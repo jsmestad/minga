@@ -777,6 +777,25 @@ defmodule MingaEditor do
     {:noreply, Renderer.render_or_async(state)}
   end
 
+  # ── AI commit message generation ───────────────────────────────────────────
+
+  def handle_info({:git_commit_message_generated, {:ok, message}}, state) do
+    state = MingaEditor.PromptUI.open(state, MingaEditor.UI.Prompt.GitCommit, default: message)
+    state = EditorState.set_status(state, "Commit message generated")
+    {:noreply, Renderer.render_or_async(state)}
+  end
+
+  def handle_info({:git_commit_message_generated, {:error, reason}}, state) do
+    state = EditorState.set_status(state, reason)
+    {:noreply, Renderer.render_or_async(state)}
+  end
+
+  def handle_info(:git_generate_timeout, state) do
+    # Only matters if the task hasn't responded yet; the status will be
+    # overwritten by the actual result if it arrives later.
+    {:noreply, state}
+  end
+
   # ── File/git events (delegated to FileEventHandler) ─────────────────────────
 
   def handle_info({:git_remote_result, ref, _result} = msg, state) when is_reference(ref) do

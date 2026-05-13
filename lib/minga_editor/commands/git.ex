@@ -40,7 +40,8 @@ defmodule MingaEditor.Commands.Git do
     {:git_blame_line, "Blame line", true},
     {:git_commit_open, "Open commit panel", false},
     {:git_amend_open, "Open amend panel", false},
-    {:git_diff_toggle_staged, "Toggle diff staged/unstaged", true}
+    {:git_diff_toggle_staged, "Toggle diff staged/unstaged", true},
+    {:git_generate_commit_message, "Generate AI commit message", false}
   ]
 
   @spec execute(state(), atom()) :: state()
@@ -102,6 +103,12 @@ defmodule MingaEditor.Commands.Git do
   def execute(state, :git_diff_toggle_staged) do
     active_buf = state.workspace.buffers.active
     toggle_diff_staged(state, active_buf)
+  end
+
+  # ── AI commit message ──────────────────────────────────────────────────────
+
+  def execute(state, :git_generate_commit_message) do
+    generate_commit_message(state)
   end
 
   # ── Navigation ─────────────────────────────────────────────────────────────
@@ -1193,6 +1200,51 @@ defmodule MingaEditor.Commands.Git do
   defp get_base_lines(git_pid) do
     # Access the base_lines from the git buffer's state
     :sys.get_state(git_pid).base_lines
+  end
+
+  @spec generate_commit_message(state()) :: state()
+  defp generate_commit_message(state) do
+    case resolve_git_root() do
+      nil -> EditorState.set_status(state, "Not in a git repository")
+      git_root -> generate_from_staged_diff(state, git_root)
+    end
+  end
+
+  @spec generate_from_staged_diff(state(), String.t()) :: state()
+  defp generate_from_staged_diff(state, git_root) do
+    case Git.diff(git_root, staged: true) do
+      {:ok, ""} ->
+        EditorState.set_status(state, "Nothing staged to generate a message for")
+
+      {:ok, diff} ->
+        spawn_commit_message_task(state, diff)
+
+      {:error, reason} ->
+        EditorState.set_status(state, "Failed to read staged diff: #{reason}")
+    end
+  end
+
+  @spec spawn_commit_message_task(state(), String.t()) :: state()
+  defp spawn_commit_message_task(state, diff) do
+    case MingaEditor.Git.CommitMessageGenerator.generate(diff, self()) do
+      {:ok, _pid} ->
+        timeout = MingaEditor.Git.CommitMessageGenerator.timeout_ms()
+        Process.send_after(self(), :git_generate_timeout, timeout)
+        EditorState.set_status(state, "Generating commit message…")
+
+      {:error, reason} ->
+        EditorState.set_status(state, reason)
+    end
+  end
+
+  @spec resolve_git_root() :: String.t() | nil
+  defp resolve_git_root do
+    root = Minga.Project.resolve_root()
+
+    case Git.root_for(root) do
+      {:ok, git_root} -> git_root
+      :not_git -> nil
+    end
   end
 
   @impl Minga.Command.Provider

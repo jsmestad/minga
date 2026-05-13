@@ -240,6 +240,10 @@ defmodule MingaEditor.Input.GitStatus do
     close_panel(state)
   end
 
+  defp execute_command(state, :git_generate_commit_message) do
+    Commands.Git.execute(state, :git_generate_commit_message)
+  end
+
   defp execute_command(state, _cmd), do: state
 
   # ── TUI state helpers ──────────────────────────────────────────────────
