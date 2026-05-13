@@ -98,6 +98,26 @@ defmodule MingaAgent.Tool.RegistryTest do
     end
   end
 
+  describe "GenServer lifecycle" do
+    test "init registers exactly the builtin tools" do
+      table = :"registry_init_#{:erlang.unique_integer([:positive])}"
+      start_supervised!({Registry, name: table, project_root: "."})
+
+      expected_names = MingaAgent.Tools.all(project_root: ".") |> Enum.map(& &1.name) |> MapSet.new()
+      registered_names = Registry.all(table) |> Enum.map(& &1.name) |> MapSet.new()
+
+      assert expected_names == registered_names
+
+      {:ok, read_spec} = Registry.lookup(table, "read_file")
+      assert read_spec.category == :filesystem
+      assert read_spec.approval_level == :auto
+
+      {:ok, write_spec} = Registry.lookup(table, "write_file")
+      assert write_spec.category == :filesystem
+      assert write_spec.approval_level == :ask
+    end
+  end
+
   describe "from_req_tool/1" do
     test "converts ReqLLM.Tool to Spec with correct category" do
       req_tool =
