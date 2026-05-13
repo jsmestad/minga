@@ -71,6 +71,7 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendGitUnstageAll()
     func sendGitCommit(message: String)
     func sendGitOpenFile(path: String)
+    func sendGitPullAndRetry()
     func sendGroupRename(id: UInt16, name: String)
     func sendGroupSetIcon(id: UInt16, icon: String)
     func sendGroupClose(id: UInt16)
@@ -627,6 +628,14 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
 
     func sendGitOpenFile(path: String) {
         sendGitPathAction(GUI_ACTION_GIT_OPEN_FILE, path: path)
+    }
+
+    /// Send a gui_action: git_pull_and_retry. Layout: opcode(1) + action_type(1).
+    func sendGitPullAndRetry() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_GIT_PULL_AND_RETRY
+        writeFrame(buf)
     }
 
     func sendGroupRename(id: UInt16, name: String) {

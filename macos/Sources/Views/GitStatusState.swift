@@ -58,17 +58,35 @@ enum GitRepoState: UInt8, Sendable {
     case loading = 2
 }
 
+/// Severity level for a git toast notification.
+enum ToastLevel: UInt8, Sendable {
+    case success = 0
+    case error = 1
+}
+
+/// Suggested recovery action for a git toast notification.
+enum ToastAction: UInt8, Sendable {
+    case none = 0
+    case pullAndRetry = 1
+}
+
 /// Observable state for the git status sidebar panel, driven by BEAM protocol messages.
 @MainActor
 @Observable
 final class GitStatusState {
     var visible: Bool = false
     var repoState: GitRepoState = .notARepo
+    var syncing: Bool = false
 
     // Branch info
     var branchName: String = ""
     var ahead: UInt16 = 0
     var behind: UInt16 = 0
+
+    // Toast notification (shown after remote operations)
+    var toastMessage: String? = nil
+    var toastLevel: ToastLevel = .success
+    var toastAction: ToastAction = .none
 
     // File entries grouped by section
     var stagedEntries: [GitStatusEntry] = []
@@ -109,12 +127,13 @@ final class GitStatusState {
     }
 
     /// Update from a decoded gui_git_status protocol message.
-    func update(repoState: GitRepoState, branchName: String, ahead: UInt16, behind: UInt16, entries: [GitStatusEntry]) {
+    func update(repoState: GitRepoState, branchName: String, ahead: UInt16, behind: UInt16, syncing: Bool, entries: [GitStatusEntry], toast: (String, ToastLevel, ToastAction)?) {
         self.visible = true
         self.repoState = repoState
         self.branchName = branchName
         self.ahead = ahead
         self.behind = behind
+        self.syncing = syncing
 
         // Partition entries by section in a single pass.
         var staged: [GitStatusEntry] = []
@@ -135,6 +154,14 @@ final class GitStatusState {
         self.changedEntries = changed
         self.untrackedEntries = untracked
         self.conflictedEntries = conflicted
+
+        if let (msg, level, action) = toast {
+            self.toastMessage = msg
+            self.toastLevel = level
+            self.toastAction = action
+        } else {
+            self.toastMessage = nil
+        }
     }
 
     /// Hide the git status panel (BEAM toggled sidebar off or switched tab).

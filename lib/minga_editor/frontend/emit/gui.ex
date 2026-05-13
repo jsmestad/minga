@@ -277,11 +277,15 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   # ── Git status panel ──
 
   @spec build_gui_git_status_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
-  defp build_gui_git_status_cmd(%{shell_state: %{git_status_panel: %{} = data}}, caches) do
-    fp = :erlang.phash2(data)
+  defp build_gui_git_status_cmd(
+         %{shell_state: %{git_status_panel: %{} = data}, git_syncing: syncing, git_toast: toast},
+         caches
+       ) do
+    enriched = Map.merge(data, %{syncing: syncing, git_toast: toast})
+    fp = :erlang.phash2(enriched)
 
     if fp != caches.last_gui_git_status_fp do
-      {ProtocolGUI.encode_gui_git_status(data), %{caches | last_gui_git_status_fp: fp}}
+      {ProtocolGUI.encode_gui_git_status(enriched), %{caches | last_gui_git_status_fp: fp}}
     else
       {nil, caches}
     end
@@ -292,10 +296,12 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       cmd =
         ProtocolGUI.encode_gui_git_status(%{
           repo_state: :not_a_repo,
+          syncing: false,
           branch: "",
           ahead: 0,
           behind: 0,
-          entries: []
+          entries: [],
+          git_toast: nil
         })
 
       {cmd, %{caches | last_gui_git_status_fp: :no_git}}

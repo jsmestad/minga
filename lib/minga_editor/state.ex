@@ -372,7 +372,7 @@ defmodule MingaEditor.State do
   def set_bottom_panel(s, panel),
     do: update_shell_state(s, &ShellState.set_bottom_panel(&1, panel))
 
-  @spec git_status_panel(t()) :: MingaEditor.Frontend.Protocol.GUI.git_status_data() | nil
+  @spec git_status_panel(t()) :: MingaEditor.Frontend.Protocol.GUI.git_status_panel_data() | nil
   def git_status_panel(%{shell_state: ss}), do: ShellState.git_status_panel(ss)
   @spec set_git_status_panel(t(), map() | nil) :: t()
   def set_git_status_panel(s, data),
@@ -380,6 +380,12 @@ defmodule MingaEditor.State do
 
   @spec close_git_status_panel(t()) :: t()
   def close_git_status_panel(s), do: update_shell_state(s, &ShellState.close_git_status_panel/1)
+
+  @spec set_git_toast(t(), ShellState.git_toast()) :: t()
+  def set_git_toast(s, toast), do: update_shell_state(s, &ShellState.set_git_toast(&1, toast))
+
+  @spec clear_git_toast(t()) :: t()
+  def clear_git_toast(s), do: update_shell_state(s, &ShellState.clear_git_toast/1)
 
   @spec tab_bar(t()) :: TabBar.t() | nil
   def tab_bar(%{shell_state: ss}), do: ShellState.tab_bar(ss)

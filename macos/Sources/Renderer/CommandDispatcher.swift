@@ -408,7 +408,7 @@ final class CommandDispatcher {
                 guiState.floatPopupState.hide()
             }
 
-        case .guiGitStatus(let repoState, let ahead, let behind, let branchName, let rawEntries):
+        case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let rawEntries, let rawToast):
             // When git_status_panel is nil, the BEAM sends notARepo + empty
             // entries as the "panel closed" signal (same pattern as file tree
             // sending empty entries to trigger hide). Can't gate on
@@ -432,12 +432,21 @@ final class CommandDispatcher {
                         path: raw.path
                     )
                 }
+                let toast: (String, ToastLevel, ToastAction)? = rawToast.flatMap { t in
+                    guard let level = ToastLevel(rawValue: t.level),
+                          let action = ToastAction(rawValue: t.action) else {
+                        return nil
+                    }
+                    return (t.message, level, action)
+                }
                 guiState.gitStatusState.update(
                     repoState: parsedRepoState,
                     branchName: branchName,
                     ahead: ahead,
                     behind: behind,
-                    entries: entries
+                    syncing: syncing,
+                    entries: entries,
+                    toast: toast
                 )
             }
         }

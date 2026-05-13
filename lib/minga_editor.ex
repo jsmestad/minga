@@ -772,6 +772,11 @@ defmodule MingaEditor do
     {:noreply, state}
   end
 
+  def handle_info(:dismiss_git_toast, state) do
+    state = EditorState.clear_git_toast(state)
+    {:noreply, Renderer.render_or_async(state)}
+  end
+
   # ── File/git events (delegated to FileEventHandler) ─────────────────────────
 
   def handle_info({:git_remote_result, ref, _result} = msg, state) when is_reference(ref) do
@@ -2338,6 +2343,12 @@ defmodule MingaEditor do
         abs_path = Path.join(git_root, path)
         open_file_by_path(state, abs_path)
     end
+  end
+
+  defp handle_gui_action(state, :git_pull_and_retry) do
+    state
+    |> EditorState.clear_git_toast()
+    |> Commands.Git.execute(:git_pull)
   end
 
   # Project.switch/1 is a cast; the picker opens against current state while the

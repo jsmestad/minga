@@ -228,6 +228,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_system_did_wake 0x35
   @gui_action_cmd_copy 0x36
   @gui_action_cmd_cut 0x37
+  @gui_action_git_pull_and_retry 0x38
 
   # ── Types ──
 
@@ -289,6 +290,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | :system_did_wake
           | :cmd_copy
           | :cmd_cut
+          | :git_pull_and_retry
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -2103,6 +2105,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   def decode_gui_action(@gui_action_cmd_cut, <<>>),
     do: {:ok, :cmd_cut}
 
+  def decode_gui_action(@gui_action_git_pull_and_retry, <<>>),
+    do: {:ok, :git_pull_and_retry}
+
   def decode_gui_action(_, _), do: :error
 
   # ═══════════════════════════════════════════════════════════════════════════
@@ -2529,8 +2534,18 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   # ── Git status panel (0x85) ──
 
-  @typedoc "Git status panel data for encoding."
-  @type git_status_data :: %{
+  @typedoc "Git toast action for error recovery."
+  @type git_toast_action :: :pull_and_retry | nil
+
+  @typedoc "Git toast data shown after a remote operation completes."
+  @type git_toast :: %{
+          message: String.t(),
+          level: :success | :error,
+          action: git_toast_action()
+        }
+
+  @typedoc "Base git status data stored on the panel (without emit-time fields)."
+  @type git_status_panel_data :: %{
           repo_state: :normal | :not_a_repo | :loading,
           branch: String.t(),
           ahead: non_neg_integer(),
@@ -2538,23 +2553,40 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           entries: [Minga.Git.StatusEntry.t()]
         }
 
+  @typedoc "Git status data enriched with syncing/toast for protocol encoding."
+  @type git_status_data :: %{
+          repo_state: :normal | :not_a_repo | :loading,
+          syncing: boolean(),
+          branch: String.t(),
+          ahead: non_neg_integer(),
+          behind: non_neg_integer(),
+          entries: [Minga.Git.StatusEntry.t()],
+          git_toast: git_toast() | nil
+        }
+
   @doc """
   Encodes a gui_git_status command (0x85) for the native GUI frontend.
 
   Wire format:
-    opcode:1, repo_state:1, ahead:2, behind:2, branch_len:2, branch,
+    opcode:1, repo_state:1, syncing:1, ahead:2, behind:2, branch_len:2, branch,
     entry_count:2, then per entry:
       path_hash:4, section:1, status:1, path_len:2, path
+    then toast section:
+      toast_present:1, [toast_level:1, action:1, msg_len:2, msg]
   """
   @spec encode_gui_git_status(git_status_data()) :: binary()
-  def encode_gui_git_status(%{
-        repo_state: repo_state,
-        branch: branch,
-        ahead: ahead,
-        behind: behind,
-        entries: entries
-      }) do
+  def encode_gui_git_status(
+        %{
+          repo_state: repo_state,
+          syncing: syncing,
+          branch: branch,
+          ahead: ahead,
+          behind: behind,
+          entries: entries
+        } = data
+      ) do
     repo_state_byte = encode_repo_state(repo_state)
+    syncing_byte = bool_to_byte(syncing)
     branch_bytes = :erlang.iolist_to_binary([branch || ""])
     entry_count = length(entries)
 
@@ -2568,12 +2600,37 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
         <<path_hash::32, section::8, status::8, byte_size(path_bytes)::16, path_bytes::binary>>
       end)
 
+    toast_binary = encode_git_toast(Map.get(data, :git_toast))
+
     IO.iodata_to_binary([
-      <<@op_gui_git_status, repo_state_byte::8, ahead::16, behind::16,
-        byte_size(branch_bytes)::16, branch_bytes::binary, entry_count::16>>
-      | entry_binaries
+      <<@op_gui_git_status, repo_state_byte::8, syncing_byte::8, ahead::16, behind::16,
+        byte_size(branch_bytes)::16, branch_bytes::binary, entry_count::16>>,
+      entry_binaries,
+      toast_binary
     ])
   end
+
+  @spec bool_to_byte(boolean()) :: 0 | 1
+  defp bool_to_byte(true), do: 1
+  defp bool_to_byte(false), do: 0
+
+  @spec encode_git_toast(git_toast() | nil) :: binary()
+  defp encode_git_toast(nil), do: <<0::8>>
+
+  defp encode_git_toast(%{message: message, level: level, action: action}) do
+    level_byte = encode_toast_level(level)
+    action_byte = encode_toast_action(action)
+    msg_bytes = :erlang.iolist_to_binary([message])
+    <<1::8, level_byte::8, action_byte::8, byte_size(msg_bytes)::16, msg_bytes::binary>>
+  end
+
+  @spec encode_toast_level(:success | :error) :: non_neg_integer()
+  defp encode_toast_level(:success), do: 0
+  defp encode_toast_level(:error), do: 1
+
+  @spec encode_toast_action(git_toast_action()) :: non_neg_integer()
+  defp encode_toast_action(nil), do: 0
+  defp encode_toast_action(:pull_and_retry), do: 1
 
   @spec encode_repo_state(:normal | :not_a_repo | :loading) :: non_neg_integer()
   defp encode_repo_state(:normal), do: 0

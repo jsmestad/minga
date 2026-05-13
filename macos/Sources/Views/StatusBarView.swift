@@ -187,6 +187,7 @@ struct StatusBarView: View {
     var isGitStatusVisible: Bool = false
     var isBottomPanelVisible: Bool = false
     var isAgentChatVisible: Bool = false
+    var gitSyncing: Bool = false
 
     private let barHeight: CGFloat = 24
 
@@ -387,6 +388,13 @@ struct StatusBarView: View {
                 Text(gitCopied ? "Copied!" : state.gitBranch)
                     .font(.system(size: 11))
                     .lineLimit(1)
+
+                if !gitCopied && gitSyncing {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.45)
+                        .frame(width: 12, height: barHeight)
+                }
 
                 // Diff stats: +added ~modified -deleted
                 if !gitCopied, state.hasGitDiffStats {

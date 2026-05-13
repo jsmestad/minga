@@ -18,6 +18,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
   alias MingaEditor.VimState
   alias MingaEditor.Viewport
   alias MingaEditor.Frontend.Capabilities
+  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.UI.FontRegistry
   alias MingaEditor.UI.Theme
 
@@ -40,7 +41,9 @@ defmodule MingaEditor.Frontend.Emit.Context do
           editing: VimState.t(),
           message_store: MingaEditor.UI.Panel.MessageStore.t(),
           title: String.t(),
-          status_bar_data: term()
+          status_bar_data: term(),
+          git_syncing: boolean(),
+          git_toast: ProtocolGUI.git_toast() | nil
         }
 
   @enforce_keys [:port_manager, :capabilities, :theme, :font_registry, :windows, :layout, :shell]
@@ -62,7 +65,9 @@ defmodule MingaEditor.Frontend.Emit.Context do
             editing: nil,
             message_store: nil,
             title: "Minga",
-            status_bar_data: nil
+            status_bar_data: nil,
+            git_syncing: false,
+            git_toast: nil
 
   @doc "Builds an emit context from render pipeline input."
   @spec from_editor_state(map()) :: t()
@@ -88,7 +93,9 @@ defmodule MingaEditor.Frontend.Emit.Context do
       editing: state.workspace.editing,
       message_store: state.message_store,
       title: title,
-      status_bar_data: MingaEditor.StatusBar.Data.from_state(state)
+      status_bar_data: MingaEditor.StatusBar.Data.from_state(state),
+      git_syncing: Map.get(state, :git_remote_op) != nil,
+      git_toast: Map.get(state.shell_state, :git_toast)
     }
   end
 

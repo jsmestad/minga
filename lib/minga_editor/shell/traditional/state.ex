@@ -21,6 +21,10 @@ defmodule MingaEditor.Shell.Traditional.State do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.WhichKey
   alias Minga.Tool.Manager, as: ToolManager
+  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
+
+  @typedoc "Git toast shown after a remote operation completes."
+  @type git_toast :: ProtocolGUI.git_toast() | nil
 
   @type t :: %__MODULE__{
           nav_flash: NavFlash.t() | nil,
@@ -29,7 +33,8 @@ defmodule MingaEditor.Shell.Traditional.State do
           status_msg: String.t() | nil,
           whichkey: WhichKey.t(),
           bottom_panel: BottomPanel.t(),
-          git_status_panel: MingaEditor.Frontend.Protocol.GUI.git_status_data() | nil,
+          git_status_panel: MingaEditor.Frontend.Protocol.GUI.git_status_panel_data() | nil,
+          git_toast: git_toast(),
           tab_bar: TabBar.t() | nil,
           agent: AgentState.t(),
           modal: ModalOverlay.t(),
@@ -51,6 +56,7 @@ defmodule MingaEditor.Shell.Traditional.State do
             whichkey: %WhichKey{},
             bottom_panel: %BottomPanel{},
             git_status_panel: nil,
+            git_toast: nil,
             tab_bar: nil,
             agent: %AgentState{},
             modal: :none,
@@ -165,7 +171,7 @@ defmodule MingaEditor.Shell.Traditional.State do
   # ── Git status panel ───────────────────────────────────────────────────────
 
   @doc "Returns the git status panel data, or nil."
-  @spec git_status_panel(t()) :: MingaEditor.Frontend.Protocol.GUI.git_status_data() | nil
+  @spec git_status_panel(t()) :: MingaEditor.Frontend.Protocol.GUI.git_status_panel_data() | nil
   def git_status_panel(%{git_status_panel: data}), do: data
 
   @doc "Sets the git status panel data."
@@ -179,6 +185,20 @@ defmodule MingaEditor.Shell.Traditional.State do
   def close_git_status_panel(%{} = ss) do
     %{ss | git_status_panel: nil}
   end
+
+  # ── Git toast ─────────────────────────────────────────────────────────────
+
+  @doc "Returns the git toast, or nil."
+  @spec git_toast(t()) :: git_toast()
+  def git_toast(%{git_toast: toast}), do: toast
+
+  @doc "Sets the git toast shown after a remote operation."
+  @spec set_git_toast(t(), git_toast()) :: t()
+  def set_git_toast(%{} = ss, toast), do: %{ss | git_toast: toast}
+
+  @doc "Clears the git toast."
+  @spec clear_git_toast(t()) :: t()
+  def clear_git_toast(%{} = ss), do: %{ss | git_toast: nil}
 
   # ── Tab bar ────────────────────────────────────────────────────────────────
 

@@ -488,24 +488,47 @@ defmodule MingaEditor.Commands.Git do
       {^ref, task_monitor, {git_root, success_msg, error_prefix}} ->
         Process.demonitor(task_monitor, [:flush])
 
-        status_msg =
+        {status_msg, toast} =
           case result do
             :ok ->
               refresh_repo(git_root)
-              success_msg
+
+              {success_msg, %{message: success_msg, level: :success, action: nil}}
 
             {:error, reason} ->
-              "#{error_prefix}: #{reason}"
+              error_msg = "#{error_prefix}: #{reason}"
+              action = push_rejection_action(reason)
+
+              {error_msg, %{message: error_msg, level: :error, action: action}}
           end
+
+        schedule_toast_dismissal()
 
         state
         |> EditorState.clear_git_remote_op()
         |> EditorState.set_status(status_msg)
+        |> EditorState.set_git_toast(toast)
 
       _ ->
         # Stale result from a superseded operation; ignore
         state
     end
+  end
+
+  @spec push_rejection_action(String.t()) :: :pull_and_retry | nil
+  defp push_rejection_action(reason) do
+    lowered = String.downcase(reason)
+
+    if String.contains?(lowered, "rejected") or String.contains?(lowered, "non-fast-forward") do
+      :pull_and_retry
+    else
+      nil
+    end
+  end
+
+  @spec schedule_toast_dismissal() :: reference()
+  defp schedule_toast_dismissal do
+    Process.send_after(self(), :dismiss_git_toast, 3_000)
   end
 
   @doc """

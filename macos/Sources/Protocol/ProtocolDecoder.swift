@@ -56,7 +56,7 @@ enum RenderCommand: Sendable {
     case guiIndentGuides(data: IndentGuideData)
     case guiLineSpacing(spacing: Float)
     case guiSplitSeparators(borderColor: UInt32, verticals: [Wire.VerticalSeparator], horizontals: [Wire.HorizontalSeparator])
-    case guiGitStatus(repoState: UInt8, ahead: UInt16, behind: UInt16, branchName: String, entries: [Wire.GitStatusEntry])
+    case guiGitStatus(repoState: UInt8, syncing: Bool, ahead: UInt16, behind: UInt16, branchName: String, entries: [Wire.GitStatusEntry], toast: (message: String, level: UInt8, action: UInt8)?)
     case guiAgentGroups(activeGroupId: UInt16, agentGroups: [Wire.AgentGroupEntry])
     case guiBoard(visible: Bool, focusedCardId: UInt32, cards: [BoardCard], filterMode: Bool, filterText: String)
     case guiAgentContext(visible: Bool, task: String, dispatchTimestamp: Date, status: CardStatus, canApprove: Bool)
@@ -1728,19 +1728,20 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 sepPos - offset)
 
     case OP_GUI_GIT_STATUS:
-        // Header: repo_state:1, ahead:2, behind:2, branch_len:2, branch, entry_count:2
-        guard data.count >= rest + 9 else { throw ProtocolDecodeError.malformed }
+        // Header: repo_state:1, syncing:1, ahead:2, behind:2, branch_len:2, branch, entry_count:2
+        guard data.count >= rest + 10 else { throw ProtocolDecodeError.malformed }
         let gsRepoState = data[rest]
-        let gsAhead = readU16(data, rest + 1)
-        let gsBehind = readU16(data, rest + 3)
-        let gsBranchLen = Int(readU16(data, rest + 5))
-        guard data.count >= rest + 7 + gsBranchLen + 2 else { throw ProtocolDecodeError.malformed }
-        let gsBranchData = data[(rest + 7)..<(rest + 7 + gsBranchLen)]
+        let gsSyncing = data[rest + 1] != 0
+        let gsAhead = readU16(data, rest + 2)
+        let gsBehind = readU16(data, rest + 4)
+        let gsBranchLen = Int(readU16(data, rest + 6))
+        guard data.count >= rest + 8 + gsBranchLen + 2 else { throw ProtocolDecodeError.malformed }
+        let gsBranchData = data[(rest + 8)..<(rest + 8 + gsBranchLen)]
         let gsBranchName = String(data: gsBranchData, encoding: .utf8) ?? ""
-        let gsEntryCount = Int(readU16(data, rest + 7 + gsBranchLen))
+        let gsEntryCount = Int(readU16(data, rest + 8 + gsBranchLen))
         var gsEntries: [Wire.GitStatusEntry] = []
         gsEntries.reserveCapacity(gsEntryCount)
-        var gsPos = rest + 9 + gsBranchLen
+        var gsPos = rest + 10 + gsBranchLen
         for _ in 0..<gsEntryCount {
             // path_hash:4, section:1, status:1, path_len:2, path
             guard data.count >= gsPos + 8 else { throw ProtocolDecodeError.malformed }
@@ -1754,7 +1755,24 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             gsEntries.append(Wire.GitStatusEntry(pathHash: gsPathHash, section: gsSection, status: gsStatus, path: gsPath))
             gsPos += 8 + gsPathLen
         }
-        return (.guiGitStatus(repoState: gsRepoState, ahead: gsAhead, behind: gsBehind, branchName: gsBranchName, entries: gsEntries),
+        // Toast section: toast_present:1, [toast_level:1, action:1, msg_len:2, msg]
+        var gsToast: (message: String, level: UInt8, action: UInt8)? = nil
+        guard data.count >= gsPos + 1 else { throw ProtocolDecodeError.malformed }
+        let gsToastPresent = data[gsPos]
+        gsPos += 1
+        if gsToastPresent == 1 {
+            guard data.count >= gsPos + 4 else { throw ProtocolDecodeError.malformed }
+            let gsToastLevel = data[gsPos]
+            let gsToastAction = data[gsPos + 1]
+            let gsToastMsgLen = Int(readU16(data, gsPos + 2))
+            gsPos += 4
+            guard data.count >= gsPos + gsToastMsgLen else { throw ProtocolDecodeError.malformed }
+            let gsToastMsgData = data[gsPos..<(gsPos + gsToastMsgLen)]
+            let gsToastMsg = String(data: gsToastMsgData, encoding: .utf8) ?? ""
+            gsPos += gsToastMsgLen
+            gsToast = (message: gsToastMsg, level: gsToastLevel, action: gsToastAction)
+        }
+        return (.guiGitStatus(repoState: gsRepoState, syncing: gsSyncing, ahead: gsAhead, behind: gsBehind, branchName: gsBranchName, entries: gsEntries, toast: gsToast),
                 gsPos - offset)
 
     case OP_GUI_AGENT_GROUPS:
