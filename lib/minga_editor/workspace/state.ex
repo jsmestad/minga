@@ -68,19 +68,11 @@ defmodule MingaEditor.Workspace.State do
   @doc """
   Converts a workspace into a typed tab context suitable for storing on a `MingaEditor.State.Tab` and later restoring via `restore_tab_context/2`.
 
-  The single chokepoint for snapshots. Beyond the `Map.from_struct/1`
-  conversion, this normalises `editing` so the snapshotted vim state is a
-  valid resting state — not a transient mid-transition pair where
-  `mode_state` belongs to the leaving mode (see `VimState.normalize/1`).
-  Use this everywhere the editor captures `state.workspace` into a tab
-  context.
+  The single chokepoint for snapshots. Delegates to `TabContext.from_workspace/1` which constructs the context struct directly from the workspace struct (no intermediate map). The vim state is normalised so the snapshotted editing state is a valid resting state, not a transient mid-transition pair where `mode_state` belongs to the leaving mode (see `VimState.normalize/1`). Use this everywhere the editor captures `state.workspace` into a tab context.
   """
   @spec to_tab_context(t()) :: TabContext.t()
   def to_tab_context(%__MODULE__{} = ws) do
-    ws
-    |> Map.update!(:editing, &VimState.normalize/1)
-    |> Map.from_struct()
-    |> TabContext.from_workspace_map()
+    TabContext.from_workspace(ws)
   end
 
   @doc "Restores a tab context into a workspace. Empty contexts are ignored by this pure helper; EditorState handles brand-new tab defaults because those need editor dimensions."
