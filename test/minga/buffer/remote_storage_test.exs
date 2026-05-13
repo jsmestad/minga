@@ -45,6 +45,21 @@ defmodule Minga.Buffer.RemoteStorageTest do
     end
   end
 
+  test "remote storage reports erpc errors without crashing" do
+    missing_node = :"missing_remote@127.0.0.1"
+    previous = Process.flag(:trap_exit, true)
+
+    try do
+      assert {:error, {:remote_unavailable, {:erpc, _reason}}} =
+               Server.start_link(
+                 file_path: "/tmp/missing.txt",
+                 storage: {:remote, missing_node, "/tmp/missing.txt"}
+               )
+    after
+      Process.flag(:trap_exit, previous)
+    end
+  end
+
   test "remote storage detects save conflicts against server changes", %{tmp_dir: tmp_dir} do
     path = Path.join(tmp_dir, "remote.txt")
     File.write!(path, "base")

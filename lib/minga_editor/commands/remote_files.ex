@@ -9,7 +9,6 @@ defmodule MingaEditor.Commands.RemoteFiles do
 
   alias Minga.Buffer
   alias Minga.Distribution.ConnectionManager
-  alias Minga.Distribution.File, as: RemoteFile
   alias Minga.Language
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
@@ -63,22 +62,15 @@ defmodule MingaEditor.Commands.RemoteFiles do
 
   @spec open_remote_file(state(), String.t(), node(), String.t()) :: state()
   defp open_remote_file(state, server_name, remote_node, remote_path) do
-    case RemoteFile.read(remote_node, remote_path) do
-      {:ok, content} ->
-        start_remote_buffer(state, server_name, remote_node, remote_path, content)
-
-      {:error, reason} ->
-        EditorState.set_status(state, "Failed to read remote file: #{inspect(reason)}")
-    end
+    start_remote_buffer(state, server_name, remote_node, remote_path)
   end
 
-  @spec start_remote_buffer(state(), String.t(), node(), String.t(), binary()) :: state()
-  defp start_remote_buffer(state, server_name, remote_node, remote_path, content) do
+  @spec start_remote_buffer(state(), String.t(), node(), String.t()) :: state()
+  defp start_remote_buffer(state, server_name, remote_node, remote_path) do
     name = "[#{server_name}] #{Path.basename(remote_path)}"
     filetype = Language.detect_filetype(remote_path)
 
     case Buffer.start_link(
-           content: content,
            file_path: remote_path,
            buffer_name: name,
            filetype: filetype,
@@ -92,7 +84,7 @@ defmodule MingaEditor.Commands.RemoteFiles do
         |> EditorState.update_remote(&Remote.put_buffer(&1, server_name, remote_path, buffer))
 
       {:error, reason} ->
-        EditorState.set_status(state, "Failed to open remote file: #{inspect(reason)}")
+        EditorState.set_status(state, "Failed to open remote file: #{format_open_error(reason)}")
     end
   end
 
@@ -138,5 +130,13 @@ defmodule MingaEditor.Commands.RemoteFiles do
     {:ok, :erpc.call(remote_node, File, :cwd!, [], 5_000)}
   catch
     :exit, reason -> {:error, "Remote server unavailable: #{inspect(reason)}"}
+    :error, {:erpc, _reason} = reason -> {:error, "Remote server unavailable: #{inspect(reason)}"}
   end
+
+  @spec format_open_error(term()) :: String.t()
+  defp format_open_error(:file_too_large) do
+    "file exceeds the remote edit read limit; set :minga, :remote_read_max_bytes to raise it"
+  end
+
+  defp format_open_error(reason), do: inspect(reason)
 end

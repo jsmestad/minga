@@ -68,10 +68,12 @@ defmodule Minga.Distribution.ConnectionManager do
     call_or_default({:connected?, server_name}, false)
   end
 
-  @doc "Returns the retry delay for `retry_count`, starting at 1s and doubling until the 30s cap."
+  @doc "Returns the retry delay for `retry_count`, starting at 1s and doubling until the 30s cap. Clamps once the doubled value would exceed 30s."
   @spec backoff_ms(non_neg_integer()) :: pos_integer()
+  def backoff_ms(retry_count) when is_integer(retry_count) and retry_count >= 5, do: 30_000
+
   def backoff_ms(retry_count) when is_integer(retry_count) and retry_count >= 0 do
-    min(1_000 * Integer.pow(2, retry_count), 30_000)
+    1_000 * Integer.pow(2, retry_count)
   end
 
   @impl GenServer

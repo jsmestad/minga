@@ -50,37 +50,59 @@ defmodule MingaEditor.Commands.AgentGroupTest do
   end
 
   describe "agent_group_next/1" do
-    test "does not crash on EditorState struct" do
+    test "switches to the next agent group's first tab" do
       state = make_state()
-      # Before the fix, this crashed with KeyError because
-      # switch_via_group accessed state.tab_bar instead of
-      # state.shell_state.tab_bar
       result = AgentGroup.agent_group_next(state)
+
       assert %EditorState{} = result
+      assert result.shell_state.tab_bar.active_id == 2
     end
   end
 
   describe "agent_group_prev/1" do
-    test "does not crash on EditorState struct" do
+    test "switches to the previous agent group's first tab" do
       state = make_state()
       result = AgentGroup.agent_group_prev(state)
+
       assert %EditorState{} = result
+      assert result.shell_state.tab_bar.active_id == 3
     end
   end
 
   describe "agent_group_toggle/1" do
-    test "does not crash on EditorState struct" do
+    test "switches from ungrouped tabs to the last agent group" do
       state = make_state()
       result = AgentGroup.agent_group_toggle(state)
+
       assert %EditorState{} = result
+      assert result.shell_state.tab_bar.active_id == 3
     end
   end
 
   describe "switch_to_ungrouped/1" do
-    test "does not crash on EditorState struct" do
-      state = make_state()
+    test "switches to the first ungrouped tab" do
+      state = make_state() |> AgentGroup.agent_group_next()
       result = AgentGroup.switch_to_ungrouped(state)
+
       assert %EditorState{} = result
+      assert result.shell_state.tab_bar.active_id == 1
+    end
+  end
+
+  describe "workspace_goto/2" do
+    test "workspace 0 switches to ungrouped tabs" do
+      state = make_state() |> AgentGroup.agent_group_next()
+      result = AgentGroup.workspace_goto(state, 0)
+
+      assert %EditorState{} = result
+      assert result.shell_state.tab_bar.active_id == 1
+    end
+
+    test "workspace numbers are one-based" do
+      state = make_state()
+
+      assert AgentGroup.workspace_goto(state, 1).shell_state.tab_bar.active_id == 2
+      assert AgentGroup.workspace_goto(state, 2).shell_state.tab_bar.active_id == 3
     end
   end
 end
