@@ -4,7 +4,11 @@ defmodule MingaEditor.UI.Picker.RemoteFileConflictSource do
   @behaviour MingaEditor.UI.Picker.Source
 
   alias Minga.Buffer
+  alias MingaEditor.Agent.DiffReview
+  alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.View.Preview
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.AgentAccess
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
 
@@ -68,13 +72,35 @@ defmodule MingaEditor.UI.Picker.RemoteFileConflictSource do
     )
   end
 
-  def on_select(%Item{id: {:remote_conflict, :show_diff, _buffer, path, _content}}, state) do
-    EditorState.set_status(state, "Showing diff for #{Path.basename(path)}")
+  def on_select(%Item{id: {:remote_conflict, :show_diff, buffer, path, content}}, state) do
+    case DiffReview.new(path, Buffer.content(buffer), content) do
+      %DiffReview{} = review ->
+        show_diff(state, path, review)
+
+      nil ->
+        EditorState.set_status(state, "No remote changes to show for #{Path.basename(path)}")
+    end
+  catch
+    :exit, reason -> EditorState.set_status(state, "Remote diff failed: #{inspect(reason)}")
   end
 
   @impl true
   @spec on_cancel(EditorState.t()) :: EditorState.t()
   def on_cancel(state), do: state
+
+  @spec show_diff(EditorState.t(), String.t(), DiffReview.t()) :: EditorState.t()
+  defp show_diff(state, path, review) do
+    state
+    |> AgentAccess.update_agent_ui(&set_diff_preview(&1, review))
+    |> EditorState.set_status("Showing diff for #{Path.basename(path)}")
+  end
+
+  @spec set_diff_preview(UIState.t(), DiffReview.t()) :: UIState.t()
+  defp set_diff_preview(ui, review) do
+    ui
+    |> UIState.update_preview(fn _ -> Preview.set_diff(Preview.new(), review) end)
+    |> UIState.set_focus(:file_viewer)
+  end
 
   @spec item(action(), pid(), String.t(), String.t(), String.t(), String.t()) :: Item.t()
   defp item(action, buffer, path, content, label, description) do

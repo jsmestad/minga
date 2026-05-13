@@ -17,10 +17,20 @@ defmodule Minga.Distribution.File do
   @doc "Reads a file from a remote node with options."
   @spec read(node(), String.t(), keyword()) :: {:ok, binary()} | {:error, term()}
   def read(node, path, opts) when is_atom(node) and is_binary(path) and is_list(opts) do
-    max_bytes = Keyword.get(opts, :max_bytes, @default_max_file_bytes)
+    max_bytes = Keyword.get(opts, :max_bytes, max_file_bytes())
     :erpc.call(node, __MODULE__, :read_local, [path, max_bytes], 5_000)
   catch
     :exit, reason -> {:error, {:remote_unavailable, reason}}
+    :error, {:erpc, _reason} = reason -> {:error, {:remote_unavailable, reason}}
+  end
+
+  @doc "Returns the configured maximum bytes for remote file reads."
+  @spec max_file_bytes() :: pos_integer()
+  def max_file_bytes do
+    case Application.get_env(:minga, :remote_read_max_bytes, @default_max_file_bytes) do
+      bytes when is_integer(bytes) and bytes > 0 -> bytes
+      _ -> @default_max_file_bytes
+    end
   end
 
   @doc "Reads a local file for remote `:erpc.call/5` use."
@@ -46,6 +56,7 @@ defmodule Minga.Distribution.File do
     :erpc.call(node, __MODULE__, :list_local_files, [root, max_files, max_depth], timeout)
   catch
     :exit, reason -> {:error, {:remote_unavailable, reason}}
+    :error, {:erpc, _reason} = reason -> {:error, {:remote_unavailable, reason}}
   end
 
   @doc "Lists text files below `root` on the current node. Intended for remote `:erpc.call/5` use."

@@ -222,28 +222,30 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, {:move_to, pos})
   end
 
+  @file_io_call_timeout 30_000
+
   @doc "Saves the buffer content to the associated file."
   @spec save(GenServer.server()) :: :ok | {:error, term()}
   def save(server) do
-    GenServer.call(server, :save)
+    GenServer.call(server, :save, @file_io_call_timeout)
   end
 
   @doc "Force-saves the buffer, skipping mtime conflict detection."
   @spec force_save(GenServer.server()) :: :ok | {:error, term()}
   def force_save(server) do
-    GenServer.call(server, :force_save)
+    GenServer.call(server, :force_save, @file_io_call_timeout)
   end
 
   @doc "Reloads the buffer from disk, preserving cursor position (clamped). Clears undo/redo."
   @spec reload(GenServer.server()) :: :ok | {:error, term()}
   def reload(server) do
-    GenServer.call(server, :reload)
+    GenServer.call(server, :reload, @file_io_call_timeout)
   end
 
   @doc "Saves the buffer content to a specific file path."
   @spec save_as(GenServer.server(), String.t()) :: :ok | {:error, term()}
   def save_as(server, file_path) when is_binary(file_path) do
-    GenServer.call(server, {:save_as, file_path})
+    GenServer.call(server, {:save_as, file_path}, @file_io_call_timeout)
   end
 
   @doc "Replaces the entire buffer content, pushing the old content onto the undo stack."
@@ -263,7 +265,7 @@ defmodule Minga.Buffer.Server do
   @doc "Replaces content and records it as the saved base revision."
   @spec replace_saved_content(GenServer.server(), String.t()) :: :ok
   def replace_saved_content(server, new_content) when is_binary(new_content) do
-    GenServer.call(server, {:replace_saved_content, new_content})
+    GenServer.call(server, {:replace_saved_content, new_content}, @file_io_call_timeout)
   end
 
   @doc "Returns the full text content of the buffer."
@@ -2140,9 +2142,16 @@ defmodule Minga.Buffer.Server do
   defp read_file(:local, path), do: File.read(path)
 
   defp read_file({:remote, node, _base_path}, path) do
-    :erpc.call(node, Minga.Distribution.File, :read_local, [path, 1_000_000], 5_000)
+    :erpc.call(
+      node,
+      Minga.Distribution.File,
+      :read_local,
+      [path, Minga.Distribution.File.max_file_bytes()],
+      5_000
+    )
   catch
-    :exit, reason -> {:error, {:remote_unavailable, reason}}
+    :exit, reason -> remote_unavailable(reason)
+    :error, {:erpc, _reason} = reason -> remote_unavailable(reason)
   end
 
   @spec file_stat_info(BufState.t() | BufState.storage(), String.t() | nil) ::
@@ -2164,8 +2173,12 @@ defmodule Minga.Buffer.Server do
   defp file_stat_result({:remote, node, _base_path}, path) do
     :erpc.call(node, File, :stat, [path, [time: :posix]], 5_000)
   catch
-    :exit, reason -> {:error, {:remote_unavailable, reason}}
+    :exit, reason -> remote_unavailable(reason)
+    :error, {:erpc, _reason} = reason -> remote_unavailable(reason)
   end
+
+  @spec remote_unavailable(term()) :: {:error, {:remote_unavailable, term()}}
+  defp remote_unavailable(reason), do: {:error, {:remote_unavailable, reason}}
 
   @spec content_hash(String.t()) :: binary()
   defp content_hash(content), do: :crypto.hash(:sha256, content)
@@ -2415,7 +2428,8 @@ defmodule Minga.Buffer.Server do
   defp write_file(%{storage: {:remote, node, _base_path}}, file_path, content) do
     :erpc.call(node, File, :write, [file_path, content], 10_000)
   catch
-    :exit, reason -> {:error, {:remote_unavailable, reason}}
+    :exit, reason -> remote_unavailable(reason)
+    :error, {:erpc, _reason} = reason -> remote_unavailable(reason)
   end
 
   # ── Edit delta tracking ──

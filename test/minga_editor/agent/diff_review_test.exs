@@ -254,6 +254,27 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       assert 0 in indices
       assert 1 in indices
     end
+
+    test "accepts a custom context line count" do
+      review = DiffReview.new("f.ex", "a\nb\nc\n", "a\nB\nc\n")
+      lines = DiffReview.to_display_lines(review, 0)
+
+      refute Enum.any?(lines, fn {_text, type, _idx} -> type == :context end)
+    end
+
+    test "does not duplicate overlapping context lines for nearby hunks" do
+      before = "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\n"
+      after_ = "l1\nL2\nl3\nl4\nL5\nl6\nl7\nl8\n"
+      review = DiffReview.new("f.ex", before, after_)
+
+      context_lines =
+        review
+        |> DiffReview.to_display_lines()
+        |> Enum.filter(fn {_text, type, _idx} -> type == :context end)
+        |> Enum.map(fn {text, _type, _idx} -> text end)
+
+      assert context_lines == ["l1", "l3", "l4", "l6", "l7", "l8"]
+    end
   end
 
   # ── update_after/2 ──────────────────────────────────────────────────────────
@@ -301,6 +322,77 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       # The original hunk's resolution should be preserved
       # (It's the same modification: bbb -> BBB at the same position)
       assert DiffReview.resolution_at(updated, 0) == :accepted
+    end
+
+    test "preserves resolutions when an unchanged hunk shifts down" do
+      before = "aaa\nbbb\nccc\nddd\neee\nfff\nggg"
+      after_v1 = "aaa\nbbb\nccc\nddd\neee\nFFF\nggg"
+      review = DiffReview.new("test.ex", before, after_v1)
+      assert review != nil
+
+      review = DiffReview.accept_current(review)
+      assert DiffReview.resolution_at(review, 0) == :accepted
+
+      after_v2 = "inserted\naaa\nbbb\nccc\nddd\neee\nFFF\nggg"
+      updated = DiffReview.update_after(review, after_v2)
+
+      assert updated != nil
+      assert DiffReview.resolution_at(updated, 0) == nil
+      assert DiffReview.resolution_at(updated, 1) == :accepted
+    end
+
+    test "preserves duplicate hunk resolutions one-to-one" do
+      before = "a\nx\nb\nc\nd\nx\ne"
+      after_v1 = "a\nX\nb\nc\nd\nX\ne"
+      review = DiffReview.new("test.ex", before, after_v1)
+      assert review != nil
+
+      review = DiffReview.accept_current(review)
+      review = DiffReview.reject_current(review)
+      assert DiffReview.resolution_at(review, 0) == :accepted
+      assert DiffReview.resolution_at(review, 1) == :rejected
+
+      after_v2 = "a\nX\nb\nc\nd\nX\ne\nnew"
+      updated = DiffReview.update_after(review, after_v2)
+
+      assert updated != nil
+      assert DiffReview.resolution_at(updated, 0) == :accepted
+      assert DiffReview.resolution_at(updated, 1) == :rejected
+      assert DiffReview.resolution_at(updated, 2) == nil
+    end
+
+    test "does not reuse one resolved hunk for multiple identical new hunks" do
+      before = "a\nx\nb\nc\nd\nx\ne"
+      after_v1 = "a\nX\nb\nc\nd\nx\ne"
+      review = DiffReview.new("test.ex", before, after_v1)
+      assert review != nil
+
+      review = DiffReview.accept_current(review)
+      assert DiffReview.resolution_at(review, 0) == :accepted
+
+      after_v2 = "a\nX\nb\nc\nd\nX\ne"
+      updated = DiffReview.update_after(review, after_v2)
+
+      assert updated != nil
+      assert DiffReview.resolution_at(updated, 0) == :accepted
+      assert DiffReview.resolution_at(updated, 1) == nil
+    end
+
+    test "does not assign a lower hunk resolution to a new identical upper hunk" do
+      before = "a\nx\nb\nc\nd\nx\ne"
+      after_v1 = "a\nx\nb\nc\nd\nX\ne"
+      review = DiffReview.new("test.ex", before, after_v1)
+      assert review != nil
+
+      review = DiffReview.accept_current(review)
+      assert DiffReview.resolution_at(review, 0) == :accepted
+
+      after_v2 = "a\nX\nb\nc\nd\nX\ne"
+      updated = DiffReview.update_after(review, after_v2)
+
+      assert updated != nil
+      assert DiffReview.resolution_at(updated, 0) == nil
+      assert DiffReview.resolution_at(updated, 1) == :accepted
     end
 
     test "drops resolutions for hunks that changed" do

@@ -9,6 +9,7 @@ defmodule MingaEditor.Agent.Events do
   GenServer to apply.
   """
 
+  alias Minga.Distribution.ConnectionManager
   alias MingaEditor.Agent.DiffReview
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
@@ -289,18 +290,74 @@ defmodule MingaEditor.Agent.Events do
     :erpc.call(remote_node, Path, :expand, [path], 5_000)
   catch
     :exit, _reason -> path
+    :error, {:erpc, _reason} -> path
   end
 
   @spec reload_tracked_remote_buffers(EditorState.t(), String.t(), String.t()) ::
           {EditorState.t(), [effect()]}
   defp reload_tracked_remote_buffers(state, path, after_content) do
     state.remote
-    |> Remote.buffers_for_path(path)
-    |> Enum.reduce({state, []}, fn {_server_name, pid}, {acc_state, acc_effects} ->
-      {new_state, effects} = reload_remote_buffer_content(acc_state, pid, path, after_content)
+    |> matching_remote_buffers(path)
+    |> Enum.reduce({state, []}, fn {_server_name, remote_path, pid}, {acc_state, acc_effects} ->
+      {new_state, effects} =
+        reload_remote_buffer_content(acc_state, pid, remote_path, after_content)
+
       {new_state, effects ++ acc_effects}
     end)
   end
+
+  @spec matching_remote_buffers(Remote.t(), String.t()) :: [{String.t(), String.t(), pid()}]
+  defp matching_remote_buffers(remote, path) do
+    {direct_matches, fallback_candidates} =
+      remote
+      |> Remote.all_buffers()
+      |> Enum.split_with(fn {_server_name, remote_path, _pid} -> remote_path == path end)
+
+    fallback_matches =
+      fallback_candidates
+      |> Enum.group_by(fn {server_name, _remote_path, _pid} -> server_name end)
+      |> Enum.flat_map(fn {server_name, buffers} ->
+        normalized_path = normalize_remote_path_for_server(server_name, path, buffers)
+
+        Enum.filter(buffers, fn {_server_name, remote_path, _pid} ->
+          remote_path == normalized_path
+        end)
+      end)
+
+    direct_matches ++ fallback_matches
+  end
+
+  @spec normalize_remote_path_for_server(String.t(), String.t(), [{String.t(), String.t(), pid()}]) ::
+          String.t()
+  defp normalize_remote_path_for_server(server_name, path, buffers) do
+    case remote_node_for_server(server_name, buffers) do
+      {:ok, remote_node} -> normalize_remote_path(remote_node, path)
+      :error -> path
+    end
+  end
+
+  @spec remote_node_for_server(String.t(), [{String.t(), String.t(), pid()}]) ::
+          {:ok, node()} | :error
+  defp remote_node_for_server(server_name, buffers) do
+    case ConnectionManager.node_for_server(server_name) do
+      {:ok, remote_node} -> {:ok, remote_node}
+      {:error, _reason} -> remote_node_from_buffers(buffers)
+    end
+  catch
+    :exit, _reason -> remote_node_from_buffers(buffers)
+  end
+
+  @spec remote_node_from_buffers([{String.t(), String.t(), pid()}]) :: {:ok, node()} | :error
+  defp remote_node_from_buffers([{_server_name, _remote_path, pid} | _rest]) do
+    case Buffer.storage(pid) do
+      {:remote, remote_node, _base_path} -> {:ok, remote_node}
+      _ -> :error
+    end
+  catch
+    :exit, _reason -> :error
+  end
+
+  defp remote_node_from_buffers([]), do: :error
 
   @spec reload_remote_buffer(EditorState.t(), String.t(), String.t(), String.t()) ::
           {EditorState.t(), [effect()]}

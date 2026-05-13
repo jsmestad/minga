@@ -55,7 +55,7 @@ defmodule MingaEditor.Commands.BufferManagement do
         EditorState.set_status(state, "Wrote #{name}")
 
       {:error, :file_changed} ->
-        EditorState.set_status(state, "WARNING: File changed on disk. Use :w! to force save.")
+        handle_file_changed_on_save(state, buf)
 
       {:error, :no_file_path} ->
         EditorState.set_status(state, "No file name — use :w <filename>")
@@ -1952,6 +1952,57 @@ defmodule MingaEditor.Commands.BufferManagement do
       buffer_pid ->
         Commands.add_buffer(state, buffer_pid)
     end
+  end
+
+  @spec handle_file_changed_on_save(state(), GenServer.server()) :: state()
+  defp handle_file_changed_on_save(state, buf) do
+    case Buffer.storage(buf) do
+      {:remote, node, _base_path} -> handle_remote_file_changed_on_save(state, buf, node)
+      _ -> EditorState.set_status(state, "WARNING: File changed on disk. Use :w! to force save.")
+    end
+  catch
+    :exit, _reason ->
+      EditorState.set_status(state, "WARNING: File changed on disk. Use :w! to force save.")
+  end
+
+  @spec handle_remote_file_changed_on_save(state(), GenServer.server(), node()) :: state()
+  defp handle_remote_file_changed_on_save(state, buf, remote_node) do
+    path = Buffer.file_path(buf)
+
+    case read_remote_conflict_content(remote_node, path) do
+      {:ok, content} ->
+        state
+        |> EditorState.set_status(
+          "File changed on server since you opened it. Reload first, keep editing, show diff, or force save."
+        )
+        |> PickerUI.open(MingaEditor.UI.Picker.RemoteFileConflictSource, %{
+          buffer: buf,
+          path: path,
+          content: content
+        })
+
+      {:error, reason} ->
+        EditorState.set_status(
+          state,
+          "File changed on server since you opened it. Reload first, or force save. Could not load remote version: #{inspect(reason)}"
+        )
+    end
+  catch
+    :exit, reason ->
+      EditorState.set_status(
+        state,
+        "File changed on server since you opened it. Reload first, or force save. Could not inspect remote conflict: #{inspect(reason)}"
+      )
+  end
+
+  @spec read_remote_conflict_content(node(), String.t() | nil) ::
+          {:ok, binary()} | {:error, term()}
+  defp read_remote_conflict_content(_remote_node, nil), do: {:error, :no_file_path}
+
+  defp read_remote_conflict_content(remote_node, path) do
+    Minga.Distribution.File.read(remote_node, path,
+      max_bytes: Minga.Distribution.File.max_file_bytes()
+    )
   end
 
   # ── :global command ────────────────────────────────────────────────────────

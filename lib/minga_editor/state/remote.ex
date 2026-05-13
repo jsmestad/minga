@@ -62,4 +62,12 @@ defmodule MingaEditor.State.Remote do
     |> Enum.filter(fn {{_server_name, remote_path}, _buffer} -> remote_path == path end)
     |> Enum.map(fn {{server_name, _remote_path}, buffer} -> {server_name, buffer} end)
   end
+
+  @doc "Returns all tracked remote buffers with their server names and paths."
+  @spec all_buffers(t()) :: [{String.t(), String.t(), pid()}]
+  def all_buffers(%__MODULE__{} = remote) do
+    Enum.map(remote.buffers, fn {{server_name, remote_path}, buffer} ->
+      {server_name, remote_path, buffer}
+    end)
+  end
 end
