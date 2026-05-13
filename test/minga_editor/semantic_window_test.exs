@@ -346,7 +346,7 @@ defmodule MingaEditor.SemanticWindowTest do
     end
   end
 
-  # ── Selection.from_visual_selection/2 ──────────────────────────────────
+  # ── Selection.from_visual_selection ────────────────────────────────────
 
   describe "Selection.from_visual_selection/2" do
     test "returns nil for no selection" do
@@ -376,6 +376,40 @@ defmodule MingaEditor.SemanticWindowTest do
       assert sel.type == :line
       assert sel.start_row == 5
       assert sel.end_row == 10
+    end
+  end
+
+  describe "Selection.from_visual_selection/5" do
+    test "clips char selection that starts above the viewport" do
+      sel = Selection.from_visual_selection({:char, {2, 4}, {7, 10}}, 5, 4, 0, 80)
+
+      assert sel.type == :char
+      assert sel.start_row == 0
+      assert sel.start_col == 0
+      assert sel.end_row == 2
+      assert sel.end_col == 10
+    end
+
+    test "clips char selection that ends below the viewport" do
+      sel = Selection.from_visual_selection({:char, {5, 4}, {12, 10}}, 5, 4, 2, 80)
+
+      assert sel.type == :char
+      assert sel.start_row == 0
+      assert sel.start_col == 4
+      assert sel.end_row == 3
+      assert sel.end_col == 82
+    end
+
+    test "drops char selection entirely above the viewport" do
+      assert Selection.from_visual_selection({:char, {1, 0}, {3, 4}}, 5, 4, 0, 80) == nil
+    end
+
+    test "clips line selection to visible rows" do
+      sel = Selection.from_visual_selection({:line, 1, 10}, 5, 4, 0, 80)
+
+      assert sel.type == :line
+      assert sel.start_row == 0
+      assert sel.end_row == 3
     end
   end
 
