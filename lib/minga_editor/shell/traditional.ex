@@ -280,7 +280,11 @@ defmodule MingaEditor.Shell.Traditional do
         tb = TabBar.update_context(tb, tb.active_id, WorkspaceState.to_tab_context(workspace))
         {%{shell_state | tab_bar: tb}, workspace, []}
 
-      _ ->
+      %Tab{} ->
+        tb = TabBar.update_context(tb, tb.active_id, WorkspaceState.to_tab_context(workspace))
+        {%{shell_state | tab_bar: tb}, workspace, []}
+
+      nil ->
         {shell_state, workspace, []}
     end
   end
