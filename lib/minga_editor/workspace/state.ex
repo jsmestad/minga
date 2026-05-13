@@ -83,12 +83,15 @@ defmodule MingaEditor.Workspace.State do
     |> TabContext.from_workspace_map()
   end
 
-  @doc "Restores a tab context into a workspace. Empty contexts are ignored by this pure helper; EditorState handles brand-new tab defaults because those need editor dimensions."
+  @doc "Restores a tab context into a workspace. Empty contexts are ignored by this pure helper; EditorState handles brand-new tab defaults because those need editor dimensions. Dead buffer pids in the restored context are scrubbed to prevent activating a dead process."
   @spec restore_tab_context(t(), TabContext.t() | TabContext.legacy()) :: t()
   def restore_tab_context(%__MODULE__{} = ws, context) when is_map(context) do
-    context
-    |> TabContext.to_workspace_map()
-    |> Enum.reduce(ws, fn {field, value}, acc -> Map.put(acc, field, value) end)
+    ws =
+      context
+      |> TabContext.to_workspace_map()
+      |> Enum.reduce(ws, fn {field, value}, acc -> Map.put(acc, field, value) end)
+
+    update_in(ws.buffers, &Buffers.scrub_dead_active/1)
   end
 
   # ── Pure workspace operations ─────────────────────────────────────────────

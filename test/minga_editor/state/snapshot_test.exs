@@ -189,6 +189,90 @@ defmodule MingaEditor.State.SnapshotTest do
     end
   end
 
+  describe "Buffers.scrub_dead_active/1" do
+    test "returns unchanged when active is nil" do
+      bs = %Buffers{active: nil, list: [], active_index: 0}
+      assert Buffers.scrub_dead_active(bs) == bs
+    end
+
+    test "returns unchanged when active pid is alive" do
+      {:ok, buf} = BufferServer.start_link(content: "alive")
+      bs = %Buffers{active: buf, list: [buf], active_index: 0}
+      assert Buffers.scrub_dead_active(bs) == bs
+    end
+
+    test "selects neighbor when active pid is dead" do
+      {:ok, buf_a} = BufferServer.start_link(content: "a")
+      {:ok, buf_b} = BufferServer.start_link(content: "b")
+
+      bs = %Buffers{active: buf_a, list: [buf_a, buf_b], active_index: 0}
+      GenServer.stop(buf_a)
+
+      scrubbed = Buffers.scrub_dead_active(bs)
+      assert scrubbed.active == buf_b
+      assert scrubbed.list == [buf_b]
+      assert scrubbed.active_index == 0
+    end
+
+    test "sets active to nil when all pids are dead" do
+      {:ok, buf_a} = BufferServer.start_link(content: "a")
+      {:ok, buf_b} = BufferServer.start_link(content: "b")
+
+      bs = %Buffers{active: buf_a, list: [buf_a, buf_b], active_index: 0}
+      GenServer.stop(buf_a)
+      GenServer.stop(buf_b)
+
+      scrubbed = Buffers.scrub_dead_active(bs)
+      assert scrubbed.active == nil
+      assert scrubbed.list == []
+      assert scrubbed.active_index == 0
+    end
+
+    test "clamps active_index when dead pid was at the end" do
+      {:ok, buf_a} = BufferServer.start_link(content: "a")
+      {:ok, buf_b} = BufferServer.start_link(content: "b")
+      {:ok, buf_c} = BufferServer.start_link(content: "c")
+
+      bs = %Buffers{active: buf_c, list: [buf_a, buf_b, buf_c], active_index: 2}
+      GenServer.stop(buf_c)
+
+      scrubbed = Buffers.scrub_dead_active(bs)
+      assert scrubbed.active in [buf_a, buf_b]
+      assert scrubbed.list == [buf_a, buf_b]
+      assert scrubbed.active_index == 1
+    end
+  end
+
+  describe "restore_tab_context/2 with dead buffer" do
+    test "scrubs dead active buffer pid on restore" do
+      {:ok, buf_a} = BufferServer.start_link(content: "a")
+      {:ok, buf_b} = BufferServer.start_link(content: "b")
+
+      # Build state with two buffers, buf_a active
+      state_with_both =
+        make_state(buffer: buf_a)
+        |> put_in(
+          [Access.key(:workspace), Access.key(:buffers)],
+          %Buffers{active: buf_a, list: [buf_a, buf_b], active_index: 0}
+        )
+
+      # Snapshot the context
+      ctx = EditorState.snapshot_tab_context(state_with_both)
+
+      # Kill the active buffer
+      GenServer.stop(buf_a)
+
+      # Restore the context into a fresh workspace
+      fresh_state = make_state(buffer: buf_b)
+      restored = EditorState.restore_tab_context(fresh_state, ctx)
+
+      # The dead pid should have been scrubbed; buf_b is active now
+      assert restored.workspace.buffers.active == buf_b
+      assert buf_a not in restored.workspace.buffers.list
+      assert buf_b in restored.workspace.buffers.list
+    end
+  end
+
   describe "switch_tab/2" do
     test "snapshots current tab, restores target tab" do
       {:ok, buf_a} = BufferServer.start_link(content: "file a")
