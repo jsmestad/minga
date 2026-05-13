@@ -126,6 +126,21 @@ defmodule MingaEditor.SemanticWindowTest do
       assert semantic_texts == ["alpha", "beta", "gamma", "delta", "epsilon"]
     end
 
+    test "semantic row text includes invisible markers when enabled" do
+      state = gui_state(content: "\thello   ")
+
+      assert {:ok, true} =
+               BufferServer.set_option(state.workspace.buffers.active, :show_invisible, true)
+
+      {[wf], _cursor, _state} = build_content(state)
+
+      [row] = wf.semantic.rows
+      [draw_text] = extract_draw_texts(wf.lines)
+      assert row.text == draw_text
+      assert row.text =~ "→"
+      assert row.text =~ "hello···"
+    end
+
     test "empty buffer produces valid semantic window" do
       state = gui_state(content: "")
       {[wf], _cursor, _state} = build_content(state)

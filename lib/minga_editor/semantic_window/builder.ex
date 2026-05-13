@@ -199,7 +199,7 @@ defmodule MingaEditor.SemanticWindow.Builder do
     |> Enum.with_index()
     |> Enum.map(fn {{line_text, hl_segments}, idx} ->
       buf_line = first_line + idx
-      {composed_text, spans} = compose_line(line_text, hl_segments, ctx.decorations, buf_line)
+      {composed_text, spans} = compose_line(line_text, hl_segments, ctx, buf_line)
 
       %VisualRow{
         row_type: :normal,
@@ -234,7 +234,7 @@ defmodule MingaEditor.SemanticWindow.Builder do
         ) :: VisualRow.t()
   defp build_visual_row_entry(buf_line, :normal, lines, first_line, ctx) do
     line_text = line_at(lines, buf_line, first_line)
-    {composed, spans} = compose_line(line_text, nil, ctx.decorations, buf_line)
+    {composed, spans} = compose_line(line_text, nil, ctx, buf_line)
 
     %VisualRow{
       row_type: :normal,
@@ -248,7 +248,7 @@ defmodule MingaEditor.SemanticWindow.Builder do
   defp build_visual_row_entry(buf_line, {:fold_start, hidden_count}, lines, first_line, ctx) do
     line_text = line_at(lines, buf_line, first_line)
     fold_text = line_text <> " ··· #{hidden_count} lines"
-    {composed, spans} = compose_line(fold_text, nil, ctx.decorations, buf_line)
+    {composed, spans} = compose_line(fold_text, nil, ctx, buf_line)
 
     %VisualRow{
       row_type: :fold_start,
@@ -316,10 +316,10 @@ defmodule MingaEditor.SemanticWindow.Builder do
   @spec compose_line(
           String.t(),
           [Highlight.styled_segment()] | nil,
-          Decorations.t(),
+          Context.t(),
           non_neg_integer()
         ) :: {String.t(), [Span.t()]}
-  defp compose_line(line_text, hl_segments, decorations, buf_line) do
+  defp compose_line(line_text, hl_segments, ctx, buf_line) do
     # Start with highlight segments or plain text
     segments =
       case hl_segments do
@@ -328,11 +328,16 @@ defmodule MingaEditor.SemanticWindow.Builder do
       end
 
     # Merge decoration highlights (search matches, etc.)
-    line_highlights = Decorations.highlights_for_line(decorations, buf_line)
+    line_highlights = Decorations.highlights_for_line(ctx.decorations, buf_line)
     segments = Decorations.merge_highlights(segments, line_highlights, buf_line)
 
     # Apply conceals and inject inline virtual text (shared pipeline)
-    segments = Composition.compose_segments(segments, decorations, buf_line)
+    segments = Composition.compose_segments(segments, ctx.decorations, buf_line)
+
+    segments =
+      if ctx.show_invisible,
+        do: Composition.apply_invisible_chars(segments, ctx.tab_width, ctx.whitespace_face),
+        else: segments
 
     # Convert to composed text + spans
     Composition.segments_to_text_and_spans(segments)

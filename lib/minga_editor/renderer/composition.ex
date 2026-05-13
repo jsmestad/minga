@@ -101,6 +101,30 @@ defmodule MingaEditor.Renderer.Composition do
   end
 
   @doc """
+  Replaces visible whitespace markers in composed styled segments.
+
+  Tabs render as `→` plus fill spaces to the next tab stop. Trailing spaces render as `·`. Marker segments use `whitespace_face`, preserving the original face for non-whitespace runs.
+  """
+  @spec apply_invisible_chars([styled_segment()], pos_integer(), Face.t() | nil) :: [
+          styled_segment()
+        ]
+  def apply_invisible_chars(segments, tab_width, whitespace_face) do
+    face = marker_face(whitespace_face)
+    full_text = Enum.map_join(segments, fn {text, _} -> text end)
+    trailing_idx = trailing_ws_start_index(full_text)
+
+    {result, _col, _idx} =
+      Enum.reduce(segments, {[], 0, 0}, fn {text, segment_face}, {acc, col, idx} ->
+        {segment_parts, new_col, new_idx} =
+          transform_segment_text(text, segment_face, col, idx, tab_width, trailing_idx, face)
+
+        {segment_parts ++ acc, new_col, new_idx}
+      end)
+
+    Enum.reverse(result)
+  end
+
+  @doc """
   Converts a list of composed styled segments into {text, [Span.t()]}
   for the semantic window path.
 
@@ -125,6 +149,87 @@ defmodule MingaEditor.Renderer.Composition do
       end)
 
     {text_parts |> Enum.reverse() |> Enum.join(), Enum.reverse(spans_rev)}
+  end
+
+  # ── Invisible character substitution (private) ─────────────────────────
+
+  @spec marker_face(Face.t() | nil) :: Face.t()
+  defp marker_face(nil), do: Face.new()
+  defp marker_face(%Face{} = face), do: face
+
+  @spec transform_segment_text(
+          String.t(),
+          Face.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer(),
+          non_neg_integer(),
+          Face.t()
+        ) :: {[styled_segment()], non_neg_integer(), non_neg_integer()}
+  defp transform_segment_text(text, face, col, idx, tab_width, trailing_idx, ws_face) do
+    graphemes = String.graphemes(text)
+
+    {parts, current_run, current_face, new_col, new_idx} =
+      Enum.reduce(graphemes, {[], "", face, col, idx}, fn g, {parts, run, run_face, c, i} ->
+        case g do
+          "\t" ->
+            fill = tab_fill(c, tab_width)
+            tab_text = "→" <> String.duplicate(" ", fill - 1)
+            parts = flush_run(parts, run, run_face)
+            {[{tab_text, ws_face} | parts], "", face, c + fill, i + 1}
+
+          " " when i >= trailing_idx ->
+            parts = flush_run(parts, run, run_face)
+            {[{"·", ws_face} | parts], "", face, c + 1, i + 1}
+
+          _ ->
+            w = Unicode.grapheme_width(g)
+            {p, r, f, nc} = append_grapheme(parts, run, run_face, face, g, c + w)
+            {p, r, f, nc, i + 1}
+        end
+      end)
+
+    parts = flush_run(parts, current_run, current_face)
+    {parts, new_col, new_idx}
+  end
+
+  @spec flush_run([styled_segment()], String.t(), Face.t()) :: [styled_segment()]
+  defp flush_run(parts, "", _face), do: parts
+  defp flush_run(parts, run, face), do: [{run, face} | parts]
+
+  @spec append_grapheme(
+          [styled_segment()],
+          String.t(),
+          Face.t(),
+          Face.t(),
+          String.t(),
+          non_neg_integer()
+        ) :: {[styled_segment()], String.t(), Face.t(), non_neg_integer()}
+  defp append_grapheme(parts, run, run_face, face, g, new_col) when run_face == face do
+    {parts, run <> g, face, new_col}
+  end
+
+  defp append_grapheme(parts, run, run_face, face, g, new_col) do
+    {flush_run(parts, run, run_face), g, face, new_col}
+  end
+
+  @spec tab_fill(non_neg_integer(), pos_integer()) :: pos_integer()
+  defp tab_fill(col, tab_width), do: tab_width - rem(col, tab_width)
+
+  @spec trailing_ws_start_index(String.t()) :: non_neg_integer()
+  defp trailing_ws_start_index(text) do
+    {last_non_ws, _} =
+      text
+      |> String.graphemes()
+      |> Enum.reduce({0, 0}, fn g, {last, idx} ->
+        case g do
+          " " -> {last, idx + 1}
+          "\t" -> {last, idx + 1}
+          _ -> {idx + 1, idx + 1}
+        end
+      end)
+
+    last_non_ws
   end
 
   # ── Inline virtual text injection (private) ──────────────────────────────
