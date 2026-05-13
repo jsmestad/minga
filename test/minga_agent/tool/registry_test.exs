@@ -103,7 +103,9 @@ defmodule MingaAgent.Tool.RegistryTest do
       table = :"registry_init_#{:erlang.unique_integer([:positive])}"
       start_supervised!({Registry, name: table, project_root: "."})
 
-      expected_names = MingaAgent.Tools.all(project_root: ".") |> Enum.map(& &1.name) |> MapSet.new()
+      expected_names =
+        MingaAgent.Tools.all(project_root: ".") |> Enum.map(& &1.name) |> MapSet.new()
+
       registered_names = Registry.all(table) |> Enum.map(& &1.name) |> MapSet.new()
 
       assert expected_names == registered_names
