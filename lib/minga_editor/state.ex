@@ -438,6 +438,11 @@ defmodule MingaEditor.State do
     Enum.find(state.diff_views, fn {_diff_buf, info} -> info.source_buf == source_buf end)
   end
 
+  @spec diff_views_for_source(t(), pid()) :: [{pid(), diff_view_info()}]
+  def diff_views_for_source(%__MODULE__{} = state, source_buf) when is_pid(source_buf) do
+    Enum.filter(state.diff_views, fn {_diff_buf, info} -> info.source_buf == source_buf end)
+  end
+
   @spec set_pending_quit(t(), :quit | :quit_all) :: t()
   def set_pending_quit(%__MODULE__{} = state, kind) when kind in [:quit, :quit_all],
     do: %{state | pending_quit: kind}

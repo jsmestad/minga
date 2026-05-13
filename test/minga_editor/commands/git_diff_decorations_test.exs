@@ -2,8 +2,14 @@ defmodule MingaEditor.Commands.GitDiffDecorationsTest do
   @moduledoc "Tests for diff view decoration application and sign generation."
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer
   alias Minga.Core.Decorations
   alias Minga.Core.DiffView
+  alias Minga.Git
+  alias Minga.Git.Stub, as: GitStub
+  alias MingaEditor.Commands.Git, as: GitCommands
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Viewport
 
   describe "diff sign generation" do
     test "produces :added signs for added lines" do
@@ -111,6 +117,112 @@ defmodule MingaEditor.Commands.GitDiffDecorationsTest do
       highlights = Decorations.highlights_for_lines(decs, 0, 3)
       assert length(highlights) == 2
     end
+
+    test "refresh_diff_views_for_buffer updates every diff for the saved source" do
+      git_root = unique_git_root()
+      rel_path = "file.txt"
+      GitStub.set_head(git_root, rel_path, "old\n")
+      on_exit(fn -> GitStub.clear(git_root) end)
+
+      {:ok, source_buf} = Buffer.start_link(content: "new\n")
+      {:ok, diff_one} = Buffer.start_link(content: "stale one")
+      {:ok, diff_two} = Buffer.start_link(content: "stale two")
+
+      info = %{
+        source_buf: source_buf,
+        git_root: git_root,
+        rel_path: rel_path,
+        staged: false,
+        line_metadata: []
+      }
+
+      state = %{
+        build_state()
+        | diff_views: %{
+            diff_one => info,
+            diff_two => info
+          }
+      }
+
+      state = GitCommands.refresh_diff_views_for_buffer(state, source_buf)
+
+      assert buffer_content(diff_one) =~ "new"
+      assert buffer_content(diff_two) =~ "new"
+      assert state.diff_views[diff_one].line_metadata != []
+      assert state.diff_views[diff_two].line_metadata != []
+    end
+
+    test "staged diff toggle treats staged deletions as empty index content" do
+      git_root = unique_git_root()
+      rel_path = "deleted.txt"
+      abs_path = Path.join(git_root, rel_path)
+
+      GitStub.set_head(git_root, rel_path, "old contents\n")
+
+      GitStub.set_status(git_root, [
+        %Git.StatusEntry{path: rel_path, status: :deleted, staged: true}
+      ])
+
+      on_exit(fn -> GitStub.clear(git_root) end)
+
+      {:ok, source_buf} = Buffer.start_link(content: "old contents\n")
+      {:ok, diff_buf} = Buffer.start_link(content: "placeholder")
+
+      {:ok, git_buf} =
+        Minga.Git.Buffer.start_link(
+          git_root: git_root,
+          file_path: abs_path,
+          initial_content: "old contents\n"
+        )
+
+      put_tracking(source_buf, git_buf)
+
+      state =
+        build_state()
+        |> EditorState.add_buffer(diff_buf)
+        |> EditorState.register_diff_view(diff_buf, %{
+          source_buf: source_buf,
+          git_root: git_root,
+          rel_path: rel_path,
+          staged: false,
+          line_metadata: []
+        })
+
+      state = GitCommands.execute(state, :git_diff_toggle_staged)
+      active_buf = state.workspace.buffers.active
+
+      assert active_buf != diff_buf
+      assert buffer_content(active_buf) =~ "old contents"
+      refute buffer_content(active_buf) =~ "No changes"
+      assert state.diff_views[active_buf].staged == true
+    end
+  end
+
+  defp build_state do
+    %EditorState{
+      port_manager: self(),
+      workspace: %MingaEditor.Workspace.State{viewport: Viewport.new(24, 80)}
+    }
+  end
+
+  defp buffer_content(buf) do
+    {content, _cursor} = Buffer.content_and_cursor(buf)
+    content
+  end
+
+  defp unique_git_root do
+    Path.join(System.tmp_dir!(), "minga-diff-test-#{System.unique_integer([:positive])}")
+  end
+
+  defp put_tracking(source_buf, git_buf) do
+    table = Minga.Git.Tracker.Registry
+
+    if :ets.whereis(table) == :undefined do
+      :ets.new(table, [:named_table, :public, :set, read_concurrency: true])
+    end
+
+    :ets.insert(table, {source_buf, git_buf})
+    on_exit(fn -> if :ets.whereis(table) != :undefined, do: :ets.delete(table, source_buf) end)
   end
 
   # Mirrors the private function in ContentHelpers for testability

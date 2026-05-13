@@ -189,13 +189,12 @@ defmodule MingaEditor.Commands.Git do
   have an open buffer. Creates a temporary buffer for the current content
   and opens a diff view against HEAD.
   """
-  @spec open_diff_for_path(state(), String.t(), String.t(), String.t(), String.t()) :: state()
-  def open_diff_for_path(state, git_root, rel_path, _abs_path, current_content) do
-    base_content =
-      case Git.show_head(git_root, rel_path) do
-        {:ok, content} -> content
-        :error -> ""
-      end
+  @spec open_diff_for_path(state(), String.t(), String.t(), String.t(), String.t(), keyword()) ::
+          state()
+  def open_diff_for_path(state, git_root, rel_path, _abs_path, current_content, opts \\ []) do
+    base_content = head_content(git_root, rel_path)
+    staged = Keyword.get(opts, :staged, false)
+    label = if staged, do: "staged", else: "unstaged"
 
     diff_result = DiffView.build(base_content, current_content)
     filename = Path.basename(rel_path)
@@ -205,7 +204,7 @@ defmodule MingaEditor.Commands.Git do
            content: diff_result.text,
            buffer_type: :nofile,
            read_only: true,
-           buffer_name: "#{filename} [diff:unstaged]",
+           buffer_name: "#{filename} [diff:#{label}]",
            filetype: filetype
          ) do
       {:ok, diff_buf} ->
@@ -215,14 +214,16 @@ defmodule MingaEditor.Commands.Git do
           source_buf: nil,
           git_root: git_root,
           rel_path: rel_path,
-          staged: false,
+          staged: staged,
           line_metadata: diff_result.line_metadata
         }
 
         state
         |> EditorState.register_diff_view(diff_buf, diff_info)
         |> Commands.add_buffer(diff_buf)
-        |> EditorState.set_status("Diff: #{filename} (#{length(diff_result.hunk_lines)} hunks)")
+        |> EditorState.set_status(
+          "Diff (#{label}): #{filename} (#{length(diff_result.hunk_lines)} hunks)"
+        )
 
       {:error, reason} ->
         EditorState.set_status(state, "Failed to open diff: #{inspect(reason)}")
@@ -278,31 +279,53 @@ defmodule MingaEditor.Commands.Git do
 
   @spec diff_contents(String.t(), String.t(), pid(), boolean()) :: {String.t(), String.t()}
   defp diff_contents(git_root, rel_path, buf, false) do
-    base_content =
-      case Git.show_head(git_root, rel_path) do
-        {:ok, content} -> content
-        :error -> ""
-      end
-
+    base_content = head_content(git_root, rel_path)
     {current_content, _cursor} = Buffer.content_and_cursor(buf)
     {base_content, current_content}
   end
 
   defp diff_contents(git_root, rel_path, _buf, true) do
-    base_content =
-      case Git.show_head(git_root, rel_path) do
-        {:ok, content} -> content
-        :error -> ""
-      end
-
-    staged_content =
-      case Git.show_staged(git_root, rel_path) do
-        {:ok, content} -> content
-        :error -> base_content
-      end
-
-    {base_content, staged_content}
+    base_content = head_content(git_root, rel_path)
+    {base_content, staged_content(git_root, rel_path)}
   end
+
+  @spec head_content(String.t(), String.t()) :: String.t()
+  defp head_content(git_root, rel_path) do
+    case Git.show_head(git_root, rel_path) do
+      {:ok, content} -> content
+      :error -> ""
+    end
+  end
+
+  @spec staged_content(String.t(), String.t()) :: String.t()
+  defp staged_content(git_root, rel_path) do
+    case Git.show_staged(git_root, rel_path) do
+      {:ok, content} -> content
+      :error -> staged_content_fallback(git_root, rel_path)
+    end
+  end
+
+  @spec staged_content_fallback(String.t(), String.t()) :: String.t()
+  defp staged_content_fallback(git_root, rel_path) do
+    if staged_deleted?(git_root, rel_path), do: "", else: head_content(git_root, rel_path)
+  end
+
+  @spec staged_deleted?(String.t(), String.t()) :: boolean()
+  defp staged_deleted?(git_root, rel_path) do
+    case Git.status(git_root) do
+      {:ok, entries} -> Enum.any?(entries, &staged_deleted_entry?(&1, rel_path))
+      {:error, _reason} -> false
+    end
+  end
+
+  @spec staged_deleted_entry?(Git.StatusEntry.t(), String.t()) :: boolean()
+  defp staged_deleted_entry?(
+         %Git.StatusEntry{path: path, status: :deleted, staged: true},
+         rel_path
+       ),
+       do: path == rel_path
+
+  defp staged_deleted_entry?(%Git.StatusEntry{}, _rel_path), do: false
 
   @spec apply_diff_decorations(pid(), [DiffView.line_meta()], MingaEditor.UI.Theme.t()) :: :ok
   defp apply_diff_decorations(diff_buf, line_metadata, theme) do
@@ -401,13 +424,13 @@ defmodule MingaEditor.Commands.Git do
   """
   @spec refresh_diff_views_for_buffer(state(), pid()) :: state()
   def refresh_diff_views_for_buffer(state, saved_buf) do
-    case EditorState.diff_view_for_source(state, saved_buf) do
-      nil ->
-        state
+    diff_views = EditorState.diff_views_for_source(state, saved_buf)
 
-      {diff_buf, %{git_root: git_root, rel_path: rel_path, staged: staged}} ->
-        refresh_diff_buffer(state, diff_buf, saved_buf, git_root, rel_path, staged)
-    end
+    Enum.reduce(diff_views, state, fn {diff_buf,
+                                       %{git_root: git_root, rel_path: rel_path, staged: staged}},
+                                      acc ->
+      refresh_diff_buffer(acc, diff_buf, saved_buf, git_root, rel_path, staged)
+    end)
   end
 
   @spec refresh_diff_buffer(state(), pid(), pid(), String.t(), String.t(), boolean()) :: state()

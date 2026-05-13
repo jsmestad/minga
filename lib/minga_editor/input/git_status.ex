@@ -256,24 +256,46 @@ defmodule MingaEditor.Input.GitStatus do
   # ── TUI state helpers ──────────────────────────────────────────────────
 
   @spec open_diff_for_entry(EditorState.t(), String.t(), Git.StatusEntry.t()) :: EditorState.t()
-  defp open_diff_for_entry(state, git_root, entry) do
+  defp open_diff_for_entry(state, git_root, %Git.StatusEntry{} = entry) do
     closed_state =
       EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :editor))
       |> EditorState.close_git_status_panel()
 
-    open_diff_in_editor(closed_state, git_root, entry.path)
+    open_diff_in_editor(closed_state, git_root, entry)
   end
 
-  @spec open_diff_in_editor(EditorState.t(), String.t(), String.t()) :: EditorState.t()
-  defp open_diff_in_editor(state, git_root, rel_path) do
-    abs_path = Path.join(git_root, rel_path)
+  @spec open_diff_in_editor(EditorState.t(), String.t(), Git.StatusEntry.t()) :: EditorState.t()
+  defp open_diff_in_editor(state, git_root, %Git.StatusEntry{} = entry) do
+    abs_path = Path.join(git_root, entry.path)
 
-    case File.read(abs_path) do
+    case content_for_entry(git_root, abs_path, entry) do
       {:ok, current_content} ->
-        Commands.Git.open_diff_for_path(state, git_root, rel_path, abs_path, current_content)
+        Commands.Git.open_diff_for_path(state, git_root, entry.path, abs_path, current_content,
+          staged: entry.staged
+        )
 
-      {:error, reason} ->
-        EditorState.set_status(state, "Could not read file: #{inspect(reason)}")
+      {:error, message} ->
+        EditorState.set_status(state, message)
+    end
+  end
+
+  @spec content_for_entry(String.t(), String.t(), Git.StatusEntry.t()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp content_for_entry(_git_root, _abs_path, %Git.StatusEntry{status: :deleted}) do
+    {:ok, ""}
+  end
+
+  defp content_for_entry(git_root, _abs_path, %Git.StatusEntry{path: rel_path, staged: true}) do
+    case Git.show_staged(git_root, rel_path) do
+      {:ok, content} -> {:ok, content}
+      :error -> {:error, "Could not read staged file: #{rel_path}"}
+    end
+  end
+
+  defp content_for_entry(_git_root, abs_path, %Git.StatusEntry{}) do
+    case File.read(abs_path) do
+      {:ok, current_content} -> {:ok, current_content}
+      {:error, reason} -> {:error, "Could not read file: #{inspect(reason)}"}
     end
   end
 
