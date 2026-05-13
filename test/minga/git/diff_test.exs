@@ -240,6 +240,100 @@ defmodule Minga.Core.DiffTest do
     end
   end
 
+  # ── word_diff/2 ────────────────────────────────────────────────────────────
+
+  describe "word_diff/2" do
+    test "identical strings produce single :eq segment" do
+      assert Diff.word_diff("hello world", "hello world") == [eq: "hello world"]
+    end
+
+    test "detects character-level insertion" do
+      result = Diff.word_diff("hello", "hello world")
+      assert {:eq, "hello"} in result
+      assert {:ins, " world"} in result
+    end
+
+    test "detects character-level deletion" do
+      result = Diff.word_diff("hello world", "hello")
+      assert {:eq, "hello"} in result
+      assert {:del, " world"} in result
+    end
+
+    test "detects character-level modification" do
+      result = Diff.word_diff("foo bar", "foo baz")
+      assert {:eq, "foo ba"} in result
+      assert {:del, "r"} in result
+      assert {:ins, "z"} in result
+    end
+
+    test "skips computation for long lines (> 500 bytes)" do
+      long_old = String.duplicate("a", 501)
+      long_new = String.duplicate("b", 501)
+      assert Diff.word_diff(long_old, long_new) == [{:del, long_old}, {:ins, long_new}]
+    end
+
+    test "handles one long line and one short line" do
+      long = String.duplicate("x", 501)
+      short = "y"
+      assert Diff.word_diff(long, short) == [{:del, long}, {:ins, short}]
+    end
+
+    test "handles empty strings" do
+      assert Diff.word_diff("", "abc") == [ins: "abc"]
+      assert Diff.word_diff("abc", "") == [del: "abc"]
+      # String.myers_difference("", "") returns [] (no segments)
+      assert Diff.word_diff("", "") == []
+    end
+  end
+
+  # ── word_diff_ranges/2 ───────────────────────────────────────────────────
+
+  describe "word_diff_ranges/2" do
+    test "returns empty ranges for identical strings" do
+      assert Diff.word_diff_ranges("hello", "hello") == {[], []}
+    end
+
+    test "returns correct del range for simple deletion" do
+      # "abc" -> "ac": the 'b' at position 1 is deleted
+      {del_ranges, ins_ranges} = Diff.word_diff_ranges("abc", "ac")
+      assert del_ranges == [{1, 2}]
+      assert ins_ranges == []
+    end
+
+    test "returns correct ins range for simple insertion" do
+      # "ac" -> "abc": 'b' inserted at position 1
+      {del_ranges, ins_ranges} = Diff.word_diff_ranges("ac", "abc")
+      assert del_ranges == []
+      assert ins_ranges == [{1, 2}]
+    end
+
+    test "returns ranges for modification" do
+      # "hello world" -> "hello earth"
+      {del_ranges, ins_ranges} = Diff.word_diff_ranges("hello world", "hello earth")
+      # Changed region starts after "hello " (position 6)
+      # First range on each side should start at or after position 6
+      [{del_start, _del_end} | _] = del_ranges
+      [{ins_start, _ins_end} | _] = ins_ranges
+      assert del_start >= 6
+      assert ins_start >= 6
+    end
+
+    test "handles multiple changed regions" do
+      # "aXbYc" -> "aAbBc": two modifications
+      {del_ranges, ins_ranges} = Diff.word_diff_ranges("aXbYc", "aAbBc")
+      assert length(del_ranges) == 2
+      assert length(ins_ranges) == 2
+    end
+
+    test "returns full-line ranges for long lines" do
+      old = String.duplicate("a", 501)
+      new = String.duplicate("b", 501)
+      {del_ranges, ins_ranges} = Diff.word_diff_ranges(old, new)
+      assert del_ranges == [{0, 501}]
+      assert ins_ranges == [{0, 501}]
+    end
+  end
+
   # ── generate_patch/4 ───────────────────────────────────────────────────────
 
   describe "generate_patch/4" do

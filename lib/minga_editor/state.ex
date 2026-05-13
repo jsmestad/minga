@@ -404,7 +404,8 @@ defmodule MingaEditor.State do
           git_root: String.t(),
           rel_path: String.t(),
           staged: boolean(),
-          line_metadata: [Minga.Core.DiffView.line_meta()]
+          line_metadata: [Minga.Core.DiffView.line_meta()],
+          hunk_lines: [non_neg_integer()]
         }
 
   @typedoc "The git_remote_op tracking tuple, or nil when no operation is in flight."
