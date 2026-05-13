@@ -23,7 +23,8 @@ defmodule MingaEditor.UI.Theme.Catppuccin do
         yank_flash_bg: p.surface1,
         highlight_read_bg: p.surface1,
         highlight_write_bg: p.surface2,
-        selection_bg: p.surface2
+        selection_bg: p.surface2,
+        whitespace_fg: p.overlay0
       },
       gutter: %MingaEditor.UI.Theme.Gutter{
         fg: p.overlay0,

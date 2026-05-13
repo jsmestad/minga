@@ -38,6 +38,7 @@ defmodule Minga.Config.OptionsTest do
                theme: :doom_one,
                indent_with: :spaces,
                indent_guides: true,
+               show_invisible: false,
                trim_trailing_whitespace: false,
                insert_final_newline: false,
                format_on_save: false,

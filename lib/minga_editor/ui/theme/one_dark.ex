@@ -38,7 +38,8 @@ defmodule MingaEditor.UI.Theme.OneDark do
         yank_flash_bg: 0x4B5263,
         highlight_read_bg: 0x3A3F4B,
         highlight_write_bg: 0x4A3F2B,
-        selection_bg: 0x264F78
+        selection_bg: 0x264F78,
+        whitespace_fg: @syntax_gutter
       },
       gutter: %MingaEditor.UI.Theme.Gutter{
         fg: @syntax_gutter,

@@ -41,7 +41,8 @@ defmodule MingaEditor.UI.Theme.DoomOne do
         yank_flash_bg: 0x4B5263,
         highlight_read_bg: 0x3A3F4B,
         highlight_write_bg: 0x4A3F2B,
-        selection_bg: 0x264F78
+        selection_bg: 0x264F78,
+        whitespace_fg: @base5
       },
       gutter: %MingaEditor.UI.Theme.Gutter{
         fg: @base5,

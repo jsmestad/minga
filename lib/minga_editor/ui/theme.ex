@@ -97,7 +97,8 @@ defmodule MingaEditor.UI.Theme do
       :yank_flash_bg,
       :highlight_read_bg,
       :highlight_write_bg,
-      :selection_bg
+      :selection_bg,
+      :whitespace_fg
     ]
 
     @type t :: %__MODULE__{
@@ -110,7 +111,8 @@ defmodule MingaEditor.UI.Theme do
             yank_flash_bg: MingaEditor.UI.Theme.color() | nil,
             highlight_read_bg: MingaEditor.UI.Theme.color() | nil,
             highlight_write_bg: MingaEditor.UI.Theme.color() | nil,
-            selection_bg: MingaEditor.UI.Theme.color() | nil
+            selection_bg: MingaEditor.UI.Theme.color() | nil,
+            whitespace_fg: MingaEditor.UI.Theme.color() | nil
           }
   end
 

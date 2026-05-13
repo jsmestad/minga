@@ -52,7 +52,8 @@ defmodule MingaEditor.Renderer.Line do
         line_byte_offset \\ 0,
         precomputed_segments \\ nil
       ) do
-    pairs = grapheme_pairs(line_text)
+    raw_pairs = grapheme_pairs(line_text)
+    pairs = maybe_substitute_invisible(raw_pairs, ctx)
     line_display_len = display_width_of_pairs(pairs)
 
     visible_pairs =
@@ -70,12 +71,11 @@ defmodule MingaEditor.Renderer.Line do
 
     has_conceals = Decorations.has_conceal_ranges?(ctx.decorations)
 
-    # When conceals are active, apply them to visible_pairs for selection paths.
-    # Without this, selection rendering would show raw text (including concealed
-    # characters) while selection coordinates are conceal-adjusted.
     concealed_pairs =
       if has_conceals do
-        apply_conceals_to_pairs(pairs, ctx.decorations, buf_line)
+        raw_pairs
+        |> apply_conceals_to_pairs(ctx.decorations, buf_line)
+        |> maybe_substitute_invisible(ctx)
       else
         nil
       end
@@ -105,13 +105,10 @@ defmodule MingaEditor.Renderer.Line do
           precomputed_segments
         )
 
-      nil when line_highlights != [] or has_conceals ->
-        # No syntax highlighting but has decorations or conceals:
-        # render through the styled-segment path
+      nil when line_highlights != [] or has_conceals or ctx.show_invisible ->
         render_decorated_plain_line(line_text, screen_row, buf_line, ctx, line_highlights)
 
       nil ->
-        # Plain text, no decorations, no syntax highlighting, no conceals
         visible_text = join_pairs(visible_pairs)
         [DisplayList.draw(screen_row, ctx.gutter_w, visible_text)]
 
@@ -420,7 +417,154 @@ defmodule MingaEditor.Renderer.Line do
     segments = Decorations.merge_highlights(segments, line_highlights, buf_line)
     segments = Composition.apply_conceals(segments, ctx.decorations, buf_line)
     segments = Composition.inject_inline_virtual_text(segments, ctx.decorations, buf_line)
+
+    segments =
+      if ctx.show_invisible,
+        do: apply_invisible_chars(segments, ctx.tab_width, ctx.whitespace_face),
+        else: segments
+
     render_segments_with_scroll(segments, screen_row, ctx)
+  end
+
+  # ── Invisible character substitution ──────────────────────────────────────────
+
+  @spec maybe_substitute_invisible([grapheme_pair()], Context.t()) :: [grapheme_pair()]
+  defp maybe_substitute_invisible(pairs, %{show_invisible: true, tab_width: tw}),
+    do: substitute_invisible_pairs(pairs, tw)
+
+  defp maybe_substitute_invisible(pairs, _ctx), do: pairs
+
+  @doc false
+  @spec substitute_invisible_pairs([grapheme_pair()], pos_integer()) :: [grapheme_pair()]
+  def substitute_invisible_pairs(pairs, tab_width) do
+    trailing_start = trailing_ws_start_pairs(pairs)
+
+    {result, _col} =
+      Enum.reduce(pairs, {[], 0}, fn {g, w}, {acc, col} ->
+        case g do
+          "\t" ->
+            fill = tab_fill(col, tab_width)
+            expanded = [{"→", 1} | List.duplicate({" ", 1}, fill - 1)]
+            {Enum.reverse(expanded) ++ acc, col + fill}
+
+          " " when col >= trailing_start ->
+            {[{"·", 1} | acc], col + 1}
+
+          _ ->
+            {[{g, w} | acc], col + w}
+        end
+      end)
+
+    Enum.reverse(result)
+  end
+
+  @spec apply_invisible_chars([{String.t(), Face.t()}], pos_integer(), Face.t()) ::
+          [{String.t(), Face.t()}]
+  defp apply_invisible_chars(segments, tab_width, ws_face) do
+    full_text = Enum.map_join(segments, fn {text, _} -> text end)
+    trailing_start = trailing_ws_start_text(full_text)
+
+    {result, _col} =
+      Enum.reduce(segments, {[], 0}, fn {text, face}, {acc, col} ->
+        {seg_parts, new_col} =
+          transform_segment_text(text, face, col, tab_width, trailing_start, ws_face)
+
+        {seg_parts ++ acc, new_col}
+      end)
+
+    Enum.reverse(result)
+  end
+
+  @spec transform_segment_text(
+          String.t(),
+          Face.t(),
+          non_neg_integer(),
+          pos_integer(),
+          non_neg_integer(),
+          Face.t()
+        ) :: {[{String.t(), Face.t()}], non_neg_integer()}
+  defp transform_segment_text(text, face, col, tab_width, trailing_start, ws_face) do
+    graphemes = String.graphemes(text)
+
+    {parts, current_run, current_face, new_col} =
+      Enum.reduce(graphemes, {[], "", face, col}, fn g, {parts, run, run_face, c} ->
+        case g do
+          "\t" ->
+            fill = tab_fill(c, tab_width)
+            tab_text = "→" <> String.duplicate(" ", fill - 1)
+            parts = flush_run(parts, run, run_face)
+            {[{tab_text, ws_face} | parts], "", face, c + fill}
+
+          " " when c >= trailing_start ->
+            parts = flush_run(parts, run, run_face)
+            {[{"·", ws_face} | parts], "", face, c + 1}
+
+          _ ->
+            w = Unicode.grapheme_width(g)
+            append_grapheme(parts, run, run_face, face, g, c + w)
+        end
+      end)
+
+    parts = flush_run(parts, current_run, current_face)
+    {parts, new_col}
+  end
+
+  @spec flush_run([{String.t(), Face.t()}], String.t(), Face.t()) :: [{String.t(), Face.t()}]
+  defp flush_run(parts, "", _face), do: parts
+  defp flush_run(parts, run, face), do: [{run, face} | parts]
+
+  @spec append_grapheme(
+          [{String.t(), Face.t()}],
+          String.t(),
+          Face.t(),
+          Face.t(),
+          String.t(),
+          non_neg_integer()
+        ) :: {[{String.t(), Face.t()}], String.t(), Face.t(), non_neg_integer()}
+  defp append_grapheme(parts, run, run_face, face, g, new_col) when run_face == face do
+    {parts, run <> g, face, new_col}
+  end
+
+  defp append_grapheme(parts, run, run_face, face, g, new_col) do
+    {flush_run(parts, run, run_face), g, face, new_col}
+  end
+
+  @spec tab_fill(non_neg_integer(), pos_integer()) :: pos_integer()
+  defp tab_fill(col, tab_width) do
+    fill = tab_width - rem(col, tab_width)
+    if fill == 0, do: tab_width, else: fill
+  end
+
+  @spec trailing_ws_start_pairs([grapheme_pair()]) :: non_neg_integer()
+  defp trailing_ws_start_pairs(pairs) do
+    {last_non_ws, _} =
+      Enum.reduce(pairs, {0, 0}, fn {g, w}, {last, col} ->
+        case g do
+          " " -> {last, col + w}
+          "\t" -> {last, col + w}
+          _ -> {col + w, col + w}
+        end
+      end)
+
+    last_non_ws
+  end
+
+  @spec trailing_ws_start_text(String.t()) :: non_neg_integer()
+  defp trailing_ws_start_text(text) do
+    graphemes = String.graphemes(text)
+
+    {last_non_ws, _} =
+      Enum.reduce(graphemes, {0, 0}, fn g, {last, col} ->
+        w = Unicode.grapheme_width(g)
+
+        case g do
+          " " -> {last, col + w}
+          "\t" -> {last, col + w}
+          _ -> {col + w, col + w}
+        end
+      end)
+
+    last_non_ws
   end
 
   # ── Conceal application to grapheme pairs (for selection paths) ──────────────
@@ -544,6 +688,11 @@ defmodule MingaEditor.Renderer.Line do
     segments = Decorations.merge_highlights(segments, line_highlights, buf_line)
     segments = Composition.apply_conceals(segments, ctx.decorations, buf_line)
     segments = Composition.inject_inline_virtual_text(segments, ctx.decorations, buf_line)
+
+    segments =
+      if ctx.show_invisible,
+        do: apply_invisible_chars(segments, ctx.tab_width, ctx.whitespace_face),
+        else: segments
 
     render_segments_with_scroll(segments, screen_row, ctx)
   end

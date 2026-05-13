@@ -12,6 +12,7 @@ defmodule MingaEditor.Renderer.Context do
   """
 
   alias Minga.Core.Decorations
+  alias Minga.Core.Face
   alias Minga.Diagnostics.Diagnostic
   alias Minga.Editing.Search.Match
   alias MingaEditor.Viewport
@@ -46,7 +47,10 @@ defmodule MingaEditor.Renderer.Context do
               warning_fg: 0xECBE7B,
               info_fg: 0x51AFEF,
               hint_fg: 0x555555
-            }
+            },
+            show_invisible: false,
+            tab_width: 2,
+            whitespace_face: nil
 
   @typedoc """
   Represents the bounds of a visual selection for rendering.
@@ -79,6 +83,9 @@ defmodule MingaEditor.Renderer.Context do
           git_signs: %{non_neg_integer() => Minga.Core.Diff.hunk_type()},
           decorations: Decorations.t(),
           git_colors: MingaEditor.UI.Theme.Git.t(),
-          gutter_colors: MingaEditor.UI.Theme.Gutter.t()
+          gutter_colors: MingaEditor.UI.Theme.Gutter.t(),
+          show_invisible: boolean(),
+          tab_width: pos_integer(),
+          whitespace_face: Face.t() | nil
         }
 end
