@@ -388,6 +388,19 @@ LLM agents hit these repeatedly. Read before writing any Elixir:
 - **Don't use map access syntax on structs.** `my_struct[:field]` doesn't work (structs don't implement Access). Use `my_struct.field` or pattern match.
 - **`mix deps.clean --all` is almost never needed.** Don't nuke deps as a first troubleshooting step. Try `mix deps.get` or `mix compile --force` first.
 
+### Custom Credo Checks
+
+Minga has project-specific Credo checks in `credo/checks/`. These enforce architectural rules that are easy to violate accidentally and hard to catch in review. All run as part of `make lint`.
+
+| Check | ID | What it guards |
+|-------|----|----------------|
+| `DependencyDirectionCheck` | EX9001 | Layer 0/1/2 dependency direction (Rule 1). Flags `alias`/`import` from a lower layer to a higher one. |
+| `NoProcessSleepCheck` | EX9002 | No `Process.sleep/1` in production code. Use `Process.send_after/3` or state machines. |
+| `NoDirectLoggerCheck` | EX9003 | No direct `Logger` calls. Use `Minga.Log.{level}(:subsystem, msg)` for filtered logging. |
+| `NoDirectStateMachineWriteCheck` | EX9004 | State machine fields (`mode:`, nested struct fields on `editing:`, `workspace:`) must go through gate functions, not raw map updates. |
+| `NoDirectModalOverlayWriteCheck` | EX9005 | Modal overlay writes must flow through `MingaEditor.State.ModalOverlay`, not raw `%{state \| modal: ...}`. |
+| `NoRawWorkspaceSnapshotCheck` | EX9006 | No `Map.from_struct` on workspace structs. Use `TabContext.from_workspace/1` instead of converting to an intermediate map. See #1403. |
+
 ### Pre-commit Checks (enforced by commit-gate extension)
 
 The `commit-gate` extension blocks every `git commit` until all checks pass. You don't need to remember this; the extension catches it automatically. But you should still run all relevant checks proactively, not just wait for the gate to yell at you. Running checks proactively is faster than getting blocked and re-running the review cycle.
