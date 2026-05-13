@@ -226,6 +226,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_file_tree_move 0x33
   @gui_action_system_will_sleep 0x34
   @gui_action_system_did_wake 0x35
+  @gui_action_cmd_copy 0x36
+  @gui_action_cmd_cut 0x37
 
   # ── Types ──
 
@@ -285,6 +287,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
              target_dir_index :: non_neg_integer()}
           | :system_will_sleep
           | :system_did_wake
+          | :cmd_copy
+          | :cmd_cut
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -2092,6 +2096,12 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_system_did_wake, <<>>),
     do: {:ok, :system_did_wake}
+
+  def decode_gui_action(@gui_action_cmd_copy, <<>>),
+    do: {:ok, :cmd_copy}
+
+  def decode_gui_action(@gui_action_cmd_cut, <<>>),
+    do: {:ok, :cmd_cut}
 
   def decode_gui_action(_, _), do: :error
 

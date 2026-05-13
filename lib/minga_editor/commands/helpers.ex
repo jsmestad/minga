@@ -231,6 +231,22 @@ defmodule MingaEditor.Commands.Helpers do
 
   def maybe_sync_clipboard(state, _text, _clipboard), do: state
 
+  @doc """
+  Unconditionally syncs text to the system clipboard, regardless of the
+  user's `clipboard` config setting. Used by Cmd+C/X menu actions which
+  are explicitly system clipboard operations.
+  """
+  @spec force_clipboard_sync(state(), String.t()) :: state()
+  def force_clipboard_sync(state, text) do
+    Clipboard.write_async(text)
+
+    if state.backend in [:gui, :native_gui] and state.port_manager do
+      MingaEditor.Frontend.clipboard_write(state.port_manager, text)
+    end
+
+    state
+  end
+
   @spec reset_active_register(state()) :: state()
   def reset_active_register(state),
     do: Editing.reset_active_register(state)

@@ -595,17 +595,50 @@ final class EditorNSView: MTKView {
 
     // MARK: - Keyboard
 
-    /// Returns true for bare system shortcuts that AppKit should handle.
+    /// Returns true for shortcuts that the menu bar or AppKit should handle
+    /// instead of being sent directly to the BEAM. The menu action sends
+    /// the appropriate command to the BEAM, so the end result is the same
+    /// but the menu item highlights visually.
     static func shouldYieldSystemCommandShortcut(_ event: NSEvent) -> Bool {
         let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        guard mods == .command else { return false }
 
-        switch event.charactersIgnoringModifiers {
-        case "q", "h", "m":
-            return true
-        default:
-            return false
+        // Bare Cmd+key: system shortcuts and menu bar items
+        if mods == .command {
+            switch event.charactersIgnoringModifiers {
+            case "q", "h", "m":
+                return true
+            case "n", "o", "s", "w":
+                return true
+            case "z", "x", "c", "v", "a", "f":
+                return true
+            case "b", ",":
+                return true
+            default:
+                return false
+            }
         }
+
+        // Cmd+Shift variants: Redo (Cmd+Shift+Z)
+        if mods == [.command, .shift] {
+            switch event.charactersIgnoringModifiers {
+            case "z", "Z":
+                return true
+            default:
+                return false
+            }
+        }
+
+        // Cmd+Ctrl+F: Toggle Full Screen
+        if mods == [.command, .control] {
+            switch event.charactersIgnoringModifiers {
+            case "f":
+                return true
+            default:
+                return false
+            }
+        }
+
+        return false
     }
 
     /// Intercept key equivalents (Cmd+key, etc.) before AppKit/SwiftUI

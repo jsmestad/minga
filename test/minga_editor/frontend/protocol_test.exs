@@ -938,6 +938,16 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       assert {:ok, {:gui_action, :system_did_wake}} = Protocol.decode_event(payload)
     end
 
+    test "cmd_copy with no payload" do
+      payload = <<0x07, 0x36>>
+      assert {:ok, {:gui_action, :cmd_copy}} = Protocol.decode_event(payload)
+    end
+
+    test "cmd_cut with no payload" do
+      payload = <<0x07, 0x37>>
+      assert {:ok, {:gui_action, :cmd_cut}} = Protocol.decode_event(payload)
+    end
+
     test "file_tree_new_file with parent_index" do
       payload = <<0x07, 0x0D, 0x00, 0x05>>
       assert {:ok, {:gui_action, {:file_tree_new_file, 5}}} = Protocol.decode_event(payload)

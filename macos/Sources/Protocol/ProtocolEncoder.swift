@@ -79,6 +79,10 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendSpaceLeaderChord(codepoint: UInt32, modifiers: UInt8)
     func sendSpaceLeaderRetract(codepoint: UInt32, modifiers: UInt8)
 
+    // Menu bar commands (mode-aware copy/cut from macOS menu)
+    func sendCmdCopy()
+    func sendCmdCut()
+
     // Find Pasteboard
     func sendFindPasteboardSearch(text: String, direction: UInt8)
 
@@ -450,6 +454,22 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_SYSTEM_DID_WAKE
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: cmd_copy (mode-aware copy from menu bar).
+    func sendCmdCopy() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_CMD_COPY
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: cmd_cut (mode-aware cut from menu bar).
+    func sendCmdCut() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_CMD_CUT
         writeFrame(buf)
     }
 
