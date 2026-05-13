@@ -82,6 +82,9 @@ final class GitStatusState {
     // Commit message (local UI state, typed by the user)
     var commitMessage: String = ""
 
+    // Amend mode (local UI state, toggled by the user)
+    var amendMode: Bool = false
+
     /// Total number of entries across all sections.
     var totalCount: Int {
         stagedEntries.count + changedEntries.count

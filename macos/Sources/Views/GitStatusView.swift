@@ -20,6 +20,7 @@ struct GitStatusView: View {
 
     @State private var hoveredEntryId: UInt32? = nil
     @State private var hoveredSection: GitStatusSection? = nil
+    @State private var fileToDiscard: GitStatusEntry? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,6 +44,24 @@ struct GitStatusView: View {
         .background(theme.treeBg)
         .focusable(false)
         .focusEffectDisabled()
+        .alert("Discard Changes?", isPresented: Binding(
+            get: { fileToDiscard != nil },
+            set: { if !$0 { fileToDiscard = nil } }
+        )) {
+            Button("Cancel", role: .cancel) {
+                fileToDiscard = nil
+            }
+            Button("Discard", role: .destructive) {
+                if let entry = fileToDiscard {
+                    encoder?.sendGitDiscardFile(path: entry.path)
+                    fileToDiscard = nil
+                }
+            }
+        } message: {
+            if let entry = fileToDiscard {
+                Text("Discard changes in \(entry.filename)? This cannot be undone.")
+            }
+        }
     }
 
     // MARK: - Empty states
@@ -272,7 +291,7 @@ struct GitStatusView: View {
                 }
             case .changed:
                 actionButton(systemName: "arrow.uturn.backward", tooltip: "Discard Changes") {
-                    encoder?.sendGitDiscardFile(path: entry.path)
+                    fileToDiscard = entry
                 }
                 actionButton(systemName: "plus", tooltip: "Stage") {
                     encoder?.sendGitStageFile(path: entry.path)
@@ -310,7 +329,19 @@ struct GitStatusView: View {
                 .frame(height: 1)
 
             VStack(spacing: 6) {
-                // Commit message input
+                // Amend toggle
+                HStack {
+                    Toggle(isOn: Bindable(state).amendMode) {
+                        Text("Amend")
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.treeFg.opacity(0.6))
+                    }
+                    .toggleStyle(.checkbox)
+                    .controlSize(.small)
+                    Spacer()
+                }
+
+                // Commit message input with character counter
                 ZStack(alignment: .topLeading) {
                     if state.commitMessage.isEmpty {
                         Text("Commit message\u{2026}")
@@ -325,48 +356,138 @@ struct GitStatusView: View {
                         .foregroundStyle(theme.treeFg)
                         .scrollContentBackground(.hidden)
                         .frame(minHeight: 40, maxHeight: 80)
+
+                    // Character counter (bottom-right)
+                    charCounter
                 }
                 .background(
                     RoundedRectangle(cornerRadius: 4)
                         .fill(theme.editorBg.opacity(0.5))
                         .overlay(
                             RoundedRectangle(cornerRadius: 4)
-                                .stroke(theme.treeSeparatorFg, lineWidth: 1)
+                                .stroke(commitBorderColor, lineWidth: 1)
                         )
                 )
 
-                // Commit button
+                // Push / Pull / Fetch row
+                HStack(spacing: 4) {
+                    if state.behind > 0 {
+                        miniButton(systemName: "arrow.down.circle", label: "Pull \(state.behind)") {
+                            encoder?.sendGitPull()
+                        }
+                    }
+                    if state.ahead > 0 {
+                        miniButton(systemName: "arrow.up.circle", label: "Push \(state.ahead)") {
+                            encoder?.sendGitPush()
+                        }
+                    }
+                    miniButton(systemName: "arrow.2.circlepath", label: "Fetch") {
+                        encoder?.sendGitFetch()
+                    }
+                    Spacer()
+                }
+
+                // Commit / Amend button
                 Button {
                     let message = state.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !message.isEmpty else { return }
-                    encoder?.sendGitCommit(message: message)
+                    if state.amendMode {
+                        encoder?.sendGitCommitAmend(message: message)
+                    } else {
+                        encoder?.sendGitCommit(message: message)
+                    }
                     state.commitMessage = ""
+                    state.amendMode = false
                 } label: {
                     HStack(spacing: 4) {
-                        Image(systemName: "checkmark")
+                        Image(systemName: state.amendMode ? "pencil" : "checkmark")
                             .font(.system(size: 10, weight: .semibold))
-                        Text("Commit")
+                        Text(state.amendMode ? "Amend" : "Commit")
                             .font(.system(size: 12, weight: .medium))
                     }
                     .frame(maxWidth: .infinity)
                     .frame(height: 26)
-                    .foregroundStyle(state.canCommit ? theme.treeBg : theme.treeFg.opacity(0.3))
+                    .foregroundStyle(commitButtonEnabled ? theme.treeBg : theme.treeFg.opacity(0.3))
                     .background(
                         RoundedRectangle(cornerRadius: 4)
-                            .fill(state.canCommit ? theme.accent : theme.treeFg.opacity(0.08))
+                            .fill(commitButtonEnabled ? theme.accent : theme.treeFg.opacity(0.08))
                     )
                 }
                 .buttonStyle(.plain)
-                .disabled(!state.canCommit)
-                .help(state.stagedEntries.isEmpty
-                    ? "Stage files before committing"
-                    : state.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        ? "Enter a commit message"
-                        : "Commit staged changes")
+                .disabled(!commitButtonEnabled)
+                .help(commitButtonHelp)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 10)
         }
+    }
+
+    @ViewBuilder
+    private var charCounter: some View {
+        let firstLine = state.commitMessage.components(separatedBy: "\n").first ?? ""
+        let count = firstLine.count
+        let color: Color = count > 50 ? theme.gutterWarningFg : theme.treeFg.opacity(0.3)
+
+        if !state.commitMessage.isEmpty {
+            Text("\(count)")
+                .font(.system(size: 10, weight: .medium).monospacedDigit())
+                .foregroundStyle(color)
+                .padding(.trailing, 8)
+                .padding(.top, 6)
+                .frame(maxWidth: .infinity, alignment: .topTrailing)
+        }
+    }
+
+    private var commitBorderColor: Color {
+        let firstLine = state.commitMessage.components(separatedBy: "\n").first ?? ""
+        if firstLine.count > 72 {
+            return theme.gutterErrorFg.opacity(0.5)
+        } else if firstLine.count > 50 {
+            return theme.gutterWarningFg.opacity(0.5)
+        }
+        return theme.treeSeparatorFg
+    }
+
+    private var commitButtonEnabled: Bool {
+        let hasMessage = !state.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if state.amendMode {
+            return hasMessage
+        }
+        return !state.stagedEntries.isEmpty && hasMessage
+    }
+
+    private var commitButtonHelp: String {
+        if state.amendMode {
+            return state.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "Enter a commit message"
+                : "Amend the previous commit"
+        }
+        if state.stagedEntries.isEmpty {
+            return "Stage files before committing"
+        }
+        if state.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Enter a commit message"
+        }
+        return "Commit staged changes"
+    }
+
+    private func miniButton(systemName: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 3) {
+                Image(systemName: systemName)
+                    .font(.system(size: 10))
+                Text(label)
+                    .font(.system(size: 11))
+            }
+            .foregroundStyle(theme.treeFg.opacity(0.6))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(theme.treeFg.opacity(0.06))
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Status formatting

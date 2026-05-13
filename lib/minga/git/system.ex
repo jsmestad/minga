@@ -174,12 +174,13 @@ defmodule Minga.Git.System do
   end
 
   @impl true
-  @spec commit(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  def commit(git_root, message) when is_binary(git_root) and is_binary(message) do
-    case System.cmd("git", ["commit", "-m", message],
-           cd: git_root,
-           stderr_to_stdout: true
-         ) do
+  @spec commit(String.t(), String.t(), keyword()) :: {:ok, String.t()} | {:error, String.t()}
+  def commit(git_root, message, opts \\ [])
+      when is_binary(git_root) and is_binary(message) do
+    args = ["commit", "-m", message]
+    args = if Keyword.get(opts, :amend, false), do: args ++ ["--amend"], else: args
+
+    case System.cmd("git", args, cd: git_root, stderr_to_stdout: true) do
       {output, 0} ->
         short_hash =
           case Regex.run(~r"\[[\w/.-]+ ([a-f0-9]+)\]", output) do
@@ -194,6 +195,17 @@ defmodule Minga.Git.System do
     end
   rescue
     e in [ErlangError, ArgumentError] -> {:error, "git commit error: #{Exception.message(e)}"}
+  end
+
+  @impl true
+  @spec last_commit_message(String.t()) :: {:ok, String.t()} | :error
+  def last_commit_message(git_root) when is_binary(git_root) do
+    case System.cmd("git", ["log", "-1", "--format=%B"], cd: git_root, stderr_to_stdout: true) do
+      {msg, 0} -> {:ok, String.trim(msg)}
+      _ -> :error
+    end
+  rescue
+    _ -> :error
   end
 
   @impl true

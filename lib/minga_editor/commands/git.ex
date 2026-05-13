@@ -30,9 +30,13 @@ defmodule MingaEditor.Commands.Git do
     {:next_git_hunk, "Next git hunk", true},
     {:prev_git_hunk, "Previous git hunk", true},
     {:git_stage_hunk, "Stage hunk", true},
+    {:git_stage_file, "Stage current file", true},
+    {:git_unstage_file, "Unstage current file", true},
     {:git_revert_hunk, "Revert hunk", true},
     {:git_preview_hunk, "Preview hunk", true},
-    {:git_blame_line, "Blame line", true}
+    {:git_blame_line, "Blame line", true},
+    {:git_commit_open, "Open commit panel", false},
+    {:git_amend_open, "Open amend panel", false}
   ]
 
   @spec execute(state(), atom()) :: state()
@@ -115,6 +119,76 @@ defmodule MingaEditor.Commands.Git do
         hunk -> do_stage_hunk(state, git_pid, buf, hunk)
       end
     end)
+  end
+
+  # ── Stage / unstage file ────────────────────────────────────────────────────
+
+  def execute(state, :git_stage_file) do
+    with_git_buffer(state, fn git_pid, _buf ->
+      git_root = Git.Buffer.git_root(git_pid)
+      rel_path = Git.Buffer.relative_path(git_pid)
+
+      case Git.stage(git_root, rel_path) do
+        :ok ->
+          refresh_repo(git_root)
+          EditorState.set_status(state, "Staged: #{rel_path}")
+
+        {:error, reason} ->
+          EditorState.set_status(state, "Stage failed: #{reason}")
+      end
+    end)
+  end
+
+  def execute(state, :git_unstage_file) do
+    with_git_buffer(state, fn git_pid, _buf ->
+      git_root = Git.Buffer.git_root(git_pid)
+      rel_path = Git.Buffer.relative_path(git_pid)
+
+      case Git.unstage(git_root, rel_path) do
+        :ok ->
+          refresh_repo(git_root)
+          EditorState.set_status(state, "Unstaged: #{rel_path}")
+
+        {:error, reason} ->
+          EditorState.set_status(state, "Unstage failed: #{reason}")
+      end
+    end)
+  end
+
+  # ── Commit / amend ────────────────────────────────────────────────────────
+
+  def execute(state, :git_commit_open) do
+    state =
+      if state.workspace.keymap_scope != :git_status do
+        open_git_status_panel(state)
+      else
+        state
+      end
+
+    MingaEditor.PromptUI.open(state, MingaEditor.UI.Prompt.GitCommit)
+  end
+
+  def execute(state, :git_amend_open) do
+    state =
+      if state.workspace.keymap_scope != :git_status do
+        open_git_status_panel(state)
+      else
+        state
+      end
+
+    default_msg =
+      case Git.root_for(Minga.Project.resolve_root()) do
+        {:ok, git_root} ->
+          case Git.last_commit_message(git_root) do
+            {:ok, msg} -> msg
+            :error -> ""
+          end
+
+        :not_git ->
+          ""
+      end
+
+    MingaEditor.PromptUI.open(state, MingaEditor.UI.Prompt.GitAmend, default: default_msg)
   end
 
   # ── Revert hunk ────────────────────────────────────────────────────────────

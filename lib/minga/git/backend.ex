@@ -36,8 +36,11 @@ defmodule Minga.Git.Backend do
   @callback stage(git_root :: String.t(), paths :: String.t() | [String.t()]) ::
               :ok | {:error, String.t()}
 
-  @callback commit(git_root :: String.t(), message :: String.t()) ::
+  @callback commit(git_root :: String.t(), message :: String.t(), opts :: keyword()) ::
               {:ok, String.t()} | {:error, String.t()}
+
+  @callback last_commit_message(git_root :: String.t()) ::
+              {:ok, String.t()} | :error
 
   @callback stage_patch(git_root :: String.t(), patch :: String.t()) ::
               :ok | {:error, String.t()}

@@ -130,9 +130,17 @@ defmodule Minga.Git do
 
   @doc """
   Creates a commit with the given message.
+
+  Options: `:amend` (boolean, default false) to amend the previous commit.
   """
-  @spec commit(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  def commit(git_root, message), do: impl().commit(git_root, message)
+  @spec commit(String.t(), String.t(), keyword()) :: {:ok, String.t()} | {:error, String.t()}
+  def commit(git_root, message, opts \\ []), do: impl().commit(git_root, message, opts)
+
+  @doc """
+  Returns the message of the most recent commit.
+  """
+  @spec last_commit_message(String.t()) :: {:ok, String.t()} | :error
+  def last_commit_message(git_root), do: impl().last_commit_message(git_root)
 
   @doc """
   Returns the current branch name for a git repository.

@@ -71,6 +71,10 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendGitUnstageAll()
     func sendGitCommit(message: String)
     func sendGitOpenFile(path: String)
+    func sendGitPush()
+    func sendGitPull()
+    func sendGitFetch()
+    func sendGitCommitAmend(message: String)
     func sendGroupRename(id: UInt16, name: String)
     func sendGroupSetIcon(id: UInt16, icon: String)
     func sendGroupClose(id: UInt16)
@@ -627,6 +631,40 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
 
     func sendGitOpenFile(path: String) {
         sendGitPathAction(GUI_ACTION_GIT_OPEN_FILE, path: path)
+    }
+
+    func sendGitPush() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_GIT_PUSH
+        writeFrame(buf)
+    }
+
+    func sendGitPull() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_GIT_PULL
+        writeFrame(buf)
+    }
+
+    func sendGitFetch() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_GIT_FETCH
+        writeFrame(buf)
+    }
+
+    func sendGitCommitAmend(message: String) {
+        let utf8 = Array(message.utf8)
+        let msgLen = min(utf8.count, Int(UInt16.max))
+        var buf = Data(count: 4 + msgLen)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_GIT_COMMIT_AMEND
+        writeU16(&buf, 2, UInt16(msgLen))
+        if msgLen > 0 {
+            buf.replaceSubrange(4..<(4 + msgLen), with: utf8[0..<msgLen])
+        }
+        writeFrame(buf)
     }
 
     func sendGroupRename(id: UInt16, name: String) {
