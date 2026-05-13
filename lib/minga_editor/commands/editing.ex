@@ -507,7 +507,8 @@ defmodule MingaEditor.Commands.Editing do
     cursor = Buffer.cursor(buf)
     {yanked, reg_type} = cmd_visual_yank_text(buf, ms, cursor)
     state = Helpers.put_register(state, yanked, :yank, reg_type)
-    Helpers.force_clipboard_sync(state, yanked)
+    state = Helpers.force_clipboard_sync(state, yanked)
+    EditorState.transition_mode(state, :normal)
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :cmd_copy) when is_pid(buf) do
@@ -526,10 +527,15 @@ defmodule MingaEditor.Commands.Editing do
         } = state,
         :cmd_cut
       ) do
-    cursor = Buffer.cursor(buf)
-    {yanked, reg_type} = cmd_visual_delete_text(buf, ms, cursor)
-    state = Helpers.put_register(state, yanked, :delete, reg_type)
-    Helpers.force_clipboard_sync(state, yanked)
+    if Buffer.read_only?(buf) do
+      EditorState.set_status(state, "Buffer is read-only")
+    else
+      cursor = Buffer.cursor(buf)
+      {yanked, reg_type} = cmd_visual_delete_text(buf, ms, cursor)
+      state = Helpers.put_register(state, yanked, :delete, reg_type)
+      state = Helpers.force_clipboard_sync(state, yanked)
+      EditorState.transition_mode(state, :normal)
+    end
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :cmd_cut) when is_pid(buf) do
@@ -543,6 +549,9 @@ defmodule MingaEditor.Commands.Editing do
       Helpers.force_clipboard_sync(state, yanked)
     end
   end
+
+  def execute(state, :cmd_copy), do: state
+  def execute(state, :cmd_cut), do: state
 
   # ── Private comment helpers ──────────────────────────────────────────────
 

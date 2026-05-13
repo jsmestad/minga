@@ -56,9 +56,9 @@ struct MingaMenuCommands: Commands {
         // Replace the default text editing commands (Cmd+C/V/X/Z/A) with
         // our own versions that route through the BEAM.
         CommandGroup(replacing: .textEditing) {
-            Button("Undo") { encoder?.sendKeyPress(codepoint: 0x75, modifiers: 0) }
+            Button("Undo") { encoder?.sendKeyPress(codepoint: 0x75, modifiers: 0) } // 'u' = vim undo
                 .keyboardShortcut("z", modifiers: .command)
-            Button("Redo") { encoder?.sendKeyPress(codepoint: 0x72, modifiers: 0x02) }
+            Button("Redo") { encoder?.sendKeyPress(codepoint: 0x72, modifiers: 0x02) } // Ctrl+R = vim redo
                 .keyboardShortcut("z", modifiers: [.command, .shift])
 
             Divider()
@@ -78,7 +78,7 @@ struct MingaMenuCommands: Commands {
                 .keyboardShortcut("f", modifiers: .command)
         }
 
-        // File menu: New, Open, Save, Close Window.
+        // File menu: New, Open, Save, Close Tab.
         // SwiftUI provides the default "New Window" item; we replace it with
         // "New Buffer" which opens an empty scratch buffer in the BEAM.
         CommandGroup(replacing: .newItem) {

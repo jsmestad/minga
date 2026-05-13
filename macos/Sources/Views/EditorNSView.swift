@@ -618,10 +618,10 @@ final class EditorNSView: MTKView {
             }
         }
 
-        // Cmd+Shift variants: Redo (Cmd+Shift+Z), Save As (Cmd+Shift+S)
+        // Cmd+Shift variants: Redo (Cmd+Shift+Z)
         if mods == [.command, .shift] {
             switch event.charactersIgnoringModifiers {
-            case "z", "Z", "s", "S":
+            case "z", "Z":
                 return true
             default:
                 return false

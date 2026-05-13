@@ -78,6 +78,7 @@ defmodule MingaEditor.Commands.CmdCopyCutTest do
 
       assert register_entry(new_state) == {"bbb\n", :linewise}
       assert BufferServer.content(buf) == "aaa\nbbb\nccc"
+      assert_receive {:clipboard_written, "bbb\n"}, 200
     end
   end
 
@@ -127,6 +128,7 @@ defmodule MingaEditor.Commands.CmdCopyCutTest do
 
       assert register_entry(new_state) == {"bbb\n", :linewise}
       assert BufferServer.content(buf) == "aaa\nccc"
+      assert_receive {:clipboard_written, "bbb\n"}, 200
     end
   end
 
@@ -156,13 +158,25 @@ defmodule MingaEditor.Commands.CmdCopyCutTest do
   end
 
   describe "cmd_cut on read-only buffer" do
-    test "does not modify buffer" do
+    test "normal mode does not modify buffer or sync clipboard" do
       buf = start_supervised!({BufferServer, content: "protected content", read_only: true})
       state = build_state(buf)
 
       _new_state = Editing.execute(state, :cmd_cut)
 
       assert BufferServer.content(buf) == "protected content"
+      refute_receive {:clipboard_written, _}, 50
+    end
+
+    test "visual mode does not modify buffer or sync clipboard" do
+      buf = start_supervised!({BufferServer, content: "protected content", read_only: true})
+      BufferServer.move_to(buf, {0, 9})
+      state = build_state(buf) |> with_visual_mode(buf, {0, 0}, :char)
+
+      _new_state = Editing.execute(state, :cmd_cut)
+
+      assert BufferServer.content(buf) == "protected content"
+      refute_receive {:clipboard_written, _}, 50
     end
   end
 end
