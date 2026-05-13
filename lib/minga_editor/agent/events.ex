@@ -13,6 +13,7 @@ defmodule MingaEditor.Agent.Events do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.View.Preview
+  alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
@@ -253,18 +254,28 @@ defmodule MingaEditor.Agent.Events do
   @spec reload_remote_buffer_if_open(EditorState.t(), String.t(), String.t()) ::
           {EditorState.t(), [effect()]}
   defp reload_remote_buffer_if_open(state, path, after_content) do
-    case current_remote_server(state) do
-      {:ok, server_name} -> reload_remote_buffer(state, server_name, path, after_content)
-      :error -> {state, []}
+    case current_remote_target(state) do
+      {:ok, server_name, remote_node} ->
+        reload_remote_buffer(
+          state,
+          server_name,
+          normalize_remote_path(remote_node, path),
+          after_content
+        )
+
+      :error ->
+        reload_tracked_remote_buffers(state, path, after_content)
     end
   end
 
-  @spec current_remote_server(EditorState.t()) :: {:ok, String.t()} | :error
-  defp current_remote_server(state) do
+  @spec current_remote_target(EditorState.t()) :: {:ok, String.t(), node()} | :error
+  defp current_remote_target(state) do
     case AgentAccess.session(state) do
       pid when is_pid(pid) and node(pid) != node() ->
-        case Minga.Distribution.ConnectionManager.server_name_for_node(node(pid)) do
-          {:ok, server_name} -> {:ok, server_name}
+        remote_node = node(pid)
+
+        case Minga.Distribution.ConnectionManager.server_name_for_node(remote_node) do
+          {:ok, server_name} -> {:ok, server_name, remote_node}
           {:error, :not_found} -> :error
         end
 
@@ -273,13 +284,30 @@ defmodule MingaEditor.Agent.Events do
     end
   end
 
+  @spec normalize_remote_path(node(), String.t()) :: String.t()
+  defp normalize_remote_path(remote_node, path) do
+    :erpc.call(remote_node, Path, :expand, [path], 5_000)
+  catch
+    :exit, _reason -> path
+  end
+
+  @spec reload_tracked_remote_buffers(EditorState.t(), String.t(), String.t()) ::
+          {EditorState.t(), [effect()]}
+  defp reload_tracked_remote_buffers(state, path, after_content) do
+    state.remote
+    |> Remote.buffers_for_path(path)
+    |> Enum.reduce({state, []}, fn {_server_name, pid}, {acc_state, acc_effects} ->
+      {new_state, effects} = reload_remote_buffer_content(acc_state, pid, path, after_content)
+      {new_state, effects ++ acc_effects}
+    end)
+  end
+
   @spec reload_remote_buffer(EditorState.t(), String.t(), String.t(), String.t()) ::
           {EditorState.t(), [effect()]}
   defp reload_remote_buffer(state, server_name, path, after_content) do
     case Remote.buffer(state.remote, server_name, path) do
       pid when is_pid(pid) ->
-        Buffer.replace_content_force(pid, after_content)
-        {state, [{:log_message, "Agent updated #{Path.basename(path)}"}]}
+        reload_remote_buffer_content(state, pid, path, after_content)
 
       _ ->
         {state, []}
@@ -287,6 +315,28 @@ defmodule MingaEditor.Agent.Events do
   catch
     :exit, reason ->
       {state, [{:log_warning, "Failed to reload remote file #{path}: #{inspect(reason)}"}]}
+  end
+
+  @spec reload_remote_buffer_content(EditorState.t(), pid(), String.t(), String.t()) ::
+          {EditorState.t(), [effect()]}
+  defp reload_remote_buffer_content(state, pid, path, after_content) do
+    if Buffer.dirty?(pid) do
+      state =
+        state
+        |> EditorState.set_status(
+          "Agent modified this file. Reload, keep editing, or show diff. Save will check for conflicts."
+        )
+        |> PickerUI.open(MingaEditor.UI.Picker.RemoteFileConflictSource, %{
+          buffer: pid,
+          path: path,
+          content: after_content
+        })
+
+      {state, [{:log_warning, "Agent modified dirty remote file #{Path.basename(path)}"}]}
+    else
+      Buffer.replace_saved_content(pid, after_content)
+      {state, [{:log_message, "Agent updated #{Path.basename(path)}"}]}
+    end
   end
 
   @spec update_preview(EditorState.t(), (Preview.t() -> Preview.t())) :: EditorState.t()

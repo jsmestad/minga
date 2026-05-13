@@ -189,6 +189,90 @@ defmodule MingaEditor.State.SnapshotTest do
     end
   end
 
+  describe "Buffers.scrub_dead_active/1" do
+    test "returns unchanged when active is nil" do
+      bs = %Buffers{active: nil, list: [], active_index: 0}
+      assert Buffers.scrub_dead_active(bs) == bs
+    end
+
+    test "returns unchanged when active pid is alive" do
+      {:ok, buf} = BufferServer.start_link(content: "alive")
+      bs = %Buffers{active: buf, list: [buf], active_index: 0}
+      assert Buffers.scrub_dead_active(bs) == bs
+    end
+
+    test "selects neighbor when active pid is dead" do
+      {:ok, buf_a} = BufferServer.start_link(content: "a")
+      {:ok, buf_b} = BufferServer.start_link(content: "b")
+
+      bs = %Buffers{active: buf_a, list: [buf_a, buf_b], active_index: 0}
+      GenServer.stop(buf_a)
+
+      scrubbed = Buffers.scrub_dead_active(bs)
+      assert scrubbed.active == buf_b
+      assert scrubbed.list == [buf_b]
+      assert scrubbed.active_index == 0
+    end
+
+    test "sets active to nil when all pids are dead" do
+      {:ok, buf_a} = BufferServer.start_link(content: "a")
+      {:ok, buf_b} = BufferServer.start_link(content: "b")
+
+      bs = %Buffers{active: buf_a, list: [buf_a, buf_b], active_index: 0}
+      GenServer.stop(buf_a)
+      GenServer.stop(buf_b)
+
+      scrubbed = Buffers.scrub_dead_active(bs)
+      assert scrubbed.active == nil
+      assert scrubbed.list == []
+      assert scrubbed.active_index == 0
+    end
+
+    test "clamps active_index when dead pid was at the end" do
+      {:ok, buf_a} = BufferServer.start_link(content: "a")
+      {:ok, buf_b} = BufferServer.start_link(content: "b")
+      {:ok, buf_c} = BufferServer.start_link(content: "c")
+
+      bs = %Buffers{active: buf_c, list: [buf_a, buf_b, buf_c], active_index: 2}
+      GenServer.stop(buf_c)
+
+      scrubbed = Buffers.scrub_dead_active(bs)
+      assert scrubbed.active in [buf_a, buf_b]
+      assert scrubbed.list == [buf_a, buf_b]
+      assert scrubbed.active_index == 1
+    end
+  end
+
+  describe "restore_tab_context/2 with dead buffer" do
+    test "scrubs dead active buffer pid on restore" do
+      {:ok, buf_a} = BufferServer.start_link(content: "a")
+      {:ok, buf_b} = BufferServer.start_link(content: "b")
+
+      # Build state with two buffers, buf_a active
+      state_with_both =
+        make_state(buffer: buf_a)
+        |> put_in(
+          [Access.key(:workspace), Access.key(:buffers)],
+          %Buffers{active: buf_a, list: [buf_a, buf_b], active_index: 0}
+        )
+
+      # Snapshot the context
+      ctx = EditorState.snapshot_tab_context(state_with_both)
+
+      # Kill the active buffer
+      GenServer.stop(buf_a)
+
+      # Restore the context into a fresh workspace
+      fresh_state = make_state(buffer: buf_b)
+      restored = EditorState.restore_tab_context(fresh_state, ctx)
+
+      # The dead pid should have been scrubbed; buf_b is active now
+      assert restored.workspace.buffers.active == buf_b
+      assert buf_a not in restored.workspace.buffers.list
+      assert buf_b in restored.workspace.buffers.list
+    end
+  end
+
   describe "switch_tab/2" do
     test "snapshots current tab, restores target tab" do
       {:ok, buf_a} = BufferServer.start_link(content: "file a")
@@ -254,6 +338,89 @@ defmodule MingaEditor.State.SnapshotTest do
     test "switching with nil tab_bar is a no-op" do
       state = make_state(tab_bar: nil)
       assert EditorState.switch_tab(state, 1) == state
+    end
+  end
+
+  describe "from_workspace/1 (direct struct-to-struct)" do
+    test "produces identical output to the legacy Map.from_struct path" do
+      {:ok, buf} = BufferServer.start_link(content: "hello")
+
+      ws = %MingaEditor.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        editing: %VimState{mode: :insert, mode_state: Mode.initial_state()},
+        buffers: %Buffers{active: buf, list: [buf]},
+        keymap_scope: :agent
+      }
+
+      # New direct path
+      new_ctx = Context.from_workspace(ws)
+
+      # Old path: normalize editing, Map.from_struct, from_workspace_map
+      old_ctx =
+        ws
+        |> Map.update!(:editing, &VimState.normalize/1)
+        |> Map.from_struct()
+        |> Context.from_workspace_map()
+
+      # All workspace data fields must match exactly
+      assert new_ctx.version == old_ctx.version
+      assert new_ctx.keymap_scope == old_ctx.keymap_scope
+      assert new_ctx.buffers == old_ctx.buffers
+      assert new_ctx.windows == old_ctx.windows
+      assert new_ctx.file_tree == old_ctx.file_tree
+      assert new_ctx.dired == old_ctx.dired
+      assert new_ctx.viewport == old_ctx.viewport
+      assert new_ctx.mouse == old_ctx.mouse
+      assert new_ctx.highlight == old_ctx.highlight
+      assert new_ctx.lsp_pending == old_ctx.lsp_pending
+      assert new_ctx.injection_ranges == old_ctx.injection_ranges
+      assert new_ctx.search == old_ctx.search
+      assert new_ctx.editing == old_ctx.editing
+      assert new_ctx.document_highlights == old_ctx.document_highlights
+      assert new_ctx.agent_ui == old_ctx.agent_ui
+
+      # present_fields contain the same fields (order is not semantically significant)
+      assert Enum.sort(new_ctx.present_fields) == Enum.sort(old_ctx.present_fields)
+
+      # Both produce the same workspace map on round-trip
+      assert Context.to_workspace_map(new_ctx) == Context.to_workspace_map(old_ctx)
+    end
+
+    test "round-trips through to_workspace_map preserving all fields" do
+      {:ok, buf} = BufferServer.start_link(content: "round-trip")
+
+      ws = %MingaEditor.Workspace.State{
+        viewport: Viewport.new(30, 100),
+        editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
+        buffers: %Buffers{active: buf, list: [buf]},
+        keymap_scope: :editor
+      }
+
+      ctx = Context.from_workspace(ws)
+      restored_map = Context.to_workspace_map(ctx)
+
+      assert restored_map.keymap_scope == :editor
+      assert restored_map.editing.mode == :normal
+      assert restored_map.buffers.active == buf
+      assert restored_map.viewport == ws.viewport
+      assert restored_map.windows == ws.windows
+      assert restored_map.mouse == ws.mouse
+      assert restored_map.highlight == ws.highlight
+      assert restored_map.search == ws.search
+    end
+
+    test "normalises transient vim state" do
+      ws = %MingaEditor.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        editing: %VimState{mode: :normal, mode_state: %Mode.CommandState{input: ""}},
+        buffers: %Buffers{},
+        keymap_scope: :editor
+      }
+
+      ctx = Context.from_workspace(ws)
+
+      assert ctx.editing.mode == :normal
+      assert match?(%Mode.State{}, ctx.editing.mode_state)
     end
   end
 
