@@ -1,14 +1,15 @@
 defmodule MingaEditor.State.Remote do
   @moduledoc "State for remote agent sessions and read-only remote file buffers."
 
+  @typedoc "Remote session metadata is normally `MingaAgent.SessionMetadata.t()`. The map fallback keeps compatibility with older remote nodes that may return decoded persisted metadata before both nodes share the exact struct module version."
   @type session_metadata :: MingaAgent.SessionMetadata.t() | map()
-  @type session_entry :: {String.t(), pid(), session_metadata()}
-  @type connection_status :: :connected | :disconnected | :ended | :unavailable
+  @type remote_session_entry :: {String.t(), pid(), session_metadata()}
+  @type remote_connection_status :: :connected | :disconnected | :ended | :unavailable
   @type remote_file_key :: {String.t(), String.t()}
 
   @type t :: %__MODULE__{
-          sessions: %{String.t() => [session_entry()]},
-          server_status: %{String.t() => connection_status()},
+          sessions: %{String.t() => [remote_session_entry()]},
+          server_status: %{String.t() => remote_connection_status()},
           buffers: %{remote_file_key() => pid()}
         }
 
@@ -17,25 +18,25 @@ defmodule MingaEditor.State.Remote do
             buffers: %{}
 
   @doc "Stores the latest discovered remote sessions for a server."
-  @spec put_sessions(t(), String.t(), [session_entry()]) :: t()
+  @spec put_sessions(t(), String.t(), [remote_session_entry()]) :: t()
   def put_sessions(%__MODULE__{} = remote, server_name, sessions)
       when is_binary(server_name) and is_list(sessions) do
     %{remote | sessions: Map.put(remote.sessions, server_name, sessions)}
   end
 
   @doc "Returns all discovered remote sessions grouped by server name."
-  @spec sessions(t()) :: %{String.t() => [session_entry()]}
+  @spec sessions(t()) :: %{String.t() => [remote_session_entry()]}
   def sessions(%__MODULE__{} = remote), do: remote.sessions
 
   @doc "Marks a server's connection status."
-  @spec put_server_status(t(), String.t(), connection_status()) :: t()
+  @spec put_server_status(t(), String.t(), remote_connection_status()) :: t()
   def put_server_status(%__MODULE__{} = remote, server_name, status)
       when is_binary(server_name) and status in [:connected, :disconnected, :ended, :unavailable] do
     %{remote | server_status: Map.put(remote.server_status, server_name, status)}
   end
 
   @doc "Returns a server's known connection status."
-  @spec server_status(t(), String.t()) :: connection_status()
+  @spec server_status(t(), String.t()) :: remote_connection_status()
   def server_status(%__MODULE__{} = remote, server_name) when is_binary(server_name) do
     Map.get(remote.server_status, server_name, :disconnected)
   end

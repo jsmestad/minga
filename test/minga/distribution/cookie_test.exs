@@ -17,6 +17,15 @@ defmodule Minga.Distribution.CookieTest do
     assert Cookie.read_file(path) == {:error, :insecure_permissions}
   end
 
+  test "read_file/1 rejects symlinks before following the target" do
+    target = temp_cookie_file("abcdefghijklmnopqrstuvwxyz123456")
+    File.chmod!(target, 0o600)
+    link = target <> "-link"
+    File.ln_s!(target, link)
+
+    assert Cookie.read_file(link) == {:error, :not_regular_file}
+  end
+
   test "to_atom/1 rejects short or invalid cookies" do
     assert Cookie.to_atom("short") == {:error, :weak_or_invalid}
     assert Cookie.to_atom("abcdefghijklmnopqrstuvwxyz12345!") == {:error, :weak_or_invalid}

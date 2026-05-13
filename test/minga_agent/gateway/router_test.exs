@@ -28,6 +28,15 @@ defmodule MingaAgent.Gateway.RouterTest do
     assert conn.resp_body == "gateway websocket auth not configured"
   end
 
+  test "websocket route returns 503 when auth token is empty" do
+    Application.put_env(:minga, :gateway_auth_token, "")
+
+    conn = Router.call(conn(:get, "/ws"), [])
+
+    assert conn.status == 503
+    assert conn.resp_body == "gateway websocket auth not configured"
+  end
+
   test "websocket route returns 401 when bearer token is missing" do
     Application.put_env(:minga, :gateway_auth_token, "expected-token")
 

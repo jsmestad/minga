@@ -164,7 +164,9 @@ defmodule Minga.Application do
   defp standalone_headless? do
     Minga.CLI.headless_args?(Burrito.Util.Args.argv())
   rescue
-    _ -> false
+    error ->
+      Minga.Log.debug(:editor, "Could not inspect standalone CLI args: #{inspect(error)}")
+      false
   end
 
   @spec prune_old_sessions() :: :ok

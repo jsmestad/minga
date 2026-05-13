@@ -7,7 +7,7 @@ defmodule Minga.Distribution.File do
   @default_max_files 5_000
   @default_max_depth 12
 
-  @type listing_acc :: %{files: [String.t()], truncated?: boolean()}
+  @type listing_acc :: %{files: [String.t()], count: non_neg_integer(), truncated?: boolean()}
   @type listing_limits :: %{max_files: pos_integer(), max_depth: non_neg_integer()}
 
   @doc "Reads a file from a remote node. Files larger than the configured cap are rejected."
@@ -62,7 +62,7 @@ defmodule Minga.Distribution.File do
 
     if File.dir?(expanded) do
       limits = %{max_files: max_files, max_depth: max_depth}
-      acc = collect_files(expanded, 0, limits, %{files: [], truncated?: false})
+      acc = collect_files(expanded, 0, limits, %{files: [], count: 0, truncated?: false})
       {:ok, Enum.sort(acc.files)}
     else
       {:error, :enoent}
@@ -143,10 +143,10 @@ defmodule Minga.Distribution.File do
 
   @spec add_file(String.t(), listing_limits(), listing_acc()) :: listing_acc()
   defp add_file(path, %{max_files: max_files}, acc) do
-    if length(acc.files) >= max_files do
+    if acc.count >= max_files do
       %{acc | truncated?: true}
     else
-      %{acc | files: [path | acc.files]}
+      %{acc | files: [path | acc.files], count: acc.count + 1}
     end
   end
 end

@@ -225,11 +225,12 @@ defmodule Minga.CLI do
 
   @spec launch(flags(), String.t() | nil) :: :ok
   defp launch(%{headless: true} = flags, _file) do
-    port = gateway_port(flags)
     auth_token = gateway_auth_token()
 
-    case gateway_ip(flags) do
-      {:ok, ip} -> start_headless_gateway(port, ip, auth_token)
+    with {:ok, port} <- gateway_port(flags),
+         {:ok, ip} <- gateway_ip(flags) do
+      start_headless_gateway(port, ip, auth_token)
+    else
       {:error, message} -> abort_startup(message)
     end
   end
@@ -281,18 +282,19 @@ defmodule Minga.CLI do
   defp ensure_distribution_started(role, flags) do
     name = distribution_node_name(role, flags)
     mode = if flags.short_name, do: :shortnames, else: :longnames
-    cookie = explicit_cookie(flags)
 
-    case start_node_if_needed(name, mode) do
-      :ok ->
-        set_cookie_and_log(cookie, :ok, name)
+    with {:ok, cookie} <- distribution_cookie(flags) do
+      case start_node_if_needed(name, mode) do
+        :ok ->
+          set_cookie_and_log(cookie, :ok, name)
 
-      {:ok, _pid} = result ->
-        set_cookie_and_log(cookie, result, name)
+        {:ok, _pid} = result ->
+          set_cookie_and_log(cookie, result, name)
 
-      {:error, reason} = result ->
-        log_distribution_result(result, name)
-        {:error, inspect(reason)}
+        {:error, reason} = result ->
+          log_distribution_result(result, name)
+          {:error, inspect(reason)}
+      end
     end
   end
 
@@ -314,20 +316,23 @@ defmodule Minga.CLI do
   end
 
   @spec hostname(boolean()) :: String.t()
-  defp hostname(true) do
+  defp hostname(short_name?) do
     {:ok, name} = :inet.gethostname()
-    name |> List.to_string() |> String.split(".") |> hd()
+    format_hostname(name, short_name?)
+  rescue
+    error in MatchError ->
+      abort_startup("Failed to resolve local hostname: #{inspect(error.term)}")
   end
 
-  defp hostname(false) do
-    {:ok, name} = :inet.gethostname()
-    List.to_string(name)
-  end
+  @spec format_hostname(charlist(), boolean()) :: String.t()
+  defp format_hostname(name, true), do: name |> List.to_string() |> String.split(".") |> hd()
+  defp format_hostname(name, false), do: List.to_string(name)
 
-  @spec explicit_cookie(flags()) :: String.t() | nil
-  defp explicit_cookie(%{cookie_file: path}) when is_binary(path), do: read_cookie_file(path)
-  defp explicit_cookie(%{cookie: cookie}) when is_binary(cookie), do: cookie
-  defp explicit_cookie(_flags), do: System.get_env("MINGA_COOKIE")
+  @doc false
+  @spec distribution_cookie(flags()) :: {:ok, String.t() | nil} | {:error, String.t()}
+  def distribution_cookie(%{cookie_file: path}) when is_binary(path), do: read_cookie_file(path)
+  def distribution_cookie(%{cookie: cookie}) when is_binary(cookie), do: {:ok, cookie}
+  def distribution_cookie(_flags), do: {:ok, System.get_env("MINGA_COOKIE")}
 
   @spec set_cookie_if_present(String.t() | nil) :: :ok | {:error, String.t()}
   defp set_cookie_if_present(nil), do: :ok
@@ -353,19 +358,14 @@ defmodule Minga.CLI do
     end
   end
 
-  @spec read_cookie_file(String.t()) :: String.t() | nil
+  @spec read_cookie_file(String.t()) :: {:ok, String.t()} | {:error, String.t()}
   defp read_cookie_file(path) do
     case Cookie.read_file(path) do
       {:ok, cookie} ->
-        cookie
+        {:ok, cookie}
 
       {:error, reason} ->
-        Minga.Log.warning(
-          :distribution,
-          "Ignoring Erlang cookie file #{path}: #{inspect(reason)}"
-        )
-
-        nil
+        {:error, "Failed to read Erlang cookie file #{path}: #{inspect(reason)}"}
     end
   end
 
@@ -385,12 +385,13 @@ defmodule Minga.CLI do
     )
   end
 
-  @spec gateway_port(flags()) :: pos_integer()
-  defp gateway_port(%{gateway_port: port}) when is_integer(port), do: port
+  @doc false
+  @spec gateway_port(flags()) :: {:ok, pos_integer()} | {:error, String.t()}
+  def gateway_port(%{gateway_port: port}) when is_integer(port), do: {:ok, port}
 
-  defp gateway_port(_flags) do
+  def gateway_port(_flags) do
     case System.get_env("MINGA_GATEWAY_PORT") do
-      nil -> @default_gateway_port
+      nil -> {:ok, @default_gateway_port}
       value -> env_gateway_port(value)
     end
   end
@@ -424,11 +425,11 @@ defmodule Minga.CLI do
   @spec gateway_auth_token() :: String.t() | nil
   defp gateway_auth_token, do: System.get_env("MINGA_GATEWAY_TOKEN")
 
-  @spec env_gateway_port(String.t()) :: pos_integer()
+  @spec env_gateway_port(String.t()) :: {:ok, pos_integer()} | {:error, String.t()}
   defp env_gateway_port(value) do
     case parse_port(value) do
-      {:ok, port} -> port
-      :error -> @default_gateway_port
+      {:ok, port} -> {:ok, port}
+      :error -> {:error, "MINGA_GATEWAY_PORT must be a TCP port between 1 and 65535"}
     end
   end
 
@@ -516,6 +517,7 @@ defmodule Minga.CLI do
 
   @spec editor_wait_params() :: {non_neg_integer(), non_neg_integer()}
   defp editor_wait_params do
+    # Tests can override the polling interval and retry count; production waits up to one second by default.
     Application.get_env(:minga, :editor_wait_params, {50, 20})
   end
 
