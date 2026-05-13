@@ -511,10 +511,10 @@ defmodule MingaEditor.State do
     state = do_remove_dead_buffer(state, pid)
 
     # Dispatch to the shell for presentation cleanup (tab removal, card updates, etc.)
-    {shell_state, workspace} =
+    {shell_state, workspace, shell_effects} =
       state.shell.on_buffer_died(state.shell_state, state.workspace, pid)
 
-    {%{state | shell_state: shell_state, workspace: workspace}, []}
+    {%{state | shell_state: shell_state, workspace: workspace}, shell_effects}
   end
 
   @doc """
@@ -855,7 +855,7 @@ defmodule MingaEditor.State do
     state = put_in(state.workspace.buffers, new_bs)
 
     # Dispatch to the active shell for presentation logic
-    {shell_state, workspace} =
+    {shell_state, workspace, shell_effects} =
       state.shell.on_buffer_added(
         state.shell_state,
         prev_workspace,
@@ -867,7 +867,7 @@ defmodule MingaEditor.State do
     state = %{state | shell_state: shell_state, workspace: workspace, buffer_add_context: :open}
 
     effects = if already_pooled, do: [], else: [{:monitor, pid}]
-    {state, effects}
+    {state, effects ++ shell_effects}
   end
 
   @doc """
@@ -898,10 +898,11 @@ defmodule MingaEditor.State do
         %{state | buffer_add_context: :open}
 
       :open ->
-        {shell_state, workspace} =
+        {shell_state, workspace, shell_effects} =
           state.shell.on_buffer_switched(state.shell_state, state.workspace)
 
-        %{state | shell_state: shell_state, workspace: workspace}
+        state = %{state | shell_state: shell_state, workspace: workspace}
+        apply_buffer_effects(state, shell_effects)
     end
   end
 

@@ -64,7 +64,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
     test "background :status_changed event sets the owning tab's badge without touching the active rendering cache",
          %{shell_state: ss, session_b: session_b} do
-      {ss2, ws2} =
+      {ss2, ws2, effects} =
         Traditional.on_agent_event(ss, workspace(), session_b, {:status_changed, :thinking})
 
       # Background tab's badge updates...
@@ -77,13 +77,14 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       # Workspace is also untouched: background events must not nudge the
       # active tab's editing surface.
       assert ws2 == workspace()
+      assert effects == []
     end
 
     test "background :status_changed -> :idle raises attention on the owning tab", %{
       shell_state: ss,
       session_b: session_b
     } do
-      {ss2, _ws} =
+      {ss2, _ws, _effects} =
         Traditional.on_agent_event(ss, workspace(), session_b, {:status_changed, :idle})
 
       assert tab(ss2.tab_bar, 2).attention == true
@@ -96,7 +97,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
     } do
       approval = %{tool_call_id: "x", name: "shell", args: %{}}
 
-      {ss2, _ws} =
+      {ss2, _ws, _effects} =
         Traditional.on_agent_event(ss, workspace(), session_b, {:approval_pending, approval})
 
       assert tab(ss2.tab_bar, 2).attention == true
@@ -107,7 +108,9 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       shell_state: ss,
       session_b: session_b
     } do
-      {ss2, _ws} = Traditional.on_agent_event(ss, workspace(), session_b, {:error, "boom"})
+      {ss2, _ws, _effects} =
+        Traditional.on_agent_event(ss, workspace(), session_b, {:error, "boom"})
+
       assert tab(ss2.tab_bar, 2).attention == true
       assert tab(ss2.tab_bar, 1).attention == false
     end
@@ -119,16 +122,22 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       # Streaming text from a background session must not reach this callback's
       # mutation path — the delta is purely a no-op so the active tab's UI
       # never re-renders for unrelated streaming.
-      {ss2, ws2} = Traditional.on_agent_event(ss, workspace(), session_b, {:text_delta, "hello"})
+      {ss2, ws2, effects} =
+        Traditional.on_agent_event(ss, workspace(), session_b, {:text_delta, "hello"})
+
       assert ss2 == ss
       assert ws2 == workspace()
+      assert effects == []
     end
 
     test "events from a session that no longer maps to any tab are silently dropped", %{
       shell_state: ss
     } do
       ghost = spawn(fn -> :ok end)
-      {ss2, _ws} = Traditional.on_agent_event(ss, workspace(), ghost, {:status_changed, :error})
+
+      {ss2, _ws, _effects} =
+        Traditional.on_agent_event(ss, workspace(), ghost, {:status_changed, :error})
+
       assert ss2.tab_bar == ss.tab_bar
     end
   end
@@ -153,7 +162,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
     } do
       # Tab.agent_status uses :thinking; Card.status uses :working — the
       # Board callback applies the mapping rather than stamping the raw atom.
-      {board2, _ws} =
+      {board2, _ws, _effects} =
         Board.on_agent_event(board, workspace(), session_b, {:status_changed, :thinking})
 
       [card_b] = Enum.filter(Map.values(board2.cards), &(&1.session == session_b))
@@ -168,7 +177,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       board: board,
       session_b: session_b
     } do
-      {board2, _ws} =
+      {board2, _ws, _effects} =
         Board.on_agent_event(board, workspace(), session_b, {:approval_pending, %{name: "shell"}})
 
       [card_b] = Enum.filter(Map.values(board2.cards), &(&1.session == session_b))
@@ -179,14 +188,19 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       board: board,
       session_b: session_b
     } do
-      {board2, _ws} = Board.on_agent_event(board, workspace(), session_b, {:error, "boom"})
+      {board2, _ws, _effects} =
+        Board.on_agent_event(board, workspace(), session_b, {:error, "boom"})
+
       [card_b] = Enum.filter(Map.values(board2.cards), &(&1.session == session_b))
       assert card_b.status == :errored
     end
 
     test "events for a session not attached to any card are silently dropped", %{board: board} do
       ghost = spawn(fn -> :ok end)
-      {board2, _ws} = Board.on_agent_event(board, workspace(), ghost, {:approval_pending, %{}})
+
+      {board2, _ws, _effects} =
+        Board.on_agent_event(board, workspace(), ghost, {:approval_pending, %{}})
+
       assert board2 == board
     end
   end

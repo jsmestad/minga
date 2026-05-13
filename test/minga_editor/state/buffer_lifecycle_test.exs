@@ -285,6 +285,26 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       assert Content.buffer?(window.content)
     end
 
+    test "opening a file from an agent tab returns :stop_spinner effect" do
+      {state, _agent_buf} = state_with_agent_tab()
+      file_buf = start_buffer("file content")
+
+      {_new_state, effects} = EditorState.add_buffer_pure(state, file_buf, context: :open)
+
+      assert :stop_spinner in effects
+      assert {:monitor, file_buf} in effects
+    end
+
+    test "opening a file from a file tab does not return :stop_spinner effect" do
+      state = state_with_file_tab()
+      file_buf = start_buffer("new file")
+
+      {_new_state, effects} = EditorState.add_buffer_pure(state, file_buf, context: :open)
+
+      refute :stop_spinner in effects
+      assert {:monitor, file_buf} in effects
+    end
+
     test "adds duplicate buffer (switches to existing tab)" do
       state = state_with_file_tab()
       buf = state.workspace.buffers.active
