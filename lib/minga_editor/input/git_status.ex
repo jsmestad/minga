@@ -18,6 +18,8 @@ defmodule MingaEditor.Input.GitStatus do
   alias MingaEditor.Input
   alias MingaEditor.Input.GitStatus.TuiState
   alias Minga.Keymap
+  alias MingaEditor.PromptUI
+  alias MingaEditor.UI.Prompt.GitCommit, as: CommitPrompt
   alias MingaEditor.Workspace.State, as: WorkspaceState
 
   @impl true
@@ -240,10 +242,7 @@ defmodule MingaEditor.Input.GitStatus do
   end
 
   defp execute_command(state, :git_status_start_commit) do
-    EditorState.set_status(
-      state,
-      "Commit message input (use :git-commit <message> in command mode)"
-    )
+    PromptUI.open(state, CommitPrompt)
   end
 
   defp execute_command(state, :git_status_close) do
