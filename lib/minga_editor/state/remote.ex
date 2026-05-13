@@ -1,5 +1,5 @@
 defmodule MingaEditor.State.Remote do
-  @moduledoc "State for remote agent sessions and read-only remote file buffers."
+  @moduledoc "State for remote agent sessions and remote file buffers."
 
   @typedoc "Remote session metadata is normally `MingaAgent.SessionMetadata.t()`. The map fallback keeps compatibility with older remote nodes that may return decoded persisted metadata before both nodes share the exact struct module version."
   @type session_metadata :: MingaAgent.SessionMetadata.t() | map()
@@ -53,5 +53,13 @@ defmodule MingaEditor.State.Remote do
   def buffer(%__MODULE__{} = remote, server_name, path)
       when is_binary(server_name) and is_binary(path) do
     Map.get(remote.buffers, {server_name, path})
+  end
+
+  @doc "Returns all tracked remote buffers for `path`, across servers."
+  @spec buffers_for_path(t(), String.t()) :: [{String.t(), pid()}]
+  def buffers_for_path(%__MODULE__{} = remote, path) when is_binary(path) do
+    remote.buffers
+    |> Enum.filter(fn {{_server_name, remote_path}, _buffer} -> remote_path == path end)
+    |> Enum.map(fn {{server_name, _remote_path}, buffer} -> {server_name, buffer} end)
   end
 end

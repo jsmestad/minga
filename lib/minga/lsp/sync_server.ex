@@ -142,8 +142,12 @@ defmodule Minga.LSP.SyncServer do
         {:minga_event, :buffer_changed, %Events.BufferChangedEvent{buffer: buf, delta: delta}},
         state
       ) do
-    state = accumulate_delta(state, buf, delta)
-    {:noreply, schedule_did_change(state, buf)}
+    if clients_for_buffer(buf) == [] do
+      {:noreply, state}
+    else
+      state = accumulate_delta(state, buf, delta)
+      {:noreply, schedule_did_change(state, buf)}
+    end
   end
 
   def handle_info(
@@ -207,6 +211,15 @@ defmodule Minga.LSP.SyncServer do
   defp resync_buffer(state, _buffer_pid), do: state
 
   defp do_buffer_open(state, buffer_pid) do
+    if remote_buffer?(buffer_pid) do
+      state
+    else
+      open_local_buffer(state, buffer_pid)
+    end
+  end
+
+  @spec open_local_buffer(state(), pid()) :: state()
+  defp open_local_buffer(state, buffer_pid) do
     filetype = Buffer.filetype(buffer_pid)
     file_path = Buffer.file_path(buffer_pid)
 
@@ -251,6 +264,16 @@ defmodule Minga.LSP.SyncServer do
     _ -> state
   catch
     :exit, _ -> state
+  end
+
+  @spec remote_buffer?(pid()) :: boolean()
+  defp remote_buffer?(buffer_pid) do
+    case Buffer.storage(buffer_pid) do
+      {:remote, _node, _path} -> true
+      _ -> false
+    end
+  catch
+    :exit, _ -> false
   end
 
   @spec do_buffer_save(pid()) :: :ok

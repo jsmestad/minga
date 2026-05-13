@@ -137,6 +137,26 @@ defmodule Minga.LSP.SyncServerTest do
       assert [^delta] = state.delta_accumulators[buf]
     end
 
+    test "ignores changes for remote buffers without LSP clients" do
+      path = "/tmp/remote-no-lsp.ex"
+      buf = start_supervised!({BufferServer, file_path: path, storage: {:remote, node(), path}})
+      delta = Minga.Buffer.EditDelta.insertion(0, {0, 0}, "x", {0, 1})
+
+      Events.broadcast(
+        :buffer_changed,
+        %Events.BufferChangedEvent{
+          buffer: buf,
+          source: Minga.Buffer.EditSource.user(),
+          delta: delta
+        }
+      )
+
+      :sys.get_state(SyncServer)
+
+      state = :sys.get_state(SyncServer)
+      refute Map.has_key?(state.delta_accumulators, buf)
+    end
+
     test "nil delta marks accumulator as full_sync" do
       buf =
         start_supervised!({BufferServer, content: "hello", file_path: "/tmp/fullsync.ex"})
