@@ -70,6 +70,37 @@ defmodule MingaEditor.State.ShellCallbacksTest do
     {state, agent_buf}
   end
 
+  @spec state_with_agent_tab() :: {EditorState.t(), pid()}
+  defp state_with_agent_tab do
+    {:ok, agent_buf} = BufferServer.start_link(content: "")
+    win_id = 1
+    agent_window = Window.new_agent_chat(win_id, agent_buf, 24, 80)
+
+    state = %EditorState{
+      port_manager: self(),
+      workspace: %WorkspaceState{
+        viewport: Viewport.new(24, 80),
+        editing: VimState.new(),
+        keymap_scope: :agent,
+        buffers: %Buffers{active: agent_buf, list: [agent_buf], active_index: 0},
+        windows: %Windows{
+          tree: WindowTree.new(win_id),
+          map: %{win_id => agent_window},
+          active: win_id,
+          next_id: win_id + 1
+        }
+      }
+    }
+
+    agent_tab = Tab.new_agent(1, "Agent")
+    tb = TabBar.new(agent_tab)
+    context = EditorState.snapshot_tab_context(state)
+    tb = TabBar.update_context(tb, 1, context)
+    state = EditorState.set_tab_bar(state, tb)
+
+    {state, agent_buf}
+  end
+
   # ── on_buffer_switched via switch_buffer/2 ───────────────────────────────────
 
   describe "switch_buffer/2 dispatches on_buffer_switched" do
@@ -83,6 +114,27 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       assert new_state.workspace.buffers.active == buf2
 
       active_tab = TabBar.active(new_state.shell_state.tab_bar)
+      assert active_tab.context.buffers.active == buf2
+      assert active_tab.context.buffers.active == new_state.workspace.buffers.active
+    end
+
+    test "Traditional: agent tab context.buffers.active tracks workspace after switch" do
+      {state, agent_buf} = state_with_agent_tab()
+      buf2 = start_buffer("second agent buffer")
+
+      # Manually add buf2 to the buffer list without triggering tab creation
+      # (EditorState.add_buffer from an agent tab would create a new file tab)
+      state =
+        EditorState.update_workspace(state, fn workspace ->
+          %{workspace | buffers: %{workspace.buffers | list: [agent_buf, buf2]}}
+        end)
+
+      new_state = EditorState.switch_buffer(state, 1)
+
+      assert new_state.workspace.buffers.active == buf2
+
+      active_tab = TabBar.active(new_state.shell_state.tab_bar)
+      assert active_tab.kind == :agent
       assert active_tab.context.buffers.active == buf2
       assert active_tab.context.buffers.active == new_state.workspace.buffers.active
     end
