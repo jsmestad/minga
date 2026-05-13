@@ -105,6 +105,28 @@ defmodule MingaEditor.Commands.CmdCopyCutTest do
       assert register_entry(new_state) == {"aaa\nbbb\n", :linewise}
       assert BufferServer.content(buf) == "aaa\nbbb\nccc"
     end
+
+    test "copies charwise selection with reversed anchor (cursor before anchor)" do
+      buf = start_buffer("hello world")
+      BufferServer.move_to(buf, {0, 0})
+      state = build_state(buf) |> with_visual_mode(buf, {0, 4}, :char)
+
+      new_state = Editing.execute(state, :cmd_copy)
+
+      assert register_entry(new_state) == {"hello", :charwise}
+      assert BufferServer.content(buf) == "hello world"
+    end
+
+    test "copies linewise selection with cursor above anchor" do
+      buf = start_buffer("aaa\nbbb\nccc")
+      BufferServer.move_to(buf, {0, 0})
+      state = build_state(buf) |> with_visual_mode(buf, {2, 0}, :line)
+
+      new_state = Editing.execute(state, :cmd_copy)
+
+      assert register_entry(new_state) == {"aaa\nbbb\nccc\n", :linewise}
+      assert BufferServer.content(buf) == "aaa\nbbb\nccc"
+    end
   end
 
   describe "cmd_cut in normal mode" do
@@ -154,6 +176,17 @@ defmodule MingaEditor.Commands.CmdCopyCutTest do
 
       assert register_entry(new_state) == {"aaa\nbbb\n", :linewise}
       assert BufferServer.content(buf) == "ccc"
+    end
+
+    test "deletes charwise selection with reversed anchor" do
+      buf = start_buffer("hello world")
+      BufferServer.move_to(buf, {0, 0})
+      state = build_state(buf) |> with_visual_mode(buf, {0, 4}, :char)
+
+      new_state = Editing.execute(state, :cmd_cut)
+
+      assert register_entry(new_state) == {"hello", :charwise}
+      assert BufferServer.content(buf) == " world"
     end
   end
 

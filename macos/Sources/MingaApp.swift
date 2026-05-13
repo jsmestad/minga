@@ -51,6 +51,7 @@ struct MingaMenuCommands: Commands {
     let appState: AppState
 
     private var encoder: InputEncoder? { appState.encoder }
+    private var connected: Bool { encoder != nil }
 
     var body: some Commands {
         // Replace the default text editing commands (Cmd+C/V/X/Z/A) with
@@ -58,24 +59,31 @@ struct MingaMenuCommands: Commands {
         CommandGroup(replacing: .textEditing) {
             Button("Undo") { encoder?.sendKeyPress(codepoint: 0x75, modifiers: 0) } // 'u' = vim undo
                 .keyboardShortcut("z", modifiers: .command)
+                .disabled(!connected)
             Button("Redo") { encoder?.sendKeyPress(codepoint: 0x72, modifiers: 0x02) } // Ctrl+R = vim redo
                 .keyboardShortcut("z", modifiers: [.command, .shift])
+                .disabled(!connected)
 
             Divider()
 
             Button("Cut") { encoder?.sendCmdCut() }
                 .keyboardShortcut("x", modifiers: .command)
+                .disabled(!connected)
             Button("Copy") { encoder?.sendCmdCopy() }
                 .keyboardShortcut("c", modifiers: .command)
+                .disabled(!connected)
             Button("Paste") { pasteFromClipboard() }
                 .keyboardShortcut("v", modifiers: .command)
+                .disabled(!connected)
             Button("Select All") { encoder?.sendExecuteCommand(name: "select_all") }
                 .keyboardShortcut("a", modifiers: .command)
+                .disabled(!connected)
 
             Divider()
 
             Button("Find…") { encoder?.sendKeyPress(codepoint: 0x2F, modifiers: 0) }
                 .keyboardShortcut("f", modifiers: .command)
+                .disabled(!connected)
         }
 
         // File menu: New, Open, Save, Close Tab.
@@ -84,27 +92,32 @@ struct MingaMenuCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Buffer") { encoder?.sendExecuteCommand(name: "new_buffer") }
                 .keyboardShortcut("n", modifiers: .command)
+                .disabled(!connected)
         }
 
         CommandGroup(after: .newItem) {
             Button("Open…") { encoder?.sendExecuteCommand(name: "find_file") }
                 .keyboardShortcut("o", modifiers: .command)
+                .disabled(!connected)
 
             Divider()
 
             Button("Save") { encoder?.sendExecuteCommand(name: "save") }
                 .keyboardShortcut("s", modifiers: .command)
+                .disabled(!connected)
 
             Divider()
 
             Button("Close Tab") { encoder?.sendExecuteCommand(name: "quit") }
                 .keyboardShortcut("w", modifiers: .command)
+                .disabled(!connected)
         }
 
         // View menu
         CommandMenu("View") {
             Button("Toggle File Tree") { encoder?.sendTogglePanel(panel: 0) }
                 .keyboardShortcut("b", modifiers: .command)
+                .disabled(!connected)
         }
     }
 
