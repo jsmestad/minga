@@ -52,7 +52,8 @@ defmodule MingaEditor.Renderer.Line do
         line_byte_offset \\ 0,
         precomputed_segments \\ nil
       ) do
-    pairs = grapheme_pairs(line_text)
+    raw_pairs = grapheme_pairs(line_text)
+    pairs = maybe_substitute_invisible(raw_pairs, ctx)
     line_display_len = display_width_of_pairs(pairs)
 
     visible_pairs =
@@ -70,12 +71,12 @@ defmodule MingaEditor.Renderer.Line do
 
     has_conceals = Decorations.has_conceal_ranges?(ctx.decorations)
 
-    # When conceals are active, apply them to visible_pairs for selection paths.
-    # Without this, selection rendering would show raw text (including concealed
-    # characters) while selection coordinates are conceal-adjusted.
+    # Conceals first: invisible substitution must see conceal-adjusted positions
     concealed_pairs =
       if has_conceals do
-        apply_conceals_to_pairs(pairs, ctx.decorations, buf_line)
+        raw_pairs
+        |> apply_conceals_to_pairs(ctx.decorations, buf_line)
+        |> maybe_substitute_invisible(ctx)
       else
         nil
       end
@@ -105,13 +106,10 @@ defmodule MingaEditor.Renderer.Line do
           precomputed_segments
         )
 
-      nil when line_highlights != [] or has_conceals ->
-        # No syntax highlighting but has decorations or conceals:
-        # render through the styled-segment path
+      nil when line_highlights != [] or has_conceals or ctx.show_invisible ->
         render_decorated_plain_line(line_text, screen_row, buf_line, ctx, line_highlights)
 
       nil ->
-        # Plain text, no decorations, no syntax highlighting, no conceals
         visible_text = join_pairs(visible_pairs)
         [DisplayList.draw(screen_row, ctx.gutter_w, visible_text)]
 
@@ -420,7 +418,63 @@ defmodule MingaEditor.Renderer.Line do
     segments = Decorations.merge_highlights(segments, line_highlights, buf_line)
     segments = Composition.apply_conceals(segments, ctx.decorations, buf_line)
     segments = Composition.inject_inline_virtual_text(segments, ctx.decorations, buf_line)
+
+    segments =
+      if ctx.show_invisible,
+        do: Composition.apply_invisible_chars(segments, ctx.tab_width, ctx.whitespace_face),
+        else: segments
+
     render_segments_with_scroll(segments, screen_row, ctx)
+  end
+
+  # ── Invisible character substitution ──────────────────────────────────────────
+
+  @spec maybe_substitute_invisible([grapheme_pair()], Context.t()) :: [grapheme_pair()]
+  defp maybe_substitute_invisible(pairs, %{show_invisible: true, tab_width: tw}),
+    do: substitute_invisible_pairs(pairs, tw)
+
+  defp maybe_substitute_invisible(pairs, _ctx), do: pairs
+
+  @doc false
+  @spec substitute_invisible_pairs([grapheme_pair()], pos_integer()) :: [grapheme_pair()]
+  def substitute_invisible_pairs(pairs, tab_width) do
+    trailing_idx = trailing_ws_start_index(pairs)
+
+    {result, _col, _idx} =
+      Enum.reduce(pairs, {[], 0, 0}, fn {g, w}, {acc, col, idx} ->
+        case g do
+          "\t" ->
+            fill = tab_fill(col, tab_width)
+            expanded = [{"→", 1} | List.duplicate({" ", 1}, fill - 1)]
+            {Enum.reverse(expanded) ++ acc, col + fill, idx + 1}
+
+          " " when idx >= trailing_idx ->
+            {[{"·", 1} | acc], col + 1, idx + 1}
+
+          _ ->
+            {[{g, w} | acc], col + w, idx + 1}
+        end
+      end)
+
+    Enum.reverse(result)
+  end
+
+  @spec tab_fill(non_neg_integer(), pos_integer()) :: pos_integer()
+  defp tab_fill(col, tab_width), do: tab_width - rem(col, tab_width)
+
+  # Returns the grapheme index where trailing whitespace begins.
+  @spec trailing_ws_start_index([grapheme_pair()]) :: non_neg_integer()
+  defp trailing_ws_start_index(pairs) do
+    {last_non_ws, _} =
+      Enum.reduce(pairs, {0, 0}, fn {g, _w}, {last, idx} ->
+        case g do
+          " " -> {last, idx + 1}
+          "\t" -> {last, idx + 1}
+          _ -> {idx + 1, idx + 1}
+        end
+      end)
+
+    last_non_ws
   end
 
   # ── Conceal application to grapheme pairs (for selection paths) ──────────────
@@ -544,6 +598,11 @@ defmodule MingaEditor.Renderer.Line do
     segments = Decorations.merge_highlights(segments, line_highlights, buf_line)
     segments = Composition.apply_conceals(segments, ctx.decorations, buf_line)
     segments = Composition.inject_inline_virtual_text(segments, ctx.decorations, buf_line)
+
+    segments =
+      if ctx.show_invisible,
+        do: Composition.apply_invisible_chars(segments, ctx.tab_width, ctx.whitespace_face),
+        else: segments
 
     render_segments_with_scroll(segments, screen_row, ctx)
   end

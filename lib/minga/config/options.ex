@@ -48,6 +48,7 @@ defmodule Minga.Config.Options do
           | :theme
           | :indent_with
           | :indent_guides
+          | :show_invisible
           | :trim_trailing_whitespace
           | :insert_final_newline
           | :format_on_save
@@ -205,6 +206,8 @@ defmodule Minga.Config.Options do
     {:indent_with, {:enum, [:spaces, :tabs]}, :spaces,
      "Whether indentation inserts spaces or tab characters."},
     {:indent_guides, :boolean, true, "Whether indentation guide decorations are shown."},
+    {:show_invisible, :boolean, false,
+     "Whether invisible characters (tabs, trailing whitespace) are shown with visible markers."},
     {:trim_trailing_whitespace, :boolean, false,
      "Whether trailing whitespace is removed before saving."},
     {:insert_final_newline, :boolean, false, "Whether files are saved with a final newline."},

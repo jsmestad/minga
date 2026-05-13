@@ -182,6 +182,7 @@ defmodule Minga.Keymap.Defaults do
     # ── Toggle ────────────────────────────────────────────────────────────────
     {[{?t, @none}, {?l, @none}], :cycle_line_numbers, "Toggle line numbers"},
     {[{?t, @none}, {?p, @none}], :toggle_bottom_panel, "Toggle bottom panel"},
+    {[{?t, @none}, {?i, @none}], :toggle_invisible, "Toggle invisible chars"},
     {[{?t, @none}, {?w, @none}], :toggle_wrap, "Toggle word wrap"},
     {[{?t, @none}, {?b, @none}], :toggle_board, "Toggle The Board"}
   ]

@@ -2074,6 +2074,7 @@ defmodule Minga.Buffer.Server do
     :scroll_margin,
     :autopair,
     :clipboard,
+    :show_invisible,
     :trim_trailing_whitespace,
     :insert_final_newline,
     :format_on_save,

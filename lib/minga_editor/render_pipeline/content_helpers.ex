@@ -134,6 +134,9 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
     is_gui = Map.get(params, :is_gui, false)
 
+    {show_invisible, tab_width, whitespace_face} =
+      invisible_char_settings(window.buffer, state.theme)
+
     ctx = %Context{
       viewport: viewport,
       visual_selection: visual_selection,
@@ -152,7 +155,10 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       diagnostic_signs: diagnostic_signs_for_path(Map.get(params, :file_path)),
       git_signs: git_signs_for_window(window),
       gutter_colors: state.theme.gutter,
-      git_colors: state.theme.git
+      git_colors: state.theme.git,
+      show_invisible: show_invisible,
+      tab_width: tab_width,
+      whitespace_face: whitespace_face
     }
 
     {ctx, state}
@@ -1056,11 +1062,32 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       ctx.content_w,
       is_active,
       ctx.confirm_match,
-      ctx.decorations.version
+      ctx.decorations.version,
+      ctx.show_invisible,
+      ctx.tab_width
     }
   end
 
   # ── Private helpers ────────────────────────────────────────────────────────
+
+  @spec invisible_char_settings(pid(), MingaEditor.UI.Theme.t()) ::
+          {boolean(), pos_integer(), Face.t() | nil}
+  defp invisible_char_settings(buf, theme) when is_pid(buf) do
+    show = Buffer.get_option(buf, :show_invisible)
+    tab_w = Buffer.get_option(buf, :tab_width)
+
+    face =
+      if show do
+        fg = theme.editor.whitespace_fg || theme.gutter.fg
+        Face.new(fg: fg)
+      else
+        nil
+      end
+
+    {show, tab_w, face}
+  catch
+    :exit, _ -> {false, 2, nil}
+  end
 
   @spec wrap_option(pid(), atom()) :: boolean()
   defp wrap_option(buf, name) do

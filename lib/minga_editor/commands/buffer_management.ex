@@ -188,6 +188,14 @@ defmodule MingaEditor.Commands.BufferManagement do
     EditorState.set_status(state, "wrap #{label}")
   end
 
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :toggle_invisible)
+      when is_pid(buf) do
+    current = Buffer.get_option(buf, :show_invisible)
+    Buffer.set_option(buf, :show_invisible, !current)
+    label = if current, do: "off", else: "on"
+    EditorState.set_status(state, "invisible #{label}")
+  end
+
   # ── Ex commands ───────────────────────────────────────────────────────────
 
   def execute(state, {:execute_ex_command, {:save, []}}) do
@@ -1821,6 +1829,13 @@ defmodule MingaEditor.Commands.BufferManagement do
         requires_buffer: true,
         execute: fn state -> execute(state, :toggle_wrap) end,
         option_toggle: :wrap
+      },
+      %Minga.Command{
+        name: :toggle_invisible,
+        description: "Toggle invisible characters",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :toggle_invisible) end,
+        option_toggle: :show_invisible
       }
     ]
 
