@@ -56,6 +56,9 @@ The BEAM-side encoder must use this envelope for all new opcodes (0x90+). Curren
 | 0x90 | clipboard_write | Write text to the system clipboard |
 | 0x91 | gui_indent_guides | Indent guide positions per window |
 | 0x92 | gui_line_spacing | Line spacing multiplier for the renderer |
+
+### 0x70 — gui_file_tree
+
 File tree sidebar entries for the native sidebar view.
 
 ```
@@ -101,7 +104,7 @@ Flags bits:
   bits 4-6: agent_status (0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan)
 
 group_id: workspace group this tab belongs to. 0 = manual/ungrouped workspace.
-Non-zero values match workspace IDs from gui_workspace_bar (0x86). The frontend
+Non-zero values match workspace IDs from gui_agent_groups (0x86). The frontend
 renders group separators at group_id transitions in the tab strip.
 ```
 
@@ -677,11 +680,30 @@ When no splits are active, the BEAM sends counts of 0 for both separator types.
 
 ### 0x85 — gui_git_status
 
-Git status panel data. See git status panel section.
+Git status panel data for the native sidebar, plus remote operation feedback used by the sidebar and status bar.
 
-### 0x86 — gui_workspace_bar
+```
+opcode(1) + repo_state(1) + syncing(1) + ahead(2) + behind(2) + branch_len(2) + branch(branch_len) + entry_count(2) + entries... + toast_present(1) + toast?
 
-Workspace indicator and dropdown data for progressive tab grouping. Sent alongside gui_tab_bar when workspaces exist.
+Per entry:
+  path_hash(4) + section(1) + status(1) + path_len(2) + path(path_len)
+
+Toast when toast_present == 1:
+  level(1) + action(1) + msg_len(2) + msg(msg_len)
+```
+
+`repo_state`: 0 = normal, 1 = not_a_repo, 2 = loading.
+`syncing`: 1 while a git remote operation is in flight, otherwise 0.
+`section`: 0 = staged, 1 = changed, 2 = untracked, 3 = conflicted.
+`status`: 0 = unknown, 1 = modified, 2 = added, 3 = deleted, 4 = renamed, 5 = copied, 6 = untracked, 7 = conflict.
+`level`: 0 = success, 1 = error.
+`action`: 0 = none, 1 = pull_and_retry.
+
+When the git status panel is closed, the BEAM sends `repo_state = not_a_repo` with no entries as the hide signal. The frontend should still copy `syncing` and `toast` so remote operation feedback remains accurate while the panel is hidden.
+
+### 0x86 — gui_agent_groups
+
+Workspace indicator and dropdown data for progressive tab grouping. Sent alongside gui_tab_bar when agent workspaces exist.
 
 ```
 opcode(1) + active_workspace_id(2) + workspace_count(1) + workspaces...
@@ -740,14 +762,36 @@ opcode(1) + action_type(1) + payload...
 | 0x1C | git_unstage_all | (empty) | Unstage all |
 | 0x1D | git_commit | msg_len(2) + msg(msg_len) | Commit with message |
 | 0x1E | git_open_file | path_len(2) + path(path_len) | Open file in editor |
+| 0x1F | agent_group_rename | id(2) + name_len(2) + name(name_len) | Rename an agent workspace group |
+| 0x20 | agent_group_set_icon | id(2) + icon_len(1) + icon(icon_len) | Change an agent workspace icon |
+| 0x21 | agent_group_close | id(2) | Close an agent workspace group |
+| 0x22 | space_leader_chord | codepoint(4) + modifiers(1) | Enter leader mode from a clean Space chord |
+| 0x23 | space_leader_retract | codepoint(4) + modifiers(1) | Retract a literal Space and enter leader mode |
+| 0x24 | find_pasteboard_search | direction(1) + text_len(2) + text(text_len) | Search from the macOS find pasteboard |
+| 0x25 | board_select_card | card_id(4) | Select a Board card |
+| 0x26 | board_close_card | card_id(4) | Close a Board card |
+| 0x27 | board_reorder | card_id(4) + new_index(2) | Reorder a Board card |
+| 0x28 | board_dispatch_agent | model_len(2) + model + task_len(2) + task | Dispatch a Board agent task |
+| 0x29 | agent_approve | (empty) | Approve an agent change request |
+| 0x2A | agent_request_changes | (empty) | Request agent changes |
+| 0x2B | agent_dismiss | (empty) | Dismiss agent review UI |
+| 0x2C | change_summary_click | index(4) | Select a change summary entry |
+| 0x2D | file_tree_edit_confirm | text_len(2) + text(text_len) | Confirm file tree inline edit |
+| 0x2E | file_tree_edit_cancel | (empty) | Cancel file tree inline edit |
 | 0x2F | scroll_to_line | line(4) | Scroll viewport to target line (from scroll indicator click/drag) |
+| 0x30 | file_tree_delete | index(2) | Delete a file tree entry |
+| 0x31 | file_tree_rename | index(2) | Rename a file tree entry |
+| 0x32 | file_tree_duplicate | index(2) | Duplicate a file tree entry |
+| 0x33 | file_tree_move | source_index(2) + target_dir_index(2) | Move a file tree entry |
+| 0x34 | system_will_sleep | (empty) | System is about to sleep |
+| 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
+| 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |
+| 0x37 | cmd_cut | (empty) | Execute mode-aware cut from the macOS menu |
 | 0x38 | git_push | (empty) | Push the current branch |
 | 0x39 | git_pull | (empty) | Pull from the upstream branch |
 | 0x3A | git_fetch | (empty) | Fetch remote refs |
 | 0x3B | git_commit_amend | msg_len(2) + msg(msg_len) | Amend the previous commit message |
 | 0x3C | git_pull_and_retry | (empty) | Pull, then retry the failed push |
-| 0x34 | system_will_sleep | (empty) | System is about to sleep |
-| 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 
 ## Theme Color Slots
 

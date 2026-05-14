@@ -155,11 +155,26 @@ struct CommandDispatcherRoutingTests {
                                            branchName: "main", entries: rawEntries, toast: nil))
         #expect(gui.gitStatusState.visible == true)
 
-        // Then send the "panel closed" sentinel: notARepo (1) + empty entries. Syncing still updates because the status bar reads this state even when the panel is hidden.
+        // Then send the "panel closed" sentinel: notARepo (1) + empty entries. Syncing and toast still update because remote operations can finish while the panel is hidden.
         dispatcher.dispatch(.guiGitStatus(repoState: 1, syncing: true, ahead: 0, behind: 0,
-                                           branchName: "", entries: [], toast: nil))
+                                           branchName: "", entries: [], toast: (message: "Push failed", level: 1, action: 1)))
         #expect(gui.gitStatusState.visible == false)
         #expect(gui.gitStatusState.syncing == true)
+        #expect(gui.gitStatusState.toastMessage == "Push failed")
+        #expect(gui.gitStatusState.toastAction == .pullAndRetry)
+    }
+
+    @Test("guiGitStatus keeps unknown git status entries")
+    @MainActor func guiGitStatusKeepsUnknownStatus() {
+        let (dispatcher, gui) = makeDispatcher()
+        let rawEntries = [
+            Wire.GitStatusEntry(pathHash: 12345, section: 1, status: 0, path: "lib/unknown.ex")
+        ]
+        dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
+                                           branchName: "main", entries: rawEntries, toast: nil))
+
+        #expect(gui.gitStatusState.changedEntries.count == 1)
+        #expect(gui.gitStatusState.changedEntries[0].status == .unknown)
     }
 
     @Test("guiGitStatus shows panel for normal repo with clean working tree")
@@ -171,6 +186,17 @@ struct CommandDispatcherRoutingTests {
                                            branchName: "main", entries: [], toast: nil))
         #expect(gui.gitStatusState.visible == true)
         #expect(gui.gitStatusState.branchName == "main")
+    }
+
+    @Test("guiGitStatus preserves toast message when metadata is unknown")
+    @MainActor func guiGitStatusToastFallback() {
+        let (dispatcher, gui) = makeDispatcher()
+        dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
+                                           branchName: "main", entries: [], toast: (message: "Remote failed", level: 99, action: 99)))
+
+        #expect(gui.gitStatusState.toastMessage == "Remote failed")
+        #expect(gui.gitStatusState.toastLevel == .error)
+        #expect(gui.gitStatusState.toastAction == .none)
     }
 
     @Test("guiCompletion visible updates completionState")

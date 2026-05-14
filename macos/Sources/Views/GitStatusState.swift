@@ -5,6 +5,7 @@ import SwiftUI
 /// Git file status codes sent by the BEAM. Matches the values in
 /// `lib/minga/port/protocol/gui.ex` for the git status panel.
 enum GitFileStatus: UInt8, Sendable {
+    case unknown = 0
     case modified = 1
     case added = 2
     case deleted = 3
@@ -157,7 +158,17 @@ final class GitStatusState {
         self.changedEntries = changed
         self.untrackedEntries = untracked
         self.conflictedEntries = conflicted
+        applyToast(toast)
+    }
 
+    /// Hide the git status panel (BEAM toggled sidebar off or switched tab).
+    func hide(syncing: Bool = false, toast: (String, ToastLevel, ToastAction)? = nil) {
+        visible = false
+        self.syncing = syncing
+        applyToast(toast)
+    }
+
+    private func applyToast(_ toast: (String, ToastLevel, ToastAction)?) {
         if let (msg, level, action) = toast {
             self.toastMessage = msg
             self.toastLevel = level
@@ -165,11 +176,5 @@ final class GitStatusState {
         } else {
             self.toastMessage = nil
         }
-    }
-
-    /// Hide the git status panel (BEAM toggled sidebar off or switched tab).
-    func hide(syncing: Bool = false) {
-        visible = false
-        self.syncing = syncing
     }
 }

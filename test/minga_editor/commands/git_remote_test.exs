@@ -53,6 +53,20 @@ defmodule MingaEditor.Commands.GitRemoteTest do
     {msg_ref, fake_monitor, context}
   end
 
+  defp start_stub_repo(dir, entries) do
+    File.mkdir_p!(Path.join(dir, ".git"))
+    Minga.Git.Stub.set_root(dir, dir)
+    Minga.Git.Stub.set_status(dir, entries)
+    {:ok, repo} = Minga.Git.Repo.ensure_started(dir, dir)
+
+    on_exit(fn ->
+      if Process.alive?(repo), do: GenServer.stop(repo)
+      Minga.Git.Stub.clear(dir)
+    end)
+
+    repo
+  end
+
   # ── Command registration ────────────────────────────────────────────────
 
   describe "command registration" do
@@ -110,21 +124,46 @@ defmodule MingaEditor.Commands.GitRemoteTest do
       assert result.git_remote_op == nil
     end
 
-    test "suggests pull and retry only for rejected push errors" do
+    test "suggests pull and retry only for non-fast-forward push errors" do
+      reasons = [
+        "non-fast-forward rejected",
+        "fetch first",
+        "remote contains work that you do not have locally",
+        "tip of your current branch is behind its remote counterpart"
+      ]
+
+      for reason <- reasons do
+        ref = make_ref()
+        op = make_remote_op(ref, {"/tmp/repo", "Pushed", "Push failed"})
+        state = build_state(%{git_remote_op: op})
+
+        result = GitCommands.handle_remote_result(state, ref, {:error, reason})
+
+        assert %{
+                 message: message,
+                 level: :error,
+                 action: :pull_and_retry,
+                 dismiss_ref: dismiss_ref
+               } = result.shell_state.git_toast
+
+        assert message == "Push failed: #{reason}"
+        assert is_reference(dismiss_ref)
+      end
+    end
+
+    test "does not suggest pull and retry for generic push rejections" do
       ref = make_ref()
       op = make_remote_op(ref, {"/tmp/repo", "Pushed", "Push failed"})
       state = build_state(%{git_remote_op: op})
 
-      result = GitCommands.handle_remote_result(state, ref, {:error, "non-fast-forward rejected"})
+      result =
+        GitCommands.handle_remote_result(
+          state,
+          ref,
+          {:error, "rejected by protected branch hook"}
+        )
 
-      assert %{
-               message: "Push failed: non-fast-forward rejected",
-               level: :error,
-               action: :pull_and_retry,
-               dismiss_ref: dismiss_ref
-             } = result.shell_state.git_toast
-
-      assert is_reference(dismiss_ref)
+      assert %{action: nil} = result.shell_state.git_toast
     end
 
     test "does not suggest pull and retry for non-push errors" do
@@ -132,9 +171,24 @@ defmodule MingaEditor.Commands.GitRemoteTest do
       op = make_remote_op(ref, {"/tmp/repo", "Pulled", "Pull failed"})
       state = build_state(%{git_remote_op: op})
 
-      result = GitCommands.handle_remote_result(state, ref, {:error, "rejected by hook"})
+      result = GitCommands.handle_remote_result(state, ref, {:error, "fetch first"})
 
       assert %{action: nil} = result.shell_state.git_toast
+    end
+
+    @tag :tmp_dir
+    test "refreshes repo cache after error result", %{tmp_dir: dir} do
+      initial = [%Minga.Git.StatusEntry{path: "before.ex", status: :modified, staged: false}]
+      refreshed = [%Minga.Git.StatusEntry{path: "after.ex", status: :conflict, staged: false}]
+      repo = start_stub_repo(dir, initial)
+      ref = make_ref()
+      state = build_state(%{git_remote_op: make_remote_op(ref, {dir, "Pulled", "Pull failed"})})
+
+      Minga.Git.Stub.set_status(dir, refreshed)
+      _result = GitCommands.handle_remote_result(state, ref, {:error, "merge conflict"})
+      :sys.get_state(repo)
+
+      assert Minga.Git.repo_status(repo) == refreshed
     end
 
     test "ignores stale results with non-matching ref" do
@@ -180,19 +234,39 @@ defmodule MingaEditor.Commands.GitRemoteTest do
     end
   end
 
-  # ── handle_remote_task_down/2 ──────────────────────────────────────────
+  # ── handle_remote_task_down/3 ──────────────────────────────────────────
 
-  describe "handle_remote_task_down/2" do
+  describe "handle_remote_task_down/3" do
     test "clears git_remote_op when task monitor matches" do
       msg_ref = make_ref()
       task_monitor = make_ref()
       op = {msg_ref, task_monitor, {"/tmp/repo", "Pushed", "Push failed"}}
       state = build_state(%{git_remote_op: op, status_msg: "Pushing…"})
 
-      result = GitCommands.handle_remote_task_down(state, task_monitor)
+      result = GitCommands.handle_remote_task_down(state, task_monitor, :killed)
 
       assert result.git_remote_op == nil
-      assert result.shell_state.status_msg == "Git operation failed unexpectedly"
+      assert result.shell_state.status_msg == "Git operation failed unexpectedly: killed"
+
+      assert %{message: "Git operation failed unexpectedly: killed", level: :error, action: nil} =
+               result.shell_state.git_toast
+    end
+
+    @tag :tmp_dir
+    test "refreshes repo cache after task crash", %{tmp_dir: dir} do
+      initial = [%Minga.Git.StatusEntry{path: "before.ex", status: :modified, staged: false}]
+      refreshed = [%Minga.Git.StatusEntry{path: "after.ex", status: :conflict, staged: false}]
+      repo = start_stub_repo(dir, initial)
+      task_monitor = make_ref()
+
+      state =
+        build_state(%{git_remote_op: {make_ref(), task_monitor, {dir, "Pulled", "Pull failed"}}})
+
+      Minga.Git.Stub.set_status(dir, refreshed)
+      _result = GitCommands.handle_remote_task_down(state, task_monitor, :killed)
+      :sys.get_state(repo)
+
+      assert Minga.Git.repo_status(repo) == refreshed
     end
 
     test "returns :not_matched when monitor ref doesn't match" do
@@ -202,13 +276,14 @@ defmodule MingaEditor.Commands.GitRemoteTest do
       op = {msg_ref, task_monitor, {"/tmp/repo", "Pushed", "Push failed"}}
       state = build_state(%{git_remote_op: op})
 
-      assert GitCommands.handle_remote_task_down(state, unrelated_monitor) == :not_matched
+      assert GitCommands.handle_remote_task_down(state, unrelated_monitor, :killed) ==
+               :not_matched
     end
 
     test "returns :not_matched when no operation is in flight" do
       state = build_state(%{git_remote_op: nil})
 
-      assert GitCommands.handle_remote_task_down(state, make_ref()) == :not_matched
+      assert GitCommands.handle_remote_task_down(state, make_ref(), :killed) == :not_matched
     end
   end
 
@@ -264,7 +339,8 @@ defmodule MingaEditor.Commands.GitRemoteTest do
 
       state = get_state(editor)
       assert state.git_remote_op == nil
-      assert state.shell_state.status_msg == "Git operation failed unexpectedly"
+      assert state.shell_state.status_msg == "Git operation failed unexpectedly: killed"
+      assert %{level: :error, action: nil} = state.shell_state.git_toast
     end
 
     test "stale :DOWN after successful result is a no-op" do

@@ -50,13 +50,21 @@ defmodule Minga.Project.FileFind do
   """
   @spec detect_strategy(String.t()) :: strategy()
   def detect_strategy(root) do
-    cond do
-      fd_executable() != nil -> :fd
-      git_repo?(root) && executable_available?("git") -> :git
-      executable_available?("find") -> :find
-      true -> :none
-    end
+    detect_strategy(
+      root,
+      fd_executable(),
+      git_repo?(root),
+      executable_available?("git"),
+      executable_available?("find")
+    )
   end
+
+  defp detect_strategy(_root, fd, _git_repo?, _git_available?, _find_available?)
+       when is_binary(fd), do: :fd
+
+  defp detect_strategy(_root, nil, true, true, _find_available?), do: :git
+  defp detect_strategy(_root, nil, _git_repo?, _git_available?, true), do: :find
+  defp detect_strategy(_root, nil, _git_repo?, _git_available?, false), do: :none
 
   # ── Strategies ──────────────────────────────────────────────────────────────
 

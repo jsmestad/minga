@@ -739,8 +739,8 @@ defmodule MingaEditor do
 
   # Process died. Check buffer monitors and git remote tasks.
   # Agent session deaths are handled via :agent_session_stopped events from SessionManager.
-  def handle_info({:DOWN, ref, :process, pid, _reason}, state) do
-    case classify_down(state, ref, pid) do
+  def handle_info({:DOWN, ref, :process, pid, reason}, state) do
+    case classify_down(state, ref, pid, reason) do
       :buffer ->
         Minga.Log.info(:editor, "Buffer process #{inspect(pid)} died, removing from state")
         state = EditorState.remove_dead_buffer(state, pid)
@@ -804,13 +804,13 @@ defmodule MingaEditor do
 
   # ── :DOWN classifier ────────────────────────────────────────────────────────
 
-  @spec classify_down(EditorState.t(), reference(), pid()) ::
+  @spec classify_down(EditorState.t(), reference(), pid(), term()) ::
           :buffer | {:git_remote_task, EditorState.t()} | :unknown
-  defp classify_down(state, ref, pid) do
+  defp classify_down(state, ref, pid, reason) do
     if Map.has_key?(state.buffer_monitors, pid) do
       :buffer
     else
-      case Commands.Git.handle_remote_task_down(state, ref) do
+      case Commands.Git.handle_remote_task_down(state, ref, reason) do
         :not_matched -> :unknown
         updated_state -> {:git_remote_task, updated_state}
       end

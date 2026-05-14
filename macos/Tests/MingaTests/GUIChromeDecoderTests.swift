@@ -1476,3 +1476,127 @@ struct DrawStyledTextDecoderTests {
         #expect(text == "hello world")
     }
 }
+
+// MARK: - gui_git_status (0x85)
+
+@Suite("GUI Git Status Decoder")
+struct GUIGitStatusDecoderTests {
+    @Test("Decode gui_git_status with syncing, entries, and toast")
+    func decodeGitStatusWithToast() throws {
+        var data = Data()
+        data.append(OP_GUI_GIT_STATUS)
+        data.append(0) // normal repo
+        data.append(1) // syncing
+        appendU16(&data, 2) // ahead
+        appendU16(&data, 1) // behind
+        appendString16(&data, "feature/git")
+        appendU16(&data, 1) // entry_count
+        appendU32(&data, 0x01020304) // path_hash
+        data.append(1) // changed section
+        data.append(1) // modified status
+        appendString16(&data, "lib/editor.ex")
+        data.append(1) // toast_present
+        data.append(1) // error level
+        data.append(1) // pull_and_retry action
+        appendString16(&data, "Push failed: fetch first")
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let entries, let toast) = cmd else {
+            Issue.record("Expected .guiGitStatus"); return
+        }
+
+        #expect(repoState == 0)
+        #expect(syncing == true)
+        #expect(ahead == 2)
+        #expect(behind == 1)
+        #expect(branchName == "feature/git")
+        #expect(entries.count == 1)
+        #expect(entries[0].pathHash == 0x01020304)
+        #expect(entries[0].section == 1)
+        #expect(entries[0].status == 1)
+        #expect(entries[0].path == "lib/editor.ex")
+        #expect(toast?.message == "Push failed: fetch first")
+        #expect(toast?.level == 1)
+        #expect(toast?.action == 1)
+    }
+
+    @Test("Invalid UTF-8 branch in gui_git_status throws malformed")
+    func invalidGitStatusBranchUTF8Throws() {
+        var data = Data()
+        data.append(OP_GUI_GIT_STATUS)
+        data.append(0) // normal repo
+        data.append(0) // not syncing
+        appendU16(&data, 0) // ahead
+        appendU16(&data, 0) // behind
+        appendU16(&data, 1) // branch_len
+        data.append(0xFF) // invalid UTF-8
+        appendU16(&data, 0) // entry_count
+        data.append(0) // toast_present
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Invalid UTF-8 path in gui_git_status throws malformed")
+    func invalidGitStatusPathUTF8Throws() {
+        var data = Data()
+        data.append(OP_GUI_GIT_STATUS)
+        data.append(0) // normal repo
+        data.append(0) // not syncing
+        appendU16(&data, 0) // ahead
+        appendU16(&data, 0) // behind
+        appendString16(&data, "main")
+        appendU16(&data, 1) // entry_count
+        appendU32(&data, 0x01020304)
+        data.append(1) // changed section
+        data.append(1) // modified status
+        appendU16(&data, 1) // path_len
+        data.append(0xFF) // invalid UTF-8
+        data.append(0) // toast_present
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Invalid UTF-8 toast in gui_git_status throws malformed")
+    func invalidGitStatusToastUTF8Throws() {
+        var data = Data()
+        data.append(OP_GUI_GIT_STATUS)
+        data.append(0) // normal repo
+        data.append(0) // not syncing
+        appendU16(&data, 0) // ahead
+        appendU16(&data, 0) // behind
+        appendString16(&data, "main")
+        appendU16(&data, 0) // entry_count
+        data.append(1) // toast_present
+        data.append(1) // error level
+        data.append(1) // pull_and_retry action
+        appendU16(&data, 1) // msg_len
+        data.append(0xFF) // invalid UTF-8
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Invalid toast presence byte in gui_git_status throws malformed")
+    func invalidGitStatusToastPresenceThrows() {
+        var data = Data()
+        data.append(OP_GUI_GIT_STATUS)
+        data.append(0) // normal repo
+        data.append(0) // not syncing
+        appendU16(&data, 0) // ahead
+        appendU16(&data, 0) // behind
+        appendString16(&data, "main")
+        appendU16(&data, 0) // entry_count
+        data.append(2) // invalid toast_present
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+}

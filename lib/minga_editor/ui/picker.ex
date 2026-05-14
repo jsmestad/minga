@@ -348,23 +348,26 @@ defmodule MingaEditor.UI.Picker do
   # Returns 0 if no match.
   @spec score_segment(String.t(), String.t()) :: non_neg_integer()
   defp score_segment(text, segment) do
-    cond do
-      # Exact prefix match — best score
-      String.starts_with?(text, segment) ->
-        300
-
-      # Contiguous substring match
-      String.contains?(text, segment) ->
-        200
-
-      # Fuzzy character-by-character match
-      fuzzy_match?(text, segment) ->
-        100
-
-      true ->
-        0
-    end
+    score_prefix_segment(text, segment, String.starts_with?(text, segment))
   end
+
+  # Exact prefix match, best score.
+  defp score_prefix_segment(_text, _segment, true), do: 300
+
+  defp score_prefix_segment(text, segment, false) do
+    score_contiguous_segment(text, segment, String.contains?(text, segment))
+  end
+
+  # Contiguous substring match.
+  defp score_contiguous_segment(_text, _segment, true), do: 200
+
+  defp score_contiguous_segment(text, segment, false) do
+    score_fuzzy_segment(text, segment, fuzzy_match?(text, segment))
+  end
+
+  # Fuzzy character-by-character match.
+  defp score_fuzzy_segment(_text, _segment, true), do: 100
+  defp score_fuzzy_segment(_text, _segment, false), do: 0
 
   # Check if all characters in `needle` appear in order in `haystack`.
   @spec fuzzy_match?(String.t(), String.t()) :: boolean()

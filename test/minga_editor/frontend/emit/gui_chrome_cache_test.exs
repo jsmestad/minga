@@ -167,6 +167,57 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       assert caches.last_gui_file_tree_fp == :no_tree
     end
 
+    test "git syncing and toast changes re-send hidden git status command" do
+      state = gui_state()
+      sb_data = StatusBarData.from_state(state)
+
+      {_ctx, caches} =
+        EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state), sb_data, nil, %Caches{})
+
+      flush_port_casts()
+
+      syncing_state =
+        MingaEditor.State.set_git_toast(state, %{
+          message: "Push failed: fetch first",
+          level: :error,
+          action: :pull_and_retry,
+          dismiss_ref: make_ref()
+        })
+
+      syncing_state = %{
+        syncing_state
+        | git_remote_op: {make_ref(), make_ref(), {"/tmp/repo", "Pushed", "Push failed"}}
+      }
+
+      {_ctx, caches2} =
+        EmitGUI.sync_swiftui_chrome(
+          Context.from_editor_state(syncing_state),
+          sb_data,
+          nil,
+          caches
+        )
+
+      git_status_cmds =
+        for <<0x85, _::binary>> = cmd <- List.flatten(collect_port_casts()), do: cmd
+
+      assert [
+               <<0x85, _repo_state::8, 1::8, _ahead::16, _behind::16, 0::16, 0::16, 1::8,
+                 _level::8, 1::8, _msg_len::16, _msg::binary>>
+             ] = git_status_cmds
+
+      refute caches2.last_gui_git_status_fp == caches.last_gui_git_status_fp
+      flush_port_casts()
+
+      {_ctx, caches3} =
+        EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state), sb_data, nil, caches2)
+
+      stopped_cmds =
+        for <<0x85, _::binary>> = cmd <- List.flatten(collect_port_casts()), do: cmd
+
+      assert [<<0x85, _repo_state::8, 0::8, _rest::binary>>] = stopped_cmds
+      refute caches3.last_gui_git_status_fp == caches2.last_gui_git_status_fp
+    end
+
     test "picker cache tracks closed state" do
       state = gui_state()
       sb_data = StatusBarData.from_state(state)

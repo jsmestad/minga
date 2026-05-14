@@ -361,49 +361,78 @@ defmodule Minga.Core.Diff do
          [pe | parent_rest] = parent_edits,
          acc
        ) do
-    {f_start, f_count, f_replacement} = fe
-    {p_start, p_count, p_replacement} = pe
+    merge_overlapping_edits(
+      ancestor,
+      pos,
+      {fe, fork_rest, fork_edits},
+      {pe, parent_rest, parent_edits},
+      acc
+    )
+  end
 
-    f_end = f_start + f_count
-    p_end = p_start + p_count
+  # Both sides made the same change (identical replacement for the same region).
+  # Must be checked before the "before" conditions because identical insertions
+  # at the same position would otherwise be duplicated.
+  defp merge_overlapping_edits(
+         ancestor,
+         pos,
+         {{start, count, replacement}, fork_rest, _fork_edits},
+         {{start, count, replacement}, parent_rest, _parent_edits},
+         acc
+       ) do
+    unchanged = Enum.slice(ancestor, pos, max(start - pos, 0))
+    acc = if unchanged != [], do: [{:resolved, unchanged} | acc], else: acc
+    acc = [{:resolved, replacement} | acc]
+    do_merge(ancestor, start + count, fork_rest, parent_rest, acc)
+  end
 
-    cond do
-      # Both sides made the same change (identical replacement for the same region).
-      # Must be checked before the "before" conditions because identical insertions
-      # at the same position (f_end == p_start) would otherwise be duplicated.
-      f_start == p_start and f_count == p_count and f_replacement == p_replacement ->
-        unchanged = Enum.slice(ancestor, pos, max(f_start - pos, 0))
-        acc = if unchanged != [], do: [{:resolved, unchanged} | acc], else: acc
-        acc = [{:resolved, f_replacement} | acc]
-        do_merge(ancestor, f_end, fork_rest, parent_rest, acc)
+  # Fork edit is entirely before parent edit (no overlap).
+  defp merge_overlapping_edits(
+         ancestor,
+         pos,
+         {{f_start, f_count, f_replacement}, fork_rest, _fork_edits},
+         {{p_start, _p_count, _p_replacement}, _parent_rest, parent_edits},
+         acc
+       )
+       when f_start + f_count <= p_start do
+    unchanged = Enum.slice(ancestor, pos, max(f_start - pos, 0))
+    acc = if unchanged != [], do: [{:resolved, unchanged} | acc], else: acc
+    acc = [{:resolved, f_replacement} | acc]
+    do_merge(ancestor, f_start + f_count, fork_rest, parent_edits, acc)
+  end
 
-      # Fork edit is entirely before parent edit (no overlap)
-      f_end <= p_start ->
-        unchanged = Enum.slice(ancestor, pos, max(f_start - pos, 0))
-        acc = if unchanged != [], do: [{:resolved, unchanged} | acc], else: acc
-        acc = [{:resolved, f_replacement} | acc]
-        do_merge(ancestor, f_end, fork_rest, parent_edits, acc)
+  # Parent edit is entirely before fork edit (no overlap).
+  defp merge_overlapping_edits(
+         ancestor,
+         pos,
+         {{f_start, _f_count, _f_replacement}, _fork_rest, fork_edits},
+         {{p_start, p_count, p_replacement}, parent_rest, _parent_edits},
+         acc
+       )
+       when p_start + p_count <= f_start do
+    unchanged = Enum.slice(ancestor, pos, max(p_start - pos, 0))
+    acc = if unchanged != [], do: [{:resolved, unchanged} | acc], else: acc
+    acc = [{:resolved, p_replacement} | acc]
+    do_merge(ancestor, p_start + p_count, fork_edits, parent_rest, acc)
+  end
 
-      # Parent edit is entirely before fork edit (no overlap)
-      p_end <= f_start ->
-        unchanged = Enum.slice(ancestor, pos, max(p_start - pos, 0))
-        acc = if unchanged != [], do: [{:resolved, unchanged} | acc], else: acc
-        acc = [{:resolved, p_replacement} | acc]
-        do_merge(ancestor, p_end, fork_edits, parent_rest, acc)
+  # Overlap: conflict.
+  defp merge_overlapping_edits(
+         ancestor,
+         pos,
+         {{f_start, f_count, f_replacement}, fork_rest, _fork_edits},
+         {{p_start, p_count, p_replacement}, parent_rest, _parent_edits},
+         acc
+       ) do
+    conflict_start = min(f_start, p_start)
+    conflict_end = max(f_start + f_count, p_start + p_count)
+    unchanged = Enum.slice(ancestor, pos, max(conflict_start - pos, 0))
+    acc = if unchanged != [], do: [{:resolved, unchanged} | acc], else: acc
+    acc = [{:conflict, f_replacement, p_replacement} | acc]
 
-      # Overlap: conflict
-      true ->
-        # Emit unchanged lines before the conflict region
-        conflict_start = min(f_start, p_start)
-        conflict_end = max(f_end, p_end)
-        unchanged = Enum.slice(ancestor, pos, max(conflict_start - pos, 0))
-        acc = if unchanged != [], do: [{:resolved, unchanged} | acc], else: acc
-        acc = [{:conflict, f_replacement, p_replacement} | acc]
-
-        # Skip past all edits consumed by this conflict region
-        {fork_rest2, parent_rest2} = skip_consumed_edits(fork_rest, parent_rest, conflict_end)
-        do_merge(ancestor, conflict_end, fork_rest2, parent_rest2, acc)
-    end
+    # Skip past all edits consumed by this conflict region.
+    {fork_rest2, parent_rest2} = skip_consumed_edits(fork_rest, parent_rest, conflict_end)
+    do_merge(ancestor, conflict_end, fork_rest2, parent_rest2, acc)
   end
 
   # Skip edits that fall within the conflict region
