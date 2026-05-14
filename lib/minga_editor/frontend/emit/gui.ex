@@ -266,9 +266,21 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     end
   end
 
+  defp build_gui_file_tree_cmd(%{file_tree: %{project_root: root_path}}, caches) do
+    build_hidden_gui_file_tree_cmd(root_path, caches)
+  end
+
   defp build_gui_file_tree_cmd(_ctx, caches) do
-    if caches.last_gui_file_tree_fp != :no_tree do
-      {ProtocolGUI.encode_gui_file_tree(nil), %{caches | last_gui_file_tree_fp: :no_tree}}
+    build_hidden_gui_file_tree_cmd(nil, caches)
+  end
+
+  @spec build_hidden_gui_file_tree_cmd(String.t() | nil, Caches.t()) ::
+          {binary() | nil, Caches.t()}
+  defp build_hidden_gui_file_tree_cmd(root_path, caches) do
+    fp = {:no_tree, root_path || ""}
+
+    if caches.last_gui_file_tree_fp != fp do
+      {ProtocolGUI.encode_hidden_gui_file_tree(root_path), %{caches | last_gui_file_tree_fp: fp}}
     else
       {nil, caches}
     end
@@ -291,8 +303,8 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     end
   end
 
-  defp build_gui_git_status_cmd(%{git_syncing: syncing}, caches) do
-    fp = {:no_git, syncing}
+  defp build_gui_git_status_cmd(%{git_syncing: syncing, git_toast: toast}, caches) do
+    fp = {:no_git, syncing, toast}
 
     if caches.last_gui_git_status_fp != fp do
       cmd =
@@ -303,7 +315,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
           ahead: 0,
           behind: 0,
           entries: [],
-          git_toast: nil
+          git_toast: toast
         })
 
       {cmd, %{caches | last_gui_git_status_fp: fp}}

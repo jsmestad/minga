@@ -206,4 +206,21 @@ struct FontManagerTests {
         fm.setPrimaryFont(name: "Menlo", size: 20, scale: 2.0, ligatures: true, weight: 2)
         #expect(fm.cellWidth > oldWidth)
     }
+
+    @Test("setPrimaryFont preserves registered secondary fonts at the new scale")
+    func setPrimaryFontPreservesSecondaryFonts() {
+        let fm = FontManager(name: "Menlo", size: 13, scale: 1.0)
+        fm.registerFont(id: 1, name: "Menlo")
+
+        let secondaryBefore = fm.fontFace(for: 1)
+        #expect(secondaryBefore !== fm.primary)
+        #expect(secondaryBefore.scale == 1.0)
+
+        fm.setPrimaryFont(name: "Menlo", size: 14, scale: 2.0, ligatures: false, weight: 5)
+
+        let secondaryAfter = fm.fontFace(for: 1)
+        #expect(secondaryAfter !== fm.primary)
+        #expect(secondaryAfter.scale == 2.0)
+        #expect(secondaryAfter.ligaturesEnabled == false)
+    }
 }

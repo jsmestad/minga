@@ -1285,6 +1285,84 @@ struct GUIAgentChatDecoderTests {
         #expect(lines[1][0].text == "  :ok")
         #expect(lines[1][0].underline == true)
     }
+
+    @Test("Decode gui_agent_chat styled_assistant link run")
+    func decodeStyledAssistantLinkRun() throws {
+        var msgs = Data()
+        appendU32(&msgs, 42) // beam_id
+        msgs.append(0x07) // type=styled_assistant
+        appendU16(&msgs, 1) // 1 line
+        appendU16(&msgs, 1) // 1 run
+        appendString16(&msgs, "docs")
+        appendRGB(&msgs, 0x61, 0xAF, 0xEF); appendRGB(&msgs, 0x00, 0x00, 0x00); msgs.append(0x0C) // underline + link
+        appendString16(&msgs, "https://example.com/docs")
+
+        let data = buildChatData(model: "claude", messages: buildMessagesPayload(count: 1, msgs))
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard case .styledAssistant(let lines) = messages[0].content else { Issue.record("Expected .styledAssistant"); return }
+        #expect(lines[0][0].text == "docs")
+        #expect(lines[0][0].underline == true)
+        #expect(lines[0][0].linkURL == "https://example.com/docs")
+    }
+
+    @Test("Decode gui_agent_chat rejects invalid UTF-8 in styled_assistant link URL")
+    func decodeStyledAssistantRejectsInvalidLinkURLUTF8() {
+        var msgs = Data()
+        appendU32(&msgs, 42)
+        msgs.append(0x07)
+        appendU16(&msgs, 1)
+        appendU16(&msgs, 1)
+        appendString16(&msgs, "docs")
+        appendRGB(&msgs, 0x61, 0xAF, 0xEF); appendRGB(&msgs, 0x00, 0x00, 0x00); msgs.append(0x0C)
+        appendU16(&msgs, 1)
+        msgs.append(0xFF)
+
+        let data = buildChatData(model: "claude", messages: buildMessagesPayload(count: 1, msgs))
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Decode gui_agent_chat rejects styled link URL length crossing section boundary")
+    func decodeStyledAssistantRejectsLinkURLCrossingSectionBoundary() {
+        var headerPayload = Data()
+        headerPayload.append(1)
+        headerPayload.append(0)
+
+        var modelPayload = Data()
+        appendString16(&modelPayload, "claude")
+
+        var promptPayload = Data()
+        appendString16(&promptPayload, "")
+
+        var msgs = Data()
+        appendU32(&msgs, 42)
+        msgs.append(0x07)
+        appendU16(&msgs, 1)
+        appendU16(&msgs, 1)
+        appendString16(&msgs, "docs")
+        appendRGB(&msgs, 0x61, 0xAF, 0xEF); appendRGB(&msgs, 0x00, 0x00, 0x00); msgs.append(0x0C)
+        appendU16(&msgs, 4)
+        msgs.append(contentsOf: "h".utf8)
+
+        var data = Data()
+        data.append(OP_GUI_AGENT_CHAT)
+        data.append(7)
+        data.append(contentsOf: buildSectionData(0x01, headerPayload))
+        data.append(contentsOf: buildSectionData(0x02, modelPayload))
+        data.append(contentsOf: buildSectionData(0x03, promptPayload))
+        data.append(contentsOf: buildSectionData(0x04, Data([0])))
+        data.append(contentsOf: buildSectionData(0x05, Data([0])))
+        data.append(contentsOf: buildSectionData(0x06, buildMessagesPayload(count: 1, msgs)))
+        data.append(contentsOf: buildSectionData(0x07, Data([0, 0, 0, 0])))
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
 }
 
 // MARK: - gui_tool_manager (0x7E)
@@ -1558,5 +1636,205 @@ struct DrawStyledTextDecoderTests {
         #expect(fontWeight == 5)
         #expect(fontId == 2)
         #expect(text == "hello world")
+    }
+}
+
+// MARK: - gui_git_status (0x85)
+
+@Suite("GUI Git Status Decoder")
+struct GUIGitStatusDecoderTests {
+    @Test("Decode gui_git_status with syncing, entries, and toast")
+    func decodeGitStatusWithToast() throws {
+        var data = Data()
+        data.append(OP_GUI_GIT_STATUS)
+        data.append(0) // normal repo
+        data.append(1) // syncing
+        appendU16(&data, 2) // ahead
+        appendU16(&data, 1) // behind
+        appendString16(&data, "feature/git")
+        appendU16(&data, 1) // entry_count
+        appendU32(&data, 0x01020304) // path_hash
+        data.append(1) // changed section
+        data.append(1) // modified status
+        appendString16(&data, "lib/editor.ex")
+        data.append(1) // toast_present
+        data.append(1) // error level
+        data.append(1) // pull_and_retry action
+        appendString16(&data, "Push failed: fetch first")
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let entries, let toast) = cmd else {
+            Issue.record("Expected .guiGitStatus"); return
+        }
+
+        #expect(repoState == 0)
+        #expect(syncing == true)
+        #expect(ahead == 2)
+        #expect(behind == 1)
+        #expect(branchName == "feature/git")
+        #expect(entries.count == 1)
+        #expect(entries[0].pathHash == 0x01020304)
+        #expect(entries[0].section == 1)
+        #expect(entries[0].status == 1)
+        #expect(entries[0].path == "lib/editor.ex")
+        #expect(toast?.message == "Push failed: fetch first")
+        #expect(toast?.level == 1)
+        #expect(toast?.action == 1)
+    }
+
+    @Test("Invalid repo state in gui_git_status throws malformed")
+    func invalidGitStatusRepoStateThrows() {
+        var data = Data()
+        data.append(OP_GUI_GIT_STATUS)
+        data.append(99) // invalid repo_state
+        data.append(0) // not syncing
+        appendU16(&data, 0) // ahead
+        appendU16(&data, 0) // behind
+        appendString16(&data, "main")
+        appendU16(&data, 0) // entry_count
+        data.append(0) // toast_present
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Invalid syncing byte in gui_git_status throws malformed")
+    func invalidGitStatusSyncingThrows() {
+        var data = Data()
+        data.append(OP_GUI_GIT_STATUS)
+        data.append(0) // normal repo
+        data.append(2) // invalid syncing
+        appendU16(&data, 0) // ahead
+        appendU16(&data, 0) // behind
+        appendString16(&data, "main")
+        appendU16(&data, 0) // entry_count
+        data.append(0) // toast_present
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Invalid UTF-8 branch in gui_git_status throws malformed")
+    func invalidGitStatusBranchUTF8Throws() {
+        var data = Data()
+        data.append(OP_GUI_GIT_STATUS)
+        data.append(0) // normal repo
+        data.append(0) // not syncing
+        appendU16(&data, 0) // ahead
+        appendU16(&data, 0) // behind
+        appendU16(&data, 1) // branch_len
+        data.append(0xFF) // invalid UTF-8
+        appendU16(&data, 0) // entry_count
+        data.append(0) // toast_present
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Invalid entry section in gui_git_status throws malformed")
+    func invalidGitStatusEntrySectionThrows() {
+        var data = Data()
+        data.append(OP_GUI_GIT_STATUS)
+        data.append(0) // normal repo
+        data.append(0) // not syncing
+        appendU16(&data, 0) // ahead
+        appendU16(&data, 0) // behind
+        appendString16(&data, "main")
+        appendU16(&data, 1) // entry_count
+        appendU32(&data, 0x01020304)
+        data.append(99) // invalid section
+        data.append(1) // modified status
+        appendString16(&data, "lib/editor.ex")
+        data.append(0) // toast_present
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Invalid entry status in gui_git_status throws malformed")
+    func invalidGitStatusEntryStatusThrows() {
+        var data = Data()
+        data.append(OP_GUI_GIT_STATUS)
+        data.append(0) // normal repo
+        data.append(0) // not syncing
+        appendU16(&data, 0) // ahead
+        appendU16(&data, 0) // behind
+        appendString16(&data, "main")
+        appendU16(&data, 1) // entry_count
+        appendU32(&data, 0x01020304)
+        data.append(1) // changed section
+        data.append(99) // invalid status
+        appendString16(&data, "lib/editor.ex")
+        data.append(0) // toast_present
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Invalid UTF-8 path in gui_git_status throws malformed")
+    func invalidGitStatusPathUTF8Throws() {
+        var data = Data()
+        data.append(OP_GUI_GIT_STATUS)
+        data.append(0) // normal repo
+        data.append(0) // not syncing
+        appendU16(&data, 0) // ahead
+        appendU16(&data, 0) // behind
+        appendString16(&data, "main")
+        appendU16(&data, 1) // entry_count
+        appendU32(&data, 0x01020304)
+        data.append(1) // changed section
+        data.append(1) // modified status
+        appendU16(&data, 1) // path_len
+        data.append(0xFF) // invalid UTF-8
+        data.append(0) // toast_present
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Invalid UTF-8 toast in gui_git_status throws malformed")
+    func invalidGitStatusToastUTF8Throws() {
+        var data = Data()
+        data.append(OP_GUI_GIT_STATUS)
+        data.append(0) // normal repo
+        data.append(0) // not syncing
+        appendU16(&data, 0) // ahead
+        appendU16(&data, 0) // behind
+        appendString16(&data, "main")
+        appendU16(&data, 0) // entry_count
+        data.append(1) // toast_present
+        data.append(1) // error level
+        data.append(1) // pull_and_retry action
+        appendU16(&data, 1) // msg_len
+        data.append(0xFF) // invalid UTF-8
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Invalid toast presence byte in gui_git_status throws malformed")
+    func invalidGitStatusToastPresenceThrows() {
+        var data = Data()
+        data.append(OP_GUI_GIT_STATUS)
+        data.append(0) // normal repo
+        data.append(0) // not syncing
+        appendU16(&data, 0) // ahead
+        appendU16(&data, 0) // behind
+        appendString16(&data, "main")
+        appendU16(&data, 0) // entry_count
+        data.append(2) // invalid toast_present
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
     }
 }

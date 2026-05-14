@@ -78,6 +78,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x1F       | agent_group_rename     |
   | 0x20       | agent_group_set_icon   |
   | 0x21       | agent_group_close      |
+  | 0x3D       | file_tree_open_in_split |
+  | 0x3E       | tab_copy_path           |
+  | 0x3F       | hover_open_action       |
   | 0x34       | system_will_sleep      |
   | 0x35       | system_did_wake        |
 
@@ -125,6 +128,12 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @op_gui_agent_context 0x88
   @op_gui_change_summary 0x89
 
+  @max_u16 65_535
+  @chat_message_limit 100
+  @max_chat_text_bytes 60_000
+  @truncation_suffix "\n… [truncated]"
+  @chat_payload_omission_notice "Some agent chat content was omitted because the GUI chat payload exceeded 65KB."
+
   # ── Sectioned format section IDs ──
   # Used by opcodes that encode their fields in self-describing sections.
   # Format: section_id(1) + section_len(2, big-endian) + payload(section_len)
@@ -169,6 +178,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @op_clipboard_write 0x90
   @op_gui_indent_guides 0x91
   @op_gui_line_spacing 0x92
+  @op_gui_hover_action 0x96
 
   # ── GUI action sub-opcodes (Frontend → BEAM) ──
 
@@ -233,6 +243,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_git_fetch 0x3A
   @gui_action_git_commit_amend 0x3B
   @gui_action_git_pull_and_retry 0x3C
+  @gui_action_file_tree_open_in_split 0x3D
+  @gui_action_tab_copy_path 0x3E
+  @gui_action_hover_open_action 0x3F
 
   # ── Types ──
 
@@ -290,6 +303,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:file_tree_duplicate, index :: non_neg_integer()}
           | {:file_tree_move, source_index :: non_neg_integer(),
              target_dir_index :: non_neg_integer()}
+          | {:file_tree_open_in_split, index :: non_neg_integer()}
+          | {:tab_copy_path, id :: pos_integer()}
+          | :hover_open_action
           | :system_will_sleep
           | :system_did_wake
           | :cmd_copy
@@ -1025,6 +1041,15 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     ])
   end
 
+  @doc "Encodes a hidden gui_file_tree command that still carries the project root for shared GUI chrome."
+  @spec encode_hidden_gui_file_tree(String.t() | nil) :: binary()
+  def encode_hidden_gui_file_tree(root_path) when is_binary(root_path) do
+    root_bytes = :erlang.iolist_to_binary([root_path])
+    <<@op_gui_file_tree, 0::16, 0::16, 0::16, byte_size(root_bytes)::16, root_bytes::binary>>
+  end
+
+  def encode_hidden_gui_file_tree(nil), do: encode_gui_file_tree(nil)
+
   @spec encode_file_tree_entry(
           Minga.Project.FileTree.entry(),
           Minga.Project.FileTree.t(),
@@ -1559,8 +1584,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
         } = data
       ) do
     status_byte = encode_agent_chat_status(status)
-    model_bytes = :erlang.iolist_to_binary([model || ""])
-    prompt_bytes = :erlang.iolist_to_binary([prompt || ""])
+    model_bytes = utf8_prefix_bytes(model || "", @max_u16 - 2)
+    prompt_bytes = utf8_prefix_bytes(prompt || "", @max_u16 - 9)
 
     # Prompt metadata for the cell-grid renderer (cursor, mode, line count).
     # These fields are appended after the prompt string so existing decoders
@@ -1575,12 +1600,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     pending_bytes = encode_pending_approval(data[:pending_approval])
     help_bytes = encode_help_overlay(data[:help_visible], data[:help_groups])
 
-    msg_binaries =
-      messages
-      |> Enum.take(100)
-      |> Enum.map(&encode_chat_message/1)
-
-    messages_payload = IO.iodata_to_binary([<<length(msg_binaries)::16>> | msg_binaries])
+    messages_payload = encode_chat_messages(messages)
 
     sections = [
       encode_section(@section_chat_header, <<1::8, status_byte::8>>),
@@ -1727,8 +1747,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp summarize_tool_args(_name, args) when map_size(args) == 0, do: ""
   defp summarize_tool_args(_name, args), do: inspect(args, limit: 80)
 
-  @typedoc "A styled text run for GUI rendering: {text, fg_rgb, bg_rgb, flags}."
-  @type styled_run :: {String.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
+  @typedoc "A styled text run for GUI rendering: {text, fg_rgb, bg_rgb, flags} or {text, fg_rgb, bg_rgb, flags, url}."
+  @type styled_run ::
+          {String.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
+          | {String.t(), non_neg_integer(), non_neg_integer(), non_neg_integer(), String.t()}
 
   @typedoc "A line of styled runs."
   @type styled_line :: [styled_run()]
@@ -1747,6 +1769,121 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
                result: String.t() | nil
              }, [[styled_run()]]}
           | {:approval_tool_call, MingaAgent.ToolCall.t(), map()}
+
+  @spec encode_chat_messages([gui_chat_message() | {pos_integer(), gui_chat_message()}]) ::
+          binary()
+  defp encode_chat_messages(messages) do
+    messages = messages |> Enum.take(@chat_message_limit) |> Enum.map(&bound_chat_message_text/1)
+    payload = encode_chat_messages_payload(messages)
+
+    if byte_size(payload) <= @max_u16 do
+      payload
+    else
+      stripped_messages = Enum.map(messages, &strip_chat_message_links/1)
+      stripped_payload = encode_chat_messages_payload(stripped_messages)
+
+      if byte_size(stripped_payload) <= @max_u16 do
+        stripped_payload
+      else
+        stripped_messages
+        |> fit_chat_messages_to_payload_limit()
+        |> encode_chat_messages_payload()
+      end
+    end
+  end
+
+  @spec bound_chat_message_text(gui_chat_message() | {pos_integer(), gui_chat_message()}) ::
+          gui_chat_message() | {pos_integer(), gui_chat_message()}
+  defp bound_chat_message_text({id, msg}) when is_integer(id),
+    do: {id, bound_chat_message_text(msg)}
+
+  defp bound_chat_message_text({:user, text}),
+    do: {:user, utf8_prefix_bytes(text, @max_chat_text_bytes)}
+
+  defp bound_chat_message_text({:user, text, attachments}),
+    do: {:user, utf8_prefix_bytes(text, @max_chat_text_bytes), attachments}
+
+  defp bound_chat_message_text({:assistant, text}),
+    do: {:assistant, utf8_prefix_bytes(text, @max_chat_text_bytes)}
+
+  defp bound_chat_message_text({:thinking, text, collapsed}),
+    do: {:thinking, utf8_prefix_bytes(text, @max_chat_text_bytes), collapsed}
+
+  defp bound_chat_message_text({:system, text, level}),
+    do: {:system, utf8_prefix_bytes(text, @max_chat_text_bytes), level}
+
+  defp bound_chat_message_text(msg), do: msg
+
+  @spec fit_chat_messages_to_payload_limit([
+          gui_chat_message() | {pos_integer(), gui_chat_message()}
+        ]) ::
+          [gui_chat_message() | {pos_integer(), gui_chat_message()}]
+  defp fit_chat_messages_to_payload_limit(messages) do
+    {selected, omitted?} =
+      messages
+      |> Enum.reverse()
+      |> Enum.reduce({[], false}, fn msg, {selected, omitted?} ->
+        candidate = [msg | selected]
+
+        if byte_size(encode_chat_messages_payload(candidate)) <= @max_u16 do
+          {candidate, omitted?}
+        else
+          {selected, true}
+        end
+      end)
+
+    if omitted?, do: add_chat_payload_omission_notice(selected), else: selected
+  end
+
+  @spec add_chat_payload_omission_notice([
+          gui_chat_message() | {pos_integer(), gui_chat_message()}
+        ]) ::
+          [gui_chat_message() | {pos_integer(), gui_chat_message()}]
+  defp add_chat_payload_omission_notice([]) do
+    [{:system, @chat_payload_omission_notice, :info}]
+  end
+
+  defp add_chat_payload_omission_notice(messages) do
+    notice = {:system, @chat_payload_omission_notice, :info}
+
+    if byte_size(encode_chat_messages_payload([notice | messages])) <= @max_u16 do
+      [notice | messages]
+    else
+      [_dropped | rest] = messages
+      add_chat_payload_omission_notice(rest)
+    end
+  end
+
+  @spec encode_chat_messages_payload([gui_chat_message() | {pos_integer(), gui_chat_message()}]) ::
+          binary()
+  defp encode_chat_messages_payload(messages) do
+    msg_binaries = Enum.map(messages, &encode_chat_message/1)
+    IO.iodata_to_binary([<<length(msg_binaries)::16>> | msg_binaries])
+  end
+
+  @spec strip_chat_message_links(gui_chat_message() | {pos_integer(), gui_chat_message()}) ::
+          gui_chat_message() | {pos_integer(), gui_chat_message()}
+  defp strip_chat_message_links({id, msg}) when is_integer(id),
+    do: {id, strip_chat_message_links(msg)}
+
+  defp strip_chat_message_links({:styled_assistant, styled_lines}) do
+    {:styled_assistant, strip_styled_lines_links(styled_lines)}
+  end
+
+  defp strip_chat_message_links({:styled_tool_call, tc, styled_lines}) do
+    {:styled_tool_call, tc, strip_styled_lines_links(styled_lines)}
+  end
+
+  defp strip_chat_message_links(msg), do: msg
+
+  @spec strip_styled_lines_links([[styled_run()]]) :: [[styled_run()]]
+  defp strip_styled_lines_links(styled_lines) do
+    Enum.map(styled_lines, fn runs -> Enum.map(runs, &strip_styled_run_link/1) end)
+  end
+
+  @spec strip_styled_run_link(styled_run()) :: styled_run()
+  defp strip_styled_run_link({text, fg, bg, flags, _url}), do: {text, fg, bg, flags &&& 0xF3}
+  defp strip_styled_run_link(run), do: run
 
   # Unwrap {id, message} tuple: prefix with the stable uint32 ID, then encode the message.
   @spec encode_chat_message({pos_integer(), gui_chat_message()} | gui_chat_message()) :: binary()
@@ -1776,16 +1913,13 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   end
 
   # Styled assistant message: opcode 0x07, line_count::16, then per line:
-  # run_count::16, then per run: text_len::16, text, fg::24, bg::24, flags::8
+  # run_count::16, then per run: text_len::16, text, fg::24, bg::24, flags::8,
+  # and when flags bit 0x08 is set: url_len::16, url.
   defp encode_chat_message_body({:styled_assistant, styled_lines}) do
     line_binaries =
       Enum.map(styled_lines, fn runs ->
         run_binaries =
-          Enum.map(runs, fn {text, fg, bg, flags} ->
-            text_bytes = :erlang.iolist_to_binary([text])
-
-            <<byte_size(text_bytes)::16, text_bytes::binary, fg::24, bg::24, flags::8>>
-          end)
+          Enum.map(runs, &encode_styled_run/1)
 
         [<<length(runs)::16>> | run_binaries]
       end)
@@ -1851,8 +1985,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   # Styled tool call: same header fields as tool_call (0x04), but result is styled runs.
   # Sub-opcode 0x08. Layout:
   #   0x08, status::8, error::8, collapsed::8, duration::32,
-  #   name_len::16, name, line_count::16, then per line:
-  #   run_count::16, then per run: text_len::16, text, fg::24, bg::24, flags::8
+  #   name_len::16, name, summary_len::16, summary, line_count::16, then per line:
+  #   run_count::16, then per run: text_len::16, text, fg::24, bg::24, flags::8,
+  #   and when flags bit 0x08 is set: url_len::16, url.
   defp encode_chat_message_body({:styled_tool_call, tc, styled_lines}) do
     name_bytes = :erlang.iolist_to_binary([tc.name])
     summary_bytes = :erlang.iolist_to_binary([tool_call_summary(tc)])
@@ -1871,10 +2006,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     line_binaries =
       Enum.map(styled_lines, fn runs ->
         run_binaries =
-          Enum.map(runs, fn {text, fg, bg, flags} ->
-            text_bytes = :erlang.iolist_to_binary([text])
-            <<byte_size(text_bytes)::16, text_bytes::binary, fg::24, bg::24, flags::8>>
-          end)
+          Enum.map(runs, &encode_styled_run/1)
 
         [<<length(runs)::16>> | run_binaries]
       end)
@@ -1896,6 +2028,63 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp encode_chat_message_body({:usage, u}) do
     cost_int = round((u.cost || 0.0) * 1_000_000)
     <<0x06::8, u.input::32, u.output::32, u.cache_read::32, u.cache_write::32, cost_int::32>>
+  end
+
+  @spec encode_styled_run(styled_run()) :: binary()
+  defp encode_styled_run({text, fg, bg, flags, url}) do
+    text_bytes = utf8_prefix_bytes(text, @max_u16)
+    url_bytes = :erlang.iolist_to_binary([url])
+
+    if byte_size(url_bytes) <= @max_u16 do
+      link_flags = flags ||| 0x08
+
+      <<byte_size(text_bytes)::16, text_bytes::binary, fg::24, bg::24, link_flags::8,
+        byte_size(url_bytes)::16, url_bytes::binary>>
+    else
+      non_link_flags = flags &&& 0xF3
+      encode_styled_run({text, fg, bg, non_link_flags})
+    end
+  end
+
+  defp encode_styled_run({text, fg, bg, flags}) do
+    text_bytes = utf8_prefix_bytes(text, @max_u16)
+    safe_flags = flags &&& 0xF7
+    <<byte_size(text_bytes)::16, text_bytes::binary, fg::24, bg::24, safe_flags::8>>
+  end
+
+  @spec utf8_prefix_bytes(String.t(), non_neg_integer()) :: binary()
+  defp utf8_prefix_bytes(text, max_bytes) when byte_size(text) <= max_bytes do
+    :erlang.iolist_to_binary([text])
+  end
+
+  defp utf8_prefix_bytes(text, max_bytes) do
+    suffix_bytes = :erlang.iolist_to_binary([@truncation_suffix])
+
+    if max_bytes <= byte_size(suffix_bytes) do
+      valid_utf8_prefix(text, max_bytes)
+    else
+      valid_utf8_prefix(text, max_bytes - byte_size(suffix_bytes)) <> suffix_bytes
+    end
+  end
+
+  @spec valid_utf8_prefix(String.t(), non_neg_integer()) :: binary()
+  defp valid_utf8_prefix(_text, 0), do: ""
+
+  defp valid_utf8_prefix(text, max_bytes) do
+    text
+    |> binary_part(0, min(max_bytes, byte_size(text)))
+    |> trim_invalid_utf8_suffix()
+  end
+
+  @spec trim_invalid_utf8_suffix(binary()) :: binary()
+  defp trim_invalid_utf8_suffix(<<>>), do: ""
+
+  defp trim_invalid_utf8_suffix(prefix) do
+    if String.valid?(prefix) do
+      prefix
+    else
+      prefix |> binary_part(0, byte_size(prefix) - 1) |> trim_invalid_utf8_suffix()
+    end
   end
 
   @spec encode_agent_chat_status(atom()) :: non_neg_integer()
@@ -1923,6 +2112,12 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_file_tree_toggle, <<index::16>>),
     do: {:ok, {:file_tree_toggle, index}}
+
+  def decode_gui_action(@gui_action_file_tree_open_in_split, <<index::16>>),
+    do: {:ok, {:file_tree_open_in_split, index}}
+
+  def decode_gui_action(@gui_action_tab_copy_path, <<id::32>>), do: {:ok, {:tab_copy_path, id}}
+  def decode_gui_action(@gui_action_hover_open_action, <<>>), do: {:ok, :hover_open_action}
 
   def decode_gui_action(@gui_action_completion_select, <<index::16>>),
     do: {:ok, {:completion_select, index}}
@@ -2399,11 +2594,32 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
         [<<line_type_byte::8, length(segments)::16>> | segment_data]
       end)
 
-    IO.iodata_to_binary([
-      <<@op_gui_hover_popup, 1::8, popup.anchor_row::16, popup.anchor_col::16, focused_byte::8,
-        popup.scroll_offset::16, length(popup.content_lines)::16>>
-      | line_data
-    ])
+    hover =
+      IO.iodata_to_binary([
+        <<@op_gui_hover_popup, 1::8, popup.anchor_row::16, popup.anchor_col::16, focused_byte::8,
+          popup.scroll_offset::16, length(popup.content_lines)::16>>
+        | line_data
+      ])
+
+    IO.iodata_to_binary([hover, encode_gui_hover_action(popup)])
+  end
+
+  @doc "Encodes optional hover popup action metadata as a forward-compatible sidecar command."
+  @spec encode_gui_hover_action(MingaEditor.HoverPopup.t() | nil) :: binary()
+  def encode_gui_hover_action(nil), do: <<@op_gui_hover_action, 1::16, 0::8>>
+
+  def encode_gui_hover_action(%MingaEditor.HoverPopup{open_action: nil}) do
+    <<@op_gui_hover_action, 1::16, 0::8>>
+  end
+
+  def encode_gui_hover_action(%MingaEditor.HoverPopup{open_action: action}) do
+    action_bytes =
+      action |> MingaEditor.HoverPopup.open_action_name() |> :erlang.iolist_to_binary()
+
+    payload_len = 1 + 2 + byte_size(action_bytes)
+
+    <<@op_gui_hover_action, payload_len::16, 1::8, byte_size(action_bytes)::16,
+      action_bytes::binary>>
   end
 
   # ── Signature Help ──

@@ -5,51 +5,77 @@ defmodule MingaEditor.MouseTest do
   alias MingaEditor
   alias MingaEditor.Commands.Movement
   alias MingaEditor.Layout
+  alias MingaEditor.State.Windows
+  alias MingaEditor.WindowTree
+  alias MingaEditor.Workspace.State, as: WorkspaceState
 
   # Content starts at row 1 because the tab bar occupies row 0.
   @content_row 1
+  @sync_timeout 15_000
 
   defp start_editor(content) do
-    {:ok, buffer} = BufferServer.start_link(content: content)
+    id = :erlang.unique_integer([:positive])
+    events_registry = :"mouse_events_#{id}"
+    project_root = isolated_project_root(id)
+    start_supervised!({Minga.Events, name: events_registry})
+
+    {:ok, buffer} = BufferServer.start_link(content: content, events_registry: events_registry)
 
     {:ok, editor} =
       MingaEditor.start_link(
-        name: :"editor_#{:erlang.unique_integer([:positive])}",
+        name: :"editor_#{id}",
         port_manager: nil,
         buffer: buffer,
         width: 40,
         height: 10,
-        editing_model: :vim
+        editing_model: :vim,
+        events_registry: events_registry,
+        project_root: project_root,
+        suppress_tool_prompts: true
       )
 
     {editor, buffer}
   end
 
   defp start_editor_no_buffer do
+    id = :erlang.unique_integer([:positive])
+    events_registry = :"mouse_events_#{id}"
+    project_root = isolated_project_root(id)
+    start_supervised!({Minga.Events, name: events_registry})
+
     {:ok, editor} =
       MingaEditor.start_link(
-        name: :"editor_#{:erlang.unique_integer([:positive])}",
+        name: :"editor_#{id}",
         port_manager: nil,
         buffer: nil,
         width: 40,
         height: 10,
-        editing_model: :vim
+        editing_model: :vim,
+        events_registry: events_registry,
+        project_root: project_root,
+        suppress_tool_prompts: true
       )
 
     editor
   end
 
+  defp isolated_project_root(id) do
+    root = Path.join(System.tmp_dir!(), "minga-mouse-#{id}")
+    File.mkdir_p!(root)
+    root
+  end
+
   defp send_key(editor, codepoint, mods \\ 0) do
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
-    _ = :sys.get_state(editor)
+    _ = :sys.get_state(editor, @sync_timeout)
   end
 
   defp send_mouse(editor, row, col, button, event_type, mods \\ 0, click_count \\ 1) do
     send(editor, {:minga_input, {:mouse_event, row, col, button, mods, event_type, click_count}})
-    _ = :sys.get_state(editor)
+    _ = :sys.get_state(editor, @sync_timeout)
   end
 
-  defp state(editor), do: :sys.get_state(editor)
+  defp state(editor), do: :sys.get_state(editor, @sync_timeout)
 
   defp rightmost_window_layout(layout) do
     Enum.max_by(layout.window_layouts, fn {_id, %{content: {_row, content_col, _w, _h}}} ->
@@ -59,20 +85,7 @@ defmodule MingaEditor.MouseTest do
 
   describe "mouse scroll" do
     defp start_mouse_editor do
-      content = Enum.map_join(0..29, "\n", &"line #{&1}")
-      {:ok, buffer} = BufferServer.start_link(content: content)
-
-      {:ok, editor} =
-        MingaEditor.start_link(
-          name: :"editor_#{:erlang.unique_integer([:positive])}",
-          port_manager: nil,
-          buffer: buffer,
-          width: 40,
-          height: 10,
-          editing_model: :vim
-        )
-
-      {editor, buffer}
+      start_editor(Enum.map_join(0..29, "\n", &"line #{&1}"))
     end
 
     test "scroll down clamps cursor to respect scroll margin" do
@@ -178,19 +191,17 @@ defmodule MingaEditor.MouseTest do
       assert col == 3
     end
 
-    test "left click accounts for viewport scroll offset" do
-      content = Enum.map_join(0..29, "\n", &"line #{&1}")
-      {:ok, buffer} = BufferServer.start_link(content: content)
+    test "right click positions cursor without starting selection drag" do
+      {editor, buffer} = start_editor("hello\nworld\nfoo bar baz")
 
-      {:ok, editor} =
-        MingaEditor.start_link(
-          name: :"editor_#{:erlang.unique_integer([:positive])}",
-          port_manager: nil,
-          buffer: buffer,
-          width: 40,
-          height: 10,
-          editing_model: :vim
-        )
+      send_mouse(editor, @content_row + 1, @gutter + 3, :right, :press)
+
+      assert BufferServer.cursor(buffer) == {1, 3}
+      assert state(editor).workspace.mouse.dragging == false
+    end
+
+    test "left click accounts for viewport scroll offset" do
+      {editor, buffer} = start_editor(Enum.map_join(0..29, "\n", &"line #{&1}"))
 
       # Scroll down then click. Default scroll_lines=1, so 4 scrolls = viewport top at 4.
       for _i <- 1..4, do: send_mouse(editor, 0, 0, :wheel_down, :press)
@@ -314,6 +325,50 @@ defmodule MingaEditor.MouseTest do
     end
   end
 
+  describe "split separator double-click" do
+    test "double-clicking a separator resets split size without entering visual mode" do
+      {editor, _buffer} = start_editor("hello world")
+
+      :sys.replace_state(editor, fn state -> Movement.execute(state, :split_vertical) end)
+      state = state(editor)
+      screen = Layout.get(state).editor_area
+      {screen_row, screen_col, screen_width, screen_height} = screen
+      row = screen_row + div(screen_height, 2)
+      initial_sep_col = screen_col + div(screen_width - 1, 2)
+
+      {:ok, {:vertical, sep_pos}} =
+        WindowTree.separator_at(state.workspace.windows.tree, screen, row, initial_sep_col)
+
+      {:ok, resized_tree} =
+        WindowTree.resize_at(
+          state.workspace.windows.tree,
+          screen,
+          :vertical,
+          sep_pos,
+          sep_pos - 5
+        )
+
+      :sys.replace_state(editor, fn state ->
+        windows = Windows.set_tree(state.workspace.windows, resized_tree)
+
+        MingaEditor.State.update_workspace(state, fn workspace ->
+          WorkspaceState.set_windows(workspace, windows)
+        end)
+      end)
+
+      state = state(editor)
+      screen = Layout.get(state).editor_area
+
+      {:ok, {:vertical, resized_sep_pos}} =
+        WindowTree.separator_at(state.workspace.windows.tree, screen, row, sep_pos - 5)
+
+      send_mouse(editor, row, resized_sep_pos, :left, :press, 0, 2)
+
+      assert {:split, :vertical, _left, _right, 0} = state(editor).workspace.windows.tree
+      assert state(editor).workspace.editing.mode == :normal
+    end
+  end
+
   describe "mouse drag selection" do
     @gutter 5
 
@@ -397,17 +452,25 @@ defmodule MingaEditor.MouseTest do
     alias MingaEditor.State.TabBar
 
     defp start_two_tab_editor do
-      {:ok, buf1} = BufferServer.start_link(content: "hello")
-      {:ok, buf2} = BufferServer.start_link(content: "world")
+      id = :erlang.unique_integer([:positive])
+      events_registry = :"mouse_tab_events_#{id}"
+      project_root = isolated_project_root(id)
+      start_supervised!({Minga.Events, name: events_registry})
+
+      {:ok, buf1} = BufferServer.start_link(content: "hello", events_registry: events_registry)
+      {:ok, buf2} = BufferServer.start_link(content: "world", events_registry: events_registry)
 
       {:ok, editor} =
         MingaEditor.start_link(
-          name: :"editor_#{:erlang.unique_integer([:positive])}",
+          name: :"editor_#{id}",
           port_manager: nil,
           buffer: buf1,
           width: 80,
           height: 10,
-          editing_model: :vim
+          editing_model: :vim,
+          events_registry: events_registry,
+          project_root: project_root,
+          suppress_tool_prompts: true
         )
 
       # Inject a second tab directly via state manipulation

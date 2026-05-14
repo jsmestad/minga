@@ -1,5 +1,5 @@
 defmodule MingaEditor.StartupTest do
-  # async: false because the force_editor test mutates Application env,
+  # async: false because the CLI startup flag tests mutate Application env,
   # which races with the first test when run concurrently.
   use ExUnit.Case, async: false
 
@@ -25,8 +25,8 @@ defmodule MingaEditor.StartupTest do
       assert agentic.view.focus == :chat
     end
 
-    test "returns :editor scope when force_editor flag is set" do
-      Application.put_env(:minga, :cli_startup_flags, %{force_editor: true, no_context: false})
+    test "returns :editor scope when editor view mode is set" do
+      Application.put_env(:minga, :cli_startup_flags, %{view_mode: :editor, no_context: false})
 
       {scope, agentic} = Startup.startup_view_state(:tui)
 
@@ -36,10 +36,26 @@ defmodule MingaEditor.StartupTest do
       Application.delete_env(:minga, :cli_startup_flags)
     end
 
-    test "returns :editor scope for native GUI backend" do
+    test "returns :agent scope when agentic view mode is set" do
+      Application.put_env(:minga, :cli_startup_flags, %{view_mode: :agentic, no_context: false})
+
+      {scope, agentic} = Startup.startup_view_state(:native_gui)
+
+      assert scope == :agent
+      assert agentic.view.active == true
+      assert agentic.view.focus == :chat
+    after
+      Application.delete_env(:minga, :cli_startup_flags)
+    end
+
+    test "returns :editor scope for native GUI backend in auto mode" do
+      Application.put_env(:minga, :cli_startup_flags, %{view_mode: :auto, no_context: false})
+
       {scope, _agentic} = Startup.startup_view_state(:native_gui)
 
       assert scope == :editor
+    after
+      Application.delete_env(:minga, :cli_startup_flags)
     end
   end
 

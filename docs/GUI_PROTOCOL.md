@@ -56,6 +56,10 @@ The BEAM-side encoder must use this envelope for all new opcodes (0x90+). Curren
 | 0x90 | clipboard_write | Write text to the system clipboard |
 | 0x91 | gui_indent_guides | Indent guide positions per window |
 | 0x92 | gui_line_spacing | Line spacing multiplier for the renderer |
+| 0x96 | gui_hover_action | Optional action metadata for the hover popup |
+
+### 0x70 — gui_file_tree
+
 File tree sidebar entries for the native sidebar view.
 
 ```
@@ -101,7 +105,7 @@ Flags bits:
   bits 4-6: agent_status (0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan)
 
 group_id: workspace group this tab belongs to. 0 = manual/ungrouped workspace.
-Non-zero values match workspace IDs from gui_workspace_bar (0x86). The frontend
+Non-zero values match workspace IDs from gui_agent_groups (0x86). The frontend
 renders group separators at group_id transitions in the tab strip.
 ```
 
@@ -283,43 +287,48 @@ When hidden:
 
 ### 0x78 — gui_agent_chat (sectioned format)
 
-Agent conversation view state. Uses sectioned envelope: `opcode(1) + section_count(1) + sections...`. Hidden: section_count=0.
+Agent conversation view state. Uses sectioned envelope: `opcode(1) + section_count(1) + sections...`. Hidden frames use `section_count=0`.
+
+Each section uses `section_id(1) + section_len(2) + payload(section_len)`. Section payloads must fit in 65,535 bytes.
 
 | Section ID | Name | Content |
 |-----------|------|--------|
-| 0x01 | Header | visible, status |
-| 0x02 | Model | model name |
-| 0x03 | Prompt | prompt text plus prompt line/cursor/mode metadata |
+| 0x01 | Header | `visible(1) + status(1)` |
+| 0x02 | Model | `model_len(2) + model` |
+| 0x03 | Prompt | `prompt_len(2) + prompt + line_count(1) + cursor_line(2) + cursor_col(2) + vim_mode(1) + visible_rows(1)` |
 | 0x04 | Pending | legacy pending approval banner payload. Current BEAM frames send `0` and render approvals inline as message type `0x09`. |
-| 0x05 | Help | help overlay visibility + groups |
-| 0x06 | Messages | message_count + messages (same nested format as before) |
+| 0x05 | Help | `visible(1) + optional groups` |
+| 0x06 | Messages | `message_count(2) + messages...` |
 | 0x07 | Completion | prompt completion popup state |
-
-**Legacy positional format (deprecated):**
-```
-When visible:
-  opcode(1) + 1(1) + status(1) + model_len(2) + model(model_len) + prompt_len(2) + prompt(prompt_len) + pending_approval + message_count(2) + messages...
 
 Status values: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error
 
-Pending approval:
-  0(1) — no pending approval
-  1(1) + name_len(2) + name(name_len) + summary_len(2) + summary(summary_len)
-
-Per message (type byte first):
-  0x01 (user):      type(1) + text_len(4) + text
-  0x02 (assistant):  type(1) + text_len(4) + text
-  0x03 (thinking):   type(1) + collapsed(1) + text_len(4) + text
-  0x04 (tool_call):  type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + result_len(4) + result
-  0x05 (system):     type(1) + level(1) + text_len(4) + text
-  0x06 (usage):      type(1) + input(4) + output(4) + cache_read(4) + cache_write(4) + cost_micros(4)
-  0x07 (styled_assistant): type(1) + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1)
-  0x08 (styled_tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1)
-  0x09 (approval_tool_call): type(1) + status(1) + name_len(2) + name + summary_len(2) + summary + tool_call_id_len(2) + tool_call_id + preview_kind(1) + preview_line_count(2), per line: line_len(2) + line
-
-When hidden:
-  opcode(1) + 0(1)
+Pending approval payload:
 ```
+0(1) — no pending approval
+1(1) + name_len(2) + name(name_len) + summary_len(2) + summary(summary_len)
+```
+
+Messages payload:
+```
+message_count(2) + messages...
+
+Per message:
+  message_id(4) + typed_payload
+
+Typed payloads:
+  0x01 (user):      type(1) + text_len(4) + text
+  0x02 (assistant): type(1) + text_len(4) + text
+  0x03 (thinking):  type(1) + collapsed(1) + text_len(4) + text
+  0x04 (tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + result_len(4) + result
+  0x05 (system):    type(1) + level(1) + text_len(4) + text
+  0x06 (usage):     type(1) + input(4) + output(4) + cache_read(4) + cache_write(4) + cost_micros(4)
+  0x07 (styled_assistant): type(1) + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1), and if flags bit 0x08 is set: url_len(2) + url. Link URLs are limited to http, https, and mailto.
+  0x08 (styled_tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1), and if flags bit 0x08 is set: url_len(2) + url. Link URLs are limited to http, https, and mailto.
+  0x09 (approval_tool_call): type(1) + status(1) + name_len(2) + name + summary_len(2) + summary + tool_call_id_len(2) + tool_call_id + preview_kind(1) + preview_line_count(2), per line: line_len(2) + line
+```
+
+Styled run flags: 0x01=bold, 0x02=italic, 0x04=underline, 0x08=link URL present.
 
 ### 0x79 — gui_gutter_separator
 
@@ -680,11 +689,30 @@ When no splits are active, the BEAM sends counts of 0 for both separator types.
 
 ### 0x85 — gui_git_status
 
-Git status panel data. See git status panel section.
+Git status panel data for the native sidebar, plus remote operation feedback used by the sidebar and status bar.
 
-### 0x86 — gui_workspace_bar
+```
+opcode(1) + repo_state(1) + syncing(1) + ahead(2) + behind(2) + branch_len(2) + branch(branch_len) + entry_count(2) + entries... + toast_present(1) + toast?
 
-Workspace indicator and dropdown data for progressive tab grouping. Sent alongside gui_tab_bar when workspaces exist.
+Per entry:
+  path_hash(4) + section(1) + status(1) + path_len(2) + path(path_len)
+
+Toast when toast_present == 1:
+  level(1) + action(1) + msg_len(2) + msg(msg_len)
+```
+
+`repo_state`: 0 = normal, 1 = not_a_repo, 2 = loading.
+`syncing`: 1 while a git remote operation is in flight, otherwise 0.
+`section`: 0 = staged, 1 = changed, 2 = untracked, 3 = conflicted.
+`status`: 0 = unknown, 1 = modified, 2 = added, 3 = deleted, 4 = renamed, 5 = copied, 6 = untracked, 7 = conflict.
+`level`: 0 = success, 1 = error.
+`action`: 0 = none, 1 = pull_and_retry.
+
+When the git status panel is closed, the BEAM sends `repo_state = not_a_repo` with no entries as the hide signal. The frontend should still copy `syncing` and `toast` so remote operation feedback remains accurate while the panel is hidden.
+
+### 0x86 — gui_agent_groups
+
+Workspace indicator and dropdown data for progressive tab grouping. Sent alongside gui_tab_bar when agent workspaces exist.
 
 ```
 opcode(1) + active_workspace_id(2) + workspace_count(1) + workspaces...
@@ -743,14 +771,39 @@ opcode(1) + action_type(1) + payload...
 | 0x1C | git_unstage_all | (empty) | Unstage all |
 | 0x1D | git_commit | msg_len(2) + msg(msg_len) | Commit with message |
 | 0x1E | git_open_file | path_len(2) + path(path_len) | Open file in editor |
+| 0x1F | agent_group_rename | id(2) + name_len(2) + name(name_len) | Rename an agent workspace group |
+| 0x20 | agent_group_set_icon | id(2) + icon_len(1) + icon(icon_len) | Change an agent workspace icon |
+| 0x21 | agent_group_close | id(2) | Close an agent workspace group |
+| 0x22 | space_leader_chord | codepoint(4) + modifiers(1) | Enter leader mode from a clean Space chord |
+| 0x23 | space_leader_retract | codepoint(4) + modifiers(1) | Retract a literal Space and enter leader mode |
+| 0x24 | find_pasteboard_search | direction(1) + text_len(2) + text(text_len) | Search from the macOS find pasteboard |
+| 0x25 | board_select_card | card_id(4) | Select a Board card |
+| 0x26 | board_close_card | card_id(4) | Close a Board card |
+| 0x27 | board_reorder | card_id(4) + new_index(2) | Reorder a Board card |
+| 0x28 | board_dispatch_agent | model_len(2) + model + task_len(2) + task | Dispatch a Board agent task |
+| 0x29 | agent_approve | (empty) | Approve an agent change request |
+| 0x2A | agent_request_changes | (empty) | Request agent changes |
+| 0x2B | agent_dismiss | (empty) | Dismiss agent review UI |
+| 0x2C | change_summary_click | index(4) | Select a change summary entry |
+| 0x2D | file_tree_edit_confirm | text_len(2) + text(text_len) | Confirm file tree inline edit |
+| 0x2E | file_tree_edit_cancel | (empty) | Cancel file tree inline edit |
 | 0x2F | scroll_to_line | line(4) | Scroll viewport to target line (from scroll indicator click/drag) |
+| 0x30 | file_tree_delete | index(2) | Delete a file tree entry |
+| 0x31 | file_tree_rename | index(2) | Rename a file tree entry |
+| 0x32 | file_tree_duplicate | index(2) | Duplicate a file tree entry |
+| 0x33 | file_tree_move | source_index(2) + target_dir_index(2) | Move a file tree entry |
+| 0x34 | system_will_sleep | (empty) | System is about to sleep |
+| 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
+| 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |
+| 0x37 | cmd_cut | (empty) | Execute mode-aware cut from the macOS menu |
 | 0x38 | git_push | (empty) | Push the current branch |
 | 0x39 | git_pull | (empty) | Pull from the upstream branch |
 | 0x3A | git_fetch | (empty) | Fetch remote refs |
 | 0x3B | git_commit_amend | msg_len(2) + msg(msg_len) | Amend the previous commit message |
 | 0x3C | git_pull_and_retry | (empty) | Pull, then retry the failed push |
-| 0x34 | system_will_sleep | (empty) | System is about to sleep |
-| 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
+| 0x3D | file_tree_open_in_split | index(2) | Open a file tree entry in a vertical split |
+| 0x3E | tab_copy_path | tab_id(4) | Copy a tab's file path |
+| 0x3F | hover_open_action | (empty) | Accept the current hover popup action |
 
 ## Theme Color Slots
 
@@ -869,7 +922,18 @@ This convention is enforced on the BEAM side: all new opcodes >= 0x90 must use t
 **Current 0x90+ opcodes:**
 - `OP_CLIPBOARD_WRITE (0x90)` — clipboard write command (length-prefixed)
 - `OP_GUI_INDENT_GUIDES (0x91)` — indent guide positions per window (length-prefixed)
-- `OP_GUI_LINE_SPACING (0x92)` — line spacing multiplier (length-prefixed)
+- `OP_GUI_LINE_SPACING (0x92)` — renderer line spacing multiplier (length-prefixed)
+- `OP_GUI_HOVER_ACTION (0x96)` — optional hover popup action metadata (length-prefixed)
+
+### 0x96 — gui_hover_action
+
+Optional action metadata for the currently visible hover popup. The hover content stays in `gui_hover_popup` (0x81); this sidecar tells native frontends whether to render an action button without parsing display text.
+
+```
+opcode(1) + payload_len(2) + visible(1) + action_len(2) + action(action_len)
+```
+
+When `visible` is `0`, the payload is only `visible(1)` and the frontend clears any current hover action. When `visible` is `1`, `action` is stable action metadata that tells the frontend to render an Open control. The frontend sends the generic `hover_open_action` (0x3F), and the BEAM executes the current popup's stored action.
 
 ### 0x91 — gui_indent_guides
 

@@ -27,6 +27,7 @@ final class HoverPopupState {
     var focused: Bool = false
     var scrollOffset: Int = 0
     var lines: [HoverLine] = []
+    var openActionName: String? = nil
 
     var visibleLines: [HoverLine] {
         Array(lines.dropFirst(min(scrollOffset, lines.count)))
@@ -50,8 +51,17 @@ final class HoverPopupState {
         }
     }
 
+    func setOpenAction(name: String) {
+        openActionName = name.isEmpty ? nil : name
+    }
+
+    func clearOpenAction() {
+        openActionName = nil
+    }
+
     func hide() {
         visible = false
         lines = []
+        openActionName = nil
     }
 }

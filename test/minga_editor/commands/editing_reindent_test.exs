@@ -148,6 +148,16 @@ defmodule MingaEditor.Commands.EditingReindentTest do
   # ── Content verification (simple cases) ────────────────────────────────────
 
   describe "content verification" do
+    test "== applies exact copy-indent fallback to the current line" do
+      content = "  parent\nchild"
+      {editor, buffer} = start_editor(content)
+      send_key(editor, ?j)
+      send_key(editor, ?=)
+      send_key(editor, ?=)
+
+      assert BufferServer.content(buffer) == "  parent\n  child"
+    end
+
     test "== does not corrupt buffer content" do
       content = "hello\nworld\nfoo"
       {editor, buffer} = start_editor(content)

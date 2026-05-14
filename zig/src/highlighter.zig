@@ -1709,6 +1709,14 @@ extern fn tree_sitter_diff() ?*const c.TSLanguage;
 extern fn tree_sitter_elisp() ?*const c.TSLanguage;
 extern fn tree_sitter_clojure() ?*const c.TSLanguage;
 extern fn tree_sitter_objc() ?*const c.TSLanguage;
+extern fn tree_sitter_sql() ?*const c.TSLanguage;
+extern fn tree_sitter_xml() ?*const c.TSLanguage;
+extern fn tree_sitter_ini() ?*const c.TSLanguage;
+extern fn tree_sitter_swift() ?*const c.TSLanguage;
+extern fn tree_sitter_vim() ?*const c.TSLanguage;
+extern fn tree_sitter_proto() ?*const c.TSLanguage;
+extern fn tree_sitter_fish() ?*const c.TSLanguage;
+extern fn tree_sitter_perl() ?*const c.TSLanguage;
 
 /// Helper to resolve a highlight query via the query_loader, which handles
 /// `; inherits:` directives at comptime. All parent queries are prepended
@@ -1780,6 +1788,14 @@ const builtin_grammars = [_]BuiltinGrammar{
     .{ .name = "elisp", .func = tree_sitter_elisp, .query = ql("elisp") },
     .{ .name = "clojure", .func = tree_sitter_clojure, .query = ql("clojure") },
     .{ .name = "objc", .func = tree_sitter_objc, .query = ql("objc") },
+    .{ .name = "sql", .func = tree_sitter_sql, .query = ql("sql"), .fold_query = qlFold("sql"), .indent_query = qlIndent("sql"), .textobject_query = qlTextobj("sql") },
+    .{ .name = "xml", .func = tree_sitter_xml, .query = ql("xml"), .injection_query = qlInj("xml"), .fold_query = qlFold("xml"), .indent_query = qlIndent("xml"), .textobject_query = qlTextobj("xml") },
+    .{ .name = "ini", .func = tree_sitter_ini, .query = ql("ini"), .fold_query = qlFold("ini"), .indent_query = qlIndent("ini"), .textobject_query = qlTextobj("ini") },
+    .{ .name = "swift", .func = tree_sitter_swift, .query = ql("swift"), .injection_query = qlInj("swift"), .fold_query = qlFold("swift"), .indent_query = qlIndent("swift"), .textobject_query = qlTextobj("swift") },
+    .{ .name = "vim", .func = tree_sitter_vim, .query = ql("vim"), .injection_query = qlInj("vim"), .fold_query = qlFold("vim"), .indent_query = qlIndent("vim"), .textobject_query = qlTextobj("vim") },
+    .{ .name = "protobuf", .func = tree_sitter_proto, .query = ql("protobuf"), .injection_query = qlInj("protobuf"), .fold_query = qlFold("protobuf"), .indent_query = qlIndent("protobuf"), .textobject_query = qlTextobj("protobuf") },
+    .{ .name = "fish", .func = tree_sitter_fish, .query = ql("fish"), .injection_query = qlInj("fish"), .indent_query = qlIndent("fish"), .textobject_query = qlTextobj("fish") },
+    .{ .name = "perl", .func = tree_sitter_perl, .query = ql("perl"), .injection_query = qlInj("perl"), .fold_query = qlFold("perl"), .indent_query = qlIndent("perl"), .textobject_query = qlTextobj("perl") },
 };
 
 // ── Tests ─────────────────────────────────────────────────────────────────
@@ -1855,6 +1871,151 @@ test "highlighter: parse JSON" {
     try std.testing.expect(hl.setLanguage("json"));
     try hl.parse("{\"key\": 42}");
     try std.testing.expect(hl.tree != null);
+}
+
+test "highlighter: missing grammar languages parse and highlight" {
+    const Sample = struct {
+        name: []const u8,
+        source: []const u8,
+        require_structural_queries: bool = false,
+    };
+    const samples = [_]Sample{
+        .{ .name = "sql", .source = "SELECT id, name FROM users WHERE active = true;\n", .require_structural_queries = true },
+        .{ .name = "xml", .source = "<root><item name=\"one\">value</item></root>\n", .require_structural_queries = true },
+        .{ .name = "ini", .source = "[core]\neditor = minga\n", .require_structural_queries = true },
+        .{ .name = "swift", .source = "func greet(name: String) { print(name) }\n", .require_structural_queries = true },
+        .{ .name = "vim", .source = "function! Test()\n  echo \"hi\"\nendfunction\n", .require_structural_queries = true },
+        .{ .name = "protobuf", .source = "syntax = \"proto3\";\nmessage User { string name = 1; }\n" },
+        .{ .name = "fish", .source = "function greet\n  echo hi\nend\n" },
+        .{ .name = "perl", .source = "sub greet { print \"hi\"; }\n" },
+    };
+
+    for (samples) |sample| {
+        var hl = try Highlighter.init(std.testing.allocator);
+        defer hl.deinit();
+
+        try std.testing.expect(hl.setLanguage(sample.name));
+        try std.testing.expect(hl.query != null);
+        if (sample.require_structural_queries) {
+            try std.testing.expect(hl.fold_query != null);
+            try std.testing.expect(hl.indent_query != null);
+            try std.testing.expect(hl.textobject_query != null);
+        }
+
+        try hl.parse(sample.source);
+        var result = try hl.highlightWithInjections();
+        defer result.deinit();
+        try std.testing.expect(result.spans.len > 0);
+    }
+}
+
+test "highlighter: new indent queries use supported captures" {
+    var sql = try Highlighter.init(std.testing.allocator);
+    defer sql.deinit();
+
+    try std.testing.expect(sql.setLanguage("sql"));
+    try sql.parse("SELECT\n  id\nFROM users;\n");
+    try std.testing.expect(sql.computeIndent(1) > 0);
+
+    var swift = try Highlighter.init(std.testing.allocator);
+    defer swift.deinit();
+
+    try std.testing.expect(swift.setLanguage("swift"));
+    try swift.parse("class Greeter {\n  let name = \"Minga\"\n}\n");
+    try std.testing.expect(swift.computeIndent(1) > 0);
+
+    try std.testing.expect(swift.setLanguage("swift"));
+    try swift.parse("struct Box<\n  T\n> {\n}\n");
+    try std.testing.expect(swift.computeIndent(1) > 0);
+    try std.testing.expectEqual(@as(i32, 0), swift.computeIndent(2));
+}
+
+test "highlighter: SQL numeric predicates classify integer and float literals" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("sql"));
+
+    const source = "SELECT 42, 3.14, 'x';\n";
+    try hl.parse(source);
+
+    var result = try hl.highlightWithInjections();
+    defer result.deinit();
+
+    var number_id: ?u16 = null;
+    var float_id: ?u16 = null;
+    for (result.capture_names, 0..) |name, i| {
+        if (std.mem.eql(u8, name, "number")) number_id = @intCast(i);
+        if (std.mem.eql(u8, name, "float")) float_id = @intCast(i);
+    }
+
+    try std.testing.expect(number_id != null);
+    try std.testing.expect(float_id != null);
+
+    const integer_start = std.mem.indexOf(u8, source, "42") orelse unreachable;
+    const float_start = std.mem.indexOf(u8, source, "3.14") orelse unreachable;
+
+    var found_integer = false;
+    var found_float = false;
+    for (result.spans) |span| {
+        if (span.start_byte == integer_start and span.end_byte == integer_start + 2 and span.capture_id == number_id.?) {
+            found_integer = true;
+        }
+        if (span.start_byte == float_start and span.end_byte == float_start + 4 and span.capture_id == float_id.?) {
+            found_float = true;
+        }
+    }
+
+    try std.testing.expect(found_integer);
+    try std.testing.expect(found_float);
+}
+
+test "highlighter: Perl shebang predicate does not tag ordinary first comments as preproc" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("perl"));
+
+    const comment_source = "# ordinary comment\nsub greet { print \"hi\"; }\n";
+    try hl.parse(comment_source);
+
+    var comment_result = try hl.highlightWithInjections();
+    defer comment_result.deinit();
+
+    var preproc_id: ?u16 = null;
+    for (comment_result.capture_names, 0..) |name, i| {
+        if (std.mem.eql(u8, name, "preproc")) preproc_id = @intCast(i);
+    }
+    try std.testing.expect(preproc_id != null);
+
+    for (comment_result.spans) |span| {
+        if (span.start_byte == 0 and span.capture_id == preproc_id.?) {
+            return error.OrdinaryCommentTaggedAsPreproc;
+        }
+    }
+
+    try std.testing.expect(hl.setLanguage("perl"));
+
+    const shebang_source = "#!/usr/bin/env perl\nsub greet { print \"hi\"; }\n";
+    try hl.parse(shebang_source);
+
+    var shebang_result = try hl.highlightWithInjections();
+    defer shebang_result.deinit();
+
+    preproc_id = null;
+    for (shebang_result.capture_names, 0..) |name, i| {
+        if (std.mem.eql(u8, name, "preproc")) preproc_id = @intCast(i);
+    }
+    try std.testing.expect(preproc_id != null);
+
+    const shebang_end = std.mem.indexOf(u8, shebang_source, "\n") orelse unreachable;
+    var found_shebang = false;
+    for (shebang_result.spans) |span| {
+        if (span.start_byte == 0 and span.end_byte == shebang_end and span.capture_id == preproc_id.?) {
+            found_shebang = true;
+        }
+    }
+    try std.testing.expect(found_shebang);
 }
 
 test "highlighter: setLanguage invalidates tree, restores cached query" {

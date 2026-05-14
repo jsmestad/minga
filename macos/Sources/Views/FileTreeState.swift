@@ -79,10 +79,11 @@ final class FileTreeState {
         return (projectRoot as NSString).appendingPathComponent(entry.relPath)
     }
 
-    /// Hide the file tree (BEAM toggled it off).
-    func hide() {
+    /// Hide the file tree (BEAM toggled it off) and keep the shared window chrome in sync with the latest project root.
+    func hide(rootPath: String = "") {
         visible = false
         entries = []
-        projectRoot = ""
+        editingIndex = nil
+        projectRoot = rootPath
     }
 }

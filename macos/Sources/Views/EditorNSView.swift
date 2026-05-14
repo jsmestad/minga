@@ -11,6 +11,12 @@ import AppKit
 import os
 import MetalKit
 
+private enum DividerCursorState: Equatable {
+    case none
+    case vertical
+    case horizontal
+}
+
 /// The main editor view. Uses MTKView's built-in display link for
 /// vsync-driven rendering with automatic frame coalescing.
 final class EditorNSView: MTKView {
@@ -29,10 +35,19 @@ final class EditorNSView: MTKView {
     /// GUI state for semantic window content (0x80) and theme colors.
     var guiState: GUIState?
 
+    /// Notifies SwiftUI app state when the NSWindow enters or exits full-screen mode.
+    var onFullScreenChanged: ((Bool) -> Void)?
+
+    /// Called when the view moves to a display with a different backing scale factor.
+    var onScaleFactorChanged: ((CGFloat) -> Void)?
+
     /// Tracks BEAM responsiveness and handles Ctrl-G recovery.
     var recoveryManager: RecoveryManager?
 
     private var trackingArea: NSTrackingArea?
+
+    /// Whether the current right-click was consumed by a native context menu.
+    private var contextMenuShownForRightClick = false
 
     /// IME composition state (marked text tracking).
     private var imeComposition = IMEComposition()
@@ -45,6 +60,12 @@ final class EditorNSView: MTKView {
     /// redundant mouse move events.
     private var lastMoveRow: Int16 = -1
     private var lastMoveCol: Int16 = -1
+
+    /// Current resize cursor pushed for split divider hover or drag.
+    private var dividerCursorState: DividerCursorState = .none
+
+    /// Divider direction captured at mouse-down so drag keeps the resize cursor.
+    private var dividerDragState: DividerCursorState = .none
 
     /// Whether the ready event has been sent to the BEAM. Deferred until
     /// setFrameSize so we send the actual window dimensions, not hardcoded defaults.
@@ -163,6 +184,8 @@ final class EditorNSView: MTKView {
         scrollFadeWorkItem = nil
         spaceGraceTimer?.cancel()
         spaceGraceTimer = nil
+        dividerDragState = .none
+        setDividerCursorState(.none)
         removeWindowObservers()
         removeAgentKeyMonitor()
         firstResponderGuard = nil
@@ -296,9 +319,9 @@ final class EditorNSView: MTKView {
 
     // MARK: - Font update
 
-    /// Called when the BEAM sends a set_font command. Replaces the font face,
-    /// resizes the grid to match new cell dimensions, and sends a resize event
-    /// to the BEAM so it re-renders with the new grid size.
+    /// Called when the BEAM sends a set_font command or the display scale changes.
+    /// Replaces the font face, resizes the grid to match new cell dimensions,
+    /// and sends a resize event to the BEAM so it re-renders with the new grid size.
     func updateFont(_ newFace: FontFace) {
         self.fontFace = newFace
 
@@ -336,13 +359,16 @@ final class EditorNSView: MTKView {
             return
         }
 
-        // Match the Metal layer's scale to the window's backing scale.
-        (layer as? CAMetalLayer)?.contentsScale = window.backingScaleFactor
+        // Correct the startup scale immediately when the window lands on a display different from NSScreen.main. The first setFrameSize call still owns the initial ready event.
+        displayConfigurationChanged(newScale: window.backingScaleFactor, sendDimensions: false)
 
         // Restore window position and size from previous session.
         // This fires before the window is made key/visible, so the
         // saved frame is applied without a visible position jump.
         window.setFrameAutosaveName("MingaEditorWindow")
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.styleMask.insert(.fullSizeContentView)
 
         installWindowObserversIfNeeded(for: window)
 
@@ -353,6 +379,57 @@ final class EditorNSView: MTKView {
         observeScrollerStyle()
         observeAccessibilityChanges()
         resetCursorBlink()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        guard let window else { return }
+        displayConfigurationChanged(newScale: window.backingScaleFactor)
+    }
+
+    /// Applies a live display configuration update to the Metal surface.
+    func displayConfigurationChanged(newScale: CGFloat, forceResizeEvent: Bool = false, sendDimensions: Bool = true) {
+        updateMetalBackingScale(newScale)
+        let scaleChanged = abs(fontFace.scale - newScale) > 0.001
+
+        if sendDimensions && (scaleChanged || forceResizeEvent) {
+            sendCurrentGridSize(reason: "Display configuration changed")
+        }
+
+        if scaleChanged {
+            onScaleFactorChanged?(newScale)
+        } else if forceResizeEvent {
+            renderFrame()
+        }
+    }
+
+    /// Updates CAMetalLayer and drawable sizing to match the current display scale.
+    private func updateMetalBackingScale(_ scale: CGFloat) {
+        (layer as? CAMetalLayer)?.contentsScale = scale
+
+        let pixelWidth = bounds.width * scale
+        let pixelHeight = bounds.height * scale
+        guard pixelWidth > 0, pixelHeight > 0 else { return }
+        drawableSize = CGSize(width: pixelWidth, height: pixelHeight)
+    }
+
+    /// Sends the current grid dimensions to the BEAM after an external display change.
+    private func sendCurrentGridSize(reason: String) {
+        guard frame.width > 0, frame.height > 0 else { return }
+
+        let gutterPad: CGFloat = dispatcher.frameState.gutterCol > 0 ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
+        let cols = UInt16(max((frame.width - gutterPad) / cellWidth, 1))
+        let rows = UInt16(max(frame.height / cellHeight, 1))
+        dispatcher.frameState.resize(newCols: cols, newRows: rows)
+
+        if readySent {
+            encoder.sendResize(cols: cols, rows: rows)
+        } else {
+            readySent = true
+            encoder.sendReady(cols: cols, rows: rows)
+        }
+
+        PortLogger.info("\(reason): \(cols)x\(rows) cells")
     }
 
     /// Registers for key-window notifications exactly once per window.
@@ -374,6 +451,19 @@ final class EditorNSView: MTKView {
             name: NSWindow.didResignKeyNotification,
             object: window
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidEnterFullScreen),
+            name: NSWindow.didEnterFullScreenNotification,
+            object: window
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidExitFullScreen),
+            name: NSWindow.didExitFullScreenNotification,
+            object: window
+        )
+        onFullScreenChanged?(window.styleMask.contains(.fullScreen))
 
         firstResponderGuard = FirstResponderGuard(window: window, editorView: self)
     }
@@ -391,6 +481,17 @@ final class EditorNSView: MTKView {
             name: NSWindow.didResignKeyNotification,
             object: observedWindow
         )
+        NotificationCenter.default.removeObserver(
+            self,
+            name: NSWindow.didEnterFullScreenNotification,
+            object: observedWindow
+        )
+        NotificationCenter.default.removeObserver(
+            self,
+            name: NSWindow.didExitFullScreenNotification,
+            object: observedWindow
+        )
+        onFullScreenChanged?(false)
         self.observedWindow = nil
     }
 
@@ -409,6 +510,14 @@ final class EditorNSView: MTKView {
     @objc private func windowDidBecomeKey(_ notification: Notification) {
         claimFirstResponder()
         resetCursorBlink()
+    }
+
+    @objc private func windowDidEnterFullScreen(_ notification: Notification) {
+        onFullScreenChanged?(true)
+    }
+
+    @objc private func windowDidExitFullScreen(_ notification: Notification) {
+        onFullScreenChanged?(false)
     }
 
     @objc private func windowDidResignKey(_ notification: Notification) {
@@ -507,7 +616,7 @@ final class EditorNSView: MTKView {
         }
         let area = NSTrackingArea(
             rect: bounds,
-            options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
             owner: self,
             userInfo: nil
         )
@@ -860,6 +969,10 @@ final class EditorNSView: MTKView {
         }
 
         resetCursorBlink()
+        dividerDragState = dividerHitState(at: point)
+        if dividerDragState != .none {
+            setDividerCursorState(dividerDragState)
+        }
         let (row, col) = cellPosition(from: event)
         let cc = UInt8(clamping: event.clickCount)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_LEFT,
@@ -874,24 +987,87 @@ final class EditorNSView: MTKView {
             return
         }
 
+        let point = convert(event.locationInWindow, from: nil)
         let (row, col) = cellPosition(from: event)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_LEFT,
                                modifiers: modifierBits(from: event.modifierFlags),
                                eventType: MOUSE_RELEASE)
+        if dividerDragState != .none {
+            dividerDragState = .none
+            setDividerCursorState(dividerHitState(at: point))
+        }
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        resetCursorBlink()
         let (row, col) = cellPosition(from: event)
+        let cc = UInt8(clamping: event.clickCount)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_RIGHT,
                                modifiers: modifierBits(from: event.modifierFlags),
-                               eventType: MOUSE_PRESS)
+                               eventType: MOUSE_PRESS, clickCount: cc)
+        contextMenuShownForRightClick = true
+        NSMenu.popUpContextMenu(buildEditorContextMenu(), with: event, for: self)
     }
 
     override func rightMouseUp(with event: NSEvent) {
+        if contextMenuShownForRightClick {
+            contextMenuShownForRightClick = false
+            return
+        }
+
         let (row, col) = cellPosition(from: event)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_RIGHT,
                                modifiers: modifierBits(from: event.modifierFlags),
                                eventType: MOUSE_RELEASE)
+    }
+
+    private func buildEditorContextMenu() -> NSMenu {
+        let menu = NSMenu(title: "Editor")
+        menu.autoenablesItems = false
+        addEditorMenuItem("Cut", action: "cut", to: menu)
+        addEditorMenuItem("Copy", action: "copy", to: menu)
+        addEditorMenuItem("Paste", action: "paste", to: menu)
+        addEditorMenuItem("Select All", action: "select_all", to: menu)
+        menu.addItem(.separator())
+
+        let hasLsp = statusBarState?.hasLsp ?? false
+        addEditorMenuItem("Go to Definition", action: "goto_definition", to: menu, enabled: hasLsp)
+        addEditorMenuItem("Peek Definition", action: "peek_definition", to: menu, enabled: hasLsp)
+        addEditorMenuItem("Find References", action: "find_references", to: menu, enabled: hasLsp)
+        addEditorMenuItem("Rename Symbol", action: "rename_symbol", to: menu, enabled: hasLsp)
+        menu.addItem(.separator())
+
+        addEditorMenuItem("Toggle Comment", action: "toggle_comment_line", to: menu)
+        addEditorMenuItem("Format Document", action: "format_buffer", to: menu)
+        return menu
+    }
+
+    private func addEditorMenuItem(_ title: String, action: String, to menu: NSMenu, enabled: Bool = true) {
+        let item = NSMenuItem(title: title, action: #selector(handleEditorContextMenuItem(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = action
+        item.isEnabled = enabled
+        menu.addItem(item)
+    }
+
+    @objc private func handleEditorContextMenuItem(_ sender: NSMenuItem) {
+        guard let action = sender.representedObject as? String else { return }
+
+        switch action {
+        case "cut":
+            encoder.sendCmdCut()
+        case "copy":
+            encoder.sendCmdCopy()
+        case "paste":
+            pasteFromClipboard()
+        default:
+            encoder.sendExecuteCommand(name: action)
+        }
+    }
+
+    private func pasteFromClipboard() {
+        guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else { return }
+        encoder.sendPasteEvent(text: text)
     }
 
     override func otherMouseDown(with event: NSEvent) {
@@ -916,6 +1092,9 @@ final class EditorNSView: MTKView {
             return
         }
 
+        if dividerDragState != .none {
+            setDividerCursorState(dividerDragState)
+        }
         let (row, col) = cellPosition(from: event)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_LEFT,
                                modifiers: modifierBits(from: event.modifierFlags),
@@ -923,6 +1102,8 @@ final class EditorNSView: MTKView {
     }
 
     override func mouseMoved(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        setDividerCursorState(dividerHitState(at: point))
         let (row, col) = cellPosition(from: event)
         guard row != lastMoveRow || col != lastMoveCol else { return }
         lastMoveRow = row
@@ -930,6 +1111,13 @@ final class EditorNSView: MTKView {
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_NONE,
                                modifiers: modifierBits(from: event.modifierFlags),
                                eventType: MOUSE_MOTION)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        if dividerDragState == .none {
+            setDividerCursorState(.none)
+        }
+        super.mouseExited(with: event)
     }
 
     /// Scroll accumulator for smooth trackpad scrolling. Extracted into a
@@ -1027,7 +1215,7 @@ final class EditorNSView: MTKView {
 
         // Vertical: smooth sub-line pixel offset
         let vEvents = scrollAccumulator.accumulateVertical(
-            deltaY: event.scrollingDeltaY, cellHeight: cellHeight)
+            deltaY: event.scrollingDeltaY, cellHeight: effectiveCellHeight)
         for e in vEvents {
             sendScrollEvent(e, row: row, col: col, mods: mods)
         }
@@ -1111,10 +1299,63 @@ final class EditorNSView: MTKView {
 
     // MARK: - Helpers
 
+    private var effectiveCellHeight: CGFloat {
+        cellHeight * CGFloat(dispatcher.frameState.lineSpacing)
+    }
+
+    private var dividerHitHalfTolerance: CGFloat {
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1.0
+        return 2.5 / scale
+    }
+
+    private func dividerHitState(at point: NSPoint) -> DividerCursorState {
+        let fs = dispatcher.frameState
+        let hitHalfTolerance = dividerHitHalfTolerance
+        let displayCellH = effectiveCellHeight
+
+        for vertical in fs.verticalSeparators {
+            let x = CGFloat(vertical.col) * cellWidth
+            let startY = CGFloat(vertical.startRow) * displayCellH
+            let endY = CGFloat(Int(vertical.endRow) + 1) * displayCellH
+            if abs(point.x - x) <= hitHalfTolerance && point.y >= startY && point.y < endY {
+                return .vertical
+            }
+        }
+
+        for horizontal in fs.horizontalSeparators {
+            let x = CGFloat(horizontal.col) * cellWidth
+            let y = CGFloat(horizontal.row) * displayCellH + (displayCellH * 0.5) - (0.5 / (window?.backingScaleFactor ?? 1.0))
+            let width = CGFloat(horizontal.width) * cellWidth
+            if abs(point.y - y) <= hitHalfTolerance && point.x >= x && point.x < x + width {
+                return .horizontal
+            }
+        }
+
+        return .none
+    }
+
+    private func setDividerCursorState(_ nextState: DividerCursorState) {
+        guard dividerCursorState != nextState else { return }
+        if dividerCursorState != .none {
+            NSCursor.pop()
+        }
+
+        switch nextState {
+        case .none:
+            break
+        case .vertical:
+            NSCursor.resizeLeftRight.push()
+        case .horizontal:
+            NSCursor.resizeUpDown.push()
+        }
+
+        dividerCursorState = nextState
+    }
+
     private func cellPosition(from event: NSEvent) -> (row: Int16, col: Int16) {
         let point = convert(event.locationInWindow, from: nil)
         let col = Int16(point.x / cellWidth)
-        let row = Int16(point.y / cellHeight)
+        let row = Int16(point.y / effectiveCellHeight)
         return (row, col)
     }
 }

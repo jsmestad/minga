@@ -27,7 +27,11 @@ defmodule MingaEditor.HoverPopup do
             anchor_row: 0,
             anchor_col: 0,
             scroll_offset: 0,
-            focused: false
+            focused: false,
+            open_action: nil
+
+  @typedoc "Action available from a focused hover popup."
+  @type open_action :: atom() | {:goto_location, String.t(), non_neg_integer(), non_neg_integer()}
 
   @typedoc "A hover popup state."
   @type t :: %__MODULE__{
@@ -35,7 +39,8 @@ defmodule MingaEditor.HoverPopup do
           anchor_row: non_neg_integer(),
           anchor_col: non_neg_integer(),
           scroll_offset: non_neg_integer(),
-          focused: boolean()
+          focused: boolean(),
+          open_action: open_action() | nil
         }
 
   @max_width 60
@@ -67,6 +72,28 @@ defmodule MingaEditor.HoverPopup do
   @doc "Focus into the hover popup for scrolling."
   @spec focus(t()) :: t()
   def focus(%__MODULE__{} = popup), do: %{popup | focused: true}
+
+  @doc "Sets the action to execute when the popup's Open action is accepted."
+  @spec with_open_action(t(), open_action()) :: t()
+  def with_open_action(%__MODULE__{} = popup, action) when is_atom(action) do
+    %{popup | open_action: action}
+  end
+
+  def with_open_action(%__MODULE__{} = popup, {:goto_location, uri, line, col} = action)
+      when is_binary(uri) and is_integer(line) and line >= 0 and is_integer(col) and col >= 0 do
+    %{popup | open_action: action}
+  end
+
+  @doc "Returns true when the popup exposes an Open action."
+  @spec open_action?(t()) :: boolean()
+  def open_action?(%__MODULE__{open_action: nil}), do: false
+  def open_action?(%__MODULE__{open_action: _action}), do: true
+
+  @doc "Returns a stable action name for native frontend metadata."
+  @spec open_action_name(open_action() | nil) :: String.t()
+  def open_action_name(nil), do: ""
+  def open_action_name(action) when is_atom(action), do: Atom.to_string(action)
+  def open_action_name({:goto_location, _uri, _line, _col}), do: "goto_location"
 
   @doc "Scroll content down (later lines visible)."
   @spec scroll_down(t()) :: t()

@@ -33,6 +33,12 @@ defmodule MingaEditor.State.Windows do
   def split?(%__MODULE__{tree: {:leaf, _}}), do: false
   def split?(%__MODULE__{tree: {:split, _, _, _, _}}), do: true
 
+  @doc "Replaces the window layout tree."
+  @spec set_tree(t(), WindowTree.t() | nil) :: t()
+  def set_tree(%__MODULE__{} = windows, tree) do
+    %{windows | tree: tree}
+  end
+
   @doc """
   Updates the window struct for the given window id.
 

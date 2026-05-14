@@ -1,7 +1,9 @@
 /// Protocol encode/decode round-trip tests.
 
 import Testing
+import AppKit
 import Foundation
+import QuartzCore
 import os
 
 @Suite("Protocol Decoder")
@@ -282,8 +284,11 @@ final class SpyEncoder: InputEncoder, Sendable {
     enum GUIAction: Sendable, Equatable {
         case selectTab(id: UInt32)
         case closeTab(id: UInt32)
+        case tabCopyPath(id: UInt32)
+        case hoverOpenAction
         case fileTreeClick(index: UInt16)
         case fileTreeToggle(index: UInt16)
+        case fileTreeOpenInSplit(index: UInt16)
         case fileTreeNewFile(parentIndex: UInt16)
         case fileTreeNewFolder(parentIndex: UInt16)
         case fileTreeEditConfirm(text: String)
@@ -375,8 +380,11 @@ final class SpyEncoder: InputEncoder, Sendable {
     // GUI actions: all recorded for test assertions
     func sendSelectTab(id: UInt32) { state.withLock { $0.guiActions.append(.selectTab(id: id)) } }
     func sendCloseTab(id: UInt32) { state.withLock { $0.guiActions.append(.closeTab(id: id)) } }
+    func sendTabCopyPath(id: UInt32) { state.withLock { $0.guiActions.append(.tabCopyPath(id: id)) } }
+    func sendHoverOpenAction() { state.withLock { $0.guiActions.append(.hoverOpenAction) } }
     func sendFileTreeClick(index: UInt16) { state.withLock { $0.guiActions.append(.fileTreeClick(index: index)) } }
     func sendFileTreeToggle(index: UInt16) { state.withLock { $0.guiActions.append(.fileTreeToggle(index: index)) } }
+    func sendFileTreeOpenInSplit(index: UInt16) { state.withLock { $0.guiActions.append(.fileTreeOpenInSplit(index: index)) } }
     func sendFileTreeNewFile(parentIndex: UInt16) { state.withLock { $0.guiActions.append(.fileTreeNewFile(parentIndex: parentIndex)) } }
     func sendFileTreeNewFolder(parentIndex: UInt16) { state.withLock { $0.guiActions.append(.fileTreeNewFolder(parentIndex: parentIndex)) } }
     func sendFileTreeEditConfirm(text: String) { state.withLock { $0.guiActions.append(.fileTreeEditConfirm(text: text)) } }
@@ -448,9 +456,9 @@ final class SpyEncoder: InputEncoder, Sendable {
 @Suite("EditorNSView Resize")
 struct EditorNSViewResizeTests {
     /// Helper to create an EditorNSView with CoreText renderer.
-    @MainActor private func makeView(spy: SpyEncoder, cols: UInt16 = 80, rows: UInt16 = 24) -> EditorNSView? {
-        let face = FontFace(name: "Menlo", size: 13.0, scale: 1.0)
-        let fm = FontManager(name: "Menlo", size: 13.0, scale: 1.0)
+    @MainActor private func makeView(spy: SpyEncoder, cols: UInt16 = 80, rows: UInt16 = 24, scale: CGFloat = 1.0) -> EditorNSView? {
+        let face = FontFace(name: "Menlo", size: 13.0, scale: scale)
+        let fm = FontManager(name: "Menlo", size: 13.0, scale: scale)
         let guiState = GUIState()
         let disp = CommandDispatcher(cols: cols, rows: rows, guiState: guiState)
         guard let ctRenderer = CoreTextMetalRenderer() else { return nil }
@@ -502,6 +510,59 @@ struct EditorNSViewResizeTests {
         #expect(spy.resizeCalls[0].rows >= 1)
         #expect(view.dispatcher.frameState.cols >= 1)
         #expect(view.dispatcher.frameState.rows >= 1)
+    }
+
+    @Test("viewDidMoveToWindow corrects initial scale mismatch without sending ready early")
+    @MainActor func viewDidMoveToWindowCorrectsInitialScaleMismatch() throws {
+        let spy = SpyEncoder()
+        guard let view = makeView(spy: spy, scale: 0.5) else { return }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+
+        var callbackScale: CGFloat?
+        view.onScaleFactorChanged = { newScale in
+            callbackScale = newScale
+        }
+
+        window.contentView = view
+        defer { window.contentView = nil }
+
+        let expectedScale = window.backingScaleFactor
+        #expect(callbackScale == expectedScale)
+        #expect((view.layer as? CAMetalLayer)?.contentsScale == expectedScale)
+        #expect(spy.readyCalls.isEmpty)
+    }
+
+    @Test("viewDidChangeBackingProperties calls scale callback when scale differs")
+    @MainActor func backingPropertyChangeCallsScaleCallback() throws {
+        let spy = SpyEncoder()
+        guard let view = makeView(spy: spy, scale: 0.5) else { return }
+        view.setFrameSize(NSSize(width: 400, height: 300))
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = view
+        defer { window.contentView = nil }
+
+        var callbackScale: CGFloat?
+        view.onScaleFactorChanged = { newScale in
+            callbackScale = newScale
+        }
+
+        let expectedScale = window.backingScaleFactor
+        view.viewDidChangeBackingProperties()
+
+        #expect(callbackScale == expectedScale)
+        #expect((view.layer as? CAMetalLayer)?.contentsScale == expectedScale)
     }
 }
 

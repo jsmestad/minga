@@ -46,7 +46,7 @@
       "measure_text":        { "hex": "0x27" }
     },
     "gui_chrome": {
-      "description": "BEAM → GUI-only chrome commands (0x70-0x7E range)",
+      "description": "BEAM → GUI-only chrome commands (0x70-0x7F range)",
       "gui_file_tree":      { "hex": "0x70" },
       "gui_tab_bar":        { "hex": "0x71" },
       "gui_which_key":      { "hex": "0x72" },
@@ -61,11 +61,22 @@
       "gui_gutter":         { "hex": "0x7B" },
       "gui_bottom_panel":   { "hex": "0x7C" },
       "gui_picker_preview": { "hex": "0x7D" },
-      "gui_tool_manager":   { "hex": "0x7E" }
+      "gui_tool_manager":   { "hex": "0x7E" },
+      "gui_minibuffer":     { "hex": "0x7F" }
     },
     "gui_semantic": {
-      "description": "BEAM → GUI semantic rendering (0x80+ range)",
-      "gui_window_content": { "hex": "0x80" }
+      "description": "BEAM → GUI semantic rendering and overlays (0x80+ range)",
+      "gui_window_content":  { "hex": "0x80" },
+      "gui_hover_popup":     { "hex": "0x81" },
+      "gui_signature_help":  { "hex": "0x82" },
+      "gui_float_popup":     { "hex": "0x83" },
+      "gui_split_separators": { "hex": "0x84" },
+      "gui_git_status":      { "hex": "0x85" },
+      "gui_agent_groups":    { "hex": "0x86" },
+      "gui_board":           { "hex": "0x87" },
+      "gui_agent_context":   { "hex": "0x88" },
+      "gui_change_summary":  { "hex": "0x89" },
+      "gui_hover_action":    { "hex": "0x96" }
     }
   },
   "gui_actions": {
@@ -91,6 +102,8 @@
     "tool_update":          { "hex": "0x13" },
     "tool_dismiss":         { "hex": "0x14" },
     "agent_tool_toggle":    { "hex": "0x15" },
+    "execute_command":      { "hex": "0x16" },
+    "minibuffer_select":    { "hex": "0x17" },
     "git_stage_file":       { "hex": "0x18" },
     "git_unstage_file":     { "hex": "0x19" },
     "git_discard_file":     { "hex": "0x1A" },
@@ -98,12 +111,38 @@
     "git_unstage_all":      { "hex": "0x1C" },
     "git_commit":           { "hex": "0x1D" },
     "git_open_file":        { "hex": "0x1E" },
+    "agent_group_rename":   { "hex": "0x1F" },
+    "agent_group_set_icon": { "hex": "0x20" },
+    "agent_group_close":    { "hex": "0x21" },
+    "space_leader_chord":   { "hex": "0x22" },
+    "space_leader_retract": { "hex": "0x23" },
+    "find_pasteboard_search": { "hex": "0x24" },
+    "board_select_card":    { "hex": "0x25" },
+    "board_close_card":     { "hex": "0x26" },
+    "board_reorder":        { "hex": "0x27" },
+    "board_dispatch_agent": { "hex": "0x28" },
+    "agent_approve":        { "hex": "0x29" },
+    "agent_request_changes": { "hex": "0x2A" },
+    "agent_dismiss":        { "hex": "0x2B" },
+    "change_summary_click": { "hex": "0x2C" },
+    "file_tree_edit_confirm": { "hex": "0x2D" },
+    "file_tree_edit_cancel": { "hex": "0x2E" },
+    "scroll_to_line":       { "hex": "0x2F" },
+    "file_tree_delete":     { "hex": "0x30" },
+    "file_tree_rename":     { "hex": "0x31" },
+    "file_tree_duplicate":  { "hex": "0x32" },
+    "file_tree_move":       { "hex": "0x33" },
     "system_will_sleep":    { "hex": "0x34" },
     "system_did_wake":      { "hex": "0x35" },
+    "cmd_copy":             { "hex": "0x36" },
+    "cmd_cut":              { "hex": "0x37" },
     "git_push":             { "hex": "0x38" },
     "git_pull":             { "hex": "0x39" },
     "git_fetch":            { "hex": "0x3A" },
     "git_commit_amend":     { "hex": "0x3B" },
-    "git_pull_and_retry":   { "hex": "0x3C" }
+    "git_pull_and_retry":   { "hex": "0x3C" },
+    "file_tree_open_in_split": { "hex": "0x3D" },
+    "tab_copy_path":        { "hex": "0x3E" },
+    "hover_open_action":    { "hex": "0x3F" }
   }
 }

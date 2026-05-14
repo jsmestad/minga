@@ -11,6 +11,7 @@ defmodule MingaAgent.Markdown do
   - `**bold**` and `__bold__`
   - `*italic*` and `_italic_`
   - `` `inline code` ``
+  - `[link text](https://example.com)`
   - Fenced code blocks (``` with optional language tag)
   - `# Headers` (levels 1-3)
   - `- list items` and `* list items`
@@ -31,6 +32,7 @@ defmodule MingaAgent.Markdown do
           | :italic
           | :bold_italic
           | :code
+          | {:link, String.t()}
           | :code_block
           | {:code_content, String.t()}
           | {:syntax, Minga.Core.Face.t()}
@@ -157,48 +159,62 @@ defmodule MingaAgent.Markdown do
 
   # Also match longer horizontal rules
   defp parse_lines([line | rest], acc, nil) do
-    trimmed = String.trim(line)
+    parsed = parse_non_code_line(line, String.trim(line))
+    parse_lines(rest, [parsed | acc], nil)
+  end
 
-    cond do
-      match?("###" <> _, trimmed) ->
-        text = trimmed |> String.trim_leading("#") |> String.trim()
-        parse_lines(rest, [{[{text, :header3}], :header} | acc], nil)
+  @spec parse_non_code_line(String.t(), String.t()) :: parsed_line()
+  defp parse_non_code_line(_line, "###" <> _ = trimmed), do: parse_header_line(trimmed, :header3)
+  defp parse_non_code_line(_line, "##" <> _ = trimmed), do: parse_header_line(trimmed, :header2)
+  defp parse_non_code_line(_line, "#" <> _ = trimmed), do: parse_header_line(trimmed, :header1)
 
-      match?("##" <> _, trimmed) ->
-        text = trimmed |> String.trim_leading("#") |> String.trim()
-        parse_lines(rest, [{[{text, :header2}], :header} | acc], nil)
+  defp parse_non_code_line(_line, ">" <> _ = trimmed) do
+    text = trimmed |> String.replace_prefix(">", "") |> String.trim_leading()
+    segments = parse_inline("│ " <> text)
+    styles = Enum.map(segments, &blockquote_segment/1)
+    {styles, :blockquote}
+  end
 
-      match?("#" <> _, trimmed) ->
-        text = trimmed |> String.trim_leading("#") |> String.trim()
-        parse_lines(rest, [{[{text, :header1}], :header} | acc], nil)
+  defp parse_non_code_line(line, "- " <> text), do: parse_bullet_line(line, text)
+  defp parse_non_code_line(line, "* " <> text), do: parse_bullet_line(line, text)
 
-      match?(">" <> _, trimmed) ->
-        text = String.trim_leading(trimmed, "> ")
-        segments = parse_inline("│ " <> text)
-        styles = Enum.map(segments, fn {t, _s} -> {t, :blockquote} end)
-        parse_lines(rest, [{styles, :blockquote} | acc], nil)
+  defp parse_non_code_line(line, trimmed) do
+    parse_numbered_line(Regex.match?(~r/^\d+\.\s/, trimmed), line, trimmed)
+  end
 
-      match?("- " <> _, trimmed) or match?("* " <> _, trimmed) ->
-        text = String.slice(trimmed, 2..-1//1)
-        indent_level = div(indent_width(line), 2)
-        prefix = String.duplicate("  ", indent_level + 1)
-        segments = parse_inline(prefix <> "• " <> text)
-        parse_lines(rest, [{segments, :list_item} | acc], nil)
+  @spec parse_header_line(String.t(), :header1 | :header2 | :header3) :: parsed_line()
+  defp parse_header_line(trimmed, style) do
+    text = trimmed |> String.trim_leading("#") |> String.trim()
+    {[{text, style}], :header}
+  end
 
-      Regex.match?(~r/^\d+\.\s/, trimmed) ->
-        # Numbered list: keep the number prefix, parse inline for the rest
-        indent_level = div(indent_width(line), 2)
-        prefix = String.duplicate("  ", indent_level + 1)
-        segments = parse_inline(prefix <> trimmed)
-        parse_lines(rest, [{segments, :list_item} | acc], nil)
+  @spec parse_bullet_line(String.t(), String.t()) :: parsed_line()
+  defp parse_bullet_line(line, text) do
+    indent_level = div(indent_width(line), 2)
+    prefix = String.duplicate("  ", indent_level + 1)
+    segments = parse_inline(prefix <> "• " <> text)
+    {segments, :list_item}
+  end
 
-      String.match?(trimmed, ~r/^[-*_]{3,}$/) ->
-        parse_lines(rest, [{[{"─────────────────────", :rule}], :rule} | acc], nil)
+  @spec parse_numbered_line(boolean(), String.t(), String.t()) :: parsed_line()
+  defp parse_numbered_line(true, line, trimmed) do
+    # Numbered list: keep the number prefix, parse inline for the rest
+    indent_level = div(indent_width(line), 2)
+    prefix = String.duplicate("  ", indent_level + 1)
+    segments = parse_inline(prefix <> trimmed)
+    {segments, :list_item}
+  end
 
-      true ->
-        segments = parse_inline(line)
-        parse_lines(rest, [{segments, :text} | acc], nil)
-    end
+  defp parse_numbered_line(false, line, trimmed) do
+    parse_extended_rule_line(String.match?(trimmed, ~r/^[-*_]{3,}$/), line)
+  end
+
+  @spec parse_extended_rule_line(boolean(), String.t()) :: parsed_line()
+  defp parse_extended_rule_line(true, _line), do: {[{"─────────────────────", :rule}], :rule}
+
+  defp parse_extended_rule_line(false, line) do
+    segments = parse_inline(line)
+    {segments, :text}
   end
 
   # ── Inline parsing ─────────────────────────────────────────────────────────
@@ -228,6 +244,17 @@ defmodule MingaAgent.Markdown do
 
       [_no_close] ->
         do_parse_inline(rest, [{"`", :plain} | acc])
+    end
+  end
+
+  # Link: [text](url)
+  defp do_parse_inline("[" <> rest, acc) do
+    case Regex.run(~r/^([^\]]+)\]\(([^)]+)\)(.*)$/s, rest) do
+      [_, label, url, remaining] ->
+        parse_link(label, url, remaining, acc)
+
+      nil ->
+        do_parse_inline(rest, [{"[", :plain} | acc])
     end
   end
 
@@ -277,7 +304,7 @@ defmodule MingaAgent.Markdown do
 
   # Regular character: consume up to next special character
   defp do_parse_inline(text, acc) do
-    case Regex.run(~r/^([^`*_]+)(.*)$/s, text) do
+    case Regex.run(~r/^([^`*_\[]+)(.*)$/s, text) do
       [_, plain, rest] ->
         do_parse_inline(rest, [{plain, :plain} | acc])
 
@@ -289,6 +316,54 @@ defmodule MingaAgent.Markdown do
   end
 
   # ── Helpers ─────────────────────────────────────────────────────────────────
+
+  @spec blockquote_segment(segment()) :: segment()
+  defp blockquote_segment({text, {:link, _url} = style}), do: {text, style}
+  defp blockquote_segment({text, _style}), do: {text, :blockquote}
+
+  @spec parse_link(String.t(), String.t(), String.t(), [segment()]) :: [segment()]
+  defp parse_link(label, url, remaining, acc) do
+    style = if safe_url?(url), do: {:link, url}, else: :plain
+    do_parse_inline(remaining, [{label, style} | acc])
+  end
+
+  @spec safe_url?(String.t()) :: boolean()
+  defp safe_url?(url) do
+    if valid_percent_escapes?(url) do
+      case URI.new(url) do
+        {:ok, uri} -> safe_uri?(uri.scheme, uri)
+        {:error, _part} -> false
+      end
+    else
+      false
+    end
+  end
+
+  @spec valid_percent_escapes?(String.t()) :: boolean()
+  defp valid_percent_escapes?(<<>>), do: true
+
+  defp valid_percent_escapes?(<<"%", first, second, rest::binary>>) do
+    hex_digit?(first) and hex_digit?(second) and valid_percent_escapes?(rest)
+  end
+
+  defp valid_percent_escapes?(<<"%", _rest::binary>>), do: false
+  defp valid_percent_escapes?(<<_char, rest::binary>>), do: valid_percent_escapes?(rest)
+
+  @spec hex_digit?(byte()) :: boolean()
+  defp hex_digit?(char) do
+    (char >= ?0 and char <= ?9) or (char >= ?a and char <= ?f) or (char >= ?A and char <= ?F)
+  end
+
+  @spec safe_uri?(String.t() | nil, URI.t()) :: boolean()
+  defp safe_uri?(scheme, %URI{host: host}) when scheme in ["http", "https"] do
+    is_binary(host) and host != ""
+  end
+
+  defp safe_uri?("mailto", %URI{path: path}) do
+    is_binary(path) and path != ""
+  end
+
+  defp safe_uri?(_scheme, _uri), do: false
 
   @spec merge_adjacent([segment()]) :: [segment()]
   defp merge_adjacent([]), do: []

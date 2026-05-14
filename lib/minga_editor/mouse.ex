@@ -39,6 +39,7 @@ defmodule MingaEditor.Mouse do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Mouse, as: MouseState
+  alias MingaEditor.State.Windows
   alias MingaEditor.Workspace.State, as: WorkspaceState
   alias MingaEditor.State.WhichKey, as: WhichKeyState
   alias MingaEditor.Viewport
@@ -193,6 +194,13 @@ defmodule MingaEditor.Mouse do
 
   def handle(state, row, col, :left, mods, :press, cc) do
     handle_left_press(state, row, col, mods, cc)
+  end
+
+  # ── Right click (press) ──
+  # Move the cursor for native GUI context menu commands without starting a selection drag.
+
+  def handle(state, row, col, :right, _mods, :press, _cc) do
+    handle_context_click(state, row, col)
   end
 
   # ── Left drag ──
@@ -421,9 +429,12 @@ defmodule MingaEditor.Mouse do
     handle_goto_definition_click(state, row, col)
   end
 
-  # Double-click: word selection
+  # Double-click: reset split divider or select word
   defp handle_left_press_modifiers(state, row, col, _mods, 2) do
-    handle_double_click(state, row, col)
+    case reset_split_at_separator(state, row, col) do
+      {:ok, reset_state} -> reset_state
+      :error -> handle_double_click(state, row, col)
+    end
   end
 
   # Triple-click: line selection
@@ -733,6 +744,30 @@ defmodule MingaEditor.Mouse do
     end
   end
 
+  @spec reset_split_at_separator(state(), non_neg_integer(), non_neg_integer()) ::
+          {:ok, state()} | :error
+  defp reset_split_at_separator(%{workspace: %{windows: %{tree: nil}}}, _row, _col), do: :error
+
+  defp reset_split_at_separator(state, row, col) do
+    screen = Layout.get(state).editor_area
+
+    with {:ok, {_dir, _sep_pos}} <-
+           WindowTree.separator_at(state.workspace.windows.tree, screen, row, col),
+         {:ok, new_tree} <-
+           WindowTree.reset_split_at_coordinate(state.workspace.windows.tree, screen, row, col) do
+      windows = Windows.set_tree(state.workspace.windows, new_tree)
+
+      state =
+        EditorState.update_workspace(state, fn workspace ->
+          WorkspaceState.set_windows(workspace, windows)
+        end)
+
+      {:ok, resize_windows_to_layout(state)}
+    else
+      :error -> :error
+    end
+  end
+
   @spec handle_separator_drag(state(), WindowTree.direction(), non_neg_integer(), integer()) ::
           state()
   defp handle_separator_drag(state, dir, sep_pos, new_pos) do
@@ -740,14 +775,15 @@ defmodule MingaEditor.Mouse do
 
     case WindowTree.resize_at(state.workspace.windows.tree, screen, dir, sep_pos, new_pos) do
       {:ok, new_tree} ->
-        state = %{
-          state
-          | workspace: %{
-              state.workspace
-              | windows: %{state.workspace.windows | tree: new_tree},
-                mouse: MouseState.update_resize(state.workspace.mouse, dir, new_pos)
-            }
-        }
+        windows = Windows.set_tree(state.workspace.windows, new_tree)
+        mouse = MouseState.update_resize(state.workspace.mouse, dir, new_pos)
+
+        state =
+          EditorState.update_workspace(state, fn workspace ->
+            workspace
+            |> WorkspaceState.set_windows(windows)
+            |> WorkspaceState.set_mouse(mouse)
+          end)
 
         resize_windows_to_layout(state)
 
@@ -795,6 +831,24 @@ defmodule MingaEditor.Mouse do
                 }
             }
         end
+    end
+  end
+
+  @spec handle_context_click(state(), non_neg_integer(), non_neg_integer()) :: state()
+  defp handle_context_click(state, row, col) do
+    state = maybe_unfocus_file_tree_for_content_click(state)
+    state = maybe_focus_window_at(state, row, col)
+
+    case mouse_to_buffer_pos(state, row, col) do
+      nil ->
+        state
+
+      {target_line, target_col} ->
+        Buffer.move_to(state.workspace.buffers.active, {target_line, target_col})
+
+        state
+        |> cancel_mode_for_mouse()
+        |> EditorState.transition_mode(:normal)
     end
   end
 

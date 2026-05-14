@@ -338,6 +338,85 @@ defmodule MingaEditor.WindowTreeTest do
     end
   end
 
+  # ── reset_split_at/4 ─────────────────────────────────────────────────────────
+
+  describe "reset_split_at/4" do
+    @screen {0, 0, 80, 24}
+
+    test "vertical reset stores equal split size" do
+      {:ok, tree} = WindowTree.split(WindowTree.new(1), 1, :vertical, 2)
+      {:ok, resized} = WindowTree.resize_at(tree, @screen, :vertical, 39, 30)
+
+      assert {:ok, {:split, :vertical, {:leaf, 1}, {:leaf, 2}, 0} = reset} =
+               WindowTree.reset_split_at(resized, @screen, :vertical, 30)
+
+      [{1, {_, _, left_w, _}}, {2, {_, _, right_w, _}}] = WindowTree.layout(reset, @screen)
+      assert left_w == 39
+      assert right_w == 40
+    end
+
+    test "horizontal reset stores equal split size" do
+      {:ok, tree} = WindowTree.split(WindowTree.new(1), 1, :horizontal, 2)
+      {:ok, resized} = WindowTree.resize_at(tree, @screen, :horizontal, 11, 16)
+
+      assert {:ok, {:split, :horizontal, {:leaf, 1}, {:leaf, 2}, 0} = reset} =
+               WindowTree.reset_split_at(resized, @screen, :horizontal, 16)
+
+      [{1, {_, _, _, top_h}}, {2, {bottom_row, _, _, bottom_h}}] =
+        WindowTree.layout(reset, @screen)
+
+      assert top_h == 12
+      assert bottom_row == 12
+      assert bottom_h == 12
+    end
+
+    test "nested reset only resets matching separator" do
+      {:ok, tree} = WindowTree.split(WindowTree.new(1), 1, :vertical, 2)
+      {:ok, tree} = WindowTree.split(tree, 2, :horizontal, 3)
+      {:ok, resized} = WindowTree.resize_at(tree, @screen, :horizontal, 11, 16)
+
+      assert {:ok,
+              {:split, :vertical, {:leaf, 1}, {:split, :horizontal, {:leaf, 2}, {:leaf, 3}, 0}, 0}} =
+               WindowTree.reset_split_at(resized, @screen, :horizontal, 16)
+    end
+
+    test "returns error for missing separator" do
+      {:ok, tree} = WindowTree.split(WindowTree.new(1), 1, :vertical, 2)
+      assert :error = WindowTree.reset_split_at(tree, @screen, :vertical, 99)
+    end
+
+    test "returns error instead of guessing when separator position is ambiguous" do
+      tree = {
+        :split,
+        :horizontal,
+        {:split, :vertical, {:leaf, 1}, {:leaf, 2}, 39},
+        {:split, :vertical, {:leaf, 3}, {:leaf, 4}, 39},
+        0
+      }
+
+      assert :error = WindowTree.reset_split_at(tree, @screen, :vertical, 39)
+    end
+  end
+
+  describe "reset_split_at_coordinate/4" do
+    @screen {0, 0, 80, 24}
+
+    test "resets the exact separator under the clicked coordinate" do
+      tree = {
+        :split,
+        :horizontal,
+        {:split, :vertical, {:leaf, 1}, {:leaf, 2}, 39},
+        {:split, :vertical, {:leaf, 3}, {:leaf, 4}, 39},
+        0
+      }
+
+      assert {:ok,
+              {:split, :horizontal, {:split, :vertical, {:leaf, 1}, {:leaf, 2}, 39},
+               {:split, :vertical, {:leaf, 3}, {:leaf, 4}, 0}, 0}} =
+               WindowTree.reset_split_at_coordinate(tree, @screen, 18, 39)
+    end
+  end
+
   # ── window_at/4 ──────────────────────────────────────────────────────────────
 
   describe "window_at/4" do

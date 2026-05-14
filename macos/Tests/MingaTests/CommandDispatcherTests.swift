@@ -109,10 +109,9 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.fileTreeState.projectRoot == "/project")
     }
 
-    @Test("guiFileTree hides when entries are empty")
-    @MainActor func guiFileTreeHidesOnEmpty() {
+    @Test("guiFileTree hides when an empty zero-width sentinel arrives")
+    @MainActor func guiFileTreeHidesOnEmptySentinel() {
         let (dispatcher, gui) = makeDispatcher()
-        // First show it
         dispatcher.dispatch(.guiFileTree(selectedIndex: 0, treeWidth: 30,
                                           rootPath: "/project",
                                           entries: [Wire.FileTreeEntry(pathHash: 1, isDir: false,
@@ -122,10 +121,40 @@ struct CommandDispatcherRoutingTests {
                                                                      editingType: 0, editingText: "")]))
         #expect(gui.fileTreeState.visible == true)
 
-        // Then hide with empty entries
+        dispatcher.dispatch(.guiFileTree(selectedIndex: 0, treeWidth: 0,
+                                          rootPath: "/project", entries: []))
+        #expect(gui.fileTreeState.visible == false)
+        #expect(gui.fileTreeState.projectRoot == "/project")
+    }
+
+    @Test("guiFileTree clears project root when hidden sentinel has no root")
+    @MainActor func guiFileTreeClearsRootOnEmptyHiddenSentinel() {
+        let (dispatcher, gui) = makeDispatcher()
+        dispatcher.dispatch(.guiFileTree(selectedIndex: 0, treeWidth: 30,
+                                          rootPath: "/project",
+                                          entries: [Wire.FileTreeEntry(pathHash: 1, isDir: false,
+                                                                     isExpanded: false, isSelected: false,
+                                                                     isEditing: false, depth: 0, gitStatus: 0,
+                                                                     icon: "", name: "a", relPath: "a",
+                                                                     editingType: 0, editingText: "")]))
+
         dispatcher.dispatch(.guiFileTree(selectedIndex: 0, treeWidth: 0,
                                           rootPath: "", entries: []))
+
         #expect(gui.fileTreeState.visible == false)
+        #expect(gui.fileTreeState.projectRoot == "")
+    }
+
+    @Test("guiFileTree keeps an empty visible tree open")
+    @MainActor func guiFileTreeKeepsEmptyVisibleTreeOpen() {
+        let (dispatcher, gui) = makeDispatcher()
+
+        dispatcher.dispatch(.guiFileTree(selectedIndex: 0, treeWidth: 30,
+                                          rootPath: "/empty-project", entries: []))
+
+        #expect(gui.fileTreeState.visible == true)
+        #expect(gui.fileTreeState.entries.isEmpty)
+        #expect(gui.fileTreeState.projectRoot == "/empty-project")
     }
 
     @Test("guiGitStatus updates state when repo has entries")
@@ -155,11 +184,40 @@ struct CommandDispatcherRoutingTests {
                                            branchName: "main", entries: rawEntries, toast: nil))
         #expect(gui.gitStatusState.visible == true)
 
-        // Then send the "panel closed" sentinel: notARepo (1) + empty entries. Syncing still updates because the status bar reads this state even when the panel is hidden.
+        // Then send the "panel closed" sentinel: notARepo (1) + empty entries. Syncing and toast still update because remote operations can finish while the panel is hidden.
         dispatcher.dispatch(.guiGitStatus(repoState: 1, syncing: true, ahead: 0, behind: 0,
-                                           branchName: "", entries: [], toast: nil))
+                                           branchName: "", entries: [], toast: (message: "Push failed", level: 1, action: 1)))
         #expect(gui.gitStatusState.visible == false)
         #expect(gui.gitStatusState.syncing == true)
+        #expect(gui.gitStatusState.toastMessage == "Push failed")
+        #expect(gui.gitStatusState.toastAction == .pullAndRetry)
+    }
+
+    @Test("guiGitStatus keeps unknown git status entries")
+    @MainActor func guiGitStatusKeepsUnknownStatus() {
+        let (dispatcher, gui) = makeDispatcher()
+        let rawEntries = [
+            Wire.GitStatusEntry(pathHash: 12345, section: 1, status: 0, path: "lib/unknown.ex"),
+            Wire.GitStatusEntry(pathHash: 12346, section: 1, status: 99, path: "lib/invalid-status.ex")
+        ]
+        dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
+                                           branchName: "main", entries: rawEntries, toast: nil))
+
+        #expect(gui.gitStatusState.changedEntries.count == 2)
+        #expect(gui.gitStatusState.changedEntries[0].status == .unknown)
+        #expect(gui.gitStatusState.changedEntries[1].status == .unknown)
+    }
+
+    @Test("guiGitStatus drops entries with invalid sections")
+    @MainActor func guiGitStatusDropsInvalidSections() {
+        let (dispatcher, gui) = makeDispatcher()
+        let rawEntries = [
+            Wire.GitStatusEntry(pathHash: 12345, section: 99, status: 1, path: "lib/bad-section.ex")
+        ]
+        dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
+                                           branchName: "main", entries: rawEntries, toast: nil))
+
+        #expect(gui.gitStatusState.totalCount == 0)
     }
 
     @Test("guiGitStatus shows panel for normal repo with clean working tree")
@@ -171,6 +229,24 @@ struct CommandDispatcherRoutingTests {
                                            branchName: "main", entries: [], toast: nil))
         #expect(gui.gitStatusState.visible == true)
         #expect(gui.gitStatusState.branchName == "main")
+    }
+
+    @Test("guiGitStatus preserves toast message when metadata is unknown")
+    @MainActor func guiGitStatusToastFallback() {
+        let (dispatcher, gui) = makeDispatcher()
+        dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
+                                           branchName: "main", entries: [], toast: (message: "Remote failed", level: 99, action: 99)))
+
+        #expect(gui.gitStatusState.toastMessage == "Remote failed")
+        #expect(gui.gitStatusState.toastLevel == .error)
+        #expect(gui.gitStatusState.toastAction == .none)
+
+        dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
+                                           branchName: "main", entries: [], toast: nil))
+
+        #expect(gui.gitStatusState.toastMessage == nil)
+        #expect(gui.gitStatusState.toastLevel == .success)
+        #expect(gui.gitStatusState.toastAction == .none)
     }
 
     @Test("guiCompletion visible updates completionState")

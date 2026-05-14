@@ -207,6 +207,13 @@ fn queryLookup(comptime name: []const u8, comptime qtype: QueryType) ?[]const u8
         .folds => @embedFile(query_dir ++ "erlang/folds.scm"),
         else => null,
     };
+    if (comptime std.mem.eql(u8, name, "fish")) return switch (qtype) {
+        .highlights => @embedFile(query_dir ++ "fish/highlights.scm"),
+        .injections => @embedFile(query_dir ++ "fish/injections.scm"),
+        .indents => @embedFile(query_dir ++ "fish/indents.scm"),
+        .textobjects => @embedFile(query_dir ++ "fish/textobjects.scm"),
+        else => null,
+    };
     if (comptime std.mem.eql(u8, name, "gleam")) return switch (qtype) {
         .highlights => @embedFile(query_dir ++ "gleam/highlights.scm"),
         .injections => @embedFile(query_dir ++ "gleam/injections.scm"),
@@ -239,6 +246,13 @@ fn queryLookup(comptime name: []const u8, comptime qtype: QueryType) ?[]const u8
         .highlights => @embedFile(query_dir ++ "html/highlights.scm"),
         .injections => @embedFile(query_dir ++ "html/injections.scm"),
         .folds => @embedFile(query_dir ++ "html/folds.scm"),
+        else => null,
+    };
+    if (comptime std.mem.eql(u8, name, "ini")) return switch (qtype) {
+        .highlights => @embedFile(query_dir ++ "ini/highlights.scm"),
+        .folds => @embedFile(query_dir ++ "ini/folds.scm"),
+        .indents => @embedFile(query_dir ++ "ini/indents.scm"),
+        .textobjects => @embedFile(query_dir ++ "ini/textobjects.scm"),
         else => null,
     };
     if (comptime std.mem.eql(u8, name, "java")) return switch (qtype) {
@@ -306,9 +320,25 @@ fn queryLookup(comptime name: []const u8, comptime qtype: QueryType) ?[]const u8
         .indents => @embedFile(query_dir ++ "ocaml/indents.scm"),
         else => null,
     };
+    if (comptime std.mem.eql(u8, name, "perl")) return switch (qtype) {
+        .highlights => @embedFile(query_dir ++ "perl/highlights.scm"),
+        .injections => @embedFile(query_dir ++ "perl/injections.scm"),
+        .folds => @embedFile(query_dir ++ "perl/folds.scm"),
+        .indents => @embedFile(query_dir ++ "perl/indents.scm"),
+        .textobjects => @embedFile(query_dir ++ "perl/textobjects.scm"),
+        else => null,
+    };
     if (comptime std.mem.eql(u8, name, "php")) return switch (qtype) {
         .highlights => @embedFile(query_dir ++ "php/highlights.scm"),
         .folds => @embedFile(query_dir ++ "php/folds.scm"),
+        else => null,
+    };
+    if (comptime std.mem.eql(u8, name, "protobuf")) return switch (qtype) {
+        .highlights => @embedFile(query_dir ++ "protobuf/highlights.scm"),
+        .injections => @embedFile(query_dir ++ "protobuf/injections.scm"),
+        .folds => @embedFile(query_dir ++ "protobuf/folds.scm"),
+        .indents => @embedFile(query_dir ++ "protobuf/indents.scm"),
+        .textobjects => @embedFile(query_dir ++ "protobuf/textobjects.scm"),
         else => null,
     };
     if (comptime std.mem.eql(u8, name, "python")) return switch (qtype) {
@@ -350,6 +380,21 @@ fn queryLookup(comptime name: []const u8, comptime qtype: QueryType) ?[]const u8
         .folds => @embedFile(query_dir ++ "scss/folds.scm"),
         else => null,
     };
+    if (comptime std.mem.eql(u8, name, "sql")) return switch (qtype) {
+        .highlights => @embedFile(query_dir ++ "sql/highlights.scm"),
+        .folds => @embedFile(query_dir ++ "sql/folds.scm"),
+        .indents => @embedFile(query_dir ++ "sql/indents.scm"),
+        .textobjects => @embedFile(query_dir ++ "sql/textobjects.scm"),
+        else => null,
+    };
+    if (comptime std.mem.eql(u8, name, "swift")) return switch (qtype) {
+        .highlights => @embedFile(query_dir ++ "swift/highlights.scm"),
+        .injections => @embedFile(query_dir ++ "swift/injections.scm"),
+        .folds => @embedFile(query_dir ++ "swift/folds.scm"),
+        .indents => @embedFile(query_dir ++ "swift/indents.scm"),
+        .textobjects => @embedFile(query_dir ++ "swift/textobjects.scm"),
+        else => null,
+    };
     if (comptime std.mem.eql(u8, name, "toml")) return switch (qtype) {
         .highlights => @embedFile(query_dir ++ "toml/highlights.scm"),
         .folds => @embedFile(query_dir ++ "toml/folds.scm"),
@@ -368,6 +413,22 @@ fn queryLookup(comptime name: []const u8, comptime qtype: QueryType) ?[]const u8
         .folds => @embedFile(query_dir ++ "typescript/folds.scm"),
         .indents => @embedFile(query_dir ++ "typescript/indents.scm"),
         .textobjects => @embedFile(query_dir ++ "typescript/textobjects.scm"),
+        else => null,
+    };
+    if (comptime std.mem.eql(u8, name, "vim")) return switch (qtype) {
+        .highlights => @embedFile(query_dir ++ "vim/highlights.scm"),
+        .injections => @embedFile(query_dir ++ "vim/injections.scm"),
+        .folds => @embedFile(query_dir ++ "vim/folds.scm"),
+        .indents => @embedFile(query_dir ++ "vim/indents.scm"),
+        .textobjects => @embedFile(query_dir ++ "vim/textobjects.scm"),
+        else => null,
+    };
+    if (comptime std.mem.eql(u8, name, "xml")) return switch (qtype) {
+        .highlights => @embedFile(query_dir ++ "xml/highlights.scm"),
+        .injections => @embedFile(query_dir ++ "xml/injections.scm"),
+        .folds => @embedFile(query_dir ++ "xml/folds.scm"),
+        .indents => @embedFile(query_dir ++ "xml/indents.scm"),
+        .textobjects => @embedFile(query_dir ++ "xml/textobjects.scm"),
         else => null,
     };
     if (comptime std.mem.eql(u8, name, "yaml")) return switch (qtype) {

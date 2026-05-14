@@ -231,27 +231,38 @@ defmodule MingaEditor.Startup do
   Returns `{keymap_scope, agentic_state}`. Called before window creation
   so the correct window type can be built in a single pass.
 
-  Agent-first startup only applies to the TUI. GUI frontends always
-  start with the editor view because agent mode is designed around the
-  TUI's full-screen chat layout.
+  Explicit CLI view modes are final. Auto startup keeps the existing
+  behavior: TUI consults the startup config, while GUI frontends default
+  to the editor view.
   """
   @spec startup_view_state(EditorState.backend()) :: {atom(), UIState.t()}
   def startup_view_state(backend) do
     cli_flags = Minga.CLI.startup_flags()
-
-    want_agent? =
-      backend == :tui and
-        not cli_flags.force_editor and
-        Config.get(:startup_view) == :agent
-
-    if want_agent? do
-      base = UIState.new()
-      av = %UIState{base | view: %{base.view | active: true, focus: :chat}}
-      {:agent, av}
-    else
-      {:editor, UIState.new()}
-    end
+    startup_view_state(backend, cli_flags.view_mode)
   end
+
+  @spec startup_view_state(EditorState.backend(), Minga.CLI.view_mode()) :: {atom(), UIState.t()}
+  defp startup_view_state(_backend, :editor), do: editor_view_state()
+  defp startup_view_state(_backend, :agentic), do: agent_view_state()
+
+  defp startup_view_state(:tui, :auto),
+    do: startup_view_state_from_config(Config.get(:startup_view))
+
+  defp startup_view_state(_backend, :auto), do: editor_view_state()
+
+  @spec startup_view_state_from_config(atom()) :: {atom(), UIState.t()}
+  defp startup_view_state_from_config(:agent), do: agent_view_state()
+  defp startup_view_state_from_config(_startup_view), do: editor_view_state()
+
+  @spec agent_view_state() :: {atom(), UIState.t()}
+  defp agent_view_state do
+    base = UIState.new()
+    av = %UIState{base | view: %{base.view | active: true, focus: :chat}}
+    {:agent, av}
+  end
+
+  @spec editor_view_state() :: {atom(), UIState.t()}
+  defp editor_view_state, do: {:editor, UIState.new()}
 
   @doc """
   Fetches port capabilities, returning defaults if no port manager is configured.

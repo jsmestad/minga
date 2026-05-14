@@ -44,6 +44,7 @@ defmodule Minga.Language.Registry do
     Minga.Language.Erlang,
     Minga.Language.Fish,
     Minga.Language.GitConfig,
+    Minga.Language.GitIgnore,
     Minga.Language.Gleam,
     Minga.Language.Go,
     Minga.Language.GraphQL,

@@ -4,6 +4,8 @@ defmodule MingaEditor.Commands.BufferManagementTest do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Options
   alias MingaEditor
+  alias MingaEditor.Commands.BufferManagement
+  alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.TabBar
 
@@ -209,6 +211,42 @@ defmodule MingaEditor.Commands.BufferManagementTest do
         new_tb
       )
     end)
+  end
+
+  describe "close_other_tabs" do
+    test "closes all tabs except the active tab" do
+      {editor, _buffer} = start_editor("first file")
+      add_second_tab(editor)
+      add_second_tab(editor)
+      assert tab_count(editor) == 3
+
+      :sys.replace_state(editor, fn state ->
+        BufferManagement.execute(state, :close_other_tabs)
+      end)
+
+      state = :sys.get_state(editor)
+      assert TabBar.count(state.shell_state.tab_bar) == 1
+      assert TabBar.active(state.shell_state.tab_bar).label == "second.txt"
+    end
+
+    test "ignores stopped-session events for tabs that were already removed" do
+      {editor, _buffer} = start_editor("first file")
+
+      state = :sys.get_state(editor)
+
+      state = %{
+        state
+        | shell_state: %{
+            state.shell_state
+            | agent: AgentState.set_error(%AgentState{}, "active agent")
+          }
+      }
+
+      result = BufferManagement.handle_agent_session_down(state, self(), :normal)
+
+      assert AgentState.status(result.shell_state.agent) == :error
+      assert result.shell_state.agent.error == "active agent"
+    end
   end
 
   describe "quit confirmation (#128)" do

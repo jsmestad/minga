@@ -21,8 +21,11 @@ protocol InputEncoder: AnyObject, Sendable {
     // GUI actions (semantic commands from SwiftUI chrome)
     func sendSelectTab(id: UInt32)
     func sendCloseTab(id: UInt32)
+    func sendTabCopyPath(id: UInt32)
+    func sendHoverOpenAction()
     func sendFileTreeClick(index: UInt16)
     func sendFileTreeToggle(index: UInt16)
+    func sendFileTreeOpenInSplit(index: UInt16)
     func sendFileTreeNewFile(parentIndex: UInt16)
     func sendFileTreeNewFolder(parentIndex: UInt16)
     func sendFileTreeEditConfirm(text: String)
@@ -295,6 +298,23 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
+    /// Send a gui_action: tab_copy_path. Layout: opcode(1) + action_type(1) + tab_id(4).
+    func sendTabCopyPath(id: UInt32) {
+        var buf = Data(count: 6)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_TAB_COPY_PATH
+        writeU32(&buf, 2, id)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: hover_open_action. Layout: opcode(1) + action_type(1).
+    func sendHoverOpenAction() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_HOVER_OPEN_ACTION
+        writeFrame(buf)
+    }
+
     /// Send a gui_action: file_tree_click. Layout: opcode(1) + action_type(1) + index(2).
     func sendFileTreeClick(index: UInt16) {
         var buf = Data(count: 4)
@@ -309,6 +329,15 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         var buf = Data(count: 4)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FILE_TREE_TOGGLE
+        writeU16(&buf, 2, index)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: file_tree_open_in_split. Layout: opcode(1) + action_type(1) + index(2).
+    func sendFileTreeOpenInSplit(index: UInt16) {
+        var buf = Data(count: 4)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_FILE_TREE_OPEN_IN_SPLIT
         writeU16(&buf, 2, index)
         writeFrame(buf)
     }

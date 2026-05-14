@@ -296,6 +296,12 @@ defmodule MingaEditor.Commands.Lsp do
         execute: &LspActions.hover/1
       },
       %Minga.Command{
+        name: :peek_definition,
+        description: "Peek definition",
+        requires_buffer: true,
+        execute: &LspActions.peek_definition/1
+      },
+      %Minga.Command{
         name: :find_references,
         description: "Find all references",
         requires_buffer: true,

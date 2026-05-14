@@ -1,64 +1,31 @@
 defmodule MingaEditor.Indent do
   @moduledoc """
-  Computes indentation for new lines.
+  Computes indentation for new lines and reindent commands.
 
-  Uses a two-step approach:
-  1. Copy the previous line's leading whitespace as the baseline indent
-  2. Apply a tree-sitter-informed delta: indent after lines ending with
-     indent triggers (do, fn, {, [, etc.), dedent on lines starting with
-     dedent triggers (end, }, ], etc.)
-
-  The indent triggers are defined per-language. Languages without triggers
-  fall back to pure copy-indent.
+  Tree-sitter is the source of truth when the active buffer has a parser buffer ID. The parser returns an indent level from the language's `indents.scm` query, and this module converts that level into spaces or tabs using the buffer's indentation options. Buffers without a tree-sitter grammar, unavailable parsers, and unsupported parser responses fall back to copy-indent.
   """
 
   alias Minga.Buffer
+  alias Minga.Parser.Manager, as: ParserManager
 
-  @typedoc "A computed indentation result."
-  @type indent_result :: %{indent: String.t(), dedent: boolean()}
+  @typedoc "Function used to request a parser indent level."
+  @type request_indent_fun :: (non_neg_integer(), non_neg_integer() -> integer() | nil)
 
-  @doc """
-  Computes the indentation string for a new line inserted after `line_num`.
-
-  Returns the whitespace string that should be inserted after the newline.
-  """
-  @spec compute_for_newline(pid(), non_neg_integer()) :: String.t()
-  def compute_for_newline(buf, line_num) do
-    base_indent = leading_whitespace(buf, line_num)
-    tab_size = Buffer.get_option(buf, :tab_size) || 2
-    indent_with = Buffer.get_option(buf, :indent_with) || :spaces
-    unit = indent_unit(indent_with, tab_size)
-
-    filetype = Buffer.filetype(buf)
-
-    case get_line_text(buf, line_num) do
-      nil ->
-        base_indent
-
-      line_text ->
-        trimmed = String.trim_trailing(line_text)
-
-        if should_indent_after?(trimmed, filetype) do
-          base_indent <> unit
-        else
-          base_indent
-        end
-    end
-  end
+  @typedoc "Options for tree-sitter indentation."
+  @type compute_opt ::
+          {:buffer_id, non_neg_integer()}
+          | {:fallback, String.t()}
+          | {:request_indent, request_indent_fun()}
 
   @doc """
-  Checks if the current line (after cursor) starts with a dedent trigger
-  and returns the adjusted indentation.
+  Computes the indentation string for an existing line.
 
-  Call this after inserting the newline and indent to check if the cursor
-  line should be dedented.
+  Tree-sitter is queried for `line_num` when a parser buffer ID is available. Otherwise, the result falls back to either the explicit `:fallback` option or copy-indent from the previous line.
   """
-  @spec should_dedent_line?(pid(), non_neg_integer()) :: boolean()
-  def should_dedent_line?(buf, line_num) do
-    case get_line_text(buf, line_num) do
-      nil -> false
-      text -> dedent_trigger?(String.trim(text), Buffer.filetype(buf))
-    end
+  @spec compute_for_line(pid(), non_neg_integer(), [compute_opt()]) :: String.t()
+  def compute_for_line(buf, line_num, opts \\ []) do
+    fallback = explicit_or_default_fallback(buf, line_num, opts)
+    compute_with_tree_sitter(buf, line_num, fallback, opts)
   end
 
   @doc "Extracts leading whitespace from a line of text."
@@ -76,25 +43,51 @@ defmodule MingaEditor.Indent do
     byte_size(extract_leading_ws(text))
   end
 
-  @doc """
-  Removes one level of indentation from the given whitespace string.
+  # ── Private ────────────────────────────────────────────────────────────────
 
-  If the whitespace ends with a tab, removes one tab. Otherwise removes
-  `tab_size` spaces (or whatever is available).
-  """
-  @spec remove_one_indent_level(String.t(), pid()) :: String.t()
-  def remove_one_indent_level(indent, buf) do
-    tab_size = Buffer.get_option(buf, :tab_size) || 2
+  @spec compute_with_tree_sitter(pid(), non_neg_integer(), String.t(), [compute_opt()]) ::
+          String.t()
+  defp compute_with_tree_sitter(buf, line_num, fallback, opts) do
+    buffer_id = Keyword.get(opts, :buffer_id, 0)
+    request_indent = Keyword.get(opts, :request_indent, &ParserManager.request_indent/2)
 
-    if String.ends_with?(indent, "\t") do
-      String.slice(indent, 0, String.length(indent) - 1)
-    else
-      remove_len = min(tab_size, byte_size(indent))
-      binary_part(indent, 0, byte_size(indent) - remove_len)
+    case request_indent_level(buffer_id, line_num, request_indent) do
+      level when is_integer(level) and level >= 0 -> whitespace_for_level(buf, level)
+      _ -> fallback
     end
   end
 
-  # ── Private ────────────────────────────────────────────────────────────────
+  @spec request_indent_level(term(), non_neg_integer(), request_indent_fun()) :: integer() | nil
+  defp request_indent_level(buffer_id, line_num, request_indent)
+       when is_integer(buffer_id) and buffer_id > 0 do
+    request_indent.(buffer_id, line_num)
+  rescue
+    _ -> nil
+  catch
+    :exit, _ -> nil
+  end
+
+  defp request_indent_level(_buffer_id, _line_num, _request_indent), do: nil
+
+  @spec whitespace_for_level(pid(), non_neg_integer()) :: String.t()
+  defp whitespace_for_level(buf, level) do
+    tab_size = Buffer.get_option(buf, :tab_size) || 2
+    indent_with = Buffer.get_option(buf, :indent_with) || :spaces
+    unit = indent_unit(indent_with, tab_size)
+    String.duplicate(unit, level)
+  end
+
+  @spec fallback_for_line(pid(), non_neg_integer()) :: String.t()
+  defp fallback_for_line(_buf, 0), do: ""
+  defp fallback_for_line(buf, line_num), do: leading_whitespace(buf, line_num - 1)
+
+  @spec explicit_or_default_fallback(pid(), non_neg_integer(), [compute_opt()]) :: String.t()
+  defp explicit_or_default_fallback(buf, line_num, opts) do
+    case Keyword.fetch(opts, :fallback) do
+      {:ok, fallback} -> fallback
+      :error -> fallback_for_line(buf, line_num)
+    end
+  end
 
   @spec leading_whitespace(pid(), non_neg_integer()) :: String.t()
   defp leading_whitespace(buf, line_num) do
@@ -116,68 +109,4 @@ defmodule MingaEditor.Indent do
   defp indent_unit(:tabs, _tab_size), do: "\t"
   defp indent_unit(:spaces, tab_size), do: String.duplicate(" ", tab_size)
   defp indent_unit(_, tab_size), do: String.duplicate(" ", tab_size)
-
-  # ── Indent triggers (per-language) ─────────────────────────────────────────
-  #
-  # These are simplified heuristics that work well for the common case.
-  # The tree-sitter indent query provides the definitive answer, but
-  # these patterns give instant feedback without a protocol roundtrip.
-
-  @spec should_indent_after?(String.t(), atom() | String.t()) :: boolean()
-  defp should_indent_after?(trimmed, filetype) when filetype in [:elixir, "elixir"] do
-    String.ends_with?(trimmed, " do") or
-      String.ends_with?(trimmed, "do") or
-      String.ends_with?(trimmed, "->") or
-      String.ends_with?(trimmed, "fn") or
-      String.ends_with?(trimmed, "{") or
-      String.ends_with?(trimmed, "[") or
-      String.ends_with?(trimmed, "(")
-  end
-
-  defp should_indent_after?(trimmed, filetype) when filetype in [:ruby, "ruby"] do
-    String.ends_with?(trimmed, " do") or
-      String.ends_with?(trimmed, "do") or
-      String.ends_with?(trimmed, "{") or
-      String.ends_with?(trimmed, "[") or
-      String.ends_with?(trimmed, "(") or
-      Regex.match?(~r/\b(def|class|module|if|unless|while|until|for|begin|case)\b/, trimmed)
-  end
-
-  defp should_indent_after?(trimmed, filetype) when filetype in [:python, "python"] do
-    String.ends_with?(trimmed, ":") or
-      String.ends_with?(trimmed, "{") or
-      String.ends_with?(trimmed, "[") or
-      String.ends_with?(trimmed, "(")
-  end
-
-  # C-family languages (c, cpp, java, javascript, typescript, go, rust, etc.)
-  defp should_indent_after?(trimmed, _filetype) do
-    String.ends_with?(trimmed, "{") or
-      String.ends_with?(trimmed, "[") or
-      String.ends_with?(trimmed, "(")
-  end
-
-  @spec dedent_trigger?(String.t(), atom() | String.t()) :: boolean()
-  defp dedent_trigger?(trimmed, filetype) when filetype in [:elixir, "elixir"] do
-    trimmed == "end" or
-      String.starts_with?(trimmed, "end ") or
-      trimmed == ")" or trimmed == "]" or trimmed == "}"
-  end
-
-  defp dedent_trigger?(trimmed, filetype) when filetype in [:ruby, "ruby"] do
-    trimmed == "end" or
-      trimmed == ")" or trimmed == "]" or trimmed == "}"
-  end
-
-  defp dedent_trigger?(trimmed, filetype) when filetype in [:python, "python"] do
-    String.starts_with?(trimmed, "return ") or
-      String.starts_with?(trimmed, "pass") or
-      String.starts_with?(trimmed, "break") or
-      String.starts_with?(trimmed, "continue") or
-      trimmed == ")" or trimmed == "]" or trimmed == "}"
-  end
-
-  defp dedent_trigger?(trimmed, _filetype) do
-    trimmed == "}" or trimmed == ")" or trimmed == "]"
-  end
 end

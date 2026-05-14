@@ -662,7 +662,7 @@ defmodule Minga.Config.LoaderTest do
 
       # Set the CLI flag
       Application.put_env(:minga, :cli_startup_flags, %{
-        force_editor: false,
+        view_mode: :auto,
         no_context: false,
         config_file: custom_path
       })
@@ -688,7 +688,7 @@ defmodule Minga.Config.LoaderTest do
       custom_path = "/tmp/minga_nonexistent_#{System.unique_integer([:positive])}.exs"
 
       Application.put_env(:minga, :cli_startup_flags, %{
-        force_editor: false,
+        view_mode: :auto,
         no_context: false,
         config_file: custom_path
       })
@@ -731,7 +731,7 @@ defmodule Minga.Config.LoaderTest do
       {_dir, cleanup} = make_config_dir("")
 
       Application.put_env(:minga, :cli_startup_flags, %{
-        force_editor: false,
+        view_mode: :auto,
         no_context: false,
         config_file: custom_path
       })
@@ -781,7 +781,7 @@ defmodule Minga.Config.LoaderTest do
       File.cd!(project_dir)
 
       Application.put_env(:minga, :cli_startup_flags, %{
-        force_editor: false,
+        view_mode: :auto,
         no_context: false,
         config_file: custom_path
       })
@@ -839,7 +839,7 @@ defmodule Minga.Config.LoaderTest do
       {_dir, cleanup} = make_config_dir("")
 
       Application.put_env(:minga, :cli_startup_flags, %{
-        force_editor: false,
+        view_mode: :auto,
         no_context: false,
         config_file: custom_path
       })

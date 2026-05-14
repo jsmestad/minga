@@ -47,6 +47,9 @@ defmodule Minga.Parser.Manager do
   @restart_window_ms 30_000
   @snippet_buffer_id_start 4_000_000_000
   @default_highlight_timeout_ms 50
+  @default_indent_request_timeout_ms 2_000
+  @default_textobject_request_timeout_ms 2_000
+  @request_client_timeout_slack_ms 50
 
   @typedoc "Options for starting the parser manager."
   @type start_opt ::
@@ -145,10 +148,43 @@ defmodule Minga.Parser.Manager do
   end
 
   @doc """
+  Requests a tree-sitter indent level synchronously.
+
+  Sends a `request_indent` command to the Zig parser and blocks until the
+  result arrives. Keystroke-path callers can pass a short timeout; callers fall back to copy-indent if the parser is slow or unavailable.
+
+  Returns a non-negative indent level, or `nil` if the parser is unavailable.
+  """
+  @spec request_indent(non_neg_integer(), non_neg_integer()) :: integer() | nil
+  @spec request_indent(non_neg_integer(), non_neg_integer(), GenServer.server()) ::
+          integer() | nil
+  @spec request_indent(non_neg_integer(), non_neg_integer(), GenServer.server(), pos_integer()) ::
+          integer() | nil
+  def request_indent(buffer_id, line), do: request_indent(buffer_id, line, __MODULE__)
+
+  def request_indent(buffer_id, line, server) do
+    request_indent(buffer_id, line, server, @default_indent_request_timeout_ms)
+  end
+
+  def request_indent(buffer_id, line, server, timeout_ms)
+      when is_integer(buffer_id) and buffer_id > 0 and is_integer(line) and line >= 0 and
+             is_integer(timeout_ms) and timeout_ms > 0 do
+    GenServer.call(
+      server,
+      {:request_indent, buffer_id, line, timeout_ms},
+      timeout_ms + @request_client_timeout_slack_ms
+    )
+  catch
+    :exit, _ -> nil
+  end
+
+  def request_indent(_buffer_id, _line, _server, _timeout_ms), do: nil
+
+  @doc """
   Requests a tree-sitter text object range synchronously.
 
   Sends a `request_textobject` command to the Zig parser and blocks until
-  the result arrives (or times out after 2 seconds).
+  the result arrives or the request times out.
 
   Returns `{start_row, start_col, end_row, end_col}` or `nil` if no match.
   """
@@ -163,7 +199,12 @@ defmodule Minga.Parser.Manager do
   def request_textobject(buffer_id, row, col, capture_name, server \\ __MODULE__)
       when is_integer(buffer_id) and is_integer(row) and is_integer(col) and
              is_binary(capture_name) do
-    GenServer.call(server, {:request_textobject, buffer_id, row, col, capture_name}, 2_000)
+    GenServer.call(
+      server,
+      {:request_textobject, buffer_id, row, col, capture_name,
+       @default_textobject_request_timeout_ms},
+      @default_textobject_request_timeout_ms + @request_client_timeout_slack_ms
+    )
   catch
     :exit, _ -> nil
   end
@@ -309,19 +350,48 @@ defmodule Minga.Parser.Manager do
   end
 
   def handle_call(
-        {:request_textobject, _buffer_id, _row, _col, _capture},
+        {:request_indent, _buffer_id, _line, _timeout_ms},
         _from,
         %{port: nil} = state
       ) do
     {:reply, nil, state}
   end
 
-  def handle_call({:request_textobject, buffer_id, row, col, capture_name}, from, state) do
+  def handle_call({:request_indent, buffer_id, _line, _timeout_ms}, _from, state)
+      when not is_map_key(state.buffer_registry, buffer_id) do
+    {:reply, nil, state}
+  end
+
+  def handle_call({:request_indent, buffer_id, line, timeout_ms}, from, state) do
+    request_id = state.next_request_id
+    cmd = Protocol.encode_request_indent(buffer_id, request_id, line)
+    Port.command(state.port, cmd)
+
+    pending = Map.put(state.pending_requests, request_id, from)
+    Process.send_after(self(), {:request_timeout, request_id}, timeout_ms)
+
+    {:noreply, %{state | next_request_id: request_id + 1, pending_requests: pending}}
+  end
+
+  def handle_call(
+        {:request_textobject, _buffer_id, _row, _col, _capture, _timeout_ms},
+        _from,
+        %{port: nil} = state
+      ) do
+    {:reply, nil, state}
+  end
+
+  def handle_call(
+        {:request_textobject, buffer_id, row, col, capture_name, timeout_ms},
+        from,
+        state
+      ) do
     request_id = state.next_request_id
     cmd = Protocol.encode_request_textobject(buffer_id, request_id, row, col, capture_name)
     Port.command(state.port, cmd)
 
     pending = Map.put(state.pending_requests, request_id, from)
+    Process.send_after(self(), {:request_timeout, request_id}, timeout_ms)
 
     {:noreply, %{state | next_request_id: request_id + 1, pending_requests: pending}}
   end
@@ -392,15 +462,11 @@ defmodule Minga.Parser.Manager do
   @impl true
   def handle_info({port, {:data, data}}, %{port: port} = state) do
     case Protocol.decode_event(data) do
-      {:ok, {:textobject_result, request_id, result}} ->
-        case Map.pop(state.pending_requests, request_id) do
-          {nil, _pending} ->
-            {:noreply, state}
+      {:ok, {:indent_result, request_id, _line, indent_level}} ->
+        reply_to_pending_request(state, request_id, indent_level)
 
-          {from, pending} ->
-            GenServer.reply(from, result)
-            {:noreply, %{state | pending_requests: pending}}
-        end
+      {:ok, {:textobject_result, request_id, result}} ->
+        reply_to_pending_request(state, request_id, result)
 
       {:ok, {:highlight_names, _buffer_id, _names} = event} ->
         handle_highlight_source_event_or_broadcast(event, state)
@@ -457,6 +523,10 @@ defmodule Minga.Parser.Manager do
         state = %{state | pending_highlights: pending_highlights}
         {:noreply, close_highlight_source_buffer(state, buffer_id)}
     end
+  end
+
+  def handle_info({:request_timeout, request_id}, state) do
+    reply_to_pending_request(state, request_id, nil)
   end
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
@@ -788,6 +858,18 @@ defmodule Minga.Parser.Manager do
     end)
 
     %{state | pending_requests: %{}, pending_highlights: %{}}
+  end
+
+  @spec reply_to_pending_request(State.t(), non_neg_integer(), term()) :: {:noreply, State.t()}
+  defp reply_to_pending_request(state, request_id, result) do
+    case Map.pop(state.pending_requests, request_id) do
+      {nil, _pending} ->
+        {:noreply, state}
+
+      {from, pending} ->
+        GenServer.reply(from, result)
+        {:noreply, %{state | pending_requests: pending}}
+    end
   end
 
   @spec broadcast([pid()], term()) :: :ok

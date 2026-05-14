@@ -17,8 +17,10 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
   alias MingaAgent.Markdown
   alias MingaEditor.UI.Highlight
 
-  @typedoc "A single styled text run: {text, fg_rgb, bg_rgb, flags}."
-  @type styled_run :: {String.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
+  @typedoc "A single styled text run: {text, fg_rgb, bg_rgb, flags} or {text, fg_rgb, bg_rgb, flags, url}."
+  @type styled_run ::
+          {String.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
+          | {String.t(), non_neg_integer(), non_neg_integer(), non_neg_integer(), String.t()}
 
   @typedoc "A line of styled runs."
   @type styled_line :: [styled_run()]
@@ -30,6 +32,7 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
   @flag_bold 0x01
   @flag_italic 0x02
   @flag_underline 0x04
+  @flag_link 0x08
 
   @doc """
   Converts assistant message text to styled runs for the GUI.
@@ -53,14 +56,13 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
     base_lines =
       Enum.map(parsed, fn {segments, _line_type} ->
         Enum.map(segments, fn {seg_text, style_atom} ->
-          {fg, bg, flags} = md_style_to_colors(style_atom, theme_syntax)
-          {seg_text, fg, bg, flags}
+          style_to_run(seg_text, style_atom, theme_syntax)
         end)
       end)
 
     # Overlay tree-sitter highlights on code block content lines
     if has_spans?(highlight) do
-      overlay_code_blocks(base_lines, parsed, text, highlight, buffer_byte_offset)
+      overlay_code_blocks(base_lines, parsed, text, highlight, theme_syntax, buffer_byte_offset)
     else
       base_lines
     end
@@ -81,9 +83,17 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
           [Markdown.parsed_line()],
           String.t(),
           Highlight.t(),
+          map(),
           non_neg_integer()
         ) :: [styled_line()]
-  defp overlay_code_blocks(base_lines, parsed, original_text, highlight, buffer_byte_offset) do
+  defp overlay_code_blocks(
+         base_lines,
+         parsed,
+         original_text,
+         highlight,
+         theme_syntax,
+         buffer_byte_offset
+       ) do
     original_lines = String.split(original_text, "\n")
     line_byte_offsets = compute_line_byte_offsets(original_lines)
 
@@ -98,6 +108,7 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
         original_lines,
         line_byte_offsets,
         highlight,
+        theme_syntax,
         buffer_byte_offset
       )
     end)
@@ -114,6 +125,7 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
           [String.t()],
           %{non_neg_integer() => non_neg_integer()},
           Highlight.t(),
+          map(),
           non_neg_integer()
         ) :: styled_line()
   defp overlay_line(
@@ -123,6 +135,7 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
          original_lines,
          line_byte_offsets,
          highlight,
+         theme_syntax,
          buffer_byte_offset
        ) do
     original_line = Enum.at(original_lines, line_idx, "")
@@ -137,12 +150,21 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
 
       case segments do
         [{^original_line, %Minga.Core.Face{fg: nil}}] -> base_runs
-        _ -> Enum.map(segments, &segment_to_run/1)
+        _ -> Enum.map(segments, &segment_to_run(&1, code_bg(theme_syntax)))
       end
     end
   end
 
-  defp overlay_line(base_runs, _line_type, _idx, _orig, _offsets, _hl, _byte_offset) do
+  defp overlay_line(
+         base_runs,
+         _line_type,
+         _idx,
+         _orig,
+         _offsets,
+         _hl,
+         _theme_syntax,
+         _byte_offset
+       ) do
     base_runs
   end
 
@@ -156,10 +178,10 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
     map
   end
 
-  @spec segment_to_run(Highlight.styled_segment()) :: styled_run()
-  defp segment_to_run({text, %Minga.Core.Face{} = face}) do
+  @spec segment_to_run(Highlight.styled_segment(), non_neg_integer()) :: styled_run()
+  defp segment_to_run({text, %Minga.Core.Face{} = face}, default_bg) do
     fg = face.fg || 0
-    bg = face.bg || 0
+    bg = face.bg || default_bg
 
     flags =
       if(face.bold, do: @flag_bold, else: 0) +
@@ -171,6 +193,17 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
 
   # ── Regex-based style mapping ──────────────────────────────────────────────
 
+  @spec style_to_run(String.t(), Markdown.style(), map()) :: styled_run()
+  defp style_to_run(text, {:link, url}, theme) do
+    {fg, bg, flags} = md_style_to_colors({:link, url}, theme)
+    {text, fg, bg, flags, url}
+  end
+
+  defp style_to_run(text, style, theme) do
+    {fg, bg, flags} = md_style_to_colors(style, theme)
+    {text, fg, bg, flags}
+  end
+
   @spec md_style_to_colors(Markdown.style(), map()) ::
           {non_neg_integer(), non_neg_integer(), non_neg_integer()}
   defp md_style_to_colors(:bold, theme), do: {default_fg(theme), 0, @flag_bold}
@@ -180,6 +213,10 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
     do: {default_fg(theme), 0, @flag_bold + @flag_italic}
 
   defp md_style_to_colors(:code, theme), do: {code_fg(theme), code_bg(theme), 0}
+
+  defp md_style_to_colors({:link, _url}, theme),
+    do: {link_fg(theme), 0, @flag_underline + @flag_link}
+
   defp md_style_to_colors(:code_block, theme), do: {code_fg(theme), 0, 0}
   defp md_style_to_colors({:code_content, _lang}, theme), do: {code_fg(theme), code_bg(theme), 0}
   defp md_style_to_colors(:header1, theme), do: {header_fg(theme), 0, @flag_bold}
@@ -207,6 +244,9 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
 
   @spec comment_fg(map()) :: non_neg_integer()
   defp comment_fg(theme), do: theme_color(theme, "comment", 0x5B6268)
+
+  @spec link_fg(map()) :: non_neg_integer()
+  defp link_fg(theme), do: theme_color(theme, "markup.link.label", 0x61AFEF)
 
   @spec theme_color(map(), String.t(), non_neg_integer()) :: non_neg_integer()
   defp theme_color(theme, name, default) do

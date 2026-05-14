@@ -10,6 +10,7 @@ defmodule Minga.Language.Fish do
       label: "Fish",
       comment_token: "# ",
       extensions: ["fish"],
+      grammar: "fish",
       shebangs: ["fish"],
       icon: "\u{E795}",
       icon_color: 0x89E051

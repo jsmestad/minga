@@ -10,6 +10,7 @@ defmodule Minga.Language.Ini do
       label: "INI",
       comment_token: "; ",
       extensions: ["ini"],
+      grammar: "ini",
       icon: "\u{E615}",
       icon_color: 0x6D8086
     }

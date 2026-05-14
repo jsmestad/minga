@@ -452,9 +452,21 @@ struct TabBarView: View {
             }
         }
         .contextMenu {
-            Button("Close Tab") {
+            Button("Close") {
                 encoder?.sendCloseTab(id: tab.id)
             }
+            Button("Close Others") {
+                encoder?.sendSelectTab(id: tab.id)
+                encoder?.sendExecuteCommand(name: "close_other_tabs")
+            }
+            Button("Close All") {
+                encoder?.sendExecuteCommand(name: "quit_all")
+            }
+            Divider()
+            Button("Copy Path") {
+                encoder?.sendTabCopyPath(id: tab.id)
+            }
+            .disabled(tab.isAgent)
         }
     }
 

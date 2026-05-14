@@ -17,11 +17,14 @@ defmodule MingaEditor.Input.Hover do
 
   @type state :: MingaEditor.Input.Handler.handler_state()
 
+  alias MingaEditor.Commands
   alias MingaEditor.HoverPopup
+  alias MingaEditor.LspActions
   alias MingaEditor.State, as: EditorState
 
-  # Escape codepoint from the port protocol
+  # Escape and Enter codepoints from the port protocol
   @key_escape 27
+  @key_enter 13
 
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
@@ -50,6 +53,17 @@ defmodule MingaEditor.Input.Hover do
      EditorState.set_hover_popup(state, HoverPopup.scroll_up(state.shell_state.hover_popup))}
   end
 
+  # When focused, Enter accepts the popup's Open action when one exists.
+  def handle_key(
+        %{shell_state: %{hover_popup: %HoverPopup{focused: true, open_action: action}}} = state,
+        @key_enter,
+        _mods
+      )
+      when action != nil do
+    state = EditorState.dismiss_hover_popup(state)
+    {:handled, execute_open_action(state, action)}
+  end
+
   # When focused, q or Escape dismisses
   def handle_key(%{shell_state: %{hover_popup: %HoverPopup{focused: true}}} = state, ?q, 0) do
     {:handled, EditorState.dismiss_hover_popup(state)}
@@ -71,6 +85,18 @@ defmodule MingaEditor.Input.Hover do
   # Not focused: any key dismisses and passes through
   def handle_key(%{shell_state: %{hover_popup: %HoverPopup{focused: false}}} = state, _cp, _mods) do
     {:passthrough, EditorState.dismiss_hover_popup(state)}
+  end
+
+  @spec execute_open_action(state(), HoverPopup.open_action()) :: state()
+  defp execute_open_action(state, {:goto_location, uri, line, col}) do
+    LspActions.open_location(state, uri, line, col)
+  end
+
+  defp execute_open_action(state, action) when is_atom(action) do
+    case Commands.execute(state, action) do
+      {new_state, _action} -> new_state
+      new_state -> new_state
+    end
   end
 
   # ── Mouse handling ──────────────────────────────────────────────────────

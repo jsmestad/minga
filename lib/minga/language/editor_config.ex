@@ -10,6 +10,7 @@ defmodule Minga.Language.EditorConfig do
       label: "EditorConfig",
       comment_token: "# ",
       filenames: [".editorconfig"],
+      grammar: "ini",
       icon: "\u{E615}",
       icon_color: 0x6D8086
     }

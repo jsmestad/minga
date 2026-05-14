@@ -24,6 +24,12 @@ final class FontManager {
     /// Secondary fonts keyed by font_id (1-255).
     private var secondaryFonts: [UInt8: FontFace] = [:]
 
+    /// Registered secondary font families keyed by font_id, retained so primary font rebuilds can preserve them.
+    private var registeredFontFamilies: [UInt8: String] = [:]
+
+    /// User-configured fallback families, retained so primary font rebuilds can preserve them.
+    private var fallbackFamilies: [String] = []
+
     /// Cell dimensions from the primary font (all fonts use these for layout).
     var cellWidth: CGFloat { primary.cellWidth }
     var cellHeight: Int { primary.cellHeight }
@@ -36,12 +42,19 @@ final class FontManager {
                                  ligatures: ligatures, weight: weight)
     }
 
-    /// Replace the primary font (e.g., after a set_font command).
+    /// Replace the primary font after a set_font command or display scale change.
     func setPrimaryFont(name: String, size: CGFloat, scale: CGFloat,
                         ligatures: Bool, weight: UInt8) {
         self.primary = FontFace(name: name, size: size, scale: scale,
                                  ligatures: ligatures, weight: weight)
-        secondaryFonts.removeAll()
+        primary.setFallbackFonts(fallbackFamilies)
+        rebuildSecondaryFonts()
+    }
+
+    /// Configure the primary font fallback chain and preserve it across primary font rebuilds.
+    func setFallbackFonts(_ families: [String]) {
+        fallbackFamilies = families
+        primary.setFallbackFonts(families)
     }
 
     /// Register a secondary font at the given ID.
@@ -51,6 +64,27 @@ final class FontManager {
             return
         }
 
+        registeredFontFamilies[id] = name
+        secondaryFonts[id] = makeSecondaryFont(id: id, name: name)
+        PortLogger.info("Registered font '\(name)' at id=\(id)")
+    }
+
+    /// Returns the FontFace for a given font_id. Falls back to primary if not found.
+    func fontFace(for fontId: UInt8) -> FontFace {
+        if fontId == 0 { return primary }
+        return secondaryFonts[fontId] ?? primary
+    }
+
+    /// Rebuilds registered secondary fonts after the primary font's size or scale changes.
+    private func rebuildSecondaryFonts() {
+        secondaryFonts.removeAll(keepingCapacity: true)
+        for (id, name) in registeredFontFamilies {
+            secondaryFonts[id] = makeSecondaryFont(id: id, name: name)
+        }
+    }
+
+    /// Creates a secondary font using the current primary font's size, scale, and ligature setting.
+    private func makeSecondaryFont(id: UInt8, name: String) -> FontFace {
         let size = CTFontGetSize(primary.ctFont)
         let secondary = FontFace(name: name, size: size, scale: primary.scale,
                                   ligatures: primary.ligaturesEnabled, weight: 2)
@@ -65,13 +99,6 @@ final class FontManager {
             )
         }
 
-        secondaryFonts[id] = secondary
-        PortLogger.info("Registered font '\(name)' at id=\(id)")
-    }
-
-    /// Returns the FontFace for a given font_id. Falls back to primary if not found.
-    func fontFace(for fontId: UInt8) -> FontFace {
-        if fontId == 0 { return primary }
-        return secondaryFonts[fontId] ?? primary
+        return secondary
     }
 }

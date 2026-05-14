@@ -23,6 +23,25 @@ defmodule Minga.Language.RegistryTest do
         assert %Language{name: ^name} = Registry.get(name)
       end
     end
+
+    test "missing grammar languages expose grammar names" do
+      expected = %{
+        sql: "sql",
+        xml: "xml",
+        ini: "ini",
+        swift: "swift",
+        vim: "vim",
+        protobuf: "protobuf",
+        fish: "fish",
+        perl: "perl",
+        gitconfig: "ini",
+        editorconfig: "ini"
+      }
+
+      for {name, grammar} <- expected do
+        assert %Language{name: ^name, grammar: ^grammar} = Registry.get(name)
+      end
+    end
   end
 
   describe "for_extension/1" do
@@ -51,6 +70,14 @@ defmodule Minga.Language.RegistryTest do
     test "looks up language by exact filename" do
       lang = Registry.for_filename("Makefile")
       assert lang.name == :make
+    end
+
+    test "looks up Vim and INI-backed config filenames" do
+      assert Registry.for_filename(".vimrc").name == :vim
+      assert Registry.for_filename("_vimrc").name == :vim
+      assert Registry.for_filename(".gvimrc").name == :vim
+      assert Registry.for_filename(".gitconfig").grammar == "ini"
+      assert Registry.for_filename(".editorconfig").grammar == "ini"
     end
 
     test "returns nil for unknown filename" do
