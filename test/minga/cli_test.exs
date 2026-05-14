@@ -221,7 +221,6 @@ defmodule Minga.CLITest do
     after
       Application.delete_env(:minga, :cli_startup_flags)
     end
-
   end
 
   describe "apply_flag_implications/1" do
