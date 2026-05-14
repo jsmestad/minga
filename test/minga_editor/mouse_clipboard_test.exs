@@ -3,11 +3,11 @@ defmodule MingaEditor.MouseClipboardTest do
   Clipboard behavior for mouse selections.
   """
 
-  # Mutates global clipboard config; async false keeps the setting isolated.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
+
+  import Hammox
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Config.Options
   alias Minga.Mode.VisualState
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Mouse
@@ -18,22 +18,17 @@ defmodule MingaEditor.MouseClipboardTest do
   alias MingaEditor.VimState
   alias MingaEditor.Workspace.State, as: WorkspaceState
 
-  setup do
-    original_clipboard = Options.get(:clipboard)
-    {:ok, _} = Options.set(:clipboard, :unnamedplus)
+  setup :verify_on_exit!
 
+  setup do
     test_pid = self()
 
-    Mox.stub(Minga.Clipboard.Mock, :write, fn text ->
+    stub(Minga.Clipboard.Mock, :write, fn text ->
       send(test_pid, {:clipboard_written, text})
       :ok
     end)
 
-    Mox.stub(Minga.Clipboard.Mock, :read, fn -> nil end)
-
-    on_exit(fn ->
-      Options.set(:clipboard, original_clipboard)
-    end)
+    stub(Minga.Clipboard.Mock, :read, fn -> nil end)
 
     :ok
   end
@@ -69,7 +64,7 @@ defmodule MingaEditor.MouseClipboardTest do
         viewport: Viewport.new(10, 40),
         buffers: %Buffers{active: buffer, list: [buffer]},
         editing: editing,
-        mouse: %MouseState{dragging: true, anchor: {0, 0}}
+        mouse: MouseState.start_drag(%MouseState{}, {0, 0})
       }
     }
   end

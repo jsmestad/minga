@@ -221,8 +221,10 @@ defmodule MingaEditor.MouseTest do
 
       send_mouse(editor, @content_row, @gutter + 3, :left, :press, 0x02)
 
+      s = state(editor)
       assert BufferServer.cursor(buffer) == {1, 3}
-      refute EditorState.status_msg(state(editor)) == "No language server"
+      assert s.workspace.mouse.dragging == false
+      refute EditorState.status_msg(s) == "No language server"
     end
 
     test "TUI Ctrl-left click keeps goto-definition behavior" do

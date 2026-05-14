@@ -461,7 +461,7 @@ defmodule MingaEditor.Mouse do
     handle_goto_definition_click(state, row, col)
   end
 
-  # On native GUI frontends, Ctrl-click is reserved for the platform context menu.
+  # On native GUI frontends, Ctrl-click follows platform context-menu semantics.
   defp handle_left_press_modifiers(
          %{capabilities: %Capabilities{frontend_type: :native_gui}} = state,
          row,
@@ -470,7 +470,7 @@ defmodule MingaEditor.Mouse do
          _cc
        )
        when band(mods, @mod_ctrl) != 0 do
-    handle_plain_left_press(state, row, col)
+    handle_context_click(state, row, col)
   end
 
   defp handle_left_press_modifiers(state, row, col, mods, _cc) when band(mods, @mod_ctrl) != 0 do
