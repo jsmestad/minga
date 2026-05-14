@@ -244,16 +244,7 @@ defmodule MingaEditor.Mouse do
         :drag,
         _cc
       ) do
-    state =
-      state
-      |> maybe_auto_scroll(row)
-      |> move_to_mouse_pos(row, col)
-
-    case dcc do
-      2 -> snap_selection_to_words(state, anchor)
-      3 -> snap_selection_to_lines(state, anchor)
-      _ -> enter_visual_if_needed(state, anchor)
-    end
+    handle_left_drag(state, row, col, anchor, dcc)
   end
 
   # ── Left release ──
@@ -288,8 +279,7 @@ defmodule MingaEditor.Mouse do
         &WorkspaceState.set_mouse(&1, MouseState.stop_drag(&1.mouse))
       )
 
-    # Auto-copy selection to system clipboard on mouse release.
-    # Standard terminal behavior: selecting text copies it.
+    # TUI keeps legacy selection auto-copy. Native GUI selection stays separate from the clipboard.
     auto_copy_selection(state)
   end
 
@@ -331,6 +321,44 @@ defmodule MingaEditor.Mouse do
   # ── Ignore all other mouse events ──
 
   def handle(state, _row, _col, _button, _mods, _type, _cc), do: state
+
+  @spec handle_left_drag(
+          state(),
+          integer(),
+          integer(),
+          {non_neg_integer(), non_neg_integer()},
+          pos_integer()
+        ) :: state()
+  defp handle_left_drag(%{workspace: %{editing: %{mode: :visual}}} = state, row, col, anchor, dcc) do
+    drag_to_mouse_pos(state, row, col, anchor, dcc)
+  end
+
+  defp handle_left_drag(state, row, col, anchor, dcc) do
+    case mouse_to_buffer_pos(state, row, col) do
+      ^anchor -> state
+      _target -> drag_to_mouse_pos(state, row, col, anchor, dcc)
+    end
+  end
+
+  @spec drag_to_mouse_pos(
+          state(),
+          integer(),
+          integer(),
+          {non_neg_integer(), non_neg_integer()},
+          pos_integer()
+        ) :: state()
+  defp drag_to_mouse_pos(state, row, col, anchor, dcc) do
+    state
+    |> maybe_auto_scroll(row)
+    |> move_to_mouse_pos(row, col)
+    |> update_drag_selection(anchor, dcc)
+  end
+
+  @spec update_drag_selection(state(), {non_neg_integer(), non_neg_integer()}, pos_integer()) ::
+          state()
+  defp update_drag_selection(state, anchor, 2), do: snap_selection_to_words(state, anchor)
+  defp update_drag_selection(state, anchor, 3), do: snap_selection_to_lines(state, anchor)
+  defp update_drag_selection(state, anchor, _dcc), do: enter_visual_if_needed(state, anchor)
 
   @spec handle_buffer_scroll_at_window(
           state(),
@@ -428,9 +456,24 @@ defmodule MingaEditor.Mouse do
     handle_shift_click(state, row, col)
   end
 
-  # Cmd+click (GUI) or Ctrl+click (TUI): go-to-definition
-  defp handle_left_press_modifiers(state, row, col, mods, _cc)
-       when band(mods, @mod_super) != 0 or band(mods, @mod_ctrl) != 0 do
+  # Cmd+click (GUI) or Ctrl+click (TUI): go-to-definition.
+  defp handle_left_press_modifiers(state, row, col, mods, _cc) when band(mods, @mod_super) != 0 do
+    handle_goto_definition_click(state, row, col)
+  end
+
+  # On native GUI frontends, Ctrl-click is reserved for the platform context menu.
+  defp handle_left_press_modifiers(
+         %{capabilities: %Capabilities{frontend_type: :native_gui}} = state,
+         row,
+         col,
+         mods,
+         _cc
+       )
+       when band(mods, @mod_ctrl) != 0 do
+    handle_plain_left_press(state, row, col)
+  end
+
+  defp handle_left_press_modifiers(state, row, col, mods, _cc) when band(mods, @mod_ctrl) != 0 do
     handle_goto_definition_click(state, row, col)
   end
 
@@ -449,6 +492,11 @@ defmodule MingaEditor.Mouse do
 
   # Single click: normal cursor positioning
   defp handle_left_press_modifiers(state, row, col, _mods, _cc) do
+    handle_plain_left_press(state, row, col)
+  end
+
+  @spec handle_plain_left_press(state(), integer(), integer()) :: state()
+  defp handle_plain_left_press(state, row, col) do
     state
     |> maybe_start_separator_drag(row, col)
     |> maybe_handle_content_click(row, col)
@@ -645,21 +693,34 @@ defmodule MingaEditor.Mouse do
   defp word_boundaries_at(buf, line, col) do
     case Buffer.lines(buf, line, 1) do
       [text] when byte_size(text) > 0 ->
-        find_word_at(String.graphemes(text), col)
+        find_word_at(text, col)
 
       _ ->
         nil
     end
   end
 
-  @spec find_word_at([String.t()], non_neg_integer()) ::
+  @spec find_word_at(String.t(), non_neg_integer()) ::
           {non_neg_integer(), non_neg_integer()} | nil
-  defp find_word_at([], _col), do: nil
+  defp find_word_at("", _col), do: nil
 
-  defp find_word_at(graphemes, col) do
-    idx = min(col, length(graphemes) - 1)
-    char = Enum.at(graphemes, idx)
+  defp find_word_at(text, col) do
+    {graphemes, byte_offsets} = Unicode.graphemes_with_byte_offsets(text)
+    byte_col = Unicode.clamp_to_grapheme_boundary(text, col)
+    idx = Unicode.byte_offset_to_grapheme_index(byte_offsets, byte_col)
+    char = elem(graphemes, idx)
 
+    {start_idx, end_idx} = word_boundary_indexes(graphemes, idx, char)
+
+    {
+      Unicode.grapheme_index_to_byte_offset(byte_offsets, start_idx, byte_size(text)),
+      Unicode.grapheme_index_to_byte_offset(byte_offsets, end_idx, byte_size(text))
+    }
+  end
+
+  @spec word_boundary_indexes(tuple(), non_neg_integer(), String.t()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp word_boundary_indexes(graphemes, idx, char) do
     if word_char?(char) do
       {scan_word_start(graphemes, idx), scan_word_end(graphemes, idx)}
     else
@@ -667,33 +728,35 @@ defmodule MingaEditor.Mouse do
     end
   end
 
-  @spec scan_word_start([String.t()], non_neg_integer()) :: non_neg_integer()
-  defp scan_word_start(graphemes, idx) do
-    if idx == 0 do
-      0
-    else
-      prev = Enum.at(graphemes, idx - 1)
+  @spec scan_word_start(tuple(), non_neg_integer()) :: non_neg_integer()
+  defp scan_word_start(_graphemes, 0), do: 0
 
-      if word_char?(prev) do
-        scan_word_start(graphemes, idx - 1)
-      else
-        idx
-      end
+  defp scan_word_start(graphemes, idx) do
+    prev = elem(graphemes, idx - 1)
+
+    if word_char?(prev) do
+      scan_word_start(graphemes, idx - 1)
+    else
+      idx
     end
   end
 
-  @spec scan_word_end([String.t()], non_neg_integer()) :: non_neg_integer()
+  @spec scan_word_end(tuple(), non_neg_integer()) :: non_neg_integer()
   defp scan_word_end(graphemes, idx) do
-    if idx >= length(graphemes) - 1 do
-      idx
-    else
-      next = Enum.at(graphemes, idx + 1)
+    last_idx = tuple_size(graphemes) - 1
+    scan_word_end(graphemes, idx, last_idx)
+  end
 
-      if word_char?(next) do
-        scan_word_end(graphemes, idx + 1)
-      else
-        idx
-      end
+  @spec scan_word_end(tuple(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
+  defp scan_word_end(_graphemes, idx, last_idx) when idx >= last_idx, do: idx
+
+  defp scan_word_end(graphemes, idx, last_idx) do
+    next = elem(graphemes, idx + 1)
+
+    if word_char?(next) do
+      scan_word_end(graphemes, idx + 1, last_idx)
+    else
+      idx
     end
   end
 
@@ -1288,13 +1351,16 @@ defmodule MingaEditor.Mouse do
   end
 
   @spec auto_copy_selection(EditorState.t()) :: EditorState.t()
+  defp auto_copy_selection(%{capabilities: %Capabilities{frontend_type: :native_gui}} = state),
+    do: state
+
   defp auto_copy_selection(
          %{workspace: %{editing: %{mode: :visual, mode_state: ms}, buffers: %{active: buf}}} =
            state
        )
        when is_pid(buf) do
     text = selection_text(buf, ms)
-    maybe_copy_to_clipboard(text)
+    maybe_copy_to_clipboard(state, text)
     state
   catch
     :exit, _ -> state
@@ -1313,14 +1379,15 @@ defmodule MingaEditor.Mouse do
     Buffer.lines_content(buf, min(a_line, c_line), max(a_line, c_line))
   end
 
-  defp maybe_copy_to_clipboard(text) when is_binary(text) and text != "" do
-    case Config.get(:clipboard) do
+  defp maybe_copy_to_clipboard(%{workspace: %{buffers: %{active: buf}}}, text)
+       when is_pid(buf) and is_binary(text) and text != "" do
+    case Buffer.get_option(buf, :clipboard) do
       :none -> :ok
       _ -> Minga.Clipboard.write(text)
     end
   end
 
-  defp maybe_copy_to_clipboard(_text), do: :ok
+  defp maybe_copy_to_clipboard(_state, _text), do: :ok
 
   @spec adjust_col_for_virtual_text(pid(), non_neg_integer(), non_neg_integer()) ::
           non_neg_integer()

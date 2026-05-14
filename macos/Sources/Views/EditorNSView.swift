@@ -70,6 +70,11 @@ final class EditorNSView: MTKView {
     /// Divider direction captured at mouse-down so drag keeps the resize cursor.
     private var dividerDragState: DividerCursorState = .none
 
+    /// Text-selection drag tracking. AppKit can report tiny drags during a normal click, so buffer drags only start after the pointer crosses a small native threshold.
+    private var leftMouseDownPoint: NSPoint?
+    private var leftMouseDragStarted: Bool = false
+    private let textDragThreshold: CGFloat = 4.0
+
     /// Whether the ready event has been sent to the BEAM. Deferred until
     /// setFrameSize so we send the actual window dimensions, not hardcoded defaults.
     private var readySent = false
@@ -983,6 +988,8 @@ final class EditorNSView: MTKView {
         }
 
         resetCursorBlink()
+        leftMouseDownPoint = point
+        leftMouseDragStarted = false
         dividerDragState = dividerHitState(at: point)
         if dividerDragState != .none {
             setDividerCursorState(dividerDragState)
@@ -1006,6 +1013,8 @@ final class EditorNSView: MTKView {
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_LEFT,
                                modifiers: modifierBits(from: event.modifierFlags),
                                eventType: MOUSE_RELEASE)
+        leftMouseDownPoint = nil
+        leftMouseDragStarted = false
         if dividerDragState != .none {
             dividerDragState = .none
             setDividerCursorState(dividerHitState(at: point))
@@ -1108,6 +1117,8 @@ final class EditorNSView: MTKView {
 
         if dividerDragState != .none {
             setDividerCursorState(dividerDragState)
+        } else if !shouldSendTextDrag(for: event) {
+            return
         }
         let (row, col) = cellPosition(from: event)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_LEFT,
@@ -1315,6 +1326,27 @@ final class EditorNSView: MTKView {
 
     private var effectiveCellHeight: CGFloat {
         cellHeight * CGFloat(dispatcher.frameState.lineSpacing)
+    }
+
+    private func shouldSendTextDrag(for event: NSEvent) -> Bool {
+        if leftMouseDragStarted {
+            return true
+        }
+
+        let point = convert(event.locationInWindow, from: nil)
+        guard let downPoint = leftMouseDownPoint else {
+            leftMouseDownPoint = point
+            leftMouseDragStarted = true
+            return true
+        }
+
+        let dx = point.x - downPoint.x
+        let dy = point.y - downPoint.y
+        let distance = sqrt(dx * dx + dy * dy)
+        guard distance >= textDragThreshold else { return false }
+
+        leftMouseDragStarted = true
+        return true
     }
 
     private var dividerHitHalfTolerance: CGFloat {

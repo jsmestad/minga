@@ -7,6 +7,7 @@ defmodule MingaEditor.MouseTest do
   alias MingaEditor
   alias MingaEditor.Commands.Movement
   alias MingaEditor.FoldMap
+  alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Windows
@@ -86,6 +87,15 @@ defmodule MingaEditor.MouseTest do
     Enum.max_by(layout.window_layouts, fn {_id, %{content: {_row, content_col, _w, _h}}} ->
       content_col
     end)
+  end
+
+  defp set_gui_capabilities(editor) do
+    send(
+      editor,
+      {:minga_input, {:capabilities_updated, %Capabilities{frontend_type: :native_gui}}}
+    )
+
+    _ = :sys.get_state(editor, @sync_timeout)
   end
 
   describe "mouse scroll" do
@@ -203,6 +213,25 @@ defmodule MingaEditor.MouseTest do
 
       assert BufferServer.cursor(buffer) == {1, 3}
       assert state(editor).workspace.mouse.dragging == false
+    end
+
+    test "native GUI Ctrl-left click positions cursor without goto-definition" do
+      {editor, buffer} = start_editor("hello\nworld\nfoo bar baz")
+      set_gui_capabilities(editor)
+
+      send_mouse(editor, @content_row, @gutter + 3, :left, :press, 0x02)
+
+      assert BufferServer.cursor(buffer) == {1, 3}
+      refute EditorState.status_msg(state(editor)) == "No language server"
+    end
+
+    test "TUI Ctrl-left click keeps goto-definition behavior" do
+      {editor, buffer} = start_editor("hello\nworld\nfoo bar baz")
+
+      send_mouse(editor, @content_row + 1, @gutter + 3, :left, :press, 0x02)
+
+      assert BufferServer.cursor(buffer) == {1, 3}
+      assert EditorState.status_msg(state(editor)) == "No language server"
     end
 
     test "left click accounts for viewport scroll offset" do
@@ -330,6 +359,21 @@ defmodule MingaEditor.MouseTest do
     end
   end
 
+  describe "mouse multi-click selection" do
+    @gutter 6
+
+    test "double-click selects full Unicode word using byte offsets" do
+      {editor, buffer} = start_editor("éclair test")
+
+      send_mouse(editor, @content_row, @gutter + 1, :left, :press, 0, 2)
+
+      assert BufferServer.cursor(buffer) == {0, 6}
+      s = state(editor)
+      assert s.workspace.editing.mode == :visual
+      assert s.workspace.editing.mode_state.visual_anchor == {0, 0}
+    end
+  end
+
   describe "split separator double-click" do
     test "double-clicking a separator resets split size without entering visual mode" do
       {editor, _buffer} = start_editor("hello world")
@@ -407,6 +451,29 @@ defmodule MingaEditor.MouseTest do
       s = state(editor)
       assert s.workspace.editing.mode == :normal
       assert s.workspace.mouse.dragging == false
+    end
+
+    test "drag event at the original buffer position does not enter visual mode" do
+      {editor, _buffer} = start_editor("hello world")
+
+      send_mouse(editor, @content_row, @gutter + 3, :left, :press)
+      send_mouse(editor, @content_row, @gutter + 3, :left, :drag)
+
+      assert state(editor).workspace.editing.mode == :normal
+
+      send_mouse(editor, @content_row, @gutter + 3, :left, :release)
+      assert state(editor).workspace.mouse.dragging == false
+    end
+
+    test "scroll after click jitter stays in normal mode" do
+      {editor, _buffer} = start_editor(Enum.map_join(0..29, "\n", &"line #{&1}"))
+
+      send_mouse(editor, @content_row, @gutter + 3, :left, :press)
+      send_mouse(editor, @content_row, @gutter + 3, :left, :drag)
+      send_mouse(editor, @content_row, @gutter + 3, :left, :release)
+      send_mouse(editor, @content_row, @gutter + 3, :wheel_down, :press)
+
+      assert state(editor).workspace.editing.mode == :normal
     end
 
     test "drag clamps to buffer bounds" do
