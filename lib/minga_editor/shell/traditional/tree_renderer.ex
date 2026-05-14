@@ -8,16 +8,17 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
   match neo-tree.nvim's visual style.
   """
 
-  alias Minga.Buffer
   alias Minga.Core.Face
-  alias MingaEditor.DisplayList
-  alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.FileTree, as: FileTreeState
-  alias MingaEditor.WindowTree
   alias Minga.Language
   alias Minga.Project.FileTree
+  alias MingaEditor.DisplayList
+  alias MingaEditor.FileTree.Row
+  alias MingaEditor.FileTree.Rows
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.UI.Devicon
   alias MingaEditor.UI.Theme
+  alias MingaEditor.WindowTree
 
   # Box-drawing characters for indent guides
   @guide_pipe "│ "
@@ -43,7 +44,8 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
       :active_path,
       editing: nil,
       git_status: %{},
-      dirty_paths: MapSet.new()
+      dirty_paths: MapSet.new(),
+      rows: nil
     ]
 
     @type t :: %__MODULE__{
@@ -54,7 +56,8 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
             active_path: String.t() | nil,
             editing: FileTreeState.editing() | nil,
             git_status: Minga.Project.FileTree.GitStatus.status_map(),
-            dirty_paths: MapSet.t(String.t())
+            dirty_paths: MapSet.t(String.t()),
+            rows: [Row.t()] | nil
           }
   end
 
@@ -69,16 +72,17 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
   """
   @spec render(RenderInput.t()) :: [DisplayList.draw()]
   def render(%RenderInput{} = input) do
-    do_render(
-      input.tree,
-      input.rect,
-      input.focused,
-      input.theme,
-      input.active_path,
-      input.editing,
-      input.git_status,
-      input.dirty_paths
-    )
+    rows =
+      input.rows ||
+        Rows.from_tree(input.tree,
+          active_path: input.active_path,
+          dirty_paths: input.dirty_paths,
+          editing: input.editing,
+          focused: input.focused,
+          git_status: input.git_status
+        )
+
+    do_render(input.tree, input.rect, input.theme, rows)
   end
 
   @spec render(EditorState.t() | map()) :: [DisplayList.draw()]
@@ -108,37 +112,15 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
       rect: rect,
       focused: focused,
       theme: state.theme,
-      active_path: active_buffer_path(state),
-      editing: state.workspace.file_tree.editing,
-      git_status: tree.git_status,
-      dirty_paths: compute_dirty_paths(state)
+      active_path: nil,
+      rows: Rows.from_state(state)
     }
 
     render(input)
   end
 
-  @spec do_render(
-          FileTree.t(),
-          WindowTree.rect(),
-          boolean(),
-          Theme.t(),
-          String.t() | nil,
-          FileTreeState.editing() | nil,
-          FileTree.GitStatus.status_map(),
-          MapSet.t(String.t())
-        ) :: [DisplayList.draw()]
-  defp do_render(
-         tree,
-         {row_off, col_off, width, height},
-         focused,
-         theme,
-         active_path,
-         editing,
-         git_status,
-         dirty_paths
-       ) do
-    entries = FileTree.visible_entries(tree)
-
+  @spec do_render(FileTree.t(), WindowTree.rect(), Theme.t(), [Row.t()]) :: [DisplayList.draw()]
+  defp do_render(tree, {row_off, col_off, width, height}, theme, rows) do
     # Header: project directory name with folder icon
     project_name = Path.basename(tree.root)
     header_text = " #{@folder_open} #{project_name}/"
@@ -155,39 +137,31 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
 
     # Entry rows (starting from row 1, leaving row 0 for header)
     content_rows = height - 1
-    scroll_offset = scroll_offset(tree.cursor, content_rows)
+    scroll_offset = scroll_offset(selected_index(rows), content_rows)
 
     render_opts = %{
-      cursor: tree.cursor,
-      focused: focused,
-      active_path: active_path,
       col_off: col_off,
       width: width,
-      theme: theme,
-      expanded: tree.expanded,
-      editing: editing,
-      git_status: git_status,
-      dirty_paths: dirty_paths
+      theme: theme
     }
 
     entry_commands =
-      entries
-      |> Enum.with_index()
+      rows
       |> Enum.drop(scroll_offset)
       |> Enum.take(content_rows)
       |> Enum.with_index()
-      |> Enum.flat_map(fn {{entry, global_idx}, screen_row} ->
+      |> Enum.flat_map(fn {tree_row, screen_row} ->
         row = row_off + 1 + screen_row
 
-        if editing != nil and global_idx == editing.index do
-          render_editing_entry(entry, row, render_opts)
+        if tree_row.editing != nil do
+          render_editing_entry(tree_row, row, render_opts)
         else
-          render_entry(entry, global_idx, row, render_opts)
+          render_entry(tree_row, row, render_opts)
         end
       end)
 
     # Fill remaining rows with blanks
-    visible_count = entries |> Enum.drop(scroll_offset) |> Enum.take(content_rows) |> length()
+    visible_count = rows |> Enum.drop(scroll_offset) |> Enum.take(content_rows) |> length()
 
     blank_commands =
       render_blanks(visible_count, content_rows, row_off + 1, col_off, width, theme)
@@ -201,38 +175,26 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
 
   # ── Entry rendering ──────────────────────────────────────────────────────
 
-  @spec render_entry(FileTree.entry(), non_neg_integer(), non_neg_integer(), map()) ::
-          [DisplayList.draw()]
-  defp render_entry(entry, idx, row, opts) do
-    %{
-      cursor: cursor,
-      focused: focused,
-      active_path: active_path,
-      col_off: col,
-      width: width,
-      theme: theme,
-      expanded: expanded,
-      git_status: git_status,
-      dirty_paths: dirty_paths
-    } = opts
+  @spec render_entry(Row.t(), non_neg_integer(), map()) :: [DisplayList.draw()]
+  defp render_entry(tree_row, row, opts) do
+    %{col_off: col, width: width, theme: theme} = opts
 
-    is_cursor = idx == cursor
-    is_active = active_path != nil and entry.path == active_path
-    is_expanded = entry.dir? and MapSet.member?(expanded, entry.path)
-    is_dirty = not entry.dir? and MapSet.member?(dirty_paths, entry.path)
+    is_cursor = tree_row.selected?
+    focused = tree_row.focused?
+    is_dirty = tree_row.dirty?
 
     # Build the guide prefix from the entry's ancestor guide flags
-    guide_prefix = build_guides(entry.guides, entry.last_child?)
+    guide_prefix = build_guides(tree_row.guides, tree_row.last_child?)
 
     # Pick the icon and its color
-    {icon, icon_color} = entry_icon(entry, is_expanded)
+    {icon, icon_color} = entry_icon(tree_row)
 
     # Entry name (dirs get trailing slash)
-    name = if entry.dir?, do: entry.name <> "/", else: entry.name
+    name = if tree_row.directory?, do: tree_row.name <> "/", else: tree_row.name
 
     # Right-side indicators: [modified_dot] [git_status]
     # Modified dot = 1 col, git status = 2 cols (space + symbol)
-    file_git_status = Map.get(git_status, entry.path)
+    file_git_status = tree_row.git_status
     git_width = if file_git_status, do: 2, else: 0
     dirty_width = if is_dirty, do: 1, else: 0
     indicator_width = dirty_width + git_width
@@ -251,7 +213,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     # Build draw commands: guide, icon, name, (dirty dot), (git indicator)
     guide_style = guide_draw_style(is_cursor, focused, theme)
     icon_style = icon_draw_style(icon_color, is_cursor, focused, theme)
-    name_style = name_draw_style(entry, is_cursor, is_active, focused, theme)
+    name_style = name_draw_style(tree_row, is_cursor, tree_row.active?, focused, theme)
 
     guide_len = String.length(guide_prefix)
 
@@ -312,12 +274,13 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
   # Renders the inline editing entry with highlighted styling and a cursor indicator.
   # The editing row shows the entry's indent guides, a type indicator icon, the
   # current editing text, and a block cursor at the insertion point.
-  @spec render_editing_entry(FileTree.entry(), non_neg_integer(), map()) :: [DisplayList.draw()]
-  defp render_editing_entry(entry, row, opts) do
-    %{col_off: col, width: width, theme: theme, editing: editing} = opts
+  @spec render_editing_entry(Row.t(), non_neg_integer(), map()) :: [DisplayList.draw()]
+  defp render_editing_entry(tree_row, row, opts) do
+    %{col_off: col, width: width, theme: theme} = opts
+    editing = tree_row.editing
 
     # Build indent guides (same depth as the entry being edited/created)
-    guide_prefix = build_guides(entry.guides, entry.last_child?)
+    guide_prefix = build_guides(tree_row.guides, tree_row.last_child?)
     guide_len = String.length(guide_prefix)
 
     # Type indicator: file icon for new file, folder icon for new folder,
@@ -326,7 +289,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
       case editing.type do
         :new_file -> {"", 0x519ABA}
         :new_folder -> {@folder_open, 0x519ABA}
-        :rename -> entry_icon(entry, false)
+        :rename -> entry_icon(tree_row)
       end
 
     prefix = guide_prefix <> icon <> " "
@@ -396,16 +359,16 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
 
   # ── Icon selection ──────────────────────────────────────────────────────
 
-  @spec entry_icon(FileTree.entry(), boolean()) :: {String.t(), non_neg_integer()}
-  defp entry_icon(%{dir?: true}, true = _expanded) do
+  @spec entry_icon(Row.t()) :: {String.t(), non_neg_integer()}
+  defp entry_icon(%Row{directory?: true, expanded?: true}) do
     {@folder_open, 0x519ABA}
   end
 
-  defp entry_icon(%{dir?: true}, false = _expanded) do
+  defp entry_icon(%Row{directory?: true}) do
     {@folder_closed, 0x519ABA}
   end
 
-  defp entry_icon(%{path: path}, _expanded) do
+  defp entry_icon(%Row{path: path}) do
     filetype = Language.detect_filetype(path)
     Devicon.icon_and_color(filetype)
   end
@@ -496,12 +459,12 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
   defp git_status_color(:renamed, theme), do: theme.tree.git_staged_fg || theme.tree.fg
   defp git_status_color(:deleted, theme), do: theme.tree.git_conflict_fg || theme.tree.fg
 
-  @spec name_draw_style(FileTree.entry(), boolean(), boolean(), boolean(), Theme.t()) :: Face.t()
-  defp name_draw_style(entry, is_cursor, is_active, focused, theme) do
+  @spec name_draw_style(Row.t(), boolean(), boolean(), boolean(), Theme.t()) :: Face.t()
+  defp name_draw_style(tree_row, is_cursor, is_active, focused, theme) do
     tree = theme.tree
 
     base_fg =
-      case {entry.dir?, is_active} do
+      case {tree_row.directory?, is_active} do
         {true, _} -> tree.dir_fg
         {_, true} -> tree.active_fg
         _ -> tree.fg
@@ -509,13 +472,13 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
 
     case {is_cursor, focused} do
       {true, true} ->
-        Face.new(fg: tree.bg, bg: base_fg, bold: entry.dir?)
+        Face.new(fg: tree.bg, bg: base_fg, bold: tree_row.directory?)
 
       {true, false} ->
-        Face.new(fg: base_fg, bg: tree.cursor_bg, bold: entry.dir?)
+        Face.new(fg: base_fg, bg: tree.cursor_bg, bold: tree_row.directory?)
 
       _ ->
-        Face.new(fg: base_fg, bg: tree.bg, bold: entry.dir?)
+        Face.new(fg: base_fg, bg: tree.bg, bold: tree_row.directory?)
     end
   end
 
@@ -565,29 +528,12 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     cursor - visible_rows + 1
   end
 
-  @spec active_buffer_path(EditorState.t()) :: String.t() | nil
-  defp active_buffer_path(%{workspace: %{buffers: %{active: nil}}}), do: nil
-
-  defp active_buffer_path(%{workspace: %{buffers: %{active: buf}}}) do
-    case Buffer.file_path(buf) do
-      nil -> nil
-      path -> Path.expand(path)
+  @spec selected_index([Row.t()]) :: non_neg_integer()
+  defp selected_index(rows) do
+    case Enum.find_index(rows, & &1.selected?) do
+      nil -> 0
+      index -> index
     end
-  end
-
-  @spec compute_dirty_paths(EditorState.t()) :: MapSet.t(String.t())
-  defp compute_dirty_paths(%{workspace: %{buffers: %{list: buffer_list}}}) do
-    buffer_list
-    |> Enum.flat_map(fn pid ->
-      try do
-        if Buffer.dirty?(pid), do: [Buffer.file_path(pid)], else: []
-      catch
-        :exit, _ -> []
-      end
-    end)
-    |> Enum.reject(&is_nil/1)
-    |> Enum.map(&Path.expand/1)
-    |> MapSet.new()
   end
 
   # Computes the tree rect from workspace data without requiring EditorState.

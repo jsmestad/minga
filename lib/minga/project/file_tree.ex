@@ -81,6 +81,14 @@ defmodule Minga.Project.FileTree do
     %{tree | cursor: min(tree.cursor + 1, max_idx)}
   end
 
+  @doc "Selects the visible entry at the given index, clamped to the current visible range."
+  @spec select(t(), integer()) :: t()
+  def select(%__MODULE__{} = tree, index) when is_integer(index) do
+    tree = ensure_entries(tree)
+    max_idx = max(length(tree.entries) - 1, 0)
+    %{tree | cursor: index |> max(0) |> min(max_idx)}
+  end
+
   # ── Expand / Collapse ─────────────────────────────────────────────────────
 
   @doc """
@@ -148,6 +156,12 @@ defmodule Minga.Project.FileTree do
       _ ->
         cached
     end
+  end
+
+  @doc "Marks a directory path as expanded and invalidates cached entries."
+  @spec expand_path(t(), String.t()) :: t()
+  def expand_path(%__MODULE__{} = tree, path) when is_binary(path) do
+    invalidate_entries(%{tree | expanded: MapSet.put(tree.expanded, Path.expand(path))})
   end
 
   @spec expand_or_enter(t(), String.t()) :: t()
