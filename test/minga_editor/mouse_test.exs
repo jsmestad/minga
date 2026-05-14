@@ -2,10 +2,15 @@ defmodule MingaEditor.MouseTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Core.Decorations
+  alias Minga.Editing.Fold.Range, as: FoldRange
   alias MingaEditor
   alias MingaEditor.Commands.Movement
+  alias MingaEditor.FoldMap
   alias MingaEditor.Layout
+  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Windows
+  alias MingaEditor.Window
   alias MingaEditor.WindowTree
   alias MingaEditor.Workspace.State, as: WorkspaceState
 
@@ -177,9 +182,9 @@ defmodule MingaEditor.MouseTest do
   end
 
   describe "mouse click-to-position" do
-    # Gutter width for ≤99 lines = 5 (2 sign column + 2 digits + 1 space).
+    # Gutter width for ≤99 lines = 6 (2 sign column + 1 fold column + 2 digits + 1 space).
     # Screen col = gutter_width + buffer_col.
-    @gutter 5
+    @gutter 6
 
     test "left click moves cursor to clicked position" do
       {editor, buffer} = start_editor("hello\nworld\nfoo bar baz")
@@ -370,7 +375,7 @@ defmodule MingaEditor.MouseTest do
   end
 
   describe "mouse drag selection" do
-    @gutter 5
+    @gutter 6
 
     test "left press + drag creates visual selection" do
       {editor, buffer} = start_editor("hello world foo")
@@ -429,6 +434,113 @@ defmodule MingaEditor.MouseTest do
       send_mouse(editor, @content_row, 5, :left, :drag)
       send_mouse(editor, @content_row, 5, :left, :release)
       assert Process.alive?(editor)
+    end
+  end
+
+  describe "fold gutter clicks" do
+    defp set_active_fold_ranges(editor, ranges) do
+      :sys.replace_state(editor, fn state ->
+        EditorState.update_window(
+          state,
+          state.workspace.windows.active,
+          &Window.set_fold_ranges(&1, ranges)
+        )
+      end)
+    end
+
+    defp active_content_origin(editor) do
+      s = state(editor)
+      %{content: {row, col, _width, _height}} = Layout.active_window_layout(Layout.get(s), s)
+      {row, col}
+    end
+
+    test "clicking an expanded fold indicator folds that range" do
+      {editor, _buffer} = start_editor("defmodule Example do\n  def run, do: :ok\nend")
+      set_active_fold_ranges(editor, [FoldRange.new!(0, 2)])
+      {row, col} = active_content_origin(editor)
+
+      send_mouse(
+        editor,
+        row,
+        col + MingaEditor.Renderer.Gutter.fold_column_offset(),
+        :left,
+        :press
+      )
+
+      window = EditorState.active_window_struct(state(editor))
+      assert FoldMap.fold_start?(window.fold_map, 0)
+    end
+
+    test "clicking a folded indicator unfolds that range" do
+      {editor, _buffer} = start_editor("defmodule Example do\n  def run, do: :ok\nend")
+      range = FoldRange.new!(0, 2)
+      set_active_fold_ranges(editor, [range])
+
+      :sys.replace_state(editor, fn state ->
+        EditorState.update_window(state, state.workspace.windows.active, &Window.fold_at(&1, 0))
+      end)
+
+      {row, col} = active_content_origin(editor)
+
+      send_mouse(
+        editor,
+        row,
+        col + MingaEditor.Renderer.Gutter.fold_column_offset(),
+        :left,
+        :press
+      )
+
+      window = EditorState.active_window_struct(state(editor))
+      refute FoldMap.fold_start?(window.fold_map, 0)
+    end
+
+    test "clicking a decoration fold indicator opens that fold region" do
+      {editor, buffer} = start_editor("agent output\nline two\nline three")
+
+      BufferServer.batch_decorations(buffer, fn decs ->
+        {_id, decs} = Decorations.add_fold_region(decs, 0, 2, closed: true)
+        decs
+      end)
+
+      {row, col} = active_content_origin(editor)
+
+      send_mouse(
+        editor,
+        row,
+        col + MingaEditor.Renderer.Gutter.fold_column_offset(),
+        :left,
+        :press
+      )
+
+      assert Decorations.closed_fold_regions(BufferServer.decorations(buffer)) == []
+    end
+
+    test "clicking outside the fold indicator column does not toggle" do
+      {editor, _buffer} = start_editor("defmodule Example do\n  def run, do: :ok\nend")
+      set_active_fold_ranges(editor, [FoldRange.new!(0, 2)])
+      {row, col} = active_content_origin(editor)
+
+      send_mouse(editor, row, col + 1, :left, :press)
+
+      window = EditorState.active_window_struct(state(editor))
+      refute FoldMap.fold_start?(window.fold_map, 0)
+    end
+
+    test "clicking the fold indicator column on a non-fold-start line does not toggle" do
+      {editor, _buffer} = start_editor("defmodule Example do\n  def run, do: :ok\nend")
+      set_active_fold_ranges(editor, [FoldRange.new!(0, 2)])
+      {row, col} = active_content_origin(editor)
+
+      send_mouse(
+        editor,
+        row + 1,
+        col + MingaEditor.Renderer.Gutter.fold_column_offset(),
+        :left,
+        :press
+      )
+
+      window = EditorState.active_window_struct(state(editor))
+      refute FoldMap.fold_start?(window.fold_map, 0)
     end
   end
 

@@ -118,8 +118,17 @@ defmodule MingaEditor.UI.Theme do
 
   defmodule Gutter do
     @moduledoc "Gutter (line number column) colors."
-    @enforce_keys [:fg, :current_fg, :error_fg, :warning_fg, :info_fg, :hint_fg]
-    defstruct [:fg, :current_fg, :error_fg, :warning_fg, :info_fg, :hint_fg, :separator_fg]
+    @enforce_keys [:fg, :current_fg, :error_fg, :warning_fg, :info_fg, :hint_fg, :fold_fg]
+    defstruct [
+      :fg,
+      :current_fg,
+      :error_fg,
+      :warning_fg,
+      :info_fg,
+      :hint_fg,
+      :fold_fg,
+      :separator_fg
+    ]
 
     @type t :: %__MODULE__{
             fg: MingaEditor.UI.Theme.color(),
@@ -128,6 +137,7 @@ defmodule MingaEditor.UI.Theme do
             warning_fg: MingaEditor.UI.Theme.color(),
             info_fg: MingaEditor.UI.Theme.color(),
             hint_fg: MingaEditor.UI.Theme.color(),
+            fold_fg: MingaEditor.UI.Theme.color(),
             separator_fg: MingaEditor.UI.Theme.color() | nil
           }
   end

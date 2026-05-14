@@ -99,7 +99,7 @@ defmodule MingaEditor.UI.Theme.SlotsTest do
       assert pair_map[0x40] == theme.tree.active_fg
     end
 
-    test "highlight and selection slots map to expected IDs" do
+    test "highlight, selection, and fold slots map to expected IDs" do
       theme = MingaEditor.UI.Theme.get!(:doom_one)
       pairs = Slots.to_color_pairs(theme)
       pair_map = Map.new(pairs)
@@ -107,6 +107,7 @@ defmodule MingaEditor.UI.Theme.SlotsTest do
       assert pair_map[0x59] == theme.editor.highlight_read_bg
       assert pair_map[0x5A] == theme.editor.highlight_write_bg
       assert pair_map[0x5B] == theme.editor.selection_bg
+      assert pair_map[0x62] == theme.gutter.fold_fg
     end
 
     test "all themes define highlight and selection colors (no nils)" do

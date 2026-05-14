@@ -166,6 +166,7 @@ final class CommandDispatcher {
                 warningFg: tc.gutterWarningFgRGB,
                 infoFg: tc.gutterInfoFgRGB,
                 hintFg: tc.gutterHintFgRGB,
+                foldFg: tc.gutterFoldFgRGB,
                 gitAddedFg: tc.gitAddedFgRGB,
                 gitModifiedFg: tc.gitModifiedFgRGB,
                 gitDeletedFg: tc.gitDeletedFgRGB

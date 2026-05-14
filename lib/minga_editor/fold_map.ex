@@ -6,7 +6,7 @@ defmodule MingaEditor.FoldMap do
   windows viewing the same buffer can have independent fold states (like
   Neovim's per-window folds).
 
-  Internally stores a sorted list of non-overlapping `FoldRange` structs.
+  Internally stores a sorted list of compatible `FoldRange` structs. Ranges may be nested for recursive fold operations, but partial overlaps are rejected.
   Lookups are linear scans over the sorted list. When the list is empty,
   all translation functions are O(1) via guard clauses (zero overhead
   for buffers without folds). This is adequate for typical fold counts
@@ -21,9 +21,9 @@ defmodule MingaEditor.FoldMap do
   - **Visible lines**: the line numbers as displayed on screen, with folded
     regions collapsed to a single summary line.
 
-  A folded range `{start_line, end_line}` contributes exactly one visible
+  A visible folded range `{start_line, end_line}` contributes exactly one visible
   line (the start/summary line). The `end_line - start_line` hidden lines
-  are skipped.
+  are skipped. Nested folds may be stored for recursive commands, but only the outer visible fold contributes to coordinate translation while its parent is closed.
 
   ## Design
 
@@ -47,15 +47,12 @@ defmodule MingaEditor.FoldMap do
   @spec new() :: t()
   def new, do: %__MODULE__{folds: []}
 
-  @doc "Creates a fold map from a list of fold ranges. Removes overlaps by keeping earlier ranges."
+  @doc "Creates a fold map from a list of fold ranges. Preserves nested ranges and rejects partial overlaps."
   @spec from_ranges([FoldRange.t()]) :: t()
   def from_ranges(ranges) when is_list(ranges) do
-    folds =
-      ranges
-      |> Enum.sort_by(& &1.start_line)
-      |> remove_overlaps()
-
-    %__MODULE__{folds: folds}
+    ranges
+    |> sort_folds()
+    |> Enum.reduce(new(), &fold(&2, &1))
   end
 
   @doc "Returns true if the fold map has no folds."
@@ -71,15 +68,19 @@ defmodule MingaEditor.FoldMap do
   @spec folds(t()) :: [FoldRange.t()]
   def folds(%__MODULE__{folds: folds}), do: folds
 
+  @doc "Returns active folds that are visible at the current fold depth."
+  @spec visible_folds(t()) :: [FoldRange.t()]
+  def visible_folds(%__MODULE__{folds: folds}), do: top_level_folds(folds)
+
   # ── Fold/Unfold operations ───────────────────────────────────────────────
 
   @doc """
   Adds a fold range. Returns the updated fold map, or the original if the
-  range overlaps with an existing fold.
+  range partially overlaps with an existing fold.
   """
   @spec fold(t(), FoldRange.t()) :: t()
   def fold(%__MODULE__{folds: folds} = fm, %FoldRange{} = range) do
-    if Enum.any?(folds, &FoldRange.overlaps?(&1, range)) do
+    if Enum.any?(folds, &conflicts?(&1, range)) do
       fm
     else
       new_folds = insert_sorted(folds, range)
@@ -147,6 +148,34 @@ defmodule MingaEditor.FoldMap do
   @spec fold_all(t(), [FoldRange.t()]) :: t()
   def fold_all(%__MODULE__{}, ranges), do: from_ranges(ranges)
 
+  @doc "Folds the outermost range containing `line` and all ranges nested inside it."
+  @spec fold_recursive(t(), non_neg_integer(), [FoldRange.t()]) :: t()
+  def fold_recursive(%__MODULE__{} = fm, line, ranges) do
+    case outermost_range(ranges, line) do
+      nil -> fm
+      range -> fold_many(fm, contained_ranges(ranges, range))
+    end
+  end
+
+  @doc "Unfolds every active fold inside the outermost range containing `line`."
+  @spec unfold_recursive(t(), non_neg_integer(), [FoldRange.t()]) :: t()
+  def unfold_recursive(%__MODULE__{folds: []} = fm, _line, _ranges), do: fm
+
+  def unfold_recursive(%__MODULE__{folds: folds} = fm, line, ranges) do
+    case recursive_unfold_target(folds, ranges, line) do
+      nil -> fm
+      target -> %{fm | folds: Enum.reject(folds, &contained_in?(&1, target))}
+    end
+  end
+
+  @doc "Finds the outermost (largest) fold range containing the given line."
+  @spec outermost_range([FoldRange.t()], non_neg_integer()) :: FoldRange.t() | nil
+  def outermost_range(ranges, line) do
+    ranges
+    |> Enum.filter(&FoldRange.contains?(&1, line))
+    |> Enum.max_by(fn %FoldRange{start_line: s, end_line: e} -> e - s end, fn -> nil end)
+  end
+
   # ── Query operations ─────────────────────────────────────────────────────
 
   @doc "Returns true if the given buffer line is hidden by a fold (inside but not the start line)."
@@ -154,7 +183,9 @@ defmodule MingaEditor.FoldMap do
   def folded?(%__MODULE__{folds: []}, _line), do: false
 
   def folded?(%__MODULE__{folds: folds}, line) do
-    Enum.any?(folds, &FoldRange.hides?(&1, line))
+    folds
+    |> top_level_folds()
+    |> Enum.any?(&FoldRange.hides?(&1, line))
   end
 
   @doc "Returns the fold range containing the given line, or :none."
@@ -162,7 +193,7 @@ defmodule MingaEditor.FoldMap do
   def fold_at(%__MODULE__{folds: []}, _line), do: :none
 
   def fold_at(%__MODULE__{folds: folds}, line) do
-    case Enum.find(folds, &FoldRange.contains?(&1, line)) do
+    case Enum.find(top_level_folds(folds), &FoldRange.contains?(&1, line)) do
       nil -> :none
       range -> {:ok, range}
     end
@@ -194,16 +225,9 @@ defmodule MingaEditor.FoldMap do
 
   def buffer_to_visible(%__MODULE__{folds: folds}, line) do
     hidden =
-      Enum.reduce(folds, 0, fn %FoldRange{start_line: s, end_line: e}, acc ->
-        cond do
-          # Fold is entirely before this line: all its hidden lines are subtracted
-          e < line -> acc + (e - s)
-          # Line is inside this fold (hidden): count lines hidden before it
-          line > s and line <= e -> acc + (line - s)
-          # Fold starts at or after this line: doesn't affect it
-          true -> acc
-        end
-      end)
+      folds
+      |> top_level_folds()
+      |> Enum.reduce(0, fn fold, acc -> hidden_offset_for_line(fold, line, acc) end)
 
     line - hidden
   end
@@ -218,8 +242,19 @@ defmodule MingaEditor.FoldMap do
   def visible_to_buffer(%__MODULE__{folds: []}, visible), do: visible
 
   def visible_to_buffer(%__MODULE__{folds: folds}, visible) do
-    do_visible_to_buffer(folds, visible, 0)
+    do_visible_to_buffer(top_level_folds(folds), visible, 0)
   end
+
+  @spec hidden_offset_for_line(FoldRange.t(), non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp hidden_offset_for_line(%FoldRange{start_line: s, end_line: e}, line, acc) when e < line,
+    do: acc + (e - s)
+
+  defp hidden_offset_for_line(%FoldRange{start_line: s, end_line: e}, line, acc)
+       when line > s and line <= e,
+       do: acc + (line - s)
+
+  defp hidden_offset_for_line(%FoldRange{}, _line, acc), do: acc
 
   @spec do_visible_to_buffer([FoldRange.t()], non_neg_integer(), non_neg_integer()) ::
           non_neg_integer()
@@ -251,7 +286,9 @@ defmodule MingaEditor.FoldMap do
 
   def visible_line_count(%__MODULE__{folds: folds}, total) do
     hidden =
-      Enum.reduce(folds, 0, fn %FoldRange{start_line: s, end_line: e}, acc -> acc + (e - s) end)
+      folds
+      |> top_level_folds()
+      |> Enum.reduce(0, fn %FoldRange{start_line: s, end_line: e}, acc -> acc + (e - s) end)
 
     max(total - hidden, 0)
   end
@@ -268,7 +305,9 @@ defmodule MingaEditor.FoldMap do
   def next_visible(%__MODULE__{folds: folds}, line) do
     next = line + 1
 
-    case Enum.find(folds, fn %FoldRange{start_line: s, end_line: e} -> next > s and next <= e end) do
+    case Enum.find(top_level_folds(folds), fn %FoldRange{start_line: s, end_line: e} ->
+           next > s and next <= e
+         end) do
       nil -> next
       %FoldRange{end_line: e} -> e + 1
     end
@@ -286,7 +325,9 @@ defmodule MingaEditor.FoldMap do
   def prev_visible(%__MODULE__{folds: folds}, line) do
     prev = max(line - 1, 0)
 
-    case Enum.find(folds, fn %FoldRange{start_line: s, end_line: e} -> prev > s and prev <= e end) do
+    case Enum.find(top_level_folds(folds), fn %FoldRange{start_line: s, end_line: e} ->
+           prev > s and prev <= e
+         end) do
       nil -> prev
       %FoldRange{start_line: s} -> s
     end
@@ -311,27 +352,65 @@ defmodule MingaEditor.FoldMap do
 
   # ── Private helpers ─────────────────────────────────────────────────────
 
-  @spec insert_sorted([FoldRange.t()], FoldRange.t()) :: [FoldRange.t()]
-  defp insert_sorted([], range), do: [range]
+  @spec fold_many(t(), [FoldRange.t()]) :: t()
+  defp fold_many(fm, ranges) do
+    Enum.reduce(ranges, fm, &fold(&2, &1))
+  end
 
-  defp insert_sorted([head | tail] = list, range) do
-    if range.start_line <= head.start_line do
-      [range | list]
-    else
-      [head | insert_sorted(tail, range)]
+  @spec recursive_unfold_target([FoldRange.t()], [FoldRange.t()], non_neg_integer()) ::
+          FoldRange.t() | nil
+  defp recursive_unfold_target(folds, ranges, line) do
+    case outermost_range(folds, line) do
+      nil -> outermost_range(ranges, line)
+      range -> range
     end
   end
 
-  @spec remove_overlaps([FoldRange.t()]) :: [FoldRange.t()]
-  defp remove_overlaps([]), do: []
-  defp remove_overlaps([single]), do: [single]
+  @spec contained_ranges([FoldRange.t()], FoldRange.t()) :: [FoldRange.t()]
+  defp contained_ranges(ranges, target) do
+    ranges
+    |> Enum.filter(&contained_in?(&1, target))
+    |> sort_folds()
+  end
 
-  defp remove_overlaps([first, second | rest]) do
-    if FoldRange.overlaps?(first, second) do
-      # Keep the earlier range, skip the overlapping one
-      remove_overlaps([first | rest])
-    else
-      [first | remove_overlaps([second | rest])]
-    end
+  @spec top_level_folds([FoldRange.t()]) :: [FoldRange.t()]
+  defp top_level_folds(folds) do
+    folds
+    |> sort_folds()
+    |> Enum.reduce([], fn fold, acc ->
+      if Enum.any?(acc, &contained_in?(fold, &1)) do
+        acc
+      else
+        acc ++ [fold]
+      end
+    end)
+  end
+
+  @spec insert_sorted([FoldRange.t()], FoldRange.t()) :: [FoldRange.t()]
+  defp insert_sorted(folds, range) do
+    [range | folds]
+    |> Enum.uniq_by(fn %FoldRange{start_line: s, end_line: e} -> {s, e} end)
+    |> sort_folds()
+  end
+
+  @spec sort_folds([FoldRange.t()]) :: [FoldRange.t()]
+  defp sort_folds(folds) do
+    Enum.sort_by(folds, fn %FoldRange{start_line: s, end_line: e} -> {s, -(e - s)} end)
+  end
+
+  @spec conflicts?(FoldRange.t(), FoldRange.t()) :: boolean()
+  defp conflicts?(existing, range) do
+    FoldRange.overlaps?(existing, range) and not nested_or_same?(existing, range)
+  end
+
+  @spec nested_or_same?(FoldRange.t(), FoldRange.t()) :: boolean()
+  defp nested_or_same?(a, b), do: contained_in?(a, b) or contained_in?(b, a)
+
+  @spec contained_in?(FoldRange.t(), FoldRange.t()) :: boolean()
+  defp contained_in?(%FoldRange{start_line: s1, end_line: e1}, %FoldRange{
+         start_line: s2,
+         end_line: e2
+       }) do
+    s1 >= s2 and e1 <= e2
   end
 end

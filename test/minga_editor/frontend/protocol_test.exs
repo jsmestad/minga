@@ -1458,6 +1458,25 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       end
     end
 
+    test "encodes open fold display type" do
+      data = %{
+        window_id: 1,
+        content_row: 0,
+        content_col: 0,
+        content_height: 1,
+        is_active: true,
+        cursor_line: 0,
+        line_number_style: :hybrid,
+        line_number_width: 4,
+        sign_col_width: 3,
+        entries: [%{buf_line: 0, display_type: :fold_open, sign_type: :none}]
+      }
+
+      encoded = ProtocolGUI.encode_gui_gutter(data)
+
+      assert :binary.match(encoded, <<4::8, 0::8>>) != :nomatch
+    end
+
     test "encodes all sign types" do
       sign_types = [
         {:none, 0},

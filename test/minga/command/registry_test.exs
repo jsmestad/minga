@@ -104,6 +104,8 @@ defmodule Minga.Command.RegistryTest do
           :fold_toggle,
           :fold_close,
           :fold_open,
+          :fold_close_recursive,
+          :fold_open_recursive,
           :fold_close_all,
           :fold_open_all,
 

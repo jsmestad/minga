@@ -73,9 +73,9 @@ defmodule MingaEditor.Renderer.LineTest do
       {cursor_row, cursor_col} = screen.cursor
 
       assert cursor_row == @content_row
-      # Gutter width for 1-line file is 5 (2 sign + 2 digits + 1 space);
-      # '好' starts at display col 2 -> 5+2=7
-      assert cursor_col == 7, "Expected cursor at display col 7, got #{cursor_col}"
+      # Gutter width for 1-line file is 6 (2 sign + 1 fold + 2 digits + 1 space);
+      # '好' starts at display col 2 -> 6+2=8
+      assert cursor_col == 8, "Expected cursor at display col 8, got #{cursor_col}"
     end
 
     test "visual selection of CJK characters highlights correct grapheme cells" do
@@ -90,16 +90,16 @@ defmodule MingaEditor.Renderer.LineTest do
       row = Enum.at(screen.grid, @content_row)
 
       # HeadlessPort places one grapheme per cell at the draw command's col.
-      # The draw command starts at display col 5 (gutter width: 2 sign + 2 digits + 1 space).
-      # '你','好','世' land at cells 5, 6, 7 with :reverse.
-      selected_cells = Enum.slice(row, 5, 3)
+      # The draw command starts at display col 6 (gutter width: 2 sign + 1 fold + 2 digits + 1 space).
+      # '你','好','世' land at cells 6, 7, 8 with :reverse.
+      selected_cells = Enum.slice(row, 6, 3)
 
       assert Enum.all?(selected_cells, fn cell -> :reverse in cell.attrs end),
-             "Expected cells 5-7 (你好世) to have :reverse attribute"
+             "Expected cells 6-8 (你好世) to have :reverse attribute"
 
-      # '界' at cell 8 must NOT be selected
-      refute :reverse in Enum.at(row, 8).attrs,
-             "Expected '界' at cell 8 to not be selected"
+      # '界' at cell 9 must NOT be selected
+      refute :reverse in Enum.at(row, 9).attrs,
+             "Expected '界' at cell 9 to not be selected"
     end
 
     test "emoji renders as 2 display columns" do
@@ -119,8 +119,8 @@ defmodule MingaEditor.Renderer.LineTest do
 
       screen = HeadlessPort.get_screen(ctx.port)
       {_crow, cursor_col} = screen.cursor
-      # gutter=5, é is 1 col wide, so after `l` cursor is at display col 1 -> col 5+1=6
-      assert cursor_col == 6, "Expected cursor at col 6 (é is 1 col wide), got #{cursor_col}"
+      # gutter=6, é is 1 col wide, so after `l` cursor is at display col 1 -> col 6+1=7
+      assert cursor_col == 7, "Expected cursor at col 7 (é is 1 col wide), got #{cursor_col}"
     end
 
     test "ASCII behavior is unchanged" do
@@ -134,8 +134,8 @@ defmodule MingaEditor.Renderer.LineTest do
 
       screen = HeadlessPort.get_screen(ctx.port)
       row = Enum.at(screen.grid, @content_row)
-      # gutter=5; select "hel" = cols 5, 6, 7
-      selected_cells = Enum.slice(row, 5, 3)
+      # gutter=6; select "hel" = cols 6, 7, 8
+      selected_cells = Enum.slice(row, 6, 3)
 
       assert Enum.all?(selected_cells, fn cell -> :reverse in cell.attrs end),
              "Expected ASCII selection cells to have :reverse attribute"
@@ -143,8 +143,8 @@ defmodule MingaEditor.Renderer.LineTest do
   end
 
   describe "visual selection rendering" do
-    # Gutter width for 1-line file: 5 (2 sign + 2 digits + 1 space)
-    @sel_gutter_w 5
+    # Gutter width for 1-line file: 6 (2 sign + 1 fold + 2 digits + 1 space)
+    @sel_gutter_w 6
 
     test "selected text has reverse attribute" do
       ctx = start_editor("hello world")

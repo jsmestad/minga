@@ -26,6 +26,8 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   alias Minga.Config
 
   alias MingaEditor.DisplayList.Frame
+  alias MingaEditor.DisplayMap
+  alias MingaEditor.FoldMap
   alias MingaEditor.Layout
   alias MingaEditor.MinibufferData
   alias MingaEditor.Renderer.Caches
@@ -972,7 +974,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     viewport_top = max(window.render_cache.last_viewport_top, 0)
     line_count = max(window.render_cache.last_line_count, 0)
 
-    {content_row, content_col, _content_w, content_height} = win_layout.content
+    {content_row, content_col, content_w, content_height} = win_layout.content
 
     win_pos = %{
       window_id: win_id,
@@ -995,7 +997,8 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       build_gutter_entries(window, buf, win_pos, %{
         cursor_line: cursor_line,
         viewport_top: viewport_top,
-        line_count: line_count
+        line_count: line_count,
+        content_w: content_w
       })
     end
   end
@@ -1003,11 +1006,19 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   @spec build_gutter_entries(MingaEditor.Window.t(), pid(), map(), map()) ::
           ProtocolGUI.gutter_data()
   defp build_gutter_entries(window, buf, win_pos, params) do
-    %{cursor_line: cursor_line, viewport_top: viewport_top, line_count: line_count} = params
+    %{
+      cursor_line: cursor_line,
+      viewport_top: viewport_top,
+      line_count: line_count,
+      content_w: content_w
+    } = params
+
     line_number_style = Buffer.get_option(buf, :line_numbers)
 
-    # Sign column is always reserved for consistent gutter layout.
-    sign_col_width = MingaEditor.Renderer.Gutter.sign_column_width()
+    # The native gutter keeps fold indicators in a dedicated cell after the sign column.
+    sign_col_width =
+      MingaEditor.Renderer.Gutter.sign_column_width() +
+        MingaEditor.Renderer.Gutter.fold_column_width()
 
     line_number_width =
       if line_number_style == :none, do: 0, else: Viewport.gutter_width(line_count)
@@ -1016,18 +1027,32 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     decorations = Buffer.decorations(buf)
     diag_signs = ContentHelpers.diagnostic_signs_for_window(window)
     git_signs = ContentHelpers.git_signs_for_window(window)
+    fold_start_lines = MapSet.new(window.fold_ranges, & &1.start_line)
+    content_width = max(content_w - sign_col_width - line_number_width, 1)
 
-    # Build entries for each visible line
     entries =
-      for row <- 0..(win_pos.content_height - 1) do
-        buf_line = viewport_top + row
+      window
+      |> gui_gutter_visible_entries(
+        decorations,
+        viewport_top,
+        win_pos.content_height,
+        line_count,
+        content_width
+      )
+      |> Enum.map(fn
+        {buf_line, row_type} when buf_line < line_count ->
+          resolve_gutter_entry(
+            buf_line,
+            row_type,
+            fold_start_lines,
+            diag_signs,
+            git_signs,
+            decorations
+          )
 
-        if buf_line < line_count do
-          resolve_gutter_entry(buf_line, diag_signs, git_signs, decorations)
-        else
+        {buf_line, _row_type} ->
           %{buf_line: buf_line, display_type: :normal, sign_type: :none}
-        end
-      end
+      end)
 
     Map.merge(win_pos, %{
       cursor_line: cursor_line,
@@ -1038,29 +1063,93 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     })
   end
 
+  @spec gui_gutter_visible_entries(
+          MingaEditor.Window.t(),
+          Minga.Core.Decorations.t(),
+          non_neg_integer(),
+          pos_integer(),
+          non_neg_integer(),
+          pos_integer()
+        ) :: [{non_neg_integer(), term()}]
+  defp gui_gutter_visible_entries(
+         window,
+         decorations,
+         viewport_top,
+         content_height,
+         line_count,
+         content_width
+       ) do
+    first_line = gui_gutter_first_line(window.fold_map, viewport_top)
+
+    case DisplayMap.compute(
+           window.fold_map,
+           decorations,
+           first_line,
+           content_height,
+           line_count,
+           content_width
+         ) do
+      nil -> Enum.map(0..(content_height - 1), fn row -> {viewport_top + row, :normal} end)
+      %DisplayMap{} = dm -> DisplayMap.to_visible_line_map(dm)
+    end
+  end
+
+  @spec gui_gutter_first_line(FoldMap.t(), non_neg_integer()) :: non_neg_integer()
+  defp gui_gutter_first_line(%FoldMap{folds: []}, viewport_top), do: viewport_top
+
+  defp gui_gutter_first_line(%FoldMap{} = fold_map, viewport_top),
+    do: FoldMap.visible_to_buffer(fold_map, viewport_top)
+
   # Resolves the gutter entry for a buffer line. Diagnostics > git signs > annotations.
   @spec resolve_gutter_entry(
           non_neg_integer(),
+          term(),
+          MapSet.t(non_neg_integer()),
           %{non_neg_integer() => atom()},
           %{non_neg_integer() => atom()},
           Minga.Core.Decorations.t()
         ) :: ProtocolGUI.gutter_entry()
-  defp resolve_gutter_entry(buf_line, diag_signs, git_signs, decorations) do
+  defp resolve_gutter_entry(
+         buf_line,
+         row_type,
+         fold_start_lines,
+         diag_signs,
+         git_signs,
+         decorations
+       ) do
     sign_type = resolve_sign_type(buf_line, diag_signs, git_signs)
+    display_type = resolve_display_type(row_type, fold_start_lines, buf_line)
 
     case sign_type do
       :none ->
-        resolve_annotation_entry(buf_line, decorations)
+        resolve_annotation_entry(buf_line, display_type, decorations)
 
       _ ->
-        %{buf_line: buf_line, display_type: :normal, sign_type: sign_type}
+        %{buf_line: buf_line, display_type: display_type, sign_type: sign_type}
     end
   end
 
+  @spec resolve_display_type(term(), MapSet.t(non_neg_integer()), non_neg_integer()) ::
+          ProtocolGUI.display_type()
+  defp resolve_display_type({:fold_start, _hidden}, _fold_start_lines, _buf_line), do: :fold_start
+
+  defp resolve_display_type({:decoration_fold, _fold}, _fold_start_lines, _buf_line),
+    do: :fold_start
+
+  defp resolve_display_type(:normal, fold_start_lines, buf_line) do
+    if MapSet.member?(fold_start_lines, buf_line), do: :fold_open, else: :normal
+  end
+
+  defp resolve_display_type(_row_type, _fold_start_lines, _buf_line), do: :normal
+
   # Checks for :gutter_icon annotations when no diagnostic or git sign is present.
-  @spec resolve_annotation_entry(non_neg_integer(), Minga.Core.Decorations.t()) ::
+  @spec resolve_annotation_entry(
+          non_neg_integer(),
+          ProtocolGUI.display_type(),
+          Minga.Core.Decorations.t()
+        ) ::
           ProtocolGUI.gutter_entry()
-  defp resolve_annotation_entry(buf_line, decorations) do
+  defp resolve_annotation_entry(buf_line, display_type, decorations) do
     icons =
       decorations
       |> Minga.Core.Decorations.annotations_for_line(buf_line)
@@ -1068,12 +1157,12 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
     case icons do
       [] ->
-        %{buf_line: buf_line, display_type: :normal, sign_type: :none}
+        %{buf_line: buf_line, display_type: display_type, sign_type: :none}
 
       [ann | _] ->
         %{
           buf_line: buf_line,
-          display_type: :normal,
+          display_type: display_type,
           sign_type: :annotation,
           sign_fg: ann.fg,
           sign_text: String.slice(ann.text, 0, 2)

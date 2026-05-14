@@ -402,10 +402,12 @@ defmodule MingaEditor.DisplayList do
   @spec prepend_draw_commands(
           [binary()],
           non_neg_integer(),
-          non_neg_integer(),
+          integer(),
           String.t(),
           Face.t()
         ) :: [binary()]
+  defp prepend_draw_commands(acc, _row, col, _text, %Face{}) when col < 0, do: acc
+
   defp prepend_draw_commands(acc, row, col, text, %Face{} = face) do
     if simple_draw_face?(face) do
       [Protocol.encode_draw_face(row, col, text, face) | acc]

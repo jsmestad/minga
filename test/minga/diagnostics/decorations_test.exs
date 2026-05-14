@@ -13,7 +13,8 @@ defmodule Minga.Diagnostics.DecorationsTest do
     error_fg: 0xFF6C6B,
     warning_fg: 0xECBE7B,
     info_fg: 0x51AFEF,
-    hint_fg: 0x5B6268
+    hint_fg: 0x5B6268,
+    fold_fg: 0x5B6268
   }
 
   defp make_diagnostic(severity, start_line, start_col, end_line, end_col) do

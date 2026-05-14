@@ -237,6 +237,7 @@ enum Wire {
         case foldStart = 1
         case foldContinuation = 2
         case wrapContinuation = 3
+        case foldOpen = 4
     }
 
     /// Sign type for the gutter sign column.

@@ -242,6 +242,16 @@ defmodule MingaEditor.RenderPipeline.Scroll do
         FoldMap.visible_to_buffer(fold_map, vis_first)
       end
 
+    # Compute final gutter dimensions before building the DisplayMap.
+    # Dynamic block decorations must see the same text width in scroll, content, and GUI gutter paths.
+    line_count_approx = Buffer.line_count(window.buffer)
+    line_number_style = Buffer.get_option(window.buffer, :line_numbers)
+
+    {has_sign_column, gutter_w} =
+      gutter_dimensions(state, window.buffer, line_number_style, line_count_approx)
+
+    content_w = max(viewport.cols - gutter_w, 1)
+
     # Compute which buffer lines are visible at each screen row.
     # The DisplayMap merges per-window folds, decoration folds, and virtual
     # lines into a unified mapping. Falls back to VisibleLines when there
@@ -252,15 +262,13 @@ defmodule MingaEditor.RenderPipeline.Scroll do
     # If decorations push the cursor off-screen, adjust first_line and recompute.
     {first_line, visible_line_map} =
       if DisplayMap.required?(fold_map, decorations) do
-        line_count_approx = Buffer.line_count(window.buffer)
-
         compute_display_map_with_cursor_check(
           fold_map,
           decorations,
           first_line,
           visible_rows,
           line_count_approx,
-          content_width,
+          content_w,
           cursor_line
         )
       else
@@ -281,19 +289,9 @@ defmodule MingaEditor.RenderPipeline.Scroll do
 
     snapshot = Buffer.render_snapshot(window.buffer, fetch_first, fetch_count)
     lines = snapshot.lines
-    line_count = snapshot.line_count
-
     # Cursor byte → display col
     cursor_line_text = cursor_line_text(lines, cursor_line, first_line)
     cursor_col = Unicode.display_col(cursor_line_text, cursor_byte_col)
-
-    # Gutter dimensions
-    line_number_style = Buffer.get_option(window.buffer, :line_numbers)
-
-    {has_sign_column, gutter_w} =
-      gutter_dimensions(state, window.buffer, line_number_style, line_count)
-
-    content_w = max(viewport.cols - gutter_w, 1)
 
     # Horizontal scroll (disabled when wrapping).
     # Use content_w (text area excluding gutter) as the effective width,

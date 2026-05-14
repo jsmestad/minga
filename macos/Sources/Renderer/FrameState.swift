@@ -17,6 +17,7 @@ struct GutterThemeColors {
     var warningFg: UInt32 = 0xECBE7B
     var infoFg: UInt32 = 0x51AFEF
     var hintFg: UInt32 = 0x555555
+    var foldFg: UInt32 = 0x555555
     var gitAddedFg: UInt32 = 0x98BE65
     var gitModifiedFg: UInt32 = 0x51AFEF
     var gitDeletedFg: UInt32 = 0xFF6C6B

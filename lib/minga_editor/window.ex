@@ -254,6 +254,32 @@ defmodule MingaEditor.Window do
     end
   end
 
+  @doc "Folds the outermost range containing the given buffer line and every nested range."
+  @spec fold_recursive_at(t(), non_neg_integer()) :: t()
+  def fold_recursive_at(%__MODULE__{fold_map: fm, fold_ranges: ranges} = window, line) do
+    new_fm = FoldMap.fold_recursive(fm, line, ranges)
+
+    if new_fm == fm do
+      window
+    else
+      %{window | fold_map: new_fm}
+      |> clamp_cursor_to_visible()
+      |> invalidate()
+    end
+  end
+
+  @doc "Unfolds every active fold inside the outermost range containing the given buffer line."
+  @spec unfold_recursive_at(t(), non_neg_integer()) :: t()
+  def unfold_recursive_at(%__MODULE__{fold_map: fm, fold_ranges: ranges} = window, line) do
+    new_fm = FoldMap.unfold_recursive(fm, line, ranges)
+
+    if new_fm == fm do
+      window
+    else
+      %{window | fold_map: new_fm} |> invalidate()
+    end
+  end
+
   @doc "Folds all available ranges."
   @spec fold_all(t()) :: t()
   def fold_all(%__MODULE__{fold_ranges: ranges} = window) do
@@ -301,7 +327,7 @@ defmodule MingaEditor.Window do
 
   @doc "Updates the available fold ranges (from a provider). Preserves existing folds that still exist in the new ranges."
   @spec set_fold_ranges(t(), [FoldRange.t()]) :: t()
-  def set_fold_ranges(%__MODULE__{fold_map: fm} = window, new_ranges) do
+  def set_fold_ranges(%__MODULE__{fold_map: fm, fold_ranges: old_ranges} = window, new_ranges) do
     # Keep existing folds that still match a range in the new set
     surviving_folds =
       Enum.filter(FoldMap.folds(fm), fn old_fold ->
@@ -313,8 +339,15 @@ defmodule MingaEditor.Window do
 
     new_fm = FoldMap.from_ranges(surviving_folds)
 
-    %{window | fold_ranges: new_ranges, fold_map: new_fm}
-    |> clamp_cursor_to_visible()
+    window =
+      %{window | fold_ranges: new_ranges, fold_map: new_fm}
+      |> clamp_cursor_to_visible()
+
+    if old_ranges == new_ranges do
+      window
+    else
+      invalidate(window)
+    end
   end
 
   @doc "Unfolds any folds that contain the given lines (used by search auto-unfold)."

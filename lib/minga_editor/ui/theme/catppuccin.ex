@@ -33,6 +33,7 @@ defmodule MingaEditor.UI.Theme.Catppuccin do
         warning_fg: p.yellow,
         info_fg: p.blue,
         hint_fg: p.overlay0,
+        fold_fg: p.overlay0,
         separator_fg: p.overlay0
       },
       git: %MingaEditor.UI.Theme.Git{

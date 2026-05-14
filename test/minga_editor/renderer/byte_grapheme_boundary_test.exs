@@ -9,6 +9,8 @@ defmodule MingaEditor.Renderer.ByteGraphemeBoundaryTest do
 
   use Minga.Test.EditorCase, async: true
 
+  @gutter_w 6
+
   describe "cursor placement with multi-byte characters" do
     test "cursor is at correct screen column after multi-byte characters" do
       # "café" — é is 2 bytes, so byte_col=5 but grapheme_col=4
@@ -18,10 +20,9 @@ defmodule MingaEditor.Renderer.ByteGraphemeBoundaryTest do
       send_key_sync(ctx, ?$)
 
       {_row, col} = screen_cursor(ctx)
-      gutter_w = 5
 
       # "café" has 4 graphemes, cursor on last char (index 3)
-      assert col == gutter_w + 3
+      assert col == @gutter_w + 3
     end
 
     test "cursor is at correct screen column with emoji" do
@@ -31,10 +32,9 @@ defmodule MingaEditor.Renderer.ByteGraphemeBoundaryTest do
       send_key_sync(ctx, ?$)
 
       {_row, col} = screen_cursor(ctx)
-      gutter_w = 5
 
       # Display columns: a=1, 🎉=2, b=1 — 'b' is at display col 3 (not grapheme 2)
-      assert col == gutter_w + 3
+      assert col == @gutter_w + 3
     end
 
     test "cursor placement with multiple multi-byte characters" do
@@ -47,10 +47,9 @@ defmodule MingaEditor.Renderer.ByteGraphemeBoundaryTest do
       send_key_sync(ctx, ?l)
 
       {_row, col} = screen_cursor(ctx)
-      gutter_w = 5
 
       # grapheme index 3
-      assert col == gutter_w + 3
+      assert col == @gutter_w + 3
     end
   end
 
@@ -81,37 +80,35 @@ defmodule MingaEditor.Renderer.ByteGraphemeBoundaryTest do
     test "visual selection highlights correct graphemes" do
       # "café" — select "af" (graphemes 1-2)
       ctx = start_editor("café")
-      gutter_w = 5
 
       # Move to 'a', enter visual, select through 'f'
       send_key_sync(ctx, ?l)
       send_key_sync(ctx, ?v)
       send_key_sync(ctx, ?l)
 
-      # Cells at grapheme positions 1 and 2 (gutter_w + 1, gutter_w + 2) should be reversed
-      cell_a = screen_cell(ctx, 1, gutter_w + 1)
-      cell_f = screen_cell(ctx, 1, gutter_w + 2)
+      # Cells at grapheme positions 1 and 2 (@gutter_w + 1, @gutter_w + 2) should be reversed
+      cell_a = screen_cell(ctx, 1, @gutter_w + 1)
+      cell_f = screen_cell(ctx, 1, @gutter_w + 2)
 
       assert :reverse in cell_a.attrs,
-             "Expected 'a' at col #{gutter_w + 1} to be selected"
+             "Expected 'a' at col #{@gutter_w + 1} to be selected"
 
       assert :reverse in cell_f.attrs,
-             "Expected 'f' at col #{gutter_w + 2} to be selected"
+             "Expected 'f' at col #{@gutter_w + 2} to be selected"
 
       # 'c' before selection should not be reversed
-      cell_c = screen_cell(ctx, 1, gutter_w)
+      cell_c = screen_cell(ctx, 1, @gutter_w)
       refute :reverse in cell_c.attrs, "Expected 'c' not to be selected"
     end
 
     test "visual selection with emoji characters" do
       ctx = start_editor("a🎉b")
-      gutter_w = 5
 
       # Select all with v$
       send_key_sync(ctx, ?v)
       send_key_sync(ctx, ?$)
 
-      cell_a = screen_cell(ctx, 1, gutter_w)
+      cell_a = screen_cell(ctx, 1, @gutter_w)
       assert :reverse in cell_a.attrs, "Expected 'a' to be selected"
     end
   end
@@ -126,10 +123,9 @@ defmodule MingaEditor.Renderer.ByteGraphemeBoundaryTest do
       send_key_sync(ctx, ?b)
 
       {_row, col} = screen_cursor(ctx)
-      gutter_w = 5
 
       # After typing "ab", cursor should be at grapheme col 2
-      assert col == gutter_w + 2
+      assert col == @gutter_w + 2
     end
   end
 
@@ -140,10 +136,9 @@ defmodule MingaEditor.Renderer.ByteGraphemeBoundaryTest do
       send_key_sync(ctx, ?$)
 
       {_row, col} = screen_cursor(ctx)
-      gutter_w = 5
 
       # "hello world" = 11 chars, cursor on 'd' at index 10
-      assert col == gutter_w + 10
+      assert col == @gutter_w + 10
     end
 
     test "modeline column correct for ASCII" do

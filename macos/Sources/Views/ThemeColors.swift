@@ -73,6 +73,7 @@ final class ThemeColors {
     var gutterWarningFg: Color = color(0xECBE7B)
     var gutterInfoFg: Color = color(0x51AFEF)
     var gutterHintFg: Color = color(0x555555)
+    var gutterFoldFg: Color = color(0x555555)
     var gitAddedFg: Color = color(0x98BE65)
     var gitModifiedFg: Color = color(0x51AFEF)
     var gitDeletedFg: Color = color(0xFF6C6B)
@@ -108,6 +109,7 @@ final class ThemeColors {
     var gutterWarningFgRGB: UInt32 = 0xECBE7B
     var gutterInfoFgRGB: UInt32 = 0x51AFEF
     var gutterHintFgRGB: UInt32 = 0x555555
+    var gutterFoldFgRGB: UInt32 = 0x555555
     var gitAddedFgRGB: UInt32 = 0x98BE65
     var gitModifiedFgRGB: UInt32 = 0x51AFEF
     var gitDeletedFgRGB: UInt32 = 0xFF6C6B
@@ -214,6 +216,7 @@ final class ThemeColors {
         case GUI_COLOR_GUTTER_WARNING_FG: gutterWarningFg = c; gutterWarningFgRGB = rgb
         case GUI_COLOR_GUTTER_INFO_FG: gutterInfoFg = c; gutterInfoFgRGB = rgb
         case GUI_COLOR_GUTTER_HINT_FG: gutterHintFg = c; gutterHintFgRGB = rgb
+        case GUI_COLOR_GUTTER_FOLD_FG: gutterFoldFg = c; gutterFoldFgRGB = rgb
         case GUI_COLOR_GIT_ADDED_FG: gitAddedFg = c; gitAddedFgRGB = rgb
         case GUI_COLOR_GIT_MODIFIED_FG: gitModifiedFg = c; gitModifiedFgRGB = rgb
         case GUI_COLOR_GIT_DELETED_FG: gitDeletedFg = c; gitDeletedFgRGB = rgb

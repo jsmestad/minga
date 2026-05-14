@@ -63,6 +63,11 @@ defmodule MingaEditor.Mouse do
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
 
+  @typep fold_gutter_target ::
+           {:window_fold, Window.id(), non_neg_integer()} | {:decoration_fold, pid(), reference()}
+
+  @typep fold_row_target :: {:window_fold, non_neg_integer()} | {:decoration_fold, reference()}
+
   @doc "Dispatches a mouse event routed to a focus-tree node."
   @spec handle_at_node(
           state(),
@@ -813,23 +818,12 @@ defmodule MingaEditor.Mouse do
         state = maybe_unfocus_file_tree_for_content_click(state)
         state = maybe_focus_window_at(state, row, col)
 
-        case mouse_to_buffer_pos(state, row, col) do
-          nil ->
+        case handle_fold_gutter_click(state, row, col) do
+          {:handled, state} ->
             state
 
-          {target_line, target_col} ->
-            Buffer.move_to(state.workspace.buffers.active, {target_line, target_col})
-
-            state = cancel_mode_for_mouse(state)
-            state = EditorState.transition_mode(state, :normal)
-
-            %{
-              state
-              | workspace: %{
-                  state.workspace
-                  | mouse: MouseState.start_drag(state.workspace.mouse, {target_line, target_col})
-                }
-            }
+          :miss ->
+            handle_buffer_content_click(state, row, col)
         end
     end
   end
@@ -850,6 +844,181 @@ defmodule MingaEditor.Mouse do
         |> cancel_mode_for_mouse()
         |> EditorState.transition_mode(:normal)
     end
+  end
+
+  @spec handle_buffer_content_click(state(), non_neg_integer(), non_neg_integer()) :: state()
+  defp handle_buffer_content_click(state, row, col) do
+    case mouse_to_buffer_pos(state, row, col) do
+      nil ->
+        state
+
+      {target_line, target_col} ->
+        Buffer.move_to(state.workspace.buffers.active, {target_line, target_col})
+
+        state = cancel_mode_for_mouse(state)
+        state = EditorState.transition_mode(state, :normal)
+
+        %{
+          state
+          | workspace: %{
+              state.workspace
+              | mouse: MouseState.start_drag(state.workspace.mouse, {target_line, target_col})
+            }
+        }
+    end
+  end
+
+  @spec handle_fold_gutter_click(state(), non_neg_integer(), non_neg_integer()) ::
+          {:handled, state()} | :miss
+  defp handle_fold_gutter_click(state, row, col) do
+    case fold_gutter_click_target(state, row, col) do
+      nil ->
+        :miss
+
+      {:window_fold, win_id, buf_line} ->
+        {:handled, EditorState.update_window(state, win_id, &Window.toggle_fold(&1, buf_line))}
+
+      {:decoration_fold, buf, fold_id} ->
+        toggle_decoration_fold(buf, fold_id)
+        {:handled, state}
+    end
+  end
+
+  @spec toggle_decoration_fold(pid(), reference()) :: :ok
+  defp toggle_decoration_fold(buf, fold_id) do
+    Buffer.batch_decorations(buf, fn decs -> Decorations.toggle_fold_region(decs, fold_id) end)
+    :ok
+  catch
+    :exit, _ -> :ok
+  end
+
+  @spec fold_gutter_click_target(state(), non_neg_integer(), non_neg_integer()) ::
+          fold_gutter_target() | nil
+  defp fold_gutter_click_target(state, row, col) do
+    layout = Layout.get(state)
+
+    case Layout.active_window_layout(layout, state) do
+      %{content: {win_row, win_col, content_w, win_h}} ->
+        find_fold_gutter_click_target(state, row, col, win_row, win_col, content_w, win_h)
+
+      nil ->
+        nil
+    end
+  end
+
+  @spec find_fold_gutter_click_target(
+          state(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer(),
+          pos_integer()
+        ) :: fold_gutter_target() | nil
+  defp find_fold_gutter_click_target(state, row, col, win_row, win_col, content_w, win_h) do
+    local_row = row - win_row
+
+    fold_col = win_col + Gutter.fold_column_offset()
+
+    if col == fold_col and local_row >= 0 and local_row < win_h do
+      active_fold_target_at_row(state, local_row, win_h, content_w)
+    else
+      nil
+    end
+  end
+
+  @spec active_fold_target_at_row(state(), non_neg_integer(), pos_integer(), pos_integer()) ::
+          fold_gutter_target() | nil
+  defp active_fold_target_at_row(
+         %{workspace: %{windows: %{active: win_id}}} = state,
+         local_row,
+         win_h,
+         content_w
+       ) do
+    with %Window{} = window <- EditorState.active_window_struct(state),
+         buf when is_pid(buf) <- window.buffer do
+      total_lines = Buffer.line_count(buf)
+      {cursor_line, _} = window.cursor
+      scroll_top = window_scroll_top(window, win_h, content_w, cursor_line, buf)
+
+      case fold_target_line_at_row(
+             buf,
+             window,
+             local_row,
+             scroll_top,
+             win_h,
+             content_w,
+             total_lines
+           ) do
+        nil -> nil
+        {:window_fold, buf_line} -> {:window_fold, win_id, buf_line}
+        {:decoration_fold, fold_id} -> {:decoration_fold, buf, fold_id}
+      end
+    else
+      _ -> nil
+    end
+  end
+
+  @spec fold_target_line_at_row(
+          pid(),
+          Window.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer(),
+          pos_integer(),
+          non_neg_integer()
+        ) :: fold_row_target() | nil
+  defp fold_target_line_at_row(buf, window, local_row, scroll_top, win_h, content_w, total_lines) do
+    decs = Buffer.decorations(buf)
+
+    first_buf_line = display_map_scroll_top(window, scroll_top)
+
+    text_width = display_map_content_width(buf, total_lines, content_w)
+
+    case DisplayMap.compute(window.fold_map, decs, first_buf_line, win_h, total_lines, text_width) do
+      nil ->
+        direct_fold_target(window, local_row + scroll_top, total_lines)
+
+      %DisplayMap{} = dm ->
+        display_map_fold_target(window, dm, local_row)
+    end
+  catch
+    :exit, _ -> nil
+  end
+
+  @spec display_map_scroll_top(Window.t(), non_neg_integer()) :: non_neg_integer()
+  defp display_map_scroll_top(%Window{fold_map: %FoldMap{folds: []}}, scroll_top), do: scroll_top
+
+  defp display_map_scroll_top(%Window{fold_map: fold_map}, scroll_top),
+    do: FoldMap.visible_to_buffer(fold_map, scroll_top)
+
+  @spec display_map_fold_target(Window.t(), DisplayMap.t(), non_neg_integer()) ::
+          fold_row_target() | nil
+  defp display_map_fold_target(window, dm, local_row) do
+    case Enum.at(dm.entries, local_row) do
+      {buf_line, {:fold_start, _}} -> {:window_fold, buf_line}
+      {_buf_line, {:decoration_fold, %{id: fold_id}}} -> {:decoration_fold, fold_id}
+      {buf_line, :normal} -> foldable_start_target(window, buf_line)
+      _ -> nil
+    end
+  end
+
+  @spec direct_fold_target(Window.t(), non_neg_integer(), non_neg_integer()) ::
+          fold_row_target() | nil
+  defp direct_fold_target(_window, target_line, total_lines) when target_line >= total_lines,
+    do: nil
+
+  defp direct_fold_target(window, target_line, _total_lines),
+    do: foldable_start_target(window, target_line)
+
+  @spec foldable_start_target(Window.t(), non_neg_integer()) :: fold_row_target() | nil
+  defp foldable_start_target(window, buf_line) do
+    if fold_indicator_line?(window, buf_line), do: {:window_fold, buf_line}, else: nil
+  end
+
+  @spec fold_indicator_line?(Window.t(), non_neg_integer()) :: boolean()
+  defp fold_indicator_line?(%Window{fold_map: fold_map, fold_ranges: ranges}, buf_line) do
+    FoldMap.fold_start?(fold_map, buf_line) or Enum.any?(ranges, &(&1.start_line == buf_line))
   end
 
   @spec maybe_unfocus_file_tree_for_content_click(state()) :: state()
@@ -880,6 +1049,11 @@ defmodule MingaEditor.Mouse do
 
   @spec gutter_width(state(), non_neg_integer()) :: non_neg_integer()
   defp gutter_width(%{workspace: %{buffers: %{active: buf}}}, total_lines) do
+    buffer_gutter_width(buf, total_lines)
+  end
+
+  @spec buffer_gutter_width(pid() | nil, non_neg_integer()) :: non_neg_integer()
+  defp buffer_gutter_width(buf, total_lines) do
     ln_style =
       if buf, do: Buffer.get_option(buf, :line_numbers), else: :none
 
@@ -888,6 +1062,11 @@ defmodule MingaEditor.Mouse do
 
     # Sign column is always reserved for consistent gutter layout.
     Gutter.total_width(number_w)
+  end
+
+  @spec display_map_content_width(pid(), non_neg_integer(), pos_integer()) :: pos_integer()
+  defp display_map_content_width(buf, total_lines, content_w) do
+    max(content_w - buffer_gutter_width(buf, total_lines), 1)
   end
 
   # ── Screen-to-buffer coordinate translation ────────────────────────────────
@@ -970,7 +1149,7 @@ defmodule MingaEditor.Mouse do
         {_cr, _cc, content_w, content_h} = win_layout.content
         buf = window.buffer
         total_lines = Buffer.line_count(buf)
-        gutter_w = gutter_width(state, total_lines)
+        gutter_w = buffer_gutter_width(buf, total_lines)
         {cursor_line, _} = window.cursor
         scroll_top = window_scroll_top(window, content_h, content_w, cursor_line, buf)
         local_row = row - win_row
@@ -1018,7 +1197,9 @@ defmodule MingaEditor.Mouse do
     decs = Buffer.decorations(buf)
     fold_map = if window, do: window.fold_map, else: FoldMap.new()
 
-    case DisplayMap.compute(fold_map, decs, scroll_top, win_h, total_lines, content_w) do
+    text_width = display_map_content_width(buf, total_lines, content_w)
+
+    case DisplayMap.compute(fold_map, decs, scroll_top, win_h, total_lines, text_width) do
       nil ->
         # No display map needed, use direct line mapping
         target_line = local_row + scroll_top
