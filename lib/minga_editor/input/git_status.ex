@@ -70,7 +70,7 @@ defmodule MingaEditor.Input.GitStatus do
   end
 
   defp execute_command(state, :git_status_prev) do
-    update_tui_state(state, fn tui, _entries -> TuiState.prev(tui) end)
+    update_tui_state(state, &TuiState.prev/2)
   end
 
   defp execute_command(state, :git_status_next_section) do

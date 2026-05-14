@@ -378,6 +378,13 @@ defmodule MingaEditor.State do
   def set_git_status_panel(s, data),
     do: update_shell_state(s, &ShellState.set_git_status_panel(&1, data))
 
+  @spec set_git_status_tui_state(
+          t(),
+          MingaEditor.Shell.Traditional.GitStatus.TuiState.t() | nil
+        ) :: t()
+  def set_git_status_tui_state(s, tui),
+    do: update_shell_state(s, &ShellState.set_git_status_tui_state(&1, tui))
+
   @spec close_git_status_panel(t()) :: t()
   def close_git_status_panel(s), do: update_shell_state(s, &ShellState.close_git_status_panel/1)
 

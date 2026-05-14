@@ -17,6 +17,7 @@ defmodule MingaEditor.Commands.Git do
   alias Minga.Git
   alias MingaEditor.Workspace.State, as: WorkspaceState
   alias Minga.Language
+  alias MingaEditor.Shell.Traditional.GitStatus.TuiState
   alias MingaEditor.UI.Picker.GitChangedSource
 
   @type state :: EditorState.t()
@@ -611,6 +612,7 @@ defmodule MingaEditor.Commands.Git do
 
         state
         |> EditorState.set_git_status_panel(panel_data)
+        |> EditorState.set_git_status_tui_state(TuiState.new())
         |> Layout.invalidate()
         |> EditorState.invalidate_all_windows()
     end

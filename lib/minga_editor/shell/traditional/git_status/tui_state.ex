@@ -47,8 +47,8 @@ defmodule MingaEditor.Shell.Traditional.GitStatus.TuiState do
   end
 
   @doc "Moves the cursor to the previous visible row."
-  @spec prev(t()) :: t()
-  def prev(%__MODULE__{} = tui) do
+  @spec prev(t(), [StatusEntry.t()]) :: t()
+  def prev(%__MODULE__{} = tui, entries) when is_list(entries) do
     %{tui | cursor_index: max(tui.cursor_index - 1, 0)}
   end
 
