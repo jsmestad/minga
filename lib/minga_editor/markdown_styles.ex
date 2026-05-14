@@ -27,6 +27,8 @@ defmodule MingaEditor.MarkdownStyles do
   def to_draw_opts({:code_content, _lang}, syntax, _fg),
     do: Face.new(fg: Map.get(syntax, :string, 0x98BE65))
 
+  def to_draw_opts({:syntax, %Face{} = face}, _syntax, _fg), do: face
+
   def to_draw_opts(:header1, syntax, _fg),
     do: Face.new(fg: Map.get(syntax, :keyword, 0x51AFEF), bold: true)
 

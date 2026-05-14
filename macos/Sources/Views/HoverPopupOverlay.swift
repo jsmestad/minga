@@ -109,7 +109,7 @@ struct HoverPopupOverlay: View {
     private var popupContent: some View {
         ScrollView(.vertical, showsIndicators: state.focused) {
             VStack(alignment: .leading, spacing: 2) {
-                ForEach(state.lines) { line in
+                ForEach(state.visibleLines) { line in
                     lineView(line)
                 }
             }
@@ -178,11 +178,13 @@ struct HoverPopupOverlay: View {
     @ViewBuilder
     private func segmentText(_ seg: HoverSegment) -> some View {
         Text(seg.text)
-            .font(segmentFont(seg.style))
-            .foregroundStyle(segmentColor(seg.style))
+            .font(segmentFont(seg))
+            .foregroundStyle(segmentColor(seg))
+            .underline(segmentUnderline(seg))
     }
 
-    private func segmentFont(_ style: Wire.HoverStyle) -> Font {
+    private func segmentFont(_ seg: HoverSegment) -> Font {
+        let style = seg.style
         switch style {
         case .bold:
             return .system(size: 13, weight: .semibold)
@@ -192,6 +194,10 @@ struct HoverPopupOverlay: View {
             return .system(size: 13, weight: .semibold).italic()
         case .code, .codeBlock, .codeContent:
             return .system(size: 12, design: .monospaced)
+        case .syntaxHighlighted:
+            let weight: Font.Weight = seg.flags & 0x01 != 0 ? .semibold : .regular
+            let font = Font.system(size: 12, weight: weight, design: .monospaced)
+            return seg.flags & 0x02 != 0 ? font.italic() : font
         case .header1:
             return .system(size: 16, weight: .bold)
         case .header2:
@@ -203,10 +209,18 @@ struct HoverPopupOverlay: View {
         }
     }
 
-    private func segmentColor(_ style: Wire.HoverStyle) -> Color {
+    private func segmentUnderline(_ seg: HoverSegment) -> Bool {
+        seg.style == .syntaxHighlighted && seg.flags & 0x04 != 0
+    }
+
+    private func segmentColor(_ seg: HoverSegment) -> Color {
+        let style = seg.style
         switch style {
         case .code, .codeBlock, .codeContent:
             return theme.popupFg.opacity(0.85)
+        case .syntaxHighlighted:
+            guard let fgColor = seg.fgColor else { return theme.popupFg.opacity(0.85) }
+            return rgbColor(fgColor)
         case .header1, .header2, .header3:
             return theme.popupFg
         case .blockquote:
@@ -218,5 +232,13 @@ struct HoverPopupOverlay: View {
         default:
             return theme.popupFg.opacity(0.9)
         }
+    }
+
+    private func rgbColor(_ rgb: UInt32) -> Color {
+        Color(
+            red: Double((rgb >> 16) & 0xFF) / 255.0,
+            green: Double((rgb >> 8) & 0xFF) / 255.0,
+            blue: Double(rgb & 0xFF) / 255.0
+        )
     }
 }

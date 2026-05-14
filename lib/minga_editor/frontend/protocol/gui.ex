@@ -2370,14 +2370,15 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     line_type(1) + segment_count(2) + segments...
 
   Each segment:
-    style(1) + text_len(2) + text(text_len)
+    standard: style(1) + text_len(2) + text(text_len)
+    syntaxHighlighted: style(1=13) + fg_r(1) + fg_g(1) + fg_b(1) + flags(1) + text_len(2) + text(text_len)
 
   Line types: 0=text, 1=code, 2=code_header, 3=header, 4=blockquote,
     5=list_item, 6=rule, 7=empty
 
   Segment styles: 0=plain, 1=bold, 2=italic, 3=bold_italic,
     4=code, 5=code_block, 6=code_content, 7=header1, 8=header2, 9=header3,
-    10=blockquote, 11=list_bullet, 12=rule
+    10=blockquote, 11=list_bullet, 12=rule, 13=syntaxHighlighted
   """
   @spec encode_gui_hover_popup(MingaEditor.HoverPopup.t() | nil) :: binary()
   def encode_gui_hover_popup(nil), do: <<@op_gui_hover_popup, 0::8>>
@@ -2393,12 +2394,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       Enum.map(popup.content_lines, fn {segments, line_type} ->
         line_type_byte = encode_line_type(line_type)
 
-        segment_data =
-          Enum.map(segments, fn {text, style} ->
-            style_byte = encode_markdown_style(style)
-            text_bytes = :erlang.iolist_to_binary([text])
-            <<style_byte::8, byte_size(text_bytes)::16, text_bytes::binary>>
-          end)
+        segment_data = Enum.map(segments, &encode_markdown_segment/1)
 
         [<<line_type_byte::8, length(segments)::16>> | segment_data]
       end)
@@ -2678,6 +2674,41 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp encode_file_status(:unknown), do: 0
 
   # ── Shared encoding helpers for hover/overlay content ──
+
+  @syntax_fallback_fg 0xBBC2CF
+
+  @spec encode_markdown_segment(MingaAgent.Markdown.segment()) :: binary()
+  defp encode_markdown_segment({text, {:syntax, %Minga.Core.Face{} = face}}) do
+    text_bytes = :erlang.iolist_to_binary([text])
+    fg = face.fg || @syntax_fallback_fg
+    flags = encode_syntax_flags(face)
+
+    <<13::8, red(fg)::8, green(fg)::8, blue(fg)::8, flags::8, byte_size(text_bytes)::16,
+      text_bytes::binary>>
+  end
+
+  defp encode_markdown_segment({text, style}) do
+    style_byte = encode_markdown_style(style)
+    text_bytes = :erlang.iolist_to_binary([text])
+    <<style_byte::8, byte_size(text_bytes)::16, text_bytes::binary>>
+  end
+
+  @spec encode_syntax_flags(Minga.Core.Face.t()) :: non_neg_integer()
+  defp encode_syntax_flags(%Minga.Core.Face{} = face) do
+    bold = if face.bold, do: 0x01, else: 0
+    italic = if face.italic, do: 0x02, else: 0
+    underline = if face.underline, do: 0x04, else: 0
+    bold + italic + underline
+  end
+
+  @spec red(non_neg_integer()) :: non_neg_integer()
+  defp red(rgb), do: rgb >>> 16 &&& 0xFF
+
+  @spec green(non_neg_integer()) :: non_neg_integer()
+  defp green(rgb), do: rgb >>> 8 &&& 0xFF
+
+  @spec blue(non_neg_integer()) :: non_neg_integer()
+  defp blue(rgb), do: rgb &&& 0xFF
 
   @spec encode_markdown_style(MingaAgent.Markdown.style()) :: non_neg_integer()
   defp encode_markdown_style(:plain), do: 0

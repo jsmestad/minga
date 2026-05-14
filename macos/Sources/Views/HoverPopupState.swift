@@ -6,6 +6,8 @@ import SwiftUI
 struct HoverSegment: Identifiable {
     let id: Int
     let style: Wire.HoverStyle
+    let fgColor: UInt32?
+    let flags: UInt8
     let text: String
 }
 
@@ -26,6 +28,10 @@ final class HoverPopupState {
     var scrollOffset: Int = 0
     var lines: [HoverLine] = []
 
+    var visibleLines: [HoverLine] {
+        Array(lines.dropFirst(min(scrollOffset, lines.count)))
+    }
+
     func update(visible: Bool, anchorRow: UInt16, anchorCol: UInt16,
                 focused: Bool, scrollOffset: UInt16, rawLines: [Wire.HoverLine]) {
         self.visible = visible
@@ -36,7 +42,7 @@ final class HoverPopupState {
         var segId = 0
         self.lines = rawLines.enumerated().map { i, line in
             let segments = line.segments.map { seg in
-                let s = HoverSegment(id: segId, style: seg.style, text: seg.text)
+                let s = HoverSegment(id: segId, style: seg.style, fgColor: seg.fgColor, flags: seg.flags, text: seg.text)
                 segId += 1
                 return s
             }

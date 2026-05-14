@@ -33,6 +33,7 @@ defmodule MingaAgent.Markdown do
           | :code
           | :code_block
           | {:code_content, String.t()}
+          | {:syntax, Minga.Core.Face.t()}
           | :header1
           | :header2
           | :header3

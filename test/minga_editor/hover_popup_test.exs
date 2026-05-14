@@ -1,13 +1,14 @@
 defmodule MingaEditor.HoverPopupTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Language.Highlight.Span
   alias MingaEditor.HoverPopup
   alias MingaEditor.UI.Theme
 
   @theme Theme.get!(:doom_one)
   @viewport {24, 80}
 
-  describe "new/3" do
+  describe "new/4" do
     test "creates a popup with parsed markdown content" do
       popup = HoverPopup.new("**bold** text", 10, 20)
       assert %HoverPopup{} = popup
@@ -27,6 +28,125 @@ defmodule MingaEditor.HoverPopupTest do
     test "handles plain text" do
       popup = HoverPopup.new("just plain text", 5, 10)
       assert [_] = popup.content_lines
+    end
+
+    test "adds syntax segments to highlighted fenced code blocks" do
+      highlighter = fn "elixir", "def hello, do: :world", _opts ->
+        {:ok, ["keyword"], [Span.new(0, 3, 0)]}
+      end
+
+      popup =
+        HoverPopup.new("```elixir\ndef hello, do: :world\n```", 5, 10,
+          theme: @theme,
+          highlighter: highlighter
+        )
+
+      assert {segments, :code} = Enum.at(popup.content_lines, 1)
+      assert {"def", {:syntax, face}} = hd(segments)
+      assert face.fg != nil
+    end
+
+    test "uses the first fence info token as the tree-sitter language" do
+      highlighter = fn "elixir", "def hello, do: :world", _opts ->
+        {:ok, ["keyword"], [Span.new(0, 3, 0)]}
+      end
+
+      popup =
+        HoverPopup.new("```elixir title=\"example\"\ndef hello, do: :world\n```", 5, 10,
+          theme: @theme,
+          highlighter: highlighter
+        )
+
+      assert {segments, :code} = Enum.at(popup.content_lines, 1)
+      assert {"def", {:syntax, face}} = hd(segments)
+      assert face.fg != nil
+    end
+
+    test "keeps code content styling when captures resolve to the default face" do
+      highlighter = fn "elixir", "value", _opts ->
+        {:ok, ["unknown.capture"], [Span.new(0, 5, 0)]}
+      end
+
+      popup =
+        HoverPopup.new("```elixir\nvalue\n```", 5, 10,
+          theme: @theme,
+          highlighter: highlighter
+        )
+
+      assert {[{"value", {:code_content, "elixir"}}], :code} = Enum.at(popup.content_lines, 1)
+    end
+
+    test "preserves code block line order after syntax enhancement" do
+      highlighter = fn "elixir", "first\nsecond", _opts ->
+        {:ok, ["keyword"], [Span.new(0, 5, 0), Span.new(6, 12, 0)]}
+      end
+
+      popup =
+        HoverPopup.new("```elixir\nfirst\nsecond\n```", 5, 10,
+          theme: @theme,
+          highlighter: highlighter
+        )
+
+      assert {[{"first", {:syntax, _}}], :code} = Enum.at(popup.content_lines, 1)
+      assert {[{"second", {:syntax, _}}], :code} = Enum.at(popup.content_lines, 2)
+    end
+
+    test "falls back when the highlighter raises" do
+      highlighter = fn "elixir", _source, _opts -> raise "parser unavailable" end
+
+      popup =
+        HoverPopup.new("```elixir\nvalue\n```", 5, 10,
+          theme: @theme,
+          highlighter: highlighter
+        )
+
+      assert {[{"value", {:code_content, "elixir"}}], :code} = Enum.at(popup.content_lines, 1)
+    end
+
+    test "skips highlighting without calling highlighter when timeout is zero" do
+      highlighter = fn _language, _source, _opts ->
+        flunk("highlighter should not be called when timeout is zero")
+      end
+
+      popup =
+        HoverPopup.new("```elixir\nvalue\n```", 5, 10,
+          theme: @theme,
+          timeout: 0,
+          highlighter: highlighter
+        )
+
+      assert {[{"value", {:code_content, "elixir"}}], :code} = Enum.at(popup.content_lines, 1)
+    end
+
+    test "passes a bounded timeout and falls back when highlighting times out" do
+      parent = self()
+
+      highlighter = fn "elixir", _source, opts ->
+        send(parent, {:hover_highlight_timeout, Keyword.fetch!(opts, :timeout)})
+        :timeout
+      end
+
+      popup =
+        HoverPopup.new("```elixir\nvalue\n```", 5, 10,
+          theme: @theme,
+          highlighter: highlighter
+        )
+
+      assert_receive {:hover_highlight_timeout, timeout}
+      assert timeout <= 50
+      assert {[{"value", {:code_content, "elixir"}}], :code} = Enum.at(popup.content_lines, 1)
+    end
+
+    test "falls back to code_content segments when highlighting is unavailable" do
+      highlighter = fn "unknown", _source, _opts -> :unsupported end
+
+      popup =
+        HoverPopup.new("```unknown\nvalue\n```", 5, 10,
+          theme: @theme,
+          highlighter: highlighter
+        )
+
+      assert {[{"value", {:code_content, "unknown"}}], :code} = Enum.at(popup.content_lines, 1)
     end
   end
 
@@ -96,6 +216,22 @@ defmodule MingaEditor.HoverPopupTest do
       popup = HoverPopup.new(text, 15, 10)
       draws = HoverPopup.render(popup, @viewport, @theme)
       assert draws != []
+    end
+
+    test "preserves segment draw order within a rendered line" do
+      popup = %HoverPopup{
+        content_lines: [{[{"first", :plain}, {"second", :bold}], :text}],
+        anchor_row: 15,
+        anchor_col: 10
+      }
+
+      texts =
+        popup
+        |> HoverPopup.render(@viewport, @theme)
+        |> Enum.map(fn {_row, _col, text, _style} -> text end)
+        |> Enum.filter(&(&1 in ["first", "second"]))
+
+      assert texts == ["first", "second"]
     end
 
     test "uses rounded border when not focused, single when focused" do

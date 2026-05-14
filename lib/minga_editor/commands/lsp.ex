@@ -43,7 +43,7 @@ defmodule MingaEditor.Commands.Lsp do
       _ ->
         markdown = build_lsp_info_markdown(clients)
         vp = state.terminal_viewport
-        popup = HoverPopup.new(markdown, div(vp.rows, 2), div(vp.cols, 4))
+        popup = HoverPopup.new(markdown, div(vp.rows, 2), div(vp.cols, 4), theme: state.theme)
         popup = HoverPopup.focus(popup)
         EditorState.set_hover_popup(state, popup)
     end
