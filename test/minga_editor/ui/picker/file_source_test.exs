@@ -21,7 +21,7 @@ defmodule MingaEditor.UI.Picker.FileSourceTest do
 
   test "on_select opens project-relative paths from the project root and records the selection",
        %{tmp_dir: tmp_dir} do
-    project = Path.join(tmp_dir, "frecency_select_project")
+    project = Path.join(tmp_dir, "frecency_select_project_#{:erlang.unique_integer([:positive])}")
     lib = Path.join(project, "lib")
     File.mkdir_p!(lib)
     File.write!(Path.join(project, "mix.exs"), "")
@@ -43,7 +43,9 @@ defmodule MingaEditor.UI.Picker.FileSourceTest do
   end
 
   test "preview selections do not record frecency until confirmed", %{tmp_dir: tmp_dir} do
-    project = Path.join(tmp_dir, "frecency_preview_project")
+    project =
+      Path.join(tmp_dir, "frecency_preview_project_#{:erlang.unique_integer([:positive])}")
+
     lib = Path.join(project, "lib")
     File.mkdir_p!(lib)
     File.write!(Path.join(project, "mix.exs"), "")
@@ -66,7 +68,7 @@ defmodule MingaEditor.UI.Picker.FileSourceTest do
   end
 
   test "files opened more often rank above files opened once", %{tmp_dir: tmp_dir} do
-    project = Path.join(tmp_dir, "frecency_picker_project")
+    project = Path.join(tmp_dir, "frecency_picker_project_#{:erlang.unique_integer([:positive])}")
     lib = Path.join(project, "lib")
     File.mkdir_p!(lib)
     File.write!(Path.join(project, "mix.exs"), "")
