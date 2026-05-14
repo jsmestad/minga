@@ -19,6 +19,8 @@ import AppKit
 /// thread already (rendering, font commands, protocol dispatch).
 @MainActor
 final class FontFace {
+    /// Font family or PostScript name requested by the caller.
+    let requestedName: String
     let ctFont: CTFont
     /// Bold variant, or nil if the font family doesn't have one.
     let ctFontBold: CTFont?
@@ -64,6 +66,9 @@ final class FontFace {
         7: 10   // black
     ]
 
+    /// The protocol weight byte used to resolve this font.
+    let protocolWeight: UInt8
+
     /// The NSFontManager weight used to resolve this font.
     let fontWeight: Int
 
@@ -78,6 +83,8 @@ final class FontFace {
     /// `weight` is the protocol weight byte (0-7), mapped to NSFontManager's scale.
     init(name: String, size: CGFloat, scale: CGFloat, ligatures: Bool = true, weight: UInt8 = 2) {
         let nsFontWeight = FontFace.weightMap[weight] ?? 5
+        self.requestedName = name
+        self.protocolWeight = weight
         self.fontWeight = nsFontWeight
         self.familyName = name
         let font = FontFace.resolveFont(name: name, size: size, weight: nsFontWeight)

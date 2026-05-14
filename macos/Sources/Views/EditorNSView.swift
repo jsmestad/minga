@@ -38,6 +38,9 @@ final class EditorNSView: MTKView {
     /// Notifies SwiftUI app state when the NSWindow enters or exits full-screen mode.
     var onFullScreenChanged: ((Bool) -> Void)?
 
+    /// Called when the view moves to a display with a different backing scale factor.
+    var onScaleFactorChanged: ((CGFloat) -> Void)?
+
     /// Tracks BEAM responsiveness and handles Ctrl-G recovery.
     var recoveryManager: RecoveryManager?
 
@@ -313,9 +316,9 @@ final class EditorNSView: MTKView {
 
     // MARK: - Font update
 
-    /// Called when the BEAM sends a set_font command. Replaces the font face,
-    /// resizes the grid to match new cell dimensions, and sends a resize event
-    /// to the BEAM so it re-renders with the new grid size.
+    /// Called when the BEAM sends a set_font command or the display scale changes.
+    /// Replaces the font face, resizes the grid to match new cell dimensions,
+    /// and sends a resize event to the BEAM so it re-renders with the new grid size.
     func updateFont(_ newFace: FontFace) {
         self.fontFace = newFace
 
@@ -353,8 +356,7 @@ final class EditorNSView: MTKView {
             return
         }
 
-        // Match the Metal layer's scale to the window's backing scale.
-        (layer as? CAMetalLayer)?.contentsScale = window.backingScaleFactor
+        updateMetalBackingScale(window.backingScaleFactor)
 
         // Restore window position and size from previous session.
         // This fires before the window is made key/visible, so the
@@ -373,6 +375,61 @@ final class EditorNSView: MTKView {
         observeScrollerStyle()
         observeAccessibilityChanges()
         resetCursorBlink()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        guard let window else { return }
+        displayConfigurationChanged(newScale: window.backingScaleFactor)
+    }
+
+    /// Applies a live display configuration update to the Metal surface.
+    /// Returns true when the backing scale changed and the font atlas must be rebuilt.
+    @discardableResult
+    func displayConfigurationChanged(newScale: CGFloat, forceResizeEvent: Bool = false) -> Bool {
+        updateMetalBackingScale(newScale)
+        let scaleChanged = abs(fontFace.scale - newScale) > 0.001
+
+        if scaleChanged || forceResizeEvent {
+            sendCurrentGridSize(reason: "Display configuration changed")
+        }
+
+        if scaleChanged {
+            onScaleFactorChanged?(newScale)
+        } else if forceResizeEvent {
+            renderFrame()
+        }
+
+        return scaleChanged
+    }
+
+    /// Updates CAMetalLayer and drawable sizing to match the current display scale.
+    private func updateMetalBackingScale(_ scale: CGFloat) {
+        (layer as? CAMetalLayer)?.contentsScale = scale
+
+        let pixelWidth = bounds.width * scale
+        let pixelHeight = bounds.height * scale
+        guard pixelWidth > 0, pixelHeight > 0 else { return }
+        drawableSize = CGSize(width: pixelWidth, height: pixelHeight)
+    }
+
+    /// Sends the current grid dimensions to the BEAM after an external display change.
+    private func sendCurrentGridSize(reason: String) {
+        guard frame.width > 0, frame.height > 0 else { return }
+
+        let gutterPad: CGFloat = dispatcher.frameState.gutterCol > 0 ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
+        let cols = UInt16(max((frame.width - gutterPad) / cellWidth, 1))
+        let rows = UInt16(max(frame.height / cellHeight, 1))
+        dispatcher.frameState.resize(newCols: cols, newRows: rows)
+
+        if readySent {
+            encoder.sendResize(cols: cols, rows: rows)
+        } else {
+            readySent = true
+            encoder.sendReady(cols: cols, rows: rows)
+        }
+
+        PortLogger.info("\(reason): \(cols)x\(rows) cells")
     }
 
     /// Registers for key-window notifications exactly once per window.
