@@ -387,6 +387,10 @@ defmodule MingaEditor.State do
   @spec clear_git_toast(t()) :: t()
   def clear_git_toast(s), do: update_shell_state(s, &ShellState.clear_git_toast/1)
 
+  @spec clear_git_toast(t(), reference()) :: t()
+  def clear_git_toast(s, dismiss_ref),
+    do: update_shell_state(s, &ShellState.clear_git_toast(&1, dismiss_ref))
+
   @spec tab_bar(t()) :: TabBar.t() | nil
   def tab_bar(%{shell_state: ss}), do: ShellState.tab_bar(ss)
   @spec set_tab_bar(t(), TabBar.t() | nil) :: t()

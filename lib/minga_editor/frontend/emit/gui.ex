@@ -291,12 +291,14 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     end
   end
 
-  defp build_gui_git_status_cmd(_ctx, caches) do
-    if caches.last_gui_git_status_fp != :no_git do
+  defp build_gui_git_status_cmd(%{git_syncing: syncing}, caches) do
+    fp = {:no_git, syncing}
+
+    if caches.last_gui_git_status_fp != fp do
       cmd =
         ProtocolGUI.encode_gui_git_status(%{
           repo_state: :not_a_repo,
-          syncing: false,
+          syncing: syncing,
           branch: "",
           ahead: 0,
           behind: 0,
@@ -304,7 +306,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
           git_toast: nil
         })
 
-      {cmd, %{caches | last_gui_git_status_fp: :no_git}}
+      {cmd, %{caches | last_gui_git_status_fp: fp}}
     else
       {nil, caches}
     end

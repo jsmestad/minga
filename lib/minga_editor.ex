@@ -772,8 +772,8 @@ defmodule MingaEditor do
     {:noreply, state}
   end
 
-  def handle_info(:dismiss_git_toast, state) do
-    state = EditorState.clear_git_toast(state)
+  def handle_info({:dismiss_git_toast, dismiss_ref}, state) do
+    state = EditorState.clear_git_toast(state, dismiss_ref)
     {:noreply, Renderer.render_or_async(state)}
   end
 
@@ -2348,7 +2348,7 @@ defmodule MingaEditor do
   defp handle_gui_action(state, :git_pull_and_retry) do
     state
     |> EditorState.clear_git_toast()
-    |> Commands.Git.execute(:git_pull)
+    |> Commands.Git.execute(:git_pull_and_retry)
   end
 
   # Project.switch/1 is a cast; the picker opens against current state while the

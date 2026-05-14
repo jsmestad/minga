@@ -200,6 +200,13 @@ defmodule MingaEditor.Shell.Traditional.State do
   @spec clear_git_toast(t()) :: t()
   def clear_git_toast(%{} = ss), do: %{ss | git_toast: nil}
 
+  @doc "Clears the git toast only when its dismissal reference matches."
+  @spec clear_git_toast(t(), reference()) :: t()
+  def clear_git_toast(%{git_toast: %{dismiss_ref: dismiss_ref}} = ss, dismiss_ref),
+    do: %{ss | git_toast: nil}
+
+  def clear_git_toast(%{} = ss, _dismiss_ref), do: ss
+
   # ── Tab bar ────────────────────────────────────────────────────────────────
 
   @doc "Returns the tab bar state, or nil."

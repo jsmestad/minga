@@ -165,7 +165,8 @@ final class GitStatusState {
     }
 
     /// Hide the git status panel (BEAM toggled sidebar off or switched tab).
-    func hide() {
+    func hide(syncing: Bool = false) {
         visible = false
+        self.syncing = syncing
     }
 }

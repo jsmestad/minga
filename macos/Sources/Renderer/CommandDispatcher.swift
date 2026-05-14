@@ -418,7 +418,7 @@ final class CommandDispatcher {
             // when git_status_panel is nil. (#1047)
             let parsedRepoState = GitRepoState(rawValue: repoState) ?? .notARepo
             if parsedRepoState == .notARepo && rawEntries.isEmpty {
-                guiState.gitStatusState.hide()
+                guiState.gitStatusState.hide(syncing: syncing)
             } else {
                 let entries = rawEntries.compactMap { raw -> GitStatusEntry? in
                     guard let section = GitStatusSection(rawValue: raw.section),

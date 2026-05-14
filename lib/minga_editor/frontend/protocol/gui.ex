@@ -2539,9 +2539,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   @typedoc "Git toast data shown after a remote operation completes."
   @type git_toast :: %{
-          message: String.t(),
-          level: :success | :error,
-          action: git_toast_action()
+          required(:message) => String.t(),
+          required(:level) => :success | :error,
+          required(:action) => git_toast_action(),
+          optional(:dismiss_ref) => reference()
         }
 
   @typedoc "Base git status data stored on the panel (without emit-time fields)."

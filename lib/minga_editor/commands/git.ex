@@ -27,6 +27,7 @@ defmodule MingaEditor.Commands.Git do
     {:git_push, "Push", false},
     {:git_pull, "Pull", false},
     {:git_fetch, "Fetch", false},
+    {:git_pull_and_retry, "Pull and retry push", false},
     {:git_diff_file, "View diff", true},
     {:next_git_hunk, "Next git hunk", true},
     {:prev_git_hunk, "Previous git hunk", true},
@@ -70,6 +71,16 @@ defmodule MingaEditor.Commands.Git do
 
   def execute(state, :git_fetch) do
     git_remote_action(state, &Git.fetch_remotes/1, "Fetching…", "Fetched", "Fetch failed")
+  end
+
+  def execute(state, :git_pull_and_retry) do
+    git_remote_action(
+      state,
+      &pull_then_push/1,
+      "Pulling and retrying…",
+      "Pushed",
+      "Pull and retry failed"
+    )
   end
 
   # ── Diff view ──────────────────────────────────────────────────────────────
@@ -480,7 +491,7 @@ defmodule MingaEditor.Commands.Git do
 
   Called by `MingaEditor.handle_info/2` when a `{:git_remote_result, ref, result}`
   message arrives. Matches the ref against the in-flight operation to ignore stale
-  results, then updates the status bar and refreshes the git repo.
+  results, then updates the status bar, toast banner, and cached git repo.
   """
   @spec handle_remote_result(state(), reference(), :ok | {:error, String.t()}) :: state()
   def handle_remote_result(state, ref, result) do
@@ -497,12 +508,13 @@ defmodule MingaEditor.Commands.Git do
 
             {:error, reason} ->
               error_msg = "#{error_prefix}: #{reason}"
-              action = push_rejection_action(reason)
+              action = push_rejection_action(error_prefix, reason)
 
               {error_msg, %{message: error_msg, level: :error, action: action}}
           end
 
-        schedule_toast_dismissal()
+        dismiss_ref = schedule_toast_dismissal()
+        toast = Map.put(toast, :dismiss_ref, dismiss_ref)
 
         state
         |> EditorState.clear_git_remote_op()
@@ -515,8 +527,8 @@ defmodule MingaEditor.Commands.Git do
     end
   end
 
-  @spec push_rejection_action(String.t()) :: :pull_and_retry | nil
-  defp push_rejection_action(reason) do
+  @spec push_rejection_action(String.t(), String.t()) :: :pull_and_retry | nil
+  defp push_rejection_action("Push failed", reason) do
     lowered = String.downcase(reason)
 
     if String.contains?(lowered, "rejected") or String.contains?(lowered, "non-fast-forward") do
@@ -526,9 +538,21 @@ defmodule MingaEditor.Commands.Git do
     end
   end
 
+  defp push_rejection_action(_error_prefix, _reason), do: nil
+
   @spec schedule_toast_dismissal() :: reference()
   defp schedule_toast_dismissal do
-    Process.send_after(self(), :dismiss_git_toast, 3_000)
+    dismiss_ref = make_ref()
+    Process.send_after(self(), {:dismiss_git_toast, dismiss_ref}, 3_000)
+    dismiss_ref
+  end
+
+  @spec pull_then_push(String.t()) :: :ok | {:error, String.t()}
+  defp pull_then_push(git_root) do
+    case Git.pull(git_root) do
+      :ok -> Git.push(git_root)
+      {:error, reason} -> {:error, "pull failed: #{reason}"}
+    end
   end
 
   @doc """
@@ -578,6 +602,7 @@ defmodule MingaEditor.Commands.Git do
         task_monitor = Process.monitor(task_pid)
 
         state
+        |> EditorState.clear_git_toast()
         |> EditorState.set_git_remote_op(
           {ref, task_monitor, {git_root, success_msg, error_prefix}}
         )

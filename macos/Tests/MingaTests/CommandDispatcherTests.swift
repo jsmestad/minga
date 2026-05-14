@@ -155,10 +155,11 @@ struct CommandDispatcherRoutingTests {
                                            branchName: "main", entries: rawEntries, toast: nil))
         #expect(gui.gitStatusState.visible == true)
 
-        // Then send the "panel closed" sentinel: notARepo (1) + empty entries
-        dispatcher.dispatch(.guiGitStatus(repoState: 1, syncing: false, ahead: 0, behind: 0,
+        // Then send the "panel closed" sentinel: notARepo (1) + empty entries. Syncing still updates because the status bar reads this state even when the panel is hidden.
+        dispatcher.dispatch(.guiGitStatus(repoState: 1, syncing: true, ahead: 0, behind: 0,
                                            branchName: "", entries: [], toast: nil))
         #expect(gui.gitStatusState.visible == false)
+        #expect(gui.gitStatusState.syncing == true)
     }
 
     @Test("guiGitStatus shows panel for normal repo with clean working tree")
