@@ -118,7 +118,8 @@ defmodule MingaEditor.State do
             buffer_add_context: :open,
             remote: %Remote{},
             stashed_board_state: nil,
-            keystroke_history: KeystrokeHistory.new()
+            keystroke_history: KeystrokeHistory.new(),
+            git_commit_gen_ref: nil
 
   @type backend :: :tui | :gui | :native_gui | :headless
 
@@ -157,7 +158,8 @@ defmodule MingaEditor.State do
           remote: Remote.t(),
           session: SessionState.t(),
           stashed_board_state: MingaEditor.Shell.Board.State.t() | nil,
-          keystroke_history: KeystrokeHistory.t()
+          keystroke_history: KeystrokeHistory.t(),
+          git_commit_gen_ref: reference() | nil
         }
 
   @spec set_renderer(t(), pid() | nil) :: t()

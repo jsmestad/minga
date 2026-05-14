@@ -1203,6 +1203,11 @@ defmodule MingaEditor.Commands.Git do
   end
 
   @spec generate_commit_message(state()) :: state()
+  defp generate_commit_message(%{git_commit_gen_ref: ref} = state)
+       when ref != nil do
+    EditorState.set_status(state, "Commit message generation already in progress")
+  end
+
   defp generate_commit_message(state) do
     case resolve_git_root() do
       nil -> EditorState.set_status(state, "Not in a git repository")
@@ -1228,12 +1233,16 @@ defmodule MingaEditor.Commands.Git do
   defp spawn_commit_message_task(state, diff) do
     case MingaEditor.Git.CommitMessageGenerator.generate(diff, self()) do
       {:ok, _pid} ->
+        ref = make_ref()
         timeout = MingaEditor.Git.CommitMessageGenerator.timeout_ms()
         Process.send_after(self(), :git_generate_timeout, timeout)
-        EditorState.set_status(state, "Generating commit message…")
+
+        state
+        |> Map.put(:git_commit_gen_ref, ref)
+        |> EditorState.set_status("Generating commit message…")
 
       {:error, reason} ->
-        EditorState.set_status(state, reason)
+        EditorState.set_status(state, "AI generation failed: #{inspect(reason)}")
     end
   end
 

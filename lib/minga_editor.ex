@@ -780,19 +780,34 @@ defmodule MingaEditor do
   # ── AI commit message generation ───────────────────────────────────────────
 
   def handle_info({:git_commit_message_generated, {:ok, message}}, state) do
-    state = MingaEditor.PromptUI.open(state, MingaEditor.UI.Prompt.GitCommit, default: message)
-    state = EditorState.set_status(state, "Commit message generated")
+    state = %{state | git_commit_gen_ref: nil}
+
+    state =
+      if MingaEditor.State.ModalOverlay.active?(EditorState.modal(state)) do
+        EditorState.set_status(state, "Commit message ready (prompt already open)")
+      else
+        state
+        |> MingaEditor.PromptUI.open(MingaEditor.UI.Prompt.GitCommit, default: message)
+        |> EditorState.set_status("Commit message generated")
+      end
+
     {:noreply, Renderer.render_or_async(state)}
   end
 
   def handle_info({:git_commit_message_generated, {:error, reason}}, state) do
+    state = %{state | git_commit_gen_ref: nil}
     state = EditorState.set_status(state, reason)
     {:noreply, Renderer.render_or_async(state)}
   end
 
+  def handle_info(:git_generate_timeout, %{git_commit_gen_ref: ref} = state)
+      when ref != nil do
+    state = %{state | git_commit_gen_ref: nil}
+    state = EditorState.set_status(state, "Commit message generation timed out")
+    {:noreply, Renderer.render_or_async(state)}
+  end
+
   def handle_info(:git_generate_timeout, state) do
-    # Only matters if the task hasn't responded yet; the status will be
-    # overwritten by the actual result if it arrives later.
     {:noreply, state}
   end
 
