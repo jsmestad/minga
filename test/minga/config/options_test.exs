@@ -47,6 +47,7 @@ defmodule Minga.Config.OptionsTest do
                title_format: "{filename} {dirty}({directory}) - Minga",
                recent_files_limit: 200,
                persist_recent_files: true,
+               persist_known_projects: true,
                clipboard: :unnamedplus,
                wrap: false,
                linebreak: true,
