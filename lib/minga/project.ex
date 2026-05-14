@@ -34,12 +34,19 @@ defmodule Minga.Project do
             cached_files: [],
             known_projects: [],
             recent_files: %{},
+            frecency_events: %{},
             rebuilding?: false,
             rebuild_ref: nil,
             events_registry: Minga.Events.default_registry()
 
   @typedoc "Per-project recent files map: project root => list of relative paths (most recent first)."
   @type recent_files_map :: %{String.t() => [String.t()]}
+
+  @typedoc "Per-file access event history (most recent first, unix seconds)."
+  @type file_accesses_map :: %{String.t() => [non_neg_integer()]}
+
+  @typedoc "Per-project frecency map: project root => %{relative_path => access_timestamps}."
+  @type frecency_events_map :: %{String.t() => file_accesses_map()}
 
   @typedoc "Project GenServer state."
   @type t :: %__MODULE__{
@@ -48,6 +55,7 @@ defmodule Minga.Project do
           cached_files: [String.t()],
           known_projects: [String.t()],
           recent_files: recent_files_map(),
+          frecency_events: frecency_events_map(),
           rebuilding?: boolean(),
           rebuild_ref: reference() | nil,
           events_registry: Minga.Events.registry()
@@ -55,6 +63,8 @@ defmodule Minga.Project do
 
   @known_projects_file "known-projects"
   @recent_files_file "recent-files"
+  @frecency_file "frecency"
+  @frecency_events_per_file_limit 10
 
   # ── Client API ──────────────────────────────────────────────────────────────
 
@@ -153,6 +163,18 @@ defmodule Minga.Project do
     GenServer.call(server, :recent_files)
   end
 
+  @doc "Returns frecency scores for files in the current project (relative path => score)."
+  @spec frecency_scores(GenServer.server()) :: %{String.t() => non_neg_integer()}
+  def frecency_scores(server \\ __MODULE__) do
+    GenServer.call(server, :frecency_scores)
+  end
+
+  @doc "Scores a file's access timestamps using frecency decay buckets."
+  @spec score_accesses([non_neg_integer()], non_neg_integer()) :: non_neg_integer()
+  def score_accesses(timestamps, now_unix) when is_list(timestamps) and is_integer(now_unix) do
+    Enum.reduce(timestamps, 0, fn ts, score -> score + bucket_points(now_unix - ts) end)
+  end
+
   # ── GenServer Callbacks ─────────────────────────────────────────────────────
 
   @impl true
@@ -169,9 +191,15 @@ defmodule Minga.Project do
 
     known = if persist_known_projects?(), do: load_known_projects(), else: []
     recent = if persist_recent_files?(), do: load_recent_files(), else: %{}
+    frecency = if persist_recent_files?(), do: load_frecency_events(), else: %{}
 
     {:ok,
-     %__MODULE__{known_projects: known, recent_files: recent, events_registry: events_registry}}
+     %__MODULE__{
+       known_projects: known,
+       recent_files: recent,
+       frecency_events: frecency,
+       events_registry: events_registry
+     }}
   end
 
   @impl true
@@ -195,6 +223,24 @@ defmodule Minga.Project do
   def handle_call(:recent_files, _from, state) do
     files = Map.get(state.recent_files, state.current_root, [])
     {:reply, files, state}
+  end
+
+  def handle_call(:frecency_scores, _from, %{current_root: nil} = state) do
+    {:reply, %{}, state}
+  end
+
+  def handle_call(:frecency_scores, _from, state) do
+    root = state.current_root
+    now_unix = System.system_time(:second)
+
+    scores =
+      state.frecency_events
+      |> Map.get(root, %{})
+      |> Map.new(fn {rel_path, timestamps} ->
+        {rel_path, score_accesses(timestamps, now_unix)}
+      end)
+
+    {:reply, scores, state}
   end
 
   @impl true
@@ -328,8 +374,24 @@ defmodule Minga.Project do
         updated = [rel_path | Enum.reject(existing, &(&1 == rel_path))]
         updated = Enum.take(updated, limit)
         new_recent = Map.put(state.recent_files, root, updated)
-        state = %{state | recent_files: new_recent}
-        if persist_recent_files?(), do: persist_recent_files(new_recent)
+
+        now_unix = System.system_time(:second)
+
+        new_frecency =
+          state.frecency_events
+          |> Map.get(root, %{})
+          |> Map.update(rel_path, [now_unix], fn timestamps ->
+            [now_unix | timestamps] |> Enum.take(@frecency_events_per_file_limit)
+          end)
+          |> then(&Map.put(state.frecency_events, root, &1))
+
+        state = %{state | recent_files: new_recent, frecency_events: new_frecency}
+
+        if persist_recent_files?() do
+          persist_recent_files(new_recent)
+          persist_frecency_events(new_frecency)
+        end
+
         state
     end
   end
@@ -488,6 +550,103 @@ defmodule Minga.Project do
       Minga.Log.warning(:editor, "Failed to persist recent files: #{Exception.message(e)}")
       :ok
   end
+
+  @spec frecency_path() :: String.t()
+  defp frecency_path do
+    config_dir = Path.expand("~/.config/minga")
+    Path.join(config_dir, @frecency_file)
+  end
+
+  @spec load_frecency_events() :: frecency_events_map()
+  defp load_frecency_events do
+    path = frecency_path()
+
+    case File.read(path) do
+      {:ok, content} -> parse_frecency_events(content)
+      {:error, _} -> %{}
+    end
+  end
+
+  @spec parse_frecency_events(String.t()) :: frecency_events_map()
+  defp parse_frecency_events(content) do
+    content
+    |> String.split("\n", trim: true)
+    |> Enum.reduce(%{}, fn line, acc ->
+      case parse_frecency_line(line) do
+        {:ok, root, rel_path, timestamp} -> update_frecency_event(acc, root, rel_path, timestamp)
+        :error -> acc
+      end
+    end)
+  end
+
+  @spec parse_frecency_line(String.t()) ::
+          {:ok, String.t(), String.t(), non_neg_integer()} | :error
+  defp parse_frecency_line(line) do
+    case String.split(line, "\t", parts: 3) do
+      [root, rel_path, ts] -> parse_frecency_timestamp(root, rel_path, ts)
+      _ -> :error
+    end
+  end
+
+  @spec parse_frecency_timestamp(String.t(), String.t(), String.t()) ::
+          {:ok, String.t(), String.t(), non_neg_integer()} | :error
+  defp parse_frecency_timestamp(root, rel_path, ts) do
+    case Integer.parse(ts) do
+      {timestamp, ""} when timestamp >= 0 -> {:ok, root, rel_path, timestamp}
+      _ -> :error
+    end
+  end
+
+  @spec update_frecency_event(frecency_events_map(), String.t(), String.t(), non_neg_integer()) ::
+          frecency_events_map()
+  defp update_frecency_event(events, root, rel_path, timestamp) do
+    root_map = Map.get(events, root, %{})
+
+    updated_root_map =
+      Map.update(root_map, rel_path, [timestamp], fn timestamps ->
+        timestamps
+        |> Kernel.++([timestamp])
+        |> Enum.take(@frecency_events_per_file_limit)
+      end)
+
+    Map.put(events, root, updated_root_map)
+  end
+
+  @spec persist_frecency_events(frecency_events_map()) :: :ok
+  defp persist_frecency_events(frecency_events) do
+    path = frecency_path()
+    dir = Path.dirname(path)
+    File.mkdir_p!(dir)
+
+    content = frecency_lines(frecency_events) |> Enum.join("\n") |> Kernel.<>("\n")
+    File.write!(path, content)
+    :ok
+  rescue
+    e ->
+      Minga.Log.warning(:editor, "Failed to persist frecency data: #{Exception.message(e)}")
+      :ok
+  end
+
+  @spec frecency_lines(frecency_events_map()) :: [String.t()]
+  defp frecency_lines(frecency_events) do
+    Enum.flat_map(frecency_events, fn {root, file_accesses} ->
+      file_accesses_to_lines(root, file_accesses)
+    end)
+  end
+
+  @spec file_accesses_to_lines(String.t(), file_accesses_map()) :: [String.t()]
+  defp file_accesses_to_lines(root, file_accesses) do
+    Enum.flat_map(file_accesses, fn {rel_path, timestamps} ->
+      Enum.map(timestamps, fn ts -> "#{root}\t#{rel_path}\t#{ts}" end)
+    end)
+  end
+
+  @spec bucket_points(integer()) :: non_neg_integer()
+  defp bucket_points(age_seconds) when age_seconds <= 4 * 60 * 60, do: 100
+  defp bucket_points(age_seconds) when age_seconds <= 24 * 60 * 60, do: 80
+  defp bucket_points(age_seconds) when age_seconds <= 7 * 24 * 60 * 60, do: 60
+  defp bucket_points(age_seconds) when age_seconds <= 30 * 24 * 60 * 60, do: 40
+  defp bucket_points(_age_seconds), do: 20
 
   # ── Domain delegates ──────────────────────────────────────────────────────
 

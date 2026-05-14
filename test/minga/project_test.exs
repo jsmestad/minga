@@ -1,5 +1,6 @@
 defmodule Minga.ProjectTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Minga.Project
 
@@ -374,6 +375,56 @@ defmodule Minga.ProjectTest do
       flush(name)
 
       assert Project.recent_files(name) == ["a.ex"]
+    end
+  end
+
+  describe "frecency" do
+    test "score_accesses/2 applies Mozilla-style decay buckets" do
+      now = 1_700_000_000
+
+      timestamps = [
+        now - 60,
+        now - 8 * 60 * 60,
+        now - 2 * 24 * 60 * 60,
+        now - 10 * 24 * 60 * 60,
+        now - 90 * 24 * 60 * 60
+      ]
+
+      assert Project.score_accesses(timestamps, now) == 100 + 80 + 60 + 40 + 20
+    end
+
+    test "score_accesses/2 is monotonic when adding another same-time access" do
+      check all(n <- StreamData.integer(0..20)) do
+        now = 1_700_000_000
+        timestamps = List.duplicate(now - 60, n)
+        with_extra = [now - 60 | timestamps]
+
+        assert Project.score_accesses(with_extra, now) >= Project.score_accesses(timestamps, now)
+      end
+    end
+
+    test "more opens produce a higher frecency score", %{tmp_dir: tmp} do
+      project = Path.join(tmp, "frecency_project")
+      lib = Path.join(project, "lib")
+      File.mkdir_p!(lib)
+      File.write!(Path.join(project, "mix.exs"), "")
+      File.write!(Path.join(lib, "hot.ex"), "")
+      File.write!(Path.join(lib, "cold.ex"), "")
+
+      {_pid, name} = start_project!()
+      Project.detect_and_set(name, Path.join(lib, "hot.ex"))
+      flush(name)
+
+      Enum.each(1..5, fn _ ->
+        Project.record_file(name, Path.join(lib, "hot.ex"))
+        flush(name)
+      end)
+
+      Project.record_file(name, Path.join(lib, "cold.ex"))
+      flush(name)
+
+      scores = Project.frecency_scores(name)
+      assert scores["lib/hot.ex"] > scores["lib/cold.ex"]
     end
   end
 end

@@ -32,9 +32,9 @@ defmodule MingaEditor.UI.Picker.FileSource do
 
     case Minga.Project.list_files(root) do
       {:ok, paths} ->
-        recency_map = build_recency_map()
+        frecency_map = build_frecency_map()
         git_status_map = build_git_status_map()
-        score_map = build_score_map(recency_map, git_status_map)
+        score_map = build_score_map(frecency_map, git_status_map)
 
         paths
         |> Enum.map(&format_file_candidate(&1, git_status_map))
@@ -74,7 +74,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
   @impl true
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: rel_path}, state) do
-    abs_path = Path.expand(rel_path)
+    abs_path = absolute_path(rel_path)
 
     Log.debug(:editor, "[file_picker] on_select path=#{rel_path}")
 
@@ -83,7 +83,9 @@ defmodule MingaEditor.UI.Picker.FileSource do
         case EditorState.start_buffer(abs_path) do
           {:ok, pid} ->
             Log.debug(:editor, "[file_picker] new buffer pid=#{inspect(pid)}")
-            EditorState.add_buffer(state, pid)
+            new_state = EditorState.add_buffer(state, pid)
+            record_selection(abs_path, state)
+            new_state
 
           {:error, reason} ->
             Minga.Log.error(:editor, "Failed to open file: #{inspect(reason)}")
@@ -91,7 +93,9 @@ defmodule MingaEditor.UI.Picker.FileSource do
         end
 
       idx ->
-        switch_existing_buffer(state, idx)
+        new_state = switch_existing_buffer(state, idx)
+        record_selection(abs_path, state)
+        new_state
     end
   end
 
@@ -137,7 +141,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
   def on_action(:open, item, state), do: on_select(item, state)
 
   def on_action(:delete, %Item{id: rel_path}, state) do
-    abs_path = Path.expand(rel_path)
+    abs_path = absolute_path(rel_path)
 
     case File.rm(abs_path) do
       :ok ->
@@ -154,19 +158,22 @@ defmodule MingaEditor.UI.Picker.FileSource do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  # Build a map of relative_path → recency_score from Project.recent_files.
-  # Most recently opened files get the highest score.
-  @spec build_recency_map() :: %{String.t() => non_neg_integer()}
-  defp build_recency_map do
-    recent = Minga.Project.recent_files()
-    total = length(recent)
+  @spec absolute_path(String.t()) :: String.t()
+  defp absolute_path(rel_path), do: Path.expand(rel_path, project_root())
 
-    recent
-    |> Enum.with_index()
-    |> Enum.into(%{}, fn {path, idx} ->
-      # Most recent = highest score. Score decays linearly.
-      {path, total - idx}
-    end)
+  @spec record_selection(String.t(), term()) :: :ok
+  defp record_selection(_abs_path, %{buffer_add_context: :preview}), do: :ok
+
+  defp record_selection(abs_path, _state) do
+    Minga.Project.record_file(abs_path)
+  catch
+    :exit, _ -> :ok
+  end
+
+  # Build a map of relative_path → frecency_score from Project.frecency_scores/0.
+  @spec build_frecency_map() :: %{String.t() => non_neg_integer()}
+  defp build_frecency_map do
+    Minga.Project.frecency_scores()
   catch
     :exit, _ -> %{}
   end
@@ -187,23 +194,22 @@ defmodule MingaEditor.UI.Picker.FileSource do
     :exit, _ -> %{}
   end
 
-  # Combine recency and git-modified scores. Git-modified files get a flat
-  # boost of 5. Recently opened files get position-based score (N..1).
-  # Both boosts stack: recently opened AND modified = highest score.
+  # Combine frecency and git-modified scores. Git-modified files get a flat
+  # boost of 5. Both boosts stack: frequently/recently opened AND modified = highest score.
   @spec build_score_map(%{String.t() => non_neg_integer()}, %{String.t() => atom()}) :: %{
           String.t() => non_neg_integer()
         }
-  defp build_score_map(recency_map, git_status_map) do
-    all_paths = Map.keys(recency_map) ++ Map.keys(git_status_map)
+  defp build_score_map(frecency_map, git_status_map) do
+    all_paths = Map.keys(frecency_map) ++ Map.keys(git_status_map)
 
     Map.new(Enum.uniq(all_paths), fn path ->
-      recency = Map.get(recency_map, path, 0)
+      frecency = Map.get(frecency_map, path, 0)
       git_boost = if Map.has_key?(git_status_map, path), do: 5, else: 0
-      {path, recency + git_boost}
+      {path, frecency + git_boost}
     end)
   end
 
-  # Sort items by combined score (recent + git-modified), preserving filesystem order for unscored.
+  # Sort items by combined score (frecency + git-modified), preserving filesystem order for unscored.
   @spec sort_by_score([Item.t()], %{String.t() => non_neg_integer()}) :: [Item.t()]
   defp sort_by_score(items, score_map) when map_size(score_map) == 0, do: items
 

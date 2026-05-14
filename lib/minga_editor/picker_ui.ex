@@ -418,10 +418,24 @@ defmodule MingaEditor.PickerUI do
   defp promote_previewed_buffer(state) do
     previewed_pid = state.workspace.buffers.active
 
+    state =
+      state
+      |> restore_picker_origin()
+      |> close()
+      |> EditorState.add_buffer(previewed_pid, context: :open)
+
+    record_previewed_buffer_access(previewed_pid)
     state
-    |> restore_picker_origin()
-    |> close()
-    |> EditorState.add_buffer(previewed_pid, context: :open)
+  end
+
+  @spec record_previewed_buffer_access(pid()) :: :ok
+  defp record_previewed_buffer_access(buffer) when is_pid(buffer) do
+    case Minga.Buffer.file_path(buffer) do
+      path when is_binary(path) -> Minga.Project.record_file(path)
+      _ -> :ok
+    end
+  catch
+    :exit, _ -> :ok
   end
 
   @spec run_select_and_close(EditorState.t(), Picker.item(), module()) ::
