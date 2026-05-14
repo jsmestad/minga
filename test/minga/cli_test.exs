@@ -1,11 +1,12 @@
 defmodule Minga.CLITest do
-  use ExUnit.Case, async: true
+  # Not async: CLI startup flag tests mutate Application env, which races with editor startup tests.
+  use ExUnit.Case, async: false
 
   alias Minga.CLI
 
   describe "parse_args/1" do
     test "no arguments returns {:open, nil, default_flags}" do
-      assert {:open, nil, %{force_editor: false, no_context: false, config_file: nil}} =
+      assert {:open, nil, %{view_mode: :auto, no_context: false, config_file: nil}} =
                CLI.parse_args([])
     end
 
@@ -33,12 +34,12 @@ defmodule Minga.CLITest do
     end
 
     test "single file argument returns {:open, path, flags}" do
-      assert {:open, "README.md", %{force_editor: false, no_context: false, config_file: nil}} =
+      assert {:open, "README.md", %{view_mode: :auto, no_context: false, config_file: nil}} =
                CLI.parse_args(["README.md"])
     end
 
     test "file argument with extra non-flag args takes the last file" do
-      assert {:open, "other.txt", %{force_editor: false, no_context: false, config_file: nil}} =
+      assert {:open, "other.txt", %{view_mode: :auto, no_context: false, config_file: nil}} =
                CLI.parse_args(["file.txt", "other.txt"])
     end
 
@@ -46,33 +47,33 @@ defmodule Minga.CLITest do
       assert {:error, _} = CLI.parse_args(["--help", "file.txt"])
     end
 
-    test "--editor flag sets force_editor" do
-      assert {:open, nil, %{force_editor: true, no_context: false, config_file: nil}} =
+    test "--editor flag sets view_mode" do
+      assert {:open, nil, %{view_mode: :editor, no_context: false, config_file: nil}} =
                CLI.parse_args(["--editor"])
     end
 
     test "--editor flag with file" do
-      assert {:open, "foo.ex", %{force_editor: true, no_context: false, config_file: nil}} =
+      assert {:open, "foo.ex", %{view_mode: :editor, no_context: false, config_file: nil}} =
                CLI.parse_args(["--editor", "foo.ex"])
     end
 
     test "--no-context flag sets no_context" do
-      assert {:open, nil, %{force_editor: false, no_context: true, config_file: nil}} =
+      assert {:open, nil, %{view_mode: :auto, no_context: true, config_file: nil}} =
                CLI.parse_args(["--no-context"])
     end
 
     test "--no-context flag with file" do
-      assert {:open, "foo.ex", %{force_editor: false, no_context: true, config_file: nil}} =
+      assert {:open, "foo.ex", %{view_mode: :auto, no_context: true, config_file: nil}} =
                CLI.parse_args(["--no-context", "foo.ex"])
     end
 
     test "--editor and --no-context together" do
-      assert {:open, "foo.ex", %{force_editor: true, no_context: true, config_file: nil}} =
+      assert {:open, "foo.ex", %{view_mode: :editor, no_context: true, config_file: nil}} =
                CLI.parse_args(["--editor", "--no-context", "foo.ex"])
     end
 
     test "flags can appear after file argument" do
-      assert {:open, "foo.ex", %{force_editor: true, no_context: false, config_file: nil}} =
+      assert {:open, "foo.ex", %{view_mode: :editor, no_context: false, config_file: nil}} =
                CLI.parse_args(["foo.ex", "--editor"])
     end
 
@@ -93,7 +94,7 @@ defmodule Minga.CLITest do
     end
 
     test "--config combined with --editor" do
-      assert {:open, "foo.ex", %{force_editor: true, config_file: "/tmp/c.exs"}} =
+      assert {:open, "foo.ex", %{view_mode: :editor, config_file: "/tmp/c.exs"}} =
                CLI.parse_args(["--config", "/tmp/c.exs", "--editor", "foo.ex"])
     end
 
@@ -187,29 +188,59 @@ defmodule Minga.CLITest do
       assert message =~ "--config"
       assert message =~ "--minimal"
     end
+
+    test "usage text describes file and directory startup behavior" do
+      assert {:error, message} = CLI.parse_args(["--help"])
+      assert message =~ "minga README.md                    Open file for editing"
+
+      assert message =~
+               "minga .                            Start agentic view with project as context"
+
+      assert message =~ "Keep agentic view and don't load the file as agent context"
+    end
   end
 
   describe "startup_flags/0" do
     test "returns default flags when no CLI flags were set" do
-      # Clear any flags from other tests
       Application.delete_env(:minga, :cli_startup_flags)
-      assert %{force_editor: false, no_context: false, config_file: nil} = CLI.startup_flags()
+      assert %{view_mode: :auto, no_context: false, config_file: nil} = CLI.startup_flags()
+    end
+
+    test "merges sparse stored flags with defaults" do
+      Application.put_env(:minga, :cli_startup_flags, %{config_file: "/tmp/custom.exs"})
+
+      assert %{view_mode: :auto, no_context: false, config_file: "/tmp/custom.exs"} =
+               CLI.startup_flags()
+    after
+      Application.delete_env(:minga, :cli_startup_flags)
     end
   end
 
   describe "main/1" do
     test "no arguments returns :ok without crashing" do
       assert :ok = CLI.main([])
+    after
+      Application.delete_env(:minga, :cli_startup_flags)
     end
 
     test "file argument returns :ok even when editor isn't running" do
       assert :ok = CLI.main(["nonexistent_file.txt"])
+    after
+      Application.delete_env(:minga, :cli_startup_flags)
+    end
+
+    test "directory argument stores agentic startup mode" do
+      Application.delete_env(:minga, :cli_startup_flags)
+      assert :ok = CLI.main([System.tmp_dir!()])
+      assert %{view_mode: :agentic, no_context: false, config_file: nil} = CLI.startup_flags()
+    after
+      Application.delete_env(:minga, :cli_startup_flags)
     end
 
     test "main stores startup flags in application env" do
       Application.delete_env(:minga, :cli_startup_flags)
       CLI.main(["--editor", "some_file.ex"])
-      assert %{force_editor: true, no_context: false, config_file: nil} = CLI.startup_flags()
+      assert %{view_mode: :editor, no_context: false, config_file: nil} = CLI.startup_flags()
     after
       Application.delete_env(:minga, :cli_startup_flags)
     end
@@ -217,32 +248,81 @@ defmodule Minga.CLITest do
     test "main stores config_file flag from --config" do
       Application.delete_env(:minga, :cli_startup_flags)
       CLI.main(["--config", "/tmp/test_config.exs"])
-      assert %{config_file: "/tmp/test_config.exs"} = CLI.startup_flags()
+      assert %{view_mode: :auto, config_file: "/tmp/test_config.exs"} = CLI.startup_flags()
     after
       Application.delete_env(:minga, :cli_startup_flags)
     end
   end
 
   describe "apply_flag_implications/1" do
-    test "minimal implies force_editor" do
+    test "minimal implies editor view" do
       {:open, _, flags} = CLI.parse_args(["--minimal", "COMMIT_EDITMSG"])
       result = CLI.apply_flag_implications(flags)
-      assert result.force_editor == true
+      assert result.view_mode == :editor
       assert result.minimal == true
     end
 
-    test "force_editor alone is preserved, does not set minimal" do
+    test "editor view alone is preserved, does not set minimal" do
       {:open, _, flags} = CLI.parse_args(["--editor"])
       result = CLI.apply_flag_implications(flags)
-      assert result.force_editor == true
+      assert result.view_mode == :editor
       assert result.minimal == false
     end
 
-    test "neither flag leaves both false" do
+    test "neither flag leaves view mode auto" do
       {:open, _, flags} = CLI.parse_args([])
       result = CLI.apply_flag_implications(flags)
-      assert result.force_editor == false
+      assert result.view_mode == :auto
       assert result.minimal == false
+    end
+  end
+
+  describe "apply_flag_implications/2" do
+    test "regular file resolves auto view to editor" do
+      path =
+        Path.join(System.tmp_dir!(), "minga_cli_file_#{System.unique_integer([:positive])}.ex")
+
+      File.write!(path, "IO.puts(:ok)\n")
+      on_exit(fn -> File.rm(path) end)
+
+      {:open, _, flags} = CLI.parse_args([path])
+      result = CLI.apply_flag_implications(flags, path)
+      assert result.view_mode == :editor
+    end
+
+    test "directory resolves auto view to agentic" do
+      {:open, _, flags} = CLI.parse_args([System.tmp_dir!()])
+      result = CLI.apply_flag_implications(flags, System.tmp_dir!())
+      assert result.view_mode == :agentic
+    end
+
+    test "nil leaves auto view unresolved" do
+      {:open, _, flags} = CLI.parse_args([])
+      result = CLI.apply_flag_implications(flags, nil)
+      assert result.view_mode == :auto
+    end
+
+    test "no-context resolves auto view to agentic" do
+      {:open, file, flags} = CLI.parse_args(["--no-context", "foo.ex"])
+      result = CLI.apply_flag_implications(flags, file)
+      assert result.view_mode == :agentic
+      assert result.no_context == true
+    end
+
+    test "explicit editor view wins over no-context" do
+      {:open, file, flags} = CLI.parse_args(["--editor", "--no-context", "foo.ex"])
+      result = CLI.apply_flag_implications(flags, file)
+      assert result.view_mode == :editor
+      assert result.no_context == true
+    end
+
+    test "nonexistent file path resolves auto view to editor" do
+      path =
+        Path.join(System.tmp_dir!(), "minga_missing_#{System.unique_integer([:positive])}.ex")
+
+      {:open, _, flags} = CLI.parse_args([path])
+      result = CLI.apply_flag_implications(flags, path)
+      assert result.view_mode == :editor
     end
   end
 end

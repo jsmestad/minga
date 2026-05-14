@@ -9,6 +9,8 @@ defmodule Minga.CLI do
   By default, Minga boots into the agentic view (controlled by the `:startup_view` config option). CLI flags can override the config:
 
   - `--editor` forces the traditional file editing view
+  - File arguments open in the traditional file editing view by default
+  - Directory arguments open the agentic view with the directory as context
   - `--no-context` opens the agentic view but skips loading the CLI file argument as preview context
   - `--headless` starts only the services and agent runtime, plus the JSON-RPC Gateway
   """
@@ -21,9 +23,12 @@ defmodule Minga.CLI do
           {:open, file :: String.t() | nil, flags()}
           | {:error, String.t()}
 
+  @typedoc "Startup view mode requested by CLI flags."
+  @type view_mode :: :auto | :editor | :agentic
+
   @typedoc "CLI flags that override config options."
   @type flags :: %{
-          force_editor: boolean(),
+          view_mode: view_mode(),
           no_context: boolean(),
           config_file: String.t() | nil,
           headless: boolean(),
@@ -37,7 +42,7 @@ defmodule Minga.CLI do
         }
 
   @default_flags %{
-    force_editor: false,
+    view_mode: :auto,
     no_context: false,
     config_file: nil,
     headless: false,
@@ -57,7 +62,7 @@ defmodule Minga.CLI do
   def main(args) do
     case parse_args(args) do
       {:open, file, flags} ->
-        store_startup_flags(flags)
+        store_startup_flags(flags, file)
 
         case maybe_start_distribution(flags) do
           :ok -> launch(flags, file)
@@ -100,7 +105,8 @@ defmodule Minga.CLI do
   @doc "Returns the startup flags stored by the CLI, or defaults if none were set."
   @spec startup_flags() :: flags()
   def startup_flags do
-    Application.get_env(:minga, :cli_startup_flags, @default_flags)
+    stored = Application.get_env(:minga, :cli_startup_flags, %{})
+    Map.merge(@default_flags, stored)
   end
 
   # ── Argument parsing ────────────────────────────────────────────────────────
@@ -114,7 +120,7 @@ defmodule Minga.CLI do
   defp parse_args(["-v" | _], _file, _flags), do: {:error, "minga #{Minga.version()}"}
 
   defp parse_args(["--editor" | rest], file, flags) do
-    parse_args(rest, file, %{flags | force_editor: true})
+    parse_args(rest, file, %{flags | view_mode: :editor})
   end
 
   defp parse_args(["--no-context" | rest], file, flags) do
@@ -247,14 +253,21 @@ defmodule Minga.CLI do
     end
   end
 
-  defp launch(_flags, file) do
+  defp launch(%{headless: false}, file) do
     log_startup(file)
-    open_editor(file)
+    open_startup_target(file)
   end
 
   @spec log_startup(String.t() | nil) :: :ok
   defp log_startup(nil), do: Minga.Log.debug(:editor, "Starting with empty buffer")
-  defp log_startup(file), do: Minga.Log.debug(:editor, "Opening file: #{file}")
+
+  defp log_startup(path) do
+    if File.dir?(path) do
+      Minga.Log.debug(:editor, "Opening project: #{path}")
+    else
+      Minga.Log.debug(:editor, "Opening file: #{path}")
+    end
+  end
 
   @spec start_headless_gateway(pos_integer(), :inet.ip_address(), String.t() | nil) :: :ok
   defp start_headless_gateway(port, ip, auth_token) do
@@ -474,17 +487,41 @@ defmodule Minga.CLI do
     exit({:shutdown, 1})
   end
 
-  @doc "Applies flag implications (e.g., minimal implies force_editor) to a flags map."
+  @doc "Applies flag implications to a flags map."
   @spec apply_flag_implications(flags()) :: flags()
-  def apply_flag_implications(%{minimal: true} = flags), do: %{flags | force_editor: true}
-  def apply_flag_implications(flags), do: flags
+  def apply_flag_implications(flags), do: apply_flag_implications(flags, nil)
 
-  @spec store_startup_flags(flags()) :: :ok
-  defp store_startup_flags(flags) do
-    effective = apply_flag_implications(flags)
+  @doc "Applies flag implications with file-aware startup view resolution."
+  @spec apply_flag_implications(flags(), String.t() | nil) :: flags()
+  def apply_flag_implications(%{minimal: true} = flags, _file) do
+    %{flags | view_mode: :editor}
+  end
+
+  def apply_flag_implications(%{view_mode: :editor} = flags, _file), do: flags
+  def apply_flag_implications(%{view_mode: :agentic} = flags, _file), do: flags
+
+  def apply_flag_implications(%{view_mode: :auto, no_context: true} = flags, _file),
+    do: %{flags | view_mode: :agentic}
+
+  def apply_flag_implications(%{view_mode: :auto} = flags, nil), do: flags
+
+  def apply_flag_implications(%{view_mode: :auto} = flags, file),
+    do: resolve_auto_view_mode(flags, file)
+
+  @spec resolve_auto_view_mode(flags(), String.t()) :: flags()
+  defp resolve_auto_view_mode(flags, file) do
+    resolve_auto_view_mode_for_directory(flags, File.dir?(file))
+  end
+
+  @spec resolve_auto_view_mode_for_directory(flags(), boolean()) :: flags()
+  defp resolve_auto_view_mode_for_directory(flags, true), do: %{flags | view_mode: :agentic}
+  defp resolve_auto_view_mode_for_directory(flags, false), do: %{flags | view_mode: :editor}
+
+  @spec store_startup_flags(flags(), String.t() | nil) :: :ok
+  defp store_startup_flags(flags, file) do
+    effective = apply_flag_implications(flags, file)
     Application.put_env(:minga, :cli_startup_flags, effective)
     if effective.minimal, do: Application.put_env(:minga, :minimal_mode, true)
-    if effective.force_editor, do: Application.put_env(:minga, :force_editor, true)
     :ok
   end
 
@@ -501,7 +538,7 @@ defmodule Minga.CLI do
       --config <path>        Use a custom config file instead of the default
       --editor               Start in file editing mode (skip agentic view)
       --minimal              Minimal mode: editor-only, no services/agent (for GIT_EDITOR use)
-      --no-context           Don't load the file as agent context
+      --no-context           Keep agentic view and don't load the file as agent context
       --headless             Start services and agent runtime without a GUI frontend
       --name <name@host>     Distributed Erlang long node name
       --sname <name>         Distributed Erlang short node name
@@ -512,26 +549,38 @@ defmodule Minga.CLI do
 
     Examples:
       minga                              Start agentic view
-      minga README.md                    Start agentic view with file as context
+      minga README.md                    Open file for editing
+      minga .                            Start agentic view with project as context
       minga --editor README.md           Open file in traditional editor
       MINGA_COOKIE=$(openssl rand -base64 32 | tr -d '/+=') minga --headless   Start detachable agent server
       minga --config ~/minimal.exs       Use a custom config profile
     """
   end
 
-  @spec open_editor(String.t() | nil) :: :ok
-  defp open_editor(file_path) do
-    case file_path do
-      nil ->
-        :ok
+  @spec open_startup_target(String.t() | nil) :: :ok
+  defp open_startup_target(nil), do: :ok
 
-      path ->
-        {interval, retries} = editor_wait_params()
+  defp open_startup_target(path) do
+    if File.dir?(path) do
+      open_project(path)
+    else
+      open_file(path)
+    end
+  end
 
-        case wait_for_editor(interval, retries) do
-          :ok -> MingaEditor.open_file(path)
-          :timeout -> Minga.Log.error(:editor, "Editor process did not start in time")
-        end
+  @spec open_project(String.t()) :: :ok
+  defp open_project(path) do
+    Minga.Project.switch(path)
+    :ok
+  end
+
+  @spec open_file(String.t()) :: :ok
+  defp open_file(path) do
+    {interval, retries} = editor_wait_params()
+
+    case wait_for_editor(interval, retries) do
+      :ok -> MingaEditor.open_file(path)
+      :timeout -> Minga.Log.error(:editor, "Editor process did not start in time")
     end
 
     :ok
