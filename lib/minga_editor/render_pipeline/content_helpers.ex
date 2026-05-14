@@ -160,7 +160,11 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       git_colors: state.theme.git,
       show_invisible: show_invisible,
       tab_width: tab_width,
-      whitespace_face: whitespace_face
+      whitespace_face: whitespace_face,
+      search_colors: state.theme.search,
+      document_highlight_colors: document_highlight_colors(state.theme),
+      wrap_on: Map.get(params, :wrap_on, false),
+      line_number_style: Map.get(params, :line_number_style, :absolute)
     }
 
     {ctx, state}
@@ -907,7 +911,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
           search_cache()
         ) :: {Decorations.t(), search_cache()}
   def merge_search_decorations(decs, matches, confirm_match, colors, cached) do
-    fingerprint = {matches, confirm_match}
+    fingerprint = {matches, confirm_match, colors}
 
     case cached do
       {^fingerprint, base_version, cached_decs} when base_version == decs.version ->
@@ -973,7 +977,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   defp merge_document_highlight_decorations(decs, [], _theme, cache), do: {decs, cache}
 
   defp merge_document_highlight_decorations(decs, highlights, theme, cached) do
-    fingerprint = {highlights, decs.version}
+    fingerprint = {highlights, decs.version, document_highlight_colors(theme)}
 
     case cached do
       {^fingerprint, cached_decs} ->
@@ -1016,8 +1020,17 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   # search highlights (priority -10) or selection.
   @spec document_highlight_bg(Minga.LSP.DocumentHighlight.kind(), MingaEditor.UI.Theme.t()) ::
           MingaEditor.UI.Theme.color()
-  defp document_highlight_bg(:write, _theme), do: 0x4A3F2B
-  defp document_highlight_bg(_kind, _theme), do: 0x3A3F4B
+  defp document_highlight_bg(:write, theme), do: elem(document_highlight_colors(theme), 1)
+  defp document_highlight_bg(_kind, theme), do: elem(document_highlight_colors(theme), 0)
+
+  @spec document_highlight_colors(MingaEditor.UI.Theme.t()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp document_highlight_colors(theme) do
+    {
+      theme.editor.highlight_read_bg || 0x3A3F4B,
+      theme.editor.highlight_write_bg || 0x4A3F2B
+    }
+  end
 
   @doc "Returns the decorations for a window's buffer."
   @spec window_decorations(Window.t()) :: Decorations.t()
@@ -1176,12 +1189,10 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   @spec context_fingerprint(Context.t(), boolean()) ::
           MingaEditor.Window.RenderCache.context_fingerprint()
   def context_fingerprint(%Context{} = ctx, is_active) do
-    hl_id = nil
-
     {
       ctx.visual_selection,
       ctx.search_matches,
-      hl_id,
+      highlight_fingerprint(ctx.highlight),
       ctx.diagnostic_signs,
       ctx.git_signs,
       ctx.viewport.left,
@@ -1191,8 +1202,26 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       ctx.confirm_match,
       ctx.decorations.version,
       ctx.show_invisible,
-      ctx.tab_width
+      ctx.tab_width,
+      ctx.cursorline_bg,
+      ctx.nav_flash,
+      ctx.nav_flash_bg,
+      ctx.editor_bg,
+      ctx.gutter_colors,
+      ctx.git_colors,
+      ctx.whitespace_face,
+      ctx.search_colors,
+      ctx.document_highlight_colors,
+      ctx.wrap_on,
+      ctx.line_number_style
     }
+  end
+
+  @spec highlight_fingerprint(Highlight.t() | nil) :: integer() | nil
+  defp highlight_fingerprint(nil), do: nil
+
+  defp highlight_fingerprint(%Highlight{} = highlight) do
+    :erlang.phash2(highlight)
   end
 
   # ── Private helpers ────────────────────────────────────────────────────────

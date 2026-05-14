@@ -7,6 +7,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
   alias MingaEditor.UI.Theme
   alias MingaEditor.Renderer.Context
   alias MingaEditor.RenderPipeline.ContentHelpers
+  alias MingaEditor.UI.Highlight
   alias MingaEditor.Viewport
   alias MingaEditor.Window
 
@@ -18,6 +19,131 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
 
   defp make_match(line, col, len) do
     %Minga.Editing.Search.Match{line: line, col: col, length: len}
+  end
+
+  describe "context_fingerprint/2" do
+    test "changes when syntax highlight spans arrive" do
+      ctx = %Context{viewport: Viewport.new(20, 80), gutter_w: 4, content_w: 76}
+      before_fp = ContentHelpers.context_fingerprint(ctx, true)
+
+      highlight =
+        Highlight.new()
+        |> Highlight.put_names(["keyword"])
+        |> Highlight.put_spans(1, [%{start_byte: 0, end_byte: 3, capture_id: 0}])
+
+      after_fp = ContentHelpers.context_fingerprint(%{ctx | highlight: highlight}, true)
+
+      refute before_fp == after_fp
+    end
+
+    test "changes when syntax highlight version changes" do
+      highlight_v1 =
+        Highlight.new()
+        |> Highlight.put_names(["keyword"])
+        |> Highlight.put_spans(1, [%{start_byte: 0, end_byte: 3, capture_id: 0}])
+
+      highlight_v2 =
+        Highlight.put_spans(highlight_v1, 2, [%{start_byte: 4, end_byte: 7, capture_id: 0}])
+
+      ctx = %Context{
+        viewport: Viewport.new(20, 80),
+        gutter_w: 4,
+        content_w: 76,
+        highlight: highlight_v1
+      }
+
+      refute ContentHelpers.context_fingerprint(ctx, true) ==
+               ContentHelpers.context_fingerprint(%{ctx | highlight: highlight_v2}, true)
+    end
+
+    test "changes when highlight theme changes with the same spans" do
+      highlight =
+        Highlight.new()
+        |> Highlight.put_names(["keyword"])
+        |> Highlight.put_spans(1, [%{start_byte: 0, end_byte: 3, capture_id: 0}])
+
+      themed_highlight = Highlight.new(Theme.get!(:one_light).syntax)
+
+      themed_highlight = %{
+        themed_highlight
+        | version: highlight.version,
+          spans: highlight.spans,
+          capture_names: highlight.capture_names
+      }
+
+      ctx = %Context{
+        viewport: Viewport.new(20, 80),
+        gutter_w: 4,
+        content_w: 76,
+        highlight: highlight
+      }
+
+      refute ContentHelpers.context_fingerprint(ctx, true) ==
+               ContentHelpers.context_fingerprint(%{ctx | highlight: themed_highlight}, true)
+    end
+
+    test "changes when chrome theme colors used by content change" do
+      ctx = %Context{
+        viewport: Viewport.new(20, 80),
+        gutter_w: 4,
+        content_w: 76,
+        editor_bg: 0x111111
+      }
+
+      refute ContentHelpers.context_fingerprint(ctx, true) ==
+               ContentHelpers.context_fingerprint(%{ctx | editor_bg: 0x222222}, true)
+    end
+
+    test "changes when search colors change" do
+      ctx = %Context{
+        viewport: Viewport.new(20, 80),
+        gutter_w: 4,
+        content_w: 76,
+        search_colors: @search_colors
+      }
+
+      alt_colors = %{@search_colors | highlight_bg: 0x123456}
+
+      refute ContentHelpers.context_fingerprint(ctx, true) ==
+               ContentHelpers.context_fingerprint(%{ctx | search_colors: alt_colors}, true)
+    end
+
+    test "changes when document highlight colors change" do
+      ctx = %Context{
+        viewport: Viewport.new(20, 80),
+        gutter_w: 4,
+        content_w: 76,
+        document_highlight_colors: {0x111111, 0x222222}
+      }
+
+      refute ContentHelpers.context_fingerprint(ctx, true) ==
+               ContentHelpers.context_fingerprint(
+                 %{
+                   ctx
+                   | document_highlight_colors: {0x333333, 0x444444}
+                 },
+                 true
+               )
+    end
+
+    test "changes when wrap mode changes" do
+      ctx = %Context{viewport: Viewport.new(20, 80), gutter_w: 4, content_w: 76, wrap_on: false}
+
+      refute ContentHelpers.context_fingerprint(ctx, true) ==
+               ContentHelpers.context_fingerprint(%{ctx | wrap_on: true}, true)
+    end
+
+    test "changes when line number style changes" do
+      ctx = %Context{
+        viewport: Viewport.new(20, 80),
+        gutter_w: 4,
+        content_w: 76,
+        line_number_style: :absolute
+      }
+
+      refute ContentHelpers.context_fingerprint(ctx, true) ==
+               ContentHelpers.context_fingerprint(%{ctx | line_number_style: :relative}, true)
+    end
   end
 
   describe "merge_search_decorations/5" do
@@ -96,6 +222,21 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
       # Different matches: must rebuild, not return cached
       highlights = Decorations.highlights_for_line(result2, 1)
       assert highlights != [], "new search match on line 1 should produce a highlight"
+    end
+
+    test "different search colors rebuild cached decorations" do
+      decs = Decorations.new()
+      matches = [make_match(0, 0, 3)]
+      alt_colors = %{@search_colors | highlight_bg: 0x123456}
+
+      {_result1, cache1} =
+        ContentHelpers.merge_search_decorations(decs, matches, nil, @search_colors, nil)
+
+      {result2, _cache2} =
+        ContentHelpers.merge_search_decorations(decs, matches, nil, alt_colors, cache1)
+
+      [highlight] = Decorations.highlights_for_line(result2, 0)
+      assert highlight.style.bg == 0x123456
     end
   end
 

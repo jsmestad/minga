@@ -141,7 +141,7 @@ defmodule MingaEditor.Window.RenderCache do
         gutter_w,
         line_count,
         buf_version,
-        cursor_line
+        _cursor_line
       ) do
     first_frame = cache.last_buf_version < 0
 
@@ -154,11 +154,7 @@ defmodule MingaEditor.Window.RenderCache do
     cache = if needs_full, do: %{cache | dirty_lines: :all}, else: cache
 
     if cache.last_buf_version != buf_version and cache.last_buf_version >= 0 do
-      if cache.last_line_count == line_count and cache.dirty_lines != :all do
-        mark_dirty(cache, [cache.last_cursor_line, cursor_line])
-      else
-        %{cache | dirty_lines: :all}
-      end
+      %{cache | dirty_lines: :all}
     else
       cache
     end

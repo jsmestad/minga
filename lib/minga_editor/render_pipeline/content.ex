@@ -111,7 +111,9 @@ defmodule MingaEditor.RenderPipeline.Content do
         has_sign_column: has_sign_column,
         file_path: snapshot.file_path,
         is_active: is_active,
-        is_gui: MingaEditor.Frontend.gui?(state.capabilities)
+        is_gui: MingaEditor.Frontend.gui?(state.capabilities),
+        wrap_on: wrap_on,
+        line_number_style: line_number_style
       })
 
     # Compute context fingerprint and check for context changes.
@@ -408,7 +410,9 @@ defmodule MingaEditor.RenderPipeline.Content do
         content_w: content_w,
         has_sign_column: true,
         is_active: is_active,
-        is_gui: MingaEditor.Frontend.gui?(state.capabilities)
+        is_gui: MingaEditor.Frontend.gui?(state.capabilities),
+        wrap_on: true,
+        line_number_style: line_number_style
       })
 
     # Compute the display map (block decorations, fold regions, virtual lines).

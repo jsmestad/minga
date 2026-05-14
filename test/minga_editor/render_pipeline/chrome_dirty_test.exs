@@ -1,8 +1,10 @@
 defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer.Server, as: BufferServer
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.TestHelpers
+  alias MingaEditor.Workspace.State, as: WorkspaceState
   alias MingaEditor.Shell.Traditional.GitStatus.TuiState
   alias MingaEditor.Shell.Traditional.State, as: ShellState
 
@@ -29,6 +31,40 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
       fp_insert = Input.chrome_fingerprint(input2)
 
       assert fp_normal != fp_insert
+    end
+
+    test "changing theme changes fingerprint" do
+      state = TestHelpers.base_state()
+      input = Input.from_editor_state(state)
+      fp_before = Input.chrome_fingerprint(input)
+
+      input2 = %{input | theme: MingaEditor.UI.Theme.get!(:one_light)}
+      fp_after = Input.chrome_fingerprint(input2)
+
+      assert fp_before != fp_after
+    end
+
+    test "saving a dirty buffer changes fingerprint without changing buffer version" do
+      dir =
+        Path.join(System.tmp_dir!(), "minga-chrome-save-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(dir)
+      path = Path.join(dir, "saved.ex")
+      File.write!(path, "defmodule Saved do\nend\n")
+
+      state = TestHelpers.base_state(content: File.read!(path))
+      buf = state.workspace.buffers.active
+      :ok = BufferServer.save_as(buf, path)
+      :ok = BufferServer.insert_text(buf, "# dirty\n")
+      version_before = BufferServer.version(buf)
+      fp_dirty = state |> Input.from_editor_state() |> Input.chrome_fingerprint()
+
+      :ok = BufferServer.save(buf)
+      version_after = BufferServer.version(buf)
+      fp_clean = state |> Input.from_editor_state() |> Input.chrome_fingerprint()
+
+      assert version_after == version_before
+      assert fp_dirty != fp_clean
     end
 
     test "moving cursor changes fingerprint" do
@@ -126,6 +162,42 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
       fp_after = state2.caches.chrome_prev_fingerprint
 
       assert fp_before != fp_after, "cursor move should change chrome fingerprint"
+    end
+
+    test "render after active buffer changes rebuilds status bar data" do
+      dir =
+        Path.join(System.tmp_dir!(), "minga-chrome-dirty-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(dir)
+      first_path = Path.join(dir, "first.ex")
+      second_path = Path.join(dir, "second.ex")
+      File.write!(first_path, "defmodule First do\nend\n")
+      File.write!(second_path, "defmodule Second do\nend\n")
+
+      state = TestHelpers.base_state(content: File.read!(first_path))
+      first_buf = state.workspace.buffers.active
+      :ok = BufferServer.save_as(first_buf, first_path)
+      {:ok, second_buf} = BufferServer.start_link(content: File.read!(second_path))
+      :ok = BufferServer.save_as(second_buf, second_path)
+
+      state1 = TestHelpers.run_pipeline(state)
+      fp_before = state1.caches.chrome_prev_fingerprint
+
+      switched =
+        put_in(state1.workspace.buffers, %{
+          state1.workspace.buffers
+          | active: second_buf,
+            list: [first_buf, second_buf],
+            active_index: 1
+        })
+        |> update_in([Access.key!(:workspace)], &WorkspaceState.sync_active_window_buffer/1)
+
+      state2 = TestHelpers.run_pipeline(switched)
+      fp_after = state2.caches.chrome_prev_fingerprint
+      {:buffer, status_bar_data} = state2.caches.chrome_prev_result.status_bar_data
+
+      assert fp_before != fp_after
+      assert status_bar_data.file_name == "second.ex"
     end
   end
 end

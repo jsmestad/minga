@@ -6,6 +6,7 @@ defmodule MingaEditor.Commands.EditingTest do
 
   defp start_editor(content) do
     {:ok, buffer} = BufferServer.start_link(content: content)
+    BufferServer.set_option(buffer, :clipboard, :none)
 
     {:ok, editor} =
       MingaEditor.start_link(

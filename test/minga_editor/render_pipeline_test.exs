@@ -190,8 +190,8 @@ defmodule MingaEditor.RenderPipelineTest do
 
       window2 = Map.get(state.workspace.windows.map, win_id)
 
-      # Buffer version changed without a line-count change → only the edited cursor line is dirty.
-      assert window2.render_cache.dirty_lines == %{0 => true}
+      # Redraw all visible lines so same-line-count edits cannot leave stale rows.
+      assert window2.render_cache.dirty_lines == :all
 
       # Verify version actually changed
       snapshot = BufferServer.render_snapshot(buf, 0, 3)
