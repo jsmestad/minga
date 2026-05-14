@@ -22,7 +22,8 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
     "string" => [fg: 0x98BE65],
     "comment" => [fg: 0x5B6268],
     "variable" => [fg: 0xBBC2CF],
-    "function" => [fg: 0xC678DD]
+    "function" => [fg: 0xC678DD],
+    "markup.link.label" => [fg: 0x61AFEF]
   }
 
   describe "stylize/4 with no highlight data (fallback path)" do
@@ -79,6 +80,23 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
       assert bg == 0x21242B
     end
 
+    test "link text strips markdown and carries url metadata" do
+      text = "Read [the docs](https://example.com/docs)"
+      result = MarkdownHighlight.stylize(text, nil, @theme_syntax)
+
+      line = hd(result)
+
+      link_run =
+        Enum.find(line, fn
+          {"the docs", _fg, _bg, _flags, _url} -> true
+          _ -> false
+        end)
+
+      assert {"the docs", 0x61AFEF, 0, flags, "https://example.com/docs"} = link_run
+      assert Bitwise.band(flags, 0x04) != 0
+      assert Bitwise.band(flags, 0x08) != 0
+    end
+
     test "multiline text produces multiple lines" do
       text = "line one\nline two\nline three"
       result = MarkdownHighlight.stylize(text, nil, @theme_syntax)
@@ -121,8 +139,9 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
       keyword_run = Enum.find(code_line, fn {t, _, _, _} -> t == "def" end)
       assert keyword_run != nil, "expected tree-sitter to produce a 'def' run"
 
-      {_, fg, _, flags} = keyword_run
+      {_, fg, bg, flags} = keyword_run
       assert fg == 0xFF0000
+      assert bg != 0
       assert Bitwise.band(flags, 0x01) != 0
     end
 
