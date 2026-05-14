@@ -79,6 +79,14 @@ defmodule MingaEditor.Commands.EditingTest do
       assert String.contains?(content, "\n")
       assert String.contains?(content, "w")
     end
+
+    test "O above an indented first line preserves fallback indentation" do
+      {editor, buffer} = start_editor("  hello")
+      send_key(editor, ?O)
+      send_key(editor, ?w)
+
+      assert BufferServer.content(buffer) == "  w\n  hello"
+    end
   end
 
   describe "Insert mode operations" do

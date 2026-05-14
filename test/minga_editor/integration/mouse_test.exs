@@ -15,6 +15,13 @@ defmodule Minga.Integration.MouseTest do
 
   # ── Test helpers ───────────────────────────────────────────────────────────
 
+  defp start_editor_with_project(content) do
+    id = :erlang.unique_integer([:positive])
+    root = Path.join(System.tmp_dir!(), "minga-integration-mouse-#{id}")
+    File.mkdir_p!(root)
+    start_editor(content, project_root: root)
+  end
+
   # Sends a gui_action to the editor and waits for the frame to render.
   defp send_gui_action(%{editor: editor, port: port}, action) do
     _ = :sys.get_state(editor, 15_000)
@@ -157,7 +164,7 @@ defmodule Minga.Integration.MouseTest do
 
   describe "click in file tree region" do
     test "clicking in tree area doesn't move buffer cursor" do
-      ctx = start_editor("hello world")
+      ctx = start_editor_with_project("hello world")
 
       send_keys_sync(ctx, "<Space>op")
       cursor_before = buffer_cursor(ctx)
@@ -361,7 +368,7 @@ defmodule Minga.Integration.MouseTest do
 
   describe "multi-region dispatch" do
     test "click dispatches to correct region when file tree is open" do
-      ctx = start_editor("hello world")
+      ctx = start_editor_with_project("hello world")
 
       # Open file tree and wait for it to render.
       send_keys_sync(ctx, "<Space>op")

@@ -8,6 +8,7 @@ defmodule MingaEditor.Commands.Editing do
 
   alias Minga.Buffer
   alias Minga.Buffer.Document
+  alias Minga.Parser.Manager, as: ParserManager
 
   alias MingaEditor.Commands.Helpers
   alias MingaEditor.HighlightSync
@@ -92,8 +93,12 @@ defmodule MingaEditor.Commands.Editing do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :insert_newline) do
     {line, _col} = Buffer.cursor(buf)
-    indent = Indent.compute_for_newline(buf, line)
-    Buffer.insert_char(buf, "\n" <> indent)
+    Buffer.insert_char(buf, "\n")
+
+    state = HighlightSync.request_reparse(state)
+    indent = Indent.compute_for_line(buf, line + 1, indent_opts(state, buf))
+    insert_indent(buf, indent)
+
     state
   end
 
@@ -119,18 +124,29 @@ defmodule MingaEditor.Commands.Editing do
         [] -> 0
       end
 
-    indent = Indent.compute_for_newline(buf, line)
     Buffer.move_to(buf, {line, end_col})
-    Buffer.insert_char(buf, "\n" <> indent)
+    Buffer.insert_char(buf, "\n")
+
+    state = HighlightSync.request_reparse(state)
+    indent = Indent.compute_for_line(buf, line + 1, indent_opts(state, buf))
+    insert_indent(buf, indent)
+
     state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :insert_line_above) do
     {line, _col} = Buffer.cursor(buf)
-    indent = Indent.compute_for_newline(buf, max(line - 1, 0))
+    fallback_indent = copy_indent_for_line_above(buf, line)
+
     Buffer.move_to(buf, {line, 0})
-    Buffer.insert_char(buf, indent <> "\n")
-    Buffer.move_to(buf, {line, byte_size(indent)})
+    Buffer.insert_char(buf, "\n")
+    Buffer.move_to(buf, {line, 0})
+
+    state = HighlightSync.request_reparse(state)
+    opts = Keyword.put(indent_opts(state, buf), :fallback, fallback_indent)
+    indent = Indent.compute_for_line(buf, line, opts)
+    insert_indent(buf, indent)
+
     state
   end
 
@@ -409,7 +425,7 @@ defmodule MingaEditor.Commands.Editing do
     {cursor_line, _} = Buffer.cursor(buf)
     total = Buffer.line_count(buf)
     end_line = min(cursor_line + n - 1, total - 1)
-    do_reindent_lines(buf, cursor_line, end_line)
+    do_reindent_lines(state, buf, cursor_line, end_line)
     state
   end
 
@@ -421,7 +437,7 @@ defmodule MingaEditor.Commands.Editing do
     {target_line, _} = target
     start_line = min(cursor_line, target_line)
     end_line = max(cursor_line, target_line)
-    do_reindent_lines(buf, start_line, end_line)
+    do_reindent_lines(state, buf, start_line, end_line)
     state
   end
 
@@ -436,7 +452,7 @@ defmodule MingaEditor.Commands.Editing do
     {cursor_line, _} = cursor
     start_line = min(anchor_line, cursor_line)
     end_line = max(anchor_line, cursor_line)
-    do_reindent_lines(buf, start_line, end_line)
+    do_reindent_lines(state, buf, start_line, end_line)
     state
   end
 
@@ -455,7 +471,7 @@ defmodule MingaEditor.Commands.Editing do
         state
 
       {{start_line, _}, {end_line, _}} ->
-        do_reindent_lines(buf, start_line, end_line)
+        do_reindent_lines(state, buf, start_line, end_line)
         state
     end
   end
@@ -649,12 +665,44 @@ defmodule MingaEditor.Commands.Editing do
 
   # ── Private reindent helpers ──────────────────────────────────────────────
 
-  @spec do_reindent_lines(pid(), non_neg_integer(), non_neg_integer()) :: :ok
-  defp do_reindent_lines(buf, start_line, end_line) do
+  @keystroke_indent_timeout_ms 200
+
+  @spec indent_opts(state(), pid()) :: [Indent.compute_opt()]
+  defp indent_opts(state, buf) do
+    [
+      buffer_id: HighlightSync.buffer_id_for(state, buf),
+      request_indent: &request_indent_on_keystroke/2
+    ]
+  end
+
+  @spec copy_indent_for_line_above(pid(), non_neg_integer()) :: String.t()
+  defp copy_indent_for_line_above(buf, 0), do: copy_line_indent(buf, 0)
+  defp copy_indent_for_line_above(buf, line), do: copy_line_indent(buf, line - 1)
+
+  @spec copy_line_indent(pid(), non_neg_integer()) :: String.t()
+  defp copy_line_indent(buf, line) do
+    case Buffer.lines(buf, line, 1) do
+      [text] -> Indent.extract_leading_ws(text)
+      [] -> ""
+    end
+  end
+
+  @spec request_indent_on_keystroke(non_neg_integer(), non_neg_integer()) :: integer() | nil
+  defp request_indent_on_keystroke(buffer_id, line) do
+    ParserManager.request_indent(buffer_id, line, ParserManager, @keystroke_indent_timeout_ms)
+  end
+
+  @spec insert_indent(pid(), String.t()) :: :ok
+  defp insert_indent(_buf, ""), do: :ok
+  defp insert_indent(buf, indent), do: Buffer.insert_text(buf, indent)
+
+  @spec do_reindent_lines(state(), pid(), non_neg_integer(), non_neg_integer()) :: :ok
+  defp do_reindent_lines(state, buf, start_line, end_line) do
     {cursor_line, _} = Buffer.cursor(buf)
+    opts = indent_opts(state, buf)
 
     for line <- start_line..end_line do
-      reindent_single_line(buf, line)
+      reindent_single_line(buf, line, opts)
     end
 
     # Move cursor to first non-blank on cursor line
@@ -670,23 +718,9 @@ defmodule MingaEditor.Commands.Editing do
     :ok
   end
 
-  @spec reindent_single_line(pid(), non_neg_integer()) :: :ok
-  defp reindent_single_line(buf, line) do
-    # Compute the desired indent for this line based on the previous line
-    desired_indent =
-      if line == 0 do
-        ""
-      else
-        Indent.compute_for_newline(buf, line - 1)
-      end
-
-    # Check if current line starts with a dedent trigger
-    desired_indent =
-      if Indent.should_dedent_line?(buf, line) do
-        Indent.remove_one_indent_level(desired_indent, buf)
-      else
-        desired_indent
-      end
+  @spec reindent_single_line(pid(), non_neg_integer(), [Indent.compute_opt()]) :: :ok
+  defp reindent_single_line(buf, line, opts) do
+    desired_indent = Indent.compute_for_line(buf, line, opts)
 
     # Get current line text and its existing indent
     case Buffer.lines(buf, line, 1) do
@@ -694,9 +728,7 @@ defmodule MingaEditor.Commands.Editing do
         current_indent = Indent.extract_leading_ws(text)
 
         if current_indent != desired_indent do
-          # Replace leading whitespace using apply_text_edit
-          indent_end_col = byte_size(current_indent)
-          Buffer.apply_edit(buf, line, 0, line, indent_end_col, desired_indent)
+          apply_indent_change(buf, line, current_indent, desired_indent)
         end
 
         :ok
@@ -704,6 +736,17 @@ defmodule MingaEditor.Commands.Editing do
       [] ->
         :ok
     end
+  end
+
+  @spec apply_indent_change(pid(), non_neg_integer(), String.t(), String.t()) :: :ok
+  defp apply_indent_change(buf, line, "", desired_indent) do
+    Buffer.move_to(buf, {line, 0})
+    insert_indent(buf, desired_indent)
+  end
+
+  defp apply_indent_change(buf, line, current_indent, desired_indent) do
+    indent_end_col = byte_size(current_indent) - 1
+    Buffer.apply_edit(buf, line, 0, line, indent_end_col, desired_indent)
   end
 
   # ── Private indent helpers ────────────────────────────────────────────────

@@ -26,14 +26,14 @@ defmodule MingaEditor.UI.Picker.FileSource do
   def preview?, do: true
 
   @impl true
-  @spec candidates(Context.t()) :: [Item.t()]
-  def candidates(_ctx) do
-    root = project_root()
+  @spec candidates(Context.t() | nil) :: [Item.t()]
+  def candidates(ctx) do
+    root = project_root(ctx)
 
     case Minga.Project.list_files(root) do
       {:ok, paths} ->
         frecency_map = build_frecency_map()
-        git_status_map = build_git_status_map()
+        git_status_map = build_git_status_map(root)
         score_map = build_score_map(frecency_map, git_status_map)
 
         paths
@@ -74,7 +74,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
   @impl true
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: rel_path}, state) do
-    abs_path = absolute_path(rel_path)
+    abs_path = absolute_path(rel_path, state)
 
     Log.debug(:editor, "[file_picker] on_select path=#{rel_path}")
 
@@ -141,7 +141,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
   def on_action(:open, item, state), do: on_select(item, state)
 
   def on_action(:delete, %Item{id: rel_path}, state) do
-    abs_path = absolute_path(rel_path)
+    abs_path = absolute_path(rel_path, state)
 
     case File.rm(abs_path) do
       :ok ->
@@ -158,8 +158,8 @@ defmodule MingaEditor.UI.Picker.FileSource do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  @spec absolute_path(String.t()) :: String.t()
-  defp absolute_path(rel_path), do: Path.expand(rel_path, project_root())
+  @spec absolute_path(String.t(), term()) :: String.t()
+  defp absolute_path(rel_path, state), do: Path.expand(rel_path, project_root(state))
 
   @spec record_selection(String.t(), term()) :: :ok
   defp record_selection(_abs_path, %{buffer_add_context: :preview}), do: :ok
@@ -179,10 +179,8 @@ defmodule MingaEditor.UI.Picker.FileSource do
   end
 
   # Build a map of relative_path → git status atom from Git.Repo.
-  @spec build_git_status_map() :: %{String.t() => atom()}
-  defp build_git_status_map do
-    root = project_root()
-
+  @spec build_git_status_map(String.t()) :: %{String.t() => atom()}
+  defp build_git_status_map(root) do
     with {:ok, git_root} <- Minga.Git.root_for(root),
          repo_pid when is_pid(repo_pid) <- Git.lookup_repo(git_root) do
       Git.Repo.status(repo_pid)
@@ -232,5 +230,15 @@ defmodule MingaEditor.UI.Picker.FileSource do
   defp git_status_annotation(:conflict), do: "!"
   defp git_status_annotation(_), do: nil
 
-  defdelegate project_root, to: Minga.Project, as: :resolve_root
+  @spec project_root(Context.t() | EditorState.t() | nil) :: String.t()
+  defp project_root(%Context{file_tree: %{project_root: root}}) when is_binary(root), do: root
+
+  defp project_root(%Context{picker_ui: %{context: %{project_root: root}}}) when is_binary(root),
+    do: root
+
+  defp project_root(%EditorState{workspace: %{file_tree: %{project_root: root}}})
+       when is_binary(root),
+       do: root
+
+  defp project_root(_ctx), do: Minga.Project.resolve_root()
 end

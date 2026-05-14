@@ -13,6 +13,7 @@ defmodule MingaAgent.SessionTest do
   alias MingaAgent.Tool.Spec
 
   @moduletag :tmp_dir
+  @event_timeout 2_000
 
   # ── Mock provider ──────────────────────────────────────────────────────────
 
@@ -241,7 +242,12 @@ defmodule MingaAgent.SessionTest do
   # final action when a turn completes, so receiving that event guarantees
   # all handle_info callbacks have run.
   defp await_turn_complete do
-    assert_receive {:agent_event, _, {:status_changed, :idle}}, 1_000
+    assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
+  end
+
+  defp send_provider_event(session, event) do
+    send(session, {:agent_provider_event, event})
+    :sys.get_state(session)
   end
 
   defp mcp_session_builtin_tool do
@@ -306,7 +312,7 @@ defmodule MingaAgent.SessionTest do
     test "enter_plan sets status, broadcasts, and writes a system message", %{session: session} do
       assert :ok = Session.enter_plan(session)
       assert Session.status(session) == :plan
-      assert_receive {:agent_event, _, {:status_changed, :plan}}, 200
+      assert_receive {:agent_event, _, {:status_changed, :plan}}, @event_timeout
 
       assert Enum.any?(Session.messages(session), fn
                {:system, text, :info} -> text =~ "Plan mode" and text =~ "/exec"
@@ -318,8 +324,8 @@ defmodule MingaAgent.SessionTest do
       assert :ok = Session.enter_plan(session)
       assert :ok = Session.enter_exec(session)
       assert Session.status(session) == :idle
-      assert_receive {:agent_event, _, {:status_changed, :plan}}, 200
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, 200
+      assert_receive {:agent_event, _, {:status_changed, :plan}}, @event_timeout
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
 
       assert Enum.any?(Session.messages(session), fn
                {:system, text, :info} -> text =~ "Execution mode" and text =~ "/plan"
@@ -375,7 +381,7 @@ defmodule MingaAgent.SessionTest do
       assert :ok = Session.enter_plan(session)
       assert :ok = Session.send_prompt(session, "hello")
       SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, :messages_changed}, 200
+      assert_receive {:agent_event, _, :messages_changed}, @event_timeout
       assert Session.status(session) == :plan
     end
 
@@ -432,15 +438,15 @@ defmodule MingaAgent.SessionTest do
     test "broadcasts status changes", %{session: session} do
       :ok = Session.send_prompt(session, "Test")
 
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 200
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, 200
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
     end
 
     test "broadcasts text deltas", %{session: session} do
       :ok = Session.send_prompt(session, "Test")
 
-      assert_receive {:agent_event, _, {:text_delta, "Hello "}}, 200
-      assert_receive {:agent_event, _, {:text_delta, "world!"}}, 200
+      assert_receive {:agent_event, _, {:text_delta, "Hello "}}, @event_timeout
+      assert_receive {:agent_event, _, {:text_delta, "world!"}}, @event_timeout
     end
   end
 
@@ -851,10 +857,10 @@ defmodule MingaAgent.SessionTest do
         reply_to: self()
       }
 
-      send(session, {:agent_provider_event, approval})
+      send_provider_event(session, approval)
 
       # Broadcast should arrive
-      assert_receive {:agent_event, _, {:approval_pending, data}}, 200
+      assert_receive {:agent_event, _, {:approval_pending, data}}, @event_timeout
       assert data.name == "shell"
       assert data.tool_call_id == "tc1"
       assert data.preview.kind == :command
@@ -871,15 +877,15 @@ defmodule MingaAgent.SessionTest do
         reply_to: self()
       }
 
-      send(session, {:agent_provider_event, approval})
-      assert_receive {:agent_event, _, {:approval_pending, _}}, 200
+      send_provider_event(session, approval)
+      assert_receive {:agent_event, _, {:approval_pending, _}}, @event_timeout
 
       :ok = Session.respond_to_approval(session, :approve)
 
       # Should receive the response directly
       assert_receive {:tool_approval_response, "tc1", :approve}
       # And the resolution broadcast
-      assert_receive {:agent_event, _, {:approval_resolved, :approve}}, 200
+      assert_receive {:agent_event, _, {:approval_resolved, :approve}}, @event_timeout
     end
 
     test "respond_to_approval with :reject sends reject", %{session: session} do
@@ -890,8 +896,8 @@ defmodule MingaAgent.SessionTest do
         reply_to: self()
       }
 
-      send(session, {:agent_provider_event, approval})
-      assert_receive {:agent_event, _, {:approval_pending, _}}, 200
+      send_provider_event(session, approval)
+      assert_receive {:agent_event, _, {:approval_pending, _}}, @event_timeout
 
       :ok = Session.respond_to_approval(session, :reject)
       assert_receive {:tool_approval_response, "tc1", :reject}
@@ -908,12 +914,12 @@ defmodule MingaAgent.SessionTest do
         reply_to: self()
       }
 
-      send(session, {:agent_provider_event, approval})
-      assert_receive {:agent_event, _, {:approval_pending, _}}, 200
+      send_provider_event(session, approval)
+      assert_receive {:agent_event, _, {:approval_pending, _}}, @event_timeout
 
       :ok = Session.respond_to_approval(session, :approve_all)
       assert_receive {:tool_approval_response, "tc1", :approve_all}
-      assert_receive {:agent_event, _, {:approval_resolved, :approve_all}}, 200
+      assert_receive {:agent_event, _, {:approval_resolved, :approve_all}}, @event_timeout
       assert {:error, :no_pending_approval} = Session.respond_to_approval(session, :approve)
     end
 
@@ -929,8 +935,8 @@ defmodule MingaAgent.SessionTest do
         reply_to: self()
       }
 
-      send(session, {:agent_provider_event, approval})
-      assert_receive {:agent_event, _, {:approval_pending, _}}, 200
+      send_provider_event(session, approval)
+      assert_receive {:agent_event, _, {:approval_pending, _}}, @event_timeout
 
       :ok = Session.abort(session)
 
@@ -1016,7 +1022,7 @@ defmodule MingaAgent.SessionTest do
     test "first_prompt returns first user message text", %{session: session} do
       Session.send_prompt(session, "Hello there")
       # Wait for prompt to be added to messages
-      assert_receive {:agent_event, _, :messages_changed}, 1000
+      assert_receive {:agent_event, _, :messages_changed}, @event_timeout
 
       meta = Session.metadata(session)
       assert meta.first_prompt == "Hello there"
@@ -1083,7 +1089,7 @@ defmodule MingaAgent.SessionTest do
     test "send_prompt while streaming queues message as steering", %{slow_session: session} do
       assert :ok = Session.send_prompt(session, "first message")
       # Wait for AgentStart to be processed (status becomes :thinking)
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
 
       # Second send_prompt while streaming: should queue, not submit
       result = Session.send_prompt(session, "steer me")
@@ -1101,12 +1107,12 @@ defmodule MingaAgent.SessionTest do
       # Let the run finish
       SlowMockProvider.proceed(Session.get_provider(session))
 
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
     end
 
     test "multiple messages accumulate in the steering queue", %{slow_session: session} do
       assert :ok = Session.send_prompt(session, "first")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
 
       assert {:queued, :steering} = Session.send_prompt(session, "steer 1")
       assert {:queued, :steering} = Session.send_prompt(session, "steer 2")
@@ -1118,12 +1124,12 @@ defmodule MingaAgent.SessionTest do
       Session.clear_queues(session)
 
       SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
     end
 
     test "queue_follow_up while streaming queues message as follow_up", %{slow_session: session} do
       assert :ok = Session.send_prompt(session, "first")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
 
       result = Session.queue_follow_up(session, "follow this up")
       assert result == {:queued, :follow_up}
@@ -1136,12 +1142,12 @@ defmodule MingaAgent.SessionTest do
       # The follow-up auto-send behaviour is covered by the dedicated describe block.
       Session.clear_queues(session)
       SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
     end
 
     test "dequeue_steering returns and clears only the steering queue", %{slow_session: session} do
       assert :ok = Session.send_prompt(session, "first")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
 
       Session.send_prompt(session, "steer me")
       Session.queue_follow_up(session, "follow up later")
@@ -1161,12 +1167,12 @@ defmodule MingaAgent.SessionTest do
       # Clear the follow-up so it doesn't auto-send during cleanup.
       Session.clear_queues(session)
       SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
     end
 
     test "recall_queues returns both queues and clears them", %{slow_session: session} do
       assert :ok = Session.send_prompt(session, "first")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
 
       Session.send_prompt(session, "steer")
       Session.queue_follow_up(session, "follow")
@@ -1181,12 +1187,12 @@ defmodule MingaAgent.SessionTest do
       assert f2 == []
 
       SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
     end
 
     test "clear_queues empties both queues", %{slow_session: session} do
       assert :ok = Session.send_prompt(session, "first")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
 
       Session.send_prompt(session, "steer")
       Session.queue_follow_up(session, "follow")
@@ -1198,7 +1204,7 @@ defmodule MingaAgent.SessionTest do
       assert follow_up == []
 
       SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
     end
 
     test "queue_follow_up when idle sends immediately like send_prompt", %{slow_session: session} do
@@ -1206,17 +1212,17 @@ defmodule MingaAgent.SessionTest do
       assert result == :ok
 
       # Message should be in conversation history right away
-      assert_receive {:agent_event, _, :messages_changed}, 500
+      assert_receive {:agent_event, _, :messages_changed}, @event_timeout
       messages = Session.messages(session)
       assert Enum.any?(messages, &match?({:user, "immediate follow-up"}, &1))
 
       SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
     end
 
     test "new_session clears both queues", %{slow_session: session} do
       assert :ok = Session.send_prompt(session, "first")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
 
       Session.send_prompt(session, "steer")
       Session.queue_follow_up(session, "follow")
@@ -1224,11 +1230,11 @@ defmodule MingaAgent.SessionTest do
       # Clear queues before proceeding so follow-up auto-send doesn't trigger.
       Session.clear_queues(session)
       SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
 
       # Re-queue to verify new_session clears them
       Session.send_prompt(session, "second run")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
 
       Session.send_prompt(session, "steer2")
       Session.queue_follow_up(session, "follow2")
@@ -1236,7 +1242,7 @@ defmodule MingaAgent.SessionTest do
       # new_session while idle-ish (we clear queues first then call new_session)
       Session.clear_queues(session)
       SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
 
       Session.new_session(session)
       {steering, follow_up} = Session.get_queued_messages(session)
@@ -1247,19 +1253,19 @@ defmodule MingaAgent.SessionTest do
     test "prompt_queued event is broadcast when queuing during streaming",
          %{slow_session: session} do
       assert :ok = Session.send_prompt(session, "first")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
 
       Session.send_prompt(session, "steer me")
-      assert_receive {:agent_event, _, {:prompt_queued, "steer me", :steering}}, 500
+      assert_receive {:agent_event, _, {:prompt_queued, "steer me", :steering}}, @event_timeout
 
       Session.queue_follow_up(session, "follow")
-      assert_receive {:agent_event, _, {:prompt_queued, "follow", :follow_up}}, 500
+      assert_receive {:agent_event, _, {:prompt_queued, "follow", :follow_up}}, @event_timeout
 
       # Clear queues so neither the steering (already dequeued by time proceed is called)
       # nor the follow-up triggers an extra run during cleanup.
       Session.clear_queues(session)
       SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
     end
   end
 
@@ -1279,7 +1285,7 @@ defmodule MingaAgent.SessionTest do
 
     test "queued follow-up is auto-sent when agent finishes", %{slow_session: session} do
       assert :ok = Session.send_prompt(session, "first")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
 
       Session.queue_follow_up(session, "now follow up")
 
@@ -1287,7 +1293,7 @@ defmodule MingaAgent.SessionTest do
       SlowMockProvider.proceed(Session.get_provider(session))
 
       # Session should NOT go idle yet - it should start a new turn
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
 
       # Follow-up message should appear in conversation history
       messages = Session.messages(session)
@@ -1299,20 +1305,20 @@ defmodule MingaAgent.SessionTest do
 
       # Complete the follow-up run
       SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
     end
 
     test "no follow-ups means normal idle transition", %{slow_session: session} do
       assert :ok = Session.send_prompt(session, "simple")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
 
       SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
     end
 
     test "queued steering messages are auto-sent when agent finishes", %{slow_session: session} do
       assert :ok = Session.send_prompt(session, "first")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
 
       # Queue a steering message (this is what happens when a user sends a prompt
       # while the agent is busy)
@@ -1324,7 +1330,7 @@ defmodule MingaAgent.SessionTest do
 
       # Session should start a new turn (not go idle) because the steering queue
       # had a pending message.
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
 
       # Steering message should appear in conversation history
       messages = Session.messages(session)
@@ -1336,14 +1342,14 @@ defmodule MingaAgent.SessionTest do
 
       # Complete the follow-up run
       SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
     end
 
     test "mixed steering and follow-up messages are combined at AgentEnd", %{
       slow_session: session
     } do
       assert :ok = Session.send_prompt(session, "first")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
 
       # Queue both types
       assert {:queued, :steering} = Session.send_prompt(session, "steer this")
@@ -1353,7 +1359,7 @@ defmodule MingaAgent.SessionTest do
       SlowMockProvider.proceed(Session.get_provider(session))
 
       # Should start a new turn
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
 
       # Both queues should be cleared
       {steering, follow_up} = Session.get_queued_messages(session)
@@ -1376,7 +1382,7 @@ defmodule MingaAgent.SessionTest do
 
       # Complete the second run
       SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
     end
   end
 
@@ -1423,7 +1429,7 @@ defmodule MingaAgent.SessionTest do
       :sys.get_state(slow_session)
 
       :ok = Session.send_prompt(slow_session, "hello")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
 
       # Mid-stream: system(1), user(2), assistant(3)
       # The SlowMockProvider sends one TextDelta with the prompt text,
@@ -1445,7 +1451,7 @@ defmodule MingaAgent.SessionTest do
       assert String.contains?(text, "world")
 
       SlowMockProvider.proceed(Session.get_provider(slow_session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
 
       # After turn completes, usage message gets the next ID
       pairs_final = Session.messages_with_ids(slow_session)
@@ -1489,7 +1495,7 @@ defmodule MingaAgent.SessionTest do
 
       :ok = Session.new_session(session)
       # Drain the broadcasts from new_session
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, 200
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
 
       pairs_after = Session.messages_with_ids(session)
       assert [{1, {:system, _, :info}}] = pairs_after
@@ -1513,7 +1519,7 @@ defmodule MingaAgent.SessionTest do
 
       :ok = Session.load_session(session, "id-test-session")
       # Drain the broadcasts
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, 200
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
 
       pairs = Session.messages_with_ids(session)
       ids = Enum.map(pairs, &elem(&1, 0))
@@ -1637,7 +1643,7 @@ defmodule MingaAgent.SessionTest do
       :sys.get_state(slow_session)
 
       :ok = Session.send_prompt(slow_session, "first")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
 
       # Queue two steering messages
       assert {:queued, :steering} = Session.send_prompt(slow_session, "steer 1")
@@ -1657,7 +1663,7 @@ defmodule MingaAgent.SessionTest do
       # Clean up
       Session.clear_queues(slow_session)
       SlowMockProvider.proceed(Session.get_provider(slow_session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
     end
 
     test "add_system_message (cast) assigns a new ID", %{session: session} do
@@ -1727,13 +1733,13 @@ defmodule MingaAgent.SessionTest do
       assert_receive {:mcp_transport_started, "Local Tools", transport}
       FakeTransport.crash(transport)
 
-      assert_receive {:agent_event, ^session, {:error, message}}, 500
+      assert_receive {:agent_event, ^session, {:error, message}}, @event_timeout
       assert message =~ "MCP server Local Tools stopped"
       assert Enum.any?(Session.messages(session), &match?({:system, _text, :error}, &1))
 
       assert :ok = Session.send_prompt(session, "continue")
       await_turn_complete()
-      assert_receive {:session_mcp_tools, tool_names}, 500
+      assert_receive {:session_mcp_tools, tool_names}, @event_timeout
       assert "builtin_echo" in tool_names
       refute "mcp_local_tools__echo_text" in tool_names
 

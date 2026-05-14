@@ -4,79 +4,79 @@ defmodule MingaEditor.IndentTest do
   alias Minga.Buffer.Server, as: BufferServer
   alias MingaEditor.Indent
 
-  describe "compute_for_newline/2" do
-    test "copies indentation from previous line" do
-      buf = start_buffer("  hello\n  world")
-      assert Indent.compute_for_newline(buf, 0) == "  "
-      assert Indent.compute_for_newline(buf, 1) == "  "
-    end
+  describe "compute_for_line/3" do
+    test "converts tree-sitter indent levels to spaces" do
+      buf = start_buffer("def foo do\nbar\nend", filetype: :elixir)
+      request_indent = fn 42, 1 -> 2 end
 
-    test "no indentation on unindented line" do
-      buf = start_buffer("hello\nworld")
-      assert Indent.compute_for_newline(buf, 0) == ""
-    end
+      indent = Indent.compute_for_line(buf, 1, buffer_id: 42, request_indent: request_indent)
 
-    test "indents after Elixir do block" do
-      buf = start_buffer("  def foo do\n    bar\n  end", filetype: :elixir)
-      indent = Indent.compute_for_newline(buf, 0)
       assert indent == "    "
     end
 
-    test "indents after opening brace" do
-      buf = start_buffer("  fn main() {", filetype: :rust)
-      indent = Indent.compute_for_newline(buf, 0)
-      assert indent == "    "
+    test "converts tree-sitter indent levels to tabs" do
+      buf = start_buffer("fn main() {\nbody\n}", filetype: :rust)
+      {:ok, :tabs} = BufferServer.set_option(buf, :indent_with, :tabs)
+      request_indent = fn 42, 1 -> 2 end
+
+      indent = Indent.compute_for_line(buf, 1, buffer_id: 42, request_indent: request_indent)
+
+      assert indent == "\t\t"
     end
 
-    test "indents after opening bracket" do
-      buf = start_buffer("  items = [", filetype: :elixir)
-      indent = Indent.compute_for_newline(buf, 0)
-      assert indent == "    "
+    test "falls back to previous line copy-indent when parser indentation is unavailable" do
+      buf = start_buffer("  parent\nchild")
+
+      assert Indent.compute_for_line(buf, 1) == "  "
     end
 
-    test "indents after Python colon" do
-      buf = start_buffer("  def foo():", filetype: :python)
-      indent = Indent.compute_for_newline(buf, 0)
-      assert indent == "    "
+    test "falls back to empty indentation for the first line" do
+      buf = start_buffer("  child")
+
+      assert Indent.compute_for_line(buf, 0) == ""
     end
 
-    test "indents after Elixir arrow" do
-      buf = start_buffer("  fn x ->", filetype: :elixir)
-      indent = Indent.compute_for_newline(buf, 0)
-      assert indent == "    "
+    test "uses explicit fallback when provided" do
+      buf = start_buffer("  child")
+
+      assert Indent.compute_for_line(buf, 0, fallback: "  ") == "  "
     end
 
-    test "preserves tab indentation" do
-      buf = start_buffer("\thello", filetype: :c)
-      indent = Indent.compute_for_newline(buf, 0)
-      assert indent == "\t"
+    test "falls back when parser returns nil" do
+      buf = start_buffer("  parent\nchild")
+      request_indent = fn 42, 1 -> nil end
+
+      indent = Indent.compute_for_line(buf, 1, buffer_id: 42, request_indent: request_indent)
+
+      assert indent == "  "
+    end
+
+    test "falls back when parser exits" do
+      buf = start_buffer("  parent\nchild")
+      request_indent = fn 42, 1 -> exit(:noproc) end
+
+      indent = Indent.compute_for_line(buf, 1, buffer_id: 42, request_indent: request_indent)
+
+      assert indent == "  "
+    end
+
+    test "falls back when parser returns a negative level" do
+      buf = start_buffer("  parent\nchild")
+      request_indent = fn 42, 1 -> -1 end
+
+      indent = Indent.compute_for_line(buf, 1, buffer_id: 42, request_indent: request_indent)
+
+      assert indent == "  "
     end
 
     test "returns empty for out-of-range line" do
       buf = start_buffer("hello")
-      assert Indent.compute_for_newline(buf, 99) == ""
+      assert Indent.compute_for_line(buf, 99) == ""
     end
 
     test "handles empty buffer" do
       buf = start_buffer("")
-      assert Indent.compute_for_newline(buf, 0) == ""
-    end
-  end
-
-  describe "should_dedent_line?/2" do
-    test "detects Elixir end keyword" do
-      buf = start_buffer("  end", filetype: :elixir)
-      assert Indent.should_dedent_line?(buf, 0)
-    end
-
-    test "detects closing brace" do
-      buf = start_buffer("  }", filetype: :rust)
-      assert Indent.should_dedent_line?(buf, 0)
-    end
-
-    test "does not dedent normal line" do
-      buf = start_buffer("  hello", filetype: :elixir)
-      refute Indent.should_dedent_line?(buf, 0)
+      assert Indent.compute_for_line(buf, 0) == ""
     end
   end
 
