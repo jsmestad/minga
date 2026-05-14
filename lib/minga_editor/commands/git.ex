@@ -122,14 +122,12 @@ defmodule MingaEditor.Commands.Git do
   # ── Stage hunk ─────────────────────────────────────────────────────────────
 
   def execute(state, :git_stage_hunk) do
-    with_git_buffer(state, fn git_pid, buf ->
-      {cursor_line, _col} = Buffer.cursor(buf)
+    active_buf = state.workspace.buffers.active
 
-      case Git.hunk_at(git_pid, cursor_line) do
-        nil -> EditorState.set_status(state, "No hunk at cursor")
-        hunk -> do_stage_hunk(state, git_pid, buf, hunk)
-      end
-    end)
+    case EditorState.diff_view_info(state, active_buf) do
+      nil -> stage_hunk_from_source_buffer(state)
+      diff_info -> stage_hunk_from_diff_view(state, active_buf, diff_info)
+    end
   end
 
   # ── Stage / unstage file ────────────────────────────────────────────────────
@@ -205,24 +203,12 @@ defmodule MingaEditor.Commands.Git do
   # ── Revert hunk ────────────────────────────────────────────────────────────
 
   def execute(state, :git_revert_hunk) do
-    with_git_buffer(state, fn git_pid, buf ->
-      {cursor_line, _col} = Buffer.cursor(buf)
+    active_buf = state.workspace.buffers.active
 
-      case Git.hunk_at(git_pid, cursor_line) do
-        nil ->
-          EditorState.set_status(state, "No hunk at cursor")
-
-        hunk ->
-          {content, _cursor} = Buffer.content_and_cursor(buf)
-          current_lines = String.split(content, "\n")
-          reverted_lines = Git.revert_hunk(current_lines, hunk)
-          reverted_content = Enum.join(reverted_lines, "\n")
-
-          Buffer.replace_content(buf, reverted_content)
-          Git.Buffer.update(git_pid, reverted_content)
-          EditorState.set_status(state, "Hunk reverted")
-      end
-    end)
+    case EditorState.diff_view_info(state, active_buf) do
+      nil -> revert_hunk_from_source_buffer(state)
+      diff_info -> revert_hunk_from_diff_view(state, active_buf, diff_info)
+    end
   end
 
   # ── Preview hunk ───────────────────────────────────────────────────────────
@@ -293,7 +279,8 @@ defmodule MingaEditor.Commands.Git do
           git_root: git_root,
           rel_path: rel_path,
           staged: staged,
-          line_metadata: diff_result.line_metadata
+          line_metadata: diff_result.line_metadata,
+          hunk_lines: diff_result.hunk_lines
         }
 
         state
@@ -340,7 +327,8 @@ defmodule MingaEditor.Commands.Git do
           git_root: git_root,
           rel_path: rel_path,
           staged: staged,
-          line_metadata: diff_result.line_metadata
+          line_metadata: diff_result.line_metadata,
+          hunk_lines: diff_result.hunk_lines
         }
 
         state
@@ -418,9 +406,20 @@ defmodule MingaEditor.Commands.Git do
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
           non_neg_integer()
         ) :: Minga.Core.Decorations.t()
-  defp apply_line_decoration(decs, %{type: :added}, line_idx, added_bg, _removed_bg, _fold_fg) do
+  defp apply_line_decoration(
+         decs,
+         %{type: :added} = meta,
+         line_idx,
+         added_bg,
+         _removed_bg,
+         added_word_bg,
+         _removed_word_bg,
+         _fold_fg
+       ) do
     {_id, decs} =
       Minga.Core.Decorations.add_highlight(decs, {line_idx, 0}, {line_idx, 9999},
         style: Face.new(bg: added_bg),
@@ -428,10 +427,19 @@ defmodule MingaEditor.Commands.Git do
         group: :diff
       )
 
-    decs
+    apply_word_highlights(decs, line_idx, meta[:word_changes], added_word_bg)
   end
 
-  defp apply_line_decoration(decs, %{type: :removed}, line_idx, _added_bg, removed_bg, _fold_fg) do
+  defp apply_line_decoration(
+         decs,
+         %{type: :removed} = meta,
+         line_idx,
+         _added_bg,
+         removed_bg,
+         _added_word_bg,
+         removed_word_bg,
+         _fold_fg
+       ) do
     {_id, decs} =
       Minga.Core.Decorations.add_highlight(decs, {line_idx, 0}, {line_idx, 9999},
         style: Face.new(bg: removed_bg),
@@ -439,10 +447,19 @@ defmodule MingaEditor.Commands.Git do
         group: :diff
       )
 
-    decs
+    apply_word_highlights(decs, line_idx, meta[:word_changes], removed_word_bg)
   end
 
-  defp apply_line_decoration(decs, %{type: :fold}, line_idx, _added_bg, _removed_bg, fold_fg) do
+  defp apply_line_decoration(
+         decs,
+         %{type: :fold},
+         line_idx,
+         _added_bg,
+         _removed_bg,
+         _added_word_bg,
+         _removed_word_bg,
+         fold_fg
+       ) do
     {_id, decs} =
       Minga.Core.Decorations.add_highlight(decs, {line_idx, 0}, {line_idx, 9999},
         style: Face.new(fg: fold_fg, italic: true),
@@ -453,23 +470,73 @@ defmodule MingaEditor.Commands.Git do
     decs
   end
 
-  defp apply_line_decoration(decs, _meta, _line_idx, _added_bg, _removed_bg, _fold_fg), do: decs
+  defp apply_line_decoration(
+         decs,
+         _meta,
+         _line_idx,
+         _added_bg,
+         _removed_bg,
+         _added_word_bg,
+         _removed_word_bg,
+         _fold_fg
+       ),
+       do: decs
 
-  @spec tint_color(non_neg_integer(), non_neg_integer(), float()) :: non_neg_integer()
-  defp tint_color(fg, bg, alpha) do
-    fg_r = Bitwise.bsr(fg, 16) |> Bitwise.band(0xFF)
-    fg_g = Bitwise.bsr(fg, 8) |> Bitwise.band(0xFF)
-    fg_b = Bitwise.band(fg, 0xFF)
+  @spec blend_color(non_neg_integer(), non_neg_integer(), float()) :: non_neg_integer()
+  defp blend_color(source_color, target_color, alpha) do
+    source_r = Bitwise.bsr(source_color, 16) |> Bitwise.band(0xFF)
+    source_g = Bitwise.bsr(source_color, 8) |> Bitwise.band(0xFF)
+    source_b = Bitwise.band(source_color, 0xFF)
 
-    bg_r = Bitwise.bsr(bg, 16) |> Bitwise.band(0xFF)
-    bg_g = Bitwise.bsr(bg, 8) |> Bitwise.band(0xFF)
-    bg_b = Bitwise.band(bg, 0xFF)
+    target_r = Bitwise.bsr(target_color, 16) |> Bitwise.band(0xFF)
+    target_g = Bitwise.bsr(target_color, 8) |> Bitwise.band(0xFF)
+    target_b = Bitwise.band(target_color, 0xFF)
 
-    r = round(fg_r * alpha + bg_r * (1.0 - alpha))
-    g = round(fg_g * alpha + bg_g * (1.0 - alpha))
-    b = round(fg_b * alpha + bg_b * (1.0 - alpha))
+    r = round(source_r * alpha + target_r * (1.0 - alpha))
+    g = round(source_g * alpha + target_g * (1.0 - alpha))
+    b = round(source_b * alpha + target_b * (1.0 - alpha))
 
     Bitwise.bsl(r, 16) + Bitwise.bsl(g, 8) + b
+  end
+
+  @spec apply_word_highlights(
+          Minga.Core.Decorations.t(),
+          non_neg_integer(),
+          [Diff.char_range()] | nil,
+          non_neg_integer()
+        ) :: Minga.Core.Decorations.t()
+  defp apply_word_highlights(decs, _line_idx, nil, _word_bg), do: decs
+  defp apply_word_highlights(decs, _line_idx, [], _word_bg), do: decs
+
+  defp apply_word_highlights(decs, line_idx, word_changes, word_bg) do
+    Enum.reduce(word_changes, decs, fn {start_col, end_col}, acc ->
+      {_id, acc} =
+        Minga.Core.Decorations.add_highlight(acc, {line_idx, start_col}, {line_idx, end_col},
+          style: Face.new(bg: word_bg),
+          priority: 2,
+          group: :diff_word
+        )
+
+      acc
+    end)
+  end
+
+  @doc "Returns `{current_hunk, total_hunks}` for the cursor position in a diff view."
+  @spec diff_hunk_position(state(), pid(), non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer()} | nil
+  def diff_hunk_position(state, buf, cursor_line) do
+    case EditorState.diff_view_info(state, buf) do
+      nil ->
+        nil
+
+      %{hunk_lines: []} ->
+        nil
+
+      %{hunk_lines: hunk_lines} ->
+        total = length(hunk_lines)
+        current = hunk_position_for_cursor(hunk_lines, cursor_line)
+        {current, total}
+    end
   end
 
   @spec toggle_diff_staged(state(), pid()) :: state()
@@ -530,7 +597,8 @@ defmodule MingaEditor.Commands.Git do
       git_root: git_root,
       rel_path: rel_path,
       staged: staged,
-      line_metadata: diff_result.line_metadata
+      line_metadata: diff_result.line_metadata,
+      hunk_lines: diff_result.hunk_lines
     }
 
     EditorState.register_diff_view(state, diff_buf, diff_info)
@@ -542,14 +610,25 @@ defmodule MingaEditor.Commands.Git do
           MingaEditor.UI.Theme.t()
         ) :: Minga.Core.Decorations.t()
   defp apply_diff_decorations_to(decs, line_metadata, theme) do
-    added_bg = tint_color(theme.git.added_fg, theme.editor.bg, 0.15)
-    removed_bg = tint_color(theme.git.deleted_fg, theme.editor.bg, 0.15)
+    added_bg = blend_color(theme.git.added_fg, theme.editor.bg, 0.15)
+    removed_bg = blend_color(theme.git.deleted_fg, theme.editor.bg, 0.15)
+    added_word_bg = blend_color(theme.git.added_fg, theme.editor.bg, 0.35)
+    removed_word_bg = blend_color(theme.git.deleted_fg, theme.editor.bg, 0.35)
     fold_fg = theme.gutter.fg
 
     line_metadata
     |> Enum.with_index()
     |> Enum.reduce(decs, fn {meta, line_idx}, decs ->
-      apply_line_decoration(decs, meta, line_idx, added_bg, removed_bg, fold_fg)
+      apply_line_decoration(
+        decs,
+        meta,
+        line_idx,
+        added_bg,
+        removed_bg,
+        added_word_bg,
+        removed_word_bg,
+        fold_fg
+      )
     end)
   end
 
@@ -707,6 +786,48 @@ defmodule MingaEditor.Commands.Git do
     "~#{count} modified (was #{length(old_lines)} lines): #{preview}#{truncated}"
   end
 
+  @spec stage_hunk_from_source_buffer(state()) :: state()
+  defp stage_hunk_from_source_buffer(state) do
+    with_git_buffer(state, fn git_pid, buf -> stage_hunk_at_cursor(state, git_pid, buf) end)
+  end
+
+  @spec stage_hunk_at_cursor(state(), pid(), pid()) :: state()
+  defp stage_hunk_at_cursor(state, git_pid, buf) do
+    {cursor_line, _col} = Buffer.cursor(buf)
+
+    case Git.hunk_at(git_pid, cursor_line) do
+      nil -> EditorState.set_status(state, "No hunk at cursor")
+      hunk -> do_stage_hunk(state, git_pid, buf, hunk)
+    end
+  end
+
+  @spec revert_hunk_from_source_buffer(state()) :: state()
+  defp revert_hunk_from_source_buffer(state) do
+    with_git_buffer(state, fn git_pid, buf -> revert_hunk_at_cursor(state, git_pid, buf) end)
+  end
+
+  @spec revert_hunk_at_cursor(state(), pid(), pid()) :: state()
+  defp revert_hunk_at_cursor(state, git_pid, buf) do
+    {cursor_line, _col} = Buffer.cursor(buf)
+
+    case Git.hunk_at(git_pid, cursor_line) do
+      nil -> EditorState.set_status(state, "No hunk at cursor")
+      hunk -> do_revert_hunk(state, git_pid, buf, hunk)
+    end
+  end
+
+  @spec do_revert_hunk(state(), pid(), pid(), Diff.hunk()) :: state()
+  defp do_revert_hunk(state, git_pid, buf, hunk) do
+    {content, _cursor} = Buffer.content_and_cursor(buf)
+    current_lines = String.split(content, "\n")
+    reverted_lines = Git.revert_hunk(current_lines, hunk)
+    reverted_content = Enum.join(reverted_lines, "\n")
+
+    Buffer.replace_content(buf, reverted_content)
+    Git.Buffer.update(git_pid, reverted_content)
+    EditorState.set_status(state, "Hunk reverted")
+  end
+
   @spec do_stage_hunk(state(), pid(), pid(), Diff.hunk()) :: state()
   defp do_stage_hunk(state, git_pid, buf, hunk) do
     git_root = Git.Buffer.git_root(git_pid)
@@ -726,6 +847,275 @@ defmodule MingaEditor.Commands.Git do
         EditorState.set_status(state, "Stage failed: #{reason}")
     end
   end
+
+  @spec stage_hunk_from_diff_view(state(), pid(), EditorState.diff_view_info()) :: state()
+  defp stage_hunk_from_diff_view(state, diff_buf, %{staged: true}) do
+    _ = diff_buf
+    EditorState.set_status(state, "Cannot stage from a staged diff view")
+  end
+
+  defp stage_hunk_from_diff_view(state, diff_buf, diff_info) do
+    %{hunk_lines: hunk_lines} = diff_info
+    {cursor_line, _col} = Buffer.cursor(diff_buf)
+
+    case find_diff_view_hunk_index(hunk_lines, diff_info.line_metadata, cursor_line) do
+      nil -> EditorState.set_status(state, "No hunk at cursor")
+      hunk_idx -> stage_diff_view_hunk(state, diff_buf, diff_info, hunk_idx)
+    end
+  end
+
+  @spec stage_diff_view_hunk(state(), pid(), EditorState.diff_view_info(), non_neg_integer()) ::
+          state()
+  defp stage_diff_view_hunk(state, diff_buf, diff_info, hunk_idx) do
+    current_content = current_content_for_diff(diff_info)
+    {base_lines, current_lines, hunks} = diff_view_lines(diff_info, current_content)
+
+    if stale_diff_view?(diff_buf, diff_info, base_lines, current_lines, hunks) do
+      state
+      |> refresh_diff_view_content(diff_buf, diff_info)
+      |> EditorState.set_status("Diff view changed; retry hunk action")
+    else
+      case Enum.at(hunks, hunk_idx) do
+        nil ->
+          EditorState.set_status(state, "Hunk no longer exists")
+
+        hunk ->
+          apply_diff_view_stage(
+            state,
+            diff_buf,
+            diff_info,
+            hunk_idx,
+            {base_lines, current_lines, hunks, current_content},
+            hunk
+          )
+      end
+    end
+  end
+
+  @spec apply_diff_view_stage(
+          state(),
+          pid(),
+          EditorState.diff_view_info(),
+          non_neg_integer(),
+          {[String.t()], [String.t()], [Diff.hunk()], String.t()},
+          Diff.hunk()
+        ) :: state()
+  defp apply_diff_view_stage(
+         state,
+         diff_buf,
+         diff_info,
+         hunk_idx,
+         {base_lines, current_lines, hunks, current_content},
+         hunk
+       ) do
+    %{git_root: git_root, rel_path: rel_path} = diff_info
+    patch = Diff.generate_patch(rel_path, base_lines, current_lines, hunk)
+
+    case Git.stage_patch(git_root, patch) do
+      :ok ->
+        invalidate_source_git_buffer(diff_info, current_content)
+        {position, total} = {hunk_idx + 1, length(hunks)}
+
+        state
+        |> refresh_diff_view_content(diff_buf, diff_info)
+        |> EditorState.set_status("Hunk #{position}/#{total} staged")
+
+      {:error, reason} ->
+        EditorState.set_status(state, "Stage failed: #{reason}")
+    end
+  end
+
+  @spec revert_hunk_from_diff_view(state(), pid(), EditorState.diff_view_info()) :: state()
+  defp revert_hunk_from_diff_view(state, _diff_buf, %{source_buf: nil}) do
+    EditorState.set_status(state, "Cannot revert: diff opened from status panel")
+  end
+
+  defp revert_hunk_from_diff_view(state, _diff_buf, %{staged: true}) do
+    EditorState.set_status(state, "Cannot revert from a staged diff view")
+  end
+
+  defp revert_hunk_from_diff_view(state, diff_buf, diff_info) do
+    %{hunk_lines: hunk_lines} = diff_info
+    {cursor_line, _col} = Buffer.cursor(diff_buf)
+
+    case find_diff_view_hunk_index(hunk_lines, diff_info.line_metadata, cursor_line) do
+      nil -> EditorState.set_status(state, "No hunk at cursor")
+      hunk_idx -> revert_diff_view_hunk(state, diff_buf, diff_info, hunk_idx)
+    end
+  end
+
+  @spec revert_diff_view_hunk(state(), pid(), EditorState.diff_view_info(), non_neg_integer()) ::
+          state()
+  defp revert_diff_view_hunk(state, diff_buf, %{source_buf: source_buf} = diff_info, hunk_idx) do
+    {current_content, _cursor} = Buffer.content_and_cursor(source_buf)
+    {base_lines, current_lines, hunks} = diff_view_lines(diff_info, current_content)
+
+    if stale_diff_view?(diff_buf, diff_info, base_lines, current_lines, hunks) do
+      state
+      |> refresh_diff_view_content(diff_buf, diff_info)
+      |> EditorState.set_status("Diff view changed; retry hunk action")
+    else
+      case Enum.at(hunks, hunk_idx) do
+        nil ->
+          EditorState.set_status(state, "Hunk no longer exists")
+
+        hunk ->
+          apply_diff_view_revert(
+            state,
+            diff_buf,
+            diff_info,
+            hunk_idx,
+            {base_lines, current_lines, hunks},
+            hunk
+          )
+      end
+    end
+  end
+
+  @spec apply_diff_view_revert(
+          state(),
+          pid(),
+          EditorState.diff_view_info(),
+          non_neg_integer(),
+          {[String.t()], [String.t()], [Diff.hunk()]},
+          Diff.hunk()
+        ) :: state()
+  defp apply_diff_view_revert(
+         state,
+         diff_buf,
+         diff_info,
+         hunk_idx,
+         {_base_lines, current_lines, hunks},
+         hunk
+       ) do
+    reverted_lines = Diff.revert_hunk(current_lines, hunk)
+    reverted_content = Enum.join(reverted_lines, "\n")
+    %{source_buf: source_buf} = diff_info
+
+    Buffer.replace_content(source_buf, reverted_content)
+
+    git_pid = Git.tracking_pid(source_buf)
+    if git_pid, do: Git.Buffer.update(git_pid, reverted_content)
+
+    {position, total} = {hunk_idx + 1, length(hunks)}
+
+    state
+    |> refresh_diff_view_content(diff_buf, diff_info)
+    |> EditorState.set_status("Hunk #{position}/#{total} reverted")
+  end
+
+  @spec stale_diff_view?(
+          pid(),
+          EditorState.diff_view_info(),
+          [String.t()],
+          [String.t()],
+          [Diff.hunk()]
+        ) :: boolean()
+  defp stale_diff_view?(diff_buf, diff_info, base_lines, current_lines, hunks) do
+    fresh = DiffView.build_from_hunks(base_lines, current_lines, hunks)
+    {displayed_text, _cursor} = Buffer.content_and_cursor(diff_buf)
+
+    displayed_text != fresh.text or diff_info.line_metadata != fresh.line_metadata or
+      diff_info.hunk_lines != fresh.hunk_lines
+  end
+
+  @spec diff_view_lines(EditorState.diff_view_info(), String.t()) ::
+          {[String.t()], [String.t()], [Diff.hunk()]}
+  defp diff_view_lines(%{git_root: git_root, rel_path: rel_path}, current_content) do
+    base_lines = git_root |> head_content(rel_path) |> split_lines()
+    current_lines = split_lines(current_content)
+    {base_lines, current_lines, Diff.diff_lines(base_lines, current_lines)}
+  end
+
+  @spec hunk_position_for_cursor([non_neg_integer()], non_neg_integer()) :: non_neg_integer()
+  defp hunk_position_for_cursor(hunk_lines, cursor_line) do
+    sorted = Enum.sort(hunk_lines)
+
+    case Enum.find_index(sorted, fn line -> cursor_line <= line end) do
+      nil -> length(sorted)
+      idx -> idx + 1
+    end
+  end
+
+  @spec find_diff_view_hunk_index(
+          [non_neg_integer()],
+          [DiffView.line_meta()],
+          non_neg_integer()
+        ) :: non_neg_integer() | nil
+  defp find_diff_view_hunk_index([], _line_metadata, _cursor_line), do: nil
+
+  defp find_diff_view_hunk_index(hunk_lines, line_metadata, cursor_line) do
+    case Enum.at(line_metadata, cursor_line) do
+      %{type: type} when type in [:added, :removed] ->
+        find_hunk_ending_at_or_after(hunk_lines, cursor_line)
+
+      _ ->
+        nil
+    end
+  end
+
+  @spec find_hunk_ending_at_or_after([non_neg_integer()], non_neg_integer()) ::
+          non_neg_integer() | nil
+  defp find_hunk_ending_at_or_after(hunk_lines, cursor_line) do
+    hunk_lines
+    |> Enum.sort()
+    |> Enum.find_index(fn line -> cursor_line <= line end)
+  end
+
+  @spec current_content_for_diff(EditorState.diff_view_info()) :: String.t()
+  defp current_content_for_diff(%{source_buf: nil, git_root: git_root, rel_path: rel_path}) do
+    abs_path = Path.join(git_root, rel_path)
+
+    case File.read(abs_path) do
+      {:ok, content} -> content
+      {:error, _} -> ""
+    end
+  end
+
+  defp current_content_for_diff(%{source_buf: source_buf}) do
+    {content, _cursor} = Buffer.content_and_cursor(source_buf)
+    content
+  end
+
+  @spec invalidate_source_git_buffer(EditorState.diff_view_info(), String.t()) :: :ok
+  defp invalidate_source_git_buffer(%{source_buf: nil}, _content), do: :ok
+
+  defp invalidate_source_git_buffer(%{source_buf: source_buf}, content) do
+    case Git.tracking_pid(source_buf) do
+      nil -> :ok
+      git_pid -> Git.Buffer.invalidate_base(git_pid, content)
+    end
+  end
+
+  @spec refresh_diff_view_content(state(), pid(), EditorState.diff_view_info()) :: state()
+  defp refresh_diff_view_content(state, diff_buf, %{staged: false} = diff_info) do
+    %{git_root: git_root, rel_path: rel_path} = diff_info
+    current_content = current_content_for_diff(diff_info)
+    base_content = head_content(git_root, rel_path)
+
+    diff_result = DiffView.build(base_content, current_content)
+
+    Buffer.replace_content_with_decorations(
+      diff_buf,
+      diff_result.text,
+      fn _decs ->
+        decs = Minga.Core.Decorations.new()
+        apply_diff_decorations_to(decs, diff_result.line_metadata, state.theme)
+      end
+    )
+
+    updated_info = %{
+      diff_info
+      | line_metadata: diff_result.line_metadata,
+        hunk_lines: diff_result.hunk_lines
+    }
+
+    EditorState.register_diff_view(state, diff_buf, updated_info)
+  end
+
+  @spec split_lines(String.t()) :: [String.t()]
+  defp split_lines(""), do: []
+  defp split_lines(content), do: String.split(content, "\n")
 
   @spec with_git_buffer(state(), (pid(), pid() -> state())) :: state()
   defp with_git_buffer(%{workspace: %{buffers: %{active: buf}}} = state, fun)

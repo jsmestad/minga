@@ -14,10 +14,10 @@ defmodule MingaEditor.Commands.GitDiffDecorationsTest do
   describe "diff sign generation" do
     test "produces :added signs for added lines" do
       metadata = [
-        %{type: :context, original_line: 0, fold_count: nil},
-        %{type: :added, original_line: 1, fold_count: nil},
-        %{type: :added, original_line: 2, fold_count: nil},
-        %{type: :context, original_line: 3, fold_count: nil}
+        %{type: :context, original_line: 0, fold_count: nil, word_changes: nil},
+        %{type: :added, original_line: 1, fold_count: nil, word_changes: nil},
+        %{type: :added, original_line: 2, fold_count: nil, word_changes: nil},
+        %{type: :context, original_line: 3, fold_count: nil, word_changes: nil}
       ]
 
       signs = diff_signs_from_metadata(metadata)
@@ -30,9 +30,9 @@ defmodule MingaEditor.Commands.GitDiffDecorationsTest do
 
     test "produces :removed signs for removed lines" do
       metadata = [
-        %{type: :context, original_line: 0, fold_count: nil},
-        %{type: :removed, original_line: nil, fold_count: nil},
-        %{type: :context, original_line: 1, fold_count: nil}
+        %{type: :context, original_line: 0, fold_count: nil, word_changes: nil},
+        %{type: :removed, original_line: nil, fold_count: nil, word_changes: nil},
+        %{type: :context, original_line: 1, fold_count: nil, word_changes: nil}
       ]
 
       signs = diff_signs_from_metadata(metadata)
@@ -44,9 +44,9 @@ defmodule MingaEditor.Commands.GitDiffDecorationsTest do
 
     test "handles mixed added and removed lines" do
       metadata = [
-        %{type: :removed, original_line: nil, fold_count: nil},
-        %{type: :added, original_line: 0, fold_count: nil},
-        %{type: :fold, original_line: nil, fold_count: 5}
+        %{type: :removed, original_line: nil, fold_count: nil, word_changes: nil},
+        %{type: :added, original_line: 0, fold_count: nil, word_changes: nil},
+        %{type: :fold, original_line: nil, fold_count: 5, word_changes: nil}
       ]
 
       signs = diff_signs_from_metadata(metadata)
@@ -58,8 +58,8 @@ defmodule MingaEditor.Commands.GitDiffDecorationsTest do
 
     test "returns empty map for all context lines" do
       metadata = [
-        %{type: :context, original_line: 0, fold_count: nil},
-        %{type: :context, original_line: 1, fold_count: nil}
+        %{type: :context, original_line: 0, fold_count: nil, word_changes: nil},
+        %{type: :context, original_line: 1, fold_count: nil, word_changes: nil}
       ]
 
       signs = diff_signs_from_metadata(metadata)
@@ -80,10 +80,10 @@ defmodule MingaEditor.Commands.GitDiffDecorationsTest do
 
     test "decoration application creates highlights for added/removed lines" do
       metadata = [
-        %{type: :context, original_line: 0, fold_count: nil},
-        %{type: :removed, original_line: nil, fold_count: nil},
-        %{type: :added, original_line: 1, fold_count: nil},
-        %{type: :fold, original_line: nil, fold_count: 3}
+        %{type: :context, original_line: 0, fold_count: nil, word_changes: nil},
+        %{type: :removed, original_line: nil, fold_count: nil, word_changes: nil},
+        %{type: :added, original_line: 1, fold_count: nil, word_changes: nil},
+        %{type: :fold, original_line: nil, fold_count: 3, word_changes: nil}
       ]
 
       decs =
@@ -133,7 +133,8 @@ defmodule MingaEditor.Commands.GitDiffDecorationsTest do
         git_root: git_root,
         rel_path: rel_path,
         staged: false,
-        line_metadata: []
+        line_metadata: [],
+        hunk_lines: []
       }
 
       state = %{
@@ -150,6 +151,144 @@ defmodule MingaEditor.Commands.GitDiffDecorationsTest do
       assert buffer_content(diff_two) =~ "new"
       assert state.diff_views[diff_one].line_metadata != []
       assert state.diff_views[diff_two].line_metadata != []
+    end
+
+    test "diff_hunk_position reports the hunk containing the cursor" do
+      {:ok, diff_buf} = Buffer.start_link(content: "placeholder")
+
+      state =
+        build_state()
+        |> EditorState.register_diff_view(diff_buf, %{
+          source_buf: nil,
+          git_root: "/tmp/repo",
+          rel_path: "file.txt",
+          staged: false,
+          line_metadata: [],
+          hunk_lines: [1, 5]
+        })
+
+      assert GitCommands.diff_hunk_position(state, diff_buf, 0) == {1, 2}
+      assert GitCommands.diff_hunk_position(state, diff_buf, 3) == {2, 2}
+      assert GitCommands.diff_hunk_position(state, diff_buf, 7) == {2, 2}
+    end
+
+    test "revert hunk from diff view ignores context lines" do
+      git_root = unique_git_root()
+      rel_path = "file.txt"
+      base = "old\nsame\ntrailing\n"
+      current = "new\nsame\ntrailing\n"
+
+      GitStub.set_head(git_root, rel_path, base)
+      on_exit(fn -> GitStub.clear(git_root) end)
+
+      diff_result = DiffView.build(base, current)
+
+      context_line =
+        Enum.find_index(diff_result.line_metadata, fn meta ->
+          meta.type == :context and meta.original_line == 2
+        end)
+
+      {:ok, source_buf} = Buffer.start_link(content: current)
+      {:ok, diff_buf} = Buffer.start_link(content: diff_result.text)
+      Buffer.move_to(diff_buf, {context_line, 0})
+
+      state =
+        build_state()
+        |> EditorState.add_buffer(source_buf)
+        |> EditorState.add_buffer(diff_buf)
+        |> EditorState.register_diff_view(diff_buf, %{
+          source_buf: source_buf,
+          git_root: git_root,
+          rel_path: rel_path,
+          staged: false,
+          line_metadata: diff_result.line_metadata,
+          hunk_lines: diff_result.hunk_lines
+        })
+
+      _state = GitCommands.execute(state, :git_revert_hunk)
+
+      assert buffer_content(source_buf) == current
+    end
+
+    test "stage hunk from diff view refreshes stale views instead of staging by index" do
+      git_root = unique_git_root()
+      rel_path = "file.txt"
+      base = "one\ntwo\nthree\n"
+      current = "one\nTWO\nthree\n"
+      changed_current = "one\nTWO\nthree\nfour\n"
+
+      GitStub.set_head(git_root, rel_path, base)
+      on_exit(fn -> GitStub.clear(git_root) end)
+
+      diff_result = DiffView.build(base, current)
+
+      added_line =
+        Enum.find_index(diff_result.line_metadata, fn meta ->
+          meta.type == :added
+        end)
+
+      {:ok, source_buf} = Buffer.start_link(content: current)
+      {:ok, diff_buf} = Buffer.start_link(content: diff_result.text)
+      Buffer.move_to(diff_buf, {added_line, 0})
+      Buffer.replace_content(source_buf, changed_current)
+
+      state =
+        build_state()
+        |> EditorState.add_buffer(source_buf)
+        |> EditorState.add_buffer(diff_buf)
+        |> EditorState.register_diff_view(diff_buf, %{
+          source_buf: source_buf,
+          git_root: git_root,
+          rel_path: rel_path,
+          staged: false,
+          line_metadata: diff_result.line_metadata,
+          hunk_lines: diff_result.hunk_lines
+        })
+
+      state = GitCommands.execute(state, :git_stage_hunk)
+
+      assert buffer_content(diff_buf) =~ "four"
+      assert EditorState.status_msg(state) == "Diff view changed; retry hunk action"
+    end
+
+    test "revert hunk from staged diff view does not mutate working buffer" do
+      git_root = unique_git_root()
+      rel_path = "file.txt"
+      base = "old\n"
+      staged = "staged\n"
+      working = "working\n"
+
+      GitStub.set_head(git_root, rel_path, base)
+      on_exit(fn -> GitStub.clear(git_root) end)
+
+      diff_result = DiffView.build(base, staged)
+
+      added_line =
+        Enum.find_index(diff_result.line_metadata, fn meta ->
+          meta.type == :added
+        end)
+
+      {:ok, source_buf} = Buffer.start_link(content: working)
+      {:ok, diff_buf} = Buffer.start_link(content: diff_result.text)
+      Buffer.move_to(diff_buf, {added_line, 0})
+
+      state =
+        build_state()
+        |> EditorState.add_buffer(source_buf)
+        |> EditorState.add_buffer(diff_buf)
+        |> EditorState.register_diff_view(diff_buf, %{
+          source_buf: source_buf,
+          git_root: git_root,
+          rel_path: rel_path,
+          staged: true,
+          line_metadata: diff_result.line_metadata,
+          hunk_lines: diff_result.hunk_lines
+        })
+
+      state = GitCommands.execute(state, :git_revert_hunk)
+
+      assert buffer_content(source_buf) == working
+      assert EditorState.status_msg(state) == "Cannot revert from a staged diff view"
     end
 
     test "staged diff toggle treats staged deletions as empty index content" do
@@ -185,7 +324,8 @@ defmodule MingaEditor.Commands.GitDiffDecorationsTest do
           git_root: git_root,
           rel_path: rel_path,
           staged: false,
-          line_metadata: []
+          line_metadata: [],
+          hunk_lines: []
         })
 
       state = GitCommands.execute(state, :git_diff_toggle_staged)

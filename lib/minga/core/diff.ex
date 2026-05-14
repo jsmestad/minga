@@ -37,6 +37,12 @@ defmodule Minga.Core.Diff do
           old_lines: [String.t()]
         }
 
+  @typedoc "A word-level diff segment: equal, deleted, or inserted text."
+  @type word_segment :: {:eq | :del | :ins, String.t()}
+
+  @typedoc "A character range within a line: {start_col, end_col} (0-based, exclusive end)."
+  @type char_range :: {non_neg_integer(), non_neg_integer()}
+
   @doc """
   Diffs base lines against current lines and returns a list of hunks.
 
@@ -47,6 +53,39 @@ defmodule Minga.Core.Diff do
     List.myers_difference(base_lines, current_lines)
     |> build_hunks(0, 0, [])
     |> Enum.reverse()
+  end
+
+  @doc """
+  Computes character-level differences between two strings.
+
+  Returns a list of tagged segments indicating equal, deleted, and inserted
+  character ranges. Skips computation for lines longer than 500 characters,
+  returning the full old line as `:del` and full new line as `:ins`.
+  """
+  @spec word_diff(String.t(), String.t()) :: [word_segment()]
+  def word_diff(old_line, new_line)
+      when byte_size(old_line) > 500 or byte_size(new_line) > 500 do
+    [{:del, old_line}, {:ins, new_line}]
+  end
+
+  def word_diff(old_line, new_line) do
+    String.myers_difference(old_line, new_line)
+  end
+
+  @doc """
+  Extracts character ranges for changed segments from a word-level diff.
+
+  Returns `{del_ranges, ins_ranges}` where each range is `{start_col, end_col}`
+  with 0-based start and exclusive end. Ranges track column offsets from the
+  perspective of each side: `:del` ranges index into the old line, `:ins` ranges
+  index into the new line.
+  """
+  @spec word_diff_ranges(String.t(), String.t()) :: {[char_range()], [char_range()]}
+  def word_diff_ranges(old_line, new_line) do
+    segments = word_diff(old_line, new_line)
+    del_ranges = extract_ranges(segments, :del)
+    ins_ranges = extract_ranges(segments, :ins)
+    {del_ranges, ins_ranges}
   end
 
   @doc """
@@ -177,6 +216,33 @@ defmodule Minga.Core.Diff do
 
     IO.iodata_to_binary([header | diff_body])
   end
+
+  # ── Private: word-level diff helpers ────────────────────────────────────────
+
+  @spec extract_ranges([word_segment()], :del | :ins) :: [char_range()]
+  defp extract_ranges(segments, target_tag) do
+    skip_tag = opposite_tag(target_tag)
+
+    {ranges, _offset} =
+      Enum.reduce(segments, {[], 0}, fn
+        {^skip_tag, _text}, {acc, offset} ->
+          # The opposite side's text doesn't advance our column offset
+          {acc, offset}
+
+        {^target_tag, text}, {acc, offset} ->
+          len = String.length(text)
+          {[{offset, offset + len} | acc], offset + len}
+
+        {:eq, text}, {acc, offset} ->
+          {acc, offset + String.length(text)}
+      end)
+
+    Enum.reverse(ranges)
+  end
+
+  @spec opposite_tag(:del | :ins) :: :ins | :del
+  defp opposite_tag(:del), do: :ins
+  defp opposite_tag(:ins), do: :del
 
   # ── Private: hunk building ─────────────────────────────────────────────────
 
@@ -323,39 +389,40 @@ defmodule Minga.Core.Diff do
     |> Enum.reverse()
   end
 
-  # Both edit lists exhausted: emit remaining ancestor lines
-  defp do_merge(ancestor, pos, [], [], acc) do
-    remaining = Enum.drop(ancestor, pos)
-
-    if remaining == [] do
-      acc
-    else
-      [{:resolved, remaining} | acc]
-    end
+  # Both edit lists exhausted: emit remaining ancestor lines.
+  defp do_merge(ancestor_remaining, _pos, [], [], acc) do
+    prepend_non_empty_resolved(ancestor_remaining, acc)
   end
 
-  # Only fork edits remain
-  defp do_merge(ancestor, pos, [fe | fork_rest], [], acc) do
+  # Only fork edits remain.
+  defp do_merge(ancestor_remaining, pos, [fe | fork_rest], [], acc) do
     {start, count, replacement} = fe
-    # Emit unchanged lines before this edit
-    unchanged = Enum.slice(ancestor, pos, max(start - pos, 0))
-    acc = if unchanged != [], do: [{:resolved, unchanged} | acc], else: acc
+    end_pos = start + count
+
+    {unchanged, ancestor_remaining} =
+      consume_ancestor_region(ancestor_remaining, pos, start, end_pos)
+
+    acc = prepend_non_empty_resolved(unchanged, acc)
     acc = [{:resolved, replacement} | acc]
-    do_merge(ancestor, start + count, fork_rest, [], acc)
+    do_merge(ancestor_remaining, end_pos, fork_rest, [], acc)
   end
 
-  # Only parent edits remain
-  defp do_merge(ancestor, pos, [], [pe | parent_rest], acc) do
+  # Only parent edits remain.
+  defp do_merge(ancestor_remaining, pos, [], [pe | parent_rest], acc) do
     {start, count, replacement} = pe
-    unchanged = Enum.slice(ancestor, pos, max(start - pos, 0))
-    acc = if unchanged != [], do: [{:resolved, unchanged} | acc], else: acc
+    end_pos = start + count
+
+    {unchanged, ancestor_remaining} =
+      consume_ancestor_region(ancestor_remaining, pos, start, end_pos)
+
+    acc = prepend_non_empty_resolved(unchanged, acc)
     acc = [{:resolved, replacement} | acc]
-    do_merge(ancestor, start + count, [], parent_rest, acc)
+    do_merge(ancestor_remaining, end_pos, [], parent_rest, acc)
   end
 
-  # Both sides have edits: pick the earlier one, detect overlaps
+  # Both sides have edits: pick the earlier one, detect overlaps.
   defp do_merge(
-         ancestor,
+         ancestor_remaining,
          pos,
          [fe | fork_rest] = fork_edits,
          [pe | parent_rest] = parent_edits,
@@ -372,38 +439,62 @@ defmodule Minga.Core.Diff do
       # Must be checked before the "before" conditions because identical insertions
       # at the same position (f_end == p_start) would otherwise be duplicated.
       f_start == p_start and f_count == p_count and f_replacement == p_replacement ->
-        unchanged = Enum.slice(ancestor, pos, max(f_start - pos, 0))
-        acc = if unchanged != [], do: [{:resolved, unchanged} | acc], else: acc
-        acc = [{:resolved, f_replacement} | acc]
-        do_merge(ancestor, f_end, fork_rest, parent_rest, acc)
+        {unchanged, ancestor_remaining} =
+          consume_ancestor_region(ancestor_remaining, pos, f_start, f_end)
 
-      # Fork edit is entirely before parent edit (no overlap)
+        acc = prepend_non_empty_resolved(unchanged, acc)
+        acc = [{:resolved, f_replacement} | acc]
+        do_merge(ancestor_remaining, f_end, fork_rest, parent_rest, acc)
+
+      # Fork edit is entirely before parent edit (no overlap).
       f_end <= p_start ->
-        unchanged = Enum.slice(ancestor, pos, max(f_start - pos, 0))
-        acc = if unchanged != [], do: [{:resolved, unchanged} | acc], else: acc
+        {unchanged, ancestor_remaining} =
+          consume_ancestor_region(ancestor_remaining, pos, f_start, f_end)
+
+        acc = prepend_non_empty_resolved(unchanged, acc)
         acc = [{:resolved, f_replacement} | acc]
-        do_merge(ancestor, f_end, fork_rest, parent_edits, acc)
+        do_merge(ancestor_remaining, f_end, fork_rest, parent_edits, acc)
 
-      # Parent edit is entirely before fork edit (no overlap)
+      # Parent edit is entirely before fork edit (no overlap).
       p_end <= f_start ->
-        unchanged = Enum.slice(ancestor, pos, max(p_start - pos, 0))
-        acc = if unchanged != [], do: [{:resolved, unchanged} | acc], else: acc
-        acc = [{:resolved, p_replacement} | acc]
-        do_merge(ancestor, p_end, fork_edits, parent_rest, acc)
+        {unchanged, ancestor_remaining} =
+          consume_ancestor_region(ancestor_remaining, pos, p_start, p_end)
 
-      # Overlap: conflict
+        acc = prepend_non_empty_resolved(unchanged, acc)
+        acc = [{:resolved, p_replacement} | acc]
+        do_merge(ancestor_remaining, p_end, fork_edits, parent_rest, acc)
+
+      # Overlap: conflict.
       true ->
-        # Emit unchanged lines before the conflict region
         conflict_start = min(f_start, p_start)
         conflict_end = max(f_end, p_end)
-        unchanged = Enum.slice(ancestor, pos, max(conflict_start - pos, 0))
-        acc = if unchanged != [], do: [{:resolved, unchanged} | acc], else: acc
+
+        {unchanged, ancestor_remaining} =
+          consume_ancestor_region(ancestor_remaining, pos, conflict_start, conflict_end)
+
+        acc = prepend_non_empty_resolved(unchanged, acc)
         acc = [{:conflict, f_replacement, p_replacement} | acc]
 
-        # Skip past all edits consumed by this conflict region
         {fork_rest2, parent_rest2} = skip_consumed_edits(fork_rest, parent_rest, conflict_end)
-        do_merge(ancestor, conflict_end, fork_rest2, parent_rest2, acc)
+        do_merge(ancestor_remaining, conflict_end, fork_rest2, parent_rest2, acc)
     end
+  end
+
+  @spec prepend_non_empty_resolved([String.t()], [merge_hunk()]) :: [merge_hunk()]
+  defp prepend_non_empty_resolved([], acc), do: acc
+  defp prepend_non_empty_resolved(lines, acc), do: [{:resolved, lines} | acc]
+
+  @spec consume_ancestor_region(
+          [String.t()],
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: {[String.t()], [String.t()]}
+  defp consume_ancestor_region(ancestor_remaining, pos, start, end_pos) do
+    unprocessed_start = max(start, pos)
+    {unchanged, at_edit} = Enum.split(ancestor_remaining, max(start - pos, 0))
+    {_consumed, remaining} = Enum.split(at_edit, max(end_pos - unprocessed_start, 0))
+    {unchanged, remaining}
   end
 
   # Skip edits that fall within the conflict region
