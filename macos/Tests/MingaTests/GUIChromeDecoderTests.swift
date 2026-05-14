@@ -1513,6 +1513,90 @@ struct GUIAgentGroupsDecoderTests {
     }
 }
 
+// MARK: - gui_hover_popup (0x81)
+
+@Suite("GUI Hover Popup Decoder")
+struct GUIHoverPopupDecoderTests {
+    @Test("Decode syntax highlighted hover segment")
+    func decodeSyntaxHighlightedSegment() throws {
+        var data = Data()
+        data.append(OP_GUI_HOVER_POPUP)
+        data.append(1) // visible
+        appendU16(&data, 10) // anchor_row
+        appendU16(&data, 5) // anchor_col
+        data.append(0) // focused
+        appendU16(&data, 0) // scroll_offset
+        appendU16(&data, 1) // line_count
+        data.append(1) // line_type = code
+        appendU16(&data, 1) // segment_count
+        data.append(13) // syntaxHighlighted
+        appendRGB(&data, 0xC6, 0x78, 0xDD)
+        data.append(0x07) // bold + italic + underline
+        appendString16(&data, "def")
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiHoverPopup(let visible, let anchorRow, let anchorCol, let focused, let scrollOffset, let lines) = cmd else {
+            Issue.record("Expected .guiHoverPopup"); return
+        }
+
+        #expect(visible)
+        #expect(anchorRow == 10)
+        #expect(anchorCol == 5)
+        #expect(!focused)
+        #expect(scrollOffset == 0)
+        #expect(lines.count == 1)
+        #expect(lines[0].lineType == .code)
+        #expect(lines[0].segments.count == 1)
+        #expect(lines[0].segments[0].style == .syntaxHighlighted)
+        #expect(lines[0].segments[0].fgColor == 0xC678DD)
+        #expect(lines[0].segments[0].flags == 0x07)
+        #expect(lines[0].segments[0].text == "def")
+    }
+
+    @Test("Truncated syntax metadata throws malformed")
+    func truncatedSyntaxMetadataThrows() {
+        var data = hoverHeader(lineCount: 1)
+        data.append(1) // line_type = code
+        appendU16(&data, 1) // segment_count
+        data.append(13) // syntaxHighlighted, missing RGB + flags + len
+        data.append(0xC6)
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Truncated syntax text throws malformed")
+    func truncatedSyntaxTextThrows() {
+        var data = hoverHeader(lineCount: 1)
+        data.append(1) // line_type = code
+        appendU16(&data, 1) // segment_count
+        data.append(13) // syntaxHighlighted
+        appendRGB(&data, 0xC6, 0x78, 0xDD)
+        data.append(0x00)
+        appendU16(&data, 5)
+        data.append(contentsOf: Array("de".utf8))
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    private func hoverHeader(lineCount: UInt16) -> Data {
+        var data = Data()
+        data.append(OP_GUI_HOVER_POPUP)
+        data.append(1) // visible
+        appendU16(&data, 10) // anchor_row
+        appendU16(&data, 5) // anchor_col
+        data.append(0) // focused
+        appendU16(&data, 0) // scroll_offset
+        appendU16(&data, lineCount)
+        return data
+    }
+}
+
 // MARK: - draw_styled_text (0x1C)
 
 @Suite("Draw Styled Text Decoder")

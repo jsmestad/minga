@@ -137,6 +137,7 @@ enum Wire {
         case blockquote = 10
         case listBullet = 11
         case rule = 12
+        case syntaxHighlighted = 13
     }
 
     /// Line type for hover content (block context).
@@ -154,6 +155,8 @@ enum Wire {
     /// A styled text segment within a hover line.
     struct HoverSegment: Sendable {
         let style: HoverStyle
+        let fgColor: UInt32?
+        let flags: UInt8
         let text: String
     }
 

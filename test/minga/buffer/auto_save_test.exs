@@ -10,7 +10,7 @@ defmodule Minga.Buffer.AutoSaveTest do
   alias Minga.Events.LogMessageEvent
 
   @moduletag :tmp_dir
-  @delay_ms 40
+  @delay_ms 5_000
 
   test "dirty file-backed buffer auto-saves after the configured delay", %{tmp_dir: dir} do
     path = Path.join(dir, "auto-save.txt")

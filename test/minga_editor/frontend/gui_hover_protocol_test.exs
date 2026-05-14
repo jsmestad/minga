@@ -9,6 +9,7 @@ defmodule MingaEditor.Frontend.GUIHoverProtocolTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Core.Face
   alias MingaEditor.HoverPopup
   alias MingaEditor.SignatureHelp
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
@@ -101,6 +102,34 @@ defmodule MingaEditor.Frontend.GUIHoverProtocolTest do
       assert <<@op_gui_hover_popup, 1, _::binary-size(9), rest::binary>> = result
       # line_type = code (1), segment_count = 1
       assert <<1, 1::16, _seg::binary>> = rest
+    end
+
+    test "syntax highlighted segments encode RGB and flags" do
+      face = Face.new(fg: 0xC678DD, bold: true, italic: true)
+
+      popup = %HoverPopup{
+        content_lines: [{[{"def", {:syntax, face}}], :code}],
+        anchor_row: 0,
+        anchor_col: 0
+      }
+
+      result = ProtocolGUI.encode_gui_hover_popup(popup)
+      assert <<@op_gui_hover_popup, 1, _::binary-size(9), rest::binary>> = result
+      assert <<1, 1::16, 13, 0xC6, 0x78, 0xDD, 0x03, 3::16, "def", _sidecar::binary>> = rest
+    end
+
+    test "syntax highlighted segments without a foreground use readable fallback" do
+      face = Face.new(bold: true)
+
+      popup = %HoverPopup{
+        content_lines: [{[{"def", {:syntax, face}}], :code}],
+        anchor_row: 0,
+        anchor_col: 0
+      }
+
+      result = ProtocolGUI.encode_gui_hover_popup(popup)
+      assert <<@op_gui_hover_popup, 1, _::binary-size(9), rest::binary>> = result
+      assert <<1, 1::16, 13, 0xBB, 0xC2, 0xCF, 0x01, 3::16, "def", _sidecar::binary>> = rest
     end
   end
 

@@ -759,7 +759,7 @@ defmodule MingaEditor.LspActions do
 
       text ->
         {cursor_row, cursor_col} = hover_cursor_screen_position(state)
-        popup = HoverPopup.new(text, cursor_row, cursor_col)
+        popup = HoverPopup.new(text, cursor_row, cursor_col, theme: state.theme)
         MingaEditor.State.set_hover_popup(state, popup)
     end
   end
@@ -791,7 +791,7 @@ defmodule MingaEditor.LspActions do
         state
 
       text ->
-        popup = HoverPopup.new(text, row, col)
+        popup = HoverPopup.new(text, row, col, theme: state.theme)
         MingaEditor.State.set_hover_popup(state, popup)
     end
   end

@@ -626,11 +626,14 @@ Per line:
   line_type(1) + segment_count(2) + segments...
 
 Per segment:
-  style(1) + text_len(2) + text(text_len)
+  standard: style(1) + text_len(2) + text(text_len)
+  syntaxHighlighted: style(1=13) + fg_r(1) + fg_g(1) + fg_b(1) + flags(1) + text_len(2) + text(text_len)
 
 Line types: 0=text, 1=code, 2=code_header, 3=header, 4=blockquote, 5=list_item, 6=rule, 7=empty
 
-Segment styles: 0=plain, 1=bold, 2=italic, 3=bold_italic, 4=code, 5=code_block, 6=code_content, 7=header1, 8=header2, 9=header3, 10=blockquote, 11=list_bullet, 12=rule
+Segment styles: 0=plain, 1=bold, 2=italic, 3=bold_italic, 4=code, 5=code_block, 6=code_content, 7=header1, 8=header2, 9=header3, 10=blockquote, 11=list_bullet, 12=rule, 13=syntaxHighlighted
+
+`syntaxHighlighted` carries a BEAM-resolved foreground color from the active theme. Its flags byte uses bit 0 for bold, bit 1 for italic, and bit 2 for underline. Frontends should render it with the same monospaced font as code content.
 
 When visible=0, no further fields are sent. The frontend hides the popup.
 When focused=1, the popup border uses the accent color and scrolling is enabled.
@@ -808,7 +811,7 @@ opcode(1) + action_type(1) + payload...
 
 Theme colors are sent as `{slot_id, r, g, b}` tuples in the `gui_theme` opcode. The slot IDs are organized by UI domain:
 
-The "Source" column shows which `Theme.t()` field each slot reads from (see `lib/minga/theme/slots.ex`). Slots that share a source will always have the same color value. Frontends that need fallback colors before the first `gui_theme` arrives can use the Doom One defaults listed below.
+The "Source" column shows which `Theme.t()` field each slot reads from (see `lib/minga_editor/ui/theme/slots.ex`). Slots that share a source will always have the same color value. Frontends that need fallback colors before the first `gui_theme` arrives can use the Doom One defaults listed below.
 
 ### Editor + Tree (0x01-0x0F)
 
@@ -996,7 +999,7 @@ A GUI frontend must satisfy these requirements:
 Within a single render cycle (one `{:packet, 4}` framed batch):
 
 1. Cell-grid commands: `clear`, `define_region`, `draw_text` (multiple), `set_cursor`, `set_cursor_shape`, `batch_end`
-2. GUI chrome commands: `gui_theme` (if changed), `gui_tab_bar`, `gui_file_tree`, `gui_which_key`, `gui_completion`, `gui_breadcrumb`, `gui_status_bar`, `gui_picker`, `gui_agent_chat`, `gui_bottom_panel`
+2. GUI chrome commands: `gui_theme` (if changed), `gui_tab_bar`, `gui_file_tree`, `gui_which_key`, `gui_completion`, `gui_breadcrumb`, `gui_status_bar`, `gui_picker`, `gui_agent_chat`, `gui_bottom_panel`, `gui_hover_popup`, `gui_signature_help`
 
 Note: GUI chrome commands are sent after `batch_end`. They are separate from the cell-grid frame because they update native UI state, not the pixel surface. The frontend should process them after committing the cell-grid frame to the GPU.
 
@@ -1006,8 +1009,8 @@ Note: GUI chrome commands are sent after `batch_end`. They are separate from the
 
 | Component | File | Language |
 |-----------|------|----------|
-| Encoder | `lib/minga/port/protocol/gui.ex` | Elixir |
-| Theme slot mapping | `lib/minga/theme/slots.ex` | Elixir |
+| Encoder | `lib/minga_editor/frontend/protocol/gui.ex` | Elixir |
+| Theme slot mapping | `lib/minga_editor/ui/theme/slots.ex` | Elixir |
 | Integration tests | `test/minga_editor/integration/gui_protocol_test.exs` | Elixir |
 
 ### macOS GUI

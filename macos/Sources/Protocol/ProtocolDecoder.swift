@@ -1603,22 +1603,38 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         hLines.reserveCapacity(hLineCount)
         for _ in 0..<hLineCount {
             // line_type(1) + segment_count(2)
-            guard data.count >= hPos + 3 else { break }
+            guard data.count >= hPos + 3 else { throw ProtocolDecodeError.malformed }
             let lineType = Wire.HoverLineType(rawValue: data[hPos]) ?? .text
             let segCount = Int(readU16(data, hPos + 1))
             hPos += 3
             var segments: [Wire.HoverSegment] = []
             segments.reserveCapacity(segCount)
             for _ in 0..<segCount {
-                // style(1) + text_len(2) + text
-                guard data.count >= hPos + 3 else { break }
+                // standard: style(1) + text_len(2) + text
+                // syntaxHighlighted: style(1=13) + fg_rgb(3) + flags(1) + text_len(2) + text
+                guard data.count >= hPos + 1 else { throw ProtocolDecodeError.malformed }
                 let style = Wire.HoverStyle(rawValue: data[hPos]) ?? .plain
-                let textLen = Int(readU16(data, hPos + 1))
-                hPos += 3
-                guard data.count >= hPos + textLen else { break }
+                hPos += 1
+                let fgColor: UInt32?
+                let flags: UInt8
+                let textLen: Int
+                if style == .syntaxHighlighted {
+                    guard data.count >= hPos + 6 else { throw ProtocolDecodeError.malformed }
+                    fgColor = UInt32(readU24(data, hPos))
+                    flags = data[hPos + 3]
+                    textLen = Int(readU16(data, hPos + 4))
+                    hPos += 6
+                } else {
+                    guard data.count >= hPos + 2 else { throw ProtocolDecodeError.malformed }
+                    fgColor = nil
+                    flags = 0
+                    textLen = Int(readU16(data, hPos))
+                    hPos += 2
+                }
+                guard data.count >= hPos + textLen else { throw ProtocolDecodeError.malformed }
                 let text = String(data: data[hPos..<(hPos + textLen)], encoding: .utf8) ?? ""
                 hPos += textLen
-                segments.append(Wire.HoverSegment(style: style, text: text))
+                segments.append(Wire.HoverSegment(style: style, fgColor: fgColor, flags: flags, text: text))
             }
             hLines.append(Wire.HoverLine(lineType: lineType, segments: segments))
         }

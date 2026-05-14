@@ -10,7 +10,7 @@ defmodule MingaEditor.HoverPopup do
   ## Lifecycle
 
   1. LSP hover response arrives with markdown content
-  2. `new/3` creates the popup state with parsed content
+  2. `new/4` creates the popup state with parsed content
   3. The render pipeline renders it as an overlay via `render/3`
   4. Any keypress (except K/j/k when focused) dismisses the popup
   """
@@ -18,7 +18,9 @@ defmodule MingaEditor.HoverPopup do
   alias MingaAgent.Markdown
   alias MingaEditor.DisplayList
   alias MingaEditor.FloatingWindow
+  alias MingaEditor.HoverPopup.SyntaxHighlight
   alias MingaEditor.MarkdownStyles
+  alias MingaEditor.UI.Theme
 
   @enforce_keys [:content_lines, :anchor_row, :anchor_col]
   defstruct content_lines: [],
@@ -51,9 +53,14 @@ defmodule MingaEditor.HoverPopup do
   Parses the markdown content and anchors the popup at the given
   cursor position.
   """
-  @spec new(String.t(), non_neg_integer(), non_neg_integer()) :: t()
-  def new(markdown_text, cursor_row, cursor_col) do
-    content_lines = Markdown.parse(markdown_text)
+  @spec new(String.t(), non_neg_integer(), non_neg_integer(), keyword()) :: t()
+  def new(markdown_text, cursor_row, cursor_col, opts \\ []) do
+    theme = Keyword.get(opts, :theme, Theme.get!(:doom_one))
+
+    content_lines =
+      markdown_text
+      |> Markdown.parse()
+      |> SyntaxHighlight.enhance(theme, opts)
 
     %__MODULE__{
       content_lines: content_lines,
@@ -114,7 +121,6 @@ defmodule MingaEditor.HoverPopup do
     {vp_rows, vp_cols} = viewport
     popup_theme = Map.get(theme, :popup, default_popup_theme())
 
-    # Compute content draws with styling
     {content_draws, content_width, content_height} =
       build_content_draws(popup.content_lines, popup.scroll_offset, vp_cols, theme)
 
@@ -163,10 +169,9 @@ defmodule MingaEditor.HoverPopup do
           map()
         ) :: {[DisplayList.draw()], non_neg_integer(), non_neg_integer()}
   defp build_content_draws(lines, scroll_offset, max_width, theme) do
-    # Take lines from scroll_offset, limit to a reasonable max
     visible_lines = Enum.drop(lines, scroll_offset)
 
-    {draws, max_col, row} =
+    {draws_by_line, max_col, row} =
       Enum.reduce(visible_lines, {[], 0, 0}, fn {segments, line_type}, {acc, max_w, row} ->
         line_draws = render_line_segments(segments, line_type, row, max_width, theme)
 
@@ -175,10 +180,11 @@ defmodule MingaEditor.HoverPopup do
           |> Enum.map(fn {text, _style} -> String.length(text) end)
           |> Enum.sum()
 
-        {line_draws ++ acc, max(max_w, line_width), row + 1}
+        {[line_draws | acc], max(max_w, line_width), row + 1}
       end)
 
-    {Enum.reverse(draws), max_col, row}
+    draws = draws_by_line |> Enum.reverse() |> List.flatten()
+    {draws, max_col, row}
   end
 
   @spec render_line_segments(

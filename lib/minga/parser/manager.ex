@@ -35,6 +35,8 @@ defmodule Minga.Parser.Manager do
 
   use GenServer
 
+  alias Minga.Language.Grammar
+  alias Minga.Language.Highlight.Span
   alias Minga.Parser.Protocol
 
   # ── Restart constants ──
@@ -43,6 +45,8 @@ defmodule Minga.Parser.Manager do
   @max_backoff_ms 5_000
   @max_restart_attempts 5
   @restart_window_ms 30_000
+  @snippet_buffer_id_start 4_000_000_000
+  @default_highlight_timeout_ms 50
   @default_indent_request_timeout_ms 2_000
   @default_textobject_request_timeout_ms 2_000
   @request_client_timeout_slack_ms 50
@@ -51,6 +55,21 @@ defmodule Minga.Parser.Manager do
   @type start_opt ::
           {:name, GenServer.name()}
           | {:parser_path, String.t()}
+
+  @typedoc "Synchronous syntax highlight result for a small source snippet."
+  @type highlight_source_result ::
+          {:ok, [String.t()], [Span.t()]}
+          | :unsupported
+          | :timeout
+          | :unavailable
+
+  @typedoc "Tracked pending synchronous snippet highlight request."
+  @type pending_highlight :: %{
+          from: GenServer.from(),
+          names: [String.t()] | nil,
+          spans: [Span.t()] | nil,
+          timer_ref: reference()
+        }
 
   @typedoc "Tracked buffer metadata for re-sync after parser restart."
   @type buffer_meta :: %{
@@ -68,6 +87,8 @@ defmodule Minga.Parser.Manager do
               ready: false,
               next_request_id: 1,
               pending_requests: %{},
+              next_snippet_buffer_id: 4_000_000_000,
+              pending_highlights: %{},
               # Crash recovery
               restart_timestamps: [],
               current_backoff_ms: 100,
@@ -82,6 +103,8 @@ defmodule Minga.Parser.Manager do
             ready: boolean(),
             next_request_id: non_neg_integer(),
             pending_requests: %{non_neg_integer() => GenServer.from()},
+            next_snippet_buffer_id: non_neg_integer(),
+            pending_highlights: %{non_neg_integer() => Minga.Parser.Manager.pending_highlight()},
             restart_timestamps: [integer()],
             current_backoff_ms: non_neg_integer(),
             gave_up: boolean(),
@@ -279,6 +302,36 @@ defmodule Minga.Parser.Manager do
     :exit, _ -> false
   end
 
+  @doc """
+  Syntax-highlights a small source snippet synchronously.
+
+  This is intended for UI snippets such as hover popup code blocks. It uses a fresh internal buffer ID, applies the language's highlight query, parses the source, and waits up to `:timeout` milliseconds for highlight names and spans. Unsupported languages, parser unavailability, and timeouts are explicit non-raising fallback results.
+  """
+  @spec highlight_source(String.t(), String.t(), keyword()) :: highlight_source_result()
+  def highlight_source(language, source, opts \\ [])
+      when is_binary(language) and is_binary(source) and is_list(opts) do
+    server = Keyword.get(opts, :server, __MODULE__)
+
+    timeout =
+      normalize_highlight_timeout(Keyword.get(opts, :timeout, @default_highlight_timeout_ms))
+
+    GenServer.call(server, {:highlight_source, language, source, timeout}, timeout + 100)
+  catch
+    :exit, {:timeout, _call} ->
+      :timeout
+
+    :exit, {:noproc, _call} ->
+      :unavailable
+
+    :exit, reason ->
+      Minga.Log.warning(:port, "Parser: snippet highlight request failed: #{inspect(reason)}")
+      :unavailable
+  end
+
+  @spec normalize_highlight_timeout(term()) :: non_neg_integer()
+  defp normalize_highlight_timeout(timeout) when is_integer(timeout) and timeout >= 0, do: timeout
+  defp normalize_highlight_timeout(_timeout), do: @default_highlight_timeout_ms
+
   # ── Server Callbacks ──
 
   @impl true
@@ -343,6 +396,20 @@ defmodule Minga.Parser.Manager do
     {:noreply, %{state | next_request_id: request_id + 1, pending_requests: pending}}
   end
 
+  def handle_call({:highlight_source, _language, _source, _timeout}, _from, %{port: nil} = state) do
+    {:reply, :unavailable, state}
+  end
+
+  def handle_call({:highlight_source, language, source, timeout}, from, state) do
+    case Grammar.read_query(language) do
+      {:ok, query} ->
+        start_highlight_source_request(language, query, source, timeout, from, state)
+
+      {:error, _reason} ->
+        {:reply, :unsupported, state}
+    end
+  end
+
   def handle_call(:restart, _from, state) do
     state = %{
       state
@@ -401,13 +468,18 @@ defmodule Minga.Parser.Manager do
       {:ok, {:textobject_result, request_id, result}} ->
         reply_to_pending_request(state, request_id, result)
 
+      {:ok, {:highlight_names, _buffer_id, _names} = event} ->
+        handle_highlight_source_event_or_broadcast(event, state)
+
+      {:ok, {:highlight_spans, _buffer_id, _version, _spans} = event} ->
+        handle_highlight_source_event_or_broadcast(event, state)
+
       {:ok, {:log_message, _level, _text} = event} ->
         broadcast(state.subscribers, {:minga_highlight, event})
         {:noreply, state}
 
       {:ok, event} ->
-        broadcast(state.subscribers, {:minga_highlight, event})
-        {:noreply, state}
+        broadcast_or_drop_snippet_event(event, state)
 
       :unknown ->
         Minga.Log.warning(:port, "Parser: received unknown opcode")
@@ -441,6 +513,18 @@ defmodule Minga.Parser.Manager do
     {:noreply, state}
   end
 
+  def handle_info({:highlight_source_timeout, buffer_id}, state) do
+    case Map.pop(state.pending_highlights, buffer_id) do
+      {nil, _pending_highlights} ->
+        {:noreply, state}
+
+      {pending, pending_highlights} ->
+        GenServer.reply(pending.from, :timeout)
+        state = %{state | pending_highlights: pending_highlights}
+        {:noreply, close_highlight_source_buffer(state, buffer_id)}
+    end
+  end
+
   def handle_info({:request_timeout, request_id}, state) do
     reply_to_pending_request(state, request_id, nil)
   end
@@ -452,6 +536,146 @@ defmodule Minga.Parser.Manager do
 
   def handle_info(_msg, state) do
     {:noreply, state}
+  end
+
+  # ── Private: synchronous snippet highlighting ──
+
+  @spec start_highlight_source_request(
+          String.t(),
+          String.t(),
+          String.t(),
+          non_neg_integer(),
+          GenServer.from(),
+          State.t()
+        ) :: {:noreply, State.t()}
+  defp start_highlight_source_request(language, query, source, timeout, from, state) do
+    buffer_id = state.next_snippet_buffer_id
+    timer_ref = Process.send_after(self(), {:highlight_source_timeout, buffer_id}, timeout)
+
+    pending_highlight = %{from: from, names: nil, spans: nil, timer_ref: timer_ref}
+    pending_highlights = Map.put(state.pending_highlights, buffer_id, pending_highlight)
+
+    commands = [
+      Protocol.encode_set_language(buffer_id, language),
+      Protocol.encode_set_highlight_query(buffer_id, query),
+      Protocol.encode_parse_buffer(buffer_id, 1, source)
+    ]
+
+    Port.command(state.port, IO.iodata_to_binary(commands))
+
+    {:noreply,
+     %{
+       state
+       | next_snippet_buffer_id: buffer_id + 1,
+         pending_highlights: pending_highlights
+     }}
+  end
+
+  @spec handle_highlight_source_event_or_broadcast(term(), State.t()) :: {:noreply, State.t()}
+  defp handle_highlight_source_event_or_broadcast(event, state) do
+    case handle_highlight_source_event(event, state) do
+      {:handled, state} ->
+        {:noreply, state}
+
+      {:miss, state} ->
+        broadcast_or_drop_snippet_event(event, state)
+    end
+  end
+
+  @typep highlight_source_event ::
+           {:highlight_names, non_neg_integer(), [String.t()]}
+           | {:highlight_spans, non_neg_integer(), non_neg_integer(), [Span.t()]}
+
+  @spec handle_highlight_source_event(highlight_source_event(), State.t()) ::
+          {:handled | :miss, State.t()}
+  defp handle_highlight_source_event({:highlight_names, buffer_id, names}, state) do
+    update_highlight_source_pending(buffer_id, :names, names, state)
+  end
+
+  defp handle_highlight_source_event({:highlight_spans, buffer_id, _version, spans}, state) do
+    update_highlight_source_pending(buffer_id, :spans, spans, state)
+  end
+
+  @spec broadcast_or_drop_snippet_event(term(), State.t()) :: {:noreply, State.t()}
+  defp broadcast_or_drop_snippet_event(event, state) do
+    case snippet_buffer_event?(event) do
+      true ->
+        Minga.Log.debug(
+          :port,
+          "Parser: dropping late snippet event #{inspect(event_name(event))}"
+        )
+
+        {:noreply, state}
+
+      false ->
+        broadcast(state.subscribers, {:minga_highlight, event})
+        {:noreply, state}
+    end
+  end
+
+  @spec snippet_buffer_event?(term()) :: boolean()
+  defp snippet_buffer_event?(event) do
+    event
+    |> event_buffer_id()
+    |> snippet_buffer_id?()
+  end
+
+  @spec event_buffer_id(term()) :: non_neg_integer() | nil
+  defp event_buffer_id({:highlight_names, buffer_id, _names}), do: buffer_id
+  defp event_buffer_id({:highlight_spans, buffer_id, _version, _spans}), do: buffer_id
+  defp event_buffer_id({:injection_ranges, buffer_id, _ranges}), do: buffer_id
+  defp event_buffer_id({:fold_ranges, buffer_id, _version, _ranges}), do: buffer_id
+  defp event_buffer_id({:textobject_positions, buffer_id, _version, _positions}), do: buffer_id
+  defp event_buffer_id({:conceal_spans, buffer_id, _version, _spans}), do: buffer_id
+  defp event_buffer_id({:request_reparse, buffer_id}), do: buffer_id
+  defp event_buffer_id(_event), do: nil
+
+  @spec snippet_buffer_id?(non_neg_integer() | nil) :: boolean()
+  defp snippet_buffer_id?(buffer_id) when is_integer(buffer_id) do
+    buffer_id >= @snippet_buffer_id_start
+  end
+
+  defp snippet_buffer_id?(_buffer_id), do: false
+
+  @spec event_name(tuple()) :: atom()
+  defp event_name(event), do: elem(event, 0)
+
+  @spec update_highlight_source_pending(non_neg_integer(), :names | :spans, [term()], State.t()) ::
+          {:handled | :miss, State.t()}
+  defp update_highlight_source_pending(buffer_id, field, value, state) do
+    case Map.fetch(state.pending_highlights, buffer_id) do
+      :error ->
+        {:miss, state}
+
+      {:ok, pending_highlight} ->
+        pending_highlight = Map.put(pending_highlight, field, value)
+        maybe_complete_highlight_source(buffer_id, pending_highlight, state)
+    end
+  end
+
+  @spec maybe_complete_highlight_source(non_neg_integer(), pending_highlight(), State.t()) ::
+          {:handled, State.t()}
+  defp maybe_complete_highlight_source(buffer_id, %{names: names, spans: spans} = pending, state)
+       when is_list(names) and is_list(spans) do
+    Process.cancel_timer(pending.timer_ref)
+    GenServer.reply(pending.from, {:ok, names, spans})
+
+    pending_highlights = Map.delete(state.pending_highlights, buffer_id)
+    state = %{state | pending_highlights: pending_highlights}
+    {:handled, close_highlight_source_buffer(state, buffer_id)}
+  end
+
+  defp maybe_complete_highlight_source(buffer_id, pending_highlight, state) do
+    pending_highlights = Map.put(state.pending_highlights, buffer_id, pending_highlight)
+    {:handled, %{state | pending_highlights: pending_highlights}}
+  end
+
+  @spec close_highlight_source_buffer(State.t(), non_neg_integer()) :: State.t()
+  defp close_highlight_source_buffer(%{port: nil} = state, _buffer_id), do: state
+
+  defp close_highlight_source_buffer(state, buffer_id) do
+    Port.command(state.port, Protocol.encode_close_buffer(buffer_id))
+    state
   end
 
   # ── Private: Port lifecycle ──
@@ -618,14 +842,22 @@ defmodule Minga.Parser.Manager do
   end
 
   @spec fail_pending_requests(State.t()) :: State.t()
-  defp fail_pending_requests(%{pending_requests: pending} = state) when pending == %{}, do: state
+  defp fail_pending_requests(%{pending_requests: pending, pending_highlights: highlights} = state)
+       when pending == %{} and highlights == %{} do
+    state
+  end
 
   defp fail_pending_requests(state) do
     Enum.each(state.pending_requests, fn {_id, from} ->
       GenServer.reply(from, nil)
     end)
 
-    %{state | pending_requests: %{}}
+    Enum.each(state.pending_highlights, fn {_buffer_id, pending} ->
+      Process.cancel_timer(pending.timer_ref)
+      GenServer.reply(pending.from, :unavailable)
+    end)
+
+    %{state | pending_requests: %{}, pending_highlights: %{}}
   end
 
   @spec reply_to_pending_request(State.t(), non_neg_integer(), term()) :: {:noreply, State.t()}

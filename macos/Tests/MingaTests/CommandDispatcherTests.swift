@@ -512,6 +512,22 @@ struct CommandDispatcherRoutingTests {
         #expect(dispatcher.frameState.gutterCol == 5) // 4 + 1
     }
 
+    @Test("guiHoverPopup exposes lines after scroll offset")
+    @MainActor func guiHoverPopupScrollOffset() {
+        let (dispatcher, gui) = makeDispatcher()
+        let lines = [
+            Wire.HoverLine(lineType: .text, segments: [Wire.HoverSegment(style: .plain, fgColor: nil, flags: 0, text: "one")]),
+            Wire.HoverLine(lineType: .text, segments: [Wire.HoverSegment(style: .plain, fgColor: nil, flags: 0, text: "two")]),
+            Wire.HoverLine(lineType: .text, segments: [Wire.HoverSegment(style: .plain, fgColor: nil, flags: 0, text: "three")])
+        ]
+
+        dispatcher.dispatch(.guiHoverPopup(visible: true, anchorRow: 4, anchorCol: 8, focused: true, scrollOffset: 1, lines: lines))
+
+        #expect(gui.hoverPopupState.visible == true)
+        #expect(gui.hoverPopupState.scrollOffset == 1)
+        #expect(gui.hoverPopupState.visibleLines.map { $0.segments.first?.text } == ["two", "three"])
+    }
+
     // MARK: - Batch lifecycle
 
     @Test("batchEnd fires onFirstRender once then clears it")
