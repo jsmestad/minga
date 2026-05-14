@@ -66,6 +66,10 @@ Minga caches the file list for the current project so the file finder opens inst
 
 The cache rebuilds automatically when you switch projects or detect a new one. Use `SPC p i` to force a rebuild, for example after creating new files outside the editor.
 
+## File tree visual quality
+
+The file tree is the project cockpit: it shows root context, hierarchy, active file, selection, focus, dirty buffers, git state, diagnostics, and common actions in one surface. See [File Tree Visual Spec](FILE_TREE_VISUAL_SPEC.md) for the shared visual target and review checklist used by the file-tree polish epic.
+
 ## Architecture
 
 `Minga.Project` is a GenServer in the supervision tree. It holds three things in its process state:
