@@ -31,6 +31,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   alias MingaEditor.Layout
   alias MingaEditor.MinibufferData
   alias MingaEditor.Renderer.Caches
+  alias MingaEditor.Renderer.Gutter
   alias MingaEditor.Shell.Traditional.Chrome.Helpers, as: ChromeHelpers
   alias MingaEditor.RenderPipeline.ContentHelpers
   alias MingaEditor.State.TabBar
@@ -356,23 +357,40 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   @spec current_cursor_screen_pos(ctx()) :: {non_neg_integer(), non_neg_integer()}
   defp current_cursor_screen_pos(ctx) do
+    active = ctx.windows.active
     layout = ctx.layout
 
-    case Map.get(layout.window_layouts, ctx.windows.active) do
-      %{content: {row, col, _w, _h}} ->
-        buf = ctx.buffers.active
+    case {Map.get(layout.window_layouts, active), Map.get(ctx.windows.map, active)} do
+      {%{content: {row, col, _w, _h}}, %{buffer: buf, viewport: viewport} = window}
+      when is_pid(buf) ->
+        {line, column} = Buffer.cursor(buf)
+        total_lines = Buffer.line_count(buf)
+        line_number_style = Buffer.get_option(buf, :line_numbers)
 
-        if buf do
-          {line, column} = Buffer.cursor(buf)
-          vp = ctx.viewport
-          {row + line - vp.top, col + column}
-        else
-          {row, col}
-        end
+        number_width =
+          if line_number_style == :none, do: 0, else: Viewport.gutter_width(total_lines)
 
-      nil ->
+        gutter_width = Gutter.total_width(number_width)
+        visible_line = visible_cursor_line(window, line)
+
+        {
+          max(row + visible_line - viewport.top, 0),
+          max(col + column + gutter_width - viewport.left, 0)
+        }
+
+      {%{content: {row, col, _w, _h}}, _window} ->
+        {row, col}
+
+      _ ->
         {0, 0}
     end
+  catch
+    :exit, _ -> {0, 0}
+  end
+
+  @spec visible_cursor_line(MingaEditor.Window.t(), non_neg_integer()) :: non_neg_integer()
+  defp visible_cursor_line(%{fold_map: fold_map}, line) do
+    if FoldMap.empty?(fold_map), do: line, else: FoldMap.buffer_to_visible(fold_map, line)
   end
 
   # ── Breadcrumb ──

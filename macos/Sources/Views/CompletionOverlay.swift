@@ -10,8 +10,6 @@ struct CompletionOverlay: View {
     let state: CompletionState
     let theme: ThemeColors
     let encoder: InputEncoder?
-    let cellWidth: CGFloat
-    let cellHeight: CGFloat
 
     private let maxVisibleItems = 10
     private let itemHeight: CGFloat = 24

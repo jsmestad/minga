@@ -1136,7 +1136,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   end
 
   def encode_gui_completion(%Minga.Editing.Completion{} = comp, cursor_row, cursor_col) do
-    items = Enum.take(comp.filtered, comp.max_visible)
+    {items, selected_offset} = Minga.Editing.Completion.visible_items(comp)
 
     entries =
       Enum.map(items, fn item ->
@@ -1150,7 +1150,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
     IO.iodata_to_binary([
       @op_gui_completion,
-      <<1::8, cursor_row::16, cursor_col::16, comp.selected::16, length(items)::16>>
+      <<1::8, cursor_row::16, cursor_col::16, selected_offset::16, length(items)::16>>
       | entries
     ])
   end

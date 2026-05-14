@@ -26,8 +26,12 @@ defmodule MingaEditor.Input.Completion do
   @escape 27
   @tab 9
   @enter 13
-  @arrow_up 0x415B1B
-  @arrow_down 0x425B1B
+  @arrow_up_legacy 0x415B1B
+  @arrow_down_legacy 0x425B1B
+  @arrow_up_kitty 57_352
+  @arrow_down_kitty 57_353
+  @arrow_up_mac 0xF700
+  @arrow_down_mac 0xF701
 
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
@@ -171,14 +175,7 @@ defmodule MingaEditor.Input.Completion do
 
   @spec set_completion_selected(Completion.t(), non_neg_integer()) :: Completion.t()
   defp set_completion_selected(%Completion{} = completion, idx) do
-    # The visible items are a window into filtered. We need to compute
-    # the absolute index in filtered from the visible window offset.
-    {_visible, _selected_offset} = Completion.visible_items(completion)
-    total = length(completion.filtered)
-    scroll_start = max(0, completion.selected - div(completion.max_visible, 2))
-    scroll_start = min(scroll_start, max(0, total - completion.max_visible))
-    absolute_idx = min(scroll_start + idx, total - 1)
-    %{completion | selected: absolute_idx}
+    Completion.select_visible(completion, idx)
   end
 
   # ── Key handling ─────────────────────────────────────────────────────────
@@ -193,14 +190,16 @@ defmodule MingaEditor.Input.Completion do
 
   # C-n or arrow down: move selection down
   defp do_handle(state, _completion, cp, mods)
-       when (cp == ?n and band(mods, @ctrl) != 0) or cp == @arrow_down do
+       when (cp == ?n and band(mods, @ctrl) != 0) or
+              cp in [@arrow_down_legacy, @arrow_down_kitty, @arrow_down_mac] do
     state = ModalOverlay.update_completion(state, &Completion.move_down/1)
     {:handled, CompletionHandling.maybe_resolve_selected(state)}
   end
 
   # C-p or arrow up: move selection up
   defp do_handle(state, _completion, cp, mods)
-       when (cp == ?p and band(mods, @ctrl) != 0) or cp == @arrow_up do
+       when (cp == ?p and band(mods, @ctrl) != 0) or
+              cp in [@arrow_up_legacy, @arrow_up_kitty, @arrow_up_mac] do
     state = ModalOverlay.update_completion(state, &Completion.move_up/1)
     {:handled, CompletionHandling.maybe_resolve_selected(state)}
   end

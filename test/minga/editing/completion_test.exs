@@ -42,6 +42,24 @@ defmodule Minga.Editing.CompletionTest do
     }
   ]
 
+  defp many_items_completion(count) do
+    0..(count - 1)
+    |> Enum.map(fn index ->
+      label = "item_" <> String.pad_leading(Integer.to_string(index), 2, "0")
+
+      %{
+        label: label,
+        kind: :function,
+        insert_text: label,
+        filter_text: label,
+        detail: "",
+        sort_text: label,
+        text_edit: nil
+      }
+    end)
+    |> Completion.new({0, 0})
+  end
+
   describe "new/2" do
     test "creates completion with sorted items" do
       comp = Completion.new(@sample_items, {0, 5})
@@ -135,6 +153,25 @@ defmodule Minga.Editing.CompletionTest do
     test "move_up on empty is no-op" do
       comp = Completion.new([], {0, 0})
       assert Completion.move_up(comp) == comp
+    end
+  end
+
+  describe "select_visible/2" do
+    test "selects by visible window offset" do
+      comp = many_items_completion(15)
+      comp = %{comp | selected: 7}
+
+      selected = Completion.select_visible(comp, 3)
+
+      assert selected.selected == 5
+      assert Completion.selected_item(selected).label == "item_05"
+    end
+
+    test "ignores offsets outside the visible window" do
+      comp = many_items_completion(15)
+      comp = %{comp | selected: 7}
+
+      assert Completion.select_visible(comp, 99) == comp
     end
   end
 

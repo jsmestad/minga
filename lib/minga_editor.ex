@@ -2118,12 +2118,7 @@ defmodule MingaEditor do
   defp handle_gui_action(state, {:completion_select, index}) do
     case MingaEditor.State.ModalOverlay.completion(state) do
       %Completion{} = comp ->
-        updated = %{comp | selected: index}
-
-        do_accept_completion(
-          MingaEditor.State.ModalOverlay.update_completion(state, fn _ -> updated end),
-          updated
-        )
+        accept_visible_completion(state, comp, index)
 
       nil ->
         state
@@ -2427,6 +2422,24 @@ defmodule MingaEditor do
     state
     |> EditorState.clear_git_toast()
     |> Commands.Git.execute(:git_pull_and_retry)
+  end
+
+  @spec accept_visible_completion(state(), Completion.t(), non_neg_integer()) :: state()
+  defp accept_visible_completion(state, comp, index) do
+    {visible, _selected_offset} = Completion.visible_items(comp)
+
+    case Enum.at(visible, index) do
+      nil ->
+        state
+
+      _item ->
+        updated = Completion.select_visible(comp, index)
+
+        do_accept_completion(
+          MingaEditor.State.ModalOverlay.update_completion(state, fn _ -> updated end),
+          updated
+        )
+    end
   end
 
   # Project.switch/1 is a cast; the picker opens against current state while the
