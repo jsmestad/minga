@@ -366,14 +366,19 @@ final class CoreTextMetalRenderer {
 
                 // Horizontal scroll: shift line textures and overlays left by scrollLeft columns.
                 // The gutter stays fixed; only content past the gutter edge scrolls.
-                let hScrollPx = Float(content.scrollLeft) * cellW * scale
+                let scrollLeftInt = Int(content.scrollLeft)
+                let hScrollPx = Float(scrollLeftInt) * cellW * scale
+                let contentCols = max(Int(frameState.cols) - Int(gutter.lineNumberWidth) - Int(gutter.signColWidth), 1)
 
                 // Selection overlay quads (drawn before text).
                 if let sel = content.selection {
                     appendSelectionQuads(
                         selection: sel,
                         rowOffset: windowRowOffset,
-                        colOffset: contentColOffset - hScrollPx,
+                        colOffset: contentColOffset,
+                        scrollLeft: scrollLeftInt,
+                        visibleRows: content.rows.count,
+                        visibleCols: contentCols,
                         cellW: cellW, cellH: displayCellH, scale: scale,
                         viewportWidth: Float(viewportSize.width),
                         quads: &semanticOverlayQuads
@@ -422,8 +427,6 @@ final class CoreTextMetalRenderer {
                 // so each texture is at most viewport-wide. Fixes gutter bleedthrough
                 // (no leftward position shift) and text truncation (texture always
                 // covers the visible portion).
-                let contentCols = max(Int(frameState.cols) - Int(gutter.lineNumberWidth) - Int(gutter.signColWidth), 1)
-                let scrollLeftInt = Int(content.scrollLeft)
                 var clippedRows: [GUIVisualRow] = []
                 clippedRows.reserveCapacity(content.rows.count)
                 for row in content.rows {
@@ -1172,65 +1175,112 @@ final class CoreTextMetalRenderer {
     private func appendSelectionQuads(
         selection sel: GUISelectionOverlay,
         rowOffset: Float, colOffset: Float,
+        scrollLeft: Int,
+        visibleRows: Int,
+        visibleCols: Int,
         cellW: Float, cellH: Float, scale: Float,
         viewportWidth: Float,
         quads: inout [QuadGPU]
     ) {
+        guard visibleRows > 0, visibleCols > 0, cellW > 0, cellH > 0, scale > 0 else {
+            assertionFailure("appendSelectionQuads called with invalid dimensions: rows=\(visibleRows) cols=\(visibleCols) cellW=\(cellW) cellH=\(cellH) scale=\(scale)")
+            return
+        }
+
+        let requestedStartRow = Int(sel.startRow)
+        let requestedEndRow = Int(sel.endRow)
+        guard requestedStartRow <= requestedEndRow else {
+            assertionFailure("Selection startRow (\(requestedStartRow)) > endRow (\(requestedEndRow))")
+            return
+        }
+
+        let startRow = max(requestedStartRow, 0)
+        let endRow = min(requestedEndRow, visibleRows - 1)
+        guard startRow <= endRow else { return }
+
         let selColor = currentThemeColors?.selectionBgSIMD ?? Self.systemSelectionColor
+        let lineHeightPx = cellH * scale
+        let colWidthPx = cellW * scale
+        let rightEdgePx = min(colOffset + Float(visibleCols) * colWidthPx, viewportWidth)
+        let fullLineWidthPx = max(rightEdgePx - colOffset, 0)
+        guard fullLineWidthPx > 0 else { return }
 
         switch sel.type {
         case .line:
-            for row in sel.startRow...sel.endRow {
+            for row in startRow...endRow {
                 var quad = QuadGPU()
-                quad.position = SIMD2<Float>(colOffset, rowOffset + Float(row) * cellH * scale)
-                quad.size = SIMD2<Float>(viewportWidth - colOffset, cellH * scale)
+                quad.position = SIMD2<Float>(colOffset, rowOffset + Float(row) * lineHeightPx)
+                quad.size = SIMD2<Float>(fullLineWidthPx, lineHeightPx)
                 quad.color = selColor
                 quad.alpha = 1.0
                 quads.append(quad)
             }
 
         case .char:
-            for row in sel.startRow...sel.endRow {
-                let y = rowOffset + Float(row) * cellH * scale
-                let startCol: Float
-                let endCol: Float
+            for row in startRow...endRow {
+                let y = rowOffset + Float(row) * lineHeightPx
+                let requestedCols = requestedSelectionCols(row: row, sel: sel, scrollLeft: scrollLeft, visibleCols: visibleCols)
+                guard let clampedCols = clampSelectionCols(requestedCols, scrollLeft: scrollLeft, visibleCols: visibleCols) else { continue }
 
-                if row == sel.startRow && row == sel.endRow {
-                    startCol = Float(sel.startCol)
-                    endCol = Float(sel.endCol)
-                } else if row == sel.startRow {
-                    startCol = Float(sel.startCol)
-                    endCol = (viewportWidth - colOffset) / (cellW * scale)
-                } else if row == sel.endRow {
-                    startCol = 0
-                    endCol = Float(sel.endCol)
-                } else {
-                    startCol = 0
-                    endCol = (viewportWidth - colOffset) / (cellW * scale)
-                }
+                let visibleStartCol = Float(clampedCols.start - scrollLeft)
+                let visibleEndCol = Float(clampedCols.end - scrollLeft)
 
                 var quad = QuadGPU()
-                quad.position = SIMD2<Float>(colOffset + startCol * cellW * scale, y)
-                quad.size = SIMD2<Float>((endCol - startCol) * cellW * scale, cellH * scale)
+                quad.position = SIMD2<Float>(colOffset + visibleStartCol * colWidthPx, y)
+                quad.size = SIMD2<Float>((visibleEndCol - visibleStartCol) * colWidthPx, lineHeightPx)
                 quad.color = selColor
                 quad.alpha = 1.0
                 quads.append(quad)
             }
 
         case .block:
-            for row in sel.startRow...sel.endRow {
-                let y = rowOffset + Float(row) * cellH * scale
-                let x = colOffset + Float(sel.startCol) * cellW * scale
-                let w = Float(sel.endCol - sel.startCol) * cellW * scale
+            for row in startRow...endRow {
+                let y = rowOffset + Float(row) * lineHeightPx
+                let requestedCols = (start: Int(sel.startCol), end: Int(sel.endCol))
+                guard let clampedCols = clampSelectionCols(requestedCols, scrollLeft: scrollLeft, visibleCols: visibleCols) else { continue }
+
+                let visibleStartCol = Float(clampedCols.start - scrollLeft)
+                let visibleEndCol = Float(clampedCols.end - scrollLeft)
 
                 var quad = QuadGPU()
-                quad.position = SIMD2<Float>(x, y)
-                quad.size = SIMD2<Float>(w, cellH * scale)
+                quad.position = SIMD2<Float>(colOffset + visibleStartCol * colWidthPx, y)
+                quad.size = SIMD2<Float>((visibleEndCol - visibleStartCol) * colWidthPx, lineHeightPx)
                 quad.color = selColor
                 quad.alpha = 1.0
                 quads.append(quad)
             }
         }
+    }
+
+    private func requestedSelectionCols(row: Int, sel: GUISelectionOverlay, scrollLeft: Int, visibleCols: Int) -> (start: Int, end: Int) {
+        let fullStart = scrollLeft
+        let fullEnd = scrollLeft + visibleCols
+        let startRow = Int(sel.startRow)
+        let endRow = Int(sel.endRow)
+
+        if row == startRow && row == endRow {
+            return (Int(sel.startCol), Int(sel.endCol))
+        }
+
+        if row == startRow {
+            return (Int(sel.startCol), fullEnd)
+        }
+
+        if row == endRow {
+            return (fullStart, Int(sel.endCol))
+        }
+
+        return (fullStart, fullEnd)
+    }
+
+    private func clampSelectionCols(_ cols: (start: Int, end: Int), scrollLeft: Int, visibleCols: Int) -> (start: Int, end: Int)? {
+        let visibleStart = scrollLeft
+        let visibleEnd = scrollLeft + visibleCols
+        let start = max(cols.start, visibleStart)
+        let end = min(cols.end, visibleEnd)
+
+        guard start < end else { return nil }
+        return (start, end)
     }
 
     /// Calculate the display width (in cell columns) of a string,
