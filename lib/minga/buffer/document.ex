@@ -165,9 +165,7 @@ defmodule Minga.Buffer.Document do
 
   @doc "Returns the byte offset of the cursor in the full text."
   @spec cursor_offset(t()) :: non_neg_integer()
-  def cursor_offset(%__MODULE__{before: before}) do
-    byte_size(before)
-  end
+  def cursor_offset(%__MODULE__{before: before}), do: byte_size(before)
 
   @doc """
   Returns the byte offset of a `{line, byte_col}` position in the buffer content.
@@ -598,23 +596,19 @@ defmodule Minga.Buffer.Document do
   # Returns `nil` if the line is out of range.
   @spec line_byte_range(tuple(), non_neg_integer(), non_neg_integer()) ::
           {non_neg_integer(), non_neg_integer()} | nil
-  defp line_byte_range(offsets, line_num, text_size) do
-    max_line = tuple_size(offsets) - 1
+  defp line_byte_range(offsets, line_num, _text_size) when line_num > tuple_size(offsets) - 1,
+    do: nil
 
-    cond do
-      line_num > max_line ->
-        nil
+  defp line_byte_range(offsets, line_num, text_size) when line_num == tuple_size(offsets) - 1 do
+    start = elem(offsets, line_num)
+    {start, text_size - start}
+  end
 
-      line_num == max_line ->
-        start = elem(offsets, line_num)
-        {start, text_size - start}
-
-      true ->
-        start = elem(offsets, line_num)
-        # Next line starts at elem(offsets, line_num + 1); subtract 1 for the newline
-        next_start = elem(offsets, line_num + 1)
-        {start, next_start - start - 1}
-    end
+  defp line_byte_range(offsets, line_num, _text_size) do
+    start = elem(offsets, line_num)
+    # Next line starts at elem(offsets, line_num + 1); subtract 1 for the newline
+    next_start = elem(offsets, line_num + 1)
+    {start, next_start - start - 1}
   end
 
   # ── Movement helpers ──
@@ -761,9 +755,7 @@ defmodule Minga.Buffer.Document do
   end
 
   @spec count_newlines(String.t()) :: non_neg_integer()
-  defp count_newlines(str) do
-    length(:binary.matches(str, "\n"))
-  end
+  defp count_newlines(str), do: length(:binary.matches(str, "\n"))
 
   # Computes the byte offset from start of text for a {line, byte_col} position
   # using the line offset tuple. O(1) lookup instead of O(lines) iteration.
@@ -818,10 +810,7 @@ defmodule Minga.Buffer.Document do
   # Count graphemes in the first `byte_count` bytes of `text`.
   @spec grapheme_count_in_bytes(String.t(), non_neg_integer()) :: non_neg_integer()
   defp grapheme_count_in_bytes(_text, 0), do: 0
-
-  defp grapheme_count_in_bytes(text, byte_count) do
-    do_grapheme_count_in_bytes(text, byte_count, 0, 0)
-  end
+  defp grapheme_count_in_bytes(text, byte_count), do: do_grapheme_count_in_bytes(text, byte_count, 0, 0)
 
   @spec do_grapheme_count_in_bytes(
           String.t(),
