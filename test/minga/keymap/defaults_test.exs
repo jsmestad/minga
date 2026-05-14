@@ -3,6 +3,16 @@ defmodule Minga.Keymap.DefaultsTest do
 
   alias Minga.Keymap.Bindings
   alias Minga.Keymap.Defaults
+  alias Minga.Keymap.NormalPrefixes
+
+  describe "normal prefix trie" do
+    test "zC and zO route to recursive fold commands" do
+      trie = NormalPrefixes.trie()
+      assert {:prefix, z_node} = Bindings.lookup(trie, {?z, 0})
+      assert {:command, :fold_close_recursive} = Bindings.lookup(z_node, {?C, 0})
+      assert {:command, :fold_open_recursive} = Bindings.lookup(z_node, {?O, 0})
+    end
+  end
 
   describe "leader_trie/0" do
     test "returns a non-empty trie node" do

@@ -51,6 +51,7 @@ defmodule MingaEditor.UI.Theme.DoomOne do
         warning_fg: @yellow,
         info_fg: @blue,
         hint_fg: @base5,
+        fold_fg: @base5,
         separator_fg: @base5
       },
       git: %MingaEditor.UI.Theme.Git{

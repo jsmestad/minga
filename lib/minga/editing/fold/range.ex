@@ -3,8 +3,7 @@ defmodule Minga.Editing.Fold.Range do
   A foldable range within a buffer.
 
   Value object representing a region that *can* be folded (collapsed).
-  Produced by fold providers, consumed by `FoldMap`. Two ranges must
-  not overlap; the fold map enforces this on insertion.
+  Produced by fold providers, consumed by `FoldMap`. Ranges may nest for recursive folds, but partial overlaps are rejected by the fold map on insertion.
 
   Both `start_line` and `end_line` are inclusive, 0-indexed buffer line
   numbers. A range must span at least two lines (`end_line > start_line`).

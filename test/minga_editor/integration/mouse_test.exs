@@ -76,9 +76,8 @@ defmodule Minga.Integration.MouseTest do
     test "positions cursor at clicked cell in editor area" do
       ctx = start_editor("hello world\nsecond line\nthird line")
 
-      # Click on "second" at row 2, accounting for gutter width
-      # Gutter is ~3 chars ("1 "), so col 3 = start of text
-      send_mouse(ctx, 2, 5, :left)
+      # Click on "second" at row 2, accounting for gutter width.
+      send_mouse(ctx, 2, 6, :left)
 
       {line, _col} = buffer_cursor(ctx)
       assert line == 1, "clicking row 2 should place cursor on buffer line 1"
@@ -105,7 +104,7 @@ defmodule Minga.Integration.MouseTest do
       ctx = start_editor("hello world")
 
       # Double-click on "hello" (row 1, within text area)
-      send_mouse(ctx, 1, 5, :left, 0, :press, 2)
+      send_mouse(ctx, 1, 6, :left, 0, :press, 2)
 
       assert editor_mode(ctx) == :visual
       assert_screen_snapshot(ctx, "mouse_double_click_word")
@@ -119,7 +118,7 @@ defmodule Minga.Integration.MouseTest do
       ctx = start_editor("hello world\nsecond line")
 
       # Triple-click on first content row
-      send_mouse(ctx, 1, 5, :left, 0, :press, 3)
+      send_mouse(ctx, 1, 6, :left, 0, :press, 3)
 
       mode = editor_mode(ctx)
 
@@ -355,9 +354,9 @@ defmodule Minga.Integration.MouseTest do
       ctx = start_editor("hello world foo bar")
 
       # Click to position cursor
-      send_mouse(ctx, 1, 5, :left)
+      send_mouse(ctx, 1, 6, :left)
       # Shift-click further right to extend selection
-      send_mouse(ctx, 1, 15, :left, @shift)
+      send_mouse(ctx, 1, 16, :left, @shift)
 
       assert editor_mode(ctx) == :visual
       assert_screen_snapshot(ctx, "mouse_shift_click_select")

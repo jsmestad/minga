@@ -138,7 +138,8 @@ defmodule MingaEditor.Renderer.ServerTest do
                         layout: %MingaEditor.Layout{},
                         shell_state: %MingaEditor.Shell.Traditional.State{},
                         windows: %MingaEditor.State.Windows{}
-                      }}
+                      }},
+                     1_000
 
       assert {:ok, _screen} = Minga.Test.HeadlessPort.collect_frame(frame_ref)
       state = drain_renderer_until_idle(renderer)

@@ -2,11 +2,12 @@ defmodule MingaEditor.Renderer.Gutter do
   @moduledoc """
   Line number gutter and diagnostic sign column rendering.
 
-  The gutter has two parts (left to right):
+  The gutter has three parts (left to right):
   1. **Sign column** (2 chars) — always reserved for diagnostic icons, git
      signs, or annotation markers. Keeping this space constant prevents
      line numbers from shifting when signs appear or disappear.
-  2. **Line numbers** (variable width) — absolute, relative, or hybrid
+  2. **Fold column** (1 char) — fold chevrons live here so they never hide signs.
+  3. **Line numbers** (variable width) — absolute, relative, or hybrid
 
   All render functions return `DisplayList.draw()` tuples (or `[]`).
   """
@@ -16,6 +17,7 @@ defmodule MingaEditor.Renderer.Gutter do
   alias MingaEditor.DisplayList
 
   @sign_col_width 2
+  @fold_col_width 1
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -24,20 +26,29 @@ defmodule MingaEditor.Renderer.Gutter do
   @type colors :: MingaEditor.UI.Theme.Gutter.t()
 
   @doc """
-  Returns the total gutter width including sign column and line numbers.
+  Returns the total gutter width including sign column, fold column, and line numbers.
 
   The sign column is always reserved (2 characters) to keep the gutter
   layout consistent regardless of whether diagnostics or git markers are
-  active. This prevents line numbers from shifting when signs appear.
+  active. The fold column is separate so fold indicators never overwrite
+  diagnostics, git signs, or annotations.
   """
   @spec total_width(non_neg_integer()) :: non_neg_integer()
   def total_width(line_number_w) do
-    @sign_col_width + line_number_w
+    @sign_col_width + @fold_col_width + line_number_w
   end
 
   @doc "Returns the width of the sign column."
   @spec sign_column_width() :: non_neg_integer()
   def sign_column_width, do: @sign_col_width
+
+  @doc "Returns the width of the fold indicator column."
+  @spec fold_column_width() :: non_neg_integer()
+  def fold_column_width, do: @fold_col_width
+
+  @doc "Returns the gutter-relative column where fold indicators are drawn."
+  @spec fold_column_offset() :: non_neg_integer()
+  def fold_column_offset, do: @sign_col_width
 
   @typedoc "Git sign color set from the active theme."
   @type git_colors :: MingaEditor.UI.Theme.Git.t()

@@ -48,6 +48,7 @@ defmodule MingaEditor.UI.Theme.OneLight do
         warning_fg: @hue_6,
         info_fg: @hue_2,
         hint_fg: @syntax_gutter,
+        fold_fg: @syntax_gutter,
         separator_fg: @syntax_gutter
       },
       git: %MingaEditor.UI.Theme.Git{

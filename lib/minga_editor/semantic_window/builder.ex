@@ -278,9 +278,9 @@ defmodule MingaEditor.SemanticWindow.Builder do
     }
   end
 
-  defp build_visual_row_entry(buf_line, {:block, block, line_idx}, _lines, _first_line, _ctx) do
-    # Block decorations render via callback; capture the rendered text
-    rendered_lines = block.render.(80)
+  defp build_visual_row_entry(buf_line, {:block, block, line_idx}, _lines, _first_line, ctx) do
+    # Block decorations render via callback; capture the rendered text using the same text width as the draw path.
+    rendered_lines = block.render.(ctx.content_w)
     normalized = BlockDecoration.normalize_render_result(rendered_lines)
     segments = Enum.at(normalized, line_idx, [])
     text = Enum.map_join(segments, fn {t, _style} -> t end)

@@ -218,6 +218,13 @@ struct ThemeColorsSlotMappingTests {
         #expect(theme.gutterHintFgRGB == 0xAABBCC)
     }
 
+    @Test("Slot 0x62 maps to gutterFoldFg and gutterFoldFgRGB")
+    @MainActor func gutterFoldFg() {
+        let theme = applySlot(GUI_COLOR_GUTTER_FOLD_FG)
+        #expect(theme.gutterFoldFg == expectedColor())
+        #expect(theme.gutterFoldFgRGB == 0xAABBCC)
+    }
+
     @Test("Slot 0x56 maps to gitAddedFg and gitAddedFgRGB")
     @MainActor func gitAddedFg() {
         let theme = applySlot(GUI_COLOR_GIT_ADDED_FG)

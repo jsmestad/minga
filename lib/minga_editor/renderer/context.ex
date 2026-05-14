@@ -46,7 +46,8 @@ defmodule MingaEditor.Renderer.Context do
               error_fg: 0xFF6C6B,
               warning_fg: 0xECBE7B,
               info_fg: 0x51AFEF,
-              hint_fg: 0x555555
+              hint_fg: 0x555555,
+              fold_fg: 0x555555
             },
             show_invisible: false,
             tab_width: 2,

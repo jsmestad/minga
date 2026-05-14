@@ -548,10 +548,10 @@ defmodule MingaEditor.Renderer.BufferLine do
   defp render_number(p, sr) do
     Gutter.render_number(
       sr,
-      p.sign_w,
+      p.sign_w + Gutter.fold_column_width(),
       p.buf_line,
       p.cursor_line,
-      p.gutter_w - p.sign_w,
+      p.gutter_w - p.sign_w - Gutter.fold_column_width(),
       p.ln_style,
       p.ctx.gutter_colors
     )

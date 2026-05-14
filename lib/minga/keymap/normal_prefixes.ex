@@ -36,6 +36,8 @@ defmodule Minga.Keymap.NormalPrefixes do
     {[{?z, 0}, {?a, 0}], :fold_toggle, "Toggle fold"},
     {[{?z, 0}, {?c, 0}], :fold_close, "Close fold"},
     {[{?z, 0}, {?o, 0}], :fold_open, "Open fold"},
+    {[{?z, 0}, {?C, 0}], :fold_close_recursive, "Close folds recursively"},
+    {[{?z, 0}, {?O, 0}], :fold_open_recursive, "Open folds recursively"},
     {[{?z, 0}, {?M, 0}], :fold_close_all, "Close all folds"},
     {[{?z, 0}, {?R, 0}], :fold_open_all, "Open all folds"},
     {[{?z, 0}, {?z, 0}], :scroll_center, "Center viewport on cursor"},

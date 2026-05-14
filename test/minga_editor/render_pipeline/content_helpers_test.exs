@@ -2,6 +2,9 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
   use ExUnit.Case, async: true
 
   alias Minga.Core.Decorations
+  alias Minga.Editing.Fold.Range, as: FoldRange
+  alias MingaEditor.Renderer.Gutter
+  alias MingaEditor.UI.Theme
   alias MingaEditor.Renderer.Context
   alias MingaEditor.RenderPipeline.ContentHelpers
   alias MingaEditor.Viewport
@@ -101,11 +104,22 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
       buf = start_supervised!({Minga.Buffer.Server, content: ""})
       viewport = Viewport.new(20, 20, 0)
 
+      gutter_colors = %Theme.Gutter{
+        fg: 0x111111,
+        current_fg: 0x222222,
+        error_fg: 0x333333,
+        warning_fg: 0x444444,
+        info_fg: 0x555555,
+        hint_fg: 0x666666,
+        fold_fg: 0xABCDEF
+      }
+
       ctx = %Context{
         viewport: viewport,
-        gutter_w: 3,
+        gutter_w: 6,
         content_w: 10,
-        decorations: Decorations.new()
+        decorations: Decorations.new(),
+        gutter_colors: gutter_colors
       }
 
       window = %Window{
@@ -117,6 +131,138 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
       }
 
       %{buf: buf, ctx: ctx, window: window}
+    end
+
+    test "expanded foldable lines render a down chevron in the gutter", %{
+      ctx: ctx,
+      window: window
+    } do
+      lines = ["defmodule Example do", "  def run, do: :ok", "end"]
+      window = Window.set_fold_ranges(window, [FoldRange.new!(0, 2)])
+
+      opts = %{
+        first_line: 0,
+        cursor_line: 0,
+        ctx: ctx,
+        ln_style: :absolute,
+        gutter_w: 6,
+        first_byte_off: 0,
+        row_off: 0,
+        col_off: 0,
+        window: window,
+        buffer: window.buffer
+      }
+
+      {gutter_layer, _content_layer, _rows, _window} =
+        ContentHelpers.render_lines_nowrap_layers(lines, opts)
+
+      assert {col, "▾", face} =
+               Enum.find(Map.get(gutter_layer, 0), fn {_col, text, _face} -> text == "▾" end)
+
+      assert col == Gutter.fold_column_offset()
+      assert face.fg == ctx.gutter_colors.fold_fg
+    end
+
+    test "fold indicators do not overwrite diagnostic signs", %{ctx: ctx, window: window} do
+      lines = ["defmodule Example do", "  def run, do: :ok", "end"]
+      window = Window.set_fold_ranges(window, [FoldRange.new!(0, 2)])
+      ctx = %{ctx | diagnostic_signs: %{0 => :error}}
+
+      opts = %{
+        first_line: 0,
+        cursor_line: 0,
+        ctx: ctx,
+        ln_style: :absolute,
+        gutter_w: 6,
+        first_byte_off: 0,
+        row_off: 0,
+        col_off: 0,
+        window: window,
+        buffer: window.buffer
+      }
+
+      {gutter_layer, _content_layer, _rows, _window} =
+        ContentHelpers.render_lines_nowrap_layers(lines, opts)
+
+      row = Map.get(gutter_layer, 0)
+
+      assert {0, "E ", _diag_face} =
+               Enum.find(row, fn {col, text, _face} -> col == 0 and text == "E " end)
+
+      assert {2, "▾", _fold_face} =
+               Enum.find(row, fn {col, text, _face} -> col == 2 and text == "▾" end)
+    end
+
+    test "folded lines render a right chevron in the gutter", %{ctx: ctx, window: window} do
+      lines = ["defmodule Example do", "  def run, do: :ok", "end"]
+      visible_line_map = [{0, {:fold_start, 2}}]
+
+      opts = %{
+        first_line: 0,
+        cursor_line: 0,
+        ctx: ctx,
+        ln_style: :absolute,
+        gutter_w: 6,
+        row_off: 0,
+        col_off: 0,
+        window: window,
+        visible_line_map: visible_line_map,
+        fold_map: %MingaEditor.FoldMap{folds: []}
+      }
+
+      {gutter_draws, _line_draws, _rendered_rows, _window} =
+        ContentHelpers.render_lines_nowrap(lines, opts)
+
+      assert {_row, _col, "▸", face} =
+               Enum.find(gutter_draws, fn {_row, _col, text, _face} -> text == "▸" end)
+
+      assert face.fg == ctx.gutter_colors.fold_fg
+    end
+
+    test "custom decoration fold placeholders render chevron in the fold column", %{
+      ctx: ctx,
+      window: window
+    } do
+      lines = ["agent output", "line two", "line three"]
+
+      {_id, decorations} =
+        Decorations.add_fold_region(Decorations.new(), 0, 2,
+          closed: true,
+          placeholder: fn _start_line, _end_line, _width ->
+            [{"custom placeholder", Minga.Core.Face.new(fg: 0xEEEEEE)}]
+          end
+        )
+
+      [fold] = Decorations.closed_fold_regions(decorations)
+      ctx = %{ctx | decorations: decorations}
+
+      opts = %{
+        first_line: 0,
+        cursor_line: 0,
+        ctx: ctx,
+        ln_style: :absolute,
+        gutter_w: 6,
+        row_off: 0,
+        col_off: 0,
+        window: window,
+        visible_line_map: [{0, {:decoration_fold, fold}}],
+        fold_map: %MingaEditor.FoldMap{folds: []}
+      }
+
+      {gutter_draws, line_draws, _rendered_rows, _window} =
+        ContentHelpers.render_lines_nowrap(lines, opts)
+
+      assert {_row, col, "▸", face} =
+               Enum.find(gutter_draws, fn {_row, _col, text, _face} -> text == "▸" end)
+
+      assert {_row, content_col, "custom placeholder", _face} =
+               Enum.find(line_draws, fn {_row, _col, text, _face} ->
+                 text == "custom placeholder"
+               end)
+
+      assert col == Gutter.fold_column_offset()
+      assert content_col == ctx.gutter_w
+      assert face.fg == ctx.gutter_colors.fold_fg
     end
 
     test "wrapped lines at screen_row > 0 render all visual rows", %{ctx: ctx, window: window} do
@@ -131,7 +277,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
         cursor_line: 0,
         ctx: ctx,
         ln_style: :absolute,
-        gutter_w: 3,
+        gutter_w: 6,
         row_off: 0,
         col_off: 0,
         window: window,
@@ -171,7 +317,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
         cursor_line: 0,
         ctx: ctx,
         ln_style: :absolute,
-        gutter_w: 3,
+        gutter_w: 6,
         row_off: 0,
         col_off: 0,
         window: window,

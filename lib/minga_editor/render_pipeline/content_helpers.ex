@@ -18,6 +18,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   alias Minga.Core.Unicode
   alias Minga.Diagnostics
   alias MingaEditor.DisplayList
+  alias MingaEditor.DisplayMap
   alias MingaEditor.RenderPosition
   alias MingaEditor.Renderer.BufferLine
   alias MingaEditor.Renderer.Context
@@ -29,6 +30,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   alias Minga.Git
   alias Minga.LSP.SyncServer
   alias Minga.Mode.VisualState
+  alias Minga.Editing.Fold.Range, as: FoldRange
   alias MingaEditor.UI.Highlight
 
   @type state :: Input.t()
@@ -204,6 +206,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     sign_w = Gutter.sign_column_width()
     max_rows = length(lines)
     dirty_rows = dirty_screen_rows(lines, first_line, window)
+    fold_start_lines = fold_start_lines(window.fold_ranges)
 
     highlight_segments_list =
       if ctx.highlight do
@@ -245,6 +248,16 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
                 highlight_segments: hl_segments
               })
 
+            fold_g =
+              fold_gutter_indicator(
+                :normal,
+                fold_indicator_pos(screen_row, row_off, col_off, gutter_w, ctx),
+                ctx.gutter_colors,
+                fold_start_lines,
+                buf_line
+              )
+
+            g_cmds = g_cmds ++ fold_g
             win = Window.cache_line(win, buf_line, g_cmds, c_cmds)
 
             {put_draws(g_layer, g_cmds), put_draws(c_layer, c_cmds), next_byte_off, win,
@@ -299,6 +312,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
     sign_w = Gutter.sign_column_width()
     max_rows = length(lines)
+    fold_start_lines = fold_start_lines(window.fold_ranges)
 
     # Pre-compute highlight segments for all visible lines in one O(N) pass.
     highlight_segments_list =
@@ -338,6 +352,16 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
                 highlight_segments: hl_segments
               })
 
+            fold_g =
+              fold_gutter_indicator(
+                :normal,
+                fold_indicator_pos(screen_row, row_off, col_off, gutter_w, ctx),
+                ctx.gutter_colors,
+                fold_start_lines,
+                buf_line
+              )
+
+            g_cmds = fold_g ++ g_cmds
             win = Window.cache_line(win, buf_line, g_cmds, c_cmds)
             {g_cmds ++ g, prepend_all(c, c_cmds), next_byte_off, win}
           else
@@ -356,7 +380,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   @spec render_lines_nowrap_folded(
           [String.t()],
           line_render_opts(),
-          [MingaEditor.FoldMap.VisibleLines.line_entry()]
+          [DisplayMap.entry()]
         ) :: {[DisplayList.draw()], [DisplayList.draw()], non_neg_integer(), Window.t()}
   defp render_lines_nowrap_folded(lines, opts, visible_line_map) do
     %{
@@ -395,7 +419,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       col_off: col_off,
       lines: lines,
       first_line: first_line,
-      wrap_index: wrap_index
+      wrap_index: wrap_index,
+      fold_start_lines: fold_start_lines(window.fold_ranges)
     }
 
     # block_render_cache is a within-window Map keyed by block ID.
@@ -405,42 +430,27 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
                                                                  {g, c, screen_row, win, bc} ->
         case fold_info do
           {:virtual_line, vt} ->
-            render_pos = %RenderPosition{
-              screen_row: screen_row,
-              gutter_w: gutter_w,
-              row_off: row_off,
-              col_off: col_off,
-              content_w: ctx.content_w
-            }
+            render_pos = content_pos(screen_row, row_off, col_off, gutter_w, ctx)
 
             c_cmds = render_virtual_line_entry(vt, render_pos)
             {g, prepend_all(c, c_cmds), screen_row + 1, win, bc}
 
           {:block, block, line_idx} ->
-            render_pos = %RenderPosition{
-              screen_row: screen_row,
-              gutter_w: gutter_w,
-              row_off: row_off,
-              col_off: col_off,
-              content_w: ctx.content_w
-            }
+            render_pos = content_pos(screen_row, row_off, col_off, gutter_w, ctx)
 
             {c_cmds, bc} = render_block_entry(block, line_idx, render_pos, bc)
             {g, prepend_all(c, c_cmds), screen_row + 1, win, bc}
 
           {:decoration_fold, %FoldRegion{placeholder: placeholder} = fold}
           when placeholder != nil ->
-            render_pos = %RenderPosition{
-              screen_row: screen_row,
-              gutter_w: gutter_w,
-              row_off: row_off,
-              col_off: col_off,
-              content_w: ctx.content_w
-            }
+            content_render_pos = content_pos(screen_row, row_off, col_off, gutter_w, ctx)
+            fold_render_pos = fold_indicator_pos(screen_row, row_off, col_off, gutter_w, ctx)
 
-            fold_g = fold_gutter_indicator(fold_info, render_pos)
+            fold_g =
+              fold_gutter_indicator(fold_info, fold_render_pos, ctx.gutter_colors, %{}, nil)
+
             segments = placeholder.(fold.start_line, fold.end_line, ctx.content_w)
-            c_cmds = render_placeholder_segments(segments, render_pos)
+            c_cmds = render_placeholder_segments(segments, content_render_pos)
             {fold_g ++ g, prepend_all(c, c_cmds), screen_row + 1, win, bc}
 
           _ ->
@@ -568,25 +578,98 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   defp fold_display_text(_text, {:virtual_line, _vt}), do: ""
   defp fold_display_text(_text, {:block, _, _}), do: ""
 
-  @spec fold_gutter_indicator(term(), RenderPosition.t()) :: [DisplayList.draw()]
-  defp fold_gutter_indicator({:fold_start, _}, %RenderPosition{} = pos) do
-    [DisplayList.draw(pos.screen_row + pos.row_off, pos.col_off, "▸")]
+  @spec fold_gutter_indicator(
+          term(),
+          RenderPosition.t(),
+          MingaEditor.UI.Theme.Gutter.t(),
+          %{non_neg_integer() => true},
+          non_neg_integer() | nil
+        ) :: [DisplayList.draw()]
+  defp fold_gutter_indicator({:fold_start, _}, %RenderPosition{} = pos, colors, _starts, _line) do
+    fold_indicator_draw(pos, "▸", colors)
   end
 
-  defp fold_gutter_indicator(:normal, _pos), do: []
-
-  defp fold_gutter_indicator({:decoration_fold, _}, %RenderPosition{} = pos) do
-    [DisplayList.draw(pos.screen_row + pos.row_off, pos.col_off, "▸")]
+  defp fold_gutter_indicator(:normal, %RenderPosition{} = pos, colors, starts, buf_line)
+       when is_integer(buf_line) do
+    if Map.has_key?(starts, buf_line) do
+      fold_indicator_draw(pos, "▾", colors)
+    else
+      []
+    end
   end
 
-  defp fold_gutter_indicator({:virtual_line, _}, _pos), do: []
-  defp fold_gutter_indicator({:block, _, _}, _pos), do: []
+  defp fold_gutter_indicator(:normal, _pos, _colors, _starts, _line), do: []
+
+  defp fold_gutter_indicator(
+         {:decoration_fold, _},
+         %RenderPosition{} = pos,
+         colors,
+         _starts,
+         _line
+       ) do
+    fold_indicator_draw(pos, "▸", colors)
+  end
+
+  defp fold_gutter_indicator({:virtual_line, _}, _pos, _colors, _starts, _line), do: []
+  defp fold_gutter_indicator({:block, _, _}, _pos, _colors, _starts, _line), do: []
+
+  @spec fold_indicator_draw(RenderPosition.t(), String.t(), MingaEditor.UI.Theme.Gutter.t()) ::
+          [DisplayList.draw()]
+  defp fold_indicator_draw(pos, icon, colors) do
+    [
+      DisplayList.draw(
+        pos.screen_row + pos.row_off,
+        pos.col_off,
+        icon,
+        Face.new(fg: colors.fold_fg)
+      )
+    ]
+  end
+
+  @spec content_pos(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Context.t()
+        ) :: RenderPosition.t()
+  defp content_pos(screen_row, row_off, col_off, gutter_w, ctx) do
+    %RenderPosition{
+      screen_row: screen_row,
+      gutter_w: gutter_w,
+      row_off: row_off,
+      col_off: col_off,
+      content_w: ctx.content_w
+    }
+  end
+
+  @spec fold_indicator_pos(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Context.t()
+        ) :: RenderPosition.t()
+  defp fold_indicator_pos(screen_row, row_off, col_off, gutter_w, ctx) do
+    %RenderPosition{
+      screen_row: screen_row,
+      gutter_w: gutter_w,
+      row_off: row_off,
+      col_off: col_off + Gutter.fold_column_offset(),
+      content_w: ctx.content_w
+    }
+  end
+
+  @spec fold_start_lines([FoldRange.t()]) :: %{non_neg_integer() => true}
+  defp fold_start_lines(ranges) do
+    Map.new(ranges, fn range -> {range.start_line, true} end)
+  end
 
   @spec render_folded_line(
           Window.t(),
           non_neg_integer(),
           String.t(),
-          :normal | {:fold_start, pos_integer()},
+          :normal | {:fold_start, pos_integer()} | {:decoration_fold, FoldRegion.t()},
           non_neg_integer(),
           map(),
           {[DisplayList.draw()], [DisplayList.draw()]}
@@ -595,15 +678,23 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     wrap_entry = Map.get(render_opts, :wrap_entry)
 
     if Window.dirty?(win, buf_line) do
-      fold_pos = %RenderPosition{
-        screen_row: screen_row,
-        gutter_w: render_opts.gutter_w,
-        row_off: render_opts.row_off,
-        col_off: render_opts.col_off,
-        content_w: render_opts.ctx.content_w
-      }
+      fold_render_pos =
+        fold_indicator_pos(
+          screen_row,
+          render_opts.row_off,
+          render_opts.col_off,
+          render_opts.gutter_w,
+          render_opts.ctx
+        )
 
-      fold_g = fold_gutter_indicator(fold_info, fold_pos)
+      fold_g =
+        fold_gutter_indicator(
+          fold_info,
+          fold_render_pos,
+          render_opts.ctx.gutter_colors,
+          render_opts.fold_start_lines,
+          buf_line
+        )
 
       {g_cmds, c_cmds, _rows} =
         BufferLine.render(%{
@@ -653,6 +744,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       WrapMap.compute(lines, ctx.content_w, breakindent: breakindent, linebreak: linebreak)
 
     sign_w = Gutter.sign_column_width()
+    fold_start_lines = fold_start_lines(opts.window.fold_ranges)
 
     {gutters, contents, screen_row, _byte_off} =
       lines
@@ -661,10 +753,12 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       |> Enum.reduce_while(
         {[], [], 0, first_byte_off},
         fn {{line_text, line_idx}, visual_rows}, {g, c, sr, byte_off} ->
+          buf_line = first_line + line_idx
+
           {g2, c2, rows_used} =
             BufferLine.render(%{
               line_text: line_text,
-              buf_line: first_line + line_idx,
+              buf_line: buf_line,
               cursor_line: cursor_line,
               byte_offset: byte_off,
               screen_row: sr,
@@ -678,6 +772,16 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
               col_offset: col_off
             })
 
+          fold_g =
+            fold_gutter_indicator(
+              :normal,
+              fold_indicator_pos(sr, row_off, col_off, gutter_w, ctx),
+              ctx.gutter_colors,
+              fold_start_lines,
+              buf_line
+            )
+
+          g2 = fold_g ++ g2
           sr2 = sr + rows_used
           next_byte_off = byte_off + byte_size(line_text) + 1
 

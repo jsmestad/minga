@@ -531,7 +531,6 @@ final class CoreTextMetalRenderer {
                 frameState: frameState,
                 cellW: cellW, cellH: displayCellH, scale: scale,
                 gutterLeftMarginPx: gutterLeftMarginPx,
-                gutterPaddingPx: gutterPaddingPx,
                 bgQuads: &bgQuads,
                 lineInstances: &lineInstances
             )
@@ -892,7 +891,6 @@ final class CoreTextMetalRenderer {
         frameState: FrameState,
         cellW: Float, cellH: Float, scale: Float,
         gutterLeftMarginPx: Float,
-        gutterPaddingPx: Float,
         bgQuads: inout [QuadGPU],
         lineInstances: inout [LineGPU]
     ) {
@@ -915,7 +913,18 @@ final class CoreTextMetalRenderer {
                 )
             }
 
-            // Line number (after sign column)
+            // Fold indicator (dedicated cell after the diagnostic/git sign column)
+            if signColWidth >= 3 {
+                renderGutterFoldIndicator(
+                    entry: entry, screenRow: screenRow, yPos: yPos, xOffset: xOffset,
+                    signColWidth: signColWidth,
+                    cellW: cellW, scale: scale,
+                    frameState: frameState,
+                    lineInstances: &lineInstances,
+                )
+            }
+
+            // Line number (after sign and fold columns)
             if gutter.lineNumberStyle != .none && gutter.lineNumberWidth > 0 {
                 renderGutterLineNumber(
                     entry: entry, gutter: gutter,
@@ -1008,6 +1017,42 @@ final class CoreTextMetalRenderer {
         }
     }
 
+    /// Renders the fold indicator for one gutter row.
+    private func renderGutterFoldIndicator(
+        entry: Wire.GutterEntry, screenRow: UInt16, yPos: Float, xOffset: Float,
+        signColWidth: Int,
+        cellW: Float, scale: Float,
+        frameState: FrameState,
+        lineInstances: inout [LineGPU],
+    ) {
+        let text: String
+        switch entry.displayType {
+        case .foldStart:
+            text = "▸"
+        case .foldOpen:
+            text = "▾"
+        case .normal, .foldContinuation, .wrapContinuation:
+            return
+        }
+
+        let fg = frameState.gutterColors.foldFg
+        let cacheKey = UInt16(0xA000) &+ screenRow
+        let contentHash = gutterContentHash(text: text, fg: fg)
+        if let atlas, let wcr = windowContentRenderer,
+           let atlasEntry = wcr.renderSimpleText(text, fg: fg, bold: false,
+                                                  key: cacheKey, contentHash: contentHash, atlas: atlas) {
+            let (uvOrigin, uvSize) = atlas.uvForSlot(atlasEntry.slotIndex, pixelWidth: atlasEntry.pixelWidth)
+            let foldColumnOffset = signColWidth - 1
+            let xPos = xOffset + Float(foldColumnOffset) * cellW * scale
+            var lineGPU = LineGPU()
+            lineGPU.position = SIMD2<Float>(xPos, yPos)
+            lineGPU.size = SIMD2<Float>(Float(atlasEntry.pixelWidth), Float(atlasEntry.pixelHeight))
+            lineGPU.uvOrigin = uvOrigin
+            lineGPU.uvSize = uvSize
+            lineInstances.append(lineGPU)
+        }
+    }
+
     /// Renders a line number for one gutter row.
     private func renderGutterLineNumber(
         entry: Wire.GutterEntry, gutter: Wire.WindowGutter,
@@ -1029,7 +1074,7 @@ final class CoreTextMetalRenderer {
         let lnWidth = Int(gutter.lineNumberWidth)
 
         // Right-align the number within the line number column space.
-        // The number starts after the sign column.
+        // The number starts after the reserved sign/fold prefix columns.
         let padCols = max(lnWidth - numberStr.count - 1, 0)
         let startCol = UInt16(signColWidth + padCols)
 

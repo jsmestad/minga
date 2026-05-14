@@ -220,7 +220,7 @@ defmodule MingaEditor.DisplayMap do
           non_neg_integer()
   def total_display_lines(fold_map, decorations, total_buf_lines, content_width \\ 80) do
     window_hidden =
-      FoldMap.folds(fold_map)
+      FoldMap.visible_folds(fold_map)
       |> Enum.reduce(0, fn f, acc -> acc + (f.end_line - f.start_line) end)
 
     dec_hidden =
@@ -229,7 +229,7 @@ defmodule MingaEditor.DisplayMap do
 
     virt_lines = Decorations.virtual_line_count(decorations, 0, total_buf_lines)
 
-    all_folds = FoldMap.folds(fold_map) ++ Decorations.closed_fold_regions(decorations)
+    all_folds = FoldMap.visible_folds(fold_map) ++ Decorations.closed_fold_regions(decorations)
 
     block_rows =
       decorations.block_decorations

@@ -360,7 +360,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | :annotation
 
   @typedoc "Display type for a gutter row."
-  @type display_type :: :normal | :fold_start | :fold_continuation | :wrap_continuation
+  @type display_type ::
+          :normal | :fold_start | :fold_continuation | :wrap_continuation | :fold_open
 
   @typedoc """
   A single gutter entry for one visible line.
@@ -471,6 +472,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp encode_display_type(:fold_start), do: 1
   defp encode_display_type(:fold_continuation), do: 2
   defp encode_display_type(:wrap_continuation), do: 3
+  defp encode_display_type(:fold_open), do: 4
 
   @spec encode_sign_type(sign_type()) :: non_neg_integer()
   defp encode_sign_type(:none), do: 0

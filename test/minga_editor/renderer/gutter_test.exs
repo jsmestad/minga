@@ -9,7 +9,8 @@ defmodule MingaEditor.Renderer.GutterTest do
     error_fg: 0xFF6C6B,
     warning_fg: 0xECBE7B,
     info_fg: 0x51AFEF,
-    hint_fg: 0x555555
+    hint_fg: 0x555555,
+    fold_fg: 0x555555
   }
 
   @git_colors %MingaEditor.UI.Theme.Git{
@@ -19,18 +20,24 @@ defmodule MingaEditor.Renderer.GutterTest do
   }
 
   describe "total_width/1" do
-    test "always includes sign column width" do
-      assert Gutter.total_width(4) == 6
+    test "always includes sign and fold column width" do
+      assert Gutter.total_width(4) == 7
     end
 
-    test "zero line number width still reserves sign column" do
-      assert Gutter.total_width(0) == 2
+    test "zero line number width still reserves sign and fold columns" do
+      assert Gutter.total_width(0) == 3
     end
   end
 
   describe "sign_column_width/0" do
     test "returns 2" do
       assert Gutter.sign_column_width() == 2
+    end
+  end
+
+  describe "fold_column_offset/0" do
+    test "returns the column after the sign column" do
+      assert Gutter.fold_column_offset() == 2
     end
   end
 

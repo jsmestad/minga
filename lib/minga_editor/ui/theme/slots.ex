@@ -18,6 +18,7 @@ defmodule MingaEditor.UI.Theme.Slots do
   | 0x40      | Accent        |
   | 0x50-0x5B | Gutter + Git + Highlights |
   | 0x5C-0x61 | Agent status  |
+  | 0x62      | Gutter fold   |
   | 0xA0-0xAE | Agent chat    |
   """
 
@@ -83,6 +84,7 @@ defmodule MingaEditor.UI.Theme.Slots do
   @git_added_fg 0x56
   @git_modified_fg 0x57
   @git_deleted_fg 0x58
+  @gutter_fold_fg 0x62
 
   # ── Document highlights + Selection ──
   @highlight_read_bg 0x59
@@ -189,6 +191,7 @@ defmodule MingaEditor.UI.Theme.Slots do
       {@gutter_warning_fg, theme.gutter.warning_fg},
       {@gutter_info_fg, theme.gutter.info_fg},
       {@gutter_hint_fg, theme.gutter.hint_fg},
+      {@gutter_fold_fg, theme.gutter.fold_fg},
       {@git_added_fg, theme.git.added_fg},
       {@git_modified_fg, theme.git.modified_fg},
       {@git_deleted_fg, theme.git.deleted_fg},

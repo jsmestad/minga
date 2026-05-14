@@ -71,6 +71,16 @@ defmodule MingaEditor.FoldMapTest do
       assert FoldMap.count(fm) == 2
     end
 
+    test "fold accepts nested ranges for recursive folds" do
+      outer = FoldRange.new!(0, 20)
+      inner = FoldRange.new!(5, 10)
+
+      fm = FoldMap.new() |> FoldMap.fold(outer) |> FoldMap.fold(inner)
+
+      assert FoldMap.count(fm) == 2
+      assert FoldMap.visible_line_count(fm, 30) == 10
+    end
+
     test "unfold_at removes fold containing the line" do
       range = FoldRange.new!(5, 10)
       fm = FoldMap.new() |> FoldMap.fold(range) |> FoldMap.unfold_at(7)
@@ -109,6 +119,43 @@ defmodule MingaEditor.FoldMapTest do
     end
   end
 
+  describe "recursive folds" do
+    test "fold_recursive folds the outermost containing range and nested ranges" do
+      outer = FoldRange.new!(0, 20)
+      child = FoldRange.new!(3, 8)
+      sibling = FoldRange.new!(12, 18)
+      outside = FoldRange.new!(30, 40)
+      ranges = [child, outside, outer, sibling]
+
+      fm = FoldMap.fold_recursive(FoldMap.new(), 5, ranges)
+
+      assert FoldMap.folds(fm) == [outer, child, sibling]
+      assert FoldMap.visible_line_count(fm, 50) == 30
+    end
+
+    test "unfold_recursive removes all active folds contained in the outermost target" do
+      outer = FoldRange.new!(0, 20)
+      child = FoldRange.new!(3, 8)
+      outside = FoldRange.new!(30, 40)
+
+      fm =
+        FoldMap.new()
+        |> FoldMap.fold(outer)
+        |> FoldMap.fold(child)
+        |> FoldMap.fold(outside)
+        |> FoldMap.unfold_recursive(5, [outer, child, outside])
+
+      assert FoldMap.folds(fm) == [outside]
+    end
+
+    test "outermost_range chooses the largest containing range" do
+      outer = FoldRange.new!(0, 20)
+      inner = FoldRange.new!(5, 10)
+
+      assert FoldMap.outermost_range([inner, outer], 6) == outer
+    end
+  end
+
   describe "fold_all/2 and unfold_all/1" do
     test "fold_all creates folds from all non-overlapping ranges" do
       ranges = [FoldRange.new!(0, 5), FoldRange.new!(10, 15), FoldRange.new!(20, 25)]
@@ -120,6 +167,13 @@ defmodule MingaEditor.FoldMapTest do
       ranges = [FoldRange.new!(0, 10), FoldRange.new!(5, 15)]
       fm = FoldMap.fold_all(FoldMap.new(), ranges)
       assert FoldMap.count(fm) == 1
+    end
+
+    test "fold_all preserves nested ranges" do
+      ranges = [FoldRange.new!(0, 20), FoldRange.new!(5, 10)]
+      fm = FoldMap.fold_all(FoldMap.new(), ranges)
+      assert FoldMap.count(fm) == 2
+      assert FoldMap.visible_line_count(fm, 30) == 10
     end
 
     test "unfold_all clears all folds" do

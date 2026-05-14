@@ -371,7 +371,7 @@ Per entry:
   buf_line(4) + display_type(1) + sign_type(1)
 ```
 
-`window_id` matches the `window_id` field in `gui_window_content` (0x80), enabling the frontend to correlate gutter data with semantic buffer content for the same window. `content_row` and `content_col` are the screen position of the window's content area (0-indexed). `content_height` is the height in rows. `is_active` is 1 for the focused window, 0 otherwise. `cursor_line` is the 0-indexed buffer line where the cursor sits. `line_number_width` is the character column count allocated for line numbers. `sign_col_width` is 0 (no sign column) or 2 (sign column present). `line_count` is the number of visible line entries.
+`window_id` matches the `window_id` field in `gui_window_content` (0x80), enabling the frontend to correlate gutter data with semantic buffer content for the same window. `content_row` and `content_col` are the screen position of the window's content area (0-indexed). `content_height` is the height in rows. `is_active` is 1 for the focused window, 0 otherwise. `cursor_line` is the 0-indexed buffer line where the cursor sits. `line_number_width` is the character column count allocated for line numbers. `sign_col_width` is the width before line numbers: 0 for no sign/fold prefix, 2 for the sign column only, or 3 when the dedicated fold column is present after the sign column. `line_count` is the number of visible line entries.
 
 Line number style values:
 | Value | Style |
@@ -388,6 +388,7 @@ Display type values:
 | 1 | fold start |
 | 2 | fold continuation |
 | 3 | wrap continuation |
+| 4 | fold open |
 
 Sign type values:
 | Value | Sign |
@@ -400,8 +401,9 @@ Sign type values:
 | 5 | diagnostic warning |
 | 6 | diagnostic info |
 | 7 | diagnostic hint |
+| 8 | annotation |
 
-Diagnostics take priority over git signs (same line shows only the highest-priority sign). The GUI frontend renders line numbers natively using its font engine, computing relative/absolute display from `buf_line` and `cursor_line`. Git signs are drawn as colored bars; diagnostic signs as colored text characters.
+Diagnostics take priority over git signs (same line shows only the highest-priority sign). The GUI frontend renders line numbers natively using its font engine, computing relative/absolute display from `buf_line` and `cursor_line`. Git signs are drawn as colored bars; diagnostic signs as colored text characters. Fold indicators render in the dedicated fold column when `display_type` is `fold_start` or `fold_open`.
 
 When this opcode is sent, the BEAM strips `WindowFrame.gutter` from the cell-grid frame output, so no draw_text commands are sent for gutter content. The TUI rendering path is unaffected.
 
@@ -882,7 +884,7 @@ Mode color slots fall back to `modeline.bar_fg` / `modeline.bar_bg` when a mode 
 |------|------|--------|-------|
 | 0x40 | accent | `tree.active_fg` | Global accent color (same as tree active) |
 
-### Gutter + Git (0x50-0x58)
+### Gutter + Git (0x50-0x58, 0x62)
 
 | Slot | Name | Source | Usage |
 |------|------|--------|-------|
@@ -895,6 +897,7 @@ Mode color slots fall back to `modeline.bar_fg` / `modeline.bar_bg` when a mode 
 | 0x56 | git_added_fg | `git.added_fg` | Git added sign color |
 | 0x57 | git_modified_fg | `git.modified_fg` | Git modified sign color |
 | 0x58 | git_deleted_fg | `git.deleted_fg` | Git deleted sign color |
+| 0x62 | gutter_fold_fg | `gutter.fold_fg` | Fold indicator color |
 
 ## Forward-Compatibility: Skip-Length for Unknown Opcodes
 

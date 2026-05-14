@@ -47,8 +47,8 @@ defmodule Minga.Integration.ToggleLineNumbersTest do
       assert BufferServer.get_option(ctx.buffer, :line_numbers) == :none
 
       row1 = screen_row(ctx, 1)
-      # Sign column (2 chars) is always reserved, but no line numbers.
-      assert row1 =~ ~r/^\s{2}line one/, "none: sign column only, no line numbers"
+      # Sign and fold columns are always reserved, but no line numbers.
+      assert row1 =~ ~r/^\s{3}line one/, "none: sign and fold columns only, no line numbers"
       refute row1 =~ ~r/^\s+\d/, "none: no line number digits"
 
       # One more press back to hybrid.

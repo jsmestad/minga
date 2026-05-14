@@ -19,12 +19,21 @@ defmodule MingaEditor.Commands.Folding do
   @type state :: EditorState.t()
 
   @typedoc "Fold command atoms."
-  @type fold_command :: :fold_toggle | :fold_close | :fold_open | :fold_close_all | :fold_open_all
+  @type fold_command ::
+          :fold_toggle
+          | :fold_close
+          | :fold_open
+          | :fold_close_recursive
+          | :fold_open_recursive
+          | :fold_close_all
+          | :fold_open_all
 
   @command_specs [
     {:fold_toggle, "Toggle fold at cursor (za)", true},
     {:fold_close, "Close fold at cursor (zc)", true},
     {:fold_open, "Open fold at cursor (zo)", true},
+    {:fold_close_recursive, "Close folds recursively (zC)", true},
+    {:fold_open_recursive, "Open folds recursively (zO)", true},
     {:fold_close_all, "Close all folds (zM)", true},
     {:fold_open_all, "Open all folds (zR)", true}
   ]
@@ -35,6 +44,8 @@ defmodule MingaEditor.Commands.Folding do
   - `:fold_toggle` — toggles the fold at the cursor line (za)
   - `:fold_close` — closes (folds) the range at the cursor line (zc)
   - `:fold_open` — opens (unfolds) the fold at the cursor line (zo)
+  - `:fold_close_recursive` — closes folds recursively under the cursor (zC)
+  - `:fold_open_recursive` — opens folds recursively under the cursor (zO)
   - `:fold_close_all` — closes all folds in the active window (zM)
   - `:fold_open_all` — opens all folds in the active window (zR)
   """
@@ -57,6 +68,20 @@ defmodule MingaEditor.Commands.Folding do
     case EditorState.active_window_struct(state) do
       nil -> state
       window -> dispatch_fold_command(state, window, :open)
+    end
+  end
+
+  def execute(state, :fold_close_recursive) do
+    case EditorState.active_window_struct(state) do
+      nil -> state
+      window -> dispatch_fold_command(state, window, :close_recursive)
+    end
+  end
+
+  def execute(state, :fold_open_recursive) do
+    case EditorState.active_window_struct(state) do
+      nil -> state
+      window -> dispatch_fold_command(state, window, :open_recursive)
     end
   end
 
@@ -83,7 +108,11 @@ defmodule MingaEditor.Commands.Folding do
   # Dispatches a fold command at the cursor line. Checks both active folds
   # (already collapsed) and available fold ranges (from tree-sitter).
   # Falls back to decoration folds if no window fold range covers the line.
-  @spec dispatch_fold_command(state(), Window.t(), :toggle | :close | :open) :: state()
+  @spec dispatch_fold_command(
+          state(),
+          Window.t(),
+          :toggle | :close | :open | :close_recursive | :open_recursive
+        ) :: state()
   defp dispatch_fold_command(state, window, action) do
     {cursor_line, _col} = window.cursor
 
@@ -97,8 +126,12 @@ defmodule MingaEditor.Commands.Folding do
     end
   end
 
-  @spec apply_window_fold(state(), Window.t(), non_neg_integer(), :toggle | :close | :open) ::
-          state()
+  @spec apply_window_fold(
+          state(),
+          Window.t(),
+          non_neg_integer(),
+          :toggle | :close | :open | :close_recursive | :open_recursive
+        ) :: state()
   defp apply_window_fold(state, _window, cursor_line, :toggle) do
     update_active_window(state, fn w -> Window.toggle_fold(w, cursor_line) end)
   end
@@ -111,8 +144,20 @@ defmodule MingaEditor.Commands.Folding do
     update_active_window(state, fn w -> Window.unfold_at(w, cursor_line) end)
   end
 
-  @spec apply_decoration_fold(state(), pid(), non_neg_integer(), :toggle | :close | :open) ::
-          state()
+  defp apply_window_fold(state, _window, cursor_line, :close_recursive) do
+    update_active_window(state, fn w -> Window.fold_recursive_at(w, cursor_line) end)
+  end
+
+  defp apply_window_fold(state, _window, cursor_line, :open_recursive) do
+    update_active_window(state, fn w -> Window.unfold_recursive_at(w, cursor_line) end)
+  end
+
+  @spec apply_decoration_fold(
+          state(),
+          pid(),
+          non_neg_integer(),
+          :toggle | :close | :open | :close_recursive | :open_recursive
+        ) :: state()
   defp apply_decoration_fold(state, buf, cursor_line, action) do
     decs = Buffer.decorations(buf)
 
@@ -137,6 +182,8 @@ defmodule MingaEditor.Commands.Folding do
   defp should_toggle?(:toggle, _closed), do: true
   defp should_toggle?(:close, closed), do: not closed
   defp should_toggle?(:open, closed), do: closed
+  defp should_toggle?(:close_recursive, closed), do: not closed
+  defp should_toggle?(:open_recursive, closed), do: closed
 
   @spec close_all_decoration_folds(state()) :: state()
   defp close_all_decoration_folds(state) do
