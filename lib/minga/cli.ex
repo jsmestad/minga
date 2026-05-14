@@ -27,6 +27,7 @@ defmodule Minga.CLI do
           no_context: boolean(),
           config_file: String.t() | nil,
           headless: boolean(),
+          minimal: boolean(),
           node_name: String.t() | nil,
           short_name: boolean(),
           cookie: String.t() | nil,
@@ -40,6 +41,7 @@ defmodule Minga.CLI do
     no_context: false,
     config_file: nil,
     headless: false,
+    minimal: false,
     node_name: nil,
     short_name: false,
     cookie: nil,
@@ -87,6 +89,12 @@ defmodule Minga.CLI do
   @spec headless_args?([String.t()]) :: boolean()
   def headless_args?(args) do
     Enum.member?(args, "--headless")
+  end
+
+  @doc "Returns true when args request minimal mode (for GIT_EDITOR use)."
+  @spec minimal_args?([String.t()]) :: boolean()
+  def minimal_args?(args) do
+    Enum.member?(args, "--minimal")
   end
 
   @doc "Returns the startup flags stored by the CLI, or defaults if none were set."
@@ -211,6 +219,10 @@ defmodule Minga.CLI do
 
   defp parse_args(["--config"], _file, _flags) do
     {:error, "--config requires a path argument\n\n#{usage()}"}
+  end
+
+  defp parse_args(["--minimal" | rest], file, flags) do
+    parse_args(rest, file, %{flags | minimal: true})
   end
 
   defp parse_args([<<"--", _::binary>> = flag | _], _file, _flags) do
@@ -462,9 +474,18 @@ defmodule Minga.CLI do
     exit({:shutdown, 1})
   end
 
+  @doc "Applies flag implications (e.g., minimal implies force_editor) to a flags map."
+  @spec apply_flag_implications(flags()) :: flags()
+  def apply_flag_implications(%{minimal: true} = flags), do: %{flags | force_editor: true}
+  def apply_flag_implications(flags), do: flags
+
   @spec store_startup_flags(flags()) :: :ok
   defp store_startup_flags(flags) do
-    Application.put_env(:minga, :cli_startup_flags, flags)
+    effective = apply_flag_implications(flags)
+    Application.put_env(:minga, :cli_startup_flags, effective)
+    if effective.minimal, do: Application.put_env(:minga, :minimal_mode, true)
+    if effective.force_editor, do: Application.put_env(:minga, :force_editor, true)
+    :ok
   end
 
   @spec usage() :: String.t()
@@ -479,6 +500,7 @@ defmodule Minga.CLI do
       -v, --version          Show version
       --config <path>        Use a custom config file instead of the default
       --editor               Start in file editing mode (skip agentic view)
+      --minimal              Minimal mode: editor-only, no services/agent (for GIT_EDITOR use)
       --no-context           Don't load the file as agent context
       --headless             Start services and agent runtime without a GUI frontend
       --name <name@host>     Distributed Erlang long node name

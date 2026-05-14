@@ -88,5 +88,21 @@ defmodule MingaEditor.Commands.BufferManagementShutdownTest do
       state = :sys.get_state(editor)
       refute state.pending_quit
     end
+
+    test ":cq exits with non-zero exit code" do
+      {editor, _buffer} = start_editor("hello")
+
+      type_string(editor, ":cq\r")
+
+      assert_receive {:shutdown_called, 1}
+    end
+
+    test ":cq! exits with non-zero exit code" do
+      {editor, _buffer} = start_editor("hello")
+
+      type_string(editor, ":cq!\r")
+
+      assert_receive {:shutdown_called, 1}
+    end
   end
 end

@@ -85,14 +85,20 @@ defmodule Minga.Application do
     # via the same path as logs from a running editor.
     Minga.LoggerHandler.install_messages_handler()
 
-    base_children = [
-      Minga.Foundation.Supervisor,
-      {Registry, keys: :unique, name: Minga.Buffer.Registry},
-      {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},
-      Minga.Buffer.Messages,
-      Minga.Services.Supervisor,
-      MingaAgent.Supervisor
-    ]
+    minimal? = minimal_mode?()
+
+    base_children =
+      [
+        Minga.Foundation.Supervisor,
+        {Registry, keys: :unique, name: Minga.Buffer.Registry},
+        {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},
+        Minga.Buffer.Messages
+      ] ++
+        if minimal? do
+          []
+        else
+          [Minga.Services.Supervisor, MingaAgent.Supervisor]
+        end
 
     editor_children =
       if start_editor?() do
@@ -117,17 +123,20 @@ defmodule Minga.Application do
     opts = [strategy: :rest_for_one, name: Minga.Supervisor]
     result = Supervisor.start_link(children, opts)
 
-    # Prune old agent sessions using the supervised Task.Supervisor
-    # (not fire-and-forget Task.start) so crashes are visible.
-    if match?({:ok, _}, result) do
-      Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, &prune_old_sessions/0)
+    unless minimal? do
+      if match?({:ok, _}, result) do
+        Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, &prune_old_sessions/0)
+      end
     end
 
-    # In Burrito standalone mode, kick off the CLI
     if Burrito.Util.running_standalone?() do
-      Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
-        Minga.CLI.start_from_cli()
-      end)
+      if minimal? do
+        Task.start_link(fn -> Minga.CLI.start_from_cli() end)
+      else
+        Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
+          Minga.CLI.start_from_cli()
+        end)
+      end
     end
 
     result
@@ -160,6 +169,11 @@ defmodule Minga.Application do
       (Burrito.Util.running_standalone?() and not standalone_headless?())
   end
 
+  @spec minimal_mode?() :: boolean()
+  defp minimal_mode? do
+    Application.get_env(:minga, :minimal_mode, false) or standalone_minimal?()
+  end
+
   @spec standalone_headless?() :: boolean()
   defp standalone_headless? do
     Minga.CLI.headless_args?(Burrito.Util.Args.argv())
@@ -167,6 +181,13 @@ defmodule Minga.Application do
     error ->
       Minga.Log.debug(:editor, "Could not inspect standalone CLI args: #{inspect(error)}")
       false
+  end
+
+  @spec standalone_minimal?() :: boolean()
+  defp standalone_minimal? do
+    Minga.CLI.minimal_args?(Burrito.Util.Args.argv())
+  rescue
+    _ -> false
   end
 
   @spec prune_old_sessions() :: :ok

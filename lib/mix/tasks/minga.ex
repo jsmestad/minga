@@ -25,6 +25,11 @@ defmodule Mix.Tasks.Minga do
   def run(args) do
     {gui?, remaining_args} = extract_gui_flag(args)
     headless? = Minga.CLI.headless_args?(remaining_args)
+    minimal? = Minga.CLI.minimal_args?(remaining_args)
+
+    if minimal? do
+      Application.put_env(:minga, :minimal_mode, true)
+    end
 
     unless headless? do
       Application.put_env(:minga, :start_editor, true)
