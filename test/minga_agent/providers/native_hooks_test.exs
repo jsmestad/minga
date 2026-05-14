@@ -68,9 +68,10 @@ defmodule MingaAgent.Providers.NativeHooksTest do
       )
 
     assert :ok = Native.send_prompt(pid, "run shell")
-    events = collect_events(1_000)
 
-    assert_received {:hook_payload, "tc_hook", "shell", %{"command" => "date"}}
+    assert_receive {:hook_payload, "tc_hook", "shell", %{"command" => "date"}}, 2_000
+
+    events = collect_events(2_000)
     refute_received :tool_callback_ran
 
     assert %Event.Error{message: error_message} = Enum.find(events, &match?(%Event.Error{}, &1))

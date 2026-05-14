@@ -1,5 +1,6 @@
 defmodule Minga.LogTest do
-  use ExUnit.Case, async: true
+  # async: false — mutates global log options and uses capture_log, which captures global Logger output.
+  use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
 

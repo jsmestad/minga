@@ -83,10 +83,11 @@ defmodule Minga.Core.OverlayTest do
 
     test "rejects traversal that escapes the overlay", %{project: project} do
       {:ok, overlay} = Overlay.create(project)
-      escaped = Path.join(Path.dirname(overlay.overlay_dir), "escape.txt")
+      escaped_name = "escape-#{System.unique_integer([:positive])}.txt"
+      escaped = Path.join(Path.dirname(overlay.overlay_dir), escaped_name)
 
       assert {:error, :path_traversal} =
-               Overlay.materialize_file(overlay, "../escape.txt", "pwned")
+               Overlay.materialize_file(overlay, "../#{escaped_name}", "pwned")
 
       refute File.exists?(escaped)
 

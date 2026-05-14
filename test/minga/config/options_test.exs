@@ -43,6 +43,7 @@ defmodule Minga.Config.OptionsTest do
                insert_final_newline: false,
                format_on_save: false,
                auto_save_delay_ms: 1000,
+               lsp_auto_start: true,
                formatter: nil,
                title_format: "{filename} {dirty}({directory}) - Minga",
                recent_files_limit: 200,
@@ -172,6 +173,12 @@ defmodule Minga.Config.OptionsTest do
       assert Options.get(s, :auto_save_delay_ms) == 0
       assert {:ok, 250} = Options.set(s, :auto_save_delay_ms, 250)
       assert Options.get(s, :auto_save_delay_ms) == 250
+    end
+
+    test "set and get lsp_auto_start", %{server: s} do
+      assert Options.get(s, :lsp_auto_start) == true
+      assert {:ok, false} = Options.set(s, :lsp_auto_start, false)
+      assert Options.get(s, :lsp_auto_start) == false
     end
 
     test "set and get startup_view", %{server: s} do

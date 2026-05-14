@@ -29,6 +29,7 @@ defmodule Minga.LSP.SyncServer do
   use GenServer
 
   alias Minga.Buffer
+  alias Minga.Config.Options
   alias Minga.Events
   alias Minga.Events.ToolMissingEvent
   alias Minga.LSP.Client
@@ -220,6 +221,15 @@ defmodule Minga.LSP.SyncServer do
 
   @spec open_local_buffer(state(), pid()) :: state()
   defp open_local_buffer(state, buffer_pid) do
+    if lsp_auto_start?() do
+      do_open_local_buffer(state, buffer_pid)
+    else
+      state
+    end
+  end
+
+  @spec do_open_local_buffer(state(), pid()) :: state()
+  defp do_open_local_buffer(state, buffer_pid) do
     filetype = Buffer.filetype(buffer_pid)
     file_path = Buffer.file_path(buffer_pid)
 
@@ -264,6 +274,13 @@ defmodule Minga.LSP.SyncServer do
     _ -> state
   catch
     :exit, _ -> state
+  end
+
+  @spec lsp_auto_start?() :: boolean()
+  defp lsp_auto_start? do
+    Options.get(:lsp_auto_start)
+  catch
+    :exit, _ -> true
   end
 
   @spec remote_buffer?(pid()) :: boolean()

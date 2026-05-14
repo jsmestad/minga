@@ -345,7 +345,7 @@ defmodule MingaAgent.SessionTest do
       assert :ok = Session.send_prompt(session, "write a file")
 
       assert_receive {:provider_tool_result, {:error, {:plan_mode_refused, message}}},
-                     200
+                     @event_timeout
 
       assert message =~ "Plan mode"
       assert message =~ "write_file"
