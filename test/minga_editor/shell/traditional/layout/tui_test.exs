@@ -49,5 +49,22 @@ defmodule MingaEditor.Shell.Traditional.Layout.TUITest do
 
       assert layout.file_tree == nil
     end
+
+    test "reserves sidebar space when git status panel is open" do
+      state =
+        base_state(cols: 80, rows: 24)
+        |> MingaEditor.State.set_git_status_panel(%{
+          repo_state: :normal,
+          branch: "main",
+          ahead: 0,
+          behind: 0,
+          entries: []
+        })
+
+      layout = LayoutTUI.compute(state)
+
+      assert {1, 0, 20, 21} = layout.file_tree
+      assert {1, 21, 59, 21} = layout.editor_area
+    end
   end
 end

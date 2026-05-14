@@ -61,24 +61,17 @@ defmodule MingaEditor.Input.GitStatusDiffOpenTest do
   end
 
   defp state_with_selected_entry(entry) do
+    alias MingaEditor.Shell.Traditional.GitStatus.TuiState
+
     panel_data = %{
       repo_state: :normal,
       branch: "main",
       ahead: 0,
       behind: 0,
-      entries: [entry],
-      tui_state: %MingaEditor.Input.GitStatus.TuiState{
-        cursor_index: 1,
-        collapsed: %{},
-        flat_entries: [
-          {:section_header, :staged, 1},
-          {:file, :staged, entry}
-        ],
-        entries: [entry],
-        discard_confirmation: nil,
-        amend_mode: false
-      }
+      entries: [entry]
     }
+
+    tui = %TuiState{cursor_index: 1, collapsed: %{}}
 
     %EditorState{
       port_manager: self(),
@@ -86,7 +79,10 @@ defmodule MingaEditor.Input.GitStatusDiffOpenTest do
         viewport: Viewport.new(24, 80),
         keymap_scope: :git_status
       },
-      shell_state: %MingaEditor.Shell.Traditional.State{git_status_panel: panel_data},
+      shell_state: %MingaEditor.Shell.Traditional.State{
+        git_status_panel: panel_data,
+        git_status_tui_state: tui
+      },
       focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
     }
   end

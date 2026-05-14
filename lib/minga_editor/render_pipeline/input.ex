@@ -252,7 +252,9 @@ defmodule MingaEditor.RenderPipeline.Input do
       # Bottom panel
       input.shell_state |> Map.get(:bottom_panel),
       # Git status panel
-      input.shell_state |> Map.get(:git_status_panel)
+      input.shell_state |> Map.get(:git_status_panel),
+      # Shell-owned chrome state that does not belong in the generic pipeline contract
+      input.shell.chrome_fingerprint(input)
     })
   end
 
