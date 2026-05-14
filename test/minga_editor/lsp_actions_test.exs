@@ -149,6 +149,30 @@ defmodule MingaEditor.LspActionsTest do
     end
   end
 
+  # ── handle_peek_definition_response/2 ──────────────────────────────────────
+
+  describe "handle_peek_definition_response/2" do
+    test "creates focused popup with source preview and open action" do
+      path = Path.join(System.tmp_dir!(), "minga_peek_#{:erlang.unique_integer([:positive])}.ex")
+      File.write!(path, "defmodule Example do\n  def target do\n    :ok\n  end\nend\n")
+
+      location = %{
+        "uri" => "file://#{path}",
+        "range" => %{"start" => %{"line" => 1, "character" => 6}}
+      }
+
+      result = LspActions.handle_peek_definition_response(fake_state(), {:ok, location})
+
+      assert %HoverPopup{} = result.shell_state.hover_popup
+      assert result.shell_state.hover_popup.focused == true
+
+      assert result.shell_state.hover_popup.open_action ==
+               {:goto_location, "file://#{path}", 1, 6}
+
+      File.rm(path)
+    end
+  end
+
   # ── handle_hover_response/2 ────────────────────────────────────────────────
 
   describe "handle_hover_response/2" do

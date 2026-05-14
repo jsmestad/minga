@@ -32,6 +32,7 @@ struct HoverPopupOverlay: View {
     let cellHeight: CGFloat
     let viewportHeight: CGFloat
     let viewportWidth: CGFloat
+    let encoder: InputEncoder?
 
     @State private var popupHeight: CGFloat = 0
     @State private var popupWidth: CGFloat = 0
@@ -111,6 +112,18 @@ struct HoverPopupOverlay: View {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(state.lines) { line in
                     lineView(line)
+                }
+
+                if state.openActionName != nil {
+                    Divider()
+                        .background(theme.popupBorder.opacity(0.3))
+                        .padding(.vertical, 4)
+
+                    Button("Open") {
+                        encoder?.sendHoverOpenAction()
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 12, weight: .semibold))
                 }
             }
             .padding(.horizontal, 12)

@@ -284,8 +284,11 @@ final class SpyEncoder: InputEncoder, Sendable {
     enum GUIAction: Sendable, Equatable {
         case selectTab(id: UInt32)
         case closeTab(id: UInt32)
+        case tabCopyPath(id: UInt32)
+        case hoverOpenAction
         case fileTreeClick(index: UInt16)
         case fileTreeToggle(index: UInt16)
+        case fileTreeOpenInSplit(index: UInt16)
         case fileTreeNewFile(parentIndex: UInt16)
         case fileTreeNewFolder(parentIndex: UInt16)
         case fileTreeEditConfirm(text: String)
@@ -377,8 +380,11 @@ final class SpyEncoder: InputEncoder, Sendable {
     // GUI actions: all recorded for test assertions
     func sendSelectTab(id: UInt32) { state.withLock { $0.guiActions.append(.selectTab(id: id)) } }
     func sendCloseTab(id: UInt32) { state.withLock { $0.guiActions.append(.closeTab(id: id)) } }
+    func sendTabCopyPath(id: UInt32) { state.withLock { $0.guiActions.append(.tabCopyPath(id: id)) } }
+    func sendHoverOpenAction() { state.withLock { $0.guiActions.append(.hoverOpenAction) } }
     func sendFileTreeClick(index: UInt16) { state.withLock { $0.guiActions.append(.fileTreeClick(index: index)) } }
     func sendFileTreeToggle(index: UInt16) { state.withLock { $0.guiActions.append(.fileTreeToggle(index: index)) } }
+    func sendFileTreeOpenInSplit(index: UInt16) { state.withLock { $0.guiActions.append(.fileTreeOpenInSplit(index: index)) } }
     func sendFileTreeNewFile(parentIndex: UInt16) { state.withLock { $0.guiActions.append(.fileTreeNewFile(parentIndex: parentIndex)) } }
     func sendFileTreeNewFolder(parentIndex: UInt16) { state.withLock { $0.guiActions.append(.fileTreeNewFolder(parentIndex: parentIndex)) } }
     func sendFileTreeEditConfirm(text: String) { state.withLock { $0.guiActions.append(.fileTreeEditConfirm(text: text)) } }

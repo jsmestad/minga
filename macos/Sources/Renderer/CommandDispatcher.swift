@@ -380,6 +380,13 @@ final class CommandDispatcher {
                 guiState.hoverPopupState.hide()
             }
 
+        case .guiHoverAction(let visible, let actionName):
+            if visible {
+                guiState.hoverPopupState.setOpenAction(name: actionName)
+            } else {
+                guiState.hoverPopupState.clearOpenAction()
+            }
+
         case .guiSignatureHelp(let visible, let anchorRow, let anchorCol,
                                 let activeSignature, let activeParameter, let signatures):
             if visible {

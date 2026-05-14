@@ -75,7 +75,8 @@
       "gui_agent_groups":    { "hex": "0x86" },
       "gui_board":           { "hex": "0x87" },
       "gui_agent_context":   { "hex": "0x88" },
-      "gui_change_summary":  { "hex": "0x89" }
+      "gui_change_summary":  { "hex": "0x89" },
+      "gui_hover_action":    { "hex": "0x96" }
     }
   },
   "gui_actions": {
@@ -139,6 +140,9 @@
     "git_pull":             { "hex": "0x39" },
     "git_fetch":            { "hex": "0x3A" },
     "git_commit_amend":     { "hex": "0x3B" },
-    "git_pull_and_retry":   { "hex": "0x3C" }
+    "git_pull_and_retry":   { "hex": "0x3C" },
+    "file_tree_open_in_split": { "hex": "0x3D" },
+    "tab_copy_path":        { "hex": "0x3E" },
+    "hover_open_action":    { "hex": "0x3F" }
   }
 }

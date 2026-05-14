@@ -196,6 +196,13 @@ defmodule MingaEditor.Mouse do
     handle_left_press(state, row, col, mods, cc)
   end
 
+  # ── Right click (press) ──
+  # Move the cursor for native GUI context menu commands without starting a selection drag.
+
+  def handle(state, row, col, :right, _mods, :press, _cc) do
+    handle_context_click(state, row, col)
+  end
+
   # ── Left drag ──
 
   def handle(
@@ -824,6 +831,24 @@ defmodule MingaEditor.Mouse do
                 }
             }
         end
+    end
+  end
+
+  @spec handle_context_click(state(), non_neg_integer(), non_neg_integer()) :: state()
+  defp handle_context_click(state, row, col) do
+    state = maybe_unfocus_file_tree_for_content_click(state)
+    state = maybe_focus_window_at(state, row, col)
+
+    case mouse_to_buffer_pos(state, row, col) do
+      nil ->
+        state
+
+      {target_line, target_col} ->
+        Buffer.move_to(state.workspace.buffers.active, {target_line, target_col})
+
+        state
+        |> cancel_mode_for_mouse()
+        |> EditorState.transition_mode(:normal)
     end
   end
 

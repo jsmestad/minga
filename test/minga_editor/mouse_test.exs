@@ -191,6 +191,15 @@ defmodule MingaEditor.MouseTest do
       assert col == 3
     end
 
+    test "right click positions cursor without starting selection drag" do
+      {editor, buffer} = start_editor("hello\nworld\nfoo bar baz")
+
+      send_mouse(editor, @content_row + 1, @gutter + 3, :right, :press)
+
+      assert BufferServer.cursor(buffer) == {1, 3}
+      assert state(editor).workspace.mouse.dragging == false
+    end
+
     test "left click accounts for viewport scroll offset" do
       {editor, buffer} = start_editor(Enum.map_join(0..29, "\n", &"line #{&1}"))
 

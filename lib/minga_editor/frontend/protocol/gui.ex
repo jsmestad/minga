@@ -78,6 +78,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x1F       | agent_group_rename     |
   | 0x20       | agent_group_set_icon   |
   | 0x21       | agent_group_close      |
+  | 0x3D       | file_tree_open_in_split |
+  | 0x3E       | tab_copy_path           |
+  | 0x3F       | hover_open_action       |
   | 0x34       | system_will_sleep      |
   | 0x35       | system_did_wake        |
 
@@ -175,6 +178,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @op_clipboard_write 0x90
   @op_gui_indent_guides 0x91
   @op_gui_line_spacing 0x92
+  @op_gui_hover_action 0x96
 
   # ── GUI action sub-opcodes (Frontend → BEAM) ──
 
@@ -239,6 +243,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_git_fetch 0x3A
   @gui_action_git_commit_amend 0x3B
   @gui_action_git_pull_and_retry 0x3C
+  @gui_action_file_tree_open_in_split 0x3D
+  @gui_action_tab_copy_path 0x3E
+  @gui_action_hover_open_action 0x3F
 
   # ── Types ──
 
@@ -296,6 +303,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:file_tree_duplicate, index :: non_neg_integer()}
           | {:file_tree_move, source_index :: non_neg_integer(),
              target_dir_index :: non_neg_integer()}
+          | {:file_tree_open_in_split, index :: non_neg_integer()}
+          | {:tab_copy_path, id :: pos_integer()}
+          | :hover_open_action
           | :system_will_sleep
           | :system_did_wake
           | :cmd_copy
@@ -2103,6 +2113,12 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   def decode_gui_action(@gui_action_file_tree_toggle, <<index::16>>),
     do: {:ok, {:file_tree_toggle, index}}
 
+  def decode_gui_action(@gui_action_file_tree_open_in_split, <<index::16>>),
+    do: {:ok, {:file_tree_open_in_split, index}}
+
+  def decode_gui_action(@gui_action_tab_copy_path, <<id::32>>), do: {:ok, {:tab_copy_path, id}}
+  def decode_gui_action(@gui_action_hover_open_action, <<>>), do: {:ok, :hover_open_action}
+
   def decode_gui_action(@gui_action_completion_select, <<index::16>>),
     do: {:ok, {:completion_select, index}}
 
@@ -2582,11 +2598,32 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
         [<<line_type_byte::8, length(segments)::16>> | segment_data]
       end)
 
-    IO.iodata_to_binary([
-      <<@op_gui_hover_popup, 1::8, popup.anchor_row::16, popup.anchor_col::16, focused_byte::8,
-        popup.scroll_offset::16, length(popup.content_lines)::16>>
-      | line_data
-    ])
+    hover =
+      IO.iodata_to_binary([
+        <<@op_gui_hover_popup, 1::8, popup.anchor_row::16, popup.anchor_col::16, focused_byte::8,
+          popup.scroll_offset::16, length(popup.content_lines)::16>>
+        | line_data
+      ])
+
+    IO.iodata_to_binary([hover, encode_gui_hover_action(popup)])
+  end
+
+  @doc "Encodes optional hover popup action metadata as a forward-compatible sidecar command."
+  @spec encode_gui_hover_action(MingaEditor.HoverPopup.t() | nil) :: binary()
+  def encode_gui_hover_action(nil), do: <<@op_gui_hover_action, 1::16, 0::8>>
+
+  def encode_gui_hover_action(%MingaEditor.HoverPopup{open_action: nil}) do
+    <<@op_gui_hover_action, 1::16, 0::8>>
+  end
+
+  def encode_gui_hover_action(%MingaEditor.HoverPopup{open_action: action}) do
+    action_bytes =
+      action |> MingaEditor.HoverPopup.open_action_name() |> :erlang.iolist_to_binary()
+
+    payload_len = 1 + 2 + byte_size(action_bytes)
+
+    <<@op_gui_hover_action, payload_len::16, 1::8, byte_size(action_bytes)::16,
+      action_bytes::binary>>
   end
 
   # ── Signature Help ──

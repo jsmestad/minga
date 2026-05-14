@@ -100,6 +100,38 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
     end
   end
 
+  describe "decode_gui_action for context menu actions" do
+    test "decodes file tree open in split" do
+      assert {:ok, {:file_tree_open_in_split, 9}} ==
+               ProtocolGUI.decode_gui_action(0x3D, <<9::16>>)
+    end
+
+    test "decodes tab copy path" do
+      assert {:ok, {:tab_copy_path, 42}} == ProtocolGUI.decode_gui_action(0x3E, <<42::32>>)
+    end
+
+    test "decodes hover open action" do
+      assert {:ok, :hover_open_action} == ProtocolGUI.decode_gui_action(0x3F, <<>>)
+    end
+  end
+
+  describe "encode_gui_hover_action/1" do
+    test "encodes visible action with length prefix" do
+      popup = %MingaEditor.HoverPopup{
+        content_lines: [{[{"Open", :bold}], :text}],
+        anchor_row: 1,
+        anchor_col: 2,
+        open_action: :goto_definition
+      }
+
+      binary = ProtocolGUI.encode_gui_hover_action(popup)
+
+      assert <<0x96, payload_len::16, 1::8, action_len::16, action::binary>> = binary
+      assert payload_len == 1 + 2 + action_len
+      assert action == "goto_definition"
+    end
+  end
+
   describe "decode_gui_action for agent group actions" do
     test "decodes agent group rename" do
       name = "My Research"

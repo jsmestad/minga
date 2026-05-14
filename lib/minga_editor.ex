@@ -17,6 +17,7 @@ defmodule MingaEditor do
   alias MingaEditor.Agent.Events
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer
+  alias Minga.Clipboard
   alias Minga.Config
   alias Minga.Editing.Completion
   alias Minga.FileWatcher
@@ -1217,6 +1218,9 @@ defmodule MingaEditor do
   defp dispatch_lsp_response(:definition, state, result),
     do: LspActions.handle_definition_response(state, result)
 
+  defp dispatch_lsp_response(:peek_definition, state, result),
+    do: LspActions.handle_peek_definition_response(state, result)
+
   defp dispatch_lsp_response(:hover, state, result),
     do: LspActions.handle_hover_response(state, result)
 
@@ -2021,6 +2025,14 @@ defmodule MingaEditor do
     EditorState.switch_tab(state, id)
   end
 
+  defp handle_gui_action(state, {:tab_copy_path, id}) do
+    copy_tab_path(state, id)
+  end
+
+  defp handle_gui_action(state, :hover_open_action) do
+    accept_hover_open_action(state)
+  end
+
   defp handle_gui_action(state, {:close_tab, id}) do
     # Delegate to the shell: Traditional switches to the target tab when
     # needed; Board and tab-bar-less Traditional return unchanged.
@@ -2044,6 +2056,10 @@ defmodule MingaEditor do
 
   defp handle_gui_action(state, {:file_tree_toggle, index}) do
     gui_tree_action(state, index, :toggle)
+  end
+
+  defp handle_gui_action(state, {:file_tree_open_in_split, index}) do
+    open_file_tree_entry_in_split(state, index)
   end
 
   defp handle_gui_action(state, {:file_tree_new_file, index}) do
@@ -2450,14 +2466,7 @@ defmodule MingaEditor do
 
   @spec open_file_by_path(state(), String.t()) :: state()
   defp open_file_by_path(state, abs_path) do
-    idx =
-      Enum.find_index(state.workspace.buffers.list, fn buf ->
-        try do
-          Buffer.file_path(buf) == abs_path
-        catch
-          :exit, _ -> false
-        end
-      end)
+    idx = buffer_index_for_path(state, abs_path)
 
     case idx do
       nil ->
@@ -2469,6 +2478,59 @@ defmodule MingaEditor do
       i ->
         EditorState.switch_buffer(state, i)
     end
+  end
+
+  @spec open_file_by_path_in_active_window(state(), String.t()) :: state()
+  defp open_file_by_path_in_active_window(state, abs_path) do
+    case buffer_index_for_path(state, abs_path) do
+      nil ->
+        case Commands.start_buffer(abs_path) do
+          {:ok, pid} -> register_buffer_in_active_window(state, pid, abs_path)
+          {:error, _reason} -> EditorState.set_status(state, "Could not open #{abs_path}")
+        end
+
+      i ->
+        EditorState.switch_buffer(state, i)
+    end
+  end
+
+  @spec buffer_index_for_path(state(), String.t()) :: non_neg_integer() | nil
+  defp buffer_index_for_path(state, abs_path) do
+    Enum.find_index(state.workspace.buffers.list, fn buf ->
+      try do
+        Buffer.file_path(buf) == abs_path
+      catch
+        :exit, _ -> false
+      end
+    end)
+  end
+
+  @spec register_buffer_in_active_window(state(), pid(), String.t()) :: state()
+  defp register_buffer_in_active_window(state, buffer_pid, file_path) do
+    state =
+      state
+      |> EditorState.update_workspace(fn workspace ->
+        workspace
+        |> WorkspaceState.set_buffers(Buffers.add(workspace.buffers, buffer_pid))
+        |> WorkspaceState.sync_active_window_buffer()
+      end)
+      |> EditorState.monitor_buffer(buffer_pid)
+
+    state = log_message(state, "Opened: #{file_path}")
+
+    Minga.Events.broadcast(
+      :buffer_opened,
+      %Minga.Events.BufferEvent{buffer: buffer_pid, path: file_path},
+      EditorState.events_registry(state)
+    )
+
+    state = HighlightSync.setup_for_buffer_pid(state, buffer_pid)
+
+    if state.backend != :headless do
+      Process.send_after(self(), :request_code_lens_and_inlay_hints, 800)
+    end
+
+    state
   end
 
   @spec resolve_git_root() :: String.t() | nil
@@ -2488,6 +2550,86 @@ defmodule MingaEditor do
       git_root -> refresh_git_repo(git_root)
     end
   end
+
+  @spec accept_hover_open_action(state()) :: state()
+  defp accept_hover_open_action(state) do
+    case EditorState.hover_popup(state) do
+      %MingaEditor.HoverPopup{open_action: action} when action != nil ->
+        state = EditorState.dismiss_hover_popup(state)
+        execute_hover_open_action(state, action)
+
+      _ ->
+        state
+    end
+  end
+
+  @spec execute_hover_open_action(state(), MingaEditor.HoverPopup.open_action()) :: state()
+  defp execute_hover_open_action(state, {:goto_location, uri, line, col}) do
+    LspActions.open_location(state, uri, line, col)
+  end
+
+  defp execute_hover_open_action(state, action) when is_atom(action) do
+    case Commands.execute(state, action) do
+      {new_state, _action} -> new_state
+      new_state -> new_state
+    end
+  end
+
+  @spec copy_tab_path(state(), Tab.id()) :: state()
+  defp copy_tab_path(state, id) do
+    case tab_file_path(state, id) do
+      nil ->
+        EditorState.set_status(state, "Tab has no file path")
+
+      path ->
+        Clipboard.write_async(path)
+        maybe_send_gui_clipboard_write(state, path)
+        EditorState.set_status(state, "Copied #{path}")
+    end
+  end
+
+  @spec maybe_send_gui_clipboard_write(state(), String.t()) :: :ok
+  defp maybe_send_gui_clipboard_write(%{port_manager: nil}, _path), do: :ok
+
+  defp maybe_send_gui_clipboard_write(state, path) do
+    MingaEditor.Frontend.clipboard_write(state.port_manager, path)
+  end
+
+  @spec tab_file_path(state(), Tab.id()) :: String.t() | nil
+  defp tab_file_path(state, id) do
+    case EditorState.tab_bar(state) do
+      %TabBar{} = tb -> tab_file_path_from_tab(state, tb, TabBar.get(tb, id))
+      nil -> nil
+    end
+  end
+
+  @spec tab_file_path_from_tab(state(), TabBar.t(), Tab.t() | nil) :: String.t() | nil
+  defp tab_file_path_from_tab(_state, _tb, nil), do: nil
+  defp tab_file_path_from_tab(_state, _tb, %Tab{kind: :agent}), do: nil
+
+  defp tab_file_path_from_tab(state, %TabBar{active_id: active_id} = tb, %Tab{id: id}) do
+    case id == active_id do
+      true -> active_buffer_path(state)
+      false -> inactive_tab_path(TabBar.get(tb, id))
+    end
+  end
+
+  @spec active_buffer_path(state()) :: String.t() | nil
+  defp active_buffer_path(%{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
+    Buffer.file_path(buf)
+  end
+
+  defp active_buffer_path(_state), do: nil
+
+  @spec inactive_tab_path(Tab.t() | nil) :: String.t() | nil
+  defp inactive_tab_path(%Tab{context: context}) when is_map(context) do
+    case TabContext.to_workspace_map(context) do
+      %{buffers: %Buffers{active: pid}} when is_pid(pid) -> Buffer.file_path(pid)
+      _ -> nil
+    end
+  end
+
+  defp inactive_tab_path(_tab), do: nil
 
   @spec buffers_for_lsp_resync(state()) :: [pid()]
   defp buffers_for_lsp_resync(state) do
@@ -2537,6 +2679,41 @@ defmodule MingaEditor do
   defp maybe_refresh_tool_picker(state), do: state
 
   # maybe_show_tool_prompt moved to ToolHandler
+
+  @spec open_file_tree_entry_in_split(state(), non_neg_integer()) :: state()
+  defp open_file_tree_entry_in_split(%{workspace: %{file_tree: %{tree: nil}}} = state, _index) do
+    state
+  end
+
+  defp open_file_tree_entry_in_split(state, index) do
+    state =
+      state
+      |> move_tree_cursor(index)
+      |> unfocus_file_tree_for_split()
+
+    case FileTree.selected_entry(state.workspace.file_tree.tree) do
+      %{dir?: false, path: path} ->
+        state
+        |> Commands.Movement.execute(:split_vertical)
+        |> Commands.Movement.execute(:window_right)
+        |> open_file_by_path_in_active_window(path)
+
+      %{dir?: true} ->
+        state
+
+      nil ->
+        state
+    end
+  end
+
+  @spec unfocus_file_tree_for_split(state()) :: state()
+  defp unfocus_file_tree_for_split(state) do
+    EditorState.update_workspace(state, fn workspace ->
+      workspace
+      |> WorkspaceState.set_file_tree(MingaEditor.State.FileTree.unfocus(workspace.file_tree))
+      |> WorkspaceState.set_keymap_scope(:editor)
+    end)
+  end
 
   # Moves the file tree cursor to the given index and performs the action.
   @spec gui_tree_action(state(), non_neg_integer(), :click | :toggle) :: state()

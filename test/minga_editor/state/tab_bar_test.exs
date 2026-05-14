@@ -64,6 +64,24 @@ defmodule MingaEditor.State.TabBarTest do
     end
   end
 
+  describe "keep_only/2" do
+    test "keeps the active tab and prunes orphaned agent groups" do
+      tb = TabBar.new(file_tab(1, "a"))
+      {tb, group1} = TabBar.add_agent_group(tb, "Agent 1")
+      {tb, group2} = TabBar.add_agent_group(tb, "Agent 2")
+      {tb, tab2} = TabBar.add(tb, :agent, "agent one")
+      tb = TabBar.move_tab_to_group(tb, tab2.id, group1.id)
+      {tb, tab3} = TabBar.add(tb, :agent, "agent two")
+      tb = TabBar.move_tab_to_group(tb, tab3.id, group2.id)
+
+      tb = TabBar.keep_only(tb, tab2.id)
+
+      assert TabBar.count(tb) == 1
+      assert TabBar.active(tb).id == tab2.id
+      assert Enum.map(tb.agent_groups, & &1.id) == [group1.id]
+    end
+  end
+
   describe "remove/2" do
     test "cannot remove the last tab" do
       tb = TabBar.new(file_tab(1))
