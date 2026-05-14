@@ -91,7 +91,19 @@
     "tool_update":          { "hex": "0x13" },
     "tool_dismiss":         { "hex": "0x14" },
     "agent_tool_toggle":    { "hex": "0x15" },
+    "git_stage_file":       { "hex": "0x18" },
+    "git_unstage_file":     { "hex": "0x19" },
+    "git_discard_file":     { "hex": "0x1A" },
+    "git_stage_all":        { "hex": "0x1B" },
+    "git_unstage_all":      { "hex": "0x1C" },
+    "git_commit":           { "hex": "0x1D" },
+    "git_open_file":        { "hex": "0x1E" },
     "system_will_sleep":    { "hex": "0x34" },
-    "system_did_wake":      { "hex": "0x35" }
+    "system_did_wake":      { "hex": "0x35" },
+    "git_push":             { "hex": "0x38" },
+    "git_pull":             { "hex": "0x39" },
+    "git_fetch":            { "hex": "0x3A" },
+    "git_commit_amend":     { "hex": "0x3B" },
+    "git_pull_and_retry":   { "hex": "0x3C" }
   }
 }

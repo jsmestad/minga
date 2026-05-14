@@ -301,7 +301,7 @@ defmodule MingaEditor.Frontend.GUIGitStatusTest do
     end
 
     test "decodes git_pull_and_retry" do
-      assert {:ok, :git_pull_and_retry} = ProtocolGUI.decode_gui_action(0x38, <<>>)
+      assert {:ok, :git_pull_and_retry} = ProtocolGUI.decode_gui_action(0x3C, <<>>)
     end
 
     test "returns error for unknown opcode" do

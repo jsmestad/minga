@@ -228,7 +228,11 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_system_did_wake 0x35
   @gui_action_cmd_copy 0x36
   @gui_action_cmd_cut 0x37
-  @gui_action_git_pull_and_retry 0x38
+  @gui_action_git_push 0x38
+  @gui_action_git_pull 0x39
+  @gui_action_git_fetch 0x3A
+  @gui_action_git_commit_amend 0x3B
+  @gui_action_git_pull_and_retry 0x3C
 
   # ── Types ──
 
@@ -290,6 +294,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | :system_did_wake
           | :cmd_copy
           | :cmd_cut
+          | :git_push
+          | :git_pull
+          | :git_fetch
+          | {:git_commit_amend, message :: String.t()}
           | :git_pull_and_retry
 
   # ═══════════════════════════════════════════════════════════════════════════
@@ -2013,6 +2021,21 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_git_open_file, <<path_len::16, path::binary-size(path_len)>>),
     do: {:ok, {:git_open_file, path}}
+
+  def decode_gui_action(@gui_action_git_push, <<>>),
+    do: {:ok, :git_push}
+
+  def decode_gui_action(@gui_action_git_pull, <<>>),
+    do: {:ok, :git_pull}
+
+  def decode_gui_action(@gui_action_git_fetch, <<>>),
+    do: {:ok, :git_fetch}
+
+  def decode_gui_action(
+        @gui_action_git_commit_amend,
+        <<msg_len::16, message::binary-size(msg_len)>>
+      ),
+      do: {:ok, {:git_commit_amend, message}}
 
   def decode_gui_action(
         @gui_action_agent_group_rename,

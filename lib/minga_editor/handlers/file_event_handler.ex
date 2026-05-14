@@ -56,19 +56,31 @@ defmodule MingaEditor.Handlers.FileEventHandler do
          ahead: ahead,
          behind: behind
        }) do
-    if EditorState.git_status_panel(state) != nil do
-      git_status_data = %{
-        repo_state: :normal,
-        branch: branch || "",
-        ahead: ahead,
-        behind: behind,
-        entries: entries
-      }
+    case EditorState.git_status_panel(state) do
+      nil ->
+        {state, []}
 
-      new_state = EditorState.set_git_status_panel(state, git_status_data)
-      {new_state, [{:render, 16}]}
-    else
-      {state, []}
+      _panel ->
+        git_status_data = %{
+          repo_state: :normal,
+          branch: branch || "",
+          ahead: ahead,
+          behind: behind,
+          entries: entries
+        }
+
+        state = EditorState.set_git_status_panel(state, git_status_data)
+
+        {shell_state, workspace} =
+          state.shell.handle_event(
+            state.shell_state,
+            state.workspace,
+            {:git_status_changed, entries}
+          )
+
+        new_state = %{state | shell_state: shell_state, workspace: workspace}
+
+        {new_state, [{:render, 16}]}
     end
   end
 

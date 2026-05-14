@@ -19,6 +19,8 @@ defmodule MingaEditor.Shell.Traditional.Layout.TUI do
   @editor_min_cols 10
   @editor_min_rows 3
   @file_tree_min_cols 8
+  @git_status_min_cols 20
+  @git_status_max_cols 40
   @agent_panel_min_rows 5
 
   @doc """
@@ -180,24 +182,42 @@ defmodule MingaEditor.Shell.Traditional.Layout.TUI do
 
   @spec file_tree_layout(EditorState.t(), pos_integer()) ::
           {Layout.rect() | nil, non_neg_integer(), pos_integer()}
-  defp file_tree_layout(%{workspace: %{file_tree: %{tree: nil}}}, total_cols) do
-    {nil, 0, total_cols}
-  end
-
   defp file_tree_layout(
          %{workspace: %{file_tree: %{tree: %FileTree{width: tw}}}} = state,
          total_cols
        ) do
+    sidebar_layout(state, total_cols, tw)
+  end
+
+  defp file_tree_layout(%{shell_state: %{git_status_panel: %{} = _panel}} = state, total_cols) do
+    sidebar_layout(state, total_cols, git_status_width(total_cols))
+  end
+
+  defp file_tree_layout(_state, total_cols) do
+    {nil, 0, total_cols}
+  end
+
+  @spec sidebar_layout(EditorState.t(), pos_integer(), pos_integer()) ::
+          {Layout.rect(), pos_integer(), pos_integer()}
+  defp sidebar_layout(state, total_cols, requested_width) do
     # Same logic as compute/1: reserve 2 rows at the bottom when possible, else 1.
     bottom_reserve = if state.terminal_viewport.rows - 2 > @content_start, do: 2, else: 1
     tree_height = state.terminal_viewport.rows - @content_start - bottom_reserve
     min_editor_w = 3
     max_tree_w = max(total_cols - 1 - min_editor_w, 1)
-    clamped_tw = min(tw, max_tree_w)
+    clamped_tw = min(requested_width, max_tree_w)
     tree_rect = {@content_start, 0, clamped_tw, tree_height}
     editor_col = clamped_tw + 1
     editor_width = max(total_cols - editor_col, 1)
     {tree_rect, editor_col, editor_width}
+  end
+
+  @spec git_status_width(pos_integer()) :: pos_integer()
+  defp git_status_width(total_cols) do
+    total_cols
+    |> div(4)
+    |> max(@git_status_min_cols)
+    |> min(@git_status_max_cols)
   end
 
   # ── Agent panel ────────────────────────────────────────────────────────────

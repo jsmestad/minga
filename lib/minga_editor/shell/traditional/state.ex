@@ -20,6 +20,7 @@ defmodule MingaEditor.Shell.Traditional.State do
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.WhichKey
+  alias MingaEditor.Shell.Traditional.GitStatus.TuiState, as: GitStatusTuiState
   alias Minga.Tool.Manager, as: ToolManager
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
@@ -34,6 +35,7 @@ defmodule MingaEditor.Shell.Traditional.State do
           whichkey: WhichKey.t(),
           bottom_panel: BottomPanel.t(),
           git_status_panel: MingaEditor.Frontend.Protocol.GUI.git_status_panel_data() | nil,
+          git_status_tui_state: GitStatusTuiState.t() | nil,
           git_toast: git_toast(),
           tab_bar: TabBar.t() | nil,
           agent: AgentState.t(),
@@ -56,6 +58,7 @@ defmodule MingaEditor.Shell.Traditional.State do
             whichkey: %WhichKey{},
             bottom_panel: %BottomPanel{},
             git_status_panel: nil,
+            git_status_tui_state: nil,
             git_toast: nil,
             tab_bar: nil,
             agent: %AgentState{},
@@ -180,10 +183,31 @@ defmodule MingaEditor.Shell.Traditional.State do
     %{ss | git_status_panel: data}
   end
 
+  @doc "Returns the TUI-only git status view state, or nil."
+  @spec git_status_tui_state(t()) :: GitStatusTuiState.t() | nil
+  def git_status_tui_state(%{git_status_tui_state: tui}), do: tui
+
+  @doc "Sets the TUI-only git status view state."
+  @spec set_git_status_tui_state(t(), GitStatusTuiState.t() | nil) :: t()
+  def set_git_status_tui_state(%{} = ss, tui) do
+    %{ss | git_status_tui_state: tui}
+  end
+
+  @doc "Refreshes existing TUI-only git status view state after shared entries change."
+  @spec refresh_git_status_tui_state(t(), [Minga.Git.StatusEntry.t()]) :: t()
+  def refresh_git_status_tui_state(
+        %{git_status_tui_state: %GitStatusTuiState{} = tui} = ss,
+        entries
+      ) do
+    %{ss | git_status_tui_state: GitStatusTuiState.refresh(tui, entries)}
+  end
+
+  def refresh_git_status_tui_state(%{} = ss, _entries), do: ss
+
   @doc "Clears the git status panel."
   @spec close_git_status_panel(t()) :: t()
   def close_git_status_panel(%{} = ss) do
-    %{ss | git_status_panel: nil}
+    %{ss | git_status_panel: nil, git_status_tui_state: nil}
   end
 
   # ── Git toast ─────────────────────────────────────────────────────────────

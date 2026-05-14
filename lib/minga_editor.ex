@@ -2260,6 +2260,34 @@ defmodule MingaEditor do
     end
   end
 
+  defp handle_gui_action(state, :git_push) do
+    Commands.Git.execute(state, :git_push)
+  end
+
+  defp handle_gui_action(state, :git_pull) do
+    Commands.Git.execute(state, :git_pull)
+  end
+
+  defp handle_gui_action(state, :git_fetch) do
+    Commands.Git.execute(state, :git_fetch)
+  end
+
+  defp handle_gui_action(state, {:git_commit_amend, message}) do
+    case resolve_git_root() do
+      nil ->
+        EditorState.set_status(state, "Not in a git repository")
+
+      git_root ->
+        result = Minga.Git.commit(git_root, message, amend: true)
+        refresh_git_repo(git_root)
+
+        case result do
+          {:ok, hash} -> EditorState.set_status(state, "Amended #{hash}")
+          {:error, reason} -> EditorState.set_status(state, "Amend failed: #{reason}")
+        end
+    end
+  end
+
   defp handle_gui_action(state, {:agent_group_close, _ws_id} = action) do
     {shell_state, workspace} =
       state.shell.handle_gui_action(state.shell_state, state.workspace, action)

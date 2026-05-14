@@ -741,6 +741,11 @@ opcode(1) + action_type(1) + payload...
 | 0x1D | git_commit | msg_len(2) + msg(msg_len) | Commit with message |
 | 0x1E | git_open_file | path_len(2) + path(path_len) | Open file in editor |
 | 0x2F | scroll_to_line | line(4) | Scroll viewport to target line (from scroll indicator click/drag) |
+| 0x38 | git_push | (empty) | Push the current branch |
+| 0x39 | git_pull | (empty) | Pull from the upstream branch |
+| 0x3A | git_fetch | (empty) | Fetch remote refs |
+| 0x3B | git_commit_amend | msg_len(2) + msg(msg_len) | Amend the previous commit message |
+| 0x3C | git_pull_and_retry | (empty) | Pull, then retry the failed push |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 

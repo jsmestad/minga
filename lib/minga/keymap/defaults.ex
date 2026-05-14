@@ -118,10 +118,13 @@ defmodule Minga.Keymap.Defaults do
     {[{?g, @none}, {?p, @none}], :git_pull, "Pull"},
     {[{?g, @none}, {?F, @none}], :git_fetch, "Fetch"},
     {[{?g, @none}, {?d, @none}], :git_diff_file, "View diff"},
-    {[{?g, @none}, {?s, @none}], :git_stage_hunk, "Stage hunk"},
+    {[{?g, @none}, {?s, @none}], :git_stage_file, "Stage file"},
+    {[{?g, @none}, {?u, @none}], :git_unstage_file, "Unstage file"},
     {[{?g, @none}, {?r, @none}], :git_revert_hunk, "Revert hunk"},
     {[{?g, @none}, {?v, @none}], :git_preview_hunk, "Preview hunk"},
     {[{?g, @none}, {?b, @none}], :git_blame_line, "Blame line"},
+    {[{?g, @none}, {?c, @none}, {?c, @none}], :git_commit_open, "Commit"},
+    {[{?g, @none}, {?c, @none}, {?a, @none}], :git_amend_open, "Amend commit"},
     {[{?g, @none}, {?D, @none}], :git_diff_toggle_staged, "Toggle staged/unstaged diff"},
 
     # ── Project ────────────────────────────────────────────────────────────────
@@ -198,6 +201,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?c, @none}], "+code"},
     {[{?c, @none}, {?l, @none}], "+LSP"},
     {[{?g, @none}], "+git"},
+    {[{?g, @none}, {?c, @none}], "+commit"},
     {[{?w, @none}], "+window"},
     {[{?q, @none}], "+quit"},
     {[{?h, @none}], "+help"},

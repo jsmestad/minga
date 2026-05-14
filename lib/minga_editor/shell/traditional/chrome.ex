@@ -34,4 +34,14 @@ defmodule MingaEditor.Shell.Traditional.Chrome do
       MingaEditor.Shell.Traditional.Chrome.TUI.build(state, layout, scrolls, cursor_info)
     end
   end
+
+  @doc "Returns Traditional-shell chrome state that is not part of the generic render-pipeline fingerprint."
+  @spec chrome_fingerprint(EditorState.t() | MingaEditor.RenderPipeline.Input.t()) :: term()
+  def chrome_fingerprint(state) do
+    if MingaEditor.Frontend.gui?(state.capabilities) do
+      nil
+    else
+      state.shell_state |> Map.get(:git_status_tui_state)
+    end
+  end
 end

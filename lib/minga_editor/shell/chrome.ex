@@ -19,6 +19,9 @@ defmodule MingaEditor.Shell.Chrome do
               cursor_info :: term()
             ) :: MingaEditor.RenderPipeline.Chrome.t()
 
+  @doc "Returns shell-specific data that affects chrome dirty tracking."
+  @callback chrome_fingerprint(editor_state :: term()) :: term()
+
   @doc "Returns true when the shell's current state can safely render through the asynchronous RenderPipeline path."
   @callback async_render?(editor_state :: term()) :: boolean()
 
