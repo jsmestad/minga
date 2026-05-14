@@ -159,115 +159,56 @@ struct FileTreeView: View {
     @ViewBuilder
     private func entryRow(_ entry: FileTreeEntry) -> some View {
         if entry.isEditing {
-            editingEntryRow(entry)
+            fileTreeRow(entry)
+                .id(entry.id)
         } else {
-            normalEntryRow(entry)
-        }
-    }
-
-    @ViewBuilder
-    private func editingEntryRow(_ entry: FileTreeEntry) -> some View {
-        HStack(spacing: 0) {
-            disclosureChevron(entry)
-
-            Text(entry.icon)
-                .font(.custom("Symbols Nerd Font Mono", size: 12))
-                .foregroundStyle(iconColor(entry))
-                .frame(width: 16, alignment: .center)
-
-            Spacer().frame(width: 4)
-
-            InlineEditField(
-                initialText: entry.editingText,
-                selectStem: entry.editingType == 2,  // rename
-                onCommit: { text in
-                    encoder?.sendFileTreeEditConfirm(text: text)
-                },
-                onCancel: {
-                    encoder?.sendFileTreeEditCancel()
+            fileTreeRow(entry)
+                .id(entry.id)
+                .contentShape(Rectangle())
+                .onHover { isHovered in
+                    hoveredEntryId = isHovered ? entry.id : nil
+                    if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
                 }
-            )
-            .frame(height: rowHeight)
+                .onTapGesture {
+                    handleEntryTap(entry)
+                }
+                .contextMenu { entryContextMenu(entry) }
+                .draggable(URL(fileURLWithPath: fileTreeState.fullPath(for: entry))) {
+                    HStack(spacing: 4) {
+                        Text(entry.icon)
+                            .font(.system(size: 12))
+                        Text(entry.name)
+                            .font(.system(size: 12))
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(theme.popupBg, in: RoundedRectangle(cornerRadius: 4))
+                }
+                .dropDestination(for: URL.self) { urls, _ in
+                    handleDrop(urls: urls, onto: entry)
+                } isTargeted: { isTargeted in
+                    dropTargetEntryId = isTargeted && entry.isDir ? entry.id : nil
+                }
         }
-        .padding(.leading, leadingPadding(entry))
-        .padding(.trailing, 8)
-        .frame(height: rowHeight)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 4)
-                .fill(theme.treeSelectionBg)
-                .padding(.horizontal, 4)
-        )
-        .overlay(alignment: .leading) {
-            indentGuides(entry)
-        }
-        .id(entry.id)
     }
 
-    @ViewBuilder
-    private func normalEntryRow(_ entry: FileTreeEntry) -> some View {
-        HStack(spacing: 0) {
-            // Disclosure chevron (directories) or alignment spacer (files)
-            disclosureChevron(entry)
-
-            // Nerd Font icon
-            Text(entry.icon)
-                .font(.custom("Symbols Nerd Font Mono", size: 12))
-                .foregroundStyle(iconColor(entry))
-                .frame(width: 16, alignment: .center)
-
-            Spacer().frame(width: 4)
-
-            // Name
-            Text(entry.name)
-                .font(.system(size: 12, weight: entry.showsActiveAccent ? .semibold : .regular))
-                .foregroundStyle(nameColor(entry))
-                .lineLimit(1)
-                .truncationMode(.tail)
-
-            Spacer(minLength: 0)
-
-            dirtyMarker(entry)
-            gitStatusDot(entry)
-        }
-        .padding(.leading, leadingPadding(entry))
-        .padding(.trailing, 8)
-        .frame(height: rowHeight)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(rowBackground(entry))
-        .overlay(alignment: .leading) {
-            activeFileAccent(entry)
-        }
-        .overlay(alignment: .leading) {
-            indentGuides(entry)
-        }
-        .id(entry.id)
-        .contentShape(Rectangle())
-        .onHover { isHovered in
-            hoveredEntryId = isHovered ? entry.id : nil
-            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-        }
-        .onTapGesture {
-            handleEntryTap(entry)
-        }
-        .contextMenu { entryContextMenu(entry) }
-        .draggable(URL(fileURLWithPath: fileTreeState.fullPath(for: entry))) {
-            HStack(spacing: 4) {
-                Text(entry.icon)
-                    .font(.system(size: 12))
-                Text(entry.name)
-                    .font(.system(size: 12))
+    private func fileTreeRow(_ entry: FileTreeEntry) -> FileTreeRowView {
+        FileTreeRowView(
+            entry: entry,
+            theme: theme,
+            rowHeight: rowHeight,
+            indentWidth: indentWidth,
+            chevronWidth: chevronWidth,
+            isHovered: hoveredEntryId == entry.id,
+            isDropTarget: dropTargetEntryId == entry.id,
+            animDuration: animDuration,
+            onEditCommit: { text in
+                encoder?.sendFileTreeEditConfirm(text: text)
+            },
+            onEditCancel: {
+                encoder?.sendFileTreeEditCancel()
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(theme.popupBg, in: RoundedRectangle(cornerRadius: 4))
-        }
-        .dropDestination(for: URL.self) { urls, _ in
-            handleDrop(urls: urls, onto: entry)
-        } isTargeted: { isTargeted in
-            dropTargetEntryId = isTargeted && entry.isDir ? entry.id : nil
-        }
-        .accessibilityLabel(entry.isDir ? "Folder: \(entry.name)" : "File: \(entry.name)")
+        )
     }
 
     // MARK: - Context menu
@@ -435,120 +376,12 @@ struct FileTreeView: View {
         }
     }
 
-    // MARK: - Indent guides
-
-    // MARK: - Dirty and git markers
-
-    /// Dirty buffers use their own marker so unsaved edits stay visible independently from git status.
-    @ViewBuilder
-    private func dirtyMarker(_ entry: FileTreeEntry) -> some View {
-        if entry.showsDirtyMarker {
-            Text("●")
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(theme.treeGitModified)
-                .padding(.trailing, entry.showsGitMarker ? 4 : 2)
-        }
-    }
-
-    /// Small colored dot indicating git status, right-aligned in the row.
-    @ViewBuilder
-    private func gitStatusDot(_ entry: FileTreeEntry) -> some View {
-        if let color = gitDotColor(entry) {
-            Circle()
-                .fill(color)
-                .frame(width: entry.hasConflictStatus ? 7 : 6, height: entry.hasConflictStatus ? 7 : 6)
-                .padding(.trailing, 2)
-        }
-    }
-
-    private func gitDotColor(_ entry: FileTreeEntry) -> Color? {
-        switch entry.gitStatusValue {
-        case .modified: return theme.treeGitModified
-        case .staged: return theme.treeGitStaged
-        case .untracked: return theme.treeGitUntracked
-        case .conflict: return theme.gutterErrorFg
-        case .renamed: return theme.treeGitStaged
-        case .deleted: return theme.gitDeletedFg
-        case .clean: return nil
-        }
-    }
-
-    /// Draws thin vertical indent guide lines using the BEAM-supplied semantic ancestor guide mask.
-    @ViewBuilder
-    private func indentGuides(_ entry: FileTreeEntry) -> some View {
-        if !entry.guides.isEmpty {
-            Canvas { context, size in
-                for (level, shouldDraw) in entry.guides.enumerated() where shouldDraw {
-                    // Align guide with the center of each ancestor's chevron column.
-                    let x = 8 + CGFloat(level) * indentWidth + chevronWidth / 2
-                    let rect = CGRect(x: x, y: 0, width: 1, height: size.height)
-                    context.fill(Path(rect), with: .color(theme.treeGuideFg))
-                }
-            }
-            .allowsHitTesting(false)
-            .frame(height: rowHeight)
-        }
-    }
-
-    // MARK: - Row layers (drop target, selection, active file, hover)
-
-    @ViewBuilder
-    private func rowBackground(_ entry: FileTreeEntry) -> some View {
-        if dropTargetEntryId == entry.id {
-            RoundedRectangle(cornerRadius: 4)
-                .fill(theme.treeSelectionBg.opacity(0.55))
-                .padding(.horizontal, 4)
-        } else if entry.isSelected {
-            RoundedRectangle(cornerRadius: 4)
-                .fill(theme.treeSelectionBg.opacity(entry.isFocused ? 1.0 : 0.42))
-                .padding(.horizontal, 4)
-        } else if hoveredEntryId == entry.id {
-            RoundedRectangle(cornerRadius: 4)
-                .fill(theme.treeFg.opacity(0.06))
-                .padding(.horizontal, 4)
-                .animation(.easeInOut(duration: animDuration), value: hoveredEntryId)
-        } else {
-            Color.clear
-        }
-    }
-
-    @ViewBuilder
-    private func activeFileAccent(_ entry: FileTreeEntry) -> some View {
-        if entry.showsActiveAccent {
-            RoundedRectangle(cornerRadius: 1)
-                .fill(theme.treeActiveFg)
-                .frame(width: 2, height: rowHeight - 8)
-                .padding(.leading, 4)
-        }
-    }
-
     // MARK: - Layout helpers
 
     private func leadingPadding(_ entry: FileTreeEntry) -> CGFloat {
         8 + CGFloat(entry.depth) * indentWidth
     }
 
-    // MARK: - Colors
-
-    private func iconColor(_ entry: FileTreeEntry) -> Color {
-        if entry.showsActiveAccent {
-            return theme.treeActiveFg
-        }
-        if entry.isDir {
-            return theme.treeDirFg
-        }
-        return theme.treeFg.opacity(0.7)
-    }
-
-    private func nameColor(_ entry: FileTreeEntry) -> Color {
-        if entry.showsActiveAccent {
-            return theme.treeActiveFg
-        }
-        if entry.isSelected {
-            return theme.treeSelectionFg
-        }
-        return entry.isDir ? theme.treeDirFg : theme.treeFg
-    }
 }
 
 /// Preference key for tracking scroll offset within the file tree.

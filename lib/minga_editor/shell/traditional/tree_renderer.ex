@@ -3,9 +3,9 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
   Renders the file tree panel into draw tuples for the left side of the screen.
 
   Produces a list of `DisplayList.draw()` tuples for the tree entries,
-  the separator column, and the header line. Uses Nerd Font icons per
-  filetype, box-drawing indent guides, and a project-name header to
-  match neo-tree.nvim's visual style.
+  the separator column, and the header line. Uses stable disclosure,
+  icon, name, and status columns with quiet ancestor guides so the tree
+  stays scannable without connector-heavy branch art.
   """
 
   alias Minga.Core.Face
@@ -20,11 +20,12 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
   alias MingaEditor.UI.Theme
   alias MingaEditor.WindowTree
 
-  # Box-drawing characters for indent guides
+  # Row anatomy: faint ancestor guides, disclosure, icon, name, spacer, dirty marker, git marker.
   @guide_pipe "│ "
-  @guide_tee "├─"
-  @guide_elbow "└─"
   @guide_blank "  "
+  @disclosure_expanded "▾ "
+  @disclosure_collapsed "▸ "
+  @disclosure_file "  "
 
   # Nerd Font folder icons (nf-md-folder / nf-md-folder-open)
   @folder_closed "\u{F024B}"
@@ -183,8 +184,10 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     focused = tree_row.focused?
     is_dirty = tree_row.dirty?
 
-    # Build the guide prefix from the entry's ancestor guide flags
+    # Build the structure columns from ancestor guides plus a dedicated disclosure column.
     guide_prefix = build_guides(tree_row.guides, tree_row.last_child?)
+    disclosure = disclosure_marker(tree_row)
+    structure_prefix = guide_prefix <> disclosure
 
     # Pick the icon and its color
     {icon, icon_color} = entry_icon(tree_row)
@@ -199,8 +202,8 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     dirty_width = if is_dirty, do: 1, else: 0
     indicator_width = dirty_width + git_width
 
-    # Compose the full line: guides + icon + space + name
-    prefix = guide_prefix <> icon <> " "
+    # Compose the full line: structure columns + icon + space + name
+    prefix = structure_prefix <> icon <> " "
     prefix_width = String.length(prefix)
 
     # Truncate name to fit, accounting for indicator space
@@ -210,25 +213,17 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     # Background style for the full row
     row_bg = row_background(is_cursor, focused, theme)
 
-    # Build draw commands: guide, icon, name, (dirty dot), (git indicator)
+    # Build draw commands: structure, icon, name, dirty marker, and git marker.
     guide_style = guide_draw_style(is_cursor, focused, theme)
     icon_style = icon_draw_style(icon_color, is_cursor, focused, theme)
     name_style = name_draw_style(tree_row, is_cursor, tree_row.active?, focused, theme)
-
-    guide_len = String.length(guide_prefix)
+    structure_len = String.length(structure_prefix)
 
     draws = []
-
-    # Guide segment (if any depth > 0)
-    draws =
-      if guide_len > 0 do
-        draws ++ [DisplayList.draw(row, col, guide_prefix, guide_style)]
-      else
-        draws
-      end
+    draws = draws ++ [DisplayList.draw(row, col, structure_prefix, guide_style)]
 
     # Icon segment
-    icon_col = col + guide_len
+    icon_col = col + structure_len
     draws = draws ++ [DisplayList.draw(row, icon_col, icon <> " ", icon_style)]
 
     # Name segment: pad to fill space between name and indicators
@@ -279,9 +274,11 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     %{col_off: col, width: width, theme: theme} = opts
     editing = tree_row.editing
 
-    # Build indent guides (same depth as the entry being edited/created)
+    # Build the same structure columns as normal rows so inline editing does not shift columns.
     guide_prefix = build_guides(tree_row.guides, tree_row.last_child?)
-    guide_len = String.length(guide_prefix)
+    disclosure = disclosure_marker(tree_row)
+    structure_prefix = guide_prefix <> disclosure
+    structure_len = String.length(structure_prefix)
 
     # Type indicator: file icon for new file, folder icon for new folder,
     # the entry's own icon for rename
@@ -292,7 +289,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
         :rename -> entry_icon(tree_row)
       end
 
-    prefix = guide_prefix <> icon <> " "
+    prefix = structure_prefix <> icon <> " "
     prefix_len = String.length(prefix)
 
     # Editing text with cursor
@@ -317,15 +314,9 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     text_style = Face.new(fg: editing_fg, bg: editing_bg, bold: true)
 
     draws = []
+    draws = draws ++ [DisplayList.draw(row, col, structure_prefix, guide_style)]
 
-    draws =
-      if guide_len > 0 do
-        draws ++ [DisplayList.draw(row, col, guide_prefix, guide_style)]
-      else
-        draws
-      end
-
-    icon_col = col + guide_len
+    icon_col = col + structure_len
     draws = draws ++ [DisplayList.draw(row, icon_col, icon <> " ", icon_style)]
 
     text_col = col + prefix_len
@@ -337,25 +328,17 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
   # ── Indent guides ──────────────────────────────────────────────────────
 
   @spec build_guides([boolean()], boolean()) :: String.t()
-  defp build_guides(ancestor_guides, last_child?) do
-    # Ancestor columns: each is either │ (more siblings) or blank (last child)
-    ancestor_part =
-      Enum.map_join(ancestor_guides, fn
-        true -> @guide_pipe
-        false -> @guide_blank
-      end)
-
-    # The connector at this entry's own depth
-    # Depth-0 entries (direct children of root) also get a connector
-    connector =
-      if last_child? do
-        @guide_elbow
-      else
-        @guide_tee
-      end
-
-    ancestor_part <> connector
+  defp build_guides(ancestor_guides, _last_child?) do
+    Enum.map_join(ancestor_guides, fn
+      true -> @guide_pipe
+      false -> @guide_blank
+    end)
   end
+
+  @spec disclosure_marker(Row.t()) :: String.t()
+  defp disclosure_marker(%Row{directory?: true, expanded?: true}), do: @disclosure_expanded
+  defp disclosure_marker(%Row{directory?: true}), do: @disclosure_collapsed
+  defp disclosure_marker(_tree_row), do: @disclosure_file
 
   # ── Icon selection ──────────────────────────────────────────────────────
 

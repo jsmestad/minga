@@ -199,6 +199,69 @@ struct FileTreeViewTests {
         #expect(strings.contains("editor.ex"))
         #expect(strings.contains("●"))
     }
+
+    @Test("Editing row renders inline edit field")
+    @MainActor func editingRowRendersInlineEditField() throws {
+        let state = FileTreeState()
+        state.visible = true
+        state.entries = [
+            sidebarFileTreeEntry(id: 1, index: 0, isEditing: true, editingType: 2, editingText: "renamed.ex",
+                                 icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"),
+        ]
+
+        let sut = FileTreeView(fileTreeState: state, theme: ThemeColors(), encoder: nil)
+        let body = try sut.inspect()
+        let fields = body.findAll(InlineEditField.self)
+
+        #expect(fields.count == 1)
+    }
+}
+
+// MARK: - FileTreeRowView
+
+@Suite("FileTreeRowView View Structure")
+struct FileTreeRowViewTests {
+
+    @Test("Accessibility labels and hints describe row state")
+    @MainActor func accessibilityLabelsAndHintsDescribeRowState() throws {
+        let file = fileTreeRowView(entry: sidebarFileTreeEntry(id: 1, index: 0, icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"))
+        #expect(file.accessibilityLabelText == "File: editor.ex")
+        #expect(file.accessibilityHintText == "Press Return to open.")
+
+        let collapsedDir = fileTreeRowView(entry: sidebarFileTreeEntry(id: 2, index: 1, isDir: true, icon: "\u{F024B}", name: "lib", relPath: "lib"))
+        #expect(collapsedDir.accessibilityLabelText == "Folder: lib")
+        #expect(collapsedDir.accessibilityHintText == "Collapsed folder. Press Return to expand.")
+
+        let expandedDir = fileTreeRowView(entry: sidebarFileTreeEntry(id: 3, index: 2, isDir: true, isExpanded: true, icon: "\u{F0256}", name: "test", relPath: "test"))
+        #expect(expandedDir.accessibilityHintText == "Expanded folder. Press Return to collapse.")
+
+        let editing = fileTreeRowView(entry: sidebarFileTreeEntry(id: 4, index: 3, isEditing: true, editingType: 2, editingText: "renamed.ex", icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"))
+        #expect(editing.accessibilityLabelText == "Editing: editor.ex")
+        #expect(editing.accessibilityHintText == "Type a new name, then press Return to confirm or Escape to cancel.")
+    }
+
+    @Test("Files directories and expanded folders have distinct row affordances")
+    @MainActor func filesDirectoriesAndExpandedFoldersHaveDistinctAffordances() throws {
+        let file = fileTreeRowView(entry: sidebarFileTreeEntry(id: 1, index: 0, icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"))
+        let collapsedDir = fileTreeRowView(entry: sidebarFileTreeEntry(id: 2, index: 1, isDir: true, icon: "\u{F024B}", name: "lib", relPath: "lib"))
+        let expandedDir = fileTreeRowView(entry: sidebarFileTreeEntry(id: 3, index: 2, isDir: true, isExpanded: true, icon: "\u{F0256}", name: "test", relPath: "test"))
+
+        #expect(try file.inspect().findAll(ViewType.Image.self).isEmpty)
+        #expect(try collapsedDir.inspect().findAll(ViewType.Image.self).count == 1)
+        #expect(try expandedDir.inspect().findAll(ViewType.Image.self).count == 1)
+        #expect(try collapsedDir.inspect().find(ViewType.Image.self).rotation().angle.degrees == 0)
+        #expect(try expandedDir.inspect().find(ViewType.Image.self).rotation().angle.degrees == 90)
+    }
+
+    @Test("Status markers remain separate from name text")
+    @MainActor func statusMarkersRemainSeparateFromNameText() throws {
+        let row = fileTreeRowView(entry: sidebarFileTreeEntry(id: 1, index: 0, isSelected: true, isFocused: true, isActive: true, isDirty: true, gitStatus: 1, icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"))
+        let strings = try row.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(strings.contains("editor.ex"))
+        #expect(strings.contains("●"))
+        #expect(try row.inspect().findAll(ViewType.Shape.self).count >= 1)
+    }
 }
 
 // MARK: - GitStatusView Section Headers
@@ -254,6 +317,22 @@ struct GitStatusViewSectionTests {
     }
 }
 
+@MainActor
+private func fileTreeRowView(entry: FileTreeEntry, isHovered: Bool = false, isDropTarget: Bool = false) -> FileTreeRowView {
+    FileTreeRowView(
+        entry: entry,
+        theme: ThemeColors(),
+        rowHeight: 22,
+        indentWidth: 14,
+        chevronWidth: 12,
+        isHovered: isHovered,
+        isDropTarget: isDropTarget,
+        animDuration: 0,
+        onEditCommit: { _ in },
+        onEditCancel: {}
+    )
+}
+
 private func sidebarFileTreeEntry(
     id: UInt32,
     index: Int,
@@ -264,15 +343,18 @@ private func sidebarFileTreeEntry(
     isActive: Bool = false,
     isDirty: Bool = false,
     gitStatus: UInt8 = 0,
+    isEditing: Bool = false,
+    editingType: UInt8 = 0xFF,
+    editingText: String = "",
     depth: Int = 0,
     icon: String,
     name: String,
     relPath: String
 ) -> FileTreeEntry {
     FileTreeEntry(id: id, index: index, isDir: isDir, isExpanded: isExpanded, isSelected: isSelected,
-                  isFocused: isFocused, isActive: isActive, isDirty: isDirty, isEditing: false,
+                  isFocused: isFocused, isActive: isActive, isDirty: isDirty, isEditing: isEditing,
                   isLastChild: false, depth: depth, gitStatus: gitStatus, diagnosticErrorCount: 0,
                   diagnosticWarningCount: 0, diagnosticInfoCount: 0, diagnosticHintCount: 0,
                   guides: [], icon: icon, name: name, relPath: relPath, path: relPath,
-                  editingType: 0xFF, editingText: "")
+                  editingType: editingType, editingText: editingText)
 }
