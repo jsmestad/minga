@@ -1131,7 +1131,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   # Otherwise, proceeds with the quit immediately.
   @spec maybe_confirm_quit(state(), :quit | :quit_all) :: state()
   defp maybe_confirm_quit(state, kind) do
-    if confirm_quit_enabled?() and any_buffer_dirty?(state) do
+    if confirm_quit_enabled?(state) and any_buffer_dirty?(state) do
       state
       |> EditorState.set_pending_quit(kind)
       |> EditorState.set_status("Modified buffers exist. Really quit? (y/n)")
@@ -1154,9 +1154,9 @@ defmodule MingaEditor.Commands.BufferManagement do
     end)
   end
 
-  @spec confirm_quit_enabled?() :: boolean()
-  defp confirm_quit_enabled? do
-    Config.get(:confirm_quit)
+  @spec confirm_quit_enabled?(state()) :: boolean()
+  defp confirm_quit_enabled?(state) do
+    Minga.Config.Options.get(EditorState.options_server(state), :confirm_quit)
   end
 
   # Validates a filetype name string against the Language registry.

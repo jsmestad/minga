@@ -9,11 +9,13 @@ defmodule MingaEditor.Commands.BufferManagementTest do
 
   defp start_editor(content) do
     {:ok, buffer} = BufferServer.start_link(content: content)
+    {:ok, options} = Options.start_link(name: nil)
 
     {:ok, editor} =
       MingaEditor.start_link(
         name: :"editor_#{:erlang.unique_integer([:positive])}",
         port_manager: nil,
+        options_server: options,
         buffer: buffer,
         width: 40,
         height: 10,
@@ -47,10 +49,13 @@ defmodule MingaEditor.Commands.BufferManagementTest do
 
       {:ok, buffer} = BufferServer.start_link(file_path: path)
 
+      {:ok, options} = Options.start_link(name: nil)
+
       {:ok, editor} =
         MingaEditor.start_link(
           name: :"editor_cmd_#{:erlang.unique_integer([:positive])}",
           port_manager: nil,
+          options_server: options,
           buffer: buffer,
           width: 40,
           height: 10,
@@ -106,10 +111,13 @@ defmodule MingaEditor.Commands.BufferManagementTest do
 
       {:ok, buffer} = BufferServer.start_link(file_path: path)
 
+      {:ok, options} = Options.start_link(name: nil)
+
       {:ok, editor} =
         MingaEditor.start_link(
           name: :"editor_ctrls_#{:erlang.unique_integer([:positive])}",
           port_manager: nil,
+          options_server: options,
           buffer: buffer,
           width: 40,
           height: 10,
@@ -267,15 +275,14 @@ defmodule MingaEditor.Commands.BufferManagementTest do
       BufferServer.insert_char(buffer, "X")
       assert BufferServer.dirty?(buffer)
 
-      # Disable confirmation
-      Options.set(:confirm_quit, false)
+      # Disable confirmation on this editor's isolated options server.
+      state = :sys.get_state(editor)
+      Options.set(state.options_server, :confirm_quit, false)
 
-      # :q with dirty buffer should NOT prompt
-      # (It would call System.stop, so check that pending_quit is never set)
+      # :q with dirty buffer should NOT prompt.
+      # It would call System.stop, so check that pending_quit is never set.
       state = :sys.get_state(editor)
       refute state.pending_quit
-    after
-      Options.set(:confirm_quit, true)
     end
   end
 end

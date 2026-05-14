@@ -19,7 +19,7 @@ defmodule MingaEditor.Frontend.GUIGitStatusTest do
 
       binary = ProtocolGUI.encode_gui_git_status(data)
 
-      # opcode(1) + repo_state(1) + syncing(1) + ahead(2) + behind(2) + branch_len(2) + "main"(4) + entry_count(2) + toast_present(1)
+      # opcode + repo_state + syncing + ahead + behind + branch_len + "main" + entry_count + toast_present
       assert byte_size(binary) == 1 + 1 + 1 + 2 + 2 + 2 + 4 + 2 + 1
 
       <<0x85, repo_state::8, syncing::8, ahead::16, behind::16, branch_len::16,
