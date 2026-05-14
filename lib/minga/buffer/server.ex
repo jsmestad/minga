@@ -919,7 +919,7 @@ defmodule Minga.Buffer.Server do
 
   def handle_call({:insert_char, char, source}, _from, state) do
     old_doc = state.document
-    new_buf = Document.insert_char(old_doc, char)
+    new_buf = Document.insert_text(old_doc, char)
 
     delta =
       EditDelta.insertion(

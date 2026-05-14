@@ -216,38 +216,38 @@ defmodule Minga.Buffer.Document do
 
   # ── Mutations ──
 
-  @doc """
-  Inserts a character (or string) at the cursor position.
+  # @doc """
+  # Inserts a character (or string) at the cursor position.
 
-  ## Examples
+  # ## Examples
 
-      iex> buf = Minga.Buffer.Document.new("world")
-      iex> buf = Minga.Buffer.Document.insert_char(buf, "hello ")
-      iex> Minga.Buffer.Document.content(buf)
-      "hello world"
-  """
-  @spec insert_char(t(), String.t()) :: t()
-  def insert_char(
-        %__MODULE__{
-          before: before,
-          after: after_,
-          cursor_line: line,
-          cursor_col: col,
-          line_count: lc
-        } = _buf,
-        char
-      )
-      when is_binary(char) do
-    {new_line, new_col, new_lc} = compute_cursor_after_insert(line, col, lc, char)
+  #     iex> buf = Minga.Buffer.Document.new("world")
+  #     iex> buf = Minga.Buffer.Document.insert_char(buf, "hello ")
+  #     iex> Minga.Buffer.Document.content(buf)
+  #     "hello world"
+  # """
+  # @spec insert_char(t(), String.t()) :: t()
+  # def insert_char(
+  #       %__MODULE__{
+  #         before: before,
+  #         after: after_,
+  #         cursor_line: line,
+  #         cursor_col: col,
+  #         line_count: lc
+  #       } = _buf,
+  #       char
+  #     )
+  #     when is_binary(char) do
+  #   {new_line, new_col, new_lc} = compute_cursor_after_insert(line, col, lc, char)
 
-    %__MODULE__{
-      before: before <> char,
-      after: after_,
-      cursor_line: new_line,
-      cursor_col: new_col,
-      line_count: new_lc
-    }
-  end
+  #   %__MODULE__{
+  #     before: before <> char,
+  #     after: after_,
+  #     cursor_line: new_line,
+  #     cursor_col: new_col,
+  #     line_count: new_lc
+  #   }
+  # end
 
   @doc """
   Inserts a multi-character string at the cursor position in a single
@@ -275,7 +275,27 @@ defmodule Minga.Buffer.Document do
   """
   @spec insert_text(t(), String.t()) :: t()
   def insert_text(%__MODULE__{} = buf, ""), do: buf
-  def insert_text(%__MODULE__{} = buf, text) when is_binary(text), do: insert_char(buf, text)
+
+  def insert_text(
+        %__MODULE__{
+          before: before,
+          # after: after_,
+          cursor_line: line,
+          cursor_col: col,
+          line_count: lc
+        } = mod,
+        text
+      )
+      when is_binary(text) do
+    {new_line, new_col, new_lc} = compute_cursor_after_insert(line, col, lc, text)
+
+    %{mod |
+      before: before <> text,
+      cursor_line: new_line,
+      cursor_col: new_col,
+      line_count: new_lc
+    }
+  end
 
   @doc """
   Deletes the character before the cursor (backspace).
