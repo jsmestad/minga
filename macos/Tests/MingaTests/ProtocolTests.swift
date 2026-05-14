@@ -506,6 +506,32 @@ struct EditorNSViewResizeTests {
         #expect(view.dispatcher.frameState.rows >= 1)
     }
 
+    @Test("viewDidMoveToWindow corrects initial scale mismatch without sending ready early")
+    @MainActor func viewDidMoveToWindowCorrectsInitialScaleMismatch() throws {
+        let spy = SpyEncoder()
+        guard let view = makeView(spy: spy, scale: 0.5) else { return }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+
+        var callbackScale: CGFloat?
+        view.onScaleFactorChanged = { newScale in
+            callbackScale = newScale
+        }
+
+        window.contentView = view
+        defer { window.contentView = nil }
+
+        let expectedScale = window.backingScaleFactor
+        #expect(callbackScale == expectedScale)
+        #expect((view.layer as? CAMetalLayer)?.contentsScale == expectedScale)
+        #expect(spy.readyCalls.isEmpty)
+    }
+
     @Test("viewDidChangeBackingProperties calls scale callback when scale differs")
     @MainActor func backingPropertyChangeCallsScaleCallback() throws {
         let spy = SpyEncoder()

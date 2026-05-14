@@ -356,7 +356,8 @@ final class EditorNSView: MTKView {
             return
         }
 
-        updateMetalBackingScale(window.backingScaleFactor)
+        // Correct the startup scale immediately when the window lands on a display different from NSScreen.main. The first setFrameSize call still owns the initial ready event.
+        displayConfigurationChanged(newScale: window.backingScaleFactor, sendDimensions: false)
 
         // Restore window position and size from previous session.
         // This fires before the window is made key/visible, so the
@@ -384,11 +385,11 @@ final class EditorNSView: MTKView {
     }
 
     /// Applies a live display configuration update to the Metal surface.
-    func displayConfigurationChanged(newScale: CGFloat, forceResizeEvent: Bool = false) {
+    func displayConfigurationChanged(newScale: CGFloat, forceResizeEvent: Bool = false, sendDimensions: Bool = true) {
         updateMetalBackingScale(newScale)
         let scaleChanged = abs(fontFace.scale - newScale) > 0.001
 
-        if scaleChanged || forceResizeEvent {
+        if sendDimensions && (scaleChanged || forceResizeEvent) {
             sendCurrentGridSize(reason: "Display configuration changed")
         }
 
