@@ -100,7 +100,7 @@ defmodule Minga.Test.EditorCase do
     # Send ready event to trigger initial render
     ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:ready, width, height}})
-    {:ok, snapshot} = HeadlessPort.collect_frame(ref)
+    {:ok, snapshot} = HeadlessPort.collect_frame(ref, @sync_timeout)
     Process.put({:last_frame_snapshot, port}, snapshot)
 
     # Drain any deferred messages queued by the :ready handler (e.g.
@@ -139,22 +139,28 @@ defmodule Minga.Test.EditorCase do
 
     editing_model = Keyword.get(opts, :editing_model, :vim)
 
-    {:ok, editor} =
-      MingaEditor.start_link(
-        name: :"headless_editor_#{id}",
-        backend: :headless,
-        port_manager: port,
-        buffer: buffer,
-        width: width,
-        height: height,
-        editing_model: editing_model,
-        events_registry: events_registry,
-        suppress_tool_prompts: true
-      )
+    editor_opts = [
+      name: :"headless_editor_#{id}",
+      backend: :headless,
+      port_manager: port,
+      buffer: buffer,
+      width: width,
+      height: height,
+      editing_model: editing_model,
+      events_registry: events_registry,
+      suppress_tool_prompts: true
+    ]
+
+    project_root = Keyword.get(opts, :project_root)
+
+    editor_opts =
+      if project_root, do: [{:project_root, project_root} | editor_opts], else: editor_opts
+
+    {:ok, editor} = MingaEditor.start_link(editor_opts)
 
     ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:ready, width, height}})
-    {:ok, snapshot} = HeadlessPort.collect_frame(ref)
+    {:ok, snapshot} = HeadlessPort.collect_frame(ref, @sync_timeout)
     Process.put({:last_frame_snapshot, port}, snapshot)
 
     # Drain deferred messages from :ready (see start_editor/2 comment).
@@ -252,7 +258,7 @@ defmodule Minga.Test.EditorCase do
     _ = get_editor_state(editor)
     ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
-    {:ok, snapshot} = HeadlessPort.collect_frame(ref)
+    {:ok, snapshot} = HeadlessPort.collect_frame(ref, @sync_timeout)
     # Store snapshot keyed by port pid so concurrent tests don't collide
     Process.put({:last_frame_snapshot, port}, snapshot)
     :ok
@@ -445,7 +451,7 @@ defmodule Minga.Test.EditorCase do
   @doc "Returns MessageStore entries after synchronizing with the editor process."
   @spec message_store_entries(editor_ctx()) :: [map()]
   def message_store_entries(%{editor: editor}) do
-    :sys.get_state(editor).message_store.entries
+    get_editor_state(editor).message_store.entries
   end
 
   @doc "Returns the number of open buffers."
@@ -767,7 +773,7 @@ defmodule Minga.Test.EditorCase do
     _ = get_editor_state(editor)
     ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:mouse_event, row, col, button, mods, event_type, click_count}})
-    {:ok, snapshot} = HeadlessPort.collect_frame(ref)
+    {:ok, snapshot} = HeadlessPort.collect_frame(ref, @sync_timeout)
     Process.put({:last_frame_snapshot, port}, snapshot)
     :ok
   end
@@ -782,7 +788,7 @@ defmodule Minga.Test.EditorCase do
     HeadlessPort.resize(port, new_width, new_height)
     ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:resize, new_width, new_height}})
-    {:ok, snapshot} = HeadlessPort.collect_frame(ref)
+    {:ok, snapshot} = HeadlessPort.collect_frame(ref, @sync_timeout)
     Process.put({:last_frame_snapshot, port}, snapshot)
     %{ctx | width: new_width, height: new_height}
   end

@@ -11,48 +11,71 @@ defmodule MingaEditor.MouseTest do
 
   # Content starts at row 1 because the tab bar occupies row 0.
   @content_row 1
+  @sync_timeout 15_000
 
   defp start_editor(content) do
-    {:ok, buffer} = BufferServer.start_link(content: content)
+    id = :erlang.unique_integer([:positive])
+    events_registry = :"mouse_events_#{id}"
+    project_root = isolated_project_root(id)
+    start_supervised!({Minga.Events, name: events_registry})
+
+    {:ok, buffer} = BufferServer.start_link(content: content, events_registry: events_registry)
 
     {:ok, editor} =
       MingaEditor.start_link(
-        name: :"editor_#{:erlang.unique_integer([:positive])}",
+        name: :"editor_#{id}",
         port_manager: nil,
         buffer: buffer,
         width: 40,
         height: 10,
-        editing_model: :vim
+        editing_model: :vim,
+        events_registry: events_registry,
+        project_root: project_root,
+        suppress_tool_prompts: true
       )
 
     {editor, buffer}
   end
 
   defp start_editor_no_buffer do
+    id = :erlang.unique_integer([:positive])
+    events_registry = :"mouse_events_#{id}"
+    project_root = isolated_project_root(id)
+    start_supervised!({Minga.Events, name: events_registry})
+
     {:ok, editor} =
       MingaEditor.start_link(
-        name: :"editor_#{:erlang.unique_integer([:positive])}",
+        name: :"editor_#{id}",
         port_manager: nil,
         buffer: nil,
         width: 40,
         height: 10,
-        editing_model: :vim
+        editing_model: :vim,
+        events_registry: events_registry,
+        project_root: project_root,
+        suppress_tool_prompts: true
       )
 
     editor
   end
 
+  defp isolated_project_root(id) do
+    root = Path.join(System.tmp_dir!(), "minga-mouse-#{id}")
+    File.mkdir_p!(root)
+    root
+  end
+
   defp send_key(editor, codepoint, mods \\ 0) do
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
-    _ = :sys.get_state(editor)
+    _ = :sys.get_state(editor, @sync_timeout)
   end
 
   defp send_mouse(editor, row, col, button, event_type, mods \\ 0, click_count \\ 1) do
     send(editor, {:minga_input, {:mouse_event, row, col, button, mods, event_type, click_count}})
-    _ = :sys.get_state(editor)
+    _ = :sys.get_state(editor, @sync_timeout)
   end
 
-  defp state(editor), do: :sys.get_state(editor)
+  defp state(editor), do: :sys.get_state(editor, @sync_timeout)
 
   defp rightmost_window_layout(layout) do
     Enum.max_by(layout.window_layouts, fn {_id, %{content: {_row, content_col, _w, _h}}} ->
@@ -62,20 +85,7 @@ defmodule MingaEditor.MouseTest do
 
   describe "mouse scroll" do
     defp start_mouse_editor do
-      content = Enum.map_join(0..29, "\n", &"line #{&1}")
-      {:ok, buffer} = BufferServer.start_link(content: content)
-
-      {:ok, editor} =
-        MingaEditor.start_link(
-          name: :"editor_#{:erlang.unique_integer([:positive])}",
-          port_manager: nil,
-          buffer: buffer,
-          width: 40,
-          height: 10,
-          editing_model: :vim
-        )
-
-      {editor, buffer}
+      start_editor(Enum.map_join(0..29, "\n", &"line #{&1}"))
     end
 
     test "scroll down clamps cursor to respect scroll margin" do
@@ -182,18 +192,7 @@ defmodule MingaEditor.MouseTest do
     end
 
     test "left click accounts for viewport scroll offset" do
-      content = Enum.map_join(0..29, "\n", &"line #{&1}")
-      {:ok, buffer} = BufferServer.start_link(content: content)
-
-      {:ok, editor} =
-        MingaEditor.start_link(
-          name: :"editor_#{:erlang.unique_integer([:positive])}",
-          port_manager: nil,
-          buffer: buffer,
-          width: 40,
-          height: 10,
-          editing_model: :vim
-        )
+      {editor, buffer} = start_editor(Enum.map_join(0..29, "\n", &"line #{&1}"))
 
       # Scroll down then click. Default scroll_lines=1, so 4 scrolls = viewport top at 4.
       for _i <- 1..4, do: send_mouse(editor, 0, 0, :wheel_down, :press)
@@ -444,17 +443,25 @@ defmodule MingaEditor.MouseTest do
     alias MingaEditor.State.TabBar
 
     defp start_two_tab_editor do
-      {:ok, buf1} = BufferServer.start_link(content: "hello")
-      {:ok, buf2} = BufferServer.start_link(content: "world")
+      id = :erlang.unique_integer([:positive])
+      events_registry = :"mouse_tab_events_#{id}"
+      project_root = isolated_project_root(id)
+      start_supervised!({Minga.Events, name: events_registry})
+
+      {:ok, buf1} = BufferServer.start_link(content: "hello", events_registry: events_registry)
+      {:ok, buf2} = BufferServer.start_link(content: "world", events_registry: events_registry)
 
       {:ok, editor} =
         MingaEditor.start_link(
-          name: :"editor_#{:erlang.unique_integer([:positive])}",
+          name: :"editor_#{id}",
           port_manager: nil,
           buffer: buf1,
           width: 80,
           height: 10,
-          editing_model: :vim
+          editing_model: :vim,
+          events_registry: events_registry,
+          project_root: project_root,
+          suppress_tool_prompts: true
         )
 
       # Inject a second tab directly via state manipulation

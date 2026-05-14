@@ -9,6 +9,7 @@ defmodule MingaEditor.Commands.MovementTest do
   defp start_editor(content \\ "hello\nworld\nfoo") do
     id = :erlang.unique_integer([:positive])
     events_registry = :"movement_events_#{id}"
+    project_root = isolated_project_root(id)
     start_supervised!({Minga.Events, name: events_registry})
 
     {:ok, buffer} = BufferServer.start_link(content: content, events_registry: events_registry)
@@ -22,10 +23,17 @@ defmodule MingaEditor.Commands.MovementTest do
         height: 10,
         editing_model: :vim,
         events_registry: events_registry,
+        project_root: project_root,
         suppress_tool_prompts: true
       )
 
     {editor, buffer}
+  end
+
+  defp isolated_project_root(id) do
+    root = Path.join(System.tmp_dir!(), "minga-movement-#{id}")
+    File.mkdir_p!(root)
+    root
   end
 
   defp send_key(editor, codepoint, mods \\ 0) do
@@ -179,18 +187,25 @@ defmodule MingaEditor.Commands.MovementTest do
 
   describe "page / half-page scrolling" do
     defp start_scroll_editor do
+      id = :erlang.unique_integer([:positive])
       content = Enum.map_join(0..29, "\n", &"line #{&1}")
+      events_registry = :"movement_scroll_events_#{id}"
+      project_root = isolated_project_root(id)
+      start_supervised!({Minga.Events, name: events_registry})
 
-      {:ok, buffer} = BufferServer.start_link(content: content)
+      {:ok, buffer} = BufferServer.start_link(content: content, events_registry: events_registry)
 
       {:ok, editor} =
         MingaEditor.start_link(
-          name: :"editor_#{:erlang.unique_integer([:positive])}",
+          name: :"editor_#{id}",
           port_manager: nil,
           buffer: buffer,
           width: 40,
           height: 10,
-          editing_model: :vim
+          editing_model: :vim,
+          events_registry: events_registry,
+          project_root: project_root,
+          suppress_tool_prompts: true
         )
 
       {editor, buffer}

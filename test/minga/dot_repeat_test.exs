@@ -11,13 +11,15 @@ defmodule Minga.DotRepeatTest do
   alias MingaEditor
 
   @escape 27
+  @sync_timeout 15_000
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
   defp start_editor(content) do
     id = :erlang.unique_integer([:positive])
     events_registry = :"dot_repeat_events_#{id}"
-    {:ok, _} = Registry.start_link(keys: :duplicate, name: events_registry)
+    project_root = isolated_project_root(id)
+    start_supervised!({Minga.Events, name: events_registry})
     {:ok, buffer} = BufferServer.start_link(content: content, events_registry: events_registry)
 
     {:ok, editor} =
@@ -28,15 +30,23 @@ defmodule Minga.DotRepeatTest do
         width: 80,
         height: 24,
         editing_model: :vim,
-        events_registry: events_registry
+        events_registry: events_registry,
+        project_root: project_root,
+        suppress_tool_prompts: true
       )
 
     {editor, buffer}
   end
 
+  defp isolated_project_root(id) do
+    root = Path.join(System.tmp_dir!(), "minga-dot-repeat-#{id}")
+    File.mkdir_p!(root)
+    root
+  end
+
   defp send_key(editor, codepoint, mods \\ 0) do
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
-    _ = :sys.get_state(editor)
+    _ = :sys.get_state(editor, @sync_timeout)
   end
 
   defp type_string(editor, text) do
