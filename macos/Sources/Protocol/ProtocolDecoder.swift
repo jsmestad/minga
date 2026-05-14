@@ -1731,13 +1731,16 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         // Header: repo_state:1, syncing:1, ahead:2, behind:2, branch_len:2, branch, entry_count:2
         guard data.count >= rest + 10 else { throw ProtocolDecodeError.malformed }
         let gsRepoState = data[rest]
-        let gsSyncing = data[rest + 1] != 0
+        guard gsRepoState <= 2 else { throw ProtocolDecodeError.malformed }
+        let gsSyncingByte = data[rest + 1]
+        guard gsSyncingByte == 0 || gsSyncingByte == 1 else { throw ProtocolDecodeError.malformed }
+        let gsSyncing = gsSyncingByte == 1
         let gsAhead = readU16(data, rest + 2)
         let gsBehind = readU16(data, rest + 4)
         let gsBranchLen = Int(readU16(data, rest + 6))
         guard data.count >= rest + 8 + gsBranchLen + 2 else { throw ProtocolDecodeError.malformed }
         let gsBranchData = data[(rest + 8)..<(rest + 8 + gsBranchLen)]
-        let gsBranchName = String(data: gsBranchData, encoding: .utf8) ?? ""
+        let gsBranchName = try readRequiredUTF8(gsBranchData)
         let gsEntryCount = Int(readU16(data, rest + 8 + gsBranchLen))
         var gsEntries: [Wire.GitStatusEntry] = []
         gsEntries.reserveCapacity(gsEntryCount)
@@ -1747,11 +1750,13 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             guard data.count >= gsPos + 8 else { throw ProtocolDecodeError.malformed }
             let gsPathHash = readU32(data, gsPos)
             let gsSection = data[gsPos + 4]
+            guard gsSection <= 3 else { throw ProtocolDecodeError.malformed }
             let gsStatus = data[gsPos + 5]
+            guard gsStatus <= 7 else { throw ProtocolDecodeError.malformed }
             let gsPathLen = Int(readU16(data, gsPos + 6))
             guard data.count >= gsPos + 8 + gsPathLen else { throw ProtocolDecodeError.malformed }
             let gsPathData = data[(gsPos + 8)..<(gsPos + 8 + gsPathLen)]
-            let gsPath = String(data: gsPathData, encoding: .utf8) ?? ""
+            let gsPath = try readRequiredUTF8(gsPathData)
             gsEntries.append(Wire.GitStatusEntry(pathHash: gsPathHash, section: gsSection, status: gsStatus, path: gsPath))
             gsPos += 8 + gsPathLen
         }
@@ -1760,6 +1765,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         guard data.count >= gsPos + 1 else { throw ProtocolDecodeError.malformed }
         let gsToastPresent = data[gsPos]
         gsPos += 1
+        guard gsToastPresent == 0 || gsToastPresent == 1 else { throw ProtocolDecodeError.malformed }
         if gsToastPresent == 1 {
             guard data.count >= gsPos + 4 else { throw ProtocolDecodeError.malformed }
             let gsToastLevel = data[gsPos]
@@ -1768,7 +1774,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             gsPos += 4
             guard data.count >= gsPos + gsToastMsgLen else { throw ProtocolDecodeError.malformed }
             let gsToastMsgData = data[gsPos..<(gsPos + gsToastMsgLen)]
-            let gsToastMsg = String(data: gsToastMsgData, encoding: .utf8) ?? ""
+            let gsToastMsg = try readRequiredUTF8(gsToastMsgData)
             gsPos += gsToastMsgLen
             gsToast = (message: gsToastMsg, level: gsToastLevel, action: gsToastAction)
         }
@@ -2022,6 +2028,13 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
 }
 
 // MARK: - Binary helpers
+
+private func readRequiredUTF8(_ data: Data.SubSequence) throws -> String {
+    guard let string = String(data: data, encoding: .utf8) else {
+        throw ProtocolDecodeError.malformed
+    }
+    return string
+}
 
 private func readU16(_ data: Data, _ offset: Int) -> UInt16 {
     return UInt16(data[offset]) << 8 | UInt16(data[offset + 1])

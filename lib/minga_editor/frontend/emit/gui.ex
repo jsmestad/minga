@@ -291,8 +291,8 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     end
   end
 
-  defp build_gui_git_status_cmd(%{git_syncing: syncing}, caches) do
-    fp = {:no_git, syncing}
+  defp build_gui_git_status_cmd(%{git_syncing: syncing, git_toast: toast}, caches) do
+    fp = {:no_git, syncing, toast}
 
     if caches.last_gui_git_status_fp != fp do
       cmd =
@@ -303,7 +303,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
           ahead: 0,
           behind: 0,
           entries: [],
-          git_toast: nil
+          git_toast: toast
         })
 
       {cmd, %{caches | last_gui_git_status_fp: fp}}

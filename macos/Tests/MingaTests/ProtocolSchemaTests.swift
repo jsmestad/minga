@@ -91,6 +91,7 @@ struct ProtocolSchemaSwiftTests {
         #expect(try schemaHex(chrome, "gui_bottom_panel") == OP_GUI_BOTTOM_PANEL)
         #expect(try schemaHex(chrome, "gui_picker_preview") == OP_GUI_PICKER_PREVIEW)
         #expect(try schemaHex(chrome, "gui_tool_manager") == OP_GUI_TOOL_MANAGER)
+        #expect(try schemaHex(chrome, "gui_minibuffer") == OP_GUI_MINIBUFFER)
     }
 
     @Test("Input opcode constants match schema")
@@ -133,6 +134,9 @@ struct ProtocolSchemaSwiftTests {
         #expect(try schemaHex(actions, "tool_uninstall") == GUI_ACTION_TOOL_UNINSTALL)
         #expect(try schemaHex(actions, "tool_update") == GUI_ACTION_TOOL_UPDATE)
         #expect(try schemaHex(actions, "tool_dismiss") == GUI_ACTION_TOOL_DISMISS)
+        #expect(try schemaHex(actions, "agent_tool_toggle") == GUI_ACTION_AGENT_TOOL_TOGGLE)
+        #expect(try schemaHex(actions, "execute_command") == GUI_ACTION_EXECUTE_COMMAND)
+        #expect(try schemaHex(actions, "minibuffer_select") == GUI_ACTION_MINIBUFFER_SELECT)
         #expect(try schemaHex(actions, "git_stage_file") == GUI_ACTION_GIT_STAGE_FILE)
         #expect(try schemaHex(actions, "git_unstage_file") == GUI_ACTION_GIT_UNSTAGE_FILE)
         #expect(try schemaHex(actions, "git_discard_file") == GUI_ACTION_GIT_DISCARD_FILE)
@@ -140,8 +144,31 @@ struct ProtocolSchemaSwiftTests {
         #expect(try schemaHex(actions, "git_unstage_all") == GUI_ACTION_GIT_UNSTAGE_ALL)
         #expect(try schemaHex(actions, "git_commit") == GUI_ACTION_GIT_COMMIT)
         #expect(try schemaHex(actions, "git_open_file") == GUI_ACTION_GIT_OPEN_FILE)
+        #expect(try schemaHex(actions, "agent_group_rename") == GUI_ACTION_GROUP_RENAME)
+        #expect(try schemaHex(actions, "agent_group_set_icon") == GUI_ACTION_GROUP_SET_ICON)
+        #expect(try schemaHex(actions, "agent_group_close") == GUI_ACTION_GROUP_CLOSE)
+        #expect(try schemaHex(actions, "space_leader_chord") == GUI_ACTION_SPACE_LEADER_CHORD)
+        #expect(try schemaHex(actions, "space_leader_retract") == GUI_ACTION_SPACE_LEADER_RETRACT)
+        #expect(try schemaHex(actions, "find_pasteboard_search") == GUI_ACTION_FIND_PASTEBOARD_SEARCH)
+        #expect(try schemaHex(actions, "board_select_card") == GUI_ACTION_BOARD_SELECT_CARD)
+        #expect(try schemaHex(actions, "board_close_card") == GUI_ACTION_BOARD_CLOSE_CARD)
+        #expect(try schemaHex(actions, "board_reorder") == GUI_ACTION_BOARD_REORDER)
+        #expect(try schemaHex(actions, "board_dispatch_agent") == GUI_ACTION_BOARD_DISPATCH_AGENT)
+        #expect(try schemaHex(actions, "agent_approve") == GUI_ACTION_AGENT_APPROVE)
+        #expect(try schemaHex(actions, "agent_request_changes") == GUI_ACTION_AGENT_REQUEST_CHANGES)
+        #expect(try schemaHex(actions, "agent_dismiss") == GUI_ACTION_AGENT_DISMISS)
+        #expect(try schemaHex(actions, "change_summary_click") == GUI_ACTION_CHANGE_SUMMARY_CLICK)
+        #expect(try schemaHex(actions, "file_tree_edit_confirm") == GUI_ACTION_FILE_TREE_EDIT_CONFIRM)
+        #expect(try schemaHex(actions, "file_tree_edit_cancel") == GUI_ACTION_FILE_TREE_EDIT_CANCEL)
+        #expect(try schemaHex(actions, "scroll_to_line") == GUI_ACTION_SCROLL_TO_LINE)
+        #expect(try schemaHex(actions, "file_tree_delete") == GUI_ACTION_FILE_TREE_DELETE)
+        #expect(try schemaHex(actions, "file_tree_rename") == GUI_ACTION_FILE_TREE_RENAME)
+        #expect(try schemaHex(actions, "file_tree_duplicate") == GUI_ACTION_FILE_TREE_DUPLICATE)
+        #expect(try schemaHex(actions, "file_tree_move") == GUI_ACTION_FILE_TREE_MOVE)
         #expect(try schemaHex(actions, "system_will_sleep") == GUI_ACTION_SYSTEM_WILL_SLEEP)
         #expect(try schemaHex(actions, "system_did_wake") == GUI_ACTION_SYSTEM_DID_WAKE)
+        #expect(try schemaHex(actions, "cmd_copy") == GUI_ACTION_CMD_COPY)
+        #expect(try schemaHex(actions, "cmd_cut") == GUI_ACTION_CMD_CUT)
         #expect(try schemaHex(actions, "git_push") == GUI_ACTION_GIT_PUSH)
         #expect(try schemaHex(actions, "git_pull") == GUI_ACTION_GIT_PULL)
         #expect(try schemaHex(actions, "git_fetch") == GUI_ACTION_GIT_FETCH)
@@ -149,12 +176,21 @@ struct ProtocolSchemaSwiftTests {
         #expect(try schemaHex(actions, "git_pull_and_retry") == GUI_ACTION_GIT_PULL_AND_RETRY)
     }
 
-    @Test("GUI window content opcode matches schema")
-    func guiWindowContentOpcode() throws {
+    @Test("GUI semantic opcodes match schema")
+    func guiSemanticOpcodes() throws {
         let schema = try loadSchema()
         guard let opcodes = schema["opcodes"] as? [String: Any],
               let semantic = opcodes["gui_semantic"] as? [String: Any] else { return }
 
         #expect(try schemaHex(semantic, "gui_window_content") == OP_GUI_WINDOW_CONTENT)
+        #expect(try schemaHex(semantic, "gui_hover_popup") == OP_GUI_HOVER_POPUP)
+        #expect(try schemaHex(semantic, "gui_signature_help") == OP_GUI_SIGNATURE_HELP)
+        #expect(try schemaHex(semantic, "gui_float_popup") == OP_GUI_FLOAT_POPUP)
+        #expect(try schemaHex(semantic, "gui_split_separators") == OP_GUI_SPLIT_SEPARATORS)
+        #expect(try schemaHex(semantic, "gui_git_status") == OP_GUI_GIT_STATUS)
+        #expect(try schemaHex(semantic, "gui_agent_groups") == OP_GUI_AGENT_GROUPS)
+        #expect(try schemaHex(semantic, "gui_board") == OP_GUI_BOARD)
+        #expect(try schemaHex(semantic, "gui_agent_context") == OP_GUI_AGENT_CONTEXT)
+        #expect(try schemaHex(semantic, "gui_change_summary") == OP_GUI_CHANGE_SUMMARY)
     }
 }

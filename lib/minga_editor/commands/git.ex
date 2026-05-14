@@ -21,6 +21,14 @@ defmodule MingaEditor.Commands.Git do
 
   @type state :: EditorState.t()
 
+  @git_toast_duration_ms 3_000
+  @pull_retry_markers [
+    "non-fast-forward",
+    "fetch first",
+    "remote contains work",
+    "tip of your current branch is behind"
+  ]
+
   @command_specs [
     {:git_status_toggle, "Git status", false},
     {:git_changed_files, "Changed files", false},
@@ -663,27 +671,13 @@ defmodule MingaEditor.Commands.Git do
       {^ref, task_monitor, {git_root, success_msg, error_prefix}} ->
         Process.demonitor(task_monitor, [:flush])
 
-        {status_msg, toast} =
-          case result do
-            :ok ->
-              refresh_repo(git_root)
-
-              {success_msg, %{message: success_msg, level: :success, action: nil}}
-
-            {:error, reason} ->
-              error_msg = "#{error_prefix}: #{reason}"
-              action = push_rejection_action(error_prefix, reason)
-
-              {error_msg, %{message: error_msg, level: :error, action: action}}
-          end
-
-        dismiss_ref = schedule_toast_dismissal()
-        toast = Map.put(toast, :dismiss_ref, dismiss_ref)
+        refresh_repo(git_root)
+        {status_msg, toast} = remote_result_feedback(result, success_msg, error_prefix)
 
         state
         |> EditorState.clear_git_remote_op()
         |> EditorState.set_status(status_msg)
-        |> EditorState.set_git_toast(toast)
+        |> EditorState.set_git_toast(with_dismiss_ref(toast))
 
       _ ->
         # Stale result from a superseded operation; ignore
@@ -691,11 +685,23 @@ defmodule MingaEditor.Commands.Git do
     end
   end
 
+  @spec remote_result_feedback(:ok | {:error, String.t()}, String.t(), String.t()) ::
+          {String.t(), MingaEditor.Shell.Traditional.State.git_toast()}
+  defp remote_result_feedback(:ok, success_msg, _error_prefix) do
+    {success_msg, %{message: success_msg, level: :success, action: nil}}
+  end
+
+  defp remote_result_feedback({:error, reason}, _success_msg, error_prefix) do
+    error_msg = "#{error_prefix}: #{reason}"
+    action = push_rejection_action(error_prefix, reason)
+    {error_msg, %{message: error_msg, level: :error, action: action}}
+  end
+
   @spec push_rejection_action(String.t(), String.t()) :: :pull_and_retry | nil
   defp push_rejection_action("Push failed", reason) do
     lowered = String.downcase(reason)
 
-    if String.contains?(lowered, "rejected") or String.contains?(lowered, "non-fast-forward") do
+    if Enum.any?(@pull_retry_markers, &String.contains?(lowered, &1)) do
       :pull_and_retry
     else
       nil
@@ -704,10 +710,15 @@ defmodule MingaEditor.Commands.Git do
 
   defp push_rejection_action(_error_prefix, _reason), do: nil
 
+  @spec with_dismiss_ref(map()) :: map()
+  defp with_dismiss_ref(toast) do
+    Map.put(toast, :dismiss_ref, schedule_toast_dismissal())
+  end
+
   @spec schedule_toast_dismissal() :: reference()
   defp schedule_toast_dismissal do
     dismiss_ref = make_ref()
-    Process.send_after(self(), {:dismiss_git_toast, dismiss_ref}, 3_000)
+    Process.send_after(self(), {:dismiss_git_toast, dismiss_ref}, @git_toast_duration_ms)
     dismiss_ref
   end
 
@@ -720,22 +731,45 @@ defmodule MingaEditor.Commands.Git do
   end
 
   @doc """
-  Handles the `:DOWN` message when an async git remote task crashes.
+  Handles the `:DOWN` message for an async git remote process.
 
-  Clears the in-flight operation so future remote operations aren't
-  permanently blocked. Called by the Editor's `:DOWN` handler.
+  A normal exit can arrive before the explicit remote-result message, so it
+  leaves the operation in flight. Abnormal exits clear the operation and show an
+  error so future remote operations are not permanently blocked. Called by the
+  Editor's `:DOWN` handler.
   """
-  @spec handle_remote_task_down(state(), reference()) :: state() | :not_matched
-  def handle_remote_task_down(state, monitor_ref) do
+  @spec handle_remote_task_down(state(), reference(), term()) :: state() | :not_matched
+  def handle_remote_task_down(state, monitor_ref, :normal) do
     case state.git_remote_op do
-      {_msg_ref, ^monitor_ref, _context} ->
+      {_, ^monitor_ref, _} -> state
+      _ -> :not_matched
+    end
+  end
+
+  def handle_remote_task_down(state, monitor_ref, reason) do
+    case state.git_remote_op do
+      {_, ^monitor_ref, {git_root, _, _}} ->
+        refresh_repo(git_root)
+        message = "Git operation failed unexpectedly: #{format_down_reason(reason)}"
+        Minga.Log.warning(:editor, "Git remote task failed: #{inspect(reason)}")
+
         state
         |> EditorState.clear_git_remote_op()
-        |> EditorState.set_status("Git operation failed unexpectedly")
+        |> EditorState.set_status(message)
+        |> EditorState.set_git_toast(
+          with_dismiss_ref(%{message: message, level: :error, action: nil})
+        )
 
       _ ->
         :not_matched
     end
+  end
+
+  @spec format_down_reason(term()) :: String.t()
+  defp format_down_reason(reason) when is_atom(reason), do: Atom.to_string(reason)
+
+  defp format_down_reason(reason) do
+    inspect(reason, charlists: :as_lists, limit: 5)
   end
 
   @spec git_remote_action(
@@ -757,18 +791,16 @@ defmodule MingaEditor.Commands.Git do
         ref = make_ref()
         editor_pid = self()
 
-        {:ok, task_pid} =
-          Task.start(fn ->
+        {_, monitor_ref} =
+          spawn_monitor(fn ->
             result = operation.(git_root)
             send(editor_pid, {:git_remote_result, ref, result})
           end)
 
-        task_monitor = Process.monitor(task_pid)
-
         state
         |> EditorState.clear_git_toast()
         |> EditorState.set_git_remote_op(
-          {ref, task_monitor, {git_root, success_msg, error_prefix}}
+          {ref, monitor_ref, {git_root, success_msg, error_prefix}}
         )
         |> EditorState.set_status(progress_msg)
 

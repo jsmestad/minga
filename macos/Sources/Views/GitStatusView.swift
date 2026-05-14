@@ -538,6 +538,7 @@ struct GitStatusView: View {
 
     private func statusLetter(_ status: GitFileStatus) -> String {
         switch status {
+        case .unknown: "•"
         case .modified: "M"
         case .added: "A"
         case .deleted: "D"
@@ -550,6 +551,7 @@ struct GitStatusView: View {
 
     private func statusColor(_ status: GitFileStatus) -> Color {
         switch status {
+        case .unknown: theme.treeFg.opacity(0.45)
         case .modified: theme.gitModifiedFg
         case .added: theme.gitAddedFg
         case .deleted: theme.gitDeletedFg
@@ -562,6 +564,7 @@ struct GitStatusView: View {
 
     private func statusAccessibilityLabel(_ status: GitFileStatus) -> String {
         switch status {
+        case .unknown: "Unknown"
         case .modified: "Modified"
         case .added: "Added"
         case .deleted: "Deleted"

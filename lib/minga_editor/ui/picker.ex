@@ -356,31 +356,27 @@ defmodule MingaEditor.UI.Picker do
 
   @spec score_segment(String.t(), String.t()) :: non_neg_integer()
   defp score_segment(text, segment) do
-    match_kind(text, segment) |> match_score()
+    case String.starts_with?(text, segment) do
+      true -> 300
+      false -> score_non_prefix_segment(text, segment)
+    end
   end
 
-  @spec match_kind(String.t(), String.t()) :: :prefix | :substring | :fuzzy | :none
-  defp match_kind(text, segment) do
-    do_match_kind(text, segment, String.starts_with?(text, segment))
+  @spec score_non_prefix_segment(String.t(), String.t()) :: non_neg_integer()
+  defp score_non_prefix_segment(text, segment) do
+    case String.contains?(text, segment) do
+      true -> 200
+      false -> score_fuzzy_segment(text, segment)
+    end
   end
 
-  @spec do_match_kind(String.t(), String.t(), boolean()) :: :prefix | :substring | :fuzzy | :none
-  defp do_match_kind(_text, _segment, true), do: :prefix
-
-  defp do_match_kind(text, segment, false),
-    do: do_match_kind_substring(text, segment, String.contains?(text, segment))
-
-  @spec do_match_kind_substring(String.t(), String.t(), boolean()) :: :substring | :fuzzy | :none
-  defp do_match_kind_substring(_text, _segment, true), do: :substring
-
-  defp do_match_kind_substring(text, segment, false),
-    do: if(fuzzy_match?(text, segment), do: :fuzzy, else: :none)
-
-  @spec match_score(:prefix | :substring | :fuzzy | :none) :: non_neg_integer()
-  defp match_score(:prefix), do: 300
-  defp match_score(:substring), do: 200
-  defp match_score(:fuzzy), do: 100
-  defp match_score(:none), do: 0
+  @spec score_fuzzy_segment(String.t(), String.t()) :: non_neg_integer()
+  defp score_fuzzy_segment(text, segment) do
+    case fuzzy_match?(text, segment) do
+      true -> 100
+      false -> 0
+    end
+  end
 
   # Check if all characters in `needle` appear in order in `haystack`.
   @spec fuzzy_match?(String.t(), String.t()) :: boolean()

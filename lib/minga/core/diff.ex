@@ -424,60 +424,104 @@ defmodule Minga.Core.Diff do
   defp do_merge(
          ancestor_remaining,
          pos,
-         [fe | fork_rest] = fork_edits,
-         [pe | parent_rest] = parent_edits,
+         [fe | fork_rest],
+         [pe | parent_rest],
          acc
        ) do
-    {f_start, f_count, f_replacement} = fe
-    {p_start, p_count, p_replacement} = pe
+    merge_overlapping_edits(ancestor_remaining, pos, {fe, fork_rest}, {pe, parent_rest}, acc)
+  end
 
+  # Both sides made the same change (identical replacement for the same region).
+  # Must be checked before the "before" conditions because identical insertions
+  # at the same position would otherwise be duplicated.
+  defp merge_overlapping_edits(
+         ancestor_remaining,
+         pos,
+         {{start, count, replacement}, fork_rest},
+         {{start, count, replacement}, parent_rest},
+         acc
+       ) do
+    end_pos = start + count
+
+    {unchanged, ancestor_remaining} =
+      consume_ancestor_region(ancestor_remaining, pos, start, end_pos)
+
+    acc = prepend_non_empty_resolved(unchanged, acc)
+    acc = [{:resolved, replacement} | acc]
+    do_merge(ancestor_remaining, end_pos, fork_rest, parent_rest, acc)
+  end
+
+  # Fork edit is entirely before parent edit (no overlap).
+  defp merge_overlapping_edits(
+         ancestor_remaining,
+         pos,
+         {{f_start, f_count, f_replacement}, fork_rest},
+         {{p_start, p_count, p_replacement}, parent_rest},
+         acc
+       )
+       when f_start + f_count <= p_start do
     f_end = f_start + f_count
+
+    {unchanged, ancestor_remaining} =
+      consume_ancestor_region(ancestor_remaining, pos, f_start, f_end)
+
+    acc = prepend_non_empty_resolved(unchanged, acc)
+    acc = [{:resolved, f_replacement} | acc]
+
+    do_merge(
+      ancestor_remaining,
+      f_end,
+      fork_rest,
+      [{p_start, p_count, p_replacement} | parent_rest],
+      acc
+    )
+  end
+
+  # Parent edit is entirely before fork edit (no overlap).
+  defp merge_overlapping_edits(
+         ancestor_remaining,
+         pos,
+         {{f_start, f_count, f_replacement}, fork_rest},
+         {{p_start, p_count, p_replacement}, parent_rest},
+         acc
+       )
+       when p_start + p_count <= f_start do
     p_end = p_start + p_count
 
-    cond do
-      # Both sides made the same change (identical replacement for the same region).
-      # Must be checked before the "before" conditions because identical insertions
-      # at the same position (f_end == p_start) would otherwise be duplicated.
-      f_start == p_start and f_count == p_count and f_replacement == p_replacement ->
-        {unchanged, ancestor_remaining} =
-          consume_ancestor_region(ancestor_remaining, pos, f_start, f_end)
+    {unchanged, ancestor_remaining} =
+      consume_ancestor_region(ancestor_remaining, pos, p_start, p_end)
 
-        acc = prepend_non_empty_resolved(unchanged, acc)
-        acc = [{:resolved, f_replacement} | acc]
-        do_merge(ancestor_remaining, f_end, fork_rest, parent_rest, acc)
+    acc = prepend_non_empty_resolved(unchanged, acc)
+    acc = [{:resolved, p_replacement} | acc]
 
-      # Fork edit is entirely before parent edit (no overlap).
-      f_end <= p_start ->
-        {unchanged, ancestor_remaining} =
-          consume_ancestor_region(ancestor_remaining, pos, f_start, f_end)
+    do_merge(
+      ancestor_remaining,
+      p_end,
+      [{f_start, f_count, f_replacement} | fork_rest],
+      parent_rest,
+      acc
+    )
+  end
 
-        acc = prepend_non_empty_resolved(unchanged, acc)
-        acc = [{:resolved, f_replacement} | acc]
-        do_merge(ancestor_remaining, f_end, fork_rest, parent_edits, acc)
+  # Overlap: conflict.
+  defp merge_overlapping_edits(
+         ancestor_remaining,
+         pos,
+         {{f_start, f_count, f_replacement}, fork_rest},
+         {{p_start, p_count, p_replacement}, parent_rest},
+         acc
+       ) do
+    conflict_start = min(f_start, p_start)
+    conflict_end = max(f_start + f_count, p_start + p_count)
 
-      # Parent edit is entirely before fork edit (no overlap).
-      p_end <= f_start ->
-        {unchanged, ancestor_remaining} =
-          consume_ancestor_region(ancestor_remaining, pos, p_start, p_end)
+    {unchanged, ancestor_remaining} =
+      consume_ancestor_region(ancestor_remaining, pos, conflict_start, conflict_end)
 
-        acc = prepend_non_empty_resolved(unchanged, acc)
-        acc = [{:resolved, p_replacement} | acc]
-        do_merge(ancestor_remaining, p_end, fork_edits, parent_rest, acc)
+    acc = prepend_non_empty_resolved(unchanged, acc)
+    acc = [{:conflict, f_replacement, p_replacement} | acc]
 
-      # Overlap: conflict.
-      true ->
-        conflict_start = min(f_start, p_start)
-        conflict_end = max(f_end, p_end)
-
-        {unchanged, ancestor_remaining} =
-          consume_ancestor_region(ancestor_remaining, pos, conflict_start, conflict_end)
-
-        acc = prepend_non_empty_resolved(unchanged, acc)
-        acc = [{:conflict, f_replacement, p_replacement} | acc]
-
-        {fork_rest2, parent_rest2} = skip_consumed_edits(fork_rest, parent_rest, conflict_end)
-        do_merge(ancestor_remaining, conflict_end, fork_rest2, parent_rest2, acc)
-    end
+    {fork_rest2, parent_rest2} = skip_consumed_edits(fork_rest, parent_rest, conflict_end)
+    do_merge(ancestor_remaining, conflict_end, fork_rest2, parent_rest2, acc)
   end
 
   @spec prepend_non_empty_resolved([String.t()], [merge_hunk()]) :: [merge_hunk()]
