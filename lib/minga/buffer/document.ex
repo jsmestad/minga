@@ -810,7 +810,9 @@ defmodule Minga.Buffer.Document do
   # Count graphemes in the first `byte_count` bytes of `text`.
   @spec grapheme_count_in_bytes(String.t(), non_neg_integer()) :: non_neg_integer()
   defp grapheme_count_in_bytes(_text, 0), do: 0
-  defp grapheme_count_in_bytes(text, byte_count), do: do_grapheme_count_in_bytes(text, byte_count, 0, 0)
+
+  defp grapheme_count_in_bytes(text, byte_count),
+    do: do_grapheme_count_in_bytes(text, byte_count, 0, 0)
 
   @spec do_grapheme_count_in_bytes(
           String.t(),
