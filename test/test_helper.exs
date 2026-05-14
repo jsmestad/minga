@@ -19,6 +19,15 @@ System.put_env("GIT_CONFIG_COUNT", "1")
 System.put_env("GIT_CONFIG_KEY_0", "init.defaultBranch")
 System.put_env("GIT_CONFIG_VALUE_0", "main")
 
+# Keep direct test invocations hermetic if config/test.exs was not loaded first.
+unless System.get_env("XDG_CONFIG_HOME") do
+  test_config_home =
+    Path.join(System.tmp_dir!(), "minga-test-config-#{System.unique_integer([:positive])}")
+
+  File.mkdir_p!(Path.join(test_config_home, "minga"))
+  System.put_env("XDG_CONFIG_HOME", test_config_home)
+end
+
 # Auto-build the Swift test harness on macOS if swiftc is available.
 # On Linux (CI), the harness tests are excluded automatically.
 harness_path = Path.join(:code.priv_dir(:minga), "minga-test-harness")

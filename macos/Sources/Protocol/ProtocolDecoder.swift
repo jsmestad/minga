@@ -32,7 +32,7 @@ enum RenderCommand: Sendable {
     case registerFont(id: UInt8, family: String)
     case guiTheme(slots: [(slotId: UInt8, r: UInt8, g: UInt8, b: UInt8)])
     case guiTabBar(activeIndex: UInt8, tabs: [Wire.TabEntry])
-    case guiFileTree(selectedIndex: UInt16, treeWidth: UInt16, rootPath: String, entries: [Wire.FileTreeEntry])
+    case guiFileTree(version: UInt8, treeFlags: UInt8, selectedId: String, treeWidth: UInt16, rootPath: String, entries: [Wire.FileTreeEntry])
     case guiCompletion(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, items: [Wire.CompletionItem])
     case guiWhichKey(visible: Bool, prefix: String, page: UInt8, pageCount: UInt8, bindings: [Wire.WhichKeyBinding])
     case guiBreadcrumb(segments: [String])
@@ -273,74 +273,118 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
 
     // GUI chrome commands.
     case OP_GUI_FILE_TREE:
-        // Header: selected_index:2, tree_width:2, entry_count:2, root_len:2, root
-        // Per entry: path_hash:4, flags:1, depth:1, git_status:1, icon_len:1, icon,
-        //            name_len:2, name, rel_path_len:2, rel_path
-        guard data.count >= rest + 8 else { throw ProtocolDecodeError.malformed }
-        let selectedIndex = readU16(data, rest)
-        let treeWidth = readU16(data, rest + 2)
-        let entryCount = Int(readU16(data, rest + 4))
-        let rootLen = Int(readU16(data, rest + 6))
-        guard data.count >= rest + 8 + rootLen else { throw ProtocolDecodeError.malformed }
-        let rootData = data[(rest + 8)..<(rest + 8 + rootLen)]
-        let rootPath = String(data: rootData, encoding: .utf8) ?? ""
-        var entries: [Wire.FileTreeEntry] = []
-        entries.reserveCapacity(entryCount)
-        var pos = rest + 8 + rootLen
-        for _ in 0..<entryCount {
-            guard data.count >= pos + 8 else { throw ProtocolDecodeError.malformed }
-            let pathHash = readU32(data, pos)
-            let flags = data[pos + 4]
-            let depth = data[pos + 5]
-            let gitStatus = data[pos + 6]
-            let iconLen = Int(data[pos + 7])
-            guard data.count >= pos + 8 + iconLen + 2 else { throw ProtocolDecodeError.malformed }
-            let iconData = data[(pos + 8)..<(pos + 8 + iconLen)]
-            let icon = String(data: iconData, encoding: .utf8) ?? ""
-            let nameLen = Int(readU16(data, pos + 8 + iconLen))
-            guard data.count >= pos + 10 + iconLen + nameLen + 2 else { throw ProtocolDecodeError.malformed }
-            let nameData = data[(pos + 10 + iconLen)..<(pos + 10 + iconLen + nameLen)]
-            let name = String(data: nameData, encoding: .utf8) ?? ""
-            let relPathLen = Int(readU16(data, pos + 10 + iconLen + nameLen))
-            guard data.count >= pos + 12 + iconLen + nameLen + relPathLen else { throw ProtocolDecodeError.malformed }
-            let relPathData = data[(pos + 12 + iconLen + nameLen)..<(pos + 12 + iconLen + nameLen + relPathLen)]
-            let relPath = String(data: relPathData, encoding: .utf8) ?? ""
-            let isEditing = flags & 0x08 != 0
-            var editingType: UInt8 = 0
-            var editingText = ""
-            var editingPayloadSize = 0
+        // Semantic file tree uses a 32-bit payload length because expanded project trees can exceed 64KB.
+        // opcode(1) + payload_len(4) + version(1) + tree_flags(1) + selected_id + root + tree_width(2) + row_count(2) + rows...
+        guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
+        let payloadLen = Int(readU32(data, rest))
+        let payloadStart = rest + 4
+        guard data.count >= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+        guard payloadLen >= 6 else { throw ProtocolDecodeError.malformed }
 
-            if isEditing {
-                guard data.count >= pos + 12 + iconLen + nameLen + relPathLen + 3 else {
-                    throw ProtocolDecodeError.malformed
-                }
-                editingType = data[pos + 12 + iconLen + nameLen + relPathLen]
-                let editingTextLen = Int(readU16(data, pos + 12 + iconLen + nameLen + relPathLen + 1))
-                guard data.count >= pos + 12 + iconLen + nameLen + relPathLen + 3 + editingTextLen else {
-                    throw ProtocolDecodeError.malformed
-                }
-                let editingTextData = data[(pos + 12 + iconLen + nameLen + relPathLen + 3)..<(pos + 12 + iconLen + nameLen + relPathLen + 3 + editingTextLen)]
-                editingText = String(data: editingTextData, encoding: .utf8) ?? ""
-                editingPayloadSize = 3 + editingTextLen
-            }
+        let version = data[payloadStart]
+        let treeFlags = data[payloadStart + 1]
+        var pos = payloadStart + 2
+
+        guard pos + 2 <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+        let selectedIdLen = Int(readU16(data, pos)); pos += 2
+        guard pos + selectedIdLen <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+        let selectedId = String(data: data[pos..<(pos + selectedIdLen)], encoding: .utf8) ?? ""
+        pos += selectedIdLen
+
+        guard pos + 2 <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+        let rootLen = Int(readU16(data, pos)); pos += 2
+        guard pos + rootLen <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+        let rootPath = String(data: data[pos..<(pos + rootLen)], encoding: .utf8) ?? ""
+        pos += rootLen
+
+        guard pos + 4 <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+        let treeWidth = readU16(data, pos); pos += 2
+        let rowCount = Int(readU16(data, pos)); pos += 2
+
+        var entries: [Wire.FileTreeEntry] = []
+        entries.reserveCapacity(rowCount)
+
+        for _ in 0..<rowCount {
+            guard pos + 17 <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+            let pathHash = readU32(data, pos); pos += 4
+            let flags = readU16(data, pos); pos += 2
+            let depth = data[pos]; pos += 1
+            let gitStatus = data[pos]; pos += 1
+            let diagnosticErrorCount = readU16(data, pos); pos += 2
+            let diagnosticWarningCount = readU16(data, pos); pos += 2
+            let diagnosticInfoCount = readU16(data, pos); pos += 2
+            let diagnosticHintCount = readU16(data, pos); pos += 2
+            let guideCount = Int(data[pos]); pos += 1
+            guard pos + guideCount <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+            let guides = (0..<guideCount).map { index in data[pos + index] != 0 }
+            pos += guideCount
+
+            guard pos + 2 <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+            let idLen = Int(readU16(data, pos)); pos += 2
+            guard pos + idLen <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+            let id = String(data: data[pos..<(pos + idLen)], encoding: .utf8) ?? ""
+            pos += idLen
+
+            guard pos + 2 <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+            let pathLen = Int(readU16(data, pos)); pos += 2
+            guard pos + pathLen <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+            let path = String(data: data[pos..<(pos + pathLen)], encoding: .utf8) ?? ""
+            pos += pathLen
+
+            guard pos + 2 <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+            let relPathLen = Int(readU16(data, pos)); pos += 2
+            guard pos + relPathLen <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+            let relPath = String(data: data[pos..<(pos + relPathLen)], encoding: .utf8) ?? ""
+            pos += relPathLen
+
+            guard pos + 2 <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+            let nameLen = Int(readU16(data, pos)); pos += 2
+            guard pos + nameLen <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+            let name = String(data: data[pos..<(pos + nameLen)], encoding: .utf8) ?? ""
+            pos += nameLen
+
+            guard pos + 1 <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+            let iconLen = Int(data[pos]); pos += 1
+            guard pos + iconLen <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+            let icon = String(data: data[pos..<(pos + iconLen)], encoding: .utf8) ?? ""
+            pos += iconLen
+
+            guard pos + 3 <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+            let editingType = data[pos]; pos += 1
+            let editingTextLen = Int(readU16(data, pos)); pos += 2
+            guard pos + editingTextLen <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+            let editingText = String(data: data[pos..<(pos + editingTextLen)], encoding: .utf8) ?? ""
+            pos += editingTextLen
 
             entries.append(Wire.FileTreeEntry(
                 pathHash: pathHash,
-                isDir: flags & 0x01 != 0,
-                isExpanded: flags & 0x02 != 0,
-                isSelected: flags & 0x04 != 0,
-                isEditing: isEditing,
+                id: id,
+                path: path,
+                isDir: flags & 0x0001 != 0,
+                isExpanded: flags & 0x0002 != 0,
+                isSelected: flags & 0x0004 != 0,
+                isFocused: flags & 0x0008 != 0,
+                isActive: flags & 0x0010 != 0,
+                isDirty: flags & 0x0020 != 0,
+                isEditing: flags & 0x0040 != 0,
+                isLastChild: flags & 0x0080 != 0,
                 depth: depth,
                 gitStatus: gitStatus,
+                diagnosticErrorCount: diagnosticErrorCount,
+                diagnosticWarningCount: diagnosticWarningCount,
+                diagnosticInfoCount: diagnosticInfoCount,
+                diagnosticHintCount: diagnosticHintCount,
+                guides: guides,
                 icon: icon,
                 name: name,
                 relPath: relPath,
                 editingType: editingType,
                 editingText: editingText
             ))
-            pos += 12 + iconLen + nameLen + relPathLen + editingPayloadSize
         }
-        return (.guiFileTree(selectedIndex: selectedIndex, treeWidth: treeWidth, rootPath: rootPath, entries: entries), pos - offset)
+
+        guard pos == payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+        return (.guiFileTree(version: version, treeFlags: treeFlags, selectedId: selectedId, treeWidth: treeWidth, rootPath: rootPath, entries: entries), 5 + payloadLen)
 
     case OP_GUI_TAB_BAR:
         // active_index:1, tab_count:1, then per tab: flags:1, id:4, group_id:2, icon_len:1, icon, label_len:2, label

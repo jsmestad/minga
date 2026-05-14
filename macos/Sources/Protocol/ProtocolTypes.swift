@@ -42,21 +42,32 @@ enum Wire {
 
     // MARK: - File tree
 
-    /// A single file tree entry decoded from the gui_file_tree protocol message.
+    /// A single file tree entry decoded from the semantic gui_file_tree protocol message.
     struct FileTreeEntry: Sendable {
         let pathHash: UInt32
+        let id: String
+        let path: String
         let isDir: Bool
         let isExpanded: Bool
         let isSelected: Bool
+        let isFocused: Bool
+        let isActive: Bool
+        let isDirty: Bool
         let isEditing: Bool
+        let isLastChild: Bool
         let depth: UInt8
         let gitStatus: UInt8
+        let diagnosticErrorCount: UInt16
+        let diagnosticWarningCount: UInt16
+        let diagnosticInfoCount: UInt16
+        let diagnosticHintCount: UInt16
+        let guides: [Bool]
         let icon: String
         let name: String
         let relPath: String
-        /// Only present when isEditing is true. 0=new_file, 1=new_folder, 2=rename.
+        /// 0=new_file, 1=new_folder, 2=rename, 255=none.
         let editingType: UInt8
-        /// Only present when isEditing is true. Pre-filled text for the editing field.
+        /// Pre-filled text for the editing field.
         let editingText: String
     }
 

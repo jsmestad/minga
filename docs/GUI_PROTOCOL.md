@@ -10,7 +10,7 @@ Minga's rendering pipeline produces two types of output:
 
 1. **Cell-grid commands** (opcodes 0x10-0x1B): draw_text, set_cursor, clear, batch_end, etc. These paint the editor content surface (buffer text, gutter, modeline for splits, minibuffer). In a TUI frontend, these go to the terminal. In a GUI frontend, these go to a Metal/OpenGL surface.
 
-2. **GUI chrome commands** (opcodes 0x70-0x7F): structured data for native chrome elements (tab bar, file tree sidebar, status bar, bottom panel, which-key popup, cursorline, gutter, etc.). These are sent only to GUI frontends. A TUI frontend never sees them.
+2. **GUI chrome commands** (opcodes 0x70+): structured data for native chrome elements (tab bar, file tree sidebar, status bar, bottom panel, which-key popup, cursorline, gutter, etc.). These are sent only to GUI frontends. A TUI frontend never sees them.
 
 Both types are sent within the same render cycle. The BEAM sends cell-grid commands first (one `{:packet, 4}` message containing clear through batch_end), then GUI chrome commands as separate `{:packet, 4}` messages immediately after. GUI chrome commands are not inside the batch_end-terminated cell-grid frame.
 
@@ -35,11 +35,11 @@ The BEAM checks `Capabilities.gui?` (true when `frontend_type == :native_gui`) t
 
 ## GUI Render Opcodes (BEAM → Frontend)
 
-GUI chrome opcodes live in the range 0x70-0x7F. GUI content opcodes (semantic buffer rendering, overlays) start at 0x80. Frontends can classify an opcode as GUI by checking `opcode >= 0x70`.
+GUI chrome opcodes start at 0x70. Older positional commands live in 0x70-0x8F, and newer forward-compatible commands live in 0x90+. GUI content opcodes (semantic buffer rendering, overlays) start at 0x80. Frontends can classify an opcode as GUI by checking `opcode >= 0x70`.
 
 ### Forward-Compatible Opcodes (0x90+)
 
-All opcodes at 0x90 and above use a length-prefixed envelope:
+Most opcodes at 0x90 and above use a 16-bit length-prefixed envelope:
 
 ```
 opcode(1) + payload_length(2, big-endian) + payload(payload_length)
@@ -47,45 +47,54 @@ opcode(1) + payload_length(2, big-endian) + payload(payload_length)
 
 This allows old frontends to skip unknown opcodes without crashing. When a frontend encounters an unrecognized opcode >= 0x90, it reads the 2-byte length, advances past the payload, and continues decoding the rest of the batch.
 
-Opcodes below 0x90 do NOT include a length prefix and retain their existing positional wire format. If a frontend encounters an unknown opcode below 0x90, it cannot determine the message size and must abort decoding.
+Opcodes below 0x90 do NOT include a length prefix and retain their existing positional wire format. If a frontend encounters an unknown opcode below 0x90, it cannot determine the message size and must abort decoding. Known 0x90+ opcodes may document a wider envelope when the payload can exceed 64KB, as `gui_file_tree` does.
 
-The BEAM-side encoder must use this envelope for all new opcodes (0x90+). Currently defined 0x90+ opcodes:
+The BEAM-side encoder must use a documented length-prefixed envelope for all new opcodes (0x90+). Currently defined 0x90+ opcodes:
 
 | Opcode | Name | Description |
 |--------|------|-------------|
 | 0x90 | clipboard_write | Write text to the system clipboard |
 | 0x91 | gui_indent_guides | Indent guide positions per window |
 | 0x92 | gui_line_spacing | Line spacing multiplier for the renderer |
+| 0x93 | gui_file_tree | Semantic file tree rows for the native sidebar view. Uses a 32-bit payload length because expanded project trees can exceed 64KB. |
 | 0x96 | gui_hover_action | Optional action metadata for the hover popup |
 
-### 0x70 — gui_file_tree
+### 0x93 — gui_file_tree
 
-File tree sidebar entries for the native sidebar view.
+The native file tree receives the same semantic row model that the TUI renderer uses. The BEAM remains the source of truth for row identity, depth, selected/focused state, expansion state, git status, diagnostics, guide columns, icons, labels, and inline editing state. Swift should render this state directly and send user actions back through the existing file-tree action opcodes.
 
 ```
-opcode(1) + selected_index(2) + tree_width(2) + entry_count(2) + root_len(2) + root(root_len) + entries...
+opcode(1) + payload_len(4) + payload(payload_len)
 
-Per entry:
-  path_hash(4) + flags(1) + depth(1) + git_status(1) + icon_len(1) + icon(icon_len) + name_len(2) + name(name_len) + rel_path_len(2) + rel_path(rel_path_len)
+Payload:
+  version(1) + tree_flags(1) + selected_id_len(2) + selected_id(selected_id_len) + root_len(2) + root(root_len) + tree_width(2) + row_count(2) + rows...
 
-Root: absolute project root path, sent once in the header.
+Per row:
+  path_hash(4) + row_flags(2) + depth(1) + git_status(1) + diagnostic_error_count(2) + diagnostic_warning_count(2) + diagnostic_info_count(2) + diagnostic_hint_count(2) + guide_count(1) + guides(guide_count) + id_len(2) + id(id_len) + path_len(2) + path(path_len) + rel_path_len(2) + rel_path(rel_path_len) + name_len(2) + name(name_len) + icon_len(1) + icon(icon_len) + editing_type(1) + editing_text_len(2) + editing_text(editing_text_len)
 
-Path hash: erlang:phash2 of the full file path, mod 2^32. Stable across tree
-updates so GUI frontends can use it as a persistent view identity for diffing.
+Tree flag bits:
+  bit 0: visible
+  bit 1: focused
+  bit 4: empty
 
-Rel path: path relative to root (e.g., "lib/minga/editor.ex"). GUI computes
-full path as root + "/" + rel_path for context menu actions.
-
-Flags bits:
+Row flag bits:
   bit 0: is_dir
-  bit 1: is_expanded (only meaningful when is_dir)
+  bit 1: is_expanded
   bit 2: is_selected
+  bit 3: is_focused
+  bit 4: is_active
+  bit 5: is_dirty
+  bit 6: is_editing
+  bit 7: is_last_child
 
 Git status values:
-  0 = none, 1 = modified, 2 = staged, 3 = untracked, 4 = conflict, 5 = ignored
+  0 = none, 1 = modified, 2 = staged, 3 = untracked, 4 = conflict, 5 = renamed, 6 = deleted
+
+Editing type values:
+  0 = new_file, 1 = new_folder, 2 = rename, 255 = none
 ```
 
-When `entry_count == 0`, the file tree should be hidden.
+When `visible` is false, the frontend should hide the file tree. Hidden payloads still include the root path when the BEAM knows it, so Swift can preserve context while clearing visible rows.
 
 ### 0x71 — gui_tab_bar
 
@@ -904,29 +913,30 @@ Mode color slots fall back to `modeline.bar_fg` / `modeline.bar_bg` when a mode 
 
 ## Forward-Compatibility: Skip-Length for Unknown Opcodes
 
-All new opcodes >= 0x90 use a mandatory 2-byte big-endian length prefix after the opcode byte:
+Standard new opcodes >= 0x90 use a 2-byte big-endian length prefix after the opcode byte:
 
 ```
 <<opcode::8, payload_length::16-big, payload::binary-size(payload_length)>>
 ```
 
-This allows older frontends to skip unknown opcodes gracefully without crashing. When a decoder encounters an opcode >= 0x90 that it doesn't recognize, it:
+This allows older frontends to skip unknown standard-envelope opcodes gracefully without crashing. When a decoder encounters an opcode >= 0x90 that it doesn't recognize, it:
 
 1. Reads the 2-byte length field
 2. Skips `length` bytes forward
 3. Continues decoding the next command
 
-For opcodes < 0x90 that are unknown, the decoder must throw an error (it cannot determine the payload size).
+For opcodes < 0x90 that are unknown, the decoder must throw an error (it cannot determine the payload size). Known opcodes may document a wider envelope when the payload can exceed 64KB. `gui_file_tree` (0x93) is one of those exceptions and uses a 4-byte length field.
 
-**Example:** A BEAM running version 0.3.0 introduces a new `OP_GUI_NEW_FEATURE = 0x91`. A macOS frontend running 0.2.0 receives this opcode. Because 0x91 >= 0x90, it reads the length prefix, skips that many bytes, and continues. The frontend remains functional even though it doesn't render the new feature.
+**Example:** A BEAM running version 0.3.0 introduces a new `OP_GUI_NEW_FEATURE = 0x91`. A macOS frontend running 0.2.0 receives this opcode. Because 0x91 >= 0x90 and uses the standard envelope, it reads the length prefix, skips that many bytes, and continues. The frontend remains functional even though it doesn't render the new feature.
 
-This convention is enforced on the BEAM side: all new opcodes >= 0x90 must use the length-prefixed encoding. See `lib/minga/frontend/protocol/gui.ex` for the encoder implementation.
+This convention is enforced on the BEAM side: all new opcodes >= 0x90 must use a documented length-prefixed encoding. See `lib/minga_editor/frontend/protocol/gui.ex` for the encoder implementation.
 
 **Current 0x90+ opcodes:**
-- `OP_CLIPBOARD_WRITE (0x90)` — clipboard write command (length-prefixed)
-- `OP_GUI_INDENT_GUIDES (0x91)` — indent guide positions per window (length-prefixed)
-- `OP_GUI_LINE_SPACING (0x92)` — renderer line spacing multiplier (length-prefixed)
-- `OP_GUI_HOVER_ACTION (0x96)` — optional hover popup action metadata (length-prefixed)
+- `OP_CLIPBOARD_WRITE (0x90)` — clipboard write command (16-bit length-prefixed)
+- `OP_GUI_INDENT_GUIDES (0x91)` — indent guide positions per window (16-bit length-prefixed)
+- `OP_GUI_LINE_SPACING (0x92)` — renderer line spacing multiplier (16-bit length-prefixed)
+- `OP_GUI_FILE_TREE (0x93)` — semantic file tree rows (32-bit length-prefixed)
+- `OP_GUI_HOVER_ACTION (0x96)` — optional hover popup action metadata (16-bit length-prefixed)
 
 ### 0x96 — gui_hover_action
 
@@ -990,7 +1000,7 @@ A GUI frontend must satisfy these requirements:
 
 4. **Send `gui_action` events for user interactions with chrome.** When a user clicks a tab, selects a completion item, or toggles a panel, encode the action and send it to the BEAM on stdout.
 
-5. **Handle missing opcodes gracefully.** New GUI opcodes may be added in the 0x70-0x8F range. Frontends should skip unknown opcodes rather than crashing. All new opcodes (0x90+) use a length-prefixed envelope (`opcode + payload_length:2 + payload`) so frontends can skip unknown opcodes by reading the length. See "Forward-Compatible Opcodes (0x90+)" above.
+5. **Handle missing opcodes gracefully.** New GUI opcodes may be added in the 0x70-0x8F range. Frontends should skip unknown opcodes rather than crashing. New opcodes in 0x90+ use a documented length-prefixed envelope so frontends can skip unknown standard-envelope opcodes by reading the length. See "Forward-Compatible Opcodes (0x90+)" above.
 
 6. **Process `gui_theme` before rendering other chrome.** The theme command typically arrives early in the first frame. Apply colors before rendering chrome elements to avoid a flash of unstyled content.
 

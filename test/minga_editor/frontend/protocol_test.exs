@@ -18,6 +18,9 @@ defmodule MingaEditor.Frontend.ProtocolTest do
        ),
        do: do_gui_agent_chat_section!(rest, target_id)
 
+  defp take_string16(<<len::16, value::binary-size(len), rest::binary>>), do: {value, rest}
+  defp take_string8(<<len::8, value::binary-size(len), rest::binary>>), do: {value, rest}
+
   # ── Modifier helpers ──
 
   describe "modifier flags" do
@@ -1070,118 +1073,172 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       end
     end
 
-    @tag :tmp_dir
-    test "encodes gui_file_tree with root, path_hash, and rel_path per entry", %{
-      tmp_dir: tmp_dir
-    } do
-      File.write!(Path.join(tmp_dir, "hello.ex"), "")
+    test "encodes semantic gui_file_tree with length prefix, root, selection, and row fields" do
+      row =
+        MingaEditor.FileTree.Row.new(
+          id: "/project/lib/hello.ex",
+          path: "/project/lib/hello.ex",
+          relative_path: "lib/hello.ex",
+          name: "hello.ex",
+          directory?: false,
+          expanded?: false,
+          selected?: true,
+          focused?: true,
+          active?: true,
+          dirty?: true,
+          git_status: :modified,
+          depth: 1,
+          guides: [true, false],
+          last_child?: true,
+          editing: nil
+        )
 
-      tree = %Minga.Project.FileTree{
-        root: tmp_dir,
-        expanded: MapSet.new([tmp_dir]),
-        cursor: 0,
-        width: 30
-      }
+      encoded = ProtocolGUI.encode_gui_file_tree("/project", 30, true, true, [row])
 
-      encoded = ProtocolGUI.encode_gui_file_tree(tree)
+      assert <<0x93, payload_len::32, payload::binary-size(payload_len)>> = encoded
+      assert <<1::8, tree_flags::8, rest::binary>> = payload
+      assert Bitwise.band(tree_flags, 0x01) != 0
+      assert Bitwise.band(tree_flags, 0x02) != 0
 
-      # Header: opcode + cursor + width + count + root_len + root
-      root_len = byte_size(tmp_dir)
+      <<selected_len::16, selected::binary-size(selected_len), rest::binary>> = rest
+      assert selected == row.id
 
-      assert <<0x70, cursor::16, width::16, count::16, ^root_len::16, root::binary-size(root_len),
-               entry_rest::binary>> = encoded
+      <<root_len::16, root::binary-size(root_len), 30::16, 1::16, row_payload::binary>> = rest
+      assert root == "/project"
 
-      assert cursor == 0
-      assert width == 30
-      assert count == 1
-      assert root == tmp_dir
+      expected_hash = :erlang.phash2(row.id, 0xFFFFFFFF)
 
-      # Entry: path_hash + flags + depth + git_status + icon + name + rel_path
-      expected_path = Path.join(tmp_dir, "hello.ex")
-      expected_hash = :erlang.phash2(expected_path, 0xFFFFFFFF)
+      assert <<^expected_hash::32, row_flags::16, 1::8, 1::8, 0::16, 0::16, 0::16, 0::16, 2::8,
+               1::8, 0::8, strings::binary>> = row_payload
 
-      assert <<^expected_hash::32, flags::8, depth::8, _git::8, icon_len::8,
-               _icon::binary-size(icon_len), name_len::16, name::binary-size(name_len),
-               rel_path_len::16, rel_path::binary-size(rel_path_len)>> = entry_rest
+      assert Bitwise.band(row_flags, 0x04) != 0
+      assert Bitwise.band(row_flags, 0x08) != 0
+      assert Bitwise.band(row_flags, 0x10) != 0
+      assert Bitwise.band(row_flags, 0x20) != 0
+      assert Bitwise.band(row_flags, 0x80) != 0
 
-      assert flags == 0x04
-      assert depth == 0
-      assert name == "hello.ex"
-      assert rel_path == "hello.ex"
+      {id, strings} = take_string16(strings)
+      {path, strings} = take_string16(strings)
+      {rel_path, strings} = take_string16(strings)
+      {name, strings} = take_string16(strings)
+      {icon, strings} = take_string8(strings)
+      <<255::8, 0::16>> = strings
+
+      assert id == row.id
+      assert path == row.path
+      assert rel_path == row.relative_path
+      assert name == row.name
+      assert icon != ""
     end
 
-    @tag :tmp_dir
-    test "path_hash is stable across encodes", %{tmp_dir: tmp_dir} do
-      File.write!(Path.join(tmp_dir, "stable.txt"), "")
+    test "encodes semantic gui_file_tree string lengths as UTF-8 byte counts" do
+      row =
+        MingaEditor.FileTree.Row.new(
+          id: "/project/lib/ñ📄.ex",
+          path: "/project/lib/ñ📄.ex",
+          relative_path: "lib/ñ📄.ex",
+          name: "ñ📄.ex",
+          directory?: false,
+          expanded?: false,
+          selected?: true,
+          depth: 0,
+          guides: [],
+          last_child?: true,
+          editing: nil
+        )
 
-      tree = %Minga.Project.FileTree{
-        root: tmp_dir,
-        expanded: MapSet.new([tmp_dir]),
-        cursor: 0,
-        width: 30
-      }
+      encoded = ProtocolGUI.encode_gui_file_tree("/project", 30, true, false, [row])
+      <<0x93, payload_len::32, payload::binary-size(payload_len)>> = encoded
 
-      encoded1 = ProtocolGUI.encode_gui_file_tree(tree)
-      encoded2 = ProtocolGUI.encode_gui_file_tree(tree)
+      <<_version::8, _tree_flags::8, selected_len::16, selected::binary-size(selected_len),
+        root_len::16, _root::binary-size(root_len), _width::16, _count::16, _hash::32,
+        _row_flags::16, _depth::8, _git::8, _diag::binary-size(8), 0::8, strings::binary>> =
+        payload
 
-      # Skip header: opcode(1) + cursor(2) + width(2) + count(2) + root_len(2) + root
-      header_size = 9 + byte_size(tmp_dir)
-      <<_header1::binary-size(header_size), entry1::binary>> = encoded1
-      <<_header2::binary-size(header_size), entry2::binary>> = encoded2
-
-      <<hash1::32, _::binary>> = entry1
-      <<hash2::32, _::binary>> = entry2
-
-      assert hash1 == hash2
+      assert selected == row.id
+      assert selected_len == byte_size(row.id)
+      {_id, strings} = take_string16(strings)
+      {_path, strings} = take_string16(strings)
+      {rel_path, strings} = take_string16(strings)
+      {name, _strings} = take_string16(strings)
+      assert rel_path == row.relative_path
+      assert name == row.name
+      assert byte_size(name) > String.length(name)
     end
 
-    test "encodes gui_file_tree nil as zero entries" do
-      encoded = ProtocolGUI.encode_gui_file_tree(nil)
-      assert <<0x70, 0::16, 0::16, 0::16, 0::16>> = encoded
+    test "encodes semantic gui_file_tree payloads larger than 64KB without length truncation" do
+      rows =
+        for index <- 1..220 do
+          suffix = String.duplicate("nested-segment-", 20) <> Integer.to_string(index)
+
+          MingaEditor.FileTree.Row.new(
+            id: "/project/#{suffix}.ex",
+            path: "/project/#{suffix}.ex",
+            relative_path: "lib/#{suffix}.ex",
+            name: "#{suffix}.ex",
+            directory?: false,
+            expanded?: false,
+            selected?: index == 1,
+            depth: 2,
+            guides: [true, false],
+            last_child?: index == 220,
+            editing: nil
+          )
+        end
+
+      encoded = ProtocolGUI.encode_gui_file_tree("/project", 30, true, false, rows)
+
+      assert <<0x93, payload_len::32, payload::binary-size(payload_len)>> = encoded
+      assert payload_len == byte_size(payload)
+      assert payload_len > 65_535
     end
 
-    test "encodes hidden gui_file_tree with project root and zero entries" do
-      root = "/tmp/minga-project"
-      root_len = byte_size(root)
+    test "encodes hidden semantic gui_file_tree with project root and empty bit" do
+      encoded = ProtocolGUI.encode_hidden_gui_file_tree("/tmp/minga-project")
 
-      encoded = ProtocolGUI.encode_hidden_gui_file_tree(root)
+      assert <<0x93, payload_len::32, payload::binary-size(payload_len)>> = encoded
 
-      assert <<0x70, 0::16, 0::16, 0::16, ^root_len::16, root_path::binary>> = encoded
-      assert root_path == root
+      assert <<1::8, tree_flags::8, selected_len::16, selected::binary-size(selected_len),
+               root_len::16, root::binary-size(root_len), 0::16, 0::16>> = payload
+
+      assert selected == ""
+
+      refute Bitwise.band(tree_flags, 0x01) != 0
+      assert Bitwise.band(tree_flags, 0x10) != 0
+      assert root == "/tmp/minga-project"
     end
 
-    @tag :tmp_dir
-    test "encodes gui_file_tree with editing payload on the editing entry", %{tmp_dir: tmp_dir} do
-      File.write!(Path.join(tmp_dir, "target.txt"), "")
+    test "encodes semantic gui_file_tree editing payload" do
+      row =
+        MingaEditor.FileTree.Row.new(
+          id: "/project/target.txt",
+          path: "/project/target.txt",
+          relative_path: "target.txt",
+          name: "target.txt",
+          directory?: false,
+          expanded?: false,
+          selected?: true,
+          depth: 0,
+          guides: [],
+          last_child?: true,
+          editing: %{index: 0, text: "renamed.txt", type: :rename, original_name: "target.txt"}
+        )
 
-      tree = %Minga.Project.FileTree{
-        root: tmp_dir,
-        expanded: MapSet.new([tmp_dir]),
-        cursor: 0,
-        width: 30
-      }
+      encoded = ProtocolGUI.encode_gui_file_tree("/project", 30, true, true, [row])
+      <<0x93, payload_len::32, payload::binary-size(payload_len)>> = encoded
+      # Skip tree header and fixed row prefix.
+      <<_version::8, _tree_flags::8, selected_len::16, _selected::binary-size(selected_len),
+        root_len::16, _root::binary-size(root_len), _width::16, _count::16, _hash::32,
+        row_flags::16, _depth::8, _git::8, _diag::binary-size(8), 0::8, strings::binary>> =
+        payload
 
-      editing = %{index: 0, text: "renamed.txt", type: :rename, original_name: "target.txt"}
-      encoded = ProtocolGUI.encode_gui_file_tree(tree, editing)
-
-      # Skip header
-      root_len = byte_size(tmp_dir)
-
-      <<0x70, _cursor::16, _width::16, _count::16, ^root_len::16, _root::binary-size(root_len),
-        entry_rest::binary>> = encoded
-
-      # Entry fields: path_hash(4) + flags(1) + depth(1) + git(1) + icon_len(1) + icon
-      # + name_len(2) + name + rel_path_len(2) + rel_path + editing_payload
-      <<_hash::32, flags::8, _depth::8, _git::8, icon_len::8, _icon::binary-size(icon_len),
-        name_len::16, _name::binary-size(name_len), rel_path_len::16,
-        _rel_path::binary-size(rel_path_len), editing_type::8, editing_text_len::16,
-        editing_text::binary-size(editing_text_len)>> =
-        entry_rest
-
-      # flags bit 3 should be set (is_editing)
-      assert Bitwise.band(flags, 0x08) != 0
-      # editing_type 2 = rename
-      assert editing_type == 2
+      assert Bitwise.band(row_flags, 0x40) != 0
+      {_id, strings} = take_string16(strings)
+      {_path, strings} = take_string16(strings)
+      {_rel_path, strings} = take_string16(strings)
+      {_name, strings} = take_string16(strings)
+      {_icon, strings} = take_string8(strings)
+      <<2::8, editing_text_len::16, editing_text::binary-size(editing_text_len)>> = strings
       assert editing_text == "renamed.txt"
     end
 

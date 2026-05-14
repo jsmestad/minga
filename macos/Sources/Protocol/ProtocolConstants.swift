@@ -26,9 +26,9 @@ let OP_DESTROY_REGION: UInt8 = 0x19
 let OP_SET_ACTIVE_REGION: UInt8 = 0x1A
 let OP_DRAW_STYLED_TEXT: UInt8 = 0x1C
 
-// MARK: - GUI chrome opcodes (BEAM → frontend, contiguous range 0x70-0x7F)
+// MARK: - GUI chrome opcodes (BEAM → frontend)
 
-let OP_GUI_FILE_TREE: UInt8 = 0x70
+let OP_GUI_FILE_TREE: UInt8 = 0x93
 let OP_GUI_TAB_BAR: UInt8 = 0x71
 let OP_GUI_WHICH_KEY: UInt8 = 0x72
 let OP_GUI_COMPLETION: UInt8 = 0x73
@@ -60,9 +60,10 @@ let OP_GUI_AGENT_CONTEXT: UInt8 = 0x88
 let OP_GUI_CHANGE_SUMMARY: UInt8 = 0x89
 let OP_GUI_HOVER_ACTION: UInt8 = 0x96
 
-// MARK: - Forward-compatible opcodes (0x90+, include 2-byte length prefix)
-// All opcodes >= 0x90 use the format: opcode(1) + payload_length(2) + payload.
-// Old frontends skip unknown 0x90+ opcodes by reading the length.
+// MARK: - Forward-compatible opcodes (0x90+, include a length prefix)
+// Most opcodes >= 0x90 use the format: opcode(1) + payload_length(2) + payload.
+// gui_file_tree uses a 32-bit payload length because expanded project trees can exceed 64KB.
+// Old frontends skip unknown 0x90+ opcodes by reading the standard 16-bit length.
 
 let OP_CLIPBOARD_WRITE: UInt8 = 0x90
 let OP_GUI_INDENT_GUIDES: UInt8 = 0x91

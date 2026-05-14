@@ -1,5 +1,12 @@
 import Config
 
+# Keep tests hermetic by preventing application startup from loading the developer's real ~/.config/minga/config.exs.
+test_config_home =
+  Path.join(System.tmp_dir!(), "minga-test-config-#{System.unique_integer([:positive])}")
+
+File.mkdir_p!(Path.join(test_config_home, "minga"))
+System.put_env("XDG_CONFIG_HOME", test_config_home)
+
 # Only show warnings and errors during test runs. Info-level messages
 # from app startup (extension loading, grammar registration) would
 # otherwise pollute test output before ExUnit's capture_log kicks in.
