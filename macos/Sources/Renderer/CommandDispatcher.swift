@@ -417,13 +417,26 @@ final class CommandDispatcher {
             // check notARepo + empty is the specific sentinel the BEAM sends
             // when git_status_panel is nil. (#1047)
             let parsedRepoState = GitRepoState(rawValue: repoState) ?? .notARepo
+            let toast: (String, ToastLevel, ToastAction)? = rawToast.map { t in
+                let parsedLevel = ToastLevel(rawValue: t.level)
+                let parsedAction = ToastAction(rawValue: t.action)
+                if parsedLevel == nil || parsedAction == nil {
+                    PortLogger.warn("Invalid git toast metadata: level=\(t.level) action=\(t.action)")
+                }
+                return (t.message, parsedLevel ?? .error, parsedAction ?? .none)
+            }
+
             if parsedRepoState == .notARepo && rawEntries.isEmpty {
-                guiState.gitStatusState.hide(syncing: syncing)
+                guiState.gitStatusState.hide(syncing: syncing, toast: toast)
             } else {
                 let entries = rawEntries.compactMap { raw -> GitStatusEntry? in
-                    guard let section = GitStatusSection(rawValue: raw.section),
-                          let status = GitFileStatus(rawValue: raw.status) else {
+                    guard let section = GitStatusSection(rawValue: raw.section) else {
+                        PortLogger.warn("Invalid git status section: \(raw.section)")
                         return nil
+                    }
+                    let status = GitFileStatus(rawValue: raw.status) ?? .unknown
+                    if status == .unknown && raw.status != GitFileStatus.unknown.rawValue {
+                        PortLogger.warn("Invalid git file status: \(raw.status)")
                     }
                     return GitStatusEntry(
                         id: (UInt32(raw.section) << 24) | (raw.pathHash & 0x00FFFFFF),
@@ -431,13 +444,6 @@ final class CommandDispatcher {
                         status: status,
                         path: raw.path
                     )
-                }
-                let toast: (String, ToastLevel, ToastAction)? = rawToast.flatMap { t in
-                    guard let level = ToastLevel(rawValue: t.level),
-                          let action = ToastAction(rawValue: t.action) else {
-                        return nil
-                    }
-                    return (t.message, level, action)
                 }
                 guiState.gitStatusState.update(
                     repoState: parsedRepoState,
