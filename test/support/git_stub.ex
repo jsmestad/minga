@@ -165,8 +165,12 @@ defmodule Minga.Git.Stub do
   def stage(_git_root, _paths), do: :ok
 
   @impl true
-  @spec commit(String.t(), String.t()) :: {:ok, String.t()}
-  def commit(_git_root, _message), do: {:ok, "stub000"}
+  @spec commit(String.t(), String.t(), keyword()) :: {:ok, String.t()}
+  def commit(_git_root, _message, _opts \\ []), do: {:ok, "stub000"}
+
+  @impl true
+  @spec last_commit_message(String.t()) :: {:ok, String.t()}
+  def last_commit_message(_git_root), do: {:ok, "stub commit message"}
 
   @impl true
   @spec stage_patch(String.t(), String.t()) :: :ok
