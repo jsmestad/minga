@@ -94,51 +94,39 @@ struct CommandDispatcherRoutingTests {
     @Test("guiFileTree updates fileTreeState when entries present")
     @MainActor func guiFileTreeRouting() {
         let (dispatcher, gui) = makeDispatcher()
-        let entries = [
-            Wire.FileTreeEntry(pathHash: 123, isDir: true, isExpanded: true,
-                           isSelected: false, isEditing: false, depth: 0, gitStatus: 0,
-                           icon: "", name: "lib", relPath: "lib",
-                           editingType: 0, editingText: "")
-        ]
-        dispatcher.dispatch(.guiFileTree(selectedIndex: 0, treeWidth: 30,
+        let entries = [wireFileTreeEntry(pathHash: 123, isDir: true, isExpanded: true, id: "/project/lib", path: "/project/lib", name: "lib", relPath: "lib")]
+        dispatcher.dispatch(.guiFileTree(version: 1, treeFlags: 0x03, selectedId: "/project/lib", treeWidth: 30,
                                           rootPath: "/project", entries: entries))
 
         #expect(gui.fileTreeState.visible == true)
+        #expect(gui.fileTreeState.focused == true)
         #expect(gui.fileTreeState.entries.count == 1)
         #expect(gui.fileTreeState.entries[0].name == "lib")
         #expect(gui.fileTreeState.projectRoot == "/project")
     }
 
-    @Test("guiFileTree hides when an empty zero-width sentinel arrives")
-    @MainActor func guiFileTreeHidesOnEmptySentinel() {
+    @Test("guiFileTree hides when visible flag is cleared")
+    @MainActor func guiFileTreeHidesOnInvisiblePayload() {
         let (dispatcher, gui) = makeDispatcher()
-        dispatcher.dispatch(.guiFileTree(selectedIndex: 0, treeWidth: 30,
+        dispatcher.dispatch(.guiFileTree(version: 1, treeFlags: 0x01, selectedId: "/project/a", treeWidth: 30,
                                           rootPath: "/project",
-                                          entries: [Wire.FileTreeEntry(pathHash: 1, isDir: false,
-                                                                     isExpanded: false, isSelected: false,
-                                                                     isEditing: false, depth: 0, gitStatus: 0,
-                                                                     icon: "", name: "a", relPath: "a",
-                                                                     editingType: 0, editingText: "")]))
+                                          entries: [wireFileTreeEntry(pathHash: 1, id: "/project/a", path: "/project/a", name: "a", relPath: "a")]))
         #expect(gui.fileTreeState.visible == true)
 
-        dispatcher.dispatch(.guiFileTree(selectedIndex: 0, treeWidth: 0,
+        dispatcher.dispatch(.guiFileTree(version: 1, treeFlags: 0x10, selectedId: "", treeWidth: 0,
                                           rootPath: "/project", entries: []))
         #expect(gui.fileTreeState.visible == false)
         #expect(gui.fileTreeState.projectRoot == "/project")
     }
 
-    @Test("guiFileTree clears project root when hidden sentinel has no root")
-    @MainActor func guiFileTreeClearsRootOnEmptyHiddenSentinel() {
+    @Test("guiFileTree clears project root when hidden payload has no root")
+    @MainActor func guiFileTreeClearsRootOnHiddenPayload() {
         let (dispatcher, gui) = makeDispatcher()
-        dispatcher.dispatch(.guiFileTree(selectedIndex: 0, treeWidth: 30,
+        dispatcher.dispatch(.guiFileTree(version: 1, treeFlags: 0x01, selectedId: "/project/a", treeWidth: 30,
                                           rootPath: "/project",
-                                          entries: [Wire.FileTreeEntry(pathHash: 1, isDir: false,
-                                                                     isExpanded: false, isSelected: false,
-                                                                     isEditing: false, depth: 0, gitStatus: 0,
-                                                                     icon: "", name: "a", relPath: "a",
-                                                                     editingType: 0, editingText: "")]))
+                                          entries: [wireFileTreeEntry(pathHash: 1, id: "/project/a", path: "/project/a", name: "a", relPath: "a")]))
 
-        dispatcher.dispatch(.guiFileTree(selectedIndex: 0, treeWidth: 0,
+        dispatcher.dispatch(.guiFileTree(version: 1, treeFlags: 0x10, selectedId: "", treeWidth: 0,
                                           rootPath: "", entries: []))
 
         #expect(gui.fileTreeState.visible == false)
@@ -149,7 +137,7 @@ struct CommandDispatcherRoutingTests {
     @MainActor func guiFileTreeKeepsEmptyVisibleTreeOpen() {
         let (dispatcher, gui) = makeDispatcher()
 
-        dispatcher.dispatch(.guiFileTree(selectedIndex: 0, treeWidth: 30,
+        dispatcher.dispatch(.guiFileTree(version: 1, treeFlags: 0x11, selectedId: "", treeWidth: 30,
                                           rootPath: "/empty-project", entries: []))
 
         #expect(gui.fileTreeState.visible == true)
@@ -559,4 +547,48 @@ struct CommandDispatcherRoutingTests {
         #expect(dispatcher.frameState.gutterColors.fg == expected)
         #expect(gui.themeColors.gutterFgRGB == expected)
     }
+}
+
+private func wireFileTreeEntry(
+    pathHash: UInt32,
+    isDir: Bool = false,
+    isExpanded: Bool = false,
+    isSelected: Bool = false,
+    isFocused: Bool = false,
+    isActive: Bool = false,
+    isDirty: Bool = false,
+    isEditing: Bool = false,
+    isLastChild: Bool = false,
+    id: String,
+    path: String,
+    name: String,
+    relPath: String,
+    editingType: UInt8 = 0xFF,
+    editingText: String = ""
+) -> Wire.FileTreeEntry {
+    Wire.FileTreeEntry(
+        pathHash: pathHash,
+        id: id,
+        path: path,
+        isDir: isDir,
+        isExpanded: isExpanded,
+        isSelected: isSelected,
+        isFocused: isFocused,
+        isActive: isActive,
+        isDirty: isDirty,
+        isEditing: isEditing,
+        isLastChild: isLastChild,
+        depth: 0,
+        gitStatus: 0,
+        diagnosticErrorCount: 0,
+        diagnosticWarningCount: 0,
+        diagnosticInfoCount: 0,
+        diagnosticHintCount: 0,
+        guides: [],
+        icon: "",
+        name: name,
+        relPath: relPath,
+        editingType: editingType,
+        editingText: editingText
+    )
 }

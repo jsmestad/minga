@@ -649,45 +649,68 @@ struct GUICursorlineDecoderTests {
     }
 }
 
-// MARK: - gui_file_tree (0x70)
+// MARK: - gui_file_tree (semantic, length-prefixed)
 
 @Suite("GUI File Tree Decoder")
 struct GUIFileTreeDecoderTests {
-    @Test("Decode gui_file_tree with entries")
+    @Test("Decode semantic gui_file_tree with entries")
     func decodeWithEntries() throws {
+        var payload = Data()
+        payload.append(1) // version
+        payload.append(0x03) // visible + focused
+        appendString16(&payload, "/home/user/project/lib") // selectedId
+        appendString16(&payload, "/home/user/project") // rootPath
+        appendU16(&payload, 30) // treeWidth
+        appendU16(&payload, 2) // rowCount
+
+        appendSemanticRow(
+            &payload,
+            hash: 0xAABBCCDD,
+            flags: 0x0001 | 0x0002 | 0x0004 | 0x0008 | 0x0080,
+            depth: 0,
+            gitStatus: 0,
+            guides: [],
+            id: "/home/user/project/lib",
+            path: "/home/user/project/lib",
+            relPath: "lib",
+            name: "lib",
+            icon: "󰉋",
+            editingType: 0xFF,
+            editingText: ""
+        )
+
+        appendSemanticRow(
+            &payload,
+            hash: 0x11223344,
+            flags: 0x0010 | 0x0020,
+            depth: 1,
+            gitStatus: 1,
+            guides: [true],
+            id: "/home/user/project/lib/editor.ex",
+            path: "/home/user/project/lib/editor.ex",
+            relPath: "lib/editor.ex",
+            name: "editor.ex",
+            icon: "",
+            editingType: 0xFF,
+            editingText: ""
+        )
+
         var data = Data()
         data.append(OP_GUI_FILE_TREE)
-        appendU16(&data, 1) // selectedIndex
-        appendU16(&data, 30) // treeWidth
-        appendU16(&data, 2) // entryCount
-        appendString16(&data, "/home/user/project") // rootPath
-
-        // Entry 1: directory, expanded, selected
-        appendU32(&data, 0xAABBCCDD) // pathHash
-        data.append(0x01 | 0x02 | 0x04) // flags: isDir + isExpanded + isSelected
-        data.append(0) // depth
-        data.append(0) // gitStatus
-        appendString8(&data, "") // icon
-        appendString16(&data, "lib") // name
-        appendString16(&data, "lib") // relPath
-
-        // Entry 2: file, git modified
-        appendU32(&data, 0x11223344) // pathHash
-        data.append(0) // flags: none
-        data.append(1) // depth
-        data.append(1) // gitStatus = modified
-        appendString8(&data, "") // icon
-        appendString16(&data, "editor.ex") // name
-        appendString16(&data, "lib/editor.ex") // relPath
+        appendU32(&data, UInt32(payload.count))
+        data.append(payload)
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiFileTree(let selectedIndex, let treeWidth, let rootPath, let entries) = cmd else {
+        guard case .guiFileTree(let version, let treeFlags, let selectedId, let treeWidth, let rootPath, let entries) = cmd else {
             Issue.record("Expected .guiFileTree"); return
         }
 
-        #expect(selectedIndex == 1)
+        #expect(version == 1)
+        #expect(treeFlags & 0x01 != 0)
+        #expect(treeFlags & 0x02 != 0)
+        #expect(selectedId == "/home/user/project/lib")
         #expect(treeWidth == 30)
         #expect(rootPath == "/home/user/project")
         #expect(entries.count == 2)
@@ -695,29 +718,143 @@ struct GUIFileTreeDecoderTests {
         #expect(entries[0].isDir == true)
         #expect(entries[0].isExpanded == true)
         #expect(entries[0].isSelected == true)
-        #expect(entries[0].name == "lib")
+        #expect(entries[0].isFocused == true)
+        #expect(entries[0].isLastChild == true)
+        #expect(entries[0].id == "/home/user/project/lib")
+        #expect(entries[0].path == "/home/user/project/lib")
         #expect(entries[1].depth == 1)
         #expect(entries[1].gitStatus == 1)
+        #expect(entries[1].isActive == true)
+        #expect(entries[1].isDirty == true)
+        #expect(entries[1].guides == [true])
         #expect(entries[1].name == "editor.ex")
         #expect(entries[1].relPath == "lib/editor.ex")
     }
 
-    @Test("Decode gui_file_tree empty (hide)")
-    func decodeEmpty() throws {
+    @Test("Decode semantic gui_file_tree hidden")
+    func decodeHidden() throws {
+        var payload = Data()
+        payload.append(1) // version
+        payload.append(0x10) // empty, not visible
+        appendString16(&payload, "")
+        appendString16(&payload, "/home/user/project")
+        appendU16(&payload, 0)
+        appendU16(&payload, 0)
+
         var data = Data()
         data.append(OP_GUI_FILE_TREE)
-        appendU16(&data, 0)
-        appendU16(&data, 0)
-        appendU16(&data, 0)
-        appendString16(&data, "")
+        appendU32(&data, UInt32(payload.count))
+        data.append(payload)
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiFileTree(_, _, _, let entries) = cmd else {
+        guard case .guiFileTree(_, let treeFlags, _, let treeWidth, let rootPath, let entries) = cmd else {
             Issue.record("Expected .guiFileTree"); return
         }
+        #expect(treeFlags & 0x01 == 0)
+        #expect(treeFlags & 0x10 != 0)
+        #expect(treeWidth == 0)
+        #expect(rootPath == "/home/user/project")
         #expect(entries.isEmpty)
+    }
+
+    @Test("Decode semantic gui_file_tree editing row")
+    func decodeEditingRow() throws {
+        var payload = Data()
+        payload.append(1)
+        payload.append(0x03)
+        appendString16(&payload, "/project/ñ📄.txt")
+        appendString16(&payload, "/project")
+        appendU16(&payload, 30)
+        appendU16(&payload, 1)
+        appendSemanticRow(
+            &payload,
+            hash: 1,
+            flags: 0x0004 | 0x0040 | 0x0080,
+            depth: 0,
+            gitStatus: 0,
+            guides: [],
+            id: "/project/ñ📄.txt",
+            path: "/project/ñ📄.txt",
+            relPath: "ñ📄.txt",
+            name: "ñ📄.txt",
+            icon: "📄",
+            editingType: 2,
+            editingText: "renombré📄.txt"
+        )
+
+        var data = Data()
+        data.append(OP_GUI_FILE_TREE)
+        appendU32(&data, UInt32(payload.count))
+        data.append(payload)
+
+        let (cmd, _) = try decodeCommand(data: data, offset: 0)
+        guard case .guiFileTree(_, _, _, _, _, let entries) = cmd else {
+            Issue.record("Expected .guiFileTree"); return
+        }
+        #expect(entries.count == 1)
+        #expect(entries[0].id == "/project/ñ📄.txt")
+        #expect(entries[0].name == "ñ📄.txt")
+        #expect(entries[0].icon == "📄")
+        #expect(entries[0].isEditing == true)
+        #expect(entries[0].editingType == 2)
+        #expect(entries[0].editingText == "renombré📄.txt")
+    }
+
+    @Test("Decode semantic gui_file_tree rejects truncated row")
+    func decodeMalformedRow() throws {
+        var payload = Data()
+        payload.append(1)
+        payload.append(0x03)
+        appendString16(&payload, "")
+        appendString16(&payload, "/project")
+        appendU16(&payload, 30)
+        appendU16(&payload, 1)
+        payload.append(0xAA) // incomplete row
+
+        var data = Data()
+        data.append(OP_GUI_FILE_TREE)
+        appendU32(&data, UInt32(payload.count))
+        data.append(payload)
+
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    private func appendSemanticRow(
+        _ data: inout Data,
+        hash: UInt32,
+        flags: UInt16,
+        depth: UInt8,
+        gitStatus: UInt8,
+        guides: [Bool],
+        id: String,
+        path: String,
+        relPath: String,
+        name: String,
+        icon: String,
+        editingType: UInt8,
+        editingText: String
+    ) {
+        appendU32(&data, hash)
+        appendU16(&data, flags)
+        data.append(depth)
+        data.append(gitStatus)
+        appendU16(&data, 0) // diagnostic errors
+        appendU16(&data, 0) // diagnostic warnings
+        appendU16(&data, 0) // diagnostic infos
+        appendU16(&data, 0) // diagnostic hints
+        data.append(UInt8(guides.count))
+        for guide in guides { data.append(guide ? 1 : 0) }
+        appendString16(&data, id)
+        appendString16(&data, path)
+        appendString16(&data, relPath)
+        appendString16(&data, name)
+        appendString8(&data, icon)
+        data.append(editingType)
+        appendString16(&data, editingText)
     }
 }
 

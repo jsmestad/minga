@@ -453,17 +453,19 @@ struct FileTreeView: View {
         case 2: return theme.treeGitStaged
         case 3: return theme.treeGitUntracked
         case 4: return theme.gutterErrorFg  // conflict
+        case 5: return theme.treeGitModified  // renamed
+        case 6: return theme.gitDeletedFg
         default: return nil
         }
     }
 
-    /// Draws thin vertical indent guide lines using a lightweight Canvas.
+    /// Draws thin vertical indent guide lines using the BEAM-supplied semantic ancestor guide mask.
     @ViewBuilder
     private func indentGuides(_ entry: FileTreeEntry) -> some View {
-        if entry.depth > 0 {
+        if !entry.guides.isEmpty {
             Canvas { context, size in
-                for level in 0..<entry.depth {
-                    // Align guide with the center of each ancestor's chevron column
+                for (level, shouldDraw) in entry.guides.enumerated() where shouldDraw {
+                    // Align guide with the center of each ancestor's chevron column.
                     let x = 8 + CGFloat(level) * indentWidth + chevronWidth / 2
                     let rect = CGRect(x: x, y: 0, width: 1, height: size.height)
                     context.fill(Path(rect), with: .color(theme.treeGuideFg))
@@ -512,6 +514,9 @@ struct FileTreeView: View {
         case 1: return theme.treeGitModified
         case 2: return theme.treeGitStaged
         case 3: return theme.treeGitUntracked
+        case 4: return theme.gutterErrorFg
+        case 5: return theme.treeGitModified
+        case 6: return theme.gitDeletedFg
         default: return theme.treeFg.opacity(0.7)
         }
     }
@@ -524,6 +529,9 @@ struct FileTreeView: View {
         case 1: return theme.treeGitModified
         case 2: return theme.treeGitStaged
         case 3: return theme.treeGitUntracked
+        case 4: return theme.gutterErrorFg
+        case 5: return theme.treeGitModified
+        case 6: return theme.gitDeletedFg
         default:
             return entry.isDir ? theme.treeDirFg : theme.treeFg
         }

@@ -666,7 +666,7 @@ Total size: 4 + msg_len bytes.
 
 ### Current design
 
-Tree-sitter parsing runs in a dedicated `minga-parser` Zig process, separate from the rendering frontend. The renderer process handles only render commands (`0x10`-`0x1B` plus GUI chrome `0x70`-`0x78`). The parser process handles highlight commands (`0x20`-`0x2E`) and sends highlight responses (`0x30`-`0x3C`). Both use the same `{:packet, 4}` framing on their respective stdin/stdout pipes. The BEAM manages both Port processes, routing commands to the appropriate one.
+Tree-sitter parsing runs in a dedicated `minga-parser` Zig process, separate from the rendering frontend. The renderer process handles only render commands (`0x10`-`0x1B` plus GUI chrome `0x70+`). The parser process handles highlight commands (`0x20`-`0x2E`) and sends highlight responses (`0x30`-`0x3C`). Both use the same `{:packet, 4}` framing on their respective stdin/stdout pipes. The BEAM manages both Port processes, routing commands to the appropriate one.
 
 This separation means rendering frontends (Swift/Metal, GTK4, Zig/libvaxis) only need to implement render commands. Tree-sitter parsing is handled by the shared parser process regardless of which frontend is active.
 
@@ -886,7 +886,7 @@ Total size: 7 + (40 + text_len) per edit.
 
 ## GUI Chrome Protocol
 
-Native GUI frontends (SwiftUI, GTK4) receive additional structured data opcodes for chrome elements like tab bars, file trees, status bars, and popups. These opcodes live in the 0x70-0x78 range and are sent only when the frontend reports `frontend_type = native_gui` in its capabilities.
+Native GUI frontends (SwiftUI, GTK4) receive additional structured data opcodes for chrome elements like tab bars, file trees, status bars, and popups. These opcodes start at 0x70 and are sent only when the frontend reports `frontend_type = native_gui` in its capabilities.
 
 See [GUI_PROTOCOL.md](GUI_PROTOCOL.md) for the complete specification of GUI chrome opcodes, gui_action input events, theme color slots, and the behavioral contract for GUI frontends.
 

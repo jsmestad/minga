@@ -221,14 +221,18 @@ struct DecoderTruncatedGUIChromeTests {
 
     @Test("gui_file_tree truncated entry")
     func truncatedFileTree() {
+        var payload = Data()
+        payload.append(1) // version
+        payload.append(0x03) // visible + focused
+        payload.append(contentsOf: [0x00, 0x00]) // selected_id_len
+        payload.append(contentsOf: [0x00, 0x00]) // root_len
+        payload.append(contentsOf: [0x00, 0x1E]) // treeWidth
+        payload.append(contentsOf: [0x00, 0x01]) // rowCount=1
+        payload.append(0xAA) // incomplete row
+
         var data = Data([OP_GUI_FILE_TREE])
-        data.append(contentsOf: [0x00, 0x00]) // selectedIndex
-        data.append(contentsOf: [0x00, 0x1E]) // treeWidth
-        data.append(contentsOf: [0x00, 0x01]) // entryCount=1
-        data.append(contentsOf: [0x00, 0x00]) // rootPath_len=0
-        // Entry needs path_hash(4)+flags(1)+depth(1)+git(1)+icon_len(1)+...
-        // Provide only 3 bytes
-        data.append(contentsOf: [0x00, 0x00, 0x00])
+        data.append(contentsOf: [0x00, 0x00, 0x00, UInt8(payload.count)])
+        data.append(payload)
 
         #expect(throws: ProtocolDecodeError.self) {
             try decodeCommand(data: data, offset: 0)

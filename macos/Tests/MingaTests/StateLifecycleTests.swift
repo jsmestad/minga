@@ -164,18 +164,15 @@ struct FileTreeStateLifecycleTests {
     @MainActor func updateConverts() {
         let state = FileTreeState()
         let raw = [
-            Wire.FileTreeEntry(pathHash: 0xAABB, isDir: true, isExpanded: true,
-                           isSelected: false, isEditing: false, depth: 0, gitStatus: 0,
-                           icon: "", name: "lib", relPath: "lib",
-                           editingType: 0, editingText: ""),
-            Wire.FileTreeEntry(pathHash: 0xCCDD, isDir: false, isExpanded: false,
-                           isSelected: true, isEditing: false, depth: 1, gitStatus: 1,
-                           icon: "", name: "editor.ex", relPath: "lib/editor.ex",
-                           editingType: 0, editingText: "")
+            stateWireFileTreeEntry(pathHash: 0xAABB, isDir: true, isExpanded: true,
+                                   id: "/project/lib", path: "/project/lib", name: "lib", relPath: "lib"),
+            stateWireFileTreeEntry(pathHash: 0xCCDD, isSelected: true,
+                                   id: "/project/lib/editor.ex", path: "/project/lib/editor.ex", name: "editor.ex", relPath: "lib/editor.ex")
         ]
-        state.update(selectedIndex: 1, treeWidth: 30, rootPath: "/project", rawEntries: raw)
+        state.update(version: 1, selectedId: "/project/lib/editor.ex", focused: true, treeWidth: 30, rootPath: "/project", rawEntries: raw)
 
         #expect(state.visible == true)
+        #expect(state.focused == true)
         #expect(state.selectedIndex == 1)
         #expect(state.projectRoot == "/project")
         #expect(state.entries.count == 2)
@@ -185,16 +182,15 @@ struct FileTreeStateLifecycleTests {
         #expect(state.entries[1].relPath == "lib/editor.ex")
     }
 
-    @Test("fullPath() computes correct absolute path")
+    @Test("fullPath() uses BEAM-supplied absolute path")
     @MainActor func fullPathComputation() {
         let state = FileTreeState()
-        state.update(selectedIndex: 0, treeWidth: 30, rootPath: "/home/user/project",
-                     rawEntries: [Wire.FileTreeEntry(pathHash: 1, isDir: false,
-                                                   isExpanded: false, isSelected: false,
-                                                   isEditing: false, depth: 1, gitStatus: 0, icon: "",
-                                                   name: "editor.ex",
-                                                   relPath: "lib/editor.ex",
-                                                   editingType: 0, editingText: "")])
+        state.update(version: 1, selectedId: "/home/user/project/lib/editor.ex", focused: false, treeWidth: 30, rootPath: "/home/user/project",
+                     rawEntries: [stateWireFileTreeEntry(pathHash: 1,
+                                                         id: "/home/user/project/lib/editor.ex",
+                                                         path: "/home/user/project/lib/editor.ex",
+                                                         name: "editor.ex",
+                                                         relPath: "lib/editor.ex")])
 
         let path = state.fullPath(for: state.entries[0])
         #expect(path == "/home/user/project/lib/editor.ex")
@@ -203,12 +199,9 @@ struct FileTreeStateLifecycleTests {
     @Test("hide(rootPath:) clears entries while preserving supplied projectRoot")
     @MainActor func hideWithRootClearsEntriesOnly() {
         let state = FileTreeState()
-        state.update(selectedIndex: 0, treeWidth: 30, rootPath: "/project",
-                     rawEntries: [Wire.FileTreeEntry(pathHash: 1, isDir: false,
-                                                   isExpanded: false, isSelected: false,
-                                                   isEditing: true, depth: 0, gitStatus: 0, icon: "",
-                                                   name: "a", relPath: "a",
-                                                   editingType: 0, editingText: "")])
+        state.update(version: 1, selectedId: "/project/a", focused: true, treeWidth: 30, rootPath: "/project",
+                     rawEntries: [stateWireFileTreeEntry(pathHash: 1, isEditing: true,
+                                                         id: "/project/a", path: "/project/a", name: "a", relPath: "a")])
         #expect(state.editingIndex == 0)
 
         state.hide(rootPath: "/project")
@@ -222,12 +215,9 @@ struct FileTreeStateLifecycleTests {
     @Test("hide() clears projectRoot when no root is supplied")
     @MainActor func hideWithoutRootClearsProjectRoot() {
         let state = FileTreeState()
-        state.update(selectedIndex: 0, treeWidth: 30, rootPath: "/project",
-                     rawEntries: [Wire.FileTreeEntry(pathHash: 1, isDir: false,
-                                                   isExpanded: false, isSelected: false,
-                                                   isEditing: false, depth: 0, gitStatus: 0, icon: "",
-                                                   name: "a", relPath: "a",
-                                                   editingType: 0, editingText: "")])
+        state.update(version: 1, selectedId: "/project/a", focused: false, treeWidth: 30, rootPath: "/project",
+                     rawEntries: [stateWireFileTreeEntry(pathHash: 1,
+                                                         id: "/project/a", path: "/project/a", name: "a", relPath: "a")])
 
         state.hide()
 
@@ -235,6 +225,44 @@ struct FileTreeStateLifecycleTests {
         #expect(state.entries.isEmpty)
         #expect(state.projectRoot == "")
     }
+}
+
+private func stateWireFileTreeEntry(
+    pathHash: UInt32,
+    isDir: Bool = false,
+    isExpanded: Bool = false,
+    isSelected: Bool = false,
+    isEditing: Bool = false,
+    id: String,
+    path: String,
+    name: String,
+    relPath: String
+) -> Wire.FileTreeEntry {
+    Wire.FileTreeEntry(
+        pathHash: pathHash,
+        id: id,
+        path: path,
+        isDir: isDir,
+        isExpanded: isExpanded,
+        isSelected: isSelected,
+        isFocused: false,
+        isActive: false,
+        isDirty: false,
+        isEditing: isEditing,
+        isLastChild: false,
+        depth: 0,
+        gitStatus: 0,
+        diagnosticErrorCount: 0,
+        diagnosticWarningCount: 0,
+        diagnosticInfoCount: 0,
+        diagnosticHintCount: 0,
+        guides: [],
+        icon: "",
+        name: name,
+        relPath: relPath,
+        editingType: isEditing ? 2 : 0xFF,
+        editingText: isEditing ? name : ""
+    )
 }
 
 // MARK: - TabBarState
