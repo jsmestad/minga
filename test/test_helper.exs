@@ -41,5 +41,10 @@ Minga.Config.Options.set(:clipboard, :none)
 # unrelated file-buffer tests. Auto-save tests opt in per buffer.
 Minga.Config.Options.set(:auto_save_delay_ms, 0)
 
+# Disable persisting known projects and recent files during tests to avoid
+# polluting ~/.config/minga/known-projects with test fixture directories.
+Minga.Config.Options.set(:persist_known_projects, false)
+Minga.Config.Options.set(:persist_recent_files, false)
+
 # Tests that create editors directly should pass `editing_model:` to
 # `MingaEditor.start_link/1` instead of mutating global config.

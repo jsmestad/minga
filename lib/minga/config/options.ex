@@ -57,6 +57,7 @@ defmodule Minga.Config.Options do
           | :title_format
           | :recent_files_limit
           | :persist_recent_files
+          | :persist_known_projects
           | :clipboard
           | :wrap
           | :linebreak
@@ -220,6 +221,8 @@ defmodule Minga.Config.Options do
     {:recent_files_limit, :pos_integer, 200, "Maximum number of recent files to keep."},
     {:persist_recent_files, :boolean, true,
      "Whether recent files are written to disk between sessions."},
+    {:persist_known_projects, :boolean, true,
+     "Whether known projects are written to disk between sessions."},
     {:clipboard, {:enum, [:unnamedplus, :unnamed, :none]}, :unnamedplus,
      "Clipboard register integration mode."},
     {:wrap, :boolean, false, "Whether long visual lines wrap in editor windows."},
