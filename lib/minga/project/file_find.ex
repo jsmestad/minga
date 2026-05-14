@@ -50,20 +50,31 @@ defmodule Minga.Project.FileFind do
   """
   @spec detect_strategy(String.t()) :: strategy()
   def detect_strategy(root) do
-    cond do
-      fd_executable() != nil -> :fd
-      git_repo?(root) && executable_available?("git") -> :git
-      executable_available?("find") -> :find
-      true -> :none
-    end
+    do_detect_strategy(root, fd_executable())
   end
+
+  @spec do_detect_strategy(String.t(), String.t() | nil) :: strategy()
+  defp do_detect_strategy(_root, fd) when fd != nil, do: :fd
+
+  defp do_detect_strategy(root, nil) do
+    do_detect_strategy_fallback(root, git_repo?(root) && executable_available?("git"))
+  end
+
+  @spec do_detect_strategy_fallback(String.t(), boolean()) :: strategy()
+  defp do_detect_strategy_fallback(_root, true), do: :git
+
+  defp do_detect_strategy_fallback(_root, false),
+    do: if(executable_available?("find"), do: :find, else: :none)
 
   # ── Strategies ──────────────────────────────────────────────────────────────
 
-  # Excludes .git/ contents via --exclude .git
+  @spec excludes() :: [String.t()]
+  defp excludes, do: Minga.Config.get(:file_find_excludes)
+
   @spec list_with_fd(String.t()) :: result()
   defp list_with_fd(root) do
-    args = ["--type", "f", "--hidden", "--follow", "--exclude", ".git", "."]
+    exclude_args = Enum.flat_map(excludes(), &["--exclude", &1])
+    args = ["--type", "f", "--hidden", "--follow"] ++ exclude_args ++ ["."]
 
     case System.cmd(fd_executable(), args, cd: root, stderr_to_stdout: true) do
       {output, 0} ->
@@ -74,24 +85,25 @@ defmodule Minga.Project.FileFind do
     end
   end
 
-  # Excludes .git/ contents inherently (only returns tracked/staged files)
   @spec list_with_git(String.t()) :: result()
   defp list_with_git(root) do
     args = ["ls-files", "--cached", "--others", "--exclude-standard"]
 
     case System.cmd("git", args, cd: root, stderr_to_stdout: true) do
       {output, 0} ->
-        {:ok, parse_lines(output)}
+        {:ok, output |> parse_lines() |> filter_excludes()}
 
       {error, _code} ->
         {:error, "git ls-files failed: #{String.trim(error)}"}
     end
   end
 
-  # Excludes .git/ contents via -not -path "*/.git/*"
   @spec list_with_find(String.t()) :: result()
   defp list_with_find(root) do
-    args = [".", "-type", "f", "-not", "-path", "*/.git/*"]
+    exclude_args =
+      Enum.flat_map(excludes(), &["-not", "-path", "*/#{&1}/*", "-not", "-name", &1])
+
+    args = [".", "-type", "f"] ++ exclude_args
 
     case System.cmd("find", args, cd: root, stderr_to_stdout: true) do
       {output, code} when code in [0, 1] ->
@@ -104,6 +116,17 @@ defmodule Minga.Project.FileFind do
   end
 
   # ── Helpers ─────────────────────────────────────────────────────────────────
+
+  @spec filter_excludes([String.t()]) :: [String.t()]
+  defp filter_excludes(paths) do
+    excluded = MapSet.new(excludes())
+
+    Enum.reject(paths, fn path ->
+      path
+      |> Path.split()
+      |> Enum.any?(&MapSet.member?(excluded, &1))
+    end)
+  end
 
   @spec parse_lines(String.t()) :: [String.t()]
   defp parse_lines(output) do

@@ -149,6 +149,43 @@ defmodule MingaEditor.UI.PickerTest do
       assert Picker.count(picker) == 1
       assert %Item{id: :a, label: "café.txt"} = Picker.selected_item(picker)
     end
+
+    test "label match ranks above description-only match" do
+      items = [
+        %Item{id: :desc_only, label: "🔥 foo.ex", description: "lib/user/foo.ex"},
+        %Item{id: :label_match, label: "🔥 user_model.ex", description: "lib/models"}
+      ]
+
+      picker = Picker.new(items) |> Picker.filter("user")
+      assert %Item{id: :label_match} = Picker.selected_item(picker)
+    end
+
+    test "icon prefix does not block prefix matching" do
+      items = [
+        %Item{id: :icon_prefix, label: "🔥 config.exs", description: ""},
+        %Item{id: :mid_match, label: "🔥 xconfig.exs", description: ""}
+      ]
+
+      picker = Picker.new(items) |> Picker.filter("config")
+      assert %Item{id: :icon_prefix} = Picker.selected_item(picker)
+    end
+
+    test "icon stripping leaves plain labels intact" do
+      items = [
+        %Item{id: :plain, label: "config.exs", description: ""},
+        %Item{id: :other, label: "readme.md", description: ""}
+      ]
+
+      picker = Picker.new(items) |> Picker.filter("config")
+      assert Picker.count(picker) == 1
+      assert %Item{id: :plain} = Picker.selected_item(picker)
+    end
+
+    test "icon-only label with no trailing text does not crash" do
+      items = [%Item{id: :icon, label: "🔥", description: "some path"}]
+      picker = Picker.new(items) |> Picker.filter("path")
+      assert Picker.count(picker) == 1
+    end
   end
 
   describe "match_positions/2" do

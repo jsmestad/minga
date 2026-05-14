@@ -320,51 +320,67 @@ defmodule MingaEditor.UI.Picker do
     |> String.split(~r/\s+/, trim: true)
   end
 
-  # Score an item against all query segments. All segments must match for a
-  # positive score. The total score is the sum of per-segment scores.
   @spec score_item(String.t(), String.t(), [String.t()]) :: non_neg_integer()
   defp score_item(label, desc, segments) do
-    down_label = String.downcase(label)
+    scoring_label = label |> String.downcase() |> strip_icon_prefix()
     down_desc = String.downcase(desc)
 
     segment_scores =
       Enum.map(segments, fn seg ->
-        label_score = score_segment(down_label, seg)
+        label_score = score_segment(scoring_label, seg)
         desc_score = score_segment(down_desc, seg)
-        max(label_score, desc_score)
+
+        if label_score > 0 do
+          label_score + 200
+        else
+          desc_score
+        end
       end)
 
     if Enum.any?(segment_scores, &(&1 == 0)) do
       0
     else
       base = Enum.sum(segment_scores)
-      # Bonus for shorter labels (tighter match).
-      length_bonus = max(0, 100 - String.length(label))
+      length_bonus = max(0, 50 - String.length(scoring_label))
       base + length_bonus
     end
   end
 
-  # Score a single segment against a string.
-  # Returns 0 if no match.
-  @spec score_segment(String.t(), String.t()) :: non_neg_integer()
-  defp score_segment(text, segment) do
-    cond do
-      # Exact prefix match — best score
-      String.starts_with?(text, segment) ->
-        300
-
-      # Contiguous substring match
-      String.contains?(text, segment) ->
-        200
-
-      # Fuzzy character-by-character match
-      fuzzy_match?(text, segment) ->
-        100
-
-      true ->
-        0
+  @spec strip_icon_prefix(String.t()) :: String.t()
+  defp strip_icon_prefix(label) do
+    case String.next_grapheme(label) do
+      {g, " " <> rest} when byte_size(g) > 1 -> rest
+      _ -> label
     end
   end
+
+  @spec score_segment(String.t(), String.t()) :: non_neg_integer()
+  defp score_segment(text, segment) do
+    match_kind(text, segment) |> match_score()
+  end
+
+  @spec match_kind(String.t(), String.t()) :: :prefix | :substring | :fuzzy | :none
+  defp match_kind(text, segment) do
+    do_match_kind(text, segment, String.starts_with?(text, segment))
+  end
+
+  @spec do_match_kind(String.t(), String.t(), boolean()) :: :prefix | :substring | :fuzzy | :none
+  defp do_match_kind(_text, _segment, true), do: :prefix
+
+  defp do_match_kind(text, segment, false),
+    do: do_match_kind_substring(text, segment, String.contains?(text, segment))
+
+  @spec do_match_kind_substring(String.t(), String.t(), boolean()) :: :substring | :fuzzy | :none
+  defp do_match_kind_substring(_text, _segment, true), do: :substring
+
+  defp do_match_kind_substring(text, segment, false),
+    do: if(fuzzy_match?(text, segment), do: :fuzzy, else: :none)
+
+  @spec match_score(:prefix | :substring | :fuzzy | :none) :: non_neg_integer()
+  defp match_score(:prefix), do: 300
+  defp match_score(:substring), do: 200
+  defp match_score(:fuzzy), do: 100
+  defp match_score(:none), do: 0
 
   # Check if all characters in `needle` appear in order in `haystack`.
   @spec fuzzy_match?(String.t(), String.t()) :: boolean()

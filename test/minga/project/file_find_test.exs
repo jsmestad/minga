@@ -22,7 +22,14 @@ defmodule Minga.Project.FileFindTest do
       File.mkdir_p!(Path.join(tmp_dir, "lib/sub"))
       File.write!(Path.join(tmp_dir, "lib/sub/deep.ex"), "deep")
 
-      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+      server = Minga.Config.Options.default_server()
+      original_excludes = Minga.Config.Options.get(server, :file_find_excludes)
+
+      on_exit(fn ->
+        Minga.Config.Options.set(server, :file_find_excludes, original_excludes)
+        File.rm_rf!(tmp_dir)
+      end)
+
       %{tmp_dir: tmp_dir}
     end
 
@@ -61,6 +68,43 @@ defmodule Minga.Project.FileFindTest do
         {:ok, files} -> assert is_list(files)
         {:error, msg} -> assert is_binary(msg)
       end
+    end
+
+    test "excludes directories listed in file_find_excludes", %{tmp_dir: tmp_dir} do
+      File.mkdir_p!(Path.join(tmp_dir, "node_modules/pkg"))
+      File.write!(Path.join(tmp_dir, "node_modules/pkg/index.js"), "module.exports = {}")
+      File.mkdir_p!(Path.join(tmp_dir, "vendor/lib"))
+      File.write!(Path.join(tmp_dir, "vendor/lib/dep.ex"), "defmodule Dep do\nend")
+
+      Minga.Config.Options.set(
+        Minga.Config.Options.default_server(),
+        :file_find_excludes,
+        ["node_modules", "vendor"]
+      )
+
+      {:ok, files} = FileFind.list_files(tmp_dir)
+
+      refute Enum.any?(files, &String.starts_with?(&1, "node_modules/"))
+      refute Enum.any?(files, &String.starts_with?(&1, "vendor/"))
+      assert "README.md" in files
+      assert "lib/app.ex" in files
+    end
+
+    test "excludes file names listed in file_find_excludes", %{tmp_dir: tmp_dir} do
+      File.write!(Path.join(tmp_dir, ".DS_Store"), "")
+      File.write!(Path.join(tmp_dir, "lib/.DS_Store"), "")
+
+      Minga.Config.Options.set(
+        Minga.Config.Options.default_server(),
+        :file_find_excludes,
+        [".DS_Store"]
+      )
+
+      {:ok, files} = FileFind.list_files(tmp_dir)
+
+      refute ".DS_Store" in files
+      refute "lib/.DS_Store" in files
+      assert "README.md" in files
     end
   end
 end

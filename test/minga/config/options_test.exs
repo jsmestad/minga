@@ -115,7 +115,28 @@ defmodule Minga.Config.OptionsTest do
                log_level_distribution: :default,
                parser_tree_ttl: 300,
                event_retention_days: 90,
-               default_shell: :traditional
+               default_shell: :traditional,
+               file_find_excludes: [
+                 ".git",
+                 "tmp",
+                 "temp",
+                 "log",
+                 "dist",
+                 ".cache",
+                 ".elixir_ls",
+                 ".lexical",
+                 "node_modules",
+                 ".venv",
+                 "__pycache__",
+                 ".mypy_cache",
+                 "vendor",
+                 "target",
+                 "build",
+                 "out",
+                 "_build",
+                 "deps",
+                 ".DS_Store"
+               ]
              }
     end
   end
