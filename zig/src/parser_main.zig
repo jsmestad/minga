@@ -335,19 +335,29 @@ fn handleCommand(
         },
         .request_textobject => |req| {
             const bs = buffers.getPtr(req.buffer_id) orelse {
-                var rbuf: [22]u8 = undefined;
-                const rlen = protocol.encodeTextobjectResult(&rbuf, req.request_id, null);
-                try protocol.writeMessage(stdout, rbuf[0..rlen]);
-                try stdout.flush();
+                try sendTextobjectResult(stdout, req.request_id, null);
                 return;
             };
-            if (!activateBuffer(hl, bs)) return;
+            if (!activateBuffer(hl, bs)) {
+                try sendTextobjectResult(stdout, req.request_id, null);
+                return;
+            }
             const result = hl.findTextobject(req.row, req.col, req.capture_name);
             saveTreeToBuffer(hl, bs);
-            var rbuf: [22]u8 = undefined;
-            const rlen = protocol.encodeTextobjectResult(&rbuf, req.request_id, result);
-            try protocol.writeMessage(stdout, rbuf[0..rlen]);
-            try stdout.flush();
+            try sendTextobjectResult(stdout, req.request_id, result);
+        },
+        .request_match_item => |req| {
+            const bs = buffers.getPtr(req.buffer_id) orelse {
+                try sendMatchItemResult(stdout, req.request_id, null);
+                return;
+            };
+            if (!activateBuffer(hl, bs)) {
+                try sendMatchItemResult(stdout, req.request_id, null);
+                return;
+            }
+            const result = hl.findMatchingItem(req.row, req.col);
+            saveTreeToBuffer(hl, bs);
+            try sendMatchItemResult(stdout, req.request_id, result);
         },
         .load_grammar => |lg| {
             hl.loadGrammar(lg.name, lg.path) catch {
@@ -467,6 +477,20 @@ fn handleCloseBuffer(
 fn sendLanguageAtResponse(stdout: *std.Io.Writer, request_id: u32, language: ?[]const u8) !void {
     var rbuf: [260]u8 = undefined;
     const rlen = protocol.encodeLanguageAtResponse(&rbuf, request_id, language) catch return;
+    try protocol.writeMessage(stdout, rbuf[0..rlen]);
+    try stdout.flush();
+}
+
+fn sendTextobjectResult(stdout: *std.Io.Writer, request_id: u32, result: ?protocol.TextobjectResult) !void {
+    var rbuf: [22]u8 = undefined;
+    const rlen = protocol.encodeTextobjectResult(&rbuf, request_id, result);
+    try protocol.writeMessage(stdout, rbuf[0..rlen]);
+    try stdout.flush();
+}
+
+fn sendMatchItemResult(stdout: *std.Io.Writer, request_id: u32, result: ?protocol.MatchItemResult) !void {
+    var rbuf: [14]u8 = undefined;
+    const rlen = protocol.encodeMatchItemResult(&rbuf, request_id, result);
     try protocol.writeMessage(stdout, rbuf[0..rlen]);
     try stdout.flush();
 }

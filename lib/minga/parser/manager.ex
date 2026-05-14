@@ -49,6 +49,7 @@ defmodule Minga.Parser.Manager do
   @default_highlight_timeout_ms 50
   @default_indent_request_timeout_ms 2_000
   @default_textobject_request_timeout_ms 2_000
+  @default_match_item_request_timeout_ms 2_000
   @request_client_timeout_slack_ms 50
 
   @typedoc "Options for starting the parser manager."
@@ -210,6 +211,28 @@ defmodule Minga.Parser.Manager do
   end
 
   @doc """
+  Requests the structural match item at the given buffer position synchronously.
+
+  Returns `{row, col}` for the matched delimiter/keyword/tag/quote, or `nil` if no tree-sitter match is available.
+  """
+  @spec request_match_item(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          GenServer.server()
+        ) :: {non_neg_integer(), non_neg_integer()} | nil
+  def request_match_item(buffer_id, row, col, server \\ __MODULE__)
+      when is_integer(buffer_id) and is_integer(row) and is_integer(col) do
+    GenServer.call(
+      server,
+      {:request_match_item, buffer_id, row, col, @default_match_item_request_timeout_ms},
+      @default_match_item_request_timeout_ms + @request_client_timeout_slack_ms
+    )
+  catch
+    :exit, _ -> nil
+  end
+
+  @doc """
   Sets the active tree-sitter language for a buffer.
   """
   @spec set_language(non_neg_integer(), String.t(), GenServer.server()) :: :ok
@@ -365,12 +388,7 @@ defmodule Minga.Parser.Manager do
   def handle_call({:request_indent, buffer_id, line, timeout_ms}, from, state) do
     request_id = state.next_request_id
     cmd = Protocol.encode_request_indent(buffer_id, request_id, line)
-    Port.command(state.port, cmd)
-
-    pending = Map.put(state.pending_requests, request_id, from)
-    Process.send_after(self(), {:request_timeout, request_id}, timeout_ms)
-
-    {:noreply, %{state | next_request_id: request_id + 1, pending_requests: pending}}
+    enqueue_pending_request(state, from, request_id, cmd, timeout_ms)
   end
 
   def handle_call(
@@ -388,12 +406,21 @@ defmodule Minga.Parser.Manager do
       ) do
     request_id = state.next_request_id
     cmd = Protocol.encode_request_textobject(buffer_id, request_id, row, col, capture_name)
-    Port.command(state.port, cmd)
+    enqueue_pending_request(state, from, request_id, cmd, timeout_ms)
+  end
 
-    pending = Map.put(state.pending_requests, request_id, from)
-    Process.send_after(self(), {:request_timeout, request_id}, timeout_ms)
+  def handle_call(
+        {:request_match_item, _buffer_id, _row, _col, _timeout_ms},
+        _from,
+        %{port: nil} = state
+      ) do
+    {:reply, nil, state}
+  end
 
-    {:noreply, %{state | next_request_id: request_id + 1, pending_requests: pending}}
+  def handle_call({:request_match_item, buffer_id, row, col, timeout_ms}, from, state) do
+    request_id = state.next_request_id
+    cmd = Protocol.encode_request_match_item(buffer_id, request_id, row, col)
+    enqueue_pending_request(state, from, request_id, cmd, timeout_ms)
   end
 
   def handle_call({:highlight_source, _language, _source, _timeout}, _from, %{port: nil} = state) do
@@ -466,6 +493,9 @@ defmodule Minga.Parser.Manager do
         reply_to_pending_request(state, request_id, indent_level)
 
       {:ok, {:textobject_result, request_id, result}} ->
+        reply_to_pending_request(state, request_id, result)
+
+      {:ok, {:match_item_result, request_id, result}} ->
         reply_to_pending_request(state, request_id, result)
 
       {:ok, {:highlight_names, _buffer_id, _names} = event} ->
@@ -839,6 +869,20 @@ defmodule Minga.Parser.Manager do
           Protocol.encode_parse_buffer(buffer_id, 0, text)
         ]
     end
+  end
+
+  @spec enqueue_pending_request(
+          State.t(),
+          GenServer.from(),
+          non_neg_integer(),
+          binary(),
+          pos_integer()
+        ) :: {:noreply, State.t()}
+  defp enqueue_pending_request(state, from, request_id, cmd, timeout_ms) do
+    Port.command(state.port, cmd)
+    pending = Map.put(state.pending_requests, request_id, from)
+    Process.send_after(self(), {:request_timeout, request_id}, timeout_ms)
+    {:noreply, %{state | next_request_id: request_id + 1, pending_requests: pending}}
   end
 
   @spec fail_pending_requests(State.t()) :: State.t()

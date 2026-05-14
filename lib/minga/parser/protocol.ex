@@ -29,6 +29,7 @@ defmodule Minga.Parser.Protocol do
   @op_set_textobject_query 0x2B
   @op_request_textobject 0x2C
   @op_close_buffer 0x2D
+  @op_request_match_item 0x2E
 
   # ── Opcodes: responses (Zig parser → BEAM) ──
 
@@ -43,6 +44,7 @@ defmodule Minga.Parser.Protocol do
   @op_textobject_positions 0x39
   @op_conceal_spans 0x3A
   @op_request_reparse 0x3B
+  @op_match_item_result 0x3C
 
   # Log messages (Zig → BEAM)
   @op_log_message 0x60
@@ -171,6 +173,19 @@ defmodule Minga.Parser.Protocol do
       byte_size(capture_name)::16, capture_name::binary>>
   end
 
+  @doc "Encodes a request_match_item command: buffer_id(4) + request_id(4) + row(4) + col(4)."
+  @spec encode_request_match_item(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: binary()
+  def encode_request_match_item(buffer_id, request_id, row, col)
+      when is_integer(buffer_id) and buffer_id >= 0 and
+             is_integer(request_id) and is_integer(row) and is_integer(col) do
+    <<@op_request_match_item, buffer_id::32, request_id::32, row::32, col::32>>
+  end
+
   @doc "Encodes a load_grammar command."
   @spec encode_load_grammar(String.t(), String.t()) :: binary()
   def encode_load_grammar(name, path) when is_binary(name) and is_binary(path) do
@@ -253,6 +268,14 @@ defmodule Minga.Parser.Protocol do
 
   def decode_event(<<@op_textobject_result, request_id::32, 0>>) do
     {:ok, {:textobject_result, request_id, nil}}
+  end
+
+  def decode_event(<<@op_match_item_result, request_id::32, 1, row::32, col::32>>) do
+    {:ok, {:match_item_result, request_id, {row, col}}}
+  end
+
+  def decode_event(<<@op_match_item_result, request_id::32, 0>>) do
+    {:ok, {:match_item_result, request_id, nil}}
   end
 
   def decode_event(

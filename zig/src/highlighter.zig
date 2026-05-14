@@ -756,6 +756,29 @@ pub const Highlighter = struct {
         return best;
     }
 
+    /// Alias for the shared MatchItemResult type.
+    pub const MatchItemResult = protocol.MatchItemResult;
+
+    /// Find the tree-sitter item that structurally matches the delimiter, keyword, quote, or tag at the cursor.
+    pub fn findMatchingItem(self: *Highlighter, row: u32, col: u32) ?MatchItemResult {
+        const tree = self.tree orelse return null;
+        const source = self.current_source orelse return null;
+        const root = c.ts_tree_root_node(tree);
+        const node = nodeAtPoint(root, row, col);
+        if (isNullNode(node)) return null;
+        if (hasCommentAncestor(node)) return null;
+
+        if (matchStringBoundary(node, source, row, col)) |matched| return matched;
+        if (matchHtmlTag(node)) |matched| return resultForNodeStart(matched);
+
+        if (!hasStringAncestorBeforeInterpolation(node)) {
+            if (matchBracketToken(node, source)) |matched| return resultForNodeStart(matched);
+            if (matchKeywordToken(node, source, self.current_language_name)) |matched| return resultForNodeStart(matched);
+        }
+
+        return null;
+    }
+
     /// Alias for the shared TextobjectEntry type (defined in protocol to avoid circular imports).
     pub const TextobjectEntry = protocol.TextobjectEntry;
 
@@ -1554,6 +1577,414 @@ pub const Highlighter = struct {
     }
 };
 
+// ── Match-item helpers ────────────────────────────────────────────────────
+
+fn nodeAtPoint(root: c.TSNode, row: u32, col: u32) c.TSNode {
+    const start = c.TSPoint{ .row = row, .column = col };
+    const end = c.TSPoint{ .row = row, .column = col + 1 };
+    return c.ts_node_descendant_for_point_range(root, start, end);
+}
+
+fn isNullNode(node: c.TSNode) bool {
+    return c.ts_node_is_null(node);
+}
+
+fn nodeType(node: c.TSNode) []const u8 {
+    return std.mem.span(c.ts_node_type(node));
+}
+
+fn nodeText(source: []const u8, node: c.TSNode) []const u8 {
+    const start: usize = @intCast(c.ts_node_start_byte(node));
+    const end: usize = @intCast(c.ts_node_end_byte(node));
+    if (start > end or end > source.len) return "";
+    return source[start..end];
+}
+
+fn resultForNodeStart(node: c.TSNode) protocol.MatchItemResult {
+    const point = c.ts_node_start_point(node);
+    return .{ .row = point.row, .col = point.column };
+}
+
+fn resultForByte(source: []const u8, byte_offset: usize) protocol.MatchItemResult {
+    const point = pointForByte(source, byte_offset);
+    return .{ .row = point.row, .col = point.column };
+}
+
+fn pointForByte(source: []const u8, byte_offset: usize) c.TSPoint {
+    var row: u32 = 0;
+    var col: u32 = 0;
+    var i: usize = 0;
+    const target = @min(byte_offset, source.len);
+    while (i < target) : (i += 1) {
+        if (source[i] == '\n') {
+            row += 1;
+            col = 0;
+        } else {
+            col += 1;
+        }
+    }
+    return .{ .row = row, .column = col };
+}
+
+fn byteForPoint(source: []const u8, row: u32, col: u32) usize {
+    var current_row: u32 = 0;
+    var current_col: u32 = 0;
+    var i: usize = 0;
+    while (i < source.len) : (i += 1) {
+        if (current_row == row and current_col == col) return i;
+        if (source[i] == '\n') {
+            current_row += 1;
+            current_col = 0;
+        } else {
+            current_col += 1;
+        }
+    }
+    return source.len;
+}
+
+fn hasCommentAncestor(node: c.TSNode) bool {
+    var current = node;
+    while (!isNullNode(current)) {
+        if (isCommentType(nodeType(current))) return true;
+        current = c.ts_node_parent(current);
+    }
+    return false;
+}
+
+fn isCommentType(typ: []const u8) bool {
+    return std.mem.indexOf(u8, typ, "comment") != null;
+}
+
+fn hasStringAncestorBeforeInterpolation(node: c.TSNode) bool {
+    var current = node;
+    while (!isNullNode(current)) {
+        const typ = nodeType(current);
+        if (isInterpolationType(typ)) return false;
+        if (isStringLikeType(typ)) return true;
+        current = c.ts_node_parent(current);
+    }
+    return false;
+}
+
+fn isInterpolationType(typ: []const u8) bool {
+    return std.mem.indexOf(u8, typ, "interpolation") != null or std.mem.eql(u8, typ, "interpolated_expression");
+}
+
+fn isStringLikeType(typ: []const u8) bool {
+    if (std.mem.indexOf(u8, typ, "string") != null and std.mem.indexOf(u8, typ, "content") == null) return true;
+    if (std.mem.indexOf(u8, typ, "heredoc") != null) return true;
+    return std.mem.eql(u8, typ, "char") or std.mem.eql(u8, typ, "quoted_content");
+}
+
+fn matchStringBoundary(node: c.TSNode, source: []const u8, row: u32, col: u32) ?protocol.MatchItemResult {
+    const string_node = nearestStringLikeNode(node) orelse return null;
+    const start: usize = @intCast(c.ts_node_start_byte(string_node));
+    const end: usize = @intCast(c.ts_node_end_byte(string_node));
+    if (end <= start or end > source.len) return null;
+
+    const text = source[start..end];
+    const delim_len = stringDelimiterLen(text);
+    if (delim_len == 0 or text.len < delim_len * 2) return null;
+
+    const cursor_byte = byteForPoint(source, row, col);
+    const close_start = end - delim_len;
+
+    if (cursor_byte >= start and cursor_byte < start + delim_len) {
+        return resultForByte(source, close_start);
+    }
+    if (cursor_byte >= close_start and cursor_byte < end) {
+        return resultForByte(source, start);
+    }
+    return null;
+}
+
+fn nearestStringLikeNode(node: c.TSNode) ?c.TSNode {
+    var current = node;
+    while (!isNullNode(current)) {
+        const typ = nodeType(current);
+        if (isInterpolationType(typ)) return null;
+        if (isStringContentType(typ)) {
+            current = c.ts_node_parent(current);
+            continue;
+        }
+        if (isStringLikeType(typ)) return current;
+        current = c.ts_node_parent(current);
+    }
+    return null;
+}
+
+fn isStringContentType(typ: []const u8) bool {
+    return std.mem.indexOf(u8, typ, "fragment") != null or
+        std.mem.indexOf(u8, typ, "content") != null or
+        std.mem.indexOf(u8, typ, "escape") != null;
+}
+
+fn stringDelimiterLen(text: []const u8) usize {
+    if (std.mem.startsWith(u8, text, "\"\"\"") and std.mem.endsWith(u8, text, "\"\"\"")) return 3;
+    if (std.mem.startsWith(u8, text, "'''") and std.mem.endsWith(u8, text, "'''")) return 3;
+    if (std.mem.startsWith(u8, text, "\"") and std.mem.endsWith(u8, text, "\"")) return 1;
+    if (std.mem.startsWith(u8, text, "'") and std.mem.endsWith(u8, text, "'")) return 1;
+    if (std.mem.startsWith(u8, text, "`") and std.mem.endsWith(u8, text, "`")) return 1;
+    return 0;
+}
+
+fn matchBracketToken(node: c.TSNode, source: []const u8) ?c.TSNode {
+    const token = tokenText(source, node);
+    const pair = bracketPair(token) orelse return null;
+    return matchSiblingToken(node, pair.open, pair.close, pair.forward);
+}
+
+const BracketPair = struct { open: []const u8, close: []const u8, forward: bool };
+
+fn bracketPair(token: []const u8) ?BracketPair {
+    if (std.mem.eql(u8, token, "(")) return .{ .open = "(", .close = ")", .forward = true };
+    if (std.mem.eql(u8, token, ")")) return .{ .open = "(", .close = ")", .forward = false };
+    if (std.mem.eql(u8, token, "[")) return .{ .open = "[", .close = "]", .forward = true };
+    if (std.mem.eql(u8, token, "]")) return .{ .open = "[", .close = "]", .forward = false };
+    if (std.mem.eql(u8, token, "{")) return .{ .open = "{", .close = "}", .forward = true };
+    if (std.mem.eql(u8, token, "}")) return .{ .open = "{", .close = "}", .forward = false };
+    return null;
+}
+
+fn matchSiblingToken(node: c.TSNode, open: []const u8, close: []const u8, forward: bool) ?c.TSNode {
+    const parent = c.ts_node_parent(node);
+    if (isNullNode(parent)) return null;
+    const count = c.ts_node_child_count(parent);
+    const idx = childIndex(parent, node) orelse return null;
+    var depth: i32 = 1;
+
+    if (forward) {
+        var i = idx + 1;
+        while (i < count) : (i += 1) {
+            const child = c.ts_node_child(parent, i);
+            const typ = nodeType(child);
+            if (std.mem.eql(u8, typ, open)) depth += 1;
+            if (std.mem.eql(u8, typ, close)) {
+                depth -= 1;
+                if (depth == 0) return child;
+            }
+        }
+    } else {
+        var i = idx;
+        while (i > 0) {
+            i -= 1;
+            const child = c.ts_node_child(parent, i);
+            const typ = nodeType(child);
+            if (std.mem.eql(u8, typ, close)) depth += 1;
+            if (std.mem.eql(u8, typ, open)) {
+                depth -= 1;
+                if (depth == 0) return child;
+            }
+        }
+    }
+    return null;
+}
+
+fn childIndex(parent: c.TSNode, node: c.TSNode) ?u32 {
+    const count = c.ts_node_child_count(parent);
+    var i: u32 = 0;
+    while (i < count) : (i += 1) {
+        if (c.ts_node_eq(c.ts_node_child(parent, i), node)) return i;
+    }
+    return null;
+}
+
+fn tokenText(source: []const u8, node: c.TSNode) []const u8 {
+    const typ = nodeType(node);
+    if (!c.ts_node_is_named(node) and typ.len <= 8) return typ;
+    const text = nodeText(source, node);
+    if (text.len <= 32) return text;
+    return "";
+}
+
+fn matchKeywordToken(node: c.TSNode, source: []const u8, language_name: ?[]const u8) ?c.TSNode {
+    const allow_named_keywords = languageAllowsNamedMatchKeywords(language_name);
+    if (c.ts_node_is_named(node) and !allow_named_keywords) return null;
+
+    const token = tokenText(source, node);
+    if (!isKnownMatchKeyword(token)) return null;
+
+    if (language_name) |lang| {
+        if (std.mem.eql(u8, lang, "elixir") and std.mem.eql(u8, token, "end")) {
+            if (matchElixirEndToHead(node, source)) |head| return head;
+        }
+    }
+
+    if (matchKeywordInAncestors(node, source, token, allow_named_keywords)) |matched| return matched;
+    return null;
+}
+
+fn languageAllowsNamedMatchKeywords(language_name: ?[]const u8) bool {
+    const lang = language_name orelse return false;
+    return std.mem.eql(u8, lang, "elixir");
+}
+
+fn isKnownMatchKeyword(token: []const u8) bool {
+    return std.mem.eql(u8, token, "do") or std.mem.eql(u8, token, "end") or
+        std.mem.eql(u8, token, "fn") or std.mem.eql(u8, token, "def") or
+        std.mem.eql(u8, token, "defp") or std.mem.eql(u8, token, "defmodule") or
+        std.mem.eql(u8, token, "if") or std.mem.eql(u8, token, "unless") or
+        std.mem.eql(u8, token, "begin") or std.mem.eql(u8, token, "case") or
+        std.mem.eql(u8, token, "fi") or std.mem.eql(u8, token, "done") or
+        std.mem.eql(u8, token, "esac") or std.mem.eql(u8, token, "else") or
+        std.mem.eql(u8, token, "elif") or std.mem.eql(u8, token, "class") or
+        std.mem.eql(u8, token, "module") or std.mem.eql(u8, token, "for") or
+        std.mem.eql(u8, token, "while");
+}
+
+fn matchKeywordInAncestors(node: c.TSNode, source: []const u8, token: []const u8, allow_named_keywords: bool) ?c.TSNode {
+    var parent = c.ts_node_parent(node);
+    while (!isNullNode(parent)) : (parent = c.ts_node_parent(parent)) {
+        if (matchKeywordInNode(parent, source, node, token, allow_named_keywords)) |matched| return matched;
+    }
+    return null;
+}
+
+fn matchKeywordInNode(parent: c.TSNode, source: []const u8, original: c.TSNode, token: []const u8, allow_named_keywords: bool) ?c.TSNode {
+    if (std.mem.eql(u8, token, "if")) {
+        if (findLastToken(parent, source, original, matchesFi, allow_named_keywords)) |matched| return matched;
+        if (findLastToken(parent, source, original, matchesEnd, allow_named_keywords)) |matched| return matched;
+        if (findLastToken(parent, source, original, matchesPythonElse, allow_named_keywords)) |matched| return matched;
+    }
+    if (std.mem.eql(u8, token, "do")) {
+        if (findLastToken(parent, source, original, matchesDone, allow_named_keywords)) |matched| return matched;
+        if (findLastToken(parent, source, original, matchesEnd, allow_named_keywords)) |matched| return matched;
+    }
+    if (std.mem.eql(u8, token, "case")) {
+        if (findLastToken(parent, source, original, matchesEsac, allow_named_keywords)) |matched| return matched;
+        if (findLastToken(parent, source, original, matchesEnd, allow_named_keywords)) |matched| return matched;
+    }
+    if (isEndKeyword(token)) return findFirstToken(parent, source, original, matchesEndOpenKeyword, allow_named_keywords);
+    if (std.mem.eql(u8, token, "fi")) return findFirstToken(parent, source, original, matchesIf, allow_named_keywords);
+    if (std.mem.eql(u8, token, "done")) return findFirstToken(parent, source, original, matchesDo, allow_named_keywords);
+    if (std.mem.eql(u8, token, "esac")) return findFirstToken(parent, source, original, matchesCase, allow_named_keywords);
+    if (std.mem.eql(u8, token, "else") or std.mem.eql(u8, token, "elif")) return findFirstToken(parent, source, original, matchesIf, allow_named_keywords);
+    return findLastToken(parent, source, original, matchesEnd, allow_named_keywords);
+}
+
+fn isEndKeyword(token: []const u8) bool {
+    return std.mem.eql(u8, token, "end");
+}
+
+fn matchElixirEndToHead(node: c.TSNode, source: []const u8) ?c.TSNode {
+    const block = c.ts_node_parent(node);
+    if (isNullNode(block) or !std.mem.eql(u8, nodeType(block), "do_block")) return null;
+    const owner = c.ts_node_parent(block);
+    if (isNullNode(owner)) return null;
+    return findFirstToken(owner, source, block, matchesElixirBlockHead, true);
+}
+
+const TokenMatcher = *const fn ([]const u8) bool;
+
+fn findFirstToken(node: c.TSNode, source: []const u8, skip: c.TSNode, matcher: TokenMatcher, allow_named_keywords: bool) ?c.TSNode {
+    if (!c.ts_node_eq(node, skip) and tokenNodeMatches(node, source, matcher, allow_named_keywords)) return node;
+    const count = c.ts_node_child_count(node);
+    var i: u32 = 0;
+    while (i < count) : (i += 1) {
+        const child = c.ts_node_child(node, i);
+        if (c.ts_node_eq(child, skip)) continue;
+        if (findFirstToken(child, source, skip, matcher, allow_named_keywords)) |matched| return matched;
+    }
+    return null;
+}
+
+fn findLastToken(node: c.TSNode, source: []const u8, skip: c.TSNode, matcher: TokenMatcher, allow_named_keywords: bool) ?c.TSNode {
+    var result: ?c.TSNode = null;
+    if (!c.ts_node_eq(node, skip) and tokenNodeMatches(node, source, matcher, allow_named_keywords)) result = node;
+    const count = c.ts_node_child_count(node);
+    var i: u32 = 0;
+    while (i < count) : (i += 1) {
+        const child = c.ts_node_child(node, i);
+        if (c.ts_node_eq(child, skip)) continue;
+        if (findLastToken(child, source, skip, matcher, allow_named_keywords)) |matched| result = matched;
+    }
+    return result;
+}
+
+fn tokenNodeMatches(node: c.TSNode, source: []const u8, matcher: TokenMatcher, allow_named_keywords: bool) bool {
+    if (c.ts_node_is_named(node) and !allow_named_keywords) return false;
+    return matcher(tokenText(source, node));
+}
+
+fn matchesEnd(token: []const u8) bool {
+    return std.mem.eql(u8, token, "end");
+}
+fn matchesDone(token: []const u8) bool {
+    return std.mem.eql(u8, token, "done");
+}
+fn matchesFi(token: []const u8) bool {
+    return std.mem.eql(u8, token, "fi");
+}
+fn matchesEsac(token: []const u8) bool {
+    return std.mem.eql(u8, token, "esac");
+}
+fn matchesIf(token: []const u8) bool {
+    return std.mem.eql(u8, token, "if");
+}
+fn matchesDo(token: []const u8) bool {
+    return std.mem.eql(u8, token, "do");
+}
+fn matchesCase(token: []const u8) bool {
+    return std.mem.eql(u8, token, "case");
+}
+fn matchesPythonElse(token: []const u8) bool {
+    return std.mem.eql(u8, token, "else") or std.mem.eql(u8, token, "elif");
+}
+
+fn matchesElixirBlockHead(token: []const u8) bool {
+    return std.mem.eql(u8, token, "def") or std.mem.eql(u8, token, "defp") or
+        std.mem.eql(u8, token, "defmodule") or std.mem.eql(u8, token, "fn") or
+        std.mem.eql(u8, token, "if") or std.mem.eql(u8, token, "unless") or
+        std.mem.eql(u8, token, "case") or std.mem.eql(u8, token, "for") or
+        std.mem.eql(u8, token, "while");
+}
+
+fn matchesEndOpenKeyword(token: []const u8) bool {
+    return matchesElixirBlockHead(token) or std.mem.eql(u8, token, "do") or
+        std.mem.eql(u8, token, "begin") or std.mem.eql(u8, token, "class") or
+        std.mem.eql(u8, token, "module");
+}
+
+fn matchHtmlTag(node: c.TSNode) ?c.TSNode {
+    if (!std.mem.eql(u8, nodeType(node), "tag_name")) return null;
+    const tag = nearestTagNode(node) orelse return null;
+    const tag_type = nodeType(tag);
+    if (std.mem.eql(u8, tag_type, "self_closing_tag")) return null;
+
+    const element = c.ts_node_parent(tag);
+    if (isNullNode(element)) return null;
+    const want_end = std.mem.eql(u8, tag_type, "start_tag");
+    const count = c.ts_node_child_count(element);
+    var i: u32 = 0;
+    while (i < count) : (i += 1) {
+        const child = c.ts_node_child(element, i);
+        const typ = nodeType(child);
+        if (want_end and std.mem.eql(u8, typ, "end_tag")) return tagNameChild(child) orelse child;
+        if (!want_end and std.mem.eql(u8, typ, "start_tag")) return tagNameChild(child) orelse child;
+    }
+    return null;
+}
+
+fn nearestTagNode(node: c.TSNode) ?c.TSNode {
+    var current = node;
+    while (!isNullNode(current)) : (current = c.ts_node_parent(current)) {
+        const typ = nodeType(current);
+        if (std.mem.eql(u8, typ, "start_tag") or std.mem.eql(u8, typ, "end_tag") or std.mem.eql(u8, typ, "self_closing_tag")) return current;
+        if (std.mem.eql(u8, typ, "element")) return null;
+    }
+    return null;
+}
+
+fn tagNameChild(tag: c.TSNode) ?c.TSNode {
+    const count = c.ts_node_child_count(tag);
+    var i: u32 = 0;
+    while (i < count) : (i += 1) {
+        const child = c.ts_node_child(tag, i);
+        if (std.mem.eql(u8, nodeType(child), "tag_name")) return child;
+    }
+    return null;
+}
+
 // ── Injection helpers ─────────────────────────────────────────────────────
 
 /// Reads `#set! injection.language "..."` predicates from a query pattern.
@@ -2016,6 +2447,146 @@ test "highlighter: Perl shebang predicate does not tag ordinary first comments a
         }
     }
     try std.testing.expect(found_shebang);
+}
+
+test "highlighter: match item finds structural brackets" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("javascript"));
+    try hl.parse("const x = (1 + 2);");
+
+    const result = hl.findMatchingItem(0, 10) orelse return error.NoMatch;
+    try std.testing.expectEqual(@as(u32, 0), result.row);
+    try std.testing.expectEqual(@as(u32, 16), result.col);
+}
+
+test "highlighter: match item ignores unrelated separators" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("javascript"));
+    try hl.parse("foo(a, b, c);");
+
+    try std.testing.expect(hl.findMatchingItem(0, 5) == null);
+}
+
+test "highlighter: match item ignores brackets inside strings and comments" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("javascript"));
+    try hl.parse("const s = \"(\"; // )\nconst x = (1);\n");
+
+    try std.testing.expect(hl.findMatchingItem(0, 11) == null);
+    try std.testing.expect(hl.findMatchingItem(0, 18) == null);
+
+    const result = hl.findMatchingItem(1, 10) orelse return error.NoMatch;
+    try std.testing.expectEqual(@as(u32, 1), result.row);
+    try std.testing.expectEqual(@as(u32, 12), result.col);
+}
+
+test "highlighter: match item matches Elixir block keywords" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("elixir"));
+    try hl.parse("def foo do\n  :ok\nend\n");
+
+    const from_def = hl.findMatchingItem(0, 0) orelse return error.NoMatch;
+    try std.testing.expectEqual(@as(u32, 2), from_def.row);
+    try std.testing.expectEqual(@as(u32, 0), from_def.col);
+
+    const from_do = hl.findMatchingItem(0, 8) orelse return error.NoMatch;
+    try std.testing.expectEqual(@as(u32, 2), from_do.row);
+    try std.testing.expectEqual(@as(u32, 0), from_do.col);
+
+    const from_end = hl.findMatchingItem(2, 0) orelse return error.NoMatch;
+    try std.testing.expectEqual(@as(u32, 0), from_end.row);
+    try std.testing.expectEqual(@as(u32, 0), from_end.col);
+}
+
+test "highlighter: match item matches string delimiters" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("javascript"));
+    try hl.parse("const s = \"hello\";");
+
+    const from_open = hl.findMatchingItem(0, 10) orelse return error.NoMatch;
+    try std.testing.expectEqual(@as(u32, 0), from_open.row);
+    try std.testing.expectEqual(@as(u32, 16), from_open.col);
+
+    const from_close = hl.findMatchingItem(0, 16) orelse return error.NoMatch;
+    try std.testing.expectEqual(@as(u32, 0), from_close.row);
+    try std.testing.expectEqual(@as(u32, 10), from_close.col);
+}
+
+test "highlighter: match item ignores string content" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("javascript"));
+    try hl.parse("const s = \"hello\";");
+
+    try std.testing.expect(hl.findMatchingItem(0, 11) == null);
+    try std.testing.expect(hl.findMatchingItem(0, 15) == null);
+}
+
+test "highlighter: match item ignores identifiers that look like shell keywords" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("javascript"));
+    try hl.parse("do { done(); } while (ok);");
+
+    try std.testing.expect(hl.findMatchingItem(0, 0) == null);
+    try std.testing.expect(hl.findMatchingItem(0, 5) == null);
+}
+
+test "highlighter: match item keeps HTML attributes out of tag matching" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("html"));
+    try hl.parse("<div title=\"x\"></div>");
+
+    try std.testing.expect(hl.findMatchingItem(0, 11) == null);
+    try std.testing.expect(hl.findMatchingItem(0, 12) == null);
+}
+
+test "highlighter: match item matches HTML tags and ignores self-closing tags" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("html"));
+    try hl.parse("<div><br/></div>");
+
+    const from_open = hl.findMatchingItem(0, 1) orelse return error.NoMatch;
+    try std.testing.expectEqual(@as(u32, 0), from_open.row);
+    try std.testing.expectEqual(@as(u32, 12), from_open.col);
+
+    const from_close = hl.findMatchingItem(0, 12) orelse return error.NoMatch;
+    try std.testing.expectEqual(@as(u32, 0), from_close.row);
+    try std.testing.expectEqual(@as(u32, 1), from_close.col);
+
+    try std.testing.expect(hl.findMatchingItem(0, 6) == null);
+}
+
+test "highlighter: match item matches Ruby if end" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("ruby"));
+    try hl.parse("if ok\n  puts :ok\nend\n");
+
+    const result = hl.findMatchingItem(0, 0) orelse return error.NoMatch;
+    try std.testing.expectEqual(@as(u32, 2), result.row);
+    try std.testing.expectEqual(@as(u32, 0), result.col);
+
+    const reverse = hl.findMatchingItem(2, 0) orelse return error.NoMatch;
+    try std.testing.expectEqual(@as(u32, 0), reverse.row);
+    try std.testing.expectEqual(@as(u32, 0), reverse.col);
 }
 
 test "highlighter: setLanguage invalidates tree, restores cached query" {

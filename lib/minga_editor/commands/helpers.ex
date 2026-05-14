@@ -377,48 +377,96 @@ defmodule MingaEditor.Commands.Helpers do
     Buffer.move_to(buf, new_pos)
   end
 
+  @doc "Sets up parser state only for motions that need tree-sitter."
+  @spec setup_for_motion(state(), atom()) :: state()
+  def setup_for_motion(%{workspace: %{buffers: %{active: buf}}} = state, :match_bracket)
+      when is_pid(buf) do
+    if HighlightSync.buffer_id_for(state, buf) == 0 do
+      HighlightSync.setup_for_buffer(state)
+    else
+      state
+    end
+  end
+
+  def setup_for_motion(state, :match_bracket), do: state
+  def setup_for_motion(state, _motion), do: state
+
+  @doc "Returns the parser buffer id only for motions that need tree-sitter."
+  @spec buffer_id_for_motion(state(), pid(), atom()) :: non_neg_integer()
+  def buffer_id_for_motion(state, buf, :match_bracket),
+    do: HighlightSync.buffer_id_for(state, buf)
+
+  def buffer_id_for_motion(_state, _buf, _motion), do: 0
+
   @doc "Resolves a motion atom to a new position in the buffer."
-  @spec resolve_motion(Buffer.document(), Minga.Editing.Motion.position(), atom()) ::
-          Minga.Editing.Motion.position()
-  def resolve_motion(buf, cursor, :word_forward),
+  @spec resolve_motion(
+          Buffer.document(),
+          Minga.Editing.Motion.position(),
+          atom(),
+          non_neg_integer()
+        ) :: Minga.Editing.Motion.position()
+  def resolve_motion(buf, cursor, :word_forward, _buffer_id),
     do: Minga.Editing.word_forward(buf, cursor)
 
-  def resolve_motion(buf, cursor, :word_backward),
+  def resolve_motion(buf, cursor, :word_backward, _buffer_id),
     do: Minga.Editing.word_backward(buf, cursor)
 
-  def resolve_motion(buf, cursor, :word_end), do: Minga.Editing.word_end(buf, cursor)
-  def resolve_motion(buf, cursor, :line_start), do: Minga.Editing.line_start(buf, cursor)
-  def resolve_motion(buf, cursor, :line_end), do: Minga.Editing.line_end(buf, cursor)
-  def resolve_motion(buf, _cursor, :document_start), do: Minga.Editing.document_start(buf)
-  def resolve_motion(buf, _cursor, :document_end), do: Minga.Editing.document_end(buf)
+  def resolve_motion(buf, cursor, :word_end, _buffer_id), do: Minga.Editing.word_end(buf, cursor)
 
-  def resolve_motion(buf, cursor, :first_non_blank),
+  def resolve_motion(buf, cursor, :line_start, _buffer_id),
+    do: Minga.Editing.line_start(buf, cursor)
+
+  def resolve_motion(buf, cursor, :line_end, _buffer_id), do: Minga.Editing.line_end(buf, cursor)
+
+  def resolve_motion(buf, _cursor, :document_start, _buffer_id),
+    do: Minga.Editing.document_start(buf)
+
+  def resolve_motion(buf, _cursor, :document_end, _buffer_id), do: Minga.Editing.document_end(buf)
+
+  def resolve_motion(buf, cursor, :first_non_blank, _buffer_id),
     do: Minga.Editing.first_non_blank(buf, cursor)
 
-  def resolve_motion(_buf, cursor, :half_page_down), do: cursor
-  def resolve_motion(_buf, cursor, :half_page_up), do: cursor
-  def resolve_motion(_buf, cursor, :page_down), do: cursor
-  def resolve_motion(_buf, cursor, :page_up), do: cursor
+  def resolve_motion(_buf, cursor, :half_page_down, _buffer_id), do: cursor
+  def resolve_motion(_buf, cursor, :half_page_up, _buffer_id), do: cursor
+  def resolve_motion(_buf, cursor, :page_down, _buffer_id), do: cursor
+  def resolve_motion(_buf, cursor, :page_up, _buffer_id), do: cursor
 
-  def resolve_motion(buf, cursor, :word_forward_big),
+  def resolve_motion(buf, cursor, :word_forward_big, _buffer_id),
     do: Minga.Editing.word_forward_big(buf, cursor)
 
-  def resolve_motion(buf, cursor, :word_backward_big),
+  def resolve_motion(buf, cursor, :word_backward_big, _buffer_id),
     do: Minga.Editing.word_backward_big(buf, cursor)
 
-  def resolve_motion(buf, cursor, :word_end_big),
+  def resolve_motion(buf, cursor, :word_end_big, _buffer_id),
     do: Minga.Editing.word_end_big(buf, cursor)
 
-  def resolve_motion(buf, cursor, :paragraph_forward),
+  def resolve_motion(buf, cursor, :paragraph_forward, _buffer_id),
     do: Minga.Editing.paragraph_forward(buf, cursor)
 
-  def resolve_motion(buf, cursor, :paragraph_backward),
+  def resolve_motion(buf, cursor, :paragraph_backward, _buffer_id),
     do: Minga.Editing.paragraph_backward(buf, cursor)
 
-  def resolve_motion(buf, cursor, :match_bracket),
-    do: Minga.Editing.match_bracket(buf, cursor)
+  def resolve_motion(_buf, cursor, :match_bracket, buffer_id) do
+    case request_match_item(buffer_id, cursor) do
+      nil -> cursor
+      match -> match
+    end
+  end
 
-  def resolve_motion(_buf, cursor, _unknown), do: cursor
+  def resolve_motion(_buf, cursor, _unknown, _buffer_id), do: cursor
+
+  @doc "Resolves a motion target, preserving no-match results for tree-sitter motions."
+  @spec resolve_motion_target(
+          Buffer.document(),
+          Minga.Editing.Motion.position(),
+          atom(),
+          non_neg_integer()
+        ) :: Minga.Editing.Motion.position() | nil
+  def resolve_motion_target(_buf, cursor, :match_bracket, buffer_id),
+    do: request_match_item(buffer_id, cursor)
+
+  def resolve_motion_target(buf, cursor, motion, buffer_id),
+    do: resolve_motion(buf, cursor, motion, buffer_id)
 
   @doc "Applies a find-char motion in the given direction."
   @spec apply_find_char(pid(), ModeState.find_direction(), String.t()) :: :ok
@@ -450,22 +498,68 @@ defmodule MingaEditor.Commands.Helpers do
   @doc "Applies a delete or yank operator over a motion range."
   @spec apply_operator_motion(pid(), state(), atom(), operator_action()) :: state()
   def apply_operator_motion(buf, state, motion, action) do
+    state = setup_for_motion(state, motion)
     gb = Buffer.snapshot(buf)
     cursor = Document.cursor(gb)
-    target = resolve_motion(gb, cursor, motion)
-    {start_pos, end_pos} = sort_positions(cursor, target)
+    buffer_id = buffer_id_for_motion(state, buf, motion)
 
-    case action do
-      :delete ->
-        text = Document.get_range(gb, start_pos, end_pos)
-        Buffer.delete_range(buf, start_pos, end_pos)
-        put_register(state, text, :delete)
+    case resolve_motion_target(gb, cursor, motion, buffer_id) do
+      nil ->
+        state
 
-      :yank ->
-        text = Document.get_range(gb, start_pos, end_pos)
-        state = put_register(state, text, :yank)
-        maybe_start_yank_flash(state, buf, start_pos, end_pos, :charwise)
+      target ->
+        {start_pos, end_pos} = sort_positions(cursor, target)
+        end_pos = operator_target(gb, motion, end_pos)
+
+        case action do
+          :delete ->
+            text = Document.get_range(gb, start_pos, end_pos)
+            Buffer.delete_range(buf, start_pos, end_pos)
+            put_register(state, text, :delete)
+
+          :yank ->
+            text = Document.get_range(gb, start_pos, end_pos)
+            state = put_register(state, text, :yank)
+            maybe_start_yank_flash(state, buf, start_pos, end_pos, :charwise)
+        end
     end
+  end
+
+  @spec operator_target(Buffer.document(), atom(), Minga.Editing.Motion.position()) ::
+          Minga.Editing.Motion.position()
+  defp operator_target(buf, :match_bracket, {line, col}) do
+    line_text = Document.line_at(buf, line) || ""
+    {line, match_item_operator_col(line_text, col)}
+  end
+
+  defp operator_target(_buf, _motion, target), do: target
+
+  @spec match_item_operator_col(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp match_item_operator_col(line_text, col) when col >= byte_size(line_text), do: col
+
+  defp match_item_operator_col(line_text, col) do
+    if match_item_token_byte?(:binary.at(line_text, col)) do
+      match_item_token_end_col(line_text, col + 1)
+    else
+      col
+    end
+  end
+
+  @spec match_item_token_end_col(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp match_item_token_end_col(line_text, col) when col >= byte_size(line_text),
+    do: byte_size(line_text) - 1
+
+  defp match_item_token_end_col(line_text, col) do
+    if match_item_token_byte?(:binary.at(line_text, col)) do
+      match_item_token_end_col(line_text, col + 1)
+    else
+      col - 1
+    end
+  end
+
+  @spec match_item_token_byte?(byte()) :: boolean()
+  defp match_item_token_byte?(byte) do
+    byte in ?a..?z or byte in ?A..?Z or byte in ?0..?9 or byte in [?_, ?-, ?:]
   end
 
   @doc "Applies a delete or yank operator over a text object range."
@@ -583,5 +677,11 @@ defmodule MingaEditor.Commands.Helpers do
     ParserManager.request_textobject(buffer_id, row, col, capture_name)
   catch
     :exit, _ -> nil
+  end
+
+  @spec request_match_item(non_neg_integer(), Minga.Editing.Motion.position()) ::
+          Minga.Editing.Motion.position() | nil
+  defp request_match_item(buffer_id, {line, col}) do
+    ParserManager.request_match_item(buffer_id, line, col)
   end
 end

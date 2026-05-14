@@ -703,6 +703,11 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       payload = <<0x30, 0::32, 1::32, 2::32, 0::32, 9::32, 0::16, 0::16, 0::16>>
       assert {:error, :malformed} = Protocol.decode_event(payload)
     end
+
+    test "decode_event match_item_result" do
+      payload = <<0x3C, 42::32, 1, 9::32, 4::32>>
+      assert {:ok, {:match_item_result, 42, {9, 4}}} = Protocol.decode_event(payload)
+    end
   end
 
   describe "log_message protocol" do
