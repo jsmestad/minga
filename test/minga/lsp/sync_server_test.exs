@@ -64,7 +64,7 @@ defmodule Minga.LSP.SyncServerTest do
 
     test "buffer_closed cleans up ETS entries" do
       buf =
-        start_supervised!({BufferServer, content: "hello", file_path: "/tmp/cleanup.ex"})
+        start_supervised!({BufferServer, content: "hello", file_path: "/tmp/cleanup.txt"})
 
       # Manually insert a fake entry to simulate an open buffer with clients.
       :ets.insert(SyncServer.Registry, {buf, [self()]})
@@ -72,7 +72,7 @@ defmodule Minga.LSP.SyncServerTest do
 
       Events.broadcast(
         :buffer_closed,
-        %Events.BufferClosedEvent{buffer: buf, path: "/tmp/cleanup.ex"}
+        %Events.BufferClosedEvent{buffer: buf, path: "/tmp/cleanup.txt"}
       )
 
       # Sync call to flush.
@@ -96,7 +96,7 @@ defmodule Minga.LSP.SyncServerTest do
 
     test "schedules debounced didChange" do
       buf =
-        start_supervised!({BufferServer, content: "hello", file_path: "/tmp/debounce.ex"})
+        start_supervised!({BufferServer, content: "hello", file_path: "/tmp/debounce.txt"})
 
       # Insert a fake client entry.
       :ets.insert(SyncServer.Registry, {buf, [self()]})
@@ -115,7 +115,7 @@ defmodule Minga.LSP.SyncServerTest do
 
     test "accumulates deltas from events" do
       buf =
-        start_supervised!({BufferServer, content: "hello", file_path: "/tmp/accum.ex"})
+        start_supervised!({BufferServer, content: "hello", file_path: "/tmp/accum.txt"})
 
       delta = Minga.Buffer.EditDelta.insertion(0, {0, 0}, "x", {0, 1})
 
@@ -138,7 +138,7 @@ defmodule Minga.LSP.SyncServerTest do
     end
 
     test "ignores changes for remote buffers without LSP clients" do
-      path = "/tmp/remote-no-lsp.ex"
+      path = "/tmp/remote-no-lsp.txt"
       buf = start_supervised!({BufferServer, file_path: path, storage: {:remote, node(), path}})
       delta = Minga.Buffer.EditDelta.insertion(0, {0, 0}, "x", {0, 1})
 
@@ -159,7 +159,7 @@ defmodule Minga.LSP.SyncServerTest do
 
     test "nil delta marks accumulator as full_sync" do
       buf =
-        start_supervised!({BufferServer, content: "hello", file_path: "/tmp/fullsync.ex"})
+        start_supervised!({BufferServer, content: "hello", file_path: "/tmp/fullsync.txt"})
 
       delta = Minga.Buffer.EditDelta.insertion(0, {0, 0}, "x", {0, 1})
       :ets.insert(SyncServer.Registry, {buf, [self()]})
@@ -196,7 +196,7 @@ defmodule Minga.LSP.SyncServerTest do
   describe "client monitoring" do
     test "crashed client is removed from ETS registry" do
       buf =
-        start_supervised!({BufferServer, content: "hello", file_path: "/tmp/monitor.ex"})
+        start_supervised!({BufferServer, content: "hello", file_path: "/tmp/monitor.txt"})
 
       client = spawn(fn -> receive do: (_ -> :ok) end)
       :ets.insert(SyncServer.Registry, {buf, [client]})
@@ -222,7 +222,7 @@ defmodule Minga.LSP.SyncServerTest do
 
     test "crashed client is removed but other clients for same buffer remain" do
       buf =
-        start_supervised!({BufferServer, content: "hello", file_path: "/tmp/multi.ex"})
+        start_supervised!({BufferServer, content: "hello", file_path: "/tmp/multi.txt"})
 
       doomed = spawn(fn -> receive do: (_ -> :ok) end)
       survivor = spawn(fn -> receive do: (_ -> :ok) end)
@@ -247,7 +247,7 @@ defmodule Minga.LSP.SyncServerTest do
 
     test "no stale monitors remain after buffer_closed" do
       buf =
-        start_supervised!({BufferServer, content: "hello", file_path: "/tmp/close_mon.ex"})
+        start_supervised!({BufferServer, content: "hello", file_path: "/tmp/close_mon.txt"})
 
       client = spawn(fn -> receive do: (_ -> :ok) end)
 
@@ -262,11 +262,14 @@ defmodule Minga.LSP.SyncServerTest do
 
       Events.broadcast(
         :buffer_closed,
-        %Events.BufferClosedEvent{buffer: buf, path: "/tmp/close_mon.ex"}
+        %Events.BufferClosedEvent{buffer: buf, path: "/tmp/close_mon.txt"}
       )
 
       final_state = :sys.get_state(SyncServer)
-      assert final_state.client_monitors == %{}
+
+      refute Enum.any?(final_state.client_monitors, fn {_ref, {buffer_pid, _client_pid}} ->
+               buffer_pid == buf
+             end)
     end
   end
 end

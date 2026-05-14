@@ -1,9 +1,17 @@
 defmodule MingaEditor.Commands.LspTest do
-  use ExUnit.Case, async: true
+  # Uses the global LSP supervisor to exercise command behavior with no active clients.
+  use ExUnit.Case, async: false
 
+  alias Minga.Test.LspIsolation
   alias MingaEditor.Commands.Lsp, as: LspCommands
 
   import MingaEditor.RenderPipeline.TestHelpers
+
+  setup do
+    LspIsolation.stop_lsp_clients()
+    on_exit(&LspIsolation.stop_lsp_clients/0)
+    :ok
+  end
 
   describe "execute/2 :lsp_info" do
     test "shows 'no language servers running' when none active" do

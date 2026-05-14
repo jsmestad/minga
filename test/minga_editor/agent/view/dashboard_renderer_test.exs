@@ -1,6 +1,8 @@
 defmodule MingaEditor.Agent.View.DashboardRendererTest do
-  use ExUnit.Case, async: true
+  # Uses the global LSP supervisor because dashboard render input includes active LSP names.
+  use ExUnit.Case, async: false
 
+  alias Minga.Test.LspIsolation
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.DashboardRenderer
   alias MingaEditor.Agent.ViewContext
@@ -14,6 +16,12 @@ defmodule MingaEditor.Agent.View.DashboardRendererTest do
   alias MingaEditor.VimState
   alias MingaEditor.Input
   alias MingaEditor.UI.Theme
+
+  setup do
+    LspIsolation.stop_lsp_clients()
+    on_exit(&LspIsolation.stop_lsp_clients/0)
+    :ok
+  end
 
   defp base_state(opts \\ []) do
     rows = Keyword.get(opts, :rows, 40)

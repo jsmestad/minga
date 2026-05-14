@@ -901,6 +901,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         disp.onModeChanged = { [weak nsView] modeName in
             guard let nsView else { return }
+            nsView.statusBarModeDidChange()
             NSAccessibility.post(
                 element: nsView,
                 notification: .announcementRequested,

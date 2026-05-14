@@ -2,20 +2,31 @@ defmodule MingaEditor.Commands.EditingTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Config.Options
+  alias Minga.Keymap.Active, as: KeymapActive
   alias MingaEditor
 
   defp start_editor(content) do
-    {:ok, buffer} = BufferServer.start_link(content: content)
+    id = :erlang.unique_integer([:positive])
+    events_registry = :"editing_test_events_#{id}"
+    {:ok, _events} = Registry.start_link(keys: :duplicate, name: events_registry)
+    {:ok, options_server} = Options.start_link(name: nil)
+    {:ok, _} = Options.set(options_server, :clipboard, :none)
+    {:ok, keymap_server} = KeymapActive.start_link(name: nil)
+    {:ok, buffer} = BufferServer.start_link(content: content, events_registry: events_registry)
     BufferServer.set_option(buffer, :clipboard, :none)
 
     {:ok, editor} =
       MingaEditor.start_link(
-        name: :"editor_#{:erlang.unique_integer([:positive])}",
+        name: :"editor_#{id}",
         port_manager: nil,
         buffer: buffer,
         width: 40,
         height: 10,
-        editing_model: :vim
+        editing_model: :vim,
+        events_registry: events_registry,
+        keymap_server: keymap_server,
+        options_server: options_server
       )
 
     {editor, buffer}

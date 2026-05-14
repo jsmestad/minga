@@ -12,6 +12,8 @@ defmodule Minga.Integration.AgentCursorTest do
 
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Config.Options
+  alias Minga.Keymap.Active, as: KeymapActive
   alias MingaEditor
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -28,13 +30,25 @@ defmodule Minga.Integration.AgentCursorTest do
     width = Keyword.get(opts, :width, 80)
     height = Keyword.get(opts, :height, 24)
     id = :erlang.unique_integer([:positive])
+    events_registry = :"agent_cursor_events_#{id}"
+    {:ok, _events} = Registry.start_link(keys: :duplicate, name: events_registry)
+    {:ok, options_server} = Options.start_link(name: nil)
+    {:ok, _} = Options.set(options_server, :clipboard, :none)
+    {:ok, keymap_server} = KeymapActive.start_link(name: nil)
 
     {:ok, port} = HeadlessPort.start_link(width: width, height: height)
 
     agent_buf = AgentBufferSync.start_buffer()
     assert is_pid(agent_buf), "Failed to start agent buffer"
 
-    {:ok, file_buf} = BufferServer.start_link(content: "", buffer_name: "unnamed")
+    {:ok, file_buf} =
+      BufferServer.start_link(
+        content: "",
+        buffer_name: "unnamed",
+        events_registry: events_registry
+      )
+
+    BufferServer.set_option(file_buf, :clipboard, :none)
 
     {:ok, editor} =
       MingaEditor.start_link(
@@ -43,7 +57,10 @@ defmodule Minga.Integration.AgentCursorTest do
         buffer: file_buf,
         width: width,
         height: height,
-        editing_model: :vim
+        editing_model: :vim,
+        events_registry: events_registry,
+        keymap_server: keymap_server,
+        options_server: options_server
       )
 
     {:ok, fake_session} = StubServer.start_link()

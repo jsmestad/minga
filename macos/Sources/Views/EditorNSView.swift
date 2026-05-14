@@ -17,6 +17,14 @@ private enum DividerCursorState: Equatable {
     case horizontal
 }
 
+private enum EditorStatusMode {
+    static let normal: UInt8 = 0
+    static let insert: UInt8 = 1
+    static let command: UInt8 = 3
+    static let search: UInt8 = 5
+    static let replace: UInt8 = 6
+}
+
 /// The main editor view. Uses MTKView's built-in display link for
 /// vsync-driven rendering with automatic frame coalescing.
 final class EditorNSView: MTKView {
@@ -109,10 +117,19 @@ final class EditorNSView: MTKView {
     /// Border overlay shown during file drag-and-drop hover.
     private var dropHighlightLayer: CAShapeLayer?
 
-    /// Status bar state from the BEAM. Used by the space leader key-chord
-    /// logic to check whether insert mode is active (SPC is always literal
-    /// in insert mode, never a leader key).
+    /// Status bar state from the BEAM. Used by the space leader key-chord logic to decide whether SPC is typed text or a leader key.
     var statusBarState: StatusBarState?
+
+    /// Short-lived local prediction that the BEAM is about to enter a text-input mode.
+    /// The status bar update is authoritative, but it arrives asynchronously after Vim-normal keys that enter insert-like input.
+    /// Without this guard, a fast `i` then `set :` sequence can still see NORMAL on the Swift side and treat the space as a leader chord instead of literal text.
+    private var optimisticTextInputMode: Bool = false
+
+    /// Token used to expire stale optimistic text-input predictions without racing newer predictions.
+    private var optimisticTextInputModeToken: UInt64 = 0
+
+    /// Maximum time to trust the local text-input prediction if the BEAM has not confirmed it through the status bar yet.
+    private let optimisticTextInputModeTimeoutMs: Int = 500
 
     // MARK: - Space leader key-chord state
 
@@ -804,12 +821,9 @@ final class EditorNSView: MTKView {
         }
 
         // ── Space leader key-chord interception ──
-        // When SPC is pending or held, intercept chord keys before any
-        // other processing. Skip when:
-        // - IME is composing (SPC is the commit key in CJK input methods)
-        // - Insert mode is active (SPC is always a literal space, never a leader)
-        let isInsertMode = statusBarState?.isInsertMode ?? false
-        if !imeComposition.hasMarkedText && !isInsertMode {
+        // When SPC is pending or held, intercept chord keys before any other processing.
+        // Skip when IME is composing or when the current mode treats SPC as typed text.
+        if !imeComposition.hasMarkedText && !spaceLeaderShouldTreatSpaceLiterally() {
             if let chars = event.charactersIgnoringModifiers, chars == " ", mods == 0 {
                 // Bare SPC keyDown (no modifiers)
                 if event.isARepeat {
@@ -1308,8 +1322,81 @@ final class EditorNSView: MTKView {
 
     /// Sends a key press and updates recovery tracking in one place.
     private func sendKeyPress(codepoint: UInt32, modifiers: UInt8) {
+        updateOptimisticTextInputMode(codepoint: codepoint, modifiers: modifiers)
         recoveryManager?.onKeySent()
         encoder.sendKeyPress(codepoint: codepoint, modifiers: modifiers)
+    }
+
+    /// Clears stale local text-input prediction when the authoritative BEAM mode changes.
+    func statusBarModeDidChange() {
+        if !Self.statusModeUsesLiteralSpace(statusMode: statusBarState?.mode) {
+            clearOptimisticTextInputMode()
+        }
+    }
+
+    /// Returns whether frontend space-leader interception should stand down.
+    /// BEAM state remains authoritative; this adds a short local prediction so text typed immediately after `i` is not misclassified as a normal-mode leader chord before the status bar message catches up.
+    private func spaceLeaderShouldTreatSpaceLiterally() -> Bool {
+        if Self.statusModeUsesLiteralSpace(statusMode: statusBarState?.mode) { return true }
+        return optimisticTextInputMode
+    }
+
+    /// Returns true for BEAM modes where SPC is typed text, not a leader chord.
+    /// CUA is encoded as normal mode, so it intentionally stays false here.
+    nonisolated static func statusModeUsesLiteralSpace(statusMode: UInt8?) -> Bool {
+        switch statusMode {
+        case EditorStatusMode.insert, EditorStatusMode.command, EditorStatusMode.search, EditorStatusMode.replace:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Keeps the short-lived text-input prediction in sync with outgoing keys.
+    private func updateOptimisticTextInputMode(codepoint: UInt32, modifiers: UInt8) {
+        if codepoint == 27 {
+            clearOptimisticTextInputMode()
+            return
+        }
+
+        guard modifiers == 0 else { return }
+        let statusMode = statusBarState?.mode
+        guard !Self.statusModeUsesLiteralSpace(statusMode: statusMode) else { return }
+        guard Self.shouldOptimisticallyEnterTextInputMode(codepoint: codepoint, statusMode: statusMode, cursorShape: dispatcher.frameState.cursorShape) else { return }
+
+        markOptimisticTextInputMode()
+    }
+
+    /// Returns true for Vim-normal keys that immediately enter insert-like text input.
+    /// The cursor-shape gate avoids applying Vim assumptions while CUA mode is active.
+    nonisolated static func shouldOptimisticallyEnterTextInputMode(codepoint: UInt32, statusMode: UInt8?, cursorShape: CursorShape) -> Bool {
+        guard statusMode == EditorStatusMode.normal, cursorShape == .block else { return false }
+
+        switch codepoint {
+        case 0x69, 0x49, 0x61, 0x41, 0x6F, 0x4F, 0x73, 0x53, 0x43, 0x52:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Starts or refreshes the short optimistic text-input window.
+    private func markOptimisticTextInputMode() {
+        optimisticTextInputMode = true
+        optimisticTextInputModeToken &+= 1
+        let token = optimisticTextInputModeToken
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(optimisticTextInputModeTimeoutMs)) { [weak self] in
+            guard let self, self.optimisticTextInputModeToken == token else { return }
+            self.optimisticTextInputMode = false
+        }
+    }
+
+    /// Clears the local text-input prediction immediately.
+    private func clearOptimisticTextInputMode() {
+        guard optimisticTextInputMode else { return }
+        optimisticTextInputMode = false
+        optimisticTextInputModeToken &+= 1
     }
 
     private func sendSpaceLeaderChord(codepoint: UInt32, modifiers: UInt8) {

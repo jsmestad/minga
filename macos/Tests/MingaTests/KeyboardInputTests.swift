@@ -211,6 +211,36 @@ struct KeyboardInputTests {
         #expect(!EditorNSView.shouldYieldSystemCommandShortcut(modifiedQuit))
     }
 
+    @Test("Text input modes treat space as literal")
+    func statusModesUsingLiteralSpace() throws {
+        #expect(!EditorNSView.statusModeUsesLiteralSpace(statusMode: nil))
+        #expect(!EditorNSView.statusModeUsesLiteralSpace(statusMode: 0))
+        #expect(EditorNSView.statusModeUsesLiteralSpace(statusMode: 1))
+        #expect(!EditorNSView.statusModeUsesLiteralSpace(statusMode: 2))
+        #expect(EditorNSView.statusModeUsesLiteralSpace(statusMode: 3))
+        #expect(!EditorNSView.statusModeUsesLiteralSpace(statusMode: 4))
+        #expect(EditorNSView.statusModeUsesLiteralSpace(statusMode: 5))
+        #expect(EditorNSView.statusModeUsesLiteralSpace(statusMode: 6))
+    }
+
+    @Test("Vim normal insert-entering keys use optimistic text input mode")
+    func optimisticTextInputModeKeys() throws {
+        let insertKeys: [(String, UInt32)] = [
+            ("i", 0x69), ("I", 0x49), ("a", 0x61), ("A", 0x41), ("o", 0x6F),
+            ("O", 0x4F), ("s", 0x73), ("S", 0x53), ("C", 0x43), ("R", 0x52)
+        ]
+
+        for (key, scalar) in insertKeys {
+            #expect(EditorNSView.shouldOptimisticallyEnterTextInputMode(codepoint: scalar, statusMode: 0, cursorShape: .block), "\(key) should predict text input mode")
+        }
+
+        #expect(!EditorNSView.shouldOptimisticallyEnterTextInputMode(codepoint: UnicodeScalar("x").value, statusMode: 0, cursorShape: .block))
+        #expect(!EditorNSView.shouldOptimisticallyEnterTextInputMode(codepoint: UnicodeScalar(" ").value, statusMode: 0, cursorShape: .block))
+        #expect(!EditorNSView.shouldOptimisticallyEnterTextInputMode(codepoint: UnicodeScalar("s").value, statusMode: 0, cursorShape: .beam))
+        #expect(!EditorNSView.shouldOptimisticallyEnterTextInputMode(codepoint: UnicodeScalar("i").value, statusMode: 1, cursorShape: .beam))
+        #expect(!EditorNSView.shouldOptimisticallyEnterTextInputMode(codepoint: UnicodeScalar("i").value, statusMode: nil, cursorShape: .block))
+    }
+
     // MARK: - Control key bypass
 
     @Test("Ctrl+A sends character codepoint with control modifier")
