@@ -375,13 +375,17 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
 
   # ── Style helpers ──────────────────────────────────────────────────────
 
+  # Visual state priority is layered, not mutually exclusive:
+  # inline editing owns the whole row, then selection owns the row background.
+  # Active file owns name/icon emphasis, dirty owns the modified-buffer marker.
+  # Git owns the git marker, and directory emphasis is the base fallback.
   @spec row_background(boolean(), boolean(), Theme.t()) :: Face.t()
   defp row_background(true = _is_cursor, true = _focused, theme) do
-    Face.new(bg: theme.tree.dir_fg)
+    Face.new(bg: theme.tree.cursor_bg)
   end
 
   defp row_background(true = _is_cursor, false = _focused, theme) do
-    Face.new(bg: theme.tree.cursor_bg)
+    Face.new(bg: theme.tree.separator_fg)
   end
 
   defp row_background(false = _is_cursor, _focused, theme) do
@@ -389,46 +393,19 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
   end
 
   @spec guide_draw_style(boolean(), boolean(), Theme.t()) :: Face.t()
-  defp guide_draw_style(true = _is_cursor, true = _focused, theme) do
-    Face.new(fg: theme.tree.bg, bg: theme.tree.dir_fg)
-  end
-
-  defp guide_draw_style(true = _is_cursor, false = _focused, theme) do
-    Face.new(fg: theme.tree.separator_fg, bg: theme.tree.cursor_bg)
-  end
-
-  defp guide_draw_style(_is_cursor, _focused, theme) do
-    Face.new(fg: theme.tree.separator_fg, bg: theme.tree.bg)
+  defp guide_draw_style(is_cursor, focused, theme) do
+    Face.new(fg: theme.tree.separator_fg, bg: row_bg_color(is_cursor, focused, theme))
   end
 
   @spec icon_draw_style(non_neg_integer(), boolean(), boolean(), Theme.t()) :: Face.t()
-  defp icon_draw_style(_icon_color, true = _is_cursor, true = _focused, theme) do
-    # Focused cursor row: invert, use bg as fg
-    Face.new(fg: theme.tree.bg, bg: theme.tree.dir_fg)
-  end
-
-  defp icon_draw_style(icon_color, true = _is_cursor, false = _focused, theme) do
-    Face.new(fg: icon_color, bg: theme.tree.cursor_bg)
-  end
-
-  defp icon_draw_style(icon_color, _is_cursor, _focused, theme) do
-    Face.new(fg: icon_color, bg: theme.tree.bg)
+  defp icon_draw_style(icon_color, is_cursor, focused, theme) do
+    Face.new(fg: icon_color, bg: row_bg_color(is_cursor, focused, theme))
   end
 
   @spec dirty_indicator_style(boolean(), boolean(), Theme.t()) :: Face.t()
-  defp dirty_indicator_style(true = _is_cursor, true = _focused, theme) do
+  defp dirty_indicator_style(is_cursor, focused, theme) do
     color = theme.tree.modified_fg || theme.tree.fg
-    Face.new(fg: theme.tree.bg, bg: color)
-  end
-
-  defp dirty_indicator_style(true = _is_cursor, false = _focused, theme) do
-    color = theme.tree.modified_fg || theme.tree.fg
-    Face.new(fg: color, bg: theme.tree.cursor_bg)
-  end
-
-  defp dirty_indicator_style(_is_cursor, _focused, theme) do
-    color = theme.tree.modified_fg || theme.tree.fg
-    Face.new(fg: color, bg: theme.tree.bg)
+    Face.new(fg: color, bg: row_bg_color(is_cursor, focused, theme), bold: true)
   end
 
   @spec git_indicator_style(
@@ -437,17 +414,12 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
           boolean(),
           Theme.t()
         ) :: Face.t()
-  defp git_indicator_style(status, true = _is_cursor, true = _focused, theme) do
-    # Focused cursor row: invert
-    Face.new(fg: theme.tree.bg, bg: git_status_color(status, theme))
-  end
-
-  defp git_indicator_style(status, true = _is_cursor, false = _focused, theme) do
-    Face.new(fg: git_status_color(status, theme), bg: theme.tree.cursor_bg)
-  end
-
-  defp git_indicator_style(status, _is_cursor, _focused, theme) do
-    Face.new(fg: git_status_color(status, theme), bg: theme.tree.bg)
+  defp git_indicator_style(status, is_cursor, focused, theme) do
+    Face.new(
+      fg: git_status_color(status, theme),
+      bg: row_bg_color(is_cursor, focused, theme),
+      bold: status == :conflict
+    )
   end
 
   @spec git_status_color(Minga.Project.FileTree.GitStatus.file_status(), Theme.t()) ::
@@ -459,28 +431,24 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
   defp git_status_color(:renamed, theme), do: theme.tree.git_staged_fg || theme.tree.fg
   defp git_status_color(:deleted, theme), do: theme.tree.git_conflict_fg || theme.tree.fg
 
+  @spec row_bg_color(boolean(), boolean(), Theme.t()) :: non_neg_integer()
+  defp row_bg_color(is_cursor, focused, theme), do: row_background(is_cursor, focused, theme).bg
+
   @spec name_draw_style(Row.t(), boolean(), boolean(), boolean(), Theme.t()) :: Face.t()
   defp name_draw_style(tree_row, is_cursor, is_active, focused, theme) do
-    tree = theme.tree
+    base_fg = name_foreground(tree_row, is_active, theme)
 
-    base_fg =
-      case {tree_row.directory?, is_active} do
-        {true, _} -> tree.dir_fg
-        {_, true} -> tree.active_fg
-        _ -> tree.fg
-      end
-
-    case {is_cursor, focused} do
-      {true, true} ->
-        Face.new(fg: tree.bg, bg: base_fg, bold: tree_row.directory?)
-
-      {true, false} ->
-        Face.new(fg: base_fg, bg: tree.cursor_bg, bold: tree_row.directory?)
-
-      _ ->
-        Face.new(fg: base_fg, bg: tree.bg, bold: tree_row.directory?)
-    end
+    Face.new(
+      fg: base_fg,
+      bg: row_bg_color(is_cursor, focused, theme),
+      bold: is_active or tree_row.directory?
+    )
   end
+
+  @spec name_foreground(Row.t(), boolean(), Theme.t()) :: non_neg_integer()
+  defp name_foreground(_tree_row, true = _is_active, theme), do: theme.tree.active_fg
+  defp name_foreground(%Row{directory?: true}, false = _is_active, theme), do: theme.tree.dir_fg
+  defp name_foreground(_tree_row, false = _is_active, theme), do: theme.tree.fg
 
   # ── Blanks, separator, scroll ──────────────────────────────────────────
 

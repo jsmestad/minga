@@ -275,20 +275,102 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
       assert lib_row_draws == []
     end
 
-    test "highlights active file path", %{tmp_dir: tmp_dir} do
-      main_path = Path.join(tmp_dir, "lib/main.ex")
+    test "active plus selected keeps selection background and active name accent", %{
+      tmp_dir: tmp_dir
+    } do
+      theme = Theme.get!(:doom_one)
+      row = semantic_file_row(tmp_dir, selected?: true, focused?: true, active?: true)
 
-      input = %RenderInput{
-        tree: sample_tree(tmp_dir),
-        rect: {0, 0, 30, 10},
-        focused: true,
-        theme: Theme.get!(:doom_one),
-        active_path: main_path
-      }
+      draws = render_semantic_rows(tmp_dir, [row], theme)
+      {_r, _c, _text, style} = draw_containing(draws, "main.ex")
 
-      draws = TreeRenderer.render(input)
-      assert [_ | _] = draws
+      assert style.fg == theme.tree.active_fg
+      assert style.bg == theme.tree.cursor_bg
+      assert style.bold == true
     end
+
+    test "active plus git modified preserves independent git marker", %{tmp_dir: tmp_dir} do
+      theme = Theme.get!(:doom_one)
+      row = semantic_file_row(tmp_dir, active?: true, git_status: :modified)
+
+      draws = render_semantic_rows(tmp_dir, [row], theme)
+      {_r, _c, _text, name_style} = draw_containing(draws, "main.ex")
+      {_r, _c, _text, git_style} = draw_matching(draws, " ●")
+
+      assert name_style.fg == theme.tree.active_fg
+      assert git_style.fg == theme.tree.git_modified_fg
+      assert git_style.bg == theme.tree.bg
+    end
+
+    test "selected plus dirty keeps dirty marker visible on selection background", %{
+      tmp_dir: tmp_dir
+    } do
+      theme = Theme.get!(:doom_one)
+      row = semantic_file_row(tmp_dir, selected?: true, focused?: true, dirty?: true)
+
+      draws = render_semantic_rows(tmp_dir, [row], theme)
+      {_r, _c, _text, dirty_style} = draw_matching(draws, "●")
+
+      assert dirty_style.fg == theme.tree.modified_fg
+      assert dirty_style.bg == theme.tree.cursor_bg
+      assert dirty_style.bold == true
+    end
+
+    test "unfocused selected row uses subdued selection background", %{tmp_dir: tmp_dir} do
+      theme = Theme.get!(:doom_one)
+      row = semantic_file_row(tmp_dir, selected?: true, focused?: false)
+
+      draws = render_semantic_rows(tmp_dir, [row], theme)
+      {_r, _c, _text, style} = draw_containing(draws, "main.ex")
+
+      assert style.bg == theme.tree.separator_fg
+      refute style.bg == theme.tree.cursor_bg
+    end
+  end
+
+  defp semantic_file_row(tmp_dir, attrs) do
+    file_path = Path.join(tmp_dir, "main.ex")
+
+    Row.new(
+      Keyword.merge(
+        [
+          id: file_path,
+          path: file_path,
+          relative_path: "main.ex",
+          name: "main.ex",
+          directory?: false,
+          expanded?: false,
+          selected?: false,
+          focused?: false,
+          active?: false,
+          dirty?: false,
+          git_status: nil,
+          depth: 0,
+          guides: [],
+          last_child?: true
+        ],
+        attrs
+      )
+    )
+  end
+
+  defp render_semantic_rows(tmp_dir, rows, theme) do
+    TreeRenderer.render(%RenderInput{
+      tree: FileTree.new(tmp_dir, width: 30),
+      rect: {0, 0, 30, 5},
+      focused: false,
+      theme: theme,
+      active_path: nil,
+      rows: rows
+    })
+  end
+
+  defp draw_containing(draws, text) do
+    Enum.find(draws, fn {_r, _c, draw_text, _style} -> String.contains?(draw_text, text) end)
+  end
+
+  defp draw_matching(draws, text) do
+    Enum.find(draws, fn {_r, _c, draw_text, _style} -> draw_text == text end)
   end
 
   describe "editing entry rendering" do

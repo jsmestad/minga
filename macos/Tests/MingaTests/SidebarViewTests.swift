@@ -182,6 +182,23 @@ struct FileTreeViewTests {
         #expect(strings.contains("lib"))
         #expect(strings.contains("editor.ex"))
     }
+
+    @Test("Dirty marker renders independently from selected and git state")
+    @MainActor func dirtyMarkerRendersWithSelectedAndGitState() throws {
+        let state = FileTreeState()
+        state.visible = true
+        state.entries = [
+            sidebarFileTreeEntry(id: 1, index: 0, isSelected: true, isFocused: false, isDirty: true, gitStatus: 1,
+                                 icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"),
+        ]
+
+        let sut = FileTreeView(fileTreeState: state, theme: ThemeColors(), encoder: nil)
+        let body = try sut.inspect()
+        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(strings.contains("editor.ex"))
+        #expect(strings.contains("●"))
+    }
 }
 
 // MARK: - GitStatusView Section Headers
@@ -243,14 +260,18 @@ private func sidebarFileTreeEntry(
     isDir: Bool = false,
     isExpanded: Bool = false,
     isSelected: Bool = false,
+    isFocused: Bool = false,
+    isActive: Bool = false,
+    isDirty: Bool = false,
+    gitStatus: UInt8 = 0,
     depth: Int = 0,
     icon: String,
     name: String,
     relPath: String
 ) -> FileTreeEntry {
     FileTreeEntry(id: id, index: index, isDir: isDir, isExpanded: isExpanded, isSelected: isSelected,
-                  isFocused: false, isActive: false, isDirty: false, isEditing: false,
-                  isLastChild: false, depth: depth, gitStatus: 0, diagnosticErrorCount: 0,
+                  isFocused: isFocused, isActive: isActive, isDirty: isDirty, isEditing: false,
+                  isLastChild: false, depth: depth, gitStatus: gitStatus, diagnosticErrorCount: 0,
                   diagnosticWarningCount: 0, diagnosticInfoCount: 0, diagnosticHintCount: 0,
                   guides: [], icon: icon, name: name, relPath: relPath, path: relPath,
                   editingType: 0xFF, editingText: "")

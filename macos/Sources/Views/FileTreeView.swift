@@ -220,14 +220,14 @@ struct FileTreeView: View {
 
             // Name
             Text(entry.name)
-                .font(.system(size: 12))
+                .font(.system(size: 12, weight: entry.showsActiveAccent ? .semibold : .regular))
                 .foregroundStyle(nameColor(entry))
                 .lineLimit(1)
                 .truncationMode(.tail)
 
             Spacer(minLength: 0)
 
-            // Git status dot
+            dirtyMarker(entry)
             gitStatusDot(entry)
         }
         .padding(.leading, leadingPadding(entry))
@@ -235,6 +235,9 @@ struct FileTreeView: View {
         .frame(height: rowHeight)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(rowBackground(entry))
+        .overlay(alignment: .leading) {
+            activeFileAccent(entry)
+        }
         .overlay(alignment: .leading) {
             indentGuides(entry)
         }
@@ -434,7 +437,18 @@ struct FileTreeView: View {
 
     // MARK: - Indent guides
 
-    // MARK: - Git status dot
+    // MARK: - Dirty and git markers
+
+    /// Dirty buffers use their own marker so unsaved edits stay visible independently from git status.
+    @ViewBuilder
+    private func dirtyMarker(_ entry: FileTreeEntry) -> some View {
+        if entry.showsDirtyMarker {
+            Text("●")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(theme.treeGitModified)
+                .padding(.trailing, entry.showsGitMarker ? 4 : 2)
+        }
+    }
 
     /// Small colored dot indicating git status, right-aligned in the row.
     @ViewBuilder
@@ -442,20 +456,20 @@ struct FileTreeView: View {
         if let color = gitDotColor(entry) {
             Circle()
                 .fill(color)
-                .frame(width: 6, height: 6)
+                .frame(width: entry.hasConflictStatus ? 7 : 6, height: entry.hasConflictStatus ? 7 : 6)
                 .padding(.trailing, 2)
         }
     }
 
     private func gitDotColor(_ entry: FileTreeEntry) -> Color? {
-        switch entry.gitStatus {
-        case 1: return theme.treeGitModified
-        case 2: return theme.treeGitStaged
-        case 3: return theme.treeGitUntracked
-        case 4: return theme.gutterErrorFg  // conflict
-        case 5: return theme.treeGitModified  // renamed
-        case 6: return theme.gitDeletedFg
-        default: return nil
+        switch entry.gitStatusValue {
+        case .modified: return theme.treeGitModified
+        case .staged: return theme.treeGitStaged
+        case .untracked: return theme.treeGitUntracked
+        case .conflict: return theme.gutterErrorFg
+        case .renamed: return theme.treeGitStaged
+        case .deleted: return theme.gitDeletedFg
+        case .clean: return nil
         }
     }
 
@@ -476,17 +490,17 @@ struct FileTreeView: View {
         }
     }
 
-    // MARK: - Row background (selection + hover)
+    // MARK: - Row layers (drop target, selection, active file, hover)
 
     @ViewBuilder
     private func rowBackground(_ entry: FileTreeEntry) -> some View {
         if dropTargetEntryId == entry.id {
             RoundedRectangle(cornerRadius: 4)
-                .fill(theme.treeSelectionBg.opacity(0.5))
+                .fill(theme.treeSelectionBg.opacity(0.55))
                 .padding(.horizontal, 4)
         } else if entry.isSelected {
             RoundedRectangle(cornerRadius: 4)
-                .fill(theme.treeSelectionBg)
+                .fill(theme.treeSelectionBg.opacity(entry.isFocused ? 1.0 : 0.42))
                 .padding(.horizontal, 4)
         } else if hoveredEntryId == entry.id {
             RoundedRectangle(cornerRadius: 4)
@@ -495,6 +509,16 @@ struct FileTreeView: View {
                 .animation(.easeInOut(duration: animDuration), value: hoveredEntryId)
         } else {
             Color.clear
+        }
+    }
+
+    @ViewBuilder
+    private func activeFileAccent(_ entry: FileTreeEntry) -> some View {
+        if entry.showsActiveAccent {
+            RoundedRectangle(cornerRadius: 1)
+                .fill(theme.treeActiveFg)
+                .frame(width: 2, height: rowHeight - 8)
+                .padding(.leading, 4)
         }
     }
 
@@ -507,34 +531,23 @@ struct FileTreeView: View {
     // MARK: - Colors
 
     private func iconColor(_ entry: FileTreeEntry) -> Color {
+        if entry.showsActiveAccent {
+            return theme.treeActiveFg
+        }
         if entry.isDir {
             return theme.treeDirFg
         }
-        switch entry.gitStatus {
-        case 1: return theme.treeGitModified
-        case 2: return theme.treeGitStaged
-        case 3: return theme.treeGitUntracked
-        case 4: return theme.gutterErrorFg
-        case 5: return theme.treeGitModified
-        case 6: return theme.gitDeletedFg
-        default: return theme.treeFg.opacity(0.7)
-        }
+        return theme.treeFg.opacity(0.7)
     }
 
     private func nameColor(_ entry: FileTreeEntry) -> Color {
+        if entry.showsActiveAccent {
+            return theme.treeActiveFg
+        }
         if entry.isSelected {
             return theme.treeSelectionFg
         }
-        switch entry.gitStatus {
-        case 1: return theme.treeGitModified
-        case 2: return theme.treeGitStaged
-        case 3: return theme.treeGitUntracked
-        case 4: return theme.gutterErrorFg
-        case 5: return theme.treeGitModified
-        case 6: return theme.gitDeletedFg
-        default:
-            return entry.isDir ? theme.treeDirFg : theme.treeFg
-        }
+        return entry.isDir ? theme.treeDirFg : theme.treeFg
     }
 }
 
