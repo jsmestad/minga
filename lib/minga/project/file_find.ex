@@ -86,7 +86,7 @@ defmodule Minga.Project.FileFind do
 
     case System.cmd("git", args, cd: root, stderr_to_stdout: true) do
       {output, 0} ->
-        {:ok, parse_lines(output)}
+        {:ok, output |> parse_lines() |> filter_excludes()}
 
       {error, _code} ->
         {:error, "git ls-files failed: #{String.trim(error)}"}
@@ -95,7 +95,9 @@ defmodule Minga.Project.FileFind do
 
   @spec list_with_find(String.t()) :: result()
   defp list_with_find(root) do
-    exclude_args = Enum.flat_map(excludes(), &["-not", "-path", "*/#{&1}/*"])
+    exclude_args =
+      Enum.flat_map(excludes(), &["-not", "-path", "*/#{&1}/*", "-not", "-name", &1])
+
     args = [".", "-type", "f"] ++ exclude_args
 
     case System.cmd("find", args, cd: root, stderr_to_stdout: true) do
@@ -109,6 +111,17 @@ defmodule Minga.Project.FileFind do
   end
 
   # ── Helpers ─────────────────────────────────────────────────────────────────
+
+  @spec filter_excludes([String.t()]) :: [String.t()]
+  defp filter_excludes(paths) do
+    excluded = MapSet.new(excludes())
+
+    Enum.reject(paths, fn path ->
+      path
+      |> Path.split()
+      |> Enum.any?(&MapSet.member?(excluded, &1))
+    end)
+  end
 
   @spec parse_lines(String.t()) :: [String.t()]
   defp parse_lines(output) do
