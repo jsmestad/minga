@@ -13,6 +13,8 @@ struct FileTreeHeaderContent: View {
     let branchName: String
     let leadingPadding: CGFloat
 
+    @State private var isHovered = false
+
     var body: some View {
         HStack(spacing: 6) {
             Text("\u{F024B}")
@@ -37,25 +39,34 @@ struct FileTreeHeaderContent: View {
                     .truncationMode(.middle)
             }
 
-            Spacer()
+            Spacer(minLength: 4)
 
-            HStack(spacing: 2) {
-                headerButton(systemName: "doc.badge.plus", tooltip: "New File…") {
-                    encoder?.sendFileTreeNewFile(parentIndex: UInt16(fileTreeState.selectedIndex))
+            if isHovered {
+                HStack(spacing: 2) {
+                    headerButton(systemName: "doc.badge.plus", tooltip: "New File…") {
+                        encoder?.sendFileTreeNewFile(parentIndex: UInt16(fileTreeState.selectedIndex))
+                    }
+                    headerButton(systemName: "folder.badge.plus", tooltip: "New Folder…") {
+                        encoder?.sendFileTreeNewFolder(parentIndex: UInt16(fileTreeState.selectedIndex))
+                    }
+                    headerButton(systemName: "arrow.clockwise", tooltip: "Refresh") {
+                        encoder?.sendFileTreeRefresh()
+                    }
+                    headerButton(systemName: "arrow.down.right.and.arrow.up.left", tooltip: "Collapse All") {
+                        encoder?.sendFileTreeCollapseAll()
+                    }
                 }
-                headerButton(systemName: "folder.badge.plus", tooltip: "New Folder…") {
-                    encoder?.sendFileTreeNewFolder(parentIndex: UInt16(fileTreeState.selectedIndex))
-                }
-                headerButton(systemName: "arrow.clockwise", tooltip: "Refresh") {
-                    encoder?.sendFileTreeRefresh()
-                }
-                headerButton(systemName: "arrow.down.right.and.arrow.up.left", tooltip: "Collapse All") {
-                    encoder?.sendFileTreeCollapseAll()
-                }
+                .transition(.opacity)
             }
         }
         .padding(.leading, leadingPadding)
         .padding(.trailing, 10)
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
     }
 
     @ViewBuilder

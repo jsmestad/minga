@@ -22,6 +22,7 @@ struct GitStatusHeaderContent: View {
                 .foregroundStyle(theme.tabActiveFg)
                 .lineLimit(1)
                 .truncationMode(.tail)
+                .layoutPriority(1)
 
             // Git branch icon (Nerd Font)
             Text("\u{E725}")
