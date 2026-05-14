@@ -327,12 +327,11 @@ defmodule MingaEditor.Commands.Editing do
   # ── Indent / dedent (single line) ────────────────────────────────────────
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :indent_line) do
-    tw = tab_width(buf)
-    indent = String.duplicate(" ", tw)
+    {indent, indent_bytes} = indent_string(buf)
     {line, col} = Buffer.cursor(buf)
     Buffer.move_to(buf, {line, 0})
-    Buffer.insert_char(buf, indent)
-    Buffer.move_to(buf, {line, col + tw})
+    Buffer.insert_text(buf, indent)
+    Buffer.move_to(buf, {line, col + indent_bytes})
     state
   end
 
@@ -366,26 +365,24 @@ defmodule MingaEditor.Commands.Editing do
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:indent_motion, motion}) do
-    gb = Buffer.snapshot(buf)
-    cursor = Document.cursor(gb)
-    target = Helpers.resolve_motion(gb, cursor, motion)
-    {cursor_line, _} = cursor
-    {target_line, _} = target
-    start_line = min(cursor_line, target_line)
-    end_line = max(cursor_line, target_line)
-    do_indent_lines(buf, start_line, end_line)
+    {state, range} = motion_line_range(state, buf, motion)
+
+    case range do
+      nil -> :ok
+      {start_line, end_line} -> do_indent_lines(buf, start_line, end_line)
+    end
+
     state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:dedent_motion, motion}) do
-    gb = Buffer.snapshot(buf)
-    cursor = Document.cursor(gb)
-    target = Helpers.resolve_motion(gb, cursor, motion)
-    {cursor_line, _} = cursor
-    {target_line, _} = target
-    start_line = min(cursor_line, target_line)
-    end_line = max(cursor_line, target_line)
-    do_dedent_lines(buf, start_line, end_line)
+    {state, range} = motion_line_range(state, buf, motion)
+
+    case range do
+      nil -> :ok
+      {start_line, end_line} -> do_dedent_lines(buf, start_line, end_line)
+    end
+
     state
   end
 
@@ -430,14 +427,13 @@ defmodule MingaEditor.Commands.Editing do
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:reindent_motion, motion}) do
-    gb = Buffer.snapshot(buf)
-    cursor = Document.cursor(gb)
-    target = Helpers.resolve_motion(gb, cursor, motion)
-    {cursor_line, _} = cursor
-    {target_line, _} = target
-    start_line = min(cursor_line, target_line)
-    end_line = max(cursor_line, target_line)
-    do_reindent_lines(state, buf, start_line, end_line)
+    {state, range} = motion_line_range(state, buf, motion)
+
+    case range do
+      nil -> :ok
+      {start_line, end_line} -> do_reindent_lines(state, buf, start_line, end_line)
+    end
+
     state
   end
 
@@ -486,11 +482,13 @@ defmodule MingaEditor.Commands.Editing do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:comment_motion, motion})
       when is_pid(buf) do
-    {cursor_line, _col} = Buffer.cursor(buf)
-    target_line = resolve_motion_line(buf, motion, cursor_line)
-    start_line = min(cursor_line, target_line)
-    end_line = max(cursor_line, target_line)
-    toggle_comment(buf, start_line, end_line, state)
+    {state, range} = motion_line_range(state, buf, motion)
+
+    case range do
+      nil -> :ok
+      {start_line, end_line} -> toggle_comment(buf, start_line, end_line, state)
+    end
+
     state
   end
 
@@ -663,6 +661,30 @@ defmodule MingaEditor.Commands.Editing do
     :ok
   end
 
+  # ── Private motion range helpers ─────────────────────────────────────────
+
+  @spec motion_line_range(state(), pid(), atom()) ::
+          {state(), {non_neg_integer(), non_neg_integer()} | nil}
+  defp motion_line_range(state, buf, motion) do
+    state = Helpers.setup_for_motion(state, motion)
+    gb = Buffer.snapshot(buf)
+    cursor = Document.cursor(gb)
+    buffer_id = Helpers.buffer_id_for_motion(state, buf, motion)
+
+    range =
+      case Helpers.resolve_motion_target(gb, cursor, motion, buffer_id) do
+        nil ->
+          nil
+
+        target ->
+          {cursor_line, _} = cursor
+          {target_line, _} = target
+          {min(cursor_line, target_line), max(cursor_line, target_line)}
+      end
+
+    {state, range}
+  end
+
   # ── Private reindent helpers ──────────────────────────────────────────────
 
   @keystroke_indent_timeout_ms 200
@@ -758,7 +780,7 @@ defmodule MingaEditor.Commands.Editing do
 
     for line <- start_line..end_line do
       Buffer.move_to(buf, {line, 0})
-      Buffer.insert_char(buf, indent)
+      Buffer.insert_text(buf, indent)
     end
 
     new_col =
@@ -821,7 +843,7 @@ defmodule MingaEditor.Commands.Editing do
   # If the line starts with a tab, remove 1 character.
   # Otherwise, remove up to tab_width spaces.
   @spec dedent_amount(pid(), String.t()) :: non_neg_integer()
-  defp dedent_amount(buf, <<"\t", _::binary>>), do: if(uses_tabs?(buf), do: 1, else: 1)
+  defp dedent_amount(_buf, <<"\t", _::binary>>), do: 1
 
   defp dedent_amount(buf, text) do
     min(count_leading_spaces(text), tab_width(buf))
@@ -866,61 +888,6 @@ defmodule MingaEditor.Commands.Editing do
     Buffer.get_option(buf, :tab_width)
   catch
     :exit, _ -> 2
-  end
-
-  @spec resolve_motion_line(pid(), atom(), non_neg_integer()) :: non_neg_integer()
-  defp resolve_motion_line(_buf, :line_down, cursor_line), do: cursor_line + 1
-
-  defp resolve_motion_line(_buf, :line_up, cursor_line),
-    do: max(0, cursor_line - 1)
-
-  defp resolve_motion_line(_buf, :document_start, _cursor_line), do: 0
-
-  defp resolve_motion_line(buf, :document_end, _cursor_line) do
-    max(0, Buffer.line_count(buf) - 1)
-  end
-
-  defp resolve_motion_line(buf, :paragraph_forward, cursor_line) do
-    content = Buffer.content(buf)
-    lines = String.split(content, "\n")
-    find_paragraph_boundary(lines, cursor_line, :forward)
-  end
-
-  defp resolve_motion_line(buf, :paragraph_backward, cursor_line) do
-    content = Buffer.content(buf)
-    lines = String.split(content, "\n")
-    find_paragraph_boundary(lines, cursor_line, :backward)
-  end
-
-  defp resolve_motion_line(_buf, _motion, cursor_line), do: cursor_line
-
-  @spec find_paragraph_boundary([String.t()], non_neg_integer(), :forward | :backward) ::
-          non_neg_integer()
-  defp find_paragraph_boundary(lines, cursor_line, :forward) do
-    total = length(lines)
-
-    lines
-    |> Enum.drop(cursor_line + 1)
-    |> Enum.with_index(cursor_line + 1)
-    |> Enum.drop_while(fn {line, _idx} -> String.trim(line) != "" end)
-    |> Enum.find(fn {line, _idx} -> String.trim(line) == "" end)
-    |> case do
-      {_, idx} -> idx
-      nil -> max(0, total - 1)
-    end
-  end
-
-  defp find_paragraph_boundary(lines, cursor_line, :backward) do
-    lines
-    |> Enum.take(cursor_line)
-    |> Enum.with_index()
-    |> Enum.reverse()
-    |> Enum.drop_while(fn {line, _idx} -> String.trim(line) != "" end)
-    |> Enum.find(fn {line, _idx} -> String.trim(line) == "" end)
-    |> case do
-      {_, idx} -> idx
-      nil -> 0
-    end
   end
 
   # ── Paste helpers ──────────────────────────────────────────────────────────

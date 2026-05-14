@@ -274,7 +274,13 @@ defmodule MingaEditor.Commands.Movement do
   # ── Bracket matching ──────────────────────────────────────────────────────
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :match_bracket) do
-    Helpers.apply_motion(buf, &Minga.Editing.match_bracket/2)
+    state = Helpers.setup_for_motion(state, :match_bracket)
+    buffer_id = Helpers.buffer_id_for_motion(state, buf, :match_bracket)
+
+    Helpers.apply_motion(buf, fn gb, cursor ->
+      Helpers.resolve_motion(gb, cursor, :match_bracket, buffer_id)
+    end)
+
     state
   end
 

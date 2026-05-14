@@ -260,13 +260,15 @@ defmodule Minga.Editing.Motion do
   defdelegate till_char_backward(buf, pos, char), to: Char
 
   @doc """
-  Jump to the matching bracket/paren/brace (Vim's `%`).
+  No-op pure fallback for `%` matching.
+
+  The editor command layer resolves `%` through tree-sitter because it owns the active parser buffer id. Pure motion callers intentionally get no text-scanning fallback.
 
   ## Examples
 
       iex> buf = Minga.Buffer.Document.new("(hello)")
       iex> Minga.Editing.Motion.match_bracket(buf, {0, 0})
-      {0, 6}
+      {0, 0}
   """
   @spec match_bracket(Readable.t(), position()) :: position()
   defdelegate match_bracket(buf, pos), to: Char

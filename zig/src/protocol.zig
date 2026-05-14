@@ -66,6 +66,7 @@ pub const OP_REQUEST_INDENT: u8 = 0x2A;
 pub const OP_SET_TEXTOBJECT_QUERY: u8 = 0x2B;
 pub const OP_REQUEST_TEXTOBJECT: u8 = 0x2C;
 pub const OP_CLOSE_BUFFER: u8 = 0x2D;
+pub const OP_REQUEST_MATCH_ITEM: u8 = 0x2E;
 
 // Highlight responses (Zig → BEAM)
 pub const OP_HIGHLIGHT_SPANS: u8 = 0x30;
@@ -92,6 +93,7 @@ pub const OP_CONCEAL_SPANS: u8 = 0x3A;
 /// Sent when the parser detects stale edit deltas (byte offsets don't match
 /// the stored source), typically after system sleep/wake.
 pub const OP_REQUEST_REPARSE: u8 = 0x3B;
+pub const OP_MATCH_ITEM_RESULT: u8 = 0x3C;
 
 // Log messages (Zig → BEAM)
 pub const OP_LOG_MESSAGE: u8 = 0x60;
@@ -266,6 +268,7 @@ pub const RenderCommand = union(enum) {
     request_indent: RequestIndent,
     set_textobject_query: SetTextobjectQuery,
     request_textobject: RequestTextobject,
+    request_match_item: RequestMatchItem,
     load_grammar: LoadGrammar,
     query_language_at: QueryLanguageAt,
     close_buffer: u32, // buffer_id
@@ -351,6 +354,13 @@ pub const RequestTextobject = struct {
     row: u32,
     col: u32,
     capture_name: []const u8,
+};
+
+pub const RequestMatchItem = struct {
+    buffer_id: u32 = 0,
+    request_id: u32,
+    row: u32,
+    col: u32,
 };
 
 pub const LoadGrammar = struct {
@@ -818,6 +828,16 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
                 .capture_name = rest[18 .. 18 + name_len],
             } };
         },
+        OP_REQUEST_MATCH_ITEM => {
+            // buffer_id:4, request_id:4, row:4, col:4
+            if (rest.len < 16) return error.Malformed;
+            return .{ .request_match_item = .{
+                .buffer_id = std.mem.readInt(u32, rest[0..4], .big),
+                .request_id = std.mem.readInt(u32, rest[4..8], .big),
+                .row = std.mem.readInt(u32, rest[8..12], .big),
+                .col = std.mem.readInt(u32, rest[12..16], .big),
+            } };
+        },
         OP_LOAD_GRAMMAR => {
             // name_len:2, name, path_len:2, path
             if (rest.len < 2) return error.Malformed;
@@ -1001,6 +1021,7 @@ pub fn commandSize(payload: []const u8) usize {
             const nl: usize = std.mem.readInt(u16, payload[17..19], .big);
             break :blk 19 + nl;
         },
+        OP_REQUEST_MATCH_ITEM => 17, // opcode(1) + buffer_id(4) + request_id(4) + row(4) + col(4)
         OP_CLOSE_BUFFER => 5, // opcode(1) + buffer_id(4)
         OP_EDIT_BUFFER => blk: {
             // opcode(1) + buffer_id(4) + version(4) + edit_count(2) + variable per edit
@@ -1189,6 +1210,27 @@ pub fn encodeTextobjectResult(buf: *[22]u8, request_id: u32, result: ?Textobject
         return 22;
     } else {
         buf[5] = 0; // not found
+        return 6;
+    }
+}
+
+/// Match item result (shared between protocol and highlighter).
+pub const MatchItemResult = struct {
+    row: u32,
+    col: u32,
+};
+
+/// Encodes match_item_result: opcode(1) + request_id(4) + found(1) + row(4) + col(4) = 14 bytes
+pub fn encodeMatchItemResult(buf: *[14]u8, request_id: u32, result: ?MatchItemResult) usize {
+    buf[0] = OP_MATCH_ITEM_RESULT;
+    std.mem.writeInt(u32, buf[1..5], request_id, .big);
+    if (result) |r| {
+        buf[5] = 1;
+        std.mem.writeInt(u32, buf[6..10], r.row, .big);
+        std.mem.writeInt(u32, buf[10..14], r.col, .big);
+        return 14;
+    } else {
+        buf[5] = 0;
         return 6;
     }
 }
@@ -2024,6 +2066,44 @@ test "decode load_grammar" {
         },
         else => return error.Malformed,
     }
+}
+
+test "decode request_match_item" {
+    var data: [17]u8 = undefined;
+    data[0] = OP_REQUEST_MATCH_ITEM;
+    std.mem.writeInt(u32, data[1..5], 7, .big);
+    std.mem.writeInt(u32, data[5..9], 42, .big);
+    std.mem.writeInt(u32, data[9..13], 3, .big);
+    std.mem.writeInt(u32, data[13..17], 11, .big);
+
+    const cmd = try decodeCommand(&data);
+    switch (cmd) {
+        .request_match_item => |req| {
+            try std.testing.expectEqual(@as(u32, 7), req.buffer_id);
+            try std.testing.expectEqual(@as(u32, 42), req.request_id);
+            try std.testing.expectEqual(@as(u32, 3), req.row);
+            try std.testing.expectEqual(@as(u32, 11), req.col);
+        },
+        else => return error.Malformed,
+    }
+}
+
+test "encode match_item_result" {
+    var found_buf: [14]u8 = undefined;
+    const found_len = encodeMatchItemResult(&found_buf, 42, .{ .row = 9, .col = 4 });
+    try std.testing.expectEqual(@as(usize, 14), found_len);
+    try std.testing.expectEqual(@as(u8, OP_MATCH_ITEM_RESULT), found_buf[0]);
+    try std.testing.expectEqual(@as(u32, 42), std.mem.readInt(u32, found_buf[1..5], .big));
+    try std.testing.expectEqual(@as(u8, 1), found_buf[5]);
+    try std.testing.expectEqual(@as(u32, 9), std.mem.readInt(u32, found_buf[6..10], .big));
+    try std.testing.expectEqual(@as(u32, 4), std.mem.readInt(u32, found_buf[10..14], .big));
+
+    var empty_buf: [14]u8 = undefined;
+    const empty_len = encodeMatchItemResult(&empty_buf, 43, null);
+    try std.testing.expectEqual(@as(usize, 6), empty_len);
+    try std.testing.expectEqual(@as(u8, OP_MATCH_ITEM_RESULT), empty_buf[0]);
+    try std.testing.expectEqual(@as(u32, 43), std.mem.readInt(u32, empty_buf[1..5], .big));
+    try std.testing.expectEqual(@as(u8, 0), empty_buf[5]);
 }
 
 test "commandSize: set_language" {

@@ -171,6 +171,8 @@ defmodule MingaEditor.Frontend.Protocol do
              result ::
                {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
                | nil}
+          | {:match_item_result, request_id :: non_neg_integer(),
+             result :: {non_neg_integer(), non_neg_integer()} | nil}
           | {:textobject_positions, buffer_id :: non_neg_integer(), version :: non_neg_integer(),
              %{atom() => [{non_neg_integer(), non_neg_integer()}]}}
           | {:request_reparse, buffer_id :: non_neg_integer()}
@@ -498,6 +500,9 @@ defmodule MingaEditor.Frontend.Protocol do
   defdelegate encode_request_textobject(buffer_id, request_id, row, col, capture_name),
     to: Minga.Parser.Protocol
 
+  defdelegate encode_request_match_item(buffer_id, request_id, row, col),
+    to: Minga.Parser.Protocol
+
   defdelegate encode_load_grammar(name, path), to: Minga.Parser.Protocol
 
   defdelegate encode_query_language_at(buffer_id, request_id, byte_offset),
@@ -575,7 +580,7 @@ defmodule MingaEditor.Frontend.Protocol do
   # Parser events are decoded by Minga.Parser.Protocol. Try it first,
   # then fall through to input event decoders.
   def decode_event(<<opcode::8, _rest::binary>> = data)
-      when opcode in 0x30..0x3B or opcode == 0x60 do
+      when opcode in 0x30..0x3C or opcode == 0x60 do
     case Minga.Parser.Protocol.decode_event(data) do
       {:ok, _} = result -> result
       :unknown -> {:error, :unknown_opcode}

@@ -283,6 +283,19 @@ defmodule MingaEditor.Commands.EditingTest do
     end
   end
 
+  describe "indent commands" do
+    test ">> respects tab indentation" do
+      {editor, buffer} = start_editor("hello")
+      BufferServer.set_option(buffer, :indent_with, :tabs)
+
+      send_key(editor, ?>)
+      send_key(editor, ?>)
+
+      assert BufferServer.content(buffer) == "\thello"
+      assert BufferServer.cursor(buffer) == {0, 1}
+    end
+  end
+
   describe "linewise paste (dd + p/P)" do
     test "dd then p moves deleted line below current line" do
       {editor, buffer} = start_editor("aaa\nbbb\nccc")
