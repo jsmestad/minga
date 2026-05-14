@@ -203,8 +203,8 @@ final class CommandDispatcher {
             handleClipboardWrite(target: target, text: text)
 
         case .guiFileTree(let selectedIndex, let treeWidth, let rootPath, let entries):
-            if entries.isEmpty {
-                guiState.fileTreeState.hide()
+            if entries.isEmpty && treeWidth == 0 {
+                guiState.fileTreeState.hide(rootPath: rootPath)
             } else {
                 guiState.fileTreeState.update(selectedIndex: selectedIndex, treeWidth: treeWidth, rootPath: rootPath, rawEntries: entries)
             }

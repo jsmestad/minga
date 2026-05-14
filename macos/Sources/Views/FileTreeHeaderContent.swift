@@ -1,7 +1,7 @@
 /// File tree header content for the unified toolbar.
 ///
-/// Shows the project name and action buttons (new file, new folder,
-/// refresh, collapse all). Rendered inside the shared toolbar row
+/// Shows the project name, git branch, and action buttons (new file,
+/// new folder, refresh, collapse all). Rendered inside the shared toolbar row
 /// so it shares the same background as the tab bar.
 
 import SwiftUI
@@ -10,6 +10,8 @@ struct FileTreeHeaderContent: View {
     let fileTreeState: FileTreeState
     let theme: ThemeColors
     let encoder: InputEncoder?
+    let branchName: String
+    let leadingPadding: CGFloat
 
     var body: some View {
         HStack(spacing: 6) {
@@ -22,6 +24,18 @@ struct FileTreeHeaderContent: View {
                 .foregroundStyle(theme.tabActiveFg)
                 .lineLimit(1)
                 .truncationMode(.tail)
+
+            if !branchName.isEmpty {
+                Text("\u{E725}")
+                    .font(.custom("Symbols Nerd Font Mono", size: 12))
+                    .foregroundStyle(theme.treeDirFg.opacity(0.7))
+
+                Text(branchName)
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(theme.tabActiveFg.opacity(0.7))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
 
             Spacer()
 
@@ -40,7 +54,8 @@ struct FileTreeHeaderContent: View {
                 }
             }
         }
-        .padding(.horizontal, 10)
+        .padding(.leading, leadingPadding)
+        .padding(.trailing, 10)
     }
 
     @ViewBuilder
