@@ -126,6 +126,8 @@ defmodule Minga.Keymap.Defaults do
     {[{?g, @none}, {?c, @none}, {?c, @none}], :git_commit_open, "Commit"},
     {[{?g, @none}, {?c, @none}, {?a, @none}], :git_amend_open, "Amend commit"},
     {[{?g, @none}, {?D, @none}], :git_diff_toggle_staged, "Toggle staged/unstaged diff"},
+    {[{?g, @none}, {?c, @none}, {?g, @none}], :git_generate_commit_message,
+     "Generate AI commit message"},
 
     # ── Project ────────────────────────────────────────────────────────────────
     {[{?p, @none}, {?f, @none}], :project_find_file, "Find file in project"},

@@ -66,7 +66,8 @@ defmodule Minga.Keymap.Scope.GitStatus do
          {"l", "Pull from remote"},
          {"f", "Fetch from remote"},
          {"cc", "Start commit (enter message)"},
-         {"ca", "Amend last commit"}
+         {"ca", "Amend last commit"},
+         {"cg", "Generate AI commit message"}
        ]},
       {"Discard Confirmation",
        [
@@ -107,6 +108,11 @@ defmodule Minga.Keymap.Scope.GitStatus do
     |> Bindings.bind([{@enter, 0}], :git_status_open_file, "Open file")
     |> Bindings.bind([{?c, 0}, {?c, 0}], :git_status_start_commit, "Start commit")
     |> Bindings.bind([{?c, 0}, {?a, 0}], :git_status_amend, "Amend last commit")
+    |> Bindings.bind(
+      [{?c, 0}, {?g, 0}],
+      :git_generate_commit_message,
+      "Generate AI commit message"
+    )
     # Discard confirmation
     |> Bindings.bind([{?y, 0}], :git_status_confirm_discard, "Confirm discard")
     |> Bindings.bind([{?n, 0}], :git_status_cancel_discard, "Cancel discard")
