@@ -27,6 +27,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   alias MingaEditor.DisplayList.Frame
   alias MingaEditor.DisplayMap
+  alias MingaEditor.FileTree.Rows
   alias MingaEditor.FoldMap
   alias MingaEditor.Layout
   alias MingaEditor.MinibufferData
@@ -257,13 +258,29 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   @spec build_gui_file_tree_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
   defp build_gui_file_tree_cmd(
-         %{file_tree: %{tree: %Minga.Project.FileTree{} = tree, editing: editing}},
+         %{file_tree: %{tree: %Minga.Project.FileTree{} = tree} = file_tree} = ctx,
          caches
        ) do
-    fp = :erlang.phash2({tree, editing})
+    rows =
+      Rows.from_tree(tree,
+        active_path: active_buffer_path(ctx),
+        dirty_paths: dirty_paths(ctx.buffers),
+        editing: Map.get(file_tree, :editing),
+        focused: file_tree_focused?(file_tree),
+        git_status: tree.git_status,
+        selected_index: tree.cursor
+      )
+
+    fp = :erlang.phash2({tree.root, tree.width, file_tree_focused?(file_tree), rows})
 
     if fp != caches.last_gui_file_tree_fp do
-      {ProtocolGUI.encode_gui_file_tree(tree, editing), %{caches | last_gui_file_tree_fp: fp}}
+      {ProtocolGUI.encode_gui_file_tree(
+         tree.root,
+         tree.width,
+         true,
+         file_tree_focused?(file_tree),
+         rows
+       ), %{caches | last_gui_file_tree_fp: fp}}
     else
       {nil, caches}
     end
@@ -288,6 +305,30 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       {nil, caches}
     end
   end
+
+  @spec file_tree_focused?(map()) :: boolean()
+  defp file_tree_focused?(file_tree), do: Map.get(file_tree, :focused, false)
+
+  @spec dirty_paths(MingaEditor.State.Buffers.t() | nil) :: MapSet.t(String.t())
+  defp dirty_paths(nil), do: MapSet.new()
+
+  defp dirty_paths(%{list: buffer_list}) do
+    buffer_list
+    |> Enum.flat_map(&dirty_buffer_path/1)
+    |> Enum.map(&Path.expand/1)
+    |> MapSet.new()
+  end
+
+  @spec dirty_buffer_path(pid()) :: [String.t()]
+  defp dirty_buffer_path(pid) when is_pid(pid) do
+    if Buffer.dirty?(pid), do: present_path(Buffer.file_path(pid)), else: []
+  catch
+    :exit, _ -> []
+  end
+
+  @spec present_path(String.t() | nil) :: [String.t()]
+  defp present_path(nil), do: []
+  defp present_path(path), do: [path]
 
   # ── Git status panel ──
 

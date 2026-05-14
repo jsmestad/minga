@@ -3,9 +3,10 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Project.FileTree
+  alias MingaEditor.FileTree.Row
   alias MingaEditor.Shell.Traditional.TreeRenderer
   alias MingaEditor.Shell.Traditional.TreeRenderer.RenderInput
-  alias Minga.Project.FileTree
   alias MingaEditor.UI.Theme
 
   @moduletag :tmp_dir
@@ -18,9 +19,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
     File.write!(Path.join(tmp_dir, "test/main_test.exs"), "defmodule MainTest do\nend\n")
 
     tree = FileTree.new(tmp_dir, width: 20)
-    # Expand lib directory
-    lib_path = Path.join(tmp_dir, "lib")
-    %{tree | expanded: MapSet.put(tree.expanded, lib_path)}
+    FileTree.expand_path(tree, Path.join(tmp_dir, "lib"))
   end
 
   describe "render/1 with RenderInput" do
@@ -113,6 +112,46 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
       # guide segment, icon segment, name segment
       row1_draws = Enum.filter(draws, fn {r, _c, _t, _s} -> r == 1 end)
       assert length(row1_draws) >= 2
+    end
+
+    test "renders supplied semantic rows", %{tmp_dir: tmp_dir} do
+      file_path = Path.join(tmp_dir, "main.ex")
+      File.write!(file_path, "defmodule Main do\nend\n")
+      tree = FileTree.new(tmp_dir, width: 30)
+
+      rows = [
+        Row.new(
+          id: file_path,
+          path: file_path,
+          relative_path: "main.ex",
+          name: "main.ex",
+          directory?: false,
+          expanded?: false,
+          selected?: true,
+          focused?: true,
+          active?: true,
+          dirty?: true,
+          git_status: :modified,
+          depth: 0,
+          guides: [],
+          last_child?: true
+        )
+      ]
+
+      input = %RenderInput{
+        tree: tree,
+        rect: {0, 0, 30, 5},
+        focused: false,
+        theme: Theme.get!(:doom_one),
+        active_path: nil,
+        rows: rows
+      }
+
+      draws = TreeRenderer.render(input)
+      all_text = Enum.map_join(draws, fn {_r, _c, text, _s} -> text end)
+
+      assert String.contains?(all_text, "main.ex")
+      assert String.contains?(all_text, "●")
     end
 
     test "renders git status indicators right-aligned", %{tmp_dir: tmp_dir} do

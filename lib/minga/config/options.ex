@@ -53,6 +53,7 @@ defmodule Minga.Config.Options do
           | :insert_final_newline
           | :format_on_save
           | :auto_save_delay_ms
+          | :lsp_auto_start
           | :formatter
           | :title_format
           | :recent_files_limit
@@ -216,6 +217,8 @@ defmodule Minga.Config.Options do
     {:format_on_save, :boolean, false, "Whether the configured formatter runs before saving."},
     {:auto_save_delay_ms, :non_neg_integer, 1000,
      "Delay before automatic save work runs; zero disables the timer."},
+    {:lsp_auto_start, :boolean, true,
+     "Whether buffer-open events automatically start configured language servers."},
     {:formatter, :string_or_nil, nil, "External formatter command for the current buffer."},
     {:title_format, :string, "{filename} {dirty}({directory}) - Minga",
      "Window title template with placeholder tokens."},

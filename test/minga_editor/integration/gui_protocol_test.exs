@@ -866,48 +866,78 @@ defmodule Minga.Integration.GUIProtocolTest do
   end
 
   describe "gui_file_tree visible" do
-    test "round-trips visible file tree with entries", %{port: port} do
-      # Raw binary: selected_index(2), tree_width(2), entry_count(2), root_len(2), root
-      # Per entry: path_hash(4), flags(1), depth(1), git_status(1), icon_len(1), icon,
-      #            name_len(2), name, rel_path_len(2), rel_path
+    test "round-trips semantic visible file tree with entries", %{port: port} do
       root = "/project"
-      name1 = "lib"
-      rel1 = "lib"
-      icon1 = <<0xF0, 0x9F, 0x93, 0x81>>
-      name2 = "editor.ex"
-      rel2 = "lib/editor.ex"
 
-      entry1 =
-        <<0xAA, 0xBB, 0xCC, 0xDD::8, 0x07::8, 0::8, 0::8, byte_size(icon1)::8, icon1::binary,
-          byte_size(name1)::16, name1::binary, byte_size(rel1)::16, rel1::binary>>
+      rows = [
+        MingaEditor.FileTree.Row.new(
+          id: "/project/lib",
+          path: "/project/lib",
+          relative_path: "lib",
+          name: "lib",
+          directory?: true,
+          expanded?: true,
+          selected?: true,
+          focused?: true,
+          depth: 0,
+          guides: [],
+          last_child?: false,
+          editing: nil
+        ),
+        MingaEditor.FileTree.Row.new(
+          id: "/project/lib/editor.ex",
+          path: "/project/lib/editor.ex",
+          relative_path: "lib/editor.ex",
+          name: "editor.ex",
+          directory?: false,
+          expanded?: false,
+          active?: true,
+          dirty?: true,
+          git_status: :modified,
+          depth: 1,
+          guides: [true],
+          last_child?: true,
+          editing: %{
+            index: 1,
+            text: "editor_renamed.ex",
+            type: :rename,
+            original_name: "editor.ex"
+          }
+        )
+      ]
 
-      entry2 =
-        <<0x11, 0x22, 0x33, 0x44::8, 0x00::8, 1::8, 1::8, 0::8, byte_size(name2)::16,
-          name2::binary, byte_size(rel2)::16, rel2::binary>>
-
-      cmd =
-        <<0x70, 1::16, 30::16, 2::16, byte_size(root)::16, root::binary, entry1::binary,
-          entry2::binary>>
-
-      Port.command(port, cmd)
+      Port.command(port, ProtocolGUI.encode_gui_file_tree(root, 30, true, true, rows))
 
       assert_receive {^port, {:data, json}}, 5_000
       decoded = Jason.decode!(json)
 
       assert decoded["type"] == "gui_file_tree"
-      assert decoded["selected_index"] == 1
+      assert decoded["version"] == 1
+      assert Bitwise.band(decoded["tree_flags"], 0x01) != 0
+      assert Bitwise.band(decoded["tree_flags"], 0x02) != 0
+      assert decoded["selected_id"] == "/project/lib"
       assert decoded["tree_width"] == 30
       assert decoded["root_path"] == "/project"
       assert length(decoded["entries"]) == 2
 
       [e1, e2] = decoded["entries"]
+      assert e1["id"] == "/project/lib"
+      assert e1["path"] == "/project/lib"
       assert e1["name"] == "lib"
+      assert e1["relative_path"] == "lib"
       assert e1["is_dir"] == true
       assert e1["is_expanded"] == true
       assert e1["is_selected"] == true
+      assert e1["is_focused"] == true
       assert e1["depth"] == 0
+
+      assert e2["id"] == "/project/lib/editor.ex"
       assert e2["name"] == "editor.ex"
+      assert e2["relative_path"] == "lib/editor.ex"
       assert e2["is_dir"] == false
+      assert e2["is_active"] == true
+      assert e2["is_dirty"] == true
+      assert e2["is_editing"] == true
       assert e2["depth"] == 1
       assert e2["git_status"] == 1
     end

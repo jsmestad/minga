@@ -203,11 +203,13 @@ final class CommandDispatcher {
         case .clipboardWrite(let target, let text):
             handleClipboardWrite(target: target, text: text)
 
-        case .guiFileTree(let selectedIndex, let treeWidth, let rootPath, let entries):
-            if entries.isEmpty && treeWidth == 0 {
-                guiState.fileTreeState.hide(rootPath: rootPath)
+        case .guiFileTree(let version, let treeFlags, let selectedId, let treeWidth, let rootPath, let entries):
+            let visible = treeFlags & 0x01 != 0
+            let focused = treeFlags & 0x02 != 0
+            if visible {
+                guiState.fileTreeState.update(version: version, selectedId: selectedId, focused: focused, treeWidth: treeWidth, rootPath: rootPath, rawEntries: entries)
             } else {
-                guiState.fileTreeState.update(selectedIndex: selectedIndex, treeWidth: treeWidth, rootPath: rootPath, rawEntries: entries)
+                guiState.fileTreeState.hide(rootPath: rootPath)
             }
 
         case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let items):

@@ -169,18 +169,10 @@ struct FileTreeViewTests {
         let state = FileTreeState()
         state.visible = true
         state.entries = [
-            FileTreeEntry(
-                id: 1, index: 0, isDir: true, isExpanded: true,
-                isSelected: false, isEditing: false, depth: 0, gitStatus: 0,
-                icon: "\u{F024B}", name: "lib", relPath: "lib",
-                editingType: 0, editingText: ""
-            ),
-            FileTreeEntry(
-                id: 2, index: 1, isDir: false, isExpanded: false,
-                isSelected: true, isEditing: false, depth: 1, gitStatus: 0,
-                icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex",
-                editingType: 0, editingText: ""
-            ),
+            sidebarFileTreeEntry(id: 1, index: 0, isDir: true, isExpanded: true,
+                                 icon: "\u{F024B}", name: "lib", relPath: "lib"),
+            sidebarFileTreeEntry(id: 2, index: 1, isSelected: true, depth: 1,
+                                 icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"),
         ]
 
         let sut = FileTreeView(fileTreeState: state, theme: ThemeColors(), encoder: nil)
@@ -243,4 +235,23 @@ struct GitStatusViewSectionTests {
         #expect(strings.contains("M"))
         #expect(strings.contains("editor.ex"))
     }
+}
+
+private func sidebarFileTreeEntry(
+    id: UInt32,
+    index: Int,
+    isDir: Bool = false,
+    isExpanded: Bool = false,
+    isSelected: Bool = false,
+    depth: Int = 0,
+    icon: String,
+    name: String,
+    relPath: String
+) -> FileTreeEntry {
+    FileTreeEntry(id: id, index: index, isDir: isDir, isExpanded: isExpanded, isSelected: isSelected,
+                  isFocused: false, isActive: false, isDirty: false, isEditing: false,
+                  isLastChild: false, depth: depth, gitStatus: 0, diagnosticErrorCount: 0,
+                  diagnosticWarningCount: 0, diagnosticInfoCount: 0, diagnosticHintCount: 0,
+                  guides: [], icon: icon, name: name, relPath: relPath, path: relPath,
+                  editingType: 0xFF, editingText: "")
 }

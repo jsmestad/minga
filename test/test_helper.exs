@@ -19,6 +19,15 @@ System.put_env("GIT_CONFIG_COUNT", "1")
 System.put_env("GIT_CONFIG_KEY_0", "init.defaultBranch")
 System.put_env("GIT_CONFIG_VALUE_0", "main")
 
+# Keep direct test invocations hermetic if config/test.exs was not loaded first.
+unless System.get_env("XDG_CONFIG_HOME") do
+  test_config_home =
+    Path.join(System.tmp_dir!(), "minga-test-config-#{System.unique_integer([:positive])}")
+
+  File.mkdir_p!(Path.join(test_config_home, "minga"))
+  System.put_env("XDG_CONFIG_HOME", test_config_home)
+end
+
 # Auto-build the Swift test harness on macOS if swiftc is available.
 # On Linux (CI), the harness tests are excluded automatically.
 harness_path = Path.join(:code.priv_dir(:minga), "minga-test-harness")
@@ -40,6 +49,10 @@ Minga.Config.Options.set(:clipboard, :none)
 # Disable auto-save globally in tests to avoid background disk writes from
 # unrelated file-buffer tests. Auto-save tests opt in per buffer.
 Minga.Config.Options.set(:auto_save_delay_ms, 0)
+
+# Disable LSP auto-start globally in tests so unrelated buffer-open events do
+# not leak real language-server clients into tests that assert no LSP is active.
+Minga.Config.Options.set(:lsp_auto_start, false)
 
 # Disable persisting known projects and recent files during tests to avoid
 # polluting ~/.config/minga/known-projects with test fixture directories.

@@ -256,11 +256,12 @@ defmodule Minga.Config.LoaderTest do
       empty_dir =
         Path.join(System.tmp_dir!(), "minga_empty_#{System.unique_integer([:positive])}")
 
+      previous_xdg_config_home = System.get_env("XDG_CONFIG_HOME")
       File.mkdir_p!(empty_dir)
       System.put_env("XDG_CONFIG_HOME", empty_dir)
 
       on_exit(fn ->
-        System.delete_env("XDG_CONFIG_HOME")
+        restore_xdg_config_home(previous_xdg_config_home)
         File.rm_rf!(empty_dir)
       end)
 
@@ -697,12 +698,13 @@ defmodule Minga.Config.LoaderTest do
       empty_dir =
         Path.join(System.tmp_dir!(), "minga_empty_#{System.unique_integer([:positive])}")
 
+      previous_xdg_config_home = System.get_env("XDG_CONFIG_HOME")
       File.mkdir_p!(empty_dir)
       System.put_env("XDG_CONFIG_HOME", empty_dir)
 
       on_exit(fn ->
         Application.delete_env(:minga, :cli_startup_flags)
-        System.delete_env("XDG_CONFIG_HOME")
+        restore_xdg_config_home(previous_xdg_config_home)
         File.rm_rf!(empty_dir)
       end)
 
@@ -877,15 +879,27 @@ defmodule Minga.Config.LoaderTest do
     minga_dir = Path.join(base, "minga")
     File.mkdir_p!(minga_dir)
     File.write!(Path.join(minga_dir, "config.exs"), config_content)
+    previous_xdg_config_home = System.get_env("XDG_CONFIG_HOME")
     System.put_env("XDG_CONFIG_HOME", base)
 
     # The per-test Options server started in setup is auto-cleaned by
     # start_supervised!, so no explicit reset is needed here.
     cleanup = fn ->
-      System.delete_env("XDG_CONFIG_HOME")
+      restore_xdg_config_home(previous_xdg_config_home)
       File.rm_rf!(base)
     end
 
     {minga_dir, cleanup}
+  end
+
+  @spec restore_xdg_config_home(String.t() | nil) :: :ok
+  defp restore_xdg_config_home(nil) do
+    System.delete_env("XDG_CONFIG_HOME")
+    :ok
+  end
+
+  defp restore_xdg_config_home(path) when is_binary(path) do
+    System.put_env("XDG_CONFIG_HOME", path)
+    :ok
   end
 end

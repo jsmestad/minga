@@ -9,11 +9,11 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   ## GUI Chrome Commands (BEAM → Frontend)
 
-  Contiguous range 0x70-0x7F for easy classification by frontends.
+  GUI chrome opcodes start at 0x70. Newer commands use the 0x90+ length-prefixed envelope so frontends can skip unknown messages.
 
   | Opcode | Name            | Description                    |
   |--------|-----------------|--------------------------------|
-  | 0x70   | gui_file_tree   | File tree entries              |
+  | 0x93   | gui_file_tree   | Semantic file tree state       |
   | 0x71   | gui_tab_bar     | Tab bar with tab entries       |
   | 0x72   | gui_which_key   | Which-key popup bindings       |
   | 0x73   | gui_completion  | Completion popup items         |
@@ -89,6 +89,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   import Bitwise
 
   alias Minga.Buffer
+  alias MingaEditor.FileTree.Row
   alias MingaEditor.MinibufferData
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
@@ -99,9 +100,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   alias MingaEditor.UI.Theme.Slots
 
   # ── GUI chrome opcodes (BEAM → Frontend) ──
-  # Contiguous range 0x70-0x7F for easy range-check classification.
+  # GUI chrome opcodes start at 0x70. Opcodes >= 0x90 include a 2-byte length prefix.
 
-  @op_gui_file_tree 0x70
+  @op_gui_file_tree 0x93
   @op_gui_tab_bar 0x71
   @op_gui_which_key 0x72
   @op_gui_completion 0x73
@@ -170,9 +171,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @section_chat_messages 0x06
   @section_chat_completion 0x07
 
-  # ── Forward-compatible opcodes (0x90+, include 2-byte length prefix) ──
-  # New opcodes >= 0x90 start with: opcode(1) + payload_length(2) + payload.
-  # Old frontends skip unknown 0x90+ opcodes by reading the length and
+  # ── Forward-compatible opcodes (0x90+, include a length prefix) ──
+  # Most opcodes >= 0x90 start with: opcode(1) + payload_length(2) + payload.
+  # gui_file_tree uses a 32-bit payload length because expanded project trees can exceed 64KB.
+  # Old frontends skip unknown 0x90+ opcodes by reading the standard 16-bit length and
   # advancing, instead of crashing. See ProtocolDecoder.swift default case.
 
   @op_clipboard_write 0x90
@@ -1007,96 +1009,109 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   # ── File tree ──
 
   @doc """
-  Encodes a gui_file_tree command with the visible file tree entries.
+  Encodes the semantic GUI file-tree command.
 
-  Sends: selected_index, tree_width, entry_count, root_len, root, then per entry:
-  path_hash, flags (is_dir, is_expanded), depth, git_status, icon, name, rel_path.
+  Wire format uses a 32-bit length-prefixed envelope:
+
+      opcode(1) + payload_len(4) + payload(payload_len)
+
+  Payload:
+
+      version(1) + tree_flags(1) + selected_id_len(2) + selected_id + root_len(2) + root + tree_width(2) + row_count(2) + rows...
+
+  Per row:
+
+      stable_hash(4) + row_flags(2) + depth(1) + git_status(1) + diagnostics(8) + guide_count(1) + guides + id + path + rel_path + name + icon + editing_type(1) + editing_text
+
+  String fields use uint16 byte lengths except icon, which uses a uint8 byte length.
   """
-  @spec encode_gui_file_tree(
-          Minga.Project.FileTree.t() | nil,
-          MingaEditor.State.FileTree.editing() | nil
-        ) ::
+  @spec encode_gui_file_tree(String.t() | nil, non_neg_integer(), boolean(), boolean(), [Row.t()]) ::
           binary()
-  def encode_gui_file_tree(tree, editing \\ nil)
+  def encode_gui_file_tree(root_path, tree_width, visible?, focused?, rows) when is_list(rows) do
+    root = root_path || ""
+    selected_id = selected_row_id(rows)
 
-  def encode_gui_file_tree(nil, _editing),
-    do: <<@op_gui_file_tree, 0::16, 0::16, 0::16, 0::16>>
+    payload =
+      IO.iodata_to_binary([
+        <<1::8, file_tree_flags(visible?, focused?, rows)::8>>,
+        encode_string16(selected_id),
+        encode_string16(root),
+        <<tree_width::16, length(rows)::16>>,
+        Enum.map(rows, &encode_file_tree_row/1)
+      ])
 
-  def encode_gui_file_tree(%Minga.Project.FileTree{} = tree, editing) do
-    entries = Minga.Project.FileTree.visible_entries(tree)
-    count = length(entries)
-    root_bytes = :erlang.iolist_to_binary([tree.root])
-
-    entry_binaries =
-      entries
-      |> Enum.with_index()
-      |> Enum.map(fn {entry, index} ->
-        is_editing = editing != nil and index == editing.index
-        encode_file_tree_entry(entry, tree, index == tree.cursor, is_editing, editing)
-      end)
-
-    IO.iodata_to_binary([
-      @op_gui_file_tree,
-      <<tree.cursor::16, tree.width::16, count::16, byte_size(root_bytes)::16,
-        root_bytes::binary>>
-      | entry_binaries
-    ])
+    <<@op_gui_file_tree, byte_size(payload)::32, payload::binary>>
   end
 
-  @doc "Encodes a hidden gui_file_tree command that still carries the project root for shared GUI chrome."
+  @doc "Encodes a hidden semantic GUI file-tree command while preserving the project root."
   @spec encode_hidden_gui_file_tree(String.t() | nil) :: binary()
-  def encode_hidden_gui_file_tree(root_path) when is_binary(root_path) do
-    root_bytes = :erlang.iolist_to_binary([root_path])
-    <<@op_gui_file_tree, 0::16, 0::16, 0::16, byte_size(root_bytes)::16, root_bytes::binary>>
+  def encode_hidden_gui_file_tree(root_path),
+    do: encode_gui_file_tree(root_path, 0, false, false, [])
+
+  @spec encode_file_tree_row(Row.t()) :: iodata()
+  defp encode_file_tree_row(%Row{} = row) do
+    icon = file_tree_row_icon(row)
+    editing_type = if row.editing, do: encode_editing_type(row.editing.type), else: 0xFF
+    editing_text = if row.editing, do: row.editing.text, else: ""
+    guides = Enum.map(row.guides, fn guide? -> if guide?, do: <<1>>, else: <<0>> end)
+
+    [
+      <<:erlang.phash2(row.id, 0xFFFFFFFF)::32, file_tree_row_flags(row)::16, row.depth::8,
+        encode_git_status(row.git_status)::8, 0::16, 0::16, 0::16, 0::16, length(row.guides)::8>>,
+      guides,
+      encode_string16(row.id),
+      encode_string16(row.path),
+      encode_string16(row.relative_path),
+      encode_string16(row.name),
+      encode_string8(icon),
+      <<editing_type::8>>,
+      encode_string16(editing_text)
+    ]
   end
 
-  def encode_hidden_gui_file_tree(nil), do: encode_gui_file_tree(nil)
-
-  @spec encode_file_tree_entry(
-          Minga.Project.FileTree.entry(),
-          Minga.Project.FileTree.t(),
-          boolean(),
-          boolean(),
-          MingaEditor.State.FileTree.editing() | nil
-        ) :: binary()
-  defp encode_file_tree_entry(entry, tree, is_selected?, is_editing, editing) do
-    is_dir = if entry[:dir?], do: 1, else: 0
-    is_expanded = if entry[:dir?] && MapSet.member?(tree.expanded, entry.path), do: 1, else: 0
-    selected_bit = if is_selected?, do: 1, else: 0
-    editing_bit = if is_editing, do: 1, else: 0
-
-    flags =
-      bor(
-        is_dir,
-        bor(bsl(is_expanded, 1), bor(bsl(selected_bit, 2), bsl(editing_bit, 3)))
-      )
-
-    git_status = encode_git_status(Map.get(tree.git_status, entry.path))
-
-    icon = file_tree_icon(entry)
-    icon_bytes = :erlang.iolist_to_binary([icon])
-    name_bytes = :erlang.iolist_to_binary([entry.name])
-    rel_path = Path.relative_to(entry.path, tree.root)
-    rel_path_bytes = :erlang.iolist_to_binary([rel_path])
-
-    # Stable 32-bit hash of the file path so the GUI can use it as a
-    # persistent SwiftUI identity across tree updates.
-    path_hash = :erlang.phash2(entry.path, 0xFFFFFFFF)
-
-    base =
-      <<path_hash::32, flags::8, entry.depth::8, git_status::8, byte_size(icon_bytes)::8,
-        icon_bytes::binary, byte_size(name_bytes)::16, name_bytes::binary,
-        byte_size(rel_path_bytes)::16, rel_path_bytes::binary>>
-
-    # Append editing payload only when this entry is being edited
-    if is_editing and editing != nil do
-      editing_type = encode_editing_type(editing.type)
-      editing_text_bytes = :erlang.iolist_to_binary([editing.text])
-
-      base <> <<editing_type::8, byte_size(editing_text_bytes)::16, editing_text_bytes::binary>>
-    else
-      base
+  @spec selected_row_id([Row.t()]) :: String.t()
+  defp selected_row_id(rows) do
+    case Enum.find(rows, & &1.selected?) do
+      %Row{id: id} -> id
+      nil -> ""
     end
+  end
+
+  @spec file_tree_flags(boolean(), boolean(), [Row.t()]) :: non_neg_integer()
+  defp file_tree_flags(visible?, focused?, rows) do
+    0
+    |> maybe_flag(visible?, 0)
+    |> maybe_flag(focused?, 1)
+    |> maybe_flag(rows == [], 4)
+  end
+
+  @spec file_tree_row_flags(Row.t()) :: non_neg_integer()
+  defp file_tree_row_flags(%Row{} = row) do
+    0
+    |> maybe_flag(row.directory?, 0)
+    |> maybe_flag(row.expanded?, 1)
+    |> maybe_flag(row.selected?, 2)
+    |> maybe_flag(row.focused?, 3)
+    |> maybe_flag(row.active?, 4)
+    |> maybe_flag(row.dirty?, 5)
+    |> maybe_flag(row.editing != nil, 6)
+    |> maybe_flag(row.last_child?, 7)
+  end
+
+  @spec maybe_flag(non_neg_integer(), boolean(), non_neg_integer()) :: non_neg_integer()
+  defp maybe_flag(flags, true, bit), do: bor(flags, bsl(1, bit))
+  defp maybe_flag(flags, false, _bit), do: flags
+
+  @spec encode_string16(String.t()) :: binary()
+  defp encode_string16(value) do
+    bytes = :erlang.iolist_to_binary([value])
+    <<byte_size(bytes)::16, bytes::binary>>
+  end
+
+  @spec encode_string8(String.t()) :: binary()
+  defp encode_string8(value) do
+    bytes = :erlang.iolist_to_binary([value])
+    <<byte_size(bytes)::8, bytes::binary>>
   end
 
   @spec encode_editing_type(atom()) :: non_neg_integer()
@@ -1107,9 +1122,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   # Nerd Font folder icon (nf-md-folder)
   @folder_icon "\u{F024B}"
 
-  @spec file_tree_icon(Minga.Project.FileTree.entry()) :: String.t()
-  defp file_tree_icon(%{dir?: true}), do: @folder_icon
-  defp file_tree_icon(%{name: name}), do: Devicon.icon(Language.detect_filetype(name))
+  @spec file_tree_row_icon(Row.t()) :: String.t()
+  defp file_tree_row_icon(%Row{directory?: true}), do: @folder_icon
+  defp file_tree_row_icon(%Row{name: name}), do: Devicon.icon(Language.detect_filetype(name))
 
   @spec encode_git_status(atom() | nil) :: non_neg_integer()
   defp encode_git_status(nil), do: 0
@@ -1117,8 +1132,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp encode_git_status(:staged), do: 2
   defp encode_git_status(:untracked), do: 3
   defp encode_git_status(:conflict), do: 4
-  defp encode_git_status(:ignored), do: 5
-  defp encode_git_status(_), do: 0
+  defp encode_git_status(:renamed), do: 5
+  defp encode_git_status(:deleted), do: 6
 
   # ── Completion ──
 

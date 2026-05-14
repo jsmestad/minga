@@ -231,12 +231,7 @@ struct FileTreePathTests {
     @MainActor func emptyRoot() {
         let state = FileTreeState()
         state.projectRoot = ""
-        let entry = FileTreeEntry(id: 1, index: 0, isDir: false,
-                                  isExpanded: false, isSelected: false,
-                                  isEditing: false,
-                                  depth: 0, gitStatus: 0, icon: "",
-                                  name: "test", relPath: "lib/test.ex",
-                                  editingType: 0, editingText: "")
+        let entry = computedFileTreeEntry(path: "", relPath: "lib/test.ex")
         #expect(state.fullPath(for: entry) == "lib/test.ex")
     }
 
@@ -244,12 +239,16 @@ struct FileTreePathTests {
     @MainActor func emptyRelPath() {
         let state = FileTreeState()
         state.projectRoot = "/project"
-        let entry = FileTreeEntry(id: 1, index: 0, isDir: false,
-                                  isExpanded: false, isSelected: false,
-                                  isEditing: false,
-                                  depth: 0, gitStatus: 0, icon: "",
-                                  name: "test", relPath: "",
-                                  editingType: 0, editingText: "")
+        let entry = computedFileTreeEntry(path: "", relPath: "")
         #expect(state.fullPath(for: entry) == "")
     }
+}
+
+private func computedFileTreeEntry(path: String, relPath: String) -> FileTreeEntry {
+    FileTreeEntry(id: 1, index: 0, isDir: false, isExpanded: false, isSelected: false,
+                  isFocused: false, isActive: false, isDirty: false, isEditing: false,
+                  isLastChild: false, depth: 0, gitStatus: 0, diagnosticErrorCount: 0,
+                  diagnosticWarningCount: 0, diagnosticInfoCount: 0, diagnosticHintCount: 0,
+                  guides: [], icon: "", name: "test", relPath: relPath, path: path,
+                  editingType: 0xFF, editingText: "")
 }
