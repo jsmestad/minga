@@ -36,8 +36,8 @@ struct GitStatusView: View {
 
             Spacer(minLength: 0)
 
-            // Commit area (only when there's a repo with changes)
-            if state.repoState == .normal && !state.isClean {
+            // Git actions are available for any normal repo. A clean tree can still be ahead/behind, and amend does not require file changes.
+            if state.repoState == .normal {
                 commitArea
             }
         }
