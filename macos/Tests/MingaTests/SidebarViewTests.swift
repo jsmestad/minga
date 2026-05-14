@@ -93,16 +93,17 @@ struct GitStatusViewEmptyStateTests {
 @Suite("GitStatusHeaderContent Branch Header")
 struct GitStatusViewBranchHeaderTests {
 
-    @Test("Branch header shows branch name")
+    @Test("Branch header shows project and branch name")
     @MainActor func showsBranchName() throws {
         let state = GitStatusState()
         state.repoState = .normal
         state.branchName = "feat/sidebar-polish"
 
-        let sut = GitStatusHeaderContent(state: state, theme: ThemeColors())
+        let sut = GitStatusHeaderContent(state: state, theme: ThemeColors(), projectName: "minga", leadingPadding: 10)
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
+        #expect(strings.contains("minga"))
         #expect(strings.contains("feat/sidebar-polish"))
     }
 
@@ -112,7 +113,7 @@ struct GitStatusViewBranchHeaderTests {
         state.repoState = .normal
         state.branchName = ""
 
-        let sut = GitStatusHeaderContent(state: state, theme: ThemeColors())
+        let sut = GitStatusHeaderContent(state: state, theme: ThemeColors(), projectName: "minga", leadingPadding: 10)
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -125,17 +126,18 @@ struct GitStatusViewBranchHeaderTests {
 @Suite("FileTreeView View Structure")
 struct FileTreeViewTests {
 
-    @Test("Project header shows project name from projectRoot path")
+    @Test("Project header shows project and branch from projectRoot path")
     @MainActor func showsProjectName() throws {
         let state = FileTreeState()
         state.visible = true
         state.projectRoot = "/Users/test/code/minga"
 
-        let sut = FileTreeHeaderContent(fileTreeState: state, theme: ThemeColors(), encoder: nil)
+        let sut = FileTreeHeaderContent(fileTreeState: state, theme: ThemeColors(), encoder: nil, branchName: "main", leadingPadding: 10)
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
         #expect(strings.contains("minga"))
+        #expect(strings.contains("main"))
     }
 
     @Test("Empty projectRoot falls back to 'Project' name")
@@ -144,7 +146,7 @@ struct FileTreeViewTests {
         state.visible = true
         state.projectRoot = ""
 
-        let sut = FileTreeHeaderContent(fileTreeState: state, theme: ThemeColors(), encoder: nil)
+        let sut = FileTreeHeaderContent(fileTreeState: state, theme: ThemeColors(), encoder: nil, branchName: "", leadingPadding: 10)
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -156,7 +158,7 @@ struct FileTreeViewTests {
         let state = FileTreeState()
         state.visible = true
 
-        let sut = FileTreeHeaderContent(fileTreeState: state, theme: ThemeColors(), encoder: nil)
+        let sut = FileTreeHeaderContent(fileTreeState: state, theme: ThemeColors(), encoder: nil, branchName: "", leadingPadding: 10)
         let body = try sut.inspect()
         let buttons = body.findAll(ViewType.Button.self)
         #expect(buttons.count >= 4)

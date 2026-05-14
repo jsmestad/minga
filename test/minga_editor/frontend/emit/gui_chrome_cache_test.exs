@@ -164,7 +164,69 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
 
       flush_port_casts()
 
-      assert caches.last_gui_file_tree_fp == :no_tree
+      assert caches.last_gui_file_tree_fp == {:no_tree, ""}
+    end
+
+    test "hidden file tree command carries project root for shared GUI chrome" do
+      root = "/tmp/minga-project"
+      state = gui_state()
+      state = put_in(state.workspace.file_tree.project_root, root)
+      sb_data = StatusBarData.from_state(state)
+
+      EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state), sb_data, nil, %Caches{})
+
+      all_cmds = collect_port_casts() |> List.flatten()
+      root_len = byte_size(root)
+
+      assert Enum.any?(all_cmds, fn
+               <<0x70, 0::16, 0::16, 0::16, ^root_len::16, root_path::binary>> ->
+                 root_path == root
+
+               _ ->
+                 false
+             end)
+    end
+
+    test "hidden file tree cache resends when project root changes" do
+      first_root = "/tmp/first-project"
+      second_root = "/tmp/second-project"
+
+      first_state = gui_state()
+      first_state = put_in(first_state.workspace.file_tree.project_root, first_root)
+
+      {_ctx, caches} =
+        EmitGUI.sync_swiftui_chrome(
+          Context.from_editor_state(first_state),
+          StatusBarData.from_state(first_state),
+          nil,
+          %Caches{}
+        )
+
+      flush_port_casts()
+
+      second_state = gui_state()
+      second_state = put_in(second_state.workspace.file_tree.project_root, second_root)
+
+      {_ctx, caches} =
+        EmitGUI.sync_swiftui_chrome(
+          Context.from_editor_state(second_state),
+          StatusBarData.from_state(second_state),
+          nil,
+          caches
+        )
+
+      all_cmds = collect_port_casts() |> List.flatten()
+      root_len = byte_size(second_root)
+
+      assert caches.last_gui_file_tree_fp == {:no_tree, second_root}
+
+      assert Enum.any?(all_cmds, fn
+               <<0x70, 0::16, 0::16, 0::16, ^root_len::16, root_path::binary>> ->
+                 root_path == second_root
+
+               _ ->
+                 false
+             end)
     end
 
     test "picker cache tracks closed state" do

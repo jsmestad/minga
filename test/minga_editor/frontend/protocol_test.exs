@@ -1135,6 +1135,16 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       assert <<0x70, 0::16, 0::16, 0::16, 0::16>> = encoded
     end
 
+    test "encodes hidden gui_file_tree with project root and zero entries" do
+      root = "/tmp/minga-project"
+      root_len = byte_size(root)
+
+      encoded = ProtocolGUI.encode_hidden_gui_file_tree(root)
+
+      assert <<0x70, 0::16, 0::16, 0::16, ^root_len::16, root_path::binary>> = encoded
+      assert root_path == root
+    end
+
     @tag :tmp_dir
     test "encodes gui_file_tree with editing payload on the editing entry", %{tmp_dir: tmp_dir} do
       File.write!(Path.join(tmp_dir, "target.txt"), "")

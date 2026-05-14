@@ -1025,6 +1025,15 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     ])
   end
 
+  @doc "Encodes a hidden gui_file_tree command that still carries the project root for shared GUI chrome."
+  @spec encode_hidden_gui_file_tree(String.t() | nil) :: binary()
+  def encode_hidden_gui_file_tree(root_path) when is_binary(root_path) do
+    root_bytes = :erlang.iolist_to_binary([root_path])
+    <<@op_gui_file_tree, 0::16, 0::16, 0::16, byte_size(root_bytes)::16, root_bytes::binary>>
+  end
+
+  def encode_hidden_gui_file_tree(nil), do: encode_gui_file_tree(nil)
+
   @spec encode_file_tree_entry(
           Minga.Project.FileTree.entry(),
           Minga.Project.FileTree.t(),

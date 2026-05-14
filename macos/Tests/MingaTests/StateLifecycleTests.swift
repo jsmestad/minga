@@ -200,8 +200,27 @@ struct FileTreeStateLifecycleTests {
         #expect(path == "/home/user/project/lib/editor.ex")
     }
 
-    @Test("hide() clears entries and projectRoot")
-    @MainActor func hideClearsAll() {
+    @Test("hide(rootPath:) clears entries while preserving supplied projectRoot")
+    @MainActor func hideWithRootClearsEntriesOnly() {
+        let state = FileTreeState()
+        state.update(selectedIndex: 0, treeWidth: 30, rootPath: "/project",
+                     rawEntries: [Wire.FileTreeEntry(pathHash: 1, isDir: false,
+                                                   isExpanded: false, isSelected: false,
+                                                   isEditing: true, depth: 0, gitStatus: 0, icon: "",
+                                                   name: "a", relPath: "a",
+                                                   editingType: 0, editingText: "")])
+        #expect(state.editingIndex == 0)
+
+        state.hide(rootPath: "/project")
+
+        #expect(state.visible == false)
+        #expect(state.entries.isEmpty)
+        #expect(state.editingIndex == nil)
+        #expect(state.projectRoot == "/project")
+    }
+
+    @Test("hide() clears projectRoot when no root is supplied")
+    @MainActor func hideWithoutRootClearsProjectRoot() {
         let state = FileTreeState()
         state.update(selectedIndex: 0, treeWidth: 30, rootPath: "/project",
                      rawEntries: [Wire.FileTreeEntry(pathHash: 1, isDir: false,
@@ -209,6 +228,7 @@ struct FileTreeStateLifecycleTests {
                                                    isEditing: false, depth: 0, gitStatus: 0, icon: "",
                                                    name: "a", relPath: "a",
                                                    editingType: 0, editingText: "")])
+
         state.hide()
 
         #expect(state.visible == false)

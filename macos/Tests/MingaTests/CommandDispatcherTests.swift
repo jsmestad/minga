@@ -109,10 +109,9 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.fileTreeState.projectRoot == "/project")
     }
 
-    @Test("guiFileTree hides when entries are empty")
-    @MainActor func guiFileTreeHidesOnEmpty() {
+    @Test("guiFileTree hides when an empty zero-width sentinel arrives")
+    @MainActor func guiFileTreeHidesOnEmptySentinel() {
         let (dispatcher, gui) = makeDispatcher()
-        // First show it
         dispatcher.dispatch(.guiFileTree(selectedIndex: 0, treeWidth: 30,
                                           rootPath: "/project",
                                           entries: [Wire.FileTreeEntry(pathHash: 1, isDir: false,
@@ -122,10 +121,40 @@ struct CommandDispatcherRoutingTests {
                                                                      editingType: 0, editingText: "")]))
         #expect(gui.fileTreeState.visible == true)
 
-        // Then hide with empty entries
+        dispatcher.dispatch(.guiFileTree(selectedIndex: 0, treeWidth: 0,
+                                          rootPath: "/project", entries: []))
+        #expect(gui.fileTreeState.visible == false)
+        #expect(gui.fileTreeState.projectRoot == "/project")
+    }
+
+    @Test("guiFileTree clears project root when hidden sentinel has no root")
+    @MainActor func guiFileTreeClearsRootOnEmptyHiddenSentinel() {
+        let (dispatcher, gui) = makeDispatcher()
+        dispatcher.dispatch(.guiFileTree(selectedIndex: 0, treeWidth: 30,
+                                          rootPath: "/project",
+                                          entries: [Wire.FileTreeEntry(pathHash: 1, isDir: false,
+                                                                     isExpanded: false, isSelected: false,
+                                                                     isEditing: false, depth: 0, gitStatus: 0,
+                                                                     icon: "", name: "a", relPath: "a",
+                                                                     editingType: 0, editingText: "")]))
+
         dispatcher.dispatch(.guiFileTree(selectedIndex: 0, treeWidth: 0,
                                           rootPath: "", entries: []))
+
         #expect(gui.fileTreeState.visible == false)
+        #expect(gui.fileTreeState.projectRoot == "")
+    }
+
+    @Test("guiFileTree keeps an empty visible tree open")
+    @MainActor func guiFileTreeKeepsEmptyVisibleTreeOpen() {
+        let (dispatcher, gui) = makeDispatcher()
+
+        dispatcher.dispatch(.guiFileTree(selectedIndex: 0, treeWidth: 30,
+                                          rootPath: "/empty-project", entries: []))
+
+        #expect(gui.fileTreeState.visible == true)
+        #expect(gui.fileTreeState.entries.isEmpty)
+        #expect(gui.fileTreeState.projectRoot == "/empty-project")
     }
 
     @Test("guiGitStatus updates state when repo has entries")

@@ -29,6 +29,9 @@ final class EditorNSView: MTKView {
     /// GUI state for semantic window content (0x80) and theme colors.
     var guiState: GUIState?
 
+    /// Notifies SwiftUI app state when the NSWindow enters or exits full-screen mode.
+    var onFullScreenChanged: ((Bool) -> Void)?
+
     /// Tracks BEAM responsiveness and handles Ctrl-G recovery.
     var recoveryManager: RecoveryManager?
 
@@ -343,6 +346,9 @@ final class EditorNSView: MTKView {
         // This fires before the window is made key/visible, so the
         // saved frame is applied without a visible position jump.
         window.setFrameAutosaveName("MingaEditorWindow")
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.styleMask.insert(.fullSizeContentView)
 
         installWindowObserversIfNeeded(for: window)
 
@@ -374,6 +380,19 @@ final class EditorNSView: MTKView {
             name: NSWindow.didResignKeyNotification,
             object: window
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidEnterFullScreen),
+            name: NSWindow.didEnterFullScreenNotification,
+            object: window
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidExitFullScreen),
+            name: NSWindow.didExitFullScreenNotification,
+            object: window
+        )
+        onFullScreenChanged?(window.styleMask.contains(.fullScreen))
 
         firstResponderGuard = FirstResponderGuard(window: window, editorView: self)
     }
@@ -391,6 +410,17 @@ final class EditorNSView: MTKView {
             name: NSWindow.didResignKeyNotification,
             object: observedWindow
         )
+        NotificationCenter.default.removeObserver(
+            self,
+            name: NSWindow.didEnterFullScreenNotification,
+            object: observedWindow
+        )
+        NotificationCenter.default.removeObserver(
+            self,
+            name: NSWindow.didExitFullScreenNotification,
+            object: observedWindow
+        )
+        onFullScreenChanged?(false)
         self.observedWindow = nil
     }
 
@@ -409,6 +439,14 @@ final class EditorNSView: MTKView {
     @objc private func windowDidBecomeKey(_ notification: Notification) {
         claimFirstResponder()
         resetCursorBlink()
+    }
+
+    @objc private func windowDidEnterFullScreen(_ notification: Notification) {
+        onFullScreenChanged?(true)
+    }
+
+    @objc private func windowDidExitFullScreen(_ notification: Notification) {
+        onFullScreenChanged?(false)
     }
 
     @objc private func windowDidResignKey(_ notification: Notification) {

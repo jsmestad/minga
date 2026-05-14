@@ -139,6 +139,40 @@ private struct PaneHeightKey: PreferenceKey {
     }
 }
 
+/// Transparent AppKit hit region that preserves standard title-bar interactions for the custom toolbar.
+private struct TitleBarDragRegion: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        TitleBarDragNSView()
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+private final class TitleBarDragNSView: NSView {
+    override var mouseDownCanMoveWindow: Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 {
+            performSystemDoubleClickAction()
+            return
+        }
+
+        super.mouseDown(with: event)
+    }
+
+    private func performSystemDoubleClickAction() {
+        let action = UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick")?.lowercased()
+        switch action {
+        case "minimize":
+            window?.performMiniaturize(nil)
+        case "none":
+            return
+        default:
+            window?.performZoom(nil)
+        }
+    }
+}
+
 /// Loading overlay shown while the BEAM boots and renders its first frame.
 /// Covers the empty Metal framebuffer with the app icon, a spinner, and a
 /// random quip so the user sees a friendly loading state instead of a blank
@@ -231,6 +265,21 @@ struct ContentView: View {
 
     private var theme: ThemeColors { appState.gui.themeColors }
 
+    private var titleBarLeadingPadding: CGFloat {
+        appState.isFullScreen ? 10 : 78
+    }
+
+    private var projectName: String {
+        if !appState.gui.fileTreeState.projectRoot.isEmpty {
+            return (appState.gui.fileTreeState.projectRoot as NSString).lastPathComponent
+        }
+        return "Minga"
+    }
+
+    private var gitBranch: String {
+        appState.gui.statusBarState.gitBranch
+    }
+
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
@@ -244,9 +293,7 @@ struct ContentView: View {
             windowOverlays
         }
         .navigationTitle(appState.windowTitle)
-        .toolbarBackground(appState.windowBgColor ?? Color(red: 0.12, green: 0.12, blue: 0.14), for: .windowToolbar)
-        .toolbarBackground(.visible, for: .windowToolbar)
-        .toolbarColorScheme(appState.windowBgIsDark ? .dark : .light, for: .windowToolbar)
+        .ignoresSafeArea(.container, edges: .top)
         .preferredColorScheme(appState.windowBgIsDark ? .dark : .light)
         .onAppear {
             sidebarWidth = CGFloat(appState.gui.fileTreeState.treeWidth) * 7.5
@@ -268,6 +315,8 @@ struct ContentView: View {
                 Rectangle()
                     .fill(theme.tabSeparatorFg.opacity(0.4))
                     .frame(width: 1, height: 16)
+            } else {
+                compactProjectBranchHeader
             }
 
             if !appState.gui.tabBarState.tabs.isEmpty {
@@ -280,8 +329,13 @@ struct ContentView: View {
                 Spacer()
             }
         }
-        .frame(height: 34)
-        .background(theme.tabBg)
+        .frame(height: 38)
+        .background {
+            ZStack {
+                theme.tabBg
+                TitleBarDragRegion()
+            }
+        }
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(theme.tabSeparatorFg.opacity(0.3))
@@ -297,14 +351,47 @@ struct ContentView: View {
             FileTreeHeaderContent(
                 fileTreeState: appState.gui.fileTreeState,
                 theme: theme,
-                encoder: appState.encoder
+                encoder: appState.encoder,
+                branchName: gitBranch,
+                leadingPadding: titleBarLeadingPadding
             )
         } else if appState.gui.gitStatusState.visible {
             GitStatusHeaderContent(
                 state: appState.gui.gitStatusState,
-                theme: theme
+                theme: theme,
+                projectName: projectName,
+                leadingPadding: titleBarLeadingPadding
             )
         }
+    }
+
+    private var compactProjectBranchHeader: some View {
+        HStack(spacing: 6) {
+            Text("\u{F024B}")
+                .font(.custom("Symbols Nerd Font Mono", size: 12))
+                .foregroundStyle(theme.treeDirFg.opacity(0.7))
+
+            Text(projectName)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(theme.tabActiveFg.opacity(0.7))
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            if !gitBranch.isEmpty {
+                Text("\u{E725}")
+                    .font(.custom("Symbols Nerd Font Mono", size: 12))
+                    .foregroundStyle(theme.treeDirFg.opacity(0.7))
+
+                Text(gitBranch)
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(theme.tabActiveFg.opacity(0.7))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+        .padding(.leading, titleBarLeadingPadding)
+        .padding(.trailing, 12)
+        .frame(height: 38)
     }
 
     // MARK: - Sidebar Body
@@ -629,10 +716,10 @@ struct ContentView: View {
 final class AppState {
     var windowTitle: String = "Minga"
     var editorNSView: EditorNSView?
-    /// Theme background color for the title bar, sent by the BEAM via set_window_bg.
-    var windowBgColor: Color?
-    /// Whether the theme is dark (luminance < 0.5). Drives toolbarColorScheme.
+    /// Whether the theme is dark (luminance < 0.5). Drives traffic-light appearance.
     var windowBgIsDark: Bool = true
+    /// Whether the window is currently in macOS full-screen mode.
+    var isFullScreen: Bool = false
     /// Flipped once when the first complete frame (batch_end) arrives from
     /// the BEAM. The startup overlay fades out when this becomes true.
     var hasReceivedFirstFrame: Bool = false
@@ -772,6 +859,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                    coreTextRenderer: ctRenderer, fontManager: fm)
         nsView.guiState = appState.gui
         nsView.statusBarState = appState.gui.statusBarState
+        nsView.onFullScreenChanged = { [weak appState] isFullScreen in
+            Task { @MainActor in
+                appState?.isFullScreen = isFullScreen
+            }
+        }
         nsView.recoveryManager = recovery
         self.editorNSView = nsView
         appState.editorNSView = nsView
@@ -809,7 +901,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let r = color.redComponent
                 let g = color.greenComponent
                 let b = color.blueComponent
-                appState.windowBgColor = Color(red: r, green: g, blue: b)
                 let isDark = (r * 0.299 + g * 0.587 + b * 0.114) < 0.5
                 appState.windowBgIsDark = isDark
                 for window in NSApp.windows {
