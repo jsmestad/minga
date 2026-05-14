@@ -764,7 +764,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
 
-        // Backing scale factor for Retina rendering.
+        // Initial backing scale for Retina rendering. The window does not exist yet, so NSScreen.main is the only safe source here. EditorNSView.viewDidMoveToWindow/viewDidChangeBackingProperties corrects this if the window lands on another display.
         let scale = NSScreen.main?.backingScaleFactor ?? 2.0
 
         // Initialize font.
@@ -865,6 +865,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         nsView.recoveryManager = recovery
+        nsView.onScaleFactorChanged = { [weak self] newScale in
+            self?.handleScaleChange(newScale: newScale)
+        }
         self.editorNSView = nsView
         appState.editorNSView = nsView
         observeWorkspaceLifecycleNotifications()
@@ -1047,6 +1050,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     PortLogger.info("Screens did wake; resuming Metal rendering")
                     self.editorNSView?.resumeAfterScreenWake()
                 }
+            },
+            Task { @MainActor [weak self] in
+                for await _ in NotificationCenter.default.notifications(named: NSApplication.didChangeScreenParametersNotification) {
+                    guard let self else { return }
+                    let scale = self.currentBackingScaleFactor()
+                    PortLogger.info("Display configuration changed; current scale: \(scale)x")
+                    self.editorNSView?.displayConfigurationChanged(newScale: scale, forceResizeEvent: true)
+                }
             }
         ]
     }
@@ -1114,14 +1125,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Font change
 
+    private func currentBackingScaleFactor() -> CGFloat {
+        editorNSView?.window?.screen?.backingScaleFactor ??
+            editorNSView?.window?.backingScaleFactor ??
+            NSScreen.main?.backingScaleFactor ??
+            2.0
+    }
+
     private func handleFontChange(family: String, size: CGFloat, ligatures: Bool, weight: UInt8) {
+        rebuildFont(family: family, size: size, scale: currentBackingScaleFactor(), ligatures: ligatures, weight: weight, reason: "Font changed")
+    }
+
+    private func handleScaleChange(newScale: CGFloat) {
+        guard let currentFace = fontFace else { return }
+        guard abs(currentFace.scale - newScale) > 0.001 else { return }
+
+        rebuildFont(
+            family: currentFace.requestedName,
+            size: CTFontGetSize(currentFace.ctFont),
+            scale: newScale,
+            ligatures: currentFace.ligaturesEnabled,
+            weight: currentFace.protocolWeight,
+            reason: "Display scale changed"
+        )
+    }
+
+    private func rebuildFont(family: String, size: CGFloat, scale: CGFloat, ligatures: Bool, weight: UInt8, reason: String) {
         guard let nsView = editorNSView else { return }
 
-        let scale = NSScreen.main?.backingScaleFactor ?? 2.0
         let newFace = FontFace(name: family, size: size, scale: scale, ligatures: ligatures, weight: weight)
-
         let fontName = CTFontCopyPostScriptName(newFace.ctFont) as String
-        PortLogger.info("Font changed: \(fontName) \(Int(size))pt, ligatures: \(ligatures), cell: \(newFace.cellWidth)x\(newFace.cellHeight)")
+        PortLogger.info("\(reason): \(fontName) \(Int(size))pt, scale: \(scale)x, ligatures: \(ligatures), cell: \(newFace.cellWidth)x\(newFace.cellHeight)")
 
         self.fontFace = newFace
 

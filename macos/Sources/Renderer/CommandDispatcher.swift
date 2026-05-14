@@ -151,7 +151,7 @@ final class CommandDispatcher {
             onFontChanged?(family, size, ligatures, weight)
 
         case .setFontFallback(let families):
-            fontManager?.primary.setFallbackFonts(families)
+            fontManager?.setFallbackFonts(families)
 
         case .registerFont(let id, let family):
             fontManager?.registerFont(id: id, name: family)
