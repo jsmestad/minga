@@ -430,6 +430,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
     if cursor_col >= vp.left and cursor_col < vp.left + content_w do
       vp
     else
+      # Cursor fits within the first viewport-width of content; reset scroll rather than re-computing
       if cursor_col < content_w do
         %{vp | left: 0}
       else

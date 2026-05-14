@@ -1470,8 +1470,16 @@ extension EditorNSView: @preconcurrency NSTextInputClient {
         // Position at the cursor location.
         let col = CGFloat(dispatcher.frameState.cursorCol)
         let row = CGFloat(dispatcher.frameState.cursorRow)
-        let gutterPad: CGFloat = (dispatcher.frameState.gutterCol > 0 && dispatcher.frameState.cursorCol >= dispatcher.frameState.gutterCol)
-            ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
+        let gutterPad: CGFloat
+        if dispatcher.frameState.gutterCol > 0 {
+            if dispatcher.frameState.cursorCol >= dispatcher.frameState.gutterCol {
+                gutterPad = CoreTextMetalRenderer.gutterLeftMarginPt + CoreTextMetalRenderer.gutterRightGapPt
+            } else {
+                gutterPad = CoreTextMetalRenderer.gutterLeftMarginPt
+            }
+        } else {
+            gutterPad = 0
+        }
         let localRect = NSRect(x: col * cellWidth + gutterPad, y: row * cellHeight,
                                 width: cellWidth, height: cellHeight)
 
@@ -1486,9 +1494,20 @@ extension EditorNSView: @preconcurrency NSTextInputClient {
         guard let window else { return 0 }
         let windowPoint = window.convertPoint(fromScreen: point)
         let localPoint = convert(windowPoint, from: nil)
-        let gutterPad: CGFloat = dispatcher.frameState.gutterCol > 0
-            ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
-        let col = max(0, Int((localPoint.x - gutterPad) / cellWidth))
+        let gutterCols = CGFloat(dispatcher.frameState.gutterCol)
+        let col: Int
+        if gutterCols > 0 {
+            let leftMargin = CoreTextMetalRenderer.gutterLeftMarginPt
+            let rightGap = CoreTextMetalRenderer.gutterRightGapPt
+            let gutterPixelEnd = leftMargin + gutterCols * cellWidth
+            if localPoint.x < gutterPixelEnd {
+                col = max(0, Int((localPoint.x - leftMargin) / cellWidth))
+            } else {
+                col = max(0, Int((localPoint.x - leftMargin - rightGap) / cellWidth))
+            }
+        } else {
+            col = max(0, Int(localPoint.x / cellWidth))
+        }
         let row = Int(localPoint.y / cellHeight)
         return row * Int(dispatcher.frameState.cols) + col
     }

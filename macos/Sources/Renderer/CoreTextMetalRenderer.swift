@@ -320,9 +320,9 @@ final class CoreTextMetalRenderer {
 
         // Gutter spacing: left margin for breathing room, right padding before separator.
         // The sign column is always reserved (2 cell widths) for consistent layout.
-        let gutterLeftMarginPt: Float = frameState.gutterCol > 0 ? round(6.0 * scale) / scale : 0
+        let gutterLeftMarginPt: Float = frameState.gutterCol > 0 ? round(Float(Self.gutterLeftMarginPt) * scale) / scale : 0
         let gutterLeftMarginPx = gutterLeftMarginPt * scale
-        let gutterPaddingPt: Float = frameState.gutterCol > 0 ? round(8.0 * scale) / scale : 0
+        let gutterPaddingPt: Float = frameState.gutterCol > 0 ? round(Float(Self.gutterRightGapPt) * scale) / scale : 0
         let gutterPaddingPx = gutterPaddingPt * scale
 
         let renderCursor = CoreTextMetalRenderer.resolveCursor(
