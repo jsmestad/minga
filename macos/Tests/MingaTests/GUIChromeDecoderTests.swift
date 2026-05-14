@@ -1285,6 +1285,84 @@ struct GUIAgentChatDecoderTests {
         #expect(lines[1][0].text == "  :ok")
         #expect(lines[1][0].underline == true)
     }
+
+    @Test("Decode gui_agent_chat styled_assistant link run")
+    func decodeStyledAssistantLinkRun() throws {
+        var msgs = Data()
+        appendU32(&msgs, 42) // beam_id
+        msgs.append(0x07) // type=styled_assistant
+        appendU16(&msgs, 1) // 1 line
+        appendU16(&msgs, 1) // 1 run
+        appendString16(&msgs, "docs")
+        appendRGB(&msgs, 0x61, 0xAF, 0xEF); appendRGB(&msgs, 0x00, 0x00, 0x00); msgs.append(0x0C) // underline + link
+        appendString16(&msgs, "https://example.com/docs")
+
+        let data = buildChatData(model: "claude", messages: buildMessagesPayload(count: 1, msgs))
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard case .styledAssistant(let lines) = messages[0].content else { Issue.record("Expected .styledAssistant"); return }
+        #expect(lines[0][0].text == "docs")
+        #expect(lines[0][0].underline == true)
+        #expect(lines[0][0].linkURL == "https://example.com/docs")
+    }
+
+    @Test("Decode gui_agent_chat rejects invalid UTF-8 in styled_assistant link URL")
+    func decodeStyledAssistantRejectsInvalidLinkURLUTF8() {
+        var msgs = Data()
+        appendU32(&msgs, 42)
+        msgs.append(0x07)
+        appendU16(&msgs, 1)
+        appendU16(&msgs, 1)
+        appendString16(&msgs, "docs")
+        appendRGB(&msgs, 0x61, 0xAF, 0xEF); appendRGB(&msgs, 0x00, 0x00, 0x00); msgs.append(0x0C)
+        appendU16(&msgs, 1)
+        msgs.append(0xFF)
+
+        let data = buildChatData(model: "claude", messages: buildMessagesPayload(count: 1, msgs))
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Decode gui_agent_chat rejects styled link URL length crossing section boundary")
+    func decodeStyledAssistantRejectsLinkURLCrossingSectionBoundary() {
+        var headerPayload = Data()
+        headerPayload.append(1)
+        headerPayload.append(0)
+
+        var modelPayload = Data()
+        appendString16(&modelPayload, "claude")
+
+        var promptPayload = Data()
+        appendString16(&promptPayload, "")
+
+        var msgs = Data()
+        appendU32(&msgs, 42)
+        msgs.append(0x07)
+        appendU16(&msgs, 1)
+        appendU16(&msgs, 1)
+        appendString16(&msgs, "docs")
+        appendRGB(&msgs, 0x61, 0xAF, 0xEF); appendRGB(&msgs, 0x00, 0x00, 0x00); msgs.append(0x0C)
+        appendU16(&msgs, 4)
+        msgs.append(contentsOf: "h".utf8)
+
+        var data = Data()
+        data.append(OP_GUI_AGENT_CHAT)
+        data.append(7)
+        data.append(contentsOf: buildSectionData(0x01, headerPayload))
+        data.append(contentsOf: buildSectionData(0x02, modelPayload))
+        data.append(contentsOf: buildSectionData(0x03, promptPayload))
+        data.append(contentsOf: buildSectionData(0x04, Data([0])))
+        data.append(contentsOf: buildSectionData(0x05, Data([0])))
+        data.append(contentsOf: buildSectionData(0x06, buildMessagesPayload(count: 1, msgs)))
+        data.append(contentsOf: buildSectionData(0x07, Data([0, 0, 0, 0])))
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
 }
 
 // MARK: - gui_tool_manager (0x7E)

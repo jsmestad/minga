@@ -337,6 +337,21 @@ enum Wire {
         let bold: Bool
         let italic: Bool
         let underline: Bool
+        let linkURL: String?
+
+        init(text: String, fgR: UInt8, fgG: UInt8, fgB: UInt8, bgR: UInt8, bgG: UInt8, bgB: UInt8, bold: Bool, italic: Bool, underline: Bool, linkURL: String? = nil) {
+            self.text = text
+            self.fgR = fgR
+            self.fgG = fgG
+            self.fgB = fgB
+            self.bgR = bgR
+            self.bgG = bgG
+            self.bgB = bgB
+            self.bold = bold
+            self.italic = italic
+            self.underline = underline
+            self.linkURL = linkURL
+        }
     }
 
     /// A help group from gui_agent_chat, containing a category title and keybindings.

@@ -108,6 +108,130 @@ defmodule MingaEditor.Frontend.GUIAgentChatProtocolTest do
       assert flags == 0x01
     end
 
+    test "encodes styled assistant link runs with url metadata" do
+      styled_lines = [
+        [{"docs", 0x61AFEF, 0, 0x0C, "https://example.com/docs"}]
+      ]
+
+      data = %{
+        visible: true,
+        messages: [{:styled_assistant, styled_lines}],
+        status: :idle,
+        model: "test",
+        prompt: "",
+        pending_approval: nil
+      }
+
+      binary = ProtocolGUI.encode_gui_agent_chat(data)
+      messages_payload = extract_section(binary, 0x06)
+
+      <<1::16, 0::32, 0x07::8, 1::16, 1::16, text_len::16, text::binary-size(text_len), fg::24,
+        bg::24, flags::8, url_len::16, url::binary-size(url_len)>> = messages_payload
+
+      assert text == "docs"
+      assert fg == 0x61AFEF
+      assert bg == 0
+      assert Bitwise.band(flags, 0x08) != 0
+      assert url == "https://example.com/docs"
+    end
+
+    test "masks link flag on styled runs without url metadata" do
+      styled_lines = [
+        [{"not a link", 0xBBC2CF, 0, 0x08}]
+      ]
+
+      data = %{
+        visible: true,
+        messages: [{:styled_assistant, styled_lines}],
+        status: :idle,
+        model: "test",
+        prompt: "",
+        pending_approval: nil
+      }
+
+      binary = ProtocolGUI.encode_gui_agent_chat(data)
+      messages_payload = extract_section(binary, 0x06)
+
+      <<1::16, 0::32, 0x07::8, 1::16, 1::16, text_len::16, _text::binary-size(text_len), _fg::24,
+        _bg::24, flags::8>> = messages_payload
+
+      assert Bitwise.band(flags, 0x08) == 0
+    end
+
+    test "downgrades overlong link urls instead of corrupting styled run framing" do
+      for url <- [String.duplicate("a", 65_535), String.duplicate("a", 65_536)] do
+        styled_lines = [
+          [{"docs", 0x61AFEF, 0, 0x0C, url}]
+        ]
+
+        data = %{
+          visible: true,
+          messages: [{:styled_assistant, styled_lines}],
+          status: :idle,
+          model: "test",
+          prompt: "",
+          pending_approval: nil
+        }
+
+        binary = ProtocolGUI.encode_gui_agent_chat(data)
+        messages_payload = extract_section(binary, 0x06)
+
+        <<1::16, 0::32, 0x07::8, 1::16, 1::16, text_len::16, text::binary-size(text_len), _fg::24,
+          _bg::24, flags::8>> = messages_payload
+
+        assert text == "docs"
+        assert Bitwise.band(flags, 0x08) == 0
+        assert Bitwise.band(flags, 0x04) == 0
+      end
+    end
+
+    test "truncates oversized plain chat text before section encoding" do
+      text = String.duplicate("x", 70_000)
+
+      data = %{
+        visible: true,
+        messages: [{:assistant, text}],
+        status: :idle,
+        model: "test",
+        prompt: "",
+        pending_approval: nil
+      }
+
+      binary = ProtocolGUI.encode_gui_agent_chat(data)
+      messages_payload = extract_section(binary, 0x06)
+
+      assert byte_size(messages_payload) <= 65_535
+
+      <<1::16, 0::32, 0x02::8, text_len::32, encoded_text::binary-size(text_len)>> =
+        messages_payload
+
+      assert byte_size(encoded_text) == 60_000
+      assert String.ends_with?(encoded_text, "… [truncated]")
+    end
+
+    test "omits older chat messages instead of overflowing the messages section" do
+      text = String.duplicate("x", 70_000)
+
+      data = %{
+        visible: true,
+        messages: [{1, {:assistant, text}}, {2, {:assistant, text}}],
+        status: :idle,
+        model: "test",
+        prompt: "",
+        pending_approval: nil
+      }
+
+      binary = ProtocolGUI.encode_gui_agent_chat(data)
+      messages_payload = extract_section(binary, 0x06)
+
+      assert byte_size(messages_payload) <= 65_535
+
+      <<2::16, 0::32, 0x05::8, 0::8, notice_len::32, notice::binary-size(notice_len), 2::32,
+        0x02::8, _rest::binary>> = messages_payload
+
+      assert notice =~ "omitted"
+    end
+
     test "encodes regular tool_call with sub-opcode 0x04" do
       tc = %MingaAgent.ToolCall{
         id: "tc-regular",

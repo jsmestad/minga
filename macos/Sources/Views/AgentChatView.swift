@@ -259,16 +259,7 @@ struct AgentChatView: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(Array(lines.enumerated()), id: \.offset) { _, runs in
-                    if runs.isEmpty || (runs.count == 1 && runs[0].text.isEmpty) {
-                        // Empty line: render as a spacer with line height
-                        Text(" ")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.clear)
-                    } else {
-                        Text(buildAttributedString(runs))
-                            .font(.system(size: 13))
-                            .textSelection(.enabled)
-                    }
+                    styledLineView(runs, baseFontSize: 13, monospaced: false)
                 }
             }
             Spacer(minLength: 40)
@@ -311,9 +302,53 @@ struct AgentChatView: View {
             if run.underline {
                 attr.underlineStyle = .single
             }
+            if let url = safeLinkURL(run.linkURL) {
+                attr.link = url
+            }
             result += attr
         }
         return result
+    }
+
+    @ViewBuilder
+    private func styledLineView(_ runs: [Wire.StyledTextRun], baseFontSize: CGFloat, monospaced: Bool) -> some View {
+        if runs.isEmpty || (runs.count == 1 && runs[0].text.isEmpty) {
+            Text(" ")
+                .font(.system(size: baseFontSize, design: monospaced ? .monospaced : .default))
+                .foregroundStyle(.clear)
+        } else if shouldScrollHorizontally(runs) {
+            ScrollView(.horizontal) {
+                Text(buildAttributedString(runs, baseFontSize: baseFontSize, monospaced: monospaced))
+                    .font(.system(size: baseFontSize, design: monospaced ? .monospaced : .default))
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+        } else {
+            Text(buildAttributedString(runs, baseFontSize: baseFontSize, monospaced: monospaced))
+                .font(.system(size: baseFontSize, design: monospaced ? .monospaced : .default))
+                .textSelection(.enabled)
+        }
+    }
+
+    private func shouldScrollHorizontally(_ runs: [Wire.StyledTextRun]) -> Bool {
+        let textRuns = runs.filter { !$0.text.isEmpty }
+        return !textRuns.isEmpty && textRuns.allSatisfy { run in
+            run.bgR != 0 || run.bgG != 0 || run.bgB != 0
+        }
+    }
+
+    private func safeLinkURL(_ value: String?) -> URL? {
+        guard let value, let url = URL(string: value), let scheme = url.scheme?.lowercased() else { return nil }
+        switch scheme {
+        case "http", "https":
+            guard let host = url.host, !host.isEmpty else { return nil }
+            return url
+        case "mailto":
+            guard !url.path.isEmpty else { return nil }
+            return url
+        default:
+            return nil
+        }
     }
 
     @ViewBuilder
@@ -403,19 +438,12 @@ struct AgentChatView: View {
                     .fill(theme.agentToolBorder.opacity(0.2))
                     .frame(height: 1)
 
-                ScrollView(.vertical) {
+                ScrollView([.horizontal, .vertical]) {
                     if let lines = resultLines, !lines.isEmpty {
                         // Styled result with tree-sitter/markdown formatting
                         VStack(alignment: .leading, spacing: 2) {
                             ForEach(Array(lines.enumerated()), id: \.offset) { _, runs in
-                                if runs.isEmpty || (runs.count == 1 && runs[0].text.isEmpty) {
-                                    Text(" ")
-                                        .font(.system(size: 11, design: .monospaced))
-                                        .foregroundStyle(.clear)
-                                } else {
-                                    Text(buildAttributedString(runs, baseFontSize: 11, monospaced: true))
-                                        .textSelection(.enabled)
-                                }
+                                styledLineView(runs, baseFontSize: 11, monospaced: true)
                             }
                         }
                         .padding(10)
@@ -425,6 +453,7 @@ struct AgentChatView: View {
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(theme.agentTextFg.opacity(0.7))
                             .textSelection(.enabled)
+                            .fixedSize(horizontal: true, vertical: false)
                             .padding(10)
                     }
                 }

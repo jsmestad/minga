@@ -38,6 +38,77 @@ defmodule MingaAgent.MarkdownTest do
       assert [{"Use ", :plain}, {"mix compile", :code}, {" here", :plain}] = segments
     end
 
+    test "parses links" do
+      result = Markdown.parse("Read [the docs](https://example.com/docs) today")
+      assert [{segments, :text}] = result
+
+      assert [
+               {"Read ", :plain},
+               {"the docs", {:link, "https://example.com/docs"}},
+               {" today", :plain}
+             ] = segments
+    end
+
+    test "keeps malformed links as plain text" do
+      result = Markdown.parse("Read [the docs](")
+      assert [{segments, :text}] = result
+      assert [{"Read [the docs](", :plain}] = segments
+    end
+
+    test "does not merge bracket text before a later link" do
+      result = Markdown.parse("See [draft] and [docs](https://example.com)")
+      assert [{segments, :text}] = result
+
+      assert [
+               {"See [draft] and ", :plain},
+               {"docs", {:link, "https://example.com"}}
+             ] = segments
+    end
+
+    test "renders unsafe link schemes as plain text" do
+      result = Markdown.parse("Open [local file](file:///etc/passwd) now")
+      assert [{segments, :text}] = result
+      assert [{"Open local file now", :plain}] = segments
+    end
+
+    test "parses uppercase safe link schemes" do
+      result = Markdown.parse("Read [docs](HTTPS://example.com/docs)")
+      assert [{segments, :text}] = result
+      assert [{"Read ", :plain}, {"docs", {:link, "HTTPS://example.com/docs"}}] = segments
+    end
+
+    test "parses mailto links" do
+      result = Markdown.parse("Email [support](mailto:support@example.com)")
+      assert [{segments, :text}] = result
+      assert [{"Email ", :plain}, {"support", {:link, "mailto:support@example.com"}}] = segments
+    end
+
+    test "requires hosts for http links and paths for mailto links" do
+      assert [{[{"Broken link", :plain}], :text}] = Markdown.parse("[Broken link](https://)")
+      assert [{[{"Empty mail", :plain}], :text}] = Markdown.parse("[Empty mail](mailto:)")
+    end
+
+    test "rejects malformed urls with whitespace or invalid host characters" do
+      assert [{[{"Bad host", :plain}], :text}] =
+               Markdown.parse("[Bad host](https://exa mple.com)")
+
+      assert [{[{"Bad chars", :plain}], :text}] =
+               Markdown.parse("[Bad chars](https://exa[mple.com)")
+
+      assert [{[{"Bad escape", :plain}], :text}] = Markdown.parse("[Bad escape](https://%zz)")
+      assert [{[{"Bad mail", :plain}], :text}] = Markdown.parse("[Bad mail](mailto:foo bar)")
+    end
+
+    test "preserves links inside blockquotes" do
+      result = Markdown.parse("> See [docs](https://example.com)")
+      assert [{segments, :blockquote}] = result
+
+      assert [
+               {"│ See ", :blockquote},
+               {"docs", {:link, "https://example.com"}}
+             ] = segments
+    end
+
     test "parses H1 header" do
       result = Markdown.parse("# Title")
       assert [{[{"Title", :header1}], :header}] = result
@@ -68,6 +139,11 @@ defmodule MingaAgent.MarkdownTest do
     test "parses blockquotes" do
       result = Markdown.parse("> Some quote")
       assert [{_segments, :blockquote}] = result
+    end
+
+    test "parses blockquotes without a space after the marker" do
+      result = Markdown.parse(">Some quote")
+      assert [{[{"│ Some quote", :blockquote}], :blockquote}] = result
     end
 
     test "parses horizontal rules" do
@@ -123,7 +199,9 @@ defmodule MingaAgent.MarkdownTest do
     end
 
     test "handles mixed formatting in one line" do
-      result = Markdown.parse("This is **bold** and *italic* and `code`")
+      result =
+        Markdown.parse("This is **bold** and *italic* and `code` and [link](https://example.com)")
+
       assert [{segments, :text}] = result
 
       assert [
@@ -132,7 +210,9 @@ defmodule MingaAgent.MarkdownTest do
                {" and ", :plain},
                {"italic", :italic},
                {" and ", :plain},
-               {"code", :code}
+               {"code", :code},
+               {" and ", :plain},
+               {"link", {:link, "https://example.com"}}
              ] = segments
     end
 
