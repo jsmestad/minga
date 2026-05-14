@@ -148,6 +148,21 @@ defmodule Minga.Editing.Completion do
 
   # ── Selection ────────────────────────────────────────────────────────────────
 
+  @doc "Selects an item by its offset in the current visible completion window."
+  @spec select_visible(t(), non_neg_integer()) :: t()
+  def select_visible(%__MODULE__{filtered: []} = completion, _offset), do: completion
+
+  def select_visible(%__MODULE__{} = completion, offset)
+      when is_integer(offset) and offset >= 0 do
+    {visible, _selected_offset} = visible_items(completion)
+
+    if Enum.at(visible, offset) == nil do
+      completion
+    else
+      %{completion | selected: visible_start(completion) + offset}
+    end
+  end
+
   @doc "Returns the currently selected item, or nil if no items."
   @spec selected_item(t()) :: item() | nil
   def selected_item(%__MODULE__{filtered: []}), do: nil
@@ -188,27 +203,26 @@ defmodule Minga.Editing.Completion do
   @spec visible_items(t()) :: {[item()], non_neg_integer()}
   def visible_items(%__MODULE__{filtered: []}), do: {[], 0}
 
-  def visible_items(%__MODULE__{filtered: filtered, selected: sel, max_visible: max_vis}) do
-    total = length(filtered)
-
-    {start, count} =
-      cond do
-        total <= max_vis ->
-          {0, total}
-
-        sel < div(max_vis, 2) ->
-          {0, max_vis}
-
-        sel >= total - div(max_vis, 2) ->
-          {total - max_vis, max_vis}
-
-        true ->
-          {sel - div(max_vis, 2), max_vis}
-      end
-
-    visible = Enum.slice(filtered, start, count)
+  def visible_items(%__MODULE__{filtered: filtered, selected: sel, max_visible: max_vis} = c) do
+    start = visible_start(c)
+    visible = Enum.slice(filtered, start, min(length(filtered), max_vis))
     {visible, sel - start}
   end
+
+  @spec visible_start(t()) :: non_neg_integer()
+  defp visible_start(%__MODULE__{filtered: filtered, selected: sel, max_visible: max_vis}) do
+    visible_start(length(filtered), sel, max_vis)
+  end
+
+  @spec visible_start(non_neg_integer(), non_neg_integer(), pos_integer()) :: non_neg_integer()
+  defp visible_start(total, _sel, max_vis) when total <= max_vis, do: 0
+  defp visible_start(_total, sel, max_vis) when sel < div(max_vis, 2), do: 0
+
+  defp visible_start(total, sel, max_vis) when sel >= total - div(max_vis, 2) do
+    total - max_vis
+  end
+
+  defp visible_start(_total, sel, max_vis), do: sel - div(max_vis, 2)
 
   @doc "Returns true if there are any filtered items to show."
   @spec active?(t()) :: boolean()

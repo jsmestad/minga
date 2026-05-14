@@ -578,6 +578,27 @@ struct ContentView: View {
 
     // MARK: - Editor Surface (Metal + editor-local overlays)
 
+    private func completionOverlayCursor() -> (row: Int, col: Int, gutterPad: CGFloat) {
+        guard let nsView = appState.editorNSView else {
+            return (appState.gui.completionState.anchorRow, appState.gui.completionState.anchorCol, 0)
+        }
+
+        let frameState = nsView.dispatcher.frameState
+        let gutterPad: CGFloat
+
+        if frameState.gutterCol > 0 {
+            if frameState.cursorCol >= frameState.gutterCol {
+                gutterPad = CoreTextMetalRenderer.gutterLeftMarginPt + CoreTextMetalRenderer.gutterRightGapPt
+            } else {
+                gutterPad = CoreTextMetalRenderer.gutterLeftMarginPt
+            }
+        } else {
+            gutterPad = 0
+        }
+
+        return (Int(frameState.cursorRow), Int(frameState.cursorCol), gutterPad)
+    }
+
     private var editorSurface: some View {
         ZStack(alignment: .topLeading) {
             // Metal editor surface (always present for input handling).
@@ -607,15 +628,14 @@ struct ContentView: View {
             if appState.gui.completionState.visible {
                 let cw = CGFloat(appState.editorNSView?.cellWidth ?? 8)
                 let ch = CGFloat(appState.editorNSView?.cellHeight ?? 16)
-                let x = CGFloat(appState.gui.completionState.anchorCol) * cw
-                let y = (CGFloat(appState.gui.completionState.anchorRow) + 1) * ch
+                let cursor = completionOverlayCursor()
+                let x = CGFloat(cursor.col) * cw + cursor.gutterPad
+                let y = (CGFloat(cursor.row) + 1) * ch
 
                 CompletionOverlay(
                     state: appState.gui.completionState,
                     theme: appState.gui.themeColors,
-                    encoder: appState.encoder,
-                    cellWidth: cw,
-                    cellHeight: ch
+                    encoder: appState.encoder
                 )
                 .offset(x: x, y: y)
             }

@@ -25,7 +25,7 @@ struct CompletionOverlayViewTests {
 
         let sut = CompletionOverlay(
             state: state, theme: ThemeColors(),
-            encoder: nil, cellWidth: 8, cellHeight: 16
+            encoder: nil
         )
 
         // When not visible, the body should produce no content
@@ -49,7 +49,7 @@ struct CompletionOverlayViewTests {
 
         let sut = CompletionOverlay(
             state: state, theme: ThemeColors(),
-            encoder: nil, cellWidth: 8, cellHeight: 16
+            encoder: nil
         )
 
         let body = try sut.inspect()
