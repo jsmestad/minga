@@ -51,7 +51,11 @@ defmodule MingaEditor.Renderer.Context do
             },
             show_invisible: false,
             tab_width: 2,
-            whitespace_face: nil
+            whitespace_face: nil,
+            search_colors: nil,
+            document_highlight_colors: nil,
+            wrap_on: false,
+            line_number_style: :absolute
 
   @typedoc """
   Represents the bounds of a visual selection for rendering.
@@ -87,6 +91,10 @@ defmodule MingaEditor.Renderer.Context do
           gutter_colors: MingaEditor.UI.Theme.Gutter.t(),
           show_invisible: boolean(),
           tab_width: pos_integer(),
-          whitespace_face: Face.t() | nil
+          whitespace_face: Face.t() | nil,
+          search_colors: MingaEditor.UI.Theme.Search.t() | nil,
+          document_highlight_colors: term(),
+          wrap_on: boolean(),
+          line_number_style: atom()
         }
 end

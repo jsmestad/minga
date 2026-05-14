@@ -9,7 +9,6 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
 
   alias MingaEditor.CompletionUI
   alias MingaEditor.DisplayList
-  alias Minga.Buffer
   alias MingaEditor.DisplayList.{Cursor, Overlay}
   alias MingaEditor.Layout
   alias MingaEditor.PickerUI
@@ -157,7 +156,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
       state.workspace.editing.mode_state,
       status_bar_dirty?(status_bar_data),
       state.shell_state.status_msg,
-      state.theme.name
+      state.theme
     })
   end
 
@@ -177,20 +176,8 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
   end
 
   @spec cached_or_fresh_status_bar_data(state(), map() | nil) :: StatusBarData.t()
-  defp cached_or_fresh_status_bar_data(state, active_scroll) do
-    buf = state.workspace.buffers.active
-
-    case state.caches.chrome_prev_result do
-      %Chrome{status_bar_data: {:buffer, data}} when is_pid(buf) ->
-        {line, col} = scroll_cursor(active_scroll, buf)
-        {line_count, dirty} = scroll_buffer_status(active_scroll, data)
-
-        {:buffer,
-         StatusBarData.refresh_cached_buffer_data(data, state, line, col, line_count, dirty)}
-
-      _ ->
-        StatusBarData.from_state(state)
-    end
+  defp cached_or_fresh_status_bar_data(state, _active_scroll) do
+    StatusBarData.from_state(state)
   catch
     :exit, _ -> StatusBarData.from_state(state)
   end
@@ -198,17 +185,6 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
   @spec status_bar_dirty?(StatusBarData.t()) :: boolean()
   defp status_bar_dirty?({:buffer, %{dirty: dirty}}), do: dirty
   defp status_bar_dirty?({:agent, %{dirty: dirty}}), do: dirty
-
-  @spec scroll_cursor(map() | nil, pid()) :: {non_neg_integer(), non_neg_integer()}
-  defp scroll_cursor(%{cursor_line: line, cursor_byte_col: col}, _buf), do: {line, col}
-  defp scroll_cursor(_active_scroll, buf), do: Buffer.cursor(buf)
-
-  @spec scroll_buffer_status(map() | nil, StatusBarData.buffer_data()) ::
-          {non_neg_integer(), boolean()}
-  defp scroll_buffer_status(%{snapshot: %{line_count: line_count, dirty: dirty}}, _data),
-    do: {line_count, dirty}
-
-  defp scroll_buffer_status(_active_scroll, data), do: {data.line_count, data.dirty}
 
   # ── Overlays ──────────────────────────────────────────────────────────────
 

@@ -114,28 +114,6 @@ defmodule MingaEditor.StatusBar.Data do
     end
   end
 
-  @doc "Updates cached buffer status data with the dynamic fields that can change every frame."
-  @spec refresh_cached_buffer_data(
-          buffer_data(),
-          EditorState.t() | map(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          boolean()
-        ) :: buffer_data()
-  def refresh_cached_buffer_data(data, state, line, col, line_count, dirty) do
-    Map.merge(data, %{
-      mode: Minga.Editing.mode(state),
-      mode_state: Editing.mode_state(state),
-      cursor_line: line,
-      cursor_col: col,
-      line_count: line_count,
-      dirty: dirty,
-      macro_recording: Minga.Editing.macro_recording_status(state),
-      status_msg: state.shell_state.status_msg
-    })
-  end
-
   # ── Buffer variant ─────────────────────────────────────────────────────────
 
   @spec build_buffer_data(EditorState.t() | map()) :: buffer_data()

@@ -54,6 +54,7 @@ defmodule MingaEditor.RenderPipeline.Input do
   alias MingaEditor.Shell.Board.State, as: BoardState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.LSP, as: LSPState
+  alias MingaEditor.StatusBar.Data, as: StatusBarData
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.UI.FontRegistry
   alias MingaEditor.UI.Panel.MessageStore
@@ -214,15 +215,20 @@ defmodule MingaEditor.RenderPipeline.Input do
     # Hash the fields that drive chrome output. We use :erlang.phash2
     # for speed (no crypto needed, just change detection).
     #
-    # Includes the active buffer's cursor and version because the status
-    # bar displays cursor position, line count, and dirty state. The render
+    # Includes the active buffer identity, cursor, and version because the status
+    # bar displays file name, filetype, cursor position, line count, and dirty state. The render
     # pipeline passes scroll-stage buffer data when available so this does
     # not need duplicate GenServer calls in the hot path.
 
     :erlang.phash2({
-      # Buffer state for status bar (cursor pos, version/dirty)
+      # Buffer state for status bar (identity, cursor pos, version/dirty)
+      input.workspace.buffers.active,
       buf_cursor,
       buf_version,
+      # Theme affects status bar, tab bar, file tree, minibuffer, and overlay styling.
+      input.theme,
+      # Status bar metadata can change without a content version bump, such as save clearing dirty.
+      status_bar_fingerprint(input),
       # Mode affects status bar label, minibuffer content, cursor shape
       input.workspace.editing.mode,
       input.workspace.editing.mode_state,
@@ -256,6 +262,15 @@ defmodule MingaEditor.RenderPipeline.Input do
       # Shell-owned chrome state that does not belong in the generic pipeline contract
       input.shell.chrome_fingerprint(input)
     })
+  end
+
+  @spec status_bar_fingerprint(t()) :: integer()
+  defp status_bar_fingerprint(%__MODULE__{} = input) do
+    input
+    |> StatusBarData.from_state()
+    |> :erlang.phash2()
+  catch
+    :exit, _ -> 0
   end
 
   @spec buffer_fingerprint_data(pid() | nil) ::
