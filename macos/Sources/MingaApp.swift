@@ -35,7 +35,7 @@ struct MingaApp: App {
                 .focusable(false)
                 .focusEffectDisabled()
         }
-        .windowStyle(.titleBar)
+        .windowStyle(.hiddenTitleBar)
         .commands {
             MingaMenuCommands(appState: appDelegate.appState)
         }
@@ -266,7 +266,7 @@ struct ContentView: View {
     private var theme: ThemeColors { appState.gui.themeColors }
 
     private var titleBarLeadingPadding: CGFloat {
-        appState.isFullScreen ? 10 : 78
+        appState.isFullScreen ? 10 : 84
     }
 
     private var projectName: String {
@@ -304,42 +304,52 @@ struct ContentView: View {
 
     /// Single toolbar row spanning the full window width. Contains the
     /// sidebar header (when visible) and the tab bar, sharing one background.
+    private let contentHeight: CGFloat = 28
+
+    private var toolbarTopPadding: CGFloat {
+        max(appState.trafficLightMidY - contentHeight / 2, 0)
+    }
+
     @ViewBuilder
     private var unifiedToolbar: some View {
-        HStack(spacing: 0) {
-            if showSidebar {
-                sidebarHeaderContent
-                    .frame(width: sidebarWidth + 8) // +8 aligns with resize handle
+        ZStack(alignment: .bottom) {
+            HStack(spacing: 0) {
+                if showSidebar {
+                    sidebarHeaderContent
+                        .frame(width: sidebarWidth + 8) // +8 aligns with resize handle
 
-                // Thin vertical separator between sidebar header and tab bar
-                Rectangle()
-                    .fill(theme.tabSeparatorFg.opacity(0.4))
-                    .frame(width: 1, height: 16)
-            } else {
-                compactProjectBranchHeader
-            }
+                    // Thin vertical separator between sidebar header and tab bar
+                    Rectangle()
+                        .fill(theme.tabSeparatorFg.opacity(0.4))
+                        .frame(width: 1, height: 16)
+                } else {
+                    compactProjectBranchHeader
+                }
 
-            if !appState.gui.tabBarState.tabs.isEmpty {
-                TabBarView(
-                    tabBarState: appState.gui.tabBarState,
-                    theme: theme,
-                    encoder: appState.encoder
-                )
-            } else {
-                Spacer()
+                if !appState.gui.tabBarState.tabs.isEmpty {
+                    TabBarView(
+                        tabBarState: appState.gui.tabBarState,
+                        theme: theme,
+                        encoder: appState.encoder
+                    )
+                } else {
+                    Spacer()
+                }
             }
+            .frame(height: contentHeight)
+            .padding(.top, toolbarTopPadding)
+            .frame(maxHeight: .infinity, alignment: .top)
+
+            Rectangle()
+                .fill(theme.tabSeparatorFg.opacity(0.3))
+                .frame(height: 1)
         }
-        .frame(height: 38)
+        .frame(height: contentHeight + toolbarTopPadding + 4)
         .background {
             ZStack {
                 theme.tabBg
                 TitleBarDragRegion()
             }
-        }
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(theme.tabSeparatorFg.opacity(0.3))
-                .frame(height: 1)
         }
     }
 
@@ -391,7 +401,6 @@ struct ContentView: View {
         }
         .padding(.leading, titleBarLeadingPadding)
         .padding(.trailing, 12)
-        .frame(height: 38)
     }
 
     // MARK: - Sidebar Body
@@ -721,6 +730,8 @@ final class AppState {
     var windowBgIsDark: Bool = true
     /// Whether the window is currently in macOS full-screen mode.
     var isFullScreen: Bool = false
+    /// Vertical center of the traffic light buttons, measured from the window top.
+    var trafficLightMidY: CGFloat = 14
     /// Flipped once when the first complete frame (batch_end) arrives from
     /// the BEAM. The startup overlay fades out when this becomes true.
     var hasReceivedFirstFrame: Bool = false
@@ -865,6 +876,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 appState?.isFullScreen = isFullScreen
             }
         }
+        nsView.onTrafficLightMeasured = { [weak appState] midY in
+            Task { @MainActor in
+                appState?.trafficLightMidY = midY
+            }
+        }
         nsView.recoveryManager = recovery
         nsView.onScaleFactorChanged = { [weak self] newScale in
             self?.handleScaleChange(newScale: newScale)
@@ -907,8 +923,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let b = color.blueComponent
                 let isDark = (r * 0.299 + g * 0.587 + b * 0.114) < 0.5
                 appState.windowBgIsDark = isDark
+                let bgColor = NSColor(red: r, green: g, blue: b, alpha: 1)
                 for window in NSApp.windows {
                     window.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
+                    window.backgroundColor = bgColor
                 }
             }
         }

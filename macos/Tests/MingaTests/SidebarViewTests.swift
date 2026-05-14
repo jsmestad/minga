@@ -153,15 +153,15 @@ struct FileTreeViewTests {
         #expect(strings.contains("Project"))
     }
 
-    @Test("Header has four action buttons (new file, new folder, refresh, collapse all)")
-    @MainActor func headerHasFourActionButtons() throws {
+    @Test("Header action buttons are hidden at rest (shown on hover)")
+    @MainActor func headerActionButtonsHiddenAtRest() throws {
         let state = FileTreeState()
         state.visible = true
 
         let sut = FileTreeHeaderContent(fileTreeState: state, theme: ThemeColors(), encoder: nil, branchName: "", leadingPadding: 10)
         let body = try sut.inspect()
         let buttons = body.findAll(ViewType.Button.self)
-        #expect(buttons.count >= 4)
+        #expect(buttons.count == 0)
     }
 
     @Test("File entries render their names")

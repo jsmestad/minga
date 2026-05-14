@@ -41,6 +41,9 @@ final class EditorNSView: MTKView {
     /// Called when the view moves to a display with a different backing scale factor.
     var onScaleFactorChanged: ((CGFloat) -> Void)?
 
+    /// Notifies SwiftUI of the traffic light vertical center for toolbar alignment.
+    var onTrafficLightMeasured: ((CGFloat) -> Void)?
+
     /// Tracks BEAM responsiveness and handles Ctrl-G recovery.
     var recoveryManager: RecoveryManager?
 
@@ -370,6 +373,7 @@ final class EditorNSView: MTKView {
         window.titleVisibility = .hidden
         window.styleMask.insert(.fullSizeContentView)
 
+        measureTrafficLightPosition(in: window)
         installWindowObserversIfNeeded(for: window)
 
         registerForDraggedTypes([.fileURL])
@@ -430,6 +434,15 @@ final class EditorNSView: MTKView {
         }
 
         PortLogger.info("\(reason): \(cols)x\(rows) cells")
+    }
+
+    private func measureTrafficLightPosition(in window: NSWindow) {
+        guard let closeButton = window.standardWindowButton(.closeButton),
+              let titleBarView = closeButton.superview else { return }
+        let buttonInTitleBar = closeButton.frame
+        let titleBarHeight = titleBarView.frame.height
+        let topDownMidY = titleBarHeight - buttonInTitleBar.midY
+        onTrafficLightMeasured?(topDownMidY)
     }
 
     /// Registers for key-window notifications exactly once per window.
