@@ -93,6 +93,32 @@ defmodule Minga.Tool.Recipe.RegistryTest do
     end
   end
 
+  describe "expert_asset?/2" do
+    test "matches macOS arm64 bare binary" do
+      assert Registry.expert_asset?("expert_darwin_arm64", "darwin_arm64")
+    end
+
+    test "matches macOS amd64 bare binary" do
+      assert Registry.expert_asset?("expert_darwin_amd64", "darwin_amd64")
+    end
+
+    test "matches Linux amd64 bare binary" do
+      assert Registry.expert_asset?("expert_linux_amd64", "linux_amd64")
+    end
+
+    test "rejects macOS asset when platform is linux" do
+      refute Registry.expert_asset?("expert_darwin_arm64", "linux_amd64")
+    end
+
+    test "rejects checksums file" do
+      refute Registry.expert_asset?("expert_checksums.txt", "darwin_arm64")
+    end
+
+    test "rejects unrelated assets" do
+      refute Registry.expert_asset?("some-other-tool", "darwin_arm64")
+    end
+  end
+
   describe "clangd_asset?/2" do
     test "matches the macOS asset with darwin suffix" do
       assert Registry.clangd_asset?("clangd-mac-21.1.8.zip", "darwin_arm64")

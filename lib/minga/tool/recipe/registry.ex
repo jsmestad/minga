@@ -37,7 +37,8 @@ defmodule Minga.Tool.Recipe.Registry do
       package: "expert-lsp/expert",
       homepage: "https://github.com/expert-lsp/expert",
       category: :lsp_server,
-      languages: [:elixir]
+      languages: [:elixir],
+      asset_pattern: &Minga.Tool.Recipe.Registry.expert_asset?/2
     },
     %Recipe{
       name: :pyright,
@@ -382,4 +383,17 @@ defmodule Minga.Tool.Recipe.Registry do
   defp clangd_os_token("linux_" <> _), do: "linux"
   defp clangd_os_token("windows_" <> _), do: "windows"
   defp clangd_os_token(_), do: "unknown"
+
+  @doc """
+  Matches Expert release assets.
+
+  Expert ships bare platform binaries with no archive extension
+  (e.g., `expert_darwin_arm64`, `expert_linux_amd64`).
+  """
+  @spec expert_asset?(String.t(), String.t()) :: boolean()
+  def expert_asset?(asset_name, platform_suffix) do
+    name = String.downcase(asset_name)
+    suffix = String.downcase(platform_suffix)
+    String.starts_with?(name, "expert_") and String.contains?(name, suffix)
+  end
 end

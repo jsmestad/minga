@@ -49,6 +49,7 @@ defmodule Minga.Tool.Installer.GitHubRelease do
            :ok <- progress.(:extracting, "Extracting #{asset["name"]}..."),
            :ok <- extract_asset(tmp_path, asset["name"], bin_dir) do
         File.rm(tmp_path)
+        normalize_raw_binary(recipe, bin_dir, asset["name"])
 
         progress.(:verifying, "Setting permissions...")
         make_binaries_executable(bin_dir)
@@ -282,6 +283,20 @@ defmodule Minga.Tool.Installer.GitHubRelease do
     File.cp!(tmp_path, dest)
     {"", 0}
   end
+
+  @spec normalize_raw_binary(Recipe.t(), String.t(), String.t()) :: :ok
+  defp normalize_raw_binary(%Recipe{provides: [cmd | _]}, bin_dir, asset_name) do
+    actual = Path.join(bin_dir, asset_name)
+    expected = Path.join(bin_dir, cmd)
+
+    if actual != expected and File.exists?(actual) and not File.exists?(expected) do
+      File.rename!(actual, expected)
+    end
+
+    :ok
+  end
+
+  defp normalize_raw_binary(_recipe, _bin_dir, _asset_name), do: :ok
 
   @spec make_binaries_executable(String.t()) :: :ok
   defp make_binaries_executable(bin_dir) do
