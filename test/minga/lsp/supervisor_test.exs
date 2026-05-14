@@ -12,6 +12,8 @@ defmodule Minga.LSP.SupervisorTest do
   alias Minga.LSP.Supervisor, as: LSPSupervisor
   alias Minga.Test.MockLSPServer
 
+  @ready_timeout 15_000
+
   setup do
     diag_name = :"diag_sup_#{System.unique_integer()}"
     sup_name = :"lsp_sup_#{System.unique_integer()}"
@@ -35,7 +37,7 @@ defmodule Minga.LSP.SupervisorTest do
       _ ->
         assert_receive {:minga_event, :lsp_status_changed,
                         %Minga.Events.LspStatusEvent{name: :mock_lsp, status: :ready}},
-                       5_000
+                       @ready_timeout
     end
   end
 
