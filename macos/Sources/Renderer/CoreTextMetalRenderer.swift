@@ -1182,11 +1182,17 @@ final class CoreTextMetalRenderer {
         viewportWidth: Float,
         quads: inout [QuadGPU]
     ) {
-        guard visibleRows > 0, visibleCols > 0, cellW > 0, cellH > 0, scale > 0 else { return }
+        guard visibleRows > 0, visibleCols > 0, cellW > 0, cellH > 0, scale > 0 else {
+            assertionFailure("appendSelectionQuads called with invalid dimensions: rows=\(visibleRows) cols=\(visibleCols) cellW=\(cellW) cellH=\(cellH) scale=\(scale)")
+            return
+        }
 
         let requestedStartRow = Int(sel.startRow)
         let requestedEndRow = Int(sel.endRow)
-        guard requestedStartRow <= requestedEndRow else { return }
+        guard requestedStartRow <= requestedEndRow else {
+            assertionFailure("Selection startRow (\(requestedStartRow)) > endRow (\(requestedEndRow))")
+            return
+        }
 
         let startRow = max(requestedStartRow, 0)
         let endRow = min(requestedEndRow, visibleRows - 1)
@@ -1214,10 +1220,10 @@ final class CoreTextMetalRenderer {
             for row in startRow...endRow {
                 let y = rowOffset + Float(row) * lineHeightPx
                 let requestedCols = requestedSelectionCols(row: row, sel: sel, scrollLeft: scrollLeft, visibleCols: visibleCols)
-                guard let visibleCols = clampSelectionCols(requestedCols, scrollLeft: scrollLeft, visibleCols: visibleCols) else { continue }
+                guard let clampedCols = clampSelectionCols(requestedCols, scrollLeft: scrollLeft, visibleCols: visibleCols) else { continue }
 
-                let visibleStartCol = Float(visibleCols.start - scrollLeft)
-                let visibleEndCol = Float(visibleCols.end - scrollLeft)
+                let visibleStartCol = Float(clampedCols.start - scrollLeft)
+                let visibleEndCol = Float(clampedCols.end - scrollLeft)
 
                 var quad = QuadGPU()
                 quad.position = SIMD2<Float>(colOffset + visibleStartCol * colWidthPx, y)
@@ -1231,10 +1237,10 @@ final class CoreTextMetalRenderer {
             for row in startRow...endRow {
                 let y = rowOffset + Float(row) * lineHeightPx
                 let requestedCols = (start: Int(sel.startCol), end: Int(sel.endCol))
-                guard let visibleCols = clampSelectionCols(requestedCols, scrollLeft: scrollLeft, visibleCols: visibleCols) else { continue }
+                guard let clampedCols = clampSelectionCols(requestedCols, scrollLeft: scrollLeft, visibleCols: visibleCols) else { continue }
 
-                let visibleStartCol = Float(visibleCols.start - scrollLeft)
-                let visibleEndCol = Float(visibleCols.end - scrollLeft)
+                let visibleStartCol = Float(clampedCols.start - scrollLeft)
+                let visibleEndCol = Float(clampedCols.end - scrollLeft)
 
                 var quad = QuadGPU()
                 quad.position = SIMD2<Float>(colOffset + visibleStartCol * colWidthPx, y)

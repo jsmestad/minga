@@ -123,9 +123,9 @@ defmodule MingaEditor.SemanticWindow.Selection do
           non_neg_integer(),
           pos_integer()
         ) :: non_neg_integer()
-  defp char_end_col(visible_end_line, selection_end_line, end_col, _viewport_left, _visible_cols)
+  defp char_end_col(visible_end_line, selection_end_line, end_col, viewport_left, visible_cols)
        when visible_end_line == selection_end_line do
-    clamp_u16(end_col)
+    clamp_u16(min(end_col, viewport_left + visible_cols))
   end
 
   defp char_end_col(_visible_end_line, _selection_end_line, _end_col, viewport_left, visible_cols) do

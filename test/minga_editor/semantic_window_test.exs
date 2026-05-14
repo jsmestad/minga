@@ -404,12 +404,44 @@ defmodule MingaEditor.SemanticWindowTest do
       assert Selection.from_visual_selection({:char, {1, 0}, {3, 4}}, 5, 4, 0, 80) == nil
     end
 
+    test "drops char selection entirely below the viewport" do
+      assert Selection.from_visual_selection({:char, {20, 0}, {25, 4}}, 5, 4, 0, 80) == nil
+    end
+
+    test "selection at exact viewport bottom boundary is included" do
+      sel = Selection.from_visual_selection({:char, {8, 0}, {8, 5}}, 5, 4, 0, 80)
+
+      assert sel.type == :char
+      assert sel.start_row == 3
+      assert sel.end_row == 3
+    end
+
+    test "selection one row past viewport bottom is dropped" do
+      assert Selection.from_visual_selection({:char, {9, 0}, {9, 5}}, 5, 4, 0, 80) == nil
+    end
+
+    test "clips start_col to viewport_left when selection starts left of viewport" do
+      sel = Selection.from_visual_selection({:char, {5, 2}, {5, 20}}, 5, 4, 10, 80)
+
+      assert sel.start_col == 10
+      assert sel.end_col == 20
+    end
+
+    test "clips end_col to viewport right edge on same-line selection" do
+      sel = Selection.from_visual_selection({:char, {5, 4}, {5, 200}}, 5, 4, 0, 80)
+
+      assert sel.start_col == 4
+      assert sel.end_col == 80
+    end
+
     test "clips line selection to visible rows" do
       sel = Selection.from_visual_selection({:line, 1, 10}, 5, 4, 0, 80)
 
       assert sel.type == :line
       assert sel.start_row == 0
+      assert sel.start_col == 0
       assert sel.end_row == 3
+      assert sel.end_col == 0
     end
   end
 
