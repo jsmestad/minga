@@ -62,7 +62,9 @@ defmodule Minga.Project.FileFind do
 
   @spec do_detect_strategy_fallback(String.t(), boolean()) :: strategy()
   defp do_detect_strategy_fallback(_root, true), do: :git
-  defp do_detect_strategy_fallback(_root, false), do: if(executable_available?("find"), do: :find, else: :none)
+
+  defp do_detect_strategy_fallback(_root, false),
+    do: if(executable_available?("find"), do: :find, else: :none)
 
   # ── Strategies ──────────────────────────────────────────────────────────────
 

@@ -366,11 +366,15 @@ defmodule MingaEditor.UI.Picker do
 
   @spec do_match_kind(String.t(), String.t(), boolean()) :: :prefix | :substring | :fuzzy | :none
   defp do_match_kind(_text, _segment, true), do: :prefix
-  defp do_match_kind(text, segment, false), do: do_match_kind_substring(text, segment, String.contains?(text, segment))
+
+  defp do_match_kind(text, segment, false),
+    do: do_match_kind_substring(text, segment, String.contains?(text, segment))
 
   @spec do_match_kind_substring(String.t(), String.t(), boolean()) :: :substring | :fuzzy | :none
   defp do_match_kind_substring(_text, _segment, true), do: :substring
-  defp do_match_kind_substring(text, segment, false), do: if(fuzzy_match?(text, segment), do: :fuzzy, else: :none)
+
+  defp do_match_kind_substring(text, segment, false),
+    do: if(fuzzy_match?(text, segment), do: :fuzzy, else: :none)
 
   @spec match_score(:prefix | :substring | :fuzzy | :none) :: non_neg_integer()
   defp match_score(:prefix), do: 300
