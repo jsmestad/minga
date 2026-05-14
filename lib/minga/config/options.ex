@@ -345,8 +345,7 @@ defmodule Minga.Config.Options do
        "_build",
        "deps",
        ".DS_Store"
-     ],
-     "Directory names excluded from the file finder (SPC f f). Stacks with .gitignore."}
+     ], "Directory names excluded from the file finder (SPC f f). Stacks with .gitignore."}
   ]
   @valid_names Enum.map(@option_specs, &elem(&1, 0))
 
