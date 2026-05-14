@@ -22,7 +22,14 @@ defmodule Minga.Project.FileFindTest do
       File.mkdir_p!(Path.join(tmp_dir, "lib/sub"))
       File.write!(Path.join(tmp_dir, "lib/sub/deep.ex"), "deep")
 
-      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+      server = Minga.Config.Options.default_server()
+      original_excludes = Minga.Config.Options.get(server, :file_find_excludes)
+
+      on_exit(fn ->
+        Minga.Config.Options.set(server, :file_find_excludes, original_excludes)
+        File.rm_rf!(tmp_dir)
+      end)
+
       %{tmp_dir: tmp_dir}
     end
 
