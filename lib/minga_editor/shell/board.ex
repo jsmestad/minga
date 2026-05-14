@@ -336,6 +336,10 @@ defmodule MingaEditor.Shell.Board do
   defp zoom_status_face(_, theme), do: Minga.Core.Face.new(fg: 0x5C6370, bg: theme.editor.bg)
 
   @impl true
+  @spec chrome_fingerprint(term()) :: term()
+  def chrome_fingerprint(_editor_state), do: nil
+
+  @impl true
   @spec async_render?(term()) :: boolean()
   def async_render?(%{
         shell_state: %BoardState{} = board_state,

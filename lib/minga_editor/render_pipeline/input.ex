@@ -75,6 +75,7 @@ defmodule MingaEditor.RenderPipeline.Input do
     :focus_tree,
     :lsp,
     :parser_status,
+    :diff_views,
     # Workspace as a plain map (enables state.workspace.X pattern-matching)
     :workspace,
     # Terminal-level viewport (screen dimensions reported by frontend on resize)
@@ -121,6 +122,7 @@ defmodule MingaEditor.RenderPipeline.Input do
           focus_tree: MingaEditor.FocusTree.t() | nil,
           lsp: LSPState.t(),
           parser_status: atom(),
+          diff_views: %{pid() => EditorState.diff_view_info()},
           caches: Caches.t(),
           terminal_viewport: Viewport.t(),
           workspace: workspace()
@@ -149,6 +151,7 @@ defmodule MingaEditor.RenderPipeline.Input do
       focus_tree: state.focus_tree,
       lsp: state.lsp,
       parser_status: state.parser_status,
+      diff_views: state.diff_views,
       caches: state.caches,
       terminal_viewport: state.terminal_viewport,
       workspace: %{
@@ -249,7 +252,9 @@ defmodule MingaEditor.RenderPipeline.Input do
       # Bottom panel
       input.shell_state |> Map.get(:bottom_panel),
       # Git status panel
-      input.shell_state |> Map.get(:git_status_panel)
+      input.shell_state |> Map.get(:git_status_panel),
+      # Shell-owned chrome state that does not belong in the generic pipeline contract
+      input.shell.chrome_fingerprint(input)
     })
   end
 

@@ -8,10 +8,12 @@ defmodule MingaEditor.Input.GitStatusInputTest do
   """
   use ExUnit.Case, async: true
 
-  alias MingaEditor.State, as: EditorState
-  alias MingaEditor.Input.GitStatus
-  alias MingaEditor.Viewport
   alias Minga.Git
+  alias MingaEditor.Input.GitStatus
+  alias MingaEditor.Shell.Traditional.GitStatus.TuiState
+  alias MingaEditor.Shell.Traditional.State, as: ShellState
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Viewport
 
   # Keycodes
   @j ?j
@@ -24,31 +26,12 @@ defmodule MingaEditor.Input.GitStatusInputTest do
       %Git.StatusEntry{path: "file3.txt", status: :untracked, staged: false}
     ]
 
-    # Initialize TUI state with flat entries
-    tui_state = %MingaEditor.Input.GitStatus.TuiState{
-      cursor_index: 0,
-      collapsed: %{},
-      flat_entries: [
-        {:section_header, :conflicts, 0},
-        {:section_header, :staged, 1},
-        {:file, :staged, Enum.at(entries, 1)},
-        {:section_header, :changes, 1},
-        {:file, :changes, Enum.at(entries, 0)},
-        {:section_header, :untracked, 1},
-        {:file, :untracked, Enum.at(entries, 2)}
-      ],
-      entries: entries,
-      discard_confirmation: nil,
-      amend_mode: false
-    }
-
     panel_data = %{
       repo_state: :normal,
       branch: "main",
       ahead: 0,
       behind: 0,
-      entries: entries,
-      tui_state: tui_state
+      entries: entries
     }
 
     %EditorState{
@@ -58,17 +41,20 @@ defmodule MingaEditor.Input.GitStatusInputTest do
         keymap_scope: :git_status
       },
       shell_state: %MingaEditor.Shell.Traditional.State{
-        git_status_panel: panel_data
+        git_status_panel: panel_data,
+        git_status_tui_state: TuiState.new()
       },
       focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
     }
   end
 
-  test "git status panel initializes with tui state" do
+  test "git status panel keeps shared data separate from tui state" do
     state = make_state_with_git_panel()
     panel = EditorState.git_status_panel(state)
     assert panel != nil
-    tui = Map.get(panel, :tui_state)
+    refute Map.has_key?(panel, :tui_state)
+
+    tui = ShellState.git_status_tui_state(state.shell_state)
     assert tui != nil
     assert tui.cursor_index == 0
     assert tui.amend_mode == false

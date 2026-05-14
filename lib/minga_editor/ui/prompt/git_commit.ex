@@ -1,9 +1,9 @@
 defmodule MingaEditor.UI.Prompt.GitCommit do
   @moduledoc """
-  Prompt handler for creating a git commit.
+  Prompt handler for committing from the TUI git status panel.
 
-  Opens a text input for the commit message. On submit, commits all
-  staged changes with the entered message and refreshes the git repo.
+  Opens a minibuffer prompt with "Commit message: ". On submit, commits
+  the staged changes and refreshes the git status panel.
   """
 
   @behaviour MingaEditor.UI.Prompt.Handler
@@ -18,12 +18,12 @@ defmodule MingaEditor.UI.Prompt.GitCommit do
   @impl true
   @spec on_submit(String.t(), EditorState.t()) :: EditorState.t()
   def on_submit(text, state) do
-    trimmed = String.trim(text)
+    message = String.trim(text)
 
-    if trimmed == "" do
-      EditorState.set_status(state, "Commit aborted: empty message")
+    if message == "" do
+      EditorState.set_status(state, "Commit cancelled: empty message")
     else
-      do_commit(state, trimmed)
+      commit_and_refresh(state, message)
     end
   end
 
@@ -31,21 +31,31 @@ defmodule MingaEditor.UI.Prompt.GitCommit do
   @spec on_cancel(EditorState.t()) :: EditorState.t()
   def on_cancel(state), do: state
 
-  @spec do_commit(EditorState.t(), String.t()) :: EditorState.t()
-  defp do_commit(state, message) do
-    case Git.root_for(Minga.Project.resolve_root()) do
-      {:ok, git_root} ->
+  @spec commit_and_refresh(EditorState.t(), String.t()) :: EditorState.t()
+  defp commit_and_refresh(state, message) do
+    case resolve_git_root() do
+      nil ->
+        EditorState.set_status(state, "Not in a git repository")
+
+      git_root ->
         case Git.commit(git_root, message) do
-          {:ok, hash} ->
+          {:ok, short_hash} ->
             refresh_repo(git_root)
-            EditorState.set_status(state, "Committed #{hash}")
+            EditorState.set_status(state, "Committed #{short_hash}")
 
           {:error, reason} ->
             EditorState.set_status(state, "Commit failed: #{reason}")
         end
+    end
+  end
 
-      :not_git ->
-        EditorState.set_status(state, "Not in a git repository")
+  @spec resolve_git_root() :: String.t() | nil
+  defp resolve_git_root do
+    root = Minga.Project.resolve_root()
+
+    case Git.root_for(root) do
+      {:ok, git_root} -> git_root
+      :not_git -> nil
     end
   end
 

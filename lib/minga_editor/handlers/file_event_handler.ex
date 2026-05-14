@@ -34,8 +34,8 @@ defmodule MingaEditor.Handlers.FileEventHandler do
     handle_git_status_changed(state, event)
   end
 
-  def handle(state, {:minga_event, :buffer_saved, %Minga.Events.BufferEvent{}}) do
-    handle_buffer_saved(state)
+  def handle(state, {:minga_event, :buffer_saved, %Minga.Events.BufferEvent{buffer: buf}}) do
+    handle_buffer_saved(state, buf)
   end
 
   def handle(state, {:git_remote_result, ref, result}) when is_reference(ref) do
@@ -56,33 +56,46 @@ defmodule MingaEditor.Handlers.FileEventHandler do
          ahead: ahead,
          behind: behind
        }) do
-    if EditorState.git_status_panel(state) != nil do
-      git_status_data = %{
-        repo_state: :normal,
-        branch: branch || "",
-        ahead: ahead,
-        behind: behind,
-        entries: entries
-      }
+    case EditorState.git_status_panel(state) do
+      nil ->
+        {state, []}
 
-      new_state = EditorState.set_git_status_panel(state, git_status_data)
-      {new_state, [{:render, 16}]}
-    else
-      {state, []}
+      _panel ->
+        git_status_data = %{
+          repo_state: :normal,
+          branch: branch || "",
+          ahead: ahead,
+          behind: behind,
+          entries: entries
+        }
+
+        state = EditorState.set_git_status_panel(state, git_status_data)
+
+        {shell_state, workspace} =
+          state.shell.handle_event(
+            state.shell_state,
+            state.workspace,
+            {:git_status_changed, entries}
+          )
+
+        new_state = %{state | shell_state: shell_state, workspace: workspace}
+
+        {new_state, [{:render, 16}]}
     end
   end
 
-  @spec handle_buffer_saved(EditorState.t()) :: {EditorState.t(), [file_effect()]}
-  defp handle_buffer_saved(state) do
-    # Refresh file tree git status
-    new_state = refresh_tree_git_status(state)
+  @spec handle_buffer_saved(EditorState.t(), pid()) :: {EditorState.t(), [file_effect()]}
+  defp handle_buffer_saved(state, saved_buf) do
+    new_state =
+      state
+      |> refresh_tree_git_status()
+      |> MingaEditor.Commands.Git.refresh_diff_views_for_buffer(saved_buf)
 
     effects = [
       {:request_code_lens},
       {:request_inlay_hints}
     ]
 
-    # Save session on file save (skip in headless)
     effects =
       if state.backend != :headless do
         effects ++ [{:save_session_deferred}]

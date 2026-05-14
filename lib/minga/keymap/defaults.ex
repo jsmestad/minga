@@ -125,6 +125,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?g, @none}, {?b, @none}], :git_blame_line, "Blame line"},
     {[{?g, @none}, {?c, @none}, {?c, @none}], :git_commit_open, "Commit"},
     {[{?g, @none}, {?c, @none}, {?a, @none}], :git_amend_open, "Amend commit"},
+    {[{?g, @none}, {?D, @none}], :git_diff_toggle_staged, "Toggle staged/unstaged diff"},
 
     # ── Project ────────────────────────────────────────────────────────────────
     {[{?p, @none}, {?f, @none}], :project_find_file, "Find file in project"},

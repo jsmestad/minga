@@ -60,6 +60,13 @@ defmodule Minga.Git.Stub do
     :ok
   end
 
+  @doc "Sets the staged index content for a file in a git root."
+  @spec set_staged(String.t(), String.t(), String.t()) :: :ok
+  def set_staged(git_root, relative_path, content) do
+    :ets.insert(@table, {{:staged, Path.expand(git_root), relative_path}, content})
+    :ok
+  end
+
   @doc "Sets the log entries returned for `git_root`."
   @spec set_log(String.t(), [Minga.Git.log_entry()]) :: :ok
   def set_log(git_root, entries) when is_list(entries) do
@@ -88,6 +95,7 @@ defmodule Minga.Git.Stub do
     :ets.match_delete(@table, {{:root, expanded}, :_})
     :ets.match_delete(@table, {{:status, expanded}, :_})
     :ets.match_delete(@table, {{:head, expanded, :_}, :_})
+    :ets.match_delete(@table, {{:staged, expanded, :_}, :_})
     :ets.match_delete(@table, {{:log, expanded}, :_})
     :ets.match_delete(@table, {{:diff, expanded}, :_})
     :ets.match_delete(@table, {{:branch, expanded}, :_})
@@ -107,6 +115,15 @@ defmodule Minga.Git.Stub do
   @spec show_head(String.t(), String.t()) :: {:ok, String.t()} | :error
   def show_head(git_root, relative_path) do
     case :ets.lookup(@table, {:head, Path.expand(git_root), relative_path}) do
+      [{_, content}] -> {:ok, content}
+      [] -> :error
+    end
+  end
+
+  @impl true
+  @spec show_staged(String.t(), String.t()) :: {:ok, String.t()} | :error
+  def show_staged(git_root, relative_path) do
+    case :ets.lookup(@table, {:staged, Path.expand(git_root), relative_path}) do
       [{_, content}] -> {:ok, content}
       [] -> :error
     end

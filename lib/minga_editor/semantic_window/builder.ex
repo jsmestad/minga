@@ -112,7 +112,14 @@ defmodule MingaEditor.SemanticWindow.Builder do
       end
 
     # Selection in display coordinates
-    selection = Selection.from_visual_selection(ctx.visual_selection, viewport.top)
+    selection =
+      Selection.from_visual_selection(
+        ctx.visual_selection,
+        viewport.top,
+        visible_rows,
+        viewport.left,
+        viewport.cols
+      )
 
     # Search matches in display coordinates
     viewport_bottom = viewport.top + visible_rows

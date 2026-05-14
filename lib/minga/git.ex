@@ -84,6 +84,15 @@ defmodule Minga.Git do
   def show_head(git_root, relative_path), do: impl().show_head(git_root, relative_path)
 
   @doc """
+  Reads the staged (index) version of a file from git.
+
+  Returns `{:ok, content}` with the file content in the index, or `:error`
+  if the file is not staged.
+  """
+  @spec show_staged(String.t(), String.t()) :: {:ok, String.t()} | :error
+  def show_staged(git_root, relative_path), do: impl().show_staged(git_root, relative_path)
+
+  @doc """
   Applies a unified diff patch to the git index (staging area).
   """
   @spec stage_patch(String.t(), String.t()) :: :ok | {:error, String.t()}

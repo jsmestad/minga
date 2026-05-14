@@ -41,6 +41,21 @@ defmodule Minga.Git.System do
   end
 
   @impl true
+  @spec show_staged(String.t(), String.t()) :: {:ok, String.t()} | :error
+  def show_staged(git_root, relative_path)
+      when is_binary(git_root) and is_binary(relative_path) do
+    case System.cmd("git", ["show", ":#{relative_path}"],
+           cd: git_root,
+           stderr_to_stdout: true
+         ) do
+      {content, 0} -> {:ok, content}
+      _ -> :error
+    end
+  rescue
+    _ -> :error
+  end
+
+  @impl true
   @spec stage_patch(String.t(), String.t()) :: :ok | {:error, String.t()}
   def stage_patch(git_root, patch) when is_binary(git_root) and is_binary(patch) do
     port =
