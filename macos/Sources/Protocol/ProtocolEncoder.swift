@@ -75,6 +75,7 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendGitPull()
     func sendGitFetch()
     func sendGitCommitAmend(message: String)
+    func sendGitPullAndRetry()
     func sendGroupRename(id: UInt16, name: String)
     func sendGroupSetIcon(id: UInt16, icon: String)
     func sendGroupClose(id: UInt16)
@@ -664,6 +665,14 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         if msgLen > 0 {
             buf.replaceSubrange(4..<(4 + msgLen), with: utf8[0..<msgLen])
         }
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: git_pull_and_retry. Layout: opcode(1) + action_type(1).
+    func sendGitPullAndRetry() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_GIT_PULL_AND_RETRY
         writeFrame(buf)
     }
 

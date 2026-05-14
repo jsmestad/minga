@@ -299,6 +299,7 @@ let GUI_ACTION_GIT_PUSH: UInt8 = 0x38
 let GUI_ACTION_GIT_PULL: UInt8 = 0x39
 let GUI_ACTION_GIT_FETCH: UInt8 = 0x3A
 let GUI_ACTION_GIT_COMMIT_AMEND: UInt8 = 0x3B
+let GUI_ACTION_GIT_PULL_AND_RETRY: UInt8 = 0x3C
 
 // MARK: - Log message opcode (frontend → BEAM)
 

@@ -565,7 +565,8 @@ struct ContentView: View {
             isFileTreeVisible: appState.gui.fileTreeState.visible,
             isGitStatusVisible: appState.gui.gitStatusState.visible,
             isBottomPanelVisible: appState.gui.bottomPanelState.visible,
-            isAgentChatVisible: appState.gui.agentChatState.visible
+            isAgentChatVisible: appState.gui.agentChatState.visible,
+            gitSyncing: appState.gui.gitStatusState.syncing
         )
     }
 

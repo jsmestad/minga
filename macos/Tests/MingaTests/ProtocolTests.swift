@@ -326,6 +326,7 @@ final class SpyEncoder: InputEncoder, Sendable {
         case gitPull
         case gitFetch
         case gitCommitAmend(message: String)
+        case gitPullAndRetry
         case boardSelectCard(id: UInt32)
         case boardCloseCard(id: UInt32)
         case boardReorder(cardId: UInt32, newIndex: UInt16)
@@ -418,6 +419,7 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendGitPull() { state.withLock { $0.guiActions.append(.gitPull) } }
     func sendGitFetch() { state.withLock { $0.guiActions.append(.gitFetch) } }
     func sendGitCommitAmend(message: String) { state.withLock { $0.guiActions.append(.gitCommitAmend(message: message)) } }
+    func sendGitPullAndRetry() { state.withLock { $0.guiActions.append(.gitPullAndRetry) } }
     func sendGroupRename(id: UInt16, name: String) { state.withLock { $0.guiActions.append(.gitOpenFile(path: "rename:\(id):\(name)")) } }
     func sendGroupSetIcon(id: UInt16, icon: String) { state.withLock { $0.guiActions.append(.gitOpenFile(path: "icon:\(id):\(icon)")) } }
     func sendGroupClose(id: UInt16) { state.withLock { $0.guiActions.append(.gitOpenFile(path: "close-ws:\(id)")) } }

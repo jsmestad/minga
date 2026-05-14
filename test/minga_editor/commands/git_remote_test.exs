@@ -76,6 +76,13 @@ defmodule MingaEditor.Commands.GitRemoteTest do
 
       assert :git_fetch in names
     end
+
+    test "git_pull_and_retry is registered as a command" do
+      commands = GitCommands.__commands__()
+      names = Enum.map(commands, & &1.name)
+
+      assert :git_pull_and_retry in names
+    end
   end
 
   # ── handle_remote_result/3 ─────────────────────────────────────────────
@@ -103,6 +110,33 @@ defmodule MingaEditor.Commands.GitRemoteTest do
       assert result.git_remote_op == nil
     end
 
+    test "suggests pull and retry only for rejected push errors" do
+      ref = make_ref()
+      op = make_remote_op(ref, {"/tmp/repo", "Pushed", "Push failed"})
+      state = build_state(%{git_remote_op: op})
+
+      result = GitCommands.handle_remote_result(state, ref, {:error, "non-fast-forward rejected"})
+
+      assert %{
+               message: "Push failed: non-fast-forward rejected",
+               level: :error,
+               action: :pull_and_retry,
+               dismiss_ref: dismiss_ref
+             } = result.shell_state.git_toast
+
+      assert is_reference(dismiss_ref)
+    end
+
+    test "does not suggest pull and retry for non-push errors" do
+      ref = make_ref()
+      op = make_remote_op(ref, {"/tmp/repo", "Pulled", "Pull failed"})
+      state = build_state(%{git_remote_op: op})
+
+      result = GitCommands.handle_remote_result(state, ref, {:error, "rejected by hook"})
+
+      assert %{action: nil} = result.shell_state.git_toast
+    end
+
     test "ignores stale results with non-matching ref" do
       current_ref = make_ref()
       stale_ref = make_ref()
@@ -124,6 +158,25 @@ defmodule MingaEditor.Commands.GitRemoteTest do
 
       assert result.git_remote_op == nil
       assert result.shell_state.status_msg == nil
+    end
+
+    test "toast dismissal only clears the matching toast" do
+      old_ref = make_ref()
+      new_ref = make_ref()
+
+      state =
+        build_state(%{})
+        |> EditorState.set_git_toast(%{
+          message: "Newer toast",
+          level: :success,
+          action: nil,
+          dismiss_ref: new_ref
+        })
+
+      assert EditorState.clear_git_toast(state, old_ref).shell_state.git_toast.message ==
+               "Newer toast"
+
+      assert EditorState.clear_git_toast(state, new_ref).shell_state.git_toast == nil
     end
   end
 

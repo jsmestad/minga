@@ -22,6 +22,13 @@ struct GitStatusHeaderContent: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
 
+            if state.syncing {
+                ProgressView()
+                    .controlSize(.mini)
+                    .scaleEffect(0.7)
+                    .frame(width: 14, height: 14)
+            }
+
             Spacer(minLength: 4)
 
             if state.ahead > 0 || state.behind > 0 {

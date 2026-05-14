@@ -24,6 +24,11 @@ struct GitStatusView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Toast banner
+            if let toast = state.toastMessage {
+                toastBanner(message: toast, level: state.toastLevel, action: state.toastAction)
+            }
+
             if state.repoState == .notARepo {
                 notARepoView
             } else if state.repoState == .loading {
@@ -488,6 +493,45 @@ struct GitStatusView: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - Toast banner
+
+    @ViewBuilder
+    private func toastBanner(message: String, level: ToastLevel, action: ToastAction) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: level == .success ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(level == .success ? theme.gitAddedFg : theme.gutterErrorFg)
+
+            Text(message)
+                .font(.system(size: 11))
+                .foregroundStyle(theme.treeFg)
+                .lineLimit(2)
+
+            Spacer(minLength: 4)
+
+            if action == .pullAndRetry {
+                Button("Pull & Retry") {
+                    encoder?.sendGitPullAndRetry()
+                }
+                .font(.system(size: 10, weight: .medium))
+                .buttonStyle(.plain)
+                .foregroundStyle(theme.accent)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(level == .success
+                    ? theme.gitAddedFg.opacity(0.1)
+                    : theme.gutterErrorFg.opacity(0.1))
+        )
+        .padding(.horizontal, 6)
+        .padding(.top, 4)
+        .transition(.move(edge: .top).combined(with: .opacity))
+        .animation(.easeInOut(duration: 0.2), value: state.toastMessage)
     }
 
     // MARK: - Status formatting

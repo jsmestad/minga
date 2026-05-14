@@ -9,11 +9,13 @@ defmodule MingaEditor.Commands.BufferManagementTest do
 
   defp start_editor(content) do
     {:ok, buffer} = BufferServer.start_link(content: content)
+    {:ok, options} = Options.start_link(name: nil)
 
     {:ok, editor} =
       MingaEditor.start_link(
         name: :"editor_#{:erlang.unique_integer([:positive])}",
         port_manager: nil,
+        options_server: options,
         buffer: buffer,
         width: 40,
         height: 10,
@@ -47,10 +49,13 @@ defmodule MingaEditor.Commands.BufferManagementTest do
 
       {:ok, buffer} = BufferServer.start_link(file_path: path)
 
+      {:ok, options} = Options.start_link(name: nil)
+
       {:ok, editor} =
         MingaEditor.start_link(
           name: :"editor_cmd_#{:erlang.unique_integer([:positive])}",
           port_manager: nil,
+          options_server: options,
           buffer: buffer,
           width: 40,
           height: 10,
@@ -106,10 +111,13 @@ defmodule MingaEditor.Commands.BufferManagementTest do
 
       {:ok, buffer} = BufferServer.start_link(file_path: path)
 
+      {:ok, options} = Options.start_link(name: nil)
+
       {:ok, editor} =
         MingaEditor.start_link(
           name: :"editor_ctrls_#{:erlang.unique_integer([:positive])}",
           port_manager: nil,
+          options_server: options,
           buffer: buffer,
           width: 40,
           height: 10,
@@ -160,10 +168,16 @@ defmodule MingaEditor.Commands.BufferManagementTest do
       assert tab_count(editor) == 1
     end
 
-    # Note: `:q` with a single tab calls `System.stop(0)` which can't be
-    # tested without killing the test process. The exit path is verified
-    # by code inspection: `close_tab_or_quit` falls through to
-    # `shutdown_editor` when the tab bar has only one tab.
+    test ":q with a single tab leaves an empty editor open" do
+      {editor, _buffer} = start_editor("first file")
+
+      type_string(editor, ":q\r")
+
+      state = :sys.get_state(editor)
+      assert Process.alive?(editor)
+      assert tab_count(editor) == 1
+      assert BufferServer.content(state.workspace.buffers.active) == ""
+    end
 
     test ":q does not kill the buffer (matches Neovim)" do
       {editor, first_buffer} = start_editor("first file")
@@ -213,18 +227,6 @@ defmodule MingaEditor.Commands.BufferManagementTest do
       assert state.shell_state.status_msg =~ "Modified buffers"
     end
 
-    test "quit with clean buffer exits without prompt" do
-      {editor, _buffer} = start_editor("hello")
-
-      # Buffer is clean (no edits). :q should not set pending_quit.
-      # It will call System.stop(0) which we can't easily test in a unit
-      # test, but we can verify pending_quit is NOT set by checking
-      # that the editor process is still alive for a moment.
-      # The real test is that pending_quit is nil.
-      state = :sys.get_state(editor)
-      refute state.pending_quit
-    end
-
     test "n at confirmation prompt cancels quit" do
       {editor, buffer} = start_editor("hello")
       BufferServer.insert_char(buffer, "X")
@@ -250,32 +252,6 @@ defmodule MingaEditor.Commands.BufferManagementTest do
       send_key(editor, 27)
       state = :sys.get_state(editor)
       assert state.pending_quit == nil
-    end
-
-    test "force quit bypasses confirmation even with dirty buffer" do
-      {editor, buffer} = start_editor("hello")
-      BufferServer.insert_char(buffer, "X")
-
-      # :q! should NOT set pending_quit
-      # (It calls System.stop so we check state before the command)
-      state = :sys.get_state(editor)
-      refute state.pending_quit
-    end
-
-    test "confirm_quit: false disables the prompt" do
-      {editor, buffer} = start_editor("hello")
-      BufferServer.insert_char(buffer, "X")
-      assert BufferServer.dirty?(buffer)
-
-      # Disable confirmation
-      Options.set(:confirm_quit, false)
-
-      # :q with dirty buffer should NOT prompt
-      # (It would call System.stop, so check that pending_quit is never set)
-      state = :sys.get_state(editor)
-      refute state.pending_quit
-    after
-      Options.set(:confirm_quit, true)
     end
   end
 end

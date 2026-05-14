@@ -9,29 +9,59 @@ defmodule MingaEditor.Frontend.GUIGitStatusTest do
     test "encodes empty entries with normal repo state" do
       data = %{
         repo_state: :normal,
+        syncing: false,
         branch: "main",
         ahead: 0,
         behind: 0,
-        entries: []
+        entries: [],
+        git_toast: nil
       }
 
       binary = ProtocolGUI.encode_gui_git_status(data)
 
-      # opcode(1) + repo_state(1) + ahead(2) + behind(2) + branch_len(2) + "main"(4) + entry_count(2)
-      assert byte_size(binary) == 1 + 1 + 2 + 2 + 2 + 4 + 2
+      # opcode + repo_state + syncing + ahead + behind + branch_len + "main" + entry_count + toast_present
+      assert byte_size(binary) == 1 + 1 + 1 + 2 + 2 + 2 + 4 + 2 + 1
 
-      <<0x85, repo_state::8, ahead::16, behind::16, branch_len::16,
-        branch::binary-size(branch_len), entry_count::16>> = binary
+      <<0x85, repo_state::8, syncing::8, ahead::16, behind::16, branch_len::16,
+        branch::binary-size(branch_len), entry_count::16, toast_present::8>> = binary
 
       assert repo_state == 0
+      assert syncing == 0
       assert ahead == 0
       assert behind == 0
       assert branch == "main"
       assert entry_count == 0
+      assert toast_present == 0
+    end
+
+    test "encodes syncing flag when true" do
+      data = %{
+        repo_state: :normal,
+        syncing: true,
+        branch: "main",
+        ahead: 0,
+        behind: 0,
+        entries: [],
+        git_toast: nil
+      }
+
+      binary = ProtocolGUI.encode_gui_git_status(data)
+
+      <<0x85, _repo::8, syncing::8, _rest::binary>> = binary
+      assert syncing == 1
     end
 
     test "encodes loading repo state" do
-      data = %{repo_state: :loading, branch: "", ahead: 0, behind: 0, entries: []}
+      data = %{
+        repo_state: :loading,
+        syncing: false,
+        branch: "",
+        ahead: 0,
+        behind: 0,
+        entries: [],
+        git_toast: nil
+      }
+
       binary = ProtocolGUI.encode_gui_git_status(data)
       <<0x85, repo_state::8, _rest::binary>> = binary
       assert repo_state == 2
@@ -40,10 +70,12 @@ defmodule MingaEditor.Frontend.GUIGitStatusTest do
     test "encodes not_a_repo state" do
       data = %{
         repo_state: :not_a_repo,
+        syncing: false,
         branch: "",
         ahead: 0,
         behind: 0,
-        entries: []
+        entries: [],
+        git_toast: nil
       }
 
       binary = ProtocolGUI.encode_gui_git_status(data)
@@ -55,15 +87,17 @@ defmodule MingaEditor.Frontend.GUIGitStatusTest do
     test "encodes ahead/behind counts" do
       data = %{
         repo_state: :normal,
+        syncing: false,
         branch: "feat/xyz",
         ahead: 3,
         behind: 1,
-        entries: []
+        entries: [],
+        git_toast: nil
       }
 
       binary = ProtocolGUI.encode_gui_git_status(data)
 
-      <<0x85, _repo::8, ahead::16, behind::16, _rest::binary>> = binary
+      <<0x85, _repo::8, _syncing::8, ahead::16, behind::16, _rest::binary>> = binary
       assert ahead == 3
       assert behind == 1
     end
@@ -77,17 +111,19 @@ defmodule MingaEditor.Frontend.GUIGitStatusTest do
 
       data = %{
         repo_state: :normal,
+        syncing: false,
         branch: "main",
         ahead: 0,
         behind: 0,
-        entries: entries
+        entries: entries,
+        git_toast: nil
       }
 
       binary = ProtocolGUI.encode_gui_git_status(data)
 
       # Parse header
-      <<0x85, _repo::8, _ahead::16, _behind::16, branch_len::16, _branch::binary-size(branch_len),
-        entry_count::16, rest::binary>> = binary
+      <<0x85, _repo::8, _syncing::8, _ahead::16, _behind::16, branch_len::16,
+        _branch::binary-size(branch_len), entry_count::16, rest::binary>> = binary
 
       assert entry_count == 3
 
@@ -107,13 +143,14 @@ defmodule MingaEditor.Frontend.GUIGitStatusTest do
       assert status2 == 1
       assert path2 == "lib/bar.ex"
 
-      # Parse third entry (untracked)
-      <<_hash3::32, section3::8, status3::8, path3_len::16, path3::binary-size(path3_len)>> =
-        rest3
+      # Parse third entry (untracked) -- toast_present byte follows
+      <<_hash3::32, section3::8, status3::8, path3_len::16, path3::binary-size(path3_len),
+        toast_present::8>> = rest3
 
       assert section3 == 2
       assert status3 == 6
       assert path3 == "new.txt"
+      assert toast_present == 0
     end
 
     test "encodes conflict entries in section 3" do
@@ -123,16 +160,19 @@ defmodule MingaEditor.Frontend.GUIGitStatusTest do
 
       data = %{
         repo_state: :normal,
+        syncing: false,
         branch: "main",
         ahead: 0,
         behind: 0,
-        entries: entries
+        entries: entries,
+        git_toast: nil
       }
 
       binary = ProtocolGUI.encode_gui_git_status(data)
 
-      <<0x85, _repo::8, _ahead::16, _behind::16, branch_len::16, _branch::binary-size(branch_len),
-        _count::16, _hash::32, section::8, status::8, _rest::binary>> = binary
+      <<0x85, _repo::8, _syncing::8, _ahead::16, _behind::16, branch_len::16,
+        _branch::binary-size(branch_len), _count::16, _hash::32, section::8, status::8,
+        _rest::binary>> = binary
 
       assert section == 3
       assert status == 7
@@ -155,20 +195,69 @@ defmodule MingaEditor.Frontend.GUIGitStatusTest do
 
         data = %{
           repo_state: :normal,
+          syncing: false,
           branch: "x",
           ahead: 0,
           behind: 0,
-          entries: entries
+          entries: entries,
+          git_toast: nil
         }
 
         binary = ProtocolGUI.encode_gui_git_status(data)
 
-        <<0x85, _repo::8, _ahead::16, _behind::16, _blen::16, _branch::binary-size(1), _count::16,
-          _hash::32, _section::8, status_byte::8, _rest::binary>> = binary
+        <<0x85, _repo::8, _syncing::8, _ahead::16, _behind::16, _blen::16,
+          _branch::binary-size(1), _count::16, _hash::32, _section::8, status_byte::8,
+          _rest::binary>> = binary
 
         assert status_byte == expected_byte,
                "expected #{status_atom} to encode as #{expected_byte}, got #{status_byte}"
       end
+    end
+
+    test "encodes success toast" do
+      data = %{
+        repo_state: :normal,
+        syncing: false,
+        branch: "main",
+        ahead: 0,
+        behind: 0,
+        entries: [],
+        git_toast: %{message: "Pushed", level: :success, action: nil}
+      }
+
+      binary = ProtocolGUI.encode_gui_git_status(data)
+
+      <<0x85, _repo::8, _syncing::8, _ahead::16, _behind::16, branch_len::16,
+        _branch::binary-size(branch_len), _count::16, toast_present::8, toast_level::8,
+        toast_action::8, msg_len::16, msg::binary-size(msg_len)>> = binary
+
+      assert toast_present == 1
+      assert toast_level == 0
+      assert toast_action == 0
+      assert msg == "Pushed"
+    end
+
+    test "encodes error toast with pull_and_retry action" do
+      data = %{
+        repo_state: :normal,
+        syncing: false,
+        branch: "main",
+        ahead: 0,
+        behind: 0,
+        entries: [],
+        git_toast: %{message: "Push failed: rejected", level: :error, action: :pull_and_retry}
+      }
+
+      binary = ProtocolGUI.encode_gui_git_status(data)
+
+      <<0x85, _repo::8, _syncing::8, _ahead::16, _behind::16, branch_len::16,
+        _branch::binary-size(branch_len), _count::16, toast_present::8, toast_level::8,
+        toast_action::8, msg_len::16, msg::binary-size(msg_len)>> = binary
+
+      assert toast_present == 1
+      assert toast_level == 1
+      assert toast_action == 1
+      assert msg == "Push failed: rejected"
     end
   end
 
@@ -209,6 +298,10 @@ defmodule MingaEditor.Frontend.GUIGitStatusTest do
       path = "src/main.rs"
       payload = <<byte_size(path)::16, path::binary>>
       assert {:ok, {:git_open_file, ^path}} = ProtocolGUI.decode_gui_action(0x1E, payload)
+    end
+
+    test "decodes git_pull_and_retry" do
+      assert {:ok, :git_pull_and_retry} = ProtocolGUI.decode_gui_action(0x3C, <<>>)
     end
 
     test "returns error for unknown opcode" do
