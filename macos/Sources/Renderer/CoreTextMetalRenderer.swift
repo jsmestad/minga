@@ -63,10 +63,14 @@ private let ctBgClearColorDefault = MTLClearColor(red: 0.01298, green: 0.01298, 
 /// in the render path, and all callers are on the main thread already.
 @MainActor
 final class CoreTextMetalRenderer {
+    /// Left margin before the gutter (breathing room from the window edge).
+    static let gutterLeftMarginPt: CGFloat = 6.0
+    /// Right gap between gutter and content (separator breathing room).
+    static let gutterRightGapPt: CGFloat = 8.0
     /// Total gutter pixel padding in points (left margin + right separator gap).
     /// Subtracted from the view width when computing cols for the BEAM so
     /// `content_w` accurately reflects the visible content area.
-    static let gutterPixelPaddingPt: CGFloat = 14.0  // 6pt left margin + 8pt right gap
+    static let gutterPixelPaddingPt: CGFloat = gutterLeftMarginPt + gutterRightGapPt
 
     let device: MTLDevice
     let commandQueue: MTLCommandQueue
@@ -316,9 +320,9 @@ final class CoreTextMetalRenderer {
 
         // Gutter spacing: left margin for breathing room, right padding before separator.
         // The sign column is always reserved (2 cell widths) for consistent layout.
-        let gutterLeftMarginPt: Float = frameState.gutterCol > 0 ? round(6.0 * scale) / scale : 0
+        let gutterLeftMarginPt: Float = frameState.gutterCol > 0 ? round(Float(Self.gutterLeftMarginPt) * scale) / scale : 0
         let gutterLeftMarginPx = gutterLeftMarginPt * scale
-        let gutterPaddingPt: Float = frameState.gutterCol > 0 ? round(8.0 * scale) / scale : 0
+        let gutterPaddingPt: Float = frameState.gutterCol > 0 ? round(Float(Self.gutterRightGapPt) * scale) / scale : 0
         let gutterPaddingPx = gutterPaddingPt * scale
 
         let renderCursor = CoreTextMetalRenderer.resolveCursor(

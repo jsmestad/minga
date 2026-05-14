@@ -430,11 +430,14 @@ defmodule MingaEditor.RenderPipeline.Scroll do
     if cursor_col >= vp.left and cursor_col < vp.left + content_w do
       vp
     else
-      # Temporarily set cols to content_w (excluding gutter) so adjust_left
-      # triggers scroll at the content edge, not the full viewport edge.
-      content_vp = %{vp | cols: content_w}
-      adjusted = Viewport.scroll_to_cursor(content_vp, {cursor_line, cursor_col}, scroll_margin)
-      %{vp | left: adjusted.left}
+      # Cursor fits within the first viewport-width of content; reset scroll rather than re-computing
+      if cursor_col < content_w do
+        %{vp | left: 0}
+      else
+        content_vp = %{vp | cols: content_w}
+        adjusted = Viewport.scroll_to_cursor(content_vp, {cursor_line, cursor_col}, scroll_margin)
+        %{vp | left: adjusted.left}
+      end
     end
   end
 

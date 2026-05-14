@@ -79,5 +79,22 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
       # First frame: sentinel values trigger full invalidation
       assert window.render_cache.dirty_lines == :all
     end
+
+    test "resets horizontal scroll when cursor fits on screen" do
+      state = base_state(content: "short line\nanother short line")
+
+      # Inject a stale left offset into the window's viewport
+      win_id = state.workspace.windows.active
+      window = Map.get(state.workspace.windows.map, win_id)
+      scrolled_vp = %{window.viewport | left: 40}
+      updated_window = %{window | viewport: scrolled_vp}
+      new_map = Map.put(state.workspace.windows.map, win_id, updated_window)
+      state = put_in(state.workspace.windows.map, new_map)
+
+      {scrolls, _state, _layout} = run_through_scroll(state)
+      [{_win_id, scroll}] = Map.to_list(scrolls)
+
+      assert scroll.viewport.left == 0
+    end
   end
 end
