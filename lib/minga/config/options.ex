@@ -57,6 +57,7 @@ defmodule Minga.Config.Options do
           | :title_format
           | :recent_files_limit
           | :persist_recent_files
+          | :persist_known_projects
           | :clipboard
           | :wrap
           | :linebreak
@@ -116,6 +117,7 @@ defmodule Minga.Config.Options do
           | :parser_tree_ttl
           | :event_retention_days
           | :default_shell
+          | :file_find_excludes
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -220,6 +222,8 @@ defmodule Minga.Config.Options do
     {:recent_files_limit, :pos_integer, 200, "Maximum number of recent files to keep."},
     {:persist_recent_files, :boolean, true,
      "Whether recent files are written to disk between sessions."},
+    {:persist_known_projects, :boolean, true,
+     "Whether known projects are written to disk between sessions."},
     {:clipboard, {:enum, [:unnamedplus, :unnamed, :none]}, :unnamedplus,
      "Clipboard register integration mode."},
     {:wrap, :boolean, false, "Whether long visual lines wrap in editor windows."},
@@ -319,7 +323,30 @@ defmodule Minga.Config.Options do
     {:event_retention_days, :pos_integer, 90,
      "Number of days to keep persisted event log entries."},
     {:default_shell, {:enum, [:traditional, :board]}, :traditional,
-     "Shell implementation opened by default."}
+     "Shell implementation opened by default."},
+    {:file_find_excludes, :string_list,
+     [
+       ".git",
+       "tmp",
+       "temp",
+       "log",
+       "dist",
+       ".cache",
+       ".elixir_ls",
+       ".lexical",
+       "node_modules",
+       ".venv",
+       "__pycache__",
+       ".mypy_cache",
+       "vendor",
+       "target",
+       "build",
+       "out",
+       "_build",
+       "deps",
+       ".DS_Store"
+     ],
+     "Directory names excluded from the file finder (SPC f f). Stacks with .gitignore."}
   ]
   @valid_names Enum.map(@option_specs, &elem(&1, 0))
 

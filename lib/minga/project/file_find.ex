@@ -50,20 +50,26 @@ defmodule Minga.Project.FileFind do
   """
   @spec detect_strategy(String.t()) :: strategy()
   def detect_strategy(root) do
-    cond do
-      fd_executable() != nil -> :fd
-      git_repo?(root) && executable_available?("git") -> :git
-      executable_available?("find") -> :find
-      true -> :none
+    if fd_executable() != nil do
+      :fd
+    else
+      if git_repo?(root) && executable_available?("git") do
+        :git
+      else
+        if executable_available?("find"), do: :find, else: :none
+      end
     end
   end
 
   # ── Strategies ──────────────────────────────────────────────────────────────
 
-  # Excludes .git/ contents via --exclude .git
+  @spec excludes() :: [String.t()]
+  defp excludes, do: Minga.Config.get(:file_find_excludes)
+
   @spec list_with_fd(String.t()) :: result()
   defp list_with_fd(root) do
-    args = ["--type", "f", "--hidden", "--follow", "--exclude", ".git", "."]
+    exclude_args = Enum.flat_map(excludes(), &["--exclude", &1])
+    args = ["--type", "f", "--hidden", "--follow"] ++ exclude_args ++ ["."]
 
     case System.cmd(fd_executable(), args, cd: root, stderr_to_stdout: true) do
       {output, 0} ->
@@ -74,7 +80,6 @@ defmodule Minga.Project.FileFind do
     end
   end
 
-  # Excludes .git/ contents inherently (only returns tracked/staged files)
   @spec list_with_git(String.t()) :: result()
   defp list_with_git(root) do
     args = ["ls-files", "--cached", "--others", "--exclude-standard"]
@@ -88,10 +93,10 @@ defmodule Minga.Project.FileFind do
     end
   end
 
-  # Excludes .git/ contents via -not -path "*/.git/*"
   @spec list_with_find(String.t()) :: result()
   defp list_with_find(root) do
-    args = [".", "-type", "f", "-not", "-path", "*/.git/*"]
+    exclude_args = Enum.flat_map(excludes(), &["-not", "-path", "*/#{&1}/*"])
+    args = [".", "-type", "f"] ++ exclude_args
 
     case System.cmd("find", args, cd: root, stderr_to_stdout: true) do
       {output, code} when code in [0, 1] ->

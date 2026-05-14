@@ -167,7 +167,7 @@ defmodule Minga.Project do
       Minga.Events.subscribe(:buffer_opened, events_registry)
     end
 
-    known = load_known_projects()
+    known = if persist_known_projects?(), do: load_known_projects(), else: []
     recent = if persist_recent_files?(), do: load_recent_files(), else: %{}
 
     {:ok,
@@ -248,7 +248,7 @@ defmodule Minga.Project do
   def handle_cast({:remove, root_path}, state) do
     expanded = Path.expand(root_path)
     new_known = Enum.reject(state.known_projects, &(&1 == expanded))
-    persist_known_projects(new_known)
+    if persist_known_projects?(), do: persist_known_projects(new_known)
     {:noreply, %{state | known_projects: new_known}}
   end
 
@@ -345,7 +345,7 @@ defmodule Minga.Project do
       state
     else
       new_known = [root | state.known_projects]
-      persist_known_projects(new_known)
+      if persist_known_projects?(), do: persist_known_projects(new_known)
       %{state | known_projects: new_known}
     end
   end
@@ -404,6 +404,11 @@ defmodule Minga.Project do
   @spec recent_files_limit() :: pos_integer()
   defp recent_files_limit do
     Config.get(:recent_files_limit)
+  end
+
+  @spec persist_known_projects?() :: boolean()
+  defp persist_known_projects? do
+    Config.get(:persist_known_projects)
   end
 
   @spec persist_recent_files?() :: boolean()
