@@ -78,6 +78,15 @@ defmodule Minga.Core.DiffMerge3Test do
 
       assert {:conflict, _hunks} = Diff.merge3(ancestor, fork, parent)
     end
+
+    test "overlapping edit after conflict does not drop unchanged ancestor lines" do
+      ancestor = Enum.map(1..9, &Integer.to_string/1)
+      fork = ["1", "2", "F3", "4", "F56", "7", "8", "9"]
+      parent = ["1", "P", "6", "7", "8", "9"]
+
+      assert {:conflict, hunks} = Diff.merge3(ancestor, fork, parent)
+      assert {:resolved, ["7", "8", "9"]} in hunks
+    end
   end
 
   describe "merge3/3 adjacent edits" do

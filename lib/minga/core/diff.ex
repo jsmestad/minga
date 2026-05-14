@@ -491,8 +491,9 @@ defmodule Minga.Core.Diff do
           non_neg_integer()
         ) :: {[String.t()], [String.t()]}
   defp consume_ancestor_region(ancestor_remaining, pos, start, end_pos) do
+    unprocessed_start = max(start, pos)
     {unchanged, at_edit} = Enum.split(ancestor_remaining, max(start - pos, 0))
-    {_consumed, remaining} = Enum.split(at_edit, max(end_pos - start, 0))
+    {_consumed, remaining} = Enum.split(at_edit, max(end_pos - unprocessed_start, 0))
     {unchanged, remaining}
   end
 
