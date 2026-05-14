@@ -5,6 +5,9 @@ defmodule MingaEditor.MouseTest do
   alias MingaEditor
   alias MingaEditor.Commands.Movement
   alias MingaEditor.Layout
+  alias MingaEditor.State.Windows
+  alias MingaEditor.WindowTree
+  alias MingaEditor.Workspace.State, as: WorkspaceState
 
   # Content starts at row 1 because the tab bar occupies row 0.
   @content_row 1
@@ -311,6 +314,50 @@ defmodule MingaEditor.MouseTest do
       {line, col} = BufferServer.cursor(buffer)
       assert line == 1
       assert col == 2
+    end
+  end
+
+  describe "split separator double-click" do
+    test "double-clicking a separator resets split size without entering visual mode" do
+      {editor, _buffer} = start_editor("hello world")
+
+      :sys.replace_state(editor, fn state -> Movement.execute(state, :split_vertical) end)
+      state = state(editor)
+      screen = Layout.get(state).editor_area
+      {screen_row, screen_col, screen_width, screen_height} = screen
+      row = screen_row + div(screen_height, 2)
+      initial_sep_col = screen_col + div(screen_width - 1, 2)
+
+      {:ok, {:vertical, sep_pos}} =
+        WindowTree.separator_at(state.workspace.windows.tree, screen, row, initial_sep_col)
+
+      {:ok, resized_tree} =
+        WindowTree.resize_at(
+          state.workspace.windows.tree,
+          screen,
+          :vertical,
+          sep_pos,
+          sep_pos - 5
+        )
+
+      :sys.replace_state(editor, fn state ->
+        windows = Windows.set_tree(state.workspace.windows, resized_tree)
+
+        MingaEditor.State.update_workspace(state, fn workspace ->
+          WorkspaceState.set_windows(workspace, windows)
+        end)
+      end)
+
+      state = state(editor)
+      screen = Layout.get(state).editor_area
+
+      {:ok, {:vertical, resized_sep_pos}} =
+        WindowTree.separator_at(state.workspace.windows.tree, screen, row, sep_pos - 5)
+
+      send_mouse(editor, row, resized_sep_pos, :left, :press, 0, 2)
+
+      assert {:split, :vertical, _left, _right, 0} = state(editor).workspace.windows.tree
+      assert state(editor).workspace.editing.mode == :normal
     end
   end
 
