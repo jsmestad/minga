@@ -11,6 +11,7 @@ defmodule Minga.Language.Swift do
       label: "Swift",
       comment_token: "// ",
       extensions: ["swift"],
+      grammar: "swift",
       icon: "\u{E755}",
       icon_color: 0xF05138,
       language_servers: [

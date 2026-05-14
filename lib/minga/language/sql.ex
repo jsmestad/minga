@@ -10,6 +10,7 @@ defmodule Minga.Language.Sql do
       label: "SQL",
       comment_token: "-- ",
       extensions: ["sql"],
+      grammar: "sql",
       icon: "\u{E706}",
       icon_color: 0xDAD8D8
     }

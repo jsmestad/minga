@@ -10,6 +10,7 @@ defmodule Minga.Language.Protobuf do
       label: "Protobuf",
       comment_token: "// ",
       extensions: ["proto"],
+      grammar: "protobuf",
       icon: "\u{F0614}",
       icon_color: 0x6A9FB5
     }

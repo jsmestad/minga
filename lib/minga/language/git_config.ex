@@ -9,7 +9,8 @@ defmodule Minga.Language.GitConfig do
       name: :gitconfig,
       label: "Git Config",
       comment_token: "# ",
-      filenames: [".gitignore", ".gitattributes", ".gitmodules"],
+      filenames: [".gitconfig", ".gitmodules"],
+      grammar: "ini",
       icon: "\u{E702}",
       icon_color: 0xF14C28
     }

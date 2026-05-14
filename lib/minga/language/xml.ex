@@ -10,6 +10,7 @@ defmodule Minga.Language.Xml do
       label: "XML",
       comment_token: "<!-- ",
       extensions: ["xml", "svg"],
+      grammar: "xml",
       icon: "\u{F05C0}",
       icon_color: 0xE37933
     }

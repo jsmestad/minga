@@ -91,6 +91,14 @@ pub fn build(b: *std.Build) void {
         .{ .name = "elisp", .has_scanner = false },
         .{ .name = "clojure", .has_scanner = false },
         .{ .name = "objc", .has_scanner = false },
+        .{ .name = "sql", .has_scanner = true },
+        .{ .name = "xml", .has_scanner = true },
+        .{ .name = "ini", .has_scanner = false },
+        .{ .name = "swift", .has_scanner = true },
+        .{ .name = "vim", .has_scanner = true },
+        .{ .name = "protobuf", .has_scanner = false },
+        .{ .name = "fish", .has_scanner = true },
+        .{ .name = "perl", .has_scanner = true },
     };
 
     var grammar_libs: [grammars.len]*std.Build.Step.Compile = undefined;
