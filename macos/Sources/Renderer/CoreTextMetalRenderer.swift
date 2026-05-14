@@ -63,10 +63,14 @@ private let ctBgClearColorDefault = MTLClearColor(red: 0.01298, green: 0.01298, 
 /// in the render path, and all callers are on the main thread already.
 @MainActor
 final class CoreTextMetalRenderer {
+    /// Left margin before the gutter (breathing room from the window edge).
+    static let gutterLeftMarginPt: CGFloat = 6.0
+    /// Right gap between gutter and content (separator breathing room).
+    static let gutterRightGapPt: CGFloat = 8.0
     /// Total gutter pixel padding in points (left margin + right separator gap).
     /// Subtracted from the view width when computing cols for the BEAM so
     /// `content_w` accurately reflects the visible content area.
-    static let gutterPixelPaddingPt: CGFloat = 14.0  // 6pt left margin + 8pt right gap
+    static let gutterPixelPaddingPt: CGFloat = gutterLeftMarginPt + gutterRightGapPt
 
     let device: MTLDevice
     let commandQueue: MTLCommandQueue

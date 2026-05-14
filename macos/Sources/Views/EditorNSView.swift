@@ -1368,8 +1368,20 @@ final class EditorNSView: MTKView {
 
     private func cellPosition(from event: NSEvent) -> (row: Int16, col: Int16) {
         let point = convert(event.locationInWindow, from: nil)
-        let col = Int16(point.x / cellWidth)
         let row = Int16(point.y / effectiveCellHeight)
+        let gutterCols = CGFloat(dispatcher.frameState.gutterCol)
+        guard gutterCols > 0 else {
+            return (row, max(0, Int16(point.x / cellWidth)))
+        }
+        let leftMargin = CoreTextMetalRenderer.gutterLeftMarginPt
+        let rightGap = CoreTextMetalRenderer.gutterRightGapPt
+        let gutterPixelEnd = leftMargin + gutterCols * cellWidth
+        let col: Int16
+        if point.x < gutterPixelEnd {
+            col = max(0, Int16((point.x - leftMargin) / cellWidth))
+        } else {
+            col = max(0, Int16((point.x - leftMargin - rightGap) / cellWidth))
+        }
         return (row, col)
     }
 }
@@ -1458,7 +1470,9 @@ extension EditorNSView: @preconcurrency NSTextInputClient {
         // Position at the cursor location.
         let col = CGFloat(dispatcher.frameState.cursorCol)
         let row = CGFloat(dispatcher.frameState.cursorRow)
-        let localRect = NSRect(x: col * cellWidth, y: row * cellHeight,
+        let gutterPad: CGFloat = (dispatcher.frameState.gutterCol > 0 && dispatcher.frameState.cursorCol >= dispatcher.frameState.gutterCol)
+            ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
+        let localRect = NSRect(x: col * cellWidth + gutterPad, y: row * cellHeight,
                                 width: cellWidth, height: cellHeight)
 
         // Convert to screen coordinates.
@@ -1472,7 +1486,9 @@ extension EditorNSView: @preconcurrency NSTextInputClient {
         guard let window else { return 0 }
         let windowPoint = window.convertPoint(fromScreen: point)
         let localPoint = convert(windowPoint, from: nil)
-        let col = Int(localPoint.x / cellWidth)
+        let gutterPad: CGFloat = dispatcher.frameState.gutterCol > 0
+            ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
+        let col = max(0, Int((localPoint.x - gutterPad) / cellWidth))
         let row = Int(localPoint.y / cellHeight)
         return row * Int(dispatcher.frameState.cols) + col
     }
