@@ -58,6 +58,14 @@ defmodule Minga.Command.ParserTest do
     test ":cquit parses to {:abort_quit, []}" do
       assert {:abort_quit, []} = Parser.parse("cquit")
     end
+
+    test ":cq! parses to {:abort_quit, []}" do
+      assert {:abort_quit, []} = Parser.parse("cq!")
+    end
+
+    test ":cquit! parses to {:abort_quit, []}" do
+      assert {:abort_quit, []} = Parser.parse("cquit!")
+    end
   end
 
   describe "parse/1 — edit command" do

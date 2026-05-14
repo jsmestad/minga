@@ -25,6 +25,7 @@ defmodule Minga.Command.RegistryTest do
           :force_quit,
           :quit_all,
           :force_quit_all,
+          :abort_quit,
           :buffer_list,
           :buffer_list_all,
           :buffer_next,

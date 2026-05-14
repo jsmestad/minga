@@ -106,6 +106,20 @@ defmodule Minga.Mode.CommandTest do
                result
     end
 
+    test ":cq → execute {:abort_quit, []} then transition to normal" do
+      result = Command.handle_key({@enter, 0}, fresh_state("cq"))
+
+      assert {:execute_then_transition, [{:execute_ex_command, {:abort_quit, []}}], :normal, _} =
+               result
+    end
+
+    test ":cquit → execute {:abort_quit, []} then transition to normal" do
+      result = Command.handle_key({@enter, 0}, fresh_state("cquit"))
+
+      assert {:execute_then_transition, [{:execute_ex_command, {:abort_quit, []}}], :normal, _} =
+               result
+    end
+
     test ":e filename → execute {:edit, filename} then transition to normal" do
       result = Command.handle_key({@enter, 0}, fresh_state("e README.md"))
 

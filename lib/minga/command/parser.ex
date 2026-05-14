@@ -235,7 +235,9 @@ defmodule Minga.Command.Parser do
   defp do_parse("qall"), do: {:quit_all, []}
   defp do_parse("qall!"), do: {:force_quit_all, []}
   defp do_parse("cq"), do: {:abort_quit, []}
+  defp do_parse("cq!"), do: {:abort_quit, []}
   defp do_parse("cquit"), do: {:abort_quit, []}
+  defp do_parse("cquit!"), do: {:abort_quit, []}
   defp do_parse("wq"), do: {:save_quit, []}
   defp do_parse("wqa"), do: {:save_quit_all, []}
   defp do_parse("wqall"), do: {:save_quit_all, []}

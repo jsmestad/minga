@@ -1720,7 +1720,7 @@ defmodule MingaEditor.Commands.BufferManagement do
       %Minga.Command{
         name: :abort_quit,
         description: "Abort and quit with error exit code",
-        requires_buffer: true,
+        requires_buffer: false,
         execute: fn state -> execute(state, :abort_quit) end
       },
       %Minga.Command{

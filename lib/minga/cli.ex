@@ -91,6 +91,12 @@ defmodule Minga.CLI do
     Enum.member?(args, "--headless")
   end
 
+  @doc "Returns true when args request minimal mode (for GIT_EDITOR use)."
+  @spec minimal_args?([String.t()]) :: boolean()
+  def minimal_args?(args) do
+    Enum.member?(args, "--minimal")
+  end
+
   @doc "Returns the startup flags stored by the CLI, or defaults if none were set."
   @spec startup_flags() :: flags()
   def startup_flags do
@@ -468,11 +474,17 @@ defmodule Minga.CLI do
     exit({:shutdown, 1})
   end
 
+  @doc "Applies flag implications (e.g., minimal implies force_editor) to a flags map."
+  @spec apply_flag_implications(flags()) :: flags()
+  def apply_flag_implications(%{minimal: true} = flags), do: %{flags | force_editor: true}
+  def apply_flag_implications(flags), do: flags
+
   @spec store_startup_flags(flags()) :: :ok
   defp store_startup_flags(flags) do
-    Application.put_env(:minga, :cli_startup_flags, flags)
-    if flags.minimal, do: Application.put_env(:minga, :minimal_mode, true)
-    if flags.minimal or flags.force_editor, do: Application.put_env(:minga, :force_editor, true)
+    effective = apply_flag_implications(flags)
+    Application.put_env(:minga, :cli_startup_flags, effective)
+    if effective.minimal, do: Application.put_env(:minga, :minimal_mode, true)
+    if effective.force_editor, do: Application.put_env(:minga, :force_editor, true)
     :ok
   end
 

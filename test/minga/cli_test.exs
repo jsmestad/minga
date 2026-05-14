@@ -180,11 +180,12 @@ defmodule Minga.CLITest do
       assert message =~ "unknown flag: --unknown"
     end
 
-    test "usage text includes --editor, --no-context, and --config" do
+    test "usage text includes --editor, --no-context, --config, and --minimal" do
       assert {:error, message} = CLI.parse_args(["--help"])
       assert message =~ "--editor"
       assert message =~ "--no-context"
       assert message =~ "--config"
+      assert message =~ "--minimal"
     end
   end
 
@@ -219,6 +220,30 @@ defmodule Minga.CLITest do
       assert %{config_file: "/tmp/test_config.exs"} = CLI.startup_flags()
     after
       Application.delete_env(:minga, :cli_startup_flags)
+    end
+
+  end
+
+  describe "apply_flag_implications/1" do
+    test "minimal implies force_editor" do
+      {:open, _, flags} = CLI.parse_args(["--minimal", "COMMIT_EDITMSG"])
+      result = CLI.apply_flag_implications(flags)
+      assert result.force_editor == true
+      assert result.minimal == true
+    end
+
+    test "force_editor alone is preserved, does not set minimal" do
+      {:open, _, flags} = CLI.parse_args(["--editor"])
+      result = CLI.apply_flag_implications(flags)
+      assert result.force_editor == true
+      assert result.minimal == false
+    end
+
+    test "neither flag leaves both false" do
+      {:open, _, flags} = CLI.parse_args([])
+      result = CLI.apply_flag_implications(flags)
+      assert result.force_editor == false
+      assert result.minimal == false
     end
   end
 end
