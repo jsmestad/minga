@@ -9,7 +9,7 @@ defmodule Minga.LSP.Supervisor do
 
   ## Example
 
-      config = %{name: :lexical, command: "lexical", ...}
+      config = %{name: :expert, command: "expert", ...}
       {:ok, client} = LSP.Supervisor.ensure_client(config, "/path/to/project")
 
       # Second call returns the same pid:
@@ -90,7 +90,7 @@ defmodule Minga.LSP.Supervisor do
   end
 
   @doc """
-  Returns the names of all active LSP servers (e.g., `[:lexical, :gopls]`).
+  Returns the names of all active LSP servers (e.g., `[:expert, :gopls]`).
 
   Safe to call from the render pipeline. Returns an empty list if the
   supervisor is not running or no clients are active.

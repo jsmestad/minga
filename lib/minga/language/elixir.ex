@@ -19,8 +19,9 @@ defmodule Minga.Language.Elixir do
       formatter: "mix format --stdin-filename {file} -",
       language_servers: [
         %ServerConfig{
-          name: :lexical,
-          command: "lexical",
+          name: :expert,
+          command: "expert",
+          args: ["--stdio"],
           root_markers: ["mix.exs"]
         }
       ],

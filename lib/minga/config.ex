@@ -521,7 +521,7 @@ defmodule Minga.Config do
   @doc """
   Sets per-server LSP settings.
 
-  Settings are deep-merged with language defaults from `ServerConfig.settings`. Use the server name from the language definition, such as `:lexical`, `:rust_analyzer`, or `:typescript_language_server`.
+  Settings are deep-merged with language defaults from `ServerConfig.settings`. Use the server name from the language definition, such as `:expert`, `:rust_analyzer`, or `:typescript_language_server`.
 
   ## Examples
 

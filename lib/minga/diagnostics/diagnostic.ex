@@ -4,7 +4,7 @@ defmodule Minga.Diagnostics.Diagnostic do
 
   Source-agnostic: LSP servers, external linters, compilers, and test runners
   all produce the same struct. The `source` field identifies the producer
-  (e.g., `"lexical"`, `"mix_compile"`).
+  (e.g., `"expert"`, `"mix_compile"`).
   """
 
   @enforce_keys [:range, :severity, :message]
