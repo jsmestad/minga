@@ -384,9 +384,7 @@ final class EditorNSView: MTKView {
     }
 
     /// Applies a live display configuration update to the Metal surface.
-    /// Returns true when the backing scale changed and the font atlas must be rebuilt.
-    @discardableResult
-    func displayConfigurationChanged(newScale: CGFloat, forceResizeEvent: Bool = false) -> Bool {
+    func displayConfigurationChanged(newScale: CGFloat, forceResizeEvent: Bool = false) {
         updateMetalBackingScale(newScale)
         let scaleChanged = abs(fontFace.scale - newScale) > 0.001
 
@@ -399,8 +397,6 @@ final class EditorNSView: MTKView {
         } else if forceResizeEvent {
             renderFrame()
         }
-
-        return scaleChanged
     }
 
     /// Updates CAMetalLayer and drawable sizing to match the current display scale.
