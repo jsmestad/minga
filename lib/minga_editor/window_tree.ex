@@ -343,8 +343,7 @@ defmodule MingaEditor.WindowTree do
 
   @doc """
   Resizes the split that owns the separator at `separator_pos` to place
-  that separator at `new_pos`. Only resizes vertical splits (by column)
-  for now.
+  that separator at `new_pos`.
 
   Returns `{:ok, new_tree}` or `:error` if no matching split is found.
   """
@@ -354,6 +353,196 @@ defmodule MingaEditor.WindowTree do
     case do_resize(tree, screen_rect, direction, separator_pos, new_pos) do
       {:ok, _} = result -> result
       :not_found -> :error
+    end
+  end
+
+  @doc """
+  Resets the split that owns `separator_pos` to equal halves.
+
+  The stored split size is set to `0`, which `clamp_size/2` resolves to an even split during layout. If multiple separators share the same row or column, this returns `:error` rather than guessing.
+  """
+  @spec reset_split_at(t(), rect(), direction(), non_neg_integer()) :: {:ok, t()} | :error
+  def reset_split_at(tree, screen_rect, direction, separator_pos) do
+    case do_reset_split(tree, screen_rect, direction, separator_pos) do
+      [new_tree] -> {:ok, new_tree}
+      _none_or_ambiguous -> :error
+    end
+  end
+
+  @doc """
+  Resets the split separator under the exact screen coordinate to equal halves.
+
+  Use this for mouse interactions because multiple separators can share the same row or column in different panes.
+  """
+  @spec reset_split_at_coordinate(t(), rect(), non_neg_integer(), non_neg_integer()) ::
+          {:ok, t()} | :error
+  def reset_split_at_coordinate(tree, screen_rect, row, col) do
+    case do_reset_split_at_coordinate(tree, screen_rect, row, col) do
+      {:ok, _} = result -> result
+      :not_found -> :error
+    end
+  end
+
+  @spec do_reset_split(t(), rect(), direction(), non_neg_integer()) :: [t()]
+  defp do_reset_split({:leaf, _}, _rect, _dir, _sep), do: []
+
+  defp do_reset_split(
+         {:split, :vertical, left, right, size},
+         {rect_row, rect_col, width, height},
+         :vertical,
+         separator_pos
+       ) do
+    usable = width - 1
+    left_width = clamp_size(size, usable)
+    sep_col = rect_col + left_width
+    left_rect = {rect_row, rect_col, left_width, height}
+    right_rect = {rect_row, sep_col + 1, max(usable - left_width, 1), height}
+    node = {:split, :vertical, left, right, size}
+    child_matches = reset_child_matches(node, left_rect, right_rect, :vertical, separator_pos)
+
+    if sep_col == separator_pos do
+      [{:split, :vertical, left, right, 0} | child_matches]
+    else
+      child_matches
+    end
+  end
+
+  defp do_reset_split(
+         {:split, :horizontal, top, bottom, size},
+         {rect_row, rect_col, width, height},
+         :horizontal,
+         separator_pos
+       ) do
+    top_height = clamp_size(size, height)
+    bottom_height = max(height - top_height, 1)
+    modeline_row = rect_row + top_height - 1
+    top_rect = {rect_row, rect_col, width, top_height}
+    bottom_rect = {rect_row + top_height, rect_col, width, bottom_height}
+    node = {:split, :horizontal, top, bottom, size}
+    child_matches = reset_child_matches(node, top_rect, bottom_rect, :horizontal, separator_pos)
+
+    if modeline_row == separator_pos do
+      [{:split, :horizontal, top, bottom, 0} | child_matches]
+    else
+      child_matches
+    end
+  end
+
+  defp do_reset_split(
+         {:split, :vertical, left, right, size},
+         {rect_row, rect_col, width, height},
+         :horizontal,
+         separator_pos
+       ) do
+    usable = width - 1
+    left_width = clamp_size(size, usable)
+    left_rect = {rect_row, rect_col, left_width, height}
+    right_rect = {rect_row, rect_col + left_width + 1, max(usable - left_width, 1), height}
+    node = {:split, :vertical, left, right, size}
+
+    reset_child_matches(node, left_rect, right_rect, :horizontal, separator_pos)
+  end
+
+  defp do_reset_split(
+         {:split, :horizontal, top, bottom, size},
+         {rect_row, rect_col, width, height},
+         :vertical,
+         separator_pos
+       ) do
+    top_height = clamp_size(size, height)
+    bottom_height = max(height - top_height, 1)
+    top_rect = {rect_row, rect_col, width, top_height}
+    bottom_rect = {rect_row + top_height, rect_col, width, bottom_height}
+    node = {:split, :horizontal, top, bottom, size}
+
+    reset_child_matches(node, top_rect, bottom_rect, :vertical, separator_pos)
+  end
+
+  @spec reset_child_matches(t(), rect(), rect(), direction(), non_neg_integer()) :: [t()]
+  defp reset_child_matches(
+         {:split, dir, left, right, size},
+         left_rect,
+         right_rect,
+         search_dir,
+         sep_pos
+       ) do
+    left_matches =
+      Enum.map(do_reset_split(left, left_rect, search_dir, sep_pos), fn new_left ->
+        {:split, dir, new_left, right, size}
+      end)
+
+    right_matches =
+      Enum.map(do_reset_split(right, right_rect, search_dir, sep_pos), fn new_right ->
+        {:split, dir, left, new_right, size}
+      end)
+
+    left_matches ++ right_matches
+  end
+
+  @spec do_reset_split_at_coordinate(t(), rect(), non_neg_integer(), non_neg_integer()) ::
+          {:ok, t()} | :not_found
+  defp do_reset_split_at_coordinate({:leaf, _}, _rect, _row, _col), do: :not_found
+
+  defp do_reset_split_at_coordinate(
+         {:split, :vertical, left, right, size},
+         {rect_row, rect_col, width, height},
+         row,
+         col
+       ) do
+    usable = width - 1
+    left_width = clamp_size(size, usable)
+    sep_col = rect_col + left_width
+
+    if col == sep_col and row >= rect_row and row < rect_row + height do
+      {:ok, {:split, :vertical, left, right, 0}}
+    else
+      left_rect = {rect_row, rect_col, left_width, height}
+      right_rect = {rect_row, sep_col + 1, max(usable - left_width, 1), height}
+      node = {:split, :vertical, left, right, size}
+
+      reset_child_at_coordinate(node, left_rect, right_rect, row, col)
+    end
+  end
+
+  defp do_reset_split_at_coordinate(
+         {:split, :horizontal, top, bottom, size},
+         {rect_row, rect_col, width, height},
+         row,
+         col
+       ) do
+    top_height = clamp_size(size, height)
+    bottom_height = max(height - top_height, 1)
+    modeline_row = rect_row + top_height - 1
+
+    if row == modeline_row and col >= rect_col and col < rect_col + width do
+      {:ok, {:split, :horizontal, top, bottom, 0}}
+    else
+      top_rect = {rect_row, rect_col, width, top_height}
+      bottom_rect = {rect_row + top_height, rect_col, width, bottom_height}
+      node = {:split, :horizontal, top, bottom, size}
+
+      reset_child_at_coordinate(node, top_rect, bottom_rect, row, col)
+    end
+  end
+
+  @spec reset_child_at_coordinate(t(), rect(), rect(), non_neg_integer(), non_neg_integer()) ::
+          {:ok, t()} | :not_found
+  defp reset_child_at_coordinate(
+         {:split, dir, left, right, size},
+         left_rect,
+         right_rect,
+         row,
+         col
+       ) do
+    case do_reset_split_at_coordinate(left, left_rect, row, col) do
+      {:ok, new_left} ->
+        {:ok, {:split, dir, new_left, right, size}}
+
+      :not_found ->
+        case do_reset_split_at_coordinate(right, right_rect, row, col) do
+          {:ok, new_right} -> {:ok, {:split, dir, left, new_right, size}}
+          :not_found -> :not_found
+        end
     end
   end
 

@@ -11,6 +11,12 @@ import AppKit
 import os
 import MetalKit
 
+private enum DividerCursorState: Equatable {
+    case none
+    case vertical
+    case horizontal
+}
+
 /// The main editor view. Uses MTKView's built-in display link for
 /// vsync-driven rendering with automatic frame coalescing.
 final class EditorNSView: MTKView {
@@ -45,6 +51,12 @@ final class EditorNSView: MTKView {
     /// redundant mouse move events.
     private var lastMoveRow: Int16 = -1
     private var lastMoveCol: Int16 = -1
+
+    /// Current resize cursor pushed for split divider hover or drag.
+    private var dividerCursorState: DividerCursorState = .none
+
+    /// Divider direction captured at mouse-down so drag keeps the resize cursor.
+    private var dividerDragState: DividerCursorState = .none
 
     /// Whether the ready event has been sent to the BEAM. Deferred until
     /// setFrameSize so we send the actual window dimensions, not hardcoded defaults.
@@ -163,6 +175,8 @@ final class EditorNSView: MTKView {
         scrollFadeWorkItem = nil
         spaceGraceTimer?.cancel()
         spaceGraceTimer = nil
+        dividerDragState = .none
+        setDividerCursorState(.none)
         removeWindowObservers()
         removeAgentKeyMonitor()
         firstResponderGuard = nil
@@ -507,7 +521,7 @@ final class EditorNSView: MTKView {
         }
         let area = NSTrackingArea(
             rect: bounds,
-            options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
             owner: self,
             userInfo: nil
         )
@@ -860,6 +874,10 @@ final class EditorNSView: MTKView {
         }
 
         resetCursorBlink()
+        dividerDragState = dividerHitState(at: point)
+        if dividerDragState != .none {
+            setDividerCursorState(dividerDragState)
+        }
         let (row, col) = cellPosition(from: event)
         let cc = UInt8(clamping: event.clickCount)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_LEFT,
@@ -874,10 +892,15 @@ final class EditorNSView: MTKView {
             return
         }
 
+        let point = convert(event.locationInWindow, from: nil)
         let (row, col) = cellPosition(from: event)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_LEFT,
                                modifiers: modifierBits(from: event.modifierFlags),
                                eventType: MOUSE_RELEASE)
+        if dividerDragState != .none {
+            dividerDragState = .none
+            setDividerCursorState(dividerHitState(at: point))
+        }
     }
 
     override func rightMouseDown(with event: NSEvent) {
@@ -916,6 +939,9 @@ final class EditorNSView: MTKView {
             return
         }
 
+        if dividerDragState != .none {
+            setDividerCursorState(dividerDragState)
+        }
         let (row, col) = cellPosition(from: event)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_LEFT,
                                modifiers: modifierBits(from: event.modifierFlags),
@@ -923,6 +949,8 @@ final class EditorNSView: MTKView {
     }
 
     override func mouseMoved(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        setDividerCursorState(dividerHitState(at: point))
         let (row, col) = cellPosition(from: event)
         guard row != lastMoveRow || col != lastMoveCol else { return }
         lastMoveRow = row
@@ -930,6 +958,13 @@ final class EditorNSView: MTKView {
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_NONE,
                                modifiers: modifierBits(from: event.modifierFlags),
                                eventType: MOUSE_MOTION)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        if dividerDragState == .none {
+            setDividerCursorState(.none)
+        }
+        super.mouseExited(with: event)
     }
 
     /// Scroll accumulator for smooth trackpad scrolling. Extracted into a
@@ -1027,7 +1062,7 @@ final class EditorNSView: MTKView {
 
         // Vertical: smooth sub-line pixel offset
         let vEvents = scrollAccumulator.accumulateVertical(
-            deltaY: event.scrollingDeltaY, cellHeight: cellHeight)
+            deltaY: event.scrollingDeltaY, cellHeight: effectiveCellHeight)
         for e in vEvents {
             sendScrollEvent(e, row: row, col: col, mods: mods)
         }
@@ -1111,10 +1146,63 @@ final class EditorNSView: MTKView {
 
     // MARK: - Helpers
 
+    private var effectiveCellHeight: CGFloat {
+        cellHeight * CGFloat(dispatcher.frameState.lineSpacing)
+    }
+
+    private var dividerHitHalfTolerance: CGFloat {
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1.0
+        return 2.5 / scale
+    }
+
+    private func dividerHitState(at point: NSPoint) -> DividerCursorState {
+        let fs = dispatcher.frameState
+        let hitHalfTolerance = dividerHitHalfTolerance
+        let displayCellH = effectiveCellHeight
+
+        for vertical in fs.verticalSeparators {
+            let x = CGFloat(vertical.col) * cellWidth
+            let startY = CGFloat(vertical.startRow) * displayCellH
+            let endY = CGFloat(Int(vertical.endRow) + 1) * displayCellH
+            if abs(point.x - x) <= hitHalfTolerance && point.y >= startY && point.y < endY {
+                return .vertical
+            }
+        }
+
+        for horizontal in fs.horizontalSeparators {
+            let x = CGFloat(horizontal.col) * cellWidth
+            let y = CGFloat(horizontal.row) * displayCellH + (displayCellH * 0.5) - (0.5 / (window?.backingScaleFactor ?? 1.0))
+            let width = CGFloat(horizontal.width) * cellWidth
+            if abs(point.y - y) <= hitHalfTolerance && point.x >= x && point.x < x + width {
+                return .horizontal
+            }
+        }
+
+        return .none
+    }
+
+    private func setDividerCursorState(_ nextState: DividerCursorState) {
+        guard dividerCursorState != nextState else { return }
+        if dividerCursorState != .none {
+            NSCursor.pop()
+        }
+
+        switch nextState {
+        case .none:
+            break
+        case .vertical:
+            NSCursor.resizeLeftRight.push()
+        case .horizontal:
+            NSCursor.resizeUpDown.push()
+        }
+
+        dividerCursorState = nextState
+    }
+
     private func cellPosition(from event: NSEvent) -> (row: Int16, col: Int16) {
         let point = convert(event.locationInWindow, from: nil)
         let col = Int16(point.x / cellWidth)
-        let row = Int16(point.y / cellHeight)
+        let row = Int16(point.y / effectiveCellHeight)
         return (row, col)
     }
 }
