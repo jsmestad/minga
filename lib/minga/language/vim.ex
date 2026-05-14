@@ -10,6 +10,8 @@ defmodule Minga.Language.Vim do
       label: "Vim",
       comment_token: "\" ",
       extensions: ["vim"],
+      filenames: [".vimrc", "_vimrc", ".gvimrc"],
+      grammar: "vim",
       icon: "\u{E62B}",
       icon_color: 0x019833
     }

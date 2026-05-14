@@ -61,6 +61,8 @@ defmodule Minga.Language.FiletypeTest do
       assert Filetype.detect("run.sh") == :bash
       assert Filetype.detect("init.bash") == :bash
       assert Filetype.detect("setup.zsh") == :bash
+      assert Filetype.detect("script.pl") == :perl
+      assert Filetype.detect("Library.pm") == :perl
     end
 
     test "detects web languages" do
@@ -125,8 +127,16 @@ defmodule Minga.Language.FiletypeTest do
     end
 
     test "detects git config files" do
-      assert Filetype.detect(".gitignore") == :gitconfig
-      assert Filetype.detect(".gitattributes") == :gitconfig
+      assert Filetype.detect(".gitconfig") == :gitconfig
+      assert Filetype.detect(".gitmodules") == :gitconfig
+      assert Filetype.detect(".gitignore") == :gitignore
+      assert Filetype.detect(".gitattributes") == :gitignore
+    end
+
+    test "detects Vim config filenames" do
+      assert Filetype.detect(".vimrc") == :vim
+      assert Filetype.detect("_vimrc") == :vim
+      assert Filetype.detect(".gvimrc") == :vim
     end
 
     test "exact filenames are case-sensitive" do
