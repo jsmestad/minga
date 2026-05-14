@@ -9,8 +9,8 @@ defmodule Minga.LSP.ServerRegistryTest do
       assert length(configs) == 1
 
       [config] = configs
-      assert config.name == :lexical
-      assert config.command == "lexical"
+      assert config.name == :expert
+      assert config.command == "expert"
       assert is_list(config.args)
       assert "mix.exs" in config.root_markers
       assert is_map(config.init_options)

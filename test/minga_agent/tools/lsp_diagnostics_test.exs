@@ -22,23 +22,23 @@ defmodule MingaAgent.Tools.LspDiagnosticsTest do
           range: %{start_line: 44, start_col: 12, end_line: 44, end_col: 20},
           severity: :error,
           message: "undefined function `foo/1`",
-          source: "lexical"
+          source: "expert"
         },
         %Diagnostic{
           range: %{start_line: 88, start_col: 3, end_line: 88, end_col: 4},
           severity: :warning,
           message: "variable `x` is unused",
-          source: "lexical"
+          source: "expert"
         },
         %Diagnostic{
           range: %{start_line: 101, start_col: 1, end_line: 101, end_col: 5},
           severity: :hint,
           message: "alias `Enum` is unused",
-          source: "lexical"
+          source: "expert"
         }
       ]
 
-      Diagnostics.publish(server, :lexical, uri, diagnostics)
+      Diagnostics.publish(server, :expert, uri, diagnostics)
 
       # The tool reads from the default Diagnostics server by URI.
       # Since we're using a custom server, we need to test the formatting directly.
@@ -51,7 +51,7 @@ defmodule MingaAgent.Tools.LspDiagnosticsTest do
       assert result =~ "1 hint"
       assert result =~ "line 45:12"
       assert result =~ "undefined function `foo/1`"
-      assert result =~ "(source: lexical)"
+      assert result =~ "(source: expert)"
     end
 
     test "returns clean message for empty diagnostics" do

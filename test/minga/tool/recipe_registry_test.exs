@@ -25,8 +25,6 @@ defmodule Minga.Tool.Recipe.RegistryTest do
             :gopls,
             :prettier,
             :black,
-            :elixir_ls,
-            :lexical,
             :lua_language_server,
             :stylua,
             :zls,
@@ -95,43 +93,29 @@ defmodule Minga.Tool.Recipe.RegistryTest do
     end
   end
 
-  describe "elixir_ls_asset?/2" do
-    test "matches the standard versioned zip" do
-      assert Registry.elixir_ls_asset?("elixir-ls-v0.30.0.zip", "darwin_arm64")
+  describe "expert_asset?/2" do
+    test "matches macOS arm64 bare binary" do
+      assert Registry.expert_asset?("expert_darwin_arm64", "darwin_arm64")
     end
 
-    test "matches regardless of platform suffix" do
-      assert Registry.elixir_ls_asset?("elixir-ls-v0.30.0.zip", "linux_amd64")
+    test "matches macOS amd64 bare binary" do
+      assert Registry.expert_asset?("expert_darwin_amd64", "darwin_amd64")
     end
 
-    test "rejects non-zip files" do
-      refute Registry.elixir_ls_asset?("elixir-ls-v0.30.0.tar.gz", "darwin_arm64")
+    test "matches Linux amd64 bare binary" do
+      assert Registry.expert_asset?("expert_linux_amd64", "linux_amd64")
     end
 
-    test "rejects unrelated assets" do
-      refute Registry.elixir_ls_asset?("some-other-tool.zip", "darwin_arm64")
-    end
-  end
-
-  describe "lexical_asset?/2" do
-    test "matches the versioned zip" do
-      assert Registry.lexical_asset?("lexical-v0.7.3.zip", "darwin_arm64")
+    test "rejects macOS asset when platform is linux" do
+      refute Registry.expert_asset?("expert_darwin_arm64", "linux_amd64")
     end
 
-    test "matches regardless of platform suffix" do
-      assert Registry.lexical_asset?("lexical-v0.7.3.zip", "linux_amd64")
-    end
-
-    test "rejects the unversioned zip to prefer the versioned one" do
-      refute Registry.lexical_asset?("lexical.zip", "darwin_arm64")
-    end
-
-    test "rejects non-zip files" do
-      refute Registry.lexical_asset?("lexical-v0.7.3.tar.gz", "darwin_arm64")
+    test "rejects checksums file" do
+      refute Registry.expert_asset?("expert_checksums.txt", "darwin_arm64")
     end
 
     test "rejects unrelated assets" do
-      refute Registry.lexical_asset?("some-other-tool.zip", "darwin_arm64")
+      refute Registry.expert_asset?("some-other-tool", "darwin_arm64")
     end
   end
 
@@ -176,8 +160,7 @@ defmodule Minga.Tool.Recipe.RegistryTest do
     test "finds tools for Elixir" do
       tools = Registry.for_language(:elixir)
       names = Enum.map(tools, & &1.name)
-      assert :elixir_ls in names
-      assert :lexical in names
+      assert :expert in names
     end
 
     test "returns empty list for unknown language" do

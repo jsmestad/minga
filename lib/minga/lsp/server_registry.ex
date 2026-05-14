@@ -28,7 +28,7 @@ defmodule Minga.LSP.ServerRegistry do
       iex> length(configs)
       1
       iex> hd(configs).name
-      :lexical
+      :expert
 
       iex> Minga.LSP.ServerRegistry.servers_for(:unknown_language)
       []

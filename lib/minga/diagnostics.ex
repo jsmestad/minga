@@ -19,7 +19,7 @@ defmodule Minga.Diagnostics do
   Producers call `publish/3` to replace all diagnostics for a given
   `{source, uri}` pair:
 
-      Diagnostics.publish(:lexical, "file:///path/to/file.ex", [%Diagnostic{...}])
+      Diagnostics.publish(:expert, "file:///path/to/file.ex", [%Diagnostic{...}])
       Diagnostics.publish(:mix_compile, "file:///path/to/file.ex", [%Diagnostic{...}])
 
   ## Consumer API
@@ -43,7 +43,7 @@ defmodule Minga.Diagnostics do
 
   alias Minga.Diagnostics.Diagnostic
 
-  @typedoc "A diagnostic source identifier (e.g., `:lexical`, `:mix_compile`)."
+  @typedoc "A diagnostic source identifier (e.g., `:expert`, `:mix_compile`)."
   @type source :: atom()
 
   @typedoc "A file URI string (e.g., `\"file:///path/to/file.ex\"`)."

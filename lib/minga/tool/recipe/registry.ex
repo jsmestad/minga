@@ -34,34 +34,11 @@ defmodule Minga.Tool.Recipe.Registry do
       description: "Official Elixir language server",
       provides: ["expert"],
       method: :github_release,
-      package: "elixir-lang/expert",
-      homepage: "https://github.com/elixir-lang/expert",
-      category: :lsp_server,
-      languages: [:elixir]
-    },
-    %Recipe{
-      name: :elixir_ls,
-      label: "ElixirLS",
-      description: "Elixir language server with debugger support",
-      provides: ["elixir-ls", "language_server.sh"],
-      method: :github_release,
-      package: "elixir-lsp/elixir-ls",
-      homepage: "https://github.com/elixir-lsp/elixir-ls",
+      package: "expert-lsp/expert",
+      homepage: "https://github.com/expert-lsp/expert",
       category: :lsp_server,
       languages: [:elixir],
-      asset_pattern: &Minga.Tool.Recipe.Registry.elixir_ls_asset?/2
-    },
-    %Recipe{
-      name: :lexical,
-      label: "Lexical",
-      description: "Next-generation Elixir language server",
-      provides: ["lexical", "start_lexical.sh"],
-      method: :github_release,
-      package: "lexical-lsp/lexical",
-      homepage: "https://github.com/lexical-lsp/lexical",
-      category: :lsp_server,
-      languages: [:elixir],
-      asset_pattern: &Minga.Tool.Recipe.Registry.lexical_asset?/2
+      asset_pattern: &Minga.Tool.Recipe.Registry.expert_asset?/2
     },
     %Recipe{
       name: :pyright,
@@ -408,34 +385,15 @@ defmodule Minga.Tool.Recipe.Registry do
   defp clangd_os_token(_), do: "unknown"
 
   @doc """
-  Matches ElixirLS release assets.
+  Matches Expert release assets.
 
-  ElixirLS is a BEAM application that ships a single platform-independent
-  zip (e.g., `elixir-ls-v0.30.0.zip`). The default asset matcher fails
-  because it looks for OS/arch strings like `darwin_arm64` in the filename.
+  Expert ships bare platform binaries with no archive extension
+  (e.g., `expert_darwin_arm64`, `expert_linux_amd64`).
   """
-  @spec elixir_ls_asset?(String.t(), String.t()) :: boolean()
-  def elixir_ls_asset?(asset_name, _platform_suffix) do
+  @spec expert_asset?(String.t(), String.t()) :: boolean()
+  def expert_asset?(asset_name, platform_suffix) do
     name = String.downcase(asset_name)
-
-    String.starts_with?(name, "elixir-ls") and
-      String.ends_with?(name, ".zip")
-  end
-
-  @doc """
-  Matches Lexical release assets.
-
-  Lexical is a BEAM application that ships platform-independent zips.
-  Releases include both a versioned zip (`lexical-v0.7.3.zip`) and a
-  plain `lexical.zip`. We prefer the versioned one to avoid cache
-  confusion across upgrades.
-  """
-  @spec lexical_asset?(String.t(), String.t()) :: boolean()
-  def lexical_asset?(asset_name, _platform_suffix) do
-    name = String.downcase(asset_name)
-
-    String.starts_with?(name, "lexical") and
-      String.ends_with?(name, ".zip") and
-      String.contains?(name, "-v")
+    suffix = String.downcase(platform_suffix)
+    String.starts_with?(name, "expert_") and String.contains?(name, suffix)
   end
 end
