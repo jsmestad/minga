@@ -121,6 +121,15 @@ defmodule Minga.CLITest do
       assert {:open, nil, %{headless: true}} = CLI.parse_args(["--headless"])
     end
 
+    test "--minimal sets minimal flag" do
+      assert {:open, nil, %{minimal: true}} = CLI.parse_args(["--minimal"])
+    end
+
+    test "--minimal combined with file argument" do
+      assert {:open, "COMMIT_EDITMSG", %{minimal: true}} =
+               CLI.parse_args(["--minimal", "COMMIT_EDITMSG"])
+    end
+
     test "--name, --cookie, --host, and --port set distribution flags" do
       cookie = "abcdefghijklmnopqrstuvwxyz123456"
 

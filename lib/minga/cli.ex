@@ -27,6 +27,7 @@ defmodule Minga.CLI do
           no_context: boolean(),
           config_file: String.t() | nil,
           headless: boolean(),
+          minimal: boolean(),
           node_name: String.t() | nil,
           short_name: boolean(),
           cookie: String.t() | nil,
@@ -40,6 +41,7 @@ defmodule Minga.CLI do
     no_context: false,
     config_file: nil,
     headless: false,
+    minimal: false,
     node_name: nil,
     short_name: false,
     cookie: nil,
@@ -211,6 +213,10 @@ defmodule Minga.CLI do
 
   defp parse_args(["--config"], _file, _flags) do
     {:error, "--config requires a path argument\n\n#{usage()}"}
+  end
+
+  defp parse_args(["--minimal" | rest], file, flags) do
+    parse_args(rest, file, %{flags | minimal: true})
   end
 
   defp parse_args([<<"--", _::binary>> = flag | _], _file, _flags) do
@@ -465,6 +471,9 @@ defmodule Minga.CLI do
   @spec store_startup_flags(flags()) :: :ok
   defp store_startup_flags(flags) do
     Application.put_env(:minga, :cli_startup_flags, flags)
+    if flags.minimal, do: Application.put_env(:minga, :minimal_mode, true)
+    if flags.minimal or flags.force_editor, do: Application.put_env(:minga, :force_editor, true)
+    :ok
   end
 
   @spec usage() :: String.t()
@@ -479,6 +488,7 @@ defmodule Minga.CLI do
       -v, --version          Show version
       --config <path>        Use a custom config file instead of the default
       --editor               Start in file editing mode (skip agentic view)
+      --minimal              Minimal mode: editor-only, no services/agent (for GIT_EDITOR use)
       --no-context           Don't load the file as agent context
       --headless             Start services and agent runtime without a GUI frontend
       --name <name@host>     Distributed Erlang long node name

@@ -85,14 +85,18 @@ defmodule Minga.Application do
     # via the same path as logs from a running editor.
     Minga.LoggerHandler.install_messages_handler()
 
-    base_children = [
-      Minga.Foundation.Supervisor,
-      {Registry, keys: :unique, name: Minga.Buffer.Registry},
-      {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},
-      Minga.Buffer.Messages,
-      Minga.Services.Supervisor,
-      MingaAgent.Supervisor
-    ]
+    base_children =
+      [
+        Minga.Foundation.Supervisor,
+        {Registry, keys: :unique, name: Minga.Buffer.Registry},
+        {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},
+        Minga.Buffer.Messages
+      ] ++
+        if Application.get_env(:minga, :minimal_mode, false) do
+          []
+        else
+          [Minga.Services.Supervisor, MingaAgent.Supervisor]
+        end
 
     editor_children =
       if start_editor?() do

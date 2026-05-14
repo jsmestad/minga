@@ -100,6 +100,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   def execute(state, :force_quit), do: close_tab_or_quit(state)
   def execute(state, :quit_all), do: maybe_confirm_quit(state, :quit_all)
   def execute(state, :force_quit_all), do: shutdown_editor(state)
+  def execute(state, :abort_quit), do: abort_quit_editor(state)
 
   def execute(%{pending_quit: kind} = state, :confirm_quit_yes) when kind != nil do
     state = EditorState.clear_pending_quit(state)
@@ -227,6 +228,9 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   def execute(state, {:execute_ex_command, {:force_quit_all, []}}),
     do: execute(state, :force_quit_all)
+
+  def execute(state, {:execute_ex_command, {:abort_quit, []}}),
+    do: execute(state, :abort_quit)
 
   def execute(state, {:execute_ex_command, {:save_quit, []}}) do
     state |> execute(:save) |> close_tab_or_quit()
@@ -1239,6 +1243,15 @@ defmodule MingaEditor.Commands.BufferManagement do
     state
   end
 
+  # Aborts the editor with a non-zero exit code. Used by `:cq` / `:cquit`
+  # so external tools (like `git commit`) can detect the user cancelled.
+  @spec abort_quit_editor(state()) :: state()
+  defp abort_quit_editor(state) do
+    shutdown_fn = Application.get_env(:minga, :shutdown_fn, &System.stop/1)
+    shutdown_fn.(1)
+    state
+  end
+
   # Closes the current file tab without killing the buffer. The buffer
   # stays in the buffer pool (matching Neovim's `:q` which closes the
   # window but leaves the buffer in the background buffer list).
@@ -1703,6 +1716,12 @@ defmodule MingaEditor.Commands.BufferManagement do
         description: "Force quit the editor (all tabs)",
         requires_buffer: true,
         execute: fn state -> execute(state, :force_quit_all) end
+      },
+      %Minga.Command{
+        name: :abort_quit,
+        description: "Abort and quit with error exit code",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :abort_quit) end
       },
       %Minga.Command{
         name: :confirm_quit_yes,

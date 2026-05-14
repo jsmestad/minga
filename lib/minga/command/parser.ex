@@ -20,6 +20,7 @@ defmodule Minga.Command.Parser do
   | `wq`             | `{:save_quit, []}`             |
   | `e <filename>`   | `{:edit, filename}`            |
   | `e!`             | `{:force_edit, []}`            |
+  | `cq`             | `{:abort_quit, []}`             |
   | `<number>`       | `{:goto_line, number}`         |
   | `1,10s/x/y/`     | `{:substitute, range, ...}`    |
   | anything else    | `{:unknown, original_string}`  |
@@ -50,6 +51,7 @@ defmodule Minga.Command.Parser do
   * `{:force_quit, []}` — force close tab or quit without saving (`:q!`)
   * `{:quit_all, []}` — quit the entire editor (`:qa`)
   * `{:force_quit_all, []}` — force quit the entire editor (`:qa!`)
+  * `{:abort_quit, []}` — abort and quit with error exit code (`:cq` / `:cquit`)
   * `{:save_quit, []}` — save and close tab, or save and quit if last tab (`:wq`)
   * `{:save_quit_all, []}` — save all buffers and quit (`:wqa`)
   * `{:edit, filename}` — open a file (`:e filename`)
@@ -74,6 +76,7 @@ defmodule Minga.Command.Parser do
           | {:force_quit, []}
           | {:quit_all, []}
           | {:force_quit_all, []}
+          | {:abort_quit, []}
           | {:save_quit, []}
           | {:save_quit_all, []}
           | {:edit, String.t()}
@@ -231,6 +234,8 @@ defmodule Minga.Command.Parser do
   defp do_parse("qa!"), do: {:force_quit_all, []}
   defp do_parse("qall"), do: {:quit_all, []}
   defp do_parse("qall!"), do: {:force_quit_all, []}
+  defp do_parse("cq"), do: {:abort_quit, []}
+  defp do_parse("cquit"), do: {:abort_quit, []}
   defp do_parse("wq"), do: {:save_quit, []}
   defp do_parse("wqa"), do: {:save_quit_all, []}
   defp do_parse("wqall"), do: {:save_quit_all, []}
