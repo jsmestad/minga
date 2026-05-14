@@ -531,6 +531,7 @@ final class EditorNSView: MTKView {
 
     @objc private func windowDidExitFullScreen(_ notification: Notification) {
         onFullScreenChanged?(false)
+        if let window { measureTrafficLightPosition(in: window) }
     }
 
     @objc private func windowDidResignKey(_ notification: Notification) {
