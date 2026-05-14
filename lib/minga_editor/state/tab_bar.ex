@@ -126,6 +126,26 @@ defmodule MingaEditor.State.TabBar do
     end
   end
 
+  @doc "Keeps only the tab with the given id. Returns unchanged when the tab is not present."
+  @spec keep_only(t(), Tab.id()) :: t()
+  def keep_only(%__MODULE__{tabs: tabs} = tb, id) do
+    case Enum.find(tabs, &(&1.id == id)) do
+      nil -> tb
+      tab -> keep_only_tab(tb, tab)
+    end
+  end
+
+  @spec keep_only_tab(t(), Tab.t()) :: t()
+  defp keep_only_tab(%__MODULE__{} = tb, %Tab{} = tab) do
+    %{tb | tabs: [tab], active_id: tab.id, agent_groups: groups_for_tabs(tb.agent_groups, [tab])}
+  end
+
+  @spec groups_for_tabs([AgentGroup.t()], [Tab.t()]) :: [AgentGroup.t()]
+  defp groups_for_tabs(groups, tabs) do
+    group_ids = tabs |> Enum.map(& &1.group_id) |> Enum.reject(&(&1 == 0)) |> MapSet.new()
+    Enum.filter(groups, &MapSet.member?(group_ids, &1.id))
+  end
+
   @doc "Returns true if a tab with the given id exists."
   @spec has_tab?(t(), Tab.id()) :: boolean()
   def has_tab?(%__MODULE__{tabs: tabs}, id) do

@@ -120,6 +120,32 @@ defmodule Minga.Integration.FileTreeTest do
       assert state.workspace.keymap_scope == :editor,
              "focus should return to editor after opening file from tree, got #{state.workspace.keymap_scope}"
     end
+
+    test "GUI open in split targets the new split while tree is focused", %{tmp_dir: dir} do
+      %{file: file, project_root: root} = setup_fixture(%{tmp_dir: dir})
+      ctx = start_editor("alpha content", file_path: file, project_root: root)
+
+      send_keys_sync(ctx, "<Space>op")
+      state = editor_state(ctx)
+      assert state.workspace.keymap_scope == :file_tree
+      original_window_id = state.workspace.windows.active
+
+      index =
+        state.workspace.file_tree.tree
+        |> Minga.Project.FileTree.visible_entries()
+        |> Enum.find_index(&(&1.name == "beta.txt"))
+
+      assert is_integer(index)
+
+      send(ctx.editor, {:minga_input, {:gui_action, {:file_tree_open_in_split, index}}})
+      state = editor_state(ctx)
+
+      assert map_size(state.workspace.windows.map) == 2
+      assert state.workspace.windows.active != original_window_id
+      assert state.workspace.windows.map[original_window_id].buffer == ctx.buffer
+      assert active_content(ctx) == "beta content"
+      assert state.workspace.keymap_scope == :editor
+    end
   end
 
   # ── Nested directory expansion ─────────────────────────────────────────────

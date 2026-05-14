@@ -98,6 +98,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   def execute(state, :force_quit), do: close_tab_or_quit(state)
+  def execute(state, :close_other_tabs), do: close_other_tabs(state)
   def execute(state, :quit_all), do: maybe_confirm_quit(state, :quit_all)
   def execute(state, :force_quit_all), do: shutdown_editor(state)
   def execute(state, :abort_quit), do: abort_quit_editor(state)
@@ -1001,10 +1002,10 @@ defmodule MingaEditor.Commands.BufferManagement do
       Enum.any?(tb.tabs, &(&1.session == session_pid)) or
         TabBar.find_group_by_session(tb, session_pid) != nil
 
-    tab_status = if reason in [:normal, :shutdown], do: :idle, else: :error
-    state = scrub_agent_tab_state(state, session_pid, tab_status)
-
     if owned? do
+      tab_status = if reason in [:normal, :shutdown], do: :idle, else: :error
+      state = scrub_agent_tab_state(state, session_pid, tab_status)
+
       msg =
         if reason in [:normal, :shutdown],
           do: "Agent session ended",
@@ -1215,6 +1216,39 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   defp close_tab_or_quit(state), do: shutdown_editor(state)
+
+  @spec close_other_tabs(state()) :: state()
+  defp close_other_tabs(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+    active_id = tb.active_id
+
+    closed_tabs = Enum.reject(tb.tabs, &(&1.id == active_id))
+    Enum.each(closed_tabs, &stop_closed_agent_tab/1)
+
+    tb = TabBar.keep_only(tb, active_id)
+    MingaEditor.log_to_messages("Closed other tabs")
+    EditorState.set_tab_bar(state, tb)
+  end
+
+  defp close_other_tabs(state), do: state
+
+  @spec stop_closed_agent_tab(Tab.t()) :: :ok
+  defp stop_closed_agent_tab(%Tab{kind: :agent, session: session}) when is_pid(session) do
+    try do
+      Session.unsubscribe(session)
+    catch
+      :exit, _ -> :ok
+    end
+
+    try do
+      GenServer.stop(session, :normal)
+    catch
+      :exit, _ -> :ok
+    end
+
+    :ok
+  end
+
+  defp stop_closed_agent_tab(%Tab{}), do: :ok
 
   # Saves all dirty buffers in the buffer list. Called by :wqa before
   # shutting down. Returns state unchanged (side-effectual only).
@@ -1704,6 +1738,12 @@ defmodule MingaEditor.Commands.BufferManagement do
         description: "Force close tab or quit",
         requires_buffer: true,
         execute: fn state -> execute(state, :force_quit) end
+      },
+      %Minga.Command{
+        name: :close_other_tabs,
+        description: "Close all tabs except the active tab",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :close_other_tabs) end
       },
       %Minga.Command{
         name: :quit_all,

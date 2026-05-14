@@ -636,7 +636,8 @@ struct ContentView: View {
                     cellWidth: overlayCW,
                     cellHeight: overlayCH,
                     viewportHeight: rightPaneHeight,
-                    viewportWidth: overlayVPW
+                    viewportWidth: overlayVPW,
+                    encoder: appState.encoder
                 )
             }
         }

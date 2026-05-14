@@ -56,6 +56,7 @@ The BEAM-side encoder must use this envelope for all new opcodes (0x90+). Curren
 | 0x90 | clipboard_write | Write text to the system clipboard |
 | 0x91 | gui_indent_guides | Indent guide positions per window |
 | 0x92 | gui_line_spacing | Line spacing multiplier for the renderer |
+| 0x96 | gui_hover_action | Optional action metadata for the hover popup |
 
 ### 0x70 — gui_file_tree
 
@@ -797,6 +798,9 @@ opcode(1) + action_type(1) + payload...
 | 0x3A | git_fetch | (empty) | Fetch remote refs |
 | 0x3B | git_commit_amend | msg_len(2) + msg(msg_len) | Amend the previous commit message |
 | 0x3C | git_pull_and_retry | (empty) | Pull, then retry the failed push |
+| 0x3D | file_tree_open_in_split | index(2) | Open a file tree entry in a vertical split |
+| 0x3E | tab_copy_path | tab_id(4) | Copy a tab's file path |
+| 0x3F | hover_open_action | (empty) | Accept the current hover popup action |
 
 ## Theme Color Slots
 
@@ -915,7 +919,18 @@ This convention is enforced on the BEAM side: all new opcodes >= 0x90 must use t
 **Current 0x90+ opcodes:**
 - `OP_CLIPBOARD_WRITE (0x90)` — clipboard write command (length-prefixed)
 - `OP_GUI_INDENT_GUIDES (0x91)` — indent guide positions per window (length-prefixed)
-- `OP_GUI_LINE_SPACING (0x92)` — line spacing multiplier (length-prefixed)
+- `OP_GUI_LINE_SPACING (0x92)` — renderer line spacing multiplier (length-prefixed)
+- `OP_GUI_HOVER_ACTION (0x96)` — optional hover popup action metadata (length-prefixed)
+
+### 0x96 — gui_hover_action
+
+Optional action metadata for the currently visible hover popup. The hover content stays in `gui_hover_popup` (0x81); this sidecar tells native frontends whether to render an action button without parsing display text.
+
+```
+opcode(1) + payload_len(2) + visible(1) + action_len(2) + action(action_len)
+```
+
+When `visible` is `0`, the payload is only `visible(1)` and the frontend clears any current hover action. When `visible` is `1`, `action` is stable action metadata that tells the frontend to render an Open control. The frontend sends the generic `hover_open_action` (0x3F), and the BEAM executes the current popup's stored action.
 
 ### 0x91 — gui_indent_guides
 

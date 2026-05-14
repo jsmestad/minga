@@ -64,6 +64,32 @@ defmodule MingaEditor.LspActions do
     end
   end
 
+  @doc "Sends a textDocument/definition request and previews the target in a popup."
+  @spec peek_definition(state()) :: state()
+  def peek_definition(%{workspace: %{buffers: %{active: nil}}} = state) do
+    EditorState.set_status(state, "No active buffer")
+  end
+
+  def peek_definition(%{workspace: %{buffers: %{active: buf}}} = state) do
+    case lsp_client_for(state, buf) do
+      nil ->
+        EditorState.set_status(state, "No language server")
+
+      client ->
+        send_lsp_request(state, client, buf, "textDocument/definition", :peek_definition)
+    end
+  end
+
+  @doc "Jumps to an already-resolved LSP location."
+  @spec open_location(state(), String.t(), non_neg_integer(), non_neg_integer()) :: state()
+  def open_location(%{workspace: %{buffers: %{active: nil}}} = state, _uri, _line, _col) do
+    EditorState.set_status(state, "No active buffer")
+  end
+
+  def open_location(state, uri, line, col) do
+    jump_to_location(state, uri, line, col)
+  end
+
   @doc "Sends a textDocument/hover request for the symbol under the cursor."
   @spec hover(state()) :: state()
   def hover(%{workspace: %{buffers: %{active: nil}}} = state) do
@@ -674,6 +700,36 @@ defmodule MingaEditor.LspActions do
 
       {uri, line, col} ->
         jump_to_location(state, uri, line, col)
+    end
+  end
+
+  @doc """
+  Handles a textDocument/definition response for peek.
+
+  Parses the target location and shows a focused popup with nearby source lines.
+  The popup exposes an Open action that jumps to the resolved target location.
+  """
+  @spec handle_peek_definition_response(state(), {:ok, term()} | {:error, term()}) :: state()
+  def handle_peek_definition_response(state, {:error, error}) do
+    Log.debug(:lsp, "Peek definition request failed: #{inspect(error)}")
+    EditorState.set_status(state, "Peek definition request failed")
+  end
+
+  def handle_peek_definition_response(state, {:ok, nil}) do
+    EditorState.set_status(state, "No definition found")
+  end
+
+  def handle_peek_definition_response(state, {:ok, []}) do
+    EditorState.set_status(state, "No definition found")
+  end
+
+  def handle_peek_definition_response(state, {:ok, result}) do
+    case parse_location(result) do
+      nil ->
+        EditorState.set_status(state, "No definition found")
+
+      {uri, line, col} ->
+        show_peek_definition_popup(state, uri, line, col)
     end
   end
 
@@ -1394,6 +1450,54 @@ defmodule MingaEditor.LspActions do
       Buffer.move_to(state.workspace.buffers.active, {line, col})
       state
     end
+  end
+
+  @spec show_peek_definition_popup(state(), String.t(), non_neg_integer(), non_neg_integer()) ::
+          state()
+  defp show_peek_definition_popup(state, uri, line, col) do
+    path = SyncServer.uri_to_path(uri)
+
+    case File.read(path) do
+      {:ok, content} ->
+        markdown = peek_definition_markdown(path, content, line, col)
+        {cursor_row, cursor_col} = hover_cursor_screen_position(state)
+
+        popup =
+          markdown
+          |> HoverPopup.new(cursor_row, cursor_col)
+          |> HoverPopup.focus()
+          |> HoverPopup.with_open_action({:goto_location, uri, line, col})
+
+        EditorState.set_hover_popup(state, popup)
+
+      {:error, reason} ->
+        EditorState.set_status(state, "Could not read definition: #{inspect(reason)}")
+    end
+  end
+
+  @spec peek_definition_markdown(String.t(), String.t(), non_neg_integer(), non_neg_integer()) ::
+          String.t()
+  defp peek_definition_markdown(path, content, line, col) do
+    lines = String.split(content, "\n", trim: false)
+    start_line = max(line - 7, 0)
+    end_line = min(line + 7, max(length(lines) - 1, 0))
+
+    preview =
+      lines
+      |> Enum.slice(start_line, end_line - start_line + 1)
+      |> Enum.with_index(start_line + 1)
+      |> Enum.map_join("\n", fn {text, number} -> format_peek_line(text, number, line + 1) end)
+
+    "### #{path}:#{line + 1}:#{col + 1}\n\n```\n#{preview}\n```"
+  end
+
+  @spec format_peek_line(String.t(), pos_integer(), pos_integer()) :: String.t()
+  defp format_peek_line(text, number, target_line) when number == target_line do
+    "▶ #{String.pad_leading(Integer.to_string(number), 4)} │ #{text}"
+  end
+
+  defp format_peek_line(text, number, _target_line) do
+    "  #{String.pad_leading(Integer.to_string(number), 4)} │ #{text}"
   end
 
   @spec open_or_switch_to_file(state(), String.t()) :: state()

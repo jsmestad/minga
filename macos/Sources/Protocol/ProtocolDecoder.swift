@@ -50,6 +50,7 @@ enum RenderCommand: Sendable {
     case guiToolManager(visible: Bool, filter: UInt8, selectedIndex: UInt16, tools: [Wire.ToolEntry])
     case guiMinibuffer(visible: Bool, mode: UInt8, cursorPos: UInt16, prompt: String, input: String, context: String, selectedIndex: UInt16, totalCandidates: UInt16, candidates: [Wire.MinibufferCandidate])
     case guiHoverPopup(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, focused: Bool, scrollOffset: UInt16, lines: [Wire.HoverLine])
+    case guiHoverAction(visible: Bool, actionName: String)
     case guiSignatureHelp(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, activeSignature: UInt8, activeParameter: UInt8, signatures: [Wire.Signature])
     case guiFloatPopup(visible: Bool, width: UInt16, height: UInt16, title: String, lines: [String])
     case clipboardWrite(target: UInt8, text: String)
@@ -1624,6 +1625,21 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         return (.guiHoverPopup(visible: true, anchorRow: hAnchorRow, anchorCol: hAnchorCol,
                                 focused: hFocused, scrollOffset: hScrollOffset, lines: hLines),
                 hPos - offset)
+
+    case OP_GUI_HOVER_ACTION:
+        guard data.count >= rest + 3 else { throw ProtocolDecodeError.malformed }
+        let payloadLen = Int(readU16(data, rest))
+        guard data.count >= rest + 2 + payloadLen else { throw ProtocolDecodeError.malformed }
+        let payloadStart = rest + 2
+        let visible = data[payloadStart] != 0
+        guard visible else { return (.guiHoverAction(visible: false, actionName: ""), 3 + payloadLen) }
+        guard payloadLen >= 3 else { throw ProtocolDecodeError.malformed }
+        let actionLen = Int(readU16(data, payloadStart + 1))
+        guard payloadLen >= 3 + actionLen else { throw ProtocolDecodeError.malformed }
+        let actionStart = payloadStart + 3
+        let actionData = data[actionStart..<(actionStart + actionLen)]
+        let actionName = String(data: actionData, encoding: .utf8) ?? ""
+        return (.guiHoverAction(visible: true, actionName: actionName), 3 + payloadLen)
 
     case OP_GUI_SIGNATURE_HELP:
         // visible(1)

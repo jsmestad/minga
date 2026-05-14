@@ -15,6 +15,7 @@ defmodule MingaEditor.Frontend.GUIHoverProtocolTest do
 
   @op_gui_hover_popup 0x81
   @op_gui_signature_help 0x82
+  @op_gui_hover_action 0x96
 
   # ── Hover Popup ──────────────────────────────────────────────────────
 
@@ -45,7 +46,7 @@ defmodule MingaEditor.Frontend.GUIHoverProtocolTest do
 
       # line: line_type(1) + segment_count(2)
       # segment: style(1) + text_len(2) + text
-      assert <<0, 1::16, 0, 11::16, "hello world">> = rest
+      assert <<0, 1::16, 0, 11::16, "hello world", @op_gui_hover_action, 1::16, 0>> = rest
     end
 
     test "focused popup sets focused byte" do
@@ -85,7 +86,7 @@ defmodule MingaEditor.Frontend.GUIHoverProtocolTest do
       # segment 2: bold(1), "my_func"
       assert <<1, 7::16, "my_func", remaining2::binary>> = remaining
       # segment 3: code(4), "(arg)"
-      assert <<4, 5::16, "(arg)">> = remaining2
+      assert <<4, 5::16, "(arg)", @op_gui_hover_action, 1::16, 0>> = remaining2
     end
 
     test "code block line type encodes as 1" do

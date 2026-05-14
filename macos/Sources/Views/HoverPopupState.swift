@@ -25,6 +25,7 @@ final class HoverPopupState {
     var focused: Bool = false
     var scrollOffset: Int = 0
     var lines: [HoverLine] = []
+    var openActionName: String? = nil
 
     func update(visible: Bool, anchorRow: UInt16, anchorCol: UInt16,
                 focused: Bool, scrollOffset: UInt16, rawLines: [Wire.HoverLine]) {
@@ -44,8 +45,17 @@ final class HoverPopupState {
         }
     }
 
+    func setOpenAction(name: String) {
+        openActionName = name.isEmpty ? nil : name
+    }
+
+    func clearOpenAction() {
+        openActionName = nil
+    }
+
     func hide() {
         visible = false
         lines = []
+        openActionName = nil
     }
 }

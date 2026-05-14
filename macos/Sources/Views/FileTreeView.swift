@@ -271,6 +271,16 @@ struct FileTreeView: View {
 
     @ViewBuilder
     private func entryContextMenu(_ entry: FileTreeEntry) -> some View {
+        if !entry.isDir {
+            Button("Open") {
+                encoder?.sendFileTreeClick(index: UInt16(entry.index))
+            }
+            Button("Open in Split") {
+                encoder?.sendFileTreeOpenInSplit(index: UInt16(entry.index))
+            }
+            Divider()
+        }
+
         if entry.isDir {
             Button("New File…") {
                 encoder?.sendFileTreeNewFile(parentIndex: UInt16(entry.index))

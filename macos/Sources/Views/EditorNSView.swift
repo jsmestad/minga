@@ -46,6 +46,9 @@ final class EditorNSView: MTKView {
 
     private var trackingArea: NSTrackingArea?
 
+    /// Whether the current right-click was consumed by a native context menu.
+    private var contextMenuShownForRightClick = false
+
     /// IME composition state (marked text tracking).
     private var imeComposition = IMEComposition()
 
@@ -996,17 +999,75 @@ final class EditorNSView: MTKView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        resetCursorBlink()
         let (row, col) = cellPosition(from: event)
+        let cc = UInt8(clamping: event.clickCount)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_RIGHT,
                                modifiers: modifierBits(from: event.modifierFlags),
-                               eventType: MOUSE_PRESS)
+                               eventType: MOUSE_PRESS, clickCount: cc)
+        contextMenuShownForRightClick = true
+        NSMenu.popUpContextMenu(buildEditorContextMenu(), with: event, for: self)
     }
 
     override func rightMouseUp(with event: NSEvent) {
+        if contextMenuShownForRightClick {
+            contextMenuShownForRightClick = false
+            return
+        }
+
         let (row, col) = cellPosition(from: event)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_RIGHT,
                                modifiers: modifierBits(from: event.modifierFlags),
                                eventType: MOUSE_RELEASE)
+    }
+
+    private func buildEditorContextMenu() -> NSMenu {
+        let menu = NSMenu(title: "Editor")
+        menu.autoenablesItems = false
+        addEditorMenuItem("Cut", action: "cut", to: menu)
+        addEditorMenuItem("Copy", action: "copy", to: menu)
+        addEditorMenuItem("Paste", action: "paste", to: menu)
+        addEditorMenuItem("Select All", action: "select_all", to: menu)
+        menu.addItem(.separator())
+
+        let hasLsp = statusBarState?.hasLsp ?? false
+        addEditorMenuItem("Go to Definition", action: "goto_definition", to: menu, enabled: hasLsp)
+        addEditorMenuItem("Peek Definition", action: "peek_definition", to: menu, enabled: hasLsp)
+        addEditorMenuItem("Find References", action: "find_references", to: menu, enabled: hasLsp)
+        addEditorMenuItem("Rename Symbol", action: "rename_symbol", to: menu, enabled: hasLsp)
+        menu.addItem(.separator())
+
+        addEditorMenuItem("Toggle Comment", action: "toggle_comment_line", to: menu)
+        addEditorMenuItem("Format Document", action: "format_buffer", to: menu)
+        return menu
+    }
+
+    private func addEditorMenuItem(_ title: String, action: String, to menu: NSMenu, enabled: Bool = true) {
+        let item = NSMenuItem(title: title, action: #selector(handleEditorContextMenuItem(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = action
+        item.isEnabled = enabled
+        menu.addItem(item)
+    }
+
+    @objc private func handleEditorContextMenuItem(_ sender: NSMenuItem) {
+        guard let action = sender.representedObject as? String else { return }
+
+        switch action {
+        case "cut":
+            encoder.sendCmdCut()
+        case "copy":
+            encoder.sendCmdCopy()
+        case "paste":
+            pasteFromClipboard()
+        default:
+            encoder.sendExecuteCommand(name: action)
+        }
+    }
+
+    private func pasteFromClipboard() {
+        guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else { return }
+        encoder.sendPasteEvent(text: text)
     }
 
     override func otherMouseDown(with event: NSEvent) {
