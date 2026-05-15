@@ -257,7 +257,7 @@ defmodule MingaEditor.Commands.Dired do
              ) do
           {:ok, new_dired} ->
             listing = Dired.format_listing(new_dired)
-            Buffer.replace_content_force(buf, listing)
+            Buffer.replace_generated_content(buf, listing)
             Buffer.move_to(buf, {0, 0})
             dired_state = DiredState.update_dired(state.workspace.dired, new_dired)
 
@@ -313,7 +313,7 @@ defmodule MingaEditor.Commands.Dired do
         case update_fn.(dired) do
           {:ok, new_dired} ->
             listing = Dired.format_listing(new_dired)
-            Buffer.replace_content_force(buf, listing)
+            Buffer.replace_generated_content(buf, listing)
             Buffer.move_to(buf, {0, 0})
             dired_state = DiredState.update_dired(state.workspace.dired, new_dired)
 

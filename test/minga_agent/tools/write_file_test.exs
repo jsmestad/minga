@@ -2,7 +2,7 @@ defmodule MingaAgent.Tools.WriteFileTest do
   use ExUnit.Case, async: true
 
   alias MingaAgent.Tools.WriteFile
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
 
   @moduletag :tmp_dir
 
@@ -51,14 +51,14 @@ defmodule MingaAgent.Tools.WriteFileTest do
     test "replaces buffer content when buffer is open", %{tmp_dir: dir} do
       path = Path.join(dir, "buffered.ex")
       File.write!(path, "old content")
-      pid = start_supervised!({BufferServer, file_path: path})
+      pid = start_supervised!({BufferProcess, file_path: path})
 
       assert {:ok, msg} = WriteFile.execute(path, "new content")
       assert msg =~ "via buffer"
 
       # Edit went through buffer
-      assert BufferServer.content(pid) == "new content"
-      assert BufferServer.dirty?(pid)
+      assert BufferProcess.content(pid) == "new content"
+      assert BufferProcess.dirty?(pid)
 
       # Disk unchanged
       assert File.read!(path) == "old content"
@@ -67,13 +67,13 @@ defmodule MingaAgent.Tools.WriteFileTest do
     test "write through buffer is undoable", %{tmp_dir: dir} do
       path = Path.join(dir, "undo.ex")
       File.write!(path, "original")
-      pid = start_supervised!({BufferServer, file_path: path})
+      pid = start_supervised!({BufferProcess, file_path: path})
 
       WriteFile.execute(path, "replaced")
-      assert BufferServer.content(pid) == "replaced"
+      assert BufferProcess.content(pid) == "replaced"
 
-      BufferServer.undo(pid)
-      assert BufferServer.content(pid) == "original"
+      BufferProcess.undo(pid)
+      assert BufferProcess.content(pid) == "original"
     end
 
     test "creates file on disk when no buffer is open", %{tmp_dir: dir} do

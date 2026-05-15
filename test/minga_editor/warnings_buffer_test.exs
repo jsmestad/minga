@@ -1,7 +1,7 @@
 defmodule MingaEditor.WarningsBufferTest do
   use Minga.Test.EditorCase, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.BottomPanel
   alias MingaEditor.Frontend.Capabilities
 
@@ -132,7 +132,7 @@ defmodule MingaEditor.WarningsBufferTest do
       :sys.get_state(ctx.editor)
 
       state = :sys.get_state(ctx.editor)
-      content = BufferServer.content(state.workspace.buffers.messages)
+      content = BufferProcess.content(state.workspace.buffers.messages)
       assert String.contains?(content, "[WARN] something broke")
     end
 

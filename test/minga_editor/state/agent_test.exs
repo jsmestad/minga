@@ -1,11 +1,11 @@
 defmodule MingaEditor.State.AgentTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.State.Agent, as: AgentState
 
   defp new_agent do
-    {:ok, _prompt_buf} = BufferServer.start_link(content: "")
+    {:ok, _prompt_buf} = BufferProcess.start_link(content: "")
     %AgentState{}
   end
 

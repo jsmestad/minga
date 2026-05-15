@@ -2,7 +2,7 @@ defmodule MingaEditor.Commands.HelpTest do
   @moduledoc false
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Keymap.Active, as: ActiveKeymap
   alias MingaEditor.Commands.Help
   alias MingaEditor.State, as: EditorState
@@ -20,7 +20,7 @@ defmodule MingaEditor.Commands.HelpTest do
     {:ok, buf} =
       DynamicSupervisor.start_child(
         Minga.Buffer.Supervisor,
-        {BufferServer, content: "hello", buffer_name: "test.txt"}
+        {BufferProcess, content: "hello", buffer_name: "test.txt"}
       )
 
     {:ok, keymap} = ActiveKeymap.start_link(name: nil)
@@ -47,7 +47,7 @@ defmodule MingaEditor.Commands.HelpTest do
       assert result.workspace.buffers.help != nil
       assert Process.alive?(result.workspace.buffers.help)
 
-      content = BufferServer.content(result.workspace.buffers.help)
+      content = BufferProcess.content(result.workspace.buffers.help)
       assert content =~ "Key:         j"
       assert content =~ "Command:     move_down"
       assert content =~ "Description: Move cursor down"
@@ -64,15 +64,15 @@ defmodule MingaEditor.Commands.HelpTest do
       state = build_state()
       result1 = Help.execute(state, {:describe_key_result, "j", :move_down, "Move cursor down"})
       help_pid = result1.workspace.buffers.help
-      version = BufferServer.version(help_pid)
+      version = BufferProcess.version(help_pid)
 
       result2 =
         Help.execute(result1, {:describe_key_result, "k", :move_up, "Move cursor up"})
 
       assert result2.workspace.buffers.help == help_pid
-      assert BufferServer.version(help_pid) > version
+      assert BufferProcess.version(help_pid) > version
 
-      content = BufferServer.content(help_pid)
+      content = BufferProcess.content(help_pid)
       assert content =~ "Command:     move_up"
       refute content =~ "Command:     move_down"
     end
@@ -90,7 +90,7 @@ defmodule MingaEditor.Commands.HelpTest do
       state = build_state()
       result = Help.execute(state, {:describe_key_not_found, "z"})
 
-      content = BufferServer.content(result.workspace.buffers.help)
+      content = BufferProcess.content(result.workspace.buffers.help)
       assert content =~ "Key not bound: z"
     end
   end
@@ -98,7 +98,7 @@ defmodule MingaEditor.Commands.HelpTest do
   describe "describe_bindings" do
     test "formats leader, normal, text object, and filetype bindings" do
       state = build_state()
-      BufferServer.set_filetype(state.workspace.buffers.active, :elixir)
+      BufferProcess.set_filetype(state.workspace.buffers.active, :elixir)
 
       content = Help.bindings_content(state)
 
@@ -137,9 +137,9 @@ defmodule MingaEditor.Commands.HelpTest do
       result = Help.execute(state, :describe_bindings)
       buffer = result.workspace.buffers.active
 
-      assert BufferServer.buffer_name(buffer) == "*Bindings*"
-      assert BufferServer.read_only?(buffer)
-      assert BufferServer.content(buffer) =~ "# Keybindings"
+      assert BufferProcess.buffer_name(buffer) == "*Bindings*"
+      assert BufferProcess.read_only?(buffer)
+      assert BufferProcess.content(buffer) =~ "# Keybindings"
     end
   end
 
@@ -148,7 +148,7 @@ defmodule MingaEditor.Commands.HelpTest do
       state = build_state()
       result = Help.describe_option(state, :tab_width)
 
-      content = BufferServer.content(result.workspace.buffers.help)
+      content = BufferProcess.content(result.workspace.buffers.help)
       assert content =~ "# Option: tab_width"
       assert content =~ "Current value: 2"
       assert content =~ "Default: 2"
@@ -162,7 +162,7 @@ defmodule MingaEditor.Commands.HelpTest do
       Minga.Config.Options.set(state.options_server, :agent_model, "test-model")
 
       result = Help.describe_option(state, :agent_model)
-      content = BufferServer.content(result.workspace.buffers.help)
+      content = BufferProcess.content(result.workspace.buffers.help)
 
       assert content =~ "Current value: \"test-model\""
       assert content =~ "Set by: default → config.exs"
@@ -170,11 +170,11 @@ defmodule MingaEditor.Commands.HelpTest do
 
     test "uses filetype-scoped values from the editor options server" do
       state = build_state()
-      BufferServer.set_filetype(state.workspace.buffers.active, :go)
+      BufferProcess.set_filetype(state.workspace.buffers.active, :go)
       Minga.Config.Options.set_for_filetype(state.options_server, :go, :agent_model, "go-model")
 
       result = Help.describe_option(state, :agent_model)
-      content = BufferServer.content(result.workspace.buffers.help)
+      content = BufferProcess.content(result.workspace.buffers.help)
 
       assert content =~ "Current value: \"go-model\""
       assert content =~ "Set by: default → filetype :go"
@@ -182,10 +182,10 @@ defmodule MingaEditor.Commands.HelpTest do
 
     test "includes buffer-local provenance in option help" do
       state = build_state()
-      BufferServer.set_option(state.workspace.buffers.active, :tab_width, 6)
+      BufferProcess.set_option(state.workspace.buffers.active, :tab_width, 6)
 
       result = Help.describe_option(state, :tab_width)
-      content = BufferServer.content(result.workspace.buffers.help)
+      content = BufferProcess.content(result.workspace.buffers.help)
 
       assert content =~ "Current value: 6"
       assert content =~ "Set by: default → buffer-local"
@@ -228,7 +228,7 @@ defmodule MingaEditor.Commands.HelpTest do
       )
 
       result = Help.describe_extension_option(state, :minga_org, :conceal)
-      content = BufferServer.content(result.workspace.buffers.help)
+      content = BufferProcess.content(result.workspace.buffers.help)
 
       assert content =~ "# Option: minga_org.conceal"
       assert content =~ "Current value: false"
@@ -327,7 +327,7 @@ defmodule MingaEditor.Commands.HelpTest do
       state = build_state()
       result = Help.execute(state, {:describe_command_named, "describe_bindings"})
 
-      content = BufferServer.content(result.workspace.buffers.help)
+      content = BufferProcess.content(result.workspace.buffers.help)
       assert content =~ "# Command: describe_bindings"
       assert content =~ "Description: Describe bindings"
       assert content =~ "Keybinding:  SPC h b"
@@ -337,7 +337,7 @@ defmodule MingaEditor.Commands.HelpTest do
       state = build_state()
       result = Help.execute(state, {:describe_command_named, "not_a_real_command_xyz"})
 
-      content = BufferServer.content(result.workspace.buffers.help)
+      content = BufferProcess.content(result.workspace.buffers.help)
       assert content =~ "Unknown command: not_a_real_command_xyz"
     end
 
@@ -345,7 +345,7 @@ defmodule MingaEditor.Commands.HelpTest do
       state = build_state()
       result = Help.execute(state, {:describe_command_named, "true"})
 
-      content = BufferServer.content(result.workspace.buffers.help)
+      content = BufferProcess.content(result.workspace.buffers.help)
       assert content =~ "Unknown command: true"
     end
 
@@ -353,7 +353,7 @@ defmodule MingaEditor.Commands.HelpTest do
       state = build_state()
       result = Help.execute(state, {:describe_command_named, ":describe_bindings"})
 
-      content = BufferServer.content(result.workspace.buffers.help)
+      content = BufferProcess.content(result.workspace.buffers.help)
       assert content =~ "# Command: describe_bindings"
     end
 
@@ -361,7 +361,7 @@ defmodule MingaEditor.Commands.HelpTest do
       state = build_state()
       result = Help.execute(state, {:describe_command_named, ":not_a_real_command"})
 
-      content = BufferServer.content(result.workspace.buffers.help)
+      content = BufferProcess.content(result.workspace.buffers.help)
       assert content =~ "Unknown command: not_a_real_command"
       refute content =~ "Unknown command: :not_a_real_command"
     end
@@ -370,7 +370,7 @@ defmodule MingaEditor.Commands.HelpTest do
       state = build_state()
       result = CommandHelpSource.on_select(%Item{id: :describe_bindings, label: ""}, state)
 
-      content = BufferServer.content(result.workspace.buffers.help)
+      content = BufferProcess.content(result.workspace.buffers.help)
       assert content =~ "# Command: describe_bindings"
       assert content =~ "Keybinding:  SPC h b"
     end
@@ -381,14 +381,14 @@ defmodule MingaEditor.Commands.HelpTest do
       state = build_state()
       result = Help.execute(state, {:describe_key_result, "j", :move_down, "Move cursor down"})
 
-      assert BufferServer.read_only?(result.workspace.buffers.help)
+      assert BufferProcess.read_only?(result.workspace.buffers.help)
     end
 
     test "help buffer can be shown as markdown" do
       state = build_state()
       result = Help.show_in_help_buffer(state, "# Help\n", filetype: :markdown)
 
-      assert BufferServer.filetype(result.workspace.buffers.help) == :markdown
+      assert BufferProcess.filetype(result.workspace.buffers.help) == :markdown
     end
 
     test "help commands without an explicit filetype reset the help buffer to text" do
@@ -397,7 +397,7 @@ defmodule MingaEditor.Commands.HelpTest do
 
       result = Help.execute(result, {:describe_key_result, "j", :move_down, "Move cursor down"})
 
-      assert BufferServer.filetype(result.workspace.buffers.help) == :text
+      assert BufferProcess.filetype(result.workspace.buffers.help) == :text
     end
 
     test "nil help buffer filetype resets to text" do
@@ -406,7 +406,7 @@ defmodule MingaEditor.Commands.HelpTest do
 
       result = Help.show_in_help_buffer(result, "Plain help\n", filetype: nil)
 
-      assert BufferServer.filetype(result.workspace.buffers.help) == :text
+      assert BufferProcess.filetype(result.workspace.buffers.help) == :text
     end
   end
 
@@ -429,9 +429,9 @@ defmodule MingaEditor.Commands.HelpTest do
 
       buf = result.workspace.buffers.active
       assert Process.alive?(buf)
-      assert BufferServer.buffer_name(buf) == "*Keystrokes*"
+      assert BufferProcess.buffer_name(buf) == "*Keystrokes*"
 
-      content = BufferServer.content(buf)
+      content = BufferProcess.content(buf)
       assert content =~ "Keystroke History"
       assert content =~ "No keystrokes recorded yet."
     end
@@ -441,7 +441,7 @@ defmodule MingaEditor.Commands.HelpTest do
       result = Help.execute(state, :describe_lossage)
 
       buf = result.workspace.buffers.active
-      assert BufferServer.read_only?(buf)
+      assert BufferProcess.read_only?(buf)
     end
 
     test "shows formatted keystrokes when history has entries" do
@@ -455,7 +455,7 @@ defmodule MingaEditor.Commands.HelpTest do
       state = %{state | keystroke_history: history}
       result = Help.execute(state, :describe_lossage)
 
-      content = BufferServer.content(result.workspace.buffers.active)
+      content = BufferProcess.content(result.workspace.buffers.active)
       assert content =~ "Keystroke History (last 2 keys)"
       assert content =~ "j"
       assert content =~ "k"
@@ -479,7 +479,7 @@ defmodule MingaEditor.Commands.HelpTest do
       state = %{state | keystroke_history: history}
       result = Help.execute(state, :describe_lossage)
 
-      content = BufferServer.content(result.workspace.buffers.active)
+      content = BufferProcess.content(result.workspace.buffers.active)
       assert content =~ "── mode: insert ──"
     end
 
@@ -495,7 +495,7 @@ defmodule MingaEditor.Commands.HelpTest do
       state = %{state | keystroke_history: history}
       result = Help.execute(state, :describe_lossage)
 
-      content = BufferServer.content(result.workspace.buffers.active)
+      content = BufferProcess.content(result.workspace.buffers.active)
       assert content =~ "→ insert"
     end
 
@@ -524,7 +524,7 @@ defmodule MingaEditor.Commands.HelpTest do
       state = %{state | keystroke_history: history}
       result = Help.execute(state, :describe_lossage)
 
-      content = BufferServer.content(result.workspace.buffers.active)
+      content = BufferProcess.content(result.workspace.buffers.active)
       assert content =~ "d w"
     end
 
@@ -546,7 +546,7 @@ defmodule MingaEditor.Commands.HelpTest do
       state = %{state | keystroke_history: history}
       result = Help.execute(state, :describe_lossage)
 
-      content = BufferServer.content(result.workspace.buffers.active)
+      content = BufferProcess.content(result.workspace.buffers.active)
       refute content =~ "chars"
     end
 
@@ -568,7 +568,7 @@ defmodule MingaEditor.Commands.HelpTest do
       state = %{state | keystroke_history: history}
       result = Help.execute(state, :describe_lossage)
 
-      content = BufferServer.content(result.workspace.buffers.active)
+      content = BufferProcess.content(result.workspace.buffers.active)
       assert content =~ "(8 chars)"
     end
   end

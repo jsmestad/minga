@@ -39,7 +39,7 @@ defmodule MingaAgent.Tools.LspBridge do
   def client_for_path(path) when is_binary(path) do
     abs_path = Path.expand(path)
 
-    case Buffer.Server.pid_for_path(abs_path) do
+    case Buffer.pid_for_path(abs_path) do
       {:ok, buf_pid} ->
         case SyncServer.clients_for_buffer(buf_pid) do
           [client | _] ->

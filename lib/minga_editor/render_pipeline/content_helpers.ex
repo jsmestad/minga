@@ -1068,7 +1068,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
   # Applies buffer-local face overrides to the highlight's face registry.
   # Reads from the editor's pre-computed face_override_registries map,
-  # which is updated via push from Buffer.Server when overrides change.
+  # which is updated via push from Buffer.Process when overrides change.
   # Zero GenServer calls on the render path.
   @spec apply_buffer_face_overrides(Highlight.t(), pid(), state()) :: Highlight.t()
   defp apply_buffer_face_overrides(hl, buf_pid, state) when is_pid(buf_pid) do

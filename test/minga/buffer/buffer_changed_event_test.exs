@@ -3,7 +3,7 @@ defmodule Minga.Buffer.BufferChangedEventTest do
 
   alias Minga.Buffer.EditDelta
   alias Minga.Buffer.EditSource
-  alias Minga.Buffer.Server
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Events
   alias Minga.Events.BufferChangedEvent
 
@@ -14,9 +14,9 @@ defmodule Minga.Buffer.BufferChangedEventTest do
 
   describe "insert_char broadcasts delta and source" do
     test "event carries insertion delta with :user source" do
-      buf = start_supervised!({Server, content: "hello"})
-      Server.move_to(buf, {0, 5})
-      Server.insert_char(buf, "!")
+      buf = start_supervised!({BufferProcess, content: "hello"})
+      BufferProcess.move_to(buf, {0, 5})
+      BufferProcess.insert_char(buf, "!")
 
       assert_receive {:minga_event, :buffer_changed,
                       %BufferChangedEvent{
@@ -29,8 +29,8 @@ defmodule Minga.Buffer.BufferChangedEventTest do
 
   describe "insert_text broadcasts delta and source" do
     test "event carries insertion delta" do
-      buf = start_supervised!({Server, content: ""})
-      Server.insert_text(buf, "world")
+      buf = start_supervised!({BufferProcess, content: ""})
+      BufferProcess.insert_text(buf, "world")
 
       assert_receive {:minga_event, :buffer_changed,
                       %BufferChangedEvent{
@@ -41,10 +41,10 @@ defmodule Minga.Buffer.BufferChangedEventTest do
     end
   end
 
-  describe "apply_text_edit broadcasts delta with source" do
+  describe "apply_edit broadcasts delta with source" do
     test "default source is :user" do
-      buf = start_supervised!({Server, content: "hello world"})
-      Server.apply_text_edit(buf, 0, 0, 0, 5, "goodbye")
+      buf = start_supervised!({BufferProcess, content: "hello world"})
+      BufferProcess.apply_edit(buf, 0, 0, 0, 5, "goodbye")
 
       assert_receive {:minga_event, :buffer_changed,
                       %BufferChangedEvent{
@@ -55,8 +55,8 @@ defmodule Minga.Buffer.BufferChangedEventTest do
     end
 
     test "custom source is propagated" do
-      buf = start_supervised!({Server, content: "hello world"})
-      Server.apply_text_edit(buf, 0, 0, 0, 5, "goodbye", EditSource.lsp(:elixir_ls))
+      buf = start_supervised!({BufferProcess, content: "hello world"})
+      BufferProcess.apply_edit(buf, 0, 0, 0, 5, "goodbye", EditSource.lsp(:elixir_ls))
 
       assert_receive {:minga_event, :buffer_changed,
                       %BufferChangedEvent{
@@ -67,11 +67,11 @@ defmodule Minga.Buffer.BufferChangedEventTest do
     end
   end
 
-  describe "apply_text_edits broadcasts with nil delta (bulk op)" do
+  describe "apply_edits broadcasts with nil delta (bulk op)" do
     test "batch edits send nil delta with source" do
-      buf = start_supervised!({Server, content: "aaa\nbbb\nccc"})
+      buf = start_supervised!({BufferProcess, content: "aaa\nbbb\nccc"})
       edits = [{{0, 0}, {0, 3}, "AAA"}, {{1, 0}, {1, 3}, "BBB"}]
-      Server.apply_text_edits(buf, edits, EditSource.lsp(:elixir_ls))
+      BufferProcess.apply_edits(buf, edits, EditSource.lsp(:elixir_ls))
 
       assert_receive {:minga_event, :buffer_changed,
                       %BufferChangedEvent{
@@ -84,9 +84,9 @@ defmodule Minga.Buffer.BufferChangedEventTest do
 
   describe "delete_before broadcasts delta" do
     test "backspace sends deletion delta" do
-      buf = start_supervised!({Server, content: "ab"})
-      Server.move_to(buf, {0, 2})
-      Server.delete_before(buf)
+      buf = start_supervised!({BufferProcess, content: "ab"})
+      BufferProcess.move_to(buf, {0, 2})
+      BufferProcess.delete_before(buf)
 
       assert_receive {:minga_event, :buffer_changed,
                       %BufferChangedEvent{
@@ -99,15 +99,15 @@ defmodule Minga.Buffer.BufferChangedEventTest do
 
   describe "undo broadcasts nil delta" do
     test "undo sends nil delta for full sync" do
-      buf = start_supervised!({Server, content: "original"})
-      Server.insert_char(buf, "x")
+      buf = start_supervised!({BufferProcess, content: "original"})
+      BufferProcess.insert_char(buf, "x")
       # Drain the insert event
       assert_receive {:minga_event, :buffer_changed, %BufferChangedEvent{delta: %EditDelta{}}}
 
       # Break coalescing so undo has something to pop
-      Server.break_undo_coalescing(buf)
+      BufferProcess.break_undo_coalescing(buf)
 
-      Server.undo(buf)
+      BufferProcess.undo(buf)
 
       assert_receive {:minga_event, :buffer_changed,
                       %BufferChangedEvent{buffer: ^buf, delta: nil}}
@@ -116,8 +116,8 @@ defmodule Minga.Buffer.BufferChangedEventTest do
 
   describe "replace_content broadcasts nil delta with source" do
     test "replace_content sends nil delta" do
-      buf = start_supervised!({Server, content: "old"})
-      Server.replace_content(buf, "new", :lsp)
+      buf = start_supervised!({BufferProcess, content: "old"})
+      BufferProcess.replace_content(buf, "new", :lsp)
 
       assert_receive {:minga_event, :buffer_changed,
                       %BufferChangedEvent{
@@ -130,8 +130,8 @@ defmodule Minga.Buffer.BufferChangedEventTest do
 
   describe "find_and_replace broadcasts with agent source" do
     test "sends nil delta (bulk op)" do
-      buf = start_supervised!({Server, content: "hello world"})
-      {:ok, _msg} = Server.find_and_replace(buf, "hello", "goodbye")
+      buf = start_supervised!({BufferProcess, content: "hello world"})
+      {:ok, _msg} = BufferProcess.find_and_replace(buf, "hello", "goodbye")
 
       assert_receive {:minga_event, :buffer_changed,
                       %BufferChangedEvent{
@@ -140,14 +140,14 @@ defmodule Minga.Buffer.BufferChangedEventTest do
                         delta: nil
                       }}
 
-      assert Server.content(buf) == "goodbye world"
+      assert BufferProcess.content(buf) == "goodbye world"
     end
   end
 
   describe "event includes version" do
     test "version is set on the event" do
-      buf = start_supervised!({Server, content: ""})
-      Server.insert_char(buf, "a")
+      buf = start_supervised!({BufferProcess, content: ""})
+      BufferProcess.insert_char(buf, "a")
 
       assert_receive {:minga_event, :buffer_changed, %BufferChangedEvent{version: version}}
 

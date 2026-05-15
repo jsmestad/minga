@@ -7,7 +7,7 @@ defmodule MingaEditor.MouseClipboardTest do
 
   import Hammox
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Mode.VisualState
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Mouse
@@ -50,9 +50,9 @@ defmodule MingaEditor.MouseClipboardTest do
   end
 
   defp build_visual_drag_state(frontend_type) do
-    buffer = start_supervised!({BufferServer, content: "hello world"})
-    BufferServer.set_option(buffer, :clipboard, :unnamedplus)
-    BufferServer.move_to(buffer, {0, 4})
+    buffer = start_supervised!({BufferProcess, content: "hello world"})
+    BufferProcess.set_option(buffer, :clipboard, :unnamedplus)
+    BufferProcess.move_to(buffer, {0, 4})
 
     visual_state = %VisualState{visual_anchor: {0, 0}, visual_type: :char}
     editing = VimState.transition(VimState.new(), :visual, visual_state)

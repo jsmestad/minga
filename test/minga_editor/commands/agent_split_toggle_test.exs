@@ -4,7 +4,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
   alias MingaEditor.Agent.BufferSync
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.Preview
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.RuntimeState
@@ -26,8 +26,8 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
   end
 
   defp base_state(opts \\ []) do
-    {:ok, buf} = BufferServer.start_link(content: "hello\nworld")
-    {:ok, prompt_buf} = BufferServer.start_link(content: "")
+    {:ok, buf} = BufferProcess.start_link(content: "hello\nworld")
+    {:ok, prompt_buf} = BufferProcess.start_link(content: "")
     agent_buf = BufferSync.start_buffer()
 
     session_pid = Keyword.get(opts, :session, fake_session())

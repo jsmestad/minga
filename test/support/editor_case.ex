@@ -13,7 +13,7 @@ defmodule Minga.Test.EditorCase do
       end
   """
   use ExUnit.CaseTemplate
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor
   alias Minga.Test.HeadlessPort
   alias Minga.Test.Snapshot
@@ -21,7 +21,7 @@ defmodule Minga.Test.EditorCase do
   using do
     quote do
       import Minga.Test.EditorCase
-      alias Minga.Buffer.Server, as: BufferServer
+      alias Minga.Buffer.Process, as: BufferProcess
     end
   end
 
@@ -61,11 +61,11 @@ defmodule Minga.Test.EditorCase do
     {:ok, port} = HeadlessPort.start_link(width: width, height: height)
     buffer_opts = [content: content, events_registry: events_registry]
     buffer_opts = if file_path, do: [{:file_path, file_path} | buffer_opts], else: buffer_opts
-    {:ok, buffer} = BufferServer.start_link(buffer_opts)
+    {:ok, buffer} = BufferProcess.start_link(buffer_opts)
 
     # Inject clipboard mode directly on the buffer so the Editor never
     # reads the global Config.Options for clipboard. Each test is isolated.
-    BufferServer.set_option(buffer, :clipboard, clipboard)
+    BufferProcess.set_option(buffer, :clipboard, clipboard)
 
     # Pin editing model per-editor so async tests don't race on global ETS.
     editing_model = Keyword.get(opts, :editing_model, :vim)
@@ -135,7 +135,7 @@ defmodule Minga.Test.EditorCase do
 
     # Inject clipboard mode directly on the buffer so the Editor never
     # reads the global Config.Options for clipboard. Each test is isolated.
-    BufferServer.set_option(buffer, :clipboard, clipboard)
+    BufferProcess.set_option(buffer, :clipboard, clipboard)
 
     editing_model = Keyword.get(opts, :editing_model, :vim)
 
@@ -421,7 +421,7 @@ defmodule Minga.Test.EditorCase do
   @doc "Returns the buffer content."
   @spec buffer_content(editor_ctx()) :: String.t()
   def buffer_content(%{buffer: buffer}) do
-    BufferServer.content(buffer)
+    BufferProcess.content(buffer)
   end
 
   @spec get_editor_state(pid()) :: MingaEditor.State.t()
@@ -439,7 +439,7 @@ defmodule Minga.Test.EditorCase do
   @doc "Returns the buffer cursor position."
   @spec buffer_cursor(editor_ctx()) :: {non_neg_integer(), non_neg_integer()}
   def buffer_cursor(%{buffer: buffer}) do
-    BufferServer.cursor(buffer)
+    BufferProcess.cursor(buffer)
   end
 
   @doc "Returns the full editor state (via :sys.get_state). Race-free."
@@ -477,7 +477,7 @@ defmodule Minga.Test.EditorCase do
   def active_content(ctx) do
     case active_buffer(ctx) do
       nil -> ""
-      buf -> BufferServer.content(buf)
+      buf -> BufferProcess.content(buf)
     end
   end
 

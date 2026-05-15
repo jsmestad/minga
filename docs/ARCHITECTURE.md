@@ -114,7 +114,7 @@ The Editor process never directly touches buffer memory. It sends messages:
 
 ```elixir
 # Editor asks the buffer for its content
-{content, cursor} = Buffer.Server.content_and_cursor(buffer_pid)
+{content, cursor} = Buffer.Process.content_and_cursor(buffer_pid)
 
 # Buffer process handles this in isolation
 def handle_call(:content_and_cursor, _from, state) do
@@ -385,7 +385,7 @@ sequenceDiagram
     participant Ed as Editor
     participant Render as Renderer.Server
     participant Mode as Mode.Normal
-    participant Buf as Buffer.Server
+    participant Buf as Buffer.Process
 
     FE->>FE: decode platform input event
     FE->>PM: key_press(0x01) via stdout
@@ -597,7 +597,7 @@ Minga inherits this philosophy through the BEAM. Every component in the editor i
 
 ```elixir
 # Change tab size for just this one buffer, at runtime
-Buffer.Server.set_option(buffer_pid, :tab_size, 2)
+Buffer.Process.set_option(buffer_pid, :tab_size, 2)
 
 # The buffer process updates its own state. That's it.
 # No global config mutated. No other buffers affected.
@@ -611,7 +611,7 @@ This maps directly to how Emacs buffer-local variables work, but with stronger g
 The natural resolution order for any setting:
 
 ```
-Buffer.Server state     (highest priority: runtime overrides for this buffer)
+Buffer.Process state     (highest priority: runtime overrides for this buffer)
     ▼ falls through to
 Filetype defaults       (conventions, e.g. Go uses tabs, Python uses 4 spaces)
     ▼ falls through to

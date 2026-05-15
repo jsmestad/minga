@@ -11,7 +11,7 @@ defmodule MingaEditor.State.TabSwitchTest do
 
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
@@ -31,8 +31,8 @@ defmodule MingaEditor.State.TabSwitchTest do
   # has buf2 snapshotted in its context.
   @spec state_with_two_file_tabs() :: {EditorState.t(), pid(), pid()}
   defp state_with_two_file_tabs do
-    {:ok, buf1} = BufferServer.start_link(content: "file one")
-    {:ok, buf2} = BufferServer.start_link(content: "file two")
+    {:ok, buf1} = BufferProcess.start_link(content: "file one")
+    {:ok, buf2} = BufferProcess.start_link(content: "file two")
 
     win_id = 1
     window1 = Window.new(win_id, buf1, 24, 80)
@@ -94,8 +94,8 @@ defmodule MingaEditor.State.TabSwitchTest do
   @spec state_with_file_and_agent_tabs() ::
           {EditorState.t(), Tab.id(), Tab.id(), pid(), pid()}
   defp state_with_file_and_agent_tabs do
-    {:ok, file_buf} = BufferServer.start_link(content: "file content")
-    {:ok, agent_buf} = BufferServer.start_link(content: "")
+    {:ok, file_buf} = BufferProcess.start_link(content: "file content")
+    {:ok, agent_buf} = BufferProcess.start_link(content: "")
 
     win_id = 1
     file_window = Window.new(win_id, file_buf, 24, 80)

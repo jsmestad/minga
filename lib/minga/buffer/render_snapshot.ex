@@ -2,7 +2,7 @@ defmodule Minga.Buffer.RenderSnapshot do
   @moduledoc """
   All data needed to render a single frame for one buffer.
 
-  Constructed atomically inside `BufferServer.handle_call/3` so the
+  Constructed atomically inside `BufferProcess.handle_call/3` so the
   caller gets a consistent snapshot of cursor, lines, metadata, and
   version in a single GenServer round-trip. Previously a bare map;
   promoted to a struct for compile-time field enforcement and better

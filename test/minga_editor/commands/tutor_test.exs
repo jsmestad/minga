@@ -2,7 +2,7 @@ defmodule MingaEditor.Commands.TutorTest do
   @moduledoc false
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Command.Parser
   alias Minga.Keymap.Active, as: ActiveKeymap
   alias MingaEditor.Commands.Tutor
@@ -14,7 +14,7 @@ defmodule MingaEditor.Commands.TutorTest do
     {:ok, buf} =
       DynamicSupervisor.start_child(
         Minga.Buffer.Supervisor,
-        {BufferServer, content: "hello", buffer_name: "test.txt"}
+        {BufferProcess, content: "hello", buffer_name: "test.txt"}
       )
 
     {:ok, keymap} = ActiveKeymap.start_link(name: nil)
@@ -37,9 +37,9 @@ defmodule MingaEditor.Commands.TutorTest do
       result = Tutor.execute(state, :tutor)
 
       tutor_buf = result.workspace.buffers.active
-      assert BufferServer.buffer_name(tutor_buf) == "*Tutor*"
+      assert BufferProcess.buffer_name(tutor_buf) == "*Tutor*"
 
-      content = BufferServer.content(tutor_buf)
+      content = BufferProcess.content(tutor_buf)
       assert content =~ "M i n g a   T u t o r"
       assert content =~ "Lesson 1"
       assert content =~ "MOVING THE CURSOR"
@@ -50,7 +50,7 @@ defmodule MingaEditor.Commands.TutorTest do
       result = Tutor.execute(state, :tutor)
 
       tutor_buf = result.workspace.buffers.active
-      refute BufferServer.read_only?(tutor_buf)
+      refute BufferProcess.read_only?(tutor_buf)
     end
 
     test "tutor buffer uses :nofile type" do
@@ -58,7 +58,7 @@ defmodule MingaEditor.Commands.TutorTest do
       result = Tutor.execute(state, :tutor)
 
       tutor_buf = result.workspace.buffers.active
-      assert BufferServer.buffer_type(tutor_buf) == :nofile
+      assert BufferProcess.buffer_type(tutor_buf) == :nofile
     end
 
     test "tutor buffer is added to buffer list" do
@@ -74,13 +74,13 @@ defmodule MingaEditor.Commands.TutorTest do
       result = Tutor.execute(state, :tutor)
       tutor_buf = result.workspace.buffers.active
 
-      BufferServer.insert_text(tutor_buf, "MODIFIED ")
-      assert BufferServer.content(tutor_buf) =~ "MODIFIED"
+      BufferProcess.insert_text(tutor_buf, "MODIFIED ")
+      assert BufferProcess.content(tutor_buf) =~ "MODIFIED"
 
       result2 = Tutor.execute(result, :tutor)
       assert result2.workspace.buffers.active == tutor_buf
-      refute BufferServer.content(tutor_buf) =~ "MODIFIED"
-      assert BufferServer.content(tutor_buf) =~ "M i n g a   T u t o r"
+      refute BufferProcess.content(tutor_buf) =~ "MODIFIED"
+      assert BufferProcess.content(tutor_buf) =~ "M i n g a   T u t o r"
     end
 
     test "creates a new buffer when the previous tutor buffer process died" do
@@ -96,7 +96,7 @@ defmodule MingaEditor.Commands.TutorTest do
 
       assert Process.alive?(new_tutor)
       assert new_tutor != old_tutor
-      assert BufferServer.buffer_name(new_tutor) == "*Tutor*"
+      assert BufferProcess.buffer_name(new_tutor) == "*Tutor*"
     end
 
     test "sets a status message" do
@@ -110,7 +110,7 @@ defmodule MingaEditor.Commands.TutorTest do
       state = build_state()
       result = Tutor.execute(state, :tutor)
 
-      content = BufferServer.content(result.workspace.buffers.active)
+      content = BufferProcess.content(result.workspace.buffers.active)
       assert content =~ "LEADER KEY"
       assert content =~ "SPC f f"
       assert content =~ "AGENT PANEL"

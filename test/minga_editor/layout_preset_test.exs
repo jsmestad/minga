@@ -1,7 +1,7 @@
 defmodule MingaEditor.LayoutPresetTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.LayoutPreset
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -10,7 +10,7 @@ defmodule MingaEditor.LayoutPresetTest do
   alias MingaEditor.Window.Content
 
   defp make_state do
-    {:ok, buf} = BufferServer.start_link(content: "hello world")
+    {:ok, buf} = BufferProcess.start_link(content: "hello world")
     window = Window.new(1, buf, 24, 80)
 
     %EditorState{
@@ -29,7 +29,7 @@ defmodule MingaEditor.LayoutPresetTest do
   end
 
   defp agent_buffer do
-    {:ok, buf} = BufferServer.start_link(content: "## Agent\n\nHello")
+    {:ok, buf} = BufferProcess.start_link(content: "## Agent\n\nHello")
     buf
   end
 

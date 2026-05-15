@@ -3,7 +3,7 @@ defmodule MingaEditor.Input.HandlerTest do
 
   @moduletag :tmp_dir
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.ModalOverlay
@@ -20,7 +20,7 @@ defmodule MingaEditor.Input.HandlerTest do
   # Handlers only inspect/modify the fields they care about.
   defp base_state(opts \\ []) do
     buf_opts = Keyword.get(opts, :buffer_opts, content: "hello\nworld")
-    {:ok, buf} = BufferServer.start_link(buf_opts)
+    {:ok, buf} = BufferProcess.start_link(buf_opts)
 
     %EditorState{
       port_manager: self(),

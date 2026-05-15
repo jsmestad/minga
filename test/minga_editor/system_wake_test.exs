@@ -2,7 +2,7 @@ defmodule MingaEditor.SystemWakeTest do
   # async: false because this test mutates the singleton LSP SyncServer ETS table.
   use ExUnit.Case, async: false
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.LSP.SyncServer
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -11,12 +11,12 @@ defmodule MingaEditor.SystemWakeTest do
 
   test "system wake resyncs inactive tab buffers" do
     active_buffer =
-      start_supervised!({BufferServer, content: "active", file_path: "/tmp/wake_active.txt"},
+      start_supervised!({BufferProcess, content: "active", file_path: "/tmp/wake_active.txt"},
         id: :wake_active_buffer
       )
 
     inactive_buffer =
-      start_supervised!({BufferServer, content: "inactive", file_path: "/tmp/wake_inactive.txt"},
+      start_supervised!({BufferProcess, content: "inactive", file_path: "/tmp/wake_inactive.txt"},
         id: :wake_inactive_buffer
       )
 

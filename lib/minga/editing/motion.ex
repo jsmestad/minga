@@ -5,7 +5,7 @@ defmodule Minga.Editing.Motion do
   Each function takes a `Readable.t()` and a current `position()`, and
   returns the new `position()` after applying the motion.  No buffer state
   is mutated — the caller is responsible for moving the buffer cursor via
-  `Document.move_to/2` or `Buffer.Server.move_to/2`.
+  `Document.move_to/2` or `Buffer.move_to/2`.
 
   This module is a facade over focused sub-modules:
 

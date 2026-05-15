@@ -1,7 +1,7 @@
 defmodule MingaEditor.HighlightSyncTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.HighlightSync
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Viewport
@@ -102,7 +102,7 @@ defmodule MingaEditor.HighlightSyncTest do
   describe "setup_for_buffer_pid/2" do
     test "assigns a buffer_id for the given buffer" do
       state = base_state()
-      {:ok, md_buf} = BufferServer.start_link(content: "# Hello", filetype: :markdown)
+      {:ok, md_buf} = BufferProcess.start_link(content: "# Hello", filetype: :markdown)
 
       new_state = HighlightSync.setup_for_buffer_pid(state, md_buf)
 
@@ -117,7 +117,7 @@ defmodule MingaEditor.HighlightSyncTest do
 
     test "sets last_active_at timestamp" do
       state = base_state()
-      {:ok, md_buf} = BufferServer.start_link(content: "# Hello", filetype: :markdown)
+      {:ok, md_buf} = BufferProcess.start_link(content: "# Hello", filetype: :markdown)
 
       new_state = HighlightSync.setup_for_buffer_pid(state, md_buf)
 
@@ -126,7 +126,7 @@ defmodule MingaEditor.HighlightSyncTest do
 
     test "initializes highlight entry for the buffer" do
       state = base_state()
-      {:ok, md_buf} = BufferServer.start_link(content: "# Hello", filetype: :markdown)
+      {:ok, md_buf} = BufferProcess.start_link(content: "# Hello", filetype: :markdown)
 
       new_state = HighlightSync.setup_for_buffer_pid(state, md_buf)
 
@@ -136,7 +136,7 @@ defmodule MingaEditor.HighlightSyncTest do
 
     test "is idempotent: second call reuses same buffer_id" do
       state = base_state()
-      {:ok, md_buf} = BufferServer.start_link(content: "# Hello", filetype: :markdown)
+      {:ok, md_buf} = BufferProcess.start_link(content: "# Hello", filetype: :markdown)
 
       state2 = HighlightSync.setup_for_buffer_pid(state, md_buf)
       id1 = Map.get(state2.workspace.highlight.buffer_ids, md_buf)
@@ -149,8 +149,8 @@ defmodule MingaEditor.HighlightSyncTest do
 
     test "assigns different ids for different buffers" do
       state = base_state()
-      {:ok, buf1} = BufferServer.start_link(content: "# A", filetype: :markdown)
-      {:ok, buf2} = BufferServer.start_link(content: "# B", filetype: :markdown)
+      {:ok, buf1} = BufferProcess.start_link(content: "# A", filetype: :markdown)
+      {:ok, buf2} = BufferProcess.start_link(content: "# B", filetype: :markdown)
 
       state2 = HighlightSync.setup_for_buffer_pid(state, buf1)
       state3 = HighlightSync.setup_for_buffer_pid(state2, buf2)
@@ -162,7 +162,7 @@ defmodule MingaEditor.HighlightSyncTest do
 
     test "returns state unchanged for unsupported filetype" do
       state = base_state()
-      {:ok, txt_buf} = BufferServer.start_link(content: "hello", filetype: :text)
+      {:ok, txt_buf} = BufferProcess.start_link(content: "hello", filetype: :text)
 
       new_state = HighlightSync.setup_for_buffer_pid(state, txt_buf)
 
@@ -193,7 +193,7 @@ defmodule MingaEditor.HighlightSyncTest do
   describe "resolve_buffer_pid/2" do
     test "returns the buffer PID for a known buffer_id" do
       state = base_state()
-      {:ok, md_buf} = BufferServer.start_link(content: "# Hello", filetype: :markdown)
+      {:ok, md_buf} = BufferProcess.start_link(content: "# Hello", filetype: :markdown)
 
       new_state = HighlightSync.setup_for_buffer_pid(state, md_buf)
       buffer_id = Map.get(new_state.workspace.highlight.buffer_ids, md_buf)

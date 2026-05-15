@@ -2,7 +2,7 @@ defmodule MingaEditor.UI.Picker.LanguageSourceTest do
   @moduledoc "Tests for the language picker source."
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Search
   alias MingaEditor.VimState
@@ -67,12 +67,12 @@ defmodule MingaEditor.UI.Picker.LanguageSourceTest do
     test "changes the buffer filetype" do
       state = state_with_buffer("hello world", :text)
       buf = state.workspace.buffers.active
-      assert BufferServer.filetype(buf) == :text
+      assert BufferProcess.filetype(buf) == :text
 
       item = %Item{id: :python, label: "Python"}
       _new_state = LanguageSource.on_select(item, state)
 
-      assert BufferServer.filetype(buf) == :python
+      assert BufferProcess.filetype(buf) == :python
     end
   end
 
@@ -82,10 +82,10 @@ defmodule MingaEditor.UI.Picker.LanguageSourceTest do
     test "changes the buffer filetype via shared function" do
       state = state_with_buffer("hello", :text)
       buf = state.workspace.buffers.active
-      assert BufferServer.filetype(buf) == :text
+      assert BufferProcess.filetype(buf) == :text
 
       new_state = BufferManagement.apply_filetype_change(state, :python)
-      assert BufferServer.filetype(buf) == :python
+      assert BufferProcess.filetype(buf) == :python
       assert new_state.shell_state.status_msg =~ "python"
     end
 
@@ -103,7 +103,7 @@ defmodule MingaEditor.UI.Picker.LanguageSourceTest do
   # ── Helpers ─────────────────────────────────────────────────────────────────
 
   defp context_with_buffer(content, filetype) do
-    {:ok, buf} = BufferServer.start_link(content: content, filetype: filetype)
+    {:ok, buf} = BufferProcess.start_link(content: content, filetype: filetype)
 
     %Context{
       buffers: %Buffers{list: [buf], active: buf, active_index: 0},
@@ -120,7 +120,7 @@ defmodule MingaEditor.UI.Picker.LanguageSourceTest do
   end
 
   defp state_with_buffer(content, filetype) do
-    {:ok, buf} = BufferServer.start_link(content: content, filetype: filetype)
+    {:ok, buf} = BufferProcess.start_link(content: content, filetype: filetype)
 
     %{
       workspace: %{buffers: %{active: buf, list: [buf], active_index: 0}},

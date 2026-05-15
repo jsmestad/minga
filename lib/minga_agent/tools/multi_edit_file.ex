@@ -2,7 +2,7 @@ defmodule MingaAgent.Tools.MultiEditFile do
   @moduledoc """
   Applies multiple find-and-replace edits to a single file in one tool call.
 
-  Routes through `Buffer.Server.find_and_replace_batch/2` when a buffer is
+  Routes through `Buffer.find_and_replace_batch/2` when a buffer is
   open for the file (atomic batch, single undo entry, no disk I/O). Falls
   back to filesystem I/O when no buffer exists.
 
@@ -61,7 +61,7 @@ defmodule MingaAgent.Tools.MultiEditFile do
     end
   end
 
-  @spec format_buffer_results(String.t(), [Minga.Buffer.Server.replace_result()]) :: String.t()
+  @spec format_buffer_results(String.t(), [Minga.Buffer.replace_result()]) :: String.t()
   defp format_buffer_results(path, results) do
     total = length(results)
     succeeded = Enum.count(results, &match?({:ok, _}, &1))

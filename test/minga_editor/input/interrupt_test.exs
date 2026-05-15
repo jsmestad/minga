@@ -1,7 +1,7 @@
 defmodule MingaEditor.Input.InterruptTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Editing.Completion
   alias Minga.Mode
   alias MingaEditor.Agent.UIState
@@ -29,7 +29,7 @@ defmodule MingaEditor.Input.InterruptTest do
 
   defp base_state(opts \\ []) do
     buf_opts = Keyword.get(opts, :buffer_opts, content: "hello\nworld")
-    buf = start_supervised!({BufferServer, buf_opts})
+    buf = start_supervised!({BufferProcess, buf_opts})
 
     %EditorState{
       port_manager: self(),

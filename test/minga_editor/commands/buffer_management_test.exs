@@ -1,7 +1,7 @@
 defmodule MingaEditor.Commands.BufferManagementTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Config.Options
   alias MingaEditor
   alias MingaEditor.Commands.BufferManagement
@@ -10,7 +10,7 @@ defmodule MingaEditor.Commands.BufferManagementTest do
   alias MingaEditor.State.TabBar
 
   defp start_editor(content) do
-    {:ok, buffer} = BufferServer.start_link(content: content)
+    {:ok, buffer} = BufferProcess.start_link(content: content)
     {:ok, options} = Options.start_link(name: nil)
 
     {:ok, editor} =
@@ -49,7 +49,7 @@ defmodule MingaEditor.Commands.BufferManagementTest do
       path = Path.join(tmp_dir, "editor_test_save_#{:erlang.unique_integer([:positive])}.txt")
       File.write!(path, "test content")
 
-      {:ok, buffer} = BufferServer.start_link(file_path: path)
+      {:ok, buffer} = BufferProcess.start_link(file_path: path)
 
       {:ok, options} = Options.start_link(name: nil)
 
@@ -91,7 +91,7 @@ defmodule MingaEditor.Commands.BufferManagementTest do
       send_key(editor, 13)
       _ = :sys.get_state(editor)
 
-      {line, _col} = BufferServer.cursor(buffer)
+      {line, _col} = BufferProcess.cursor(buffer)
       assert line == 2
     end
 
@@ -111,7 +111,7 @@ defmodule MingaEditor.Commands.BufferManagementTest do
       path = Path.join(tmp_dir, "editor_ctrl_s_#{:erlang.unique_integer([:positive])}.txt")
       File.write!(path, "ctrl-s test")
 
-      {:ok, buffer} = BufferServer.start_link(file_path: path)
+      {:ok, buffer} = BufferProcess.start_link(file_path: path)
 
       {:ok, options} = Options.start_link(name: nil)
 
@@ -178,7 +178,7 @@ defmodule MingaEditor.Commands.BufferManagementTest do
       state = :sys.get_state(editor)
       assert Process.alive?(editor)
       assert tab_count(editor) == 1
-      assert BufferServer.content(state.workspace.buffers.active) == ""
+      assert BufferProcess.content(state.workspace.buffers.active) == ""
     end
 
     test ":q does not kill the buffer (matches Neovim)" do
@@ -202,7 +202,7 @@ defmodule MingaEditor.Commands.BufferManagementTest do
   # path which adds buffers to the existing tab rather than creating new ones.
   defp add_second_tab(editor) do
     :sys.replace_state(editor, fn state ->
-      {:ok, buffer2} = BufferServer.start_link(content: "second tab content")
+      {:ok, buffer2} = BufferProcess.start_link(content: "second tab content")
       {new_tb, _tab} = TabBar.add(state.shell_state.tab_bar, :file, "second.txt")
       new_buffers = Buffers.add(state.workspace.buffers, buffer2)
 
@@ -254,8 +254,8 @@ defmodule MingaEditor.Commands.BufferManagementTest do
       {editor, buffer} = start_editor("hello")
 
       # Make buffer dirty
-      BufferServer.insert_char(buffer, "X")
-      assert BufferServer.dirty?(buffer)
+      BufferProcess.insert_char(buffer, "X")
+      assert BufferProcess.dirty?(buffer)
 
       # Send :q via command mode
       type_string(editor, ":q\r")
@@ -267,7 +267,7 @@ defmodule MingaEditor.Commands.BufferManagementTest do
 
     test "n at confirmation prompt cancels quit" do
       {editor, buffer} = start_editor("hello")
-      BufferServer.insert_char(buffer, "X")
+      BufferProcess.insert_char(buffer, "X")
 
       type_string(editor, ":q\r")
       state = :sys.get_state(editor)
@@ -281,7 +281,7 @@ defmodule MingaEditor.Commands.BufferManagementTest do
 
     test "Escape at confirmation prompt cancels quit" do
       {editor, buffer} = start_editor("hello")
-      BufferServer.insert_char(buffer, "X")
+      BufferProcess.insert_char(buffer, "X")
 
       type_string(editor, ":q\r")
       state = :sys.get_state(editor)

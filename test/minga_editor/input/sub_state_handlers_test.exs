@@ -16,7 +16,7 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
   alias MingaEditor.Agent.DiffReview, as: DiffReviewData
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.Preview
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Editing.Scroll
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
@@ -31,8 +31,8 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
   alias MingaEditor.Input.ToolApproval
 
   defp base_state(opts) do
-    {:ok, buf} = BufferServer.start_link(content: "hello world")
-    {:ok, prompt_buf} = BufferServer.start_link(content: "")
+    {:ok, buf} = BufferProcess.start_link(content: "hello world")
+    {:ok, prompt_buf} = BufferProcess.start_link(content: "")
 
     agent = %AgentState{
       pending_approval: Keyword.get(opts, :pending_approval, nil)

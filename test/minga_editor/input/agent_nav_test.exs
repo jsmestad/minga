@@ -3,7 +3,7 @@ defmodule MingaEditor.Input.AgentNavTest do
 
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.Agent.UIState
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
@@ -27,8 +27,8 @@ defmodule MingaEditor.Input.AgentNavTest do
 
     AgentBufferSync.sync(buf, messages)
 
-    {:ok, prompt_buf} = BufferServer.start_link(content: "")
-    {:ok, file_buf} = BufferServer.start_link(content: "file content")
+    {:ok, prompt_buf} = BufferProcess.start_link(content: "")
+    {:ok, file_buf} = BufferProcess.start_link(content: "file content")
 
     agent = %AgentState{buffer: buf, runtime: %RuntimeState{status: :idle}}
 
@@ -69,7 +69,7 @@ defmodule MingaEditor.Input.AgentNavTest do
     test "j moves cursor down in agent buffer" do
       state = make_state()
       buf = AgentAccess.agent(state).buffer
-      BufferServer.move_to(buf, {0, 0})
+      BufferProcess.move_to(buf, {0, 0})
 
       # AgentNav processes the key through Mode FSM directly (no buffer swap
       # needed since buffers.active is already set by focus_window in prod).
@@ -79,41 +79,41 @@ defmodule MingaEditor.Input.AgentNavTest do
 
       {:handled, _new_state} = AgentNav.handle_key(state, ?j, 0)
 
-      {line, _col} = BufferServer.cursor(buf)
+      {line, _col} = BufferProcess.cursor(buf)
       assert line == 1
     end
 
     test "k moves cursor up in agent buffer" do
       state = make_state()
       buf = AgentAccess.agent(state).buffer
-      BufferServer.move_to(buf, {5, 0})
+      BufferProcess.move_to(buf, {5, 0})
 
       state = put_in(state.workspace.buffers.active, buf)
 
       {:handled, _new_state} = AgentNav.handle_key(state, ?k, 0)
 
-      {line, _col} = BufferServer.cursor(buf)
+      {line, _col} = BufferProcess.cursor(buf)
       assert line == 4
     end
 
     test "G moves cursor to end of buffer" do
       state = make_state()
       buf = AgentAccess.agent(state).buffer
-      BufferServer.move_to(buf, {0, 0})
+      BufferProcess.move_to(buf, {0, 0})
 
       state = put_in(state.workspace.buffers.active, buf)
 
       {:handled, _new_state} = AgentNav.handle_key(state, ?G, 0)
 
-      {line, _col} = BufferServer.cursor(buf)
-      total = BufferServer.line_count(buf)
+      {line, _col} = BufferProcess.cursor(buf)
+      total = BufferProcess.line_count(buf)
       assert line == total - 1
     end
 
     test "unpins agent chat window when user navigates" do
       state = make_state()
       buf = AgentAccess.agent(state).buffer
-      BufferServer.move_to(buf, {0, 0})
+      BufferProcess.move_to(buf, {0, 0})
 
       state = put_in(state.workspace.buffers.active, buf)
 
@@ -152,7 +152,7 @@ defmodule MingaEditor.Input.AgentNavTest do
       state = make_state()
       original_buf = state.workspace.buffers.active
       chat_buf = AgentAccess.agent(state).buffer
-      BufferServer.move_to(chat_buf, {0, 0})
+      BufferProcess.move_to(chat_buf, {0, 0})
 
       new_state = AgentNav.delegate_to_mode_fsm(state, chat_buf, ?j, 0)
 
@@ -160,14 +160,14 @@ defmodule MingaEditor.Input.AgentNavTest do
       assert new_state.workspace.buffers.active == original_buf
 
       # Cursor should have moved in the chat buffer
-      {line, _col} = BufferServer.cursor(chat_buf)
+      {line, _col} = BufferProcess.cursor(chat_buf)
       assert line == 1
     end
 
     test "blocks insert mode transitions on read-only chat buffer" do
       state = make_state()
       buf = AgentAccess.agent(state).buffer
-      BufferServer.move_to(buf, {0, 0})
+      BufferProcess.move_to(buf, {0, 0})
 
       # 's' (substitute) would enter insert mode in normal vim,
       # but the chat buffer is read-only so mode stays normal.
@@ -179,12 +179,12 @@ defmodule MingaEditor.Input.AgentNavTest do
     test "syncs scroll offset to cursor line" do
       state = make_state()
       buf = AgentAccess.agent(state).buffer
-      BufferServer.move_to(buf, {0, 0})
+      BufferProcess.move_to(buf, {0, 0})
 
       new_state = AgentNav.delegate_to_mode_fsm(state, buf, ?j, 0)
 
       scroll = AgentAccess.panel(new_state).scroll
-      {cursor_line, _} = BufferServer.cursor(buf)
+      {cursor_line, _} = BufferProcess.cursor(buf)
       assert scroll.offset == cursor_line
     end
 
@@ -211,7 +211,7 @@ defmodule MingaEditor.Input.AgentNavTest do
       {:ok, new_buf} =
         DynamicSupervisor.start_child(
           Minga.Buffer.Supervisor,
-          {BufferServer, content: "", buffer_name: "[new 99]"}
+          {BufferProcess, content: "", buffer_name: "[new 99]"}
         )
 
       # Simulate the restore guard: if buffers.active changed away from
@@ -324,7 +324,7 @@ defmodule MingaEditor.Input.AgentNavTest do
     test "insert mode allowed when agent input is focused despite read-only active buffer" do
       state = make_state(input_focused: true)
       agent_buf = AgentAccess.agent(state).buffer
-      assert BufferServer.read_only?(agent_buf)
+      assert BufferProcess.read_only?(agent_buf)
       state = put_in(state.workspace.buffers.active, agent_buf)
 
       new_state = KeyDispatch.handle_key(state, ?A, 0)

@@ -8,7 +8,7 @@ defmodule Minga.Integration.ToggleLineNumbersTest do
   """
   use Minga.Test.EditorCase, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
 
   @multi_line_content "line one\nline two\nline three\nline four\nline five"
 
@@ -16,19 +16,19 @@ defmodule Minga.Integration.ToggleLineNumbersTest do
     test "cycles through hybrid → absolute → relative → none → hybrid" do
       ctx = start_editor(@multi_line_content)
 
-      assert BufferServer.get_option(ctx.buffer, :line_numbers) == :hybrid
+      assert BufferProcess.get_option(ctx.buffer, :line_numbers) == :hybrid
 
       send_keys_sync(ctx, "<SPC>tl")
-      assert BufferServer.get_option(ctx.buffer, :line_numbers) == :absolute
+      assert BufferProcess.get_option(ctx.buffer, :line_numbers) == :absolute
 
       send_keys_sync(ctx, "<SPC>tl")
-      assert BufferServer.get_option(ctx.buffer, :line_numbers) == :relative
+      assert BufferProcess.get_option(ctx.buffer, :line_numbers) == :relative
 
       send_keys_sync(ctx, "<SPC>tl")
-      assert BufferServer.get_option(ctx.buffer, :line_numbers) == :none
+      assert BufferProcess.get_option(ctx.buffer, :line_numbers) == :none
 
       send_keys_sync(ctx, "<SPC>tl")
-      assert BufferServer.get_option(ctx.buffer, :line_numbers) == :hybrid
+      assert BufferProcess.get_option(ctx.buffer, :line_numbers) == :hybrid
     end
 
     test "gutter content updates on screen after toggling to none and back" do
@@ -44,7 +44,7 @@ defmodule Minga.Integration.ToggleLineNumbersTest do
       send_keys_sync(ctx, "<SPC>tl")
       send_keys_sync(ctx, "<SPC>tl")
       send_keys_sync(ctx, "<SPC>tl")
-      assert BufferServer.get_option(ctx.buffer, :line_numbers) == :none
+      assert BufferProcess.get_option(ctx.buffer, :line_numbers) == :none
 
       row1 = screen_row(ctx, 1)
       # Sign and fold columns are always reserved, but no line numbers.
@@ -53,7 +53,7 @@ defmodule Minga.Integration.ToggleLineNumbersTest do
 
       # One more press back to hybrid.
       send_keys_sync(ctx, "<SPC>tl")
-      assert BufferServer.get_option(ctx.buffer, :line_numbers) == :hybrid
+      assert BufferProcess.get_option(ctx.buffer, :line_numbers) == :hybrid
 
       row1 = screen_row(ctx, 1)
       row2 = screen_row(ctx, 2)

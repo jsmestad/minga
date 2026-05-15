@@ -7,7 +7,7 @@ defmodule Minga.Integration.MouseTest do
   """
   use Minga.Test.EditorCase, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree
   alias Minga.Test.HeadlessPort
@@ -506,7 +506,7 @@ defmodule Minga.Integration.MouseTest do
 
       # Add a second buffer and switch to it via state injection
       {:ok, second_buffer} =
-        BufferServer.start_link(content: "different content here")
+        BufferProcess.start_link(content: "different content here")
 
       :sys.replace_state(ctx.editor, fn state ->
         EditorState.add_buffer(state, second_buffer)

@@ -14,7 +14,7 @@ defmodule MingaEditor.Integration.MatchItemTest do
     test "jumps from Elixir def to matching end" do
       content = "def foo do\n  :ok\nend\n"
       ctx = start_editor(content, file_path: tmp_file("match_item.ex", content))
-      assert Minga.Buffer.Server.filetype(ctx.buffer) == :elixir
+      assert Minga.Buffer.Process.filetype(ctx.buffer) == :elixir
       wait_for_highlight(ctx)
 
       send_keys_sync(ctx, "%")

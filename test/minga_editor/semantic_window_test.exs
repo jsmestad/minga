@@ -22,7 +22,7 @@ defmodule MingaEditor.SemanticWindowTest do
   alias MingaEditor.SemanticWindow.VisualRow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.FontRegistry
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Core.Face
 
   alias Minga.Editing.Search.Match, as: SearchMatchStruct
@@ -130,7 +130,7 @@ defmodule MingaEditor.SemanticWindowTest do
       state = gui_state(content: "\thello   ")
 
       assert {:ok, true} =
-               BufferServer.set_option(state.workspace.buffers.active, :show_invisible, true)
+               BufferProcess.set_option(state.workspace.buffers.active, :show_invisible, true)
 
       {[wf], _cursor, _state} = build_content(state)
 
@@ -235,7 +235,7 @@ defmodule MingaEditor.SemanticWindowTest do
 
     test "block cursor at end of line renders over the final character cell" do
       state = gui_state(content: "this")
-      :ok = BufferServer.move_to(state.workspace.buffers.active, {0, byte_size("this")})
+      :ok = BufferProcess.move_to(state.workspace.buffers.active, {0, byte_size("this")})
 
       {[wf], _cursor, _state} = build_content(state)
 

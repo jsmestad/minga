@@ -53,7 +53,7 @@ defmodule MingaEditor.Commands.Operators do
       {line, _col} = Buffer.cursor(buf)
       total = Buffer.line_count(buf)
       end_line = min(line + count - 1, total - 1)
-      yanked = Buffer.lines_content(buf, line, end_line)
+      yanked = Buffer.content_on_lines(buf, line, end_line)
       Buffer.delete_lines(buf, line, end_line)
       Helpers.put_register(state, yanked <> "\n", :delete, :linewise)
     end
@@ -73,7 +73,7 @@ defmodule MingaEditor.Commands.Operators do
       end_line = min(line + count - 1, total - 1)
 
       # Yank all lines first, then clear/delete
-      yanked = Buffer.lines_content(buf, line, end_line)
+      yanked = Buffer.content_on_lines(buf, line, end_line)
 
       # Delete extra lines (all but the first), then clear the remaining one
       delete_trailing_lines(buf, line, end_line)
@@ -91,7 +91,7 @@ defmodule MingaEditor.Commands.Operators do
     {line, _col} = Buffer.cursor(buf)
     total = Buffer.line_count(buf)
     end_line = min(line + count - 1, total - 1)
-    yanked = Buffer.lines_content(buf, line, end_line)
+    yanked = Buffer.content_on_lines(buf, line, end_line)
     state = Helpers.put_register(state, yanked <> "\n", :yank, :linewise)
     Helpers.maybe_start_yank_flash(state, buf, {line, 0}, {end_line, 0}, :linewise)
   end

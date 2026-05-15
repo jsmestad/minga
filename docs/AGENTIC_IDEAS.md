@@ -69,7 +69,7 @@ Three scales of "remember what happened" share an event format but differ in sto
 - Scale B: Session Archaeology (#1086): per-agent-session with file snapshots
 - Scale C: Total Recall (#1111): everything, globally queryable by time range
 
-Build A first (source-tagged edit events in Buffer.Server via #1093). B uses them. C wraps them in a global log (#1120). The critical decision: design the `EditEvent` struct for Scale C's needs from day one, even if you only store at Scale A's granularity initially.
+Build A first (source-tagged edit events in Buffer.Process via #1093). B uses them. C wraps them in a global log (#1120). The critical decision: design the `EditEvent` struct for Scale C's needs from day one, even if you only store at Scale A's granularity initially.
 
 ### Process Visualization: VIEWS (one collector, multiple renderings)
 
@@ -99,7 +99,7 @@ The strongest differentiator. No other editor lets you watch an AI agent edit in
 | [#1082](https://github.com/jsmestad/minga/issues/1082) | Ghost Cursors | Moderate (Metal overlay) | 1 week |
 | [#1083](https://github.com/jsmestad/minga/issues/1083) | Edit Timeline | Moderate (new panel) | 1 week |
 
-**Infrastructure built:** Event Recording System (#1120), Agent-to-Buffer.Server routing (BUFFER-AWARE-AGENTS Phase 1)
+**Infrastructure built:** Event Recording System (#1120), Agent-to-Buffer.Process routing (BUFFER-AWARE-AGENTS Phase 1)
 
 **Pivot safety:** If users hate "watching the agent work in real-time," disable the ghost cursor Metal overlay with one boolean. The edit timeline is passive history (useful regardless). Provenance undo is BEAM-only. Near-zero waste.
 

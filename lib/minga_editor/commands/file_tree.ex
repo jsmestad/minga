@@ -415,7 +415,7 @@ defmodule MingaEditor.Commands.FileTree do
 
   # Opens a file from the tree, reusing an existing buffer when one exists
   # for the same path. Without the dedup check, the file tree creates
-  # duplicate Buffer.Server processes for the same file, which causes stale
+  # duplicate Buffer.Process processes for the same file, which causes stale
   # tree-sitter highlight spans from the old buffer's parse to be misrouted
   # to the new buffer (garbled text on first render).
   @spec open_file_from_tree(state(), String.t(), FileTree.t()) :: state()

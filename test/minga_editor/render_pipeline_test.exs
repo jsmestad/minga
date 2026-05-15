@@ -9,7 +9,7 @@ defmodule MingaEditor.RenderPipelineTest do
 
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Editing.Completion
   alias MingaEditor.FocusTree
   alias MingaEditor.Layout
@@ -119,7 +119,7 @@ defmodule MingaEditor.RenderPipelineTest do
     test "focus tree completion overlay uses the post-scroll viewport" do
       state = base_state(content: long_content(80), rows: 10, cols: 80)
       buffer = state.workspace.buffers.active
-      BufferServer.move_to(buffer, {60, 0})
+      BufferProcess.move_to(buffer, {60, 0})
 
       completion = Completion.new([completion_item("alpha"), completion_item("beta")], {60, 0})
 
@@ -180,7 +180,7 @@ defmodule MingaEditor.RenderPipelineTest do
       old_version = window1.render_cache.last_buf_version
 
       # Edit: insert a character
-      BufferServer.insert_char(buf, "x")
+      BufferProcess.insert_char(buf, "x")
 
       # Frame 2: scroll stage should detect version change
       state = EditorState.sync_active_window_cursor(state)
@@ -194,7 +194,7 @@ defmodule MingaEditor.RenderPipelineTest do
       assert window2.render_cache.dirty_lines == :all
 
       # Verify version actually changed
-      snapshot = BufferServer.render_snapshot(buf, 0, 3)
+      snapshot = BufferProcess.render_snapshot(buf, 0, 3)
       assert snapshot.version > old_version
     end
 
@@ -207,7 +207,7 @@ defmodule MingaEditor.RenderPipelineTest do
       assert_receive {:"$gen_cast", {:send_commands, cmds1}}
 
       # Edit
-      BufferServer.insert_char(buf, "X")
+      BufferProcess.insert_char(buf, "X")
 
       # Frame 2
       state = run_pipeline(state)
@@ -313,7 +313,7 @@ defmodule MingaEditor.RenderPipelineTest do
       [{win_id, _}] = Map.to_list(state.workspace.windows.map)
 
       # Edit buffer
-      BufferServer.insert_char(buf, "X")
+      BufferProcess.insert_char(buf, "X")
 
       # Frame 2: should detect version change, redraw all
       state = run_pipeline(state)
@@ -331,7 +331,7 @@ defmodule MingaEditor.RenderPipelineTest do
       lines = Enum.map_join(1..10, "\n", &"line #{&1}")
       state = base_state(content: lines, rows: 15, cols: 80)
       # Use absolute numbering so only old+new cursor lines dirty
-      BufferServer.set_option(state.workspace.buffers.active, :line_numbers, :absolute)
+      BufferProcess.set_option(state.workspace.buffers.active, :line_numbers, :absolute)
 
       # Frame 1: full render
       state = run_pipeline(state)
@@ -341,9 +341,9 @@ defmodule MingaEditor.RenderPipelineTest do
       assert window.render_cache.dirty_lines == %{}
 
       # Simulate cursor move from line 0 to line 3
-      BufferServer.move(state.workspace.buffers.active, :down)
-      BufferServer.move(state.workspace.buffers.active, :down)
-      BufferServer.move(state.workspace.buffers.active, :down)
+      BufferProcess.move(state.workspace.buffers.active, :down)
+      BufferProcess.move(state.workspace.buffers.active, :down)
+      BufferProcess.move(state.workspace.buffers.active, :down)
 
       # Run through scroll stage to detect gutter invalidation
       state = EditorState.sync_active_window_cursor(state)
@@ -362,14 +362,14 @@ defmodule MingaEditor.RenderPipelineTest do
       lines = Enum.map_join(1..10, "\n", &"line #{&1}")
       state = base_state(content: lines, rows: 15, cols: 80)
       # Hybrid numbering: every visible line number changes on cursor move
-      BufferServer.set_option(state.workspace.buffers.active, :line_numbers, :hybrid)
+      BufferProcess.set_option(state.workspace.buffers.active, :line_numbers, :hybrid)
 
       # Frame 1
       state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       # Move cursor
-      BufferServer.move(state.workspace.buffers.active, :down)
+      BufferProcess.move(state.workspace.buffers.active, :down)
       state = EditorState.sync_active_window_cursor(state)
       state = RenderPipeline.compute_layout(state)
       layout = Layout.get(state)

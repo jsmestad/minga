@@ -2,7 +2,7 @@ defmodule MingaEditor.Commands.AgentCodeBlockTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.Agent.UIState
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
@@ -31,7 +31,7 @@ defmodule MingaEditor.Commands.AgentCodeBlockTest do
 
       buf = new_state.workspace.buffers.active
       assert is_pid(buf)
-      assert BufferServer.content(buf) == content
+      assert BufferProcess.content(buf) == content
     end
 
     test "sets buffer name based on language" do
@@ -39,7 +39,7 @@ defmodule MingaEditor.Commands.AgentCodeBlockTest do
       new_state = AgentCommands.open_code_block(state, "python", "print('hi')")
 
       buf = new_state.workspace.buffers.active
-      name = BufferServer.buffer_name(buf)
+      name = BufferProcess.buffer_name(buf)
       assert name == "*Agent: python*"
     end
 
@@ -48,7 +48,7 @@ defmodule MingaEditor.Commands.AgentCodeBlockTest do
       new_state = AgentCommands.open_code_block(state, "", "some plain text")
 
       buf = new_state.workspace.buffers.active
-      name = BufferServer.buffer_name(buf)
+      name = BufferProcess.buffer_name(buf)
       assert name == "*Agent: text*"
     end
 
@@ -57,7 +57,7 @@ defmodule MingaEditor.Commands.AgentCodeBlockTest do
       new_state = AgentCommands.open_code_block(state, "elixir", "IO.puts(:ok)")
 
       buf = new_state.workspace.buffers.active
-      assert BufferServer.filetype(buf) == :elixir
+      assert BufferProcess.filetype(buf) == :elixir
     end
 
     test "handles unknown language tags gracefully" do
@@ -66,20 +66,20 @@ defmodule MingaEditor.Commands.AgentCodeBlockTest do
 
       buf = new_state.workspace.buffers.active
       assert is_pid(buf)
-      assert BufferServer.content(buf) == "+++[>+<-]"
+      assert BufferProcess.content(buf) == "+++[>+<-]"
     end
 
     test "maps common aliases (js -> javascript, py -> python)" do
       state = base_state()
 
       js_state = AgentCommands.open_code_block(state, "js", "console.log('hi')")
-      assert BufferServer.filetype(js_state.workspace.buffers.active) == :javascript
+      assert BufferProcess.filetype(js_state.workspace.buffers.active) == :javascript
 
       py_state = AgentCommands.open_code_block(state, "py", "print('hi')")
-      assert BufferServer.filetype(py_state.workspace.buffers.active) == :python
+      assert BufferProcess.filetype(py_state.workspace.buffers.active) == :python
 
       sh_state = AgentCommands.open_code_block(state, "bash", "echo hi")
-      assert BufferServer.filetype(sh_state.workspace.buffers.active) == :bash
+      assert BufferProcess.filetype(sh_state.workspace.buffers.active) == :bash
     end
   end
 end

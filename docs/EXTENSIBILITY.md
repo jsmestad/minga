@@ -91,7 +91,7 @@ end
 # :override - replace a command entirely
 advise :override, :save, fn state ->
   state = Minga.API.save()
-  case Minga.Buffer.Server.file_path(state.buffers.active) do
+  case Minga.Buffer.file_path(state.buffers.active) do
     nil -> state
     path ->
       System.cmd("git", ["add", path], stderr_to_stdout: true)
@@ -120,8 +120,8 @@ end
 
 on :buffer_open, fn buffer_pid, path ->
   if String.ends_with?(path, ".md") do
-    Buffer.Server.set_option(buffer_pid, :wrap, true)
-    Buffer.Server.set_option(buffer_pid, :spell_check, true)
+    Buffer.set_option(buffer_pid, :wrap, true)
+    Buffer.set_option(buffer_pid, :spell_check, true)
   end
 end
 
@@ -147,7 +147,7 @@ In Minga, each buffer is a BEAM process with its own state. "Buffer-local" isn't
 
 ```elixir
 # Set an option for one buffer (just update that process's state)
-Buffer.Server.set_option(buffer_pid, :tab_size, 2)
+Buffer.set_option(buffer_pid, :tab_size, 2)
 
 # Set a global default (update the editor process)
 Minga.Config.set(:tab_size, 4)
@@ -172,10 +172,10 @@ Minga.Config.set(:tab_size, 4)
 **Elixir:**
 ```elixir
 # From the editor's eval prompt (SPC :e or similar)
-Buffer.Server.line_count(current_buffer())
+Buffer.line_count(current_buffer())
 #=> 347
 
-Enum.map(buffers(), &Buffer.Server.file_path/1)
+Enum.map(buffers(), &Buffer.file_path/1)
 #=> ["/project/lib/app.ex", "/project/README.md"]
 
 # Eval the current selection or buffer
@@ -215,7 +215,7 @@ Emacs has nothing comparable to `:observer.start()`, a full GUI dashboard showin
 h Minga.Motion.Word.word_forward   # docstring
 Minga.Keymap.describe("SPC f f")   # what does this binding do?
 Minga.Config.get(:tab_size)        # current global value
-Buffer.Server.get_option(buf, :tab_size)  # buffer-local value
+Buffer.get_option(buf, :tab_size)  # buffer-local value
 
 # Elixir's module introspection
 Minga.Motion.Word.__info__(:functions)  # list all functions
@@ -248,7 +248,7 @@ bind :normal, "SPC g b", :git_blame, "Git blame"
 
 # Custom command with real Elixir logic
 command :count_todos, "Count TODOs in buffer" do
-  content = Buffer.Server.content(current_buffer())
+  content = Buffer.content(current_buffer())
   count = content |> String.split("\n") |> Enum.count(&String.contains?(&1, "TODO"))
   notify("#{count} TODOs found")
 end
@@ -347,7 +347,7 @@ Agent.Session.start(provider: :claude, buffer: current_buffer())
 
 This is where the BEAM architecture pays off the most. Every other editor is trying to bolt async AI support onto a fundamentally single-threaded architecture. Minga's process model means "an external thing wants to modify a buffer" is a first-class, safe, concurrent operation.
 
-The same `Buffer.Server` API that user extensions use (`apply_text_edits/2`, `content/1`, `replace_content/2`) is the API that agent tools will use. There's one interface for programmatic buffer access, whether the caller is a user's custom command, an LSP client, or an AI agent. Agent tools are being [wired to route through this API](BUFFER-AWARE-AGENTS.md) instead of bypassing it with filesystem I/O, which means extensions that hook into buffer events (`:after_save`, advice on commands) will automatically see and respond to agent edits too.
+The same `Buffer` API that user extensions use (`apply_edits/3`, `content/1`, `replace_content/2`) is the API that agent tools will use. There's one interface for programmatic buffer access, whether the caller is a user's custom command, an LSP client, or an AI agent. Agent tools are being [wired to route through this API](BUFFER-AWARE-AGENTS.md) instead of bypassing it with filesystem I/O, which means extensions that hook into buffer events (`:after_save`, advice on commands) will automatically see and respond to agent edits too.
 
 ---
 

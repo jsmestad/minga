@@ -92,7 +92,7 @@ defmodule MingaEditor.Agent.BufferSync do
         )
 
         # Fallback: at least replace content
-        Buffer.replace_content_force(pid, text)
+        Buffer.replace_generated_content(pid, text)
     end
 
     # Return the line index, reusing the already-computed text and offsets

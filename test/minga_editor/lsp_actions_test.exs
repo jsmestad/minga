@@ -3,7 +3,7 @@ defmodule MingaEditor.LspActionsTest do
 
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.HoverPopup
   alias MingaEditor.LspActions
   alias MingaEditor.State, as: EditorState
@@ -228,7 +228,7 @@ defmodule MingaEditor.LspActionsTest do
     end
 
     test "silently no-ops when no LSP client is registered" do
-      buf = start_supervised!({BufferServer, content: "hello"})
+      buf = start_supervised!({BufferProcess, content: "hello"})
       state = fake_state_with_buffer(buf)
       result = LspActions.code_lens(state)
       assert result.shell_state.status_msg == nil
@@ -239,7 +239,7 @@ defmodule MingaEditor.LspActionsTest do
 
   describe "handle_code_lens_response/2" do
     test "stores resolved lenses with commands directly" do
-      {:ok, buf} = BufferServer.start_link(content: "def hello do\n  :ok\nend")
+      {:ok, buf} = BufferProcess.start_link(content: "def hello do\n  :ok\nend")
       state = fake_state_with_buffer(buf)
 
       lens = %{
@@ -281,7 +281,7 @@ defmodule MingaEditor.LspActionsTest do
 
   describe "handle_code_lens_resolve_response/2" do
     test "merges resolved lens into existing lenses" do
-      {:ok, buf} = BufferServer.start_link(content: "def hello do\n  :ok\nend")
+      {:ok, buf} = BufferProcess.start_link(content: "def hello do\n  :ok\nend")
       state = fake_state_with_buffer(buf)
 
       resolved = %{
@@ -323,7 +323,7 @@ defmodule MingaEditor.LspActionsTest do
 
   describe "handle_inlay_hint_response/2" do
     test "stores parsed hints with correct line/col/label" do
-      {:ok, buf} = BufferServer.start_link(content: "x = 1 + 2")
+      {:ok, buf} = BufferProcess.start_link(content: "x = 1 + 2")
       state = fake_state_with_buffer(buf)
 
       hint = %{
@@ -348,7 +348,7 @@ defmodule MingaEditor.LspActionsTest do
     end
 
     test "handles label as array of InlayHintLabelPart" do
-      {:ok, buf} = BufferServer.start_link(content: "x = 1")
+      {:ok, buf} = BufferProcess.start_link(content: "x = 1")
       state = fake_state_with_buffer(buf)
 
       hint = %{
@@ -397,7 +397,7 @@ defmodule MingaEditor.LspActionsTest do
     end
 
     test "sets timer when viewport top changes" do
-      {:ok, buf} = BufferServer.start_link(content: "hello")
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
 
       state = %{fake_state() | backend: :zig}
 
@@ -418,7 +418,7 @@ defmodule MingaEditor.LspActionsTest do
     end
 
     test "skips timer in headless mode" do
-      {:ok, buf} = BufferServer.start_link(content: "hello")
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
 
       state = fake_state()
 
@@ -436,7 +436,7 @@ defmodule MingaEditor.LspActionsTest do
     end
 
     test "cancels previous timer and sets new one" do
-      {:ok, buf} = BufferServer.start_link(content: "hello")
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
 
       state = %{fake_state() | backend: :zig}
 
@@ -494,7 +494,7 @@ defmodule MingaEditor.LspActionsTest do
     end
 
     test "prepareRename with Range only reads text from buffer" do
-      {:ok, buf} = BufferServer.start_link(content: "def hello_world do\n  :ok\nend")
+      {:ok, buf} = BufferProcess.start_link(content: "def hello_world do\n  :ok\nend")
       state = fake_state_with_buffer(buf)
       state = %{state | workspace: %{state.workspace | editing: VimState.new()}}
 
@@ -511,7 +511,7 @@ defmodule MingaEditor.LspActionsTest do
     end
 
     test "prepareRename with wrapped Range reads text from buffer" do
-      {:ok, buf} = BufferServer.start_link(content: "def hello_world do\n  :ok\nend")
+      {:ok, buf} = BufferProcess.start_link(content: "def hello_world do\n  :ok\nend")
       state = fake_state_with_buffer(buf)
       state = %{state | workspace: %{state.workspace | editing: VimState.new()}}
 

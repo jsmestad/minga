@@ -3,7 +3,7 @@ defmodule MingaAgent.Tools.MultiEditFileTest do
 
   alias MingaAgent.Tools.MultiEditFile
   alias Minga.Buffer
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
 
   @moduletag :tmp_dir
 
@@ -134,7 +134,7 @@ defmodule MingaAgent.Tools.MultiEditFileTest do
     test "batch edits route through buffer as a single undo entry", %{tmp_dir: dir} do
       path = Path.join(dir, "buffered.ex")
       File.write!(path, "aaa bbb ccc")
-      pid = start_supervised!({BufferServer, file_path: path})
+      pid = start_supervised!({BufferProcess, file_path: path})
 
       edits = [
         %{"old_text" => "aaa", "new_text" => "AAA"},
@@ -145,15 +145,15 @@ defmodule MingaAgent.Tools.MultiEditFileTest do
       assert result =~ "2/2 edits applied"
 
       # Edit went through buffer
-      assert BufferServer.content(pid) == "AAA bbb CCC"
-      assert BufferServer.dirty?(pid)
+      assert BufferProcess.content(pid) == "AAA bbb CCC"
+      assert BufferProcess.dirty?(pid)
 
       # Disk unchanged
       assert File.read!(path) == "aaa bbb ccc"
 
       # Single undo reverts entire batch
-      BufferServer.undo(pid)
-      assert BufferServer.content(pid) == "aaa bbb ccc"
+      BufferProcess.undo(pid)
+      assert BufferProcess.content(pid) == "aaa bbb ccc"
     end
 
     test "ensure_for_path creates buffer when none exists", %{tmp_dir: dir} do
@@ -165,14 +165,14 @@ defmodule MingaAgent.Tools.MultiEditFileTest do
 
       # Buffer was created by ensure_for_path; edit went through buffer
       {:ok, pid} = Buffer.pid_for_path(Path.expand(path))
-      assert BufferServer.content(pid) == "AAA bbb"
-      assert BufferServer.dirty?(pid)
+      assert BufferProcess.content(pid) == "AAA bbb"
+      assert BufferProcess.dirty?(pid)
     end
   end
 
   # Helper to read content from the buffer that ensure_for_path created.
   defp buffer_content(path) do
     {:ok, pid} = Buffer.pid_for_path(Path.expand(path))
-    BufferServer.content(pid)
+    BufferProcess.content(pid)
   end
 end

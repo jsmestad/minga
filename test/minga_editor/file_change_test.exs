@@ -5,7 +5,7 @@ defmodule MingaEditor.FileChangeTest do
 
   use Minga.Test.EditorCase, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
 
   @tag :tmp_dir
   test "unmodified buffer silently reloads on file change", %{tmp_dir: tmp_dir} do
@@ -22,7 +22,7 @@ defmodule MingaEditor.FileChangeTest do
     _ = :sys.get_state(ctx.editor)
 
     # Buffer should have new content
-    content = BufferServer.content(ctx.buffer)
+    content = BufferProcess.content(ctx.buffer)
     assert content == "updated externally"
 
     # Status message should confirm reload
@@ -73,7 +73,7 @@ defmodule MingaEditor.FileChangeTest do
     # Press r to reload
     send_key_sync(ctx, ?r)
 
-    content = BufferServer.content(ctx.buffer)
+    content = BufferProcess.content(ctx.buffer)
     assert content == "reloaded content"
 
     state = :sys.get_state(ctx.editor)
@@ -101,7 +101,7 @@ defmodule MingaEditor.FileChangeTest do
     # Press k to keep
     send_key_sync(ctx, ?k)
 
-    content = BufferServer.content(ctx.buffer)
+    content = BufferProcess.content(ctx.buffer)
     assert String.contains?(content, "local")
 
     state = :sys.get_state(ctx.editor)

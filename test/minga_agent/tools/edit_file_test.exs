@@ -3,7 +3,7 @@ defmodule MingaAgent.Tools.EditFileTest do
 
   alias MingaAgent.Tools.EditFile
   alias Minga.Buffer
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
 
   @moduletag :tmp_dir
 
@@ -59,13 +59,13 @@ defmodule MingaAgent.Tools.EditFileTest do
     test "routes through buffer when buffer is open", %{tmp_dir: dir} do
       path = Path.join(dir, "buffered.ex")
       File.write!(path, "defmodule Foo do\n  def hello, do: :world\nend\n")
-      pid = start_supervised!({BufferServer, file_path: path})
+      pid = start_supervised!({BufferProcess, file_path: path})
 
       assert {:ok, _} = EditFile.execute(path, "def hello, do: :world", "def hello, do: :earth")
 
       # Edit went through buffer, not disk
-      assert BufferServer.content(pid) =~ "def hello, do: :earth"
-      assert BufferServer.dirty?(pid)
+      assert BufferProcess.content(pid) =~ "def hello, do: :earth"
+      assert BufferProcess.dirty?(pid)
 
       # Disk file unchanged
       assert File.read!(path) =~ "def hello, do: :world"
@@ -74,13 +74,13 @@ defmodule MingaAgent.Tools.EditFileTest do
     test "edit through buffer is undoable", %{tmp_dir: dir} do
       path = Path.join(dir, "undo.ex")
       File.write!(path, "aaa bbb ccc")
-      pid = start_supervised!({BufferServer, file_path: path})
+      pid = start_supervised!({BufferProcess, file_path: path})
 
       EditFile.execute(path, "bbb", "BBB")
-      assert BufferServer.content(pid) == "aaa BBB ccc"
+      assert BufferProcess.content(pid) == "aaa BBB ccc"
 
-      BufferServer.undo(pid)
-      assert BufferServer.content(pid) == "aaa bbb ccc"
+      BufferProcess.undo(pid)
+      assert BufferProcess.content(pid) == "aaa bbb ccc"
     end
 
     test "return value contract is identical for both paths", %{tmp_dir: dir} do
@@ -93,7 +93,7 @@ defmodule MingaAgent.Tools.EditFileTest do
       # Pre-opened buffer path
       path2 = Path.join(dir, "second.ex")
       File.write!(path2, "hello world")
-      _pid = start_supervised!({BufferServer, file_path: path2})
+      _pid = start_supervised!({BufferProcess, file_path: path2})
       assert {:ok, msg2} = EditFile.execute(path2, "hello", "goodbye")
       assert is_binary(msg2)
     end
@@ -106,14 +106,14 @@ defmodule MingaAgent.Tools.EditFileTest do
 
       # Buffer was created by ensure_for_path; edit went through buffer
       {:ok, pid} = Buffer.pid_for_path(Path.expand(path))
-      assert BufferServer.content(pid) == "goodbye world"
-      assert BufferServer.dirty?(pid)
+      assert BufferProcess.content(pid) == "goodbye world"
+      assert BufferProcess.dirty?(pid)
     end
   end
 
   # Helper to read content from the buffer that ensure_for_path created.
   defp buffer_content(path) do
     {:ok, pid} = Buffer.pid_for_path(Path.expand(path))
-    BufferServer.content(pid)
+    BufferProcess.content(pid)
   end
 end

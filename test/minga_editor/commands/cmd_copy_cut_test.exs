@@ -9,7 +9,7 @@ defmodule MingaEditor.Commands.CmdCopyCutTest do
 
   import Hammox
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Commands.Editing
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Registers
@@ -33,7 +33,7 @@ defmodule MingaEditor.Commands.CmdCopyCutTest do
   end
 
   defp start_buffer(content) do
-    start_supervised!({BufferServer, content: content})
+    start_supervised!({BufferProcess, content: content})
   end
 
   defp build_state(buf) do
@@ -65,19 +65,19 @@ defmodule MingaEditor.Commands.CmdCopyCutTest do
       new_state = Editing.execute(state, :cmd_copy)
 
       assert register_entry(new_state) == {"hello\n", :linewise}
-      assert BufferServer.content(buf) == "hello\nworld\nfoo"
+      assert BufferProcess.content(buf) == "hello\nworld\nfoo"
       assert_receive {:clipboard_written, "hello\n"}, 200
     end
 
     test "copies line at cursor position" do
       buf = start_buffer("aaa\nbbb\nccc")
-      BufferServer.move_to(buf, {1, 0})
+      BufferProcess.move_to(buf, {1, 0})
       state = build_state(buf)
 
       new_state = Editing.execute(state, :cmd_copy)
 
       assert register_entry(new_state) == {"bbb\n", :linewise}
-      assert BufferServer.content(buf) == "aaa\nbbb\nccc"
+      assert BufferProcess.content(buf) == "aaa\nbbb\nccc"
       assert_receive {:clipboard_written, "bbb\n"}, 200
     end
   end
@@ -85,48 +85,48 @@ defmodule MingaEditor.Commands.CmdCopyCutTest do
   describe "cmd_copy in visual mode" do
     test "copies charwise selection and transitions to normal mode" do
       buf = start_buffer("hello world")
-      BufferServer.move_to(buf, {0, 4})
+      BufferProcess.move_to(buf, {0, 4})
       state = build_state(buf) |> with_visual_mode(buf, {0, 0}, :char)
 
       new_state = Editing.execute(state, :cmd_copy)
 
       assert register_entry(new_state) == {"hello", :charwise}
-      assert BufferServer.content(buf) == "hello world"
+      assert BufferProcess.content(buf) == "hello world"
       assert new_state.workspace.editing.mode == :normal
       assert_receive {:clipboard_written, "hello"}, 200
     end
 
     test "copies linewise selection" do
       buf = start_buffer("aaa\nbbb\nccc")
-      BufferServer.move_to(buf, {1, 0})
+      BufferProcess.move_to(buf, {1, 0})
       state = build_state(buf) |> with_visual_mode(buf, {0, 0}, :line)
 
       new_state = Editing.execute(state, :cmd_copy)
 
       assert register_entry(new_state) == {"aaa\nbbb\n", :linewise}
-      assert BufferServer.content(buf) == "aaa\nbbb\nccc"
+      assert BufferProcess.content(buf) == "aaa\nbbb\nccc"
     end
 
     test "copies charwise selection with reversed anchor (cursor before anchor)" do
       buf = start_buffer("hello world")
-      BufferServer.move_to(buf, {0, 0})
+      BufferProcess.move_to(buf, {0, 0})
       state = build_state(buf) |> with_visual_mode(buf, {0, 4}, :char)
 
       new_state = Editing.execute(state, :cmd_copy)
 
       assert register_entry(new_state) == {"hello", :charwise}
-      assert BufferServer.content(buf) == "hello world"
+      assert BufferProcess.content(buf) == "hello world"
     end
 
     test "copies linewise selection with cursor above anchor" do
       buf = start_buffer("aaa\nbbb\nccc")
-      BufferServer.move_to(buf, {0, 0})
+      BufferProcess.move_to(buf, {0, 0})
       state = build_state(buf) |> with_visual_mode(buf, {2, 0}, :line)
 
       new_state = Editing.execute(state, :cmd_copy)
 
       assert register_entry(new_state) == {"aaa\nbbb\nccc\n", :linewise}
-      assert BufferServer.content(buf) == "aaa\nbbb\nccc"
+      assert BufferProcess.content(buf) == "aaa\nbbb\nccc"
     end
   end
 
@@ -138,19 +138,19 @@ defmodule MingaEditor.Commands.CmdCopyCutTest do
       new_state = Editing.execute(state, :cmd_cut)
 
       assert register_entry(new_state) == {"hello\n", :linewise}
-      assert BufferServer.content(buf) == "world\nfoo"
+      assert BufferProcess.content(buf) == "world\nfoo"
       assert_receive {:clipboard_written, "hello\n"}, 200
     end
 
     test "cuts line at cursor position" do
       buf = start_buffer("aaa\nbbb\nccc")
-      BufferServer.move_to(buf, {1, 0})
+      BufferProcess.move_to(buf, {1, 0})
       state = build_state(buf)
 
       new_state = Editing.execute(state, :cmd_cut)
 
       assert register_entry(new_state) == {"bbb\n", :linewise}
-      assert BufferServer.content(buf) == "aaa\nccc"
+      assert BufferProcess.content(buf) == "aaa\nccc"
       assert_receive {:clipboard_written, "bbb\n"}, 200
     end
   end
@@ -158,59 +158,59 @@ defmodule MingaEditor.Commands.CmdCopyCutTest do
   describe "cmd_cut in visual mode" do
     test "deletes charwise selection and transitions to normal mode" do
       buf = start_buffer("hello world")
-      BufferServer.move_to(buf, {0, 4})
+      BufferProcess.move_to(buf, {0, 4})
       state = build_state(buf) |> with_visual_mode(buf, {0, 0}, :char)
 
       new_state = Editing.execute(state, :cmd_cut)
 
       assert register_entry(new_state) == {"hello", :charwise}
-      assert BufferServer.content(buf) == " world"
+      assert BufferProcess.content(buf) == " world"
       assert new_state.workspace.editing.mode == :normal
       assert_receive {:clipboard_written, "hello"}, 200
     end
 
     test "deletes linewise selection" do
       buf = start_buffer("aaa\nbbb\nccc")
-      BufferServer.move_to(buf, {1, 0})
+      BufferProcess.move_to(buf, {1, 0})
       state = build_state(buf) |> with_visual_mode(buf, {0, 0}, :line)
 
       new_state = Editing.execute(state, :cmd_cut)
 
       assert register_entry(new_state) == {"aaa\nbbb\n", :linewise}
-      assert BufferServer.content(buf) == "ccc"
+      assert BufferProcess.content(buf) == "ccc"
     end
 
     test "deletes charwise selection with reversed anchor" do
       buf = start_buffer("hello world")
-      BufferServer.move_to(buf, {0, 0})
+      BufferProcess.move_to(buf, {0, 0})
       state = build_state(buf) |> with_visual_mode(buf, {0, 4}, :char)
 
       new_state = Editing.execute(state, :cmd_cut)
 
       assert register_entry(new_state) == {"hello", :charwise}
-      assert BufferServer.content(buf) == " world"
+      assert BufferProcess.content(buf) == " world"
     end
   end
 
   describe "cmd_cut on read-only buffer" do
     test "normal mode does not modify buffer or sync clipboard" do
-      buf = start_supervised!({BufferServer, content: "protected content", read_only: true})
+      buf = start_supervised!({BufferProcess, content: "protected content", read_only: true})
       state = build_state(buf)
 
       _new_state = Editing.execute(state, :cmd_cut)
 
-      assert BufferServer.content(buf) == "protected content"
+      assert BufferProcess.content(buf) == "protected content"
       refute_receive {:clipboard_written, _}, 50
     end
 
     test "visual mode does not modify buffer or sync clipboard" do
-      buf = start_supervised!({BufferServer, content: "protected content", read_only: true})
-      BufferServer.move_to(buf, {0, 9})
+      buf = start_supervised!({BufferProcess, content: "protected content", read_only: true})
+      BufferProcess.move_to(buf, {0, 9})
       state = build_state(buf) |> with_visual_mode(buf, {0, 0}, :char)
 
       _new_state = Editing.execute(state, :cmd_cut)
 
-      assert BufferServer.content(buf) == "protected content"
+      assert BufferProcess.content(buf) == "protected content"
       refute_receive {:clipboard_written, _}, 50
     end
   end

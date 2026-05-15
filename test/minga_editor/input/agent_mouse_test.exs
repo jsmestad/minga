@@ -2,7 +2,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.Agent.UIState
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Layout
   alias MingaEditor.LayoutPreset
   alias MingaEditor.State, as: EditorState
@@ -24,8 +24,8 @@ defmodule MingaEditor.Input.AgentMouseTest do
   # ── Test helpers ───────────────────────────────────────────────────────────
 
   defp base_state(opts \\ []) do
-    {:ok, buf} = BufferServer.start_link(content: "hello\nworld\nfoo\nbar\nbaz")
-    {:ok, _prompt_buf} = BufferServer.start_link(content: "")
+    {:ok, buf} = BufferProcess.start_link(content: "hello\nworld\nfoo\nbar\nbaz")
+    {:ok, _prompt_buf} = BufferProcess.start_link(content: "")
 
     agent = %AgentState{
       runtime: %RuntimeState{status: :idle},
@@ -61,7 +61,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
   end
 
   defp with_agent_split(state, agent_content \\ "") do
-    {:ok, agent_buf} = BufferServer.start_link(content: agent_content)
+    {:ok, agent_buf} = BufferProcess.start_link(content: agent_content)
 
     state =
       AgentAccess.update_agent(state, fn agent ->

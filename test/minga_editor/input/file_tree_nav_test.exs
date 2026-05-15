@@ -3,7 +3,7 @@ defmodule MingaEditor.Input.FileTreeNavTest do
 
   @moduletag :tmp_dir
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.Viewport
@@ -107,7 +107,7 @@ defmodule MingaEditor.Input.FileTreeNavTest do
       {:handled, state} = walk_surface_handlers(state, ?j, 0)
       {:handled, state} = walk_surface_handlers(state, ?j, 0)
 
-      {buf_line, _col} = BufferServer.cursor(buf)
+      {buf_line, _col} = BufferProcess.cursor(buf)
       assert buf_line == state.workspace.file_tree.tree.cursor
     end
   end

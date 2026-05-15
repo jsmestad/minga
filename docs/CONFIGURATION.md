@@ -120,7 +120,7 @@ For the full option API, see [`Minga.Config.Options`](https://jsmestad.github.io
 
 ### Buffer-aware agent options
 
-When agent tools are [routed through `Buffer.Server`](BUFFER-AWARE-AGENTS.md), file-backed buffers auto-save after `:auto_save_delay_ms` so agent edits are not stranded only in memory. Set it to `0` if you want every dirty buffer to wait for an explicit save.
+When agent tools are [routed through `Buffer`](BUFFER-AWARE-AGENTS.md), file-backed buffers auto-save after `:auto_save_delay_ms` so agent edits are not stranded only in memory. Set it to `0` if you want every dirty buffer to wait for an explicit save.
 
 Some buffer-aware controls are still planned:
 
@@ -776,7 +776,7 @@ advise :override, :save, fn state ->
   state = Minga.API.save()
 
   # Then auto-stage
-  case Minga.Buffer.Server.file_path(state.buffers.active) do
+  case Minga.Buffer.file_path(state.buffers.active) do
     nil -> state
     path ->
       System.cmd("git", ["add", path], stderr_to_stdout: true)

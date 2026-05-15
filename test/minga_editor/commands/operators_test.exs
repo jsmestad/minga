@@ -4,11 +4,11 @@ defmodule MingaEditor.Commands.OperatorsTest do
   yank_lines_counted) in MingaEditor.Commands.Operators.
 
   Calls `Operators.execute/2` directly on constructed EditorState structs
-  with a real BufferServer. No Editor GenServer needed.
+  with a real BufferProcess. No Editor GenServer needed.
   """
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Commands.Operators
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Registers
@@ -16,7 +16,7 @@ defmodule MingaEditor.Commands.OperatorsTest do
   alias MingaEditor.Workspace.State, as: WorkspaceState
 
   defp start_buffer(content) do
-    start_supervised!({BufferServer, content: content})
+    start_supervised!({BufferProcess, content: content})
   end
 
   defp build_state(buf) do
@@ -42,7 +42,7 @@ defmodule MingaEditor.Commands.OperatorsTest do
 
       new_state = Operators.execute(state, {:delete_lines_counted, 1})
 
-      assert BufferServer.content(buf) == "world\nfoo"
+      assert BufferProcess.content(buf) == "world\nfoo"
       assert register_entry(new_state) == {"hello\n", :linewise}
     end
 
@@ -52,7 +52,7 @@ defmodule MingaEditor.Commands.OperatorsTest do
 
       new_state = Operators.execute(state, {:delete_lines_counted, 2})
 
-      assert BufferServer.content(buf) == "ccc\nddd"
+      assert BufferProcess.content(buf) == "ccc\nddd"
       assert register_entry(new_state) == {"aaa\nbbb\n", :linewise}
     end
 
@@ -62,18 +62,18 @@ defmodule MingaEditor.Commands.OperatorsTest do
 
       new_state = Operators.execute(state, {:delete_lines_counted, 3})
 
-      assert BufferServer.content(buf) == "line4\nline5"
+      assert BufferProcess.content(buf) == "line4\nline5"
       assert register_entry(new_state) == {"line1\nline2\nline3\n", :linewise}
     end
 
     test "2dd from middle line deletes that line and next" do
       buf = start_buffer("aaa\nbbb\nccc\nddd")
-      BufferServer.move_to(buf, {1, 0})
+      BufferProcess.move_to(buf, {1, 0})
       state = build_state(buf)
 
       new_state = Operators.execute(state, {:delete_lines_counted, 2})
 
-      assert BufferServer.content(buf) == "aaa\nddd"
+      assert BufferProcess.content(buf) == "aaa\nddd"
       assert register_entry(new_state) == {"bbb\nccc\n", :linewise}
     end
 
@@ -83,7 +83,7 @@ defmodule MingaEditor.Commands.OperatorsTest do
 
       new_state = Operators.execute(state, {:delete_lines_counted, 5})
 
-      assert BufferServer.content(buf) == ""
+      assert BufferProcess.content(buf) == ""
       assert register_entry(new_state) == {"aaa\nbbb\n", :linewise}
     end
 
@@ -93,7 +93,7 @@ defmodule MingaEditor.Commands.OperatorsTest do
 
       new_state = Operators.execute(state, {:delete_lines_counted, 1})
 
-      assert BufferServer.content(buf) == ""
+      assert BufferProcess.content(buf) == ""
       assert register_entry(new_state) == {"only line\n", :linewise}
     end
 
@@ -109,12 +109,12 @@ defmodule MingaEditor.Commands.OperatorsTest do
 
     test "cursor on last line with count > 1 deletes only that line" do
       buf = start_buffer("aaa\nbbb\nccc")
-      BufferServer.move_to(buf, {2, 0})
+      BufferProcess.move_to(buf, {2, 0})
       state = build_state(buf)
 
       new_state = Operators.execute(state, {:delete_lines_counted, 3})
 
-      assert BufferServer.content(buf) == "aaa\nbbb"
+      assert BufferProcess.content(buf) == "aaa\nbbb"
       assert register_entry(new_state) == {"ccc\n", :linewise}
     end
   end
@@ -128,7 +128,7 @@ defmodule MingaEditor.Commands.OperatorsTest do
 
       new_state = Operators.execute(state, {:change_lines_counted, 1})
 
-      content = BufferServer.content(buf)
+      content = BufferProcess.content(buf)
       refute String.contains?(content, "hello")
       assert String.contains?(content, "world")
       assert register_entry(new_state) == {"hello\n", :linewise}
@@ -140,7 +140,7 @@ defmodule MingaEditor.Commands.OperatorsTest do
 
       new_state = Operators.execute(state, {:change_lines_counted, 2})
 
-      content = BufferServer.content(buf)
+      content = BufferProcess.content(buf)
       refute String.contains?(content, "aaa")
       refute String.contains?(content, "bbb")
       assert String.contains?(content, "ccc")
@@ -157,7 +157,7 @@ defmodule MingaEditor.Commands.OperatorsTest do
 
       new_state = Operators.execute(state, {:yank_lines_counted, 1})
 
-      assert BufferServer.content(buf) == "hello\nworld"
+      assert BufferProcess.content(buf) == "hello\nworld"
       assert register_entry(new_state) == {"hello\n", :linewise}
     end
 
@@ -167,7 +167,7 @@ defmodule MingaEditor.Commands.OperatorsTest do
 
       new_state = Operators.execute(state, {:yank_lines_counted, 2})
 
-      assert BufferServer.content(buf) == "aaa\nbbb\nccc"
+      assert BufferProcess.content(buf) == "aaa\nbbb\nccc"
       assert register_entry(new_state) == {"aaa\nbbb\n", :linewise}
     end
 
@@ -187,7 +187,7 @@ defmodule MingaEditor.Commands.OperatorsTest do
 
       new_state = Operators.execute(state, {:yank_lines_counted, 5})
 
-      assert BufferServer.content(buf) == "aaa\nbbb"
+      assert BufferProcess.content(buf) == "aaa\nbbb"
       assert register_entry(new_state) == {"aaa\nbbb\n", :linewise}
     end
   end

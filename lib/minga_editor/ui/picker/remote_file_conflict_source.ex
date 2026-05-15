@@ -59,7 +59,7 @@ defmodule MingaEditor.UI.Picker.RemoteFileConflictSource do
   @impl true
   @spec on_select(Item.t(), EditorState.t()) :: EditorState.t()
   def on_select(%Item{id: {:remote_conflict, :reload, buffer, path, content}}, state) do
-    Buffer.replace_saved_content(buffer, content)
+    Buffer.accept_saved_content(buffer, content)
     EditorState.set_status(state, "Reloaded #{Path.basename(path)} from remote")
   catch
     :exit, reason -> EditorState.set_status(state, "Remote reload failed: #{inspect(reason)}")

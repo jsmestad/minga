@@ -24,7 +24,7 @@ defmodule MingaEditor.Workspace.StateTest do
       original_buf = ws.buffers.active
 
       # Create a new buffer to switch to
-      {:ok, new_buf} = Minga.Buffer.Server.start_link(content: "new content")
+      {:ok, new_buf} = Minga.Buffer.Process.start_link(content: "new content")
 
       # Update buffers.active to the new buffer, but leave the window pointing at the old one
       ws = %{ws | buffers: %{ws.buffers | active: new_buf}}
@@ -54,7 +54,7 @@ defmodule MingaEditor.Workspace.StateTest do
       ws = %{ws | windows: %{ws.windows | map: Map.put(ws.windows.map, win_id, agent_window)}}
 
       # Change the active buffer to something different
-      {:ok, new_buf} = Minga.Buffer.Server.start_link(content: "new content")
+      {:ok, new_buf} = Minga.Buffer.Process.start_link(content: "new content")
       ws = %{ws | buffers: %{ws.buffers | active: new_buf}}
 
       # sync should NOT touch the agent_chat window

@@ -118,7 +118,7 @@ defmodule MingaEditor.FileTreeIntegrationTest do
 
       # Verify the file was opened
       assert state.workspace.buffers.active != original_buf
-      path = BufferServer.file_path(state.workspace.buffers.active)
+      path = BufferProcess.file_path(state.workspace.buffers.active)
       assert Path.basename(path) == "other.ex"
 
       # Focus returned to editor

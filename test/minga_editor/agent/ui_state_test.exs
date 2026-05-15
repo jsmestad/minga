@@ -4,7 +4,7 @@ defmodule MingaEditor.Agent.UIStateTest do
   alias MingaAgent.Config, as: AgentConfig
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
 
   # Creates a UIState with a running prompt buffer containing the given text.
   defp ui_with_input(lines, cursor \\ nil) do
@@ -12,14 +12,14 @@ defmodule MingaEditor.Agent.UIStateTest do
     cursor = cursor || {0, 0}
     ui = UIState.new()
     ui = UIState.ensure_prompt_buffer(ui)
-    BufferServer.replace_content(ui.panel.prompt_buffer, text)
-    BufferServer.set_cursor(ui.panel.prompt_buffer, cursor)
+    BufferProcess.replace_content(ui.panel.prompt_buffer, text)
+    BufferProcess.move_to(ui.panel.prompt_buffer, cursor)
     ui
   end
 
   # Moves the cursor in the prompt buffer.
   defp set_input_cursor(ui, cursor) do
-    BufferServer.set_cursor(ui.panel.prompt_buffer, cursor)
+    BufferProcess.move_to(ui.panel.prompt_buffer, cursor)
     ui
   end
 
@@ -311,7 +311,7 @@ defmodule MingaEditor.Agent.UIStateTest do
       ui = ui_with_input([""])
       ui = put_in(ui.panel.prompt_history, ["entry"])
       ui = put_in(ui.panel.history_index, 0)
-      BufferServer.replace_content(ui.panel.prompt_buffer, "entry")
+      BufferProcess.replace_content(ui.panel.prompt_buffer, "entry")
       ui = UIState.history_next(ui)
       assert UIState.input_text(ui) == ""
       assert ui.panel.history_index == -1

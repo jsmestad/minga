@@ -7,16 +7,16 @@
 
 **The vim editing model applies to all navigable content. Each content type implements `NavigableContent` with the data structure that fits its domain. Don't reimplement navigation commands; implement the protocol instead.**
 
-Minga is agentic-first. The agent view is not a file buffer pretending to be chat. Chat content is structured data (messages, tool calls, code blocks with collapse state, thinking sections). Forcing it into a flat `Buffer.Server` to get vim navigation is the wrong tradeoff: it loses semantic structure, creates streaming/undo problems, and makes interactive elements (approve, collapse) harder.
+Minga is agentic-first. The agent view is not a file buffer pretending to be chat. Chat content is structured data (messages, tool calls, code blocks with collapse state, thinking sections). Forcing it into a flat `Buffer.Process` to get vim navigation is the wrong tradeoff: it loses semantic structure, creates streaming/undo problems, and makes interactive elements (approve, collapse) harder.
 
 The shared layer is the **interaction model**, not the data structure:
 
 1. **The editing model (vim/CUA) produces command atoms from key sequences.** `Mode.process(mode, key, mode_state)` returns `:move_down`, `:scroll_half_page`, `:yank`, etc. It doesn't know what content it's operating on.
 
 2. **Each content type interprets those commands against its own data model** via the `NavigableContent` protocol. Same command, different content:
-   - File buffer: `:move_down` → `BufferServer.move(buf, :down)` (gap buffer cursor movement)
+   - File buffer: `:move_down` → `BufferProcess.move(buf, :down)` (gap buffer cursor movement)
    - Chat messages: `:move_down` → scroll to next visual line in rendered message list
-   - Agent prompt: `:move_down` → `BufferServer.move(prompt_buf, :down)` (this one IS a buffer)
+   - Agent prompt: `:move_down` → `BufferProcess.move(prompt_buf, :down)` (this one IS a buffer)
 
 3. **Content-specific actions are domain commands, not editing commands.** Submit prompt, approve tool, reject hunk, toggle collapse, session lifecycle. These belong in domain-specific command handlers, not in the editing model.
 
@@ -24,10 +24,10 @@ The shared layer is the **interaction model**, not the data structure:
 
 | Content | Data structure | Editing | NavigableContent |
 |---------|---------------|---------|-----------------|
-| File buffer | `Buffer.Server` (gap buffer) | Full vim/CUA (insert, visual, operators, motions) | Buffer adapter |
-| Agent prompt | `Buffer.Server` | Full vim/CUA | Buffer adapter |
-| Chat messages | Structured list + `*Agent*` Buffer.Server | Navigation only (no insert, no editing) | Buffer adapter (temporary) |
-| `*Messages*` buffer | `Buffer.Server` (read-only) | Navigation + yank (no insert) | Buffer adapter |
+| File buffer | `Buffer.Process` (gap buffer) | Full vim/CUA (insert, visual, operators, motions) | Buffer adapter |
+| Agent prompt | `Buffer.Process` | Full vim/CUA | Buffer adapter |
+| Chat messages | Structured list + `*Agent*` Buffer.Process | Navigation only (no insert, no editing) | Buffer adapter (temporary) |
+| `*Messages*` buffer | `Buffer.Process` (read-only) | Navigation + yank (no insert) | Buffer adapter |
 | Preview/diff pane | Generated read-only content | Navigation + interactive (approve/reject hunks) | Buffer or custom adapter |
 
 ## Completed Work
@@ -39,7 +39,7 @@ The shared layer is the **interaction model**, not the data structure:
 - Property-based tests for NavigableContent
 
 ### Phase D: Prompt migration (PRs #325, #331, #337, #339)
-- Agent prompt backed by Buffer.Server (replacing TextField)
+- Agent prompt backed by Buffer.Process (replacing TextField)
 - PanelState accessors replacing direct `panel.input` access
 - Input.Vim module deleted (-1,770 lines)
 

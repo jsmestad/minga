@@ -2,10 +2,10 @@ defmodule Minga.Buffer.ForkTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Fork
-  alias Minga.Buffer.Server
+  alias Minga.Buffer.Process, as: BufferProcess
 
   defp start_parent!(content) do
-    start_supervised!({Server, content: content}, id: make_ref())
+    start_supervised!({BufferProcess, content: content}, id: make_ref())
   end
 
   describe "create/1 and content/1" do
@@ -15,7 +15,7 @@ defmodule Minga.Buffer.ForkTest do
       {:ok, fork} = Fork.create(parent)
 
       assert Fork.content(fork) == "hello\nworld"
-      assert Fork.content(fork) == Server.content(parent)
+      assert Fork.content(fork) == BufferProcess.content(parent)
     end
 
     test "fork starts clean and at version 0" do
@@ -36,7 +36,7 @@ defmodule Minga.Buffer.ForkTest do
       GenServer.call(fork, {:replace_content, "new content", :agent})
 
       assert Fork.content(fork) == "new content"
-      assert Server.content(parent) == "hello\nworld"
+      assert BufferProcess.content(parent) == "hello\nworld"
     end
 
     test "editing fork marks it dirty and increments version" do
@@ -148,7 +148,7 @@ defmodule Minga.Buffer.ForkTest do
 
       # Edit both fork and parent
       GenServer.call(fork, {:replace_content, "fork changed", :agent})
-      Server.replace_content(parent, "parent changed")
+      BufferProcess.replace_content(parent, "parent changed")
 
       assert Fork.ancestor_content(fork) == "original content"
     end
@@ -168,7 +168,7 @@ defmodule Minga.Buffer.ForkTest do
       parent = start_parent!("line1\nline2\nline3")
 
       {:ok, fork} = Fork.create(parent)
-      Server.replace_content(parent, "line1\nparent_changed\nline3")
+      BufferProcess.replace_content(parent, "line1\nparent_changed\nline3")
 
       assert {:ok, "line1\nparent_changed\nline3"} = Fork.merge(fork)
     end
@@ -178,7 +178,7 @@ defmodule Minga.Buffer.ForkTest do
 
       {:ok, fork} = Fork.create(parent)
       GenServer.call(fork, {:find_and_replace, "b", "fork_b", nil})
-      Server.replace_content(parent, "a\nb\nc\nparent_d\ne")
+      BufferProcess.replace_content(parent, "a\nb\nc\nparent_d\ne")
 
       assert {:ok, merged} = Fork.merge(fork)
       assert merged =~ "fork_b"
@@ -190,7 +190,7 @@ defmodule Minga.Buffer.ForkTest do
 
       {:ok, fork} = Fork.create(parent)
       GenServer.call(fork, {:find_and_replace, "b", "fork_b", nil})
-      Server.replace_content(parent, "a\nparent_b\nc")
+      BufferProcess.replace_content(parent, "a\nparent_b\nc")
 
       assert {:conflict, hunks} = Fork.merge(fork)
       assert Enum.any?(hunks, &match?({:conflict, _, _}, &1))

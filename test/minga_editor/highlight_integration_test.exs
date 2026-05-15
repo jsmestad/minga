@@ -277,7 +277,7 @@ defmodule MingaEditor.HighlightIntegrationTest do
     test "new editor has empty highlights before :ready" do
       id = :erlang.unique_integer([:positive])
       {:ok, port} = HeadlessPort.start_link(width: 80, height: 24)
-      {:ok, buffer} = BufferServer.start_link(content: "defmodule Foo do\nend\n")
+      {:ok, buffer} = BufferProcess.start_link(content: "defmodule Foo do\nend\n")
 
       {:ok, editor} =
         MingaEditor.start_link(

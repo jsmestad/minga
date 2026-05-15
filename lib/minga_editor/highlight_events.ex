@@ -82,7 +82,7 @@ defmodule MingaEditor.HighlightEvents do
   def maybe_reparse(state, version_before) do
     content_changed = buffer_version(state) != version_before
 
-    # Buffer.Server now broadcasts :buffer_changed with delta from record_edit.
+    # Buffer.Process now broadcasts :buffer_changed with delta from record_edit.
     # No need to call notify_buffer_changed here.
 
     if content_changed do

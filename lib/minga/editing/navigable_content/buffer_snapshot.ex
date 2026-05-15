@@ -9,8 +9,8 @@ defmodule Minga.Editing.NavigableContent.BufferSnapshot do
 
   ## Usage
 
-      # Take a snapshot from a running Buffer.Server
-      doc = Buffer.Server.snapshot(server)
+      # Take a snapshot from a running Buffer
+      doc = Buffer.snapshot(server)
       snapshot = BufferSnapshot.new(doc, scroll)
 
       # Commands operate on the snapshot
@@ -18,7 +18,7 @@ defmodule Minga.Editing.NavigableContent.BufferSnapshot do
       snapshot = NavigableContent.set_cursor(snapshot, pos)
 
       # Apply the result back
-      Buffer.Server.apply_snapshot(server, snapshot.document)
+      Buffer.commit_snapshot(server, snapshot.document)
 
   ## Coordinate system
 

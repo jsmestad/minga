@@ -2,7 +2,7 @@ defmodule MingaEditor.Commands.EvalTest do
   @moduledoc false
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Commands.Eval
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -14,7 +14,7 @@ defmodule MingaEditor.Commands.EvalTest do
     {:ok, pid} =
       DynamicSupervisor.start_child(
         Minga.Buffer.Supervisor,
-        {BufferServer,
+        {BufferProcess,
          content: "", buffer_name: "*Messages*", read_only: true, unlisted: true, persistent: true}
       )
 
@@ -32,7 +32,7 @@ defmodule MingaEditor.Commands.EvalTest do
   end
 
   defp messages_content(buf) do
-    BufferServer.content(buf)
+    BufferProcess.content(buf)
   end
 
   # ── Tests ─────────────────────────────────────────────────────────────────────

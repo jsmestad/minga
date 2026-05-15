@@ -8,7 +8,7 @@ defmodule MingaEditor.Commands.EditingReindentTest do
   """
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor
 
   defp start_editor(content) do
@@ -16,7 +16,7 @@ defmodule MingaEditor.Commands.EditingReindentTest do
     events_registry = :"reindent_events_#{id}"
     start_supervised!({Minga.Events, name: events_registry})
 
-    {:ok, buffer} = BufferServer.start_link(content: content, events_registry: events_registry)
+    {:ok, buffer} = BufferProcess.start_link(content: content, events_registry: events_registry)
 
     {:ok, editor} =
       MingaEditor.start_link(
@@ -155,7 +155,7 @@ defmodule MingaEditor.Commands.EditingReindentTest do
       send_key(editor, ?=)
       send_key(editor, ?=)
 
-      assert BufferServer.content(buffer) == "  parent\n  child"
+      assert BufferProcess.content(buffer) == "  parent\n  child"
     end
 
     test "== does not corrupt buffer content" do
@@ -164,7 +164,7 @@ defmodule MingaEditor.Commands.EditingReindentTest do
       send_key(editor, ?=)
       send_key(editor, ?=)
 
-      result = BufferServer.content(buffer)
+      result = BufferProcess.content(buffer)
       # Content should not lose characters. The line may gain/lose whitespace
       # but the non-whitespace content should be preserved.
       assert String.contains?(result, "hello")
@@ -175,7 +175,7 @@ defmodule MingaEditor.Commands.EditingReindentTest do
       send_key(editor, ?=)
       send_key(editor, ?G)
 
-      result = BufferServer.content(buffer)
+      result = BufferProcess.content(buffer)
       assert is_binary(result)
       # All original non-whitespace content should be preserved
       for char <- ["a", "b", "c", "d", "e"] do

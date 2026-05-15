@@ -9,7 +9,7 @@ defmodule MingaEditor.Renderer.ConcealRenderTest do
 
   use Minga.Test.EditorCase, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Core.Decorations
 
   # Content starts at row 1 because the tab bar occupies row 0.
@@ -20,7 +20,7 @@ defmodule MingaEditor.Renderer.ConcealRenderTest do
       # Conceals on line 0, cursor on line 1
       ctx = start_editor("**bold**\nsecond line")
 
-      BufferServer.batch_decorations(ctx.buffer, fn decs ->
+      BufferProcess.batch_decorations(ctx.buffer, fn decs ->
         {_id1, decs} = Decorations.add_conceal(decs, {0, 0}, {0, 2}, group: :test)
         {_id2, decs} = Decorations.add_conceal(decs, {0, 6}, {0, 8}, group: :test)
         decs
@@ -41,7 +41,7 @@ defmodule MingaEditor.Renderer.ConcealRenderTest do
     test "conceal with replacement character shows replacement on non-cursor line" do
       ctx = start_editor("**bold**\nsecond line")
 
-      BufferServer.batch_decorations(ctx.buffer, fn decs ->
+      BufferProcess.batch_decorations(ctx.buffer, fn decs ->
         {_id1, decs} =
           Decorations.add_conceal(decs, {0, 0}, {0, 2}, replacement: "·", group: :test)
 
@@ -66,19 +66,19 @@ defmodule MingaEditor.Renderer.ConcealRenderTest do
     test "buffer content is not modified by concealment" do
       ctx = start_editor("**bold**")
 
-      BufferServer.batch_decorations(ctx.buffer, fn decs ->
+      BufferProcess.batch_decorations(ctx.buffer, fn decs ->
         {_id, decs} = Decorations.add_conceal(decs, {0, 0}, {0, 2}, group: :test)
         decs
       end)
 
-      content = BufferServer.content(ctx.buffer)
+      content = BufferProcess.content(ctx.buffer)
       assert content == "**bold**"
     end
 
     test "removing conceals restores display" do
       ctx = start_editor("**bold**\nsecond line")
 
-      BufferServer.batch_decorations(ctx.buffer, fn decs ->
+      BufferProcess.batch_decorations(ctx.buffer, fn decs ->
         {_id, decs} = Decorations.add_conceal(decs, {0, 0}, {0, 2}, group: :test)
         decs
       end)
@@ -86,7 +86,7 @@ defmodule MingaEditor.Renderer.ConcealRenderTest do
       # Move cursor off line 0, then remove conceals
       send_key_sync(ctx, ?j)
 
-      BufferServer.batch_decorations(ctx.buffer, fn decs ->
+      BufferProcess.batch_decorations(ctx.buffer, fn decs ->
         Decorations.remove_conceal_group(decs, :test)
       end)
 
@@ -102,7 +102,7 @@ defmodule MingaEditor.Renderer.ConcealRenderTest do
     test "multiple conceals on one line" do
       ctx = start_editor("# Heading\nsecond line")
 
-      BufferServer.batch_decorations(ctx.buffer, fn decs ->
+      BufferProcess.batch_decorations(ctx.buffer, fn decs ->
         {_id, decs} = Decorations.add_conceal(decs, {0, 0}, {0, 2}, group: :test)
         decs
       end)
@@ -119,7 +119,7 @@ defmodule MingaEditor.Renderer.ConcealRenderTest do
     test "cursor line reveals concealed text" do
       ctx = start_editor("**bold**\nnormal line")
 
-      BufferServer.batch_decorations(ctx.buffer, fn decs ->
+      BufferProcess.batch_decorations(ctx.buffer, fn decs ->
         {_id1, decs} = Decorations.add_conceal(decs, {0, 0}, {0, 2}, group: :test)
         {_id2, decs} = Decorations.add_conceal(decs, {0, 6}, {0, 8}, group: :test)
         decs
@@ -137,7 +137,7 @@ defmodule MingaEditor.Renderer.ConcealRenderTest do
     test "non-cursor line hides concealed text while cursor line reveals" do
       ctx = start_editor("**bold**\n**italic**")
 
-      BufferServer.batch_decorations(ctx.buffer, fn decs ->
+      BufferProcess.batch_decorations(ctx.buffer, fn decs ->
         {_id1, decs} = Decorations.add_conceal(decs, {0, 0}, {0, 2}, group: :test)
         {_id2, decs} = Decorations.add_conceal(decs, {0, 6}, {0, 8}, group: :test)
         {_id3, decs} = Decorations.add_conceal(decs, {1, 0}, {1, 2}, group: :test)
@@ -160,7 +160,7 @@ defmodule MingaEditor.Renderer.ConcealRenderTest do
     test "yank across concealed range produces raw text" do
       ctx = start_editor("**bold**", clipboard: :none)
 
-      BufferServer.batch_decorations(ctx.buffer, fn decs ->
+      BufferProcess.batch_decorations(ctx.buffer, fn decs ->
         {_id1, decs} = Decorations.add_conceal(decs, {0, 0}, {0, 2}, group: :test)
         {_id2, decs} = Decorations.add_conceal(decs, {0, 6}, {0, 8}, group: :test)
         decs
@@ -169,7 +169,7 @@ defmodule MingaEditor.Renderer.ConcealRenderTest do
       # Yank the line
       send_keys_sync(ctx, "Vy")
 
-      content = BufferServer.content(ctx.buffer)
+      content = BufferProcess.content(ctx.buffer)
       assert content == "**bold**"
     end
   end

@@ -12,7 +12,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
 
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
@@ -31,7 +31,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
 
   @spec start_buffer(String.t()) :: pid()
   defp start_buffer(content) do
-    {:ok, pid} = BufferServer.start_link(content: content)
+    {:ok, pid} = BufferProcess.start_link(content: content)
     pid
   end
 
@@ -47,7 +47,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
 
   @spec state_with_agent_chat() :: {EditorState.t(), pid()}
   defp state_with_agent_chat do
-    {:ok, agent_buf} = BufferServer.start_link(content: "")
+    {:ok, agent_buf} = BufferProcess.start_link(content: "")
     win_id = 1
     agent_window = Window.new_agent_chat(win_id, agent_buf, 24, 80)
 
@@ -72,7 +72,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
 
   @spec state_with_agent_tab() :: {EditorState.t(), pid()}
   defp state_with_agent_tab do
-    {:ok, agent_buf} = BufferServer.start_link(content: "")
+    {:ok, agent_buf} = BufferProcess.start_link(content: "")
     win_id = 1
     agent_window = Window.new_agent_chat(win_id, agent_buf, 24, 80)
 
@@ -157,16 +157,16 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       buf2 = start_buffer("clean.ex")
       state = EditorState.add_buffer(state, buf2)
 
-      BufferServer.insert_char(buf1, "x")
-      assert BufferServer.dirty?(buf1)
-      refute BufferServer.dirty?(buf2)
+      BufferProcess.insert_char(buf1, "x")
+      assert BufferProcess.dirty?(buf1)
+      refute BufferProcess.dirty?(buf2)
 
       new_state = EditorState.switch_buffer(state, 1)
 
       active_tab = TabBar.active(new_state.shell_state.tab_bar)
       tab_buf = active_tab.context.buffers.active
       assert tab_buf == buf2
-      refute BufferServer.dirty?(tab_buf)
+      refute BufferProcess.dirty?(tab_buf)
     end
 
     test "Traditional: repeated switch_buffer cycles maintain snapshot invariant" do

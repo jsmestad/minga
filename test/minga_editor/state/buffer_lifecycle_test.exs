@@ -11,7 +11,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
 
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
@@ -76,7 +76,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
   # Creates a state with an agent tab active and an agent_chat window.
   @spec state_with_agent_tab() :: {EditorState.t(), pid()}
   defp state_with_agent_tab do
-    {:ok, agent_buf} = BufferServer.start_link(content: "")
+    {:ok, agent_buf} = BufferProcess.start_link(content: "")
     win_id = 1
     agent_window = Window.new_agent_chat(win_id, agent_buf, 24, 80)
 
@@ -108,14 +108,14 @@ defmodule MingaEditor.State.BufferLifecycleTest do
   # Starts a buffer for use in tests. Returns the pid.
   @spec start_buffer(String.t()) :: pid()
   defp start_buffer(content) do
-    {:ok, pid} = BufferServer.start_link(content: content)
+    {:ok, pid} = BufferProcess.start_link(content: content)
     pid
   end
 
   @spec start_file_buffer(String.t(), String.t()) :: pid()
   defp start_file_buffer(path, content) do
     File.write!(path, content)
-    {:ok, pid} = BufferServer.start_link(file_path: path)
+    {:ok, pid} = BufferProcess.start_link(file_path: path)
     pid
   end
 
@@ -310,7 +310,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       buf = state.workspace.buffers.active
 
       # Create a second file tab with a different buffer
-      {:ok, buf2} = BufferServer.start_link(content: "second file")
+      {:ok, buf2} = BufferProcess.start_link(content: "second file")
       state = EditorState.add_buffer(state, buf2)
 
       # Now we have two tabs; the second (buf2) is active
@@ -456,7 +456,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
     end
 
     test "clears special buffer slot when messages buffer dies" do
-      {:ok, msg_buf} = BufferServer.start_link(content: "")
+      {:ok, msg_buf} = BufferProcess.start_link(content: "")
 
       state = %EditorState{
         port_manager: self(),
@@ -487,7 +487,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       # This tests the A1 content-type guard in sync_active_window_buffer.
       # When a window has {:agent_chat, _} content, adding a new buffer
       # to the buffer pool should NOT overwrite the window's content type.
-      {:ok, agent_buf} = BufferServer.start_link(content: "")
+      {:ok, agent_buf} = BufferProcess.start_link(content: "")
       win_id = 1
       agent_window = Window.new_agent_chat(win_id, agent_buf, 24, 80)
 

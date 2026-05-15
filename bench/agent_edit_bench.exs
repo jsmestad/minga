@@ -7,9 +7,9 @@
 #
 # Run: mix run bench/agent_edit_bench.exs
 
-defmodule Bench.BufferServer do
+defmodule Bench.BufferProcess do
   @moduledoc """
-  Minimal GenServer simulating Buffer.Server with atomic find-and-replace.
+  Minimal GenServer simulating Buffer.Process with atomic find-and-replace.
   Holds file content in memory. No disk I/O, no FileWatcher, no reparse.
   """
   use GenServer
@@ -209,7 +209,7 @@ IO.puts("  One find-and-replace on a 1K-line file")
 IO.puts("=" |> String.duplicate(70))
 IO.puts("")
 
-{:ok, single_buf} = Bench.BufferServer.start_link(content_1k)
+{:ok, single_buf} = Bench.BufferProcess.start_link(content_1k)
 [{single_old, single_new}] = Enum.take(edits_1k_single, 1)
 
 Benchee.run(
@@ -223,7 +223,7 @@ Benchee.run(
     },
     "buffer GenServer (atomic, pre-started)" => {
       fn _input ->
-        Bench.BufferServer.find_and_replace(single_buf, single_old, single_new)
+        Bench.BufferProcess.find_and_replace(single_buf, single_old, single_new)
       end,
       before_each: fn _ ->
         GenServer.call(single_buf, {:reset, content_1k})
@@ -246,7 +246,7 @@ IO.puts("=" |> String.duplicate(70))
 IO.puts("")
 
 edits_5k_20 = Bench.FileGen.generate_edits(content_5k, 20)
-{:ok, seq_buf} = Bench.BufferServer.start_link(content_5k)
+{:ok, seq_buf} = Bench.BufferProcess.start_link(content_5k)
 
 Benchee.run(
   %{
@@ -260,7 +260,7 @@ Benchee.run(
     "buffer GenServer (20× atomic calls, pre-started)" => {
       fn _input ->
         Enum.each(edits_5k_20, fn {old, new} ->
-          Bench.BufferServer.find_and_replace(seq_buf, old, new)
+          Bench.BufferProcess.find_and_replace(seq_buf, old, new)
         end)
       end,
       before_each: fn _ ->
@@ -287,7 +287,7 @@ IO.puts("")
 # Pre-generate fresh content for each iteration via hooks
 # For the buffer path, pre-start the GenServer (the buffer is already open
 # when the agent edits a file the user has open)
-{:ok, batch_buf} = Bench.BufferServer.start_link(content_5k)
+{:ok, batch_buf} = Bench.BufferProcess.start_link(content_5k)
 
 Benchee.run(
   %{
@@ -300,7 +300,7 @@ Benchee.run(
     },
     "buffer GenServer (atomic batch, pre-started)" => {
       fn _input ->
-        Bench.BufferServer.find_and_replace_batch(batch_buf, edits_5k_batch)
+        Bench.BufferProcess.find_and_replace_batch(batch_buf, edits_5k_batch)
       end,
       before_each: fn _ ->
         # Reset content for fair comparison
@@ -324,7 +324,7 @@ IO.puts("=" |> String.duplicate(70))
 IO.puts("")
 
 edits_5k_50 = Bench.FileGen.generate_edits(content_5k, 50)
-{:ok, conc_buf} = Bench.BufferServer.start_link(content_5k)
+{:ok, conc_buf} = Bench.BufferProcess.start_link(content_5k)
 
 buffer_concurrent_prestarted = fn buf, edits, agent_count ->
   chunks = Enum.chunk_every(edits, div(length(edits), agent_count))
@@ -333,7 +333,7 @@ buffer_concurrent_prestarted = fn buf, edits, agent_count ->
     Enum.map(chunks, fn chunk ->
       Task.async(fn ->
         Enum.each(chunk, fn {old, new} ->
-          Bench.BufferServer.find_and_replace(buf, old, new)
+          Bench.BufferProcess.find_and_replace(buf, old, new)
         end)
       end)
     end)

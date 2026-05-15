@@ -19,7 +19,7 @@ defmodule MingaEditor.DropOpenTest do
       state = editor_state(ctx)
 
       assert length(state.workspace.buffers.list) == 2
-      assert Minga.Buffer.Server.file_path(state.workspace.buffers.active) == path
+      assert Minga.Buffer.Process.file_path(state.workspace.buffers.active) == path
     end
 
     @tag :tmp_dir
@@ -40,7 +40,7 @@ defmodule MingaEditor.DropOpenTest do
       state = editor_state(ctx)
 
       assert length(state.workspace.buffers.list) == 4
-      assert Minga.Buffer.Server.file_path(state.workspace.buffers.active) == List.last(paths)
+      assert Minga.Buffer.Process.file_path(state.workspace.buffers.active) == List.last(paths)
     end
 
     @tag :tmp_dir
@@ -55,7 +55,7 @@ defmodule MingaEditor.DropOpenTest do
       state = editor_state(ctx)
 
       assert length(state.workspace.buffers.list) == initial_count
-      assert Minga.Buffer.Server.file_path(state.workspace.buffers.active) == path
+      assert Minga.Buffer.Process.file_path(state.workspace.buffers.active) == path
     end
   end
 end

@@ -3,7 +3,7 @@ defmodule MingaEditor.StartupTest do
   # which races with the first test when run concurrently.
   use ExUnit.Case, async: false
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Config.Options
   alias MingaEditor.LayoutPreset
   alias MingaEditor.Startup
@@ -164,7 +164,7 @@ defmodule MingaEditor.StartupTest do
     end
 
     test "editor mode creates a buffer window" do
-      {:ok, buf} = BufferServer.start_link(content: "hello")
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
 
       {window, update} = Startup.build_initial_window(:editor, 1, buf, 24, 80)
 
@@ -188,7 +188,7 @@ defmodule MingaEditor.StartupTest do
       # This is the regression guard. If this test fails, the agent
       # session won't start because AgentLifecycle.maybe_start_session
       # checks LayoutPreset.has_agent_chat? before starting.
-      {:ok, buf} = BufferServer.start_link(content: "scratch")
+      {:ok, buf} = BufferProcess.start_link(content: "scratch")
 
       {window, {:agent_buffer, _agent_buf}} =
         Startup.build_initial_window(:agent, 1, buf, 24, 80)
@@ -218,7 +218,7 @@ defmodule MingaEditor.StartupTest do
     end
 
     test "editor mode produces has_agent_chat? == false" do
-      {:ok, buf} = BufferServer.start_link(content: "scratch")
+      {:ok, buf} = BufferProcess.start_link(content: "scratch")
       {window, :noop} = Startup.build_initial_window(:editor, 1, buf, 24, 80)
 
       state = %EditorState{

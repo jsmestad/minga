@@ -19,7 +19,7 @@ defmodule Minga.Chaos.EditorFuzzerTest do
   use PropCheck
   use PropCheck.StateM.ModelDSL
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Chaos.EditorActions
   alias MingaEditor
   alias Minga.Test.HeadlessPort
@@ -66,8 +66,8 @@ defmodule Minga.Chaos.EditorFuzzerTest do
     height = 24
     id = :erlang.unique_integer([:positive])
     {:ok, port} = HeadlessPort.start_link(width: width, height: height)
-    {:ok, buffer} = BufferServer.start_link(content: content)
-    BufferServer.set_option(buffer, :clipboard, :none)
+    {:ok, buffer} = BufferProcess.start_link(content: content)
+    BufferProcess.set_option(buffer, :clipboard, :none)
 
     # Stub clipboard with in-memory storage via ETS so yank/paste sequences
     # work realistically. ETS is used because the Editor GenServer calls

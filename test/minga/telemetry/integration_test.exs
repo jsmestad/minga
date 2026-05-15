@@ -10,7 +10,7 @@ defmodule Minga.Telemetry.IntegrationTest do
   # Attaches and detaches global telemetry handlers.
   use ExUnit.Case, async: false
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor
 
   setup do
@@ -32,7 +32,7 @@ defmodule Minga.Telemetry.IntegrationTest do
       nil
     )
 
-    {:ok, buffer} = BufferServer.start_link(content: "hello\nworld\nfoo")
+    {:ok, buffer} = BufferProcess.start_link(content: "hello\nworld\nfoo")
 
     {:ok, editor} =
       MingaEditor.start_link(

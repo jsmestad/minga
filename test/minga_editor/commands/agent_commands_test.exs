@@ -13,7 +13,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.Agent.UIState
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
@@ -31,9 +31,9 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   # ── Helpers ──────────────────────────────────────────────────────────────
 
   defp base_state(opts \\ []) do
-    {:ok, buf} = BufferServer.start_link(content: Keyword.get(opts, :content, "hello\nworld"))
+    {:ok, buf} = BufferProcess.start_link(content: Keyword.get(opts, :content, "hello\nworld"))
 
-    {:ok, prompt_buf} = BufferServer.start_link(content: "")
+    {:ok, prompt_buf} = BufferProcess.start_link(content: "")
 
     default_session =
       if Keyword.has_key?(opts, :session) do
@@ -94,7 +94,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       state =
         AgentAccess.update_agent_ui(state, fn ui ->
           ui = UIState.ensure_prompt_buffer(ui)
-          BufferServer.replace_content(ui.panel.prompt_buffer, "hello agent")
+          BufferProcess.replace_content(ui.panel.prompt_buffer, "hello agent")
           ui
         end)
 
@@ -284,7 +284,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     end
 
     test "preserves the agent buffer across reset" do
-      {:ok, agent_buf} = BufferServer.start_link(content: "old chat")
+      {:ok, agent_buf} = BufferProcess.start_link(content: "old chat")
       state = base_state(agent_buffer: agent_buf)
 
       new_state = AgentCommands.new_agent_session(state)

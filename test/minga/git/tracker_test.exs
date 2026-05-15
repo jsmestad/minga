@@ -2,7 +2,7 @@ defmodule Minga.Git.TrackerTest do
   # async: false — reads/mutates the shared Tracker GenServer process (singleton)
   use ExUnit.Case, async: false
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Events
   alias Minga.Git.Repo
   alias Minga.Git.Stub, as: GitStub
@@ -22,14 +22,14 @@ defmodule Minga.Git.TrackerTest do
 
   describe "lookup/1" do
     test "returns nil for untracked buffer" do
-      {:ok, buf} = BufferServer.start_link(content: "hello")
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
       assert Tracker.lookup(buf) == nil
     end
   end
 
   describe "tracked?/1" do
     test "returns false for untracked buffer" do
-      {:ok, buf} = BufferServer.start_link(content: "hello")
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
       refute Tracker.tracked?(buf)
     end
   end
@@ -40,7 +40,7 @@ defmodule Minga.Git.TrackerTest do
       File.write!(path, "defmodule Foo do\nend\n")
       GitStub.set_head(dir, Path.relative_to(path, dir), "defmodule Foo do\nend\n")
 
-      {:ok, buf} = BufferServer.start_link(content: "defmodule Foo do\nend\n", file_path: path)
+      {:ok, buf} = BufferProcess.start_link(content: "defmodule Foo do\nend\n", file_path: path)
       Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: path})
 
       # Flush the Tracker so it processes the :buffer_opened event
@@ -59,7 +59,7 @@ defmodule Minga.Git.TrackerTest do
       File.write!(path, "x = 1\n")
       GitStub.set_head(dir, Path.relative_to(path, dir), "x = 1\n")
 
-      {:ok, buf} = BufferServer.start_link(content: "x = 1\n", file_path: path)
+      {:ok, buf} = BufferProcess.start_link(content: "x = 1\n", file_path: path)
       Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: path})
       flush_tracker()
       assert Tracker.tracked?(buf)
@@ -78,7 +78,7 @@ defmodule Minga.Git.TrackerTest do
       File.write!(path, "x = 1\n")
       GitStub.set_head(dir, Path.relative_to(path, dir), "x = 1\n")
 
-      {:ok, buf} = BufferServer.start_link(content: "x = 1\n", file_path: path)
+      {:ok, buf} = BufferProcess.start_link(content: "x = 1\n", file_path: path)
       Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: path})
       flush_tracker()
       assert Tracker.tracked?(buf)
@@ -97,7 +97,7 @@ defmodule Minga.Git.TrackerTest do
 
     test "no-op for file not in a git repo" do
       path = "/tmp/not_a_git_repo_#{:rand.uniform(100_000)}.ex"
-      {:ok, buf} = BufferServer.start_link(content: "hello", file_path: path)
+      {:ok, buf} = BufferProcess.start_link(content: "hello", file_path: path)
       Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: path})
 
       # Flush the event; if the Tracker tried to track it, it would be
@@ -114,12 +114,12 @@ defmodule Minga.Git.TrackerTest do
       File.write!(path, "line1\nline2\n")
       GitStub.set_head(dir, Path.relative_to(path, dir), "line1\nline2\n")
 
-      {:ok, buf} = BufferServer.start_link(content: "line1\nline2\n", file_path: path)
+      {:ok, buf} = BufferProcess.start_link(content: "line1\nline2\n", file_path: path)
       Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: path})
       flush_tracker()
       assert Tracker.tracked?(buf)
 
-      BufferServer.insert_text(buf, "new line\n")
+      BufferProcess.insert_text(buf, "new line\n")
 
       Events.broadcast(
         :buffer_changed,
@@ -133,7 +133,7 @@ defmodule Minga.Git.TrackerTest do
     end
 
     test "no-op for untracked buffer" do
-      {:ok, buf} = BufferServer.start_link(content: "hello")
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
 
       Events.broadcast(
         :buffer_changed,

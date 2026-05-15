@@ -6,14 +6,14 @@ defmodule MingaEditor.EditorTest do
   """
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor
   alias MingaEditor.Startup
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Viewport
 
   defp start_editor(content \\ "hello\nworld\nfoo") do
-    {:ok, buffer} = BufferServer.start_link(content: content)
+    {:ok, buffer} = BufferProcess.start_link(content: content)
 
     {:ok, editor} =
       MingaEditor.start_link(
@@ -44,7 +44,7 @@ defmodule MingaEditor.EditorTest do
 
   describe "build_initial_state/1" do
     test "returns an EditorState in :normal mode with the buffer wired up" do
-      {:ok, buffer} = BufferServer.start_link(content: "hi")
+      {:ok, buffer} = BufferProcess.start_link(content: "hi")
 
       state =
         Startup.build_initial_state(
@@ -152,7 +152,7 @@ defmodule MingaEditor.EditorTest do
     # exists to catch regressions where Editor.handle_info swallows or
     # rewrites the status_msg surfaced by KeyDispatch.
     test "pressing i on a read-only buffer surfaces status_msg in shell_state" do
-      {:ok, buffer} = BufferServer.start_link(content: "read only", read_only: true)
+      {:ok, buffer} = BufferProcess.start_link(content: "read only", read_only: true)
 
       {:ok, editor} =
         MingaEditor.start_link(

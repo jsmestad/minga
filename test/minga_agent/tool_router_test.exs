@@ -12,7 +12,7 @@ defmodule MingaAgent.ToolRouterTest do
     File.write!(path, "defmodule Foo do\n  def hello, do: :world\nend\n")
 
     {:ok, parent} =
-      start_supervised({Minga.Buffer.Server, content: File.read!(path), file_path: path})
+      start_supervised({Minga.Buffer.Process, content: File.read!(path), file_path: path})
 
     {:ok, store} = start_supervised(BufferForkStore)
 
@@ -77,7 +77,7 @@ defmodule MingaAgent.ToolRouterTest do
       assert Fork.content(fork_pid) == "new content\n"
 
       # Parent buffer untouched
-      assert Minga.Buffer.Server.content(parent) ==
+      assert Minga.Buffer.Process.content(parent) ==
                "defmodule Foo do\n  def hello, do: :world\nend\n"
     end
 

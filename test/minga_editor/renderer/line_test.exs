@@ -170,7 +170,7 @@ defmodule MingaEditor.Renderer.LineTest do
 
       # Set scroll margin to 0 on this buffer (not global) so we can
       # assert exact scroll positions without affecting other async tests.
-      BufferServer.set_option(ctx.buffer, :scroll_margin, 0)
+      BufferProcess.set_option(ctx.buffer, :scroll_margin, 0)
 
       for _ <- 1..10, do: send_key_sync(ctx, ?j)
 

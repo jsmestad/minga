@@ -1,7 +1,7 @@
 defmodule MingaEditor.StateTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
@@ -26,7 +26,7 @@ defmodule MingaEditor.StateTest do
   end
 
   defp start_buffer(content \\ "hello") do
-    {:ok, pid} = BufferServer.start_link(content: content)
+    {:ok, pid} = BufferProcess.start_link(content: content)
     pid
   end
 
@@ -170,11 +170,11 @@ defmodule MingaEditor.StateTest do
   describe "focus_window/2" do
     test "switches active window and restores cursor" do
       {state, buf1} = state_with_buffer("hello\nworld\nfoo")
-      BufferServer.move_to(buf1, {2, 0})
+      BufferProcess.move_to(buf1, {2, 0})
 
       # Split: window 1 at {2,0}, window 2 gets copy
       {:ok, tree} = WindowTree.split(state.workspace.windows.tree, 1, :vertical, 2)
-      cursor = BufferServer.cursor(buf1)
+      cursor = BufferProcess.cursor(buf1)
       win1 = %{Map.fetch!(state.workspace.windows.map, 1) | cursor: cursor}
       win2 = Window.new(2, buf1, 24, 40, {0, 0})
 
@@ -187,13 +187,13 @@ defmodule MingaEditor.StateTest do
         })
 
       # Move cursor in active window to {2,0}
-      BufferServer.move_to(buf1, {2, 0})
+      BufferProcess.move_to(buf1, {2, 0})
 
       # Focus window 2 (which has stored cursor {0,0})
       new_state = EditorState.focus_window(state, 2)
 
       assert new_state.workspace.windows.active == 2
-      assert BufferServer.cursor(buf1) == {0, 0}
+      assert BufferProcess.cursor(buf1) == {0, 0}
     end
 
     test "saves outgoing window's cursor" do
@@ -212,7 +212,7 @@ defmodule MingaEditor.StateTest do
         })
 
       # Move cursor to {1, 3}
-      BufferServer.move_to(buf1, {1, 3})
+      BufferProcess.move_to(buf1, {1, 3})
 
       new_state = EditorState.focus_window(state, 2)
 
@@ -238,7 +238,7 @@ defmodule MingaEditor.StateTest do
   describe "sync_active_window_cursor/1" do
     test "snapshots buffer cursor into active window" do
       {state, buf} = state_with_buffer("hello\nworld")
-      BufferServer.move_to(buf, {1, 3})
+      BufferProcess.move_to(buf, {1, 3})
 
       new_state = EditorState.sync_active_window_cursor(state)
 

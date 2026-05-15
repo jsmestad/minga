@@ -3,7 +3,7 @@ defmodule MingaEditor.PickerUITest do
 
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.PickerUI
   alias MingaEditor.PickerUI.RenderInput
   alias MingaEditor.State, as: EditorState
@@ -28,8 +28,8 @@ defmodule MingaEditor.PickerUITest do
   end
 
   defp preview_promotion_state do
-    {:ok, original_buf} = BufferServer.start_link(content: "original")
-    {:ok, preview_buf} = BufferServer.start_link(content: "preview")
+    {:ok, original_buf} = BufferProcess.start_link(content: "original")
+    {:ok, preview_buf} = BufferProcess.start_link(content: "preview")
     win_id = 1
     original_window = Window.new(win_id, original_buf, 24, 80)
     preview_window = %{original_window | buffer: preview_buf, content: {:buffer, preview_buf}}

@@ -71,7 +71,7 @@ Before recommending EditorCase, ask whether a lighter test layer would suffice. 
 
 **1. Pure function?** (Motion, TextObject, Operator, Document operations) → Test the function directly with `Document.new()` + assertion. No GenServer needed. These tests run in microseconds and never flake.
 
-**2. Single GenServer operation?** (Buffer.Server insert, delete, undo) → Start the GenServer with `start_supervised!`, call the function, assert. No Editor or HeadlessPort.
+**2. Single GenServer operation?** (Buffer.Process insert, delete, undo) → Start the GenServer with `start_supervised!`, call the function, assert. No Editor or HeadlessPort.
 
 **3. Input dispatch wiring?** (key X reaches command Y) → EditorCase with `send_key_sync` + EditorCase query helpers (`buffer_content`, `buffer_cursor`, `editor_mode`). No screen assertions needed.
 

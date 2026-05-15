@@ -5,7 +5,7 @@ defmodule MingaEditor.UI.Picker.OptionScopeSourceTest do
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.OptionScopeSource
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Config.Options
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Search
@@ -43,8 +43,8 @@ defmodule MingaEditor.UI.Picker.OptionScopeSourceTest do
 
   describe "on_select/2 — buffer scope" do
     test "sets option on the active buffer" do
-      {:ok, buf} = BufferServer.start_link(content: "hello")
-      assert BufferServer.get_option(buf, :wrap) == false
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
+      assert BufferProcess.get_option(buf, :wrap) == false
 
       state = %{
         workspace: %{buffers: %{active: buf}},
@@ -57,14 +57,14 @@ defmodule MingaEditor.UI.Picker.OptionScopeSourceTest do
           state
         )
 
-      assert BufferServer.get_option(buf, :wrap) == true
+      assert BufferProcess.get_option(buf, :wrap) == true
       assert result.shell_state.status_msg =~ "this buffer"
     end
   end
 
   describe "on_select/2 — global scope" do
     test "sets option on the global Options agent" do
-      {:ok, buf} = BufferServer.start_link(content: "hello")
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
       original = Options.get(:wrap)
       ctx = %{option_name: :wrap, new_value: !original}
 
@@ -102,8 +102,8 @@ defmodule MingaEditor.UI.Picker.OptionScopeSourceTest do
     # production).
 
     test "applies buffer-scoped option when modal is already :none" do
-      {:ok, buf} = BufferServer.start_link(content: "hello")
-      assert BufferServer.get_option(buf, :wrap) == false
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
+      assert BufferProcess.get_option(buf, :wrap) == false
 
       state = %{
         workspace: %{buffers: %{active: buf}},
@@ -119,12 +119,12 @@ defmodule MingaEditor.UI.Picker.OptionScopeSourceTest do
           state
         )
 
-      assert BufferServer.get_option(buf, :wrap) == true
+      assert BufferProcess.get_option(buf, :wrap) == true
       assert result.shell_state.status_msg =~ "this buffer"
     end
 
     test "applies global-scoped option when modal is already :none" do
-      {:ok, buf} = BufferServer.start_link(content: "hello")
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
       original = Options.get(:wrap)
       ctx = %{option_name: :wrap, new_value: !original}
 

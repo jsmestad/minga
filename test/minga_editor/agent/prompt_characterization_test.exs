@@ -3,12 +3,12 @@ defmodule MingaEditor.Agent.PromptCharacterizationTest do
   Characterization tests for the agent prompt editing flow.
 
   These pin the observable behavior of the prompt so regressions are
-  caught mechanically. The prompt is backed by a Buffer.Server and
+  caught mechanically. The prompt is backed by a Buffer.Process and
   edited via the standard Mode FSM (same pipeline as file buffers).
 
   The prompt has three concerns:
 
-  1. **Text storage** — `Buffer.Server` (gap buffer). All text mutations
+  1. **Text storage** — `Buffer.Process` (gap buffer). All text mutations
      (insert, delete, newline) go through GenServer calls.
 
   2. **Vim editing** — The standard Mode FSM handles motions, operators,
@@ -25,7 +25,7 @@ defmodule MingaEditor.Agent.PromptCharacterizationTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.Agent.UIState
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -36,7 +36,7 @@ defmodule MingaEditor.Agent.PromptCharacterizationTest do
 
   defp with_text(text) do
     panel = new_panel()
-    BufferServer.replace_content(panel.panel.prompt_buffer, text)
+    BufferProcess.replace_content(panel.panel.prompt_buffer, text)
     panel
   end
 
@@ -192,7 +192,7 @@ defmodule MingaEditor.Agent.PromptCharacterizationTest do
 
     test "backspace joins lines" do
       panel = with_text("ab\ncd")
-      BufferServer.set_cursor(panel.panel.prompt_buffer, {1, 0})
+      BufferProcess.move_to(panel.panel.prompt_buffer, {1, 0})
       panel = UIState.delete_char(panel)
       assert UIState.input_lines(panel) == ["abcd"]
     end

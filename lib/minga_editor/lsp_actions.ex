@@ -1783,7 +1783,7 @@ defmodule MingaEditor.LspActions do
   defp extract_rename_placeholder(_, _state), do: ""
 
   # Reads text from the buffer for an LSP range (end is exclusive).
-  # content_range is inclusive on both ends, so we adjust end_col - 1.
+  # Buffer.text_between_inclusive/3 includes both endpoints, so we adjust end_col - 1.
   @spec read_range_from_buffer(
           state(),
           {non_neg_integer(), non_neg_integer()},
@@ -1792,7 +1792,7 @@ defmodule MingaEditor.LspActions do
   defp read_range_from_buffer(%{workspace: %{buffers: %{active: buf}}}, {sl, sc}, {el, ec})
        when is_pid(buf) do
     {adj_el, adj_ec} = adjust_lsp_end_position(buf, el, ec)
-    Buffer.text_between(buf, {sl, sc}, {adj_el, adj_ec})
+    Buffer.text_between_inclusive(buf, {sl, sc}, {adj_el, adj_ec})
   rescue
     _ -> ""
   catch
@@ -1801,7 +1801,7 @@ defmodule MingaEditor.LspActions do
 
   defp read_range_from_buffer(_, _, _), do: ""
 
-  # LSP end position is exclusive. content_range is inclusive.
+  # LSP end position is exclusive. Buffer.text_between_inclusive/3 is inclusive.
   # Adjust end position back by 1 column (or to end of prev line if col is 0).
   @spec adjust_lsp_end_position(pid(), non_neg_integer(), non_neg_integer()) ::
           {non_neg_integer(), non_neg_integer()}
