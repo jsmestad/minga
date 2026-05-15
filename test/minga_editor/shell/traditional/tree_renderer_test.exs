@@ -38,8 +38,10 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
     end
 
     test "includes a header row with project name and folder icon", %{tmp_dir: tmp_dir} do
+      root = Path.join(tmp_dir, "minga")
+
       input = %RenderInput{
-        tree: sample_tree(tmp_dir),
+        tree: sample_tree(root),
         rect: {0, 0, 20, 10},
         focused: false,
         theme: Theme.get!(:doom_one),
@@ -51,8 +53,9 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
       header = Enum.find(draws, fn {r, c, _t, _s} -> r == 0 and c == 0 end)
       assert header != nil
       {_r, _c, text, style} = header
-      # Contains the folder open icon (nf-md-folder-open U+F0256)
+      # Contains the folder open icon (nf-md-folder-open U+F0256) and project/root context.
       assert String.contains?(text, "\u{F0256}")
+      assert String.contains?(text, "minga")
       assert style.bold == true
     end
 
@@ -84,10 +87,12 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
       texts = Enum.map(draws, fn {_r, _c, text, _s} -> text end)
       all_text = Enum.join(texts)
 
-      # Box-drawing guide characters should be present
-      assert String.contains?(all_text, "├─")
-      assert String.contains?(all_text, "└─")
-      # Expanded lib/ should produce a pipe guide for its children
+      # Disclosure symbols replace heavy connector branch art.
+      assert String.contains?(all_text, "▾ ")
+      assert String.contains?(all_text, "▸ ")
+      refute String.contains?(all_text, "├─")
+      refute String.contains?(all_text, "└─")
+      # Expanded lib/ should still produce a quiet ancestor guide for its children.
       assert String.contains?(all_text, "│ ")
 
       # Directory names should have trailing slashes
@@ -109,9 +114,25 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
 
       draws = TreeRenderer.render(input)
       # Row 1 is the first entry (lib/ directory). It should have multiple draws:
-      # guide segment, icon segment, name segment
+      # structure segment, icon segment, name segment
       row1_draws = Enum.filter(draws, fn {r, _c, _t, _s} -> r == 1 end)
-      assert length(row1_draws) >= 2
+      assert length(row1_draws) >= 3
+    end
+
+    test "uses stable disclosure icon and name columns", %{tmp_dir: tmp_dir} do
+      draws =
+        TreeRenderer.render(%RenderInput{
+          tree: sample_tree(tmp_dir),
+          rect: {0, 0, 30, 10},
+          focused: false,
+          theme: Theme.get!(:doom_one),
+          active_path: nil
+        })
+
+      assert {1, 0, "▾ ", _style} = draw_matching(draws, "▾ ")
+      assert {1, 2, "\u{F0256} ", _style} = draw_matching(draws, "\u{F0256} ")
+      assert {1, 4, name, _style} = draw_containing(draws, "lib/")
+      assert String.starts_with?(name, "lib/")
     end
 
     test "renders supplied semantic rows", %{tmp_dir: tmp_dir} do
@@ -456,8 +477,10 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
       texts = Enum.map(row2_draws, fn {_r, _c, text, _s} -> text end)
       all_text = Enum.join(texts)
 
-      # The entry at depth 1 should have a guide connector (└─ since it's last child)
-      assert String.contains?(all_text, "└─") or String.contains?(all_text, "├─")
+      # The entry at depth 1 should keep a quiet structure column without heavy branch art.
+      assert String.contains?(all_text, "│ ") or String.contains?(all_text, "  ")
+      refute String.contains?(all_text, "└─")
+      refute String.contains?(all_text, "├─")
     end
 
     test "non-editing entries render normally when editing is active", %{tmp_dir: tmp_dir} do
