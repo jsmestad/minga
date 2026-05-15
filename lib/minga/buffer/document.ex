@@ -35,7 +35,7 @@ defmodule Minga.Buffer.Document do
       "Hhello\\nworld"
   """
 
-  alias Minga.Buffer.Lines
+  alias Minga.Buffer.{Cursor, Lines}
 
   @enforce_keys [:before, :after, :cursor_line, :cursor_col, :line_count]
   defstruct [:before, :after, :cursor_line, :cursor_col, :line_count, :line_offsets]
@@ -166,17 +166,17 @@ defmodule Minga.Buffer.Document do
     end
   end
 
-  @doc """
-  Converts a grapheme column to a byte column for the given line.
+  # @doc """
+  # Converts a grapheme column to a byte column for the given line.
 
-  Walks graphemes until `grapheme_index` graphemes have been counted,
-  returning the byte offset at that point. Used by motions that need
-  to reason about character positions.
-  """
-  @spec byte_col_for_grapheme(String.t(), non_neg_integer()) :: non_neg_integer()
-  def byte_col_for_grapheme(line_text, grapheme_index) when grapheme_index >= 0 do
-    do_byte_col_for_grapheme(line_text, grapheme_index, 0)
-  end
+  # Walks graphemes until `grapheme_index` graphemes have been counted,
+  # returning the byte offset at that point. Used by motions that need
+  # to reason about character positions.
+  # """
+  # @spec byte_col_for_grapheme(String.t(), non_neg_integer()) :: non_neg_integer()
+  # def byte_col_for_grapheme(line_text, grapheme_index) when grapheme_index >= 0 do
+  #   do_byte_col_for_grapheme(line_text, grapheme_index, 0)
+  # end
 
   # ── Mutations ──
 
@@ -264,55 +264,6 @@ defmodule Minga.Buffer.Document do
       {_grapheme, rest} -> %{buf | after: rest}
       nil -> buf
     end
-  end
-
-  # ── Movement ──
-
-  @doc "Moves the cursor one step in the given direction."
-  @spec move(t(), direction()) :: t()
-  def move(%__MODULE__{} = buf, :left), do: move_left(buf)
-  def move(%__MODULE__{} = buf, :right), do: move_right(buf)
-  def move(%__MODULE__{} = buf, :up), do: move_up(buf)
-  def move(%__MODULE__{} = buf, :down), do: move_down(buf)
-
-  @doc """
-  Moves the cursor to an exact `{line, byte_col}` position.
-
-  Line and column are clamped to valid buffer bounds.
-
-  ## Examples
-
-      iex> buf = Minga.Buffer.Document.new("hello\\nworld")
-      iex> buf = Minga.Buffer.Document.move_to(buf, {1, 3})
-      iex> Minga.Buffer.Document.cursor(buf)
-      {1, 3}
-  """
-  @spec move_to(t(), position()) :: t()
-  def move_to(%__MODULE__{} = buf, {target_line, target_col})
-      when target_line >= 0 and target_col >= 0 do
-    {offsets, text} = Lines.ensure_line_offsets(buf)
-    text_size = byte_size(text)
-
-    # Clamp line to valid range
-    max_line = tuple_size(offsets) - 1
-    line = min(target_line, max_line)
-
-    # Get line text via index for column clamping
-    {line_start, line_len} = Lines.line_byte_range(offsets, line, text_size)
-    line_text = binary_part(text, line_start, line_len)
-    col = min(target_col, line_len)
-
-    # Clamp to grapheme boundary (don't land in the middle of a multi-byte char)
-    col = clamp_to_grapheme_boundary(line_text, col)
-
-    # Calculate byte offset from line start offset + col
-    byte_off = line_start + col
-
-    # Split at byte position (O(1) binary_part)
-    before = binary_part(text, 0, byte_off)
-    after_ = binary_part(text, byte_off, text_size - byte_off)
-
-    %{buf | before: before, after: after_, cursor_line: line, cursor_col: col, line_offsets: nil}
   end
 
   # ── Range operations ──
@@ -507,54 +458,6 @@ defmodule Minga.Buffer.Document do
 
   # ── Movement helpers ──
 
-  @spec move_left(t()) :: t()
-  defp move_left(%__MODULE__{before: ""} = buf), do: buf
-
-  defp move_left(%__MODULE__{before: before, after: after_, cursor_line: line} = buf) do
-    {new_before, char} = pop_last_grapheme(before)
-
-    {new_line, new_col} =
-      case char do
-        "\n" -> {line - 1, byte_col_in_last_line(new_before)}
-        _ -> {line, byte_size(new_before) - byte_offset_of_last_newline(new_before)}
-      end
-
-    %{buf | before: new_before, after: char <> after_, cursor_line: new_line, cursor_col: new_col}
-  end
-
-  @spec move_right(t()) :: t()
-  defp move_right(%__MODULE__{after: ""} = buf), do: buf
-
-  defp move_right(
-         %__MODULE__{before: before, after: after_, cursor_line: line, cursor_col: col} = buf
-       ) do
-    case String.next_grapheme(after_) do
-      {"\n", rest} ->
-        %{buf | before: before <> "\n", after: rest, cursor_line: line + 1, cursor_col: 0}
-
-      {grapheme, rest} ->
-        %{buf | before: before <> grapheme, after: rest, cursor_col: col + byte_size(grapheme)}
-
-      nil ->
-        buf
-    end
-  end
-
-  @spec move_up(t()) :: t()
-  defp move_up(%__MODULE__{cursor_line: 0} = buf), do: buf
-
-  defp move_up(%__MODULE__{cursor_line: line, cursor_col: col} = buf) do
-    move_to(buf, {line - 1, col})
-  end
-
-  @spec move_down(t()) :: t()
-  defp move_down(%__MODULE__{cursor_line: line, line_count: lc} = buf) when line >= lc - 1,
-    do: buf
-
-  defp move_down(%__MODULE__{cursor_line: line, cursor_col: col} = buf) do
-    move_to(buf, {line + 1, col})
-  end
-
   # Computes new cursor position and line_count after inserting `text` at the current cursor.
   # Uses byte_size for column tracking.
   @spec compute_cursor_after_insert(
@@ -579,28 +482,29 @@ defmodule Minga.Buffer.Document do
     end
   end
 
-  # Returns the byte column of the position after the last `\n` in `str`,
-  # i.e. the byte offset within the current line if the cursor were at the end of `str`.
+  @doc """
+  Returns the byte column of the position after the last `\n` in `str`,
+  i.e. the byte offset within the current line if the cursor were at the end of `str`.
+  """
   @spec byte_col_in_last_line(String.t()) :: non_neg_integer()
-  defp byte_col_in_last_line(""), do: 0
+  def byte_col_in_last_line(""), do: 0
 
-  defp byte_col_in_last_line(str) do
+  def byte_col_in_last_line(str) do
     byte_size(str) - byte_offset_of_last_newline(str)
   end
 
-  # Returns the byte offset just past the last `\n` in `str`, or 0 if no newline.
+  @doc "Returns the byte offset just past the last `\n` in `str`, or 0 if no newline."
   @spec byte_offset_of_last_newline(String.t()) :: non_neg_integer()
-  defp byte_offset_of_last_newline(str) do
+  def byte_offset_of_last_newline(str) do
     case :binary.matches(str, "\n") do
       [] -> 0
       matches -> elem(List.last(matches), 0) + 1
     end
   end
 
-  # Splits off the last grapheme from a string, preserving exact binary representation.
-  # Returns {rest, last_grapheme}.
+  @doc "Splits off the last grapheme from a string, preserving exact binary representation."
   @spec pop_last_grapheme(String.t()) :: {String.t(), String.t()}
-  defp pop_last_grapheme(str) do
+  def pop_last_grapheme(str) do
     byte_len = byte_size(str)
     # Walk forward with next_grapheme to find where the last grapheme starts
     {last_start, _} = find_last_grapheme_offset(str, 0)
@@ -673,34 +577,6 @@ defmodule Minga.Buffer.Document do
     end
   end
 
-  # Clamp a byte offset to the nearest grapheme boundary (don't land mid-character).
-  @spec clamp_to_grapheme_boundary(String.t(), non_neg_integer()) :: non_neg_integer()
-  defp clamp_to_grapheme_boundary(_text, 0), do: 0
-
-  defp clamp_to_grapheme_boundary(text, target_byte) when target_byte >= byte_size(text) do
-    byte_size(text)
-  end
-
-  defp clamp_to_grapheme_boundary(text, target_byte) do
-    do_clamp_to_grapheme_boundary(text, target_byte, 0)
-  end
-
-  @spec do_clamp_to_grapheme_boundary(String.t(), non_neg_integer(), non_neg_integer()) ::
-          non_neg_integer()
-  defp do_clamp_to_grapheme_boundary(text, target_byte, current_byte) do
-    case String.next_grapheme_size(text) do
-      {size, _rest} when current_byte + size > target_byte ->
-        # The next grapheme would overshoot — stay at current_byte
-        current_byte
-
-      {size, rest} ->
-        do_clamp_to_grapheme_boundary(rest, target_byte, current_byte + size)
-
-      nil ->
-        current_byte
-    end
-  end
-
   # Count graphemes in the first `byte_count` bytes of `text`.
   @spec grapheme_count_in_bytes(String.t(), non_neg_integer()) :: non_neg_integer()
   defp grapheme_count_in_bytes(_text, 0), do: 0
@@ -730,23 +606,26 @@ defmodule Minga.Buffer.Document do
     end
   end
 
-  # Convert grapheme index to byte offset within a line.
-  @spec do_byte_col_for_grapheme(String.t(), non_neg_integer(), non_neg_integer()) ::
-          non_neg_integer()
-  defp do_byte_col_for_grapheme(_text, 0, byte_offset), do: byte_offset
+  # # Convert grapheme index to byte offset within a line.
+  # @spec do_byte_col_for_grapheme(String.t(), non_neg_integer(), non_neg_integer()) ::
+  #         non_neg_integer()
+  # defp do_byte_col_for_grapheme(_text, 0, byte_offset), do: byte_offset
 
-  defp do_byte_col_for_grapheme(text, remaining, byte_offset) do
-    case String.next_grapheme_size(text) do
-      {size, rest} ->
-        do_byte_col_for_grapheme(rest, remaining - 1, byte_offset + size)
+  # defp do_byte_col_for_grapheme(text, remaining, byte_offset) do
+  #   case String.next_grapheme_size(text) do
+  #     {size, rest} ->
+  #       do_byte_col_for_grapheme(rest, remaining - 1, byte_offset + size)
 
-      nil ->
-        byte_offset
-    end
-  end
+  #     nil ->
+  #       byte_offset
+  #   end
+  # end
 
   defdelegate line_at(buf, line_num), to: Lines
   defdelegate lines(buf, start, count), to: Lines
+
+  defdelegate move(buf, direction), to: Cursor
+  defdelegate move_to(buf, target), to: Cursor
 end
 
 defimpl Minga.Editing.Text.Readable, for: Minga.Buffer.Document do

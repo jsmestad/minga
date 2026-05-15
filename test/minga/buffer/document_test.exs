@@ -406,20 +406,6 @@ defmodule Minga.Buffer.DocumentTest do
     end
   end
 
-  describe "byte_col_for_grapheme/2" do
-    test "ASCII: grapheme index equals byte offset" do
-      assert Document.byte_col_for_grapheme("hello", 3) == 3
-    end
-
-    test "multi-byte: grapheme 4 of café is byte 5" do
-      assert Document.byte_col_for_grapheme("café", 4) == 5
-    end
-
-    test "emoji: grapheme 1 of 🥨ab is byte 4" do
-      assert Document.byte_col_for_grapheme("🥨ab", 1) == 4
-    end
-  end
-
   describe "last_grapheme_byte_offset/1" do
     test "empty string returns 0" do
       assert Document.last_grapheme_byte_offset("") == 0
