@@ -315,11 +315,10 @@ end
 defimpl Minga.Editing.Text.Readable, for: Minga.Buffer.Document do
   @moduledoc false
 
-  alias Minga.Buffer.Document
-  alias Minga.Buffer.Lines
+  alias Minga.Buffer.{Document, Lines, Position}
 
   def content(doc), do: Document.content(doc)
   def line_at(doc, n), do: Lines.fetch(doc, n)
   def line_count(doc), do: Document.line_count(doc)
-  def offset_to_position(doc, offset), do: Document.offset_to_position(doc, offset)
+  def offset_to_position(doc, offset), do: Position.from_point(doc, offset)
 end
