@@ -803,6 +803,7 @@ opcode(1) + action_type(1) + payload...
 | 0x31 | file_tree_rename | index(2) | Rename a file tree entry |
 | 0x32 | file_tree_duplicate | index(2) | Duplicate a file tree entry |
 | 0x33 | file_tree_move | source_index(2) + target_dir_index(2) | Move a file tree entry |
+| 0x40 | file_tree_drop | target_index(2) + target_path_hash(4) + target_kind(1) + modifiers(1) + target_id_len(2) + target_id + target_path_len(2) + target_path + source_count(2) + sources... | Report file tree drag/drop intent for BEAM-owned filesystem handling |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |
@@ -815,6 +816,8 @@ opcode(1) + action_type(1) + payload...
 | 0x3D | file_tree_open_in_split | index(2) | Open a file tree entry in a vertical split |
 | 0x3E | tab_copy_path | tab_id(4) | Copy a tab's file path |
 | 0x3F | hover_open_action | (empty) | Accept the current hover popup action |
+
+For `file_tree_drop`, `target_kind` is `1` for a directory and `0` for a file. Each source is encoded as `path_len(2) + path(path_len)`. Frontends should send both the target index and stable target identity so the BEAM can reject stale drops safely; drops onto files are resolved to the file's parent directory by the BEAM.
 
 ## Theme Color Slots
 

@@ -108,6 +108,24 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       assert File.exists?(new_path), "Expected renamed.txt to exist"
       refute File.exists?(file), "Expected target.txt to no longer exist"
     end
+
+    test "rename does not overwrite an existing sibling", %{tmp_dir: dir} do
+      file = Path.join(dir, "target.txt")
+      existing = Path.join(dir, "existing.txt")
+      File.write!(file, "content")
+      File.write!(existing, "existing")
+
+      ctx = start_editor("content", file_path: file, project_root: dir)
+
+      _state = send_keys_sync(ctx, "<SPC>op")
+      state = send_keys_sync(ctx, "R")
+      backspaces = String.duplicate("<BS>", String.length(state.workspace.file_tree.editing.text))
+      state = send_keys_sync(ctx, "#{backspaces}existing.txt<Enter>")
+
+      assert state.workspace.file_tree.editing == nil
+      assert File.read!(file) == "content"
+      assert File.read!(existing) == "existing"
+    end
   end
 
   describe "cancel editing" do

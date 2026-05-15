@@ -81,6 +81,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x3D       | file_tree_open_in_split |
   | 0x3E       | tab_copy_path           |
   | 0x3F       | hover_open_action       |
+  | 0x40       | file_tree_drop          |
   | 0x34       | system_will_sleep      |
   | 0x35       | system_did_wake        |
 
@@ -90,6 +91,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   alias Minga.Buffer
   alias MingaEditor.FileTree.Diagnostics, as: FileTreeDiagnostics
+  alias MingaEditor.FileTree.DropIntent
   alias MingaEditor.FileTree.Row
   alias MingaEditor.MinibufferData
   alias MingaEditor.State.Buffers
@@ -249,6 +251,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_file_tree_open_in_split 0x3D
   @gui_action_tab_copy_path 0x3E
   @gui_action_hover_open_action 0x3F
+  @gui_action_file_tree_drop 0x40
 
   # ── Types ──
 
@@ -306,6 +309,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:file_tree_duplicate, index :: non_neg_integer()}
           | {:file_tree_move, source_index :: non_neg_integer(),
              target_dir_index :: non_neg_integer()}
+          | {:file_tree_drop, DropIntent.t()}
           | {:file_tree_open_in_split, index :: non_neg_integer()}
           | {:tab_copy_path, id :: pos_integer()}
           | :hover_open_action
@@ -2343,6 +2347,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       ),
       do: {:ok, {:file_tree_move, source_index, target_dir_index}}
 
+  def decode_gui_action(@gui_action_file_tree_drop, payload), do: decode_file_tree_drop(payload)
+
   def decode_gui_action(@gui_action_system_will_sleep, <<>>),
     do: {:ok, :system_will_sleep}
 
@@ -2359,6 +2365,59 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     do: {:ok, :git_pull_and_retry}
 
   def decode_gui_action(_, _), do: :error
+
+  @spec decode_file_tree_drop(binary()) :: {:ok, {:file_tree_drop, DropIntent.t()}} | :error
+  defp decode_file_tree_drop(
+         <<target_index::16, target_path_hash::32, target_kind::8, modifiers::8, rest::binary>>
+       ) do
+    with {:ok, target_dir?} <- decode_drop_target_kind(target_kind),
+         {:ok, target_id, rest} <- decode_string16(rest),
+         {:ok, target_path, rest} <- decode_string16(rest),
+         <<source_count::16, sources_binary::binary>> <- rest,
+         {:ok, source_paths, <<>>} <- decode_string16_list(sources_binary, source_count) do
+      {:ok,
+       {:file_tree_drop,
+        DropIntent.new(
+          source_paths: source_paths,
+          target_index: target_index,
+          target_id: target_id,
+          target_path_hash: target_path_hash,
+          target_path: target_path,
+          target_dir?: target_dir?,
+          modifiers: modifiers
+        )}}
+    else
+      _ -> :error
+    end
+  end
+
+  defp decode_file_tree_drop(_payload), do: :error
+
+  @spec decode_drop_target_kind(non_neg_integer()) :: {:ok, boolean()} | :error
+  defp decode_drop_target_kind(1), do: {:ok, true}
+  defp decode_drop_target_kind(0), do: {:ok, false}
+  defp decode_drop_target_kind(_kind), do: :error
+
+  @spec decode_string16(binary()) :: {:ok, String.t(), binary()} | :error
+
+  defp decode_string16(<<len::16, value::binary-size(len), rest::binary>>) do
+    if String.valid?(value), do: {:ok, value, rest}, else: :error
+  end
+
+  defp decode_string16(_payload), do: :error
+
+  @spec decode_string16_list(binary(), non_neg_integer()) ::
+          {:ok, [String.t()], binary()} | :error
+  defp decode_string16_list(rest, 0), do: {:ok, [], rest}
+
+  defp decode_string16_list(payload, count) when count > 0 do
+    with {:ok, value, rest} <- decode_string16(payload),
+         {:ok, values, rest} <- decode_string16_list(rest, count - 1) do
+      {:ok, [value | values], rest}
+    else
+      _ -> :error
+    end
+  end
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Tool Manager (BEAM → Frontend)

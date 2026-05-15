@@ -465,9 +465,7 @@ defmodule Minga.Core.Unicode do
   @doc """
   Converts a display column (terminal columns) to a byte offset.
 
-  Walks graphemes from the start of `text`, accumulating display width,
-  until the target display column is reached or exceeded. Returns the
-  byte offset of the grapheme at that display column.
+  Walks graphemes from the start of `text`, accumulating display width. If the target lands on a grapheme boundary, returns that boundary's byte offset. If the target lands inside a wide grapheme, returns the start byte offset for that grapheme.
 
   ## Examples
 
@@ -499,15 +497,31 @@ defmodule Minga.Core.Unicode do
         w = grapheme_width(g)
         new_col = col + w
 
-        if new_col >= target do
-          bytes
-        else
-          do_display_col_to_byte(rest, target, new_col, bytes + byte_size(g))
-        end
+        next_display_col_to_byte(rest, target, new_col, bytes, byte_size(g))
 
       nil ->
         bytes
     end
+  end
+
+  @spec next_display_col_to_byte(
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
+          non_neg_integer()
+  defp next_display_col_to_byte(_rest, target, new_col, bytes, _grapheme_bytes)
+       when new_col > target,
+       do: bytes
+
+  defp next_display_col_to_byte(_rest, target, new_col, bytes, grapheme_bytes)
+       when new_col == target,
+       do: bytes + grapheme_bytes
+
+  defp next_display_col_to_byte(rest, target, new_col, bytes, grapheme_bytes) do
+    do_display_col_to_byte(rest, target, new_col, bytes + grapheme_bytes)
   end
 
   @doc """

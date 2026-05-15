@@ -2107,6 +2107,10 @@ defmodule MingaEditor do
     Commands.FileTree.move(state, source_index, target_dir_index)
   end
 
+  defp handle_gui_action(state, {:file_tree_drop, intent}) do
+    Commands.FileTree.drop(state, intent)
+  end
+
   defp handle_gui_action(state, :file_tree_collapse_all) do
     Commands.FileTree.collapse_all(state)
   end
