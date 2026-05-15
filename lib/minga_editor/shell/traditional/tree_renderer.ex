@@ -52,7 +52,8 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
       editing: nil,
       git_status: %{},
       dirty_paths: MapSet.new(),
-      rows: nil
+      rows: nil,
+      status: :ready
     ]
 
     @type t :: %__MODULE__{
@@ -64,7 +65,8 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
             editing: FileTreeState.editing() | nil,
             git_status: Minga.Project.FileTree.GitStatus.status_map(),
             dirty_paths: MapSet.t(String.t()),
-            rows: [Row.t()] | nil
+            rows: [Row.t()] | nil,
+            status: FileTreeState.tree_status()
           }
   end
 
@@ -89,7 +91,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
           git_status: input.git_status
         )
 
-    do_render(input.tree, input.rect, input.theme, rows)
+    do_render(input.tree, input.rect, input.theme, effective_status(input.status, rows), rows)
   end
 
   @spec render(EditorState.t() | map()) :: [DisplayList.draw()]
@@ -108,7 +110,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
 
   @spec render_from_workspace(map(), MingaEditor.UI.Theme.t(), map()) :: [DisplayList.draw()]
   defp render_from_workspace(
-         %{file_tree: %{tree: tree, focused: focused}} = _ws,
+         %{file_tree: %{tree: tree, focused: focused} = file_tree} = _ws,
          _theme,
          state
        ) do
@@ -120,18 +122,21 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
       focused: focused,
       theme: state.theme,
       active_path: nil,
-      rows: Rows.from_state(state)
+      rows: Rows.from_state(state),
+      status: status_from_file_tree(file_tree)
     }
 
     render(input)
   end
 
-  @spec do_render(FileTree.t(), WindowTree.rect(), Theme.t(), [Row.t()]) :: [DisplayList.draw()]
-  defp do_render(_tree, {_row_off, _col_off, width, height}, _theme, _rows)
+  @spec do_render(FileTree.t(), WindowTree.rect(), Theme.t(), FileTreeState.tree_status(), [
+          Row.t()
+        ]) :: [DisplayList.draw()]
+  defp do_render(_tree, {_row_off, _col_off, width, height}, _theme, _status, _rows)
        when width <= 0 or height <= 0,
        do: []
 
-  defp do_render(tree, {row_off, col_off, width, height}, theme, rows) do
+  defp do_render(tree, {row_off, col_off, width, height}, theme, status, rows) do
     # Header: project directory name with folder icon
     project_name = Path.basename(tree.root)
     header_text = " #{@folder_open} #{project_name}/"
@@ -157,22 +162,10 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     }
 
     entry_commands =
-      rows
-      |> Enum.drop(scroll_offset)
-      |> Enum.take(content_rows)
-      |> Enum.with_index()
-      |> Enum.flat_map(fn {tree_row, screen_row} ->
-        row = row_off + 1 + screen_row
-
-        if tree_row.editing != nil do
-          render_editing_entry(tree_row, row, render_opts)
-        else
-          render_entry(tree_row, row, render_opts)
-        end
-      end)
+      render_content_rows(status, rows, scroll_offset, content_rows, row_off + 1, render_opts)
 
     # Fill remaining rows with blanks
-    visible_count = rows |> Enum.drop(scroll_offset) |> Enum.take(content_rows) |> length()
+    visible_count = visible_content_count(status, rows, scroll_offset, content_rows)
 
     blank_commands =
       render_blanks(visible_count, content_rows, row_off + 1, col_off, width, theme)
@@ -182,6 +175,74 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     sep_commands = render_separator(sep_col, row_off, height, theme)
 
     header ++ entry_commands ++ blank_commands ++ sep_commands
+  end
+
+  @spec status_from_file_tree(FileTreeState.t() | map()) :: FileTreeState.tree_status()
+  defp status_from_file_tree(%FileTreeState{} = file_tree), do: FileTreeState.status(file_tree)
+  defp status_from_file_tree(_file_tree), do: :ready
+
+  @spec effective_status(FileTreeState.tree_status(), [Row.t()]) :: FileTreeState.tree_status()
+  defp effective_status(:ready, []), do: :empty
+  defp effective_status(status, _rows), do: status
+
+  @spec render_content_rows(
+          FileTreeState.tree_status(),
+          [Row.t()],
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          map()
+        ) :: [DisplayList.draw()]
+  defp render_content_rows(:ready, rows, scroll_offset, content_rows, first_row, opts) do
+    rows
+    |> Enum.drop(scroll_offset)
+    |> Enum.take(content_rows)
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {tree_row, screen_row} ->
+      row = first_row + screen_row
+
+      if tree_row.editing != nil do
+        render_editing_entry(tree_row, row, opts)
+      else
+        render_entry(tree_row, row, opts)
+      end
+    end)
+  end
+
+  defp render_content_rows(status, _rows, _scroll_offset, content_rows, first_row, opts) do
+    status
+    |> state_lines()
+    |> Enum.take(content_rows)
+    |> Enum.with_index()
+    |> Enum.map(fn {line, screen_row} ->
+      render_state_line(line, first_row + screen_row, opts)
+    end)
+  end
+
+  @spec visible_content_count(
+          FileTreeState.tree_status(),
+          [Row.t()],
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: non_neg_integer()
+  defp visible_content_count(:ready, rows, scroll_offset, content_rows) do
+    rows |> Enum.drop(scroll_offset) |> Enum.take(content_rows) |> length()
+  end
+
+  defp visible_content_count(status, _rows, _scroll_offset, content_rows) do
+    status |> state_lines() |> Enum.take(content_rows) |> length()
+  end
+
+  @spec state_lines(FileTreeState.tree_status()) :: [String.t()]
+  defp state_lines(:loading), do: ["  ⏳ Loading files…"]
+  defp state_lines(:empty), do: ["  No files yet", "  Press n to create a file"]
+  defp state_lines({:error, reason}), do: ["  ⚠ File tree error", "  #{reason}"]
+  defp state_lines(_status), do: []
+
+  @spec render_state_line(String.t(), non_neg_integer(), map()) :: DisplayList.draw()
+  defp render_state_line(line, row, %{col_off: col, width: width, theme: theme}) do
+    text = line |> Unicode.truncate_display_width(width) |> Unicode.pad_display_trailing(width)
+    DisplayList.draw(row, col, text, Face.new(fg: theme.tree.fg, bg: theme.tree.bg))
   end
 
   # ── Entry rendering ──────────────────────────────────────────────────────

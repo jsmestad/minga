@@ -63,11 +63,15 @@ The BEAM-side encoder must use a documented length-prefixed envelope for all new
 
 The native file tree receives the same semantic row model that the TUI renderer uses. The BEAM remains the source of truth for row identity, depth, selected/focused state, expansion state, git status, diagnostics, guide columns, icons, labels, and inline editing state. Swift should render this state directly and send user actions back through the existing file-tree action opcodes.
 
+Legacy note: early GUI prototypes used the low 0x70 chrome range and inferred hidden state from an empty entry list. New frontends must ignore that sentinel behavior. `0x93` v2 is the canonical file-tree protocol, and `tree_state` is the only source of truth for hidden, loading, empty, ready, and error states.
+
 ```
 opcode(1) + payload_len(4) + payload(payload_len)
 
-Payload:
-  version(1) + tree_flags(1) + selected_id_len(2) + selected_id(selected_id_len) + root_len(2) + root(root_len) + tree_width(2) + row_count(2) + rows...
+Payload v2:
+  version(1) + tree_flags(1) + tree_state(1) + selected_id_len(2) + selected_id(selected_id_len) + root_len(2) + root(root_len) + tree_width(2) + row_count(2) + error_reason_len(2) + error_reason(error_reason_len) + rows...
+
+Payload v1, kept for decoder compatibility, omitted `tree_state` and `error_reason`. Frontends should derive v1 state from `visible` and `empty`, but all new BEAM payloads use v2.
 
 Per row:
   path_hash(4) + row_flags(2) + depth(1) + git_status(1) + diagnostic_error_count(2) + diagnostic_warning_count(2) + diagnostic_info_count(2) + diagnostic_hint_count(2) + guide_count(1) + guides(guide_count) + id_len(2) + id(id_len) + path_len(2) + path(path_len) + rel_path_len(2) + rel_path(rel_path_len) + name_len(2) + name(name_len) + icon_len(1) + icon(icon_len) + editing_type(1) + editing_text_len(2) + editing_text(editing_text_len)
@@ -76,6 +80,13 @@ Tree flag bits:
   bit 0: visible
   bit 1: focused
   bit 4: empty
+
+Tree state values:
+  0 = hidden
+  1 = loading
+  2 = empty
+  3 = ready
+  4 = error
 
 Row flag bits:
   bit 0: is_dir
@@ -94,7 +105,11 @@ Editing type values:
   0 = new_file, 1 = new_folder, 2 = rename, 255 = none
 ```
 
-When `visible` is false, the frontend should hide the file tree. Hidden payloads still include the root path when the BEAM knows it, so Swift can preserve context while clearing visible rows.
+When `tree_state == 0`, the frontend should hide the file tree. Hidden payloads still include the root path when the BEAM knows it, so Swift can preserve context while clearing visible rows.
+
+`row_count == 0` only means the payload contains no entry rows. It does not imply hidden. Use `tree_state` to distinguish hidden (`0`), loading (`1`), visible-empty (`2`), and error (`4`) states. The `empty` flag bit is retained for compatibility and is set only for `tree_state == 2`.
+
+When `tree_state == 4`, `error_reason` contains a short user-displayable reason. For all other states, `error_reason` is an empty string.
 
 ### 0x71 — gui_tab_bar
 
@@ -764,8 +779,8 @@ opcode(1) + action_type(1) + payload...
 | 0x0A | panel_dismiss | (empty) | User dismissed the bottom panel |
 | 0x0B | panel_resize | height_percent(1) | User resized the bottom panel |
 | 0x0C | open_file | path_len(2) + path(path_len) | Open or switch to a file |
-| 0x0D | file_tree_new_file | (empty) | Create new file at selected entry |
-| 0x0E | file_tree_new_folder | (empty) | Create new folder at selected entry |
+| 0x0D | file_tree_new_file | parent_index(2) | Create new file under or near the selected entry |
+| 0x0E | file_tree_new_folder | parent_index(2) | Create new folder under or near the selected entry |
 | 0x0F | file_tree_collapse_all | (empty) | Collapse all directories in tree |
 | 0x10 | file_tree_refresh | (empty) | Refresh file tree |
 | 0x11 | tool_install | name_len(2) + name(name_len) | Install a tool by name |

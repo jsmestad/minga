@@ -175,11 +175,30 @@ struct FileTreeStateLifecycleTests {
         #expect(state.focused == true)
         #expect(state.selectedIndex == 1)
         #expect(state.projectRoot == "/project")
+        #expect(state.treeState == .ready)
         #expect(state.entries.count == 2)
         #expect(state.entries[0].isDir == true)
         #expect(state.entries[0].name == "lib")
         #expect(state.entries[1].isSelected == true)
         #expect(state.entries[1].relPath == "lib/editor.ex")
+    }
+
+    @Test("update() preserves explicit empty loading and error states")
+    @MainActor func updatePreservesExplicitStates() {
+        let state = FileTreeState()
+
+        state.update(version: 2, selectedId: "", focused: false, treeWidth: 30, rootPath: "/project", rawEntries: [], treeState: 1)
+        #expect(state.visible == true)
+        #expect(state.treeState == .loading)
+
+        state.update(version: 2, selectedId: "", focused: false, treeWidth: 30, rootPath: "/project", rawEntries: [], treeState: 2)
+        #expect(state.visible == true)
+        #expect(state.treeState == .empty)
+
+        state.update(version: 2, selectedId: "", focused: false, treeWidth: 30, rootPath: "/project", rawEntries: [], treeState: 4, errorReason: "permission denied")
+        #expect(state.visible == true)
+        #expect(state.treeState == .error)
+        #expect(state.errorReason == "permission denied")
     }
 
     @Test("fullPath() uses BEAM-supplied absolute path")

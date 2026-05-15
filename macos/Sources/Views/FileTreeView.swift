@@ -40,37 +40,86 @@ struct FileTreeView: View {
 
     @ViewBuilder
     private var entryList: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.vertical) {
-                LazyVStack(spacing: 0) {
-                    ForEach(fileTreeState.entries) { entry in
-                        entryRow(entry)
+        if fileTreeState.entries.isEmpty && fileTreeState.treeState != .ready {
+            stateContent
+        } else {
+            ScrollViewReader { proxy in
+                ScrollView(.vertical) {
+                    LazyVStack(spacing: 0) {
+                        ForEach(fileTreeState.entries) { entry in
+                            entryRow(entry)
+                        }
+                    }
+                    .padding(.top, 2)
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear.preference(
+                                key: ScrollOffsetKey.self,
+                                value: geo.frame(in: .named("fileTreeScroll")).minY
+                            )
+                        }
+                    )
+                }
+                .coordinateSpace(name: "fileTreeScroll")
+                .onPreferenceChange(ScrollOffsetKey.self) { value in
+                    scrollOffset = value
+                }
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    stickyParentHeader
+                }
+                .onChange(of: fileTreeState.selectedIndex) { _, newIndex in
+                    if let selectedEntry = fileTreeState.entries.first(where: { $0.index == newIndex }) {
+                        withAnimation(nil) {
+                            proxy.scrollTo(selectedEntry.id, anchor: .center)
+                        }
                     }
                 }
-                .padding(.top, 2)
-                .background(
-                    GeometryReader { geo in
-                        Color.clear.preference(
-                            key: ScrollOffsetKey.self,
-                            value: geo.frame(in: .named("fileTreeScroll")).minY
-                        )
-                    }
-                )
             }
-            .coordinateSpace(name: "fileTreeScroll")
-            .onPreferenceChange(ScrollOffsetKey.self) { value in
-                scrollOffset = value
-            }
-            .safeAreaInset(edge: .top, spacing: 0) {
-                stickyParentHeader
-            }
-            .onChange(of: fileTreeState.selectedIndex) { _, newIndex in
-                if let selectedEntry = fileTreeState.entries.first(where: { $0.index == newIndex }) {
-                    withAnimation(nil) {
-                        proxy.scrollTo(selectedEntry.id, anchor: .center)
-                    }
+        }
+    }
+
+    @ViewBuilder
+    private var stateContent: some View {
+        VStack(spacing: 10) {
+            switch fileTreeState.treeState {
+            case .loading:
+                ProgressView()
+                    .controlSize(.small)
+                stateText(title: "Loading files…", subtitle: "Scanning the project tree.")
+            case .empty:
+                stateText(title: "No files yet", subtitle: "Create a file or refresh after adding project files.")
+                Button("New File…") {
+                    encoder?.sendFileTreeNewFile(parentIndex: UInt16(fileTreeState.selectedIndex))
                 }
+                .buttonStyle(.borderless)
+                Button("Refresh") {
+                    encoder?.sendFileTreeRefresh()
+                }
+                .buttonStyle(.borderless)
+            case .error:
+                stateText(title: "Couldn’t load file tree", subtitle: fileTreeState.errorReason.isEmpty ? "Check project permissions, then refresh." : fileTreeState.errorReason)
+                Button("Refresh") {
+                    encoder?.sendFileTreeRefresh()
+                }
+                .buttonStyle(.borderless)
+            case .hidden, .ready:
+                EmptyView()
             }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .padding(20)
+        .background(theme.treeBg)
+    }
+
+    private func stateText(title: String, subtitle: String) -> some View {
+        VStack(spacing: 4) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(theme.treeDirFg)
+            Text(subtitle)
+                .font(.system(size: 11))
+                .foregroundStyle(theme.treeFg.opacity(0.65))
+                .multilineTextAlignment(.center)
         }
     }
 

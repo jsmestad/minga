@@ -35,6 +35,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.Shell.Traditional.Chrome.Helpers, as: ChromeHelpers
   alias MingaEditor.RenderPipeline.ContentHelpers
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.TabBar
   alias MingaEditor.StatusBar.Data, as: StatusBarData
   alias MingaEditor.Viewport
@@ -271,18 +272,27 @@ defmodule MingaEditor.Frontend.Emit.GUI do
         selected_index: tree.cursor
       )
 
-    fp = :erlang.phash2({tree.root, tree.width, file_tree_focused?(file_tree), rows})
+    tree_status = FileTreeState.status(file_tree)
+    rows = if tree_status == :ready, do: rows, else: []
+    fp = :erlang.phash2({tree.root, tree.width, file_tree_focused?(file_tree), tree_status, rows})
 
     if fp != caches.last_gui_file_tree_fp do
       {ProtocolGUI.encode_gui_file_tree(
          tree.root,
          tree.width,
-         true,
+         tree_status,
          file_tree_focused?(file_tree),
          rows
        ), %{caches | last_gui_file_tree_fp: fp}}
     else
       {nil, caches}
+    end
+  end
+
+  defp build_gui_file_tree_cmd(%{file_tree: %FileTreeState{} = file_tree}, caches) do
+    case FileTreeState.status(file_tree) do
+      :hidden -> build_hidden_gui_file_tree_cmd(file_tree.project_root, caches)
+      status -> build_gui_file_tree_state_cmd(file_tree, status, caches)
     end
   end
 
@@ -292,6 +302,20 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   defp build_gui_file_tree_cmd(_ctx, caches) do
     build_hidden_gui_file_tree_cmd(nil, caches)
+  end
+
+  @spec build_gui_file_tree_state_cmd(FileTreeState.t(), FileTreeState.tree_status(), Caches.t()) ::
+          {binary() | nil, Caches.t()}
+  defp build_gui_file_tree_state_cmd(%FileTreeState{} = file_tree, status, caches) do
+    width = FileTreeState.width(file_tree)
+    fp = {:file_tree_state, file_tree.project_root || "", width, status}
+
+    if caches.last_gui_file_tree_fp != fp do
+      {ProtocolGUI.encode_gui_file_tree(file_tree.project_root, width, status, false, []),
+       %{caches | last_gui_file_tree_fp: fp}}
+    else
+      {nil, caches}
+    end
   end
 
   @spec build_hidden_gui_file_tree_cmd(String.t() | nil, Caches.t()) ::

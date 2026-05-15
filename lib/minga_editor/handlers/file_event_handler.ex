@@ -9,6 +9,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   """
 
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias Minga.Project.FileTree
 
   @typedoc "Effects that the file event handler may return."
@@ -112,6 +113,10 @@ defmodule MingaEditor.Handlers.FileEventHandler do
 
   defp refresh_tree_git_status(%{workspace: %{file_tree: %{tree: tree}}} = state) do
     updated_tree = FileTree.refresh_git_status(tree)
-    put_in(state.workspace.file_tree.tree, updated_tree)
+
+    put_in(
+      state.workspace.file_tree,
+      FileTreeState.replace_tree(state.workspace.file_tree, updated_tree)
+    )
   end
 end

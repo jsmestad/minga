@@ -656,12 +656,14 @@ struct GUIFileTreeDecoderTests {
     @Test("Decode semantic gui_file_tree with entries")
     func decodeWithEntries() throws {
         var payload = Data()
-        payload.append(1) // version
+        payload.append(2) // version
         payload.append(0x03) // visible + focused
+        payload.append(3) // ready tree state
         appendString16(&payload, "/home/user/project/lib") // selectedId
         appendString16(&payload, "/home/user/project") // rootPath
         appendU16(&payload, 30) // treeWidth
         appendU16(&payload, 2) // rowCount
+        appendString16(&payload, "") // errorReason
 
         appendSemanticRow(
             &payload,
@@ -707,16 +709,18 @@ struct GUIFileTreeDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiFileTree(let version, let treeFlags, let selectedId, let treeWidth, let rootPath, let entries) = cmd else {
+        guard case .guiFileTree(let version, let treeFlags, let treeState, let selectedId, let treeWidth, let rootPath, let errorReason, let entries) = cmd else {
             Issue.record("Expected .guiFileTree"); return
         }
 
-        #expect(version == 1)
+        #expect(version == 2)
         #expect(treeFlags & 0x01 != 0)
         #expect(treeFlags & 0x02 != 0)
+        #expect(treeState == 3)
         #expect(selectedId == "/home/user/project/lib")
         #expect(treeWidth == 30)
         #expect(rootPath == "/home/user/project")
+        #expect(errorReason == "")
         #expect(entries.count == 2)
         #expect(entries[0].pathHash == 0xAABBCCDD)
         #expect(entries[0].isDir == true)
@@ -742,12 +746,14 @@ struct GUIFileTreeDecoderTests {
     @Test("Decode semantic gui_file_tree hidden")
     func decodeHidden() throws {
         var payload = Data()
-        payload.append(1) // version
-        payload.append(0x10) // empty, not visible
+        payload.append(2) // version
+        payload.append(0x00) // not visible
+        payload.append(0) // hidden tree state
         appendString16(&payload, "")
         appendString16(&payload, "/home/user/project")
         appendU16(&payload, 0)
         appendU16(&payload, 0)
+        appendString16(&payload, "")
 
         var data = Data()
         data.append(OP_GUI_FILE_TREE)
@@ -757,25 +763,61 @@ struct GUIFileTreeDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiFileTree(_, let treeFlags, _, let treeWidth, let rootPath, let entries) = cmd else {
+        guard case .guiFileTree(_, let treeFlags, let treeState, _, let treeWidth, let rootPath, _, let entries) = cmd else {
             Issue.record("Expected .guiFileTree"); return
         }
         #expect(treeFlags & 0x01 == 0)
-        #expect(treeFlags & 0x10 != 0)
+        #expect(treeFlags & 0x10 == 0)
+        #expect(treeState == 0)
         #expect(treeWidth == 0)
         #expect(rootPath == "/home/user/project")
         #expect(entries.isEmpty)
     }
 
+    @Test("Decode semantic gui_file_tree loading empty and error states")
+    func decodeExplicitEmptyStates() throws {
+        for (state, flags, reason) in [(UInt8(1), UInt8(0x01), ""), (UInt8(2), UInt8(0x11), ""), (UInt8(4), UInt8(0x01), "permission denied")] {
+            var payload = Data()
+            payload.append(2)
+            payload.append(flags)
+            payload.append(state)
+            appendString16(&payload, "")
+            appendString16(&payload, "/project")
+            appendU16(&payload, 30)
+            appendU16(&payload, 0)
+            appendString16(&payload, reason)
+
+            var data = Data()
+            data.append(OP_GUI_FILE_TREE)
+            appendU32(&data, UInt32(payload.count))
+            data.append(payload)
+
+            let (cmd, size) = try decodeCommand(data: data, offset: 0)
+            #expect(size == data.count)
+
+            guard case .guiFileTree(_, let treeFlags, let treeState, _, let treeWidth, let rootPath, let errorReason, let entries) = cmd else {
+                Issue.record("Expected .guiFileTree"); return
+            }
+            #expect(treeFlags == flags)
+            #expect(treeState == state)
+            #expect(treeWidth == 30)
+            #expect(rootPath == "/project")
+            #expect(errorReason == reason)
+            #expect(entries.isEmpty)
+        }
+    }
+
     @Test("Decode semantic gui_file_tree editing row")
     func decodeEditingRow() throws {
         var payload = Data()
-        payload.append(1)
+        payload.append(2)
         payload.append(0x03)
+        payload.append(3)
         appendString16(&payload, "/project/ñ📄.txt")
         appendString16(&payload, "/project")
         appendU16(&payload, 30)
         appendU16(&payload, 1)
+        appendString16(&payload, "")
         appendSemanticRow(
             &payload,
             hash: 1,
@@ -798,7 +840,7 @@ struct GUIFileTreeDecoderTests {
         data.append(payload)
 
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
-        guard case .guiFileTree(_, _, _, _, _, let entries) = cmd else {
+        guard case .guiFileTree(_, _, _, _, _, _, _, let entries) = cmd else {
             Issue.record("Expected .guiFileTree"); return
         }
         #expect(entries.count == 1)

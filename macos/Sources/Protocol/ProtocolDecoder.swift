@@ -32,7 +32,7 @@ enum RenderCommand: Sendable {
     case registerFont(id: UInt8, family: String)
     case guiTheme(slots: [(slotId: UInt8, r: UInt8, g: UInt8, b: UInt8)])
     case guiTabBar(activeIndex: UInt8, tabs: [Wire.TabEntry])
-    case guiFileTree(version: UInt8, treeFlags: UInt8, selectedId: String, treeWidth: UInt16, rootPath: String, entries: [Wire.FileTreeEntry])
+    case guiFileTree(version: UInt8, treeFlags: UInt8, treeState: UInt8, selectedId: String, treeWidth: UInt16, rootPath: String, errorReason: String, entries: [Wire.FileTreeEntry])
     case guiCompletion(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, items: [Wire.CompletionItem])
     case guiWhichKey(visible: Bool, prefix: String, page: UInt8, pageCount: UInt8, bindings: [Wire.WhichKeyBinding])
     case guiBreadcrumb(segments: [String])
@@ -274,7 +274,8 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
     // GUI chrome commands.
     case OP_GUI_FILE_TREE:
         // Semantic file tree uses a 32-bit payload length because expanded project trees can exceed 64KB.
-        // opcode(1) + payload_len(4) + version(1) + tree_flags(1) + selected_id + root + tree_width(2) + row_count(2) + rows...
+        // v1: opcode(1) + payload_len(4) + version(1) + tree_flags(1) + selected_id + root + tree_width(2) + row_count(2) + rows...
+        // v2: adds tree_state(1) after tree_flags and error_reason after row_count.
         guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
         let payloadLen = Int(readU32(data, rest))
         let payloadStart = rest + 4
@@ -284,6 +285,14 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let version = data[payloadStart]
         let treeFlags = data[payloadStart + 1]
         var pos = payloadStart + 2
+        let treeState: UInt8
+        if version >= 2 {
+            guard pos + 1 <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+            treeState = data[pos]
+            pos += 1
+        } else {
+            treeState = legacyFileTreeState(treeFlags: treeFlags)
+        }
 
         guard pos + 2 <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
         let selectedIdLen = Int(readU16(data, pos)); pos += 2
@@ -300,6 +309,17 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         guard pos + 4 <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
         let treeWidth = readU16(data, pos); pos += 2
         let rowCount = Int(readU16(data, pos)); pos += 2
+
+        let errorReason: String
+        if version >= 2 {
+            guard pos + 2 <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+            let errorReasonLen = Int(readU16(data, pos)); pos += 2
+            guard pos + errorReasonLen <= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+            errorReason = String(data: data[pos..<(pos + errorReasonLen)], encoding: .utf8) ?? ""
+            pos += errorReasonLen
+        } else {
+            errorReason = ""
+        }
 
         var entries: [Wire.FileTreeEntry] = []
         entries.reserveCapacity(rowCount)
@@ -384,7 +404,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         }
 
         guard pos == payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
-        return (.guiFileTree(version: version, treeFlags: treeFlags, selectedId: selectedId, treeWidth: treeWidth, rootPath: rootPath, entries: entries), 5 + payloadLen)
+        return (.guiFileTree(version: version, treeFlags: treeFlags, treeState: treeState, selectedId: selectedId, treeWidth: treeWidth, rootPath: rootPath, errorReason: errorReason, entries: entries), 5 + payloadLen)
 
     case OP_GUI_TAB_BAR:
         // active_index:1, tab_count:1, then per tab: flags:1, id:4, group_id:2, icon_len:1, icon, label_len:2, label
@@ -2131,6 +2151,12 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
 }
 
 // MARK: - Binary helpers
+
+private func legacyFileTreeState(treeFlags: UInt8) -> UInt8 {
+    if treeFlags & 0x01 == 0 { return 0 }
+    if treeFlags & 0x10 != 0 { return 2 }
+    return 3
+}
 
 private func readRequiredUTF8(_ data: Data.SubSequence) throws -> String {
     guard let string = String(data: data, encoding: .utf8) else {

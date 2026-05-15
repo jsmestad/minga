@@ -293,6 +293,31 @@ struct FileTreeViewTests {
 
         #expect(fields.count == 1)
     }
+
+    @Test("Empty loading and error states render friendly messages")
+    @MainActor func fileTreeEmptyLoadingErrorStatesRenderMessages() throws {
+        let state = FileTreeState()
+        state.visible = true
+        state.treeState = .empty
+        state.entries = []
+
+        var sut = FileTreeView(fileTreeState: state, theme: ThemeColors(), encoder: nil)
+        var strings = try sut.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        #expect(strings.contains("No files yet"))
+        #expect(strings.contains("Create a file or refresh after adding project files."))
+
+        state.treeState = .loading
+        sut = FileTreeView(fileTreeState: state, theme: ThemeColors(), encoder: nil)
+        strings = try sut.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        #expect(strings.contains("Loading files…"))
+
+        state.treeState = .error
+        state.errorReason = "permission denied"
+        sut = FileTreeView(fileTreeState: state, theme: ThemeColors(), encoder: nil)
+        strings = try sut.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        #expect(strings.contains("Couldn’t load file tree"))
+        #expect(strings.contains("permission denied"))
+    }
 }
 
 // MARK: - FileTreeRowView

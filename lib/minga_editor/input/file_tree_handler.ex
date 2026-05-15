@@ -197,7 +197,11 @@ defmodule MingaEditor.Input.FileTreeHandler do
   @spec sync_tree_cursor_from_buffer(EditorState.t(), pid()) :: EditorState.t()
   defp sync_tree_cursor_from_buffer(%{workspace: %{file_tree: %{tree: tree}}} = state, buf) do
     {cursor_line, _col} = Buffer.cursor(buf)
-    put_in(state.workspace.file_tree.tree, FileTree.select(tree, cursor_line))
+
+    put_in(
+      state.workspace.file_tree,
+      FileTreeState.replace_tree(state.workspace.file_tree, FileTree.select(tree, cursor_line))
+    )
   end
 
   # ── File tree mouse helpers ────────────────────────────────────────────
@@ -214,7 +218,14 @@ defmodule MingaEditor.Input.FileTreeHandler do
   defp handle_file_tree_click(state, tree, _row, _ft_row, _ft_height, button, _click_count)
        when button in [:wheel_up, :wheel_down] do
     delta = if button == :wheel_down, do: 3, else: -3
-    put_in(state.workspace.file_tree.tree, FileTree.select(tree, tree.cursor + delta))
+
+    put_in(
+      state.workspace.file_tree,
+      FileTreeState.replace_tree(
+        state.workspace.file_tree,
+        FileTree.select(tree, tree.cursor + delta)
+      )
+    )
   end
 
   defp handle_file_tree_click(state, tree, row, ft_row, ft_height, :left, click_count) do
@@ -233,7 +244,15 @@ defmodule MingaEditor.Input.FileTreeHandler do
           state
 
         entry ->
-          state = put_in(state.workspace.file_tree.tree, FileTree.select(tree, entry_idx))
+          state =
+            put_in(
+              state.workspace.file_tree,
+              FileTreeState.replace_tree(
+                state.workspace.file_tree,
+                FileTree.select(tree, entry_idx)
+              )
+            )
+
           handle_tree_entry_click(state, entry, click_count)
       end
     end
