@@ -18,7 +18,7 @@ defmodule Minga.Buffer.Server do
 
   use GenServer
 
-  alias Minga.Buffer.{Cursor, Document, Lines, Position}
+  alias Minga.Buffer.{Cursor, Document, Lines, Operation, Position}
   alias Minga.Buffer.EditDelta
   alias Minga.Buffer.EditSource
   alias Minga.Config
@@ -900,17 +900,7 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:insert_text, text, source}, _from, state) do
-    old_doc = state.document
-    new_doc = Document.insert_text(old_doc, text)
-
-    delta =
-      EditDelta.insertion(
-        byte_size(old_doc.before),
-        Document.cursor(old_doc),
-        text,
-        Document.cursor(new_doc)
-      )
-
+    {:edited, new_doc, delta} = Operation.insert_at_cursor(state.document, text)
     undo_source = EditSource.to_undo_source(source)
     state = push_undo(state, new_doc, undo_source) |> mark_dirty() |> record_edit(delta, source)
     {:reply, :ok, state}
@@ -925,23 +915,13 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:apply_text_edit, from_pos, to_pos, new_text, source}, _from, state) do
-    old_content = Document.content(state.document)
-    start_byte = byte_offset_at(old_content, from_pos)
-    old_end_byte = byte_offset_at(old_content, to_pos)
-
-    doc = Cursor.place(state.document, from_pos)
-    doc = Document.delete_range(doc, from_pos, to_pos)
-    doc = Document.insert_text(doc, new_text)
-
-    new_end_pos = advance_position(from_pos, new_text)
-
-    delta =
-      EditDelta.replacement(start_byte, old_end_byte, from_pos, to_pos, new_text, new_end_pos)
+    {:edited, new_doc, delta} =
+      Operation.replace_range(state.document, from_pos, to_pos, new_text)
 
     undo_source = EditSource.to_undo_source(source)
 
     {:reply, :ok,
-     push_undo(state, doc, undo_source) |> mark_dirty() |> record_edit(delta, source)}
+     push_undo(state, new_doc, undo_source) |> mark_dirty() |> record_edit(delta, source)}
   end
 
   def handle_call({:apply_text_edits, _edits, _source}, _from, %{read_only: true} = state) do
@@ -953,21 +933,7 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:apply_text_edits, edits, source}, _from, state) do
-    # Sort edits in reverse document order so earlier offsets stay valid
-    # as we apply edits from the end of the document backward.
-    sorted =
-      Enum.sort(edits, fn {from_a, _, _}, {from_b, _, _} ->
-        from_a >= from_b
-      end)
-
-    doc =
-      Enum.reduce(sorted, state.document, fn {from_pos, to_pos, new_text}, doc ->
-        doc
-        |> Cursor.place(from_pos)
-        |> Document.delete_range(from_pos, to_pos)
-        |> Document.insert_text(new_text)
-      end)
-
+    doc = Operation.replace_ranges(state.document, edits)
     undo_source = EditSource.to_undo_source(source)
 
     # Multi-edit batches are complex to delta-track (offsets shift between
@@ -1040,23 +1006,12 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call(:delete_before, _from, state) do
-    old_doc = state.document
-    new_buf = Document.delete_before(old_doc)
+    case Operation.backspace(state.document) do
+      :unchanged ->
+        {:reply, :ok, state}
 
-    if new_buf == old_doc do
-      {:reply, :ok, state}
-    else
-      new_cursor = Document.cursor(new_buf)
-
-      delta =
-        EditDelta.deletion(
-          byte_size(new_buf.before),
-          byte_size(old_doc.before),
-          new_cursor,
-          Document.cursor(old_doc)
-        )
-
-      {:reply, :ok, push_undo(state, new_buf, :user) |> mark_dirty() |> record_edit(delta)}
+      {:edited, new_doc, delta} ->
+        {:reply, :ok, push_undo(state, new_doc, :user) |> mark_dirty() |> record_edit(delta)}
     end
   end
 
@@ -1065,36 +1020,12 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call(:delete_at, _from, state) do
-    old_doc = state.document
-    new_buf = Document.delete_at(old_doc)
+    case Operation.delete_forward(state.document) do
+      :unchanged ->
+        {:reply, :ok, state}
 
-    if new_buf == old_doc do
-      {:reply, :ok, state}
-    else
-      # delete_at removes the char after cursor; cursor position stays the same
-      old_end_byte =
-        byte_size(old_doc.before) + byte_size(old_doc.after) - byte_size(new_buf.after)
-
-      old_content = Document.content(old_doc)
-      # Compute old_end_position from the removed text
-      removed =
-        binary_part(
-          old_content,
-          byte_size(old_doc.before),
-          old_end_byte - byte_size(old_doc.before)
-        )
-
-      old_end_pos = advance_position(Document.cursor(old_doc), removed)
-
-      delta =
-        EditDelta.deletion(
-          byte_size(old_doc.before),
-          old_end_byte,
-          Document.cursor(old_doc),
-          old_end_pos
-        )
-
-      {:reply, :ok, push_undo(state, new_buf, :user) |> mark_dirty() |> record_edit(delta)}
+      {:edited, new_doc, delta} ->
+        {:reply, :ok, push_undo(state, new_doc, :user) |> mark_dirty() |> record_edit(delta)}
     end
   end
 
@@ -1544,17 +1475,12 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:delete_range, from_pos, to_pos}, _from, state) do
-    old_doc = state.document
-    new_buf = Document.delete_range(old_doc, from_pos, to_pos)
+    case Operation.delete_range(state.document, from_pos, to_pos) do
+      :unchanged ->
+        {:reply, :ok, state}
 
-    if new_buf == old_doc do
-      {:reply, :ok, state}
-    else
-      old_content = Document.content(old_doc)
-      start_byte = byte_offset_at(old_content, from_pos)
-      old_end_byte = byte_offset_at(old_content, to_pos)
-      delta = EditDelta.deletion(start_byte, old_end_byte, from_pos, to_pos)
-      {:reply, :ok, push_undo(state, new_buf, :user) |> mark_dirty() |> record_edit(delta)}
+      {:edited, new_doc, delta} ->
+        {:reply, :ok, push_undo(state, new_doc, :user) |> mark_dirty() |> record_edit(delta)}
     end
   end
 
@@ -1573,20 +1499,12 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:delete_lines, start_line, end_line}, _from, state) do
-    old_doc = state.document
-    new_buf = Document.delete_lines(old_doc, start_line, end_line)
+    case Operation.delete_lines(state.document, start_line, end_line) do
+      :unchanged ->
+        {:reply, :ok, state}
 
-    if new_buf == old_doc do
-      {:reply, :ok, state}
-    else
-      old_content = Document.content(old_doc)
-      from_pos = {start_line, 0}
-      # end_line is inclusive; delete through end of that line (including newline)
-      to_pos = {end_line + 1, 0}
-      start_byte = byte_offset_at(old_content, from_pos)
-      old_end_byte = byte_offset_at(old_content, to_pos)
-      delta = EditDelta.deletion(start_byte, old_end_byte, from_pos, to_pos)
-      {:reply, :ok, push_undo(state, new_buf, :user) |> mark_dirty() |> record_edit(delta)}
+      {:edited, new_doc, delta} ->
+        {:reply, :ok, push_undo(state, new_doc, :user) |> mark_dirty() |> record_edit(delta)}
     end
   end
 
@@ -2452,44 +2370,6 @@ defmodule Minga.Buffer.Server do
   # when the list is already shorter than the limit.
   @spec cap_log([{non_neg_integer(), EditDelta.t()}]) :: [{non_neg_integer(), EditDelta.t()}]
   defp cap_log(log), do: Enum.take(log, @max_single_consumer_log)
-
-  # Compute byte offset for a {line, col} position in content.
-  @spec byte_offset_at(String.t(), {non_neg_integer(), non_neg_integer()}) :: non_neg_integer()
-  defp byte_offset_at(content, {target_line, target_col}) do
-    lines = String.split(content, "\n")
-
-    bytes_before_line =
-      lines
-      |> Enum.take(target_line)
-      |> Enum.reduce(0, fn line, acc -> acc + byte_size(line) + 1 end)
-
-    line_text = Enum.at(lines, target_line, "")
-
-    col_bytes =
-      line_text
-      |> String.graphemes()
-      |> Enum.take(target_col)
-      |> IO.iodata_to_binary()
-      |> byte_size()
-
-    bytes_before_line + col_bytes
-  end
-
-  @spec advance_position({non_neg_integer(), non_neg_integer()}, String.t()) ::
-          {non_neg_integer(), non_neg_integer()}
-  defp advance_position({line, col}, text) do
-    text
-    |> String.split("\n")
-    |> case do
-      [single] ->
-        {line, col + String.length(single)}
-
-      parts ->
-        new_lines = length(parts) - 1
-        last_part = List.last(parts)
-        {line + new_lines, String.length(last_part)}
-    end
-  end
 
   # ── move_if_possible helpers ──
 

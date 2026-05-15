@@ -833,6 +833,21 @@ defmodule Minga.Buffer.ServerTest do
       assert delta.inserted_text == ""
     end
 
+    test "apply_text_edit records byte-accurate unicode replacement delta" do
+      {:ok, pid} = Server.start_link(content: "aébc")
+      Server.apply_text_edit(pid, 0, 1, 0, 1, "X")
+      edits = Server.flush_edits(pid, :test)
+      assert [delta] = edits
+      assert Server.content(pid) == "aXbc"
+      assert delta.start_byte == 1
+      assert delta.old_end_byte == 3
+      assert delta.new_end_byte == 2
+      assert delta.start_position == {0, 1}
+      assert delta.old_end_position == {0, 3}
+      assert delta.new_end_position == {0, 2}
+      assert delta.inserted_text == "X"
+    end
+
     test "flush_edits clears pending deltas for that consumer" do
       {:ok, pid} = Server.start_link(content: "hello")
       Server.move_to(pid, {0, 5})
