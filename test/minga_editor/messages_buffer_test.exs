@@ -3,7 +3,7 @@ defmodule MingaEditor.MessagesBufferTest do
   Tests for the *Messages* buffer popup and `SPC b m`.
 
   The `*Messages*` buffer is now a BEAM-wide singleton owned by
-  `Minga.Buffer.Messages` (#1483). Each test owns a unique tag it
+  `Minga.Log.MessagesBuffer` (#1483). Each test owns a unique tag it
   writes to the shared buffer, so concurrent tests can run async
   without cross-test pollution.
   """
@@ -22,7 +22,7 @@ defmodule MingaEditor.MessagesBufferTest do
     # before the assertion runs. The wrapper subscribes synchronously in
     # Registry.dispatch, but a :sys.get_state barrier guarantees the cast/info
     # is fully processed.
-    _ = :sys.get_state(Minga.Buffer.Messages)
+    _ = :sys.get_state(Minga.Log.MessagesBuffer)
     :ok
   end
 
@@ -41,7 +41,7 @@ defmodule MingaEditor.MessagesBufferTest do
       _ctx = start_editor("hello")
       emit_log(tag)
 
-      assert String.contains?(Buffer.content(Buffer.messages()), tag)
+      assert String.contains?(Buffer.content(Minga.Log.messages_buffer()), tag)
     end
 
     test "popup is rendered when SPC b m is pressed after emitting our tagged entry" do
@@ -119,17 +119,17 @@ defmodule MingaEditor.MessagesBufferTest do
     end
 
     test "starting an editor does not start a new *Messages* buffer" do
-      pid_before = Buffer.messages()
+      pid_before = Minga.Log.messages_buffer()
       assert is_pid(pid_before)
 
       _ctx = start_editor("hello")
 
-      assert Buffer.messages() == pid_before
+      assert Minga.Log.messages_buffer() == pid_before
       assert Process.alive?(pid_before)
     end
 
     test "killing one editor does not kill the *Messages* buffer" do
-      pid_before = Buffer.messages()
+      pid_before = Minga.Log.messages_buffer()
       assert is_pid(pid_before)
       assert Process.alive?(pid_before)
 
@@ -138,7 +138,7 @@ defmodule MingaEditor.MessagesBufferTest do
       :ok = GenServer.stop(ctx.editor, :normal)
 
       assert Process.alive?(pid_before)
-      assert Buffer.messages() == pid_before
+      assert Minga.Log.messages_buffer() == pid_before
     end
 
     test "entries written by one editor are visible to another" do
@@ -148,7 +148,7 @@ defmodule MingaEditor.MessagesBufferTest do
 
       emit_log(tag)
 
-      assert String.contains?(Buffer.content(Buffer.messages()), tag)
+      assert String.contains?(Buffer.content(Minga.Log.messages_buffer()), tag)
     end
   end
 

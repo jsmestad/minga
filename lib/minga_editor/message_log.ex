@@ -67,7 +67,7 @@ defmodule MingaEditor.MessageLog do
 
   Used by the editor's `:log_message` subscription so external broadcasts
   (LSP, parser, git, agent) still surface in the GUI Messages tab. The
-  shared buffer is updated by `Minga.Buffer.Messages` directly from the
+  shared buffer is updated by `Minga.Log.MessagesBuffer` directly from the
   same broadcast, so we deliberately do not append twice here.
   """
   @spec append_to_store(EditorState.t(), String.t(), MessageStore.level()) ::

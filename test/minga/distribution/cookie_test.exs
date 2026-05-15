@@ -3,22 +3,24 @@ defmodule Minga.Distribution.CookieTest do
 
   alias Minga.Distribution.Cookie
 
-  test "read_file/1 accepts a regular owner-only cookie file" do
-    path = temp_cookie_file("abcdefghijklmnopqrstuvwxyz123456")
+  @moduletag :tmp_dir
+
+  test "read_file/1 accepts a regular owner-only cookie file", %{tmp_dir: dir} do
+    path = temp_cookie_file(dir, "abcdefghijklmnopqrstuvwxyz123456")
     File.chmod!(path, 0o600)
 
     assert Cookie.read_file(path) == {:ok, "abcdefghijklmnopqrstuvwxyz123456"}
   end
 
-  test "read_file/1 rejects group or other readable cookie files" do
-    path = temp_cookie_file("abcdefghijklmnopqrstuvwxyz123456")
+  test "read_file/1 rejects group or other readable cookie files", %{tmp_dir: dir} do
+    path = temp_cookie_file(dir, "abcdefghijklmnopqrstuvwxyz123456")
     File.chmod!(path, 0o644)
 
     assert Cookie.read_file(path) == {:error, :insecure_permissions}
   end
 
-  test "read_file/1 rejects symlinks before following the target" do
-    target = temp_cookie_file("abcdefghijklmnopqrstuvwxyz123456")
+  test "read_file/1 rejects symlinks before following the target", %{tmp_dir: dir} do
+    target = temp_cookie_file(dir, "abcdefghijklmnopqrstuvwxyz123456")
     File.chmod!(target, 0o600)
     link = target <> "-link"
     File.ln_s!(target, link)
@@ -36,10 +38,8 @@ defmodule Minga.Distribution.CookieTest do
              Cookie.to_atom("abcdefghijklmnopqrstuvwxyz123456")
   end
 
-  @spec temp_cookie_file(String.t()) :: String.t()
-  defp temp_cookie_file(content) do
-    dir = Path.join(System.tmp_dir!(), "minga-cookie-test-#{System.unique_integer([:positive])}")
-    File.mkdir_p!(dir)
+  @spec temp_cookie_file(String.t(), String.t()) :: String.t()
+  defp temp_cookie_file(dir, content) do
     path = Path.join(dir, "cookie")
     File.write!(path, content)
     path

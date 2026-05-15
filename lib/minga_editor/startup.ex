@@ -60,7 +60,7 @@ defmodule MingaEditor.Startup do
     subscribe_to_parser(Keyword.get(opts, :parser_manager))
     FileWatcherHelpers.maybe_watch_buffer(buffer)
 
-    messages_buf = Minga.Buffer.messages()
+    messages_buf = Minga.Log.messages_buffer()
 
     # Always ensure an active buffer exists. The editor's render pipeline,
     # command dispatch, and input routing all assume buffers.active is a
