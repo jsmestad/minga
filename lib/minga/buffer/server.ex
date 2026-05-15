@@ -18,7 +18,7 @@ defmodule Minga.Buffer.Server do
 
   use GenServer
 
-  alias Minga.Buffer.Document
+  alias Minga.Buffer.{Cursor, Document, Lines, Position}
   alias Minga.Buffer.EditDelta
   alias Minga.Buffer.EditSource
   alias Minga.Config
@@ -929,7 +929,7 @@ defmodule Minga.Buffer.Server do
     start_byte = byte_offset_at(old_content, from_pos)
     old_end_byte = byte_offset_at(old_content, to_pos)
 
-    doc = Document.move_to(state.document, from_pos)
+    doc = Cursor.place(state.document, from_pos)
     doc = Document.delete_range(doc, from_pos, to_pos)
     doc = Document.insert_text(doc, new_text)
 
@@ -963,7 +963,7 @@ defmodule Minga.Buffer.Server do
     doc =
       Enum.reduce(sorted, state.document, fn {from_pos, to_pos, new_text}, doc ->
         doc
-        |> Document.move_to(from_pos)
+        |> Cursor.place(from_pos)
         |> Document.delete_range(from_pos, to_pos)
         |> Document.insert_text(new_text)
       end)
@@ -1099,12 +1099,12 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:move, direction}, _from, state) do
-    new_buf = Document.move(state.document, direction)
+    new_buf = Cursor.move(state.document, direction)
     {:reply, :ok, %{state | document: new_buf}}
   end
 
   def handle_call({:move_to, pos}, _from, state) do
-    new_buf = Document.move_to(state.document, pos)
+    new_buf = Cursor.place(state.document, pos)
     {:reply, :ok, %{state | document: new_buf}}
   end
 
@@ -1184,7 +1184,7 @@ defmodule Minga.Buffer.Server do
         clamped_line = min(line, line_count - 1)
 
         clamped_col =
-          case Document.lines(new_buf, clamped_line, 1) do
+          case Lines.slice(new_buf, clamped_line, 1) do
             [row] ->
               # col is a byte offset; clamp to last valid grapheme boundary
               Unicode.clamp_to_grapheme_boundary(row, min(col, byte_size(row)))
@@ -1193,7 +1193,7 @@ defmodule Minga.Buffer.Server do
               0
           end
 
-        new_buf = Document.move_to(new_buf, {clamped_line, clamped_col})
+        new_buf = Cursor.place(new_buf, {clamped_line, clamped_col})
         first_line = text |> String.split("\n", parts: 2) |> List.first("")
         filetype = Language.detect_filetype_from_content(state.file_path, first_line)
 
@@ -1299,12 +1299,12 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:byte_offset_for_line, line}, _from, state) do
-    offset = Document.position_to_offset(state.document, {line, 0})
+    offset = Position.point_for(state.document, {line, 0})
     {:reply, offset, state}
   end
 
   def handle_call({:get_lines, start, count}, _from, state) do
-    {:reply, Document.lines(state.document, start, count), state}
+    {:reply, Lines.slice(state.document, start, count), state}
   end
 
   def handle_call(:cursor, _from, state) do
@@ -1312,12 +1312,12 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:set_cursor, {line, col}}, _from, state) do
-    doc = Document.move_to(state.document, {line, col})
+    doc = Cursor.place(state.document, {line, col})
     {:reply, :ok, %{state | document: doc}}
   end
 
   def handle_call({:move_cursor, direction}, _from, state) do
-    doc = Document.move(state.document, direction)
+    doc = Cursor.move(state.document, direction)
     {:reply, :ok, %{state | document: doc}}
   end
 
@@ -1327,7 +1327,7 @@ defmodule Minga.Buffer.Server do
         %{document: %Document{cursor_col: col} = doc} = state
       )
       when col > 0 do
-    new_doc = Document.move(doc, :left)
+    new_doc = Cursor.move(doc, :left)
     {:reply, {:ok, Document.cursor(new_doc)}, %{state | document: new_doc}}
   end
 
@@ -1501,13 +1501,12 @@ defmodule Minga.Buffer.Server do
     last_line = max(0, line_count - 1)
 
     last_col =
-      case Document.lines(new_buf, last_line, 1) do
-        # last_grapheme_byte_offset returns 0 for empty rows, which is correct
-        [row] -> Unicode.last_grapheme_byte_offset(row)
+      case Lines.slice(new_buf, last_line, 1) do
+        [row] -> Position.last_character_on_line(row)
         _ -> 0
       end
 
-    new_buf = Document.move_to(new_buf, {last_line, last_col})
+    new_buf = Cursor.place(new_buf, {last_line, last_col})
     {:reply, :ok, %{state | document: new_buf}}
   end
 
@@ -1516,12 +1515,12 @@ defmodule Minga.Buffer.Server do
 
     # Use position_to_offset for O(1) byte offset lookup via line index,
     # instead of iterating all lines before first_line.
-    first_line_byte_offset = Document.position_to_offset(buf, {first_line, 0})
+    first_line_byte_offset = Position.point_for(buf, {first_line, 0})
 
     snapshot = %RenderSnapshot{
       cursor: Document.cursor(buf),
       line_count: Document.line_count(buf),
-      lines: Document.lines(buf, first_line, count),
+      lines: Lines.slice(buf, first_line, count),
       file_path: state.file_path,
       filetype: state.filetype,
       buffer_type: state.buffer_type,
@@ -1727,7 +1726,7 @@ defmodule Minga.Buffer.Server do
     new_doc =
       case Keyword.get(opts, :cursor) do
         nil -> new_doc
-        {line, col} -> Document.move_to(new_doc, {line, col})
+        {line, col} -> Cursor.place(new_doc, {line, col})
       end
 
     new_decs = decoration_fn.(Decorations.new())
@@ -2496,8 +2495,8 @@ defmodule Minga.Buffer.Server do
 
   @spec right_boundary(Document.t(), non_neg_integer()) :: non_neg_integer()
   defp right_boundary(doc, line) do
-    case Document.lines(doc, line, 1) do
-      [text] when byte_size(text) > 0 -> Unicode.last_grapheme_byte_offset(text)
+    case Lines.slice(doc, line, 1) do
+      [text] when byte_size(text) > 0 -> Position.last_character_on_line(text)
       _ -> 0
     end
   end
@@ -2505,7 +2504,7 @@ defmodule Minga.Buffer.Server do
   @spec do_move_right(non_neg_integer(), non_neg_integer(), Document.t(), BufState.t()) ::
           {:reply, {:ok, Document.position()} | :at_boundary, BufState.t()}
   defp do_move_right(col, max_col, doc, state) when col < max_col do
-    new_doc = Document.move(doc, :right)
+    new_doc = Cursor.move(doc, :right)
     {:reply, {:ok, Document.cursor(new_doc)}, %{state | document: new_doc}}
   end
 
