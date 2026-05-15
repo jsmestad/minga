@@ -35,7 +35,7 @@ defmodule Minga.Buffer.Document do
       "Hhello\\nworld"
   """
 
-  alias Minga.Buffer.{Cursor, Lines}
+  alias Minga.Buffer.{Cursor, Lines, Position}
 
   @enforce_keys [:before, :after, :cursor_line, :cursor_col, :line_count]
   defstruct [:before, :after, :cursor_line, :cursor_col, :line_count, :line_offsets]
@@ -53,13 +53,7 @@ defmodule Minga.Buffer.Document do
           line_offsets: line_offsets()
         }
 
-  @typedoc """
-  A zero-indexed `{line, byte_col}` position in the buffer.
-
-  `byte_col` is the byte offset within the line's UTF-8 binary.
-  For ASCII text, this equals the character/grapheme index.
-  """
-  @type position :: {line :: non_neg_integer(), byte_col :: non_neg_integer()}
+  @type position :: Position.t()
 
   @typedoc "A direction for cursor movement."
   @type direction :: :left | :right | :up | :down
@@ -131,52 +125,6 @@ defmodule Minga.Buffer.Document do
   @doc "Returns the byte offset of the cursor in the full text."
   @spec cursor_offset(t()) :: non_neg_integer()
   def cursor_offset(%__MODULE__{before: before}), do: byte_size(before)
-
-  @doc """
-  Returns the byte offset of a `{line, byte_col}` position in the buffer content.
-  """
-  @spec position_to_offset(t(), position()) :: non_neg_integer()
-  def position_to_offset(%__MODULE__{} = buf, {line, col})
-      when line >= 0 and col >= 0 do
-    {offsets, text} = Lines.ensure_line_offsets(buf)
-    offset_for_position(offsets, line, col, byte_size(text))
-  end
-
-  @doc """
-  Converts a byte offset in the buffer content to a `{line, byte_col}` position.
-  Clamps to valid bounds.
-  """
-  @spec offset_to_position(t(), non_neg_integer()) :: position()
-  def offset_to_position(%__MODULE__{} = buf, offset) when offset >= 0 do
-    text = content(buf)
-    do_offset_to_position(text, offset, 0, 0)
-  end
-
-  @doc """
-  Converts a `{line, byte_col}` position to a grapheme (display) column.
-
-  Counts graphemes in the line text from byte 0 to `byte_col`.
-  Used by the renderer to convert byte positions to screen columns.
-  """
-  @spec grapheme_col(t(), position()) :: non_neg_integer()
-  def grapheme_col(%__MODULE__{} = buf, {line, byte_col}) do
-    case Lines.line_at(buf, line) do
-      nil -> 0
-      text -> grapheme_count_in_bytes(text, byte_col)
-    end
-  end
-
-  # @doc """
-  # Converts a grapheme column to a byte column for the given line.
-
-  # Walks graphemes until `grapheme_index` graphemes have been counted,
-  # returning the byte offset at that point. Used by motions that need
-  # to reason about character positions.
-  # """
-  # @spec byte_col_for_grapheme(String.t(), non_neg_integer()) :: non_neg_integer()
-  # def byte_col_for_grapheme(line_text, grapheme_index) when grapheme_index >= 0 do
-  #   do_byte_col_for_grapheme(line_text, grapheme_index, 0)
-  # end
 
   # ── Mutations ──
 
@@ -276,8 +224,11 @@ defmodule Minga.Buffer.Document do
   def content_range(%__MODULE__{} = buf, from_pos, to_pos) do
     {offsets, text} = Lines.ensure_line_offsets(buf)
     text_size = byte_size(text)
-    from_off = offset_for_position(offsets, elem(from_pos, 0), elem(from_pos, 1), text_size)
-    to_off = offset_for_position(offsets, elem(to_pos, 0), elem(to_pos, 1), text_size)
+
+    from_off =
+      Position.offset_for_position(offsets, elem(from_pos, 0), elem(from_pos, 1), text_size)
+
+    to_off = Position.offset_for_position(offsets, elem(to_pos, 0), elem(to_pos, 1), text_size)
     {start_off, end_off} = if from_off <= to_off, do: {from_off, to_off}, else: {to_off, from_off}
 
     # end_off points to the start of the last character. Find its byte length.
@@ -297,8 +248,11 @@ defmodule Minga.Buffer.Document do
   def delete_range(%__MODULE__{} = buf, from_pos, to_pos) do
     {offsets, text} = Lines.ensure_line_offsets(buf)
     text_size = byte_size(text)
-    from_off = offset_for_position(offsets, elem(from_pos, 0), elem(from_pos, 1), text_size)
-    to_off = offset_for_position(offsets, elem(to_pos, 0), elem(to_pos, 1), text_size)
+
+    from_off =
+      Position.offset_for_position(offsets, elem(from_pos, 0), elem(from_pos, 1), text_size)
+
+    to_off = Position.offset_for_position(offsets, elem(to_pos, 0), elem(to_pos, 1), text_size)
 
     {start_off, end_off, cursor_pos} =
       if from_off <= to_off,
@@ -328,8 +282,8 @@ defmodule Minga.Buffer.Document do
     text_size = byte_size(text)
 
     {s, e} = sort_positions(start_pos, end_pos)
-    s_off = offset_for_position(offsets, elem(s, 0), elem(s, 1), text_size)
-    e_off = offset_for_position(offsets, elem(e, 0), elem(e, 1), text_size)
+    s_off = Position.offset_for_position(offsets, elem(s, 0), elem(s, 1), text_size)
+    e_off = Position.offset_for_position(offsets, elem(e, 0), elem(e, 1), text_size)
 
     # e_off points to the start of the last character. Find its byte length.
     remaining = binary_part(text, e_off, text_size - e_off)
@@ -531,22 +485,6 @@ defmodule Minga.Buffer.Document do
     end
   end
 
-  # Converts a byte offset to {line, byte_col} by scanning for newlines.
-  @spec do_offset_to_position(String.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
-          position()
-  defp do_offset_to_position(_text, 0, line, col), do: {line, col}
-  defp do_offset_to_position("", _offset, line, col), do: {line, col}
-
-  defp do_offset_to_position(text, offset, line, col) when offset > 0 do
-    case text do
-      <<"\n", rest::binary>> ->
-        do_offset_to_position(rest, offset - 1, line + 1, 0)
-
-      <<_byte, rest::binary>> ->
-        do_offset_to_position(rest, offset - 1, line, col + 1)
-    end
-  end
-
   @spec sort_positions(position(), position()) :: {position(), position()}
   defp sort_positions({l1, c1} = p1, {l2, c2} = p2) do
     if {l1, c1} <= {l2, c2}, do: {p1, p2}, else: {p2, p1}
@@ -554,17 +492,6 @@ defmodule Minga.Buffer.Document do
 
   @spec count_newlines(String.t()) :: non_neg_integer()
   defp count_newlines(str), do: length(:binary.matches(str, "\n"))
-
-  # Computes the byte offset from start of text for a {line, byte_col} position
-  # using the line offset tuple. O(1) lookup instead of O(lines) iteration.
-  @spec offset_for_position(tuple(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
-          non_neg_integer()
-  defp offset_for_position(offsets, line, col, text_size) do
-    max_line = tuple_size(offsets) - 1
-    clamped_line = min(line, max_line)
-    offset = elem(offsets, clamped_line) + col
-    min(offset, text_size)
-  end
 
   # Returns the byte size of the next grapheme in `text`, or 0 for empty.
   @spec next_grapheme_byte_size(String.t()) :: non_neg_integer()
@@ -577,55 +504,15 @@ defmodule Minga.Buffer.Document do
     end
   end
 
-  # Count graphemes in the first `byte_count` bytes of `text`.
-  @spec grapheme_count_in_bytes(String.t(), non_neg_integer()) :: non_neg_integer()
-  defp grapheme_count_in_bytes(_text, 0), do: 0
-
-  defp grapheme_count_in_bytes(text, byte_count),
-    do: do_grapheme_count_in_bytes(text, byte_count, 0, 0)
-
-  @spec do_grapheme_count_in_bytes(
-          String.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) ::
-          non_neg_integer()
-  defp do_grapheme_count_in_bytes(_text, byte_count, bytes_seen, grapheme_count)
-       when bytes_seen >= byte_count do
-    grapheme_count
-  end
-
-  defp do_grapheme_count_in_bytes(text, byte_count, bytes_seen, grapheme_count) do
-    case String.next_grapheme_size(text) do
-      {size, rest} ->
-        do_grapheme_count_in_bytes(rest, byte_count, bytes_seen + size, grapheme_count + 1)
-
-      nil ->
-        grapheme_count
-    end
-  end
-
-  # # Convert grapheme index to byte offset within a line.
-  # @spec do_byte_col_for_grapheme(String.t(), non_neg_integer(), non_neg_integer()) ::
-  #         non_neg_integer()
-  # defp do_byte_col_for_grapheme(_text, 0, byte_offset), do: byte_offset
-
-  # defp do_byte_col_for_grapheme(text, remaining, byte_offset) do
-  #   case String.next_grapheme_size(text) do
-  #     {size, rest} ->
-  #       do_byte_col_for_grapheme(rest, remaining - 1, byte_offset + size)
-
-  #     nil ->
-  #       byte_offset
-  #   end
-  # end
-
   defdelegate line_at(buf, line_num), to: Lines
   defdelegate lines(buf, start, count), to: Lines
 
   defdelegate move(buf, direction), to: Cursor
   defdelegate move_to(buf, target), to: Cursor
+
+  defdelegate position_to_offset(buf, target), to: Position
+  defdelegate offset_to_position(doc, offset), to: Position
+  defdelegate grapheme_col(buf, value), to: Position
 end
 
 defimpl Minga.Editing.Text.Readable, for: Minga.Buffer.Document do
