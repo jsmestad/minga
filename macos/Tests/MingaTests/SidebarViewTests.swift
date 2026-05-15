@@ -332,6 +332,34 @@ struct FileTreeRowViewTests {
         #expect(noisyStrings.contains("✖9+"))
     }
 
+    @Test("Deep rows compress indentation before it overwhelms names")
+    @MainActor func deepRowsCompressIndentationBeforeItOverwhelmsNames() throws {
+        let shallow = fileTreeRowView(entry: sidebarFileTreeEntry(id: 1, index: 0, depth: 2, icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"))
+        let deep = fileTreeRowView(entry: sidebarFileTreeEntry(id: 2, index: 1, depth: 8, icon: "\u{E62D}", name: "very_long_component_view.ex", relPath: "lib/minga_editor/shell/traditional/very_long_component_view.ex"))
+
+        #expect(deep.leadingPadding > shallow.leadingPadding)
+        #expect(deep.leadingPadding < 8 + CGFloat(8) * 14)
+    }
+
+    @Test("Selected rows quiet indent guides")
+    @MainActor func selectedRowsQuietIndentGuides() throws {
+        let normal = fileTreeRowView(entry: sidebarFileTreeEntry(id: 1, index: 0, depth: 4, guides: [true, true, false, true], icon: "\u{E62D}", name: "normal.ex", relPath: "lib/normal.ex"))
+        let selected = fileTreeRowView(entry: sidebarFileTreeEntry(id: 2, index: 1, isSelected: true, depth: 4, guides: [true, true, false, true], icon: "\u{E62D}", name: "selected.ex", relPath: "lib/selected.ex"))
+
+        #expect(selected.indentGuideOpacity < normal.indentGuideOpacity)
+    }
+
+    @Test("Nested rows keep names and status badges as independent views")
+    @MainActor func nestedRowsKeepNamesAndStatusBadgesAsIndependentViews() throws {
+        let row = fileTreeRowView(entry: sidebarFileTreeEntry(id: 1, index: 0, isDirty: true, gitStatus: 1, diagnosticWarningCount: 1, depth: 8, guides: [true, true, false, true, false, true, true, false], icon: "\u{E62D}", name: "非常に長い_component_view.ex", relPath: "lib/minga_editor/shell/traditional/非常に長い_component_view.ex"))
+        let strings = try row.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(strings.contains("非常に長い_component_view.ex"))
+        #expect(strings.contains("⚠"))
+        #expect(strings.contains("●"))
+        #expect(try row.inspect().findAll(ViewType.Shape.self).count >= 1)
+    }
+
     @Test("Selected active and hovered rows keep status markers readable")
     @MainActor func selectedActiveAndHoveredRowsKeepStatusMarkersReadable() throws {
         let selected = fileTreeRowView(entry: sidebarFileTreeEntry(id: 1, index: 0, isSelected: true, isFocused: false, isDirty: true, gitStatus: 1, diagnosticWarningCount: 1, icon: "\u{E62D}", name: "selected.ex", relPath: "selected.ex"))
@@ -434,6 +462,7 @@ private func sidebarFileTreeEntry(
     editingType: UInt8 = 0xFF,
     editingText: String = "",
     depth: Int = 0,
+    guides: [Bool] = [],
     icon: String,
     name: String,
     relPath: String
@@ -442,6 +471,6 @@ private func sidebarFileTreeEntry(
                   isFocused: isFocused, isActive: isActive, isDirty: isDirty, isEditing: isEditing,
                   isLastChild: false, depth: depth, gitStatus: gitStatus, diagnosticErrorCount: diagnosticErrorCount,
                   diagnosticWarningCount: diagnosticWarningCount, diagnosticInfoCount: diagnosticInfoCount, diagnosticHintCount: diagnosticHintCount,
-                  guides: [], icon: icon, name: name, relPath: relPath, path: relPath,
+                  guides: guides, icon: icon, name: name, relPath: relPath, path: relPath,
                   editingType: editingType, editingText: editingText)
 }

@@ -3,6 +3,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Core.Unicode
   alias Minga.Project.FileTree
   alias MingaEditor.FileTree.Diagnostics, as: RowDiagnostics
   alias MingaEditor.FileTree.Row
@@ -399,6 +400,78 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
       assert draw_col(dirty_draw) < draw_col(git_draw)
     end
 
+    test "deep nested unicode rows preserve basename tail and status within display width", %{
+      tmp_dir: tmp_dir
+    } do
+      path = Path.join(tmp_dir, "lib/minga_editor/shell/traditional/非常に長い_component_view.ex")
+
+      row =
+        Row.new(
+          id: path,
+          path: path,
+          relative_path: "lib/minga_editor/shell/traditional/非常に長い_component_view.ex",
+          name: "非常に長い_component_view.ex",
+          directory?: false,
+          expanded?: false,
+          selected?: true,
+          focused?: true,
+          active?: false,
+          dirty?: true,
+          git_status: :modified,
+          diagnostics: RowDiagnostics.new({0, 1, 0, 0}),
+          depth: 8,
+          guides: [true, true, false, true, false, true, true, false],
+          last_child?: true
+        )
+
+      draws =
+        TreeRenderer.render(%RenderInput{
+          tree: FileTree.new(tmp_dir, width: 18),
+          rect: {0, 0, 18, 5},
+          focused: true,
+          theme: Theme.get!(:doom_one),
+          active_path: nil,
+          rows: [row]
+        })
+
+      row_text = rendered_row_text(draws, 1, 18)
+
+      assert Unicode.display_width(row_text) <= 18
+      assert String.contains?(row_text, "…")
+      assert String.contains?(row_text, ".ex")
+      assert draw_matching(draws, "⚠") != nil
+      assert draw_matching(draws, "●") != nil
+      assert draw_matching(draws, " ●") != nil
+    end
+
+    test "deep nested fixture renders long unicode children within narrow tree width", %{
+      tmp_dir: tmp_dir
+    } do
+      tree = nested_fixture_tree(tmp_dir, width: 18)
+
+      target_path =
+        Path.join(tmp_dir, "lib/minga_editor/shell/traditional/非常に長い_component_view.ex")
+
+      draws =
+        TreeRenderer.render(%RenderInput{
+          tree: tree,
+          rect: {0, 0, 18, 12},
+          focused: false,
+          theme: Theme.get!(:doom_one),
+          active_path: nil,
+          git_status: %{target_path => :modified},
+          dirty_paths: MapSet.new([target_path])
+        })
+
+      row_draws = Enum.filter(draws, fn {_r, _c, text, _s} -> String.contains?(text, ".ex") end)
+
+      assert row_draws != []
+
+      for {row, _col, _text, _style} <- row_draws do
+        assert Unicode.display_width(rendered_row_text(draws, row, 18)) <= 18
+      end
+    end
+
     test "large diagnostic counts are capped before narrow-row fitting", %{tmp_dir: tmp_dir} do
       row =
         semantic_file_row(tmp_dir,
@@ -437,6 +510,35 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
       assert style.bg == theme.tree.separator_fg
       refute style.bg == theme.tree.cursor_bg
     end
+  end
+
+  defp nested_fixture_tree(tmp_dir, opts) do
+    width = Keyword.fetch!(opts, :width)
+    deep_dir = Path.join(tmp_dir, "lib/minga_editor/shell/traditional")
+    sibling_dir = Path.join(tmp_dir, "lib/minga_editor/shell/board")
+
+    File.mkdir_p!(deep_dir)
+    File.mkdir_p!(sibling_dir)
+
+    File.write!(
+      Path.join(deep_dir, "非常に長い_component_view.ex"),
+      "defmodule ComponentView do\nend\n"
+    )
+
+    File.write!(Path.join(sibling_dir, "card.ex"), "defmodule Card do\nend\n")
+
+    FileTree.new(tmp_dir, width: width)
+    |> FileTree.expand_path(Path.join(tmp_dir, "lib"))
+    |> FileTree.expand_path(Path.join(tmp_dir, "lib/minga_editor"))
+    |> FileTree.expand_path(Path.join(tmp_dir, "lib/minga_editor/shell"))
+    |> FileTree.expand_path(deep_dir)
+  end
+
+  defp rendered_row_text(draws, row, width) do
+    draws
+    |> Enum.filter(fn {draw_row, col, _t, _s} -> draw_row == row and col < width end)
+    |> Enum.sort_by(fn {_r, col, _t, _s} -> col end)
+    |> Enum.map_join(fn {_r, _c, text, _s} -> text end)
   end
 
   defp semantic_file_row(tmp_dir, attrs) do

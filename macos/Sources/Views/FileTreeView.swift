@@ -61,7 +61,7 @@ struct FileTreeView: View {
             .onPreferenceChange(ScrollOffsetKey.self) { value in
                 scrollOffset = value
             }
-            .overlay(alignment: .top) {
+            .safeAreaInset(edge: .top, spacing: 0) {
                 stickyParentHeader
             }
             .onChange(of: fileTreeState.selectedIndex) { _, newIndex in
@@ -116,6 +116,9 @@ struct FileTreeView: View {
                     .fill(theme.treeSeparatorFg.opacity(0.3))
                     .frame(height: 1)
             }
+            .background(theme.treeBg)
+            .zIndex(1)
+            .allowsHitTesting(false)
         }
     }
 
@@ -379,7 +382,13 @@ struct FileTreeView: View {
     // MARK: - Layout helpers
 
     private func leadingPadding(_ entry: FileTreeEntry) -> CGFloat {
-        8 + CGFloat(entry.depth) * indentWidth
+        8 + depthOffset(for: entry.depth)
+    }
+
+    private func depthOffset(for depth: Int) -> CGFloat {
+        let fullIndentDepth = min(depth, 4)
+        let compactIndentDepth = max(depth - 4, 0)
+        return CGFloat(fullIndentDepth) * indentWidth + CGFloat(compactIndentDepth) * indentWidth * 0.55
     }
 
 }

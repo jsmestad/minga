@@ -17,6 +17,8 @@ struct FileTreeRowView: View {
     let onEditCommit: (String) -> Void
     let onEditCancel: () -> Void
 
+    @Environment(\.displayScale) private var displayScale
+
     var body: some View {
         rowContent
             .padding(.leading, leadingPadding)
@@ -59,13 +61,14 @@ struct FileTreeRowView: View {
                     .font(.system(size: 12, weight: entry.showsActiveAccent ? .semibold : .regular))
                     .foregroundStyle(nameColor)
                     .lineLimit(1)
-                    .truncationMode(.tail)
+                    .truncationMode(.middle)
+                    .layoutPriority(0)
 
                 Spacer(minLength: 0)
 
-                diagnosticMarker
-                dirtyMarker
-                gitStatusDot
+                statusCluster
+                    .fixedSize(horizontal: true, vertical: false)
+                    .layoutPriority(2)
             }
         }
     }
@@ -81,6 +84,15 @@ struct FileTreeRowView: View {
                 .frame(width: chevronWidth, height: rowHeight)
         } else {
             Spacer().frame(width: chevronWidth)
+        }
+    }
+
+    @ViewBuilder
+    private var statusCluster: some View {
+        HStack(spacing: 0) {
+            diagnosticMarker
+            dirtyMarker
+            gitStatusDot
         }
     }
 
@@ -163,9 +175,10 @@ struct FileTreeRowView: View {
         if !entry.guides.isEmpty {
             Canvas { context, size in
                 for (level, shouldDraw) in entry.guides.enumerated() where shouldDraw {
-                    let x = 8 + CGFloat(level) * indentWidth + chevronWidth / 2
-                    let rect = CGRect(x: x, y: 0, width: 1, height: size.height)
-                    context.fill(Path(rect), with: .color(theme.treeGuideFg))
+                    let x = pixelSnapped(guideX(for: level))
+                    let lineWidth = max(1 / displayScale, 0.5)
+                    let rect = CGRect(x: x, y: 0, width: lineWidth, height: size.height)
+                    context.fill(Path(rect), with: .color(theme.treeGuideFg.opacity(indentGuideOpacity)))
                 }
             }
             .allowsHitTesting(false)
@@ -203,8 +216,28 @@ struct FileTreeRowView: View {
             .padding(.horizontal, 4)
     }
 
-    private var leadingPadding: CGFloat {
-        8 + CGFloat(entry.depth) * indentWidth
+    var leadingPadding: CGFloat {
+        8 + depthOffset(for: entry.depth)
+    }
+
+    var indentGuideOpacity: Double {
+        if entry.isSelected || isDropTarget { return 0.22 }
+        return 0.42
+    }
+
+    private func guideX(for level: Int) -> CGFloat {
+        8 + depthOffset(for: level) + chevronWidth / 2
+    }
+
+    private func depthOffset(for depth: Int) -> CGFloat {
+        let fullIndentDepth = min(depth, 4)
+        let compactIndentDepth = max(depth - 4, 0)
+        return CGFloat(fullIndentDepth) * indentWidth + CGFloat(compactIndentDepth) * indentWidth * 0.55
+    }
+
+    private func pixelSnapped(_ value: CGFloat) -> CGFloat {
+        guard displayScale > 0 else { return value }
+        return (value * displayScale).rounded(.toNearestOrAwayFromZero) / displayScale
     }
 
     private var iconColor: Color {
