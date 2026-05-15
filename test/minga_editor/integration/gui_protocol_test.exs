@@ -906,13 +906,15 @@ defmodule Minga.Integration.GUIProtocolTest do
         )
       ]
 
-      Port.command(port, ProtocolGUI.encode_gui_file_tree(root, 30, true, true, rows))
+      Port.command(port, ProtocolGUI.encode_gui_file_tree(root, 30, :ready, true, rows))
 
       assert_receive {^port, {:data, json}}, 5_000
       decoded = Jason.decode!(json)
 
       assert decoded["type"] == "gui_file_tree"
-      assert decoded["version"] == 1
+      assert decoded["version"] == 2
+      assert decoded["tree_state"] == 3
+      assert decoded["error_reason"] == ""
       assert Bitwise.band(decoded["tree_flags"], 0x01) != 0
       assert Bitwise.band(decoded["tree_flags"], 0x02) != 0
       assert decoded["selected_id"] == "/project/lib"

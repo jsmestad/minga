@@ -104,7 +104,7 @@ When you first run a new test, it will fail because no baseline exists. Run with
 
 Some tests depend on external state that varies between runs:
 
-- **File tree tests**: the tree shows real project files, so file counts and names change.
+- **File tree tests**: the tree shows real project files, so file counts and names change. Prefer deterministic fixtures plus semantic row tests, draw tuple assertions, GUI protocol encoder/decoder tests, and Swift view-structure tests for selected, active, dirty, git, diagnostics, editing, nested, hidden, loading, empty, and error states.
 - **Agent panel tests**: agent initialization state varies depending on what's running.
 - **File picker**: file counts change as the project evolves.
 

@@ -56,6 +56,15 @@ enum FileTreeDiagnosticSeverity {
     case hint
 }
 
+/// Explicit sidebar state sent by the BEAM. Row count alone is not enough because hidden, loading, empty, and error states can all have zero rows.
+enum FileTreeVisibilityState: UInt8 {
+    case hidden = 0
+    case loading = 1
+    case empty = 2
+    case ready = 3
+    case error = 4
+}
+
 extension FileTreeEntry {
     var gitStatusValue: FileTreeGitStatus {
         FileTreeGitStatus(rawValue: gitStatus) ?? .clean
@@ -108,6 +117,8 @@ final class FileTreeState {
     var treeWidth: Int = 30
     var visible: Bool = false
     var focused: Bool = false
+    var treeState: FileTreeVisibilityState = .hidden
+    var errorReason: String = ""
     /// Project root path sent by the BEAM (e.g., "/Users/foo/myproject").
     var projectRoot: String = ""
     /// Index of the entry currently being edited, or nil if no editing is active.
@@ -120,14 +131,17 @@ final class FileTreeState {
     /// function is called, the tree data has genuinely changed and the
     /// array rebuild is necessary (git status, file renames, expand/collapse
     /// can change entry content without changing count or selection).
-    func update(version: UInt8, selectedId: String, focused: Bool, treeWidth: UInt16, rootPath: String, rawEntries: [Wire.FileTreeEntry]) {
+    func update(version: UInt8, selectedId: String, focused: Bool, treeWidth: UInt16, rootPath: String, rawEntries: [Wire.FileTreeEntry], treeState: UInt8 = FileTreeVisibilityState.ready.rawValue, errorReason: String = "") {
+        let decodedState = FileTreeVisibilityState(rawValue: treeState) ?? .ready
         self.version = version
         self.selectedId = selectedId
         self.selectedIndex = rawEntries.firstIndex(where: { $0.id == selectedId }) ?? 0
         self.treeWidth = Int(treeWidth)
         self.projectRoot = rootPath
-        self.visible = true
+        self.visible = decodedState != .hidden
         self.focused = focused
+        self.treeState = decodedState
+        self.errorReason = errorReason
         self.entries = rawEntries.enumerated().map { index, entry in
             FileTreeEntry(
                 id: entry.id,
@@ -171,6 +185,8 @@ final class FileTreeState {
     func hide(rootPath: String = "") {
         visible = false
         focused = false
+        treeState = .hidden
+        errorReason = ""
         entries = []
         selectedId = ""
         editingIndex = nil

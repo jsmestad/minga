@@ -70,21 +70,27 @@ struct FileTreeHeaderContent: View {
     @ViewBuilder
     private var secondaryContext: some View {
         if !branchName.isEmpty {
-            HStack(spacing: 4) {
-                Text("\u{E725}")
-                    .font(.custom("Symbols Nerd Font Mono", size: 11))
-                    .foregroundStyle(theme.treeDirFg.opacity(0.55))
-
-                Text(branchName)
-                    .font(.system(size: 11, weight: .regular))
-                    .foregroundStyle(theme.tabActiveFg.opacity(0.62))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(theme.treeHeaderFg.opacity(0.08), in: Capsule())
+            badge(icon: "\u{E725}", label: branchName)
+        } else if let stateLabel = treeStateLabel {
+            badge(icon: treeStateIcon, label: stateLabel)
         }
+    }
+
+    private func badge(icon: String, label: String) -> some View {
+        HStack(spacing: 4) {
+            Text(icon)
+                .font(.custom("Symbols Nerd Font Mono", size: 11))
+                .foregroundStyle(theme.treeDirFg.opacity(0.55))
+
+            Text(label)
+                .font(.system(size: 11, weight: .regular))
+                .foregroundStyle(theme.tabActiveFg.opacity(0.62))
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(theme.treeHeaderFg.opacity(0.08), in: Capsule())
     }
 
     private var actionButtons: some View {
@@ -126,5 +132,21 @@ struct FileTreeHeaderContent: View {
             return (fileTreeState.projectRoot as NSString).lastPathComponent
         }
         return "Project"
+    }
+
+    private var treeStateLabel: String? {
+        switch fileTreeState.treeState {
+        case .loading: return "Loading"
+        case .empty: return "Empty"
+        case .error: return "Error"
+        case .hidden, .ready: return nil
+        }
+    }
+
+    private var treeStateIcon: String {
+        switch fileTreeState.treeState {
+        case .error: return "⚠"
+        default: return ""
+        }
     }
 }

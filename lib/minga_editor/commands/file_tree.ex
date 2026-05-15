@@ -125,8 +125,13 @@ defmodule MingaEditor.Commands.FileTree do
 
   def new_file(%{workspace: %{file_tree: %{tree: tree}}} = state) do
     {index, tree} = editing_insertion_index(tree)
-    ft = FileTreeState.start_editing(state.workspace.file_tree, index, :new_file)
-    state = put_in(state.workspace.file_tree, %{ft | tree: tree})
+
+    ft =
+      state.workspace.file_tree
+      |> FileTreeState.start_editing(index, :new_file)
+      |> FileTreeState.replace_tree(tree)
+
+    state = put_in(state.workspace.file_tree, ft)
     sync_buffer(state)
   end
 
@@ -140,8 +145,13 @@ defmodule MingaEditor.Commands.FileTree do
 
   def new_folder(%{workspace: %{file_tree: %{tree: tree}}} = state) do
     {index, tree} = editing_insertion_index(tree)
-    ft = FileTreeState.start_editing(state.workspace.file_tree, index, :new_folder)
-    state = put_in(state.workspace.file_tree, %{ft | tree: tree})
+
+    ft =
+      state.workspace.file_tree
+      |> FileTreeState.start_editing(index, :new_folder)
+      |> FileTreeState.replace_tree(tree)
+
+    state = put_in(state.workspace.file_tree, ft)
     sync_buffer(state)
   end
 
@@ -465,7 +475,10 @@ defmodule MingaEditor.Commands.FileTree do
             EditorState.switch_buffer(state, idx)
           end
 
-        put_in(state.workspace.file_tree.tree, FileTree.reveal(tree, path))
+        put_in(
+          state.workspace.file_tree,
+          FileTreeState.replace_tree(state.workspace.file_tree, FileTree.reveal(tree, path))
+        )
     end
   end
 
@@ -508,11 +521,18 @@ defmodule MingaEditor.Commands.FileTree do
   defp sync_and_update(%{workspace: %{file_tree: %{buffer: buf}}} = state, new_tree)
        when is_pid(buf) do
     BufferSync.sync(buf, new_tree)
-    put_in(state.workspace.file_tree.tree, new_tree)
+
+    put_in(
+      state.workspace.file_tree,
+      FileTreeState.replace_tree(state.workspace.file_tree, new_tree)
+    )
   end
 
   defp sync_and_update(state, new_tree) do
-    put_in(state.workspace.file_tree.tree, new_tree)
+    put_in(
+      state.workspace.file_tree,
+      FileTreeState.replace_tree(state.workspace.file_tree, new_tree)
+    )
   end
 
   # Computes the insertion index for a new file/folder.

@@ -95,6 +95,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   alias MingaEditor.FileTree.Row
   alias MingaEditor.MinibufferData
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
@@ -1020,9 +1021,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
       opcode(1) + payload_len(4) + payload(payload_len)
 
-  Payload:
+  Payload v2:
 
-      version(1) + tree_flags(1) + selected_id_len(2) + selected_id + root_len(2) + root + tree_width(2) + row_count(2) + rows...
+      version(1) + tree_flags(1) + tree_state(1) + selected_id_len(2) + selected_id + root_len(2) + root + tree_width(2) + row_count(2) + error_reason_len(2) + error_reason + rows...
 
   Per row:
 
@@ -1030,18 +1031,23 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   String fields use uint16 byte lengths except icon, which uses a uint8 byte length.
   """
-  @spec encode_gui_file_tree(String.t() | nil, non_neg_integer(), boolean(), boolean(), [Row.t()]) ::
-          binary()
-  def encode_gui_file_tree(root_path, tree_width, visible?, focused?, rows) when is_list(rows) do
+  @type file_tree_status :: FileTreeState.tree_status()
+
+  @spec encode_gui_file_tree(String.t() | nil, non_neg_integer(), file_tree_status(), boolean(), [
+          Row.t()
+        ]) :: binary()
+  def encode_gui_file_tree(root_path, tree_width, status, focused?, rows) when is_list(rows) do
     root = root_path || ""
     selected_id = selected_row_id(rows)
+    error_reason = file_tree_error_reason(status)
 
     payload =
       IO.iodata_to_binary([
-        <<1::8, file_tree_flags(visible?, focused?, rows)::8>>,
+        <<2::8, file_tree_flags(status, focused?)::8, encode_file_tree_status(status)::8>>,
         encode_string16(selected_id),
         encode_string16(root),
         <<tree_width::16, length(rows)::16>>,
+        encode_string16(error_reason),
         Enum.map(rows, &encode_file_tree_row(&1, root))
       ])
 
@@ -1051,7 +1057,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @doc "Encodes a hidden semantic GUI file-tree command while preserving the project root."
   @spec encode_hidden_gui_file_tree(String.t() | nil) :: binary()
   def encode_hidden_gui_file_tree(root_path),
-    do: encode_gui_file_tree(root_path, 0, false, false, [])
+    do: encode_gui_file_tree(root_path, 0, :hidden, false, [])
 
   @spec encode_file_tree_row(Row.t(), String.t()) :: iodata()
   defp encode_file_tree_row(%Row{} = row, root) do
@@ -1096,13 +1102,24 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     end
   end
 
-  @spec file_tree_flags(boolean(), boolean(), [Row.t()]) :: non_neg_integer()
-  defp file_tree_flags(visible?, focused?, rows) do
+  @spec file_tree_flags(FileTreeState.tree_status(), boolean()) :: non_neg_integer()
+  defp file_tree_flags(status, focused?) do
     0
-    |> maybe_flag(visible?, 0)
+    |> maybe_flag(FileTreeState.visible_status?(status), 0)
     |> maybe_flag(focused?, 1)
-    |> maybe_flag(rows == [], 4)
+    |> maybe_flag(status == :empty, 4)
   end
+
+  @spec encode_file_tree_status(FileTreeState.tree_status()) :: non_neg_integer()
+  defp encode_file_tree_status(:hidden), do: 0
+  defp encode_file_tree_status(:loading), do: 1
+  defp encode_file_tree_status(:empty), do: 2
+  defp encode_file_tree_status(:ready), do: 3
+  defp encode_file_tree_status({:error, _reason}), do: 4
+
+  @spec file_tree_error_reason(FileTreeState.tree_status()) :: String.t()
+  defp file_tree_error_reason({:error, reason}), do: reason
+  defp file_tree_error_reason(_status), do: ""
 
   @spec file_tree_row_flags(Row.t()) :: non_neg_integer()
   defp file_tree_row_flags(%Row{} = row) do

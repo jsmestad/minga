@@ -95,26 +95,27 @@ struct CommandDispatcherRoutingTests {
     @MainActor func guiFileTreeRouting() {
         let (dispatcher, gui) = makeDispatcher()
         let entries = [wireFileTreeEntry(pathHash: 123, isDir: true, isExpanded: true, id: "/project/lib", path: "/project/lib", name: "lib", relPath: "lib")]
-        dispatcher.dispatch(.guiFileTree(version: 1, treeFlags: 0x03, selectedId: "/project/lib", treeWidth: 30,
-                                          rootPath: "/project", entries: entries))
+        dispatcher.dispatch(.guiFileTree(version: 2, treeFlags: 0x03, treeState: 3, selectedId: "/project/lib", treeWidth: 30,
+                                          rootPath: "/project", errorReason: "", entries: entries))
 
         #expect(gui.fileTreeState.visible == true)
         #expect(gui.fileTreeState.focused == true)
+        #expect(gui.fileTreeState.treeState == .ready)
         #expect(gui.fileTreeState.entries.count == 1)
         #expect(gui.fileTreeState.entries[0].name == "lib")
         #expect(gui.fileTreeState.projectRoot == "/project")
     }
 
-    @Test("guiFileTree hides when visible flag is cleared")
-    @MainActor func guiFileTreeHidesOnInvisiblePayload() {
+    @Test("guiFileTree hides when explicit tree state is hidden")
+    @MainActor func guiFileTreeHidesOnHiddenState() {
         let (dispatcher, gui) = makeDispatcher()
-        dispatcher.dispatch(.guiFileTree(version: 1, treeFlags: 0x01, selectedId: "/project/a", treeWidth: 30,
-                                          rootPath: "/project",
+        dispatcher.dispatch(.guiFileTree(version: 2, treeFlags: 0x01, treeState: 3, selectedId: "/project/a", treeWidth: 30,
+                                          rootPath: "/project", errorReason: "",
                                           entries: [wireFileTreeEntry(pathHash: 1, id: "/project/a", path: "/project/a", name: "a", relPath: "a")]))
         #expect(gui.fileTreeState.visible == true)
 
-        dispatcher.dispatch(.guiFileTree(version: 1, treeFlags: 0x10, selectedId: "", treeWidth: 0,
-                                          rootPath: "/project", entries: []))
+        dispatcher.dispatch(.guiFileTree(version: 2, treeFlags: 0x00, treeState: 0, selectedId: "", treeWidth: 0,
+                                          rootPath: "/project", errorReason: "", entries: []))
         #expect(gui.fileTreeState.visible == false)
         #expect(gui.fileTreeState.projectRoot == "/project")
     }
@@ -122,12 +123,12 @@ struct CommandDispatcherRoutingTests {
     @Test("guiFileTree clears project root when hidden payload has no root")
     @MainActor func guiFileTreeClearsRootOnHiddenPayload() {
         let (dispatcher, gui) = makeDispatcher()
-        dispatcher.dispatch(.guiFileTree(version: 1, treeFlags: 0x01, selectedId: "/project/a", treeWidth: 30,
-                                          rootPath: "/project",
+        dispatcher.dispatch(.guiFileTree(version: 2, treeFlags: 0x01, treeState: 3, selectedId: "/project/a", treeWidth: 30,
+                                          rootPath: "/project", errorReason: "",
                                           entries: [wireFileTreeEntry(pathHash: 1, id: "/project/a", path: "/project/a", name: "a", relPath: "a")]))
 
-        dispatcher.dispatch(.guiFileTree(version: 1, treeFlags: 0x10, selectedId: "", treeWidth: 0,
-                                          rootPath: "", entries: []))
+        dispatcher.dispatch(.guiFileTree(version: 2, treeFlags: 0x00, treeState: 0, selectedId: "", treeWidth: 0,
+                                          rootPath: "", errorReason: "", entries: []))
 
         #expect(gui.fileTreeState.visible == false)
         #expect(gui.fileTreeState.projectRoot == "")
@@ -137,12 +138,29 @@ struct CommandDispatcherRoutingTests {
     @MainActor func guiFileTreeKeepsEmptyVisibleTreeOpen() {
         let (dispatcher, gui) = makeDispatcher()
 
-        dispatcher.dispatch(.guiFileTree(version: 1, treeFlags: 0x11, selectedId: "", treeWidth: 30,
-                                          rootPath: "/empty-project", entries: []))
+        dispatcher.dispatch(.guiFileTree(version: 2, treeFlags: 0x11, treeState: 2, selectedId: "", treeWidth: 30,
+                                          rootPath: "/empty-project", errorReason: "", entries: []))
 
         #expect(gui.fileTreeState.visible == true)
+        #expect(gui.fileTreeState.treeState == .empty)
         #expect(gui.fileTreeState.entries.isEmpty)
         #expect(gui.fileTreeState.projectRoot == "/empty-project")
+    }
+
+    @Test("guiFileTree preserves loading and error states with empty entries")
+    @MainActor func guiFileTreePreservesLoadingAndErrorStates() {
+        let (dispatcher, gui) = makeDispatcher()
+
+        dispatcher.dispatch(.guiFileTree(version: 2, treeFlags: 0x01, treeState: 1, selectedId: "", treeWidth: 30,
+                                          rootPath: "/project", errorReason: "", entries: []))
+        #expect(gui.fileTreeState.visible == true)
+        #expect(gui.fileTreeState.treeState == .loading)
+
+        dispatcher.dispatch(.guiFileTree(version: 2, treeFlags: 0x01, treeState: 4, selectedId: "", treeWidth: 30,
+                                          rootPath: "/project", errorReason: "permission denied", entries: []))
+        #expect(gui.fileTreeState.visible == true)
+        #expect(gui.fileTreeState.treeState == .error)
+        #expect(gui.fileTreeState.errorReason == "permission denied")
     }
 
     @Test("guiGitStatus updates state when repo has entries")

@@ -74,14 +74,14 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         return ["type": "gui_tab_bar", "active_index": Int(activeIndex), "tabs": tabArray]
 
-    case .guiFileTree(let version, let treeFlags, let selectedId, let treeWidth, let rootPath, let entries):
+    case .guiFileTree(let version, let treeFlags, let treeState, let selectedId, let treeWidth, let rootPath, let errorReason, let entries):
         let entryArray = entries.map { e -> [String: Any] in
             ["id": e.id, "path": e.path, "name": e.name, "relative_path": e.relPath, "depth": Int(e.depth),
              "is_dir": e.isDir, "is_expanded": e.isExpanded, "is_selected": e.isSelected, "is_focused": e.isFocused,
              "is_active": e.isActive, "is_dirty": e.isDirty, "is_editing": e.isEditing,
              "git_status": Int(e.gitStatus), "icon": e.icon]
         }
-        return ["type": "gui_file_tree", "version": Int(version), "tree_flags": Int(treeFlags), "selected_id": selectedId, "tree_width": Int(treeWidth), "root_path": rootPath, "entries": entryArray]
+        return ["type": "gui_file_tree", "version": Int(version), "tree_flags": Int(treeFlags), "tree_state": Int(treeState), "selected_id": selectedId, "tree_width": Int(treeWidth), "root_path": rootPath, "error_reason": errorReason, "entries": entryArray]
 
     case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let items):
         let itemArray = items.map { i -> [String: Any] in

@@ -181,9 +181,9 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       assert Enum.any?(all_cmds, fn
                <<0x93, payload_len::32, payload::binary-size(payload_len)>> ->
                  match?(
-                   <<1::8, tree_flags::8, 0::16, ^root_len::16, ^root::binary-size(root_len),
-                     0::16, 0::16>>
-                   when Bitwise.band(tree_flags, 0x10) != 0,
+                   <<2::8, tree_flags::8, 0::8, 0::16, ^root_len::16,
+                     ^root::binary-size(root_len), 0::16, 0::16, 0::16>>
+                   when Bitwise.band(tree_flags, 0x01) == 0,
                    payload
                  )
 
@@ -228,9 +228,9 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       assert Enum.any?(all_cmds, fn
                <<0x93, payload_len::32, payload::binary-size(payload_len)>> ->
                  match?(
-                   <<1::8, tree_flags::8, 0::16, ^root_len::16,
-                     ^second_root::binary-size(root_len), 0::16, 0::16>>
-                   when Bitwise.band(tree_flags, 0x10) != 0,
+                   <<2::8, tree_flags::8, 0::8, 0::16, ^root_len::16,
+                     ^second_root::binary-size(root_len), 0::16, 0::16, 0::16>>
+                   when Bitwise.band(tree_flags, 0x01) == 0,
                    payload
                  )
 

@@ -1127,18 +1127,21 @@ defmodule MingaEditor.Frontend.ProtocolTest do
           editing: nil
         )
 
-      encoded = ProtocolGUI.encode_gui_file_tree("/project", 30, true, true, [row])
+      encoded = ProtocolGUI.encode_gui_file_tree("/project", 30, :ready, true, [row])
 
       assert <<0x93, payload_len::32, payload::binary-size(payload_len)>> = encoded
-      assert <<1::8, tree_flags::8, rest::binary>> = payload
+      assert <<2::8, tree_flags::8, 3::8, rest::binary>> = payload
       assert Bitwise.band(tree_flags, 0x01) != 0
       assert Bitwise.band(tree_flags, 0x02) != 0
 
       <<selected_len::16, selected::binary-size(selected_len), rest::binary>> = rest
       assert selected == row.id
 
-      <<root_len::16, root::binary-size(root_len), 30::16, 1::16, row_payload::binary>> = rest
+      <<root_len::16, root::binary-size(root_len), 30::16, 1::16, error_len::16,
+        error_reason::binary-size(error_len), row_payload::binary>> = rest
+
       assert root == "/project"
+      assert error_reason == ""
 
       expected_hash = :erlang.phash2(row.id, 0xFFFFFFFF)
 
@@ -1182,13 +1185,13 @@ defmodule MingaEditor.Frontend.ProtocolTest do
           editing: nil
         )
 
-      encoded = ProtocolGUI.encode_gui_file_tree("/project", 30, true, false, [row])
+      encoded = ProtocolGUI.encode_gui_file_tree("/project", 30, :ready, false, [row])
       <<0x93, payload_len::32, payload::binary-size(payload_len)>> = encoded
 
-      <<_version::8, _tree_flags::8, selected_len::16, _selected::binary-size(selected_len),
-        root_len::16, _root::binary-size(root_len), _width::16, _count::16, _hash::32,
-        _row_flags::16, _depth::8, _git::8, 65_535::16, 65_535::16, 3::16, 4::16, _rest::binary>> =
-        payload
+      <<_version::8, _tree_flags::8, _tree_state::8, selected_len::16,
+        _selected::binary-size(selected_len), root_len::16, _root::binary-size(root_len),
+        _width::16, _count::16, 0::16, _hash::32, _row_flags::16, _depth::8, _git::8, 65_535::16,
+        65_535::16, 3::16, 4::16, _rest::binary>> = payload
     end
 
     test "encodes semantic gui_file_tree string lengths as UTF-8 byte counts" do
@@ -1207,13 +1210,13 @@ defmodule MingaEditor.Frontend.ProtocolTest do
           editing: nil
         )
 
-      encoded = ProtocolGUI.encode_gui_file_tree("/project", 30, true, false, [row])
+      encoded = ProtocolGUI.encode_gui_file_tree("/project", 30, :ready, false, [row])
       <<0x93, payload_len::32, payload::binary-size(payload_len)>> = encoded
 
-      <<_version::8, _tree_flags::8, selected_len::16, selected::binary-size(selected_len),
-        root_len::16, _root::binary-size(root_len), _width::16, _count::16, _hash::32,
-        _row_flags::16, _depth::8, _git::8, _diag::binary-size(8), 0::8, strings::binary>> =
-        payload
+      <<_version::8, _tree_flags::8, _tree_state::8, selected_len::16,
+        selected::binary-size(selected_len), root_len::16, _root::binary-size(root_len),
+        _width::16, _count::16, 0::16, _hash::32, _row_flags::16, _depth::8, _git::8,
+        _diag::binary-size(8), 0::8, strings::binary>> = payload
 
       assert selected == row.id
       assert selected_len == byte_size(row.id)
@@ -1246,26 +1249,51 @@ defmodule MingaEditor.Frontend.ProtocolTest do
           )
         end
 
-      encoded = ProtocolGUI.encode_gui_file_tree("/project", 30, true, false, rows)
+      encoded = ProtocolGUI.encode_gui_file_tree("/project", 30, :ready, false, rows)
 
       assert <<0x93, payload_len::32, payload::binary-size(payload_len)>> = encoded
       assert payload_len == byte_size(payload)
       assert payload_len > 65_535
     end
 
-    test "encodes hidden semantic gui_file_tree with project root and empty bit" do
+    test "encodes hidden semantic gui_file_tree with explicit hidden state" do
       encoded = ProtocolGUI.encode_hidden_gui_file_tree("/tmp/minga-project")
 
       assert <<0x93, payload_len::32, payload::binary-size(payload_len)>> = encoded
 
-      assert <<1::8, tree_flags::8, selected_len::16, selected::binary-size(selected_len),
-               root_len::16, root::binary-size(root_len), 0::16, 0::16>> = payload
+      assert <<2::8, tree_flags::8, 0::8, selected_len::16, selected::binary-size(selected_len),
+               root_len::16, root::binary-size(root_len), 0::16, 0::16, 0::16>> = payload
 
       assert selected == ""
 
       refute Bitwise.band(tree_flags, 0x01) != 0
-      assert Bitwise.band(tree_flags, 0x10) != 0
+      refute Bitwise.band(tree_flags, 0x10) != 0
       assert root == "/tmp/minga-project"
+    end
+
+    test "encodes visible empty, loading, and error semantic gui_file_tree states without rows" do
+      empty = ProtocolGUI.encode_gui_file_tree("/project", 30, :empty, false, [])
+      loading = ProtocolGUI.encode_gui_file_tree("/project", 30, :loading, false, [])
+
+      error =
+        ProtocolGUI.encode_gui_file_tree("/project", 30, {:error, "permission denied"}, false, [])
+
+      assert <<0x93, _::32, 2::8, empty_flags::8, 2::8, _empty_rest::binary>> = empty
+      assert Bitwise.band(empty_flags, 0x01) != 0
+      assert Bitwise.band(empty_flags, 0x10) != 0
+
+      assert <<0x93, _::32, 2::8, loading_flags::8, 1::8, _loading_rest::binary>> = loading
+      assert Bitwise.band(loading_flags, 0x01) != 0
+      refute Bitwise.band(loading_flags, 0x10) != 0
+
+      assert <<0x93, payload_len::32, payload::binary-size(payload_len)>> = error
+
+      assert <<2::8, error_flags::8, 4::8, selected_len::16, _selected::binary-size(selected_len),
+               root_len::16, _root::binary-size(root_len), 30::16, 0::16, reason_len::16,
+               reason::binary-size(reason_len)>> = payload
+
+      assert Bitwise.band(error_flags, 0x01) != 0
+      assert reason == "permission denied"
     end
 
     test "encodes semantic gui_file_tree editing payload" do
@@ -1284,13 +1312,13 @@ defmodule MingaEditor.Frontend.ProtocolTest do
           editing: %{index: 0, text: "renamed.txt", type: :rename, original_name: "target.txt"}
         )
 
-      encoded = ProtocolGUI.encode_gui_file_tree("/project", 30, true, true, [row])
+      encoded = ProtocolGUI.encode_gui_file_tree("/project", 30, :ready, true, [row])
       <<0x93, payload_len::32, payload::binary-size(payload_len)>> = encoded
       # Skip tree header and fixed row prefix.
-      <<_version::8, _tree_flags::8, selected_len::16, _selected::binary-size(selected_len),
-        root_len::16, _root::binary-size(root_len), _width::16, _count::16, _hash::32,
-        row_flags::16, _depth::8, _git::8, _diag::binary-size(8), 0::8, strings::binary>> =
-        payload
+      <<_version::8, _tree_flags::8, _tree_state::8, selected_len::16,
+        _selected::binary-size(selected_len), root_len::16, _root::binary-size(root_len),
+        _width::16, _count::16, 0::16, _hash::32, row_flags::16, _depth::8, _git::8,
+        _diag::binary-size(8), 0::8, strings::binary>> = payload
 
       assert Bitwise.band(row_flags, 0x40) != 0
       {_id, strings} = take_string16(strings)

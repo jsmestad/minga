@@ -110,6 +110,53 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
       refute Enum.any?(draws, fn {row, col, _text, _style} -> row > 0 and col < 20 end)
     end
 
+    test "renders empty loading and error rows without layout drift", %{tmp_dir: tmp_dir} do
+      tree = FileTree.new(tmp_dir, width: 24)
+      theme = Theme.get!(:doom_one)
+
+      empty_draws =
+        TreeRenderer.render(%RenderInput{
+          tree: tree,
+          rect: {0, 0, 24, 5},
+          focused: false,
+          theme: theme,
+          active_path: nil,
+          rows: []
+        })
+
+      loading_draws =
+        TreeRenderer.render(%RenderInput{
+          tree: tree,
+          rect: {0, 0, 24, 5},
+          focused: false,
+          theme: theme,
+          active_path: nil,
+          rows: [],
+          status: :loading
+        })
+
+      error_draws =
+        TreeRenderer.render(%RenderInput{
+          tree: tree,
+          rect: {0, 0, 24, 5},
+          focused: false,
+          theme: theme,
+          active_path: nil,
+          rows: [],
+          status: {:error, "permission denied"}
+        })
+
+      assert draw_texts(empty_draws) =~ "No files yet"
+      assert draw_texts(loading_draws) =~ "Loading files"
+      assert draw_texts(error_draws) =~ "File tree error"
+      assert draw_texts(error_draws) =~ "permission denied"
+
+      for draws <- [empty_draws, loading_draws, error_draws] do
+        assert Enum.any?(draws, fn {_row, col, text, _style} -> col == 24 and text == "│" end)
+        refute Enum.any?(draws, fn {row, col, _text, _style} -> row < 0 or col < 0 end)
+      end
+    end
+
     test "renders indent guides and file icons", %{tmp_dir: tmp_dir} do
       input = %RenderInput{
         tree: sample_tree(tmp_dir),
@@ -610,6 +657,10 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
       active_path: nil,
       rows: rows
     })
+  end
+
+  defp draw_texts(draws) do
+    Enum.map_join(draws, fn {_r, _c, text, _style} -> text end)
   end
 
   defp draw_containing(draws, text) do

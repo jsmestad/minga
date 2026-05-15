@@ -8,6 +8,7 @@ defmodule MingaEditor.FileTree.RowsTest do
   alias Minga.Project.FileTree
   alias MingaEditor.FileTree.Diagnostics, as: RowDiagnostics
   alias MingaEditor.FileTree.Rows
+  alias MingaEditor.State.FileTree, as: FileTreeState
 
   @moduletag :tmp_dir
 
@@ -186,6 +187,54 @@ defmodule MingaEditor.FileTree.RowsTest do
 
     test "returns no rows for an empty visible tree", %{tmp_dir: tmp_dir} do
       assert Rows.from_tree(FileTree.new(tmp_dir)) == []
+    end
+  end
+
+  describe "FileTreeState.status/1" do
+    test "distinguishes hidden, empty, ready, loading, and error states", %{tmp_dir: tmp_dir} do
+      assert FileTreeState.status(%FileTreeState{}) == :hidden
+
+      empty_tree = FileTree.new(tmp_dir)
+      assert FileTreeState.status(FileTreeState.open(%FileTreeState{}, empty_tree, nil)) == :empty
+
+      ready_tree = flat_tree(tmp_dir)
+      assert FileTreeState.status(FileTreeState.open(%FileTreeState{}, ready_tree, nil)) == :ready
+
+      loading = FileTreeState.loading(%FileTreeState{project_root: tmp_dir})
+      assert FileTreeState.status(loading) == :loading
+
+      missing_tree = FileTree.new(Path.join(tmp_dir, "missing"))
+
+      assert {:error, reason} =
+               FileTreeState.status(FileTreeState.open(%FileTreeState{}, missing_tree, nil))
+
+      assert reason != ""
+    end
+
+    test "replace_tree clears stale loading or error state", %{tmp_dir: tmp_dir} do
+      ready_tree = flat_tree(tmp_dir)
+
+      loading =
+        %FileTreeState{tree: ready_tree}
+        |> FileTreeState.loading()
+        |> FileTreeState.replace_tree(ready_tree)
+
+      assert FileTreeState.status(loading) == :ready
+
+      errored =
+        %FileTreeState{tree: ready_tree}
+        |> FileTreeState.error(:eacces)
+        |> FileTreeState.replace_tree(ready_tree)
+
+      assert FileTreeState.status(errored) == :ready
+    end
+
+    test "width preserves the last sidebar width for state-only payloads", %{tmp_dir: tmp_dir} do
+      tree = FileTree.new(tmp_dir, width: 42)
+      file_tree = FileTreeState.open(%FileTreeState{}, tree, nil)
+
+      assert FileTreeState.width(file_tree) == 42
+      assert file_tree |> FileTreeState.close() |> FileTreeState.width() == 42
     end
   end
 
