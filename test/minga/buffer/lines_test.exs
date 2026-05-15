@@ -4,6 +4,24 @@ defmodule Minga.Buffer.LinesTest do
 
   alias Minga.Buffer.{Document, Lines}
 
+  describe "count/1" do
+    test "empty text has one line" do
+      assert Lines.count("") == 1
+    end
+
+    test "single line without newline" do
+      assert Lines.count("hello") == 1
+    end
+
+    test "counts lines separated by newlines" do
+      assert Lines.count("a\nb\nc") == 3
+    end
+
+    test "trailing newline adds an empty line" do
+      assert Lines.count("a\nb\n") == 3
+    end
+  end
+
   describe "fetch/2" do
     test "returns the first line" do
       buf = Document.new("hello\nworld")

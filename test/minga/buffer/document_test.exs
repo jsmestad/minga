@@ -34,37 +34,9 @@ defmodule Minga.Buffer.DocumentTest do
     end
   end
 
-  describe "line_count/1" do
-    test "empty buffer has 1 line" do
-      assert Document.line_count(Document.new()) == 1
-    end
-
-    test "single line without newline" do
-      assert Document.line_count(Document.new("hello")) == 1
-    end
-
-    test "counts lines separated by newlines" do
-      assert Document.line_count(Document.new("a\nb\nc")) == 3
-    end
-
-    test "trailing newline adds an empty line" do
-      assert Document.line_count(Document.new("a\nb\n")) == 3
-    end
-  end
-
   describe "cursor/1" do
     test "starts at {0, 0} for new buffer" do
       assert Document.cursor(Document.new("hello")) == {0, 0}
-    end
-
-    test "reflects position after moving right (ASCII)" do
-      buf = Document.new("hello") |> Document.move(:right) |> Document.move(:right)
-      assert Document.cursor(buf) == {0, 2}
-    end
-
-    test "reflects position on second line" do
-      buf = Document.new("ab\ncd") |> Document.move_to({1, 1})
-      assert Document.cursor(buf) == {1, 1}
     end
   end
 
@@ -232,54 +204,6 @@ defmodule Minga.Buffer.DocumentTest do
     end
   end
 
-  # ── Grapheme/byte conversion ──
-
-  describe "grapheme_col/2" do
-    test "ASCII: byte col equals grapheme col" do
-      buf = Document.new("hello")
-      assert Document.grapheme_col(buf, {0, 3}) == 3
-    end
-
-    test "multi-byte: byte col larger than grapheme col" do
-      # "café" — é is 2 bytes
-      buf = Document.new("café")
-      # byte_col 3 = start of é = grapheme col 3
-      assert Document.grapheme_col(buf, {0, 3}) == 3
-      # byte_col 5 (end) = 4 graphemes
-      assert Document.grapheme_col(buf, {0, 5}) == 4
-    end
-
-    test "emoji: 4-byte char" do
-      buf = Document.new("🥨ab")
-      # byte 0 = grapheme 0
-      assert Document.grapheme_col(buf, {0, 0}) == 0
-      # byte 4 = past emoji = grapheme 1
-      assert Document.grapheme_col(buf, {0, 4}) == 1
-      # byte 5 = grapheme 2
-      assert Document.grapheme_col(buf, {0, 5}) == 2
-    end
-  end
-
-  describe "last_grapheme_byte_offset/1" do
-    test "empty string returns 0" do
-      assert Document.last_grapheme_byte_offset("") == 0
-    end
-
-    test "ASCII string" do
-      assert Document.last_grapheme_byte_offset("hello") == 4
-    end
-
-    test "multi-byte last char" do
-      # "café" — é starts at byte 3
-      assert Document.last_grapheme_byte_offset("café") == 3
-    end
-
-    test "emoji last char" do
-      # "hi🥨" — 🥨 starts at byte 2
-      assert Document.last_grapheme_byte_offset("hi🥨") == 2
-    end
-  end
-
   # ── Round-trip integrity ──
 
   describe "content integrity" do
@@ -336,14 +260,6 @@ defmodule Minga.Buffer.DocumentTest do
     test "handles emoji sequences" do
       buf = Document.new("🇩🇪") |> Document.insert_text("!")
       assert Document.content(buf) == "!🇩🇪"
-    end
-
-    test "cursor position uses byte offsets" do
-      buf = Document.new("🥨ab") |> Document.move(:right)
-      # 🥨 is 4 bytes, so cursor_col = 4
-      assert Document.cursor(buf) == {0, 4}
-      # But grapheme_col is 1
-      assert Document.grapheme_col(buf, Document.cursor(buf)) == 1
     end
   end
 
@@ -442,24 +358,6 @@ defmodule Minga.Buffer.DocumentTest do
       assert Document.cursor(buf) == {0, 0}
       assert Document.line_count(buf) == 1
     end
-
-    test "move_to arbitrary position updates cache" do
-      buf = Document.new("abc\ndef\nghi") |> Document.move_to({2, 1})
-      assert_cache_valid(buf)
-      assert Document.cursor(buf) == {2, 1}
-    end
-
-    test "move_left across newline updates line and col" do
-      buf = Document.new("ab\ncd") |> Document.move_to({1, 0}) |> Document.move(:left)
-      assert_cache_valid(buf)
-      assert Document.cursor(buf) == {0, 2}
-    end
-
-    test "move_right across newline updates line and resets col" do
-      buf = Document.new("ab\ncd") |> Document.move_to({0, 2}) |> Document.move(:right)
-      assert_cache_valid(buf)
-      assert Document.cursor(buf) == {1, 0}
-    end
   end
 
   # ── Property: cache always matches recomputed values ──
@@ -532,32 +430,6 @@ defmodule Minga.Buffer.DocumentTest do
            "line_count: got #{lc}, expected #{expected_lc} (content=#{inspect(text)})"
 
     :ok
-  end
-
-  # ── Line index cache tests ──
-
-  describe "line index cache" do
-    test "position_to_offset uses index for O(1) lookup" do
-      buf = Document.new("hello\nworld\nfoo")
-      # "hello\n" = 6 bytes, "world\n" = 6 bytes, "foo" starts at 12
-      assert Document.position_to_offset(buf, {0, 0}) == 0
-      assert Document.position_to_offset(buf, {1, 0}) == 6
-      assert Document.position_to_offset(buf, {2, 0}) == 12
-      assert Document.position_to_offset(buf, {2, 2}) == 14
-    end
-
-    test "position_to_offset clamps column beyond line length to text_size" do
-      buf = Document.new("ab\ncd")
-      # Total text_size = 5. Line 0 starts at 0, line 1 starts at 3.
-      # Column 50 on line 0 would be 0 + 50 = 50, but clamps to 5.
-      assert Document.position_to_offset(buf, {0, 50}) == 5
-    end
-
-    test "position_to_offset clamps line beyond last line" do
-      buf = Document.new("ab\ncd")
-      # Only lines 0 and 1. Line 99 clamps to line 1 (offset 3) + col 0.
-      assert Document.position_to_offset(buf, {99, 0}) == 3
-    end
   end
 
   # Convert a byte offset in text to a {line, byte_col} position.

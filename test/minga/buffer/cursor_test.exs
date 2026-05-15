@@ -111,6 +111,29 @@ defmodule Minga.Buffer.CursorTest do
     end
   end
 
+  describe "cache updates" do
+    test "place updates cursor cache" do
+      doc = Document.new("abc\ndef\nghi") |> Cursor.place({2, 1})
+
+      assert_cache_valid(doc)
+      assert Document.cursor(doc) == {2, 1}
+    end
+
+    test "moving left across a newline updates line and column" do
+      doc = Document.new("ab\ncd") |> Cursor.place({1, 0}) |> Cursor.move(:left)
+
+      assert_cache_valid(doc)
+      assert Document.cursor(doc) == {0, 2}
+    end
+
+    test "moving right across a newline updates line and column" do
+      doc = Document.new("ab\ncd") |> Cursor.place({0, 2}) |> Cursor.move(:right)
+
+      assert_cache_valid(doc)
+      assert Document.cursor(doc) == {1, 0}
+    end
+  end
+
   property "moving does not alter content" do
     check all(
             text <- string(:printable, min_length: 1, max_length: 200),
@@ -149,5 +172,31 @@ defmodule Minga.Buffer.CursorTest do
       max_col = byte_size(current_line)
       assert byte_col >= 0 and byte_col <= max_col
     end
+  end
+
+  @spec assert_cache_valid(Document.t()) :: :ok
+  defp assert_cache_valid(%Document{
+         before: before,
+         after: after_,
+         cursor_line: cursor_line,
+         cursor_col: cursor_col,
+         line_count: line_count
+       }) do
+    lines_before = :binary.split(before, "\n", [:global])
+    expected_line = length(lines_before) - 1
+    expected_column = lines_before |> List.last() |> byte_size()
+    text = before <> after_
+
+    expected_line_count =
+      case text do
+        "" -> 1
+        _ -> length(:binary.matches(text, "\n")) + 1
+      end
+
+    assert cursor_line == expected_line
+    assert cursor_col == expected_column
+    assert line_count == expected_line_count
+
+    :ok
   end
 end
