@@ -1,94 +1,116 @@
 defmodule Minga.Buffer.Position do
-  @typedoc """
-  A zero-indexed `{line, byte_col}` position in the buffer.
+  @moduledoc """
+  Resolves editor positions into concrete places in document text.
 
-  `byte_col` is the byte offset within the line's UTF-8 binary.
-  For ASCII text, this equals the character/grapheme index.
+  A position is still stored as `{line, column}` for the rest of the editor, but this module owns the translation between that editor-facing coordinate and the document's internal text point.
   """
-  @type t :: {line :: non_neg_integer(), byte_col :: non_neg_integer()}
 
   alias Minga.Buffer.{Document, Lines}
 
-  @doc """
-  Returns the byte offset of a `{line, byte_col}` position in the buffer content.
-  """
-  @spec position_to_offset(Document.t(), t()) :: non_neg_integer()
-  def position_to_offset(%Document{} = buf, {line, col})
-      when line >= 0 and col >= 0 do
-    {offsets, text} = Lines.ensure_line_offsets(buf)
-    offset_for_position(offsets, line, col, byte_size(text))
+  @typedoc "A zero-indexed editor position."
+  @type t :: {line :: non_neg_integer(), column :: non_neg_integer()}
+
+  @typedoc "An absolute point in the document text."
+  @type point :: non_neg_integer()
+
+  @doc "Returns the document point for an editor position."
+  @spec point_for(Document.t(), t()) :: point()
+  def point_for(%Document{} = doc, {line, column})
+      when line >= 0 and column >= 0 do
+    {line_starts, text} = Lines.snapshot(doc)
+    point_in(line_starts, line, column, byte_size(text))
   end
 
-  @doc """
-  Converts a byte offset in the buffer content to a `{line, byte_col}` position.
-  Clamps to valid bounds.
-  """
-  @spec offset_to_position(Document.t(), non_neg_integer()) :: t()
-  def offset_to_position(%Document{} = buf, offset) when offset >= 0 do
-    text = Document.content(buf)
-    do_offset_to_position(text, offset, 0, 0)
+  @doc "Returns the editor position at a document point."
+  @spec from_point(Document.t(), point()) :: t()
+  def from_point(%Document{} = doc, point) when point >= 0 do
+    doc |> Document.content() |> walk_to_position(point, 0, 0)
   end
 
-  @doc """
-  Computes the byte offset from start of text for a {line, byte_col} position
-  using the line offset tuple. O(1) lookup instead of O(lines) iteration.
-  """
-  @spec offset_for_position(tuple(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
-          non_neg_integer()
-  def offset_for_position(offsets, line, col, text_size) do
-    max_line = tuple_size(offsets) - 1
+  @doc "Returns the document point for an editor position against an existing line index."
+  @spec point_in(Lines.line_starts(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          point()
+  def point_in(line_starts, line, column, text_size)
+      when is_tuple(line_starts) and line >= 0 and column >= 0 do
+    max_line = tuple_size(line_starts) - 1
     clamped_line = min(line, max_line)
-    offset = elem(offsets, clamped_line) + col
-    min(offset, text_size)
+    point = Lines.start(line_starts, clamped_line) + column
+    min(point, text_size)
   end
 
-  @doc """
-  Converts a `{line, byte_col}` position to a grapheme (display) column.
-
-  Counts graphemes in the line text from byte 0 to `byte_col`.
-  Used by the renderer to convert byte positions to screen columns.
-  """
-  @spec grapheme_col(Document.t(), t()) :: non_neg_integer()
-  def grapheme_col(%Document{} = buf, {line, byte_col}) do
-    case Lines.line_at(buf, line) do
+  @doc "Returns the on-screen column for an editor position."
+  @spec display_column(Document.t(), t()) :: non_neg_integer()
+  def display_column(%Document{} = doc, {line, column}) do
+    case Lines.fetch(doc, line) do
       nil -> 0
-      text -> grapheme_count_in_bytes(text, byte_col)
+      text -> visible_steps_before(text, column)
     end
   end
 
-  # Converts a byte offset to {line, byte_col} by scanning for newlines.
-  defp do_offset_to_position(_text, 0, line, col), do: {line, col}
-  defp do_offset_to_position("", _offset, line, col), do: {line, col}
+  @doc "Returns the position of the last selectable character on a line."
+  @spec last_character_on_line(String.t()) :: non_neg_integer()
+  def last_character_on_line(""), do: 0
 
-  defp do_offset_to_position(text, offset, line, col) when offset > 0 do
+  def last_character_on_line(text) when is_binary(text) do
+    {point, _size} = final_character(text, 0)
+    point
+  end
+
+  @doc "Returns the point immediately after the character at `point`."
+  @spec after_character_at(String.t(), point()) :: point()
+  def after_character_at(text, point) when is_binary(text) and is_integer(point) and point >= 0 do
+    text_size = byte_size(text)
+    clamped_point = min(point, text_size)
+    remaining = binary_part(text, clamped_point, text_size - clamped_point)
+
+    case String.next_grapheme_size(remaining) do
+      {size, _rest} -> min(clamped_point + size, text_size)
+      nil -> clamped_point
+    end
+  end
+
+  @spec walk_to_position(String.t(), point(), non_neg_integer(), non_neg_integer()) :: t()
+  defp walk_to_position(_text, 0, line, column), do: {line, column}
+  defp walk_to_position("", _point, line, column), do: {line, column}
+
+  defp walk_to_position(text, point, line, column) when point > 0 do
     case text do
       <<"\n", rest::binary>> ->
-        do_offset_to_position(rest, offset - 1, line + 1, 0)
+        walk_to_position(rest, point - 1, line + 1, 0)
 
       <<_byte, rest::binary>> ->
-        do_offset_to_position(rest, offset - 1, line, col + 1)
+        walk_to_position(rest, point - 1, line, column + 1)
     end
   end
 
-  # Count graphemes in the first `byte_count` bytes of `text`.
-  @spec grapheme_count_in_bytes(String.t(), non_neg_integer()) :: non_neg_integer()
-  defp grapheme_count_in_bytes(_text, 0), do: 0
+  @spec visible_steps_before(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp visible_steps_before(_text, 0), do: 0
 
-  defp grapheme_count_in_bytes(text, byte_count),
-    do: do_grapheme_count_in_bytes(text, byte_count, 0, 0)
+  defp visible_steps_before(text, column), do: count_visible_steps(text, column, 0, 0)
 
-  defp do_grapheme_count_in_bytes(_text, byte_count, bytes_seen, grapheme_count)
-       when bytes_seen >= byte_count do
-    grapheme_count
+  @spec count_visible_steps(String.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp count_visible_steps(_text, target_column, current_column, visible_steps)
+       when current_column >= target_column do
+    visible_steps
   end
 
-  defp do_grapheme_count_in_bytes(text, byte_count, bytes_seen, grapheme_count) do
+  defp count_visible_steps(text, target_column, current_column, visible_steps) do
     case String.next_grapheme_size(text) do
       {size, rest} ->
-        do_grapheme_count_in_bytes(rest, byte_count, bytes_seen + size, grapheme_count + 1)
+        count_visible_steps(rest, target_column, current_column + size, visible_steps + 1)
 
       nil ->
-        grapheme_count
+        visible_steps
+    end
+  end
+
+  @spec final_character(String.t(), non_neg_integer()) :: {non_neg_integer(), non_neg_integer()}
+  defp final_character(text, current_point) do
+    case String.next_grapheme_size(text) do
+      {size, ""} -> {current_point, size}
+      {size, rest} -> final_character(rest, current_point + size)
+      nil -> {current_point, 0}
     end
   end
 end

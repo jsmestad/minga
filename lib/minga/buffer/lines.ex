@@ -1,89 +1,109 @@
 defmodule Minga.Buffer.Lines do
+  @moduledoc """
+  Presents document content as editor lines.
+
+  This module owns line-oriented questions: fetching visible line text, taking line ranges, and measuring how inserted text changes the current line.
+  """
+
   alias Minga.Buffer.Document
 
-  @doc """
-  Returns the text of a specific line (zero-indexed), without the trailing newline.
-  Returns `nil` if the line number is out of range.
-  """
-  @spec line_at(Document.t(), non_neg_integer()) :: String.t() | nil
-  def line_at(%Document{} = buf, line_num) when line_num >= 0 do
-    {offsets, text} = ensure_line_offsets(buf)
+  @type line_index :: non_neg_integer()
+  @type line_count :: pos_integer()
+  @type line_starts :: tuple()
+  @type line_span :: {start :: non_neg_integer(), length :: non_neg_integer()}
+  @type snapshot :: {line_starts(), String.t()}
 
-    case line_byte_range(offsets, line_num, byte_size(text)) do
+  @doc "Returns the content of one editor line without its trailing newline."
+  @spec fetch(Document.t(), line_index()) :: String.t() | nil
+  def fetch(%Document{} = doc, line) when line >= 0 do
+    {line_starts, text} = snapshot(doc)
+
+    case span(line_starts, line, byte_size(text)) do
       nil -> nil
-      {start, len} -> binary_part(text, start, len)
+      {start, length} -> binary_part(text, start, length)
     end
   end
 
-  @doc """
-  Returns a range of lines (zero-indexed, inclusive start, exclusive end).
-  """
-  @spec lines(Document.t(), non_neg_integer(), non_neg_integer()) :: [String.t()]
+  @doc "Returns up to `count` editor lines starting at `first_line`."
+  @spec slice(Document.t(), line_index(), non_neg_integer()) :: [String.t()]
+  def slice(%Document{} = doc, first_line, count) when first_line >= 0 and count >= 0 do
+    {line_starts, text} = snapshot(doc)
+    text_size = byte_size(text)
+    last_line = tuple_size(line_starts) - 1
+    final_line = min(first_line + count - 1, last_line)
 
-  def lines(%Document{} = buf, start, count) when start >= 0 and count >= 0 do
-    {offsets, _text} = ensure_line_offsets(buf)
-    # text_size = byte_size(text)
-    max_line = tuple_size(offsets) - 1
-    last = min(start + count - 1, max_line)
-
-    if start > max_line do
+    if first_line > last_line do
       []
     else
-      for line_num <- start..last do
-        line_at(buf, line_num)
-        # {s, len} = line_byte_range(offsets, line_num, text_size)
-        # binary_part(text, s, len)
+      for line <- first_line..final_line do
+        {start, length} = span(line_starts, line, text_size)
+        binary_part(text, start, length)
       end
     end
   end
 
-  @doc """
-  Lazily computes line offsets if the cache is stale. Returns the offset
-  tuple and the materialized content binary so callers avoid a second
-  `content()` call. Uses `:binary.matches/2` (Boyer-Moore in C) for a
-  single-pass newline scan.
-  """
-  @spec ensure_line_offsets(Document.t()) :: {tuple(), String.t()}
-  def ensure_line_offsets(%Document{line_offsets: offsets} = buf) when is_tuple(offsets) do
-    {offsets, Document.content(buf)}
+  @doc "Returns indexed document text so callers can answer multiple line questions without rebuilding the line index."
+  @spec snapshot(Document.t()) :: snapshot()
+  def snapshot(%Document{line_offsets: line_starts} = doc) when is_tuple(line_starts) do
+    {line_starts, Document.content(doc)}
   end
 
-  def ensure_line_offsets(%Document{} = buf) do
-    text = Document.content(buf)
-    offsets = build_line_offsets(text)
-    {offsets, text}
+  def snapshot(%Document{} = doc) do
+    text = Document.content(doc)
+    {build_index(text), text}
   end
 
-  # Builds a tuple of byte offsets marking the start of each line.
-  # Line 0 always starts at offset 0. Each subsequent line starts one byte
-  # after a newline character.
-  @spec build_line_offsets(String.t()) :: tuple()
-  defp build_line_offsets(text) do
+  @doc "Returns how many editor lines `text` occupies."
+  @spec count(String.t()) :: line_count()
+  def count(""), do: 1
+  def count(text) when is_binary(text), do: break_count(text) + 1
+
+  @doc "Returns how many line breaks appear in `text`."
+  @spec break_count(String.t()) :: non_neg_integer()
+  def break_count(text) when is_binary(text), do: length(:binary.matches(text, "\n"))
+
+  @doc "Returns the cursor column at the end of the final line in `text`."
+  @spec last_line_width(String.t()) :: non_neg_integer()
+  def last_line_width(""), do: 0
+
+  def last_line_width(text) do
+    byte_size(text) - last_line_start(text)
+  end
+
+  @doc "Returns the content span for one editor line."
+  @spec span(line_starts(), line_index(), non_neg_integer()) :: line_span() | nil
+  def span(line_starts, line, _text_size) when line > tuple_size(line_starts) - 1, do: nil
+
+  def span(line_starts, line, text_size) when line == tuple_size(line_starts) - 1 do
+    start = elem(line_starts, line)
+    {start, text_size - start}
+  end
+
+  def span(line_starts, line, _text_size) do
+    start = elem(line_starts, line)
+    next_start = elem(line_starts, line + 1)
+    {start, next_start - start - 1}
+  end
+
+  @doc "Returns where one editor line starts in the document text."
+  @spec start(line_starts(), line_index()) :: non_neg_integer()
+  def start(line_starts, line) when is_tuple(line_starts) and line >= 0 do
+    elem(line_starts, line)
+  end
+
+  @spec build_index(String.t()) :: line_starts()
+  defp build_index(text) do
     newline_positions = :binary.matches(text, "\n")
 
     [0 | Enum.map(newline_positions, fn {pos, _len} -> pos + 1 end)]
     |> List.to_tuple()
   end
 
-  @doc """
-  Returns the byte range {start_offset, byte_length} for a given line
-  number, using the line offset tuple and the total content size.
-  Returns `nil` if the line is out of range.
-  """
-  @spec line_byte_range(tuple(), non_neg_integer(), non_neg_integer()) ::
-          {non_neg_integer(), non_neg_integer()} | nil
-  def line_byte_range(offsets, line_num, _text_size) when line_num > tuple_size(offsets) - 1,
-    do: nil
-
-  def line_byte_range(offsets, line_num, text_size) when line_num == tuple_size(offsets) - 1 do
-    start = elem(offsets, line_num)
-    {start, text_size - start}
-  end
-
-  def line_byte_range(offsets, line_num, _text_size) do
-    start = elem(offsets, line_num)
-    # Next line starts at elem(offsets, line_num + 1); subtract 1 for the newline
-    next_start = elem(offsets, line_num + 1)
-    {start, next_start - start - 1}
+  @spec last_line_start(String.t()) :: non_neg_integer()
+  defp last_line_start(text) do
+    case :binary.matches(text, "\n") do
+      [] -> 0
+      matches -> elem(List.last(matches), 0) + 1
+    end
   end
 end

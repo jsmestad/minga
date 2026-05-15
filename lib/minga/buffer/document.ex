@@ -76,7 +76,7 @@ defmodule Minga.Buffer.Document do
     lc =
       case text do
         "" -> 1
-        _ -> count_newlines(text) + 1
+        _ -> Lines.count(text)
       end
 
     %__MODULE__{before: "", after: text, cursor_line: 0, cursor_col: 0, line_count: lc}
@@ -188,12 +188,12 @@ defmodule Minga.Buffer.Document do
   def delete_before(
         %__MODULE__{before: before, cursor_line: line, cursor_col: _col, line_count: lc} = buf
       ) do
-    {new_before, removed} = pop_last_grapheme(before)
+    {new_before, removed} = Cursor.previous_character(before)
 
     {new_line, new_col, new_lc} =
       case removed do
-        "\n" -> {line - 1, byte_col_in_last_line(new_before), lc - 1}
-        _ -> {line, byte_size(new_before) - byte_offset_of_last_newline(new_before), lc}
+        "\n" -> {line - 1, Lines.last_line_width(new_before), lc - 1}
+        _ -> {line, Lines.last_line_width(new_before), lc}
       end
 
     %{buf | before: new_before, cursor_line: new_line, cursor_col: new_col, line_count: new_lc}
@@ -207,7 +207,7 @@ defmodule Minga.Buffer.Document do
   def delete_at(%__MODULE__{after: ""} = buf), do: buf
 
   def delete_at(%__MODULE__{after: after_, line_count: lc} = buf) do
-    case String.next_grapheme(after_) do
+    case Cursor.next_character(after_) do
       {"\n", rest} -> %{buf | after: rest, line_count: lc - 1}
       {_grapheme, rest} -> %{buf | after: rest}
       nil -> buf
@@ -222,21 +222,18 @@ defmodule Minga.Buffer.Document do
   """
   @spec content_range(t(), position(), position()) :: String.t()
   def content_range(%__MODULE__{} = buf, from_pos, to_pos) do
-    {offsets, text} = Lines.ensure_line_offsets(buf)
+    {offsets, text} = Lines.snapshot(buf)
     text_size = byte_size(text)
 
     from_off =
-      Position.offset_for_position(offsets, elem(from_pos, 0), elem(from_pos, 1), text_size)
+      Position.point_in(offsets, elem(from_pos, 0), elem(from_pos, 1), text_size)
 
-    to_off = Position.offset_for_position(offsets, elem(to_pos, 0), elem(to_pos, 1), text_size)
+    to_off = Position.point_in(offsets, elem(to_pos, 0), elem(to_pos, 1), text_size)
     {start_off, end_off} = if from_off <= to_off, do: {from_off, to_off}, else: {to_off, from_off}
 
-    # end_off points to the start of the last character. Find its byte length.
-    remaining = binary_part(text, end_off, text_size - end_off)
-    char_len = next_grapheme_byte_size(remaining)
-    extract_len = min(end_off - start_off + char_len, text_size - start_off)
+    range_end = Position.after_character_at(text, end_off)
 
-    binary_part(text, start_off, extract_len)
+    binary_part(text, start_off, range_end - start_off)
   end
 
   @doc """
@@ -246,23 +243,20 @@ defmodule Minga.Buffer.Document do
   """
   @spec delete_range(t(), position(), position()) :: t()
   def delete_range(%__MODULE__{} = buf, from_pos, to_pos) do
-    {offsets, text} = Lines.ensure_line_offsets(buf)
+    {offsets, text} = Lines.snapshot(buf)
     text_size = byte_size(text)
 
     from_off =
-      Position.offset_for_position(offsets, elem(from_pos, 0), elem(from_pos, 1), text_size)
+      Position.point_in(offsets, elem(from_pos, 0), elem(from_pos, 1), text_size)
 
-    to_off = Position.offset_for_position(offsets, elem(to_pos, 0), elem(to_pos, 1), text_size)
+    to_off = Position.point_in(offsets, elem(to_pos, 0), elem(to_pos, 1), text_size)
 
     {start_off, end_off, cursor_pos} =
       if from_off <= to_off,
         do: {from_off, to_off, from_pos},
         else: {to_off, from_off, to_pos}
 
-    # end_off points to the start of the last character. Find its byte length.
-    remaining = binary_part(text, end_off, text_size - end_off)
-    char_len = next_grapheme_byte_size(remaining)
-    delete_end = min(end_off + char_len, text_size)
+    delete_end = Position.after_character_at(text, end_off)
 
     before_text = binary_part(text, 0, start_off)
     after_text = binary_part(text, delete_end, text_size - delete_end)
@@ -278,19 +272,16 @@ defmodule Minga.Buffer.Document do
   """
   @spec get_range(t(), position(), position()) :: String.t()
   def get_range(%__MODULE__{} = buf, start_pos, end_pos) do
-    {offsets, text} = Lines.ensure_line_offsets(buf)
+    {offsets, text} = Lines.snapshot(buf)
     text_size = byte_size(text)
 
     {s, e} = sort_positions(start_pos, end_pos)
-    s_off = Position.offset_for_position(offsets, elem(s, 0), elem(s, 1), text_size)
-    e_off = Position.offset_for_position(offsets, elem(e, 0), elem(e, 1), text_size)
+    s_off = Position.point_in(offsets, elem(s, 0), elem(s, 1), text_size)
+    e_off = Position.point_in(offsets, elem(e, 0), elem(e, 1), text_size)
 
-    # e_off points to the start of the last character. Find its byte length.
-    remaining = binary_part(text, e_off, text_size - e_off)
-    char_len = next_grapheme_byte_size(remaining)
-    extract_len = min(e_off - s_off + char_len, text_size - s_off)
+    range_end = Position.after_character_at(text, e_off)
 
-    binary_part(text, s_off, extract_len)
+    binary_part(text, s_off, range_end - s_off)
   end
 
   @doc """
@@ -302,7 +293,7 @@ defmodule Minga.Buffer.Document do
       when start_line >= 0 and end_line >= 0 do
     {s, e} = if start_line <= end_line, do: {start_line, end_line}, else: {end_line, start_line}
     count = e - s + 1
-    Lines.lines(buf, s, count) |> Enum.join("\n")
+    Lines.slice(buf, s, count) |> Enum.join("\n")
   end
 
   @doc """
@@ -314,7 +305,7 @@ defmodule Minga.Buffer.Document do
   @spec delete_lines(t(), non_neg_integer(), non_neg_integer()) :: t()
   def delete_lines(%__MODULE__{} = buf, start_line, end_line)
       when start_line >= 0 and end_line >= 0 do
-    {offsets, text} = Lines.ensure_line_offsets(buf)
+    {offsets, text} = Lines.snapshot(buf)
     text_size = byte_size(text)
     total_lines = tuple_size(offsets)
 
@@ -365,7 +356,7 @@ defmodule Minga.Buffer.Document do
   """
   @spec clear_line(t(), non_neg_integer()) :: {String.t(), t()}
   def clear_line(%__MODULE__{} = buf, line_num) when line_num >= 0 do
-    case Minga.Buffer.Lines.line_at(buf, line_num) do
+    case Lines.fetch(buf, line_num) do
       nil ->
         {"", buf}
 
@@ -374,7 +365,7 @@ defmodule Minga.Buffer.Document do
 
       text ->
         start_pos = {line_num, 0}
-        end_pos = {line_num, last_grapheme_byte_offset(text)}
+        end_pos = {line_num, Position.last_character_on_line(text)}
         new_buf = delete_range(buf, start_pos, end_pos)
         {text, new_buf}
     end
@@ -394,23 +385,7 @@ defmodule Minga.Buffer.Document do
     {before <> after_, {line, col}}
   end
 
-  # ── Byte/grapheme conversion utilities ──
-
-  @doc """
-  Returns the byte offset of the first byte of the last grapheme in `text`.
-  Returns 0 for empty strings.
-  """
-  @spec last_grapheme_byte_offset(String.t()) :: non_neg_integer()
-  def last_grapheme_byte_offset(""), do: 0
-
-  def last_grapheme_byte_offset(text) do
-    {offset, _size} = find_last_grapheme_offset(text, 0)
-    offset
-  end
-
   # ── Private helpers ──
-
-  # ── Movement helpers ──
 
   # Computes new cursor position and line_count after inserting `text` at the current cursor.
   # Uses byte_size for column tracking.
@@ -421,67 +396,14 @@ defmodule Minga.Buffer.Document do
           String.t()
         ) :: {non_neg_integer(), non_neg_integer(), pos_integer()}
   defp compute_cursor_after_insert(line, col, lc, text) do
-    newline_count = count_newlines(text)
+    newline_count = Lines.break_count(text)
 
     case newline_count do
       0 ->
         {line, col + byte_size(text), lc}
 
       _ ->
-        # Find byte_size of content after the last newline
-        matches = :binary.matches(text, "\n")
-        {last_newline_pos, _len} = List.last(matches)
-        last_line_bytes = byte_size(text) - last_newline_pos - 1
-        {line + newline_count, last_line_bytes, lc + newline_count}
-    end
-  end
-
-  @doc """
-  Returns the byte column of the position after the last `\n` in `str`,
-  i.e. the byte offset within the current line if the cursor were at the end of `str`.
-  """
-  @spec byte_col_in_last_line(String.t()) :: non_neg_integer()
-  def byte_col_in_last_line(""), do: 0
-
-  def byte_col_in_last_line(str) do
-    byte_size(str) - byte_offset_of_last_newline(str)
-  end
-
-  @doc "Returns the byte offset just past the last `\n` in `str`, or 0 if no newline."
-  @spec byte_offset_of_last_newline(String.t()) :: non_neg_integer()
-  def byte_offset_of_last_newline(str) do
-    case :binary.matches(str, "\n") do
-      [] -> 0
-      matches -> elem(List.last(matches), 0) + 1
-    end
-  end
-
-  @doc "Splits off the last grapheme from a string, preserving exact binary representation."
-  @spec pop_last_grapheme(String.t()) :: {String.t(), String.t()}
-  def pop_last_grapheme(str) do
-    byte_len = byte_size(str)
-    # Walk forward with next_grapheme to find where the last grapheme starts
-    {last_start, _} = find_last_grapheme_offset(str, 0)
-    rest = binary_part(str, 0, last_start)
-    last = binary_part(str, last_start, byte_len - last_start)
-    {rest, last}
-  end
-
-  # Walks the string grapheme by grapheme, tracking the byte offset
-  # of the start of the last grapheme.
-  @spec find_last_grapheme_offset(String.t(), non_neg_integer()) ::
-          {non_neg_integer(), non_neg_integer()}
-  defp find_last_grapheme_offset(str, current_offset) do
-    case String.next_grapheme_size(str) do
-      {size, ""} ->
-        # This is the last grapheme
-        {current_offset, size}
-
-      {size, rest} ->
-        find_last_grapheme_offset(rest, current_offset + size)
-
-      nil ->
-        {current_offset, 0}
+        {line + newline_count, Lines.last_line_width(text), lc + newline_count}
     end
   end
 
@@ -490,29 +412,19 @@ defmodule Minga.Buffer.Document do
     if {l1, c1} <= {l2, c2}, do: {p1, p2}, else: {p2, p1}
   end
 
-  @spec count_newlines(String.t()) :: non_neg_integer()
-  defp count_newlines(str), do: length(:binary.matches(str, "\n"))
+  @doc "Returns the position of the last selectable character on a line."
+  @spec last_grapheme_byte_offset(String.t()) :: non_neg_integer()
+  defdelegate last_grapheme_byte_offset(text), to: Position, as: :last_character_on_line
 
-  # Returns the byte size of the next grapheme in `text`, or 0 for empty.
-  @spec next_grapheme_byte_size(String.t()) :: non_neg_integer()
-  defp next_grapheme_byte_size(""), do: 0
+  defdelegate line_at(buf, line_num), to: Lines, as: :fetch
+  defdelegate lines(buf, start, count), to: Lines, as: :slice
 
-  defp next_grapheme_byte_size(text) do
-    case String.next_grapheme_size(text) do
-      {size, _rest} -> size
-      nil -> 0
-    end
-  end
+  defdelegate move(buf, direction), to: Cursor, as: :step
+  defdelegate move_to(buf, target), to: Cursor, as: :place
 
-  defdelegate line_at(buf, line_num), to: Lines
-  defdelegate lines(buf, start, count), to: Lines
-
-  defdelegate move(buf, direction), to: Cursor
-  defdelegate move_to(buf, target), to: Cursor
-
-  defdelegate position_to_offset(buf, target), to: Position
-  defdelegate offset_to_position(doc, offset), to: Position
-  defdelegate grapheme_col(buf, value), to: Position
+  defdelegate position_to_offset(buf, target), to: Position, as: :point_for
+  defdelegate offset_to_position(doc, offset), to: Position, as: :from_point
+  defdelegate grapheme_col(buf, value), to: Position, as: :display_column
 end
 
 defimpl Minga.Editing.Text.Readable, for: Minga.Buffer.Document do
@@ -522,7 +434,7 @@ defimpl Minga.Editing.Text.Readable, for: Minga.Buffer.Document do
   alias Minga.Buffer.Lines
 
   def content(doc), do: Document.content(doc)
-  def line_at(doc, n), do: Lines.line_at(doc, n)
+  def line_at(doc, n), do: Lines.fetch(doc, n)
   def line_count(doc), do: Document.line_count(doc)
   def offset_to_position(doc, offset), do: Document.offset_to_position(doc, offset)
 end
