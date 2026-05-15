@@ -412,7 +412,7 @@ defmodule Minga.Buffer.ServerTest do
     test "replaces buffer content and marks dirty" do
       {:ok, pid} = Server.start_link(content: "hello")
       gb = Server.snapshot(pid)
-      new_gb = Document.insert_char(gb, "X")
+      new_gb = Document.insert_text(gb, "X")
 
       assert :ok = Server.apply_snapshot(pid, new_gb)
       assert Server.content(pid) == "Xhello"
@@ -422,7 +422,7 @@ defmodule Minga.Buffer.ServerTest do
     test "pushes undo state so changes can be undone" do
       {:ok, pid} = Server.start_link(content: "hello")
       gb = Server.snapshot(pid)
-      new_gb = Document.insert_char(gb, "X")
+      new_gb = Document.insert_text(gb, "X")
 
       Server.apply_snapshot(pid, new_gb)
       assert Server.content(pid) == "Xhello"
@@ -434,7 +434,7 @@ defmodule Minga.Buffer.ServerTest do
     test "returns error on read-only buffer" do
       {:ok, pid} = Server.start_link(content: "hello", read_only: true)
       gb = Server.snapshot(pid)
-      new_gb = Document.insert_char(gb, "X")
+      new_gb = Document.insert_text(gb, "X")
 
       assert {:error, :read_only} = Server.apply_snapshot(pid, new_gb)
       assert Server.content(pid) == "hello"

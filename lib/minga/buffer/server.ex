@@ -18,7 +18,7 @@ defmodule Minga.Buffer.Server do
 
   use GenServer
 
-  alias Minga.Buffer.Document
+  alias Minga.Buffer.{Cursor, Document, Lines, Position}
   alias Minga.Buffer.EditDelta
   alias Minga.Buffer.EditSource
   alias Minga.Config
@@ -79,14 +79,14 @@ defmodule Minga.Buffer.Server do
 
   @doc "Opens a file, replacing the current buffer content."
   @spec open(GenServer.server(), String.t()) :: :ok | {:error, term()}
-  def open(server, file_path) when is_binary(file_path) do
+  def open(server, file_path) do
     GenServer.call(server, {:open, file_path})
   end
 
   @doc "Inserts a character at the current cursor position."
   @spec insert_char(GenServer.server(), String.t(), EditSource.t()) :: :ok
-  def insert_char(server, char, source \\ EditSource.user()) when is_binary(char) do
-    GenServer.call(server, {:insert_char, char, source})
+  def insert_char(server, char, source \\ EditSource.user()) do
+    GenServer.call(server, {:insert_text, char, source})
   end
 
   @doc """
@@ -95,7 +95,7 @@ defmodule Minga.Buffer.Server do
   Each character is inserted sequentially, advancing the cursor.
   """
   @spec insert_text(GenServer.server(), String.t(), EditSource.t()) :: :ok
-  def insert_text(server, text, source \\ EditSource.user()) when is_binary(text) do
+  def insert_text(server, text, source \\ EditSource.user()) do
     GenServer.call(server, {:insert_text, text, source})
   end
 
@@ -167,8 +167,7 @@ defmodule Minga.Buffer.Server do
 
   @spec find_and_replace(GenServer.server(), String.t(), String.t(), boundary()) ::
           {:ok, String.t()} | {:error, String.t()}
-  def find_and_replace(server, old_text, new_text, boundary \\ nil)
-      when is_binary(old_text) and is_binary(new_text) do
+  def find_and_replace(server, old_text, new_text, boundary \\ nil) do
     GenServer.call(server, {:find_and_replace, old_text, new_text, boundary})
   end
 
@@ -217,8 +216,7 @@ defmodule Minga.Buffer.Server do
 
   @doc "Moves the cursor to an exact position."
   @spec move_to(GenServer.server(), Document.position()) :: :ok
-  def move_to(server, {line, col} = pos)
-      when is_integer(line) and line >= 0 and is_integer(col) and col >= 0 do
+  def move_to(server, {line, col} = pos) when line >= 0 and col >= 0 do
     GenServer.call(server, {:move_to, pos})
   end
 
@@ -244,7 +242,7 @@ defmodule Minga.Buffer.Server do
 
   @doc "Saves the buffer content to a specific file path."
   @spec save_as(GenServer.server(), String.t()) :: :ok | {:error, term()}
-  def save_as(server, file_path) when is_binary(file_path) do
+  def save_as(server, file_path) do
     GenServer.call(server, {:save_as, file_path}, @file_io_call_timeout)
   end
 
@@ -258,13 +256,13 @@ defmodule Minga.Buffer.Server do
 
   @doc "Replaces buffer content bypassing read-only. For programmatic panel updates."
   @spec replace_content_force(GenServer.server(), String.t()) :: :ok
-  def replace_content_force(server, new_content) when is_binary(new_content) do
+  def replace_content_force(server, new_content) do
     GenServer.call(server, {:replace_content_force, new_content})
   end
 
   @doc "Replaces content and records it as the saved base revision."
   @spec replace_saved_content(GenServer.server(), String.t()) :: :ok
-  def replace_saved_content(server, new_content) when is_binary(new_content) do
+  def replace_saved_content(server, new_content) do
     GenServer.call(server, {:replace_saved_content, new_content}, @file_io_call_timeout)
   end
 
@@ -276,14 +274,13 @@ defmodule Minga.Buffer.Server do
 
   @doc "Returns the byte offset for the start of a given line."
   @spec byte_offset_for_line(GenServer.server(), non_neg_integer()) :: non_neg_integer()
-  def byte_offset_for_line(server, line) when is_integer(line) and line >= 0 do
+  def byte_offset_for_line(server, line) when line >= 0 do
     GenServer.call(server, {:byte_offset_for_line, line})
   end
 
   @doc "Returns a range of lines from the buffer."
   @spec get_lines(GenServer.server(), non_neg_integer(), non_neg_integer()) :: [String.t()]
-  def get_lines(server, start, count)
-      when is_integer(start) and start >= 0 and is_integer(count) and count >= 0 do
+  def get_lines(server, start, count) when start >= 0 and count >= 0 do
     GenServer.call(server, {:get_lines, start, count})
   end
 
@@ -295,7 +292,7 @@ defmodule Minga.Buffer.Server do
 
   @doc "Sets the cursor to an absolute position. Clamped to buffer bounds."
   @spec set_cursor(GenServer.server(), Document.position()) :: :ok
-  def set_cursor(server, {line, col}) when is_integer(line) and is_integer(col) do
+  def set_cursor(server, {line, col}) do
     GenServer.call(server, {:set_cursor, {line, col}})
   end
 
@@ -324,21 +321,15 @@ defmodule Minga.Buffer.Server do
 
   @doc "Returns the total line count."
   @spec line_count(GenServer.server()) :: pos_integer()
-  def line_count(server) do
-    GenServer.call(server, :line_count)
-  end
+  def line_count(server), do: GenServer.call(server, :line_count)
 
   @doc "Returns whether the buffer has unsaved changes."
   @spec dirty?(GenServer.server()) :: boolean()
-  def dirty?(server) do
-    GenServer.call(server, :dirty?)
-  end
+  def dirty?(server), do: GenServer.call(server, :dirty?)
 
   @doc "Returns the buffer's mutation version counter (increments on every content change)."
   @spec version(GenServer.server()) :: non_neg_integer()
-  def version(server) do
-    GenServer.call(server, :version)
-  end
+  def version(server), do: GenServer.call(server, :version)
 
   @doc """
   Returns and clears pending edit deltas accumulated since the last flush.
@@ -348,9 +339,7 @@ defmodule Minga.Buffer.Server do
   """
   @deprecated "Use flush_edits/2 with a consumer_id instead"
   @spec flush_edits(GenServer.server()) :: [EditDelta.t()]
-  def flush_edits(server) do
-    GenServer.call(server, :flush_edits)
-  end
+  def flush_edits(server), do: GenServer.call(server, :flush_edits)
 
   @doc """
   Returns edit deltas accumulated since the given consumer's last read.
@@ -369,7 +358,7 @@ defmodule Minga.Buffer.Server do
   synchronously inside the Editor GenServer before the deferred broadcast fires.
   """
   @spec flush_edits(GenServer.server(), atom()) :: [EditDelta.t()]
-  def flush_edits(server, consumer_id) when is_atom(consumer_id) do
+  def flush_edits(server, consumer_id) do
     GenServer.call(server, {:flush_edits, consumer_id})
   end
 
@@ -381,7 +370,7 @@ defmodule Minga.Buffer.Server do
   no GenServer calls. The path is expanded to an absolute path before lookup.
   """
   @spec pid_for_path(String.t()) :: {:ok, pid()} | :not_found
-  def pid_for_path(path) when is_binary(path) do
+  def pid_for_path(path) do
     abs_path = Path.expand(path)
 
     case Registry.lookup(Minga.Buffer.Registry, abs_path) do
@@ -428,8 +417,7 @@ defmodule Minga.Buffer.Server do
       Buffer.Server.remap_face(buf, "comment", italic: false)
   """
   @spec remap_face(GenServer.server(), String.t(), keyword()) :: :ok
-  def remap_face(server, face_name, attrs)
-      when is_binary(face_name) and is_list(attrs) do
+  def remap_face(server, face_name, attrs) when is_list(attrs) do
     GenServer.call(server, {:remap_face, face_name, attrs})
   end
 
@@ -437,7 +425,7 @@ defmodule Minga.Buffer.Server do
   Clears a buffer-local face override, restoring the theme default.
   """
   @spec clear_face_override(GenServer.server(), String.t()) :: :ok
-  def clear_face_override(server, face_name) when is_binary(face_name) do
+  def clear_face_override(server, face_name) do
     GenServer.call(server, {:clear_face_override, face_name})
   end
 
@@ -449,15 +437,13 @@ defmodule Minga.Buffer.Server do
   a highlight reparse after this call.
   """
   @spec set_filetype(GenServer.server(), atom()) :: :ok
-  def set_filetype(server, filetype) when is_atom(filetype) do
+  def set_filetype(server, filetype) do
     GenServer.call(server, {:set_filetype, filetype})
   end
 
   @doc "Returns the buffer name (e.g. `*Messages*`), or `nil` for file buffers."
   @spec buffer_name(GenServer.server()) :: String.t() | nil
-  def buffer_name(server) do
-    GenServer.call(server, :buffer_name)
-  end
+  def buffer_name(server), do: GenServer.call(server, :buffer_name)
 
   @doc """
   Returns the display name for use in the status bar and modeline.
@@ -529,7 +515,7 @@ defmodule Minga.Buffer.Server do
   """
   @spec set_option(GenServer.server(), atom(), term()) ::
           {:ok, term()} | {:error, String.t()}
-  def set_option(server, name, value) when is_atom(name) do
+  def set_option(server, name, value) do
     GenServer.call(server, {:set_option, name, value})
   end
 
@@ -551,7 +537,7 @@ defmodule Minga.Buffer.Server do
 
   @doc "Appends text to the end of the buffer, bypassing read-only. For programmatic writes."
   @spec append(GenServer.server(), String.t()) :: :ok
-  def append(server, text) when is_binary(text) do
+  def append(server, text) do
     GenServer.call(server, {:append, text})
   end
 
@@ -567,8 +553,7 @@ defmodule Minga.Buffer.Server do
   """
   @spec render_snapshot(GenServer.server(), non_neg_integer(), non_neg_integer()) ::
           RenderSnapshot.t()
-  def render_snapshot(server, first_line, count)
-      when is_integer(first_line) and first_line >= 0 and is_integer(count) and count >= 0 do
+  def render_snapshot(server, first_line, count) when first_line >= 0 and count >= 0 do
     GenServer.call(server, {:render_snapshot, first_line, count})
   end
 
@@ -599,8 +584,7 @@ defmodule Minga.Buffer.Server do
   """
   @spec get_lines_content(GenServer.server(), non_neg_integer(), non_neg_integer()) :: String.t()
   def get_lines_content(server, start_line, end_line)
-      when is_integer(start_line) and start_line >= 0 and
-             is_integer(end_line) and end_line >= 0 do
+      when start_line >= 0 and end_line >= 0 do
     GenServer.call(server, {:get_lines_content, start_line, end_line})
   end
 
@@ -612,7 +596,7 @@ defmodule Minga.Buffer.Server do
 
   @doc "Clears all content on the given line. Returns `{:ok, yanked_text}`."
   @spec clear_line(GenServer.server(), non_neg_integer()) :: {:ok, String.t()}
-  def clear_line(server, line) when is_integer(line) and line >= 0 do
+  def clear_line(server, line) when line >= 0 do
     GenServer.call(server, {:clear_line, line})
   end
 
@@ -652,9 +636,7 @@ defmodule Minga.Buffer.Server do
 
   @doc "Deletes lines [start_line, end_line] inclusive. Cursor lands at the first remaining line."
   @spec delete_lines(GenServer.server(), non_neg_integer(), non_neg_integer()) :: :ok
-  def delete_lines(server, start_line, end_line)
-      when is_integer(start_line) and start_line >= 0 and
-             is_integer(end_line) and end_line >= 0 do
+  def delete_lines(server, start_line, end_line) when start_line >= 0 and end_line >= 0 do
     GenServer.call(server, {:delete_lines, start_line, end_line})
   end
 
@@ -736,7 +718,7 @@ defmodule Minga.Buffer.Server do
 
   @doc "Removes all highlight ranges in a group."
   @spec remove_highlight_group(GenServer.server(), atom()) :: :ok
-  def remove_highlight_group(server, group) when is_atom(group) do
+  def remove_highlight_group(server, group) do
     GenServer.call(server, {:remove_highlight_group, group})
   end
 
@@ -764,7 +746,7 @@ defmodule Minga.Buffer.Server do
           keyword()
         ) :: :ok
   def replace_content_with_decorations(server, content, decoration_fn, opts \\ [])
-      when is_binary(content) and is_function(decoration_fn, 1) do
+      when is_function(decoration_fn, 1) do
     GenServer.call(server, {:replace_content_with_decorations, content, decoration_fn, opts})
   end
 
@@ -913,27 +895,6 @@ defmodule Minga.Buffer.Server do
     end
   end
 
-  def handle_call({:insert_char, _char, _source}, _from, %{read_only: true} = state) do
-    {:reply, {:error, :read_only}, state}
-  end
-
-  def handle_call({:insert_char, char, source}, _from, state) do
-    old_doc = state.document
-    new_buf = Document.insert_char(old_doc, char)
-
-    delta =
-      EditDelta.insertion(
-        byte_size(old_doc.before),
-        Document.cursor(old_doc),
-        char,
-        Document.cursor(new_buf)
-      )
-
-    undo_source = EditSource.to_undo_source(source)
-    state = push_undo(state, new_buf, undo_source) |> mark_dirty() |> record_edit(delta, source)
-    {:reply, :ok, state}
-  end
-
   def handle_call({:insert_text, _text, _source}, _from, %{read_only: true} = state) do
     {:reply, {:error, :read_only}, state}
   end
@@ -968,7 +929,7 @@ defmodule Minga.Buffer.Server do
     start_byte = byte_offset_at(old_content, from_pos)
     old_end_byte = byte_offset_at(old_content, to_pos)
 
-    doc = Document.move_to(state.document, from_pos)
+    doc = Cursor.place(state.document, from_pos)
     doc = Document.delete_range(doc, from_pos, to_pos)
     doc = Document.insert_text(doc, new_text)
 
@@ -1002,7 +963,7 @@ defmodule Minga.Buffer.Server do
     doc =
       Enum.reduce(sorted, state.document, fn {from_pos, to_pos, new_text}, doc ->
         doc
-        |> Document.move_to(from_pos)
+        |> Cursor.place(from_pos)
         |> Document.delete_range(from_pos, to_pos)
         |> Document.insert_text(new_text)
       end)
@@ -1138,12 +1099,12 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:move, direction}, _from, state) do
-    new_buf = Document.move(state.document, direction)
+    new_buf = Cursor.move(state.document, direction)
     {:reply, :ok, %{state | document: new_buf}}
   end
 
   def handle_call({:move_to, pos}, _from, state) do
-    new_buf = Document.move_to(state.document, pos)
+    new_buf = Cursor.place(state.document, pos)
     {:reply, :ok, %{state | document: new_buf}}
   end
 
@@ -1223,7 +1184,7 @@ defmodule Minga.Buffer.Server do
         clamped_line = min(line, line_count - 1)
 
         clamped_col =
-          case Document.lines(new_buf, clamped_line, 1) do
+          case Lines.slice(new_buf, clamped_line, 1) do
             [row] ->
               # col is a byte offset; clamp to last valid grapheme boundary
               Unicode.clamp_to_grapheme_boundary(row, min(col, byte_size(row)))
@@ -1232,7 +1193,7 @@ defmodule Minga.Buffer.Server do
               0
           end
 
-        new_buf = Document.move_to(new_buf, {clamped_line, clamped_col})
+        new_buf = Cursor.place(new_buf, {clamped_line, clamped_col})
         first_line = text |> String.split("\n", parts: 2) |> List.first("")
         filetype = Language.detect_filetype_from_content(state.file_path, first_line)
 
@@ -1338,12 +1299,12 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:byte_offset_for_line, line}, _from, state) do
-    offset = Document.position_to_offset(state.document, {line, 0})
+    offset = Position.point_for(state.document, {line, 0})
     {:reply, offset, state}
   end
 
   def handle_call({:get_lines, start, count}, _from, state) do
-    {:reply, Document.lines(state.document, start, count), state}
+    {:reply, Lines.slice(state.document, start, count), state}
   end
 
   def handle_call(:cursor, _from, state) do
@@ -1351,12 +1312,12 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:set_cursor, {line, col}}, _from, state) do
-    doc = Document.move_to(state.document, {line, col})
+    doc = Cursor.place(state.document, {line, col})
     {:reply, :ok, %{state | document: doc}}
   end
 
   def handle_call({:move_cursor, direction}, _from, state) do
-    doc = Document.move(state.document, direction)
+    doc = Cursor.move(state.document, direction)
     {:reply, :ok, %{state | document: doc}}
   end
 
@@ -1366,7 +1327,7 @@ defmodule Minga.Buffer.Server do
         %{document: %Document{cursor_col: col} = doc} = state
       )
       when col > 0 do
-    new_doc = Document.move(doc, :left)
+    new_doc = Cursor.move(doc, :left)
     {:reply, {:ok, Document.cursor(new_doc)}, %{state | document: new_doc}}
   end
 
@@ -1540,13 +1501,12 @@ defmodule Minga.Buffer.Server do
     last_line = max(0, line_count - 1)
 
     last_col =
-      case Document.lines(new_buf, last_line, 1) do
-        # last_grapheme_byte_offset returns 0 for empty rows, which is correct
-        [row] -> Unicode.last_grapheme_byte_offset(row)
+      case Lines.slice(new_buf, last_line, 1) do
+        [row] -> Position.last_character_on_line(row)
         _ -> 0
       end
 
-    new_buf = Document.move_to(new_buf, {last_line, last_col})
+    new_buf = Cursor.place(new_buf, {last_line, last_col})
     {:reply, :ok, %{state | document: new_buf}}
   end
 
@@ -1555,12 +1515,12 @@ defmodule Minga.Buffer.Server do
 
     # Use position_to_offset for O(1) byte offset lookup via line index,
     # instead of iterating all lines before first_line.
-    first_line_byte_offset = Document.position_to_offset(buf, {first_line, 0})
+    first_line_byte_offset = Position.point_for(buf, {first_line, 0})
 
     snapshot = %RenderSnapshot{
       cursor: Document.cursor(buf),
       line_count: Document.line_count(buf),
-      lines: Document.lines(buf, first_line, count),
+      lines: Lines.slice(buf, first_line, count),
       file_path: state.file_path,
       filetype: state.filetype,
       buffer_type: state.buffer_type,
@@ -1766,7 +1726,7 @@ defmodule Minga.Buffer.Server do
     new_doc =
       case Keyword.get(opts, :cursor) do
         nil -> new_doc
-        {line, col} -> Document.move_to(new_doc, {line, col})
+        {line, col} -> Cursor.place(new_doc, {line, col})
       end
 
     new_decs = decoration_fn.(Decorations.new())
@@ -2535,8 +2495,8 @@ defmodule Minga.Buffer.Server do
 
   @spec right_boundary(Document.t(), non_neg_integer()) :: non_neg_integer()
   defp right_boundary(doc, line) do
-    case Document.lines(doc, line, 1) do
-      [text] when byte_size(text) > 0 -> Unicode.last_grapheme_byte_offset(text)
+    case Lines.slice(doc, line, 1) do
+      [text] when byte_size(text) > 0 -> Position.last_character_on_line(text)
       _ -> 0
     end
   end
@@ -2544,7 +2504,7 @@ defmodule Minga.Buffer.Server do
   @spec do_move_right(non_neg_integer(), non_neg_integer(), Document.t(), BufState.t()) ::
           {:reply, {:ok, Document.position()} | :at_boundary, BufState.t()}
   defp do_move_right(col, max_col, doc, state) when col < max_col do
-    new_doc = Document.move(doc, :right)
+    new_doc = Cursor.move(doc, :right)
     {:reply, {:ok, Document.cursor(new_doc)}, %{state | document: new_doc}}
   end
 

@@ -23,7 +23,7 @@ defmodule Minga.Buffer.DocumentPerfTest do
   to catch a true regression back to O(n) scanning (which would produce
   ratios in the hundreds or thousands for a 1M-line buffer).
 
-  Mutation operations (`insert_char`, `delete_before`, `move_to`) are
+  Mutation operations (`insert_text`, `delete_before`, `move_to`) are
   also spot-checked to ensure their incremental cache updates don't
   inadvertently re-introduce O(n) work.
   """
@@ -112,16 +112,16 @@ defmodule Minga.Buffer.DocumentPerfTest do
 
   # ── Mutation operations ───────────────────────────────────────────────────
 
-  describe "insert_char/2 cache update is fast" do
+  describe "insert_text/2 cache update is fast" do
     test "insert at cursor on large buffer stays under 1ms", %{large: buf} do
-      avg_us = avg_time_us(fn -> Document.insert_char(buf, "x") end)
-      assert avg_us < 1_000, "insert_char/2 on #{@large_lines}-line buffer took #{avg_us}µs"
+      avg_us = avg_time_us(fn -> Document.insert_text(buf, "x") end)
+      assert avg_us < 1_000, "insert_text/2 on #{@large_lines}-line buffer took #{avg_us}µs"
     end
 
-    test "insert_char does not scale with buffer size", %{small: small, large: large} do
-      small_us = avg_time_us(fn -> Document.insert_char(small, "x") end)
-      large_us = avg_time_us(fn -> Document.insert_char(large, "x") end)
-      assert_no_scaling(small_us, large_us, "insert_char/2")
+    test "insert_text does not scale with buffer size", %{small: small, large: large} do
+      small_us = avg_time_us(fn -> Document.insert_text(small, "x") end)
+      large_us = avg_time_us(fn -> Document.insert_text(large, "x") end)
+      assert_no_scaling(small_us, large_us, "insert_text/2")
     end
   end
 

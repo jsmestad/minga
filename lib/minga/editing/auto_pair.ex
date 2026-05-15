@@ -80,7 +80,7 @@ defmodule Minga.Editing.AutoPair do
       {:skip, ")"}
   """
   @spec on_insert(Document.t(), position(), String.t()) :: insert_action()
-  def on_insert(%Document{} = buffer, {line, col}, char) when is_binary(char) do
+  def on_insert(%Document{} = buffer, {line, col}, char) do
     char_at_cursor = char_at(buffer, line, col)
 
     cond do
@@ -130,18 +130,16 @@ defmodule Minga.Editing.AutoPair do
       :passthrough
   """
   @spec on_backspace(Document.t(), position()) :: backspace_action()
-  def on_backspace(%Document{} = buffer, {line, col}) do
-    if col == 0 do
-      :passthrough
-    else
-      before = char_at(buffer, line, col - 1)
-      at = char_at(buffer, line, col)
+  def on_backspace(%Document{}, {_line, 0}), do: :passthrough
 
-      case Map.get(@all_pairs, before) do
-        nil -> :passthrough
-        expected_close when expected_close == at -> :delete_pair
-        _ -> :passthrough
-      end
+  def on_backspace(%Document{} = buffer, {line, col}) do
+    before = char_at(buffer, line, col - 1)
+    at = char_at(buffer, line, col)
+
+    case Map.get(@all_pairs, before) do
+      nil -> :passthrough
+      expected_close when expected_close == at -> :delete_pair
+      _ -> :passthrough
     end
   end
 
@@ -159,9 +157,7 @@ defmodule Minga.Editing.AutoPair do
       nil
   """
   @spec closing_for(String.t()) :: String.t() | nil
-  def closing_for(char) when is_binary(char) do
-    Map.get(@all_pairs, char)
-  end
+  def closing_for(char), do: Map.get(@all_pairs, char)
 
   # ── Private helpers ──────────────────────────────────────────────────────────
 
