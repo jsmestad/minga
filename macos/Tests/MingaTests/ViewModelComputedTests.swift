@@ -222,6 +222,37 @@ struct WhichKeyBindingTests {
     }
 }
 
+// MARK: - FileTreeState and FileTreeEntry computed state
+
+@Suite("FileTreeState and FileTreeEntry Computed State")
+struct FileTreeStateComputedTests {
+
+    @Test("BEAM protocol fields drive active dirty selected and git state")
+    @MainActor func protocolFieldsDriveSemanticState() {
+        let state = FileTreeState()
+        state.update(version: 2, selectedId: "/project/lib/editor.ex", focused: false, treeWidth: 30, rootPath: "/project", rawEntries: [
+            computedWireFileTreeEntry(id: "/project/lib/editor.ex", isSelected: true, isFocused: false, isActive: true, isDirty: true, gitStatus: 4),
+        ])
+
+        let entry = state.entries[0]
+        #expect(entry.isSelected == true)
+        #expect(entry.isFocused == false)
+        #expect(entry.isActive == true)
+        #expect(entry.isDirty == true)
+        #expect(entry.gitStatusValue == .conflict)
+        #expect(entry.showsActiveAccent == true)
+        #expect(entry.showsDirtyMarker == true)
+        #expect(entry.showsGitMarker == true)
+        #expect(entry.hasConflictStatus == true)
+    }
+
+    @Test("Dirty marker is suppressed for directories")
+    @MainActor func directoryDirtyMarkerSuppressed() {
+        let entry = computedFileTreeEntry(path: "/project/lib", relPath: "lib", isDir: true, isDirty: true)
+        #expect(entry.showsDirtyMarker == false)
+    }
+}
+
 // MARK: - FileTreeState fullPath
 
 @Suite("FileTreeState Path Computation")
@@ -244,11 +275,21 @@ struct FileTreePathTests {
     }
 }
 
-private func computedFileTreeEntry(path: String, relPath: String) -> FileTreeEntry {
-    FileTreeEntry(id: 1, index: 0, isDir: false, isExpanded: false, isSelected: false,
-                  isFocused: false, isActive: false, isDirty: false, isEditing: false,
+private func computedFileTreeEntry(path: String, relPath: String, isDir: Bool = false, isDirty: Bool = false) -> FileTreeEntry {
+    FileTreeEntry(id: 1, index: 0, isDir: isDir, isExpanded: false, isSelected: false,
+                  isFocused: false, isActive: false, isDirty: isDirty, isEditing: false,
                   isLastChild: false, depth: 0, gitStatus: 0, diagnosticErrorCount: 0,
                   diagnosticWarningCount: 0, diagnosticInfoCount: 0, diagnosticHintCount: 0,
                   guides: [], icon: "", name: "test", relPath: relPath, path: path,
                   editingType: 0xFF, editingText: "")
+}
+
+private func computedWireFileTreeEntry(id: String, isSelected: Bool, isFocused: Bool, isActive: Bool, isDirty: Bool, gitStatus: UInt8) -> Wire.FileTreeEntry {
+    Wire.FileTreeEntry(pathHash: 1, id: id, path: id, isDir: false, isExpanded: false,
+                       isSelected: isSelected, isFocused: isFocused, isActive: isActive,
+                       isDirty: isDirty, isEditing: false, isLastChild: false, depth: 0,
+                       gitStatus: gitStatus, diagnosticErrorCount: 0, diagnosticWarningCount: 0,
+                       diagnosticInfoCount: 0, diagnosticHintCount: 0, guides: [], icon: "",
+                       name: "editor.ex", relPath: "lib/editor.ex", editingType: 0xFF,
+                       editingText: "")
 }

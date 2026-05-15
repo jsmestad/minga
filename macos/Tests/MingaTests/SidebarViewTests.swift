@@ -41,6 +41,18 @@ struct SidebarHeaderButtonTests {
         try button.tap()
         #expect(tapped)
     }
+
+    @Test("Tooltip also backs the accessibility label")
+    @MainActor func tooltipBacksAccessibilityLabel() throws {
+        let sut = SidebarHeaderButton(
+            systemName: "plus",
+            barFg: .white,
+            tooltip: "New File…",
+            action: {}
+        )
+        let button = try sut.inspect().find(ViewType.Button.self)
+        #expect(try button.accessibilityLabel().string() == "New File…")
+    }
 }
 
 // MARK: - GitStatusView Empty States
@@ -153,15 +165,49 @@ struct FileTreeViewTests {
         #expect(strings.contains("Project"))
     }
 
-    @Test("Header action buttons are hidden at rest (shown on hover)")
-    @MainActor func headerActionButtonsHiddenAtRest() throws {
+    @Test("Header action buttons reserve layout space at rest")
+    @MainActor func headerActionButtonsReserveLayoutSpaceAtRest() throws {
         let state = FileTreeState()
         state.visible = true
 
         let sut = FileTreeHeaderContent(fileTreeState: state, theme: ThemeColors(), encoder: nil, branchName: "", leadingPadding: 10)
         let body = try sut.inspect()
         let buttons = body.findAll(ViewType.Button.self)
-        #expect(buttons.count == 0)
+        #expect(buttons.count == 4)
+    }
+
+    @Test("Header action buttons send file-tree actions")
+    @MainActor func headerActionButtonsSendFileTreeActions() throws {
+        let state = FileTreeState()
+        state.visible = true
+        state.selectedIndex = 7
+        let spy = SpyEncoder()
+
+        let sut = FileTreeHeaderContent(fileTreeState: state, theme: ThemeColors(), encoder: spy, branchName: "main", leadingPadding: 10)
+        let buttons = try sut.inspect().findAll(ViewType.Button.self)
+
+        try buttons[0].tap()
+        try buttons[1].tap()
+        try buttons[2].tap()
+        try buttons[3].tap()
+
+        #expect(spy.guiActions == [
+            .fileTreeNewFile(parentIndex: 7),
+            .fileTreeNewFolder(parentIndex: 7),
+            .fileTreeRefresh,
+            .fileTreeCollapseAll,
+        ])
+    }
+
+    @Test("Header accessibility summarizes project and branch context")
+    @MainActor func headerAccessibilitySummarizesProjectAndBranchContext() throws {
+        let state = FileTreeState()
+        state.visible = true
+        state.projectRoot = "/Users/test/code/minga"
+
+        let sut = FileTreeHeaderContent(fileTreeState: state, theme: ThemeColors(), encoder: nil, branchName: "main", leadingPadding: 10)
+
+        #expect(sut.accessibilityLabelText == "File tree for minga, branch main")
     }
 
     @Test("File entries render their names")
@@ -181,6 +227,86 @@ struct FileTreeViewTests {
 
         #expect(strings.contains("lib"))
         #expect(strings.contains("editor.ex"))
+    }
+
+    @Test("Dirty marker renders independently from selected and git state")
+    @MainActor func dirtyMarkerRendersWithSelectedAndGitState() throws {
+        let state = FileTreeState()
+        state.visible = true
+        state.entries = [
+            sidebarFileTreeEntry(id: 1, index: 0, isSelected: true, isFocused: false, isDirty: true, gitStatus: 1,
+                                 icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"),
+        ]
+
+        let sut = FileTreeView(fileTreeState: state, theme: ThemeColors(), encoder: nil)
+        let body = try sut.inspect()
+        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(strings.contains("editor.ex"))
+        #expect(strings.contains("●"))
+    }
+
+    @Test("Editing row renders inline edit field")
+    @MainActor func editingRowRendersInlineEditField() throws {
+        let state = FileTreeState()
+        state.visible = true
+        state.entries = [
+            sidebarFileTreeEntry(id: 1, index: 0, isEditing: true, editingType: 2, editingText: "renamed.ex",
+                                 icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"),
+        ]
+
+        let sut = FileTreeView(fileTreeState: state, theme: ThemeColors(), encoder: nil)
+        let body = try sut.inspect()
+        let fields = body.findAll(InlineEditField.self)
+
+        #expect(fields.count == 1)
+    }
+}
+
+// MARK: - FileTreeRowView
+
+@Suite("FileTreeRowView View Structure")
+struct FileTreeRowViewTests {
+
+    @Test("Accessibility labels and hints describe row state")
+    @MainActor func accessibilityLabelsAndHintsDescribeRowState() throws {
+        let file = fileTreeRowView(entry: sidebarFileTreeEntry(id: 1, index: 0, icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"))
+        #expect(file.accessibilityLabelText == "File: editor.ex")
+        #expect(file.accessibilityHintText == "Press Return to open.")
+
+        let collapsedDir = fileTreeRowView(entry: sidebarFileTreeEntry(id: 2, index: 1, isDir: true, icon: "\u{F024B}", name: "lib", relPath: "lib"))
+        #expect(collapsedDir.accessibilityLabelText == "Folder: lib")
+        #expect(collapsedDir.accessibilityHintText == "Collapsed folder. Press Return to expand.")
+
+        let expandedDir = fileTreeRowView(entry: sidebarFileTreeEntry(id: 3, index: 2, isDir: true, isExpanded: true, icon: "\u{F0256}", name: "test", relPath: "test"))
+        #expect(expandedDir.accessibilityHintText == "Expanded folder. Press Return to collapse.")
+
+        let editing = fileTreeRowView(entry: sidebarFileTreeEntry(id: 4, index: 3, isEditing: true, editingType: 2, editingText: "renamed.ex", icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"))
+        #expect(editing.accessibilityLabelText == "Editing: editor.ex")
+        #expect(editing.accessibilityHintText == "Type a new name, then press Return to confirm or Escape to cancel.")
+    }
+
+    @Test("Files directories and expanded folders have distinct row affordances")
+    @MainActor func filesDirectoriesAndExpandedFoldersHaveDistinctAffordances() throws {
+        let file = fileTreeRowView(entry: sidebarFileTreeEntry(id: 1, index: 0, icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"))
+        let collapsedDir = fileTreeRowView(entry: sidebarFileTreeEntry(id: 2, index: 1, isDir: true, icon: "\u{F024B}", name: "lib", relPath: "lib"))
+        let expandedDir = fileTreeRowView(entry: sidebarFileTreeEntry(id: 3, index: 2, isDir: true, isExpanded: true, icon: "\u{F0256}", name: "test", relPath: "test"))
+
+        #expect(try file.inspect().findAll(ViewType.Image.self).isEmpty)
+        #expect(try collapsedDir.inspect().findAll(ViewType.Image.self).count == 1)
+        #expect(try expandedDir.inspect().findAll(ViewType.Image.self).count == 1)
+        #expect(try collapsedDir.inspect().find(ViewType.Image.self).rotation().angle.degrees == 0)
+        #expect(try expandedDir.inspect().find(ViewType.Image.self).rotation().angle.degrees == 90)
+    }
+
+    @Test("Status markers remain separate from name text")
+    @MainActor func statusMarkersRemainSeparateFromNameText() throws {
+        let row = fileTreeRowView(entry: sidebarFileTreeEntry(id: 1, index: 0, isSelected: true, isFocused: true, isActive: true, isDirty: true, gitStatus: 1, icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"))
+        let strings = try row.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(strings.contains("editor.ex"))
+        #expect(strings.contains("●"))
+        #expect(try row.inspect().findAll(ViewType.Shape.self).count >= 1)
     }
 }
 
@@ -237,21 +363,44 @@ struct GitStatusViewSectionTests {
     }
 }
 
+@MainActor
+private func fileTreeRowView(entry: FileTreeEntry, isHovered: Bool = false, isDropTarget: Bool = false) -> FileTreeRowView {
+    FileTreeRowView(
+        entry: entry,
+        theme: ThemeColors(),
+        rowHeight: 22,
+        indentWidth: 14,
+        chevronWidth: 12,
+        isHovered: isHovered,
+        isDropTarget: isDropTarget,
+        animDuration: 0,
+        onEditCommit: { _ in },
+        onEditCancel: {}
+    )
+}
+
 private func sidebarFileTreeEntry(
     id: UInt32,
     index: Int,
     isDir: Bool = false,
     isExpanded: Bool = false,
     isSelected: Bool = false,
+    isFocused: Bool = false,
+    isActive: Bool = false,
+    isDirty: Bool = false,
+    gitStatus: UInt8 = 0,
+    isEditing: Bool = false,
+    editingType: UInt8 = 0xFF,
+    editingText: String = "",
     depth: Int = 0,
     icon: String,
     name: String,
     relPath: String
 ) -> FileTreeEntry {
     FileTreeEntry(id: id, index: index, isDir: isDir, isExpanded: isExpanded, isSelected: isSelected,
-                  isFocused: false, isActive: false, isDirty: false, isEditing: false,
-                  isLastChild: false, depth: depth, gitStatus: 0, diagnosticErrorCount: 0,
+                  isFocused: isFocused, isActive: isActive, isDirty: isDirty, isEditing: isEditing,
+                  isLastChild: false, depth: depth, gitStatus: gitStatus, diagnosticErrorCount: 0,
                   diagnosticWarningCount: 0, diagnosticInfoCount: 0, diagnosticHintCount: 0,
                   guides: [], icon: icon, name: name, relPath: relPath, path: relPath,
-                  editingType: 0xFF, editingText: "")
+                  editingType: editingType, editingText: editingText)
 }

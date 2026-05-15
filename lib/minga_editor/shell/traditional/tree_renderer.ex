@@ -3,9 +3,9 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
   Renders the file tree panel into draw tuples for the left side of the screen.
 
   Produces a list of `DisplayList.draw()` tuples for the tree entries,
-  the separator column, and the header line. Uses Nerd Font icons per
-  filetype, box-drawing indent guides, and a project-name header to
-  match neo-tree.nvim's visual style.
+  the separator column, and the header line. Uses stable disclosure,
+  icon, name, and status columns with quiet ancestor guides so the tree
+  stays scannable without connector-heavy branch art.
   """
 
   alias Minga.Core.Face
@@ -20,11 +20,12 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
   alias MingaEditor.UI.Theme
   alias MingaEditor.WindowTree
 
-  # Box-drawing characters for indent guides
+  # Row anatomy: faint ancestor guides, disclosure, icon, name, spacer, dirty marker, git marker.
   @guide_pipe "│ "
-  @guide_tee "├─"
-  @guide_elbow "└─"
   @guide_blank "  "
+  @disclosure_expanded "▾ "
+  @disclosure_collapsed "▸ "
+  @disclosure_file "  "
 
   # Nerd Font folder icons (nf-md-folder / nf-md-folder-open)
   @folder_closed "\u{F024B}"
@@ -183,8 +184,10 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     focused = tree_row.focused?
     is_dirty = tree_row.dirty?
 
-    # Build the guide prefix from the entry's ancestor guide flags
+    # Build the structure columns from ancestor guides plus a dedicated disclosure column.
     guide_prefix = build_guides(tree_row.guides, tree_row.last_child?)
+    disclosure = disclosure_marker(tree_row)
+    structure_prefix = guide_prefix <> disclosure
 
     # Pick the icon and its color
     {icon, icon_color} = entry_icon(tree_row)
@@ -199,8 +202,8 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     dirty_width = if is_dirty, do: 1, else: 0
     indicator_width = dirty_width + git_width
 
-    # Compose the full line: guides + icon + space + name
-    prefix = guide_prefix <> icon <> " "
+    # Compose the full line: structure columns + icon + space + name
+    prefix = structure_prefix <> icon <> " "
     prefix_width = String.length(prefix)
 
     # Truncate name to fit, accounting for indicator space
@@ -210,25 +213,17 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     # Background style for the full row
     row_bg = row_background(is_cursor, focused, theme)
 
-    # Build draw commands: guide, icon, name, (dirty dot), (git indicator)
+    # Build draw commands: structure, icon, name, dirty marker, and git marker.
     guide_style = guide_draw_style(is_cursor, focused, theme)
     icon_style = icon_draw_style(icon_color, is_cursor, focused, theme)
     name_style = name_draw_style(tree_row, is_cursor, tree_row.active?, focused, theme)
-
-    guide_len = String.length(guide_prefix)
+    structure_len = String.length(structure_prefix)
 
     draws = []
-
-    # Guide segment (if any depth > 0)
-    draws =
-      if guide_len > 0 do
-        draws ++ [DisplayList.draw(row, col, guide_prefix, guide_style)]
-      else
-        draws
-      end
+    draws = draws ++ [DisplayList.draw(row, col, structure_prefix, guide_style)]
 
     # Icon segment
-    icon_col = col + guide_len
+    icon_col = col + structure_len
     draws = draws ++ [DisplayList.draw(row, icon_col, icon <> " ", icon_style)]
 
     # Name segment: pad to fill space between name and indicators
@@ -279,9 +274,11 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     %{col_off: col, width: width, theme: theme} = opts
     editing = tree_row.editing
 
-    # Build indent guides (same depth as the entry being edited/created)
+    # Build the same structure columns as normal rows so inline editing does not shift columns.
     guide_prefix = build_guides(tree_row.guides, tree_row.last_child?)
-    guide_len = String.length(guide_prefix)
+    disclosure = disclosure_marker(tree_row)
+    structure_prefix = guide_prefix <> disclosure
+    structure_len = String.length(structure_prefix)
 
     # Type indicator: file icon for new file, folder icon for new folder,
     # the entry's own icon for rename
@@ -292,7 +289,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
         :rename -> entry_icon(tree_row)
       end
 
-    prefix = guide_prefix <> icon <> " "
+    prefix = structure_prefix <> icon <> " "
     prefix_len = String.length(prefix)
 
     # Editing text with cursor
@@ -317,15 +314,9 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     text_style = Face.new(fg: editing_fg, bg: editing_bg, bold: true)
 
     draws = []
+    draws = draws ++ [DisplayList.draw(row, col, structure_prefix, guide_style)]
 
-    draws =
-      if guide_len > 0 do
-        draws ++ [DisplayList.draw(row, col, guide_prefix, guide_style)]
-      else
-        draws
-      end
-
-    icon_col = col + guide_len
+    icon_col = col + structure_len
     draws = draws ++ [DisplayList.draw(row, icon_col, icon <> " ", icon_style)]
 
     text_col = col + prefix_len
@@ -337,25 +328,17 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
   # ── Indent guides ──────────────────────────────────────────────────────
 
   @spec build_guides([boolean()], boolean()) :: String.t()
-  defp build_guides(ancestor_guides, last_child?) do
-    # Ancestor columns: each is either │ (more siblings) or blank (last child)
-    ancestor_part =
-      Enum.map_join(ancestor_guides, fn
-        true -> @guide_pipe
-        false -> @guide_blank
-      end)
-
-    # The connector at this entry's own depth
-    # Depth-0 entries (direct children of root) also get a connector
-    connector =
-      if last_child? do
-        @guide_elbow
-      else
-        @guide_tee
-      end
-
-    ancestor_part <> connector
+  defp build_guides(ancestor_guides, _last_child?) do
+    Enum.map_join(ancestor_guides, fn
+      true -> @guide_pipe
+      false -> @guide_blank
+    end)
   end
+
+  @spec disclosure_marker(Row.t()) :: String.t()
+  defp disclosure_marker(%Row{directory?: true, expanded?: true}), do: @disclosure_expanded
+  defp disclosure_marker(%Row{directory?: true}), do: @disclosure_collapsed
+  defp disclosure_marker(_tree_row), do: @disclosure_file
 
   # ── Icon selection ──────────────────────────────────────────────────────
 
@@ -375,13 +358,17 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
 
   # ── Style helpers ──────────────────────────────────────────────────────
 
+  # Visual state priority is layered, not mutually exclusive:
+  # inline editing owns the whole row, then selection owns the row background.
+  # Active file owns name/icon emphasis, dirty owns the modified-buffer marker.
+  # Git owns the git marker, and directory emphasis is the base fallback.
   @spec row_background(boolean(), boolean(), Theme.t()) :: Face.t()
   defp row_background(true = _is_cursor, true = _focused, theme) do
-    Face.new(bg: theme.tree.dir_fg)
+    Face.new(bg: theme.tree.cursor_bg)
   end
 
   defp row_background(true = _is_cursor, false = _focused, theme) do
-    Face.new(bg: theme.tree.cursor_bg)
+    Face.new(bg: theme.tree.separator_fg)
   end
 
   defp row_background(false = _is_cursor, _focused, theme) do
@@ -389,46 +376,19 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
   end
 
   @spec guide_draw_style(boolean(), boolean(), Theme.t()) :: Face.t()
-  defp guide_draw_style(true = _is_cursor, true = _focused, theme) do
-    Face.new(fg: theme.tree.bg, bg: theme.tree.dir_fg)
-  end
-
-  defp guide_draw_style(true = _is_cursor, false = _focused, theme) do
-    Face.new(fg: theme.tree.separator_fg, bg: theme.tree.cursor_bg)
-  end
-
-  defp guide_draw_style(_is_cursor, _focused, theme) do
-    Face.new(fg: theme.tree.separator_fg, bg: theme.tree.bg)
+  defp guide_draw_style(is_cursor, focused, theme) do
+    Face.new(fg: theme.tree.separator_fg, bg: row_bg_color(is_cursor, focused, theme))
   end
 
   @spec icon_draw_style(non_neg_integer(), boolean(), boolean(), Theme.t()) :: Face.t()
-  defp icon_draw_style(_icon_color, true = _is_cursor, true = _focused, theme) do
-    # Focused cursor row: invert, use bg as fg
-    Face.new(fg: theme.tree.bg, bg: theme.tree.dir_fg)
-  end
-
-  defp icon_draw_style(icon_color, true = _is_cursor, false = _focused, theme) do
-    Face.new(fg: icon_color, bg: theme.tree.cursor_bg)
-  end
-
-  defp icon_draw_style(icon_color, _is_cursor, _focused, theme) do
-    Face.new(fg: icon_color, bg: theme.tree.bg)
+  defp icon_draw_style(icon_color, is_cursor, focused, theme) do
+    Face.new(fg: icon_color, bg: row_bg_color(is_cursor, focused, theme))
   end
 
   @spec dirty_indicator_style(boolean(), boolean(), Theme.t()) :: Face.t()
-  defp dirty_indicator_style(true = _is_cursor, true = _focused, theme) do
+  defp dirty_indicator_style(is_cursor, focused, theme) do
     color = theme.tree.modified_fg || theme.tree.fg
-    Face.new(fg: theme.tree.bg, bg: color)
-  end
-
-  defp dirty_indicator_style(true = _is_cursor, false = _focused, theme) do
-    color = theme.tree.modified_fg || theme.tree.fg
-    Face.new(fg: color, bg: theme.tree.cursor_bg)
-  end
-
-  defp dirty_indicator_style(_is_cursor, _focused, theme) do
-    color = theme.tree.modified_fg || theme.tree.fg
-    Face.new(fg: color, bg: theme.tree.bg)
+    Face.new(fg: color, bg: row_bg_color(is_cursor, focused, theme), bold: true)
   end
 
   @spec git_indicator_style(
@@ -437,17 +397,12 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
           boolean(),
           Theme.t()
         ) :: Face.t()
-  defp git_indicator_style(status, true = _is_cursor, true = _focused, theme) do
-    # Focused cursor row: invert
-    Face.new(fg: theme.tree.bg, bg: git_status_color(status, theme))
-  end
-
-  defp git_indicator_style(status, true = _is_cursor, false = _focused, theme) do
-    Face.new(fg: git_status_color(status, theme), bg: theme.tree.cursor_bg)
-  end
-
-  defp git_indicator_style(status, _is_cursor, _focused, theme) do
-    Face.new(fg: git_status_color(status, theme), bg: theme.tree.bg)
+  defp git_indicator_style(status, is_cursor, focused, theme) do
+    Face.new(
+      fg: git_status_color(status, theme),
+      bg: row_bg_color(is_cursor, focused, theme),
+      bold: status == :conflict
+    )
   end
 
   @spec git_status_color(Minga.Project.FileTree.GitStatus.file_status(), Theme.t()) ::
@@ -459,28 +414,24 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
   defp git_status_color(:renamed, theme), do: theme.tree.git_staged_fg || theme.tree.fg
   defp git_status_color(:deleted, theme), do: theme.tree.git_conflict_fg || theme.tree.fg
 
+  @spec row_bg_color(boolean(), boolean(), Theme.t()) :: non_neg_integer()
+  defp row_bg_color(is_cursor, focused, theme), do: row_background(is_cursor, focused, theme).bg
+
   @spec name_draw_style(Row.t(), boolean(), boolean(), boolean(), Theme.t()) :: Face.t()
   defp name_draw_style(tree_row, is_cursor, is_active, focused, theme) do
-    tree = theme.tree
+    base_fg = name_foreground(tree_row, is_active, theme)
 
-    base_fg =
-      case {tree_row.directory?, is_active} do
-        {true, _} -> tree.dir_fg
-        {_, true} -> tree.active_fg
-        _ -> tree.fg
-      end
-
-    case {is_cursor, focused} do
-      {true, true} ->
-        Face.new(fg: tree.bg, bg: base_fg, bold: tree_row.directory?)
-
-      {true, false} ->
-        Face.new(fg: base_fg, bg: tree.cursor_bg, bold: tree_row.directory?)
-
-      _ ->
-        Face.new(fg: base_fg, bg: tree.bg, bold: tree_row.directory?)
-    end
+    Face.new(
+      fg: base_fg,
+      bg: row_bg_color(is_cursor, focused, theme),
+      bold: is_active or tree_row.directory?
+    )
   end
+
+  @spec name_foreground(Row.t(), boolean(), Theme.t()) :: non_neg_integer()
+  defp name_foreground(_tree_row, true = _is_active, theme), do: theme.tree.active_fg
+  defp name_foreground(%Row{directory?: true}, false = _is_active, theme), do: theme.tree.dir_fg
+  defp name_foreground(_tree_row, false = _is_active, theme), do: theme.tree.fg
 
   # ── Blanks, separator, scroll ──────────────────────────────────────────
 

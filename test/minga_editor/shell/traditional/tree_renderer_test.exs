@@ -38,8 +38,10 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
     end
 
     test "includes a header row with project name and folder icon", %{tmp_dir: tmp_dir} do
+      root = Path.join(tmp_dir, "minga")
+
       input = %RenderInput{
-        tree: sample_tree(tmp_dir),
+        tree: sample_tree(root),
         rect: {0, 0, 20, 10},
         focused: false,
         theme: Theme.get!(:doom_one),
@@ -51,8 +53,9 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
       header = Enum.find(draws, fn {r, c, _t, _s} -> r == 0 and c == 0 end)
       assert header != nil
       {_r, _c, text, style} = header
-      # Contains the folder open icon (nf-md-folder-open U+F0256)
+      # Contains the folder open icon (nf-md-folder-open U+F0256) and project/root context.
       assert String.contains?(text, "\u{F0256}")
+      assert String.contains?(text, "minga")
       assert style.bold == true
     end
 
@@ -84,10 +87,12 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
       texts = Enum.map(draws, fn {_r, _c, text, _s} -> text end)
       all_text = Enum.join(texts)
 
-      # Box-drawing guide characters should be present
-      assert String.contains?(all_text, "├─")
-      assert String.contains?(all_text, "└─")
-      # Expanded lib/ should produce a pipe guide for its children
+      # Disclosure symbols replace heavy connector branch art.
+      assert String.contains?(all_text, "▾ ")
+      assert String.contains?(all_text, "▸ ")
+      refute String.contains?(all_text, "├─")
+      refute String.contains?(all_text, "└─")
+      # Expanded lib/ should still produce a quiet ancestor guide for its children.
       assert String.contains?(all_text, "│ ")
 
       # Directory names should have trailing slashes
@@ -109,9 +114,25 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
 
       draws = TreeRenderer.render(input)
       # Row 1 is the first entry (lib/ directory). It should have multiple draws:
-      # guide segment, icon segment, name segment
+      # structure segment, icon segment, name segment
       row1_draws = Enum.filter(draws, fn {r, _c, _t, _s} -> r == 1 end)
-      assert length(row1_draws) >= 2
+      assert length(row1_draws) >= 3
+    end
+
+    test "uses stable disclosure icon and name columns", %{tmp_dir: tmp_dir} do
+      draws =
+        TreeRenderer.render(%RenderInput{
+          tree: sample_tree(tmp_dir),
+          rect: {0, 0, 30, 10},
+          focused: false,
+          theme: Theme.get!(:doom_one),
+          active_path: nil
+        })
+
+      assert {1, 0, "▾ ", _style} = draw_matching(draws, "▾ ")
+      assert {1, 2, "\u{F0256} ", _style} = draw_matching(draws, "\u{F0256} ")
+      assert {1, 4, name, _style} = draw_containing(draws, "lib/")
+      assert String.starts_with?(name, "lib/")
     end
 
     test "renders supplied semantic rows", %{tmp_dir: tmp_dir} do
@@ -275,20 +296,102 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
       assert lib_row_draws == []
     end
 
-    test "highlights active file path", %{tmp_dir: tmp_dir} do
-      main_path = Path.join(tmp_dir, "lib/main.ex")
+    test "active plus selected keeps selection background and active name accent", %{
+      tmp_dir: tmp_dir
+    } do
+      theme = Theme.get!(:doom_one)
+      row = semantic_file_row(tmp_dir, selected?: true, focused?: true, active?: true)
 
-      input = %RenderInput{
-        tree: sample_tree(tmp_dir),
-        rect: {0, 0, 30, 10},
-        focused: true,
-        theme: Theme.get!(:doom_one),
-        active_path: main_path
-      }
+      draws = render_semantic_rows(tmp_dir, [row], theme)
+      {_r, _c, _text, style} = draw_containing(draws, "main.ex")
 
-      draws = TreeRenderer.render(input)
-      assert [_ | _] = draws
+      assert style.fg == theme.tree.active_fg
+      assert style.bg == theme.tree.cursor_bg
+      assert style.bold == true
     end
+
+    test "active plus git modified preserves independent git marker", %{tmp_dir: tmp_dir} do
+      theme = Theme.get!(:doom_one)
+      row = semantic_file_row(tmp_dir, active?: true, git_status: :modified)
+
+      draws = render_semantic_rows(tmp_dir, [row], theme)
+      {_r, _c, _text, name_style} = draw_containing(draws, "main.ex")
+      {_r, _c, _text, git_style} = draw_matching(draws, " ●")
+
+      assert name_style.fg == theme.tree.active_fg
+      assert git_style.fg == theme.tree.git_modified_fg
+      assert git_style.bg == theme.tree.bg
+    end
+
+    test "selected plus dirty keeps dirty marker visible on selection background", %{
+      tmp_dir: tmp_dir
+    } do
+      theme = Theme.get!(:doom_one)
+      row = semantic_file_row(tmp_dir, selected?: true, focused?: true, dirty?: true)
+
+      draws = render_semantic_rows(tmp_dir, [row], theme)
+      {_r, _c, _text, dirty_style} = draw_matching(draws, "●")
+
+      assert dirty_style.fg == theme.tree.modified_fg
+      assert dirty_style.bg == theme.tree.cursor_bg
+      assert dirty_style.bold == true
+    end
+
+    test "unfocused selected row uses subdued selection background", %{tmp_dir: tmp_dir} do
+      theme = Theme.get!(:doom_one)
+      row = semantic_file_row(tmp_dir, selected?: true, focused?: false)
+
+      draws = render_semantic_rows(tmp_dir, [row], theme)
+      {_r, _c, _text, style} = draw_containing(draws, "main.ex")
+
+      assert style.bg == theme.tree.separator_fg
+      refute style.bg == theme.tree.cursor_bg
+    end
+  end
+
+  defp semantic_file_row(tmp_dir, attrs) do
+    file_path = Path.join(tmp_dir, "main.ex")
+
+    Row.new(
+      Keyword.merge(
+        [
+          id: file_path,
+          path: file_path,
+          relative_path: "main.ex",
+          name: "main.ex",
+          directory?: false,
+          expanded?: false,
+          selected?: false,
+          focused?: false,
+          active?: false,
+          dirty?: false,
+          git_status: nil,
+          depth: 0,
+          guides: [],
+          last_child?: true
+        ],
+        attrs
+      )
+    )
+  end
+
+  defp render_semantic_rows(tmp_dir, rows, theme) do
+    TreeRenderer.render(%RenderInput{
+      tree: FileTree.new(tmp_dir, width: 30),
+      rect: {0, 0, 30, 5},
+      focused: false,
+      theme: theme,
+      active_path: nil,
+      rows: rows
+    })
+  end
+
+  defp draw_containing(draws, text) do
+    Enum.find(draws, fn {_r, _c, draw_text, _style} -> String.contains?(draw_text, text) end)
+  end
+
+  defp draw_matching(draws, text) do
+    Enum.find(draws, fn {_r, _c, draw_text, _style} -> draw_text == text end)
   end
 
   describe "editing entry rendering" do
@@ -374,8 +477,10 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
       texts = Enum.map(row2_draws, fn {_r, _c, text, _s} -> text end)
       all_text = Enum.join(texts)
 
-      # The entry at depth 1 should have a guide connector (└─ since it's last child)
-      assert String.contains?(all_text, "└─") or String.contains?(all_text, "├─")
+      # The entry at depth 1 should keep a quiet structure column without heavy branch art.
+      assert String.contains?(all_text, "│ ") or String.contains?(all_text, "  ")
+      refute String.contains?(all_text, "└─")
+      refute String.contains?(all_text, "├─")
     end
 
     test "non-editing entries render normally when editing is active", %{tmp_dir: tmp_dir} do

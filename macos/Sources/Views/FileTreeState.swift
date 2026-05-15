@@ -4,6 +4,7 @@ import SwiftUI
 
 /// A single file tree entry for SwiftUI rendering.
 struct FileTreeEntry: Identifiable {
+    /// Visual states are layered in the same priority order as the BEAM TUI renderer: inline editing, drop target, selected row, active file, dirty buffer, git status, then directory emphasis.
     /// Stable 32-bit hash of the file path, sent by the BEAM. Persists across
     /// tree updates so SwiftUI's diffing correctly identifies unchanged rows
     /// instead of treating every row below a change as new.
@@ -36,6 +37,38 @@ struct FileTreeEntry: Identifiable {
     let editingType: UInt8
     /// Pre-filled text for the editing field. Only meaningful when isEditing is true.
     let editingText: String
+}
+
+enum FileTreeGitStatus: UInt8 {
+    case clean = 0
+    case modified = 1
+    case staged = 2
+    case untracked = 3
+    case conflict = 4
+    case renamed = 5
+    case deleted = 6
+}
+
+extension FileTreeEntry {
+    var gitStatusValue: FileTreeGitStatus {
+        FileTreeGitStatus(rawValue: gitStatus) ?? .clean
+    }
+
+    var showsActiveAccent: Bool {
+        isActive && !isEditing
+    }
+
+    var showsDirtyMarker: Bool {
+        isDirty && !isDir
+    }
+
+    var showsGitMarker: Bool {
+        gitStatusValue != .clean
+    }
+
+    var hasConflictStatus: Bool {
+        gitStatusValue == .conflict
+    }
 }
 
 /// Observable state for the file tree sidebar, driven by BEAM protocol messages.
