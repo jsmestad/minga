@@ -7,11 +7,11 @@ defmodule Minga.Buffer.Cursor do
 
   @type direction :: :left | :right | :up | :down
 
-  @doc "Moves the cursor one step in the requested direction."
-  @spec step(Document.t(), direction()) :: Document.t()
-  def step(%Document{before: ""} = doc, :left), do: doc
+  @doc "Moves the cursor one move in the requested direction."
+  @spec move(Document.t(), direction()) :: Document.t()
+  def move(%Document{before: ""} = doc, :left), do: doc
 
-  def step(%Document{cursor_line: line} = doc, :left) do
+  def move(%Document{cursor_line: line} = doc, :left) do
     {new_before, character} = previous_character(doc.before)
     new_line = if character == "\n", do: line - 1, else: line
     new_column = Lines.last_line_width(new_before)
@@ -25,9 +25,9 @@ defmodule Minga.Buffer.Cursor do
     }
   end
 
-  def step(%Document{after: ""} = doc, :right), do: doc
+  def move(%Document{after: ""} = doc, :right), do: doc
 
-  def step(%Document{} = doc, :right) do
+  def move(%Document{} = doc, :right) do
     case next_character(doc.after) do
       {"\n", rest} ->
         %{
@@ -51,15 +51,15 @@ defmodule Minga.Buffer.Cursor do
     end
   end
 
-  def step(%Document{cursor_line: 0} = doc, :up), do: doc
+  def move(%Document{cursor_line: 0} = doc, :up), do: doc
 
-  def step(%Document{} = doc, :up), do: place(doc, {doc.cursor_line - 1, doc.cursor_col})
+  def move(%Document{} = doc, :up), do: place(doc, {doc.cursor_line - 1, doc.cursor_col})
 
-  def step(%Document{cursor_line: line, line_count: line_count} = doc, :down)
+  def move(%Document{cursor_line: line, line_count: line_count} = doc, :down)
       when line >= line_count - 1,
       do: doc
 
-  def step(%Document{} = doc, :down), do: place(doc, {doc.cursor_line + 1, doc.cursor_col})
+  def move(%Document{} = doc, :down), do: place(doc, {doc.cursor_line + 1, doc.cursor_col})
 
   @doc "Places the cursor at the nearest valid caret position for the requested editor position."
   @spec place(Document.t(), Document.position()) :: Document.t()
@@ -97,7 +97,7 @@ defmodule Minga.Buffer.Cursor do
 
   @doc "Returns the character immediately after a caret."
   @spec next_character(String.t()) :: {String.t(), String.t()} | nil
-  def next_character(text) when is_binary(text), do: String.next_grapheme(text)
+  def next_character(text), do: String.next_grapheme(text)
 
   @spec caret_column(non_neg_integer(), String.t()) :: non_neg_integer()
   defp caret_column(0, _line_text), do: 0

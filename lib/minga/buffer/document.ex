@@ -301,7 +301,7 @@ defmodule Minga.Buffer.Document do
   defdelegate line_at(buf, line_num), to: Lines, as: :fetch
   defdelegate lines(buf, start, count), to: Lines, as: :slice
 
-  defdelegate move(buf, direction), to: Cursor, as: :step
+  defdelegate move(buf, direction), to: Cursor, as: :move
   defdelegate move_to(buf, target), to: Cursor, as: :place
 
   defdelegate position_to_offset(buf, target), to: Position, as: :point_for
