@@ -203,7 +203,7 @@ defmodule MingaEditor.CompletionHandling do
       Buffer.insert_text(buf, text)
     end
 
-    # Buffer.Server now broadcasts :buffer_changed with delta from record_edit
+    # Buffer.Process now broadcasts :buffer_changed with delta from record_edit
     state
   end
 
@@ -220,7 +220,7 @@ defmodule MingaEditor.CompletionHandling do
       edit.new_text
     )
 
-    # Buffer.Server now broadcasts :buffer_changed with delta from record_edit
+    # Buffer.Process now broadcasts :buffer_changed with delta from record_edit
     state
   end
 

@@ -50,7 +50,7 @@ Scheduler count (`+S`) and dirty IO threads (`+SDio`) are left at BEAM defaults.
 | `+MBas aobf` | bf | aobf | Address-order best fit reduces fragmentation for bursty allocation patterns (render loop builds then discards IO lists every frame). |
 | `+Mea min` | (default) | min | Return unused memory carriers to the OS sooner. Editors should have a small idle footprint. |
 | `+MBacul 0` | (default) | 0 | Abandon carriers more aggressively. Don't hold memory the editor isn't using. |
-| `+hmbs 32768` | 262144 | 32768 | Lower minimum binary virtual heap. Triggers binary GC sooner on processes that churn binaries (Editor, Buffer.Server during render and streaming). |
+| `+hmbs 32768` | 262144 | 32768 | Lower minimum binary virtual heap. Triggers binary GC sooner on processes that churn binaries (Editor, Buffer.Process during render and streaming). |
 
 ### Per-process GC tuning (Elixir code)
 
@@ -63,7 +63,7 @@ Process.flag(:min_heap_size, 4096)   # Pre-allocate larger heap; avoids repeated
 
 Processes with this tuning:
 - `Minga.Editor` (render loop, state management)
-- `Minga.Buffer.Server` (gap buffer, binary churn on edits)
+- `Minga.Buffer.Process` (gap buffer, binary churn on edits)
 - `Minga.Port.Manager` (binary render commands every frame; fullsweep only, no min_heap bump)
 
 ### Development vs release
@@ -107,7 +107,7 @@ The raw I/O isn't the bottleneck (OS page cache makes reads/writes effectively m
 
 ### Planned path: buffer-routed edits
 
-Route through `Buffer.Server.apply_text_edits/2`: one GenServer call with a list of edits, one undo entry, one version bump, one `EditDelta` batch for tree-sitter. Zero filesystem events.
+Route through `Minga.Buffer.apply_edits/3`: one GenServer call with a list of edits, one undo entry, one version bump, one `EditDelta` batch for tree-sitter. Zero filesystem events.
 
 | Metric | Filesystem (20 edits) | Buffer (20 edits, 1 batch) |
 |--------|----------------------|---------------------------|
@@ -139,7 +139,7 @@ See [BUFFER-AWARE-AGENTS.md](BUFFER-AWARE-AGENTS.md) for the full design.
 2. [Gap Buffer: Replace Grapheme Lists with Binary Walking](#2-gap-buffer-replace-grapheme-lists-with-binary-walking)
 3. [Gap Buffer: Use IOdata Instead of Binary Concatenation](#3-gap-buffer-use-iodata-instead-of-binary-concatenation)
 4. [Motion Module: Avoid Temporary Document + Content Copies](#4-motion-module-avoid-temporary-gapbuffer--content-copies)
-5. [Editor: Batch Remaining Buffer.Server Mutations into Single Calls](#5-editor-batch-remaining-bufferserver-mutations-into-single-calls)
+5. [Editor: Batch Remaining Buffer.Process Mutations into Single Calls](#5-editor-batch-remaining-bufferserver-mutations-into-single-calls)
 6. [Editor: Pre-build Render Binaries with IOlists](#6-editor-pre-build-render-binaries-with-iolists)
 7. [Undo/Redo: Structural Sharing via Zipper or Diff-Based Stack](#7-undoredo-structural-sharing-via-zipper-or-diff-based-stack)
 8. [TextObject: Avoid Flattening Entire Buffer for Paren Matching](#8-textobject-avoid-flattening-entire-buffer-for-paren-matching)
@@ -253,10 +253,10 @@ While `content_and_cursor/1` reduced GenServer round-trips from 3 to 2, the temp
 
 ### Fix
 
-**Move motion execution into the Buffer.Server process** via an `apply_motion/2` GenServer call. The motion function runs inside the server where the gap buffer already lives (zero copies):
+**Move motion execution into the Buffer.Process process** via an `apply_motion/2` GenServer call. The motion function runs inside the server where the gap buffer already lives (zero copies):
 
 ```elixir
-# In Buffer.Server
+# In Buffer.Process
 def handle_call({:apply_motion, motion_fn}, _from, state) do
   new_pos = motion_fn.(state.document, Document.cursor(state.document))
   new_buf = Document.move_to(state.document, new_pos)
@@ -272,11 +272,11 @@ This eliminates the content copy, the temporary Document, and reduces the remain
 
 ---
 
-## 5. Editor: Batch Remaining Buffer.Server Mutations into Single Calls
+## 5. Editor: Batch Remaining Buffer.Process Mutations into Single Calls
 
 ### Problem
 
-Several editor commands still issue multiple sequential GenServer calls to `BufferServer`. The `change_line` command was fixed (now uses `clear_line/1`), but others remain:
+Several editor commands still issue multiple sequential GenServer calls to `BufferProcess`. The `change_line` command was fixed (now uses `clear_line/1`), but others remain:
 
 - **`join_lines`**: 4+ GenServer calls (cursor, get_lines, move_to, delete_at, N × delete_at for whitespace, insert_char)
 - **`indent_line`**: 3 calls (cursor, move_to, insert_char, move_to)
@@ -285,10 +285,10 @@ Several editor commands still issue multiple sequential GenServer calls to `Buff
 
 ### Fix
 
-Add compound operations to `BufferServer` / `Document`:
+Add compound operations to `BufferProcess` / `Document`:
 
 ```elixir
-# In Buffer.Server
+# In Buffer.Process
 def handle_call({:join_lines, line}, _from, state) do
   {new_buf, _} = Document.join_lines(state.document, line)
   {:reply, :ok, push_undo(state, new_buf) |> mark_dirty()}
@@ -331,7 +331,7 @@ More impactful: in `PortManager.handle_cast({:send_commands, ...})`, skip the in
 
 Every mutation pushes a **complete copy** of the `Document.t()` struct onto the undo stack. The struct contains `before` and `after_` binaries which together hold the full file content. For a 1 MB file, each keystroke adds ~1 MB to the undo stack. With `@max_undo_stack` of 1000, that's potentially ~1 GB of undo history.
 
-The BEAM's garbage collector runs per-process, so this all lives in the `Buffer.Server` process heap and causes increasingly expensive GC pauses.
+The BEAM's garbage collector runs per-process, so this all lives in the `Buffer.Process` process heap and causes increasingly expensive GC pauses.
 
 ### Fix
 
@@ -458,7 +458,7 @@ The three highest-contention GenServer stores have been migrated to ETS with `re
 
 ### Remaining
 
-The Editor process still creates a temporary `Document.new(content)` for motions, copying the full content across processes. Best approach: move motions into the Buffer.Server process (see #4).
+The Editor process still creates a temporary `Document.new(content)` for motions, copying the full content across processes. Best approach: move motions into the Buffer.Process process (see #4).
 
 ### Impact
 
@@ -528,7 +528,7 @@ The project already has `test/perf/document_perf_test.exs`. Extend this with ben
 Implement optimizations in this order for maximum impact:
 
 1. **#1** Line index cache (eliminates the #1 allocation source)
-2. **#4** Move motions into Buffer.Server (eliminates cross-process copies)
+2. **#4** Move motions into Buffer.Process (eliminates cross-process copies)
 3. **#5** Batch remaining mutations (eliminates O(n) GenServer calls)
 4. **#7** Diff-based undo (memory)
 5. **#2** Binary walking (allocation reduction)

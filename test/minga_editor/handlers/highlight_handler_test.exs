@@ -88,7 +88,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
     test "non-active buffer stores names in highlights map" do
       state = base_state()
       # Create a secondary buffer
-      {:ok, other_buf} = Minga.Buffer.Server.start_link(content: "other")
+      {:ok, other_buf} = Minga.Buffer.Process.start_link(content: "other")
       state = with_buffer_id(state, other_buf, 2)
       state = with_highlight(state, other_buf)
 
@@ -187,7 +187,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
 
     test "non-active buffer stores spans" do
       state = base_state()
-      {:ok, other_buf} = Minga.Buffer.Server.start_link(content: "other")
+      {:ok, other_buf} = Minga.Buffer.Process.start_link(content: "other")
       state = with_buffer_id(state, other_buf, 2)
       state = with_highlight(state, other_buf)
 
@@ -256,7 +256,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
 
     test "non-active buffer is a no-op" do
       state = base_state()
-      {:ok, other_buf} = Minga.Buffer.Server.start_link(content: "other")
+      {:ok, other_buf} = Minga.Buffer.Process.start_link(content: "other")
       state = with_buffer_id(state, other_buf, 2)
 
       {new_state, effects} =
@@ -301,7 +301,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
 
     test "non-active buffer is a no-op" do
       state = base_state()
-      {:ok, other_buf} = Minga.Buffer.Server.start_link(content: "other")
+      {:ok, other_buf} = Minga.Buffer.Process.start_link(content: "other")
       state = with_buffer_id(state, other_buf, 2)
 
       {new_state, effects} =

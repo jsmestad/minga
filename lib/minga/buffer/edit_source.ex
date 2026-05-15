@@ -82,10 +82,10 @@ defmodule Minga.Buffer.EditSource do
   @doc """
   Converts a simple undo source atom to the rich event source.
 
-  Used when Buffer.Server mutation functions are called without an explicit
+  Used when Buffer.Process mutation functions are called without an explicit
   source parameter, preserving backward compatibility.
 
-  Note: for `:agent`, the returned `session_id` is the Buffer.Server's own PID,
+  Note: for `:agent`, the returned `session_id` is the Buffer.Process's own PID,
   not an agent session PID. The undo stack doesn't preserve the original session
   reference. Treat it as a sentinel indicating "some agent edit, origin unknown."
   """

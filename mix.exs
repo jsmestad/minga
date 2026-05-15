@@ -127,8 +127,9 @@ defmodule Minga.MixProject do
             MingaEditor.WindowTree
           ],
           Buffer: [
+            Minga.Buffer,
             Minga.Buffer.Document,
-            Minga.Buffer.Server
+            Minga.Buffer.Process
           ],
           Modes: [
             Minga.Mode,

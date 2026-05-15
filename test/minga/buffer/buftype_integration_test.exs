@@ -7,12 +7,12 @@ defmodule Minga.Buffer.BuftypeIntegrationTest do
   """
   use Minga.Test.EditorCase, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
 
   describe "nofile buffer blocks editing" do
     test "insert mode is blocked with read-only message" do
       {:ok, buf} =
-        BufferServer.start_link(
+        BufferProcess.start_link(
           content: "read only content",
           buffer_type: :nofile,
           read_only: true
@@ -28,49 +28,49 @@ defmodule Minga.Buffer.BuftypeIntegrationTest do
 
     test "dd is blocked on read-only nofile buffer" do
       {:ok, buf} =
-        BufferServer.start_link(
+        BufferProcess.start_link(
           content: "line one\nline two\nline three",
           buffer_type: :nofile,
           read_only: true
         )
 
-      original = BufferServer.content(buf)
+      original = BufferProcess.content(buf)
       ctx = start_editor_with_buffer(buf)
 
       send_keys_sync(ctx, "dd")
-      assert BufferServer.content(buf) == original
+      assert BufferProcess.content(buf) == original
     end
 
     test "save is blocked on nofile buffer" do
       {:ok, buf} =
-        BufferServer.start_link(
+        BufferProcess.start_link(
           content: "no file",
           buffer_type: :nofile
         )
 
-      assert BufferServer.save(buf) == {:error, :buffer_not_saveable}
+      assert BufferProcess.save(buf) == {:error, :buffer_not_saveable}
     end
 
     test "force_save is blocked on nofile buffer" do
       {:ok, buf} =
-        BufferServer.start_link(
+        BufferProcess.start_link(
           content: "no file",
           buffer_type: :nofile
         )
 
-      assert BufferServer.force_save(buf) == {:error, :buffer_not_saveable}
+      assert BufferProcess.force_save(buf) == {:error, :buffer_not_saveable}
     end
   end
 
   describe "nowrite buffer blocks save but allows editing" do
     test "save is blocked on nowrite buffer" do
       {:ok, buf} =
-        BufferServer.start_link(
+        BufferProcess.start_link(
           content: "nowrite content",
           buffer_type: :nowrite
         )
 
-      assert BufferServer.force_save(buf) == {:error, :buffer_not_saveable}
+      assert BufferProcess.force_save(buf) == {:error, :buffer_not_saveable}
     end
   end
 
@@ -83,7 +83,7 @@ defmodule Minga.Buffer.BuftypeIntegrationTest do
       ctx = start_editor("hello", file_path: path)
       buf = ctx.buffer
 
-      assert BufferServer.buffer_type(buf) == :file
+      assert BufferProcess.buffer_type(buf) == :file
 
       # Enter insert mode, type, escape, save
       send_keys_sync(ctx, "A world")
@@ -101,12 +101,12 @@ defmodule Minga.Buffer.BuftypeIntegrationTest do
       ctx = start_editor("hello", file_path: path)
       buf = ctx.buffer
 
-      refute BufferServer.dirty?(buf)
+      refute BufferProcess.dirty?(buf)
 
       send_keys_sync(ctx, "iX")
       send_keys_sync(ctx, "<Esc>")
 
-      assert BufferServer.dirty?(buf)
+      assert BufferProcess.dirty?(buf)
     end
 
     @tag :tmp_dir
@@ -119,10 +119,10 @@ defmodule Minga.Buffer.BuftypeIntegrationTest do
 
       send_keys_sync(ctx, "iX")
       send_keys_sync(ctx, "<Esc>")
-      assert BufferServer.content(buf) =~ "X"
+      assert BufferProcess.content(buf) =~ "X"
 
       send_key_sync(ctx, ?u)
-      refute BufferServer.content(buf) =~ "X"
+      refute BufferProcess.content(buf) =~ "X"
     end
   end
 end

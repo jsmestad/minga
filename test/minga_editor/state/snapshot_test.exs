@@ -1,7 +1,7 @@
 defmodule MingaEditor.State.SnapshotTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
@@ -32,7 +32,7 @@ defmodule MingaEditor.State.SnapshotTest do
 
   describe "snapshot_tab_context/1" do
     test "captures per-tab fields directly (no surface_state bridge)" do
-      {:ok, buf} = BufferServer.start_link(content: "hello")
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
       state = make_state(buffer: buf, mode: :insert, keymap_scope: :agent)
 
       ctx = EditorState.snapshot_tab_context(state)
@@ -49,7 +49,7 @@ defmodule MingaEditor.State.SnapshotTest do
     end
 
     test "captures all per-tab fields" do
-      {:ok, buf} = BufferServer.start_link(content: "hello")
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
       state = make_state(buffer: buf, mode: :insert, keymap_scope: :editor)
 
       ctx = EditorState.snapshot_tab_context(state)
@@ -78,8 +78,8 @@ defmodule MingaEditor.State.SnapshotTest do
 
   describe "restore_tab_context/2" do
     test "restores per-tab fields from flat context" do
-      {:ok, buf_a} = BufferServer.start_link(content: "a")
-      {:ok, buf_b} = BufferServer.start_link(content: "b")
+      {:ok, buf_a} = BufferProcess.start_link(content: "a")
+      {:ok, buf_b} = BufferProcess.start_link(content: "b")
 
       state = make_state(buffer: buf_a)
 
@@ -94,8 +94,8 @@ defmodule MingaEditor.State.SnapshotTest do
     end
 
     test "restores agent scope context correctly" do
-      {:ok, buf_a} = BufferServer.start_link(content: "a")
-      {:ok, buf_b} = BufferServer.start_link(content: "b")
+      {:ok, buf_a} = BufferProcess.start_link(content: "a")
+      {:ok, buf_b} = BufferProcess.start_link(content: "b")
 
       state = make_state(buffer: buf_a)
 
@@ -113,8 +113,8 @@ defmodule MingaEditor.State.SnapshotTest do
       # keys (those in WorkspaceState.field_names()), so legacy fields are
       # ignored and the workspace falls back to whatever the live state already
       # holds. No crash, no migration, no warning.
-      {:ok, buf_a} = BufferServer.start_link(content: "a")
-      {:ok, buf_b} = BufferServer.start_link(content: "b")
+      {:ok, buf_a} = BufferProcess.start_link(content: "a")
+      {:ok, buf_b} = BufferProcess.start_link(content: "b")
 
       state = make_state(buffer: buf_a, mode: :normal, keymap_scope: :editor)
 
@@ -142,8 +142,8 @@ defmodule MingaEditor.State.SnapshotTest do
     end
 
     test "restores string-key encoded contexts using present_fields" do
-      {:ok, buf_a} = BufferServer.start_link(content: "a")
-      {:ok, buf_b} = BufferServer.start_link(content: "b")
+      {:ok, buf_a} = BufferProcess.start_link(content: "a")
+      {:ok, buf_b} = BufferProcess.start_link(content: "b")
       state = make_state(buffer: buf_a, keymap_scope: :editor)
       legacy_vim = %VimState{mode: :insert, mode_state: Mode.initial_state()}
       buffers = %Buffers{active: buf_b, list: [buf_b], active_index: 0}
@@ -169,7 +169,7 @@ defmodule MingaEditor.State.SnapshotTest do
     end
 
     test "writes synthesized defaults back into the active tab on empty context" do
-      {:ok, buf} = BufferServer.start_link(content: "new file")
+      {:ok, buf} = BufferProcess.start_link(content: "new file")
 
       tab = Tab.new_file(1, "new.ex")
       tb = TabBar.new(tab)
@@ -196,14 +196,14 @@ defmodule MingaEditor.State.SnapshotTest do
     end
 
     test "returns unchanged when active pid is alive" do
-      {:ok, buf} = BufferServer.start_link(content: "alive")
+      {:ok, buf} = BufferProcess.start_link(content: "alive")
       bs = %Buffers{active: buf, list: [buf], active_index: 0}
       assert Buffers.scrub_dead_active(bs) == bs
     end
 
     test "selects neighbor when active pid is dead" do
-      {:ok, buf_a} = BufferServer.start_link(content: "a")
-      {:ok, buf_b} = BufferServer.start_link(content: "b")
+      {:ok, buf_a} = BufferProcess.start_link(content: "a")
+      {:ok, buf_b} = BufferProcess.start_link(content: "b")
 
       bs = %Buffers{active: buf_a, list: [buf_a, buf_b], active_index: 0}
       GenServer.stop(buf_a)
@@ -215,8 +215,8 @@ defmodule MingaEditor.State.SnapshotTest do
     end
 
     test "sets active to nil when all pids are dead" do
-      {:ok, buf_a} = BufferServer.start_link(content: "a")
-      {:ok, buf_b} = BufferServer.start_link(content: "b")
+      {:ok, buf_a} = BufferProcess.start_link(content: "a")
+      {:ok, buf_b} = BufferProcess.start_link(content: "b")
 
       bs = %Buffers{active: buf_a, list: [buf_a, buf_b], active_index: 0}
       GenServer.stop(buf_a)
@@ -229,9 +229,9 @@ defmodule MingaEditor.State.SnapshotTest do
     end
 
     test "clamps active_index when dead pid was at the end" do
-      {:ok, buf_a} = BufferServer.start_link(content: "a")
-      {:ok, buf_b} = BufferServer.start_link(content: "b")
-      {:ok, buf_c} = BufferServer.start_link(content: "c")
+      {:ok, buf_a} = BufferProcess.start_link(content: "a")
+      {:ok, buf_b} = BufferProcess.start_link(content: "b")
+      {:ok, buf_c} = BufferProcess.start_link(content: "c")
 
       bs = %Buffers{active: buf_c, list: [buf_a, buf_b, buf_c], active_index: 2}
       GenServer.stop(buf_c)
@@ -245,8 +245,8 @@ defmodule MingaEditor.State.SnapshotTest do
 
   describe "restore_tab_context/2 with dead buffer" do
     test "scrubs dead active buffer pid on restore" do
-      {:ok, buf_a} = BufferServer.start_link(content: "a")
-      {:ok, buf_b} = BufferServer.start_link(content: "b")
+      {:ok, buf_a} = BufferProcess.start_link(content: "a")
+      {:ok, buf_b} = BufferProcess.start_link(content: "b")
 
       # Build state with two buffers, buf_a active
       state_with_both =
@@ -275,8 +275,8 @@ defmodule MingaEditor.State.SnapshotTest do
 
   describe "switch_tab/2" do
     test "snapshots current tab, restores target tab" do
-      {:ok, buf_a} = BufferServer.start_link(content: "file a")
-      {:ok, buf_b} = BufferServer.start_link(content: "file b")
+      {:ok, buf_a} = BufferProcess.start_link(content: "file a")
+      {:ok, buf_b} = BufferProcess.start_link(content: "file b")
 
       tab_a = Tab.new_file(1, "a.ex")
       tb = TabBar.new(tab_a)
@@ -317,7 +317,7 @@ defmodule MingaEditor.State.SnapshotTest do
     end
 
     test "switching to a brand-new tab writes context into tab bar immediately" do
-      {:ok, buf} = BufferServer.start_link(content: "original")
+      {:ok, buf} = BufferProcess.start_link(content: "original")
 
       tab_a = Tab.new_file(1, "a.ex")
       tb = TabBar.new(tab_a)
@@ -343,7 +343,7 @@ defmodule MingaEditor.State.SnapshotTest do
 
   describe "from_workspace/1 (direct struct-to-struct)" do
     test "produces identical output to the legacy Map.from_struct path" do
-      {:ok, buf} = BufferServer.start_link(content: "hello")
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
 
       ws = %MingaEditor.Workspace.State{
         viewport: Viewport.new(24, 80),
@@ -387,7 +387,7 @@ defmodule MingaEditor.State.SnapshotTest do
     end
 
     test "round-trips through to_workspace_map preserving all fields" do
-      {:ok, buf} = BufferServer.start_link(content: "round-trip")
+      {:ok, buf} = BufferProcess.start_link(content: "round-trip")
 
       ws = %MingaEditor.Workspace.State{
         viewport: Viewport.new(30, 100),

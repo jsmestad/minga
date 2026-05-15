@@ -45,6 +45,6 @@
 +MBacul 0
 
 ## Lower the minimum binary virtual heap size. This triggers binary
-## GC sooner on processes that churn binaries (Editor, Buffer.Server
+## GC sooner on processes that churn binaries (Editor, Buffer.Process
 ## during render and streaming). Default is 262144 words.
 +hmbs 32768

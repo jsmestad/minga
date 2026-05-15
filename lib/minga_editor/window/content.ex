@@ -19,9 +19,9 @@ defmodule MingaEditor.Window.Content do
 
   | Tag | Reference | NavigableContent? | Editable? |
   |-----|-----------|-------------------|-----------|
-  | `:buffer` | `pid()` (Buffer.Server) | Yes (via BufferSnapshot) | Yes |
+  | `:buffer` | `pid()` (Buffer.Process) | Yes (via BufferSnapshot) | Yes |
   | `:agent_chat` | `pid()` (Agent.Session) | Yes | No |
-  | `:agent_prompt` | `pid()` (Buffer.Server) | Yes (via BufferSnapshot) | Yes |
+  | `:agent_prompt` | `pid()` (Buffer.Process) | Yes (via BufferSnapshot) | Yes |
   | `:terminal` | `pid()` (future, #122) | Yes (future) | No |
   | `:browser` | `reference()` (future, #305) | Yes (future) | No |
 
@@ -43,7 +43,7 @@ defmodule MingaEditor.Window.Content do
   @spec buffer(pid()) :: t()
   def buffer(pid) when is_pid(pid), do: {:buffer, pid}
 
-  @doc "Creates an agent chat content reference. The pid is the agent's `*Agent*` Buffer.Server."
+  @doc "Creates an agent chat content reference. The pid is the agent's `*Agent*` Buffer.Process."
   @spec agent_chat(pid()) :: t()
   def agent_chat(pid) when is_pid(pid), do: {:agent_chat, pid}
 
@@ -55,8 +55,8 @@ defmodule MingaEditor.Window.Content do
   @doc """
   Returns the underlying pid for any content type.
 
-  For `:buffer`, this is the Buffer.Server pid. For `:agent_chat`, this
-  is the agent's `*Agent*` Buffer.Server pid (used for cursor/scroll).
+  For `:buffer`, this is the Buffer.Process pid. For `:agent_chat`, this
+  is the agent's `*Agent*` Buffer.Process pid (used for cursor/scroll).
   """
   @spec pid(t()) :: pid()
   def pid({:buffer, p}), do: p

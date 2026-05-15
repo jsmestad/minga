@@ -32,14 +32,14 @@ For 20 edits to one file, this means:
 
 `MultiEditFile` batches edits in memory (one read, one write), but still pays the FileWatcher and reparse costs.
 
-The buffer already has `Buffer.Server.apply_text_edits/2` which would give:
+The buffer facade already has `Minga.Buffer.apply_edits/3` which would give:
 - 0 syscalls
 - 0 FileWatcher events
 - 1 incremental tree-sitter reparse (via EditDelta)
 - 1 undo entry (the entire batch)
 - No race condition (serialized through the buffer's GenServer mailbox)
 
-**Fix:** Add a `BufferRouter` module that resolves file path to buffer pid (if open) and routes through `apply_text_edits/2`. Fall back to filesystem I/O when no buffer exists. The string-match-to-position conversion can use `:binary.matches` to find offsets, then `Document.offset_to_position` (already exists) to convert.
+**Fix:** Add a `BufferRouter` module that resolves file path to buffer pid (if open) and routes through `Minga.Buffer.apply_edits/3`. Fall back to filesystem I/O when no buffer exists. The string-match-to-position conversion can use `:binary.matches` to find offsets, then `Document.offset_to_position` (already exists) to convert.
 
 **Why first:** Every agent feature built on filesystem I/O inherits this performance tax. The longer this waits, the more code depends on the slow path.
 
@@ -67,15 +67,15 @@ Set `:log_level_render` to `:debug` to see per-stage timing in `*Messages*`. The
 **Effort:** Quick win (low), structural fix (medium-high).
 
 `Helpers.apply_motion` does:
-1. `BufferServer.snapshot(buf)` copies the full `Document.t()` to the Editor process
+1. `BufferProcess.snapshot(buf)` copies the full `Document.t()` to the Editor process
 2. Runs the motion function on it
-3. `BufferServer.move_to(buf, new_pos)` sends the result back
+3. `BufferProcess.move_to(buf, new_pos)` sends the result back
 
 For a 50K-line file (~3MB), every motion copies 3MB across the process boundary. But the severity varies by motion type:
 
 | Motion | Snapshot needed? | Content materialized? | Cost |
 |--------|------------------|-----------------------|------|
-| `j`, `k` (up/down) | No (uses `BufferServer.move` directly) | No | Low |
+| `j`, `k` (up/down) | No (uses `BufferProcess.move` directly) | No | Low |
 | `h`, `l` (left/right) | Yes (checks boundary) | No | Medium |
 | `0`, `$`, `^` (line) | Yes (snapshot) | No, uses `line_at` | Medium |
 | `w`, `b`, `e` (word) | Yes (snapshot) | Yes (`content()` = O(n) concat) | **High** |
@@ -94,7 +94,7 @@ Word motions are the worst: they call `Readable.content(buf)` which concatenates
 
 `BufState.push_undo` stores `{version, document}` where `document` contains the full file as `before` + `after` binaries. Worst case for a 1MB file with 1000 undo entries: ~1GB in the buffer process heap.
 
-In practice, the 300ms coalescing window limits human typing to 2-3 entries/second. Agent edits via `apply_text_edits/2` push one entry per batch, which is manageable. The real problem is the current agent path: filesystem writes trigger buffer reloads, and each reload may push a snapshot.
+In practice, the 300ms coalescing window limits human typing to 2-3 entries/second. Agent edits via `Minga.Buffer.apply_edits/3` push one entry per batch, which is manageable. The real problem is the current agent path: filesystem writes trigger buffer reloads, and each reload may push a snapshot.
 
 **Fix (when telemetry proves it matters):** Delta-based undo. Store the inverse operation (what was deleted/inserted + cursor positions) rather than the full document. This is how every production editor does it. Each entry shrinks from ~file_size to ~edit_size.
 
@@ -105,7 +105,7 @@ In practice, the 300ms coalescing window limits human typing to 2-3 entries/seco
 **Impact:** MEDIUM. Already partially optimized via `render_snapshot`.
 **Effort:** Low-medium.
 
-The scroll stage makes 4-7 `BufferServer` calls per window per frame:
+The scroll stage makes 4-7 `BufferProcess` calls per window per frame:
 - `line_count` (1 call)
 - `cursor` (1 call, active window only)
 - `decorations` (1 call)
@@ -126,7 +126,7 @@ At 60fps, that's ~300-420 GenServer round-trips/second per window. Each GenServe
 
 The invalidation is narrower than it appears: only `move_to` and content mutations set `line_offsets: nil`. Regular `move(:left/:right/:up/:down)` preserves the cache.
 
-If agent edits route through `apply_text_edits/2` (P1 fix), they're batched, so you get one invalidation per batch, not per edit.
+If agent edits route through `Minga.Buffer.apply_edits/3` (P1 fix), they're batched, so you get one invalidation per batch, not per edit.
 
 **Fix (when telemetry proves it matters):** Incremental offset update. Given an EditDelta, adjust offsets above the edit point rather than rebuilding from scratch.
 
@@ -147,7 +147,7 @@ The gap buffer moves the cursor by shifting bytes between `before` and `after`. 
 
 ### Agent Tool String Matching is O(n×m)
 
-`EditFile` uses `String.split(content, old_text)` to count occurrences, then `String.replace` to apply. For large files with long search strings, that's two full scans. If routed through the buffer (P1 fix), the tool layer needs to convert string matches to positions first, then hand off positions to `apply_text_edits/2`.
+`EditFile` uses `String.split(content, old_text)` to count occurrences, then `String.replace` to apply. For large files with long search strings, that's two full scans. If routed through the buffer (P1 fix), the tool layer needs to convert string matches to positions first, then hand off positions to `Minga.Buffer.apply_edits/3`.
 
 ## What Already Works Well
 

@@ -1,7 +1,7 @@
 defmodule MingaEditor.MouseTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Core.Decorations
   alias Minga.Editing.Fold.Range, as: FoldRange
   alias MingaEditor
@@ -25,7 +25,7 @@ defmodule MingaEditor.MouseTest do
     project_root = isolated_project_root(id)
     start_supervised!({Minga.Events, name: events_registry})
 
-    {:ok, buffer} = BufferServer.start_link(content: content, events_registry: events_registry)
+    {:ok, buffer} = BufferProcess.start_link(content: content, events_registry: events_registry)
 
     {:ok, editor} =
       MingaEditor.start_link(
@@ -112,16 +112,16 @@ defmodule MingaEditor.MouseTest do
       # effective_margin = min(5, div(7,2)) = 3, new_top=1:
       # cursor pushed to 1 + 3 = 4.
       send_mouse(editor, 0, 0, :wheel_down, :press)
-      {line, _col} = BufferServer.cursor(buffer)
+      {line, _col} = BufferProcess.cursor(buffer)
       assert line == 4
     end
 
     test "scroll down keeps cursor in place when it remains visible" do
       {editor, buffer} = start_mouse_editor()
-      BufferServer.move_to(buffer, {5, 0})
+      BufferProcess.move_to(buffer, {5, 0})
       _ = :sys.get_state(editor)
       send_mouse(editor, 0, 0, :wheel_down, :press)
-      {line, _col} = BufferServer.cursor(buffer)
+      {line, _col} = BufferProcess.cursor(buffer)
       assert line == 5
     end
 
@@ -130,10 +130,10 @@ defmodule MingaEditor.MouseTest do
       # Scroll down twice (2 lines), move cursor down, then scroll up
       send_mouse(editor, 0, 0, :wheel_down, :press)
       send_mouse(editor, 0, 0, :wheel_down, :press)
-      BufferServer.move_to(buffer, {5, 0})
+      BufferProcess.move_to(buffer, {5, 0})
       _ = :sys.get_state(editor)
       send_mouse(editor, 0, 0, :wheel_up, :press)
-      {line, _col} = BufferServer.cursor(buffer)
+      {line, _col} = BufferProcess.cursor(buffer)
       assert line == 5
     end
 
@@ -141,21 +141,21 @@ defmodule MingaEditor.MouseTest do
       {editor, buffer} = start_mouse_editor()
       # Scroll down enough that cursor at line 0 is off-screen
       for _i <- 1..3, do: send_mouse(editor, 0, 0, :wheel_down, :press)
-      {line, _col} = BufferServer.cursor(buffer)
+      {line, _col} = BufferProcess.cursor(buffer)
       assert line >= 1
     end
 
     test "scroll at top of file doesn't go negative" do
       {editor, buffer} = start_mouse_editor()
       send_mouse(editor, 0, 0, :wheel_up, :press)
-      {line, _col} = BufferServer.cursor(buffer)
+      {line, _col} = BufferProcess.cursor(buffer)
       assert line == 0
     end
 
     test "scroll at bottom of file clamps viewport" do
       {editor, buffer} = start_mouse_editor()
       for _i <- 1..10, do: send_mouse(editor, 0, 0, :wheel_down, :press)
-      {line, _col} = BufferServer.cursor(buffer)
+      {line, _col} = BufferProcess.cursor(buffer)
       assert line >= 0
       assert line <= 29
     end
@@ -201,7 +201,7 @@ defmodule MingaEditor.MouseTest do
       # Row @content_row + 1 = screen row 2 = buffer line 1
       send_mouse(editor, @content_row + 1, @gutter + 3, :left, :press)
       send_mouse(editor, @content_row + 1, @gutter + 3, :left, :release)
-      {line, col} = BufferServer.cursor(buffer)
+      {line, col} = BufferProcess.cursor(buffer)
       assert line == 1
       assert col == 3
     end
@@ -211,7 +211,7 @@ defmodule MingaEditor.MouseTest do
 
       send_mouse(editor, @content_row + 1, @gutter + 3, :right, :press)
 
-      assert BufferServer.cursor(buffer) == {1, 3}
+      assert BufferProcess.cursor(buffer) == {1, 3}
       assert state(editor).workspace.mouse.dragging == false
     end
 
@@ -222,7 +222,7 @@ defmodule MingaEditor.MouseTest do
       send_mouse(editor, @content_row, @gutter + 3, :left, :press, 0x02)
 
       s = state(editor)
-      assert BufferServer.cursor(buffer) == {1, 3}
+      assert BufferProcess.cursor(buffer) == {1, 3}
       assert s.workspace.mouse.dragging == false
       refute EditorState.status_msg(s) == "No language server"
     end
@@ -232,7 +232,7 @@ defmodule MingaEditor.MouseTest do
 
       send_mouse(editor, @content_row + 1, @gutter + 3, :left, :press, 0x02)
 
-      assert BufferServer.cursor(buffer) == {1, 3}
+      assert BufferProcess.cursor(buffer) == {1, 3}
       assert EditorState.status_msg(state(editor)) == "No language server"
     end
 
@@ -243,7 +243,7 @@ defmodule MingaEditor.MouseTest do
       for _i <- 1..4, do: send_mouse(editor, 0, 0, :wheel_down, :press)
       send_mouse(editor, @content_row + 2, 0, :left, :press)
       send_mouse(editor, @content_row + 2, 0, :left, :release)
-      {line, _col} = BufferServer.cursor(buffer)
+      {line, _col} = BufferProcess.cursor(buffer)
       # Verify cursor moved past the initial view (scrolled at least 4 lines).
       assert line >= 4
     end
@@ -288,40 +288,40 @@ defmodule MingaEditor.MouseTest do
 
       send_mouse(editor, row, col + @gutter, :left, :press)
 
-      {_line, cursor_col} = BufferServer.cursor(buffer)
+      {_line, cursor_col} = BufferProcess.cursor(buffer)
       assert state(editor).workspace.windows.active == target_id
       assert cursor_col == scrolled_left
     end
 
     test "left click on modeline row is ignored" do
       {editor, buffer} = start_editor("hello\nworld")
-      original_cursor = BufferServer.cursor(buffer)
+      original_cursor = BufferProcess.cursor(buffer)
       send_mouse(editor, 8, 5, :left, :press)
       send_mouse(editor, 8, 5, :left, :release)
-      assert BufferServer.cursor(buffer) == original_cursor
+      assert BufferProcess.cursor(buffer) == original_cursor
     end
 
     test "left click on minibuffer row is ignored" do
       {editor, buffer} = start_editor("hello\nworld")
-      original_cursor = BufferServer.cursor(buffer)
+      original_cursor = BufferProcess.cursor(buffer)
       send_mouse(editor, 9, 5, :left, :press)
       send_mouse(editor, 9, 5, :left, :release)
-      assert BufferServer.cursor(buffer) == original_cursor
+      assert BufferProcess.cursor(buffer) == original_cursor
     end
 
     test "left click on tilde row (beyond buffer end) is ignored" do
       {editor, buffer} = start_editor("hello\nworld")
-      original_cursor = BufferServer.cursor(buffer)
+      original_cursor = BufferProcess.cursor(buffer)
       send_mouse(editor, 5, 0, :left, :press)
       send_mouse(editor, 5, 0, :left, :release)
-      assert BufferServer.cursor(buffer) == original_cursor
+      assert BufferProcess.cursor(buffer) == original_cursor
     end
 
     test "left click clamps column to line length" do
       {editor, buffer} = start_editor("hi\nworld")
       send_mouse(editor, @content_row, 10, :left, :press)
       send_mouse(editor, @content_row, 10, :left, :release)
-      {line, col} = BufferServer.cursor(buffer)
+      {line, col} = BufferProcess.cursor(buffer)
       assert line == 0
       assert col <= 1
     end
@@ -332,7 +332,7 @@ defmodule MingaEditor.MouseTest do
       send_key(editor, ?l)
       send_mouse(editor, @content_row + 1, @gutter + 2, :left, :press)
       send_mouse(editor, @content_row + 1, @gutter + 2, :left, :release)
-      {line, col} = BufferServer.cursor(buffer)
+      {line, col} = BufferProcess.cursor(buffer)
       assert line == 1
       assert col == 2
       assert state(editor).workspace.editing.mode == :normal
@@ -343,7 +343,7 @@ defmodule MingaEditor.MouseTest do
       send_key(editor, ?:)
       send_mouse(editor, @content_row + 1, @gutter + 2, :left, :press)
       send_mouse(editor, @content_row + 1, @gutter + 2, :left, :release)
-      {line, col} = BufferServer.cursor(buffer)
+      {line, col} = BufferProcess.cursor(buffer)
       assert line == 1
       assert col == 2
       assert state(editor).workspace.editing.mode == :normal
@@ -355,7 +355,7 @@ defmodule MingaEditor.MouseTest do
       send_mouse(editor, @content_row + 1, @gutter + 2, :left, :press)
       send_mouse(editor, @content_row + 1, @gutter + 2, :left, :release)
 
-      {line, col} = BufferServer.cursor(buffer)
+      {line, col} = BufferProcess.cursor(buffer)
       assert line == 1
       assert col == 2
     end
@@ -369,7 +369,7 @@ defmodule MingaEditor.MouseTest do
 
       send_mouse(editor, @content_row, @gutter + 1, :left, :press, 0, 2)
 
-      assert BufferServer.cursor(buffer) == {0, 6}
+      assert BufferProcess.cursor(buffer) == {0, 6}
       s = state(editor)
       assert s.workspace.editing.mode == :visual
       assert s.workspace.editing.mode_state.visual_anchor == {0, 0}
@@ -427,7 +427,7 @@ defmodule MingaEditor.MouseTest do
       {editor, buffer} = start_editor("hello world foo")
       send_mouse(editor, @content_row, @gutter + 2, :left, :press)
       send_mouse(editor, @content_row, @gutter + 8, :left, :drag)
-      {line, col} = BufferServer.cursor(buffer)
+      {line, col} = BufferProcess.cursor(buffer)
       assert line == 0
       assert col == 8
     end
@@ -437,7 +437,7 @@ defmodule MingaEditor.MouseTest do
       send_mouse(editor, @content_row, @gutter + 2, :left, :press)
       send_mouse(editor, @content_row, @gutter + 8, :left, :drag)
       send_mouse(editor, @content_row, @gutter + 8, :left, :release)
-      {_line, col} = BufferServer.cursor(buffer)
+      {_line, col} = BufferProcess.cursor(buffer)
       assert col == 8
       s = state(editor)
       assert s.workspace.editing.mode == :visual
@@ -482,16 +482,16 @@ defmodule MingaEditor.MouseTest do
       {editor, buffer} = start_editor("hi\nworld")
       send_mouse(editor, @content_row, 0, :left, :press)
       send_mouse(editor, @content_row, 50, :left, :drag)
-      {line, col} = BufferServer.cursor(buffer)
+      {line, col} = BufferProcess.cursor(buffer)
       assert line == 0
       assert col <= 1
     end
 
     test "drag ignores events when not dragging" do
       {editor, buffer} = start_editor("hello world")
-      original = BufferServer.cursor(buffer)
+      original = BufferProcess.cursor(buffer)
       send_mouse(editor, @content_row, 5, :left, :drag)
-      assert BufferServer.cursor(buffer) == original
+      assert BufferProcess.cursor(buffer) == original
     end
   end
 
@@ -566,7 +566,7 @@ defmodule MingaEditor.MouseTest do
     test "clicking a decoration fold indicator opens that fold region" do
       {editor, buffer} = start_editor("agent output\nline two\nline three")
 
-      BufferServer.batch_decorations(buffer, fn decs ->
+      BufferProcess.batch_decorations(buffer, fn decs ->
         {_id, decs} = Decorations.add_fold_region(decs, 0, 2, closed: true)
         decs
       end)
@@ -581,7 +581,7 @@ defmodule MingaEditor.MouseTest do
         :press
       )
 
-      assert Decorations.closed_fold_regions(BufferServer.decorations(buffer)) == []
+      assert Decorations.closed_fold_regions(BufferProcess.decorations(buffer)) == []
     end
 
     test "clicking outside the fold indicator column does not toggle" do
@@ -616,16 +616,16 @@ defmodule MingaEditor.MouseTest do
   describe "mouse with negative coordinates" do
     test "negative row is ignored" do
       {editor, buffer} = start_editor("hello")
-      original = BufferServer.cursor(buffer)
+      original = BufferProcess.cursor(buffer)
       send_mouse(editor, -1, 5, :left, :press)
-      assert BufferServer.cursor(buffer) == original
+      assert BufferProcess.cursor(buffer) == original
     end
 
     test "negative col is ignored" do
       {editor, buffer} = start_editor("hello")
-      original = BufferServer.cursor(buffer)
+      original = BufferProcess.cursor(buffer)
       send_mouse(editor, @content_row, -3, :left, :press)
-      assert BufferServer.cursor(buffer) == original
+      assert BufferProcess.cursor(buffer) == original
     end
   end
 
@@ -638,8 +638,8 @@ defmodule MingaEditor.MouseTest do
       project_root = isolated_project_root(id)
       start_supervised!({Minga.Events, name: events_registry})
 
-      {:ok, buf1} = BufferServer.start_link(content: "hello", events_registry: events_registry)
-      {:ok, buf2} = BufferServer.start_link(content: "world", events_registry: events_registry)
+      {:ok, buf1} = BufferProcess.start_link(content: "hello", events_registry: events_registry)
+      {:ok, buf2} = BufferProcess.start_link(content: "world", events_registry: events_registry)
 
       {:ok, editor} =
         MingaEditor.start_link(

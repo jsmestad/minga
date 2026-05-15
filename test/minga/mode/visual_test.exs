@@ -1,7 +1,7 @@
 defmodule Minga.Mode.VisualTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Mode
   alias Minga.Mode.Normal
   alias Minga.Mode.Visual
@@ -385,55 +385,55 @@ defmodule Minga.Mode.VisualTest do
 
   describe "delete_visual_selection with real buffer (characterwise)" do
     setup do
-      {:ok, buf} = BufferServer.start_link(content: "hello world\nfoo bar")
+      {:ok, buf} = BufferProcess.start_link(content: "hello world\nfoo bar")
       {:ok, buf: buf}
     end
 
     test "deleting 'hello' from start of line", %{buf: buf} do
       # Place cursor at col 4 (on 'o')
-      BufferServer.move_to(buf, {0, 4})
+      BufferProcess.move_to(buf, {0, 4})
 
       # Simulate: anchor={0,0}, cursor={0,4}, delete char selection
       anchor = {0, 0}
-      cursor = BufferServer.cursor(buf)
+      cursor = BufferProcess.cursor(buf)
       assert cursor == {0, 4}
 
       # delete_range is inclusive on both ends
-      BufferServer.delete_range(buf, anchor, cursor)
+      BufferProcess.delete_range(buf, anchor, cursor)
 
-      assert BufferServer.content(buf) == " world\nfoo bar"
+      assert BufferProcess.content(buf) == " world\nfoo bar"
     end
 
     test "yanking a range returns correct text", %{buf: buf} do
-      BufferServer.move_to(buf, {0, 4})
-      text = BufferServer.get_range(buf, {0, 0}, {0, 4})
+      BufferProcess.move_to(buf, {0, 4})
+      text = BufferProcess.get_range(buf, {0, 0}, {0, 4})
       assert text == "hello"
     end
   end
 
   describe "delete_visual_selection with real buffer (linewise)" do
     setup do
-      {:ok, buf} = BufferServer.start_link(content: "line one\nline two\nline three")
+      {:ok, buf} = BufferProcess.start_link(content: "line one\nline two\nline three")
       {:ok, buf: buf}
     end
 
     test "deleting first two lines leaves only the third", %{buf: buf} do
-      BufferServer.delete_lines(buf, 0, 1)
-      assert BufferServer.content(buf) == "line three"
+      BufferProcess.delete_lines(buf, 0, 1)
+      assert BufferProcess.content(buf) == "line three"
     end
 
     test "deleting the middle line preserves surrounding lines", %{buf: buf} do
-      BufferServer.delete_lines(buf, 1, 1)
-      assert BufferServer.content(buf) == "line one\nline three"
+      BufferProcess.delete_lines(buf, 1, 1)
+      assert BufferProcess.content(buf) == "line one\nline three"
     end
 
     test "deleting all lines leaves an empty buffer", %{buf: buf} do
-      BufferServer.delete_lines(buf, 0, 2)
-      assert BufferServer.content(buf) == ""
+      BufferProcess.delete_lines(buf, 0, 2)
+      assert BufferProcess.content(buf) == ""
     end
 
     test "get_lines_content returns joined text of a range", %{buf: buf} do
-      text = BufferServer.get_lines_content(buf, 0, 1)
+      text = BufferProcess.get_lines_content(buf, 0, 1)
       assert text == "line one\nline two"
     end
   end

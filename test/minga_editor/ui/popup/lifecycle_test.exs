@@ -1,7 +1,7 @@
 defmodule MingaEditor.UI.Popup.LifecycleTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -381,7 +381,7 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
     test "render_float_overlays returns overlays for float popups", %{state: state, table: t} do
       real_buf =
         start_supervised!(
-          {BufferServer, content: "hello world", buffer_name: "*Help*"},
+          {BufferProcess, content: "hello world", buffer_name: "*Help*"},
           id: :float_overlay_buf
         )
 

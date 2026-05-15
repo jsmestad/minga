@@ -2,7 +2,7 @@ defmodule Minga.Editing.Operator do
   @moduledoc """
   Operator functions for the Minga editor: delete, change, and yank.
 
-  Each function takes a `Buffer.Server` PID and two positions, and applies
+  Each function takes a `Buffer.Process` PID and two positions, and applies
   the operator to the text between those positions.
 
   ## Position semantics
@@ -24,7 +24,7 @@ defmodule Minga.Editing.Operator do
   line by index (zero-based).
   """
 
-  alias Minga.Buffer.{Document, Server}
+  alias Minga.Buffer.Document
   alias Minga.Core.Unicode
 
   @typedoc "A zero-indexed {line, col} cursor position."
@@ -39,7 +39,7 @@ defmodule Minga.Editing.Operator do
   """
   @spec delete(GenServer.server(), position(), position()) :: {:ok, :deleted}
   def delete(server, from, to) do
-    Server.delete_range(server, from, to)
+    Minga.Buffer.delete_range(server, from, to)
     {:ok, :deleted}
   end
 
@@ -50,7 +50,7 @@ defmodule Minga.Editing.Operator do
   """
   @spec change(GenServer.server(), position(), position()) :: {:ok, :changed}
   def change(server, from, to) do
-    Server.delete_range(server, from, to)
+    Minga.Buffer.delete_range(server, from, to)
     {:ok, :changed}
   end
 
@@ -60,7 +60,7 @@ defmodule Minga.Editing.Operator do
   """
   @spec yank(GenServer.server(), position(), position()) :: {:ok, String.t()}
   def yank(server, from, to) do
-    text = Server.get_range(server, from, to)
+    text = Minga.Buffer.text_between_inclusive(server, from, to)
     {:ok, text}
   end
 
@@ -76,7 +76,7 @@ defmodule Minga.Editing.Operator do
   @spec delete_line(GenServer.server(), non_neg_integer()) :: {:ok, :deleted}
   def delete_line(server, line_index) when is_integer(line_index) and line_index >= 0 do
     {from, to} = line_range(server, line_index)
-    Server.delete_range(server, from, to)
+    Minga.Buffer.delete_range(server, from, to)
     {:ok, :deleted}
   end
 
@@ -88,7 +88,7 @@ defmodule Minga.Editing.Operator do
   @spec change_line(GenServer.server(), non_neg_integer()) :: {:ok, :changed}
   def change_line(server, line_index) when is_integer(line_index) and line_index >= 0 do
     {from, to} = line_range(server, line_index)
-    Server.delete_range(server, from, to)
+    Minga.Buffer.delete_range(server, from, to)
     {:ok, :changed}
   end
 
@@ -100,7 +100,7 @@ defmodule Minga.Editing.Operator do
   @spec yank_line(GenServer.server(), non_neg_integer()) :: {:ok, String.t()}
   def yank_line(server, line_index) when is_integer(line_index) and line_index >= 0 do
     {from, to} = line_range(server, line_index)
-    text = Server.get_range(server, from, to)
+    text = Minga.Buffer.text_between_inclusive(server, from, to)
     {:ok, text}
   end
 
@@ -114,8 +114,11 @@ defmodule Minga.Editing.Operator do
   # inclusive end therefore includes the newline.
   @spec line_range(GenServer.server(), non_neg_integer()) :: {position(), position()}
   defp line_range(server, line_index) do
-    total_lines = Server.line_count(server)
-    line_text = Server.get_lines(server, line_index, 1) |> List.first() |> then(&(&1 || ""))
+    total_lines = Minga.Buffer.line_count(server)
+
+    line_text =
+      Minga.Buffer.lines(server, line_index, 1) |> List.first() |> then(&(&1 || ""))
+
     line_len = byte_size(line_text)
 
     cond do
@@ -129,7 +132,7 @@ defmodule Minga.Editing.Operator do
       # The newline lives at byte_col == byte_size(prev_text) on the previous line.
       line_index >= total_lines - 1 ->
         prev_text =
-          Server.get_lines(server, line_index - 1, 1)
+          Minga.Buffer.lines(server, line_index - 1, 1)
           |> List.first()
           |> then(&(&1 || ""))
 

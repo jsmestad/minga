@@ -119,7 +119,7 @@ defmodule Minga.Editing.Formatter do
   Applies whitespace transforms with explicit boolean flags.
 
   Used by buffer-local option callers that have already resolved the
-  option values from `Buffer.Server.get_option/2`.
+  option values from `Buffer.get_option/2`.
   """
   @spec apply_save_transforms(String.t(), boolean(), boolean()) :: String.t()
   def apply_save_transforms(content, trim_trailing, insert_final_newline) do

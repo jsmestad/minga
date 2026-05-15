@@ -1,7 +1,7 @@
 defmodule MingaEditor.IndentTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Indent
 
   describe "compute_for_line/3" do
@@ -16,7 +16,7 @@ defmodule MingaEditor.IndentTest do
 
     test "converts tree-sitter indent levels to tabs" do
       buf = start_buffer("fn main() {\nbody\n}", filetype: :rust)
-      {:ok, :tabs} = BufferServer.set_option(buf, :indent_with, :tabs)
+      {:ok, :tabs} = BufferProcess.set_option(buf, :indent_with, :tabs)
       request_indent = fn 42, 1 -> 2 end
 
       indent = Indent.compute_for_line(buf, 1, buffer_id: 42, request_indent: request_indent)
@@ -85,7 +85,7 @@ defmodule MingaEditor.IndentTest do
   defp start_buffer(content, opts \\ []) do
     filetype = Keyword.get(opts, :filetype)
     init_opts = [content: content] ++ if(filetype, do: [filetype: filetype], else: [])
-    {:ok, buf} = BufferServer.start_link(init_opts)
+    {:ok, buf} = BufferProcess.start_link(init_opts)
     buf
   end
 end

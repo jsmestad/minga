@@ -3,7 +3,7 @@ defmodule Minga.CommandOutputTest do
   # can race with ExUnit's :standard_error capture/restore lifecycle
   use ExUnit.Case, async: false
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.CommandOutput
   alias Minga.Events
 
@@ -34,7 +34,7 @@ defmodule Minga.CommandOutputTest do
       buf = CommandOutput.buffer(name)
       assert is_pid(buf)
 
-      content = BufferServer.content(buf)
+      content = BufferProcess.content(buf)
       assert content =~ "$ echo hello"
       assert content =~ "hello"
     end
@@ -47,7 +47,7 @@ defmodule Minga.CommandOutputTest do
       assert code == 0
 
       buf = CommandOutput.buffer(name)
-      content = BufferServer.content(buf)
+      content = BufferProcess.content(buf)
       assert content =~ "[Process exited with code 0]"
     end
 
@@ -59,7 +59,7 @@ defmodule Minga.CommandOutputTest do
       assert code == 42
 
       buf = CommandOutput.buffer(name)
-      content = BufferServer.content(buf)
+      content = BufferProcess.content(buf)
       assert content =~ "[Process exited with code 42]"
     end
 
@@ -72,7 +72,7 @@ defmodule Minga.CommandOutputTest do
       await_done(name)
 
       buf = CommandOutput.buffer(name)
-      content = BufferServer.content(buf)
+      content = BufferProcess.content(buf)
       refute content =~ "first"
       assert content =~ "second"
     end
@@ -83,7 +83,7 @@ defmodule Minga.CommandOutputTest do
       await_done(name)
 
       buf = CommandOutput.buffer(name)
-      content = BufferServer.content(buf)
+      content = BufferProcess.content(buf)
       assert content =~ "out"
       assert content =~ "err"
     end

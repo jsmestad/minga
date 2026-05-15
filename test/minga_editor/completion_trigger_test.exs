@@ -3,7 +3,7 @@ defmodule MingaEditor.CompletionTriggerTest do
 
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.CompletionTrigger
 
   # ── flush_debounce/3 with client list ──────────────────────────────────────
@@ -13,7 +13,7 @@ defmodule MingaEditor.CompletionTriggerTest do
       bridge = CompletionTrigger.new()
       # Buffer needs a file_path for completion requests to be sent
       {:ok, buf} =
-        BufferServer.start_link(file_path: "/tmp/test_completion.ex", content: "hello")
+        BufferProcess.start_link(file_path: "/tmp/test_completion.ex", content: "hello")
 
       # Use self() as fake clients; send_completion_requests will call
       # Client.request on each, which will fail (not real LSP clients)
@@ -26,7 +26,7 @@ defmodule MingaEditor.CompletionTriggerTest do
 
     test "accepts a single client pid for backward compatibility" do
       bridge = CompletionTrigger.new()
-      {:ok, buf} = BufferServer.start_link(content: "hello")
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
       result = CompletionTrigger.flush_debounce(bridge, self(), buf)
       assert is_map(result)
       GenServer.stop(buf)
@@ -37,12 +37,12 @@ defmodule MingaEditor.CompletionTriggerTest do
       # The message is {:completion_debounce, clients, buffer_pid} where
       # clients is a list.
       bridge = CompletionTrigger.new()
-      {:ok, buf} = BufferServer.start_link(file_path: "/tmp/test_multi.ex", content: "ab")
-      BufferServer.move_to(buf, {0, 2})
+      {:ok, buf} = BufferProcess.start_link(file_path: "/tmp/test_multi.ex", content: "ab")
+      BufferProcess.move_to(buf, {0, 2})
 
       # Trigger with two identifier chars worth of prefix by inserting "cd"
-      BufferServer.insert_char(buf, "c")
-      BufferServer.insert_char(buf, "d")
+      BufferProcess.insert_char(buf, "c")
+      BufferProcess.insert_char(buf, "d")
 
       # The maybe_trigger path for identifier chars schedules a debounce.
       # We test that the message payload is the right shape by calling
@@ -74,7 +74,7 @@ defmodule MingaEditor.CompletionTriggerTest do
     test "stale response (ref doesn't match) is ignored" do
       ref = make_ref()
       bridge = %{CompletionTrigger.new() | pending_ref: make_ref()}
-      {:ok, buf} = BufferServer.start_link(content: "hello")
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
 
       {result_bridge, result} = CompletionTrigger.handle_response(bridge, ref, {:ok, nil}, buf)
       assert result == nil
@@ -86,7 +86,7 @@ defmodule MingaEditor.CompletionTriggerTest do
     test "error response clears pending ref" do
       ref = make_ref()
       bridge = %{CompletionTrigger.new() | pending_ref: ref}
-      {:ok, buf} = BufferServer.start_link(content: "hello")
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
 
       {result_bridge, result} =
         CompletionTrigger.handle_response(bridge, ref, {:error, "timeout"}, buf)
@@ -109,7 +109,7 @@ defmodule MingaEditor.CompletionTriggerTest do
           trigger_position: {0, 0}
       }
 
-      {:ok, buf} = BufferServer.start_link(content: "hello")
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
 
       # Simulate response from secondary (ref doesn't match primary but is in pending_refs)
       lsp_result = %{

@@ -1,11 +1,11 @@
 defmodule MingaEditor.Commands.VisualTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor
 
   defp start_editor(content) do
-    {:ok, buffer} = BufferServer.start_link(content: content)
+    {:ok, buffer} = BufferProcess.start_link(content: content)
 
     {:ok, editor} =
       MingaEditor.start_link(
@@ -33,7 +33,7 @@ defmodule MingaEditor.Commands.VisualTest do
       send_key(editor, ?l)
       send_key(editor, ?d)
 
-      content = BufferServer.content(buffer)
+      content = BufferProcess.content(buffer)
       refute String.starts_with?(content, "hel")
     end
 
@@ -43,7 +43,7 @@ defmodule MingaEditor.Commands.VisualTest do
       send_key(editor, ?j)
       send_key(editor, ?d)
 
-      content = BufferServer.content(buffer)
+      content = BufferProcess.content(buffer)
       assert String.contains?(content, "foo")
     end
 
@@ -54,10 +54,10 @@ defmodule MingaEditor.Commands.VisualTest do
       send_key(editor, ?l)
       send_key(editor, ?y)
 
-      assert BufferServer.content(buffer) == "hello world"
+      assert BufferProcess.content(buffer) == "hello world"
 
       send_key(editor, ?p)
-      assert String.length(BufferServer.content(buffer)) > String.length("hello world")
+      assert String.length(BufferProcess.content(buffer)) > String.length("hello world")
     end
   end
 end

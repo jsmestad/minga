@@ -2,7 +2,7 @@ defmodule MingaEditor.Commands.BufferManagementShutdownTest do
   # Mutates Application env (:shutdown_fn), so these shutdown-path tests cannot run async.
   use ExUnit.Case, async: false
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Config.Options
   alias MingaEditor
 
@@ -23,7 +23,7 @@ defmodule MingaEditor.Commands.BufferManagementShutdownTest do
   end
 
   defp start_editor(content) do
-    {:ok, buffer} = BufferServer.start_link(content: content)
+    {:ok, buffer} = BufferProcess.start_link(content: content)
     {:ok, options} = Options.start_link(name: nil)
 
     {:ok, editor} =
@@ -64,8 +64,8 @@ defmodule MingaEditor.Commands.BufferManagementShutdownTest do
 
     test "force quit all bypasses confirmation even with dirty buffer" do
       {editor, buffer} = start_editor("hello")
-      BufferServer.insert_char(buffer, "X")
-      assert BufferServer.dirty?(buffer)
+      BufferProcess.insert_char(buffer, "X")
+      assert BufferProcess.dirty?(buffer)
 
       type_string(editor, ":qa!\r")
 
@@ -76,8 +76,8 @@ defmodule MingaEditor.Commands.BufferManagementShutdownTest do
 
     test "confirm_quit false disables dirty-buffer quit-all prompt" do
       {editor, buffer} = start_editor("hello")
-      BufferServer.insert_char(buffer, "X")
-      assert BufferServer.dirty?(buffer)
+      BufferProcess.insert_char(buffer, "X")
+      assert BufferProcess.dirty?(buffer)
 
       state = :sys.get_state(editor)
       Options.set(state.options_server, :confirm_quit, false)

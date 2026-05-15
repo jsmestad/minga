@@ -1,7 +1,7 @@
 defmodule MingaEditor.EnsureBufferTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor
 
   @moduletag :tmp_dir
@@ -10,7 +10,7 @@ defmodule MingaEditor.EnsureBufferTest do
     test "returns existing pid if buffer already registered", %{tmp_dir: dir} do
       path = Path.join(dir, "existing.ex")
       File.write!(path, "defmodule Existing do\nend\n")
-      pid = start_supervised!({BufferServer, file_path: path})
+      pid = start_supervised!({BufferProcess, file_path: path})
 
       assert {:ok, ^pid} = MingaEditor.ensure_buffer_for_path(path)
     end
@@ -28,7 +28,7 @@ defmodule MingaEditor.EnsureBufferTest do
       # This works even without a running Editor.
       path = Path.join(dir, "fast_path.ex")
       File.write!(path, "content")
-      pid = start_supervised!({BufferServer, file_path: path})
+      pid = start_supervised!({BufferProcess, file_path: path})
 
       # Call multiple times to verify idempotency
       assert {:ok, ^pid} = MingaEditor.ensure_buffer_for_path(path)

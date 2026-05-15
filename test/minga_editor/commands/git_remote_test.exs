@@ -5,7 +5,7 @@ defmodule MingaEditor.Commands.GitRemoteTest do
   """
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor
   alias MingaEditor.Commands.Git, as: GitCommands
   alias MingaEditor.State, as: EditorState
@@ -29,7 +29,7 @@ defmodule MingaEditor.Commands.GitRemoteTest do
   end
 
   defp start_editor(content \\ "") do
-    {:ok, buffer} = BufferServer.start_link(content: content)
+    {:ok, buffer} = BufferProcess.start_link(content: content)
 
     {:ok, editor} =
       MingaEditor.start_link(

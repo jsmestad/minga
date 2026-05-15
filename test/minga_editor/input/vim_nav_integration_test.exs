@@ -12,7 +12,7 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
 
   @moduletag :tmp_dir
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.Viewport
@@ -93,13 +93,13 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
     test "yy yanks the current line without modifying buffer", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
       buf = state.workspace.file_tree.buffer
-      content_before = BufferServer.content(buf)
+      content_before = BufferProcess.content(buf)
 
       # yy should yank without error
       {:handled, state} = walk_surface_handlers(state, ?y, 0)
       {:handled, _state} = walk_surface_handlers(state, ?y, 0)
 
-      assert BufferServer.content(buf) == content_before
+      assert BufferProcess.content(buf) == content_before
     end
   end
 

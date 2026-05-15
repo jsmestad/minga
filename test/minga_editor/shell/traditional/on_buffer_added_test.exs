@@ -9,7 +9,7 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
 
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Dashboard
   alias MingaEditor.Shell.Traditional
   alias MingaEditor.Shell.Traditional.State, as: ShellState
@@ -30,7 +30,7 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
         modal: {:dashboard, DashboardPayload.new(Dashboard.new_state())}
       }
 
-      {:ok, buf} = BufferServer.start_link(content: "hello")
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
 
       {new_shell, _ws, _effects} =
         Traditional.on_buffer_added(shell_state, blank_workspace(), buf, :open)
@@ -48,7 +48,7 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
 
       shell_state = %ShellState{modal: {:picker, picker_payload}}
 
-      {:ok, buf} = BufferServer.start_link(content: "hello")
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
 
       {new_shell, _ws, _effects} =
         Traditional.on_buffer_added(shell_state, blank_workspace(), buf, :open)
@@ -58,7 +58,7 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
 
     test "is a no-op when no modal is active" do
       shell_state = %ShellState{modal: :none}
-      {:ok, buf} = BufferServer.start_link(content: "hello")
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
 
       {new_shell, _ws, _effects} =
         Traditional.on_buffer_added(shell_state, blank_workspace(), buf, :open)

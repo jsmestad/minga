@@ -78,7 +78,7 @@ Minga.Command.Registry.register(
 )
 ```
 
-The state map contains `buffers.active` (the active buffer's PID), `vim.mode`, window layout, and everything else. You'll mostly interact with the buffer through `Buffer.Server` (covered below).
+The state map contains `buffers.active` (the active buffer's PID), `vim.mode`, window layout, and everything else. You'll mostly interact with the buffer through `Buffer` (covered below).
 
 **Naming convention:** Prefix your command names with your extension's domain to avoid collisions. `:org_cycle_todo`, not `:cycle_todo`.
 
@@ -321,34 +321,34 @@ Picker and prompt are mutually exclusive. Opening one closes the other.
 
 ## Buffer Operations
 
-Buffers are GenServer processes. The active buffer's PID lives at `state.buffers.active` in your command functions. Read and write through `Minga.Buffer.Server`:
+Buffers are GenServer processes. The active buffer's PID lives at `state.buffers.active` in your command functions. Read and write through `Minga.Buffer`:
 
 ```elixir
 buf = state.buffers.active
 
 # Reading
-{line, col} = Minga.Buffer.Server.cursor(buf)
-lines = Minga.Buffer.Server.get_lines(buf, start_line, count)
-total = Minga.Buffer.Server.line_count(buf)
-filetype = Minga.Buffer.Server.filetype(buf)
-path = Minga.Buffer.Server.file_path(buf)
+{line, col} = Minga.Buffer.cursor(buf)
+lines = Minga.Buffer.lines(buf, start_line, count)
+total = Minga.Buffer.line_count(buf)
+filetype = Minga.Buffer.filetype(buf)
+path = Minga.Buffer.file_path(buf)
 
-# Writing (use apply_text_edit for all text changes)
-Minga.Buffer.Server.apply_text_edit(buf, start_line, start_col, end_line, end_col, new_text)
+# Writing (use apply_edit for all text changes)
+Minga.Buffer.apply_edit(buf, start_line, start_col, end_line, end_col, new_text)
 
 # Batch edits (multiple ranges, applied as one undo entry)
-Minga.Buffer.Server.apply_text_edits(buf, [
+Minga.Buffer.apply_edits(buf, [
   {{start_line, start_col}, {end_line, end_col}, new_text},
   {{other_start_line, other_start_col}, {other_end_line, other_end_col}, other_text}
 ])
 
 # Move the cursor
-Minga.Buffer.Server.move_to(buf, {line, col})
+Minga.Buffer.move_to(buf, {line, col})
 ```
 
-**Use `apply_text_edit` for all text changes**, even single characters. Don't loop over `insert_char` for multi-character text; that creates pathological undo stack growth and is O(n²) on the gap buffer.
+**Use `apply_edit/6` for all text changes**, even single characters. Don't loop over `insert_char` for multi-character text; that creates pathological undo stack growth and is O(n²) on the gap buffer.
 
-**Create a wrapper module.** Put all your `Buffer.Server` calls behind a thin delegator module (e.g., `MyExtension.Buffer`). This isolates you from API changes and gives you a natural seam for [test stubs](#testing).
+**Create a wrapper module.** Put all your `Buffer` calls behind a thin delegator module (e.g., `MyExtension.Buffer`). This isolates you from API changes and gives you a natural seam for [test stubs](#testing).
 
 ---
 
@@ -359,7 +359,7 @@ Decorations are visual overlays that don't modify buffer content: highlight rang
 Always use `batch_decorations` for bulk updates. It defers tree rebuilding until the batch completes, preventing frame stutter when replacing many decorations at once.
 
 ```elixir
-Minga.Buffer.Server.batch_decorations(buf, fn decs ->
+Minga.Buffer.batch_decorations(buf, fn decs ->
   # Clear your previous decorations
   decs = Minga.Buffer.Decorations.remove_group(decs, :org_markup)
 
@@ -403,7 +403,7 @@ Three annotation kinds are supported:
 
 ```elixir
 # Add annotations inside a batch_decorations call
-Minga.Buffer.Server.batch_decorations(buf, fn decs ->
+Minga.Buffer.batch_decorations(buf, fn decs ->
   # Clear previous annotations from this group
   decs = Minga.Buffer.Decorations.remove_group(decs, :org_tags)
 
@@ -509,7 +509,7 @@ In unit tests you don't want a running Minga instance. The solution is the same 
 
 **1. Separate pure logic from editor integration.** Parse text, transform strings, compute fold ranges as pure functions. Test these with zero dependencies.
 
-**2. Create a buffer wrapper with a swappable backend.** Put all `Buffer.Server` calls behind a behaviour module. Use the real backend in production, an in-memory stub in tests.
+**2. Create a buffer wrapper with a swappable backend.** Put all `Buffer` calls behind a behaviour module. Use the real backend in production, an in-memory stub in tests.
 
 ```elixir
 # lib/my_ext/buffer.ex (behaviour + delegator)

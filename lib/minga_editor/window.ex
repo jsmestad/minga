@@ -95,7 +95,7 @@ defmodule MingaEditor.Window do
   @doc """
   Creates a new agent chat window.
 
-  The `buffer` field is set to the agent's `*Agent*` Buffer.Server pid
+  The `buffer` field is set to the agent's `*Agent*` Buffer.Process pid
   for backward compatibility with code that reads `window.buffer`. The
   `content` field uses the `:agent_chat` tag so the render pipeline can
   dispatch to the agent chat renderer.

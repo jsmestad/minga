@@ -55,10 +55,10 @@ defmodule Minga.Credo.DependencyDirectionCheckTest do
       |> assert_issue()
     end
 
-    test "flags Core module depending on Buffer.Server (Layer 1)" do
+    test "flags Core module depending on Buffer.Process (Layer 1)" do
       """
       defmodule Minga.Core.Decorations do
-        alias Minga.Buffer.Server
+        alias Minga.Buffer.Process, as: BufferProcess
       end
       """
       |> check("lib/minga/core/decorations.ex")
@@ -105,7 +105,7 @@ defmodule Minga.Credo.DependencyDirectionCheckTest do
     test "Layer 2 may depend on Layer 1" do
       """
       defmodule MingaEditor.Commands.Foo do
-        alias Minga.Buffer.Server
+        alias Minga.Buffer.Process, as: BufferProcess
       end
       """
       |> check("lib/minga/editor/commands/foo.ex")
@@ -125,12 +125,12 @@ defmodule Minga.Credo.DependencyDirectionCheckTest do
 
     test "Layer 1 may depend on Layer 0" do
       """
-      defmodule Minga.Buffer.Server do
+      defmodule Minga.Buffer.Process do
         alias Minga.Buffer.Document
         alias Minga.Core.Decorations
       end
       """
-      |> check("lib/minga/buffer/server.ex")
+      |> check("lib/minga/buffer/process.ex")
       |> refute_issues()
     end
 
@@ -177,7 +177,7 @@ defmodule Minga.Credo.DependencyDirectionCheckTest do
       """
       defmodule Minga.Core.FaceTest do
         alias MingaEditor.State
-        alias Minga.Buffer.Server
+        alias Minga.Buffer.Process, as: BufferProcess
       end
       """
       |> check("test/minga/core/face_test.exs")

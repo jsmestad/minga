@@ -17,7 +17,7 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
   use Minga.Test.EditorCase, async: true
 
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -46,7 +46,7 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
     assert is_pid(agent_buf), "Failed to start agent buffer"
 
     # Create a file buffer so the editor has something in the buffer list
-    {:ok, file_buf} = BufferServer.start_link(content: "", buffer_name: "unnamed")
+    {:ok, file_buf} = BufferProcess.start_link(content: "", buffer_name: "unnamed")
 
     # Start the editor with the file buffer; we'll reconfigure the
     # state to look like agent mode below.

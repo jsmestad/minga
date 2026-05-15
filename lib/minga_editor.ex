@@ -162,7 +162,7 @@ defmodule MingaEditor do
       {:ok, pid} ->
         # Notify the Editor to register this buffer in the workspace
         # (monitoring, buffer list, log message). The cast is fire-and-forget;
-        # the tools only need the pid for Buffer.Server calls.
+        # the tools only need the pid for Buffer.Process calls.
         GenServer.cast(server, {:register_background_buffer, pid, Path.expand(path)})
         {:ok, pid}
 

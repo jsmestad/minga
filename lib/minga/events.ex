@@ -215,7 +215,7 @@ defmodule Minga.Events do
     @moduledoc """
     Payload for `:face_overrides_changed` events.
 
-    Sent by `Buffer.Server` when buffer-local face overrides change so
+    Sent by `Buffer.Process` when buffer-local face overrides change so
     the Editor can pre-compute the merged face registry without a
     GenServer call back into the buffer.
     """
@@ -448,7 +448,7 @@ defmodule Minga.Events do
   struct with delta and source fields. This wrapper exists for backward
   compatibility during migration.
   """
-  @deprecated "Buffer.Server now broadcasts :buffer_changed automatically on every edit. No manual broadcast needed."
+  @deprecated "Buffer.Process now broadcasts :buffer_changed automatically on every edit. No manual broadcast needed."
   @spec notify_buffer_changed(pid()) :: :ok
   @spec notify_buffer_changed(pid(), keyword() | registry()) :: :ok
   def notify_buffer_changed(buf, registry_or_opts \\ default_registry()) when is_pid(buf) do

@@ -11,7 +11,7 @@ defmodule Minga.Integration.AgentCursorTest do
   use Minga.Test.EditorCase, async: true
 
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Config.Options
   alias Minga.Keymap.Active, as: KeymapActive
   alias MingaEditor
@@ -42,13 +42,13 @@ defmodule Minga.Integration.AgentCursorTest do
     assert is_pid(agent_buf), "Failed to start agent buffer"
 
     {:ok, file_buf} =
-      BufferServer.start_link(
+      BufferProcess.start_link(
         content: "",
         buffer_name: "unnamed",
         events_registry: events_registry
       )
 
-    BufferServer.set_option(file_buf, :clipboard, :none)
+    BufferProcess.set_option(file_buf, :clipboard, :none)
 
     {:ok, editor} =
       MingaEditor.start_link(

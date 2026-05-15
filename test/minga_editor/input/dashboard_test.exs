@@ -88,8 +88,8 @@ defmodule MingaEditor.Input.DashboardTest do
 
   describe "handle_key/3 when no dashboard" do
     test "passes through when buffers.active is set and modal is :none" do
-      alias Minga.Buffer.Server, as: BufferServer
-      {:ok, buf} = BufferServer.start_link(content: "hello")
+      alias Minga.Buffer.Process, as: BufferProcess
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
 
       state = %EditorState{
         port_manager: self(),

@@ -7,7 +7,7 @@ defmodule Minga.DotRepeatTest do
   """
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor
 
   @escape 27
@@ -20,7 +20,7 @@ defmodule Minga.DotRepeatTest do
     events_registry = :"dot_repeat_events_#{id}"
     project_root = isolated_project_root(id)
     start_supervised!({Minga.Events, name: events_registry})
-    {:ok, buffer} = BufferServer.start_link(content: content, events_registry: events_registry)
+    {:ok, buffer} = BufferProcess.start_link(content: content, events_registry: events_registry)
 
     {:ok, editor} =
       MingaEditor.start_link(
@@ -56,7 +56,7 @@ defmodule Minga.DotRepeatTest do
   end
 
   defp content(buffer) do
-    BufferServer.content(buffer)
+    BufferProcess.content(buffer)
   end
 
   # ── Tests ────────────────────────────────────────────────────────────────────
@@ -173,7 +173,7 @@ defmodule Minga.DotRepeatTest do
 
       send_key(editor, ?.)
       assert content(buffer) == "hello"
-      assert BufferServer.cursor(buffer) == {0, 0}
+      assert BufferProcess.cursor(buffer) == {0, 0}
     end
   end
 

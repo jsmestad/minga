@@ -3,7 +3,7 @@ defmodule Minga.Project.FileTree.BufferSyncTest do
 
   @moduletag :tmp_dir
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Project.FileTree
   alias Minga.Project.FileTree.BufferSync
 
@@ -13,10 +13,10 @@ defmodule Minga.Project.FileTree.BufferSyncTest do
       pid = BufferSync.start_buffer(tree)
 
       assert is_pid(pid)
-      assert BufferServer.buffer_type(pid) == :nofile
-      assert BufferServer.read_only?(pid)
-      assert BufferServer.buffer_name(pid) == "*File Tree*"
-      assert BufferServer.unlisted?(pid)
+      assert BufferProcess.buffer_type(pid) == :nofile
+      assert BufferProcess.read_only?(pid)
+      assert BufferProcess.buffer_name(pid) == "*File Tree*"
+      assert BufferProcess.unlisted?(pid)
     end
 
     test "buffer content matches visible entries", %{tmp_dir: tmp_dir} do
@@ -27,7 +27,7 @@ defmodule Minga.Project.FileTree.BufferSyncTest do
       tree = FileTree.new(tmp_dir)
       pid = BufferSync.start_buffer(tree)
 
-      content = BufferServer.content(pid)
+      content = BufferProcess.content(pid)
       lines = String.split(content, "\n")
 
       # Directories first (sorted), then files (sorted)
@@ -45,13 +45,13 @@ defmodule Minga.Project.FileTree.BufferSyncTest do
       tree = FileTree.new(tmp_dir)
       pid = BufferSync.start_buffer(tree)
 
-      content_before = BufferServer.content(pid)
+      content_before = BufferProcess.content(pid)
 
       # Toggle hidden files changes visible entries
       new_tree = FileTree.toggle_hidden(tree)
       BufferSync.sync(pid, new_tree)
 
-      content_after = BufferServer.content(pid)
+      content_after = BufferProcess.content(pid)
       # Content may or may not change depending on hidden files present,
       # but the sync should not crash
       assert is_binary(content_after)
@@ -71,7 +71,7 @@ defmodule Minga.Project.FileTree.BufferSyncTest do
       tree = FileTree.move_down(tree)
       BufferSync.sync(pid, tree)
 
-      {cursor_line, _col} = BufferServer.cursor(pid)
+      {cursor_line, _col} = BufferProcess.cursor(pid)
       assert cursor_line == tree.cursor
     end
   end

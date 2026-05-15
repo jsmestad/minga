@@ -2,13 +2,13 @@ defmodule Minga.LSP.SyncServerTest do
   # async: false — reads/mutates the shared SyncServer GenServer process (singleton)
   use ExUnit.Case, async: false
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Events
   alias Minga.LSP.SyncServer
 
   describe "clients_for_buffer/1" do
     test "returns empty list for untracked buffer" do
-      buf = start_supervised!({BufferServer, content: "hello"})
+      buf = start_supervised!({BufferProcess, content: "hello"})
       assert SyncServer.clients_for_buffer(buf) == []
     end
   end
@@ -16,7 +16,7 @@ defmodule Minga.LSP.SyncServerTest do
   describe "resync_buffers/1" do
     test "clears stale clients, monitors, timers, and deltas before reopening" do
       buf =
-        start_supervised!({BufferServer, content: "hello", file_path: "/tmp/resync.txt"})
+        start_supervised!({BufferProcess, content: "hello", file_path: "/tmp/resync.txt"})
 
       client = spawn(fn -> receive do: (_ -> :ok) end)
       timer = Process.send_after(self(), :unused_sync_timer, 60_000)
@@ -52,7 +52,7 @@ defmodule Minga.LSP.SyncServerTest do
 
   describe "event bus integration" do
     test "buffer_opened for non-file buffer is a no-op" do
-      buf = start_supervised!({BufferServer, content: "scratch"})
+      buf = start_supervised!({BufferProcess, content: "scratch"})
 
       Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: "/tmp/no_lsp.txt"})
 
@@ -64,7 +64,7 @@ defmodule Minga.LSP.SyncServerTest do
 
     test "buffer_closed cleans up ETS entries" do
       buf =
-        start_supervised!({BufferServer, content: "hello", file_path: "/tmp/cleanup.txt"})
+        start_supervised!({BufferProcess, content: "hello", file_path: "/tmp/cleanup.txt"})
 
       # Manually insert a fake entry to simulate an open buffer with clients.
       :ets.insert(SyncServer.Registry, {buf, [self()]})
@@ -84,7 +84,7 @@ defmodule Minga.LSP.SyncServerTest do
 
   describe "buffer_changed event" do
     test "no-op for buffer with no clients" do
-      buf = start_supervised!({BufferServer, content: "hello"})
+      buf = start_supervised!({BufferProcess, content: "hello"})
 
       Events.broadcast(
         :buffer_changed,
@@ -96,7 +96,7 @@ defmodule Minga.LSP.SyncServerTest do
 
     test "schedules debounced didChange" do
       buf =
-        start_supervised!({BufferServer, content: "hello", file_path: "/tmp/debounce.txt"})
+        start_supervised!({BufferProcess, content: "hello", file_path: "/tmp/debounce.txt"})
 
       # Insert a fake client entry.
       :ets.insert(SyncServer.Registry, {buf, [self()]})
@@ -115,7 +115,7 @@ defmodule Minga.LSP.SyncServerTest do
 
     test "accumulates deltas from events" do
       buf =
-        start_supervised!({BufferServer, content: "hello", file_path: "/tmp/accum.txt"})
+        start_supervised!({BufferProcess, content: "hello", file_path: "/tmp/accum.txt"})
 
       delta = Minga.Buffer.EditDelta.insertion(0, {0, 0}, "x", {0, 1})
 
@@ -139,7 +139,7 @@ defmodule Minga.LSP.SyncServerTest do
 
     test "ignores changes for remote buffers without LSP clients" do
       path = "/tmp/remote-no-lsp.txt"
-      buf = start_supervised!({BufferServer, file_path: path, storage: {:remote, node(), path}})
+      buf = start_supervised!({BufferProcess, file_path: path, storage: {:remote, node(), path}})
       delta = Minga.Buffer.EditDelta.insertion(0, {0, 0}, "x", {0, 1})
 
       Events.broadcast(
@@ -159,7 +159,7 @@ defmodule Minga.LSP.SyncServerTest do
 
     test "nil delta marks accumulator as full_sync" do
       buf =
-        start_supervised!({BufferServer, content: "hello", file_path: "/tmp/fullsync.txt"})
+        start_supervised!({BufferProcess, content: "hello", file_path: "/tmp/fullsync.txt"})
 
       delta = Minga.Buffer.EditDelta.insertion(0, {0, 0}, "x", {0, 1})
       :ets.insert(SyncServer.Registry, {buf, [self()]})
@@ -196,7 +196,7 @@ defmodule Minga.LSP.SyncServerTest do
   describe "client monitoring" do
     test "crashed client is removed from ETS registry" do
       buf =
-        start_supervised!({BufferServer, content: "hello", file_path: "/tmp/monitor.txt"})
+        start_supervised!({BufferProcess, content: "hello", file_path: "/tmp/monitor.txt"})
 
       client = spawn(fn -> receive do: (_ -> :ok) end)
       :ets.insert(SyncServer.Registry, {buf, [client]})
@@ -222,7 +222,7 @@ defmodule Minga.LSP.SyncServerTest do
 
     test "crashed client is removed but other clients for same buffer remain" do
       buf =
-        start_supervised!({BufferServer, content: "hello", file_path: "/tmp/multi.txt"})
+        start_supervised!({BufferProcess, content: "hello", file_path: "/tmp/multi.txt"})
 
       doomed = spawn(fn -> receive do: (_ -> :ok) end)
       survivor = spawn(fn -> receive do: (_ -> :ok) end)
@@ -247,7 +247,7 @@ defmodule Minga.LSP.SyncServerTest do
 
     test "no stale monitors remain after buffer_closed" do
       buf =
-        start_supervised!({BufferServer, content: "hello", file_path: "/tmp/close_mon.txt"})
+        start_supervised!({BufferProcess, content: "hello", file_path: "/tmp/close_mon.txt"})
 
       client = spawn(fn -> receive do: (_ -> :ok) end)
 

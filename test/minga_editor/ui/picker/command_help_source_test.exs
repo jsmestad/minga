@@ -2,7 +2,7 @@ defmodule MingaEditor.UI.Picker.CommandHelpSourceTest do
   @moduledoc false
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Keymap.Active, as: ActiveKeymap
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -15,7 +15,7 @@ defmodule MingaEditor.UI.Picker.CommandHelpSourceTest do
     {:ok, buf} =
       DynamicSupervisor.start_child(
         Minga.Buffer.Supervisor,
-        {BufferServer, content: "", buffer_name: "test.txt"}
+        {BufferProcess, content: "", buffer_name: "test.txt"}
       )
 
     {:ok, keymap} = ActiveKeymap.start_link(name: nil)

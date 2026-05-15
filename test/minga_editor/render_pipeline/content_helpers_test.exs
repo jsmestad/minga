@@ -242,7 +242,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
 
   describe "render_lines_nowrap with visible_line_map and wrap_on" do
     setup do
-      buf = start_supervised!({Minga.Buffer.Server, content: ""})
+      buf = start_supervised!({Minga.Buffer.Process, content: ""})
       viewport = Viewport.new(20, 20, 0)
 
       gutter_colors = %Theme.Gutter{

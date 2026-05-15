@@ -1,15 +1,15 @@
 defmodule MingaEditor.Agent.PromptBufferTest do
   @moduledoc """
-  Tests for the prompt Buffer.Server integration in UIState.
+  Tests for the prompt Buffer.Process integration in UIState.
 
-  Now that Buffer.Server is the primary store (not a shadow), these
+  Now that Buffer.Process is the primary store (not a shadow), these
   verify that all UIState operations correctly delegate to the buffer.
   """
 
   use ExUnit.Case, async: true
 
   alias MingaEditor.Agent.UIState
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -18,7 +18,7 @@ defmodule MingaEditor.Agent.PromptBufferTest do
     panel = UIState.set_input_focused(panel, true)
 
     if text != "" do
-      BufferServer.replace_content(panel.panel.prompt_buffer, text)
+      BufferProcess.replace_content(panel.panel.prompt_buffer, text)
     end
 
     panel
@@ -40,7 +40,7 @@ defmodule MingaEditor.Agent.PromptBufferTest do
 
     test "prompt buffer starts with empty content" do
       panel = focused_panel()
-      assert BufferServer.content(panel.panel.prompt_buffer) == ""
+      assert BufferProcess.content(panel.panel.prompt_buffer) == ""
     end
 
     test "ensure_prompt_buffer is idempotent" do
@@ -76,7 +76,7 @@ defmodule MingaEditor.Agent.PromptBufferTest do
       panel = focused_panel()
       panel = UIState.insert_char(panel, "h")
       panel = UIState.insert_char(panel, "i")
-      assert BufferServer.content(panel.panel.prompt_buffer) == "hi"
+      assert BufferProcess.content(panel.panel.prompt_buffer) == "hi"
     end
 
     test "insert_newline writes to buffer" do
@@ -84,27 +84,27 @@ defmodule MingaEditor.Agent.PromptBufferTest do
       panel = UIState.insert_char(panel, "a")
       panel = UIState.insert_newline(panel)
       panel = UIState.insert_char(panel, "b")
-      assert BufferServer.content(panel.panel.prompt_buffer) == "a\nb"
+      assert BufferProcess.content(panel.panel.prompt_buffer) == "a\nb"
     end
 
     test "delete_char writes to buffer" do
       panel = focused_panel("hello")
-      BufferServer.set_cursor(panel.panel.prompt_buffer, {0, 5})
+      BufferProcess.set_cursor(panel.panel.prompt_buffer, {0, 5})
       panel = UIState.delete_char(panel)
-      assert BufferServer.content(panel.panel.prompt_buffer) == "hell"
+      assert BufferProcess.content(panel.panel.prompt_buffer) == "hell"
     end
 
     test "clear_input empties buffer" do
       panel = focused_panel()
       panel = UIState.insert_char(panel, "x")
       panel = UIState.clear_input(panel)
-      assert BufferServer.content(panel.panel.prompt_buffer) == ""
+      assert BufferProcess.content(panel.panel.prompt_buffer) == ""
     end
 
     test "short paste writes to buffer" do
       panel = focused_panel()
       panel = UIState.insert_paste(panel, "pasted")
-      assert BufferServer.content(panel.panel.prompt_buffer) == "pasted"
+      assert BufferProcess.content(panel.panel.prompt_buffer) == "pasted"
     end
 
     test "history_prev writes to buffer" do
@@ -112,7 +112,7 @@ defmodule MingaEditor.Agent.PromptBufferTest do
       panel = UIState.insert_char(panel, "x")
       panel = UIState.clear_input(panel)
       panel = UIState.history_prev(panel)
-      assert BufferServer.content(panel.panel.prompt_buffer) == "x"
+      assert BufferProcess.content(panel.panel.prompt_buffer) == "x"
     end
 
     test "history_next writes to buffer" do
@@ -125,7 +125,7 @@ defmodule MingaEditor.Agent.PromptBufferTest do
       panel = UIState.history_prev(panel)
       panel = UIState.history_prev(panel)
       panel = UIState.history_next(panel)
-      assert BufferServer.content(panel.panel.prompt_buffer) == "b"
+      assert BufferProcess.content(panel.panel.prompt_buffer) == "b"
     end
   end
 
@@ -139,7 +139,7 @@ defmodule MingaEditor.Agent.PromptBufferTest do
 
     test "input_cursor matches buffer cursor" do
       panel = focused_panel("hello")
-      BufferServer.set_cursor(panel.panel.prompt_buffer, {0, 3})
+      BufferProcess.set_cursor(panel.panel.prompt_buffer, {0, 3})
       assert UIState.input_cursor(panel) == {0, 3}
     end
 

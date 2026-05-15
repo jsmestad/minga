@@ -4,7 +4,7 @@ defmodule MingaEditor.Agent.View.PromptRendererTest do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.PromptRenderer
   alias MingaEditor.Agent.ViewContext
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
@@ -18,15 +18,15 @@ defmodule MingaEditor.Agent.View.PromptRendererTest do
   defp base_state(opts \\ []) do
     rows = Keyword.get(opts, :rows, 40)
     cols = Keyword.get(opts, :cols, 120)
-    {:ok, buf} = BufferServer.start_link(content: "line one\nline two\nline three")
+    {:ok, buf} = BufferProcess.start_link(content: "line one\nline two\nline three")
 
     input_lines = Keyword.get(opts, :input_lines, [Keyword.get(opts, :input_text, "")])
 
     input_cursor =
       Keyword.get(opts, :input_cursor, {0, String.length(Keyword.get(opts, :input_text, ""))})
 
-    {:ok, prompt_buf} = BufferServer.start_link(content: Enum.join(input_lines, "\n"))
-    BufferServer.set_cursor(prompt_buf, input_cursor)
+    {:ok, prompt_buf} = BufferProcess.start_link(content: Enum.join(input_lines, "\n"))
+    BufferProcess.set_cursor(prompt_buf, input_cursor)
 
     agent = %AgentState{
       runtime: %RuntimeState{status: :idle},

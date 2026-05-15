@@ -8,7 +8,7 @@ defmodule MingaAgent.BufferForkStoreTest do
     # Start a parent buffer with known content
     {:ok, parent} =
       start_supervised(
-        {Minga.Buffer.Server, content: "line one\nline two\nline three\n", name: nil}
+        {Minga.Buffer.Process, content: "line one\nline two\nline three\n", name: nil}
       )
 
     {:ok, store} = start_supervised(BufferForkStore)
@@ -94,7 +94,7 @@ defmodule MingaAgent.BufferForkStoreTest do
       assert %{} == BufferForkStore.all(store)
 
       # Original buffer is untouched
-      assert Minga.Buffer.Server.content(parent) == "line one\nline two\nline three\n"
+      assert Minga.Buffer.Process.content(parent) == "line one\nline two\nline three\n"
     end
   end
 

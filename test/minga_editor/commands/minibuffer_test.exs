@@ -9,11 +9,11 @@ defmodule MingaEditor.Commands.MinibufferTest do
 
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor
 
   defp start_editor(content \\ "hello") do
-    {:ok, buffer} = BufferServer.start_link(content: content)
+    {:ok, buffer} = BufferProcess.start_link(content: content)
 
     {:ok, editor} =
       MingaEditor.start_link(

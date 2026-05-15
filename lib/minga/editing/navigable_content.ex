@@ -32,7 +32,7 @@ defprotocol Minga.Editing.NavigableContent do
   ## Snapshot model
 
   Protocol implementations operate on value types (structs), not on
-  GenServer pids. For `Buffer.Server`, the caller takes a snapshot
+  GenServer pids. For `Buffer.Process`, the caller takes a snapshot
   (`Document.t()` wrapped in a `BufferSnapshot`), runs commands against
   it, then applies the result back. This keeps commands composable and
   testable without running processes.

@@ -75,7 +75,7 @@ defmodule MingaEditor.Agent.UIState do
   # ── Prompt buffer lifecycle ─────────────────────────────────────────────
 
   @doc """
-  Ensures a prompt Buffer.Server is running. Starts one if `prompt_buffer`
+  Ensures a prompt Buffer.Process is running. Starts one if `prompt_buffer`
   is nil or the process is dead.
   """
   @spec ensure_prompt_buffer(t()) :: t()
@@ -155,7 +155,7 @@ defmodule MingaEditor.Agent.UIState do
     %{state | panel: %{panel | spinner_frame: panel.spinner_frame + 1}}
   end
 
-  # ── Input editing (delegates to Buffer.Server) ──────────────────────────
+  # ── Input editing (delegates to Buffer.Process) ──────────────────────────
 
   @doc "Inserts a character at the cursor position."
   @spec insert_char(t(), String.t()) :: t()

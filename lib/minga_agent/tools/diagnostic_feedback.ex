@@ -77,7 +77,7 @@ defmodule MingaAgent.Tools.DiagnosticFeedback do
 
   @spec has_lsp_client?(String.t()) :: boolean()
   defp has_lsp_client?(abs_path) do
-    case Buffer.Server.pid_for_path(abs_path) do
+    case Buffer.pid_for_path(abs_path) do
       {:ok, buf_pid} -> SyncServer.clients_for_buffer(buf_pid) != []
       :not_found -> false
     end

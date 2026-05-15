@@ -164,7 +164,7 @@ Benchee.run(
 IO.puts("")
 IO.puts("=" |> String.duplicate(70))
 IO.puts("COMPONENT 4: Full buffer reload (File.read + Document.new)")
-IO.puts("  What Buffer.Server.reload/1 actually does per file change.")
+IO.puts("  What Buffer.Process.reload/1 actually does per file change.")
 IO.puts("=" |> String.duplicate(70))
 IO.puts("")
 

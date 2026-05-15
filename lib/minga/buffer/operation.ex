@@ -2,7 +2,7 @@ defmodule Minga.Buffer.Operation do
   @moduledoc """
   Pure buffer edit operations with delta generation.
 
-  `Document` owns the gap-buffer data structure. This module owns domain edits that need both the updated document and the sync delta describing the change. `Buffer.Server` wraps these operations with process concerns like read-only checks, undo, dirty tracking, events, and persistence.
+  `Document` owns the gap-buffer data structure. This module owns domain edits that need both the updated document and the sync delta describing the change. `Buffer.Process` wraps these operations with process concerns like read-only checks, undo, dirty tracking, events, and persistence.
   """
 
   alias Minga.Buffer.Document

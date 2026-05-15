@@ -3,7 +3,7 @@ defmodule MingaEditor.UI.Picker.CommandSourceTest do
 
   alias MingaEditor.UI.Picker.Item
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Command
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -27,7 +27,7 @@ defmodule MingaEditor.UI.Picker.CommandSourceTest do
 
   describe "on_select/2 — scopeable command" do
     test "opens scope picker instead of setting pending_command" do
-      {:ok, buf} = BufferServer.start_link(content: "hello")
+      {:ok, buf} = BufferProcess.start_link(content: "hello")
 
       state = %EditorState{
         port_manager: nil,

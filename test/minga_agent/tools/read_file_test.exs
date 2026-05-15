@@ -119,10 +119,10 @@ defmodule MingaAgent.Tools.ReadFileTest do
       File.write!(path, "disk content")
 
       # Start a buffer for the file, which registers in the Buffer.Registry
-      {:ok, pid} = start_supervised({Buffer.Server, file_path: path})
+      {:ok, pid} = start_supervised({Buffer.Process, file_path: path})
 
       # Modify the buffer in-memory without saving to disk
-      :ok = Buffer.Server.insert_text(pid, " MODIFIED")
+      :ok = Buffer.Process.insert_text(pid, " MODIFIED")
 
       # ReadFile should return the in-memory content, not the disk content
       assert {:ok, result} = ReadFile.execute(path)
@@ -138,10 +138,10 @@ defmodule MingaAgent.Tools.ReadFileTest do
       disk_lines = Enum.map_join(1..10, "\n", &"disk line #{&1}")
       File.write!(path, disk_lines)
 
-      {:ok, pid} = start_supervised({Buffer.Server, file_path: path})
+      {:ok, pid} = start_supervised({Buffer.Process, file_path: path})
 
       # Replace content in buffer with different lines
-      :ok = Buffer.Server.replace_content(pid, Enum.map_join(1..10, "\n", &"buffer line #{&1}"))
+      :ok = Buffer.Process.replace_content(pid, Enum.map_join(1..10, "\n", &"buffer line #{&1}"))
 
       assert {:ok, result} = ReadFile.execute(path, offset: 3, limit: 2)
       assert result =~ "[lines 3-4 of 10]"
@@ -162,11 +162,11 @@ defmodule MingaAgent.Tools.ReadFileTest do
       path = Path.join(dir, "large_buffer.txt")
       File.write!(path, "small")
 
-      {:ok, pid} = start_supervised({Buffer.Server, file_path: path})
+      {:ok, pid} = start_supervised({Buffer.Process, file_path: path})
 
       # Replace with large content in buffer
       large_content = String.duplicate("x", 300_000)
-      :ok = Buffer.Server.replace_content(pid, large_content)
+      :ok = Buffer.Process.replace_content(pid, large_content)
 
       assert {:ok, result} = ReadFile.execute(path)
       assert result =~ "[truncated at 256KB]"
@@ -176,8 +176,8 @@ defmodule MingaAgent.Tools.ReadFileTest do
       path = Path.join(dir, "expanded.txt")
       File.write!(path, "disk content")
 
-      {:ok, pid} = start_supervised({Buffer.Server, file_path: path})
-      :ok = Buffer.Server.replace_content(pid, "buffer content")
+      {:ok, pid} = start_supervised({Buffer.Process, file_path: path})
+      :ok = Buffer.Process.replace_content(pid, "buffer content")
 
       # ReadFile expands the path, so relative/absolute should both work
       assert {:ok, "buffer content"} = ReadFile.execute(path)
@@ -189,13 +189,13 @@ defmodule MingaAgent.Tools.ReadFileTest do
       path = Path.join(dir, "delta.txt")
       File.write!(path, "hello world")
 
-      {:ok, pid} = start_supervised({Buffer.Server, file_path: path})
+      {:ok, pid} = start_supervised({Buffer.Process, file_path: path})
 
       # Subscribe to buffer change events
       Minga.Events.subscribe(:buffer_changed)
 
       # Apply an agent edit via find_and_replace (same path as agent tools)
-      {:ok, _msg} = Buffer.Server.find_and_replace(pid, "hello", "goodbye")
+      {:ok, _msg} = Buffer.Process.find_and_replace(pid, "hello", "goodbye")
 
       # The buffer should broadcast a :buffer_changed event that the parser
       # would use for tree-sitter incremental updates
@@ -205,7 +205,7 @@ defmodule MingaAgent.Tools.ReadFileTest do
       assert is_integer(version)
 
       # Verify the content was actually changed
-      assert Buffer.Server.content(pid) =~ "goodbye world"
+      assert Buffer.Process.content(pid) =~ "goodbye world"
     end
   end
 end

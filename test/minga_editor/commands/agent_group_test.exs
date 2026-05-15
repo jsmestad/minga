@@ -1,7 +1,7 @@
 defmodule MingaEditor.Commands.AgentGroupTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Commands.AgentGroup
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
@@ -13,7 +13,7 @@ defmodule MingaEditor.Commands.AgentGroupTest do
   # Builds an EditorState with an ungrouped file tab (id 1, group 0),
   # and two agent groups each with one tab (ids 2 and 3, groups 1 and 2).
   defp make_state do
-    {:ok, buf} = start_supervised({BufferServer, content: "hello"})
+    {:ok, buf} = start_supervised({BufferProcess, content: "hello"})
 
     window = Window.new(1, buf, 24, 80)
 

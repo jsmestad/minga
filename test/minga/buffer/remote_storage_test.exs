@@ -1,7 +1,7 @@
 defmodule Minga.Buffer.RemoteStorageTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server
+  alias Minga.Buffer.Process, as: BufferProcess
 
   @moduletag :tmp_dir
 
@@ -9,26 +9,26 @@ defmodule Minga.Buffer.RemoteStorageTest do
     path = Path.join(tmp_dir, "remote.txt")
     File.write!(path, "remote content")
 
-    {:ok, pid} = Server.start_link(file_path: path, storage: {:remote, node(), path})
+    {:ok, pid} = BufferProcess.start_link(file_path: path, storage: {:remote, node(), path})
 
-    assert Server.content(pid) == "remote content"
-    assert Server.file_path(pid) == path
-    assert Server.storage(pid) == {:remote, node(), path}
-    refute Server.read_only?(pid)
+    assert BufferProcess.content(pid) == "remote content"
+    assert BufferProcess.file_path(pid) == path
+    assert BufferProcess.storage(pid) == {:remote, node(), path}
+    refute BufferProcess.read_only?(pid)
   end
 
   test "remote storage saves local edits back through erpc", %{tmp_dir: tmp_dir} do
     path = Path.join(tmp_dir, "remote.txt")
     File.write!(path, "before")
 
-    {:ok, pid} = Server.start_link(file_path: path, storage: {:remote, node(), path})
+    {:ok, pid} = BufferProcess.start_link(file_path: path, storage: {:remote, node(), path})
 
-    :ok = Server.insert_text(pid, " after")
-    assert Server.dirty?(pid)
+    :ok = BufferProcess.insert_text(pid, " after")
+    assert BufferProcess.dirty?(pid)
 
-    assert Server.save(pid) == :ok
+    assert BufferProcess.save(pid) == :ok
     assert File.read!(path) == " afterbefore"
-    refute Server.dirty?(pid)
+    refute BufferProcess.dirty?(pid)
   end
 
   test "remote storage rejects files over the remote read cap", %{tmp_dir: tmp_dir} do
@@ -38,7 +38,7 @@ defmodule Minga.Buffer.RemoteStorageTest do
     previous = Process.flag(:trap_exit, true)
 
     try do
-      assert Server.start_link(file_path: path, storage: {:remote, node(), path}) ==
+      assert BufferProcess.start_link(file_path: path, storage: {:remote, node(), path}) ==
                {:error, :file_too_large}
     after
       Process.flag(:trap_exit, previous)
@@ -51,7 +51,7 @@ defmodule Minga.Buffer.RemoteStorageTest do
 
     try do
       assert {:error, {:remote_unavailable, {:erpc, _reason}}} =
-               Server.start_link(
+               BufferProcess.start_link(
                  file_path: "/tmp/missing.txt",
                  storage: {:remote, missing_node, "/tmp/missing.txt"}
                )
@@ -64,13 +64,13 @@ defmodule Minga.Buffer.RemoteStorageTest do
     path = Path.join(tmp_dir, "remote.txt")
     File.write!(path, "base")
 
-    {:ok, pid} = Server.start_link(file_path: path, storage: {:remote, node(), path})
+    {:ok, pid} = BufferProcess.start_link(file_path: path, storage: {:remote, node(), path})
 
-    :ok = Server.insert_text(pid, "local ")
+    :ok = BufferProcess.insert_text(pid, "local ")
     File.write!(path, "agent changed")
 
-    assert Server.save(pid) == {:error, :file_changed}
-    assert Server.dirty?(pid)
+    assert BufferProcess.save(pid) == {:error, :file_changed}
+    assert BufferProcess.dirty?(pid)
     assert File.read!(path) == "agent changed"
   end
 
@@ -78,13 +78,13 @@ defmodule Minga.Buffer.RemoteStorageTest do
     path = Path.join(tmp_dir, "remote.txt")
     File.write!(path, "base")
 
-    {:ok, pid} = Server.start_link(file_path: path, storage: {:remote, node(), path})
+    {:ok, pid} = BufferProcess.start_link(file_path: path, storage: {:remote, node(), path})
 
-    :ok = Server.insert_text(pid, "local ")
+    :ok = BufferProcess.insert_text(pid, "local ")
     File.write!(path, "agent changed")
 
-    assert Server.force_save(pid) == :ok
+    assert BufferProcess.force_save(pid) == :ok
     assert File.read!(path) == "local base"
-    refute Server.dirty?(pid)
+    refute BufferProcess.dirty?(pid)
   end
 end

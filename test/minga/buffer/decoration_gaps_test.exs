@@ -2,17 +2,17 @@ defmodule Minga.Buffer.DecorationGapsTest do
   @moduledoc "Tests for #611 decoration system gap fixes."
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Core.Decorations
   alias Minga.Core.IntervalTree
 
   describe "content replacement clears decorations" do
     test "replace_content_force resets decorations" do
-      {:ok, pid} = BufferServer.start_link(content: "hello world")
+      {:ok, pid} = BufferProcess.start_link(content: "hello world")
 
       # Add a decoration
       :ok =
-        BufferServer.batch_decorations(pid, fn decs ->
+        BufferProcess.batch_decorations(pid, fn decs ->
           {_id, decs} =
             Decorations.add_highlight(decs, {0, 0}, {0, 5},
               style: Minga.Core.Face.new(fg: 0xFF0000)
@@ -22,14 +22,14 @@ defmodule Minga.Buffer.DecorationGapsTest do
         end)
 
       # Verify it exists
-      decs = BufferServer.decorations(pid)
+      decs = BufferProcess.decorations(pid)
       assert decs.version > 0
 
       # Replace content
-      :ok = BufferServer.replace_content_force(pid, "new content")
+      :ok = BufferProcess.replace_content_force(pid, "new content")
 
       # Decorations should be cleared
-      decs = BufferServer.decorations(pid)
+      decs = BufferProcess.decorations(pid)
       assert decs.highlights == nil || IntervalTree.size(decs.highlights) == 0
       assert decs.virtual_texts == []
     end
@@ -39,10 +39,10 @@ defmodule Minga.Buffer.DecorationGapsTest do
       path = Path.join(tmp, "deco_test_#{System.unique_integer([:positive])}.txt")
       File.write!(path, "original")
 
-      {:ok, pid} = BufferServer.start_link(file_path: path)
+      {:ok, pid} = BufferProcess.start_link(file_path: path)
 
       # Add decoration
-      BufferServer.batch_decorations(pid, fn decs ->
+      BufferProcess.batch_decorations(pid, fn decs ->
         {_id, decs} =
           Decorations.add_virtual_text(decs, {0, 0},
             segments: [{"hint", Minga.Core.Face.new()}],
@@ -52,15 +52,15 @@ defmodule Minga.Buffer.DecorationGapsTest do
         decs
       end)
 
-      decs = BufferServer.decorations(pid)
+      decs = BufferProcess.decorations(pid)
       assert length(decs.virtual_texts) == 1
 
       # Reload
       File.write!(path, "updated")
-      :ok = BufferServer.reload(pid)
+      :ok = BufferProcess.reload(pid)
 
       # Decorations cleared
-      decs = BufferServer.decorations(pid)
+      decs = BufferProcess.decorations(pid)
       assert decs.virtual_texts == []
 
       File.rm(path)
@@ -137,9 +137,9 @@ defmodule Minga.Buffer.DecorationGapsTest do
 
   describe "replace_content_with_decorations/4" do
     test "atomically replaces content and decorations" do
-      {:ok, pid} = BufferServer.start_link(content: "old")
+      {:ok, pid} = BufferProcess.start_link(content: "old")
 
-      BufferServer.replace_content_with_decorations(
+      BufferProcess.replace_content_with_decorations(
         pid,
         "new content",
         fn decs ->
@@ -152,23 +152,23 @@ defmodule Minga.Buffer.DecorationGapsTest do
         end
       )
 
-      assert BufferServer.content(pid) == "new content"
-      decs = BufferServer.decorations(pid)
+      assert BufferProcess.content(pid) == "new content"
+      decs = BufferProcess.decorations(pid)
       highlights = IntervalTree.to_list(decs.highlights)
       assert length(highlights) == 1
     end
 
     test "supports cursor option" do
-      {:ok, pid} = BufferServer.start_link(content: "old")
+      {:ok, pid} = BufferProcess.start_link(content: "old")
 
-      BufferServer.replace_content_with_decorations(
+      BufferProcess.replace_content_with_decorations(
         pid,
         "line1\nline2",
         fn decs -> decs end,
         cursor: {1, 0}
       )
 
-      assert BufferServer.cursor(pid) == {1, 0}
+      assert BufferProcess.cursor(pid) == {1, 0}
     end
   end
 

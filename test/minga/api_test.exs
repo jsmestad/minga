@@ -3,7 +3,7 @@ defmodule Minga.APITest do
   use ExUnit.Case, async: true
 
   alias Minga.API
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
 
   # ── Test helpers ──────────────────────────────────────────────────────────────
 
@@ -38,7 +38,7 @@ defmodule Minga.APITest do
     end
 
     def handle_call(:api_save, _from, %{buffer: buf} = state) do
-      result = BufferServer.save(buf)
+      result = BufferProcess.save(buf)
       {:reply, result, state}
     end
 
@@ -63,7 +63,7 @@ defmodule Minga.APITest do
     {:ok, buf} =
       DynamicSupervisor.start_child(
         Minga.Buffer.Supervisor,
-        {BufferServer, content: content, buffer_name: "test.txt"}
+        {BufferProcess, content: content, buffer_name: "test.txt"}
       )
 
     buf

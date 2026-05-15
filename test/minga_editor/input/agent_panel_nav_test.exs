@@ -3,7 +3,7 @@ defmodule MingaEditor.Input.AgentPanelNavTest do
 
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.Agent.UIState
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
@@ -33,7 +33,7 @@ defmodule MingaEditor.Input.AgentPanelNavTest do
       {:assistant, "World\nLine 2\nLine 3\nLine 4\nLine 5"}
     ])
 
-    {:ok, prompt_buf} = BufferServer.start_link(content: "")
+    {:ok, prompt_buf} = BufferProcess.start_link(content: "")
 
     agent = %AgentState{buffer: buf, runtime: %RuntimeState{status: :idle}}
 
@@ -61,12 +61,12 @@ defmodule MingaEditor.Input.AgentPanelNavTest do
       buf = AgentAccess.agent(state).buffer
 
       # Cursor starts at end (auto-scroll from sync)
-      {start_line, _} = BufferServer.cursor(buf)
+      {start_line, _} = BufferProcess.cursor(buf)
 
       {:handled, _state} = walk_surface_handlers(state, ?k, 0)
 
       # After k, cursor should have moved up
-      {new_line, _} = BufferServer.cursor(buf)
+      {new_line, _} = BufferProcess.cursor(buf)
       assert new_line < start_line
     end
 
@@ -102,16 +102,16 @@ defmodule MingaEditor.Input.AgentPanelNavTest do
       buf = AgentAccess.agent(state).buffer
 
       # Move cursor to top first
-      {_, _} = BufferServer.cursor(buf)
+      {_, _} = BufferProcess.cursor(buf)
       # Navigate with gg to get to top
       {:handled, state} = walk_surface_handlers(state, ?g, 0)
       {:handled, state} = walk_surface_handlers(state, ?g, 0)
 
-      {start_line, _} = BufferServer.cursor(buf)
+      {start_line, _} = BufferProcess.cursor(buf)
 
       {:handled, _state} = walk_surface_handlers(state, ?j, 0)
 
-      {new_line, _} = BufferServer.cursor(buf)
+      {new_line, _} = BufferProcess.cursor(buf)
       assert new_line > start_line
     end
   end

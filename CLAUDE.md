@@ -42,7 +42,7 @@ Two OS processes, one protocol:
 Dependencies flow downward only. A custom Credo check (`DependencyDirectionCheck`) flags violations.
 
 - **Layer 0** (pure functions, no deps): `Buffer.Document`, `Editing.Motion.*`, `Editing.TextObject`, `Core.*`, `Mode.*` FSM modules
-- **Layer 1** (stateful services, depends on Layer 0): `Buffer.Server`, `Config.*`, `LSP.*`, `Git.*`, `Agent.*`, `Keymap.*`, `Parser.Manager`, `Frontend.Manager`
+- **Layer 1** (stateful services, depends on Layer 0): `Buffer.Process`, `Config.*`, `LSP.*`, `Git.*`, `Agent.*`, `Keymap.*`, `Parser.Manager`, `Frontend.Manager`
 - **Layer 2** (orchestration, depends on everything): `Editor.*`, `Shell.*`, `Input.*`, `Workspace.State`, `Editor.Commands.*`, `Editor.RenderPipeline.*`
 
 ### State hierarchy

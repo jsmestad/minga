@@ -2,7 +2,7 @@ defmodule Minga.Buffer.Replace do
   @moduledoc """
   Pure unique text replacement operations for buffer documents.
 
-  This module owns the domain semantics for agent-style find-and-replace edits: the old text must exist exactly once, optional line boundaries are enforced against that unique match, and batch replacements apply sequentially while preserving per-edit results. `Buffer.Server` and `Buffer.Fork` wrap these pure operations with their own process, undo, version, and merge concerns.
+  This module owns the domain semantics for agent-style find-and-replace edits: the old text must exist exactly once, optional line boundaries are enforced against that unique match, and batch replacements apply sequentially while preserving per-edit results. `Buffer.Process` and `Buffer.Fork` wrap these pure operations with their own process, undo, version, and merge concerns.
   """
 
   alias Minga.Buffer.Document

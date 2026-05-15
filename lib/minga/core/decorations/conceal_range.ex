@@ -5,7 +5,7 @@ defmodule Minga.Core.Decorations.ConcealRange do
 
   Concealed text occupies zero display columns (or one column if a
   replacement character is specified). The buffer content is never
-  modified; `BufferServer.content/1` always returns the raw text
+  modified; `BufferProcess.content/1` always returns the raw text
   including concealed characters.
 
   ## Replacement character

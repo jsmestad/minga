@@ -2,12 +2,12 @@ defmodule MingaEditor.Commands.WindowTest do
   # Direct editor key-dispatch tests share global keymap/options servers, so CI concurrency can change leader routing.
   use ExUnit.Case, async: false
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor
   alias MingaEditor.State, as: EditorState
 
   defp start_editor(content \\ "hello\nworld\nfoo") do
-    {:ok, buffer} = BufferServer.start_link(content: content)
+    {:ok, buffer} = BufferProcess.start_link(content: content)
 
     {:ok, editor} =
       MingaEditor.start_link(
@@ -222,7 +222,7 @@ defmodule MingaEditor.Commands.WindowTest do
       send_key(editor, 27)
 
       # Buffer content should reflect the edit
-      content = BufferServer.content(buffer)
+      content = BufferProcess.content(buffer)
       assert content =~ "X"
     end
   end

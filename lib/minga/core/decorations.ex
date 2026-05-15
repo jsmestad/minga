@@ -1125,7 +1125,7 @@ defmodule Minga.Core.Decorations do
   `new_end` is the post-edit position where the change ends (for insertions,
   this is after the inserted text; for deletions, this equals `edit_start`).
 
-  This is called by `Buffer.Server` after each edit, passing the positions
+  This is called by `Buffer.Process` after each edit, passing the positions
   from the `EditDelta`.
   """
   @spec adjust_for_edit(

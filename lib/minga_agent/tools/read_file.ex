@@ -2,7 +2,7 @@ defmodule MingaAgent.Tools.ReadFile do
   @moduledoc """
   Reads the contents of a file and returns it as a string.
 
-  Routes through `Buffer.Server.content/1` when a buffer is open for the
+  Routes through `Buffer.content/1` when a buffer is open for the
   file, returning the live in-memory content instead of stale disk content.
   Falls back to `File.read/1` when no buffer exists.
 

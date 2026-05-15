@@ -2,7 +2,7 @@ defmodule MingaAgent.Tools.WriteFile do
   @moduledoc """
   Writes content to a file, creating parent directories as needed.
 
-  Routes through `Buffer.Server.replace_content/2` when a buffer is open
+  Routes through `Buffer.replace_content/2` when a buffer is open
   for the file (undoable, immediate viewport update, no FileWatcher noise).
   Falls back to filesystem I/O when no buffer exists (including new file
   creation).

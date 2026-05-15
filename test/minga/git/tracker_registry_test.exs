@@ -1,7 +1,7 @@
 defmodule Minga.Git.TrackerRegistryTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Events
   alias Minga.Git.Stub, as: GitStub
   alias Minga.Git.Tracker
@@ -35,7 +35,7 @@ defmodule Minga.Git.TrackerRegistryTest do
     path = Path.join(dir, "tracker_registry_test.ex")
     File.write!(path, "x = 1\n")
     GitStub.set_head(dir, Path.relative_to(path, dir), "x = 1\n")
-    {:ok, buf} = BufferServer.start_link(content: "x = 1\n", file_path: path)
+    {:ok, buf} = BufferProcess.start_link(content: "x = 1\n", file_path: path)
 
     Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: path}, registry_b)
     _ = :sys.get_state(tracker)

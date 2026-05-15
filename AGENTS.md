@@ -182,7 +182,7 @@ Code is organized in three layers. Dependencies flow downward only. A module in 
 These are pure functions and data structures. They take values in and return values out. They don't call GenServers, don't subscribe to events, don't log. They're the stable core that everything else builds on.
 
 **Layer 1 — Stateful services (depend on Layer 0 only):**
-`Buffer.Server`, `Config.*`, `Events`, `Language.*`, `LSP.*`, `Git.*`, `Project.*`, `Agent.*` (session management, tool execution), `Keymap.*`, `Parser.Manager`, `Frontend.Manager`, `Frontend.Protocol`
+`Buffer.Process`, `Config.*`, `Events`, `Language.*`, `LSP.*`, `Git.*`, `Project.*`, `Agent.*` (session management, tool execution), `Keymap.*`, `Parser.Manager`, `Frontend.Manager`, `Frontend.Protocol`
 
 These are GenServers, registries, and OTP processes. They manage state and coordinate work. They use Layer 0 data structures and algorithms but don't know anything about how the editor presents itself.
 
@@ -233,7 +233,7 @@ The smell: if the same condition appears in 3+ files, it should be a function or
 
 ### Rule 4: Module grouping (directories, not facades)
 
-Directories under `lib/minga/` group related modules. Some have a top-level entry-point module (e.g., `Minga.Buffer` delegates to `Buffer.Server`), others don't (e.g., `core/` is just a collection of pure data structures). Both patterns are fine. The entry-point module is a convenience for callers, not an access-control gate.
+Directories under `lib/minga/` group related modules. Some have a top-level entry-point module (e.g., `Minga.Buffer` delegates to `Buffer.Process`), others don't (e.g., `core/` is just a collection of pure data structures). Both patterns are fine. The entry-point module is a convenience for callers, not an access-control gate.
 
 The practical rule: **prefer the entry-point module when one exists**, because it gives you a stable API if the internals are reorganized. But reaching into `Buffer.Document` directly from `Editing.Motion` is fine when you need the data structure, not the GenServer. The Layer rules (Rule 1) are what actually prevent bad coupling, not module access.
 
@@ -310,7 +310,7 @@ Elixir 1.19's set-theoretic type system catches real bugs at compile time. Help 
   - **Accumulating in a loop/reduce** (building a list item by item): prepend with `[item | acc]` inside the loop, then `Enum.reverse(acc)` once at the end. This is O(n) total vs O(n²) for repeated `++`. This is the one case where the pattern is correct.
   - **Frequent appends AND frequent ordered reads on a large list**: use `:queue` (Erlang's double-ended queue) for O(1) amortized operations on both ends.
   - **Never use `Enum.reverse([item | Enum.reverse(list)])`** as a substitute for `list ++ [item]`. It's strictly worse: same O(n) complexity, 2x the constant factor, and much harder to read.
-- **Bulk text operations** — when inserting or replacing multi-character text in a `Document`, always use bulk operations (`Document.insert_text/2`, `Buffer.Server.apply_text_edit/6`). Never decompose a string into graphemes and reduce over `insert_char` in a loop. Character-by-character insertion is O(n²) on the gap buffer's binary and creates pathological undo stack growth.
+- **Bulk text operations** — when inserting or replacing multi-character text in a `Document`, always use bulk operations (`Document.insert_text/2`, `Minga.Buffer.apply_edit/6`). Never decompose a string into graphemes and reduce over `insert_char` in a loop. Character-by-character insertion is O(n²) on the gap buffer's binary and creates pathological undo stack growth.
 - **Structs over bare maps and tuples for data that crosses module boundaries.** Tuples and bare `%{}` maps are fine for small, fixed-shape data inside one module. When a data shape is used across 3+ modules (returned from a behaviour callback and consumed by a renderer, constructed in one GenServer and mutated in another), use a struct. Name the struct after the domain concept it represents (`Agent.ToolCall`, not `Agent.ToolCallMap`). Signals you need a struct: the same `%{key: ..., key: ...}` shape is constructed in multiple files, consumers do `%{tc | status: :error, result: "aborted"}` mutations in scattered places, or adding a field silently breaks pattern matches elsewhere. Put the struct in its own file under the domain it belongs to (`lib/minga/agent/tool_call.ex`).
   - **Co-locate mutations on the struct module.** When a struct has domain transitions (e.g., a tool call completing, erroring, or being aborted), put those methods on the struct itself: `ToolCall.complete(tc, result)`, `ToolCall.abort(tc)`. This replaces scattered `%{tc | status: :error, result: "aborted", is_error: true}` updates with a single call that encodes the business rules. The test: if 3+ files do `%{thing | field: value}` on the same struct, extract a method.
   - **`@enforce_keys` should list genuinely required fields, or be omitted entirely.** Don't add `@enforce_keys []` as documentation; it's noise. If a struct has fields that must always be provided at construction time (e.g., `id`, `name`), enforce those. If every field has a meaningful default, skip `@enforce_keys`.
@@ -491,14 +491,14 @@ test "w moves cursor to next word" do
 end
 ```
 
-**2. Single GenServer operation?** (Buffer.Server insert, delete, undo) → Start the GenServer, call the function, assert. No Editor or HeadlessPort needed.
+**2. Single GenServer operation?** (Buffer.Process insert, delete, undo) → Start the GenServer, call the function, assert. No Editor or HeadlessPort needed.
 
 ```elixir
 # ✅ Good: test the GenServer directly
 test "insert_text adds text at cursor" do
-  {:ok, buf} = start_supervised({BufferServer, content: "hello"})
-  BufferServer.insert_text(buf, " world")
-  assert BufferServer.content(buf) == "hello world"
+  {:ok, buf} = start_supervised({Minga.Buffer, content: "hello"})
+  Minga.Buffer.insert_text(buf, " world")
+  assert Minga.Buffer.content(buf) == "hello world"
 end
 ```
 

@@ -2,7 +2,7 @@ defmodule MingaEditor.Commands.AgentSplitTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.RuntimeState
@@ -17,8 +17,8 @@ defmodule MingaEditor.Commands.AgentSplitTest do
   alias Minga.Test.StubServer
 
   defp make_state do
-    {:ok, buf} = BufferServer.start_link(content: "hello world")
-    {:ok, _prompt_buf} = BufferServer.start_link(content: "")
+    {:ok, buf} = BufferProcess.start_link(content: "hello world")
+    {:ok, _prompt_buf} = BufferProcess.start_link(content: "")
     agent_buf = AgentBufferSync.start_buffer()
     {:ok, fake_session} = StubServer.start_link()
 

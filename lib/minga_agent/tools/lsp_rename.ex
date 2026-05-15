@@ -135,7 +135,7 @@ defmodule MingaAgent.Tools.LspRename do
 
   @spec apply_edits_to_file(String.t(), [WorkspaceEdit.text_edit()]) :: :ok | {:error, String.t()}
   defp apply_edits_to_file(path, edits) do
-    case Buffer.Server.pid_for_path(path) do
+    case Buffer.pid_for_path(path) do
       {:ok, pid} ->
         Buffer.apply_edits(pid, edits)
         :ok

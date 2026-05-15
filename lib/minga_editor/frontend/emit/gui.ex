@@ -1671,7 +1671,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
     lines =
       try do
-        Buffer.Server.get_lines(buf, viewport_top, visible_count)
+        Buffer.lines(buf, viewport_top, visible_count)
       catch
         :exit, _ -> []
       end

@@ -194,7 +194,7 @@ defmodule MingaAgent.BufferForkStore do
   defp apply_merge_to_parent(path, merged_text) do
     case Minga.Buffer.pid_for_path(path) do
       {:ok, buf_pid} ->
-        Minga.Buffer.Server.replace_content(buf_pid, merged_text, :agent)
+        Minga.Buffer.replace_content(buf_pid, merged_text, :agent)
         :ok
 
       :not_found ->

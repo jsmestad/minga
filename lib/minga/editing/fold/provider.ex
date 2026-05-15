@@ -26,7 +26,7 @@ defmodule Minga.Editing.Fold.Provider do
   @doc """
   Computes fold ranges for a buffer.
 
-  `buffer` is the Buffer.Server pid. `filetype` is the buffer's filetype atom.
+  `buffer` is the Buffer.Process pid. `filetype` is the buffer's filetype atom.
   The provider should read the buffer content and return a list of fold ranges.
 
   This callback may be called from any process. Implementations should

@@ -1,7 +1,7 @@
 defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.Workspace.State, as: WorkspaceState
@@ -54,13 +54,13 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
 
       state = TestHelpers.base_state(content: File.read!(path))
       buf = state.workspace.buffers.active
-      :ok = BufferServer.save_as(buf, path)
-      :ok = BufferServer.insert_text(buf, "# dirty\n")
-      version_before = BufferServer.version(buf)
+      :ok = BufferProcess.save_as(buf, path)
+      :ok = BufferProcess.insert_text(buf, "# dirty\n")
+      version_before = BufferProcess.version(buf)
       fp_dirty = state |> Input.from_editor_state() |> Input.chrome_fingerprint()
 
-      :ok = BufferServer.save(buf)
-      version_after = BufferServer.version(buf)
+      :ok = BufferProcess.save(buf)
+      version_after = BufferProcess.version(buf)
       fp_clean = state |> Input.from_editor_state() |> Input.chrome_fingerprint()
 
       assert version_after == version_before
@@ -176,9 +176,9 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
 
       state = TestHelpers.base_state(content: File.read!(first_path))
       first_buf = state.workspace.buffers.active
-      :ok = BufferServer.save_as(first_buf, first_path)
-      {:ok, second_buf} = BufferServer.start_link(content: File.read!(second_path))
-      :ok = BufferServer.save_as(second_buf, second_path)
+      :ok = BufferProcess.save_as(first_buf, first_path)
+      {:ok, second_buf} = BufferProcess.start_link(content: File.read!(second_path))
+      :ok = BufferProcess.save_as(second_buf, second_path)
 
       state1 = TestHelpers.run_pipeline(state)
       fp_before = state1.caches.chrome_prev_fingerprint

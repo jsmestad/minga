@@ -2,7 +2,7 @@ defmodule MingaEditor.Commands.InsertEntryTest do
   @moduledoc """
   Layer-1 tests for the read-only buffer guard on mode-entry keys.
 
-  Builds an EditorState backed by a real `Buffer.Server` flagged
+  Builds an EditorState backed by a real `Buffer.Process` flagged
   `read_only: true`, then exercises `KeyDispatch.handle_key/3` for the
   `i` (insert) and `R` (replace) keys. The guard in
   `KeyDispatch.guard_read_only/4` should keep the editor in :normal
@@ -10,7 +10,7 @@ defmodule MingaEditor.Commands.InsertEntryTest do
   """
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.KeyDispatch
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -19,7 +19,7 @@ defmodule MingaEditor.Commands.InsertEntryTest do
   alias MingaEditor.Workspace.State, as: WorkspaceState
 
   defp start_read_only_buffer do
-    start_supervised!({BufferServer, content: "read only", read_only: true})
+    start_supervised!({BufferProcess, content: "read only", read_only: true})
   end
 
   defp build_state(buffer) do
@@ -55,7 +55,7 @@ defmodule MingaEditor.Commands.InsertEntryTest do
     end
 
     test "writable buffer transitions into :insert on i" do
-      {:ok, buffer} = start_supervised({BufferServer, content: "writable"})
+      {:ok, buffer} = start_supervised({BufferProcess, content: "writable"})
       state = build_state(buffer)
 
       result = KeyDispatch.handle_key(state, ?i, 0)

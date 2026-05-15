@@ -2,7 +2,7 @@ defmodule MingaEditor.MouseMultiClickTest do
   @moduledoc "Tests for multi-click selection, modifier clicks, and new mouse features."
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor
 
   @gutter 6
@@ -10,7 +10,7 @@ defmodule MingaEditor.MouseMultiClickTest do
   @content_row 1
 
   defp start_editor(content) do
-    {:ok, buffer} = BufferServer.start_link(content: content)
+    {:ok, buffer} = BufferProcess.start_link(content: content)
 
     {:ok, editor} =
       MingaEditor.start_link(
@@ -57,7 +57,7 @@ defmodule MingaEditor.MouseMultiClickTest do
       assert anchor_col == 6
 
       # Cursor should be at end of "world" (col 10)
-      {_line, cursor_col} = BufferServer.cursor(buffer)
+      {_line, cursor_col} = BufferProcess.cursor(buffer)
       assert cursor_col == 10
     end
 
@@ -70,7 +70,7 @@ defmodule MingaEditor.MouseMultiClickTest do
       {_line, anchor_col} = s.workspace.editing.mode_state.visual_anchor
       assert anchor_col == 0
 
-      {_line, cursor_col} = BufferServer.cursor(buffer)
+      {_line, cursor_col} = BufferProcess.cursor(buffer)
       assert cursor_col == 4
     end
 
@@ -112,7 +112,7 @@ defmodule MingaEditor.MouseMultiClickTest do
       {_line, anchor_col} = s.workspace.editing.mode_state.visual_anchor
       assert anchor_col == 0
 
-      {_line, cursor_col} = BufferServer.cursor(buffer)
+      {_line, cursor_col} = BufferProcess.cursor(buffer)
       assert cursor_col == 10
     end
 
@@ -128,7 +128,7 @@ defmodule MingaEditor.MouseMultiClickTest do
 
       s = state(editor)
       assert s.workspace.editing.mode == :visual
-      {_line, cursor_col} = BufferServer.cursor(buffer)
+      {_line, cursor_col} = BufferProcess.cursor(buffer)
       assert cursor_col == 15
     end
   end
@@ -138,7 +138,7 @@ defmodule MingaEditor.MouseMultiClickTest do
       {editor, buffer} = start_editor("hello world")
       send_mouse(editor, @content_row, @gutter + 5, :middle, :press)
 
-      {line, col} = BufferServer.cursor(buffer)
+      {line, col} = BufferProcess.cursor(buffer)
       assert line == 0
       assert col == 5
     end
@@ -191,7 +191,7 @@ defmodule MingaEditor.MouseMultiClickTest do
       # Ctrl+click (0x02 is ctrl modifier)
       send_mouse(editor, @content_row, @gutter + 3, :left, :press, 0x02)
 
-      {line, col} = BufferServer.cursor(buffer)
+      {line, col} = BufferProcess.cursor(buffer)
       assert line == 0
       assert col == 3
       assert Process.alive?(editor)
@@ -201,16 +201,16 @@ defmodule MingaEditor.MouseMultiClickTest do
   describe "negative coordinates" do
     test "negative row is ignored" do
       {editor, buffer} = start_editor("hello")
-      original = BufferServer.cursor(buffer)
+      original = BufferProcess.cursor(buffer)
       send_mouse(editor, -1, 5, :left, :press)
-      assert BufferServer.cursor(buffer) == original
+      assert BufferProcess.cursor(buffer) == original
     end
 
     test "negative col is ignored" do
       {editor, buffer} = start_editor("hello")
-      original = BufferServer.cursor(buffer)
+      original = BufferProcess.cursor(buffer)
       send_mouse(editor, 0, -3, :left, :press)
-      assert BufferServer.cursor(buffer) == original
+      assert BufferProcess.cursor(buffer) == original
     end
   end
 end

@@ -1,7 +1,7 @@
 defmodule Minga.Diagnostics.DecorationsTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Core.Decorations
   alias Minga.Diagnostics
   alias Minga.Diagnostics.Decorations, as: DiagDecorations
@@ -40,7 +40,7 @@ defmodule Minga.Diagnostics.DecorationsTest do
     setup :setup_diag_server
 
     test "creates underline highlight ranges from diagnostics", ctx do
-      {:ok, pid} = BufferServer.start_link(content: "hello world\nfoo bar")
+      {:ok, pid} = BufferProcess.start_link(content: "hello world\nfoo bar")
       uri = "file:///test/file.ex"
 
       # Publish a diagnostic
@@ -52,7 +52,7 @@ defmodule Minga.Diagnostics.DecorationsTest do
       DiagDecorations.apply(pid, uri, @gutter_colors, ctx.diag_name)
 
       # Verify the decoration was created
-      decs = BufferServer.decorations(pid)
+      decs = BufferProcess.decorations(pid)
       ranges = Decorations.highlights_for_line(decs, 0)
       assert length(ranges) == 1
 
@@ -63,7 +63,7 @@ defmodule Minga.Diagnostics.DecorationsTest do
     end
 
     test "multiple diagnostics on same line create multiple ranges", ctx do
-      {:ok, pid} = BufferServer.start_link(content: "hello world foo bar")
+      {:ok, pid} = BufferProcess.start_link(content: "hello world foo bar")
       uri = "file:///test/multi.ex"
 
       Diagnostics.publish(ctx.diag_name, :test, uri, [
@@ -73,13 +73,13 @@ defmodule Minga.Diagnostics.DecorationsTest do
 
       DiagDecorations.apply(pid, uri, @gutter_colors, ctx.diag_name)
 
-      decs = BufferServer.decorations(pid)
+      decs = BufferProcess.decorations(pid)
       ranges = Decorations.highlights_for_line(decs, 0)
       assert length(ranges) == 2
     end
 
     test "zero-width diagnostic is skipped", ctx do
-      {:ok, pid} = BufferServer.start_link(content: "hello")
+      {:ok, pid} = BufferProcess.start_link(content: "hello")
       uri = "file:///test/point.ex"
 
       Diagnostics.publish(ctx.diag_name, :test, uri, [
@@ -88,13 +88,13 @@ defmodule Minga.Diagnostics.DecorationsTest do
 
       DiagDecorations.apply(pid, uri, @gutter_colors, ctx.diag_name)
 
-      decs = BufferServer.decorations(pid)
+      decs = BufferProcess.decorations(pid)
       ranges = Decorations.highlights_for_line(decs, 0)
       assert ranges == []
     end
 
     test "clear/1 removes diagnostic decorations", ctx do
-      {:ok, pid} = BufferServer.start_link(content: "hello")
+      {:ok, pid} = BufferProcess.start_link(content: "hello")
       uri = "file:///test/clear.ex"
 
       Diagnostics.publish(ctx.diag_name, :test, uri, [
@@ -102,14 +102,14 @@ defmodule Minga.Diagnostics.DecorationsTest do
       ])
 
       DiagDecorations.apply(pid, uri, @gutter_colors, ctx.diag_name)
-      assert length(Decorations.highlights_for_line(BufferServer.decorations(pid), 0)) == 1
+      assert length(Decorations.highlights_for_line(BufferProcess.decorations(pid), 0)) == 1
 
       DiagDecorations.clear(pid)
-      assert Decorations.highlights_for_line(BufferServer.decorations(pid), 0) == []
+      assert Decorations.highlights_for_line(BufferProcess.decorations(pid), 0) == []
     end
 
     test "re-apply replaces old decorations", ctx do
-      {:ok, pid} = BufferServer.start_link(content: "hello world")
+      {:ok, pid} = BufferProcess.start_link(content: "hello world")
       uri = "file:///test/replace.ex"
 
       # First apply: one error
@@ -118,7 +118,7 @@ defmodule Minga.Diagnostics.DecorationsTest do
       ])
 
       DiagDecorations.apply(pid, uri, @gutter_colors, ctx.diag_name)
-      assert length(Decorations.highlights_for_line(BufferServer.decorations(pid), 0)) == 1
+      assert length(Decorations.highlights_for_line(BufferProcess.decorations(pid), 0)) == 1
 
       # Second apply: different diagnostic
       Diagnostics.publish(ctx.diag_name, :test, uri, [
@@ -128,7 +128,7 @@ defmodule Minga.Diagnostics.DecorationsTest do
       DiagDecorations.apply(pid, uri, @gutter_colors, ctx.diag_name)
 
       # Old error should be gone, new warning should exist
-      decs = BufferServer.decorations(pid)
+      decs = BufferProcess.decorations(pid)
       assert Decorations.highlights_for_line(decs, 0) |> length() == 1
 
       [range] = Decorations.highlights_for_line(decs, 0)
@@ -144,7 +144,7 @@ defmodule Minga.Diagnostics.DecorationsTest do
       }
 
       for {severity, expected_color} <- colors do
-        {:ok, pid} = BufferServer.start_link(content: "hello world")
+        {:ok, pid} = BufferProcess.start_link(content: "hello world")
         uri = "file:///test/color_#{severity}.ex"
 
         Diagnostics.publish(ctx.diag_name, :test, uri, [
@@ -153,7 +153,7 @@ defmodule Minga.Diagnostics.DecorationsTest do
 
         DiagDecorations.apply(pid, uri, @gutter_colors, ctx.diag_name)
 
-        [range] = Decorations.highlights_for_line(BufferServer.decorations(pid), 0)
+        [range] = Decorations.highlights_for_line(BufferProcess.decorations(pid), 0)
 
         assert range.style.underline_color == expected_color,
                "#{severity} underline should be #{inspect(expected_color)}"
@@ -161,11 +161,11 @@ defmodule Minga.Diagnostics.DecorationsTest do
     end
 
     test "diagnostic decorations don't affect other groups", ctx do
-      {:ok, pid} = BufferServer.start_link(content: "hello world")
+      {:ok, pid} = BufferProcess.start_link(content: "hello world")
       uri = "file:///test/groups.ex"
 
       # Add a search highlight
-      BufferServer.batch_decorations(pid, fn decs ->
+      BufferProcess.batch_decorations(pid, fn decs ->
         {_id, decs} =
           Decorations.add_highlight(decs, {0, 0}, {0, 5},
             style: Minga.Core.Face.new(fg: 0x00FF00),
@@ -182,7 +182,7 @@ defmodule Minga.Diagnostics.DecorationsTest do
 
       DiagDecorations.apply(pid, uri, @gutter_colors, ctx.diag_name)
 
-      decs = BufferServer.decorations(pid)
+      decs = BufferProcess.decorations(pid)
       ranges = Decorations.highlights_for_line(decs, 0)
       # Both search and diagnostic ranges should exist
       assert length(ranges) == 2

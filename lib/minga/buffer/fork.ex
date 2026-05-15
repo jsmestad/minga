@@ -3,7 +3,7 @@ defmodule Minga.Buffer.Fork do
   A forked copy of a buffer for concurrent agent editing.
 
   When an agent session starts editing a file, a fork is created from the
-  parent `Buffer.Server`. The fork holds a snapshot of the parent's Document
+  parent `Buffer.Process`. The fork holds a snapshot of the parent's Document
   at fork time (the common ancestor) and its own Document that the agent edits.
   The user continues editing the parent buffer independently.
 
@@ -11,7 +11,7 @@ defmodule Minga.Buffer.Fork do
   fork changes, and current parent changes. Non-overlapping changes merge
   automatically. Overlapping changes are returned as conflicts for resolution.
 
-  The fork exposes the same GenServer call messages as Buffer.Server for the
+  The fork exposes the same GenServer call messages as Buffer.Process for the
   editing subset (content, find_and_replace, replace_content, etc.), so agent
   tools can call it without knowing whether they're talking to a fork or a
   real buffer.
@@ -29,7 +29,7 @@ defmodule Minga.Buffer.Fork do
 
   alias Minga.Buffer.Document
   alias Minga.Buffer.Replace
-  alias Minga.Buffer.Server, as: BufServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Core.Diff
 
   @typedoc "Fork creation options."
@@ -56,7 +56,7 @@ defmodule Minga.Buffer.Fork do
   """
   @spec create(pid()) :: {:ok, pid()} | {:error, term()}
   def create(parent_pid) when is_pid(parent_pid) do
-    content = BufServer.content(parent_pid)
+    content = BufferProcess.content(parent_pid)
     start_link(parent: parent_pid, content: content)
   end
 
@@ -198,7 +198,7 @@ defmodule Minga.Buffer.Fork do
     ancestor_lines = Document.content(state.ancestor) |> String.split("\n")
     fork_lines = Document.content(state.document) |> String.split("\n")
 
-    parent_content = BufServer.content(state.parent)
+    parent_content = BufferProcess.content(state.parent)
     parent_lines = String.split(parent_content, "\n")
 
     result = Diff.merge3(ancestor_lines, fork_lines, parent_lines)

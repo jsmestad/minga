@@ -1,7 +1,7 @@
 defmodule MingaEditor.Input.RouterTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Test.InputRouterMouseProbe
   alias MingaEditor.FocusTree
   alias MingaEditor.FocusTree.Node, as: FocusNode
@@ -13,7 +13,7 @@ defmodule MingaEditor.Input.RouterTest do
   alias MingaEditor.Input.Router
 
   defp base_state do
-    {:ok, buf} = BufferServer.start_link(content: "hello\nworld\nthird")
+    {:ok, buf} = BufferProcess.start_link(content: "hello\nworld\nthird")
 
     %EditorState{
       port_manager: self(),
@@ -107,7 +107,7 @@ defmodule MingaEditor.Input.RouterTest do
       state = base_state()
       # 'j' in normal mode moves cursor down
       new_state = Router.dispatch(state, ?j, 0)
-      cursor = BufferServer.cursor(new_state.workspace.buffers.active)
+      cursor = BufferProcess.cursor(new_state.workspace.buffers.active)
       assert elem(cursor, 0) == 1
     end
 
@@ -121,7 +121,7 @@ defmodule MingaEditor.Input.RouterTest do
 
       # 'j' is swallowed by conflict prompt, not forwarded to mode
       new_state = Router.dispatch(state, ?j, 0)
-      cursor = BufferServer.cursor(new_state.workspace.buffers.active)
+      cursor = BufferProcess.cursor(new_state.workspace.buffers.active)
       # Cursor did not move because conflict prompt intercepted the key
       assert elem(cursor, 0) == 0
     end
@@ -166,7 +166,7 @@ defmodule MingaEditor.Input.RouterTest do
       # Another normal key
       state = Router.dispatch(state, ?k, 0)
       # Should have moved down then up, back to line 0
-      cursor = BufferServer.cursor(state.workspace.buffers.active)
+      cursor = BufferProcess.cursor(state.workspace.buffers.active)
       assert elem(cursor, 0) == 0
     end
   end
@@ -215,7 +215,7 @@ defmodule MingaEditor.Input.RouterTest do
       assert snapshot.old_buffer == state.workspace.buffers.active
       assert snapshot.old_mode == :normal
       assert snapshot.old_cursor == {0, 0}
-      assert snapshot.buf_version == BufferServer.version(state.workspace.buffers.active)
+      assert snapshot.buf_version == BufferProcess.version(state.workspace.buffers.active)
     end
 
     test "handles nil active buffer" do

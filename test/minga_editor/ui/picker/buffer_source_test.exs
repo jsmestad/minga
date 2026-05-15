@@ -3,7 +3,7 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
 
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Search
   alias MingaEditor.VimState
@@ -15,7 +15,7 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
   alias MingaEditor.UI.Theme
 
   defp start_buffer(opts) do
-    {:ok, pid} = BufferServer.start_link(opts)
+    {:ok, pid} = BufferProcess.start_link(opts)
 
     on_exit(fn ->
       try do

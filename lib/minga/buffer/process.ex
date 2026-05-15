@@ -1,19 +1,19 @@
-defmodule Minga.Buffer.Server do
+defmodule Minga.Buffer.Process do
   @moduledoc """
   GenServer wrapping a `Document` with file I/O and dirty tracking.
 
-  Each open file gets its own `Buffer.Server` process, managed by
+  Each open file gets its own `Buffer.Process` process, managed by
   the `Buffer.Supervisor` (DynamicSupervisor). If a buffer process
   crashes, only that buffer is lost, and all other buffers and the
   editor continue running.
 
   ## Examples
 
-      {:ok, pid} = Minga.Buffer.Server.start_link(file_path: "README.md")
-      :ok = Minga.Buffer.Server.insert_char(pid, "x")
-      true = Minga.Buffer.Server.dirty?(pid)
-      :ok = Minga.Buffer.Server.save(pid)
-      false = Minga.Buffer.Server.dirty?(pid)
+      {:ok, pid} = Minga.Buffer.Process.start_link(file_path: "README.md")
+      :ok = Minga.Buffer.Process.insert_char(pid, "x")
+      true = Minga.Buffer.Process.dirty?(pid)
+      :ok = Minga.Buffer.Process.save(pid)
+      false = Minga.Buffer.Process.dirty?(pid)
   """
 
   use GenServer
@@ -413,8 +413,8 @@ defmodule Minga.Buffer.Server do
 
   ## Examples
 
-      Buffer.Server.remap_face(buf, "default", fg: 0x000000, bg: 0xFFFFFF)
-      Buffer.Server.remap_face(buf, "comment", italic: false)
+      Buffer.Process.remap_face(buf, "default", fg: 0x000000, bg: 0xFFFFFF)
+      Buffer.Process.remap_face(buf, "comment", italic: false)
   """
   @spec remap_face(GenServer.server(), String.t(), keyword()) :: :ok
   def remap_face(server, face_name, attrs) when is_list(attrs) do
@@ -1811,7 +1811,7 @@ defmodule Minga.Buffer.Server do
 
   # Broadcasts a face_overrides_changed event so any subscriber (typically
   # the Editor) can pre-compute the merged face registry. Using Events
-  # decouples Buffer.Server from the Editor module.
+  # decouples Buffer.Process from the Editor module.
   @spec notify_face_overrides_changed(BufState.t(), %{String.t() => keyword()}) :: :ok
   defp notify_face_overrides_changed(state, overrides) do
     Minga.Events.broadcast(

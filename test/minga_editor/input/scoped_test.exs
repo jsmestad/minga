@@ -6,7 +6,7 @@ defmodule MingaEditor.Input.ScopedTest do
   alias MingaEditor.Agent.DiffReview
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.Preview
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
 
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.RuntimeState
@@ -26,8 +26,8 @@ defmodule MingaEditor.Input.ScopedTest do
   alias Minga.Project.FileTree.BufferSync
 
   defp base_state(opts) do
-    {:ok, buf} = BufferServer.start_link(content: "hello world")
-    {:ok, prompt_buf} = BufferServer.start_link(content: "")
+    {:ok, buf} = BufferProcess.start_link(content: "hello world")
+    {:ok, prompt_buf} = BufferProcess.start_link(content: "")
 
     agent = %AgentState{
       runtime: %RuntimeState{status: :idle},
@@ -90,7 +90,7 @@ defmodule MingaEditor.Input.ScopedTest do
 
   describe "editor scope — agent side panel nav" do
     setup do
-      {:ok, agent_buf} = BufferServer.start_link(content: "line1\nline2\nline3\nline4")
+      {:ok, agent_buf} = BufferProcess.start_link(content: "line1\nline2\nline3\nline4")
 
       state =
         base_state(
@@ -116,7 +116,7 @@ defmodule MingaEditor.Input.ScopedTest do
     test "j delegates to mode FSM with agent buffer", %{state: state, agent_buf: agent_buf} do
       # j should delegate to mode FSM, moving cursor in agent buffer
       {:handled, _new_state} = walk_surface_handlers(state, ?j, 0)
-      {line, _col} = BufferServer.cursor(agent_buf)
+      {line, _col} = BufferProcess.cursor(agent_buf)
       assert line >= 1
     end
 
@@ -139,7 +139,7 @@ defmodule MingaEditor.Input.ScopedTest do
 
   describe "editor scope — agent side panel input" do
     setup do
-      {:ok, agent_buf} = BufferServer.start_link(content: "chat content")
+      {:ok, agent_buf} = BufferProcess.start_link(content: "chat content")
 
       state =
         base_state(
@@ -698,7 +698,7 @@ defmodule MingaEditor.Input.ScopedTest do
 
   describe "editor scope — panel mention completion" do
     setup do
-      {:ok, agent_buf} = BufferServer.start_link(content: "chat")
+      {:ok, agent_buf} = BufferProcess.start_link(content: "chat")
 
       state =
         base_state(

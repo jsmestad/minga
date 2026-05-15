@@ -2,7 +2,7 @@ defmodule Minga.Buffer.Persistence do
   @moduledoc """
   Stateless file persistence operations for buffers.
 
-  `Minga.Buffer.Server` owns the process transaction: undo state, dirty state, events, timers, and registry updates. This module owns the file-system and remote-storage details that make those transactions possible: reading content, writing content, collecting file metadata, hashing saved content, and deciding whether the backing file changed since the buffer last saved or loaded it.
+  `Minga.Buffer.Process` owns the process transaction: undo state, dirty state, events, timers, and registry updates. This module owns the file-system and remote-storage details that make those transactions possible: reading content, writing content, collecting file metadata, hashing saved content, and deciding whether the backing file changed since the buffer last saved or loaded it.
   """
 
   alias Minga.Buffer.State, as: BufState

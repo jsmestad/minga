@@ -5,7 +5,7 @@ defmodule Minga.Buffer.AutoSaveTest do
 
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Events
   alias Minga.Events.LogMessageEvent
 
@@ -15,19 +15,19 @@ defmodule Minga.Buffer.AutoSaveTest do
   test "dirty file-backed buffer auto-saves after the configured delay", %{tmp_dir: dir} do
     path = Path.join(dir, "auto-save.txt")
     File.write!(path, "hello")
-    {:ok, pid} = Server.start_link(file_path: path)
-    assert {:ok, 1} = Server.set_option(pid, :auto_save_delay_ms, 1)
+    {:ok, pid} = BufferProcess.start_link(file_path: path)
+    assert {:ok, 1} = BufferProcess.set_option(pid, :auto_save_delay_ms, 1)
 
     Events.subscribe(:log_message)
     Events.subscribe(:buffer_saved)
 
     try do
-      :ok = Server.insert_text(pid, "!")
+      :ok = BufferProcess.insert_text(pid, "!")
 
       assert_buffer_saved(path)
       assert_log_contains("Auto-saved: #{Path.relative_to_cwd(path)}")
       assert File.read!(path) == "!hello"
-      refute Server.dirty?(pid)
+      refute BufferProcess.dirty?(pid)
     after
       Events.unsubscribe(:buffer_saved)
       Events.unsubscribe(:log_message)
@@ -37,14 +37,14 @@ defmodule Minga.Buffer.AutoSaveTest do
   test "rapid edits reset the debounce timer", %{tmp_dir: dir} do
     path = Path.join(dir, "debounce.txt")
     File.write!(path, "base")
-    {:ok, pid} = Server.start_link(file_path: path)
-    assert {:ok, @delay_ms} = Server.set_option(pid, :auto_save_delay_ms, @delay_ms)
+    {:ok, pid} = BufferProcess.start_link(file_path: path)
+    assert {:ok, @delay_ms} = BufferProcess.set_option(pid, :auto_save_delay_ms, @delay_ms)
 
-    :ok = Server.insert_text(pid, "A")
+    :ok = BufferProcess.insert_text(pid, "A")
     first_token = :sys.get_state(pid).auto_save_token
     assert is_reference(first_token)
 
-    :ok = Server.insert_text(pid, "B")
+    :ok = BufferProcess.insert_text(pid, "B")
     second_token = :sys.get_state(pid).auto_save_token
     assert is_reference(second_token)
     refute first_token == second_token
@@ -56,21 +56,21 @@ defmodule Minga.Buffer.AutoSaveTest do
     send(pid, {:auto_save, second_token})
     :sys.get_state(pid)
     assert File.read!(path) == "ABbase"
-    refute Server.dirty?(pid)
+    refute BufferProcess.dirty?(pid)
   end
 
   test "explicit save cancels a pending auto-save timer", %{tmp_dir: dir} do
     path = Path.join(dir, "explicit-save.txt")
     File.write!(path, "hello")
-    {:ok, pid} = Server.start_link(file_path: path)
-    assert {:ok, @delay_ms} = Server.set_option(pid, :auto_save_delay_ms, @delay_ms)
+    {:ok, pid} = BufferProcess.start_link(file_path: path)
+    assert {:ok, @delay_ms} = BufferProcess.set_option(pid, :auto_save_delay_ms, @delay_ms)
 
-    :ok = Server.insert_text(pid, "!")
+    :ok = BufferProcess.insert_text(pid, "!")
     state = :sys.get_state(pid)
     assert is_reference(state.auto_save_timer)
     assert is_reference(state.auto_save_token)
 
-    assert :ok = Server.save(pid)
+    assert :ok = BufferProcess.save(pid)
     refute :sys.get_state(pid).auto_save_timer
 
     send(pid, {:auto_save, state.auto_save_token})
@@ -82,16 +82,19 @@ defmodule Minga.Buffer.AutoSaveTest do
     for buffer_type <- [:nofile, :nowrite, :prompt, :terminal] do
       path = Path.join(dir, "#{buffer_type}.txt")
       File.write!(path, "original")
-      {:ok, pid} = Server.start_link(file_path: path, buffer_type: buffer_type, read_only: false)
-      assert {:ok, @delay_ms} = Server.set_option(pid, :auto_save_delay_ms, @delay_ms)
 
-      :ok = Server.insert_text(pid, "!")
+      {:ok, pid} =
+        BufferProcess.start_link(file_path: path, buffer_type: buffer_type, read_only: false)
+
+      assert {:ok, @delay_ms} = BufferProcess.set_option(pid, :auto_save_delay_ms, @delay_ms)
+
+      :ok = BufferProcess.insert_text(pid, "!")
       refute :sys.get_state(pid).auto_save_timer
 
       send(pid, {:auto_save, make_ref()})
       :sys.get_state(pid)
       assert File.read!(path) == "original"
-      assert Server.dirty?(pid)
+      assert BufferProcess.dirty?(pid)
       GenServer.stop(pid)
     end
   end
@@ -99,72 +102,72 @@ defmodule Minga.Buffer.AutoSaveTest do
   test "auto-save delay of 0 disables auto-save", %{tmp_dir: dir} do
     path = Path.join(dir, "disabled.txt")
     File.write!(path, "hello")
-    {:ok, pid} = Server.start_link(file_path: path)
-    assert {:ok, 0} = Server.set_option(pid, :auto_save_delay_ms, 0)
+    {:ok, pid} = BufferProcess.start_link(file_path: path)
+    assert {:ok, 0} = BufferProcess.set_option(pid, :auto_save_delay_ms, 0)
 
-    :ok = Server.insert_text(pid, "!")
+    :ok = BufferProcess.insert_text(pid, "!")
     refute :sys.get_state(pid).auto_save_timer
 
     send(pid, {:auto_save, make_ref()})
     :sys.get_state(pid)
     assert File.read!(path) == "hello"
-    assert Server.dirty?(pid)
+    assert BufferProcess.dirty?(pid)
   end
 
   test "disabling auto-save cancels an already pending timer", %{tmp_dir: dir} do
     path = Path.join(dir, "disable-pending.txt")
     File.write!(path, "hello")
-    {:ok, pid} = Server.start_link(file_path: path)
-    assert {:ok, @delay_ms} = Server.set_option(pid, :auto_save_delay_ms, @delay_ms)
+    {:ok, pid} = BufferProcess.start_link(file_path: path)
+    assert {:ok, @delay_ms} = BufferProcess.set_option(pid, :auto_save_delay_ms, @delay_ms)
 
-    :ok = Server.insert_text(pid, "!")
+    :ok = BufferProcess.insert_text(pid, "!")
     token = :sys.get_state(pid).auto_save_token
     assert is_reference(token)
 
-    assert {:ok, 0} = Server.set_option(pid, :auto_save_delay_ms, 0)
+    assert {:ok, 0} = BufferProcess.set_option(pid, :auto_save_delay_ms, 0)
     refute :sys.get_state(pid).auto_save_timer
 
     send(pid, {:auto_save, token})
     :sys.get_state(pid)
     assert File.read!(path) == "hello"
-    assert Server.dirty?(pid)
+    assert BufferProcess.dirty?(pid)
   end
 
   test "undo to a dirty version schedules auto-save", %{tmp_dir: dir} do
     path = Path.join(dir, "undo-dirty.txt")
     File.write!(path, "hello")
-    {:ok, pid} = Server.start_link(file_path: path)
-    assert {:ok, @delay_ms} = Server.set_option(pid, :auto_save_delay_ms, @delay_ms)
+    {:ok, pid} = BufferProcess.start_link(file_path: path)
+    assert {:ok, @delay_ms} = BufferProcess.set_option(pid, :auto_save_delay_ms, @delay_ms)
 
-    :ok = Server.insert_text(pid, "!")
+    :ok = BufferProcess.insert_text(pid, "!")
     token = :sys.get_state(pid).auto_save_token
     send(pid, {:auto_save, token})
     :sys.get_state(pid)
-    refute Server.dirty?(pid)
+    refute BufferProcess.dirty?(pid)
 
-    :ok = Server.undo(pid)
+    :ok = BufferProcess.undo(pid)
     state = :sys.get_state(pid)
-    assert Server.dirty?(pid)
+    assert BufferProcess.dirty?(pid)
     assert is_reference(state.auto_save_timer)
     assert is_reference(state.auto_save_token)
 
     send(pid, {:auto_save, state.auto_save_token})
     :sys.get_state(pid)
     assert File.read!(path) == "hello"
-    refute Server.dirty?(pid)
+    refute BufferProcess.dirty?(pid)
   end
 
   test "auto-save skips when a missing file appears on disk before the timer fires", %{
     tmp_dir: dir
   } do
     path = Path.join(dir, "externally-created.txt")
-    {:ok, pid} = Server.start_link(file_path: path)
-    assert {:ok, @delay_ms} = Server.set_option(pid, :auto_save_delay_ms, @delay_ms)
+    {:ok, pid} = BufferProcess.start_link(file_path: path)
+    assert {:ok, @delay_ms} = BufferProcess.set_option(pid, :auto_save_delay_ms, @delay_ms)
 
     Events.subscribe(:log_message)
 
     try do
-      :ok = Server.insert_text(pid, "buffer")
+      :ok = BufferProcess.insert_text(pid, "buffer")
       token = :sys.get_state(pid).auto_save_token
       File.write!(path, "external")
 
@@ -176,7 +179,7 @@ defmodule Minga.Buffer.AutoSaveTest do
       )
 
       assert File.read!(path) == "external"
-      assert Server.dirty?(pid)
+      assert BufferProcess.dirty?(pid)
     after
       Events.unsubscribe(:log_message)
     end
@@ -185,11 +188,11 @@ defmodule Minga.Buffer.AutoSaveTest do
   test "auto-save skips when an existing file changes before the timer fires", %{tmp_dir: dir} do
     path = Path.join(dir, "externally-modified.txt")
     File.write!(path, "hello")
-    {:ok, pid} = Server.start_link(file_path: path)
-    assert {:ok, @delay_ms} = Server.set_option(pid, :auto_save_delay_ms, @delay_ms)
+    {:ok, pid} = BufferProcess.start_link(file_path: path)
+    assert {:ok, @delay_ms} = BufferProcess.set_option(pid, :auto_save_delay_ms, @delay_ms)
 
     original_mtime = :sys.get_state(pid).mtime
-    :ok = Server.insert_text(pid, "!")
+    :ok = BufferProcess.insert_text(pid, "!")
     token = :sys.get_state(pid).auto_save_token
     File.write!(path, "HELLO")
     File.touch!(path, original_mtime)
@@ -205,7 +208,7 @@ defmodule Minga.Buffer.AutoSaveTest do
       )
 
       assert File.read!(path) == "HELLO"
-      assert Server.dirty?(pid)
+      assert BufferProcess.dirty?(pid)
     after
       Events.unsubscribe(:log_message)
     end
@@ -214,10 +217,10 @@ defmodule Minga.Buffer.AutoSaveTest do
   test "auto-save skips when an existing file is deleted before the timer fires", %{tmp_dir: dir} do
     path = Path.join(dir, "externally-deleted.txt")
     File.write!(path, "hello")
-    {:ok, pid} = Server.start_link(file_path: path)
-    assert {:ok, @delay_ms} = Server.set_option(pid, :auto_save_delay_ms, @delay_ms)
+    {:ok, pid} = BufferProcess.start_link(file_path: path)
+    assert {:ok, @delay_ms} = BufferProcess.set_option(pid, :auto_save_delay_ms, @delay_ms)
 
-    :ok = Server.insert_text(pid, "!")
+    :ok = BufferProcess.insert_text(pid, "!")
     token = :sys.get_state(pid).auto_save_token
     File.rm!(path)
 
@@ -232,7 +235,7 @@ defmodule Minga.Buffer.AutoSaveTest do
       )
 
       refute File.exists?(path)
-      assert Server.dirty?(pid)
+      assert BufferProcess.dirty?(pid)
     after
       Events.unsubscribe(:log_message)
     end
@@ -241,10 +244,10 @@ defmodule Minga.Buffer.AutoSaveTest do
   test "stopping a buffer cancels the pending auto-save timer", %{tmp_dir: dir} do
     path = Path.join(dir, "stopped.txt")
     File.write!(path, "hello")
-    {:ok, pid} = Server.start_link(file_path: path)
-    assert {:ok, @delay_ms} = Server.set_option(pid, :auto_save_delay_ms, @delay_ms)
+    {:ok, pid} = BufferProcess.start_link(file_path: path)
+    assert {:ok, @delay_ms} = BufferProcess.set_option(pid, :auto_save_delay_ms, @delay_ms)
 
-    :ok = Server.insert_text(pid, "!")
+    :ok = BufferProcess.insert_text(pid, "!")
     assert is_reference(:sys.get_state(pid).auto_save_timer)
 
     ref = Process.monitor(pid)

@@ -1,11 +1,11 @@
 defmodule Minga.Buffer.MtimeTest do
   @moduledoc """
-  Tests for file mtime tracking and save-conflict detection in BufferServer.
+  Tests for file mtime tracking and save-conflict detection in BufferProcess.
   """
 
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
 
   @tag :tmp_dir
   test "opening a file records its mtime", %{tmp_dir: tmp_dir} do
@@ -13,14 +13,14 @@ defmodule Minga.Buffer.MtimeTest do
     File.write!(path, "hello")
     %{mtime: disk_mtime} = File.stat!(path, time: :posix)
 
-    {:ok, buf} = BufferServer.start_link(file_path: path)
+    {:ok, buf} = BufferProcess.start_link(file_path: path)
     state = :sys.get_state(buf)
 
     assert state.mtime == disk_mtime
   end
 
   test "scratch buffer has nil mtime" do
-    {:ok, buf} = BufferServer.start_link(content: "scratch")
+    {:ok, buf} = BufferProcess.start_link(content: "scratch")
     state = :sys.get_state(buf)
 
     assert state.mtime == nil
@@ -31,12 +31,12 @@ defmodule Minga.Buffer.MtimeTest do
     path = Path.join(tmp_dir, "save.txt")
     File.write!(path, "original")
 
-    {:ok, buf} = BufferServer.start_link(file_path: path)
+    {:ok, buf} = BufferProcess.start_link(file_path: path)
     old_state = :sys.get_state(buf)
 
     # Modify buffer so there's something to save
-    BufferServer.insert_char(buf, "x")
-    :ok = BufferServer.save(buf)
+    BufferProcess.insert_char(buf, "x")
+    :ok = BufferProcess.save(buf)
 
     new_state = :sys.get_state(buf)
     assert new_state.mtime >= old_state.mtime
@@ -48,13 +48,13 @@ defmodule Minga.Buffer.MtimeTest do
     path = Path.join(tmp_dir, "conflict.txt")
     File.write!(path, "original")
 
-    {:ok, buf} = BufferServer.start_link(file_path: path)
+    {:ok, buf} = BufferProcess.start_link(file_path: path)
 
     # Simulate external modification, different size triggers detection even within the same second.
     File.write!(path, "externally modified with longer content")
 
-    BufferServer.insert_char(buf, "x")
-    result = BufferServer.save(buf)
+    BufferProcess.insert_char(buf, "x")
+    result = BufferProcess.save(buf)
 
     assert result == {:error, :file_changed}
     state = :sys.get_state(buf)
@@ -66,15 +66,15 @@ defmodule Minga.Buffer.MtimeTest do
     path = Path.join(tmp_dir, "touched.txt")
     File.write!(path, "original")
 
-    {:ok, buf} = BufferServer.start_link(file_path: path)
+    {:ok, buf} = BufferProcess.start_link(file_path: path)
     original_mtime = :sys.get_state(buf).mtime
     File.touch!(path, original_mtime + 10)
 
-    BufferServer.insert_char(buf, "x")
+    BufferProcess.insert_char(buf, "x")
 
-    assert BufferServer.save(buf) == :ok
+    assert BufferProcess.save(buf) == :ok
     assert File.read!(path) == "xoriginal"
-    refute BufferServer.dirty?(buf)
+    refute BufferProcess.dirty?(buf)
   end
 
   @tag :tmp_dir
@@ -82,13 +82,13 @@ defmodule Minga.Buffer.MtimeTest do
     path = Path.join(tmp_dir, "force.txt")
     File.write!(path, "original")
 
-    {:ok, buf} = BufferServer.start_link(file_path: path)
+    {:ok, buf} = BufferProcess.start_link(file_path: path)
 
     # Simulate external modification with a different size.
     File.write!(path, "externally modified with longer content")
 
-    BufferServer.insert_char(buf, "forced")
-    result = BufferServer.force_save(buf)
+    BufferProcess.insert_char(buf, "forced")
+    result = BufferProcess.force_save(buf)
 
     assert result == :ok
     assert File.read!(path) == "forcedoriginal"
@@ -102,19 +102,19 @@ defmodule Minga.Buffer.MtimeTest do
     path = Path.join(tmp_dir, "reload.txt")
     File.write!(path, "line1\nline2\nline3")
 
-    {:ok, buf} = BufferServer.start_link(file_path: path)
+    {:ok, buf} = BufferProcess.start_link(file_path: path)
 
     # Modify buffer locally
-    BufferServer.insert_char(buf, "x")
-    assert BufferServer.dirty?(buf) == true
+    BufferProcess.insert_char(buf, "x")
+    assert BufferProcess.dirty?(buf) == true
 
     # Modify on disk
     File.write!(path, "reloaded content")
 
-    :ok = BufferServer.reload(buf)
+    :ok = BufferProcess.reload(buf)
 
-    assert BufferServer.content(buf) == "reloaded content"
-    assert BufferServer.dirty?(buf) == false
+    assert BufferProcess.content(buf) == "reloaded content"
+    assert BufferProcess.dirty?(buf) == false
   end
 
   @tag :tmp_dir
@@ -122,14 +122,14 @@ defmodule Minga.Buffer.MtimeTest do
     path = Path.join(tmp_dir, "undo.txt")
     File.write!(path, "original")
 
-    {:ok, buf} = BufferServer.start_link(file_path: path)
-    BufferServer.insert_char(buf, "change1")
-    BufferServer.insert_char(buf, "change2")
+    {:ok, buf} = BufferProcess.start_link(file_path: path)
+    BufferProcess.insert_char(buf, "change1")
+    BufferProcess.insert_char(buf, "change2")
 
     state_before = :sys.get_state(buf)
     assert state_before.undo_stack != []
 
-    :ok = BufferServer.reload(buf)
+    :ok = BufferProcess.reload(buf)
 
     state_after = :sys.get_state(buf)
     assert state_after.undo_stack == []
@@ -141,15 +141,15 @@ defmodule Minga.Buffer.MtimeTest do
     path = Path.join(tmp_dir, "clamp.txt")
     File.write!(path, "line1\nline2\nline3\nline4\nline5")
 
-    {:ok, buf} = BufferServer.start_link(file_path: path)
+    {:ok, buf} = BufferProcess.start_link(file_path: path)
     # Move cursor to line 4
-    BufferServer.move_to(buf, {4, 3})
+    BufferProcess.move_to(buf, {4, 3})
 
     # Reload with shorter content
     File.write!(path, "short\nfile")
-    :ok = BufferServer.reload(buf)
+    :ok = BufferProcess.reload(buf)
 
-    {line, col} = BufferServer.cursor(buf)
+    {line, col} = BufferProcess.cursor(buf)
     # Should clamp to last line (1), col clamped to line length
     assert line <= 1
     assert col <= 3
@@ -160,34 +160,34 @@ defmodule Minga.Buffer.MtimeTest do
     path = Path.join(tmp_dir, "deleted.txt")
     File.write!(path, "exists")
 
-    {:ok, buf} = BufferServer.start_link(file_path: path)
+    {:ok, buf} = BufferProcess.start_link(file_path: path)
 
     # Delete the file
     File.rm!(path)
 
-    BufferServer.insert_char(buf, "new content")
-    result = BufferServer.save(buf)
+    BufferProcess.insert_char(buf, "new content")
+    result = BufferProcess.save(buf)
 
     assert result == :ok
     assert File.read!(path) == "new contentexists"
   end
 
   test "reload on scratch buffer returns error" do
-    {:ok, buf} = BufferServer.start_link(content: "scratch")
-    assert BufferServer.reload(buf) == {:error, :no_file_path}
+    {:ok, buf} = BufferProcess.start_link(content: "scratch")
+    assert BufferProcess.reload(buf) == {:error, :no_file_path}
   end
 
   test "force_save on scratch buffer returns error" do
-    {:ok, buf} = BufferServer.start_link(content: "scratch")
-    assert BufferServer.force_save(buf) == {:error, :no_file_path}
+    {:ok, buf} = BufferProcess.start_link(content: "scratch")
+    assert BufferProcess.force_save(buf) == {:error, :no_file_path}
   end
 
   @tag :tmp_dir
   test "save_as updates mtime", %{tmp_dir: tmp_dir} do
     path = Path.join(tmp_dir, "saveas.txt")
 
-    {:ok, buf} = BufferServer.start_link(content: "new file")
-    :ok = BufferServer.save_as(buf, path)
+    {:ok, buf} = BufferProcess.start_link(content: "new file")
+    :ok = BufferProcess.save_as(buf, path)
 
     state = :sys.get_state(buf)
     assert state.mtime != nil
@@ -199,7 +199,7 @@ defmodule Minga.Buffer.MtimeTest do
     path = Path.join(tmp_dir, "sized.txt")
     File.write!(path, "hello")
 
-    {:ok, buf} = BufferServer.start_link(file_path: path)
+    {:ok, buf} = BufferProcess.start_link(file_path: path)
     state = :sys.get_state(buf)
 
     assert state.file_size == 5
@@ -210,8 +210,8 @@ defmodule Minga.Buffer.MtimeTest do
     path = Path.join(tmp_dir, "opened.txt")
     File.write!(path, "content")
 
-    {:ok, buf} = BufferServer.start_link(content: "scratch")
-    :ok = BufferServer.open(buf, path)
+    {:ok, buf} = BufferProcess.start_link(content: "scratch")
+    :ok = BufferProcess.open(buf, path)
 
     state = :sys.get_state(buf)
     assert state.mtime != nil

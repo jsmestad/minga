@@ -6,7 +6,7 @@ defmodule Minga.Test.Invariants do
   with a descriptive message. `assert_all!/1` runs them all.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
 
   @valid_modes [
     :normal,
@@ -45,8 +45,8 @@ defmodule Minga.Test.Invariants do
     buf = state.workspace.buffers.active
 
     if is_pid(buf) do
-      {cursor_line, cursor_col} = BufferServer.cursor(buf)
-      content = BufferServer.content(buf)
+      {cursor_line, cursor_col} = BufferProcess.cursor(buf)
+      content = BufferProcess.content(buf)
       lines = String.split(content, "\n")
 
       %{

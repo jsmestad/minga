@@ -6,7 +6,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
 
   - **Layer 0** (pure foundations): Buffer.Document, Editing.Motion, Core.*,
     Mode.* FSM modules. No dependencies on other Minga modules.
-  - **Layer 1** (stateful services): Buffer.Server, Config.*, Language.*,
+  - **Layer 1** (stateful services): Buffer.Process, Config.*, Language.*,
     LSP.*, Git.*, Project.*, Keymap.*, Parser.*, Frontend.Manager/Protocol.
     May depend on Layer 0 only.
   - **Layer 2** (orchestration/presentation): Editor.*, Shell.*, Input.*,

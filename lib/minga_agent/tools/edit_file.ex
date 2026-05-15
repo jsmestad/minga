@@ -2,7 +2,7 @@ defmodule MingaAgent.Tools.EditFile do
   @moduledoc """
   Replaces exact text in a file.
 
-  Routes through `Buffer.Server.find_and_replace/3` when a buffer is open
+  Routes through `Buffer.find_and_replace/3` when a buffer is open
   for the file (atomic, undoable, no disk I/O). Falls back to filesystem
   I/O when no buffer exists.
 

@@ -2,12 +2,12 @@ defmodule Minga.Buffer.SaveAllDirtyTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer
-  alias Minga.Buffer.Server
+  alias Minga.Buffer.Process, as: BufferProcess
 
   @moduletag :tmp_dir
 
   defp start_file_buffer(path) do
-    start_supervised!({Server, file_path: path}, id: make_ref())
+    start_supervised!({BufferProcess, file_path: path}, id: make_ref())
   end
 
   describe "save_all_dirty/0" do
@@ -20,11 +20,11 @@ defmodule Minga.Buffer.SaveAllDirtyTest do
       buf_a = start_file_buffer(a_path)
       buf_b = start_file_buffer(b_path)
 
-      :ok = Server.insert_text(buf_a, " MODIFIED_A")
-      :ok = Server.insert_text(buf_b, " MODIFIED_B")
+      :ok = BufferProcess.insert_text(buf_a, " MODIFIED_A")
+      :ok = BufferProcess.insert_text(buf_b, " MODIFIED_B")
 
-      assert Server.dirty?(buf_a)
-      assert Server.dirty?(buf_b)
+      assert BufferProcess.dirty?(buf_a)
+      assert BufferProcess.dirty?(buf_b)
 
       {saved, _warnings} = Buffer.save_all_dirty()
 
@@ -39,7 +39,7 @@ defmodule Minga.Buffer.SaveAllDirtyTest do
       File.write!(path, "original")
 
       buf = start_file_buffer(path)
-      refute Server.dirty?(buf)
+      refute BufferProcess.dirty?(buf)
 
       Buffer.save_all_dirty()
 
@@ -55,8 +55,8 @@ defmodule Minga.Buffer.SaveAllDirtyTest do
       writable_buf = start_file_buffer(writable_path)
       readonly_buf = start_file_buffer(readonly_path)
 
-      :ok = Server.insert_text(writable_buf, " MODIFIED")
-      :ok = Server.insert_text(readonly_buf, " MODIFIED")
+      :ok = BufferProcess.insert_text(writable_buf, " MODIFIED")
+      :ok = BufferProcess.insert_text(readonly_buf, " MODIFIED")
 
       # Make the file unwritable so save fails
       File.chmod!(readonly_path, 0o000)
@@ -77,12 +77,12 @@ defmodule Minga.Buffer.SaveAllDirtyTest do
       File.write!(path, "original")
 
       buf = start_file_buffer(path)
-      :ok = Server.insert_text(buf, " MODIFIED")
-      assert Server.dirty?(buf)
+      :ok = BufferProcess.insert_text(buf, " MODIFIED")
+      assert BufferProcess.dirty?(buf)
 
       Buffer.save_all_dirty()
 
-      refute Server.dirty?(buf)
+      refute BufferProcess.dirty?(buf)
     end
   end
 end

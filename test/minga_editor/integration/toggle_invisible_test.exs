@@ -2,19 +2,19 @@ defmodule Minga.Integration.ToggleInvisibleTest do
   @moduledoc "Integration tests for toggling invisible characters via SPC t i."
   use Minga.Test.EditorCase, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
 
   describe "SPC t i toggles invisible characters" do
     test "toggles show_invisible option on the buffer" do
       ctx = start_editor("hello")
 
-      assert BufferServer.get_option(ctx.buffer, :show_invisible) == false
+      assert BufferProcess.get_option(ctx.buffer, :show_invisible) == false
 
       send_keys_sync(ctx, "<SPC>ti")
-      assert BufferServer.get_option(ctx.buffer, :show_invisible) == true
+      assert BufferProcess.get_option(ctx.buffer, :show_invisible) == true
 
       send_keys_sync(ctx, "<SPC>ti")
-      assert BufferServer.get_option(ctx.buffer, :show_invisible) == false
+      assert BufferProcess.get_option(ctx.buffer, :show_invisible) == false
     end
 
     test "trailing whitespace renders as dots when enabled" do

@@ -14,7 +14,7 @@ The sections below describe the design rationale and prior art analysis that mot
 
 ## The Problem (Before This Work)
 
-Minga's agent tools (`EditFile`, `WriteFile`, `ReadFile`) used to bypass the buffer entirely. They went straight to `File.read` and `File.write` on disk. Meanwhile, the `Buffer.Server` GenServer was sitting right there, holding the same file's content in a gap buffer with undo tracking, dirty state, tree-sitter sync, and a batch `apply_text_edits/2` API built for exactly this kind of programmatic editing.
+Minga's agent tools (`EditFile`, `WriteFile`, `ReadFile`) used to bypass the buffer entirely. They went straight to `File.read` and `File.write` on disk. Meanwhile, the `Minga.Buffer` facade was sitting right there, backed by a `Buffer.Process` GenServer that holds the same file's content in a gap buffer with undo tracking, dirty state, tree-sitter sync, and a batch `apply_edits/3` API built for exactly this kind of programmatic editing.
 
 The old data flow looked like this:
 
@@ -50,7 +50,7 @@ This causes real problems:
 
 What if agents edited the buffer, not the filesystem?
 
-The simplest version: agent tools call `Buffer.Server.apply_text_edits/2` instead of `File.read/write`. Edits happen in-memory, appear instantly in the editor, go on the undo stack, and trigger incremental tree-sitter updates.
+The simplest version: agent tools call `Minga.Buffer.apply_edits/3` instead of `File.read/write`. Edits happen in-memory, appear instantly in the editor, go on the undo stack, and trigger incremental tree-sitter updates.
 
 The more ambitious version: each agent session gets its own fork of the buffer. Multiple agents edit concurrently without conflicts. When they're done, their changes merge back. The editor becomes a collaboration server, not just a viewing layer.
 
@@ -82,7 +82,7 @@ None of these do explicit batching to reduce filesystem churn. Each edit is appl
 
 ### The gap Minga sits in
 
-Minga is an **editor with an integrated agent**, but its agent tools behave like a **standalone CLI agent**. It has buffers, `apply_text_edits/2`, undo stacks, tree-sitter sync, dirty tracking. All the infrastructure for Phase 1 exists. The agent tools just don't use any of it.
+Minga is an **editor with an integrated agent**, but its agent tools behave like a **standalone CLI agent**. It has buffers, `Minga.Buffer.apply_edits/3`, undo stacks, tree-sitter sync, dirty tracking. All the infrastructure for Phase 1 exists. The agent tools just don't use any of it.
 
 Cursor gets Phase 1 "for free" because the AI is a VS Code extension calling the editor's own API. Minga's agent lives inside the editor but bypasses it, going straight to disk.
 
@@ -112,7 +112,7 @@ Not because it's a bad idea. Because the use case didn't exist when the editors 
 
 Yes, but the win is forward-looking, not backward-looking. The trajectory is clear: agents are getting faster, more autonomous, and people will run more of them concurrently. The editing pattern is shifting from "human types, agent suggests" to "human directs, multiple agents execute." Every editor will eventually need to deal with this. The ones built on shared-state, single-event-loop architectures (VS Code/Monaco, Neovim's single-threaded core) will have a much harder time retrofitting it than an editor with process isolation and message-passing serialization baked into the foundation.
 
-Minga's position is genuinely unusual: it's being built now, in the agentic era, on a runtime (the BEAM) whose process model is accidentally perfect for this problem. The `Buffer.Server` GenServer already serializes concurrent access. `apply_text_edits/2` already exists for programmatic batch editing. `EditDelta` already tracks incremental changes for tree-sitter sync. Forking a `Document` struct into a new process is a few lines of code. The infrastructure is there. The agent tools are just wired to the wrong layer.
+Minga's position is genuinely unusual: it's being built now, in the agentic era, on a runtime (the BEAM) whose process model is accidentally perfect for this problem. The `Buffer.Process` GenServer already serializes concurrent access, and `Minga.Buffer.apply_edits/3` already exists for programmatic batch editing through the facade. `EditDelta` already tracks incremental changes for tree-sitter sync. Forking a `Document` struct into a new process is a few lines of code. The infrastructure is there. The agent tools are just wired to the wrong layer.
 
 ---
 
@@ -137,7 +137,7 @@ Even writes are deceptive. `File.write/2` without `fsync` writes to the page cac
 
 ### Where redundant work matters more than raw speed
 
-**Batching.** An agent making 20 edits to one file today does 20 full read-modify-write cycles (20 `File.read` calls, 20 `String.replace` calls, 20 `File.write` calls). Through the buffer, that's one `apply_text_edits/2` call with a list of 20 edits. One GenServer message, one undo entry, one version bump. The win isn't "memory is faster than SSD." It's "1 round-trip vs 20."
+**Batching.** An agent making 20 edits to one file today does 20 full read-modify-write cycles (20 `File.read` calls, 20 `String.replace` calls, 20 `File.write` calls). Through the buffer, that's one `Minga.Buffer.apply_edits/3` call with a list of 20 edits. One GenServer message, one undo entry, one version bump. The win isn't "memory is faster than SSD." It's "1 round-trip vs 20."
 
 **File watcher noise.** Each `File.write` triggers a filesystem notification, which `FileWatcher` picks up, which fires a "file changed on disk" check, which may trigger a buffer reload or auto-reload. Twenty writes in quick succession means twenty watcher events competing with the agent's next edit. Buffer edits produce zero filesystem events.
 
@@ -168,16 +168,16 @@ This is the 80/20 move. One agent, same buffer, instant edits.
 Agent wants to edit main.ex
     │
     ▼
-Look up the Buffer.Server pid for main.ex
+Look up the Buffer.Process pid for main.ex
     │
-    ├─ Found → call Buffer.Server.apply_text_edits/2
+    ├─ Found → call Minga.Buffer.apply_edits/3
     │            ├─ Edit applied in-memory (gap buffer, O(1) at cursor)
     │            ├─ Undo entry pushed
     │            ├─ EditDelta sent to tree-sitter for incremental reparse
     │            ├─ Dirty flag set (user sees unsaved indicator)
     │            └─ Next render frame shows the change
     │
-    └─ Not found → open a Buffer.Server for the file, then edit
+    └─ Not found → open a Buffer.Process for the file, then edit
                    (or fall back to filesystem I/O for unvisited files)
 ```
 
@@ -185,11 +185,11 @@ Look up the Buffer.Server pid for main.ex
 
 The agent's `edit_file` tool currently does find-and-replace on raw file content. To work with buffers, it needs to:
 
-1. **Find the match position.** Convert "find this text and replace it" into `{start_line, start_col, end_line, end_col, replacement}`. The buffer content is available via `Buffer.Server.content/1`, and the text search is the same `String.split` logic `EditFile` already uses.
-2. **Call `apply_text_edits/2`.** This API already exists, takes a list of positional edits, applies them in a single GenServer call, pushes one undo entry, and bumps the version once.
+1. **Find the match position.** Convert "find this text and replace it" into `{start_line, start_col, end_line, end_col, replacement}`. The buffer content is available via `Minga.Buffer.content/1`, and the text search is the same `String.split` logic `EditFile` already uses.
+2. **Call `Minga.Buffer.apply_edits/3`.** This API already exists, takes a list of positional edits, applies them in a single GenServer call, pushes one undo entry, and bumps the version once.
 3. **Handle the "file not open" case.** If no buffer exists for the file, either open one on demand (good for files the user will want to see) or fall back to filesystem I/O (fine for generated files or config that doesn't need undo).
 
-`read_file` and `write_file` get similar treatment. `read_file` returns `Buffer.Server.content/1` when the buffer exists (always fresh, no disk read). `write_file` calls `Buffer.Server.replace_content/2` for existing buffers.
+`read_file` and `write_file` get similar treatment. `read_file` returns `Minga.Buffer.content/1` when the buffer exists (always fresh, no disk read). `write_file` calls `Minga.Buffer.replace_content/2` for existing buffers.
 
 ### What you get
 
@@ -217,7 +217,7 @@ When an agent session starts editing a file, Minga forks the `Document` struct: 
 
 ```
                     ┌─────────────────────────┐
-                    │  Buffer.Server (main.ex) │
+                    │  Buffer.Process (main.ex) │
                     │  Document: original      │
                     │  User keeps editing here │
                     └───────────┬──────────────┘
@@ -292,7 +292,7 @@ A fork is cheap. The `Document` struct is immutable data (two binaries + some in
 )
 
 # Agent tools route to the fork instead of the parent
-Buffer.Fork.apply_text_edits(fork_pid, edits)
+Buffer.Fork.find_and_replace(fork_pid, old_text, new_text)
 
 # When done, merge back
 Buffer.Fork.merge(fork_pid)
@@ -328,7 +328,7 @@ Agent runtime checks: which buffers have I modified?
     │
     ▼
 For each dirty buffer:
-    Buffer.Server.save(pid)       ← writes to disk
+    Buffer.Process.save(pid)       ← writes to disk
     │
     ▼
 Shell command runs against up-to-date files

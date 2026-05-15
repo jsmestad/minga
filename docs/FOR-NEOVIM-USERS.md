@@ -137,7 +137,7 @@ This is a production-grade observability toolkit. When something goes wrong, you
 
 In Neovim, you write config in Lua, but the editor is written in C. When you need to understand what `vim.api.nvim_buf_set_lines()` does, you're reading C source.
 
-In Minga, when you call `Buffer.Server.content(buf)` in your config, you're calling the same Elixir function the editor calls. The source you read to learn the API is the source that runs the editor.
+In Minga, when you call `Buffer.content(buf)` in your config, you're calling the same Elixir function the editor calls. The source you read to learn the API is the source that runs the editor.
 
 ---
 

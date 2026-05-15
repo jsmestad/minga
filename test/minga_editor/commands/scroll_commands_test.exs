@@ -7,11 +7,11 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
   """
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor
 
   defp start_editor(content, opts \\ []) do
-    {:ok, buffer} = BufferServer.start_link(content: content)
+    {:ok, buffer} = BufferProcess.start_link(content: content)
 
     {:ok, editor} =
       MingaEditor.start_link(
@@ -52,7 +52,7 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
       assert win.viewport.top == 1
 
       # Cursor should be clamped to stay visible (at least line 1)
-      {cursor_line, _} = BufferServer.cursor(buffer)
+      {cursor_line, _} = BufferProcess.cursor(buffer)
       assert cursor_line >= 1
     end
 
@@ -60,7 +60,7 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
       {editor, buffer} = start_editor("a\nb\nc")
 
       # Move cursor to last line
-      BufferServer.move_to(buffer, {2, 0})
+      BufferProcess.move_to(buffer, {2, 0})
       _ = :sys.get_state(editor)
 
       # Try to scroll down past EOF
@@ -76,12 +76,12 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
       {editor, buffer} = start_editor(content)
 
       # Move cursor to line 10 (well within view after 1 scroll)
-      BufferServer.move_to(buffer, {10, 0})
+      BufferProcess.move_to(buffer, {10, 0})
       _ = :sys.get_state(editor)
 
       send_key(editor, ?e, @ctrl)
 
-      {cursor_line, _} = BufferServer.cursor(buffer)
+      {cursor_line, _} = BufferProcess.cursor(buffer)
       assert cursor_line == 10
     end
   end
@@ -97,7 +97,7 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
       # Move cursor to line that will be below viewport after scroll up
       win = active_window(editor)
       max_visible = win.viewport.top + 20
-      BufferServer.move_to(buffer, {max_visible, 0})
+      BufferProcess.move_to(buffer, {max_visible, 0})
       _ = :sys.get_state(editor)
 
       send_key(editor, ?y, @ctrl)
@@ -113,7 +113,7 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
       {editor, buffer} = start_editor(content, height: 24)
 
       # Move cursor to line 50
-      BufferServer.move_to(buffer, {50, 0})
+      BufferProcess.move_to(buffer, {50, 0})
       _ = :sys.get_state(editor)
 
       # Press z then z
@@ -138,7 +138,7 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
       content = Enum.map_join(0..99, "\n", &"line #{&1}")
       {editor, buffer} = start_editor(content, height: 24)
 
-      BufferServer.move_to(buffer, {50, 0})
+      BufferProcess.move_to(buffer, {50, 0})
       _ = :sys.get_state(editor)
 
       # Press z then t
@@ -161,7 +161,7 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
       content = Enum.map_join(0..99, "\n", &"line #{&1}")
       {editor, buffer} = start_editor(content, height: 24)
 
-      BufferServer.move_to(buffer, {50, 0})
+      BufferProcess.move_to(buffer, {50, 0})
       _ = :sys.get_state(editor)
 
       # Press z then b

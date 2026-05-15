@@ -6,7 +6,7 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
   a single buffer window, suitable for testing individual pipeline stages.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.DisplayList
   alias MingaEditor.DisplayList.{Cursor, Frame, WindowFrame}
   alias MingaEditor.Layout
@@ -35,7 +35,7 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
     rows = Keyword.get(opts, :rows, 24)
     cols = Keyword.get(opts, :cols, 80)
     content = Keyword.get(opts, :content, "line one\nline two\nline three")
-    {:ok, buf} = BufferServer.start_link(content: content)
+    {:ok, buf} = BufferProcess.start_link(content: content)
 
     win_id = 1
     window = Window.new(win_id, buf, rows, cols)

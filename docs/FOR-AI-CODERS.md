@@ -49,7 +49,7 @@ Agent edit:         {:insert, code, {200, 0}}     → processed second
 
 No locks. No mutexes. No "file changed on disk" dialogs.
 
-> **Where we are today:** Agent tools currently write to the filesystem (`File.read/write`), bypassing the buffer. We're actively wiring agent tools to route through `Buffer.Server` so edits go through the same mailbox as your keystrokes, with full undo integration. See [Buffer-Aware Agents](BUFFER-AWARE-AGENTS.md) for the design.
+> **Where we are today:** Agent tools currently write to the filesystem (`File.read/write`), bypassing the buffer. We're actively wiring agent tools to route through `Buffer.Process` so edits go through the same mailbox as your keystrokes, with full undo integration. See [Buffer-Aware Agents](BUFFER-AWARE-AGENTS.md) for the design.
 
 ### You can see what agents are doing
 
@@ -102,7 +102,7 @@ Here's the thing nobody says out loud: you still open an editor. You run Claude 
 
 **Minga today:** The built-in agent collapses this into one tool. You chat, watch the agent work, and review inline diffs without switching windows.
 
-**Minga next:** Agent tools are being [rewired to route through `Buffer.Server`](BUFFER-AWARE-AGENTS.md) instead of the filesystem. Agent edits will flow through the same undo system as your typing, appear instantly, and trigger incremental tree-sitter updates.
+**Minga next:** Agent tools are being [rewired to route through `Buffer.Process`](BUFFER-AWARE-AGENTS.md) instead of the filesystem. Agent edits will flow through the same undo system as your typing, appear instantly, and trigger incremental tree-sitter updates.
 
 ### vs. Copilot / inline completions
 
@@ -150,7 +150,7 @@ When the agent edits a file, the diff appears in the preview pane immediately. N
 
 ### Agent-aware undo (planned)
 
-Once agent tools [route through `Buffer.Server`](BUFFER-AWARE-AGENTS.md#phase-1-route-agent-tools-through-buffers), agent edits will participate in the undo system. Press `u` to undo an agent's changes the same way you undo your own typing. The buffer architecture supports this; the agent tools just need to be wired to use it.
+Once agent tools [route through `Buffer.Process`](BUFFER-AWARE-AGENTS.md#phase-1-route-agent-tools-through-buffers), agent edits will participate in the undo system. Press `u` to undo an agent's changes the same way you undo your own typing. The buffer architecture supports this; the agent tools just need to be wired to use it.
 
 ### Buffer forking for concurrent agents (planned)
 

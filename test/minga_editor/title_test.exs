@@ -1,7 +1,7 @@
 defmodule MingaEditor.TitleTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Windows
@@ -18,14 +18,14 @@ defmodule MingaEditor.TitleTest do
     mode = Keyword.get(opts, :mode, :normal)
 
     {:ok, buf} =
-      BufferServer.start_link(
+      BufferProcess.start_link(
         content: "hello",
         file_path: path,
         buffer_name: name
       )
 
     if dirty do
-      BufferServer.insert_char(buf, "x")
+      BufferProcess.insert_char(buf, "x")
     end
 
     %{
@@ -100,8 +100,8 @@ defmodule MingaEditor.TitleTest do
 
   describe "format/2 with EditorState (content-aware)" do
     test "agent chat window shows Agent in title" do
-      {:ok, agent_buf} = BufferServer.start_link(content: "")
-      {:ok, file_buf} = BufferServer.start_link(content: "code")
+      {:ok, agent_buf} = BufferProcess.start_link(content: "")
+      {:ok, file_buf} = BufferProcess.start_link(content: "code")
       agent_window = Window.new_agent_chat(1, agent_buf, 24, 80)
 
       state = %EditorState{
@@ -127,7 +127,7 @@ defmodule MingaEditor.TitleTest do
 
     test "buffer window shows filename in title" do
       {:ok, buf} =
-        BufferServer.start_link(
+        BufferProcess.start_link(
           content: "hello",
           file_path: "/home/user/project/lib/editor.ex"
         )
@@ -159,7 +159,7 @@ defmodule MingaEditor.TitleTest do
   describe "format_gui/1" do
     test "buffer window shows clean GUI title" do
       {:ok, buf} =
-        BufferServer.start_link(
+        BufferProcess.start_link(
           content: "hello",
           file_path: "/home/user/project/lib/editor.ex"
         )
@@ -188,12 +188,12 @@ defmodule MingaEditor.TitleTest do
 
     test "dirty buffer shows dot indicator" do
       {:ok, buf} =
-        BufferServer.start_link(
+        BufferProcess.start_link(
           content: "hello",
           file_path: "/home/user/project/lib/editor.ex"
         )
 
-      BufferServer.insert_char(buf, "x")
+      BufferProcess.insert_char(buf, "x")
       window = Window.new(1, buf, 24, 80)
 
       state = %EditorState{
@@ -218,7 +218,7 @@ defmodule MingaEditor.TitleTest do
 
     test "special buffer strips asterisks" do
       {:ok, buf} =
-        BufferServer.start_link(
+        BufferProcess.start_link(
           content: "",
           buffer_name: "*Messages*"
         )
@@ -246,8 +246,8 @@ defmodule MingaEditor.TitleTest do
     end
 
     test "agent chat window shows Agent" do
-      {:ok, agent_buf} = BufferServer.start_link(content: "")
-      {:ok, file_buf} = BufferServer.start_link(content: "code")
+      {:ok, agent_buf} = BufferProcess.start_link(content: "")
+      {:ok, file_buf} = BufferProcess.start_link(content: "code")
       agent_window = Window.new_agent_chat(1, agent_buf, 24, 80)
 
       state = %EditorState{
