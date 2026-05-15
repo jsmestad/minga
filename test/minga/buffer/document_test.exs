@@ -4,8 +4,6 @@ defmodule Minga.Buffer.DocumentTest do
 
   alias Minga.Buffer.Document
 
-  # ── Construction ──
-
   describe "new/1" do
     test "creates an empty buffer" do
       buf = Document.new()
@@ -25,8 +23,6 @@ defmodule Minga.Buffer.DocumentTest do
       assert Document.cursor(buf) == {0, 0}
     end
   end
-
-  # ── Queries ──
 
   describe "empty?/1" do
     test "returns true for empty buffer" do
@@ -113,9 +109,9 @@ defmodule Minga.Buffer.DocumentTest do
 
   # ── Insertion ──
 
-  describe "insert_char/2" do
+  describe "insert_text/2" do
     test "inserts at the beginning of a buffer" do
-      buf = Document.new("hello") |> Document.insert_char("X")
+      buf = Document.new("hello") |> Document.insert_text("X")
       assert Document.content(buf) == "Xhello"
       assert Document.cursor(buf) == {0, 1}
     end
@@ -125,47 +121,43 @@ defmodule Minga.Buffer.DocumentTest do
         Document.new("hello")
         |> Document.move(:right)
         |> Document.move(:right)
-        |> Document.insert_char("X")
+        |> Document.insert_text("X")
 
       assert Document.content(buf) == "heXllo"
       assert Document.cursor(buf) == {0, 3}
     end
 
     test "inserts at the end" do
-      buf = Document.new("hi") |> Document.move_to({0, 2}) |> Document.insert_char("!")
+      buf = Document.new("hi") |> Document.move_to({0, 2}) |> Document.insert_text("!")
       assert Document.content(buf) == "hi!"
     end
 
     test "inserts a newline" do
-      buf = Document.new("ab") |> Document.move(:right) |> Document.insert_char("\n")
+      buf = Document.new("ab") |> Document.move(:right) |> Document.insert_text("\n")
       assert Document.content(buf) == "a\nb"
       assert Document.cursor(buf) == {1, 0}
     end
 
     test "inserts unicode emoji — byte_col reflects byte size" do
-      buf = Document.new("hi") |> Document.insert_char("🥨")
+      buf = Document.new("hi") |> Document.insert_text("🥨")
       assert Document.content(buf) == "🥨hi"
       # 🥨 is 4 bytes
       assert Document.cursor(buf) == {0, 4}
     end
 
     test "inserts multi-byte CJK character" do
-      buf = Document.new("hi") |> Document.insert_char("日")
+      buf = Document.new("hi") |> Document.insert_text("日")
       assert Document.content(buf) == "日hi"
       # 日 is 3 bytes
       assert Document.cursor(buf) == {0, 3}
     end
 
     test "inserts into empty buffer" do
-      buf = Document.new() |> Document.insert_char("a")
+      buf = Document.new() |> Document.insert_text("a")
       assert Document.content(buf) == "a"
       assert Document.cursor(buf) == {0, 1}
     end
-  end
 
-  # ── Bulk Insert ──
-
-  describe "insert_text/2" do
     test "inserts a multi-character string in one operation" do
       buf = Document.new("world") |> Document.insert_text("hello ")
       assert Document.content(buf) == "hello world"
@@ -199,22 +191,6 @@ defmodule Minga.Buffer.DocumentTest do
       assert Document.content(buf) == "🎉🎊end"
       # Each emoji is 4 bytes
       assert Document.cursor(buf) == {0, 8}
-    end
-
-    test "produces identical result to sequential insert_char calls" do
-      text = "hello\nworld\n!"
-      bulk = Document.new("base") |> Document.insert_text(text)
-
-      sequential =
-        text
-        |> String.graphemes()
-        |> Enum.reduce(Document.new("base"), fn char, doc ->
-          Document.insert_char(doc, char)
-        end)
-
-      assert Document.content(bulk) == Document.content(sequential)
-      assert Document.cursor(bulk) == Document.cursor(sequential)
-      assert Document.line_count(bulk) == Document.line_count(sequential)
     end
 
     test "inserts multi-line text in the middle of existing content" do
@@ -472,7 +448,7 @@ defmodule Minga.Buffer.DocumentTest do
       original = Document.content(buf)
 
       buf =
-        buf |> Document.move(:right) |> Document.insert_char("X") |> Document.delete_before()
+        buf |> Document.move(:right) |> Document.insert_text("X") |> Document.delete_before()
 
       assert Document.content(buf) == original
     end
@@ -496,11 +472,11 @@ defmodule Minga.Buffer.DocumentTest do
     test "multiple insertions and deletions" do
       buf =
         Document.new()
-        |> Document.insert_char("a")
-        |> Document.insert_char("b")
-        |> Document.insert_char("c")
+        |> Document.insert_text("a")
+        |> Document.insert_text("b")
+        |> Document.insert_text("c")
         |> Document.delete_before()
-        |> Document.insert_char("C")
+        |> Document.insert_text("C")
 
       assert Document.content(buf) == "abC"
     end
@@ -518,7 +494,7 @@ defmodule Minga.Buffer.DocumentTest do
     end
 
     test "handles emoji sequences" do
-      buf = Document.new("🇩🇪") |> Document.insert_char("!")
+      buf = Document.new("🇩🇪") |> Document.insert_text("!")
       assert Document.content(buf) == "!🇩🇪"
     end
 
@@ -547,7 +523,7 @@ defmodule Minga.Buffer.DocumentTest do
         buf =
           buf
           |> Document.move_to(line_col)
-          |> Document.insert_char(char)
+          |> Document.insert_text(char)
           |> Document.delete_before()
 
         assert Document.content(buf) == text
@@ -599,7 +575,7 @@ defmodule Minga.Buffer.DocumentTest do
 
   describe "cache: cursor and line_count accuracy" do
     test "insert at start of line updates col" do
-      buf = Document.new("hello") |> Document.insert_char("X")
+      buf = Document.new("hello") |> Document.insert_text("X")
       assert_cache_valid(buf)
       assert Document.cursor(buf) == {0, 1}
     end
@@ -608,7 +584,7 @@ defmodule Minga.Buffer.DocumentTest do
       buf =
         Document.new("hello")
         |> Document.move_to({0, 2})
-        |> Document.insert_char("X")
+        |> Document.insert_text("X")
 
       assert_cache_valid(buf)
       assert Document.cursor(buf) == {0, 3}
@@ -618,14 +594,14 @@ defmodule Minga.Buffer.DocumentTest do
       buf =
         Document.new("hello")
         |> Document.move_to({0, 5})
-        |> Document.insert_char("X")
+        |> Document.insert_text("X")
 
       assert_cache_valid(buf)
       assert Document.cursor(buf) == {0, 6}
     end
 
     test "inserting a newline increments line and resets col" do
-      buf = Document.new("ab") |> Document.move(:right) |> Document.insert_char("\n")
+      buf = Document.new("ab") |> Document.move(:right) |> Document.insert_text("\n")
       assert_cache_valid(buf)
       assert Document.cursor(buf) == {1, 0}
       assert Document.line_count(buf) == 2
@@ -633,7 +609,7 @@ defmodule Minga.Buffer.DocumentTest do
 
     test "inserting multi-line string updates cursor and line_count" do
       buf =
-        Document.new("start") |> Document.move_to({0, 5}) |> Document.insert_char("a\nb\nc")
+        Document.new("start") |> Document.move_to({0, 5}) |> Document.insert_text("a\nb\nc")
 
       assert_cache_valid(buf)
       assert Document.cursor(buf) == {2, 1}
@@ -718,7 +694,7 @@ defmodule Minga.Buffer.DocumentTest do
 
         result =
           Enum.reduce(ops, buf, fn
-            {:insert, char}, acc -> Document.insert_char(acc, char)
+            {:insert, char}, acc -> Document.insert_text(acc, char)
             {:move_to, l, c}, acc -> Document.move_to(acc, {l, c})
             :delete_before, acc -> Document.delete_before(acc)
             :delete_at, acc -> Document.delete_at(acc)
@@ -802,7 +778,7 @@ defmodule Minga.Buffer.DocumentTest do
       assert Document.line_at(buf, 1) == "bbb"
 
       # Insert invalidates cache
-      buf = Document.insert_char(buf, "X")
+      buf = Document.insert_text(buf, "X")
       assert Document.line_at(buf, 0) == "Xaaa"
 
       # Move invalidates cache

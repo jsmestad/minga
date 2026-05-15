@@ -30,10 +30,12 @@ defmodule Minga.Buffer.Document do
       iex> buf = Minga.Buffer.Document.new("hello\\nworld")
       iex> Minga.Buffer.Document.cursor(buf)
       {0, 0}
-      iex> buf = Minga.Buffer.Document.insert_char(buf, "H")
+      iex> buf = Minga.Buffer.Document.insert_text(buf, "H")
       iex> Minga.Buffer.Document.content(buf)
       "Hhello\\nworld"
   """
+
+  alias Minga.Buffer.Lines
 
   @enforce_keys [:before, :after, :cursor_line, :cursor_col, :line_count]
   defstruct [:before, :after, :cursor_line, :cursor_col, :line_count, :line_offsets]
@@ -76,7 +78,7 @@ defmodule Minga.Buffer.Document do
       {0, 0}
   """
   @spec new(String.t()) :: t()
-  def new(text \\ "") when is_binary(text) do
+  def new(text \\ "") do
     lc =
       case text do
         "" -> 1
@@ -90,9 +92,7 @@ defmodule Minga.Buffer.Document do
 
   @doc "Returns the full text content of the buffer."
   @spec content(t()) :: String.t()
-  def content(%__MODULE__{before: before, after: after_}) do
-    before <> after_
-  end
+  def content(%__MODULE__{before: before, after: after_}), do: before <> after_
 
   @doc """
   Returns true if the buffer contains no text.
@@ -124,41 +124,6 @@ defmodule Minga.Buffer.Document do
   @spec line_count(t()) :: pos_integer()
   def line_count(%__MODULE__{line_count: lc}), do: lc
 
-  @doc """
-  Returns the text of a specific line (zero-indexed), without the trailing newline.
-  Returns `nil` if the line number is out of range.
-  """
-  @spec line_at(t(), non_neg_integer()) :: String.t() | nil
-  def line_at(%__MODULE__{} = buf, line_num) when is_integer(line_num) and line_num >= 0 do
-    {offsets, text} = ensure_line_offsets(buf)
-
-    case line_byte_range(offsets, line_num, byte_size(text)) do
-      nil -> nil
-      {start, len} -> binary_part(text, start, len)
-    end
-  end
-
-  @doc """
-  Returns a range of lines (zero-indexed, inclusive start, exclusive end).
-  """
-  @spec lines(t(), non_neg_integer(), non_neg_integer()) :: [String.t()]
-  def lines(%__MODULE__{} = buf, start, count)
-      when is_integer(start) and start >= 0 and is_integer(count) and count >= 0 do
-    {offsets, text} = ensure_line_offsets(buf)
-    text_size = byte_size(text)
-    max_line = tuple_size(offsets) - 1
-    last = min(start + count - 1, max_line)
-
-    if start > max_line do
-      []
-    else
-      for line_num <- start..last do
-        {s, len} = line_byte_range(offsets, line_num, text_size)
-        binary_part(text, s, len)
-      end
-    end
-  end
-
   @doc "Returns the current cursor position as a `{line, byte_col}` tuple."
   @spec cursor(t()) :: position()
   def cursor(%__MODULE__{cursor_line: line, cursor_col: col}), do: {line, col}
@@ -172,8 +137,8 @@ defmodule Minga.Buffer.Document do
   """
   @spec position_to_offset(t(), position()) :: non_neg_integer()
   def position_to_offset(%__MODULE__{} = buf, {line, col})
-      when is_integer(line) and line >= 0 and is_integer(col) and col >= 0 do
-    {offsets, text} = ensure_line_offsets(buf)
+      when line >= 0 and col >= 0 do
+    {offsets, text} = Lines.ensure_line_offsets(buf)
     offset_for_position(offsets, line, col, byte_size(text))
   end
 
@@ -182,7 +147,7 @@ defmodule Minga.Buffer.Document do
   Clamps to valid bounds.
   """
   @spec offset_to_position(t(), non_neg_integer()) :: position()
-  def offset_to_position(%__MODULE__{} = buf, offset) when is_integer(offset) and offset >= 0 do
+  def offset_to_position(%__MODULE__{} = buf, offset) when offset >= 0 do
     text = content(buf)
     do_offset_to_position(text, offset, 0, 0)
   end
@@ -195,7 +160,7 @@ defmodule Minga.Buffer.Document do
   """
   @spec grapheme_col(t(), position()) :: non_neg_integer()
   def grapheme_col(%__MODULE__{} = buf, {line, byte_col}) do
-    case line_at(buf, line) do
+    case Lines.line_at(buf, line) do
       nil -> 0
       text -> grapheme_count_in_bytes(text, byte_col)
     end
@@ -209,55 +174,15 @@ defmodule Minga.Buffer.Document do
   to reason about character positions.
   """
   @spec byte_col_for_grapheme(String.t(), non_neg_integer()) :: non_neg_integer()
-  def byte_col_for_grapheme(line_text, grapheme_index)
-      when is_binary(line_text) and is_integer(grapheme_index) and grapheme_index >= 0 do
+  def byte_col_for_grapheme(line_text, grapheme_index) when grapheme_index >= 0 do
     do_byte_col_for_grapheme(line_text, grapheme_index, 0)
   end
 
   # ── Mutations ──
 
-  # @doc """
-  # Inserts a character (or string) at the cursor position.
-
-  # ## Examples
-
-  #     iex> buf = Minga.Buffer.Document.new("world")
-  #     iex> buf = Minga.Buffer.Document.insert_char(buf, "hello ")
-  #     iex> Minga.Buffer.Document.content(buf)
-  #     "hello world"
-  # """
-  # @spec insert_char(t(), String.t()) :: t()
-  # def insert_char(
-  #       %__MODULE__{
-  #         before: before,
-  #         after: after_,
-  #         cursor_line: line,
-  #         cursor_col: col,
-  #         line_count: lc
-  #       } = _buf,
-  #       char
-  #     )
-  #     when is_binary(char) do
-  #   {new_line, new_col, new_lc} = compute_cursor_after_insert(line, col, lc, char)
-
-  #   %__MODULE__{
-  #     before: before <> char,
-  #     after: after_,
-  #     cursor_line: new_line,
-  #     cursor_col: new_col,
-  #     line_count: new_lc
-  #   }
-  # end
-
   @doc """
   Inserts a multi-character string at the cursor position in a single
-  binary operation. Use this instead of decomposing into graphemes and
-  calling `insert_char/2` in a loop; that pattern is O(n²) on the gap
-  buffer's binary.
-
-  Functionally equivalent to `insert_char/2` (which already accepts
-  arbitrary strings), but exists as a separate entry point so the intent
-  is clear and `Buffer.Server` can route bulk inserts here directly.
+  binary operation. 
 
   ## Examples
 
@@ -285,15 +210,15 @@ defmodule Minga.Buffer.Document do
           line_count: lc
         } = mod,
         text
-      )
-      when is_binary(text) do
+      ) do
     {new_line, new_col, new_lc} = compute_cursor_after_insert(line, col, lc, text)
 
-    %{mod |
-      before: before <> text,
-      cursor_line: new_line,
-      cursor_col: new_col,
-      line_count: new_lc
+    %{
+      mod
+      | before: before <> text,
+        cursor_line: new_line,
+        cursor_col: new_col,
+        line_count: new_lc
     }
   end
 
@@ -364,9 +289,8 @@ defmodule Minga.Buffer.Document do
   """
   @spec move_to(t(), position()) :: t()
   def move_to(%__MODULE__{} = buf, {target_line, target_col})
-      when is_integer(target_line) and target_line >= 0 and
-             is_integer(target_col) and target_col >= 0 do
-    {offsets, text} = ensure_line_offsets(buf)
+      when target_line >= 0 and target_col >= 0 do
+    {offsets, text} = Lines.ensure_line_offsets(buf)
     text_size = byte_size(text)
 
     # Clamp line to valid range
@@ -374,7 +298,7 @@ defmodule Minga.Buffer.Document do
     line = min(target_line, max_line)
 
     # Get line text via index for column clamping
-    {line_start, line_len} = line_byte_range(offsets, line, text_size)
+    {line_start, line_len} = Lines.line_byte_range(offsets, line, text_size)
     line_text = binary_part(text, line_start, line_len)
     col = min(target_col, line_len)
 
@@ -399,7 +323,7 @@ defmodule Minga.Buffer.Document do
   """
   @spec content_range(t(), position(), position()) :: String.t()
   def content_range(%__MODULE__{} = buf, from_pos, to_pos) do
-    {offsets, text} = ensure_line_offsets(buf)
+    {offsets, text} = Lines.ensure_line_offsets(buf)
     text_size = byte_size(text)
     from_off = offset_for_position(offsets, elem(from_pos, 0), elem(from_pos, 1), text_size)
     to_off = offset_for_position(offsets, elem(to_pos, 0), elem(to_pos, 1), text_size)
@@ -420,7 +344,7 @@ defmodule Minga.Buffer.Document do
   """
   @spec delete_range(t(), position(), position()) :: t()
   def delete_range(%__MODULE__{} = buf, from_pos, to_pos) do
-    {offsets, text} = ensure_line_offsets(buf)
+    {offsets, text} = Lines.ensure_line_offsets(buf)
     text_size = byte_size(text)
     from_off = offset_for_position(offsets, elem(from_pos, 0), elem(from_pos, 1), text_size)
     to_off = offset_for_position(offsets, elem(to_pos, 0), elem(to_pos, 1), text_size)
@@ -449,7 +373,7 @@ defmodule Minga.Buffer.Document do
   """
   @spec get_range(t(), position(), position()) :: String.t()
   def get_range(%__MODULE__{} = buf, start_pos, end_pos) do
-    {offsets, text} = ensure_line_offsets(buf)
+    {offsets, text} = Lines.ensure_line_offsets(buf)
     text_size = byte_size(text)
 
     {s, e} = sort_positions(start_pos, end_pos)
@@ -470,11 +394,10 @@ defmodule Minga.Buffer.Document do
   """
   @spec get_lines_content(t(), non_neg_integer(), non_neg_integer()) :: String.t()
   def get_lines_content(%__MODULE__{} = buf, start_line, end_line)
-      when is_integer(start_line) and start_line >= 0 and
-             is_integer(end_line) and end_line >= 0 do
+      when start_line >= 0 and end_line >= 0 do
     {s, e} = if start_line <= end_line, do: {start_line, end_line}, else: {end_line, start_line}
     count = e - s + 1
-    lines(buf, s, count) |> Enum.join("\n")
+    Lines.lines(buf, s, count) |> Enum.join("\n")
   end
 
   @doc """
@@ -485,9 +408,8 @@ defmodule Minga.Buffer.Document do
   """
   @spec delete_lines(t(), non_neg_integer(), non_neg_integer()) :: t()
   def delete_lines(%__MODULE__{} = buf, start_line, end_line)
-      when is_integer(start_line) and start_line >= 0 and
-             is_integer(end_line) and end_line >= 0 do
-    {offsets, text} = ensure_line_offsets(buf)
+      when start_line >= 0 and end_line >= 0 do
+    {offsets, text} = Lines.ensure_line_offsets(buf)
     text_size = byte_size(text)
     total_lines = tuple_size(offsets)
 
@@ -537,8 +459,8 @@ defmodule Minga.Buffer.Document do
   that was on the line. The cursor is placed at column 0 of the line.
   """
   @spec clear_line(t(), non_neg_integer()) :: {String.t(), t()}
-  def clear_line(%__MODULE__{} = buf, line_num) when is_integer(line_num) and line_num >= 0 do
-    case line_at(buf, line_num) do
+  def clear_line(%__MODULE__{} = buf, line_num) when line_num >= 0 do
+    case Minga.Buffer.Lines.line_at(buf, line_num) do
       nil ->
         {"", buf}
 
@@ -576,60 +498,12 @@ defmodule Minga.Buffer.Document do
   @spec last_grapheme_byte_offset(String.t()) :: non_neg_integer()
   def last_grapheme_byte_offset(""), do: 0
 
-  def last_grapheme_byte_offset(text) when is_binary(text) do
+  def last_grapheme_byte_offset(text) do
     {offset, _size} = find_last_grapheme_offset(text, 0)
     offset
   end
 
   # ── Private helpers ──
-
-  # ── Line index helpers ──
-
-  # Lazily computes line offsets if the cache is stale. Returns the offset
-  # tuple and the materialized content binary so callers avoid a second
-  # `content()` call. Uses `:binary.matches/2` (Boyer-Moore in C) for a
-  # single-pass newline scan.
-  @spec ensure_line_offsets(t()) :: {tuple(), String.t()}
-  defp ensure_line_offsets(%__MODULE__{line_offsets: offsets} = buf) when is_tuple(offsets) do
-    {offsets, content(buf)}
-  end
-
-  defp ensure_line_offsets(%__MODULE__{} = buf) do
-    text = content(buf)
-    offsets = build_line_offsets(text)
-    {offsets, text}
-  end
-
-  # Builds a tuple of byte offsets marking the start of each line.
-  # Line 0 always starts at offset 0. Each subsequent line starts one byte
-  # after a newline character.
-  @spec build_line_offsets(String.t()) :: tuple()
-  defp build_line_offsets(text) do
-    newline_positions = :binary.matches(text, "\n")
-
-    [0 | Enum.map(newline_positions, fn {pos, _len} -> pos + 1 end)]
-    |> List.to_tuple()
-  end
-
-  # Returns the byte range {start_offset, byte_length} for a given line
-  # number, using the line offset tuple and the total content size.
-  # Returns `nil` if the line is out of range.
-  @spec line_byte_range(tuple(), non_neg_integer(), non_neg_integer()) ::
-          {non_neg_integer(), non_neg_integer()} | nil
-  defp line_byte_range(offsets, line_num, _text_size) when line_num > tuple_size(offsets) - 1,
-    do: nil
-
-  defp line_byte_range(offsets, line_num, text_size) when line_num == tuple_size(offsets) - 1 do
-    start = elem(offsets, line_num)
-    {start, text_size - start}
-  end
-
-  defp line_byte_range(offsets, line_num, _text_size) do
-    start = elem(offsets, line_num)
-    # Next line starts at elem(offsets, line_num + 1); subtract 1 for the newline
-    next_start = elem(offsets, line_num + 1)
-    {start, next_start - start - 1}
-  end
 
   # ── Movement helpers ──
 
@@ -870,15 +744,19 @@ defmodule Minga.Buffer.Document do
         byte_offset
     end
   end
+
+  defdelegate line_at(buf, line_num), to: Lines
+  defdelegate lines(buf, start, count), to: Lines
 end
 
 defimpl Minga.Editing.Text.Readable, for: Minga.Buffer.Document do
   @moduledoc false
 
   alias Minga.Buffer.Document
+  alias Minga.Buffer.Lines
 
   def content(doc), do: Document.content(doc)
-  def line_at(doc, n), do: Document.line_at(doc, n)
+  def line_at(doc, n), do: Lines.line_at(doc, n)
   def line_count(doc), do: Document.line_count(doc)
   def offset_to_position(doc, offset), do: Document.offset_to_position(doc, offset)
 end
