@@ -121,7 +121,7 @@ defmodule Minga.CommandOutput do
 
     # Clear the buffer and write a header
     cwd = Keyword.get(opts, :cwd, Minga.Project.root() || ".")
-    Buffer.replace_content_force(state.buffer, "$ #{command}\n\n")
+    Buffer.replace_generated_content(state.buffer, "$ #{command}\n\n")
 
     port =
       Port.open({:spawn, command}, [

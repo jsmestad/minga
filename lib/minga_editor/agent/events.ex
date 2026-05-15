@@ -391,7 +391,7 @@ defmodule MingaEditor.Agent.Events do
 
       {state, [{:log_warning, "Agent modified dirty remote file #{Path.basename(path)}"}]}
     else
-      Buffer.replace_saved_content(pid, after_content)
+      Buffer.accept_saved_content(pid, after_content)
       {state, [{:log_message, "Agent updated #{Path.basename(path)}"}]}
     end
   end

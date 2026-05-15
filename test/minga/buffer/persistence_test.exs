@@ -23,9 +23,9 @@ defmodule Minga.Buffer.PersistenceTest do
     path = Path.join([tmp_dir, "nested", "dir", "file.txt"])
     state = %BufState{document: Document.new(""), storage: :local}
 
-    assert Persistence.write(state, path, "hello") == :ok
-    assert Persistence.read(state, path) == {:ok, "hello"}
-    assert {_mtime, 5} = Persistence.metadata(state, path)
+    assert Persistence.write_content(state, path, "hello") == :ok
+    assert Persistence.read_content(state, path) == {:ok, "hello"}
+    assert {_mtime, 5} = Persistence.file_metadata(state, path)
   end
 
   test "changed_since_saved? ignores metadata drift when saved content still matches", %{
@@ -33,7 +33,7 @@ defmodule Minga.Buffer.PersistenceTest do
   } do
     path = Path.join(tmp_dir, "same.txt")
     File.write!(path, "base")
-    {mtime, size} = Persistence.metadata(:local, path)
+    {mtime, size} = Persistence.file_metadata(:local, path)
 
     state = saved_state(path, "base", mtime, size)
 
@@ -43,7 +43,7 @@ defmodule Minga.Buffer.PersistenceTest do
   test "changed_since_saved? detects same-size content drift", %{tmp_dir: tmp_dir} do
     path = Path.join(tmp_dir, "changed.txt")
     File.write!(path, "base")
-    {mtime, size} = Persistence.metadata(:local, path)
+    {mtime, size} = Persistence.file_metadata(:local, path)
 
     state = saved_state(path, "base", mtime, size)
     File.write!(path, "diff")
@@ -57,7 +57,7 @@ defmodule Minga.Buffer.PersistenceTest do
       file_path: path,
       mtime: mtime,
       file_size: size,
-      file_hash: Persistence.content_hash(content)
+      file_hash: Persistence.content_fingerprint(content)
     }
   end
 end

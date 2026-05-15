@@ -34,7 +34,7 @@ defmodule MingaEditor.Agent.View.DashboardRendererTest do
       Keyword.get(opts, :input_cursor, {0, String.length(Keyword.get(opts, :input_text, ""))})
 
     {:ok, prompt_buf} = BufferProcess.start_link(content: Enum.join(input_lines, "\n"))
-    BufferProcess.set_cursor(prompt_buf, input_cursor)
+    BufferProcess.move_to(prompt_buf, input_cursor)
 
     agent = %AgentState{
       runtime: %RuntimeState{status: :idle},

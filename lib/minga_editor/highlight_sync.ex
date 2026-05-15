@@ -73,7 +73,7 @@ defmodule MingaEditor.HighlightSync do
   Requests a full reparse of a specific buffer PID.
 
   Used after content changes to non-active buffers (e.g., agent buffer sync).
-  Sends a parse_buffer command with the full content since replace_content_force
+  Sends a parse_buffer command with the full content since replace_generated_content
   clears pending edit deltas.
   """
   @spec request_reparse_buffer(EditorState.t(), pid()) :: EditorState.t()
@@ -471,7 +471,7 @@ defmodule MingaEditor.HighlightSync do
 
     # Try incremental sync first: if the buffer has pending edit deltas,
     # send them as an edit_buffer command instead of the full content.
-    edits = Buffer.flush_edits(state.workspace.buffers.active, :highlight)
+    edits = Buffer.consume_edit_deltas(state.workspace.buffers.active, :highlight)
 
     commands =
       if edits != [] do

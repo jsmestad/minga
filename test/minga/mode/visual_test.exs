@@ -406,7 +406,7 @@ defmodule Minga.Mode.VisualTest do
 
     test "yanking a range returns correct text", %{buf: buf} do
       BufferProcess.move_to(buf, {0, 4})
-      text = BufferProcess.get_range(buf, {0, 0}, {0, 4})
+      text = BufferProcess.text_between_inclusive(buf, {0, 0}, {0, 4})
       assert text == "hello"
     end
   end
@@ -432,8 +432,8 @@ defmodule Minga.Mode.VisualTest do
       assert BufferProcess.content(buf) == ""
     end
 
-    test "get_lines_content returns joined text of a range", %{buf: buf} do
-      text = BufferProcess.get_lines_content(buf, 0, 1)
+    test "content_on_lines returns joined text of a range", %{buf: buf} do
+      text = BufferProcess.content_on_lines(buf, 0, 1)
       assert text == "line one\nline two"
     end
   end

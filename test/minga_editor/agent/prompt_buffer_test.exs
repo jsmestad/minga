@@ -89,7 +89,7 @@ defmodule MingaEditor.Agent.PromptBufferTest do
 
     test "delete_char writes to buffer" do
       panel = focused_panel("hello")
-      BufferProcess.set_cursor(panel.panel.prompt_buffer, {0, 5})
+      BufferProcess.move_to(panel.panel.prompt_buffer, {0, 5})
       panel = UIState.delete_char(panel)
       assert BufferProcess.content(panel.panel.prompt_buffer) == "hell"
     end
@@ -139,7 +139,7 @@ defmodule MingaEditor.Agent.PromptBufferTest do
 
     test "input_cursor matches buffer cursor" do
       panel = focused_panel("hello")
-      BufferProcess.set_cursor(panel.panel.prompt_buffer, {0, 3})
+      BufferProcess.move_to(panel.panel.prompt_buffer, {0, 3})
       assert UIState.input_cursor(panel) == {0, 3}
     end
 

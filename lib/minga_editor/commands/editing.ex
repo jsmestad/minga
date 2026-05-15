@@ -527,7 +527,7 @@ defmodule MingaEditor.Commands.Editing do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :cmd_copy) when is_pid(buf) do
     {line, _col} = Buffer.cursor(buf)
-    yanked = Buffer.lines_content(buf, line, line) <> "\n"
+    yanked = Buffer.content_on_lines(buf, line, line) <> "\n"
     state = Helpers.put_register(state, yanked, :yank, :linewise)
     Helpers.force_clipboard_sync(state, yanked)
   end
@@ -557,7 +557,7 @@ defmodule MingaEditor.Commands.Editing do
       EditorState.set_status(state, "Buffer is read-only")
     else
       {line, _col} = Buffer.cursor(buf)
-      yanked = Buffer.lines_content(buf, line, line) <> "\n"
+      yanked = Buffer.content_on_lines(buf, line, line) <> "\n"
       Buffer.delete_lines(buf, line, line)
       state = Helpers.put_register(state, yanked, :delete, :linewise)
       Helpers.force_clipboard_sync(state, yanked)
@@ -575,7 +575,7 @@ defmodule MingaEditor.Commands.Editing do
     injection_ranges = Map.get(state.workspace.injection_ranges, buf, [])
 
     prefix = resolve_comment_prefix(buf, start_line, filetype, injection_ranges)
-    raw = Buffer.lines_content(buf, start_line, end_line)
+    raw = Buffer.content_on_lines(buf, start_line, end_line)
     lines = String.split(raw, "\n")
 
     edits = Minga.Editing.Comment.compute_toggle_edits(lines, prefix, start_line)
@@ -1003,7 +1003,7 @@ defmodule MingaEditor.Commands.Editing do
         {cursor_line, _} = cursor
         start_line = min(anchor_line, cursor_line)
         end_line = max(anchor_line, cursor_line)
-        {Buffer.lines_content(buf, start_line, end_line) <> "\n", :linewise}
+        {Buffer.content_on_lines(buf, start_line, end_line) <> "\n", :linewise}
     end
   end
 
@@ -1021,7 +1021,7 @@ defmodule MingaEditor.Commands.Editing do
         {cursor_line, _} = cursor
         start_line = min(anchor_line, cursor_line)
         end_line = max(anchor_line, cursor_line)
-        text = Buffer.lines_content(buf, start_line, end_line)
+        text = Buffer.content_on_lines(buf, start_line, end_line)
         Buffer.delete_lines(buf, start_line, end_line)
         {text <> "\n", :linewise}
     end

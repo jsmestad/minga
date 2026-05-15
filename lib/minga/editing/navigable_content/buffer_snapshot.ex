@@ -18,7 +18,7 @@ defmodule Minga.Editing.NavigableContent.BufferSnapshot do
       snapshot = NavigableContent.set_cursor(snapshot, pos)
 
       # Apply the result back
-      Buffer.apply_snapshot(server, snapshot.document)
+      Buffer.commit_snapshot(server, snapshot.document)
 
   ## Coordinate system
 

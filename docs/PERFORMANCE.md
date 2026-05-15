@@ -157,7 +157,7 @@ See [BUFFER-AWARE-AGENTS.md](BUFFER-AWARE-AGENTS.md) for the full design.
 
 ### Problem
 
-Nearly every query function in `Document` calls `content/1` which does `before <> after_`, an O(n) binary concatenation that allocates a fresh copy of the entire buffer content. Functions like `line_at/2`, `lines/3`, and `content_range/3` then immediately `String.split/2` that copy into a list of lines.
+Nearly every query function in `Document` calls `content/1` which does `before <> after_`, an O(n) binary concatenation that allocates a fresh copy of the entire buffer content. Functions like `line_at/2`, `lines/3`, and `content_between_inclusive/3` then immediately `String.split/2` that copy into a list of lines.
 
 For a 10,000-line file, every single cursor motion triggers:
 1. `content/1` → allocate ~500 KB binary

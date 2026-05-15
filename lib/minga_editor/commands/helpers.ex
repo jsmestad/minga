@@ -513,12 +513,12 @@ defmodule MingaEditor.Commands.Helpers do
 
         case action do
           :delete ->
-            text = Document.get_range(gb, start_pos, end_pos)
+            text = Document.content_between_inclusive(gb, start_pos, end_pos)
             Buffer.delete_range(buf, start_pos, end_pos)
             put_register(state, text, :delete)
 
           :yank ->
-            text = Document.get_range(gb, start_pos, end_pos)
+            text = Document.content_between_inclusive(gb, start_pos, end_pos)
             state = put_register(state, text, :yank)
             maybe_start_yank_flash(state, buf, start_pos, end_pos, :charwise)
         end
@@ -575,12 +575,12 @@ defmodule MingaEditor.Commands.Helpers do
         state
 
       {:delete, {start_pos, end_pos}} ->
-        text = Document.get_range(gb, start_pos, end_pos)
+        text = Document.content_between_inclusive(gb, start_pos, end_pos)
         Buffer.delete_range(buf, start_pos, end_pos)
         put_register(state, text, :delete)
 
       {:yank, {start_pos, end_pos}} ->
-        text = Document.get_range(gb, start_pos, end_pos)
+        text = Document.content_between_inclusive(gb, start_pos, end_pos)
         state = put_register(state, text, :yank)
         maybe_start_yank_flash(state, buf, start_pos, end_pos, :charwise)
     end

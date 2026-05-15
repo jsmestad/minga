@@ -52,7 +52,7 @@ defmodule Minga.Project.FileTree.BufferSync do
   def sync(pid, tree) do
     entries = FileTree.visible_entries(tree)
     text = entries_to_text(entries, tree.expanded)
-    Buffer.replace_content_force(pid, text)
+    Buffer.replace_generated_content(pid, text)
     # Move buffer cursor to match tree cursor
     Buffer.move_to(pid, {tree.cursor, 0})
     :ok

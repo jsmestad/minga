@@ -41,10 +41,10 @@ defmodule Minga.Buffer.BufferChangedEventTest do
     end
   end
 
-  describe "apply_text_edit broadcasts delta with source" do
+  describe "apply_edit broadcasts delta with source" do
     test "default source is :user" do
       buf = start_supervised!({BufferProcess, content: "hello world"})
-      BufferProcess.apply_text_edit(buf, 0, 0, 0, 5, "goodbye")
+      BufferProcess.apply_edit(buf, 0, 0, 0, 5, "goodbye")
 
       assert_receive {:minga_event, :buffer_changed,
                       %BufferChangedEvent{
@@ -56,7 +56,7 @@ defmodule Minga.Buffer.BufferChangedEventTest do
 
     test "custom source is propagated" do
       buf = start_supervised!({BufferProcess, content: "hello world"})
-      BufferProcess.apply_text_edit(buf, 0, 0, 0, 5, "goodbye", EditSource.lsp(:elixir_ls))
+      BufferProcess.apply_edit(buf, 0, 0, 0, 5, "goodbye", EditSource.lsp(:elixir_ls))
 
       assert_receive {:minga_event, :buffer_changed,
                       %BufferChangedEvent{
@@ -67,11 +67,11 @@ defmodule Minga.Buffer.BufferChangedEventTest do
     end
   end
 
-  describe "apply_text_edits broadcasts with nil delta (bulk op)" do
+  describe "apply_edits broadcasts with nil delta (bulk op)" do
     test "batch edits send nil delta with source" do
       buf = start_supervised!({BufferProcess, content: "aaa\nbbb\nccc"})
       edits = [{{0, 0}, {0, 3}, "AAA"}, {{1, 0}, {1, 3}, "BBB"}]
-      BufferProcess.apply_text_edits(buf, edits, EditSource.lsp(:elixir_ls))
+      BufferProcess.apply_edits(buf, edits, EditSource.lsp(:elixir_ls))
 
       assert_receive {:minga_event, :buffer_changed,
                       %BufferChangedEvent{

@@ -155,7 +155,7 @@ defmodule MingaEditor.AgentLifecycle do
       end)
 
     # Trigger tree-sitter reparse for markdown highlighting.
-    # replace_content_force clears edit deltas, so we do a full reparse.
+    # replace_generated_content clears edit deltas, so we do a full reparse.
     HighlightSync.request_reparse_buffer(state, buffer)
   end
 

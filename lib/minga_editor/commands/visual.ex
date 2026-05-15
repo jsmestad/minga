@@ -47,7 +47,7 @@ defmodule MingaEditor.Commands.Visual do
           {cursor_line, _} = cursor
           start_line = min(anchor_line, cursor_line)
           end_line = max(anchor_line, cursor_line)
-          text = Buffer.lines_content(buf, start_line, end_line)
+          text = Buffer.content_on_lines(buf, start_line, end_line)
           Buffer.delete_lines(buf, start_line, end_line)
           {text <> "\n", :linewise}
       end
@@ -76,7 +76,7 @@ defmodule MingaEditor.Commands.Visual do
           {cursor_line, _} = cursor
           start_line = min(anchor_line, cursor_line)
           end_line = max(anchor_line, cursor_line)
-          {Buffer.lines_content(buf, start_line, end_line) <> "\n", :linewise}
+          {Buffer.content_on_lines(buf, start_line, end_line) <> "\n", :linewise}
       end
 
     state = Helpers.put_register(state, yanked, :yank, reg_type)

@@ -192,7 +192,7 @@ defmodule MingaEditor.Agent.PromptCharacterizationTest do
 
     test "backspace joins lines" do
       panel = with_text("ab\ncd")
-      BufferProcess.set_cursor(panel.panel.prompt_buffer, {1, 0})
+      BufferProcess.move_to(panel.panel.prompt_buffer, {1, 0})
       panel = UIState.delete_char(panel)
       assert UIState.input_lines(panel) == ["abcd"]
     end

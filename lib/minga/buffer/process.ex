@@ -105,7 +105,7 @@ defmodule Minga.Buffer.Process do
   Moves to the start of the range, deletes the range, then inserts the
   new text. Used by LSP text edits.
   """
-  @spec apply_text_edit(
+  @spec apply_edit(
           GenServer.server(),
           non_neg_integer(),
           non_neg_integer(),
@@ -114,7 +114,7 @@ defmodule Minga.Buffer.Process do
           String.t(),
           EditSource.t()
         ) :: :ok
-  def apply_text_edit(
+  def apply_edit(
         server,
         start_line,
         start_col,
@@ -125,7 +125,7 @@ defmodule Minga.Buffer.Process do
       ) do
     GenServer.call(
       server,
-      {:apply_text_edit, {start_line, start_col}, {end_line, end_col}, new_text, source}
+      {:apply_edit, {start_line, start_col}, {end_line, end_col}, new_text, source}
     )
   end
 
@@ -148,9 +148,9 @@ defmodule Minga.Buffer.Process do
   Source defaults to `{:lsp, :unknown}` (not `:user`) because batch edits
   are typically LSP code actions or agent tool calls, not interactive typing.
   """
-  @spec apply_text_edits(GenServer.server(), [text_edit()], EditSource.t()) :: :ok
-  def apply_text_edits(server, edits, source \\ EditSource.lsp(:unknown)) when is_list(edits) do
-    GenServer.call(server, {:apply_text_edits, edits, source})
+  @spec apply_edits(GenServer.server(), [text_edit()], EditSource.t()) :: :ok
+  def apply_edits(server, edits, source \\ EditSource.lsp(:unknown)) when is_list(edits) do
+    GenServer.call(server, {:apply_edits, edits, source})
   end
 
   @doc """
@@ -255,15 +255,15 @@ defmodule Minga.Buffer.Process do
   end
 
   @doc "Replaces buffer content bypassing read-only. For programmatic panel updates."
-  @spec replace_content_force(GenServer.server(), String.t()) :: :ok
-  def replace_content_force(server, new_content) do
-    GenServer.call(server, {:replace_content_force, new_content})
+  @spec replace_generated_content(GenServer.server(), String.t()) :: :ok
+  def replace_generated_content(server, new_content) do
+    GenServer.call(server, {:replace_generated_content, new_content})
   end
 
-  @doc "Replaces content and records it as the saved base revision."
-  @spec replace_saved_content(GenServer.server(), String.t()) :: :ok
-  def replace_saved_content(server, new_content) do
-    GenServer.call(server, {:replace_saved_content, new_content}, @file_io_call_timeout)
+  @doc "Accepts content as the saved base revision and clears dirty state."
+  @spec accept_saved_content(GenServer.server(), String.t()) :: :ok
+  def accept_saved_content(server, new_content) do
+    GenServer.call(server, {:accept_saved_content, new_content}, @file_io_call_timeout)
   end
 
   @doc "Returns the full text content of the buffer."
@@ -279,27 +279,15 @@ defmodule Minga.Buffer.Process do
   end
 
   @doc "Returns a range of lines from the buffer."
-  @spec get_lines(GenServer.server(), non_neg_integer(), non_neg_integer()) :: [String.t()]
-  def get_lines(server, start, count) when start >= 0 and count >= 0 do
-    GenServer.call(server, {:get_lines, start, count})
+  @spec lines(GenServer.server(), non_neg_integer(), non_neg_integer()) :: [String.t()]
+  def lines(server, start, count) when start >= 0 and count >= 0 do
+    GenServer.call(server, {:lines, start, count})
   end
 
   @doc "Returns the current cursor position."
   @spec cursor(GenServer.server()) :: Document.position()
   def cursor(server) do
     GenServer.call(server, :cursor)
-  end
-
-  @doc "Sets the cursor to an absolute position. Clamped to buffer bounds."
-  @spec set_cursor(GenServer.server(), Document.position()) :: :ok
-  def set_cursor(server, {line, col}) do
-    GenServer.call(server, {:set_cursor, {line, col}})
-  end
-
-  @doc "Moves the cursor in the given direction."
-  @spec move_cursor(GenServer.server(), :up | :down | :left | :right) :: :ok
-  def move_cursor(server, direction) when direction in [:up, :down, :left, :right] do
-    GenServer.call(server, {:move_cursor, direction})
   end
 
   @doc """
@@ -332,14 +320,14 @@ defmodule Minga.Buffer.Process do
   def version(server), do: GenServer.call(server, :version)
 
   @doc """
-  Returns and clears pending edit deltas accumulated since the last flush.
+  Returns and clears pending edit deltas accumulated since the last legacy consumer read.
 
-  Deprecated: use `flush_edits/2` with a consumer_id for per-consumer cursors.
+  Deprecated: use `consume_edit_deltas/2` with a consumer_id for per-consumer cursors.
   This legacy version destructively drains the shared pending_edits list.
   """
-  @deprecated "Use flush_edits/2 with a consumer_id instead"
-  @spec flush_edits(GenServer.server()) :: [EditDelta.t()]
-  def flush_edits(server), do: GenServer.call(server, :flush_edits)
+  @deprecated "Use consume_edit_deltas/2 with a consumer_id instead"
+  @spec consume_edit_deltas(GenServer.server()) :: [EditDelta.t()]
+  def consume_edit_deltas(server), do: GenServer.call(server, :consume_edit_deltas)
 
   @doc """
   Returns edit deltas accumulated since the given consumer's last read.
@@ -349,7 +337,7 @@ defmodule Minga.Buffer.Process do
   deltas since that cursor are returned and the cursor advances. The buffer
   trims deltas that all registered consumers have read.
 
-  This avoids the data race where two consumers calling `flush_edits/1`
+  This avoids the data race where two consumers calling `consume_edit_deltas/1`
   would each miss the other's deltas.
 
   Deprecated: prefer consuming deltas from `BufferChangedEvent` payloads
@@ -357,9 +345,9 @@ defmodule Minga.Buffer.Process do
   HighlightSync still uses this during the migration period since it runs
   synchronously inside the Editor GenServer before the deferred broadcast fires.
   """
-  @spec flush_edits(GenServer.server(), atom()) :: [EditDelta.t()]
-  def flush_edits(server, consumer_id) do
-    GenServer.call(server, {:flush_edits, consumer_id})
+  @spec consume_edit_deltas(GenServer.server(), atom()) :: [EditDelta.t()]
+  def consume_edit_deltas(server, consumer_id) do
+    GenServer.call(server, {:consume_edit_deltas, consumer_id})
   end
 
   @doc """
@@ -548,20 +536,13 @@ defmodule Minga.Buffer.Process do
 
   Fetches cursor position, total line count, the visible line range starting at
   `first_line` (up to `count` lines), file path, and dirty flag atomically.
-  This replaces 5 individual calls (cursor, line_count, get_lines, file_path,
+  This replaces 5 individual calls (cursor, line_count, lines, file_path,
   dirty?) with a single round-trip.
   """
   @spec render_snapshot(GenServer.server(), non_neg_integer(), non_neg_integer()) ::
           RenderSnapshot.t()
   def render_snapshot(server, first_line, count) when first_line >= 0 and count >= 0 do
     GenServer.call(server, {:render_snapshot, first_line, count})
-  end
-
-  @doc "Returns the text between two positions (from_pos inclusive, to_pos exclusive)."
-  @spec content_range(GenServer.server(), Document.position(), Document.position()) ::
-          String.t()
-  def content_range(server, from_pos, to_pos) do
-    GenServer.call(server, {:content_range, from_pos, to_pos})
   end
 
   @doc "Deletes the text between two positions (from_pos inclusive, to_pos exclusive), placing the cursor at the start of the range."
@@ -574,18 +555,19 @@ defmodule Minga.Buffer.Process do
   Returns the text in the range [start_pos, end_pos] inclusive.
   Positions are sorted automatically.
   """
-  @spec get_range(GenServer.server(), Document.position(), Document.position()) :: String.t()
-  def get_range(server, start_pos, end_pos) do
-    GenServer.call(server, {:get_range, start_pos, end_pos})
+  @spec text_between_inclusive(GenServer.server(), Document.position(), Document.position()) ::
+          String.t()
+  def text_between_inclusive(server, start_pos, end_pos) do
+    GenServer.call(server, {:text_between_inclusive, start_pos, end_pos})
   end
 
   @doc """
   Returns the joined text of lines [start_line, end_line] inclusive (no trailing newline).
   """
-  @spec get_lines_content(GenServer.server(), non_neg_integer(), non_neg_integer()) :: String.t()
-  def get_lines_content(server, start_line, end_line)
+  @spec content_on_lines(GenServer.server(), non_neg_integer(), non_neg_integer()) :: String.t()
+  def content_on_lines(server, start_line, end_line)
       when start_line >= 0 and end_line >= 0 do
-    GenServer.call(server, {:get_lines_content, start_line, end_line})
+    GenServer.call(server, {:content_on_lines, start_line, end_line})
   end
 
   @doc "Returns the content and cursor position in a single GenServer call."
@@ -645,7 +627,7 @@ defmodule Minga.Buffer.Process do
 
   Use this to batch multiple reads into a single GenServer call. Perform
   all calculations on the returned struct, then apply the result with
-  `move_to/2` (cursor-only changes) or `apply_snapshot/2` (content changes).
+  `move_to/2` (cursor-only changes) or `commit_snapshot/2` (content changes).
   """
   @spec snapshot(GenServer.server()) :: Document.t()
   def snapshot(server) do
@@ -660,9 +642,9 @@ defmodule Minga.Buffer.Process do
   snapshot. Only call this when content has actually changed; for cursor-only
   changes use `move_to/2` instead.
   """
-  @spec apply_snapshot(GenServer.server(), Document.t()) :: :ok
-  def apply_snapshot(server, %Document{} = new_buf) do
-    GenServer.call(server, {:apply_snapshot, new_buf})
+  @spec commit_snapshot(GenServer.server(), Document.t()) :: :ok
+  def commit_snapshot(server, %Document{} = new_buf) do
+    GenServer.call(server, {:commit_snapshot, new_buf})
   end
 
   @doc """
@@ -671,7 +653,7 @@ defmodule Minga.Buffer.Process do
   scroll operations can be composed with cursor and content changes.
 
   After operating on the snapshot through `NavigableContent`, apply the
-  result back with `apply_navigable_snapshot/2`.
+  result back with `commit_navigable_snapshot/2`.
   """
   @spec navigable_snapshot(GenServer.server(), Scroll.t()) :: BufferSnapshot.t()
   def navigable_snapshot(server, %Scroll{} = scroll) do
@@ -686,9 +668,9 @@ defmodule Minga.Buffer.Process do
   Only writes the document back if content or cursor changed. Returns
   the scroll state from the snapshot for the caller to store.
   """
-  @spec apply_navigable_snapshot(GenServer.server(), BufferSnapshot.t()) :: Scroll.t()
-  def apply_navigable_snapshot(server, %BufferSnapshot{document: new_doc, scroll: scroll}) do
-    apply_snapshot(server, new_doc)
+  @spec commit_navigable_snapshot(GenServer.server(), BufferSnapshot.t()) :: Scroll.t()
+  def commit_navigable_snapshot(server, %BufferSnapshot{document: new_doc, scroll: scroll}) do
+    commit_snapshot(server, new_doc)
     scroll
   end
 
@@ -843,7 +825,7 @@ defmodule Minga.Buffer.Process do
           buffer_type: buffer_type,
           mtime: mtime,
           file_size: size,
-          file_hash: Persistence.saved_content_hash(path, mtime, text),
+          file_hash: Persistence.saved_content_fingerprint(path, mtime, text),
           name: Keyword.get(opts, :buffer_name),
           read_only: read_only,
           unlisted: Keyword.get(opts, :unlisted, false),
@@ -865,12 +847,12 @@ defmodule Minga.Buffer.Process do
   @impl true
   @spec handle_call(term(), GenServer.from(), state()) :: {:reply, term(), state()}
   def handle_call({:open, file_path}, _from, state) do
-    case Persistence.read(state, file_path) do
+    case Persistence.read_content(state, file_path) do
       {:ok, text} ->
         first_line = text |> String.split("\n", parts: 2) |> List.first("")
         filetype = Language.detect_filetype_from_content(file_path, first_line)
 
-        {mtime, size} = Persistence.metadata(state, file_path)
+        {mtime, size} = Persistence.file_metadata(state, file_path)
 
         new_state = %{
           state
@@ -880,7 +862,7 @@ defmodule Minga.Buffer.Process do
             dirty: false,
             mtime: mtime,
             file_size: size,
-            file_hash: Persistence.content_hash(text),
+            file_hash: Persistence.content_fingerprint(text),
             decorations: Decorations.new(),
             undo_stack: [],
             redo_stack: []
@@ -907,14 +889,14 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call(
-        {:apply_text_edit, _from_pos, _to_pos, _text, _source},
+        {:apply_edit, _from_pos, _to_pos, _text, _source},
         _from,
         %{read_only: true} = state
       ) do
     {:reply, {:error, :read_only}, state}
   end
 
-  def handle_call({:apply_text_edit, from_pos, to_pos, new_text, source}, _from, state) do
+  def handle_call({:apply_edit, from_pos, to_pos, new_text, source}, _from, state) do
     {:edited, new_doc, delta} =
       Operation.replace_range(state.document, from_pos, to_pos, new_text)
 
@@ -924,15 +906,15 @@ defmodule Minga.Buffer.Process do
      push_undo(state, new_doc, undo_source) |> mark_dirty() |> record_edit(delta, source)}
   end
 
-  def handle_call({:apply_text_edits, _edits, _source}, _from, %{read_only: true} = state) do
+  def handle_call({:apply_edits, _edits, _source}, _from, %{read_only: true} = state) do
     {:reply, {:error, :read_only}, state}
   end
 
-  def handle_call({:apply_text_edits, [], _source}, _from, state) do
+  def handle_call({:apply_edits, [], _source}, _from, state) do
     {:reply, :ok, state}
   end
 
-  def handle_call({:apply_text_edits, edits, source}, _from, state) do
+  def handle_call({:apply_edits, edits, source}, _from, state) do
     doc = Operation.replace_ranges(state.document, edits)
     undo_source = EditSource.to_undo_source(source)
 
@@ -1030,23 +1012,23 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call(:save, _from, state) do
-    {disk_mtime, disk_size} = Persistence.metadata(state, state.file_path)
+    {disk_mtime, disk_size} = Persistence.file_metadata(state, state.file_path)
 
     if Persistence.changed_since_saved?(state, disk_mtime, disk_size) do
       {:reply, {:error, :file_changed}, state}
     else
       content = Document.content(state.document)
 
-      case Persistence.write(state, state.file_path, content) do
+      case Persistence.write_content(state, state.file_path, content) do
         :ok ->
-          {new_mtime, new_size} = Persistence.metadata(state, state.file_path)
+          {new_mtime, new_size} = Persistence.file_metadata(state, state.file_path)
 
           {:reply, :ok,
            mark_saved(%{
              state
              | mtime: new_mtime,
                file_size: new_size,
-               file_hash: Persistence.content_hash(content)
+               file_hash: Persistence.content_fingerprint(content)
            })}
 
         {:error, reason} ->
@@ -1067,16 +1049,16 @@ defmodule Minga.Buffer.Process do
   def handle_call(:force_save, _from, state) do
     content = Document.content(state.document)
 
-    case Persistence.write(state, state.file_path, content) do
+    case Persistence.write_content(state, state.file_path, content) do
       :ok ->
-        {new_mtime, new_size} = Persistence.metadata(state, state.file_path)
+        {new_mtime, new_size} = Persistence.file_metadata(state, state.file_path)
 
         {:reply, :ok,
          mark_saved(%{
            state
            | mtime: new_mtime,
              file_size: new_size,
-             file_hash: Persistence.content_hash(content)
+             file_hash: Persistence.content_fingerprint(content)
          })}
 
       {:error, reason} ->
@@ -1089,7 +1071,7 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call(:reload, _from, state) do
-    case Persistence.read(state, state.file_path) do
+    case Persistence.read_content(state, state.file_path) do
       {:ok, text} ->
         {line, col} = Document.cursor(state.document)
         new_buf = Document.new(text)
@@ -1110,7 +1092,7 @@ defmodule Minga.Buffer.Process do
         first_line = text |> String.split("\n", parts: 2) |> List.first("")
         filetype = Language.detect_filetype_from_content(state.file_path, first_line)
 
-        {new_mtime, new_size} = Persistence.metadata(state, state.file_path)
+        {new_mtime, new_size} = Persistence.file_metadata(state, state.file_path)
 
         new_state = %{
           state
@@ -1119,7 +1101,7 @@ defmodule Minga.Buffer.Process do
             dirty: false,
             mtime: new_mtime,
             file_size: new_size,
-            file_hash: Persistence.content_hash(text),
+            file_hash: Persistence.content_fingerprint(text),
             undo_stack: [],
             redo_stack: [],
             decorations: Decorations.new()
@@ -1136,9 +1118,9 @@ defmodule Minga.Buffer.Process do
   def handle_call({:save_as, file_path}, _from, state) do
     content = Document.content(state.document)
 
-    case Persistence.write(state, file_path, content) do
+    case Persistence.write_content(state, file_path, content) do
       :ok ->
-        {new_mtime, new_size} = Persistence.metadata(state, file_path)
+        {new_mtime, new_size} = Persistence.file_metadata(state, file_path)
         unregister_path(state.file_path)
         register_path(file_path)
 
@@ -1148,7 +1130,7 @@ defmodule Minga.Buffer.Process do
            | file_path: file_path,
              mtime: new_mtime,
              file_size: new_size,
-             file_hash: Persistence.content_hash(content)
+             file_hash: Persistence.content_fingerprint(content)
          })}
 
       {:error, reason} ->
@@ -1169,7 +1151,7 @@ defmodule Minga.Buffer.Process do
 
   # Force replace bypasses read_only. Used by panel buffers (file tree, agent)
   # that are read-only to the user but need programmatic content updates.
-  def handle_call({:replace_content_force, new_content}, _from, state) do
+  def handle_call({:replace_generated_content, new_content}, _from, state) do
     new_buf = Document.new(new_content)
 
     new_state = %{
@@ -1184,9 +1166,9 @@ defmodule Minga.Buffer.Process do
     {:reply, :ok, new_state}
   end
 
-  def handle_call({:replace_saved_content, new_content}, _from, state) do
+  def handle_call({:accept_saved_content, new_content}, _from, state) do
     new_buf = Document.new(new_content)
-    {mtime, size} = Persistence.metadata(state, state.file_path)
+    {mtime, size} = Persistence.file_metadata(state, state.file_path)
 
     new_state = %{
       state
@@ -1196,7 +1178,7 @@ defmodule Minga.Buffer.Process do
         saved_version: state.version + 1,
         mtime: mtime,
         file_size: size,
-        file_hash: Persistence.content_hash(new_content),
+        file_hash: Persistence.content_fingerprint(new_content),
         undo_stack: [],
         redo_stack: [],
         pending_edits: [],
@@ -1216,22 +1198,12 @@ defmodule Minga.Buffer.Process do
     {:reply, offset, state}
   end
 
-  def handle_call({:get_lines, start, count}, _from, state) do
+  def handle_call({:lines, start, count}, _from, state) do
     {:reply, Lines.slice(state.document, start, count), state}
   end
 
   def handle_call(:cursor, _from, state) do
     {:reply, Document.cursor(state.document), state}
-  end
-
-  def handle_call({:set_cursor, {line, col}}, _from, state) do
-    doc = Cursor.place(state.document, {line, col})
-    {:reply, :ok, %{state | document: doc}}
-  end
-
-  def handle_call({:move_cursor, direction}, _from, state) do
-    doc = Cursor.move(state.document, direction)
-    {:reply, :ok, %{state | document: doc}}
   end
 
   def handle_call(
@@ -1262,12 +1234,12 @@ defmodule Minga.Buffer.Process do
     {:reply, state.dirty, state}
   end
 
-  def handle_call(:flush_edits, _from, state) do
+  def handle_call(:consume_edit_deltas, _from, state) do
     edits = Enum.reverse(state.pending_edits)
     {:reply, edits, %{state | pending_edits: []}}
   end
 
-  def handle_call({:flush_edits, consumer_id}, _from, state) do
+  def handle_call({:consume_edit_deltas, consumer_id}, _from, state) do
     cursor = Map.get(state.consumer_cursors, consumer_id, 0)
 
     deltas =
@@ -1447,11 +1419,6 @@ defmodule Minga.Buffer.Process do
     {:reply, snapshot, state}
   end
 
-  def handle_call({:content_range, from_pos, to_pos}, _from, state) do
-    text = Document.content_range(state.document, from_pos, to_pos)
-    {:reply, text, state}
-  end
-
   def handle_call({:delete_range, _from_pos, _to_pos}, _from, %{read_only: true} = state) do
     {:reply, {:error, :read_only}, state}
   end
@@ -1466,13 +1433,13 @@ defmodule Minga.Buffer.Process do
     end
   end
 
-  def handle_call({:get_range, start_pos, end_pos}, _from, state) do
-    result = Document.get_range(state.document, start_pos, end_pos)
+  def handle_call({:text_between_inclusive, start_pos, end_pos}, _from, state) do
+    result = Document.content_between_inclusive(state.document, start_pos, end_pos)
     {:reply, result, state}
   end
 
-  def handle_call({:get_lines_content, start_line, end_line}, _from, state) do
-    result = Document.get_lines_content(state.document, start_line, end_line)
+  def handle_call({:content_on_lines, start_line, end_line}, _from, state) do
+    result = Document.content_on_lines(state.document, start_line, end_line)
     {:reply, result, state}
   end
 
@@ -1498,11 +1465,11 @@ defmodule Minga.Buffer.Process do
     {:reply, state.document, state}
   end
 
-  def handle_call({:apply_snapshot, _new_buf}, _from, %{read_only: true} = state) do
+  def handle_call({:commit_snapshot, _new_buf}, _from, %{read_only: true} = state) do
     {:reply, {:error, :read_only}, state}
   end
 
-  def handle_call({:apply_snapshot, new_buf}, _from, state) do
+  def handle_call({:commit_snapshot, new_buf}, _from, state) do
     {:reply, :ok,
      push_undo(state, new_buf, :user) |> mark_dirty() |> clear_edits(EditSource.user())}
   end
@@ -1947,7 +1914,7 @@ defmodule Minga.Buffer.Process do
 
   @spec auto_save_file(state(), String.t()) :: {:noreply, state()}
   defp auto_save_file(state, path) do
-    case Persistence.stat(state, path) do
+    case Persistence.file_info(state, path) do
       {:ok, %{mtime: disk_mtime, size: disk_size}} ->
         maybe_write_auto_save_file(state, path, disk_mtime, disk_size)
 
@@ -1987,16 +1954,16 @@ defmodule Minga.Buffer.Process do
   defp write_auto_save_file(state, path) do
     content = Document.content(state.document)
 
-    case Persistence.write(state, path, content) do
+    case Persistence.write_content(state, path, content) do
       :ok ->
-        {new_mtime, new_size} = Persistence.metadata(state, path)
+        {new_mtime, new_size} = Persistence.file_metadata(state, path)
 
         new_state =
           mark_saved(%{
             state
             | mtime: new_mtime,
               file_size: new_size,
-              file_hash: Persistence.content_hash(content)
+              file_hash: Persistence.content_fingerprint(content)
           })
 
         log_to_messages(new_state, "Auto-saved: #{display_path(path)}", :info)
@@ -2140,7 +2107,7 @@ defmodule Minga.Buffer.Process do
   end
 
   # Maximum edit_log entries retained when only one consumer is registered.
-  # Prevents unbounded growth if the second consumer never calls flush_edits.
+  # Prevents unbounded growth if the second consumer never calls consume_edit_deltas.
   # At this limit, older entries are dropped (the lagging consumer will get a
   # partial log and must fall back to full sync).
   @max_single_consumer_log 1000

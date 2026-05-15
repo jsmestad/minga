@@ -1376,7 +1376,7 @@ defmodule MingaEditor.Mouse do
   defp selection_text(buf, %{visual_type: :line} = ms) do
     {a_line, _} = ms.visual_anchor
     {c_line, _} = Buffer.cursor(buf)
-    Buffer.lines_content(buf, min(a_line, c_line), max(a_line, c_line))
+    Buffer.content_on_lines(buf, min(a_line, c_line), max(a_line, c_line))
   end
 
   defp maybe_copy_to_clipboard(%{workspace: %{buffers: %{active: buf}}}, text)

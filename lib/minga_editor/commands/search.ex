@@ -494,7 +494,7 @@ defmodule MingaEditor.Commands.Search do
           String.t()
   defp word_at_cursor(gb, cursor) do
     {start_pos, end_pos} = Minga.Editing.select_inner_word(gb, cursor)
-    Document.get_range(gb, start_pos, end_pos)
+    Document.content_between_inclusive(gb, start_pos, end_pos)
   end
 
   defp active_foldable_window(state) do

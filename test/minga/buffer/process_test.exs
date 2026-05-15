@@ -291,10 +291,10 @@ defmodule Minga.Buffer.ProcessTest do
     end
   end
 
-  describe "get_lines/3" do
+  describe "lines/3" do
     test "returns requested line range" do
       {:ok, pid} = BufferProcess.start_link(content: "a\nb\nc\nd\ne")
-      assert BufferProcess.get_lines(pid, 1, 3) == ["b", "c", "d"]
+      assert BufferProcess.lines(pid, 1, 3) == ["b", "c", "d"]
     end
   end
 
@@ -408,13 +408,13 @@ defmodule Minga.Buffer.ProcessTest do
     end
   end
 
-  describe "apply_snapshot/2" do
+  describe "commit_snapshot/2" do
     test "replaces buffer content and marks dirty" do
       {:ok, pid} = BufferProcess.start_link(content: "hello")
       gb = BufferProcess.snapshot(pid)
       new_gb = Document.insert_text(gb, "X")
 
-      assert :ok = BufferProcess.apply_snapshot(pid, new_gb)
+      assert :ok = BufferProcess.commit_snapshot(pid, new_gb)
       assert BufferProcess.content(pid) == "Xhello"
       assert BufferProcess.dirty?(pid)
     end
@@ -424,7 +424,7 @@ defmodule Minga.Buffer.ProcessTest do
       gb = BufferProcess.snapshot(pid)
       new_gb = Document.insert_text(gb, "X")
 
-      BufferProcess.apply_snapshot(pid, new_gb)
+      BufferProcess.commit_snapshot(pid, new_gb)
       assert BufferProcess.content(pid) == "Xhello"
 
       BufferProcess.undo(pid)
@@ -436,7 +436,7 @@ defmodule Minga.Buffer.ProcessTest do
       gb = BufferProcess.snapshot(pid)
       new_gb = Document.insert_text(gb, "X")
 
-      assert {:error, :read_only} = BufferProcess.apply_snapshot(pid, new_gb)
+      assert {:error, :read_only} = BufferProcess.commit_snapshot(pid, new_gb)
       assert BufferProcess.content(pid) == "hello"
     end
 
@@ -445,13 +445,13 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.move_to(pid, {1, 2})
       gb = BufferProcess.snapshot(pid)
 
-      BufferProcess.apply_snapshot(pid, gb)
+      BufferProcess.commit_snapshot(pid, gb)
       assert BufferProcess.content(pid) == "hello\nworld"
       assert BufferProcess.cursor(pid) == {1, 2}
     end
   end
 
-  describe "apply_text_edits/2" do
+  describe "apply_edits/2" do
     test "applies multiple edits in a single call" do
       {:ok, pid} = BufferProcess.start_link(content: "aaa\nbbb\nccc")
 
@@ -461,7 +461,7 @@ defmodule Minga.Buffer.ProcessTest do
         {{2, 0}, {2, 2}, "CCC"}
       ]
 
-      assert :ok = BufferProcess.apply_text_edits(pid, edits)
+      assert :ok = BufferProcess.apply_edits(pid, edits)
       assert BufferProcess.content(pid) == "AAA\nbbb\nCCC"
     end
 
@@ -473,7 +473,7 @@ defmodule Minga.Buffer.ProcessTest do
         {{2, 0}, {2, 2}, "CCC"}
       ]
 
-      BufferProcess.apply_text_edits(pid, edits)
+      BufferProcess.apply_edits(pid, edits)
       assert BufferProcess.content(pid) == "AAA\nbbb\nCCC"
 
       # One undo reverts all edits
@@ -483,14 +483,14 @@ defmodule Minga.Buffer.ProcessTest do
 
     test "empty edit list is a no-op" do
       {:ok, pid} = BufferProcess.start_link(content: "hello")
-      BufferProcess.apply_text_edits(pid, [])
+      BufferProcess.apply_edits(pid, [])
       assert BufferProcess.content(pid) == "hello"
       refute BufferProcess.dirty?(pid)
     end
 
     test "returns error on read-only buffer" do
       {:ok, pid} = BufferProcess.start_link(content: "hello", read_only: true)
-      assert {:error, :read_only} = BufferProcess.apply_text_edits(pid, [{{0, 0}, {0, 0}, "X"}])
+      assert {:error, :read_only} = BufferProcess.apply_edits(pid, [{{0, 0}, {0, 0}, "X"}])
     end
 
     test "auto-sorts edits in reverse document order" do
@@ -502,7 +502,7 @@ defmodule Minga.Buffer.ProcessTest do
         {{2, 0}, {2, 2}, "CCC"}
       ]
 
-      BufferProcess.apply_text_edits(pid, edits)
+      BufferProcess.apply_edits(pid, edits)
       assert BufferProcess.content(pid) == "AAA\nbbb\nCCC"
     end
   end
@@ -722,9 +722,9 @@ defmodule Minga.Buffer.ProcessTest do
       assert BufferProcess.last_undo_source(pid) == :agent
     end
 
-    test "LSP batch edits (apply_text_edits) are tagged :lsp" do
+    test "LSP batch edits (apply_edits) are tagged :lsp" do
       pid = start_supervised!({BufferProcess, content: "hello"})
-      BufferProcess.apply_text_edits(pid, [{{0, 0}, {0, 5}, "goodbye"}])
+      BufferProcess.apply_edits(pid, [{{0, 0}, {0, 5}, "goodbye"}])
 
       assert BufferProcess.last_undo_source(pid) == :lsp
     end
@@ -793,7 +793,7 @@ defmodule Minga.Buffer.ProcessTest do
 
     test "returns :lsp for LSP edits" do
       pid = start_supervised!({BufferProcess, content: "hello"})
-      BufferProcess.apply_text_edits(pid, [{{0, 0}, {0, 5}, "goodbye"}])
+      BufferProcess.apply_edits(pid, [{{0, 0}, {0, 5}, "goodbye"}])
       assert BufferProcess.last_undo_source(pid) == :lsp
     end
 
@@ -819,7 +819,7 @@ defmodule Minga.Buffer.ProcessTest do
       {:ok, pid} = BufferProcess.start_link(content: "hello")
       BufferProcess.move_to(pid, {0, 5})
       BufferProcess.insert_char(pid, "!")
-      edits = BufferProcess.flush_edits(pid, :test)
+      edits = BufferProcess.consume_edit_deltas(pid, :test)
       assert [delta] = edits
       assert delta.start_byte == 5
       assert delta.old_end_byte == 5
@@ -831,7 +831,7 @@ defmodule Minga.Buffer.ProcessTest do
       {:ok, pid} = BufferProcess.start_link(content: "hello")
       BufferProcess.move_to(pid, {0, 5})
       BufferProcess.delete_before(pid)
-      edits = BufferProcess.flush_edits(pid, :test)
+      edits = BufferProcess.consume_edit_deltas(pid, :test)
       assert [delta] = edits
       assert delta.start_byte == 4
       assert delta.old_end_byte == 5
@@ -839,10 +839,10 @@ defmodule Minga.Buffer.ProcessTest do
       assert delta.inserted_text == ""
     end
 
-    test "apply_text_edit records byte-accurate unicode replacement delta" do
+    test "apply_edit records byte-accurate unicode replacement delta" do
       {:ok, pid} = BufferProcess.start_link(content: "aébc")
-      BufferProcess.apply_text_edit(pid, 0, 1, 0, 1, "X")
-      edits = BufferProcess.flush_edits(pid, :test)
+      BufferProcess.apply_edit(pid, 0, 1, 0, 1, "X")
+      edits = BufferProcess.consume_edit_deltas(pid, :test)
       assert [delta] = edits
       assert BufferProcess.content(pid) == "aXbc"
       assert delta.start_byte == 1
@@ -854,12 +854,12 @@ defmodule Minga.Buffer.ProcessTest do
       assert delta.inserted_text == "X"
     end
 
-    test "flush_edits clears pending deltas for that consumer" do
+    test "consume_edit_deltas clears pending deltas for that consumer" do
       {:ok, pid} = BufferProcess.start_link(content: "hello")
       BufferProcess.move_to(pid, {0, 5})
       BufferProcess.insert_char(pid, "!")
-      assert [_] = BufferProcess.flush_edits(pid, :test)
-      assert [] = BufferProcess.flush_edits(pid, :test)
+      assert [_] = BufferProcess.consume_edit_deltas(pid, :test)
+      assert [] = BufferProcess.consume_edit_deltas(pid, :test)
     end
 
     test "multiple edits accumulate in order" do
@@ -867,7 +867,7 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.move_to(pid, {0, 2})
       BufferProcess.insert_char(pid, "c")
       BufferProcess.insert_char(pid, "d")
-      edits = BufferProcess.flush_edits(pid, :test)
+      edits = BufferProcess.consume_edit_deltas(pid, :test)
       assert length(edits) == 2
       assert [first, second] = edits
       assert first.inserted_text == "c"
@@ -877,7 +877,7 @@ defmodule Minga.Buffer.ProcessTest do
     test "delete_range records a deletion delta" do
       {:ok, pid} = BufferProcess.start_link(content: "hello world")
       BufferProcess.delete_range(pid, {0, 5}, {0, 11})
-      edits = BufferProcess.flush_edits(pid, :test)
+      edits = BufferProcess.consume_edit_deltas(pid, :test)
       assert [delta] = edits
       assert delta.start_byte == 5
       assert delta.old_end_byte == 11
@@ -889,12 +889,12 @@ defmodule Minga.Buffer.ProcessTest do
       {:ok, pid} = BufferProcess.start_link(content: "hello")
       BufferProcess.move_to(pid, {0, 5})
       BufferProcess.insert_char(pid, "!")
-      assert [_] = BufferProcess.flush_edits(pid, :test)
+      assert [_] = BufferProcess.consume_edit_deltas(pid, :test)
       # Make another edit then undo
       BufferProcess.insert_char(pid, "?")
       BufferProcess.undo(pid)
       # Undo clears edits to force full sync
-      assert [] = BufferProcess.flush_edits(pid, :test)
+      assert [] = BufferProcess.consume_edit_deltas(pid, :test)
     end
 
     test "replace_content clears pending edits" do
@@ -902,13 +902,13 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.move_to(pid, {0, 5})
       BufferProcess.insert_char(pid, "!")
       BufferProcess.replace_content(pid, "goodbye")
-      assert [] = BufferProcess.flush_edits(pid, :test)
+      assert [] = BufferProcess.consume_edit_deltas(pid, :test)
     end
   end
 
-  # ── Per-consumer flush_edits ──────────────────────────────────────────────
+  # ── Per-consumer consume_edit_deltas ──────────────────────────────────────────────
 
-  describe "per-consumer flush_edits" do
+  describe "per-consumer consume_edit_deltas" do
     test "two consumers independently receive the full set of deltas from the same edit" do
       {:ok, pid} = BufferProcess.start_link(content: "hello")
       BufferProcess.move_to(pid, {0, 5})
@@ -916,8 +916,8 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.insert_char(pid, "y")
 
       # Both consumers should see the same 2 deltas
-      lsp_deltas = BufferProcess.flush_edits(pid, :lsp)
-      hl_deltas = BufferProcess.flush_edits(pid, :highlight)
+      lsp_deltas = BufferProcess.consume_edit_deltas(pid, :lsp)
+      hl_deltas = BufferProcess.consume_edit_deltas(pid, :highlight)
 
       assert length(lsp_deltas) == 2
       assert length(hl_deltas) == 2
@@ -925,14 +925,14 @@ defmodule Minga.Buffer.ProcessTest do
       assert Enum.map(hl_deltas, & &1.inserted_text) == ["x", "y"]
     end
 
-    test "flush_edits with consumer_id returns deltas since that consumer's last read" do
+    test "consume_edit_deltas with consumer_id returns deltas since that consumer's last read" do
       {:ok, pid} = BufferProcess.start_link(content: "hello")
       BufferProcess.move_to(pid, {0, 5})
       BufferProcess.insert_char(pid, "a")
       BufferProcess.insert_char(pid, "b")
 
       # First flush gets both deltas
-      assert [d1, d2] = BufferProcess.flush_edits(pid, :lsp)
+      assert [d1, d2] = BufferProcess.consume_edit_deltas(pid, :lsp)
       assert d1.inserted_text == "a"
       assert d2.inserted_text == "b"
 
@@ -940,7 +940,7 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.insert_char(pid, "c")
 
       # Second flush gets only the new one
-      assert [d3] = BufferProcess.flush_edits(pid, :lsp)
+      assert [d3] = BufferProcess.consume_edit_deltas(pid, :lsp)
       assert d3.inserted_text == "c"
     end
 
@@ -951,7 +951,7 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.insert_char(pid, "c")
 
       # :lsp reads all 3
-      lsp_first = BufferProcess.flush_edits(pid, :lsp)
+      lsp_first = BufferProcess.consume_edit_deltas(pid, :lsp)
       assert length(lsp_first) == 3
 
       # More edits
@@ -959,12 +959,12 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.insert_char(pid, "e")
 
       # :highlight hasn't read yet, should get all 5
-      hl_all = BufferProcess.flush_edits(pid, :highlight)
+      hl_all = BufferProcess.consume_edit_deltas(pid, :highlight)
       assert length(hl_all) == 5
       assert Enum.map(hl_all, & &1.inserted_text) == ["a", "b", "c", "d", "e"]
 
       # :lsp should get only the 2 new ones
-      lsp_second = BufferProcess.flush_edits(pid, :lsp)
+      lsp_second = BufferProcess.consume_edit_deltas(pid, :lsp)
       assert length(lsp_second) == 2
       assert Enum.map(lsp_second, & &1.inserted_text) == ["d", "e"]
     end
@@ -975,12 +975,12 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.insert_char(pid, "b")
 
       # Both consumers flush
-      BufferProcess.flush_edits(pid, :lsp)
-      BufferProcess.flush_edits(pid, :highlight)
+      BufferProcess.consume_edit_deltas(pid, :lsp)
+      BufferProcess.consume_edit_deltas(pid, :highlight)
 
       # Once both registered consumers have caught up, the log is trimmed —
       # a new consumer registering after the fact sees no historical deltas.
-      assert [] = BufferProcess.flush_edits(pid, :late_arrival)
+      assert [] = BufferProcess.consume_edit_deltas(pid, :late_arrival)
     end
 
     test "new consumer starts from sequence 0 and gets entire log" do
@@ -990,7 +990,7 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.insert_char(pid, "c")
 
       # :lsp reads all 3
-      BufferProcess.flush_edits(pid, :lsp)
+      BufferProcess.consume_edit_deltas(pid, :lsp)
 
       # More edits
       BufferProcess.insert_char(pid, "d")
@@ -1006,7 +1006,7 @@ defmodule Minga.Buffer.ProcessTest do
       # read them yet. Entries for a,b,c (seq 1,2,3) may or may not be trimmed
       # depending on whether other consumers exist. Since only :lsp is registered
       # and its cursor is at 3, entries 1-3 got trimmed on that flush.
-      new_deltas = BufferProcess.flush_edits(pid, :new_consumer)
+      new_deltas = BufferProcess.consume_edit_deltas(pid, :new_consumer)
       # Gets at least the 2 unread by all consumers (d, e)
       assert length(new_deltas) >= 2
     end
@@ -1018,15 +1018,15 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.insert_char(pid, "b")
 
       # :lsp reads
-      assert [_, _] = BufferProcess.flush_edits(pid, :lsp)
+      assert [_, _] = BufferProcess.consume_edit_deltas(pid, :lsp)
 
       # More edits then undo
       BufferProcess.insert_char(pid, "c")
       BufferProcess.undo(pid)
 
       # Both consumers get empty (forces full sync)
-      assert [] = BufferProcess.flush_edits(pid, :lsp)
-      assert [] = BufferProcess.flush_edits(pid, :highlight)
+      assert [] = BufferProcess.consume_edit_deltas(pid, :lsp)
+      assert [] = BufferProcess.consume_edit_deltas(pid, :highlight)
     end
 
     test "replace_content clears the edit log for all consumers" do
@@ -1035,20 +1035,20 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.insert_char(pid, "!")
       BufferProcess.replace_content(pid, "goodbye")
 
-      assert [] = BufferProcess.flush_edits(pid, :lsp)
-      assert [] = BufferProcess.flush_edits(pid, :highlight)
+      assert [] = BufferProcess.consume_edit_deltas(pid, :lsp)
+      assert [] = BufferProcess.consume_edit_deltas(pid, :highlight)
     end
 
     test "flush with no edits returns empty list" do
       {:ok, pid} = BufferProcess.start_link(content: "hello")
-      assert [] = BufferProcess.flush_edits(pid, :lsp)
+      assert [] = BufferProcess.consume_edit_deltas(pid, :lsp)
     end
 
     test "flush same consumer twice with no intervening edits returns empty" do
       {:ok, pid} = BufferProcess.start_link(content: "hello")
       BufferProcess.insert_char(pid, "!")
-      assert [_] = BufferProcess.flush_edits(pid, :lsp)
-      assert [] = BufferProcess.flush_edits(pid, :lsp)
+      assert [_] = BufferProcess.consume_edit_deltas(pid, :lsp)
+      assert [] = BufferProcess.consume_edit_deltas(pid, :lsp)
     end
 
     test "edit_log is capped at 1000 entries when only one consumer is registered" do
@@ -1057,12 +1057,12 @@ defmodule Minga.Buffer.ProcessTest do
       # Insert more than 1000 chars with only :lsp reading periodically
       for _ <- 1..1100, do: BufferProcess.insert_char(pid, "x")
 
-      # Only one consumer has ever called flush_edits
-      _deltas = BufferProcess.flush_edits(pid, :lsp)
+      # Only one consumer has ever called consume_edit_deltas
+      _deltas = BufferProcess.consume_edit_deltas(pid, :lsp)
 
       # A late-arriving consumer would see every retained entry (its cursor
       # starts at 0). With the cap in place it sees at most 1000, not 1100.
-      late_deltas = BufferProcess.flush_edits(pid, :late_arrival)
+      late_deltas = BufferProcess.consume_edit_deltas(pid, :late_arrival)
       assert length(late_deltas) <= 1000
     end
   end

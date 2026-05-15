@@ -13,13 +13,13 @@ defmodule MingaEditor.Agent.UIStateTest do
     ui = UIState.new()
     ui = UIState.ensure_prompt_buffer(ui)
     BufferProcess.replace_content(ui.panel.prompt_buffer, text)
-    BufferProcess.set_cursor(ui.panel.prompt_buffer, cursor)
+    BufferProcess.move_to(ui.panel.prompt_buffer, cursor)
     ui
   end
 
   # Moves the cursor in the prompt buffer.
   defp set_input_cursor(ui, cursor) do
-    BufferProcess.set_cursor(ui.panel.prompt_buffer, cursor)
+    BufferProcess.move_to(ui.panel.prompt_buffer, cursor)
     ui
   end
 

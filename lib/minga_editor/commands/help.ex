@@ -939,7 +939,7 @@ defmodule MingaEditor.Commands.Help do
 
   @spec replace_help_content(pid(), String.t()) :: :ok
   defp replace_help_content(buf, content) do
-    :ok = Buffer.replace_content_force(buf, content)
+    :ok = Buffer.replace_generated_content(buf, content)
     Buffer.move_to(buf, {0, 0})
   end
 

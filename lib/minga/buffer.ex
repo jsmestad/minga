@@ -117,23 +117,15 @@ defmodule Minga.Buffer do
 
   @doc "A range of lines starting at `start` (0-indexed), returning `count` lines."
   @spec lines(t(), non_neg_integer(), non_neg_integer()) :: [String.t()]
-  defdelegate lines(server, start, count), to: BufferProcess, as: :get_lines
+  defdelegate lines(server, start, count), to: BufferProcess
 
   @doc "Content of lines from `start_line` to `end_line` (inclusive, 0-indexed)."
-  @spec lines_content(t(), non_neg_integer(), non_neg_integer()) :: String.t()
-  defdelegate lines_content(server, start_line, end_line),
-    to: BufferProcess,
-    as: :get_lines_content
-
-  @doc "Text between two positions (end exclusive)."
-  @spec text_between(t(), position(), position()) :: String.t()
-  defdelegate text_between(server, from_pos, to_pos), to: BufferProcess, as: :content_range
+  @spec content_on_lines(t(), non_neg_integer(), non_neg_integer()) :: String.t()
+  defdelegate content_on_lines(server, start_line, end_line), to: BufferProcess
 
   @doc "Text between two positions (end inclusive, includes the character at end_pos)."
   @spec text_between_inclusive(t(), position(), position()) :: String.t()
-  defdelegate text_between_inclusive(server, start_pos, end_pos),
-    to: BufferProcess,
-    as: :get_range
+  defdelegate text_between_inclusive(server, start_pos, end_pos), to: BufferProcess
 
   @doc "Number of lines in the buffer."
   @spec line_count(t()) :: pos_integer()
@@ -193,14 +185,12 @@ defmodule Minga.Buffer do
                 new_text,
                 source \\ Minga.Buffer.EditSource.user()
               ),
-              to: BufferProcess,
-              as: :apply_text_edit
+              to: BufferProcess
 
   @doc "Apply a batch of edits atomically (for LSP workspace edits)."
   @spec apply_edits(t(), [text_edit()], Minga.Buffer.EditSource.t()) :: :ok
   defdelegate apply_edits(server, edits, source \\ Minga.Buffer.EditSource.lsp(:unknown)),
-    to: BufferProcess,
-    as: :apply_text_edits
+    to: BufferProcess
 
   @doc "Delete the character before the cursor."
   @spec delete_before(t()) :: :ok
@@ -227,12 +217,13 @@ defmodule Minga.Buffer do
           :ok | {:error, term()}
   defdelegate replace_content(server, new_content, source \\ :user), to: BufferProcess
 
-  @doc "Replace content unconditionally (bypasses read-only check)."
-  @spec replace_content_force(t(), String.t()) :: :ok
-  defdelegate replace_content_force(server, new_content), to: BufferProcess
+  @doc "Replace generated/internal content, bypassing user read-only restrictions."
+  @spec replace_generated_content(t(), String.t()) :: :ok
+  defdelegate replace_generated_content(server, new_content), to: BufferProcess
 
-  @spec replace_saved_content(t(), String.t()) :: :ok
-  defdelegate replace_saved_content(server, new_content), to: BufferProcess
+  @doc "Accept content as the saved base revision and clear dirty state."
+  @spec accept_saved_content(t(), String.t()) :: :ok
+  defdelegate accept_saved_content(server, new_content), to: BufferProcess
 
   @doc "Find and replace the first occurrence of `old_text` with `new_text`."
   @spec find_and_replace(t(), String.t(), String.t(), boundary()) ::
@@ -392,9 +383,9 @@ defmodule Minga.Buffer do
   @spec snapshot(t()) :: document()
   defdelegate snapshot(server), to: BufferProcess
 
-  @doc "Restore a previously captured document snapshot."
-  @spec apply_snapshot(t(), document()) :: :ok
-  defdelegate apply_snapshot(server, new_buf), to: BufferProcess
+  @doc "Commit a previously captured document snapshot."
+  @spec commit_snapshot(t(), document()) :: :ok
+  defdelegate commit_snapshot(server, new_buf), to: BufferProcess
 
   @doc "Render-ready snapshot of visible lines for the rendering pipeline."
   @spec render_snapshot(t(), non_neg_integer(), non_neg_integer()) ::
@@ -403,9 +394,9 @@ defmodule Minga.Buffer do
 
   # ── Edit deltas (for LSP incremental sync) ─────────────────────────
 
-  @doc "Flush edit deltas accumulated since the given consumer's last read."
-  @spec flush_edits(t(), atom()) :: [Minga.Buffer.EditDelta.t()]
-  defdelegate flush_edits(server, consumer_id), to: BufferProcess
+  @doc "Consume edit deltas accumulated since the given consumer's last read."
+  @spec consume_edit_deltas(t(), atom()) :: [Minga.Buffer.EditDelta.t()]
+  defdelegate consume_edit_deltas(server, consumer_id), to: BufferProcess
 
   # ── Decorations ────────────────────────────────────────────────────
 

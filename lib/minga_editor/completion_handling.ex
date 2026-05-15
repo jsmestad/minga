@@ -139,7 +139,7 @@ defmodule MingaEditor.CompletionHandling do
         state |> accept_text(completion, text) |> dismiss()
 
       {:text_edit, edit} ->
-        state |> apply_text_edit(edit) |> dismiss()
+        state |> apply_completion_edit(edit) |> dismiss()
     end
   end
 
@@ -209,8 +209,9 @@ defmodule MingaEditor.CompletionHandling do
 
   defp accept_text(state, _completion, _text), do: state
 
-  @spec apply_text_edit(EditorState.t(), Completion.text_edit()) :: EditorState.t()
-  defp apply_text_edit(%{workspace: %{buffers: %{active: buf}}} = state, edit) when is_pid(buf) do
+  @spec apply_completion_edit(EditorState.t(), Completion.text_edit()) :: EditorState.t()
+  defp apply_completion_edit(%{workspace: %{buffers: %{active: buf}}} = state, edit)
+       when is_pid(buf) do
     Buffer.apply_edit(
       buf,
       edit.range.start_line,
@@ -224,7 +225,7 @@ defmodule MingaEditor.CompletionHandling do
     state
   end
 
-  defp apply_text_edit(state, _edit), do: state
+  defp apply_completion_edit(state, _edit), do: state
 
   @spec maybe_update(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
   defp maybe_update(state, codepoint, _mods) do

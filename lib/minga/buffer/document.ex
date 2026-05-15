@@ -217,11 +217,11 @@ defmodule Minga.Buffer.Document do
   # ── Range operations ──
 
   @doc """
-  Returns the text between two positions **inclusive** on both ends.
+  Returns the content between two positions **inclusive** on both ends.
   If the positions are reversed, they are normalised automatically.
   """
-  @spec content_range(t(), position(), position()) :: String.t()
-  def content_range(%__MODULE__{} = buf, from_pos, to_pos) do
+  @spec content_between_inclusive(t(), position(), position()) :: String.t()
+  def content_between_inclusive(%__MODULE__{} = buf, from_pos, to_pos) do
     buf |> Selection.characterwise(from_pos, to_pos) |> then(&Selection.contents(buf, &1))
   end
 
@@ -233,17 +233,6 @@ defmodule Minga.Buffer.Document do
   @spec delete_range(t(), position(), position()) :: t()
   def delete_range(%__MODULE__{} = buf, from_pos, to_pos) do
     buf |> Selection.characterwise(from_pos, to_pos) |> then(&Selection.delete(buf, &1))
-  end
-
-  @doc """
-  Returns the text in the range [start_pos, end_pos] inclusive (characterwise).
-
-  Positions are clamped to valid buffer bounds. If start_pos is after end_pos,
-  the positions are swapped automatically.
-  """
-  @spec get_range(t(), position(), position()) :: String.t()
-  def get_range(%__MODULE__{} = buf, start_pos, end_pos) do
-    content_range(buf, start_pos, end_pos)
   end
 
   @doc """
@@ -311,7 +300,9 @@ defmodule Minga.Buffer.Document do
   defdelegate offset_to_position(doc, offset), to: Position, as: :from_point
   defdelegate grapheme_col(buf, value), to: Position, as: :display_column
 
-  defdelegate get_lines_content(buf, start_line, end_line), to: Selection, as: :line_contents
+  @spec content_on_lines(t(), non_neg_integer(), non_neg_integer()) :: String.t()
+  defdelegate content_on_lines(buf, start_line, end_line), to: Selection, as: :line_contents
+
   defdelegate clear_line(buf, line_num), to: Selection
 end
 

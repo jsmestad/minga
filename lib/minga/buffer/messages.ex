@@ -120,7 +120,7 @@ defmodule Minga.Buffer.Messages do
       excess = line_count - @max_lines
       content = Buffer.content(buffer)
       trimmed = content |> String.split("\n") |> Enum.drop(excess) |> Enum.join("\n")
-      Buffer.replace_content_force(buffer, trimmed)
+      Buffer.replace_generated_content(buffer, trimmed)
     end
 
     :ok

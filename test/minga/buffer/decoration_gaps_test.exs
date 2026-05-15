@@ -7,7 +7,7 @@ defmodule Minga.Buffer.DecorationGapsTest do
   alias Minga.Core.IntervalTree
 
   describe "content replacement clears decorations" do
-    test "replace_content_force resets decorations" do
+    test "replace_generated_content resets decorations" do
       {:ok, pid} = BufferProcess.start_link(content: "hello world")
 
       # Add a decoration
@@ -26,7 +26,7 @@ defmodule Minga.Buffer.DecorationGapsTest do
       assert decs.version > 0
 
       # Replace content
-      :ok = BufferProcess.replace_content_force(pid, "new content")
+      :ok = BufferProcess.replace_generated_content(pid, "new content")
 
       # Decorations should be cleared
       decs = BufferProcess.decorations(pid)
