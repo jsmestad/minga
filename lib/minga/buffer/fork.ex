@@ -162,7 +162,7 @@ defmodule Minga.Buffer.Fork do
   end
 
   def handle_call({:find_and_replace, old_text, new_text, boundary}, _from, state) do
-    case Replace.unique(state.document, old_text, new_text, boundary) do
+    case Replace.apply(state.document, old_text, new_text, boundary) do
       {:ok, new_doc, msg} ->
         {:reply, {:ok, msg},
          %{state | document: new_doc, dirty: true, version: state.version + 1}}
@@ -178,7 +178,7 @@ defmodule Minga.Buffer.Fork do
   end
 
   def handle_call({:find_and_replace_batch, edits, boundary}, _from, state) do
-    {final_doc, results, any_applied?} = Replace.batch(state.document, edits, boundary)
+    {final_doc, results, any_applied?} = Replace.apply_batch(state.document, edits, boundary)
 
     new_state =
       if any_applied? do

@@ -1,8 +1,8 @@
 defmodule Minga.Buffer.Replace do
   @moduledoc """
-  Pure unique text replacement operations for buffer documents.
+  Pure text replacement operations for buffer documents.
 
-  This module owns the domain semantics for agent-style find-and-replace edits: the old text must exist exactly once, optional line boundaries are enforced against that unique match, and batch replacements apply sequentially while preserving per-edit results. `Buffer.Process` and `Buffer.Fork` wrap these pure operations with their own process, undo, version, and merge concerns.
+  This module owns the domain semantics for agent-style find-and-replace edits: the expected text must identify exactly one replacement target, optional line boundaries are enforced against that target, and batch replacements apply sequentially while preserving per-edit results. `Buffer.Process` and `Buffer.Fork` wrap these pure operations with their own process, undo, version, and merge concerns.
   """
 
   alias Minga.Buffer.Document
@@ -19,25 +19,25 @@ defmodule Minga.Buffer.Replace do
   @typedoc "Result of applying a batch of replacement edits."
   @type batch_result :: {Document.t(), [result()], any_applied? :: boolean()}
 
-  @doc "Replaces `old_text` with `new_text` when the old text has exactly one match in the document."
-  @spec unique(Document.t(), String.t(), String.t(), boundary()) ::
+  @doc "Applies a replacement when `old_text` identifies exactly one target in the document."
+  @spec apply(Document.t(), String.t(), String.t(), boundary()) ::
           {:ok, Document.t(), String.t()} | {:error, String.t()}
-  def unique(%Document{} = doc, old_text, new_text, boundary \\ nil)
+  def apply(%Document{} = doc, old_text, new_text, boundary \\ nil)
       when is_binary(old_text) and is_binary(new_text) do
     content = Document.content(doc)
 
-    with {:ok, match} <- unique_match(content, old_text),
+    with {:ok, match} <- find_replacement_target(content, old_text),
          :ok <- check_boundary(content, match, boundary) do
       {:ok, replace_match(content, match, new_text), "applied"}
     end
   end
 
-  @doc "Applies unique replacements sequentially and returns the final document plus per-edit results."
-  @spec batch(Document.t(), [edit()], boundary()) :: batch_result()
-  def batch(%Document{} = doc, edits, boundary \\ nil) when is_list(edits) do
+  @doc "Applies replacements sequentially and returns the final document plus per-edit results."
+  @spec apply_batch(Document.t(), [edit()], boundary()) :: batch_result()
+  def apply_batch(%Document{} = doc, edits, boundary \\ nil) when is_list(edits) do
     {final_doc, results_reversed} =
       Enum.reduce(edits, {doc, []}, fn {old_text, new_text}, {current_doc, acc} ->
-        case unique(current_doc, old_text, new_text, boundary) do
+        case apply(current_doc, old_text, new_text, boundary) do
           {:ok, new_doc, msg} -> {new_doc, [{:ok, msg} | acc]}
           {:error, _} = err -> {current_doc, [err | acc]}
         end
@@ -47,11 +47,11 @@ defmodule Minga.Buffer.Replace do
     {final_doc, results, Enum.any?(results, &match?({:ok, _}, &1))}
   end
 
-  @spec unique_match(String.t(), String.t()) ::
+  @spec find_replacement_target(String.t(), String.t()) ::
           {:ok, {non_neg_integer(), pos_integer()}} | {:error, String.t()}
-  defp unique_match(_content, ""), do: {:error, "old_text is empty"}
+  defp find_replacement_target(_content, ""), do: {:error, "old_text is empty"}
 
-  defp unique_match(content, old_text) do
+  defp find_replacement_target(content, old_text) do
     case :binary.matches(content, old_text) do
       [] -> {:error, "old_text not found"}
       [match] -> {:ok, match}

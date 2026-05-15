@@ -1234,7 +1234,7 @@ defmodule Minga.Buffer.ProcessTest do
   end
 
   describe "find_and_replace/3" do
-    test "replacing unique text updates content and marks dirty" do
+    test "replacing text with one clear target updates content and marks dirty" do
       {:ok, pid} =
         BufferProcess.start_link(content: "defmodule Foo do\n  def hello, do: :world\nend\n")
 
