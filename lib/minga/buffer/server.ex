@@ -18,7 +18,7 @@ defmodule Minga.Buffer.Server do
 
   use GenServer
 
-  alias Minga.Buffer.{Cursor, Document, Lines, Operation, Position, Replace}
+  alias Minga.Buffer.{Cursor, Document, Lines, Operation, Persistence, Position, Replace}
   alias Minga.Buffer.EditDelta
   alias Minga.Buffer.EditSource
   alias Minga.Config
@@ -812,7 +812,7 @@ defmodule Minga.Buffer.Server do
     initial_content = Keyword.get(opts, :content, "")
     storage = Keyword.get(opts, :storage, :local)
 
-    case load_content(storage, file_path, initial_content) do
+    case Persistence.load_content(storage, file_path, initial_content) do
       {:ok, text, path, {mtime, size}} ->
         filetype =
           case Keyword.get(opts, :filetype) do
@@ -843,7 +843,7 @@ defmodule Minga.Buffer.Server do
           buffer_type: buffer_type,
           mtime: mtime,
           file_size: size,
-          file_hash: saved_content_hash(path, mtime, text),
+          file_hash: Persistence.saved_content_hash(path, mtime, text),
           name: Keyword.get(opts, :buffer_name),
           read_only: read_only,
           unlisted: Keyword.get(opts, :unlisted, false),
@@ -865,12 +865,12 @@ defmodule Minga.Buffer.Server do
   @impl true
   @spec handle_call(term(), GenServer.from(), state()) :: {:reply, term(), state()}
   def handle_call({:open, file_path}, _from, state) do
-    case read_file(state, file_path) do
+    case Persistence.read(state, file_path) do
       {:ok, text} ->
         first_line = text |> String.split("\n", parts: 2) |> List.first("")
         filetype = Language.detect_filetype_from_content(file_path, first_line)
 
-        {mtime, size} = file_stat_info(state, file_path)
+        {mtime, size} = Persistence.metadata(state, file_path)
 
         new_state = %{
           state
@@ -880,7 +880,7 @@ defmodule Minga.Buffer.Server do
             dirty: false,
             mtime: mtime,
             file_size: size,
-            file_hash: content_hash(text),
+            file_hash: Persistence.content_hash(text),
             decorations: Decorations.new(),
             undo_stack: [],
             redo_stack: []
@@ -1030,23 +1030,23 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call(:save, _from, state) do
-    {disk_mtime, disk_size} = file_stat_info(state, state.file_path)
+    {disk_mtime, disk_size} = Persistence.metadata(state, state.file_path)
 
-    if file_changed_on_disk?(state, disk_mtime, disk_size) do
+    if Persistence.changed_since_saved?(state, disk_mtime, disk_size) do
       {:reply, {:error, :file_changed}, state}
     else
       content = Document.content(state.document)
 
-      case write_file(state, state.file_path, content) do
+      case Persistence.write(state, state.file_path, content) do
         :ok ->
-          {new_mtime, new_size} = file_stat_info(state, state.file_path)
+          {new_mtime, new_size} = Persistence.metadata(state, state.file_path)
 
           {:reply, :ok,
            mark_saved(%{
              state
              | mtime: new_mtime,
                file_size: new_size,
-               file_hash: content_hash(content)
+               file_hash: Persistence.content_hash(content)
            })}
 
         {:error, reason} ->
@@ -1067,16 +1067,16 @@ defmodule Minga.Buffer.Server do
   def handle_call(:force_save, _from, state) do
     content = Document.content(state.document)
 
-    case write_file(state, state.file_path, content) do
+    case Persistence.write(state, state.file_path, content) do
       :ok ->
-        {new_mtime, new_size} = file_stat_info(state, state.file_path)
+        {new_mtime, new_size} = Persistence.metadata(state, state.file_path)
 
         {:reply, :ok,
          mark_saved(%{
            state
            | mtime: new_mtime,
              file_size: new_size,
-             file_hash: content_hash(content)
+             file_hash: Persistence.content_hash(content)
          })}
 
       {:error, reason} ->
@@ -1089,7 +1089,7 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call(:reload, _from, state) do
-    case read_file(state, state.file_path) do
+    case Persistence.read(state, state.file_path) do
       {:ok, text} ->
         {line, col} = Document.cursor(state.document)
         new_buf = Document.new(text)
@@ -1110,7 +1110,7 @@ defmodule Minga.Buffer.Server do
         first_line = text |> String.split("\n", parts: 2) |> List.first("")
         filetype = Language.detect_filetype_from_content(state.file_path, first_line)
 
-        {new_mtime, new_size} = file_stat_info(state, state.file_path)
+        {new_mtime, new_size} = Persistence.metadata(state, state.file_path)
 
         new_state = %{
           state
@@ -1119,7 +1119,7 @@ defmodule Minga.Buffer.Server do
             dirty: false,
             mtime: new_mtime,
             file_size: new_size,
-            file_hash: content_hash(text),
+            file_hash: Persistence.content_hash(text),
             undo_stack: [],
             redo_stack: [],
             decorations: Decorations.new()
@@ -1136,9 +1136,9 @@ defmodule Minga.Buffer.Server do
   def handle_call({:save_as, file_path}, _from, state) do
     content = Document.content(state.document)
 
-    case write_file(state, file_path, content) do
+    case Persistence.write(state, file_path, content) do
       :ok ->
-        {new_mtime, new_size} = file_stat_info(state, file_path)
+        {new_mtime, new_size} = Persistence.metadata(state, file_path)
         unregister_path(state.file_path)
         register_path(file_path)
 
@@ -1148,7 +1148,7 @@ defmodule Minga.Buffer.Server do
            | file_path: file_path,
              mtime: new_mtime,
              file_size: new_size,
-             file_hash: content_hash(content)
+             file_hash: Persistence.content_hash(content)
          })}
 
       {:error, reason} ->
@@ -1186,7 +1186,7 @@ defmodule Minga.Buffer.Server do
 
   def handle_call({:replace_saved_content, new_content}, _from, state) do
     new_buf = Document.new(new_content)
-    {mtime, size} = file_stat_info(state, state.file_path)
+    {mtime, size} = Persistence.metadata(state, state.file_path)
 
     new_state = %{
       state
@@ -1196,7 +1196,7 @@ defmodule Minga.Buffer.Server do
         saved_version: state.version + 1,
         mtime: mtime,
         file_size: size,
-        file_hash: content_hash(new_content),
+        file_hash: Persistence.content_hash(new_content),
         undo_stack: [],
         redo_stack: [],
         pending_edits: [],
@@ -1868,105 +1868,6 @@ defmodule Minga.Buffer.Server do
     :exit, _ -> %{}
   end
 
-  @typep file_meta :: {integer() | nil, non_neg_integer() | nil}
-
-  @spec load_content(BufState.storage(), String.t() | nil, String.t()) ::
-          {:ok, String.t(), String.t() | nil, file_meta()} | {:error, term()}
-  defp load_content(_storage, nil, initial_content), do: {:ok, initial_content, nil, {nil, nil}}
-
-  defp load_content(storage, file_path, _initial_content) do
-    case read_file(storage, file_path) do
-      {:ok, text} -> {:ok, text, file_path, file_stat_info(storage, file_path)}
-      {:error, :enoent} -> {:ok, "", file_path, {nil, nil}}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  # Detects external changes by comparing mtime, file size, and saved-content hash.
-  # The hash closes the same-second, same-size hole in coarse filesystem mtimes.
-  @spec file_changed_on_disk?(BufState.t(), integer() | nil, non_neg_integer() | nil) ::
-          boolean()
-  defp file_changed_on_disk?(%{mtime: nil}, nil, _disk_size), do: false
-  defp file_changed_on_disk?(%{mtime: nil}, _disk_mtime, _disk_size), do: true
-  defp file_changed_on_disk?(_state, nil, _disk_size), do: false
-
-  defp file_changed_on_disk?(state, disk_mtime, disk_size) do
-    metadata_changed? = disk_mtime != state.mtime or disk_size != state.file_size
-
-    case saved_content_status(state) do
-      :same -> false
-      :changed -> true
-      :unknown -> metadata_changed?
-    end
-  end
-
-  @typep saved_content_status :: :same | :changed | :unknown
-
-  @spec saved_content_status(BufState.t()) :: saved_content_status()
-  defp saved_content_status(%{file_path: path, file_hash: hash} = state)
-       when is_binary(path) and is_binary(hash) do
-    case read_file(state, path) do
-      {:ok, content} -> if content_hash(content) == hash, do: :same, else: :changed
-      {:error, _reason} -> :changed
-    end
-  end
-
-  defp saved_content_status(_state), do: :unknown
-
-  @spec read_file(BufState.t() | BufState.storage(), String.t()) ::
-          {:ok, String.t()} | {:error, term()}
-  defp read_file(%{storage: storage}, path), do: read_file(storage, path)
-  defp read_file(:local, path), do: File.read(path)
-
-  defp read_file({:remote, node, _base_path}, path) do
-    :erpc.call(
-      node,
-      Minga.Distribution.File,
-      :read_local,
-      [path, Minga.Distribution.File.max_file_bytes()],
-      5_000
-    )
-  catch
-    :exit, reason -> remote_unavailable(reason)
-    :error, {:erpc, _reason} = reason -> remote_unavailable(reason)
-  end
-
-  @spec file_stat_info(BufState.t() | BufState.storage(), String.t() | nil) ::
-          {integer() | nil, non_neg_integer() | nil}
-  defp file_stat_info(_state_or_storage, nil), do: {nil, nil}
-
-  defp file_stat_info(state_or_storage, path) do
-    case file_stat_result(state_or_storage, path) do
-      {:ok, %{mtime: mtime, size: size}} -> {mtime, size}
-      {:error, _} -> {nil, nil}
-    end
-  end
-
-  @spec file_stat_result(BufState.t() | BufState.storage(), String.t()) ::
-          {:ok, File.Stat.t()} | {:error, term()}
-  defp file_stat_result(%{storage: storage}, path), do: file_stat_result(storage, path)
-  defp file_stat_result(:local, path), do: File.stat(path, time: :posix)
-
-  defp file_stat_result({:remote, node, _base_path}, path) do
-    :erpc.call(node, File, :stat, [path, [time: :posix]], 5_000)
-  catch
-    :exit, reason -> remote_unavailable(reason)
-    :error, {:erpc, _reason} = reason -> remote_unavailable(reason)
-  end
-
-  @spec remote_unavailable(term()) :: {:error, {:remote_unavailable, term()}}
-  defp remote_unavailable(reason), do: {:error, {:remote_unavailable, reason}}
-
-  @spec content_hash(String.t()) :: binary()
-  defp content_hash(content), do: :crypto.hash(:sha256, content)
-
-  @spec saved_content_hash(String.t() | nil, integer() | nil, String.t()) :: binary() | nil
-  defp saved_content_hash(path, mtime, content) when is_binary(path) and is_integer(mtime) do
-    content_hash(content)
-  end
-
-  defp saved_content_hash(_path, _mtime, _content), do: nil
-
   # Delegates to BufState for time-based undo coalescing.
   @spec push_undo(state(), Document.t(), BufState.edit_source()) :: state()
   defp push_undo(state, new_buf, source), do: BufState.push_undo(state, new_buf, source)
@@ -2046,7 +1947,7 @@ defmodule Minga.Buffer.Server do
 
   @spec auto_save_file(state(), String.t()) :: {:noreply, state()}
   defp auto_save_file(state, path) do
-    case file_stat_result(state, path) do
+    case Persistence.stat(state, path) do
       {:ok, %{mtime: disk_mtime, size: disk_size}} ->
         maybe_write_auto_save_file(state, path, disk_mtime, disk_size)
 
@@ -2064,7 +1965,7 @@ defmodule Minga.Buffer.Server do
   @spec maybe_write_auto_save_file(state(), String.t(), integer(), non_neg_integer()) ::
           {:noreply, state()}
   defp maybe_write_auto_save_file(state, path, disk_mtime, disk_size) do
-    if file_changed_on_disk?(state, disk_mtime, disk_size) do
+    if Persistence.changed_since_saved?(state, disk_mtime, disk_size) do
       skip_auto_save(state, path, "file changed on disk")
     else
       write_auto_save_file(state, path)
@@ -2086,16 +1987,16 @@ defmodule Minga.Buffer.Server do
   defp write_auto_save_file(state, path) do
     content = Document.content(state.document)
 
-    case write_file(state, path, content) do
+    case Persistence.write(state, path, content) do
       :ok ->
-        {new_mtime, new_size} = file_stat_info(state, path)
+        {new_mtime, new_size} = Persistence.metadata(state, path)
 
         new_state =
           mark_saved(%{
             state
             | mtime: new_mtime,
               file_size: new_size,
-              file_hash: content_hash(content)
+              file_hash: Persistence.content_hash(content)
           })
 
         log_to_messages(new_state, "Auto-saved: #{display_path(path)}", :info)
@@ -2190,24 +2091,6 @@ defmodule Minga.Buffer.Server do
   end
 
   defp delete_swap_file(_state), do: :ok
-
-  @spec write_file(BufState.t(), String.t(), String.t()) :: :ok | {:error, term()}
-  defp write_file(%{storage: :local}, file_path, content) do
-    file_path
-    |> Path.dirname()
-    |> File.mkdir_p()
-    |> case do
-      :ok -> File.write(file_path, content)
-      error -> error
-    end
-  end
-
-  defp write_file(%{storage: {:remote, node, _base_path}}, file_path, content) do
-    :erpc.call(node, File, :write, [file_path, content], 10_000)
-  catch
-    :exit, reason -> remote_unavailable(reason)
-    :error, {:erpc, _reason} = reason -> remote_unavailable(reason)
-  end
 
   # ── Edit delta tracking ──
 
