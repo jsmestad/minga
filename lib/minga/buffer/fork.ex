@@ -28,6 +28,7 @@ defmodule Minga.Buffer.Fork do
   use GenServer
 
   alias Minga.Buffer.Document
+  alias Minga.Buffer.Replace
   alias Minga.Buffer.Server, as: BufServer
   alias Minga.Core.Diff
 
@@ -160,10 +161,8 @@ defmodule Minga.Buffer.Fork do
     {:reply, state.version, state}
   end
 
-  def handle_call({:find_and_replace, old_text, new_text, _boundary}, _from, state) do
-    content = Document.content(state.document)
-
-    case do_find_and_replace(content, old_text, new_text) do
+  def handle_call({:find_and_replace, old_text, new_text, boundary}, _from, state) do
+    case Replace.unique(state.document, old_text, new_text, boundary) do
       {:ok, new_doc, msg} ->
         {:reply, {:ok, msg},
          %{state | document: new_doc, dirty: true, version: state.version + 1}}
@@ -178,26 +177,11 @@ defmodule Minga.Buffer.Fork do
     {:reply, :ok, %{state | document: new_doc, dirty: true, version: state.version + 1}}
   end
 
-  def handle_call({:find_and_replace_batch, edits, _boundary}, _from, state) do
-    {final_doc, results_reversed} =
-      Enum.reduce(edits, {state.document, []}, fn
-        {"", _new_text}, {doc, acc} ->
-          {doc, [{:error, "old_text is empty"} | acc]}
-
-        {old_text, new_text}, {doc, acc} ->
-          content = Document.content(doc)
-
-          case do_find_and_replace(content, old_text, new_text) do
-            {:ok, new_doc, msg} -> {new_doc, [{:ok, msg} | acc]}
-            {:error, _} = err -> {doc, [err | acc]}
-          end
-      end)
-
-    results = Enum.reverse(results_reversed)
-    any_applied = Enum.any?(results, &match?({:ok, _}, &1))
+  def handle_call({:find_and_replace_batch, edits, boundary}, _from, state) do
+    {final_doc, results, any_applied?} = Replace.batch(state.document, edits, boundary)
 
     new_state =
-      if any_applied do
+      if any_applied? do
         %{state | document: final_doc, dirty: true, version: state.version + 1}
       else
         state
@@ -236,28 +220,6 @@ defmodule Minga.Buffer.Fork do
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────
-
-  @spec do_find_and_replace(String.t(), String.t(), String.t()) ::
-          {:ok, Document.t(), String.t()} | {:error, String.t()}
-  defp do_find_and_replace(_content, "", _new_text) do
-    {:error, "old_text is empty"}
-  end
-
-  defp do_find_and_replace(content, old_text, new_text) do
-    case :binary.matches(content, old_text) do
-      [] ->
-        {:error, "old_text not found"}
-
-      [{offset, len}] ->
-        before_match = binary_part(content, 0, offset)
-        after_match = binary_part(content, offset + len, byte_size(content) - offset - len)
-        new_content = before_match <> new_text <> after_match
-        {:ok, Document.new(new_content), "applied"}
-
-      matches ->
-        {:error, "old_text found #{length(matches)} times (ambiguous)"}
-    end
-  end
 
   @spec format_merge_result(Diff.merge3_result()) ::
           {:ok, String.t()} | {:conflict, [Diff.merge_hunk()]}
