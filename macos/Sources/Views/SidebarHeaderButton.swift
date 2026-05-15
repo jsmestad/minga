@@ -36,6 +36,7 @@ struct SidebarHeaderButton: View {
         }
         .buttonStyle(.plain)
         .help(tooltip)
+        .accessibilityLabel(tooltip)
         .onHover { hovering in
             if reduceMotion {
                 isHovered = hovering

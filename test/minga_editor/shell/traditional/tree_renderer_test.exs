@@ -38,8 +38,10 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
     end
 
     test "includes a header row with project name and folder icon", %{tmp_dir: tmp_dir} do
+      root = Path.join(tmp_dir, "minga")
+
       input = %RenderInput{
-        tree: sample_tree(tmp_dir),
+        tree: sample_tree(root),
         rect: {0, 0, 20, 10},
         focused: false,
         theme: Theme.get!(:doom_one),
@@ -51,8 +53,9 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
       header = Enum.find(draws, fn {r, c, _t, _s} -> r == 0 and c == 0 end)
       assert header != nil
       {_r, _c, text, style} = header
-      # Contains the folder open icon (nf-md-folder-open U+F0256)
+      # Contains the folder open icon (nf-md-folder-open U+F0256) and project/root context.
       assert String.contains?(text, "\u{F0256}")
+      assert String.contains?(text, "minga")
       assert style.bold == true
     end
 

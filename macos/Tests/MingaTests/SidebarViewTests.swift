@@ -41,6 +41,18 @@ struct SidebarHeaderButtonTests {
         try button.tap()
         #expect(tapped)
     }
+
+    @Test("Tooltip also backs the accessibility label")
+    @MainActor func tooltipBacksAccessibilityLabel() throws {
+        let sut = SidebarHeaderButton(
+            systemName: "plus",
+            barFg: .white,
+            tooltip: "New File…",
+            action: {}
+        )
+        let button = try sut.inspect().find(ViewType.Button.self)
+        #expect(try button.accessibilityLabel().string() == "New File…")
+    }
 }
 
 // MARK: - GitStatusView Empty States
@@ -153,15 +165,49 @@ struct FileTreeViewTests {
         #expect(strings.contains("Project"))
     }
 
-    @Test("Header action buttons are hidden at rest (shown on hover)")
-    @MainActor func headerActionButtonsHiddenAtRest() throws {
+    @Test("Header action buttons reserve layout space at rest")
+    @MainActor func headerActionButtonsReserveLayoutSpaceAtRest() throws {
         let state = FileTreeState()
         state.visible = true
 
         let sut = FileTreeHeaderContent(fileTreeState: state, theme: ThemeColors(), encoder: nil, branchName: "", leadingPadding: 10)
         let body = try sut.inspect()
         let buttons = body.findAll(ViewType.Button.self)
-        #expect(buttons.count == 0)
+        #expect(buttons.count == 4)
+    }
+
+    @Test("Header action buttons send file-tree actions")
+    @MainActor func headerActionButtonsSendFileTreeActions() throws {
+        let state = FileTreeState()
+        state.visible = true
+        state.selectedIndex = 7
+        let spy = SpyEncoder()
+
+        let sut = FileTreeHeaderContent(fileTreeState: state, theme: ThemeColors(), encoder: spy, branchName: "main", leadingPadding: 10)
+        let buttons = try sut.inspect().findAll(ViewType.Button.self)
+
+        try buttons[0].tap()
+        try buttons[1].tap()
+        try buttons[2].tap()
+        try buttons[3].tap()
+
+        #expect(spy.guiActions == [
+            .fileTreeNewFile(parentIndex: 7),
+            .fileTreeNewFolder(parentIndex: 7),
+            .fileTreeRefresh,
+            .fileTreeCollapseAll,
+        ])
+    }
+
+    @Test("Header accessibility summarizes project and branch context")
+    @MainActor func headerAccessibilitySummarizesProjectAndBranchContext() throws {
+        let state = FileTreeState()
+        state.visible = true
+        state.projectRoot = "/Users/test/code/minga"
+
+        let sut = FileTreeHeaderContent(fileTreeState: state, theme: ThemeColors(), encoder: nil, branchName: "main", leadingPadding: 10)
+
+        #expect(sut.accessibilityLabelText == "File tree for minga, branch main")
     }
 
     @Test("File entries render their names")
