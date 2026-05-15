@@ -348,6 +348,34 @@ defmodule Minga.Core.UnicodeTest do
     end
   end
 
+  # ── truncate_display_width/2 and pad_display_trailing/2 ──────────────────
+
+  describe "display-width truncation helpers" do
+    test "truncate_display_width respects wide grapheme widths" do
+      assert Unicode.truncate_display_width("你好world", 5) == "你好w"
+      assert Unicode.display_width(Unicode.truncate_display_width("你好world", 5)) == 5
+    end
+
+    test "truncate_display_width never splits a wide grapheme" do
+      assert Unicode.truncate_display_width("你", 1) == ""
+      assert Unicode.truncate_display_width("你a", 3) == "你a"
+    end
+
+    test "pad_display_trailing pads to the requested display width" do
+      padded = Unicode.pad_display_trailing("你", 3)
+
+      assert Unicode.display_width(padded) == 3
+      assert padded == "你 "
+    end
+
+    test "pad_display_trailing truncates before padding" do
+      padded = Unicode.pad_display_trailing("你好", 3)
+
+      assert Unicode.display_width(padded) == 3
+      assert padded == "你 "
+    end
+  end
+
   # ── byte_col_for_grapheme/2 ──────────────────────────────────────────────
 
   describe "byte_col_for_grapheme/2" do

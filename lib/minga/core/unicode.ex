@@ -401,6 +401,68 @@ defmodule Minga.Core.Unicode do
   end
 
   @doc """
+  Truncates a string to fit within `max_width` display columns.
+
+  The result never splits a grapheme and never exceeds the requested display width. Wide graphemes that would cross the boundary are omitted.
+
+  ## Examples
+
+      iex> Minga.Core.Unicode.truncate_display_width("hello", 3)
+      "hel"
+
+      iex> Minga.Core.Unicode.truncate_display_width("你好world", 5)
+      "你好w"
+  """
+  @spec truncate_display_width(String.t(), non_neg_integer()) :: String.t()
+  def truncate_display_width(_text, 0), do: ""
+
+  def truncate_display_width(text, max_width) when is_binary(text) and max_width > 0 do
+    do_truncate_display_width(text, max_width, 0, [])
+  end
+
+  @spec do_truncate_display_width(String.t(), non_neg_integer(), non_neg_integer(), [String.t()]) ::
+          String.t()
+  defp do_truncate_display_width("", _max_width, _width, acc) do
+    acc |> Enum.reverse() |> IO.iodata_to_binary()
+  end
+
+  defp do_truncate_display_width(text, max_width, width, acc) do
+    case String.next_grapheme(text) do
+      {grapheme, rest} ->
+        next_width = width + grapheme_width(grapheme)
+
+        if next_width > max_width do
+          acc |> Enum.reverse() |> IO.iodata_to_binary()
+        else
+          do_truncate_display_width(rest, max_width, next_width, [grapheme | acc])
+        end
+
+      nil ->
+        acc |> Enum.reverse() |> IO.iodata_to_binary()
+    end
+  end
+
+  @doc """
+  Pads or truncates a string so the result occupies exactly `target_width` display columns.
+
+  Use this at rendering boundaries where row segments must align in terminal columns even when text contains CJK, emoji, or combining characters.
+
+  ## Examples
+
+      iex> Minga.Core.Unicode.pad_display_trailing("hi", 4)
+      "hi  "
+
+      iex> Minga.Core.Unicode.pad_display_trailing("你好", 3)
+      "你 "
+  """
+  @spec pad_display_trailing(String.t(), non_neg_integer()) :: String.t()
+  def pad_display_trailing(text, target_width) when is_binary(text) do
+    truncated = truncate_display_width(text, target_width)
+    padding_width = target_width - display_width(truncated)
+    truncated <> String.duplicate(" ", padding_width)
+  end
+
+  @doc """
   Converts a display column (terminal columns) to a byte offset.
 
   Walks graphemes from the start of `text`, accumulating display width,

@@ -9,6 +9,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
   """
 
   alias Minga.Core.Face
+  alias Minga.Core.Unicode
   alias Minga.Language
   alias Minga.Project.FileTree
   alias MingaEditor.DisplayList
@@ -27,6 +28,10 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
   @disclosure_expanded "▾ "
   @disclosure_collapsed "▸ "
   @disclosure_file "  "
+  @guide_ellipsis "… "
+  @name_ellipsis "…"
+  @minimum_name_width 4
+  @minimum_editing_text_width 1
 
   # Nerd Font folder icons (nf-md-folder / nf-md-folder-open)
   @folder_closed "\u{F024B}"
@@ -126,7 +131,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     # Header: project directory name with folder icon
     project_name = Path.basename(tree.root)
     header_text = " #{@folder_open} #{project_name}/"
-    header_display = String.slice(header_text, 0, width) |> String.pad_trailing(width)
+    header_display = Unicode.pad_display_trailing(header_text, width)
 
     header = [
       DisplayList.draw(
@@ -186,52 +191,50 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     is_dirty = tree_row.dirty?
     diagnostic_text = diagnostic_indicator_text(tree_row.diagnostics)
 
-    # Build the structure columns from ancestor guides plus a dedicated disclosure column.
-    guide_prefix = build_guides(tree_row.guides, tree_row.last_child?)
-    disclosure = disclosure_marker(tree_row)
-    structure_prefix = guide_prefix <> disclosure
-
-    # Pick the icon and its color
-    {icon, icon_color} = entry_icon(tree_row)
-
-    # Entry name (dirs get trailing slash)
+    # Entry name (dirs get trailing slash). Middle truncation keeps the useful beginning and extension visible.
     name = if tree_row.directory?, do: tree_row.name <> "/", else: tree_row.name
 
-    # Compose the full line: structure columns + icon + space + name
-    prefix = structure_prefix <> icon <> " "
-    prefix_width = String.length(prefix)
+    # Reserve right-side indicators before spending width on deep indentation.
+    fixed_prefix_width = fixed_prefix_width(tree_row)
 
-    # Right-side indicators: [diagnostic] [modified_dot] [git_status].
-    # Fit them into the available suffix so narrow panes never let badges overlap the row prefix.
     {diagnostic_text, is_dirty, file_git_status} =
-      fit_indicators(diagnostic_text, is_dirty, tree_row.git_status, max(width - prefix_width, 0))
+      fit_indicators(
+        diagnostic_text,
+        is_dirty,
+        tree_row.git_status,
+        max(width - fixed_prefix_width, 0)
+      )
 
-    diagnostic_width = String.length(diagnostic_text)
+    diagnostic_width = Unicode.display_width(diagnostic_text)
     git_width = if file_git_status, do: 2, else: 0
     dirty_width = if is_dirty, do: 1, else: 0
     indicator_width = diagnostic_width + dirty_width + git_width
 
-    # Truncate name to fit, accounting for indicator space
-    max_name_len = max(width - prefix_width - indicator_width, 0)
-    display_name = String.slice(name, 0, max_name_len)
+    {prefix, structure_prefix, icon, icon_color} =
+      row_prefix(tree_row, width, indicator_width, @minimum_name_width)
+
+    prefix_width = Unicode.display_width(prefix)
+
+    # Truncate name to fit in display columns, accounting for wide unicode and indicator space.
+    name_pad_width = max(width - prefix_width - indicator_width, 0)
+    display_name = truncate_name(name, name_pad_width)
 
     # Build draw commands: structure, icon, name, diagnostic marker, dirty marker, and git marker.
     guide_style = guide_draw_style(is_cursor, focused, theme)
     icon_style = icon_draw_style(icon_color, is_cursor, focused, theme)
     name_style = name_draw_style(tree_row, is_cursor, tree_row.active?, focused, theme)
-    structure_len = String.length(structure_prefix)
+    structure_width = Unicode.display_width(structure_prefix)
 
     draws = []
     draws = draws ++ [DisplayList.draw(row, col, structure_prefix, guide_style)]
 
     # Icon segment
-    icon_col = col + structure_len
+    icon_col = col + structure_width
     draws = draws ++ [DisplayList.draw(row, icon_col, icon <> " ", icon_style)]
 
     # Name segment: pad to fill space between name and indicators
     name_col = col + prefix_width
-    name_pad_width = max(width - prefix_width - indicator_width, 0)
-    padded_name = String.pad_trailing(display_name, name_pad_width)
+    padded_name = Unicode.pad_display_trailing(display_name, name_pad_width)
     draws = draws ++ [DisplayList.draw(row, name_col, padded_name, name_style)]
 
     # Right-aligned indicators start here.
@@ -265,12 +268,6 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     %{col_off: col, width: width, theme: theme} = opts
     editing = tree_row.editing
 
-    # Build the same structure columns as normal rows so inline editing does not shift columns.
-    guide_prefix = build_guides(tree_row.guides, tree_row.last_child?)
-    disclosure = disclosure_marker(tree_row)
-    structure_prefix = guide_prefix <> disclosure
-    structure_len = String.length(structure_prefix)
-
     # Type indicator: file icon for new file, folder icon for new folder,
     # the entry's own icon for rename
     {icon, _icon_color} =
@@ -280,8 +277,18 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
         :rename -> entry_icon(tree_row)
       end
 
+    # Build the same structure columns as normal rows, but compact deep guides before they hide the edit text.
+    disclosure = disclosure_marker(tree_row)
+    fixed_prefix = disclosure <> icon <> " "
+
+    guide_width =
+      max(width - Unicode.display_width(fixed_prefix) - @minimum_editing_text_width, 0)
+
+    guide_prefix = build_guides(tree_row.guides, guide_width)
+    structure_prefix = guide_prefix <> disclosure
+    structure_width = Unicode.display_width(structure_prefix)
     prefix = structure_prefix <> icon <> " "
-    prefix_len = String.length(prefix)
+    prefix_width = Unicode.display_width(prefix)
 
     # Editing text with cursor
     text = editing.text
@@ -289,12 +296,9 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     display_text = text <> cursor_char
 
     # Truncate to fit
-    max_text_len = max(width - prefix_len, 0)
-    display_text = String.slice(display_text, 0, max_text_len)
-
-    # Pad to fill the row
-    total_drawn = prefix_len + String.length(display_text)
-    pad = if total_drawn < width, do: String.duplicate(" ", width - total_drawn), else: ""
+    text_width = max(width - prefix_width, 0)
+    display_text = Unicode.truncate_display_width(display_text, text_width)
+    padded_text = Unicode.pad_display_trailing(display_text, text_width)
 
     # Editing row uses inverse video (selection highlight)
     editing_bg = theme.tree.dir_fg
@@ -307,23 +311,143 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     draws = []
     draws = draws ++ [DisplayList.draw(row, col, structure_prefix, guide_style)]
 
-    icon_col = col + structure_len
+    icon_col = col + structure_width
     draws = draws ++ [DisplayList.draw(row, icon_col, icon <> " ", icon_style)]
 
-    text_col = col + prefix_len
-    draws = draws ++ [DisplayList.draw(row, text_col, display_text <> pad, text_style)]
+    text_col = col + prefix_width
+    draws = draws ++ [DisplayList.draw(row, text_col, padded_text, text_style)]
 
     draws
   end
 
   # ── Indent guides ──────────────────────────────────────────────────────
 
-  @spec build_guides([boolean()], boolean()) :: String.t()
-  defp build_guides(ancestor_guides, _last_child?) do
-    Enum.map_join(ancestor_guides, fn
-      true -> @guide_pipe
-      false -> @guide_blank
-    end)
+  @spec fixed_prefix_width(Row.t()) :: non_neg_integer()
+  defp fixed_prefix_width(tree_row) do
+    {icon, _icon_color} = entry_icon(tree_row)
+    Unicode.display_width(disclosure_marker(tree_row) <> icon <> " ")
+  end
+
+  @spec row_prefix(Row.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          {String.t(), String.t(), String.t(), non_neg_integer()}
+  defp row_prefix(tree_row, row_width, indicator_width, minimum_name_width) do
+    disclosure = disclosure_marker(tree_row)
+    {icon, icon_color} = entry_icon(tree_row)
+    fixed_prefix = disclosure <> icon <> " "
+
+    guide_width =
+      max(
+        row_width - Unicode.display_width(fixed_prefix) - indicator_width - minimum_name_width,
+        0
+      )
+
+    guide_prefix = build_guides(tree_row.guides, guide_width)
+    structure_prefix = guide_prefix <> disclosure
+    prefix = structure_prefix <> icon <> " "
+
+    {prefix, structure_prefix, icon, icon_color}
+  end
+
+  @spec build_guides([boolean()], non_neg_integer()) :: String.t()
+  defp build_guides(_ancestor_guides, 0), do: ""
+
+  defp build_guides(ancestor_guides, max_width) do
+    ancestor_guides
+    |> guide_text()
+    |> maybe_compact_guides(ancestor_guides, max_width)
+  end
+
+  @spec maybe_compact_guides(String.t(), [boolean()], non_neg_integer()) :: String.t()
+  defp maybe_compact_guides(full_guides, ancestor_guides, max_width) do
+    if Unicode.display_width(full_guides) <= max_width do
+      full_guides
+    else
+      compact_guides(ancestor_guides, max_width)
+    end
+  end
+
+  @spec compact_guides([boolean()], non_neg_integer()) :: String.t()
+  defp compact_guides([], _max_width), do: ""
+  defp compact_guides(_ancestor_guides, max_width) when max_width < 2, do: ""
+
+  defp compact_guides(ancestor_guides, max_width) do
+    suffix_width = max(max_width - Unicode.display_width(@guide_ellipsis), 0)
+
+    suffix =
+      ancestor_guides
+      |> take_suffix_guides(div(suffix_width, 2))
+      |> guide_text()
+
+    Unicode.truncate_display_width(@guide_ellipsis <> suffix, max_width)
+  end
+
+  @spec take_suffix_guides([boolean()], non_neg_integer()) :: [boolean()]
+  defp take_suffix_guides(_ancestor_guides, 0), do: []
+  defp take_suffix_guides(ancestor_guides, count), do: Enum.take(ancestor_guides, -count)
+
+  @spec guide_text([boolean()]) :: String.t()
+  defp guide_text(ancestor_guides) do
+    Enum.map_join(ancestor_guides, &guide_segment/1)
+  end
+
+  @spec guide_segment(boolean()) :: String.t()
+  defp guide_segment(true), do: @guide_pipe
+  defp guide_segment(false), do: @guide_blank
+
+  @spec truncate_name(String.t(), non_neg_integer()) :: String.t()
+  defp truncate_name(_name, 0), do: ""
+
+  defp truncate_name(name, max_width) do
+    if Unicode.display_width(name) <= max_width do
+      name
+    else
+      truncate_name_middle(name, max_width)
+    end
+  end
+
+  @spec truncate_name_middle(String.t(), non_neg_integer()) :: String.t()
+  defp truncate_name_middle(name, 1), do: Unicode.truncate_display_width(name, 1)
+
+  defp truncate_name_middle(name, max_width) do
+    ellipsis_width = Unicode.display_width(@name_ellipsis)
+    available_width = max(max_width - ellipsis_width, 0)
+    suffix_width = suffix_width_for_name(name, available_width)
+    prefix_width = available_width - suffix_width
+
+    Unicode.truncate_display_width(name, prefix_width) <>
+      @name_ellipsis <> trailing_display_width(name, suffix_width)
+  end
+
+  @spec suffix_width_for_name(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp suffix_width_for_name(_name, 0), do: 0
+
+  defp suffix_width_for_name(name, available_width) do
+    extension_width = name |> Path.extname() |> Unicode.display_width()
+    available_width |> div(2) |> max(extension_width) |> min(available_width)
+  end
+
+  @spec trailing_display_width(String.t(), non_neg_integer()) :: String.t()
+  defp trailing_display_width(_text, 0), do: ""
+
+  defp trailing_display_width(text, max_width) do
+    text
+    |> String.graphemes()
+    |> Enum.reverse()
+    |> take_trailing_graphemes(max_width, 0, [])
+  end
+
+  @spec take_trailing_graphemes([String.t()], non_neg_integer(), non_neg_integer(), [String.t()]) ::
+          String.t()
+  defp take_trailing_graphemes([], _max_width, _width, acc), do: Enum.join(acc)
+
+  defp take_trailing_graphemes([grapheme | rest], max_width, width, acc) do
+    next_width = width + Unicode.grapheme_width(grapheme)
+
+    if next_width > max_width do
+      Enum.join(acc)
+    else
+      take_trailing_graphemes(rest, max_width, next_width, [grapheme | acc])
+    end
   end
 
   @spec disclosure_marker(Row.t()) :: String.t()
@@ -395,8 +519,8 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
   defp fit_diagnostic_indicator("", available_width), do: {"", available_width}
 
   defp fit_diagnostic_indicator(text, available_width) do
-    fitted = String.slice(text, 0, available_width)
-    {fitted, available_width - String.length(fitted)}
+    fitted = Unicode.truncate_display_width(text, available_width)
+    {fitted, available_width - Unicode.display_width(fitted)}
   end
 
   @spec fit_dirty_indicator(boolean(), non_neg_integer()) :: {boolean(), non_neg_integer()}
