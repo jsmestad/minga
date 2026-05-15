@@ -298,7 +298,10 @@ defmodule Minga.Buffer.Document do
   @spec last_grapheme_byte_offset(String.t()) :: non_neg_integer()
   defdelegate last_grapheme_byte_offset(text), to: Position, as: :last_character_on_line
 
+  @spec line_at(t(), non_neg_integer()) :: String.t() | nil
   defdelegate line_at(buf, line_num), to: Lines, as: :fetch
+
+  @spec lines(t(), non_neg_integer(), non_neg_integer()) :: [String.t()]
   defdelegate lines(buf, start, count), to: Lines, as: :slice
 
   defdelegate move(buf, direction), to: Cursor, as: :move
@@ -317,8 +320,15 @@ defimpl Minga.Editing.Text.Readable, for: Minga.Buffer.Document do
 
   alias Minga.Buffer.{Document, Lines, Position}
 
+  @spec content(Document.t()) :: String.t()
   def content(doc), do: Document.content(doc)
+
+  @spec line_at(Document.t(), non_neg_integer()) :: String.t() | nil
   def line_at(doc, n), do: Lines.fetch(doc, n)
+
+  @spec line_count(Document.t()) :: pos_integer()
   def line_count(doc), do: Document.line_count(doc)
+
+  @spec offset_to_position(Document.t(), non_neg_integer()) :: Document.position()
   def offset_to_position(doc, offset), do: Position.from_point(doc, offset)
 end
