@@ -1459,11 +1459,9 @@ defmodule MingaEditor.Mouse do
   defp horizontal_cursor_target(display_col, _left, _cols), do: display_col
 
   @spec byte_offset_for_visible_col(String.t(), non_neg_integer()) :: non_neg_integer()
-  defp byte_offset_for_visible_col(_line_text, 0), do: 0
-
   defp byte_offset_for_visible_col(line_text, target_col) do
     line_text
-    |> Unicode.display_col_to_byte(target_col + 1)
+    |> Unicode.display_col_to_byte(target_col)
     |> advance_to_visible_col(line_text, target_col)
   end
 

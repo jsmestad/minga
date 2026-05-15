@@ -76,6 +76,40 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
       assert sep_draws != []
     end
 
+    test "renders no off-rect rows for zero-height panels", %{tmp_dir: tmp_dir} do
+      draws =
+        TreeRenderer.render(%RenderInput{
+          tree: sample_tree(tmp_dir),
+          rect: {0, 0, 20, 0},
+          focused: false,
+          theme: Theme.get!(:doom_one),
+          active_path: nil
+        })
+
+      assert draws == []
+    end
+
+    test "height-one panels render only the header and one separator cell", %{tmp_dir: tmp_dir} do
+      draws =
+        TreeRenderer.render(%RenderInput{
+          tree: sample_tree(tmp_dir),
+          rect: {0, 0, 20, 1},
+          focused: false,
+          theme: Theme.get!(:doom_one),
+          active_path: nil
+        })
+
+      assert Enum.any?(draws, fn {row, col, text, _style} ->
+               row == 0 and col == 0 and String.contains?(text, "\u{F0256}")
+             end)
+
+      sep_draws =
+        Enum.filter(draws, fn {_row, col, text, _style} -> col == 20 and text == "│" end)
+
+      assert [{0, 20, "│", _style}] = sep_draws
+      refute Enum.any?(draws, fn {row, col, _text, _style} -> row > 0 and col < 20 end)
+    end
+
     test "renders indent guides and file icons", %{tmp_dir: tmp_dir} do
       input = %RenderInput{
         tree: sample_tree(tmp_dir),
@@ -392,7 +426,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
       dirty_draw = draw_matching(draws, "●")
       git_draw = draw_matching(draws, " ●")
 
-      assert String.length(row_text) <= 12
+      assert Unicode.display_width(row_text) <= 12
       assert diagnostic_draw != nil
       assert dirty_draw != nil
       assert git_draw != nil
@@ -496,7 +530,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
         |> Enum.sort_by(fn {_r, c, _t, _s} -> c end)
         |> Enum.map_join(fn {_r, _c, text, _s} -> text end)
 
-      assert String.length(row_text) <= 10
+      assert Unicode.display_width(row_text) <= 10
       assert String.contains?(row_text, "✖9+")
     end
 

@@ -348,6 +348,28 @@ defmodule Minga.Core.UnicodeTest do
     end
   end
 
+  describe "display_col_to_byte/2" do
+    test "ASCII display columns map to byte boundaries" do
+      assert Unicode.display_col_to_byte("hello", 0) == 0
+      assert Unicode.display_col_to_byte("hello", 3) == 3
+      assert Unicode.display_col_to_byte("hello", 5) == 5
+    end
+
+    test "wide grapheme trailing edge maps after the grapheme" do
+      assert Unicode.display_col_to_byte("你好世界", 2) == byte_size("你")
+      assert Unicode.display_col_to_byte("你好世界", 4) == byte_size("你好")
+    end
+
+    test "display column inside a wide grapheme maps to the grapheme start" do
+      assert Unicode.display_col_to_byte("你好", 1) == 0
+      assert Unicode.display_col_to_byte("a你b", 2) == byte_size("a")
+    end
+
+    test "past the end clamps to byte_size" do
+      assert Unicode.display_col_to_byte("a你", 99) == byte_size("a你")
+    end
+  end
+
   # ── truncate_display_width/2 and pad_display_trailing/2 ──────────────────
 
   describe "display-width truncation helpers" do

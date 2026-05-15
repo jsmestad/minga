@@ -617,8 +617,8 @@ defmodule MingaEditor.Commands.FileTree do
   @spec apply_drop_source(state(), String.t(), String.t(), [FileTree.entry()], String.t()) ::
           {:changed | :unchanged, state()}
   defp apply_drop_source(state, source_path, target_dir, entries, root) do
-    source_path = canonical_path(source_path)
-    root = canonical_path(root)
+    source_path = Path.expand(source_path)
+    root = Path.expand(root)
 
     if path_under_root?(source_path, root) do
       apply_internal_drop_source(state, source_path, target_dir, entries)
@@ -630,7 +630,7 @@ defmodule MingaEditor.Commands.FileTree do
   @spec apply_internal_drop_source(state(), String.t(), String.t(), [FileTree.entry()]) ::
           {:changed | :unchanged, state()}
   defp apply_internal_drop_source(state, source_path, target_dir, entries) do
-    case Enum.find(entries, &same_path?(&1.path, source_path)) do
+    case Enum.find(entries, &same_expanded_path?(&1.path, source_path)) do
       nil ->
         MingaEditor.log_to_messages("[file-tree] Drop rejected: stale source #{source_path}")
         {:unchanged, state}
@@ -673,7 +673,7 @@ defmodule MingaEditor.Commands.FileTree do
   defp apply_external_drop_source(state, source_path, target_dir) do
     dest_path = Path.join(target_dir, Path.basename(source_path))
 
-    if File.exists?(dest_path) do
+    if path_entry_exists?(dest_path) do
       MingaEditor.log_to_messages(
         "[file-tree] Drop copy skipped, destination exists: #{dest_path}"
       )
@@ -768,6 +768,9 @@ defmodule MingaEditor.Commands.FileTree do
     end
   end
 
+  @spec same_expanded_path?(String.t(), String.t()) :: boolean()
+  defp same_expanded_path?(left, right), do: Path.expand(left) == Path.expand(right)
+
   @spec same_path?(String.t(), String.t()) :: boolean()
   defp same_path?(left, right), do: canonical_path(left) == canonical_path(right)
 
@@ -818,7 +821,7 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec execute_rename(state(), String.t(), String.t(), String.t()) :: state()
   defp execute_rename(state, old_path, new_path, new_name) do
-    case File.rename(old_path, new_path) do
+    case guarded_rename(old_path, new_path) do
       :ok ->
         state = sync_moved_buffer_path(state, old_path, new_path, "Rename")
 
@@ -872,19 +875,73 @@ defmodule MingaEditor.Commands.FileTree do
     end
   end
 
-  @spec update_buffer_path(state(), String.t(), String.t()) :: {:ok, state()} | {:error, term()}
+  @spec update_buffer_path(state(), String.t(), String.t()) ::
+          {:ok, state()} | {:error, [{String.t(), term()}]}
   defp update_buffer_path(state, old_path, new_path) do
-    case EditorState.find_buffer_by_path(state, old_path) do
+    old_path = Path.expand(old_path)
+    new_path = Path.expand(new_path)
+
+    errors =
+      state.workspace.buffers.list
+      |> Enum.reduce([], &retarget_moved_buffer(&1, &2, old_path, new_path))
+      |> Enum.reverse()
+
+    case errors do
+      [] -> {:ok, state}
+      [_ | _] -> {:error, errors}
+    end
+  end
+
+  @spec retarget_moved_buffer(pid(), [{String.t(), term()}], String.t(), String.t()) ::
+          [{String.t(), term()}]
+  defp retarget_moved_buffer(pid, errors, old_path, new_path) do
+    case safe_buffer_file_path(pid) do
       nil ->
-        {:ok, state}
+        errors
 
-      idx ->
-        pid = Enum.at(state.workspace.buffers.list, idx)
+      path ->
+        save_moved_buffer_path(pid, path, moved_buffer_path(path, old_path, new_path), errors)
+    end
+  end
 
-        case Buffer.save_as(pid, new_path) do
-          :ok -> {:ok, state}
-          {:error, reason} -> {:error, reason}
-        end
+  @spec safe_buffer_file_path(pid()) :: String.t() | nil
+  defp safe_buffer_file_path(pid) do
+    Buffer.file_path(pid)
+  catch
+    :exit, _ -> nil
+  end
+
+  @spec save_moved_buffer_path(pid(), String.t(), String.t() | nil, [{String.t(), term()}]) ::
+          [{String.t(), term()}]
+  defp save_moved_buffer_path(_pid, _path, nil, errors), do: errors
+
+  defp save_moved_buffer_path(pid, path, moved_path, errors) do
+    case Buffer.save_as(pid, moved_path) do
+      :ok -> errors
+      {:error, reason} -> [{path, reason} | errors]
+    end
+  catch
+    :exit, reason -> [{path, {:exit, reason}} | errors]
+  end
+
+  @spec moved_buffer_path(String.t(), String.t(), String.t()) :: String.t() | nil
+  defp moved_buffer_path(path, old_path, new_path) do
+    expanded_path = Path.expand(path)
+
+    if expanded_path == old_path do
+      new_path
+    else
+      moved_descendant_buffer_path(expanded_path, old_path, new_path)
+    end
+  end
+
+  @spec moved_descendant_buffer_path(String.t(), String.t(), String.t()) :: String.t() | nil
+  defp moved_descendant_buffer_path(expanded_path, old_path, new_path) do
+    prefix = path_prefix(old_path)
+
+    if String.starts_with?(expanded_path, prefix) do
+      suffix = String.replace_prefix(expanded_path, prefix, "")
+      Path.join(new_path, suffix)
     end
   end
 
@@ -894,7 +951,7 @@ defmodule MingaEditor.Commands.FileTree do
     base = Path.rootname(path)
     candidate = "#{base} copy#{ext}"
 
-    if File.exists?(candidate) do
+    if path_entry_exists?(candidate) do
       find_unique_copy(base, ext, 2)
     else
       candidate
@@ -905,7 +962,7 @@ defmodule MingaEditor.Commands.FileTree do
   defp find_unique_copy(base, ext, n) do
     candidate = "#{base} copy #{n}#{ext}"
 
-    if File.exists?(candidate),
+    if path_entry_exists?(candidate),
       do: find_unique_copy(base, ext, n + 1),
       else: candidate
   end

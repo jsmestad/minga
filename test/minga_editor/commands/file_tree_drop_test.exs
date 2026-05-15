@@ -80,6 +80,26 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       assert File.exists?(Path.join(target_dir, "source.txt"))
     end
 
+    test "moves an internal symlink entry instead of copying its external target", %{tmp_dir: dir} do
+      active_file = Path.join(dir, "main.ex")
+      target_dir = Path.join(dir, "target")
+      symlink_path = Path.join(dir, "linked.txt")
+      {external_root, external_file} = external_file_fixture(dir, "linked-target.txt")
+      on_exit(fn -> File.rm_rf(external_root) end)
+      File.write!(active_file, "main")
+      File.mkdir_p!(target_dir)
+      File.ln_s!(external_file, symlink_path)
+
+      state = open_file_tree(dir, active_file)
+      intent = drop_intent(state.workspace.file_tree.tree, target_dir, [symlink_path])
+
+      _state = Commands.FileTree.drop(state, intent)
+
+      assert {:error, :enoent} = File.lstat(symlink_path)
+      assert {:ok, %File.Stat{type: :symlink}} = File.lstat(Path.join(target_dir, "linked.txt"))
+      assert File.read!(external_file) == "external"
+    end
+
     test "moves an internal visible source to the parent directory when dropped onto a file", %{
       tmp_dir: dir
     } do
@@ -137,6 +157,47 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
 
       assert File.read!(source_file) == "source"
       assert {:ok, %File.Stat{type: :symlink}} = File.lstat(dangling_dest)
+      refute File.exists?(Path.join(target_dir, "missing.txt"))
+    end
+
+    test "does not copy through a dangling symlink destination for an external source", %{
+      tmp_dir: dir
+    } do
+      active_file = Path.join(dir, "main.ex")
+      target_dir = Path.join(dir, "target")
+      dangling_dest = Path.join(target_dir, "external.txt")
+      File.write!(active_file, "main")
+      File.mkdir_p!(target_dir)
+      File.ln_s!("missing.txt", dangling_dest)
+      {external_root, external_file} = external_file_fixture(dir, "external.txt")
+      on_exit(fn -> File.rm_rf(external_root) end)
+
+      state = open_file_tree(dir, active_file)
+      intent = drop_intent(state.workspace.file_tree.tree, target_dir, [external_file])
+
+      _state = Commands.FileTree.drop(state, intent)
+
+      assert {:ok, %File.Stat{type: :symlink}} = File.lstat(dangling_dest)
+      refute File.exists?(Path.join(target_dir, "missing.txt"))
+    end
+
+    test "retargets open buffers under an internally moved directory", %{tmp_dir: dir} do
+      source_dir = Path.join(dir, "source")
+      target_dir = Path.join(dir, "target")
+      active_file = Path.join(source_dir, "main.ex")
+      moved_file = Path.join([target_dir, "source", "main.ex"])
+      File.mkdir_p!(source_dir)
+      File.mkdir_p!(target_dir)
+      File.write!(active_file, "main")
+
+      state = open_file_tree(dir, active_file)
+      intent = drop_intent(state.workspace.file_tree.tree, target_dir, [source_dir])
+
+      _state = Commands.FileTree.drop(state, intent)
+
+      refute File.exists?(active_file)
+      assert File.exists?(moved_file)
+      assert Minga.Buffer.file_path(state.workspace.buffers.active) == moved_file
     end
   end
 

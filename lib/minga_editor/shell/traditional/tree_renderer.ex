@@ -127,6 +127,10 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
   end
 
   @spec do_render(FileTree.t(), WindowTree.rect(), Theme.t(), [Row.t()]) :: [DisplayList.draw()]
+  defp do_render(_tree, {_row_off, _col_off, width, height}, _theme, _rows)
+       when width <= 0 or height <= 0,
+       do: []
+
   defp do_render(tree, {row_off, col_off, width, height}, theme, rows) do
     # Header: project directory name with folder icon
     project_name = Path.basename(tree.root)
@@ -143,7 +147,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     ]
 
     # Entry rows (starting from row 1, leaving row 0 for header)
-    content_rows = height - 1
+    content_rows = max(height - 1, 0)
     scroll_offset = scroll_offset(selected_index(rows), content_rows)
 
     render_opts = %{
@@ -749,8 +753,8 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     end
   end
 
-  @spec scroll_offset(non_neg_integer(), pos_integer()) :: non_neg_integer()
-  defp scroll_offset(cursor, visible_rows) when visible_rows <= 0, do: cursor
+  @spec scroll_offset(non_neg_integer(), non_neg_integer()) :: non_neg_integer()
+  defp scroll_offset(cursor, 0), do: cursor
   defp scroll_offset(cursor, visible_rows) when cursor < visible_rows, do: 0
 
   defp scroll_offset(cursor, visible_rows) do
