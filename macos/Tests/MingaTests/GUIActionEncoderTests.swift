@@ -137,6 +137,17 @@ struct GUIActionEncoderTests {
         ])
     }
 
+    @Test("file tree drop action records stable target identity and source paths")
+    func fileTreeDropAction() {
+        let spy = SpyEncoder()
+        let encoder: InputEncoder = spy
+        encoder.sendFileTreeDrop(sourcePaths: ["/tmp/from.txt"], targetIndex: 9, targetId: "/project/lib", targetPathHash: 0xABCD, targetPath: "/project/lib", targetIsDir: true, modifiers: 0)
+
+        #expect(spy.guiActions == [
+            .fileTreeDrop(sourcePaths: ["/tmp/from.txt"], targetIndex: 9, targetId: "/project/lib", targetPathHash: 0xABCD, targetPath: "/project/lib", targetIsDir: true, modifiers: 0)
+        ])
+    }
+
     @Test("file tree edit confirm and cancel actions record correctly")
     func fileTreeEditActions() {
         let spy = SpyEncoder()

@@ -15,6 +15,7 @@ defmodule MingaEditor.Commands.FileTree do
   alias MingaEditor.Workspace.State, as: WorkspaceState
   alias Minga.Project.FileTree
   alias Minga.Project.FileTree.BufferSync
+  alias MingaEditor.FileTree.DropIntent
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
@@ -331,6 +332,30 @@ defmodule MingaEditor.Commands.FileTree do
     end
   end
 
+  @doc "Handles a native GUI file-tree drop intent with BEAM-owned filesystem operations."
+  @spec drop(state(), DropIntent.t()) :: state()
+
+  def drop(%{workspace: %{file_tree: %{tree: nil}}} = state, %DropIntent{}) do
+    MingaEditor.log_to_messages("[file-tree] Drop rejected: file tree is unavailable")
+    state
+  end
+
+  def drop(%{workspace: %{file_tree: %{tree: tree}}} = state, %DropIntent{} = intent) do
+    entries = FileTree.visible_entries(tree)
+
+    case drop_target_dir(entries, intent) do
+      {:ok, target_dir} ->
+        {state, changed?} =
+          apply_drop_sources(state, intent.source_paths, target_dir, entries, tree.root)
+
+        refresh_after_drop(state, changed?)
+
+      :error ->
+        log_stale_drop_target(entries, intent)
+        state
+    end
+  end
+
   @doc "Cancels the current inline edit without making changes."
   @spec cancel_editing(state()) :: state()
   def cancel_editing(%{workspace: %{file_tree: %{editing: nil}}} = state), do: state
@@ -536,7 +561,232 @@ defmodule MingaEditor.Commands.FileTree do
     end
   end
 
-  # Clears editing state and refreshes the tree from disk.
+  @spec apply_drop_sources(state(), [String.t()], String.t(), [FileTree.entry()], String.t()) ::
+          {state(), boolean()}
+  defp apply_drop_sources(state, source_paths, target_dir, entries, root) do
+    Enum.reduce(source_paths, {state, false}, fn source_path, acc ->
+      apply_drop_source_result(source_path, acc, target_dir, entries, root)
+    end)
+  end
+
+  @spec apply_drop_source_result(
+          String.t(),
+          {state(), boolean()},
+          String.t(),
+          [FileTree.entry()],
+          String.t()
+        ) :: {state(), boolean()}
+  defp apply_drop_source_result(source_path, {state, changed?}, target_dir, entries, root) do
+    case apply_drop_source(state, source_path, target_dir, entries, root) do
+      {:changed, next_state} -> {next_state, true}
+      {:unchanged, next_state} -> {next_state, changed?}
+    end
+  end
+
+  @spec refresh_after_drop(state(), boolean()) :: state()
+  defp refresh_after_drop(state, true), do: refresh(state)
+  defp refresh_after_drop(state, false), do: state
+
+  # Validates the GUI-reported drop target against the current BEAM-owned tree.
+  @spec drop_target_dir([FileTree.entry()], DropIntent.t()) :: {:ok, String.t()} | :error
+  defp drop_target_dir(entries, %DropIntent{} = intent) do
+    case Enum.at(entries, intent.target_index) do
+      nil ->
+        :error
+
+      target ->
+        if drop_target_matches?(target, intent) do
+          {:ok, drop_target_dir_path(target)}
+        else
+          :error
+        end
+    end
+  end
+
+  @spec drop_target_matches?(FileTree.entry(), DropIntent.t()) :: boolean()
+  defp drop_target_matches?(target, %DropIntent{} = intent) do
+    same_path?(target.path, intent.target_path) and same_path?(target.path, intent.target_id) and
+      :erlang.phash2(Path.expand(target.path), 0xFFFFFFFF) == intent.target_path_hash and
+      target.dir? == intent.target_dir?
+  end
+
+  @spec drop_target_dir_path(FileTree.entry()) :: String.t()
+  defp drop_target_dir_path(%{dir?: true, path: path}), do: path
+  defp drop_target_dir_path(%{dir?: false, path: path}), do: Path.dirname(path)
+
+  @spec apply_drop_source(state(), String.t(), String.t(), [FileTree.entry()], String.t()) ::
+          {:changed | :unchanged, state()}
+  defp apply_drop_source(state, source_path, target_dir, entries, root) do
+    source_path = canonical_path(source_path)
+    root = canonical_path(root)
+
+    if path_under_root?(source_path, root) do
+      apply_internal_drop_source(state, source_path, target_dir, entries)
+    else
+      apply_external_drop_source(state, source_path, target_dir)
+    end
+  end
+
+  @spec apply_internal_drop_source(state(), String.t(), String.t(), [FileTree.entry()]) ::
+          {:changed | :unchanged, state()}
+  defp apply_internal_drop_source(state, source_path, target_dir, entries) do
+    case Enum.find(entries, &same_path?(&1.path, source_path)) do
+      nil ->
+        MingaEditor.log_to_messages("[file-tree] Drop rejected: stale source #{source_path}")
+        {:unchanged, state}
+
+      source ->
+        move_drop_source(state, source, target_dir)
+    end
+  end
+
+  @spec move_drop_source(state(), FileTree.entry(), String.t()) ::
+          {:changed | :unchanged, state()}
+  defp move_drop_source(state, source, target_dir) do
+    new_path = Path.join(target_dir, source.name)
+
+    if same_path?(source.path, new_path) do
+      {:unchanged, state}
+    else
+      case guarded_rename(source.path, new_path) do
+        :ok ->
+          state = sync_moved_buffer_path(state, source.path, new_path, "Move")
+
+          MingaEditor.log_to_messages(
+            "[file-tree] Moved: #{source.name} → #{Path.dirname(new_path)}"
+          )
+
+          {:changed, state}
+
+        {:error, reason} ->
+          MingaEditor.log_to_messages(
+            "[file-tree] Move failed: #{source.path} → #{new_path}: #{inspect(reason)}"
+          )
+
+          {:unchanged, state}
+      end
+    end
+  end
+
+  @spec apply_external_drop_source(state(), String.t(), String.t()) ::
+          {:changed | :unchanged, state()}
+  defp apply_external_drop_source(state, source_path, target_dir) do
+    dest_path = Path.join(target_dir, Path.basename(source_path))
+
+    if File.exists?(dest_path) do
+      MingaEditor.log_to_messages(
+        "[file-tree] Drop copy skipped, destination exists: #{dest_path}"
+      )
+
+      {:unchanged, state}
+    else
+      copy_external_drop_source(state, source_path, dest_path)
+    end
+  end
+
+  @spec copy_external_drop_source(state(), String.t(), String.t()) ::
+          {:changed | :unchanged, state()}
+  defp copy_external_drop_source(state, source_path, dest_path) do
+    result =
+      if File.dir?(source_path),
+        do: File.cp_r(source_path, dest_path),
+        else: File.cp(source_path, dest_path)
+
+    case result do
+      :ok ->
+        MingaEditor.log_to_messages(
+          "[file-tree] Copied: #{Path.basename(source_path)} → #{Path.dirname(dest_path)}"
+        )
+
+        {:changed, state}
+
+      {:ok, _files} ->
+        MingaEditor.log_to_messages(
+          "[file-tree] Copied: #{Path.basename(source_path)} → #{Path.dirname(dest_path)}"
+        )
+
+        {:changed, state}
+
+      {:error, reason, file} ->
+        cleanup_result = cleanup_partial_copy(dest_path)
+
+        MingaEditor.log_to_messages(
+          "[file-tree] Drop copy failed: #{source_path} → #{dest_path} at #{file}: #{inspect(reason)}. #{cleanup_result}"
+        )
+
+        {:changed, state}
+
+      {:error, reason} ->
+        MingaEditor.log_to_messages(
+          "[file-tree] Drop copy failed: #{source_path} → #{dest_path}: #{inspect(reason)}"
+        )
+
+        {:unchanged, state}
+    end
+  end
+
+  @spec cleanup_partial_copy(String.t()) :: String.t()
+  defp cleanup_partial_copy(dest_path) do
+    case File.rm_rf(dest_path) do
+      {:ok, []} -> "No partial output was found."
+      {:ok, _paths} -> "Partial output was removed: #{dest_path}."
+      {:error, reason, file} -> "Partial cleanup failed at #{file}: #{inspect(reason)}."
+    end
+  end
+
+  @spec log_stale_drop_target([FileTree.entry()], DropIntent.t()) :: :ok
+  defp log_stale_drop_target(entries, %DropIntent{} = intent) do
+    current = Enum.at(entries, intent.target_index)
+
+    MingaEditor.log_to_messages(
+      "[file-tree] Drop rejected: stale target index=#{intent.target_index} target=#{intent.target_path} id=#{intent.target_id} hash=#{intent.target_path_hash}; current=#{drop_target_debug(current)}"
+    )
+  end
+
+  @spec drop_target_debug(FileTree.entry() | nil) :: String.t()
+  defp drop_target_debug(nil), do: "missing"
+
+  defp drop_target_debug(entry) do
+    "#{entry.path} dir?=#{entry.dir?} hash=#{:erlang.phash2(Path.expand(entry.path), 0xFFFFFFFF)}"
+  end
+
+  @spec guarded_rename(String.t(), String.t()) :: :ok | {:error, term()}
+  defp guarded_rename(old_path, new_path) do
+    if path_entry_exists?(new_path) do
+      {:error, {:destination_exists, new_path}}
+    else
+      File.rename(old_path, new_path)
+    end
+  end
+
+  @spec path_entry_exists?(String.t()) :: boolean()
+  defp path_entry_exists?(path) do
+    case File.lstat(path) do
+      {:ok, _stat} -> true
+      {:error, :enoent} -> false
+      {:error, _reason} -> true
+    end
+  end
+
+  @spec same_path?(String.t(), String.t()) :: boolean()
+  defp same_path?(left, right), do: canonical_path(left) == canonical_path(right)
+
+  @spec canonical_path(String.t()) :: String.t()
+  defp canonical_path(path) do
+    case :file.read_link_all(String.to_charlist(path)) do
+      {:ok, real_path} -> List.to_string(real_path)
+      {:error, _reason} -> Path.expand(path)
+    end
+  end
+
+  @spec path_under_root?(String.t(), String.t()) :: boolean()
+  defp path_under_root?(path, root),
+    do: path == root or String.starts_with?(path, path_prefix(root))
+
+  @spec path_prefix(String.t()) :: String.t()
+  defp path_prefix("/"), do: "/"
+  defp path_prefix(root), do: root <> "/"
+
   @spec clear_editing_and_refresh(state()) :: state()
   defp clear_editing_and_refresh(state) do
     ft = FileTreeState.cancel_editing(state.workspace.file_tree)
@@ -570,7 +820,7 @@ defmodule MingaEditor.Commands.FileTree do
   defp execute_rename(state, old_path, new_path, new_name) do
     case File.rename(old_path, new_path) do
       :ok ->
-        state = update_buffer_path(state, old_path, new_path)
+        state = sync_moved_buffer_path(state, old_path, new_path, "Rename")
 
         MingaEditor.log_to_messages(
           "[file-tree] Renamed: #{Path.basename(old_path)} \u2192 #{new_name}"
@@ -579,12 +829,14 @@ defmodule MingaEditor.Commands.FileTree do
         clear_editing_and_refresh(state)
 
       {:error, reason} ->
-        MingaEditor.log_to_messages("[file-tree] Rename failed: #{inspect(reason)}")
+        MingaEditor.log_to_messages(
+          "[file-tree] Rename failed: #{old_path} → #{new_path}: #{inspect(reason)}"
+        )
+
         cancel_editing(state)
     end
   end
 
-  # Updates any open buffer that references the old path to the new path.
   # Counts all files and directories recursively under the given path.
   @spec count_children(String.t()) :: non_neg_integer()
   defp count_children(path) do
@@ -605,16 +857,34 @@ defmodule MingaEditor.Commands.FileTree do
     end
   end
 
-  @spec update_buffer_path(state(), String.t(), String.t()) :: state()
+  @spec sync_moved_buffer_path(state(), String.t(), String.t(), String.t()) :: state()
+  defp sync_moved_buffer_path(state, old_path, new_path, action) do
+    case update_buffer_path(state, old_path, new_path) do
+      {:ok, state} ->
+        state
+
+      {:error, reason} ->
+        MingaEditor.log_to_messages(
+          "[file-tree] #{action} completed on disk, but open buffer path update failed: #{old_path} → #{new_path}: #{inspect(reason)}"
+        )
+
+        state
+    end
+  end
+
+  @spec update_buffer_path(state(), String.t(), String.t()) :: {:ok, state()} | {:error, term()}
   defp update_buffer_path(state, old_path, new_path) do
     case EditorState.find_buffer_by_path(state, old_path) do
       nil ->
-        state
+        {:ok, state}
 
       idx ->
         pid = Enum.at(state.workspace.buffers.list, idx)
-        Buffer.save_as(pid, new_path)
-        state
+
+        case Buffer.save_as(pid, new_path) do
+          :ok -> {:ok, state}
+          {:error, reason} -> {:error, reason}
+        end
     end
   end
 
@@ -642,16 +912,19 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec execute_move(state(), String.t(), String.t(), String.t()) :: state()
   defp execute_move(state, old_path, new_path, name) do
-    case File.rename(old_path, new_path) do
+    case guarded_rename(old_path, new_path) do
       :ok ->
-        state = update_buffer_path(state, old_path, new_path)
+        state = sync_moved_buffer_path(state, old_path, new_path, "Move")
 
         MingaEditor.log_to_messages("[file-tree] Moved: #{name} → #{Path.dirname(new_path)}")
 
         refresh(state)
 
       {:error, reason} ->
-        MingaEditor.log_to_messages("[file-tree] Move failed: #{inspect(reason)}")
+        MingaEditor.log_to_messages(
+          "[file-tree] Move failed: #{old_path} → #{new_path}: #{inspect(reason)}"
+        )
+
         state
     end
   end

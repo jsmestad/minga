@@ -991,6 +991,39 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       assert {:ok, {:gui_action, :file_tree_refresh}} = Protocol.decode_event(payload)
     end
 
+    test "file_tree_drop with target identity and source paths" do
+      target_id = "/project/lib"
+      target_path = "/project/lib"
+      source_a = "/tmp/a.txt"
+      source_b = "/tmp/b.txt"
+
+      payload =
+        <<0x07, 0x40, 8::16, 0xAABBCCDD::32, 1::8, 2::8, byte_size(target_id)::16,
+          target_id::binary, byte_size(target_path)::16, target_path::binary, 2::16,
+          byte_size(source_a)::16, source_a::binary, byte_size(source_b)::16, source_b::binary>>
+
+      assert {:ok, {:gui_action, {:file_tree_drop, intent}}} = Protocol.decode_event(payload)
+      assert %MingaEditor.FileTree.DropIntent{} = intent
+      assert intent.target_index == 8
+      assert intent.target_path_hash == 0xAABBCCDD
+      assert intent.target_dir? == true
+      assert intent.modifiers == 2
+      assert intent.target_id == target_id
+      assert intent.target_path == target_path
+      assert intent.source_paths == [source_a, source_b]
+    end
+
+    test "file_tree_drop rejects malformed payloads" do
+      assert {:error, :malformed} =
+               Protocol.decode_event(<<0x07, 0x40, 8::16, 0::32, 2::8, 0::8>>)
+
+      assert {:error, :malformed} =
+               Protocol.decode_event(<<0x07, 0x40, 8::16, 0::32, 1::8, 0::8, 4::16, "ab">>)
+
+      assert {:error, :malformed} =
+               Protocol.decode_event(<<0x07, 0x40, 8::16, 0::32, 1::8, 0::8, 1::16, 0xFF>>)
+    end
+
     test "unknown action type returns malformed" do
       payload = <<0x07, 0xFF, 0, 0>>
       assert {:error, :malformed} = Protocol.decode_event(payload)

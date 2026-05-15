@@ -34,6 +34,7 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendFileTreeRename(index: UInt16)
     func sendFileTreeDuplicate(index: UInt16)
     func sendFileTreeMove(sourceIndex: UInt16, targetDirIndex: UInt16)
+    func sendFileTreeDrop(sourcePaths: [String], targetIndex: UInt16, targetId: String, targetPathHash: UInt32, targetPath: String, targetIsDir: Bool, modifiers: UInt8)
     func sendFileTreeCollapseAll()
     func sendFileTreeRefresh()
     func sendCompletionSelect(index: UInt16)
@@ -421,6 +422,31 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf[3] = UInt8(sourceIndex & 0xFF)
         buf[4] = UInt8(targetDirIndex >> 8)
         buf[5] = UInt8(targetDirIndex & 0xFF)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: file_tree_drop. Layout: opcode(1) + action_type(1) + target_index(2) + target_hash(4) + target_kind(1) + modifiers(1) + target_id + target_path + sources.
+    func sendFileTreeDrop(sourcePaths: [String], targetIndex: UInt16, targetId: String, targetPathHash: UInt32, targetPath: String, targetIsDir: Bool, modifiers: UInt8) {
+        if let error = fileTreeDropPayloadError(sourcePaths: sourcePaths, targetId: targetId, targetPath: targetPath) {
+            sendLog(level: LOG_LEVEL_WARN, message: error)
+            return
+        }
+
+        var buf = Data()
+        buf.append(OP_GUI_ACTION)
+        buf.append(GUI_ACTION_FILE_TREE_DROP)
+        appendU16(&buf, targetIndex)
+        appendU32(&buf, targetPathHash)
+        buf.append(targetIsDir ? 1 : 0)
+        buf.append(modifiers)
+        appendString16(&buf, targetId)
+        appendString16(&buf, targetPath)
+        appendU16(&buf, UInt16(min(sourcePaths.count, Int(UInt16.max))))
+
+        for path in sourcePaths.prefix(Int(UInt16.max)) {
+            appendString16(&buf, path)
+        }
+
         writeFrame(buf)
     }
 
@@ -1006,6 +1032,51 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         let flags = fcntl(fd, F_GETFL, 0)
         guard flags >= 0 else { return }
         _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
+    }
+
+    private func fileTreeDropPayloadError(sourcePaths: [String], targetId: String, targetPath: String) -> String? {
+        if sourcePaths.count > Int(UInt16.max) {
+            return "File tree drop rejected: too many source paths for GUI protocol"
+        }
+
+        if !fitsString16(targetId) {
+            return "File tree drop rejected: target identity exceeds GUI protocol limit"
+        }
+
+        if !fitsString16(targetPath) {
+            return "File tree drop rejected: target path exceeds GUI protocol limit"
+        }
+
+        if sourcePaths.contains(where: { !fitsString16($0) }) {
+            return "File tree drop rejected: source path exceeds GUI protocol limit"
+        }
+
+        return nil
+    }
+
+    private func fitsString16(_ text: String) -> Bool {
+        text.utf8.count <= Int(UInt16.max)
+    }
+
+    private func appendU16(_ buf: inout Data, _ value: UInt16) {
+        buf.append(UInt8((value >> 8) & 0xFF))
+        buf.append(UInt8(value & 0xFF))
+    }
+
+    private func appendU32(_ buf: inout Data, _ value: UInt32) {
+        buf.append(UInt8((value >> 24) & 0xFF))
+        buf.append(UInt8((value >> 16) & 0xFF))
+        buf.append(UInt8((value >> 8) & 0xFF))
+        buf.append(UInt8(value & 0xFF))
+    }
+
+    private func appendString16(_ buf: inout Data, _ text: String) {
+        let utf8 = Array(text.utf8)
+        let length = min(utf8.count, Int(UInt16.max))
+        appendU16(&buf, UInt16(length))
+        if length > 0 {
+            buf.append(contentsOf: utf8[0..<length])
+        }
     }
 
     private func writeU16(_ buf: inout Data, _ offset: Int, _ value: UInt16) {

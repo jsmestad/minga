@@ -246,6 +246,38 @@ struct FileTreeViewTests {
         #expect(strings.contains("●"))
     }
 
+    @Test("Drop sends BEAM-owned intent instead of performing filesystem work")
+    @MainActor func dropSendsBeamOwnedIntent() throws {
+        let state = FileTreeState()
+        state.visible = true
+        state.projectRoot = "/project"
+        let entry = sidebarFileTreeEntry(id: 0xABCD, index: 4, isDir: false, icon: "\u{E62D}", name: "file.ex", relPath: "lib/file.ex", path: "/project/lib/file.ex")
+        state.entries = [entry]
+        let spy = SpyEncoder()
+
+        let sut = FileTreeView(fileTreeState: state, theme: ThemeColors(), encoder: spy)
+        let handled = sut.handleDrop(urls: [URL(fileURLWithPath: "/tmp/from.txt")], onto: entry)
+
+        #expect(handled)
+        #expect(spy.guiActions == [
+            .fileTreeDrop(sourcePaths: ["/tmp/from.txt"], targetIndex: 4, targetId: "lib/file.ex", targetPathHash: 0xABCD, targetPath: "/project/lib/file.ex", targetIsDir: false, modifiers: 0)
+        ])
+    }
+
+    @Test("Drop is not handled when encoder is unavailable")
+    @MainActor func dropWithoutEncoderIsRejected() throws {
+        let state = FileTreeState()
+        state.visible = true
+        state.projectRoot = "/project"
+        let entry = sidebarFileTreeEntry(id: 0xABCD, index: 4, isDir: false, icon: "\u{E62D}", name: "file.ex", relPath: "lib/file.ex", path: "/project/lib/file.ex")
+        state.entries = [entry]
+
+        let sut = FileTreeView(fileTreeState: state, theme: ThemeColors(), encoder: nil)
+        let handled = sut.handleDrop(urls: [URL(fileURLWithPath: "/tmp/from.txt")], onto: entry)
+
+        #expect(!handled)
+    }
+
     @Test("Editing row renders inline edit field")
     @MainActor func editingRowRendersInlineEditField() throws {
         let state = FileTreeState()
@@ -465,12 +497,13 @@ private func sidebarFileTreeEntry(
     guides: [Bool] = [],
     icon: String,
     name: String,
-    relPath: String
+    relPath: String,
+    path: String? = nil
 ) -> FileTreeEntry {
     FileTreeEntry(id: relPath, pathHash: id, index: index, isDir: isDir, isExpanded: isExpanded, isSelected: isSelected,
                   isFocused: isFocused, isActive: isActive, isDirty: isDirty, isEditing: isEditing,
                   isLastChild: false, depth: depth, gitStatus: gitStatus, diagnosticErrorCount: diagnosticErrorCount,
                   diagnosticWarningCount: diagnosticWarningCount, diagnosticInfoCount: diagnosticInfoCount, diagnosticHintCount: diagnosticHintCount,
-                  guides: guides, icon: icon, name: name, relPath: relPath, path: relPath,
+                  guides: guides, icon: icon, name: name, relPath: relPath, path: path ?? relPath,
                   editingType: editingType, editingText: editingText)
 }

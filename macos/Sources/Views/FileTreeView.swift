@@ -170,7 +170,6 @@ struct FileTreeView: View {
                 .contentShape(Rectangle())
                 .onHover { isHovered in
                     hoveredEntryId = isHovered ? entry.id : nil
-                    if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
                 }
                 .onTapGesture {
                     handleEntryTap(entry)
@@ -190,7 +189,7 @@ struct FileTreeView: View {
                 .dropDestination(for: URL.self) { urls, _ in
                     handleDrop(urls: urls, onto: entry)
                 } isTargeted: { isTargeted in
-                    dropTargetEntryId = isTargeted && entry.isDir ? entry.id : nil
+                    dropTargetEntryId = isTargeted ? entry.id : nil
                 }
         }
     }
@@ -288,11 +287,11 @@ struct FileTreeView: View {
     // MARK: - Click handling
 
     /// Handles single and double-click without SwiftUI's 300ms delay.
-    /// Uses a 250ms window to detect double-clicks internally.
+    /// Uses the user's system double-click interval.
     private func handleEntryTap(_ entry: FileTreeEntry) {
         let now = Date()
         let timeSinceLastClick = lastClickTime.map { now.timeIntervalSince($0) } ?? .infinity
-        let isDoubleClick = lastClickEntryId == entry.id && timeSinceLastClick < 0.25
+        let isDoubleClick = lastClickEntryId == entry.id && timeSinceLastClick < NSEvent.doubleClickInterval
 
         if isDoubleClick {
             // Double-click: always open (files open permanently)
@@ -313,54 +312,24 @@ struct FileTreeView: View {
 
     // MARK: - Drop handling
 
-    /// Handles a drop of URLs onto a tree entry.
-    /// Internal moves (within the project) are sent to the BEAM as move operations.
-    /// External files (from Finder) are copied into the target directory.
-    private func handleDrop(urls: [URL], onto entry: FileTreeEntry) -> Bool {
-        let targetDir: String
-        if entry.isDir {
-            targetDir = fileTreeState.fullPath(for: entry)
-        } else {
-            targetDir = (fileTreeState.fullPath(for: entry) as NSString).deletingLastPathComponent
-        }
+    /// Handles a drop of URLs onto a tree entry by sending intent to the BEAM.
+    /// The BEAM validates stale targets, resolves file targets to their parent directory, and performs filesystem work.
+    func handleDrop(urls: [URL], onto entry: FileTreeEntry) -> Bool {
+        let sourcePaths = urls.map(\.path).filter { !$0.isEmpty }
+        guard !sourcePaths.isEmpty else { return false }
+        guard let encoder else { return false }
 
-        let projectRoot = fileTreeState.projectRoot
-        var handledAny = false
+        encoder.sendFileTreeDrop(
+            sourcePaths: sourcePaths,
+            targetIndex: UInt16(entry.index),
+            targetId: entry.id,
+            targetPathHash: entry.pathHash,
+            targetPath: fileTreeState.fullPath(for: entry),
+            targetIsDir: entry.isDir,
+            modifiers: currentModifierBits()
+        )
 
-        for url in urls {
-            let sourcePath = url.path
-            let isInternal = sourcePath.hasPrefix(projectRoot)
-
-            if isInternal {
-                // Internal move: find the source entry index and send move to BEAM
-                if let sourceEntry = fileTreeState.entries.first(where: {
-                    fileTreeState.fullPath(for: $0) == sourcePath
-                }) {
-                    encoder?.sendFileTreeMove(
-                        sourceIndex: UInt16(sourceEntry.index),
-                        targetDirIndex: UInt16(entry.index)
-                    )
-                    handledAny = true
-                }
-            } else {
-                // External file: copy into target directory
-                let destPath = (targetDir as NSString).appendingPathComponent(url.lastPathComponent)
-                let destURL = URL(fileURLWithPath: destPath)
-                do {
-                    try FileManager.default.copyItem(at: url, to: destURL)
-                    handledAny = true
-                } catch {
-                    encoder?.sendLog(level: 3, message: "Drop copy failed: \(error.localizedDescription)")
-                }
-            }
-        }
-
-        if handledAny {
-            // Refresh tree after external copies
-            encoder?.sendFileTreeRefresh()
-        }
-
-        return handledAny
+        return true
     }
 
     // MARK: - Disclosure chevron
@@ -389,6 +358,16 @@ struct FileTreeView: View {
         let fullIndentDepth = min(depth, 4)
         let compactIndentDepth = max(depth - 4, 0)
         return CGFloat(fullIndentDepth) * indentWidth + CGFloat(compactIndentDepth) * indentWidth * 0.55
+    }
+
+    private func currentModifierBits() -> UInt8 {
+        var mods: UInt8 = 0
+        let flags = NSEvent.modifierFlags
+        if flags.contains(.shift) { mods |= 0x01 }
+        if flags.contains(.control) { mods |= 0x02 }
+        if flags.contains(.option) { mods |= 0x04 }
+        if flags.contains(.command) { mods |= 0x08 }
+        return mods
     }
 
 }

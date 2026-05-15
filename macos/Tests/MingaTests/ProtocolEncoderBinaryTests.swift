@@ -40,6 +40,14 @@ private func readI16(_ data: Data, _ offset: Int) -> Int16 {
     Int16(bitPattern: readU16(data, offset))
 }
 
+/// Read a length-prefixed UTF-8 string and return the string plus the next offset.
+private func readString16(_ data: Data, _ offset: Int) -> (String, Int) {
+    let length = Int(readU16(data, offset))
+    let start = offset + 2
+    let end = start + length
+    return (String(data: data.subdata(in: start..<end), encoding: .utf8) ?? "", end)
+}
+
 // MARK: - Ready event
 
 @Suite("Encoder Binary: Ready")
@@ -215,6 +223,47 @@ struct EncoderGUIActionTests {
         #expect(payload.count == 4)
         #expect(payload[1] == GUI_ACTION_FILE_TREE_CLICK)
         #expect(readU16(payload, 2) == 15)
+    }
+
+    @Test("file_tree_drop encodes stable target identity and sources")
+    func fileTreeDropLayout() {
+        let payload = captureFrame {
+            $0.sendFileTreeDrop(sourcePaths: ["/tmp/a.txt", "/tmp/b.txt"], targetIndex: 8, targetId: "/project/lib", targetPathHash: 0xAABBCCDD, targetPath: "/project/lib", targetIsDir: true, modifiers: 0x02)
+        }
+
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_FILE_TREE_DROP)
+        #expect(readU16(payload, 2) == 8)
+        #expect(readU32(payload, 4) == 0xAABBCCDD)
+        #expect(payload[8] == 1)
+        #expect(payload[9] == 0x02)
+
+        let (targetId, afterTargetId) = readString16(payload, 10)
+        let (targetPath, afterTargetPath) = readString16(payload, afterTargetId)
+        let sourceCount = readU16(payload, afterTargetPath)
+        let (sourceA, afterSourceA) = readString16(payload, afterTargetPath + 2)
+        let (sourceB, afterSourceB) = readString16(payload, afterSourceA)
+
+        #expect(targetId == "/project/lib")
+        #expect(targetPath == "/project/lib")
+        #expect(sourceCount == 2)
+        #expect(sourceA == "/tmp/a.txt")
+        #expect(sourceB == "/tmp/b.txt")
+        #expect(afterSourceB == payload.count)
+    }
+
+    @Test("file_tree_drop rejects overlong paths instead of truncating")
+    func fileTreeDropRejectsOverlongPath() {
+        let overlongPath = "/tmp/" + String(repeating: "a", count: Int(UInt16.max))
+        let payload = captureFrame {
+            $0.sendFileTreeDrop(sourcePaths: [overlongPath], targetIndex: 8, targetId: "/project/lib", targetPathHash: 0xAABBCCDD, targetPath: "/project/lib", targetIsDir: true, modifiers: 0)
+        }
+
+        #expect(payload[0] == OP_LOG_MESSAGE)
+        #expect(payload[1] == LOG_LEVEL_WARN)
+        let messageLength = Int(readU16(payload, 2))
+        let message = String(data: payload[4..<(4 + messageLength)], encoding: .utf8)
+        #expect(message?.contains("source path exceeds GUI protocol limit") == true)
     }
 
     @Test("completion_select encodes index as UInt16")
