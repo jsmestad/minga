@@ -35,7 +35,7 @@ defmodule Minga.Buffer.Document do
       "Hhello\\nworld"
   """
 
-  alias Minga.Buffer.{Cursor, Lines, Position}
+  alias Minga.Buffer.{Cursor, Lines, Position, Selection}
 
   @enforce_keys [:before, :after, :cursor_line, :cursor_col, :line_count]
   defstruct [:before, :after, :cursor_line, :cursor_col, :line_count, :line_offsets]
@@ -222,18 +222,7 @@ defmodule Minga.Buffer.Document do
   """
   @spec content_range(t(), position(), position()) :: String.t()
   def content_range(%__MODULE__{} = buf, from_pos, to_pos) do
-    {offsets, text} = Lines.snapshot(buf)
-    text_size = byte_size(text)
-
-    from_off =
-      Position.point_in(offsets, elem(from_pos, 0), elem(from_pos, 1), text_size)
-
-    to_off = Position.point_in(offsets, elem(to_pos, 0), elem(to_pos, 1), text_size)
-    {start_off, end_off} = if from_off <= to_off, do: {from_off, to_off}, else: {to_off, from_off}
-
-    range_end = Position.after_character_at(text, end_off)
-
-    binary_part(text, start_off, range_end - start_off)
+    buf |> Selection.characterwise(from_pos, to_pos) |> then(&Selection.contents(buf, &1))
   end
 
   @doc """
@@ -243,25 +232,7 @@ defmodule Minga.Buffer.Document do
   """
   @spec delete_range(t(), position(), position()) :: t()
   def delete_range(%__MODULE__{} = buf, from_pos, to_pos) do
-    {offsets, text} = Lines.snapshot(buf)
-    text_size = byte_size(text)
-
-    from_off =
-      Position.point_in(offsets, elem(from_pos, 0), elem(from_pos, 1), text_size)
-
-    to_off = Position.point_in(offsets, elem(to_pos, 0), elem(to_pos, 1), text_size)
-
-    {start_off, end_off, cursor_pos} =
-      if from_off <= to_off,
-        do: {from_off, to_off, from_pos},
-        else: {to_off, from_off, to_pos}
-
-    delete_end = Position.after_character_at(text, end_off)
-
-    before_text = binary_part(text, 0, start_off)
-    after_text = binary_part(text, delete_end, text_size - delete_end)
-    new_text = before_text <> after_text
-    move_to(new(new_text), cursor_pos)
+    buf |> Selection.characterwise(from_pos, to_pos) |> then(&Selection.delete(buf, &1))
   end
 
   @doc """
@@ -272,28 +243,7 @@ defmodule Minga.Buffer.Document do
   """
   @spec get_range(t(), position(), position()) :: String.t()
   def get_range(%__MODULE__{} = buf, start_pos, end_pos) do
-    {offsets, text} = Lines.snapshot(buf)
-    text_size = byte_size(text)
-
-    {s, e} = sort_positions(start_pos, end_pos)
-    s_off = Position.point_in(offsets, elem(s, 0), elem(s, 1), text_size)
-    e_off = Position.point_in(offsets, elem(e, 0), elem(e, 1), text_size)
-
-    range_end = Position.after_character_at(text, e_off)
-
-    binary_part(text, s_off, range_end - s_off)
-  end
-
-  @doc """
-  Returns the joined text of lines [start_line, end_line] inclusive, with
-  newlines between them (no trailing newline).
-  """
-  @spec get_lines_content(t(), non_neg_integer(), non_neg_integer()) :: String.t()
-  def get_lines_content(%__MODULE__{} = buf, start_line, end_line)
-      when start_line >= 0 and end_line >= 0 do
-    {s, e} = if start_line <= end_line, do: {start_line, end_line}, else: {end_line, start_line}
-    count = e - s + 1
-    Lines.slice(buf, s, count) |> Enum.join("\n")
+    content_range(buf, start_pos, end_pos)
   end
 
   @doc """
@@ -305,70 +255,7 @@ defmodule Minga.Buffer.Document do
   @spec delete_lines(t(), non_neg_integer(), non_neg_integer()) :: t()
   def delete_lines(%__MODULE__{} = buf, start_line, end_line)
       when start_line >= 0 and end_line >= 0 do
-    {offsets, text} = Lines.snapshot(buf)
-    text_size = byte_size(text)
-    total_lines = tuple_size(offsets)
-
-    {s, e} = if start_line <= end_line, do: {start_line, end_line}, else: {end_line, start_line}
-    s = min(s, total_lines - 1)
-    e = min(e, total_lines - 1)
-
-    # Compute byte range to delete: from start of line s to start of line e+1
-    # (or end of text if e is the last line)
-    delete_start = elem(offsets, s)
-
-    delete_end =
-      if e + 1 < total_lines do
-        elem(offsets, e + 1)
-      else
-        text_size
-      end
-
-    before_text = binary_part(text, 0, delete_start)
-    after_text = binary_part(text, delete_end, text_size - delete_end)
-
-    new_text =
-      case {before_text, after_text} do
-        {"", ""} -> ""
-        # If before_text ends with \n and we're joining with after_text,
-        # the newline separates them correctly
-        _ -> before_text <> after_text
-      end
-
-    # Remove trailing newline if we deleted through the end and before_text has one
-    new_text =
-      if delete_end == text_size and byte_size(new_text) > 0 and
-           :binary.last(new_text) == ?\n do
-        binary_part(new_text, 0, byte_size(new_text) - 1)
-      else
-        new_text
-      end
-
-    remaining_lines = total_lines - (e - s + 1)
-    target_line = min(s, max(0, remaining_lines - 1))
-    new_text |> new() |> move_to({target_line, 0})
-  end
-
-  @doc """
-  Clears all content on the given line, leaving an empty line.
-  Returns `{yanked_text, new_buffer}` where `yanked_text` is the text
-  that was on the line. The cursor is placed at column 0 of the line.
-  """
-  @spec clear_line(t(), non_neg_integer()) :: {String.t(), t()}
-  def clear_line(%__MODULE__{} = buf, line_num) when line_num >= 0 do
-    case Lines.fetch(buf, line_num) do
-      nil ->
-        {"", buf}
-
-      "" ->
-        {"", move_to(buf, {line_num, 0})}
-
-      text ->
-        start_pos = {line_num, 0}
-        end_pos = {line_num, Position.last_character_on_line(text)}
-        new_buf = delete_range(buf, start_pos, end_pos)
-        {text, new_buf}
-    end
+    buf |> Selection.linewise(start_line, end_line) |> then(&Selection.delete(buf, &1))
   end
 
   @doc """
@@ -407,11 +294,6 @@ defmodule Minga.Buffer.Document do
     end
   end
 
-  @spec sort_positions(position(), position()) :: {position(), position()}
-  defp sort_positions({l1, c1} = p1, {l2, c2} = p2) do
-    if {l1, c1} <= {l2, c2}, do: {p1, p2}, else: {p2, p1}
-  end
-
   @doc "Returns the position of the last selectable character on a line."
   @spec last_grapheme_byte_offset(String.t()) :: non_neg_integer()
   defdelegate last_grapheme_byte_offset(text), to: Position, as: :last_character_on_line
@@ -425,6 +307,9 @@ defmodule Minga.Buffer.Document do
   defdelegate position_to_offset(buf, target), to: Position, as: :point_for
   defdelegate offset_to_position(doc, offset), to: Position, as: :from_point
   defdelegate grapheme_col(buf, value), to: Position, as: :display_column
+
+  defdelegate get_lines_content(buf, start_line, end_line), to: Selection, as: :line_contents
+  defdelegate clear_line(buf, line_num), to: Selection
 end
 
 defimpl Minga.Editing.Text.Readable, for: Minga.Buffer.Document do
