@@ -43,15 +43,6 @@ defmodule Minga.Buffer do
   defdelegate pid_for_path(path), to: BufferProcess
 
   @doc """
-  Returns the pid of the BEAM-wide singleton `*Messages*` buffer.
-
-  Available in headless mode, before any editor exists. Returns `nil`
-  only if `Minga.Buffer.Messages` is not running (e.g. boot ordering bug).
-  """
-  @spec messages() :: pid() | nil
-  defdelegate messages(), to: Minga.Buffer.Messages, as: :pid
-
-  @doc """
   Returns the pid for a buffer at `path`, starting one if it doesn't exist.
 
   If a buffer is already registered for `path`, returns its pid immediately.

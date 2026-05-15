@@ -20,7 +20,7 @@ defmodule Minga.Application do
       │   └── Minga.Language.Filetype.Registry
       ├── Minga.Buffer.Registry (Registry, :unique)
       ├── Minga.Buffer.Supervisor (DynamicSupervisor, one_for_one)
-      ├── Minga.Buffer.Messages           (singleton *Messages* buffer owner)
+      ├── Minga.Log.MessagesBuffer           (singleton *Messages* buffer owner)
       ├── Minga.Services.Supervisor (rest_for_one)
       │   ├── Minga.Services.Independent (one_for_one)
       │   │   ├── Minga.Git.Tracker
@@ -62,8 +62,8 @@ defmodule Minga.Application do
   @spec start(Application.start_type(), term()) :: {:ok, pid()} | {:error, term()}
   def start(_type, _args) do
     # Create the log buffer ETS table owned by the supervisor process.
-    # This table survives Editor crashes so the LoggerHandler can queue
-    # messages while the Editor is restarting. The Editor flushes it on init.
+    # This table survives process crashes so LoggerHandler can queue messages
+    # before Minga.Log.MessagesBuffer subscribes and drains it on init.
     Minga.LoggerHandler.ensure_buffer_table()
     Grammar.init_registry()
     DevHandler.attach()
@@ -81,7 +81,7 @@ defmodule Minga.Application do
     end
 
     # Install the :log_message broadcast handler before the supervision
-    # tree starts so headless and pre-editor logs reach Minga.Buffer.Messages
+    # tree starts so headless and pre-editor logs reach Minga.Log.MessagesBuffer
     # via the same path as logs from a running editor.
     Minga.LoggerHandler.install_messages_handler()
 
@@ -92,7 +92,7 @@ defmodule Minga.Application do
         Minga.Foundation.Supervisor,
         {Registry, keys: :unique, name: Minga.Buffer.Registry},
         {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},
-        Minga.Buffer.Messages
+        Minga.Log.MessagesBuffer
       ] ++
         if minimal? do
           []

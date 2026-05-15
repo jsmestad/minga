@@ -25,15 +25,15 @@ defmodule Minga.LoggerHandlerTest do
   end
 
   describe "log/2 routing to the shared *Messages* buffer" do
-    test "appends entries to Minga.Buffer.messages/0" do
+    test "appends entries to Minga.Log.messages_buffer/0" do
       tag = "logger-handler-shared-#{System.unique_integer([:positive])}"
       event = %{level: :error, msg: {:string, tag}, meta: %{}}
 
       LoggerHandler.log(event, %{})
 
-      buf = Buffer.messages()
+      buf = Minga.Log.messages_buffer()
       assert is_pid(buf)
-      assert wait_for_text(buf, tag)
+      assert_messages_buffer_contains(tag)
     end
 
     test "preserves level prefix in the formatted text" do
@@ -41,8 +41,7 @@ defmodule Minga.LoggerHandlerTest do
 
       LoggerHandler.log(%{level: :warning, msg: {:string, tag}, meta: %{}}, %{})
 
-      buf = Buffer.messages()
-      assert wait_for_text(buf, "[warning] " <> tag)
+      assert_messages_buffer_contains("[warning] " <> tag)
     end
 
     test "formats erlang format strings" do
@@ -53,8 +52,7 @@ defmodule Minga.LoggerHandlerTest do
         %{}
       )
 
-      buf = Buffer.messages()
-      assert wait_for_text(buf, tag)
+      assert_messages_buffer_contains(tag)
     end
   end
 
@@ -73,27 +71,11 @@ defmodule Minga.LoggerHandlerTest do
     end
   end
 
-  defp wait_for_text(buf, tag, timeout_ms \\ 500) do
-    deadline = System.monotonic_time(:millisecond) + timeout_ms
-    do_wait_for_text(buf, tag, deadline)
-  end
+  defp assert_messages_buffer_contains(tag) do
+    :sys.get_state(Minga.Log.MessagesBuffer)
+    content = Buffer.content(Minga.Log.messages_buffer())
 
-  defp do_wait_for_text(buf, tag, deadline) do
-    content = Buffer.content(buf)
-
-    if String.contains?(content, tag) do
-      true
-    else
-      retry_or_fail(buf, tag, deadline, content)
-    end
-  end
-
-  defp retry_or_fail(buf, tag, deadline, content) do
-    if System.monotonic_time(:millisecond) >= deadline do
-      flunk("expected #{inspect(tag)} in *Messages* buffer; got:\n#{content}")
-    else
-      Process.sleep(10)
-      do_wait_for_text(buf, tag, deadline)
-    end
+    assert String.contains?(content, tag),
+           "expected #{inspect(tag)} in *Messages* buffer; got:\n#{content}"
   end
 end

@@ -11,7 +11,7 @@ defmodule Minga.Runtime do
       ├── Minga.Foundation.Supervisor
       ├── Minga.Buffer.Registry
       ├── Minga.Buffer.Supervisor
-      ├── Minga.Buffer.Messages
+      ├── Minga.Log.MessagesBuffer
       ├── Minga.Services.Supervisor
       └── MingaAgent.Supervisor
 
@@ -34,7 +34,7 @@ defmodule Minga.Runtime do
       Minga.Foundation.Supervisor,
       {Registry, keys: :unique, name: Minga.Buffer.Registry},
       {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},
-      Minga.Buffer.Messages,
+      Minga.Log.MessagesBuffer,
       Minga.Services.Supervisor,
       MingaAgent.Supervisor
     ]

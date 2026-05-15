@@ -181,7 +181,7 @@ defmodule Minga.LoggerHandler do
 
     # Buffer when the Events registry isn't yet up (very early boot, before
     # Foundation.Supervisor has started) or when no subscribers are listening
-    # yet (Minga.Buffer.Messages hasn't booted). Once the wrapper subscribes,
+    # yet (Minga.Log.MessagesBuffer hasn't booted). Once the wrapper subscribes,
     # broadcasts reach it directly and the ETS buffer is drained on its init.
     if has_subscribers?() do
       event_level = if level in [:warning, :error], do: :warning, else: :info
@@ -203,11 +203,11 @@ defmodule Minga.LoggerHandler do
     # isn't started yet, which is expected during the very first phase
     # of Application boot. Treat it as "no subscribers"; the entry will
     # land in the LoggerHandler ETS pre-buffer and get drained by
-    # Minga.Buffer.Messages on init.
+    # Minga.Log.MessagesBuffer on init.
     ArgumentError -> false
   end
 
-  # ── Buffer for messages during Editor downtime ─────────────────────────────
+  # ── Buffer messages until the messages buffer subscriber is ready ──────────
 
   @spec buffer_message(String.t(), atom()) :: :ok
   defp buffer_message(text, level) do

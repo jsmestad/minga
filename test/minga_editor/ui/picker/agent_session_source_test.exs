@@ -63,7 +63,6 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
 
     test "returns tab candidates when agent tabs exist" do
       {:ok, pid} = start_test_session()
-      Session.subscribe(pid)
 
       state = state_with_agent_tab(pid)
       ctx = Context.from_editor_state(state)
@@ -75,13 +74,11 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
       assert is_binary(label)
       assert String.contains?(desc, "test-model")
 
-      Session.unsubscribe(pid)
       stop_session(pid)
     end
 
     test "active agent tab is marked with bullet" do
       {:ok, pid} = start_test_session()
-      Session.subscribe(pid)
 
       state = state_with_agent_tab(pid)
       ctx = Context.from_editor_state(state)
@@ -95,15 +92,12 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
 
       assert active != nil
 
-      Session.unsubscribe(pid)
       stop_session(pid)
     end
 
     test "candidates include completed and failed background subagent tabs" do
       {:ok, pid1} = start_test_session()
       {:ok, pid2} = start_test_session()
-      Session.subscribe(pid1)
-      Session.subscribe(pid2)
 
       state =
         state_with_two_agent_tabs(pid1, pid2)
@@ -123,8 +117,6 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
       result = AgentSessionSource.on_select(target, state)
       assert result.shell_state.tab_bar.active_id == elem(elem(target.id, 1), 1)
 
-      Session.unsubscribe(pid1)
-      Session.unsubscribe(pid2)
       stop_session(pid1)
       stop_session(pid2)
     end
@@ -188,8 +180,6 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
     test "background agent tab is not marked with bullet" do
       {:ok, pid1} = start_test_session()
       {:ok, pid2} = start_test_session()
-      Session.subscribe(pid1)
-      Session.subscribe(pid2)
 
       state = state_with_two_agent_tabs(pid1, pid2)
       ctx = Context.from_editor_state(state)
@@ -208,8 +198,6 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
         refute String.contains?(label, "\u{2022}")
       end)
 
-      Session.unsubscribe(pid1)
-      Session.unsubscribe(pid2)
       stop_session(pid1)
       stop_session(pid2)
     end
@@ -238,7 +226,6 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
 
     test "with tab entry switches to that tab" do
       {:ok, pid} = start_test_session()
-      Session.subscribe(pid)
 
       state = state_with_two_tabs_file_active(pid)
       agent_tab_id = Enum.find(state.shell_state.tab_bar.tabs, &(&1.kind == :agent)).id
@@ -246,7 +233,6 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
       result = AgentSessionSource.on_select(item, state)
       assert result.shell_state.tab_bar.active_id == agent_tab_id
 
-      Session.unsubscribe(pid)
       stop_session(pid)
     end
   end

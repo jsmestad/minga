@@ -66,6 +66,10 @@ defmodule Minga.Log do
     distribution: :log_level_distribution
   }
 
+  @doc "Returns the pid of the BEAM-wide singleton `*Messages*` buffer."
+  @spec messages_buffer() :: pid() | nil
+  def messages_buffer, do: Minga.Log.MessagesBuffer.pid()
+
   @doc "Logs a debug message for the given subsystem (if its level permits)."
   @spec debug(subsystem(), String.t() | (-> String.t())) :: :ok
   def debug(subsystem, message_or_fun) do

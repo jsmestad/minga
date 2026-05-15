@@ -12,7 +12,7 @@ defmodule Minga.Buffer.AutoSaveTest do
   @moduletag :tmp_dir
   @delay_ms 5_000
 
-  test "dirty file-backed buffer auto-saves after the configured delay", %{tmp_dir: dir} do
+  test "dirty file-backed buffer auto-saves when the debounce timer fires", %{tmp_dir: dir} do
     path = Path.join(dir, "auto-save.txt")
     File.write!(path, "hello")
     {:ok, pid} = BufferProcess.start_link(file_path: path)
@@ -23,6 +23,10 @@ defmodule Minga.Buffer.AutoSaveTest do
 
     try do
       :ok = BufferProcess.insert_text(pid, "!")
+      token = :sys.get_state(pid).auto_save_token
+      assert is_reference(token)
+
+      send(pid, {:auto_save, token})
 
       assert_buffer_saved(path)
       assert_log_contains("Auto-saved: #{Path.relative_to_cwd(path)}")

@@ -1,4 +1,4 @@
-defmodule Minga.Buffer.Messages do
+defmodule Minga.Log.MessagesBuffer do
   @moduledoc """
   Owner of the BEAM-wide singleton `*Messages*` buffer.
 
