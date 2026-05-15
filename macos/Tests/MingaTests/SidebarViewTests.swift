@@ -301,12 +301,49 @@ struct FileTreeRowViewTests {
 
     @Test("Status markers remain separate from name text")
     @MainActor func statusMarkersRemainSeparateFromNameText() throws {
-        let row = fileTreeRowView(entry: sidebarFileTreeEntry(id: 1, index: 0, isSelected: true, isFocused: true, isActive: true, isDirty: true, gitStatus: 1, icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"))
+        let row = fileTreeRowView(entry: sidebarFileTreeEntry(id: 1, index: 0, isSelected: true, isFocused: true, isActive: true, isDirty: true, gitStatus: 1, diagnosticErrorCount: 2, icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"))
         let strings = try row.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
         #expect(strings.contains("editor.ex"))
+        #expect(strings.contains("✖2"))
         #expect(strings.contains("●"))
         #expect(try row.inspect().findAll(ViewType.Shape.self).count >= 1)
+    }
+
+    @Test("Accessibility labels include independent status summaries")
+    @MainActor func accessibilityLabelsIncludeStatusSummaries() throws {
+        let row = fileTreeRowView(entry: sidebarFileTreeEntry(id: 1, index: 0, isDirty: true, gitStatus: 4, diagnosticWarningCount: 1, icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"))
+
+        #expect(row.accessibilityLabelText == "File: editor.ex, 1 warning, unsaved changes, git conflict")
+    }
+
+    @Test("Diagnostic info and hint severities render distinct markers")
+    @MainActor func diagnosticInfoAndHintSeveritiesRenderDistinctMarkers() throws {
+        let info = fileTreeRowView(entry: sidebarFileTreeEntry(id: 1, index: 0, diagnosticInfoCount: 1, icon: "\u{E62D}", name: "info.ex", relPath: "info.ex"))
+        let hint = fileTreeRowView(entry: sidebarFileTreeEntry(id: 2, index: 1, diagnosticHintCount: 3, icon: "\u{E62D}", name: "hint.ex", relPath: "hint.ex"))
+        let noisy = fileTreeRowView(entry: sidebarFileTreeEntry(id: 3, index: 2, diagnosticErrorCount: 120, icon: "\u{E62D}", name: "noisy.ex", relPath: "noisy.ex"))
+
+        let infoStrings = try info.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        let hintStrings = try hint.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        let noisyStrings = try noisy.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(infoStrings.contains("ℹ"))
+        #expect(hintStrings.contains("·3"))
+        #expect(noisyStrings.contains("✖9+"))
+    }
+
+    @Test("Selected active and hovered rows keep status markers readable")
+    @MainActor func selectedActiveAndHoveredRowsKeepStatusMarkersReadable() throws {
+        let selected = fileTreeRowView(entry: sidebarFileTreeEntry(id: 1, index: 0, isSelected: true, isFocused: false, isDirty: true, gitStatus: 1, diagnosticWarningCount: 1, icon: "\u{E62D}", name: "selected.ex", relPath: "selected.ex"))
+        let active = fileTreeRowView(entry: sidebarFileTreeEntry(id: 2, index: 1, isSelected: true, isFocused: true, isActive: true, isDirty: true, gitStatus: 4, diagnosticErrorCount: 1, icon: "\u{E62D}", name: "active.ex", relPath: "active.ex"))
+        let hovered = fileTreeRowView(entry: sidebarFileTreeEntry(id: 3, index: 2, isDirty: true, gitStatus: 2, diagnosticInfoCount: 1, icon: "\u{E62D}", name: "hovered.ex", relPath: "hovered.ex"), isHovered: true)
+
+        for row in [selected, active, hovered] {
+            let strings = try row.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+            #expect(strings.contains("●"))
+            #expect(row.accessibilityLabelText.contains("unsaved changes"))
+            #expect(row.accessibilityLabelText.contains("git"))
+        }
     }
 }
 
@@ -389,6 +426,10 @@ private func sidebarFileTreeEntry(
     isActive: Bool = false,
     isDirty: Bool = false,
     gitStatus: UInt8 = 0,
+    diagnosticErrorCount: UInt16 = 0,
+    diagnosticWarningCount: UInt16 = 0,
+    diagnosticInfoCount: UInt16 = 0,
+    diagnosticHintCount: UInt16 = 0,
     isEditing: Bool = false,
     editingType: UInt8 = 0xFF,
     editingText: String = "",
@@ -397,10 +438,10 @@ private func sidebarFileTreeEntry(
     name: String,
     relPath: String
 ) -> FileTreeEntry {
-    FileTreeEntry(id: id, index: index, isDir: isDir, isExpanded: isExpanded, isSelected: isSelected,
+    FileTreeEntry(id: relPath, pathHash: id, index: index, isDir: isDir, isExpanded: isExpanded, isSelected: isSelected,
                   isFocused: isFocused, isActive: isActive, isDirty: isDirty, isEditing: isEditing,
-                  isLastChild: false, depth: depth, gitStatus: gitStatus, diagnosticErrorCount: 0,
-                  diagnosticWarningCount: 0, diagnosticInfoCount: 0, diagnosticHintCount: 0,
+                  isLastChild: false, depth: depth, gitStatus: gitStatus, diagnosticErrorCount: diagnosticErrorCount,
+                  diagnosticWarningCount: diagnosticWarningCount, diagnosticInfoCount: diagnosticInfoCount, diagnosticHintCount: diagnosticHintCount,
                   guides: [], icon: icon, name: name, relPath: relPath, path: relPath,
                   editingType: editingType, editingText: editingText)
 }

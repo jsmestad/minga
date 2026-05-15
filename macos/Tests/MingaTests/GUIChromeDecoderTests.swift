@@ -685,6 +685,10 @@ struct GUIFileTreeDecoderTests {
             flags: 0x0010 | 0x0020,
             depth: 1,
             gitStatus: 1,
+            diagnosticErrorCount: 1,
+            diagnosticWarningCount: 2,
+            diagnosticInfoCount: 3,
+            diagnosticHintCount: 4,
             guides: [true],
             id: "/home/user/project/lib/editor.ex",
             path: "/home/user/project/lib/editor.ex",
@@ -724,6 +728,10 @@ struct GUIFileTreeDecoderTests {
         #expect(entries[0].path == "/home/user/project/lib")
         #expect(entries[1].depth == 1)
         #expect(entries[1].gitStatus == 1)
+        #expect(entries[1].diagnosticErrorCount == 1)
+        #expect(entries[1].diagnosticWarningCount == 2)
+        #expect(entries[1].diagnosticInfoCount == 3)
+        #expect(entries[1].diagnosticHintCount == 4)
         #expect(entries[1].isActive == true)
         #expect(entries[1].isDirty == true)
         #expect(entries[1].guides == [true])
@@ -829,6 +837,10 @@ struct GUIFileTreeDecoderTests {
         flags: UInt16,
         depth: UInt8,
         gitStatus: UInt8,
+        diagnosticErrorCount: UInt16 = 0,
+        diagnosticWarningCount: UInt16 = 0,
+        diagnosticInfoCount: UInt16 = 0,
+        diagnosticHintCount: UInt16 = 0,
         guides: [Bool],
         id: String,
         path: String,
@@ -842,10 +854,10 @@ struct GUIFileTreeDecoderTests {
         appendU16(&data, flags)
         data.append(depth)
         data.append(gitStatus)
-        appendU16(&data, 0) // diagnostic errors
-        appendU16(&data, 0) // diagnostic warnings
-        appendU16(&data, 0) // diagnostic infos
-        appendU16(&data, 0) // diagnostic hints
+        appendU16(&data, diagnosticErrorCount)
+        appendU16(&data, diagnosticWarningCount)
+        appendU16(&data, diagnosticInfoCount)
+        appendU16(&data, diagnosticHintCount)
         data.append(UInt8(guides.count))
         for guide in guides { data.append(guide ? 1 : 0) }
         appendString16(&data, id)

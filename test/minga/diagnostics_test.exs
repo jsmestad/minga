@@ -168,6 +168,28 @@ defmodule Minga.DiagnosticsTest do
     end
   end
 
+  describe "count_tuples_by_uri_prefix/2" do
+    test "returns counts for diagnostics under a URI prefix", %{server: s} do
+      project_file = "file:///tmp/project/lib/a.ex"
+      nested_file = "file:///tmp/project/lib/nested/b.ex"
+      other_file = "file:///tmp/other/c.ex"
+
+      Diagnostics.publish(s, :server_a, project_file, [
+        make_diag(severity: :error),
+        make_diag(severity: :warning)
+      ])
+
+      Diagnostics.publish(s, :server_a, nested_file, [make_diag(severity: :hint)])
+      Diagnostics.publish(s, :server_a, other_file, [make_diag(severity: :error)])
+
+      counts = Diagnostics.count_tuples_by_uri_prefix(s, "file:///tmp/project")
+
+      assert counts[project_file] == {1, 1, 0, 0}
+      assert counts[nested_file] == {0, 0, 0, 1}
+      refute Map.has_key?(counts, other_file)
+    end
+  end
+
   describe "next/3" do
     test "returns the next diagnostic after current line", %{server: s} do
       d1 = make_diag(line: 2, message: "line 2")
@@ -359,6 +381,27 @@ defmodule Minga.DiagnosticsTest do
 
       Diagnostics.publish(s, :server_a, @uri, [])
       assert Diagnostics.for_uri(s, @uri) == []
+    end
+
+    test "publishing empty list removes the source from URI tracking", %{server: s} do
+      uri = @uri
+      Minga.Events.subscribe(:diagnostics_updated)
+
+      Diagnostics.publish(s, :server_a, uri, [make_diag()])
+
+      assert_receive {:minga_event, :diagnostics_updated,
+                      %Minga.Events.DiagnosticsUpdatedEvent{uri: ^uri, source: :server_a}}
+
+      Diagnostics.publish(s, :server_a, uri, [])
+
+      assert_receive {:minga_event, :diagnostics_updated,
+                      %Minga.Events.DiagnosticsUpdatedEvent{uri: ^uri, source: :server_a}}
+
+      Diagnostics.clear_source(s, :server_a)
+
+      refute_receive {:minga_event, :diagnostics_updated,
+                      %Minga.Events.DiagnosticsUpdatedEvent{uri: ^uri, source: :server_a}},
+                     50
     end
   end
 end

@@ -7,12 +7,12 @@ defmodule MingaEditor.FileTree.Row do
 
   alias Minga.Project.FileTree
   alias Minga.Project.FileTree.GitStatus
+  alias MingaEditor.FileTree.Diagnostics
   alias MingaEditor.State.FileTree, as: FileTreeState
 
   @type t :: %__MODULE__{
           id: String.t(),
           path: String.t(),
-          relative_path: String.t(),
           name: String.t(),
           directory?: boolean(),
           expanded?: boolean(),
@@ -21,6 +21,7 @@ defmodule MingaEditor.FileTree.Row do
           active?: boolean(),
           dirty?: boolean(),
           git_status: GitStatus.file_status() | nil,
+          diagnostics: Diagnostics.t(),
           depth: non_neg_integer(),
           guides: [boolean()],
           last_child?: boolean(),
@@ -30,7 +31,6 @@ defmodule MingaEditor.FileTree.Row do
   @enforce_keys [
     :id,
     :path,
-    :relative_path,
     :name,
     :directory?,
     :expanded?,
@@ -40,7 +40,6 @@ defmodule MingaEditor.FileTree.Row do
   ]
   defstruct id: nil,
             path: nil,
-            relative_path: nil,
             name: nil,
             directory?: false,
             expanded?: false,
@@ -49,6 +48,7 @@ defmodule MingaEditor.FileTree.Row do
             active?: false,
             dirty?: false,
             git_status: nil,
+            diagnostics: %Diagnostics{},
             depth: 0,
             guides: [],
             last_child?: false,
@@ -57,7 +57,9 @@ defmodule MingaEditor.FileTree.Row do
   @doc "Constructs a semantic file-tree row."
   @spec new(keyword()) :: t()
   def new(attrs) when is_list(attrs) do
-    struct!(__MODULE__, attrs)
+    attrs
+    |> Keyword.drop([:relative_path])
+    |> then(&struct!(__MODULE__, &1))
   end
 
   @doc "Builds a stable row identity for a file-tree entry."

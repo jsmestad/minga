@@ -12,6 +12,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
   alias Minga.Language
   alias Minga.Project.FileTree
   alias MingaEditor.DisplayList
+  alias MingaEditor.FileTree.Diagnostics
   alias MingaEditor.FileTree.Row
   alias MingaEditor.FileTree.Rows
   alias MingaEditor.State, as: EditorState
@@ -20,7 +21,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
   alias MingaEditor.UI.Theme
   alias MingaEditor.WindowTree
 
-  # Row anatomy: faint ancestor guides, disclosure, icon, name, spacer, dirty marker, git marker.
+  # Row anatomy: faint ancestor guides, disclosure, icon, name, spacer, diagnostic marker, dirty marker, git marker.
   @guide_pipe "│ "
   @guide_blank "  "
   @disclosure_expanded "▾ "
@@ -183,6 +184,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     is_cursor = tree_row.selected?
     focused = tree_row.focused?
     is_dirty = tree_row.dirty?
+    diagnostic_text = diagnostic_indicator_text(tree_row.diagnostics)
 
     # Build the structure columns from ancestor guides plus a dedicated disclosure column.
     guide_prefix = build_guides(tree_row.guides, tree_row.last_child?)
@@ -195,25 +197,25 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     # Entry name (dirs get trailing slash)
     name = if tree_row.directory?, do: tree_row.name <> "/", else: tree_row.name
 
-    # Right-side indicators: [modified_dot] [git_status]
-    # Modified dot = 1 col, git status = 2 cols (space + symbol)
-    file_git_status = tree_row.git_status
-    git_width = if file_git_status, do: 2, else: 0
-    dirty_width = if is_dirty, do: 1, else: 0
-    indicator_width = dirty_width + git_width
-
     # Compose the full line: structure columns + icon + space + name
     prefix = structure_prefix <> icon <> " "
     prefix_width = String.length(prefix)
+
+    # Right-side indicators: [diagnostic] [modified_dot] [git_status].
+    # Fit them into the available suffix so narrow panes never let badges overlap the row prefix.
+    {diagnostic_text, is_dirty, file_git_status} =
+      fit_indicators(diagnostic_text, is_dirty, tree_row.git_status, max(width - prefix_width, 0))
+
+    diagnostic_width = String.length(diagnostic_text)
+    git_width = if file_git_status, do: 2, else: 0
+    dirty_width = if is_dirty, do: 1, else: 0
+    indicator_width = diagnostic_width + dirty_width + git_width
 
     # Truncate name to fit, accounting for indicator space
     max_name_len = max(width - prefix_width - indicator_width, 0)
     display_name = String.slice(name, 0, max_name_len)
 
-    # Background style for the full row
-    row_bg = row_background(is_cursor, focused, theme)
-
-    # Build draw commands: structure, icon, name, dirty marker, and git marker.
+    # Build draw commands: structure, icon, name, diagnostic marker, dirty marker, and git marker.
     guide_style = guide_draw_style(is_cursor, focused, theme)
     icon_style = icon_draw_style(icon_color, is_cursor, focused, theme)
     name_style = name_draw_style(tree_row, is_cursor, tree_row.active?, focused, theme)
@@ -232,36 +234,25 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     padded_name = String.pad_trailing(display_name, name_pad_width)
     draws = draws ++ [DisplayList.draw(row, name_col, padded_name, name_style)]
 
-    # Right-aligned indicators start here
+    # Right-aligned indicators start here.
     indicator_col = col + width - indicator_width
 
-    # Modified buffer dot (between name and git status)
     draws =
-      if is_dirty do
-        dirty_style = dirty_indicator_style(is_cursor, focused, theme)
-        draws ++ [DisplayList.draw(row, indicator_col, "●", dirty_style)]
-      else
-        draws
-      end
+      draw_diagnostic_indicator(
+        draws,
+        tree_row.diagnostics,
+        diagnostic_text,
+        row,
+        indicator_col,
+        is_cursor,
+        focused,
+        theme
+      )
 
-    # Git status indicator (rightmost)
-    if file_git_status do
-      git_col = col + width - git_width
-      git_symbol = " " <> Minga.Project.FileTree.GitStatus.symbol(file_git_status)
-      git_style = git_indicator_style(file_git_status, is_cursor, focused, theme)
-      draws ++ [DisplayList.draw(row, git_col, git_symbol, git_style)]
-    else
-      # Pad remaining space if no indicators
-      drawn_width = prefix_width + String.length(padded_name) + dirty_width
-
-      if drawn_width < width do
-        pad = String.duplicate(" ", width - drawn_width)
-        pad_face = %{row_bg | fg: theme.tree.fg}
-        draws ++ [DisplayList.draw(row, col + drawn_width, pad, pad_face)]
-      else
-        draws
-      end
-    end
+    dirty_col = indicator_col + diagnostic_width
+    draws = draw_dirty_indicator(draws, is_dirty, row, dirty_col, is_cursor, focused, theme)
+    git_col = dirty_col + dirty_width
+    draw_git_indicator(draws, file_git_status, row, git_col, is_cursor, focused, theme)
   end
 
   # ── Editing entry rendering ─────────────────────────────────────────────
@@ -385,10 +376,173 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     Face.new(fg: icon_color, bg: row_bg_color(is_cursor, focused, theme))
   end
 
+  @spec fit_indicators(
+          String.t(),
+          boolean(),
+          Minga.Project.FileTree.GitStatus.file_status() | nil,
+          non_neg_integer()
+        ) :: {String.t(), boolean(), Minga.Project.FileTree.GitStatus.file_status() | nil}
+  defp fit_indicators(diagnostic_text, dirty?, git_status, available_width) do
+    {diagnostic_text, remaining_width} =
+      fit_diagnostic_indicator(diagnostic_text, available_width)
+
+    {dirty?, remaining_width} = fit_dirty_indicator(dirty?, remaining_width)
+    {git_status, _remaining_width} = fit_git_indicator(git_status, remaining_width)
+    {diagnostic_text, dirty?, git_status}
+  end
+
+  @spec fit_diagnostic_indicator(String.t(), non_neg_integer()) :: {String.t(), non_neg_integer()}
+  defp fit_diagnostic_indicator("", available_width), do: {"", available_width}
+
+  defp fit_diagnostic_indicator(text, available_width) do
+    fitted = String.slice(text, 0, available_width)
+    {fitted, available_width - String.length(fitted)}
+  end
+
+  @spec fit_dirty_indicator(boolean(), non_neg_integer()) :: {boolean(), non_neg_integer()}
+  defp fit_dirty_indicator(true = _dirty?, available_width) when available_width >= 1,
+    do: {true, available_width - 1}
+
+  defp fit_dirty_indicator(_dirty?, available_width), do: {false, available_width}
+
+  @spec fit_git_indicator(Minga.Project.FileTree.GitStatus.file_status() | nil, non_neg_integer()) ::
+          {Minga.Project.FileTree.GitStatus.file_status() | nil, non_neg_integer()}
+  defp fit_git_indicator(nil, available_width), do: {nil, available_width}
+
+  defp fit_git_indicator(git_status, available_width) when available_width >= 2,
+    do: {git_status, available_width - 2}
+
+  defp fit_git_indicator(_git_status, available_width), do: {nil, available_width}
+
+  @spec diagnostic_indicator_text(Diagnostics.t()) :: String.t()
+  defp diagnostic_indicator_text(%Diagnostics{} = diagnostics) do
+    case Diagnostics.highest_severity(diagnostics) do
+      nil ->
+        ""
+
+      severity ->
+        diagnostic_severity_icon(severity) <> diagnostic_count_suffix(diagnostics, severity)
+    end
+  end
+
+  @spec diagnostic_count_suffix(Diagnostics.t(), Diagnostics.severity()) :: String.t()
+  defp diagnostic_count_suffix(diagnostics, severity) do
+    case Diagnostics.count_for(diagnostics, severity) do
+      count when count > 9 -> "9+"
+      count when count > 1 -> Integer.to_string(count)
+      _count -> ""
+    end
+  end
+
+  @spec diagnostic_severity_icon(Diagnostics.severity()) :: String.t()
+  defp diagnostic_severity_icon(:error), do: "✖"
+  defp diagnostic_severity_icon(:warning), do: "⚠"
+  defp diagnostic_severity_icon(:info), do: "ℹ"
+  defp diagnostic_severity_icon(:hint), do: "·"
+
+  @spec draw_diagnostic_indicator(
+          [DisplayList.draw()],
+          Diagnostics.t(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          boolean(),
+          boolean(),
+          Theme.t()
+        ) :: [DisplayList.draw()]
+  defp draw_diagnostic_indicator(
+         draws,
+         %Diagnostics{},
+         "",
+         _row,
+         _col,
+         _is_cursor,
+         _focused,
+         _theme
+       ),
+       do: draws
+
+  defp draw_diagnostic_indicator(
+         draws,
+         %Diagnostics{} = diagnostics,
+         text,
+         row,
+         col,
+         is_cursor,
+         focused,
+         theme
+       ) do
+    case Diagnostics.highest_severity(diagnostics) do
+      nil ->
+        draws
+
+      severity ->
+        draws ++
+          [
+            DisplayList.draw(
+              row,
+              col,
+              text,
+              diagnostic_indicator_style(severity, is_cursor, focused, theme)
+            )
+          ]
+    end
+  end
+
+  @spec diagnostic_indicator_style(Diagnostics.severity(), boolean(), boolean(), Theme.t()) ::
+          Face.t()
+  defp diagnostic_indicator_style(severity, is_cursor, focused, theme) do
+    Face.new(
+      fg: diagnostic_severity_color(severity, theme),
+      bg: row_bg_color(is_cursor, focused, theme),
+      bold: severity in [:error, :warning]
+    )
+  end
+
+  @spec diagnostic_severity_color(Diagnostics.severity(), Theme.t()) :: non_neg_integer()
+  defp diagnostic_severity_color(:error, theme), do: theme.gutter.error_fg
+  defp diagnostic_severity_color(:warning, theme), do: theme.gutter.warning_fg
+  defp diagnostic_severity_color(:info, theme), do: theme.gutter.info_fg
+  defp diagnostic_severity_color(:hint, theme), do: theme.gutter.hint_fg
+
+  @spec draw_dirty_indicator(
+          [DisplayList.draw()],
+          boolean(),
+          non_neg_integer(),
+          non_neg_integer(),
+          boolean(),
+          boolean(),
+          Theme.t()
+        ) :: [DisplayList.draw()]
+  defp draw_dirty_indicator(draws, true = _is_dirty, row, col, is_cursor, focused, theme) do
+    dirty_style = dirty_indicator_style(is_cursor, focused, theme)
+    draws ++ [DisplayList.draw(row, col, "●", dirty_style)]
+  end
+
+  defp draw_dirty_indicator(draws, false = _is_dirty, _row, _col, _is_cursor, _focused, _theme),
+    do: draws
+
   @spec dirty_indicator_style(boolean(), boolean(), Theme.t()) :: Face.t()
   defp dirty_indicator_style(is_cursor, focused, theme) do
     color = theme.tree.modified_fg || theme.tree.fg
     Face.new(fg: color, bg: row_bg_color(is_cursor, focused, theme), bold: true)
+  end
+
+  @spec draw_git_indicator(
+          [DisplayList.draw()],
+          Minga.Project.FileTree.GitStatus.file_status() | nil,
+          non_neg_integer(),
+          non_neg_integer(),
+          boolean(),
+          boolean(),
+          Theme.t()
+        ) :: [DisplayList.draw()]
+  defp draw_git_indicator(draws, nil, _row, _col, _is_cursor, _focused, _theme), do: draws
+
+  defp draw_git_indicator(draws, file_git_status, row, col, is_cursor, focused, theme) do
+    git_symbol = " " <> Minga.Project.FileTree.GitStatus.symbol(file_git_status)
+    git_style = git_indicator_style(file_git_status, is_cursor, focused, theme)
+    draws ++ [DisplayList.draw(row, col, git_symbol, git_style)]
   end
 
   @spec git_indicator_style(

@@ -33,6 +33,7 @@ defmodule Minga.Project.FileTree.GitStatus do
           {:ok, entries} ->
             entries
             |> entries_to_status_map(git_root)
+            |> filter_under_root(root_path)
             |> propagate_to_directories(root_path)
 
           {:error, _} ->
@@ -97,6 +98,15 @@ defmodule Minga.Project.FileTree.GitStatus do
     end)
   end
 
+  @spec filter_under_root(status_map(), String.t()) :: status_map()
+  defp filter_under_root(file_statuses, root_path) do
+    expanded_root = Path.expand(root_path)
+
+    Map.filter(file_statuses, fn {path, _status} ->
+      path |> Path.expand() |> path_under_root?(expanded_root)
+    end)
+  end
+
   @spec propagate_to_directories(status_map(), String.t()) :: status_map()
   defp propagate_to_directories(file_statuses, root_path) do
     expanded_root = Path.expand(root_path)
@@ -119,10 +129,19 @@ defmodule Minga.Project.FileTree.GitStatus do
   defp do_ancestor_dirs(dir, root, acc) when dir == root, do: acc
 
   defp do_ancestor_dirs(dir, root, acc) do
-    if String.starts_with?(dir, root) do
+    if path_under_root?(dir, root) do
       do_ancestor_dirs(Path.dirname(dir), root, [dir | acc])
     else
       acc
     end
   end
+
+  @spec path_under_root?(String.t(), String.t()) :: boolean()
+  defp path_under_root?(path, root) do
+    path == root or String.starts_with?(path, path_prefix(root))
+  end
+
+  @spec path_prefix(String.t()) :: String.t()
+  defp path_prefix("/"), do: "/"
+  defp path_prefix(root), do: root <> "/"
 end
