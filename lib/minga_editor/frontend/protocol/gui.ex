@@ -89,6 +89,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   import Bitwise
 
   alias Minga.Buffer
+  alias MingaEditor.FileTree.Diagnostics, as: FileTreeDiagnostics
   alias MingaEditor.FileTree.Row
   alias MingaEditor.MinibufferData
   alias MingaEditor.State.Buffers
@@ -1037,7 +1038,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
         encode_string16(selected_id),
         encode_string16(root),
         <<tree_width::16, length(rows)::16>>,
-        Enum.map(rows, &encode_file_tree_row/1)
+        Enum.map(rows, &encode_file_tree_row(&1, root))
       ])
 
     <<@op_gui_file_tree, byte_size(payload)::32, payload::binary>>
@@ -1048,26 +1049,40 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   def encode_hidden_gui_file_tree(root_path),
     do: encode_gui_file_tree(root_path, 0, false, false, [])
 
-  @spec encode_file_tree_row(Row.t()) :: iodata()
-  defp encode_file_tree_row(%Row{} = row) do
+  @spec encode_file_tree_row(Row.t(), String.t()) :: iodata()
+  defp encode_file_tree_row(%Row{} = row, root) do
     icon = file_tree_row_icon(row)
     editing_type = if row.editing, do: encode_editing_type(row.editing.type), else: 0xFF
     editing_text = if row.editing, do: row.editing.text, else: ""
     guides = Enum.map(row.guides, fn guide? -> if guide?, do: <<1>>, else: <<0>> end)
 
+    {diagnostic_errors, diagnostic_warnings, diagnostic_info, diagnostic_hints} =
+      row.diagnostics
+      |> FileTreeDiagnostics.to_tuple()
+      |> clamp_file_tree_diagnostics()
+
     [
       <<:erlang.phash2(row.id, 0xFFFFFFFF)::32, file_tree_row_flags(row)::16, row.depth::8,
-        encode_git_status(row.git_status)::8, 0::16, 0::16, 0::16, 0::16, length(row.guides)::8>>,
+        encode_git_status(row.git_status)::8, diagnostic_errors::16, diagnostic_warnings::16,
+        diagnostic_info::16, diagnostic_hints::16, length(row.guides)::8>>,
       guides,
       encode_string16(row.id),
       encode_string16(row.path),
-      encode_string16(row.relative_path),
+      encode_string16(Path.relative_to(row.path, root)),
       encode_string16(row.name),
       encode_string8(icon),
       <<editing_type::8>>,
       encode_string16(editing_text)
     ]
   end
+
+  @spec clamp_file_tree_diagnostics(FileTreeDiagnostics.counts()) :: FileTreeDiagnostics.counts()
+  defp clamp_file_tree_diagnostics({errors, warnings, info, hints}) do
+    {clamp_u16(errors), clamp_u16(warnings), clamp_u16(info), clamp_u16(hints)}
+  end
+
+  @spec clamp_u16(non_neg_integer()) :: non_neg_integer()
+  defp clamp_u16(value), do: min(value, @max_u16)
 
   @spec selected_row_id([Row.t()]) :: String.t()
   defp selected_row_id(rows) do

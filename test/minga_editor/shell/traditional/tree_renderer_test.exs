@@ -4,6 +4,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
   use ExUnit.Case, async: true
 
   alias Minga.Project.FileTree
+  alias MingaEditor.FileTree.Diagnostics, as: RowDiagnostics
   alias MingaEditor.FileTree.Row
   alias MingaEditor.Shell.Traditional.TreeRenderer
   alias MingaEditor.Shell.Traditional.TreeRenderer.RenderInput
@@ -337,6 +338,95 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
       assert dirty_style.bold == true
     end
 
+    test "diagnostic dirty and git markers remain separate on selected rows", %{tmp_dir: tmp_dir} do
+      theme = Theme.get!(:doom_one)
+
+      row =
+        semantic_file_row(tmp_dir,
+          selected?: true,
+          focused?: true,
+          dirty?: true,
+          git_status: :conflict,
+          diagnostics: RowDiagnostics.new({2, 0, 0, 0})
+        )
+
+      draws = render_semantic_rows(tmp_dir, [row], theme)
+      {_r, _c, _text, diagnostic_style} = draw_matching(draws, "✖2")
+      {_r, _c, _text, dirty_style} = draw_matching(draws, "●")
+      {_r, _c, _text, git_style} = draw_matching(draws, " !")
+
+      assert diagnostic_style.fg == theme.gutter.error_fg
+      assert diagnostic_style.bg == theme.tree.cursor_bg
+      assert dirty_style.fg == theme.tree.modified_fg
+      assert dirty_style.bg == theme.tree.cursor_bg
+      assert git_style.fg == theme.tree.git_conflict_fg
+      assert git_style.bg == theme.tree.cursor_bg
+    end
+
+    test "right-edge status columns fit by truncating the name first", %{tmp_dir: tmp_dir} do
+      row =
+        semantic_file_row(tmp_dir,
+          dirty?: true,
+          git_status: :modified,
+          diagnostics: RowDiagnostics.new({0, 1, 0, 0})
+        )
+
+      draws =
+        TreeRenderer.render(%RenderInput{
+          tree: FileTree.new(tmp_dir, width: 12),
+          rect: {0, 0, 12, 5},
+          focused: false,
+          theme: Theme.get!(:doom_one),
+          active_path: nil,
+          rows: [row]
+        })
+
+      row_text =
+        draws
+        |> Enum.filter(fn {r, c, _t, _s} -> r == 1 and c < 12 end)
+        |> Enum.sort_by(fn {_r, c, _t, _s} -> c end)
+        |> Enum.map_join(fn {_r, _c, text, _s} -> text end)
+
+      diagnostic_draw = draw_matching(draws, "⚠")
+      dirty_draw = draw_matching(draws, "●")
+      git_draw = draw_matching(draws, " ●")
+
+      assert String.length(row_text) <= 12
+      assert diagnostic_draw != nil
+      assert dirty_draw != nil
+      assert git_draw != nil
+      assert draw_col(diagnostic_draw) < draw_col(dirty_draw)
+      assert draw_col(dirty_draw) < draw_col(git_draw)
+    end
+
+    test "large diagnostic counts are capped before narrow-row fitting", %{tmp_dir: tmp_dir} do
+      row =
+        semantic_file_row(tmp_dir,
+          dirty?: true,
+          git_status: :conflict,
+          diagnostics: RowDiagnostics.new({120, 0, 0, 0})
+        )
+
+      draws =
+        TreeRenderer.render(%RenderInput{
+          tree: FileTree.new(tmp_dir, width: 10),
+          rect: {0, 0, 10, 5},
+          focused: false,
+          theme: Theme.get!(:doom_one),
+          active_path: nil,
+          rows: [row]
+        })
+
+      row_text =
+        draws
+        |> Enum.filter(fn {r, c, _t, _s} -> r == 1 and c < 10 end)
+        |> Enum.sort_by(fn {_r, c, _t, _s} -> c end)
+        |> Enum.map_join(fn {_r, _c, text, _s} -> text end)
+
+      assert String.length(row_text) <= 10
+      assert String.contains?(row_text, "✖9+")
+    end
+
     test "unfocused selected row uses subdued selection background", %{tmp_dir: tmp_dir} do
       theme = Theme.get!(:doom_one)
       row = semantic_file_row(tmp_dir, selected?: true, focused?: false)
@@ -393,6 +483,8 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
   defp draw_matching(draws, text) do
     Enum.find(draws, fn {_r, _c, draw_text, _style} -> draw_text == text end)
   end
+
+  defp draw_col({_r, col, _text, _style}), do: col
 
   describe "editing entry rendering" do
     test "editing entry renders with inverse video styling", %{tmp_dir: tmp_dir} do

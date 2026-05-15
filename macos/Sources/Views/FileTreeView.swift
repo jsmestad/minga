@@ -22,10 +22,10 @@ struct FileTreeView: View {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.15
     }
 
-    @State private var hoveredEntryId: UInt32? = nil
+    @State private var hoveredEntryId: String? = nil
     @State private var scrollOffset: CGFloat = 0
-    @State private var dropTargetEntryId: UInt32? = nil
-    @State private var lastClickEntryId: UInt32? = nil
+    @State private var dropTargetEntryId: String? = nil
+    @State private var lastClickEntryId: String? = nil
     @State private var lastClickTime: Date? = nil
 
     var body: some View {

@@ -3,7 +3,10 @@ defmodule MingaEditor.FileTree.RowsTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Diagnostics
+  alias Minga.Diagnostics.Diagnostic
   alias Minga.Project.FileTree
+  alias MingaEditor.FileTree.Diagnostics, as: RowDiagnostics
   alias MingaEditor.FileTree.Rows
 
   @moduletag :tmp_dir
@@ -51,6 +54,106 @@ defmodule MingaEditor.FileTree.RowsTest do
       assert row.dirty? == false
     end
 
+    test "attaches diagnostic counts to file rows", %{tmp_dir: tmp_dir} do
+      tree = flat_tree(tmp_dir)
+      file_path = Path.join(tmp_dir, "alpha.ex")
+
+      [row | _] = Rows.from_tree(tree, diagnostics: %{file_path => {2, 1, 0, 3}})
+
+      assert row.diagnostics.error_count == 2
+      assert row.diagnostics.warning_count == 1
+      assert row.diagnostics.hint_count == 3
+      assert RowDiagnostics.highest_severity(row.diagnostics) == :error
+    end
+
+    test "accepts diagnostics count maps from the diagnostics store", %{tmp_dir: tmp_dir} do
+      tree = flat_tree(tmp_dir)
+      file_path = Path.join(tmp_dir, "alpha.ex")
+
+      [row | _] =
+        Rows.from_tree(tree,
+          diagnostics: %{file_path => %{error: 1, warning: 2, info: 3, hint: 4}}
+        )
+
+      assert row.diagnostics.error_count == 1
+      assert row.diagnostics.warning_count == 2
+      assert row.diagnostics.info_count == 3
+      assert row.diagnostics.hint_count == 4
+    end
+
+    test "reads diagnostics from the diagnostics store by default", %{tmp_dir: tmp_dir} do
+      diagnostics_server =
+        start_supervised!({Diagnostics, name: :"row_diag_#{System.unique_integer()}"})
+
+      File.mkdir_p!(Path.join(tmp_dir, "lib"))
+      file_path = Path.join([tmp_dir, "lib", "a.ex"])
+      File.write!(file_path, "")
+
+      Diagnostics.publish(
+        diagnostics_server,
+        :test,
+        Minga.LSP.SyncServer.path_to_uri(file_path),
+        [diagnostic(:error), diagnostic(:hint)]
+      )
+
+      rows = tmp_dir |> FileTree.new() |> Rows.from_tree(diagnostics_server: diagnostics_server)
+      lib = Enum.find(rows, &(&1.name == "lib"))
+
+      assert lib.diagnostics.error_count == 1
+      assert lib.diagnostics.hint_count == 1
+      assert RowDiagnostics.highest_severity(lib.diagnostics) == :error
+    end
+
+    test "propagates diagnostic status to ancestor directories", %{tmp_dir: tmp_dir} do
+      File.mkdir_p!(Path.join([tmp_dir, "lib", "minga"]))
+      file_path = Path.join([tmp_dir, "lib", "minga", "editor.ex"])
+      File.write!(file_path, "")
+
+      tree = FileTree.new(tmp_dir)
+      rows = Rows.from_tree(tree, diagnostics: %{file_path => {0, 1, 0, 0}})
+      lib = Enum.find(rows, &(&1.name == "lib"))
+
+      assert lib.directory? == true
+      assert lib.diagnostics.warning_count == 1
+      assert RowDiagnostics.highest_severity(lib.diagnostics) == :warning
+    end
+
+    test "merges descendant diagnostic counts on directory rows", %{tmp_dir: tmp_dir} do
+      File.mkdir_p!(Path.join(tmp_dir, "lib"))
+      first_path = Path.join([tmp_dir, "lib", "a.ex"])
+      second_path = Path.join([tmp_dir, "lib", "b.ex"])
+      File.write!(first_path, "")
+      File.write!(second_path, "")
+
+      tree = FileTree.new(tmp_dir)
+
+      rows =
+        Rows.from_tree(tree,
+          diagnostics: %{first_path => {1, 0, 0, 0}, second_path => {0, 2, 0, 0}}
+        )
+
+      lib = Enum.find(rows, &(&1.name == "lib"))
+
+      assert lib.diagnostics.error_count == 1
+      assert lib.diagnostics.warning_count == 2
+      assert RowDiagnostics.highest_severity(lib.diagnostics) == :error
+    end
+
+    test "ignores diagnostics outside sibling paths with the same prefix", %{tmp_dir: tmp_dir} do
+      File.mkdir_p!(Path.join(tmp_dir, "lib"))
+      File.write!(Path.join([tmp_dir, "lib", "inside.ex"]), "")
+      outside_path = Path.join([tmp_dir <> "_sibling", "lib", "outside.ex"])
+
+      rows =
+        tmp_dir
+        |> FileTree.new()
+        |> Rows.from_tree(diagnostics: %{outside_path => {1, 0, 0, 0}})
+
+      lib = Enum.find(rows, &(&1.name == "lib"))
+
+      assert RowDiagnostics.total_count(lib.diagnostics) == 0
+    end
+
     test "attaches inline editing metadata only to the edited index", %{tmp_dir: tmp_dir} do
       tree = flat_tree(tmp_dir)
       editing = %{index: 1, text: "renamed.ex", type: :rename, original_name: "beta.ex"}
@@ -78,7 +181,7 @@ defmodule MingaEditor.FileTree.RowsTest do
       assert row.depth == 2
       assert row.guides == [false, false]
       assert row.last_child? == true
-      assert row.relative_path == "lib/minga/editor.ex"
+      assert row.path == Path.join([tmp_dir, "lib", "minga", "editor.ex"])
     end
 
     test "returns no rows for an empty visible tree", %{tmp_dir: tmp_dir} do
@@ -90,5 +193,15 @@ defmodule MingaEditor.FileTree.RowsTest do
     File.write!(Path.join(tmp_dir, "alpha.ex"), "")
     File.write!(Path.join(tmp_dir, "beta.ex"), "")
     FileTree.new(tmp_dir)
+  end
+
+  defp diagnostic(severity) do
+    %Diagnostic{
+      range: %{start_line: 0, start_col: 0, end_line: 0, end_col: 1},
+      severity: severity,
+      message: "diagnostic",
+      source: "test",
+      code: nil
+    }
   end
 end

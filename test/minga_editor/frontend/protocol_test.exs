@@ -1087,6 +1087,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
           active?: true,
           dirty?: true,
           git_status: :modified,
+          diagnostics: MingaEditor.FileTree.Diagnostics.new({1, 2, 3, 4}),
           depth: 1,
           guides: [true, false],
           last_child?: true,
@@ -1108,7 +1109,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
 
       expected_hash = :erlang.phash2(row.id, 0xFFFFFFFF)
 
-      assert <<^expected_hash::32, row_flags::16, 1::8, 1::8, 0::16, 0::16, 0::16, 0::16, 2::8,
+      assert <<^expected_hash::32, row_flags::16, 1::8, 1::8, 1::16, 2::16, 3::16, 4::16, 2::8,
                1::8, 0::8, strings::binary>> = row_payload
 
       assert Bitwise.band(row_flags, 0x04) != 0
@@ -1126,9 +1127,35 @@ defmodule MingaEditor.Frontend.ProtocolTest do
 
       assert id == row.id
       assert path == row.path
-      assert rel_path == row.relative_path
+      assert rel_path == "lib/hello.ex"
       assert name == row.name
       assert icon != ""
+    end
+
+    test "clamps semantic gui_file_tree diagnostic counts to uint16 wire fields" do
+      row =
+        MingaEditor.FileTree.Row.new(
+          id: "/project/lib/noisy.ex",
+          path: "/project/lib/noisy.ex",
+          relative_path: "lib/noisy.ex",
+          name: "noisy.ex",
+          directory?: false,
+          expanded?: false,
+          selected?: true,
+          diagnostics: MingaEditor.FileTree.Diagnostics.new({70_000, 65_536, 3, 4}),
+          depth: 0,
+          guides: [],
+          last_child?: true,
+          editing: nil
+        )
+
+      encoded = ProtocolGUI.encode_gui_file_tree("/project", 30, true, false, [row])
+      <<0x93, payload_len::32, payload::binary-size(payload_len)>> = encoded
+
+      <<_version::8, _tree_flags::8, selected_len::16, _selected::binary-size(selected_len),
+        root_len::16, _root::binary-size(root_len), _width::16, _count::16, _hash::32,
+        _row_flags::16, _depth::8, _git::8, 65_535::16, 65_535::16, 3::16, 4::16, _rest::binary>> =
+        payload
     end
 
     test "encodes semantic gui_file_tree string lengths as UTF-8 byte counts" do
@@ -1161,7 +1188,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       {_path, strings} = take_string16(strings)
       {rel_path, strings} = take_string16(strings)
       {name, _strings} = take_string16(strings)
-      assert rel_path == row.relative_path
+      assert rel_path == "lib/ñ📄.ex"
       assert name == row.name
       assert byte_size(name) > String.length(name)
     end

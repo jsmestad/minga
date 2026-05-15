@@ -193,10 +193,23 @@ defmodule Minga.Diagnostics do
   @spec count_tuple(GenServer.server(), uri()) ::
           {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil
   def count_tuple(server \\ __MODULE__, uri) when is_binary(uri) do
-    case count(server, uri) do
-      %{error: 0, warning: 0, info: 0, hint: 0} -> nil
-      %{error: e, warning: w, info: i, hint: h} -> {e, w, i, h}
-    end
+    server
+    |> table_name()
+    |> count_tuple_from_table(uri)
+  end
+
+  @doc """
+  Returns diagnostic count tuples for URIs under a prefix.
+
+  This is used by project-level status surfaces, such as the file tree, to build a path-keyed diagnostic summary without scanning unrelated diagnostic payloads or walking the filesystem.
+  """
+  @spec count_tuples_by_uri_prefix(GenServer.server(), uri()) :: %{
+          uri() => {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
+        }
+  def count_tuples_by_uri_prefix(server \\ __MODULE__, uri_prefix) when is_binary(uri_prefix) do
+    server
+    |> table_name()
+    |> do_count_tuples_by_uri_prefix(uri_prefix)
   end
 
   @doc """
@@ -244,8 +257,7 @@ defmodule Minga.Diagnostics do
 
   @impl GenServer
   def handle_call({:publish, source, uri, diagnostics}, _from, state) do
-    :ets.insert(state.table, {{source, uri}, diagnostics})
-    update_uri_index(state.uri_index, uri, source, :add)
+    store_published_diagnostics(state, source, uri, diagnostics)
     invalidate_cache(state.merge_cache, uri)
     gen = state.generation + 1
     broadcast_diagnostics_updated(uri, source)
@@ -295,6 +307,17 @@ defmodule Minga.Diagnostics do
 
   # ── Private ────────────────────────────────────────────────────────────────
 
+  @spec store_published_diagnostics(state(), source(), uri(), [Diagnostic.t()]) :: :ok
+  defp store_published_diagnostics(state, source, uri, []) do
+    :ets.delete(state.table, {source, uri})
+    update_uri_index(state.uri_index, uri, source, :remove)
+  end
+
+  defp store_published_diagnostics(state, source, uri, diagnostics) do
+    :ets.insert(state.table, {{source, uri}, diagnostics})
+    update_uri_index(state.uri_index, uri, source, :add)
+  end
+
   # Merged diagnostics for a URI, using the URI index for O(1) source
   # lookup and a generation-based cache to avoid re-merging on every call.
   @spec merged_for_uri(:ets.table(), uri()) :: [Diagnostic.t()]
@@ -330,6 +353,65 @@ defmodule Minga.Diagnostics do
       end
     end)
     |> Diagnostic.sort()
+  end
+
+  @spec do_count_tuples_by_uri_prefix(:ets.table(), uri()) :: %{
+          uri() => {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
+        }
+  defp do_count_tuples_by_uri_prefix(table, uri_prefix) do
+    {uri_index, _cache_table} = :persistent_term.get({__MODULE__, table})
+
+    :ets.foldl(
+      fn {uri, _sources}, acc ->
+        maybe_put_count_tuple(acc, table, uri, uri_prefix)
+      end,
+      %{},
+      uri_index
+    )
+  end
+
+  @spec maybe_put_count_tuple(map(), :ets.table(), uri(), uri()) :: map()
+  defp maybe_put_count_tuple(acc, table, uri, uri_prefix) do
+    if uri_under_prefix?(uri, uri_prefix) do
+      case count_tuple_from_table(table, uri) do
+        nil -> acc
+        counts -> Map.put(acc, uri, counts)
+      end
+    else
+      acc
+    end
+  end
+
+  @spec uri_under_prefix?(uri(), uri()) :: boolean()
+  defp uri_under_prefix?(uri, uri_prefix),
+    do: uri == uri_prefix or String.starts_with?(uri, prefix_dir(uri_prefix))
+
+  @spec prefix_dir(uri()) :: uri()
+  defp prefix_dir(uri_prefix) do
+    if String.ends_with?(uri_prefix, "/"), do: uri_prefix, else: uri_prefix <> "/"
+  end
+
+  @spec count_tuple_from_table(:ets.table(), uri()) ::
+          {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil
+  defp count_tuple_from_table(table, uri) do
+    case count_from_table(table, uri) do
+      %{error: 0, warning: 0, info: 0, hint: 0} -> nil
+      %{error: e, warning: w, info: i, hint: h} -> {e, w, i, h}
+    end
+  end
+
+  @spec count_from_table(:ets.table(), uri()) :: %{
+          error: non_neg_integer(),
+          warning: non_neg_integer(),
+          info: non_neg_integer(),
+          hint: non_neg_integer()
+        }
+  defp count_from_table(table, uri) do
+    table
+    |> merged_for_uri(uri)
+    |> Enum.reduce(%{error: 0, warning: 0, info: 0, hint: 0}, fn diag, acc ->
+      Map.update!(acc, diag.severity, &(&1 + 1))
+    end)
   end
 
   @spec find_next([Diagnostic.t()], non_neg_integer()) :: Diagnostic.t() | nil

@@ -6,8 +6,11 @@ defmodule MingaEditor.FileTree.Rows do
   """
 
   alias Minga.Buffer
+  alias Minga.Diagnostics, as: DiagnosticStore
+  alias Minga.LSP.SyncServer
   alias Minga.Project.FileTree
   alias Minga.Project.FileTree.GitStatus
+  alias MingaEditor.FileTree.Diagnostics
   alias MingaEditor.FileTree.Row
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -18,6 +21,8 @@ defmodule MingaEditor.FileTree.Rows do
           active_path: String.t() | nil,
           dirty_paths: MapSet.t(String.t()),
           git_status: GitStatus.status_map(),
+          diagnostics: %{String.t() => Diagnostics.t() | Diagnostics.counts() | map() | keyword()},
+          diagnostics_server: GenServer.server(),
           editing: FileTreeState.editing() | nil
         ]
 
@@ -25,6 +30,16 @@ defmodule MingaEditor.FileTree.Rows do
   @spec from_tree(FileTree.t(), options()) :: [Row.t()]
   def from_tree(%FileTree{} = tree, opts \\ []) do
     git_status = Keyword.get(opts, :git_status, tree.git_status)
+
+    diagnostics_server = Keyword.get(opts, :diagnostics_server, DiagnosticStore)
+
+    diagnostics =
+      opts
+      |> Keyword.get_lazy(:diagnostics, fn ->
+        diagnostic_map_for_root(tree.root, diagnostics_server)
+      end)
+      |> propagated_diagnostics(tree.root)
+
     dirty_paths = Keyword.get(opts, :dirty_paths, MapSet.new())
     active_path = opts |> Keyword.get(:active_path) |> expand_optional_path()
     selected_index = Keyword.get(opts, :selected_index, tree.cursor)
@@ -39,6 +54,7 @@ defmodule MingaEditor.FileTree.Rows do
         active_path: active_path,
         dirty_paths: dirty_paths,
         editing: editing,
+        diagnostics: diagnostics,
         focused: focused,
         git_status: git_status,
         selected_index: selected_index
@@ -70,7 +86,6 @@ defmodule MingaEditor.FileTree.Rows do
     Row.new(
       id: Row.id_for(entry),
       path: path,
-      relative_path: Path.relative_to(path, tree.root),
       name: entry.name,
       directory?: entry.dir?,
       expanded?: entry.dir? and MapSet.member?(tree.expanded, path),
@@ -79,6 +94,7 @@ defmodule MingaEditor.FileTree.Rows do
       active?: active?(path, opts.active_path),
       dirty?: dirty?(entry, path, opts.dirty_paths),
       git_status: Map.get(opts.git_status, path),
+      diagnostics: Map.get(opts.diagnostics, path, Diagnostics.empty()),
       depth: entry.depth,
       guides: entry.guides,
       last_child?: entry.last_child?,
@@ -99,6 +115,80 @@ defmodule MingaEditor.FileTree.Rows do
   defp editing_for_index(_index, nil), do: nil
   defp editing_for_index(index, %{index: index} = editing), do: editing
   defp editing_for_index(_index, _editing), do: nil
+
+  @spec diagnostic_map_for_root(String.t(), GenServer.server()) :: %{
+          String.t() => Diagnostics.t()
+        }
+  defp diagnostic_map_for_root(root, diagnostics_server) when is_binary(root) do
+    diagnostics_server
+    |> DiagnosticStore.count_tuples_by_uri_prefix(SyncServer.path_to_uri(root))
+    |> Map.new(fn {uri, counts} -> {SyncServer.uri_to_path(uri), Diagnostics.new(counts)} end)
+  rescue
+    ArgumentError -> %{}
+  catch
+    :exit, _ -> %{}
+  end
+
+  @spec propagated_diagnostics(map(), String.t()) :: %{String.t() => Diagnostics.t()}
+  defp propagated_diagnostics(diagnostics, root) when is_map(diagnostics) do
+    expanded_root = Path.expand(root)
+
+    Enum.reduce(diagnostics, %{}, fn {path, row_diagnostics}, acc ->
+      diagnostics = Diagnostics.new(row_diagnostics)
+      expanded_path = Path.expand(path)
+      put_propagated_diagnostics(acc, expanded_path, expanded_root, diagnostics)
+    end)
+  end
+
+  @spec put_propagated_diagnostics(
+          %{String.t() => Diagnostics.t()},
+          String.t(),
+          String.t(),
+          Diagnostics.t()
+        ) :: %{String.t() => Diagnostics.t()}
+  defp put_propagated_diagnostics(acc, path, root, diagnostics) do
+    if path_under_root?(path, root) do
+      path
+      |> diagnostic_ancestor_dirs(root)
+      |> Enum.reduce(put_diagnostics(acc, path, diagnostics), fn dir, inner_acc ->
+        put_diagnostics(inner_acc, dir, diagnostics)
+      end)
+    else
+      acc
+    end
+  end
+
+  @spec put_diagnostics(%{String.t() => Diagnostics.t()}, String.t(), Diagnostics.t()) :: %{
+          String.t() => Diagnostics.t()
+        }
+  defp put_diagnostics(acc, path, diagnostics) do
+    Map.update(acc, path, diagnostics, &Diagnostics.merge(&1, diagnostics))
+  end
+
+  @spec diagnostic_ancestor_dirs(String.t(), String.t()) :: [String.t()]
+  defp diagnostic_ancestor_dirs(path, root) do
+    do_diagnostic_ancestor_dirs(Path.dirname(path), root, [])
+  end
+
+  @spec do_diagnostic_ancestor_dirs(String.t(), String.t(), [String.t()]) :: [String.t()]
+  defp do_diagnostic_ancestor_dirs(dir, root, acc) when dir == root, do: acc
+
+  defp do_diagnostic_ancestor_dirs(dir, root, acc) do
+    if path_under_root?(dir, root) do
+      do_diagnostic_ancestor_dirs(Path.dirname(dir), root, [dir | acc])
+    else
+      acc
+    end
+  end
+
+  @spec path_under_root?(String.t(), String.t()) :: boolean()
+  defp path_under_root?(path, root) do
+    path == root or String.starts_with?(path, path_prefix(root))
+  end
+
+  @spec path_prefix(String.t()) :: String.t()
+  defp path_prefix("/"), do: "/"
+  defp path_prefix(root), do: root <> "/"
 
   @spec expand_optional_path(String.t() | nil) :: String.t() | nil
   defp expand_optional_path(nil), do: nil

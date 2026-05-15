@@ -5,10 +5,10 @@ import SwiftUI
 /// A single file tree entry for SwiftUI rendering.
 struct FileTreeEntry: Identifiable {
     /// Visual states are layered in the same priority order as the BEAM TUI renderer: inline editing, drop target, selected row, active file, dirty buffer, git status, then directory emphasis.
-    /// Stable 32-bit hash of the file path, sent by the BEAM. Persists across
-    /// tree updates so SwiftUI's diffing correctly identifies unchanged rows
-    /// instead of treating every row below a change as new.
-    let id: UInt32
+    /// Stable semantic row identity sent by the BEAM. SwiftUI uses this as the row identity so hover, drop, and diffing state cannot collide on a 32-bit hash.
+    let id: String
+    /// Stable 32-bit hash sent by the BEAM for protocol/debug parity. It is not used as SwiftUI identity because hashes can collide.
+    let pathHash: UInt32
     /// Array index within the current visible entries. Used for click actions
     /// (the BEAM expects an index, not a hash).
     let index: Int
@@ -49,6 +49,13 @@ enum FileTreeGitStatus: UInt8 {
     case deleted = 6
 }
 
+enum FileTreeDiagnosticSeverity {
+    case error
+    case warning
+    case info
+    case hint
+}
+
 extension FileTreeEntry {
     var gitStatusValue: FileTreeGitStatus {
         FileTreeGitStatus(rawValue: gitStatus) ?? .clean
@@ -69,6 +76,25 @@ extension FileTreeEntry {
     var hasConflictStatus: Bool {
         gitStatusValue == .conflict
     }
+
+    var highestDiagnosticSeverity: FileTreeDiagnosticSeverity? {
+        if diagnosticErrorCount > 0 { return .error }
+        if diagnosticWarningCount > 0 { return .warning }
+        if diagnosticInfoCount > 0 { return .info }
+        if diagnosticHintCount > 0 { return .hint }
+        return nil
+    }
+
+    var highestDiagnosticCount: UInt16 {
+        switch highestDiagnosticSeverity {
+        case .error: return diagnosticErrorCount
+        case .warning: return diagnosticWarningCount
+        case .info: return diagnosticInfoCount
+        case .hint: return diagnosticHintCount
+        case nil: return 0
+        }
+    }
+
 }
 
 /// Observable state for the file tree sidebar, driven by BEAM protocol messages.
@@ -104,7 +130,8 @@ final class FileTreeState {
         self.focused = focused
         self.entries = rawEntries.enumerated().map { index, entry in
             FileTreeEntry(
-                id: entry.pathHash,
+                id: entry.id,
+                pathHash: entry.pathHash,
                 index: index,
                 isDir: entry.isDir,
                 isExpanded: entry.isExpanded,

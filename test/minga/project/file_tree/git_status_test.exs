@@ -64,6 +64,23 @@ defmodule Minga.Project.FileTree.GitStatusTest do
       status = GitStatus.compute(dir)
       assert Map.get(status, Path.join(dir, "src")) == :modified
     end
+
+    test "filters repo status to the requested root path", %{root: dir} do
+      root_path = Path.join(dir, "app")
+      File.mkdir_p!(root_path)
+      GitStub.set_root(root_path, dir)
+
+      GitStub.set_status(dir, [
+        %StatusEntry{path: "app/lib/inside.ex", status: :modified, staged: false},
+        %StatusEntry{path: "application/lib/outside.ex", status: :conflict, staged: false}
+      ])
+
+      status = GitStatus.compute(root_path)
+
+      assert Map.get(status, Path.join([dir, "app", "lib"])) == :modified
+      refute Map.has_key?(status, Path.join([dir, "application", "lib"]))
+      refute Map.has_key?(status, Path.join([dir, "application", "lib", "outside.ex"]))
+    end
   end
 
   describe "symbol/1" do

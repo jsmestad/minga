@@ -235,6 +235,7 @@ struct FileTreeStateComputedTests {
         ])
 
         let entry = state.entries[0]
+        #expect(entry.id == "/project/lib/editor.ex")
         #expect(entry.isSelected == true)
         #expect(entry.isFocused == false)
         #expect(entry.isActive == true)
@@ -244,6 +245,18 @@ struct FileTreeStateComputedTests {
         #expect(entry.showsDirtyMarker == true)
         #expect(entry.showsGitMarker == true)
         #expect(entry.hasConflictStatus == true)
+    }
+
+    @Test("Diagnostic severity uses error warning info hint priority")
+    @MainActor func diagnosticSeverityUsesPriority() {
+        let state = FileTreeState()
+        state.update(version: 2, selectedId: "/project/lib/editor.ex", focused: false, treeWidth: 30, rootPath: "/project", rawEntries: [
+            computedWireFileTreeEntry(id: "/project/lib/editor.ex", isSelected: false, isFocused: false, isActive: false, isDirty: false, gitStatus: 0, diagnosticErrorCount: 0, diagnosticWarningCount: 2, diagnosticInfoCount: 5, diagnosticHintCount: 8),
+        ])
+
+        let entry = state.entries[0]
+        #expect(entry.highestDiagnosticSeverity == .warning)
+        #expect(entry.highestDiagnosticCount == 2)
     }
 
     @Test("Dirty marker is suppressed for directories")
@@ -276,7 +289,7 @@ struct FileTreePathTests {
 }
 
 private func computedFileTreeEntry(path: String, relPath: String, isDir: Bool = false, isDirty: Bool = false) -> FileTreeEntry {
-    FileTreeEntry(id: 1, index: 0, isDir: isDir, isExpanded: false, isSelected: false,
+    FileTreeEntry(id: relPath, pathHash: 1, index: 0, isDir: isDir, isExpanded: false, isSelected: false,
                   isFocused: false, isActive: false, isDirty: isDirty, isEditing: false,
                   isLastChild: false, depth: 0, gitStatus: 0, diagnosticErrorCount: 0,
                   diagnosticWarningCount: 0, diagnosticInfoCount: 0, diagnosticHintCount: 0,
@@ -284,12 +297,12 @@ private func computedFileTreeEntry(path: String, relPath: String, isDir: Bool = 
                   editingType: 0xFF, editingText: "")
 }
 
-private func computedWireFileTreeEntry(id: String, isSelected: Bool, isFocused: Bool, isActive: Bool, isDirty: Bool, gitStatus: UInt8) -> Wire.FileTreeEntry {
+private func computedWireFileTreeEntry(id: String, isSelected: Bool, isFocused: Bool, isActive: Bool, isDirty: Bool, gitStatus: UInt8, diagnosticErrorCount: UInt16 = 0, diagnosticWarningCount: UInt16 = 0, diagnosticInfoCount: UInt16 = 0, diagnosticHintCount: UInt16 = 0) -> Wire.FileTreeEntry {
     Wire.FileTreeEntry(pathHash: 1, id: id, path: id, isDir: false, isExpanded: false,
                        isSelected: isSelected, isFocused: isFocused, isActive: isActive,
                        isDirty: isDirty, isEditing: false, isLastChild: false, depth: 0,
-                       gitStatus: gitStatus, diagnosticErrorCount: 0, diagnosticWarningCount: 0,
-                       diagnosticInfoCount: 0, diagnosticHintCount: 0, guides: [], icon: "",
+                       gitStatus: gitStatus, diagnosticErrorCount: diagnosticErrorCount, diagnosticWarningCount: diagnosticWarningCount,
+                       diagnosticInfoCount: diagnosticInfoCount, diagnosticHintCount: diagnosticHintCount, guides: [], icon: "",
                        name: "editor.ex", relPath: "lib/editor.ex", editingType: 0xFF,
                        editingText: "")
 }
