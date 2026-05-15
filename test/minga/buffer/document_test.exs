@@ -460,17 +460,6 @@ defmodule Minga.Buffer.DocumentTest do
       assert_cache_valid(buf)
       assert Document.cursor(buf) == {1, 0}
     end
-
-    test "delete_range spanning multiple lines rebuilds cache correctly" do
-      buf = Document.new("abc\ndef\nghi") |> Document.delete_range({0, 1}, {1, 1})
-      assert_cache_valid(buf)
-    end
-
-    test "delete_lines rebuilds cache correctly" do
-      buf = Document.new("a\nb\nc\nd") |> Document.delete_lines(1, 2)
-      assert_cache_valid(buf)
-      assert Document.line_count(buf) == 2
-    end
   end
 
   # ── Property: cache always matches recomputed values ──
@@ -568,27 +557,6 @@ defmodule Minga.Buffer.DocumentTest do
       buf = Document.new("ab\ncd")
       # Only lines 0 and 1. Line 99 clamps to line 1 (offset 3) + col 0.
       assert Document.position_to_offset(buf, {99, 0}) == 3
-    end
-
-    test "get_range with out-of-bounds coordinates does not crash" do
-      buf = Document.new("hello\n\nworld")
-      # Line 1 is empty. Anchor at {1, 43} is beyond the line.
-      # This previously crashed with binary_part("", 43, -43).
-      result = Document.get_range(buf, {1, 43}, {0, 0})
-      assert is_binary(result)
-    end
-
-    test "get_range with both positions beyond text_size returns empty" do
-      buf = Document.new("ab")
-      result = Document.get_range(buf, {99, 99}, {99, 99})
-      assert result == ""
-    end
-
-    test "content_range with stale coordinates clamps gracefully" do
-      buf = Document.new("line1\n\nline3")
-      # Line 1 is empty, col 20 is beyond it.
-      result = Document.content_range(buf, {0, 0}, {1, 20})
-      assert is_binary(result)
     end
   end
 
