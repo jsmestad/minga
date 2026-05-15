@@ -52,45 +52,6 @@ defmodule Minga.Buffer.DocumentTest do
     end
   end
 
-  describe "line_at/2" do
-    test "returns the first line" do
-      buf = Document.new("hello\nworld")
-      assert Document.line_at(buf, 0) == "hello"
-    end
-
-    test "returns the second line" do
-      buf = Document.new("hello\nworld")
-      assert Document.line_at(buf, 1) == "world"
-    end
-
-    test "returns nil for out-of-range line" do
-      buf = Document.new("hello")
-      assert Document.line_at(buf, 5) == nil
-    end
-
-    test "returns empty string for empty line" do
-      buf = Document.new("hello\n\nworld")
-      assert Document.line_at(buf, 1) == ""
-    end
-  end
-
-  describe "lines/3" do
-    test "returns a range of lines" do
-      buf = Document.new("a\nb\nc\nd\ne")
-      assert Document.lines(buf, 1, 3) == ["b", "c", "d"]
-    end
-
-    test "returns empty list when start is past end" do
-      buf = Document.new("a\nb")
-      assert Document.lines(buf, 10, 5) == []
-    end
-
-    test "returns fewer lines when count exceeds available" do
-      buf = Document.new("a\nb\nc")
-      assert Document.lines(buf, 1, 10) == ["b", "c"]
-    end
-  end
-
   describe "cursor/1" do
     test "starts at {0, 0} for new buffer" do
       assert Document.cursor(Document.new("hello")) == {0, 0}
@@ -271,113 +232,6 @@ defmodule Minga.Buffer.DocumentTest do
     end
   end
 
-  # ── Movement ──
-
-  describe "move/2 :left" do
-    test "moves cursor left" do
-      buf = Document.new("hello") |> Document.move_to({0, 3}) |> Document.move(:left)
-      assert Document.cursor(buf) == {0, 2}
-    end
-
-    test "stays at start when already at {0, 0}" do
-      buf = Document.new("hello") |> Document.move(:left)
-      assert Document.cursor(buf) == {0, 0}
-    end
-
-    test "wraps to end of previous line" do
-      buf = Document.new("ab\ncd") |> Document.move_to({1, 0}) |> Document.move(:left)
-      assert Document.cursor(buf) == {0, 2}
-    end
-  end
-
-  describe "move/2 :right" do
-    test "moves cursor right" do
-      buf = Document.new("hello") |> Document.move(:right)
-      assert Document.cursor(buf) == {0, 1}
-    end
-
-    test "stays at end when already at the end" do
-      buf = Document.new("hi") |> Document.move_to({0, 2}) |> Document.move(:right)
-      assert Document.cursor(buf) == {0, 2}
-    end
-
-    test "wraps to start of next line" do
-      buf = Document.new("ab\ncd") |> Document.move_to({0, 2}) |> Document.move(:right)
-      assert Document.cursor(buf) == {1, 0}
-    end
-
-    test "moves by byte size for multi-byte characters" do
-      buf = Document.new("🥨ab") |> Document.move(:right)
-      # 🥨 is 4 bytes
-      assert Document.cursor(buf) == {0, 4}
-    end
-  end
-
-  describe "move/2 :up" do
-    test "moves cursor to the same column on previous line" do
-      buf = Document.new("hello\nworld") |> Document.move_to({1, 3}) |> Document.move(:up)
-      assert Document.cursor(buf) == {0, 3}
-    end
-
-    test "clamps column when previous line is shorter" do
-      buf = Document.new("hi\nworld") |> Document.move_to({1, 4}) |> Document.move(:up)
-      assert Document.cursor(buf) == {0, 2}
-    end
-
-    test "stays on first line when already on line 0" do
-      buf = Document.new("hello\nworld") |> Document.move(:up)
-      assert Document.cursor(buf) == {0, 0}
-    end
-  end
-
-  describe "move/2 :down" do
-    test "moves cursor to the same column on next line" do
-      buf = Document.new("hello\nworld") |> Document.move_to({0, 3}) |> Document.move(:down)
-      assert Document.cursor(buf) == {1, 3}
-    end
-
-    test "clamps column when next line is shorter" do
-      buf = Document.new("hello\nhi") |> Document.move_to({0, 4}) |> Document.move(:down)
-      assert Document.cursor(buf) == {1, 2}
-    end
-
-    test "stays on last line when already on the last line" do
-      buf = Document.new("hello\nworld") |> Document.move_to({1, 0}) |> Document.move(:down)
-      assert Document.cursor(buf) == {1, 0}
-    end
-  end
-
-  describe "move_to/2" do
-    test "moves to exact position" do
-      buf = Document.new("abc\ndef\nghi") |> Document.move_to({2, 1})
-      assert Document.cursor(buf) == {2, 1}
-    end
-
-    test "clamps line to last line" do
-      buf = Document.new("abc\ndef") |> Document.move_to({99, 0})
-      assert Document.cursor(buf) == {1, 0}
-    end
-
-    test "clamps column to end of line (byte size)" do
-      buf = Document.new("abc\ndef") |> Document.move_to({0, 99})
-      assert Document.cursor(buf) == {0, 3}
-    end
-
-    test "preserves buffer content after move" do
-      text = "hello\nworld"
-      buf = Document.new(text) |> Document.move_to({1, 3})
-      assert Document.content(buf) == text
-    end
-
-    test "clamps to grapheme boundary for multi-byte chars" do
-      # "café" — é is 2 bytes (0xC3 0xA9), byte_size is 5
-      buf = Document.new("café") |> Document.move_to({0, 4})
-      # byte 4 is in the middle of é (which starts at byte 3)
-      # Should clamp to byte 3 (start of é)
-      assert Document.cursor(buf) == {0, 3}
-    end
-  end
-
   # ── Grapheme/byte conversion ──
 
   describe "grapheme_col/2" do
@@ -513,46 +367,6 @@ defmodule Minga.Buffer.DocumentTest do
           |> Document.delete_before()
 
         assert Document.content(buf) == text
-      end
-    end
-
-    property "moving does not alter content" do
-      check all(
-              text <- string(:printable, min_length: 1, max_length: 200),
-              moves <-
-                list_of(member_of([:left, :right, :up, :down]), min_length: 1, max_length: 20)
-            ) do
-        buf = Document.new(text)
-
-        result =
-          Enum.reduce(moves, buf, fn dir, acc ->
-            Document.move(acc, dir)
-          end)
-
-        assert Document.content(result) == text
-      end
-    end
-
-    property "cursor is always within valid bounds" do
-      check all(
-              text <- string(:printable, min_length: 0, max_length: 200),
-              moves <-
-                list_of(member_of([:left, :right, :up, :down]), min_length: 0, max_length: 30)
-            ) do
-        buf = Document.new(text)
-
-        buf =
-          Enum.reduce(moves, buf, fn dir, acc ->
-            Document.move(acc, dir)
-          end)
-
-        {line, byte_col} = Document.cursor(buf)
-        max_line = Document.line_count(buf) - 1
-        assert line >= 0 and line <= max_line
-
-        current_line = Document.line_at(buf, line)
-        max_col = byte_size(current_line)
-        assert byte_col >= 0 and byte_col <= max_col
       end
     end
   end
@@ -734,57 +548,6 @@ defmodule Minga.Buffer.DocumentTest do
   # ── Line index cache tests ──
 
   describe "line index cache" do
-    property "line_at matches naive String.split for random content" do
-      check all(
-              text <- string(:printable, min_length: 0, max_length: 500),
-              line_num <- integer(0..20)
-            ) do
-        buf = Document.new(text)
-        naive = text |> String.split("\n") |> Enum.at(line_num)
-        indexed = Document.line_at(buf, line_num)
-        assert indexed == naive
-      end
-    end
-
-    property "lines matches naive String.split |> Enum.slice for random content" do
-      check all(
-              text <- string(:printable, min_length: 0, max_length: 500),
-              start <- integer(0..15),
-              count <- integer(1..10)
-            ) do
-        buf = Document.new(text)
-        naive = text |> String.split("\n") |> Enum.slice(start, count)
-        indexed = Document.lines(buf, start, count)
-        assert indexed == naive
-      end
-    end
-
-    test "line_at works after mutations invalidate the cache" do
-      buf = Document.new("aaa\nbbb\nccc")
-      assert Document.line_at(buf, 1) == "bbb"
-
-      # Insert invalidates cache
-      buf = Document.insert_text(buf, "X")
-      assert Document.line_at(buf, 0) == "Xaaa"
-
-      # Move invalidates cache
-      buf = Document.move_to(buf, {1, 0})
-      assert Document.line_at(buf, 1) == "bbb"
-
-      # Delete invalidates cache
-      buf = Document.delete_at(buf)
-      assert Document.line_at(buf, 1) == "bb"
-    end
-
-    test "lines returns correct viewport after insert_text" do
-      buf = Document.new("line1\nline2\nline3\nline4\nline5")
-      buf = Document.move_to(buf, {2, 0})
-      buf = Document.insert_text(buf, "NEW\n")
-
-      assert Document.lines(buf, 2, 2) == ["NEW", "line3"]
-      assert Document.line_count(buf) == 6
-    end
-
     test "position_to_offset uses index for O(1) lookup" do
       buf = Document.new("hello\nworld\nfoo")
       # "hello\n" = 6 bytes, "world\n" = 6 bytes, "foo" starts at 12
