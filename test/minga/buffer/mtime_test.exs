@@ -118,7 +118,7 @@ defmodule Minga.Buffer.MtimeTest do
   end
 
   @tag :tmp_dir
-  test ":e! clears undo/redo stacks", %{tmp_dir: tmp_dir} do
+  test ":e! clears undo/redo history", %{tmp_dir: tmp_dir} do
     path = Path.join(tmp_dir, "undo.txt")
     File.write!(path, "original")
 
@@ -126,14 +126,12 @@ defmodule Minga.Buffer.MtimeTest do
     BufferProcess.insert_char(buf, "change1")
     BufferProcess.insert_char(buf, "change2")
 
-    state_before = :sys.get_state(buf)
-    assert state_before.undo_stack != []
+    assert BufferProcess.last_undo_source(buf) != nil
 
     :ok = BufferProcess.reload(buf)
 
-    state_after = :sys.get_state(buf)
-    assert state_after.undo_stack == []
-    assert state_after.redo_stack == []
+    assert BufferProcess.last_undo_source(buf) == nil
+    assert BufferProcess.last_redo_source(buf) == nil
   end
 
   @tag :tmp_dir

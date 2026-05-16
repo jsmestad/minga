@@ -3,8 +3,8 @@ defmodule Minga.Buffer.EditSource do
   Identifies who made an edit to a buffer.
 
   The rich source type flows through events, ghost cursors, and the edit
-  timeline. The undo stack uses a simpler atom-based source (see
-  `Minga.Buffer.State.edit_source`); use `to_undo_source/1` to bridge.
+  timeline. The undo history uses a simpler atom-based source; use
+  `to_undo_source/1` to bridge.
 
   ## Creating sources
 
@@ -36,6 +36,9 @@ defmodule Minga.Buffer.EditSource do
           | {:lsp, server_name :: atom()}
           | :formatter
           | :unknown
+
+  @typedoc "Simple edit source for undo/redo attribution."
+  @type undo_source :: :user | :agent | :lsp | :recovery
 
   # ── Constructors ──────────────────────────────────────────────────────
 
@@ -72,7 +75,7 @@ defmodule Minga.Buffer.EditSource do
   This bridge exists so the undo system can continue using atom-based
   guards until Provenance Undo (#1108) migrates it to the rich type.
   """
-  @spec to_undo_source(t()) :: Minga.Buffer.State.edit_source()
+  @spec to_undo_source(t()) :: undo_source()
   def to_undo_source(:user), do: :user
   def to_undo_source({:agent, _session_id, _tool_call_id}), do: :agent
   def to_undo_source({:lsp, _server_name}), do: :lsp
@@ -89,7 +92,7 @@ defmodule Minga.Buffer.EditSource do
   not an agent session PID. The undo stack doesn't preserve the original session
   reference. Treat it as a sentinel indicating "some agent edit, origin unknown."
   """
-  @spec from_undo_source(Minga.Buffer.State.edit_source()) :: t()
+  @spec from_undo_source(undo_source()) :: t()
   def from_undo_source(:user), do: user()
   def from_undo_source(:agent), do: agent(self(), "unknown")
   def from_undo_source(:lsp), do: lsp(:unknown)
