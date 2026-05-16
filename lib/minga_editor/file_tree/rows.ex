@@ -15,6 +15,8 @@ defmodule MingaEditor.FileTree.Rows do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
 
+  @type indexed_entry :: {FileTree.entry(), non_neg_integer()}
+
   @type options :: [
           selected_index: non_neg_integer(),
           focused: boolean(),
@@ -29,36 +31,20 @@ defmodule MingaEditor.FileTree.Rows do
   @doc "Builds semantic rows from a pure file tree and explicit presentation inputs."
   @spec from_tree(FileTree.t(), options()) :: [Row.t()]
   def from_tree(%FileTree{} = tree, opts \\ []) do
-    git_status = Keyword.get(opts, :git_status, tree.git_status)
-
-    diagnostics_server = Keyword.get(opts, :diagnostics_server, DiagnosticStore)
-
-    diagnostics =
-      opts
-      |> Keyword.get_lazy(:diagnostics, fn ->
-        diagnostic_map_for_root(tree.root, diagnostics_server)
-      end)
-      |> propagated_diagnostics(tree.root)
-
-    dirty_paths = Keyword.get(opts, :dirty_paths, MapSet.new())
-    active_path = opts |> Keyword.get(:active_path) |> expand_optional_path()
-    selected_index = Keyword.get(opts, :selected_index, tree.cursor)
-    focused = Keyword.get(opts, :focused, false)
-    editing = Keyword.get(opts, :editing)
-
     tree
     |> FileTree.visible_entries()
     |> Enum.with_index()
-    |> Enum.map(fn {entry, index} ->
-      row_from_entry(entry, index, tree, %{
-        active_path: active_path,
-        dirty_paths: dirty_paths,
-        editing: editing,
-        diagnostics: diagnostics,
-        focused: focused,
-        git_status: git_status,
-        selected_index: selected_index
-      })
+    |> from_entries(tree, opts)
+  end
+
+  @doc "Builds semantic rows from already-selected visible entries."
+  @spec from_entries([indexed_entry()], FileTree.t(), options()) :: [Row.t()]
+  def from_entries(indexed_entries, %FileTree{} = tree, opts \\ [])
+      when is_list(indexed_entries) do
+    context = row_context(tree, opts)
+
+    Enum.map(indexed_entries, fn {entry, index} ->
+      row_from_entry(entry, index, tree, context)
     end)
   end
 
@@ -78,6 +64,29 @@ defmodule MingaEditor.FileTree.Rows do
   end
 
   def from_state(_state), do: []
+
+  @spec row_context(FileTree.t(), options()) :: map()
+  defp row_context(%FileTree{} = tree, opts) do
+    git_status = Keyword.get(opts, :git_status, tree.git_status)
+    diagnostics_server = Keyword.get(opts, :diagnostics_server, DiagnosticStore)
+
+    diagnostics =
+      opts
+      |> Keyword.get_lazy(:diagnostics, fn ->
+        diagnostic_map_for_root(tree.root, diagnostics_server)
+      end)
+      |> propagated_diagnostics(tree.root)
+
+    %{
+      active_path: opts |> Keyword.get(:active_path) |> expand_optional_path(),
+      dirty_paths: Keyword.get(opts, :dirty_paths, MapSet.new()),
+      editing: Keyword.get(opts, :editing),
+      diagnostics: diagnostics,
+      focused: Keyword.get(opts, :focused, false),
+      git_status: git_status,
+      selected_index: Keyword.get(opts, :selected_index, tree.cursor)
+    }
+  end
 
   @spec row_from_entry(FileTree.entry(), non_neg_integer(), FileTree.t(), map()) :: Row.t()
   defp row_from_entry(entry, index, tree, opts) do

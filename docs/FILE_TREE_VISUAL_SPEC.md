@@ -187,6 +187,28 @@ blue row = selected, active, dirty, git modified, focused
 
 Review prompt: which part of the row tells me the buffer is dirty after focus moves away? If the answer is only color, split the layers.
 
+## Large-tree validation recipe
+
+Use a generated fixture when reviewing responsiveness, accessibility semantics, or row-level invalidation changes. This keeps the validation repeatable without checking thousands of files into the repo.
+
+```bash
+fixture="$(mktemp -d)/minga-large-tree"
+mkdir -p "$fixture"
+for d in $(seq -w 1 80); do
+  mkdir -p "$fixture/pkg_$d/src/deep/module_$d" "$fixture/pkg_$d/test"
+  for f in $(seq -w 1 40); do
+    printf 'defmodule LargeTree.Pkg%s.File%s do\nend\n' "$d" "$f" > "$fixture/pkg_$d/src/deep/module_$d/file_$f.ex"
+    printf 'defmodule LargeTree.Pkg%s.File%sTest do\nend\n' "$d" "$f" > "$fixture/pkg_$d/test/file_${f}_test.exs"
+  done
+  printf '# package %s\n' "$d" > "$fixture/pkg_$d/README.md"
+done
+printf 'Open this directory in Minga: %s\n' "$fixture"
+```
+
+Validate the same interactions on macOS and TUI: open the file tree, hold cursor movement through several screens, scroll with the mouse or trackpad, hover rows on macOS, expand and collapse mid-depth directories, reveal an active file, and refresh git/status data if the fixture is inside a git worktree. The tree should not visibly stall, TUI rows should keep text markers such as `●`, `✖`, `⚠`, and `+` readable without relying only on color, and macOS VoiceOver should announce file versus folder, selected/current state, expanded/collapsed state, diagnostics, dirty/git status, and the practical row actions.
+
+Record the fixture size, machine, frontend, interactions tested, and any VoiceOver spot-checks in the PR description. Do not add FPS assertions to CI; use deterministic row/protocol/view tests plus this manual smoke test.
+
 ## Regression coverage guidance
 
 Prefer the lightest test layer that proves the state mapping.

@@ -33,6 +33,7 @@ enum RenderCommand: Sendable {
     case guiTheme(slots: [(slotId: UInt8, r: UInt8, g: UInt8, b: UInt8)])
     case guiTabBar(activeIndex: UInt8, tabs: [Wire.TabEntry])
     case guiFileTree(version: UInt8, treeFlags: UInt8, treeState: UInt8, selectedId: String, treeWidth: UInt16, rootPath: String, errorReason: String, entries: [Wire.FileTreeEntry])
+    case guiFileTreeSelection(selectedId: String, focused: Bool)
     case guiCompletion(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, items: [Wire.CompletionItem])
     case guiWhichKey(visible: Bool, prefix: String, page: UInt8, pageCount: UInt8, bindings: [Wire.WhichKeyBinding])
     case guiBreadcrumb(segments: [String])
@@ -405,6 +406,19 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
 
         guard pos == payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
         return (.guiFileTree(version: version, treeFlags: treeFlags, treeState: treeState, selectedId: selectedId, treeWidth: treeWidth, rootPath: rootPath, errorReason: errorReason, entries: entries), 5 + payloadLen)
+
+    case OP_GUI_FILE_TREE_SELECTION:
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let payloadLen = Int(readU16(data, rest))
+        let payloadStart = rest + 2
+        guard data.count >= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+        guard payloadLen >= 3 else { throw ProtocolDecodeError.malformed }
+        let flags = data[payloadStart]
+        var pos = payloadStart + 1
+        let selectedIdLen = Int(readU16(data, pos)); pos += 2
+        guard pos + selectedIdLen == payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+        let selectedId = String(data: data[pos..<(pos + selectedIdLen)], encoding: .utf8) ?? ""
+        return (.guiFileTreeSelection(selectedId: selectedId, focused: flags & 0x01 != 0), 3 + payloadLen)
 
     case OP_GUI_TAB_BAR:
         // active_index:1, tab_count:1, then per tab: flags:1, id:4, group_id:2, icon_len:1, icon, label_len:2, label

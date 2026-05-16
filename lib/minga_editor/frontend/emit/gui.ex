@@ -24,13 +24,17 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   alias MingaEditor.Agent.View.PromptSemanticWindow
   alias Minga.Buffer
   alias Minga.Config
+  alias Minga.Diagnostics, as: DiagnosticStore
+  alias Minga.LSP.SyncServer
 
   alias MingaEditor.DisplayList.Frame
   alias MingaEditor.DisplayMap
+  alias MingaEditor.FileTree.Diagnostics, as: FileTreeDiagnostics
   alias MingaEditor.FileTree.Rows
   alias MingaEditor.FoldMap
   alias MingaEditor.Layout
   alias MingaEditor.MinibufferData
+  alias Minga.Project.FileTree
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.Shell.Traditional.Chrome.Helpers, as: ChromeHelpers
@@ -259,33 +263,62 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   @spec build_gui_file_tree_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
   defp build_gui_file_tree_cmd(
-         %{file_tree: %{tree: %Minga.Project.FileTree{} = tree} = file_tree} = ctx,
+         %{file_tree: %{tree: %FileTree{} = tree} = file_tree} = ctx,
          caches
        ) do
-    rows =
-      Rows.from_tree(tree,
-        active_path: active_buffer_path(ctx),
-        dirty_paths: dirty_paths(ctx.buffers),
-        editing: Map.get(file_tree, :editing),
-        focused: file_tree_focused?(file_tree),
-        git_status: tree.git_status,
-        selected_index: tree.cursor
-      )
-
+    tree = FileTree.ensure_entries(tree)
     tree_status = FileTreeState.status(file_tree)
-    rows = if tree_status == :ready, do: rows, else: []
-    fp = :erlang.phash2({tree.root, tree.width, file_tree_focused?(file_tree), tree_status, rows})
 
-    if fp != caches.last_gui_file_tree_fp do
-      {ProtocolGUI.encode_gui_file_tree(
-         tree.root,
-         tree.width,
-         tree_status,
-         file_tree_focused?(file_tree),
-         rows
-       ), %{caches | last_gui_file_tree_fp: fp}}
-    else
-      {nil, caches}
+    case tree_status do
+      :ready ->
+        active_path = active_buffer_path(ctx)
+        dirty_paths = dirty_paths(ctx.buffers)
+        diagnostics = file_tree_diagnostics(tree.root)
+
+        structural_fp =
+          file_tree_ready_structural_fingerprint(
+            tree,
+            file_tree,
+            active_path,
+            dirty_paths,
+            diagnostics
+          )
+
+        selection_fp = file_tree_selection_fingerprint(tree, file_tree)
+
+        case caches.last_gui_file_tree_fp do
+          {:ready, ^structural_fp, ^selection_fp} ->
+            {nil, caches}
+
+          {:ready, ^structural_fp, _previous_selection_fp} ->
+            {ProtocolGUI.encode_gui_file_tree_selection(
+               selected_row_id(tree),
+               file_tree_focused?(file_tree)
+             ), %{caches | last_gui_file_tree_fp: {:ready, structural_fp, selection_fp}}}
+
+          _previous_fp ->
+            rows =
+              Rows.from_tree(tree,
+                active_path: active_path,
+                dirty_paths: dirty_paths,
+                editing: Map.get(file_tree, :editing),
+                focused: file_tree_focused?(file_tree),
+                git_status: tree.git_status,
+                diagnostics: diagnostics,
+                selected_index: tree.cursor
+              )
+
+            {ProtocolGUI.encode_gui_file_tree(
+               tree.root,
+               tree.width,
+               tree_status,
+               file_tree_focused?(file_tree),
+               rows
+             ), %{caches | last_gui_file_tree_fp: {:ready, structural_fp, selection_fp}}}
+        end
+
+      status ->
+        build_gui_file_tree_state_cmd(file_tree, status, caches)
     end
   end
 
@@ -327,6 +360,61 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       {ProtocolGUI.encode_hidden_gui_file_tree(root_path), %{caches | last_gui_file_tree_fp: fp}}
     else
       {nil, caches}
+    end
+  end
+
+  @spec file_tree_ready_structural_fingerprint(
+          FileTree.t(),
+          FileTreeState.t(),
+          String.t() | nil,
+          MapSet.t(String.t()),
+          %{String.t() => FileTreeDiagnostics.t()}
+        ) :: non_neg_integer()
+  defp file_tree_ready_structural_fingerprint(
+         tree,
+         file_tree,
+         active_path,
+         dirty_paths,
+         diagnostics
+       ) do
+    :erlang.phash2({
+      tree.root,
+      tree.width,
+      tree.show_hidden,
+      tree.expanded,
+      tree.entries,
+      tree.git_status,
+      Map.get(file_tree, :editing),
+      active_path,
+      dirty_paths,
+      diagnostics
+    })
+  end
+
+  @spec file_tree_diagnostics(String.t()) :: %{String.t() => FileTreeDiagnostics.t()}
+  defp file_tree_diagnostics(root) when is_binary(root) do
+    root
+    |> SyncServer.path_to_uri()
+    |> DiagnosticStore.count_tuples_by_uri_prefix()
+    |> Map.new(fn {uri, counts} ->
+      {SyncServer.uri_to_path(uri), FileTreeDiagnostics.new(counts)}
+    end)
+  rescue
+    ArgumentError -> %{}
+  catch
+    :exit, _ -> %{}
+  end
+
+  @spec file_tree_selection_fingerprint(FileTree.t(), map()) :: non_neg_integer()
+  defp file_tree_selection_fingerprint(tree, file_tree) do
+    :erlang.phash2({selected_row_id(tree), file_tree_focused?(file_tree)})
+  end
+
+  @spec selected_row_id(FileTree.t()) :: String.t()
+  defp selected_row_id(%FileTree{entries: entries, cursor: cursor}) when is_list(entries) do
+    case Enum.at(entries, cursor) do
+      nil -> ""
+      entry -> MingaEditor.FileTree.Row.id_for(entry)
     end
   end
 

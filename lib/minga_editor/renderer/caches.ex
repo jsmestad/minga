@@ -75,7 +75,12 @@ defmodule MingaEditor.Renderer.Caches do
           last_gui_theme: integer() | nil,
           last_gui_tab_bar_fp: integer() | nil,
           last_gui_agent_groups_fp: integer() | nil,
-          last_gui_file_tree_fp: integer() | {:no_tree, String.t()} | nil,
+          last_gui_file_tree_fp:
+            integer()
+            | {:ready, non_neg_integer(), non_neg_integer()}
+            | {:file_tree_state, String.t(), non_neg_integer(), term()}
+            | {:no_tree, String.t()}
+            | nil,
           last_gui_git_status_fp: integer() | {:no_git, boolean()} | nil,
           last_gui_which_key_fp: integer() | nil,
           last_gui_completion_fp: integer() | nil,

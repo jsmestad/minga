@@ -106,6 +106,47 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.fileTreeState.projectRoot == "/project")
     }
 
+    @Test("guiFileTreeSelection updates selection and focus without replacing entries")
+    @MainActor func guiFileTreeSelectionRouting() {
+        let (dispatcher, gui) = makeDispatcher()
+        let entries = [
+            wireFileTreeEntry(pathHash: 1, isSelected: true, isFocused: true, id: "/project/a", path: "/project/a", name: "a", relPath: "a"),
+            wireFileTreeEntry(pathHash: 2, id: "/project/b", path: "/project/b", name: "b", relPath: "b")
+        ]
+        dispatcher.dispatch(.guiFileTree(version: 2, treeFlags: 0x03, treeState: 3, selectedId: "/project/a", treeWidth: 30,
+                                          rootPath: "/project", errorReason: "", entries: entries))
+
+        dispatcher.dispatch(.guiFileTreeSelection(selectedId: "/project/b", focused: false))
+
+        #expect(gui.fileTreeState.entries.count == 2)
+        #expect(gui.fileTreeState.entries[0].id == "/project/a")
+        #expect(gui.fileTreeState.entries[1].id == "/project/b")
+        #expect(gui.fileTreeState.selectedId == "/project/b")
+        #expect(gui.fileTreeState.selectedIndex == 1)
+        #expect(gui.fileTreeState.focused == false)
+        #expect(gui.fileTreeState.entries[0].isSelected == false)
+        #expect(gui.fileTreeState.entries[1].isSelected == true)
+        #expect(gui.fileTreeState.entries.allSatisfy { $0.isFocused == false })
+    }
+
+    @Test("guiFileTreeSelection ignores unknown selected id without clearing selection")
+    @MainActor func guiFileTreeSelectionIgnoresUnknownId() {
+        let (dispatcher, gui) = makeDispatcher()
+        let entries = [
+            wireFileTreeEntry(pathHash: 1, isSelected: true, isFocused: true, id: "/project/a", path: "/project/a", name: "a", relPath: "a")
+        ]
+        dispatcher.dispatch(.guiFileTree(version: 2, treeFlags: 0x03, treeState: 3, selectedId: "/project/a", treeWidth: 30,
+                                          rootPath: "/project", errorReason: "", entries: entries))
+
+        dispatcher.dispatch(.guiFileTreeSelection(selectedId: "/project/missing", focused: false))
+
+        #expect(gui.fileTreeState.selectedId == "/project/a")
+        #expect(gui.fileTreeState.selectedIndex == 0)
+        #expect(gui.fileTreeState.focused == false)
+        #expect(gui.fileTreeState.entries[0].isSelected == true)
+        #expect(gui.fileTreeState.entries[0].isFocused == false)
+    }
+
     @Test("guiFileTree hides when explicit tree state is hidden")
     @MainActor func guiFileTreeHidesOnHiddenState() {
         let (dispatcher, gui) = makeDispatcher()

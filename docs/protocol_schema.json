@@ -48,6 +48,7 @@
     "gui_chrome": {
       "description": "BEAM → GUI-only chrome commands (0x70+ range)",
       "gui_file_tree":      { "hex": "0x93" },
+      "gui_file_tree_selection": { "hex": "0x94" },
       "gui_tab_bar":        { "hex": "0x71" },
       "gui_which_key":      { "hex": "0x72" },
       "gui_completion":     { "hex": "0x73" },

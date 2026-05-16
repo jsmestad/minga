@@ -77,6 +77,7 @@ struct ProtocolSchemaSwiftTests {
               let chrome = opcodes["gui_chrome"] as? [String: Any] else { return }
 
         #expect(try schemaHex(chrome, "gui_file_tree") == OP_GUI_FILE_TREE)
+        #expect(try schemaHex(chrome, "gui_file_tree_selection") == OP_GUI_FILE_TREE_SELECTION)
         #expect(try schemaHex(chrome, "gui_tab_bar") == OP_GUI_TAB_BAR)
         #expect(try schemaHex(chrome, "gui_which_key") == OP_GUI_WHICH_KEY)
         #expect(try schemaHex(chrome, "gui_completion") == OP_GUI_COMPLETION)

@@ -14,6 +14,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | Opcode | Name            | Description                    |
   |--------|-----------------|--------------------------------|
   | 0x93   | gui_file_tree   | Semantic file tree state       |
+  | 0x94   | gui_file_tree_selection | File tree selection-only update |
   | 0x71   | gui_tab_bar     | Tab bar with tab entries       |
   | 0x72   | gui_which_key   | Which-key popup bindings       |
   | 0x73   | gui_completion  | Completion popup items         |
@@ -107,6 +108,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   # GUI chrome opcodes start at 0x70. Opcodes >= 0x90 include a 2-byte length prefix.
 
   @op_gui_file_tree 0x93
+  @op_gui_file_tree_selection 0x94
   @op_gui_tab_bar 0x71
   @op_gui_which_key 0x72
   @op_gui_completion 0x73
@@ -1058,6 +1060,21 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @spec encode_hidden_gui_file_tree(String.t() | nil) :: binary()
   def encode_hidden_gui_file_tree(root_path),
     do: encode_gui_file_tree(root_path, 0, :hidden, false, [])
+
+  @doc "Encodes a lightweight file-tree selection update."
+  @spec encode_gui_file_tree_selection(String.t(), boolean()) :: binary()
+  def encode_gui_file_tree_selection(selected_id, focused?) when is_binary(selected_id) do
+    payload =
+      IO.iodata_to_binary([
+        <<file_tree_selection_flags(focused?)::8>>,
+        encode_string16(selected_id)
+      ])
+
+    <<@op_gui_file_tree_selection, byte_size(payload)::16, payload::binary>>
+  end
+
+  @spec file_tree_selection_flags(boolean()) :: non_neg_integer()
+  defp file_tree_selection_flags(focused?), do: maybe_flag(0, focused?, 0)
 
   @spec encode_file_tree_row(Row.t(), String.t()) :: iodata()
   defp encode_file_tree_row(%Row{} = row, root) do

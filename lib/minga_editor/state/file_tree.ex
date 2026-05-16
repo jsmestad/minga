@@ -70,9 +70,14 @@ defmodule MingaEditor.State.FileTree do
   def status(%__MODULE__{tree: nil, tree_status: status}) when status in [:loading], do: status
   def status(%__MODULE__{tree: nil, tree_status: {:error, _reason} = status}), do: status
   def status(%__MODULE__{tree: nil}), do: :hidden
-  def status(%__MODULE__{tree_status: :loading}), do: :loading
-  def status(%__MODULE__{tree_status: {:error, _reason} = status}), do: status
-  def status(%__MODULE__{tree: %FileTree{} = tree}), do: classify_tree(tree)
+
+  def status(%__MODULE__{tree: %FileTree{}, tree_status: :hidden} = ft),
+    do: classify_tree(ft.tree)
+
+  def status(%__MODULE__{tree: %FileTree{}, tree_status: status})
+      when status in [:loading, :empty, :ready], do: status
+
+  def status(%__MODULE__{tree: %FileTree{}, tree_status: {:error, _reason} = status}), do: status
 
   @doc "Returns true when the explicit tree status should occupy the sidebar."
   @spec visible_status?(tree_status()) :: boolean()
@@ -95,6 +100,8 @@ defmodule MingaEditor.State.FileTree do
   @doc "Opens the tree with the given data, buffer, and focused state."
   @spec open(t(), FileTree.t(), pid() | nil) :: t()
   def open(%__MODULE__{} = ft, tree, buffer) do
+    tree = ensure_tree_entries(tree)
+
     %{
       ft
       | tree: tree,
@@ -109,6 +116,7 @@ defmodule MingaEditor.State.FileTree do
   @doc "Replaces the backing tree and refreshes the presentation status."
   @spec replace_tree(t(), FileTree.t()) :: t()
   def replace_tree(%__MODULE__{} = ft, %FileTree{} = tree) do
+    tree = ensure_tree_entries(tree)
     %{ft | tree: tree, tree_status: classify_tree(tree), tree_width: tree.width}
   end
 
@@ -181,6 +189,9 @@ defmodule MingaEditor.State.FileTree do
   def cancel_editing(%__MODULE__{} = ft) do
     %{ft | editing: nil}
   end
+
+  @spec ensure_tree_entries(FileTree.t()) :: FileTree.t()
+  defp ensure_tree_entries(%FileTree{} = tree), do: FileTree.ensure_entries(tree)
 
   @spec classify_tree(FileTree.t()) :: tree_status()
   defp classify_tree(%FileTree{} = tree) do

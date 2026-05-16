@@ -374,6 +374,43 @@ struct FileTreeRowViewTests {
         #expect(row.accessibilityLabelText == "File: editor.ex, 1 warning, unsaved changes, git conflict")
     }
 
+    @Test("Accessibility values expose selected current expanded and focused state")
+    @MainActor func accessibilityValuesExposeSelectionAndTreeState() throws {
+        let currentFile = fileTreeRowView(entry: sidebarFileTreeEntry(id: 1, index: 0, isSelected: true, isFocused: true, isActive: true, icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"))
+        #expect(currentFile.accessibilityValueText == "selected, current file, keyboard focus")
+        #expect(currentFile.accessibilityTraits.contains(.isSelected))
+        #expect(currentFile.accessibilityTraits.contains(.isButton))
+
+        let folder = fileTreeRowView(entry: sidebarFileTreeEntry(id: 2, index: 1, isDir: true, isExpanded: true, icon: "\u{F0256}", name: "lib", relPath: "lib"))
+        #expect(folder.accessibilityValueText == "expanded")
+
+        let editing = fileTreeRowView(entry: sidebarFileTreeEntry(id: 3, index: 2, isEditing: true, editingType: 2, editingText: "renamed.ex", icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"))
+        #expect(editing.accessibilityLabelText == "Editing: editor.ex")
+        #expect(editing.accessibilityValueText == "editing name")
+        #expect(editing.accessibilityTraits.contains(.isButton) == false)
+    }
+
+    @Test("Stable row ids resolve the current entry even after the row list changes")
+    @MainActor func stableRowIdsResolveTheCurrentEntry() throws {
+        let state = FileTreeState()
+        state.entries = [
+            sidebarFileTreeEntry(id: 1, index: 8, icon: "\u{E62D}", name: "alpha.ex", relPath: "/project/alpha.ex", path: "/project/alpha.ex"),
+            sidebarFileTreeEntry(id: 2, index: 3, icon: "\u{E62D}", name: "beta.ex", relPath: "/project/beta.ex", path: "/project/beta.ex"),
+        ]
+
+        #expect(state.entry(withID: "/project/alpha.ex")?.index == 8)
+        #expect(state.entry(withID: "/project/beta.ex")?.index == 3)
+        #expect(state.entry(withID: "/project/missing.ex") == nil)
+
+        state.entries = [
+            sidebarFileTreeEntry(id: 2, index: 1, icon: "\u{E62D}", name: "beta.ex", relPath: "/project/beta.ex", path: "/project/beta.ex"),
+            sidebarFileTreeEntry(id: 1, index: 0, icon: "\u{E62D}", name: "alpha.ex", relPath: "/project/alpha.ex", path: "/project/alpha.ex"),
+        ]
+
+        #expect(state.entry(withID: "/project/alpha.ex")?.index == 0)
+        #expect(state.entry(withID: "/project/beta.ex")?.index == 1)
+    }
+
     @Test("Diagnostic info and hint severities render distinct markers")
     @MainActor func diagnosticInfoAndHintSeveritiesRenderDistinctMarkers() throws {
         let info = fileTreeRowView(entry: sidebarFileTreeEntry(id: 1, index: 0, diagnosticInfoCount: 1, icon: "\u{E62D}", name: "info.ex", relPath: "info.ex"))
@@ -496,6 +533,7 @@ private func fileTreeRowView(entry: FileTreeEntry, isHovered: Bool = false, isDr
         isHovered: isHovered,
         isDropTarget: isDropTarget,
         animDuration: 0,
+        onActivate: {},
         onEditCommit: { _ in },
         onEditCancel: {}
     )
