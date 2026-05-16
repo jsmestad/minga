@@ -106,6 +106,13 @@ defmodule MingaEditor.FileChangeTest do
 
     state = :sys.get_state(ctx.editor)
     refute MingaEditor.State.ModalOverlay.match(state.shell_state.modal, :conflict)
+
+    send(ctx.editor, {:file_changed_on_disk, Path.expand(path)})
+    _ = :sys.get_state(ctx.editor)
+    state = :sys.get_state(ctx.editor)
+    refute MingaEditor.State.ModalOverlay.match(state.shell_state.modal, :conflict)
+
+    assert BufferProcess.save(ctx.buffer) == {:error, :file_changed}
   end
 
   @tag :tmp_dir

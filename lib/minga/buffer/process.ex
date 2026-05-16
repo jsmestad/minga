@@ -278,6 +278,12 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, {:accept_saved_content, new_content}, @file_io_call_timeout)
   end
 
+  @doc "Acknowledges the current disk metadata after the user chooses to keep local edits."
+  @spec acknowledge_disk_change(GenServer.server()) :: :ok
+  def acknowledge_disk_change(server) do
+    GenServer.call(server, :acknowledge_disk_change, @file_io_call_timeout)
+  end
+
   @doc "Returns the full text content of the buffer."
   @spec content(GenServer.server()) :: String.t()
   def content(server) do
@@ -836,9 +842,7 @@ defmodule Minga.Buffer.Process do
           filetype: filetype,
           storage: storage,
           buffer_type: buffer_type,
-          mtime: mtime,
-          file_size: size,
-          file_hash: Persistence.saved_content_fingerprint(path, mtime, text),
+          save_state: BufState.loaded_save_state(path, {mtime, size}, text),
           name: Keyword.get(opts, :buffer_name),
           read_only: read_only,
           unlisted: Keyword.get(opts, :unlisted, false),
@@ -868,14 +872,10 @@ defmodule Minga.Buffer.Process do
         {mtime, size} = Persistence.file_metadata(state, file_path)
 
         new_state = %{
-          state
+          BufState.load_saved_content(state, file_path, {mtime, size}, text)
           | document: Document.new(text),
             file_path: file_path,
             filetype: filetype,
-            dirty: false,
-            mtime: mtime,
-            file_size: size,
-            file_hash: Persistence.content_fingerprint(text),
             decorations: Decorations.new(),
             undo_history: UndoHistory.clear(state.undo_history)
         }
@@ -1035,13 +1035,7 @@ defmodule Minga.Buffer.Process do
         :ok ->
           {new_mtime, new_size} = Persistence.file_metadata(state, state.file_path)
 
-          {:reply, :ok,
-           mark_saved(%{
-             state
-             | mtime: new_mtime,
-               file_size: new_size,
-               file_hash: Persistence.content_fingerprint(content)
-           })}
+          {:reply, :ok, mark_saved(state, {new_mtime, new_size}, content)}
 
         {:error, reason} ->
           {:reply, {:error, reason}, state}
@@ -1065,13 +1059,7 @@ defmodule Minga.Buffer.Process do
       :ok ->
         {new_mtime, new_size} = Persistence.file_metadata(state, state.file_path)
 
-        {:reply, :ok,
-         mark_saved(%{
-           state
-           | mtime: new_mtime,
-             file_size: new_size,
-             file_hash: Persistence.content_fingerprint(content)
-         })}
+        {:reply, :ok, mark_saved(state, {new_mtime, new_size}, content)}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -1107,13 +1095,9 @@ defmodule Minga.Buffer.Process do
         {new_mtime, new_size} = Persistence.file_metadata(state, state.file_path)
 
         new_state = %{
-          state
+          BufState.load_saved_content(state, state.file_path, {new_mtime, new_size}, text)
           | document: new_buf,
             filetype: filetype,
-            dirty: false,
-            mtime: new_mtime,
-            file_size: new_size,
-            file_hash: Persistence.content_fingerprint(text),
             undo_history: UndoHistory.clear(state.undo_history),
             decorations: Decorations.new()
         }
@@ -1135,14 +1119,7 @@ defmodule Minga.Buffer.Process do
         unregister_path(state.file_path)
         register_path(file_path)
 
-        {:reply, :ok,
-         mark_saved(%{
-           state
-           | file_path: file_path,
-             mtime: new_mtime,
-             file_size: new_size,
-             file_hash: Persistence.content_fingerprint(content)
-         })}
+        {:reply, :ok, mark_saved(%{state | file_path: file_path}, {new_mtime, new_size}, content)}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -1166,9 +1143,8 @@ defmodule Minga.Buffer.Process do
     new_buf = Document.new(new_content)
 
     new_state = %{
-      state
+      BufState.record_clean_change(state)
       | document: new_buf,
-        version: state.version + 1,
         change_log: ChangeLog.clear(state.change_log),
         decorations: Decorations.new()
     }
@@ -1182,14 +1158,8 @@ defmodule Minga.Buffer.Process do
     {mtime, size} = Persistence.file_metadata(state, state.file_path)
 
     new_state = %{
-      state
+      BufState.accept_saved_content(state, {mtime, size}, new_content)
       | document: new_buf,
-        dirty: false,
-        version: state.version + 1,
-        saved_version: state.version + 1,
-        mtime: mtime,
-        file_size: size,
-        file_hash: Persistence.content_fingerprint(new_content),
         undo_history: UndoHistory.clear(state.undo_history),
         change_log: ChangeLog.clear(state.change_log),
         decorations: Decorations.new()
@@ -1197,6 +1167,20 @@ defmodule Minga.Buffer.Process do
 
     defer_content_replaced(new_state)
     {:reply, :ok, new_state}
+  end
+
+  def handle_call(:acknowledge_disk_change, _from, %{file_path: nil} = state) do
+    {:reply, :ok, state}
+  end
+
+  def handle_call(:acknowledge_disk_change, _from, state) do
+    case Persistence.file_info(state, state.file_path) do
+      {:ok, %{mtime: mtime, size: size}} ->
+        {:reply, :ok, BufState.acknowledge_disk_metadata(state, {mtime, size})}
+
+      {:error, _reason} ->
+        {:reply, :ok, state}
+    end
   end
 
   def handle_call(:content, _from, state) do
@@ -1241,7 +1225,7 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call(:dirty?, _from, state) do
-    {:reply, state.dirty, state}
+    {:reply, BufState.dirty?(state), state}
   end
 
   def handle_call(:consume_edit_deltas, _from, state) do
@@ -1255,7 +1239,7 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call(:version, _from, state) do
-    {:reply, state.version, state}
+    {:reply, BufState.version(state), state}
   end
 
   def handle_call(:file_path, _from, state) do
@@ -1393,11 +1377,11 @@ defmodule Minga.Buffer.Process do
       file_path: state.file_path,
       filetype: state.filetype,
       buffer_type: state.buffer_type,
-      dirty: state.dirty,
+      dirty: BufState.dirty?(state),
       name: state.name,
       read_only: state.read_only,
       first_line_byte_offset: first_line_byte_offset,
-      version: state.version
+      version: BufState.version(state)
     }
 
     {:reply, snapshot, state}
@@ -1473,7 +1457,7 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call(:undo, _from, state) do
-    case UndoHistory.undo(state.undo_history, state.version, state.document) do
+    case UndoHistory.undo(state.undo_history, BufState.version(state), state.document) do
       :empty ->
         {:reply, :ok, state}
 
@@ -1482,9 +1466,8 @@ defmodule Minga.Buffer.Process do
 
         new_state =
           %{
-            state
+            BufState.restore_version(state, restore.version)
             | document: restore.document,
-              version: restore.version,
               undo_history: undo_history
           }
           |> sync_dirty()
@@ -1496,7 +1479,7 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call(:redo, _from, state) do
-    case UndoHistory.redo(state.undo_history, state.version, state.document) do
+    case UndoHistory.redo(state.undo_history, BufState.version(state), state.document) do
       :empty ->
         {:reply, :ok, state}
 
@@ -1505,9 +1488,8 @@ defmodule Minga.Buffer.Process do
 
         new_state =
           %{
-            state
+            BufState.restore_version(state, restore.version)
             | document: restore.document,
-              version: restore.version,
               undo_history: undo_history
           }
           |> sync_dirty()
@@ -1566,9 +1548,8 @@ defmodule Minga.Buffer.Process do
     new_decs = decoration_fn.(Decorations.new())
 
     new_state = %{
-      state
+      BufState.record_clean_change(state)
       | document: new_doc,
-        version: state.version + 1,
         change_log: ChangeLog.clear(state.change_log),
         decorations: new_decs
     }
@@ -1616,24 +1597,12 @@ defmodule Minga.Buffer.Process do
   @impl true
   def handle_info(
         :write_swap,
-        %{buffer_type: :file, file_path: path, dirty: true, swap_dir: dir} = state
+        %{buffer_type: :file, file_path: path, swap_dir: dir} = state
       )
       when is_binary(path) and is_binary(dir) do
-    content = Document.content(state.document)
-    swap_opts = [swap_dir: dir]
-
-    Task.start(fn ->
-      case Minga.Session.write_swap(path, content, swap_opts) do
-        :ok ->
-          :ok
-
-        {:error, reason} ->
-          Minga.Log.warning(
-            :editor,
-            "Failed to write swap file for #{Path.basename(path)}: #{inspect(reason)}"
-          )
-      end
-    end)
+    if BufState.dirty?(state) do
+      start_swap_write_task(state, path, dir)
+    end
 
     {:noreply, %{state | swap_timer: nil}}
   end
@@ -1644,10 +1613,10 @@ defmodule Minga.Buffer.Process do
 
   def handle_info(
         {:auto_save, token},
-        %{buffer_type: :file, file_path: path, dirty: true, auto_save_token: token} = state
+        %{buffer_type: :file, file_path: path, auto_save_token: token} = state
       )
       when is_binary(path) do
-    if auto_save_enabled?(state) do
+    if BufState.dirty?(state) and auto_save_enabled?(state) do
       auto_save_file(state, path)
     else
       {:noreply, clear_auto_save_timer(state)}
@@ -1698,6 +1667,32 @@ defmodule Minga.Buffer.Process do
 
   # ── Private ──
 
+  @spec start_swap_write_task(state(), String.t(), String.t()) :: :ok
+  defp start_swap_write_task(state, path, dir) do
+    content = Document.content(state.document)
+    swap_opts = [swap_dir: dir]
+
+    Task.start(fn ->
+      write_swap_file(path, content, swap_opts)
+    end)
+
+    :ok
+  end
+
+  @spec write_swap_file(String.t(), String.t(), keyword()) :: :ok
+  defp write_swap_file(path, content, swap_opts) do
+    case Minga.Session.write_swap(path, content, swap_opts) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :editor,
+          "Failed to write swap file for #{Path.basename(path)}: #{inspect(reason)}"
+        )
+    end
+  end
+
   # Defers a :content_replaced broadcast to a subsequent handle_info turn.
   # Broadcasting inside handle_call would deadlock if any subscriber calls
   # back into this GenServer. The self-send pattern unblocks the caller
@@ -1736,7 +1731,7 @@ defmodule Minga.Buffer.Process do
          buffer: self(),
          delta: delta,
          source: source,
-         version: state.version
+         version: BufState.version(state)
        }}
     )
 
@@ -1805,7 +1800,7 @@ defmodule Minga.Buffer.Process do
   @spec push_undo(state(), Document.t(), BufState.edit_source()) :: state()
   defp push_undo(state, new_buf, source) do
     undo_history =
-      UndoHistory.record_edit(state.undo_history, state.version, state.document, source)
+      UndoHistory.record_edit(state.undo_history, BufState.version(state), state.document, source)
 
     %{state | document: new_buf, undo_history: undo_history}
   end
@@ -1813,7 +1808,12 @@ defmodule Minga.Buffer.Process do
   @spec push_undo_force(state(), Document.t(), BufState.edit_source()) :: state()
   defp push_undo_force(state, new_buf, source) do
     undo_history =
-      UndoHistory.record_edit_force(state.undo_history, state.version, state.document, source)
+      UndoHistory.record_edit_force(
+        state.undo_history,
+        BufState.version(state),
+        state.document,
+        source
+      )
 
     %{state | document: new_buf, undo_history: undo_history}
   end
@@ -1843,16 +1843,16 @@ defmodule Minga.Buffer.Process do
   defp sync_dirty(state) do
     state = BufState.sync_dirty(state)
 
-    if state.dirty do
+    if BufState.dirty?(state) do
       schedule_auto_save(state)
     else
       cancel_auto_save_timer(state)
     end
   end
 
-  @spec mark_saved(state()) :: state()
-  defp mark_saved(state) do
-    state = BufState.mark_saved(state)
+  @spec mark_saved(state(), Minga.Buffer.SaveState.metadata(), String.t()) :: state()
+  defp mark_saved(state, metadata, content) do
+    state = BufState.mark_saved(state, metadata, content)
     :ok = delete_swap_file(state)
     state = cancel_swap_timer(state)
     cancel_auto_save_timer(state)
@@ -1879,10 +1879,10 @@ defmodule Minga.Buffer.Process do
   end
 
   @spec apply_option_change(state(), atom()) :: state()
-  defp apply_option_change(%{dirty: true} = state, :auto_save_delay_ms),
-    do: schedule_auto_save(state)
+  defp apply_option_change(state, :auto_save_delay_ms) do
+    if BufState.dirty?(state), do: schedule_auto_save(state), else: cancel_auto_save_timer(state)
+  end
 
-  defp apply_option_change(state, :auto_save_delay_ms), do: cancel_auto_save_timer(state)
   defp apply_option_change(state, _name), do: state
 
   @spec auto_save_file(state(), String.t()) :: {:noreply, state()}
@@ -1891,11 +1891,12 @@ defmodule Minga.Buffer.Process do
       {:ok, %{mtime: disk_mtime, size: disk_size}} ->
         maybe_write_auto_save_file(state, path, disk_mtime, disk_size)
 
-      {:error, :enoent} when is_nil(state.mtime) ->
-        write_auto_save_file(state, path)
-
       {:error, :enoent} ->
-        skip_auto_save(state, path, "file was deleted on disk")
+        if is_nil(BufState.mtime(state)) do
+          write_auto_save_file(state, path)
+        else
+          skip_auto_save(state, path, "file was deleted on disk")
+        end
 
       {:error, reason} ->
         skip_auto_save(state, path, "could not stat file: #{inspect(reason)}")
@@ -1931,13 +1932,7 @@ defmodule Minga.Buffer.Process do
       :ok ->
         {new_mtime, new_size} = Persistence.file_metadata(state, path)
 
-        new_state =
-          mark_saved(%{
-            state
-            | mtime: new_mtime,
-              file_size: new_size,
-              file_hash: Persistence.content_fingerprint(content)
-          })
+        new_state = mark_saved(state, {new_mtime, new_size}, content)
 
         log_to_messages(new_state, "Auto-saved: #{display_path(path)}", :info)
         broadcast_buffer_saved(new_state, path)

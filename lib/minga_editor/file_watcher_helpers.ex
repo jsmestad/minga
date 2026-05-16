@@ -8,6 +8,7 @@ defmodule MingaEditor.FileWatcherHelpers do
   """
 
   alias Minga.Buffer
+  alias Minga.Buffer.State, as: BufState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Conflict, as: ConflictPayload
@@ -59,20 +60,70 @@ defmodule MingaEditor.FileWatcherHelpers do
 
   # ── Private helpers ──────────────────────────────────────────────────────
 
-  @spec handle_change(state(), pid(), String.t(), map(), integer() | nil, non_neg_integer() | nil) ::
+  @spec handle_change(
+          state(),
+          pid(),
+          String.t(),
+          BufState.t(),
+          integer() | nil,
+          non_neg_integer() | nil
+        ) ::
           state()
   defp handle_change(state, _buf, _path, _buf_state, nil, _size), do: state
-  defp handle_change(state, _buf, _path, %{mtime: nil}, _mtime, _size), do: state
 
-  defp handle_change(state, _buf, _path, %{mtime: mtime, file_size: size}, mtime, size), do: state
+  defp handle_change(state, buf, path, buf_state, disk_mtime, disk_size) do
+    handle_known_change(
+      state,
+      buf,
+      path,
+      disk_mtime,
+      disk_size,
+      BufState.mtime(buf_state),
+      BufState.file_size(buf_state),
+      BufState.dirty?(buf_state)
+    )
+  end
 
-  defp handle_change(state, buf, path, %{dirty: false}, _mtime, _size) do
+  @spec handle_known_change(
+          state(),
+          pid(),
+          String.t(),
+          integer(),
+          non_neg_integer() | nil,
+          integer() | nil,
+          non_neg_integer() | nil,
+          boolean()
+        ) :: state()
+  defp handle_known_change(state, _buf, _path, _disk_mtime, _disk_size, nil, _saved_size, _dirty),
+    do: state
+
+  defp handle_known_change(state, _buf, _path, mtime, size, mtime, size, _dirty), do: state
+
+  defp handle_known_change(
+         state,
+         buf,
+         path,
+         _disk_mtime,
+         _disk_size,
+         _saved_mtime,
+         _saved_size,
+         false
+       ) do
     Buffer.reload(buf)
     name = Path.basename(path)
     EditorState.set_status(state, "#{name} reloaded (changed on disk)")
   end
 
-  defp handle_change(state, buf, path, _buf_state, _mtime, _size) do
+  defp handle_known_change(
+         state,
+         buf,
+         path,
+         _disk_mtime,
+         _disk_size,
+         _saved_mtime,
+         _saved_size,
+         true
+       ) do
     name = Path.basename(path)
 
     state = ModalOverlay.open(state, :conflict, ConflictPayload.new(buf, path))

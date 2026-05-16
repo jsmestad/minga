@@ -5,12 +5,13 @@ defmodule Minga.Buffer.Persistence do
   `Minga.Buffer.Process` owns the process transaction: undo state, dirty state, events, timers, and registry updates. This module owns the file-system and remote-storage details that make those transactions possible: reading content, writing content, collecting file metadata, fingerprinting saved content, and deciding whether the backing file changed since the buffer last saved or loaded it.
   """
 
+  alias Minga.Buffer.SaveState
   alias Minga.Buffer.State, as: BufState
 
   @type storage :: BufState.storage()
   @type metadata :: {mtime :: integer() | nil, size :: non_neg_integer() | nil}
   @type state_or_storage :: BufState.t() | storage()
-  @type saved_content_status :: :same | :changed | :unknown
+  @type saved_content_status :: SaveState.saved_content_status()
 
   @doc "Loads initial buffer content from storage or returns the supplied scratch content when no path is set."
   @spec load_content(storage(), String.t() | nil, String.t()) ::
@@ -87,43 +88,41 @@ defmodule Minga.Buffer.Persistence do
 
   @doc "Returns true when the backing file differs from the buffer's saved baseline."
   @spec changed_since_saved?(BufState.t(), integer() | nil, non_neg_integer() | nil) :: boolean()
-  def changed_since_saved?(%BufState{mtime: nil}, nil, _disk_size), do: false
-  def changed_since_saved?(%BufState{mtime: nil}, _disk_mtime, _disk_size), do: true
-  def changed_since_saved?(_state, nil, _disk_size), do: false
-
   def changed_since_saved?(%BufState{} = state, disk_mtime, disk_size) do
-    metadata_changed? = disk_mtime != state.mtime or disk_size != state.file_size
-
-    case saved_content_status(state) do
-      :same -> false
-      :changed -> true
-      :unknown -> metadata_changed?
-    end
+    BufState.changed_since_saved?(state, disk_mtime, disk_size, saved_content_status(state))
   end
 
   @doc "Fingerprints content with the algorithm used to track saved file baselines."
   @spec content_fingerprint(String.t()) :: binary()
-  def content_fingerprint(content), do: :crypto.hash(:sha256, content)
+  def content_fingerprint(content), do: SaveState.content_fingerprint(content)
 
   @doc "Returns a saved-content fingerprint only when a path and concrete mtime make the baseline meaningful."
   @spec saved_content_fingerprint(String.t() | nil, integer() | nil, String.t()) :: binary() | nil
-  def saved_content_fingerprint(path, mtime, content)
-      when is_binary(path) and is_integer(mtime) do
-    content_fingerprint(content)
+  def saved_content_fingerprint(path, mtime, content) do
+    SaveState.saved_content_fingerprint(path, mtime, content)
   end
 
-  def saved_content_fingerprint(_path, _mtime, _content), do: nil
-
   @spec saved_content_status(BufState.t()) :: saved_content_status()
-  defp saved_content_status(%BufState{file_path: path, file_hash: hash} = state)
-       when is_binary(path) and is_binary(hash) do
+  defp saved_content_status(%BufState{file_path: path} = state) when is_binary(path) do
+    hash = BufState.file_hash(state)
+
+    if is_binary(hash) do
+      saved_content_status_for_hash(state, path, hash)
+    else
+      :unknown
+    end
+  end
+
+  defp saved_content_status(_state), do: :unknown
+
+  @spec saved_content_status_for_hash(BufState.t(), String.t(), binary()) ::
+          saved_content_status()
+  defp saved_content_status_for_hash(state, path, hash) do
     case read_content(state, path) do
       {:ok, content} -> if content_fingerprint(content) == hash, do: :same, else: :changed
       {:error, _reason} -> :changed
     end
   end
-
-  defp saved_content_status(_state), do: :unknown
 
   @spec remote_unavailable(term()) :: {:error, {:remote_unavailable, term()}}
   defp remote_unavailable(reason), do: {:error, {:remote_unavailable, reason}}

@@ -3,6 +3,7 @@ defmodule Minga.Buffer.PersistenceTest do
 
   alias Minga.Buffer.Document
   alias Minga.Buffer.Persistence
+  alias Minga.Buffer.SaveState
   alias Minga.Buffer.State, as: BufState
 
   @moduletag :tmp_dir
@@ -55,9 +56,7 @@ defmodule Minga.Buffer.PersistenceTest do
     %BufState{
       document: Document.new(content),
       file_path: path,
-      mtime: mtime,
-      file_size: size,
-      file_hash: Persistence.content_fingerprint(content)
+      save_state: SaveState.loaded(path, {mtime, size}, content)
     }
   end
 end

@@ -216,6 +216,10 @@ defmodule Minga.Buffer do
   @spec accept_saved_content(t(), String.t()) :: :ok
   defdelegate accept_saved_content(server, new_content), to: BufferProcess
 
+  @doc "Acknowledge the current disk metadata after keeping local edits during a file-change conflict."
+  @spec acknowledge_disk_change(t()) :: :ok
+  defdelegate acknowledge_disk_change(server), to: BufferProcess
+
   @doc "Find and replace the first occurrence of `old_text` with `new_text`."
   @spec find_and_replace(t(), String.t(), String.t(), boundary()) ::
           {:ok, String.t()} | {:error, String.t()}
