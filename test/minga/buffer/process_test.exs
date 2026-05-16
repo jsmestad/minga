@@ -7,6 +7,13 @@ defmodule Minga.Buffer.ProcessTest do
 
   @moduletag :tmp_dir
 
+  defp consume_edit_deltas(buffer, consumer_id) do
+    case BufferProcess.consume_edit_deltas(buffer, consumer_id) do
+      {:ok, deltas} -> deltas
+      :reset_required -> flunk("expected edit deltas, got reset_required")
+    end
+  end
+
   describe "child_spec/1" do
     test "uses restart: :temporary so crashed buffers stay dead" do
       spec = BufferProcess.child_spec(file_path: "test.ex")
@@ -819,7 +826,7 @@ defmodule Minga.Buffer.ProcessTest do
       {:ok, pid} = BufferProcess.start_link(content: "hello")
       BufferProcess.move_to(pid, {0, 5})
       BufferProcess.insert_char(pid, "!")
-      edits = BufferProcess.consume_edit_deltas(pid, :test)
+      edits = consume_edit_deltas(pid, :test)
       assert [delta] = edits
       assert delta.start_byte == 5
       assert delta.old_end_byte == 5
@@ -831,7 +838,7 @@ defmodule Minga.Buffer.ProcessTest do
       {:ok, pid} = BufferProcess.start_link(content: "hello")
       BufferProcess.move_to(pid, {0, 5})
       BufferProcess.delete_before(pid)
-      edits = BufferProcess.consume_edit_deltas(pid, :test)
+      edits = consume_edit_deltas(pid, :test)
       assert [delta] = edits
       assert delta.start_byte == 4
       assert delta.old_end_byte == 5
@@ -842,7 +849,7 @@ defmodule Minga.Buffer.ProcessTest do
     test "apply_edit records byte-accurate unicode replacement delta" do
       {:ok, pid} = BufferProcess.start_link(content: "aébc")
       BufferProcess.apply_edit(pid, 0, 1, 0, 1, "X")
-      edits = BufferProcess.consume_edit_deltas(pid, :test)
+      edits = consume_edit_deltas(pid, :test)
       assert [delta] = edits
       assert BufferProcess.content(pid) == "aXbc"
       assert delta.start_byte == 1
@@ -858,8 +865,8 @@ defmodule Minga.Buffer.ProcessTest do
       {:ok, pid} = BufferProcess.start_link(content: "hello")
       BufferProcess.move_to(pid, {0, 5})
       BufferProcess.insert_char(pid, "!")
-      assert [_] = BufferProcess.consume_edit_deltas(pid, :test)
-      assert [] = BufferProcess.consume_edit_deltas(pid, :test)
+      assert [_] = consume_edit_deltas(pid, :test)
+      assert [] = consume_edit_deltas(pid, :test)
     end
 
     test "multiple edits accumulate in order" do
@@ -867,7 +874,7 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.move_to(pid, {0, 2})
       BufferProcess.insert_char(pid, "c")
       BufferProcess.insert_char(pid, "d")
-      edits = BufferProcess.consume_edit_deltas(pid, :test)
+      edits = consume_edit_deltas(pid, :test)
       assert length(edits) == 2
       assert [first, second] = edits
       assert first.inserted_text == "c"
@@ -877,7 +884,7 @@ defmodule Minga.Buffer.ProcessTest do
     test "delete_range records a deletion delta" do
       {:ok, pid} = BufferProcess.start_link(content: "hello world")
       BufferProcess.delete_range(pid, {0, 5}, {0, 11})
-      edits = BufferProcess.consume_edit_deltas(pid, :test)
+      edits = consume_edit_deltas(pid, :test)
       assert [delta] = edits
       assert delta.start_byte == 5
       assert delta.old_end_byte == 11
@@ -889,12 +896,12 @@ defmodule Minga.Buffer.ProcessTest do
       {:ok, pid} = BufferProcess.start_link(content: "hello")
       BufferProcess.move_to(pid, {0, 5})
       BufferProcess.insert_char(pid, "!")
-      assert [_] = BufferProcess.consume_edit_deltas(pid, :test)
+      assert [_] = consume_edit_deltas(pid, :test)
       # Make another edit then undo
       BufferProcess.insert_char(pid, "?")
       BufferProcess.undo(pid)
       # Undo clears edits to force full sync
-      assert [] = BufferProcess.consume_edit_deltas(pid, :test)
+      assert :reset_required = BufferProcess.consume_edit_deltas(pid, :test)
     end
 
     test "replace_content clears pending edits" do
@@ -902,7 +909,7 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.move_to(pid, {0, 5})
       BufferProcess.insert_char(pid, "!")
       BufferProcess.replace_content(pid, "goodbye")
-      assert [] = BufferProcess.consume_edit_deltas(pid, :test)
+      assert :reset_required = BufferProcess.consume_edit_deltas(pid, :test)
     end
   end
 
@@ -916,8 +923,8 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.insert_char(pid, "y")
 
       # Both consumers should see the same 2 deltas
-      lsp_deltas = BufferProcess.consume_edit_deltas(pid, :lsp)
-      hl_deltas = BufferProcess.consume_edit_deltas(pid, :highlight)
+      lsp_deltas = consume_edit_deltas(pid, :lsp)
+      hl_deltas = consume_edit_deltas(pid, :highlight)
 
       assert length(lsp_deltas) == 2
       assert length(hl_deltas) == 2
@@ -932,7 +939,7 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.insert_char(pid, "b")
 
       # First flush gets both deltas
-      assert [d1, d2] = BufferProcess.consume_edit_deltas(pid, :lsp)
+      assert [d1, d2] = consume_edit_deltas(pid, :lsp)
       assert d1.inserted_text == "a"
       assert d2.inserted_text == "b"
 
@@ -940,7 +947,7 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.insert_char(pid, "c")
 
       # Second flush gets only the new one
-      assert [d3] = BufferProcess.consume_edit_deltas(pid, :lsp)
+      assert [d3] = consume_edit_deltas(pid, :lsp)
       assert d3.inserted_text == "c"
     end
 
@@ -951,7 +958,7 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.insert_char(pid, "c")
 
       # :lsp reads all 3
-      lsp_first = BufferProcess.consume_edit_deltas(pid, :lsp)
+      lsp_first = consume_edit_deltas(pid, :lsp)
       assert length(lsp_first) == 3
 
       # More edits
@@ -959,12 +966,12 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.insert_char(pid, "e")
 
       # :highlight hasn't read yet, should get all 5
-      hl_all = BufferProcess.consume_edit_deltas(pid, :highlight)
+      hl_all = consume_edit_deltas(pid, :highlight)
       assert length(hl_all) == 5
       assert Enum.map(hl_all, & &1.inserted_text) == ["a", "b", "c", "d", "e"]
 
       # :lsp should get only the 2 new ones
-      lsp_second = BufferProcess.consume_edit_deltas(pid, :lsp)
+      lsp_second = consume_edit_deltas(pid, :lsp)
       assert length(lsp_second) == 2
       assert Enum.map(lsp_second, & &1.inserted_text) == ["d", "e"]
     end
@@ -975,12 +982,13 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.insert_char(pid, "b")
 
       # Both consumers flush
-      BufferProcess.consume_edit_deltas(pid, :lsp)
-      BufferProcess.consume_edit_deltas(pid, :highlight)
+      consume_edit_deltas(pid, :lsp)
+      consume_edit_deltas(pid, :highlight)
 
-      # Once both registered consumers have caught up, the log is trimmed —
-      # a new consumer registering after the fact sees no historical deltas.
-      assert [] = BufferProcess.consume_edit_deltas(pid, :late_arrival)
+      # Once both registered consumers have caught up, the log is trimmed.
+      # A new consumer registering after the fact needs a full sync because
+      # there is no retained history for its baseline.
+      assert :reset_required = BufferProcess.consume_edit_deltas(pid, :late_arrival)
     end
 
     test "new consumer starts from sequence 0 and gets entire log" do
@@ -990,25 +998,15 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.insert_char(pid, "c")
 
       # :lsp reads all 3
-      BufferProcess.consume_edit_deltas(pid, :lsp)
+      consume_edit_deltas(pid, :lsp)
 
       # More edits
       BufferProcess.insert_char(pid, "d")
       BufferProcess.insert_char(pid, "e")
 
-      # New consumer never registered before, gets everything still in log
-      # (log is trimmed based on min cursor; :lsp cursor is at 3, so a-c may be trimmed)
-      # But :new_consumer has cursor 0, so as long as log entries exist, it gets them.
-      # Since :lsp flushed 3 but :new_consumer hasn't, the log won't be fully trimmed.
-      # Actually, the log was trimmed based on registered consumers only.
-      # Since :new_consumer wasn't registered, its cursor defaults to 0 on first call.
-      # The log entries for d and e (seq 4, 5) are still there because :lsp hasn't
-      # read them yet. Entries for a,b,c (seq 1,2,3) may or may not be trimmed
-      # depending on whether other consumers exist. Since only :lsp is registered
-      # and its cursor is at 3, entries 1-3 got trimmed on that flush.
-      new_deltas = BufferProcess.consume_edit_deltas(pid, :new_consumer)
-      # Gets at least the 2 unread by all consumers (d, e)
-      assert length(new_deltas) >= 2
+      # New consumer never registered before, but the complete history is still retained.
+      new_deltas = consume_edit_deltas(pid, :new_consumer)
+      assert Enum.map(new_deltas, & &1.inserted_text) == ["a", "b", "c", "d", "e"]
     end
 
     test "undo clears the edit log for all consumers" do
@@ -1018,15 +1016,15 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.insert_char(pid, "b")
 
       # :lsp reads
-      assert [_, _] = BufferProcess.consume_edit_deltas(pid, :lsp)
+      assert [_, _] = consume_edit_deltas(pid, :lsp)
 
       # More edits then undo
       BufferProcess.insert_char(pid, "c")
       BufferProcess.undo(pid)
 
-      # Both consumers get empty (forces full sync)
-      assert [] = BufferProcess.consume_edit_deltas(pid, :lsp)
-      assert [] = BufferProcess.consume_edit_deltas(pid, :highlight)
+      # Both consumers must full-sync after history is cleared.
+      assert :reset_required = BufferProcess.consume_edit_deltas(pid, :lsp)
+      assert :reset_required = BufferProcess.consume_edit_deltas(pid, :highlight)
     end
 
     test "replace_content clears the edit log for all consumers" do
@@ -1035,35 +1033,33 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.insert_char(pid, "!")
       BufferProcess.replace_content(pid, "goodbye")
 
-      assert [] = BufferProcess.consume_edit_deltas(pid, :lsp)
-      assert [] = BufferProcess.consume_edit_deltas(pid, :highlight)
+      assert :reset_required = BufferProcess.consume_edit_deltas(pid, :lsp)
+      assert :reset_required = BufferProcess.consume_edit_deltas(pid, :highlight)
     end
 
     test "flush with no edits returns empty list" do
       {:ok, pid} = BufferProcess.start_link(content: "hello")
-      assert [] = BufferProcess.consume_edit_deltas(pid, :lsp)
+      assert [] = consume_edit_deltas(pid, :lsp)
     end
 
     test "flush same consumer twice with no intervening edits returns empty" do
       {:ok, pid} = BufferProcess.start_link(content: "hello")
       BufferProcess.insert_char(pid, "!")
-      assert [_] = BufferProcess.consume_edit_deltas(pid, :lsp)
-      assert [] = BufferProcess.consume_edit_deltas(pid, :lsp)
+      assert [_] = consume_edit_deltas(pid, :lsp)
+      assert [] = consume_edit_deltas(pid, :lsp)
     end
 
-    test "edit_log is capped at 1000 entries when only one consumer is registered" do
+    test "change log is capped at 1000 entries when only one consumer is registered" do
       {:ok, pid} = BufferProcess.start_link(content: "")
 
       # Insert more than 1000 chars with only :lsp reading periodically
       for _ <- 1..1100, do: BufferProcess.insert_char(pid, "x")
 
       # Only one consumer has ever called consume_edit_deltas
-      _deltas = BufferProcess.consume_edit_deltas(pid, :lsp)
+      _deltas = consume_edit_deltas(pid, :lsp)
 
-      # A late-arriving consumer would see every retained entry (its cursor
-      # starts at 0). With the cap in place it sees at most 1000, not 1100.
-      late_deltas = BufferProcess.consume_edit_deltas(pid, :late_arrival)
-      assert length(late_deltas) <= 1000
+      # A late-arriving consumer is behind compacted history, so it must full-sync.
+      assert :reset_required = BufferProcess.consume_edit_deltas(pid, :late_arrival)
     end
   end
 

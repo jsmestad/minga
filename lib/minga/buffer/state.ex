@@ -13,9 +13,11 @@ defmodule Minga.Buffer.State do
   under burst editing while preserving correct undo for human-speed edits.
   """
 
+  alias Minga.Buffer.ChangeLog
   alias Minga.Buffer.Document
-  alias Minga.Buffer.EditDelta
   alias Minga.Core.Decorations
+
+  @default_change_log ChangeLog.new()
 
   @typedoc """
   Buffer type controlling behavior:
@@ -57,10 +59,7 @@ defmodule Minga.Buffer.State do
             read_only: false,
             unlisted: false,
             persistent: false,
-            pending_edits: [],
-            edit_seq: 0,
-            edit_log: [],
-            consumer_cursors: %{},
+            change_log: @default_change_log,
             decorations: %Decorations{},
             face_overrides: %{},
             options: %{},
@@ -90,10 +89,7 @@ defmodule Minga.Buffer.State do
           read_only: boolean(),
           unlisted: boolean(),
           persistent: boolean(),
-          pending_edits: [EditDelta.t()],
-          edit_seq: non_neg_integer(),
-          edit_log: [{non_neg_integer(), EditDelta.t()}],
-          consumer_cursors: %{atom() => non_neg_integer()},
+          change_log: ChangeLog.t(),
           decorations: Decorations.t(),
           face_overrides: %{String.t() => keyword()},
           options: %{atom() => term()},

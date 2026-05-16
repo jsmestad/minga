@@ -385,8 +385,8 @@ defmodule Minga.Buffer do
 
   # ── Edit deltas (for LSP incremental sync) ─────────────────────────
 
-  @doc "Consume edit deltas accumulated since the given consumer's last read."
-  @spec consume_edit_deltas(t(), atom()) :: [Minga.Buffer.EditDelta.t()]
+  @doc "Consume edit deltas accumulated since the given consumer's last read, or return `:reset_required` when the consumer must full-sync."
+  @spec consume_edit_deltas(t(), atom()) :: BufferProcess.edit_delta_update()
   defdelegate consume_edit_deltas(server, consumer_id), to: BufferProcess
 
   # ── Decorations ────────────────────────────────────────────────────
