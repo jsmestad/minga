@@ -14,6 +14,7 @@ struct FileTreeRowView: View {
     let isHovered: Bool
     let isDropTarget: Bool
     let animDuration: Double
+    let onActivate: () -> Void
     let onEditCommit: (String) -> Void
     let onEditCancel: () -> Void
 
@@ -25,7 +26,7 @@ struct FileTreeRowView: View {
     }
 
     var body: some View {
-        rowContent
+        let row = rowContent
             .padding(.leading, leadingPadding)
             .padding(.trailing, 8)
             .frame(height: rowHeight)
@@ -40,21 +41,32 @@ struct FileTreeRowView: View {
             .onHover { isHovered in
                 isLocallyHovered = isHovered
             }
+            .accessibilityElement(children: entry.isEditing ? .contain : .ignore)
             .accessibilityLabel(accessibilityLabelText)
             .accessibilityValue(accessibilityValueText)
             .accessibilityHint(accessibilityHintText)
             .accessibilityAddTraits(accessibilityTraits)
+
+        if entry.isEditing {
+            row
+        } else {
+            row.accessibilityAction {
+                onActivate()
+            }
+        }
     }
 
     @ViewBuilder
     private var rowContent: some View {
         HStack(spacing: 0) {
             disclosureChevron
+                .accessibilityHidden(entry.isEditing)
 
             Text(entry.icon)
                 .font(.custom("Symbols Nerd Font Mono", size: 12))
                 .foregroundStyle(iconColor)
                 .frame(width: 16, alignment: .center)
+                .accessibilityHidden(entry.isEditing)
 
             Spacer().frame(width: 4)
 
@@ -348,7 +360,8 @@ struct FileTreeRowView: View {
     }
 
     var accessibilityTraits: AccessibilityTraits {
-        var traits: AccessibilityTraits = .isButton
+        var traits: AccessibilityTraits = []
+        if !entry.isEditing { traits.insert(.isButton) }
         if entry.isSelected { traits.insert(.isSelected) }
         return traits
     }

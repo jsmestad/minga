@@ -57,6 +57,7 @@ The BEAM-side encoder must use a documented length-prefixed envelope for all new
 | 0x91 | gui_indent_guides | Indent guide positions per window |
 | 0x92 | gui_line_spacing | Line spacing multiplier for the renderer |
 | 0x93 | gui_file_tree | Semantic file tree rows for the native sidebar view. Uses a 32-bit payload length because expanded project trees can exceed 64KB. |
+| 0x94 | gui_file_tree_selection | Lightweight file tree selection and focus update. |
 | 0x96 | gui_hover_action | Optional action metadata for the hover popup |
 
 ### 0x93 — gui_file_tree
@@ -110,6 +111,22 @@ When `tree_state == 0`, the frontend should hide the file tree. Hidden payloads 
 `row_count == 0` only means the payload contains no entry rows. It does not imply hidden. Use `tree_state` to distinguish hidden (`0`), loading (`1`), visible-empty (`2`), and error (`4`) states. The `empty` flag bit is retained for compatibility and is set only for `tree_state == 2`.
 
 When `tree_state == 4`, `error_reason` contains a short user-displayable reason. For all other states, `error_reason` is an empty string.
+
+### 0x94 — gui_file_tree_selection
+
+Selection and focus changes are common while navigating large trees. The BEAM sends this small update when the row model itself has not changed, so the native sidebar can update selection without receiving or decoding the full tree payload again.
+
+```
+opcode(1) + payload_len(2) + payload(payload_len)
+
+Payload:
+  flags(1) + selected_id_len(2) + selected_id(selected_id_len)
+```
+
+Flag bits:
+  bit 0: focused
+
+Frontends should apply this only to the current file-tree model. If no full `gui_file_tree` payload has been received yet, the update is safe to ignore.
 
 ### 0x71 — gui_tab_bar
 

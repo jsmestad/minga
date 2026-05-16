@@ -212,6 +212,9 @@ final class CommandDispatcher {
                 guiState.fileTreeState.hide(rootPath: rootPath)
             }
 
+        case .guiFileTreeSelection(let selectedId, let focused):
+            guiState.fileTreeState.updateSelection(selectedId: selectedId, focused: focused)
+
         case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let items):
             if visible {
                 guiState.completionState.update(visible: true, anchorRow: anchorRow, anchorCol: anchorCol, selectedIndex: selectedIndex, rawItems: items)

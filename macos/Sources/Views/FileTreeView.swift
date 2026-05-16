@@ -210,16 +210,22 @@ struct FileTreeView: View {
     @ViewBuilder
     private func entryRow(_ entry: FileTreeEntry) -> some View {
         if entry.isEditing {
-            fileTreeRow(entry)
+            fileTreeRow(entry, onActivate: {})
                 .id(entry.id)
         } else {
-            fileTreeRow(entry)
+            fileTreeRow(entry, onActivate: { activateEntry(id: entry.id) })
                 .id(entry.id)
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    handleEntryTap(entry)
+                    activateEntry(id: entry.id)
                 }
-                .modifier(FileTreeEntryAccessibilityActions(entry: entry, encoder: encoder))
+                .modifier(
+                    FileTreeEntryAccessibilityActions(
+                        entry: entry,
+                        encoder: encoder,
+                        resolveEntry: { fileTreeState.entry(withID: $0) }
+                    )
+                )
                 .contextMenu { entryContextMenu(entry) }
                 .draggable(URL(fileURLWithPath: fileTreeState.fullPath(for: entry))) {
                     HStack(spacing: 4) {
@@ -240,7 +246,7 @@ struct FileTreeView: View {
         }
     }
 
-    private func fileTreeRow(_ entry: FileTreeEntry) -> FileTreeRowView {
+    private func fileTreeRow(_ entry: FileTreeEntry, onActivate: @escaping () -> Void) -> FileTreeRowView {
         FileTreeRowView(
             entry: entry,
             theme: theme,
@@ -250,6 +256,7 @@ struct FileTreeView: View {
             isHovered: false,
             isDropTarget: dropTargetEntryId == entry.id,
             animDuration: animDuration,
+            onActivate: onActivate,
             onEditCommit: { text in
                 encoder?.sendFileTreeEditConfirm(text: text)
             },
@@ -263,66 +270,95 @@ struct FileTreeView: View {
 
     @ViewBuilder
     private func entryContextMenu(_ entry: FileTreeEntry) -> some View {
+        let entryId = entry.id
+
         if !entry.isDir {
             Button("Open") {
-                encoder?.sendFileTreeClick(index: UInt16(entry.index))
+                withCurrentEntry(entryId) { entry in
+                    encoder?.sendFileTreeClick(index: UInt16(entry.index))
+                }
             }
             Button("Open in Split") {
-                encoder?.sendFileTreeOpenInSplit(index: UInt16(entry.index))
+                withCurrentEntry(entryId) { entry in
+                    encoder?.sendFileTreeOpenInSplit(index: UInt16(entry.index))
+                }
             }
             Divider()
         }
 
         if entry.isDir {
             Button("New File…") {
-                encoder?.sendFileTreeNewFile(parentIndex: UInt16(entry.index))
+                withCurrentEntry(entryId) { entry in
+                    encoder?.sendFileTreeNewFile(parentIndex: UInt16(entry.index))
+                }
             }
             Button("New Folder…") {
-                encoder?.sendFileTreeNewFolder(parentIndex: UInt16(entry.index))
+                withCurrentEntry(entryId) { entry in
+                    encoder?.sendFileTreeNewFolder(parentIndex: UInt16(entry.index))
+                }
             }
             Divider()
         }
 
         Button("Rename") {
-            encoder?.sendFileTreeRename(index: UInt16(entry.index))
+            withCurrentEntry(entryId) { entry in
+                encoder?.sendFileTreeRename(index: UInt16(entry.index))
+            }
         }
         Button("Duplicate") {
-            encoder?.sendFileTreeDuplicate(index: UInt16(entry.index))
+            withCurrentEntry(entryId) { entry in
+                encoder?.sendFileTreeDuplicate(index: UInt16(entry.index))
+            }
         }
 
         Divider()
 
         Button("Copy Path") {
-            copyToClipboard(fileTreeState.fullPath(for: entry))
+            withCurrentEntry(entryId) { entry in
+                copyToClipboard(fileTreeState.fullPath(for: entry))
+            }
         }
         Button("Copy Relative Path") {
-            copyToClipboard(entry.relPath)
+            withCurrentEntry(entryId) { entry in
+                copyToClipboard(entry.relPath)
+            }
         }
 
         Divider()
 
         Button("Reveal in Finder") {
-            let path = fileTreeState.fullPath(for: entry)
-            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+            withCurrentEntry(entryId) { entry in
+                let path = fileTreeState.fullPath(for: entry)
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+            }
         }
         Button("Open in Terminal") {
-            let path = fileTreeState.fullPath(for: entry)
-            let dirPath = entry.isDir ? path : (path as NSString).deletingLastPathComponent
-            let dirURL = URL(fileURLWithPath: dirPath)
-            NSWorkspace.shared.open(
-                [dirURL],
-                withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"),
-                configuration: NSWorkspace.OpenConfiguration()
-            )
+            withCurrentEntry(entryId) { entry in
+                let path = fileTreeState.fullPath(for: entry)
+                let dirPath = entry.isDir ? path : (path as NSString).deletingLastPathComponent
+                let dirURL = URL(fileURLWithPath: dirPath)
+                NSWorkspace.shared.open(
+                    [dirURL],
+                    withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"),
+                    configuration: NSWorkspace.OpenConfiguration()
+                )
+            }
         }
 
         Divider()
 
         Button(role: .destructive) {
-            encoder?.sendFileTreeDelete(index: UInt16(entry.index))
+            withCurrentEntry(entryId) { entry in
+                encoder?.sendFileTreeDelete(index: UInt16(entry.index))
+            }
         } label: {
             Text("Move to Trash")
         }
+    }
+
+    private func withCurrentEntry(_ id: String, perform: (FileTreeEntry) -> Void) {
+        guard let entry = fileTreeState.entry(withID: id) else { return }
+        perform(entry)
     }
 
     private func copyToClipboard(_ string: String) {
@@ -354,6 +390,11 @@ struct FileTreeView: View {
             lastClickEntryId = entry.id
             lastClickTime = now
         }
+    }
+
+    private func activateEntry(id: String) {
+        guard let entry = fileTreeState.entry(withID: id) else { return }
+        handleEntryTap(entry)
     }
 
     // MARK: - Drop handling
@@ -421,38 +462,48 @@ struct FileTreeView: View {
 private struct FileTreeEntryAccessibilityActions: ViewModifier {
     let entry: FileTreeEntry
     let encoder: InputEncoder?
+    let resolveEntry: (String) -> FileTreeEntry?
 
     @ViewBuilder
     func body(content: Content) -> some View {
         if entry.isDir {
             content
                 .accessibilityAction(named: Text("Toggle Folder")) {
+                    guard let entry = resolveEntry(entry.id) else { return }
                     encoder?.sendFileTreeToggle(index: UInt16(entry.index))
                 }
                 .accessibilityAction(named: Text("New File…")) {
+                    guard let entry = resolveEntry(entry.id) else { return }
                     encoder?.sendFileTreeNewFile(parentIndex: UInt16(entry.index))
                 }
                 .accessibilityAction(named: Text("New Folder…")) {
+                    guard let entry = resolveEntry(entry.id) else { return }
                     encoder?.sendFileTreeNewFolder(parentIndex: UInt16(entry.index))
                 }
                 .accessibilityAction(named: Text("Rename")) {
+                    guard let entry = resolveEntry(entry.id) else { return }
                     encoder?.sendFileTreeRename(index: UInt16(entry.index))
                 }
                 .accessibilityAction(named: Text("Move to Trash")) {
+                    guard let entry = resolveEntry(entry.id) else { return }
                     encoder?.sendFileTreeDelete(index: UInt16(entry.index))
                 }
         } else {
             content
                 .accessibilityAction(named: Text("Open")) {
+                    guard let entry = resolveEntry(entry.id) else { return }
                     encoder?.sendFileTreeClick(index: UInt16(entry.index))
                 }
                 .accessibilityAction(named: Text("Open in Split")) {
+                    guard let entry = resolveEntry(entry.id) else { return }
                     encoder?.sendFileTreeOpenInSplit(index: UInt16(entry.index))
                 }
                 .accessibilityAction(named: Text("Rename")) {
+                    guard let entry = resolveEntry(entry.id) else { return }
                     encoder?.sendFileTreeRename(index: UInt16(entry.index))
                 }
                 .accessibilityAction(named: Text("Move to Trash")) {
+                    guard let entry = resolveEntry(entry.id) else { return }
                     encoder?.sendFileTreeDelete(index: UInt16(entry.index))
                 }
         }

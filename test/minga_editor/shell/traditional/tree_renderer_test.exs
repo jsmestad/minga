@@ -3,13 +3,18 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Core.Unicode
   alias Minga.Project.FileTree
   alias MingaEditor.FileTree.Diagnostics, as: RowDiagnostics
   alias MingaEditor.FileTree.Row
+  alias MingaEditor.State.Buffers
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.Shell.Traditional.TreeRenderer
   alias MingaEditor.Shell.Traditional.TreeRenderer.RenderInput
   alias MingaEditor.UI.Theme
+
+  import MingaEditor.RenderPipeline.TestHelpers, only: [gui_state: 1]
 
   @moduletag :tmp_dir
 
@@ -108,6 +113,78 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
 
       assert [{0, 20, "│", _style}] = sep_draws
       refute Enum.any?(draws, fn {row, col, _text, _style} -> row > 0 and col < 20 end)
+    end
+
+    test "production state render shows active and dirty row states", %{tmp_dir: tmp_dir} do
+      active_path = Path.join(tmp_dir, "active.ex")
+      dirty_path = Path.join(tmp_dir, "dirty.ex")
+      File.write!(active_path, "active")
+      File.write!(dirty_path, "dirty")
+
+      {:ok, active_buf} = BufferProcess.start_link(file_path: active_path)
+      {:ok, dirty_buf} = BufferProcess.start_link(file_path: dirty_path)
+      :ok = BufferProcess.insert_text(dirty_buf, "!")
+
+      tree = FileTree.new(tmp_dir, width: 32)
+      file_tree = FileTreeState.open(%FileTreeState{}, tree, nil)
+
+      state = gui_state(rows: 10, cols: 80)
+      state = put_in(state.workspace.file_tree, file_tree)
+
+      state =
+        put_in(state.workspace.buffers, %Buffers{
+          active: active_buf,
+          list: [active_buf, dirty_buf],
+          active_index: 0
+        })
+
+      draws = TreeRenderer.render(state)
+      all_text = draw_texts(draws)
+
+      assert String.contains?(all_text, "active.ex")
+      assert String.contains?(all_text, "dirty.ex")
+      assert String.contains?(all_text, "●")
+
+      {_row, _col, _text, active_style} = draw_containing(draws, "active.ex")
+      assert active_style.fg == Theme.get!(:doom_one).tree.active_fg
+      assert active_style.bold == true
+
+      {_row, _col, _text, dirty_style} = draw_matching(draws, "●")
+      assert dirty_style.fg == Theme.get!(:doom_one).tree.modified_fg
+    end
+
+    test "production state render shows loading and error messages", %{tmp_dir: tmp_dir} do
+      tree = FileTree.new(tmp_dir, width: 24)
+      file_tree = FileTreeState.open(%FileTreeState{}, tree, nil)
+      theme = Theme.get!(:doom_one)
+
+      loading_draws =
+        TreeRenderer.render(%{
+          workspace: %{
+            file_tree: FileTreeState.loading(file_tree),
+            viewport: %{rows: 5, cols: 80},
+            buffers: %{active: nil, list: [], active_index: 0}
+          },
+          theme: theme
+        })
+
+      error_draws =
+        TreeRenderer.render(%{
+          workspace: %{
+            file_tree: FileTreeState.error(file_tree, :eacces),
+            viewport: %{rows: 5, cols: 80},
+            buffers: %{active: nil, list: [], active_index: 0}
+          },
+          theme: theme
+        })
+
+      assert draw_texts(loading_draws) =~ "Loading files"
+      assert draw_texts(error_draws) =~ "File tree error"
+      assert draw_texts(error_draws) =~ "permission denied"
+
+      for draws <- [loading_draws, error_draws] do
+        assert Enum.any?(draws, fn {_row, col, text, _style} -> col == 24 and text == "│" end)
+      end
     end
 
     test "renders empty loading and error rows without layout drift", %{tmp_dir: tmp_dir} do
@@ -218,37 +295,52 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
       assert String.starts_with?(name, "lib/")
     end
 
-    test "renders production state for large trees through the visible row window", %{
-      tmp_dir: tmp_dir
-    } do
+    test "renders production state for large trees around the selected row", %{tmp_dir: tmp_dir} do
       for index <- 1..600 do
-        File.write!(Path.join(tmp_dir, "file_#{index}.ex"), "")
+        File.write!(
+          Path.join(tmp_dir, "file_#{String.pad_leading(Integer.to_string(index), 3, "0")}.ex"),
+          ""
+        )
       end
 
       tree = FileTree.new(tmp_dir, width: 32) |> FileTree.select(599)
+      file_tree = FileTreeState.open(%FileTreeState{}, tree, nil)
 
       draws =
         TreeRenderer.render(%{
           workspace: %{
-            file_tree: %{tree: tree, focused: true},
-            viewport: %{rows: 10, cols: 80}
+            file_tree: %{file_tree | focused: true},
+            viewport: %{rows: 10, cols: 80},
+            buffers: %{active: nil, list: [], active_index: 0}
           },
           theme: Theme.get!(:doom_one)
         })
 
-      content_draw_rows =
-        draws
-        |> Enum.filter(fn {row, col, _text, _style} -> row > 1 and col < 32 end)
-        |> Enum.map(fn {row, _col, _text, _style} -> row end)
-        |> Enum.uniq()
+      all_text = draw_texts(draws)
 
-      assert content_draw_rows == Enum.to_list(2..8)
-      assert draw_texts(draws) =~ ".ex"
+      for name <- [
+            "file_594.ex",
+            "file_595.ex",
+            "file_596.ex",
+            "file_597.ex",
+            "file_598.ex",
+            "file_599.ex",
+            "file_600.ex"
+          ] do
+        assert String.contains?(all_text, name)
+      end
+
+      refute String.contains?(all_text, "file_593.ex")
+      refute String.contains?(all_text, "file_001.ex")
+      assert String.contains?(all_text, "file_600.ex")
     end
 
-    test "renders large RenderInput trees from only the visible row window", %{tmp_dir: tmp_dir} do
+    test "renders large RenderInput trees around the selected row", %{tmp_dir: tmp_dir} do
       for index <- 1..600 do
-        File.write!(Path.join(tmp_dir, "file_#{index}.ex"), "")
+        File.write!(
+          Path.join(tmp_dir, "file_#{String.pad_leading(Integer.to_string(index), 3, "0")}.ex"),
+          ""
+        )
       end
 
       tree = FileTree.new(tmp_dir, width: 32) |> FileTree.select(599)
@@ -262,14 +354,22 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
           active_path: nil
         })
 
-      content_draw_rows =
-        draws
-        |> Enum.filter(fn {row, col, _text, _style} -> row > 0 and col < 32 end)
-        |> Enum.map(fn {row, _col, _text, _style} -> row end)
-        |> Enum.uniq()
+      all_text = draw_texts(draws)
 
-      assert content_draw_rows == Enum.to_list(1..7)
-      assert draw_texts(draws) =~ ".ex"
+      for name <- [
+            "file_594.ex",
+            "file_595.ex",
+            "file_596.ex",
+            "file_597.ex",
+            "file_598.ex",
+            "file_599.ex",
+            "file_600.ex"
+          ] do
+        assert String.contains?(all_text, name)
+      end
+
+      refute String.contains?(all_text, "file_593.ex")
+      refute String.contains?(all_text, "file_001.ex")
     end
 
     test "renders supplied semantic rows", %{tmp_dir: tmp_dir} do

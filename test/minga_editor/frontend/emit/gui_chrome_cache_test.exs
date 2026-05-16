@@ -9,7 +9,12 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Diagnostics
+  alias Minga.Diagnostics.Diagnostic
+  alias Minga.LSP.SyncServer
+  alias Minga.Project.FileTree
   alias MingaEditor.Renderer.Caches
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.Tab
@@ -237,6 +242,148 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
                _ ->
                  false
              end)
+    end
+
+    test "ready large file trees reuse cached rows on the second frame" do
+      root =
+        Path.join(System.tmp_dir!(), "minga-gui-file-tree-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(root)
+
+      for index <- 1..300 do
+        filename = "file_#{String.pad_leading(Integer.to_string(index), 3, "0")}.ex"
+        File.write!(Path.join(root, filename), "")
+      end
+
+      file_tree = FileTreeState.open(%FileTreeState{}, FileTree.new(root, width: 32), nil)
+
+      state = gui_state()
+      state = put_in(state.workspace.file_tree, file_tree)
+
+      {_ctx, caches} =
+        EmitGUI.sync_swiftui_chrome(
+          Context.from_editor_state(state),
+          StatusBarData.from_state(state),
+          nil,
+          %Caches{}
+        )
+
+      first_cmds = collect_port_casts() |> List.flatten()
+      assert Enum.any?(first_cmds, &match?(<<0x93, _::binary>>, &1))
+
+      {_ctx, caches2} =
+        EmitGUI.sync_swiftui_chrome(
+          Context.from_editor_state(state),
+          StatusBarData.from_state(state),
+          nil,
+          caches
+        )
+
+      second_cmds = collect_port_casts() |> List.flatten()
+
+      assert caches2.last_gui_file_tree_fp == caches.last_gui_file_tree_fp
+      refute Enum.any?(second_cmds, &match?(<<0x93, _::binary>>, &1))
+    end
+
+    test "ready file trees resend full GUI rows when diagnostics change" do
+      root =
+        Path.join(
+          System.tmp_dir!(),
+          "minga-gui-file-tree-diagnostics-#{System.unique_integer([:positive])}"
+        )
+
+      File.mkdir_p!(root)
+      file_path = Path.join(root, "alpha.ex")
+      File.write!(file_path, "")
+
+      uri = SyncServer.path_to_uri(file_path)
+
+      on_exit(fn ->
+        Diagnostics.clear(:gui_file_tree_cache_test, uri)
+      end)
+
+      file_tree = FileTreeState.open(%FileTreeState{}, FileTree.new(root, width: 32), nil)
+
+      state = gui_state()
+      state = put_in(state.workspace.file_tree, file_tree)
+
+      {_ctx, caches} =
+        EmitGUI.sync_swiftui_chrome(
+          Context.from_editor_state(state),
+          StatusBarData.from_state(state),
+          nil,
+          %Caches{}
+        )
+
+      flush_port_casts()
+
+      :ok =
+        Diagnostics.publish(:gui_file_tree_cache_test, uri, [
+          %Diagnostic{
+            range: %{start_line: 0, start_col: 0, end_line: 0, end_col: 1},
+            severity: :error,
+            message: "boom"
+          }
+        ])
+
+      {_ctx, _caches2} =
+        EmitGUI.sync_swiftui_chrome(
+          Context.from_editor_state(state),
+          StatusBarData.from_state(state),
+          nil,
+          caches
+        )
+
+      cmds = collect_port_casts() |> List.flatten()
+
+      assert Enum.any?(cmds, &match?(<<0x93, _::binary>>, &1))
+      refute Enum.any?(cmds, &match?(<<0x94, _::binary>>, &1))
+    end
+
+    test "ready large file tree selection changes emit selection update without resending rows" do
+      root =
+        Path.join(
+          System.tmp_dir!(),
+          "minga-gui-file-tree-selection-#{System.unique_integer([:positive])}"
+        )
+
+      File.mkdir_p!(root)
+
+      for index <- 1..300 do
+        filename = "file_#{String.pad_leading(Integer.to_string(index), 3, "0")}.ex"
+        File.write!(Path.join(root, filename), "")
+      end
+
+      file_tree = FileTreeState.open(%FileTreeState{}, FileTree.new(root, width: 32), nil)
+
+      state = gui_state()
+      state = put_in(state.workspace.file_tree, file_tree)
+
+      {_ctx, caches} =
+        EmitGUI.sync_swiftui_chrome(
+          Context.from_editor_state(state),
+          StatusBarData.from_state(state),
+          nil,
+          %Caches{}
+        )
+
+      flush_port_casts()
+
+      moved_tree = FileTreeState.replace_tree(file_tree, FileTree.select(file_tree.tree, 42))
+      moved_state = put_in(state.workspace.file_tree, moved_tree)
+
+      {_ctx, _caches2} =
+        EmitGUI.sync_swiftui_chrome(
+          Context.from_editor_state(moved_state),
+          StatusBarData.from_state(moved_state),
+          nil,
+          caches
+        )
+
+      second_cmds = collect_port_casts() |> List.flatten()
+
+      refute Enum.any?(second_cmds, &match?(<<0x93, _::binary>>, &1))
+      assert [<<0x94, _::binary>>] = Enum.filter(second_cmds, &match?(<<0x94, _::binary>>, &1))
     end
 
     test "git syncing and toast changes re-send hidden git status command" do

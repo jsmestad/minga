@@ -743,6 +743,28 @@ struct GUIFileTreeDecoderTests {
         #expect(entries[1].relPath == "lib/editor.ex")
     }
 
+    @Test("Decode lightweight gui_file_tree_selection")
+    func decodeSelectionUpdate() throws {
+        var payload = Data()
+        payload.append(0x01)
+        appendString16(&payload, "/home/user/project/lib/editor.ex")
+
+        var data = Data()
+        data.append(OP_GUI_FILE_TREE_SELECTION)
+        appendU16(&data, UInt16(payload.count))
+        data.append(payload)
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiFileTreeSelection(let selectedId, let focused) = cmd else {
+            Issue.record("Expected .guiFileTreeSelection"); return
+        }
+
+        #expect(selectedId == "/home/user/project/lib/editor.ex")
+        #expect(focused == true)
+    }
+
     @Test("Decode semantic gui_file_tree hidden")
     func decodeHidden() throws {
         var payload = Data()

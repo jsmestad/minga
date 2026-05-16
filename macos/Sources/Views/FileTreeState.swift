@@ -37,6 +37,35 @@ struct FileTreeEntry: Identifiable {
     let editingType: UInt8
     /// Pre-filled text for the editing field. Only meaningful when isEditing is true.
     let editingText: String
+
+    func withSelection(isSelected: Bool, isFocused: Bool) -> FileTreeEntry {
+        FileTreeEntry(
+            id: id,
+            pathHash: pathHash,
+            index: index,
+            isDir: isDir,
+            isExpanded: isExpanded,
+            isSelected: isSelected,
+            isFocused: isFocused,
+            isActive: isActive,
+            isDirty: isDirty,
+            isEditing: isEditing,
+            isLastChild: isLastChild,
+            depth: depth,
+            gitStatus: gitStatus,
+            diagnosticErrorCount: diagnosticErrorCount,
+            diagnosticWarningCount: diagnosticWarningCount,
+            diagnosticInfoCount: diagnosticInfoCount,
+            diagnosticHintCount: diagnosticHintCount,
+            guides: guides,
+            icon: icon,
+            name: name,
+            relPath: relPath,
+            path: path,
+            editingType: editingType,
+            editingText: editingText
+        )
+    }
 }
 
 enum FileTreeGitStatus: UInt8 {
@@ -174,11 +203,34 @@ final class FileTreeState {
         self.editingIndex = rawEntries.firstIndex(where: { $0.isEditing })
     }
 
+    /// Updates selection and focus without replacing the full tree payload.
+    func updateSelection(selectedId: String, focused: Bool) {
+        guard let selectedIndex = entries.firstIndex(where: { $0.id == selectedId }) else {
+            self.focused = focused
+            self.entries = entries.map { entry in
+                entry.withSelection(isSelected: entry.isSelected, isFocused: focused)
+            }
+            return
+        }
+
+        self.selectedId = selectedId
+        self.selectedIndex = selectedIndex
+        self.focused = focused
+        self.entries = entries.map { entry in
+            entry.withSelection(isSelected: entry.id == selectedId, isFocused: focused)
+        }
+    }
+
     /// Computes the full absolute path for an entry.
     func fullPath(for entry: FileTreeEntry) -> String {
         if !entry.path.isEmpty { return entry.path }
         guard !projectRoot.isEmpty, !entry.relPath.isEmpty else { return entry.relPath }
         return (projectRoot as NSString).appendingPathComponent(entry.relPath)
+    }
+
+    /// Resolves the current entry for a stable row identifier.
+    func entry(withID id: String) -> FileTreeEntry? {
+        entries.first { $0.id == id }
     }
 
     /// Hide the file tree (BEAM toggled it off) and keep the shared window chrome in sync with the latest project root.

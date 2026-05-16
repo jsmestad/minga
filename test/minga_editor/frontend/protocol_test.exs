@@ -1256,6 +1256,14 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       assert payload_len > 65_535
     end
 
+    test "encodes lightweight gui_file_tree_selection update" do
+      encoded = ProtocolGUI.encode_gui_file_tree_selection("/project/lib/hello.ex", true)
+
+      assert <<0x94, payload_len::16, payload::binary-size(payload_len)>> = encoded
+      assert <<1::8, selected_len::16, selected::binary-size(selected_len)>> = payload
+      assert selected == "/project/lib/hello.ex"
+    end
+
     test "encodes hidden semantic gui_file_tree with explicit hidden state" do
       encoded = ProtocolGUI.encode_hidden_gui_file_tree("/tmp/minga-project")
 

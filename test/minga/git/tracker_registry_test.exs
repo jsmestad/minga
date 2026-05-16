@@ -41,11 +41,10 @@ defmodule Minga.Git.TrackerRegistryTest do
     table = :"tracker_registry_#{System.unique_integer([:positive])}"
     tracker_name = :"tracker_#{System.unique_integer([:positive])}"
 
-    tracker =
-      start_supervised!(
-        {Tracker, name: tracker_name, events_registry: registry_a, registry_table: table},
-        id: table
-      )
+    start_supervised!(
+      {Tracker, name: tracker_name, events_registry: registry_a, registry_table: table},
+      id: table
+    )
 
     path = Path.join(dir, "tracker_registry_test.ex")
     File.write!(path, "x = 1\n")
@@ -53,7 +52,6 @@ defmodule Minga.Git.TrackerRegistryTest do
     {:ok, buf} = BufferProcess.start_link(content: "x = 1\n", file_path: path)
 
     Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: path}, registry_b)
-    _ = :sys.get_state(tracker)
     refute Tracker.tracked?(buf, table)
 
     Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: path}, registry_a)

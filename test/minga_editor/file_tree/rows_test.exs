@@ -283,6 +283,22 @@ defmodule MingaEditor.FileTree.RowsTest do
       assert FileTreeState.status(errored) == :ready
     end
 
+    test "open and replace_tree keep cached visible entries on the stored tree", %{
+      tmp_dir: tmp_dir
+    } do
+      tree = flat_tree(tmp_dir)
+      file_tree = FileTreeState.open(%FileTreeState{}, tree, nil)
+
+      assert is_list(file_tree.tree.entries)
+      assert length(file_tree.tree.entries) == 2
+
+      replaced_tree = FileTree.toggle_hidden(file_tree.tree)
+      replaced = FileTreeState.replace_tree(file_tree, replaced_tree)
+
+      assert is_list(replaced.tree.entries)
+      assert replaced.tree.entries != []
+    end
+
     test "width preserves the last sidebar width for state-only payloads", %{tmp_dir: tmp_dir} do
       tree = FileTree.new(tmp_dir, width: 42)
       file_tree = FileTreeState.open(%FileTreeState{}, tree, nil)

@@ -38,6 +38,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       expected = schema["opcodes"]["gui_chrome"]
 
       assert_opcode(expected, "gui_file_tree", 0x93)
+      assert_opcode(expected, "gui_file_tree_selection", 0x94)
       assert_opcode(expected, "gui_tab_bar", 0x71)
       assert_opcode(expected, "gui_which_key", 0x72)
       assert_opcode(expected, "gui_completion", 0x73)
