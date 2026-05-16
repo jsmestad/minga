@@ -7,7 +7,8 @@
 #   ./scripts/vendor-tree-sitter.sh --core   # only tree-sitter core
 #   ./scripts/vendor-tree-sitter.sh --lang elixir  # only one grammar
 #
-# To update versions, edit the TREE_SITTER_VERSION or grammar entries below.
+# To update versions, edit scripts/tree-sitter-vendors.txt or run
+# scripts/bump-tree-sitter-vendors.rb.
 
 set -euo pipefail
 
@@ -17,64 +18,24 @@ VENDOR_DIR="$PROJECT_ROOT/zig/vendor"
 QUERIES_DIR="$PROJECT_ROOT/priv/queries"
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
-
-# ── Versions ────────────────────────────────────────────────────────────────
-
-TREE_SITTER_VERSION="v0.26.7"
-
-# ── Grammar definitions ────────────────────────────────────────────────────
-# Format: name|repo|tag|scanner_ext|src_subdir
-# scanner_ext: "c", "cc", or "-" for none
-# src_subdir: path to src/ within the repo (default "src")
-#
-# To add a grammar: add an entry here. The script handles the rest.
-
-GRAMMARS=(
-  "elixir|elixir-lang/tree-sitter-elixir|v0.3.4|c|src"
-  "heex|the-mikedavis/tree-sitter-heex|v0.2.1|-|src"
-  "json|tree-sitter/tree-sitter-json|v0.24.8|-|src"
-  "yaml|tree-sitter-grammars/tree-sitter-yaml|v0.7.2|c|src"
-  "toml|tree-sitter/tree-sitter-toml|v0.5.1|c|src"
-  "markdown|tree-sitter-grammars/tree-sitter-markdown|v0.5.3|c|tree-sitter-markdown/src"
-  "markdown_inline|tree-sitter-grammars/tree-sitter-markdown|v0.5.3|c|tree-sitter-markdown-inline/src"
-  "ruby|tree-sitter/tree-sitter-ruby|v0.23.1|c|src"
-  "javascript|tree-sitter/tree-sitter-javascript|v0.25.0|c|src"
-  "typescript|tree-sitter/tree-sitter-typescript|v0.23.2|c|typescript/src"
-  "tsx|tree-sitter/tree-sitter-typescript|v0.23.2|c|tsx/src"
-  "go|tree-sitter/tree-sitter-go|v0.25.0|-|src"
-  "rust|tree-sitter/tree-sitter-rust|v0.24.0|c|src"
-  "zig|tree-sitter-grammars/tree-sitter-zig|v1.1.2|-|src"
-  "erlang|WhatsApp/tree-sitter-erlang|0.1.0|-|src"
-  "bash|tree-sitter/tree-sitter-bash|v0.25.1|c|src"
-  "c|tree-sitter/tree-sitter-c|v0.24.1|-|src"
-  "cpp|tree-sitter/tree-sitter-cpp|v0.23.4|c|src"
-  "html|tree-sitter/tree-sitter-html|v0.23.2|c|src"
-  "css|tree-sitter/tree-sitter-css|v0.25.0|c|src"
-  "lua|tree-sitter-grammars/tree-sitter-lua|v0.5.0|c|src"
-  "python|tree-sitter/tree-sitter-python|v0.25.0|c|src"
-  # sql: DerekStride/tree-sitter-sql doesn't ship pre-generated parser.c
-  # graphql: bkegley/tree-sitter-graphql has no tags
-  "kotlin|fwcd/tree-sitter-kotlin|0.3.8|c|src"
-  "gleam|gleam-lang/tree-sitter-gleam|v1.1.0|c|src"
-)
-
-# ── Query overrides ────────────────────────────────────────────────────────
-# Format: name|query_subdir (path to queries/ within the repo)
-# If not listed, defaults to "queries" in the repo root.
-# Some grammars put queries in a subdirectory.
-
-declare -A QUERY_DIRS
-QUERY_DIRS=(
-  ["markdown"]="tree-sitter-markdown/queries"
-  ["markdown_inline"]="tree-sitter-markdown-inline/queries"
-  ["typescript"]="queries"
-  ["tsx"]="queries"
-)
+MANIFEST="$PROJECT_ROOT/scripts/tree-sitter-vendors.txt"
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
 info()  { echo "  → $*"; }
 err()   { echo "ERROR: $*" >&2; exit 1; }
+
+manifest_entries() {
+  grep -vE '^\s*(#|$)' "$MANIFEST"
+}
+
+core_entry() {
+  manifest_entries | awk -F'|' '$1 == "core" { print; exit }'
+}
+
+grammar_entries() {
+  manifest_entries | awk -F'|' '$1 == "grammar" { print }'
+}
 
 download_tarball() {
   local repo="$1" tag="$2" dest="$3"
@@ -103,10 +64,14 @@ extracted_dir() {
 # ── Core library ────────────────────────────────────────────────────────────
 
 vendor_core() {
-  echo "=== Vendoring tree-sitter core ${TREE_SITTER_VERSION} ==="
+  local entry kind name repo tag scanner_ext src_subdir query_subdir
+  entry="$(core_entry)"
+  IFS='|' read -r kind name repo tag scanner_ext src_subdir query_subdir <<< "$entry"
+
+  echo "=== Vendoring tree-sitter core ${tag} ==="
   local dest="$WORK_DIR/ts-core"
   mkdir -p "$dest"
-  download_tarball "tree-sitter/tree-sitter" "$TREE_SITTER_VERSION" "$dest"
+  download_tarball "$repo" "$tag" "$dest"
   local src_dir
   src_dir="$(extracted_dir "$dest")"
 
@@ -117,7 +82,7 @@ vendor_core() {
   cp -r "$src_dir/lib/include" "$target/"
 
   # Write version file for tracking
-  echo "$TREE_SITTER_VERSION" > "$target/VERSION"
+  echo "$tag" > "$target/VERSION"
   info "Installed tree-sitter core → zig/vendor/tree-sitter/"
 }
 
@@ -125,7 +90,8 @@ vendor_core() {
 
 vendor_grammar() {
   local entry="$1"
-  IFS='|' read -r name repo tag scanner_ext src_subdir <<< "$entry"
+  local kind name repo tag scanner_ext src_subdir query_subdir
+  IFS='|' read -r kind name repo tag scanner_ext src_subdir query_subdir <<< "$entry"
 
   echo "=== Vendoring grammar: ${name} (${repo}@${tag}) ==="
 
@@ -169,24 +135,30 @@ vendor_grammar() {
 
   # Special cases: copy shared files that scanners reference via relative paths
   case "$name" in
+    ocaml)
+      # scanner.c includes ../../../common/scanner.h from the upstream monorepo.
+      if [ -f "$repo_dir/common/scanner.h" ]; then
+        cp "$repo_dir/common/scanner.h" "$target/src/common_scanner.h"
+        perl -0pi -e 's|#include "../../../common/scanner.h"|#include "common_scanner.h"|' "$target/src/scanner.c"
+        info "  + common_scanner.h (patched include)"
+      fi
+      ;;
     typescript|tsx)
       # scanner.c includes ../../common/scanner.h — copy it locally
       if [ -f "$repo_dir/common/scanner.h" ]; then
         cp "$repo_dir/common/scanner.h" "$target/src/common_scanner.h"
         # Patch the include to use local copy
-        sed -i '' 's|#include "../../common/scanner.h"|#include "common_scanner.h"|' "$target/src/scanner.c"
+        perl -0pi -e 's|#include "../../common/scanner.h"|#include "common_scanner.h"|' "$target/src/scanner.c"
         info "  + common_scanner.h (patched include)"
       fi
       ;;
   esac
 
   # Copy highlight queries
-  local query_dir="${QUERY_DIRS[$name]:-queries}"
-  local full_query_dir="$repo_dir/${query_dir}"
+  local full_query_dir="$repo_dir/${query_subdir}"
   local query_target="$QUERIES_DIR/${name}"
-  rm -rf "$query_target"
 
-  if [ -d "$full_query_dir" ] && ls "$full_query_dir"/*.scm >/dev/null 2>&1; then
+  if [ "$query_subdir" != "-" ] && [ -d "$full_query_dir" ] && ls "$full_query_dir"/*.scm >/dev/null 2>&1; then
     mkdir -p "$query_target"
     cp "$full_query_dir"/*.scm "$query_target/"
     info "  + queries → priv/queries/${name}/"
@@ -228,22 +200,22 @@ main() {
       ;;
     single)
       local found=false
-      for entry in "${GRAMMARS[@]}"; do
-        IFS='|' read -r name _ <<< "$entry"
+      while IFS= read -r entry; do
+        IFS='|' read -r _kind name _repo _tag _scanner_ext _src_subdir _query_subdir <<< "$entry"
         if [ "$name" = "$single_lang" ]; then
           vendor_grammar "$entry"
           found=true
           break
         fi
-      done
+      done < <(grammar_entries)
       $found || err "Unknown grammar: ${single_lang}"
       ;;
     all)
       vendor_core
       echo ""
-      for entry in "${GRAMMARS[@]}"; do
+      while IFS= read -r entry; do
         vendor_grammar "$entry"
-      done
+      done < <(grammar_entries)
       ;;
   esac
 

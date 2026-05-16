@@ -1,0 +1,42 @@
+name: Tree-sitter Vendors
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 10 * * 1"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    name: Update vendored tree-sitter sources
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Bump manifest
+        run: ruby scripts/bump-tree-sitter-vendors.rb
+
+      - name: Vendor sources
+        run: scripts/vendor-tree-sitter.sh
+
+      - name: Verify Zig parser and renderer
+        run: cd zig && zig build test
+
+      - name: Open pull request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: automation/tree-sitter-vendors
+          delete-branch: true
+          title: "chore: update vendored tree-sitter sources"
+          commit-message: "chore: update vendored tree-sitter sources"
+          body: |
+            Updates vendored tree-sitter core, grammar sources, and bundled queries from `scripts/tree-sitter-vendors.txt`.
+
+            The workflow ran `cd zig && zig build test` before opening this PR.
