@@ -37,7 +37,8 @@ defmodule MingaEditor.State.FileTree do
           editing: editing() | nil,
           project_root: String.t() | nil,
           tree_status: tree_status(),
-          tree_width: pos_integer()
+          tree_width: pos_integer(),
+          refresh_timer: reference() | nil
         }
 
   defstruct tree: nil,
@@ -46,7 +47,8 @@ defmodule MingaEditor.State.FileTree do
             editing: nil,
             project_root: nil,
             tree_status: :hidden,
-            tree_width: 30
+            tree_width: 30,
+            refresh_timer: nil
 
   @doc "Returns true when the file tree is open."
   @spec open?(t()) :: boolean()
@@ -98,6 +100,7 @@ defmodule MingaEditor.State.FileTree do
       | tree: tree,
         focused: true,
         buffer: buffer,
+        project_root: tree.root,
         tree_status: classify_tree(tree),
         tree_width: tree.width
     }
@@ -114,6 +117,29 @@ defmodule MingaEditor.State.FileTree do
   def loading(%__MODULE__{} = ft) do
     %{ft | focused: false, editing: nil, tree_status: :loading}
   end
+
+  @doc "Updates the project root associated with the file tree."
+  @spec set_project_root(t(), String.t() | nil) :: t()
+  def set_project_root(%__MODULE__{} = ft, nil), do: %{ft | project_root: nil}
+
+  def set_project_root(%__MODULE__{} = ft, root) when is_binary(root) do
+    %{ft | project_root: Path.expand(root)}
+  end
+
+  @doc "Returns true when a filesystem refresh timer is pending."
+  @spec refresh_scheduled?(t()) :: boolean()
+  def refresh_scheduled?(%__MODULE__{refresh_timer: ref}) when is_reference(ref), do: true
+  def refresh_scheduled?(%__MODULE__{}), do: false
+
+  @doc "Stores the pending filesystem refresh timer reference."
+  @spec schedule_refresh(t(), reference()) :: t()
+  def schedule_refresh(%__MODULE__{} = ft, ref) when is_reference(ref) do
+    %{ft | refresh_timer: ref}
+  end
+
+  @doc "Clears the pending filesystem refresh timer reference."
+  @spec clear_refresh(t()) :: t()
+  def clear_refresh(%__MODULE__{} = ft), do: %{ft | refresh_timer: nil}
 
   @doc "Marks the sidebar as failed with a displayable reason."
   @spec error(t(), term()) :: t()

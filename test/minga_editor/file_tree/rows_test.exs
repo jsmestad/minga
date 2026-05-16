@@ -3,12 +3,18 @@ defmodule MingaEditor.FileTree.RowsTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Diagnostics
   alias Minga.Diagnostics.Diagnostic
   alias Minga.Project.FileTree
   alias MingaEditor.FileTree.Diagnostics, as: RowDiagnostics
   alias MingaEditor.FileTree.Rows
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
+  alias MingaEditor.Workspace.State, as: WorkspaceState
+
+  import MingaEditor.RenderPipeline.TestHelpers
 
   @moduletag :tmp_dir
 
@@ -190,6 +196,28 @@ defmodule MingaEditor.FileTree.RowsTest do
     end
   end
 
+  describe "from_state/1" do
+    test "active row follows buffer switches without reopening the tree", %{tmp_dir: tmp_dir} do
+      alpha_path = Path.join(tmp_dir, "alpha.ex")
+      beta_path = Path.join(tmp_dir, "beta.ex")
+      File.write!(alpha_path, "alpha")
+      File.write!(beta_path, "beta")
+      {:ok, alpha_buffer} = BufferProcess.start_link(file_path: alpha_path)
+      {:ok, beta_buffer} = BufferProcess.start_link(file_path: beta_path)
+
+      state =
+        tmp_dir
+        |> state_with_tree()
+        |> put_buffers([alpha_buffer, beta_buffer])
+
+      assert active_row_name(state) == "alpha.ex"
+
+      switched_state = EditorState.switch_buffer(state, 1)
+
+      assert active_row_name(switched_state) == "beta.ex"
+    end
+  end
+
   describe "FileTreeState.status/1" do
     test "distinguishes hidden, empty, ready, loading, and error states", %{tmp_dir: tmp_dir} do
       assert FileTreeState.status(%FileTreeState{}) == :hidden
@@ -242,6 +270,25 @@ defmodule MingaEditor.FileTree.RowsTest do
     File.write!(Path.join(tmp_dir, "alpha.ex"), "")
     File.write!(Path.join(tmp_dir, "beta.ex"), "")
     FileTree.new(tmp_dir)
+  end
+
+  defp state_with_tree(root) do
+    tree = FileTree.new(root)
+    file_tree = FileTreeState.open(%FileTreeState{}, tree, nil)
+
+    EditorState.update_workspace(base_state(), &WorkspaceState.set_file_tree(&1, file_tree))
+  end
+
+  defp put_buffers(state, [active | _rest] = buffers) do
+    buffer_state = %Buffers{active: active, list: buffers, active_index: 0}
+    EditorState.update_workspace(state, &%{&1 | buffers: buffer_state})
+  end
+
+  defp active_row_name(state) do
+    state
+    |> Rows.from_state()
+    |> Enum.find(& &1.active?)
+    |> Map.fetch!(:name)
   end
 
   defp diagnostic(severity) do

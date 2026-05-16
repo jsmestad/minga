@@ -26,6 +26,12 @@ defmodule Minga.FileWatcherTest do
     assert :ok == FileWatcher.unwatch_path(watcher, "/tmp/test.txt")
   end
 
+  test "watch_directory and unwatch_directory succeed" do
+    watcher = start_watcher()
+    assert :ok == FileWatcher.watch_directory(watcher, "/tmp/project")
+    assert :ok == FileWatcher.unwatch_directory(watcher, "/tmp/project")
+  end
+
   test "subscribe registers the caller" do
     watcher = start_watcher()
     assert :ok == FileWatcher.subscribe(watcher, self())
@@ -79,6 +85,71 @@ defmodule Minga.FileWatcherTest do
     # Flush the watcher's mailbox so the event is processed
     :sys.get_state(watcher)
     refute_receive {:file_changed_on_disk, _}, 50
+  end
+
+  test "events under watched project directories are forwarded" do
+    watcher = start_watcher(subscriber: self(), debounce_ms: 10)
+    root = "/tmp/project-tree-watch"
+    path = Path.join(root, "new_file.ex")
+
+    FileWatcher.watch_directory(watcher, root)
+    send(watcher, {:file_event, nil, {path, [:created]}})
+    :sys.get_state(watcher)
+
+    assert_receive {:file_changed_on_disk, ^path}, 500
+  end
+
+  test "unwatch_directory stops forwarding project directory events" do
+    watcher = start_watcher(subscriber: self(), debounce_ms: 10)
+    root = "/tmp/project-tree-unwatch"
+    path = Path.join(root, "new_file.ex")
+
+    FileWatcher.watch_directory(watcher, root)
+    FileWatcher.unwatch_directory(watcher, root)
+    send(watcher, {:file_event, nil, {path, [:created]}})
+    :sys.get_state(watcher)
+
+    refute_receive {:file_changed_on_disk, ^path}, 50
+  end
+
+  test "watch_directory is idempotent for project directory registrations" do
+    watcher = start_watcher(subscriber: self())
+    root = "/tmp/project-tree-idempotent"
+
+    FileWatcher.watch_directory(watcher, root)
+    first_state = :sys.get_state(watcher)
+    FileWatcher.watch_directory(watcher, root)
+    second_state = :sys.get_state(watcher)
+
+    assert first_state.watched_dirs == second_state.watched_dirs
+    assert first_state.watcher == second_state.watcher
+  end
+
+  test "check_all notifies watched project directories" do
+    watcher = start_watcher(subscriber: self())
+    root = "/tmp/project-tree-check-all"
+
+    FileWatcher.watch_directory(watcher, root)
+    FileWatcher.check_all(watcher)
+    :sys.get_state(watcher)
+
+    assert_receive {:file_changed_on_disk, ^root}, 50
+  end
+
+  test "unwatch_directory_tree removes nested project directory registrations" do
+    watcher = start_watcher(subscriber: self(), debounce_ms: 10)
+    root = "/tmp/project-tree-root-unwatch"
+    nested = Path.join(root, "lib")
+    path = Path.join(nested, "new_file.ex")
+
+    FileWatcher.watch_directory(watcher, root)
+    FileWatcher.watch_directory(watcher, nested)
+    FileWatcher.unwatch_directory_tree(watcher, root)
+    send(watcher, {:file_event, nil, {path, [:created]}})
+    state = :sys.get_state(watcher)
+
+    assert state.watched_project_dirs == MapSet.new()
+    refute_receive {:file_changed_on_disk, ^path}, 50
   end
 
   test "check_all is safe after subscriber dies" do

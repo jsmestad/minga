@@ -16,6 +16,7 @@ defmodule MingaEditor.Commands.FileTree do
   alias Minga.Project.FileTree
   alias Minga.Project.FileTree.BufferSync
   alias MingaEditor.FileTree.DropIntent
+  alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
@@ -23,9 +24,23 @@ defmodule MingaEditor.Commands.FileTree do
   @spec toggle(state()) :: state()
   def toggle(%{workspace: %{file_tree: %{tree: nil}}} = state), do: open(state)
 
-  def toggle(%{workspace: %{file_tree: %{buffer: buf}}} = state) when is_pid(buf) do
+  def toggle(%{workspace: %{file_tree: %{tree: tree, buffer: buf}}} = state) when is_pid(buf) do
+    FileTreeFreshness.unwatch_expanded_dirs(tree)
     GenServer.stop(buf, :normal)
 
+    scope = restore_scope(state)
+
+    EditorState.update_workspace(state, fn ws ->
+      ws
+      |> Map.put(:file_tree, FileTreeState.close(ws.file_tree))
+      |> WorkspaceState.set_keymap_scope(scope)
+    end)
+    |> Layout.invalidate()
+    |> EditorState.invalidate_all_windows()
+  end
+
+  def toggle(%{workspace: %{file_tree: %{tree: %FileTree{} = tree}}} = state) do
+    FileTreeFreshness.unwatch_expanded_dirs(tree)
     scope = restore_scope(state)
 
     EditorState.update_workspace(state, fn ws ->
@@ -496,6 +511,7 @@ defmodule MingaEditor.Commands.FileTree do
     tree = FileTree.new(root)
     tree = FileTree.refresh_git_status(tree)
     tree = reveal_active(tree, state.workspace.buffers.active)
+    FileTreeFreshness.watch_expanded_dirs(tree)
     buf = BufferSync.start_buffer(tree)
 
     EditorState.update_workspace(state, fn ws ->
@@ -520,6 +536,7 @@ defmodule MingaEditor.Commands.FileTree do
   @spec sync_and_update(state(), FileTree.t()) :: state()
   defp sync_and_update(%{workspace: %{file_tree: %{buffer: buf}}} = state, new_tree)
        when is_pid(buf) do
+    FileTreeFreshness.watch_expanded_dirs(new_tree)
     BufferSync.sync(buf, new_tree)
 
     put_in(
@@ -529,6 +546,8 @@ defmodule MingaEditor.Commands.FileTree do
   end
 
   defp sync_and_update(state, new_tree) do
+    FileTreeFreshness.watch_expanded_dirs(new_tree)
+
     put_in(
       state.workspace.file_tree,
       FileTreeState.replace_tree(state.workspace.file_tree, new_tree)
