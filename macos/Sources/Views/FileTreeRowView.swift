@@ -18,6 +18,11 @@ struct FileTreeRowView: View {
     let onEditCancel: () -> Void
 
     @Environment(\.displayScale) private var displayScale
+    @State private var isLocallyHovered = false
+
+    private var effectiveHovered: Bool {
+        isHovered || isLocallyHovered
+    }
 
     var body: some View {
         rowContent
@@ -32,8 +37,13 @@ struct FileTreeRowView: View {
             .overlay(alignment: .leading) {
                 indentGuides
             }
+            .onHover { isHovered in
+                isLocallyHovered = isHovered
+            }
             .accessibilityLabel(accessibilityLabelText)
+            .accessibilityValue(accessibilityValueText)
             .accessibilityHint(accessibilityHintText)
+            .accessibilityAddTraits(accessibilityTraits)
     }
 
     @ViewBuilder
@@ -194,9 +204,9 @@ struct FileTreeRowView: View {
             rowFill(theme.treeSelectionBg.opacity(0.55))
         } else if entry.isSelected {
             rowFill(theme.treeSelectionBg.opacity(entry.isFocused ? 1.0 : 0.42))
-        } else if isHovered {
+        } else if effectiveHovered {
             rowFill(theme.treeFg.opacity(0.06))
-                .animation(.easeInOut(duration: animDuration), value: isHovered)
+                .animation(.easeInOut(duration: animDuration), value: effectiveHovered)
         }
     }
 
@@ -319,6 +329,28 @@ struct FileTreeRowView: View {
         case .info: return "info diagnostics"
         case .hint: return "hints"
         }
+    }
+
+    var accessibilityValueText: String {
+        accessibilityValueParts.joined(separator: ", ")
+    }
+
+    private var accessibilityValueParts: [String] {
+        var parts: [String] = []
+
+        if entry.isSelected { parts.append("selected") }
+        if entry.isActive { parts.append("current file") }
+        if entry.isFocused { parts.append("keyboard focus") }
+        if entry.isDir { parts.append(entry.isExpanded ? "expanded" : "collapsed") }
+        if entry.isEditing { parts.append("editing name") }
+
+        return parts
+    }
+
+    var accessibilityTraits: AccessibilityTraits {
+        var traits: AccessibilityTraits = .isButton
+        if entry.isSelected { traits.insert(.isSelected) }
+        return traits
     }
 
     var accessibilityHintText: String {

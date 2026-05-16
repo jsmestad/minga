@@ -22,7 +22,6 @@ struct FileTreeView: View {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.15
     }
 
-    @State private var hoveredEntryId: String? = nil
     @State private var scrollOffset: CGFloat = 0
     @State private var dropTargetEntryId: String? = nil
     @State private var lastClickEntryId: String? = nil
@@ -217,12 +216,10 @@ struct FileTreeView: View {
             fileTreeRow(entry)
                 .id(entry.id)
                 .contentShape(Rectangle())
-                .onHover { isHovered in
-                    hoveredEntryId = isHovered ? entry.id : nil
-                }
                 .onTapGesture {
                     handleEntryTap(entry)
                 }
+                .modifier(FileTreeEntryAccessibilityActions(entry: entry, encoder: encoder))
                 .contextMenu { entryContextMenu(entry) }
                 .draggable(URL(fileURLWithPath: fileTreeState.fullPath(for: entry))) {
                     HStack(spacing: 4) {
@@ -250,7 +247,7 @@ struct FileTreeView: View {
             rowHeight: rowHeight,
             indentWidth: indentWidth,
             chevronWidth: chevronWidth,
-            isHovered: hoveredEntryId == entry.id,
+            isHovered: false,
             isDropTarget: dropTargetEntryId == entry.id,
             animDuration: animDuration,
             onEditCommit: { text in
@@ -419,6 +416,47 @@ struct FileTreeView: View {
         return mods
     }
 
+}
+
+private struct FileTreeEntryAccessibilityActions: ViewModifier {
+    let entry: FileTreeEntry
+    let encoder: InputEncoder?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if entry.isDir {
+            content
+                .accessibilityAction(named: Text("Toggle Folder")) {
+                    encoder?.sendFileTreeToggle(index: UInt16(entry.index))
+                }
+                .accessibilityAction(named: Text("New File…")) {
+                    encoder?.sendFileTreeNewFile(parentIndex: UInt16(entry.index))
+                }
+                .accessibilityAction(named: Text("New Folder…")) {
+                    encoder?.sendFileTreeNewFolder(parentIndex: UInt16(entry.index))
+                }
+                .accessibilityAction(named: Text("Rename")) {
+                    encoder?.sendFileTreeRename(index: UInt16(entry.index))
+                }
+                .accessibilityAction(named: Text("Move to Trash")) {
+                    encoder?.sendFileTreeDelete(index: UInt16(entry.index))
+                }
+        } else {
+            content
+                .accessibilityAction(named: Text("Open")) {
+                    encoder?.sendFileTreeClick(index: UInt16(entry.index))
+                }
+                .accessibilityAction(named: Text("Open in Split")) {
+                    encoder?.sendFileTreeOpenInSplit(index: UInt16(entry.index))
+                }
+                .accessibilityAction(named: Text("Rename")) {
+                    encoder?.sendFileTreeRename(index: UInt16(entry.index))
+                }
+                .accessibilityAction(named: Text("Move to Trash")) {
+                    encoder?.sendFileTreeDelete(index: UInt16(entry.index))
+                }
+        }
+    }
 }
 
 /// Preference key for tracking scroll offset within the file tree.

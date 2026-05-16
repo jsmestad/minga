@@ -196,6 +196,32 @@ defmodule MingaEditor.FileTree.RowsTest do
     end
   end
 
+  describe "from_entries/3" do
+    test "builds only the requested indexed rows for large visible lists", %{tmp_dir: tmp_dir} do
+      for index <- 1..300 do
+        File.write!(Path.join(tmp_dir, "file_#{index}.ex"), "")
+      end
+
+      tree = FileTree.new(tmp_dir) |> FileTree.select(249)
+
+      indexed_entries =
+        tree
+        |> FileTree.visible_entries()
+        |> Enum.slice(245, 10)
+        |> Enum.with_index(245)
+
+      rows = Rows.from_entries(indexed_entries, tree, selected_index: tree.cursor)
+
+      assert length(rows) == 10
+
+      assert Enum.map(rows, & &1.name) ==
+               Enum.map(indexed_entries, fn {entry, _index} -> entry.name end)
+
+      assert Enum.count(rows, & &1.selected?) == 1
+      assert Enum.find(rows, & &1.selected?).name == Enum.at(rows, 4).name
+    end
+  end
+
   describe "from_state/1" do
     test "active row follows buffer switches without reopening the tree", %{tmp_dir: tmp_dir} do
       alpha_path = Path.join(tmp_dir, "alpha.ex")

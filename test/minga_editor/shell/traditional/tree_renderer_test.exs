@@ -218,6 +218,60 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
       assert String.starts_with?(name, "lib/")
     end
 
+    test "renders production state for large trees through the visible row window", %{
+      tmp_dir: tmp_dir
+    } do
+      for index <- 1..600 do
+        File.write!(Path.join(tmp_dir, "file_#{index}.ex"), "")
+      end
+
+      tree = FileTree.new(tmp_dir, width: 32) |> FileTree.select(599)
+
+      draws =
+        TreeRenderer.render(%{
+          workspace: %{
+            file_tree: %{tree: tree, focused: true},
+            viewport: %{rows: 10, cols: 80}
+          },
+          theme: Theme.get!(:doom_one)
+        })
+
+      content_draw_rows =
+        draws
+        |> Enum.filter(fn {row, col, _text, _style} -> row > 1 and col < 32 end)
+        |> Enum.map(fn {row, _col, _text, _style} -> row end)
+        |> Enum.uniq()
+
+      assert content_draw_rows == Enum.to_list(2..8)
+      assert draw_texts(draws) =~ ".ex"
+    end
+
+    test "renders large RenderInput trees from only the visible row window", %{tmp_dir: tmp_dir} do
+      for index <- 1..600 do
+        File.write!(Path.join(tmp_dir, "file_#{index}.ex"), "")
+      end
+
+      tree = FileTree.new(tmp_dir, width: 32) |> FileTree.select(599)
+
+      draws =
+        TreeRenderer.render(%RenderInput{
+          tree: tree,
+          rect: {0, 0, 32, 8},
+          focused: true,
+          theme: Theme.get!(:doom_one),
+          active_path: nil
+        })
+
+      content_draw_rows =
+        draws
+        |> Enum.filter(fn {row, col, _text, _style} -> row > 0 and col < 32 end)
+        |> Enum.map(fn {row, _col, _text, _style} -> row end)
+        |> Enum.uniq()
+
+      assert content_draw_rows == Enum.to_list(1..7)
+      assert draw_texts(draws) =~ ".ex"
+    end
+
     test "renders supplied semantic rows", %{tmp_dir: tmp_dir} do
       file_path = Path.join(tmp_dir, "main.ex")
       File.write!(file_path, "defmodule Main do\nend\n")

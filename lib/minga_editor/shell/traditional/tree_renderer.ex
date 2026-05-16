@@ -8,6 +8,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
   stays scannable without connector-heavy branch art.
   """
 
+  alias Minga.Buffer
   alias Minga.Core.Face
   alias Minga.Core.Unicode
   alias Minga.Language
@@ -81,17 +82,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
   """
   @spec render(RenderInput.t()) :: [DisplayList.draw()]
   def render(%RenderInput{} = input) do
-    rows =
-      input.rows ||
-        Rows.from_tree(input.tree,
-          active_path: input.active_path,
-          dirty_paths: input.dirty_paths,
-          editing: input.editing,
-          focused: input.focused,
-          git_status: input.git_status
-        )
-
-    do_render(input.tree, input.rect, input.theme, effective_status(input.status, rows), rows)
+    do_render(input)
   end
 
   @spec render(EditorState.t() | map()) :: [DisplayList.draw()]
@@ -121,22 +112,24 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
       rect: rect,
       focused: focused,
       theme: state.theme,
-      active_path: nil,
-      rows: Rows.from_state(state),
+      active_path: active_buffer_path(state),
+      dirty_paths: dirty_paths(state),
+      editing: Map.get(file_tree, :editing),
+      git_status: tree.git_status,
       status: status_from_file_tree(file_tree)
     }
 
     render(input)
   end
 
-  @spec do_render(FileTree.t(), WindowTree.rect(), Theme.t(), FileTreeState.tree_status(), [
-          Row.t()
-        ]) :: [DisplayList.draw()]
-  defp do_render(_tree, {_row_off, _col_off, width, height}, _theme, _status, _rows)
+  @spec do_render(RenderInput.t()) :: [DisplayList.draw()]
+  defp do_render(%RenderInput{rect: {_row_off, _col_off, width, height}})
        when width <= 0 or height <= 0,
        do: []
 
-  defp do_render(tree, {row_off, col_off, width, height}, theme, status, rows) do
+  defp do_render(
+         %RenderInput{tree: tree, rect: {row_off, col_off, width, height}, theme: theme} = input
+       ) do
     # Header: project directory name with folder icon
     project_name = Path.basename(tree.root)
     header_text = " #{@folder_open} #{project_name}/"
@@ -153,7 +146,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
 
     # Entry rows (starting from row 1, leaving row 0 for header)
     content_rows = max(height - 1, 0)
-    scroll_offset = scroll_offset(selected_index(rows), content_rows)
+    {status, rows, visible_count} = visible_rows_for_input(input, content_rows)
 
     render_opts = %{
       col_off: col_off,
@@ -162,11 +155,9 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     }
 
     entry_commands =
-      render_content_rows(status, rows, scroll_offset, content_rows, row_off + 1, render_opts)
+      render_content_rows(status, rows, content_rows, row_off + 1, render_opts)
 
     # Fill remaining rows with blanks
-    visible_count = visible_content_count(status, rows, scroll_offset, content_rows)
-
     blank_commands =
       render_blanks(visible_count, content_rows, row_off + 1, col_off, width, theme)
 
@@ -181,22 +172,142 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
   defp status_from_file_tree(%FileTreeState{} = file_tree), do: FileTreeState.status(file_tree)
   defp status_from_file_tree(_file_tree), do: :ready
 
-  @spec effective_status(FileTreeState.tree_status(), [Row.t()]) :: FileTreeState.tree_status()
+  @spec active_buffer_path(EditorState.t() | map()) :: String.t() | nil
+  defp active_buffer_path(%{workspace: %{buffers: %{active: nil}}}), do: nil
+
+  defp active_buffer_path(%{workspace: %{buffers: %{active: buf}}}) do
+    case Buffer.file_path(buf) do
+      nil -> nil
+      path -> Path.expand(path)
+    end
+  catch
+    :exit, _ -> nil
+  end
+
+  defp active_buffer_path(_state), do: nil
+
+  defp dirty_paths(%{workspace: %{buffers: %{list: buffer_list}}}) do
+    buffer_list
+    |> Enum.flat_map(&dirty_buffer_path/1)
+    |> Enum.map(&Path.expand/1)
+    |> MapSet.new()
+  end
+
+  defp dirty_paths(_state), do: MapSet.new()
+
+  @spec dirty_buffer_path(pid()) :: [String.t()]
+  defp dirty_buffer_path(pid) when is_pid(pid) do
+    if Buffer.dirty?(pid), do: present_path(Buffer.file_path(pid)), else: []
+  catch
+    :exit, _ -> []
+  end
+
+  @spec present_path(String.t() | nil) :: [String.t()]
+  defp present_path(nil), do: []
+  defp present_path(path), do: [path]
+
+  @spec effective_status(FileTreeState.tree_status(), list()) :: FileTreeState.tree_status()
   defp effective_status(:ready, []), do: :empty
   defp effective_status(status, _rows), do: status
+
+  @spec visible_rows_for_input(RenderInput.t(), non_neg_integer()) ::
+          {FileTreeState.tree_status(), [Row.t()], non_neg_integer()}
+  defp visible_rows_for_input(%RenderInput{rows: rows, status: status}, content_rows)
+       when is_list(rows) do
+    status = effective_status(status, rows)
+    visible_rows = visible_rows(status, rows, content_rows)
+    {status, visible_rows, length(visible_rows)}
+  end
+
+  defp visible_rows_for_input(%RenderInput{} = input, content_rows) do
+    entries = FileTree.visible_entries(input.tree)
+    status = effective_status(input.status, entries)
+    visible_entries = visible_entries(status, entries, input.tree.cursor, content_rows)
+
+    rows =
+      Rows.from_entries(visible_entries, input.tree,
+        active_path: input.active_path,
+        dirty_paths: input.dirty_paths,
+        editing: input.editing,
+        focused: input.focused,
+        git_status: input.git_status,
+        selected_index: input.tree.cursor
+      )
+
+    {status, rows, visible_count(status, rows, content_rows)}
+  end
+
+  @spec visible_count(FileTreeState.tree_status(), [Row.t()], non_neg_integer()) ::
+          non_neg_integer()
+  defp visible_count(:ready, rows, _content_rows), do: length(rows)
+
+  defp visible_count(status, _rows, content_rows) do
+    status |> state_lines() |> Enum.take(content_rows) |> length()
+  end
+
+  @spec visible_rows(FileTreeState.tree_status(), [Row.t()], non_neg_integer()) :: [Row.t()]
+  defp visible_rows(:ready, _rows, 0), do: []
+
+  defp visible_rows(:ready, rows, content_rows) do
+    rows
+    |> selected_index()
+    |> visible_range(content_rows)
+    |> then(&Enum.slice(rows, &1))
+  end
+
+  defp visible_rows(status, _rows, content_rows) do
+    status
+    |> state_lines()
+    |> Enum.take(content_rows)
+    |> Enum.with_index()
+    |> Enum.map(fn {line, index} ->
+      Row.new(
+        id: "state:#{index}",
+        path: "",
+        name: line,
+        directory?: false,
+        expanded?: false,
+        depth: 0,
+        guides: [],
+        last_child?: true
+      )
+    end)
+  end
+
+  @spec visible_entries(
+          FileTreeState.tree_status(),
+          [FileTree.entry()],
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
+          [Rows.indexed_entry()]
+  defp visible_entries(:ready, _entries, _cursor, 0), do: []
+
+  defp visible_entries(:ready, entries, cursor, content_rows) do
+    range = visible_range(cursor, content_rows)
+
+    entries
+    |> Enum.slice(range)
+    |> Enum.with_index(range.first)
+  end
+
+  defp visible_entries(_status, _entries, _cursor, _content_rows), do: []
+
+  @spec visible_range(non_neg_integer(), non_neg_integer()) :: Range.t()
+  defp visible_range(cursor, content_rows) do
+    offset = scroll_offset(cursor, content_rows)
+    offset..(offset + content_rows - 1)//1
+  end
 
   @spec render_content_rows(
           FileTreeState.tree_status(),
           [Row.t()],
           non_neg_integer(),
           non_neg_integer(),
-          non_neg_integer(),
           map()
         ) :: [DisplayList.draw()]
-  defp render_content_rows(:ready, rows, scroll_offset, content_rows, first_row, opts) do
+  defp render_content_rows(:ready, rows, _content_rows, first_row, opts) do
     rows
-    |> Enum.drop(scroll_offset)
-    |> Enum.take(content_rows)
     |> Enum.with_index()
     |> Enum.flat_map(fn {tree_row, screen_row} ->
       row = first_row + screen_row
@@ -209,7 +320,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     end)
   end
 
-  defp render_content_rows(status, _rows, _scroll_offset, content_rows, first_row, opts) do
+  defp render_content_rows(status, _rows, content_rows, first_row, opts) do
     status
     |> state_lines()
     |> Enum.take(content_rows)
@@ -217,20 +328,6 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     |> Enum.map(fn {line, screen_row} ->
       render_state_line(line, first_row + screen_row, opts)
     end)
-  end
-
-  @spec visible_content_count(
-          FileTreeState.tree_status(),
-          [Row.t()],
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: non_neg_integer()
-  defp visible_content_count(:ready, rows, scroll_offset, content_rows) do
-    rows |> Enum.drop(scroll_offset) |> Enum.take(content_rows) |> length()
-  end
-
-  defp visible_content_count(status, _rows, _scroll_offset, content_rows) do
-    status |> state_lines() |> Enum.take(content_rows) |> length()
   end
 
   @spec state_lines(FileTreeState.tree_status()) :: [String.t()]

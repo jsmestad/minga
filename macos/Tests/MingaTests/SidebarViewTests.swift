@@ -374,6 +374,16 @@ struct FileTreeRowViewTests {
         #expect(row.accessibilityLabelText == "File: editor.ex, 1 warning, unsaved changes, git conflict")
     }
 
+    @Test("Accessibility values expose selected current expanded and focused state")
+    @MainActor func accessibilityValuesExposeSelectionAndTreeState() throws {
+        let currentFile = fileTreeRowView(entry: sidebarFileTreeEntry(id: 1, index: 0, isSelected: true, isFocused: true, isActive: true, icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"))
+        #expect(currentFile.accessibilityValueText == "selected, current file, keyboard focus")
+        #expect(currentFile.accessibilityTraits.contains(.isSelected))
+
+        let folder = fileTreeRowView(entry: sidebarFileTreeEntry(id: 2, index: 1, isDir: true, isExpanded: true, icon: "\u{F0256}", name: "lib", relPath: "lib"))
+        #expect(folder.accessibilityValueText == "expanded")
+    }
+
     @Test("Diagnostic info and hint severities render distinct markers")
     @MainActor func diagnosticInfoAndHintSeveritiesRenderDistinctMarkers() throws {
         let info = fileTreeRowView(entry: sidebarFileTreeEntry(id: 1, index: 0, diagnosticInfoCount: 1, icon: "\u{E62D}", name: "info.ex", relPath: "info.ex"))
