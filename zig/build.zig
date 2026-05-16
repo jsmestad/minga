@@ -63,7 +63,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "go", .has_scanner = false },
         .{ .name = "rust", .has_scanner = true },
         .{ .name = "zig", .has_scanner = false },
-        .{ .name = "erlang", .has_scanner = false },
+        .{ .name = "erlang", .has_scanner = true },
         .{ .name = "bash", .has_scanner = true },
         .{ .name = "c", .has_scanner = false },
         .{ .name = "cpp", .has_scanner = true },

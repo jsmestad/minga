@@ -1,4 +1,11 @@
 ; CREDITS @stumash (stuart.mashaal@gmail.com)
+
+(field_expression field: (identifier) @property)
+(field_expression value: (identifier) @type
+ (#match? @type "^[A-Z]"))
+
+(type_identifier) @type
+
 (class_definition
   name: (identifier) @type)
 
@@ -17,26 +24,23 @@
 (simple_enum_case
   name: (identifier) @type)
 
-; variables
+;; variables
+
 (class_parameter
-  name: (identifier) @variable.parameter)
+  name: (identifier) @parameter)
 
-(self_type
-  (identifier) @variable.parameter)
+(self_type (identifier) @parameter)
 
-(interpolation
-  (identifier))
+(interpolation (identifier) @none)
+(interpolation (block) @none)
 
-(interpolation
-  (block))
+;; types
 
-; types
 (type_definition
   name: (type_identifier) @type.definition)
 
-(type_identifier) @type
+;; val/var definitions/declarations
 
-; val/var definitions/declarations
 (val_definition
   pattern: (identifier) @variable)
 
@@ -49,47 +53,28 @@
 (var_declaration
   name: (identifier) @variable)
 
-; method definition
-(function_declaration
-  name: (identifier) @function.method)
-
-(function_definition
-  name: (identifier) @function.method)
-
 ; imports/exports
-(import_declaration
-  path: (identifier) @module)
 
-(stable_identifier
-  (identifier) @module)
+(import_declaration
+  path: (identifier) @namespace)
+((stable_identifier (identifier) @namespace))
 
 ((import_declaration
-  path: (identifier) @type)
-  (#match? @type "^[A-Z]"))
-
-((stable_identifier
-  (identifier) @type)
-  (#match? @type "^[A-Z]"))
+  path: (identifier) @type) (#match? @type "^[A-Z]"))
+((stable_identifier (identifier) @type) (#match? @type "^[A-Z]"))
 
 (export_declaration
-  path: (identifier) @module)
-
-(stable_identifier
-  (identifier) @module)
+  path: (identifier) @namespace)
+((stable_identifier (identifier) @namespace))
 
 ((export_declaration
-  path: (identifier) @type)
-  (#match? @type "^[A-Z]"))
+  path: (identifier) @type) (#match? @type "^[A-Z]"))
+((stable_identifier (identifier) @type) (#match? @type "^[A-Z]"))
 
-((stable_identifier
-  (identifier) @type)
-  (#match? @type "^[A-Z]"))
-
-((namespace_selectors
-  (identifier) @type)
-  (#match? @type "^[A-Z]"))
+((namespace_selectors (identifier) @type) (#match? @type "^[A-Z]"))
 
 ; method invocation
+
 (call_expression
   function: (identifier) @function.call)
 
@@ -98,11 +83,11 @@
 
 (call_expression
   function: (field_expression
-    field: (identifier) @function.method.call))
+    field: (identifier) @method.call))
 
 ((call_expression
-  function: (identifier) @constructor)
-  (#match? @constructor "^[A-Z]"))
+   function: (identifier) @constructor)
+ (#match? @constructor "^[A-Z]"))
 
 (generic_function
   function: (identifier) @function.call)
@@ -111,73 +96,66 @@
   interpolator: (identifier) @function.call)
 
 ; function definitions
+
 (function_definition
   name: (identifier) @function)
 
 (parameter
-  name: (identifier) @variable.parameter)
+  name: (identifier) @parameter)
 
 (binding
-  name: (identifier) @variable.parameter)
+  name: (identifier) @parameter)
 
-(lambda_expression
-  parameters: (identifier) @variable.parameter)
+; method definition
+
+(function_declaration
+      name: (identifier) @method)
+
+(function_definition
+      name: (identifier) @method)
 
 ; expressions
-(field_expression
-  field: (identifier) @variable.member)
 
-(field_expression
-  value: (identifier) @type
-  (#match? @type "^[A-Z]"))
-
-(infix_expression
-  operator: (identifier) @operator)
-
-(infix_expression
-  operator: (operator_identifier) @operator)
-
-(infix_type
-  operator: (operator_identifier) @operator)
-
-(infix_type
-  operator: (operator_identifier) @operator)
+(infix_expression operator: (identifier) @operator)
+(infix_expression operator: (operator_identifier) @operator)
+(infix_type operator: (operator_identifier) @operator)
+(infix_type operator: (operator_identifier) @operator)
 
 ; literals
+
 (boolean_literal) @boolean
-
 (integer_literal) @number
-
-(floating_point_literal) @number.float
+(floating_point_literal) @float
 
 [
   (string)
+  (character_literal)
   (interpolated_string_expression)
 ] @string
 
-(character_literal) @character
+(interpolation "$" @punctuation.special)
 
-(interpolation
-  "$" @punctuation.special)
+;; keywords
 
-; keywords
-(opaque_modifier) @keyword.modifier
-
+(opaque_modifier) @type.qualifier
 (infix_modifier) @keyword
-
-(transparent_modifier) @keyword.modifier
-
-(open_modifier) @keyword.modifier
+(transparent_modifier) @type.qualifier
+(open_modifier) @type.qualifier
 
 [
   "case"
+  "class"
+  "enum"
   "extends"
   "derives"
   "finally"
-  ; `forSome` existential types not implemented yet
-  ; `macro` not implemented yet
+;; `forSome` existential types not implemented yet
+;; `macro` not implemented yet
   "object"
   "override"
+  "package"
+  "trait"
+  "type"
   "val"
   "var"
   "with"
@@ -186,14 +164,8 @@
   "end"
   "implicit"
   "extension"
+  "with"
 ] @keyword
-
-[
-  "enum"
-  "class"
-  "trait"
-  "type"
-] @keyword.type
 
 [
   "abstract"
@@ -202,24 +174,18 @@
   "sealed"
   "private"
   "protected"
-] @keyword.modifier
+] @type.qualifier
 
-(inline_modifier) @keyword.modifier
+(inline_modifier) @storageclass
 
 (null_literal) @constant.builtin
 
-(wildcard
-  "_") @character.special
-
-(namespace_wildcard
-  [
-    "*"
-    "_"
-  ] @character.special)
+(wildcard) @parameter
 
 (annotation) @attribute
 
-; special keywords
+;; special keywords
+
 "new" @keyword.operator
 
 [
@@ -227,21 +193,20 @@
   "if"
   "match"
   "then"
-] @keyword.conditional
+] @conditional
 
 [
-  "("
-  ")"
-  "["
-  "]"
-  "{"
-  "}"
-] @punctuation.bracket
+ "("
+ ")"
+ "["
+ "]"
+ "{"
+ "}"
+]  @punctuation.bracket
 
 [
-  "."
-  ","
-  ":"
+ "."
+ ","
 ] @punctuation.delimiter
 
 [
@@ -249,62 +214,47 @@
   "for"
   "while"
   "yield"
-] @keyword.repeat
+] @repeat
 
 "def" @keyword.function
 
 [
-  "=>"
-  "?=>"
-  "="
-  "!"
-  "<-"
-  "@"
+ "=>"
+ "<-"
+ "@"
 ] @operator
 
-[
-  "import"
-  "export"
-  "package"
-] @keyword.import
+["import" "export"] @include
 
 [
   "try"
   "catch"
   "throw"
-] @keyword.exception
+] @exception
 
 "return" @keyword.return
 
-[
-  (comment)
-  (block_comment)
-] @comment
+(comment) @spell @comment
+(block_comment) @spell @comment
 
-((block_comment) @comment.documentation
-  (#match? @comment.documentation "^/[*][*][^*].*[*]/$"))
-
-; `case` is a conditional keyword in case_block
-(case_block
-  (case_clause
-    "case" @keyword.conditional))
+;; `case` is a conditional keyword in case_block
 
 (case_block
-  (case_clause
-    "=>" @punctuation.delimiter))
+  (case_clause ("case") @conditional))
+(indented_cases
+  (case_clause ("case") @conditional))
 
 (operator_identifier) @operator
 
-((identifier) @type
-  (#match? @type "^[A-Z]"))
-
+((identifier) @type (#match? @type "^[A-Z]"))
 ((identifier) @variable.builtin
-  (#match? @variable.builtin "^this$"))
+ (#match? @variable.builtin "^this$"))
 
-((identifier) @function.builtin
-  (#match? @function.builtin "^super$"))
+(
+  (identifier) @function.builtin
+  (#match? @function.builtin "^super$")
+)
 
-; Scala CLI using directives
-(using_directive_key) @variable.parameter
-
+;; Scala CLI using directives
+(using_directive_key) @parameter
 (using_directive_value) @string
