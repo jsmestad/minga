@@ -902,7 +902,7 @@ defmodule MingaEditor.State do
       end
 
     prev_workspace = state.workspace
-    state = put_in(state.workspace.buffers, new_bs)
+    state = update_workspace(state, &WorkspaceState.set_buffers(&1, new_bs))
 
     # Dispatch to the active shell for presentation logic
     {shell_state, workspace, shell_effects} =

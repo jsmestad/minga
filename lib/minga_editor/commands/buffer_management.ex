@@ -22,6 +22,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Windows
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
@@ -30,6 +31,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   alias Minga.Mode.ToolConfirmState
   alias Minga.Tool.Recipe.Registry, as: RecipeRegistry
   alias MingaEditor.UI.Popup.Lifecycle, as: PopupLifecycle
+  alias MingaEditor.Workspace.State, as: WorkspaceState
 
   @type state :: EditorState.t()
 
@@ -885,14 +887,10 @@ defmodule MingaEditor.Commands.BufferManagement do
 
         _ ->
           new_idx = min(idx, Enum.count(new_buffers) - 1)
-          new_active = Enum.at(new_buffers, new_idx)
+          new_bs = Buffers.replace_list(bs, new_buffers, new_idx)
 
-          put_in(state.workspace.buffers, %{
-            bs
-            | list: new_buffers,
-              active_index: new_idx,
-              active: new_active
-          })
+          state
+          |> EditorState.update_workspace(&WorkspaceState.set_buffers(&1, new_bs))
           |> EditorState.sync_active_window_buffer()
       end
     end
@@ -1117,7 +1115,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp close_agent_tab(%{shell_state: %{tab_bar: %TabBar{}}} = state) do
     state
     |> cleanup_agent_session()
-    |> then(fn s -> put_in(s.workspace.keymap_scope, :editor) end)
+    |> EditorState.update_workspace(&WorkspaceState.set_keymap_scope(&1, :editor))
     |> remove_current_tab()
     |> restore_active_tab_context()
   end
@@ -1640,13 +1638,9 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp focus_popup_window(state, buffer_pid) do
     case find_popup_for_buffer(state, buffer_pid) do
       {:ok, popup_window_id} ->
-        %{
-          state
-          | workspace: %{
-              state.workspace
-              | windows: %{state.workspace.windows | active: popup_window_id}
-            }
-        }
+        EditorState.update_workspace(state, fn ws ->
+          WorkspaceState.set_windows(ws, Windows.set_active(ws.windows, popup_window_id))
+        end)
 
       :none ->
         state
@@ -1686,23 +1680,17 @@ defmodule MingaEditor.Commands.BufferManagement do
            {Minga.Buffer, content: "", buffer_name: "[new 1]"}
          ) do
       {:ok, new_buf} ->
-        %{
-          state
-          | workspace: %{
-              state.workspace
-              | buffers: %{bs | list: [new_buf], active_index: 0, active: new_buf}
-            }
-        }
+        state
+        |> EditorState.update_workspace(
+          &WorkspaceState.set_buffers(&1, Buffers.replace_list(bs, [new_buf], 0))
+        )
         |> EditorState.sync_active_window_buffer()
 
       {:error, _} ->
-        %{
-          state
-          | workspace: %{
-              state.workspace
-              | buffers: %{bs | list: [], active_index: 0, active: nil}
-            }
-        }
+        EditorState.update_workspace(
+          state,
+          &WorkspaceState.set_buffers(&1, Buffers.replace_list(bs, [], 0))
+        )
     end
   end
 
@@ -2164,7 +2152,7 @@ defmodule MingaEditor.Commands.BufferManagement do
         {updated_vim, updated_state}
       end)
 
-    put_in(final_state.workspace.editing, final_vim)
+    EditorState.update_workspace(final_state, &WorkspaceState.set_editing(&1, final_vim))
   end
 
   @spec string_to_key_tuple(String.t()) :: Minga.Mode.key()

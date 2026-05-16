@@ -27,6 +27,7 @@ defmodule MingaEditor.LayoutPreset do
   """
 
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Windows
   alias MingaEditor.Window
   alias MingaEditor.Workspace.State, as: WorkspaceState
   alias MingaEditor.Window.Content
@@ -72,7 +73,12 @@ defmodule MingaEditor.LayoutPreset do
     case WindowTree.close(state.workspace.windows.tree, agent_win_id) do
       {:ok, new_tree} ->
         map = Map.delete(state.workspace.windows.map, agent_win_id)
-        windows = %{state.workspace.windows | tree: new_tree, map: map}
+
+        windows =
+          state.workspace.windows
+          |> Windows.set_tree(new_tree)
+          |> Windows.set_map(map)
+
         state = EditorState.update_workspace(state, &WorkspaceState.set_windows(&1, windows))
 
         # If we were in agent scope, return to editor scope since the
@@ -89,26 +95,23 @@ defmodule MingaEditor.LayoutPreset do
   end
 
   @spec maybe_switch_focus_away(EditorState.t(), Window.id()) :: EditorState.t()
-  defp maybe_switch_focus_away(state, closing_id) do
-    if state.workspace.windows.active == closing_id do
-      case find_non_agent_window(state) do
-        {buf_win_id, window} ->
-          scope = EditorState.scope_for_content(window.content, state.workspace.keymap_scope)
+  defp maybe_switch_focus_away(%{workspace: %{windows: %{active: active}}} = state, closing_id)
+       when active != closing_id,
+       do: state
 
-          %{
-            state
-            | workspace: %{
-                state.workspace
-                | windows: %{state.workspace.windows | active: buf_win_id},
-                  keymap_scope: scope
-              }
-          }
+  defp maybe_switch_focus_away(state, _closing_id) do
+    case find_non_agent_window(state) do
+      {buf_win_id, window} ->
+        scope = EditorState.scope_for_content(window.content, state.workspace.keymap_scope)
 
-        nil ->
-          state
-      end
-    else
-      state
+        EditorState.update_workspace(state, fn ws ->
+          ws
+          |> WorkspaceState.set_windows(Windows.set_active(ws.windows, buf_win_id))
+          |> WorkspaceState.set_keymap_scope(scope)
+        end)
+
+      nil ->
+        state
     end
   end
 
@@ -141,12 +144,11 @@ defmodule MingaEditor.LayoutPreset do
         {:ok, new_tree} ->
           new_map = Map.put(state.workspace.windows.map, next_id, agent_window)
 
-          windows = %{
+          windows =
             state.workspace.windows
-            | tree: new_tree,
-              map: new_map,
-              next_id: next_id + 1
-          }
+            |> Windows.set_tree(new_tree)
+            |> Windows.set_map(new_map)
+            |> Windows.set_next_id(next_id + 1)
 
           EditorState.update_workspace(state, &WorkspaceState.set_windows(&1, windows))
 

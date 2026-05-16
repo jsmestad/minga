@@ -39,6 +39,18 @@ defmodule MingaEditor.State.Windows do
     %{windows | tree: tree}
   end
 
+  @doc "Sets the active window id."
+  @spec set_active(t(), Window.id()) :: t()
+  def set_active(%__MODULE__{} = windows, id), do: %{windows | active: id}
+
+  @doc "Replaces the window map."
+  @spec set_map(t(), %{Window.id() => Window.t()}) :: t()
+  def set_map(%__MODULE__{} = windows, map) when is_map(map), do: %{windows | map: map}
+
+  @doc "Sets the next available window id."
+  @spec set_next_id(t(), Window.id()) :: t()
+  def set_next_id(%__MODULE__{} = windows, id), do: %{windows | next_id: id}
+
   @doc """
   Updates the window struct for the given window id.
 

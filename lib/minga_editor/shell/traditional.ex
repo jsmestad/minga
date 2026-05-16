@@ -527,7 +527,11 @@ defmodule MingaEditor.Shell.Traditional do
     {tb, new_tab} = TabBar.add(tb, :file, label)
 
     # Leave agent UI view: reset to editor scope and window content type
-    workspace = %{workspace | agent_ui: UIState.new(), keymap_scope: :editor}
+    workspace =
+      workspace
+      |> WorkspaceState.set_agent_ui(UIState.new())
+      |> WorkspaceState.set_keymap_scope(:editor)
+
     workspace = reset_active_window_to_buffer(workspace)
     workspace = WorkspaceState.sync_active_window_buffer(workspace)
 
@@ -587,7 +591,10 @@ defmodule MingaEditor.Shell.Traditional do
             content: Content.buffer(buffers.active)
         }
 
-        %{workspace | windows: %{workspace.windows | map: Map.put(map, id, updated)}}
+        WorkspaceState.set_windows(
+          workspace,
+          Windows.set_map(workspace.windows, Map.put(map, id, updated))
+        )
 
       nil ->
         workspace

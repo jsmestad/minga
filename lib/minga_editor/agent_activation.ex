@@ -16,6 +16,8 @@ defmodule MingaEditor.AgentActivation do
   alias MingaAgent.Session, as: AgentSession
   alias MingaEditor.Agent.UIState
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Windows
+  alias MingaEditor.Workspace.State, as: WorkspaceState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.Window.Content
@@ -96,7 +98,7 @@ defmodule MingaEditor.AgentActivation do
 
   @spec set_agent_scope(EditorState.t()) :: EditorState.t()
   defp set_agent_scope(state) do
-    put_in(state.workspace.keymap_scope, :agent)
+    EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :agent))
   end
 
   @spec set_agent_chat_window_content(EditorState.t(), pid()) :: EditorState.t()
@@ -107,7 +109,10 @@ defmodule MingaEditor.AgentActivation do
     if active_win do
       updated_win = %{active_win | content: Content.agent_chat(session)}
       new_map = Map.put(state.workspace.windows.map, active_id, updated_win)
-      put_in(state.workspace.windows.map, new_map)
+
+      EditorState.update_workspace(state, fn ws ->
+        WorkspaceState.set_windows(ws, Windows.set_map(ws.windows, new_map))
+      end)
     else
       state
     end
@@ -129,7 +134,7 @@ defmodule MingaEditor.AgentActivation do
 
   @spec reset_scope(EditorState.t()) :: EditorState.t()
   defp reset_scope(state) do
-    put_in(state.workspace.keymap_scope, :editor)
+    EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :editor))
   end
 
   @spec unfocus_prompt(EditorState.t()) :: EditorState.t()

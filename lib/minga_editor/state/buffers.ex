@@ -114,4 +114,23 @@ defmodule MingaEditor.State.Buffers do
         help: help
     }
   end
+
+  @doc "Sets the help buffer pid."
+  @spec set_help(t(), pid() | nil) :: t()
+  def set_help(%__MODULE__{} = bs, pid), do: %{bs | help: pid}
+
+  @doc "Sets the messages buffer pid."
+  @spec set_messages(t(), pid() | nil) :: t()
+  def set_messages(%__MODULE__{} = bs, pid), do: %{bs | messages: pid}
+
+  @doc "Overrides the active buffer pid without updating the index. Use for temporary buffer swaps where the pid is not in the buffer list."
+  @spec set_active_override(t(), pid() | nil) :: t()
+  def set_active_override(%__MODULE__{} = bs, pid), do: %{bs | active: pid}
+
+  @doc "Replaces the buffer list and selects the buffer at the given index."
+  @spec replace_list(t(), [pid()], non_neg_integer()) :: t()
+  def replace_list(%__MODULE__{} = bs, list, idx) when is_list(list) and is_integer(idx) do
+    active = Enum.at(list, idx)
+    %{bs | list: list, active_index: idx, active: active}
+  end
 end

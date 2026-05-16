@@ -27,4 +27,16 @@ defmodule MingaEditor.State.Search do
   def record_pattern(%__MODULE__{} = s, pattern) do
     %{s | last_pattern: pattern}
   end
+
+  @doc "Sets just the last search direction."
+  @spec set_last_direction(t(), Minga.Editing.Search.direction()) :: t()
+  def set_last_direction(%__MODULE__{} = s, direction) do
+    %{s | last_direction: direction}
+  end
+
+  @doc "Replaces the cached project search results."
+  @spec set_project_results(t(), [Minga.Project.ProjectSearch.match()]) :: t()
+  def set_project_results(%__MODULE__{} = s, results) when is_list(results) do
+    %{s | project_results: results}
+  end
 end

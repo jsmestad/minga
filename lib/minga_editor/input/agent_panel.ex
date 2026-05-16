@@ -24,6 +24,8 @@ defmodule MingaEditor.Input.AgentPanel do
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.LayoutPreset
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Buffers
+  alias MingaEditor.Workspace.State, as: WorkspaceState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.Input
   alias MingaEditor.Input.AgentNav
@@ -146,6 +148,13 @@ defmodule MingaEditor.Input.AgentPanel do
   # bindings. Printable chars and @-mention fall through to
   # handle_panel_self_insert above.
 
+  @spec set_active_buffer_override(EditorState.t(), pid() | nil) :: EditorState.t()
+  defp set_active_buffer_override(state, pid) do
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.set_buffers(ws, Buffers.set_active_override(ws.buffers, pid))
+    end)
+  end
+
   # ── Panel navigation mode ──────────────────────────────────────────────
 
   @spec handle_panel_nav(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
@@ -217,13 +226,13 @@ defmodule MingaEditor.Input.AgentPanel do
     if is_pid(prompt_pid) do
       try do
         real_active = state.workspace.buffers.active
-        state = put_in(state.workspace.buffers.active, prompt_pid)
+        state = set_active_buffer_override(state, prompt_pid)
         state = MingaEditor.do_handle_key(state, cp, mods)
 
         # Only restore if a command didn't legitimately change buffers.active.
         # Same guard as AgentNav.delegate_to_mode_fsm/4.
         if state.workspace.buffers.active == prompt_pid do
-          put_in(state.workspace.buffers.active, real_active)
+          set_active_buffer_override(state, real_active)
         else
           state
         end

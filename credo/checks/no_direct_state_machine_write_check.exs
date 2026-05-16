@@ -77,10 +77,13 @@ defmodule Minga.Credo.NoDirectStateMachineWriteCheck do
       []
     else
       gated_fields = Params.get(params, :gated_fields, __MODULE__)
+      guarded_struct_fields = Params.get(params, :guarded_struct_fields, __MODULE__)
       issue_meta = IssueMeta.for(source_file, params)
 
       source_file
-      |> Credo.Code.prewalk(&find_direct_writes(&1, &2, issue_meta, gated_fields))
+      |> Credo.Code.prewalk(
+        &find_direct_writes(&1, &2, issue_meta, gated_fields, guarded_struct_fields)
+      )
       |> List.flatten()
     end
   end
@@ -90,41 +93,122 @@ defmodule Minga.Credo.NoDirectStateMachineWriteCheck do
   #   {:%{}, meta, [{:|, _, [map, [key: val]]}]}
   # We look for gated field names in the keyword list after the pipe.
   defp find_direct_writes(
-         {:%{}, _meta, [{:|, _, [_map, updates]}]} = ast,
+         {:%{}, _meta, [{:|, _, [map, updates]}]} = ast,
          issues,
          issue_meta,
-         gated_fields
+         gated_fields,
+         guarded_struct_fields
        )
        when is_list(updates) do
     new_issues =
-      updates
-      |> Enum.filter(fn
-        {field, _value} when is_atom(field) -> field in gated_fields
-        _ -> false
-      end)
-      |> Enum.map(fn {field, value} ->
-        line_no = extract_line(value) || extract_line(ast)
-
-        format_issue(issue_meta,
-          message:
-            "Direct write to `#{field}:` bypasses the state machine gate function. " <>
-              "Use EditorState.transition_mode/3 or VimState.transition/3 instead.",
-          trigger: "#{field}:",
-          line_no: line_no
-        )
-      end)
-      |> Enum.reject(&is_nil/1)
+      direct_gated_field_issues(ast, updates, issue_meta, gated_fields) ++
+        guarded_map_update_issues(ast, map, updates, issue_meta, guarded_struct_fields)
 
     {ast, new_issues ++ issues}
   end
 
-  # Also catch nested map updates where the value itself is a map update
-  # containing the gated field. E.g.:
-  #   %{state | vim: %{state.vim | mode: :normal}}
-  # The outer update has `vim:` whose value is another map update with `mode:`.
-  defp find_direct_writes(ast, issues, _issue_meta, _gated_fields) do
+  defp find_direct_writes(
+         {:put_in, meta, [path_ast, _value]} = ast,
+         issues,
+         issue_meta,
+         _gated_fields,
+         guarded_struct_fields
+       ) do
+    new_issues =
+      case guarded_path_match(extract_dot_path(path_ast), guarded_struct_fields) do
+        nil ->
+          []
+
+        {parent, child} ->
+          [
+            format_issue(issue_meta,
+              message:
+                "Direct put_in through `#{parent}.#{child}` bypasses the owning state module. " <>
+                  "Use the appropriate WorkspaceState and sub-state setter instead.",
+              trigger: "put_in",
+              line_no: meta[:line] || extract_line(ast)
+            )
+          ]
+      end
+
+    {ast, new_issues ++ issues}
+  end
+
+  defp find_direct_writes(ast, issues, _issue_meta, _gated_fields, _guarded_struct_fields) do
     {ast, issues}
   end
+
+  @spec direct_gated_field_issues(term(), keyword(), IssueMeta.t(), [atom()]) :: [Credo.Issue.t()]
+  defp direct_gated_field_issues(ast, updates, issue_meta, gated_fields) do
+    updates
+    |> Enum.filter(fn
+      {field, _value} when is_atom(field) -> field in gated_fields
+      _ -> false
+    end)
+    |> Enum.map(fn {field, value} ->
+      line_no = extract_line(value) || extract_line(ast)
+
+      format_issue(issue_meta,
+        message:
+          "Direct write to `#{field}:` bypasses the state machine gate function. " <>
+            "Use EditorState.transition_mode/3 or VimState.transition/3 instead.",
+        trigger: "#{field}:",
+        line_no: line_no
+      )
+    end)
+  end
+
+  @spec guarded_map_update_issues(term(), term(), keyword(), IssueMeta.t(), keyword([atom()])) :: [Credo.Issue.t()]
+  defp guarded_map_update_issues(ast, map, updates, issue_meta, guarded_struct_fields) do
+    map_path = extract_dot_path(map)
+    map_match = guarded_path_match(map_path, guarded_struct_fields)
+
+    updates
+    |> Enum.flat_map(fn
+      {field, value} when is_atom(field) ->
+        update_match = guarded_path_match(map_path ++ [field], guarded_struct_fields)
+        guarded_issue(ast, value, issue_meta, map_match || update_match, field)
+
+      _ ->
+        []
+    end)
+  end
+
+  @spec guarded_issue(term(), term(), IssueMeta.t(), {atom(), atom()} | nil, atom()) :: [Credo.Issue.t()]
+  defp guarded_issue(_ast, _value, _issue_meta, nil, _field), do: []
+
+  defp guarded_issue(ast, value, issue_meta, {parent, child}, field) do
+    [
+      format_issue(issue_meta,
+        message:
+          "Direct write through `#{parent}.#{child}` bypasses the owning state module. " <>
+            "Use the appropriate WorkspaceState and sub-state setter instead.",
+        trigger: "#{field}:",
+        line_no: extract_line(value) || extract_line(ast)
+      )
+    ]
+  end
+
+  defp guarded_path_match(path, guarded_struct_fields) when is_list(path) do
+    guarded_struct_fields
+    |> Enum.find_value(fn {parent, children} ->
+      path
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.find_value(fn
+        [^parent, child] -> if child in children, do: {parent, child}
+        _ -> nil
+      end)
+    end)
+  end
+
+  defp guarded_path_match(_path, _guarded_struct_fields), do: nil
+
+  defp extract_dot_path({{:., _, [left, field]}, _, []}) when is_atom(field) do
+    extract_dot_path(left) ++ [field]
+  end
+
+  defp extract_dot_path({name, _, context}) when is_atom(name) and is_atom(context), do: [name]
+  defp extract_dot_path(_ast), do: []
 
   # Extracts line number from various AST shapes.
   defp extract_line({_, meta, _}) when is_list(meta), do: meta[:line]

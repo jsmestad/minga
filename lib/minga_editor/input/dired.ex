@@ -17,6 +17,8 @@ defmodule MingaEditor.Input.Dired do
 
   alias MingaEditor.Commands
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Dired, as: DiredState
+  alias MingaEditor.Workspace.State, as: WorkspaceState
   alias Minga.Keymap
   alias Minga.Keymap.Scope
 
@@ -127,11 +129,18 @@ defmodule MingaEditor.Input.Dired do
 
   @spec put_pending_prefix(state(), Minga.Keymap.Bindings.node_t()) :: state()
   defp put_pending_prefix(state, node) do
-    put_in(state.workspace.dired.pending_prefix, node)
+    update_pending_prefix(state, node)
   end
 
   @spec clear_pending_prefix(state()) :: state()
   defp clear_pending_prefix(state) do
-    put_in(state.workspace.dired.pending_prefix, nil)
+    update_pending_prefix(state, nil)
+  end
+
+  @spec update_pending_prefix(state(), Minga.Keymap.Bindings.node_t() | nil) :: state()
+  defp update_pending_prefix(state, prefix) do
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.set_dired(ws, DiredState.set_pending_prefix(ws.dired, prefix))
+    end)
   end
 end

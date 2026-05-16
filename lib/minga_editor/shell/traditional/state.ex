@@ -288,4 +288,16 @@ defmodule MingaEditor.Shell.Traditional.State do
       MapSet.member?(ToolManager.installing(), tool_name) or
       tool_name in ss.tool_prompt_queue
   end
+
+  @doc "Sets whether a CUA space leader sequence is pending."
+  @spec set_space_leader_pending(t(), boolean()) :: t()
+  def set_space_leader_pending(%{} = ss, value) when is_boolean(value) do
+    %{ss | space_leader_pending: value}
+  end
+
+  @doc "Sets the CUA space leader timer reference."
+  @spec set_space_leader_timer(t(), reference() | nil) :: t()
+  def set_space_leader_timer(%{} = ss, timer) do
+    %{ss | space_leader_timer: timer}
+  end
 end

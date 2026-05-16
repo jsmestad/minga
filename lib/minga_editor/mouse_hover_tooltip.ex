@@ -11,6 +11,7 @@ defmodule MingaEditor.MouseHoverTooltip do
   alias Minga.Diagnostics
   alias MingaEditor.HoverPopup
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Workspace.State, as: WorkspaceState
   alias Minga.LSP.Client
   alias Minga.LSP.SyncServer
 
@@ -80,43 +81,31 @@ defmodule MingaEditor.MouseHoverTooltip do
           integer()
         ) :: state()
   defp send_hover_request(state, buf, buf_line, buf_col, row, col) do
-    clients = SyncServer.clients_for_buffer(buf)
+    with [client | _] <- SyncServer.clients_for_buffer(buf),
+         path when is_binary(path) <- Buffer.file_path(buf) do
+      uri = SyncServer.path_to_uri(path)
 
-    case clients do
-      [] ->
-        state
+      params = %{
+        "textDocument" => %{"uri" => uri},
+        "position" => %{"line" => buf_line, "character" => buf_col}
+      }
 
-      [client | _] ->
-        file_path = Buffer.file_path(buf)
-
-        case file_path do
-          nil ->
-            state
-
-          path ->
-            uri = SyncServer.path_to_uri(path)
-
-            params = %{
-              "textDocument" => %{"uri" => uri},
-              "position" => %{"line" => buf_line, "character" => buf_col}
-            }
-
-            ref = Client.request(client, "textDocument/hover", params)
-
-            # Store the mouse screen position for the hover popup anchor
-            state =
-              put_in(
-                state.workspace.lsp_pending,
-                Map.put(state.workspace.lsp_pending, ref, {:hover_mouse, row, col})
-              )
-
-            state
-        end
+      ref = Client.request(client, "textDocument/hover", params)
+      put_lsp_pending(state, ref, {:hover_mouse, row, col})
+    else
+      _ -> state
     end
   rescue
     _ -> state
   catch
     :exit, _ -> state
+  end
+
+  @spec put_lsp_pending(state(), reference(), atom() | tuple()) :: state()
+  defp put_lsp_pending(state, ref, kind) do
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.set_lsp_pending(ws, Map.put(ws.lsp_pending, ref, kind))
+    end)
   end
 
   @spec gutter_width(term()) :: non_neg_integer()

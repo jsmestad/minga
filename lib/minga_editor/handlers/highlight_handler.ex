@@ -16,8 +16,10 @@ defmodule MingaEditor.Handlers.HighlightHandler do
   alias MingaEditor.HighlightEvents
   alias MingaEditor.HighlightSync
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Highlighting
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.Window
+  alias MingaEditor.Workspace.State, as: WorkspaceState
   alias Minga.Editing.Fold.Range, as: FoldRange
 
   @typedoc "Effects that the highlight handler may return."
@@ -204,13 +206,10 @@ defmodule MingaEditor.Handlers.HighlightHandler do
   end
 
   defp handle_injection_ranges(state, pid, _buffer_id, ranges) do
-    new_state = %{
-      state
-      | workspace: %{
-          state.workspace
-          | injection_ranges: Map.put(state.workspace.injection_ranges, pid, ranges)
-        }
-    }
+    new_state =
+      EditorState.update_workspace(state, fn ws ->
+        WorkspaceState.set_injection_ranges(ws, Map.put(ws.injection_ranges, pid, ranges))
+      end)
 
     {new_state, []}
   end
@@ -388,14 +387,16 @@ defmodule MingaEditor.Handlers.HighlightHandler do
         {pid, %{buf_hl | version: 0}}
       end)
 
-    new_state = %{
+    new_state =
       state
-      | workspace: %{
-          state.workspace
-          | highlight: %{hl | version: 0, highlights: reset_highlights}
-        },
-        parser_status: :available
-    }
+      |> EditorState.update_workspace(fn ws ->
+        WorkspaceState.update_highlight(ws, fn highlight ->
+          highlight
+          |> Highlighting.set_version(0)
+          |> Highlighting.set_highlights(reset_highlights)
+        end)
+      end)
+      |> Map.put(:parser_status, :available)
 
     {new_state, [{:log_message, "Parser restarted, syntax highlighting recovered"}]}
   end

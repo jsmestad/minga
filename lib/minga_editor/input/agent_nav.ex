@@ -34,6 +34,8 @@ defmodule MingaEditor.Input.AgentNav do
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Buffers
+  alias MingaEditor.Workspace.State, as: WorkspaceState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.Window
 
@@ -122,7 +124,7 @@ defmodule MingaEditor.Input.AgentNav do
         ) :: EditorState.t()
   def delegate_to_mode_fsm(state, chat_buffer, cp, mods) do
     real_active = state.workspace.buffers.active
-    state = put_in(state.workspace.buffers.active, chat_buffer)
+    state = set_active_buffer_override(state, chat_buffer)
 
     state = MingaEditor.do_handle_key(state, cp, mods)
 
@@ -145,10 +147,17 @@ defmodule MingaEditor.Input.AgentNav do
     # Only restore the original active buffer if a command didn't
     # legitimately change it (e.g., leader commands like :new_buffer).
     if state.workspace.buffers.active == chat_buffer do
-      put_in(state.workspace.buffers.active, real_active)
+      set_active_buffer_override(state, real_active)
     else
       state
     end
+  end
+
+  @spec set_active_buffer_override(EditorState.t(), pid() | nil) :: EditorState.t()
+  defp set_active_buffer_override(state, pid) do
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.set_buffers(ws, Buffers.set_active_override(ws.buffers, pid))
+    end)
   end
 
   # ── Private helpers ─────────────────────────────────────────────────────
