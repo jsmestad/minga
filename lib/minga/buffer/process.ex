@@ -26,7 +26,8 @@ defmodule Minga.Buffer.Process do
     Operation,
     Persistence,
     Position,
-    Replace
+    Replace,
+    UndoHistory
   }
 
   alias Minga.Buffer.EditDelta
@@ -245,7 +246,7 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, :force_save, @file_io_call_timeout)
   end
 
-  @doc "Reloads the buffer from disk, preserving cursor position (clamped). Clears undo/redo."
+  @doc "Reloads the buffer from disk, preserving cursor position (clamped). Clears undo/redo history."
   @spec reload(GenServer.server()) :: :ok | {:error, term()}
   def reload(server) do
     GenServer.call(server, :reload, @file_io_call_timeout)
@@ -876,8 +877,7 @@ defmodule Minga.Buffer.Process do
             file_size: size,
             file_hash: Persistence.content_fingerprint(text),
             decorations: Decorations.new(),
-            undo_stack: [],
-            redo_stack: []
+            undo_history: UndoHistory.clear(state.undo_history)
         }
 
         unregister_path(state.file_path)
@@ -1114,8 +1114,7 @@ defmodule Minga.Buffer.Process do
             mtime: new_mtime,
             file_size: new_size,
             file_hash: Persistence.content_fingerprint(text),
-            undo_stack: [],
-            redo_stack: [],
+            undo_history: UndoHistory.clear(state.undo_history),
             decorations: Decorations.new()
         }
 
@@ -1191,8 +1190,7 @@ defmodule Minga.Buffer.Process do
         mtime: mtime,
         file_size: size,
         file_hash: Persistence.content_fingerprint(new_content),
-        undo_stack: [],
-        redo_stack: [],
+        undo_history: UndoHistory.clear(state.undo_history),
         change_log: ChangeLog.clear(state.change_log),
         decorations: Decorations.new()
     }
@@ -1475,79 +1473,62 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call(:undo, _from, state) do
-    case state.undo_stack do
-      [] ->
+    case UndoHistory.undo(state.undo_history, state.version, state.document) do
+      :empty ->
         {:reply, :ok, state}
 
-      [{prev_version, prev_buf, source} | rest_undo] ->
-        redo_entry = {state.version, state.document, source}
-
-        event_source = EditSource.from_undo_source(source)
+      {:ok, restore, undo_history} ->
+        event_source = EditSource.from_undo_source(restore.source)
 
         new_state =
           %{
             state
-            | document: prev_buf,
-              version: prev_version,
-              undo_stack: rest_undo,
-              redo_stack: [redo_entry | state.redo_stack]
+            | document: restore.document,
+              version: restore.version,
+              undo_history: undo_history
           }
           |> sync_dirty()
           |> clear_edits(event_source)
 
-        log_undo_source(:undo, source)
+        log_undo_source(:undo, restore.source)
         {:reply, :ok, new_state}
     end
   end
 
   def handle_call(:redo, _from, state) do
-    case state.redo_stack do
-      [] ->
+    case UndoHistory.redo(state.undo_history, state.version, state.document) do
+      :empty ->
         {:reply, :ok, state}
 
-      [{next_version, next_buf, source} | rest_redo] ->
-        undo_entry = {state.version, state.document, source}
-
-        event_source = EditSource.from_undo_source(source)
+      {:ok, restore, undo_history} ->
+        event_source = EditSource.from_undo_source(restore.source)
 
         new_state =
           %{
             state
-            | document: next_buf,
-              version: next_version,
-              redo_stack: rest_redo,
-              undo_stack: [undo_entry | state.undo_stack]
+            | document: restore.document,
+              version: restore.version,
+              undo_history: undo_history
           }
           |> sync_dirty()
           |> clear_edits(event_source)
 
-        log_undo_source(:redo, source)
+        log_undo_source(:redo, restore.source)
         {:reply, :ok, new_state}
     end
   end
 
   def handle_call(:break_undo_coalescing, _from, state) do
-    {:reply, :ok, BufState.break_undo_coalescing(state)}
+    undo_history = UndoHistory.break_coalescing(state.undo_history)
+    {:reply, :ok, %{state | undo_history: undo_history}}
   end
 
   def handle_call(:last_undo_source, _from, state) do
-    source =
-      case state.undo_stack do
-        [] -> nil
-        [{_version, _doc, source} | _] -> source
-      end
-
-    {:reply, source, state}
+    {:reply, UndoHistory.last_undo_source(state.undo_history), state}
   end
 
   def handle_call(:last_redo_source, _from, state) do
-    source =
-      case state.redo_stack do
-        [] -> nil
-        [{_version, _doc, source} | _] -> source
-      end
-
-    {:reply, source, state}
+    {:reply, UndoHistory.last_redo_source(state.undo_history), state}
   end
 
   # ── Decoration callbacks ──
@@ -1821,15 +1802,21 @@ defmodule Minga.Buffer.Process do
     :exit, _ -> %{}
   end
 
-  # Delegates to BufState for time-based undo coalescing.
   @spec push_undo(state(), Document.t(), BufState.edit_source()) :: state()
-  defp push_undo(state, new_buf, source), do: BufState.push_undo(state, new_buf, source)
+  defp push_undo(state, new_buf, source) do
+    undo_history =
+      UndoHistory.record_edit(state.undo_history, state.version, state.document, source)
 
-  # Force-pushes an undo entry, bypassing coalescing. Used for agent
-  # batch edits and explicit actions like :replace_content.
+    %{state | document: new_buf, undo_history: undo_history}
+  end
+
   @spec push_undo_force(state(), Document.t(), BufState.edit_source()) :: state()
-  defp push_undo_force(state, new_buf, source),
-    do: BufState.push_undo_force(state, new_buf, source)
+  defp push_undo_force(state, new_buf, source) do
+    undo_history =
+      UndoHistory.record_edit_force(state.undo_history, state.version, state.document, source)
+
+    %{state | document: new_buf, undo_history: undo_history}
+  end
 
   # Logs undo/redo source for non-user edits (diagnostic, gated by :log_level_editor).
   @spec log_undo_source(:undo | :redo, BufState.edit_source()) :: :ok

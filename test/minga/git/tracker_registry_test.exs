@@ -20,6 +20,21 @@ defmodule Minga.Git.TrackerRegistryTest do
     name
   end
 
+  defp assert_eventually(fun, attempts \\ 200)
+
+  defp assert_eventually(fun, attempts) when attempts > 0 do
+    if fun.() do
+      :ok
+    else
+      receive do
+      after
+        50 -> assert_eventually(fun, attempts - 1)
+      end
+    end
+  end
+
+  defp assert_eventually(_fun, 0), do: flunk("condition did not become true")
+
   test "tracker starts tracking only for events from its configured registry", %{root: dir} do
     registry_a = start_registry(:tracker_events_a)
     registry_b = start_registry(:tracker_events_b)
@@ -42,7 +57,6 @@ defmodule Minga.Git.TrackerRegistryTest do
     refute Tracker.tracked?(buf, table)
 
     Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: path}, registry_a)
-    _ = :sys.get_state(tracker)
-    assert Tracker.tracked?(buf, table)
+    assert_eventually(fn -> Tracker.tracked?(buf, table) end)
   end
 end

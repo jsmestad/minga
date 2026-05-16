@@ -2,22 +2,17 @@ defmodule Minga.Buffer.State do
   @moduledoc """
   Internal state for the Buffer GenServer.
 
-  Holds the gap buffer, file path, dirty flag, and undo/redo stacks.
-
-  ## Undo coalescing
-
-  Rapid edits (e.g., AI-driven or fast typing) that arrive within
-  `@undo_coalesce_ms` of each other are grouped into a single undo entry.
-  Instead of pushing a new snapshot for every mutation, the top of the undo
-  stack is kept and only the document is replaced. This bounds memory usage
-  under burst editing while preserving correct undo for human-speed edits.
+  Holds the document, file path, dirty flag, and buffer-local runtime state.
   """
 
   alias Minga.Buffer.ChangeLog
   alias Minga.Buffer.Document
+  alias Minga.Buffer.EditSource
+  alias Minga.Buffer.UndoHistory
   alias Minga.Core.Decorations
 
   @default_change_log ChangeLog.new()
+  @default_undo_history UndoHistory.new()
 
   @typedoc """
   Buffer type controlling behavior:
@@ -34,11 +29,7 @@ defmodule Minga.Buffer.State do
   @type storage :: :local | {:remote, node(), String.t()}
 
   @typedoc "The source of an edit for undo/redo attribution."
-  @type edit_source :: :user | :agent | :lsp | :recovery
-
-  @typedoc "An undo/redo stack entry: the document snapshot, version, and edit source."
-  @type stack_entry ::
-          {version :: non_neg_integer(), document :: Document.t(), source :: edit_source()}
+  @type edit_source :: EditSource.undo_source()
 
   @enforce_keys [:document]
   defstruct document: nil,
@@ -52,9 +43,7 @@ defmodule Minga.Buffer.State do
             mtime: nil,
             file_size: nil,
             file_hash: nil,
-            undo_stack: [],
-            redo_stack: [],
-            last_undo_at: 0,
+            undo_history: @default_undo_history,
             name: nil,
             read_only: false,
             unlisted: false,
@@ -82,9 +71,7 @@ defmodule Minga.Buffer.State do
           mtime: integer() | nil,
           file_size: non_neg_integer() | nil,
           file_hash: binary() | nil,
-          undo_stack: [stack_entry()],
-          redo_stack: [stack_entry()],
-          last_undo_at: integer(),
+          undo_history: UndoHistory.t(),
           name: String.t() | nil,
           read_only: boolean(),
           unlisted: boolean(),
@@ -101,17 +88,6 @@ defmodule Minga.Buffer.State do
           events_registry: Minga.Events.registry()
         }
 
-  @max_undo_stack 1000
-
-  @doc """
-  The coalescing window in milliseconds. Edits arriving within this window
-  of the previous undo push are merged into the same undo entry.
-  """
-  @spec undo_coalesce_ms() :: pos_integer()
-  def undo_coalesce_ms, do: 300
-
-  @undo_coalesce_ms 300
-
   @doc "Marks the buffer as having unsaved changes (bumps version)."
   @spec mark_dirty(t()) :: t()
   def mark_dirty(%__MODULE__{} = state) do
@@ -121,7 +97,7 @@ defmodule Minga.Buffer.State do
 
   @doc """
   Sets the dirty flag based on whether the given version matches the saved
-  version. Used by undo/redo which restore a version from the stack rather
+  version. Used by undo/redo which restore a version from history rather
   than incrementing.
   """
   @spec sync_dirty(t()) :: t()
@@ -133,75 +109,5 @@ defmodule Minga.Buffer.State do
   @spec mark_saved(t()) :: t()
   def mark_saved(%__MODULE__{} = state) do
     %{state | dirty: false, saved_version: state.version}
-  end
-
-  @doc """
-  Pushes the current document onto the undo stack and replaces it with
-  `new_buf`. Clears the redo stack. The undo stack is capped at
-  #{@max_undo_stack} entries.
-
-  If the previous undo push happened within #{@undo_coalesce_ms}ms, the
-  new document replaces the current one without pushing another snapshot
-  onto the stack. This coalesces rapid edits (AI, fast typing) into a
-  single undo step while preserving distinct undo entries for edits
-  separated by a pause.
-  """
-  @spec push_undo(t(), Document.t(), edit_source()) :: t()
-  def push_undo(%__MODULE__{} = state, new_buf, source)
-      when source in [:user, :agent, :lsp, :recovery] do
-    now = System.monotonic_time(:millisecond)
-    elapsed = now - state.last_undo_at
-
-    do_push_undo(state, new_buf, source, now, elapsed)
-  end
-
-  # First undo ever, or enough time has passed: push a new entry.
-  @spec do_push_undo(t(), Document.t(), edit_source(), integer(), integer()) :: t()
-  defp do_push_undo(%__MODULE__{} = state, new_buf, source, now, elapsed)
-       when state.last_undo_at == 0 or elapsed >= @undo_coalesce_ms do
-    entry = {state.version, state.document, source}
-
-    new_undo =
-      [entry | state.undo_stack]
-      |> Enum.take(@max_undo_stack)
-
-    %{state | document: new_buf, undo_stack: new_undo, redo_stack: [], last_undo_at: now}
-  end
-
-  # Within the coalescing window: replace document, keep stack as-is.
-  # Source is ignored here; the stack entry was already recorded with the
-  # source from the first edit in this coalescing window.
-  defp do_push_undo(%__MODULE__{} = state, new_buf, _source, now, _elapsed) do
-    %{state | document: new_buf, redo_stack: [], last_undo_at: now}
-  end
-
-  @doc """
-  Pushes an undo entry unconditionally, bypassing time-based coalescing.
-
-  Use this for explicit actions (like `:replace_content`, agent batch edits)
-  where each invocation should always be a separate undo step regardless of
-  timing.
-  """
-  @spec push_undo_force(t(), Document.t(), edit_source()) :: t()
-  def push_undo_force(%__MODULE__{} = state, new_buf, source)
-      when source in [:user, :agent, :lsp, :recovery] do
-    now = System.monotonic_time(:millisecond)
-    entry = {state.version, state.document, source}
-
-    new_undo =
-      [entry | state.undo_stack]
-      |> Enum.take(@max_undo_stack)
-
-    %{state | document: new_buf, undo_stack: new_undo, redo_stack: [], last_undo_at: now}
-  end
-
-  @doc """
-  Resets the coalescing timer so the next `push_undo/2` will always
-  create a new undo entry. Call this at undo boundaries (e.g., mode
-  transitions like leaving insert mode).
-  """
-  @spec break_undo_coalescing(t()) :: t()
-  def break_undo_coalescing(%__MODULE__{} = state) do
-    %{state | last_undo_at: 0}
   end
 end

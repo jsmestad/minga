@@ -744,7 +744,7 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.undo(pid)
       assert BufferProcess.last_redo_source(pid) == :agent
 
-      # Redo pushes it back to undo_stack
+      # Redo pushes it back to undo history
       BufferProcess.redo(pid)
       assert BufferProcess.last_undo_source(pid) == :agent
     end
