@@ -46,7 +46,10 @@ PLAN.md
 .build/
 tmp/
 test/tmp/
-autoresearch.jsonl
-autoresearch.ideas.md
 macos/build/
 macos/DerivedData/
+
+# Agent / experiment scratch files
+.standup/
+CLAUDE.md
+autoresearch.*
