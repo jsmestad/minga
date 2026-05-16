@@ -471,16 +471,20 @@ defmodule MingaEditor.HighlightSync do
 
     # Try incremental sync first: if the buffer has pending edit deltas,
     # send them as an edit_buffer command instead of the full content.
-    edits = Buffer.consume_edit_deltas(state.workspace.buffers.active, :highlight)
-
     commands =
-      if edits != [] do
-        delta_maps = Enum.map(edits, &Map.from_struct/1)
-        [Protocol.encode_edit_buffer(buffer_id, version, delta_maps)]
-      else
-        # No deltas (e.g., undo/redo, content replaced externally): full sync
-        content = Buffer.content(state.workspace.buffers.active)
-        [Protocol.encode_parse_buffer(buffer_id, version, content)]
+      case Buffer.consume_edit_deltas(state.workspace.buffers.active, :highlight) do
+        {:ok, []} ->
+          # No deltas (e.g., undo/redo, content replaced externally): full sync
+          content = Buffer.content(state.workspace.buffers.active)
+          [Protocol.encode_parse_buffer(buffer_id, version, content)]
+
+        {:ok, edits} ->
+          delta_maps = Enum.map(edits, &Map.from_struct/1)
+          [Protocol.encode_edit_buffer(buffer_id, version, delta_maps)]
+
+        :reset_required ->
+          content = Buffer.content(state.workspace.buffers.active)
+          [Protocol.encode_parse_buffer(buffer_id, version, content)]
       end
 
     ParserManager.send_commands(commands)

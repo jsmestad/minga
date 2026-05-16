@@ -18,7 +18,17 @@ defmodule Minga.Buffer.Process do
 
   use GenServer
 
-  alias Minga.Buffer.{Cursor, Document, Lines, Operation, Persistence, Position, Replace}
+  alias Minga.Buffer.{
+    ChangeLog,
+    Cursor,
+    Document,
+    Lines,
+    Operation,
+    Persistence,
+    Position,
+    Replace
+  }
+
   alias Minga.Buffer.EditDelta
   alias Minga.Buffer.EditSource
   alias Minga.Config
@@ -47,6 +57,7 @@ defmodule Minga.Buffer.Process do
 
   @typedoc "Internal state of the buffer server."
   @type state :: BufState.t()
+  @type edit_delta_update :: {:ok, [EditDelta.t()]} | :reset_required
 
   # ── Child Spec ──
 
@@ -323,7 +334,7 @@ defmodule Minga.Buffer.Process do
   Returns and clears pending edit deltas accumulated since the last legacy consumer read.
 
   Deprecated: use `consume_edit_deltas/2` with a consumer_id for per-consumer cursors.
-  This legacy version destructively drains the shared pending_edits list.
+  This legacy version destructively drains the shared pending changes list.
   """
   @deprecated "Use consume_edit_deltas/2 with a consumer_id instead"
   @spec consume_edit_deltas(GenServer.server()) :: [EditDelta.t()]
@@ -335,7 +346,8 @@ defmodule Minga.Buffer.Process do
   Each consumer is identified by an atom (e.g., `:lsp`, `:highlight`).
   The buffer tracks a per-consumer cursor (sequence number). On each call,
   deltas since that cursor are returned and the cursor advances. The buffer
-  trims deltas that all registered consumers have read.
+  trims deltas that all registered consumers have read. Returns `:reset_required`
+  if older retained deltas were compacted before the consumer caught up.
 
   This avoids the data race where two consumers calling `consume_edit_deltas/1`
   would each miss the other's deltas.
@@ -345,7 +357,7 @@ defmodule Minga.Buffer.Process do
   HighlightSync still uses this during the migration period since it runs
   synchronously inside the Editor GenServer before the deferred broadcast fires.
   """
-  @spec consume_edit_deltas(GenServer.server(), atom()) :: [EditDelta.t()]
+  @spec consume_edit_deltas(GenServer.server(), atom()) :: edit_delta_update()
   def consume_edit_deltas(server, consumer_id) do
     GenServer.call(server, {:consume_edit_deltas, consumer_id})
   end
@@ -1158,7 +1170,7 @@ defmodule Minga.Buffer.Process do
       state
       | document: new_buf,
         version: state.version + 1,
-        pending_edits: [],
+        change_log: ChangeLog.clear(state.change_log),
         decorations: Decorations.new()
     }
 
@@ -1181,7 +1193,7 @@ defmodule Minga.Buffer.Process do
         file_hash: Persistence.content_fingerprint(new_content),
         undo_stack: [],
         redo_stack: [],
-        pending_edits: [],
+        change_log: ChangeLog.clear(state.change_log),
         decorations: Decorations.new()
     }
 
@@ -1235,39 +1247,13 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call(:consume_edit_deltas, _from, state) do
-    edits = Enum.reverse(state.pending_edits)
-    {:reply, edits, %{state | pending_edits: []}}
+    {edits, change_log} = ChangeLog.drain_pending_changes(state.change_log)
+    {:reply, edits, %{state | change_log: change_log}}
   end
 
   def handle_call({:consume_edit_deltas, consumer_id}, _from, state) do
-    cursor = Map.get(state.consumer_cursors, consumer_id, 0)
-
-    deltas =
-      state.edit_log
-      |> Enum.filter(fn {seq, _delta} -> seq > cursor end)
-      |> Enum.sort_by(fn {seq, _delta} -> seq end)
-      |> Enum.map(fn {_seq, delta} -> delta end)
-
-    new_cursor = state.edit_seq
-    new_cursors = Map.put(state.consumer_cursors, consumer_id, new_cursor)
-
-    # Trim log entries that all *registered* consumers have read.
-    # When only one consumer is registered, cap the log at @max_single_consumer_log
-    # to prevent unbounded growth if the second consumer never arrives.
-    trimmed_log =
-      if map_size(new_cursors) >= 2 do
-        min_cursor =
-          new_cursors
-          |> Map.values()
-          |> Enum.min()
-
-        Enum.filter(state.edit_log, fn {seq, _} -> seq > min_cursor end)
-      else
-        cap_log(state.edit_log)
-      end
-
-    new_state = %{state | consumer_cursors: new_cursors, edit_log: trimmed_log}
-    {:reply, deltas, new_state}
+    {result, change_log} = ChangeLog.take_unseen_changes(state.change_log, consumer_id)
+    {:reply, result, %{state | change_log: change_log}}
   end
 
   def handle_call(:version, _from, state) do
@@ -1602,7 +1588,7 @@ defmodule Minga.Buffer.Process do
       state
       | document: new_doc,
         version: state.version + 1,
-        pending_edits: [],
+        change_log: ChangeLog.clear(state.change_log),
         decorations: new_decs
     }
 
@@ -2068,14 +2054,7 @@ defmodule Minga.Buffer.Process do
 
   @spec record_edit(state(), EditDelta.t(), EditSource.t()) :: state()
   defp record_edit(state, delta, source) do
-    new_seq = state.edit_seq + 1
-
-    state = %{
-      state
-      | pending_edits: [delta | state.pending_edits],
-        edit_seq: new_seq,
-        edit_log: [{new_seq, delta} | state.edit_log]
-    }
+    state = %{state | change_log: ChangeLog.record_change(state.change_log, delta)}
 
     # Adjust decoration anchors based on the edit
     state =
@@ -2103,21 +2082,8 @@ defmodule Minga.Buffer.Process do
   @spec clear_edits(state(), EditSource.t()) :: state()
   defp clear_edits(state, source) do
     defer_buffer_changed(state, nil, source)
-    %{state | pending_edits: [], edit_log: [], consumer_cursors: %{}}
+    %{state | change_log: ChangeLog.clear(state.change_log)}
   end
-
-  # Maximum edit_log entries retained when only one consumer is registered.
-  # Prevents unbounded growth if the second consumer never calls consume_edit_deltas.
-  # At this limit, older entries are dropped (the lagging consumer will get a
-  # partial log and must fall back to full sync).
-  @max_single_consumer_log 1000
-
-  # Keeps only the most recent @max_single_consumer_log entries.
-  # The edit_log is stored newest-first (prepended in record_edit),
-  # so Enum.take gets the most recent entries. Enum.take is a no-op
-  # when the list is already shorter than the limit.
-  @spec cap_log([{non_neg_integer(), EditDelta.t()}]) :: [{non_neg_integer(), EditDelta.t()}]
-  defp cap_log(log), do: Enum.take(log, @max_single_consumer_log)
 
   # ── move_if_possible helpers ──
 
