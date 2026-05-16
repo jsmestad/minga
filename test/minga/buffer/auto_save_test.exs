@@ -6,6 +6,7 @@ defmodule Minga.Buffer.AutoSaveTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Buffer.State, as: BufState
   alias Minga.Events
   alias Minga.Events.LogMessageEvent
 
@@ -195,7 +196,7 @@ defmodule Minga.Buffer.AutoSaveTest do
     {:ok, pid} = BufferProcess.start_link(file_path: path)
     assert {:ok, @delay_ms} = BufferProcess.set_option(pid, :auto_save_delay_ms, @delay_ms)
 
-    original_mtime = :sys.get_state(pid).mtime
+    original_mtime = pid |> :sys.get_state() |> BufState.mtime()
     :ok = BufferProcess.insert_text(pid, "!")
     token = :sys.get_state(pid).auto_save_token
     File.write!(path, "HELLO")

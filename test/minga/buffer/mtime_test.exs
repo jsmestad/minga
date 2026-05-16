@@ -6,6 +6,7 @@ defmodule Minga.Buffer.MtimeTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Buffer.State, as: BufState
 
   @tag :tmp_dir
   test "opening a file records its mtime", %{tmp_dir: tmp_dir} do
@@ -16,14 +17,14 @@ defmodule Minga.Buffer.MtimeTest do
     {:ok, buf} = BufferProcess.start_link(file_path: path)
     state = :sys.get_state(buf)
 
-    assert state.mtime == disk_mtime
+    assert BufState.mtime(state) == disk_mtime
   end
 
   test "scratch buffer has nil mtime" do
     {:ok, buf} = BufferProcess.start_link(content: "scratch")
     state = :sys.get_state(buf)
 
-    assert state.mtime == nil
+    assert BufState.mtime(state) == nil
   end
 
   @tag :tmp_dir
@@ -39,8 +40,8 @@ defmodule Minga.Buffer.MtimeTest do
     :ok = BufferProcess.save(buf)
 
     new_state = :sys.get_state(buf)
-    assert new_state.mtime >= old_state.mtime
-    assert new_state.dirty == false
+    assert BufState.mtime(new_state) >= BufState.mtime(old_state)
+    assert BufState.dirty?(new_state) == false
   end
 
   @tag :tmp_dir
@@ -58,7 +59,7 @@ defmodule Minga.Buffer.MtimeTest do
 
     assert result == {:error, :file_changed}
     state = :sys.get_state(buf)
-    assert state.dirty == true
+    assert BufState.dirty?(state) == true
   end
 
   @tag :tmp_dir
@@ -67,7 +68,7 @@ defmodule Minga.Buffer.MtimeTest do
     File.write!(path, "original")
 
     {:ok, buf} = BufferProcess.start_link(file_path: path)
-    original_mtime = :sys.get_state(buf).mtime
+    original_mtime = buf |> :sys.get_state() |> BufState.mtime()
     File.touch!(path, original_mtime + 10)
 
     BufferProcess.insert_char(buf, "x")
@@ -94,7 +95,7 @@ defmodule Minga.Buffer.MtimeTest do
     assert File.read!(path) == "forcedoriginal"
 
     state = :sys.get_state(buf)
-    assert state.dirty == false
+    assert BufState.dirty?(state) == false
   end
 
   @tag :tmp_dir
@@ -188,7 +189,7 @@ defmodule Minga.Buffer.MtimeTest do
     :ok = BufferProcess.save_as(buf, path)
 
     state = :sys.get_state(buf)
-    assert state.mtime != nil
+    assert BufState.mtime(state) != nil
     assert File.exists?(path)
   end
 
@@ -200,7 +201,7 @@ defmodule Minga.Buffer.MtimeTest do
     {:ok, buf} = BufferProcess.start_link(file_path: path)
     state = :sys.get_state(buf)
 
-    assert state.file_size == 5
+    assert BufState.file_size(state) == 5
   end
 
   @tag :tmp_dir
@@ -212,6 +213,6 @@ defmodule Minga.Buffer.MtimeTest do
     :ok = BufferProcess.open(buf, path)
 
     state = :sys.get_state(buf)
-    assert state.mtime != nil
+    assert BufState.mtime(state) != nil
   end
 end

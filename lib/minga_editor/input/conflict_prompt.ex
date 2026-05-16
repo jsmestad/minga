@@ -43,15 +43,7 @@ defmodule MingaEditor.Input.ConflictPrompt do
         _mods
       )
       when is_pid(buf) do
-    buf_state = :sys.get_state(buf)
-
-    case File.stat(buf_state.file_path, time: :posix) do
-      {:ok, %{mtime: mtime, size: size}} ->
-        :sys.replace_state(buf, fn s -> %{s | mtime: mtime, file_size: size} end)
-
-      {:error, _} ->
-        :ok
-    end
+    Buffer.acknowledge_disk_change(buf)
 
     {:handled, state |> ModalOverlay.dismiss() |> EditorState.clear_status()}
   end
