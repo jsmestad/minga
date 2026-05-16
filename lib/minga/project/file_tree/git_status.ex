@@ -30,19 +30,27 @@ defmodule Minga.Project.FileTree.GitStatus do
     case Minga.Git.root_for(root_path) do
       {:ok, git_root} ->
         case Minga.Git.status(git_root) do
-          {:ok, entries} ->
-            entries
-            |> entries_to_status_map(git_root)
-            |> filter_under_root(root_path)
-            |> propagate_to_directories(root_path)
-
-          {:error, _} ->
-            %{}
+          {:ok, entries} -> from_entries(entries, git_root, root_path)
+          {:error, _} -> %{}
         end
 
       :not_git ->
         %{}
     end
+  end
+
+  @doc """
+  Builds file-tree git status from an already-fetched git status event.
+
+  This lets event handlers refresh badges without shelling out during render or recomputing status that `Minga.Git.Repo` already fetched.
+  """
+  @spec from_entries([Minga.Git.status_entry()], String.t(), String.t()) :: status_map()
+  def from_entries(entries, git_root, root_path)
+      when is_list(entries) and is_binary(git_root) and is_binary(root_path) do
+    entries
+    |> entries_to_status_map(git_root)
+    |> filter_under_root(root_path)
+    |> propagate_to_directories(root_path)
   end
 
   @doc """

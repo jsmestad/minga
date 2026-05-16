@@ -215,8 +215,11 @@ defmodule MingaEditor do
     Minga.Events.subscribe(:diagnostics_updated, events_registry)
     Minga.Events.subscribe(:lsp_status_changed, events_registry)
 
-    # Refresh file tree git status when any buffer is saved.
+    # Refresh file tree state when buffers, project files, git, diagnostics, or project roots change.
     Minga.Events.subscribe(:buffer_saved, events_registry)
+    Minga.Events.subscribe(:buffer_changed, events_registry)
+    Minga.Events.subscribe(:file_written, events_registry)
+    Minga.Events.subscribe(:project_rebuilt, events_registry)
     Minga.Events.subscribe(:git_status_changed, events_registry)
 
     # Tool manager progress: show install/update status in the status line.
@@ -477,11 +480,11 @@ defmodule MingaEditor do
   end
 
   # ── File watcher notification ──
-  def handle_info({:file_changed_on_disk, path}, state) do
+  def handle_info({:file_changed_on_disk, path} = msg, state) do
     new_state = FileWatcherHelpers.handle_file_change(state, path)
     new_state = log_message(new_state, "External change detected: #{path}")
-    new_state = Renderer.render_or_async(new_state)
-    {:noreply, new_state}
+    {new_state, effects} = FileEventHandler.handle(new_state, msg)
+    {:noreply, apply_effects(new_state, effects)}
   end
 
   def handle_info(
@@ -655,6 +658,12 @@ defmodule MingaEditor do
     state = maybe_trigger_nav_flash(state)
     state = Renderer.render_or_async(state)
     {:noreply, %{state | render_timer: nil}}
+  end
+
+  # Debounced file-tree refresh timer fired — rescan the cached tree once for a burst of filesystem events.
+  def handle_info(:file_tree_refresh_timer, state) do
+    {state, effects} = FileEventHandler.handle(state, :file_tree_refresh_timer)
+    {:noreply, apply_effects(state, effects)}
   end
 
   # Renderer.Server writeback after each async frame completes.
@@ -864,7 +873,13 @@ defmodule MingaEditor do
     :tool_missing
   ]
 
-  @file_events [:git_status_changed, :buffer_saved]
+  @file_events [
+    :git_status_changed,
+    :buffer_saved,
+    :buffer_changed,
+    :file_written,
+    :project_rebuilt
+  ]
 
   @spec dispatch_minga_event(EditorState.t(), atom(), term(), term()) :: EditorState.t()
   defp dispatch_minga_event(state, event, _payload, msg) when event in @tool_events do
@@ -893,10 +908,16 @@ defmodule MingaEditor do
          state,
          :diagnostics_updated,
          %Minga.Events.DiagnosticsUpdatedEvent{uri: uri},
-         _msg
+         msg
        ) do
     apply_diagnostic_decorations(state, uri)
-    schedule_render(state, 16)
+    {state, effects} = FileEventHandler.handle(state, msg)
+
+    if effects == [] do
+      schedule_render(state, 16)
+    else
+      apply_effects(state, effects)
+    end
   end
 
   defp dispatch_minga_event(
@@ -1328,6 +1349,7 @@ defmodule MingaEditor do
   * `{:request_code_lens}` — request fresh code lenses from LSP
   * `{:request_inlay_hints}` — request fresh inlay hints from LSP
   * `{:save_session_deferred}` — send :save_session to self
+  * `{:schedule_file_tree_refresh, delay}` — debounce one filesystem tree refresh
   * `{:handle_git_remote_result, ref, result}` — process git remote result
   """
   @type effect ::
@@ -1363,6 +1385,7 @@ defmodule MingaEditor do
           | {:request_code_lens}
           | {:request_inlay_hints}
           | {:save_session_deferred}
+          | {:schedule_file_tree_refresh, non_neg_integer()}
           | {:handle_git_remote_result, reference(), term()}
 
   @doc """
@@ -1460,6 +1483,15 @@ defmodule MingaEditor do
     end
 
     state
+  end
+
+  defp apply_effect(state, {:schedule_file_tree_refresh, delay}) when is_integer(delay) do
+    if MingaEditor.FileTree.Freshness.refresh_scheduled?(state) do
+      state
+    else
+      ref = Process.send_after(self(), :file_tree_refresh_timer, delay)
+      MingaEditor.FileTree.Freshness.schedule_refresh(state, ref)
+    end
   end
 
   defp apply_effect(state, {:conceal_spans, pid, spans}) when is_pid(pid) do

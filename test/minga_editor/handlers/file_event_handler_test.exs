@@ -8,11 +8,19 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
 
   use ExUnit.Case, async: true
 
+  @moduletag :tmp_dir
+
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Git.StatusEntry
+  alias Minga.Project.FileTree
+  alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.Handlers.FileEventHandler
   alias MingaEditor.Shell.Traditional.GitStatus.TuiState
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Buffers
+  alias MingaEditor.State.FileTree, as: FileTreeState
+  alias MingaEditor.Workspace.State, as: WorkspaceState
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -110,7 +118,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       refute Map.has_key?(EditorState.git_status_panel(new_state), :tui_state)
     end
 
-    test "without git panel open is a no-op" do
+    test "without git panel or file tree open is a no-op" do
       state = base_state()
 
       event =
@@ -126,6 +134,204 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       {new_state, effects} = FileEventHandler.handle(state, event)
       assert new_state == state
       assert effects == []
+    end
+
+    test "without git panel open refreshes file tree badges from the event", %{tmp_dir: tmp_dir} do
+      file_path = Path.join(tmp_dir, "alpha.ex")
+      File.write!(file_path, "")
+      state = state_with_tree(tmp_dir)
+
+      event =
+        {:minga_event, :git_status_changed,
+         %Minga.Events.GitStatusEvent{
+           git_root: tmp_dir,
+           entries: [%StatusEntry{path: "alpha.ex", status: :modified, staged: false}],
+           branch: "main",
+           ahead: 0,
+           behind: 0
+         }}
+
+      {new_state, effects} = FileEventHandler.handle(state, event)
+
+      assert new_state.workspace.file_tree.tree.git_status[file_path] == :modified
+      assert {:render, 16} in effects
+    end
+  end
+
+  describe "file tree freshness" do
+    @describetag :tmp_dir
+
+    test "file change under the tree root schedules one debounced refresh", %{tmp_dir: tmp_dir} do
+      state = state_with_tree(tmp_dir)
+      changed_path = Path.join(tmp_dir, "created.ex")
+
+      {_state, effects} = FileEventHandler.handle(state, {:file_changed_on_disk, changed_path})
+
+      assert effects == [{:schedule_file_tree_refresh, 50}]
+    end
+
+    test "file change outside the tree root does not refresh", %{tmp_dir: tmp_dir} do
+      state = state_with_tree(tmp_dir)
+      outside_path = Path.join(tmp_dir <> "_sibling", "created.ex")
+
+      {_state, effects} = FileEventHandler.handle(state, {:file_changed_on_disk, outside_path})
+
+      assert effects == []
+    end
+
+    test "file_written under the tree root schedules a debounced refresh", %{tmp_dir: tmp_dir} do
+      state = state_with_tree(tmp_dir)
+      changed_path = Path.join(tmp_dir, "created_by_agent.ex")
+
+      {_state, effects} =
+        FileEventHandler.handle(state, {
+          :minga_event,
+          :file_written,
+          %Minga.Events.FileWrittenEvent{path: changed_path, change_type: :created}
+        })
+
+      assert effects == [{:schedule_file_tree_refresh, 50}]
+    end
+
+    test "file_written outside the tree root does not refresh", %{tmp_dir: tmp_dir} do
+      state = state_with_tree(tmp_dir)
+      outside_path = Path.join(tmp_dir <> "_sibling", "created_by_agent.ex")
+
+      {_state, effects} =
+        FileEventHandler.handle(state, {
+          :minga_event,
+          :file_written,
+          %Minga.Events.FileWrittenEvent{path: outside_path, change_type: :created}
+        })
+
+      assert effects == []
+    end
+
+    test "applying repeated refresh effects keeps one pending timer", %{tmp_dir: tmp_dir} do
+      state = state_with_tree(tmp_dir)
+
+      first_state = MingaEditor.apply_effects(state, [{:schedule_file_tree_refresh, 1_000}])
+      first_ref = first_state.workspace.file_tree.refresh_timer
+
+      second_state =
+        MingaEditor.apply_effects(first_state, [{:schedule_file_tree_refresh, 1_000}])
+
+      assert is_reference(first_ref)
+      assert second_state.workspace.file_tree.refresh_timer == first_ref
+      Process.cancel_timer(first_ref)
+    end
+
+    test "refresh timer rescans entries and clears pending timer", %{tmp_dir: tmp_dir} do
+      File.write!(Path.join(tmp_dir, "alpha.ex"), "")
+
+      state =
+        tmp_dir
+        |> state_with_tree()
+        |> FileTreeFreshness.schedule_refresh(make_ref())
+
+      File.write!(Path.join(tmp_dir, "beta.ex"), "")
+
+      {new_state, effects} = FileEventHandler.handle(state, :file_tree_refresh_timer)
+
+      names =
+        new_state.workspace.file_tree.tree |> FileTree.visible_entries() |> Enum.map(& &1.name)
+
+      assert "beta.ex" in names
+      refute FileTreeFreshness.refresh_scheduled?(new_state)
+      assert {:render, 16} in effects
+    end
+
+    test "diagnostics under the tree root schedule render", %{tmp_dir: tmp_dir} do
+      file_path = Path.join(tmp_dir, "alpha.ex")
+      state = state_with_tree(tmp_dir)
+      uri = Minga.LSP.SyncServer.path_to_uri(file_path)
+
+      {_state, effects} =
+        FileEventHandler.handle(state, {
+          :minga_event,
+          :diagnostics_updated,
+          %Minga.Events.DiagnosticsUpdatedEvent{uri: uri, source: :test}
+        })
+
+      assert effects == [{:render, 16}]
+    end
+
+    test "diagnostics outside the tree root do not render the tree", %{tmp_dir: tmp_dir} do
+      state = state_with_tree(tmp_dir)
+      uri = Minga.LSP.SyncServer.path_to_uri(Path.join(tmp_dir <> "_sibling", "alpha.ex"))
+
+      {_state, effects} =
+        FileEventHandler.handle(state, {
+          :minga_event,
+          :diagnostics_updated,
+          %Minga.Events.DiagnosticsUpdatedEvent{uri: uri, source: :test}
+        })
+
+      assert effects == []
+    end
+
+    test "buffer changes under the tree root schedule render", %{tmp_dir: tmp_dir} do
+      file_path = Path.join(tmp_dir, "alpha.ex")
+      File.write!(file_path, "alpha")
+      {:ok, buffer} = BufferProcess.start_link(file_path: file_path)
+
+      state =
+        tmp_dir
+        |> state_with_tree()
+        |> put_active_buffer(buffer)
+
+      {_state, effects} =
+        FileEventHandler.handle(state, {
+          :minga_event,
+          :buffer_changed,
+          %Minga.Events.BufferChangedEvent{buffer: buffer, source: :test}
+        })
+
+      assert effects == [{:render, 16}]
+    end
+
+    test "buffer changes outside the tree root do not render the tree", %{tmp_dir: tmp_dir} do
+      file_path = Path.join(tmp_dir <> "_sibling", "alpha.ex")
+      File.mkdir_p!(Path.dirname(file_path))
+      File.write!(file_path, "alpha")
+      {:ok, buffer} = BufferProcess.start_link(file_path: file_path)
+
+      state = state_with_tree(tmp_dir)
+
+      {_state, effects} =
+        FileEventHandler.handle(state, {
+          :minga_event,
+          :buffer_changed,
+          %Minga.Events.BufferChangedEvent{buffer: buffer, source: :test}
+        })
+
+      assert effects == []
+    end
+
+    test "project rebuild changes the visible tree root", %{tmp_dir: tmp_dir} do
+      old_root = Path.join(tmp_dir, "old")
+      new_root = Path.join(tmp_dir, "new")
+      File.mkdir_p!(old_root)
+      File.mkdir_p!(new_root)
+      File.write!(Path.join(old_root, "old.ex"), "")
+      File.write!(Path.join(new_root, "new.ex"), "")
+
+      state = state_with_tree(old_root)
+
+      {new_state, effects} =
+        FileEventHandler.handle(state, {
+          :minga_event,
+          :project_rebuilt,
+          %Minga.Events.ProjectRebuiltEvent{root: new_root}
+        })
+
+      names =
+        new_state.workspace.file_tree.tree |> FileTree.visible_entries() |> Enum.map(& &1.name)
+
+      assert new_state.workspace.file_tree.project_root == Path.expand(new_root)
+      assert "new.ex" in names
+      refute "old.ex" in names
+      assert {:render, 16} in effects
     end
   end
 
@@ -189,5 +395,17 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       assert new_state == state
       assert effects == []
     end
+  end
+
+  defp state_with_tree(root) do
+    tree = FileTree.new(root)
+    file_tree = FileTreeState.open(%FileTreeState{}, tree, nil)
+
+    EditorState.update_workspace(base_state(), &WorkspaceState.set_file_tree(&1, file_tree))
+  end
+
+  defp put_active_buffer(state, buffer) do
+    buffers = %Buffers{active: buffer, list: [buffer], active_index: 0}
+    EditorState.update_workspace(state, &%{&1 | buffers: buffers})
   end
 end

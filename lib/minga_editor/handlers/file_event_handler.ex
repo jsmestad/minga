@@ -8,16 +8,15 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   functions.
   """
 
+  alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.FileTree, as: FileTreeState
-  alias Minga.Project.FileTree
 
   @typedoc "Effects that the file event handler may return."
   @type file_effect ::
           :render
           | {:render, pos_integer()}
           | {:log_message, String.t()}
-          | {:refresh_tree_git_status}
+          | {:schedule_file_tree_refresh, non_neg_integer()}
           | {:request_code_lens}
           | {:request_inlay_hints}
           | {:save_session_deferred}
@@ -39,6 +38,40 @@ defmodule MingaEditor.Handlers.FileEventHandler do
     handle_buffer_saved(state, buf)
   end
 
+  def handle(
+        state,
+        {:minga_event, :buffer_changed, %Minga.Events.BufferChangedEvent{buffer: buf}}
+      ) do
+    handle_buffer_changed(state, buf)
+  end
+
+  def handle(
+        state,
+        {:minga_event, :diagnostics_updated, %Minga.Events.DiagnosticsUpdatedEvent{uri: uri}}
+      ) do
+    handle_diagnostics_updated(state, uri)
+  end
+
+  def handle(state, {:minga_event, :file_written, %Minga.Events.FileWrittenEvent{path: path}}) do
+    handle_file_changed(state, path)
+  end
+
+  def handle(
+        state,
+        {:minga_event, :project_rebuilt, %Minga.Events.ProjectRebuiltEvent{root: root}}
+      ) do
+    handle_project_rebuilt(state, root)
+  end
+
+  def handle(state, {:file_changed_on_disk, path}) when is_binary(path) do
+    handle_file_changed(state, path)
+  end
+
+  def handle(state, :file_tree_refresh_timer) do
+    state = FileTreeFreshness.flush_refresh(state)
+    {state, [{:render, 16}]}
+  end
+
   def handle(state, {:git_remote_result, ref, result}) when is_reference(ref) do
     {state, [{:handle_git_remote_result, ref, result}]}
   end
@@ -51,15 +84,20 @@ defmodule MingaEditor.Handlers.FileEventHandler do
 
   @spec handle_git_status_changed(EditorState.t(), Minga.Events.GitStatusEvent.t()) ::
           {EditorState.t(), [file_effect()]}
-  defp handle_git_status_changed(state, %Minga.Events.GitStatusEvent{
-         entries: entries,
-         branch: branch,
-         ahead: ahead,
-         behind: behind
-       }) do
+  defp handle_git_status_changed(
+         state,
+         %Minga.Events.GitStatusEvent{
+           entries: entries,
+           branch: branch,
+           ahead: ahead,
+           behind: behind
+         } = event
+       ) do
+    state = FileTreeFreshness.refresh_git_status(state, event)
+
     case EditorState.git_status_panel(state) do
       nil ->
-        {state, []}
+        if FileTreeFreshness.open?(state), do: {state, [{:render, 16}]}, else: {state, []}
 
       _panel ->
         git_status_data = %{
@@ -89,12 +127,13 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   defp handle_buffer_saved(state, saved_buf) do
     new_state =
       state
-      |> refresh_tree_git_status()
+      |> FileTreeFreshness.refresh_git_status_from_disk()
       |> MingaEditor.Commands.Git.refresh_diff_views_for_buffer(saved_buf)
 
     effects = [
       {:request_code_lens},
-      {:request_inlay_hints}
+      {:request_inlay_hints},
+      {:render, 16}
     ]
 
     effects =
@@ -107,16 +146,37 @@ defmodule MingaEditor.Handlers.FileEventHandler do
     {new_state, effects}
   end
 
-  # Refreshes the file tree's git status annotations.
-  @spec refresh_tree_git_status(EditorState.t()) :: EditorState.t()
-  defp refresh_tree_git_status(%{workspace: %{file_tree: %{tree: nil}}} = state), do: state
+  @spec handle_buffer_changed(EditorState.t(), pid()) :: {EditorState.t(), [file_effect()]}
+  defp handle_buffer_changed(state, buffer) do
+    if FileTreeFreshness.buffer_under_tree?(state, buffer) do
+      {state, [{:render, 16}]}
+    else
+      {state, []}
+    end
+  end
 
-  defp refresh_tree_git_status(%{workspace: %{file_tree: %{tree: tree}}} = state) do
-    updated_tree = FileTree.refresh_git_status(tree)
+  @spec handle_diagnostics_updated(EditorState.t(), String.t()) ::
+          {EditorState.t(), [file_effect()]}
+  defp handle_diagnostics_updated(state, uri) do
+    if FileTreeFreshness.diagnostic_uri_under_tree?(state, uri) do
+      {state, [{:render, 16}]}
+    else
+      {state, []}
+    end
+  end
 
-    put_in(
-      state.workspace.file_tree,
-      FileTreeState.replace_tree(state.workspace.file_tree, updated_tree)
-    )
+  @spec handle_file_changed(EditorState.t(), String.t()) :: {EditorState.t(), [file_effect()]}
+  defp handle_file_changed(state, path) do
+    if FileTreeFreshness.path_under_tree?(state, path) do
+      {state, [{:schedule_file_tree_refresh, 50}]}
+    else
+      {state, []}
+    end
+  end
+
+  @spec handle_project_rebuilt(EditorState.t(), String.t()) :: {EditorState.t(), [file_effect()]}
+  defp handle_project_rebuilt(state, root) do
+    state = FileTreeFreshness.update_project_root(state, root)
+    {state, [{:render, 16}]}
   end
 end
