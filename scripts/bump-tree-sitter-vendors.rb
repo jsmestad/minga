@@ -10,7 +10,8 @@ def semver?(ref)
 end
 
 def semver_key(ref)
-  ref.sub(/\Av/, "").split(".").map(&:to_i)
+  parts = ref.sub(/\Av/, "").split(".").map(&:to_i)
+  parts + [0] * (3 - parts.size)
 end
 
 def latest_tag(repo)
@@ -19,8 +20,7 @@ def latest_tag(repo)
 
   output
     .lines
-    .map { |line| line.split(/\s+/, 2)[1] }
-    .compact
+    .filter_map { |line| line.split(/\s+/, 2)[1] }
     .map { |ref| ref.sub(%r{\Arefs/tags/}, "").sub(/\^\{\}\z/, "") }
     .select { |tag| semver?(tag) }
     .uniq
@@ -33,6 +33,7 @@ updated_lines = File.readlines(MANIFEST, chomp: true).map do |line|
   next line if line.strip.empty? || line.start_with?("#")
 
   fields = line.split("|", -1)
+  next line if fields.length < 4
   kind, name, repo, ref = fields
   next line unless %w[core grammar].include?(kind)
   next line unless semver?(ref)

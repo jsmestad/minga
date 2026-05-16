@@ -66,6 +66,7 @@ extracted_dir() {
 vendor_core() {
   local entry kind name repo tag scanner_ext src_subdir query_subdir
   entry="$(core_entry)"
+  [ -z "$entry" ] && err "No core entry found in manifest"
   IFS='|' read -r kind name repo tag scanner_ext src_subdir query_subdir <<< "$entry"
 
   echo "=== Vendoring tree-sitter core ${tag} ==="
@@ -139,7 +140,7 @@ vendor_grammar() {
       # scanner.c includes ../../../common/scanner.h from the upstream monorepo.
       if [ -f "$repo_dir/common/scanner.h" ]; then
         cp "$repo_dir/common/scanner.h" "$target/src/common_scanner.h"
-        perl -0pi -e 's|#include "../../../common/scanner.h"|#include "common_scanner.h"|' "$target/src/scanner.c"
+        perl -pi -e 's|#include "../../../common/scanner.h"|#include "common_scanner.h"|' "$target/src/scanner.c"
         info "  + common_scanner.h (patched include)"
       fi
       ;;
@@ -148,7 +149,7 @@ vendor_grammar() {
       if [ -f "$repo_dir/common/scanner.h" ]; then
         cp "$repo_dir/common/scanner.h" "$target/src/common_scanner.h"
         # Patch the include to use local copy
-        perl -0pi -e 's|#include "../../common/scanner.h"|#include "common_scanner.h"|' "$target/src/scanner.c"
+        perl -pi -e 's|#include "../../common/scanner.h"|#include "common_scanner.h"|' "$target/src/scanner.c"
         info "  + common_scanner.h (patched include)"
       fi
       ;;
@@ -157,6 +158,7 @@ vendor_grammar() {
   # Copy highlight queries
   local full_query_dir="$repo_dir/${query_subdir}"
   local query_target="$QUERIES_DIR/${name}"
+  rm -rf "$query_target"
 
   if [ "$query_subdir" != "-" ] && [ -d "$full_query_dir" ] && ls "$full_query_dir"/*.scm >/dev/null 2>&1; then
     mkdir -p "$query_target"
