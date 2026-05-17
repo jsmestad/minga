@@ -60,6 +60,9 @@ final class CommandDispatcher {
     /// Called when line_spacing changes, so EditorNSView can trigger a resize.
     var onLineSpacingChanged: ((Float) -> Void)?
 
+    /// Called when the BEAM changes the GUI cursor animation preference.
+    var onCursorAnimationChanged: ((Bool) -> Void)?
+
     /// Called once after the first `batch_end` is received from the BEAM.
     /// Used in bundle mode to flush pending file URLs after the BEAM is ready.
     var onFirstRender: (() -> Void)?
@@ -204,6 +207,9 @@ final class CommandDispatcher {
             if oldSpacing != frameState.lineSpacing {
                 onLineSpacingChanged?(frameState.lineSpacing)
             }
+
+        case .guiCursorAnimation(let enabled):
+            onCursorAnimationChanged?(enabled)
 
         case .clipboardWrite(let target, let text):
             handleClipboardWrite(target: target, text: text)

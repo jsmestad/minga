@@ -355,23 +355,43 @@ defmodule MingaEditor.Startup do
   @doc """
   Sends font configuration to the frontend via the port protocol.
 
-  Also sends the line_spacing value so the frontend can apply the
-  spacing multiplier to row positioning.
+  Also sends GUI renderer options such as line spacing and cursor animation.
   """
   @spec send_font_config(MingaEditor.State.t()) :: :ok
   def send_font_config(%{port_manager: nil}), do: :ok
 
-  def send_font_config(%{port_manager: port}) do
-    family = Config.get(:font_family)
-    size = Config.get(:font_size)
-    ligatures = Config.get(:font_ligatures)
-    weight = Config.get(:font_weight)
-    fallback = Config.get(:font_fallback)
+  def send_font_config(%{port_manager: port} = state) do
+    options_server = EditorState.options_server(state)
+    family = Minga.Config.Options.get(options_server, :font_family)
+    size = Minga.Config.Options.get(options_server, :font_size)
+    ligatures = Minga.Config.Options.get(options_server, :font_ligatures)
+    weight = Minga.Config.Options.get(options_server, :font_weight)
+    fallback = Minga.Config.Options.get(options_server, :font_fallback)
 
     MingaEditor.Frontend.configure_font(port, family, size, ligatures, weight, fallback || [])
 
-    line_spacing = Config.get(:line_spacing) || 1.0
-    MingaEditor.Frontend.send_line_spacing(port, line_spacing)
+    if MingaEditor.Frontend.gui?(state.capabilities) do
+      line_spacing = Minga.Config.Options.get(options_server, :line_spacing) || 1.0
+      MingaEditor.Frontend.send_line_spacing(port, line_spacing)
+
+      cursor_animate = Minga.Config.Options.get(options_server, :cursor_animate)
+      MingaEditor.Frontend.send_cursor_animation(port, cursor_animate)
+    end
+  catch
+    :exit, _ -> :ok
+  end
+
+  @doc "Sends the current cursor animation preference to GUI frontends after a runtime option change."
+  @spec send_cursor_animation_config(MingaEditor.State.t(), boolean()) :: :ok
+  def send_cursor_animation_config(%{port_manager: nil}, _enabled), do: :ok
+
+  def send_cursor_animation_config(%{port_manager: port} = state, enabled)
+      when is_boolean(enabled) do
+    if MingaEditor.Frontend.gui?(state.capabilities) do
+      MingaEditor.Frontend.send_cursor_animation(port, enabled)
+    end
+
+    :ok
   catch
     :exit, _ -> :ok
   end

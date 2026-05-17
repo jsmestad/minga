@@ -110,6 +110,7 @@ defmodule Minga.Config.Options do
           | :log_level_agent
           | :log_level_editor
           | :cursorline
+          | :cursor_animate
           | :nav_flash
           | :nav_flash_threshold
           | :log_level_config
@@ -164,6 +165,13 @@ defmodule Minga.Config.Options do
 
   @typedoc "Reference to a Config.Options GenServer (registered name or pid)."
   @type server :: GenServer.server()
+
+  @typedoc "Options server state."
+  @type state :: %{
+          table: :ets.table(),
+          source: server(),
+          events_registry: Minga.Events.registry()
+        }
 
   # Single source of truth for the default registered Options server. Other
   # modules call `default_server/0` rather than referencing `__MODULE__`
@@ -290,6 +298,8 @@ defmodule Minga.Config.Options do
     {:confirm_quit, :boolean, true,
      "Whether quitting with unsaved changes asks for confirmation."},
     {:cursorline, :boolean, true, "Whether the current cursor line is highlighted."},
+    {:cursor_animate, :boolean, true,
+     "Whether cursor movement is smoothly animated in GUI frontends."},
     {:nav_flash, :boolean, true, "Whether large cursor jumps briefly highlight the destination."},
     {:nav_flash_threshold, :pos_integer, 5,
      "Minimum jump distance that triggers navigation flash."},
@@ -370,28 +380,32 @@ defmodule Minga.Config.Options do
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
+    events_registry = Keyword.get(opts, :events_registry, Minga.Events.default_registry())
+
     case Keyword.fetch(opts, :name) do
-      {:ok, nil} -> GenServer.start_link(__MODULE__, :anonymous, [])
-      {:ok, name} -> GenServer.start_link(__MODULE__, name, name: name)
-      :error -> GenServer.start_link(__MODULE__, __MODULE__, name: __MODULE__)
+      {:ok, nil} -> GenServer.start_link(__MODULE__, {:anonymous, events_registry}, [])
+      {:ok, name} -> GenServer.start_link(__MODULE__, {name, events_registry}, name: name)
+      :error -> GenServer.start_link(__MODULE__, {__MODULE__, events_registry}, name: __MODULE__)
     end
   end
 
   @impl GenServer
-  def init(:anonymous) do
+  def init({:anonymous, events_registry}) do
     # The first arg to :ets.new/2 is a tag, not a table identity, when
     # :named_table is omitted. Do NOT add :named_table here — multiple
     # anonymous Options servers may run concurrently (per-test isolation),
     # and a named ETS table can only exist once per BEAM node.
     table = :ets.new(:config_options, [:set, :public, read_concurrency: true])
     seed_defaults(table)
-    {:ok, %{table: table}}
+    seed_runtime_metadata(table, self(), events_registry)
+    {:ok, %{table: table, source: self(), events_registry: events_registry}}
   end
 
-  def init(name) do
+  def init({name, events_registry}) do
     table = :ets.new(table_name(name), [:set, :public, :named_table, read_concurrency: true])
     seed_defaults(table)
-    {:ok, %{table: table}}
+    seed_runtime_metadata(table, name, events_registry)
+    {:ok, %{table: table, source: name, events_registry: events_registry}}
   end
 
   # ── Extension Option Registration ──────────────────────────────────────────
@@ -626,9 +640,22 @@ defmodule Minga.Config.Options do
   """
   @spec set(server(), option_name(), term()) :: {:ok, term()} | {:error, String.t()}
   def set(server \\ @default_server, name, value) when is_atom(name) do
+    table = table_name(server)
+
     case validate(name, value) do
       :ok ->
-        :ets.insert(table_name(server), {name, value})
+        :ets.insert(table, {name, value})
+
+        Minga.Events.broadcast(
+          :option_changed,
+          %Minga.Events.OptionChangedEvent{
+            source: option_source(table, server),
+            name: name,
+            value: value
+          },
+          option_events_registry(table)
+        )
+
         {:ok, value}
 
       {:error, _} = err ->
@@ -711,8 +738,21 @@ defmodule Minga.Config.Options do
   @spec reset(server()) :: :ok
   def reset(server \\ @default_server) do
     table = table_name(server)
+    source = option_source(table, server)
+    events_registry = option_events_registry(table)
+    previous_cursor_animate = get(server, :cursor_animate)
     :ets.delete_all_objects(table)
     seed_defaults(table)
+    seed_runtime_metadata(table, source, events_registry)
+
+    broadcast_reset_option(
+      :cursor_animate,
+      previous_cursor_animate,
+      get(server, :cursor_animate),
+      source,
+      events_registry
+    )
+
     :ok
   end
 
@@ -1032,7 +1072,7 @@ defmodule Minga.Config.Options do
     end
   end
 
-  @spec table_name(GenServer.server()) :: atom()
+  @spec table_name(GenServer.server()) :: :ets.table()
   defp table_name(name) when is_atom(name), do: :"#{name}_ets"
   defp table_name(pid) when is_pid(pid), do: GenServer.call(pid, :table_name)
 
@@ -1040,6 +1080,42 @@ defmodule Minga.Config.Options do
   defp seed_defaults(table) do
     entries = Enum.map(@defaults, fn {name, value} -> {name, value} end)
     :ets.insert(table, entries)
+  end
+
+  @spec seed_runtime_metadata(:ets.table(), server(), Minga.Events.registry()) :: true
+  defp seed_runtime_metadata(table, source, events_registry) do
+    :ets.insert(table, [
+      {{:__metadata__, :source}, source},
+      {{:__metadata__, :events_registry}, events_registry}
+    ])
+  end
+
+  @spec option_source(:ets.table(), server()) :: server()
+  defp option_source(table, fallback) do
+    case :ets.lookup(table, {:__metadata__, :source}) do
+      [{{:__metadata__, :source}, source}] -> source
+      [] -> fallback
+    end
+  end
+
+  @spec broadcast_reset_option(option_name(), term(), term(), server(), Minga.Events.registry()) ::
+          :ok
+  defp broadcast_reset_option(_name, value, value, _source, _events_registry), do: :ok
+
+  defp broadcast_reset_option(name, _previous_value, value, source, events_registry) do
+    Minga.Events.broadcast(
+      :option_changed,
+      %Minga.Events.OptionChangedEvent{source: source, name: name, value: value},
+      events_registry
+    )
+  end
+
+  @spec option_events_registry(:ets.table()) :: Minga.Events.registry()
+  defp option_events_registry(table) do
+    case :ets.lookup(table, {:__metadata__, :events_registry}) do
+      [{{:__metadata__, :events_registry}, events_registry}] -> events_registry
+      [] -> Minga.Events.default_registry()
+    end
   end
 
   @impl GenServer

@@ -239,6 +239,7 @@ defmodule MingaEditor do
     Minga.Events.subscribe(:node_connected, events_registry)
     Minga.Events.subscribe(:node_disconnected, events_registry)
     Minga.Events.subscribe(:load_user_themes, events_registry)
+    Minga.Events.subscribe(:option_changed, events_registry)
     Minga.Events.subscribe(:extension_updates_available, events_registry)
 
     # Monitor all initial buffers so we get :DOWN when they die.
@@ -934,6 +935,24 @@ defmodule MingaEditor do
 
   defp dispatch_minga_event(
          state,
+         :option_changed,
+         %Minga.Events.OptionChangedEvent{
+           source: source,
+           name: :cursor_animate,
+           value: enabled
+         },
+         _msg
+       )
+       when is_boolean(enabled) do
+    if option_source_matches?(source, EditorState.options_server(state)) do
+      Startup.send_cursor_animation_config(state, enabled)
+    end
+
+    state
+  end
+
+  defp dispatch_minga_event(
+         state,
          :face_overrides_changed,
          %Minga.Events.FaceOverridesChangedEvent{buffer: buf_pid, overrides: overrides},
          _msg
@@ -1041,6 +1060,17 @@ defmodule MingaEditor do
   end
 
   defp dispatch_minga_event(state, _event, _payload, _msg), do: state
+
+  @spec option_source_matches?(GenServer.server(), GenServer.server()) :: boolean()
+  defp option_source_matches?(source, server) when source == server, do: true
+
+  defp option_source_matches?(source, server) when is_atom(source) and is_pid(server),
+    do: Process.whereis(source) == server
+
+  defp option_source_matches?(source, server) when is_pid(source) and is_atom(server),
+    do: Process.whereis(server) == source
+
+  defp option_source_matches?(_source, _server), do: false
 
   @spec handle_node_connected(EditorState.t(), Minga.Distribution.Events.NodeConnectedEvent.t()) ::
           EditorState.t()

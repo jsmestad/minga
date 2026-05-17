@@ -187,6 +187,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @op_clipboard_write 0x90
   @op_gui_indent_guides 0x91
   @op_gui_line_spacing 0x92
+  @op_gui_cursor_animation 0x95
   @op_gui_hover_action 0x96
 
   # ── GUI action sub-opcodes (Frontend → BEAM) ──
@@ -1027,6 +1028,20 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   def encode_gui_line_spacing(spacing) when is_number(spacing) and spacing >= 1.0 do
     spacing_x100 = round(spacing * 100)
     <<@op_gui_line_spacing, 2::16, spacing_x100::16>>
+  end
+
+  # ── Cursor animation (forward-compatible, 0x95) ──
+
+  @doc """
+  Encodes a gui_cursor_animation command.
+
+  Sends whether the GUI renderer should animate cursor movement. Reduce Motion can still disable animation on the frontend.
+  Uses the forward-compatible 0x90+ format: opcode(1) + payload_length(2) + enabled(1).
+  """
+  @spec encode_gui_cursor_animation(boolean()) :: binary()
+  def encode_gui_cursor_animation(enabled) when is_boolean(enabled) do
+    enabled_byte = if enabled, do: 1, else: 0
+    <<@op_gui_cursor_animation, 1::16, enabled_byte::8>>
   end
 
   # ── File tree ──

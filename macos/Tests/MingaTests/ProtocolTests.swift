@@ -56,6 +56,18 @@ struct ProtocolDecoderTests {
         #expect(shape == .beam)
     }
 
+    @Test("Decode gui_cursor_animation command")
+    func decodeGuiCursorAnimation() throws {
+        let data = Data([OP_GUI_CURSOR_ANIMATION, 0x00, 0x01, 0x00])
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == 4)
+        guard case .guiCursorAnimation(let enabled) = cmd else {
+            Issue.record("Expected .guiCursorAnimation, got \(String(describing: cmd))")
+            return
+        }
+        #expect(enabled == false)
+    }
+
     @Test("Decode draw_text command")
     func decodeDrawText() throws {
         // row=1, col=2, fg=0xFF0000 (red), bg=0x00FF00 (green), attrs=0x01 (bold), text="Hi"

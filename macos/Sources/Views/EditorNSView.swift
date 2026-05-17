@@ -191,6 +191,7 @@ final class EditorNSView: MTKView {
         colorPixelFormat = .bgra8Unorm_srgb
         layer?.isOpaque = true
 
+        coreTextRenderer.setCursorAnimationReduceMotionDisabled(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
     }
 
     @available(*, unavailable)
@@ -287,6 +288,7 @@ final class EditorNSView: MTKView {
         accessibilityTask = Task { @MainActor [weak self] in
             for await _ in NotificationCenter.default.notifications(named: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification) {
                 guard let self else { return }
+                self.coreTextRenderer.setCursorAnimationReduceMotionDisabled(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
                 if SystemBlinkTiming.blinkingDisabled {
                     self.stopCursorBlink()
                 } else {
@@ -301,6 +303,10 @@ final class EditorNSView: MTKView {
     /// Sub-cell-height vertical pixel offset for smooth trackpad scrolling.
     /// Positive = content shifted up (scrolled down). Always in [0, cellHeight).
     private var scrollPixelOffset: CGFloat = 0
+
+    /// Window receiving the current fractional smooth-scroll offset.
+    /// Nil means the event location did not resolve to a scrollable editor window, so fractional offset is disabled instead of shifting every pane.
+    private var scrollTargetWindowId: UInt16?
 
     /// Schedule a render on the next vsync. Multiple calls between vsyncs
     /// are coalesced by MTKView into a single draw() call.
@@ -343,7 +349,7 @@ final class EditorNSView: MTKView {
         }
         let validGutterHoverRow = validGutterHoverWindowId == nil ? nil : gutterHoverRow
         let validMouseInGutter = isMouseInGutter && validGutterHoverWindowId != nil
-
+        let cursorAnimationGeneration = coreTextRenderer.cursorAnimationGeneration
         coreTextRenderer.render(frameState: fs, fontManager: fontManager,
                                 cursorBlinkVisible: cursorBlinkVisible,
                                 windowContents: guiState?.windowContents ?? [:],
@@ -352,7 +358,15 @@ final class EditorNSView: MTKView {
                                 gutterHoverWindowId: validGutterHoverWindowId,
                                 gutterHoverRow: validGutterHoverRow,
                                 drawable: drawable, viewportSize: drawableSize,
-                                contentScale: scale)
+                                contentScale: scale,
+                                scrollOffset: SIMD2<Float>(0, Float(scrollPixelOffset)),
+                                scrollTargetWindowId: scrollTargetWindowId)
+        if coreTextRenderer.cursorAnimationGeneration != cursorAnimationGeneration {
+            resetCursorBlink()
+        }
+        if coreTextRenderer.cursorAnimating {
+            needsDisplay = true
+        }
         dispatcher.frameState.dirty = false
     }
 
@@ -1270,6 +1284,9 @@ final class EditorNSView: MTKView {
     private func handleTrackpadScroll(event: NSEvent, row: Int16, col: Int16, mods: UInt8) {
         if event.phase == .began {
             scrollAccumulator.reset()
+            scrollTargetWindowId = smoothScrollTargetWindowId(row: row, col: col)
+        } else if scrollTargetWindowId == nil {
+            scrollTargetWindowId = smoothScrollTargetWindowId(row: row, col: col)
         }
 
         // Vertical: smooth sub-line pixel offset
@@ -1278,7 +1295,7 @@ final class EditorNSView: MTKView {
         for e in vEvents {
             sendScrollEvent(e, row: row, col: col, mods: mods)
         }
-        scrollPixelOffset = scrollAccumulator.pixelOffsetY
+        scrollPixelOffset = scrollTargetWindowId == nil ? 0 : scrollAccumulator.pixelOffsetY
 
         // Horizontal: discrete column events
         let hEvents = scrollAccumulator.accumulateHorizontal(
@@ -1289,17 +1306,43 @@ final class EditorNSView: MTKView {
 
         // Snap to zero when gesture/momentum ends
         if (event.phase == .ended || event.phase == .cancelled) && event.momentumPhase == [] {
-            scrollAccumulator.snapVertical()
-            scrollPixelOffset = 0
+            finishSmoothScrollGesture()
         }
-        if event.momentumPhase == .ended {
-            scrollAccumulator.snapVertical()
-            scrollPixelOffset = 0
+        if event.momentumPhase == .ended || event.momentumPhase == .cancelled {
+            finishSmoothScrollGesture()
         }
 
         // Tell MTKView we need a frame. The display link coalesces
         // multiple scroll events between vsyncs into one draw() call.
         needsDisplay = true
+    }
+
+    private func finishSmoothScrollGesture() {
+        scrollAccumulator.reset()
+        scrollPixelOffset = 0
+        scrollTargetWindowId = nil
+    }
+
+    private func smoothScrollTargetWindowId(row: Int16, col: Int16) -> UInt16? {
+        EditorNSView.smoothScrollTargetWindowId(row: row, col: col, windowGutters: dispatcher.frameState.windowGutters)
+    }
+
+    nonisolated static func smoothScrollTargetWindowId(row: Int16, col: Int16, windowGutters: [UInt16: Wire.WindowGutter]) -> UInt16? {
+        guard row >= 0, col >= 0 else { return nil }
+        let rowValue = Int(row)
+        let colValue = Int(col)
+        let rowMatches = windowGutters.values.filter { gutter in
+            let startRow = Int(gutter.contentRow)
+            let endRow = startRow + Int(gutter.contentHeight)
+            let startCol = Int(gutter.contentCol)
+            let endCol = startCol + Int(gutter.contentWidth)
+            return rowValue >= startRow && rowValue < endRow && colValue >= startCol && colValue < endCol
+        }
+        guard !rowMatches.isEmpty else { return nil }
+
+        return rowMatches
+            .max { lhs, rhs in lhs.contentCol < rhs.contentCol }?
+            .windowId
     }
 
     /// Discrete mouse wheel: one event per click, no accumulation.

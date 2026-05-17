@@ -57,6 +57,7 @@ enum RenderCommand: Sendable {
     case clipboardWrite(target: UInt8, text: String)
     case guiIndentGuides(data: IndentGuideData)
     case guiLineSpacing(spacing: Float)
+    case guiCursorAnimation(enabled: Bool)
     case guiSplitSeparators(borderColor: UInt32, verticals: [Wire.VerticalSeparator], horizontals: [Wire.HorizontalSeparator])
     case guiGitStatus(repoState: UInt8, syncing: Bool, ahead: UInt16, behind: UInt16, branchName: String, entries: [Wire.GitStatusEntry], toast: (message: String, level: UInt8, action: UInt8)?)
     case guiAgentGroups(activeGroupId: UInt16, agentGroups: [Wire.AgentGroupEntry])
@@ -2137,6 +2138,15 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let spacingX100 = readU16(data, rest + 2)
         let spacing = Float(spacingX100) / 100.0
         return (.guiLineSpacing(spacing: spacing), 1 + 2 + lsPayloadLen)
+
+    case OP_GUI_CURSOR_ANIMATION:
+        // Forward-compatible format: opcode(1) + payload_length(2) + enabled(1)
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let caPayloadLen = Int(readU16(data, rest))
+        guard data.count >= rest + 2 + caPayloadLen, caPayloadLen >= 1 else {
+            throw ProtocolDecodeError.malformed
+        }
+        return (.guiCursorAnimation(enabled: data[rest + 2] != 0), 1 + 2 + caPayloadLen)
 
     case OP_CLIPBOARD_WRITE:
         // Forward-compatible format: opcode(1) + payload_length(2) + target(1) + text_len(2) + text

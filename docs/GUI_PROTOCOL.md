@@ -58,6 +58,7 @@ The BEAM-side encoder must use a documented length-prefixed envelope for all new
 | 0x92 | gui_line_spacing | Line spacing multiplier for the renderer |
 | 0x93 | gui_file_tree | Semantic file tree rows for the native sidebar view. Uses a 32-bit payload length because expanded project trees can exceed 64KB. |
 | 0x94 | gui_file_tree_selection | Lightweight file tree selection and focus update. |
+| 0x95 | gui_cursor_animation | Cursor movement animation preference for GUI renderers. |
 | 0x96 | gui_hover_action | Optional action metadata for the hover popup |
 
 ### 0x93 — gui_file_tree
@@ -972,7 +973,19 @@ This convention is enforced on the BEAM side: all new opcodes >= 0x90 must use a
 - `OP_GUI_INDENT_GUIDES (0x91)` — indent guide positions per window (16-bit length-prefixed)
 - `OP_GUI_LINE_SPACING (0x92)` — renderer line spacing multiplier (16-bit length-prefixed)
 - `OP_GUI_FILE_TREE (0x93)` — semantic file tree rows (32-bit length-prefixed)
+- `OP_GUI_CURSOR_ANIMATION (0x95)` — cursor movement animation preference (16-bit length-prefixed)
 - `OP_GUI_HOVER_ACTION (0x96)` — optional hover popup action metadata (16-bit length-prefixed)
+
+### 0x95 — gui_cursor_animation
+
+Sends whether GUI renderers should animate cursor movement. The frontend must still disable animation when the platform Reduce Motion accessibility setting is active.
+
+```
+opcode(1=0x95) + payload_length(2=0x0001) + enabled(1)
+```
+
+Fields:
+- `enabled`: `1` enables smooth cursor movement, `0` snaps the cursor directly to the BEAM-reported position.
 
 ### 0x96 — gui_hover_action
 

@@ -47,6 +47,7 @@ That's it. Save the file and restart Minga. Your options take effect immediately
 | `:font_size` | positive integer | `13` | Font size in points (see [Fonts](#fonts) below) |
 | `:font_weight` | weight atom | `:regular` | Font weight (see [Fonts](#fonts) below) |
 | `:font_ligatures` | boolean | `true` | Enable programming ligatures (see [Fonts](#fonts) below) |
+| `:cursor_animate` | boolean | `true` | Smoothly animate cursor movement in GUI frontends |
 | `:log_level` | `:debug`, `:info`, `:warning`, `:error`, `:none` | `:info` | Global minimum log level (see [Logging](#logging) below) |
 | `:log_level_render` | log level or `:default` | `:default` | Log level for the render pipeline |
 | `:log_level_lsp` | log level or `:default` | `:default` | Log level for LSP client communication |
@@ -63,6 +64,7 @@ set :font_family, "JetBrains Mono"
 set :font_size, 14
 set :font_weight, :regular
 set :font_ligatures, true
+set :cursor_animate, false
 ```
 
 Invalid values show a clear error. Setting `:tab_width` to `-1` tells you it must be a positive integer.
