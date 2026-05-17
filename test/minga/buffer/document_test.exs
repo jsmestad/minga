@@ -204,6 +204,28 @@ defmodule Minga.Buffer.DocumentTest do
     end
   end
 
+  describe "replace_at_byte_range/5" do
+    test "replaces bytes and restores cursor" do
+      buf = Document.new("hello world") |> Document.move_to({0, 5})
+      buf = Document.replace_at_byte_range(buf, 6, 5, "there", {0, 2})
+
+      assert Document.content(buf) == "hello there"
+      assert Document.cursor(buf) == {0, 2}
+    end
+
+    test "rejects byte ranges beyond document content" do
+      assert_raise ArgumentError, ~r/invalid byte range/, fn ->
+        Document.replace_at_byte_range(Document.new("hello"), 4, 2, "x", {0, 0})
+      end
+    end
+
+    test "rejects replacements that produce invalid UTF-8 content" do
+      assert_raise ArgumentError, ~r/invalid UTF-8/, fn ->
+        Document.replace_at_byte_range(Document.new("é"), 1, 0, <<0xFF>>, {0, 0})
+      end
+    end
+  end
+
   # ── Round-trip integrity ──
 
   describe "content integrity" do

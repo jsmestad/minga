@@ -256,6 +256,31 @@ defmodule Minga.Buffer.Document do
     buf |> Selection.linewise(start_line, end_line) |> then(&Selection.delete(buf, &1))
   end
 
+  @doc false
+  @spec replace_at_byte_range(t(), non_neg_integer(), non_neg_integer(), binary(), position()) ::
+          t()
+  def replace_at_byte_range(
+        %__MODULE__{} = doc,
+        start_byte,
+        bytes_to_remove,
+        text_to_insert,
+        cursor_pos
+      )
+      when start_byte >= 0 and bytes_to_remove >= 0 and is_binary(text_to_insert) do
+    content = content(doc)
+    content_size = byte_size(content)
+    :ok = validate_byte_range(start_byte, bytes_to_remove, content_size)
+    prefix = binary_part(content, 0, start_byte)
+    suffix_start = start_byte + bytes_to_remove
+    suffix = binary_part(content, suffix_start, content_size - suffix_start)
+    new_content = prefix <> text_to_insert <> suffix
+
+    new_content
+    |> validate_reconstructed_content()
+    |> new()
+    |> move_to(cursor_pos)
+  end
+
   @doc """
   Returns the content and cursor position in a single call,
   avoiding separate content/1 + cursor/1 round-trips.
@@ -271,6 +296,25 @@ defmodule Minga.Buffer.Document do
   end
 
   # ── Private helpers ──
+
+  @spec validate_byte_range(non_neg_integer(), non_neg_integer(), non_neg_integer()) :: :ok
+  defp validate_byte_range(start_byte, bytes_to_remove, content_size)
+       when start_byte <= content_size and start_byte + bytes_to_remove <= content_size do
+    :ok
+  end
+
+  defp validate_byte_range(start_byte, bytes_to_remove, content_size) do
+    raise ArgumentError,
+          "invalid byte range: start_byte=#{start_byte}, bytes_to_remove=#{bytes_to_remove}, content_size=#{content_size}"
+  end
+
+  @spec validate_reconstructed_content(binary()) :: binary()
+  defp validate_reconstructed_content(content) do
+    case String.valid?(content) do
+      true -> content
+      false -> raise ArgumentError, "byte range replacement produced invalid UTF-8 content"
+    end
+  end
 
   # Computes new cursor position and line_count after inserting `text` at the current cursor.
   # Uses byte_size for column tracking.
