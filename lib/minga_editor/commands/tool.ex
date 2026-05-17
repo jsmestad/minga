@@ -6,9 +6,8 @@ defmodule MingaEditor.Commands.Tool do
   and `:tool_manage` (picker UI) commands.
   """
 
-  @behaviour Minga.Command.Provider
+  use MingaEditor.Commands.Provider
 
-  alias Minga.Command
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
   alias Minga.Tool.Manager, as: ToolManager
@@ -18,42 +17,11 @@ defmodule MingaEditor.Commands.Tool do
 
   @type state :: EditorState.t()
 
-  @impl true
-  @spec __commands__() :: [Command.t()]
-  def __commands__ do
-    [
-      %Command{
-        name: :tool_install,
-        description: "Install a tool",
-        execute: fn state -> execute(state, :tool_install) end,
-        requires_buffer: false
-      },
-      %Command{
-        name: :tool_uninstall,
-        description: "Uninstall a tool",
-        execute: fn state -> execute(state, :tool_uninstall) end,
-        requires_buffer: false
-      },
-      %Command{
-        name: :tool_update,
-        description: "Update a tool",
-        execute: fn state -> execute(state, :tool_update) end,
-        requires_buffer: false
-      },
-      %Command{
-        name: :tool_list,
-        description: "List installed tools",
-        execute: fn state -> execute(state, :tool_list) end,
-        requires_buffer: false
-      },
-      %Command{
-        name: :tool_manage,
-        description: "Manage tools",
-        execute: fn state -> execute(state, :tool_manage) end,
-        requires_buffer: false
-      }
-    ]
-  end
+  command(:tool_install, "Install a tool", requires_buffer: false)
+  command(:tool_uninstall, "Uninstall a tool", requires_buffer: false)
+  command(:tool_update, "Update a tool", requires_buffer: false)
+  command(:tool_list, "List installed tools", requires_buffer: false)
+  command(:tool_manage, "Manage tools", requires_buffer: false)
 
   @doc "Executes a named tool action (from :ToolInstall name, etc.)."
   @spec execute_named(state(), :install | :uninstall | :update, String.t()) :: state()

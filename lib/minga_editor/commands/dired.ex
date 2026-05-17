@@ -8,10 +8,9 @@ defmodule MingaEditor.Commands.Dired do
   directories.
   """
 
-  @behaviour Minga.Command.Provider
+  use MingaEditor.Commands.Provider
 
   alias Minga.Buffer
-  alias Minga.Command
   alias Minga.Dired
   alias MingaEditor.Commands
   alias MingaEditor.State, as: EditorState
@@ -20,84 +19,18 @@ defmodule MingaEditor.Commands.Dired do
 
   @type state :: EditorState.t()
 
-  @impl Minga.Command.Provider
-  @spec __commands__() :: [Command.t()]
-  def __commands__ do
-    [
-      %Command{
-        name: :dired_open,
-        description: "Open directory (Dired)",
-        requires_buffer: false,
-        execute: fn state -> execute(state, :dired_open) end
-      },
-      %Command{
-        name: :dired_open_entry,
-        description: "Open file / enter directory",
-        requires_buffer: false,
-        execute: fn state -> execute(state, :dired_open_entry) end
-      },
-      %Command{
-        name: :dired_parent,
-        description: "Go to parent directory",
-        requires_buffer: false,
-        execute: fn state -> execute(state, :dired_parent) end
-      },
-      %Command{
-        name: :dired_close,
-        description: "Close directory buffer",
-        requires_buffer: false,
-        execute: fn state -> execute(state, :dired_close) end
-      },
-      %Command{
-        name: :dired_toggle_hidden,
-        description: "Toggle hidden files",
-        requires_buffer: false,
-        execute: fn state -> execute(state, :dired_toggle_hidden) end
-      },
-      %Command{
-        name: :dired_cycle_sort,
-        description: "Cycle sort order",
-        requires_buffer: false,
-        execute: fn state -> execute(state, :dired_cycle_sort) end
-      },
-      %Command{
-        name: :dired_toggle_details,
-        description: "Toggle detail columns",
-        requires_buffer: false,
-        execute: fn state -> execute(state, :dired_toggle_details) end
-      },
-      %Command{
-        name: :dired_open_external,
-        description: "Open with system application",
-        requires_buffer: false,
-        execute: fn state -> execute(state, :dired_open_external) end
-      },
-      %Command{
-        name: :dired_refresh,
-        description: "Refresh directory listing",
-        requires_buffer: false,
-        execute: fn state -> execute(state, :dired_refresh) end
-      },
-      %Command{
-        name: :dired_apply_changes,
-        description: "Apply directory changes",
-        requires_buffer: false,
-        execute: fn state -> execute(state, :dired_apply_changes) end
-      },
-      %Command{
-        name: :dired_confirm_apply,
-        description: "Confirm and apply changes",
-        requires_buffer: false,
-        execute: fn state -> execute(state, :dired_confirm_apply) end
-      },
-      %Command{
-        name: :dired_cancel_apply,
-        description: "Cancel pending changes",
-        requires_buffer: false,
-        execute: fn state -> execute(state, :dired_cancel_apply) end
-      }
-    ]
-  end
+  command(:dired_open, "Open directory (Dired)", requires_buffer: false)
+  command(:dired_open_entry, "Open file / enter directory", requires_buffer: false)
+  command(:dired_parent, "Go to parent directory", requires_buffer: false)
+  command(:dired_close, "Close directory buffer", requires_buffer: false)
+  command(:dired_toggle_hidden, "Toggle hidden files", requires_buffer: false)
+  command(:dired_cycle_sort, "Cycle sort order", requires_buffer: false)
+  command(:dired_toggle_details, "Toggle detail columns", requires_buffer: false)
+  command(:dired_open_external, "Open with system application", requires_buffer: false)
+  command(:dired_refresh, "Refresh directory listing", requires_buffer: false)
+  command(:dired_apply_changes, "Apply directory changes", requires_buffer: false)
+  command(:dired_confirm_apply, "Confirm and apply changes", requires_buffer: false)
+  command(:dired_cancel_apply, "Cancel pending changes", requires_buffer: false)
 
   # ── Command dispatch ─────────────────────────────────────────────────────
 

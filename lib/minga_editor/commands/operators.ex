@@ -4,7 +4,7 @@ defmodule MingaEditor.Commands.Operators do
   line-wise variants (dd/yy/cc/S).
   """
 
-  @behaviour Minga.Command.Provider
+  use MingaEditor.Commands.Provider
 
   alias Minga.Buffer
   alias MingaEditor.Commands.Helpers
@@ -142,15 +142,5 @@ defmodule MingaEditor.Commands.Operators do
   @spec read_only_msg(state()) :: state()
   defp read_only_msg(state), do: EditorState.set_status(state, "Buffer is read-only")
 
-  @impl Minga.Command.Provider
-  def __commands__ do
-    Enum.map(@command_specs, fn {name, desc, requires_buffer} ->
-      %Minga.Command{
-        name: name,
-        description: desc,
-        requires_buffer: requires_buffer,
-        execute: fn state -> execute(state, name) end
-      }
-    end)
-  end
+  commands(@command_specs)
 end

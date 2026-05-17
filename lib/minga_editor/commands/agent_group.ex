@@ -7,7 +7,7 @@ defmodule MingaEditor.Commands.AgentGroup do
   context is restored. Never mutate `tab_bar.active_id` directly.
   """
 
-  @behaviour Minga.Command.Provider
+  use MingaEditor.Commands.Provider
 
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.TabBar
@@ -118,42 +118,21 @@ defmodule MingaEditor.Commands.AgentGroup do
     end
   end
 
-  @workspace_command_specs [
-    {:agent_group_next, "Next workspace", :agent_group_next},
-    {:agent_group_prev, "Previous workspace", :agent_group_prev},
-    # Kept as a command alias for the existing SPC TAB A default binding.
-    {:agent_group_next_agent, "Next agent workspace", :agent_group_next},
-    {:ungrouped_tabs, "Switch to my tabs", :switch_to_ungrouped},
-    {:agent_group_toggle, "Toggle last workspace", :agent_group_toggle},
-    {:agent_group_close, "Close workspace", :agent_group_close},
-    {:agent_group_list, "List agent groups", :agent_group_list},
-    {:agent_group_rename, "Rename workspace", :agent_group_rename},
-    {:agent_group_set_icon, "Set workspace icon", :agent_group_set_icon}
-  ]
+  command(:agent_group_next, "Next workspace", execute: &agent_group_next/1)
+  command(:agent_group_prev, "Previous workspace", execute: &agent_group_prev/1)
 
-  @impl Minga.Command.Provider
-  def __commands__ do
-    dispatched =
-      Enum.map(@workspace_command_specs, fn {cmd_name, desc, fun_name} ->
-        %Minga.Command{
-          name: cmd_name,
-          description: desc,
-          requires_buffer: false,
-          execute: fn state -> apply(__MODULE__, fun_name, [state]) end
-        }
-      end)
+  # Kept as a command alias for the existing SPC TAB A default binding.
+  command(:agent_group_next_agent, "Next agent workspace", execute: &agent_group_next/1)
 
-    # Numbered workspace jumps (SPC TAB 1..9)
-    numbered =
-      for n <- 1..9 do
-        %Minga.Command{
-          name: :"workspace_goto_#{n}",
-          description: "Workspace #{n}",
-          requires_buffer: false,
-          execute: fn state -> workspace_goto(state, n) end
-        }
-      end
+  command(:ungrouped_tabs, "Switch to my tabs", execute: &switch_to_ungrouped/1)
+  command(:agent_group_toggle, "Toggle last workspace", execute: &agent_group_toggle/1)
+  command(:agent_group_close, "Close workspace", execute: &agent_group_close/1)
+  command(:agent_group_list, "List agent groups", execute: &agent_group_list/1)
+  command(:agent_group_rename, "Rename workspace", execute: &agent_group_rename/1)
+  command(:agent_group_set_icon, "Set workspace icon", execute: &agent_group_set_icon/1)
 
-    dispatched ++ numbered
-  end
+  numbered_commands(:workspace_goto, 1..9, "Workspace",
+    argument: :number,
+    execute: &workspace_goto/2
+  )
 end

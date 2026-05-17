@@ -4,7 +4,7 @@ defmodule MingaEditor.Commands.Testing do
   view output.
   """
 
-  @behaviour Minga.Command.Provider
+  use MingaEditor.Commands.Provider
 
   alias Minga.Buffer
   alias MingaEditor.Commands.BufferManagement
@@ -115,39 +115,9 @@ defmodule MingaEditor.Commands.Testing do
     Minga.Project.TestRunner.detect_project_filetype(Minga.Project.root() || ".")
   end
 
-  @impl Minga.Command.Provider
-  def __commands__ do
-    [
-      %Minga.Command{
-        name: :test_file,
-        description: "Run tests for current file",
-        requires_buffer: true,
-        execute: &test_file/1
-      },
-      %Minga.Command{
-        name: :test_all,
-        description: "Run all tests",
-        requires_buffer: true,
-        execute: &test_all/1
-      },
-      %Minga.Command{
-        name: :test_at_point,
-        description: "Run test at cursor",
-        requires_buffer: true,
-        execute: &test_at_point/1
-      },
-      %Minga.Command{
-        name: :test_rerun,
-        description: "Rerun last test",
-        requires_buffer: true,
-        execute: &test_rerun/1
-      },
-      %Minga.Command{
-        name: :test_output,
-        description: "Show test output",
-        requires_buffer: true,
-        execute: &test_output/1
-      }
-    ]
-  end
+  command(:test_file, "Run tests for current file", requires_buffer: true, execute: &test_file/1)
+  command(:test_all, "Run all tests", requires_buffer: true, execute: &test_all/1)
+  command(:test_at_point, "Run test at cursor", requires_buffer: true, execute: &test_at_point/1)
+  command(:test_rerun, "Rerun last test", requires_buffer: true, execute: &test_rerun/1)
+  command(:test_output, "Show test output", requires_buffer: true, execute: &test_output/1)
 end

@@ -6,7 +6,7 @@ defmodule MingaEditor.Commands.Lsp do
   language server instances attached to the current buffer.
   """
 
-  @behaviour Minga.Command.Provider
+  use MingaEditor.Commands.Provider
 
   alias Minga.Buffer
   alias MingaEditor.HoverPopup
@@ -270,107 +270,69 @@ defmodule MingaEditor.Commands.Lsp do
   defp format_elapsed(s) when s < 3600, do: "#{div(s, 60)}m #{rem(s, 60)}s"
   defp format_elapsed(s), do: "#{div(s, 3600)}h #{div(rem(s, 3600), 60)}m"
 
-  @impl Minga.Command.Provider
-  def __commands__ do
-    standard =
-      Enum.map(@command_specs, fn {name, desc, requires_buffer} ->
-        %Minga.Command{
-          name: name,
-          description: desc,
-          requires_buffer: requires_buffer,
-          execute: fn state -> execute(state, name) end
-        }
-      end)
+  commands(@command_specs)
 
-    lsp_actions = [
-      %Minga.Command{
-        name: :goto_definition,
-        description: "Go to definition",
-        requires_buffer: true,
-        execute: &LspActions.goto_definition/1
-      },
-      %Minga.Command{
-        name: :hover,
-        description: "Hover documentation",
-        requires_buffer: true,
-        execute: &LspActions.hover/1
-      },
-      %Minga.Command{
-        name: :peek_definition,
-        description: "Peek definition",
-        requires_buffer: true,
-        execute: &LspActions.peek_definition/1
-      },
-      %Minga.Command{
-        name: :find_references,
-        description: "Find all references",
-        requires_buffer: true,
-        execute: &LspActions.find_references/1
-      },
-      %Minga.Command{
-        name: :code_action,
-        description: "Code actions",
-        requires_buffer: true,
-        execute: &LspActions.code_action/1
-      },
-      %Minga.Command{
-        name: :rename_symbol,
-        description: "Rename symbol",
-        requires_buffer: true,
-        execute: &LspActions.prepare_rename/1
-      },
-      %Minga.Command{
-        name: :goto_type_definition,
-        description: "Go to type definition",
-        requires_buffer: true,
-        execute: &LspActions.goto_type_definition/1
-      },
-      %Minga.Command{
-        name: :goto_implementation,
-        description: "Go to implementation",
-        requires_buffer: true,
-        execute: &LspActions.goto_implementation/1
-      },
-      %Minga.Command{
-        name: :document_symbols,
-        description: "Document symbols",
-        requires_buffer: true,
-        execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.SymbolSource) end
-      },
-      %Minga.Command{
-        name: :selection_expand,
-        description: "Smart selection expand",
-        requires_buffer: true,
-        execute: &LspActions.selection_expand/1
-      },
-      %Minga.Command{
-        name: :selection_shrink,
-        description: "Smart selection shrink",
-        requires_buffer: true,
-        execute: &LspActions.selection_shrink/1
-      },
-      %Minga.Command{
-        name: :call_hierarchy,
-        description: "Call hierarchy (incoming)",
-        requires_buffer: true,
-        execute: &LspActions.prepare_call_hierarchy/1
-      },
-      %Minga.Command{
-        name: :call_hierarchy_outgoing,
-        description: "Call hierarchy (outgoing)",
-        requires_buffer: true,
-        execute: &LspActions.prepare_outgoing_call_hierarchy/1
-      },
-      %Minga.Command{
-        name: :workspace_symbols,
-        description: "Search workspace symbols",
-        requires_buffer: true,
-        execute: fn state ->
-          PickerUI.open(state, WorkspaceSymbolSource)
-        end
-      }
-    ]
+  command(:goto_definition, "Go to definition",
+    requires_buffer: true,
+    execute: &LspActions.goto_definition/1
+  )
 
-    standard ++ lsp_actions
-  end
+  command(:hover, "Hover documentation", requires_buffer: true, execute: &LspActions.hover/1)
+
+  command(:peek_definition, "Peek definition",
+    requires_buffer: true,
+    execute: &LspActions.peek_definition/1
+  )
+
+  command(:find_references, "Find all references",
+    requires_buffer: true,
+    execute: &LspActions.find_references/1
+  )
+
+  command(:code_action, "Code actions", requires_buffer: true, execute: &LspActions.code_action/1)
+
+  command(:rename_symbol, "Rename symbol",
+    requires_buffer: true,
+    execute: &LspActions.prepare_rename/1
+  )
+
+  command(:goto_type_definition, "Go to type definition",
+    requires_buffer: true,
+    execute: &LspActions.goto_type_definition/1
+  )
+
+  command(:goto_implementation, "Go to implementation",
+    requires_buffer: true,
+    execute: &LspActions.goto_implementation/1
+  )
+
+  command(:document_symbols, "Document symbols",
+    requires_buffer: true,
+    execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.SymbolSource) end
+  )
+
+  command(:selection_expand, "Smart selection expand",
+    requires_buffer: true,
+    execute: &LspActions.selection_expand/1
+  )
+
+  command(:selection_shrink, "Smart selection shrink",
+    requires_buffer: true,
+    execute: &LspActions.selection_shrink/1
+  )
+
+  command(:call_hierarchy, "Call hierarchy (incoming)",
+    requires_buffer: true,
+    execute: &LspActions.prepare_call_hierarchy/1
+  )
+
+  command(:call_hierarchy_outgoing, "Call hierarchy (outgoing)",
+    requires_buffer: true,
+    execute: &LspActions.prepare_outgoing_call_hierarchy/1
+  )
+
+  command(:workspace_symbols, "Search workspace symbols",
+    requires_buffer: true,
+    execute: fn state -> PickerUI.open(state, WorkspaceSymbolSource) end
+  )
 end

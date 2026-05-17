@@ -4,7 +4,7 @@ defmodule MingaEditor.Commands.Visual do
   visual selection.
   """
 
-  @behaviour Minga.Command.Provider
+  use MingaEditor.Commands.Provider
 
   alias Minga.Buffer
   alias Minga.Buffer.Document
@@ -173,17 +173,7 @@ defmodule MingaEditor.Commands.Visual do
   defp visual_type_for_text_object(:paragraph), do: :line
   defp visual_type_for_text_object(_spec), do: :char
 
-  @impl Minga.Command.Provider
-  def __commands__ do
-    Enum.map(@command_specs, fn {name, desc, requires_buffer} ->
-      %Minga.Command{
-        name: name,
-        description: desc,
-        requires_buffer: requires_buffer,
-        execute: fn state -> execute(state, name) end
-      }
-    end)
-  end
+  commands(@command_specs)
 
   # Checks if the active window is an agent chat window by inspecting
   # the window's content field (structural check, no GenServer call).

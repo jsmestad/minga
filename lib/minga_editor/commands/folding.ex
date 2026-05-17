@@ -7,7 +7,7 @@ defmodule MingaEditor.Commands.Folding do
   take precedence when both types exist at the cursor line.
   """
 
-  @behaviour Minga.Command.Provider
+  use MingaEditor.Commands.Provider
 
   alias Minga.Buffer
   alias Minga.Core.Decorations
@@ -257,15 +257,5 @@ defmodule MingaEditor.Commands.Folding do
     if fold.closed, do: Decorations.toggle_fold_region(decs, fold.id), else: decs
   end
 
-  @impl Minga.Command.Provider
-  def __commands__ do
-    Enum.map(@command_specs, fn {name, desc, requires_buffer} ->
-      %Minga.Command{
-        name: name,
-        description: desc,
-        requires_buffer: requires_buffer,
-        execute: fn state -> execute(state, name) end
-      }
-    end)
-  end
+  commands(@command_specs)
 end

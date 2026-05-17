@@ -5,7 +5,7 @@ defmodule MingaEditor.Commands.Help do
   Help content is created lazily, reused across invocations, and always shown in read-only special buffers.
   """
 
-  @behaviour Minga.Command.Provider
+  use MingaEditor.Commands.Provider
 
   alias Minga.Buffer
   alias Minga.Command
@@ -31,48 +31,12 @@ defmodule MingaEditor.Commands.Help do
           optional(:display_key) => String.t()
         }
 
-  @impl Minga.Command.Provider
-  @spec __commands__() :: [Command.t()]
-  def __commands__ do
-    [
-      %Command{
-        name: :describe_bindings,
-        description: "Describe bindings",
-        requires_buffer: false,
-        execute: fn state -> execute(state, :describe_bindings) end
-      },
-      %Command{
-        name: :describe_command,
-        description: "Describe command",
-        requires_buffer: false,
-        execute: fn state -> execute(state, :describe_command) end
-      },
-      %Command{
-        name: :describe_option,
-        description: "Describe option",
-        requires_buffer: false,
-        execute: fn state -> execute(state, :describe_option) end
-      },
-      %Command{
-        name: :indent_picker,
-        description: "Open indent settings picker",
-        requires_buffer: false,
-        execute: fn state -> execute(state, :indent_picker) end
-      },
-      %Command{
-        name: :describe_lossage,
-        description: "Show keystroke history",
-        requires_buffer: false,
-        execute: fn state -> execute(state, :describe_lossage) end
-      },
-      %Command{
-        name: :describe_function,
-        description: "Describe function",
-        requires_buffer: false,
-        execute: fn state -> execute(state, :describe_function) end
-      }
-    ]
-  end
+  command(:describe_bindings, "Describe bindings", requires_buffer: false)
+  command(:describe_command, "Describe command", requires_buffer: false)
+  command(:describe_option, "Describe option", requires_buffer: false)
+  command(:indent_picker, "Open indent settings picker", requires_buffer: false)
+  command(:describe_lossage, "Show keystroke history", requires_buffer: false)
+  command(:describe_function, "Describe function", requires_buffer: false)
 
   @spec execute(state(), Mode.command()) :: state()
   def execute(state, {:describe_key_result, key_str, command, description}) do

@@ -4,7 +4,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   ex-command dispatch, and line number style cycling.
   """
 
-  @behaviour Minga.Command.Provider
+  use MingaEditor.Commands.Provider
 
   alias MingaAgent.Session
   alias Minga.Buffer
@@ -1694,200 +1694,61 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
   end
 
-  @impl Minga.Command.Provider
-  def __commands__ do
-    standard = [
-      %Minga.Command{
-        name: :save,
-        description: "Save the current file",
-        requires_buffer: true,
-        execute: fn state -> execute(state, :save) end
-      },
-      %Minga.Command{
-        name: :force_save,
-        description: "Force save the current file",
-        requires_buffer: true,
-        execute: fn state -> execute(state, :force_save) end
-      },
-      %Minga.Command{
-        name: :reload,
-        description: "Reload file from disk",
-        requires_buffer: true,
-        execute: fn state -> execute(state, :reload) end
-      },
-      %Minga.Command{
-        name: :quit,
-        description: "Close tab or quit",
-        requires_buffer: true,
-        execute: fn state -> execute(state, :quit) end
-      },
-      %Minga.Command{
-        name: :force_quit,
-        description: "Force close tab or quit",
-        requires_buffer: true,
-        execute: fn state -> execute(state, :force_quit) end
-      },
-      %Minga.Command{
-        name: :close_other_tabs,
-        description: "Close all tabs except the active tab",
-        requires_buffer: true,
-        execute: fn state -> execute(state, :close_other_tabs) end
-      },
-      %Minga.Command{
-        name: :quit_all,
-        description: "Quit the editor (all tabs)",
-        requires_buffer: true,
-        execute: fn state -> execute(state, :quit_all) end
-      },
-      %Minga.Command{
-        name: :force_quit_all,
-        description: "Force quit the editor (all tabs)",
-        requires_buffer: true,
-        execute: fn state -> execute(state, :force_quit_all) end
-      },
-      %Minga.Command{
-        name: :abort_quit,
-        description: "Abort and quit with error exit code",
-        requires_buffer: false,
-        execute: fn state -> execute(state, :abort_quit) end
-      },
-      %Minga.Command{
-        name: :confirm_quit_yes,
-        description: "Confirm quit (yes)",
-        requires_buffer: true,
-        execute: fn state -> execute(state, :confirm_quit_yes) end
-      },
-      %Minga.Command{
-        name: :confirm_quit_no,
-        description: "Confirm quit (no)",
-        requires_buffer: true,
-        execute: fn state -> execute(state, :confirm_quit_no) end
-      },
-      %Minga.Command{
-        name: :buffer_list,
-        description: "Switch buffer",
-        requires_buffer: true,
-        execute: fn state -> execute(state, :buffer_list) end
-      },
-      %Minga.Command{
-        name: :buffer_list_all,
-        description: "Switch buffer (all)",
-        requires_buffer: true,
-        execute: fn state -> execute(state, :buffer_list_all) end
-      },
-      %Minga.Command{
-        name: :buffer_next,
-        description: "Next buffer",
-        requires_buffer: true,
-        execute: fn state -> execute(state, :buffer_next) end
-      },
-      %Minga.Command{
-        name: :buffer_prev,
-        description: "Previous buffer",
-        requires_buffer: true,
-        execute: fn state -> execute(state, :buffer_prev) end
-      },
-      %Minga.Command{
-        name: :kill_buffer,
-        description: "Kill current buffer",
-        requires_buffer: true,
-        execute: fn state -> execute(state, :kill_buffer) end
-      },
-      %Minga.Command{
-        name: :view_messages,
-        description: "Show messages in bottom panel",
-        requires_buffer: false,
-        execute: fn state -> execute(state, :view_messages) end
-      },
-      %Minga.Command{
-        name: :view_warnings,
-        description: "Show warnings in bottom panel",
-        requires_buffer: false,
-        execute: fn state -> execute(state, :view_warnings) end
-      },
-      %Minga.Command{
-        name: :open_config,
-        description: "Open config file",
-        requires_buffer: true,
-        execute: fn state -> execute(state, :open_config) end
-      },
-      %Minga.Command{
-        name: :tab_next,
-        description: "Next tab",
-        requires_buffer: true,
-        execute: fn state -> execute(state, :tab_next) end
-      },
-      %Minga.Command{
-        name: :tab_prev,
-        description: "Previous tab",
-        requires_buffer: true,
-        execute: fn state -> execute(state, :tab_prev) end
-      },
-      %Minga.Command{
-        name: :new_buffer,
-        description: "Create new empty buffer",
-        requires_buffer: false,
-        execute: fn state -> execute(state, :new_buffer) end
-      },
-      %Minga.Command{
-        name: :reload_config,
-        description: "Reload config",
-        requires_buffer: true,
-        execute: &reload_config/1
-      },
-      %Minga.Command{
-        name: :alternate_file,
-        description: "Switch to alternate file",
-        requires_buffer: true,
-        execute: &alternate_file/1
-      }
-    ]
+  command(:save, "Save the current file", requires_buffer: true)
+  command(:force_save, "Force save the current file", requires_buffer: true)
+  command(:reload, "Reload file from disk", requires_buffer: true)
+  command(:quit, "Close tab or quit", requires_buffer: true)
+  command(:force_quit, "Force close tab or quit", requires_buffer: true)
+  command(:close_other_tabs, "Close all tabs except the active tab", requires_buffer: true)
+  command(:quit_all, "Quit the editor (all tabs)", requires_buffer: true)
+  command(:force_quit_all, "Force quit the editor (all tabs)", requires_buffer: true)
+  command(:abort_quit, "Abort and quit with error exit code", requires_buffer: false)
+  command(:confirm_quit_yes, "Confirm quit (yes)", requires_buffer: true)
+  command(:confirm_quit_no, "Confirm quit (no)", requires_buffer: true)
+  command(:buffer_list, "Switch buffer", requires_buffer: true)
+  command(:buffer_list_all, "Switch buffer (all)", requires_buffer: true)
+  command(:buffer_next, "Next buffer", requires_buffer: true)
+  command(:buffer_prev, "Previous buffer", requires_buffer: true)
+  command(:kill_buffer, "Kill current buffer", requires_buffer: true)
+  command(:view_messages, "Show messages in bottom panel", requires_buffer: false)
+  command(:view_warnings, "Show warnings in bottom panel", requires_buffer: false)
+  command(:open_config, "Open config file", requires_buffer: true)
+  command(:tab_next, "Next tab", requires_buffer: true)
+  command(:tab_prev, "Previous tab", requires_buffer: true)
+  command(:new_buffer, "Create new empty buffer", requires_buffer: false)
+  command(:reload_config, "Reload config", requires_buffer: true, execute: &reload_config/1)
 
-    tabs =
-      for n <- 1..9 do
-        cmd = String.to_atom("tab_goto_#{n}")
+  command(:alternate_file, "Switch to alternate file",
+    requires_buffer: true,
+    execute: &alternate_file/1
+  )
 
-        %Minga.Command{
-          name: cmd,
-          description: "Switch to tab #{n}",
-          requires_buffer: true,
-          execute: fn state -> tab_goto(state, cmd) end
-        }
-      end
+  numbered_commands(:tab_goto, 1..9, "Switch to tab",
+    requires_buffer: true,
+    execute: &tab_goto/2
+  )
 
-    scoped = [
-      %Minga.Command{
-        name: :cycle_line_numbers,
-        description: "Cycle line number style (hybrid → absolute → relative → none)",
-        requires_buffer: true,
-        execute: fn state -> execute(state, :cycle_line_numbers) end,
-        option_toggle:
-          {:line_numbers,
-           fn
-             :hybrid -> :absolute
-             :absolute -> :relative
-             :relative -> :none
-             :none -> :hybrid
-           end}
-      },
-      %Minga.Command{
-        name: :toggle_wrap,
-        description: "Toggle word wrap",
-        requires_buffer: true,
-        execute: fn state -> execute(state, :toggle_wrap) end,
-        option_toggle: :wrap
-      },
-      %Minga.Command{
-        name: :toggle_invisible,
-        description: "Toggle invisible characters",
-        requires_buffer: true,
-        execute: fn state -> execute(state, :toggle_invisible) end,
-        option_toggle: :show_invisible
-      }
-    ]
+  command(:cycle_line_numbers, "Cycle line number style (hybrid → absolute → relative → none)",
+    requires_buffer: true,
+    option_toggle:
+      {:line_numbers,
+       fn
+         :hybrid -> :absolute
+         :absolute -> :relative
+         :relative -> :none
+         :none -> :hybrid
+       end}
+  )
 
-    standard ++ tabs ++ scoped
-  end
+  command(:toggle_wrap, "Toggle word wrap",
+    requires_buffer: true,
+    option_toggle: :wrap
+  )
+
+  command(:toggle_invisible, "Toggle invisible characters",
+    requires_buffer: true,
+    option_toggle: :show_invisible
+  )
 
   # ── Frontend dispatch ─────────────────────────────────────────────────────
 

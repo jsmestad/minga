@@ -4,7 +4,7 @@ defmodule MingaEditor.Commands.Project do
   add/remove known projects.
   """
 
-  @behaviour Minga.Command.Provider
+  use MingaEditor.Commands.Provider
 
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
@@ -80,15 +80,5 @@ defmodule MingaEditor.Commands.Project do
     :exit, _ -> nil
   end
 
-  @impl Minga.Command.Provider
-  def __commands__ do
-    Enum.map(@command_specs, fn {name, desc, requires_buffer} ->
-      %Minga.Command{
-        name: name,
-        description: desc,
-        requires_buffer: requires_buffer,
-        execute: fn state -> execute(state, name) end
-      }
-    end)
-  end
+  commands(@command_specs)
 end

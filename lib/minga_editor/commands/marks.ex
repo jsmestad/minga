@@ -4,7 +4,7 @@ defmodule MingaEditor.Commands.Marks do
   last cursor position.
   """
 
-  @behaviour Minga.Command.Provider
+  use MingaEditor.Commands.Provider
 
   alias Minga.Buffer
   alias Minga.Buffer.Document
@@ -110,15 +110,5 @@ defmodule MingaEditor.Commands.Marks do
 
   def execute(state, :jump_to_last_pos_exact), do: state
 
-  @impl Minga.Command.Provider
-  def __commands__ do
-    Enum.map(@command_specs, fn {name, desc, requires_buffer} ->
-      %Minga.Command{
-        name: name,
-        description: desc,
-        requires_buffer: requires_buffer,
-        execute: fn state -> execute(state, name) end
-      }
-    end)
-  end
+  commands(@command_specs)
 end

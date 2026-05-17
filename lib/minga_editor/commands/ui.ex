@@ -5,93 +5,75 @@ defmodule MingaEditor.Commands.UI do
   to a specific domain.
   """
 
-  @behaviour Minga.Command.Provider
+  use MingaEditor.Commands.Provider
 
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
   alias Minga.Parser.Manager, as: ParserManager
 
-  @impl Minga.Command.Provider
-  def __commands__ do
-    [
-      %Minga.Command{
-        name: :command_palette,
-        description: "Execute command",
-        requires_buffer: false,
-        execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.CommandSource) end
-      },
-      %Minga.Command{
-        name: :find_file,
-        description: "Find file in project",
-        requires_buffer: false,
-        execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.FileSource) end
-      },
-      %Minga.Command{
-        name: :find_file_other_window,
-        description: "Find file in other window",
-        requires_buffer: false,
-        execute: fn state ->
-          state
-          |> MingaEditor.Commands.Movement.execute(:split_vertical)
-          |> PickerUI.open(MingaEditor.UI.Picker.FileSource)
-        end
-      },
-      %Minga.Command{
-        name: :theme_picker,
-        description: "Pick theme",
-        requires_buffer: false,
-        execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.ThemeSource) end
-      },
-      %Minga.Command{
-        name: :set_language,
-        description: "Set buffer language",
-        requires_buffer: false,
-        execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.LanguageSource) end
-      },
-      %Minga.Command{
-        name: :diagnostics_list,
-        description: "List buffer diagnostics",
-        requires_buffer: true,
-        execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.Sources.Diagnostics) end
-      },
-      %Minga.Command{
-        name: :filetype_menu,
-        description: "Show filetype actions",
-        requires_buffer: true,
-        execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.LanguageSource) end
-      },
-      %Minga.Command{
-        name: :parser_restart,
-        description: "Restart tree-sitter parser",
-        requires_buffer: false,
-        execute: &execute_parser_restart/1
-      },
-      %Minga.Command{
-        name: :toggle_bottom_panel,
-        description: "Toggle bottom panel",
-        requires_buffer: false,
-        execute: &toggle_bottom_panel/1
-      },
-      %Minga.Command{
-        name: :bottom_panel_next_tab,
-        description: "Bottom panel: next tab",
-        requires_buffer: false,
-        execute: &bottom_panel_next_tab/1
-      },
-      %Minga.Command{
-        name: :bottom_panel_prev_tab,
-        description: "Bottom panel: previous tab",
-        requires_buffer: false,
-        execute: &bottom_panel_prev_tab/1
-      },
-      %Minga.Command{
-        name: :toggle_board,
-        description: "Toggle The Board view",
-        requires_buffer: false,
-        execute: &toggle_board/1
-      }
-    ]
-  end
+  command(:command_palette, "Execute command",
+    requires_buffer: false,
+    execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.CommandSource) end
+  )
+
+  command(:find_file, "Find file in project",
+    requires_buffer: false,
+    execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.FileSource) end
+  )
+
+  command(:find_file_other_window, "Find file in other window",
+    requires_buffer: false,
+    execute: fn state ->
+      state
+      |> MingaEditor.Commands.Movement.execute(:split_vertical)
+      |> PickerUI.open(MingaEditor.UI.Picker.FileSource)
+    end
+  )
+
+  command(:theme_picker, "Pick theme",
+    requires_buffer: false,
+    execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.ThemeSource) end
+  )
+
+  command(:set_language, "Set buffer language",
+    requires_buffer: false,
+    execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.LanguageSource) end
+  )
+
+  command(:diagnostics_list, "List buffer diagnostics",
+    requires_buffer: true,
+    execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.Sources.Diagnostics) end
+  )
+
+  command(:filetype_menu, "Show filetype actions",
+    requires_buffer: true,
+    execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.LanguageSource) end
+  )
+
+  command(:parser_restart, "Restart tree-sitter parser",
+    requires_buffer: false,
+    execute: &execute_parser_restart/1
+  )
+
+  command(:toggle_bottom_panel, "Toggle bottom panel",
+    requires_buffer: false,
+    execute: &toggle_bottom_panel/1
+  )
+
+  command(:bottom_panel_next_tab, "Bottom panel: next tab",
+    requires_buffer: false,
+    execute: &bottom_panel_next_tab/1
+  )
+
+  command(:bottom_panel_prev_tab, "Bottom panel: previous tab",
+    requires_buffer: false,
+    execute: &bottom_panel_prev_tab/1
+  )
+
+  command(:toggle_board, "Toggle The Board view",
+    requires_buffer: false,
+    execute: &toggle_board/1
+  )
 
   @spec toggle_bottom_panel(EditorState.t()) :: EditorState.t()
   defp toggle_bottom_panel(state), do: frontend(state).toggle_bottom_panel(state)

@@ -4,11 +4,10 @@ defmodule MingaEditor.Commands.Tutor do
   lessons that the user edits directly to practice motions and operators.
   """
 
-  @behaviour Minga.Command.Provider
+  use MingaEditor.Commands.Provider
 
   alias Minga.Buffer
   alias Minga.Buffer.Document
-  alias Minga.Command
   alias MingaEditor.Commands
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -18,18 +17,7 @@ defmodule MingaEditor.Commands.Tutor do
 
   @tutor_buffer_name "*Tutor*"
 
-  @impl Minga.Command.Provider
-  @spec __commands__() :: [Command.t()]
-  def __commands__ do
-    [
-      %Command{
-        name: :tutor,
-        description: "Interactive Minga tutorial",
-        requires_buffer: false,
-        execute: fn state -> execute(state, :tutor) end
-      }
-    ]
-  end
+  command(:tutor, "Interactive Minga tutorial", requires_buffer: false)
 
   @spec execute(state(), :tutor) :: state()
   def execute(state, :tutor) do

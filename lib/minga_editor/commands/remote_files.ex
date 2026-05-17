@@ -5,7 +5,7 @@ defmodule MingaEditor.Commands.RemoteFiles do
   Remote files edit at local buffer speed and save through Erlang distribution. LSP features are intentionally disabled for these buffers because language servers run on the remote machine, not in the local editor workspace.
   """
 
-  @behaviour Minga.Command.Provider
+  use MingaEditor.Commands.Provider
 
   alias Minga.Buffer
   alias Minga.Distribution.ConnectionManager
@@ -48,17 +48,10 @@ defmodule MingaEditor.Commands.RemoteFiles do
     end
   end
 
-  @impl Minga.Command.Provider
-  def __commands__ do
-    [
-      %Minga.Command{
-        name: :remote_find_file,
-        description: "Find file on remote server",
-        requires_buffer: false,
-        execute: &find_remote_file/1
-      }
-    ]
-  end
+  command(:remote_find_file, "Find file on remote server",
+    requires_buffer: false,
+    execute: &find_remote_file/1
+  )
 
   @spec open_remote_file(state(), String.t(), node(), String.t()) :: state()
   defp open_remote_file(state, server_name, remote_node, remote_path) do

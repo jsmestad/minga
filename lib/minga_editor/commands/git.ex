@@ -4,7 +4,7 @@ defmodule MingaEditor.Commands.Git do
   branch picker, hunk navigation, stage, revert, preview, and blame.
   """
 
-  @behaviour Minga.Command.Provider
+  use MingaEditor.Commands.Provider
 
   alias Minga.Buffer
   alias Minga.Core.Diff
@@ -1313,15 +1313,5 @@ defmodule MingaEditor.Commands.Git do
     end
   end
 
-  @impl Minga.Command.Provider
-  def __commands__ do
-    Enum.map(@command_specs, fn {name, desc, requires_buffer} ->
-      %Minga.Command{
-        name: name,
-        description: desc,
-        requires_buffer: requires_buffer,
-        execute: fn state -> execute(state, name) end
-      }
-    end)
-  end
+  commands(@command_specs)
 end

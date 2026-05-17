@@ -4,7 +4,7 @@ defmodule MingaEditor.Commands.Search do
   word-under-cursor search.
   """
 
-  @behaviour Minga.Command.Provider
+  use MingaEditor.Commands.Provider
 
   alias Minga.Buffer
   alias Minga.Buffer.Document
@@ -502,53 +502,31 @@ defmodule MingaEditor.Commands.Search do
     end
   end
 
-  @impl Minga.Command.Provider
-  def __commands__ do
-    standard =
-      Enum.map(@command_specs, fn {name, desc, requires_buffer} ->
-        %Minga.Command{
-          name: name,
-          description: desc,
-          requires_buffer: requires_buffer,
-          execute: fn state -> execute(state, name) end
-        }
-      end)
+  commands(@command_specs)
 
-    extra = [
-      %Minga.Command{
-        name: :search_project,
-        description: "Search across project files",
-        requires_buffer: false,
-        execute: fn state ->
-          EditorState.transition_mode(state, :search_prompt, %Minga.Mode.SearchPromptState{})
-        end
-      },
-      %Minga.Command{
-        name: :search_todos,
-        description: "Search TODO markers",
-        requires_buffer: false,
-        execute: fn state ->
-          PickerUI.open(state, MingaEditor.UI.Picker.TodoSearchSource)
-        end
-      },
-      %Minga.Command{
-        name: :search_buffer,
-        description: "Search in buffer",
-        requires_buffer: true,
-        execute: fn state ->
-          EditorState.transition_mode(state, :search, %SearchState{direction: :forward})
-        end
-      },
-      %Minga.Command{
-        name: :search_and_replace,
-        description: "Search and replace",
-        requires_buffer: true,
-        execute: fn state ->
-          EditorState.transition_mode(state, :command, %CommandState{input: "%s/"})
-        end
-      }
-    ]
+  command(:search_project, "Search across project files",
+    requires_buffer: false,
+    execute: fn state ->
+      EditorState.transition_mode(state, :search_prompt, %Minga.Mode.SearchPromptState{})
+    end
+  )
 
-    standard ++ extra
-  end
+  command(:search_todos, "Search TODO markers",
+    requires_buffer: false,
+    execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.TodoSearchSource) end
+  )
+
+  command(:search_buffer, "Search in buffer",
+    requires_buffer: true,
+    execute: fn state ->
+      EditorState.transition_mode(state, :search, %SearchState{direction: :forward})
+    end
+  )
+
+  command(:search_and_replace, "Search and replace",
+    requires_buffer: true,
+    execute: fn state ->
+      EditorState.transition_mode(state, :command, %CommandState{input: "%s/"})
+    end
+  )
 end

@@ -2,6 +2,7 @@ defmodule MingaEditor.Commands.BufferManagementTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Command
   alias Minga.Config.Options
   alias MingaEditor
   alias MingaEditor.Commands.BufferManagement
@@ -73,6 +74,26 @@ defmodule MingaEditor.Commands.BufferManagementTest do
   end
 
   defp tab_count(state), do: state |> EditorState.tab_bar() |> TabBar.count()
+
+  describe "__commands__/0" do
+    test "preserves line toggle and wrap metadata" do
+      commands = BufferManagement.__commands__() |> Map.new(&{&1.name, &1})
+
+      assert %Command{requires_buffer: true, option_toggle: {:line_numbers, toggle}} =
+               commands[:cycle_line_numbers]
+
+      assert is_function(toggle, 1)
+      assert toggle.(:hybrid) == :absolute
+      assert toggle.(:absolute) == :relative
+      assert toggle.(:relative) == :none
+      assert toggle.(:none) == :hybrid
+
+      assert %Command{requires_buffer: true, option_toggle: :wrap} = commands[:toggle_wrap]
+
+      assert %Command{requires_buffer: true, option_toggle: :show_invisible} =
+               commands[:toggle_invisible]
+    end
+  end
 
   describe "command mode editor integration smoke" do
     @describetag layer: :editor_integration
