@@ -176,7 +176,7 @@ enum RenderCommand: Sendable {
     case guiLineSpacing(spacing: Float)
     case guiCursorAnimation(enabled: Bool)
     case guiSplitSeparators(borderColor: UInt32, verticals: [Wire.VerticalSeparator], horizontals: [Wire.HorizontalSeparator])
-    case guiGitStatus(repoState: UInt8, syncing: Bool, ahead: UInt16, behind: UInt16, branchName: String, entries: [Wire.GitStatusEntry], toast: (message: String, level: UInt8, action: UInt8)?)
+    case guiGitStatus(repoState: UInt8, syncing: Bool, ahead: UInt16, behind: UInt16, branchName: String, entries: [Wire.GitStatusEntry], toast: (message: String, level: UInt8, action: UInt8)?, entryBasePath: String, lastCommitMessage: String)
     case guiAgentGroups(activeGroupId: UInt16, agentGroups: [Wire.AgentGroupEntry])
     case guiBoard(visible: Bool, focusedCardId: UInt32, cards: [BoardCard], filterMode: Bool, filterText: String)
     case guiAgentContext(visible: Bool, task: String, dispatchTimestamp: Date, status: CardStatus, canApprove: Bool)
@@ -2065,7 +2065,22 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             gsPos += gsToastMsgLen
             gsToast = (message: gsToastMsg, level: gsToastLevel, action: gsToastAction)
         }
-        return (.guiGitStatus(repoState: gsRepoState, syncing: gsSyncing, ahead: gsAhead, behind: gsBehind, branchName: gsBranchName, entries: gsEntries, toast: gsToast),
+
+        guard data.count >= gsPos + 2 else { throw ProtocolDecodeError.malformed }
+        let gsEntryBasePathLen = Int(readU16(data, gsPos))
+        gsPos += 2
+        guard data.count >= gsPos + gsEntryBasePathLen + 2 else { throw ProtocolDecodeError.malformed }
+        let gsEntryBasePathData = data[gsPos..<(gsPos + gsEntryBasePathLen)]
+        let gsEntryBasePath = try readRequiredUTF8(gsEntryBasePathData)
+        gsPos += gsEntryBasePathLen
+
+        let gsLastCommitMessageLen = Int(readU16(data, gsPos))
+        gsPos += 2
+        guard data.count >= gsPos + gsLastCommitMessageLen else { throw ProtocolDecodeError.malformed }
+        let gsLastCommitMessageData = data[gsPos..<(gsPos + gsLastCommitMessageLen)]
+        let gsLastCommitMessage = try readRequiredUTF8(gsLastCommitMessageData)
+        gsPos += gsLastCommitMessageLen
+        return (.guiGitStatus(repoState: gsRepoState, syncing: gsSyncing, ahead: gsAhead, behind: gsBehind, branchName: gsBranchName, entries: gsEntries, toast: gsToast, entryBasePath: gsEntryBasePath, lastCommitMessage: gsLastCommitMessage),
                 gsPos - offset)
 
     case OP_GUI_AGENT_GROUPS:

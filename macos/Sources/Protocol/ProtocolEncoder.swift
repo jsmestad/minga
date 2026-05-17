@@ -75,6 +75,7 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendGitUnstageAll()
     func sendGitCommit(message: String)
     func sendGitOpenFile(path: String)
+    func sendGitOpenDiff(path: String, section: UInt8)
     func sendGitPush()
     func sendGitPull()
     func sendGitFetch()
@@ -674,20 +675,39 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     func sendGitCommit(message: String) {
+        sendGitCommit(message: message, amend: false)
+    }
+
+    private func sendGitCommit(message: String, amend: Bool) {
         let utf8 = Array(message.utf8)
         let msgLen = min(utf8.count, Int(UInt16.max))
-        var buf = Data(count: 4 + msgLen)
+        var buf = Data(count: 5 + msgLen)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_GIT_COMMIT
-        writeU16(&buf, 2, UInt16(msgLen))
+        buf[2] = amend ? 1 : 0
+        writeU16(&buf, 3, UInt16(msgLen))
         if msgLen > 0 {
-            buf.replaceSubrange(4..<(4 + msgLen), with: utf8[0..<msgLen])
+            buf.replaceSubrange(5..<(5 + msgLen), with: utf8[0..<msgLen])
         }
         writeFrame(buf)
     }
 
     func sendGitOpenFile(path: String) {
         sendGitPathAction(GUI_ACTION_GIT_OPEN_FILE, path: path)
+    }
+
+    func sendGitOpenDiff(path: String, section: UInt8) {
+        let utf8 = Array(path.utf8)
+        let pathLen = min(utf8.count, Int(UInt16.max))
+        var buf = Data(count: 5 + pathLen)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_GIT_OPEN_DIFF
+        writeU16(&buf, 2, UInt16(pathLen))
+        if pathLen > 0 {
+            buf.replaceSubrange(4..<(4 + pathLen), with: utf8[0..<pathLen])
+        }
+        buf[4 + pathLen] = section
+        writeFrame(buf)
     }
 
     func sendGitPush() {
@@ -712,16 +732,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     func sendGitCommitAmend(message: String) {
-        let utf8 = Array(message.utf8)
-        let msgLen = min(utf8.count, Int(UInt16.max))
-        var buf = Data(count: 4 + msgLen)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_GIT_COMMIT_AMEND
-        writeU16(&buf, 2, UInt16(msgLen))
-        if msgLen > 0 {
-            buf.replaceSubrange(4..<(4 + msgLen), with: utf8[0..<msgLen])
-        }
-        writeFrame(buf)
+        sendGitCommit(message: message, amend: true)
     }
 
     /// Send a gui_action: git_pull_and_retry. Layout: opcode(1) + action_type(1).
