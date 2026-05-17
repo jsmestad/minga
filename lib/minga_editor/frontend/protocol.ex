@@ -49,6 +49,7 @@ defmodule MingaEditor.Frontend.Protocol do
   @op_gui_action 0x07
 
   alias Minga.Core.Face
+  alias Minga.Parser.StructuralNavResult
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
@@ -171,6 +172,7 @@ defmodule MingaEditor.Frontend.Protocol do
              result ::
                {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
                | nil}
+          | {:node_info, request_id :: non_neg_integer(), StructuralNavResult.t() | nil}
           | {:match_item_result, request_id :: non_neg_integer(),
              result :: {non_neg_integer(), non_neg_integer()} | nil}
           | {:textobject_positions, buffer_id :: non_neg_integer(), version :: non_neg_integer(),
@@ -496,11 +498,22 @@ defmodule MingaEditor.Frontend.Protocol do
   defdelegate encode_set_indent_query(buffer_id, query), to: Minga.Parser.Protocol
   defdelegate encode_request_indent(buffer_id, request_id, line), to: Minga.Parser.Protocol
   defdelegate encode_set_textobject_query(buffer_id, query), to: Minga.Parser.Protocol
+  defdelegate encode_set_tags_query(buffer_id, query), to: Minga.Parser.Protocol
 
   defdelegate encode_request_textobject(buffer_id, request_id, row, col, capture_name),
     to: Minga.Parser.Protocol
 
   defdelegate encode_request_match_item(buffer_id, request_id, row, col),
+    to: Minga.Parser.Protocol
+
+  @spec encode_request_structural_nav(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          0..3
+        ) :: binary()
+  defdelegate encode_request_structural_nav(buffer_id, request_id, row, col, action),
     to: Minga.Parser.Protocol
 
   defdelegate encode_load_grammar(name, path), to: Minga.Parser.Protocol
@@ -580,7 +593,7 @@ defmodule MingaEditor.Frontend.Protocol do
   # Parser events are decoded by Minga.Parser.Protocol. Try it first,
   # then fall through to input event decoders.
   def decode_event(<<opcode::8, _rest::binary>> = data)
-      when opcode in 0x30..0x3C or opcode == 0x60 do
+      when opcode in 0x30..0x3E or opcode == 0x60 do
     case Minga.Parser.Protocol.decode_event(data) do
       {:ok, _} = result -> result
       :unknown -> {:error, :unknown_opcode}

@@ -424,6 +424,7 @@ final class SpyEncoder: InputEncoder, Sendable {
         case gitUnstageAll
         case gitCommit(message: String)
         case gitOpenFile(path: String)
+        case gitOpenDiff(path: String, section: UInt8)
         case gitPush
         case gitPull
         case gitFetch
@@ -522,6 +523,7 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendGitUnstageAll() { state.withLock { $0.guiActions.append(.gitUnstageAll) } }
     func sendGitCommit(message: String) { state.withLock { $0.guiActions.append(.gitCommit(message: message)) } }
     func sendGitOpenFile(path: String) { state.withLock { $0.guiActions.append(.gitOpenFile(path: path)) } }
+    func sendGitOpenDiff(path: String, section: UInt8) { state.withLock { $0.guiActions.append(.gitOpenDiff(path: path, section: section)) } }
     func sendGitPush() { state.withLock { $0.guiActions.append(.gitPush) } }
     func sendGitPull() { state.withLock { $0.guiActions.append(.gitPull) } }
     func sendGitFetch() { state.withLock { $0.guiActions.append(.gitFetch) } }

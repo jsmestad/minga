@@ -1,10 +1,8 @@
 defmodule MingaEditor.Commands.OperatorsTest do
   @moduledoc """
-  Tests for counted line operators (delete_lines_counted, change_lines_counted,
-  yank_lines_counted) in MingaEditor.Commands.Operators.
+  Layer 0/1 command-state tests for counted line operators (delete_lines_counted, change_lines_counted, yank_lines_counted) in MingaEditor.Commands.Operators.
 
-  Calls `Operators.execute/2` directly on constructed EditorState structs
-  with a real BufferProcess. No Editor GenServer needed.
+  Calls `Operators.execute/2` directly on constructed EditorState structs with a real BufferProcess. No Editor GenServer needed.
   """
   use ExUnit.Case, async: true
 

@@ -44,7 +44,8 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
            entries: [%{path: "foo.ex", status: :modified}],
            branch: "develop",
            ahead: 1,
-           behind: 0
+           behind: 0,
+           last_commit_message: "feat: previous subject"
          }}
 
       {new_state, effects} = FileEventHandler.handle(state, event)
@@ -52,6 +53,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       panel = EditorState.git_status_panel(new_state)
       assert panel.branch == "develop"
       assert panel.ahead == 1
+      assert panel.last_commit_message == "feat: previous subject"
       assert {:render, 16} in effects
     end
 

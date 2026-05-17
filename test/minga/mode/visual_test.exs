@@ -97,6 +97,26 @@ defmodule Minga.Mode.VisualTest do
       assert {:execute, :move_right, _} = Visual.handle_key({?l, 0}, state)
     end
 
+    test "Alt+h emits structural parent navigation" do
+      state = visual_state()
+      assert {:execute, :nav_parent, _} = Visual.handle_key({?h, 0x04}, state)
+    end
+
+    test "Alt+l emits structural first child navigation" do
+      state = visual_state()
+      assert {:execute, :nav_first_child, _} = Visual.handle_key({?l, 0x04}, state)
+    end
+
+    test "Alt+j emits structural next sibling navigation" do
+      state = visual_state()
+      assert {:execute, :nav_next_sibling, _} = Visual.handle_key({?j, 0x04}, state)
+    end
+
+    test "Alt+k emits structural previous sibling navigation" do
+      state = visual_state()
+      assert {:execute, :nav_prev_sibling, _} = Visual.handle_key({?k, 0x04}, state)
+    end
+
     test "w emits :word_forward" do
       state = visual_state()
       assert {:execute, :word_forward, _} = Visual.handle_key({?w, 0}, state)

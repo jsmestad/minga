@@ -38,6 +38,7 @@ defmodule Minga.Git.Repo do
     branch: nil,
     ahead: 0,
     behind: 0,
+    last_commit_message: "",
     watcher_pid: nil,
     debounce_ref: nil,
     events_registry: Minga.Events.default_registry()
@@ -51,6 +52,7 @@ defmodule Minga.Git.Repo do
           branch: String.t() | nil,
           ahead: non_neg_integer(),
           behind: non_neg_integer(),
+          last_commit_message: String.t(),
           watcher_pid: pid() | nil,
           debounce_ref: reference() | nil,
           events_registry: Minga.Events.registry()
@@ -70,7 +72,8 @@ defmodule Minga.Git.Repo do
           staged_count: non_neg_integer(),
           unstaged_count: non_neg_integer(),
           untracked_count: non_neg_integer(),
-          conflict_count: non_neg_integer()
+          conflict_count: non_neg_integer(),
+          last_commit_message: String.t()
         }
 
   # ── Client API ─────────────────────────────────────────────────────────
@@ -263,17 +266,27 @@ defmodule Minga.Git.Repo do
     old_branch = state.branch
     old_ahead = state.ahead
     old_behind = state.behind
+    old_last_commit_message = state.last_commit_message
 
     entries = fetch_status(state.git_root, state.project_root)
     branch = fetch_branch(state.git_root)
     {ahead, behind} = fetch_ahead_behind(state.git_root)
+    last_commit_message = fetch_last_commit_message(state.git_root)
 
-    state = %{state | entries: entries, branch: branch, ahead: ahead, behind: behind}
+    state = %{
+      state
+      | entries: entries,
+        branch: branch,
+        ahead: ahead,
+        behind: behind,
+        last_commit_message: last_commit_message
+    }
 
     # Broadcast only if something changed
     changed =
       entries != old_entries or branch != old_branch or
-        ahead != old_ahead or behind != old_behind
+        ahead != old_ahead or behind != old_behind or
+        last_commit_message != old_last_commit_message
 
     if changed do
       Minga.Events.broadcast(
@@ -283,7 +296,8 @@ defmodule Minga.Git.Repo do
           entries: entries,
           branch: branch,
           ahead: ahead,
-          behind: behind
+          behind: behind,
+          last_commit_message: last_commit_message
         },
         state.events_registry
       )
@@ -317,6 +331,14 @@ defmodule Minga.Git.Repo do
     case Git.ahead_behind(git_root) do
       {:ok, ahead, behind} -> {ahead, behind}
       :error -> {0, 0}
+    end
+  end
+
+  @spec fetch_last_commit_message(String.t()) :: String.t()
+  defp fetch_last_commit_message(git_root) do
+    case Git.last_commit_message(git_root) do
+      {:ok, message} -> message
+      :error -> ""
     end
   end
 
@@ -358,7 +380,8 @@ defmodule Minga.Git.Repo do
       staged_count: counts.staged,
       unstaged_count: counts.unstaged,
       untracked_count: counts.untracked,
-      conflict_count: counts.conflict
+      conflict_count: counts.conflict,
+      last_commit_message: state.last_commit_message
     }
   end
 

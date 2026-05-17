@@ -379,16 +379,11 @@ defmodule MingaEditor.Commands.Helpers do
 
   @doc "Sets up parser state only for motions that need tree-sitter."
   @spec setup_for_motion(state(), atom()) :: state()
-  def setup_for_motion(%{workspace: %{buffers: %{active: buf}}} = state, :match_bracket)
-      when is_pid(buf) do
-    if HighlightSync.buffer_id_for(state, buf) == 0 do
-      HighlightSync.setup_for_buffer(state)
-    else
-      state
-    end
-  end
-
-  def setup_for_motion(state, :match_bracket), do: state
+  def setup_for_motion(state, :match_bracket), do: setup_for_tree_sitter_motion(state)
+  def setup_for_motion(state, :nav_parent), do: setup_for_tree_sitter_motion(state)
+  def setup_for_motion(state, :nav_first_child), do: setup_for_tree_sitter_motion(state)
+  def setup_for_motion(state, :nav_next_sibling), do: setup_for_tree_sitter_motion(state)
+  def setup_for_motion(state, :nav_prev_sibling), do: setup_for_tree_sitter_motion(state)
   def setup_for_motion(state, _motion), do: state
 
   @doc "Returns the parser buffer id only for motions that need tree-sitter."
@@ -396,7 +391,30 @@ defmodule MingaEditor.Commands.Helpers do
   def buffer_id_for_motion(state, buf, :match_bracket),
     do: HighlightSync.buffer_id_for(state, buf)
 
+  def buffer_id_for_motion(state, buf, :nav_parent), do: HighlightSync.buffer_id_for(state, buf)
+
+  def buffer_id_for_motion(state, buf, :nav_first_child),
+    do: HighlightSync.buffer_id_for(state, buf)
+
+  def buffer_id_for_motion(state, buf, :nav_next_sibling),
+    do: HighlightSync.buffer_id_for(state, buf)
+
+  def buffer_id_for_motion(state, buf, :nav_prev_sibling),
+    do: HighlightSync.buffer_id_for(state, buf)
+
   def buffer_id_for_motion(_state, _buf, _motion), do: 0
+
+  @spec setup_for_tree_sitter_motion(state()) :: state()
+  defp setup_for_tree_sitter_motion(%{workspace: %{buffers: %{active: buf}}} = state)
+       when is_pid(buf) do
+    if HighlightSync.buffer_id_for(state, buf) == 0 do
+      HighlightSync.setup_for_buffer(state)
+    else
+      state
+    end
+  end
+
+  defp setup_for_tree_sitter_motion(state), do: state
 
   @doc "Resolves a motion atom to a new position in the buffer."
   @spec resolve_motion(

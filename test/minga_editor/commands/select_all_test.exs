@@ -1,37 +1,38 @@
 defmodule MingaEditor.Commands.SelectAllTest do
   @moduledoc """
-  Tests for the :select_all command.
+  Layer 0/1 command-state tests for the :select_all command.
+
+  The observable contract is the selected buffer range and visual state, so a live Editor GenServer is unnecessary.
   """
 
-  use Minga.Test.EditorCase, async: true
+  use ExUnit.Case, async: true
 
-  describe "select_all" do
+  import MingaEditor.CommandStateHelpers
+
+  alias Minga.Buffer.Process, as: BufferProcess
+
+  describe "Layer 0/1 command state: select_all" do
     test "enters visual line mode with full buffer selected" do
-      ctx = start_editor("aaa\nbbb\nccc")
+      buffer = start_buffer("aaa\nbbb\nccc")
+      state = command_state(buffer)
 
-      send_keys_sync(ctx, "<Space>")
-      # Cancel the leader mode (we just need normal mode for the test)
-      send_key(ctx, 27)
-
-      # Execute select_all via command registry
-      state = editor_state(ctx)
       state = MingaEditor.Commands.execute(state, :select_all)
 
-      assert Minga.Editing.mode(state) == :visual
-      ms = MingaEditor.Editing.mode_state(state)
-      assert ms.visual_anchor == {0, 0}
-      assert ms.visual_type == :line
+      assert state.workspace.editing.mode == :visual
+      assert state.workspace.editing.mode_state.visual_anchor == {0, 0}
+      assert state.workspace.editing.mode_state.visual_type == :line
+      assert BufferProcess.cursor(buffer) == {2, 2}
     end
 
     test "works with single-line buffer" do
-      ctx = start_editor("hello")
+      buffer = start_buffer("hello")
+      state = command_state(buffer)
 
-      state = editor_state(ctx)
       state = MingaEditor.Commands.execute(state, :select_all)
 
-      assert Minga.Editing.mode(state) == :visual
-      ms = MingaEditor.Editing.mode_state(state)
-      assert ms.visual_anchor == {0, 0}
+      assert state.workspace.editing.mode == :visual
+      assert state.workspace.editing.mode_state.visual_anchor == {0, 0}
+      assert BufferProcess.cursor(buffer) == {0, 4}
     end
   end
 end

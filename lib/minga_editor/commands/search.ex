@@ -524,6 +524,14 @@ defmodule MingaEditor.Commands.Search do
         end
       },
       %Minga.Command{
+        name: :search_todos,
+        description: "Search TODO markers",
+        requires_buffer: false,
+        execute: fn state ->
+          PickerUI.open(state, MingaEditor.UI.Picker.TodoSearchSource)
+        end
+      },
+      %Minga.Command{
         name: :search_buffer,
         description: "Search in buffer",
         requires_buffer: true,

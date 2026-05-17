@@ -393,6 +393,22 @@ defmodule Minga.Mode.Normal do
     {:execute, :move_right, state}
   end
 
+  def handle_key({?h, mods}, state) when band(mods, @alt) != 0 do
+    {:execute, :nav_parent, state}
+  end
+
+  def handle_key({?l, mods}, state) when band(mods, @alt) != 0 do
+    {:execute, :nav_first_child, state}
+  end
+
+  def handle_key({?j, mods}, state) when band(mods, @alt) != 0 do
+    {:execute, :nav_next_sibling, state}
+  end
+
+  def handle_key({?k, mods}, state) when band(mods, @alt) != 0 do
+    {:execute, :nav_prev_sibling, state}
+  end
+
   # Arrow keys
   def handle_key({@arrow_up, _mods}, state) do
     {:execute, :move_up, state}

@@ -7,11 +7,11 @@ defmodule MingaEditor.Frontend.Protocol.GUISettingsTest do
 
   describe "settings gui_actions" do
     test "decodes config_query" do
-      assert {:ok, {:gui_action, :config_query}} = Protocol.decode_event(<<0x07, 0x43>>)
+      assert {:ok, {:gui_action, :config_query}} = Protocol.decode_event(<<0x07, 0x44>>)
     end
 
     test "decodes typed config_update without creating atoms" do
-      payload = <<0x07, 0x42, 5, "theme", 0x04, 0, 8, "doom_one">>
+      payload = <<0x07, 0x43, 5, "theme", 0x04, 0, 8, "doom_one">>
 
       assert {:ok, {:gui_action, {:config_update, :theme, :doom_one}}} =
                Protocol.decode_event(payload)
@@ -19,24 +19,24 @@ defmodule MingaEditor.Frontend.Protocol.GUISettingsTest do
 
     test "decodes boolean integer and string config_update values" do
       assert {:ok, {:gui_action, {:config_update, :wrap, true}}} =
-               Protocol.decode_event(<<0x07, 0x42, 4, "wrap", 0x01, 1>>)
+               Protocol.decode_event(<<0x07, 0x43, 4, "wrap", 0x01, 1>>)
 
       assert {:ok, {:gui_action, {:config_update, :tab_width, 4}}} =
-               Protocol.decode_event(<<0x07, 0x42, 9, "tab_width", 0x02, 4::32-signed>>)
+               Protocol.decode_event(<<0x07, 0x43, 9, "tab_width", 0x02, 4::32-signed>>)
 
       assert {:ok, {:gui_action, {:config_update, :font_family, "Iosevka"}}} =
-               Protocol.decode_event(<<0x07, 0x42, 11, "font_family", 0x03, 7::16, "Iosevka">>)
+               Protocol.decode_event(<<0x07, 0x43, 11, "font_family", 0x03, 7::16, "Iosevka">>)
     end
 
     test "rejects config_update for options outside the settings panel allowlist" do
       key = "confirm_quit"
-      payload = <<0x07, 0x42, byte_size(key)::8, key::binary, 0x01, 0>>
+      payload = <<0x07, 0x43, byte_size(key)::8, key::binary, 0x01, 0>>
 
       assert {:error, :malformed} = Protocol.decode_event(payload)
     end
 
     test "rejects unknown config option names" do
-      payload = <<0x07, 0x42, 7, "unknown", 0x01, 1>>
+      payload = <<0x07, 0x43, 7, "unknown", 0x01, 1>>
 
       assert {:error, :malformed} = Protocol.decode_event(payload)
     end

@@ -358,6 +358,48 @@ struct EncoderGUIActionTests {
         #expect(decoded == path)
     }
 
+    @Test("git_commit encodes amend flag, length, and message")
+    func gitCommitLayout() {
+        let message = "feat: polish git panel"
+        let payload = captureFrame { $0.sendGitCommit(message: message) }
+
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_GIT_COMMIT)
+        #expect(payload[2] == 0)
+        let messageLen = readU16(payload, 3)
+        #expect(messageLen == UInt16(message.utf8.count))
+        let decoded = String(data: payload[5..<(5 + Int(messageLen))], encoding: .utf8)
+        #expect(decoded == message)
+    }
+
+    @Test("git_commit amend encodes amend flag, length, and message")
+    func gitCommitAmendLayout() {
+        let message = "fixup: previous subject"
+        let payload = captureFrame { $0.sendGitCommitAmend(message: message) }
+
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_GIT_COMMIT)
+        #expect(payload[2] == 1)
+        let messageLen = readU16(payload, 3)
+        #expect(messageLen == UInt16(message.utf8.count))
+        let decoded = String(data: payload[5..<(5 + Int(messageLen))], encoding: .utf8)
+        #expect(decoded == message)
+    }
+
+    @Test("git_open_diff encodes path and section")
+    func gitOpenDiffLayout() {
+        let path = "lib/editor.ex"
+        let payload = captureFrame { $0.sendGitOpenDiff(path: path, section: 2) }
+
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_GIT_OPEN_DIFF)
+        let pathLen = readU16(payload, 2)
+        #expect(pathLen == UInt16(path.utf8.count))
+        let decoded = String(data: payload[4..<(4 + Int(pathLen))], encoding: .utf8)
+        #expect(decoded == path)
+        #expect(payload[4 + Int(pathLen)] == 2)
+    }
+
     @Test("tool_install encodes name with length prefix")
     func toolInstallLayout() {
         let payload = captureFrame { $0.sendToolInstall(name: "elixir_ls") }

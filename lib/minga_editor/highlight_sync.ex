@@ -14,6 +14,7 @@ defmodule MingaEditor.HighlightSync do
   alias Minga.Parser.Manager, as: ParserManager
   alias MingaEditor.UI.Highlight
   alias MingaEditor.UI.Highlight.Grammar
+  alias MingaEditor.Window
 
   @doc """
   Sets up highlighting for the current buffer.
@@ -34,7 +35,9 @@ defmodule MingaEditor.HighlightSync do
         send_parse_only(state, language)
 
       :unsupported ->
-        put_active_highlight(state, Highlight.from_theme(state.theme))
+        state
+        |> put_active_highlight(Highlight.from_theme(state.theme))
+        |> clear_active_document_symbols()
     end
   end
 
@@ -109,6 +112,22 @@ defmodule MingaEditor.HighlightSync do
     end
   end
 
+  @spec clear_active_document_symbols(EditorState.t()) :: EditorState.t()
+  defp clear_active_document_symbols(
+         %EditorState{workspace: %{buffers: %{active: active_buf}}} = state
+       )
+       when is_pid(active_buf) do
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.update_windows_for_buffer(
+        ws,
+        active_buf,
+        &Window.set_document_symbols(&1, [])
+      )
+    end)
+  end
+
+  defp clear_active_document_symbols(%EditorState{} = state), do: state
+
   @spec send_parse_for_pid(EditorState.t(), pid(), String.t(), [setup_opt()]) :: EditorState.t()
   defp send_parse_for_pid(state, buf_pid, language, opts) do
     {buffer_id, state} = ensure_buffer_id_for(state, buf_pid)
@@ -120,6 +139,7 @@ defmodule MingaEditor.HighlightSync do
     injection_override = user_injection_query_override(buffer_id, language)
     fold_override = user_fold_query_override(buffer_id, language)
     textobject_override = user_textobject_query_override(buffer_id, language)
+    tags_override = user_tags_query_override(buffer_id, language)
 
     parse_cmd = Protocol.encode_parse_buffer(buffer_id, version, content)
 
@@ -130,6 +150,7 @@ defmodule MingaEditor.HighlightSync do
         injection_override,
         fold_override,
         textobject_override,
+        tags_override,
         [parse_cmd]
       ])
 
@@ -147,6 +168,7 @@ defmodule MingaEditor.HighlightSync do
         user_injection_query_override(bid, language),
         user_fold_query_override(bid, language),
         user_textobject_query_override(bid, language),
+        user_tags_query_override(bid, language),
         [Protocol.encode_parse_buffer(bid, 0, fresh_content)]
       ])
     end
@@ -230,6 +252,7 @@ defmodule MingaEditor.HighlightSync do
     injection_override = user_injection_query_override(buffer_id, language)
     fold_override = user_fold_query_override(buffer_id, language)
     textobject_override = user_textobject_query_override(buffer_id, language)
+    tags_override = user_tags_query_override(buffer_id, language)
 
     parse_cmd = Protocol.encode_parse_buffer(buffer_id, version, content)
 
@@ -240,6 +263,7 @@ defmodule MingaEditor.HighlightSync do
         injection_override,
         fold_override,
         textobject_override,
+        tags_override,
         [parse_cmd]
       ])
 
@@ -257,6 +281,7 @@ defmodule MingaEditor.HighlightSync do
         user_injection_query_override(bid, language),
         user_fold_query_override(bid, language),
         user_textobject_query_override(bid, language),
+        user_tags_query_override(bid, language),
         [Protocol.encode_parse_buffer(bid, 0, fresh_content)]
       ])
     end
@@ -431,6 +456,30 @@ defmodule MingaEditor.HighlightSync do
     case System.user_home() do
       nil -> nil
       home -> Path.join([home, ".config", "minga", "queries", language, "textobjects.scm"])
+    end
+  end
+
+  # Returns a list with a set_tags_query command if the user has a custom
+  # tags query file for this language, or an empty list to use the Zig built-in.
+  @spec user_tags_query_override(non_neg_integer(), String.t()) :: [binary()]
+  defp user_tags_query_override(buffer_id, language) do
+    user_path = user_tags_query_path(language)
+
+    if user_path != nil and File.exists?(user_path) do
+      case File.read(user_path) do
+        {:ok, query_text} -> [Protocol.encode_set_tags_query(buffer_id, query_text)]
+        {:error, _} -> []
+      end
+    else
+      []
+    end
+  end
+
+  @spec user_tags_query_path(String.t()) :: String.t() | nil
+  defp user_tags_query_path(language) do
+    case System.user_home() do
+      nil -> nil
+      home -> Path.join([home, ".config", "minga", "queries", language, "tags.scm"])
     end
   end
 

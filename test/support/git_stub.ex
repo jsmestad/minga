@@ -100,6 +100,7 @@ defmodule Minga.Git.Stub do
     :ets.match_delete(@table, {{:diff, expanded}, :_})
     :ets.match_delete(@table, {{:branch, expanded}, :_})
     :ets.match_delete(@table, {{:ahead_behind, expanded}, :_})
+    :ets.match_delete(@table, {{:last_commit_message, expanded}, :_})
     :ok
   end
 
@@ -170,7 +171,12 @@ defmodule Minga.Git.Stub do
 
   @impl true
   @spec last_commit_message(String.t()) :: {:ok, String.t()}
-  def last_commit_message(_git_root), do: {:ok, "stub commit message"}
+  def last_commit_message(git_root) do
+    case :ets.lookup(@table, {:last_commit_message, Path.expand(git_root)}) do
+      [{_, message}] -> {:ok, message}
+      [] -> {:ok, "stub commit message"}
+    end
+  end
 
   @impl true
   @spec stage_patch(String.t(), String.t()) :: :ok
@@ -245,6 +251,13 @@ defmodule Minga.Git.Stub do
   @spec set_ahead_behind(String.t(), non_neg_integer(), non_neg_integer()) :: :ok
   def set_ahead_behind(git_root, ahead, behind) do
     :ets.insert(@table, {{:ahead_behind, Path.expand(git_root)}, {ahead, behind}})
+    :ok
+  end
+
+  @doc "Sets the last commit message returned for `git_root`."
+  @spec set_last_commit_message(String.t(), String.t()) :: :ok
+  def set_last_commit_message(git_root, message) when is_binary(message) do
+    :ets.insert(@table, {{:last_commit_message, Path.expand(git_root)}, message})
     :ok
   end
 

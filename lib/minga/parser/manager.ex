@@ -38,6 +38,7 @@ defmodule Minga.Parser.Manager do
   alias Minga.Language.Grammar
   alias Minga.Language.Highlight.Span
   alias Minga.Parser.Protocol
+  alias Minga.Parser.StructuralNavResult
 
   # ── Restart constants ──
 
@@ -50,6 +51,7 @@ defmodule Minga.Parser.Manager do
   @default_indent_request_timeout_ms 2_000
   @default_textobject_request_timeout_ms 2_000
   @default_match_item_request_timeout_ms 2_000
+  @default_structural_nav_request_timeout_ms 2_000
   @request_client_timeout_slack_ms 50
 
   @typedoc "Options for starting the parser manager."
@@ -71,6 +73,9 @@ defmodule Minga.Parser.Manager do
           spans: [Span.t()] | nil,
           timer_ref: reference()
         }
+
+  @typedoc "Structural navigation result returned by the parser."
+  @type structural_nav_result :: StructuralNavResult.t()
 
   @typedoc "Tracked buffer metadata for re-sync after parser restart."
   @type buffer_meta :: %{
@@ -227,6 +232,33 @@ defmodule Minga.Parser.Manager do
       server,
       {:request_match_item, buffer_id, row, col, @default_match_item_request_timeout_ms},
       @default_match_item_request_timeout_ms + @request_client_timeout_slack_ms
+    )
+  catch
+    :exit, _ -> nil
+  end
+
+  @doc """
+  Requests structural AST navigation synchronously.
+
+  Action values are `0` for parent, `1` for first child, `2` for next sibling, and `3` for previous sibling.
+
+  Returns `%Minga.Parser.StructuralNavResult{}` for the target node, or `nil` if no target exists or the parser is unavailable.
+  """
+  @spec request_structural_nav(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          0..3,
+          GenServer.server()
+        ) :: structural_nav_result() | nil
+  def request_structural_nav(buffer_id, row, col, action, server \\ __MODULE__)
+      when is_integer(buffer_id) and is_integer(row) and is_integer(col) and
+             is_integer(action) and action >= 0 and action <= 3 do
+    GenServer.call(
+      server,
+      {:request_structural_nav, buffer_id, row, col, action,
+       @default_structural_nav_request_timeout_ms},
+      @default_structural_nav_request_timeout_ms + @request_client_timeout_slack_ms
     )
   catch
     :exit, _ -> nil
@@ -423,6 +455,20 @@ defmodule Minga.Parser.Manager do
     enqueue_pending_request(state, from, request_id, cmd, timeout_ms)
   end
 
+  def handle_call(
+        {:request_structural_nav, _buffer_id, _row, _col, _action, _timeout_ms},
+        _from,
+        %{port: nil} = state
+      ) do
+    {:reply, nil, state}
+  end
+
+  def handle_call({:request_structural_nav, buffer_id, row, col, action, timeout_ms}, from, state) do
+    request_id = state.next_request_id
+    cmd = Protocol.encode_request_structural_nav(buffer_id, request_id, row, col, action)
+    enqueue_pending_request(state, from, request_id, cmd, timeout_ms)
+  end
+
   def handle_call({:highlight_source, _language, _source, _timeout}, _from, %{port: nil} = state) do
     {:reply, :unavailable, state}
   end
@@ -496,6 +542,9 @@ defmodule Minga.Parser.Manager do
         reply_to_pending_request(state, request_id, result)
 
       {:ok, {:match_item_result, request_id, result}} ->
+        reply_to_pending_request(state, request_id, result)
+
+      {:ok, {:node_info, request_id, result}} ->
         reply_to_pending_request(state, request_id, result)
 
       {:ok, {:highlight_names, _buffer_id, _names} = event} ->
@@ -656,6 +705,7 @@ defmodule Minga.Parser.Manager do
   defp event_buffer_id({:injection_ranges, buffer_id, _ranges}), do: buffer_id
   defp event_buffer_id({:fold_ranges, buffer_id, _version, _ranges}), do: buffer_id
   defp event_buffer_id({:textobject_positions, buffer_id, _version, _positions}), do: buffer_id
+  defp event_buffer_id({:document_symbols, buffer_id, _version, _symbols}), do: buffer_id
   defp event_buffer_id({:conceal_spans, buffer_id, _version, _spans}), do: buffer_id
   defp event_buffer_id({:request_reparse, buffer_id}), do: buffer_id
   defp event_buffer_id(_event), do: nil

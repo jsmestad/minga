@@ -179,6 +179,7 @@ struct ProtocolSchemaSwiftTests {
         #expect(try schemaHex(actions, "git_fetch") == GUI_ACTION_GIT_FETCH)
         #expect(try schemaHex(actions, "git_commit_amend") == GUI_ACTION_GIT_COMMIT_AMEND)
         #expect(try schemaHex(actions, "git_pull_and_retry") == GUI_ACTION_GIT_PULL_AND_RETRY)
+        #expect(try schemaHex(actions, "git_open_diff") == GUI_ACTION_GIT_OPEN_DIFF)
     }
 
     @Test("GUI semantic opcodes match schema")
