@@ -38,7 +38,6 @@ defmodule Minga.MixProject do
           # Coming From...
           "docs/FOR-NEOVIM-USERS.md",
           "docs/FOR-EMACS-USERS.md",
-          "docs/FOR-PI-USERS.md",
           "docs/FOR-AI-CODERS.md",
           # Extending Minga
           "docs/EXTENSIBILITY.md",
@@ -65,7 +64,6 @@ defmodule Minga.MixProject do
           "Coming From...": [
             "docs/FOR-NEOVIM-USERS.md",
             "docs/FOR-EMACS-USERS.md",
-            "docs/FOR-PI-USERS.md",
             "docs/FOR-AI-CODERS.md"
           ],
           "Extending Minga": [
