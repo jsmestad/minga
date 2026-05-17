@@ -37,38 +37,31 @@ defmodule MingaEditor.Frontend.Protocol do
   | SUPER | 0x08  |
   """
 
-  # --- BEGIN GENERATED (mix protocol.gen) ---
-  # Generated from docs/protocol_schema.toml. Do not edit by hand.
+  alias Minga.Protocol.Opcodes
 
-  # Input
-  @op_key_press 0x01
-  @op_resize 0x02
-  @op_ready 0x03
-  @op_mouse_event 0x04
-  @op_capabilities_updated 0x05
-  @op_paste_event 0x06
-  @op_gui_action 0x07
-
-  # Render
-  @op_draw_text 0x10
-  @op_set_cursor 0x11
-  @op_clear 0x12
-  @op_batch_end 0x13
-  @op_define_region 0x14
-  @op_set_cursor_shape 0x15
-  @op_set_title 0x16
-  @op_set_window_bg 0x17
-  @op_clear_region 0x18
-  @op_destroy_region 0x19
-  @op_set_active_region 0x1A
-  @op_scroll_region 0x1B
-  @op_draw_styled_text 0x1C
-
-  # Config
-  @op_set_font 0x50
-  @op_set_font_fallback 0x51
-  @op_register_font 0x52
-  # --- END GENERATED ---
+  @op_key_press Opcodes.key_press()
+  @op_resize Opcodes.resize()
+  @op_ready Opcodes.ready()
+  @op_mouse_event Opcodes.mouse_event()
+  @op_capabilities_updated Opcodes.capabilities_updated()
+  @op_paste_event Opcodes.paste_event()
+  @op_gui_action Opcodes.gui_action()
+  @op_draw_text Opcodes.draw_text()
+  @op_set_cursor Opcodes.set_cursor()
+  @op_clear Opcodes.clear()
+  @op_batch_end Opcodes.batch_end()
+  @op_define_region Opcodes.define_region()
+  @op_set_cursor_shape Opcodes.set_cursor_shape()
+  @op_set_title Opcodes.set_title()
+  @op_set_window_bg Opcodes.set_window_bg()
+  @op_clear_region Opcodes.clear_region()
+  @op_destroy_region Opcodes.destroy_region()
+  @op_set_active_region Opcodes.set_active_region()
+  @op_scroll_region Opcodes.scroll_region()
+  @op_draw_styled_text Opcodes.draw_styled_text()
+  @op_set_font Opcodes.set_font()
+  @op_set_font_fallback Opcodes.set_font_fallback()
+  @op_register_font Opcodes.register_font()
 
   alias Minga.Core.Face
   alias Minga.Parser.StructuralNavResult

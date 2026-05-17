@@ -1,86 +1,62 @@
 #!/usr/bin/env python3
-"""Fail when generated protocol outputs change without the schema changing."""
+"""Fail when generated protocol artifacts are added back to Git."""
 
 from __future__ import annotations
 
 import subprocess
 import sys
-from pathlib import Path
 
-SCHEMA_PATH = "docs/protocol_schema.toml"
-GENERATED_STANDALONE = {
+LEGACY_GENERATED_SOURCE_PATHS = {
     "macos/Sources/Protocol/ProtocolOpcodes.generated.swift",
     "zig/src/protocol_opcodes.zig",
     "zig/src/protocol_schema_test.zig",
 }
-GENERATED_BLOCK_FILES = {
-    "lib/minga_editor/frontend/protocol.ex",
-    "lib/minga/parser/protocol.ex",
-    "lib/minga_editor/frontend/protocol/gui.ex",
-    "lib/minga_editor/frontend/protocol/gui_window_content.ex",
-    "zig/src/protocol.zig",
-}
-BEGIN_MARKER = "BEGIN GENERATED (mix protocol.gen)"
-END_MARKER = "END GENERATED"
+GENERATED_SOURCE_PREFIXES = (
+    ".generated/protocol/",
+    "zig/src/generated/",
+)
 
 
 def main() -> int:
     base_ref = sys.argv[1] if len(sys.argv) > 1 else "origin/main"
-    changed = changed_files(base_ref)
-
-    if SCHEMA_PATH in changed:
-        return 0
-
-    violations = sorted(GENERATED_STANDALONE.intersection(changed))
-    violations.extend(path for path in sorted(GENERATED_BLOCK_FILES.intersection(changed)) if generated_block_changed(base_ref, path))
+    violations = sorted(changed_generated_sources(base_ref))
 
     if not violations:
         return 0
 
-    print("Generated protocol outputs changed without docs/protocol_schema.toml changing.", file=sys.stderr)
-    print("Edit docs/protocol_schema.toml, run `mix protocol.gen`, and commit both the schema and generated output.", file=sys.stderr)
-    print("Changed generated outputs:", file=sys.stderr)
+    print("Generated protocol artifacts must not be committed as source.", file=sys.stderr)
+    print("Run `mix protocol.gen` to regenerate ignored build artifacts, but do not add them to Git.", file=sys.stderr)
+    print("Generated paths changed as tracked source:", file=sys.stderr)
     for path in violations:
         print(f"  - {path}", file=sys.stderr)
     return 1
 
 
-def changed_files(base_ref: str) -> set[str]:
-    result = subprocess.run(["git", "diff", "--name-only", f"{base_ref}...HEAD"], check=True, text=True, stdout=subprocess.PIPE)
-    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+def changed_generated_sources(base_ref: str) -> set[str]:
+    result = subprocess.run(
+        ["git", "diff", "--name-status", f"{base_ref}...HEAD"],
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+    )
+
+    violations: set[str] = set()
+    for line in result.stdout.splitlines():
+        if not line.strip():
+            continue
+        status, *paths = line.split("\t")
+        path = paths[-1]
+        if generated_source_path(path) and not status.startswith("D"):
+            violations.add(path)
+
+    return violations
 
 
-def generated_block_changed(base_ref: str, path: str) -> bool:
-    current = Path(path).read_text()
-    try:
-        previous = subprocess.run(["git", "show", f"{base_ref}:{path}"], check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout
-    except subprocess.CalledProcessError:
+def generated_source_path(path: str) -> bool:
+    if path in LEGACY_GENERATED_SOURCE_PATHS:
         return True
 
-    return extract_generated_blocks(previous) != extract_generated_blocks(current)
-
-
-def extract_generated_blocks(text: str) -> list[str]:
-    blocks: list[str] = []
-    offset = 0
-
-    while True:
-        begin = text.find(BEGIN_MARKER, offset)
-        if begin == -1:
-            break
-
-        end = text.find(END_MARKER, begin)
-        if end == -1:
-            blocks.append(text[begin:])
-            break
-
-        end_line = text.find("\n", end)
-        if end_line == -1:
-            end_line = len(text)
-        blocks.append(text[begin:end_line])
-        offset = end_line
-
-    return blocks
+    return path.startswith(GENERATED_SOURCE_PREFIXES)
 
 
 if __name__ == "__main__":

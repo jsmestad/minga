@@ -1,17 +1,16 @@
-defmodule Mix.Tasks.Protocol.Gen do
+defmodule Minga.Mix.ProtocolGenerator do
   @moduledoc """
-  Generates protocol opcode constants from `docs/protocol_schema.toml`.
+  Generates protocol opcode artifacts from `docs/protocol_schema.toml`.
 
-  The generated sections are committed to the repository. Use `mix protocol.gen --check` in CI to verify the committed files match the schema.
+  The schema is the source of truth. Generated protocol artifacts are written under `.generated/protocol/`, which is ignored by Git and consumed by local build steps.
   """
 
-  use Mix.Task
-
-  @shortdoc "Generates protocol opcode constants"
-
   @schema_path "docs/protocol_schema.toml"
-  @begin_marker "BEGIN GENERATED (mix protocol.gen)"
-  @end_marker "END GENERATED"
+  @generated_root ".generated/protocol"
+  @generated_elixir_path Path.join([@generated_root, "elixir/lib/minga/protocol/opcodes.ex"])
+  @generated_swift_path Path.join([@generated_root, "swift/ProtocolOpcodes.generated.swift"])
+  @generated_zig_opcodes_path "zig/src/generated/protocol_opcodes.zig"
+  @generated_zig_schema_test_path "zig/src/generated/protocol_schema_test.zig"
   @allowed_opcode_categories [
     "input",
     "render",
@@ -33,9 +32,10 @@ defmodule Mix.Tasks.Protocol.Gen do
   @type schema :: %{String.t() => term()}
   @type generated_file :: {Path.t(), String.t()}
 
-  @impl Mix.Task
   @spec run([String.t()]) :: :ok
   def run(args) do
+    ensure_generator_deps_loaded!()
+
     {opts, _argv, _invalid} = OptionParser.parse(args, strict: [check: :boolean])
     schema = load_schema!()
     files = generated_files(schema)
@@ -43,6 +43,14 @@ defmodule Mix.Tasks.Protocol.Gen do
     case Keyword.get(opts, :check, false) do
       true -> check_files!(files)
       false -> write_files!(files)
+    end
+  end
+
+  @spec ensure_generator_deps_loaded!() :: :ok
+  defp ensure_generator_deps_loaded! do
+    case Code.ensure_loaded(Toml) do
+      {:module, Toml} -> :ok
+      {:error, _reason} -> Mix.Task.run("deps.loadpaths", [])
     end
   end
 
@@ -67,63 +75,27 @@ defmodule Mix.Tasks.Protocol.Gen do
   @spec generated_files(schema()) :: [generated_file()]
   defp generated_files(schema) do
     [
-      replace_block_file(
-        "lib/minga_editor/frontend/protocol.ex",
-        elixir_opcodes_block(schema, ["input", "render", "config"], [], ["log_message"])
-      ),
-      replace_block_file(
-        "lib/minga/parser/protocol.ex",
-        elixir_opcodes_block(
-          schema,
-          ["parser_commands", "parser_responses"],
-          ["log_message"],
-          ["measure_text", "text_width"]
-        )
-      ),
-      replace_block_file(
-        "lib/minga_editor/frontend/protocol/gui.ex",
-        elixir_gui_block(schema)
-      ),
-      replace_block_file(
-        "lib/minga_editor/frontend/protocol/gui_window_content.ex",
-        elixir_opcodes_block(schema, [], ["gui_window_content"], [])
-      ),
-      {"macos/Sources/Protocol/ProtocolOpcodes.generated.swift", swift_file(schema)},
-      replace_block_file("zig/src/protocol.zig", zig_reexports_block(schema)),
-      {"zig/src/protocol_opcodes.zig", zig_opcodes_file(schema)},
-      {"zig/src/protocol_schema_test.zig", zig_schema_test_file(schema)}
+      {@generated_elixir_path, elixir_file(schema)},
+      {@generated_swift_path, swift_file(schema)},
+      {@generated_zig_opcodes_path, zig_opcodes_file(schema)},
+      {@generated_zig_schema_test_path, zig_schema_test_file(schema)}
     ]
-  end
-
-  @spec replace_block_file(Path.t(), String.t()) :: generated_file()
-  defp replace_block_file(path, block) do
-    source = File.read!(path)
-    {path, replace_generated_block!(source, path, block)}
-  end
-
-  @spec replace_generated_block!(String.t(), Path.t(), String.t()) :: String.t()
-  defp replace_generated_block!(source, path, block) do
-    begin_marker = Regex.escape("--- #{@begin_marker} ---")
-    end_marker = Regex.escape("--- #{@end_marker} ---")
-
-    pattern =
-      Regex.compile!(
-        "([ \\t]*(?:#|//) #{begin_marker}\\n).*?([ \\t]*(?:#|//) #{end_marker})",
-        "s"
-      )
-
-    case Regex.run(pattern, source, capture: :all_but_first) do
-      [begin_line, end_line] -> Regex.replace(pattern, source, begin_line <> block <> end_line)
-      nil -> Mix.raise("Missing generated block markers in #{path}")
-    end
   end
 
   @spec write_files!([generated_file()]) :: :ok
   defp write_files!(files) do
     Enum.each(files, fn {path, content} ->
       path |> Path.dirname() |> File.mkdir_p!()
-      File.write!(path, content)
+      write_if_changed!(path, content)
     end)
+  end
+
+  @spec write_if_changed!(Path.t(), String.t()) :: :ok
+  defp write_if_changed!(path, content) do
+    case File.read(path) do
+      {:ok, ^content} -> :ok
+      _other -> File.write!(path, content)
+    end
   end
 
   @spec check_files!([generated_file()]) :: :ok
@@ -146,57 +118,51 @@ defmodule Mix.Tasks.Protocol.Gen do
   defp outdated_message(stale) do
     paths = Enum.map_join(stale, "\n", fn {path, _content} -> "  - #{path}" end)
 
-    "Generated protocol files are out of date. Run `mix protocol.gen` and commit the result.\n#{paths}"
+    "Generated protocol artifacts are out of date. Run `mix protocol.gen` to regenerate build artifacts.\n#{paths}"
   end
 
-  @spec elixir_gui_block(schema()) :: String.t()
-  defp elixir_gui_block(schema) do
-    opcodes =
-      opcodes_by_categories(schema, ["gui_chrome", "gui_semantic"], [], ["gui_window_content"])
-
+  @spec elixir_file(schema()) :: String.t()
+  defp elixir_file(schema) do
+    opcodes = Map.fetch!(schema, "opcodes")
     actions = Map.fetch!(schema, "gui_actions")
 
     [
-      generated_header("  #"),
-      elixir_opcodes(opcodes),
-      "\n  # GUI action sub-opcodes (Frontend → BEAM)\n",
-      elixir_gui_actions(actions)
+      "defmodule Minga.Protocol.Opcodes do\n",
+      "  @moduledoc \"\"\"\n",
+      "  Generated protocol opcode constants.\n\n",
+      "  Generated from `docs/protocol_schema.toml` by `mix protocol.gen`. Do not edit by hand.\n",
+      "  \"\"\"\n\n",
+      elixir_opcode_functions(opcodes),
+      "\n",
+      elixir_gui_action_functions(actions),
+      "end\n"
     ]
     |> IO.iodata_to_binary()
   end
 
-  @spec elixir_opcodes_block(schema(), [String.t()], [String.t()], [String.t()]) :: String.t()
-  defp elixir_opcodes_block(schema, categories, include_names, exclude_names) do
-    schema
-    |> opcodes_by_categories(categories, include_names, exclude_names)
-    |> then(fn opcodes -> [generated_header("  #"), elixir_opcodes(opcodes)] end)
-    |> IO.iodata_to_binary()
-  end
-
-  @spec generated_header(String.t()) :: String.t()
-  defp generated_header(comment_prefix) do
-    "#{comment_prefix} Generated from #{@schema_path}. Do not edit by hand.\n"
-  end
-
-  @spec elixir_opcodes([opcode()]) :: iodata()
-  defp elixir_opcodes(opcodes) do
+  @spec elixir_opcode_functions([opcode()]) :: iodata()
+  defp elixir_opcode_functions(opcodes) do
     opcodes
     |> group_by_category()
     |> Enum.map(fn {category, entries} ->
-      ["\n  # ", category_title(category), "\n", Enum.map(entries, &elixir_opcode_line/1)]
+      ["  # ", category_title(category), "\n", Enum.map(entries, &elixir_opcode_function/1), "\n"]
     end)
   end
 
-  @spec elixir_opcode_line(opcode()) :: String.t()
-  defp elixir_opcode_line(%{"name" => name, "value" => value}) do
-    "  @op_#{name} #{hex(value)}\n"
+  @spec elixir_opcode_function(opcode()) :: String.t()
+  defp elixir_opcode_function(%{"name" => name, "value" => value}) do
+    "  @spec #{name}() :: non_neg_integer()\n  def #{name}, do: #{hex(value)}\n"
   end
 
-  @spec elixir_gui_actions([gui_action()]) :: iodata()
-  defp elixir_gui_actions(actions) do
-    Enum.map(actions, fn %{"name" => name, "value" => value} ->
-      "  @gui_action_#{name} #{hex(value)}\n"
-    end)
+  @spec elixir_gui_action_functions([gui_action()]) :: iodata()
+  defp elixir_gui_action_functions(actions) do
+    [
+      "  # GUI action sub-opcodes (Frontend to BEAM)\n",
+      Enum.map(actions, fn %{"name" => name, "value" => value} ->
+        "  @spec gui_action_#{name}() :: non_neg_integer()\n  def gui_action_#{name}, do: #{hex(value)}\n"
+      end),
+      "\n"
+    ]
   end
 
   @spec swift_file(schema()) :: String.t()
@@ -275,34 +241,6 @@ defmodule Mix.Tasks.Protocol.Gen do
     "pub const GUI_ACTION_#{constant_name(name)}: u8 = #{hex(value)};\n"
   end
 
-  @spec zig_reexports_block(schema()) :: String.t()
-  defp zig_reexports_block(schema) do
-    opcodes = Map.fetch!(schema, "opcodes")
-    actions = Map.fetch!(schema, "gui_actions")
-
-    [
-      "const opcodes = @import(\"protocol_opcodes.zig\");\n",
-      generated_header("//"),
-      "\n",
-      Enum.map(opcodes, &zig_opcode_reexport_line/1),
-      "\n",
-      Enum.map(actions, &zig_gui_action_reexport_line/1)
-    ]
-    |> IO.iodata_to_binary()
-  end
-
-  @spec zig_opcode_reexport_line(opcode()) :: String.t()
-  defp zig_opcode_reexport_line(%{"name" => name}) do
-    constant = constant_name(name)
-    "pub const OP_#{constant} = opcodes.OP_#{constant};\n"
-  end
-
-  @spec zig_gui_action_reexport_line(gui_action()) :: String.t()
-  defp zig_gui_action_reexport_line(%{"name" => name}) do
-    constant = constant_name(name)
-    "pub const GUI_ACTION_#{constant} = opcodes.GUI_ACTION_#{constant};\n"
-  end
-
   @spec zig_schema_test_file(schema()) :: String.t()
   defp zig_schema_test_file(schema) do
     opcodes = Map.fetch!(schema, "opcodes")
@@ -313,7 +251,7 @@ defmodule Mix.Tasks.Protocol.Gen do
       "//!\n",
       "//! Generated from `docs/protocol_schema.toml` by `mix protocol.gen`. Do not edit by hand.\n\n",
       "const std = @import(\"std\");\n",
-      "const protocol = @import(\"protocol.zig\");\n",
+      "const protocol = @import(\"../protocol.zig\");\n",
       "const opcodes = @import(\"protocol_opcodes.zig\");\n\n",
       "test \"generated opcode constants match schema\" {\n",
       Enum.map(opcodes, &zig_opcode_expect_line/1),
@@ -443,23 +381,6 @@ defmodule Mix.Tasks.Protocol.Gen do
   @spec canonical_result(boolean(), String.t(), String.t()) :: [String.t()]
   defp canonical_result(true, _name, _canonical), do: []
   defp canonical_result(false, name, canonical), do: ["#{name} -> #{canonical}"]
-
-  @spec opcodes_by_categories(schema(), [String.t()], [String.t()], [String.t()]) :: [opcode()]
-  defp opcodes_by_categories(schema, categories, include_names, exclude_names) do
-    schema
-    |> Map.fetch!("opcodes")
-    |> Enum.filter(&opcode_selected?(&1, categories, include_names, exclude_names))
-  end
-
-  @spec opcode_selected?(opcode(), [String.t()], [String.t()], [String.t()]) :: boolean()
-  defp opcode_selected?(
-         %{"category" => category, "name" => name},
-         categories,
-         include_names,
-         exclude_names
-       ) do
-    (category in categories or name in include_names) and name not in exclude_names
-  end
 
   @spec group_by_category([opcode()]) :: [{String.t(), [opcode()]}]
   defp group_by_category(opcodes) do

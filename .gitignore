@@ -11,6 +11,7 @@ minga-*.tar
 zig/zig-out/
 zig/.zig-cache/
 zig/zig-pkg/
+zig/src/generated/
 
 # Swift / Xcode
 macos/.build/
@@ -19,6 +20,7 @@ macos/Minga.xcodeproj/xcuserdata/
 macos/Minga.xcodeproj/project.xcworkspace/xcuserdata/
 
 # Generated
+/.generated/
 erl_crash.dump
 /priv/minga-renderer
 /priv/minga-parser

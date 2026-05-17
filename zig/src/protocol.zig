@@ -20,9 +20,7 @@
 /// is NOT included in encode/decode here.
 const std = @import("std");
 
-// --- BEGIN GENERATED (mix protocol.gen) ---
-const opcodes = @import("protocol_opcodes.zig");
-// Generated from docs/protocol_schema.toml. Do not edit by hand.
+const opcodes = @import("generated/protocol_opcodes.zig");
 
 pub const OP_KEY_PRESS = opcodes.OP_KEY_PRESS;
 pub const OP_RESIZE = opcodes.OP_RESIZE;
@@ -95,12 +93,6 @@ pub const OP_GUI_BOTTOM_PANEL = opcodes.OP_GUI_BOTTOM_PANEL;
 pub const OP_GUI_PICKER_PREVIEW = opcodes.OP_GUI_PICKER_PREVIEW;
 pub const OP_GUI_TOOL_MANAGER = opcodes.OP_GUI_TOOL_MANAGER;
 pub const OP_GUI_MINIBUFFER = opcodes.OP_GUI_MINIBUFFER;
-pub const OP_CLIPBOARD_WRITE = opcodes.OP_CLIPBOARD_WRITE;
-pub const OP_GUI_INDENT_GUIDES = opcodes.OP_GUI_INDENT_GUIDES;
-pub const OP_GUI_LINE_SPACING = opcodes.OP_GUI_LINE_SPACING;
-pub const OP_GUI_FILE_TREE = opcodes.OP_GUI_FILE_TREE;
-pub const OP_GUI_FILE_TREE_SELECTION = opcodes.OP_GUI_FILE_TREE_SELECTION;
-pub const OP_GUI_CURSOR_ANIMATION = opcodes.OP_GUI_CURSOR_ANIMATION;
 pub const OP_GUI_WINDOW_CONTENT = opcodes.OP_GUI_WINDOW_CONTENT;
 pub const OP_GUI_HOVER_POPUP = opcodes.OP_GUI_HOVER_POPUP;
 pub const OP_GUI_SIGNATURE_HELP = opcodes.OP_GUI_SIGNATURE_HELP;
@@ -111,9 +103,14 @@ pub const OP_GUI_AGENT_GROUPS = opcodes.OP_GUI_AGENT_GROUPS;
 pub const OP_GUI_BOARD = opcodes.OP_GUI_BOARD;
 pub const OP_GUI_AGENT_CONTEXT = opcodes.OP_GUI_AGENT_CONTEXT;
 pub const OP_GUI_CHANGE_SUMMARY = opcodes.OP_GUI_CHANGE_SUMMARY;
+pub const OP_CLIPBOARD_WRITE = opcodes.OP_CLIPBOARD_WRITE;
+pub const OP_GUI_INDENT_GUIDES = opcodes.OP_GUI_INDENT_GUIDES;
+pub const OP_GUI_LINE_SPACING = opcodes.OP_GUI_LINE_SPACING;
+pub const OP_GUI_FILE_TREE = opcodes.OP_GUI_FILE_TREE;
+pub const OP_GUI_FILE_TREE_SELECTION = opcodes.OP_GUI_FILE_TREE_SELECTION;
+pub const OP_GUI_CURSOR_ANIMATION = opcodes.OP_GUI_CURSOR_ANIMATION;
 pub const OP_GUI_HOVER_ACTION = opcodes.OP_GUI_HOVER_ACTION;
 pub const OP_GUI_CONFIG_STATE = opcodes.OP_GUI_CONFIG_STATE;
-
 pub const GUI_ACTION_SELECT_TAB = opcodes.GUI_ACTION_SELECT_TAB;
 pub const GUI_ACTION_CLOSE_TAB = opcodes.GUI_ACTION_CLOSE_TAB;
 pub const GUI_ACTION_FILE_TREE_CLICK = opcodes.GUI_ACTION_FILE_TREE_CLICK;
@@ -182,7 +179,6 @@ pub const GUI_ACTION_FOLD_TOGGLE_AT_LINE = opcodes.GUI_ACTION_FOLD_TOGGLE_AT_LIN
 pub const GUI_ACTION_GIT_OPEN_DIFF = opcodes.GUI_ACTION_GIT_OPEN_DIFF;
 pub const GUI_ACTION_CONFIG_UPDATE = opcodes.GUI_ACTION_CONFIG_UPDATE;
 pub const GUI_ACTION_CONFIG_QUERY = opcodes.GUI_ACTION_CONFIG_QUERY;
-// --- END GENERATED ---
 
 // Log levels// Log levels
 pub const LOG_LEVEL_ERR: u8 = 0;
@@ -2746,5 +2742,5 @@ test "decode draw_styled_text truncated returns malformed" {
 }
 
 test {
-    _ = @import("protocol_schema_test.zig");
+    _ = @import("generated/protocol_schema_test.zig");
 }

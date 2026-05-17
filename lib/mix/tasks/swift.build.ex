@@ -16,6 +16,8 @@ defmodule Mix.Tasks.Swift.Build do
   @impl Mix.Task
   @spec run([String.t()]) :: :ok
   def run(args) do
+    Mix.Task.run("protocol.gen", [])
+
     System.find_executable("xcodebuild")
     |> run_with_xcodebuild(args)
   end
@@ -34,6 +36,7 @@ defmodule Mix.Tasks.Swift.Build do
 
   @spec xcodebuild_args([String.t()]) :: [String.t()]
   defp xcodebuild_args([]), do: ["-project", "macos/Minga.xcodeproj", "-scheme", "Minga", "build"]
+  defp xcodebuild_args(["--" | args]), do: args
   defp xcodebuild_args(args), do: args
 
   @spec handle_xcodebuild_result({String.t(), non_neg_integer()}) :: :ok

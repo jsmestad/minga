@@ -16,46 +16,39 @@ defmodule Minga.Parser.Protocol do
   alias Minga.Language.Symbol
   alias Minga.Parser.StructuralNavResult
 
-  # --- BEGIN GENERATED (mix protocol.gen) ---
-  # Generated from docs/protocol_schema.toml. Do not edit by hand.
+  alias Minga.Protocol.Opcodes
 
-  # Input
-  @op_log_message 0x60
-
-  # Parser Commands
-  @op_set_language 0x20
-  @op_parse_buffer 0x21
-  @op_set_highlight_query 0x22
-  @op_load_grammar 0x23
-  @op_set_injection_query 0x24
-  @op_query_language_at 0x25
-  @op_edit_buffer 0x26
-  @op_set_fold_query 0x28
-  @op_set_indent_query 0x29
-  @op_request_indent 0x2A
-  @op_set_textobject_query 0x2B
-  @op_request_textobject 0x2C
-  @op_close_buffer 0x2D
-  @op_request_match_item 0x2E
-  @op_request_structural_nav 0x2F
-  @op_set_tags_query 0x40
-
-  # Parser Responses
-  @op_highlight_spans 0x30
-  @op_highlight_names 0x31
-  @op_grammar_loaded 0x32
-  @op_language_at_response 0x33
-  @op_injection_ranges 0x34
-  @op_fold_ranges 0x36
-  @op_indent_result 0x37
-  @op_textobject_result 0x38
-  @op_textobject_positions 0x39
-  @op_conceal_spans 0x3A
-  @op_request_reparse 0x3B
-  @op_match_item_result 0x3C
-  @op_node_info 0x3D
-  @op_document_symbols 0x3E
-  # --- END GENERATED ---
+  @op_log_message Opcodes.log_message()
+  @op_set_language Opcodes.set_language()
+  @op_parse_buffer Opcodes.parse_buffer()
+  @op_set_highlight_query Opcodes.set_highlight_query()
+  @op_load_grammar Opcodes.load_grammar()
+  @op_set_injection_query Opcodes.set_injection_query()
+  @op_query_language_at Opcodes.query_language_at()
+  @op_edit_buffer Opcodes.edit_buffer()
+  @op_set_fold_query Opcodes.set_fold_query()
+  @op_set_indent_query Opcodes.set_indent_query()
+  @op_request_indent Opcodes.request_indent()
+  @op_set_textobject_query Opcodes.set_textobject_query()
+  @op_request_textobject Opcodes.request_textobject()
+  @op_close_buffer Opcodes.close_buffer()
+  @op_request_match_item Opcodes.request_match_item()
+  @op_request_structural_nav Opcodes.request_structural_nav()
+  @op_set_tags_query Opcodes.set_tags_query()
+  @op_highlight_spans Opcodes.highlight_spans()
+  @op_highlight_names Opcodes.highlight_names()
+  @op_grammar_loaded Opcodes.grammar_loaded()
+  @op_language_at_response Opcodes.language_at_response()
+  @op_injection_ranges Opcodes.injection_ranges()
+  @op_fold_ranges Opcodes.fold_ranges()
+  @op_indent_result Opcodes.indent_result()
+  @op_textobject_result Opcodes.textobject_result()
+  @op_textobject_positions Opcodes.textobject_positions()
+  @op_conceal_spans Opcodes.conceal_spans()
+  @op_request_reparse Opcodes.request_reparse()
+  @op_match_item_result Opcodes.match_item_result()
+  @op_node_info Opcodes.node_info()
+  @op_document_symbols Opcodes.document_symbols()
 
   # Well-known textobject type IDs (match Zig constants)
   @textobj_function 0

@@ -21,6 +21,8 @@ defmodule Mix.Tasks.Compile.MingaZig do
   @impl true
   @spec run(keyword()) :: {:ok, []} | {:error, []}
   def run(_opts) do
+    Mix.Task.run("protocol.gen", [])
+
     if File.dir?(@zig_dir) do
       outputs = required_outputs()
 

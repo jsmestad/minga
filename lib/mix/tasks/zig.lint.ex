@@ -17,6 +17,8 @@ defmodule Mix.Tasks.Zig.Lint do
   @impl Mix.Task
   @spec run(list()) :: :ok
   def run(_args) do
+    Mix.Task.run("protocol.gen", [])
+
     zig_root = Path.join(Mix.Project.project_file() |> Path.dirname(), "zig")
 
     unless File.dir?(zig_root) do

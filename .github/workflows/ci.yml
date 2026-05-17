@@ -70,7 +70,8 @@ jobs:
 
       - run: mix deps.get
       - run: mix deps.compile
-      - name: Check generated protocol edits include schema changes
+      - run: mix protocol.gen
+      - name: Check generated protocol artifacts stay out of source
         if: github.event_name == 'pull_request'
         env:
           BASE_REF: ${{ github.base_ref }}
@@ -117,12 +118,31 @@ jobs:
   test-zig:
     name: Test (Zig)
     runs-on: ubuntu-latest
+    env:
+      MIX_ENV: test
     steps:
       - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
 
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
+
+      - name: Cache deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: zig-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
+          restore-keys: zig-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
+
+      - run: mix deps.get
+      - run: mix protocol.gen
 
       - name: Run Zig tests
         run: cd zig && zig build test
@@ -132,6 +152,23 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Cache deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: swift-deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
+          restore-keys: swift-deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
+
+      - run: mix deps.get
+      - run: mix protocol.gen
 
       - name: Cache DerivedData
         uses: actions/cache@v4
