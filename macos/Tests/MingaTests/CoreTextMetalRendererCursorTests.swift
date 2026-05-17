@@ -19,7 +19,7 @@ struct CoreTextMetalRendererCursorTests {
         frameState.cursorShape = .block
         frameState.windowGutters[2] = Wire.WindowGutter(
             windowId: 2, contentRow: 4, contentCol: 1, contentHeight: 20,
-            isActive: true, cursorLine: 10, lineNumberStyle: .hybrid,
+            isActive: true, contentWidth: 80, cursorLine: 10, lineNumberStyle: .hybrid,
             lineNumberWidth: 4, signColWidth: 1, entries: []
         )
 
@@ -134,7 +134,7 @@ struct CoreTextMetalRendererCursorTests {
         dispatcher.frameState.cursorShape = .block
         dispatcher.frameState.windowGutters[1] = Wire.WindowGutter(
             windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 24,
-            isActive: true, cursorLine: 1, lineNumberStyle: .hybrid,
+            isActive: true, contentWidth: 80, cursorLine: 1, lineNumberStyle: .hybrid,
             lineNumberWidth: 4, signColWidth: 1, entries: []
         )
 

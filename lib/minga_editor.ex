@@ -2451,6 +2451,10 @@ defmodule MingaEditor do
     end
   end
 
+  defp handle_gui_action(state, {:fold_toggle_at_line, window_id, line}) do
+    Commands.Folding.execute_at_line(state, window_id, line)
+  end
+
   defp handle_gui_action(state, :cmd_copy) do
     Commands.Editing.execute(state, :cmd_copy)
   end

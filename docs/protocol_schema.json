@@ -134,6 +134,7 @@
     "file_tree_duplicate":  { "hex": "0x32" },
     "file_tree_move":       { "hex": "0x33" },
     "file_tree_drop":       { "hex": "0x40" },
+    "fold_toggle_at_line":  { "hex": "0x41" },
     "system_will_sleep":    { "hex": "0x34" },
     "system_did_wake":      { "hex": "0x35" },
     "cmd_copy":             { "hex": "0x36" },

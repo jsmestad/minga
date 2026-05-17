@@ -333,6 +333,7 @@ final class SpyEncoder: InputEncoder, Sendable {
         case gitFetch
         case gitCommitAmend(message: String)
         case gitPullAndRetry
+        case foldToggleAtLine(windowId: UInt16, bufferLine: UInt32)
         case boardSelectCard(id: UInt32)
         case boardCloseCard(id: UInt32)
         case boardReorder(cardId: UInt32, newIndex: UInt16)
@@ -453,6 +454,9 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendAgentDismiss() { /* no-op for tests */ }
     func sendChangeSummaryClick(index: UInt32) { /* no-op for tests */ }
     func sendScrollToLine(line: UInt32) { /* no-op for tests */ }
+    func sendFoldToggleAtLine(windowId: UInt16, bufferLine: UInt32) {
+        state.withLock { $0.guiActions.append(.foldToggleAtLine(windowId: windowId, bufferLine: bufferLine)) }
+    }
 }
 
 @Suite("EditorNSView Resize")

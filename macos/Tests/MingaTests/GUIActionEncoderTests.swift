@@ -61,6 +61,15 @@ struct GUIActionEncoderTests {
         #expect(spy.guiActions == [.systemDidWake])
     }
 
+    @Test("sendFoldToggleAtLine records buffer line")
+    func foldToggleAtLine() {
+        let spy = SpyEncoder()
+        let encoder: InputEncoder = spy
+        encoder.sendFoldToggleAtLine(windowId: 7, bufferLine: 42)
+
+        #expect(spy.guiActions == [.foldToggleAtLine(windowId: 7, bufferLine: 42)])
+    }
+
     @Test("sendFileTreeClick records index")
     func fileTreeClick() {
         let spy = SpyEncoder()

@@ -1152,6 +1152,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       content_row: content_row,
       content_col: content_col,
       content_height: content_height,
+      content_width: content_w,
       is_active: is_active
     }
 
@@ -1199,6 +1200,10 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     diag_signs = ContentHelpers.diagnostic_signs_for_window(window)
     git_signs = ContentHelpers.git_signs_for_window(window)
     fold_start_lines = MapSet.new(window.fold_ranges, & &1.start_line)
+
+    fold_end_by_start =
+      Map.new(window.fold_ranges, fn range -> {range.start_line, range.end_line} end)
+
     content_width = max(content_w - sign_col_width - line_number_width, 1)
 
     entries =
@@ -1216,13 +1221,19 @@ defmodule MingaEditor.Frontend.Emit.GUI do
             buf_line,
             row_type,
             fold_start_lines,
+            fold_end_by_start,
             diag_signs,
             git_signs,
             decorations
           )
 
         {buf_line, _row_type} ->
-          %{buf_line: buf_line, display_type: :normal, sign_type: :none}
+          %{
+            buf_line: buf_line,
+            display_type: :normal,
+            sign_type: :none,
+            fold_end_line: 0xFFFF_FFFF
+          }
       end)
 
     Map.merge(win_pos, %{
@@ -1276,6 +1287,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
           non_neg_integer(),
           term(),
           MapSet.t(non_neg_integer()),
+          %{non_neg_integer() => non_neg_integer()},
           %{non_neg_integer() => atom()},
           %{non_neg_integer() => atom()},
           Minga.Core.Decorations.t()
@@ -1284,19 +1296,26 @@ defmodule MingaEditor.Frontend.Emit.GUI do
          buf_line,
          row_type,
          fold_start_lines,
+         fold_end_by_start,
          diag_signs,
          git_signs,
          decorations
        ) do
     sign_type = resolve_sign_type(buf_line, diag_signs, git_signs)
     display_type = resolve_display_type(row_type, fold_start_lines, buf_line)
+    fold_end_line = Map.get(fold_end_by_start, buf_line, 0xFFFF_FFFF)
 
     case sign_type do
       :none ->
-        resolve_annotation_entry(buf_line, display_type, decorations)
+        resolve_annotation_entry(buf_line, display_type, fold_end_line, decorations)
 
       _ ->
-        %{buf_line: buf_line, display_type: display_type, sign_type: sign_type}
+        %{
+          buf_line: buf_line,
+          display_type: display_type,
+          sign_type: sign_type,
+          fold_end_line: fold_end_line
+        }
     end
   end
 
@@ -1317,10 +1336,11 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   @spec resolve_annotation_entry(
           non_neg_integer(),
           ProtocolGUI.display_type(),
+          non_neg_integer(),
           Minga.Core.Decorations.t()
         ) ::
           ProtocolGUI.gutter_entry()
-  defp resolve_annotation_entry(buf_line, display_type, decorations) do
+  defp resolve_annotation_entry(buf_line, display_type, fold_end_line, decorations) do
     icons =
       decorations
       |> Minga.Core.Decorations.annotations_for_line(buf_line)
@@ -1328,13 +1348,19 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
     case icons do
       [] ->
-        %{buf_line: buf_line, display_type: display_type, sign_type: :none}
+        %{
+          buf_line: buf_line,
+          display_type: display_type,
+          sign_type: :none,
+          fold_end_line: fold_end_line
+        }
 
       [ann | _] ->
         %{
           buf_line: buf_line,
           display_type: display_type,
           sign_type: :annotation,
+          fold_end_line: fold_end_line,
           sign_fg: ann.fg,
           sign_text: String.slice(ann.text, 0, 2)
         }

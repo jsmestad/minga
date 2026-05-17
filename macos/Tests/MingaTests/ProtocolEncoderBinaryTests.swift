@@ -266,6 +266,17 @@ struct EncoderGUIActionTests {
         #expect(message?.contains("source path exceeds GUI protocol limit") == true)
     }
 
+    @Test("fold_toggle_at_line encodes window ID and buffer line")
+    func foldToggleAtLineLayout() {
+        let payload = captureFrame { $0.sendFoldToggleAtLine(windowId: 7, bufferLine: 42) }
+
+        #expect(payload.count == 8)
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_FOLD_TOGGLE_AT_LINE)
+        #expect(readU16(payload, 2) == 7)
+        #expect(readU32(payload, 4) == 42)
+    }
+
     @Test("completion_select encodes index as UInt16")
     func completionSelectLayout() {
         let payload = captureFrame { $0.sendCompletionSelect(index: 3) }

@@ -947,6 +947,7 @@ struct GUIGutterDecoderTests {
         appendU16(&window, 5) // contentCol
         appendU16(&window, 24) // contentHeight
         window.append(1) // isActive
+        appendU16(&window, 80) // contentWidth
 
         // Section 0x02: Config
         var config = Data()
@@ -959,11 +960,11 @@ struct GUIGutterDecoderTests {
         var entries = Data()
         appendU16(&entries, 3) // entry count
         // Entry 1
-        appendU32(&entries, 8); entries.append(0); entries.append(1) // normal, gitAdded
+        appendU32(&entries, 8); entries.append(0); entries.append(1); appendU32(&entries, UInt32.max) // normal, gitAdded, no fold range
         // Entry 2
-        appendU32(&entries, 9); entries.append(1); entries.append(0) // foldStart, none
+        appendU32(&entries, 9); entries.append(1); entries.append(0); appendU32(&entries, 14) // foldStart, none, fold end
         // Entry 3
-        appendU32(&entries, 10); entries.append(3); entries.append(4) // wrapContinuation, diagError
+        appendU32(&entries, 10); entries.append(3); entries.append(4); appendU32(&entries, UInt32.max) // wrapContinuation, diagError, no fold range
 
         var data = Data()
         data.append(OP_GUI_GUTTER)
@@ -983,6 +984,7 @@ struct GUIGutterDecoderTests {
         #expect(gutterData.contentCol == 5)
         #expect(gutterData.contentHeight == 24)
         #expect(gutterData.isActive == true)
+        #expect(gutterData.contentWidth == 80)
         #expect(gutterData.cursorLine == 10)
         #expect(gutterData.lineNumberStyle == .hybrid)
         #expect(gutterData.lineNumberWidth == 4)
@@ -991,8 +993,88 @@ struct GUIGutterDecoderTests {
         #expect(gutterData.entries[0].bufLine == 8)
         #expect(gutterData.entries[0].signType == .gitAdded)
         #expect(gutterData.entries[1].displayType == .foldStart)
+        #expect(gutterData.entries[1].foldEndLine == 14)
         #expect(gutterData.entries[2].displayType == .wrapContinuation)
         #expect(gutterData.entries[2].signType == .diagError)
+    }
+
+    @Test("Decode gui_gutter with legacy window section layout")
+    func decodeGutterLegacyWindowSection() throws {
+        var window = Data()
+        appendU16(&window, 1)
+        appendU16(&window, 0)
+        appendU16(&window, 5)
+        appendU16(&window, 24)
+        window.append(1)
+
+        var config = Data()
+        appendU32(&config, 10)
+        config.append(0)
+        config.append(4)
+        config.append(1)
+
+        var entries = Data()
+        appendU16(&entries, 1)
+        appendU32(&entries, 8); entries.append(0); entries.append(1); appendU32(&entries, UInt32.max)
+
+        var data = Data()
+        data.append(OP_GUI_GUTTER)
+        data.append(3)
+        data.append(contentsOf: buildSectionData(0x01, window))
+        data.append(contentsOf: buildSectionData(0x02, config))
+        data.append(contentsOf: buildSectionData(0x03, entries))
+
+        let (cmd, _) = try decodeCommand(data: data, offset: 0)
+        guard case .guiGutter(let gutterData) = cmd else {
+            Issue.record("Expected .guiGutter"); return
+        }
+
+        #expect(gutterData.windowId == 1)
+        #expect(gutterData.contentHeight == 24)
+        #expect(gutterData.isActive == true)
+        #expect(gutterData.contentWidth == 0)
+        #expect(gutterData.entries.count == 1)
+    }
+
+    @Test("Truncated gui_gutter entry throws malformed")
+    func decodeGutterTruncatedEntryThrows() throws {
+        var entries = Data()
+        appendU16(&entries, 1)
+        appendU32(&entries, 8)
+        entries.append(0)
+        entries.append(1)
+        // Missing fold_end_line u32.
+
+        var data = Data()
+        data.append(OP_GUI_GUTTER)
+        data.append(1)
+        data.append(contentsOf: buildSectionData(0x03, entries))
+
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Truncated gui_gutter annotation text throws malformed")
+    func decodeGutterTruncatedAnnotationThrows() throws {
+        var entries = Data()
+        appendU16(&entries, 1)
+        appendU32(&entries, 8)
+        entries.append(0)
+        entries.append(8)
+        appendU32(&entries, UInt32.max)
+        entries.append(contentsOf: [0xAA, 0xBB, 0xCC])
+        entries.append(4)
+        entries.append(contentsOf: [0xF0, 0x9F])
+
+        var data = Data()
+        data.append(OP_GUI_GUTTER)
+        data.append(1)
+        data.append(contentsOf: buildSectionData(0x03, entries))
+
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: data, offset: 0)
+        }
     }
 }
 

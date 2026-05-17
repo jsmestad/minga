@@ -1200,6 +1200,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         var contentRow: UInt16 = 0
         var contentCol: UInt16 = 0
         var contentHeight: UInt16 = 0
+        var contentWidth: UInt16 = 0
         var isActive = false
         var cursorLine: UInt32 = 0
         var style: Wire.LineNumberStyle = .hybrid
@@ -1212,16 +1213,18 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             let gsId = data[gutterPos]
             let gsLen = Int(readU16(data, gutterPos + 1))
             let gsStart = gutterPos + 3
-            guard data.count >= gsStart + gsLen else { throw ProtocolDecodeError.malformed }
+            let gsEnd = gsStart + gsLen
+            guard data.count >= gsEnd else { throw ProtocolDecodeError.malformed }
 
             switch gsId {
-            case 0x01: // Window: window_id(2) + row(2) + col(2) + height(2) + is_active(1)
+            case 0x01: // Window: window_id(2) + row(2) + col(2) + height(2) + is_active(1) [+ width(2)]
                 guard gsLen >= 9 else { break }
                 windowId = readU16(data, gsStart)
                 contentRow = readU16(data, gsStart + 2)
                 contentCol = readU16(data, gsStart + 4)
                 contentHeight = readU16(data, gsStart + 6)
                 isActive = data[gsStart + 8] != 0
+                contentWidth = gsLen >= 11 ? readU16(data, gsStart + 9) : 0
 
             case 0x02: // Config: cursor_line(4) + style(1) + ln_width(1) + sign_width(1)
                 guard gsLen >= 7 else { break }
@@ -1231,27 +1234,29 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 signWidth = data[gsStart + 6]
 
             case 0x03: // Entries: count(2) + entries...
-                guard gsLen >= 2 else { break }
+                guard gsLen >= 2 else { throw ProtocolDecodeError.malformed }
                 let lineCount = Int(readU16(data, gsStart))
                 entries.reserveCapacity(lineCount)
                 var ePos = gsStart + 2
                 for _ in 0..<lineCount {
-                    guard data.count >= ePos + 6 else { break }
+                    guard gsEnd >= ePos + 10 else { throw ProtocolDecodeError.malformed }
                     let bufLine = readU32(data, ePos)
                     let dt = Wire.GutterDisplayType(rawValue: data[ePos + 4]) ?? .normal
                     let st = Wire.GutterSignType(rawValue: data[ePos + 5]) ?? .none
-                    ePos += 6
+                    let rawFoldEndLine = readU32(data, ePos + 6)
+                    let foldEndLine: UInt32? = rawFoldEndLine == UInt32.max ? nil : rawFoldEndLine
+                    ePos += 10
                     if st == .annotation {
-                        guard data.count >= ePos + 4 else { break }
+                        guard gsEnd >= ePos + 4 else { throw ProtocolDecodeError.malformed }
                         let fg = readU24(data, ePos)
                         let textLen = Int(data[ePos + 3])
                         ePos += 4
-                        guard data.count >= ePos + textLen else { break }
+                        guard gsEnd >= ePos + textLen else { throw ProtocolDecodeError.malformed }
                         let text = String(data: Data(data[ePos..<(ePos + textLen)]), encoding: .utf8) ?? ""
                         ePos += textLen
-                        entries.append(Wire.GutterEntry(bufLine: bufLine, displayType: dt, signType: st, signFg: fg, signText: text))
+                        entries.append(Wire.GutterEntry(bufLine: bufLine, displayType: dt, signType: st, foldEndLine: foldEndLine, signFg: fg, signText: text))
                     } else {
-                        entries.append(Wire.GutterEntry(bufLine: bufLine, displayType: dt, signType: st))
+                        entries.append(Wire.GutterEntry(bufLine: bufLine, displayType: dt, signType: st, foldEndLine: foldEndLine))
                     }
                 }
 
@@ -1263,9 +1268,9 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
 
         let windowGutter = Wire.WindowGutter(
             windowId: windowId, contentRow: contentRow, contentCol: contentCol,
-            contentHeight: contentHeight, isActive: isActive, cursorLine: cursorLine,
-            lineNumberStyle: style, lineNumberWidth: lnWidth, signColWidth: signWidth,
-            entries: entries
+            contentHeight: contentHeight, isActive: isActive, contentWidth: contentWidth,
+            cursorLine: cursorLine, lineNumberStyle: style, lineNumberWidth: lnWidth,
+            signColWidth: signWidth, entries: entries
         )
         return (.guiGutter(data: windowGutter), gutterPos - offset)
 

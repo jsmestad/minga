@@ -72,6 +72,11 @@ final class EditorNSView: MTKView {
     private var lastMoveRow: Int16 = -1
     private var lastMoveCol: Int16 = -1
 
+    /// Gutter hover state used for fold chevron visibility and range highlight.
+    private var isMouseInGutter: Bool = false
+    private var gutterHoverWindowId: UInt16?
+    private var gutterHoverRow: UInt16?
+
     /// Current resize cursor pushed for split divider hover or drag.
     private var dividerCursorState: DividerCursorState = .none
 
@@ -333,10 +338,19 @@ final class EditorNSView: MTKView {
             flashScrollIndicator()
         }
 
+        let validGutterHoverWindowId = gutterHoverWindowId.flatMap { windowId in
+            dispatcher.currentFrameGutterWindowIds.contains(windowId) ? windowId : nil
+        }
+        let validGutterHoverRow = validGutterHoverWindowId == nil ? nil : gutterHoverRow
+        let validMouseInGutter = isMouseInGutter && validGutterHoverWindowId != nil
+
         coreTextRenderer.render(frameState: fs, fontManager: fontManager,
                                 cursorBlinkVisible: cursorBlinkVisible,
                                 windowContents: guiState?.windowContents ?? [:],
                                 themeColors: guiState?.themeColors,
+                                isMouseInGutter: validMouseInGutter,
+                                gutterHoverWindowId: validGutterHoverWindowId,
+                                gutterHoverRow: validGutterHoverRow,
                                 drawable: drawable, viewportSize: drawableSize,
                                 contentScale: scale)
         dispatcher.frameState.dirty = false
@@ -1001,6 +1015,10 @@ final class EditorNSView: MTKView {
             return
         }
 
+        if handleFoldChevronClick(at: point) {
+            return
+        }
+
         resetCursorBlink()
         leftMouseDownPoint = point
         leftMouseDragStarted = false
@@ -1143,6 +1161,7 @@ final class EditorNSView: MTKView {
     override func mouseMoved(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         setDividerCursorState(dividerHitState(at: point))
+        updateGutterHover(at: point)
         let (row, col) = cellPosition(from: event)
         guard row != lastMoveRow || col != lastMoveCol else { return }
         lastMoveRow = row
@@ -1156,6 +1175,7 @@ final class EditorNSView: MTKView {
         if dividerDragState == .none {
             setDividerCursorState(.none)
         }
+        clearGutterHover()
         super.mouseExited(with: event)
     }
 
@@ -1483,6 +1503,74 @@ final class EditorNSView: MTKView {
         }
 
         dividerCursorState = nextState
+    }
+
+    private func handleFoldChevronClick(at point: NSPoint) -> Bool {
+        guard let (gutter, entry) = foldChevronEntry(at: point) else { return false }
+        encoder.sendFoldToggleAtLine(windowId: gutter.windowId, bufferLine: entry.bufLine)
+        return true
+    }
+
+    private func foldChevronEntry(at point: NSPoint) -> (gutter: Wire.WindowGutter, entry: Wire.GutterEntry)? {
+        guard let (gutter, rowIndex) = gutterHit(at: point) else { return nil }
+        guard Int(gutter.signColWidth) >= 3 else { return nil }
+        guard rowIndex >= 0 && rowIndex < gutter.entries.count else { return nil }
+
+        let gutterX = CGFloat(gutter.contentCol) * cellWidth + CoreTextMetalRenderer.gutterLeftMarginPt
+        let foldColumnOffset = CGFloat(Int(gutter.signColWidth) - 1)
+        let foldStartX = gutterX + foldColumnOffset * cellWidth
+        guard point.x >= foldStartX && point.x < foldStartX + cellWidth else { return nil }
+
+        let entry = gutter.entries[rowIndex]
+        switch entry.displayType {
+        case .foldOpen, .foldStart:
+            return (gutter, entry)
+        case .normal, .foldContinuation, .wrapContinuation:
+            return nil
+        }
+    }
+
+    private func updateGutterHover(at point: NSPoint) {
+        let next: (Bool, UInt16?, UInt16?)
+        if let (gutter, rowIndex) = gutterHit(at: point), rowIndex >= 0 && rowIndex < gutter.entries.count {
+            next = (true, gutter.windowId, gutter.contentRow + UInt16(rowIndex))
+        } else {
+            next = (false, nil, nil)
+        }
+
+        guard next.0 != isMouseInGutter || next.1 != gutterHoverWindowId || next.2 != gutterHoverRow else { return }
+        isMouseInGutter = next.0
+        gutterHoverWindowId = next.1
+        gutterHoverRow = next.2
+        needsDisplay = true
+    }
+
+    private func clearGutterHover() {
+        guard isMouseInGutter || gutterHoverWindowId != nil || gutterHoverRow != nil else { return }
+        isMouseInGutter = false
+        gutterHoverWindowId = nil
+        gutterHoverRow = nil
+        needsDisplay = true
+    }
+
+    private func gutterHit(at point: NSPoint) -> (gutter: Wire.WindowGutter, rowIndex: Int)? {
+        let screenRow = Int(point.y / effectiveCellHeight)
+
+        for windowId in dispatcher.currentFrameGutterWindowIds {
+            guard let gutter = dispatcher.frameState.windowGutters[windowId] else { continue }
+            let startRow = Int(gutter.contentRow)
+            let endRow = startRow + Int(gutter.contentHeight)
+            guard screenRow >= startRow && screenRow < endRow else { continue }
+
+            let gutterX = CGFloat(gutter.contentCol) * cellWidth + CoreTextMetalRenderer.gutterLeftMarginPt
+            let gutterWidth = CGFloat(gutter.lineNumberWidth) + CGFloat(gutter.signColWidth)
+            let gutterEndX = gutterX + gutterWidth * cellWidth
+            guard point.x >= gutterX && point.x < gutterEndX else { continue }
+
+            return (gutter, screenRow - startRow)
+        }
+
+        return nil
     }
 
     private func cellPosition(from event: NSEvent) -> (row: Int16, col: Int16) {

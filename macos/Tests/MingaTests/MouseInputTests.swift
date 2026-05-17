@@ -173,6 +173,58 @@ struct MouseInputTests {
         #expect(call.col == 15)
     }
 
+    @Test("mouseDown on fold chevron sends fold toggle instead of generic mouse input")
+    @MainActor func foldChevronClickUsesSpecialAction() throws {
+        let spy = SpyEncoder()
+        guard let view = makeView(spy: spy) else { return }
+        let cw = view.cellWidth
+        let ch = view.cellHeight
+
+        let activeGutter = Wire.WindowGutter(
+            windowId: 1, contentRow: 0, contentCol: 0, contentHeight: 24,
+            isActive: true, contentWidth: 80, cursorLine: 11, lineNumberStyle: .hybrid,
+            lineNumberWidth: 4, signColWidth: 3,
+            entries: [Wire.GutterEntry(bufLine: 11, displayType: .normal, signType: .none)]
+        )
+        let inactiveGutter = Wire.WindowGutter(
+            windowId: 7, contentRow: 0, contentCol: 20, contentHeight: 24,
+            isActive: false, contentWidth: 80, cursorLine: 42, lineNumberStyle: .hybrid,
+            lineNumberWidth: 4, signColWidth: 3,
+            entries: [Wire.GutterEntry(bufLine: 42, displayType: .foldStart, signType: .none, foldEndLine: 50)]
+        )
+        view.dispatcher.dispatch(.guiGutter(data: activeGutter))
+        view.dispatcher.dispatch(.guiGutter(data: inactiveGutter))
+
+        guard let event = mouseEvent(type: .leftMouseDown,
+                                     location: NSPoint(x: cw * 22.2, y: ch * 0.5)) else { return }
+        view.mouseDown(with: event)
+
+        #expect(spy.guiActions == [.foldToggleAtLine(windowId: 7, bufferLine: 42)])
+        #expect(spy.mouseEventCalls.isEmpty)
+    }
+
+    @Test("mouseDown ignores stale gutter data from a previous frame")
+    @MainActor func staleGutterIgnoredForHitTesting() throws {
+        let spy = SpyEncoder()
+        guard let view = makeView(spy: spy) else { return }
+        let cw = view.cellWidth
+        let ch = view.cellHeight
+
+        view.dispatcher.frameState.windowGutters[9] = Wire.WindowGutter(
+            windowId: 9, contentRow: 0, contentCol: 5, contentHeight: 24,
+            isActive: true, contentWidth: 80, cursorLine: 42, lineNumberStyle: .hybrid,
+            lineNumberWidth: 4, signColWidth: 3,
+            entries: [Wire.GutterEntry(bufLine: 42, displayType: .foldStart, signType: .none, foldEndLine: 50)]
+        )
+
+        guard let event = mouseEvent(type: .leftMouseDown,
+                                     location: NSPoint(x: cw * 7.2, y: ch * 0.5)) else { return }
+        view.mouseDown(with: event)
+
+        #expect(spy.guiActions.isEmpty)
+        #expect(spy.mouseEventCalls.count == 1)
+    }
+
     // MARK: - Mouse move (deduplication)
 
     @Test("mouseMoved sends motion event")

@@ -274,14 +274,17 @@ enum Wire {
         let signType: GutterSignType
         /// Annotation icon foreground color (24-bit RGB). Only valid when signType == .annotation.
         let signFg: UInt32
+        /// Inclusive end line for the fold range when this row is foldable.
+        let foldEndLine: UInt32?
         /// Annotation icon text. Only valid when signType == .annotation.
         let signText: String
 
         init(bufLine: UInt32, displayType: GutterDisplayType, signType: GutterSignType,
-             signFg: UInt32 = 0, signText: String = "") {
+             foldEndLine: UInt32? = nil, signFg: UInt32 = 0, signText: String = "") {
             self.bufLine = bufLine
             self.displayType = displayType
             self.signType = signType
+            self.foldEndLine = foldEndLine
             self.signFg = signFg
             self.signText = signText
         }
@@ -300,6 +303,8 @@ enum Wire {
         let contentHeight: UInt16
         /// Whether this is the active (focused) window.
         let isActive: Bool
+        /// Width of this window's content area in columns.
+        let contentWidth: UInt16
 
         let cursorLine: UInt32
         let lineNumberStyle: LineNumberStyle

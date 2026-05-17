@@ -95,15 +95,46 @@ defmodule MingaEditor.Commands.Folding do
     open_all_decoration_folds(state)
   end
 
+  @doc """
+  Toggles the fold at a specific buffer line in the active window.
+
+  This is used by tests and non-windowed callers. Native GUI gutter clicks should call `execute_at_line/3` so split windows target the clicked window.
+  """
+  @spec execute_at_line(state(), non_neg_integer()) :: state()
+  def execute_at_line(state, buffer_line) do
+    case EditorState.active_window_struct(state) do
+      nil -> state
+      window -> dispatch_fold_command_at_line(state, window, buffer_line, :toggle)
+    end
+  end
+
+  @doc """
+  Toggles the fold at a specific buffer line in the given window.
+
+  The cursor and active window are left unchanged; the window id comes from the GUI gutter that was clicked.
+  """
+  @spec execute_at_line(state(), Window.id(), non_neg_integer()) :: state()
+  def execute_at_line(state, window_id, buffer_line) do
+    case Map.get(state.workspace.windows.map, window_id) do
+      nil -> state
+      window -> dispatch_fold_command_at_line(state, window, buffer_line, :toggle)
+    end
+  end
+
   # ── Private ────────────────────────────────────────────────────────────────
 
   @spec update_active_window(state(), (Window.t() -> Window.t())) :: state()
   defp update_active_window(%{workspace: %{windows: %{active: id}}} = state, fun)
        when is_integer(id) do
-    EditorState.update_window(state, id, fun)
+    update_window(state, id, fun)
   end
 
   defp update_active_window(state, _fun), do: state
+
+  @spec update_window(state(), Window.id(), (Window.t() -> Window.t())) :: state()
+  defp update_window(state, window_id, fun) when is_integer(window_id) do
+    EditorState.update_window(state, window_id, fun)
+  end
 
   # Dispatches a fold command at the cursor line. Checks both active folds
   # (already collapsed) and available fold ranges (from tree-sitter).
@@ -115,14 +146,23 @@ defmodule MingaEditor.Commands.Folding do
         ) :: state()
   defp dispatch_fold_command(state, window, action) do
     {cursor_line, _col} = window.cursor
+    dispatch_fold_command_at_line(state, window, cursor_line, action)
+  end
 
-    has_active_fold = FoldMap.fold_at(window.fold_map, cursor_line) != :none
-    has_available_range = Enum.any?(window.fold_ranges, &FoldRange.contains?(&1, cursor_line))
+  @spec dispatch_fold_command_at_line(
+          state(),
+          Window.t(),
+          non_neg_integer(),
+          :toggle | :close | :open | :close_recursive | :open_recursive
+        ) :: state()
+  defp dispatch_fold_command_at_line(state, window, buffer_line, action) do
+    has_active_fold = FoldMap.fold_at(window.fold_map, buffer_line) != :none
+    has_available_range = Enum.any?(window.fold_ranges, &FoldRange.contains?(&1, buffer_line))
 
     if has_active_fold or has_available_range do
-      apply_window_fold(state, window, cursor_line, action)
+      apply_window_fold(state, window, buffer_line, action)
     else
-      apply_decoration_fold(state, window.buffer, cursor_line, action)
+      apply_decoration_fold(state, window.buffer, buffer_line, action)
     end
   end
 
@@ -132,24 +172,24 @@ defmodule MingaEditor.Commands.Folding do
           non_neg_integer(),
           :toggle | :close | :open | :close_recursive | :open_recursive
         ) :: state()
-  defp apply_window_fold(state, _window, cursor_line, :toggle) do
-    update_active_window(state, fn w -> Window.toggle_fold(w, cursor_line) end)
+  defp apply_window_fold(state, window, cursor_line, :toggle) do
+    update_window(state, window.id, fn w -> Window.toggle_fold(w, cursor_line) end)
   end
 
-  defp apply_window_fold(state, _window, cursor_line, :close) do
-    update_active_window(state, fn w -> Window.fold_at(w, cursor_line) end)
+  defp apply_window_fold(state, window, cursor_line, :close) do
+    update_window(state, window.id, fn w -> Window.fold_at(w, cursor_line) end)
   end
 
-  defp apply_window_fold(state, _window, cursor_line, :open) do
-    update_active_window(state, fn w -> Window.unfold_at(w, cursor_line) end)
+  defp apply_window_fold(state, window, cursor_line, :open) do
+    update_window(state, window.id, fn w -> Window.unfold_at(w, cursor_line) end)
   end
 
-  defp apply_window_fold(state, _window, cursor_line, :close_recursive) do
-    update_active_window(state, fn w -> Window.fold_recursive_at(w, cursor_line) end)
+  defp apply_window_fold(state, window, cursor_line, :close_recursive) do
+    update_window(state, window.id, fn w -> Window.fold_recursive_at(w, cursor_line) end)
   end
 
-  defp apply_window_fold(state, _window, cursor_line, :open_recursive) do
-    update_active_window(state, fn w -> Window.unfold_recursive_at(w, cursor_line) end)
+  defp apply_window_fold(state, window, cursor_line, :open_recursive) do
+    update_window(state, window.id, fn w -> Window.unfold_recursive_at(w, cursor_line) end)
   end
 
   @spec apply_decoration_fold(

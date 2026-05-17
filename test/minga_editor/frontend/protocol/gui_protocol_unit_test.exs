@@ -100,6 +100,15 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
     end
   end
 
+  describe "decode_gui_action for gutter fold actions" do
+    test "decodes fold toggle at line" do
+      assert {:ok, {:fold_toggle_at_line, 7, 42}} ==
+               ProtocolGUI.decode_gui_action(0x41, <<7::16, 42::32>>)
+
+      assert :error == ProtocolGUI.decode_gui_action(0x41, <<42::32>>)
+    end
+  end
+
   describe "decode_gui_action for context menu actions" do
     test "decodes file tree open in split" do
       assert {:ok, {:file_tree_open_in_split, 9}} ==

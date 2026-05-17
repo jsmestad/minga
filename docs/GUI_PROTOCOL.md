@@ -399,20 +399,20 @@ Structured gutter data for native line number and sign rendering. One message is
 
 | Section ID | Name | Content |
 |-----------|------|--------|
-| 0x01 | Window | window_id, content_row, content_col, content_height, is_active |
+| 0x01 | Window | window_id, content_row, content_col, content_height, is_active, content_width |
 | 0x02 | Config | cursor_line, line_number_style, line_number_width, sign_col_width |
 | 0x03 | Entries | entry_count + entries (positional per entry) |
 
 ```
-opcode(1) + window_id(2) + content_row(2) + content_col(2) + content_height(2) + is_active(1)
+opcode(1) + window_id(2) + content_row(2) + content_col(2) + content_height(2) + is_active(1) + content_width(2)
 + cursor_line(4) + line_number_style(1) + line_number_width(1)
 + sign_col_width(1) + line_count(2) + entries...
 
 Per entry:
-  buf_line(4) + display_type(1) + sign_type(1)
+  buf_line(4) + display_type(1) + sign_type(1) + fold_end_line(4)
 ```
 
-`window_id` matches the `window_id` field in `gui_window_content` (0x80), enabling the frontend to correlate gutter data with semantic buffer content for the same window. `content_row` and `content_col` are the screen position of the window's content area (0-indexed). `content_height` is the height in rows. `is_active` is 1 for the focused window, 0 otherwise. `cursor_line` is the 0-indexed buffer line where the cursor sits. `line_number_width` is the character column count allocated for line numbers. `sign_col_width` is the width before line numbers: 0 for no sign/fold prefix, 2 for the sign column only, or 3 when the dedicated fold column is present after the sign column. `line_count` is the number of visible line entries.
+`window_id` matches the `window_id` field in `gui_window_content` (0x80), enabling the frontend to correlate gutter data with semantic buffer content for the same window. `content_row` and `content_col` are the screen position of the window's content area (0-indexed). `content_height` is the height in rows. `is_active` is 1 for the focused window, 0 otherwise. `content_width` is the width in columns and lets the frontend clip gutter hover highlights to split boundaries. `cursor_line` is the 0-indexed buffer line where the cursor sits. `line_number_width` is the character column count allocated for line numbers. `sign_col_width` is the width before line numbers: 0 for no sign/fold prefix, 2 for the sign column only, or 3 when the dedicated fold column is present after the sign column. `line_count` is the number of visible line entries. `fold_end_line` is the inclusive 0-indexed buffer end line for foldable rows, or `0xFFFFFFFF` when the row has no fold range.
 
 Line number style values:
 | Value | Style |
@@ -836,6 +836,7 @@ opcode(1) + action_type(1) + payload...
 | 0x32 | file_tree_duplicate | index(2) | Duplicate a file tree entry |
 | 0x33 | file_tree_move | source_index(2) + target_dir_index(2) | Move a file tree entry |
 | 0x40 | file_tree_drop | target_index(2) + target_path_hash(4) + target_kind(1) + modifiers(1) + target_id_len(2) + target_id + target_path_len(2) + target_path + source_count(2) + sources... | Report file tree drag/drop intent for BEAM-owned filesystem handling |
+| 0x41 | fold_toggle_at_line | window_id(2) + buffer_line(4) | Toggle the fold at a gutter-targeted buffer line without moving the cursor |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |
