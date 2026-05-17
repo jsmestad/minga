@@ -91,6 +91,7 @@ defmodule MingaEditor.RenderPipeline.Content do
       preview_matches: preview_matches,
       line_number_style: line_number_style,
       wrap_on: wrap_on,
+      width_oracle: width_oracle,
       window: window
     } = scroll
 
@@ -115,7 +116,7 @@ defmodule MingaEditor.RenderPipeline.Content do
         is_gui: MingaEditor.Frontend.gui?(state.capabilities),
         wrap_on: wrap_on,
         line_number_style: line_number_style,
-        width_oracle: MingaEditor.Frontend.Capabilities.width_oracle(state.capabilities)
+        width_oracle: width_oracle
       })
 
     # Compute context fingerprint and check for context changes.
@@ -266,7 +267,7 @@ defmodule MingaEditor.RenderPipeline.Content do
   defp cursor_visual_position(%{wrap_on: false}), do: {0, 0, 0}
 
   defp cursor_visual_position(%{wrap_on: true, visible_line_map: visible_line_map})
-       when not is_nil(visible_line_map), do: {0, 0, 0}
+       when is_list(visible_line_map), do: {0, 0, 0}
 
   defp cursor_visual_position(%{
          wrap_on: true,

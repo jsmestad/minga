@@ -8,7 +8,14 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Core.WrapMap
   alias MingaEditor
+  alias MingaEditor.Commands.Movement
+  alias MingaEditor.Layout
+  alias MingaEditor.RenderPipeline.TestHelpers
+  alias MingaEditor.Renderer.Gutter
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Viewport
 
   defp start_editor(content, opts \\ []) do
     {:ok, buffer} = BufferProcess.start_link(content: content, filetype: :elixir)
@@ -26,7 +33,7 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
     {editor, buffer}
   end
 
-  defp send_key(editor, codepoint, mods \\ 0) do
+  defp send_key(editor, codepoint, mods) do
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
     _ = :sys.get_state(editor)
   end
@@ -39,6 +46,50 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
   end
 
   @ctrl 0x02
+  @wrapped_cursor_col 500
+
+  defp wrapped_scroll_state do
+    state = TestHelpers.base_state(content: String.duplicate("a", 600) <> "\n" <> "tail", rows: 10, cols: 40)
+    buffer = state.workspace.buffers.active
+
+    _ = BufferProcess.set_option(buffer, :wrap, true)
+    _ = BufferProcess.set_option(buffer, :line_numbers, :none)
+    BufferProcess.move_to(buffer, {0, @wrapped_cursor_col})
+
+    state
+  end
+
+  defp wrapped_cursor_visual_row(state, buffer) do
+    content_width = wrapped_content_width(state, buffer)
+
+    String.duplicate("a", 600)
+    |> then(&WrapMap.compute([&1], content_width))
+    |> hd()
+    |> Enum.with_index()
+    |> Enum.filter(fn {row, _idx} -> row.byte_offset <= @wrapped_cursor_col end)
+    |> List.last()
+    |> elem(1)
+  end
+
+  defp wrapped_content_width(state, buffer) do
+    layout = Layout.get(state)
+
+    content_width =
+      case Layout.active_window_layout(layout, state) do
+        %{content: {_row, _col, width, _height}} -> width
+        nil -> elem(layout.editor_area, 2)
+      end
+
+    line_count = BufferProcess.line_count(buffer)
+
+    gutter_width =
+      case BufferProcess.get_option(buffer, :line_numbers) do
+        :none -> Gutter.total_width(0)
+        _ -> Gutter.total_width(Viewport.gutter_width(line_count))
+      end
+
+    max(content_width - gutter_width, 1)
+  end
 
   describe "Ctrl-e (scroll_down_line)" do
     test "scrolls viewport down and clamps cursor when off-screen" do
@@ -56,18 +107,23 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
       assert cursor_line >= 1
     end
 
-    test "wrapped scroll keeps the viewport on a visual row" do
-      content = String.duplicate("a", 200)
+    test "wrapped scroll preserves the cursor when it stays visible" do
+      content =
+        String.duplicate("a", 120) <> "\n" <> String.duplicate("b", 160) <> "\n" <> "tail\nfinal"
+
       {editor, buffer} = start_editor(content, width: 40, height: 10)
       BufferProcess.set_option(buffer, :wrap, true)
 
-      send_key(editor, ?e, @ctrl)
+      BufferProcess.move_to(buffer, {1, 0})
+      original_cursor = BufferProcess.cursor(buffer)
 
-      win = active_window(editor)
-      assert win.viewport.visual_row_offset == 1
-      {cursor_line, cursor_col} = BufferProcess.cursor(buffer)
-      assert cursor_line == 0
-      assert cursor_col > 0
+      send_key(editor, ?e, @ctrl)
+      assert BufferProcess.cursor(buffer) == original_cursor
+      assert active_window(editor).viewport.visual_row_offset == 1
+
+      send_key(editor, ?y, @ctrl)
+      assert BufferProcess.cursor(buffer) == original_cursor
+      assert active_window(editor).viewport.visual_row_offset == 0
     end
 
     test "does not scroll past end of file" do
@@ -85,18 +141,22 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
       assert win.viewport.top == 0
     end
 
-    test "preserves cursor when it stays visible" do
-      content = Enum.map_join(0..99, "\n", &"line #{&1}")
-      {editor, buffer} = start_editor(content)
+    test "wrapped scroll nudges the cursor when it would leave the viewport" do
+      content =
+        String.duplicate("a", 120) <> "\n" <> String.duplicate("b", 160) <> "\n" <> "tail\nfinal"
 
-      # Move cursor to line 10 (well within view after 1 scroll)
-      BufferProcess.move_to(buffer, {10, 0})
-      _ = :sys.get_state(editor)
+      {editor, buffer} = start_editor(content, width: 40, height: 10)
+      BufferProcess.set_option(buffer, :wrap, true)
+
+      BufferProcess.move_to(buffer, {0, 0})
+      original_cursor = BufferProcess.cursor(buffer)
 
       send_key(editor, ?e, @ctrl)
 
-      {cursor_line, _} = BufferProcess.cursor(buffer)
-      assert cursor_line == 10
+      {cursor_line, cursor_col} = BufferProcess.cursor(buffer)
+      refute {cursor_line, cursor_col} == original_cursor
+      assert cursor_line == 0
+      assert cursor_col > 0
     end
   end
 
@@ -119,96 +179,48 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
       win_after = active_window(editor)
       assert win_after.viewport.top == 4
     end
-
-    test "wrapped scroll up keeps the viewport on a visual row" do
-      content = String.duplicate("a", 200)
-      {editor, buffer} = start_editor(content, width: 40, height: 10)
-      BufferProcess.set_option(buffer, :wrap, true)
-
-      send_key(editor, ?e, @ctrl)
-      {_, cursor_col_down} = BufferProcess.cursor(buffer)
-      assert cursor_col_down > 0
-
-      send_key(editor, ?y, @ctrl)
-
-      win = active_window(editor)
-      assert win.viewport.visual_row_offset == 0
-      {cursor_line, cursor_col_up} = BufferProcess.cursor(buffer)
-      assert cursor_line == 0
-      assert cursor_col_up == 0
-    end
   end
 
   describe "zz (scroll_center)" do
-    test "centers viewport on cursor" do
-      content = Enum.map_join(0..99, "\n", &"line #{&1}")
-      {editor, buffer} = start_editor(content, height: 24)
+    test "centers the wrapped visual row on screen" do
+      state = wrapped_scroll_state()
+      buffer = state.workspace.buffers.active
+      cursor_visual_row = wrapped_cursor_visual_row(state, buffer)
 
-      # Move cursor to line 50
-      BufferProcess.move_to(buffer, {50, 0})
-      _ = :sys.get_state(editor)
-
-      # Press z then z
-      send_key(editor, ?z)
-      send_key(editor, ?z)
-
-      win = active_window(editor)
-      # Assert the centering property: cursor line 50 should be near
-      # the midpoint of the visible area, regardless of how many rows
-      # are reserved for chrome (tab bar, status bar, etc.).
+      state = Movement.execute(state, :scroll_center)
+      win = EditorState.active_window_struct(state)
       visible = MingaEditor.Viewport.content_rows(win.viewport)
-      midpoint = win.viewport.top + div(visible, 2)
+      centered_row = win.viewport.top + win.viewport.visual_row_offset + div(visible, 2)
 
-      assert abs(midpoint - 50) <= 1,
-             "cursor line 50 should be near viewport midpoint #{midpoint} " <>
-               "(viewport.top=#{win.viewport.top}, content_rows=#{visible})"
+      assert centered_row == cursor_visual_row
     end
   end
 
   describe "zt (scroll_cursor_top)" do
-    test "scrolls cursor to top of viewport" do
-      content = Enum.map_join(0..99, "\n", &"line #{&1}")
-      {editor, buffer} = start_editor(content, height: 24)
+    test "scrolls a wrapped visual row to the top of the viewport" do
+      state = wrapped_scroll_state()
+      buffer = state.workspace.buffers.active
+      cursor_visual_row = wrapped_cursor_visual_row(state, buffer)
 
-      BufferProcess.move_to(buffer, {50, 0})
-      _ = :sys.get_state(editor)
+      state = Movement.execute(state, :scroll_cursor_top)
+      win = EditorState.active_window_struct(state)
 
-      # Press z then t
-      send_key(editor, ?z)
-      send_key(editor, ?t)
-
-      win = active_window(editor)
-      # Cursor line 50 should be near the top of the visible area.
-      # "Near" accounts for scroll_margin (default 5).
-      visible = MingaEditor.Viewport.content_rows(win.viewport)
-
-      assert win.viewport.top <= 50 and win.viewport.top >= 50 - visible + 1,
-             "cursor line 50 should be near top of viewport " <>
-               "(viewport.top=#{win.viewport.top}, content_rows=#{visible})"
+      assert win.viewport.top + win.viewport.visual_row_offset == cursor_visual_row
     end
   end
 
   describe "zb (scroll_cursor_bottom)" do
-    test "scrolls cursor to bottom of viewport" do
-      content = Enum.map_join(0..99, "\n", &"line #{&1}")
-      {editor, buffer} = start_editor(content, height: 24)
+    test "scrolls a wrapped visual row to the bottom of the viewport" do
+      state = wrapped_scroll_state()
+      buffer = state.workspace.buffers.active
+      cursor_visual_row = wrapped_cursor_visual_row(state, buffer)
 
-      BufferProcess.move_to(buffer, {50, 0})
-      _ = :sys.get_state(editor)
-
-      # Press z then b
-      send_key(editor, ?z)
-      send_key(editor, ?b)
-
-      win = active_window(editor)
-      # Cursor line 50 should be near the bottom of the visible area.
-      # "Near" accounts for scroll_margin (default 5) + 1.
+      state = Movement.execute(state, :scroll_cursor_bottom)
+      win = EditorState.active_window_struct(state)
       visible = MingaEditor.Viewport.content_rows(win.viewport)
-      bottom = win.viewport.top + visible - 1
+      bottom_row = win.viewport.top + win.viewport.visual_row_offset + visible - 1
 
-      assert abs(bottom - 50) <= 6,
-             "cursor line 50 should be near bottom of viewport " <>
-               "(viewport.top=#{win.viewport.top}, bottom=#{bottom}, content_rows=#{visible})"
+      assert bottom_row == cursor_visual_row
     end
   end
 end

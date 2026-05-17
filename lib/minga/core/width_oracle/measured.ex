@@ -2,7 +2,7 @@ defmodule Minga.Core.WidthOracle.Measured do
   @moduledoc """
   Width oracle backed by cached frontend text measurements.
 
-  A measured oracle carries per-instance state so proportional font wrapping can use GUI measurements without changing `Minga.Core.WrapMap`. Cache misses deliberately fall back to monospace widths; callers can populate the cache from `measure_text` and recompute wrap maps when `text_width` responses arrive.
+  A measured oracle carries per-instance state, so proportional font wrapping can use GUI measurements without changing `Minga.Core.WrapMap`. Only use it when the caller owns the cache and can keep it in sync. Cache misses deliberately fall back to monospace widths; callers can populate the cache from `measure_text` and recompute wrap maps when `text_width` responses arrive.
   """
 
   alias Minga.Core.Unicode
@@ -11,7 +11,7 @@ defmodule Minga.Core.WidthOracle.Measured do
 
   @type t :: %__MODULE__{cache: %{String.t() => non_neg_integer()}}
 
-  @doc "Creates a measured oracle with an optional width cache."
+  @doc "Creates a measured oracle with an owned width cache."
   @spec new(%{String.t() => non_neg_integer()}) :: t()
   def new(cache \\ %{}) when is_map(cache), do: %__MODULE__{cache: cache}
 

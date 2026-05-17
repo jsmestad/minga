@@ -57,25 +57,34 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       assert wf.modeline == %{}
     end
 
-    test "wraps production content when visible_line_map is present" do
-      state = base_state(content: String.duplicate("a", 120) <> "\n" <> String.duplicate("b", 120) <> "\nvisible")
+    test "visible_line_map keeps wrapped cursor math out of the folded path" do
+      state =
+        base_state(
+          content:
+            String.duplicate("a", 120) <>
+              "\n" <> String.duplicate("b", 160) <> "\nvisible\nfold\ntail"
+        )
+
       buffer = state.workspace.buffers.active
       Minga.Buffer.Process.set_option(buffer, :wrap, true)
+      Minga.Buffer.Process.move_to(buffer, {2, 0})
+      assert Minga.Buffer.Process.cursor(buffer) == {2, 0}
 
       win_id = state.workspace.windows.active
       window = Map.fetch!(state.workspace.windows.map, win_id)
-      window = Window.set_fold_ranges(window, [Minga.Editing.Fold.Range.new!(1, 2)])
-      window = Window.fold_at(window, 1)
+      window = Window.set_fold_ranges(window, [Minga.Editing.Fold.Range.new!(3, 4)])
+      window = Window.fold_at(window, 3)
       state = put_in(state.workspace.windows.map[win_id], window)
 
       {scrolls, state, _layout} = run_through_scroll(state)
       [{_scroll_win_id, scroll}] = Map.to_list(scrolls)
       assert scroll.visible_line_map != nil
 
-      {[wf], _cursor, _state} = Content.build_content(state, scrolls)
+      {[wf], cursor_info, _state} = Content.build_content(state, scrolls)
 
-      assert map_size(wf.lines) > 2
-      assert Enum.any?(Map.keys(wf.lines), &(&1 > 1))
+      assert %Cursor{row: row} = cursor_info
+      assert row <= 3
+      assert Enum.max(Map.keys(wf.lines)) <= 4
     end
 
     test "updates window tracking fields after render" do

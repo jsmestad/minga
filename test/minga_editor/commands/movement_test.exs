@@ -2,7 +2,11 @@ defmodule MingaEditor.Commands.MovementTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Editing.Fold.Range, as: FoldRange
   alias MingaEditor
+  alias MingaEditor.Commands.Movement
+  alias MingaEditor.RenderPipeline.TestHelpers
+  alias MingaEditor.Window
 
   @sync_timeout 15_000
 
@@ -39,6 +43,16 @@ defmodule MingaEditor.Commands.MovementTest do
   defp send_key(editor, codepoint, mods \\ 0) do
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
     _ = :sys.get_state(editor, @sync_timeout)
+  end
+
+  defp set_active_fold_ranges(editor, ranges) do
+    :sys.replace_state(editor, fn state ->
+      MingaEditor.State.update_window(
+        state,
+        state.workspace.windows.active,
+        &Window.set_fold_ranges(&1, ranges)
+      )
+    end)
   end
 
   describe "Normal mode — movements" do
@@ -166,6 +180,66 @@ defmodule MingaEditor.Commands.MovementTest do
 
       send_key(editor, 57_350)
       assert BufferProcess.cursor(buffer) == {0, 2}
+    end
+  end
+
+  describe "wrap-aware motions with folds" do
+    test "j/k/0/$ stay logical when folds are active" do
+      content =
+        [
+          "visible top",
+          "hidden one",
+          "hidden two",
+          "hidden three",
+          String.duplicate("a", 120)
+        ]
+        |> Enum.join("\n")
+
+      {editor, buffer} = start_editor(content)
+      _ = BufferProcess.set_option(buffer, :wrap, true)
+      set_active_fold_ranges(editor, [FoldRange.new!(1, 3)])
+
+      :sys.replace_state(editor, fn state ->
+        MingaEditor.State.update_window(
+          state,
+          state.workspace.windows.active,
+          &Window.fold_at(&1, 1)
+        )
+      end)
+
+      send_key(editor, ?j)
+      assert BufferProcess.cursor(buffer) == {1, 0}
+
+      send_key(editor, ?j)
+      assert elem(BufferProcess.cursor(buffer), 0) == 4
+
+      send_key(editor, ?k)
+      assert elem(BufferProcess.cursor(buffer), 0) == 1
+
+      BufferProcess.move_to(buffer, {4, 90})
+      _ = :sys.get_state(editor, @sync_timeout)
+      send_key(editor, ?0)
+      assert BufferProcess.cursor(buffer) == {4, 0}
+
+      BufferProcess.move_to(buffer, {4, 90})
+      _ = :sys.get_state(editor, @sync_timeout)
+      send_key(editor, ?$)
+      assert BufferProcess.cursor(buffer) == {4, 119}
+    end
+
+    test "wrapped j uses the active split window width" do
+      state = TestHelpers.base_state(content: String.duplicate("a", 60) <> "\n" <> "second")
+      buffer = state.workspace.buffers.active
+
+      _ = BufferProcess.set_option(buffer, :wrap, true)
+      _ = BufferProcess.set_option(buffer, :line_numbers, :none)
+
+      state = Movement.execute(state, :split_vertical)
+      _ = Movement.execute(state, :move_down)
+
+      {cursor_line, cursor_col} = BufferProcess.cursor(buffer)
+      assert cursor_line == 0
+      assert cursor_col > 0
     end
   end
 

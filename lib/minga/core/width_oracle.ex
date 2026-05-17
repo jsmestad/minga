@@ -2,7 +2,7 @@ defprotocol Minga.Core.WidthOracle do
   @moduledoc """
   Measures display width for wrap computation.
 
-  The render pipeline passes an oracle value into `Minga.Core.WrapMap` so wrap decisions can stay BEAM-owned while the measurement strategy varies by frontend. The default monospace oracle uses Unicode cell widths. GUI frontends can pass a measured oracle with cached frontend measurements when proportional fonts are enabled.
+  The render pipeline passes an oracle value into `Minga.Core.WrapMap` so wrap decisions can stay BEAM-owned while the measurement strategy varies by frontend. The safe production oracle is monospace. Measured oracles are opt-in and only make sense when the caller owns the cache.
   """
 
   @doc "Returns the display width of a single grapheme."

@@ -5,11 +5,14 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Editing.Fold.Range, as: FoldRange
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Scroll
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Window
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -60,6 +63,25 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
 
       assert scroll.gutter_w >= 0
       assert scroll.content_w >= 1
+    end
+
+    test "wrap_on is false when folds produce a visible_line_map" do
+      state = base_state(content: String.duplicate("a", 120) <> "\n" <> "hidden\nfold\ntail")
+      buffer = state.workspace.buffers.active
+      _ = BufferProcess.set_option(buffer, :wrap, true)
+
+      win_id = state.workspace.windows.active
+      window = Map.fetch!(state.workspace.windows.map, win_id)
+      window = Window.set_fold_ranges(window, [FoldRange.new!(1, 3)])
+      window = Window.fold_at(window, 1)
+      state = put_in(state.workspace.windows.map[win_id], window)
+
+      {scrolls, _state, _layout} = run_through_scroll(state)
+      [{_win_id, scroll}] = Map.to_list(scrolls)
+
+      assert scroll.visible_line_map != nil
+      refute scroll.wrap_on
+      assert scroll.viewport.visual_row_offset == 0
     end
 
     test "scroll result includes buf_version" do

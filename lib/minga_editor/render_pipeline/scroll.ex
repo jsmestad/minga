@@ -58,7 +58,8 @@ defmodule MingaEditor.RenderPipeline.Scroll do
       :preview_matches,
       :line_number_style,
       :wrap_on,
-      :buf_version
+      :buf_version,
+      :width_oracle
     ]
 
     defstruct [
@@ -80,6 +81,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
       :line_number_style,
       :wrap_on,
       :buf_version,
+      :width_oracle,
       visible_line_map: nil
     ]
 
@@ -102,6 +104,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
             line_number_style: atom(),
             wrap_on: boolean(),
             buf_version: non_neg_integer(),
+            width_oracle: Minga.Core.WidthOracle.t(),
             visible_line_map: [VisibleLines.line_entry()] | [MingaEditor.DisplayMap.entry()] | nil
           }
   end
@@ -322,6 +325,8 @@ defmodule MingaEditor.RenderPipeline.Scroll do
         visible_line_map: visible_line_map
       })
 
+    wrap_on = wrap_on and is_nil(visible_line_map)
+
     # Horizontal scroll (disabled when wrapping).
     # Use content_w (text area excluding gutter) as the effective width,
     # so the cursor triggers scroll when it reaches the content edge,
@@ -360,6 +365,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
       line_number_style: line_number_style,
       wrap_on: wrap_on,
       buf_version: snapshot.version,
+      width_oracle: width_oracle,
       visible_line_map: visible_line_map
     }
   end
@@ -400,8 +406,9 @@ defmodule MingaEditor.RenderPipeline.Scroll do
            visible_line_map: visible_line_map
          } = params
        )
-       when not is_nil(visible_line_map) do
+       when is_list(visible_line_map) do
     text = cursor_line_text(params.lines, params.cursor_line, params.first_line)
+
     {params.viewport, params.first_line, params.snapshot, params.lines, text,
      Unicode.display_col(text, params.cursor_byte_col)}
   end

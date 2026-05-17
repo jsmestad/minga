@@ -33,7 +33,7 @@ defmodule MingaEditor.Frontend.CapabilitiesTest do
       assert Capabilities.proportional_text?(%Capabilities{text_rendering: :proportional})
     end
 
-    test "width_oracle/1 defaults to monospace for now" do
+    test "width_oracle/1 returns the safe production oracle" do
       assert %Minga.Core.WidthOracle.Monospace{} =
                Capabilities.width_oracle(%Capabilities{text_rendering: :monospace})
 
@@ -41,7 +41,7 @@ defmodule MingaEditor.Frontend.CapabilitiesTest do
                Capabilities.width_oracle(%Capabilities{text_rendering: :proportional})
     end
 
-    test "width_oracle/2 can opt into measured widths with owned cache state" do
+    test "width_oracle/2 opts into measured widths only with an owned cache" do
       oracle =
         Capabilities.width_oracle(%Capabilities{text_rendering: :proportional}, %{"a" => 2})
 
