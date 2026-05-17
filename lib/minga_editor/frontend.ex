@@ -111,6 +111,12 @@ defmodule MingaEditor.Frontend do
     send_commands(port, [MingaEditor.Frontend.Protocol.GUI.encode_gui_cursor_animation(enabled)])
   end
 
+  @doc "Sends the native settings panel state to GUI frontends."
+  @spec send_config_state(GenServer.server(), ProtocolGUI.config_state()) :: :ok
+  def send_config_state(port, config_state) do
+    send_commands(port, [ProtocolGUI.encode_gui_config_state(config_state)])
+  end
+
   # ── Parser/Highlight commands ────────────────────────────────────────────
 
   @doc """

@@ -1,8 +1,10 @@
 defmodule MingaEditor.Shell.Traditional.ModelineTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.Shell.Traditional.Modeline
+  alias Minga.Config.ModelineSegments
+  alias Minga.Config.Options
   alias Minga.Mode
+  alias MingaEditor.Shell.Traditional.Modeline
 
   @base_data %{
     mode: :normal,
@@ -261,6 +263,354 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
     end
   end
 
+  describe "configurable segments" do
+    test "omitting a segment hides it" do
+      with_options(fn options ->
+        Options.set(options, :modeline_left_segments, [:mode, :filename])
+        data = Map.put(@base_data, :git_branch, "main")
+
+        {commands, _regions} = Modeline.render(0, 120, data)
+        text = combined_text(commands)
+
+        refute String.contains?(text, "main")
+        refute String.contains?(text, "\uE0A0")
+      end)
+    end
+
+    test "segment order controls render order" do
+      with_options(fn options ->
+        Options.set(options, :modeline_left_segments, [:filename, :mode])
+        Options.set(options, :modeline_right_segments, [])
+
+        {commands, _regions} = Modeline.render(0, 120, @base_data)
+
+        assert text_col(commands, "test.ex") < text_col(commands, "NORMAL")
+      end)
+    end
+
+    test "custom segment renders from registry on declared side" do
+      segment_name = :word_count_modeline_test
+      ModelineSegments.unregister(segment_name)
+
+      try do
+        ModelineSegments.register(segment_name, [side: :right, priority: 50], fn ctx ->
+          {" #{ctx.data.filetype}W ", ctx.info_fg, ctx.bar_bg, [], nil}
+        end)
+
+        {commands, _regions} = Modeline.render(0, 120, @base_data)
+        text = combined_text(commands)
+
+        assert String.contains?(text, "elixirW")
+      after
+        ModelineSegments.unregister(segment_name)
+      end
+    end
+
+    test "responsive truncation drops lower-priority segments first" do
+      with_options(fn options ->
+        Options.set(options, :modeline_left_segments, [:mode, :filename, :git])
+        Options.set(options, :modeline_right_segments, [])
+
+        data =
+          Map.merge(@base_data, %{
+            file_name: "very_long_file_name.ex",
+            git_branch: "very-long-branch-name"
+          })
+
+        {commands, _regions} = Modeline.render(0, 24, data)
+        text = combined_text(commands)
+
+        assert String.contains?(text, "NORMAL")
+        refute String.contains?(text, "very-long-branch-name")
+      end)
+    end
+
+    test "separator styles render configured characters" do
+      with_options(fn options ->
+        Options.set(options, :modeline_left_segments, [:mode, :filename])
+        Options.set(options, :modeline_right_segments, [])
+        Options.set(options, :modeline_separator, :round)
+        {round_commands, _regions} = Modeline.render(0, 120, @base_data)
+
+        Options.set(options, :modeline_separator, :slant)
+        {slant_commands, _regions} = Modeline.render(0, 120, @base_data)
+
+        Options.set(options, :modeline_separator, :none)
+        {none_commands, _regions} = Modeline.render(0, 120, @base_data)
+
+        assert String.contains?(combined_text(round_commands), "")
+        assert String.contains?(combined_text(slant_commands), "")
+        refute String.contains?(combined_text(none_commands), "")
+        refute String.contains?(combined_text(none_commands), "")
+      end)
+    end
+
+    test "unknown segment names are ignored" do
+      with_options(fn options ->
+        Options.set(options, :modeline_left_segments, [:mode, :missing_segment, :filename])
+        Options.set(options, :modeline_right_segments, [])
+
+        {commands, _regions} = Modeline.render(0, 120, @base_data)
+        text = combined_text(commands)
+
+        assert String.contains?(text, "NORMAL")
+        assert String.contains?(text, "test.ex")
+      end)
+    end
+
+    test "gui_segments exposes configured custom segment default side" do
+      segment_name = :gui_default_side_modeline_test
+      ModelineSegments.unregister(segment_name)
+
+      try do
+        assert :ok =
+                 ModelineSegments.register(segment_name, [side: :left, priority: 50], fn ctx ->
+                   {" LEFTY ", ctx.info_fg, ctx.bar_bg, [], nil}
+                 end)
+
+        segments = Modeline.gui_segments(@base_data)
+
+        assert Enum.any?(segments.left, fn {text, _fg, _bg, _opts, _target} ->
+                 text == " LEFTY "
+               end)
+
+        refute Enum.any?(segments.right, fn {text, _fg, _bg, _opts, _target} ->
+                 text == " LEFTY "
+               end)
+      after
+        ModelineSegments.unregister(segment_name)
+      end
+    end
+
+    test "explicit configured side overrides custom default side without duplication" do
+      segment_name = :gui_override_side_modeline_test
+      ModelineSegments.unregister(segment_name)
+
+      try do
+        assert :ok =
+                 ModelineSegments.register(segment_name, [side: :left, priority: 50], fn ctx ->
+                   {" MOVED ", ctx.info_fg, ctx.bar_bg, [], nil}
+                 end)
+
+        with_options(fn options ->
+          Options.set(options, :modeline_left_segments, [])
+          Options.set(options, :modeline_right_segments, [segment_name])
+
+          segments = Modeline.gui_segments(@base_data)
+          left_text = segment_text(segments.left)
+          right_text = segment_text(segments.right)
+
+          refute String.contains?(left_text, "MOVED")
+          assert String.contains?(right_text, "MOVED")
+          assert right_text |> String.split("MOVED") |> length() == 2
+        end)
+      after
+        ModelineSegments.unregister(segment_name)
+      end
+    end
+
+    test "registry rejects duplicate segment names from different sources" do
+      table = :"modeline_collision_#{System.unique_integer([:positive])}"
+      start_supervised!({ModelineSegments, name: table})
+
+      assert :ok =
+               ModelineSegments.register(
+                 table,
+                 :dup_segment,
+                 [side: :right],
+                 fn _ctx -> nil end,
+                 :config
+               )
+
+      assert {:error, {:duplicate_name, :dup_segment, :config, {:extension, :demo}}} =
+               ModelineSegments.register(
+                 table,
+                 :dup_segment,
+                 [side: :left],
+                 fn _ctx -> nil end,
+                 {:extension, :demo}
+               )
+
+      assert %{source: :config, side: :right} = ModelineSegments.lookup(table, :dup_segment)
+    end
+
+    test "unregister_source only removes segments owned by that source" do
+      table = :"modeline_source_#{System.unique_integer([:positive])}"
+      start_supervised!({ModelineSegments, name: table})
+
+      assert :ok =
+               ModelineSegments.register(
+                 table,
+                 :config_segment,
+                 [side: :right],
+                 fn _ctx -> nil end,
+                 :config
+               )
+
+      assert :ok =
+               ModelineSegments.register(
+                 table,
+                 :extension_segment,
+                 [side: :left],
+                 fn _ctx -> nil end,
+                 {:extension, :demo}
+               )
+
+      assert :ok = ModelineSegments.unregister_source(table, {:extension, :demo})
+
+      assert %{source: :config} = ModelineSegments.lookup(table, :config_segment)
+      assert ModelineSegments.lookup(table, :extension_segment) == nil
+    end
+
+    test "registry rejects invalid side and priority declarations" do
+      table = :"modeline_invalid_#{System.unique_integer([:positive])}"
+      start_supervised!({ModelineSegments, name: table})
+
+      assert {:error, {:invalid_side, :middle}} =
+               ModelineSegments.register(
+                 table,
+                 :bad_side,
+                 [side: :middle],
+                 fn _ctx -> nil end,
+                 :config
+               )
+
+      assert {:error, {:invalid_priority, "high"}} =
+               ModelineSegments.register(
+                 table,
+                 :bad_priority,
+                 [priority: "high"],
+                 fn _ctx -> nil end,
+                 :config
+               )
+    end
+
+    test "registry rejects names reserved by built-in segments" do
+      table = :"modeline_reserved_#{System.unique_integer([:positive])}"
+      start_supervised!({ModelineSegments, name: table})
+
+      assert {:error, {:reserved_name, :mode}} =
+               ModelineSegments.register(
+                 table,
+                 :mode,
+                 [side: :left],
+                 fn _ctx -> {" hacked ", 0xFFFFFF, 0x000000, [], nil} end,
+                 :config
+               )
+
+      assert ModelineSegments.lookup(table, :mode) == nil
+    end
+
+    test "custom segments with invalid colors are dropped" do
+      segment_name = :invalid_color_modeline_test
+      ModelineSegments.unregister(segment_name)
+
+      try do
+        assert :ok =
+                 ModelineSegments.register(segment_name, [side: :left], fn _ctx ->
+                   {" BAD_COLOR ", 0x1_000000, -1, [], nil}
+                 end)
+
+        segments = Modeline.gui_segments(@base_data)
+
+        refute String.contains?(segment_text(segments.left), "BAD_COLOR")
+        refute String.contains?(segment_text(segments.right), "BAD_COLOR")
+      after
+        ModelineSegments.unregister(segment_name)
+      end
+    end
+
+    test "custom segments with invalid UTF-8 text are dropped" do
+      segment_name = :invalid_utf8_modeline_test
+      ModelineSegments.unregister(segment_name)
+
+      try do
+        assert :ok =
+                 ModelineSegments.register(segment_name, [side: :left], fn ctx ->
+                   {<<" BAD_UTF8 ", 0xFF>>, ctx.info_fg, ctx.bar_bg, [], nil}
+                 end)
+
+        assert %{left: left, right: right} = Modeline.gui_segments(@base_data)
+        refute String.contains?(segment_text(left), "BAD_UTF8")
+        refute String.contains?(segment_text(right), "BAD_UTF8")
+
+        {commands, _regions} = Modeline.render(0, 120, @base_data)
+        refute String.contains?(combined_text(commands), "BAD_UTF8")
+      after
+        ModelineSegments.unregister(segment_name)
+      end
+    end
+
+    test "custom segments with malformed opts are dropped" do
+      segment_name = :invalid_opts_modeline_test
+      ModelineSegments.unregister(segment_name)
+
+      try do
+        assert :ok =
+                 ModelineSegments.register(segment_name, [side: :left], fn ctx ->
+                   {" BAD_OPTS ", ctx.info_fg, ctx.bar_bg, [bold: :yes], nil}
+                 end)
+
+        assert %{left: left, right: right} = Modeline.gui_segments(@base_data)
+        refute String.contains?(segment_text(left), "BAD_OPTS")
+        refute String.contains?(segment_text(right), "BAD_OPTS")
+
+        {commands, _regions} = Modeline.render(0, 120, @base_data)
+        refute String.contains?(combined_text(commands), "BAD_OPTS")
+      after
+        ModelineSegments.unregister(segment_name)
+      end
+    end
+
+    test "invalid custom segment warnings use stable keys for changing output" do
+      segment_name = :dynamic_invalid_output_modeline_test
+      counter = :counters.new(1, [])
+      warnings_table = Minga.Config.ModelineSegments.Warnings
+      ModelineSegments.unregister(segment_name)
+      ModelineSegments.reset_warnings()
+
+      try do
+        assert :ok =
+                 ModelineSegments.register(segment_name, [side: :left], fn _ctx ->
+                   :counters.add(counter, 1, 1)
+                   {:bad_output, :counters.get(counter, 1)}
+                 end)
+
+        Modeline.render(0, 120, @base_data)
+        Modeline.render(0, 120, @base_data)
+
+        warning_keys =
+          warnings_table
+          |> :ets.tab2list()
+          |> Enum.map(fn {key, true} -> key end)
+
+        assert Enum.count(warning_keys, &(&1 == {:invalid_segment_output, segment_name})) == 1
+        refute Enum.any?(warning_keys, &match?({:invalid_segment_output, ^segment_name, _}, &1))
+      after
+        ModelineSegments.unregister(segment_name)
+        ModelineSegments.reset_warnings()
+      end
+    end
+
+    test "custom segment exceptions are dropped without raising" do
+      segment_name = :raising_modeline_test
+      ModelineSegments.unregister(segment_name)
+
+      try do
+        assert :ok =
+                 ModelineSegments.register(segment_name, [side: :left], fn _ctx ->
+                   raise "boom"
+                 end)
+
+        assert %{left: left, right: right} = Modeline.gui_segments(@base_data)
+        refute String.contains?(segment_text(left), "boom")
+        refute String.contains?(segment_text(right), "boom")
+      after
+        ModelineSegments.unregister(segment_name)
+      end
+    end
+  end
+
   describe "cursor_shape/1" do
     test "insert mode returns beam" do
       assert Modeline.cursor_shape(:insert) == :beam
@@ -293,6 +643,36 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
     test "operator_pending mode returns block" do
       assert Modeline.cursor_shape(:operator_pending) == :block
     end
+  end
+
+  defp with_options(fun) when is_function(fun, 1) do
+    options = start_supervised!({Options, name: nil})
+    previous = Process.get(:minga_config_options)
+    Process.put(:minga_config_options, options)
+
+    try do
+      fun.(options)
+    after
+      restore_options_server(previous)
+    end
+  end
+
+  defp restore_options_server(nil), do: Process.delete(:minga_config_options)
+  defp restore_options_server(previous), do: Process.put(:minga_config_options, previous)
+
+  defp combined_text(commands) do
+    Enum.map_join(commands, fn {_row, _col, segment, _opts} -> segment end)
+  end
+
+  defp text_col(commands, needle) do
+    commands
+    |> Enum.find_value(fn {_row, col, segment, _opts} ->
+      if String.contains?(segment, needle), do: col
+    end)
+  end
+
+  defp segment_text(segments) do
+    Enum.map_join(segments, fn {text, _fg, _bg, _opts, _target} -> text end)
   end
 
   describe "parser status indicator" do

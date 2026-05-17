@@ -156,6 +156,9 @@ defmodule Minga.Extension do
   """
   @type keybind_spec :: {bindable_mode(), String.t(), atom(), String.t(), keyword()}
 
+  @typedoc "A modeline segment declaration: `{name, opts, {module, function}}`."
+  @type modeline_segment_spec :: {atom(), keyword(), {module(), atom()}}
+
   @doc """
   Injects the `Minga.Extension` behaviour, DSL macros (`option/3`,
   `command/3`, `keybind/4`, `keybind/5`), and a default `child_spec/1`.
@@ -205,6 +208,7 @@ defmodule Minga.Extension do
       Module.register_attribute(__MODULE__, :__extension_options__, accumulate: true)
       Module.register_attribute(__MODULE__, :__extension_commands__, accumulate: true)
       Module.register_attribute(__MODULE__, :__extension_keybinds__, accumulate: true)
+      Module.register_attribute(__MODULE__, :__extension_modeline_segments__, accumulate: true)
       @before_compile Minga.Extension
 
       @doc false
@@ -220,7 +224,15 @@ defmodule Minga.Extension do
 
       defoverridable child_spec: 1
 
-      import Minga.Extension, only: [option: 3, command: 3, keybind: 4, keybind: 5]
+      import Minga.Extension,
+        only: [
+          option: 3,
+          command: 3,
+          keybind: 4,
+          keybind: 5,
+          modeline_segment: 2,
+          modeline_segment: 3
+        ]
     end
   end
 
@@ -289,6 +301,34 @@ defmodule Minga.Extension do
   end
 
   @doc """
+  Declares a modeline segment this extension provides.
+
+  The block receives `ctx`, the same context map used by built-in modeline segments, and returns a segment tuple, a list of segment tuples, `nil`, or `[]`.
+
+  ## Examples
+
+      modeline_segment :word_count, side: :right, priority: 50 do
+        if ctx.data.filetype in [:markdown, :text, :org] do
+          {" WORDS ", ctx.info_fg, ctx.bar_bg, [], nil}
+        end
+      end
+  """
+  defmacro modeline_segment(name, opts \\ [], do: block) do
+    fun_name = :"__modeline_segment_#{name}__"
+
+    quote do
+      @__extension_modeline_segments__ {unquote(name), unquote(opts),
+                                        {__MODULE__, unquote(fun_name)}}
+
+      @doc false
+      @spec unquote(fun_name)(map()) :: term()
+      def unquote(fun_name)(var!(ctx)) do
+        unquote(block)
+      end
+    end
+  end
+
+  @doc """
   Declares a keybinding this extension provides.
 
   Accumulated at compile time and exposed via `__keybind_schema__/0`.
@@ -319,10 +359,12 @@ defmodule Minga.Extension do
     options = Module.get_attribute(env.module, :__extension_options__) || []
     commands = Module.get_attribute(env.module, :__extension_commands__) || []
     keybinds = Module.get_attribute(env.module, :__extension_keybinds__) || []
+    modeline_segments = Module.get_attribute(env.module, :__extension_modeline_segments__) || []
     # Accumulated attributes are in reverse order; restore declaration order
     options = Enum.reverse(options)
     commands = Enum.reverse(commands)
     keybinds = Enum.reverse(keybinds)
+    modeline_segments = Enum.reverse(modeline_segments)
 
     quote do
       @doc false
@@ -336,6 +378,10 @@ defmodule Minga.Extension do
       @doc false
       @spec __keybind_schema__() :: [Minga.Extension.keybind_spec()]
       def __keybind_schema__, do: unquote(Macro.escape(keybinds))
+
+      @doc false
+      @spec __modeline_segment_schema__() :: [Minga.Extension.modeline_segment_spec()]
+      def __modeline_segment_schema__, do: unquote(Macro.escape(modeline_segments))
     end
   end
 end

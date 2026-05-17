@@ -175,6 +175,7 @@ defmodule Minga.Config.Completion do
   defp format_type(:string), do: "string"
   defp format_type(:string_or_nil), do: "string or nil"
   defp format_type(:string_list), do: "list of strings"
+  defp format_type(:atom_list), do: "list of atoms"
   defp format_type(:map_or_nil), do: "map or nil"
   defp format_type(:map_list), do: "list of maps"
   defp format_type(:float_or_nil), do: "float or nil"

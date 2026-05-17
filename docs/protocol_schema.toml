@@ -545,6 +545,12 @@ name = "gui_hover_action"
 value = 0x96
 direction = "beam_to_frontend"
 
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_config_state"
+value = 0x97
+direction = "beam_to_frontend"
+
 # Sub-opcodes inside gui_action (0x07).
 [[gui_actions]]
 name = "select_tab"
@@ -811,3 +817,11 @@ value = 0x41
 [[gui_actions]]
 name = "git_open_diff"
 value = 0x42
+
+[[gui_actions]]
+name = "config_update"
+value = 0x43
+
+[[gui_actions]]
+name = "config_query"
+value = 0x44

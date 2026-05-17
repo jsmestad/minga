@@ -12,6 +12,7 @@ defmodule Minga.Config.LoaderTest do
   alias Minga.Config
   alias Minga.Config.Hooks
   alias Minga.Config.Loader
+  alias Minga.Config.ModelineSegments
   alias Minga.Config.Options
   alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.LSP.ServerConfig
@@ -22,9 +23,9 @@ defmodule Minga.Config.LoaderTest do
     previous_options_server = Process.put(:minga_config_options, options_server)
     previous_keymap_server = Process.put(:minga_config_keymap, keymap_server)
 
-    # Hooks/CommandRegistry remain global singletons (Tickets 8 and beyond);
-    # ensure they're running but not isolated per test.
-    for {mod, _} <- [{Hooks, nil}, {CommandRegistry, nil}] do
+    # Hooks/CommandRegistry/ModelineSegments remain global singletons; ensure
+    # they're running but not isolated per test.
+    for {mod, _} <- [{Hooks, nil}, {CommandRegistry, nil}, {ModelineSegments, nil}] do
       case mod.start_link() do
         {:ok, _} -> :ok
         {:error, {:already_started, _}} -> mod.reset()
@@ -403,6 +404,217 @@ defmodule Minga.Config.LoaderTest do
     end
   end
 
+  describe "gui_settings.exs" do
+    test "overrides project config before after.exs" do
+      {minga_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+        set :tab_width, 2
+        """)
+
+      project_dir =
+        Path.join(System.tmp_dir!(), "minga_gui_cfg_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(project_dir)
+
+      File.write!(Path.join(project_dir, ".minga.exs"), """
+      use Minga.Config
+      set :tab_width, 6
+      """)
+
+      File.write!(Path.join(minga_dir, "gui_settings.exs"), """
+      use Minga.Config
+      set :tab_width, 8
+      """)
+
+      original_cwd = File.cwd!()
+      File.cd!(project_dir)
+
+      on_exit(fn ->
+        File.cd!(original_cwd)
+        cleanup.()
+        File.rm_rf!(project_dir)
+      end)
+
+      name = :"loader_gui_settings_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+
+      assert Loader.gui_settings_error(pid) == nil
+      assert Options.get(test_options_server(), :tab_width) == 8
+    end
+
+    test "after.exs still overrides gui_settings.exs" do
+      {minga_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+        set :tab_width, 2
+        """)
+
+      project_dir =
+        Path.join(System.tmp_dir!(), "minga_gui_after_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(project_dir)
+
+      File.write!(Path.join(project_dir, ".minga.exs"), """
+      use Minga.Config
+      set :tab_width, 6
+      """)
+
+      File.write!(Path.join(minga_dir, "gui_settings.exs"), """
+      use Minga.Config
+      set :tab_width, 8
+      """)
+
+      File.write!(Path.join(minga_dir, "after.exs"), """
+      use Minga.Config
+      set :tab_width, 9
+      """)
+
+      original_cwd = File.cwd!()
+      File.cd!(project_dir)
+
+      on_exit(fn ->
+        File.cd!(original_cwd)
+        cleanup.()
+        File.rm_rf!(project_dir)
+      end)
+
+      name = :"loader_gui_after_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+
+      assert Loader.gui_settings_error(pid) == nil
+      assert Loader.after_error(pid) == nil
+      assert Options.get(test_options_server(), :tab_width) == 9
+    end
+
+    test "reload picks up gui_settings.exs changes with the same precedence" do
+      {minga_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+        set :tab_width, 2
+        """)
+
+      File.write!(Path.join(minga_dir, "gui_settings.exs"), """
+      use Minga.Config
+      set :tab_width, 4
+      """)
+
+      File.write!(Path.join(minga_dir, "after.exs"), """
+      use Minga.Config
+      set :line_numbers, :absolute
+      """)
+
+      on_exit(cleanup)
+
+      name = :"loader_gui_reload_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+      assert Options.get(test_options_server(), :tab_width) == 4
+      assert Options.get(test_options_server(), :line_numbers) == :absolute
+
+      File.write!(Path.join(minga_dir, "gui_settings.exs"), """
+      use Minga.Config
+      set :tab_width, 8
+      set :line_numbers, :relative
+      """)
+
+      assert :ok = Loader.reload(pid)
+      assert Options.get(test_options_server(), :tab_width) == 8
+      assert Options.get(test_options_server(), :line_numbers) == :absolute
+    end
+
+    test "marks gui_settings.exs values as explicit so GUI defaults preserve them" do
+      {minga_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+        set :tab_width, 2
+        """)
+
+      File.write!(Path.join(minga_dir, "gui_settings.exs"), """
+      use Minga.Config
+      set :line_numbers, :hybrid
+      """)
+
+      on_exit(cleanup)
+
+      name = :"loader_gui_explicit_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+
+      assert Loader.gui_settings_error(pid) == nil
+      assert Options.get(test_options_server(), :line_numbers) == :hybrid
+      assert Options.explicitly_set?(test_options_server(), :line_numbers)
+
+      gui_caps = %MingaEditor.Frontend.Capabilities{frontend_type: :native_gui}
+      assert :ok = MingaEditor.Startup.apply_gui_defaults(gui_caps, test_options_server())
+      assert Options.get(test_options_server(), :line_numbers) == :hybrid
+    end
+
+    test "gui_settings.exs default-valued selections override config.exs values" do
+      {minga_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+        set :line_spacing, 1.2
+        set :wrap, true
+        """)
+
+      File.write!(Path.join(minga_dir, "gui_settings.exs"), """
+      use Minga.Config
+      set :line_spacing, 1.0
+      set :wrap, false
+      """)
+
+      on_exit(cleanup)
+
+      name = :"loader_gui_default_values_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+
+      assert Loader.gui_settings_error(pid) == nil
+      assert Options.get(test_options_server(), :line_spacing) == 1.0
+      assert Options.get(test_options_server(), :wrap) == false
+      assert Options.explicitly_set?(test_options_server(), :line_spacing)
+      assert Options.explicitly_set?(test_options_server(), :wrap)
+
+      gui_caps = %MingaEditor.Frontend.Capabilities{frontend_type: :native_gui}
+      assert :ok = MingaEditor.Startup.apply_gui_defaults(gui_caps, test_options_server())
+      assert Options.get(test_options_server(), :line_spacing) == 1.0
+    end
+
+    test "non-GUI config sources do not mark options explicit" do
+      {_minga_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+        set :tab_width, 2
+        """)
+
+      project_dir =
+        Path.join(
+          System.tmp_dir!(),
+          "minga_non_gui_explicit_#{System.unique_integer([:positive])}"
+        )
+
+      File.mkdir_p!(project_dir)
+
+      File.write!(Path.join(project_dir, ".minga.exs"), """
+      use Minga.Config
+      set :line_numbers, :relative
+      """)
+
+      original_cwd = File.cwd!()
+      File.cd!(project_dir)
+
+      on_exit(fn ->
+        File.cd!(original_cwd)
+        cleanup.()
+        File.rm_rf!(project_dir)
+      end)
+
+      name = :"loader_non_gui_explicit_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+
+      assert Loader.gui_settings_error(pid) == nil
+      refute Options.explicitly_set?(test_options_server(), :line_numbers)
+    end
+  end
+
   describe "after.exs" do
     test "after.exs runs after config and can use user modules" do
       {minga_dir, cleanup} = make_config_dir("")
@@ -435,6 +647,54 @@ defmodule Minga.Config.LoaderTest do
   end
 
   describe "reload/1" do
+    test "loads modeline_segment declarations from config" do
+      {_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+
+        modeline_segment :loader_words, side: :left, priority: 42 do
+          {" WORDS ", ctx.info_fg, ctx.bar_bg, [], nil}
+        end
+        """)
+
+      on_exit(cleanup)
+
+      name = :"loader_modeline_segment_#{System.unique_integer([:positive])}"
+      {:ok, _pid} = Loader.start_link(name: name)
+
+      assert %{side: :left, priority: 42, source: :config} =
+               ModelineSegments.lookup(:loader_words)
+    end
+
+    test "reload replaces stale config modeline segments" do
+      {minga_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+
+        modeline_segment :loader_stale_segment, side: :right do
+          {" OLD ", ctx.info_fg, ctx.bar_bg, [], nil}
+        end
+        """)
+
+      on_exit(cleanup)
+
+      name = :"loader_reload_modeline_segment_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+      assert ModelineSegments.lookup(:loader_stale_segment) != nil
+
+      File.write!(Path.join(minga_dir, "config.exs"), """
+      use Minga.Config
+
+      modeline_segment :loader_fresh_segment, side: :left do
+        {" NEW ", ctx.info_fg, ctx.bar_bg, [], nil}
+      end
+      """)
+
+      assert :ok = Loader.reload(pid)
+      assert ModelineSegments.lookup(:loader_stale_segment) == nil
+      assert %{side: :left, source: :config} = ModelineSegments.lookup(:loader_fresh_segment)
+    end
+
     test "reload picks up changed config values" do
       {minga_dir, cleanup} =
         make_config_dir("""

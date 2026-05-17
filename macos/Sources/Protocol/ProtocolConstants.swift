@@ -153,6 +153,14 @@ let MOUSE_SCROLL_DOWN: UInt8 = 0x41
 let MOUSE_SCROLL_RIGHT: UInt8 = 0x42
 let MOUSE_SCROLL_LEFT: UInt8 = 0x43
 
+// MARK: - Settings value types
+
+let SETTING_VALUE_BOOL: UInt8 = 0x01
+let SETTING_VALUE_INT: UInt8 = 0x02
+let SETTING_VALUE_STRING: UInt8 = 0x03
+let SETTING_VALUE_ATOM: UInt8 = 0x04
+let SETTING_VALUE_FLOAT: UInt8 = 0x05
+
 // MARK: - Log levels (must match Zig protocol.zig and Elixir protocol.ex)
 
 let LOG_LEVEL_ERR: UInt8 = 0

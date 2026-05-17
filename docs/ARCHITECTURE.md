@@ -161,7 +161,7 @@ graph TD
 
 ### Foundation tier
 
-Stateless registries and configuration that everything else depends on. These rarely fail.
+Stateless registries and configuration that everything else depends on. These rarely fail. `Config.ModelineSegments` owns the ETS table for user and extension-provided modeline segment renderers, so config reloads can replace those renderers without coupling extensions to the editor renderer.
 
 ```mermaid
 graph TD
@@ -172,6 +172,7 @@ graph TD
     FOUND --> KEYMAP["Keymap.Active"]
     FOUND --> HOOKS["Config.Hooks"]
     FOUND --> ADVICE["Config.Advice"]
+    FOUND --> MODELINE["Config.ModelineSegments"]
     FOUND --> FT["Filetype.Registry"]
 
     style FOUND fill:#6c3483,stroke:#4a235a,color:#fff
@@ -368,7 +369,7 @@ The display list uses **styled text runs**, not a cell grid. A cell grid is term
 
 Each frontend does the last-mile translation. The macOS GUI converts text runs into CoreText attributed strings drawn on a Metal surface at pixel positions derived from the font metrics. The TUI frontend converts text runs into terminal cells (a run `{5, "hello", green}` becomes five green cells at columns 5-9). The IR doesn't change; only the frontend's interpretation does.
 
-GUI frontends also receive **structured chrome data** (opcodes 0x70-0x78) for native UI elements: tab bars, file trees, status bars, which-key popups, completion menus, and agent chat views. These are rendered as platform-native widgets (SwiftUI views, GTK4 widgets) rather than painted as cells. See **[docs/GUI_PROTOCOL.md](GUI_PROTOCOL.md)** for the full specification.
+GUI frontends also receive **structured chrome data** (opcodes 0x70-0x78) for native UI elements: tab bars, file trees, status bars, which-key popups, completion menus, and agent chat views. These are rendered as platform-native widgets (SwiftUI views, GTK4 widgets) rather than painted as cells. The status bar uses the same configured modeline segment resolution as the TUI path, then sends styled segment data in the `gui_status_bar` payload so custom and hidden segments stay in sync across frontends. See **[docs/GUI_PROTOCOL.md](GUI_PROTOCOL.md)** for the full specification.
 
 This design also supports variable-width font rendering in GUI frontends. The IR uses character offsets, not pixel positions. A monospaced frontend multiplies by cell width; a proportional frontend measures the preceding characters to find the pixel X. The `measure_text` / `text_width` protocol opcodes handle the cases where the BEAM needs to query the frontend for precise measurements.
 

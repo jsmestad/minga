@@ -364,6 +364,123 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       assert label == "session-3: tests"
     end
 
+    test "encodes configured modeline segment section" do
+      data =
+        Map.put(status_data(), :modeline_segments, %{
+          left: [{" NORMAL ", 0xBBC2CF, 0x51AFEF, [bold: true], nil}],
+          right: [{" Elixir ", 0xC678DD, 0x282C34, [], :set_language}]
+        })
+
+      binary = ProtocolGUI.encode_gui_status_bar({:buffer, data})
+      sections = status_sections(binary)
+
+      <<1::8, 1::16, 1::16, left_fg::24, left_bg::24, left_attrs::8, left_len::16,
+        left_text::binary-size(left_len), left_target_len::16,
+        left_target::binary-size(left_target_len), right_fg::24, right_bg::24, right_attrs::8,
+        right_len::16, right_text::binary-size(right_len), right_target_len::16,
+        right_target::binary-size(right_target_len)>> = Map.fetch!(sections, 0x0B)
+
+      assert left_fg == 0xBBC2CF
+      assert left_bg == 0x51AFEF
+      assert left_attrs == 0x01
+      assert left_text == " NORMAL "
+      assert left_target == ""
+      assert right_fg == 0xC678DD
+      assert right_bg == 0x282C34
+      assert right_attrs == 0x00
+      assert right_text == " Elixir "
+      assert right_target == "set_language"
+    end
+
+    test "bounds oversized modeline segment text to the 16-bit section limit" do
+      data =
+        Map.put(status_data(), :modeline_segments, %{
+          left: [{String.duplicate("x", 70_000), 0xBBC2CF, 0x51AFEF, [], nil}],
+          right: []
+        })
+
+      binary = ProtocolGUI.encode_gui_status_bar({:buffer, data})
+      sections = status_sections(binary)
+      payload = Map.fetch!(sections, 0x0B)
+
+      assert byte_size(payload) <= 65_535
+
+      <<1::8, 1::16, 0::16, _fg::24, _bg::24, _attrs::8, text_len::16, _rest::binary>> =
+        payload
+
+      assert text_len <= 65_524
+    end
+
+    test "drops trailing modeline segments when the section would overflow" do
+      tiny_segment = {"x", 0xBBC2CF, 0x51AFEF, [], nil}
+
+      data =
+        Map.put(status_data(), :modeline_segments, %{
+          left: List.duplicate(tiny_segment, 70_000),
+          right: []
+        })
+
+      binary = ProtocolGUI.encode_gui_status_bar({:buffer, data})
+      sections = status_sections(binary)
+      payload = Map.fetch!(sections, 0x0B)
+      <<1::8, left_count::16, 0::16, _segments::binary>> = payload
+
+      assert byte_size(payload) <= 65_535
+      assert left_count == 128
+    end
+
+    test "caps total modeline segments across both sides" do
+      tiny_segment = {"x", 0xBBC2CF, 0x51AFEF, [], nil}
+
+      data =
+        Map.put(status_data(), :modeline_segments, %{
+          left: List.duplicate(tiny_segment, 100),
+          right: List.duplicate(tiny_segment, 100)
+        })
+
+      binary = ProtocolGUI.encode_gui_status_bar({:buffer, data})
+      payload = binary |> status_sections() |> Map.fetch!(0x0B)
+      <<1::8, left_count::16, right_count::16, _segments::binary>> = payload
+
+      assert left_count == 100
+      assert right_count == 28
+    end
+
+    test "does not truncate oversized modeline command targets" do
+      first_segment = {String.duplicate("x", 65_507), 0xBBC2CF, 0x51AFEF, [], nil}
+      clickable_segment = {"Y", 0xBBC2CF, 0x51AFEF, [], :set_language}
+
+      data =
+        Map.put(status_data(), :modeline_segments, %{
+          left: [first_segment, clickable_segment],
+          right: []
+        })
+
+      binary = ProtocolGUI.encode_gui_status_bar({:buffer, data})
+      payload = binary |> status_sections() |> Map.fetch!(0x0B)
+      <<1::8, 2::16, 0::16, segments::binary>> = payload
+      {_first, rest} = take_modeline_segment(segments)
+      {second, ""} = take_modeline_segment(rest)
+
+      assert second.text == "Y"
+      assert second.target == ""
+    end
+
+    test "sanitizes invalid UTF-8 modeline text before encoding" do
+      data =
+        Map.put(status_data(), :modeline_segments, %{
+          left: [{<<"BAD", 0xFF>>, 0xBBC2CF, 0x51AFEF, [], nil}],
+          right: []
+        })
+
+      binary = ProtocolGUI.encode_gui_status_bar({:buffer, data})
+      payload = binary |> status_sections() |> Map.fetch!(0x0B)
+      <<1::8, 1::16, 0::16, segments::binary>> = payload
+      {segment, ""} = take_modeline_segment(segments)
+
+      assert segment.text == "BAD"
+    end
+
     test "encodes background subagent count and label in agent variant" do
       data =
         Map.merge(status_data(), %{
@@ -414,6 +531,13 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
 
   defp status_sections(<<0x76, count::8, rest::binary>>) do
     parse_status_sections(rest, count, %{})
+  end
+
+  defp take_modeline_segment(
+         <<fg::24, bg::24, attrs::8, text_len::16, text::binary-size(text_len), target_len::16,
+           target::binary-size(target_len), rest::binary>>
+       ) do
+    {%{fg: fg, bg: bg, attrs: attrs, text: text, target: target}, rest}
   end
 
   defp parse_status_sections(rest, 0, acc) do

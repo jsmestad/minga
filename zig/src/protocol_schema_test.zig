@@ -95,6 +95,7 @@ test "generated opcode constants match schema" {
     try std.testing.expectEqual(@as(u8, 0x88), opcodes.OP_GUI_AGENT_CONTEXT);
     try std.testing.expectEqual(@as(u8, 0x89), opcodes.OP_GUI_CHANGE_SUMMARY);
     try std.testing.expectEqual(@as(u8, 0x96), opcodes.OP_GUI_HOVER_ACTION);
+    try std.testing.expectEqual(@as(u8, 0x97), opcodes.OP_GUI_CONFIG_STATE);
     try std.testing.expectEqual(@as(u8, 0x01), opcodes.GUI_ACTION_SELECT_TAB);
     try std.testing.expectEqual(@as(u8, 0x02), opcodes.GUI_ACTION_CLOSE_TAB);
     try std.testing.expectEqual(@as(u8, 0x03), opcodes.GUI_ACTION_FILE_TREE_CLICK);
@@ -161,6 +162,8 @@ test "generated opcode constants match schema" {
     try std.testing.expectEqual(@as(u8, 0x40), opcodes.GUI_ACTION_FILE_TREE_DROP);
     try std.testing.expectEqual(@as(u8, 0x41), opcodes.GUI_ACTION_FOLD_TOGGLE_AT_LINE);
     try std.testing.expectEqual(@as(u8, 0x42), opcodes.GUI_ACTION_GIT_OPEN_DIFF);
+    try std.testing.expectEqual(@as(u8, 0x43), opcodes.GUI_ACTION_CONFIG_UPDATE);
+    try std.testing.expectEqual(@as(u8, 0x44), opcodes.GUI_ACTION_CONFIG_QUERY);
 }
 
 test "protocol re-exports generated opcode constants" {
@@ -252,6 +255,7 @@ test "protocol re-exports generated opcode constants" {
     try std.testing.expectEqual(opcodes.OP_GUI_AGENT_CONTEXT, protocol.OP_GUI_AGENT_CONTEXT);
     try std.testing.expectEqual(opcodes.OP_GUI_CHANGE_SUMMARY, protocol.OP_GUI_CHANGE_SUMMARY);
     try std.testing.expectEqual(opcodes.OP_GUI_HOVER_ACTION, protocol.OP_GUI_HOVER_ACTION);
+    try std.testing.expectEqual(opcodes.OP_GUI_CONFIG_STATE, protocol.OP_GUI_CONFIG_STATE);
     try std.testing.expectEqual(opcodes.GUI_ACTION_SELECT_TAB, protocol.GUI_ACTION_SELECT_TAB);
     try std.testing.expectEqual(opcodes.GUI_ACTION_CLOSE_TAB, protocol.GUI_ACTION_CLOSE_TAB);
     try std.testing.expectEqual(opcodes.GUI_ACTION_FILE_TREE_CLICK, protocol.GUI_ACTION_FILE_TREE_CLICK);
@@ -318,6 +322,8 @@ test "protocol re-exports generated opcode constants" {
     try std.testing.expectEqual(opcodes.GUI_ACTION_FILE_TREE_DROP, protocol.GUI_ACTION_FILE_TREE_DROP);
     try std.testing.expectEqual(opcodes.GUI_ACTION_FOLD_TOGGLE_AT_LINE, protocol.GUI_ACTION_FOLD_TOGGLE_AT_LINE);
     try std.testing.expectEqual(opcodes.GUI_ACTION_GIT_OPEN_DIFF, protocol.GUI_ACTION_GIT_OPEN_DIFF);
+    try std.testing.expectEqual(opcodes.GUI_ACTION_CONFIG_UPDATE, protocol.GUI_ACTION_CONFIG_UPDATE);
+    try std.testing.expectEqual(opcodes.GUI_ACTION_CONFIG_QUERY, protocol.GUI_ACTION_CONFIG_QUERY);
 }
 
 test "protocol exposes generated opcode declarations" {
@@ -410,6 +416,7 @@ test "protocol exposes generated opcode declarations" {
         if (!@hasDecl(protocol, "OP_GUI_AGENT_CONTEXT")) @compileError("missing OP_GUI_AGENT_CONTEXT");
         if (!@hasDecl(protocol, "OP_GUI_CHANGE_SUMMARY")) @compileError("missing OP_GUI_CHANGE_SUMMARY");
         if (!@hasDecl(protocol, "OP_GUI_HOVER_ACTION")) @compileError("missing OP_GUI_HOVER_ACTION");
+        if (!@hasDecl(protocol, "OP_GUI_CONFIG_STATE")) @compileError("missing OP_GUI_CONFIG_STATE");
         if (!@hasDecl(protocol, "GUI_ACTION_SELECT_TAB")) @compileError("missing GUI_ACTION_SELECT_TAB");
         if (!@hasDecl(protocol, "GUI_ACTION_CLOSE_TAB")) @compileError("missing GUI_ACTION_CLOSE_TAB");
         if (!@hasDecl(protocol, "GUI_ACTION_FILE_TREE_CLICK")) @compileError("missing GUI_ACTION_FILE_TREE_CLICK");
@@ -476,5 +483,7 @@ test "protocol exposes generated opcode declarations" {
         if (!@hasDecl(protocol, "GUI_ACTION_FILE_TREE_DROP")) @compileError("missing GUI_ACTION_FILE_TREE_DROP");
         if (!@hasDecl(protocol, "GUI_ACTION_FOLD_TOGGLE_AT_LINE")) @compileError("missing GUI_ACTION_FOLD_TOGGLE_AT_LINE");
         if (!@hasDecl(protocol, "GUI_ACTION_GIT_OPEN_DIFF")) @compileError("missing GUI_ACTION_GIT_OPEN_DIFF");
+        if (!@hasDecl(protocol, "GUI_ACTION_CONFIG_UPDATE")) @compileError("missing GUI_ACTION_CONFIG_UPDATE");
+        if (!@hasDecl(protocol, "GUI_ACTION_CONFIG_QUERY")) @compileError("missing GUI_ACTION_CONFIG_QUERY");
     }
 }

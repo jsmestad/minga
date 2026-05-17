@@ -38,6 +38,7 @@ defmodule Minga.Config do
   alias Minga.Config.Advice
   alias Minga.Config.Completion
   alias Minga.Config.Loader
+  alias Minga.Config.ModelineSegments
   alias Minga.Config.Options
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Keymap
@@ -209,6 +210,10 @@ defmodule Minga.Config do
   @spec config_path() :: String.t()
   defdelegate config_path(), to: Loader
 
+  @doc "Returns the generated GUI settings overlay path (`~/.config/minga/gui_settings.exs`)."
+  @spec gui_settings_path() :: String.t()
+  defdelegate gui_settings_path(), to: Loader
+
   @doc "Re-evaluates the user's config file. Returns `:ok` or `{:error, reason}`."
   @spec reload() :: :ok | {:error, term()}
   defdelegate reload(), to: Loader
@@ -274,9 +279,15 @@ defmodule Minga.Config do
   """
   @spec set(Options.option_name(), term()) :: :ok
   def set(name, value) when is_atom(name) do
-    case Options.set(options_server(), name, value) do
-      {:ok, _} -> :ok
-      {:error, msg} -> raise ArgumentError, msg
+    server = options_server()
+
+    case Options.set(server, name, value) do
+      {:ok, _} ->
+        maybe_mark_gui_explicit(server, name)
+        :ok
+
+      {:error, msg} ->
+        raise ArgumentError, msg
     end
   end
 
@@ -300,6 +311,15 @@ defmodule Minga.Config do
       {:ok, _} -> :ok
       {:error, msg} -> raise ArgumentError, msg
     end
+  end
+
+  @spec maybe_mark_gui_explicit(Options.server(), Options.option_name()) :: :ok
+  defp maybe_mark_gui_explicit(server, name) do
+    if Process.get(:minga_config_source) == :gui_settings do
+      Options.mark_explicit(server, name)
+    end
+
+    :ok
   end
 
   @doc """
@@ -431,6 +451,37 @@ defmodule Minga.Config do
         unquote(block)
       end)
     end
+  end
+
+  @doc """
+  Defines a custom modeline segment from `config.exs`.
+
+  The block receives `ctx`, the same context map used by built-in modeline segments, and returns a segment tuple, a list of segment tuples, `nil`, or `[]`.
+
+  ## Examples
+
+      modeline_segment :word_count, side: :right, priority: 50 do
+        if ctx.data.filetype in [:markdown, :text, :org] do
+          {" WORDS ", ctx.info_fg, ctx.bar_bg, [], nil}
+        end
+      end
+  """
+  defmacro modeline_segment(name, opts \\ [], do: block) do
+    quote do
+      Minga.Config.register_modeline_segment(unquote(name), unquote(opts), fn var!(ctx) ->
+        unquote(block)
+      end)
+    end
+  end
+
+  @doc """
+  Registers a custom modeline segment render function.
+  """
+  @spec register_modeline_segment(atom(), keyword(), Minga.Config.ModelineSegment.render_fun()) ::
+          :ok
+  def register_modeline_segment(name, opts, render)
+      when is_atom(name) and is_list(opts) and is_function(render, 1) do
+    ModelineSegments.register!(name, opts, render)
   end
 
   @doc """

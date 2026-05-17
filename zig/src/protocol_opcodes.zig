@@ -110,6 +110,7 @@ pub const OP_GUI_BOARD: u8 = 0x87;
 pub const OP_GUI_AGENT_CONTEXT: u8 = 0x88;
 pub const OP_GUI_CHANGE_SUMMARY: u8 = 0x89;
 pub const OP_GUI_HOVER_ACTION: u8 = 0x96;
+pub const OP_GUI_CONFIG_STATE: u8 = 0x97;
 
 // GUI action sub-opcodes.
 
@@ -179,3 +180,5 @@ pub const GUI_ACTION_HOVER_OPEN_ACTION: u8 = 0x3F;
 pub const GUI_ACTION_FILE_TREE_DROP: u8 = 0x40;
 pub const GUI_ACTION_FOLD_TOGGLE_AT_LINE: u8 = 0x41;
 pub const GUI_ACTION_GIT_OPEN_DIFF: u8 = 0x42;
+pub const GUI_ACTION_CONFIG_UPDATE: u8 = 0x43;
+pub const GUI_ACTION_CONFIG_QUERY: u8 = 0x44;
