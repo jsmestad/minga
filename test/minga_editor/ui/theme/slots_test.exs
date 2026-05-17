@@ -89,6 +89,7 @@ defmodule MingaEditor.UI.Theme.SlotsTest do
       assert pair_map[0x21] == theme.popup.fg
       assert pair_map[0x22] == theme.popup.border_fg
       assert pair_map[0x23] == theme.popup.sel_bg
+      assert pair_map[0x2A] == theme.popup.sel_fg
     end
 
     test "accent color maps to popup title color instead of tree active color" do
@@ -127,6 +128,7 @@ defmodule MingaEditor.UI.Theme.SlotsTest do
         assert pair_map[0x59] != nil, "#{theme_name} missing highlight_read_bg"
         assert pair_map[0x5A] != nil, "#{theme_name} missing highlight_write_bg"
         assert pair_map[0x5B] != nil, "#{theme_name} missing selection_bg"
+        assert pair_map[0x2A] != nil, "#{theme_name} missing popup_sel_fg"
       end
     end
 

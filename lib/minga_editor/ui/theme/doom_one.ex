@@ -96,7 +96,7 @@ defmodule MingaEditor.UI.Theme.DoomOne do
       },
       picker: %MingaEditor.UI.Theme.Picker{
         bg: 0x1E2127,
-        sel_bg: 0x3E4451,
+        sel_bg: @dark_blue,
         prompt_bg: 0x1E2127,
         dim_fg: 0x5C6370,
         text_fg: 0xABB2BF,
@@ -105,7 +105,7 @@ defmodule MingaEditor.UI.Theme.DoomOne do
         border_fg: 0x61AFEF,
         menu_bg: @bg,
         menu_fg: 0xABB2BF,
-        menu_sel_bg: 0x3E4451,
+        menu_sel_bg: @dark_blue,
         menu_sel_fg: 0xFFFFFF
       },
       minibuffer: %MingaEditor.UI.Theme.Minibuffer{
@@ -123,7 +123,7 @@ defmodule MingaEditor.UI.Theme.DoomOne do
         fg: @base8,
         bg: @bg_alt,
         border_fg: @base6,
-        sel_fg: @bg,
+        sel_fg: @base8,
         sel_bg: @dark_blue,
         title_fg: @blue,
         key_fg: @cyan,

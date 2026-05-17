@@ -13,7 +13,7 @@ defmodule MingaEditor.UI.Theme.Slots do
   |-----------|---------------|
   | 0x01-0x0F | Editor + Tree |
   | 0x10-0x17 | Tab bar       |
-  | 0x20-0x29 | Popups + Breadcrumb |
+  | 0x20-0x2A | Popups + Breadcrumb |
   | 0x30-0x3A | Modeline + Status bar |
   | 0x40      | Accent        |
   | 0x50-0x5B | Gutter + Git + Highlights |
@@ -54,6 +54,7 @@ defmodule MingaEditor.UI.Theme.Slots do
   @popup_fg 0x21
   @popup_border 0x22
   @popup_sel_bg 0x23
+  @popup_sel_fg 0x2A
   @popup_key_fg 0x24
   @popup_group_fg 0x25
   @popup_desc_fg 0x26
@@ -170,6 +171,7 @@ defmodule MingaEditor.UI.Theme.Slots do
       {@popup_fg, p.fg},
       {@popup_border, p.border_fg},
       {@popup_sel_bg, p.sel_bg},
+      {@popup_sel_fg, p.sel_fg},
       {@popup_key_fg, p.key_fg},
       {@popup_group_fg, p.group_fg},
       {@popup_desc_fg, p.fg},

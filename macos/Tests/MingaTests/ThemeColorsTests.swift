@@ -119,6 +119,9 @@ struct ThemeColorsSlotMappingTests {
     @Test("Slot 0x23 maps to popupSelBg")
     @MainActor func popupSelBg() { #expect(applySlot(GUI_COLOR_POPUP_SEL_BG).popupSelBg == expectedColor()) }
 
+    @Test("Slot 0x2A maps to popupSelFg")
+    @MainActor func popupSelFg() { #expect(applySlot(GUI_COLOR_POPUP_SEL_FG).popupSelFg == expectedColor()) }
+
     @Test("Slot 0x24 maps to popupKeyFg")
     @MainActor func popupKeyFg() { #expect(applySlot(GUI_COLOR_POPUP_KEY_FG).popupKeyFg == expectedColor()) }
 

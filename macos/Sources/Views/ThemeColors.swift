@@ -44,6 +44,7 @@ final class ThemeColors {
     var popupFg: Color = color(0xBBC2CF)
     var popupBorder: Color = color(0x3F444A)
     var popupSelBg: Color = color(0x2257A0)
+    var popupSelFg: Color = color(0xDFDFDF)
     var popupKeyFg: Color = color(0x51AFEF)
     var popupGroupFg: Color = color(0xC678DD)
     var popupDescFg: Color = color(0xBBC2CF)
@@ -192,6 +193,7 @@ final class ThemeColors {
         case GUI_COLOR_POPUP_FG: popupFg = c
         case GUI_COLOR_POPUP_BORDER: popupBorder = c
         case GUI_COLOR_POPUP_SEL_BG: popupSelBg = c
+        case GUI_COLOR_POPUP_SEL_FG: popupSelFg = c
         case GUI_COLOR_POPUP_KEY_FG: popupKeyFg = c
         case GUI_COLOR_POPUP_GROUP_FG: popupGroupFg = c
         case GUI_COLOR_POPUP_DESC_FG: popupDescFg = c

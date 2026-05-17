@@ -204,7 +204,7 @@ struct MinibufferView: View {
                 Text(candidate.description)
                     .font(.system(size: 12))
                     .foregroundStyle(isSelected
-                        ? theme.editorBg.opacity(0.7)
+                        ? theme.popupSelFg.opacity(0.75)
                         : theme.popupFg.opacity(0.4))
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -217,13 +217,15 @@ struct MinibufferView: View {
                 Text(candidate.annotation)
                     .font(.system(size: 10.5, design: .monospaced))
                     .foregroundStyle(isSelected
-                        ? theme.editorBg.opacity(0.5)
+                        ? theme.popupSelFg.opacity(0.65)
                         : theme.popupFg.opacity(0.3))
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
                     .background(
                         RoundedRectangle(cornerRadius: 3)
-                            .fill((isSelected ? theme.editorBg : theme.popupFg).opacity(0.06))
+                            .fill(isSelected
+                                ? theme.popupSelFg.opacity(0.08)
+                                : theme.popupFg.opacity(0.06))
                     )
             }
         }
@@ -256,11 +258,11 @@ struct MinibufferView: View {
         if candidate.matchPositions.isEmpty {
             Text(candidate.label)
                 .font(.system(size: 13, design: .monospaced))
-                .foregroundStyle(isSelected ? theme.editorBg : theme.popupFg)
+                .foregroundStyle(isSelected ? theme.popupSelFg : theme.popupFg)
                 .lineLimit(1)
         } else {
-            let baseColor = isSelected ? Color(theme.editorBg).opacity(0.7) : Color(theme.popupFg)
-            let matchColor = isSelected ? Color.white : Color(theme.accent)
+            let baseColor = isSelected ? theme.popupSelFg.opacity(0.82) : theme.popupFg
+            let matchColor = isSelected ? theme.popupSelFg : Color(theme.accent)
             let attributed = TextHighlighting.attributedString(
                 candidate.label,
                 matchPositions: candidate.matchPositions,
