@@ -842,6 +842,8 @@ opcode(1) + action_type(1) + payload...
 | 0x33 | file_tree_move | source_index(2) + target_dir_index(2) | Move a file tree entry |
 | 0x40 | file_tree_drop | target_index(2) + target_path_hash(4) + target_kind(1) + modifiers(1) + target_id_len(2) + target_id + target_path_len(2) + target_path + source_count(2) + sources... | Report file tree drag/drop intent for BEAM-owned filesystem handling |
 | 0x41 | fold_toggle_at_line | window_id(2) + buffer_line(4) | Toggle the fold at a gutter-targeted buffer line without moving the cursor |
+| 0x43 | config_update | key_len(1) + key + type_tag(1) + value_payload | Update a typed config option from the native Settings UI |
+| 0x44 | config_query | (empty) | Request the current native Settings state |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |
@@ -859,6 +861,14 @@ opcode(1) + action_type(1) + payload...
 Older path-only `git_open_diff` payloads are accepted as a compatibility fallback only when the path is unambiguous. Native frontends should always send the section-aware form.
 
 For `file_tree_drop`, `target_kind` is `1` for a directory and `0` for a file. Each source is encoded as `path_len(2) + path(path_len)`. Frontends should send both the target index and stable target identity so the BEAM can reject stale drops safely; drops onto files are resolved to the file's parent directory by the BEAM.
+
+## Settings State (0x97)
+
+`gui_config_state` uses the standard 0x90+ envelope: `opcode(1) + payload_len(2) + payload`. The payload is `option_count(2) + options + theme_preview_count(2) + theme_previews + keybinding_count(2) + keybindings`.
+
+Each option is `name_len(1) + name + type_tag(1) + value_payload`. Type tags are `0x01` boolean, `0x02` signed integer, `0x03` string, `0x04` atom encoded as a string, and `0x05` float64. Strings use a 16-bit byte length. Theme previews are `display_name_len(1) + display_name + atom_len(1) + atom + editor_bg(3) + editor_fg(3) + accent(3)`. Keybindings are `mode_len(1) + mode + key_len(2) + key + command_len(2) + command + description_len(2) + description`.
+
+The frontend sends `config_query` when the Settings window appears. It sends `config_update` for each changed control. The BEAM applies the option immediately and persists GUI-originated changes to `~/.config/minga/gui_settings.exs`, loaded after `config.exs` and `.minga.exs` but before `after.exs`.
 
 ## Theme Color Slots
 

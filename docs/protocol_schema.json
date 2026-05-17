@@ -77,7 +77,8 @@
       "gui_board":           { "hex": "0x87" },
       "gui_agent_context":   { "hex": "0x88" },
       "gui_change_summary":  { "hex": "0x89" },
-      "gui_hover_action":    { "hex": "0x96" }
+      "gui_hover_action":    { "hex": "0x96" },
+      "gui_config_state":    { "hex": "0x97" }
     }
   },
   "gui_actions": {
@@ -136,6 +137,8 @@
     "file_tree_drop":       { "hex": "0x40" },
     "fold_toggle_at_line":  { "hex": "0x41" },
     "git_open_diff":       { "hex": "0x42" },
+    "config_update":        { "hex": "0x43" },
+    "config_query":         { "hex": "0x44" },
     "system_will_sleep":    { "hex": "0x34" },
     "system_did_wake":      { "hex": "0x35" },
     "cmd_copy":             { "hex": "0x36" },

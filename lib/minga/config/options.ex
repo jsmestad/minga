@@ -111,6 +111,7 @@ defmodule Minga.Config.Options do
           | :log_level_editor
           | :cursorline
           | :cursor_animate
+          | :cursor_blink
           | :nav_flash
           | :nav_flash_threshold
           | :log_level_config
@@ -300,6 +301,7 @@ defmodule Minga.Config.Options do
     {:cursorline, :boolean, true, "Whether the current cursor line is highlighted."},
     {:cursor_animate, :boolean, true,
      "Whether cursor movement is smoothly animated in GUI frontends."},
+    {:cursor_blink, :boolean, true, "Whether GUI frontends blink the editor cursor."},
     {:nav_flash, :boolean, true, "Whether large cursor jumps briefly highlight the destination."},
     {:nav_flash_threshold, :pos_integer, 5,
      "Minimum jump distance that triggers navigation flash."},
@@ -660,6 +662,22 @@ defmodule Minga.Config.Options do
 
       {:error, _} = err ->
         err
+    end
+  end
+
+  @doc "Marks an option as explicitly set by the GUI settings overlay."
+  @spec mark_explicit(server(), option_name()) :: :ok
+  def mark_explicit(server \\ @default_server, name) when is_atom(name) do
+    :ets.insert(table_name(server), {{:explicit, name}, true})
+    :ok
+  end
+
+  @doc "Returns whether an option was explicitly set by the GUI settings overlay."
+  @spec explicitly_set?(server(), option_name()) :: boolean()
+  def explicitly_set?(server \\ @default_server, name) when is_atom(name) do
+    case :ets.lookup(table_name(server), {:explicit, name}) do
+      [{{:explicit, ^name}, true}] -> true
+      _ -> false
     end
   end
 

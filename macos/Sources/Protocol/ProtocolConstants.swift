@@ -60,6 +60,7 @@ let OP_GUI_BOARD: UInt8 = 0x87
 let OP_GUI_AGENT_CONTEXT: UInt8 = 0x88
 let OP_GUI_CHANGE_SUMMARY: UInt8 = 0x89
 let OP_GUI_HOVER_ACTION: UInt8 = 0x96
+let OP_GUI_CONFIG_STATE: UInt8 = 0x97
 
 // MARK: - Forward-compatible opcodes (0x90+, include a length prefix)
 // Most opcodes >= 0x90 use the format: opcode(1) + payload_length(2) + payload.
@@ -311,6 +312,14 @@ let GUI_ACTION_HOVER_OPEN_ACTION: UInt8 = 0x3F
 let GUI_ACTION_FILE_TREE_DROP: UInt8 = 0x40
 let GUI_ACTION_FOLD_TOGGLE_AT_LINE: UInt8 = 0x41
 let GUI_ACTION_GIT_OPEN_DIFF: UInt8 = 0x42
+let GUI_ACTION_CONFIG_UPDATE: UInt8 = 0x43
+let GUI_ACTION_CONFIG_QUERY: UInt8 = 0x44
+
+let SETTING_VALUE_BOOL: UInt8 = 0x01
+let SETTING_VALUE_INT: UInt8 = 0x02
+let SETTING_VALUE_STRING: UInt8 = 0x03
+let SETTING_VALUE_ATOM: UInt8 = 0x04
+let SETTING_VALUE_FLOAT: UInt8 = 0x05
 
 // MARK: - Log message opcode (frontend → BEAM)
 

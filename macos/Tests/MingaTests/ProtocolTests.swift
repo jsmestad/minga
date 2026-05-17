@@ -6,6 +6,48 @@ import Foundation
 import QuartzCore
 import os
 
+private func appendConfigStateU16(_ data: inout Data, _ value: UInt16) {
+    data.append(UInt8((value >> 8) & 0xFF))
+    data.append(UInt8(value & 0xFF))
+}
+
+private func appendConfigStateString8(_ data: inout Data, _ text: String) {
+    let bytes = Array(text.utf8.prefix(Int(UInt8.max)))
+    data.append(UInt8(bytes.count))
+    data.append(contentsOf: bytes)
+}
+
+private func appendConfigStateString16(_ data: inout Data, _ text: String) {
+    let bytes = Array(text.utf8.prefix(Int(UInt16.max)))
+    appendConfigStateU16(&data, UInt16(bytes.count))
+    data.append(contentsOf: bytes)
+}
+
+private func appendConfigStateValue(_ data: inout Data, _ value: SettingValue) {
+    switch value {
+    case .bool(let enabled):
+        data.append(SETTING_VALUE_BOOL)
+        data.append(enabled ? 1 : 0)
+    case .int(let number):
+        data.append(SETTING_VALUE_INT)
+        let unsigned = UInt32(bitPattern: Int32(clamping: number))
+        data.append(UInt8((unsigned >> 24) & 0xFF))
+        data.append(UInt8((unsigned >> 16) & 0xFF))
+        data.append(UInt8((unsigned >> 8) & 0xFF))
+        data.append(UInt8(unsigned & 0xFF))
+    case .string(let text):
+        data.append(SETTING_VALUE_STRING)
+        appendConfigStateString16(&data, text)
+    case .atom(let text):
+        data.append(SETTING_VALUE_ATOM)
+        appendConfigStateString16(&data, text)
+    case .float(let number):
+        data.append(SETTING_VALUE_FLOAT)
+        let bits = number.bitPattern.bigEndian
+        withUnsafeBytes(of: bits) { data.append(contentsOf: $0) }
+    }
+}
+
 @Suite("Protocol Decoder")
 struct ProtocolDecoderTests {
     @Test("Decode clear command")
@@ -66,6 +108,48 @@ struct ProtocolDecoderTests {
             return
         }
         #expect(enabled == false)
+    }
+
+    @Test("Decode gui_config_state command")
+    func decodeGuiConfigState() throws {
+        var payload = Data()
+        appendConfigStateU16(&payload, 3)
+        appendConfigStateString8(&payload, "theme")
+        appendConfigStateValue(&payload, .atom("doom_one"))
+        appendConfigStateString8(&payload, "font_size")
+        appendConfigStateValue(&payload, .int(14))
+        appendConfigStateString8(&payload, "cursor_blink")
+        appendConfigStateValue(&payload, .bool(true))
+
+        appendConfigStateU16(&payload, 1)
+        appendConfigStateString8(&payload, "Doom One")
+        appendConfigStateString8(&payload, "doom_one")
+        payload.append(contentsOf: [0x28, 0x2C, 0x34, 0xBB, 0xC2, 0xCF, 0x51, 0xAF, 0xEF])
+
+        appendConfigStateU16(&payload, 1)
+        appendConfigStateString8(&payload, "normal")
+        appendConfigStateString16(&payload, "SPC f f")
+        appendConfigStateString16(&payload, "find_file")
+        appendConfigStateString16(&payload, "Find file")
+
+        var encoded = Data([OP_GUI_CONFIG_STATE])
+        appendConfigStateU16(&encoded, UInt16(payload.count))
+        encoded.append(payload)
+
+        let (cmd, size) = try decodeCommand(data: encoded, offset: 0)
+        #expect(size == encoded.count)
+        guard case .guiConfigState(let state) = cmd else {
+            Issue.record("Expected .guiConfigState, got \(String(describing: cmd))")
+            return
+        }
+
+        #expect(state.options["theme"] == .atom("doom_one"))
+        #expect(state.options["font_size"] == .int(14))
+        #expect(state.options["cursor_blink"] == .bool(true))
+        #expect(state.themePreviews.count == 1)
+        #expect(state.keybindings.count == 1)
+        #expect(state.themePreviews[0].name == "Doom One")
+        #expect(state.keybindings[0].key == "SPC f f")
     }
 
     @Test("Decode draw_text command")

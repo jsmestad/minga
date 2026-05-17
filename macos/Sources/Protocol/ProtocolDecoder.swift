@@ -181,6 +181,7 @@ enum RenderCommand: Sendable {
     case guiBoard(visible: Bool, focusedCardId: UInt32, cards: [BoardCard], filterMode: Bool, filterText: String)
     case guiAgentContext(visible: Bool, task: String, dispatchTimestamp: Date, status: CardStatus, canApprove: Bool)
     case guiChangeSummary(visible: Bool, entries: [ChangeSummaryEntry], selectedIndex: Int)
+    case guiConfigState(Wire.ConfigState)
 }
 
 // MARK: - Decoder
@@ -344,6 +345,14 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let nameData = data[(rest + 3)..<(rest + 3 + nameLen)]
         let family = String(data: nameData, encoding: .utf8) ?? "Menlo"
         return (.registerFont(id: fontId, family: family), 1 + 3 + nameLen)
+
+    case OP_GUI_CONFIG_STATE:
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let payloadLen = Int(readU16(data, rest))
+        let payloadStart = rest + 2
+        guard data.count >= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+        let state = try decodeConfigState(data: data, start: payloadStart, end: payloadStart + payloadLen)
+        return (.guiConfigState(state), 1 + 2 + payloadLen)
 
     // Highlight and parser opcodes: skip them (variable length).
     case OP_SET_LANGUAGE:
@@ -2336,6 +2345,106 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         }
         throw ProtocolDecodeError.unknownOpcode(opcode)
     }
+}
+
+// MARK: - Config state decoder
+
+private func decodeConfigState(data: Data, start: Int, end: Int) throws -> Wire.ConfigState {
+    var pos = start
+    guard pos + 2 <= end else { throw ProtocolDecodeError.malformed }
+    let optionCount = Int(readU16(data, pos))
+    pos += 2
+
+    var options: [String: SettingValue] = [:]
+    for _ in 0..<optionCount {
+        let key = try readString8(data: data, pos: &pos, end: end)
+        let value = try readSettingValue(data: data, pos: &pos, end: end)
+        options[key] = value
+    }
+
+    guard pos + 2 <= end else { throw ProtocolDecodeError.malformed }
+    let previewCount = Int(readU16(data, pos))
+    pos += 2
+
+    var previews: [Wire.ThemePreview] = []
+    previews.reserveCapacity(previewCount)
+    for _ in 0..<previewCount {
+        let name = try readString8(data: data, pos: &pos, end: end)
+        let atom = try readString8(data: data, pos: &pos, end: end)
+        guard pos + 9 <= end else { throw ProtocolDecodeError.malformed }
+        let editorBg = readU24(data, pos)
+        let editorFg = readU24(data, pos + 3)
+        let accent = readU24(data, pos + 6)
+        pos += 9
+        previews.append(Wire.ThemePreview(name: name, atom: atom, editorBg: editorBg, editorFg: editorFg, accent: accent))
+    }
+
+    guard pos + 2 <= end else { throw ProtocolDecodeError.malformed }
+    let bindingCount = Int(readU16(data, pos))
+    pos += 2
+
+    var bindings: [Wire.KeybindingEntry] = []
+    bindings.reserveCapacity(bindingCount)
+    for _ in 0..<bindingCount {
+        let mode = try readString8(data: data, pos: &pos, end: end)
+        let key = try readString16(data: data, pos: &pos, end: end)
+        let command = try readString16(data: data, pos: &pos, end: end)
+        let description = try readString16(data: data, pos: &pos, end: end)
+        bindings.append(Wire.KeybindingEntry(mode: mode, key: key, command: command, description: description))
+    }
+
+    guard pos == end else { throw ProtocolDecodeError.malformed }
+    return Wire.ConfigState(options: options, themePreviews: previews, keybindings: bindings)
+}
+
+private func readSettingValue(data: Data, pos: inout Int, end: Int) throws -> SettingValue {
+    guard pos < end else { throw ProtocolDecodeError.malformed }
+    let tag = data[pos]
+    pos += 1
+
+    switch tag {
+    case SETTING_VALUE_BOOL:
+        guard pos + 1 <= end else { throw ProtocolDecodeError.malformed }
+        let enabled = data[pos] != 0
+        pos += 1
+        return .bool(enabled)
+    case SETTING_VALUE_INT:
+        guard pos + 4 <= end else { throw ProtocolDecodeError.malformed }
+        let value = Int(Int32(bitPattern: readU32(data, pos)))
+        pos += 4
+        return .int(value)
+    case SETTING_VALUE_STRING:
+        return .string(try readString16(data: data, pos: &pos, end: end))
+    case SETTING_VALUE_ATOM:
+        return .atom(try readString16(data: data, pos: &pos, end: end))
+    case SETTING_VALUE_FLOAT:
+        guard pos + 8 <= end else { throw ProtocolDecodeError.malformed }
+        let bits = readU64(data, pos)
+        pos += 8
+        return .float(Double(bitPattern: bits))
+    default:
+        throw ProtocolDecodeError.malformed
+    }
+}
+
+private func readString8(data: Data, pos: inout Int, end: Int) throws -> String {
+    guard pos + 1 <= end else { throw ProtocolDecodeError.malformed }
+    let len = Int(data[pos])
+    pos += 1
+    guard pos + len <= end else { throw ProtocolDecodeError.malformed }
+    let string = try readRequiredUTF8(data[pos..<(pos + len)])
+    pos += len
+    return string
+}
+
+private func readString16(data: Data, pos: inout Int, end: Int) throws -> String {
+    guard pos + 2 <= end else { throw ProtocolDecodeError.malformed }
+    let len = Int(readU16(data, pos))
+    pos += 2
+    guard pos + len <= end else { throw ProtocolDecodeError.malformed }
+    let string = try readRequiredUTF8(data[pos..<(pos + len)])
+    pos += len
+    return string
 }
 
 // MARK: - Binary helpers

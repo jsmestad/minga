@@ -164,6 +164,9 @@ final class CommandDispatcher {
         case .registerFont(let id, let family):
             fontManager?.registerFont(id: id, name: family)
 
+        case .guiConfigState(let configState):
+            guiState.settingsState.apply(configState: configState)
+
         case .guiTheme(let slots):
             guiState.themeColors.applySlots(slots)
             let tc = guiState.themeColors

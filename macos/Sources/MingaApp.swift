@@ -39,6 +39,10 @@ struct MingaApp: App {
         .commands {
             MingaMenuCommands(appState: appDelegate.appState)
         }
+
+        Settings {
+            SettingsView(appState: appDelegate.appState)
+        }
     }
 }
 
@@ -740,27 +744,6 @@ struct ContentView: View {
     }
 }
 
-/// Observable state shared between the app delegate and views.
-@MainActor
-@Observable
-final class AppState {
-    var windowTitle: String = "Minga"
-    var editorNSView: EditorNSView?
-    /// Whether the theme is dark (luminance < 0.5). Drives traffic-light appearance.
-    var windowBgIsDark: Bool = true
-    /// Whether the window is currently in macOS full-screen mode.
-    var isFullScreen: Bool = false
-    /// Vertical center of the traffic light buttons, measured from the window top.
-    var trafficLightMidY: CGFloat = 14
-    /// Flipped once when the first complete frame (batch_end) arrives from
-    /// the BEAM. The startup overlay fades out when this becomes true.
-    var hasReceivedFirstFrame: Bool = false
-    /// All GUI chrome sub-states in a single container.
-    let gui = GUIState()
-    /// Protocol encoder for sending gui_action events from SwiftUI chrome.
-    var encoder: InputEncoder?
-}
-
 /// App delegate that sets up the protocol reader, renderer, and wiring.
 ///
 /// Operates in two modes:
@@ -859,6 +842,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let enc = ProtocolEncoder(output: protocolOutput)
         self.encoder = enc
         appState.encoder = enc
+        appState.gui.settingsState.encoder = enc
 
         // Enable port-based logging so messages appear in *Messages*.
         PortLogger.setup(encoder: enc)
@@ -891,6 +875,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                    coreTextRenderer: ctRenderer, fontManager: fm)
         nsView.guiState = appState.gui
         nsView.statusBarState = appState.gui.statusBarState
+        appState.gui.settingsState.encoder = enc
+        appState.gui.settingsState.onCursorBlinkChanged = { [weak nsView] enabled in
+            nsView?.setCursorBlinkEnabled(enabled)
+        }
         nsView.onFullScreenChanged = { [weak appState] isFullScreen in
             Task { @MainActor in
                 appState?.isFullScreen = isFullScreen
@@ -949,7 +937,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let isDark = (r * 0.299 + g * 0.587 + b * 0.114) < 0.5
                 appState.windowBgIsDark = isDark
                 let bgColor = NSColor(red: r, green: g, blue: b, alpha: 1)
-                for window in NSApp.windows {
+                for window in NSApp.windows where window.identifier?.rawValue != "MingaSettingsWindow" {
                     window.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
                     window.backgroundColor = bgColor
                 }
@@ -1126,6 +1114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let enc = ProtocolEncoder(output: writeHandle)
         self.encoder = enc
         appState.encoder = enc
+        appState.gui.settingsState.encoder = enc
         PortLogger.setup(encoder: enc)
 
         // Capture for the background-thread disconnect callback.

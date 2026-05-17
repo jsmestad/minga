@@ -109,6 +109,7 @@ defmodule Minga.Config.OptionsTest do
                log_level_editor: :default,
                cursorline: true,
                cursor_animate: true,
+               cursor_blink: true,
                nav_flash: true,
                nav_flash_threshold: 5,
                yank_flash: true,
