@@ -269,6 +269,8 @@ Macro recording: 0=not recording, 1-26=recording register a-z
 
 `ModelineSegments` is the named GUI projection of the configurable modeline. The BEAM resolves built-in and custom segment names, side placement, explicit ordering, and click targets, then sends named styled segments to the frontend. Native frontends should use `name` to render known built-ins with platform-native controls (`mode` as a badge, `position` as compact text, `filetype` with the devicon, and so on) instead of drawing terminal-style full-height color blocks. Unknown or custom names can use `text`, `fg`, `bg`, and `attrs` as a native chip fallback. `attrs` uses the same low bits as `draw_text`: bit 0 bold, bit 1 underline, bit 2 italic. `command` is empty for non-clickable segments; otherwise it is a command name to send through the existing `execute_command` GUI action.
 
+Section `0x0B` is omitted when the BEAM has no GUI modeline data for this frame. A present section with zero left and right segments is explicit and tells the frontend not to synthesize fallback built-ins.
+
 ### 0x77 — gui_picker (sectioned format)
 
 Fuzzy finder / command palette state. Uses sectioned envelope: `opcode(1) + section_count(1) + sections...`. Hidden picker: section_count=0.

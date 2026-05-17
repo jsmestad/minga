@@ -210,6 +210,107 @@ struct StatusBarViewViewTests {
         #expect(strings.contains("Ln 42, Col 9"))
     }
 
+    @Test("Fallback native status bar renders default built-ins without modeline segments")
+    @MainActor func fallbackNativeStatusBarRendersDefaultBuiltins() throws {
+        let state = statusBarState()
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
+        let body = try sut.inspect()
+        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(strings.contains("NORMAL"))
+        #expect(strings.contains("Elixir"))
+        #expect(strings.contains("Ln 42, Col 9"))
+        #expect(strings.contains("Spaces:2"))
+    }
+
+    @Test("Filename group uses BEAM modeline text for native rendering")
+    @MainActor func filenameGroupUsesModelineText() throws {
+        let state = statusBarState(leftSegments: [segment(1, " main.ex [1/2] recording @q ", kind: "filename")])
+        state.filename = "main.ex"
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
+        let body = try sut.inspect()
+        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(strings.contains("main.ex [1/2] recording @q"))
+    }
+
+    @Test("Fallback built-in status bar controls emit default commands")
+    @MainActor func fallbackBuiltinControlsEmitDefaultCommands() throws {
+        let spy = SpyEncoder()
+        let state = statusBarState()
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: spy)
+        let buttons = try sut.inspect().findAll(ViewType.Button.self)
+
+        for button in buttons {
+            try button.tap()
+        }
+
+        #expect(spy.guiActions.contains(.executeCommand(name: "set_language")))
+        #expect(spy.guiActions.contains(.executeCommand(name: "indent_picker")))
+    }
+
+    @Test("Configured built-in controls prefer BEAM command override")
+    @MainActor func configuredBuiltinControlsPreferBeamCommandOverride() throws {
+        let spy = SpyEncoder()
+        let state = statusBarState(rightSegments: [segment(1, " Elixir ", kind: "filetype", command: "filetype_menu")])
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: spy)
+        let buttons = try sut.inspect().findAll(ViewType.Button.self)
+
+        for button in buttons {
+            try button.tap()
+        }
+
+        #expect(spy.guiActions.contains(.executeCommand(name: "filetype_menu")))
+        #expect(!spy.guiActions.contains(.executeCommand(name: "set_language")))
+    }
+
+    @Test("Filename control emits fallback buffer list command")
+    @MainActor func filenameControlEmitsFallbackBufferListCommand() throws {
+        let spy = SpyEncoder()
+        let state = statusBarState(leftSegments: [segment(1, " main.ex ", kind: "filename")])
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: spy)
+        let buttons = try sut.inspect().findAll(ViewType.Button.self)
+
+        for button in buttons {
+            try button.tap()
+        }
+
+        #expect(spy.guiActions.contains(.executeCommand(name: "buffer_list")))
+    }
+
+    @Test("Filename control prefers BEAM command override")
+    @MainActor func filenameControlPrefersBeamCommandOverride() throws {
+        let spy = SpyEncoder()
+        let state = statusBarState(leftSegments: [segment(1, " main.ex ", kind: "filename", command: "custom_buffer_picker")])
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: spy)
+        let buttons = try sut.inspect().findAll(ViewType.Button.self)
+
+        for button in buttons {
+            try button.tap()
+        }
+
+        #expect(spy.guiActions.contains(.executeCommand(name: "custom_buffer_picker")))
+        #expect(!spy.guiActions.contains(.executeCommand(name: "buffer_list")))
+    }
+
+    @Test("Custom unknown status bar segment remains visible and clickable")
+    @MainActor func customUnknownStatusBarSegmentVisibleAndClickable() throws {
+        let spy = SpyEncoder()
+        let state = statusBarState(leftSegments: [segment(1, " 42W ", kind: "word_count", command: "word_count")])
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: spy)
+        let body = try sut.inspect()
+        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        let buttons = body.findAll(ViewType.Button.self)
+
+        #expect(strings.contains("42W"))
+
+        for button in buttons {
+            try button.tap()
+        }
+
+        #expect(spy.guiActions.contains(.executeCommand(name: "word_count")))
+    }
+
     @Test("Configured modeline groups receive bounded budgets")
     @MainActor func configuredModelineGroupsReceiveBoundedBudgets() throws {
         let longLeftSegments = (0..<20).map { segment($0, " LEFT-SEGMENT-WITH-LONG-TEXT-\($0) ") }

@@ -1767,13 +1767,13 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       ),
       encode_section(@section_message, <<byte_size(message)::16, message::binary>>),
       encode_section(@section_recording, <<macro_byte::8>>),
-      encode_section(@section_indent, <<indent_type_byte::8, indent_size::8>>),
-      encode_section(
-        @section_modeline_segments,
-        encode_modeline_segments(Map.get(d, :modeline_segments))
-      ),
-      encode_section(@section_selection, <<selection_mode::8, selection_size::32>>)
+      encode_section(@section_indent, <<indent_type_byte::8, indent_size::8>>)
     ]
+
+    sections = sections ++ modeline_segment_sections(Map.get(d, :modeline_segments))
+
+    sections =
+      sections ++ [encode_section(@section_selection, <<selection_mode::8, selection_size::32>>)]
 
     # Agent section (only when content_kind == 1)
     if content_kind == 1 do
@@ -1801,9 +1801,14 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     end
   end
 
-  @spec encode_modeline_segments(%{left: [tuple()], right: [tuple()]} | nil) :: binary()
-  defp encode_modeline_segments(nil), do: <<2::8, 0::16, 0::16>>
+  @spec modeline_segment_sections(%{left: [tuple()], right: [tuple()]} | nil) :: [binary()]
+  defp modeline_segment_sections(nil), do: []
 
+  defp modeline_segment_sections(modeline_segments) do
+    [encode_section(@section_modeline_segments, encode_modeline_segments(modeline_segments))]
+  end
+
+  @spec encode_modeline_segments(%{left: [tuple()], right: [tuple()]}) :: binary()
   defp encode_modeline_segments(%{left: left, right: right}) do
     {left, right} = capped_modeline_segments(left, right)
     {encoded_left, left_count, remaining} = bounded_modeline_side(left, @max_u16 - 5)

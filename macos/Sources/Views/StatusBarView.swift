@@ -195,6 +195,7 @@ struct StatusBarView: View {
     private let maxCenterStatusWidth: CGFloat = 320
 
     @State private var gitCopied = false
+    @State private var gitCopyResetTask: Task<Void, Never>?
 
     var body: some View {
         GeometryReader { proxy in
@@ -271,12 +272,13 @@ struct StatusBarView: View {
             }
             .buttonStyle(.plain)
             .help(tooltip)
-            .onHover { isHovered in
-                if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-            }
+            .accessibilityLabel(tooltip)
+            .accessibilityHint("Runs the status bar action")
+            .statusBarPointingHand()
         } else {
             content()
                 .help(tooltip)
+                .accessibilityLabel(tooltip)
         }
     }
 
@@ -343,7 +345,7 @@ struct StatusBarView: View {
         case "mode":
             modeBadge
         case "filename":
-            filenameSegment(command: command(in: group))
+            filenameSegment(group: group, command: command(in: group))
         case "git":
             if state.hasGit && !state.gitBranch.isEmpty { gitSegment }
         case "agent":
@@ -376,21 +378,29 @@ struct StatusBarView: View {
             ProgressView()
                 .scaleEffect(0.45)
                 .frame(width: 14, height: barHeight)
+                .help("Agent thinking")
+                .accessibilityLabel("Agent thinking")
         case 2:
             Image(systemName: "bolt.fill")
                 .font(.system(size: 9))
                 .foregroundStyle(theme.statusbarAccentFg)
                 .frame(width: 14, height: barHeight)
+                .help("Agent executing tools")
+                .accessibilityLabel("Agent executing tools")
         case 3:
             Image(systemName: "exclamationmark.circle.fill")
                 .font(.system(size: 9))
                 .foregroundStyle(theme.gutterErrorFg)
                 .frame(width: 14, height: barHeight)
+                .help("Agent error")
+                .accessibilityLabel("Agent error")
         case 4:
             Image(systemName: "pencil.and.outline")
                 .font(.system(size: 9))
                 .foregroundStyle(theme.agentStatusNeedsYou)
                 .frame(width: 14, height: barHeight)
+                .help("Agent needs input")
+                .accessibilityLabel("Agent needs input")
         default:
             EmptyView()
         }
@@ -412,10 +422,10 @@ struct StatusBarView: View {
         }
         .buttonStyle(.plain)
         .help("Background sub-agents")
+        .accessibilityLabel(backgroundSubagentText)
+        .accessibilityHint("Switches to a background sub-agent session")
         .padding(.horizontal, 6)
-        .onHover { isHovered in
-            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-        }
+        .statusBarPointingHand()
     }
 
     private var backgroundSubagentText: String {
@@ -432,8 +442,12 @@ struct StatusBarView: View {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(state.gitBranch, forType: .string)
             gitCopied = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            gitCopyResetTask?.cancel()
+            gitCopyResetTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled else { return }
                 gitCopied = false
+                gitCopyResetTask = nil
             }
         }) {
             HStack(spacing: 3) {
@@ -474,9 +488,13 @@ struct StatusBarView: View {
         }
         .buttonStyle(.plain)
         .help("Click to copy branch name")
+        .accessibilityLabel(gitCopied ? "Git branch copied" : "Git branch \(state.gitBranch)")
+        .accessibilityHint("Copies the branch name")
         .padding(.horizontal, 6)
-        .onHover { isHovered in
-            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        .statusBarPointingHand()
+        .onDisappear {
+            gitCopyResetTask?.cancel()
+            gitCopyResetTask = nil
         }
     }
 
@@ -532,11 +550,20 @@ struct StatusBarView: View {
             }
             .buttonStyle(.plain)
             .help("Show diagnostics (SPC c d)")
+            .accessibilityLabel(diagnosticsAccessibilityLabel)
+            .accessibilityHint("Shows diagnostics")
             .padding(.horizontal, 4)
-            .onHover { isHovered in
-                if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-            }
+            .statusBarPointingHand()
         }
+    }
+
+    private var diagnosticsAccessibilityLabel: String {
+        var parts: [String] = []
+        if state.errorCount > 0 { parts.append("\(state.errorCount) errors") }
+        if state.warningCount > 0 { parts.append("\(state.warningCount) warnings") }
+        if state.infoCount > 0 { parts.append("\(state.infoCount) info") }
+        if state.hintCount > 0 { parts.append("\(state.hintCount) hints") }
+        return parts.isEmpty ? "Diagnostics" : "Diagnostics: \(parts.joined(separator: ", "))"
     }
 
     @ViewBuilder
@@ -591,9 +618,9 @@ struct StatusBarView: View {
         }
         .buttonStyle(.plain)
         .help("Indent settings")
-        .onHover { isHovered in
-            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-        }
+        .accessibilityLabel("Indent settings: \(state.indent.label) \(state.indent.size)")
+        .accessibilityHint("Changes indentation settings")
+        .statusBarPointingHand()
     }
 
     @ViewBuilder
@@ -614,23 +641,26 @@ struct StatusBarView: View {
         }
         .buttonStyle(.plain)
         .help("Change language mode (SPC b l)")
-        .onHover { isHovered in
-            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-        }
+        .accessibilityLabel("Language mode \(state.filetypeDisplay)")
+        .accessibilityHint("Changes language mode")
+        .statusBarPointingHand()
     }
 
     @ViewBuilder
-    private func filenameSegment(command: String? = nil) -> some View {
-        if !state.filename.isEmpty {
+    private func filenameSegment(group: StatusBarSegmentGroup? = nil, command: String? = nil) -> some View {
+        let modelineText = group.map(filenameText(in:)) ?? ""
+        let displayText = modelineText.isEmpty ? state.filename : modelineText
+
+        if !displayText.isEmpty {
             Button(action: {
                 encoder?.sendExecuteCommand(name: command ?? "buffer_list")
             }) {
                 HStack(spacing: 3) {
-                    Text(state.filename)
+                    Text(displayText)
                         .font(.system(size: 11))
                         .foregroundStyle(theme.modelineBarFg.opacity(0.65))
                         .lineLimit(1)
-                    if state.isDirty {
+                    if modelineText.isEmpty && state.isDirty {
                         Circle()
                             .fill(theme.statusbarAccentFg.opacity(0.9))
                             .frame(width: 5, height: 5)
@@ -639,10 +669,17 @@ struct StatusBarView: View {
             }
             .buttonStyle(.plain)
             .help("Buffer list")
-            .onHover { isHovered in
-                if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-            }
+            .accessibilityLabel("Buffer \(displayText)")
+            .accessibilityHint("Opens the buffer list")
+            .statusBarPointingHand()
         }
+    }
+
+    private func filenameText(in group: StatusBarSegmentGroup) -> String {
+        group.segments
+            .map(\.text)
+            .joined()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     @ViewBuilder
@@ -953,6 +990,7 @@ private struct StatusBarModelineSegmentView: View {
         if segment.command.isEmpty {
             segmentText
                 .contentShape(Rectangle())
+                .accessibilityLabel(trimmedDisplayText)
         } else {
             Button(action: {
                 encoder?.sendExecuteCommand(name: segment.command)
@@ -962,10 +1000,10 @@ private struct StatusBarModelineSegmentView: View {
             }
             .buttonStyle(.plain)
             .contentShape(Rectangle())
-            .help(segment.command)
-            .onHover { isHovered in
-                if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-            }
+            .help(accessibilityHelp)
+            .accessibilityLabel(trimmedDisplayText)
+            .accessibilityHint(accessibilityHint)
+            .statusBarPointingHand()
         }
     }
 
@@ -1008,6 +1046,17 @@ private struct StatusBarModelineSegmentView: View {
             .fill(color(segment.bgColor).opacity(0.18))
     }
 
+    private var accessibilityHelp: String {
+        if segment.command.isEmpty {
+            return trimmedDisplayText
+        }
+        return "\(trimmedDisplayText) (\(segment.command))"
+    }
+
+    private var accessibilityHint: String {
+        segment.command.isEmpty ? "Status bar segment" : "Runs \(segment.command)"
+    }
+
     private var segmentFont: Font {
         if StatusBarModelineFont.containsPrivateUseGlyph(segment.text) {
             return .custom("Symbols Nerd Font Mono", size: 11)
@@ -1026,6 +1075,35 @@ private struct StatusBarModelineSegmentView: View {
             green: Double((value >> 8) & 0xFF) / 255.0,
             blue: Double(value & 0xFF) / 255.0
         )
+    }
+}
+
+private struct StatusBarPointingHandModifier: ViewModifier {
+    @State private var didPushCursor = false
+
+    func body(content: Content) -> some View {
+        content
+            .onHover { hovering in
+                if hovering, !didPushCursor {
+                    NSCursor.pointingHand.push()
+                    didPushCursor = true
+                } else if !hovering, didPushCursor {
+                    NSCursor.pop()
+                    didPushCursor = false
+                }
+            }
+            .onDisappear {
+                if didPushCursor {
+                    NSCursor.pop()
+                    didPushCursor = false
+                }
+            }
+    }
+}
+
+private extension View {
+    func statusBarPointingHand() -> some View {
+        modifier(StatusBarPointingHandModifier())
     }
 }
 
@@ -1074,6 +1152,8 @@ private struct StatusBarIconButton: View {
         }
         .buttonStyle(.plain)
         .help(tooltip)
+        .accessibilityLabel(tooltip)
+        .accessibilityHint("Toggles this panel")
         .onHover { hovering in
             if reduceMotion {
                 isHovered = hovering
@@ -1082,8 +1162,8 @@ private struct StatusBarIconButton: View {
                     isHovered = hovering
                 }
             }
-            if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
+        .statusBarPointingHand()
     }
 }
 

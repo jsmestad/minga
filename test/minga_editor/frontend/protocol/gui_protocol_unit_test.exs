@@ -364,6 +364,26 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       assert label == "session-3: tests"
     end
 
+    test "omits modeline segment section when no GUI modeline data is attached" do
+      binary = ProtocolGUI.encode_gui_status_bar({:buffer, status_data()})
+      sections = status_sections(binary)
+
+      refute Map.has_key?(sections, 0x0B)
+    end
+
+    test "encodes explicit empty modeline segment section" do
+      data =
+        Map.put(status_data(), :modeline_segments, %{
+          left: [],
+          right: []
+        })
+
+      binary = ProtocolGUI.encode_gui_status_bar({:buffer, data})
+      sections = status_sections(binary)
+
+      assert <<2, 0::16, 0::16>> = Map.fetch!(sections, 0x0B)
+    end
+
     test "encodes configured modeline segment section" do
       data =
         Map.put(status_data(), :modeline_segments, %{
