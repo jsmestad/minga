@@ -4,7 +4,7 @@ defmodule Minga.Config.WriterTest do
   alias Minga.Config.Writer
 
   describe "GUI settings overlay" do
-    test "writes only changed values using the config DSL" do
+    test "writes explicit GUI values using the config DSL" do
       path = tmp_path("gui_settings.exs")
       {:ok, writer} = start_supervised({Writer, name: nil, path: path, debounce_ms: 10})
 
@@ -15,7 +15,7 @@ defmodule Minga.Config.WriterTest do
 
       content = File.read!(path)
       assert content =~ "use Minga.Config"
-      refute content =~ "set :theme"
+      assert content =~ "set :theme, :doom_one"
       assert content =~ "set :font_size, 16"
       assert content =~ "set :wrap, true"
     end
@@ -33,6 +33,32 @@ defmodule Minga.Config.WriterTest do
       content = File.read!(path)
       assert content =~ "set :font_size, 18"
       assert content =~ "set :wrap, true"
+    end
+
+    test "persists explicit hybrid line_numbers selections" do
+      path = tmp_path("gui_settings_hybrid.exs")
+      {:ok, writer} = start_supervised({Writer, name: nil, path: path, debounce_ms: 10})
+
+      assert :ok = Writer.persist(writer, :line_numbers, :hybrid)
+      assert :ok = Writer.flush(writer)
+
+      content = File.read!(path)
+      assert content =~ "set :line_numbers, :hybrid"
+    end
+
+    test "persists explicit default-valued selections" do
+      path = tmp_path("gui_settings_defaults.exs")
+      {:ok, writer} = start_supervised({Writer, name: nil, path: path, debounce_ms: 10})
+
+      assert :ok = Writer.persist(writer, :line_numbers, :hybrid)
+      assert :ok = Writer.persist(writer, :line_spacing, 1.0)
+      assert :ok = Writer.persist(writer, :wrap, false)
+      assert :ok = Writer.flush(writer)
+
+      content = File.read!(path)
+      assert content =~ "set :line_numbers, :hybrid"
+      assert content =~ "set :line_spacing, 1.0"
+      assert content =~ "set :wrap, false"
     end
 
     test "pending writes flush before reload starts" do
@@ -98,9 +124,11 @@ defmodule Minga.Config.WriterTest do
   end
 
   defp tmp_path(name) do
+    suffix = Base.url_encode64(:crypto.strong_rand_bytes(8), padding: false)
+
     Path.join(
       System.tmp_dir!(),
-      "minga-writer-test-#{System.unique_integer([:positive])}/#{name}"
+      "minga-writer-test-#{suffix}/#{name}"
     )
   end
 end

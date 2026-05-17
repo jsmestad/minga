@@ -665,6 +665,22 @@ defmodule Minga.Config.Options do
     end
   end
 
+  @doc "Marks an option as explicitly set by the GUI settings overlay."
+  @spec mark_explicit(server(), option_name()) :: :ok
+  def mark_explicit(server \\ @default_server, name) when is_atom(name) do
+    :ets.insert(table_name(server), {{:explicit, name}, true})
+    :ok
+  end
+
+  @doc "Returns whether an option was explicitly set by the GUI settings overlay."
+  @spec explicitly_set?(server(), option_name()) :: boolean()
+  def explicitly_set?(server \\ @default_server, name) when is_atom(name) do
+    case :ets.lookup(table_name(server), {:explicit, name}) do
+      [{{:explicit, ^name}, true}] -> true
+      _ -> false
+    end
+  end
+
   @doc """
   Gets the current global value of an option, falling back to its default.
   """

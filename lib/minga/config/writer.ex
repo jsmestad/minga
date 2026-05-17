@@ -180,7 +180,6 @@ defmodule Minga.Config.Writer do
   defp write_values(path, values) do
     body =
       values
-      |> Enum.reject(fn {name, value} -> Options.default(name) == value end)
       |> Enum.sort_by(fn {name, _value} -> Atom.to_string(name) end)
       |> Enum.map(fn {name, value} -> "set :#{name}, #{format_value(value)}\n" end)
       |> IO.iodata_to_binary()

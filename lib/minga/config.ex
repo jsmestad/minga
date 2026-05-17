@@ -278,9 +278,15 @@ defmodule Minga.Config do
   """
   @spec set(Options.option_name(), term()) :: :ok
   def set(name, value) when is_atom(name) do
-    case Options.set(options_server(), name, value) do
-      {:ok, _} -> :ok
-      {:error, msg} -> raise ArgumentError, msg
+    server = options_server()
+
+    case Options.set(server, name, value) do
+      {:ok, _} ->
+        maybe_mark_gui_explicit(server, name)
+        :ok
+
+      {:error, msg} ->
+        raise ArgumentError, msg
     end
   end
 
@@ -304,6 +310,15 @@ defmodule Minga.Config do
       {:ok, _} -> :ok
       {:error, msg} -> raise ArgumentError, msg
     end
+  end
+
+  @spec maybe_mark_gui_explicit(Options.server(), Options.option_name()) :: :ok
+  defp maybe_mark_gui_explicit(server, name) do
+    if Process.get(:minga_config_source) == :gui_settings do
+      Options.mark_explicit(server, name)
+    end
+
+    :ok
   end
 
   @doc """

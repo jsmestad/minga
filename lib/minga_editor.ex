@@ -2186,6 +2186,7 @@ defmodule MingaEditor do
     if MingaEditor.Frontend.Protocol.GUI.settings_option?(name) do
       case Minga.Config.Options.set(EditorState.options_server(state), name, value) do
         {:ok, persisted_value} ->
+          Minga.Config.Options.mark_explicit(EditorState.options_server(state), name)
           Minga.Config.Writer.persist(name, persisted_value)
 
           state

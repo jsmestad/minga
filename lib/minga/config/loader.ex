@@ -309,7 +309,9 @@ defmodule Minga.Config.Loader do
 
       # 5. Eval generated GUI settings overlay
       gui_settings_path = Path.join(config_dir, "gui_settings.exs")
-      gui_settings_error = eval_if_exists(gui_settings_path)
+
+      gui_settings_error =
+        with_config_source(:gui_settings, fn -> eval_if_exists(gui_settings_path) end)
 
       # 6. Eval after.exs
       after_path = Path.join(config_dir, "after.exs")
@@ -346,6 +348,17 @@ defmodule Minga.Config.Loader do
       restore_pdict(:minga_config_keymap, previous_keymap_server)
       restore_pdict(:minga_config_options, previous_options_server)
       restore_pdict(:minga_config_lsp_settings, previous_lsp_settings)
+    end
+  end
+
+  @spec with_config_source(atom(), (-> term())) :: term()
+  defp with_config_source(source, fun) when is_atom(source) and is_function(fun, 0) do
+    previous = Process.put(:minga_config_source, source)
+
+    try do
+      fun.()
+    after
+      restore_pdict(:minga_config_source, previous)
     end
   end
 

@@ -1,6 +1,9 @@
 defmodule MingaEditor.MouseMultiClickTest do
   @moduledoc "Tests for multi-click selection, modifier clicks, and new mouse features."
-  use ExUnit.Case, async: true
+  # Uses live editor startup and shared mouse/input state, so this file runs serially.
+  use ExUnit.Case, async: false
+
+  import Hammox
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor
@@ -9,20 +12,50 @@ defmodule MingaEditor.MouseMultiClickTest do
   # Content starts at row 1 because the tab bar occupies row 0.
   @content_row 1
 
-  defp start_editor(content) do
-    {:ok, buffer} = BufferProcess.start_link(content: content)
+  setup :verify_on_exit!
 
-    {:ok, editor} =
-      MingaEditor.start_link(
-        name: :"editor_#{:erlang.unique_integer([:positive])}",
-        port_manager: nil,
-        buffer: buffer,
-        width: 40,
-        height: 10,
-        editing_model: :vim
+  setup do
+    stub(Minga.Clipboard.Mock, :read, fn -> nil end)
+    :ok
+  end
+
+  defp start_editor(content) do
+    id = :erlang.unique_integer([:positive])
+    events_registry = start_events_registry(id)
+
+    options_server =
+      start_supervised!({Minga.Config.Options, name: nil, events_registry: events_registry},
+        id: {:options, id}
       )
 
+    buffer =
+      start_supervised!({BufferProcess, content: content, events_registry: events_registry},
+        id: {:buffer, id}
+      )
+
+    editor =
+      start_supervised!(
+        {MingaEditor,
+         name: :"editor_#{id}",
+         port_manager: nil,
+         buffer: buffer,
+         width: 40,
+         height: 10,
+         editing_model: :vim,
+         options_server: options_server,
+         events_registry: events_registry},
+        id: {:editor, id}
+      )
+
+    allow(Minga.Clipboard.Mock, self(), editor)
+    :sys.get_state(editor)
     {editor, buffer}
+  end
+
+  defp start_events_registry(id) do
+    name = :"#{__MODULE__}.Events.#{id}"
+    start_supervised!({Registry, keys: :duplicate, name: name}, id: {:events_registry, id})
+    name
   end
 
   defp send_mouse(editor, row, col, button, event_type, mods \\ 0, click_count \\ 1) do
