@@ -13,6 +13,7 @@ defmodule Minga.Parser.Protocol do
 
   alias Minga.Language.Highlight.InjectionRange
   alias Minga.Language.Highlight.Span
+  alias Minga.Parser.StructuralNavResult
 
   # ── Opcodes: commands (BEAM → Zig parser) ──
 
@@ -30,6 +31,7 @@ defmodule Minga.Parser.Protocol do
   @op_request_textobject 0x2C
   @op_close_buffer 0x2D
   @op_request_match_item 0x2E
+  @op_request_structural_nav 0x2F
 
   # ── Opcodes: responses (Zig parser → BEAM) ──
 
@@ -45,6 +47,7 @@ defmodule Minga.Parser.Protocol do
   @op_conceal_spans 0x3A
   @op_request_reparse 0x3B
   @op_match_item_result 0x3C
+  @op_node_info 0x3D
 
   # Log messages (Zig → BEAM)
   @op_log_message 0x60
@@ -186,6 +189,21 @@ defmodule Minga.Parser.Protocol do
     <<@op_request_match_item, buffer_id::32, request_id::32, row::32, col::32>>
   end
 
+  @doc "Encodes a request_structural_nav command: buffer_id(4) + request_id(4) + row(4) + col(4) + action(1)."
+  @spec encode_request_structural_nav(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          0..3
+        ) :: binary()
+  def encode_request_structural_nav(buffer_id, request_id, row, col, action)
+      when is_integer(buffer_id) and buffer_id >= 0 and
+             is_integer(request_id) and is_integer(row) and is_integer(col) and
+             is_integer(action) and action >= 0 and action <= 3 do
+    <<@op_request_structural_nav, buffer_id::32, request_id::32, row::32, col::32, action::8>>
+  end
+
   @doc "Encodes a load_grammar command."
   @spec encode_load_grammar(String.t(), String.t()) :: binary()
   def encode_load_grammar(name, path) when is_binary(name) and is_binary(path) do
@@ -276,6 +294,18 @@ defmodule Minga.Parser.Protocol do
 
   def decode_event(<<@op_match_item_result, request_id::32, 0>>) do
     {:ok, {:match_item_result, request_id, nil}}
+  end
+
+  def decode_event(
+        <<@op_node_info, request_id::32, 1, start_row::32, start_col::32, end_row::32,
+          end_col::32, type_len::16, type_name::binary-size(type_len)>>
+      ) do
+    result = StructuralNavResult.new(start_row, start_col, end_row, end_col, type_name)
+    {:ok, {:node_info, request_id, result}}
+  end
+
+  def decode_event(<<@op_node_info, request_id::32, 0>>) do
+    {:ok, {:node_info, request_id, nil}}
   end
 
   def decode_event(
