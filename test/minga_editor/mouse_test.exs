@@ -11,6 +11,7 @@ defmodule MingaEditor.MouseTest do
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Windows
+  alias Minga.Mode.VisualState
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
   alias MingaEditor.Workspace.State, as: WorkspaceState
@@ -94,6 +95,19 @@ defmodule MingaEditor.MouseTest do
       editor,
       {:minga_input, {:capabilities_updated, %Capabilities{frontend_type: :native_gui}}}
     )
+
+    _ = :sys.get_state(editor, @sync_timeout)
+  end
+
+  defp set_visual_selection(editor, buffer, anchor, cursor, visual_type) do
+    BufferProcess.move_to(buffer, cursor)
+
+    :sys.replace_state(editor, fn state ->
+      EditorState.transition_mode(state, :visual, %VisualState{
+        visual_anchor: anchor,
+        visual_type: visual_type
+      })
+    end)
 
     _ = :sys.get_state(editor, @sync_timeout)
   end
@@ -336,6 +350,67 @@ defmodule MingaEditor.MouseTest do
       assert line == 1
       assert col == 2
       assert state(editor).workspace.editing.mode == :normal
+    end
+
+    test "right click inside visual char selection preserves selection" do
+      {editor, buffer} = start_editor("hello world\nsecond line")
+      set_visual_selection(editor, buffer, {0, 0}, {0, 4}, :char)
+
+      send_mouse(editor, @content_row, @gutter + 2, :right, :press)
+
+      s = state(editor)
+      assert s.workspace.editing.mode == :visual
+      assert s.workspace.editing.mode_state.visual_anchor == {0, 0}
+      assert s.workspace.editing.mode_state.visual_type == :char
+      assert BufferProcess.cursor(buffer) == {0, 4}
+    end
+
+    test "right click inside visual line selection preserves selection" do
+      {editor, buffer} = start_editor("one\ntwo\nthree\nfour")
+      set_visual_selection(editor, buffer, {0, 0}, {2, 0}, :line)
+
+      send_mouse(editor, @content_row + 1, @gutter + 2, :right, :press)
+
+      s = state(editor)
+      assert s.workspace.editing.mode == :visual
+      assert s.workspace.editing.mode_state.visual_anchor == {0, 0}
+      assert s.workspace.editing.mode_state.visual_type == :line
+      assert BufferProcess.cursor(buffer) == {2, 0}
+    end
+
+    test "right click outside visual char selection clears selection" do
+      {editor, buffer} = start_editor("hello world\nsecond line")
+      set_visual_selection(editor, buffer, {0, 0}, {0, 4}, :char)
+
+      send_mouse(editor, @content_row + 1, @gutter + 2, :right, :press)
+
+      assert state(editor).workspace.editing.mode == :normal
+      assert BufferProcess.cursor(buffer) == {1, 2}
+    end
+
+    test "native GUI Ctrl-left click inside selection preserves it" do
+      {editor, buffer} = start_editor("hello world\nsecond line")
+      set_gui_capabilities(editor)
+      set_visual_selection(editor, buffer, {0, 0}, {0, 4}, :char)
+
+      send_mouse(editor, 0, @gutter + 2, :left, :press, 0x02)
+
+      s = state(editor)
+      assert s.workspace.editing.mode == :visual
+      assert s.workspace.editing.mode_state.visual_anchor == {0, 0}
+      assert s.workspace.editing.mode_state.visual_type == :char
+      assert BufferProcess.cursor(buffer) == {0, 4}
+    end
+
+    test "native GUI Ctrl-left click outside selection clears it" do
+      {editor, buffer} = start_editor("hello world\nsecond line")
+      set_gui_capabilities(editor)
+      set_visual_selection(editor, buffer, {0, 0}, {0, 4}, :char)
+
+      send_mouse(editor, 1, @gutter + 2, :left, :press, 0x02)
+
+      assert state(editor).workspace.editing.mode == :normal
+      assert BufferProcess.cursor(buffer) == {1, 2}
     end
 
     test "left click in command mode cancels command, returns to normal" do
