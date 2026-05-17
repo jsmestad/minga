@@ -214,10 +214,7 @@ defmodule Minga.LSP.SyncServerTest do
       Process.exit(client, :kill)
       assert_receive {:DOWN, ^test_ref, :process, ^client, :killed}
 
-      # Now the :DOWN to SyncServer is guaranteed to be in its mailbox.
-      :sys.get_state(SyncServer)
-
-      assert SyncServer.clients_for_buffer(buf) == []
+      assert_clients_for_buffer(buf, [])
     end
 
     test "crashed client is removed but other clients for same buffer remain" do
@@ -240,9 +237,7 @@ defmodule Minga.LSP.SyncServerTest do
       Process.exit(doomed, :kill)
       assert_receive {:DOWN, ^test_ref, :process, ^doomed, :killed}
 
-      :sys.get_state(SyncServer)
-
-      assert SyncServer.clients_for_buffer(buf) == [survivor]
+      assert_clients_for_buffer(buf, [survivor])
     end
 
     test "no stale monitors remain after buffer_closed" do
@@ -271,5 +266,27 @@ defmodule Minga.LSP.SyncServerTest do
                buffer_pid == buf
              end)
     end
+  end
+
+  @spec assert_clients_for_buffer(pid(), [pid()], non_neg_integer()) :: :ok
+  defp assert_clients_for_buffer(buffer_pid, expected, attempts \\ 50)
+
+  defp assert_clients_for_buffer(buffer_pid, expected, attempts) when attempts > 0 do
+    :sys.get_state(SyncServer)
+
+    case SyncServer.clients_for_buffer(buffer_pid) do
+      ^expected ->
+        :ok
+
+      _other ->
+        receive do
+        after
+          10 -> assert_clients_for_buffer(buffer_pid, expected, attempts - 1)
+        end
+    end
+  end
+
+  defp assert_clients_for_buffer(buffer_pid, expected, 0) do
+    assert SyncServer.clients_for_buffer(buffer_pid) == expected
   end
 end

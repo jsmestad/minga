@@ -4,7 +4,7 @@
       name: "default",
       strict: true,
       files: %{
-        included: ["lib/", "test/"],
+        included: ["lib/", "mix/", "test/"],
         excluded: [~r"/_build/", ~r"/deps/", ~r"/test/support/"]
       },
       plugins: [],

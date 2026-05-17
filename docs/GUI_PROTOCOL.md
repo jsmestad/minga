@@ -1088,9 +1088,12 @@ Note: GUI chrome commands are sent after `batch_end`. They are separate from the
 | Component | File | Language |
 |-----------|------|----------|
 | Opcode schema | `docs/protocol_schema.toml` | TOML |
-| Opcode generator | `lib/mix/tasks/protocol.gen.ex` | Elixir |
-| Generated Swift opcodes | `macos/Sources/Protocol/ProtocolOpcodes.generated.swift` | Swift |
-| Generated Zig opcodes | `zig/src/protocol_opcodes.zig` | Zig |
+| Opcode generator | `mix/protocol_generator.ex` and `mix/tasks/protocol.gen.ex` | Elixir |
+| Generated Elixir opcodes | `.generated/protocol/elixir/lib/minga/protocol/opcodes.ex` | Elixir |
+| Generated Swift opcodes | `macos/.generated/protocol/ProtocolOpcodes.generated.swift` | Swift |
+| Generated Zig opcodes | `zig/src/generated/protocol_opcodes.zig` | Zig |
+
+`docs/protocol_schema.toml` is the source of truth. Run `mix protocol.gen` to write ignored build artifacts, and run `mix protocol.gen --check` to verify the generated artifacts are present and reproducible. Local Mix, Swift harness, and Xcode build paths run generation before compiling their protocol consumers. Direct `cd zig && zig build test` expects `zig/src/generated/protocol_opcodes.zig` and `zig/src/generated/protocol_schema_test.zig` to already exist, so run `mix protocol.gen` first or use `mix zig.lint` / `mix compile`. Generated opcode files are build artifacts, not maintained source, so normal PR review should review the schema, generator, tests, and consumer code rather than line-reviewing generated constants.
 
 ### BEAM GUI protocol implementation
 
@@ -1105,7 +1108,7 @@ Note: GUI chrome commands are sent after `batch_end`. They are separate from the
 | Component | File | Language |
 |-----------|------|----------|
 | Decoder | `macos/Sources/Protocol/ProtocolDecoder.swift` | Swift |
-| Generated opcode constants | `macos/Sources/Protocol/ProtocolOpcodes.generated.swift` | Swift |
+| Generated opcode constants | `macos/.generated/protocol/ProtocolOpcodes.generated.swift` | Swift |
 | Non-opcode constants | `macos/Sources/Protocol/ProtocolConstants.swift` | Swift |
 | Test harness | `macos/TestHarness/main.swift` | Swift |
 

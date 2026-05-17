@@ -5,46 +5,59 @@ defmodule Mix.Tasks.Protocol.GenTest do
 
   @repo_root File.cwd!()
   @fixture_paths [
-    "docs/protocol_schema.toml",
-    "lib/minga_editor/frontend/protocol.ex",
-    "lib/minga/parser/protocol.ex",
-    "lib/minga_editor/frontend/protocol/gui.ex",
-    "lib/minga_editor/frontend/protocol/gui_window_content.ex",
-    "macos/Sources/Protocol/ProtocolOpcodes.generated.swift",
-    "zig/src/protocol.zig",
-    "zig/src/protocol_opcodes.zig",
-    "zig/src/protocol_schema_test.zig"
+    "docs/protocol_schema.toml"
+  ]
+  @generated_paths [
+    ".generated/protocol/elixir/lib/minga/protocol/opcodes.ex",
+    "macos/.generated/protocol/ProtocolOpcodes.generated.swift",
+    "zig/src/generated/protocol_opcodes.zig",
+    "zig/src/generated/protocol_schema_test.zig"
   ]
 
-  test "--check passes against a clean fixture tree" do
+  test "generates protocol artifacts into ignored build locations" do
     with_fixture_dir(fn dir ->
       File.cd!(dir, fn ->
+        assert :ok = Mix.Tasks.Protocol.Gen.run([])
+      end)
+
+      for rel_path <- @generated_paths do
+        path = Path.join(dir, rel_path)
+        assert File.exists?(path), "expected #{rel_path} to be generated"
+        assert File.read!(path) =~ "Generated from `docs/protocol_schema.toml`"
+      end
+    end)
+  end
+
+  test "--check passes against generated artifacts" do
+    with_fixture_dir(fn dir ->
+      File.cd!(dir, fn ->
+        assert :ok = Mix.Tasks.Protocol.Gen.run([])
         assert :ok = Mix.Tasks.Protocol.Gen.run(["--check"])
       end)
     end)
   end
 
-  test "--check fails when a generated file drifts" do
+  test "--check fails when a generated artifact drifts" do
     with_fixture_dir(fn dir ->
-      Path.join([dir, "macos/Sources/Protocol/ProtocolOpcodes.generated.swift"])
+      File.cd!(dir, fn ->
+        assert :ok = Mix.Tasks.Protocol.Gen.run([])
+      end)
+
+      Path.join([dir, "macos/.generated/protocol/ProtocolOpcodes.generated.swift"])
       |> File.write!("let OP_KEY_PRESS: UInt8 = 0x02\n")
 
       File.cd!(dir, fn ->
-        assert_raise Mix.Error, ~r/Generated protocol files are out of date/, fn ->
+        assert_raise Mix.Error, ~r/Generated protocol artifacts are out of date/, fn ->
           Mix.Tasks.Protocol.Gen.run(["--check"])
         end
       end)
     end)
   end
 
-  test "--check fails when a generated block drifts" do
+  test "--check fails when generated artifacts are missing" do
     with_fixture_dir(fn dir ->
-      path = Path.join([dir, "lib/minga_editor/frontend/protocol.ex"])
-      source = File.read!(path)
-      File.write!(path, String.replace(source, "@op_key_press 0x01", "@op_key_press 0x02"))
-
       File.cd!(dir, fn ->
-        assert_raise Mix.Error, ~r/Generated protocol files are out of date/, fn ->
+        assert_raise Mix.Error, ~r/Run `mix protocol.gen`/, fn ->
           Mix.Tasks.Protocol.Gen.run(["--check"])
         end
       end)

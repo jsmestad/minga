@@ -1,7 +1,12 @@
+Code.require_file("mix/protocol_generator.ex", __DIR__)
+Code.require_file("mix/compilers/protocol_gen.ex", __DIR__)
+Code.require_file("mix/tasks/protocol.gen.ex", __DIR__)
+
 defmodule Minga.MixProject do
   use Mix.Project
 
   @version "0.1.0"
+  @generated_elixir_path ".generated/protocol/elixir/lib"
 
   def project do
     [
@@ -12,7 +17,7 @@ defmodule Minga.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       aliases: aliases(),
-      compilers: Mix.compilers() ++ [:minga_zig],
+      compilers: [:protocol_gen] ++ Mix.compilers() ++ [:minga_zig],
       dialyzer: [
         plt_add_apps: [:mix, :credo],
         ignore_warnings: ".dialyzer_ignore.exs"
@@ -177,8 +182,8 @@ defmodule Minga.MixProject do
     ]
   end
 
-  defp elixirc_paths(:test), do: ["lib", "test/support", "test/perf"]
-  defp elixirc_paths(_), do: ["lib"]
+  defp elixirc_paths(:test), do: [@generated_elixir_path, "lib", "test/support", "test/perf"]
+  defp elixirc_paths(_), do: [@generated_elixir_path, "lib"]
 
   def cli do
     [

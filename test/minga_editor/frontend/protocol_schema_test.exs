@@ -225,7 +225,9 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
     actual = opcodes_by_name(schema, category)
 
     for {name, value} <- expected do
-      assert Map.fetch!(actual, Atom.to_string(name)) == value
+      string_name = Atom.to_string(name)
+      assert Map.fetch!(actual, string_name) == value
+      assert apply(Minga.Protocol.Opcodes, name, []) == value
     end
 
     assert MapSet.new(Map.keys(actual)) ==
@@ -237,7 +239,11 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
     actual = schema["gui_actions"] |> Map.new(fn entry -> {entry["name"], entry["value"]} end)
 
     for {name, value} <- expected do
-      assert Map.fetch!(actual, Atom.to_string(name)) == value
+      string_name = Atom.to_string(name)
+      assert Map.fetch!(actual, string_name) == value
+
+      assert apply(Minga.Protocol.Opcodes, String.to_atom("gui_action_" <> string_name), []) ==
+               value
     end
 
     assert MapSet.new(Map.keys(actual)) ==

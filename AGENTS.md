@@ -847,10 +847,10 @@ Agent tools live in `lib/minga_agent/tools/`. When adding or modifying a tool th
 ### New render command (requires BEAM + frontend changes)
 1. Add the opcode to `docs/protocol_schema.toml`, then run `mix protocol.gen`. Do not hand-edit generated opcode constants.
 2. Add the BEAM encoder/decoder behavior in the relevant protocol module under `lib/minga_editor/frontend/` or `lib/minga/parser/`.
-3. **macOS GUI:** Use the generated constant from `macos/Sources/Protocol/ProtocolOpcodes.generated.swift`, add decoder behavior in `macos/Sources/Protocol/ProtocolDecoder.swift`, and add the handler in `CommandDispatcher.swift`.
+3. **macOS GUI:** Use the generated constants from `macos/.generated/protocol/ProtocolOpcodes.generated.swift`, add decoder behavior in `macos/Sources/Protocol/ProtocolDecoder.swift`, and add the handler in `CommandDispatcher.swift`.
 4. **TUI:** Use the generated re-export in `zig/src/protocol.zig`, then add decoder and handler behavior in `zig/src/protocol.zig` + `zig/src/renderer.zig`.
 5. **Linux GUI:** (when it exists) Add decoder and handler behavior in the GTK4 frontend.
-6. Test encode/decode round-trip on all sides. GUI chrome opcodes (0x70-0x78) only need GUI frontend support; the TUI ignores them.
+6. Test encode/decode round-trip on all sides. GUI chrome and semantic opcodes are schema-defined and normally target native GUI support; if a GUI-only opcode can appear on the TUI stream, add an explicit Zig decoder skip or no-op handler for that opcode.
 
 ### New tree-sitter grammar
 

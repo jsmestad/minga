@@ -4,9 +4,40 @@ const BackendOption = enum {
     tui,
 };
 
+const generated_protocol_files = [_][]const u8{
+    "src/generated/protocol_opcodes.zig",
+    "src/generated/protocol_schema_test.zig",
+};
+
+fn ensureGeneratedProtocolArtifacts(b: *std.Build) void {
+    var missing: [generated_protocol_files.len][]const u8 = undefined;
+    var missing_count: usize = 0;
+
+    for (generated_protocol_files) |path| {
+        if (b.build_root.handle.access(b.graph.io, path, .{})) |_| {
+        } else |err| switch (err) {
+            error.FileNotFound => {
+                missing[missing_count] = path;
+                missing_count += 1;
+            },
+            else => std.debug.panic("failed to check for generated Zig protocol artifacts at {s}: {s}", .{ path, @errorName(err) }),
+        }
+    }
+
+    if (missing_count == 0) return;
+
+    std.debug.print("error: missing generated Zig protocol artifacts.\nRun `mix protocol.gen` from the repository root, then rerun `zig build` in `zig/`.\nMissing files:\n", .{});
+    for (missing[0..missing_count]) |path| {
+        std.debug.print("  - {s}\n", .{path});
+    }
+    std.process.exit(1);
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
+    ensureGeneratedProtocolArtifacts(b);
 
     const backend = b.option(BackendOption, "backend", "Rendering backend (default: tui)") orelse .tui;
 

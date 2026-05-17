@@ -1,73 +1,79 @@
+# This module shells out to git in temporary repositories.
 defmodule Minga.ProtocolGeneratedEditsScriptTest do
-  # Spawns git in temporary repositories to exercise the CI guard script.
   use ExUnit.Case, async: false
 
-  @repo_root File.cwd!()
-  @script Path.join(@repo_root, "scripts/check_protocol_generated_edits")
+  @script Path.expand("../../scripts/check_protocol_generated_edits", __DIR__)
 
-  test "fails when a standalone generated file changes without the schema" do
-    with_git_fixture(fn dir ->
+  test "passes when generated source files are only deleted" do
+    with_git_repo(fn dir ->
       write!(
         dir,
-        "macos/Sources/Protocol/ProtocolOpcodes.generated.swift",
-        "let OP_KEY_PRESS: UInt8 = 0x02\n"
+        "macos/.generated/protocol/ProtocolOpcodes.generated.swift",
+        "let OP_KEY_PRESS: UInt8 = 0x01\n"
       )
 
-      git!(dir, ["add", "."])
-      git!(dir, ["commit", "-m", "edit generated swift"])
+      commit_all!(dir, "baseline")
+      File.rm!(Path.join(dir, "macos/.generated/protocol/ProtocolOpcodes.generated.swift"))
+      commit_all!(dir, "remove generated source")
 
-      assert {output, 1} = run_guard(dir)
-
-      assert output =~
-               "Generated protocol outputs changed without docs/protocol_schema.toml changing"
-
-      assert output =~ "macos/Sources/Protocol/ProtocolOpcodes.generated.swift"
+      assert {"", 0} = System.cmd(@script, ["HEAD~1"], cd: dir, stderr_to_stdout: true)
     end)
   end
 
-  test "passes when a generated file and schema change together" do
-    with_git_fixture(fn dir ->
+  test "fails when generated source files are added back" do
+    with_git_repo(fn dir ->
+      commit_all!(dir, "baseline")
+      write!(dir, "zig/src/protocol_opcodes.zig", "pub const OP_KEY_PRESS: u8 = 0x01;\n")
+      commit_all!(dir, "add generated source")
+
+      {output, code} = System.cmd(@script, ["HEAD~1"], cd: dir, stderr_to_stdout: true)
+
+      assert code == 1
+      assert output =~ "Generated protocol artifacts must not be committed as source"
+      assert output =~ "zig/src/protocol_opcodes.zig"
+      assert output =~ "mix protocol.gen"
+    end)
+  end
+
+  test "fails when ignored generated artifact paths are force-added" do
+    with_git_repo(fn dir ->
+      commit_all!(dir, "baseline")
+
+      write!(
+        dir,
+        "macos/.generated/protocol/ProtocolOpcodes.generated.swift",
+        "let OP_KEY_PRESS: UInt8 = 0x01\n"
+      )
+
+      write!(
+        dir,
+        "zig/src/generated/protocol_opcodes.zig",
+        "pub const OP_KEY_PRESS: u8 = 0x01;\n"
+      )
+
+      commit_all!(dir, "force add ignored generated artifacts")
+
+      {output, code} = System.cmd(@script, ["HEAD~1"], cd: dir, stderr_to_stdout: true)
+
+      assert code == 1
+      assert output =~ "macos/.generated/protocol/ProtocolOpcodes.generated.swift"
+      assert output =~ "zig/src/generated/protocol_opcodes.zig"
+    end)
+  end
+
+  test "passes for schema and generator edits" do
+    with_git_repo(fn dir ->
+      commit_all!(dir, "baseline")
       write!(dir, "docs/protocol_schema.toml", "version = \"1.0.1\"\n")
+      write!(dir, "mix/tasks/protocol.gen.ex", "defmodule Mix.Tasks.Protocol.Gen do\nend\n")
+      commit_all!(dir, "edit generator inputs")
 
-      write!(
-        dir,
-        "macos/Sources/Protocol/ProtocolOpcodes.generated.swift",
-        "let OP_KEY_PRESS: UInt8 = 0x02\n"
-      )
-
-      git!(dir, ["add", "."])
-      git!(dir, ["commit", "-m", "edit schema and generated swift"])
-
-      assert {_, 0} = run_guard(dir)
+      assert {"", 0} = System.cmd(@script, ["HEAD~1"], cd: dir, stderr_to_stdout: true)
     end)
   end
 
-  test "passes when a mixed protocol file changes outside its generated block" do
-    with_git_fixture(fn dir ->
-      path = Path.join(dir, "lib/minga_editor/frontend/protocol.ex")
-      File.write!(path, File.read!(path) <> "\ndef encode_extra, do: :ok\n")
-      git!(dir, ["add", "."])
-      git!(dir, ["commit", "-m", "edit protocol code outside generated block"])
-
-      assert {_, 0} = run_guard(dir)
-    end)
-  end
-
-  test "fails when a mixed protocol file generated block changes without the schema" do
-    with_git_fixture(fn dir ->
-      path = Path.join(dir, "lib/minga_editor/frontend/protocol.ex")
-      source = File.read!(path)
-      File.write!(path, String.replace(source, "@op_key_press 0x01", "@op_key_press 0x02"))
-      git!(dir, ["add", "."])
-      git!(dir, ["commit", "-m", "edit generated elixir block"])
-
-      assert {output, 1} = run_guard(dir)
-      assert output =~ "lib/minga_editor/frontend/protocol.ex"
-    end)
-  end
-
-  @spec with_git_fixture((Path.t() -> any())) :: any()
-  defp with_git_fixture(fun) do
+  @spec with_git_repo((Path.t() -> any())) :: any()
+  defp with_git_repo(fun) do
     dir =
       Path.join(
         System.tmp_dir!(),
@@ -78,43 +84,13 @@ defmodule Minga.ProtocolGeneratedEditsScriptTest do
     File.mkdir_p!(dir)
 
     try do
-      write_base_files(dir)
       git!(dir, ["init", "-b", "main"])
       git!(dir, ["config", "user.email", "test@example.com"])
-      git!(dir, ["config", "user.name", "Protocol Guard Test"])
-      git!(dir, ["add", "."])
-      git!(dir, ["commit", "-m", "base"])
-      git!(dir, ["checkout", "-b", "feature"])
+      git!(dir, ["config", "user.name", "Test User"])
       fun.(dir)
     after
       File.rm_rf!(dir)
     end
-  end
-
-  @spec write_base_files(Path.t()) :: :ok
-  defp write_base_files(dir) do
-    write!(dir, "docs/protocol_schema.toml", "version = \"1.0.0\"\n")
-
-    write!(
-      dir,
-      "macos/Sources/Protocol/ProtocolOpcodes.generated.swift",
-      "let OP_KEY_PRESS: UInt8 = 0x01\n"
-    )
-
-    write!(dir, "zig/src/protocol_opcodes.zig", "pub const OP_KEY_PRESS: u8 = 0x01;\n")
-    write!(dir, "zig/src/protocol_schema_test.zig", "test \"schema\" {}\n")
-
-    write!(dir, "lib/minga_editor/frontend/protocol.ex", """
-    defmodule MingaEditor.Frontend.Protocol do
-      # --- BEGIN GENERATED (mix protocol.gen) ---
-      @op_key_press 0x01
-      # --- END GENERATED ---
-
-      def decode, do: :ok
-    end
-    """)
-
-    :ok
   end
 
   @spec write!(Path.t(), Path.t(), String.t()) :: :ok
@@ -124,16 +100,17 @@ defmodule Minga.ProtocolGeneratedEditsScriptTest do
     File.write!(path, content)
   end
 
-  @spec run_guard(Path.t()) :: {String.t(), non_neg_integer()}
-  defp run_guard(dir) do
-    System.cmd("python3", [@script, "main"], cd: dir, stderr_to_stdout: true)
+  @spec commit_all!(Path.t(), String.t()) :: :ok
+  defp commit_all!(dir, message) do
+    git!(dir, ["add", "-A"])
+    git!(dir, ["commit", "--allow-empty", "-m", message])
   end
 
-  @spec git!(Path.t(), [String.t()]) :: String.t()
+  @spec git!(Path.t(), [String.t()]) :: :ok
   defp git!(dir, args) do
     case System.cmd("git", args, cd: dir, stderr_to_stdout: true) do
-      {output, 0} -> output
-      {output, code} -> flunk("git #{Enum.join(args, " ")} failed with #{code}:\n#{output}")
+      {_output, 0} -> :ok
+      {output, code} -> flunk("git #{Enum.join(args, " ")} failed with #{code}: #{output}")
     end
   end
 end

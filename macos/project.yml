@@ -26,6 +26,9 @@ targets:
     sources:
       - path: Sources
         type: group
+      - path: .generated/protocol/ProtocolOpcodes.generated.swift
+        name: ProtocolOpcodes.generated.swift
+        type: file
       - path: Resources
         type: group
     settings:
@@ -40,6 +43,18 @@ targets:
         COMBINE_HIDPI_IMAGES: "YES"
         MTL_LANGUAGE_REVISION: UseDeploymentTarget
     dependencies: []
+    preBuildScripts:
+      - name: Generate protocol opcodes
+        script: |
+          cd "${SRCROOT}/.."
+          if ! command -v mix >/dev/null 2>&1; then
+            echo "error: mix is required to generate protocol artifacts. Install Elixir, then run: mix protocol.gen"
+            exit 1
+          fi
+          mix protocol.gen
+        basedOnDependencyAnalysis: false
+        outputFiles:
+          - $(SRCROOT)/.generated/protocol/ProtocolOpcodes.generated.swift
     postCompileScripts:
       - name: Copy CLI launcher
         script: |
@@ -67,12 +82,25 @@ targets:
         type: group
         excludes:
           - "MingaApp.swift"
+      - path: .generated/protocol/ProtocolOpcodes.generated.swift
+        name: ProtocolOpcodes.generated.swift
+        type: file
     settings:
       base:
         PRODUCT_NAME: MingaTests
         GENERATE_INFOPLIST_FILE: "YES"
     dependencies:
       - package: ViewInspector
+    preBuildScripts:
+      - name: Generate protocol opcodes
+        script: |
+          cd "${SRCROOT}/.."
+          if ! command -v mix >/dev/null 2>&1; then
+            echo "error: mix is required to generate protocol artifacts. Install Elixir, then run: mix protocol.gen"
+            exit 1
+          fi
+          mix protocol.gen
+        basedOnDependencyAnalysis: false
 
 schemes:
   Minga:
