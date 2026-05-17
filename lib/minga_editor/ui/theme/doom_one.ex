@@ -8,19 +8,24 @@ defmodule MingaEditor.UI.Theme.DoomOne do
 
   # ── Doom One palette ──────────────────────────────────────────────────
   @blue 0x51AFEF
+  @dark_blue 0x2257A0
   @red 0xFF6C6B
   @magenta 0xC678DD
+  @variable_magenta 0xDCAEEA
   @green 0x98BE65
   @orange 0xDA8548
   @yellow 0xECBE7B
   @cyan 0x46D9FF
+  @dark_cyan 0x5699AF
   @teal 0x4DB5BD
   @violet 0xA9A1E1
   @fg 0xBBC2CF
-  @grey 0x5B6268
+  @grey 0x3F444A
   @light_grey 0x818990
   @bg 0x282C34
+  @bg_alt 0x21242B
   @base3 0x23272E
+  @base4 0x3F444A
   @base5 0x5B6268
   @base6 0x73797E
   @base8 0xDFDFDF
@@ -66,14 +71,14 @@ defmodule MingaEditor.UI.Theme.DoomOne do
       },
       git: %MingaEditor.UI.Theme.Git{
         added_fg: @green,
-        modified_fg: @blue,
+        modified_fg: @orange,
         deleted_fg: @red
       },
       modeline: %MingaEditor.UI.Theme.Modeline{
         bar_fg: @fg,
         bar_bg: @base3,
         info_fg: @fg,
-        info_bg: 0x3F444A,
+        info_bg: @base4,
         filetype_fg: @green,
         mode_colors: %{
           normal: {0x000000, @blue},
@@ -116,10 +121,10 @@ defmodule MingaEditor.UI.Theme.DoomOne do
       },
       popup: %MingaEditor.UI.Theme.Popup{
         fg: @base8,
-        bg: 0x333333,
+        bg: @bg_alt,
         border_fg: @base6,
         sel_fg: @bg,
-        sel_bg: @blue,
+        sel_bg: @dark_blue,
         title_fg: @blue,
         key_fg: @cyan,
         separator_fg: @base5,
@@ -128,14 +133,14 @@ defmodule MingaEditor.UI.Theme.DoomOne do
       tree: %MingaEditor.UI.Theme.Tree{
         bg: @base3,
         fg: @fg,
-        dir_fg: @blue,
+        dir_fg: @fg,
         active_fg: @green,
         cursor_bg: 0x3E4451,
         header_fg: @blue,
         header_bg: @base3,
         separator_fg: @base5,
         modified_fg: @orange,
-        git_modified_fg: @orange,
+        git_modified_fg: @violet,
         git_staged_fg: @green,
         git_untracked_fg: @grey,
         git_conflict_fg: @red
@@ -166,7 +171,7 @@ defmodule MingaEditor.UI.Theme.DoomOne do
         context_mid: @yellow,
         context_high: @red,
         usage_fg: @grey,
-        toast_bg: 0x3F444A,
+        toast_bg: @base4,
         toast_fg: @fg,
         toast_border: @base6,
         system_fg: @base6,
@@ -207,23 +212,23 @@ defmodule MingaEditor.UI.Theme.DoomOne do
   defp syntax do
     %{
       # ── Keywords ────────────────────────────────────────────────────────
-      "keyword" => [fg: @magenta, bold: true],
-      "keyword.function" => [fg: @magenta, bold: true],
-      "keyword.operator" => [fg: @magenta],
-      "keyword.return" => [fg: @magenta, bold: true],
-      "keyword.conditional" => [fg: @magenta, bold: true],
-      "keyword.coroutine" => [fg: @magenta, bold: true],
-      "keyword.directive" => [fg: @magenta],
-      "keyword.exception" => [fg: @magenta],
-      "keyword.import" => [fg: @magenta],
-      "keyword.modifier" => [fg: @magenta, bold: true],
-      "keyword.repeat" => [fg: @magenta, bold: true],
-      "keyword.type" => [fg: @magenta, bold: true],
-      "conditional" => [fg: @magenta, bold: true],
-      "exception" => [fg: @magenta],
-      "include" => [fg: @magenta],
-      "import" => [fg: @magenta],
-      "repeat" => [fg: @magenta, bold: true],
+      "keyword" => [fg: @blue, bold: true],
+      "keyword.function" => [fg: @blue, bold: true],
+      "keyword.operator" => [fg: @blue],
+      "keyword.return" => [fg: @blue, bold: true],
+      "keyword.conditional" => [fg: @blue, bold: true],
+      "keyword.coroutine" => [fg: @blue, bold: true],
+      "keyword.directive" => [fg: @blue],
+      "keyword.exception" => [fg: @blue],
+      "keyword.import" => [fg: @blue],
+      "keyword.modifier" => [fg: @blue, bold: true],
+      "keyword.repeat" => [fg: @blue, bold: true],
+      "keyword.type" => [fg: @blue, bold: true],
+      "conditional" => [fg: @blue, bold: true],
+      "exception" => [fg: @blue],
+      "include" => [fg: @blue],
+      "import" => [fg: @blue],
+      "repeat" => [fg: @blue, bold: true],
 
       # ── Strings ─────────────────────────────────────────────────────────
       "string" => [fg: @green],
@@ -243,32 +248,32 @@ defmodule MingaEditor.UI.Theme.DoomOne do
       "comment.discard" => [fg: @grey, italic: true],
 
       # ── Functions ───────────────────────────────────────────────────────
-      "function" => [fg: @blue],
-      "function.call" => [fg: @blue],
-      "function.builtin" => [fg: @teal],
+      "function" => [fg: @magenta],
+      "function.call" => [fg: @magenta, italic: true],
+      "function.builtin" => [fg: @magenta],
       "function.macro" => [fg: @magenta, bold: true],
-      "function.method" => [fg: @blue],
-      "function.method.builtin" => [fg: @teal],
-      "function.special" => [fg: @magenta],
-      "method" => [fg: @blue],
-      "method.call" => [fg: @blue],
+      "function.method" => [fg: @cyan],
+      "function.method.builtin" => [fg: @cyan],
+      "function.special" => [fg: @dark_cyan],
+      "method" => [fg: @cyan],
+      "method.call" => [fg: @cyan],
 
       # ── Types ───────────────────────────────────────────────────────────
       "type" => [fg: @yellow],
       "type.builtin" => [fg: @yellow, bold: true],
 
       # ── Variables ───────────────────────────────────────────────────────
-      "variable" => [fg: @fg],
-      "variable.builtin" => [fg: @orange],
+      "variable" => [fg: @variable_magenta],
+      "variable.builtin" => [fg: @magenta],
       "variable.parameter" => [fg: @red],
       "variable.member" => [fg: @teal],
       "parameter" => [fg: @red],
       "field" => [fg: @teal],
 
       # ── Constants & numbers ─────────────────────────────────────────────
-      "constant" => [fg: @orange],
-      "constant.builtin" => [fg: @orange, bold: true],
-      "boolean" => [fg: @orange, bold: true],
+      "constant" => [fg: @violet],
+      "constant.builtin" => [fg: @violet, bold: true],
+      "boolean" => [fg: @violet, bold: true],
       "number" => [fg: @orange],
       "number.float" => [fg: @orange],
       "float" => [fg: @orange],
@@ -324,10 +329,10 @@ defmodule MingaEditor.UI.Theme.DoomOne do
       "markup.quote" => [fg: @grey, italic: true],
 
       # ── CSS-specific ───────────────────────────────────────────────────
-      "charset" => [fg: @magenta, bold: true],
-      "keyframes" => [fg: @magenta, bold: true],
-      "media" => [fg: @magenta, bold: true],
-      "supports" => [fg: @magenta, bold: true],
+      "charset" => [fg: @blue, bold: true],
+      "keyframes" => [fg: @blue, bold: true],
+      "media" => [fg: @blue, bold: true],
+      "supports" => [fg: @blue, bold: true],
 
       # ── Misc ───────────────────────────────────────────────────────────
       "escape" => [fg: @orange],

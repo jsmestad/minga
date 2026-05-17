@@ -259,8 +259,8 @@ struct MinibufferView: View {
                 .foregroundStyle(isSelected ? theme.editorBg : theme.popupFg)
                 .lineLimit(1)
         } else {
-            let baseColor = isSelected ? Color(theme.editorBg) : Color(theme.popupFg)
-            let matchColor = isSelected ? Color(theme.editorBg) : Color(theme.accent)
+            let baseColor = isSelected ? Color(theme.editorBg).opacity(0.7) : Color(theme.popupFg)
+            let matchColor = isSelected ? Color.white : Color(theme.accent)
             let attributed = TextHighlighting.attributedString(
                 candidate.label,
                 matchPositions: candidate.matchPositions,
@@ -278,7 +278,7 @@ struct MinibufferView: View {
     private func candidateBackground(isSelected: Bool, isHovered: Bool) -> some View {
         if isSelected {
             RoundedRectangle(cornerRadius: 3)
-                .fill(theme.accent.opacity(0.8))
+                .fill(theme.popupSelBg)
                 .padding(.horizontal, 4)
         } else if isHovered {
             RoundedRectangle(cornerRadius: 3)
