@@ -1,4 +1,13 @@
 defmodule MingaEditor.Commands.MovementTest do
+  @moduledoc """
+  Editor GenServer smoke coverage for movement routing.
+
+  The former full-stack movement assertions are classified into lower layers:
+
+  * Layer 0 key dispatch lives in `test/minga/mode/normal_movement_dispatch_test.exs`.
+  * Layer 1 command/state-handler cursor outcomes live in `test/minga_editor/commands/movement_command_test.exs`.
+  * This file keeps only smoke checks that prove keypresses reach the editor command path.
+  """
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
@@ -13,6 +22,9 @@ defmodule MingaEditor.Commands.MovementTest do
   alias Minga.Editing.Fold.Range, as: FoldRange
 
   @sync_timeout 15_000
+  @ctrl 0x02
+  @arrow_left 57_350
+  @arrow_right 57_351
 
   defp start_editor(content \\ "hello\nworld\nfoo", width \\ 40, height \\ 10) do
     id = :erlang.unique_integer([:positive])
@@ -67,6 +79,7 @@ defmodule MingaEditor.Commands.MovementTest do
   defp send_key(editor, codepoint, mods \\ 0) do
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
     _ = :sys.get_state(editor, @sync_timeout)
+    :ok
   end
 
   defp set_active_fold_ranges(editor, ranges) do
@@ -82,10 +95,44 @@ defmodule MingaEditor.Commands.MovementTest do
   describe "Normal mode — movements" do
     test "default bus tool prompts cannot interrupt movement dispatch" do
       {editor, buffer} = start_editor("hello")
-      state = :sys.get_state(editor, @sync_timeout)
 
-      refute editor in Minga.Events.subscribers(:tool_missing)
-      assert editor in Minga.Events.subscribers(:tool_missing, state.events_registry)
+      send_key(editor, ?l)
+
+      assert BufferProcess.cursor(buffer) == {0, 1}
+    end
+
+    test "count prefix reaches the mode dispatch and command executor" do
+      {editor, buffer} = start_editor("hello world")
+
+      send_key(editor, ?3)
+      send_key(editor, ?l)
+
+      assert BufferProcess.cursor(buffer) == {0, 3}
+    end
+
+    test "normal-mode ctrl page key reaches the scroll command path" do
+      {editor, buffer} = start_editor(lines(0..29))
+
+      send_key(editor, ?d, @ctrl)
+
+      assert BufferProcess.cursor(buffer) == {4, 0}
+    end
+
+    test "insert-mode arrow keys route through insert movement semantics" do
+      {editor, buffer} = start_editor("ab\ncd")
+
+      send_key(editor, ?i)
+      send_key(editor, @arrow_right)
+      send_key(editor, @arrow_right)
+      send_key(editor, @arrow_right)
+      assert BufferProcess.cursor(buffer) == {1, 0}
+
+      send_key(editor, @arrow_left)
+      assert BufferProcess.cursor(buffer) == {0, 2}
+    end
+
+    test "events on the default bus do not interrupt movement dispatch" do
+      {editor, buffer} = start_editor("hello")
 
       Minga.Events.broadcast(:tool_missing, %Minga.Events.ToolMissingEvent{command: "rg"})
       send_key(editor, ?l)
@@ -554,4 +601,6 @@ defmodule MingaEditor.Commands.MovementTest do
       assert Process.alive?(editor)
     end
   end
+
+  defp lines(range), do: Enum.map_join(range, "\n", &"line #{&1}")
 end

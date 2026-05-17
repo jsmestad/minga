@@ -119,6 +119,9 @@ defmodule Minga.Integration.GUIProtocolTest do
            git_diff_summary: {5, 3, 1},
            diagnostic_counts: {2, 4, 1, 0},
            diagnostic_hint: "✖ undefined function foo/0 [ElixirLS]",
+           indent_type: :spaces,
+           indent_size: 2,
+           selection_info: {:chars, 42},
            lsp_status: :ready,
            parser_status: :available,
            buf_index: 1,
@@ -126,7 +129,11 @@ defmodule Minga.Integration.GUIProtocolTest do
            macro_recording: {true, "q"},
            agent_status: :thinking,
            agent_theme_colors: nil,
-           status_msg: "Wrote foo.ex"
+           status_msg: "Wrote foo.ex",
+           modeline_segments: %{
+             left: [{" NORMAL ", 0xBBC2CF, 0x51AFEF, [bold: true], nil}],
+             right: [{" Elixir ", 0xC678DD, 0x282C34, [], :set_language}]
+           }
          }}
 
       cmd = ProtocolGUI.encode_gui_status_bar(data)
@@ -156,6 +163,17 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["git_deleted"] == 1
       assert decoded["filename"] == "foo.ex"
       assert decoded["diagnostic_hint"] == "✖ undefined function foo/0 [ElixirLS]"
+      assert decoded["indent_type"] == 0
+      assert decoded["indent_size"] == 2
+
+      assert [%{"text" => " NORMAL ", "attrs" => 1, "command" => ""}] =
+               decoded["modeline_left_segments"]
+
+      assert [%{"text" => " Elixir ", "command" => "set_language"}] =
+               decoded["modeline_right_segments"]
+
+      assert decoded["selection_mode"] == 1
+      assert decoded["selection_size"] == 42
     end
 
     test "gui_status_bar agent variant encodes and decodes correctly", %{port: port} do
@@ -181,6 +199,9 @@ defmodule Minga.Integration.GUIProtocolTest do
            git_diff_summary: {3, 2, 0},
            diagnostic_counts: {1, 2, 0, 1},
            diagnostic_hint: "⚠ unused variable [ElixirLS]",
+           indent_type: :tabs,
+           indent_size: 4,
+           selection_info: {:lines, 3},
            lsp_status: :ready,
            parser_status: :available,
            buf_index: 2,
@@ -213,6 +234,10 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["git_deleted"] == 0
       assert decoded["filename"] == "editor.ex"
       assert decoded["diagnostic_hint"] == "⚠ unused variable [ElixirLS]"
+      assert decoded["indent_type"] == 1
+      assert decoded["indent_size"] == 4
+      assert decoded["selection_mode"] == 2
+      assert decoded["selection_size"] == 3
     end
 
     test "gui_agent_chat hidden encodes and decodes correctly", %{port: port} do

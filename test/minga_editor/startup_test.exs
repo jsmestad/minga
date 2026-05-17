@@ -159,6 +159,17 @@ defmodule MingaEditor.StartupTest do
       assert Options.get(server, :line_spacing) == 1.5
     end
 
+    test "respects explicit user override to default line_spacing in GUI mode",
+         %{server: server} do
+      gui_caps = %MingaEditor.Frontend.Capabilities{frontend_type: :native_gui}
+      {:ok, _} = Options.set(server, :line_spacing, 1.0)
+      :ok = Options.mark_explicit(server, :line_spacing)
+
+      Startup.apply_gui_defaults(gui_caps, server)
+
+      assert Options.get(server, :line_spacing) == 1.0
+    end
+
     test "sets line_numbers to :absolute for GUI frontend", %{server: server} do
       gui_caps = %MingaEditor.Frontend.Capabilities{frontend_type: :native_gui}
 
@@ -188,16 +199,13 @@ defmodule MingaEditor.StartupTest do
     end
 
     test "respects explicit user override to :hybrid in GUI mode", %{server: server} do
-      # Edge case: user explicitly wants :hybrid in GUI mode.
-      # Our heuristic treats this as "not explicitly set" and overrides it.
-      # This is an acknowledged tradeoff (ticket #728 notes this).
       gui_caps = %MingaEditor.Frontend.Capabilities{frontend_type: :native_gui}
+      {:ok, _} = Options.set(server, :line_numbers, :hybrid)
+      :ok = Options.mark_explicit(server, :line_numbers)
 
       Startup.apply_gui_defaults(gui_caps, server)
 
-      # :hybrid becomes :absolute because we can't distinguish "user set :hybrid"
-      # from "default :hybrid". This is acceptable per ticket scope.
-      assert Options.get(server, :line_numbers) == :absolute
+      assert Options.get(server, :line_numbers) == :hybrid
     end
 
     test "writes land on the supplied server, not the default singleton" do

@@ -338,13 +338,15 @@ defmodule MingaEditor.Startup do
 
     if Capabilities.gui?(caps) do
       # Only override if the user hasn't explicitly set a preference.
-      # :hybrid is the TUI default; if it's still :hybrid, the user
-      # hasn't touched it, so we can safely switch to :absolute.
-      if Minga.Config.Options.get(options_server, :line_numbers) == :hybrid do
+      # :hybrid is the TUI default; if it is still the implicit default, we can
+      # safely switch to :absolute for native GUI frontends.
+      if Minga.Config.Options.get(options_server, :line_numbers) == :hybrid and
+           not Minga.Config.Options.explicitly_set?(options_server, :line_numbers) do
         Minga.Config.Options.set(options_server, :line_numbers, :absolute)
       end
 
-      if Minga.Config.Options.get(options_server, :line_spacing) == 1.0 do
+      if Minga.Config.Options.get(options_server, :line_spacing) == 1.0 and
+           not Minga.Config.Options.explicitly_set?(options_server, :line_spacing) do
         Minga.Config.Options.set(options_server, :line_spacing, 1.2)
       end
     end

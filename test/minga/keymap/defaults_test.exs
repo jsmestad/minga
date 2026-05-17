@@ -187,6 +187,12 @@ defmodule Minga.Keymap.DefaultsTest do
       assert {:command, :search_and_replace} = Bindings.lookup(s_node, {?r, 0})
     end
 
+    test "SPC s j → :document_symbols" do
+      trie = Defaults.leader_trie()
+      {:prefix, s_node} = Bindings.lookup(trie, {?s, 0})
+      assert {:command, :document_symbols} = Bindings.lookup(s_node, {?j, 0})
+    end
+
     # ── Negative cases ─────────────────────────────────────────────────────────
 
     test "unknown leader prefix returns :not_found" do
@@ -236,6 +242,14 @@ defmodule Minga.Keymap.DefaultsTest do
       bindings = Defaults.normal_bindings()
       assert {_, _} = bindings[{?d, 0x02}]
       assert {_, _} = bindings[{?u, 0x02}]
+    end
+
+    test "contains structural navigation Alt+ bindings" do
+      bindings = Defaults.normal_bindings()
+      assert {:nav_parent, _} = bindings[{?h, 0x04}]
+      assert {:nav_first_child, _} = bindings[{?l, 0x04}]
+      assert {:nav_next_sibling, _} = bindings[{?j, 0x04}]
+      assert {:nav_prev_sibling, _} = bindings[{?k, 0x04}]
     end
 
     test "contains operator keys" do

@@ -109,6 +109,13 @@ defmodule MingaEditor.Workspace.State do
     %{wspace | windows: Windows.update(ws, id, fun)}
   end
 
+  @doc "Updates every window that shows the given buffer via a mapper function."
+  @spec update_windows_for_buffer(t(), pid(), (Window.t() -> Window.t())) :: t()
+  def update_windows_for_buffer(%__MODULE__{windows: ws} = wspace, buffer, fun)
+      when is_pid(buffer) and is_function(fun, 1) do
+    %{wspace | windows: Windows.update_by_buffer(ws, buffer, fun)}
+  end
+
   @doc """
   Invalidates render caches for all windows.
 
@@ -154,10 +161,12 @@ defmodule MingaEditor.Workspace.State do
         windows =
           Windows.update(ws, id, fn window ->
             %{
-              Window.invalidate(window)
+              window
               | buffer: buffers.active,
                 content: Content.buffer(buffers.active)
             }
+            |> Window.set_document_symbols([])
+            |> Window.invalidate()
           end)
 
         %{wspace | windows: windows}

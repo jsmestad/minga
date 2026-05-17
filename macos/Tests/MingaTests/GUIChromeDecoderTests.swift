@@ -26,6 +26,13 @@ private func appendU32(_ data: inout Data, _ value: UInt32) {
     data.append(UInt8(value & 0xFF))
 }
 
+/// Appends a 24-bit big-endian integer to a Data buffer.
+private func appendU24(_ data: inout Data, _ value: UInt32) {
+    data.append(UInt8((value >> 16) & 0xFF))
+    data.append(UInt8((value >> 8) & 0xFF))
+    data.append(UInt8(value & 0xFF))
+}
+
 /// Appends a length-prefixed UTF-8 string with a UInt16 length prefix.
 private func appendString16(_ data: inout Data, _ string: String) {
     let utf8 = Array(string.utf8)
@@ -345,6 +352,14 @@ struct GUIStatusBarDecoderTests {
         return section
     }
 
+    private func appendStatusBarSegment(_ data: inout Data, text: String, fg: UInt32, bg: UInt32, attrs: UInt8, command: String) {
+        appendU24(&data, fg)
+        appendU24(&data, bg)
+        data.append(attrs)
+        appendString16(&data, text)
+        appendString16(&data, command)
+    }
+
     @Test("Decode gui_status_bar buffer variant (sectioned format)")
     func decodeBufferVariant() throws {
         var identity = Data()
@@ -380,6 +395,14 @@ struct GUIStatusBarDecoderTests {
         appendString16(&file, "editor.ex") // filename
         appendString8(&file, "elixir") // filetype
 
+        var indent = Data()
+        indent.append(1) // tabs
+        indent.append(4) // size
+
+        var selection = Data()
+        selection.append(2) // line selection
+        appendU32(&selection, 3) // size
+
         var msg = Data()
         appendString16(&msg, "-- INSERT --")
 
@@ -398,6 +421,8 @@ struct GUIStatusBarDecoderTests {
             buildSection(SECTION_LANGUAGE, language),
             buildSection(SECTION_GIT, git),
             buildSection(SECTION_FILE, file),
+            buildSection(0x0A, indent),
+            buildSection(0x0C, selection),
             buildSection(SECTION_MESSAGE, msg),
             buildSection(SECTION_RECORDING, recording),
             buildSection(SECTION_AGENT, agent),
@@ -411,41 +436,38 @@ struct GUIStatusBarDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiStatusBar(let contentKind, let mode, let cursorLine, let cursorCol,
-                                  let lineCount, let flags, let lspStatus, let gitBranch,
-                                  let message, let filetype, let errorCount, let warningCount,
-                                  _, _, _,
-                                  let infoCount, let hintCount, let macroRecording,
-                                  let parserStatus, let agentStatus,
-                                  let gitAdded, let gitModified, let gitDeleted,
-                                  _, _, _, _, let filename, _, let backgroundSubagentCount,
-                                  let backgroundSubagentLabel) = cmd else {
+        guard case .guiStatusBar(let update) = cmd else {
             Issue.record("Expected .guiStatusBar"); return
         }
 
-        #expect(contentKind == 0)
-        #expect(mode == 1)
-        #expect(cursorLine == 42)
-        #expect(cursorCol == 9)
-        #expect(lineCount == 500)
-        #expect(flags == 0x03)
-        #expect(lspStatus == 1)
-        #expect(gitBranch == "main")
-        #expect(message == "-- INSERT --")
-        #expect(filetype == "elixir")
-        #expect(errorCount == 3)
-        #expect(warningCount == 7)
-        #expect(infoCount == 1)
-        #expect(hintCount == 2)
-        #expect(macroRecording == 0)
-        #expect(parserStatus == 1)
-        #expect(agentStatus == 0)
-        #expect(gitAdded == 5)
-        #expect(gitModified == 3)
-        #expect(gitDeleted == 1)
-        #expect(filename == "editor.ex")
-        #expect(backgroundSubagentCount == 2)
-        #expect(backgroundSubagentLabel == "session-2: tests")
+        #expect(update.contentKind == 0)
+        #expect(update.mode == 1)
+        #expect(update.cursorLine == 42)
+        #expect(update.cursorCol == 9)
+        #expect(update.lineCount == 500)
+        #expect(update.flags == 0x03)
+        #expect(update.lspStatus == 1)
+        #expect(update.gitBranch == "main")
+        #expect(update.message == "-- INSERT --")
+        #expect(update.filetype == "elixir")
+        #expect(update.errorCount == 3)
+        #expect(update.warningCount == 7)
+        #expect(update.infoCount == 1)
+        #expect(update.hintCount == 2)
+        #expect(update.macroRecording == 0)
+        #expect(update.parserStatus == 1)
+        #expect(update.agentStatus == 0)
+        #expect(update.gitAdded == 5)
+        #expect(update.gitModified == 3)
+        #expect(update.gitDeleted == 1)
+        #expect(update.filename == "editor.ex")
+        #expect(update.indent.kind == 1)
+        #expect(update.indent.size == 4)
+        #expect(update.selection.mode == 2)
+        #expect(update.selection.size == 3)
+        #expect(update.backgroundSubagentCount == 2)
+        #expect(update.backgroundSubagentLabel == "session-2: tests")
+
     }
 
     @Test("Decode gui_status_bar agent variant (sectioned format)")
@@ -518,26 +540,216 @@ struct GUIStatusBarDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiStatusBar(let contentKind, _, let cursorLine, _, let lineCount, _, _, let gitBranch, _, let filetype, let errorCount, _, let modelName, let messageCount, let sessionStatus, _, let hintCount, _, _, let agentStatus, let gitAdded, let gitModified, _, _, _, _, _, let filename, _, let backgroundSubagentCount, let backgroundSubagentLabel) = cmd else {
+        guard case .guiStatusBar(let update) = cmd else {
+
             Issue.record("Expected .guiStatusBar"); return
         }
 
-        #expect(contentKind == 1)
-        #expect(modelName == "claude-3-5-sonnet")
-        #expect(messageCount == 12)
-        #expect(sessionStatus == 1)
-        #expect(cursorLine == 11)
-        #expect(lineCount == 100)
-        #expect(gitBranch == "feat/agent")
-        #expect(filetype == "elixir")
-        #expect(errorCount == 1)
-        #expect(hintCount == 1)
-        #expect(agentStatus == 1)
-        #expect(gitAdded == 3)
-        #expect(gitModified == 2)
-        #expect(filename == "editor.ex")
-        #expect(backgroundSubagentCount == 3)
-        #expect(backgroundSubagentLabel == "session-3: agent tests")
+        #expect(update.contentKind == 1)
+        #expect(update.modelName == "claude-3-5-sonnet")
+        #expect(update.messageCount == 12)
+        #expect(update.sessionStatus == 1)
+        #expect(update.cursorLine == 11)
+        #expect(update.lineCount == 100)
+        #expect(update.gitBranch == "feat/agent")
+        #expect(update.filetype == "elixir")
+        #expect(update.errorCount == 1)
+        #expect(update.hintCount == 1)
+        #expect(update.agentStatus == 1)
+        #expect(update.gitAdded == 3)
+        #expect(update.gitModified == 2)
+        #expect(update.filename == "editor.ex")
+        #expect(update.backgroundSubagentCount == 3)
+        #expect(update.backgroundSubagentLabel == "session-3: agent tests")
+    }
+
+    @Test("Decode configured modeline segments section")
+    func decodeModelineSegmentsSection() throws {
+        var identity = Data()
+        identity.append(0); identity.append(0); identity.append(0)
+
+        var modelineSegments = Data()
+        modelineSegments.append(1) // version
+        appendU16(&modelineSegments, 1) // left count
+        appendU16(&modelineSegments, 1) // right count
+        appendStatusBarSegment(&modelineSegments, text: " NORMAL ", fg: 0xBBC2CF, bg: 0x51AFEF, attrs: 0x01, command: "")
+        appendStatusBarSegment(&modelineSegments, text: " Elixir ", fg: 0xC678DD, bg: 0x282C34, attrs: 0x00, command: "set_language")
+
+        let sections = [
+            buildSection(SECTION_IDENTITY, identity),
+            buildSection(SECTION_MODELINE_SEGMENTS, modelineSegments),
+        ]
+
+        var data = Data()
+        data.append(OP_GUI_STATUS_BAR)
+        data.append(UInt8(sections.count))
+        for s in sections { data.append(s) }
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiStatusBar(let update) = cmd else {
+            Issue.record("Expected .guiStatusBar"); return
+        }
+
+        #expect(update.modelineLeftSegments.count == 1)
+        #expect(update.modelineLeftSegments[0].text == " NORMAL ")
+        #expect(update.modelineLeftSegments[0].fgColor == 0xBBC2CF)
+        #expect(update.modelineLeftSegments[0].bgColor == 0x51AFEF)
+        #expect(update.modelineLeftSegments[0].isBold)
+        #expect(update.modelineRightSegments.count == 1)
+        #expect(update.modelineRightSegments[0].text == " Elixir ")
+        #expect(update.modelineRightSegments[0].command == "set_language")
+    }
+
+    @Test("Unsupported modeline segment section version is ignored")
+    func unsupportedModelineSegmentVersionIsIgnored() throws {
+        var identity = Data()
+        identity.append(0); identity.append(0); identity.append(0)
+
+        var modelineSegments = Data()
+        modelineSegments.append(2) // unsupported version
+        appendU16(&modelineSegments, 1)
+        appendU16(&modelineSegments, 0)
+        appendStatusBarSegment(&modelineSegments, text: " HIDDEN ", fg: 0xBBC2CF, bg: 0x51AFEF, attrs: 0x00, command: "")
+
+        let sections = [
+            buildSection(SECTION_IDENTITY, identity),
+            buildSection(SECTION_MODELINE_SEGMENTS, modelineSegments),
+        ]
+
+        var data = Data()
+        data.append(OP_GUI_STATUS_BAR)
+        data.append(UInt8(sections.count))
+        for s in sections { data.append(s) }
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiStatusBar(let update) = cmd else {
+            Issue.record("Expected .guiStatusBar"); return
+        }
+
+        #expect(update.modelineLeftSegments.isEmpty)
+        #expect(update.modelineRightSegments.isEmpty)
+    }
+
+    @Test("Invalid UTF-8 modeline segment text throws malformed")
+    func invalidUTF8ModelineSegmentTextThrows() throws {
+        var identity = Data()
+        identity.append(0); identity.append(0); identity.append(0)
+
+        var modelineSegments = Data()
+        modelineSegments.append(1)
+        appendU16(&modelineSegments, 1)
+        appendU16(&modelineSegments, 0)
+        appendU24(&modelineSegments, 0xBBC2CF)
+        appendU24(&modelineSegments, 0x51AFEF)
+        modelineSegments.append(0x00)
+        appendU16(&modelineSegments, 1)
+        modelineSegments.append(0xFF)
+        appendU16(&modelineSegments, 0)
+
+        let sections = [
+            buildSection(SECTION_IDENTITY, identity),
+            buildSection(SECTION_MODELINE_SEGMENTS, modelineSegments),
+        ]
+
+        var data = Data()
+        data.append(OP_GUI_STATUS_BAR)
+        data.append(UInt8(sections.count))
+        for s in sections { data.append(s) }
+
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Invalid UTF-8 modeline segment command throws malformed")
+    func invalidUTF8ModelineSegmentCommandThrows() throws {
+        var identity = Data()
+        identity.append(0); identity.append(0); identity.append(0)
+
+        var modelineSegments = Data()
+        modelineSegments.append(1)
+        appendU16(&modelineSegments, 1)
+        appendU16(&modelineSegments, 0)
+        appendU24(&modelineSegments, 0xBBC2CF)
+        appendU24(&modelineSegments, 0x51AFEF)
+        modelineSegments.append(0x00)
+        appendString16(&modelineSegments, " OK ")
+        appendU16(&modelineSegments, 1)
+        modelineSegments.append(0xFF)
+
+        let sections = [
+            buildSection(SECTION_IDENTITY, identity),
+            buildSection(SECTION_MODELINE_SEGMENTS, modelineSegments),
+        ]
+
+        var data = Data()
+        data.append(OP_GUI_STATUS_BAR)
+        data.append(UInt8(sections.count))
+        for s in sections { data.append(s) }
+
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Truncated modeline segment throws malformed")
+    func truncatedModelineSegmentThrows() throws {
+        var identity = Data()
+        identity.append(0); identity.append(0); identity.append(0)
+
+        var modelineSegments = Data()
+        modelineSegments.append(1) // version
+        appendU16(&modelineSegments, 1) // left count
+        appendU16(&modelineSegments, 0) // right count
+        appendU24(&modelineSegments, 0xBBC2CF)
+        appendU24(&modelineSegments, 0x51AFEF)
+        modelineSegments.append(0x00)
+        appendU16(&modelineSegments, 12) // text length, but text is missing
+        modelineSegments.append(contentsOf: Data("short".utf8))
+
+        let sections = [
+            buildSection(SECTION_IDENTITY, identity),
+            buildSection(SECTION_MODELINE_SEGMENTS, modelineSegments),
+        ]
+
+        var data = Data()
+        data.append(OP_GUI_STATUS_BAR)
+        data.append(UInt8(sections.count))
+        for s in sections { data.append(s) }
+
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Modeline segment count mismatch throws malformed")
+    func modelineSegmentCountMismatchThrows() throws {
+        var identity = Data()
+        identity.append(0); identity.append(0); identity.append(0)
+
+        var modelineSegments = Data()
+        modelineSegments.append(1) // version
+        appendU16(&modelineSegments, 2) // left count declares two segments
+        appendU16(&modelineSegments, 0)
+        appendStatusBarSegment(&modelineSegments, text: " ONLY ", fg: 0xBBC2CF, bg: 0x51AFEF, attrs: 0x00, command: "")
+
+        let sections = [
+            buildSection(SECTION_IDENTITY, identity),
+            buildSection(SECTION_MODELINE_SEGMENTS, modelineSegments),
+        ]
+
+        var data = Data()
+        data.append(OP_GUI_STATUS_BAR)
+        data.append(UInt8(sections.count))
+        for s in sections { data.append(s) }
+
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: data, offset: 0)
+        }
     }
 
     @Test("Unknown sections are skipped (forward compatibility)")
@@ -567,13 +779,14 @@ struct GUIStatusBarDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiStatusBar(_, _, let cursorLine, let cursorCol, let lineCount, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = cmd else {
+        guard case .guiStatusBar(let update) = cmd else {
+
             Issue.record("Expected .guiStatusBar"); return
         }
 
-        #expect(cursorLine == 10)
-        #expect(cursorCol == 5)
-        #expect(lineCount == 200)
+        #expect(update.cursorLine == 10)
+        #expect(update.cursorCol == 5)
+        #expect(update.lineCount == 200)
     }
 
     @Test("Missing sections use defaults")
@@ -589,15 +802,16 @@ struct GUIStatusBarDecoderTests {
 
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
 
-        guard case .guiStatusBar(let contentKind, let mode, let cursorLine, _, _, _, _, let gitBranch, _, _, let errorCount, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = cmd else {
+        guard case .guiStatusBar(let update) = cmd else {
+
             Issue.record("Expected .guiStatusBar"); return
         }
 
-        #expect(contentKind == 0)
-        #expect(mode == 2) // visual
-        #expect(cursorLine == 0) // default
-        #expect(gitBranch == "") // default
-        #expect(errorCount == 0) // default
+        #expect(update.contentKind == 0)
+        #expect(update.mode == 2) // visual
+        #expect(update.cursorLine == 0) // default
+        #expect(update.gitBranch == "") // default
+        #expect(update.errorCount == 0) // default
     }
 }
 
@@ -1956,11 +2170,13 @@ struct GUIGitStatusDecoderTests {
         data.append(1) // error level
         data.append(1) // pull_and_retry action
         appendString16(&data, "Push failed: fetch first")
+        appendString16(&data, "/repo")
+        appendString16(&data, "feat: previous commit")
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let entries, let toast) = cmd else {
+        guard case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let entries, let toast, let entryBasePath, let lastCommitMessage) = cmd else {
             Issue.record("Expected .guiGitStatus"); return
         }
 
@@ -1977,6 +2193,8 @@ struct GUIGitStatusDecoderTests {
         #expect(toast?.message == "Push failed: fetch first")
         #expect(toast?.level == 1)
         #expect(toast?.action == 1)
+        #expect(entryBasePath == "/repo")
+        #expect(lastCommitMessage == "feat: previous commit")
     }
 
     @Test("Invalid repo state in gui_git_status throws malformed")

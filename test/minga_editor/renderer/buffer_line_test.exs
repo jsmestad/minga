@@ -140,6 +140,33 @@ defmodule MingaEditor.Renderer.BufferLineTest do
       all_text = Enum.map_join(decoded, "", fn cmd -> cmd.text end)
       assert all_text == "fn hello do"
     end
+
+    test "renders indent guides over leading whitespace" do
+      ctx =
+        make_ctx(%{
+          gutter_w: 4,
+          content_w: 20,
+          tab_width: 2,
+          indent_guide_face: Minga.Core.Face.new(fg: 0x111111),
+          indent_guide_active_face: Minga.Core.Face.new(fg: 0x222222)
+        })
+
+      {_g, content, 1} =
+        BufferLine.render(
+          make_params(%{
+            line_text: "      value",
+            ctx: ctx,
+            indent_guide_cols: [%{col: 2, active: false}, %{col: 4, active: true}]
+          })
+        )
+
+      decoded = decode_all(content)
+      inactive = Enum.find(decoded, fn cmd -> cmd.text == "│" and cmd.col == 6 end)
+      active = Enum.find(decoded, fn cmd -> cmd.text == "│" and cmd.col == 8 end)
+
+      assert inactive.fg == 0x111111
+      assert active.fg == 0x222222
+    end
   end
 
   # ── Wrapped rendering ──────────────────────────────────────────────────

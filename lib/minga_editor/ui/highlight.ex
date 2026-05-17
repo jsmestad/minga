@@ -215,6 +215,48 @@ defmodule MingaEditor.UI.Highlight do
     Enum.reverse(results_rev)
   end
 
+  @doc "Returns true when this highlight state has at least one tree-sitter span."
+  @spec has_spans?(t()) :: boolean()
+  def has_spans?(%__MODULE__{spans: spans}) when is_tuple(spans), do: tuple_size(spans) > 0
+  def has_spans?(%__MODULE__{spans: spans}) when is_list(spans), do: spans != []
+
+  @doc "Returns byte ranges within a line that are covered by comment captures."
+  @spec comment_ranges_for_line(t(), String.t(), non_neg_integer()) :: [
+          {non_neg_integer(), non_neg_integer()}
+        ]
+  def comment_ranges_for_line(%__MODULE__{spans: spans} = hl, line_text, line_start_byte)
+      when is_tuple(spans) and is_binary(line_text) and is_integer(line_start_byte) and
+             line_start_byte >= 0 do
+    line_end_byte = line_start_byte + byte_size(line_text)
+    span_count = tuple_size(spans)
+
+    spans
+    |> collect_overlapping(span_count, 0, line_start_byte, line_end_byte, [])
+    |> Enum.filter(&comment_span?(hl, &1))
+    |> Enum.map(&span_line_range(&1, line_start_byte, line_end_byte))
+    |> Enum.reject(fn {start_byte, end_byte} -> end_byte <= start_byte end)
+  end
+
+  def comment_ranges_for_line(%__MODULE__{spans: spans} = hl, line_text, line_start_byte)
+      when is_list(spans) do
+    comment_ranges_for_line(%{hl | spans: List.to_tuple(spans)}, line_text, line_start_byte)
+  end
+
+  @spec comment_span?(t(), map()) :: boolean()
+  defp comment_span?(hl, span) do
+    case capture_name_at(hl, span.capture_id) do
+      "comment" <> _rest -> true
+      _ -> false
+    end
+  end
+
+  @spec span_line_range(map(), non_neg_integer(), non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp span_line_range(span, line_start_byte, line_end_byte) do
+    {max(span.start_byte, line_start_byte) - line_start_byte,
+     min(span.end_byte, line_end_byte) - line_start_byte}
+  end
+
   # ── Private: batch rendering ─────────────────────────────────────────
 
   @spec batch_lines(

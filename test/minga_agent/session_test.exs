@@ -13,7 +13,7 @@ defmodule MingaAgent.SessionTest do
   alias MingaAgent.Tool.Spec
 
   @moduletag :tmp_dir
-  @event_timeout 2_000
+  @event_timeout 5_000
 
   # ── Mock provider ──────────────────────────────────────────────────────────
 

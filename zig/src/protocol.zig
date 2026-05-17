@@ -20,85 +20,171 @@
 /// is NOT included in encode/decode here.
 const std = @import("std");
 
-// ── Opcodes ──
+// --- BEGIN GENERATED (mix protocol.gen) ---
+const opcodes = @import("protocol_opcodes.zig");
+// Generated from docs/protocol_schema.toml. Do not edit by hand.
 
-pub const OP_KEY_PRESS: u8 = 0x01;
-pub const OP_RESIZE: u8 = 0x02;
-pub const OP_READY: u8 = 0x03;
-pub const OP_MOUSE_EVENT: u8 = 0x04;
-pub const OP_CAPABILITIES_UPDATED: u8 = 0x05;
-pub const OP_PASTE_EVENT: u8 = 0x06;
-pub const OP_DRAW_TEXT: u8 = 0x10;
-pub const OP_SET_CURSOR: u8 = 0x11;
-pub const OP_CLEAR: u8 = 0x12;
-pub const OP_BATCH_END: u8 = 0x13;
-pub const OP_DEFINE_REGION: u8 = 0x14;
-pub const OP_SET_CURSOR_SHAPE: u8 = 0x15;
-pub const OP_SET_TITLE: u8 = 0x16;
-pub const OP_SET_WINDOW_BG: u8 = 0x17;
-pub const OP_CLEAR_REGION: u8 = 0x18;
-pub const OP_DESTROY_REGION: u8 = 0x19;
-pub const OP_SET_ACTIVE_REGION: u8 = 0x1A;
-pub const OP_SCROLL_REGION: u8 = 0x1B;
-pub const OP_DRAW_STYLED_TEXT: u8 = 0x1C;
+pub const OP_KEY_PRESS = opcodes.OP_KEY_PRESS;
+pub const OP_RESIZE = opcodes.OP_RESIZE;
+pub const OP_READY = opcodes.OP_READY;
+pub const OP_MOUSE_EVENT = opcodes.OP_MOUSE_EVENT;
+pub const OP_CAPABILITIES_UPDATED = opcodes.OP_CAPABILITIES_UPDATED;
+pub const OP_PASTE_EVENT = opcodes.OP_PASTE_EVENT;
+pub const OP_GUI_ACTION = opcodes.OP_GUI_ACTION;
+pub const OP_LOG_MESSAGE = opcodes.OP_LOG_MESSAGE;
+pub const OP_DRAW_TEXT = opcodes.OP_DRAW_TEXT;
+pub const OP_SET_CURSOR = opcodes.OP_SET_CURSOR;
+pub const OP_CLEAR = opcodes.OP_CLEAR;
+pub const OP_BATCH_END = opcodes.OP_BATCH_END;
+pub const OP_DEFINE_REGION = opcodes.OP_DEFINE_REGION;
+pub const OP_SET_CURSOR_SHAPE = opcodes.OP_SET_CURSOR_SHAPE;
+pub const OP_SET_TITLE = opcodes.OP_SET_TITLE;
+pub const OP_SET_WINDOW_BG = opcodes.OP_SET_WINDOW_BG;
+pub const OP_CLEAR_REGION = opcodes.OP_CLEAR_REGION;
+pub const OP_DESTROY_REGION = opcodes.OP_DESTROY_REGION;
+pub const OP_SET_ACTIVE_REGION = opcodes.OP_SET_ACTIVE_REGION;
+pub const OP_SCROLL_REGION = opcodes.OP_SCROLL_REGION;
+pub const OP_DRAW_STYLED_TEXT = opcodes.OP_DRAW_STYLED_TEXT;
+pub const OP_SET_FONT = opcodes.OP_SET_FONT;
+pub const OP_SET_FONT_FALLBACK = opcodes.OP_SET_FONT_FALLBACK;
+pub const OP_REGISTER_FONT = opcodes.OP_REGISTER_FONT;
+pub const OP_SET_LANGUAGE = opcodes.OP_SET_LANGUAGE;
+pub const OP_PARSE_BUFFER = opcodes.OP_PARSE_BUFFER;
+pub const OP_SET_HIGHLIGHT_QUERY = opcodes.OP_SET_HIGHLIGHT_QUERY;
+pub const OP_LOAD_GRAMMAR = opcodes.OP_LOAD_GRAMMAR;
+pub const OP_SET_INJECTION_QUERY = opcodes.OP_SET_INJECTION_QUERY;
+pub const OP_QUERY_LANGUAGE_AT = opcodes.OP_QUERY_LANGUAGE_AT;
+pub const OP_EDIT_BUFFER = opcodes.OP_EDIT_BUFFER;
+pub const OP_MEASURE_TEXT = opcodes.OP_MEASURE_TEXT;
+pub const OP_SET_FOLD_QUERY = opcodes.OP_SET_FOLD_QUERY;
+pub const OP_SET_INDENT_QUERY = opcodes.OP_SET_INDENT_QUERY;
+pub const OP_REQUEST_INDENT = opcodes.OP_REQUEST_INDENT;
+pub const OP_SET_TEXTOBJECT_QUERY = opcodes.OP_SET_TEXTOBJECT_QUERY;
+pub const OP_REQUEST_TEXTOBJECT = opcodes.OP_REQUEST_TEXTOBJECT;
+pub const OP_CLOSE_BUFFER = opcodes.OP_CLOSE_BUFFER;
+pub const OP_REQUEST_MATCH_ITEM = opcodes.OP_REQUEST_MATCH_ITEM;
+pub const OP_REQUEST_STRUCTURAL_NAV = opcodes.OP_REQUEST_STRUCTURAL_NAV;
+pub const OP_SET_TAGS_QUERY = opcodes.OP_SET_TAGS_QUERY;
+pub const OP_HIGHLIGHT_SPANS = opcodes.OP_HIGHLIGHT_SPANS;
+pub const OP_HIGHLIGHT_NAMES = opcodes.OP_HIGHLIGHT_NAMES;
+pub const OP_GRAMMAR_LOADED = opcodes.OP_GRAMMAR_LOADED;
+pub const OP_LANGUAGE_AT_RESPONSE = opcodes.OP_LANGUAGE_AT_RESPONSE;
+pub const OP_INJECTION_RANGES = opcodes.OP_INJECTION_RANGES;
+pub const OP_TEXT_WIDTH = opcodes.OP_TEXT_WIDTH;
+pub const OP_FOLD_RANGES = opcodes.OP_FOLD_RANGES;
+pub const OP_INDENT_RESULT = opcodes.OP_INDENT_RESULT;
+pub const OP_TEXTOBJECT_RESULT = opcodes.OP_TEXTOBJECT_RESULT;
+pub const OP_TEXTOBJECT_POSITIONS = opcodes.OP_TEXTOBJECT_POSITIONS;
+pub const OP_CONCEAL_SPANS = opcodes.OP_CONCEAL_SPANS;
+pub const OP_REQUEST_REPARSE = opcodes.OP_REQUEST_REPARSE;
+pub const OP_MATCH_ITEM_RESULT = opcodes.OP_MATCH_ITEM_RESULT;
+pub const OP_NODE_INFO = opcodes.OP_NODE_INFO;
+pub const OP_DOCUMENT_SYMBOLS = opcodes.OP_DOCUMENT_SYMBOLS;
+pub const OP_GUI_TAB_BAR = opcodes.OP_GUI_TAB_BAR;
+pub const OP_GUI_WHICH_KEY = opcodes.OP_GUI_WHICH_KEY;
+pub const OP_GUI_COMPLETION = opcodes.OP_GUI_COMPLETION;
+pub const OP_GUI_THEME = opcodes.OP_GUI_THEME;
+pub const OP_GUI_BREADCRUMB = opcodes.OP_GUI_BREADCRUMB;
+pub const OP_GUI_STATUS_BAR = opcodes.OP_GUI_STATUS_BAR;
+pub const OP_GUI_PICKER = opcodes.OP_GUI_PICKER;
+pub const OP_GUI_AGENT_CHAT = opcodes.OP_GUI_AGENT_CHAT;
+pub const OP_GUI_GUTTER_SEP = opcodes.OP_GUI_GUTTER_SEP;
+pub const OP_GUI_CURSORLINE = opcodes.OP_GUI_CURSORLINE;
+pub const OP_GUI_GUTTER = opcodes.OP_GUI_GUTTER;
+pub const OP_GUI_BOTTOM_PANEL = opcodes.OP_GUI_BOTTOM_PANEL;
+pub const OP_GUI_PICKER_PREVIEW = opcodes.OP_GUI_PICKER_PREVIEW;
+pub const OP_GUI_TOOL_MANAGER = opcodes.OP_GUI_TOOL_MANAGER;
+pub const OP_GUI_MINIBUFFER = opcodes.OP_GUI_MINIBUFFER;
+pub const OP_CLIPBOARD_WRITE = opcodes.OP_CLIPBOARD_WRITE;
+pub const OP_GUI_INDENT_GUIDES = opcodes.OP_GUI_INDENT_GUIDES;
+pub const OP_GUI_LINE_SPACING = opcodes.OP_GUI_LINE_SPACING;
+pub const OP_GUI_FILE_TREE = opcodes.OP_GUI_FILE_TREE;
+pub const OP_GUI_FILE_TREE_SELECTION = opcodes.OP_GUI_FILE_TREE_SELECTION;
+pub const OP_GUI_CURSOR_ANIMATION = opcodes.OP_GUI_CURSOR_ANIMATION;
+pub const OP_GUI_WINDOW_CONTENT = opcodes.OP_GUI_WINDOW_CONTENT;
+pub const OP_GUI_HOVER_POPUP = opcodes.OP_GUI_HOVER_POPUP;
+pub const OP_GUI_SIGNATURE_HELP = opcodes.OP_GUI_SIGNATURE_HELP;
+pub const OP_GUI_FLOAT_POPUP = opcodes.OP_GUI_FLOAT_POPUP;
+pub const OP_GUI_SPLIT_SEPARATORS = opcodes.OP_GUI_SPLIT_SEPARATORS;
+pub const OP_GUI_GIT_STATUS = opcodes.OP_GUI_GIT_STATUS;
+pub const OP_GUI_AGENT_GROUPS = opcodes.OP_GUI_AGENT_GROUPS;
+pub const OP_GUI_BOARD = opcodes.OP_GUI_BOARD;
+pub const OP_GUI_AGENT_CONTEXT = opcodes.OP_GUI_AGENT_CONTEXT;
+pub const OP_GUI_CHANGE_SUMMARY = opcodes.OP_GUI_CHANGE_SUMMARY;
+pub const OP_GUI_HOVER_ACTION = opcodes.OP_GUI_HOVER_ACTION;
+pub const OP_GUI_CONFIG_STATE = opcodes.OP_GUI_CONFIG_STATE;
 
-// Config commands (BEAM → frontend, TUI ignores)
-pub const OP_SET_FONT: u8 = 0x50;
-pub const OP_SET_FONT_FALLBACK: u8 = 0x51;
-pub const OP_REGISTER_FONT: u8 = 0x52;
+pub const GUI_ACTION_SELECT_TAB = opcodes.GUI_ACTION_SELECT_TAB;
+pub const GUI_ACTION_CLOSE_TAB = opcodes.GUI_ACTION_CLOSE_TAB;
+pub const GUI_ACTION_FILE_TREE_CLICK = opcodes.GUI_ACTION_FILE_TREE_CLICK;
+pub const GUI_ACTION_FILE_TREE_TOGGLE = opcodes.GUI_ACTION_FILE_TREE_TOGGLE;
+pub const GUI_ACTION_COMPLETION_SELECT = opcodes.GUI_ACTION_COMPLETION_SELECT;
+pub const GUI_ACTION_BREADCRUMB_CLICK = opcodes.GUI_ACTION_BREADCRUMB_CLICK;
+pub const GUI_ACTION_TOGGLE_PANEL = opcodes.GUI_ACTION_TOGGLE_PANEL;
+pub const GUI_ACTION_NEW_TAB = opcodes.GUI_ACTION_NEW_TAB;
+pub const GUI_ACTION_PANEL_SWITCH_TAB = opcodes.GUI_ACTION_PANEL_SWITCH_TAB;
+pub const GUI_ACTION_PANEL_DISMISS = opcodes.GUI_ACTION_PANEL_DISMISS;
+pub const GUI_ACTION_PANEL_RESIZE = opcodes.GUI_ACTION_PANEL_RESIZE;
+pub const GUI_ACTION_OPEN_FILE = opcodes.GUI_ACTION_OPEN_FILE;
+pub const GUI_ACTION_FILE_TREE_NEW_FILE = opcodes.GUI_ACTION_FILE_TREE_NEW_FILE;
+pub const GUI_ACTION_FILE_TREE_NEW_FOLDER = opcodes.GUI_ACTION_FILE_TREE_NEW_FOLDER;
+pub const GUI_ACTION_FILE_TREE_COLLAPSE_ALL = opcodes.GUI_ACTION_FILE_TREE_COLLAPSE_ALL;
+pub const GUI_ACTION_FILE_TREE_REFRESH = opcodes.GUI_ACTION_FILE_TREE_REFRESH;
+pub const GUI_ACTION_TOOL_INSTALL = opcodes.GUI_ACTION_TOOL_INSTALL;
+pub const GUI_ACTION_TOOL_UNINSTALL = opcodes.GUI_ACTION_TOOL_UNINSTALL;
+pub const GUI_ACTION_TOOL_UPDATE = opcodes.GUI_ACTION_TOOL_UPDATE;
+pub const GUI_ACTION_TOOL_DISMISS = opcodes.GUI_ACTION_TOOL_DISMISS;
+pub const GUI_ACTION_AGENT_TOOL_TOGGLE = opcodes.GUI_ACTION_AGENT_TOOL_TOGGLE;
+pub const GUI_ACTION_EXECUTE_COMMAND = opcodes.GUI_ACTION_EXECUTE_COMMAND;
+pub const GUI_ACTION_MINIBUFFER_SELECT = opcodes.GUI_ACTION_MINIBUFFER_SELECT;
+pub const GUI_ACTION_GIT_STAGE_FILE = opcodes.GUI_ACTION_GIT_STAGE_FILE;
+pub const GUI_ACTION_GIT_UNSTAGE_FILE = opcodes.GUI_ACTION_GIT_UNSTAGE_FILE;
+pub const GUI_ACTION_GIT_DISCARD_FILE = opcodes.GUI_ACTION_GIT_DISCARD_FILE;
+pub const GUI_ACTION_GIT_STAGE_ALL = opcodes.GUI_ACTION_GIT_STAGE_ALL;
+pub const GUI_ACTION_GIT_UNSTAGE_ALL = opcodes.GUI_ACTION_GIT_UNSTAGE_ALL;
+pub const GUI_ACTION_GIT_COMMIT = opcodes.GUI_ACTION_GIT_COMMIT;
+pub const GUI_ACTION_GIT_OPEN_FILE = opcodes.GUI_ACTION_GIT_OPEN_FILE;
+pub const GUI_ACTION_AGENT_GROUP_RENAME = opcodes.GUI_ACTION_AGENT_GROUP_RENAME;
+pub const GUI_ACTION_AGENT_GROUP_SET_ICON = opcodes.GUI_ACTION_AGENT_GROUP_SET_ICON;
+pub const GUI_ACTION_AGENT_GROUP_CLOSE = opcodes.GUI_ACTION_AGENT_GROUP_CLOSE;
+pub const GUI_ACTION_SPACE_LEADER_CHORD = opcodes.GUI_ACTION_SPACE_LEADER_CHORD;
+pub const GUI_ACTION_SPACE_LEADER_RETRACT = opcodes.GUI_ACTION_SPACE_LEADER_RETRACT;
+pub const GUI_ACTION_FIND_PASTEBOARD_SEARCH = opcodes.GUI_ACTION_FIND_PASTEBOARD_SEARCH;
+pub const GUI_ACTION_BOARD_SELECT_CARD = opcodes.GUI_ACTION_BOARD_SELECT_CARD;
+pub const GUI_ACTION_BOARD_CLOSE_CARD = opcodes.GUI_ACTION_BOARD_CLOSE_CARD;
+pub const GUI_ACTION_BOARD_REORDER = opcodes.GUI_ACTION_BOARD_REORDER;
+pub const GUI_ACTION_BOARD_DISPATCH_AGENT = opcodes.GUI_ACTION_BOARD_DISPATCH_AGENT;
+pub const GUI_ACTION_AGENT_APPROVE = opcodes.GUI_ACTION_AGENT_APPROVE;
+pub const GUI_ACTION_AGENT_REQUEST_CHANGES = opcodes.GUI_ACTION_AGENT_REQUEST_CHANGES;
+pub const GUI_ACTION_AGENT_DISMISS = opcodes.GUI_ACTION_AGENT_DISMISS;
+pub const GUI_ACTION_CHANGE_SUMMARY_CLICK = opcodes.GUI_ACTION_CHANGE_SUMMARY_CLICK;
+pub const GUI_ACTION_FILE_TREE_EDIT_CONFIRM = opcodes.GUI_ACTION_FILE_TREE_EDIT_CONFIRM;
+pub const GUI_ACTION_FILE_TREE_EDIT_CANCEL = opcodes.GUI_ACTION_FILE_TREE_EDIT_CANCEL;
+pub const GUI_ACTION_SCROLL_TO_LINE = opcodes.GUI_ACTION_SCROLL_TO_LINE;
+pub const GUI_ACTION_FILE_TREE_DELETE = opcodes.GUI_ACTION_FILE_TREE_DELETE;
+pub const GUI_ACTION_FILE_TREE_RENAME = opcodes.GUI_ACTION_FILE_TREE_RENAME;
+pub const GUI_ACTION_FILE_TREE_DUPLICATE = opcodes.GUI_ACTION_FILE_TREE_DUPLICATE;
+pub const GUI_ACTION_FILE_TREE_MOVE = opcodes.GUI_ACTION_FILE_TREE_MOVE;
+pub const GUI_ACTION_SYSTEM_WILL_SLEEP = opcodes.GUI_ACTION_SYSTEM_WILL_SLEEP;
+pub const GUI_ACTION_SYSTEM_DID_WAKE = opcodes.GUI_ACTION_SYSTEM_DID_WAKE;
+pub const GUI_ACTION_CMD_COPY = opcodes.GUI_ACTION_CMD_COPY;
+pub const GUI_ACTION_CMD_CUT = opcodes.GUI_ACTION_CMD_CUT;
+pub const GUI_ACTION_GIT_PUSH = opcodes.GUI_ACTION_GIT_PUSH;
+pub const GUI_ACTION_GIT_PULL = opcodes.GUI_ACTION_GIT_PULL;
+pub const GUI_ACTION_GIT_FETCH = opcodes.GUI_ACTION_GIT_FETCH;
+pub const GUI_ACTION_GIT_COMMIT_AMEND = opcodes.GUI_ACTION_GIT_COMMIT_AMEND;
+pub const GUI_ACTION_GIT_PULL_AND_RETRY = opcodes.GUI_ACTION_GIT_PULL_AND_RETRY;
+pub const GUI_ACTION_FILE_TREE_OPEN_IN_SPLIT = opcodes.GUI_ACTION_FILE_TREE_OPEN_IN_SPLIT;
+pub const GUI_ACTION_TAB_COPY_PATH = opcodes.GUI_ACTION_TAB_COPY_PATH;
+pub const GUI_ACTION_HOVER_OPEN_ACTION = opcodes.GUI_ACTION_HOVER_OPEN_ACTION;
+pub const GUI_ACTION_FILE_TREE_DROP = opcodes.GUI_ACTION_FILE_TREE_DROP;
+pub const GUI_ACTION_FOLD_TOGGLE_AT_LINE = opcodes.GUI_ACTION_FOLD_TOGGLE_AT_LINE;
+pub const GUI_ACTION_GIT_OPEN_DIFF = opcodes.GUI_ACTION_GIT_OPEN_DIFF;
+pub const GUI_ACTION_CONFIG_UPDATE = opcodes.GUI_ACTION_CONFIG_UPDATE;
+pub const GUI_ACTION_CONFIG_QUERY = opcodes.GUI_ACTION_CONFIG_QUERY;
+// --- END GENERATED ---
 
-// Incremental content sync (BEAM → Zig)
-pub const OP_EDIT_BUFFER: u8 = 0x26;
-
-// Text measurement (BEAM → Zig)
-pub const OP_MEASURE_TEXT: u8 = 0x27;
-
-// Highlight commands (BEAM → Zig)
-pub const OP_SET_LANGUAGE: u8 = 0x20;
-pub const OP_PARSE_BUFFER: u8 = 0x21;
-pub const OP_SET_HIGHLIGHT_QUERY: u8 = 0x22;
-pub const OP_LOAD_GRAMMAR: u8 = 0x23;
-pub const OP_SET_INJECTION_QUERY: u8 = 0x24;
-pub const OP_QUERY_LANGUAGE_AT: u8 = 0x25;
-pub const OP_SET_FOLD_QUERY: u8 = 0x28;
-pub const OP_SET_INDENT_QUERY: u8 = 0x29;
-pub const OP_REQUEST_INDENT: u8 = 0x2A;
-pub const OP_SET_TEXTOBJECT_QUERY: u8 = 0x2B;
-pub const OP_REQUEST_TEXTOBJECT: u8 = 0x2C;
-pub const OP_CLOSE_BUFFER: u8 = 0x2D;
-pub const OP_REQUEST_MATCH_ITEM: u8 = 0x2E;
-
-// Highlight responses (Zig → BEAM)
-pub const OP_HIGHLIGHT_SPANS: u8 = 0x30;
-pub const OP_HIGHLIGHT_NAMES: u8 = 0x31;
-pub const OP_GRAMMAR_LOADED: u8 = 0x32;
-pub const OP_LANGUAGE_AT_RESPONSE: u8 = 0x33;
-pub const OP_INJECTION_RANGES: u8 = 0x34;
-
-// Text measurement responses (Zig → BEAM)
-pub const OP_TEXT_WIDTH: u8 = 0x35;
-
-// Fold responses (Zig → BEAM)
-pub const OP_FOLD_RANGES: u8 = 0x36;
-
-// Indent responses (Zig → BEAM)
-pub const OP_INDENT_RESULT: u8 = 0x37;
-
-// Textobject responses (Zig → BEAM)
-pub const OP_TEXTOBJECT_RESULT: u8 = 0x38;
-pub const OP_TEXTOBJECT_POSITIONS: u8 = 0x39;
-pub const OP_CONCEAL_SPANS: u8 = 0x3A;
-
-/// Requests that the BEAM send a full parse_buffer for this buffer_id.
-/// Sent when the parser detects stale edit deltas (byte offsets don't match
-/// the stored source), typically after system sleep/wake.
-pub const OP_REQUEST_REPARSE: u8 = 0x3B;
-pub const OP_MATCH_ITEM_RESULT: u8 = 0x3C;
-
-// Log messages (Zig → BEAM)
-pub const OP_LOG_MESSAGE: u8 = 0x60;
-
-// Log levels
+// Log levels// Log levels
 pub const LOG_LEVEL_ERR: u8 = 0;
 pub const LOG_LEVEL_WARN: u8 = 1;
 pub const LOG_LEVEL_INFO: u8 = 2;
@@ -192,6 +278,22 @@ pub const InjectionRange = struct {
     language: []const u8,
 };
 
+/// A tree-sitter document symbol extracted from a tags.scm @definition capture.
+pub const DocumentSymbol = struct {
+    kind: u8,
+    name: []const u8,
+    start_row: u32,
+    start_col: u32,
+    end_row: u32,
+    end_col: u32,
+};
+
+pub const SYMBOL_FUNCTION: u8 = 0;
+pub const SYMBOL_MODULE: u8 = 1;
+pub const SYMBOL_METHOD: u8 = 2;
+pub const SYMBOL_INTERFACE: u8 = 3;
+pub const SYMBOL_TEST: u8 = 4;
+
 /// A layout region defines a rectangular area on screen.
 pub const Region = struct {
     id: u16,
@@ -269,6 +371,8 @@ pub const RenderCommand = union(enum) {
     set_textobject_query: SetTextobjectQuery,
     request_textobject: RequestTextobject,
     request_match_item: RequestMatchItem,
+    request_structural_nav: RequestStructuralNav,
+    set_tags_query: SetTagsQuery,
     load_grammar: LoadGrammar,
     query_language_at: QueryLanguageAt,
     close_buffer: u32, // buffer_id
@@ -342,6 +446,11 @@ pub const SetTextobjectQuery = struct {
     source: []const u8,
 };
 
+pub const SetTagsQuery = struct {
+    buffer_id: u32 = 0,
+    source: []const u8,
+};
+
 pub const RequestIndent = struct {
     buffer_id: u32 = 0,
     request_id: u32,
@@ -361,6 +470,21 @@ pub const RequestMatchItem = struct {
     request_id: u32,
     row: u32,
     col: u32,
+};
+
+pub const StructuralNavAction = enum(u8) {
+    parent = 0,
+    first_child = 1,
+    next_sibling = 2,
+    prev_sibling = 3,
+};
+
+pub const RequestStructuralNav = struct {
+    buffer_id: u32 = 0,
+    request_id: u32,
+    row: u32,
+    col: u32,
+    action: StructuralNavAction,
 };
 
 pub const LoadGrammar = struct {
@@ -606,6 +730,39 @@ pub fn encodeHighlightNames(allocator: std.mem.Allocator, buffer_id: u32, names:
     return buf;
 }
 
+/// Encodes document_symbols: opcode(1) + buffer_id(4) + version(4) + count(4) + entries.
+/// Each entry: kind(1) + name_len(2) + name + start_row(4) + start_col(4) + end_row(4) + end_col(4).
+pub fn encodeDocumentSymbols(allocator: std.mem.Allocator, buffer_id: u32, version: u32, symbols: []const DocumentSymbol) ![]u8 {
+    const header_size = 1 + 4 + 4 + 4;
+    var total: usize = header_size;
+    for (symbols) |symbol| {
+        total += 1 + 2 + @min(symbol.name.len, std.math.maxInt(u16)) + 4 + 4 + 4 + 4;
+    }
+
+    const buf = try allocator.alloc(u8, total);
+    buf[0] = OP_DOCUMENT_SYMBOLS;
+    std.mem.writeInt(u32, buf[1..5], buffer_id, .big);
+    std.mem.writeInt(u32, buf[5..9], version, .big);
+    std.mem.writeInt(u32, buf[9..13], @intCast(symbols.len), .big);
+
+    var off: usize = header_size;
+    for (symbols) |symbol| {
+        const name_len: u16 = @intCast(@min(symbol.name.len, std.math.maxInt(u16)));
+        const name_len_usize: usize = @intCast(name_len);
+        buf[off] = symbol.kind;
+        std.mem.writeInt(u16, buf[off + 1 ..][0..2], name_len, .big);
+        @memcpy(buf[off + 3 .. off + 3 + name_len_usize], symbol.name[0..name_len_usize]);
+        off += 3 + name_len_usize;
+        std.mem.writeInt(u32, buf[off..][0..4], symbol.start_row, .big);
+        std.mem.writeInt(u32, buf[off + 4 ..][0..4], symbol.start_col, .big);
+        std.mem.writeInt(u32, buf[off + 8 ..][0..4], symbol.end_row, .big);
+        std.mem.writeInt(u32, buf[off + 12 ..][0..4], symbol.end_col, .big);
+        off += 16;
+    }
+
+    return buf;
+}
+
 /// Encodes grammar_loaded: opcode(1) + success:u8 + name_len:2 + name
 pub fn encodeGrammarLoaded(buf: []u8, success: bool, name: []const u8) !usize {
     const total = 4 + name.len;
@@ -838,6 +995,28 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
                 .col = std.mem.readInt(u32, rest[12..16], .big),
             } };
         },
+        OP_REQUEST_STRUCTURAL_NAV => {
+            // buffer_id:4, request_id:4, row:4, col:4, action:1
+            if (rest.len < 17) return error.Malformed;
+            return .{ .request_structural_nav = .{
+                .buffer_id = std.mem.readInt(u32, rest[0..4], .big),
+                .request_id = std.mem.readInt(u32, rest[4..8], .big),
+                .row = std.mem.readInt(u32, rest[8..12], .big),
+                .col = std.mem.readInt(u32, rest[12..16], .big),
+                .action = try decodeStructuralNavAction(rest[16]),
+            } };
+        },
+        OP_SET_TAGS_QUERY => {
+            // buffer_id:4, query_len:4, query
+            if (rest.len < 8) return error.Malformed;
+            const buffer_id = std.mem.readInt(u32, rest[0..4], .big);
+            const query_len = std.mem.readInt(u32, rest[4..8], .big);
+            if (rest.len < 8 + query_len) return error.Malformed;
+            return .{ .set_tags_query = .{
+                .buffer_id = buffer_id,
+                .source = rest[8 .. 8 + query_len],
+            } };
+        },
         OP_LOAD_GRAMMAR => {
             // name_len:2, name, path_len:2, path
             if (rest.len < 2) return error.Malformed;
@@ -957,6 +1136,16 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
     }
 }
 
+fn decodeStructuralNavAction(action: u8) !StructuralNavAction {
+    return switch (action) {
+        0 => .parent,
+        1 => .first_child,
+        2 => .next_sibling,
+        3 => .prev_sibling,
+        else => error.Malformed,
+    };
+}
+
 /// Returns the byte size of the first command in `payload`.
 ///
 /// Used when iterating a batch message containing multiple concatenated
@@ -994,7 +1183,7 @@ pub fn commandSize(payload: []const u8) usize {
             const source_len: usize = std.mem.readInt(u32, payload[9..13], .big);
             break :blk 13 + source_len;
         },
-        OP_SET_HIGHLIGHT_QUERY, OP_SET_INJECTION_QUERY, OP_SET_FOLD_QUERY, OP_SET_INDENT_QUERY, OP_SET_TEXTOBJECT_QUERY => blk: {
+        OP_SET_HIGHLIGHT_QUERY, OP_SET_INJECTION_QUERY, OP_SET_FOLD_QUERY, OP_SET_INDENT_QUERY, OP_SET_TEXTOBJECT_QUERY, OP_SET_TAGS_QUERY => blk: {
             // opcode(1) + buffer_id(4) + query_len(4) + query
             if (payload.len < 9) break :blk payload.len;
             const query_len: usize = std.mem.readInt(u32, payload[5..9], .big);
@@ -1022,6 +1211,7 @@ pub fn commandSize(payload: []const u8) usize {
             break :blk 19 + nl;
         },
         OP_REQUEST_MATCH_ITEM => 17, // opcode(1) + buffer_id(4) + request_id(4) + row(4) + col(4)
+        OP_REQUEST_STRUCTURAL_NAV => 18, // opcode(1) + buffer_id(4) + request_id(4) + row(4) + col(4) + action(1)
         OP_CLOSE_BUFFER => 5, // opcode(1) + buffer_id(4)
         OP_EDIT_BUFFER => blk: {
             // opcode(1) + buffer_id(4) + version(4) + edit_count(2) + variable per edit
@@ -1229,6 +1419,35 @@ pub fn encodeMatchItemResult(buf: *[14]u8, request_id: u32, result: ?MatchItemRe
         std.mem.writeInt(u32, buf[6..10], r.row, .big);
         std.mem.writeInt(u32, buf[10..14], r.col, .big);
         return 14;
+    } else {
+        buf[5] = 0;
+        return 6;
+    }
+}
+
+/// Structural navigation result (shared between protocol and highlighter).
+pub const StructuralNavResult = struct {
+    start_row: u32,
+    start_col: u32,
+    end_row: u32,
+    end_col: u32,
+    type_name: []const u8,
+};
+
+/// Encodes node_info: opcode(1) + request_id(4) + found(1) + start_row(4) + start_col(4) + end_row(4) + end_col(4) + type_len(2) + type
+pub fn encodeNodeInfo(buf: *[280]u8, request_id: u32, result: ?StructuralNavResult) usize {
+    buf[0] = OP_NODE_INFO;
+    std.mem.writeInt(u32, buf[1..5], request_id, .big);
+    if (result) |r| {
+        const type_len = @min(r.type_name.len, 255);
+        buf[5] = 1;
+        std.mem.writeInt(u32, buf[6..10], r.start_row, .big);
+        std.mem.writeInt(u32, buf[10..14], r.start_col, .big);
+        std.mem.writeInt(u32, buf[14..18], r.end_row, .big);
+        std.mem.writeInt(u32, buf[18..22], r.end_col, .big);
+        std.mem.writeInt(u16, buf[22..24], @intCast(type_len), .big);
+        @memcpy(buf[24 .. 24 + type_len], r.type_name[0..type_len]);
+        return 24 + type_len;
     } else {
         buf[5] = 0;
         return 6;
@@ -2106,6 +2325,68 @@ test "encode match_item_result" {
     try std.testing.expectEqual(@as(u8, 0), empty_buf[5]);
 }
 
+test "decode request_structural_nav" {
+    var data: [18]u8 = undefined;
+    data[0] = OP_REQUEST_STRUCTURAL_NAV;
+    std.mem.writeInt(u32, data[1..5], 7, .big);
+    std.mem.writeInt(u32, data[5..9], 42, .big);
+    std.mem.writeInt(u32, data[9..13], 3, .big);
+    std.mem.writeInt(u32, data[13..17], 11, .big);
+    data[17] = 2;
+
+    const cmd = try decodeCommand(&data);
+    switch (cmd) {
+        .request_structural_nav => |req| {
+            try std.testing.expectEqual(@as(u32, 7), req.buffer_id);
+            try std.testing.expectEqual(@as(u32, 42), req.request_id);
+            try std.testing.expectEqual(@as(u32, 3), req.row);
+            try std.testing.expectEqual(@as(u32, 11), req.col);
+            try std.testing.expectEqual(StructuralNavAction.next_sibling, req.action);
+        },
+        else => return error.Malformed,
+    }
+}
+
+test "decode request_structural_nav rejects invalid actions" {
+    var data: [18]u8 = undefined;
+    data[0] = OP_REQUEST_STRUCTURAL_NAV;
+    std.mem.writeInt(u32, data[1..5], 7, .big);
+    std.mem.writeInt(u32, data[5..9], 42, .big);
+    std.mem.writeInt(u32, data[9..13], 3, .big);
+    std.mem.writeInt(u32, data[13..17], 11, .big);
+    data[17] = 4;
+
+    try std.testing.expectError(error.Malformed, decodeCommand(&data));
+}
+
+test "encode node_info" {
+    var found_buf: [280]u8 = undefined;
+    const found_len = encodeNodeInfo(&found_buf, 42, .{
+        .start_row = 1,
+        .start_col = 2,
+        .end_row = 3,
+        .end_col = 4,
+        .type_name = "call_expression",
+    });
+    try std.testing.expectEqual(@as(usize, 39), found_len);
+    try std.testing.expectEqual(@as(u8, OP_NODE_INFO), found_buf[0]);
+    try std.testing.expectEqual(@as(u32, 42), std.mem.readInt(u32, found_buf[1..5], .big));
+    try std.testing.expectEqual(@as(u8, 1), found_buf[5]);
+    try std.testing.expectEqual(@as(u32, 1), std.mem.readInt(u32, found_buf[6..10], .big));
+    try std.testing.expectEqual(@as(u32, 2), std.mem.readInt(u32, found_buf[10..14], .big));
+    try std.testing.expectEqual(@as(u32, 3), std.mem.readInt(u32, found_buf[14..18], .big));
+    try std.testing.expectEqual(@as(u32, 4), std.mem.readInt(u32, found_buf[18..22], .big));
+    try std.testing.expectEqual(@as(u16, 15), std.mem.readInt(u16, found_buf[22..24], .big));
+    try std.testing.expectEqualStrings("call_expression", found_buf[24..39]);
+
+    var empty_buf: [280]u8 = undefined;
+    const empty_len = encodeNodeInfo(&empty_buf, 43, null);
+    try std.testing.expectEqual(@as(usize, 6), empty_len);
+    try std.testing.expectEqual(@as(u8, OP_NODE_INFO), empty_buf[0]);
+    try std.testing.expectEqual(@as(u32, 43), std.mem.readInt(u32, empty_buf[1..5], .big));
+    try std.testing.expectEqual(@as(u8, 0), empty_buf[5]);
+}
+
 test "commandSize: set_language" {
     // opcode(1) + buffer_id(4) + name_len(2) + "elixir"(6) = 13 bytes
     var data: [13]u8 = undefined;
@@ -2462,4 +2743,8 @@ test "decode draw_styled_text with underline style curl" {
 test "decode draw_styled_text truncated returns malformed" {
     const data = [_]u8{ 0x1C, 0x00, 0x03 }; // too short
     try std.testing.expectError(error.Malformed, decodeCommand(&data));
+}
+
+test {
+    _ = @import("protocol_schema_test.zig");
 }

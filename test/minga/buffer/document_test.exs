@@ -204,6 +204,28 @@ defmodule Minga.Buffer.DocumentTest do
     end
   end
 
+  describe "replace_at_byte_range/5" do
+    test "replaces bytes and restores cursor" do
+      buf = Document.new("hello world") |> Document.move_to({0, 5})
+      buf = Document.replace_at_byte_range(buf, 6, 5, "there", {0, 2})
+
+      assert Document.content(buf) == "hello there"
+      assert Document.cursor(buf) == {0, 2}
+    end
+
+    test "rejects byte ranges beyond document content" do
+      assert_raise ArgumentError, ~r/invalid byte range/, fn ->
+        Document.replace_at_byte_range(Document.new("hello"), 4, 2, "x", {0, 0})
+      end
+    end
+
+    test "rejects replacements that produce invalid UTF-8 content" do
+      assert_raise ArgumentError, ~r/invalid UTF-8/, fn ->
+        Document.replace_at_byte_range(Document.new("é"), 1, 0, <<0xFF>>, {0, 0})
+      end
+    end
+  end
+
   # ── Round-trip integrity ──
 
   describe "content integrity" do
@@ -357,6 +379,30 @@ defmodule Minga.Buffer.DocumentTest do
       assert_cache_valid(buf)
       assert Document.cursor(buf) == {0, 0}
       assert Document.line_count(buf) == 1
+    end
+  end
+
+  describe "content_range_length/3" do
+    test "counts a single-character inclusive range" do
+      buf = Document.new("hello")
+      assert Document.content_range_length(buf, {0, 1}, {0, 1}) == 1
+    end
+
+    test "counts multi-line selections without depending on order" do
+      buf = Document.new("ab\ncde\nf")
+      assert Document.content_range_length(buf, {0, 1}, {1, 2}) == 5
+      assert Document.content_range_length(buf, {1, 2}, {0, 1}) == 5
+    end
+
+    test "counts unicode graphemes instead of bytes" do
+      buf = Document.new("a🥨日")
+      assert Document.content_range_length(buf, {0, 1}, {0, 1}) == 1
+      assert Document.content_range_length(buf, {0, 1}, {0, 5}) == 2
+    end
+
+    test "returns zero at the end of an empty buffer" do
+      buf = Document.new("")
+      assert Document.content_range_length(buf, {0, 0}, {0, 0}) == 0
     end
   end
 

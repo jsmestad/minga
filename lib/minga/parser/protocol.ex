@@ -13,9 +13,16 @@ defmodule Minga.Parser.Protocol do
 
   alias Minga.Language.Highlight.InjectionRange
   alias Minga.Language.Highlight.Span
+  alias Minga.Language.Symbol
+  alias Minga.Parser.StructuralNavResult
 
-  # ── Opcodes: commands (BEAM → Zig parser) ──
+  # --- BEGIN GENERATED (mix protocol.gen) ---
+  # Generated from docs/protocol_schema.toml. Do not edit by hand.
 
+  # Input
+  @op_log_message 0x60
+
+  # Parser Commands
   @op_set_language 0x20
   @op_parse_buffer 0x21
   @op_set_highlight_query 0x22
@@ -30,9 +37,10 @@ defmodule Minga.Parser.Protocol do
   @op_request_textobject 0x2C
   @op_close_buffer 0x2D
   @op_request_match_item 0x2E
+  @op_request_structural_nav 0x2F
+  @op_set_tags_query 0x40
 
-  # ── Opcodes: responses (Zig parser → BEAM) ──
-
+  # Parser Responses
   @op_highlight_spans 0x30
   @op_highlight_names 0x31
   @op_grammar_loaded 0x32
@@ -45,9 +53,9 @@ defmodule Minga.Parser.Protocol do
   @op_conceal_spans 0x3A
   @op_request_reparse 0x3B
   @op_match_item_result 0x3C
-
-  # Log messages (Zig → BEAM)
-  @op_log_message 0x60
+  @op_node_info 0x3D
+  @op_document_symbols 0x3E
+  # --- END GENERATED ---
 
   # Well-known textobject type IDs (match Zig constants)
   @textobj_function 0
@@ -56,6 +64,13 @@ defmodule Minga.Parser.Protocol do
   @textobj_block 3
   @textobj_comment 4
   @textobj_test 5
+
+  # Well-known document symbol kind IDs (match Zig constants)
+  @symbol_function 0
+  @symbol_module 1
+  @symbol_method 2
+  @symbol_interface 3
+  @symbol_test 4
 
   # ── Encoding: incremental content sync (BEAM → Zig) ──
 
@@ -156,6 +171,13 @@ defmodule Minga.Parser.Protocol do
     <<@op_set_textobject_query, buffer_id::32, byte_size(query)::32, query::binary>>
   end
 
+  @doc "Encodes a set_tags_query command with buffer_id."
+  @spec encode_set_tags_query(non_neg_integer(), String.t()) :: binary()
+  def encode_set_tags_query(buffer_id, query)
+      when is_integer(buffer_id) and buffer_id >= 0 and is_binary(query) do
+    <<@op_set_tags_query, buffer_id::32, byte_size(query)::32, query::binary>>
+  end
+
   @doc "Encodes a request_textobject command: buffer_id(4) + request_id(4) + row(4) + col(4) + name_len(2) + name."
   @spec encode_request_textobject(
           non_neg_integer(),
@@ -184,6 +206,21 @@ defmodule Minga.Parser.Protocol do
       when is_integer(buffer_id) and buffer_id >= 0 and
              is_integer(request_id) and is_integer(row) and is_integer(col) do
     <<@op_request_match_item, buffer_id::32, request_id::32, row::32, col::32>>
+  end
+
+  @doc "Encodes a request_structural_nav command: buffer_id(4) + request_id(4) + row(4) + col(4) + action(1)."
+  @spec encode_request_structural_nav(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          0..3
+        ) :: binary()
+  def encode_request_structural_nav(buffer_id, request_id, row, col, action)
+      when is_integer(buffer_id) and buffer_id >= 0 and
+             is_integer(request_id) and is_integer(row) and is_integer(col) and
+             is_integer(action) and action >= 0 and action <= 3 do
+    <<@op_request_structural_nav, buffer_id::32, request_id::32, row::32, col::32, action::8>>
   end
 
   @doc "Encodes a load_grammar command."
@@ -279,6 +316,18 @@ defmodule Minga.Parser.Protocol do
   end
 
   def decode_event(
+        <<@op_node_info, request_id::32, 1, start_row::32, start_col::32, end_row::32,
+          end_col::32, type_len::16, type_name::binary-size(type_len)>>
+      ) do
+    result = StructuralNavResult.new(start_row, start_col, end_row, end_col, type_name)
+    {:ok, {:node_info, request_id, result}}
+  end
+
+  def decode_event(<<@op_node_info, request_id::32, 0>>) do
+    {:ok, {:node_info, request_id, nil}}
+  end
+
+  def decode_event(
         <<@op_textobject_positions, buffer_id::32, version::32, count::32, entries::binary>>
       ) do
     positions = decode_textobject_entries(entries, count, %{})
@@ -294,6 +343,13 @@ defmodule Minga.Parser.Protocol do
 
   def decode_event(<<@op_request_reparse, buffer_id::32>>) do
     {:ok, {:request_reparse, buffer_id}}
+  end
+
+  def decode_event(<<@op_document_symbols, buffer_id::32, version::32, count::32, rest::binary>>) do
+    case decode_document_symbols(rest, count, []) do
+      {:ok, symbols} -> {:ok, {:document_symbols, buffer_id, version, symbols}}
+      :error -> {:error, :malformed}
+    end
   end
 
   def decode_event(<<@op_log_message, level_byte::8, msg_len::16, msg::binary-size(msg_len)>>) do
@@ -377,6 +433,27 @@ defmodule Minga.Parser.Protocol do
 
   defp decode_conceal_spans(_rest, _remaining, _acc), do: :error
 
+  @spec decode_document_symbols(binary(), non_neg_integer(), [Symbol.t()]) ::
+          {:ok, [Symbol.t()]} | :error
+  defp decode_document_symbols(_data, 0, acc), do: {:ok, Enum.reverse(acc)}
+
+  defp decode_document_symbols(
+         <<kind_id::8, name_len::16, name::binary-size(name_len), start_row::32, start_col::32,
+           end_row::32, end_col::32, rest::binary>>,
+         remaining,
+         acc
+       ) do
+    symbol = %Symbol{
+      kind: symbol_kind_to_atom(kind_id),
+      name: name,
+      range: {start_row, start_col, end_row, end_col}
+    }
+
+    decode_document_symbols(rest, remaining - 1, [symbol | acc])
+  end
+
+  defp decode_document_symbols(_data, _remaining, _acc), do: :error
+
   @spec decode_textobject_entries(binary(), non_neg_integer(), map()) :: map()
   defp decode_textobject_entries(_data, 0, acc) do
     Map.new(acc, fn {type, positions} -> {type, Enum.reverse(positions)} end)
@@ -415,6 +492,14 @@ defmodule Minga.Parser.Protocol do
 
     decode_injection_ranges(rest, remaining - 1, [range | acc])
   end
+
+  @spec symbol_kind_to_atom(non_neg_integer()) :: Symbol.kind()
+  defp symbol_kind_to_atom(@symbol_function), do: :function
+  defp symbol_kind_to_atom(@symbol_module), do: :module
+  defp symbol_kind_to_atom(@symbol_method), do: :method
+  defp symbol_kind_to_atom(@symbol_interface), do: :interface
+  defp symbol_kind_to_atom(@symbol_test), do: :test
+  defp symbol_kind_to_atom(_), do: :function
 
   @spec textobj_type_to_atom(non_neg_integer()) :: atom()
   defp textobj_type_to_atom(@textobj_function), do: :function

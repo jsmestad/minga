@@ -12,6 +12,9 @@ final class GUIState {
     /// Theme colors for SwiftUI chrome views.
     let themeColors = ThemeColors()
 
+    /// Native settings panel state.
+    let settingsState = SettingsState()
+
     /// Tab bar state.
     let tabBarState = TabBarState()
 

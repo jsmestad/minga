@@ -1,13 +1,53 @@
 defmodule MingaEditor.StatusBar.DataTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Config.ModelineSegments
+  alias Minga.Config.Options
+  alias Minga.Mode.VisualState
   alias MingaAgent.Subagent.Handle
   alias MingaEditor.StatusBar.Data
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
+  alias MingaEditor.Window
+  alias MingaEditor.WindowTree
   alias MingaEditor.Workspace.State, as: WorkspaceState
+
+  test "from_state leaves GUI modeline segments detached by default" do
+    state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
+    data = Data.from_state(state)
+
+    assert {:buffer, buffer_data} = data
+    refute Map.has_key?(buffer_data, :modeline_segments)
+  end
+
+  test "with_modeline_segments attaches GUI modeline segments from supplied registry" do
+    table = :"status_bar_data_modeline_segments_#{System.unique_integer([:positive])}"
+    start_supervised!({ModelineSegments, name: table})
+
+    assert :ok =
+             ModelineSegments.register(
+               table,
+               :status_bar_data_modeline_test,
+               [side: :left],
+               fn ctx -> {" GUI_ONLY ", ctx.info_fg, ctx.bar_bg, [], nil} end,
+               :config
+             )
+
+    state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
+    data = Data.from_state(state)
+
+    assert {:buffer, buffer_data} = Data.with_modeline_segments(data, state.theme, table)
+    assert %{left: left, right: right} = buffer_data.modeline_segments
+
+    assert Enum.any?(left ++ right, fn {text, _fg, _bg, _opts, _target} ->
+             text == " GUI_ONLY "
+           end)
+  end
 
   test "projects running background subagent count and active label" do
     handle1 = handle("session-2", "tests")
@@ -41,12 +81,108 @@ defmodule MingaEditor.StatusBar.DataTest do
     assert data.active_background_subagent_label == "session-2: tests"
   end
 
+  test "uses options server values when no active buffer is available" do
+    options = start_supervised!({Options, name: nil})
+    {:ok, _} = Options.set_for_filetype(options, :text, :indent_with, :tabs)
+    {:ok, _} = Options.set_for_filetype(options, :text, :tab_width, 4)
+
+    state = %EditorState{
+      port_manager: self(),
+      options_server: options,
+      workspace: %WorkspaceState{viewport: Viewport.new(24, 80)},
+      shell_state: %MingaEditor.Shell.Traditional.State{}
+    }
+
+    {:buffer, data} = Data.from_state(state)
+
+    assert data.indent_type == :tabs
+    assert data.indent_size == 4
+  end
+
+  test "buffer-local indent options override filetype defaults" do
+    options = start_supervised!({Options, name: nil})
+    {:ok, _} = Options.set_for_filetype(options, :elixir, :indent_with, :spaces)
+    {:ok, _} = Options.set_for_filetype(options, :elixir, :tab_width, 2)
+
+    {state, buf} = state_with_buffer("hello", options, :elixir)
+    BufferProcess.set_option(buf, :indent_with, :tabs)
+    BufferProcess.set_option(buf, :tab_width, 4)
+
+    {:buffer, data} = Data.from_state(state)
+
+    assert data.indent_type == :tabs
+    assert data.indent_size == 4
+  end
+
+  test "visual char selection reports grapheme count" do
+    {state, _buf} = state_with_buffer("héllo", nil, :text)
+
+    state =
+      EditorState.transition_mode(state, :visual, %VisualState{
+        visual_type: :char,
+        visual_anchor: {0, 0}
+      })
+
+    {:buffer, data} = Data.from_state(state)
+
+    assert data.selection_info == {:chars, 5}
+  end
+
+  test "visual line selection reports selected line count" do
+    {state, _buf} = state_with_buffer("one\ntwo\nthree", nil, :text)
+
+    state =
+      EditorState.transition_mode(state, :visual, %VisualState{
+        visual_type: :line,
+        visual_anchor: {0, 0}
+      })
+
+    {:buffer, data} = Data.from_state(state)
+
+    assert data.selection_info == {:lines, 3}
+  end
+
   defp state_with_tab_bar(tab_bar) do
     %EditorState{
       port_manager: self(),
       workspace: %WorkspaceState{viewport: Viewport.new(24, 80)},
       shell_state: %MingaEditor.Shell.Traditional.State{tab_bar: tab_bar}
     }
+  end
+
+  defp state_with_buffer(content, options_server, filetype) do
+    options_server = options_server || start_supervised!({Options, name: nil})
+    buf = start_buffer(content, filetype)
+    workspace = workspace_with_buffer(buf)
+
+    state =
+      %EditorState{
+        port_manager: self(),
+        options_server: options_server,
+        workspace: workspace,
+        shell_state: %MingaEditor.Shell.Traditional.State{}
+      }
+
+    {state, buf}
+  end
+
+  defp workspace_with_buffer(buf) do
+    %WorkspaceState{
+      viewport: Viewport.new(24, 80),
+      buffers: %Buffers{list: [buf], active_index: 0, active: buf},
+      windows: %Windows{
+        tree: WindowTree.new(1),
+        map: %{1 => Window.new(1, buf, 24, 80)},
+        active: 1,
+        next_id: 2
+      }
+    }
+  end
+
+  defp start_buffer(content, filetype) do
+    buf = start_supervised!({BufferProcess, [content: "", filetype: filetype]})
+    :ok = BufferProcess.insert_text(buf, content)
+    buf
   end
 
   defp handle(session_id, task) do

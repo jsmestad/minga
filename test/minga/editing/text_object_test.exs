@@ -232,4 +232,163 @@ defmodule Minga.Editing.TextObjectTest do
       assert {{0, 3}, {0, 5}} = result
     end
   end
+
+  # ── inner_paragraph/2 ─────────────────────────────────────────────────────────
+
+  describe "inner_paragraph/2 (ip)" do
+    test "selects contiguous non-blank lines around the cursor" do
+      b = buf("one\ntwo\n\nthree")
+      assert {{0, 0}, {1, 2}} = TextObject.inner_paragraph(b, {1, 1})
+    end
+
+    test "selects the blank-line run when cursor is on a blank line" do
+      b = buf("one\n\n  \ntwo")
+      assert {{1, 0}, {2, 1}} = TextObject.inner_paragraph(b, {1, 0})
+    end
+
+    test "selects a single-line buffer" do
+      b = buf("only line")
+      assert {{0, 0}, {0, 8}} = TextObject.inner_paragraph(b, {0, 4})
+    end
+
+    test "returns nil for an empty buffer" do
+      assert nil == TextObject.inner_paragraph(buf(""), {0, 0})
+    end
+
+    test "handles document boundaries" do
+      b = buf("first\n\nlast")
+      assert {{0, 0}, {0, 4}} = TextObject.inner_paragraph(b, {0, 0})
+      assert {{2, 0}, {2, 3}} = TextObject.inner_paragraph(b, {2, 3})
+    end
+  end
+
+  # ── a_paragraph/2 ─────────────────────────────────────────────────────────────
+
+  describe "a_paragraph/2 (ap)" do
+    test "includes one trailing blank line when available" do
+      b = buf("one\ntwo\n\nthree")
+      assert {{0, 0}, {2, 0}} = TextObject.a_paragraph(b, {0, 1})
+    end
+
+    test "includes one leading blank line when paragraph is at end of file" do
+      b = buf("one\n\ntwo\nthree")
+      assert {{1, 0}, {3, 4}} = TextObject.a_paragraph(b, {2, 1})
+    end
+
+    test "keeps a single paragraph without surrounding blank lines unchanged" do
+      b = buf("one\ntwo")
+      assert {{0, 0}, {1, 2}} = TextObject.a_paragraph(b, {1, 0})
+    end
+
+    test "handles cursor on a blank separator line by selecting the following paragraph" do
+      b = buf("one\n\nthree\n\nfour")
+      assert {{2, 0}, {3, 0}} = TextObject.a_paragraph(b, {1, 0})
+    end
+
+    test "returns nil for an empty buffer" do
+      assert nil == TextObject.a_paragraph(buf(""), {0, 0})
+    end
+  end
+
+  # ── inner_sentence/2 ──────────────────────────────────────────────────────────
+
+  describe "inner_sentence/2 (is)" do
+    test "selects the current sentence on a multi-sentence line" do
+      b = buf("First sentence. Second sentence!")
+      assert {{0, 16}, {0, 31}} = TextObject.inner_sentence(b, {0, 20})
+    end
+
+    test "selects a sentence spanning multiple lines" do
+      b = buf("First sentence spans\ntwo lines. Next one.")
+      assert {{0, 0}, {1, 9}} = TextObject.inner_sentence(b, {1, 4})
+    end
+
+    test "includes closing delimiters after terminal punctuation" do
+      b = buf(~s(He said "stop." Then left.))
+      assert {{0, 0}, {0, 14}} = TextObject.inner_sentence(b, {0, 10})
+    end
+
+    test "cursor on punctuation selects that sentence" do
+      b = buf("Hello. Bye.")
+      assert {{0, 0}, {0, 5}} = TextObject.inner_sentence(b, {0, 5})
+    end
+
+    test "cursor on whitespace inside a sentence selects the sentence" do
+      b = buf("One continues.")
+      assert {{0, 0}, {0, 13}} = TextObject.inner_sentence(b, {0, 3})
+    end
+
+    test "cursor on embedded newline inside a sentence selects the sentence" do
+      b = buf("One continues\nacross lines.")
+      assert {{0, 0}, {1, 12}} = TextObject.inner_sentence(b, {0, 13})
+    end
+
+    test "cursor on leading whitespace selects the first sentence" do
+      b = buf("  Hello. Bye.")
+      assert {{0, 0}, {0, 7}} = TextObject.inner_sentence(b, {0, 0})
+    end
+
+    test "cursor on whitespace between sentences selects the whitespace run" do
+      b = buf("Hello.   Bye.")
+      assert {{0, 6}, {0, 8}} = TextObject.inner_sentence(b, {0, 7})
+    end
+
+    test "cursor on trailing whitespace selects the trailing spaces only" do
+      b = buf("Hello.   ")
+      assert {{0, 6}, {0, 8}} = TextObject.inner_sentence(b, {0, 7})
+    end
+
+    test "returns nil for empty buffer and blank lines" do
+      assert nil == TextObject.inner_sentence(buf(""), {0, 0})
+      assert nil == TextObject.inner_sentence(buf("Hello.\n\nBye."), {1, 0})
+    end
+
+    test "treats an unterminated single line as a sentence" do
+      b = buf("No punctuation")
+      assert {{0, 0}, {0, 13}} = TextObject.inner_sentence(b, {0, 3})
+    end
+  end
+
+  # ── a_sentence/2 ──────────────────────────────────────────────────────────────
+
+  describe "a_sentence/2 (as)" do
+    test "includes trailing whitespace" do
+      b = buf("Hello.   Bye.")
+      assert {{0, 0}, {0, 8}} = TextObject.a_sentence(b, {0, 1})
+    end
+
+    test "cursor on whitespace inside a single sentence selects that sentence" do
+      b = buf("One continues.")
+      assert {{0, 0}, {0, 13}} = TextObject.a_sentence(b, {0, 3})
+    end
+
+    test "cursor on whitespace inside a sentence selects the sentence" do
+      b = buf("One continues. Two.")
+      assert {{0, 0}, {0, 14}} = TextObject.a_sentence(b, {0, 3})
+    end
+
+    test "cursor on whitespace between sentences selects whitespace plus following sentence" do
+      b = buf("Hello.   Bye.")
+      assert {{0, 6}, {0, 12}} = TextObject.a_sentence(b, {0, 7})
+    end
+
+    test "includes newline whitespace before the next sentence" do
+      b = buf("Hello.\nBye.")
+      assert {{0, 0}, {0, 6}} = TextObject.a_sentence(b, {0, 1})
+    end
+
+    test "handles sentence at document end" do
+      b = buf("Hello. Bye.")
+      assert {{0, 7}, {0, 10}} = TextObject.a_sentence(b, {0, 8})
+    end
+
+    test "returns nil for trailing whitespace after the final sentence" do
+      assert nil == TextObject.a_sentence(buf("Hello.   "), {0, 7})
+    end
+
+    test "returns nil for empty buffer and blank lines" do
+      assert nil == TextObject.a_sentence(buf(""), {0, 0})
+      assert nil == TextObject.a_sentence(buf("Hello.\n\nBye."), {1, 0})
+    end
+  end
 end

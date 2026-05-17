@@ -572,6 +572,24 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.apply_edits(pid, edits)
       assert BufferProcess.content(pid) == "AAA\nbbb\nCCC"
     end
+
+    test "replays unsorted variable-length edits on the same line through undo and redo" do
+      {:ok, pid} = BufferProcess.start_link(content: "abcdefghij")
+
+      edits = [
+        {{0, 1}, {0, 2}, "LMNOP"},
+        {{0, 6}, {0, 8}, "W"}
+      ]
+
+      assert :ok = BufferProcess.apply_edits(pid, edits)
+      assert BufferProcess.content(pid) == "aLMNOPdefWj"
+
+      BufferProcess.undo(pid)
+      assert BufferProcess.content(pid) == "abcdefghij"
+
+      BufferProcess.redo(pid)
+      assert BufferProcess.content(pid) == "aLMNOPdefWj"
+    end
   end
 
   describe "buffer_type" do
@@ -821,6 +839,36 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.replace_content(pid, "goodbye")
 
       assert BufferProcess.last_undo_source(pid) == :user
+    end
+
+    test "replace_generated_content clears stale undo history" do
+      pid = start_supervised!({BufferProcess, content: "hello"})
+      BufferProcess.insert_char(pid, "X")
+      assert BufferProcess.content(pid) == "Xhello"
+
+      BufferProcess.replace_generated_content(pid, "generated")
+
+      assert BufferProcess.content(pid) == "generated"
+      assert BufferProcess.last_undo_source(pid) == nil
+      assert BufferProcess.last_redo_source(pid) == nil
+
+      BufferProcess.undo(pid)
+      assert BufferProcess.content(pid) == "generated"
+    end
+
+    test "replace_content_with_decorations clears stale undo history" do
+      pid = start_supervised!({BufferProcess, content: "hello"})
+      BufferProcess.insert_char(pid, "X")
+      assert BufferProcess.content(pid) == "Xhello"
+
+      BufferProcess.replace_content_with_decorations(pid, "decorated", fn decs -> decs end)
+
+      assert BufferProcess.content(pid) == "decorated"
+      assert BufferProcess.last_undo_source(pid) == nil
+      assert BufferProcess.last_redo_source(pid) == nil
+
+      BufferProcess.undo(pid)
+      assert BufferProcess.content(pid) == "decorated"
     end
 
     test "interleaved user and agent edits preserve correct sources" do

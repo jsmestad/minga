@@ -2,6 +2,8 @@ defmodule MingaEditor.Commands.DiredTest do
   @moduledoc """
   Integration tests for the dired (Oil.nvim-style) directory buffer.
 
+  Classification: these tests intentionally remain EditorCase integration coverage because they verify save interception, confirmation flow, real file creation/deletion/rename, navigation, and visible listing updates through the dired buffer.
+
   Tests the full keystroke-to-filesystem pipeline: opening dired via
   ex commands, navigating directories, editing filenames, and confirming
   file operations. Uses EditorCase for headless editor state.
@@ -11,7 +13,7 @@ defmodule MingaEditor.Commands.DiredTest do
 
   @moduletag :tmp_dir
 
-  describe ":dired — open directory buffer" do
+  describe "[EditorCase integration] :dired — open directory buffer" do
     test "opens directory by path", %{tmp_dir: dir} do
       File.write!(Path.join(dir, "hello.txt"), "")
       File.write!(Path.join(dir, "other.txt"), "")
@@ -52,7 +54,7 @@ defmodule MingaEditor.Commands.DiredTest do
     end
   end
 
-  describe "save interception" do
+  describe "[EditorCase integration] save interception" do
     test ":w on dired buffer does not write to disk", %{tmp_dir: dir} do
       file = Path.join(dir, "file.txt")
       File.write!(file, "original")
@@ -92,7 +94,7 @@ defmodule MingaEditor.Commands.DiredTest do
     end
   end
 
-  describe "confirm-then-apply" do
+  describe "[EditorCase integration] confirm-then-apply" do
     test "y confirms and applies rename", %{tmp_dir: dir} do
       File.write!(Path.join(dir, "old.txt"), "content")
 
@@ -193,7 +195,7 @@ defmodule MingaEditor.Commands.DiredTest do
     end
   end
 
-  describe "navigation" do
+  describe "[EditorCase integration] navigation" do
     test "Enter on a directory navigates into it", %{tmp_dir: dir} do
       subdir = Path.join(dir, "sub")
       File.mkdir_p!(subdir)
@@ -238,7 +240,7 @@ defmodule MingaEditor.Commands.DiredTest do
     end
   end
 
-  describe "display toggles" do
+  describe "[EditorCase integration] display toggles" do
     test "g. toggles hidden files", %{tmp_dir: dir} do
       File.write!(Path.join(dir, ".hidden"), "")
       File.write!(Path.join(dir, "visible.txt"), "")

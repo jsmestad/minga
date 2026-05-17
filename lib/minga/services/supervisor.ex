@@ -27,6 +27,7 @@ defmodule Minga.Services.Supervisor do
       ├── Minga.Extension.Registry           Extension metadata (Agent)
       ├── Minga.Extension.Supervisor         DynamicSupervisor for extension processes
       ├── Minga.Config.Loader                Evaluates user config on init
+      ├── Minga.Config.Writer                Debounced GUI settings overlay writer
       ├── Minga.LSP.Supervisor               DynamicSupervisor for LSP clients
       ├── Minga.LSP.SyncServer               Subscribes to buffer events, manages LSP sync
       ├── Minga.Project                      Project root detection, file cache
@@ -60,6 +61,7 @@ defmodule Minga.Services.Supervisor do
       Minga.Extension.Registry,
       Minga.Extension.Supervisor,
       Minga.Config.Loader,
+      Minga.Config.Writer,
 
       # LSP chain: Supervisor → SyncServer
       Minga.LSP.Supervisor,

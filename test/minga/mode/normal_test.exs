@@ -83,6 +83,22 @@ defmodule Minga.Mode.NormalTest do
       assert {:execute, :move_right, _} = Normal.handle_key({?l, 0}, fresh_state())
     end
 
+    test "Alt+h produces structural parent navigation" do
+      assert {:execute, :nav_parent, _} = Normal.handle_key({?h, 0x04}, fresh_state())
+    end
+
+    test "Alt+l produces structural first child navigation" do
+      assert {:execute, :nav_first_child, _} = Normal.handle_key({?l, 0x04}, fresh_state())
+    end
+
+    test "Alt+j produces structural next sibling navigation" do
+      assert {:execute, :nav_next_sibling, _} = Normal.handle_key({?j, 0x04}, fresh_state())
+    end
+
+    test "Alt+k produces structural previous sibling navigation" do
+      assert {:execute, :nav_prev_sibling, _} = Normal.handle_key({?k, 0x04}, fresh_state())
+    end
+
     test "0 with no count produces {:execute, :move_to_line_start, state}" do
       assert {:execute, :move_to_line_start, _} =
                Normal.handle_key({?0, 0}, fresh_state())

@@ -10,8 +10,47 @@
 
 import Foundation
 
+/// Config setting value encoded in GUI config actions and state pushes.
+enum SettingValue: Sendable, Equatable {
+    case bool(Bool)
+    case int(Int)
+    case string(String)
+    case atom(String)
+    case float(Double)
+}
+
 /// Namespace for all binary protocol data types decoded from the BEAM.
 enum Wire {
+
+    // MARK: - Settings
+
+    /// Complete or incremental settings state from the BEAM.
+    struct ConfigState: Sendable {
+        let options: [String: SettingValue]
+        let themePreviews: [ThemePreview]
+        let keybindings: [KeybindingEntry]
+    }
+
+    /// A compact built-in theme preview for the settings panel.
+    struct ThemePreview: Sendable, Identifiable {
+        let name: String
+        let atom: String
+        let editorBg: UInt32
+        let editorFg: UInt32
+        let accent: UInt32
+
+        var id: String { atom }
+    }
+
+    /// A read-only keybinding row for the settings panel.
+    struct KeybindingEntry: Sendable, Identifiable {
+        let mode: String
+        let key: String
+        let command: String
+        let description: String
+
+        var id: String { "\(mode):\(key):\(command):\(description)" }
+    }
 
     // MARK: - Tab bar
 
@@ -88,6 +127,22 @@ enum Wire {
         let key: String
         let description: String
         let icon: String
+    }
+
+    // MARK: - Status bar
+
+    /// A configured modeline segment from the gui_status_bar modeline segment section.
+    struct StatusBarSegment: Sendable, Equatable, Identifiable {
+        let id: Int
+        let text: String
+        let fgColor: UInt32
+        let bgColor: UInt32
+        let attrs: UInt8
+        let command: String
+
+        var isBold: Bool { attrs & 0x01 != 0 }
+        var isUnderline: Bool { attrs & 0x02 != 0 }
+        var isItalic: Bool { attrs & 0x04 != 0 }
     }
 
     // MARK: - Picker

@@ -115,7 +115,7 @@ defmodule MingaEditor.Commands.Operators do
       when is_pid(buf) do
     if read_only?(buf),
       do: read_only_msg(state),
-      else: Helpers.apply_text_object(state, modifier, spec, :delete)
+      else: Helpers.apply_text_object(state, modifier, spec, :change)
   end
 
   def execute(

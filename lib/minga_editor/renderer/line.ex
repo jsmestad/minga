@@ -16,7 +16,9 @@ defmodule MingaEditor.Renderer.Line do
 
   alias Minga.Core.Decorations
   alias Minga.Core.Decorations.ConcealRange
+  alias Minga.Core.Decorations.HighlightRange
   alias Minga.Core.Face
+  alias Minga.Core.HlTodo
   alias Minga.Core.Unicode
   alias MingaEditor.DisplayList
   alias MingaEditor.Renderer.Composition
@@ -107,11 +109,24 @@ defmodule MingaEditor.Renderer.Line do
         )
 
       nil when line_highlights != [] or has_conceals or ctx.show_invisible ->
-        render_decorated_plain_line(line_text, screen_row, buf_line, ctx, line_highlights)
+        render_decorated_plain_line(
+          line_text,
+          screen_row,
+          buf_line,
+          ctx,
+          line_byte_offset,
+          line_highlights
+        )
 
       nil ->
-        visible_text = join_pairs(visible_pairs)
-        [DisplayList.draw(screen_row, ctx.gutter_w, visible_text)]
+        render_plain_or_todo_line(
+          line_text,
+          visible_pairs,
+          screen_row,
+          buf_line,
+          ctx,
+          line_byte_offset
+        )
 
       :full ->
         visible_text = join_pairs(effective_visible)
@@ -411,10 +426,22 @@ defmodule MingaEditor.Renderer.Line do
           non_neg_integer(),
           non_neg_integer(),
           Context.t(),
+          non_neg_integer(),
           [Decorations.highlight_range()]
         ) :: [DisplayList.draw()]
-  defp render_decorated_plain_line(line_text, screen_row, buf_line, ctx, line_highlights) do
+  defp render_decorated_plain_line(
+         line_text,
+         screen_row,
+         buf_line,
+         ctx,
+         line_byte_offset,
+         line_highlights
+       ) do
     segments = [{line_text, Face.new()}]
+
+    line_highlights =
+      line_highlights ++ todo_highlight_ranges(line_text, buf_line, ctx, line_byte_offset)
+
     segments = Decorations.merge_highlights(segments, line_highlights, buf_line)
     segments = Composition.apply_conceals(segments, ctx.decorations, buf_line)
     segments = Composition.inject_inline_virtual_text(segments, ctx.decorations, buf_line)
@@ -425,6 +452,32 @@ defmodule MingaEditor.Renderer.Line do
         else: segments
 
     render_segments_with_scroll(segments, screen_row, ctx)
+  end
+
+  @spec render_plain_or_todo_line(
+          String.t(),
+          [grapheme_pair()],
+          non_neg_integer(),
+          non_neg_integer(),
+          Context.t(),
+          non_neg_integer()
+        ) :: [DisplayList.draw()]
+  defp render_plain_or_todo_line(
+         line_text,
+         visible_pairs,
+         screen_row,
+         buf_line,
+         ctx,
+         line_byte_offset
+       ) do
+    todo_ranges = todo_highlight_ranges(line_text, buf_line, ctx, line_byte_offset)
+
+    if todo_ranges == [] do
+      visible_text = join_pairs(visible_pairs)
+      [DisplayList.draw(screen_row, ctx.gutter_w, visible_text)]
+    else
+      render_decorated_plain_line(line_text, screen_row, buf_line, ctx, line_byte_offset, [])
+    end
   end
 
   # ── Invisible character substitution ──────────────────────────────────────────
@@ -595,6 +648,9 @@ defmodule MingaEditor.Renderer.Line do
         Highlight.styles_for_line(ctx.highlight, line_text, line_byte_offset)
 
     # Merge decoration highlight ranges with syntax segments (pre-queried, no double lookup)
+    line_highlights =
+      line_highlights ++ todo_highlight_ranges(line_text, buf_line, ctx, line_byte_offset)
+
     segments = Decorations.merge_highlights(segments, line_highlights, buf_line)
     segments = Composition.apply_conceals(segments, ctx.decorations, buf_line)
     segments = Composition.inject_inline_virtual_text(segments, ctx.decorations, buf_line)
@@ -605,6 +661,62 @@ defmodule MingaEditor.Renderer.Line do
         else: segments
 
     render_segments_with_scroll(segments, screen_row, ctx)
+  end
+
+  @spec todo_highlight_ranges(String.t(), non_neg_integer(), Context.t(), non_neg_integer()) :: [
+          HighlightRange.t()
+        ]
+  defp todo_highlight_ranges(line_text, buf_line, ctx, line_byte_offset) do
+    line_text
+    |> HlTodo.scan_line()
+    |> Enum.filter(&todo_match_in_scope?(&1, ctx, line_text, line_byte_offset))
+    |> Enum.map(&todo_highlight_range(&1, buf_line, ctx, line_text))
+  end
+
+  @spec todo_match_in_scope?(HlTodo.match(), Context.t(), String.t(), non_neg_integer()) ::
+          boolean()
+  defp todo_match_in_scope?(_match, %{highlight: nil}, _line_text, _line_byte_offset), do: true
+
+  defp todo_match_in_scope?(
+         {start_byte, end_byte, _keyword},
+         %{highlight: highlight},
+         line_text,
+         line_byte_offset
+       ) do
+    if Highlight.has_spans?(highlight) do
+      highlight
+      |> Highlight.comment_ranges_for_line(line_text, line_byte_offset)
+      |> Enum.any?(fn {comment_start, comment_end} ->
+        start_byte >= comment_start and end_byte <= comment_end
+      end)
+    else
+      true
+    end
+  end
+
+  @spec todo_highlight_range(HlTodo.match(), non_neg_integer(), Context.t(), String.t()) ::
+          HighlightRange.t()
+  defp todo_highlight_range({start_byte, end_byte, keyword}, buf_line, ctx, line_text) do
+    start_col = byte_offset_to_grapheme_index(line_text, start_byte)
+    end_col = byte_offset_to_grapheme_index(line_text, end_byte)
+
+    %HighlightRange{
+      id: make_ref(),
+      start: {buf_line, start_col},
+      end_: {buf_line, end_col},
+      style: Map.get(ctx.hl_todo_faces, keyword, Face.new(bold: true)),
+      priority: 10,
+      group: :hl_todo
+    }
+  end
+
+  @spec byte_offset_to_grapheme_index(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp byte_offset_to_grapheme_index(text, byte_offset) do
+    text
+    |> binary_part(0, min(byte_offset, byte_size(text)))
+    |> String.length()
+  rescue
+    ArgumentError -> String.length(text)
   end
 
   # Shared rendering for styled segments with horizontal scroll clipping.

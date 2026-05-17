@@ -469,6 +469,8 @@ defmodule MingaEditor.Frontend.Emit.GUI do
           ahead: 0,
           behind: 0,
           entries: [],
+          entry_base_path: "",
+          last_commit_message: "",
           git_toast: toast
         })
 
@@ -578,7 +580,8 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   # No fingerprint caching; the encoding cost is small (fixed-size struct).
 
   @spec build_gui_status_bar_cmd(ctx(), StatusBarData.t(), Caches.t()) :: {binary(), Caches.t()}
-  defp build_gui_status_bar_cmd(_ctx, status_bar_data, caches) do
+  defp build_gui_status_bar_cmd(ctx, status_bar_data, caches) do
+    status_bar_data = StatusBarData.with_modeline_segments(status_bar_data, ctx.theme)
     {ProtocolGUI.encode_gui_status_bar(status_bar_data), caches}
   end
 

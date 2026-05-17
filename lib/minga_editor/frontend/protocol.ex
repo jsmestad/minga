@@ -37,9 +37,10 @@ defmodule MingaEditor.Frontend.Protocol do
   | SUPER | 0x08  |
   """
 
-  # ── Opcodes ──
+  # --- BEGIN GENERATED (mix protocol.gen) ---
+  # Generated from docs/protocol_schema.toml. Do not edit by hand.
 
-  # Input events (Zig → BEAM)
+  # Input
   @op_key_press 0x01
   @op_resize 0x02
   @op_ready 0x03
@@ -48,11 +49,7 @@ defmodule MingaEditor.Frontend.Protocol do
   @op_paste_event 0x06
   @op_gui_action 0x07
 
-  alias Minga.Core.Face
-  alias MingaEditor.Frontend.Capabilities
-  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
-
-  # Render commands (BEAM → Zig)
+  # Render
   @op_draw_text 0x10
   @op_set_cursor 0x11
   @op_clear 0x12
@@ -66,6 +63,17 @@ defmodule MingaEditor.Frontend.Protocol do
   @op_set_active_region 0x1A
   @op_scroll_region 0x1B
   @op_draw_styled_text 0x1C
+
+  # Config
+  @op_set_font 0x50
+  @op_set_font_fallback 0x51
+  @op_register_font 0x52
+  # --- END GENERATED ---
+
+  alias Minga.Core.Face
+  alias Minga.Parser.StructuralNavResult
+  alias MingaEditor.Frontend.Capabilities
+  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
   # ── Font weight encoding (shared between set_font and draw_styled_text) ──
 
@@ -86,11 +94,6 @@ defmodule MingaEditor.Frontend.Protocol do
 
   # Parser protocol opcodes are defined in Minga.Parser.Protocol.
   # Encode/decode functions for parser commands are delegated there.
-
-  # Config commands (BEAM → frontend)
-  @op_set_font 0x50
-  @op_set_font_fallback 0x51
-  @op_register_font 0x52
 
   # Log message opcode is defined in Minga.Parser.Protocol (0x60)
 
@@ -171,6 +174,7 @@ defmodule MingaEditor.Frontend.Protocol do
              result ::
                {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
                | nil}
+          | {:node_info, request_id :: non_neg_integer(), StructuralNavResult.t() | nil}
           | {:match_item_result, request_id :: non_neg_integer(),
              result :: {non_neg_integer(), non_neg_integer()} | nil}
           | {:textobject_positions, buffer_id :: non_neg_integer(), version :: non_neg_integer(),
@@ -496,11 +500,22 @@ defmodule MingaEditor.Frontend.Protocol do
   defdelegate encode_set_indent_query(buffer_id, query), to: Minga.Parser.Protocol
   defdelegate encode_request_indent(buffer_id, request_id, line), to: Minga.Parser.Protocol
   defdelegate encode_set_textobject_query(buffer_id, query), to: Minga.Parser.Protocol
+  defdelegate encode_set_tags_query(buffer_id, query), to: Minga.Parser.Protocol
 
   defdelegate encode_request_textobject(buffer_id, request_id, row, col, capture_name),
     to: Minga.Parser.Protocol
 
   defdelegate encode_request_match_item(buffer_id, request_id, row, col),
+    to: Minga.Parser.Protocol
+
+  @spec encode_request_structural_nav(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          0..3
+        ) :: binary()
+  defdelegate encode_request_structural_nav(buffer_id, request_id, row, col, action),
     to: Minga.Parser.Protocol
 
   defdelegate encode_load_grammar(name, path), to: Minga.Parser.Protocol
@@ -580,7 +595,7 @@ defmodule MingaEditor.Frontend.Protocol do
   # Parser events are decoded by Minga.Parser.Protocol. Try it first,
   # then fall through to input event decoders.
   def decode_event(<<opcode::8, _rest::binary>> = data)
-      when opcode in 0x30..0x3C or opcode == 0x60 do
+      when opcode in 0x30..0x3E or opcode == 0x60 do
     case Minga.Parser.Protocol.decode_event(data) do
       {:ok, _} = result -> result
       :unknown -> {:error, :unknown_opcode}

@@ -98,40 +98,46 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
     case .guiBreadcrumb(let segments):
         return ["type": "gui_breadcrumb", "segments": segments]
 
-    case .guiStatusBar(let contentKind, let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype, let errorCount, let warningCount, let modelName, let messageCount, let sessionStatus, let infoCount, let hintCount, let macroRecording, let parserStatus, let agentStatus, let gitAdded, let gitModified, let gitDeleted, let icon, let iconColorR, let iconColorG, let iconColorB, let filename, let diagnosticHint, let backgroundSubagentCount, let backgroundSubagentLabel):
+    case .guiStatusBar(let update):
         var result: [String: Any] = [:]
         result["type"] = "gui_status_bar"
-        result["content_kind"] = Int(contentKind)
-        result["mode"] = Int(mode)
-        result["cursor_line"] = Int(cursorLine)
-        result["cursor_col"] = Int(cursorCol)
-        result["line_count"] = Int(lineCount)
-        result["flags"] = Int(flags)
-        result["lsp_status"] = Int(lspStatus)
-        result["git_branch"] = gitBranch
-        result["message"] = message
-        result["filetype"] = filetype
-        result["error_count"] = Int(errorCount)
-        result["warning_count"] = Int(warningCount)
-        result["model_name"] = modelName
-        result["message_count"] = Int(messageCount)
-        result["session_status"] = Int(sessionStatus)
-        result["info_count"] = Int(infoCount)
-        result["hint_count"] = Int(hintCount)
-        result["macro_recording"] = Int(macroRecording)
-        result["parser_status"] = Int(parserStatus)
-        result["agent_status"] = Int(agentStatus)
-        result["git_added"] = Int(gitAdded)
-        result["git_modified"] = Int(gitModified)
-        result["git_deleted"] = Int(gitDeleted)
-        result["icon"] = icon
-        result["icon_color_r"] = Int(iconColorR)
-        result["icon_color_g"] = Int(iconColorG)
-        result["icon_color_b"] = Int(iconColorB)
-        result["filename"] = filename
-        result["diagnostic_hint"] = diagnosticHint
-        result["background_subagent_count"] = Int(backgroundSubagentCount)
-        result["background_subagent_label"] = backgroundSubagentLabel
+        result["content_kind"] = Int(update.contentKind)
+        result["mode"] = Int(update.mode)
+        result["cursor_line"] = Int(update.cursorLine)
+        result["cursor_col"] = Int(update.cursorCol)
+        result["line_count"] = Int(update.lineCount)
+        result["flags"] = Int(update.flags)
+        result["lsp_status"] = Int(update.lspStatus)
+        result["git_branch"] = update.gitBranch
+        result["message"] = update.message
+        result["filetype"] = update.filetype
+        result["error_count"] = Int(update.errorCount)
+        result["warning_count"] = Int(update.warningCount)
+        result["model_name"] = update.modelName
+        result["message_count"] = Int(update.messageCount)
+        result["session_status"] = Int(update.sessionStatus)
+        result["info_count"] = Int(update.infoCount)
+        result["hint_count"] = Int(update.hintCount)
+        result["macro_recording"] = Int(update.macroRecording)
+        result["parser_status"] = Int(update.parserStatus)
+        result["agent_status"] = Int(update.agentStatus)
+        result["git_added"] = Int(update.gitAdded)
+        result["git_modified"] = Int(update.gitModified)
+        result["git_deleted"] = Int(update.gitDeleted)
+        result["icon"] = update.icon
+        result["icon_color_r"] = Int(update.iconColorR)
+        result["icon_color_g"] = Int(update.iconColorG)
+        result["icon_color_b"] = Int(update.iconColorB)
+        result["filename"] = update.filename
+        result["diagnostic_hint"] = update.diagnosticHint
+        result["background_subagent_count"] = Int(update.backgroundSubagentCount)
+        result["background_subagent_label"] = update.backgroundSubagentLabel
+        result["indent_type"] = Int(update.indent.kind)
+        result["indent_size"] = Int(update.indent.size)
+        result["modeline_left_segments"] = statusBarSegmentsToJSON(update.modelineLeftSegments)
+        result["modeline_right_segments"] = statusBarSegmentsToJSON(update.modelineRightSegments)
+        result["selection_mode"] = Int(update.selection.mode)
+        result["selection_size"] = Int(update.selection.size)
         return result
 
     case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let title, let query, let hasPreview, let items, let actionMenu):
@@ -293,6 +299,18 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
 
     default:
         return nil
+    }
+}
+
+func statusBarSegmentsToJSON(_ segments: [Wire.StatusBarSegment]) -> [[String: Any]] {
+    return segments.map { segment in
+        [
+            "text": segment.text,
+            "fg_color": Int(segment.fgColor),
+            "bg_color": Int(segment.bgColor),
+            "attrs": Int(segment.attrs),
+            "command": segment.command
+        ]
     }
 }
 

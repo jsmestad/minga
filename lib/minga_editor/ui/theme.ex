@@ -24,6 +24,7 @@ defmodule MingaEditor.UI.Theme do
     CatppuccinMocha
   }
 
+  alias Minga.Core.Face
   alias MingaEditor.UI.Theme.{DoomOne, OneDark, OneLight}
 
   @enforce_keys [
@@ -51,6 +52,7 @@ defmodule MingaEditor.UI.Theme do
     :search,
     :popup,
     :tree,
+    :hl_todo,
     :agent,
     :tab_bar,
     :dashboard
@@ -77,6 +79,7 @@ defmodule MingaEditor.UI.Theme do
           search: MingaEditor.UI.Theme.Search.t(),
           popup: MingaEditor.UI.Theme.Popup.t(),
           tree: MingaEditor.UI.Theme.Tree.t(),
+          hl_todo: %{atom() => Face.t()} | nil,
           agent: MingaEditor.UI.Theme.Agent.t() | nil,
           tab_bar: MingaEditor.UI.Theme.TabBar.t() | nil,
           dashboard: MingaEditor.UI.Theme.Dashboard.t() | nil
@@ -98,7 +101,9 @@ defmodule MingaEditor.UI.Theme do
       :highlight_read_bg,
       :highlight_write_bg,
       :selection_bg,
-      :whitespace_fg
+      :whitespace_fg,
+      :indent_guide_fg,
+      :indent_guide_active_fg
     ]
 
     @type t :: %__MODULE__{
@@ -112,7 +117,9 @@ defmodule MingaEditor.UI.Theme do
             highlight_read_bg: MingaEditor.UI.Theme.color() | nil,
             highlight_write_bg: MingaEditor.UI.Theme.color() | nil,
             selection_bg: MingaEditor.UI.Theme.color() | nil,
-            whitespace_fg: MingaEditor.UI.Theme.color() | nil
+            whitespace_fg: MingaEditor.UI.Theme.color() | nil,
+            indent_guide_fg: MingaEditor.UI.Theme.color() | nil,
+            indent_guide_active_fg: MingaEditor.UI.Theme.color() | nil
           }
   end
 
@@ -603,6 +610,21 @@ defmodule MingaEditor.UI.Theme do
       nil -> :error
       loaded -> {:ok, loaded.theme}
     end
+  end
+
+  @doc "Returns the TODO keyword faces, falling back to Doom One-compatible defaults."
+  @spec hl_todo_faces(t()) :: %{atom() => Face.t()}
+  def hl_todo_faces(%__MODULE__{hl_todo: faces}) when is_map(faces), do: faces
+
+  def hl_todo_faces(%__MODULE__{}) do
+    %{
+      todo: Face.new(fg: 0xECBE7B, bold: true),
+      fixme: Face.new(fg: 0xFF6C6B, bold: true),
+      note: Face.new(fg: 0x51AFEF, bold: true),
+      hack: Face.new(fg: 0xDA8548, bold: true),
+      review: Face.new(fg: 0xC678DD, bold: true),
+      deprecated: Face.new(fg: 0x5B6268, strikethrough: true)
+    }
   end
 
   @doc "Returns the agent theme section, falling back to a basic default."

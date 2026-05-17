@@ -7,7 +7,8 @@ defmodule MingaEditor.RenderPipelineTest do
   `test/minga/editor/render_pipeline/*_test.exs`.
   """
 
-  use ExUnit.Case, async: true
+  # Uses process-local render-pipeline font registry state, so this file runs serially.
+  use ExUnit.Case, async: false
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Editing.Completion

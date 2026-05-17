@@ -72,7 +72,12 @@ defmodule MingaEditor.Frontend.Protocol.GUIWindowContent do
   alias MingaEditor.SemanticWindow.Span
   alias MingaEditor.SemanticWindow.VisualRow
 
+  # --- BEGIN GENERATED (mix protocol.gen) ---
+  # Generated from docs/protocol_schema.toml. Do not edit by hand.
+
+  # Gui Semantic
   @op_gui_window_content 0x80
+  # --- END GENERATED ---
 
   # Sectioned format section IDs
   @section_wc_header 0x01

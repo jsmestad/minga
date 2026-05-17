@@ -164,6 +164,9 @@ final class CommandDispatcher {
         case .registerFont(let id, let family):
             fontManager?.registerFont(id: id, name: family)
 
+        case .guiConfigState(let configState):
+            guiState.settingsState.apply(configState: configState)
+
         case .guiTheme(let slots):
             guiState.themeColors.applySlots(slots)
             let tc = guiState.themeColors
@@ -243,26 +246,11 @@ final class CommandDispatcher {
         case .guiBreadcrumb(let segments):
             guiState.breadcrumbState.update(segments: segments)
 
-        case .guiStatusBar(let contentKind, let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype, let errorCount, let warningCount, let modelName, let messageCount, let sessionStatus, let infoCount, let hintCount, let macroRecording, let parserStatus, let agentStatus, let gitAdded, let gitModified, let gitDeleted, let icon, let iconColorR, let iconColorG, let iconColorB, let filename, let diagnosticHint, let backgroundSubagentCount, let backgroundSubagentLabel):
-            let update = StatusBarUpdate(
-                contentKind: contentKind, mode: mode,
-                cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount,
-                flags: flags, lspStatus: lspStatus, gitBranch: gitBranch,
-                message: message, filetype: filetype,
-                errorCount: errorCount, warningCount: warningCount,
-                modelName: modelName, messageCount: messageCount, sessionStatus: sessionStatus,
-                infoCount: infoCount, hintCount: hintCount, macroRecording: macroRecording,
-                parserStatus: parserStatus, agentStatus: agentStatus,
-                gitAdded: gitAdded, gitModified: gitModified, gitDeleted: gitDeleted,
-                icon: icon, iconColorR: iconColorR, iconColorG: iconColorG, iconColorB: iconColorB,
-                filename: filename, diagnosticHint: diagnosticHint,
-                backgroundSubagentCount: backgroundSubagentCount,
-                backgroundSubagentLabel: backgroundSubagentLabel
-            )
+        case .guiStatusBar(let update):
             guiState.statusBarState.update(from: update)
-            frameState.totalLineCount = lineCount
-            if mode != lastMode {
-                lastMode = mode
+            frameState.totalLineCount = update.lineCount
+            if update.mode != lastMode {
+                lastMode = update.mode
                 onModeChanged?(guiState.statusBarState.modeName)
             }
 
@@ -433,7 +421,7 @@ final class CommandDispatcher {
                 guiState.floatPopupState.hide()
             }
 
-        case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let rawEntries, let rawToast):
+        case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let rawEntries, let rawToast, let entryBasePath, let lastCommitMessage):
             // When git_status_panel is nil, the BEAM sends notARepo + empty
             // entries as the "panel closed" signal (same pattern as file tree
             // sending empty entries to trigger hide). Can't gate on
@@ -451,7 +439,7 @@ final class CommandDispatcher {
                 return (t.message, parsedLevel ?? .error, parsedAction ?? .none)
             }
 
-            if parsedRepoState == .notARepo && rawEntries.isEmpty {
+            if parsedRepoState == .notARepo && rawEntries.isEmpty && entryBasePath.isEmpty {
                 guiState.gitStatusState.hide(syncing: syncing, toast: toast)
             } else {
                 let entries = rawEntries.compactMap { raw -> GitStatusEntry? in
@@ -464,7 +452,7 @@ final class CommandDispatcher {
                         PortLogger.warn("Invalid git file status: \(raw.status)")
                     }
                     return GitStatusEntry(
-                        id: (UInt32(raw.section) << 24) | (raw.pathHash & 0x00FFFFFF),
+                        pathHash: raw.pathHash,
                         section: section,
                         status: status,
                         path: raw.path
@@ -477,7 +465,9 @@ final class CommandDispatcher {
                     behind: behind,
                     syncing: syncing,
                     entries: entries,
-                    toast: toast
+                    toast: toast,
+                    entryBasePath: entryBasePath,
+                    lastCommitMessage: lastCommitMessage
                 )
             }
         }

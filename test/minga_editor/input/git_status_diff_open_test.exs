@@ -60,7 +60,41 @@ defmodule MingaEditor.Input.GitStatusDiffOpenTest do
     refute EditorState.status_msg(state) =~ "Could not read"
   end
 
-  defp state_with_selected_entry(entry) do
+  test "GUI open diff uses section when duplicate paths exist", %{git_root: git_root} do
+    rel_path = "both.txt"
+    File.write!(Path.join(git_root, rel_path), "worktree\n")
+    GitStub.set_head(git_root, rel_path, "head\n")
+    GitStub.set_staged(git_root, rel_path, "staged\n")
+
+    staged_entry = %Git.StatusEntry{path: rel_path, status: :modified, staged: true}
+    changed_entry = %Git.StatusEntry{path: rel_path, status: :modified, staged: false}
+
+    {:noreply, staged_state} =
+      MingaEditor.handle_info(
+        {:minga_input, {:gui_action, {:git_open_diff, rel_path, 0}}},
+        state_with_panel_entries([changed_entry, staged_entry])
+      )
+
+    staged_buf = staged_state.workspace.buffers.active
+    assert Buffer.buffer_name(staged_buf) == "both.txt [diff:staged]"
+    assert buffer_content(staged_buf) =~ "staged"
+    refute buffer_content(staged_buf) =~ "worktree"
+
+    {:noreply, changed_state} =
+      MingaEditor.handle_info(
+        {:minga_input, {:gui_action, {:git_open_diff, rel_path, 1}}},
+        state_with_panel_entries([staged_entry, changed_entry])
+      )
+
+    changed_buf = changed_state.workspace.buffers.active
+    assert Buffer.buffer_name(changed_buf) == "both.txt [diff:unstaged]"
+    assert buffer_content(changed_buf) =~ "worktree"
+    refute buffer_content(changed_buf) =~ "staged"
+  end
+
+  defp state_with_selected_entry(entry), do: state_with_panel_entries([entry])
+
+  defp state_with_panel_entries(entries) do
     alias MingaEditor.Shell.Traditional.GitStatus.TuiState
 
     panel_data = %{
@@ -68,7 +102,7 @@ defmodule MingaEditor.Input.GitStatusDiffOpenTest do
       branch: "main",
       ahead: 0,
       behind: 0,
-      entries: [entry]
+      entries: entries
     }
 
     tui = %TuiState{cursor_index: 1, collapsed: %{}}

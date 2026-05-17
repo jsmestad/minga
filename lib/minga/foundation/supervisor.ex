@@ -17,6 +17,7 @@ defmodule Minga.Foundation.Supervisor do
       ├── Minga.Keymap.Active          Active keymap state
       ├── Minga.Config.Hooks           Lifecycle hooks
       ├── Minga.Config.Advice          Before/after command advice (ETS)
+      ├── Minga.Config.ModelineSegments Custom modeline segments (ETS)
       ├── MingaAgent.Tool.Registry     Agent tool specs (ETS)
       └── Minga.Language.Filetype.Registry      Filetype detection
 
@@ -43,6 +44,7 @@ defmodule Minga.Foundation.Supervisor do
       Minga.Keymap.Active,
       Minga.Config.Hooks,
       Minga.Config.Advice,
+      Minga.Config.ModelineSegments,
       MingaAgent.Tool.Registry,
       Minga.Language.Filetype.Registry
     ]

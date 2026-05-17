@@ -211,17 +211,7 @@ defmodule MingaEditor.Commands.Git do
         state
       end
 
-    default_msg =
-      case Git.root_for(Minga.Project.resolve_root()) do
-        {:ok, git_root} ->
-          case Git.last_commit_message(git_root) do
-            {:ok, msg} -> msg
-            :error -> ""
-          end
-
-        :not_git ->
-          ""
-      end
+    default_msg = git_status_last_commit_message(state)
 
     MingaEditor.PromptUI.open(state, MingaEditor.UI.Prompt.GitAmend, default: default_msg)
   end
@@ -819,9 +809,11 @@ defmodule MingaEditor.Commands.Git do
 
   @spec open_git_status_panel(state()) :: state()
   defp open_git_status_panel(state) do
-    case Git.root_for(Minga.Project.resolve_root()) do
+    project_root = Minga.Project.resolve_root()
+
+    case Git.root_for(project_root) do
       {:ok, git_root} -> open_git_status_for_root(state, git_root)
-      :not_git -> EditorState.set_status(state, "Not in a git repository")
+      :not_git -> open_not_git_status_panel(state, project_root)
     end
   end
 
@@ -840,7 +832,9 @@ defmodule MingaEditor.Commands.Git do
           branch: summary.branch || "",
           ahead: summary.ahead,
           behind: summary.behind,
-          entries: entries
+          entries: entries,
+          entry_base_path: Minga.Project.resolve_root(),
+          last_commit_message: summary.last_commit_message
         }
 
         # Mutual exclusivity: close file tree when opening git status
@@ -853,6 +847,37 @@ defmodule MingaEditor.Commands.Git do
         |> EditorState.set_git_status_panel(panel_data)
         |> Layout.invalidate()
         |> EditorState.invalidate_all_windows()
+    end
+  end
+
+  @spec open_not_git_status_panel(state(), String.t()) :: state()
+  defp open_not_git_status_panel(state, project_root) do
+    panel_data = %{
+      repo_state: :not_a_repo,
+      branch: "",
+      ahead: 0,
+      behind: 0,
+      entries: [],
+      entry_base_path: project_root,
+      last_commit_message: ""
+    }
+
+    state = close_file_tree_if_open(state)
+
+    state =
+      EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :git_status))
+
+    state
+    |> EditorState.set_git_status_panel(panel_data)
+    |> Layout.invalidate()
+    |> EditorState.invalidate_all_windows()
+  end
+
+  @spec git_status_last_commit_message(state()) :: String.t()
+  defp git_status_last_commit_message(state) do
+    case EditorState.git_status_panel(state) do
+      nil -> ""
+      panel -> Map.get(panel, :last_commit_message, "")
     end
   end
 

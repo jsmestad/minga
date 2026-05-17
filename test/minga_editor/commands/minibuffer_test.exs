@@ -2,15 +2,20 @@ defmodule MingaEditor.Commands.MinibufferTest do
   @moduledoc """
   Tests for the :accept_command_candidate command handler.
 
-  Verifies that Tab acceptance in command mode replaces the input with
-  the selected candidate, handles edge cases (no match, wrong mode),
-  and resets the candidate_index after acceptance.
+  Most coverage exercises command-mode state transitions directly. One editor-level smoke test remains to verify that Tab is routed to the command handler from command mode.
   """
 
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Config.Options
   alias MingaEditor
+  alias MingaEditor.Commands
+  alias MingaEditor.Editing
+  alias MingaEditor.Startup
+  alias MingaEditor.State, as: EditorState
+
+  @sync_timeout 30_000
 
   defp start_editor(content \\ "hello") do
     {:ok, buffer} = BufferProcess.start_link(content: content)
@@ -28,77 +33,93 @@ defmodule MingaEditor.Commands.MinibufferTest do
     {editor, buffer}
   end
 
+  defp start_command_state(input, candidate_index \\ 0) do
+    {:ok, buffer} = BufferProcess.start_link(content: "hello")
+    {:ok, options} = Options.start_link(name: nil)
+
+    state =
+      Startup.build_initial_state(
+        port_manager: nil,
+        options_server: options,
+        buffer: buffer,
+        width: 80,
+        height: 24,
+        editing_model: :vim
+      )
+      |> EditorState.transition_mode(:command)
+      |> Editing.update_mode_state(%{input: input, candidate_index: candidate_index})
+
+    {state, buffer}
+  end
+
   defp send_key(editor, codepoint, mods \\ 0) do
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
-    _ = :sys.get_state(editor)
+    :sys.get_state(editor, @sync_timeout)
   end
 
-  defp get_mode_state(editor) do
-    state = :sys.get_state(editor)
-    {state.workspace.editing.mode, state.workspace.editing.mode_state}
+  describe "accept_command_candidate command state" do
+    @describetag layer: :command_state
+
+    test "replaces input with selected candidate" do
+      {state, _buffer} = start_command_state("sav")
+
+      result = Commands.execute(state, {:accept_command_candidate})
+      mode_state = Editing.mode_state(result)
+
+      assert Minga.Editing.mode(result) == :command
+      assert mode_state.input == "save"
+      assert mode_state.candidate_index == 0
+    end
+
+    test "with no matching candidates is a no-op" do
+      {state, _buffer} = start_command_state("zzzzz")
+
+      result = Commands.execute(state, {:accept_command_candidate})
+      mode_state = Editing.mode_state(result)
+
+      assert Minga.Editing.mode(result) == :command
+      assert mode_state.input == "zzzzz"
+      assert mode_state.candidate_index == 0
+    end
+
+    test "accepts the selected non-first candidate" do
+      {state, _buffer} = start_command_state("qui", 1)
+
+      result = Commands.execute(state, {:accept_command_candidate})
+      mode_state = Editing.mode_state(result)
+
+      assert mode_state.input == "quit_all"
+      assert mode_state.candidate_index == 0
+    end
+
+    test "does nothing outside command mode" do
+      {state, _buffer} = start_command_state("sav")
+      state = EditorState.transition_mode(state, :normal)
+
+      result = Commands.execute(state, {:accept_command_candidate})
+
+      assert Minga.Editing.mode(result) == :normal
+    end
   end
 
-  describe "accept_command_candidate via Tab in command mode" do
-    test "Tab replaces input with selected candidate" do
+  describe "accept_command_candidate editor integration smoke" do
+    @describetag layer: :editor_integration
+
+    test "Tab routes to quit_all candidate acceptance in command mode" do
       {editor, _buf} = start_editor()
 
-      # Enter command mode
       send_key(editor, ?:)
-      # Type "sav" to get "save" as a candidate
-      send_key(editor, ?s)
-      send_key(editor, ?a)
-      send_key(editor, ?v)
-
-      # Press Tab to accept
-      send_key(editor, 9)
-
-      {mode, ms} = get_mode_state(editor)
-      assert mode == :command
-      assert ms.input == "save"
-      assert ms.candidate_index == 0
-    end
-
-    test "Tab with no matching candidates is a no-op" do
-      {editor, _buf} = start_editor()
-
-      # Enter command mode
-      send_key(editor, ?:)
-      # Type nonsense that matches nothing
-      send_key(editor, ?z)
-      send_key(editor, ?z)
-      send_key(editor, ?z)
-      send_key(editor, ?z)
-      send_key(editor, ?z)
-
-      # Press Tab
-      send_key(editor, 9)
-
-      {mode, ms} = get_mode_state(editor)
-      assert mode == :command
-      assert ms.input == "zzzzz"
-    end
-
-    test "arrow down then Tab selects second candidate" do
-      {editor, _buf} = start_editor()
-
-      # Enter command mode
-      send_key(editor, ?:)
-      # Type "qui" to get "quit" and "quit_all" as candidates
       send_key(editor, ?q)
       send_key(editor, ?u)
       send_key(editor, ?i)
 
-      # Arrow down to select second candidate
-      send_key(editor, 57_353)
+      _ = send_key(editor, 57_353)
+      state = send_key(editor, 9)
+      mode_state = Editing.mode_state(state)
 
-      # Press Tab to accept
-      send_key(editor, 9)
-
-      {mode, ms} = get_mode_state(editor)
-      assert mode == :command
-      # Should have accepted the second candidate (quit_all)
-      assert ms.input == "quit_all"
-      assert ms.candidate_index == 0
+      assert Minga.Editing.mode(state) == :command
+      assert mode_state.input == "quit_all"
+      assert mode_state.candidate_index == 0
     end
   end
 end

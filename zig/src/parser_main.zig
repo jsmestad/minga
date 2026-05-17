@@ -271,6 +271,7 @@ fn handleCommand(
             if (hl.textobject_query != null) {
                 sendTextobjectPositions(hl, pb.buffer_id, pb.version, stdout, alloc) catch {};
             }
+            sendDocumentSymbols(hl, pb.buffer_id, pb.version, stdout, alloc) catch {};
 
             // Save tree back to buffer state.
             saveTreeToBuffer(hl, bs);
@@ -333,6 +334,15 @@ fn handleCommand(
                 hl.setTextobjectQuery(stq.source) catch {};
             }
         },
+        .set_tags_query => |stq| {
+            if (buffers.getPtr(stq.buffer_id)) |bs| {
+                if (!activateBuffer(hl, bs)) return;
+                hl.setTagsQuery(stq.source) catch {};
+                saveTreeToBuffer(hl, bs);
+            } else {
+                hl.setTagsQuery(stq.source) catch {};
+            }
+        },
         .request_textobject => |req| {
             const bs = buffers.getPtr(req.buffer_id) orelse {
                 try sendTextobjectResult(stdout, req.request_id, null);
@@ -358,6 +368,19 @@ fn handleCommand(
             const result = hl.findMatchingItem(req.row, req.col);
             saveTreeToBuffer(hl, bs);
             try sendMatchItemResult(stdout, req.request_id, result);
+        },
+        .request_structural_nav => |req| {
+            const bs = buffers.getPtr(req.buffer_id) orelse {
+                try sendStructuralNavResult(stdout, req.request_id, null);
+                return;
+            };
+            if (!activateBuffer(hl, bs)) {
+                try sendStructuralNavResult(stdout, req.request_id, null);
+                return;
+            }
+            const result = hl.structuralNav(req.row, req.col, req.action);
+            saveTreeToBuffer(hl, bs);
+            try sendStructuralNavResult(stdout, req.request_id, result);
         },
         .load_grammar => |lg| {
             hl.loadGrammar(lg.name, lg.path) catch {
@@ -452,6 +475,7 @@ fn handleEditBuffer(
     if (hl.textobject_query != null) {
         sendTextobjectPositions(hl, decoded.buffer_id, decoded.version, stdout, alloc) catch {};
     }
+    sendDocumentSymbols(hl, decoded.buffer_id, decoded.version, stdout, alloc) catch {};
 
     // Save tree back to buffer state.
     saveTreeToBuffer(hl, bs);
@@ -495,6 +519,13 @@ fn sendMatchItemResult(stdout: *std.Io.Writer, request_id: u32, result: ?protoco
     try stdout.flush();
 }
 
+fn sendStructuralNavResult(stdout: *std.Io.Writer, request_id: u32, result: ?protocol.StructuralNavResult) !void {
+    var rbuf: [280]u8 = undefined;
+    const rlen = protocol.encodeNodeInfo(&rbuf, request_id, result);
+    try protocol.writeMessage(stdout, rbuf[0..rlen]);
+    try stdout.flush();
+}
+
 /// Send textobject positions to stdout.
 fn sendTextobjectPositions(
     hl: *highlighter_mod.Highlighter,
@@ -507,6 +538,23 @@ fn sendTextobjectPositions(
     defer if (entries.len > 0) alloc.free(entries);
 
     const buf = try protocol.encodeTextobjectPositions(alloc, buffer_id, version, entries);
+    defer alloc.free(buf);
+    try protocol.writeMessage(stdout, buf);
+    try stdout.flush();
+}
+
+/// Send document symbols to stdout.
+fn sendDocumentSymbols(
+    hl: *highlighter_mod.Highlighter,
+    buffer_id: u32,
+    version: u32,
+    stdout: *std.Io.Writer,
+    alloc: std.mem.Allocator,
+) !void {
+    const symbols = hl.collectSymbols(alloc);
+    defer if (symbols.len > 0) alloc.free(symbols);
+
+    const buf = try protocol.encodeDocumentSymbols(alloc, buffer_id, version, symbols);
     defer alloc.free(buf);
     try protocol.writeMessage(stdout, buf);
     try stdout.flush();

@@ -75,6 +75,7 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendGitUnstageAll()
     func sendGitCommit(message: String)
     func sendGitOpenFile(path: String)
+    func sendGitOpenDiff(path: String, section: UInt8)
     func sendGitPush()
     func sendGitPull()
     func sendGitFetch()
@@ -108,6 +109,10 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendChangeSummaryClick(index: UInt32)
     func sendScrollToLine(line: UInt32)
     func sendFoldToggleAtLine(windowId: UInt16, bufferLine: UInt32)
+
+    // Native settings actions
+    func sendConfigQuery()
+    func sendConfigUpdate(key: String, value: SettingValue)
 }
 
 extension InputEncoder {
@@ -115,6 +120,12 @@ extension InputEncoder {
     func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8) {
         sendMouseEvent(row: row, col: col, button: button, modifiers: modifiers, eventType: eventType, clickCount: 1)
     }
+
+    /// Default no-op so existing test spies do not need to implement settings actions.
+    func sendConfigQuery() {}
+
+    /// Default no-op so existing test spies do not need to implement settings actions.
+    func sendConfigUpdate(key: String, value: SettingValue) {}
 }
 
 /// Thread-safe encoder that writes `{:packet, 4}` framed events to stdout.
@@ -674,20 +685,39 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     func sendGitCommit(message: String) {
+        sendGitCommit(message: message, amend: false)
+    }
+
+    private func sendGitCommit(message: String, amend: Bool) {
         let utf8 = Array(message.utf8)
         let msgLen = min(utf8.count, Int(UInt16.max))
-        var buf = Data(count: 4 + msgLen)
+        var buf = Data(count: 5 + msgLen)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_GIT_COMMIT
-        writeU16(&buf, 2, UInt16(msgLen))
+        buf[2] = amend ? 1 : 0
+        writeU16(&buf, 3, UInt16(msgLen))
         if msgLen > 0 {
-            buf.replaceSubrange(4..<(4 + msgLen), with: utf8[0..<msgLen])
+            buf.replaceSubrange(5..<(5 + msgLen), with: utf8[0..<msgLen])
         }
         writeFrame(buf)
     }
 
     func sendGitOpenFile(path: String) {
         sendGitPathAction(GUI_ACTION_GIT_OPEN_FILE, path: path)
+    }
+
+    func sendGitOpenDiff(path: String, section: UInt8) {
+        let utf8 = Array(path.utf8)
+        let pathLen = min(utf8.count, Int(UInt16.max))
+        var buf = Data(count: 5 + pathLen)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_GIT_OPEN_DIFF
+        writeU16(&buf, 2, UInt16(pathLen))
+        if pathLen > 0 {
+            buf.replaceSubrange(4..<(4 + pathLen), with: utf8[0..<pathLen])
+        }
+        buf[4 + pathLen] = section
+        writeFrame(buf)
     }
 
     func sendGitPush() {
@@ -712,16 +742,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     }
 
     func sendGitCommitAmend(message: String) {
-        let utf8 = Array(message.utf8)
-        let msgLen = min(utf8.count, Int(UInt16.max))
-        var buf = Data(count: 4 + msgLen)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_GIT_COMMIT_AMEND
-        writeU16(&buf, 2, UInt16(msgLen))
-        if msgLen > 0 {
-            buf.replaceSubrange(4..<(4 + msgLen), with: utf8[0..<msgLen])
-        }
-        writeFrame(buf)
+        sendGitCommit(message: message, amend: true)
     }
 
     /// Send a gui_action: git_pull_and_retry. Layout: opcode(1) + action_type(1).
@@ -737,7 +758,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         let nameLen = min(utf8.count, Int(UInt16.max))
         var buf = Data(count: 6 + nameLen)
         buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_GROUP_RENAME
+        buf[1] = GUI_ACTION_AGENT_GROUP_RENAME
         writeU16(&buf, 2, id)
         writeU16(&buf, 4, UInt16(nameLen))
         if nameLen > 0 {
@@ -751,7 +772,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         let iconLen = min(utf8.count, 255)
         var buf = Data(count: 5 + iconLen)
         buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_GROUP_SET_ICON
+        buf[1] = GUI_ACTION_AGENT_GROUP_SET_ICON
         writeU16(&buf, 2, id)
         buf[4] = UInt8(iconLen)
         if iconLen > 0 {
@@ -763,7 +784,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     func sendGroupClose(id: UInt16) {
         var buf = Data(count: 4)
         buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_GROUP_CLOSE
+        buf[1] = GUI_ACTION_AGENT_GROUP_CLOSE
         writeU16(&buf, 2, id)
         writeFrame(buf)
     }
@@ -931,6 +952,61 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeU16(&buf, 2, windowId)
         writeU32(&buf, 4, bufferLine)
         writeFrame(buf)
+    }
+
+    /// Send a gui_action: config_query. Layout: opcode(1) + action_type(1).
+    func sendConfigQuery() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_CONFIG_QUERY
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: config_update. Layout: opcode(1) + action_type(1) + key_len(1) + key + value.
+    func sendConfigUpdate(key: String, value: SettingValue) {
+        let keyBytes = Array(key.utf8.prefix(Int(UInt8.max)))
+        var buf = Data()
+        buf.append(OP_GUI_ACTION)
+        buf.append(GUI_ACTION_CONFIG_UPDATE)
+        buf.append(UInt8(keyBytes.count))
+        buf.append(contentsOf: keyBytes)
+        appendSettingValue(value, to: &buf)
+        writeFrame(buf)
+    }
+
+    private func appendSettingValue(_ value: SettingValue, to buf: inout Data) {
+        switch value {
+        case .bool(let enabled):
+            buf.append(SETTING_VALUE_BOOL)
+            buf.append(enabled ? 1 : 0)
+        case .int(let number):
+            buf.append(SETTING_VALUE_INT)
+            appendI32(Int32(clamping: number), to: &buf)
+        case .string(let text):
+            buf.append(SETTING_VALUE_STRING)
+            appendString16(&buf, text)
+        case .atom(let text):
+            buf.append(SETTING_VALUE_ATOM)
+            appendString16(&buf, text)
+        case .float(let number):
+            buf.append(SETTING_VALUE_FLOAT)
+            appendFloat64(number, to: &buf)
+        }
+    }
+
+    private func appendI32(_ value: Int32, to buf: inout Data) {
+        let unsigned = UInt32(bitPattern: value)
+        buf.append(UInt8((unsigned >> 24) & 0xFF))
+        buf.append(UInt8((unsigned >> 16) & 0xFF))
+        buf.append(UInt8((unsigned >> 8) & 0xFF))
+        buf.append(UInt8(unsigned & 0xFF))
+    }
+
+    private func appendFloat64(_ value: Double, to buf: inout Data) {
+        let bits = value.bitPattern.bigEndian
+        withUnsafeBytes(of: bits) { rawBuffer in
+            buf.append(contentsOf: rawBuffer)
+        }
     }
 
     // MARK: - Private

@@ -115,6 +115,22 @@ defmodule Minga.Git.RepoTest do
       refute_receive {:minga_event, :git_status_changed, %{git_root: ^dir}}, 50
     end
 
+    test "refresh publishes and caches last commit message changes", %{root: dir, repo: repo} do
+      Events.subscribe(:git_status_changed)
+      GitStub.set_last_commit_message(dir, "feat: updated subject")
+
+      Repo.refresh(repo)
+      :sys.get_state(repo)
+
+      assert_receive {:minga_event, :git_status_changed,
+                      %Events.GitStatusEvent{
+                        git_root: ^dir,
+                        last_commit_message: "feat: updated subject"
+                      }}
+
+      assert Repo.summary(repo).last_commit_message == "feat: updated subject"
+    end
+
     test "refresh publishes git_status_changed when branch changes", %{root: dir, repo: repo} do
       Events.subscribe(:git_status_changed)
       GitStub.set_branch(dir, "feature/new")

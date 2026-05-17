@@ -17,6 +17,7 @@ defmodule MingaEditor.UI.Picker.Context do
   - `tab_bar` — tab bar state (tabs, active tab, agent groups)
   - `agent_session` — agent session PID (if available)
   - `picker_ui` — picker UI state (context map for sources)
+  - `document_symbols` — tree-sitter document symbols for the active window
   - `capabilities` — frontend capabilities (GUI detection, etc.)
   - `keymap_server` — keymap server used by this editor instance
   - `options_server` — options server used by this editor instance
@@ -56,7 +57,8 @@ defmodule MingaEditor.UI.Picker.Context do
     :capabilities,
     :keymap_server,
     :options_server,
-    :theme
+    :theme,
+    document_symbols: []
   ]
 
   @type t :: %__MODULE__{
@@ -68,6 +70,7 @@ defmodule MingaEditor.UI.Picker.Context do
           tab_bar: TabBar.t(),
           agent_session: pid() | nil,
           picker_ui: map(),
+          document_symbols: [Minga.Language.Symbol.t()],
           capabilities: map(),
           keymap_server: State.keymap_server() | nil,
           options_server: State.options_server() | nil,
@@ -95,11 +98,20 @@ defmodule MingaEditor.UI.Picker.Context do
       tab_bar: state.shell_state.tab_bar,
       agent_session: agent_session,
       picker_ui: picker_ui,
+      document_symbols: active_document_symbols(state),
       capabilities: state.capabilities,
       keymap_server: State.keymap_server(state),
       options_server: State.options_server(state),
       theme: state.theme
     }
+  end
+
+  @spec active_document_symbols(State.t()) :: [Minga.Language.Symbol.t()]
+  defp active_document_symbols(%State{} = state) do
+    case State.active_window_struct(state) do
+      %{document_symbols: symbols} when is_list(symbols) -> symbols
+      _ -> []
+    end
   end
 
   @spec picker_ui_from_modal(State.t(), map() | nil) :: PickerState.t()

@@ -14,6 +14,7 @@ defmodule MingaEditor.SemanticWindowTest do
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.Scroll
+  alias MingaEditor.RenderPipeline.Scroll.WindowScroll
   alias MingaEditor.SemanticWindow
   alias MingaEditor.SemanticWindow.DiagnosticRange
   alias MingaEditor.SemanticWindow.SearchMatch
@@ -21,8 +22,11 @@ defmodule MingaEditor.SemanticWindowTest do
   alias MingaEditor.SemanticWindow.Span
   alias MingaEditor.SemanticWindow.VisualRow
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Renderer.Context
   alias MingaEditor.UI.FontRegistry
+  alias MingaEditor.UI.Highlight
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Core.Decorations
   alias Minga.Core.Face
 
   alias Minga.Editing.Search.Match, as: SearchMatchStruct
@@ -115,6 +119,100 @@ defmodule MingaEditor.SemanticWindowTest do
       [draw_text] = extract_draw_texts(wf.lines)
 
       assert row.text == draw_text
+    end
+
+    test "semantic spans include TODO keyword faces" do
+      state = gui_state(content: "# TODO ship")
+      {[wf], _cursor, _state} = build_content(state)
+
+      [row] = wf.semantic.rows
+      todo_span = Enum.find(row.spans, fn span -> span.start_col == 2 and span.end_col == 6 end)
+
+      assert row.text == "# TODO ship"
+      assert todo_span.fg == 0xECBE7B
+      assert Bitwise.band(todo_span.attrs, 1) == 1
+    end
+
+    test "folded semantic rows keep the fold suffix neutral when hidden lines contain TODOs" do
+      full_lines = ["alpha", "  # TODO hidden", "  # TODO visible"]
+      state = gui_state(content: Enum.join(full_lines, "\n"))
+      buffer = state.workspace.buffers.active
+      win_id = state.workspace.windows.active
+      window = Map.fetch!(state.workspace.windows.map, win_id)
+      layout = Layout.get(state)
+      win_layout = Map.fetch!(layout.window_layouts, win_id)
+      snapshot = BufferProcess.render_snapshot(buffer, 0, 3)
+      line1_off = Highlight.byte_offset_for_line(full_lines, 1)
+      line2_off = Highlight.byte_offset_for_line(full_lines, 2)
+      todo_face = Face.new(fg: 0xECBE7B, bold: true)
+      comment_face = [fg: 0x6A737D]
+
+      hl =
+        Highlight.new(%{"comment" => comment_face})
+        |> Highlight.put_names(["comment"])
+        |> Highlight.put_spans(1, [
+          %{
+            start_byte: line1_off,
+            end_byte: line1_off + byte_size(Enum.at(full_lines, 1)),
+            capture_id: 0
+          },
+          %{
+            start_byte: line2_off,
+            end_byte: line2_off + byte_size(Enum.at(full_lines, 2)),
+            capture_id: 0
+          }
+        ])
+
+      scroll = %WindowScroll{
+        win_id: win_id,
+        window: window,
+        win_layout: win_layout,
+        is_active: true,
+        viewport: state.workspace.viewport,
+        cursor_line: 0,
+        cursor_byte_col: 0,
+        cursor_col: 0,
+        first_line: 0,
+        lines: snapshot.lines,
+        snapshot: snapshot,
+        gutter_w: 4,
+        content_w: state.workspace.viewport.cols - 4,
+        has_sign_column: false,
+        preview_matches: [],
+        line_number_style: :absolute,
+        wrap_on: false,
+        buf_version: snapshot.version,
+        width_oracle: %Minga.Core.WidthOracle.Monospace{},
+        visible_line_map: [{0, {:fold_start, 1}}, {2, :normal}]
+      }
+
+      ctx = %Context{
+        viewport: state.workspace.viewport,
+        gutter_w: 4,
+        content_w: state.workspace.viewport.cols - 4,
+        highlight: hl,
+        decorations: Decorations.new(),
+        hl_todo_faces: %{todo: todo_face}
+      }
+
+      semantic = SemanticWindow.Builder.build(state, scroll, ctx)
+
+      [fold_row, visible_row] = semantic.rows
+      suffix = " ··· 1 lines"
+
+      assert fold_row.row_type == :fold_start
+      assert visible_row.row_type == :normal
+      assert fold_row.text == "alpha#{suffix}"
+      assert visible_row.text =~ "TODO"
+
+      assert Enum.any?(fold_row.spans, fn span ->
+               span.start_col == String.length("alpha") and span.fg == ctx.gutter_colors.fold_fg and
+                 Bitwise.band(span.attrs, 1) == 0
+             end)
+
+      assert Enum.any?(visible_row.spans, fn span ->
+               span.fg == todo_face.fg and Bitwise.band(span.attrs, 1) == 1
+             end)
     end
 
     test "semantic row text matches for multiline content" do

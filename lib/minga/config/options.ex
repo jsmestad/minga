@@ -56,6 +56,9 @@ defmodule Minga.Config.Options do
           | :lsp_auto_start
           | :formatter
           | :title_format
+          | :modeline_left_segments
+          | :modeline_right_segments
+          | :modeline_separator
           | :recent_files_limit
           | :persist_recent_files
           | :persist_known_projects
@@ -111,6 +114,7 @@ defmodule Minga.Config.Options do
           | :log_level_editor
           | :cursorline
           | :cursor_animate
+          | :cursor_blink
           | :nav_flash
           | :nav_flash_threshold
           | :log_level_config
@@ -155,6 +159,7 @@ defmodule Minga.Config.Options do
           | :string
           | :string_or_nil
           | :string_list
+          | :atom_list
           | :map_or_nil
           | :map_list
           | :float_or_nil
@@ -230,6 +235,13 @@ defmodule Minga.Config.Options do
     {:formatter, :string_or_nil, nil, "External formatter command for the current buffer."},
     {:title_format, :string, "{filename} {dirty}({directory}) - Minga",
      "Window title template with placeholder tokens."},
+    {:modeline_left_segments, :atom_list, [:mode, :filename, :git, :agent, :background_agent],
+     "Modeline segments shown on the left, in render order."},
+    {:modeline_right_segments, :atom_list,
+     [:diagnostics, :indent, :parser, :lsp, :filetype, :position, :percent],
+     "Modeline segments shown on the right, in render order."},
+    {:modeline_separator, {:enum, [:powerline, :round, :slant, :none]}, :powerline,
+     "Separator style between modeline color zones."},
     {:recent_files_limit, :pos_integer, 200, "Maximum number of recent files to keep."},
     {:persist_recent_files, :boolean, true,
      "Whether recent files are written to disk between sessions."},
@@ -300,6 +312,7 @@ defmodule Minga.Config.Options do
     {:cursorline, :boolean, true, "Whether the current cursor line is highlighted."},
     {:cursor_animate, :boolean, true,
      "Whether cursor movement is smoothly animated in GUI frontends."},
+    {:cursor_blink, :boolean, true, "Whether GUI frontends blink the editor cursor."},
     {:nav_flash, :boolean, true, "Whether large cursor jumps briefly highlight the destination."},
     {:nav_flash_threshold, :pos_integer, 5,
      "Minimum jump distance that triggers navigation flash."},
@@ -669,6 +682,22 @@ defmodule Minga.Config.Options do
     end
   end
 
+  @doc "Marks an option as explicitly set by the GUI settings overlay."
+  @spec mark_explicit(server(), option_name()) :: :ok
+  def mark_explicit(server \\ @default_server, name) when is_atom(name) do
+    :ets.insert(table_name(server), {{:explicit, name}, true})
+    :ok
+  end
+
+  @doc "Returns whether an option was explicitly set by the GUI settings overlay."
+  @spec explicitly_set?(server(), option_name()) :: boolean()
+  def explicitly_set?(server \\ @default_server, name) when is_atom(name) do
+    case :ets.lookup(table_name(server), {:explicit, name}) do
+      [{{:explicit, ^name}, true}] -> true
+      _ -> false
+    end
+  end
+
   @doc """
   Gets the current global value of an option, falling back to its default.
   """
@@ -958,6 +987,18 @@ defmodule Minga.Config.Options do
 
   defp validate_type(:string_list, name, value) do
     {:error, "#{name} must be a list of strings, got: #{inspect(value)}"}
+  end
+
+  defp validate_type(:atom_list, _name, value) when is_list(value) do
+    if Enum.all?(value, &is_atom/1) do
+      :ok
+    else
+      {:error, "expected a list of atoms, got non-atom elements"}
+    end
+  end
+
+  defp validate_type(:atom_list, name, value) do
+    {:error, "#{name} must be a list of atoms, got: #{inspect(value)}"}
   end
 
   defp validate_type(:map_or_nil, _name, nil), do: :ok

@@ -15,6 +15,18 @@ defmodule Minga.Editing.TextObject do
   * `a_word/2` (`aw`) — the word plus one surrounding whitespace run
     (trailing preferred; leading used when at end of line).
 
+  ## Paragraph text objects
+
+  * `inner_paragraph/2` (`ip`) — contiguous non-blank lines around the cursor,
+    or the current blank-line run when the cursor is on a blank line.
+  * `a_paragraph/2` (`ap`) — the paragraph plus one surrounding blank line,
+    preferring a trailing blank line and using a leading blank at end of file.
+
+  ## Sentence text objects
+
+  * `inner_sentence/2` (`is`) — the current sentence without trailing whitespace.
+  * `a_sentence/2` (`as`) — the current sentence including trailing whitespace.
+
   ## Quote text objects
 
   * `inner_quotes/3` (`i"`, `i'`) — the content between the nearest enclosing
@@ -40,6 +52,9 @@ defmodule Minga.Editing.TextObject do
 
   @typedoc "An inclusive `{start_pos, end_pos}` range, or `nil` when not found."
   @type range :: {position(), position()} | nil
+
+  @typep sentence_tokens :: tuple()
+  @typep sentence_span :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
 
   # ── Word text objects ────────────────────────────────────────────────────────
 
@@ -118,6 +133,74 @@ defmodule Minga.Editing.TextObject do
       {{line, start_byte}, {line, end_byte}}
     end
   end
+
+  # ── Paragraph text objects ────────────────────────────────────────────────────
+
+  @doc """
+  Returns the current paragraph range without surrounding blank lines.
+
+  A paragraph is a contiguous run of non-blank lines. When the cursor is on a
+  blank line, the current blank-line run is returned so operators still have a
+  stable linewise target.
+
+  Corresponds to Vim's `ip` text object.
+  """
+  @spec inner_paragraph(Readable.t(), position()) :: range()
+  def inner_paragraph(buffer, position) do
+    case paragraph_bounds(buffer, position) do
+      nil -> nil
+      {first_line, last_line} -> line_range(buffer, first_line, last_line)
+    end
+  end
+
+  @doc """
+  Returns the current paragraph plus one surrounding blank line.
+
+  A trailing blank line is preferred. If the paragraph reaches end of file and
+  has a leading blank line, that leading blank is included instead.
+
+  Corresponds to Vim's `ap` text object.
+  """
+  @spec a_paragraph(Readable.t(), position()) :: range()
+  def a_paragraph(buffer, {line, _col} = position) do
+    case paragraph_bounds(buffer, position) do
+      nil ->
+        nil
+
+      {first_line, last_line} ->
+        line_text = Readable.line_at(buffer, line) || ""
+
+        if blank_line?(line_text) do
+          around_blank_paragraph_range(buffer, first_line, last_line)
+        else
+          around_paragraph_range(buffer, first_line, last_line)
+        end
+    end
+  end
+
+  # ── Sentence text objects ─────────────────────────────────────────────────────
+
+  @doc """
+  Returns the current sentence without trailing whitespace.
+
+  Sentences end at `.`, `!`, or `?`, may include closing delimiters after the
+  punctuation, and stop at paragraph boundaries.
+
+  Corresponds to Vim's `is` text object.
+  """
+  @spec inner_sentence(Readable.t(), position()) :: range()
+  def inner_sentence(buffer, position), do: sentence_range(buffer, position, :inner)
+
+  @doc """
+  Returns the current sentence including trailing whitespace.
+
+  When the cursor is on whitespace between two sentences, this follows Vim's
+  around-sentence behavior and selects the following sentence.
+
+  Corresponds to Vim's `as` text object.
+  """
+  @spec a_sentence(Readable.t(), position()) :: range()
+  def a_sentence(buffer, position), do: sentence_range(buffer, position, :around)
 
   # ── Quote text objects ────────────────────────────────────────────────────────
 
@@ -278,6 +361,549 @@ defmodule Minga.Editing.TextObject do
   defp adjust_end_position(row, 0) when row > 0, do: {row - 1, 0}
   defp adjust_end_position(row, col) when col > 0, do: {row, col - 1}
   defp adjust_end_position(row, col), do: {row, col}
+
+  # ── Private — paragraph helpers ───────────────────────────────────────────────
+
+  @spec paragraph_bounds(Readable.t(), position()) :: {non_neg_integer(), non_neg_integer()} | nil
+  defp paragraph_bounds(buffer, {line, _col}) do
+    if empty_buffer?(buffer) do
+      nil
+    else
+      paragraph_bounds_for_line(buffer, line, Readable.line_at(buffer, line))
+    end
+  end
+
+  @spec paragraph_bounds_for_line(Readable.t(), non_neg_integer(), String.t() | nil) ::
+          {non_neg_integer(), non_neg_integer()} | nil
+  defp paragraph_bounds_for_line(_buffer, _line, nil), do: nil
+
+  defp paragraph_bounds_for_line(buffer, line, text) do
+    if blank_line?(text) do
+      {blank_run_start(buffer, line), blank_run_end(buffer, line)}
+    else
+      {paragraph_start(buffer, line), paragraph_end(buffer, line)}
+    end
+  end
+
+  @spec empty_buffer?(Readable.t()) :: boolean()
+  defp empty_buffer?(buffer) do
+    Readable.line_count(buffer) == 1 and (Readable.line_at(buffer, 0) || "") == ""
+  end
+
+  @spec paragraph_start(Readable.t(), non_neg_integer()) :: non_neg_integer()
+  defp paragraph_start(_buffer, 0), do: 0
+
+  defp paragraph_start(buffer, line) do
+    prev_line = line - 1
+
+    if blank_line?(Readable.line_at(buffer, prev_line) || "") do
+      line
+    else
+      paragraph_start(buffer, prev_line)
+    end
+  end
+
+  @spec paragraph_end(Readable.t(), non_neg_integer()) :: non_neg_integer()
+  defp paragraph_end(buffer, line) do
+    next_line = line + 1
+
+    case Readable.line_at(buffer, next_line) do
+      nil ->
+        line
+
+      text ->
+        if blank_line?(text), do: line, else: paragraph_end(buffer, next_line)
+    end
+  end
+
+  @spec blank_run_start(Readable.t(), non_neg_integer()) :: non_neg_integer()
+  defp blank_run_start(_buffer, 0), do: 0
+
+  defp blank_run_start(buffer, line) do
+    prev_line = line - 1
+
+    if blank_line?(Readable.line_at(buffer, prev_line) || "") do
+      blank_run_start(buffer, prev_line)
+    else
+      line
+    end
+  end
+
+  @spec blank_run_end(Readable.t(), non_neg_integer()) :: non_neg_integer()
+  defp blank_run_end(buffer, line) do
+    next_line = line + 1
+
+    case Readable.line_at(buffer, next_line) do
+      nil ->
+        line
+
+      text ->
+        if blank_line?(text), do: blank_run_end(buffer, next_line), else: line
+    end
+  end
+
+  @spec around_paragraph_range(Readable.t(), non_neg_integer(), non_neg_integer()) :: range()
+  defp around_paragraph_range(buffer, first_line, last_line) do
+    line_count = Readable.line_count(buffer)
+
+    extended =
+      case paragraph_extension(buffer, first_line, last_line, line_count) do
+        :trailing -> {first_line, last_line + 1}
+        :leading -> {first_line - 1, last_line}
+        :none -> {first_line, last_line}
+      end
+
+    {range_first, range_last} = extended
+    line_range(buffer, range_first, range_last)
+  end
+
+  @spec around_blank_paragraph_range(Readable.t(), non_neg_integer(), non_neg_integer()) ::
+          range()
+  defp around_blank_paragraph_range(buffer, first_blank_line, last_blank_line) do
+    case next_non_blank_line(buffer, last_blank_line + 1) do
+      nil ->
+        case previous_non_blank_line(buffer, first_blank_line - 1) do
+          nil ->
+            line_range(buffer, first_blank_line, last_blank_line)
+
+          prev_line ->
+            line_range(buffer, paragraph_start(buffer, prev_line), last_blank_line)
+        end
+
+      next_line ->
+        around_paragraph_range(buffer, next_line, paragraph_end(buffer, next_line))
+    end
+  end
+
+  @spec paragraph_extension(
+          Readable.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer()
+        ) :: :trailing | :leading | :none
+  defp paragraph_extension(buffer, _first_line, last_line, line_count)
+       when last_line + 1 < line_count do
+    if blank_line?(Readable.line_at(buffer, last_line + 1) || ""), do: :trailing, else: :none
+  end
+
+  defp paragraph_extension(buffer, first_line, _last_line, _line_count) when first_line > 0 do
+    if blank_line?(Readable.line_at(buffer, first_line - 1) || ""), do: :leading, else: :none
+  end
+
+  defp paragraph_extension(_buffer, _first_line, _last_line, _line_count), do: :none
+
+  @spec line_range(Readable.t(), non_neg_integer(), non_neg_integer()) :: range()
+  defp line_range(buffer, first_line, last_line) do
+    {{first_line, 0}, {last_line, last_line_col(buffer, last_line)}}
+  end
+
+  @spec last_line_col(Readable.t(), non_neg_integer()) :: non_neg_integer()
+  defp last_line_col(buffer, line) do
+    case Readable.line_at(buffer, line) do
+      nil -> 0
+      "" -> 0
+      text -> Unicode.last_grapheme_byte_offset(text)
+    end
+  end
+
+  @spec next_non_blank_line(Readable.t(), integer()) :: non_neg_integer() | nil
+  defp next_non_blank_line(buffer, line) do
+    case Readable.line_at(buffer, line) do
+      nil ->
+        nil
+
+      text ->
+        if blank_line?(text), do: next_non_blank_line(buffer, line + 1), else: line
+    end
+  end
+
+  @spec previous_non_blank_line(Readable.t(), integer()) :: non_neg_integer() | nil
+  defp previous_non_blank_line(_buffer, line) when line < 0, do: nil
+
+  defp previous_non_blank_line(buffer, line) do
+    case Readable.line_at(buffer, line) do
+      nil ->
+        previous_non_blank_line(buffer, line - 1)
+
+      text ->
+        if blank_line?(text), do: previous_non_blank_line(buffer, line - 1), else: line
+    end
+  end
+
+  @spec blank_line?(String.t()) :: boolean()
+  defp blank_line?(text), do: String.trim(text) == ""
+
+  # ── Private — sentence helpers ────────────────────────────────────────────────
+
+  @spec sentence_range(Readable.t(), position(), :inner | :around) :: range()
+  defp sentence_range(buffer, position, kind) do
+    case sentence_context(buffer, position) do
+      nil ->
+        nil
+
+      {tokens, cursor_idx} ->
+        spans = sentence_spans(tokens)
+        sentence_range_for_tokens(tokens, spans, cursor_idx, kind)
+    end
+  end
+
+  @spec sentence_range_for_tokens(
+          sentence_tokens(),
+          [sentence_span()],
+          non_neg_integer(),
+          :inner | :around
+        ) :: range()
+  defp sentence_range_for_tokens(tokens, spans, cursor_idx, kind) do
+    case elem(tokens, cursor_idx) do
+      {" ", _pos} -> sentence_range_for_whitespace(tokens, spans, cursor_idx, kind)
+      {"\t", _pos} -> sentence_range_for_whitespace(tokens, spans, cursor_idx, kind)
+      {"\n", _pos} -> sentence_range_for_whitespace(tokens, spans, cursor_idx, kind)
+      {_char, _pos} -> sentence_span_for(spans, tokens, cursor_idx, kind)
+    end
+  end
+
+  @spec sentence_range_for_whitespace(
+          sentence_tokens(),
+          [sentence_span()],
+          non_neg_integer(),
+          :inner | :around
+        ) :: range()
+  defp sentence_range_for_whitespace(tokens, spans, cursor_idx, kind) do
+    if cursor_idx_within_sentence_inner?(spans, cursor_idx) do
+      sentence_span_for(spans, tokens, cursor_idx, kind)
+    else
+      sentence_gap_range(tokens, spans, cursor_idx, kind)
+    end
+  end
+
+  @spec cursor_idx_within_sentence_inner?([sentence_span()], non_neg_integer()) :: boolean()
+  defp cursor_idx_within_sentence_inner?(spans, cursor_idx) do
+    Enum.any?(spans, fn {start_idx, end_idx, _trailing_end_idx} ->
+      cursor_idx >= start_idx and cursor_idx <= end_idx
+    end)
+  end
+
+  @spec sentence_context(Readable.t(), position()) :: {sentence_tokens(), non_neg_integer()} | nil
+  defp sentence_context(buffer, position) do
+    case paragraph_bounds(buffer, position) do
+      nil -> nil
+      bounds -> sentence_context_in_bounds(buffer, position, bounds)
+    end
+  end
+
+  @spec sentence_context_in_bounds(
+          Readable.t(),
+          position(),
+          {non_neg_integer(), non_neg_integer()}
+        ) :: {sentence_tokens(), non_neg_integer()} | nil
+  defp sentence_context_in_bounds(buffer, {line, _col} = position, {first_line, last_line}) do
+    line_text = Readable.line_at(buffer, line) || ""
+
+    if blank_line?(line_text) do
+      nil
+    else
+      tokens = sentence_tokens(buffer, first_line, last_line)
+      cursor_idx = sentence_cursor_index(tokens, position)
+      if cursor_idx == nil, do: nil, else: {tokens, cursor_idx}
+    end
+  end
+
+  @spec sentence_tokens(Readable.t(), non_neg_integer(), non_neg_integer()) :: sentence_tokens()
+  defp sentence_tokens(buffer, first_line, last_line) do
+    first_line..last_line
+    |> Enum.flat_map(&sentence_tokens_for_line(buffer, &1, last_line))
+    |> List.to_tuple()
+  end
+
+  @spec sentence_tokens_for_line(Readable.t(), non_neg_integer(), non_neg_integer()) :: [
+          {String.t(), position()}
+        ]
+  defp sentence_tokens_for_line(buffer, line, last_line) do
+    text = Readable.line_at(buffer, line) || ""
+    tokens = graphemes_with_byte_cols(text, line)
+
+    if line < last_line do
+      tokens ++ [{"\n", {line, byte_size(text)}}]
+    else
+      tokens
+    end
+  end
+
+  @spec sentence_cursor_index(sentence_tokens(), position()) :: non_neg_integer() | nil
+  defp sentence_cursor_index(tokens, position) do
+    list = Tuple.to_list(tokens)
+    exact = Enum.find_index(list, fn {_g, token_pos} -> token_pos == position end)
+
+    case exact do
+      nil -> nearest_sentence_cursor_index(list, position)
+      idx -> idx
+    end
+  end
+
+  @spec nearest_sentence_cursor_index([{String.t(), position()}], position()) ::
+          non_neg_integer() | nil
+  defp nearest_sentence_cursor_index(tokens, position) do
+    after_idx =
+      Enum.find_index(tokens, fn {_g, token_pos} ->
+        compare_position(token_pos, position) == :gt
+      end)
+
+    case after_idx do
+      nil -> index_before_position(tokens, position)
+      idx -> idx
+    end
+  end
+
+  @spec index_before_position([{String.t(), position()}], position()) :: non_neg_integer() | nil
+  defp index_before_position(tokens, position) do
+    tokens
+    |> Enum.with_index()
+    |> Enum.filter(fn {{_g, token_pos}, _idx} -> compare_position(token_pos, position) == :lt end)
+    |> List.last()
+    |> index_from_position_result()
+  end
+
+  @spec index_from_position_result({{String.t(), position()}, non_neg_integer()} | nil) ::
+          non_neg_integer() | nil
+  defp index_from_position_result(nil), do: nil
+  defp index_from_position_result({_token, idx}), do: idx
+
+  @spec sentence_spans(sentence_tokens()) :: [sentence_span()]
+  defp sentence_spans(tokens) do
+    case next_non_whitespace_index(tokens, 0) do
+      nil -> []
+      start_idx -> build_sentence_spans(tokens, start_idx, [])
+    end
+  end
+
+  @spec build_sentence_spans(sentence_tokens(), non_neg_integer(), [sentence_span()]) :: [
+          sentence_span()
+        ]
+  defp build_sentence_spans(tokens, start_idx, acc) do
+    end_idx = sentence_end_or_paragraph_end(tokens, start_idx)
+    trailing_end_idx = trailing_whitespace_end(tokens, end_idx + 1)
+    span = {start_idx, end_idx, trailing_end_idx}
+
+    case next_non_whitespace_index(tokens, trailing_end_idx + 1) do
+      nil -> Enum.reverse([span | acc])
+      next_start_idx -> build_sentence_spans(tokens, next_start_idx, [span | acc])
+    end
+  end
+
+  @spec sentence_end_or_paragraph_end(sentence_tokens(), non_neg_integer()) :: non_neg_integer()
+  defp sentence_end_or_paragraph_end(tokens, start_idx) do
+    case find_sentence_end(tokens, start_idx) do
+      nil -> last_non_whitespace_index(tokens, tuple_size(tokens) - 1)
+      end_idx -> end_idx
+    end
+  end
+
+  @spec find_sentence_end(sentence_tokens(), non_neg_integer()) :: non_neg_integer() | nil
+  defp find_sentence_end(tokens, idx) when idx >= tuple_size(tokens), do: nil
+
+  defp find_sentence_end(tokens, idx) do
+    {char, _pos} = elem(tokens, idx)
+
+    if sentence_terminal?(char) do
+      sentence_end_after_terminal(tokens, idx)
+    else
+      find_sentence_end(tokens, idx + 1)
+    end
+  end
+
+  @spec sentence_end_after_terminal(sentence_tokens(), non_neg_integer()) ::
+          non_neg_integer() | nil
+  defp sentence_end_after_terminal(tokens, idx) do
+    close_idx = closing_delimiter_end(tokens, idx + 1)
+
+    if sentence_boundary_after?(tokens, close_idx + 1) do
+      close_idx
+    else
+      find_sentence_end(tokens, idx + 1)
+    end
+  end
+
+  @spec closing_delimiter_end(sentence_tokens(), non_neg_integer()) :: non_neg_integer()
+  defp closing_delimiter_end(tokens, idx) when idx >= tuple_size(tokens), do: idx - 1
+
+  defp closing_delimiter_end(tokens, idx) do
+    {char, _pos} = elem(tokens, idx)
+
+    if closing_sentence_delimiter?(char) do
+      closing_delimiter_end(tokens, idx + 1)
+    else
+      idx - 1
+    end
+  end
+
+  @spec sentence_boundary_after?(sentence_tokens(), non_neg_integer()) :: boolean()
+  defp sentence_boundary_after?(tokens, idx) when idx >= tuple_size(tokens), do: true
+
+  defp sentence_boundary_after?(tokens, idx) do
+    {char, _pos} = elem(tokens, idx)
+    sentence_whitespace?(char)
+  end
+
+  @spec trailing_whitespace_end(sentence_tokens(), non_neg_integer()) :: non_neg_integer()
+  defp trailing_whitespace_end(tokens, idx) when idx >= tuple_size(tokens),
+    do: tuple_size(tokens) - 1
+
+  defp trailing_whitespace_end(tokens, idx) do
+    {char, _pos} = elem(tokens, idx)
+
+    if sentence_whitespace?(char) do
+      trailing_whitespace_end(tokens, idx + 1)
+    else
+      idx - 1
+    end
+  end
+
+  @spec next_non_whitespace_index(sentence_tokens(), non_neg_integer()) :: non_neg_integer() | nil
+  defp next_non_whitespace_index(tokens, idx) when idx >= tuple_size(tokens), do: nil
+
+  defp next_non_whitespace_index(tokens, idx) do
+    {char, _pos} = elem(tokens, idx)
+
+    if sentence_whitespace?(char) do
+      next_non_whitespace_index(tokens, idx + 1)
+    else
+      idx
+    end
+  end
+
+  @spec last_non_whitespace_index(sentence_tokens(), integer()) :: non_neg_integer()
+  defp last_non_whitespace_index(tokens, idx) do
+    {char, _pos} = elem(tokens, idx)
+
+    if sentence_whitespace?(char) do
+      last_non_whitespace_index(tokens, idx - 1)
+    else
+      idx
+    end
+  end
+
+  @spec sentence_gap_range(
+          sentence_tokens(),
+          [sentence_span()],
+          non_neg_integer(),
+          :inner | :around
+        ) :: range()
+  defp sentence_gap_range(tokens, spans, cursor_idx, :inner) do
+    {gap_start_idx, gap_end_idx} = whitespace_run_indices(tokens, cursor_idx)
+
+    case {previous_sentence_span(spans, cursor_idx), next_sentence_span(spans, cursor_idx)} do
+      {nil, nil} ->
+        nil
+
+      {nil, {_next_start_idx, next_end_idx, _next_trailing_end_idx}} ->
+        range_from_token_indices(tokens, gap_start_idx, next_end_idx)
+
+      {_prev_span, _next_span} ->
+        range_from_token_indices(tokens, gap_start_idx, gap_end_idx)
+    end
+  end
+
+  defp sentence_gap_range(tokens, spans, cursor_idx, :around) do
+    {gap_start_idx, _gap_end_idx} = whitespace_run_indices(tokens, cursor_idx)
+
+    case next_sentence_span(spans, cursor_idx) do
+      nil ->
+        nil
+
+      {_next_start_idx, _next_end_idx, next_trailing_end_idx} ->
+        {_gap_char, gap_start_pos} = elem(tokens, gap_start_idx)
+        {_next_char, next_end_pos} = elem(tokens, next_trailing_end_idx)
+        {gap_start_pos, next_end_pos}
+    end
+  end
+
+  @spec next_sentence_span([sentence_span()], non_neg_integer()) :: sentence_span() | nil
+  defp next_sentence_span(spans, cursor_idx) do
+    Enum.find(spans, fn {start_idx, _end_idx, _trailing_end_idx} -> cursor_idx < start_idx end)
+  end
+
+  @spec previous_sentence_span([sentence_span()], non_neg_integer()) :: sentence_span() | nil
+  defp previous_sentence_span(spans, cursor_idx) do
+    spans
+    |> Enum.reverse()
+    |> Enum.find(fn {start_idx, _end_idx, _trailing_end_idx} -> cursor_idx >= start_idx end)
+  end
+
+  @spec whitespace_run_indices(sentence_tokens(), non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp whitespace_run_indices(tokens, idx) do
+    start_idx = scan_left_tuple(tokens, idx, &sentence_whitespace_token?/1)
+    end_idx = scan_right_tuple(tokens, idx, &sentence_whitespace_token?/1)
+    {start_idx, end_idx}
+  end
+
+  @spec sentence_whitespace_token?({String.t(), position()}) :: boolean()
+  defp sentence_whitespace_token?({char, _pos}), do: sentence_whitespace?(char)
+
+  @spec sentence_span_for(
+          [sentence_span()],
+          sentence_tokens(),
+          non_neg_integer(),
+          :inner | :around
+        ) ::
+          range()
+  defp sentence_span_for(spans, tokens, cursor_idx, :inner) do
+    span =
+      Enum.find(spans, fn {start_idx, _end_idx, trailing_end_idx} ->
+        cursor_idx >= start_idx and cursor_idx <= trailing_end_idx
+      end) ||
+        Enum.find(spans, fn {start_idx, _end_idx, _trailing_end_idx} -> cursor_idx < start_idx end)
+
+    sentence_span_to_range(span, tokens, :inner)
+  end
+
+  defp sentence_span_for(spans, tokens, cursor_idx, :around) do
+    span =
+      Enum.find(spans, fn {start_idx, end_idx, _trailing_end_idx} ->
+        cursor_idx >= start_idx and cursor_idx <= end_idx
+      end) ||
+        Enum.find(spans, fn {start_idx, _end_idx, _trailing_end_idx} -> cursor_idx < start_idx end) ||
+        List.last(spans)
+
+    sentence_span_to_range(span, tokens, :around)
+  end
+
+  @spec sentence_span_to_range(sentence_span() | nil, sentence_tokens(), :inner | :around) ::
+          range()
+  defp sentence_span_to_range(nil, _tokens, _kind), do: nil
+
+  defp sentence_span_to_range({start_idx, end_idx, _trailing_end_idx}, tokens, :inner) do
+    range_from_token_indices(tokens, start_idx, end_idx)
+  end
+
+  defp sentence_span_to_range({start_idx, _end_idx, trailing_end_idx}, tokens, :around) do
+    range_from_token_indices(tokens, start_idx, trailing_end_idx)
+  end
+
+  @spec range_from_token_indices(sentence_tokens(), non_neg_integer(), non_neg_integer()) ::
+          range()
+  defp range_from_token_indices(tokens, start_idx, end_idx) when end_idx >= start_idx do
+    {_start_char, start_pos} = elem(tokens, start_idx)
+    {_end_char, end_pos} = elem(tokens, end_idx)
+    {start_pos, end_pos}
+  end
+
+  defp range_from_token_indices(_tokens, _start_idx, _end_idx), do: nil
+  @spec compare_position(position(), position()) :: :lt | :eq | :gt
+  defp compare_position(pos, pos), do: :eq
+  defp compare_position({line_a, _col_a}, {line_b, _col_b}) when line_a < line_b, do: :lt
+  defp compare_position({line_a, _col_a}, {line_b, _col_b}) when line_a > line_b, do: :gt
+  defp compare_position({line, col_a}, {line, col_b}) when col_a < col_b, do: :lt
+  defp compare_position(_pos_a, _pos_b), do: :gt
+
+  @spec sentence_terminal?(String.t()) :: boolean()
+  defp sentence_terminal?(char), do: char in [".", "!", "?"]
+
+  @spec closing_sentence_delimiter?(String.t()) :: boolean()
+  defp closing_sentence_delimiter?(char), do: char in [")", "]", "}", "\"", "'"]
+
+  @spec sentence_whitespace?(String.t()) :: boolean()
+  defp sentence_whitespace?(char), do: char in [" ", "\t", "\n"]
 
   # ── Private — word helpers ────────────────────────────────────────────────────
 

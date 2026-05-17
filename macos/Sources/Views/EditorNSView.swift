@@ -163,6 +163,9 @@ final class EditorNSView: MTKView {
     /// determine whether to draw the cursor.
     private(set) var cursorBlinkVisible: Bool = true
 
+    /// Whether Minga config allows blinking the editor cursor.
+    private var cursorBlinkEnabled: Bool = true
+
     /// The async task driving the blink timer. Cancelled on focus loss,
     /// cursor hide, or dealloc.
     private var blinkTask: Task<Void, Never>?
@@ -234,6 +237,7 @@ final class EditorNSView: MTKView {
         cursorBlinkVisible = true
 
         guard !isScreenAsleep else { return }
+        guard cursorBlinkEnabled else { return }
 
         // Don't blink when Accessibility > Reduce Motion is on.
         guard !SystemBlinkTiming.blinkingDisabled else { return }
@@ -254,6 +258,16 @@ final class EditorNSView: MTKView {
                 self?.cursorBlinkVisible = true
                 self?.needsDisplay = true
             }
+        }
+    }
+
+    /// Enables or disables editor cursor blinking from Minga config.
+    func setCursorBlinkEnabled(_ enabled: Bool) {
+        cursorBlinkEnabled = enabled
+        if enabled {
+            resetCursorBlink()
+        } else {
+            stopCursorBlink()
         }
     }
 

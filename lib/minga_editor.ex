@@ -202,10 +202,8 @@ defmodule MingaEditor do
     state = EditorState.set_renderer(state, renderer_pid)
 
     # Logger redirect and startup messages
-    tui_active? = state.backend == :tui
-
     state =
-      if tui_active? do
+      if state.backend != :headless do
         log_path = Minga.LoggerHandler.install()
         state = log_message(state, "Editor started")
         log_message(state, "Log file: #{log_path}")
@@ -407,6 +405,7 @@ defmodule MingaEditor do
     }
 
     Startup.send_font_config(new_state)
+    push_full_config_state(new_state)
     new_state = Renderer.render_or_async(new_state)
     # Setup highlighting after first paint with correct viewport
     new_state = setup_highlight_or_defer(new_state)
@@ -953,6 +952,22 @@ defmodule MingaEditor do
 
   defp dispatch_minga_event(
          state,
+         :option_changed,
+         %Minga.Events.OptionChangedEvent{source: source, name: name, value: value},
+         _msg
+       ) do
+    if option_source_matches?(source, EditorState.options_server(state)) and
+         MingaEditor.Frontend.Protocol.GUI.settings_option?(name) do
+      state
+      |> apply_runtime_config_option(name, value)
+      |> push_config_state_entry(name, value)
+    else
+      state
+    end
+  end
+
+  defp dispatch_minga_event(
+         state,
          :face_overrides_changed,
          %Minga.Events.FaceOverridesChangedEvent{buffer: buf_pid, overrides: overrides},
          _msg
@@ -1071,6 +1086,93 @@ defmodule MingaEditor do
     do: Process.whereis(server) == source
 
   defp option_source_matches?(_source, _server), do: false
+
+  @spec push_full_config_state(EditorState.t()) :: :ok
+  defp push_full_config_state(%{port_manager: nil}), do: :ok
+
+  defp push_full_config_state(%{port_manager: port} = state) do
+    if MingaEditor.Frontend.gui?(state.capabilities) do
+      config_state =
+        MingaEditor.Frontend.Protocol.GUI.config_state(
+          EditorState.options_server(state),
+          state.keymap_server
+        )
+
+      MingaEditor.Frontend.send_config_state(port, config_state)
+    end
+
+    :ok
+  catch
+    :exit, _ -> :ok
+  end
+
+  @spec push_config_state_entry(EditorState.t(), atom(), term()) :: EditorState.t()
+  defp push_config_state_entry(%{port_manager: nil} = state, _name, _value), do: state
+
+  defp push_config_state_entry(%{port_manager: port} = state, name, value) do
+    if MingaEditor.Frontend.gui?(state.capabilities) and
+         MingaEditor.Frontend.Protocol.GUI.settings_option?(name) do
+      config_state = MingaEditor.Frontend.Protocol.GUI.config_state_entry(name, value)
+      MingaEditor.Frontend.send_config_state(port, config_state)
+    end
+
+    state
+  catch
+    :exit, _ -> state
+  end
+
+  @spec apply_runtime_config_option(EditorState.t(), atom(), term()) :: EditorState.t()
+  defp apply_runtime_config_option(state, :theme, theme_name) when is_atom(theme_name) do
+    case MingaEditor.UI.Theme.get(theme_name) do
+      {:ok, theme} ->
+        if state.port_manager do
+          MingaEditor.Frontend.send_commands(state.port_manager, [
+            MingaEditor.Frontend.Protocol.GUI.encode_gui_theme(theme)
+          ])
+        end
+
+        %{state | theme: theme}
+        |> EditorState.invalidate_all_windows()
+        |> Layout.invalidate()
+
+      :error ->
+        state
+    end
+  catch
+    :exit, _ -> state
+  end
+
+  defp apply_runtime_config_option(state, name, _value)
+       when name in [:font_family, :font_size, :font_weight, :font_ligatures] do
+    Startup.send_font_config(state)
+    state
+  end
+
+  defp apply_runtime_config_option(state, name, value)
+       when name in [:line_numbers, :wrap, :tab_width] do
+    Enum.each(runtime_config_buffers(state), fn buffer ->
+      Buffer.set_option(buffer, name, value)
+    end)
+
+    state
+    |> EditorState.invalidate_all_windows()
+    |> Layout.invalidate()
+  end
+
+  defp apply_runtime_config_option(state, :cursorline, _value) do
+    state
+    |> EditorState.invalidate_all_windows()
+    |> Layout.invalidate()
+  end
+
+  defp apply_runtime_config_option(state, _name, _value), do: state
+
+  @spec runtime_config_buffers(EditorState.t()) :: [pid()]
+  defp runtime_config_buffers(state) do
+    state.workspace.buffers.list
+    |> Enum.filter(&is_pid/1)
+    |> Enum.uniq()
+  end
 
   @spec handle_node_connected(EditorState.t(), Minga.Distribution.Events.NodeConnectedEvent.t()) ::
           EditorState.t()
@@ -2073,6 +2175,36 @@ defmodule MingaEditor do
     |> Renderer.render_or_async()
   end
 
+  defp handle_gui_action(state, :config_query) do
+    push_full_config_state(state)
+    state
+  end
+
+  defp handle_gui_action(state, {:config_update, name, value}) do
+    if MingaEditor.Frontend.Protocol.GUI.settings_option?(name) do
+      case Minga.Config.Options.set(EditorState.options_server(state), name, value) do
+        {:ok, persisted_value} ->
+          Minga.Config.Options.mark_explicit(EditorState.options_server(state), name)
+          Minga.Config.Writer.persist(name, persisted_value)
+
+          state
+          |> apply_runtime_config_option(name, persisted_value)
+          |> push_config_state_entry(name, persisted_value)
+
+        {:error, reason} ->
+          Minga.Log.warning(:config, "Ignored GUI config update for #{inspect(name)}: #{reason}")
+          state
+      end
+    else
+      Minga.Log.warning(
+        :config,
+        "Ignored GUI config update outside settings panel for #{inspect(name)}"
+      )
+
+      state
+    end
+  end
+
   defp handle_gui_action(%{shell: MingaEditor.Shell.Board} = state, action) do
     {shell_state, workspace} =
       MingaEditor.Shell.Board.handle_gui_action(state.shell_state, state.workspace, action)
@@ -2355,15 +2487,27 @@ defmodule MingaEditor do
   end
 
   defp handle_gui_action(state, {:git_stage_file, path}) do
-    git_action(state, fn git_root -> Minga.Git.stage(git_root, path) end, "Staged #{path}")
+    git_action(
+      state,
+      fn git_root -> Minga.Git.stage(git_root, git_relative_path(git_root, path)) end,
+      "Staged #{path}"
+    )
   end
 
   defp handle_gui_action(state, {:git_unstage_file, path}) do
-    git_action(state, fn git_root -> Minga.Git.unstage(git_root, path) end, "Unstaged #{path}")
+    git_action(
+      state,
+      fn git_root -> Minga.Git.unstage(git_root, git_relative_path(git_root, path)) end,
+      "Unstaged #{path}"
+    )
   end
 
   defp handle_gui_action(state, {:git_discard_file, path}) do
-    git_action(state, fn git_root -> Minga.Git.discard(git_root, path) end, "Discarded #{path}")
+    git_action(
+      state,
+      fn git_root -> Minga.Git.discard(git_root, git_relative_path(git_root, path)) end,
+      "Discarded #{path}"
+    )
   end
 
   defp handle_gui_action(state, :git_stage_all) do
@@ -2375,19 +2519,11 @@ defmodule MingaEditor do
   end
 
   defp handle_gui_action(state, {:git_commit, message}) do
-    case resolve_git_root() do
-      nil ->
-        EditorState.set_status(state, "Not in a git repository")
+    commit_from_gui(state, message, false)
+  end
 
-      git_root ->
-        result = Minga.Git.commit(git_root, message)
-        refresh_git_repo(git_root)
-
-        case result do
-          {:ok, hash} -> EditorState.set_status(state, "Committed #{hash}")
-          {:error, reason} -> EditorState.set_status(state, "Commit failed: #{reason}")
-        end
-    end
+  defp handle_gui_action(state, {:git_commit, message, amend?}) do
+    commit_from_gui(state, message, amend?)
   end
 
   defp handle_gui_action(state, :git_push) do
@@ -2403,19 +2539,7 @@ defmodule MingaEditor do
   end
 
   defp handle_gui_action(state, {:git_commit_amend, message}) do
-    case resolve_git_root() do
-      nil ->
-        EditorState.set_status(state, "Not in a git repository")
-
-      git_root ->
-        result = Minga.Git.commit(git_root, message, amend: true)
-        refresh_git_repo(git_root)
-
-        case result do
-          {:ok, hash} -> EditorState.set_status(state, "Amended #{hash}")
-          {:error, reason} -> EditorState.set_status(state, "Amend failed: #{reason}")
-        end
-    end
+    commit_from_gui(state, message, true)
   end
 
   defp handle_gui_action(state, {:agent_group_close, _ws_id} = action) do
@@ -2509,10 +2633,149 @@ defmodule MingaEditor do
     end
   end
 
+  defp handle_gui_action(state, {:git_open_diff, path, section}) do
+    case resolve_git_root() do
+      nil ->
+        EditorState.set_status(state, "Not in a git repository")
+
+      git_root ->
+        open_git_diff_from_panel(state, git_root, path, section)
+    end
+  end
+
   defp handle_gui_action(state, :git_pull_and_retry) do
     state
     |> EditorState.clear_git_toast()
     |> Commands.Git.execute(:git_pull_and_retry)
+  end
+
+  @spec commit_from_gui(state(), String.t(), boolean()) :: state()
+  defp commit_from_gui(state, message, amend?) do
+    case resolve_git_root() do
+      nil ->
+        EditorState.set_status(state, "Not in a git repository")
+
+      git_root ->
+        opts = if amend?, do: [amend: true], else: []
+        result = Minga.Git.commit(git_root, message, opts)
+        refresh_git_repo(git_root)
+        commit_status(state, result, amend?)
+    end
+  end
+
+  @spec commit_status(state(), {:ok, String.t()} | {:error, String.t()}, boolean()) :: state()
+  defp commit_status(state, {:ok, hash}, true),
+    do: EditorState.set_status(state, "Amended #{hash}")
+
+  defp commit_status(state, {:ok, hash}, false),
+    do: EditorState.set_status(state, "Committed #{hash}")
+
+  defp commit_status(state, {:error, reason}, true),
+    do: EditorState.set_status(state, "Amend failed: #{reason}")
+
+  defp commit_status(state, {:error, reason}, false),
+    do: EditorState.set_status(state, "Commit failed: #{reason}")
+
+  @spec open_git_diff_from_panel(state(), String.t(), String.t(), non_neg_integer()) :: state()
+  defp open_git_diff_from_panel(state, git_root, path, section) do
+    entries = git_status_panel_entries(state)
+
+    matches =
+      case section do
+        section when section in 0..3 ->
+          Enum.filter(entries, &git_status_entry_matches?(&1, path, section))
+
+        _legacy ->
+          Enum.filter(entries, &(&1.path == path))
+      end
+
+    case matches do
+      [%Git.StatusEntry{} = entry] ->
+        open_git_diff_for_entry(state, git_root, entry)
+
+      [] ->
+        EditorState.set_status(state, "No git diff entry for #{path}")
+
+      [_ | [_ | _]] ->
+        EditorState.set_status(
+          state,
+          "Ambiguous git diff entry for #{path}; use section-aware diff"
+        )
+    end
+  end
+
+  @spec git_status_entry_matches?(Git.StatusEntry.t(), String.t(), non_neg_integer()) :: boolean()
+  defp git_status_entry_matches?(%Git.StatusEntry{} = entry, path, section) do
+    entry.path == path && git_status_section(entry) == section
+  end
+
+  @spec git_status_section(Git.StatusEntry.t()) :: non_neg_integer()
+  defp git_status_section(%Git.StatusEntry{staged: true}), do: 0
+  defp git_status_section(%Git.StatusEntry{status: :untracked}), do: 2
+  defp git_status_section(%Git.StatusEntry{status: :conflict}), do: 3
+  defp git_status_section(%Git.StatusEntry{}), do: 1
+
+  @spec git_status_panel_entries(state()) :: [Git.StatusEntry.t()]
+  defp git_status_panel_entries(state) do
+    case EditorState.git_status_panel(state) do
+      nil -> []
+      panel -> Map.get(panel, :entries) || []
+    end
+  end
+
+  @spec open_git_diff_for_entry(state(), String.t(), Git.StatusEntry.t()) :: state()
+  defp open_git_diff_for_entry(state, git_root, %Git.StatusEntry{} = entry) do
+    abs_path = git_status_abs_path(git_root, entry.path)
+    git_path = Path.relative_to(abs_path, git_root)
+    git_entry = %{entry | path: git_path}
+
+    case git_diff_content(git_root, abs_path, git_entry) do
+      {:ok, current_content} ->
+        Commands.Git.open_diff_for_path(state, git_root, git_path, abs_path, current_content,
+          staged: entry.staged
+        )
+
+      {:error, message} ->
+        EditorState.set_status(state, message)
+    end
+  end
+
+  @spec git_diff_content(String.t(), String.t(), Git.StatusEntry.t()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp git_diff_content(_git_root, _abs_path, %Git.StatusEntry{status: :deleted}) do
+    {:ok, ""}
+  end
+
+  defp git_diff_content(git_root, _abs_path, %Git.StatusEntry{path: rel_path, staged: true}) do
+    case Git.show_staged(git_root, rel_path) do
+      {:ok, content} -> {:ok, content}
+      :error -> {:error, "Could not read staged file: #{rel_path}"}
+    end
+  end
+
+  defp git_diff_content(_git_root, abs_path, %Git.StatusEntry{}) do
+    case File.read(abs_path) do
+      {:ok, current_content} -> {:ok, current_content}
+      {:error, reason} -> {:error, "Could not read file: #{inspect(reason)}"}
+    end
+  end
+
+  @spec git_relative_path(String.t(), String.t()) :: String.t()
+  defp git_relative_path(git_root, path) do
+    git_root
+    |> git_status_abs_path(path)
+    |> Path.relative_to(git_root)
+  end
+
+  @spec git_status_abs_path(String.t(), String.t()) :: String.t()
+  defp git_status_abs_path(git_root, path) do
+    project_root = Minga.Project.resolve_root()
+
+    if String.starts_with?(Path.expand(project_root), Path.expand(git_root)) do
+      Path.join(project_root, path)
+    else
+      Path.join(git_root, path)
+    end
   end
 
   @spec accept_visible_completion(state(), Completion.t(), non_neg_integer()) :: state()

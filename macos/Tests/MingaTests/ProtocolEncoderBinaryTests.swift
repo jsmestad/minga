@@ -358,6 +358,48 @@ struct EncoderGUIActionTests {
         #expect(decoded == path)
     }
 
+    @Test("git_commit encodes amend flag, length, and message")
+    func gitCommitLayout() {
+        let message = "feat: polish git panel"
+        let payload = captureFrame { $0.sendGitCommit(message: message) }
+
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_GIT_COMMIT)
+        #expect(payload[2] == 0)
+        let messageLen = readU16(payload, 3)
+        #expect(messageLen == UInt16(message.utf8.count))
+        let decoded = String(data: payload[5..<(5 + Int(messageLen))], encoding: .utf8)
+        #expect(decoded == message)
+    }
+
+    @Test("git_commit amend encodes amend flag, length, and message")
+    func gitCommitAmendLayout() {
+        let message = "fixup: previous subject"
+        let payload = captureFrame { $0.sendGitCommitAmend(message: message) }
+
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_GIT_COMMIT)
+        #expect(payload[2] == 1)
+        let messageLen = readU16(payload, 3)
+        #expect(messageLen == UInt16(message.utf8.count))
+        let decoded = String(data: payload[5..<(5 + Int(messageLen))], encoding: .utf8)
+        #expect(decoded == message)
+    }
+
+    @Test("git_open_diff encodes path and section")
+    func gitOpenDiffLayout() {
+        let path = "lib/editor.ex"
+        let payload = captureFrame { $0.sendGitOpenDiff(path: path, section: 2) }
+
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_GIT_OPEN_DIFF)
+        let pathLen = readU16(payload, 2)
+        #expect(pathLen == UInt16(path.utf8.count))
+        let decoded = String(data: payload[4..<(4 + Int(pathLen))], encoding: .utf8)
+        #expect(decoded == path)
+        #expect(payload[4 + Int(pathLen)] == 2)
+    }
+
     @Test("tool_install encodes name with length prefix")
     func toolInstallLayout() {
         let payload = captureFrame { $0.sendToolInstall(name: "elixir_ls") }
@@ -387,6 +429,65 @@ struct EncoderGUIActionTests {
         #expect(nameLen == 11) // "buffer_prev".count
         let name = String(data: payload[4..<(4 + Int(nameLen))], encoding: .utf8)
         #expect(name == "buffer_prev")
+    }
+}
+
+// MARK: - Settings
+
+@Suite("Encoder Binary: Settings")
+struct EncoderSettingsTests {
+    @Test("config_query encodes action with no payload")
+    func configQueryLayout() {
+        let payload = captureFrame { $0.sendConfigQuery() }
+
+        #expect(payload.count == 2)
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_CONFIG_QUERY)
+    }
+
+    @Test("config_update encodes typed atom payload")
+    func configUpdateAtomLayout() {
+        let payload = captureFrame { $0.sendConfigUpdate(key: "theme", value: .atom("doom_one")) }
+
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_CONFIG_UPDATE)
+        #expect(payload[2] == 5)
+        #expect(String(data: payload[3..<8], encoding: .utf8) == "theme")
+        #expect(payload[8] == SETTING_VALUE_ATOM)
+        #expect(readU16(payload, 9) == 8)
+        #expect(String(data: payload[11..<19], encoding: .utf8) == "doom_one")
+    }
+
+    @Test("config_update encodes typed bool payload")
+    func configUpdateBoolLayout() {
+        let payload = captureFrame { $0.sendConfigUpdate(key: "wrap", value: .bool(true)) }
+
+        #expect(payload == Data([OP_GUI_ACTION, GUI_ACTION_CONFIG_UPDATE, 4, 0x77, 0x72, 0x61, 0x70, SETTING_VALUE_BOOL, 1]))
+    }
+
+    @Test("config_update encodes typed int payload")
+    func configUpdateIntLayout() {
+        let payload = captureFrame { $0.sendConfigUpdate(key: "tab_width", value: .int(4)) }
+
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_CONFIG_UPDATE)
+        #expect(payload[2] == 9)
+        #expect(String(data: payload[3..<12], encoding: .utf8) == "tab_width")
+        #expect(payload[12] == SETTING_VALUE_INT)
+        #expect(readU32(payload, 13) == 4)
+    }
+
+    @Test("config_update encodes typed string payload")
+    func configUpdateStringLayout() {
+        let payload = captureFrame { $0.sendConfigUpdate(key: "font_family", value: .string("Iosevka")) }
+
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_CONFIG_UPDATE)
+        #expect(payload[2] == 11)
+        #expect(String(data: payload[3..<14], encoding: .utf8) == "font_family")
+        #expect(payload[14] == SETTING_VALUE_STRING)
+        #expect(readU16(payload, 15) == 7)
+        #expect(String(data: payload[17..<24], encoding: .utf8) == "Iosevka")
     }
 }
 

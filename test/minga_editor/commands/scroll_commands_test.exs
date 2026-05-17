@@ -1,9 +1,8 @@
 defmodule MingaEditor.Commands.ScrollCommandsTest do
   @moduledoc """
-  Integration tests for scroll commands (Ctrl-e/y, zz/zt/zb).
+  Layer 1 command/state-handler coverage for scroll commands.
 
-  Verifies the full execute path: read cursor, scroll viewport,
-  clamp cursor, write to the correct window's viewport.
+  These tests call `MingaEditor.Commands.Movement.execute/2` directly on constructed state and assert observable cursor and active-window viewport outcomes. Key-to-command routing is covered separately in `Minga.Mode.NormalMovementDispatchTest`, so this file does not boot the `MingaEditor` GenServer.
   """
   use ExUnit.Case, async: true
 
@@ -15,9 +14,13 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
+  alias MingaEditor.Window
+  alias MingaEditor.Workspace.State, as: WorkspaceState
 
-  defp start_editor(content, opts \\ []) do
+  defp start_editor(content, opts) do
     {:ok, buffer} = BufferProcess.start_link(content: content, filetype: :elixir)
 
     {:ok, editor} =
@@ -37,6 +40,28 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
     _ = :sys.get_state(editor)
   end
+
+  defp start_buffer(content) do
+    start_supervised!({BufferProcess, content: content, filetype: :elixir})
+  end
+
+  defp build_state(buf, opts \\ []) do
+    rows = Keyword.get(opts, :rows, 24)
+    cols = Keyword.get(opts, :cols, 80)
+    window = Window.new(1, buf, rows, cols)
+
+    %EditorState{
+      port_manager: nil,
+      terminal_viewport: Viewport.new(rows, cols),
+      workspace: %WorkspaceState{
+        viewport: Viewport.new(rows, cols),
+        buffers: %Buffers{active: buf, list: [buf]},
+        windows: %Windows{tree: {:leaf, 1}, map: %{1 => window}, active: 1, next_id: 2}
+      }
+    }
+  end
+
+  defp active_viewport(state), do: EditorState.current_viewport(state)
 
   defp state(editor), do: :sys.get_state(editor)
 
@@ -97,19 +122,15 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
     max(content_width - gutter_width, 1)
   end
 
-  describe "Ctrl-e (scroll_down_line)" do
+  describe "Layer 1 command/state handler — Ctrl-e scroll_down_line" do
     test "scrolls viewport down and clamps cursor when off-screen" do
-      content = Enum.map_join(0..99, "\n", &"line #{&1}")
-      {editor, buffer} = start_editor(content)
+      buf = start_buffer(lines(0..99))
+      state = build_state(buf)
 
-      # Cursor is at line 0. Scroll down once.
-      send_key(editor, ?e, @ctrl)
+      state = Movement.execute(state, :scroll_down_line)
 
-      win = active_window(editor)
-      assert win.viewport.top == 1
-
-      # Cursor should be clamped to stay visible (at least line 1)
-      {cursor_line, _} = BufferProcess.cursor(buffer)
+      assert active_viewport(state).top == 1
+      {cursor_line, _} = BufferProcess.cursor(buf)
       assert cursor_line >= 1
     end
 
@@ -133,18 +154,13 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
     end
 
     test "does not scroll past end of file" do
-      {editor, buffer} = start_editor("a\nb\nc")
+      buf = start_buffer("a\nb\nc")
+      BufferProcess.move_to(buf, {2, 0})
+      state = build_state(buf)
 
-      # Move cursor to last line
-      BufferProcess.move_to(buffer, {2, 0})
-      _ = :sys.get_state(editor)
+      state = Movement.execute(state, :scroll_down_line)
 
-      # Try to scroll down past EOF
-      send_key(editor, ?e, @ctrl)
-
-      win = active_window(editor)
-      # With only 3 lines and a tall viewport, top should stay 0
-      assert win.viewport.top == 0
+      assert active_viewport(state).top == 0
     end
 
     test "wrapped scroll nudges the cursor when it would leave the viewport" do
@@ -164,26 +180,36 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
       assert cursor_line == 0
       assert cursor_col > 0
     end
+
+    test "preserves cursor when it stays visible" do
+      buf = start_buffer(lines(0..99))
+      BufferProcess.move_to(buf, {10, 0})
+      state = build_state(buf)
+
+      Movement.execute(state, :scroll_down_line)
+
+      assert BufferProcess.cursor(buf) == {10, 0}
+    end
   end
 
-  describe "Ctrl-y (scroll_up_line)" do
+  describe "Layer 1 command/state handler — Ctrl-y scroll_up_line" do
     test "scrolls viewport up and clamps cursor when off-screen" do
-      content = Enum.map_join(0..99, "\n", &"line #{&1}")
-      {editor, buffer} = start_editor(content)
+      buf = start_buffer(lines(0..99))
+      state = build_state(buf)
 
-      # First scroll down enough to have room to scroll up
-      for _ <- 1..5, do: send_key(editor, ?e, @ctrl)
+      state =
+        Enum.reduce(1..5, state, fn _step, acc -> Movement.execute(acc, :scroll_down_line) end)
 
-      # Move cursor to line that will be below viewport after scroll up
-      win = active_window(editor)
-      max_visible = win.viewport.top + 20
-      BufferProcess.move_to(buffer, {max_visible, 0})
-      _ = :sys.get_state(editor)
+      max_visible = active_viewport(state).top + 20
+      BufferProcess.move_to(buf, {max_visible, 0})
 
-      send_key(editor, ?y, @ctrl)
+      state = Movement.execute(state, :scroll_up_line)
 
-      win_after = active_window(editor)
-      assert win_after.viewport.top == 4
+      assert active_viewport(state).top == 4
+      {cursor_line, _} = BufferProcess.cursor(buf)
+
+      assert cursor_line <=
+               active_viewport(state).top + Viewport.content_rows(active_viewport(state)) - 1
     end
   end
 
@@ -316,4 +342,44 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
                head_rows + max(eof_visual_rows - visible, 0)
     end
   end
+
+  describe "Layer 1 command/state handler — z-prefixed viewport positioning" do
+    test "zz centers viewport on cursor" do
+      buf = start_buffer(lines(0..99))
+      BufferProcess.move_to(buf, {50, 0})
+      state = build_state(buf, rows: 24)
+
+      state = Movement.execute(state, :scroll_center)
+      viewport = active_viewport(state)
+      midpoint = viewport.top + div(Viewport.content_rows(viewport), 2)
+
+      assert abs(midpoint - 50) <= 1
+    end
+
+    test "zt scrolls cursor near the top of the viewport" do
+      buf = start_buffer(lines(0..99))
+      BufferProcess.move_to(buf, {50, 0})
+      state = build_state(buf, rows: 24)
+
+      state = Movement.execute(state, :scroll_cursor_top)
+      viewport = active_viewport(state)
+      visible = Viewport.content_rows(viewport)
+
+      assert viewport.top <= 50 and viewport.top >= 50 - visible + 1
+    end
+
+    test "zb scrolls cursor near the bottom of the viewport" do
+      buf = start_buffer(lines(0..99))
+      BufferProcess.move_to(buf, {50, 0})
+      state = build_state(buf, rows: 24)
+
+      state = Movement.execute(state, :scroll_cursor_bottom)
+      viewport = active_viewport(state)
+      bottom = viewport.top + Viewport.content_rows(viewport) - 1
+
+      assert abs(bottom - 50) <= 6
+    end
+  end
+
+  defp lines(range), do: Enum.map_join(range, "\n", &"line #{&1}")
 end

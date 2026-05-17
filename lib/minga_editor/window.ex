@@ -33,6 +33,7 @@ defmodule MingaEditor.Window do
   alias MingaEditor.DisplayList
   alias MingaEditor.FoldMap
   alias Minga.Editing.Fold.Range, as: FoldRange
+  alias Minga.Language.Symbol
   alias MingaEditor.Viewport
   alias MingaEditor.Window.Content
   alias MingaEditor.Window.RenderCache
@@ -53,6 +54,7 @@ defmodule MingaEditor.Window do
           fold_map: FoldMap.t(),
           fold_ranges: [FoldRange.t()],
           textobject_positions: %{atom() => [{non_neg_integer(), non_neg_integer()}]},
+          document_symbols: [Symbol.t()],
           popup_meta: PopupActive.t() | nil,
           render_cache: RenderCache.t()
         }
@@ -68,6 +70,7 @@ defmodule MingaEditor.Window do
     fold_map: %FoldMap{folds: []},
     fold_ranges: [],
     textobject_positions: %{},
+    document_symbols: [],
     popup_meta: nil,
     render_cache: %RenderCache{}
   ]
@@ -198,6 +201,12 @@ defmodule MingaEditor.Window do
   @doc "Returns true if this window has any active folds."
   @spec has_folds?(t()) :: boolean()
   def has_folds?(%__MODULE__{fold_map: fm}), do: not FoldMap.empty?(fm)
+
+  @doc "Updates the document symbols available for this window."
+  @spec set_document_symbols(t(), [Symbol.t()]) :: t()
+  def set_document_symbols(%__MODULE__{} = window, symbols) when is_list(symbols) do
+    %{window | document_symbols: symbols}
+  end
 
   @doc "Finds the next textobject position of the given type after (row, col)."
   @spec next_textobject(t(), atom(), {non_neg_integer(), non_neg_integer()}) ::

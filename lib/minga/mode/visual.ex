@@ -61,6 +61,7 @@ defmodule Minga.Mode.Visual do
 
   # Modifier flags (mirrors MingaEditor.Frontend.Protocol)
   @ctrl 0x02
+  @alt 0x04
   @super 0x08
 
   # Arrow key codepoints sent by libvaxis
@@ -93,6 +94,22 @@ defmodule Minga.Mode.Visual do
 
   def handle_key({?l, 0}, state) do
     {:execute, :move_right, state}
+  end
+
+  def handle_key({?h, mods}, state) when band(mods, @alt) != 0 do
+    {:execute, :nav_parent, state}
+  end
+
+  def handle_key({?l, mods}, state) when band(mods, @alt) != 0 do
+    {:execute, :nav_first_child, state}
+  end
+
+  def handle_key({?j, mods}, state) when band(mods, @alt) != 0 do
+    {:execute, :nav_next_sibling, state}
+  end
+
+  def handle_key({?k, mods}, state) when band(mods, @alt) != 0 do
+    {:execute, :nav_prev_sibling, state}
   end
 
   def handle_key({?w, 0}, %VisualState{text_object_modifier: nil} = state) do
@@ -260,6 +277,19 @@ defmodule Minga.Mode.Visual do
   def handle_key({?w, 0}, %VisualState{text_object_modifier: modifier} = state)
       when modifier in [:inner, :around] do
     {:execute, [{:visual_text_object, modifier, :word}], %{state | text_object_modifier: nil}}
+  end
+
+  # Paragraph text object
+  def handle_key({?p, 0}, %VisualState{text_object_modifier: modifier} = state)
+      when modifier in [:inner, :around] do
+    {:execute, [{:visual_text_object, modifier, :paragraph}],
+     %{state | text_object_modifier: nil}}
+  end
+
+  # Sentence text object
+  def handle_key({?s, 0}, %VisualState{text_object_modifier: modifier} = state)
+      when modifier in [:inner, :around] do
+    {:execute, [{:visual_text_object, modifier, :sentence}], %{state | text_object_modifier: nil}}
   end
 
   # Quote text objects

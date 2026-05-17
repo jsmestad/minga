@@ -38,7 +38,6 @@ defmodule Minga.MixProject do
           # Coming From...
           "docs/FOR-NEOVIM-USERS.md",
           "docs/FOR-EMACS-USERS.md",
-          "docs/FOR-PI-USERS.md",
           "docs/FOR-AI-CODERS.md",
           # Extending Minga
           "docs/EXTENSIBILITY.md",
@@ -65,7 +64,6 @@ defmodule Minga.MixProject do
           "Coming From...": [
             "docs/FOR-NEOVIM-USERS.md",
             "docs/FOR-EMACS-USERS.md",
-            "docs/FOR-PI-USERS.md",
             "docs/FOR-AI-CODERS.md"
           ],
           "Extending Minga": [
@@ -188,7 +186,8 @@ defmodule Minga.MixProject do
         "test.llm": :test,
         "test.debug": :test,
         "test.quick": :test,
-        "test.heavy": :test
+        "test.heavy": :test,
+        conformance: :test
       ]
     ]
   end
@@ -224,6 +223,7 @@ defmodule Minga.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:hammox, "~> 0.7", only: :test},
       {:telemetry, "~> 1.0"},
+      {:toml, "~> 0.7.0"},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:benchee, "~> 1.3", only: :dev, runtime: false},
       {:exqlite, "~> 0.27"},
@@ -291,13 +291,18 @@ defmodule Minga.MixProject do
           Minga.CLI.main(argv)
         '"
       ],
-      test: ["test --warnings-as-errors"],
+      test: ["test --warnings-as-errors --exclude conformance"],
       "test.llm": [
-        "test --warnings-as-errors --formatter Minga.Test.LLMFormatter --max-failures 5 --exclude heavy"
+        "test --warnings-as-errors --formatter Minga.Test.LLMFormatter --max-failures 5 --exclude heavy --exclude conformance"
       ],
-      "test.debug": ["test --warnings-as-errors --trace --max-failures 3"],
-      "test.quick": ["test --warnings-as-errors --stale --max-failures 5 --exclude heavy"],
-      "test.heavy": ["test --warnings-as-errors --only heavy"],
+      "test.debug": ["test --warnings-as-errors --trace --max-failures 3 --exclude conformance"],
+      "test.quick": [
+        "test --warnings-as-errors --stale --max-failures 5 --exclude heavy --exclude conformance"
+      ],
+      "test.heavy": ["test --warnings-as-errors --only heavy --exclude conformance"],
+      conformance: [
+        "run --no-start -e 'Mix.Tasks.Test.run([\"--warnings-as-errors\", \"--include\", \"conformance\", \"test/conformance/\"])'"
+      ],
       # lint runs via Makefile (`make lint`) so all steps run even if one
       # fails. Mix aliases stop on first failure, which skips dialyzer.
       "lint.fix": ["format", "credo --strict"]

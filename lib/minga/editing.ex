@@ -130,6 +130,38 @@ defmodule Minga.Editing do
     to: Minga.Editing.TextObject,
     as: :a_parens
 
+  @spec select_inner_paragraph(
+          Minga.Editing.Text.Readable.t(),
+          Minga.Editing.TextObject.position()
+        ) :: Minga.Editing.TextObject.range()
+  defdelegate select_inner_paragraph(readable, pos),
+    to: Minga.Editing.TextObject,
+    as: :inner_paragraph
+
+  @spec select_around_paragraph(
+          Minga.Editing.Text.Readable.t(),
+          Minga.Editing.TextObject.position()
+        ) :: Minga.Editing.TextObject.range()
+  defdelegate select_around_paragraph(readable, pos),
+    to: Minga.Editing.TextObject,
+    as: :a_paragraph
+
+  @spec select_inner_sentence(
+          Minga.Editing.Text.Readable.t(),
+          Minga.Editing.TextObject.position()
+        ) :: Minga.Editing.TextObject.range()
+  defdelegate select_inner_sentence(readable, pos),
+    to: Minga.Editing.TextObject,
+    as: :inner_sentence
+
+  @spec select_around_sentence(
+          Minga.Editing.Text.Readable.t(),
+          Minga.Editing.TextObject.position()
+        ) :: Minga.Editing.TextObject.range()
+  defdelegate select_around_sentence(readable, pos),
+    to: Minga.Editing.TextObject,
+    as: :a_sentence
+
   defdelegate select_structural_inner(tree_data),
     to: Minga.Editing.TextObject,
     as: :structural_inner

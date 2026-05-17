@@ -7,13 +7,68 @@ defmodule MingaEditor.UI.Theme.Catppuccin do
   Palette values sourced from https://github.com/catppuccin/catppuccin.
   """
 
+  alias Minga.Core.Face
+  alias MingaEditor.UI.Theme.Builder
+  alias MingaEditor.UI.Theme.Palette
+
   @doc "Builds a full `MingaEditor.UI.Theme.t()` struct from a Catppuccin palette map."
   @spec build(atom(), map()) :: MingaEditor.UI.Theme.t()
   def build(name, p) do
-    %MingaEditor.UI.Theme{
-      name: name,
+    Builder.from_palette(name, palette(name, p), overrides(p))
+  end
+
+  @spec palette(atom(), map()) :: Palette.t()
+  defp palette(name, p) do
+    Palette.new(%{
+      variant: variant(name),
+      bg: p.base,
+      fg: p.text,
+      surface: p.surface0,
+      overlay: p.mantle,
+      muted: p.overlay0,
+      subtle: p.surface1,
+      accent: p.blue,
+      highlight: p.blue,
+      selection_bg: p.surface2,
+      error: p.red,
+      warning: p.yellow,
+      info: p.blue,
+      success: p.green,
+      match: p.yellow,
+      link: p.rosewater,
+      border: p.overlay1,
+      contrast_fg: p.base,
+      builtin: p.teal,
+      functions: p.blue,
+      keywords: p.mauve,
+      methods: p.blue,
+      operators: p.sky,
+      constants: p.peach,
+      strings: p.green,
+      numbers: p.peach,
+      type: p.yellow,
+      variables: p.text,
+      comments: p.overlay0
+    })
+  end
+
+  @spec variant(atom()) :: Palette.variant()
+  defp variant(:catppuccin_latte), do: :light
+  defp variant(_name), do: :dark
+
+  @spec overrides(map()) :: map()
+  defp overrides(p) do
+    %{
       syntax: syntax(p),
-      editor: %MingaEditor.UI.Theme.Editor{
+      hl_todo: %{
+        todo: Face.new(fg: p.yellow, bold: true),
+        fixme: Face.new(fg: p.red, bold: true),
+        note: Face.new(fg: p.blue, bold: true),
+        hack: Face.new(fg: p.peach, bold: true),
+        review: Face.new(fg: p.mauve, bold: true),
+        deprecated: Face.new(fg: p.overlay0, strikethrough: true)
+      },
+      editor: %{
         bg: p.base,
         fg: p.text,
         tilde_fg: p.surface1,
@@ -24,9 +79,11 @@ defmodule MingaEditor.UI.Theme.Catppuccin do
         highlight_read_bg: p.surface1,
         highlight_write_bg: p.surface2,
         selection_bg: p.surface2,
-        whitespace_fg: p.overlay0
+        whitespace_fg: p.overlay0,
+        indent_guide_fg: p.surface1,
+        indent_guide_active_fg: p.overlay0
       },
-      gutter: %MingaEditor.UI.Theme.Gutter{
+      gutter: %{
         fg: p.overlay0,
         current_fg: p.text,
         error_fg: p.red,
@@ -36,12 +93,8 @@ defmodule MingaEditor.UI.Theme.Catppuccin do
         fold_fg: p.overlay0,
         separator_fg: p.overlay0
       },
-      git: %MingaEditor.UI.Theme.Git{
-        added_fg: p.green,
-        modified_fg: p.blue,
-        deleted_fg: p.red
-      },
-      modeline: %MingaEditor.UI.Theme.Modeline{
+      git: %{added_fg: p.green, modified_fg: p.blue, deleted_fg: p.red},
+      modeline: %{
         bar_fg: p.text,
         bar_bg: p.mantle,
         info_fg: p.text,
@@ -61,7 +114,7 @@ defmodule MingaEditor.UI.Theme.Catppuccin do
         lsp_starting: p.overlay0,
         lsp_error: p.red
       },
-      picker: %MingaEditor.UI.Theme.Picker{
+      picker: %{
         bg: p.mantle,
         sel_bg: p.surface1,
         prompt_bg: p.mantle,
@@ -75,18 +128,9 @@ defmodule MingaEditor.UI.Theme.Catppuccin do
         menu_sel_bg: p.surface1,
         menu_sel_fg: p.lavender
       },
-      minibuffer: %MingaEditor.UI.Theme.Minibuffer{
-        fg: p.text,
-        bg: p.crust,
-        warning_fg: p.yellow,
-        dim_fg: p.overlay0
-      },
-      search: %MingaEditor.UI.Theme.Search{
-        highlight_fg: p.base,
-        highlight_bg: p.yellow,
-        current_bg: p.red
-      },
-      popup: %MingaEditor.UI.Theme.Popup{
+      minibuffer: %{fg: p.text, bg: p.crust, warning_fg: p.yellow, dim_fg: p.overlay0},
+      search: %{highlight_fg: p.base, highlight_bg: p.yellow, current_bg: p.red},
+      popup: %{
         fg: p.text,
         bg: p.surface0,
         border_fg: p.overlay1,
@@ -97,7 +141,7 @@ defmodule MingaEditor.UI.Theme.Catppuccin do
         separator_fg: p.overlay0,
         group_fg: p.blue
       },
-      tree: %MingaEditor.UI.Theme.Tree{
+      tree: %{
         bg: p.mantle,
         fg: p.text,
         dir_fg: p.blue,
@@ -112,7 +156,7 @@ defmodule MingaEditor.UI.Theme.Catppuccin do
         git_untracked_fg: p.overlay0,
         git_conflict_fg: p.red
       },
-      agent: %MingaEditor.UI.Theme.Agent{
+      agent: %{
         panel_bg: p.base,
         panel_border: p.surface1,
         header_fg: p.blue,
@@ -152,7 +196,7 @@ defmodule MingaEditor.UI.Theme.Catppuccin do
         delimiter_dim: p.surface0,
         link_fg: p.blue
       },
-      dashboard: %MingaEditor.UI.Theme.Dashboard{
+      dashboard: %{
         bg: p.base,
         logo_fg: p.yellow,
         heading_fg: p.blue,
@@ -161,7 +205,7 @@ defmodule MingaEditor.UI.Theme.Catppuccin do
         shortcut_fg: p.green,
         muted_fg: p.overlay0
       },
-      tab_bar: %MingaEditor.UI.Theme.TabBar{
+      tab_bar: %{
         active_fg: p.text,
         active_bg: p.base,
         inactive_fg: p.overlay0,

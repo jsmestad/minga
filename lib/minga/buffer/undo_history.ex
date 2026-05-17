@@ -2,21 +2,23 @@ defmodule Minga.Buffer.UndoHistory do
   @moduledoc """
   Undo and redo history for a buffer document.
 
-  The buffer process owns the live document and version counter. This struct remembers the snapshots needed to move backward and forward through document history, including the source of each edit for diagnostics and attribution.
+  The buffer process owns the live document and version counter. This struct remembers the patches needed to move backward and forward through document history, including the source of each edit for diagnostics and attribution.
 
-  This module is pure state. It does not mark buffers dirty, broadcast events, or mutate documents.
+  This module is pure state. It does not mark buffers dirty, broadcast events, or mutate documents outside applying returned patches to produce a restore document.
   """
 
   alias Minga.Buffer.Document
   alias Minga.Buffer.EditSource
   alias Minga.Buffer.UndoHistory.Restore
+  alias Minga.Buffer.UndoPatch
 
   @max_entries 1000
   @coalesce_ms 300
 
   @type edit_source :: EditSource.undo_source()
   @type version :: non_neg_integer()
-  @type entry :: {version(), Document.t(), edit_source()}
+  @type patches :: nonempty_list(UndoPatch.t())
+  @type entry :: {version(), patches(), edit_source()}
 
   defstruct undo_entries: [],
             redo_entries: [],
@@ -36,22 +38,22 @@ defmodule Minga.Buffer.UndoHistory do
   @spec coalesce_ms() :: pos_integer()
   def coalesce_ms, do: @coalesce_ms
 
-  @doc "Records an undo snapshot, coalescing rapid edits into one history entry."
-  @spec record_edit(t(), version(), Document.t(), edit_source()) :: t()
-  def record_edit(%__MODULE__{} = history, version, %Document{} = document, source)
+  @doc "Records an undo patch, coalescing rapid edits into one history entry."
+  @spec record_edit(t(), version(), UndoPatch.t(), edit_source()) :: t()
+  def record_edit(%__MODULE__{} = history, version, patch, source)
       when source in [:user, :agent, :lsp, :recovery] do
     now = System.monotonic_time(:millisecond)
     elapsed = now - history.last_recorded_at
 
-    do_record_edit(history, version, document, source, now, elapsed)
+    do_record_edit(history, version, patch, source, now, elapsed)
   end
 
-  @doc "Records an undo snapshot without time-based coalescing."
-  @spec record_edit_force(t(), version(), Document.t(), edit_source()) :: t()
-  def record_edit_force(%__MODULE__{} = history, version, %Document{} = document, source)
+  @doc "Records one undo entry containing all patches in the batch."
+  @spec record_edit_batch(t(), version(), patches(), edit_source()) :: t()
+  def record_edit_batch(%__MODULE__{} = history, version, [_patch | _rest] = patches, source)
       when source in [:user, :agent, :lsp, :recovery] do
     now = System.monotonic_time(:millisecond)
-    entry = {version, document, source}
+    entry = {version, patches, source}
 
     %{
       history
@@ -61,13 +63,21 @@ defmodule Minga.Buffer.UndoHistory do
     }
   end
 
+  @doc "Records an undo patch without time-based coalescing."
+  @spec record_edit_force(t(), version(), UndoPatch.t(), edit_source()) :: t()
+  def record_edit_force(%__MODULE__{} = history, version, patch, source)
+      when source in [:user, :agent, :lsp, :recovery] do
+    record_edit_batch(history, version, [patch], source)
+  end
+
   @doc "Returns the previous document/version and updates history, or `:empty` when undo is unavailable."
   @spec undo(t(), version(), Document.t()) :: {:ok, Restore.t(), t()} | :empty
   def undo(%__MODULE__{undo_entries: []}, _current_version, %Document{}), do: :empty
 
   def undo(%__MODULE__{} = history, current_version, %Document{} = current_document) do
-    [{previous_version, previous_document, source} | remaining_undo] = history.undo_entries
-    redo_entry = {current_version, current_document, source}
+    [{previous_version, patches, source} | remaining_undo] = history.undo_entries
+    {previous_document, redo_patches} = apply_patches(current_document, patches)
+    redo_entry = {current_version, redo_patches, source}
 
     new_history = %{
       history
@@ -83,8 +93,9 @@ defmodule Minga.Buffer.UndoHistory do
   def redo(%__MODULE__{redo_entries: []}, _current_version, %Document{}), do: :empty
 
   def redo(%__MODULE__{} = history, current_version, %Document{} = current_document) do
-    [{next_version, next_document, source} | remaining_redo] = history.redo_entries
-    undo_entry = {current_version, current_document, source}
+    [{next_version, patches, source} | remaining_redo] = history.redo_entries
+    {next_document, undo_patches} = apply_patches(current_document, patches)
+    undo_entry = {current_version, undo_patches, source}
 
     new_history = %{
       history
@@ -110,12 +121,12 @@ defmodule Minga.Buffer.UndoHistory do
   @doc "Returns the source of the most recent undo entry, or `nil` if undo is unavailable."
   @spec last_undo_source(t()) :: edit_source() | nil
   def last_undo_source(%__MODULE__{undo_entries: []}), do: nil
-  def last_undo_source(%__MODULE__{undo_entries: [{_version, _document, source} | _]}), do: source
+  def last_undo_source(%__MODULE__{undo_entries: [{_version, _patches, source} | _]}), do: source
 
   @doc "Returns the source of the most recent redo entry, or `nil` if redo is unavailable."
   @spec last_redo_source(t()) :: edit_source() | nil
   def last_redo_source(%__MODULE__{redo_entries: []}), do: nil
-  def last_redo_source(%__MODULE__{redo_entries: [{_version, _document, source} | _]}), do: source
+  def last_redo_source(%__MODULE__{redo_entries: [{_version, _patches, source} | _]}), do: source
 
   @doc false
   @spec undo_count(t()) :: non_neg_integer()
@@ -125,10 +136,10 @@ defmodule Minga.Buffer.UndoHistory do
   @spec redo_count(t()) :: non_neg_integer()
   def redo_count(%__MODULE__{} = history), do: length(history.redo_entries)
 
-  @spec do_record_edit(t(), version(), Document.t(), edit_source(), integer(), integer()) :: t()
-  defp do_record_edit(%__MODULE__{} = history, version, document, source, now, elapsed)
+  @spec do_record_edit(t(), version(), UndoPatch.t(), edit_source(), integer(), integer()) :: t()
+  defp do_record_edit(%__MODULE__{} = history, version, patch, source, now, elapsed)
        when history.last_recorded_at == 0 or elapsed >= @coalesce_ms do
-    entry = {version, document, source}
+    entry = {version, [patch], source}
 
     %{
       history
@@ -138,8 +149,40 @@ defmodule Minga.Buffer.UndoHistory do
     }
   end
 
-  defp do_record_edit(%__MODULE__{} = history, _version, _document, _source, now, _elapsed) do
-    %{history | redo_entries: [], last_recorded_at: now}
+  defp do_record_edit(
+         %__MODULE__{undo_entries: [{entry_version, patches, source} | rest]} = history,
+         _version,
+         patch,
+         source,
+         now,
+         _elapsed
+       ) do
+    %{
+      history
+      | undo_entries: [{entry_version, [patch | patches], source} | rest],
+        redo_entries: [],
+        last_recorded_at: now
+    }
+  end
+
+  defp do_record_edit(%__MODULE__{} = history, version, patch, source, now, _elapsed) do
+    entry = {version, [patch], source}
+
+    %{
+      history
+      | undo_entries: cap_entries([entry | history.undo_entries]),
+        redo_entries: [],
+        last_recorded_at: now
+    }
+  end
+
+  @spec apply_patches(Document.t(), patches()) :: {Document.t(), patches()}
+  defp apply_patches(%Document{} = document, patches) do
+    Enum.reduce(patches, {document, []}, fn patch, {current_document, inverse_patches} ->
+      inverse = UndoPatch.invert(patch, current_document)
+      next_document = UndoPatch.apply(patch, current_document)
+      {next_document, [inverse | inverse_patches]}
+    end)
   end
 
   @spec cap_entries([entry()]) :: [entry()]
