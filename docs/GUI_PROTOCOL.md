@@ -243,6 +243,9 @@ opcode(1) + section_count(1) + [section_id(1) + section_len(2) + payload(section
 | 0x07 | Message | msg_len(2) + msg |
 | 0x08 | Recording | macro_recording(1) |
 | 0x09 | Agent | buffer variant: agent_status(1) + background_count(2) + background_label_len(2) + background_label. Agent variant: model_name_len(1) + model_name + message_count(4) + session_status(1) + agent_status(1) + background_count(2) + background_label_len(2) + background_label |
+| 0x0A | Indent | indent_type(1: 0=spaces, 1=tabs) + indent_size(1) |
+| 0x0B | Reserved | Reserved for future encoding section |
+| 0x0C | Selection | selection_mode(1: 0=none, 1=chars, 2=lines) + selection_size(4) |
 
 `content_kind`: 0 = buffer window, 1 = agent chat window. When `content_kind == 1`, the standard sections (cursor, git, diagnostics, etc.) contain background buffer data and section 0x09 includes agent-specific fields. `background_count` is the number of currently running background sub-agents. `background_label` is the active background child label when focused, otherwise the first running child label.
 

@@ -243,26 +243,11 @@ final class CommandDispatcher {
         case .guiBreadcrumb(let segments):
             guiState.breadcrumbState.update(segments: segments)
 
-        case .guiStatusBar(let contentKind, let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype, let errorCount, let warningCount, let modelName, let messageCount, let sessionStatus, let infoCount, let hintCount, let macroRecording, let parserStatus, let agentStatus, let gitAdded, let gitModified, let gitDeleted, let icon, let iconColorR, let iconColorG, let iconColorB, let filename, let diagnosticHint, let backgroundSubagentCount, let backgroundSubagentLabel):
-            let update = StatusBarUpdate(
-                contentKind: contentKind, mode: mode,
-                cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount,
-                flags: flags, lspStatus: lspStatus, gitBranch: gitBranch,
-                message: message, filetype: filetype,
-                errorCount: errorCount, warningCount: warningCount,
-                modelName: modelName, messageCount: messageCount, sessionStatus: sessionStatus,
-                infoCount: infoCount, hintCount: hintCount, macroRecording: macroRecording,
-                parserStatus: parserStatus, agentStatus: agentStatus,
-                gitAdded: gitAdded, gitModified: gitModified, gitDeleted: gitDeleted,
-                icon: icon, iconColorR: iconColorR, iconColorG: iconColorG, iconColorB: iconColorB,
-                filename: filename, diagnosticHint: diagnosticHint,
-                backgroundSubagentCount: backgroundSubagentCount,
-                backgroundSubagentLabel: backgroundSubagentLabel
-            )
+        case .guiStatusBar(let update):
             guiState.statusBarState.update(from: update)
-            frameState.totalLineCount = lineCount
-            if mode != lastMode {
-                lastMode = mode
+            frameState.totalLineCount = update.lineCount
+            if update.mode != lastMode {
+                lastMode = update.mode
                 onModeChanged?(guiState.statusBarState.modeName)
             }
 

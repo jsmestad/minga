@@ -20,17 +20,22 @@ defmodule MingaEditor.Commands.Diagnostics do
   @command_specs [
     {:next_diagnostic, "Jump to next diagnostic", true},
     {:prev_diagnostic, "Jump to previous diagnostic", true},
-    {:diagnostic_list, "Show diagnostic list picker", true}
+    {:diagnostic_list, "Show diagnostic list picker", true},
+    {:diagnostic_picker, "Show diagnostic list picker", true}
   ]
 
   @doc "Executes a diagnostic or LSP command."
   @spec execute(
           EditorState.t(),
-          :next_diagnostic | :prev_diagnostic | :diagnostic_list | :lsp_info
+          :next_diagnostic | :prev_diagnostic | :diagnostic_list | :diagnostic_picker | :lsp_info
         ) :: EditorState.t()
   def execute(%{workspace: %{buffers: %{active: nil}}} = state, _cmd), do: state
 
   def execute(state, :diagnostic_list) do
+    PickerUI.open(state, DiagPickerSource)
+  end
+
+  def execute(state, :diagnostic_picker) do
     PickerUI.open(state, DiagPickerSource)
   end
 

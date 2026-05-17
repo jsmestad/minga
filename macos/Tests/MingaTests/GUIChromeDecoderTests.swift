@@ -411,41 +411,33 @@ struct GUIStatusBarDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiStatusBar(let contentKind, let mode, let cursorLine, let cursorCol,
-                                  let lineCount, let flags, let lspStatus, let gitBranch,
-                                  let message, let filetype, let errorCount, let warningCount,
-                                  _, _, _,
-                                  let infoCount, let hintCount, let macroRecording,
-                                  let parserStatus, let agentStatus,
-                                  let gitAdded, let gitModified, let gitDeleted,
-                                  _, _, _, _, let filename, _, let backgroundSubagentCount,
-                                  let backgroundSubagentLabel) = cmd else {
+        guard case .guiStatusBar(let update) = cmd else {
             Issue.record("Expected .guiStatusBar"); return
         }
 
-        #expect(contentKind == 0)
-        #expect(mode == 1)
-        #expect(cursorLine == 42)
-        #expect(cursorCol == 9)
-        #expect(lineCount == 500)
-        #expect(flags == 0x03)
-        #expect(lspStatus == 1)
-        #expect(gitBranch == "main")
-        #expect(message == "-- INSERT --")
-        #expect(filetype == "elixir")
-        #expect(errorCount == 3)
-        #expect(warningCount == 7)
-        #expect(infoCount == 1)
-        #expect(hintCount == 2)
-        #expect(macroRecording == 0)
-        #expect(parserStatus == 1)
-        #expect(agentStatus == 0)
-        #expect(gitAdded == 5)
-        #expect(gitModified == 3)
-        #expect(gitDeleted == 1)
-        #expect(filename == "editor.ex")
-        #expect(backgroundSubagentCount == 2)
-        #expect(backgroundSubagentLabel == "session-2: tests")
+        #expect(update.contentKind == 0)
+        #expect(update.mode == 1)
+        #expect(update.cursorLine == 42)
+        #expect(update.cursorCol == 9)
+        #expect(update.lineCount == 500)
+        #expect(update.flags == 0x03)
+        #expect(update.lspStatus == 1)
+        #expect(update.gitBranch == "main")
+        #expect(update.message == "-- INSERT --")
+        #expect(update.filetype == "elixir")
+        #expect(update.errorCount == 3)
+        #expect(update.warningCount == 7)
+        #expect(update.infoCount == 1)
+        #expect(update.hintCount == 2)
+        #expect(update.macroRecording == 0)
+        #expect(update.parserStatus == 1)
+        #expect(update.agentStatus == 0)
+        #expect(update.gitAdded == 5)
+        #expect(update.gitModified == 3)
+        #expect(update.gitDeleted == 1)
+        #expect(update.filename == "editor.ex")
+        #expect(update.backgroundSubagentCount == 2)
+        #expect(update.backgroundSubagentLabel == "session-2: tests")
     }
 
     @Test("Decode gui_status_bar agent variant (sectioned format)")
@@ -518,26 +510,26 @@ struct GUIStatusBarDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiStatusBar(let contentKind, _, let cursorLine, _, let lineCount, _, _, let gitBranch, _, let filetype, let errorCount, _, let modelName, let messageCount, let sessionStatus, _, let hintCount, _, _, let agentStatus, let gitAdded, let gitModified, _, _, _, _, _, let filename, _, let backgroundSubagentCount, let backgroundSubagentLabel) = cmd else {
+        guard case .guiStatusBar(let update) = cmd else {
             Issue.record("Expected .guiStatusBar"); return
         }
 
-        #expect(contentKind == 1)
-        #expect(modelName == "claude-3-5-sonnet")
-        #expect(messageCount == 12)
-        #expect(sessionStatus == 1)
-        #expect(cursorLine == 11)
-        #expect(lineCount == 100)
-        #expect(gitBranch == "feat/agent")
-        #expect(filetype == "elixir")
-        #expect(errorCount == 1)
-        #expect(hintCount == 1)
-        #expect(agentStatus == 1)
-        #expect(gitAdded == 3)
-        #expect(gitModified == 2)
-        #expect(filename == "editor.ex")
-        #expect(backgroundSubagentCount == 3)
-        #expect(backgroundSubagentLabel == "session-3: agent tests")
+        #expect(update.contentKind == 1)
+        #expect(update.modelName == "claude-3-5-sonnet")
+        #expect(update.messageCount == 12)
+        #expect(update.sessionStatus == 1)
+        #expect(update.cursorLine == 11)
+        #expect(update.lineCount == 100)
+        #expect(update.gitBranch == "feat/agent")
+        #expect(update.filetype == "elixir")
+        #expect(update.errorCount == 1)
+        #expect(update.hintCount == 1)
+        #expect(update.agentStatus == 1)
+        #expect(update.gitAdded == 3)
+        #expect(update.gitModified == 2)
+        #expect(update.filename == "editor.ex")
+        #expect(update.backgroundSubagentCount == 3)
+        #expect(update.backgroundSubagentLabel == "session-3: agent tests")
     }
 
     @Test("Unknown sections are skipped (forward compatibility)")
@@ -567,13 +559,13 @@ struct GUIStatusBarDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiStatusBar(_, _, let cursorLine, let cursorCol, let lineCount, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = cmd else {
+        guard case .guiStatusBar(let update) = cmd else {
             Issue.record("Expected .guiStatusBar"); return
         }
 
-        #expect(cursorLine == 10)
-        #expect(cursorCol == 5)
-        #expect(lineCount == 200)
+        #expect(update.cursorLine == 10)
+        #expect(update.cursorCol == 5)
+        #expect(update.lineCount == 200)
     }
 
     @Test("Missing sections use defaults")
@@ -589,15 +581,15 @@ struct GUIStatusBarDecoderTests {
 
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
 
-        guard case .guiStatusBar(let contentKind, let mode, let cursorLine, _, _, _, _, let gitBranch, _, _, let errorCount, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = cmd else {
+        guard case .guiStatusBar(let update) = cmd else {
             Issue.record("Expected .guiStatusBar"); return
         }
 
-        #expect(contentKind == 0)
-        #expect(mode == 2) // visual
-        #expect(cursorLine == 0) // default
-        #expect(gitBranch == "") // default
-        #expect(errorCount == 0) // default
+        #expect(update.contentKind == 0)
+        #expect(update.mode == 2) // visual
+        #expect(update.cursorLine == 0) // default
+        #expect(update.gitBranch == "") // default
+        #expect(update.errorCount == 0) // default
     }
 }
 

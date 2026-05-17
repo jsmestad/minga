@@ -587,6 +587,16 @@ defmodule Minga.Buffer.Process do
   end
 
   @doc """
+  Returns the grapheme count in the range [start_pos, end_pos] inclusive.
+  Positions are sorted automatically.
+  """
+  @spec content_range_length(GenServer.server(), Document.position(), Document.position()) ::
+          non_neg_integer()
+  def content_range_length(server, start_pos, end_pos) do
+    GenServer.call(server, {:content_range_length, start_pos, end_pos})
+  end
+
+  @doc """
   Returns the joined text of lines [start_line, end_line] inclusive (no trailing newline).
   """
   @spec content_on_lines(GenServer.server(), non_neg_integer(), non_neg_integer()) :: String.t()
@@ -1427,6 +1437,11 @@ defmodule Minga.Buffer.Process do
 
   def handle_call({:text_between_inclusive, start_pos, end_pos}, _from, state) do
     result = Document.content_between_inclusive(state.document, start_pos, end_pos)
+    {:reply, result, state}
+  end
+
+  def handle_call({:content_range_length, start_pos, end_pos}, _from, state) do
+    result = Document.content_range_length(state.document, start_pos, end_pos)
     {:reply, result, state}
   end
 

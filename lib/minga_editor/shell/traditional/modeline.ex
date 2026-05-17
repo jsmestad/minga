@@ -60,6 +60,10 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
           optional(:git_diff_summary) => git_diff_summary(),
           optional(:diagnostic_counts) =>
             {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil,
+          optional(:indent_type) => :spaces | :tabs,
+          optional(:indent_size) => pos_integer(),
+          optional(:selection_info) =>
+            {:chars, non_neg_integer()} | {:lines, pos_integer()} | nil,
           optional(:background_subagent_count) => non_neg_integer(),
           optional(:active_background_subagent_label) => String.t() | nil
         }
@@ -107,7 +111,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
         do: "Top",
         else: "#{div(data.cursor_line * 100, max(data.line_count - 1, 1))}%%"
 
-    pos_segment = " #{data.cursor_line + 1}:#{data.cursor_col + 1} "
+    pos_segment = build_position_segment(data)
     pct_segment = " #{percent} "
 
     # Build draw commands as a list of {text, fg, bg, opts} segments,
@@ -121,23 +125,23 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     parser_segments = build_parser_segments(data, bar_bg, ml)
     git_segments = build_git_segments(data, bar_bg, theme)
     diagnostic_segments = build_diagnostic_segments(data, bar_bg, theme)
+    indent_segments = build_indent_segment(data, info_fg, info_bg)
 
     # Segments are {text, fg, bg, opts, click_target}
     # click_target is an atom command or nil for non-clickable segments
-    left_segments =
-      [
-        {mode_segment, mode_fg, mode_bg, [bold: true], nil},
-        {@separator, mode_bg, info_bg, [], nil},
-        {file_segment, info_fg, info_bg, [], :buffer_list},
-        {@separator, info_bg, bar_bg, [], nil}
-      ] ++
-        git_segments ++
-        Enum.map(agent_segments, fn {text, fg, bg, opts} -> {text, fg, bg, opts, nil} end) ++
+    required_left_segments = [
+      {mode_segment, mode_fg, mode_bg, [bold: true], nil},
+      {@separator, mode_bg, info_bg, [], nil},
+      {file_segment, info_fg, info_bg, [], :buffer_list},
+      {@separator, info_bg, bar_bg, [], nil}
+    ]
+
+    agent_segments =
+      Enum.map(agent_segments, fn {text, fg, bg, opts} -> {text, fg, bg, opts, nil} end) ++
         background_agent_segments
 
-    right_segments =
-      diagnostic_segments ++
-        parser_segments ++
+    status_segments =
+      parser_segments ++
         lsp_segments ++
         [
           {" #{devicon}", devicon_color, filetype_bg, [], nil},
@@ -148,16 +152,15 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
           {pct_segment, mode_fg, mode_bg, [bold: true], nil}
         ]
 
-    left_width =
-      Enum.reduce(left_segments, 0, fn {text, _, _, _, _}, acc ->
-        acc + Unicode.display_width(text)
-      end)
+    {left_segments, right_segments} =
+      fit_segments(cols, required_left_segments, git_segments, agent_segments, [
+        {:diagnostics, diagnostic_segments},
+        {:indent, indent_segments},
+        {:status, status_segments}
+      ])
 
-    right_width =
-      Enum.reduce(right_segments, 0, fn {text, _, _, _, _}, acc ->
-        acc + Unicode.display_width(text)
-      end)
-
+    left_width = segments_width(left_segments)
+    right_width = segments_width(right_segments)
     fill_width = max(0, cols - left_width - right_width)
 
     all_segments =
@@ -182,6 +185,85 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
       end)
 
     {Enum.reverse(commands), Enum.reverse(click_regions)}
+  end
+
+  @type segment :: {String.t(), non_neg_integer(), non_neg_integer(), keyword(), atom() | nil}
+  @type segment_group :: {atom(), [segment()]}
+
+  @spec build_position_segment(modeline_data()) :: String.t()
+  defp build_position_segment(%{selection_info: {:chars, count}}), do: " #{count} chars "
+  defp build_position_segment(%{selection_info: {:lines, count}}), do: " #{count} lines "
+  defp build_position_segment(data), do: " #{data.cursor_line + 1}:#{data.cursor_col + 1} "
+
+  @spec build_indent_segment(modeline_data(), non_neg_integer(), non_neg_integer()) :: [segment()]
+  defp build_indent_segment(%{indent_type: type, indent_size: size}, fg, bg) do
+    label = if type == :tabs, do: "Tabs", else: "Spaces"
+    [{" #{label}:#{size} ", fg, bg, [], :indent_picker}]
+  end
+
+  defp build_indent_segment(_data, _fg, _bg), do: []
+
+  @spec fit_segments(pos_integer(), [segment()], [segment()], [segment()], [segment_group()]) ::
+          {[segment()], [segment()]}
+  defp fit_segments(cols, required_left, git_segments, agent_segments, right_groups) do
+    drop_order = [:indent, :diagnostics, :git]
+    do_fit_segments(cols, required_left, git_segments, agent_segments, right_groups, drop_order)
+  end
+
+  @spec do_fit_segments(
+          pos_integer(),
+          [segment()],
+          [segment()],
+          [segment()],
+          [segment_group()],
+          [atom()]
+        ) :: {[segment()], [segment()]}
+  defp do_fit_segments(cols, required_left, git_segments, agent_segments, right_groups, []) do
+    {required_left ++ git_segments ++ agent_segments, flatten_groups(right_groups)}
+    |> maybe_return_segments(cols)
+  end
+
+  defp do_fit_segments(cols, required_left, git_segments, agent_segments, right_groups, [
+         drop | rest
+       ]) do
+    left_segments = required_left ++ git_segments ++ agent_segments
+    right_segments = flatten_groups(right_groups)
+
+    if segments_width(left_segments) + segments_width(right_segments) <= cols do
+      {left_segments, right_segments}
+    else
+      do_fit_segments(
+        cols,
+        required_left,
+        maybe_drop_segments(drop, :git, git_segments),
+        agent_segments,
+        maybe_drop_group(right_groups, drop),
+        rest
+      )
+    end
+  end
+
+  @spec maybe_return_segments({[segment()], [segment()]}, pos_integer()) ::
+          {[segment()], [segment()]}
+  defp maybe_return_segments({left_segments, right_segments}, _cols),
+    do: {left_segments, right_segments}
+
+  @spec maybe_drop_segments(atom(), atom(), [segment()]) :: [segment()]
+  defp maybe_drop_segments(key, key, _segments), do: []
+  defp maybe_drop_segments(_drop, _key, segments), do: segments
+
+  @spec maybe_drop_group([segment_group()], atom()) :: [segment_group()]
+  defp maybe_drop_group(groups, :git), do: groups
+
+  defp maybe_drop_group(groups, drop),
+    do: Enum.reject(groups, fn {key, _segments} -> key == drop end)
+
+  @spec flatten_groups([segment_group()]) :: [segment()]
+  defp flatten_groups(groups), do: Enum.flat_map(groups, fn {_key, segments} -> segments end)
+
+  @spec segments_width([segment()]) :: non_neg_integer()
+  defp segments_width(segments) do
+    Enum.reduce(segments, 0, fn {text, _, _, _, _}, acc -> acc + Unicode.display_width(text) end)
   end
 
   @doc """
@@ -303,7 +385,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     segments =
       if errors > 0 do
         [
-          {" #{@diag_error_icon} #{errors}", gutter.error_fg, bar_bg, [], :diagnostic_list}
+          {" #{@diag_error_icon} #{errors}", gutter.error_fg, bar_bg, [], :diagnostic_picker}
           | segments
         ]
       else
@@ -313,7 +395,8 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     segments =
       if warnings > 0 do
         [
-          {" #{@diag_warning_icon} #{warnings}", gutter.warning_fg, bar_bg, [], :diagnostic_list}
+          {" #{@diag_warning_icon} #{warnings}", gutter.warning_fg, bar_bg, [],
+           :diagnostic_picker}
           | segments
         ]
       else
@@ -322,7 +405,10 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
 
     segments =
       if info > 0 do
-        [{" #{@diag_info_icon} #{info}", gutter.info_fg, bar_bg, [], :diagnostic_list} | segments]
+        [
+          {" #{@diag_info_icon} #{info}", gutter.info_fg, bar_bg, [], :diagnostic_picker}
+          | segments
+        ]
       else
         segments
       end
