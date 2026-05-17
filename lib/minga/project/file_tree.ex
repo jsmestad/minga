@@ -37,7 +37,8 @@ defmodule Minga.Project.FileTree do
           show_hidden: boolean(),
           width: pos_integer(),
           git_status: GitStatus.status_map(),
-          entries: [entry()] | nil
+          entries: [entry()] | nil,
+          filter: String.t() | nil
         }
 
   @enforce_keys [:root]
@@ -47,7 +48,8 @@ defmodule Minga.Project.FileTree do
             show_hidden: false,
             width: 30,
             git_status: %{},
-            entries: nil
+            entries: nil,
+            filter: nil
 
   @default_ignore ~w(.git _build deps node_modules .elixir_ls)
 
@@ -234,7 +236,7 @@ defmodule Minga.Project.FileTree do
   def ensure_entries(%__MODULE__{entries: entries} = tree) when is_list(entries), do: tree
 
   def ensure_entries(%__MODULE__{} = tree) do
-    %{tree | entries: walk(tree.root, 0, tree, [])}
+    %{tree | entries: tree.root |> walk(0, tree, []) |> filter_entries(tree)}
   end
 
   @doc "Refreshes the tree by rescanning the filesystem (clamps cursor)."
@@ -243,6 +245,32 @@ defmodule Minga.Project.FileTree do
     tree = invalidate_entries(tree) |> ensure_entries()
     max_idx = max(length(tree.entries) - 1, 0)
     %{tree | cursor: min(tree.cursor, max_idx)}
+  end
+
+  @doc "Re-roots the tree while preserving display options."
+  @spec reroot(t(), String.t()) :: t()
+  def reroot(%__MODULE__{} = tree, root) when is_binary(root) do
+    %__MODULE__{
+      root: Path.expand(root),
+      expanded: MapSet.new([Path.expand(root)]),
+      cursor: 0,
+      show_hidden: tree.show_hidden,
+      width: tree.width,
+      git_status: %{},
+      filter: tree.filter
+    }
+  end
+
+  @doc "Sets the active substring filter and resets selection to the first match."
+  @spec set_filter(t(), String.t()) :: t()
+  def set_filter(%__MODULE__{} = tree, filter) when is_binary(filter) do
+    invalidate_entries(%{tree | filter: filter, cursor: 0})
+  end
+
+  @doc "Clears the active substring filter and resets selection to the first visible entry."
+  @spec clear_filter(t()) :: t()
+  def clear_filter(%__MODULE__{} = tree) do
+    invalidate_entries(%{tree | filter: nil, cursor: 0})
   end
 
   @doc "Refreshes git status for the tree root. Returns the updated tree."
@@ -323,7 +351,7 @@ defmodule Minga.Project.FileTree do
       guides: parent_guides
     }
 
-    if is_dir and MapSet.member?(tree.expanded, full) do
+    if is_dir and descend_into_directory?(tree, full) and not symlinked_directory?(full) do
       # Children need to know: at this entry's depth, are there more siblings?
       # If this entry is NOT the last child, its depth column should draw │.
       child_guides = parent_guides ++ [not is_last]
@@ -332,6 +360,40 @@ defmodule Minga.Project.FileTree do
       [entry]
     end
   end
+
+  @spec descend_into_directory?(t(), String.t()) :: boolean()
+  defp descend_into_directory?(%__MODULE__{} = tree, path) do
+    MapSet.member?(tree.expanded, path) or active_filter?(tree)
+  end
+
+  @spec filter_entries([entry()], t()) :: [entry()]
+  defp filter_entries(entries, %__MODULE__{filter: nil}), do: entries
+  defp filter_entries(entries, %__MODULE__{filter: ""}), do: entries
+
+  defp filter_entries(entries, %__MODULE__{filter: filter, root: root}) do
+    needle = String.downcase(filter)
+    Enum.filter(entries, &filter_match?(&1, needle, root))
+  end
+
+  @spec filter_match?(entry(), String.t(), String.t()) :: boolean()
+  defp filter_match?(entry, needle, root) do
+    relative_path = Path.relative_to(entry.path, root)
+
+    entry.name |> String.downcase() |> String.contains?(needle) or
+      relative_path |> String.downcase() |> String.contains?(needle)
+  end
+
+  @spec symlinked_directory?(String.t()) :: boolean()
+  defp symlinked_directory?(path) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :symlink}} -> true
+      _ -> false
+    end
+  end
+
+  @spec active_filter?(t()) :: boolean()
+  defp active_filter?(%__MODULE__{filter: filter}) when is_binary(filter), do: filter != ""
+  defp active_filter?(%__MODULE__{}), do: false
 
   @spec ignored?(String.t()) :: boolean()
   defp ignored?(name), do: name in @default_ignore

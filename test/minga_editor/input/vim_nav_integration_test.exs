@@ -4,11 +4,13 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
   buffers (file tree and agent panel) via mode FSM delegation through
   the keymap scope system.
 
-  Tests cover motions (j, k, gg, G), count prefix, yank, insert mode
+  Tests cover motions (j, k, gg, G), count prefix, path copy, insert mode
   blocking, and tree-specific keys to confirm these buffers inherit the
   full vim vocabulary while scope-specific bindings take priority.
   """
   use ExUnit.Case, async: true
+
+  import Hammox
 
   @moduletag :tmp_dir
 
@@ -18,6 +20,21 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
   alias MingaEditor.Viewport
   alias Minga.Project.FileTree
   alias Minga.Project.FileTree.BufferSync
+
+  setup :verify_on_exit!
+
+  setup do
+    test_pid = self()
+
+    stub(Minga.Clipboard.Mock, :write, fn text ->
+      send(test_pid, {:clipboard_written, text})
+      :ok
+    end)
+
+    stub(Minga.Clipboard.Mock, :read, fn -> nil end)
+
+    :ok
+  end
 
   defp walk_surface_handlers(state, cp, mods) do
     Enum.reduce_while(MingaEditor.Input.surface_handlers(), {:passthrough, state}, fn handler,
@@ -89,17 +106,19 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
     end
   end
 
-  describe "file tree: yank in read-only buffer" do
-    test "yy yanks the current line without modifying buffer", %{tmp_dir: tmp_dir} do
+  describe "file tree: copy path" do
+    test "y copies the selected path without modifying the read-only tree buffer", %{
+      tmp_dir: tmp_dir
+    } do
       state = make_tree_state(tmp_dir)
       buf = state.workspace.file_tree.buffer
       content_before = BufferProcess.content(buf)
+      selected_path = FileTree.selected_entry(state.workspace.file_tree.tree).path
 
-      # yy should yank without error
-      {:handled, state} = walk_surface_handlers(state, ?y, 0)
       {:handled, _state} = walk_surface_handlers(state, ?y, 0)
 
       assert BufferProcess.content(buf) == content_before
+      assert_receive {:clipboard_written, ^selected_path}, 200
     end
   end
 

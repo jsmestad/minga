@@ -58,17 +58,23 @@ defmodule Minga.Keymap.Scope.FileTree do
          {"Tab", "Toggle directory expand"},
          {"l / h", "Expand / collapse directory"},
          {"H", "Toggle hidden files"},
-         {"r", "Refresh tree"}
+         {"r", "Refresh tree"},
+         {"- / . / ~", "Parent root / selected root / project root"}
        ]},
       {"File Operations",
        [
          {"a", "New file"},
          {"A", "New folder"},
          {"R", "Rename"},
-         {"d", "Delete"}
+         {"d", "Delete"},
+         {"y", "Copy path"},
+         {"c / m", "Mark copy / move"},
+         {"p", "Paste marked entry"}
        ]},
       {"View",
        [
+         {"/", "Filter tree"},
+         {"?", "Toggle help"},
          {"q / Esc", "Close file tree"}
        ]}
     ]
@@ -85,12 +91,21 @@ defmodule Minga.Keymap.Scope.FileTree do
     |> Bindings.bind([{?h, 0}], :tree_collapse, "Collapse directory")
     |> Bindings.bind([{?H, 0}], :tree_toggle_hidden, "Toggle hidden files")
     |> Bindings.bind([{?r, 0}], :tree_refresh, "Refresh file tree")
+    |> Bindings.bind([{?-, 0}], :tree_root_parent, "Root tree at parent")
+    |> Bindings.bind([{?., 0}], :tree_root_selected, "Root tree at selected directory")
+    |> Bindings.bind([{?~, 0}], :tree_root_original, "Root tree at project")
+    |> Bindings.bind([{?/, 0}], :tree_filter, "Filter file tree")
+    |> Bindings.bind([{??, 0}], :tree_toggle_help, "Toggle help overlay")
     |> Bindings.bind([{?q, 0}], :tree_close, "Close file tree")
     |> Bindings.bind([{@escape, 0}], :tree_close, "Close file tree")
     |> Bindings.bind([{?a, 0}], :tree_new_file, "New file")
     |> Bindings.bind([{?A, 0}], :tree_new_folder, "New folder")
     |> Bindings.bind([{?R, 0}], :tree_rename, "Rename")
     |> Bindings.bind([{?d, 0}], :tree_delete, "Delete")
+    |> Bindings.bind([{?y, 0}], :tree_copy_path, "Copy path")
+    |> Bindings.bind([{?c, 0}], :tree_mark_copy, "Mark for copy")
+    |> Bindings.bind([{?m, 0}], :tree_mark_move, "Mark for move")
+    |> Bindings.bind([{?p, 0}], :tree_paste, "Paste marked entry")
   end
 
   # ── CUA mode bindings ─────────────────────────────────────────────────────

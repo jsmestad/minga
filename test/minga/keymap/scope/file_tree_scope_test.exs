@@ -29,6 +29,13 @@ defmodule Minga.Keymap.Scope.FileTreeScopeTest do
     test "d resolves to tree_delete" do
       assert {:command, :tree_delete} = Scope.resolve_key(:file_tree, :normal, {?d, 0})
     end
+
+    test "copy and paste operations resolve" do
+      assert {:command, :tree_copy_path} = Scope.resolve_key(:file_tree, :normal, {?y, 0})
+      assert {:command, :tree_mark_copy} = Scope.resolve_key(:file_tree, :normal, {?c, 0})
+      assert {:command, :tree_mark_move} = Scope.resolve_key(:file_tree, :normal, {?m, 0})
+      assert {:command, :tree_paste} = Scope.resolve_key(:file_tree, :normal, {?p, 0})
+    end
   end
 
   describe "CUA mode: file operation bindings not present" do
@@ -83,6 +90,14 @@ defmodule Minga.Keymap.Scope.FileTreeScopeTest do
     test "r refreshes tree" do
       assert {:command, :tree_refresh} = Scope.resolve_key(:file_tree, :normal, {?r, 0})
     end
+
+    test "re-root, filter, and help bindings resolve" do
+      assert {:command, :tree_root_parent} = Scope.resolve_key(:file_tree, :normal, {?-, 0})
+      assert {:command, :tree_root_selected} = Scope.resolve_key(:file_tree, :normal, {?., 0})
+      assert {:command, :tree_root_original} = Scope.resolve_key(:file_tree, :normal, {?~, 0})
+      assert {:command, :tree_filter} = Scope.resolve_key(:file_tree, :normal, {?/, 0})
+      assert {:command, :tree_toggle_help} = Scope.resolve_key(:file_tree, :normal, {??, 0})
+    end
   end
 
   describe "help_groups includes File Operations" do
@@ -96,6 +111,9 @@ defmodule Minga.Keymap.Scope.FileTreeScopeTest do
       assert Enum.any?(bindings, fn {key, _desc} -> key == "A" end)
       assert Enum.any?(bindings, fn {key, _desc} -> key == "R" end)
       assert Enum.any?(bindings, fn {key, _desc} -> key == "d" end)
+      assert Enum.any?(bindings, fn {key, _desc} -> key == "y" end)
+      assert Enum.any?(bindings, fn {key, _desc} -> key == "c / m" end)
+      assert Enum.any?(bindings, fn {key, _desc} -> key == "p" end)
     end
   end
 end

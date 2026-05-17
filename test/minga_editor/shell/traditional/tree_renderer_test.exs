@@ -66,6 +66,45 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
       assert style.bold == true
     end
 
+    test "renders filter prompt header while filtering", %{tmp_dir: tmp_dir} do
+      input = %RenderInput{
+        tree: sample_tree(tmp_dir),
+        rect: {0, 0, 24, 6},
+        focused: true,
+        theme: Theme.get!(:doom_one),
+        active_path: nil,
+        filtering?: true,
+        filter_text: "main"
+      }
+
+      draws = TreeRenderer.render(input)
+      assert draw_texts(draws) =~ " / main▏"
+    end
+
+    test "renders file tree help overlay contents", %{tmp_dir: tmp_dir} do
+      input = %RenderInput{
+        tree: sample_tree(tmp_dir),
+        rect: {0, 0, 72, 30},
+        focused: true,
+        theme: Theme.get!(:doom_one),
+        active_path: nil,
+        help_visible?: true
+      }
+
+      draws = TreeRenderer.render(input)
+      text = draw_texts(draws)
+
+      assert text =~ "Keyboard Shortcuts"
+      assert text =~ "Navigation"
+      assert text =~ "File Operations"
+      assert text =~ "Copy path"
+      assert text =~ "Mark copy / move"
+      assert text =~ "Paste"
+      assert text =~ "Parent root / selected root / project root"
+      assert text =~ "Filter tree"
+      assert text =~ "Toggle help"
+    end
+
     test "renders separator column", %{tmp_dir: tmp_dir} do
       input = %RenderInput{
         tree: sample_tree(tmp_dir),

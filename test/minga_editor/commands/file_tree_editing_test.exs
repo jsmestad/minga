@@ -7,6 +7,8 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
   """
   use Minga.Test.EditorCase, async: true
 
+  alias Minga.Buffer
+
   @moduletag :tmp_dir
 
   describe "new file (a)" do
@@ -123,6 +125,61 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       state = send_keys_sync(ctx, "#{backspaces}existing.txt<Enter>")
 
       assert state.workspace.file_tree.editing == nil
+      assert File.read!(file) == "content"
+      assert File.read!(existing) == "existing"
+    end
+  end
+
+  describe "rename retargets open buffers" do
+    test "rename retargets a dirty open file buffer without writing its contents", %{tmp_dir: dir} do
+      file = Path.join(dir, "target.txt")
+      renamed = Path.join(dir, "renamed.txt")
+      File.write!(file, "content")
+
+      ctx = start_editor("content", file_path: file, project_root: dir)
+      buffer = active_buffer(ctx)
+
+      assert is_pid(buffer)
+      :ok = Buffer.insert_char(buffer, "!")
+      assert Buffer.dirty?(buffer)
+
+      _state = send_keys_sync(ctx, "<SPC>op")
+      state = send_keys_sync(ctx, "R")
+      backspaces = String.duplicate("<BS>", String.length(state.workspace.file_tree.editing.text))
+      state = send_keys_sync(ctx, "#{backspaces}renamed.txt<Enter>")
+
+      assert state.workspace.file_tree.editing == nil
+      assert Buffer.file_path(buffer) == renamed
+      assert Buffer.dirty?(buffer)
+      assert File.read!(renamed) == "content"
+      refute File.exists?(file)
+
+      assert :ok = Buffer.save(buffer)
+      assert File.read!(renamed) == "!content"
+    end
+
+    test "rename leaves a dirty open buffer on the original path when destination exists", %{
+      tmp_dir: dir
+    } do
+      file = Path.join(dir, "target.txt")
+      existing = Path.join(dir, "existing.txt")
+      File.write!(file, "content")
+      File.write!(existing, "existing")
+
+      ctx = start_editor("content", file_path: file, project_root: dir)
+      buffer = active_buffer(ctx)
+
+      :ok = Buffer.insert_char(buffer, "!")
+      assert Buffer.dirty?(buffer)
+
+      _state = send_keys_sync(ctx, "<SPC>op")
+      state = send_keys_sync(ctx, "R")
+      backspaces = String.duplicate("<BS>", String.length(state.workspace.file_tree.editing.text))
+      state = send_keys_sync(ctx, "#{backspaces}existing.txt<Enter>")
+
+      assert state.workspace.file_tree.editing == nil
+      assert Buffer.file_path(buffer) == file
+      assert Buffer.dirty?(buffer)
       assert File.read!(file) == "content"
       assert File.read!(existing) == "existing"
     end
