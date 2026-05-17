@@ -3,6 +3,7 @@ defmodule MingaEditor.Renderer.BufferLineTest do
 
   alias MingaEditor.Renderer.BufferLine
   alias MingaEditor.Renderer.Context
+  alias MingaEditor.Renderer.Gutter
   alias MingaEditor.Viewport
 
   # ── Test helpers ──────────────────────────────────────────────────────────
@@ -53,7 +54,8 @@ defmodule MingaEditor.Renderer.BufferLineTest do
       col_offset: 0
     }
 
-    Map.merge(defaults, overrides)
+    params = Map.merge(defaults, overrides)
+    Map.put_new(params, :sign_ctx, Gutter.SignContext.from_render_context(params.ctx))
   end
 
   defp make_ctx(overrides) do
@@ -115,9 +117,9 @@ defmodule MingaEditor.Renderer.BufferLineTest do
         BufferLine.render(make_params(%{ctx: ctx, sign_w: 2, gutter_w: 6, buf_line: 0}))
 
       decoded = decode_all(gutters)
-      sign_cmd = Enum.find(decoded, fn cmd -> cmd.col == 0 end)
+      sign_cmd = Enum.find(decoded, fn cmd -> cmd.text == "E " end)
       assert sign_cmd != nil
-      assert String.contains?(sign_cmd.text, "E")
+      assert sign_cmd.fg == ctx.gutter_colors.error_fg
     end
 
     test "git sign appears when buffer line has a git change" do
@@ -127,8 +129,9 @@ defmodule MingaEditor.Renderer.BufferLineTest do
         BufferLine.render(make_params(%{ctx: ctx, sign_w: 2, gutter_w: 6, buf_line: 0}))
 
       decoded = decode_all(gutters)
-      sign_cmd = Enum.find(decoded, fn cmd -> cmd.col == 0 end)
+      sign_cmd = Enum.find(decoded, fn cmd -> cmd.text == "▎ " end)
       assert sign_cmd != nil
+      assert sign_cmd.fg == ctx.git_colors.added_fg
     end
 
     test "content text matches the line_text" do

@@ -1,7 +1,11 @@
 defmodule MingaEditor.Renderer.GutterTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Core.Decorations
+  alias Minga.Core.Decorations.LineAnnotation
+  alias MingaEditor.Renderer.Context
   alias MingaEditor.Renderer.Gutter
+  alias MingaEditor.Viewport
 
   @colors %MingaEditor.UI.Theme.Gutter{
     fg: 0x555555,
@@ -18,6 +22,28 @@ defmodule MingaEditor.Renderer.GutterTest do
     modified_fg: 0x51AFEF,
     deleted_fg: 0xFF6C6B
   }
+
+  defp sign_ctx(overrides) do
+    %Context{
+      viewport: Viewport.new(24, 80),
+      gutter_w: 4,
+      content_w: 76,
+      diagnostic_signs: Map.get(overrides, :diagnostic_signs, %{}),
+      git_signs: Map.get(overrides, :git_signs, %{}),
+      gutter_colors: @colors,
+      git_colors: @git_colors,
+      decorations: Map.get(overrides, :decorations, %Decorations{})
+    }
+    |> Gutter.SignContext.from_render_context()
+  end
+
+  defp decode_draw({row, col, text, style}) do
+    %{row: row, col: col, text: text, fg: style.fg, bg: style.bg}
+  end
+
+  defp assert_sign(draw, expected_text, expected_fg) do
+    assert %{text: ^expected_text, fg: ^expected_fg} = decode_draw(draw)
+  end
 
   describe "total_width/1" do
     test "always includes sign and fold column width" do
@@ -41,61 +67,68 @@ defmodule MingaEditor.Renderer.GutterTest do
     end
   end
 
-  describe "render_sign/7" do
+  describe "render_sign/4" do
     test "renders error sign (diagnostic takes priority)" do
-      diag_signs = %{5 => :error}
-      result = Gutter.render_sign(0, 0, 5, diag_signs, %{}, @colors, @git_colors)
-      assert is_tuple(result)
+      result = Gutter.render_sign(0, 0, 5, sign_ctx(%{diagnostic_signs: %{5 => :error}}))
+      assert_sign(result, "E ", @colors.error_fg)
     end
 
     test "renders warning sign" do
-      diag_signs = %{3 => :warning}
-      result = Gutter.render_sign(0, 0, 3, diag_signs, %{}, @colors, @git_colors)
-      assert is_tuple(result)
+      result = Gutter.render_sign(0, 0, 3, sign_ctx(%{diagnostic_signs: %{3 => :warning}}))
+      assert_sign(result, "W ", @colors.warning_fg)
     end
 
     test "renders info sign" do
-      diag_signs = %{1 => :info}
-      result = Gutter.render_sign(0, 0, 1, diag_signs, %{}, @colors, @git_colors)
-      assert is_tuple(result)
+      result = Gutter.render_sign(0, 0, 1, sign_ctx(%{diagnostic_signs: %{1 => :info}}))
+      assert_sign(result, "I ", @colors.info_fg)
     end
 
     test "renders hint sign" do
-      diag_signs = %{0 => :hint}
-      result = Gutter.render_sign(0, 0, 0, diag_signs, %{}, @colors, @git_colors)
-      assert is_tuple(result)
+      result = Gutter.render_sign(0, 0, 0, sign_ctx(%{diagnostic_signs: %{0 => :hint}}))
+      assert_sign(result, "H ", @colors.hint_fg)
     end
 
     test "renders git added sign when no diagnostic" do
-      git_signs = %{5 => :added}
-      result = Gutter.render_sign(0, 0, 5, %{}, git_signs, @colors, @git_colors)
-      assert is_tuple(result)
+      result = Gutter.render_sign(0, 0, 5, sign_ctx(%{git_signs: %{5 => :added}}))
+      assert_sign(result, "▎ ", @git_colors.added_fg)
     end
 
     test "renders git modified sign when no diagnostic" do
-      git_signs = %{5 => :modified}
-      result = Gutter.render_sign(0, 0, 5, %{}, git_signs, @colors, @git_colors)
-      assert is_tuple(result)
+      result = Gutter.render_sign(0, 0, 5, sign_ctx(%{git_signs: %{5 => :modified}}))
+      assert_sign(result, "▎ ", @git_colors.modified_fg)
     end
 
     test "renders git deleted sign when no diagnostic" do
-      git_signs = %{5 => :deleted}
-      result = Gutter.render_sign(0, 0, 5, %{}, git_signs, @colors, @git_colors)
-      assert is_tuple(result)
+      result = Gutter.render_sign(0, 0, 5, sign_ctx(%{git_signs: %{5 => :deleted}}))
+      assert_sign(result, "▁ ", @git_colors.deleted_fg)
     end
 
     test "diagnostic takes priority over git sign on same line" do
-      diag_signs = %{5 => :error}
-      git_signs = %{5 => :added}
-      result = Gutter.render_sign(0, 0, 5, diag_signs, git_signs, @colors, @git_colors)
-      # Should render the diagnostic sign, not the git sign
-      assert is_tuple(result)
+      result =
+        Gutter.render_sign(
+          0,
+          0,
+          5,
+          sign_ctx(%{diagnostic_signs: %{5 => :error}, git_signs: %{5 => :added}})
+        )
+
+      assert_sign(result, "E ", @colors.error_fg)
     end
 
-    test "renders empty space when no diagnostic or git sign" do
-      diag_signs = %{5 => :error}
-      result = Gutter.render_sign(0, 0, 10, diag_signs, %{}, @colors, @git_colors)
-      assert is_tuple(result)
+    test "renders gutter icon annotation when no diagnostic or git sign" do
+      decorations = %Decorations{
+        annotations: [
+          %LineAnnotation{id: make_ref(), line: 10, text: "!", kind: :gutter_icon, fg: 0xAA55FF}
+        ]
+      }
+
+      result = Gutter.render_sign(0, 0, 10, sign_ctx(%{decorations: decorations}))
+      assert_sign(result, "! ", 0xAA55FF)
+    end
+
+    test "renders empty space when no diagnostic, git sign, or gutter annotation" do
+      result = Gutter.render_sign(0, 0, 10, sign_ctx(%{}))
+      assert_sign(result, "  ", nil)
     end
   end
 
