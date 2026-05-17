@@ -68,7 +68,7 @@ jobs:
 
       - run: mix deps.get
       - run: mix deps.compile
-      - run: mix test --warnings-as-errors --exclude system_clipboard
+      - run: mix test --warnings-as-errors --exclude system_clipboard --exclude conformance
 
   conformance:
     name: Neovim Conformance

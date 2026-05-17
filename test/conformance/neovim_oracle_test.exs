@@ -7,11 +7,33 @@ defmodule Minga.Conformance.NeovimOracleTest do
   @moduletag :conformance
   @moduletag timeout: 30_000
 
-  test "runs scenarios through Neovim and returns results keyed by name" do
-    assert {:ok, results} = NeovimOracle.run(fake_scenarios(), 2_000)
-    assert results["oracle h"].line == 0
-    assert results["oracle h"].col == 1
-    assert results["oracle dw"].content == "two"
+  describe "with real nvim" do
+    if System.find_executable("nvim") == nil do
+      @describetag skip: "nvim not found; install Neovim to run oracle-backed conformance tests"
+    end
+
+    test "runs scenarios through Neovim and returns results keyed by name" do
+      assert {:ok, results} = NeovimOracle.run(fake_scenarios(), 2_000)
+      assert results["oracle h"].line == 0
+      assert results["oracle h"].col == 1
+      assert results["oracle dw"].content == "two"
+    end
+
+    test "captures insert mode after change operator transitions" do
+      scenarios = [
+        %{
+          name: "oracle cw mode",
+          type: :operator,
+          content: "one two",
+          cursor: %{line: 0, col: 0},
+          keys: "cw",
+          compare: :mode
+        }
+      ]
+
+      assert {:ok, results} = NeovimOracle.run(scenarios, 2_000)
+      assert results["oracle cw mode"].mode == "i"
+    end
   end
 
   test "times out a hung nvim process" do
@@ -21,20 +43,11 @@ defmodule Minga.Conformance.NeovimOracleTest do
     end)
   end
 
-  test "captures insert mode after change operator transitions" do
-    scenarios = [
-      %{
-        name: "oracle cw mode",
-        type: :operator,
-        content: "one two",
-        cursor: %{line: 0, col: 0},
-        keys: "cw",
-        compare: :mode
-      }
-    ]
-
-    assert {:ok, results} = NeovimOracle.run(scenarios, 2_000)
-    assert results["oracle cw mode"].mode == "i"
+  test "returns a failure tuple when nvim exits non-zero with output" do
+    fake_nvim("#!/usr/bin/env bash\nprintf 'nvim exploded' >&2\nexit 7\n", fn nvim ->
+      assert {:error, {:nvim_failed, 7, "nvim exploded"}} =
+               NeovimOracle.run_with_executable(nvim, fake_scenarios(), 2_000)
+    end)
   end
 
   test "reports invalid oracle output" do

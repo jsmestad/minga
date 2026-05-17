@@ -292,14 +292,18 @@ defmodule Minga.MixProject do
           Minga.CLI.main(argv)
         '"
       ],
-      test: ["test --warnings-as-errors"],
+      test: ["test --warnings-as-errors --exclude conformance"],
       "test.llm": [
-        "test --warnings-as-errors --formatter Minga.Test.LLMFormatter --max-failures 5 --exclude heavy"
+        "test --warnings-as-errors --formatter Minga.Test.LLMFormatter --max-failures 5 --exclude heavy --exclude conformance"
       ],
-      "test.debug": ["test --warnings-as-errors --trace --max-failures 3"],
-      "test.quick": ["test --warnings-as-errors --stale --max-failures 5 --exclude heavy"],
-      "test.heavy": ["test --warnings-as-errors --only heavy"],
-      conformance: ["test --warnings-as-errors test/conformance/"],
+      "test.debug": ["test --warnings-as-errors --trace --max-failures 3 --exclude conformance"],
+      "test.quick": [
+        "test --warnings-as-errors --stale --max-failures 5 --exclude heavy --exclude conformance"
+      ],
+      "test.heavy": ["test --warnings-as-errors --only heavy --exclude conformance"],
+      conformance: [
+        "run --no-start -e 'Mix.Tasks.Test.run([\"--warnings-as-errors\", \"--include\", \"conformance\", \"test/conformance/\"])'"
+      ],
       # lint runs via Makefile (`make lint`) so all steps run even if one
       # fails. Mix aliases stop on first failure, which skips dialyzer.
       "lint.fix": ["format", "credo --strict"]

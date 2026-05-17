@@ -103,32 +103,8 @@ defmodule Minga.Test.NeovimOracle do
       type: Atom.to_string(scenario.type),
       content: scenario.content,
       cursor: scenario.cursor,
-      keys: scenario.keys,
-      compare: stringify_compare(scenario.compare),
-      tags: Enum.map(Map.get(scenario, :tags, []), &Atom.to_string/1),
-      known_divergence: stringify_known_divergence(Map.get(scenario, :known_divergence))
+      keys: scenario.keys
     }
-  end
-
-  @spec stringify_compare(compare_target()) :: String.t() | [String.t()]
-  defp stringify_compare(:both), do: "both"
-  defp stringify_compare(compare) when is_atom(compare), do: Atom.to_string(compare)
-  defp stringify_compare(compare) when is_list(compare), do: Enum.map(compare, &Atom.to_string/1)
-
-  @spec stringify_known_divergence(divergence() | nil) :: map() | nil
-  defp stringify_known_divergence(nil), do: nil
-
-  defp stringify_known_divergence(%{} = divergence) do
-    %{
-      reason: divergence.reason,
-      failures: Enum.map(divergence.failures, &Atom.to_string/1),
-      actual: stringify_actual(divergence.actual)
-    }
-  end
-
-  @spec stringify_actual(map()) :: map()
-  defp stringify_actual(actual) do
-    Enum.into(actual, %{}, fn {key, value} -> {Atom.to_string(key), value} end)
   end
 
   @spec invoke_nvim(String.t(), String.t(), pos_integer()) ::
