@@ -2,6 +2,8 @@ defmodule MingaEditor.Commands.FileTreeRevealTest do
   @moduledoc """
   Tests for the reveal_active_file command (SPC o r).
 
+  Classification: the FileTree.reveal/2 ancestor expansion seam is tested directly, while EditorCase tests remain for user-facing command routing, tree opening, focus, and visible sidebar behavior.
+
   Verifies that revealing the active buffer's file in the tree opens the
   tree if needed, expands parents, moves the cursor, and focuses the tree.
 
@@ -34,7 +36,23 @@ defmodule MingaEditor.Commands.FileTreeRevealTest do
     assert file_entry != nil, "#{Path.basename(file_path)} should be visible in the tree"
   end
 
-  describe "reveal active file (SPC o r)" do
+  describe "[command-state] FileTree.reveal/2" do
+    test "expands ancestors and selects the target file directly", %{tmp_dir: dir} do
+      nested = Path.join([dir, "lib", "minga"])
+      File.mkdir_p!(nested)
+      file = Path.join(nested, "editor.ex")
+      File.write!(file, "hello")
+
+      tree = dir |> FileTree.new() |> FileTree.collapse_all() |> FileTree.reveal(file)
+      entries = FileTree.visible_entries(tree)
+
+      assert Enum.any?(entries, &(&1.path == Path.expand(file)))
+      assert %{path: selected_path} = FileTree.selected_entry(tree)
+      assert selected_path == Path.expand(file)
+    end
+  end
+
+  describe "[EditorCase integration] reveal active file (SPC o r)" do
     test "opens tree and reveals file when tree is closed", %{tmp_dir: dir} do
       file = Path.join(dir, "reveal_test.txt")
       File.write!(file, "hello")
@@ -42,7 +60,7 @@ defmodule MingaEditor.Commands.FileTreeRevealTest do
       ctx = start_editor("hello", file_path: file, project_root: dir)
 
       # Tree starts closed
-      state = :sys.get_state(ctx.editor)
+      state = editor_state(ctx)
       assert state.workspace.file_tree.tree == nil
 
       # Reveal active file
@@ -108,7 +126,7 @@ defmodule MingaEditor.Commands.FileTreeRevealTest do
 
       # Reveal should be a no-op (tree stays closed)
       _state = send_keys_sync(ctx, "<SPC>or")
-      state = :sys.get_state(ctx.editor)
+      state = editor_state(ctx)
 
       # Tree should not have opened
       assert state.workspace.file_tree.tree == nil
