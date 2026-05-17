@@ -25,6 +25,7 @@ defmodule MingaEditor.Renderer.BufferLine do
   alias MingaEditor.NavFlash
   alias MingaEditor.Renderer.Context
   alias MingaEditor.Renderer.Gutter
+  alias MingaEditor.Renderer.Gutter.SignContext
   alias MingaEditor.Renderer.Line, as: LineRenderer
   alias Minga.Core.WrapMap
   alias MingaEditor.UI.Highlight
@@ -40,6 +41,7 @@ defmodule MingaEditor.Renderer.BufferLine do
   - `byte_offset`   — absolute byte offset of this line in the buffer
   - `screen_row`    — first screen row to draw on
   - `ctx`           — per-frame render context (viewport, highlights, etc.)
+  - `sign_ctx`      — per-window sign rendering context
   - `ln_style`      — line number display style
   - `gutter_w`      — total gutter width (sign column + line numbers)
   - `sign_w`        — sign column width (0 when no diagnostics)
@@ -55,6 +57,7 @@ defmodule MingaEditor.Renderer.BufferLine do
           required(:byte_offset) => non_neg_integer(),
           required(:screen_row) => non_neg_integer(),
           required(:ctx) => Context.t(),
+          required(:sign_ctx) => SignContext.t(),
           required(:ln_style) => Gutter.line_number_style(),
           required(:gutter_w) => non_neg_integer(),
           required(:sign_w) => non_neg_integer(),
@@ -531,17 +534,8 @@ defmodule MingaEditor.Renderer.BufferLine do
   # ── Gutter primitives ───────────────────────────────────────────────────
 
   @spec render_sign(line_params(), non_neg_integer()) :: DisplayList.draw() | []
-  defp render_sign(%{ctx: ctx, buf_line: buf_line}, sr) do
-    Gutter.render_sign(
-      sr,
-      0,
-      buf_line,
-      ctx.diagnostic_signs,
-      ctx.git_signs,
-      ctx.gutter_colors,
-      ctx.git_colors,
-      ctx.decorations
-    )
+  defp render_sign(%{buf_line: buf_line, sign_ctx: sign_ctx}, sr) do
+    Gutter.render_sign(sr, 0, buf_line, sign_ctx)
   end
 
   @spec render_number(line_params(), non_neg_integer()) :: DisplayList.draw() | []

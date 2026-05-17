@@ -15,6 +15,7 @@ defmodule MingaEditor.Renderer.Gutter do
   alias Minga.Core.Face
   alias Minga.Diagnostics.Diagnostic
   alias MingaEditor.DisplayList
+  alias MingaEditor.Renderer.Gutter.SignContext
 
   @sign_col_width 2
   @fold_col_width 1
@@ -63,24 +64,11 @@ defmodule MingaEditor.Renderer.Gutter do
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
-          %{non_neg_integer() => Diagnostic.severity()},
-          %{non_neg_integer() => atom()},
-          colors(),
-          git_colors(),
-          Minga.Core.Decorations.t()
+          SignContext.t()
         ) :: DisplayList.draw() | []
-  def render_sign(
-        screen_row,
-        col_offset,
-        buf_line,
-        diag_signs,
-        git_signs,
-        colors,
-        git_colors,
-        decorations \\ %Minga.Core.Decorations{}
-      ) do
-    diag = Map.get(diag_signs, buf_line)
-    git = Map.get(git_signs, buf_line)
+  def render_sign(screen_row, col_offset, buf_line, %SignContext{} = sign_ctx) do
+    diag = Map.get(sign_ctx.diagnostic_signs, buf_line)
+    git = Map.get(sign_ctx.git_signs, buf_line)
 
     render_sign_for_line(
       screen_row,
@@ -88,9 +76,9 @@ defmodule MingaEditor.Renderer.Gutter do
       buf_line,
       diag,
       git,
-      colors,
-      git_colors,
-      decorations
+      sign_ctx.colors,
+      sign_ctx.git_colors,
+      sign_ctx.decorations
     )
   end
 

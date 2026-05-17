@@ -23,6 +23,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   alias MingaEditor.Renderer.BufferLine
   alias MingaEditor.Renderer.Context
   alias MingaEditor.Renderer.Gutter
+  alias MingaEditor.Renderer.Gutter.SignContext
   alias MingaEditor.Renderer.SearchHighlight
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Window
@@ -208,6 +209,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     } = opts
 
     sign_w = Gutter.sign_column_width()
+    sign_ctx = SignContext.from_render_context(ctx)
     max_rows = length(lines)
     dirty_rows = dirty_screen_rows(lines, first_line, window)
     fold_start_lines = fold_start_lines(window.fold_ranges)
@@ -242,6 +244,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
                 byte_offset: byte_off,
                 screen_row: screen_row,
                 ctx: ctx,
+                sign_ctx: sign_ctx,
                 ln_style: ln_style,
                 gutter_w: gutter_w,
                 sign_w: sign_w,
@@ -315,6 +318,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     } = opts
 
     sign_w = Gutter.sign_column_width()
+    sign_ctx = SignContext.from_render_context(ctx)
     max_rows = length(lines)
     fold_start_lines = fold_start_lines(window.fold_ranges)
 
@@ -346,6 +350,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
                 byte_offset: byte_off,
                 screen_row: screen_row,
                 ctx: ctx,
+                sign_ctx: sign_ctx,
                 ln_style: ln_style,
                 gutter_w: gutter_w,
                 sign_w: sign_w,
@@ -399,6 +404,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     } = opts
 
     sign_w = Gutter.sign_column_width()
+    sign_ctx = SignContext.from_render_context(ctx)
     wrap_on = Map.get(opts, :wrap_on, false)
 
     # Pre-compute wrap map for all visible buffer lines in one batch call
@@ -416,6 +422,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     render_opts = %{
       cursor_line: cursor_line,
       ctx: ctx,
+      sign_ctx: sign_ctx,
       ln_style: ln_style,
       gutter_w: gutter_w,
       sign_w: sign_w,
@@ -708,6 +715,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
           byte_offset: 0,
           screen_row: screen_row,
           ctx: render_opts.ctx,
+          sign_ctx: render_opts.sign_ctx,
           ln_style: render_opts.ln_style,
           gutter_w: render_opts.gutter_w,
           sign_w: render_opts.sign_w,
@@ -748,6 +756,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       WrapMap.compute(lines, ctx.content_w, breakindent: breakindent, linebreak: linebreak)
 
     sign_w = Gutter.sign_column_width()
+    sign_ctx = SignContext.from_render_context(ctx)
     fold_start_lines = fold_start_lines(opts.window.fold_ranges)
 
     {gutters, contents, screen_row, _byte_off} =
@@ -767,6 +776,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
               byte_offset: byte_off,
               screen_row: sr,
               ctx: ctx,
+              sign_ctx: sign_ctx,
               ln_style: ln_style,
               gutter_w: gutter_w,
               sign_w: sign_w,
