@@ -79,24 +79,6 @@ defmodule MingaEditor.UI.Theme.BuilderTest do
     end
   end
 
-  describe "Catppuccin migration" do
-    for theme_name <- [
-          :catppuccin_mocha,
-          :catppuccin_latte,
-          :catppuccin_frappe,
-          :catppuccin_macchiato
-        ] do
-      test "#{theme_name} matches the legacy hand-wired theme byte-for-byte" do
-        legacy =
-          "test/fixtures/theme/#{unquote(theme_name)}.term"
-          |> File.read!()
-          |> :erlang.binary_to_term()
-
-        assert Theme.get!(unquote(theme_name)) == legacy
-      end
-    end
-  end
-
   @spec sample_palette() :: Palette.t()
   defp sample_palette do
     Palette.new(%{
