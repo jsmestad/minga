@@ -31,6 +31,14 @@ defmodule MingaEditor.UI.Theme.DoomOne do
     %MingaEditor.UI.Theme{
       name: :doom_one,
       syntax: syntax(),
+      hl_todo: %{
+        todo: Minga.Core.Face.new(fg: @yellow, bold: true),
+        fixme: Minga.Core.Face.new(fg: @red, bold: true),
+        note: Minga.Core.Face.new(fg: @blue, bold: true),
+        hack: Minga.Core.Face.new(fg: @orange, bold: true),
+        review: Minga.Core.Face.new(fg: @magenta, bold: true),
+        deprecated: Minga.Core.Face.new(fg: @grey, strikethrough: true)
+      },
       editor: %MingaEditor.UI.Theme.Editor{
         bg: @bg,
         fg: @fg,
@@ -42,7 +50,9 @@ defmodule MingaEditor.UI.Theme.DoomOne do
         highlight_read_bg: 0x3A3F4B,
         highlight_write_bg: 0x4A3F2B,
         selection_bg: 0x264F78,
-        whitespace_fg: @base5
+        whitespace_fg: @base5,
+        indent_guide_fg: 0x3B3F4C,
+        indent_guide_active_fg: 0x5C6370
       },
       gutter: %MingaEditor.UI.Theme.Gutter{
         fg: @base5,

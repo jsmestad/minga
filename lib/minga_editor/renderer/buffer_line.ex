@@ -20,6 +20,7 @@ defmodule MingaEditor.Renderer.BufferLine do
 
   alias Minga.Core.Decorations
   alias Minga.Core.Face
+  alias Minga.Core.IndentGuide
   alias Minga.Core.Unicode
   alias MingaEditor.DisplayList
   alias MingaEditor.NavFlash
@@ -65,7 +66,8 @@ defmodule MingaEditor.Renderer.BufferLine do
           required(:max_rows) => pos_integer(),
           required(:row_offset) => non_neg_integer(),
           required(:col_offset) => non_neg_integer(),
-          optional(:highlight_segments) => [Highlight.styled_segment()] | nil
+          optional(:highlight_segments) => [Highlight.styled_segment()] | nil,
+          optional(:indent_guide_cols) => [IndentGuide.guide()]
         }
 
   @doc """
@@ -114,6 +116,7 @@ defmodule MingaEditor.Renderer.BufferLine do
     content_cmds = maybe_apply_cursorline(content_cmds, sr, p)
     content_cmds = maybe_apply_decoration_bg(content_cmds, sr, p)
     content_cmds = overlay_decoration_styles(content_cmds, sr, p)
+    content_cmds = content_cmds ++ render_indent_guides(p, sr)
 
     gutters = build_gutter_list(sign_cmd, gutter_cmd, p.row_offset, p.col_offset)
     contents = maybe_offset(content_cmds, p.row_offset, p.col_offset)
@@ -171,6 +174,9 @@ defmodule MingaEditor.Renderer.BufferLine do
     content_cmds = maybe_apply_decoration_bg(content_cmds, sr, p)
     content_cmds = overlay_decoration_styles(content_cmds, sr, p)
 
+    content_cmds =
+      if is_first, do: content_cmds ++ render_indent_guides(p, sr), else: content_cmds
+
     # Draw the border and shift text rightward to make room.
     content_cmds =
       if vt_w > 0 do
@@ -186,6 +192,52 @@ defmodule MingaEditor.Renderer.BufferLine do
     contents = maybe_offset(content_cmds, p.row_offset, p.col_offset)
     {gutters, contents}
   end
+
+  # ── Indent guides ──────────────────────────────────────────────────────────
+
+  @spec render_indent_guides(line_params(), non_neg_integer()) :: [DisplayList.draw()]
+  defp render_indent_guides(%{indent_guide_cols: []}, _screen_row), do: []
+  defp render_indent_guides(p, _screen_row) when not is_map_key(p, :indent_guide_cols), do: []
+
+  defp render_indent_guides(p, screen_row) do
+    leading_width = leading_whitespace_width(p.line_text, p.ctx.tab_width)
+
+    p.indent_guide_cols
+    |> Enum.filter(&visible_indent_guide?(&1, p.ctx, leading_width, p.line_text))
+    |> Enum.map(fn guide -> indent_guide_draw(guide, p.ctx, screen_row) end)
+  end
+
+  @spec visible_indent_guide?(IndentGuide.guide(), Context.t(), non_neg_integer(), String.t()) ::
+          boolean()
+  defp visible_indent_guide?(%{col: col}, ctx, leading_width, line_text) do
+    col >= ctx.viewport.left and col < ctx.viewport.left + ctx.content_w and
+      (String.trim(line_text) == "" or col < leading_width)
+  end
+
+  @spec indent_guide_draw(IndentGuide.guide(), Context.t(), non_neg_integer()) ::
+          DisplayList.draw()
+  defp indent_guide_draw(%{col: col, active: active}, ctx, screen_row) do
+    face = if active, do: ctx.indent_guide_active_face, else: ctx.indent_guide_face
+    DisplayList.draw(screen_row, ctx.gutter_w + col - ctx.viewport.left, "│", face || Face.new())
+  end
+
+  @spec leading_whitespace_width(String.t(), pos_integer()) :: non_neg_integer()
+  defp leading_whitespace_width(line, tab_width) do
+    line
+    |> String.graphemes()
+    |> Enum.reduce_while(0, fn grapheme, col ->
+      leading_whitespace_step(grapheme, col, tab_width)
+    end)
+  end
+
+  @spec leading_whitespace_step(String.t(), non_neg_integer(), pos_integer()) ::
+          {:cont, non_neg_integer()} | {:halt, non_neg_integer()}
+  defp leading_whitespace_step(" ", col, _tab_width), do: {:cont, col + 1}
+  defp leading_whitespace_step("\t", col, tab_width), do: {:cont, col + tab_fill(col, tab_width)}
+  defp leading_whitespace_step(_grapheme, col, _tab_width), do: {:halt, col}
+
+  @spec tab_fill(non_neg_integer(), pos_integer()) :: pos_integer()
+  defp tab_fill(col, tab_width), do: tab_width - rem(col, tab_width)
 
   # ── Cursorline & Nav-flash ─────────────────────────────────────────────────
 

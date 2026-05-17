@@ -28,6 +28,14 @@ defmodule MingaEditor.UI.Theme.OneLight do
     %MingaEditor.UI.Theme{
       name: :one_light,
       syntax: syntax(),
+      hl_todo: %{
+        todo: Minga.Core.Face.new(fg: @hue_6_2, bold: true),
+        fixme: Minga.Core.Face.new(fg: @hue_5, bold: true),
+        note: Minga.Core.Face.new(fg: @hue_2, bold: true),
+        hack: Minga.Core.Face.new(fg: @hue_6, bold: true),
+        review: Minga.Core.Face.new(fg: @hue_3, bold: true),
+        deprecated: Minga.Core.Face.new(fg: @mono_3, strikethrough: true)
+      },
       editor: %MingaEditor.UI.Theme.Editor{
         bg: @syntax_bg,
         fg: @mono_1,
@@ -39,7 +47,9 @@ defmodule MingaEditor.UI.Theme.OneLight do
         highlight_read_bg: 0xD0D5DC,
         highlight_write_bg: 0xE8D8B8,
         selection_bg: 0xBDD5FC,
-        whitespace_fg: @syntax_gutter
+        whitespace_fg: @syntax_gutter,
+        indent_guide_fg: @syntax_guide,
+        indent_guide_active_fg: @mono_3
       },
       gutter: %MingaEditor.UI.Theme.Gutter{
         fg: @syntax_gutter,
