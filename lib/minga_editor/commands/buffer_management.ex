@@ -148,7 +148,8 @@ defmodule MingaEditor.Commands.BufferManagement do
 
     case DynamicSupervisor.start_child(
            Minga.Buffer.Supervisor,
-           {Minga.Buffer, content: "", buffer_name: name}
+           {Minga.Buffer,
+            content: "", buffer_name: name, options_server: EditorState.options_server(state)}
          ) do
       {:ok, pid} ->
         Commands.add_buffer(state, pid)
@@ -254,7 +255,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   def execute(state, {:execute_ex_command, {:edit, file_path}}) do
     case EditorState.find_buffer_by_path(state, file_path) do
       nil ->
-        case Commands.start_buffer(file_path) do
+        case Commands.start_buffer(file_path, EditorState.options_server(state)) do
           {:ok, pid} ->
             Commands.add_buffer(state, pid)
 
@@ -552,7 +553,7 @@ defmodule MingaEditor.Commands.BufferManagement do
       """)
     end
 
-    case Commands.start_buffer(config_path) do
+    case Commands.start_buffer(config_path, EditorState.options_server(state)) do
       {:ok, pid} ->
         EditorState.add_buffer(state, pid)
 
@@ -1195,7 +1196,8 @@ defmodule MingaEditor.Commands.BufferManagement do
     {:ok, buf} =
       DynamicSupervisor.start_child(
         Minga.Buffer.Supervisor,
-        {Minga.Buffer, content: "", buffer_name: "[new]"}
+        {Minga.Buffer,
+         content: "", buffer_name: "[new]", options_server: EditorState.options_server(state)}
       )
 
     # add_buffer creates a new file tab (for agent tabs, via
@@ -1677,7 +1679,8 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp create_fallback_buffer(state, bs) do
     case DynamicSupervisor.start_child(
            Minga.Buffer.Supervisor,
-           {Minga.Buffer, content: "", buffer_name: "[new 1]"}
+           {Minga.Buffer,
+            content: "", buffer_name: "[new 1]", options_server: EditorState.options_server(state)}
          ) do
       {:ok, new_buf} ->
         state

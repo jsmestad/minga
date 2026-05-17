@@ -84,7 +84,7 @@ defmodule MingaEditor.Commands.AgentSession do
       {:ok, pid} ->
         state =
           if AgentAccess.agent(state).buffer == nil do
-            buf = AgentBufferSync.start_buffer()
+            buf = AgentBufferSync.start_buffer(EditorState.options_server(state))
             state = AgentAccess.update_agent(state, &AgentState.set_buffer(&1, buf))
             state = EditorState.monitor_buffer(state, buf)
             AgentLifecycle.setup_agent_highlight(state)
@@ -178,7 +178,12 @@ defmodule MingaEditor.Commands.AgentSession do
     name = buffer_name_for_language(language)
     filetype = filetype_from_language(language)
 
-    case Buffer.start_link(content: content, buffer_name: name, filetype: filetype) do
+    case Buffer.start_link(
+           content: content,
+           buffer_name: name,
+           filetype: filetype,
+           options_server: EditorState.options_server(state)
+         ) do
       {:ok, buf} ->
         state
         |> put_in([Access.key(:workspace), Access.key(:buffers), Access.key(:active)], buf)
@@ -316,7 +321,7 @@ defmodule MingaEditor.Commands.AgentSession do
 
   @spec create_agent_buffer(state()) :: state()
   defp create_agent_buffer(state) do
-    case AgentBufferSync.start_buffer() do
+    case AgentBufferSync.start_buffer(EditorState.options_server(state)) do
       pid when is_pid(pid) ->
         state = AgentAccess.update_agent(state, &AgentState.set_buffer(&1, pid))
         state = EditorState.monitor_buffer(state, pid)

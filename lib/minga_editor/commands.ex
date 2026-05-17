@@ -576,7 +576,11 @@ defmodule MingaEditor.Commands do
 
   @doc "Returns the existing buffer for a file path, or starts one if needed."
   @spec start_buffer(String.t()) :: {:ok, pid()} | {:error, term()}
-  def start_buffer(file_path) do
+  @spec start_buffer(String.t(), Minga.Config.Options.server() | nil) ::
+          {:ok, pid()} | {:error, term()}
+  def start_buffer(file_path, options_server \\ Minga.Config.Options.default_server()) do
+    options_server = normalize_options_server(options_server)
+
     case Buffer.pid_for_path(file_path) do
       {:ok, pid} ->
         {:ok, pid}
@@ -584,7 +588,7 @@ defmodule MingaEditor.Commands do
       :not_found ->
         DynamicSupervisor.start_child(
           Minga.Buffer.Supervisor,
-          {Minga.Buffer, file_path: file_path}
+          {Minga.Buffer, file_path: file_path, options_server: options_server}
         )
     end
   end
@@ -599,6 +603,10 @@ defmodule MingaEditor.Commands do
           state() | {state(), action()}
   defp guard_buffer(%{workspace: %{buffers: %{active: nil}}} = state, _fun), do: state
   defp guard_buffer(_state, fun), do: fun.()
+
+  @spec normalize_options_server(term() | nil) :: Minga.Config.Options.server()
+  defp normalize_options_server(nil), do: Minga.Config.Options.default_server()
+  defp normalize_options_server(server), do: Minga.Config.Options.validate_server!(server)
 
   # Remove the current tool from the prompt queue after accept/decline.
   @spec drain_tool_prompt_queue(state()) :: state()

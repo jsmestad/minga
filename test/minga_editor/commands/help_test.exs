@@ -3,6 +3,7 @@ defmodule MingaEditor.Commands.HelpTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Config.Options
   alias Minga.Keymap.Active, as: ActiveKeymap
   alias MingaEditor.Commands.Help
   alias MingaEditor.State, as: EditorState
@@ -42,10 +43,15 @@ defmodule MingaEditor.Commands.HelpTest do
   describe "describe_key_result" do
     test "creates *Help* buffer with key description" do
       state = build_state()
+
+      assert {:ok, false} =
+               Options.set_for_filetype(state.options_server, :text, :autopair_block, false)
+
       result = Help.execute(state, {:describe_key_result, "j", :move_down, "Move cursor down"})
 
       assert result.workspace.buffers.help != nil
       assert Process.alive?(result.workspace.buffers.help)
+      assert BufferProcess.get_option(result.workspace.buffers.help, :autopair_block) == false
 
       content = BufferProcess.content(result.workspace.buffers.help)
       assert content =~ "Key:         j"

@@ -59,6 +59,33 @@ defmodule Minga.Buffer.ProcessTest do
       {:ok, _pid} = BufferProcess.start_link(name: :test_buffer, content: "named")
       assert BufferProcess.content(:test_buffer) == "named"
     end
+
+    test "falls back to builtin defaults when a private options server dies" do
+      options_server = start_supervised!({Options, name: nil})
+
+      assert {:ok, false} =
+               Options.set_for_filetype(options_server, :text, :cursor_animate, false)
+
+      :ok = GenServer.stop(options_server)
+
+      {:ok, pid} =
+        BufferProcess.start_link(
+          content: "hello",
+          filetype: :text,
+          options_server: options_server
+        )
+
+      assert BufferProcess.content(pid) == "hello"
+      assert BufferProcess.get_option(pid, :cursor_animate) == Options.default(:cursor_animate)
+    end
+
+    test "accepts a missing named options_server and falls back to builtin defaults" do
+      {:ok, pid} =
+        BufferProcess.start_link(content: "hello", options_server: :missing_options_server)
+
+      assert BufferProcess.content(pid) == "hello"
+      assert BufferProcess.get_option(pid, :cursor_animate) == Options.default(:cursor_animate)
+    end
   end
 
   describe "open/2" do
@@ -73,6 +100,36 @@ defmodule Minga.Buffer.ProcessTest do
       assert BufferProcess.content(pid) == "new content"
       assert BufferProcess.file_path(pid) == path
       refute BufferProcess.dirty?(pid)
+    end
+
+    test "re-seeds cached options from the opened filetype and preserves explicit options", %{
+      tmp_dir: tmp_dir
+    } do
+      options_server = start_supervised!({Options, name: nil})
+
+      assert {:ok, false} =
+               Options.set_for_filetype(options_server, :text, :autopair_block, false)
+
+      assert {:ok, true} = Options.set_for_filetype(options_server, :bash, :autopair_block, true)
+
+      path = Path.join(tmp_dir, "open_script")
+      File.write!(path, "#!/usr/bin/env bash\n")
+
+      {:ok, pid} =
+        BufferProcess.start_link(
+          content: "hello",
+          filetype: :text,
+          options_server: options_server
+        )
+
+      BufferProcess.set_option(pid, :clipboard, :none)
+      assert BufferProcess.get_option(pid, :autopair_block) == false
+
+      :ok = BufferProcess.open(pid, path)
+
+      assert BufferProcess.filetype(pid) == :bash
+      assert BufferProcess.get_option(pid, :autopair_block) == true
+      assert BufferProcess.get_option(pid, :clipboard) == :none
     end
 
     test "returns error for unreadable file" do
@@ -90,6 +147,40 @@ defmodule Minga.Buffer.ProcessTest do
 
       BufferProcess.open(pid, path)
       refute BufferProcess.dirty?(pid)
+    end
+  end
+
+  describe "reload/1" do
+    test "re-seeds cached options from the reloaded filetype and preserves explicit options", %{
+      tmp_dir: tmp_dir
+    } do
+      options_server = start_supervised!({Options, name: nil})
+
+      assert {:ok, false} =
+               Options.set_for_filetype(options_server, :text, :autopair_block, false)
+
+      assert {:ok, true} = Options.set_for_filetype(options_server, :bash, :autopair_block, true)
+
+      path = Path.join(tmp_dir, "reload_script")
+      File.write!(path, "hello")
+
+      {:ok, pid} =
+        BufferProcess.start_link(
+          file_path: path,
+          filetype: :text,
+          options_server: options_server
+        )
+
+      BufferProcess.set_option(pid, :clipboard, :none)
+      assert BufferProcess.get_option(pid, :autopair_block) == false
+
+      File.write!(path, "#!/usr/bin/env bash\n")
+      :ok = BufferProcess.reload(pid)
+
+      assert BufferProcess.filetype(pid) == :bash
+      assert BufferProcess.get_option(pid, :autopair_block) == true
+      assert BufferProcess.get_option(pid, :clipboard) == :none
+      assert BufferProcess.content(pid) == "#!/usr/bin/env bash\n"
     end
   end
 
@@ -1301,6 +1392,39 @@ defmodule Minga.Buffer.ProcessTest do
       # Change to Go filetype; non-explicit tab_width should reseed to 8
       BufferProcess.set_filetype(pid, :go)
       assert BufferProcess.get_option(pid, :tab_width) == 8
+    end
+
+    test "get_option falls back to builtin defaults when a private options server dies" do
+      options_server = start_supervised!({Options, name: nil})
+      assert {:ok, 4} = Options.set_for_filetype(options_server, :text, :tab_width, 4)
+      :ok = GenServer.stop(options_server)
+
+      {:ok, pid} =
+        BufferProcess.start_link(
+          content: "hello",
+          filetype: :text,
+          options_server: options_server
+        )
+
+      assert BufferProcess.get_option(pid, :tab_width) == 2
+    end
+
+    test "set_filetype reseeds from the buffer's private options server" do
+      options_server = start_supervised!({Options, name: nil})
+      assert {:ok, 11} = Options.set_for_filetype(options_server, :go, :tab_width, 11)
+
+      {:ok, pid} =
+        BufferProcess.start_link(
+          content: "hello",
+          filetype: :text,
+          options_server: options_server
+        )
+
+      assert BufferProcess.get_option(pid, :tab_width) == 2
+
+      BufferProcess.set_filetype(pid, :go)
+
+      assert BufferProcess.get_option(pid, :tab_width) == 11
     end
   end
 

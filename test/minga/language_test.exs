@@ -33,4 +33,12 @@ defmodule Minga.LanguageTest do
       assert lang.project_type == nil
     end
   end
+
+  describe "block_pairs/1" do
+    test "returns built-in language smart-edit metadata" do
+      assert [%Minga.Language.BlockPair{} | _] = Language.block_pairs(:elixir)
+      assert Language.block_pairs(:text) == []
+      assert Language.block_pairs(:unknown_language) == []
+    end
+  end
 end

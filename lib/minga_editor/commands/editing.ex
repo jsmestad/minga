@@ -8,12 +8,14 @@ defmodule MingaEditor.Commands.Editing do
 
   alias Minga.Buffer
   alias Minga.Buffer.Document
+  alias Minga.Language
   alias Minga.Parser.Manager, as: ParserManager
 
   alias MingaEditor.Commands.Helpers
   alias MingaEditor.HighlightSync
   alias MingaEditor.Indent
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.UI.Highlight
   alias MingaEditor.State.Registers
   alias MingaEditor.VimState
   alias MingaEditor.Workspace.State, as: WorkspaceState
@@ -92,12 +94,15 @@ defmodule MingaEditor.Commands.Editing do
   # ── Insertion ─────────────────────────────────────────────────────────────
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :insert_newline) do
-    {line, _col} = Buffer.cursor(buf)
+    {line, col} = Buffer.cursor(buf)
+    block_closing = block_closing_for_enter(state, buf, line, col)
     Buffer.insert_char(buf, "\n")
 
     state = HighlightSync.request_reparse(state)
     indent = Indent.compute_for_line(buf, line + 1, indent_opts(state, buf))
+    indent = block_inner_indent(buf, indent, block_closing)
     insert_indent(buf, indent)
+    insert_block_closing(buf, indent, block_closing)
 
     state
   end
@@ -105,7 +110,7 @@ defmodule MingaEditor.Commands.Editing do
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:insert_char, char})
       when is_binary(char) do
     if Buffer.get_option(buf, :autopair) do
-      execute_autopair_insert(buf, char)
+      execute_autopair_insert(state, buf, char)
     else
       Buffer.insert_char(buf, char)
     end
@@ -621,6 +626,176 @@ defmodule MingaEditor.Commands.Editing do
     Buffer.apply_edit(buf, line, col, line, col + len - 1, "")
   end
 
+  # ── Private block-pair helpers ────────────────────────────────────────────
+
+  @typep block_closing :: {indent :: String.t(), closing :: String.t()}
+
+  @spec block_closing_for_enter(state(), pid(), non_neg_integer(), non_neg_integer()) ::
+          block_closing() | nil
+  defp block_closing_for_enter(state, buf, line, col) do
+    with true <- Buffer.get_option(buf, :autopair_block),
+         [line_text] <- Buffer.lines(buf, line, 1),
+         true <- block_suffix_allowed?(line_text, col),
+         :code <- scope_at_position(state, buf, {line, block_scope_col(col)}),
+         line_prefix <- line_prefix(line_text, col),
+         closing when is_binary(closing) <- block_closing_keyword(buf, line_prefix) do
+      {Indent.extract_leading_ws(line_text), closing}
+    else
+      _ -> nil
+    end
+  end
+
+  @spec block_scope_col(non_neg_integer()) :: non_neg_integer()
+  defp block_scope_col(0), do: 0
+  defp block_scope_col(col), do: col - 1
+
+  @spec line_prefix(String.t(), non_neg_integer()) :: String.t()
+  defp line_prefix(line_text, col) do
+    binary_part(line_text, 0, min(col, byte_size(line_text)))
+  end
+
+  @spec block_suffix_allowed?(String.t(), non_neg_integer()) :: boolean()
+  defp block_suffix_allowed?(line_text, col) do
+    suffix_start = min(col, byte_size(line_text))
+    suffix = binary_part(line_text, suffix_start, byte_size(line_text) - suffix_start)
+    String.trim(suffix) == ""
+  end
+
+  @spec block_closing_keyword(pid(), String.t()) :: String.t() | nil
+  defp block_closing_keyword(buf, line_prefix) do
+    buf
+    |> Buffer.filetype()
+    |> Language.block_pairs()
+    |> Minga.Editing.block_closing_for(line_prefix)
+  end
+
+  @spec block_inner_indent(pid(), String.t(), block_closing() | nil) :: String.t()
+  defp block_inner_indent(_buf, indent, nil), do: indent
+
+  defp block_inner_indent(buf, indent, {closing_indent, _closing}) do
+    if byte_size(indent) > byte_size(closing_indent) do
+      indent
+    else
+      closing_indent <> indent_unit(buf)
+    end
+  end
+
+  @spec indent_unit(pid()) :: String.t()
+  defp indent_unit(buf) do
+    {unit, _width} = indent_string(buf)
+    unit
+  end
+
+  @spec insert_block_closing(pid(), String.t(), block_closing() | nil) :: :ok
+  defp insert_block_closing(_buf, _inner_indent, nil), do: :ok
+
+  defp insert_block_closing(buf, inner_indent, {closing_indent, closing}) do
+    Buffer.insert_text(buf, "\n" <> closing_indent <> closing)
+    {cursor_line, _cursor_col} = Buffer.cursor(buf)
+    Buffer.move_to(buf, {cursor_line - 1, byte_size(inner_indent)})
+    :ok
+  end
+
+  @spec scope_at_position(state(), pid(), Document.position()) :: Highlight.scope()
+  defp scope_at_position(state, buf, position) do
+    case highlight_for_buffer(state, buf) do
+      %Highlight{} = highlight -> scope_at_highlight(highlight, buf, position)
+      nil -> :code
+    end
+  end
+
+  @spec scope_at_highlight(Highlight.t(), pid(), Document.position()) :: Highlight.scope()
+  defp scope_at_highlight(highlight, buf, {line, col} = position) do
+    content = Buffer.content(buf)
+    scope = Highlight.scope_at(highlight, byte_offset_for_position(buf, position), content)
+    scope_at_highlight(scope, highlight, buf, content, line, col)
+  end
+
+  @spec scope_at_highlight(
+          Highlight.scope(),
+          Highlight.t(),
+          pid(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: Highlight.scope()
+  defp scope_at_highlight(:code, highlight, buf, content, line, col) do
+    if line_comment_scope_at_eol?(highlight, buf, content, line, col),
+      do: :comment,
+      else: :code
+  end
+
+  defp scope_at_highlight(scope, _highlight, _buf, _content, _line, _col), do: scope
+
+  @line_comment_block_prefixes ["/*", "<!--", "<%!--", "{-", "(*"]
+
+  @spec line_comment_scope_at_eol?(
+          Highlight.t(),
+          pid(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: boolean()
+  defp line_comment_scope_at_eol?(highlight, buf, content, line, col) do
+    with [line_text] <- Buffer.lines(buf, line, 1),
+         true <- col == byte_size(line_text),
+         token when is_binary(token) <- language_comment_token(Buffer.filetype(buf)),
+         true <- line_comment_token?(token) do
+      line_comment_scope_before_cursor?(highlight, buf, content, line, line_text)
+    else
+      _ -> false
+    end
+  end
+
+  @spec line_comment_token?(String.t()) :: boolean()
+  defp line_comment_token?(token) do
+    not Enum.any?(@line_comment_block_prefixes, &String.starts_with?(token, &1))
+  end
+
+  @spec line_comment_scope_before_cursor?(
+          Highlight.t(),
+          pid(),
+          String.t(),
+          non_neg_integer(),
+          String.t()
+        ) :: boolean()
+  defp line_comment_scope_before_cursor?(_highlight, _buf, _content, _line, ""), do: false
+
+  defp line_comment_scope_before_cursor?(highlight, buf, content, line, line_text) do
+    trimmed_line = String.trim_trailing(line_text)
+    trimmed_col = byte_size(trimmed_line)
+
+    if trimmed_col == 0 do
+      false
+    else
+      comment_scope_at_byte?(highlight, buf, content, line, trimmed_col - 1)
+    end
+  end
+
+  @spec comment_scope_at_byte?(
+          Highlight.t(),
+          pid(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: boolean()
+  defp comment_scope_at_byte?(highlight, buf, content, line, col) do
+    Highlight.scope_at(highlight, byte_offset_for_position(buf, {line, col}), content) == :comment
+  end
+
+  @spec highlight_for_buffer(state(), pid()) :: Highlight.t() | nil
+  defp highlight_for_buffer(%{workspace: %{highlight: %{highlights: highlights}}}, buf)
+       when is_map(highlights) do
+    Map.get(highlights, buf)
+  end
+
+  defp highlight_for_buffer(_state, _buf), do: nil
+
+  @spec byte_offset_for_position(pid(), Document.position()) :: non_neg_integer()
+  defp byte_offset_for_position(buf, {line, col}) do
+    Buffer.byte_offset_for_line(buf, line) + col
+  end
+
   # ── Private autopair helpers ──────────────────────────────────────────────
 
   @spec execute_autopair_delete(state(), pid()) :: state()
@@ -640,11 +815,21 @@ defmodule MingaEditor.Commands.Editing do
     state
   end
 
-  @spec execute_autopair_insert(pid(), String.t()) :: :ok
-  defp execute_autopair_insert(buf, char) do
+  @spec execute_autopair_insert(state(), pid(), String.t()) :: :ok
+  defp execute_autopair_insert(state, buf, char) do
     gb = Buffer.snapshot(buf)
     cursor = Document.cursor(gb)
 
+    case scope_at_position(state, buf, cursor) do
+      :code -> apply_autopair_insert(buf, gb, cursor, char)
+      _scope -> apply_non_code_autopair_insert(buf, gb, cursor, char)
+    end
+
+    :ok
+  end
+
+  @spec apply_autopair_insert(pid(), Document.t(), Document.position(), String.t()) :: :ok
+  defp apply_autopair_insert(buf, gb, cursor, char) do
     case Minga.Editing.insert_with_pairs(gb, cursor, char) do
       {:pair, open, close} ->
         Buffer.insert_char(buf, open)
@@ -653,6 +838,23 @@ defmodule MingaEditor.Commands.Editing do
 
       {:skip, _char} ->
         Buffer.move(buf, :right)
+
+      {:passthrough, char} ->
+        Buffer.insert_char(buf, char)
+    end
+
+    :ok
+  end
+
+  @spec apply_non_code_autopair_insert(pid(), Document.t(), Document.position(), String.t()) ::
+          :ok
+  defp apply_non_code_autopair_insert(buf, gb, cursor, char) do
+    case Minga.Editing.insert_with_pairs(gb, cursor, char) do
+      {:skip, _char} ->
+        Buffer.move(buf, :right)
+
+      {:pair, _open, _close} ->
+        Buffer.insert_char(buf, char)
 
       {:passthrough, char} ->
         Buffer.insert_char(buf, char)

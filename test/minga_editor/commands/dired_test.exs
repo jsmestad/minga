@@ -11,6 +11,9 @@ defmodule MingaEditor.Commands.DiredTest do
 
   use Minga.Test.EditorCase, async: true
 
+  alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Config.Options
+
   @moduletag :tmp_dir
 
   describe "[EditorCase integration] :dired — open directory buffer" do
@@ -18,14 +21,39 @@ defmodule MingaEditor.Commands.DiredTest do
       File.write!(Path.join(dir, "hello.txt"), "")
       File.write!(Path.join(dir, "other.txt"), "")
 
-      ctx = start_editor("")
+      options_server = start_supervised!({Options, name: nil})
+
+      assert {:ok, false} =
+               Options.set_for_filetype(options_server, :dired, :autopair_block, false)
+
+      ctx = start_editor("", options_server: options_server)
       state = send_keys_sync(ctx, ":dired #{dir}<CR>")
 
       assert state.workspace.keymap_scope == :dired
       assert state.workspace.dired.active?
+      assert BufferProcess.get_option(active_buffer(ctx), :autopair_block) == false
       content = active_content(ctx)
       assert content =~ "hello.txt"
       assert content =~ "other.txt"
+    end
+
+    test "opening a regular file from dired inherits the editor options server", %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "hello.txt"), "hello")
+
+      options_server = start_supervised!({Options, name: nil})
+
+      assert {:ok, false} =
+               Options.set_for_filetype(options_server, :text, :autopair_block, false)
+
+      ctx = start_editor("", options_server: options_server)
+      send_keys_sync(ctx, ":dired #{dir}<CR>")
+
+      state = send_keys_sync(ctx, "<CR>")
+      active = active_buffer(ctx)
+
+      refute state.workspace.dired.active?
+      assert BufferProcess.file_path(active) == Path.join(dir, "hello.txt")
+      assert BufferProcess.get_option(active, :autopair_block) == false
     end
 
     test ":oil alias works the same", %{tmp_dir: dir} do

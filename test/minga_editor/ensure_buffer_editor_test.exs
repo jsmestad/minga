@@ -3,6 +3,8 @@ defmodule MingaEditor.EnsureBufferEditorTest do
 
   use Minga.Test.EditorCase, async: true
 
+  alias Minga.Config.Options
+
   @moduletag :tmp_dir
 
   describe "ensure_buffer_for_path/2 with a running editor" do
@@ -11,13 +13,19 @@ defmodule MingaEditor.EnsureBufferEditorTest do
       other_path = Path.join(dir, "other.ex")
       File.write!(path, "tracked")
       File.write!(other_path, "other")
-      ctx = start_editor("tracked", file_path: path)
+
+      options_server = start_supervised!({Options, name: nil})
+
+      assert {:ok, false} =
+               Options.set_for_filetype(options_server, :elixir, :autopair_block, false)
+
+      ctx = start_editor("tracked", file_path: path, options_server: options_server)
       editor = ctx.editor
       original = active_buffer(ctx)
       monitor = Process.monitor(editor)
 
       assert {:ok, new_buf} = MingaEditor.ensure_buffer_for_path(other_path, editor)
-      on_exit(fn -> if Process.alive?(new_buf), do: GenServer.stop(new_buf) end)
+      assert BufferProcess.get_option(new_buf, :autopair_block) == false
 
       state = editor_state(ctx)
       assert state.workspace.buffers.active == original

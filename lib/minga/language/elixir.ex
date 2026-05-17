@@ -2,6 +2,7 @@ defmodule Minga.Language.Elixir do
   @moduledoc "Elixir language definition"
 
   alias Minga.Language
+  alias Minga.Language.BlockPair
   alias Minga.LSP.ServerConfig
 
   @spec definition() :: Language.t()
@@ -28,5 +29,14 @@ defmodule Minga.Language.Elixir do
       root_markers: ["mix.exs", "mix.lock"],
       project_type: :mix
     }
+  end
+
+  @doc "Returns Insert-mode block auto-close metadata for Elixir."
+  @spec block_pairs() :: [BlockPair.t()]
+  def block_pairs do
+    [
+      BlockPair.new("do", "end", :line_suffix),
+      BlockPair.new("fn", "end", :line_suffix)
+    ]
   end
 end

@@ -25,6 +25,7 @@ That's it. Save the file and restart Minga. Your options take effect immediately
 | `:tab_width` | positive integer | `2` | Number of spaces per indent level |
 | `:line_numbers` | `:hybrid`, `:absolute`, `:relative`, `:none` | `:hybrid` | Line number display style |
 | `:autopair` | boolean | `true` | Auto-insert matching brackets and quotes |
+| `:autopair_block` | boolean | `true` | Auto-insert language-aware block-closing keywords on Enter |
 | `:scroll_margin` | non-negative integer | `5` | Lines to keep visible above/below cursor when scrolling |
 | `:theme` | theme name atom | `:doom_one` | Color theme (see [Themes](#themes) below) |
 | `:indent_with` | `:spaces` or `:tabs` | `:spaces` | Whether to indent with spaces or tab characters |
@@ -58,6 +59,7 @@ That's it. Save the file and restart Minga. Your options take effect immediately
 set :tab_width, 2
 set :line_numbers, :hybrid
 set :autopair, true
+set :autopair_block, true
 set :scroll_margin, 5
 set :theme, :catppuccin_mocha
 set :font_family, "JetBrains Mono"
@@ -1247,6 +1249,7 @@ set :tab_width, 2
 set :line_numbers, :relative
 set :scroll_margin, 5
 set :autopair, true
+set :autopair_block, true
 set :theme, :catppuccin_mocha
 set :whichkey_layout, :float        # centered floating window (or :bottom)
 

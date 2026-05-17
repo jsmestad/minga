@@ -61,6 +61,12 @@ defmodule Minga.Test.EditorCase do
     {:ok, port} = HeadlessPort.start_link(width: width, height: height)
     buffer_opts = [content: content, events_registry: events_registry]
     buffer_opts = if file_path, do: [{:file_path, file_path} | buffer_opts], else: buffer_opts
+
+    buffer_opts =
+      if Keyword.has_key?(opts, :options_server),
+        do: [{:options_server, Keyword.get(opts, :options_server)} | buffer_opts],
+        else: buffer_opts
+
     {:ok, buffer} = BufferProcess.start_link(buffer_opts)
 
     # Inject clipboard mode directly on the buffer so the Editor never
@@ -85,6 +91,11 @@ defmodule Minga.Test.EditorCase do
       events_registry: events_registry,
       suppress_tool_prompts: true
     ]
+
+    editor_opts =
+      if Keyword.has_key?(opts, :options_server),
+        do: [{:options_server, Keyword.get(opts, :options_server)} | editor_opts],
+        else: editor_opts
 
     editor_opts =
       if shell, do: [{:shell, shell}, {:skip_persistence, true} | editor_opts], else: editor_opts
@@ -150,6 +161,11 @@ defmodule Minga.Test.EditorCase do
       events_registry: events_registry,
       suppress_tool_prompts: true
     ]
+
+    editor_opts =
+      if Keyword.has_key?(opts, :options_server),
+        do: [{:options_server, Keyword.get(opts, :options_server)} | editor_opts],
+        else: editor_opts
 
     project_root = Keyword.get(opts, :project_root)
 
@@ -690,8 +706,11 @@ defmodule Minga.Test.EditorCase do
     if condition.(state) do
       state
     else
-      Process.sleep(interval)
-      do_wait_until(editor, condition, remaining - 1, interval, message)
+      receive do
+      after
+        interval ->
+          do_wait_until(editor, condition, remaining - 1, interval, message)
+      end
     end
   end
 
@@ -731,8 +750,11 @@ defmodule Minga.Test.EditorCase do
     if condition.() do
       :ok
     else
-      Process.sleep(interval)
-      do_wait_screen(editor, port, condition, remaining - 1, interval, message)
+      receive do
+      after
+        interval ->
+          do_wait_screen(editor, port, condition, remaining - 1, interval, message)
+      end
     end
   end
 

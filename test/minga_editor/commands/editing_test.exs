@@ -12,11 +12,14 @@ defmodule MingaEditor.Commands.EditingTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Config.Options
   alias Minga.Keymap.Active, as: KeymapActive
+  alias Minga.Language.Highlight.Span
   alias Minga.Mode
   alias MingaEditor
   alias MingaEditor.Commands.Editing
   alias MingaEditor.Commands.Operators
   alias MingaEditor.Commands.Visual
+  alias MingaEditor.State.Highlighting
+  alias MingaEditor.UI.Highlight
 
   @sync_timeout 15_000
 
@@ -128,6 +131,154 @@ defmodule MingaEditor.Commands.EditingTest do
 
       _state = Editing.execute(state, :delete_before)
       assert BufferProcess.content(buffer) == ""
+    end
+
+    test "insert_char does not autopair inside highlighted strings" do
+      buffer = start_buffer("\"hello\"")
+      BufferProcess.set_option(buffer, :autopair, true)
+      BufferProcess.move_to(buffer, {0, 1})
+
+      highlight =
+        Highlight.new()
+        |> Highlight.put_names(["string"])
+        |> Highlight.put_spans(1, [Span.new(0, 7, 0)])
+
+      _state =
+        Editing.execute(command_state_with_highlight(buffer, highlight), {:insert_char, "("})
+
+      assert BufferProcess.content(buffer) == "\"(hello\""
+    end
+
+    test "insert_char skips over closing delimiter inside highlighted strings" do
+      buffer = start_buffer("\"()\"")
+      BufferProcess.set_option(buffer, :autopair, true)
+      BufferProcess.move_to(buffer, {0, 2})
+
+      highlight =
+        Highlight.new()
+        |> Highlight.put_names(["string"])
+        |> Highlight.put_spans(1, [Span.new(0, 4, 0)])
+
+      _state =
+        Editing.execute(command_state_with_highlight(buffer, highlight), {:insert_char, ")"})
+
+      assert BufferProcess.content(buffer) == "\"()\""
+      assert BufferProcess.cursor(buffer) == {0, 3}
+    end
+
+    test "insert_char does not autopair opening brackets inside highlighted comments" do
+      buffer = start_buffer("# x")
+      BufferProcess.set_option(buffer, :autopair, true)
+      BufferProcess.move_to(buffer, {0, 2})
+
+      highlight =
+        Highlight.new()
+        |> Highlight.put_names(["comment"])
+        |> Highlight.put_spans(1, [Span.new(0, 3, 0)])
+
+      _state =
+        Editing.execute(command_state_with_highlight(buffer, highlight), {:insert_char, "("})
+
+      assert BufferProcess.content(buffer) == "# (x"
+    end
+
+    test "insert_char does not autopair at the end of an inline highlighted line comment" do
+      buffer = start_buffer("x # comment", filetype: :elixir)
+      BufferProcess.set_option(buffer, :autopair, true)
+      BufferProcess.move_to(buffer, {0, byte_size("x # comment")})
+
+      highlight =
+        Highlight.new()
+        |> Highlight.put_names(["comment"])
+        |> Highlight.put_spans(1, [Span.new(2, byte_size("x # comment"), 0)])
+
+      _state =
+        Editing.execute(command_state_with_highlight(buffer, highlight), {:insert_char, "("})
+
+      assert BufferProcess.content(buffer) == "x # comment("
+      assert BufferProcess.cursor(buffer) == {0, byte_size("x # comment(")}
+    end
+
+    test "insert_char does not autopair at the end of a no-space line comment" do
+      buffer = start_buffer("#x", filetype: :elixir)
+      BufferProcess.set_option(buffer, :autopair, true)
+      BufferProcess.move_to(buffer, {0, byte_size("#x")})
+
+      highlight =
+        Highlight.new()
+        |> Highlight.put_names(["comment"])
+        |> Highlight.put_spans(1, [Span.new(0, byte_size("#x"), 0)])
+
+      _state =
+        Editing.execute(command_state_with_highlight(buffer, highlight), {:insert_char, "("})
+
+      assert BufferProcess.content(buffer) == "#x("
+      assert BufferProcess.cursor(buffer) == {0, byte_size("#x(")}
+    end
+  end
+
+  describe "Layer 0/1 command state: block autopair" do
+    test "inserts Elixir end below a block opener and leaves cursor on inner line" do
+      buffer = start_buffer("def run do", filetype: :elixir)
+      BufferProcess.set_option(buffer, :autopair_block, true)
+      BufferProcess.set_option(buffer, :tab_width, 2)
+      BufferProcess.set_option(buffer, :indent_with, :spaces)
+      BufferProcess.move_to(buffer, {0, byte_size("def run do")})
+
+      _state = Editing.execute(command_state(buffer), :insert_newline)
+
+      assert BufferProcess.content(buffer) == "def run do\n  \nend"
+      assert BufferProcess.cursor(buffer) == {1, 2}
+    end
+
+    test "does not insert block closer when disabled for the buffer" do
+      buffer = start_buffer("def run do", filetype: :elixir)
+      BufferProcess.set_option(buffer, :autopair_block, false)
+      BufferProcess.move_to(buffer, {0, byte_size("def run do")})
+
+      _state = Editing.execute(command_state(buffer), :insert_newline)
+
+      assert BufferProcess.content(buffer) == "def run do\n"
+    end
+
+    test "does not insert block closer when cursor is before trailing text" do
+      buffer = start_buffer("def run do rest", filetype: :elixir)
+      BufferProcess.set_option(buffer, :autopair_block, true)
+      BufferProcess.move_to(buffer, {0, byte_size("def run do")})
+
+      _state = Editing.execute(command_state(buffer), :insert_newline)
+
+      assert BufferProcess.content(buffer) == "def run do\n rest"
+    end
+
+    test "insert_newline does not add a block closer at the end of a highlighted line comment" do
+      buffer = start_buffer("# def run do", filetype: :elixir)
+      BufferProcess.set_option(buffer, :autopair_block, true)
+      BufferProcess.move_to(buffer, {0, byte_size("# def run do")})
+
+      highlight =
+        Highlight.new()
+        |> Highlight.put_names(["comment"])
+        |> Highlight.put_spans(1, [Span.new(0, byte_size("# def run do"), 0)])
+
+      _state = Editing.execute(command_state_with_highlight(buffer, highlight), :insert_newline)
+
+      assert BufferProcess.content(buffer) == "# def run do\n"
+    end
+
+    test "insert_newline does not add a block closer inside highlighted strings" do
+      buffer = start_buffer("def run do", filetype: :elixir)
+      BufferProcess.set_option(buffer, :autopair_block, true)
+      BufferProcess.move_to(buffer, {0, byte_size("def run do")})
+
+      highlight =
+        Highlight.new()
+        |> Highlight.put_names(["string"])
+        |> Highlight.put_spans(1, [Span.new(0, byte_size("def run do"), 0)])
+
+      _state = Editing.execute(command_state_with_highlight(buffer, highlight), :insert_newline)
+
+      assert BufferProcess.content(buffer) == "def run do\n"
     end
   end
 
@@ -452,5 +603,11 @@ defmodule MingaEditor.Commands.EditingTest do
   defp send_key(editor, codepoint, mods \\ 0) do
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
     _ = :sys.get_state(editor, @sync_timeout)
+  end
+
+  defp command_state_with_highlight(buffer, highlight) do
+    state = command_state(buffer)
+    workspace = %{state.workspace | highlight: %Highlighting{highlights: %{buffer => highlight}}}
+    %{state | workspace: workspace}
   end
 end

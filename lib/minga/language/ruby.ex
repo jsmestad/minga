@@ -2,6 +2,7 @@ defmodule Minga.Language.Ruby do
   @moduledoc "Ruby language definition"
 
   alias Minga.Language
+  alias Minga.Language.BlockPair
   alias Minga.LSP.ServerConfig
 
   @spec definition() :: Language.t()
@@ -27,5 +28,17 @@ defmodule Minga.Language.Ruby do
       root_markers: ["Gemfile"],
       project_type: :ruby
     }
+  end
+
+  @doc "Returns Insert-mode block auto-close metadata for Ruby."
+  @spec block_pairs() :: [BlockPair.t()]
+  def block_pairs do
+    [
+      BlockPair.new("def", "end", :line_head),
+      BlockPair.new("class", "end", :line_head),
+      BlockPair.new("module", "end", :line_head),
+      BlockPair.new("if", "end", :line_head),
+      BlockPair.new("do", "end", :line_suffix)
+    ]
   end
 end

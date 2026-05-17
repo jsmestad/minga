@@ -510,10 +510,14 @@ defmodule MingaEditor.State do
 
   @doc "Starts a new buffer under the buffer supervisor for the given file path."
   @spec start_buffer(String.t()) :: {:ok, pid()} | {:error, term()}
-  def start_buffer(file_path) do
+  @spec start_buffer(String.t(), Minga.Config.Options.server() | nil) ::
+          {:ok, pid()} | {:error, term()}
+  def start_buffer(file_path, options_server \\ Minga.Config.Options.default_server()) do
+    options_server = normalize_options_server(options_server)
+
     DynamicSupervisor.start_child(
       Minga.Buffer.Supervisor,
-      {Minga.Buffer, file_path: file_path}
+      {Minga.Buffer, file_path: file_path, options_server: options_server}
     )
   end
 
@@ -536,6 +540,10 @@ defmodule MingaEditor.State do
   end
 
   def monitor_buffer(state, _), do: state
+
+  @spec normalize_options_server(term() | nil) :: Minga.Config.Options.server()
+  defp normalize_options_server(nil), do: Minga.Config.Options.default_server()
+  defp normalize_options_server(server), do: Minga.Config.Options.validate_server!(server)
 
   @doc """
   Monitors a list of buffer pids. Convenience wrapper around `monitor_buffer/2`.

@@ -211,7 +211,7 @@ defmodule MingaEditor.Commands.Dired do
   @spec open_directory(state(), String.t()) :: state()
   def open_directory(state, dir) do
     with {:ok, dired} <- Dired.read_directory(dir),
-         {:ok, pid} <- start_dired_buffer(dired) do
+         {:ok, pid} <- start_dired_buffer(state, dired) do
       dired_state = DiredState.activate(%DiredState{}, dired, pid)
 
       state
@@ -228,8 +228,8 @@ defmodule MingaEditor.Commands.Dired do
     end
   end
 
-  @spec start_dired_buffer(Dired.t()) :: {:ok, pid()} | {:error, term()}
-  defp start_dired_buffer(%Dired{} = dired) do
+  @spec start_dired_buffer(state(), Dired.t()) :: {:ok, pid()} | {:error, term()}
+  defp start_dired_buffer(state, %Dired{} = dired) do
     listing = Dired.format_listing(dired)
 
     DynamicSupervisor.start_child(
@@ -240,7 +240,8 @@ defmodule MingaEditor.Commands.Dired do
        buffer_name: "*Dired: #{dired.directory}*",
        read_only: false,
        unlisted: true,
-       filetype: :dired}
+       filetype: :dired,
+       options_server: EditorState.options_server(state)}
     )
   end
 
@@ -278,7 +279,7 @@ defmodule MingaEditor.Commands.Dired do
   defp open_file(state, file_path) do
     state = close_dired(state)
 
-    case Commands.start_buffer(file_path) do
+    case Commands.start_buffer(file_path, EditorState.options_server(state)) do
       {:ok, pid} -> Commands.add_buffer(state, pid)
       {:error, _} -> EditorState.set_status(state, "Cannot open: #{file_path}")
     end

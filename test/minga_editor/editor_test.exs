@@ -7,6 +7,7 @@ defmodule MingaEditor.EditorTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Config.Options
   alias MingaEditor
   alias MingaEditor.Startup
   alias MingaEditor.State, as: EditorState
@@ -96,21 +97,36 @@ defmodule MingaEditor.EditorTest do
 
   describe "open_file/2" do
     @tag :tmp_dir
-    test "opens a file and renders", %{tmp_dir: tmp_dir} do
+    test "opens a file using the editor options server and switches active buffer", %{
+      tmp_dir: tmp_dir
+    } do
       path = Path.join(tmp_dir, "test_open.txt")
       File.write!(path, "opened file content")
+
+      options_server = start_supervised!({Options, name: nil})
+
+      assert {:ok, false} =
+               Options.set_for_filetype(options_server, :text, :autopair_block, false)
+
+      {:ok, buffer} = BufferProcess.start_link(content: "scratch", options_server: options_server)
 
       {:ok, editor} =
         MingaEditor.start_link(
           name: :"editor_open_#{:erlang.unique_integer([:positive])}",
           port_manager: nil,
-          buffer: nil,
+          buffer: buffer,
+          options_server: options_server,
           width: 40,
           height: 10,
           editing_model: :vim
         )
 
       assert :ok = MingaEditor.open_file(editor, path)
+
+      state = :sys.get_state(editor)
+      assert state.workspace.buffers.active != buffer
+      assert BufferProcess.file_path(state.workspace.buffers.active) == path
+      assert BufferProcess.get_option(state.workspace.buffers.active, :autopair_block) == false
     end
   end
 
@@ -173,15 +189,11 @@ defmodule MingaEditor.EditorTest do
   end
 
   describe "whichkey timeout" do
-    test "real-timer fires end-to-end and is ignored when ref is stale" do
+    test "stale timer message leaves the popup hidden" do
       {editor, _buffer} = start_editor()
       before_whichkey = :sys.get_state(editor).shell_state.whichkey
 
-      # Ref does not match the editor's stored timer (nil by default), so the
-      # handler must hit its stale-ref branch and leave the popup hidden.
-      timer_ref = Process.send_after(editor, {:whichkey_timeout, make_ref()}, 0)
-
-      assert :ok = await_timer_fired(timer_ref)
+      send(editor, {:whichkey_timeout, make_ref()})
       after_whichkey = :sys.get_state(editor).shell_state.whichkey
 
       assert after_whichkey.show == before_whichkey.show
@@ -197,23 +209,6 @@ defmodule MingaEditor.EditorTest do
       # the stale-ref branch and returns state unchanged (pinned match below).
       assert {:noreply, ^state} =
                MingaEditor.handle_info({:whichkey_timeout, make_ref()}, state)
-    end
-  end
-
-  # Polls Process.read_timer/1 until the timer has been delivered. Bounded by
-  # 50 iterations of 1ms sleeps so the test fails loudly via :timeout instead
-  # of hanging if the timer wheel ever stalls.
-  defp await_timer_fired(ref, attempts \\ 50)
-  defp await_timer_fired(_ref, 0), do: :timeout
-
-  defp await_timer_fired(ref, attempts) do
-    case Process.read_timer(ref) do
-      false ->
-        :ok
-
-      _ms_left ->
-        Process.sleep(1)
-        await_timer_fired(ref, attempts - 1)
     end
   end
 end

@@ -1,6 +1,7 @@
 defmodule MingaEditor.EnsureBufferTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor
 
@@ -21,6 +22,35 @@ defmodule MingaEditor.EnsureBufferTest do
       # Buffer.ensure_for_path checks File.exists? before starting a buffer.
       # No buffer exists and the file doesn't exist on disk, so we get :enoent.
       assert {:error, :enoent} = MingaEditor.ensure_buffer_for_path(path)
+    end
+
+    test "starts a buffer for an existing file when no editor is running", %{tmp_dir: dir} do
+      path = Path.join(dir, "no_editor.ex")
+      File.write!(path, "defmodule NoEditor do\nend\n")
+
+      assert {:ok, pid} = MingaEditor.ensure_buffer_for_path(path, :missing_minga_editor)
+
+      monitor = Process.monitor(pid)
+      assert Buffer.file_path(pid) == Path.expand(path)
+      refute_receive {:DOWN, ^monitor, :process, ^pid, _reason}, 0
+      Process.demonitor(monitor, [:flush])
+    end
+
+    test "falls back when the supplied editor pid is already dead", %{tmp_dir: dir} do
+      path = Path.join(dir, "dead_editor.ex")
+      File.write!(path, "defmodule DeadEditor do\nend\n")
+      {:ok, editor} = Agent.start_link(fn -> :ok end)
+      editor_monitor = Process.monitor(editor)
+
+      GenServer.stop(editor)
+      assert_receive {:DOWN, ^editor_monitor, :process, ^editor, :normal}
+
+      assert {:ok, pid} = MingaEditor.ensure_buffer_for_path(path, editor)
+
+      buffer_monitor = Process.monitor(pid)
+      assert Buffer.file_path(pid) == Path.expand(path)
+      refute_receive {:DOWN, ^buffer_monitor, :process, ^pid, _reason}, 0
+      Process.demonitor(buffer_monitor, [:flush])
     end
 
     test "skips GenServer call when buffer is already in the Registry", %{tmp_dir: dir} do

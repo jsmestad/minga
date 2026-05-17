@@ -80,7 +80,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
 
     case EditorState.find_buffer_by_path(state, abs_path) do
       nil ->
-        case EditorState.start_buffer(abs_path) do
+        case EditorState.start_buffer(abs_path, EditorState.options_server(state)) do
           {:ok, pid} ->
             Log.debug(:editor, "[file_picker] new buffer pid=#{inspect(pid)}")
             new_state = EditorState.add_buffer(state, pid)

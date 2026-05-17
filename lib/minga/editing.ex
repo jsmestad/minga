@@ -125,6 +125,12 @@ defmodule Minga.Editing do
   @doc "Backspace, removing the matching bracket when the cursor is between a pair."
   defdelegate backspace_with_pairs(buf, pos), to: Minga.Editing.AutoPair, as: :on_backspace
 
+  @doc "Returns the closing keyword for language-owned block-pair metadata and line text, or nil."
+  @spec block_closing_for([Minga.Language.BlockPair.t()], String.t()) :: String.t() | nil
+  defdelegate block_closing_for(block_pairs, line_text),
+    to: Minga.Editing.BlockPair,
+    as: :closing_for
+
   # ── Comment toggling ───────────────────────────────────────────────────
 
   @doc "Compute comment toggle edits for the given lines (pure, no Buffer I/O)."

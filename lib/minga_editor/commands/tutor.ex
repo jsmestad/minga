@@ -37,7 +37,7 @@ defmodule MingaEditor.Commands.Tutor do
 
     case find_tutor_buffer(state) do
       nil ->
-        {:ok, pid} = start_tutor_buffer(content)
+        {:ok, pid} = start_tutor_buffer(state, content)
         state = Commands.add_buffer(state, pid)
 
         EditorState.set_status(
@@ -58,8 +58,8 @@ defmodule MingaEditor.Commands.Tutor do
     |> File.read!()
   end
 
-  @spec start_tutor_buffer(String.t()) :: {:ok, pid()} | {:error, term()}
-  defp start_tutor_buffer(content) do
+  @spec start_tutor_buffer(state(), String.t()) :: {:ok, pid()} | {:error, term()}
+  defp start_tutor_buffer(state, content) do
     DynamicSupervisor.start_child(
       Minga.Buffer.Supervisor,
       {Minga.Buffer,
@@ -67,7 +67,8 @@ defmodule MingaEditor.Commands.Tutor do
        buffer_name: @tutor_buffer_name,
        buffer_type: :nofile,
        read_only: false,
-       filetype: :text}
+       filetype: :text,
+       options_server: EditorState.options_server(state)}
     )
   end
 
