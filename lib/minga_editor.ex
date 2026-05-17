@@ -202,10 +202,8 @@ defmodule MingaEditor do
     state = EditorState.set_renderer(state, renderer_pid)
 
     # Logger redirect and startup messages
-    tui_active? = state.backend == :tui
-
     state =
-      if tui_active? do
+      if state.backend != :headless do
         log_path = Minga.LoggerHandler.install()
         state = log_message(state, "Editor started")
         log_message(state, "Log file: #{log_path}")
