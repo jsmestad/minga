@@ -160,14 +160,25 @@ defmodule MingaEditor.LspActions do
         state
 
       client ->
-        send_lsp_request(
-          state,
-          client,
-          buf,
-          "textDocument/documentHighlight",
-          :document_highlight
-        )
+        if supports_capability?(client, "documentHighlightProvider") do
+          send_lsp_request(
+            state,
+            client,
+            buf,
+            "textDocument/documentHighlight",
+            :document_highlight
+          )
+        else
+          state
+        end
     end
+  end
+
+  @spec supports_capability?(pid(), String.t()) :: boolean()
+  defp supports_capability?(client, key) do
+    caps = Client.capabilities(client)
+    provider = caps[key]
+    provider == true or is_map(provider)
   end
 
   @doc """
@@ -549,18 +560,22 @@ defmodule MingaEditor.LspActions do
         state
 
       client ->
-        file_path = Buffer.file_path(buf)
+        if supports_capability?(client, "codeLensProvider") do
+          file_path = Buffer.file_path(buf)
 
-        case file_path do
-          nil ->
-            EditorState.set_status(state, "Buffer has no file path")
+          case file_path do
+            nil ->
+              EditorState.set_status(state, "Buffer has no file path")
 
-          path ->
-            uri = SyncServer.path_to_uri(path)
-            params = %{"textDocument" => %{"uri" => uri}}
-            ref = Client.request(client, "textDocument/codeLens", params)
+            path ->
+              uri = SyncServer.path_to_uri(path)
+              params = %{"textDocument" => %{"uri" => uri}}
+              ref = Client.request(client, "textDocument/codeLens", params)
 
-            put_lsp_pending(state, ref, :code_lens)
+              put_lsp_pending(state, ref, :code_lens)
+          end
+        else
+          state
         end
     end
   end
@@ -579,27 +594,31 @@ defmodule MingaEditor.LspActions do
         state
 
       client ->
-        file_path = Buffer.file_path(buf)
+        if supports_capability?(client, "inlayHintProvider") do
+          file_path = Buffer.file_path(buf)
 
-        case file_path do
-          nil ->
-            state
+          case file_path do
+            nil ->
+              state
 
-          path ->
-            uri = SyncServer.path_to_uri(path)
-            vp = state.terminal_viewport
+            path ->
+              uri = SyncServer.path_to_uri(path)
+              vp = state.terminal_viewport
 
-            params = %{
-              "textDocument" => %{"uri" => uri},
-              "range" => %{
-                "start" => %{"line" => vp.top, "character" => 0},
-                "end" => %{"line" => vp.top + vp.rows, "character" => 0}
+              params = %{
+                "textDocument" => %{"uri" => uri},
+                "range" => %{
+                  "start" => %{"line" => vp.top, "character" => 0},
+                  "end" => %{"line" => vp.top + vp.rows, "character" => 0}
+                }
               }
-            }
 
-            ref = Client.request(client, "textDocument/inlayHint", params)
+              ref = Client.request(client, "textDocument/inlayHint", params)
 
-            put_lsp_pending(state, ref, :inlay_hint)
+              put_lsp_pending(state, ref, :inlay_hint)
+          end
+        else
+          state
         end
     end
   end
