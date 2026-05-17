@@ -1,50 +1,16 @@
 defmodule MingaEditor.EditorTest do
   @moduledoc """
-  Integration smoke tests for the Editor GenServer: contracts the
-  GenServer itself owns (port roundtrip, file open, viewport
-  propagation, stale-timer dispatch, status_msg surfacing).
+  Smoke tests for the Editor GenServer contracts that are not covered by command or render-pipeline tests.
   """
-  use ExUnit.Case, async: true
+  use Minga.Test.EditorCase, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Config.Options
   alias MingaEditor
   alias MingaEditor.Startup
-  alias MingaEditor.State, as: EditorState
-  alias MingaEditor.Viewport
-
-  defp start_editor(content \\ "hello\nworld\nfoo") do
-    {:ok, buffer} = BufferProcess.start_link(content: content)
-
-    {:ok, editor} =
-      MingaEditor.start_link(
-        name: :"editor_#{:erlang.unique_integer([:positive])}",
-        port_manager: nil,
-        buffer: buffer,
-        width: 40,
-        height: 10,
-        editing_model: :vim
-      )
-
-    {editor, buffer}
-  end
-
-  defp start_editor_no_buffer do
-    {:ok, editor} =
-      MingaEditor.start_link(
-        name: :"editor_#{:erlang.unique_integer([:positive])}",
-        port_manager: nil,
-        buffer: nil,
-        width: 40,
-        height: 10,
-        editing_model: :vim
-      )
-
-    editor
-  end
 
   describe "build_initial_state/1" do
-    test "returns an EditorState in :normal mode with the buffer wired up" do
+    test "returns normal-mode state with the provided buffer active" do
       {:ok, buffer} = BufferProcess.start_link(content: "hi")
 
       state =
@@ -56,12 +22,11 @@ defmodule MingaEditor.EditorTest do
           editing_model: :vim
         )
 
-      assert state.workspace.editing.mode == :normal
       assert Minga.Editing.mode(state) == :normal
-      assert state.workspace.buffers.active == buffer
+      assert active_buffer_pid(state) == buffer
     end
 
-    test "creates a default [new 1] buffer when none is provided" do
+    test "creates a default buffer when none is provided" do
       state =
         Startup.build_initial_state(
           port_manager: nil,
@@ -71,144 +36,57 @@ defmodule MingaEditor.EditorTest do
           editing_model: :vim
         )
 
-      assert state.workspace.editing.mode == :normal
-      # Render pipeline / command dispatch / input routing all assume
-      # buffers.active is a pid, so Startup synthesises one when caller
-      # passes nil.
-      assert is_pid(state.workspace.buffers.active)
-    end
-  end
-
-  describe "render/1" do
-    test "render cast doesn't crash with a buffer" do
-      {editor, _buffer} = start_editor()
-      MingaEditor.render(editor)
-      _ = :sys.get_state(editor)
-      assert Process.alive?(editor)
-    end
-
-    test "render cast doesn't crash without a buffer" do
-      editor = start_editor_no_buffer()
-      MingaEditor.render(editor)
-      _ = :sys.get_state(editor)
-      assert Process.alive?(editor)
+      assert Minga.Editing.mode(state) == :normal
+      assert is_pid(active_buffer_pid(state))
     end
   end
 
   describe "open_file/2" do
     @tag :tmp_dir
-    test "opens a file using the editor options server and switches active buffer", %{
-      tmp_dir: tmp_dir
-    } do
+    test "opens a file and switches active content", %{tmp_dir: tmp_dir} do
       path = Path.join(tmp_dir, "test_open.txt")
       File.write!(path, "opened file content")
-
       options_server = start_supervised!({Options, name: nil})
 
       assert {:ok, false} =
                Options.set_for_filetype(options_server, :text, :autopair_block, false)
 
-      {:ok, buffer} = BufferProcess.start_link(content: "scratch", options_server: options_server)
+      ctx = start_editor("scratch", options_server: options_server)
 
-      {:ok, editor} =
-        MingaEditor.start_link(
-          name: :"editor_open_#{:erlang.unique_integer([:positive])}",
-          port_manager: nil,
-          buffer: buffer,
-          options_server: options_server,
-          width: 40,
-          height: 10,
-          editing_model: :vim
-        )
+      assert :ok = MingaEditor.open_file(ctx.editor, path)
+      editor_state(ctx)
 
-      assert :ok = MingaEditor.open_file(editor, path)
-
-      state = :sys.get_state(editor)
-      assert state.workspace.buffers.active != buffer
-      assert BufferProcess.file_path(state.workspace.buffers.active) == path
-      assert BufferProcess.get_option(state.workspace.buffers.active, :autopair_block) == false
+      assert active_content(ctx) == "opened file content"
+      refute BufferProcess.get_option(active_buffer(ctx), :autopair_block)
     end
   end
 
-  describe "resize" do
-    test "port-driven resize updates the workspace viewport" do
-      {editor, _buffer} = start_editor()
-      send(editor, {:minga_input, {:resize, 120, 40}})
-      state = :sys.get_state(editor)
+  describe "message handling" do
+    test "render and stray messages do not crash the editor" do
+      ctx = start_editor("hello")
+      ref = Process.monitor(ctx.editor)
 
-      assert %Viewport{rows: 40, cols: 120} = state.workspace.viewport
-    end
-  end
-
-  describe "ready" do
-    test "ready event seeds the workspace viewport columns" do
-      {editor, _buffer} = start_editor()
-      send(editor, {:minga_input, {:ready, 100, 30}})
-      state = :sys.get_state(editor)
-
-      assert state.workspace.viewport.cols == 100
-    end
-  end
-
-  describe "unknown handle_info messages" do
-    test "stray messages are dropped without crashing" do
-      {editor, _buffer} = start_editor()
-      ref = Process.monitor(editor)
-      send(editor, :some_random_message)
-      send(editor, {:unexpected, :tuple})
-      _ = :sys.get_state(editor)
+      MingaEditor.render(ctx.editor)
+      send(ctx.editor, :some_random_message)
+      send(ctx.editor, {:unexpected, :tuple})
+      editor_state(ctx)
 
       refute_received {:DOWN, ^ref, :process, _, _}
     end
   end
 
-  describe "read-only buffer through the GenServer" do
-    # Layer-1 KeyDispatch behaviour is covered in
-    # test/minga_editor/commands/insert_entry_test.exs. This smoke test
-    # exists to catch regressions where Editor.handle_info swallows or
-    # rewrites the status_msg surfaced by KeyDispatch.
-    test "pressing i on a read-only buffer surfaces status_msg in shell_state" do
-      {:ok, buffer} = BufferProcess.start_link(content: "read only", read_only: true)
+  describe "read-only buffers" do
+    test "pressing i on a read-only buffer surfaces the warning" do
+      buffer = start_supervised!({BufferProcess, content: "read only", read_only: true})
+      ctx = start_editor_with_buffer(buffer)
 
-      {:ok, editor} =
-        MingaEditor.start_link(
-          name: :"editor_ro_#{:erlang.unique_integer([:positive])}",
-          port_manager: nil,
-          buffer: buffer,
-          width: 40,
-          height: 10,
-          editing_model: :vim
-        )
+      send_key_sync(ctx, ?i)
+      sync_screen(ctx)
 
-      send(editor, {:minga_input, {:key_press, ?i, 0}})
-      state = :sys.get_state(editor)
-
-      assert state.workspace.editing.mode == :normal
-      assert state.shell_state.status_msg == "Buffer is read-only"
+      assert_minibuffer_contains(ctx, "Buffer is read-only")
+      assert editor_mode(ctx) == :normal
     end
   end
 
-  describe "whichkey timeout" do
-    test "stale timer message leaves the popup hidden" do
-      {editor, _buffer} = start_editor()
-      before_whichkey = :sys.get_state(editor).shell_state.whichkey
-
-      send(editor, {:whichkey_timeout, make_ref()})
-      after_whichkey = :sys.get_state(editor).shell_state.whichkey
-
-      assert after_whichkey.show == before_whichkey.show
-      assert after_whichkey.timer == before_whichkey.timer
-    end
-
-    test "stale ref handler is a pure no-op (called directly with a fabricated ref)" do
-      {editor, _buffer} = start_editor()
-      state = :sys.get_state(editor)
-      assert EditorState.whichkey(state).timer == nil
-
-      # Any fresh ref differs from the nil-default timer, so the handler hits
-      # the stale-ref branch and returns state unchanged (pinned match below).
-      assert {:noreply, ^state} =
-               MingaEditor.handle_info({:whichkey_timeout, make_ref()}, state)
-    end
-  end
+  defp active_buffer_pid(state), do: state.workspace.buffers.active
 end
