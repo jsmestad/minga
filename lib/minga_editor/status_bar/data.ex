@@ -19,6 +19,7 @@ defmodule MingaEditor.StatusBar.Data do
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.Window.Content
+  alias Minga.Config.Options
   alias Minga.Git
   alias Minga.LSP.SyncServer
   alias MingaEditor.UI.Theme
@@ -33,6 +34,12 @@ defmodule MingaEditor.StatusBar.Data do
 
   @typedoc "Parser availability status."
   @type parser_status :: :available | :unavailable | :restarting
+
+  @typedoc "Indentation display information."
+  @type indent_type :: :spaces | :tabs
+
+  @typedoc "Visual selection size display information."
+  @type selection_info :: {:chars, non_neg_integer()} | {:lines, pos_integer()} | nil
 
   @typedoc "Data for a focused buffer window."
   @type buffer_data :: %{
@@ -49,6 +56,9 @@ defmodule MingaEditor.StatusBar.Data do
           diagnostic_counts:
             {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil,
           diagnostic_hint: String.t() | nil,
+          indent_type: indent_type(),
+          indent_size: pos_integer(),
+          selection_info: selection_info(),
           lsp_status: lsp_status(),
           parser_status: parser_status(),
           buf_index: pos_integer(),
@@ -83,6 +93,9 @@ defmodule MingaEditor.StatusBar.Data do
           diagnostic_counts:
             {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil,
           diagnostic_hint: String.t() | nil,
+          indent_type: indent_type(),
+          indent_size: pos_integer(),
+          selection_info: selection_info(),
           lsp_status: lsp_status(),
           parser_status: parser_status(),
           buf_index: pos_integer(),
@@ -133,12 +146,17 @@ defmodule MingaEditor.StatusBar.Data do
     # center segment when idle, replaces the old cell-grid minibuffer hint)
     diagnostic_hint = cursor_line_diagnostic_hint_from_path(file_path, line)
 
+    mode = Minga.Editing.mode(state)
+    mode_state = Editing.mode_state(state)
+    {indent_type, indent_size} = indent_info(state, buf, filetype)
+    selection_info = selection_info(mode, mode_state, buf, {line, col})
+
     agent = AgentAccess.agent(state)
     background = background_subagent_summary(state)
 
     %{
-      mode: Minga.Editing.mode(state),
-      mode_state: Editing.mode_state(state),
+      mode: mode,
+      mode_state: mode_state,
       cursor_line: line,
       cursor_col: col,
       line_count: line_count,
@@ -149,6 +167,9 @@ defmodule MingaEditor.StatusBar.Data do
       git_diff_summary: git_diff_summary,
       diagnostic_counts: diagnostic_counts,
       diagnostic_hint: diagnostic_hint,
+      indent_type: indent_type,
+      indent_size: indent_size,
+      selection_info: selection_info,
       lsp_status: state.lsp.status,
       parser_status: state.parser_status,
       buf_index: state.workspace.buffers.active_index + 1,
@@ -183,6 +204,67 @@ defmodule MingaEditor.StatusBar.Data do
     :exit, _ -> nil
   end
 
+  @spec indent_info(EditorState.t() | map(), pid() | nil, atom()) ::
+          {indent_type(), pos_integer()}
+  defp indent_info(state, buf, filetype) do
+    options_server = options_server(state)
+    indent_type = buffer_option(buf, options_server, filetype, :indent_with)
+    indent_size = buffer_option(buf, options_server, filetype, :tab_width)
+    {normalize_indent_type(indent_type), normalize_indent_size(indent_size)}
+  end
+
+  @spec buffer_option(pid() | nil, Options.server(), atom(), Options.option_name()) :: term()
+  defp buffer_option(buf, options_server, filetype, option) when is_pid(buf) do
+    case Buffer.get_option(buf, option) do
+      :error -> Options.get_for_filetype(options_server, option, filetype)
+      value -> value
+    end
+  catch
+    :exit, _ -> Options.get_for_filetype(options_server, option, filetype)
+  end
+
+  defp buffer_option(nil, options_server, filetype, option) do
+    Options.get_for_filetype(options_server, option, filetype)
+  end
+
+  @spec options_server(EditorState.t() | map()) :: Options.server()
+  defp options_server(%EditorState{} = state), do: EditorState.options_server(state)
+  defp options_server(%{options_server: server}), do: server
+  defp options_server(_state), do: Options.default_server()
+
+  @spec normalize_indent_type(term()) :: indent_type()
+  defp normalize_indent_type(:tabs), do: :tabs
+  defp normalize_indent_type(_value), do: :spaces
+
+  @spec normalize_indent_size(term()) :: pos_integer()
+  defp normalize_indent_size(value) when is_integer(value) and value > 0, do: value
+  defp normalize_indent_size(_value), do: 2
+
+  @spec selection_info(
+          Minga.Mode.mode(),
+          Minga.Mode.state() | nil,
+          pid() | nil,
+          Buffer.position()
+        ) ::
+          selection_info()
+  defp selection_info(
+         :visual,
+         %{visual_type: :line, visual_anchor: {anchor_line, _}},
+         _buf,
+         {line, _}
+       ) do
+    {:lines, abs(anchor_line - line) + 1}
+  end
+
+  defp selection_info(:visual, %{visual_type: :char, visual_anchor: anchor}, buf, cursor)
+       when is_pid(buf) do
+    {:chars, Buffer.content_range_length(buf, anchor, cursor)}
+  catch
+    :exit, _ -> nil
+  end
+
+  defp selection_info(_mode, _mode_state, _buf, _cursor), do: nil
+
   # ── Agent variant ──────────────────────────────────────────────────────────
 
   @spec build_agent_data(EditorState.t() | map()) :: agent_data()
@@ -216,11 +298,15 @@ defmodule MingaEditor.StatusBar.Data do
     {git_branch, git_diff_summary} = git_modeline_data(buf)
     diagnostic_counts = diagnostic_modeline_data_from_path(file_path)
     diagnostic_hint = cursor_line_diagnostic_hint_from_path(file_path, line)
+    mode = Minga.Editing.mode(state)
+    mode_state = Editing.mode_state(state)
+    {indent_type, indent_size} = indent_info(state, buf, filetype)
+    selection_info = selection_info(mode, mode_state, buf, {line, col})
     background = background_subagent_summary(state)
 
     %{
-      mode: Minga.Editing.mode(state),
-      mode_state: Editing.mode_state(state),
+      mode: mode,
+      mode_state: mode_state,
       model_name: model_name,
       session_status: agent.runtime.status,
       message_count: message_count,
@@ -238,6 +324,9 @@ defmodule MingaEditor.StatusBar.Data do
       git_diff_summary: git_diff_summary,
       diagnostic_counts: diagnostic_counts,
       diagnostic_hint: diagnostic_hint,
+      indent_type: indent_type,
+      indent_size: indent_size,
+      selection_info: selection_info,
       lsp_status: state.lsp.status,
       parser_status: state.parser_status,
       buf_index: state.workspace.buffers.active_index + 1,
@@ -371,6 +460,9 @@ defmodule MingaEditor.StatusBar.Data do
       git_branch: d.git_branch,
       git_diff_summary: d.git_diff_summary,
       diagnostic_counts: d.diagnostic_counts,
+      indent_type: d.indent_type,
+      indent_size: d.indent_size,
+      selection_info: d.selection_info,
       background_subagent_count: d.background_subagent_count,
       active_background_subagent_label: d.active_background_subagent_label
     }

@@ -5,43 +5,24 @@
 
 import SwiftUI
 
-/// Typed snapshot of status bar data from the BEAM. Constructed by
-/// CommandDispatcher, consumed by StatusBarState.update(). Named fields
-/// prevent the transposition bugs that a 15-parameter function invites.
-struct StatusBarUpdate: Sendable {
-    let contentKind: UInt8
-    let mode: UInt8
-    let cursorLine: UInt32
-    let cursorCol: UInt32
-    let lineCount: UInt32
-    let flags: UInt8
-    let lspStatus: UInt8
-    let gitBranch: String
-    let message: String
-    let filetype: String
-    let errorCount: UInt16
-    let warningCount: UInt16
-    // Agent-only fields
-    let modelName: String
-    let messageCount: UInt32
-    let sessionStatus: UInt8
-    // Extended fields (TUI modeline parity)
-    let infoCount: UInt16
-    let hintCount: UInt16
-    let macroRecording: UInt8
-    let parserStatus: UInt8
-    let agentStatus: UInt8
-    let gitAdded: UInt16
-    let gitModified: UInt16
-    let gitDeleted: UInt16
-    let icon: String
-    let iconColorR: UInt8
-    let iconColorG: UInt8
-    let iconColorB: UInt8
-    let filename: String
-    let diagnosticHint: String
-    let backgroundSubagentCount: UInt16
-    let backgroundSubagentLabel: String
+private extension StatusBarUpdate.IndentInfo {
+    var label: String {
+        kind == 1 ? "Tabs" : "Spaces"
+    }
+}
+
+private extension StatusBarUpdate.SelectionInfo {
+    var isActive: Bool {
+        mode != 0 && size > 0
+    }
+
+    var displayText: String {
+        switch mode {
+        case 1: return "\(size) chars"
+        case 2: return "\(size) lines"
+        default: return ""
+        }
+    }
 }
 
 @MainActor
@@ -81,6 +62,8 @@ final class StatusBarState {
     var diagnosticHint: String = ""
     var backgroundSubagentCount: UInt16 = 0
     var backgroundSubagentLabel: String = ""
+    var indent: StatusBarUpdate.IndentInfo = .init(kind: 0, size: 2)
+    var selection: StatusBarUpdate.SelectionInfo = .init(mode: 0, size: 0)
 
     /// Updates status bar properties, guarding each assignment with an
     /// equality check to prevent redundant `@Observable` notifications.
@@ -119,6 +102,8 @@ final class StatusBarState {
         if self.diagnosticHint != data.diagnosticHint { self.diagnosticHint = data.diagnosticHint }
         if self.backgroundSubagentCount != data.backgroundSubagentCount { self.backgroundSubagentCount = data.backgroundSubagentCount }
         if self.backgroundSubagentLabel != data.backgroundSubagentLabel { self.backgroundSubagentLabel = data.backgroundSubagentLabel }
+        if self.indent != data.indent { self.indent = data.indent }
+        if self.selection != data.selection { self.selection = data.selection }
     }
 
     var modeName: String {
@@ -531,6 +516,8 @@ struct StatusBarView: View {
                 lspIndicator
             }
 
+            indentSegment
+
             // Devicon + filetype (clickable to change language mode)
             if !state.filetype.isEmpty {
                 Button(action: {
@@ -554,23 +541,51 @@ struct StatusBarView: View {
                 }
             }
 
-            // Cursor position / message count
-            if state.isAgentWindow {
-                Text("\(state.messageCount) msgs")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(theme.modelineBarFg.opacity(0.7))
-            } else {
-                Text("Ln \(state.cursorLine), Col \(state.cursorCol)")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(theme.modelineBarFg.opacity(0.7))
-                    .help("Line \(state.cursorLine), Column \(state.cursorCol)")
-            }
+            // Cursor position, selection size, or message count
+            positionSegment
 
             // Vim mode badge
             modeBadge
                 .help("\(state.modeName) mode")
         }
         .padding(.trailing, 8)
+    }
+
+    @ViewBuilder
+    private var indentSegment: some View {
+        Button(action: {
+            encoder?.sendExecuteCommand(name: "indent_picker")
+        }) {
+            Text("\(state.indent.label):\(state.indent.size)")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(theme.modelineBarFg.opacity(0.65))
+        }
+        .buttonStyle(.plain)
+        .help("Indent settings")
+        .onHover { isHovered in
+            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+    }
+
+    @ViewBuilder
+    private var positionSegment: some View {
+        if state.isAgentWindow {
+            Text("\(state.messageCount) msgs")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(theme.modelineBarFg.opacity(0.7))
+        } else if state.selection.isActive {
+            Text(state.selection.displayText)
+                .font(.system(size: 11, design: .monospaced))
+                .monospacedDigit()
+                .contentTransition(.numericText())
+                .foregroundStyle(theme.modelineBarFg.opacity(0.7))
+                .help(state.selection.displayText)
+        } else {
+            Text("Ln \(state.cursorLine), Col \(state.cursorCol)")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(theme.modelineBarFg.opacity(0.7))
+                .help("Line \(state.cursorLine), Column \(state.cursorCol)")
+        }
     }
 
     // MARK: - Parser status (only when degraded)

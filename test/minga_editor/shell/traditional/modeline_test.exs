@@ -355,10 +355,56 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
       assert length(commands_with) == length(commands_without)
     end
 
-    test "diagnostic counts are clickable to diagnostic_list" do
+    test "diagnostic counts are clickable to diagnostic_picker" do
       data = Map.put(@base_data, :diagnostic_counts, {1, 0, 0, 0})
       {_commands, regions} = Modeline.render(0, 120, data)
-      assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :diagnostic_list end)
+      assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :diagnostic_picker end)
+    end
+  end
+
+  describe "indent and selection segments" do
+    test "shows spaces indentation and exposes indent picker click target" do
+      data = Map.merge(@base_data, %{indent_type: :spaces, indent_size: 2})
+      {commands, regions} = Modeline.render(0, 120, data)
+      text = Enum.map_join(commands, fn {_r, _c, segment, _s} -> segment end)
+
+      assert String.contains?(text, "Spaces:2")
+      assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :indent_picker end)
+    end
+
+    test "shows tabs indentation" do
+      data = Map.merge(@base_data, %{indent_type: :tabs, indent_size: 4})
+      {commands, _regions} = Modeline.render(0, 120, data)
+      text = Enum.map_join(commands, fn {_r, _c, segment, _s} -> segment end)
+
+      assert String.contains?(text, "Tabs:4")
+    end
+
+    test "selection info replaces cursor position" do
+      data = Map.merge(@base_data, %{selection_info: {:chars, 42}})
+      {commands, _regions} = Modeline.render(0, 120, data)
+      text = Enum.map_join(commands, fn {_r, _c, segment, _s} -> segment end)
+
+      assert String.contains?(text, "42 chars")
+      refute String.contains?(text, "1:1")
+    end
+
+    test "narrow layout drops indent before diagnostics and git" do
+      data =
+        Map.merge(@base_data, %{
+          git_branch: "feature-branch",
+          git_diff_summary: {12, 3, 4},
+          diagnostic_counts: {2, 1, 0, 0},
+          indent_type: :spaces,
+          indent_size: 2
+        })
+
+      {commands, _regions} = Modeline.render(0, 55, data)
+      text = Enum.map_join(commands, fn {_r, _c, segment, _s} -> segment end)
+
+      refute String.contains?(text, "Spaces:2")
+      assert String.contains?(text, "NORMAL")
+      assert String.contains?(text, "test.ex")
     end
   end
 end

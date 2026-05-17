@@ -360,6 +360,30 @@ defmodule Minga.Buffer.DocumentTest do
     end
   end
 
+  describe "content_range_length/3" do
+    test "counts a single-character inclusive range" do
+      buf = Document.new("hello")
+      assert Document.content_range_length(buf, {0, 1}, {0, 1}) == 1
+    end
+
+    test "counts multi-line selections without depending on order" do
+      buf = Document.new("ab\ncde\nf")
+      assert Document.content_range_length(buf, {0, 1}, {1, 2}) == 5
+      assert Document.content_range_length(buf, {1, 2}, {0, 1}) == 5
+    end
+
+    test "counts unicode graphemes instead of bytes" do
+      buf = Document.new("a🥨日")
+      assert Document.content_range_length(buf, {0, 1}, {0, 1}) == 1
+      assert Document.content_range_length(buf, {0, 1}, {0, 5}) == 2
+    end
+
+    test "returns zero at the end of an empty buffer" do
+      buf = Document.new("")
+      assert Document.content_range_length(buf, {0, 0}, {0, 0}) == 0
+    end
+  end
+
   # ── Property: cache always matches recomputed values ──
 
   describe "property: cache consistency" do

@@ -226,6 +226,15 @@ defmodule Minga.Buffer.Document do
   end
 
   @doc """
+  Returns the grapheme count between two positions **inclusive** on both ends.
+  If the positions are reversed, they are normalised automatically.
+  """
+  @spec content_range_length(t(), position(), position()) :: non_neg_integer()
+  def content_range_length(%__MODULE__{} = buf, from_pos, to_pos) do
+    buf |> Selection.characterwise(from_pos, to_pos) |> then(&Selection.length(buf, &1))
+  end
+
+  @doc """
   Deletes the text between two positions **inclusive** on both ends.
   If the positions are reversed, they are normalised automatically.
   The cursor is placed at the earlier position.

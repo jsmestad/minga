@@ -346,7 +346,7 @@ struct CommandDispatcherRoutingTests {
     @Test("guiStatusBar updates statusBarState")
     @MainActor func guiStatusBarRouting() {
         let (dispatcher, gui) = makeDispatcher()
-        dispatcher.dispatch(.guiStatusBar(contentKind: 0, mode: 1, cursorLine: 42,
+        dispatcher.dispatch(.guiStatusBar(StatusBarUpdate(contentKind: 0, mode: 1, cursorLine: 42,
                                            cursorCol: 9, lineCount: 500, flags: 0x03,
                                            lspStatus: 1, gitBranch: "main",
                                            message: "-- INSERT --", filetype: "elixir",
@@ -357,19 +357,25 @@ struct CommandDispatcherRoutingTests {
                                            gitAdded: 5, gitModified: 3, gitDeleted: 1,
                                            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0,
                                            filename: "editor.ex", diagnosticHint: "",
-                                           backgroundSubagentCount: 0, backgroundSubagentLabel: ""))
+                                           backgroundSubagentCount: 0, backgroundSubagentLabel: "",
+                                           indent: .init(kind: 1, size: 4),
+                                           selection: .init(mode: 2, size: 3))))
 
         #expect(gui.statusBarState.mode == 1)
         #expect(gui.statusBarState.cursorLine == 42)
         #expect(gui.statusBarState.gitBranch == "main")
         #expect(gui.statusBarState.filetype == "elixir")
         #expect(gui.statusBarState.errorCount == 3)
+        #expect(gui.statusBarState.indent.kind == 1)
+        #expect(gui.statusBarState.indent.size == 4)
+        #expect(gui.statusBarState.selection.mode == 2)
+        #expect(gui.statusBarState.selection.size == 3)
     }
 
     @Test("guiStatusBar agent variant populates background buffer fields")
     @MainActor func guiStatusBarAgentRouting() {
         let (dispatcher, gui) = makeDispatcher()
-        dispatcher.dispatch(.guiStatusBar(contentKind: 1, mode: 0, cursorLine: 11,
+        dispatcher.dispatch(.guiStatusBar(StatusBarUpdate(contentKind: 1, mode: 0, cursorLine: 11,
                                            cursorCol: 6, lineCount: 100, flags: 0x03,
                                            lspStatus: 1, gitBranch: "feat/agent",
                                            message: "", filetype: "elixir",
@@ -380,7 +386,7 @@ struct CommandDispatcherRoutingTests {
                                            gitAdded: 3, gitModified: 2, gitDeleted: 0,
                                            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0,
                                            filename: "editor.ex", diagnosticHint: "",
-                                           backgroundSubagentCount: 2, backgroundSubagentLabel: "session-2: tests"))
+                                           backgroundSubagentCount: 2, backgroundSubagentLabel: "session-2: tests")))
 
         #expect(gui.statusBarState.contentKind == 1)
         #expect(gui.statusBarState.isAgentWindow == true)
