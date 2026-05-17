@@ -8,7 +8,8 @@ defmodule Minga.Config.Loader do
   2. `~/.config/minga/themes/*.exs` (load user themes, before config eval)
   3. `~/.config/minga/config.exs` (global config)
   4. `.minga.exs` in the current working directory (project-local config)
-  5. `~/.config/minga/after.exs` (post-init hook)
+  5. `~/.config/minga/gui_settings.exs` (generated GUI settings overlay)
+  6. `~/.config/minga/after.exs` (post-init hook)
 
   Later sources override earlier ones (last-writer-wins for options and
   keybindings). Errors at any stage are captured and stored for the
@@ -29,6 +30,7 @@ defmodule Minga.Config.Loader do
   alias Minga.Config.Advice
   alias Minga.Config.Hooks
   alias Minga.Config.Options
+  alias Minga.Config.Writer
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Extension.Supervisor, as: ExtSupervisor
   alias Minga.Keymap
@@ -45,6 +47,8 @@ defmodule Minga.Config.Loader do
           modules_errors: [String.t()],
           project_config_path: String.t() | nil,
           project_config_error: String.t() | nil,
+          gui_settings_path: String.t(),
+          gui_settings_error: String.t() | nil,
           after_error: String.t() | nil,
           lsp_settings: %{atom() => map()},
           keymap_server: keymap_server(),
@@ -122,6 +126,26 @@ defmodule Minga.Config.Loader do
   def project_config_error, do: project_config_error(__MODULE__)
   def project_config_error(server), do: Agent.get(server, & &1.project_config_error)
 
+  @doc "Returns the generated GUI settings overlay path."
+  @spec gui_settings_path() :: String.t()
+  @spec gui_settings_path(GenServer.server()) :: String.t()
+  def gui_settings_path, do: gui_settings_path(__MODULE__)
+
+  def gui_settings_path(server) when is_atom(server) do
+    case Process.whereis(server) do
+      nil -> default_gui_settings_path()
+      _pid -> Agent.get(server, & &1.gui_settings_path)
+    end
+  end
+
+  def gui_settings_path(server), do: Agent.get(server, & &1.gui_settings_path)
+
+  @doc "Returns the gui_settings.exs load error, or `nil` if clean (or no GUI overlay)."
+  @spec gui_settings_error() :: String.t() | nil
+  @spec gui_settings_error(GenServer.server()) :: String.t() | nil
+  def gui_settings_error, do: gui_settings_error(__MODULE__)
+  def gui_settings_error(server), do: Agent.get(server, & &1.gui_settings_error)
+
   @doc "Returns the after.exs load error, or `nil` if clean (or no after.exs)."
   @spec after_error() :: String.t() | nil
   @spec after_error(GenServer.server()) :: String.t() | nil
@@ -159,6 +183,17 @@ defmodule Minga.Config.Loader do
   def reload, do: reload(__MODULE__)
 
   def reload(server) do
+    Writer.set_reloading(true)
+
+    try do
+      do_reload(server)
+    after
+      Writer.set_reloading(false)
+    end
+  end
+
+  @spec do_reload(GenServer.server()) :: :ok | {:error, String.t()}
+  defp do_reload(server) do
     # Stop all running extensions first
     ExtSupervisor.stop_all()
 
@@ -206,7 +241,12 @@ defmodule Minga.Config.Loader do
 
     # Return error if any stage had problems
     errors =
-      [new_state.load_error, new_state.project_config_error, new_state.after_error]
+      [
+        new_state.load_error,
+        new_state.project_config_error,
+        new_state.gui_settings_error,
+        new_state.after_error
+      ]
       |> Enum.reject(&is_nil/1)
 
     all_errors = new_state.modules_errors ++ errors
@@ -267,14 +307,18 @@ defmodule Minga.Config.Loader do
       project_path = resolve_project_config_path()
       project_config_error = eval_if_exists(project_path)
 
-      # 5. Eval after.exs
+      # 5. Eval generated GUI settings overlay
+      gui_settings_path = Path.join(config_dir, "gui_settings.exs")
+      gui_settings_error = eval_if_exists(gui_settings_path)
+
+      # 6. Eval after.exs
       after_path = Path.join(config_dir, "after.exs")
       after_error = eval_if_exists(after_path)
 
-      # 6. Apply log level from config
+      # 7. Apply log level from config
       apply_log_level(options_server)
 
-      # 7. Start declared extensions (if the supervisor is running).
+      # 8. Start declared extensions (if the supervisor is running).
       # Skip in test mode so user-installed extensions don't affect test
       # determinism (e.g., extra keybindings altering which-key snapshots).
       if Process.whereis(Minga.Extension.Supervisor) != nil &&
@@ -291,6 +335,8 @@ defmodule Minga.Config.Loader do
         modules_errors: modules_errors,
         project_config_path: project_path,
         project_config_error: project_config_error,
+        gui_settings_path: gui_settings_path,
+        gui_settings_error: gui_settings_error,
         after_error: after_error,
         lsp_settings: lsp_settings,
         keymap_server: keymap_server,
@@ -441,6 +487,13 @@ defmodule Minga.Config.Loader do
       %{config_file: path} when is_binary(path) -> path
       _ -> nil
     end
+  end
+
+  @spec default_gui_settings_path() :: String.t()
+  defp default_gui_settings_path do
+    default_config_path()
+    |> Path.dirname()
+    |> Path.join("gui_settings.exs")
   end
 
   @spec default_config_path() :: String.t()

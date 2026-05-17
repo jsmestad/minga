@@ -168,6 +168,8 @@ struct ProtocolSchemaSwiftTests {
         #expect(try schemaHex(actions, "file_tree_move") == GUI_ACTION_FILE_TREE_MOVE)
         #expect(try schemaHex(actions, "file_tree_drop") == GUI_ACTION_FILE_TREE_DROP)
         #expect(try schemaHex(actions, "fold_toggle_at_line") == GUI_ACTION_FOLD_TOGGLE_AT_LINE)
+        #expect(try schemaHex(actions, "config_update") == GUI_ACTION_CONFIG_UPDATE)
+        #expect(try schemaHex(actions, "config_query") == GUI_ACTION_CONFIG_QUERY)
         #expect(try schemaHex(actions, "system_will_sleep") == GUI_ACTION_SYSTEM_WILL_SLEEP)
         #expect(try schemaHex(actions, "system_did_wake") == GUI_ACTION_SYSTEM_DID_WAKE)
         #expect(try schemaHex(actions, "cmd_copy") == GUI_ACTION_CMD_COPY)
@@ -195,5 +197,6 @@ struct ProtocolSchemaSwiftTests {
         #expect(try schemaHex(semantic, "gui_board") == OP_GUI_BOARD)
         #expect(try schemaHex(semantic, "gui_agent_context") == OP_GUI_AGENT_CONTEXT)
         #expect(try schemaHex(semantic, "gui_change_summary") == OP_GUI_CHANGE_SUMMARY)
+        #expect(try schemaHex(semantic, "gui_config_state") == OP_GUI_CONFIG_STATE)
     }
 }

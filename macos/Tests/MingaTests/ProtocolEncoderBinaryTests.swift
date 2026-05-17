@@ -390,6 +390,33 @@ struct EncoderGUIActionTests {
     }
 }
 
+// MARK: - Settings
+
+@Suite("Encoder Binary: Settings")
+struct EncoderSettingsTests {
+    @Test("config_query encodes action with no payload")
+    func configQueryLayout() {
+        let payload = captureFrame { $0.sendConfigQuery() }
+
+        #expect(payload.count == 2)
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_CONFIG_QUERY)
+    }
+
+    @Test("config_update encodes typed atom payload")
+    func configUpdateAtomLayout() {
+        let payload = captureFrame { $0.sendConfigUpdate(key: "theme", value: .atom("doom_one")) }
+
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_CONFIG_UPDATE)
+        #expect(payload[2] == 5)
+        #expect(String(data: payload[3..<8], encoding: .utf8) == "theme")
+        #expect(payload[8] == SETTING_VALUE_ATOM)
+        #expect(readU16(payload, 9) == 8)
+        #expect(String(data: payload[11..<19], encoding: .utf8) == "doom_one")
+    }
+}
+
 // MARK: - Frame header
 
 @Suite("Encoder Binary: Frame Header")

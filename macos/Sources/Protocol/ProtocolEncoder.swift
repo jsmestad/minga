@@ -108,6 +108,10 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendChangeSummaryClick(index: UInt32)
     func sendScrollToLine(line: UInt32)
     func sendFoldToggleAtLine(windowId: UInt16, bufferLine: UInt32)
+
+    // Native settings actions
+    func sendConfigQuery()
+    func sendConfigUpdate(key: String, value: SettingValue)
 }
 
 extension InputEncoder {
@@ -115,6 +119,12 @@ extension InputEncoder {
     func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8) {
         sendMouseEvent(row: row, col: col, button: button, modifiers: modifiers, eventType: eventType, clickCount: 1)
     }
+
+    /// Default no-op so existing test spies do not need to implement settings actions.
+    func sendConfigQuery() {}
+
+    /// Default no-op so existing test spies do not need to implement settings actions.
+    func sendConfigUpdate(key: String, value: SettingValue) {}
 }
 
 /// Thread-safe encoder that writes `{:packet, 4}` framed events to stdout.
@@ -931,6 +941,68 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeU16(&buf, 2, windowId)
         writeU32(&buf, 4, bufferLine)
         writeFrame(buf)
+    }
+
+    /// Send a gui_action: config_query. Layout: opcode(1) + action_type(1).
+    func sendConfigQuery() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_CONFIG_QUERY
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: config_update. Layout: opcode(1) + action_type(1) + key_len(1) + key + value.
+    func sendConfigUpdate(key: String, value: SettingValue) {
+        let keyBytes = Array(key.utf8.prefix(Int(UInt8.max)))
+        var buf = Data()
+        buf.append(OP_GUI_ACTION)
+        buf.append(GUI_ACTION_CONFIG_UPDATE)
+        buf.append(UInt8(keyBytes.count))
+        buf.append(contentsOf: keyBytes)
+        appendSettingValue(value, to: &buf)
+        writeFrame(buf)
+    }
+
+    private func appendSettingValue(_ value: SettingValue, to buf: inout Data) {
+        switch value {
+        case .bool(let enabled):
+            buf.append(SETTING_VALUE_BOOL)
+            buf.append(enabled ? 1 : 0)
+        case .int(let number):
+            buf.append(SETTING_VALUE_INT)
+            appendI32(Int32(clamping: number), to: &buf)
+        case .string(let text):
+            buf.append(SETTING_VALUE_STRING)
+            appendString16(text, to: &buf)
+        case .atom(let text):
+            buf.append(SETTING_VALUE_ATOM)
+            appendString16(text, to: &buf)
+        case .float(let number):
+            buf.append(SETTING_VALUE_FLOAT)
+            appendFloat64(number, to: &buf)
+        }
+    }
+
+    private func appendString16(_ text: String, to buf: inout Data) {
+        let bytes = Array(text.utf8.prefix(Int(UInt16.max)))
+        buf.append(UInt8((bytes.count >> 8) & 0xFF))
+        buf.append(UInt8(bytes.count & 0xFF))
+        buf.append(contentsOf: bytes)
+    }
+
+    private func appendI32(_ value: Int32, to buf: inout Data) {
+        let unsigned = UInt32(bitPattern: value)
+        buf.append(UInt8((unsigned >> 24) & 0xFF))
+        buf.append(UInt8((unsigned >> 16) & 0xFF))
+        buf.append(UInt8((unsigned >> 8) & 0xFF))
+        buf.append(UInt8(unsigned & 0xFF))
+    }
+
+    private func appendFloat64(_ value: Double, to buf: inout Data) {
+        let bits = value.bitPattern.bigEndian
+        withUnsafeBytes(of: bits) { rawBuffer in
+            buf.append(contentsOf: rawBuffer)
+        }
     }
 
     // MARK: - Private

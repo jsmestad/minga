@@ -209,6 +209,10 @@ defmodule Minga.Config do
   @spec config_path() :: String.t()
   defdelegate config_path(), to: Loader
 
+  @doc "Returns the generated GUI settings overlay path (`~/.config/minga/gui_settings.exs`)."
+  @spec gui_settings_path() :: String.t()
+  defdelegate gui_settings_path(), to: Loader
+
   @doc "Re-evaluates the user's config file. Returns `:ok` or `{:error, reason}`."
   @spec reload() :: :ok | {:error, term()}
   defdelegate reload(), to: Loader

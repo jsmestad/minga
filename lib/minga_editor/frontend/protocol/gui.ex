@@ -37,6 +37,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x85   | gui_git_status       | Git status panel data      |
   | 0x86   | gui_agent_groups    | Workspace indicator + list |
   | 0x87   | gui_board           | Board card grid state      |
+  | 0x97   | gui_config_state    | Settings panel state       |
 
   ## GUI Actions (Frontend → BEAM)
 
@@ -84,6 +85,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x3F       | hover_open_action       |
   | 0x40       | file_tree_drop          |
   | 0x41       | fold_toggle_at_line     |
+  | 0x42       | config_update          |
+  | 0x43       | config_query           |
   | 0x34       | system_will_sleep      |
   | 0x35       | system_did_wake        |
 
@@ -92,6 +95,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   import Bitwise
 
   alias Minga.Buffer
+  alias Minga.Config.Options
+  alias Minga.Keymap.Active, as: KeymapActive
+  alias Minga.Keymap.Bindings
   alias MingaEditor.FileTree.Diagnostics, as: FileTreeDiagnostics
   alias MingaEditor.FileTree.DropIntent
   alias MingaEditor.FileTree.Row
@@ -189,6 +195,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @op_gui_line_spacing 0x92
   @op_gui_cursor_animation 0x95
   @op_gui_hover_action 0x96
+  @op_gui_config_state 0x97
 
   # ── GUI action sub-opcodes (Frontend → BEAM) ──
 
@@ -258,6 +265,27 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_hover_open_action 0x3F
   @gui_action_file_tree_drop 0x40
   @gui_action_fold_toggle_at_line 0x41
+  @gui_action_config_update 0x42
+  @gui_action_config_query 0x43
+
+  @value_boolean 0x01
+  @value_integer 0x02
+  @value_string 0x03
+  @value_atom 0x04
+  @value_float 0x05
+
+  @settings_options [
+    :theme,
+    :font_family,
+    :font_size,
+    :font_weight,
+    :font_ligatures,
+    :tab_width,
+    :line_numbers,
+    :wrap,
+    :cursorline,
+    :cursor_blink
+  ]
 
   @no_fold_range 0xFFFF_FFFF
 
@@ -332,6 +360,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | :git_fetch
           | {:git_commit_amend, message :: String.t()}
           | :git_pull_and_retry
+          | {:config_update, Options.option_name(), term()}
+          | :config_query
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -1042,6 +1072,308 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   def encode_gui_cursor_animation(enabled) when is_boolean(enabled) do
     enabled_byte = if enabled, do: 1, else: 0
     <<@op_gui_cursor_animation, 1::16, enabled_byte::8>>
+  end
+
+  # ── Config state (forward-compatible, 0x97) ──
+
+  @typedoc "Theme preview swatch sent to native settings UI."
+  @type theme_preview :: %{
+          required(:name) => String.t(),
+          required(:atom) => String.t(),
+          required(:editor_bg) => non_neg_integer(),
+          required(:editor_fg) => non_neg_integer(),
+          required(:accent) => non_neg_integer()
+        }
+
+  @typedoc "Read-only keybinding entry sent to native settings UI."
+  @type keybinding_entry :: %{
+          required(:mode) => String.t(),
+          required(:key) => String.t(),
+          required(:command) => String.t(),
+          required(:description) => String.t()
+        }
+
+  @typedoc "Settings state payload sent to native settings UI."
+  @type config_state :: %{
+          required(:options) => %{Options.option_name() => term()},
+          required(:theme_previews) => [theme_preview()],
+          required(:keybindings) => [keybinding_entry()]
+        }
+
+  @doc "Encodes the current settings panel state for native GUI frontends."
+  @spec encode_gui_config_state(config_state()) :: binary()
+  def encode_gui_config_state(%{
+        options: options,
+        theme_previews: previews,
+        keybindings: bindings
+      }) do
+    option_entries = Enum.map(options, fn {name, value} -> encode_config_option(name, value) end)
+    preview_entries = Enum.map(previews, &encode_theme_preview/1)
+    binding_entries = Enum.map(bindings, &encode_keybinding_entry/1)
+
+    payload =
+      IO.iodata_to_binary([
+        <<length(option_entries)::16>>,
+        option_entries,
+        <<length(preview_entries)::16>>,
+        preview_entries,
+        <<length(binding_entries)::16>>,
+        binding_entries
+      ])
+
+    <<@op_gui_config_state, byte_size(payload)::16, payload::binary>>
+  end
+
+  @doc "Builds a full settings state payload from the current config and keymap servers."
+  @spec config_state(Options.server(), Minga.Keymap.server()) :: config_state()
+  def config_state(
+        options_server \\ Options.default_server(),
+        keymap_server \\ Minga.Keymap.default_server()
+      ) do
+    options =
+      @settings_options
+      |> Enum.map(fn name -> {name, Options.get(options_server, name)} end)
+      |> Map.new()
+
+    %{
+      options: options,
+      theme_previews: theme_previews(),
+      keybindings: keybinding_entries(keymap_server)
+    }
+  end
+
+  @doc "Builds a one-option settings state payload for incremental updates."
+  @spec config_state_entry(Options.option_name(), term()) :: config_state()
+  def config_state_entry(name, value) do
+    %{options: %{name => value}, theme_previews: [], keybindings: []}
+  end
+
+  @spec settings_option?(atom()) :: boolean()
+  def settings_option?(name), do: name in @settings_options
+
+  @spec encode_config_option(Options.option_name(), term()) :: binary()
+  defp encode_config_option(name, value) when is_atom(name) do
+    name_bytes = Atom.to_string(name)
+    value_payload = encode_config_value(value)
+    <<byte_size(name_bytes)::8, name_bytes::binary, value_payload::binary>>
+  end
+
+  @spec encode_config_value(term()) :: binary()
+  defp encode_config_value(value) when is_boolean(value) do
+    encoded = if value, do: 1, else: 0
+    <<@value_boolean::8, encoded::8>>
+  end
+
+  defp encode_config_value(value) when is_integer(value),
+    do: <<@value_integer::8, value::32-signed>>
+
+  defp encode_config_value(value) when is_binary(value) do
+    bytes = :erlang.iolist_to_binary([value])
+    <<@value_string::8, byte_size(bytes)::16, bytes::binary>>
+  end
+
+  defp encode_config_value(value) when is_atom(value) do
+    bytes = Atom.to_string(value)
+    <<@value_atom::8, byte_size(bytes)::16, bytes::binary>>
+  end
+
+  defp encode_config_value(value) when is_float(value), do: <<@value_float::8, value::float-64>>
+
+  defp encode_config_value(value) do
+    bytes = inspect(value)
+    <<@value_string::8, byte_size(bytes)::16, bytes::binary>>
+  end
+
+  @spec encode_theme_preview(theme_preview()) :: binary()
+  defp encode_theme_preview(%{
+         name: name,
+         atom: atom,
+         editor_bg: bg,
+         editor_fg: fg,
+         accent: accent
+       }) do
+    <<encode_string8(name)::binary, encode_string8(atom)::binary, bg::24, fg::24, accent::24>>
+  end
+
+  @spec theme_previews() :: [theme_preview()]
+  defp theme_previews do
+    MingaEditor.UI.Theme.available()
+    |> Enum.map(&theme_preview/1)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  @spec theme_preview(atom()) :: theme_preview() | nil
+  defp theme_preview(name) do
+    case MingaEditor.UI.Theme.get(name) do
+      {:ok, theme} ->
+        %{
+          name: humanize_theme_name(name),
+          atom: Atom.to_string(name),
+          editor_bg: theme.editor.bg,
+          editor_fg: theme.editor.fg,
+          accent: theme_accent(theme)
+        }
+
+      :error ->
+        nil
+    end
+  end
+
+  @spec humanize_theme_name(atom()) :: String.t()
+  defp humanize_theme_name(name) do
+    name
+    |> Atom.to_string()
+    |> String.replace("_", " ")
+    |> String.split(" ")
+    |> Enum.map_join(" ", &String.capitalize/1)
+  end
+
+  @spec theme_accent(MingaEditor.UI.Theme.t()) :: non_neg_integer()
+  defp theme_accent(%{modeline: %{filetype_fg: accent}}), do: accent
+
+  @spec keybinding_entries(Minga.Keymap.server()) :: [keybinding_entry()]
+  defp keybinding_entries(keymap_server) do
+    [
+      normal_keybinding_entries(keymap_server),
+      leader_keybinding_entries(keymap_server),
+      mode_keybinding_entries(keymap_server),
+      scope_keybinding_entries(keymap_server)
+    ]
+    |> List.flatten()
+    |> Enum.uniq_by(fn %{mode: mode, key: key, command: command} -> {mode, key, command} end)
+    |> Enum.sort_by(fn %{mode: mode, key: key} -> {mode, key} end)
+  end
+
+  @spec normal_keybinding_entries(Minga.Keymap.server()) :: [keybinding_entry()]
+  defp normal_keybinding_entries(keymap_server) do
+    keymap_server
+    |> safe_normal_bindings()
+    |> Enum.map(fn {key, {command, description}} ->
+      keybinding_entry("normal", [key], command, description)
+    end)
+  end
+
+  @spec leader_keybinding_entries(Minga.Keymap.server()) :: [keybinding_entry()]
+  defp leader_keybinding_entries(keymap_server) do
+    keymap_server
+    |> safe_leader_trie()
+    |> trie_keybinding_entries("normal", [Minga.Keymap.Defaults.leader_key()])
+  end
+
+  @spec mode_keybinding_entries(Minga.Keymap.server()) :: [keybinding_entry()]
+  defp mode_keybinding_entries(keymap_server) do
+    [:insert, :visual, :operator_pending, :command]
+    |> Enum.flat_map(fn mode ->
+      keymap_server
+      |> safe_mode_trie(mode)
+      |> trie_keybinding_entries(Atom.to_string(mode), [])
+    end)
+  end
+
+  @spec scope_keybinding_entries(Minga.Keymap.server()) :: [keybinding_entry()]
+  defp scope_keybinding_entries(keymap_server) do
+    Minga.Keymap.Scope.all_scopes()
+    |> Enum.flat_map(fn scope ->
+      case Minga.Keymap.Scope.module_for(scope) do
+        nil ->
+          []
+
+        mod ->
+          Enum.flat_map([:normal, :insert, :input_normal, :cua], fn vim_state ->
+            mode = "#{scope}/#{vim_state}"
+
+            [
+              mod.keymap(vim_state, []) |> trie_keybinding_entries(mode, []),
+              mod.shared_keymap() |> trie_keybinding_entries(mode, []),
+              safe_scope_trie(keymap_server, scope, vim_state)
+              |> trie_keybinding_entries(mode, [])
+            ]
+          end)
+      end
+    end)
+  end
+
+  @spec safe_normal_bindings(Minga.Keymap.server()) :: %{Bindings.key() => {atom(), String.t()}}
+  defp safe_normal_bindings(keymap_server) do
+    KeymapActive.normal_bindings(keymap_server)
+  rescue
+    ArgumentError -> Minga.Keymap.Defaults.normal_bindings()
+  catch
+    :exit, _ -> Minga.Keymap.Defaults.normal_bindings()
+  end
+
+  @spec safe_leader_trie(Minga.Keymap.server()) :: Bindings.node_t()
+  defp safe_leader_trie(keymap_server) do
+    KeymapActive.leader_trie(keymap_server)
+  rescue
+    ArgumentError -> Minga.Keymap.Defaults.leader_trie()
+  catch
+    :exit, _ -> Minga.Keymap.Defaults.leader_trie()
+  end
+
+  @spec safe_mode_trie(Minga.Keymap.server(), atom()) :: Bindings.node_t()
+  defp safe_mode_trie(keymap_server, mode) do
+    KeymapActive.mode_trie(keymap_server, mode)
+  rescue
+    ArgumentError -> Bindings.new()
+  catch
+    :exit, _ -> Bindings.new()
+  end
+
+  @spec safe_scope_trie(Minga.Keymap.server(), Minga.Keymap.Scope.scope_name(), atom()) ::
+          Bindings.node_t()
+  defp safe_scope_trie(keymap_server, scope, vim_state) do
+    KeymapActive.scope_trie(keymap_server, scope, vim_state)
+  rescue
+    ArgumentError -> Bindings.new()
+  catch
+    :exit, _ -> Bindings.new()
+  end
+
+  @spec trie_keybinding_entries(Bindings.node_t(), String.t(), [Bindings.key()]) ::
+          [keybinding_entry()]
+  defp trie_keybinding_entries(%Bindings.Node{} = node, mode, prefix) do
+    node.children
+    |> Enum.flat_map(fn {key, child} ->
+      sequence = prefix ++ [key]
+      child_entries = trie_keybinding_entries(child, mode, sequence)
+
+      case child.command do
+        nil ->
+          child_entries
+
+        command ->
+          [keybinding_entry(mode, sequence, command, child.description || "") | child_entries]
+      end
+    end)
+  end
+
+  @spec keybinding_entry(String.t(), [Bindings.key()], atom() | tuple(), String.t()) ::
+          keybinding_entry()
+  defp keybinding_entry(mode, sequence, command, description) do
+    %{
+      mode: mode,
+      key: format_key_sequence(sequence),
+      command: command_to_string(command),
+      description: description
+    }
+  end
+
+  @spec format_key_sequence([Bindings.key()]) :: String.t()
+  defp format_key_sequence(sequence) do
+    sequence
+    |> Enum.map(&Bindings.format_key/1)
+    |> Enum.join(" ")
+  end
+
+  @spec command_to_string(atom() | tuple()) :: String.t()
+  defp command_to_string(command) when is_atom(command), do: Atom.to_string(command)
+  defp command_to_string(command), do: inspect(command)
+
+  @spec encode_keybinding_entry(keybinding_entry()) :: binary()
+  defp encode_keybinding_entry(%{mode: mode, key: key, command: command, description: desc}) do
+    <<encode_string8(mode)::binary, encode_string16(key)::binary,
+      encode_string16(command)::binary, encode_string16(desc)::binary>>
   end
 
   # ── File tree ──
@@ -2431,7 +2763,56 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   def decode_gui_action(@gui_action_git_pull_and_retry, <<>>),
     do: {:ok, :git_pull_and_retry}
 
+  def decode_gui_action(@gui_action_config_query, <<>>), do: {:ok, :config_query}
+
+  def decode_gui_action(
+        @gui_action_config_update,
+        <<key_len::8, key::binary-size(key_len), value_payload::binary>>
+      ) do
+    with {:ok, name} <- decode_existing_option_name(key),
+         {:ok, value, <<>>} <- decode_config_value(value_payload) do
+      {:ok, {:config_update, name, value}}
+    else
+      _ -> :error
+    end
+  end
+
   def decode_gui_action(_, _), do: :error
+
+  @spec decode_existing_option_name(String.t()) :: {:ok, Options.option_name()} | :error
+  defp decode_existing_option_name(key) do
+    name = String.to_existing_atom(key)
+
+    if name in Options.valid_names() do
+      {:ok, name}
+    else
+      :error
+    end
+  rescue
+    ArgumentError -> :error
+  end
+
+  @spec decode_config_value(binary()) :: {:ok, term(), binary()} | :error
+  defp decode_config_value(<<@value_boolean, 0, rest::binary>>), do: {:ok, false, rest}
+  defp decode_config_value(<<@value_boolean, 1, rest::binary>>), do: {:ok, true, rest}
+
+  defp decode_config_value(<<@value_integer, value::32-signed, rest::binary>>),
+    do: {:ok, value, rest}
+
+  defp decode_config_value(<<@value_float, value::float-64, rest::binary>>),
+    do: {:ok, value, rest}
+
+  defp decode_config_value(<<@value_string, len::16, value::binary-size(len), rest::binary>>),
+    do: {:ok, value, rest}
+
+  defp decode_config_value(<<@value_atom, len::16, value::binary-size(len), rest::binary>>) do
+    atom = String.to_existing_atom(value)
+    {:ok, atom, rest}
+  rescue
+    ArgumentError -> :error
+  end
+
+  defp decode_config_value(_payload), do: :error
 
   @spec decode_file_tree_drop(binary()) :: {:ok, {:file_tree_drop, DropIntent.t()}} | :error
   defp decode_file_tree_drop(

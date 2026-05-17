@@ -111,6 +111,7 @@ defmodule Minga.Config.Options do
           | :log_level_editor
           | :cursorline
           | :cursor_animate
+          | :cursor_blink
           | :nav_flash
           | :nav_flash_threshold
           | :log_level_config
@@ -300,6 +301,7 @@ defmodule Minga.Config.Options do
     {:cursorline, :boolean, true, "Whether the current cursor line is highlighted."},
     {:cursor_animate, :boolean, true,
      "Whether cursor movement is smoothly animated in GUI frontends."},
+    {:cursor_blink, :boolean, true, "Whether GUI frontends blink the editor cursor."},
     {:nav_flash, :boolean, true, "Whether large cursor jumps briefly highlight the destination."},
     {:nav_flash_threshold, :pos_integer, 5,
      "Minimum jump distance that triggers navigation flash."},
