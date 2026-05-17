@@ -9,8 +9,11 @@ defmodule MingaEditor.Workspace.StateTest do
   use ExUnit.Case, async: true
 
   alias Minga.Mode
+  alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Language.Symbol
   alias MingaEditor.VimState
   alias MingaEditor.State.Tab.Context
+  alias MingaEditor.Window
   alias MingaEditor.Window.Content
   alias MingaEditor.Workspace.State, as: WorkspaceState
 
@@ -64,6 +67,33 @@ defmodule MingaEditor.Workspace.StateTest do
       assert result_window.content == {:agent_chat, agent_pid}
       # buffer field should remain unchanged (still the original, not new_buf)
       assert result_window.buffer == window.buffer
+    end
+
+    test "clears document symbols when the active window switches buffers" do
+      state = base_state(content: "defmodule First do\nend\n")
+      win_id = state.workspace.windows.active
+      {:ok, new_buf} = BufferProcess.start_link(content: "plain text")
+      symbols = [%Symbol{kind: :module, name: "First", range: {0, 0, 1, 3}}]
+
+      workspace =
+        state.workspace
+        |> WorkspaceState.update_window(win_id, &Window.set_document_symbols(&1, symbols))
+        |> then(fn ws ->
+          %{
+            ws
+            | buffers: %{
+                ws.buffers
+                | active: new_buf,
+                  list: [ws.buffers.active, new_buf],
+                  active_index: 1
+              }
+          }
+        end)
+
+      synced = WorkspaceState.sync_active_window_buffer(workspace)
+      window = Map.fetch!(synced.windows.map, win_id)
+
+      assert window.document_symbols == []
     end
   end
 

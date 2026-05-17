@@ -705,6 +705,7 @@ defmodule Minga.Parser.Manager do
   defp event_buffer_id({:injection_ranges, buffer_id, _ranges}), do: buffer_id
   defp event_buffer_id({:fold_ranges, buffer_id, _version, _ranges}), do: buffer_id
   defp event_buffer_id({:textobject_positions, buffer_id, _version, _positions}), do: buffer_id
+  defp event_buffer_id({:document_symbols, buffer_id, _version, _symbols}), do: buffer_id
   defp event_buffer_id({:conceal_spans, buffer_id, _version, _spans}), do: buffer_id
   defp event_buffer_id({:request_reparse, buffer_id}), do: buffer_id
   defp event_buffer_id(_event), do: nil

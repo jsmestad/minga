@@ -68,6 +68,7 @@ pub const OP_REQUEST_TEXTOBJECT: u8 = 0x2C;
 pub const OP_CLOSE_BUFFER: u8 = 0x2D;
 pub const OP_REQUEST_MATCH_ITEM: u8 = 0x2E;
 pub const OP_REQUEST_STRUCTURAL_NAV: u8 = 0x2F;
+pub const OP_SET_TAGS_QUERY: u8 = 0x40;
 
 // Highlight responses (Zig → BEAM)
 pub const OP_HIGHLIGHT_SPANS: u8 = 0x30;
@@ -96,6 +97,7 @@ pub const OP_CONCEAL_SPANS: u8 = 0x3A;
 pub const OP_REQUEST_REPARSE: u8 = 0x3B;
 pub const OP_MATCH_ITEM_RESULT: u8 = 0x3C;
 pub const OP_NODE_INFO: u8 = 0x3D;
+pub const OP_DOCUMENT_SYMBOLS: u8 = 0x3E;
 
 // Log messages (Zig → BEAM)
 pub const OP_LOG_MESSAGE: u8 = 0x60;
@@ -194,6 +196,22 @@ pub const InjectionRange = struct {
     language: []const u8,
 };
 
+/// A tree-sitter document symbol extracted from a tags.scm @definition capture.
+pub const DocumentSymbol = struct {
+    kind: u8,
+    name: []const u8,
+    start_row: u32,
+    start_col: u32,
+    end_row: u32,
+    end_col: u32,
+};
+
+pub const SYMBOL_FUNCTION: u8 = 0;
+pub const SYMBOL_MODULE: u8 = 1;
+pub const SYMBOL_METHOD: u8 = 2;
+pub const SYMBOL_INTERFACE: u8 = 3;
+pub const SYMBOL_TEST: u8 = 4;
+
 /// A layout region defines a rectangular area on screen.
 pub const Region = struct {
     id: u16,
@@ -272,6 +290,7 @@ pub const RenderCommand = union(enum) {
     request_textobject: RequestTextobject,
     request_match_item: RequestMatchItem,
     request_structural_nav: RequestStructuralNav,
+    set_tags_query: SetTagsQuery,
     load_grammar: LoadGrammar,
     query_language_at: QueryLanguageAt,
     close_buffer: u32, // buffer_id
@@ -341,6 +360,11 @@ pub const SetIndentQuery = struct {
 };
 
 pub const SetTextobjectQuery = struct {
+    buffer_id: u32 = 0,
+    source: []const u8,
+};
+
+pub const SetTagsQuery = struct {
     buffer_id: u32 = 0,
     source: []const u8,
 };
@@ -624,6 +648,39 @@ pub fn encodeHighlightNames(allocator: std.mem.Allocator, buffer_id: u32, names:
     return buf;
 }
 
+/// Encodes document_symbols: opcode(1) + buffer_id(4) + version(4) + count(4) + entries.
+/// Each entry: kind(1) + name_len(2) + name + start_row(4) + start_col(4) + end_row(4) + end_col(4).
+pub fn encodeDocumentSymbols(allocator: std.mem.Allocator, buffer_id: u32, version: u32, symbols: []const DocumentSymbol) ![]u8 {
+    const header_size = 1 + 4 + 4 + 4;
+    var total: usize = header_size;
+    for (symbols) |symbol| {
+        total += 1 + 2 + @min(symbol.name.len, std.math.maxInt(u16)) + 4 + 4 + 4 + 4;
+    }
+
+    const buf = try allocator.alloc(u8, total);
+    buf[0] = OP_DOCUMENT_SYMBOLS;
+    std.mem.writeInt(u32, buf[1..5], buffer_id, .big);
+    std.mem.writeInt(u32, buf[5..9], version, .big);
+    std.mem.writeInt(u32, buf[9..13], @intCast(symbols.len), .big);
+
+    var off: usize = header_size;
+    for (symbols) |symbol| {
+        const name_len: u16 = @intCast(@min(symbol.name.len, std.math.maxInt(u16)));
+        const name_len_usize: usize = @intCast(name_len);
+        buf[off] = symbol.kind;
+        std.mem.writeInt(u16, buf[off + 1 ..][0..2], name_len, .big);
+        @memcpy(buf[off + 3 .. off + 3 + name_len_usize], symbol.name[0..name_len_usize]);
+        off += 3 + name_len_usize;
+        std.mem.writeInt(u32, buf[off..][0..4], symbol.start_row, .big);
+        std.mem.writeInt(u32, buf[off + 4 ..][0..4], symbol.start_col, .big);
+        std.mem.writeInt(u32, buf[off + 8 ..][0..4], symbol.end_row, .big);
+        std.mem.writeInt(u32, buf[off + 12 ..][0..4], symbol.end_col, .big);
+        off += 16;
+    }
+
+    return buf;
+}
+
 /// Encodes grammar_loaded: opcode(1) + success:u8 + name_len:2 + name
 pub fn encodeGrammarLoaded(buf: []u8, success: bool, name: []const u8) !usize {
     const total = 4 + name.len;
@@ -867,6 +924,17 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
                 .action = try decodeStructuralNavAction(rest[16]),
             } };
         },
+        OP_SET_TAGS_QUERY => {
+            // buffer_id:4, query_len:4, query
+            if (rest.len < 8) return error.Malformed;
+            const buffer_id = std.mem.readInt(u32, rest[0..4], .big);
+            const query_len = std.mem.readInt(u32, rest[4..8], .big);
+            if (rest.len < 8 + query_len) return error.Malformed;
+            return .{ .set_tags_query = .{
+                .buffer_id = buffer_id,
+                .source = rest[8 .. 8 + query_len],
+            } };
+        },
         OP_LOAD_GRAMMAR => {
             // name_len:2, name, path_len:2, path
             if (rest.len < 2) return error.Malformed;
@@ -1033,7 +1101,7 @@ pub fn commandSize(payload: []const u8) usize {
             const source_len: usize = std.mem.readInt(u32, payload[9..13], .big);
             break :blk 13 + source_len;
         },
-        OP_SET_HIGHLIGHT_QUERY, OP_SET_INJECTION_QUERY, OP_SET_FOLD_QUERY, OP_SET_INDENT_QUERY, OP_SET_TEXTOBJECT_QUERY => blk: {
+        OP_SET_HIGHLIGHT_QUERY, OP_SET_INJECTION_QUERY, OP_SET_FOLD_QUERY, OP_SET_INDENT_QUERY, OP_SET_TEXTOBJECT_QUERY, OP_SET_TAGS_QUERY => blk: {
             // opcode(1) + buffer_id(4) + query_len(4) + query
             if (payload.len < 9) break :blk payload.len;
             const query_len: usize = std.mem.readInt(u32, payload[5..9], .big);

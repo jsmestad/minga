@@ -110,6 +110,22 @@ defmodule MingaEditor.State.Windows do
     end
   end
 
+  @doc "Updates every window that shows the given buffer pid via a mapper function."
+  @spec update_by_buffer(t(), pid(), (Window.t() -> Window.t())) :: t()
+  def update_by_buffer(%__MODULE__{map: windows} = win, buffer, fun)
+      when is_pid(buffer) and is_function(fun, 1) do
+    %{win | map: Enum.reduce(windows, windows, &update_by_buffer(buffer, fun, &1, &2))}
+  end
+
+  defp update_by_buffer(buffer, fun, {id, %Window{buffer: buffer}}, acc) do
+    case Map.fetch(acc, id) do
+      {:ok, current} -> Map.put(acc, id, fun.(current))
+      :error -> acc
+    end
+  end
+
+  defp update_by_buffer(_buffer, _fun, _entry, acc), do: acc
+
   @doc """
   Returns all popup windows as a list of `{window_id, window}` tuples.
 

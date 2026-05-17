@@ -47,6 +47,7 @@ const BuiltinGrammar = struct {
     fold_query: ?[]const u8 = null,
     indent_query: ?[]const u8 = null,
     textobject_query: ?[]const u8 = null,
+    tags_query: ?[]const u8 = null,
 };
 
 pub const InjectionRange = protocol.InjectionRange;
@@ -62,6 +63,7 @@ pub const Highlighter = struct {
     fold_query: ?*c.TSQuery = null,
     indent_query: ?*c.TSQuery = null,
     textobject_query: ?*c.TSQuery = null,
+    tags_query: ?*c.TSQuery = null,
     current_language: ?*const c.TSLanguage = null,
     current_language_name: ?[]const u8 = null,
     current_source: ?[]const u8 = null,
@@ -72,6 +74,7 @@ pub const Highlighter = struct {
     fold_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     indent_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     textobject_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
+    tags_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     /// Currently active predicate table (set during setLanguage)
     current_predicates: ?*const predicates_mod.PredicateTable = null,
     /// Capture id for @conceal in the active highlight query, if present.
@@ -113,6 +116,7 @@ pub const Highlighter = struct {
             .fold_query_cache = .empty,
             .indent_query_cache = .empty,
             .textobject_query_cache = .empty,
+            .tags_query_cache = .empty,
             .allocator = allocator,
         };
 
@@ -153,6 +157,9 @@ pub const Highlighter = struct {
             }
             if (entry.textobject_query) |textobj_source| {
                 self.prewarmOne(entry.name, textobj_source, &self.textobject_query_cache);
+            }
+            if (entry.tags_query) |tags_source| {
+                self.prewarmOne(entry.name, tags_source, &self.tags_query_cache);
             }
         }
     }
@@ -254,6 +261,13 @@ pub const Highlighter = struct {
             c.ts_query_delete(entry.value_ptr.*);
         }
         self.textobject_query_cache.deinit(self.allocator);
+
+        // Free all cached tags queries
+        var tait = self.tags_query_cache.iterator();
+        while (tait.next()) |entry| {
+            c.ts_query_delete(entry.value_ptr.*);
+        }
+        self.tags_query_cache.deinit(self.allocator);
 
         if (self.injection_ranges.len > 0) {
             self.allocator.free(self.injection_ranges);
@@ -387,6 +401,25 @@ pub const Highlighter = struct {
                             if (c.ts_query_new(lang, textobj_source.ptr, @intCast(textobj_source.len), &err_off, &err_type)) |compiled| {
                                 self.textobject_query = compiled;
                                 self.textobject_query_cache.put(self.allocator, entry.name, compiled) catch {};
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Tags query
+            if (self.tags_query_cache.get(name)) |cached| {
+                self.tags_query = cached;
+            } else {
+                self.tags_query = null;
+                inline for (builtin_grammars) |entry| {
+                    if (std.mem.eql(u8, entry.name, name)) {
+                        if (entry.tags_query) |tags_source| {
+                            var err_off: u32 = 0;
+                            var err_type: c.TSQueryError = c.TSQueryErrorNone;
+                            if (c.ts_query_new(lang, tags_source.ptr, @intCast(tags_source.len), &err_off, &err_type)) |compiled| {
+                                self.tags_query = compiled;
+                                self.tags_query_cache.put(self.allocator, entry.name, compiled) catch {};
                             }
                         }
                     }
@@ -682,6 +715,139 @@ pub const Highlighter = struct {
 
         self.textobject_query = new_query;
         self.textobject_query_cache.put(self.allocator, name, new_query) catch {};
+    }
+
+    /// Compile and cache a user-provided tags query for the current language.
+    pub fn setTagsQuery(self: *Highlighter, source: []const u8) !void {
+        const lang = self.current_language orelse return error.NoLanguageSet;
+        const name = self.current_language_name orelse return error.NoLanguageSet;
+
+        while (!self.cache_mutex.tryLock()) std.atomic.spinLoopHint();
+        defer self.cache_mutex.unlock();
+
+        var error_offset: u32 = 0;
+        var error_type: c.TSQueryError = c.TSQueryErrorNone;
+
+        const new_query = c.ts_query_new(
+            lang,
+            source.ptr,
+            @intCast(source.len),
+            &error_offset,
+            &error_type,
+        ) orelse {
+            std.log.warn("Tags query compile error at offset {d}, type {d}", .{
+                error_offset, error_type,
+            });
+            return error.QueryCompileFailed;
+        };
+
+        if (self.tags_query_cache.fetchRemove(name)) |old_entry| {
+            c.ts_query_delete(old_entry.value);
+        }
+
+        self.tags_query = new_query;
+        self.tags_query_cache.put(self.allocator, name, new_query) catch {};
+    }
+
+    fn symbolKindForCapture(capture_name: []const u8) ?u8 {
+        if (!std.mem.startsWith(u8, capture_name, "definition.")) return null;
+        const suffix = capture_name["definition.".len..];
+        if (std.mem.eql(u8, suffix, "function")) return protocol.SYMBOL_FUNCTION;
+        if (std.mem.eql(u8, suffix, "module")) return protocol.SYMBOL_MODULE;
+        if (std.mem.eql(u8, suffix, "class")) return protocol.SYMBOL_MODULE;
+        if (std.mem.eql(u8, suffix, "method")) return protocol.SYMBOL_METHOD;
+        if (std.mem.eql(u8, suffix, "interface")) return protocol.SYMBOL_INTERFACE;
+        if (std.mem.eql(u8, suffix, "protocol")) return protocol.SYMBOL_INTERFACE;
+        if (std.mem.eql(u8, suffix, "test")) return protocol.SYMBOL_TEST;
+        if (std.mem.eql(u8, suffix, "macro")) return protocol.SYMBOL_FUNCTION;
+        return null;
+    }
+
+    fn findCaptureNode(captures: []const c.TSQueryCapture, capture_id: u32) ?c.TSNode {
+        for (captures) |cap| {
+            if (cap.index == capture_id) return cap.node;
+        }
+        return null;
+    }
+
+    /// Alias for the shared DocumentSymbol type.
+    pub const DocumentSymbol = protocol.DocumentSymbol;
+
+    /// Collect document symbols from @definition.* captures in the current tags query.
+    ///
+    /// Each symbol is paired with the @name capture from the same query match. Only
+    /// definition captures are emitted; reference captures are ignored.
+    pub fn collectSymbols(self: *Highlighter, allocator: std.mem.Allocator) []DocumentSymbol {
+        const tq = self.tags_query orelse return &.{};
+        const tree = self.tree orelse return &.{};
+        const source = self.current_source orelse return &.{};
+        const root = c.ts_tree_root_node(tree);
+        var predicate_table = predicates_mod.PredicateTable.init(tq, allocator);
+        defer predicate_table.deinit();
+
+        const cap_count = c.ts_query_capture_count(tq);
+        var name_capture_id: ?u32 = null;
+        var cap_to_kind: [128]?u8 = .{null} ** 128;
+        var has_definition = false;
+
+        for (0..@min(cap_count, 128)) |i| {
+            var name_len: u32 = 0;
+            const name_ptr = c.ts_query_capture_name_for_id(tq, @intCast(i), &name_len);
+            if (name_ptr == null) continue;
+            const cap_name = name_ptr[0..name_len];
+
+            if (std.mem.eql(u8, cap_name, "name")) {
+                name_capture_id = @intCast(i);
+            } else if (symbolKindForCapture(cap_name)) |kind| {
+                cap_to_kind[i] = kind;
+                has_definition = true;
+            }
+        }
+
+        if (name_capture_id == null or !has_definition) return &.{};
+
+        const cursor = c.ts_query_cursor_new() orelse return &.{};
+        defer c.ts_query_cursor_delete(cursor);
+        c.ts_query_cursor_exec(cursor, tq, root);
+
+        var symbols: std.ArrayListUnmanaged(DocumentSymbol) = .empty;
+
+        var match: c.TSQueryMatch = undefined;
+        while (c.ts_query_cursor_next_match(cursor, &match)) {
+            if (!predicate_table.evaluate(match, source)) continue;
+            const captures = if (match.captures == null) continue else match.captures[0..@intCast(match.capture_count)];
+            const name_node = findCaptureNode(captures, name_capture_id.?) orelse continue;
+            const name_start = c.ts_node_start_byte(name_node);
+            const name_end = c.ts_node_end_byte(name_node);
+            if (name_end <= name_start or name_end > source.len) continue;
+            const symbol_name = source[name_start..name_end];
+
+            for (captures) |cap| {
+                if (cap.index >= 128) continue;
+                const kind = cap_to_kind[cap.index] orelse continue;
+                const start = c.ts_node_start_point(cap.node);
+                const end = c.ts_node_end_point(cap.node);
+                symbols.append(allocator, .{
+                    .kind = kind,
+                    .name = symbol_name,
+                    .start_row = start.row,
+                    .start_col = start.column,
+                    .end_row = end.row,
+                    .end_col = end.column,
+                }) catch continue;
+            }
+        }
+
+        const items = symbols.items;
+        std.mem.sortUnstable(DocumentSymbol, items, {}, struct {
+            fn lessThan(_: void, a: DocumentSymbol, b: DocumentSymbol) bool {
+                if (a.start_row != b.start_row) return a.start_row < b.start_row;
+                if (a.start_col != b.start_col) return a.start_col < b.start_col;
+                return std.mem.lessThan(u8, a.name, b.name);
+            }
+        }.lessThan);
+
+        return symbols.toOwnedSlice(allocator) catch &.{};
     }
 
     /// Alias for the shared TextobjectResult type.
@@ -2232,47 +2398,52 @@ fn qlTextobj(comptime name: []const u8) ?[]const u8 {
     return comptime query_loader.resolve(name, .textobjects);
 }
 
+/// Helper to resolve a tags query via the query_loader.
+fn qlTags(comptime name: []const u8) ?[]const u8 {
+    return comptime query_loader.resolve(name, .tags);
+}
+
 const builtin_grammars = [_]BuiltinGrammar{
-    .{ .name = "elixir", .func = tree_sitter_elixir, .query = ql("elixir"), .injection_query = qlInj("elixir"), .fold_query = qlFold("elixir"), .indent_query = qlIndent("elixir"), .textobject_query = qlTextobj("elixir") },
+    .{ .name = "elixir", .func = tree_sitter_elixir, .query = ql("elixir"), .injection_query = qlInj("elixir"), .fold_query = qlFold("elixir"), .indent_query = qlIndent("elixir"), .textobject_query = qlTextobj("elixir"), .tags_query = qlTags("elixir") },
     .{ .name = "heex", .func = tree_sitter_heex },
     .{ .name = "json", .func = tree_sitter_json, .query = ql("json"), .fold_query = qlFold("json"), .indent_query = qlIndent("json") },
     .{ .name = "yaml", .func = tree_sitter_yaml, .query = ql("yaml"), .fold_query = qlFold("yaml"), .indent_query = qlIndent("yaml") },
     .{ .name = "toml", .func = tree_sitter_toml, .query = ql("toml"), .fold_query = qlFold("toml") },
     .{ .name = "markdown", .func = tree_sitter_markdown, .query = ql("markdown"), .injection_query = qlInj("markdown"), .fold_query = qlFold("markdown") },
     .{ .name = "markdown_inline", .func = tree_sitter_markdown_inline, .query = ql("markdown_inline"), .injection_query = qlInj("markdown_inline") },
-    .{ .name = "ruby", .func = tree_sitter_ruby, .query = ql("ruby"), .fold_query = qlFold("ruby"), .indent_query = qlIndent("ruby"), .textobject_query = qlTextobj("ruby") },
-    .{ .name = "javascript", .func = tree_sitter_javascript, .query = ql("javascript"), .injection_query = qlInj("javascript"), .fold_query = qlFold("javascript"), .indent_query = qlIndent("javascript"), .textobject_query = qlTextobj("javascript") },
-    .{ .name = "typescript", .func = tree_sitter_typescript, .query = ql("typescript"), .fold_query = qlFold("typescript"), .indent_query = qlIndent("typescript"), .textobject_query = qlTextobj("typescript") },
-    .{ .name = "tsx", .func = tree_sitter_tsx, .query = ql("tsx"), .fold_query = qlFold("tsx"), .textobject_query = qlTextobj("tsx") },
-    .{ .name = "go", .func = tree_sitter_go, .query = ql("go"), .fold_query = qlFold("go"), .indent_query = qlIndent("go"), .textobject_query = qlTextobj("go") },
-    .{ .name = "rust", .func = tree_sitter_rust, .query = ql("rust"), .injection_query = qlInj("rust"), .fold_query = qlFold("rust"), .indent_query = qlIndent("rust"), .textobject_query = qlTextobj("rust") },
+    .{ .name = "ruby", .func = tree_sitter_ruby, .query = ql("ruby"), .fold_query = qlFold("ruby"), .indent_query = qlIndent("ruby"), .textobject_query = qlTextobj("ruby"), .tags_query = qlTags("ruby") },
+    .{ .name = "javascript", .func = tree_sitter_javascript, .query = ql("javascript"), .injection_query = qlInj("javascript"), .fold_query = qlFold("javascript"), .indent_query = qlIndent("javascript"), .textobject_query = qlTextobj("javascript"), .tags_query = qlTags("javascript") },
+    .{ .name = "typescript", .func = tree_sitter_typescript, .query = ql("typescript"), .fold_query = qlFold("typescript"), .indent_query = qlIndent("typescript"), .textobject_query = qlTextobj("typescript"), .tags_query = qlTags("typescript") },
+    .{ .name = "tsx", .func = tree_sitter_tsx, .query = ql("tsx"), .fold_query = qlFold("tsx"), .textobject_query = qlTextobj("tsx"), .tags_query = qlTags("tsx") },
+    .{ .name = "go", .func = tree_sitter_go, .query = ql("go"), .fold_query = qlFold("go"), .indent_query = qlIndent("go"), .textobject_query = qlTextobj("go"), .tags_query = qlTags("go") },
+    .{ .name = "rust", .func = tree_sitter_rust, .query = ql("rust"), .injection_query = qlInj("rust"), .fold_query = qlFold("rust"), .indent_query = qlIndent("rust"), .textobject_query = qlTextobj("rust"), .tags_query = qlTags("rust") },
     .{ .name = "zig", .func = tree_sitter_zig, .query = ql("zig"), .injection_query = qlInj("zig"), .fold_query = qlFold("zig"), .indent_query = qlIndent("zig"), .textobject_query = qlTextobj("zig") },
     .{ .name = "erlang", .func = tree_sitter_erlang, .query = ql("erlang"), .fold_query = qlFold("erlang") },
     .{ .name = "bash", .func = tree_sitter_bash, .query = ql("bash"), .fold_query = qlFold("bash"), .indent_query = qlIndent("bash"), .textobject_query = qlTextobj("bash") },
-    .{ .name = "c", .func = tree_sitter_c, .query = ql("c"), .fold_query = qlFold("c"), .indent_query = qlIndent("c"), .textobject_query = qlTextobj("c") },
-    .{ .name = "cpp", .func = tree_sitter_cpp, .query = ql("cpp"), .injection_query = qlInj("cpp"), .fold_query = qlFold("cpp"), .indent_query = qlIndent("cpp"), .textobject_query = qlTextobj("cpp") },
+    .{ .name = "c", .func = tree_sitter_c, .query = ql("c"), .fold_query = qlFold("c"), .indent_query = qlIndent("c"), .textobject_query = qlTextobj("c"), .tags_query = qlTags("c") },
+    .{ .name = "cpp", .func = tree_sitter_cpp, .query = ql("cpp"), .injection_query = qlInj("cpp"), .fold_query = qlFold("cpp"), .indent_query = qlIndent("cpp"), .textobject_query = qlTextobj("cpp"), .tags_query = qlTags("cpp") },
     .{ .name = "html", .func = tree_sitter_html, .query = ql("html"), .injection_query = qlInj("html"), .fold_query = qlFold("html") },
     .{ .name = "css", .func = tree_sitter_css, .query = ql("css"), .fold_query = qlFold("css"), .indent_query = qlIndent("css") },
-    .{ .name = "lua", .func = tree_sitter_lua, .query = ql("lua"), .injection_query = qlInj("lua"), .fold_query = qlFold("lua"), .indent_query = qlIndent("lua"), .textobject_query = qlTextobj("lua") },
-    .{ .name = "python", .func = tree_sitter_python, .query = ql("python"), .fold_query = qlFold("python"), .indent_query = qlIndent("python"), .textobject_query = qlTextobj("python") },
+    .{ .name = "lua", .func = tree_sitter_lua, .query = ql("lua"), .injection_query = qlInj("lua"), .fold_query = qlFold("lua"), .indent_query = qlIndent("lua"), .textobject_query = qlTextobj("lua"), .tags_query = qlTags("lua") },
+    .{ .name = "python", .func = tree_sitter_python, .query = ql("python"), .fold_query = qlFold("python"), .indent_query = qlIndent("python"), .textobject_query = qlTextobj("python"), .tags_query = qlTags("python") },
     .{ .name = "kotlin", .func = tree_sitter_kotlin, .query = ql("kotlin"), .fold_query = qlFold("kotlin"), .indent_query = qlIndent("kotlin"), .textobject_query = qlTextobj("kotlin") },
-    .{ .name = "gleam", .func = tree_sitter_gleam, .query = ql("gleam"), .injection_query = qlInj("gleam"), .fold_query = qlFold("gleam") },
+    .{ .name = "gleam", .func = tree_sitter_gleam, .query = ql("gleam"), .injection_query = qlInj("gleam"), .fold_query = qlFold("gleam"), .tags_query = qlTags("gleam") },
     .{ .name = "java", .func = tree_sitter_java, .query = ql("java"), .fold_query = qlFold("java"), .indent_query = qlIndent("java"), .textobject_query = qlTextobj("java") },
-    .{ .name = "c_sharp", .func = tree_sitter_c_sharp, .query = ql("c_sharp") },
+    .{ .name = "c_sharp", .func = tree_sitter_c_sharp, .query = ql("c_sharp"), .tags_query = qlTags("c_sharp") },
     .{ .name = "php", .func = tree_sitter_php_only, .query = ql("php"), .fold_query = qlFold("php") },
     .{ .name = "dockerfile", .func = tree_sitter_dockerfile, .query = ql("dockerfile") },
     .{ .name = "hcl", .func = tree_sitter_hcl, .query = ql("hcl") },
     .{ .name = "scss", .func = tree_sitter_scss, .query = ql("scss"), .fold_query = qlFold("scss") },
     .{ .name = "graphql", .func = tree_sitter_graphql, .query = ql("graphql") },
-    .{ .name = "nix", .func = tree_sitter_nix, .query = ql("nix"), .fold_query = qlFold("nix"), .indent_query = qlIndent("nix"), .textobject_query = qlTextobj("nix") },
-    .{ .name = "ocaml", .func = tree_sitter_ocaml, .query = ql("ocaml"), .fold_query = qlFold("ocaml"), .indent_query = qlIndent("ocaml") },
+    .{ .name = "nix", .func = tree_sitter_nix, .query = ql("nix"), .fold_query = qlFold("nix"), .indent_query = qlIndent("nix"), .textobject_query = qlTextobj("nix"), .tags_query = qlTags("nix") },
+    .{ .name = "ocaml", .func = tree_sitter_ocaml, .query = ql("ocaml"), .fold_query = qlFold("ocaml"), .indent_query = qlIndent("ocaml"), .tags_query = qlTags("ocaml") },
     .{ .name = "haskell", .func = tree_sitter_haskell, .query = ql("haskell"), .fold_query = qlFold("haskell"), .textobject_query = qlTextobj("haskell") },
-    .{ .name = "scala", .func = tree_sitter_scala, .query = ql("scala"), .fold_query = qlFold("scala"), .indent_query = qlIndent("scala"), .textobject_query = qlTextobj("scala") },
-    .{ .name = "r", .func = tree_sitter_r, .query = ql("r") },
+    .{ .name = "scala", .func = tree_sitter_scala, .query = ql("scala"), .fold_query = qlFold("scala"), .indent_query = qlIndent("scala"), .textobject_query = qlTextobj("scala"), .tags_query = qlTags("scala") },
+    .{ .name = "r", .func = tree_sitter_r, .query = ql("r"), .tags_query = qlTags("r") },
     .{ .name = "dart", .func = tree_sitter_dart, .query = ql("dart"), .fold_query = qlFold("dart"), .indent_query = qlIndent("dart"), .textobject_query = qlTextobj("dart") },
     .{ .name = "make", .func = tree_sitter_make, .query = ql("make"), .fold_query = qlFold("make") },
     .{ .name = "diff", .func = tree_sitter_diff, .query = ql("diff"), .fold_query = qlFold("diff") },
-    .{ .name = "elisp", .func = tree_sitter_elisp, .query = ql("elisp") },
+    .{ .name = "elisp", .func = tree_sitter_elisp, .query = ql("elisp"), .tags_query = qlTags("elisp") },
     .{ .name = "clojure", .func = tree_sitter_clojure, .query = ql("clojure") },
     .{ .name = "objc", .func = tree_sitter_objc, .query = ql("objc") },
     .{ .name = "sql", .func = tree_sitter_sql, .query = ql("sql"), .fold_query = qlFold("sql"), .indent_query = qlIndent("sql"), .textobject_query = qlTextobj("sql") },
@@ -2947,4 +3118,51 @@ test "highlighter: predicates filter #any-of? correctly in Elixir" {
         }
     }
     try std.testing.expect(found_defmodule_keyword);
+}
+
+test "highlighter: collectSymbols returns definitions from tags query" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("elixir"));
+    try std.testing.expect(hl.tags_query != null);
+
+    const source =
+        \\defmodule Foo do
+        \\  def bar do
+        \\    IO.puts("hello")
+        \\  end
+        \\end
+    ;
+    try hl.parse(source);
+
+    const symbols = hl.collectSymbols(std.testing.allocator);
+    defer if (symbols.len > 0) std.testing.allocator.free(symbols);
+
+    try std.testing.expectEqual(@as(usize, 2), symbols.len);
+    try std.testing.expectEqual(protocol.SYMBOL_MODULE, symbols[0].kind);
+    try std.testing.expectEqualStrings("Foo", symbols[0].name);
+    try std.testing.expectEqual(@as(u32, 0), symbols[0].start_row);
+    try std.testing.expectEqual(protocol.SYMBOL_FUNCTION, symbols[1].kind);
+    try std.testing.expectEqualStrings("bar", symbols[1].name);
+    try std.testing.expectEqual(@as(u32, 1), symbols[1].start_row);
+}
+
+test "highlighter: collectSymbols honors tags query predicates" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("elixir"));
+    const source =
+        \\foo Bar
+        \\defmodule Real do
+        \\end
+    ;
+    try hl.parse(source);
+
+    const symbols = hl.collectSymbols(std.testing.allocator);
+    defer if (symbols.len > 0) std.testing.allocator.free(symbols);
+
+    try std.testing.expectEqual(@as(usize, 1), symbols.len);
+    try std.testing.expectEqualStrings("Real", symbols[0].name);
 }

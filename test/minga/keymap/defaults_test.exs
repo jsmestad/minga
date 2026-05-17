@@ -187,6 +187,12 @@ defmodule Minga.Keymap.DefaultsTest do
       assert {:command, :search_and_replace} = Bindings.lookup(s_node, {?r, 0})
     end
 
+    test "SPC s j → :document_symbols" do
+      trie = Defaults.leader_trie()
+      {:prefix, s_node} = Bindings.lookup(trie, {?s, 0})
+      assert {:command, :document_symbols} = Bindings.lookup(s_node, {?j, 0})
+    end
+
     # ── Negative cases ─────────────────────────────────────────────────────────
 
     test "unknown leader prefix returns :not_found" do
