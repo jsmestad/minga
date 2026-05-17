@@ -47,6 +47,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: erlef/setup-beam@v1
         with:
@@ -68,6 +70,14 @@ jobs:
 
       - run: mix deps.get
       - run: mix deps.compile
+      - name: Check generated protocol edits include schema changes
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags origin "$BASE_REF"
+          scripts/check_protocol_generated_edits "origin/$BASE_REF"
+      - run: mix protocol.gen --check
       - run: mix test --warnings-as-errors --exclude system_clipboard --exclude conformance
 
   conformance:

@@ -106,11 +106,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   alias MingaEditor.UI.Devicon
   alias MingaEditor.UI.Theme.Slots
 
-  # ── GUI chrome opcodes (BEAM → Frontend) ──
-  # GUI chrome opcodes start at 0x70. Opcodes >= 0x90 include a 2-byte length prefix.
+  # --- BEGIN GENERATED (mix protocol.gen) ---
+  # Generated from docs/protocol_schema.toml. Do not edit by hand.
 
-  @op_gui_file_tree 0x93
-  @op_gui_file_tree_selection 0x94
+  # Gui Chrome
   @op_gui_tab_bar 0x71
   @op_gui_which_key 0x72
   @op_gui_completion 0x73
@@ -119,14 +118,21 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @op_gui_status_bar 0x76
   @op_gui_picker 0x77
   @op_gui_agent_chat 0x78
-  @op_gui_gutter_separator 0x79
+  @op_gui_gutter_sep 0x79
   @op_gui_cursorline 0x7A
   @op_gui_gutter 0x7B
   @op_gui_bottom_panel 0x7C
   @op_gui_picker_preview 0x7D
   @op_gui_tool_manager 0x7E
   @op_gui_minibuffer 0x7F
-  # 0x80 is gui_window_content (in gui_window_content.ex)
+  @op_clipboard_write 0x90
+  @op_gui_indent_guides 0x91
+  @op_gui_line_spacing 0x92
+  @op_gui_file_tree 0x93
+  @op_gui_file_tree_selection 0x94
+  @op_gui_cursor_animation 0x95
+
+  # Gui Semantic
   @op_gui_hover_popup 0x81
   @op_gui_signature_help 0x82
   @op_gui_float_popup 0x83
@@ -136,6 +142,76 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @op_gui_board 0x87
   @op_gui_agent_context 0x88
   @op_gui_change_summary 0x89
+  @op_gui_hover_action 0x96
+
+  # GUI action sub-opcodes (Frontend → BEAM)
+  @gui_action_select_tab 0x01
+  @gui_action_close_tab 0x02
+  @gui_action_file_tree_click 0x03
+  @gui_action_file_tree_toggle 0x04
+  @gui_action_completion_select 0x05
+  @gui_action_breadcrumb_click 0x06
+  @gui_action_toggle_panel 0x07
+  @gui_action_new_tab 0x08
+  @gui_action_panel_switch_tab 0x09
+  @gui_action_panel_dismiss 0x0A
+  @gui_action_panel_resize 0x0B
+  @gui_action_open_file 0x0C
+  @gui_action_file_tree_new_file 0x0D
+  @gui_action_file_tree_new_folder 0x0E
+  @gui_action_file_tree_collapse_all 0x0F
+  @gui_action_file_tree_refresh 0x10
+  @gui_action_tool_install 0x11
+  @gui_action_tool_uninstall 0x12
+  @gui_action_tool_update 0x13
+  @gui_action_tool_dismiss 0x14
+  @gui_action_agent_tool_toggle 0x15
+  @gui_action_execute_command 0x16
+  @gui_action_minibuffer_select 0x17
+  @gui_action_git_stage_file 0x18
+  @gui_action_git_unstage_file 0x19
+  @gui_action_git_discard_file 0x1A
+  @gui_action_git_stage_all 0x1B
+  @gui_action_git_unstage_all 0x1C
+  @gui_action_git_commit 0x1D
+  @gui_action_git_open_file 0x1E
+  @gui_action_agent_group_rename 0x1F
+  @gui_action_agent_group_set_icon 0x20
+  @gui_action_agent_group_close 0x21
+  @gui_action_space_leader_chord 0x22
+  @gui_action_space_leader_retract 0x23
+  @gui_action_find_pasteboard_search 0x24
+  @gui_action_board_select_card 0x25
+  @gui_action_board_close_card 0x26
+  @gui_action_board_reorder 0x27
+  @gui_action_board_dispatch_agent 0x28
+  @gui_action_agent_approve 0x29
+  @gui_action_agent_request_changes 0x2A
+  @gui_action_agent_dismiss 0x2B
+  @gui_action_change_summary_click 0x2C
+  @gui_action_file_tree_edit_confirm 0x2D
+  @gui_action_file_tree_edit_cancel 0x2E
+  @gui_action_scroll_to_line 0x2F
+  @gui_action_file_tree_delete 0x30
+  @gui_action_file_tree_rename 0x31
+  @gui_action_file_tree_duplicate 0x32
+  @gui_action_file_tree_move 0x33
+  @gui_action_system_will_sleep 0x34
+  @gui_action_system_did_wake 0x35
+  @gui_action_cmd_copy 0x36
+  @gui_action_cmd_cut 0x37
+  @gui_action_git_push 0x38
+  @gui_action_git_pull 0x39
+  @gui_action_git_fetch 0x3A
+  @gui_action_git_commit_amend 0x3B
+  @gui_action_git_pull_and_retry 0x3C
+  @gui_action_file_tree_open_in_split 0x3D
+  @gui_action_tab_copy_path 0x3E
+  @gui_action_hover_open_action 0x3F
+  @gui_action_file_tree_drop 0x40
+  @gui_action_fold_toggle_at_line 0x41
+  @gui_action_git_open_diff 0x42
+  # --- END GENERATED ---
 
   @max_u16 65_535
   @max_u32 4_294_967_295
@@ -182,88 +258,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @section_chat_help 0x05
   @section_chat_messages 0x06
   @section_chat_completion 0x07
-
-  # ── Forward-compatible opcodes (0x90+, include a length prefix) ──
-  # Most opcodes >= 0x90 start with: opcode(1) + payload_length(2) + payload.
-  # gui_file_tree uses a 32-bit payload length because expanded project trees can exceed 64KB.
-  # Old frontends skip unknown 0x90+ opcodes by reading the standard 16-bit length and
-  # advancing, instead of crashing. See ProtocolDecoder.swift default case.
-
-  @op_clipboard_write 0x90
-  @op_gui_indent_guides 0x91
-  @op_gui_line_spacing 0x92
-  @op_gui_cursor_animation 0x95
-  @op_gui_hover_action 0x96
-
-  # ── GUI action sub-opcodes (Frontend → BEAM) ──
-
-  @gui_action_select_tab 0x01
-  @gui_action_close_tab 0x02
-  @gui_action_file_tree_click 0x03
-  @gui_action_file_tree_toggle 0x04
-  @gui_action_completion_select 0x05
-  @gui_action_breadcrumb_click 0x06
-  @gui_action_toggle_panel 0x07
-  @gui_action_new_tab 0x08
-  @gui_action_panel_switch_tab 0x09
-  @gui_action_panel_dismiss 0x0A
-  @gui_action_panel_resize 0x0B
-  @gui_action_open_file 0x0C
-  @gui_action_file_tree_new_file 0x0D
-  @gui_action_file_tree_new_folder 0x0E
-  @gui_action_file_tree_collapse_all 0x0F
-  @gui_action_file_tree_refresh 0x10
-  @gui_action_tool_install 0x11
-  @gui_action_tool_uninstall 0x12
-  @gui_action_tool_update 0x13
-  @gui_action_tool_dismiss 0x14
-  @gui_action_agent_tool_toggle 0x15
-  @gui_action_execute_command 0x16
-  @gui_action_minibuffer_select 0x17
-
-  @gui_action_git_stage_file 0x18
-  @gui_action_git_unstage_file 0x19
-  @gui_action_git_discard_file 0x1A
-  @gui_action_git_stage_all 0x1B
-  @gui_action_git_unstage_all 0x1C
-  @gui_action_git_commit 0x1D
-  @gui_action_git_open_file 0x1E
-  @gui_action_agent_group_rename 0x1F
-  @gui_action_agent_group_set_icon 0x20
-  @gui_action_agent_group_close 0x21
-  @gui_action_space_leader_chord 0x22
-  @gui_action_space_leader_retract 0x23
-  @gui_action_find_pasteboard_search 0x24
-  @gui_action_board_select_card 0x25
-  @gui_action_board_close_card 0x26
-  @gui_action_board_reorder 0x27
-  @gui_action_board_dispatch_agent 0x28
-  @gui_action_agent_approve 0x29
-  @gui_action_agent_request_changes 0x2A
-  @gui_action_agent_dismiss 0x2B
-  @gui_action_change_summary_click 0x2C
-  @gui_action_file_tree_edit_confirm 0x2D
-  @gui_action_file_tree_edit_cancel 0x2E
-  @gui_action_scroll_to_line 0x2F
-  @gui_action_file_tree_delete 0x30
-  @gui_action_file_tree_rename 0x31
-  @gui_action_file_tree_duplicate 0x32
-  @gui_action_file_tree_move 0x33
-  @gui_action_system_will_sleep 0x34
-  @gui_action_system_did_wake 0x35
-  @gui_action_cmd_copy 0x36
-  @gui_action_cmd_cut 0x37
-  @gui_action_git_push 0x38
-  @gui_action_git_pull 0x39
-  @gui_action_git_fetch 0x3A
-  @gui_action_git_commit_amend 0x3B
-  @gui_action_git_pull_and_retry 0x3C
-  @gui_action_git_open_diff 0x42
-  @gui_action_file_tree_open_in_split 0x3D
-  @gui_action_tab_copy_path 0x3E
-  @gui_action_hover_open_action 0x3F
-  @gui_action_file_tree_drop 0x40
-  @gui_action_fold_toggle_at_line 0x41
 
   @no_fold_range 0xFFFF_FFFF
 
@@ -534,7 +528,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     r = color_rgb >>> 16 &&& 0xFF
     g = color_rgb >>> 8 &&& 0xFF
     b = color_rgb &&& 0xFF
-    <<@op_gui_gutter_separator, col::16, r::8, g::8, b::8>>
+    <<@op_gui_gutter_sep, col::16, r::8, g::8, b::8>>
   end
 
   # ── Bottom panel ──

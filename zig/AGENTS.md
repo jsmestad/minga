@@ -109,11 +109,14 @@ The renderer uses an arena allocator that resets after every `batch_end`. Graphe
 
 ### Protocol sync
 
-The protocol constants in `src/protocol.zig` must exactly match:
-- `lib/minga/frontend/protocol.ex` (BEAM side, canonical source of truth)
-- `macos/Sources/Protocol/ProtocolConstants.swift` (macOS side)
+Opcode constants are generated from `docs/protocol_schema.toml`.
 
-When adding or changing opcodes, update all three files. The BEAM side is the source of truth.
+- Regenerate with `mix protocol.gen`
+- `src/protocol.zig` re-exports the generated opcode values from `src/protocol_opcodes.zig`
+- The committed Swift opcode file is `macos/Sources/Protocol/ProtocolOpcodes.generated.swift`
+- BEAM-side protocol modules under `lib/minga_editor/frontend/` consume generated opcode values and remain the source of truth for decoding, encoding, and tests
+
+When adding or changing opcodes, edit the schema and regenerate instead of hand-editing the constant files.
 
 The TUI process only handles cell-grid opcodes (0x10-0x1F) and basic commands (clear, cursor, regions, font, batch_end). GUI chrome opcodes (0x70-0x8F) are skipped by the decoder. If you add a new GUI-only opcode, the Zig decoder needs a skip clause (read the byte count and discard) so it doesn't choke on unknown opcodes in a shared protocol stream.
 

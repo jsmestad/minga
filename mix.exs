@@ -225,6 +225,7 @@ defmodule Minga.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:hammox, "~> 0.7", only: :test},
       {:telemetry, "~> 1.0"},
+      {:toml, "~> 0.7.0"},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:benchee, "~> 1.3", only: :dev, runtime: false},
       {:exqlite, "~> 0.27"},

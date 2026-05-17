@@ -748,7 +748,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         let nameLen = min(utf8.count, Int(UInt16.max))
         var buf = Data(count: 6 + nameLen)
         buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_GROUP_RENAME
+        buf[1] = GUI_ACTION_AGENT_GROUP_RENAME
         writeU16(&buf, 2, id)
         writeU16(&buf, 4, UInt16(nameLen))
         if nameLen > 0 {
@@ -762,7 +762,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         let iconLen = min(utf8.count, 255)
         var buf = Data(count: 5 + iconLen)
         buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_GROUP_SET_ICON
+        buf[1] = GUI_ACTION_AGENT_GROUP_SET_ICON
         writeU16(&buf, 2, id)
         buf[4] = UInt8(iconLen)
         if iconLen > 0 {
@@ -774,7 +774,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     func sendGroupClose(id: UInt16) {
         var buf = Data(count: 4)
         buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_GROUP_CLOSE
+        buf[1] = GUI_ACTION_AGENT_GROUP_CLOSE
         writeU16(&buf, 2, id)
         writeFrame(buf)
     }
