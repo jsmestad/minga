@@ -16,6 +16,7 @@ zig/src/generated/
 # Swift / Xcode
 macos/.build/
 macos/.swiftpm/
+macos/.generated/
 macos/Minga.xcodeproj/xcuserdata/
 macos/Minga.xcodeproj/project.xcworkspace/xcuserdata/
 

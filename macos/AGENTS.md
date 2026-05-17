@@ -81,6 +81,7 @@ macos/
 
     Protocol/
       ProtocolConstants.swift              # Non-opcode protocol constants
+      # Generated opcode values live at macos/.generated/protocol/ProtocolOpcodes.generated.swift
       ProtocolDecoder.swift                # Binary → RenderCommand enum + all data types
       ProtocolEncoder.swift                # Input/GUI events → binary on stdout
       ProtocolReader.swift                 # Background thread reading {:packet,4} from stdin
@@ -177,7 +178,7 @@ This is the "dumb renderer" principle in practice: the view never decides what t
 ### New GUI chrome element (e.g., a new panel or overlay)
 
 1. **Elixir side**: add the opcode encoder in `lib/minga_editor/frontend/protocol/gui.ex`, add the emit call in `lib/minga_editor/frontend/emit/gui.ex`, then add the opcode to `docs/protocol_schema.toml` and regenerate with `mix protocol.gen`
-2. **Generated Swift opcodes**: use the generated opcode constant from `.generated/protocol/swift/ProtocolOpcodes.generated.swift`
+2. **Generated Swift opcodes**: use the generated opcode constant from `macos/.generated/protocol/ProtocolOpcodes.generated.swift`
 3. **ProtocolDecoder.swift**: add the `RenderCommand` enum case and decoder
 4. **FooState.swift**: create the `@Observable` state class with an `update(...)` and `hide()` method
 5. **FooView.swift**: create the SwiftUI view that reads from the state
@@ -189,7 +190,7 @@ This is the "dumb renderer" principle in practice: the view never decides what t
 ### New GUI action (user interaction → BEAM)
 
 1. **Schema first**: add the action to `docs/protocol_schema.toml`, then run `mix protocol.gen`
-2. **Generated Swift opcodes**: use the generated `GUI_ACTION_FOO` constant from `.generated/protocol/swift/ProtocolOpcodes.generated.swift`
+2. **Generated Swift opcodes**: use the generated `GUI_ACTION_FOO` constant from `macos/.generated/protocol/ProtocolOpcodes.generated.swift`
 3. **ProtocolEncoder.swift**: add `sendFoo(...)` method to the `InputEncoder` protocol and `ProtocolEncoder` class
 4. **BEAM side**: add decoder clause in `lib/minga_editor/frontend/protocol.ex` and handler in the Editor
 5. **SwiftUI view**: call `encoder.sendFoo(...)` from the appropriate event handler
@@ -206,7 +207,7 @@ This is the "dumb renderer" principle in practice: the view never decides what t
 Opcode constants are generated from `docs/protocol_schema.toml`.
 
 - Regenerate with `mix protocol.gen`
-- Generated Swift opcodes are written to `.generated/protocol/swift/ProtocolOpcodes.generated.swift`
+- Generated Swift opcodes are written to `macos/.generated/protocol/ProtocolOpcodes.generated.swift`
 - `Sources/Protocol/ProtocolConstants.swift` keeps the non-opcode constants
 - `lib/minga_editor/frontend/protocol.ex` and `zig/src/protocol.zig` re-export the generated opcode values
 - Generated opcode files are ignored build artifacts, not committed source

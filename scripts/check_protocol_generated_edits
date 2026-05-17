@@ -13,6 +13,7 @@ LEGACY_GENERATED_SOURCE_PATHS = {
 }
 GENERATED_SOURCE_PREFIXES = (
     ".generated/protocol/",
+    "macos/.generated/protocol/",
     "zig/src/generated/",
 )
 

@@ -8,12 +8,12 @@ defmodule Minga.ProtocolGeneratedEditsScriptTest do
     with_git_repo(fn dir ->
       write!(
         dir,
-        "macos/Sources/Protocol/ProtocolOpcodes.generated.swift",
+        "macos/.generated/protocol/ProtocolOpcodes.generated.swift",
         "let OP_KEY_PRESS: UInt8 = 0x01\n"
       )
 
       commit_all!(dir, "baseline")
-      File.rm!(Path.join(dir, "macos/Sources/Protocol/ProtocolOpcodes.generated.swift"))
+      File.rm!(Path.join(dir, "macos/.generated/protocol/ProtocolOpcodes.generated.swift"))
       commit_all!(dir, "remove generated source")
 
       assert {"", 0} = System.cmd(@script, ["HEAD~1"], cd: dir, stderr_to_stdout: true)
@@ -41,7 +41,7 @@ defmodule Minga.ProtocolGeneratedEditsScriptTest do
 
       write!(
         dir,
-        ".generated/protocol/swift/ProtocolOpcodes.generated.swift",
+        "macos/.generated/protocol/ProtocolOpcodes.generated.swift",
         "let OP_KEY_PRESS: UInt8 = 0x01\n"
       )
 
@@ -56,7 +56,7 @@ defmodule Minga.ProtocolGeneratedEditsScriptTest do
       {output, code} = System.cmd(@script, ["HEAD~1"], cd: dir, stderr_to_stdout: true)
 
       assert code == 1
-      assert output =~ ".generated/protocol/swift/ProtocolOpcodes.generated.swift"
+      assert output =~ "macos/.generated/protocol/ProtocolOpcodes.generated.swift"
       assert output =~ "zig/src/generated/protocol_opcodes.zig"
     end)
   end

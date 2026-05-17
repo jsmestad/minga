@@ -1,6 +1,6 @@
 /// Port protocol constants that are not opcode values.
 ///
-/// Opcode and GUI action constants are generated in `.generated/protocol/swift/ProtocolOpcodes.generated.swift` from `docs/protocol_schema.toml`.
+/// Opcode and GUI action constants are generated in `macos/.generated/protocol/ProtocolOpcodes.generated.swift` from `docs/protocol_schema.toml`.
 
 // MARK: - Sectioned format section IDs
 // Used by opcodes with self-describing sections (gui_status_bar, etc.).

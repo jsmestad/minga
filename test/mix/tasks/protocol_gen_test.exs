@@ -9,7 +9,7 @@ defmodule Mix.Tasks.Protocol.GenTest do
   ]
   @generated_paths [
     ".generated/protocol/elixir/lib/minga/protocol/opcodes.ex",
-    ".generated/protocol/swift/ProtocolOpcodes.generated.swift",
+    "macos/.generated/protocol/ProtocolOpcodes.generated.swift",
     "zig/src/generated/protocol_opcodes.zig",
     "zig/src/generated/protocol_schema_test.zig"
   ]
@@ -43,7 +43,7 @@ defmodule Mix.Tasks.Protocol.GenTest do
         assert :ok = Mix.Tasks.Protocol.Gen.run([])
       end)
 
-      Path.join([dir, ".generated/protocol/swift/ProtocolOpcodes.generated.swift"])
+      Path.join([dir, "macos/.generated/protocol/ProtocolOpcodes.generated.swift"])
       |> File.write!("let OP_KEY_PRESS: UInt8 = 0x02\n")
 
       File.cd!(dir, fn ->

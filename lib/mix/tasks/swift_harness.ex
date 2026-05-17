@@ -21,7 +21,7 @@ defmodule Mix.Tasks.Swift.Harness do
     Mix.Task.run("protocol.gen", [])
 
     sources = [
-      ".generated/protocol/swift/ProtocolOpcodes.generated.swift",
+      "macos/.generated/protocol/ProtocolOpcodes.generated.swift",
       "macos/Sources/Protocol/ProtocolConstants.swift",
       "macos/Sources/Protocol/ProtocolTypes.swift",
       "macos/Sources/Protocol/ProtocolDecoder.swift",

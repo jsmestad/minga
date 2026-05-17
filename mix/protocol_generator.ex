@@ -2,13 +2,13 @@ defmodule Minga.Mix.ProtocolGenerator do
   @moduledoc """
   Generates protocol opcode artifacts from `docs/protocol_schema.toml`.
 
-  The schema is the source of truth. Generated protocol artifacts are written under `.generated/protocol/`, which is ignored by Git and consumed by local build steps.
+  The schema is the source of truth. Generated protocol artifacts are written under `.generated/protocol/` for Elixir, `macos/.generated/protocol/` for Swift, and `zig/src/generated/` for Zig.
   """
 
   @schema_path "docs/protocol_schema.toml"
   @generated_root ".generated/protocol"
   @generated_elixir_path Path.join([@generated_root, "elixir/lib/minga/protocol/opcodes.ex"])
-  @generated_swift_path Path.join([@generated_root, "swift/ProtocolOpcodes.generated.swift"])
+  @generated_swift_path "macos/.generated/protocol/ProtocolOpcodes.generated.swift"
   @generated_zig_opcodes_path "zig/src/generated/protocol_opcodes.zig"
   @generated_zig_schema_test_path "zig/src/generated/protocol_schema_test.zig"
   @allowed_opcode_categories [

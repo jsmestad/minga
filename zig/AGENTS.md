@@ -113,13 +113,15 @@ Opcode constants are generated from `docs/protocol_schema.toml`.
 
 - Regenerate with `mix protocol.gen`
 - `src/protocol.zig` re-exports the generated opcode values from `src/generated/protocol_opcodes.zig`
-- Swift opcodes are generated to `.generated/protocol/swift/ProtocolOpcodes.generated.swift`
+- Swift opcodes are generated to `macos/.generated/protocol/ProtocolOpcodes.generated.swift`
 - BEAM-side protocol modules consume generated opcode values from `.generated/protocol/elixir/lib/minga/protocol/opcodes.ex`
 - Generated opcode files are ignored build artifacts, not committed source
 
 When adding or changing opcodes, edit the schema and regenerate instead of hand-editing the generated files.
 
-The TUI process only handles cell-grid opcodes (0x10-0x1F) and basic commands (clear, cursor, regions, font, batch_end). GUI chrome opcodes (0x70-0x8F) are skipped by the decoder. If you add a new GUI-only opcode, the Zig decoder needs a skip clause (read the byte count and discard) so it doesn't choke on unknown opcodes in a shared protocol stream.
+Direct `cd zig && zig build test` expects `zig/src/generated/protocol_opcodes.zig` and `zig/src/generated/protocol_schema_test.zig` to already exist. Run `mix protocol.gen` first, or use `mix zig.lint` / `mix compile`, which generate them for you.
+
+The TUI process handles the cell-grid opcodes and parser responses it knows about from the schema. GUI chrome and semantic opcodes are schema-defined and normally target GUI frontends; if a GUI-only opcode can appear on the TUI stream, add an explicit decoder skip or no-op handler for it.
 
 ## Coding Standards
 

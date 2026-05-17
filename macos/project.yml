@@ -26,7 +26,7 @@ targets:
     sources:
       - path: Sources
         type: group
-      - path: ../.generated/protocol/swift/ProtocolOpcodes.generated.swift
+      - path: .generated/protocol/ProtocolOpcodes.generated.swift
         name: ProtocolOpcodes.generated.swift
         type: file
       - path: Resources
@@ -54,7 +54,7 @@ targets:
           mix protocol.gen
         basedOnDependencyAnalysis: false
         outputFiles:
-          - $(SRCROOT)/../.generated/protocol/swift/ProtocolOpcodes.generated.swift
+          - $(SRCROOT)/.generated/protocol/ProtocolOpcodes.generated.swift
     postCompileScripts:
       - name: Copy CLI launcher
         script: |
@@ -82,7 +82,7 @@ targets:
         type: group
         excludes:
           - "MingaApp.swift"
-      - path: ../.generated/protocol/swift/ProtocolOpcodes.generated.swift
+      - path: .generated/protocol/ProtocolOpcodes.generated.swift
         name: ProtocolOpcodes.generated.swift
         type: file
     settings:
