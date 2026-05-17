@@ -313,6 +313,16 @@ defmodule Minga.Editing.TextObjectTest do
       assert {{0, 0}, {0, 5}} = TextObject.inner_sentence(b, {0, 5})
     end
 
+    test "cursor on whitespace inside a sentence selects the sentence" do
+      b = buf("One continues.")
+      assert {{0, 0}, {0, 13}} = TextObject.inner_sentence(b, {0, 3})
+    end
+
+    test "cursor on embedded newline inside a sentence selects the sentence" do
+      b = buf("One continues\nacross lines.")
+      assert {{0, 0}, {1, 12}} = TextObject.inner_sentence(b, {0, 13})
+    end
+
     test "cursor on leading whitespace selects the first sentence" do
       b = buf("  Hello. Bye.")
       assert {{0, 0}, {0, 7}} = TextObject.inner_sentence(b, {0, 0})
@@ -345,6 +355,16 @@ defmodule Minga.Editing.TextObjectTest do
     test "includes trailing whitespace" do
       b = buf("Hello.   Bye.")
       assert {{0, 0}, {0, 8}} = TextObject.a_sentence(b, {0, 1})
+    end
+
+    test "cursor on whitespace inside a single sentence selects that sentence" do
+      b = buf("One continues.")
+      assert {{0, 0}, {0, 13}} = TextObject.a_sentence(b, {0, 3})
+    end
+
+    test "cursor on whitespace inside a sentence selects the sentence" do
+      b = buf("One continues. Two.")
+      assert {{0, 0}, {0, 14}} = TextObject.a_sentence(b, {0, 3})
     end
 
     test "cursor on whitespace between sentences selects whitespace plus following sentence" do
