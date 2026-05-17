@@ -31,6 +31,7 @@ defmodule Minga.CLI do
           view_mode: view_mode(),
           no_context: boolean(),
           config_file: String.t() | nil,
+          debug_log: String.t() | nil,
           headless: boolean(),
           minimal: boolean(),
           node_name: String.t() | nil,
@@ -45,6 +46,7 @@ defmodule Minga.CLI do
     view_mode: :auto,
     no_context: false,
     config_file: nil,
+    debug_log: nil,
     headless: false,
     minimal: false,
     node_name: nil,
@@ -64,8 +66,10 @@ defmodule Minga.CLI do
       {:open, file, flags} ->
         store_startup_flags(flags, file)
 
-        case maybe_start_distribution(flags) do
-          :ok -> launch(flags, file)
+        with :ok <- maybe_start_debug_log(flags),
+             :ok <- maybe_start_distribution(flags) do
+          launch(flags, file)
+        else
           {:error, message} -> abort_startup(message)
         end
 
@@ -227,6 +231,38 @@ defmodule Minga.CLI do
     {:error, "--config requires a path argument\n\n#{usage()}"}
   end
 
+  defp parse_args(["--debug-log", <<"--", _::binary>> | _], _file, _flags) do
+    {:error, "--debug-log requires a path argument, not a flag\n\n#{usage()}"}
+  end
+
+  defp parse_args(["--debug-log", "" | _], _file, _flags) do
+    {:error, "--debug-log requires a non-empty path argument\n\n#{usage()}"}
+  end
+
+  defp parse_args(["--debug-log", path | rest], file, flags) when is_binary(path) do
+    parse_args(rest, file, %{flags | debug_log: Path.expand(path)})
+  end
+
+  defp parse_args(["--debug-log"], _file, _flags) do
+    {:error, "--debug-log requires a path argument\n\n#{usage()}"}
+  end
+
+  defp parse_args(["-D", <<"--", _::binary>> | _], _file, _flags) do
+    {:error, "-D requires a path argument, not a flag\n\n#{usage()}"}
+  end
+
+  defp parse_args(["-D", "" | _], _file, _flags) do
+    {:error, "-D requires a non-empty path argument\n\n#{usage()}"}
+  end
+
+  defp parse_args(["-D", path | rest], file, flags) when is_binary(path) do
+    parse_args(rest, file, %{flags | debug_log: Path.expand(path)})
+  end
+
+  defp parse_args(["-D"], _file, _flags) do
+    {:error, "-D requires a path argument\n\n#{usage()}"}
+  end
+
   defp parse_args(["--minimal" | rest], file, flags) do
     parse_args(rest, file, %{flags | minimal: true})
   end
@@ -283,6 +319,47 @@ defmodule Minga.CLI do
     end
 
     :ok
+  end
+
+  @spec maybe_start_debug_log(flags()) :: :ok | {:error, String.t()}
+  defp maybe_start_debug_log(%{debug_log: nil}), do: :ok
+
+  defp maybe_start_debug_log(%{debug_log: path}) when is_binary(path) do
+    case Minga.DebugLog.start(path) do
+      {:ok, _pid} ->
+        :ok
+
+      {:error, {:debug_log_unwritable, ^path, reason}} ->
+        {:error, debug_log_error(path, reason)}
+
+      {:error, {:debug_log_init_failed, ^path, reason}} ->
+        {:error, debug_log_init_error(path, reason)}
+
+      {:error, {:debug_log_init_failed, ^path, reason, {:close_failed, close_reason}}} ->
+        {:error, debug_log_init_error(path, reason, close_reason)}
+
+      {:error, {:debug_log_already_started, existing_path, ^path}} ->
+        {:error, "Debug log is already writing to #{existing_path}, not #{path}"}
+
+      {:error, reason} ->
+        {:error, "Failed to start debug log #{path}: #{inspect(reason)}"}
+    end
+  end
+
+  @spec debug_log_error(String.t(), term()) :: String.t()
+  defp debug_log_error(path, reason) do
+    "Debug log path is not writable: #{path} (#{inspect(reason)})"
+  end
+
+  @spec debug_log_init_error(String.t(), term(), term() | nil) :: String.t()
+  defp debug_log_init_error(path, reason, close_reason \\ nil) do
+    message = "Debug log could not initialize at #{path}: #{inspect(reason)}"
+
+    if close_reason == nil do
+      message
+    else
+      "#{message} (cleanup failed: #{inspect(close_reason)})"
+    end
   end
 
   @spec maybe_start_distribution(flags()) :: :ok | {:error, String.t()}
@@ -482,9 +559,22 @@ defmodule Minga.CLI do
   @spec abort_startup(String.t()) :: no_return()
   defp abort_startup(message) do
     Minga.Log.error(:editor, message)
+    Logger.flush()
+    flush_debug_log()
     IO.puts(:stderr, message)
     System.stop(1)
     exit({:shutdown, 1})
+  end
+
+  @spec flush_debug_log() :: :ok
+  defp flush_debug_log do
+    case Minga.DebugLog.stop() do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        IO.puts(:stderr, "Failed to stop debug log before shutdown: #{inspect(reason)}")
+    end
   end
 
   @doc "Applies flag implications to a flags map."
@@ -521,7 +611,19 @@ defmodule Minga.CLI do
   defp store_startup_flags(flags, file) do
     effective = apply_flag_implications(flags, file)
     Application.put_env(:minga, :cli_startup_flags, effective)
+    store_debug_log_path(effective.debug_log)
     if effective.minimal, do: Application.put_env(:minga, :minimal_mode, true)
+    :ok
+  end
+
+  @spec store_debug_log_path(String.t() | nil) :: :ok
+  defp store_debug_log_path(nil) do
+    Application.delete_env(:minga, :debug_log_path)
+    :ok
+  end
+
+  defp store_debug_log_path(path) when is_binary(path) do
+    Application.put_env(:minga, :debug_log_path, path)
     :ok
   end
 
@@ -536,6 +638,7 @@ defmodule Minga.CLI do
       -h, --help             Show this help message
       -v, --version          Show version
       --config <path>        Use a custom config file instead of the default
+      -D, --debug-log <path> Append *Messages* and *Warnings* entries to a crash-safe log
       --editor               Start in file editing mode (skip agentic view)
       --minimal              Minimal mode: editor-only, no services/agent (for GIT_EDITOR use)
       --no-context           Keep agentic view and don't load the file as agent context
@@ -554,6 +657,7 @@ defmodule Minga.CLI do
       minga --editor README.md           Open file in traditional editor
       MINGA_COOKIE=$(openssl rand -base64 32 | tr -d '/+=') minga --headless   Start detachable agent server
       minga --config ~/minimal.exs       Use a custom config profile
+      minga -D /tmp/minga-debug.log      Persist messages and warnings for crash forensics
     """
   end
 

@@ -9,6 +9,10 @@ defmodule Minga.LogMessagesRoutingTest do
   setup do
     {:ok, _opts} = Options.start_link(name: :"opts_#{System.unique_integer()}")
 
+    if Process.whereis(Minga.EventBus) == nil do
+      start_supervised!(Minga.Events.child_spec(name: Minga.EventBus))
+    end
+
     on_exit(fn -> Options.reset() end)
 
     :ok
@@ -36,6 +40,29 @@ defmodule Minga.LogMessagesRoutingTest do
 
       assert text =~ "Grammar org registered successfully"
       assert text =~ "[editor/info]"
+    end
+
+    test "Minga.Log.error preserves error severity when Logger suppresses it" do
+      Options.set(:log_level, :info)
+      Options.set(:log_level_editor, :default)
+
+      Events.subscribe(:log_message)
+
+      previous_level = Logger.level()
+      Logger.configure(level: :none)
+
+      on_exit(fn ->
+        Logger.configure(level: previous_level)
+        Events.unsubscribe(:log_message)
+      end)
+
+      Minga.Log.error(:editor, "startup aborted")
+
+      assert_receive {:minga_event, :log_message, %LogMessageEvent{text: text, level: :error}},
+                     500
+
+      assert text =~ "startup aborted"
+      assert text =~ "[editor/error]"
     end
   end
 end
