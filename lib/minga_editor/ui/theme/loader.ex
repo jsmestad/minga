@@ -3,9 +3,9 @@ defmodule MingaEditor.UI.Theme.Loader do
   Discovers and loads user-defined theme files from disk.
 
   Theme files are Elixir scripts (`.exs`) that return a map describing
-  face overrides, editor chrome colors, and optional inheritance from
-  a built-in theme. They live in `~/.config/minga/themes/` and are
-  evaluated at startup and on `:reload_themes`.
+  palette definitions, face overrides, editor chrome colors, and optional
+  inheritance from a built-in theme. They live in `~/.config/minga/themes/`
+  and are evaluated at startup and on `:reload_themes`.
 
   ## Theme file format
 
@@ -29,6 +29,8 @@ defmodule MingaEditor.UI.Theme.Loader do
   - `:inherits` (optional) — atom name of a built-in theme to extend.
     The built-in theme's syntax map and editor colors are used as the
     base; the file's `:faces` and `:editor` fields override them.
+  - `:palette` (optional) — semantic palette map passed to `Theme.Builder.from_palette/2`. When present, the palette produces a complete theme cascade. Mutually exclusive with `:inherits`.
+  - `:overrides` (optional) — map of concrete theme section overrides applied after palette derivation, such as `%{popup: %{title_fg: 0x89B4FA}}`. Invalid sections or fields fail the theme load instead of being ignored.
   - `:faces` (optional) — map of face name strings to style keyword
     lists. Merged via `Face.Registry.with_overrides/2`.
   - `:editor` (optional) — map of editor chrome color overrides
@@ -43,6 +45,7 @@ defmodule MingaEditor.UI.Theme.Loader do
 
   alias MingaEditor.UI.Face.Registry, as: FaceRegistry
   alias MingaEditor.UI.Theme
+  alias MingaEditor.UI.Theme.Builder
 
   defmodule LoadedTheme do
     @moduledoc "A loaded user theme with its face registry and metadata."
@@ -145,12 +148,14 @@ defmodule MingaEditor.UI.Theme.Loader do
 
   @spec build_theme(map(), String.t()) :: {:ok, loaded_theme()} | {:error, load_error()}
   defp build_theme(data, path) do
+    validate_theme_source!(data)
     name = data.name
-    base_theme = resolve_base_theme(data)
 
-    # Apply editor color overrides
-    theme = apply_editor_overrides(base_theme, data)
-    theme = %{theme | name: name}
+    theme =
+      data
+      |> resolve_base_theme()
+      |> apply_editor_overrides(data)
+      |> rename_theme(name)
 
     # Build face registry from the theme, then apply face overrides
     registry = FaceRegistry.from_theme(theme)
@@ -173,7 +178,21 @@ defmodule MingaEditor.UI.Theme.Loader do
        }}
   end
 
+  @spec validate_theme_source!(map()) :: :ok
+  defp validate_theme_source!(%{palette: _palette, inherits: inherits}) do
+    raise ArgumentError,
+          "theme cannot specify both :palette and :inherits; remove :inherits #{inspect(inherits)}"
+  end
+
+  defp validate_theme_source!(_data), do: :ok
+
   @spec resolve_base_theme(map()) :: Theme.t()
+  defp resolve_base_theme(%{name: name, palette: palette} = data)
+       when is_atom(name) and is_map(palette) do
+    overrides = Map.get(data, :overrides, %{})
+    Builder.from_palette(name, palette, overrides)
+  end
+
   defp resolve_base_theme(%{inherits: base_name}) when is_atom(base_name) do
     case Theme.get(base_name) do
       {:ok, theme} -> theme
@@ -182,6 +201,9 @@ defmodule MingaEditor.UI.Theme.Loader do
   end
 
   defp resolve_base_theme(_data), do: Theme.get!(:doom_one)
+
+  @spec rename_theme(Theme.t(), atom()) :: Theme.t()
+  defp rename_theme(theme, name), do: %{theme | name: name}
 
   @editor_fields MapSet.new(
                    Map.keys(%Theme.Editor{bg: 0, fg: 0, tilde_fg: 0, split_border_fg: 0}) --
@@ -195,7 +217,7 @@ defmodule MingaEditor.UI.Theme.Loader do
         if MapSet.member?(@editor_fields, key) do
           %{ed | key => value}
         else
-          ed
+          raise ArgumentError, "unknown theme editor override field: #{inspect(key)}"
         end
       end)
 

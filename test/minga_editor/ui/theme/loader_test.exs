@@ -60,6 +60,112 @@ defmodule MingaEditor.UI.Theme.LoaderTest do
       assert loaded.theme.editor.fg == 0xEEEEEE
     end
 
+    test "invalid editor override fields return load errors", %{tmp_dir: dir} do
+      path = Path.join(dir, "bad_editor.exs")
+
+      File.write!(path, """
+      %{
+        name: :bad_editor_test,
+        inherits: :doom_one,
+        editor: %{backround: 0x101010}
+      }
+      """)
+
+      assert {:error, %{path: ^path, error: error}} = Loader.load_file(path)
+      assert error =~ "unknown theme editor override field: :backround"
+    end
+
+    test "palette themes build the full cascade and apply overrides", %{tmp_dir: dir} do
+      path = Path.join(dir, "palette.exs")
+
+      File.write!(path, """
+      %{
+        name: :palette_test,
+        palette: %{
+          variant: :dark,
+          bg: 0x101010,
+          fg: 0xEEEEEE,
+          surface: 0x202020,
+          overlay: 0x181818,
+          muted: 0x777777,
+          subtle: 0x303030,
+          highlight: 0x3366FF,
+          selection_bg: 0x444444,
+          error: 0xFF5555,
+          warning: 0xFFFF55,
+          info: 0x3366FF,
+          success: 0x55FF55,
+          strings: 0x55FF55,
+          keywords: 0xAA55FF
+        },
+        overrides: %{
+          popup: %{title_fg: 0x123456},
+          git: %{modified_fg: 0x654321}
+        },
+        faces: %{
+          "keyword" => [fg: 0xABCDEF]
+        }
+      }
+      """)
+
+      {:ok, loaded} = Loader.load_file(path)
+      assert loaded.theme.name == :palette_test
+      assert loaded.theme.editor.bg == 0x101010
+      assert loaded.theme.popup.title_fg == 0x123456
+      assert loaded.theme.git.modified_fg == 0x654321
+      assert loaded.theme.agent.header_fg == 0x3366FF
+      assert loaded.theme.tab_bar.active_bg == 0x101010
+
+      keyword = MingaEditor.UI.Face.Registry.style_for(loaded.face_registry, "keyword")
+      assert keyword.fg == 0xABCDEF
+    end
+
+    test "palette and inherits cannot both be specified", %{tmp_dir: dir} do
+      path = Path.join(dir, "ambiguous.exs")
+
+      File.write!(path, """
+      %{
+        name: :ambiguous_test,
+        inherits: :doom_one,
+        palette: %{
+          variant: :dark,
+          bg: 0x101010,
+          fg: 0xEEEEEE,
+          surface: 0x202020,
+          overlay: 0x181818,
+          muted: 0x777777,
+          subtle: 0x303030
+        }
+      }
+      """)
+
+      assert {:error, %{path: ^path, error: error}} = Loader.load_file(path)
+      assert error =~ "cannot specify both :palette and :inherits"
+    end
+
+    test "invalid palette overrides return load errors", %{tmp_dir: dir} do
+      path = Path.join(dir, "bad_override.exs")
+
+      File.write!(path, """
+      %{
+        name: :bad_override_test,
+        palette: %{
+          variant: :dark,
+          bg: 0x101010,
+          fg: 0xEEEEEE,
+          surface: 0x202020,
+          overlay: 0x181818,
+          muted: 0x777777,
+          subtle: 0x303030
+        },
+        overrides: %{popup: %{titel_fg: 0x123456}}
+      }
+      """)
+
+      assert {:error, %{path: ^path, error: error}} = Loader.load_file(path)
+      assert error =~ "unknown theme override field :popup.:titel_fg"
+    end
+
     test "theme without inherits defaults to doom_one", %{tmp_dir: dir} do
       path = Path.join(dir, "bare.exs")
 
