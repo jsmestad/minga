@@ -48,6 +48,7 @@ defmodule MingaEditor.UI.Picker.OptionScopeSource do
   @impl true
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: {scope, ctx}}, state) when scope in [:buffer, :global] do
+    record_command_execution(ctx)
     apply_scoped(scope, ctx.option_name, ctx.new_value, state)
   end
 
@@ -58,6 +59,15 @@ defmodule MingaEditor.UI.Picker.OptionScopeSource do
   def on_cancel(state), do: state
 
   # ── Private ─────────────────────────────────────────────────────────────────
+
+  @spec record_command_execution(map()) :: :ok
+  defp record_command_execution(%{command_name: command_name}) when is_atom(command_name) do
+    Minga.Project.record_command(command_name)
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp record_command_execution(_ctx), do: :ok
 
   @spec apply_scoped(:buffer | :global, atom(), term(), term()) :: term()
   defp apply_scoped(:buffer, name, value, state) do

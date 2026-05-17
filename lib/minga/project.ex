@@ -13,6 +13,7 @@ defmodule Minga.Project do
   * `cached_files` — the file list for the current project (populated by a background Task)
   * `known_projects` — list of all project roots the user has visited, persisted to disk
   * `recent_files` — per-project list of recently opened files, most recent first, persisted to disk
+  * `command_frecency` — command execution timestamps used to rank the empty command palette
   * `rebuilding?` — true while a background Task is rebuilding the file cache
 
   ## File cache
@@ -26,6 +27,7 @@ defmodule Minga.Project do
 
   use GenServer
 
+  alias Minga.Command
   alias Minga.Config
   alias Minga.Project.Detector
 
@@ -35,6 +37,7 @@ defmodule Minga.Project do
             known_projects: [],
             recent_files: %{},
             frecency_events: %{},
+            command_frecency: %{},
             rebuilding?: false,
             rebuild_ref: nil,
             events_registry: Minga.Events.default_registry()
@@ -48,6 +51,9 @@ defmodule Minga.Project do
   @typedoc "Per-project frecency map: project root => %{relative_path => access_timestamps}."
   @type frecency_events_map :: %{String.t() => file_accesses_map()}
 
+  @typedoc "Per-command execution event history (most recent first, unix seconds)."
+  @type command_frecency_map :: %{atom() => [non_neg_integer()]}
+
   @typedoc "Project GenServer state."
   @type t :: %__MODULE__{
           current_root: String.t() | nil,
@@ -56,6 +62,7 @@ defmodule Minga.Project do
           known_projects: [String.t()],
           recent_files: recent_files_map(),
           frecency_events: frecency_events_map(),
+          command_frecency: command_frecency_map(),
           rebuilding?: boolean(),
           rebuild_ref: reference() | nil,
           events_registry: Minga.Events.registry()
@@ -64,7 +71,9 @@ defmodule Minga.Project do
   @known_projects_file "known-projects"
   @recent_files_file "recent-files"
   @frecency_file "frecency"
+  @command_frecency_file "command-frecency"
   @frecency_events_per_file_limit 10
+  @command_frecency_events_limit 20
 
   # ── Client API ──────────────────────────────────────────────────────────────
 
@@ -169,6 +178,35 @@ defmodule Minga.Project do
     GenServer.call(server, :frecency_scores)
   end
 
+  @doc "Records a command execution for command palette frecency ranking."
+  @spec record_command(GenServer.server(), atom()) :: :ok
+  def record_command(server \\ __MODULE__, command_name)
+
+  def record_command(__MODULE__, command_name) when is_atom(command_name) do
+    case Process.whereis(__MODULE__) do
+      nil ->
+        Minga.Log.warning(
+          :editor,
+          "Command frecency not recorded, Project unavailable: #{command_name}"
+        )
+
+        :ok
+
+      _pid ->
+        GenServer.cast(__MODULE__, {:record_command, command_name})
+    end
+  end
+
+  def record_command(server, command_name) when is_atom(command_name) do
+    GenServer.cast(server, {:record_command, command_name})
+  end
+
+  @doc "Returns frecency scores for command palette commands (command name => score)."
+  @spec command_frecency_scores(GenServer.server()) :: %{atom() => non_neg_integer()}
+  def command_frecency_scores(server \\ __MODULE__) do
+    GenServer.call(server, :command_frecency_scores)
+  end
+
   @doc "Scores a file's access timestamps using frecency decay buckets."
   @spec score_accesses([non_neg_integer()], non_neg_integer()) :: non_neg_integer()
   def score_accesses(timestamps, now_unix) when is_list(timestamps) and is_integer(now_unix) do
@@ -192,12 +230,14 @@ defmodule Minga.Project do
     known = if persist_known_projects?(), do: load_known_projects(), else: []
     recent = if persist_recent_files?(), do: load_recent_files(), else: %{}
     frecency = if persist_recent_files?(), do: load_frecency_events(), else: %{}
+    command_frecency = load_command_frecency()
 
     {:ok,
      %__MODULE__{
        known_projects: known,
        recent_files: recent,
        frecency_events: frecency,
+       command_frecency: command_frecency,
        events_registry: events_registry
      }}
   end
@@ -238,6 +278,17 @@ defmodule Minga.Project do
       |> Map.get(root, %{})
       |> Map.new(fn {rel_path, timestamps} ->
         {rel_path, score_accesses(timestamps, now_unix)}
+      end)
+
+    {:reply, scores, state}
+  end
+
+  def handle_call(:command_frecency_scores, _from, state) do
+    now_unix = System.system_time(:second)
+
+    scores =
+      Map.new(state.command_frecency, fn {command_name, timestamps} ->
+        {command_name, score_accesses(timestamps, now_unix)}
       end)
 
     {:reply, scores, state}
@@ -289,6 +340,10 @@ defmodule Minga.Project do
 
   def handle_cast({:record_file, file_path}, state) do
     {:noreply, do_record_file(state, file_path)}
+  end
+
+  def handle_cast({:record_command, command_name}, state) do
+    {:noreply, do_record_command(state, command_name)}
   end
 
   def handle_cast({:remove, root_path}, state) do
@@ -394,6 +449,20 @@ defmodule Minga.Project do
 
         state
     end
+  end
+
+  @spec do_record_command(t(), atom()) :: t()
+  defp do_record_command(state, command_name) when is_atom(command_name) do
+    now_unix = System.system_time(:second)
+
+    command_frecency =
+      Map.update(state.command_frecency, command_name, [now_unix], fn timestamps ->
+        [now_unix | timestamps] |> Enum.take(@command_frecency_events_limit)
+      end)
+
+    state = %{state | command_frecency: command_frecency}
+    persist_command_frecency(command_frecency)
+    state
   end
 
   @spec set_project(t(), String.t(), Detector.project_type() | nil) :: t()
@@ -638,6 +707,144 @@ defmodule Minga.Project do
   defp file_accesses_to_lines(root, file_accesses) do
     Enum.flat_map(file_accesses, fn {rel_path, timestamps} ->
       Enum.map(timestamps, fn ts -> "#{root}\t#{rel_path}\t#{ts}" end)
+    end)
+  end
+
+  # ── Command frecency persistence ───────────────────────────────────────────
+
+  @spec command_frecency_path() :: String.t()
+  defp command_frecency_path do
+    config_dir = System.get_env("XDG_CONFIG_HOME") || Path.expand("~/.config")
+    Path.join([config_dir, "minga", @command_frecency_file])
+  end
+
+  @spec load_command_frecency() :: command_frecency_map()
+  defp load_command_frecency do
+    path = command_frecency_path()
+
+    case read_persisted_file(path, "command frecency") do
+      {:ok, content} -> parse_command_frecency(content)
+      :missing -> %{}
+      {:error, _reason} -> %{}
+    end
+  end
+
+  @spec read_persisted_file(String.t(), String.t()) ::
+          {:ok, String.t()} | :missing | {:error, term()}
+  defp read_persisted_file(path, label) do
+    case File.read(path) do
+      {:ok, content} ->
+        {:ok, content}
+
+      {:error, :enoent} ->
+        :missing
+
+      {:error, reason} ->
+        Minga.Log.warning(:editor, "Failed to read #{label} from #{path}: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  @spec parse_command_frecency(String.t()) :: command_frecency_map()
+  defp parse_command_frecency(content) do
+    content
+    |> String.split("\n", trim: true)
+    |> Enum.with_index(1)
+    |> Enum.reduce(%{}, fn {line, line_number}, acc ->
+      case parse_command_frecency_line(line) do
+        {:ok, command_name, timestamp} ->
+          update_command_frecency(acc, command_name, timestamp)
+
+        {:error, reason} ->
+          Minga.Log.warning(
+            :editor,
+            "Skipping invalid command frecency line #{line_number}: #{line} (#{reason})"
+          )
+
+          acc
+      end
+    end)
+  end
+
+  @spec parse_command_frecency_line(String.t()) ::
+          {:ok, atom(), non_neg_integer()} | {:error, atom()}
+  defp parse_command_frecency_line(line) do
+    case String.split(line, "\t", parts: 2) do
+      [command_name, ts] ->
+        with {:ok, command_atom} <- parse_command_frecency_command_name(command_name),
+             {:ok, timestamp} <- parse_command_frecency_timestamp(ts),
+             :ok <- validate_command_frecency_command(command_atom) do
+          {:ok, command_atom, timestamp}
+        end
+
+      _ ->
+        {:error, :invalid_format}
+    end
+  end
+
+  @spec parse_command_frecency_command_name(String.t()) :: {:ok, atom()} | {:error, atom()}
+  defp parse_command_frecency_command_name(command_name) do
+    {:ok, String.to_existing_atom(command_name)}
+  rescue
+    ArgumentError -> {:error, :unknown_command_name}
+  end
+
+  @spec parse_command_frecency_timestamp(String.t()) ::
+          {:ok, non_neg_integer()} | {:error, atom()}
+  defp parse_command_frecency_timestamp(ts) do
+    case Integer.parse(ts) do
+      {timestamp, ""} when timestamp >= 0 -> {:ok, timestamp}
+      _ -> {:error, :invalid_timestamp}
+    end
+  end
+
+  @spec validate_command_frecency_command(atom()) :: :ok | {:error, atom()}
+  defp validate_command_frecency_command(command_name) do
+    case Process.whereis(Minga.Command.Registry) do
+      nil ->
+        {:error, :command_registry_unavailable}
+
+      _pid ->
+        case Command.lookup(command_name) do
+          {:ok, _cmd} -> :ok
+          :error -> {:error, :stale_command}
+        end
+    end
+  catch
+    :exit, _ -> {:error, :command_registry_unavailable}
+  end
+
+  @spec update_command_frecency(command_frecency_map(), atom(), non_neg_integer()) ::
+          command_frecency_map()
+  defp update_command_frecency(events, command_name, timestamp) do
+    Map.update(events, command_name, [timestamp], fn timestamps ->
+      (timestamps ++ [timestamp]) |> Enum.take(@command_frecency_events_limit)
+    end)
+  end
+
+  @spec persist_command_frecency(command_frecency_map()) :: :ok
+  defp persist_command_frecency(command_frecency) do
+    path = command_frecency_path()
+    dir = Path.dirname(path)
+    File.mkdir_p!(dir)
+
+    content = command_frecency_lines(command_frecency) |> Enum.join("\n") |> Kernel.<>("\n")
+    File.write!(path, content)
+    :ok
+  rescue
+    e ->
+      Minga.Log.warning(
+        :editor,
+        "Failed to persist command frecency data: #{Exception.message(e)}"
+      )
+
+      :ok
+  end
+
+  @spec command_frecency_lines(command_frecency_map()) :: [String.t()]
+  defp command_frecency_lines(command_frecency) do
+    Enum.flat_map(command_frecency, fn {command_name, timestamps} ->
+      Enum.map(timestamps, fn ts -> "#{command_name}\t#{ts}" end)
     end)
   end
 

@@ -378,6 +378,35 @@ defmodule Minga.ProjectTest do
     end
   end
 
+  describe "command frecency" do
+    test "record_command/2 scores repeated command executions higher" do
+      {_pid, name} = start_project!()
+
+      Enum.each(1..3, fn _ ->
+        Project.record_command(name, :save)
+        flush(name)
+      end)
+
+      Project.record_command(name, :quit)
+      flush(name)
+
+      scores = Project.command_frecency_scores(name)
+      assert scores.save > scores.quit
+    end
+
+    test "record_command/2 keeps the newest command events within the limit" do
+      {_pid, name} = start_project!()
+
+      Enum.each(1..25, fn _ ->
+        Project.record_command(name, :save)
+        flush(name)
+      end)
+
+      state = flush(name)
+      assert length(state.command_frecency.save) == 20
+    end
+  end
+
   describe "frecency" do
     test "score_accesses/2 applies Mozilla-style decay buckets" do
       now = 1_700_000_000

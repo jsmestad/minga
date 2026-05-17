@@ -170,11 +170,25 @@ defmodule MingaEditor.Input.Picker do
         new_state = source.on_select(item, new_state)
 
         case Map.get(new_state, :pending_command) do
-          nil -> new_state
-          cmd -> MingaEditor.dispatch_command(Map.delete(new_state, :pending_command), cmd)
+          nil ->
+            new_state
+
+          cmd ->
+            record_command_execution(source, cmd)
+            MingaEditor.dispatch_command(Map.delete(new_state, :pending_command), cmd)
         end
     end
   end
+
+  @spec record_command_execution(module(), term()) :: :ok
+  defp record_command_execution(MingaEditor.UI.Picker.CommandSource, command_name)
+       when is_atom(command_name) do
+    Minga.Project.record_command(command_name)
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp record_command_execution(_source, _command_name), do: :ok
 
   # Bottom-anchored: items grow upward from the prompt at viewport bottom.
   @spec bottom_click_index(EditorState.t(), PickerData.t(), integer()) :: integer()

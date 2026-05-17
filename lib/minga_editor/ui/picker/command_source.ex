@@ -11,6 +11,7 @@ defmodule MingaEditor.UI.Picker.CommandSource do
   @behaviour MingaEditor.UI.Picker.Source
 
   alias Minga.Keymap
+  alias Minga.Project
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
 
@@ -27,6 +28,7 @@ defmodule MingaEditor.UI.Picker.CommandSource do
   @spec candidates(Context.t()) :: [Item.t()]
   def candidates(_ctx) do
     keybind_map = build_keybind_map()
+    frecency_scores = fetch_command_frecency()
 
     try do
       Command.all_commands()
@@ -40,7 +42,7 @@ defmodule MingaEditor.UI.Picker.CommandSource do
           annotation: annotation
         }
       end)
-      |> Enum.sort_by(& &1.label)
+      |> sort_by_frecency(frecency_scores)
     catch
       :exit, _ ->
         Minga.Log.warning(:editor, "Command registry not available")
@@ -101,6 +103,20 @@ defmodule MingaEditor.UI.Picker.CommandSource do
     }
 
     PickerUI.open(state, OptionScopeSource, context)
+  end
+
+  @spec fetch_command_frecency() :: %{atom() => non_neg_integer()}
+  defp fetch_command_frecency do
+    Project.command_frecency_scores()
+  catch
+    :exit, _ -> %{}
+  end
+
+  @spec sort_by_frecency([Item.t()], %{atom() => non_neg_integer()}) :: [Item.t()]
+  defp sort_by_frecency(items, scores) do
+    Enum.sort_by(items, fn %Item{id: command_name, label: label} ->
+      {-Map.get(scores, command_name, 0), label}
+    end)
   end
 
   @spec build_keybind_map() :: %{atom() => String.t()}

@@ -445,10 +445,24 @@ defmodule MingaEditor.PickerUI do
     new_state = source.on_select(item, new_state)
 
     case Map.get(new_state, :pending_command) do
-      nil -> new_state
-      cmd -> {Map.delete(new_state, :pending_command), {:execute_command, cmd}}
+      nil ->
+        new_state
+
+      cmd ->
+        record_command_execution(source, cmd)
+        {Map.delete(new_state, :pending_command), {:execute_command, cmd}}
     end
   end
+
+  @spec record_command_execution(module(), term()) :: :ok
+  defp record_command_execution(MingaEditor.UI.Picker.CommandSource, command_name)
+       when is_atom(command_name) do
+    Minga.Project.record_command(command_name)
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp record_command_execution(_source, _command_name), do: :ok
 
   @doc """
   Renders the picker overlay. Returns `{draws, cursor_pos | nil}`.
