@@ -1,11 +1,18 @@
 defmodule MingaEditor.Commands.SearchLeaderTest do
-  use Minga.Test.EditorCase, async: true
+  @moduledoc """
+  Layer 0/1 command-state tests for search leader commands.
 
-  describe "search_buffer" do
+  These commands only transform EditorState, so they do not need a live Editor GenServer.
+  """
+
+  use ExUnit.Case, async: true
+
+  import MingaEditor.CommandStateHelpers
+
+  describe "Layer 0/1 command state: search_buffer" do
     test "transitions to search mode with forward direction" do
-      ctx = start_editor("hello world")
+      state = start_buffer("hello world") |> command_state()
 
-      state = editor_state(ctx)
       state = MingaEditor.Commands.execute(state, :search_buffer)
 
       assert state.workspace.editing.mode == :search
@@ -13,11 +20,10 @@ defmodule MingaEditor.Commands.SearchLeaderTest do
     end
   end
 
-  describe "search_and_replace" do
+  describe "Layer 0/1 command state: search_and_replace" do
     test "transitions to command mode with %s/ prefix" do
-      ctx = start_editor("hello world")
+      state = start_buffer("hello world") |> command_state()
 
-      state = editor_state(ctx)
       state = MingaEditor.Commands.execute(state, :search_and_replace)
 
       assert state.workspace.editing.mode == :command
