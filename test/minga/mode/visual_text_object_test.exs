@@ -72,6 +72,34 @@ defmodule Minga.Mode.VisualTextObjectTest do
                Visual.handle_key({?w, 0}, state)
     end
 
+    test "vip selects inner paragraph" do
+      state = visual_state(modifier: :inner)
+
+      assert {:execute, [{:visual_text_object, :inner, :paragraph}], %VisualState{}} =
+               Visual.handle_key({?p, 0}, state)
+    end
+
+    test "vap selects around paragraph" do
+      state = visual_state(modifier: :around)
+
+      assert {:execute, [{:visual_text_object, :around, :paragraph}], %VisualState{}} =
+               Visual.handle_key({?p, 0}, state)
+    end
+
+    test "vis selects inner sentence" do
+      state = visual_state(modifier: :inner)
+
+      assert {:execute, [{:visual_text_object, :inner, :sentence}], %VisualState{}} =
+               Visual.handle_key({?s, 0}, state)
+    end
+
+    test "vas selects around sentence" do
+      state = visual_state(modifier: :around)
+
+      assert {:execute, [{:visual_text_object, :around, :sentence}], %VisualState{}} =
+               Visual.handle_key({?s, 0}, state)
+    end
+
     test "vi\" selects inner double-quoted string" do
       state = visual_state(modifier: :inner)
 

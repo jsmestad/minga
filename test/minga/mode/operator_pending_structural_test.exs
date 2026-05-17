@@ -100,5 +100,33 @@ defmodule Minga.Mode.OperatorPendingStructuralTest do
       assert {:execute_then_transition, [{:delete_text_object, :inner, {:paren, "(", ")"}}],
               :normal, _} = OperatorPending.handle_key({?(, 0}, state)
     end
+
+    test "dip emits paragraph text object without affecting unmodified p" do
+      state = %OPState{operator: :delete, text_object_modifier: :inner}
+
+      assert {:execute_then_transition, [{:delete_text_object, :inner, :paragraph}], :normal, _} =
+               OperatorPending.handle_key({?p, 0}, state)
+    end
+
+    test "yap emits around paragraph text object" do
+      state = %OPState{operator: :yank, text_object_modifier: :around}
+
+      assert {:execute_then_transition, [{:yank_text_object, :around, :paragraph}], :normal, _} =
+               OperatorPending.handle_key({?p, 0}, state)
+    end
+
+    test "cis emits inner sentence text object and transitions to insert" do
+      state = %OPState{operator: :change, text_object_modifier: :inner}
+
+      assert {:execute_then_transition, [{:change_text_object, :inner, :sentence}], :insert, _} =
+               OperatorPending.handle_key({?s, 0}, state)
+    end
+
+    test "das emits around sentence text object" do
+      state = %OPState{operator: :delete, text_object_modifier: :around}
+
+      assert {:execute_then_transition, [{:delete_text_object, :around, :sentence}], :normal, _} =
+               OperatorPending.handle_key({?s, 0}, state)
+    end
   end
 end

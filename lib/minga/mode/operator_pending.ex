@@ -57,6 +57,8 @@ defmodule Minga.Mode.OperatorPending do
   | Key | Object                              |
   |-----|-------------------------------------|
   | `w` | word (`iw` / `aw`)                  |
+  | `p` | paragraph (`ip` / `ap`)             |
+  | `s` | sentence (`is` / `as`)              |
   | `"` | double-quoted string (`i"` / `a"`)  |
   | `'` | single-quoted string (`i'` / `a'`)  |
   | `(` or `)` | parentheses (`i(` / `a(`) |
@@ -106,6 +108,18 @@ defmodule Minga.Mode.OperatorPending do
   def handle_key({?w, 0}, %OPState{text_object_modifier: modifier} = state)
       when modifier in [:inner, :around] do
     execute_text_object(state, modifier, :word)
+  end
+
+  # `p` — paragraph text object.
+  def handle_key({?p, 0}, %OPState{text_object_modifier: modifier} = state)
+      when modifier in [:inner, :around] do
+    execute_text_object(state, modifier, :paragraph)
+  end
+
+  # `s` — sentence text object.
+  def handle_key({?s, 0}, %OPState{text_object_modifier: modifier} = state)
+      when modifier in [:inner, :around] do
+    execute_text_object(state, modifier, :sentence)
   end
 
   # `"` — double-quoted string.

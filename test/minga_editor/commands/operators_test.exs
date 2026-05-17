@@ -191,4 +191,112 @@ defmodule MingaEditor.Commands.OperatorsTest do
       assert register_entry(new_state) == {"aaa\nbbb\n", :linewise}
     end
   end
+
+  # ── paragraph text object operators ─────────────────────────────────────────
+
+  describe "paragraph text object operators" do
+    test "dip deletes the current paragraph linewise" do
+      buf = start_buffer("one\ntwo\n\nthree")
+      BufferProcess.move_to(buf, {1, 0})
+      state = build_state(buf)
+
+      new_state = Operators.execute(state, {:delete_text_object, :inner, :paragraph})
+
+      assert BufferProcess.content(buf) == "\nthree"
+      assert register_entry(new_state) == {"one\ntwo\n", :linewise}
+    end
+
+    test "yap yanks paragraph plus trailing blank line as linewise" do
+      buf = start_buffer("one\ntwo\n\nthree")
+      BufferProcess.move_to(buf, {0, 0})
+      state = build_state(buf)
+
+      new_state = Operators.execute(state, {:yank_text_object, :around, :paragraph})
+
+      assert BufferProcess.content(buf) == "one\ntwo\n\nthree"
+      assert register_entry(new_state) == {"one\ntwo\n\n", :linewise}
+      assert register_entry(new_state, "0") == {"one\ntwo\n\n", :linewise}
+    end
+
+    test "cip clears the current line instead of deleting all selected lines" do
+      buf = start_buffer("one\ntwo\n\nthree")
+      BufferProcess.move_to(buf, {1, 0})
+      state = build_state(buf)
+
+      new_state = Operators.execute(state, {:change_text_object, :inner, :paragraph})
+
+      assert BufferProcess.content(buf) == "\n\nthree"
+      assert register_entry(new_state) == {"one\ntwo\n", :linewise}
+    end
+
+    test "cap on a blank separator line prefers the following paragraph" do
+      buf = start_buffer("one\n\nthree\n\nfour")
+      BufferProcess.move_to(buf, {1, 0})
+      state = build_state(buf)
+
+      new_state = Operators.execute(state, {:change_text_object, :around, :paragraph})
+
+      assert BufferProcess.content(buf) == "one\n\n\nfour"
+      assert register_entry(new_state) == {"three\n\n", :linewise}
+    end
+
+    test "dap on a blank separator line deletes the following paragraph linewise" do
+      buf = start_buffer("one\n\nthree\n\nfour")
+      BufferProcess.move_to(buf, {1, 0})
+      state = build_state(buf)
+
+      new_state = Operators.execute(state, {:delete_text_object, :around, :paragraph})
+
+      assert BufferProcess.content(buf) == "one\n\nfour"
+      assert register_entry(new_state) == {"three\n\n", :linewise}
+    end
+  end
+
+  # ── sentence text object operators ───────────────────────────────────────────
+
+  describe "sentence text object operators" do
+    test "dis on leading whitespace selects the whole sentence" do
+      buf = start_buffer("  Hello. Bye.")
+      BufferProcess.move_to(buf, {0, 0})
+      state = build_state(buf)
+
+      new_state = Operators.execute(state, {:delete_text_object, :inner, :sentence})
+
+      assert BufferProcess.content(buf) == " Bye."
+      assert register_entry(new_state) == {"  Hello.", :charwise}
+    end
+
+    test "cis on leading whitespace selects the whole sentence and enters insert" do
+      buf = start_buffer("  Hello. Bye.")
+      BufferProcess.move_to(buf, {0, 0})
+      state = build_state(buf)
+
+      new_state = Operators.execute(state, {:change_text_object, :inner, :sentence})
+
+      assert BufferProcess.content(buf) == " Bye."
+      assert register_entry(new_state) == {"  Hello.", :charwise}
+    end
+
+    test "das on trailing whitespace is a no-op" do
+      buf = start_buffer("Hello.   ")
+      BufferProcess.move_to(buf, {0, 7})
+      state = build_state(buf)
+
+      new_state = Operators.execute(state, {:delete_text_object, :around, :sentence})
+
+      assert BufferProcess.content(buf) == "Hello.   "
+      assert register_entry(new_state) == nil
+    end
+
+    test "yas on trailing whitespace is a no-op" do
+      buf = start_buffer("Hello.   ")
+      BufferProcess.move_to(buf, {0, 7})
+      state = build_state(buf)
+
+      new_state = Operators.execute(state, {:yank_text_object, :around, :sentence})
+
+      assert BufferProcess.content(buf) == "Hello.   "
+      assert register_entry(new_state) == nil
+    end
+  end
 end

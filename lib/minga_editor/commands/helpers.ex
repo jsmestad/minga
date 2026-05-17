@@ -26,7 +26,7 @@ defmodule MingaEditor.Commands.Helpers do
   @type operator_action :: :delete | :yank
 
   @typedoc "Text object action kind."
-  @type text_object_action :: :delete | :yank
+  @type text_object_action :: :delete | :yank | :change
 
   @typedoc "Clipboard sync mode controlling automatic system clipboard integration."
   @type clipboard_mode :: :unnamedplus | :unnamed | :none
@@ -570,21 +570,69 @@ defmodule MingaEditor.Commands.Helpers do
     buffer_id = HighlightSync.buffer_id_for(state, buf)
     range = compute_text_object_range(gb, cursor, modifier, spec, buffer_id)
 
-    case {action, range} do
-      {_, nil} ->
+    case {linewise_spec?(spec), action, range} do
+      {_, _, nil} ->
         state
 
-      {:delete, {start_pos, end_pos}} ->
+      {true, :delete, {start_pos, end_pos}} ->
+        apply_linewise_text_object(buf, state, start_pos, end_pos, :delete)
+
+      {true, :change, {start_pos, end_pos}} ->
+        apply_linewise_text_object(buf, state, start_pos, end_pos, :change)
+
+      {true, :yank, {start_pos, end_pos}} ->
+        apply_linewise_text_object(buf, state, start_pos, end_pos, :yank)
+
+      {false, :delete, {start_pos, end_pos}} ->
         text = Document.content_between_inclusive(gb, start_pos, end_pos)
         Buffer.delete_range(buf, start_pos, end_pos)
         put_register(state, text, :delete)
 
-      {:yank, {start_pos, end_pos}} ->
+      {false, :change, {start_pos, end_pos}} ->
+        text = Document.content_between_inclusive(gb, start_pos, end_pos)
+        Buffer.delete_range(buf, start_pos, end_pos)
+        put_register(state, text, :delete)
+
+      {false, :yank, {start_pos, end_pos}} ->
         text = Document.content_between_inclusive(gb, start_pos, end_pos)
         state = put_register(state, text, :yank)
         maybe_start_yank_flash(state, buf, start_pos, end_pos, :charwise)
     end
   end
+
+  defp apply_linewise_text_object(
+         buf,
+         state,
+         {start_line, _start_col},
+         {end_line, _end_col},
+         action
+       ) do
+    first_line = min(start_line, end_line)
+    last_line = max(start_line, end_line)
+    text = Buffer.content_on_lines(buf, first_line, last_line) <> "\n"
+
+    case action do
+      :delete ->
+        Buffer.delete_lines(buf, first_line, last_line)
+        put_register(state, text, :delete, :linewise)
+
+      :change ->
+        if first_line < last_line do
+          Buffer.delete_lines(buf, first_line + 1, last_line)
+        end
+
+        {:ok, _} = Buffer.clear_line(buf, first_line)
+        put_register(state, text, :delete, :linewise)
+
+      :yank ->
+        state = put_register(state, text, :yank, :linewise)
+        maybe_start_yank_flash(state, buf, {first_line, 0}, {last_line, 0}, :linewise)
+    end
+  end
+
+  @spec linewise_spec?(term()) :: boolean()
+  defp linewise_spec?(:paragraph), do: true
+  defp linewise_spec?(_spec), do: false
 
   @doc "Computes the range for a text object modifier + spec pair."
   @spec compute_text_object_range(
@@ -612,6 +660,18 @@ defmodule MingaEditor.Commands.Helpers do
 
   def compute_text_object_range(buf, pos, :around, {:paren, open, close}, _bid),
     do: Minga.Editing.select_around_parens(buf, pos, open, close)
+
+  def compute_text_object_range(buf, pos, :inner, :paragraph, _bid),
+    do: Minga.Editing.select_inner_paragraph(buf, pos)
+
+  def compute_text_object_range(buf, pos, :around, :paragraph, _bid),
+    do: Minga.Editing.select_around_paragraph(buf, pos)
+
+  def compute_text_object_range(buf, pos, :inner, :sentence, _bid),
+    do: Minga.Editing.select_inner_sentence(buf, pos)
+
+  def compute_text_object_range(buf, pos, :around, :sentence, _bid),
+    do: Minga.Editing.select_around_sentence(buf, pos)
 
   def compute_text_object_range(_buf, {line, col}, :inner, {:structural, type}, bid) do
     capture = Atom.to_string(type) <> ".inside"

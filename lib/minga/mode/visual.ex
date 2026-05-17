@@ -262,6 +262,19 @@ defmodule Minga.Mode.Visual do
     {:execute, [{:visual_text_object, modifier, :word}], %{state | text_object_modifier: nil}}
   end
 
+  # Paragraph text object
+  def handle_key({?p, 0}, %VisualState{text_object_modifier: modifier} = state)
+      when modifier in [:inner, :around] do
+    {:execute, [{:visual_text_object, modifier, :paragraph}],
+     %{state | text_object_modifier: nil}}
+  end
+
+  # Sentence text object
+  def handle_key({?s, 0}, %VisualState{text_object_modifier: modifier} = state)
+      when modifier in [:inner, :around] do
+    {:execute, [{:visual_text_object, modifier, :sentence}], %{state | text_object_modifier: nil}}
+  end
+
   # Quote text objects
   def handle_key({?", 0}, %VisualState{text_object_modifier: modifier} = state)
       when modifier in [:inner, :around] do
