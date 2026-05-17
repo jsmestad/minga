@@ -2,6 +2,7 @@ defmodule MingaEditor.Commands.AgentGroupTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Command
   alias MingaEditor.Commands.AgentGroup
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
@@ -47,6 +48,26 @@ defmodule MingaEditor.Commands.AgentGroupTest do
       },
       shell_state: %MingaEditor.Shell.Traditional.State{tab_bar: tb}
     }
+  end
+
+  describe "__commands__/0" do
+    test "exports the agent group command contract" do
+      commands = AgentGroup.__commands__()
+
+      assert Enum.all?(commands, &match?(%Command{}, &1))
+      assert Enum.any?(commands, &(&1.name == :agent_group_next))
+      assert Enum.any?(commands, &(&1.name == :agent_group_next_agent))
+
+      for n <- 1..9 do
+        assert Enum.any?(commands, &(&1.name == String.to_atom("workspace_goto_#{n}")))
+      end
+
+      assert %{description: "Next workspace", requires_buffer: false} =
+               Enum.find(commands, &(&1.name == :agent_group_next))
+
+      assert %{description: "Workspace 1", requires_buffer: false} =
+               Enum.find(commands, &(&1.name == :workspace_goto_1))
+    end
   end
 
   describe "agent_group_next/1" do

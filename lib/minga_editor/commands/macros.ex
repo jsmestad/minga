@@ -3,7 +3,7 @@ defmodule MingaEditor.Commands.Macros do
   Macro recording and replay commands.
   """
 
-  @behaviour Minga.Command.Provider
+  use MingaEditor.Commands.Provider
 
   alias MingaEditor.Editing
   alias MingaEditor.MacroRecorder
@@ -41,21 +41,13 @@ defmodule MingaEditor.Commands.Macros do
     end
   end
 
-  @impl Minga.Command.Provider
-  def __commands__ do
-    [
-      %Minga.Command{
-        name: :toggle_macro_recording,
-        description: "Toggle macro recording",
-        requires_buffer: true,
-        execute: &toggle_recording/1
-      },
-      %Minga.Command{
-        name: :replay_last_macro,
-        description: "Replay last macro",
-        requires_buffer: true,
-        execute: &replay_last/1
-      }
-    ]
-  end
+  command(:toggle_macro_recording, "Toggle macro recording",
+    requires_buffer: true,
+    execute: &toggle_recording/1
+  )
+
+  command(:replay_last_macro, "Replay last macro",
+    requires_buffer: true,
+    execute: &replay_last/1
+  )
 end

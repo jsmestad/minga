@@ -7,7 +7,7 @@ defmodule MingaEditor.Commands.Formatting do
   Falls back to configured external formatters if LSP is unavailable.
   """
 
-  @behaviour Minga.Command.Provider
+  use MingaEditor.Commands.Provider
 
   alias Minga.Buffer
   alias MingaEditor.State, as: EditorState
@@ -224,15 +224,5 @@ defmodule MingaEditor.Commands.Formatting do
     )
   end
 
-  @impl Minga.Command.Provider
-  def __commands__ do
-    [
-      %Minga.Command{
-        name: :format_buffer,
-        description: "Format buffer",
-        requires_buffer: true,
-        execute: &format_buffer/1
-      }
-    ]
-  end
+  command(:format_buffer, "Format buffer", requires_buffer: true, execute: &format_buffer/1)
 end

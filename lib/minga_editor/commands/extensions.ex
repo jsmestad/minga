@@ -3,7 +3,7 @@ defmodule MingaEditor.Commands.Extensions do
   Extension management commands: list, update, and inspect extensions.
   """
 
-  @behaviour Minga.Command.Provider
+  use MingaEditor.Commands.Provider
 
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
@@ -85,39 +85,22 @@ defmodule MingaEditor.Commands.Extensions do
     end
   end
 
-  @impl Minga.Command.Provider
-  def __commands__ do
-    [
-      %Minga.Command{
-        name: :extension_list,
-        description: "List extensions",
-        requires_buffer: true,
-        execute: &list/1
-      },
-      %Minga.Command{
-        name: :extension_update_all,
-        description: "Check all extension updates",
-        requires_buffer: true,
-        execute: &update_all/1
-      },
-      %Minga.Command{
-        name: :extension_update,
-        description: "Update extension",
-        requires_buffer: true,
-        execute: &update/1
-      },
-      %Minga.Command{
-        name: :apply_extension_updates,
-        description: "Apply extension updates",
-        requires_buffer: true,
-        execute: &apply_updates/1
-      },
-      %Minga.Command{
-        name: :extension_confirm_details,
-        description: "Extension update details",
-        requires_buffer: true,
-        execute: &confirm_details/1
-      }
-    ]
-  end
+  command(:extension_list, "List extensions", requires_buffer: true, execute: &list/1)
+
+  command(:extension_update_all, "Check all extension updates",
+    requires_buffer: true,
+    execute: &update_all/1
+  )
+
+  command(:extension_update, "Update extension", requires_buffer: true, execute: &update/1)
+
+  command(:apply_extension_updates, "Apply extension updates",
+    requires_buffer: true,
+    execute: &apply_updates/1
+  )
+
+  command(:extension_confirm_details, "Extension update details",
+    requires_buffer: true,
+    execute: &confirm_details/1
+  )
 end

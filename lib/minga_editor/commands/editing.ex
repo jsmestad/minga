@@ -4,7 +4,7 @@ defmodule MingaEditor.Commands.Editing do
   case toggle, indent/dedent, undo/redo, and paste.
   """
 
-  @behaviour Minga.Command.Provider
+  use MingaEditor.Commands.Provider
 
   alias Minga.Buffer
   alias Minga.Buffer.Document
@@ -1243,45 +1243,25 @@ defmodule MingaEditor.Commands.Editing do
     end
   end
 
-  @impl Minga.Command.Provider
-  def __commands__ do
-    standard =
-      Enum.map(@command_specs, fn {name, desc, requires_buffer} ->
-        %Minga.Command{
-          name: name,
-          description: desc,
-          requires_buffer: requires_buffer,
-          execute: fn state -> execute(state, name) end
-        }
-      end)
+  commands(@command_specs)
 
-    aliases = [
-      %Minga.Command{
-        name: :toggle_comment_line,
-        description: "Toggle comment on line",
-        requires_buffer: true,
-        execute: fn state -> execute(state, :comment_line) end
-      },
-      %Minga.Command{
-        name: :toggle_comment_selection,
-        description: "Toggle comment on selection",
-        requires_buffer: true,
-        execute: fn state -> execute(state, :comment_visual_selection) end
-      },
-      %Minga.Command{
-        name: :delete_chars_at,
-        description: "Delete character(s) at cursor and yank (x)",
-        requires_buffer: true,
-        execute: fn state -> execute(state, {:delete_chars_at, 1}) end
-      },
-      %Minga.Command{
-        name: :delete_chars_before,
-        description: "Delete character(s) before cursor and yank (X)",
-        requires_buffer: true,
-        execute: fn state -> execute(state, {:delete_chars_before, 1}) end
-      }
-    ]
+  command(:toggle_comment_line, "Toggle comment on line",
+    requires_buffer: true,
+    execute: fn state -> execute(state, :comment_line) end
+  )
 
-    standard ++ aliases
-  end
+  command(:toggle_comment_selection, "Toggle comment on selection",
+    requires_buffer: true,
+    execute: fn state -> execute(state, :comment_visual_selection) end
+  )
+
+  command(:delete_chars_at, "Delete character(s) at cursor and yank (x)",
+    requires_buffer: true,
+    execute: fn state -> execute(state, {:delete_chars_at, 1}) end
+  )
+
+  command(:delete_chars_before, "Delete character(s) before cursor and yank (X)",
+    requires_buffer: true,
+    execute: fn state -> execute(state, {:delete_chars_before, 1}) end
+  )
 end

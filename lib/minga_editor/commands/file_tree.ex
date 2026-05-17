@@ -4,7 +4,7 @@ defmodule MingaEditor.Commands.FileTree do
   expanding/collapsing directories, and opening files from the tree.
   """
 
-  @behaviour Minga.Command.Provider
+  use MingaEditor.Commands.Provider
 
   alias Minga.Buffer
   alias MingaEditor.Commands
@@ -1334,165 +1334,104 @@ defmodule MingaEditor.Commands.FileTree do
     end
   end
 
-  @impl Minga.Command.Provider
-  def __commands__ do
-    [
-      %Minga.Command{
-        name: :toggle_file_tree,
-        description: "Toggle file tree",
-        requires_buffer: false,
-        execute: &toggle/1
-      },
-      %Minga.Command{
-        name: :tree_open_or_toggle,
-        description: "Open file or toggle directory",
-        requires_buffer: false,
-        execute: &open_or_toggle/1
-      },
-      %Minga.Command{
-        name: :tree_toggle_directory,
-        description: "Toggle directory in tree",
-        requires_buffer: false,
-        execute: &toggle_directory/1
-      },
-      %Minga.Command{
-        name: :tree_expand,
-        description: "Expand tree node",
-        requires_buffer: false,
-        execute: &expand/1
-      },
-      %Minga.Command{
-        name: :tree_collapse,
-        description: "Collapse tree node",
-        requires_buffer: false,
-        execute: &collapse/1
-      },
-      %Minga.Command{
-        name: :tree_toggle_hidden,
-        description: "Toggle hidden files in tree",
-        requires_buffer: false,
-        execute: &toggle_hidden/1
-      },
-      %Minga.Command{
-        name: :tree_refresh,
-        description: "Refresh file tree",
-        requires_buffer: false,
-        execute: &refresh/1
-      },
-      %Minga.Command{
-        name: :tree_copy_path,
-        description: "Copy file tree path",
-        requires_buffer: false,
-        execute: &copy_path/1
-      },
-      %Minga.Command{
-        name: :tree_mark_copy,
-        description: "Mark file tree entry for copy",
-        requires_buffer: false,
-        execute: &mark_copy/1
-      },
-      %Minga.Command{
-        name: :tree_mark_move,
-        description: "Mark file tree entry for move",
-        requires_buffer: false,
-        execute: &mark_move/1
-      },
-      %Minga.Command{
-        name: :tree_paste,
-        description: "Paste marked file tree entry",
-        requires_buffer: false,
-        execute: &paste/1
-      },
-      %Minga.Command{
-        name: :tree_root_parent,
-        description: "Root file tree at parent directory",
-        requires_buffer: false,
-        execute: &root_parent/1
-      },
-      %Minga.Command{
-        name: :tree_root_selected,
-        description: "Root file tree at selected directory",
-        requires_buffer: false,
-        execute: &root_selected/1
-      },
-      %Minga.Command{
-        name: :tree_root_original,
-        description: "Restore file tree project root",
-        requires_buffer: false,
-        execute: &root_original/1
-      },
-      %Minga.Command{
-        name: :tree_filter,
-        description: "Filter file tree",
-        requires_buffer: false,
-        execute: &filter/1
-      },
-      %Minga.Command{
-        name: :tree_toggle_help,
-        description: "Toggle file tree help",
-        requires_buffer: false,
-        execute: &toggle_help/1
-      },
-      %Minga.Command{
-        name: :tree_close,
-        description: "Close file tree",
-        requires_buffer: false,
-        execute: &close/1
-      },
-      %Minga.Command{
-        name: :tree_collapse_all,
-        description: "Collapse all directories in tree",
-        requires_buffer: false,
-        execute: &collapse_all/1
-      },
-      %Minga.Command{
-        name: :tree_new_file,
-        description: "Create new file in tree",
-        requires_buffer: false,
-        execute: &new_file/1
-      },
-      %Minga.Command{
-        name: :tree_new_folder,
-        description: "Create new folder in tree",
-        requires_buffer: false,
-        execute: &new_folder/1
-      },
-      %Minga.Command{
-        name: :tree_rename,
-        description: "Rename file or folder in tree",
-        requires_buffer: false,
-        execute: &rename/1
-      },
-      %Minga.Command{
-        name: :tree_confirm_editing,
-        description: "Confirm file tree inline edit",
-        requires_buffer: false,
-        execute: &confirm_editing/1
-      },
-      %Minga.Command{
-        name: :tree_cancel_editing,
-        description: "Cancel file tree inline edit",
-        requires_buffer: false,
-        execute: &cancel_editing/1
-      },
-      %Minga.Command{
-        name: :tree_reveal_active,
-        description: "Reveal active file in tree",
-        requires_buffer: false,
-        execute: &reveal_active_file/1
-      },
-      %Minga.Command{
-        name: :tree_delete,
-        description: "Delete file or folder in tree",
-        requires_buffer: false,
-        execute: &delete/1
-      },
-      %Minga.Command{
-        name: :tree_duplicate,
-        description: "Duplicate file or folder in tree",
-        requires_buffer: false,
-        execute: &duplicate/1
-      }
-    ]
-  end
+  command(:toggle_file_tree, "Toggle file tree", requires_buffer: false, execute: &toggle/1)
+
+  command(:tree_open_or_toggle, "Open file or toggle directory",
+    requires_buffer: false,
+    execute: &open_or_toggle/1
+  )
+
+  command(:tree_toggle_directory, "Toggle directory in tree",
+    requires_buffer: false,
+    execute: &toggle_directory/1
+  )
+
+  command(:tree_expand, "Expand tree node", requires_buffer: false, execute: &expand/1)
+  command(:tree_collapse, "Collapse tree node", requires_buffer: false, execute: &collapse/1)
+
+  command(:tree_toggle_hidden, "Toggle hidden files in tree",
+    requires_buffer: false,
+    execute: &toggle_hidden/1
+  )
+
+  command(:tree_refresh, "Refresh file tree", requires_buffer: false, execute: &refresh/1)
+  command(:tree_copy_path, "Copy file tree path", requires_buffer: false, execute: &copy_path/1)
+
+  command(:tree_mark_copy, "Mark file tree entry for copy",
+    requires_buffer: false,
+    execute: &mark_copy/1
+  )
+
+  command(:tree_mark_move, "Mark file tree entry for move",
+    requires_buffer: false,
+    execute: &mark_move/1
+  )
+
+  command(:tree_paste, "Paste marked file tree entry", requires_buffer: false, execute: &paste/1)
+
+  command(:tree_root_parent, "Root file tree at parent directory",
+    requires_buffer: false,
+    execute: &root_parent/1
+  )
+
+  command(:tree_root_selected, "Root file tree at selected directory",
+    requires_buffer: false,
+    execute: &root_selected/1
+  )
+
+  command(:tree_root_original, "Restore file tree project root",
+    requires_buffer: false,
+    execute: &root_original/1
+  )
+
+  command(:tree_filter, "Filter file tree", requires_buffer: false, execute: &filter/1)
+
+  command(:tree_toggle_help, "Toggle file tree help",
+    requires_buffer: false,
+    execute: &toggle_help/1
+  )
+
+  command(:tree_close, "Close file tree", requires_buffer: false, execute: &close/1)
+
+  command(:tree_collapse_all, "Collapse all directories in tree",
+    requires_buffer: false,
+    execute: &collapse_all/1
+  )
+
+  command(:tree_new_file, "Create new file in tree", requires_buffer: false, execute: &new_file/1)
+
+  command(:tree_new_folder, "Create new folder in tree",
+    requires_buffer: false,
+    execute: &new_folder/1
+  )
+
+  command(:tree_rename, "Rename file or folder in tree",
+    requires_buffer: false,
+    execute: &rename/1
+  )
+
+  command(:tree_confirm_editing, "Confirm file tree inline edit",
+    requires_buffer: false,
+    execute: &confirm_editing/1
+  )
+
+  command(:tree_cancel_editing, "Cancel file tree inline edit",
+    requires_buffer: false,
+    execute: &cancel_editing/1
+  )
+
+  command(:tree_reveal_active, "Reveal active file in tree",
+    requires_buffer: false,
+    execute: &reveal_active_file/1
+  )
+
+  command(:tree_delete, "Delete file or folder in tree",
+    requires_buffer: false,
+    execute: &delete/1
+  )
+
+  command(:tree_duplicate, "Duplicate file or folder in tree",
+    requires_buffer: false,
+    execute: &duplicate/1
+  )
 end
