@@ -135,6 +135,9 @@ defmodule MingaEditor.UI.Theme.Slots do
     p = theme.popup
     ml = theme.modeline
 
+    # GUI accent slots follow the concrete theme highlight/title color, not the palette input field.
+    accent = accent_color(theme)
+
     {normal_fg, normal_bg} = mode_color(ml, :normal)
     {insert_fg, insert_bg} = mode_color(ml, :insert)
     {visual_fg, visual_bg} = mode_color(ml, :visual)
@@ -183,8 +186,8 @@ defmodule MingaEditor.UI.Theme.Slots do
       {@mode_insert_fg, insert_fg},
       {@mode_visual_bg, visual_bg},
       {@mode_visual_fg, visual_fg},
-      {@statusbar_accent_fg, t.active_fg},
-      {@accent, t.active_fg},
+      {@statusbar_accent_fg, accent},
+      {@accent, accent},
       {@gutter_fg, theme.gutter.fg},
       {@gutter_current_fg, theme.gutter.current_fg},
       {@gutter_error_fg, theme.gutter.error_fg},
@@ -199,6 +202,11 @@ defmodule MingaEditor.UI.Theme.Slots do
       {@highlight_write_bg, e.highlight_write_bg || 0x4A3F2B},
       {@selection_bg, e.selection_bg || 0x264F78}
     ] ++ agent_status_pairs(theme, tb) ++ agent_chat_pairs(theme)
+  end
+
+  @spec accent_color(MingaEditor.UI.Theme.t()) :: MingaEditor.UI.Theme.color()
+  defp accent_color(%MingaEditor.UI.Theme{} = theme) do
+    theme.popup.title_fg || theme.modeline.filetype_fg
   end
 
   @spec agent_status_pairs(MingaEditor.UI.Theme.t(), MingaEditor.UI.Theme.TabBar.t() | nil) :: [

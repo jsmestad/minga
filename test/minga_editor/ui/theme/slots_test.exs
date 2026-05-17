@@ -91,12 +91,21 @@ defmodule MingaEditor.UI.Theme.SlotsTest do
       assert pair_map[0x23] == theme.popup.sel_bg
     end
 
-    test "accent color maps to tree active_fg" do
+    test "accent color maps to popup title color instead of tree active color" do
       theme = MingaEditor.UI.Theme.get!(:doom_one)
       pairs = Slots.to_color_pairs(theme)
       pair_map = Map.new(pairs)
 
-      assert pair_map[0x40] == theme.tree.active_fg
+      assert pair_map[0x40] == theme.popup.title_fg
+      assert pair_map[0x40] != theme.tree.active_fg
+    end
+
+    test "accent falls back to modeline filetype color when popup title is nil" do
+      theme = MingaEditor.UI.Theme.get!(:doom_one)
+      theme = %{theme | popup: %{theme.popup | title_fg: nil}}
+      pair_map = Map.new(Slots.to_color_pairs(theme))
+
+      assert pair_map[0x40] == theme.modeline.filetype_fg
     end
 
     test "highlight, selection, and fold slots map to expected IDs" do
