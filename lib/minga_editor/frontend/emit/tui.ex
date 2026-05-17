@@ -90,10 +90,13 @@ defmodule MingaEditor.Frontend.Emit.TUI do
     end
   end
 
-  # Kill switch for the scroll region optimization. Set to true to re-enable
-  # once the libvaxis buffer sync issue is resolved.
+  # Kill switch for the scroll region optimization. Set
+  # `config :minga, :tui_scroll_optimization, true` to re-enable once the
+  # libvaxis buffer sync issue is resolved.
   @spec scroll_optimization_enabled?() :: boolean()
-  defp scroll_optimization_enabled?, do: false
+  defp scroll_optimization_enabled? do
+    Application.get_env(:minga, :tui_scroll_optimization, false) == true
+  end
 
   @spec detect_scroll_regions_impl(ctx(), Caches.t()) :: [scroll_delta()] | nil
   defp detect_scroll_regions_impl(ctx, caches) do
