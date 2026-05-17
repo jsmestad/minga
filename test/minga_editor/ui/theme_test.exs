@@ -54,6 +54,29 @@ defmodule Minga.ThemeTest do
       assert is_integer(Keyword.get(style, :fg))
     end
 
+    test "doom one follows upstream syntax semantic colors" do
+      theme = Theme.get!(:doom_one)
+
+      assert Keyword.get(Theme.style_for_capture(theme, "keyword"), :fg) == 0x51AFEF
+      assert Keyword.get(Theme.style_for_capture(theme, "function"), :fg) == 0xC678DD
+      assert Keyword.get(Theme.style_for_capture(theme, "function.call"), :fg) == 0xC678DD
+      assert Keyword.get(Theme.style_for_capture(theme, "function.call"), :italic) == true
+      assert Keyword.get(Theme.style_for_capture(theme, "method"), :fg) == 0x46D9FF
+      assert Keyword.get(Theme.style_for_capture(theme, "constant"), :fg) == 0xA9A1E1
+      assert Keyword.get(Theme.style_for_capture(theme, "boolean"), :fg) == 0xA9A1E1
+      assert Keyword.get(Theme.style_for_capture(theme, "variable"), :fg) == 0xDCAEEA
+    end
+
+    test "doom one follows upstream popup, tree, and git colors" do
+      theme = Theme.get!(:doom_one)
+
+      assert theme.popup.bg == 0x21242B
+      assert theme.popup.sel_bg == 0x2257A0
+      assert theme.git.modified_fg == 0xDA8548
+      assert theme.tree.git_modified_fg == 0xA9A1E1
+      assert theme.tree.dir_fg == theme.editor.fg
+    end
+
     test "suffix fallback" do
       theme = Theme.get!(:doom_one)
       style = Theme.style_for_capture(theme, "keyword.unknown.deep")
