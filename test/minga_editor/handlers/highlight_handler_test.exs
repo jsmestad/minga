@@ -11,6 +11,8 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
 
   alias MingaEditor.Handlers.HighlightHandler
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Window
+  alias MingaEditor.Workspace.State, as: WorkspaceState
   alias MingaEditor.UI.Highlight
 
   import MingaEditor.RenderPipeline.TestHelpers
@@ -340,16 +342,50 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
       assert window.document_symbols == symbols
     end
 
-    test "non-active buffer is a no-op" do
+    test "updates a visible matching window even when another buffer is active" do
       state = base_state()
+      first_buf = state.workspace.buffers.active
       {:ok, other_buf} = Minga.Buffer.Process.start_link(content: "other")
-      state = with_buffer_id(state, other_buf, 2)
+      stale_symbols = [%Minga.Language.Symbol{kind: :function, name: "old", range: {0, 0, 0, 3}}]
+      fresh_symbols = [%Minga.Language.Symbol{kind: :function, name: "new", range: {0, 0, 0, 3}}]
+
+      state = with_buffer_id(state, first_buf, 1)
+      win_id = state.workspace.windows.active
+
+      state =
+        EditorState.update_workspace(state, fn ws ->
+          WorkspaceState.update_window(ws, win_id, fn window ->
+            Window.set_document_symbols(window, stale_symbols)
+          end)
+        end)
+
+      second_window = Window.new(2, other_buf, 24, 80)
+
+      workspace =
+        %{state.workspace | buffers: %{state.workspace.buffers | active: other_buf}}
+        |> then(fn ws ->
+          %{
+            ws
+            | windows: %{
+                ws.windows
+                | map: Map.put(ws.windows.map, 2, second_window),
+                  active: 2,
+                  next_id: 3
+              }
+          }
+        end)
+
+      state = %{state | workspace: workspace}
 
       {new_state, effects} =
-        HighlightHandler.handle(state, {:minga_highlight, {:document_symbols, 2, 1, []}})
+        HighlightHandler.handle(
+          state,
+          {:minga_highlight, {:document_symbols, 1, 1, fresh_symbols}}
+        )
 
-      assert new_state == state
       assert effects == []
+      assert Map.fetch!(new_state.workspace.windows.map, 1).document_symbols == fresh_symbols
+      assert Map.fetch!(new_state.workspace.windows.map, 2).document_symbols == []
     end
   end
 

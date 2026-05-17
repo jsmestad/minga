@@ -2,10 +2,13 @@ defmodule MingaEditor.HighlightSyncTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Language.Symbol
   alias MingaEditor.HighlightSync
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
+  alias MingaEditor.Window
 
   # Minimal state for testing with a fake active buffer PID.
   defp base_state do
@@ -167,6 +170,37 @@ defmodule MingaEditor.HighlightSyncTest do
       new_state = HighlightSync.setup_for_buffer_pid(state, txt_buf)
 
       refute Map.has_key?(new_state.workspace.highlight.buffer_ids, txt_buf)
+    end
+
+    test "clears seeded window document symbols for unsupported buffers" do
+      {:ok, txt_buf} = BufferProcess.start_link(content: "hello", filetype: :text)
+      stale_symbols = [%Symbol{kind: :function, name: "old", range: {0, 0, 0, 3}}]
+      first_window = Window.set_document_symbols(Window.new(1, txt_buf, 24, 80), stale_symbols)
+      second_window = Window.set_document_symbols(Window.new(2, txt_buf, 24, 80), stale_symbols)
+
+      state =
+        base_state()
+        |> then(fn s ->
+          %{s | workspace: %{s.workspace | buffers: %{s.workspace.buffers | active: txt_buf}}}
+        end)
+        |> then(fn s ->
+          %{
+            s
+            | workspace: %{
+                s.workspace
+                | windows: %Windows{
+                    map: %{1 => first_window, 2 => second_window},
+                    active: 1,
+                    next_id: 3
+                  }
+              }
+          }
+        end)
+
+      new_state = HighlightSync.setup_for_buffer(state)
+
+      assert Map.fetch!(new_state.workspace.windows.map, 1).document_symbols == []
+      assert Map.fetch!(new_state.workspace.windows.map, 2).document_symbols == []
     end
   end
 

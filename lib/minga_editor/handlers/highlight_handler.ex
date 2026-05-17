@@ -377,23 +377,17 @@ defmodule MingaEditor.Handlers.HighlightHandler do
      ]}
   end
 
-  defp handle_document_symbols(state, pid, _buffer_id, symbols)
-       when pid == state.workspace.buffers.active do
+  defp handle_document_symbols(state, pid, _buffer_id, symbols) do
     new_state =
-      case EditorState.active_window_struct(state) do
-        nil ->
-          state
-
-        %Window{id: id} ->
-          EditorState.update_window(state, id, &Window.set_document_symbols(&1, symbols))
-      end
+      EditorState.update_workspace(state, fn ws ->
+        WorkspaceState.update_windows_for_buffer(
+          ws,
+          pid,
+          &Window.set_document_symbols(&1, symbols)
+        )
+      end)
 
     {new_state, []}
-  end
-
-  defp handle_document_symbols(state, _pid, _buffer_id, _symbols) do
-    # Response for a non-active buffer; discard.
-    {state, []}
   end
 
   @spec handle_request_reparse(EditorState.t(), non_neg_integer()) ::

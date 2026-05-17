@@ -14,6 +14,7 @@ defmodule MingaEditor.HighlightSync do
   alias Minga.Parser.Manager, as: ParserManager
   alias MingaEditor.UI.Highlight
   alias MingaEditor.UI.Highlight.Grammar
+  alias MingaEditor.Window
 
   @doc """
   Sets up highlighting for the current buffer.
@@ -112,15 +113,20 @@ defmodule MingaEditor.HighlightSync do
   end
 
   @spec clear_active_document_symbols(EditorState.t()) :: EditorState.t()
-  defp clear_active_document_symbols(%EditorState{} = state) do
-    case EditorState.active_window_struct(state) do
-      nil ->
-        state
-
-      %{id: id} ->
-        EditorState.update_window(state, id, &MingaEditor.Window.set_document_symbols(&1, []))
-    end
+  defp clear_active_document_symbols(
+         %EditorState{workspace: %{buffers: %{active: active_buf}}} = state
+       )
+       when is_pid(active_buf) do
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.update_windows_for_buffer(
+        ws,
+        active_buf,
+        &Window.set_document_symbols(&1, [])
+      )
+    end)
   end
+
+  defp clear_active_document_symbols(%EditorState{} = state), do: state
 
   @spec send_parse_for_pid(EditorState.t(), pid(), String.t(), [setup_opt()]) :: EditorState.t()
   defp send_parse_for_pid(state, buf_pid, language, opts) do
