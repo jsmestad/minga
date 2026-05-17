@@ -913,7 +913,7 @@ The "Source" column shows which `Theme.t()` field each slot reads from (see `lib
 
 Tab bar slots are nil when the theme has no `tab_bar` section. Frontends should fall back to editor bg/fg.
 
-### Popups + Breadcrumb (0x20-0x29)
+### Popups + Breadcrumb (0x20-0x2A)
 
 | Slot | Name | Source | Usage |
 |------|------|--------|-------|
@@ -927,6 +927,7 @@ Tab bar slots are nil when the theme has no `tab_bar` section. Frontends should 
 | 0x27 | breadcrumb_bg | `modeline.bar_bg` | Breadcrumb bar bg (same as modeline) |
 | 0x28 | breadcrumb_fg | `modeline.info_fg` | Breadcrumb text (same as modeline info) |
 | 0x29 | breadcrumb_separator_fg | `tree.separator_fg` | Breadcrumb separator (same as tree separator) |
+| 0x2A | popup_sel_fg | `popup.sel_fg` | Selected item foreground |
 
 ### Modeline + Status Bar (0x30-0x3A)
 
