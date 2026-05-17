@@ -595,33 +595,33 @@ defmodule MingaEditor do
 
   # LSP async response — route to the appropriate handler based on lsp.pending
   def handle_info({:lsp_response, ref, result}, state) do
-    case Map.pop(state.workspace.lsp_pending, ref) do
-      {:completion_resolve, pending} ->
-        new_state = set_lsp_pending(state, pending)
+    case Map.fetch(state.workspace.lsp_pending, ref) do
+      {:ok, :completion_resolve} ->
+        new_state = delete_lsp_pending(state, ref)
         new_state = CompletionHandling.handle_resolve_response(new_state, result)
         {:noreply, Renderer.render_or_async(new_state)}
 
-      {:signature_help, pending} ->
-        new_state = set_lsp_pending(state, pending)
+      {:ok, :signature_help} ->
+        new_state = delete_lsp_pending(state, ref)
         new_state = CompletionHandling.handle_signature_help_response(new_state, result)
         {:noreply, Renderer.render_or_async(new_state)}
 
-      {{:semantic_tokens, buf_pid}, pending} ->
-        new_state = set_lsp_pending(state, pending)
+      {:ok, {:semantic_tokens, buf_pid}} ->
+        new_state = delete_lsp_pending(state, ref)
         new_state = SemanticTokenSync.handle_response(new_state, buf_pid, result)
         {:noreply, Renderer.render_or_async(new_state)}
 
-      {kind, pending} when is_atom(kind) ->
-        new_state = set_lsp_pending(state, pending)
+      {:ok, kind} when is_atom(kind) ->
+        new_state = delete_lsp_pending(state, ref)
         new_state = dispatch_lsp_response(kind, new_state, result)
         {:noreply, Renderer.render_or_async(new_state)}
 
-      {kind, pending} when is_tuple(kind) ->
-        new_state = set_lsp_pending(state, pending)
+      {:ok, kind} when is_tuple(kind) ->
+        new_state = delete_lsp_pending(state, ref)
         new_state = dispatch_lsp_response(kind, new_state, result)
         {:noreply, Renderer.render_or_async(new_state)}
 
-      {nil, _} ->
+      :error ->
         # Not a tracked request — try completion handler
         handle_lsp_completion_response(ref, result, state)
     end
@@ -1270,6 +1270,11 @@ defmodule MingaEditor do
   @spec set_lsp_pending(state(), %{reference() => atom() | tuple()}) :: state()
   defp set_lsp_pending(state, pending) do
     EditorState.update_workspace(state, &WorkspaceState.set_lsp_pending(&1, pending))
+  end
+
+  @spec delete_lsp_pending(state(), reference()) :: state()
+  defp delete_lsp_pending(state, ref) do
+    set_lsp_pending(state, Map.delete(state.workspace.lsp_pending, ref))
   end
 
   # Dispatches an LSP response to the appropriate handler based on the kind atom.

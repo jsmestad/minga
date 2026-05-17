@@ -1613,7 +1613,7 @@ defmodule MingaAgent.Providers.Native do
     :exit, _ -> false
   end
 
-  @spec emit_plan_mode_refusal(pid() | nil, String.t()) :: :ok
+  @spec emit_plan_mode_refusal(pid(), String.t()) :: :ok
   defp emit_plan_mode_refusal(session_pid, message) when is_pid(session_pid) do
     send(
       session_pid,
@@ -1622,8 +1622,6 @@ defmodule MingaAgent.Providers.Native do
 
     :ok
   end
-
-  defp emit_plan_mode_refusal(_session_pid, _message), do: :ok
 
   @spec execute_found_tool(ReqLLM.Tool.t(), map(), pid() | nil) :: {String.t(), boolean()}
   defp execute_found_tool(_tool, %{name: "shell"} = tool_call, provider_pid)

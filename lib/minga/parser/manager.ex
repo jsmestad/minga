@@ -805,8 +805,6 @@ defmodule Minga.Parser.Manager do
   end
 
   @spec resync_all_buffers(State.t()) :: State.t()
-  defp resync_all_buffers(%{port: nil} = state), do: state
-
   defp resync_all_buffers(state) do
     buffer_count = map_size(state.buffer_registry)
 

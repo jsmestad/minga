@@ -421,9 +421,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   @spec file_tree_focused?(map()) :: boolean()
   defp file_tree_focused?(file_tree), do: Map.get(file_tree, :focused, false)
 
-  @spec dirty_paths(MingaEditor.State.Buffers.t() | nil) :: MapSet.t(String.t())
-  defp dirty_paths(nil), do: MapSet.new()
-
+  @spec dirty_paths(MingaEditor.State.Buffers.t()) :: MapSet.t(String.t())
   defp dirty_paths(%{list: buffer_list}) do
     buffer_list
     |> Enum.flat_map(&dirty_buffer_path/1)
