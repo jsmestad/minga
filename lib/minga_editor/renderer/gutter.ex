@@ -225,8 +225,12 @@ defmodule MingaEditor.Renderer.Gutter do
 
   @spec number_and_color(non_neg_integer(), non_neg_integer(), line_number_style(), colors()) ::
           {non_neg_integer(), non_neg_integer()}
-  defp number_and_color(buf_line, _cursor_line, :absolute, colors) do
+  defp number_and_color(buf_line, cursor_line, :absolute, colors) when buf_line == cursor_line do
     {buf_line + 1, colors.current_fg}
+  end
+
+  defp number_and_color(buf_line, _cursor_line, :absolute, colors) do
+    {buf_line + 1, colors.fg}
   end
 
   defp number_and_color(buf_line, cursor_line, :relative, colors) do

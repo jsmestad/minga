@@ -138,6 +138,28 @@ defmodule MingaEditor.Renderer.GutterTest do
       assert is_tuple(result)
     end
 
+    test "absolute line numbers use the active color only on the cursor line" do
+      current = Gutter.render_number(0, 0, 5, 5, 4, :absolute, @colors)
+      other = Gutter.render_number(1, 0, 4, 5, 4, :absolute, @colors)
+
+      current_fg = @colors.current_fg
+      regular_fg = @colors.fg
+
+      assert %{text: "  6", fg: ^current_fg} = decode_draw(current)
+      assert %{text: "  5", fg: ^regular_fg} = decode_draw(other)
+    end
+
+    test "hybrid line numbers keep relative lines dim and cursor line active" do
+      current = Gutter.render_number(0, 0, 5, 5, 4, :hybrid, @colors)
+      other = Gutter.render_number(1, 0, 4, 5, 4, :hybrid, @colors)
+
+      current_fg = @colors.current_fg
+      regular_fg = @colors.fg
+
+      assert %{text: "  6", fg: ^current_fg} = decode_draw(current)
+      assert %{text: "  1", fg: ^regular_fg} = decode_draw(other)
+    end
+
     test "returns empty for :none style with zero width" do
       assert Gutter.render_number(0, 0, 5, 5, 0, :none, @colors) == []
     end
