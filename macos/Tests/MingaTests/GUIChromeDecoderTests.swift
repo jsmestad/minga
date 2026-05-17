@@ -380,6 +380,14 @@ struct GUIStatusBarDecoderTests {
         appendString16(&file, "editor.ex") // filename
         appendString8(&file, "elixir") // filetype
 
+        var indent = Data()
+        indent.append(1) // tabs
+        indent.append(4) // size
+
+        var selection = Data()
+        selection.append(2) // line selection
+        appendU32(&selection, 3) // size
+
         var msg = Data()
         appendString16(&msg, "-- INSERT --")
 
@@ -398,6 +406,8 @@ struct GUIStatusBarDecoderTests {
             buildSection(SECTION_LANGUAGE, language),
             buildSection(SECTION_GIT, git),
             buildSection(SECTION_FILE, file),
+            buildSection(0x0A, indent),
+            buildSection(0x0C, selection),
             buildSection(SECTION_MESSAGE, msg),
             buildSection(SECTION_RECORDING, recording),
             buildSection(SECTION_AGENT, agent),
@@ -436,6 +446,10 @@ struct GUIStatusBarDecoderTests {
         #expect(update.gitModified == 3)
         #expect(update.gitDeleted == 1)
         #expect(update.filename == "editor.ex")
+        #expect(update.indent.kind == 1)
+        #expect(update.indent.size == 4)
+        #expect(update.selection.mode == 2)
+        #expect(update.selection.size == 3)
         #expect(update.backgroundSubagentCount == 2)
         #expect(update.backgroundSubagentLabel == "session-2: tests")
     }

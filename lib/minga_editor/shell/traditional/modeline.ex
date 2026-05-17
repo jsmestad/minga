@@ -218,9 +218,8 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
           [segment_group()],
           [atom()]
         ) :: {[segment()], [segment()]}
-  defp do_fit_segments(cols, required_left, git_segments, agent_segments, right_groups, []) do
+  defp do_fit_segments(_cols, required_left, git_segments, agent_segments, right_groups, []) do
     {required_left ++ git_segments ++ agent_segments, flatten_groups(right_groups)}
-    |> maybe_return_segments(cols)
   end
 
   defp do_fit_segments(cols, required_left, git_segments, agent_segments, right_groups, [
@@ -242,11 +241,6 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
       )
     end
   end
-
-  @spec maybe_return_segments({[segment()], [segment()]}, pos_integer()) ::
-          {[segment()], [segment()]}
-  defp maybe_return_segments({left_segments, right_segments}, _cols),
-    do: {left_segments, right_segments}
 
   @spec maybe_drop_segments(atom(), atom(), [segment()]) :: [segment()]
   defp maybe_drop_segments(key, key, _segments), do: []

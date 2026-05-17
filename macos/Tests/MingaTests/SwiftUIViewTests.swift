@@ -182,6 +182,85 @@ struct StatusBarViewViewTests {
         #expect(strings.contains("Elixir"))
     }
 
+    @Test("Tabs indent renders in the status bar")
+    @MainActor func tabsIndent() throws {
+        let state = StatusBarState()
+        state.indent = .init(kind: 1, size: 4)
+
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
+        let body = try sut.inspect()
+        let texts = body.findAll(ViewInspectorQuery.text)
+        let strings = texts.compactMap { try? $0.string() }
+
+        #expect(strings.contains("Tabs:4"))
+    }
+
+    @Test("Visual char selection renders grapheme count")
+    @MainActor func visualCharSelection() throws {
+        let state = StatusBarState()
+        state.selection = .init(mode: 1, size: 42)
+
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
+        let body = try sut.inspect()
+        let texts = body.findAll(ViewInspectorQuery.text)
+        let strings = texts.compactMap { try? $0.string() }
+
+        #expect(strings.contains("42 chars"))
+    }
+
+    @Test("Visual line selection renders line count")
+    @MainActor func visualLineSelection() throws {
+        let state = StatusBarState()
+        state.selection = .init(mode: 2, size: 3)
+
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
+        let body = try sut.inspect()
+        let texts = body.findAll(ViewInspectorQuery.text)
+        let strings = texts.compactMap { try? $0.string() }
+
+        #expect(strings.contains("3 lines"))
+    }
+
+    @Test("Status bar update populates indent and selection")
+    @MainActor func statusBarUpdateRendersIndentAndSelection() throws {
+        let state = StatusBarState()
+        state.update(from: StatusBarUpdate(
+            contentKind: 0, mode: 2, cursorLine: 42, cursorCol: 9,
+            lineCount: 500, flags: 0, lspStatus: 0, gitBranch: "",
+            message: "", filetype: "", errorCount: 0, warningCount: 0,
+            modelName: "", messageCount: 0, sessionStatus: 0,
+            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
+            gitAdded: 0, gitModified: 0, gitDeleted: 0,
+            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
+            backgroundSubagentCount: 0, backgroundSubagentLabel: "",
+            indent: .init(kind: 1, size: 4),
+            selection: .init(mode: 1, size: 42)
+        ))
+
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
+        let body = try sut.inspect()
+        let texts = body.findAll(ViewInspectorQuery.text)
+        let strings = texts.compactMap { try? $0.string() }
+
+        #expect(strings.contains("Tabs:4"))
+        #expect(strings.contains("42 chars"))
+    }
+
+    @Test("No selection falls back to cursor position text")
+    @MainActor func noSelectionFallsBackToCursorPosition() throws {
+        let state = StatusBarState()
+        state.cursorLine = 42
+        state.cursorCol = 9
+
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
+        let body = try sut.inspect()
+        let texts = body.findAll(ViewInspectorQuery.text)
+        let strings = texts.compactMap { try? $0.string() }
+
+        #expect(strings.contains("Ln 42, Col 9"))
+        #expect(strings.contains("Spaces:2"))
+    }
+
     @Test("Filetype display is titleized")
     @MainActor func filetypeDisplay() {
         let state = StatusBarState()

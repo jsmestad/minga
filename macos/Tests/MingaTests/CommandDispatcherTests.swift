@@ -357,13 +357,19 @@ struct CommandDispatcherRoutingTests {
                                            gitAdded: 5, gitModified: 3, gitDeleted: 1,
                                            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0,
                                            filename: "editor.ex", diagnosticHint: "",
-                                           backgroundSubagentCount: 0, backgroundSubagentLabel: "")))
+                                           backgroundSubagentCount: 0, backgroundSubagentLabel: "",
+                                           indent: .init(kind: 1, size: 4),
+                                           selection: .init(mode: 2, size: 3))))
 
         #expect(gui.statusBarState.mode == 1)
         #expect(gui.statusBarState.cursorLine == 42)
         #expect(gui.statusBarState.gitBranch == "main")
         #expect(gui.statusBarState.filetype == "elixir")
         #expect(gui.statusBarState.errorCount == 3)
+        #expect(gui.statusBarState.indent.kind == 1)
+        #expect(gui.statusBarState.indent.size == 4)
+        #expect(gui.statusBarState.selection.mode == 2)
+        #expect(gui.statusBarState.selection.size == 3)
     }
 
     @Test("guiStatusBar agent variant populates background buffer fields")
