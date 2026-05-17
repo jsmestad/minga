@@ -2,8 +2,11 @@ defmodule MingaEditor.UI.Theme.OneLight do
   @moduledoc """
   One Light theme, based on Atom's One Light syntax theme.
 
-  A light theme with the classic Atom color palette, inverted luminance.
+  Atom's `one-light-syntax` does not define Minga-specific chrome like agent panels, dashboards, tree sidebars, tab bars, or pickers. Those surfaces derive from the semantic theme builder so they stay consistent with the upstream palette without copying a large hand-wired map.
   """
+
+  alias MingaEditor.UI.Theme.Builder
+  alias MingaEditor.UI.Theme.Palette
 
   # ── One Light palette (Atom) ──────────────────────────────────────────
   @mono_1 0x383A42
@@ -21,57 +24,74 @@ defmodule MingaEditor.UI.Theme.OneLight do
   @syntax_guide 0xEAEAEA
   @ui_bg 0xF0F0F0
   @ui_fg 0x616161
+  @syntax_selection 0xE6E6E6
+  @syntax_color_modified 0xF2A60D
 
   @doc "Returns the One Light theme struct."
   @spec theme() :: MingaEditor.UI.Theme.t()
   def theme do
-    %MingaEditor.UI.Theme{
-      name: :one_light,
-      syntax: syntax(),
-      hl_todo: %{
-        todo: Minga.Core.Face.new(fg: @hue_6_2, bold: true),
-        fixme: Minga.Core.Face.new(fg: @hue_5, bold: true),
-        note: Minga.Core.Face.new(fg: @hue_2, bold: true),
-        hack: Minga.Core.Face.new(fg: @hue_6, bold: true),
-        review: Minga.Core.Face.new(fg: @hue_3, bold: true),
-        deprecated: Minga.Core.Face.new(fg: @mono_3, strikethrough: true)
-      },
-      editor: %MingaEditor.UI.Theme.Editor{
-        bg: @syntax_bg,
-        fg: @mono_1,
-        tilde_fg: @mono_3,
-        split_border_fg: @syntax_guide,
-        cursorline_bg: 0xF0F0F0,
+    Builder.from_palette(:one_light, palette(), overrides())
+  end
+
+  @spec palette() :: Palette.t()
+  defp palette do
+    Palette.new(%{
+      variant: :light,
+      bg: @syntax_bg,
+      fg: @mono_1,
+      surface: @ui_bg,
+      overlay: @ui_bg,
+      muted: @syntax_gutter,
+      subtle: @syntax_guide,
+      accent: @hue_2,
+      highlight: @hue_2,
+      selection_bg: @syntax_selection,
+      error: @hue_5,
+      warning: @syntax_color_modified,
+      info: @hue_2,
+      success: @hue_4,
+      match: @hue_6,
+      link: @hue_1,
+      border: @syntax_guide,
+      contrast_fg: 0xFFFFFF,
+      builtin: @hue_1,
+      functions: @hue_2,
+      keywords: @hue_3,
+      methods: @hue_2,
+      operators: @mono_1,
+      constants: @hue_6,
+      strings: @hue_4,
+      numbers: @hue_6,
+      type: @hue_6_2,
+      variables: @hue_5,
+      comments: @mono_3
+    })
+  end
+
+  @spec overrides() :: Builder.overrides()
+  defp overrides do
+    %{
+      editor: %{
+        cursorline_bg: @syntax_selection,
         nav_flash_bg: 0xE0E0E0,
         yank_flash_bg: 0xD5D5D5,
         highlight_read_bg: 0xD0D5DC,
         highlight_write_bg: 0xE8D8B8,
-        selection_bg: 0xBDD5FC,
         whitespace_fg: @syntax_gutter,
         indent_guide_fg: @syntax_guide,
         indent_guide_active_fg: @mono_3
       },
-      gutter: %MingaEditor.UI.Theme.Gutter{
-        fg: @syntax_gutter,
+      gutter: %{
         current_fg: @mono_1,
-        error_fg: @hue_5,
         warning_fg: @hue_6,
-        info_fg: @hue_2,
         hint_fg: @syntax_gutter,
         fold_fg: @syntax_gutter,
         separator_fg: @syntax_gutter
       },
-      git: %MingaEditor.UI.Theme.Git{
-        added_fg: @hue_4,
-        modified_fg: @hue_2,
-        deleted_fg: @hue_5
-      },
-      modeline: %MingaEditor.UI.Theme.Modeline{
+      modeline: %{
         bar_fg: @ui_fg,
-        bar_bg: @ui_bg,
         info_fg: @mono_1,
         info_bg: @syntax_guide,
-        filetype_fg: @hue_4,
         mode_colors: %{
           normal: {0xFFFFFF, @hue_2},
           insert: {0xFFFFFF, @hue_4},
@@ -80,258 +100,39 @@ defmodule MingaEditor.UI.Theme.OneLight do
           command: {0xFFFFFF, @hue_6_2},
           replace: {0xFFFFFF, @hue_5},
           search: {0xFFFFFF, @hue_1}
-        },
-        lsp_ready: @hue_4,
-        lsp_initializing: @hue_6_2,
-        lsp_starting: @syntax_guide,
-        lsp_error: @hue_5
+        }
       },
-      picker: %MingaEditor.UI.Theme.Picker{
+      popup: %{bg: @syntax_guide, border_fg: @mono_3, sel_bg: @hue_2, separator_fg: @mono_2},
+      tree: %{
         bg: @ui_bg,
-        sel_bg: 0xD0D0D0,
-        prompt_bg: @ui_bg,
-        dim_fg: @mono_3,
-        text_fg: @mono_1,
-        highlight_fg: 0x000000,
-        match_fg: @hue_6,
-        border_fg: @hue_2,
-        menu_bg: @syntax_bg,
-        menu_fg: @mono_1,
-        menu_sel_bg: 0xD0D0D0,
-        menu_sel_fg: 0x000000
-      },
-      minibuffer: %MingaEditor.UI.Theme.Minibuffer{
-        fg: @mono_1,
-        bg: @syntax_bg,
-        warning_fg: @hue_6,
-        dim_fg: @mono_3
-      },
-      search: %MingaEditor.UI.Theme.Search{
-        highlight_fg: 0xFFFFFF,
-        highlight_bg: @hue_6,
-        current_bg: @hue_5
-      },
-      popup: %MingaEditor.UI.Theme.Popup{
-        fg: @mono_1,
-        bg: @syntax_guide,
-        border_fg: @mono_3,
-        sel_fg: @syntax_bg,
-        sel_bg: @hue_2,
-        title_fg: @hue_2,
-        key_fg: @hue_1,
-        separator_fg: @mono_2,
-        group_fg: @hue_2
-      },
-      tree: %MingaEditor.UI.Theme.Tree{
-        bg: 0xF0F0F0,
-        fg: @mono_1,
-        dir_fg: @hue_2,
-        active_fg: @hue_4,
-        cursor_bg: 0xE5E5E6,
-        header_fg: @hue_2,
-        header_bg: 0xF0F0F0,
-        separator_fg: @mono_3,
-        modified_fg: @hue_6,
-        git_modified_fg: @hue_6,
-        git_staged_fg: @hue_4,
-        git_untracked_fg: @mono_3,
-        git_conflict_fg: @hue_5
-      },
-      agent: %MingaEditor.UI.Theme.Agent{
-        panel_bg: @syntax_bg,
-        panel_border: @syntax_guide,
-        header_fg: @hue_2,
+        cursor_bg: @syntax_selection,
         header_bg: @ui_bg,
-        user_border: @hue_2,
-        user_label: @hue_2,
-        assistant_border: @hue_4,
-        assistant_label: @hue_4,
-        tool_border: @hue_6,
-        tool_header: @hue_6,
-        code_bg: @ui_bg,
-        code_border: @syntax_guide,
-        input_border: @hue_2,
-        input_bg: @syntax_bg,
-        input_placeholder: @mono_3,
-        thinking_fg: @hue_6,
-        status_thinking: @hue_6,
-        status_tool: @hue_1,
-        status_error: @hue_5,
-        status_idle: @mono_3,
-        text_fg: @mono_1,
-        context_low: @hue_4,
-        context_mid: @hue_6,
-        context_high: @hue_5,
-        usage_fg: @mono_3,
-        toast_bg: @syntax_guide,
-        toast_fg: @mono_1,
-        toast_border: @mono_3,
-        system_fg: @mono_2,
-        search_match_bg: @hue_6,
-        search_current_bg: @hue_5,
-        hint_fg: 0xA0A1A7,
-        heading1_fg: @hue_3,
-        heading2_fg: @hue_2,
-        heading3_fg: @hue_4,
-        dashboard_label: 0x4078F2,
-        delimiter_dim: 0xC8CCD4,
-        link_fg: 0x4078F2
+        separator_fg: @mono_3,
+        modified_fg: @syntax_color_modified,
+        git_untracked_fg: @mono_3
       },
-      dashboard: %MingaEditor.UI.Theme.Dashboard{
-        bg: @syntax_bg,
-        logo_fg: @hue_6,
-        heading_fg: @hue_2,
-        item_fg: @mono_1,
-        item_active_bg: @syntax_guide,
-        shortcut_fg: @hue_4,
-        muted_fg: @mono_3
-      },
-      tab_bar: %MingaEditor.UI.Theme.TabBar{
-        active_fg: 0x383A42,
-        active_bg: @syntax_bg,
-        inactive_fg: @ui_fg,
-        inactive_bg: @ui_bg,
-        separator_fg: @syntax_guide,
-        modified_fg: @hue_6,
-        attention_fg: @hue_5,
-        close_hover_fg: @hue_5,
-        bg: @ui_bg
-      }
+      syntax: syntax_overrides()
     }
   end
 
-  @spec syntax() :: MingaEditor.UI.Theme.syntax()
-  defp syntax do
+  @spec syntax_overrides() :: MingaEditor.UI.Theme.syntax()
+  defp syntax_overrides do
     %{
-      # ── Keywords ────────────────────────────────────────────────────────
-      "keyword" => [fg: @hue_3, bold: true],
-      "keyword.function" => [fg: @hue_3, bold: true],
-      "keyword.operator" => [fg: @hue_3],
-      "keyword.return" => [fg: @hue_3, bold: true],
-      "keyword.conditional" => [fg: @hue_3, bold: true],
-      "keyword.coroutine" => [fg: @hue_3, bold: true],
-      "keyword.directive" => [fg: @hue_3],
-      "keyword.exception" => [fg: @hue_3],
-      "keyword.import" => [fg: @hue_3],
-      "keyword.modifier" => [fg: @hue_3, bold: true],
-      "keyword.repeat" => [fg: @hue_3, bold: true],
-      "keyword.type" => [fg: @hue_3, bold: true],
-      "conditional" => [fg: @hue_3, bold: true],
-      "exception" => [fg: @hue_3],
-      "include" => [fg: @hue_3],
-      "import" => [fg: @hue_3],
-      "repeat" => [fg: @hue_3, bold: true],
-
-      # ── Strings ─────────────────────────────────────────────────────────
-      "string" => [fg: @hue_4],
-      "string.special" => [fg: @hue_6],
-      "string.special.symbol" => [fg: @hue_1],
-      "string.special.key" => [fg: @hue_2],
-      "string.special.regex" => [fg: @hue_6],
+      "string.special.regex" => [fg: @hue_1],
       "string.escape" => [fg: @hue_1],
-      "string.regex" => [fg: @hue_6],
+      "string.regex" => [fg: @hue_1],
       "character" => [fg: @hue_6],
-
-      # ── Comments ────────────────────────────────────────────────────────
-      "comment" => [fg: @mono_3, italic: true],
-      "comment.doc" => [fg: @mono_2, italic: true],
-      "comment.documentation" => [fg: @mono_2, italic: true],
-      "comment.unused" => [fg: @mono_3, italic: true],
-      "comment.discard" => [fg: @mono_3, italic: true],
-
-      # ── Functions ───────────────────────────────────────────────────────
-      "function" => [fg: @hue_2],
-      "function.call" => [fg: @hue_2],
-      "function.builtin" => [fg: @hue_1],
-      "function.macro" => [fg: @hue_3, bold: true],
-      "function.method" => [fg: @hue_2],
-      "function.method.builtin" => [fg: @hue_1],
-      "function.special" => [fg: @hue_3],
-      "method" => [fg: @hue_2],
-      "method.call" => [fg: @hue_2],
-
-      # ── Types ───────────────────────────────────────────────────────────
-      "type" => [fg: @hue_6_2],
-      "type.builtin" => [fg: @hue_6_2, bold: true],
-
-      # ── Variables ───────────────────────────────────────────────────────
-      "variable" => [fg: @mono_1],
-      "variable.builtin" => [fg: @hue_6],
-      "variable.parameter" => [fg: @hue_5],
-      "variable.member" => [fg: @hue_1],
-      "parameter" => [fg: @hue_5],
-      "field" => [fg: @hue_1],
-
-      # ── Constants & numbers ─────────────────────────────────────────────
-      "constant" => [fg: @hue_6],
-      "constant.builtin" => [fg: @hue_6, bold: true],
-      "boolean" => [fg: @hue_6, bold: true],
-      "number" => [fg: @hue_6],
-      "number.float" => [fg: @hue_6],
-      "float" => [fg: @hue_6],
-
-      # ── Operators & punctuation ─────────────────────────────────────────
-      "operator" => [fg: @hue_1],
-      "punctuation" => [fg: @mono_3],
+      "variable.parameter" => [fg: @mono_1],
+      "parameter" => [fg: @mono_1],
+      "variable.member" => [fg: @mono_1],
+      "field" => [fg: @mono_1],
+      "property" => [fg: @mono_1],
+      "attribute" => [fg: @hue_6],
+      "tag.attribute" => [fg: @hue_6],
+      "escape" => [fg: @hue_1],
       "punctuation.bracket" => [fg: @mono_1],
       "punctuation.delimiter" => [fg: @mono_1],
-      "punctuation.special" => [fg: @hue_5],
-      "delimiter" => [fg: @mono_1],
-
-      # ── Modules & namespaces ────────────────────────────────────────────
-      "module" => [fg: @hue_6_2],
-      "namespace" => [fg: @hue_6_2],
-
-      # ── Attributes & properties ─────────────────────────────────────────
-      "attribute" => [fg: @hue_6],
-      "property" => [fg: @hue_1],
-      "label" => [fg: @hue_5],
-
-      # ── Tags (HTML/XML) ────────────────────────────────────────────────
-      "tag" => [fg: @hue_5],
-      "tag.attribute" => [fg: @hue_6],
-      "tag.error" => [fg: @hue_5, bold: true],
-
-      # ── Preprocessor ───────────────────────────────────────────────────
-      "preproc" => [fg: @hue_3, bold: true],
-
-      # ── Markup (nvim-treesitter / tree-sitter standard) ────────────────
-      "markup.heading" => [fg: @hue_5, bold: true],
-      "markup.heading.1" => [fg: @hue_5, bold: true],
-      "markup.heading.2" => [fg: @hue_6, bold: true],
-      "markup.heading.3" => [fg: @hue_4, bold: true],
-      "markup.heading.4" => [fg: @hue_6_2, bold: true],
-      "markup.heading.5" => [fg: @hue_1, bold: true],
-      "markup.heading.6" => [fg: @hue_3, bold: true],
-      "markup.bold" => [fg: @hue_6, bold: true],
-      "markup.strong" => [fg: @hue_6, bold: true],
-      "markup.italic" => [fg: @hue_3, italic: true],
-      "markup.strikethrough" => [fg: @mono_3, strikethrough: true],
-      "markup.raw" => [fg: @hue_4],
-      "markup.raw.block" => [fg: @hue_4],
-      "markup.raw.inline" => [fg: @hue_4],
-      "markup.link" => [fg: @hue_1],
-      "markup.link.url" => [fg: @hue_1, underline: true],
-      "markup.link.label" => [fg: @hue_2],
-      "markup.list" => [fg: @hue_5],
-      "markup.list.numbered" => [fg: @hue_5],
-      "markup.list.unnumbered" => [fg: @hue_5],
-      "markup.list.checked" => [fg: @hue_4],
-      "markup.list.unchecked" => [fg: @mono_3],
-      "markup.quote" => [fg: @mono_3, italic: true],
-
-      # ── CSS-specific ───────────────────────────────────────────────────
-      "charset" => [fg: @hue_3, bold: true],
-      "keyframes" => [fg: @hue_3, bold: true],
-      "media" => [fg: @hue_3, bold: true],
-      "supports" => [fg: @hue_3, bold: true],
-
-      # ── Misc ───────────────────────────────────────────────────────────
-      "escape" => [fg: @hue_1],
-      "embedded" => [fg: @mono_1],
-      "constructor" => [fg: @hue_6_2, bold: true],
-      "error" => [fg: @hue_5, bold: true],
-      "warning" => [fg: @hue_6, bold: true]
+      "delimiter" => [fg: @mono_1]
     }
   end
 end
