@@ -29,7 +29,7 @@ defmodule MingaEditor.UI.Theme.Loader do
   - `:inherits` (optional) — atom name of a built-in theme to extend.
     The built-in theme's syntax map and editor colors are used as the
     base; the file's `:faces` and `:editor` fields override them.
-  - `:palette` (optional) — semantic palette map passed to `Theme.Builder.from_palette/2`. When present, the palette produces a complete theme cascade. Mutually exclusive with `:inherits`.
+  - `:palette` (optional) — semantic palette map passed to `Theme.Builder.from_palette/3`. When present, the palette produces a complete theme cascade. Mutually exclusive with `:inherits`.
   - `:overrides` (optional) — map of concrete theme section overrides applied after palette derivation, such as `%{popup: %{title_fg: 0x89B4FA}}`. Invalid sections or fields fail the theme load instead of being ignored.
   - `:faces` (optional) — map of face name strings to style keyword
     lists. Merged via `Face.Registry.with_overrides/2`.
@@ -156,6 +156,7 @@ defmodule MingaEditor.UI.Theme.Loader do
       |> resolve_base_theme()
       |> apply_editor_overrides(data)
       |> rename_theme(name)
+      |> apply_theme_overrides(data)
 
     # Build face registry from the theme, then apply face overrides
     registry = FaceRegistry.from_theme(theme)
@@ -170,6 +171,9 @@ defmodule MingaEditor.UI.Theme.Loader do
 
     {:ok, %LoadedTheme{name: name, theme: theme, face_registry: registry, source_path: path}}
   rescue
+    e in ArgumentError ->
+      {:error, %LoadError{path: path, error: Exception.message(e)}}
+
     e ->
       {:error,
        %LoadError{
@@ -179,6 +183,18 @@ defmodule MingaEditor.UI.Theme.Loader do
   end
 
   @spec validate_theme_source!(map()) :: :ok
+  defp validate_theme_source!(%{palette: palette}) when not is_map(palette) do
+    raise ArgumentError, "theme palette must be a map"
+  end
+
+  defp validate_theme_source!(%{overrides: overrides}) when not is_map(overrides) do
+    raise ArgumentError, "theme overrides must be a map"
+  end
+
+  defp validate_theme_source!(%{inherits: inherits}) when not is_atom(inherits) do
+    raise ArgumentError, "theme :inherits must be an atom, got: #{inspect(inherits)}"
+  end
+
   defp validate_theme_source!(%{palette: _palette, inherits: inherits}) do
     raise ArgumentError,
           "theme cannot specify both :palette and :inherits; remove :inherits #{inspect(inherits)}"
@@ -196,11 +212,24 @@ defmodule MingaEditor.UI.Theme.Loader do
   defp resolve_base_theme(%{inherits: base_name}) when is_atom(base_name) do
     case Theme.get(base_name) do
       {:ok, theme} -> theme
-      :error -> Theme.get!(:doom_one)
+      :error -> raise ArgumentError, "unknown theme in :inherits: #{inspect(base_name)}"
     end
   end
 
+  defp resolve_base_theme(%{inherits: base_name}) do
+    raise ArgumentError, "theme :inherits must be an atom, got: #{inspect(base_name)}"
+  end
+
   defp resolve_base_theme(_data), do: Theme.get!(:doom_one)
+
+  @spec apply_theme_overrides(Theme.t(), map()) :: Theme.t()
+  defp apply_theme_overrides(theme, %{palette: _palette}), do: theme
+
+  defp apply_theme_overrides(theme, %{overrides: overrides}) when is_map(overrides) do
+    Builder.apply_overrides(theme, overrides)
+  end
+
+  defp apply_theme_overrides(theme, _data), do: theme
 
   @spec rename_theme(Theme.t(), atom()) :: Theme.t()
   defp rename_theme(theme, name), do: %{theme | name: name}
@@ -210,19 +239,38 @@ defmodule MingaEditor.UI.Theme.Loader do
                      [:__struct__]
                  )
 
+  @spec valid_color?(term()) :: boolean()
+  defp valid_color?(value), do: is_integer(value) and value >= 0
+
   @spec apply_editor_overrides(Theme.t(), map()) :: Theme.t()
   defp apply_editor_overrides(theme, %{editor: overrides}) when is_map(overrides) do
     editor =
       Enum.reduce(overrides, theme.editor, fn {key, value}, ed ->
-        if MapSet.member?(@editor_fields, key) do
-          %{ed | key => value}
-        else
-          raise ArgumentError, "unknown theme editor override field: #{inspect(key)}"
-        end
+        apply_editor_override(ed, key, value)
       end)
 
     %{theme | editor: editor}
   end
 
   defp apply_editor_overrides(theme, _data), do: theme
+
+  @spec apply_editor_override(Theme.Editor.t(), atom(), term()) :: Theme.Editor.t()
+  defp apply_editor_override(ed, key, value) do
+    case MapSet.member?(@editor_fields, key) do
+      true -> validate_editor_override(ed, key, value)
+      false -> raise ArgumentError, "unknown theme editor override field: #{inspect(key)}"
+    end
+  end
+
+  @spec validate_editor_override(Theme.Editor.t(), atom(), term()) :: Theme.Editor.t()
+  defp validate_editor_override(ed, key, value) do
+    case valid_color?(value) do
+      true ->
+        %{ed | key => value}
+
+      false ->
+        raise ArgumentError,
+              "theme editor override #{Atom.to_string(key)} must be a color, got: #{inspect(value)}"
+    end
+  end
 end

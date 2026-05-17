@@ -42,6 +42,148 @@ defmodule MingaEditor.UI.Theme.Builder do
     dashboard: Theme.Dashboard
   }
 
+  @color_fields %{
+    editor: [
+      :bg,
+      :fg,
+      :tilde_fg,
+      :split_border_fg,
+      :cursorline_bg,
+      :nav_flash_bg,
+      :yank_flash_bg,
+      :highlight_read_bg,
+      :highlight_write_bg,
+      :selection_bg,
+      :whitespace_fg,
+      :indent_guide_fg,
+      :indent_guide_active_fg
+    ],
+    gutter: [
+      :fg,
+      :current_fg,
+      :error_fg,
+      :warning_fg,
+      :info_fg,
+      :hint_fg,
+      :fold_fg,
+      :separator_fg
+    ],
+    git: [:added_fg, :modified_fg, :deleted_fg],
+    modeline: [
+      :bar_fg,
+      :bar_bg,
+      :info_fg,
+      :info_bg,
+      :filetype_fg,
+      :lsp_ready,
+      :lsp_initializing,
+      :lsp_starting,
+      :lsp_error
+    ],
+    picker: [
+      :bg,
+      :sel_bg,
+      :prompt_bg,
+      :dim_fg,
+      :text_fg,
+      :highlight_fg,
+      :match_fg,
+      :border_fg,
+      :menu_bg,
+      :menu_fg,
+      :menu_sel_bg,
+      :menu_sel_fg
+    ],
+    minibuffer: [:fg, :bg, :warning_fg, :dim_fg],
+    search: [:highlight_fg, :highlight_bg, :current_bg],
+    popup: [
+      :fg,
+      :bg,
+      :border_fg,
+      :sel_fg,
+      :sel_bg,
+      :title_fg,
+      :key_fg,
+      :separator_fg,
+      :group_fg
+    ],
+    tree: [
+      :bg,
+      :fg,
+      :dir_fg,
+      :active_fg,
+      :cursor_bg,
+      :header_fg,
+      :header_bg,
+      :separator_fg,
+      :modified_fg,
+      :git_modified_fg,
+      :git_staged_fg,
+      :git_untracked_fg,
+      :git_conflict_fg
+    ],
+    agent: [
+      :panel_bg,
+      :panel_border,
+      :header_fg,
+      :header_bg,
+      :user_border,
+      :user_label,
+      :assistant_border,
+      :assistant_label,
+      :tool_border,
+      :tool_header,
+      :code_bg,
+      :code_border,
+      :input_border,
+      :input_bg,
+      :input_placeholder,
+      :thinking_fg,
+      :status_thinking,
+      :status_tool,
+      :status_error,
+      :status_idle,
+      :text_fg,
+      :context_low,
+      :context_mid,
+      :context_high,
+      :usage_fg,
+      :toast_bg,
+      :toast_fg,
+      :toast_border,
+      :system_fg,
+      :search_match_bg,
+      :search_current_bg,
+      :heading1_fg,
+      :heading2_fg,
+      :heading3_fg,
+      :hint_fg,
+      :dashboard_label,
+      :delimiter_dim,
+      :link_fg
+    ],
+    tab_bar: [
+      :active_fg,
+      :active_bg,
+      :inactive_fg,
+      :inactive_bg,
+      :separator_fg,
+      :modified_fg,
+      :attention_fg,
+      :close_hover_fg,
+      :bg
+    ],
+    dashboard: [
+      :bg,
+      :logo_fg,
+      :heading_fg,
+      :item_fg,
+      :item_active_bg,
+      :shortcut_fg,
+      :muted_fg
+    ]
+  }
+
   @doc "Builds a complete theme from a semantic palette."
   @spec from_palette(atom(), Palette.t() | map(), overrides()) :: Theme.t()
   def from_palette(name, palette, overrides \\ %{}) when is_atom(name) and is_map(overrides) do
@@ -70,321 +212,342 @@ defmodule MingaEditor.UI.Theme.Builder do
   @spec editor(Palette.t()) :: Theme.Editor.t()
   defp editor(%Palette{} = p) do
     %Theme.Editor{
-      bg: p.bg,
-      fg: p.fg,
-      tilde_fg: p.subtle,
-      split_border_fg: p.border,
-      cursorline_bg: p.surface,
-      nav_flash_bg: p.subtle,
-      yank_flash_bg: p.subtle,
-      highlight_read_bg: p.subtle,
-      highlight_write_bg: p.selection_bg,
-      selection_bg: p.selection_bg,
-      whitespace_fg: p.muted,
-      indent_guide_fg: p.subtle,
-      indent_guide_active_fg: p.muted
+      bg: p.base.bg,
+      fg: p.base.fg,
+      tilde_fg: p.base.subtle,
+      split_border_fg: p.semantic.border,
+      cursorline_bg: p.base.surface,
+      nav_flash_bg: p.base.subtle,
+      yank_flash_bg: p.base.subtle,
+      highlight_read_bg: p.base.subtle,
+      highlight_write_bg: p.semantic.selection_bg,
+      selection_bg: p.semantic.selection_bg,
+      whitespace_fg: p.base.muted,
+      indent_guide_fg: p.base.subtle,
+      indent_guide_active_fg: p.base.muted
     }
   end
 
   @spec gutter(Palette.t()) :: Theme.Gutter.t()
   defp gutter(%Palette{} = p) do
     %Theme.Gutter{
-      fg: p.muted,
-      current_fg: p.fg,
-      error_fg: p.error,
-      warning_fg: p.warning,
-      info_fg: p.info,
-      hint_fg: p.muted,
-      fold_fg: p.muted,
-      separator_fg: p.border
+      fg: p.base.muted,
+      current_fg: p.base.fg,
+      error_fg: p.semantic.error,
+      warning_fg: p.semantic.warning,
+      info_fg: p.semantic.info,
+      hint_fg: p.base.muted,
+      fold_fg: p.base.muted,
+      separator_fg: p.semantic.border
     }
   end
 
   @spec git(Palette.t()) :: Theme.Git.t()
   defp git(%Palette{} = p) do
-    %Theme.Git{added_fg: p.success, modified_fg: p.warning, deleted_fg: p.error}
+    %Theme.Git{
+      added_fg: p.semantic.success,
+      modified_fg: p.semantic.warning,
+      deleted_fg: p.semantic.error
+    }
   end
 
   @spec modeline(Palette.t()) :: Theme.Modeline.t()
   defp modeline(%Palette{} = p) do
     %Theme.Modeline{
-      bar_fg: p.fg,
-      bar_bg: p.overlay,
-      info_fg: p.fg,
-      info_bg: p.border,
-      filetype_fg: p.success,
-      mode_colors: %{
-        normal: {p.contrast_fg, p.highlight},
-        insert: {p.contrast_fg, p.success},
-        visual: {p.contrast_fg, p.functions},
-        operator_pending: {p.contrast_fg, p.warning},
-        command: {p.contrast_fg, p.warning},
-        replace: {p.contrast_fg, p.error},
-        search: {p.contrast_fg, p.info}
-      },
-      lsp_ready: p.success,
-      lsp_initializing: p.warning,
-      lsp_starting: p.muted,
-      lsp_error: p.error
+      bar_fg: p.base.fg,
+      bar_bg: p.base.overlay,
+      info_fg: p.base.fg,
+      info_bg: p.semantic.border,
+      filetype_fg: p.semantic.success,
+      mode_colors: default_mode_colors(p),
+      lsp_ready: p.semantic.success,
+      lsp_initializing: p.semantic.warning,
+      lsp_starting: p.base.muted,
+      lsp_error: p.semantic.error
+    }
+  end
+
+  @spec default_mode_colors(Palette.t()) :: %{
+          atom() => {Theme.color(), Theme.color()}
+        }
+  defp default_mode_colors(%Palette{} = p) do
+    %{
+      normal: {p.semantic.contrast_fg, p.semantic.highlight},
+      insert: {p.semantic.contrast_fg, p.semantic.success},
+      visual: {p.semantic.contrast_fg, p.syntax.functions},
+      operator_pending: {p.semantic.contrast_fg, p.semantic.warning},
+      command: {p.semantic.contrast_fg, p.semantic.warning},
+      replace: {p.semantic.contrast_fg, p.semantic.error},
+      search: {p.semantic.contrast_fg, p.semantic.info}
     }
   end
 
   @spec picker(Palette.t()) :: Theme.Picker.t()
   defp picker(%Palette{} = p) do
     %Theme.Picker{
-      bg: p.surface,
-      sel_bg: p.selection_bg,
-      prompt_bg: p.surface,
-      dim_fg: p.muted,
-      text_fg: p.fg,
-      highlight_fg: p.highlight,
-      match_fg: p.match,
-      border_fg: p.border,
-      menu_bg: p.bg,
-      menu_fg: p.fg,
-      menu_sel_bg: p.selection_bg,
-      menu_sel_fg: p.highlight
+      bg: p.base.surface,
+      sel_bg: p.semantic.selection_bg,
+      prompt_bg: p.base.surface,
+      dim_fg: p.base.muted,
+      text_fg: p.base.fg,
+      highlight_fg: p.semantic.highlight,
+      match_fg: p.semantic.match,
+      border_fg: p.semantic.border,
+      menu_bg: p.base.bg,
+      menu_fg: p.base.fg,
+      menu_sel_bg: p.semantic.selection_bg,
+      menu_sel_fg: p.semantic.highlight
     }
   end
 
   @spec minibuffer(Palette.t()) :: Theme.Minibuffer.t()
   defp minibuffer(%Palette{} = p) do
-    %Theme.Minibuffer{fg: p.fg, bg: p.overlay, warning_fg: p.warning, dim_fg: p.muted}
+    %Theme.Minibuffer{
+      fg: p.base.fg,
+      bg: p.base.overlay,
+      warning_fg: p.semantic.warning,
+      dim_fg: p.base.muted
+    }
   end
 
   @spec search(Palette.t()) :: Theme.Search.t()
   defp search(%Palette{} = p) do
-    %Theme.Search{highlight_fg: p.contrast_fg, highlight_bg: p.match, current_bg: p.error}
+    %Theme.Search{
+      highlight_fg: p.semantic.contrast_fg,
+      highlight_bg: p.semantic.match,
+      current_bg: p.semantic.error
+    }
   end
 
   @spec popup(Palette.t()) :: Theme.Popup.t()
   defp popup(%Palette{} = p) do
     %Theme.Popup{
-      fg: p.fg,
-      bg: p.surface,
-      border_fg: p.border,
-      sel_fg: p.contrast_fg,
-      sel_bg: p.selection_bg,
-      title_fg: p.highlight,
-      key_fg: p.info,
-      separator_fg: p.border,
-      group_fg: p.highlight
+      fg: p.base.fg,
+      bg: p.base.surface,
+      border_fg: p.semantic.border,
+      sel_fg: p.semantic.contrast_fg,
+      sel_bg: p.semantic.selection_bg,
+      title_fg: p.semantic.highlight,
+      key_fg: p.semantic.info,
+      separator_fg: p.semantic.border,
+      group_fg: p.semantic.highlight
     }
   end
 
   @spec tree(Palette.t()) :: Theme.Tree.t()
   defp tree(%Palette{} = p) do
     %Theme.Tree{
-      bg: p.surface,
-      fg: p.fg,
-      dir_fg: p.info,
-      active_fg: p.success,
-      cursor_bg: p.selection_bg,
-      header_fg: p.highlight,
-      header_bg: p.surface,
-      separator_fg: p.border,
-      modified_fg: p.warning,
-      git_modified_fg: p.warning,
-      git_staged_fg: p.success,
-      git_untracked_fg: p.muted,
-      git_conflict_fg: p.error
+      bg: p.base.surface,
+      fg: p.base.fg,
+      dir_fg: p.semantic.info,
+      active_fg: p.semantic.success,
+      cursor_bg: p.semantic.selection_bg,
+      header_fg: p.semantic.highlight,
+      header_bg: p.base.surface,
+      separator_fg: p.semantic.border,
+      modified_fg: p.semantic.warning,
+      git_modified_fg: p.semantic.warning,
+      git_staged_fg: p.semantic.success,
+      git_untracked_fg: p.base.muted,
+      git_conflict_fg: p.semantic.error
     }
   end
 
   @spec agent(Palette.t()) :: Theme.Agent.t()
   defp agent(%Palette{} = p) do
     %Theme.Agent{
-      panel_bg: p.bg,
-      panel_border: p.border,
-      header_fg: p.highlight,
-      header_bg: p.surface,
-      user_border: p.highlight,
-      user_label: p.highlight,
-      assistant_border: p.success,
-      assistant_label: p.success,
-      tool_border: p.warning,
-      tool_header: p.warning,
-      code_bg: p.surface,
-      code_border: p.border,
-      input_border: p.highlight,
-      input_bg: p.bg,
-      input_placeholder: p.muted,
-      thinking_fg: p.warning,
-      status_thinking: p.warning,
-      status_tool: p.info,
-      status_error: p.error,
-      status_idle: p.muted,
-      text_fg: p.fg,
-      context_low: p.success,
-      context_mid: p.warning,
-      context_high: p.error,
-      usage_fg: p.muted,
-      toast_bg: p.surface,
-      toast_fg: p.fg,
-      toast_border: p.border,
-      system_fg: p.muted,
-      search_match_bg: p.match,
-      search_current_bg: p.error,
-      heading1_fg: p.keywords,
-      heading2_fg: p.functions,
-      heading3_fg: p.success,
-      hint_fg: p.muted,
-      dashboard_label: p.highlight,
-      delimiter_dim: p.subtle,
-      link_fg: p.link
+      panel_bg: p.base.bg,
+      panel_border: p.semantic.border,
+      header_fg: p.semantic.highlight,
+      header_bg: p.base.surface,
+      user_border: p.semantic.highlight,
+      user_label: p.semantic.highlight,
+      assistant_border: p.semantic.success,
+      assistant_label: p.semantic.success,
+      tool_border: p.semantic.warning,
+      tool_header: p.semantic.warning,
+      code_bg: p.base.surface,
+      code_border: p.semantic.border,
+      input_border: p.semantic.highlight,
+      input_bg: p.base.bg,
+      input_placeholder: p.base.muted,
+      thinking_fg: p.semantic.warning,
+      status_thinking: p.semantic.warning,
+      status_tool: p.semantic.info,
+      status_error: p.semantic.error,
+      status_idle: p.base.muted,
+      text_fg: p.base.fg,
+      context_low: p.semantic.success,
+      context_mid: p.semantic.warning,
+      context_high: p.semantic.error,
+      usage_fg: p.base.muted,
+      toast_bg: p.base.surface,
+      toast_fg: p.base.fg,
+      toast_border: p.semantic.border,
+      system_fg: p.base.muted,
+      search_match_bg: p.semantic.match,
+      search_current_bg: p.semantic.error,
+      heading1_fg: p.syntax.keywords,
+      heading2_fg: p.syntax.functions,
+      heading3_fg: p.semantic.success,
+      hint_fg: p.base.muted,
+      dashboard_label: p.semantic.highlight,
+      delimiter_dim: p.base.subtle,
+      link_fg: p.semantic.link
     }
   end
 
   @spec dashboard(Palette.t()) :: Theme.Dashboard.t()
   defp dashboard(%Palette{} = p) do
     %Theme.Dashboard{
-      bg: p.bg,
-      logo_fg: p.warning,
-      heading_fg: p.highlight,
-      item_fg: p.fg,
-      item_active_bg: p.surface,
-      shortcut_fg: p.success,
-      muted_fg: p.muted
+      bg: p.base.bg,
+      logo_fg: p.semantic.warning,
+      heading_fg: p.semantic.highlight,
+      item_fg: p.base.fg,
+      item_active_bg: p.base.surface,
+      shortcut_fg: p.semantic.success,
+      muted_fg: p.base.muted
     }
   end
 
   @spec tab_bar(Palette.t()) :: Theme.TabBar.t()
   defp tab_bar(%Palette{} = p) do
     %Theme.TabBar{
-      active_fg: p.fg,
-      active_bg: p.bg,
-      inactive_fg: p.muted,
-      inactive_bg: p.surface,
-      separator_fg: p.border,
-      modified_fg: p.warning,
-      attention_fg: p.error,
-      close_hover_fg: p.error,
-      bg: p.surface
+      active_fg: p.base.fg,
+      active_bg: p.base.bg,
+      inactive_fg: p.base.muted,
+      inactive_bg: p.base.surface,
+      separator_fg: p.semantic.border,
+      modified_fg: p.semantic.warning,
+      attention_fg: p.semantic.error,
+      close_hover_fg: p.semantic.error,
+      bg: p.base.surface
     }
   end
 
   @spec hl_todo(Palette.t()) :: %{atom() => Face.t()}
   defp hl_todo(%Palette{} = p) do
     %{
-      todo: Face.new(fg: p.warning, bold: true),
-      fixme: Face.new(fg: p.error, bold: true),
-      note: Face.new(fg: p.info, bold: true),
-      hack: Face.new(fg: p.constants, bold: true),
-      review: Face.new(fg: p.keywords, bold: true),
-      deprecated: Face.new(fg: p.muted, strikethrough: true)
+      todo: Face.new(fg: p.semantic.warning, bold: true),
+      fixme: Face.new(fg: p.semantic.error, bold: true),
+      note: Face.new(fg: p.semantic.info, bold: true),
+      hack: Face.new(fg: p.syntax.constants, bold: true),
+      review: Face.new(fg: p.syntax.keywords, bold: true),
+      deprecated: Face.new(fg: p.base.muted, strikethrough: true)
     }
   end
 
   @spec syntax(Palette.t()) :: Theme.syntax()
   defp syntax(%Palette{} = p) do
     %{
-      "keyword" => [fg: p.keywords, bold: true],
-      "keyword.function" => [fg: p.keywords, bold: true],
-      "keyword.operator" => [fg: p.operators],
-      "keyword.return" => [fg: p.keywords, bold: true],
-      "keyword.conditional" => [fg: p.keywords, bold: true],
-      "keyword.coroutine" => [fg: p.keywords, bold: true],
-      "keyword.directive" => [fg: p.keywords],
-      "keyword.exception" => [fg: p.keywords],
-      "keyword.import" => [fg: p.keywords],
-      "keyword.modifier" => [fg: p.keywords, bold: true],
-      "keyword.repeat" => [fg: p.keywords, bold: true],
-      "keyword.type" => [fg: p.keywords, bold: true],
-      "conditional" => [fg: p.keywords, bold: true],
-      "exception" => [fg: p.keywords],
-      "include" => [fg: p.keywords],
-      "import" => [fg: p.keywords],
-      "repeat" => [fg: p.keywords, bold: true],
-      "string" => [fg: p.strings],
-      "string.special" => [fg: p.constants],
-      "string.special.symbol" => [fg: p.builtin],
-      "string.special.key" => [fg: p.functions],
-      "string.special.regex" => [fg: p.constants],
-      "string.escape" => [fg: p.operators],
-      "string.regex" => [fg: p.constants],
-      "character" => [fg: p.builtin],
-      "comment" => [fg: p.comments, italic: true],
-      "comment.doc" => [fg: p.muted, italic: true],
-      "comment.documentation" => [fg: p.muted, italic: true],
-      "comment.unused" => [fg: p.comments, italic: true],
-      "comment.discard" => [fg: p.comments, italic: true],
-      "function" => [fg: p.functions],
-      "function.call" => [fg: p.functions],
-      "function.builtin" => [fg: p.builtin],
-      "function.macro" => [fg: p.keywords, bold: true],
-      "function.method" => [fg: p.methods],
-      "function.method.builtin" => [fg: p.builtin],
-      "function.special" => [fg: p.keywords],
-      "method" => [fg: p.methods],
-      "method.call" => [fg: p.methods],
-      "type" => [fg: p.type],
-      "type.builtin" => [fg: p.type, bold: true],
-      "variable" => [fg: p.variables],
-      "variable.builtin" => [fg: p.error],
-      "variable.parameter" => [fg: p.variables],
-      "variable.member" => [fg: p.builtin],
-      "parameter" => [fg: p.variables],
-      "field" => [fg: p.builtin],
-      "constant" => [fg: p.constants],
-      "constant.builtin" => [fg: p.constants, bold: true],
-      "boolean" => [fg: p.constants, bold: true],
-      "number" => [fg: p.numbers],
-      "number.float" => [fg: p.numbers],
-      "float" => [fg: p.numbers],
-      "operator" => [fg: p.operators],
-      "punctuation" => [fg: p.muted],
-      "punctuation.bracket" => [fg: p.muted],
-      "punctuation.delimiter" => [fg: p.muted],
-      "punctuation.special" => [fg: p.operators],
-      "delimiter" => [fg: p.muted],
-      "module" => [fg: p.type],
-      "namespace" => [fg: p.type],
-      "attribute" => [fg: p.builtin],
-      "property" => [fg: p.builtin],
-      "label" => [fg: p.info],
-      "tag" => [fg: p.keywords],
-      "tag.attribute" => [fg: p.type],
-      "tag.error" => [fg: p.error, bold: true],
-      "preproc" => [fg: p.operators, bold: true],
-      "markup.heading" => [fg: p.error, bold: true],
-      "markup.heading.1" => [fg: p.error, bold: true],
-      "markup.heading.2" => [fg: p.constants, bold: true],
-      "markup.heading.3" => [fg: p.warning, bold: true],
-      "markup.heading.4" => [fg: p.success, bold: true],
-      "markup.heading.5" => [fg: p.functions, bold: true],
-      "markup.heading.6" => [fg: p.keywords, bold: true],
-      "markup.bold" => [fg: p.constants, bold: true],
-      "markup.strong" => [fg: p.constants, bold: true],
-      "markup.italic" => [fg: p.variables, italic: true],
-      "markup.strikethrough" => [fg: p.muted, strikethrough: true],
-      "markup.raw" => [fg: p.strings],
-      "markup.raw.block" => [fg: p.strings],
-      "markup.raw.inline" => [fg: p.strings],
-      "markup.link" => [fg: p.link],
-      "markup.link.url" => [fg: p.link, underline: true],
-      "markup.link.label" => [fg: p.functions],
-      "markup.list" => [fg: p.error],
-      "markup.list.numbered" => [fg: p.error],
-      "markup.list.unnumbered" => [fg: p.error],
-      "markup.list.checked" => [fg: p.success],
-      "markup.list.unchecked" => [fg: p.muted],
-      "markup.quote" => [fg: p.muted, italic: true],
-      "charset" => [fg: p.keywords, bold: true],
-      "keyframes" => [fg: p.keywords, bold: true],
-      "media" => [fg: p.keywords, bold: true],
-      "supports" => [fg: p.keywords, bold: true],
-      "escape" => [fg: p.operators],
-      "embedded" => [fg: p.variables],
-      "constructor" => [fg: p.info, bold: true],
-      "error" => [fg: p.error, bold: true],
-      "warning" => [fg: p.warning, bold: true]
+      "keyword" => [fg: p.syntax.keywords, bold: true],
+      "keyword.function" => [fg: p.syntax.keywords, bold: true],
+      "keyword.operator" => [fg: p.syntax.operators],
+      "keyword.return" => [fg: p.syntax.keywords, bold: true],
+      "keyword.conditional" => [fg: p.syntax.keywords, bold: true],
+      "keyword.coroutine" => [fg: p.syntax.keywords, bold: true],
+      "keyword.directive" => [fg: p.syntax.keywords],
+      "keyword.exception" => [fg: p.syntax.keywords],
+      "keyword.import" => [fg: p.syntax.keywords],
+      "keyword.modifier" => [fg: p.syntax.keywords, bold: true],
+      "keyword.repeat" => [fg: p.syntax.keywords, bold: true],
+      "keyword.type" => [fg: p.syntax.keywords, bold: true],
+      "conditional" => [fg: p.syntax.keywords, bold: true],
+      "exception" => [fg: p.syntax.keywords],
+      "include" => [fg: p.syntax.keywords],
+      "import" => [fg: p.syntax.keywords],
+      "repeat" => [fg: p.syntax.keywords, bold: true],
+      "string" => [fg: p.syntax.strings],
+      "string.special" => [fg: p.syntax.constants],
+      "string.special.symbol" => [fg: p.syntax.builtin],
+      "string.special.key" => [fg: p.syntax.functions],
+      "string.special.regex" => [fg: p.syntax.constants],
+      "string.escape" => [fg: p.syntax.operators],
+      "string.regex" => [fg: p.syntax.constants],
+      "character" => [fg: p.syntax.builtin],
+      "comment" => [fg: p.syntax.comments, italic: true],
+      "comment.doc" => [fg: p.syntax.comments, italic: true],
+      "comment.documentation" => [fg: p.syntax.comments, italic: true],
+      "comment.unused" => [fg: p.syntax.comments, italic: true],
+      "comment.discard" => [fg: p.syntax.comments, italic: true],
+      "function" => [fg: p.syntax.functions],
+      "function.call" => [fg: p.syntax.functions],
+      "function.builtin" => [fg: p.syntax.builtin],
+      "function.macro" => [fg: p.syntax.keywords, bold: true],
+      "function.method" => [fg: p.syntax.methods],
+      "function.method.builtin" => [fg: p.syntax.builtin],
+      "function.special" => [fg: p.syntax.keywords],
+      "method" => [fg: p.syntax.methods],
+      "method.call" => [fg: p.syntax.methods],
+      "type" => [fg: p.syntax.type],
+      "type.builtin" => [fg: p.syntax.type, bold: true],
+      "variable" => [fg: p.syntax.variables],
+      "variable.builtin" => [fg: p.semantic.error],
+      "variable.parameter" => [fg: p.syntax.variables],
+      "variable.member" => [fg: p.syntax.builtin],
+      "parameter" => [fg: p.syntax.variables],
+      "field" => [fg: p.syntax.builtin],
+      "constant" => [fg: p.syntax.constants],
+      "constant.builtin" => [fg: p.syntax.constants, bold: true],
+      "boolean" => [fg: p.syntax.constants, bold: true],
+      "number" => [fg: p.syntax.numbers],
+      "number.float" => [fg: p.syntax.numbers],
+      "float" => [fg: p.syntax.numbers],
+      "operator" => [fg: p.syntax.operators],
+      "punctuation" => [fg: p.base.muted],
+      "punctuation.bracket" => [fg: p.base.muted],
+      "punctuation.delimiter" => [fg: p.base.muted],
+      "punctuation.special" => [fg: p.syntax.operators],
+      "delimiter" => [fg: p.base.muted],
+      "module" => [fg: p.syntax.type],
+      "namespace" => [fg: p.syntax.type],
+      "attribute" => [fg: p.syntax.builtin],
+      "property" => [fg: p.syntax.builtin],
+      "label" => [fg: p.semantic.info],
+      "tag" => [fg: p.syntax.keywords],
+      "tag.attribute" => [fg: p.syntax.type],
+      "tag.error" => [fg: p.semantic.error, bold: true],
+      "preproc" => [fg: p.syntax.operators, bold: true],
+      "markup.heading" => [fg: p.semantic.error, bold: true],
+      "markup.heading.1" => [fg: p.semantic.error, bold: true],
+      "markup.heading.2" => [fg: p.syntax.constants, bold: true],
+      "markup.heading.3" => [fg: p.semantic.warning, bold: true],
+      "markup.heading.4" => [fg: p.semantic.success, bold: true],
+      "markup.heading.5" => [fg: p.syntax.functions, bold: true],
+      "markup.heading.6" => [fg: p.syntax.keywords, bold: true],
+      "markup.bold" => [fg: p.syntax.constants, bold: true],
+      "markup.strong" => [fg: p.syntax.constants, bold: true],
+      "markup.italic" => [fg: p.syntax.variables, italic: true],
+      "markup.strikethrough" => [fg: p.base.muted, strikethrough: true],
+      "markup.raw" => [fg: p.syntax.strings],
+      "markup.raw.block" => [fg: p.syntax.strings],
+      "markup.raw.inline" => [fg: p.syntax.strings],
+      "markup.link" => [fg: p.semantic.link],
+      "markup.link.url" => [fg: p.semantic.link, underline: true],
+      "markup.link.label" => [fg: p.syntax.functions],
+      "markup.list" => [fg: p.semantic.error],
+      "markup.list.numbered" => [fg: p.semantic.error],
+      "markup.list.unnumbered" => [fg: p.semantic.error],
+      "markup.list.checked" => [fg: p.semantic.success],
+      "markup.list.unchecked" => [fg: p.base.muted],
+      "markup.quote" => [fg: p.base.muted, italic: true],
+      "charset" => [fg: p.syntax.keywords, bold: true],
+      "keyframes" => [fg: p.syntax.keywords, bold: true],
+      "media" => [fg: p.syntax.keywords, bold: true],
+      "supports" => [fg: p.syntax.keywords, bold: true],
+      "escape" => [fg: p.syntax.operators],
+      "embedded" => [fg: p.syntax.variables],
+      "constructor" => [fg: p.semantic.info, bold: true],
+      "error" => [fg: p.semantic.error, bold: true],
+      "warning" => [fg: p.semantic.warning, bold: true]
     }
   end
 
+  @doc false
   @spec apply_overrides(Theme.t(), overrides()) :: Theme.t()
-  defp apply_overrides(theme, overrides) when map_size(overrides) == 0, do: theme
+  def apply_overrides(theme, overrides) when map_size(overrides) == 0, do: theme
 
-  defp apply_overrides(%Theme{} = theme, overrides) when is_map(overrides) do
+  def apply_overrides(%Theme{} = theme, overrides) when is_map(overrides) do
     Enum.reduce(overrides, theme, &apply_override/2)
   end
 
@@ -425,7 +588,7 @@ defmodule MingaEditor.UI.Theme.Builder do
 
     Enum.reduce(overrides, struct, fn {key, value}, acc ->
       if MapSet.member?(fields, key) do
-        %{acc | key => merge_value(Map.get(acc, key), value)}
+        %{acc | key => validate_override_value(section, key, Map.get(acc, key), value)}
       else
         raise ArgumentError,
               "unknown theme override field #{inspect(section)}.#{inspect(key)}"
@@ -433,11 +596,64 @@ defmodule MingaEditor.UI.Theme.Builder do
     end)
   end
 
-  @spec merge_value(term(), term()) :: term()
-  defp merge_value(%_{} = _current, value), do: value
+  @spec validate_override_value(atom(), atom(), term(), term()) :: term()
+  defp validate_override_value(section, :mode_colors, current, value)
+       when is_map(current) and is_map(value) do
+    merge_mode_colors(section, current, value)
+  end
 
-  defp merge_value(current, value) when is_map(current) and is_map(value),
-    do: Map.merge(current, value)
+  defp validate_override_value(section, :mode_colors, _current, value) do
+    raise ArgumentError,
+          "theme override #{Atom.to_string(section)}.mode_colors must be a map of {fg, bg} tuples, got: #{inspect(value)}"
+  end
 
-  defp merge_value(_current, value), do: value
+  defp validate_override_value(section, field, _current, value) do
+    if color_field?(section, field) do
+      validate_color_override(section, field, value)
+    else
+      value
+    end
+  end
+
+  @spec merge_mode_colors(atom(), map(), map()) :: map()
+  defp merge_mode_colors(section, current, overrides) do
+    allowed_modes = current |> Map.keys() |> MapSet.new()
+
+    Enum.reduce(overrides, current, fn {mode, value}, acc ->
+      if MapSet.member?(allowed_modes, mode) do
+        Map.put(acc, mode, validate_mode_color(section, mode, value))
+      else
+        raise ArgumentError,
+              "unknown theme override #{Atom.to_string(section)}.mode_colors key: #{format_key(mode)}"
+      end
+    end)
+  end
+
+  @spec validate_mode_color(atom(), term(), term()) :: {Theme.color(), Theme.color()}
+  defp validate_mode_color(_section, _mode, {fg, bg})
+       when is_integer(fg) and fg >= 0 and is_integer(bg) and bg >= 0,
+       do: {fg, bg}
+
+  defp validate_mode_color(section, mode, value) do
+    raise ArgumentError,
+          "theme override #{Atom.to_string(section)}.mode_colors.#{format_key(mode)} must be a {fg, bg} color tuple, got: #{inspect(value)}"
+  end
+
+  @spec format_key(term()) :: String.t()
+  defp format_key(key) when is_atom(key), do: Atom.to_string(key)
+  defp format_key(key), do: inspect(key)
+
+  @spec validate_color_override(atom(), atom(), term()) :: Theme.color()
+  defp validate_color_override(_section, _field, value) when is_integer(value) and value >= 0,
+    do: value
+
+  defp validate_color_override(section, field, value) do
+    raise ArgumentError,
+          "theme override #{Atom.to_string(section)}.#{Atom.to_string(field)} must be a color, got: #{inspect(value)}"
+  end
+
+  @spec color_field?(atom(), atom()) :: boolean()
+  defp color_field?(section, field) do
+    field in Map.get(@color_fields, section, [])
+  end
 end

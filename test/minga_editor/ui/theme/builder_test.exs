@@ -44,6 +44,30 @@ defmodule MingaEditor.UI.Theme.BuilderTest do
       assert theme.syntax["string"] == [fg: 0xA6E3A1]
     end
 
+    test "rejects unknown modeline mode keys" do
+      assert_raise ArgumentError,
+                   ~r/unknown theme override modeline\.mode_colors key: norml/,
+                   fn ->
+                     Builder.from_palette(:palette_test, sample_palette(), %{
+                       modeline: %{mode_colors: %{norml: {0x000000, 0xFFFFFF}}}
+                     })
+                   end
+    end
+
+    test "rejects invalid override value shapes" do
+      assert_raise ArgumentError, ~r/theme override popup\.title_fg must be a color/, fn ->
+        Builder.from_palette(:palette_test, sample_palette(), %{popup: %{title_fg: :oops}})
+      end
+
+      assert_raise ArgumentError,
+                   ~r/theme override modeline\.mode_colors\.normal must be a \{fg, bg\} color tuple/,
+                   fn ->
+                     Builder.from_palette(:palette_test, sample_palette(), %{
+                       modeline: %{mode_colors: %{normal: :oops}}
+                     })
+                   end
+    end
+
     test "rejects unknown override sections and fields" do
       assert_raise ArgumentError, ~r/unknown theme override section: :popop/, fn ->
         Builder.from_palette(:palette_test, sample_palette(), %{popop: %{title_fg: 0x123456}})

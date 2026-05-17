@@ -60,6 +60,71 @@ defmodule MingaEditor.UI.Theme.LoaderTest do
       assert loaded.theme.editor.fg == 0xEEEEEE
     end
 
+    test "non-map palettes return load errors", %{tmp_dir: dir} do
+      path = Path.join(dir, "bad_palette.exs")
+
+      File.write!(path, """
+      %{
+        name: :bad_palette_test,
+        palette: :not_a_map
+      }
+      """)
+
+      assert {:error, %{path: ^path, error: error}} = Loader.load_file(path)
+      assert error == "theme palette must be a map"
+    end
+
+    test "invalid inherits types return load errors", %{tmp_dir: dir} do
+      path = Path.join(dir, "bad_inherits_type.exs")
+
+      File.write!(path, """
+      %{
+        name: :bad_inherits_type_test,
+        inherits: "doom_one"
+      }
+      """)
+
+      assert {:error, %{path: ^path, error: error}} = Loader.load_file(path)
+      assert error == "theme :inherits must be an atom, got: \"doom_one\""
+    end
+
+    test "unknown inherits atoms return load errors", %{tmp_dir: dir} do
+      path = Path.join(dir, "bad_inherits_name.exs")
+
+      File.write!(path, """
+      %{
+        name: :bad_inherits_name_test,
+        inherits: :dooom_one
+      }
+      """)
+
+      assert {:error, %{path: ^path, error: error}} = Loader.load_file(path)
+      assert error == "unknown theme in :inherits: :dooom_one"
+    end
+
+    test "invalid optional palette colors return load errors", %{tmp_dir: dir} do
+      path = Path.join(dir, "bad_palette_color.exs")
+
+      File.write!(path, """
+      %{
+        name: :bad_palette_color_test,
+        palette: %{
+          variant: :dark,
+          bg: 0x101010,
+          fg: 0xEEEEEE,
+          surface: 0x202020,
+          overlay: 0x181818,
+          muted: 0x777777,
+          subtle: 0x303030,
+          highlight: :oops
+        }
+      }
+      """)
+
+      assert {:error, %{path: ^path, error: error}} = Loader.load_file(path)
+      assert error =~ "theme palette highlight must be a color"
+    end
+
     test "invalid editor override fields return load errors", %{tmp_dir: dir} do
       path = Path.join(dir, "bad_editor.exs")
 
@@ -73,6 +138,21 @@ defmodule MingaEditor.UI.Theme.LoaderTest do
 
       assert {:error, %{path: ^path, error: error}} = Loader.load_file(path)
       assert error =~ "unknown theme editor override field: :backround"
+    end
+
+    test "invalid editor override values return load errors", %{tmp_dir: dir} do
+      path = Path.join(dir, "bad_editor_value.exs")
+
+      File.write!(path, """
+      %{
+        name: :bad_editor_value_test,
+        inherits: :doom_one,
+        editor: %{bg: :oops}
+      }
+      """)
+
+      assert {:error, %{path: ^path, error: error}} = Loader.load_file(path)
+      assert error =~ "theme editor override bg must be a color"
     end
 
     test "palette themes build the full cascade and apply overrides", %{tmp_dir: dir} do
@@ -120,6 +200,21 @@ defmodule MingaEditor.UI.Theme.LoaderTest do
       assert keyword.fg == 0xABCDEF
     end
 
+    test "unknown override sections return load errors through inherited themes", %{tmp_dir: dir} do
+      path = Path.join(dir, "bad_section.exs")
+
+      File.write!(path, """
+      %{
+        name: :bad_section_test,
+        inherits: :doom_one,
+        overrides: %{popop: %{title_fg: 0x123456}}
+      }
+      """)
+
+      assert {:error, %{path: ^path, error: error}} = Loader.load_file(path)
+      assert error =~ "unknown theme override section: :popop"
+    end
+
     test "palette and inherits cannot both be specified", %{tmp_dir: dir} do
       path = Path.join(dir, "ambiguous.exs")
 
@@ -141,6 +236,25 @@ defmodule MingaEditor.UI.Theme.LoaderTest do
 
       assert {:error, %{path: ^path, error: error}} = Loader.load_file(path)
       assert error =~ "cannot specify both :palette and :inherits"
+    end
+
+    test "inherited themes apply overrides too", %{tmp_dir: dir} do
+      path = Path.join(dir, "inherits_override.exs")
+
+      File.write!(path, """
+      %{
+        name: :inherits_override_test,
+        inherits: :doom_one,
+        overrides: %{
+          popup: %{title_fg: 0x123456},
+          editor: %{bg: 0x111111}
+        }
+      }
+      """)
+
+      {:ok, loaded} = Loader.load_file(path)
+      assert loaded.theme.editor.bg == 0x111111
+      assert loaded.theme.popup.title_fg == 0x123456
     end
 
     test "invalid palette overrides return load errors", %{tmp_dir: dir} do
@@ -166,17 +280,21 @@ defmodule MingaEditor.UI.Theme.LoaderTest do
       assert error =~ "unknown theme override field :popup.:titel_fg"
     end
 
-    test "theme without inherits defaults to doom_one", %{tmp_dir: dir} do
-      path = Path.join(dir, "bare.exs")
+    test "default themes also apply overrides", %{tmp_dir: dir} do
+      path = Path.join(dir, "bare_override.exs")
 
       File.write!(path, """
-      %{name: :bare_test}
+      %{
+        name: :bare_override_test,
+        overrides: %{popup: %{title_fg: 0x123456}}
+      }
       """)
 
       {:ok, loaded} = Loader.load_file(path)
-      # Should have doom_one's editor colors as base
       doom = MingaEditor.UI.Theme.get!(:doom_one)
+
       assert loaded.theme.editor.bg == doom.editor.bg
+      assert loaded.theme.popup.title_fg == 0x123456
     end
 
     test "returns error for missing name", %{tmp_dir: dir} do

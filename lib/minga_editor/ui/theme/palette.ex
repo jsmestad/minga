@@ -1,180 +1,101 @@
-# credo:disable-for-this-file Credo.Check.Warning.StructFieldAmount
-# This ticket intentionally defines a flat semantic authoring surface for theme files.
 defmodule MingaEditor.UI.Theme.Palette do
   @moduledoc """
   Semantic color palette used to derive a complete editor theme.
 
-  A palette is the small authoring surface for themes. Theme authors provide base colors, semantic accents, and syntax roles; `MingaEditor.UI.Theme.Builder` expands them into all of the concrete theme sub-structs consumed by the renderer.
+  Theme authors provide a flat palette map, and this module expands it into smaller nested structs for base colors, semantic accents, and syntax roles.
   """
 
   alias MingaEditor.UI.Theme
+  alias MingaEditor.UI.Theme.Palette.{Base, Semantic, Syntax}
 
-  @enforce_keys [:variant, :bg, :fg, :surface, :overlay, :muted, :subtle]
-  defstruct [
-    :variant,
-    :bg,
-    :fg,
-    :surface,
-    :overlay,
-    :muted,
-    :subtle,
-    :accent,
-    :highlight,
-    :selection_bg,
-    :error,
-    :warning,
-    :info,
-    :success,
-    :match,
-    :link,
-    :border,
-    :contrast_fg,
-    :builtin,
-    :functions,
-    :keywords,
-    :methods,
-    :operators,
-    :constants,
-    :strings,
-    :numbers,
-    :type,
-    :variables,
-    :comments
-  ]
+  @enforce_keys [:variant, :base, :semantic, :syntax]
+  defstruct [:variant, :base, :semantic, :syntax]
 
   @type variant :: :dark | :light
   @type color :: Theme.color()
 
   @type t :: %__MODULE__{
           variant: variant(),
-          bg: color(),
-          fg: color(),
-          surface: color(),
-          overlay: color(),
-          muted: color(),
-          subtle: color(),
-          accent: color(),
-          highlight: color(),
-          selection_bg: color(),
-          error: color(),
-          warning: color(),
-          info: color(),
-          success: color(),
-          match: color(),
-          link: color(),
-          border: color(),
-          contrast_fg: color(),
-          builtin: color(),
-          functions: color(),
-          keywords: color(),
-          methods: color(),
-          operators: color(),
-          constants: color(),
-          strings: color(),
-          numbers: color(),
-          type: color(),
-          variables: color(),
-          comments: color()
+          base: Base.t(),
+          semantic: Semantic.t(),
+          syntax: Syntax.t()
         }
 
-  @doc "Builds a palette from an atom-keyed map and fills optional semantic defaults."
+  @doc "Builds a palette from a flat theme map."
   @spec new(map()) :: t()
   def new(attrs) when is_map(attrs) do
-    attrs
-    |> then(&struct!(__MODULE__, &1))
-    |> normalize()
+    variant = variant!(attrs)
+    base = Base.new(attrs)
+    semantic = Semantic.new(attrs, variant, base)
+    syntax = Syntax.new(attrs, semantic, base)
+
+    %__MODULE__{variant: variant, base: base, semantic: semantic, syntax: syntax}
   end
 
-  @doc "Normalizes an existing palette or atom-keyed palette map."
+  @doc "Normalizes an existing palette or flat palette map."
   @spec from_map(t() | map()) :: t()
-  def from_map(%__MODULE__{} = palette), do: normalize(palette)
+  def from_map(%__MODULE__{} = palette) do
+    validate_palette!(palette)
+    palette
+  end
+
   def from_map(attrs) when is_map(attrs), do: new(attrs)
 
-  @doc "Fills optional semantic and syntax roles using variant-aware defaults."
-  @spec normalize(t()) :: t()
-  def normalize(%__MODULE__{variant: :dark} = palette) do
-    palette
-    |> fill_semantic_defaults()
-    |> fill_syntax_defaults()
-  end
+  @spec variant!(map()) :: variant()
+  defp variant!(%{variant: :dark}), do: :dark
+  defp variant!(%{variant: :light}), do: :light
 
-  def normalize(%__MODULE__{variant: :light} = palette) do
-    palette
-    |> fill_semantic_defaults()
-    |> fill_syntax_defaults()
-  end
-
-  def normalize(%__MODULE__{variant: variant}) do
+  defp variant!(%{variant: variant}) do
     raise ArgumentError, "theme palette variant must be :dark or :light, got: #{inspect(variant)}"
   end
 
-  @spec fill_semantic_defaults(t()) :: t()
-  defp fill_semantic_defaults(%__MODULE__{} = palette) do
-    accent = palette.accent || default_info(palette.variant)
-    highlight = palette.highlight || accent
-    warning = palette.warning || default_warning(palette.variant)
-    info = palette.info || accent
-
-    %{
-      palette
-      | accent: accent,
-        highlight: highlight,
-        selection_bg: palette.selection_bg || palette.surface,
-        error: palette.error || default_error(palette.variant),
-        warning: warning,
-        info: info,
-        success: palette.success || default_success(palette.variant),
-        match: palette.match || warning,
-        link: palette.link || info,
-        border: palette.border || palette.subtle,
-        contrast_fg: palette.contrast_fg || default_contrast_fg(palette)
-    }
+  defp variant!(_attrs) do
+    raise ArgumentError, "theme palette is missing required key :variant"
   end
 
-  @spec fill_syntax_defaults(t()) :: t()
-  defp fill_syntax_defaults(%__MODULE__{} = palette) do
-    functions = default_color(palette_color(palette, :functions), palette.info)
-
-    %{
-      palette
-      | builtin: default_color(palette_color(palette, :builtin), palette.info),
-        functions: functions,
-        keywords: default_color(palette_color(palette, :keywords), palette.highlight),
-        methods: default_color(palette_color(palette, :methods), functions),
-        operators: default_color(palette_color(palette, :operators), palette.accent),
-        constants: default_color(palette_color(palette, :constants), palette.warning),
-        strings: default_color(palette_color(palette, :strings), palette.success),
-        numbers: default_color(palette_color(palette, :numbers), palette.warning),
-        type: default_color(palette_color(palette, :type), palette.warning),
-        variables: default_color(palette_color(palette, :variables), palette.fg),
-        comments: default_color(palette_color(palette, :comments), palette.muted)
-    }
+  @spec validate_palette!(t()) :: :ok
+  defp validate_palette!(%__MODULE__{
+         variant: variant,
+         base: base,
+         semantic: semantic,
+         syntax: syntax
+       }) do
+    validate_variant!(variant)
+    validate_struct!(:base, Base, base)
+    validate_struct!(:semantic, Semantic, semantic)
+    validate_struct!(:syntax, Syntax, syntax)
+    :ok
   end
 
-  @spec palette_color(t(), atom()) :: color() | nil
-  defp palette_color(%__MODULE__{} = palette, field), do: Map.get(palette, field)
+  @spec validate_variant!(term()) :: variant()
+  defp validate_variant!(:dark), do: :dark
+  defp validate_variant!(:light), do: :light
 
-  @spec default_color(color() | nil, color()) :: color()
-  defp default_color(nil, fallback), do: fallback
-  defp default_color(color, _fallback), do: color
+  defp validate_variant!(variant) do
+    raise ArgumentError, "theme palette variant must be :dark or :light, got: #{inspect(variant)}"
+  end
 
-  @spec default_contrast_fg(t()) :: color()
-  defp default_contrast_fg(%__MODULE__{variant: :dark, bg: bg}), do: bg
-  defp default_contrast_fg(%__MODULE__{variant: :light}), do: 0xFFFFFF
+  @spec validate_struct!(atom(), module(), term()) :: :ok
+  defp validate_struct!(label, module, struct) do
+    case struct do
+      %{__struct__: ^module} = nested ->
+        Enum.each(Map.from_struct(nested), fn {key, value} ->
+          validate_color!(label, key, value)
+        end)
 
-  @spec default_error(variant()) :: color()
-  defp default_error(:dark), do: 0xFF6C6B
-  defp default_error(:light), do: 0xE45649
+        :ok
 
-  @spec default_warning(variant()) :: color()
-  defp default_warning(:dark), do: 0xECBE7B
-  defp default_warning(:light), do: 0xDA8548
+      _ ->
+        raise ArgumentError,
+              "theme palette #{label} must be a #{inspect(module)} struct, got: #{inspect(struct)}"
+    end
+  end
 
-  @spec default_info(variant()) :: color()
-  defp default_info(:dark), do: 0x51AFEF
-  defp default_info(:light), do: 0x0184BC
+  @spec validate_color!(atom(), atom(), term()) :: term()
+  defp validate_color!(_label, _key, value) when is_integer(value) and value >= 0, do: value
 
-  @spec default_success(variant()) :: color()
-  defp default_success(:dark), do: 0x98BE65
-  defp default_success(:light), do: 0x50A14F
+  defp validate_color!(label, key, value) do
+    raise ArgumentError,
+          "theme palette #{label}.#{key} must be a color, got: #{inspect(value)}"
+  end
 end

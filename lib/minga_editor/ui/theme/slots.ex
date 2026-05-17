@@ -134,6 +134,8 @@ defmodule MingaEditor.UI.Theme.Slots do
     tb = theme.tab_bar
     p = theme.popup
     ml = theme.modeline
+
+    # GUI accent slots follow the concrete theme highlight/title color, not the palette input field.
     accent = accent_color(theme)
 
     {normal_fg, normal_bg} = mode_color(ml, :normal)
