@@ -68,7 +68,7 @@ defmodule MingaEditor.UI.Picker.ProjectSearchSource do
 
   @spec open_new_buffer(map(), String.t(), non_neg_integer(), non_neg_integer()) :: map()
   defp open_new_buffer(state, abs_path, line, col) do
-    case EditorState.start_buffer(abs_path) do
+    case EditorState.start_buffer(abs_path, EditorState.options_server(state)) do
       {:ok, pid} ->
         new_state = EditorState.add_buffer(state, pid)
         Buffer.move_to(pid, {line, col})

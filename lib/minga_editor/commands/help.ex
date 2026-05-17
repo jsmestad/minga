@@ -916,7 +916,7 @@ defmodule MingaEditor.Commands.Help do
 
   @spec start_help_buffer(state()) :: {state(), pid()}
   defp start_help_buffer(state) do
-    {:ok, pid} = start_special_buffer("*Help*")
+    {:ok, pid} = start_special_buffer(state, "*Help*")
 
     state =
       EditorState.update_workspace(state, fn ws ->
@@ -928,16 +928,21 @@ defmodule MingaEditor.Commands.Help do
 
   @spec start_named_buffer(state(), String.t()) :: {state(), pid()}
   defp start_named_buffer(state, buffer_name) do
-    {:ok, pid} = start_special_buffer(buffer_name)
+    {:ok, pid} = start_special_buffer(state, buffer_name)
     {Commands.add_buffer(state, pid), pid}
   end
 
-  @spec start_special_buffer(String.t()) :: {:ok, pid()} | {:error, term()}
-  defp start_special_buffer(buffer_name) do
+  @spec start_special_buffer(state(), String.t()) :: {:ok, pid()} | {:error, term()}
+  defp start_special_buffer(state, buffer_name) do
     DynamicSupervisor.start_child(
       Minga.Buffer.Supervisor,
       {Minga.Buffer,
-       content: "", buffer_name: buffer_name, read_only: true, unlisted: true, persistent: true}
+       content: "",
+       buffer_name: buffer_name,
+       read_only: true,
+       unlisted: true,
+       persistent: true,
+       options_server: EditorState.options_server(state)}
     )
   end
 

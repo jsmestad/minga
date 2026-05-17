@@ -4,6 +4,7 @@ defmodule MingaEditor.Commands.TutorTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Command.Parser
+  alias Minga.Config.Options
   alias Minga.Keymap.Active, as: ActiveKeymap
   alias MingaEditor.Commands.Tutor
   alias MingaEditor.State, as: EditorState
@@ -34,10 +35,15 @@ defmodule MingaEditor.Commands.TutorTest do
   describe "execute/2" do
     test "creates a *Tutor* buffer with tutorial content" do
       state = build_state()
+
+      assert {:ok, false} =
+               Options.set_for_filetype(state.options_server, :text, :autopair_block, false)
+
       result = Tutor.execute(state, :tutor)
 
       tutor_buf = result.workspace.buffers.active
       assert BufferProcess.buffer_name(tutor_buf) == "*Tutor*"
+      assert BufferProcess.get_option(tutor_buf, :autopair_block) == false
 
       content = BufferProcess.content(tutor_buf)
       assert content =~ "M i n g a   T u t o r"

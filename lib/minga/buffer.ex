@@ -55,9 +55,12 @@ defmodule Minga.Buffer do
   """
   @spec ensure_for_path(String.t()) :: {:ok, pid()} | {:error, term()}
   @spec ensure_for_path(String.t(), Minga.Events.registry()) :: {:ok, pid()} | {:error, term()}
-  def ensure_for_path(path, events_registry \\ Minga.Events.default_registry())
+  @spec ensure_for_path(String.t(), Minga.Events.registry(), keyword()) ::
+          {:ok, pid()} | {:error, term()}
+  def ensure_for_path(path, events_registry \\ Minga.Events.default_registry(), opts \\ [])
       when is_binary(path) do
     abs_path = Path.expand(path)
+    options_server = Keyword.get(opts, :options_server, Minga.Config.Options.default_server())
 
     case pid_for_path(abs_path) do
       {:ok, pid} ->
@@ -65,19 +68,20 @@ defmodule Minga.Buffer do
 
       :not_found ->
         if File.exists?(abs_path) do
-          start_buffer_for_path(abs_path, events_registry)
+          start_buffer_for_path(abs_path, events_registry, options_server)
         else
           {:error, :enoent}
         end
     end
   end
 
-  @spec start_buffer_for_path(String.t(), Minga.Events.registry()) ::
+  @spec start_buffer_for_path(String.t(), Minga.Events.registry(), Minga.Config.Options.server()) ::
           {:ok, pid()} | {:error, term()}
-  defp start_buffer_for_path(abs_path, events_registry) do
+  defp start_buffer_for_path(abs_path, events_registry, options_server) do
     case DynamicSupervisor.start_child(
            Minga.Buffer.Supervisor,
-           {__MODULE__, file_path: abs_path, events_registry: events_registry}
+           {__MODULE__,
+            file_path: abs_path, events_registry: events_registry, options_server: options_server}
          ) do
       {:ok, pid} ->
         Minga.Events.broadcast(

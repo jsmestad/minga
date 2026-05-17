@@ -52,6 +52,7 @@ defmodule Minga.Buffer.Process do
           | {:buffer_type, BufState.buffer_type()}
           | {:storage, BufState.storage()}
           | {:filetype, atom()}
+          | {:options_server, Minga.Config.Options.server() | nil}
           | {:read_only, boolean()}
           | {:unlisted, boolean()}
           | {:persistent, boolean()}
@@ -853,10 +854,13 @@ defmodule Minga.Buffer.Process do
             {_, explicit} -> explicit
           end
 
+        options_server = normalize_options_server(Keyword.get(opts, :options_server))
+
         state = %BufState{
           document: Document.new(text),
           file_path: path,
           filetype: filetype,
+          options_server: options_server,
           storage: storage,
           buffer_type: buffer_type,
           save_state: BufState.loaded_save_state(path, {mtime, size}, text),
@@ -864,7 +868,7 @@ defmodule Minga.Buffer.Process do
           read_only: read_only,
           unlisted: Keyword.get(opts, :unlisted, false),
           persistent: Keyword.get(opts, :persistent, false),
-          options: seed_options(filetype),
+          options: seed_options(options_server, filetype),
           explicit_options: MapSet.new(),
           swap_dir: Keyword.get(opts, :swap_dir),
           events_registry: Keyword.get(opts, :events_registry, Minga.Events.default_registry())
@@ -893,6 +897,7 @@ defmodule Minga.Buffer.Process do
           | document: Document.new(text),
             file_path: file_path,
             filetype: filetype,
+            options: reseed_options(state, filetype),
             decorations: Decorations.new(),
             undo_history: UndoHistory.clear(state.undo_history)
         }
@@ -1120,6 +1125,7 @@ defmodule Minga.Buffer.Process do
           BufState.load_saved_content(state, state.file_path, {new_mtime, new_size}, text)
           | document: new_buf,
             filetype: filetype,
+            options: reseed_options(state, filetype),
             undo_history: UndoHistory.clear(state.undo_history),
             decorations: Decorations.new()
         }
@@ -1308,21 +1314,11 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call({:set_filetype, filetype}, _from, state) do
-    # Reseed from global defaults for the new filetype, but preserve any
+    # Reseed from the configured options server for the new filetype, but preserve any
     # options that were explicitly set via set_option (e.g., clipboard: :none
     # injected by test setup). Without this, set_filetype would wipe out
-    # per-buffer overrides and re-read from the global Config.Options.
-    seeded = seed_options(filetype)
-
-    merged =
-      Enum.reduce(state.explicit_options, seeded, fn name, opts ->
-        case Map.fetch(state.options, name) do
-          {:ok, value} -> Map.put(opts, name, value)
-          :error -> opts
-        end
-      end)
-
-    new_state = %{state | filetype: filetype, options: merged}
+    # per-buffer overrides and re-read from the configured Config.Options.
+    new_state = %{state | filetype: filetype, options: reseed_options(state, filetype)}
     {:reply, :ok, new_state}
   end
 
@@ -1809,10 +1805,41 @@ defmodule Minga.Buffer.Process do
   # defaults, so the fallback path is rarely hit (only for options not in
   # the seed list, or if the Options agent was unavailable at init time).
   @spec resolve_option(BufState.t(), atom()) :: term()
-  defp resolve_option(%{options: opts, filetype: ft}, name) do
+  defp resolve_option(%{options: opts, filetype: ft, options_server: options_server}, name) do
     case Map.fetch(opts, name) do
       {:ok, value} -> value
-      :error -> Config.get_for_filetype(name, ft)
+      :error -> fallback_option(options_server, name, ft)
+    end
+  end
+
+  @spec fallback_option(Minga.Config.Options.server() | nil, atom(), atom() | nil) :: term()
+  defp fallback_option(options_server, name, filetype) do
+    case safe_get_for_filetype(options_server, name, filetype) do
+      {:ok, value} -> value
+      :error -> Minga.Config.Options.default(name)
+    end
+  end
+
+  @spec safe_get_for_filetype(Minga.Config.Options.server() | nil, atom(), atom() | nil) ::
+          {:ok, term()} | :error
+  defp safe_get_for_filetype(nil, name, filetype),
+    do: safe_get_for_filetype(Minga.Config.Options.default_server(), name, filetype)
+
+  defp safe_get_for_filetype(server, name, filetype) when is_pid(server) do
+    if Process.alive?(server) do
+      {:ok, Minga.Config.Options.get_for_filetype(server, name, filetype)}
+    else
+      :error
+    end
+  end
+
+  defp safe_get_for_filetype(server, name, filetype) when is_atom(server) do
+    table = :"#{server}_ets"
+
+    if :ets.whereis(table) == :undefined do
+      :error
+    else
+      {:ok, Minga.Config.Options.get_for_filetype(server, name, filetype)}
     end
   end
 
@@ -1838,13 +1865,27 @@ defmodule Minga.Buffer.Process do
     :line_numbers
   ]
 
-  @spec seed_options(atom()) :: %{atom() => term()}
-  defp seed_options(filetype) do
+  @spec normalize_options_server(term() | nil) :: Minga.Config.Options.server()
+  defp normalize_options_server(nil), do: Minga.Config.Options.default_server()
+  defp normalize_options_server(server), do: Minga.Config.Options.validate_server!(server)
+
+  @spec seed_options(Minga.Config.Options.server() | nil, atom()) :: %{atom() => term()}
+  defp seed_options(options_server, filetype) do
     Map.new(@buffer_local_options, fn name ->
-      {name, Config.get_for_filetype(name, filetype)}
+      {name,
+       case safe_get_for_filetype(options_server, name, filetype) do
+         {:ok, value} -> value
+         :error -> Minga.Config.Options.default(name)
+       end}
     end)
-  catch
-    :exit, _ -> %{}
+  end
+
+  @spec reseed_options(BufState.t(), atom()) :: %{atom() => term()}
+  defp reseed_options(%{options: options, explicit_options: explicit_options} = state, filetype) do
+    explicit_values = Map.take(options, MapSet.to_list(explicit_options))
+
+    seed_options(state.options_server, filetype)
+    |> Map.merge(explicit_values)
   end
 
   @spec push_undo(state(), Document.t(), BufState.edit_source(), EditDelta.t()) :: state()

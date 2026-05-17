@@ -37,6 +37,7 @@ defmodule Minga.Buffer.State do
   defstruct document: nil,
             file_path: nil,
             filetype: :text,
+            options_server: Minga.Config.Options.default_server(),
             storage: :local,
             buffer_type: :file,
             save_state: @default_save_state,
@@ -56,10 +57,13 @@ defmodule Minga.Buffer.State do
             swap_dir: nil,
             events_registry: Minga.Events.default_registry()
 
+  @type options_server :: Minga.Config.Options.server()
+
   @type t :: %__MODULE__{
           document: Document.t(),
           file_path: String.t() | nil,
           filetype: atom(),
+          options_server: options_server(),
           storage: storage(),
           buffer_type: buffer_type(),
           save_state: SaveState.t(),

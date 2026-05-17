@@ -227,9 +227,7 @@ defmodule MingaEditor.Commands.EditingTest do
 
       _state = Editing.execute(command_state(buffer), :insert_newline)
 
-      assert BufferProcess.content(buffer) == "def run do
-  
-end"
+      assert BufferProcess.content(buffer) == "def run do\n  \nend"
       assert BufferProcess.cursor(buffer) == {1, 2}
     end
 
@@ -240,8 +238,7 @@ end"
 
       _state = Editing.execute(command_state(buffer), :insert_newline)
 
-      assert BufferProcess.content(buffer) == "def run do
-"
+      assert BufferProcess.content(buffer) == "def run do\n"
     end
 
     test "does not insert block closer when cursor is before trailing text" do
@@ -251,8 +248,7 @@ end"
 
       _state = Editing.execute(command_state(buffer), :insert_newline)
 
-      assert BufferProcess.content(buffer) == "def run do
- rest"
+      assert BufferProcess.content(buffer) == "def run do\n rest"
     end
 
     test "insert_newline does not add a block closer at the end of a highlighted line comment" do
@@ -267,8 +263,7 @@ end"
 
       _state = Editing.execute(command_state_with_highlight(buffer, highlight), :insert_newline)
 
-      assert BufferProcess.content(buffer) == "# def run do
-"
+      assert BufferProcess.content(buffer) == "# def run do\n"
     end
 
     test "insert_newline does not add a block closer inside highlighted strings" do
@@ -283,8 +278,7 @@ end"
 
       _state = Editing.execute(command_state_with_highlight(buffer, highlight), :insert_newline)
 
-      assert BufferProcess.content(buffer) == "def run do
-"
+      assert BufferProcess.content(buffer) == "def run do\n"
     end
   end
 

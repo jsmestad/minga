@@ -333,7 +333,7 @@ defmodule MingaEditor.Commands.FileTree do
 
     state = clear_editing_and_refresh(state)
 
-    case Commands.start_buffer(full_path) do
+    case Commands.start_buffer(full_path, EditorState.options_server(state)) do
       {:ok, pid} ->
         MingaEditor.do_file_tree_open(state, pid, full_path, state.workspace.file_tree.tree)
 
@@ -790,7 +790,7 @@ defmodule MingaEditor.Commands.FileTree do
   defp open_file_from_tree(state, path, tree) do
     case EditorState.find_buffer_by_path(state, path) do
       nil ->
-        case Commands.start_buffer(path) do
+        case Commands.start_buffer(path, EditorState.options_server(state)) do
           {:ok, pid} -> MingaEditor.do_file_tree_open(state, pid, path, tree)
           {:error, _} -> state
         end
@@ -827,7 +827,7 @@ defmodule MingaEditor.Commands.FileTree do
     tree = FileTree.refresh_git_status(tree)
     tree = reveal_active(tree, state.workspace.buffers.active)
     FileTreeFreshness.watch_expanded_dirs(tree)
-    buf = BufferSync.start_buffer(tree)
+    buf = BufferSync.start_buffer(tree, EditorState.options_server(state))
 
     EditorState.update_workspace(state, fn ws ->
       ws

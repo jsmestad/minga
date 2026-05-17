@@ -76,7 +76,8 @@ defmodule MingaEditor.Commands.RemoteFiles do
            filetype: filetype,
            storage: {:remote, remote_node, remote_path},
            read_only: false,
-           buffer_type: :file
+           buffer_type: :file,
+           options_server: EditorState.options_server(state)
          ) do
       {:ok, buffer} ->
         state

@@ -158,7 +158,7 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec create_agent_buffer(state()) :: state()
   defp create_agent_buffer(state) do
-    case AgentBufferSync.start_buffer() do
+    case AgentBufferSync.start_buffer(EditorState.options_server(state)) do
       buf when is_pid(buf) ->
         state = AgentAccess.update_agent(state, fn a -> %{a | buffer: buf} end)
         # Register with tree-sitter parser for markdown highlighting

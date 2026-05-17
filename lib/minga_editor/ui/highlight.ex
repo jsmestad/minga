@@ -555,17 +555,33 @@ defmodule MingaEditor.UI.Highlight do
 
   defp collect_overlapping(spans, count, idx, line_start, line_end, acc) do
     span = elem(spans, idx)
+    collect_overlapping_by_span(spans, count, idx, line_start, line_end, acc, span)
+  end
 
-    cond do
-      span.start_byte >= line_end ->
-        Enum.reverse(acc)
+  defp collect_overlapping_by_span(_spans, _count, _idx, _line_start, line_end, acc, %{
+         start_byte: start_byte
+       })
+       when start_byte >= line_end do
+    Enum.reverse(acc)
+  end
 
-      span.end_byte > line_start ->
-        collect_overlapping(spans, count, idx + 1, line_start, line_end, [span | acc])
+  defp collect_overlapping_by_span(
+         spans,
+         count,
+         idx,
+         line_start,
+         line_end,
+         acc,
+         %{
+           end_byte: end_byte
+         } = span
+       )
+       when end_byte > line_start do
+    collect_overlapping(spans, count, idx + 1, line_start, line_end, [span | acc])
+  end
 
-      true ->
-        collect_overlapping(spans, count, idx + 1, line_start, line_end, acc)
-    end
+  defp collect_overlapping_by_span(spans, count, idx, line_start, line_end, acc, _span) do
+    collect_overlapping(spans, count, idx + 1, line_start, line_end, acc)
   end
 
   # ── Private: innermost-wins span resolution ──────────────────────────
@@ -711,15 +727,13 @@ defmodule MingaEditor.UI.Highlight do
   @spec insert_active([active_entry()], active_entry()) :: [active_entry()]
   defp insert_active([], entry), do: [entry]
 
-  defp insert_active([{hl, hw, hp, _} = head | tail], {el, ew, ep, _} = entry) do
-    cond do
-      el > hl -> [entry, head | tail]
-      el < hl -> [head | insert_active(tail, entry)]
-      ew < hw -> [entry, head | tail]
-      ew > hw -> [head | insert_active(tail, entry)]
-      ep > hp -> [entry, head | tail]
-      true -> [head | insert_active(tail, entry)]
-    end
+  defp insert_active([{hl, hw, hp, _} = head | tail], {el, ew, ep, _} = entry)
+       when el > hl or (el == hl and ew < hw) or (el == hl and ew == hw and ep > hp) do
+    [entry, head | tail]
+  end
+
+  defp insert_active([head | tail], entry) do
+    [head | insert_active(tail, entry)]
   end
 
   @spec remove_active([active_entry()], active_entry()) :: [active_entry()]

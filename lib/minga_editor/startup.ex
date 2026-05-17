@@ -48,9 +48,10 @@ defmodule MingaEditor.Startup do
     events_registry = Keyword.get(opts, :events_registry, Minga.Events.default_registry())
 
     options_server =
-      opts
-      |> Keyword.get(:options_server, Minga.Config.Options.default_server())
-      |> Minga.Config.Options.validate_server!()
+      case Keyword.get(opts, :options_server, Minga.Config.Options.default_server()) do
+        nil -> Minga.Config.Options.default_server()
+        server -> Minga.Config.Options.validate_server!(server)
+      end
 
     width = Keyword.get(opts, :width, 80)
     height = Keyword.get(opts, :height, 24)
@@ -75,7 +76,7 @@ defmodule MingaEditor.Startup do
           {:ok, buf} =
             DynamicSupervisor.start_child(
               Minga.Buffer.Supervisor,
-              {Buffer, content: "", buffer_name: "[new 1]"}
+              {Buffer, content: "", buffer_name: "[new 1]", options_server: options_server}
             )
 
           {buf, [buf]}
@@ -89,7 +90,14 @@ defmodule MingaEditor.Startup do
     initial_window_id = 1
 
     {initial_window, agent_state_update} =
-      build_initial_window(keymap_scope, initial_window_id, active_buf, height, width)
+      build_initial_window(
+        keymap_scope,
+        initial_window_id,
+        active_buf,
+        height,
+        width,
+        options_server
+      )
 
     windows =
       if initial_window, do: %{initial_window_id => initial_window}, else: %{}
@@ -175,8 +183,27 @@ defmodule MingaEditor.Startup do
   """
   @spec build_initial_window(atom(), Window.id(), pid() | nil, pos_integer(), pos_integer()) ::
           {Window.t() | nil, {:agent_buffer, pid()} | :noop}
-  def build_initial_window(:agent, win_id, _active_buf, rows, cols) do
-    agent_buf = AgentBufferSync.start_buffer()
+  @spec build_initial_window(
+          atom(),
+          Window.id(),
+          pid() | nil,
+          pos_integer(),
+          pos_integer(),
+          Minga.Config.Options.server()
+        ) :: {Window.t() | nil, {:agent_buffer, pid()} | :noop}
+  def build_initial_window(scope, win_id, active_buf, rows, cols) do
+    build_initial_window(
+      scope,
+      win_id,
+      active_buf,
+      rows,
+      cols,
+      Minga.Config.Options.default_server()
+    )
+  end
+
+  def build_initial_window(:agent, win_id, _active_buf, rows, cols, options_server) do
+    agent_buf = AgentBufferSync.start_buffer(options_server)
 
     if is_pid(agent_buf) do
       window = Window.new_agent_chat(win_id, agent_buf, rows, cols)
@@ -186,7 +213,7 @@ defmodule MingaEditor.Startup do
     end
   end
 
-  def build_initial_window(_scope, win_id, active_buf, rows, cols) do
+  def build_initial_window(_scope, win_id, active_buf, rows, cols, _options_server) do
     window =
       if active_buf, do: Window.new(win_id, active_buf, rows, cols), else: nil
 

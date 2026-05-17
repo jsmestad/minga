@@ -1542,7 +1542,7 @@ defmodule MingaEditor.LspActions do
 
     case idx do
       nil ->
-        case Commands.start_buffer(file_path) do
+        case Commands.start_buffer(file_path, EditorState.options_server(state)) do
           {:ok, pid} -> Commands.add_buffer(state, pid)
           {:error, _reason} -> EditorState.set_status(state, "Could not open #{file_path}")
         end
@@ -1999,7 +1999,7 @@ defmodule MingaEditor.LspActions do
   defp ensure_buffer_open(state, path) do
     case find_buffer_by_path(state, path) do
       nil ->
-        case Commands.start_buffer(path) do
+        case Commands.start_buffer(path, EditorState.options_server(state)) do
           {:ok, pid} -> Commands.add_buffer(state, pid)
           {:error, _} -> state
         end

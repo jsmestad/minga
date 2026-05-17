@@ -71,7 +71,7 @@ defmodule MingaEditor do
           | {:port_manager, GenServer.server()}
           | {:parser_manager, GenServer.server()}
           | {:keymap_server, GenServer.server()}
-          | {:options_server, GenServer.server()}
+          | {:options_server, GenServer.server() | nil}
           | {:events_registry, Minga.Events.registry()}
           | {:buffer, pid()}
           | {:width, pos_integer()}
@@ -150,8 +150,8 @@ defmodule MingaEditor do
   @doc """
   Ensures a buffer exists for the given file path, opening one if needed.
 
-  Delegates to `Buffer.ensure_for_path/1` for the actual buffer start, then
-  casts to the Editor to register the buffer in the workspace (buffer list,
+  Delegates to the Editor GenServer so it can use the editor's options server
+  for buffer creation, then registers the buffer in the workspace (buffer list,
   monitoring, log message). The buffer is added in the background without
   switching the active window.
 
@@ -161,18 +161,40 @@ defmodule MingaEditor do
   @spec ensure_buffer_for_path(String.t(), GenServer.server()) ::
           {:ok, pid()} | {:error, term()}
   def ensure_buffer_for_path(path, server \\ __MODULE__) do
-    case Buffer.ensure_for_path(path) do
-      {:ok, pid} ->
-        # Notify the Editor to register this buffer in the workspace
-        # (monitoring, buffer list, log message). The cast is fire-and-forget;
-        # the tools only need the pid for Buffer.Process calls.
-        GenServer.cast(server, {:register_background_buffer, pid, Path.expand(path)})
-        {:ok, pid}
-
-      error ->
-        error
+    case live_editor_server(server) do
+      nil -> Buffer.ensure_for_path(path)
+      live_server -> ensure_buffer_for_path_via_editor(path, live_server)
     end
   end
+
+  @spec live_editor_server(GenServer.server()) :: pid() | nil
+  defp live_editor_server(server) when is_pid(server) do
+    if Process.alive?(server), do: server, else: nil
+  end
+
+  defp live_editor_server(server), do: GenServer.whereis(server)
+
+  @spec ensure_buffer_for_path_via_editor(String.t(), pid()) :: {:ok, pid()} | {:error, term()}
+  defp ensure_buffer_for_path_via_editor(path, live_server) do
+    GenServer.call(live_server, {:ensure_buffer_for_path, path})
+  catch
+    :exit, reason -> handle_ensure_buffer_call_exit(reason, path)
+  end
+
+  @spec handle_ensure_buffer_call_exit(term(), String.t()) :: {:ok, pid()} | {:error, term()}
+  defp handle_ensure_buffer_call_exit(reason, path) do
+    if stale_editor_call_exit?(reason) do
+      Buffer.ensure_for_path(path)
+    else
+      exit(reason)
+    end
+  end
+
+  @spec stale_editor_call_exit?(term()) :: boolean()
+  defp stale_editor_call_exit?({reason, {GenServer, :call, _args}}),
+    do: reason in [:noproc, :normal, :shutdown] or match?({:shutdown, _}, reason)
+
+  defp stale_editor_call_exit?(reason), do: reason in [:noproc, :normal, :shutdown]
 
   @doc "Send an async message to the Editor GenServer. Used by background tasks."
   @spec cast(term(), GenServer.server()) :: :ok
@@ -285,7 +307,7 @@ defmodule MingaEditor do
   @impl true
   @spec handle_call(term(), GenServer.from(), state()) :: {:reply, term(), state()}
   def handle_call({:open_file, file_path}, _from, state) do
-    case Commands.start_buffer(file_path) do
+    case Commands.start_buffer(file_path, EditorState.options_server(state)) do
       {:ok, pid} ->
         new_state = register_buffer(state, pid, file_path)
         new_state = AgentLifecycle.maybe_set_auto_context(new_state, file_path, pid)
@@ -294,6 +316,25 @@ defmodule MingaEditor do
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:ensure_buffer_for_path, path}, _from, state) do
+    case Buffer.ensure_for_path(path, EditorState.events_registry(state),
+           options_server: EditorState.options_server(state)
+         ) do
+      {:ok, pid} ->
+        new_state =
+          if buffer_tracked?(state, pid) do
+            state
+          else
+            register_buffer_background(state, pid, Path.expand(path))
+          end
+
+        {:reply, {:ok, pid}, new_state}
+
+      error ->
+        {:reply, error, state}
     end
   end
 
@@ -2047,7 +2088,7 @@ defmodule MingaEditor do
   @spec restore_session_buffer(Session.buffer_entry(), state()) :: state()
   defp restore_session_buffer(%{file: file} = entry, state) do
     if File.exists?(file) do
-      case Commands.start_buffer(file) do
+      case Commands.start_buffer(file, EditorState.options_server(state)) do
         {:ok, pid} ->
           :ok = Buffer.move_to(pid, {entry.cursor_line, entry.cursor_col})
           register_buffer(state, pid, file)
@@ -2064,7 +2105,7 @@ defmodule MingaEditor do
   # The buffer is marked dirty since the recovered content hasn't been saved.
   @spec recover_buffer(state(), String.t(), String.t()) :: state()
   defp recover_buffer(state, file_path, content) do
-    case Commands.start_buffer(file_path) do
+    case Commands.start_buffer(file_path, EditorState.options_server(state)) do
       {:ok, pid} ->
         # Replace buffer content with the recovered swap data.
         # This marks the buffer dirty (unsaved changes from the crash).
@@ -2840,7 +2881,7 @@ defmodule MingaEditor do
 
     case idx do
       nil ->
-        case Commands.start_buffer(abs_path) do
+        case Commands.start_buffer(abs_path, EditorState.options_server(state)) do
           {:ok, pid} -> Commands.add_buffer(state, pid)
           {:error, _reason} -> EditorState.set_status(state, "Could not open #{abs_path}")
         end
@@ -2854,7 +2895,7 @@ defmodule MingaEditor do
   defp open_file_by_path_in_active_window(state, abs_path) do
     case buffer_index_for_path(state, abs_path) do
       nil ->
-        case Commands.start_buffer(abs_path) do
+        case Commands.start_buffer(abs_path, EditorState.options_server(state)) do
           {:ok, pid} -> register_buffer_in_active_window(state, pid, abs_path)
           {:error, _reason} -> EditorState.set_status(state, "Could not open #{abs_path}")
         end

@@ -699,16 +699,88 @@ defmodule MingaEditor.Commands.Editing do
   @spec scope_at_position(state(), pid(), Document.position()) :: Highlight.scope()
   defp scope_at_position(state, buf, position) do
     case highlight_for_buffer(state, buf) do
-      %Highlight{} = highlight ->
-        Highlight.scope_at(
-          highlight,
-          byte_offset_for_position(buf, position),
-          Buffer.content(buf)
-        )
-
-      nil ->
-        :code
+      %Highlight{} = highlight -> scope_at_highlight(highlight, buf, position)
+      nil -> :code
     end
+  end
+
+  @spec scope_at_highlight(Highlight.t(), pid(), Document.position()) :: Highlight.scope()
+  defp scope_at_highlight(highlight, buf, {line, col} = position) do
+    content = Buffer.content(buf)
+    scope = Highlight.scope_at(highlight, byte_offset_for_position(buf, position), content)
+    scope_at_highlight(scope, highlight, buf, content, line, col)
+  end
+
+  @spec scope_at_highlight(
+          Highlight.scope(),
+          Highlight.t(),
+          pid(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: Highlight.scope()
+  defp scope_at_highlight(:code, highlight, buf, content, line, col) do
+    if line_comment_scope_at_eol?(highlight, buf, content, line, col),
+      do: :comment,
+      else: :code
+  end
+
+  defp scope_at_highlight(scope, _highlight, _buf, _content, _line, _col), do: scope
+
+  @line_comment_block_prefixes ["/*", "<!--", "<%!--", "{-", "(*"]
+
+  @spec line_comment_scope_at_eol?(
+          Highlight.t(),
+          pid(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: boolean()
+  defp line_comment_scope_at_eol?(highlight, buf, content, line, col) do
+    with [line_text] <- Buffer.lines(buf, line, 1),
+         true <- col == byte_size(line_text),
+         token when is_binary(token) <- language_comment_token(Buffer.filetype(buf)),
+         true <- line_comment_token?(token) do
+      line_comment_scope_before_cursor?(highlight, buf, content, line, line_text)
+    else
+      _ -> false
+    end
+  end
+
+  @spec line_comment_token?(String.t()) :: boolean()
+  defp line_comment_token?(token) do
+    not Enum.any?(@line_comment_block_prefixes, &String.starts_with?(token, &1))
+  end
+
+  @spec line_comment_scope_before_cursor?(
+          Highlight.t(),
+          pid(),
+          String.t(),
+          non_neg_integer(),
+          String.t()
+        ) :: boolean()
+  defp line_comment_scope_before_cursor?(_highlight, _buf, _content, _line, ""), do: false
+
+  defp line_comment_scope_before_cursor?(highlight, buf, content, line, line_text) do
+    trimmed_line = String.trim_trailing(line_text)
+    trimmed_col = byte_size(trimmed_line)
+
+    if trimmed_col == 0 do
+      false
+    else
+      comment_scope_at_byte?(highlight, buf, content, line, trimmed_col - 1)
+    end
+  end
+
+  @spec comment_scope_at_byte?(
+          Highlight.t(),
+          pid(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: boolean()
+  defp comment_scope_at_byte?(highlight, buf, content, line, col) do
+    Highlight.scope_at(highlight, byte_offset_for_position(buf, {line, col}), content) == :comment
   end
 
   @spec highlight_for_buffer(state(), pid()) :: Highlight.t() | nil
@@ -750,7 +822,7 @@ defmodule MingaEditor.Commands.Editing do
 
     case scope_at_position(state, buf, cursor) do
       :code -> apply_autopair_insert(buf, gb, cursor, char)
-      _scope -> Buffer.insert_char(buf, char)
+      _scope -> apply_non_code_autopair_insert(buf, gb, cursor, char)
     end
 
     :ok
@@ -766,6 +838,23 @@ defmodule MingaEditor.Commands.Editing do
 
       {:skip, _char} ->
         Buffer.move(buf, :right)
+
+      {:passthrough, char} ->
+        Buffer.insert_char(buf, char)
+    end
+
+    :ok
+  end
+
+  @spec apply_non_code_autopair_insert(pid(), Document.t(), Document.position(), String.t()) ::
+          :ok
+  defp apply_non_code_autopair_insert(buf, gb, cursor, char) do
+    case Minga.Editing.insert_with_pairs(gb, cursor, char) do
+      {:skip, _char} ->
+        Buffer.move(buf, :right)
+
+      {:pair, _open, _close} ->
+        Buffer.insert_char(buf, char)
 
       {:passthrough, char} ->
         Buffer.insert_char(buf, char)

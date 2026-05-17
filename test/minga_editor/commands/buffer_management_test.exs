@@ -12,15 +12,15 @@ defmodule MingaEditor.Commands.BufferManagementTest do
 
   @sync_timeout 30_000
 
-  defp start_editor(content) do
-    {:ok, buffer} = BufferProcess.start_link(content: content)
-    {:ok, options} = Options.start_link(name: nil)
+  defp start_editor(content, options_server \\ nil) do
+    options_server = options_server || start_supervised!({Options, name: nil})
+    {:ok, buffer} = BufferProcess.start_link(content: content, options_server: options_server)
 
     {:ok, editor} =
       MingaEditor.start_link(
         name: :"editor_#{:erlang.unique_integer([:positive])}",
         port_manager: nil,
-        options_server: options,
+        options_server: options_server,
         buffer: buffer,
         width: 40,
         height: 10,
@@ -105,13 +105,56 @@ defmodule MingaEditor.Commands.BufferManagementTest do
       assert File.read!(path) == "test content"
     end
 
-    test ":e command keeps the editor process alive when opening an arbitrary path" do
-      {editor, _buffer} = start_editor("hello")
+    @tag :tmp_dir
+    test ":e command opens a file using the editor options server", %{tmp_dir: tmp_dir} do
+      options_server = start_supervised!({Options, name: nil})
+
+      assert {:ok, false} =
+               Options.set_for_filetype(options_server, :text, :autopair_block, false)
+
+      path = Path.join(tmp_dir, "editor_open_#{:erlang.unique_integer([:positive])}.txt")
+      File.write!(path, "opened content")
+
+      {editor, original_buffer} = start_editor("hello", options_server)
+      monitor = Process.monitor(editor)
+
       send_key(editor, ?:)
-      type_string(editor, "e test.txt")
+      type_string(editor, "e #{path}")
       send_key(editor, 13)
 
-      assert Process.alive?(editor)
+      state = :sys.get_state(editor)
+      active = state.workspace.buffers.active
+      assert active != original_buffer
+      assert BufferProcess.file_path(active) == path
+      assert BufferProcess.get_option(active, :autopair_block) == false
+      refute_receive {:DOWN, ^monitor, :process, ^editor, _reason}, 0
+      Process.demonitor(monitor, [:flush])
+    end
+
+    @tag :tmp_dir
+    test ":e switches to an already-open file without duplicating the buffer", %{tmp_dir: tmp_dir} do
+      options_server = start_supervised!({Options, name: nil})
+
+      assert {:ok, false} =
+               Options.set_for_filetype(options_server, :text, :autopair_block, false)
+
+      path = Path.join(tmp_dir, "editor_open_b_#{:erlang.unique_integer([:positive])}.txt")
+      File.write!(path, "second")
+
+      {editor, original_buffer} = start_editor("hello", options_server)
+      {:ok, existing_buffer} = MingaEditor.ensure_buffer_for_path(path, editor)
+      monitor = Process.monitor(editor)
+
+      send_key(editor, ?:)
+      type_string(editor, "e #{path}")
+      send_key(editor, 13)
+
+      state = :sys.get_state(editor)
+      assert state.workspace.buffers.active == existing_buffer
+      assert state.workspace.buffers.list == [original_buffer, existing_buffer]
+      assert BufferProcess.get_option(existing_buffer, :autopair_block) == false
+      refute_receive {:DOWN, ^monitor, :process, ^editor, _reason}, 0
+      Process.demonitor(monitor, [:flush])
     end
 
     test "goto line via :N command moves the buffer cursor" do

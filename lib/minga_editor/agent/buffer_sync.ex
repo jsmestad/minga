@@ -17,8 +17,8 @@ defmodule MingaEditor.Agent.BufferSync do
   (no user edits), unlisted (hidden from buffer picker), and persistent
   (survives buffer kill).
   """
-  @spec start_buffer() :: pid() | nil
-  def start_buffer do
+  @spec start_buffer(Minga.Config.Options.server()) :: pid() | nil
+  def start_buffer(options_server \\ Minga.Config.Options.default_server()) do
     case Buffer.start_link(
            content: "",
            buffer_type: :nofile,
@@ -26,7 +26,8 @@ defmodule MingaEditor.Agent.BufferSync do
            filetype: :markdown,
            read_only: true,
            unlisted: true,
-           persistent: true
+           persistent: true,
+           options_server: options_server
          ) do
       {:ok, pid} ->
         Buffer.set_option(pid, :line_numbers, :none)

@@ -417,6 +417,42 @@ defmodule MingaEditor.StartupTest do
     end
   end
 
+  describe "build_initial_state/1" do
+    test "treats nil options_server as the default server" do
+      state =
+        Startup.build_initial_state(
+          backend: :headless,
+          port_manager: nil,
+          parser_manager: nil,
+          options_server: nil,
+          width: 80,
+          height: 24
+        )
+
+      assert state.options_server == Options.default_server()
+    end
+
+    test "threads the supplied options server into the initial buffer" do
+      options_server = start_supervised!({Options, name: __MODULE__})
+
+      assert {:ok, false} =
+               Options.set_for_filetype(options_server, :text, :autopair_block, false)
+
+      state =
+        Startup.build_initial_state(
+          backend: :headless,
+          port_manager: nil,
+          parser_manager: nil,
+          options_server: options_server,
+          width: 80,
+          height: 24
+        )
+
+      assert state.options_server == options_server
+      assert BufferProcess.get_option(state.workspace.buffers.active, :autopair_block) == false
+    end
+  end
+
   describe "build_initial_window/5" do
     test "agent mode creates a full-screen agent_chat window" do
       {window, update} = Startup.build_initial_window(:agent, 1, self(), 24, 80)

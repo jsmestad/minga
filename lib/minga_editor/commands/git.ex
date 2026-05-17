@@ -285,7 +285,8 @@ defmodule MingaEditor.Commands.Git do
            buffer_type: :nofile,
            read_only: true,
            buffer_name: "#{filename} [diff:#{label}]",
-           filetype: filetype
+           filetype: filetype,
+           options_server: EditorState.options_server(state)
          ) do
       {:ok, diff_buf} ->
         apply_diff_decorations(diff_buf, diff_result.line_metadata, state.theme)
@@ -333,7 +334,8 @@ defmodule MingaEditor.Commands.Git do
            buffer_type: :nofile,
            read_only: true,
            buffer_name: "#{filename} [diff:#{label}]",
-           filetype: filetype
+           filetype: filetype,
+           options_server: EditorState.options_server(state)
          ) do
       {:ok, diff_buf} ->
         apply_diff_decorations(diff_buf, diff_result.line_metadata, state.theme)
