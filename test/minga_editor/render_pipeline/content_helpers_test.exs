@@ -304,6 +304,41 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
       assert face.fg == ctx.gutter_colors.fold_fg
     end
 
+    test "passes indent guide data through to buffer line rendering", %{ctx: ctx, window: window} do
+      lines = ["def run do", "    child", "end"]
+
+      ctx = %{
+        ctx
+        | tab_width: 2,
+          cursor_col: 4,
+          indent_guide_face: Minga.Core.Face.new(fg: 0x111111),
+          indent_guide_active_face: Minga.Core.Face.new(fg: 0x222222)
+      }
+
+      opts = %{
+        first_line: 0,
+        cursor_line: 1,
+        ctx: ctx,
+        ln_style: :absolute,
+        gutter_w: 6,
+        first_byte_off: 0,
+        row_off: 0,
+        col_off: 0,
+        window: window,
+        buffer: window.buffer
+      }
+
+      {_gutter_layer, content_layer, _rows, _window} =
+        ContentHelpers.render_lines_nowrap_layers(lines, opts)
+
+      assert {8, "│", face} =
+               Enum.find(Map.get(content_layer, 1), fn {col, text, _face} ->
+                 col == 8 and text == "│"
+               end)
+
+      assert face.fg == 0x111111
+    end
+
     test "fold indicators do not overwrite diagnostic signs", %{ctx: ctx, window: window} do
       lines = ["defmodule Example do", "  def run, do: :ok", "end"]
       window = Window.set_fold_ranges(window, [FoldRange.new!(0, 2)])

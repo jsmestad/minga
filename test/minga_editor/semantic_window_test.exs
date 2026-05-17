@@ -117,6 +117,18 @@ defmodule MingaEditor.SemanticWindowTest do
       assert row.text == draw_text
     end
 
+    test "semantic spans include TODO keyword faces" do
+      state = gui_state(content: "# TODO ship")
+      {[wf], _cursor, _state} = build_content(state)
+
+      [row] = wf.semantic.rows
+      todo_span = Enum.find(row.spans, fn span -> span.start_col == 2 and span.end_col == 6 end)
+
+      assert row.text == "# TODO ship"
+      assert todo_span.fg == 0xECBE7B
+      assert Bitwise.band(todo_span.attrs, 1) == 1
+    end
+
     test "semantic row text matches for multiline content" do
       content = "alpha\nbeta\ngamma\ndelta\nepsilon"
       state = gui_state(content: content)

@@ -41,6 +41,7 @@ defmodule Minga.Keymap.Defaults do
     # ── Search ─────────────────────────────────────────────────────────────────
     {[{?s, @none}, {?p, @none}], :search_project, "Search project"},
     {[{?s, @none}, {?s, @none}], :search_buffer, "Search in buffer"},
+    {[{?s, @none}, {?t, @none}], :search_todos, "Search TODOs"},
     {[{?s, @none}, {?r, @none}], :search_and_replace, "Search and replace"},
     {[{?s, @none}, {?w, @none}], :workspace_symbols, "Search workspace symbols"},
     {[{?/, @none}], :search_project, "Search project"},

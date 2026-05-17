@@ -12,6 +12,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   alias Minga.Buffer
   alias Minga.Config
   alias Minga.Core.Decorations
+  alias Minga.Core.IndentGuide
   alias Minga.Core.Decorations.ConcealRange
   alias Minga.Core.Decorations.FoldRegion
   alias Minga.Core.Face
@@ -165,7 +166,13 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       search_colors: state.theme.search,
       document_highlight_colors: document_highlight_colors(state.theme),
       wrap_on: Map.get(params, :wrap_on, false),
-      line_number_style: Map.get(params, :line_number_style, :absolute)
+      line_number_style: Map.get(params, :line_number_style, :absolute),
+      indent_guide_face:
+        Face.new(fg: state.theme.editor.indent_guide_fg || state.theme.gutter.fg),
+      indent_guide_active_face:
+        Face.new(fg: state.theme.editor.indent_guide_active_fg || state.theme.gutter.current_fg),
+      hl_todo_faces: MingaEditor.UI.Theme.hl_todo_faces(state.theme),
+      cursor_col: Map.get(params, :cursor_col, cursor_display_col(lines, cursor, first_line))
     }
 
     {ctx, state}
@@ -226,12 +233,14 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
         List.duplicate(nil, max_rows)
       end
 
+    indent_guides_list = indent_guides_for_lines(lines, opts)
+
     {gutter_layer, content_layer, _byte_off, window, _screen_row} =
       Enum.zip_reduce(
-        lines,
-        highlight_segments_list,
+        [lines, highlight_segments_list, indent_guides_list],
         {%{}, %{}, first_byte_off, window, 0},
-        fn line_text, hl_segments, {g_layer, c_layer, byte_off, win, screen_row} ->
+        fn [line_text, hl_segments, indent_guide_cols],
+           {g_layer, c_layer, byte_off, win, screen_row} ->
           buf_line = first_line + screen_row
           next_byte_off = byte_off + byte_size(line_text) + 1
 
@@ -252,7 +261,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
                 max_rows: max_rows,
                 row_offset: row_off,
                 col_offset: col_off,
-                highlight_segments: hl_segments
+                highlight_segments: hl_segments,
+                indent_guide_cols: indent_guide_cols
               })
 
             fold_g =
@@ -331,13 +341,16 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
         List.duplicate(nil, max_rows)
       end
 
+    indent_guides_list = indent_guides_for_lines(lines, opts)
+
     {gutters, contents_rev, _byte_off, window} =
       lines
       |> Enum.zip(highlight_segments_list)
+      |> Enum.zip(indent_guides_list)
       |> Enum.with_index()
       |> Enum.reduce(
         {[], [], first_byte_off, window},
-        fn {{line_text, hl_segments}, screen_row}, {g, c, byte_off, win} ->
+        fn {{{line_text, hl_segments}, indent_guide_cols}, screen_row}, {g, c, byte_off, win} ->
           buf_line = first_line + screen_row
           next_byte_off = byte_off + byte_size(line_text) + 1
 
@@ -358,7 +371,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
                 max_rows: max_rows,
                 row_offset: row_off,
                 col_offset: col_off,
-                highlight_segments: hl_segments
+                highlight_segments: hl_segments,
+                indent_guide_cols: indent_guide_cols
               })
 
             fold_g =
@@ -431,7 +445,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       lines: lines,
       first_line: first_line,
       wrap_index: wrap_index,
-      fold_start_lines: fold_start_lines(window.fold_ranges)
+      fold_start_lines: fold_start_lines(window.fold_ranges),
+      indent_guides_by_line: indent_guides_for_lines(lines, opts)
     }
 
     # block_render_cache is a within-window Map keyed by block ID.
@@ -496,6 +511,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       render_opts
       |> Map.put(:max_rows, screen_row + rows_for_line)
       |> Map.put(:wrap_entry, wrap_entry)
+      |> Map.put(:indent_guide_cols, indent_guides_for_buf_line(render_opts, buf_line))
 
     {new_g, new_c, win} =
       render_folded_line(win, buf_line, display_text, fold_info, screen_row, line_opts, {g, c})
@@ -722,7 +738,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
           wrap_entry: wrap_entry,
           max_rows: render_opts.max_rows,
           row_offset: render_opts.row_off,
-          col_offset: render_opts.col_off
+          col_offset: render_opts.col_off,
+          indent_guide_cols: Map.get(render_opts, :indent_guide_cols, [])
         })
 
       win = Window.cache_line(win, buf_line, fold_g ++ g_cmds, c_cmds)
@@ -755,6 +772,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     wrap_map =
       WrapMap.compute(lines, ctx.content_w, breakindent: breakindent, linebreak: linebreak)
 
+    indent_guides_list = indent_guides_for_lines(lines, opts)
+
     sign_w = Gutter.sign_column_width()
     sign_ctx = SignContext.from_render_context(ctx)
     fold_start_lines = fold_start_lines(opts.window.fold_ranges)
@@ -763,9 +782,10 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       lines
       |> Enum.with_index()
       |> Enum.zip(wrap_map)
+      |> Enum.zip(indent_guides_list)
       |> Enum.reduce_while(
         {[], [], 0, first_byte_off},
-        fn {{line_text, line_idx}, visual_rows}, {g, c, sr, byte_off} ->
+        fn {{{line_text, line_idx}, visual_rows}, indent_guide_cols}, {g, c, sr, byte_off} ->
           buf_line = first_line + line_idx
 
           {g2, c2, rows_used} =
@@ -783,7 +803,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
               wrap_entry: visual_rows,
               max_rows: max_rows,
               row_offset: row_off,
-              col_offset: col_off
+              col_offset: col_off,
+              indent_guide_cols: indent_guide_cols
             })
 
           fold_g =
@@ -1223,7 +1244,11 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       ctx.search_colors,
       ctx.document_highlight_colors,
       ctx.wrap_on,
-      ctx.line_number_style
+      ctx.line_number_style,
+      ctx.indent_guide_face,
+      ctx.indent_guide_active_face,
+      ctx.hl_todo_faces,
+      ctx.cursor_col
     }
   end
 
@@ -1235,6 +1260,36 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   end
 
   # ── Private helpers ────────────────────────────────────────────────────────
+
+  @spec indent_guides_for_lines([String.t()], map()) :: [[IndentGuide.guide()]]
+  defp indent_guides_for_lines(lines, %{ctx: ctx, window: window}) do
+    if Config.get(:indent_guides) and not MingaEditor.Window.Content.agent_chat?(window.content) do
+      {guides, levels} = IndentGuide.compute_with_levels(lines, ctx.tab_width, ctx.cursor_col)
+      Enum.map(levels, &guides_for_indent_level(guides, &1, ctx.tab_width))
+    else
+      List.duplicate([], length(lines))
+    end
+  end
+
+  @spec guides_for_indent_level([IndentGuide.guide()], non_neg_integer(), pos_integer()) :: [
+          IndentGuide.guide()
+        ]
+  defp guides_for_indent_level(guides, indent_level, tab_width) do
+    Enum.filter(guides, fn %{col: col} -> div(col, tab_width) <= indent_level end)
+  end
+
+  @spec indent_guides_for_buf_line(map(), non_neg_integer()) :: [IndentGuide.guide()]
+  defp indent_guides_for_buf_line(render_opts, buf_line) do
+    line_index = buf_line - render_opts.first_line
+    Enum.at(render_opts.indent_guides_by_line, line_index, [])
+  end
+
+  @spec cursor_display_col([String.t()], Buffer.position(), non_neg_integer()) ::
+          non_neg_integer()
+  defp cursor_display_col(lines, {line, byte_col}, first_line) do
+    line_text = cursor_line_text(lines, line, first_line)
+    Unicode.display_col(line_text, byte_col)
+  end
 
   @spec invisible_char_settings(pid(), MingaEditor.UI.Theme.t()) ::
           {boolean(), pos_integer(), Face.t() | nil}
