@@ -123,6 +123,66 @@ defmodule Minga.HighlightTest do
       assert text == "hello world"
     end
 
+    test "empty line returns no segments" do
+      hl =
+        highlight_with(
+          spans: [%{start_byte: 0, end_byte: 10, capture_id: 0}],
+          capture_names: ["keyword"],
+          theme: %{"keyword" => [fg: 0xFF0000]}
+        )
+
+      assert Highlight.styles_for_line(hl, "", 5) == []
+    end
+
+    test "mismatched spans on a Unicode line preserve valid text" do
+      hl =
+        highlight_with(
+          spans: [
+            %{start_byte: 2, end_byte: 5, capture_id: 0},
+            %{start_byte: 10, end_byte: 20, capture_id: 0}
+          ],
+          capture_names: ["keyword"],
+          theme: %{"keyword" => [fg: 0xFF0000]}
+        )
+
+      line = "# ── Server Callbacks ──────"
+      result = Highlight.styles_for_line(hl, line, 0)
+      all_text = Enum.map_join(result, fn {text, _style} -> text end)
+
+      assert String.valid?(all_text)
+      assert all_text == line
+    end
+
+    test "span boundary inside a multi-byte character preserves byte count" do
+      line = "──"
+
+      hl =
+        highlight_with(
+          spans: [%{start_byte: 0, end_byte: 1, capture_id: 0}],
+          capture_names: ["comment"],
+          theme: %{"comment" => [fg: 0x888888]}
+        )
+
+      result = Highlight.styles_for_line(hl, line, 0)
+      all_text = Enum.map_join(result, fn {text, _style} -> text end)
+      assert byte_size(all_text) == byte_size(line)
+    end
+
+    test "span at a valid multi-byte character boundary applies style" do
+      line = "──"
+
+      hl =
+        highlight_with(
+          spans: [%{start_byte: 0, end_byte: 3, capture_id: 0}],
+          capture_names: ["comment"],
+          theme: %{"comment" => [fg: 0x888888]}
+        )
+
+      result = Highlight.styles_for_line(hl, line, 0)
+
+      assert_segments(result, [{"─", fg: 0x888888}, {"─", []}])
+    end
+
     test "single span covering part of line" do
       hl =
         highlight_with(
