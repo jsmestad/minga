@@ -26,6 +26,13 @@ private func appendU32(_ data: inout Data, _ value: UInt32) {
     data.append(UInt8(value & 0xFF))
 }
 
+/// Appends a 24-bit big-endian integer to a Data buffer.
+private func appendU24(_ data: inout Data, _ value: UInt32) {
+    data.append(UInt8((value >> 16) & 0xFF))
+    data.append(UInt8((value >> 8) & 0xFF))
+    data.append(UInt8(value & 0xFF))
+}
+
 /// Appends a length-prefixed UTF-8 string with a UInt16 length prefix.
 private func appendString16(_ data: inout Data, _ string: String) {
     let utf8 = Array(string.utf8)
@@ -345,6 +352,14 @@ struct GUIStatusBarDecoderTests {
         return section
     }
 
+    private func appendStatusBarSegment(_ data: inout Data, text: String, fg: UInt32, bg: UInt32, attrs: UInt8, command: String) {
+        appendU24(&data, fg)
+        appendU24(&data, bg)
+        data.append(attrs)
+        appendString16(&data, text)
+        appendString16(&data, command)
+    }
+
     @Test("Decode gui_status_bar buffer variant (sectioned format)")
     func decodeBufferVariant() throws {
         var identity = Data()
@@ -452,6 +467,7 @@ struct GUIStatusBarDecoderTests {
         #expect(update.selection.size == 3)
         #expect(update.backgroundSubagentCount == 2)
         #expect(update.backgroundSubagentLabel == "session-2: tests")
+
     }
 
     @Test("Decode gui_status_bar agent variant (sectioned format)")
@@ -525,6 +541,7 @@ struct GUIStatusBarDecoderTests {
         #expect(size == data.count)
 
         guard case .guiStatusBar(let update) = cmd else {
+
             Issue.record("Expected .guiStatusBar"); return
         }
 
@@ -544,6 +561,195 @@ struct GUIStatusBarDecoderTests {
         #expect(update.filename == "editor.ex")
         #expect(update.backgroundSubagentCount == 3)
         #expect(update.backgroundSubagentLabel == "session-3: agent tests")
+    }
+
+    @Test("Decode configured modeline segments section")
+    func decodeModelineSegmentsSection() throws {
+        var identity = Data()
+        identity.append(0); identity.append(0); identity.append(0)
+
+        var modelineSegments = Data()
+        modelineSegments.append(1) // version
+        appendU16(&modelineSegments, 1) // left count
+        appendU16(&modelineSegments, 1) // right count
+        appendStatusBarSegment(&modelineSegments, text: " NORMAL ", fg: 0xBBC2CF, bg: 0x51AFEF, attrs: 0x01, command: "")
+        appendStatusBarSegment(&modelineSegments, text: " Elixir ", fg: 0xC678DD, bg: 0x282C34, attrs: 0x00, command: "set_language")
+
+        let sections = [
+            buildSection(SECTION_IDENTITY, identity),
+            buildSection(SECTION_MODELINE_SEGMENTS, modelineSegments),
+        ]
+
+        var data = Data()
+        data.append(OP_GUI_STATUS_BAR)
+        data.append(UInt8(sections.count))
+        for s in sections { data.append(s) }
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiStatusBar(let update) = cmd else {
+            Issue.record("Expected .guiStatusBar"); return
+        }
+
+        #expect(update.modelineLeftSegments.count == 1)
+        #expect(update.modelineLeftSegments[0].text == " NORMAL ")
+        #expect(update.modelineLeftSegments[0].fgColor == 0xBBC2CF)
+        #expect(update.modelineLeftSegments[0].bgColor == 0x51AFEF)
+        #expect(update.modelineLeftSegments[0].isBold)
+        #expect(update.modelineRightSegments.count == 1)
+        #expect(update.modelineRightSegments[0].text == " Elixir ")
+        #expect(update.modelineRightSegments[0].command == "set_language")
+    }
+
+    @Test("Unsupported modeline segment section version is ignored")
+    func unsupportedModelineSegmentVersionIsIgnored() throws {
+        var identity = Data()
+        identity.append(0); identity.append(0); identity.append(0)
+
+        var modelineSegments = Data()
+        modelineSegments.append(2) // unsupported version
+        appendU16(&modelineSegments, 1)
+        appendU16(&modelineSegments, 0)
+        appendStatusBarSegment(&modelineSegments, text: " HIDDEN ", fg: 0xBBC2CF, bg: 0x51AFEF, attrs: 0x00, command: "")
+
+        let sections = [
+            buildSection(SECTION_IDENTITY, identity),
+            buildSection(SECTION_MODELINE_SEGMENTS, modelineSegments),
+        ]
+
+        var data = Data()
+        data.append(OP_GUI_STATUS_BAR)
+        data.append(UInt8(sections.count))
+        for s in sections { data.append(s) }
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiStatusBar(let update) = cmd else {
+            Issue.record("Expected .guiStatusBar"); return
+        }
+
+        #expect(update.modelineLeftSegments.isEmpty)
+        #expect(update.modelineRightSegments.isEmpty)
+    }
+
+    @Test("Invalid UTF-8 modeline segment text throws malformed")
+    func invalidUTF8ModelineSegmentTextThrows() throws {
+        var identity = Data()
+        identity.append(0); identity.append(0); identity.append(0)
+
+        var modelineSegments = Data()
+        modelineSegments.append(1)
+        appendU16(&modelineSegments, 1)
+        appendU16(&modelineSegments, 0)
+        appendU24(&modelineSegments, 0xBBC2CF)
+        appendU24(&modelineSegments, 0x51AFEF)
+        modelineSegments.append(0x00)
+        appendU16(&modelineSegments, 1)
+        modelineSegments.append(0xFF)
+        appendU16(&modelineSegments, 0)
+
+        let sections = [
+            buildSection(SECTION_IDENTITY, identity),
+            buildSection(SECTION_MODELINE_SEGMENTS, modelineSegments),
+        ]
+
+        var data = Data()
+        data.append(OP_GUI_STATUS_BAR)
+        data.append(UInt8(sections.count))
+        for s in sections { data.append(s) }
+
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Invalid UTF-8 modeline segment command throws malformed")
+    func invalidUTF8ModelineSegmentCommandThrows() throws {
+        var identity = Data()
+        identity.append(0); identity.append(0); identity.append(0)
+
+        var modelineSegments = Data()
+        modelineSegments.append(1)
+        appendU16(&modelineSegments, 1)
+        appendU16(&modelineSegments, 0)
+        appendU24(&modelineSegments, 0xBBC2CF)
+        appendU24(&modelineSegments, 0x51AFEF)
+        modelineSegments.append(0x00)
+        appendString16(&modelineSegments, " OK ")
+        appendU16(&modelineSegments, 1)
+        modelineSegments.append(0xFF)
+
+        let sections = [
+            buildSection(SECTION_IDENTITY, identity),
+            buildSection(SECTION_MODELINE_SEGMENTS, modelineSegments),
+        ]
+
+        var data = Data()
+        data.append(OP_GUI_STATUS_BAR)
+        data.append(UInt8(sections.count))
+        for s in sections { data.append(s) }
+
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Truncated modeline segment throws malformed")
+    func truncatedModelineSegmentThrows() throws {
+        var identity = Data()
+        identity.append(0); identity.append(0); identity.append(0)
+
+        var modelineSegments = Data()
+        modelineSegments.append(1) // version
+        appendU16(&modelineSegments, 1) // left count
+        appendU16(&modelineSegments, 0) // right count
+        appendU24(&modelineSegments, 0xBBC2CF)
+        appendU24(&modelineSegments, 0x51AFEF)
+        modelineSegments.append(0x00)
+        appendU16(&modelineSegments, 12) // text length, but text is missing
+        modelineSegments.append(contentsOf: Data("short".utf8))
+
+        let sections = [
+            buildSection(SECTION_IDENTITY, identity),
+            buildSection(SECTION_MODELINE_SEGMENTS, modelineSegments),
+        ]
+
+        var data = Data()
+        data.append(OP_GUI_STATUS_BAR)
+        data.append(UInt8(sections.count))
+        for s in sections { data.append(s) }
+
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Modeline segment count mismatch throws malformed")
+    func modelineSegmentCountMismatchThrows() throws {
+        var identity = Data()
+        identity.append(0); identity.append(0); identity.append(0)
+
+        var modelineSegments = Data()
+        modelineSegments.append(1) // version
+        appendU16(&modelineSegments, 2) // left count declares two segments
+        appendU16(&modelineSegments, 0)
+        appendStatusBarSegment(&modelineSegments, text: " ONLY ", fg: 0xBBC2CF, bg: 0x51AFEF, attrs: 0x00, command: "")
+
+        let sections = [
+            buildSection(SECTION_IDENTITY, identity),
+            buildSection(SECTION_MODELINE_SEGMENTS, modelineSegments),
+        ]
+
+        var data = Data()
+        data.append(OP_GUI_STATUS_BAR)
+        data.append(UInt8(sections.count))
+        for s in sections { data.append(s) }
+
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: data, offset: 0)
+        }
     }
 
     @Test("Unknown sections are skipped (forward compatibility)")
@@ -574,6 +780,7 @@ struct GUIStatusBarDecoderTests {
         #expect(size == data.count)
 
         guard case .guiStatusBar(let update) = cmd else {
+
             Issue.record("Expected .guiStatusBar"); return
         }
 
@@ -596,6 +803,7 @@ struct GUIStatusBarDecoderTests {
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
 
         guard case .guiStatusBar(let update) = cmd else {
+
             Issue.record("Expected .guiStatusBar"); return
         }
 

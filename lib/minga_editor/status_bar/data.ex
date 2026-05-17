@@ -14,6 +14,7 @@ defmodule MingaEditor.StatusBar.Data do
   alias MingaAgent.Session
   alias Minga.Buffer
   alias Minga.Diagnostics
+  alias Minga.Config.ModelineSegments
   alias MingaEditor.Editing
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
@@ -22,6 +23,7 @@ defmodule MingaEditor.StatusBar.Data do
   alias Minga.Config.Options
   alias Minga.Git
   alias Minga.LSP.SyncServer
+  alias MingaEditor.Shell.Traditional.Modeline
   alias MingaEditor.UI.Theme
 
   # ── Types ──────────────────────────────────────────────────────────────────
@@ -43,6 +45,7 @@ defmodule MingaEditor.StatusBar.Data do
 
   @typedoc "Data for a focused buffer window."
   @type buffer_data :: %{
+          optional(:modeline_segments) => Modeline.gui_segments(),
           mode: Minga.Mode.mode(),
           mode_state: Minga.Mode.state() | nil,
           cursor_line: non_neg_integer(),
@@ -73,6 +76,7 @@ defmodule MingaEditor.StatusBar.Data do
 
   @typedoc "Data for a focused agent chat window. Includes background buffer context so the status bar layout stays stable across mode switches."
   @type agent_data :: %{
+          optional(:modeline_segments) => Modeline.gui_segments(),
           mode: Minga.Mode.mode(),
           mode_state: Minga.Mode.state() | nil,
           model_name: String.t(),
@@ -126,6 +130,17 @@ defmodule MingaEditor.StatusBar.Data do
       {:buffer, build_buffer_data(state)}
     end
   end
+
+  @doc "Attaches GUI-ready configured modeline segments to status bar data."
+  @spec with_modeline_segments(t(), Theme.t()) :: t()
+  @spec with_modeline_segments(t(), Theme.t(), ModelineSegments.table()) :: t()
+  def with_modeline_segments(status_bar_data, theme, modeline_segments_table \\ ModelineSegments)
+
+  def with_modeline_segments({:buffer, data}, theme, modeline_segments_table),
+    do: {:buffer, attach_modeline_segments(data, theme, modeline_segments_table)}
+
+  def with_modeline_segments({:agent, data}, theme, modeline_segments_table),
+    do: {:agent, attach_modeline_segments(data, theme, modeline_segments_table)}
 
   # ── Buffer variant ─────────────────────────────────────────────────────────
 
@@ -337,6 +352,16 @@ defmodule MingaEditor.StatusBar.Data do
     }
   end
 
+  @spec attach_modeline_segments(map(), Theme.t(), ModelineSegments.table()) ::
+          buffer_data() | agent_data()
+  defp attach_modeline_segments(data, theme, modeline_segments_table) do
+    Map.put(
+      data,
+      :modeline_segments,
+      Modeline.gui_segments(data_to_modeline_data(data), theme, modeline_segments_table)
+    )
+  end
+
   # ── Git helpers ────────────────────────────────────────────────────────────
 
   @doc "Returns {branch_name | nil, diff_summary | nil} for the status bar."
@@ -440,7 +465,10 @@ defmodule MingaEditor.StatusBar.Data do
   Both variants carry the same buffer fields and produce identical modeline data.
   """
   @spec to_modeline_data(t()) :: MingaEditor.Shell.Traditional.Modeline.modeline_data()
-  def to_modeline_data({_variant, d}) do
+  def to_modeline_data({_variant, d}), do: data_to_modeline_data(d)
+
+  @spec data_to_modeline_data(map()) :: MingaEditor.Shell.Traditional.Modeline.modeline_data()
+  defp data_to_modeline_data(d) do
     %{
       mode: d.mode,
       mode_state: d.mode_state,

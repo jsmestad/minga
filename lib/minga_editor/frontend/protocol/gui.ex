@@ -145,6 +145,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   @max_u16 65_535
   @max_u32 4_294_967_295
+  @max_modeline_segments 128
   @chat_message_limit 100
   @max_chat_text_bytes 60_000
   @truncation_suffix "\n… [truncated]"
@@ -166,7 +167,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @section_recording 0x08
   @section_agent 0x09
   @section_indent 0x0A
-  # 0x0B reserved for future encoding section
+  @section_modeline_segments 0x0B
   @section_selection 0x0C
 
   # gui_gutter sections
@@ -1702,7 +1703,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     0x08 - Recording: macro_recording
     0x09 - Agent: model_name, message_count, session_status, agent_status
     0x0A - Indent: indent_type, indent_size
-    0x0B - Reserved for future encoding section
+    0x0B - ModelineSegments: configured left/right styled modeline segments
     0x0C - Selection: selection_mode, selection_size
   """
   @spec encode_gui_status_bar(MingaEditor.StatusBar.Data.t()) :: binary()
@@ -1773,6 +1774,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       encode_section(@section_message, <<byte_size(message)::16, message::binary>>),
       encode_section(@section_recording, <<macro_byte::8>>),
       encode_section(@section_indent, <<indent_type_byte::8, indent_size::8>>),
+      encode_section(
+        @section_modeline_segments,
+        encode_modeline_segments(Map.get(d, :modeline_segments))
+      ),
       encode_section(@section_selection, <<selection_mode::8, selection_size::32>>)
     ]
 
@@ -1800,6 +1805,89 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           )
         ]
     end
+  end
+
+  @spec encode_modeline_segments(%{left: [tuple()], right: [tuple()]} | nil) :: binary()
+  defp encode_modeline_segments(nil), do: <<1::8, 0::16, 0::16>>
+
+  defp encode_modeline_segments(%{left: left, right: right}) do
+    {left, right} = capped_modeline_segments(left, right)
+    {encoded_left, left_count, remaining} = bounded_modeline_side(left, @max_u16 - 5)
+    {encoded_right, right_count, _remaining} = bounded_modeline_side(right, remaining)
+
+    IO.iodata_to_binary([
+      <<1::8, left_count::16, right_count::16>>,
+      encoded_left,
+      encoded_right
+    ])
+  end
+
+  @spec capped_modeline_segments([tuple()], [tuple()]) :: {[tuple()], [tuple()]}
+  defp capped_modeline_segments(left, right) do
+    left = Enum.take(left, @max_modeline_segments)
+    right = Enum.take(right, max(0, @max_modeline_segments - length(left)))
+    {left, right}
+  end
+
+  @spec bounded_modeline_side([tuple()], non_neg_integer()) ::
+          {[binary()], non_neg_integer(), non_neg_integer()}
+  defp bounded_modeline_side(segments, budget) do
+    Enum.reduce_while(segments, {[], 0, budget}, fn segment, {encoded, count, remaining} ->
+      case encode_modeline_segment(segment, remaining) do
+        {:ok, bytes} -> {:cont, {[bytes | encoded], count + 1, remaining - byte_size(bytes)}}
+        :drop -> {:halt, {encoded, count, remaining}}
+      end
+    end)
+    |> then(fn {encoded, count, remaining} -> {Enum.reverse(encoded), count, remaining} end)
+  end
+
+  @spec encode_modeline_segment(tuple(), non_neg_integer()) :: {:ok, binary()} | :drop
+  defp encode_modeline_segment(_segment, remaining) when remaining < 11, do: :drop
+
+  defp encode_modeline_segment({text, fg, bg, opts, target}, remaining) do
+    attrs = encode_modeline_attrs(opts)
+    target = encode_modeline_target(target)
+    payload_budget = remaining - 11
+    {text_bytes, target_bytes} = bounded_modeline_text_and_target(text, target, payload_budget)
+
+    {:ok,
+     <<fg::24, bg::24, attrs::8, byte_size(text_bytes)::16, text_bytes::binary,
+       byte_size(target_bytes)::16, target_bytes::binary>>}
+  end
+
+  @spec bounded_modeline_text_and_target(String.t(), String.t(), non_neg_integer()) ::
+          {binary(), binary()}
+  defp bounded_modeline_text_and_target(text, target, budget) do
+    target_bytes = modeline_target_bytes(target, budget)
+    text_budget = budget - byte_size(target_bytes)
+    text_bytes = utf8_prefix_bytes(text, min(byte_size(text), text_budget))
+    {text_bytes, target_bytes}
+  end
+
+  @spec modeline_target_bytes(String.t(), non_neg_integer()) :: binary()
+  defp modeline_target_bytes("", _budget), do: ""
+
+  defp modeline_target_bytes(target, budget) do
+    target_bytes = :erlang.iolist_to_binary([target])
+
+    if byte_size(target_bytes) <= budget do
+      target_bytes
+    else
+      ""
+    end
+  end
+
+  @spec encode_modeline_target(atom() | nil) :: String.t()
+  defp encode_modeline_target(nil), do: ""
+
+  defp encode_modeline_target(target), do: Atom.to_string(target)
+
+  @spec encode_modeline_attrs(keyword()) :: non_neg_integer()
+  defp encode_modeline_attrs(opts) do
+    bold = if Keyword.get(opts, :bold, false), do: 0x01, else: 0x00
+    underline = if Keyword.get(opts, :underline, false), do: 0x02, else: 0x00
+    italic = if Keyword.get(opts, :italic, false), do: 0x04, else: 0x00
+    bold ||| underline ||| italic
   end
 
   @spec encode_vim_mode(atom()) :: non_neg_integer()
@@ -2528,7 +2616,11 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   @spec utf8_prefix_bytes(String.t(), non_neg_integer()) :: binary()
   defp utf8_prefix_bytes(text, max_bytes) when byte_size(text) <= max_bytes do
-    :erlang.iolist_to_binary([text])
+    if String.valid?(text) do
+      :erlang.iolist_to_binary([text])
+    else
+      valid_utf8_prefix(text, max_bytes)
+    end
   end
 
   defp utf8_prefix_bytes(text, max_bytes) do

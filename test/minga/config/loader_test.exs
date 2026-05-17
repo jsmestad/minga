@@ -12,6 +12,7 @@ defmodule Minga.Config.LoaderTest do
   alias Minga.Config
   alias Minga.Config.Hooks
   alias Minga.Config.Loader
+  alias Minga.Config.ModelineSegments
   alias Minga.Config.Options
   alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.LSP.ServerConfig
@@ -22,9 +23,9 @@ defmodule Minga.Config.LoaderTest do
     previous_options_server = Process.put(:minga_config_options, options_server)
     previous_keymap_server = Process.put(:minga_config_keymap, keymap_server)
 
-    # Hooks/CommandRegistry remain global singletons (Tickets 8 and beyond);
-    # ensure they're running but not isolated per test.
-    for {mod, _} <- [{Hooks, nil}, {CommandRegistry, nil}] do
+    # Hooks/CommandRegistry/ModelineSegments remain global singletons; ensure
+    # they're running but not isolated per test.
+    for {mod, _} <- [{Hooks, nil}, {CommandRegistry, nil}, {ModelineSegments, nil}] do
       case mod.start_link() do
         {:ok, _} -> :ok
         {:error, {:already_started, _}} -> mod.reset()
@@ -646,6 +647,54 @@ defmodule Minga.Config.LoaderTest do
   end
 
   describe "reload/1" do
+    test "loads modeline_segment declarations from config" do
+      {_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+
+        modeline_segment :loader_words, side: :left, priority: 42 do
+          {" WORDS ", ctx.info_fg, ctx.bar_bg, [], nil}
+        end
+        """)
+
+      on_exit(cleanup)
+
+      name = :"loader_modeline_segment_#{System.unique_integer([:positive])}"
+      {:ok, _pid} = Loader.start_link(name: name)
+
+      assert %{side: :left, priority: 42, source: :config} =
+               ModelineSegments.lookup(:loader_words)
+    end
+
+    test "reload replaces stale config modeline segments" do
+      {minga_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+
+        modeline_segment :loader_stale_segment, side: :right do
+          {" OLD ", ctx.info_fg, ctx.bar_bg, [], nil}
+        end
+        """)
+
+      on_exit(cleanup)
+
+      name = :"loader_reload_modeline_segment_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+      assert ModelineSegments.lookup(:loader_stale_segment) != nil
+
+      File.write!(Path.join(minga_dir, "config.exs"), """
+      use Minga.Config
+
+      modeline_segment :loader_fresh_segment, side: :left do
+        {" NEW ", ctx.info_fg, ctx.bar_bg, [], nil}
+      end
+      """)
+
+      assert :ok = Loader.reload(pid)
+      assert ModelineSegments.lookup(:loader_stale_segment) == nil
+      assert %{side: :left, source: :config} = ModelineSegments.lookup(:loader_fresh_segment)
+    end
+
     test "reload picks up changed config values" do
       {minga_dir, cleanup} =
         make_config_dir("""
