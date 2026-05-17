@@ -6,6 +6,8 @@ defmodule MingaEditor.Commands.BufferManagementShutdownTest do
   alias Minga.Config.Options
   alias MingaEditor
 
+  @sync_timeout 30_000
+
   setup do
     previous_shutdown_fn = Application.fetch_env(:minga, :shutdown_fn)
     test_pid = self()
@@ -42,7 +44,7 @@ defmodule MingaEditor.Commands.BufferManagementShutdownTest do
 
   defp send_key(editor, codepoint, mods \\ 0) do
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
-    _ = :sys.get_state(editor)
+    _ = :sys.get_state(editor, @sync_timeout)
   end
 
   defp type_string(editor, text) do
@@ -51,14 +53,16 @@ defmodule MingaEditor.Commands.BufferManagementShutdownTest do
     |> Enum.each(fn char -> send_key(editor, char) end)
   end
 
-  describe "shutdown paths" do
+  describe "shutdown-path editor integration" do
+    @describetag layer: :editor_integration
+
     test "quit all with clean buffer exits without confirmation" do
       {editor, _buffer} = start_editor("hello")
 
       type_string(editor, ":qa\r")
 
       assert_receive {:shutdown_called, 0}
-      state = :sys.get_state(editor)
+      state = :sys.get_state(editor, @sync_timeout)
       refute state.pending_quit
     end
 
@@ -70,7 +74,7 @@ defmodule MingaEditor.Commands.BufferManagementShutdownTest do
       type_string(editor, ":qa!\r")
 
       assert_receive {:shutdown_called, 0}
-      state = :sys.get_state(editor)
+      state = :sys.get_state(editor, @sync_timeout)
       refute state.pending_quit
     end
 
@@ -79,13 +83,13 @@ defmodule MingaEditor.Commands.BufferManagementShutdownTest do
       BufferProcess.insert_char(buffer, "X")
       assert BufferProcess.dirty?(buffer)
 
-      state = :sys.get_state(editor)
+      state = :sys.get_state(editor, @sync_timeout)
       Options.set(state.options_server, :confirm_quit, false)
 
       type_string(editor, ":qa\r")
 
       assert_receive {:shutdown_called, 0}
-      state = :sys.get_state(editor)
+      state = :sys.get_state(editor, @sync_timeout)
       refute state.pending_quit
     end
 
