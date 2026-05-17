@@ -158,8 +158,8 @@ struct BreadcrumbBarViewTests {
 @Suite("StatusBarView View Structure")
 struct StatusBarViewViewTests {
 
-    private func segment(_ id: Int, _ text: String, command: String = "") -> Wire.StatusBarSegment {
-        Wire.StatusBarSegment(id: id, text: text, fgColor: 0xFFFFFF, bgColor: 0x000000, attrs: 0, command: command)
+    private func segment(_ id: Int, _ text: String, kind: String = "custom", command: String = "") -> Wire.StatusBarSegment {
+        Wire.StatusBarSegment(id: id, kind: kind, text: text, fgColor: 0xFFFFFF, bgColor: 0x000000, attrs: 0, command: command)
     }
 
     @MainActor private func statusBarState(
@@ -196,8 +196,8 @@ struct StatusBarViewViewTests {
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
             backgroundSubagentCount: 0, backgroundSubagentLabel: "",
-            modelineLeftSegments: [segment(0, " NORMAL ")],
-            modelineRightSegments: [segment(0, " Elixir "), segment(1, " 42:9 ")]
+            modelineLeftSegments: [segment(0, " NORMAL ", kind: "mode")],
+            modelineRightSegments: [segment(0, " Elixir ", kind: "filetype"), segment(1, " 42:9 ", kind: "position")]
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
@@ -205,9 +205,110 @@ struct StatusBarViewViewTests {
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
 
-        #expect(strings.contains(" NORMAL "))
-        #expect(strings.contains(" Elixir "))
-        #expect(strings.contains(" 42:9 "))
+        #expect(strings.contains("NORMAL"))
+        #expect(strings.contains("Elixir"))
+        #expect(strings.contains("Ln 42, Col 9"))
+    }
+
+    @Test("Fallback native status bar renders default built-ins without modeline segments")
+    @MainActor func fallbackNativeStatusBarRendersDefaultBuiltins() throws {
+        let state = statusBarState()
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
+        let body = try sut.inspect()
+        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(strings.contains("NORMAL"))
+        #expect(strings.contains("Elixir"))
+        #expect(strings.contains("Ln 42, Col 9"))
+        #expect(strings.contains("Spaces:2"))
+    }
+
+    @Test("Filename group uses BEAM modeline text for native rendering")
+    @MainActor func filenameGroupUsesModelineText() throws {
+        let state = statusBarState(leftSegments: [segment(1, " main.ex [1/2] recording @q ", kind: "filename")])
+        state.filename = "main.ex"
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
+        let body = try sut.inspect()
+        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(strings.contains("main.ex [1/2] recording @q"))
+    }
+
+    @Test("Fallback built-in status bar controls emit default commands")
+    @MainActor func fallbackBuiltinControlsEmitDefaultCommands() throws {
+        let spy = SpyEncoder()
+        let state = statusBarState()
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: spy)
+        let buttons = try sut.inspect().findAll(ViewType.Button.self)
+
+        for button in buttons {
+            try button.tap()
+        }
+
+        #expect(spy.guiActions.contains(.executeCommand(name: "set_language")))
+        #expect(spy.guiActions.contains(.executeCommand(name: "indent_picker")))
+    }
+
+    @Test("Configured built-in controls prefer BEAM command override")
+    @MainActor func configuredBuiltinControlsPreferBeamCommandOverride() throws {
+        let spy = SpyEncoder()
+        let state = statusBarState(rightSegments: [segment(1, " Elixir ", kind: "filetype", command: "filetype_menu")])
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: spy)
+        let buttons = try sut.inspect().findAll(ViewType.Button.self)
+
+        for button in buttons {
+            try button.tap()
+        }
+
+        #expect(spy.guiActions.contains(.executeCommand(name: "filetype_menu")))
+        #expect(!spy.guiActions.contains(.executeCommand(name: "set_language")))
+    }
+
+    @Test("Filename control emits fallback buffer list command")
+    @MainActor func filenameControlEmitsFallbackBufferListCommand() throws {
+        let spy = SpyEncoder()
+        let state = statusBarState(leftSegments: [segment(1, " main.ex ", kind: "filename")])
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: spy)
+        let buttons = try sut.inspect().findAll(ViewType.Button.self)
+
+        for button in buttons {
+            try button.tap()
+        }
+
+        #expect(spy.guiActions.contains(.executeCommand(name: "buffer_list")))
+    }
+
+    @Test("Filename control prefers BEAM command override")
+    @MainActor func filenameControlPrefersBeamCommandOverride() throws {
+        let spy = SpyEncoder()
+        let state = statusBarState(leftSegments: [segment(1, " main.ex ", kind: "filename", command: "custom_buffer_picker")])
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: spy)
+        let buttons = try sut.inspect().findAll(ViewType.Button.self)
+
+        for button in buttons {
+            try button.tap()
+        }
+
+        #expect(spy.guiActions.contains(.executeCommand(name: "custom_buffer_picker")))
+        #expect(!spy.guiActions.contains(.executeCommand(name: "buffer_list")))
+    }
+
+    @Test("Custom unknown status bar segment remains visible and clickable")
+    @MainActor func customUnknownStatusBarSegmentVisibleAndClickable() throws {
+        let spy = SpyEncoder()
+        let state = statusBarState(leftSegments: [segment(1, " 42W ", kind: "word_count", command: "word_count")])
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: spy)
+        let body = try sut.inspect()
+        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        let buttons = body.findAll(ViewType.Button.self)
+
+        #expect(strings.contains("42W"))
+
+        for button in buttons {
+            try button.tap()
+        }
+
+        #expect(spy.guiActions.contains(.executeCommand(name: "word_count")))
     }
 
     @Test("Configured modeline groups receive bounded budgets")
@@ -235,7 +336,7 @@ struct StatusBarViewViewTests {
 
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
-        #expect(strings.contains(" CLICKABLE-RIGHT-SEGMENT-WITH-LONG-TEXT "))
+        #expect(strings.contains("CLICKABLE-RIGHT-SEGMENT-WITH-LONG-TEXT"))
     }
 
     @Test("Layout protects center lane with huge left and tiny right groups")
@@ -389,8 +490,8 @@ struct StatusBarViewViewTests {
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
             backgroundSubagentCount: 0, backgroundSubagentLabel: "",
-            modelineLeftSegments: [segment(0, " NORMAL ")],
-            modelineRightSegments: [segment(0, " 7 msgs ")]
+            modelineLeftSegments: [segment(0, " NORMAL ", kind: "mode")],
+            modelineRightSegments: [segment(0, " 7 msgs ", kind: "position")]
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
@@ -400,8 +501,8 @@ struct StatusBarViewViewTests {
 
         // Model name no longer appears in the status bar (lives in agent chat header only)
         #expect(!strings.contains("claude-3-5-sonnet"))
-        #expect(strings.contains(" 7 msgs "))
-        #expect(strings.contains(" NORMAL "))
+        #expect(strings.contains("7 msgs"))
+        #expect(strings.contains("NORMAL"))
     }
 
     @Test("Git branch shown when flag is set")
@@ -416,7 +517,7 @@ struct StatusBarViewViewTests {
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
             backgroundSubagentCount: 0, backgroundSubagentLabel: "",
-            modelineLeftSegments: [segment(0, " main ")], modelineRightSegments: []
+            modelineLeftSegments: [segment(0, " main ", kind: "git")], modelineRightSegments: []
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
@@ -424,7 +525,7 @@ struct StatusBarViewViewTests {
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
 
-        #expect(strings.contains(" main "))
+        #expect(strings.contains("main"))
     }
 
     @Test("Diagnostic counts shown when non-zero")
@@ -439,7 +540,7 @@ struct StatusBarViewViewTests {
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
             backgroundSubagentCount: 0, backgroundSubagentLabel: "",
-            modelineLeftSegments: [], modelineRightSegments: [segment(0, " 3 "), segment(1, " 7 ")]
+            modelineLeftSegments: [], modelineRightSegments: [segment(0, " 3 ", kind: "diagnostics"), segment(1, " 7 ", kind: "diagnostics")]
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
@@ -447,8 +548,8 @@ struct StatusBarViewViewTests {
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
 
-        #expect(strings.contains(" 3 "))
-        #expect(strings.contains(" 7 "))
+        #expect(strings.contains("3"))
+        #expect(strings.contains("7"))
     }
 
     @Test("Background subagent segment shows count and label")
@@ -463,7 +564,7 @@ struct StatusBarViewViewTests {
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
             backgroundSubagentCount: 2, backgroundSubagentLabel: "session-2: tests",
-            modelineLeftSegments: [segment(0, " bg:2 session-2: tests")], modelineRightSegments: []
+            modelineLeftSegments: [segment(0, " bg:2 session-2: tests", kind: "background_agent")], modelineRightSegments: []
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
@@ -471,7 +572,7 @@ struct StatusBarViewViewTests {
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
 
-        #expect(strings.contains(" bg:2 session-2: tests"))
+        #expect(strings.contains("bg:2 session-2: tests"))
     }
 
     @Test("Background subagent segment is hidden when count is zero")

@@ -73,7 +73,7 @@ Invalid values show a clear error. Setting `:tab_width` to `-1` tells you it mus
 
 ## Modeline
 
-The modeline is the status line at the bottom of each editor window. It is built from named segments, so you can hide noisy information, move the important parts closer to the edge, or add your own project-specific status. The same segment configuration drives the TUI modeline and the native GUI status bar.
+The modeline is the status line at the bottom of each editor window. It is built from named segments, so you can hide noisy information, move the important parts closer to the edge, or add your own project-specific status. The same segment configuration drives the TUI modeline and the native GUI status bar; the GUI renders known built-ins with compact SwiftUI controls and renders custom segments as native chips instead of terminal-style color blocks.
 
 ### Built-in segments
 
