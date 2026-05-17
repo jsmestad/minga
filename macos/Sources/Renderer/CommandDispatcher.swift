@@ -433,7 +433,7 @@ final class CommandDispatcher {
                 guiState.floatPopupState.hide()
             }
 
-        case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let rawEntries, let rawToast):
+        case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let rawEntries, let rawToast, let entryBasePath, let lastCommitMessage):
             // When git_status_panel is nil, the BEAM sends notARepo + empty
             // entries as the "panel closed" signal (same pattern as file tree
             // sending empty entries to trigger hide). Can't gate on
@@ -451,7 +451,7 @@ final class CommandDispatcher {
                 return (t.message, parsedLevel ?? .error, parsedAction ?? .none)
             }
 
-            if parsedRepoState == .notARepo && rawEntries.isEmpty {
+            if parsedRepoState == .notARepo && rawEntries.isEmpty && entryBasePath.isEmpty {
                 guiState.gitStatusState.hide(syncing: syncing, toast: toast)
             } else {
                 let entries = rawEntries.compactMap { raw -> GitStatusEntry? in
@@ -464,7 +464,7 @@ final class CommandDispatcher {
                         PortLogger.warn("Invalid git file status: \(raw.status)")
                     }
                     return GitStatusEntry(
-                        id: (UInt32(raw.section) << 24) | (raw.pathHash & 0x00FFFFFF),
+                        pathHash: raw.pathHash,
                         section: section,
                         status: status,
                         path: raw.path
@@ -477,7 +477,9 @@ final class CommandDispatcher {
                     behind: behind,
                     syncing: syncing,
                     entries: entries,
-                    toast: toast
+                    toast: toast,
+                    entryBasePath: entryBasePath,
+                    lastCommitMessage: lastCommitMessage
                 )
             }
         }

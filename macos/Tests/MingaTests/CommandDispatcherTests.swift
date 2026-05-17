@@ -212,7 +212,7 @@ struct CommandDispatcherRoutingTests {
             Wire.GitStatusEntry(pathHash: 12345, section: 1, status: 1, path: "lib/editor.ex")
         ]
         dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 2, behind: 0,
-                                           branchName: "main", entries: rawEntries, toast: nil))
+                                           branchName: "main", entries: rawEntries, toast: nil, entryBasePath: "", lastCommitMessage: ""))
 
         #expect(gui.gitStatusState.visible == true)
         #expect(gui.gitStatusState.branchName == "main")
@@ -229,12 +229,12 @@ struct CommandDispatcherRoutingTests {
             Wire.GitStatusEntry(pathHash: 12345, section: 1, status: 1, path: "lib/editor.ex")
         ]
         dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
-                                           branchName: "main", entries: rawEntries, toast: nil))
+                                           branchName: "main", entries: rawEntries, toast: nil, entryBasePath: "", lastCommitMessage: ""))
         #expect(gui.gitStatusState.visible == true)
 
         // Then send the "panel closed" sentinel: notARepo (1) + empty entries. Syncing and toast still update because remote operations can finish while the panel is hidden.
         dispatcher.dispatch(.guiGitStatus(repoState: 1, syncing: true, ahead: 0, behind: 0,
-                                           branchName: "", entries: [], toast: (message: "Push failed", level: 1, action: 1)))
+                                           branchName: "", entries: [], toast: (message: "Push failed", level: 1, action: 1), entryBasePath: "", lastCommitMessage: ""))
         #expect(gui.gitStatusState.visible == false)
         #expect(gui.gitStatusState.syncing == true)
         #expect(gui.gitStatusState.toastMessage == "Push failed")
@@ -249,7 +249,7 @@ struct CommandDispatcherRoutingTests {
             Wire.GitStatusEntry(pathHash: 12346, section: 1, status: 99, path: "lib/invalid-status.ex")
         ]
         dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
-                                           branchName: "main", entries: rawEntries, toast: nil))
+                                           branchName: "main", entries: rawEntries, toast: nil, entryBasePath: "", lastCommitMessage: ""))
 
         #expect(gui.gitStatusState.changedEntries.count == 2)
         #expect(gui.gitStatusState.changedEntries[0].status == .unknown)
@@ -263,9 +263,21 @@ struct CommandDispatcherRoutingTests {
             Wire.GitStatusEntry(pathHash: 12345, section: 99, status: 1, path: "lib/bad-section.ex")
         ]
         dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
-                                           branchName: "main", entries: rawEntries, toast: nil))
+                                           branchName: "main", entries: rawEntries, toast: nil, entryBasePath: "", lastCommitMessage: ""))
 
         #expect(gui.gitStatusState.totalCount == 0)
+    }
+
+    @Test("guiGitStatus shows not-a-repo panel when BEAM sends a project root")
+    @MainActor func guiGitStatusShowsNotARepoPanel() {
+        let (dispatcher, gui) = makeDispatcher()
+
+        dispatcher.dispatch(.guiGitStatus(repoState: 1, syncing: false, ahead: 0, behind: 0,
+                                           branchName: "", entries: [], toast: nil, entryBasePath: "/project", lastCommitMessage: ""))
+
+        #expect(gui.gitStatusState.visible == true)
+        #expect(gui.gitStatusState.repoState == .notARepo)
+        #expect(gui.gitStatusState.entryBasePath == "/project")
     }
 
     @Test("guiGitStatus shows panel for normal repo with clean working tree")
@@ -274,7 +286,7 @@ struct CommandDispatcherRoutingTests {
         // Normal repo (0) with zero entries is a clean working tree, NOT
         // a hide signal. Only notARepo + empty triggers hide.
         dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
-                                           branchName: "main", entries: [], toast: nil))
+                                           branchName: "main", entries: [], toast: nil, entryBasePath: "", lastCommitMessage: ""))
         #expect(gui.gitStatusState.visible == true)
         #expect(gui.gitStatusState.branchName == "main")
     }
@@ -283,14 +295,14 @@ struct CommandDispatcherRoutingTests {
     @MainActor func guiGitStatusToastFallback() {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
-                                           branchName: "main", entries: [], toast: (message: "Remote failed", level: 99, action: 99)))
+                                           branchName: "main", entries: [], toast: (message: "Remote failed", level: 99, action: 99), entryBasePath: "", lastCommitMessage: ""))
 
         #expect(gui.gitStatusState.toastMessage == "Remote failed")
         #expect(gui.gitStatusState.toastLevel == .error)
         #expect(gui.gitStatusState.toastAction == .none)
 
         dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
-                                           branchName: "main", entries: [], toast: nil))
+                                           branchName: "main", entries: [], toast: nil, entryBasePath: "", lastCommitMessage: ""))
 
         #expect(gui.gitStatusState.toastMessage == nil)
         #expect(gui.gitStatusState.toastLevel == .success)

@@ -33,7 +33,7 @@ defmodule Minga.Events do
   | `:buffer_closed`  | `BufferClosedEvent`  | `buffer: pid(), path: String.t() \| :scratch`  |
   | `:buffer_changed` | `BufferChangedEvent` | `buffer: pid(), source: EditSource.t()`  |
   | `:mode_changed`   | `ModeEvent`          | `old: atom(), new: atom()`        |
-  | `:git_status_changed` | `GitStatusEvent` | `git_root, entries, branch, ahead, behind` |
+  | `:git_status_changed` | `GitStatusEvent` | `git_root, entries, branch, ahead, behind` plus cached `last_commit_message` |
   | `:diagnostics_updated` | `DiagnosticsUpdatedEvent` | `uri: String.t(), source: atom()` |
   | `:lsp_status_changed` | `LspStatusEvent` | `name: atom(), status: atom(), uri: String.t() \| nil` |
   | `:project_rebuilt` | `ProjectRebuiltEvent` | `root: String.t()` |
@@ -148,14 +148,15 @@ defmodule Minga.Events do
   defmodule GitStatusEvent do
     @moduledoc "Payload for `:git_status_changed` events. Published by `Git.Repo` when repo status changes."
     @enforce_keys [:git_root, :entries, :branch, :ahead, :behind]
-    defstruct [:git_root, :entries, :branch, :ahead, :behind]
+    defstruct [:git_root, :entries, :branch, :ahead, :behind, last_commit_message: ""]
 
     @type t :: %__MODULE__{
             git_root: String.t(),
             entries: [Minga.Git.StatusEntry.t()],
             branch: String.t() | nil,
             ahead: non_neg_integer(),
-            behind: non_neg_integer()
+            behind: non_neg_integer(),
+            last_commit_message: String.t()
           }
   end
 

@@ -1956,11 +1956,13 @@ struct GUIGitStatusDecoderTests {
         data.append(1) // error level
         data.append(1) // pull_and_retry action
         appendString16(&data, "Push failed: fetch first")
+        appendString16(&data, "/repo")
+        appendString16(&data, "feat: previous commit")
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let entries, let toast) = cmd else {
+        guard case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let entries, let toast, let entryBasePath, let lastCommitMessage) = cmd else {
             Issue.record("Expected .guiGitStatus"); return
         }
 
@@ -1977,6 +1979,8 @@ struct GUIGitStatusDecoderTests {
         #expect(toast?.message == "Push failed: fetch first")
         #expect(toast?.level == 1)
         #expect(toast?.action == 1)
+        #expect(entryBasePath == "/repo")
+        #expect(lastCommitMessage == "feat: previous commit")
     }
 
     @Test("Invalid repo state in gui_git_status throws malformed")
