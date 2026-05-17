@@ -158,8 +158,8 @@ struct BreadcrumbBarViewTests {
 @Suite("StatusBarView View Structure")
 struct StatusBarViewViewTests {
 
-    private func segment(_ id: Int, _ text: String, command: String = "") -> Wire.StatusBarSegment {
-        Wire.StatusBarSegment(id: id, text: text, fgColor: 0xFFFFFF, bgColor: 0x000000, attrs: 0, command: command)
+    private func segment(_ id: Int, _ text: String, kind: String = "custom", command: String = "") -> Wire.StatusBarSegment {
+        Wire.StatusBarSegment(id: id, kind: kind, text: text, fgColor: 0xFFFFFF, bgColor: 0x000000, attrs: 0, command: command)
     }
 
     @MainActor private func statusBarState(
@@ -196,8 +196,8 @@ struct StatusBarViewViewTests {
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
             backgroundSubagentCount: 0, backgroundSubagentLabel: "",
-            modelineLeftSegments: [segment(0, " NORMAL ")],
-            modelineRightSegments: [segment(0, " Elixir "), segment(1, " 42:9 ")]
+            modelineLeftSegments: [segment(0, " NORMAL ", kind: "mode")],
+            modelineRightSegments: [segment(0, " Elixir ", kind: "filetype"), segment(1, " 42:9 ", kind: "position")]
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
@@ -205,9 +205,9 @@ struct StatusBarViewViewTests {
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
 
-        #expect(strings.contains(" NORMAL "))
-        #expect(strings.contains(" Elixir "))
-        #expect(strings.contains(" 42:9 "))
+        #expect(strings.contains("NORMAL"))
+        #expect(strings.contains("Elixir"))
+        #expect(strings.contains("Ln 42, Col 9"))
     }
 
     @Test("Configured modeline groups receive bounded budgets")
@@ -235,7 +235,7 @@ struct StatusBarViewViewTests {
 
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
-        #expect(strings.contains(" CLICKABLE-RIGHT-SEGMENT-WITH-LONG-TEXT "))
+        #expect(strings.contains("CLICKABLE-RIGHT-SEGMENT-WITH-LONG-TEXT"))
     }
 
     @Test("Layout protects center lane with huge left and tiny right groups")
@@ -389,8 +389,8 @@ struct StatusBarViewViewTests {
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
             backgroundSubagentCount: 0, backgroundSubagentLabel: "",
-            modelineLeftSegments: [segment(0, " NORMAL ")],
-            modelineRightSegments: [segment(0, " 7 msgs ")]
+            modelineLeftSegments: [segment(0, " NORMAL ", kind: "mode")],
+            modelineRightSegments: [segment(0, " 7 msgs ", kind: "position")]
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
@@ -400,8 +400,8 @@ struct StatusBarViewViewTests {
 
         // Model name no longer appears in the status bar (lives in agent chat header only)
         #expect(!strings.contains("claude-3-5-sonnet"))
-        #expect(strings.contains(" 7 msgs "))
-        #expect(strings.contains(" NORMAL "))
+        #expect(strings.contains("7 msgs"))
+        #expect(strings.contains("NORMAL"))
     }
 
     @Test("Git branch shown when flag is set")
@@ -416,7 +416,7 @@ struct StatusBarViewViewTests {
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
             backgroundSubagentCount: 0, backgroundSubagentLabel: "",
-            modelineLeftSegments: [segment(0, " main ")], modelineRightSegments: []
+            modelineLeftSegments: [segment(0, " main ", kind: "git")], modelineRightSegments: []
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
@@ -424,7 +424,7 @@ struct StatusBarViewViewTests {
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
 
-        #expect(strings.contains(" main "))
+        #expect(strings.contains("main"))
     }
 
     @Test("Diagnostic counts shown when non-zero")
@@ -439,7 +439,7 @@ struct StatusBarViewViewTests {
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
             backgroundSubagentCount: 0, backgroundSubagentLabel: "",
-            modelineLeftSegments: [], modelineRightSegments: [segment(0, " 3 "), segment(1, " 7 ")]
+            modelineLeftSegments: [], modelineRightSegments: [segment(0, " 3 ", kind: "diagnostics"), segment(1, " 7 ", kind: "diagnostics")]
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
@@ -447,8 +447,8 @@ struct StatusBarViewViewTests {
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
 
-        #expect(strings.contains(" 3 "))
-        #expect(strings.contains(" 7 "))
+        #expect(strings.contains("3"))
+        #expect(strings.contains("7"))
     }
 
     @Test("Background subagent segment shows count and label")
@@ -463,7 +463,7 @@ struct StatusBarViewViewTests {
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
             backgroundSubagentCount: 2, backgroundSubagentLabel: "session-2: tests",
-            modelineLeftSegments: [segment(0, " bg:2 session-2: tests")], modelineRightSegments: []
+            modelineLeftSegments: [segment(0, " bg:2 session-2: tests", kind: "background_agent")], modelineRightSegments: []
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
@@ -471,7 +471,7 @@ struct StatusBarViewViewTests {
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
 
-        #expect(strings.contains(" bg:2 session-2: tests"))
+        #expect(strings.contains("bg:2 session-2: tests"))
     }
 
     @Test("Background subagent segment is hidden when count is zero")

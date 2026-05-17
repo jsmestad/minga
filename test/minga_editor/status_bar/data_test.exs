@@ -44,7 +44,7 @@ defmodule MingaEditor.StatusBar.DataTest do
     assert {:buffer, buffer_data} = Data.with_modeline_segments(data, state.theme, table)
     assert %{left: left, right: right} = buffer_data.modeline_segments
 
-    assert Enum.any?(left ++ right, fn {text, _fg, _bg, _opts, _target} ->
+    assert Enum.any?(left ++ right, fn {_name, text, _fg, _bg, _opts, _target} ->
              text == " GUI_ONLY "
            end)
   end

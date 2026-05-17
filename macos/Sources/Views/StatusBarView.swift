@@ -64,6 +64,7 @@ final class StatusBarState {
     var backgroundSubagentCount: UInt16 = 0
     var backgroundSubagentLabel: String = ""
     var indent: StatusBarUpdate.IndentInfo = .init(kind: 0, size: 2)
+    var modelineSegmentsPresent: Bool = false
     var modelineLeftSegments: [Wire.StatusBarSegment] = []
     var modelineRightSegments: [Wire.StatusBarSegment] = []
     var selection: StatusBarUpdate.SelectionInfo = .init(mode: 0, size: 0)
@@ -106,6 +107,8 @@ final class StatusBarState {
         if self.backgroundSubagentCount != data.backgroundSubagentCount { self.backgroundSubagentCount = data.backgroundSubagentCount }
         if self.backgroundSubagentLabel != data.backgroundSubagentLabel { self.backgroundSubagentLabel = data.backgroundSubagentLabel }
         if self.indent != data.indent { self.indent = data.indent }
+        let hasModelineSegments = data.modelineSegmentsPresent || !data.modelineLeftSegments.isEmpty || !data.modelineRightSegments.isEmpty
+        if self.modelineSegmentsPresent != hasModelineSegments { self.modelineSegmentsPresent = hasModelineSegments }
         if self.modelineLeftSegments != data.modelineLeftSegments { self.modelineLeftSegments = data.modelineLeftSegments }
         if self.modelineRightSegments != data.modelineRightSegments { self.modelineRightSegments = data.modelineRightSegments }
         if self.selection != data.selection { self.selection = data.selection }
@@ -169,6 +172,12 @@ final class StatusBarState {
     }
 }
 
+private struct StatusBarSegmentGroup: Identifiable {
+    let id: String
+    let kind: String
+    var segments: [Wire.StatusBarSegment]
+}
+
 struct StatusBarView: View {
     let state: StatusBarState
     let theme: ThemeColors
@@ -184,6 +193,8 @@ struct StatusBarView: View {
     private let leftFixedControlsWidth: CGFloat = 101
     private let rightFixedControlsWidth: CGFloat = 34
     private let maxCenterStatusWidth: CGFloat = 320
+
+    @State private var gitCopied = false
 
     var body: some View {
         GeometryReader { proxy in
@@ -211,6 +222,62 @@ struct StatusBarView: View {
         .background(theme.modelineBarBg)
         .focusable(false)
         .focusEffectDisabled()
+    }
+
+    private var leftModelineGroups: [StatusBarSegmentGroup] {
+        statusBarGroups(
+            from: state.modelineLeftSegments,
+            fallbackKinds: ["agent", "background_agent", "git", "diagnostics"],
+            side: "left"
+        )
+    }
+
+    private var rightModelineGroups: [StatusBarSegmentGroup] {
+        statusBarGroups(
+            from: state.modelineRightSegments,
+            fallbackKinds: ["parser", "lsp", "indent", "filetype", "position", "mode"],
+            side: "right"
+        )
+    }
+
+    private func statusBarGroups(from segments: [Wire.StatusBarSegment], fallbackKinds: [String], side: String) -> [StatusBarSegmentGroup] {
+        guard state.modelineSegmentsPresent else {
+            return fallbackKinds.enumerated().map { index, kind in
+                StatusBarSegmentGroup(id: "fallback-\(side)-\(index)-\(kind)", kind: kind, segments: [])
+            }
+        }
+
+        var groups: [StatusBarSegmentGroup] = []
+        for segment in segments {
+            let kind = segment.kind.isEmpty ? "custom" : segment.kind
+            if let lastIndex = groups.indices.last, groups[lastIndex].kind == kind {
+                groups[lastIndex].segments.append(segment)
+            } else {
+                groups.append(StatusBarSegmentGroup(id: "\(side)-\(groups.count)-\(kind)", kind: kind, segments: [segment]))
+            }
+        }
+        return groups
+    }
+
+    private func command(in group: StatusBarSegmentGroup) -> String? {
+        group.segments.first { !$0.command.isEmpty }?.command
+    }
+
+    @ViewBuilder
+    private func commandButton<Content: View>(command: String?, tooltip: String, @ViewBuilder content: () -> Content) -> some View {
+        if let command {
+            Button(action: { encoder?.sendExecuteCommand(name: command) }) {
+                content()
+            }
+            .buttonStyle(.plain)
+            .help(tooltip)
+            .onHover { isHovered in
+                if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
+        } else {
+            content()
+                .help(tooltip)
+        }
     }
 
     func modelineLayout(totalWidth: CGFloat) -> StatusBarModelineLayout {
@@ -265,6 +332,390 @@ struct StatusBarView: View {
                 .foregroundStyle(theme.modelineBarFg.opacity(0.45))
                 .lineLimit(1)
                 .truncationMode(.tail)
+        }
+    }
+
+    // MARK: - Native configured groups
+
+    @ViewBuilder
+    private func nativeModelineGroup(_ group: StatusBarSegmentGroup) -> some View {
+        switch group.kind {
+        case "mode":
+            modeBadge
+        case "filename":
+            filenameSegment(command: command(in: group))
+        case "git":
+            if state.hasGit && !state.gitBranch.isEmpty { gitSegment }
+        case "agent":
+            agentStatusIcon
+        case "background_agent":
+            if state.hasRunningBackgroundSubagents { backgroundSubagentSegment }
+        case "diagnostics":
+            diagnosticIndicators(command: command(in: group))
+        case "parser":
+            parserStatusIcon(command: command(in: group))
+        case "lsp":
+            if state.hasLsp { lspIndicator(command: command(in: group)) }
+        case "filetype":
+            if !state.filetype.isEmpty { filetypeSegment(command: command(in: group)) }
+        case "position":
+            positionSegment
+        case "percent":
+            percentSegment
+        case "indent":
+            indentSegment(command: command(in: group))
+        default:
+            customModelineGroup(group)
+        }
+    }
+
+    @ViewBuilder
+    private var agentStatusIcon: some View {
+        switch state.agentStatus {
+        case 1:
+            ProgressView()
+                .scaleEffect(0.45)
+                .frame(width: 14, height: barHeight)
+        case 2:
+            Image(systemName: "bolt.fill")
+                .font(.system(size: 9))
+                .foregroundStyle(theme.statusbarAccentFg)
+                .frame(width: 14, height: barHeight)
+        case 3:
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.system(size: 9))
+                .foregroundStyle(theme.gutterErrorFg)
+                .frame(width: 14, height: barHeight)
+        case 4:
+            Image(systemName: "pencil.and.outline")
+                .font(.system(size: 9))
+                .foregroundStyle(theme.agentStatusNeedsYou)
+                .frame(width: 14, height: barHeight)
+        default:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private var backgroundSubagentSegment: some View {
+        Button(action: {
+            encoder?.sendExecuteCommand(name: "agent_session_switcher")
+        }) {
+            HStack(spacing: 3) {
+                Image(systemName: "person.2.wave.2.fill")
+                    .font(.system(size: 9, weight: .medium))
+                Text(backgroundSubagentText)
+                    .font(.system(size: 11))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(theme.modelineBarFg.opacity(0.65))
+        }
+        .buttonStyle(.plain)
+        .help("Background sub-agents")
+        .padding(.horizontal, 6)
+        .onHover { isHovered in
+            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+    }
+
+    private var backgroundSubagentText: String {
+        if state.backgroundSubagentLabel.isEmpty {
+            return "bg:\(state.backgroundSubagentCount)"
+        }
+
+        return "bg:\(state.backgroundSubagentCount) \(state.backgroundSubagentLabel)"
+    }
+
+    @ViewBuilder
+    private var gitSegment: some View {
+        Button(action: {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(state.gitBranch, forType: .string)
+            gitCopied = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                gitCopied = false
+            }
+        }) {
+            HStack(spacing: 3) {
+                Image(systemName: gitCopied ? "checkmark" : "arrow.triangle.branch")
+                    .font(.system(size: 9, weight: .medium))
+                Text(gitCopied ? "Copied!" : state.gitBranch)
+                    .font(.system(size: 11))
+                    .lineLimit(1)
+
+                if !gitCopied && gitSyncing {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.45)
+                        .frame(width: 12, height: barHeight)
+                }
+
+                if !gitCopied, state.hasGitDiffStats {
+                    HStack(spacing: 4) {
+                        if state.gitAdded > 0 {
+                            Text("+\(state.gitAdded)")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(theme.gitAddedFg)
+                        }
+                        if state.gitModified > 0 {
+                            Text("~\(state.gitModified)")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(theme.gitModifiedFg)
+                        }
+                        if state.gitDeleted > 0 {
+                            Text("-\(state.gitDeleted)")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(theme.gitDeletedFg)
+                        }
+                    }
+                }
+            }
+            .foregroundStyle(theme.modelineBarFg.opacity(0.6))
+        }
+        .buttonStyle(.plain)
+        .help("Click to copy branch name")
+        .padding(.horizontal, 6)
+        .onHover { isHovered in
+            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+    }
+
+    @ViewBuilder
+    private func diagnosticIndicators(command: String? = nil) -> some View {
+        let hasAny = state.errorCount > 0 || state.warningCount > 0 || state.infoCount > 0 || state.hintCount > 0
+        if hasAny {
+            Button(action: {
+                if let command {
+                    encoder?.sendExecuteCommand(name: command)
+                } else {
+                    encoder?.sendTogglePanel(panel: 1)
+                }
+            }) {
+                HStack(spacing: 6) {
+                    if state.errorCount > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 9))
+                            Text("\(state.errorCount)")
+                                .font(.system(size: 11))
+                        }
+                        .foregroundStyle(theme.gutterErrorFg)
+                    }
+                    if state.warningCount > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 9))
+                            Text("\(state.warningCount)")
+                                .font(.system(size: 11))
+                        }
+                        .foregroundStyle(theme.gutterWarningFg)
+                    }
+                    if state.infoCount > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "info.circle.fill")
+                                .font(.system(size: 9))
+                            Text("\(state.infoCount)")
+                                .font(.system(size: 11))
+                        }
+                        .foregroundStyle(theme.gutterInfoFg)
+                    }
+                    if state.hintCount > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "lightbulb.fill")
+                                .font(.system(size: 9))
+                            Text("\(state.hintCount)")
+                                .font(.system(size: 11))
+                        }
+                        .foregroundStyle(theme.gutterHintFg)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .help("Show diagnostics (SPC c d)")
+            .padding(.horizontal, 4)
+            .onHover { isHovered in
+                if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func parserStatusIcon(command: String? = nil) -> some View {
+        switch state.parserStatus {
+        case 1:
+            commandButton(command: command, tooltip: "Tree-sitter parser unavailable") {
+                Image(systemName: "leaf.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(theme.gutterErrorFg)
+            }
+        case 2:
+            commandButton(command: command, tooltip: "Tree-sitter parser restarting") {
+                Image(systemName: "leaf.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(theme.gutterWarningFg)
+            }
+        default:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func lspIndicator(command: String? = nil) -> some View {
+        let info = lspInfo(state.lspStatus)
+        commandButton(command: command, tooltip: info.tooltip) {
+            Image(systemName: info.icon)
+                .font(.system(size: 9))
+                .foregroundStyle(info.color)
+                .padding(.horizontal, 4)
+        }
+    }
+
+    private func lspInfo(_ status: UInt8) -> (icon: String, tooltip: String, color: Color) {
+        switch status {
+        case 1:  return ("checkmark.circle.fill",         "LSP: ready",         theme.gitAddedFg)
+        case 2:  return ("arrow.triangle.2.circlepath",   "LSP: initializing…", theme.modelineBarFg.opacity(0.5))
+        case 3:  return ("arrow.triangle.2.circlepath",   "LSP: starting…",     theme.modelineBarFg.opacity(0.5))
+        case 4:  return ("exclamationmark.triangle.fill", "LSP: error",         theme.gutterErrorFg)
+        default: return ("circle",                        "LSP: inactive",      theme.modelineBarFg.opacity(0.3))
+        }
+    }
+
+    @ViewBuilder
+    private func indentSegment(command: String? = nil) -> some View {
+        Button(action: {
+            encoder?.sendExecuteCommand(name: command ?? "indent_picker")
+        }) {
+            Text("\(state.indent.label):\(state.indent.size)")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(theme.modelineBarFg.opacity(0.65))
+        }
+        .buttonStyle(.plain)
+        .help("Indent settings")
+        .onHover { isHovered in
+            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+    }
+
+    @ViewBuilder
+    private func filetypeSegment(command: String? = nil) -> some View {
+        Button(action: {
+            encoder?.sendExecuteCommand(name: command ?? "set_language")
+        }) {
+            HStack(spacing: 3) {
+                if !state.icon.isEmpty {
+                    Text(state.icon)
+                        .font(.custom("Symbols Nerd Font Mono", size: 11))
+                        .foregroundStyle(state.iconColor)
+                }
+                Text(state.filetypeDisplay)
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.modelineBarFg.opacity(0.6))
+            }
+        }
+        .buttonStyle(.plain)
+        .help("Change language mode (SPC b l)")
+        .onHover { isHovered in
+            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+    }
+
+    @ViewBuilder
+    private func filenameSegment(command: String? = nil) -> some View {
+        if !state.filename.isEmpty {
+            Button(action: {
+                encoder?.sendExecuteCommand(name: command ?? "buffer_list")
+            }) {
+                HStack(spacing: 3) {
+                    Text(state.filename)
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.modelineBarFg.opacity(0.65))
+                        .lineLimit(1)
+                    if state.isDirty {
+                        Circle()
+                            .fill(theme.statusbarAccentFg.opacity(0.9))
+                            .frame(width: 5, height: 5)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .help("Buffer list")
+            .onHover { isHovered in
+                if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var positionSegment: some View {
+        if state.isAgentWindow {
+            Text("\(state.messageCount) msgs")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(theme.modelineBarFg.opacity(0.7))
+        } else if state.selection.isActive {
+            Text(state.selection.displayText)
+                .font(.system(size: 11, design: .monospaced))
+                .monospacedDigit()
+                .contentTransition(.numericText())
+                .foregroundStyle(theme.modelineBarFg.opacity(0.7))
+                .help(state.selection.displayText)
+        } else {
+            Text("Ln \(state.cursorLine), Col \(state.cursorCol)")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(theme.modelineBarFg.opacity(0.7))
+                .help("Line \(state.cursorLine), Column \(state.cursorCol)")
+        }
+    }
+
+    @ViewBuilder
+    private var percentSegment: some View {
+        Text(percentText)
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundStyle(theme.modelineBarFg.opacity(0.55))
+            .help("Position in file")
+    }
+
+    private var percentText: String {
+        if state.lineCount <= 1 || state.cursorLine <= 1 {
+            return "Top"
+        }
+        if state.cursorLine >= state.lineCount {
+            return "Bot"
+        }
+        let numerator = max(0, Int(state.cursorLine) - 1) * 100
+        let denominator = max(1, Int(state.lineCount) - 1)
+        return "\(numerator / denominator)%"
+    }
+
+    @ViewBuilder
+    private var modeBadge: some View {
+        let (bg, fg) = modeColors(state.mode)
+        Text(state.modeName)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(fg)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(bg)
+            )
+            .help("\(state.modeName) mode")
+    }
+
+    private func modeColors(_ mode: UInt8) -> (Color, Color) {
+        switch mode {
+        case 0: return (theme.modeNormalBg, theme.modeNormalFg)
+        case 1: return (theme.modeInsertBg, theme.modeInsertFg)
+        case 2: return (theme.modeVisualBg, theme.modeVisualFg)
+        default: return (theme.modelineInfoBg, theme.modelineInfoFg)
+        }
+    }
+
+    @ViewBuilder
+    private func customModelineGroup(_ group: StatusBarSegmentGroup) -> some View {
+        HStack(spacing: 2) {
+            ForEach(group.segments) { segment in
+                StatusBarModelineSegmentView(segment: segment, encoder: encoder)
+            }
         }
     }
 
@@ -344,9 +795,8 @@ struct StatusBarView: View {
                 .clipped()
                 .contentShape(Rectangle())
 
-
-            boundedConfiguredModelineSegments(
-                state.modelineLeftSegments,
+            boundedNativeModelineGroups(
+                leftModelineGroups,
                 width: layout.leftModelineWidth,
                 alignment: .leading
             )
@@ -358,8 +808,8 @@ struct StatusBarView: View {
 
     private func rightStatusZone(_ layout: StatusBarModelineLayout) -> some View {
         HStack(spacing: sideSpacing) {
-            boundedConfiguredModelineSegments(
-                state.modelineRightSegments,
+            boundedNativeModelineGroups(
+                rightModelineGroups,
                 width: layout.rightModelineWidth,
                 alignment: .trailing
             )
@@ -374,8 +824,8 @@ struct StatusBarView: View {
         .contentShape(Rectangle())
     }
 
-    private func boundedConfiguredModelineSegments(_ segments: [Wire.StatusBarSegment], width: CGFloat, alignment: Alignment) -> some View {
-        configuredModelineSegments(segments)
+    private func boundedNativeModelineGroups(_ groups: [StatusBarSegmentGroup], width: CGFloat, alignment: Alignment) -> some View {
+        nativeModelineGroups(groups)
             .lineLimit(1)
             .truncationMode(.tail)
             .frame(width: width, height: barHeight, alignment: alignment)
@@ -383,10 +833,10 @@ struct StatusBarView: View {
             .clipped()
     }
 
-    private func configuredModelineSegments(_ segments: [Wire.StatusBarSegment]) -> some View {
-        HStack(spacing: 0) {
-            ForEach(segments) { segment in
-                StatusBarModelineSegmentView(segment: segment, encoder: encoder)
+    private func nativeModelineGroups(_ groups: [StatusBarSegmentGroup]) -> some View {
+        HStack(spacing: 8) {
+            ForEach(groups) { group in
+                nativeModelineGroup(group)
             }
         }
         .contentShape(Rectangle())
@@ -521,7 +971,8 @@ private struct StatusBarModelineSegmentView: View {
 
     @ViewBuilder
     private var segmentText: some View {
-        let text = Text(segment.text)
+        let displayText = trimmedDisplayText
+        let text = Text(displayText)
             .font(segmentFont)
             .fontWeight(segmentFontWeight)
             .foregroundStyle(color(segment.fgColor))
@@ -532,17 +983,29 @@ private struct StatusBarModelineSegmentView: View {
         if segment.isItalic {
             text
                 .italic()
-                .frame(minHeight: 24, maxHeight: 24, alignment: .center)
-                .background(color(segment.bgColor))
+                .padding(.horizontal, 6)
+                .frame(height: 18, alignment: .center)
+                .background(customBackground)
                 .contentShape(Rectangle())
                 .clipped()
         } else {
             text
-                .frame(minHeight: 24, maxHeight: 24, alignment: .center)
-                .background(color(segment.bgColor))
+                .padding(.horizontal, 6)
+                .frame(height: 18, alignment: .center)
+                .background(customBackground)
                 .contentShape(Rectangle())
                 .clipped()
         }
+    }
+
+    private var trimmedDisplayText: String {
+        let trimmed = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? segment.text : trimmed
+    }
+
+    private var customBackground: some View {
+        RoundedRectangle(cornerRadius: 4)
+            .fill(color(segment.bgColor).opacity(0.18))
     }
 
     private var segmentFont: Font {

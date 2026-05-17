@@ -244,7 +244,7 @@ opcode(1) + section_count(1) + [section_id(1) + section_len(2) + payload(section
 | 0x08 | Recording | macro_recording(1) |
 | 0x09 | Agent | buffer variant: agent_status(1) + background_count(2) + background_label_len(2) + background_label. Agent variant: model_name_len(1) + model_name + message_count(4) + session_status(1) + agent_status(1) + background_count(2) + background_label_len(2) + background_label |
 | 0x0A | Indent | indent_type(1: 0=spaces, 1=tabs) + indent_size(1) |
-| 0x0B | ModelineSegments | version(1) + left_count(2) + right_count(2) + left segments + right segments. Each segment is fg(3) + bg(3) + attrs(1) + text_len(2) + text + command_len(2) + command |
+| 0x0B | ModelineSegments | version(1, currently 2) + left_count(2) + right_count(2) + left segments + right segments. Each v2 segment is name_len(1) + name + fg(3) + bg(3) + attrs(1) + text_len(2) + text + command_len(2) + command. |
 | 0x0C | Selection | selection_mode(1: 0=none, 1=chars, 2=lines) + selection_size(4) |
 
 `content_kind`: 0 = buffer window, 1 = agent chat window. When `content_kind == 1`, the standard sections (cursor, git, diagnostics, etc.) contain background buffer data and section 0x09 includes agent-specific fields. `background_count` is the number of currently running background sub-agents. `background_label` is the active background child label when focused, otherwise the first running child label.
@@ -267,7 +267,7 @@ Macro recording: 0=not recording, 1-26=recording register a-z
 
 `icon` is a UTF-8 encoded Nerd Font glyph for the filetype (e.g., "" for Elixir). `icon_color` is 24-bit RGB split into 3 bytes. `filename` is the display name of the active buffer (for accessibility/tooltip use). `git_added`, `git_modified`, `git_deleted` are line counts from the buffer's diff against HEAD.
 
-`ModelineSegments` is the native GUI projection of the configurable modeline. The BEAM resolves built-in and custom segment names, default side placement, explicit side overrides, separator style, and click targets, then sends styled text segments to the frontend. Native frontends render these segments in the status bar alongside frontend-owned controls such as panel toggles. `attrs` uses the same low bits as `draw_text`: bit 0 bold, bit 1 underline, bit 2 italic. `command` is empty for non-clickable segments; otherwise it is a command name to send through the existing `execute_command` GUI action.
+`ModelineSegments` is the named GUI projection of the configurable modeline. The BEAM resolves built-in and custom segment names, side placement, explicit ordering, and click targets, then sends named styled segments to the frontend. Native frontends should use `name` to render known built-ins with platform-native controls (`mode` as a badge, `position` as compact text, `filetype` with the devicon, and so on) instead of drawing terminal-style full-height color blocks. Unknown or custom names can use `text`, `fg`, `bg`, and `attrs` as a native chip fallback. `attrs` uses the same low bits as `draw_text`: bit 0 bold, bit 1 underline, bit 2 italic. `command` is empty for non-clickable segments; otherwise it is a command name to send through the existing `execute_command` GUI action.
 
 ### 0x77 — gui_picker (sectioned format)
 

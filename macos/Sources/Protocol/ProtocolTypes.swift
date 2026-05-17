@@ -134,11 +134,22 @@ enum Wire {
     /// A configured modeline segment from the gui_status_bar modeline segment section.
     struct StatusBarSegment: Sendable, Equatable, Identifiable {
         let id: Int
+        let kind: String
         let text: String
         let fgColor: UInt32
         let bgColor: UInt32
         let attrs: UInt8
         let command: String
+
+        init(id: Int, kind: String = "custom", text: String, fgColor: UInt32, bgColor: UInt32, attrs: UInt8, command: String) {
+            self.id = id
+            self.kind = kind
+            self.text = text
+            self.fgColor = fgColor
+            self.bgColor = bgColor
+            self.attrs = attrs
+            self.command = command
+        }
 
         var isBold: Bool { attrs & 0x01 != 0 }
         var isUnderline: Bool { attrs & 0x02 != 0 }

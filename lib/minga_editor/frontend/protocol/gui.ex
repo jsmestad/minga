@@ -1697,7 +1697,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     0x08 - Recording: macro_recording
     0x09 - Agent: model_name, message_count, session_status, agent_status
     0x0A - Indent: indent_type, indent_size
-    0x0B - ModelineSegments: configured left/right styled modeline segments
+    0x0B - ModelineSegments: named configured left/right styled modeline segments
     0x0C - Selection: selection_mode, selection_size
   """
   @spec encode_gui_status_bar(MingaEditor.StatusBar.Data.t()) :: binary()
@@ -1802,7 +1802,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   end
 
   @spec encode_modeline_segments(%{left: [tuple()], right: [tuple()]} | nil) :: binary()
-  defp encode_modeline_segments(nil), do: <<1::8, 0::16, 0::16>>
+  defp encode_modeline_segments(nil), do: <<2::8, 0::16, 0::16>>
 
   defp encode_modeline_segments(%{left: left, right: right}) do
     {left, right} = capped_modeline_segments(left, right)
@@ -1810,7 +1810,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     {encoded_right, right_count, _remaining} = bounded_modeline_side(right, remaining)
 
     IO.iodata_to_binary([
-      <<1::8, left_count::16, right_count::16>>,
+      <<2::8, left_count::16, right_count::16>>,
       encoded_left,
       encoded_right
     ])
@@ -1836,17 +1836,37 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   end
 
   @spec encode_modeline_segment(tuple(), non_neg_integer()) :: {:ok, binary()} | :drop
-  defp encode_modeline_segment(_segment, remaining) when remaining < 11, do: :drop
+  defp encode_modeline_segment(_segment, remaining) when remaining < 12, do: :drop
+
+  defp encode_modeline_segment({name, text, fg, bg, opts, target}, remaining) do
+    name_bytes = modeline_name_bytes(name)
+    overhead = 12 + byte_size(name_bytes)
+
+    if remaining < overhead do
+      :drop
+    else
+      attrs = encode_modeline_attrs(opts)
+      target = encode_modeline_target(target)
+      payload_budget = remaining - overhead
+      {text_bytes, target_bytes} = bounded_modeline_text_and_target(text, target, payload_budget)
+
+      {:ok,
+       <<byte_size(name_bytes)::8, name_bytes::binary, fg::24, bg::24, attrs::8,
+         byte_size(text_bytes)::16, text_bytes::binary, byte_size(target_bytes)::16,
+         target_bytes::binary>>}
+    end
+  end
 
   defp encode_modeline_segment({text, fg, bg, opts, target}, remaining) do
-    attrs = encode_modeline_attrs(opts)
-    target = encode_modeline_target(target)
-    payload_budget = remaining - 11
-    {text_bytes, target_bytes} = bounded_modeline_text_and_target(text, target, payload_budget)
+    encode_modeline_segment({:custom, text, fg, bg, opts, target}, remaining)
+  end
 
-    {:ok,
-     <<fg::24, bg::24, attrs::8, byte_size(text_bytes)::16, text_bytes::binary,
-       byte_size(target_bytes)::16, target_bytes::binary>>}
+  @spec modeline_name_bytes(atom() | String.t()) :: binary()
+  defp modeline_name_bytes(name) do
+    name
+    |> to_string()
+    |> :erlang.iolist_to_binary()
+    |> utf8_prefix_bytes(255)
   end
 
   @spec bounded_modeline_text_and_target(String.t(), String.t(), non_neg_integer()) ::

@@ -53,6 +53,7 @@ struct StatusBarUpdate: Sendable {
     let backgroundSubagentCount: UInt16
     let backgroundSubagentLabel: String
     let indent: IndentInfo
+    let modelineSegmentsPresent: Bool
     let modelineLeftSegments: [Wire.StatusBarSegment]
     let modelineRightSegments: [Wire.StatusBarSegment]
     let selection: SelectionInfo
@@ -90,6 +91,7 @@ struct StatusBarUpdate: Sendable {
         backgroundSubagentCount: UInt16,
         backgroundSubagentLabel: String,
         indent: IndentInfo = .init(kind: 0, size: 2),
+        modelineSegmentsPresent: Bool = false,
         modelineLeftSegments: [Wire.StatusBarSegment] = [],
         modelineRightSegments: [Wire.StatusBarSegment] = [],
         selection: SelectionInfo = .init(mode: 0, size: 0)
@@ -126,6 +128,7 @@ struct StatusBarUpdate: Sendable {
         self.backgroundSubagentCount = backgroundSubagentCount
         self.backgroundSubagentLabel = backgroundSubagentLabel
         self.indent = indent
+        self.modelineSegmentsPresent = modelineSegmentsPresent
         self.modelineLeftSegments = modelineLeftSegments
         self.modelineRightSegments = modelineRightSegments
         self.selection = selection
@@ -720,6 +723,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         var sessionStatus: UInt8 = 0
         var agentStatus: UInt8 = 0
         var indent = StatusBarUpdate.IndentInfo(kind: 0, size: 2)
+        var modelineSegmentsPresent = false
         var modelineLeftSegments: [Wire.StatusBarSegment] = []
         var modelineRightSegments: [Wire.StatusBarSegment] = []
         var selection = StatusBarUpdate.SelectionInfo(mode: 0, size: 0)
@@ -833,13 +837,14 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             case 0x0B: // ModelineSegments: version(1) + left_count(2) + right_count(2) + segments...
                 guard sectionLen >= 5 else { throw ProtocolDecodeError.malformed }
                 let version = data[sStart]
-                guard version == 1 else { break }
+                guard version == 1 || version == 2 else { break }
+                modelineSegmentsPresent = true
                 let leftCount = Int(readU16(data, sStart + 1))
                 let rightCount = Int(readU16(data, sStart + 3))
                 var segmentPos = sStart + 5
                 let sectionEnd = sStart + sectionLen
-                modelineLeftSegments = try decodeStatusBarSegments(data: data, pos: &segmentPos, count: leftCount, end: sectionEnd)
-                modelineRightSegments = try decodeStatusBarSegments(data: data, pos: &segmentPos, count: rightCount, end: sectionEnd)
+                modelineLeftSegments = try decodeStatusBarSegments(data: data, pos: &segmentPos, count: leftCount, end: sectionEnd, version: version)
+                modelineRightSegments = try decodeStatusBarSegments(data: data, pos: &segmentPos, count: rightCount, end: sectionEnd, version: version)
                 guard segmentPos == sectionEnd else { throw ProtocolDecodeError.malformed }
 
             case 0x0C: // Selection: selection_mode(1) + selection_size(4)
@@ -868,6 +873,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             backgroundSubagentCount: backgroundSubagentCount,
             backgroundSubagentLabel: backgroundSubagentLabel,
             indent: indent,
+            modelineSegmentsPresent: modelineSegmentsPresent,
             modelineLeftSegments: modelineLeftSegments,
             modelineRightSegments: modelineRightSegments,
             selection: selection
@@ -2484,11 +2490,21 @@ private func readRequiredUTF8(_ data: Data.SubSequence) throws -> String {
     return string
 }
 
-private func decodeStatusBarSegments(data: Data, pos: inout Int, count: Int, end: Int) throws -> [Wire.StatusBarSegment] {
+private func decodeStatusBarSegments(data: Data, pos: inout Int, count: Int, end: Int, version: UInt8) throws -> [Wire.StatusBarSegment] {
     var segments: [Wire.StatusBarSegment] = []
     segments.reserveCapacity(count)
 
     for index in 0..<count {
+        var kind = "custom"
+        if version >= 2 {
+            guard pos + 1 <= end else { throw ProtocolDecodeError.malformed }
+            let kindLen = Int(data[pos]); pos += 1
+            guard pos + kindLen <= end else { throw ProtocolDecodeError.malformed }
+            guard let decodedKind = String(data: data[pos..<(pos + kindLen)], encoding: .utf8) else { throw ProtocolDecodeError.malformed }
+            kind = decodedKind
+            pos += kindLen
+        }
+
         guard pos + 9 <= end else { throw ProtocolDecodeError.malformed }
         let fg = readU24(data, pos); pos += 3
         let bg = readU24(data, pos); pos += 3
@@ -2501,7 +2517,7 @@ private func decodeStatusBarSegments(data: Data, pos: inout Int, count: Int, end
         guard pos + commandLen <= end else { throw ProtocolDecodeError.malformed }
         guard let command = String(data: data[pos..<(pos + commandLen)], encoding: .utf8) else { throw ProtocolDecodeError.malformed }
         pos += commandLen
-        segments.append(Wire.StatusBarSegment(id: index, text: text, fgColor: fg, bgColor: bg, attrs: attrs, command: command))
+        segments.append(Wire.StatusBarSegment(id: index, kind: kind, text: text, fgColor: fg, bgColor: bg, attrs: attrs, command: command))
     }
 
     return segments

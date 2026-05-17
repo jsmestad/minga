@@ -61,8 +61,10 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
 
   @type separator_style :: :powerline | :round | :slant | :none
   @type render_segment :: ModelineSegment.render_segment()
+  @type gui_segment ::
+          {atom(), String.t(), non_neg_integer(), non_neg_integer(), keyword(), atom() | nil}
   @type segment_group :: %{name: atom(), priority: integer(), segments: [render_segment()]}
-  @type gui_segments :: %{left: [render_segment()], right: [render_segment()]}
+  @type gui_segments :: %{left: [gui_segment()], right: [gui_segment()]}
   @type context :: %{
           data: modeline_data(),
           theme: Theme.t(),
@@ -153,14 +155,13 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
         modeline_segments_table \\ ModelineSegments
       ) do
     ctx = context(data, theme)
-    separator_style = Minga.Config.get(:modeline_separator)
     {left_names, right_names} = configured_segment_names(modeline_segments_table)
     left_groups = build_segment_groups(left_names, ctx, modeline_segments_table)
     right_groups = build_segment_groups(right_names, ctx, modeline_segments_table)
 
     %{
-      left: left_segments(left_groups, separator_style, ctx.bar_bg),
-      right: right_segments(right_groups, separator_style, ctx.bar_bg)
+      left: gui_segments_from_groups(left_groups),
+      right: gui_segments_from_groups(right_groups)
     }
   end
 
@@ -500,6 +501,13 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   @spec drop_group([segment_group()], :left | :right, atom(), :left | :right) :: [segment_group()]
   defp drop_group(groups, side, name, side), do: Enum.reject(groups, &(&1.name == name))
   defp drop_group(groups, _drop_side, _name, _own_side), do: groups
+
+  @spec gui_segments_from_groups([segment_group()]) :: [gui_segment()]
+  defp gui_segments_from_groups(groups) do
+    Enum.flat_map(groups, fn %{name: name, segments: segments} ->
+      Enum.map(segments, fn {text, fg, bg, opts, target} -> {name, text, fg, bg, opts, target} end)
+    end)
+  end
 
   @spec groups_width([segment_group()], [segment_group()], separator_style(), non_neg_integer()) ::
           non_neg_integer()

@@ -352,7 +352,10 @@ struct GUIStatusBarDecoderTests {
         return section
     }
 
-    private func appendStatusBarSegment(_ data: inout Data, text: String, fg: UInt32, bg: UInt32, attrs: UInt8, command: String) {
+    private func appendStatusBarSegment(_ data: inout Data, kind: String? = nil, text: String, fg: UInt32, bg: UInt32, attrs: UInt8, command: String) {
+        if let kind {
+            appendString8(&data, kind)
+        }
         appendU24(&data, fg)
         appendU24(&data, bg)
         data.append(attrs)
@@ -569,11 +572,11 @@ struct GUIStatusBarDecoderTests {
         identity.append(0); identity.append(0); identity.append(0)
 
         var modelineSegments = Data()
-        modelineSegments.append(1) // version
+        modelineSegments.append(2) // version
         appendU16(&modelineSegments, 1) // left count
         appendU16(&modelineSegments, 1) // right count
-        appendStatusBarSegment(&modelineSegments, text: " NORMAL ", fg: 0xBBC2CF, bg: 0x51AFEF, attrs: 0x01, command: "")
-        appendStatusBarSegment(&modelineSegments, text: " Elixir ", fg: 0xC678DD, bg: 0x282C34, attrs: 0x00, command: "set_language")
+        appendStatusBarSegment(&modelineSegments, kind: "mode", text: " NORMAL ", fg: 0xBBC2CF, bg: 0x51AFEF, attrs: 0x01, command: "")
+        appendStatusBarSegment(&modelineSegments, kind: "filetype", text: " Elixir ", fg: 0xC678DD, bg: 0x282C34, attrs: 0x00, command: "set_language")
 
         let sections = [
             buildSection(SECTION_IDENTITY, identity),
@@ -592,12 +595,15 @@ struct GUIStatusBarDecoderTests {
             Issue.record("Expected .guiStatusBar"); return
         }
 
+        #expect(update.modelineSegmentsPresent)
         #expect(update.modelineLeftSegments.count == 1)
+        #expect(update.modelineLeftSegments[0].kind == "mode")
         #expect(update.modelineLeftSegments[0].text == " NORMAL ")
         #expect(update.modelineLeftSegments[0].fgColor == 0xBBC2CF)
         #expect(update.modelineLeftSegments[0].bgColor == 0x51AFEF)
         #expect(update.modelineLeftSegments[0].isBold)
         #expect(update.modelineRightSegments.count == 1)
+        #expect(update.modelineRightSegments[0].kind == "filetype")
         #expect(update.modelineRightSegments[0].text == " Elixir ")
         #expect(update.modelineRightSegments[0].command == "set_language")
     }
@@ -608,7 +614,7 @@ struct GUIStatusBarDecoderTests {
         identity.append(0); identity.append(0); identity.append(0)
 
         var modelineSegments = Data()
-        modelineSegments.append(2) // unsupported version
+        modelineSegments.append(3) // unsupported version
         appendU16(&modelineSegments, 1)
         appendU16(&modelineSegments, 0)
         appendStatusBarSegment(&modelineSegments, text: " HIDDEN ", fg: 0xBBC2CF, bg: 0x51AFEF, attrs: 0x00, command: "")

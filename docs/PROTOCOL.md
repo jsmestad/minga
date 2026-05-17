@@ -925,9 +925,9 @@ Total size: 7 + (40 + text_len) per edit.
 
 ## GUI Chrome Protocol
 
-Native GUI frontends (SwiftUI, GTK4) receive additional structured data opcodes for chrome elements like tab bars, file trees, status bars, and popups. These opcodes start at 0x70 and are sent only when the frontend reports `frontend_type = native_gui` in its capabilities. The GUI status bar opcode carries the same configured modeline segment surface as the TUI modeline, encoded as structured styled segments inside the `gui_status_bar` sectioned payload.
+Native GUI frontends (SwiftUI, GTK4) receive additional structured data opcodes for chrome elements like tab bars, file trees, status bars, and popups. These opcodes start at 0x70 and are sent only when the frontend reports `frontend_type = native_gui` in its capabilities. The GUI status bar opcode carries structured status fields plus named configured modeline segments so native frontends can keep platform styling while honoring modeline order and visibility.
 
-See [GUI_PROTOCOL.md](GUI_PROTOCOL.md) for the complete specification of GUI chrome opcodes, gui_action input events, theme color slots, and the behavioral contract for GUI frontends. The sectioned `gui_status_bar` opcode (`0x76`) is specified there, including the indent section (`0x0A`), reserved encoding section (`0x0B`), and selection section (`0x0C`).
+See [GUI_PROTOCOL.md](GUI_PROTOCOL.md) for the complete specification of GUI chrome opcodes, gui_action input events, theme color slots, and the behavioral contract for GUI frontends. The sectioned `gui_status_bar` opcode (`0x76`) is specified there, including the indent section (`0x0A`), named modeline segment section (`0x0B`), and selection section (`0x0C`).
 
 ---
 

@@ -370,11 +370,11 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
 
         segments = Modeline.gui_segments(@base_data)
 
-        assert Enum.any?(segments.left, fn {text, _fg, _bg, _opts, _target} ->
-                 text == " LEFTY "
+        assert Enum.any?(segments.left, fn {name, text, _fg, _bg, _opts, _target} ->
+                 name == segment_name and text == " LEFTY "
                end)
 
-        refute Enum.any?(segments.right, fn {text, _fg, _bg, _opts, _target} ->
+        refute Enum.any?(segments.right, fn {_name, text, _fg, _bg, _opts, _target} ->
                  text == " LEFTY "
                end)
       after
@@ -672,7 +672,7 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
   end
 
   defp segment_text(segments) do
-    Enum.map_join(segments, fn {text, _fg, _bg, _opts, _target} -> text end)
+    Enum.map_join(segments, fn {_name, text, _fg, _bg, _opts, _target} -> text end)
   end
 
   describe "parser status indicator" do
