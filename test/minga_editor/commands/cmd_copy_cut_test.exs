@@ -1,9 +1,8 @@
 defmodule MingaEditor.Commands.CmdCopyCutTest do
   @moduledoc """
-  Tests for :cmd_copy and :cmd_cut commands (macOS Cmd+C / Cmd+X menu actions).
+  Layer 0/1 command-state tests for :cmd_copy and :cmd_cut commands (macOS Cmd+C / Cmd+X menu actions).
 
-  Verifies mode-aware behavior: visual selection when active, current line when not.
-  Tests register writes and forced clipboard sync.
+  Verifies mode-aware behavior: visual selection when active, current line when not. Tests register writes and forced clipboard sync without a live Editor GenServer.
   """
   use ExUnit.Case, async: true
 
