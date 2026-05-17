@@ -779,6 +779,29 @@ pub const Highlighter = struct {
         return null;
     }
 
+    /// Alias for the shared StructuralNavResult type.
+    pub const StructuralNavResult = protocol.StructuralNavResult;
+
+    /// Navigate from the deepest named node at `row, col` to a structural relative.
+    pub fn structuralNav(self: *Highlighter, row: u32, col: u32, action: protocol.StructuralNavAction) ?StructuralNavResult {
+        const tree = self.tree orelse return null;
+        const root = c.ts_tree_root_node(tree);
+        const node = namedNodeAtPoint(root, row, col);
+        if (isNullNode(node)) return null;
+
+        const target = structuralNavTarget(node, action) orelse return null;
+        const start = c.ts_node_start_point(target);
+        const end = c.ts_node_end_point(target);
+
+        return .{
+            .start_row = start.row,
+            .start_col = start.column,
+            .end_row = end.row,
+            .end_col = end.column,
+            .type_name = nodeType(target),
+        };
+    }
+
     /// Alias for the shared TextobjectEntry type (defined in protocol to avoid circular imports).
     pub const TextobjectEntry = protocol.TextobjectEntry;
 
@@ -1583,6 +1606,39 @@ fn nodeAtPoint(root: c.TSNode, row: u32, col: u32) c.TSNode {
     const start = c.TSPoint{ .row = row, .column = col };
     const end = c.TSPoint{ .row = row, .column = col + 1 };
     return c.ts_node_descendant_for_point_range(root, start, end);
+}
+
+fn namedNodeAtPoint(root: c.TSNode, row: u32, col: u32) c.TSNode {
+    const start = c.TSPoint{ .row = row, .column = col };
+    const end = c.TSPoint{ .row = row, .column = col + 1 };
+    return c.ts_node_named_descendant_for_point_range(root, start, end);
+}
+
+fn structuralNavTarget(node: c.TSNode, action: protocol.StructuralNavAction) ?c.TSNode {
+    return switch (action) {
+        .parent => firstMeaningfulNamedParent(node),
+        .first_child => nullIfNull(c.ts_node_named_child(node, 0)),
+        .next_sibling => nullIfNull(c.ts_node_next_named_sibling(node)),
+        .prev_sibling => nullIfNull(c.ts_node_prev_named_sibling(node)),
+    };
+}
+
+fn firstMeaningfulNamedParent(node: c.TSNode) ?c.TSNode {
+    var parent = c.ts_node_parent(node);
+    while (!isNullNode(parent)) : (parent = c.ts_node_parent(parent)) {
+        if (isRootNode(parent)) return null;
+        if (c.ts_node_is_named(parent)) return parent;
+    }
+    return null;
+}
+
+fn nullIfNull(node: c.TSNode) ?c.TSNode {
+    if (isNullNode(node)) return null;
+    return node;
+}
+
+fn isRootNode(node: c.TSNode) bool {
+    return isNullNode(c.ts_node_parent(node));
 }
 
 fn isNullNode(node: c.TSNode) bool {
@@ -2447,6 +2503,61 @@ test "highlighter: Perl shebang predicate does not tag ordinary first comments a
         }
     }
     try std.testing.expect(found_shebang);
+}
+
+test "highlighter: structural nav parent moves from function body to function declaration" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("javascript"));
+    try hl.parse("function add(a, b) {\n  return a + b;\n}\n");
+
+    const result = hl.structuralNav(0, 20, .parent) orelse return error.NoMatch;
+    try std.testing.expectEqual(@as(u32, 0), result.start_row);
+    try std.testing.expectEqual(@as(u32, 0), result.start_col);
+    try std.testing.expectEqualStrings("function_declaration", result.type_name);
+}
+
+test "highlighter: structural nav first child moves from function to name" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("javascript"));
+    try hl.parse("function add(a, b) { return a + b; }");
+
+    const result = hl.structuralNav(0, 0, .first_child) orelse return error.NoMatch;
+    try std.testing.expectEqual(@as(u32, 0), result.start_row);
+    try std.testing.expectEqual(@as(u32, 9), result.start_col);
+    try std.testing.expectEqualStrings("identifier", result.type_name);
+}
+
+test "highlighter: structural nav next and previous siblings move between arguments" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("javascript"));
+    try hl.parse("f(a, b, c);");
+
+    const next = hl.structuralNav(0, 2, .next_sibling) orelse return error.NoMatch;
+    try std.testing.expectEqual(@as(u32, 0), next.start_row);
+    try std.testing.expectEqual(@as(u32, 5), next.start_col);
+    try std.testing.expectEqualStrings("identifier", next.type_name);
+
+    const prev = hl.structuralNav(0, 8, .prev_sibling) orelse return error.NoMatch;
+    try std.testing.expectEqual(@as(u32, 0), prev.start_row);
+    try std.testing.expectEqual(@as(u32, 5), prev.start_col);
+    try std.testing.expectEqualStrings("identifier", prev.type_name);
+}
+
+test "highlighter: structural nav returns null when no target exists" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("javascript"));
+    try hl.parse("function add(a, b) { return a + b; }");
+
+    try std.testing.expect(hl.structuralNav(0, 0, .parent) == null);
+    try std.testing.expect(hl.structuralNav(0, 9, .prev_sibling) == null);
 }
 
 test "highlighter: match item finds structural brackets" {

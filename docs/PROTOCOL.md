@@ -65,6 +65,7 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 | `0x2C` | request_textobject | variable | Request a text object range |
 | `0x2D` | close_buffer | 5 | Free parser state for a buffer |
 | `0x2E` | request_match_item | 17 | Request structural delimiter, keyword, quote, or tag match |
+| `0x2F` | request_structural_nav | 18 | Request parent, child, or sibling AST navigation |
 
 ### Frontend → BEAM (Input Events)
 
@@ -93,6 +94,7 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 | `0x3A` | conceal_spans | variable | Conceal byte ranges and replacement text |
 | `0x3B` | request_reparse | 5 | Parser requests full reparse after stale edit deltas |
 | `0x3C` | match_item_result | 6 or 14 | Structural match position result (or nil) |
+| `0x3D` | node_info | 6 or 24 + type_len | Structural navigation target range and node type |
 
 ### Frontend → BEAM (Diagnostics)
 
@@ -591,6 +593,23 @@ Total size: 9 + count × 9 bytes.
 
 **Behavior:** The Zig parser runs the `textobjects.scm` query against the parse tree and collects the start positions of all `.around` captures (e.g., `@function.around`, `@class.around`). Entries are sorted by (row, col) before sending. The BEAM decodes them into a `%{atom => [{row, col}]}` map and stores them on the active window struct. Navigation commands (`]f`, `[f`, etc.) scan this cached data with no further IPC to Zig.
 
+### `0x2F` request_structural_nav
+
+Request Helix-style structural AST navigation from the parser. The parser starts from the deepest named tree-sitter node at the cursor and returns the requested named relative.
+
+```
+opcode:     u8  = 0x2F
+buffer_id:  u32           parser buffer id
+request_id: u32           caller-chosen correlation id
+row:        u32           0-indexed line number
+col:        u32           0-indexed byte column
+action:     u8            0=parent, 1=first child, 2=next sibling, 3=previous sibling
+```
+
+Total size: 18 bytes.
+
+**Behavior:** Anonymous and punctuation nodes are skipped by starting with `ts_node_named_descendant_for_point_range` and moving through named parents, children, or siblings. If the parser has no buffer, no grammar, or no target node, it responds with `node_info` and `found = 0`. Invalid action bytes are malformed protocol commands.
+
 ### `0x3C` match_item_result
 
 Response to `request_match_item`. The parser returns one cursor position for the matching structural item, or `found = 0` when the cursor is not on a matchable item or the buffer has no grammar.
@@ -606,6 +625,26 @@ col:        u32           present only when found = 1
 Total size: 6 bytes when not found, 14 bytes when found.
 
 **Behavior:** Used by `%` in normal, visual, and operator-pending modes. The Zig parser walks the tree-sitter AST to match structural brackets, block keywords such as `def`/`end`, string delimiters, and HTML/XML tags without falling back to text scanning.
+
+### `0x3D` node_info
+
+Response to `request_structural_nav`. The parser returns the target node range and tree-sitter node type, or `found = 0` when no target exists.
+
+```
+opcode:     u8  = 0x3D
+request_id: u32           correlation ID from the request
+found:      u8            1 if a node was found, 0 otherwise
+start_row:  u32           present only when found = 1
+start_col:  u32           present only when found = 1
+end_row:    u32           present only when found = 1
+end_col:    u32           present only when found = 1
+type_len:   u16           present only when found = 1, capped at 255 bytes by the Zig encoder
+type:       [type_len]u8  UTF-8 tree-sitter node type name
+```
+
+Total size: 6 bytes when not found, 24 + type_len bytes when found.
+
+**Behavior:** The BEAM moves the cursor to `(start_row, start_col)` and can display `type` to help users learn the file's AST structure. The Zig encoder uses a fixed 280-byte stack buffer and truncates type names to 255 bytes. Current tree-sitter node type names are far shorter than this cap, but frontend and parser implementations should treat the cap as part of the wire contract.
 
 ### `0x3B` request_reparse
 
@@ -666,7 +705,7 @@ Total size: 4 + msg_len bytes.
 
 ### Current design
 
-Tree-sitter parsing runs in a dedicated `minga-parser` Zig process, separate from the rendering frontend. The renderer process handles only render commands (`0x10`-`0x1B` plus GUI chrome `0x70+`). The parser process handles highlight commands (`0x20`-`0x2E`) and sends highlight responses (`0x30`-`0x3C`). Both use the same `{:packet, 4}` framing on their respective stdin/stdout pipes. The BEAM manages both Port processes, routing commands to the appropriate one.
+Tree-sitter parsing runs in a dedicated `minga-parser` Zig process, separate from the rendering frontend. The renderer process handles only render commands (`0x10`-`0x1B` plus GUI chrome `0x70+`). The parser process handles highlight commands (`0x20`-`0x2F`) and sends highlight responses (`0x30`-`0x3D`). Both use the same `{:packet, 4}` framing on their respective stdin/stdout pipes. The BEAM manages both Port processes, routing commands to the appropriate one.
 
 This separation means rendering frontends (Swift/Metal, GTK4, Zig/libvaxis) only need to implement render commands. Tree-sitter parsing is handled by the shared parser process regardless of which frontend is active.
 

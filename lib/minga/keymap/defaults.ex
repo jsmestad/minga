@@ -28,6 +28,7 @@ defmodule Minga.Keymap.Defaults do
   alias Minga.Keymap.Bindings
 
   @none 0x00
+  @alt 0x04
 
   # ---------------------------------------------------------------------------
   # Leaf bindings: {key_sequence, command_atom, description}
@@ -270,6 +271,10 @@ defmodule Minga.Keymap.Defaults do
       {?j, 0} => {:move_down, "Move cursor down"},
       {?k, 0} => {:move_up, "Move cursor up"},
       {?l, 0} => {:move_right, "Move cursor right"},
+      {?h, @alt} => {:nav_parent, "Move to parent AST node"},
+      {?l, @alt} => {:nav_first_child, "Move to first child AST node"},
+      {?j, @alt} => {:nav_next_sibling, "Move to next sibling AST node"},
+      {?k, @alt} => {:nav_prev_sibling, "Move to previous sibling AST node"},
       {?0, 0} => {:move_to_line_start, "Move to line start"},
       {?$, 0} => {:move_to_line_end, "Move to line end"},
       {?^, 0} => {:move_to_first_non_blank, "First non-blank character"},

@@ -238,6 +238,14 @@ defmodule Minga.Keymap.DefaultsTest do
       assert {_, _} = bindings[{?u, 0x02}]
     end
 
+    test "contains structural navigation Alt+ bindings" do
+      bindings = Defaults.normal_bindings()
+      assert {:nav_parent, _} = bindings[{?h, 0x04}]
+      assert {:nav_first_child, _} = bindings[{?l, 0x04}]
+      assert {:nav_next_sibling, _} = bindings[{?j, 0x04}]
+      assert {:nav_prev_sibling, _} = bindings[{?k, 0x04}]
+    end
+
     test "contains operator keys" do
       bindings = Defaults.normal_bindings()
       assert {_, _} = bindings[{?d, 0}]

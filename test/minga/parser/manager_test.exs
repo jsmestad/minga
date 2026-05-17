@@ -20,7 +20,7 @@ defmodule Minga.Parser.ManagerTest do
       content = "def foo do\nif bar do\nbaz\nend\nend"
       buffer_id = 1
 
-      setup_buffer(server, buffer_id, content)
+      setup_buffer(server, buffer_id, "elixir", content)
 
       assert Manager.request_indent(buffer_id, 2, server) == 2
       assert Manager.request_indent(buffer_id, 3, server) == 1
@@ -31,19 +31,50 @@ defmodule Minga.Parser.ManagerTest do
       content = "def foo do\n\nend"
       buffer_id = 1
 
-      setup_buffer(server, buffer_id, content)
+      setup_buffer(server, buffer_id, "elixir", content)
 
       assert Manager.request_indent(buffer_id, 1, server) == 1
     end
   end
 
-  defp setup_buffer(server, buffer_id, content) do
+  describe "request_structural_nav/5" do
+    test "returns nil without waiting when the parser port is unavailable" do
+      server = start_parser_manager(parser_path: "/missing/minga-parser")
+
+      assert Manager.request_structural_nav(1, 0, 0, 0, server) == nil
+    end
+
+    test "returns target node ranges and type names from the parser" do
+      server = start_parser_manager()
+      content = "function add(a, b) {\n  return a + b;\n}\n"
+      buffer_id = 2
+
+      setup_buffer(server, buffer_id, "javascript", content)
+
+      parent = Manager.request_structural_nav(buffer_id, 0, 20, 0, server)
+      first_child = Manager.request_structural_nav(buffer_id, 0, 0, 1, server)
+      next_sibling = Manager.request_structural_nav(buffer_id, 0, 13, 2, server)
+      prev_sibling = Manager.request_structural_nav(buffer_id, 0, 16, 3, server)
+
+      assert parent.start_row == 0
+      assert parent.start_col == 0
+      assert parent.type_name == "function_declaration"
+      assert first_child.start_col == 9
+      assert first_child.type_name == "identifier"
+      assert next_sibling.start_col == 16
+      assert next_sibling.type_name == "identifier"
+      assert prev_sibling.start_col == 13
+      assert prev_sibling.type_name == "identifier"
+    end
+  end
+
+  defp setup_buffer(server, buffer_id, language, content) do
     Manager.send_commands(server, [
-      Protocol.encode_set_language(buffer_id, "elixir"),
+      Protocol.encode_set_language(buffer_id, language),
       Protocol.encode_parse_buffer(buffer_id, 0, content)
     ])
 
-    Manager.register_buffer(buffer_id, "elixir", fn -> content end, server: server)
+    Manager.register_buffer(buffer_id, language, fn -> content end, server: server)
   end
 
   defp start_parser_manager(opts \\ []) do

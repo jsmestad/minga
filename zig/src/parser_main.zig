@@ -359,6 +359,19 @@ fn handleCommand(
             saveTreeToBuffer(hl, bs);
             try sendMatchItemResult(stdout, req.request_id, result);
         },
+        .request_structural_nav => |req| {
+            const bs = buffers.getPtr(req.buffer_id) orelse {
+                try sendStructuralNavResult(stdout, req.request_id, null);
+                return;
+            };
+            if (!activateBuffer(hl, bs)) {
+                try sendStructuralNavResult(stdout, req.request_id, null);
+                return;
+            }
+            const result = hl.structuralNav(req.row, req.col, req.action);
+            saveTreeToBuffer(hl, bs);
+            try sendStructuralNavResult(stdout, req.request_id, result);
+        },
         .load_grammar => |lg| {
             hl.loadGrammar(lg.name, lg.path) catch {
                 var rbuf: [260]u8 = undefined;
@@ -491,6 +504,13 @@ fn sendTextobjectResult(stdout: *std.Io.Writer, request_id: u32, result: ?protoc
 fn sendMatchItemResult(stdout: *std.Io.Writer, request_id: u32, result: ?protocol.MatchItemResult) !void {
     var rbuf: [14]u8 = undefined;
     const rlen = protocol.encodeMatchItemResult(&rbuf, request_id, result);
+    try protocol.writeMessage(stdout, rbuf[0..rlen]);
+    try stdout.flush();
+}
+
+fn sendStructuralNavResult(stdout: *std.Io.Writer, request_id: u32, result: ?protocol.StructuralNavResult) !void {
+    var rbuf: [280]u8 = undefined;
+    const rlen = protocol.encodeNodeInfo(&rbuf, request_id, result);
     try protocol.writeMessage(stdout, rbuf[0..rlen]);
     try stdout.flush();
 }

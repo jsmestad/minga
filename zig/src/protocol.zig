@@ -67,6 +67,7 @@ pub const OP_SET_TEXTOBJECT_QUERY: u8 = 0x2B;
 pub const OP_REQUEST_TEXTOBJECT: u8 = 0x2C;
 pub const OP_CLOSE_BUFFER: u8 = 0x2D;
 pub const OP_REQUEST_MATCH_ITEM: u8 = 0x2E;
+pub const OP_REQUEST_STRUCTURAL_NAV: u8 = 0x2F;
 
 // Highlight responses (Zig → BEAM)
 pub const OP_HIGHLIGHT_SPANS: u8 = 0x30;
@@ -94,6 +95,7 @@ pub const OP_CONCEAL_SPANS: u8 = 0x3A;
 /// the stored source), typically after system sleep/wake.
 pub const OP_REQUEST_REPARSE: u8 = 0x3B;
 pub const OP_MATCH_ITEM_RESULT: u8 = 0x3C;
+pub const OP_NODE_INFO: u8 = 0x3D;
 
 // Log messages (Zig → BEAM)
 pub const OP_LOG_MESSAGE: u8 = 0x60;
@@ -269,6 +271,7 @@ pub const RenderCommand = union(enum) {
     set_textobject_query: SetTextobjectQuery,
     request_textobject: RequestTextobject,
     request_match_item: RequestMatchItem,
+    request_structural_nav: RequestStructuralNav,
     load_grammar: LoadGrammar,
     query_language_at: QueryLanguageAt,
     close_buffer: u32, // buffer_id
@@ -361,6 +364,21 @@ pub const RequestMatchItem = struct {
     request_id: u32,
     row: u32,
     col: u32,
+};
+
+pub const StructuralNavAction = enum(u8) {
+    parent = 0,
+    first_child = 1,
+    next_sibling = 2,
+    prev_sibling = 3,
+};
+
+pub const RequestStructuralNav = struct {
+    buffer_id: u32 = 0,
+    request_id: u32,
+    row: u32,
+    col: u32,
+    action: StructuralNavAction,
 };
 
 pub const LoadGrammar = struct {
@@ -838,6 +856,17 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
                 .col = std.mem.readInt(u32, rest[12..16], .big),
             } };
         },
+        OP_REQUEST_STRUCTURAL_NAV => {
+            // buffer_id:4, request_id:4, row:4, col:4, action:1
+            if (rest.len < 17) return error.Malformed;
+            return .{ .request_structural_nav = .{
+                .buffer_id = std.mem.readInt(u32, rest[0..4], .big),
+                .request_id = std.mem.readInt(u32, rest[4..8], .big),
+                .row = std.mem.readInt(u32, rest[8..12], .big),
+                .col = std.mem.readInt(u32, rest[12..16], .big),
+                .action = try decodeStructuralNavAction(rest[16]),
+            } };
+        },
         OP_LOAD_GRAMMAR => {
             // name_len:2, name, path_len:2, path
             if (rest.len < 2) return error.Malformed;
@@ -957,6 +986,16 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
     }
 }
 
+fn decodeStructuralNavAction(action: u8) !StructuralNavAction {
+    return switch (action) {
+        0 => .parent,
+        1 => .first_child,
+        2 => .next_sibling,
+        3 => .prev_sibling,
+        else => error.Malformed,
+    };
+}
+
 /// Returns the byte size of the first command in `payload`.
 ///
 /// Used when iterating a batch message containing multiple concatenated
@@ -1022,6 +1061,7 @@ pub fn commandSize(payload: []const u8) usize {
             break :blk 19 + nl;
         },
         OP_REQUEST_MATCH_ITEM => 17, // opcode(1) + buffer_id(4) + request_id(4) + row(4) + col(4)
+        OP_REQUEST_STRUCTURAL_NAV => 18, // opcode(1) + buffer_id(4) + request_id(4) + row(4) + col(4) + action(1)
         OP_CLOSE_BUFFER => 5, // opcode(1) + buffer_id(4)
         OP_EDIT_BUFFER => blk: {
             // opcode(1) + buffer_id(4) + version(4) + edit_count(2) + variable per edit
@@ -1229,6 +1269,35 @@ pub fn encodeMatchItemResult(buf: *[14]u8, request_id: u32, result: ?MatchItemRe
         std.mem.writeInt(u32, buf[6..10], r.row, .big);
         std.mem.writeInt(u32, buf[10..14], r.col, .big);
         return 14;
+    } else {
+        buf[5] = 0;
+        return 6;
+    }
+}
+
+/// Structural navigation result (shared between protocol and highlighter).
+pub const StructuralNavResult = struct {
+    start_row: u32,
+    start_col: u32,
+    end_row: u32,
+    end_col: u32,
+    type_name: []const u8,
+};
+
+/// Encodes node_info: opcode(1) + request_id(4) + found(1) + start_row(4) + start_col(4) + end_row(4) + end_col(4) + type_len(2) + type
+pub fn encodeNodeInfo(buf: *[280]u8, request_id: u32, result: ?StructuralNavResult) usize {
+    buf[0] = OP_NODE_INFO;
+    std.mem.writeInt(u32, buf[1..5], request_id, .big);
+    if (result) |r| {
+        const type_len = @min(r.type_name.len, 255);
+        buf[5] = 1;
+        std.mem.writeInt(u32, buf[6..10], r.start_row, .big);
+        std.mem.writeInt(u32, buf[10..14], r.start_col, .big);
+        std.mem.writeInt(u32, buf[14..18], r.end_row, .big);
+        std.mem.writeInt(u32, buf[18..22], r.end_col, .big);
+        std.mem.writeInt(u16, buf[22..24], @intCast(type_len), .big);
+        @memcpy(buf[24 .. 24 + type_len], r.type_name[0..type_len]);
+        return 24 + type_len;
     } else {
         buf[5] = 0;
         return 6;
@@ -2102,6 +2171,68 @@ test "encode match_item_result" {
     const empty_len = encodeMatchItemResult(&empty_buf, 43, null);
     try std.testing.expectEqual(@as(usize, 6), empty_len);
     try std.testing.expectEqual(@as(u8, OP_MATCH_ITEM_RESULT), empty_buf[0]);
+    try std.testing.expectEqual(@as(u32, 43), std.mem.readInt(u32, empty_buf[1..5], .big));
+    try std.testing.expectEqual(@as(u8, 0), empty_buf[5]);
+}
+
+test "decode request_structural_nav" {
+    var data: [18]u8 = undefined;
+    data[0] = OP_REQUEST_STRUCTURAL_NAV;
+    std.mem.writeInt(u32, data[1..5], 7, .big);
+    std.mem.writeInt(u32, data[5..9], 42, .big);
+    std.mem.writeInt(u32, data[9..13], 3, .big);
+    std.mem.writeInt(u32, data[13..17], 11, .big);
+    data[17] = 2;
+
+    const cmd = try decodeCommand(&data);
+    switch (cmd) {
+        .request_structural_nav => |req| {
+            try std.testing.expectEqual(@as(u32, 7), req.buffer_id);
+            try std.testing.expectEqual(@as(u32, 42), req.request_id);
+            try std.testing.expectEqual(@as(u32, 3), req.row);
+            try std.testing.expectEqual(@as(u32, 11), req.col);
+            try std.testing.expectEqual(StructuralNavAction.next_sibling, req.action);
+        },
+        else => return error.Malformed,
+    }
+}
+
+test "decode request_structural_nav rejects invalid actions" {
+    var data: [18]u8 = undefined;
+    data[0] = OP_REQUEST_STRUCTURAL_NAV;
+    std.mem.writeInt(u32, data[1..5], 7, .big);
+    std.mem.writeInt(u32, data[5..9], 42, .big);
+    std.mem.writeInt(u32, data[9..13], 3, .big);
+    std.mem.writeInt(u32, data[13..17], 11, .big);
+    data[17] = 4;
+
+    try std.testing.expectError(error.Malformed, decodeCommand(&data));
+}
+
+test "encode node_info" {
+    var found_buf: [280]u8 = undefined;
+    const found_len = encodeNodeInfo(&found_buf, 42, .{
+        .start_row = 1,
+        .start_col = 2,
+        .end_row = 3,
+        .end_col = 4,
+        .type_name = "call_expression",
+    });
+    try std.testing.expectEqual(@as(usize, 39), found_len);
+    try std.testing.expectEqual(@as(u8, OP_NODE_INFO), found_buf[0]);
+    try std.testing.expectEqual(@as(u32, 42), std.mem.readInt(u32, found_buf[1..5], .big));
+    try std.testing.expectEqual(@as(u8, 1), found_buf[5]);
+    try std.testing.expectEqual(@as(u32, 1), std.mem.readInt(u32, found_buf[6..10], .big));
+    try std.testing.expectEqual(@as(u32, 2), std.mem.readInt(u32, found_buf[10..14], .big));
+    try std.testing.expectEqual(@as(u32, 3), std.mem.readInt(u32, found_buf[14..18], .big));
+    try std.testing.expectEqual(@as(u32, 4), std.mem.readInt(u32, found_buf[18..22], .big));
+    try std.testing.expectEqual(@as(u16, 15), std.mem.readInt(u16, found_buf[22..24], .big));
+    try std.testing.expectEqualStrings("call_expression", found_buf[24..39]);
+
+    var empty_buf: [280]u8 = undefined;
+    const empty_len = encodeNodeInfo(&empty_buf, 43, null);
+    try std.testing.expectEqual(@as(usize, 6), empty_len);
+    try std.testing.expectEqual(@as(u8, OP_NODE_INFO), empty_buf[0]);
     try std.testing.expectEqual(@as(u32, 43), std.mem.readInt(u32, empty_buf[1..5], .big));
     try std.testing.expectEqual(@as(u8, 0), empty_buf[5]);
 }
