@@ -50,6 +50,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "Minga.Buffer.SaveState",
     "Minga.Buffer.State",
     "Minga.Buffer.UndoHistory",
+    "Minga.Buffer.UndoPatch",
     "Minga.Editing.Motion",
     "Minga.Editing.Operator",
     "Minga.Editing.TextObject",

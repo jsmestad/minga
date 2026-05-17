@@ -53,4 +53,20 @@ defmodule Minga.Buffer.OperationTest do
       assert delta.inserted_text == ""
     end
   end
+
+  describe "delete_lines/3" do
+    test "returns a delta for the actual bytes removed when deleting the final line" do
+      doc = Document.new("alpha\nbeta")
+
+      assert {:edited, new_doc, delta} = Operation.delete_lines(doc, 1, 1)
+      assert Document.content(new_doc) == "alpha"
+      assert delta.start_byte == 5
+      assert delta.old_end_byte == 10
+      assert delta.new_end_byte == 5
+      assert delta.start_position == {0, 5}
+      assert delta.old_end_position == {1, 4}
+      assert delta.new_end_position == {0, 5}
+      assert delta.inserted_text == ""
+    end
+  end
 end
