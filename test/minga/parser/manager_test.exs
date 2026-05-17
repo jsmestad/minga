@@ -8,6 +8,22 @@ defmodule Minga.Parser.ManagerTest do
   alias Minga.Parser.Manager
   alias Minga.Parser.Protocol
 
+  describe "document_symbols" do
+    test "parser publishes symbols from built-in tags query after parse" do
+      server = start_parser_manager()
+      buffer_id = 11
+      content = "defmodule Foo do\n  def bar do\n    :ok\n  end\nend\n"
+
+      :ok = Manager.subscribe(server)
+      setup_buffer(server, buffer_id, content)
+      _indent = Manager.request_indent(buffer_id, 1, server)
+
+      assert_receive {:minga_highlight, {:document_symbols, ^buffer_id, 0, symbols}}, 2_000
+      assert Enum.any?(symbols, &match?(%Minga.Language.Symbol{kind: :module, name: "Foo"}, &1))
+      assert Enum.any?(symbols, &match?(%Minga.Language.Symbol{kind: :function, name: "bar"}, &1))
+    end
+  end
+
   describe "request_indent/3" do
     test "returns nil without waiting when the parser port is unavailable" do
       server = start_parser_manager(parser_path: "/missing/minga-parser")

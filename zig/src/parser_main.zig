@@ -271,6 +271,7 @@ fn handleCommand(
             if (hl.textobject_query != null) {
                 sendTextobjectPositions(hl, pb.buffer_id, pb.version, stdout, alloc) catch {};
             }
+            sendDocumentSymbols(hl, pb.buffer_id, pb.version, stdout, alloc) catch {};
 
             // Save tree back to buffer state.
             saveTreeToBuffer(hl, bs);
@@ -331,6 +332,15 @@ fn handleCommand(
                 saveTreeToBuffer(hl, bs);
             } else {
                 hl.setTextobjectQuery(stq.source) catch {};
+            }
+        },
+        .set_tags_query => |stq| {
+            if (buffers.getPtr(stq.buffer_id)) |bs| {
+                if (!activateBuffer(hl, bs)) return;
+                hl.setTagsQuery(stq.source) catch {};
+                saveTreeToBuffer(hl, bs);
+            } else {
+                hl.setTagsQuery(stq.source) catch {};
             }
         },
         .request_textobject => |req| {
@@ -465,6 +475,7 @@ fn handleEditBuffer(
     if (hl.textobject_query != null) {
         sendTextobjectPositions(hl, decoded.buffer_id, decoded.version, stdout, alloc) catch {};
     }
+    sendDocumentSymbols(hl, decoded.buffer_id, decoded.version, stdout, alloc) catch {};
 
     // Save tree back to buffer state.
     saveTreeToBuffer(hl, bs);
@@ -527,6 +538,23 @@ fn sendTextobjectPositions(
     defer if (entries.len > 0) alloc.free(entries);
 
     const buf = try protocol.encodeTextobjectPositions(alloc, buffer_id, version, entries);
+    defer alloc.free(buf);
+    try protocol.writeMessage(stdout, buf);
+    try stdout.flush();
+}
+
+/// Send document symbols to stdout.
+fn sendDocumentSymbols(
+    hl: *highlighter_mod.Highlighter,
+    buffer_id: u32,
+    version: u32,
+    stdout: *std.Io.Writer,
+    alloc: std.mem.Allocator,
+) !void {
+    const symbols = hl.collectSymbols(alloc);
+    defer if (symbols.len > 0) alloc.free(symbols);
+
+    const buf = try protocol.encodeDocumentSymbols(alloc, buffer_id, version, symbols);
     defer alloc.free(buf);
     try protocol.writeMessage(stdout, buf);
     try stdout.flush();

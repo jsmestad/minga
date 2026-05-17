@@ -335,7 +335,7 @@ defmodule MingaEditor.Commands.Lsp do
         name: :document_symbols,
         description: "Document symbols",
         requires_buffer: true,
-        execute: &LspActions.document_symbols/1
+        execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.SymbolSource) end
       },
       %Minga.Command{
         name: :selection_expand,

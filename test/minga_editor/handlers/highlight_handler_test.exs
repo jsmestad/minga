@@ -312,6 +312,47 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
     end
   end
 
+  describe "document_symbols" do
+    test "unknown buffer_id returns log warning" do
+      state = base_state()
+
+      {_state, effects} =
+        HighlightHandler.handle(state, {:minga_highlight, {:document_symbols, 999, 1, []}})
+
+      assert Enum.any?(effects, fn
+               {:log, :editor, :warning, msg} -> String.contains?(msg, "document_symbols")
+               _ -> false
+             end)
+    end
+
+    test "active buffer sets document symbols on the window" do
+      state = base_state()
+      buf = state.workspace.buffers.active
+      state = with_buffer_id(state, buf, 1)
+      symbols = [%Minga.Language.Symbol{kind: :function, name: "run", range: {0, 0, 3, 3}}]
+
+      {new_state, effects} =
+        HighlightHandler.handle(state, {:minga_highlight, {:document_symbols, 1, 1, symbols}})
+
+      assert effects == []
+      win_id = new_state.workspace.windows.active
+      window = Map.get(new_state.workspace.windows.map, win_id)
+      assert window.document_symbols == symbols
+    end
+
+    test "non-active buffer is a no-op" do
+      state = base_state()
+      {:ok, other_buf} = Minga.Buffer.Process.start_link(content: "other")
+      state = with_buffer_id(state, other_buf, 2)
+
+      {new_state, effects} =
+        HighlightHandler.handle(state, {:minga_highlight, {:document_symbols, 2, 1, []}})
+
+      assert new_state == state
+      assert effects == []
+    end
+  end
+
   describe "grammar_loaded" do
     test "success returns info log effect" do
       state = base_state()

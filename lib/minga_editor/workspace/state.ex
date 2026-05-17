@@ -154,10 +154,12 @@ defmodule MingaEditor.Workspace.State do
         windows =
           Windows.update(ws, id, fn window ->
             %{
-              Window.invalidate(window)
+              window
               | buffer: buffers.active,
                 content: Content.buffer(buffers.active)
             }
+            |> Window.set_document_symbols([])
+            |> Window.invalidate()
           end)
 
         %{wspace | windows: windows}

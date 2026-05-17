@@ -498,6 +498,7 @@ defmodule MingaEditor.Frontend.Protocol do
   defdelegate encode_set_indent_query(buffer_id, query), to: Minga.Parser.Protocol
   defdelegate encode_request_indent(buffer_id, request_id, line), to: Minga.Parser.Protocol
   defdelegate encode_set_textobject_query(buffer_id, query), to: Minga.Parser.Protocol
+  defdelegate encode_set_tags_query(buffer_id, query), to: Minga.Parser.Protocol
 
   defdelegate encode_request_textobject(buffer_id, request_id, row, col, capture_name),
     to: Minga.Parser.Protocol
@@ -592,7 +593,7 @@ defmodule MingaEditor.Frontend.Protocol do
   # Parser events are decoded by Minga.Parser.Protocol. Try it first,
   # then fall through to input event decoders.
   def decode_event(<<opcode::8, _rest::binary>> = data)
-      when opcode in 0x30..0x3D or opcode == 0x60 do
+      when opcode in 0x30..0x3E or opcode == 0x60 do
     case Minga.Parser.Protocol.decode_event(data) do
       {:ok, _} = result -> result
       :unknown -> {:error, :unknown_opcode}

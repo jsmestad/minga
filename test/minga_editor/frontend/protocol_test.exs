@@ -631,6 +631,14 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       assert rest == query
     end
 
+    test "encode_set_tags_query produces correct binary" do
+      query = "(call) @definition.function"
+      encoded = Protocol.encode_set_tags_query(4, query)
+      qlen = byte_size(query)
+      assert <<0x40, 4::32, ^qlen::32, rest::binary>> = encoded
+      assert rest == query
+    end
+
     test "encode_load_grammar produces correct binary" do
       encoded = Protocol.encode_load_grammar("lua", "/tmp/lua.so")
       assert <<0x23, 3::16, "lua", 11::16, rest::binary>> = encoded
