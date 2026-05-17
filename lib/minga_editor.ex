@@ -2638,7 +2638,7 @@ defmodule MingaEditor do
 
       window ->
         vp = window.viewport
-        new_vp = %{vp | top: max(line, 0)}
+        new_vp = Viewport.put_top(vp, max(line, 0))
         new_win = MingaEditor.Window.set_viewport(window, new_vp)
         new_map = Map.put(win_map, active_win_id, new_win)
 

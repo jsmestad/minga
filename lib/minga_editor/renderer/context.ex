@@ -13,6 +13,8 @@ defmodule MingaEditor.Renderer.Context do
 
   alias Minga.Core.Decorations
   alias Minga.Core.Face
+  alias Minga.Core.WidthOracle
+  alias Minga.Core.WidthOracle.Monospace
   alias Minga.Diagnostics.Diagnostic
   alias Minga.Editing.Search.Match
   alias MingaEditor.Viewport
@@ -59,7 +61,8 @@ defmodule MingaEditor.Renderer.Context do
             search_colors: nil,
             document_highlight_colors: nil,
             wrap_on: false,
-            line_number_style: :absolute
+            line_number_style: :absolute,
+            width_oracle: %Monospace{}
 
   @typedoc """
   Represents the bounds of a visual selection for rendering.
@@ -103,6 +106,7 @@ defmodule MingaEditor.Renderer.Context do
           search_colors: MingaEditor.UI.Theme.Search.t() | nil,
           document_highlight_colors: term(),
           wrap_on: boolean(),
-          line_number_style: atom()
+          line_number_style: atom(),
+          width_oracle: WidthOracle.t()
         }
 end

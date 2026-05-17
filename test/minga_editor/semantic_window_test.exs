@@ -182,6 +182,7 @@ defmodule MingaEditor.SemanticWindowTest do
         line_number_style: :absolute,
         wrap_on: false,
         buf_version: snapshot.version,
+        width_oracle: %Minga.Core.WidthOracle.Monospace{},
         visible_line_map: [{0, {:fold_start, 1}}, {2, :normal}]
       }
 

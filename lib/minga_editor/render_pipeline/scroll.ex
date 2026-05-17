@@ -13,9 +13,11 @@ defmodule MingaEditor.RenderPipeline.Scroll do
   alias Minga.Buffer
   alias Minga.Core.Decorations
   alias Minga.Core.Unicode
+  alias Minga.Core.WrapMap
   alias MingaEditor.DisplayMap
   alias MingaEditor.FoldMap
   alias MingaEditor.FoldMap.VisibleLines
+  alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Layout
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.Renderer.SearchHighlight
@@ -56,7 +58,8 @@ defmodule MingaEditor.RenderPipeline.Scroll do
       :preview_matches,
       :line_number_style,
       :wrap_on,
-      :buf_version
+      :buf_version,
+      :width_oracle
     ]
 
     defstruct [
@@ -78,6 +81,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
       :line_number_style,
       :wrap_on,
       :buf_version,
+      :width_oracle,
       visible_line_map: nil
     ]
 
@@ -100,6 +104,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
             line_number_style: atom(),
             wrap_on: boolean(),
             buf_version: non_neg_integer(),
+            width_oracle: Minga.Core.WidthOracle.t(),
             visible_line_map: [VisibleLines.line_entry()] | [MingaEditor.DisplayMap.entry()] | nil
           }
   end
@@ -155,6 +160,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
           |> Window.set_viewport(scroll.viewport)
           |> Window.detect_invalidation(
             scroll.viewport.top,
+            Viewport.cache_key(scroll.viewport),
             scroll.gutter_w,
             scroll.snapshot.line_count,
             scroll.buf_version,
@@ -212,6 +218,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
     # Ctrl-e/y, zz/zt/zb, and mouse wheel scroll actually persist.
     # scroll_to_cursor only adjusts top when the cursor moves off-screen.
     wrap_on = wrap_enabled?(window.buffer)
+    width_oracle = Capabilities.width_oracle(state.capabilities)
     scroll_margin = scroll_margin(window.buffer)
     fold_map = window.fold_map
     %Viewport{} = win_vp = window.viewport
@@ -235,7 +242,8 @@ defmodule MingaEditor.RenderPipeline.Scroll do
         viewport,
         visible_cursor_line,
         scroll_margin,
-        is_active
+        is_active,
+        wrap_on
       )
 
     visible_rows = Viewport.content_rows(viewport)
@@ -298,8 +306,26 @@ defmodule MingaEditor.RenderPipeline.Scroll do
     snapshot = Buffer.render_snapshot(window.buffer, fetch_first, fetch_count)
     lines = snapshot.lines
     # Cursor byte → display col
-    cursor_line_text = cursor_line_text(lines, cursor_line, first_line)
-    cursor_col = Unicode.display_col(cursor_line_text, cursor_byte_col)
+    {viewport, first_line, snapshot, lines, _cursor_line_text, cursor_col} =
+      maybe_adjust_wrapped_viewport(%{
+        wrap_on: wrap_on,
+        is_active: is_active,
+        viewport: viewport,
+        first_line: first_line,
+        lines: lines,
+        snapshot: snapshot,
+        buf: window.buffer,
+        cursor_line: cursor_line,
+        cursor_byte_col: cursor_byte_col,
+        content_w: content_w,
+        visible_rows: visible_rows,
+        scroll_margin: scroll_margin,
+        fetch_count: fetch_count,
+        oracle: width_oracle,
+        visible_line_map: visible_line_map
+      })
+
+    wrap_on = wrap_on and is_nil(visible_line_map)
 
     # Horizontal scroll (disabled when wrapping).
     # Use content_w (text area excluding gutter) as the effective width,
@@ -339,25 +365,301 @@ defmodule MingaEditor.RenderPipeline.Scroll do
       line_number_style: line_number_style,
       wrap_on: wrap_on,
       buf_version: snapshot.version,
+      width_oracle: width_oracle,
       visible_line_map: visible_line_map
     }
+  end
+
+  @spec maybe_adjust_wrapped_viewport(map()) ::
+          {Viewport.t(), non_neg_integer(), map(), [String.t()], String.t(), non_neg_integer()}
+  defp maybe_adjust_wrapped_viewport(%{
+         wrap_on: false,
+         viewport: viewport,
+         first_line: first_line,
+         lines: lines,
+         snapshot: snapshot,
+         cursor_line: cursor_line,
+         cursor_byte_col: cursor_byte_col
+       }) do
+    text = cursor_line_text(lines, cursor_line, first_line)
+    {viewport, first_line, snapshot, lines, text, Unicode.display_col(text, cursor_byte_col)}
+  end
+
+  defp maybe_adjust_wrapped_viewport(%{
+         wrap_on: true,
+         is_active: false,
+         viewport: viewport,
+         first_line: first_line,
+         lines: lines,
+         snapshot: snapshot,
+         cursor_line: cursor_line,
+         cursor_byte_col: cursor_byte_col
+       }) do
+    text = cursor_line_text(lines, cursor_line, first_line)
+    {viewport, first_line, snapshot, lines, text, Unicode.display_col(text, cursor_byte_col)}
+  end
+
+  defp maybe_adjust_wrapped_viewport(
+         %{
+           wrap_on: true,
+           is_active: true,
+           visible_line_map: visible_line_map
+         } = params
+       )
+       when is_list(visible_line_map) do
+    text = cursor_line_text(params.lines, params.cursor_line, params.first_line)
+
+    {params.viewport, params.first_line, params.snapshot, params.lines, text,
+     Unicode.display_col(text, params.cursor_byte_col)}
+  end
+
+  defp maybe_adjust_wrapped_viewport(
+         %{
+           wrap_on: true,
+           is_active: true,
+           first_line: first_line,
+           lines: lines,
+           cursor_line: cursor_line
+         } = params
+       ) do
+    if cursor_line < first_line or cursor_line >= first_line + length(lines) do
+      refetch_wrapped_viewport(Map.merge(params, %{top: cursor_line, offset: 0}))
+    else
+      adjust_wrapped_viewport_from_map(params)
+    end
+  end
+
+  @spec adjust_wrapped_viewport_from_map(map()) ::
+          {Viewport.t(), non_neg_integer(), map(), [String.t()], String.t(), non_neg_integer()}
+  defp adjust_wrapped_viewport_from_map(
+         %{
+           viewport: viewport,
+           first_line: first_line,
+           lines: lines,
+           snapshot: snapshot,
+           buf: buf,
+           cursor_line: cursor_line,
+           cursor_byte_col: cursor_byte_col,
+           content_w: content_w,
+           visible_rows: visible_rows,
+           scroll_margin: scroll_margin,
+           oracle: oracle,
+           fetch_count: fetch_count
+         } = params
+       ) do
+    wrap_map = compute_wrap_map(buf, lines, content_w, oracle)
+    cursor_idx = cursor_line - first_line
+
+    cursor_entry =
+      Enum.at(wrap_map, cursor_idx, [
+        %{byte_offset: 0, text: "", source_text: "", indent_width: 0}
+      ])
+
+    cursor_visual_row = visual_row_index(cursor_entry, cursor_byte_col)
+    rows_before_cursor = wrap_map |> Enum.take(cursor_idx) |> WrapMap.visual_row_count()
+    cursor_abs = rows_before_cursor + cursor_visual_row
+    effective_margin = min(scroll_margin, div(visible_rows - 1, 2))
+
+    desired_start =
+      desired_visual_start(viewport.visual_row_offset, cursor_abs, visible_rows, effective_margin)
+
+    {new_top, new_offset, top_count} = visual_start_to_top(wrap_map, first_line, desired_start)
+
+    total_lines = Buffer.line_count(buf)
+    near_eof = new_top + visible_rows >= total_lines - 1
+
+    total_visual_rows_to_eof =
+      if near_eof do
+        visual_rows_to_eof(buf, new_top, content_w, oracle)
+      else
+        top_count
+      end
+
+    new_offset =
+      if near_eof do
+        min(new_offset, Viewport.max_visual_row_offset(total_visual_rows_to_eof, visible_rows))
+      else
+        new_offset
+      end
+
+    top_count = max(top_count, total_visual_rows_to_eof)
+    new_viewport = Viewport.put_top_visual(viewport, new_top, new_offset, top_count)
+
+    if new_top == first_line and not near_eof do
+      text = cursor_line_text(lines, cursor_line, first_line)
+
+      {new_viewport, first_line, snapshot, lines, text,
+       Unicode.display_col(text, cursor_byte_col)}
+    else
+      refetch_wrapped_viewport(
+        Map.merge(params, %{
+          viewport: new_viewport,
+          top: new_top,
+          offset: new_offset,
+          fetch_count:
+            if(near_eof, do: max(fetch_count, max(total_lines - new_top, 1)), else: fetch_count)
+        })
+      )
+    end
+  end
+
+  @spec refetch_wrapped_viewport(map()) ::
+          {Viewport.t(), non_neg_integer(), map(), [String.t()], String.t(), non_neg_integer()}
+  defp refetch_wrapped_viewport(%{
+         viewport: viewport,
+         top: top,
+         offset: offset,
+         buf: buf,
+         cursor_line: cursor_line,
+         cursor_byte_col: cursor_byte_col,
+         content_w: content_w,
+         fetch_count: fetch_count,
+         oracle: oracle
+       }) do
+    snapshot = Buffer.render_snapshot(buf, top, fetch_count)
+    lines = snapshot.lines
+    wrap_map = compute_wrap_map(buf, lines, content_w, oracle)
+
+    top_count =
+      wrap_map
+      |> List.first([%{byte_offset: 0, text: "", source_text: "", indent_width: 0}])
+      |> length()
+      |> max(1)
+
+    viewport = Viewport.put_top_visual(viewport, top, offset, top_count)
+    text = cursor_line_text(lines, cursor_line, top)
+    {viewport, top, snapshot, lines, text, Unicode.display_col(text, cursor_byte_col)}
+  end
+
+  @spec desired_visual_start(
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer(),
+          non_neg_integer()
+        ) ::
+          non_neg_integer()
+  defp desired_visual_start(current_start, cursor_abs, _visible_rows, margin)
+       when cursor_abs < current_start + margin do
+    if current_start > 0 and cursor_abs >= current_start do
+      current_start
+    else
+      max(cursor_abs - margin, 0)
+    end
+  end
+
+  defp desired_visual_start(current_start, cursor_abs, visible_rows, margin)
+       when cursor_abs >= current_start + visible_rows - margin do
+    max(cursor_abs - visible_rows + 1 + margin, 0)
+  end
+
+  defp desired_visual_start(current_start, _cursor_abs, _visible_rows, _margin), do: current_start
+
+  @spec visual_start_to_top(WrapMap.t(), non_neg_integer(), non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer(), pos_integer()}
+  defp visual_start_to_top(wrap_map, first_line, desired_start) do
+    do_visual_start_to_top(wrap_map, first_line, desired_start)
+  end
+
+  @spec do_visual_start_to_top(WrapMap.t(), non_neg_integer(), non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer(), pos_integer()}
+  defp do_visual_start_to_top([], first_line, _desired_start), do: {first_line, 0, 1}
+
+  defp do_visual_start_to_top([entry | rest], line, desired_start) do
+    count = max(length(entry), 1)
+
+    if desired_start < count do
+      {line, desired_start, count}
+    else
+      do_visual_start_to_top(rest, line + 1, desired_start - count)
+    end
+  end
+
+  @spec visual_rows_to_eof(pid(), non_neg_integer(), pos_integer(), Minga.Core.WidthOracle.t()) ::
+          pos_integer()
+  defp visual_rows_to_eof(buf, start_line, content_w, oracle) do
+    total_lines = Buffer.line_count(buf)
+    fetch_count = max(total_lines - start_line, 1)
+    snapshot = Buffer.render_snapshot(buf, start_line, fetch_count)
+
+    WrapMap.compute(snapshot.lines, content_w,
+      breakindent: wrap_option(buf, :breakindent),
+      linebreak: wrap_option(buf, :linebreak),
+      oracle: oracle,
+      tab_width: tab_width(buf)
+    )
+    |> WrapMap.visual_row_count()
+    |> max(1)
+  catch
+    :exit, _ -> 1
+  end
+
+  @spec compute_wrap_map(pid(), [String.t()], pos_integer(), Minga.Core.WidthOracle.t()) ::
+          WrapMap.t()
+  defp compute_wrap_map(buf, lines, content_w, oracle) do
+    WrapMap.compute(lines, content_w,
+      breakindent: wrap_option(buf, :breakindent),
+      linebreak: wrap_option(buf, :linebreak),
+      oracle: oracle,
+      tab_width: tab_width(buf)
+    )
+  end
+
+  @spec visual_row_index(WrapMap.wrap_entry(), non_neg_integer()) :: non_neg_integer()
+  defp visual_row_index(wrap_entry, cursor_byte_col) do
+    wrap_entry
+    |> Enum.with_index()
+    |> Enum.filter(fn {row, _idx} -> row.byte_offset <= cursor_byte_col end)
+    |> List.last({%{byte_offset: 0}, 0})
+    |> elem(1)
+  end
+
+  @spec wrap_option(pid(), atom()) :: boolean()
+  defp wrap_option(buf, name) do
+    Buffer.get_option(buf, name)
+  catch
+    :exit, _ -> true
+  end
+
+  @spec tab_width(pid()) :: pos_integer()
+  defp tab_width(buf) do
+    Buffer.get_option(buf, :tab_width)
+  catch
+    :exit, _ -> 2
   end
 
   @spec maybe_scroll_active_window_to_cursor(
           Viewport.t(),
           non_neg_integer(),
           non_neg_integer(),
+          boolean(),
           boolean()
         ) :: Viewport.t()
   defp maybe_scroll_active_window_to_cursor(
          viewport,
          _visible_cursor_line,
          _scroll_margin,
-         false
+         false,
+         _wrap_on
        ),
        do: viewport
 
-  defp maybe_scroll_active_window_to_cursor(viewport, visible_cursor_line, scroll_margin, true) do
+  defp maybe_scroll_active_window_to_cursor(
+         viewport,
+         _visible_cursor_line,
+         _scroll_margin,
+         true,
+         true
+       ) do
+    viewport
+  end
+
+  defp maybe_scroll_active_window_to_cursor(
+         viewport,
+         visible_cursor_line,
+         scroll_margin,
+         true,
+         false
+       ) do
     saved_left = viewport.left
 
     viewport

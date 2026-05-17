@@ -5,11 +5,16 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Core.WrapMap
   alias MingaEditor.DisplayList.{Cursor, WindowFrame}
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.Scroll
+  alias MingaEditor.Renderer.Gutter
+  alias MingaEditor.Viewport
+  alias MingaEditor.Window
   alias MingaEditor.State, as: EditorState
 
   import MingaEditor.RenderPipeline.TestHelpers
@@ -21,6 +26,32 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
     layout = Layout.get(state)
     {scrolls, state} = Scroll.scroll_windows(state, layout)
     {scrolls, state, layout}
+  end
+
+  defp wrapped_content_width(state, buffer) do
+    layout = Layout.get(state)
+
+    content_width =
+      case Layout.active_window_layout(layout, state) do
+        %{content: {_row, _col, width, _height}} -> width
+        nil -> elem(layout.editor_area, 2)
+      end
+
+    line_count = BufferProcess.line_count(buffer)
+
+    gutter_width =
+      case BufferProcess.get_option(buffer, :line_numbers) do
+        :none -> Gutter.total_width(0)
+        _ -> Gutter.total_width(Viewport.gutter_width(line_count))
+      end
+
+    max(content_width - gutter_width, 1)
+  end
+
+  defp layer_row_text(layer, row) do
+    layer
+    |> Map.get(row, [])
+    |> Enum.map_join("", fn {_col, text, _face} -> text end)
   end
 
   describe "build_content/2" do
@@ -56,6 +87,36 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       assert wf.modeline == %{}
     end
 
+    test "visible_line_map keeps wrapped cursor math out of the folded path" do
+      state =
+        base_state(
+          content:
+            String.duplicate("a", 120) <>
+              "\n" <> String.duplicate("b", 160) <> "\nvisible\nfold\ntail"
+        )
+
+      buffer = state.workspace.buffers.active
+      Minga.Buffer.Process.set_option(buffer, :wrap, true)
+      Minga.Buffer.Process.move_to(buffer, {2, 0})
+      assert Minga.Buffer.Process.cursor(buffer) == {2, 0}
+
+      win_id = state.workspace.windows.active
+      window = Map.fetch!(state.workspace.windows.map, win_id)
+      window = Window.set_fold_ranges(window, [Minga.Editing.Fold.Range.new!(3, 4)])
+      window = Window.fold_at(window, 3)
+      state = put_in(state.workspace.windows.map[win_id], window)
+
+      {scrolls, state, _layout} = run_through_scroll(state)
+      [{_scroll_win_id, scroll}] = Map.to_list(scrolls)
+      assert scroll.visible_line_map != nil
+
+      {[wf], cursor_info, _state} = Content.build_content(state, scrolls)
+
+      assert %Cursor{row: row} = cursor_info
+      assert row <= 3
+      assert Enum.max(Map.keys(wf.lines)) <= 4
+    end
+
     test "updates window tracking fields after render" do
       state = base_state()
       {scrolls, state, _layout} = run_through_scroll(state)
@@ -68,9 +129,53 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       assert window.render_cache.dirty_lines == %{}
       # Tracking fields should be set (no longer sentinels)
       assert window.render_cache.last_viewport_top >= 0
+      assert window.render_cache.last_viewport_cache_key >= 0
       assert window.render_cache.last_gutter_w >= 0
       assert window.render_cache.last_line_count > 0
       assert window.render_cache.last_buf_version >= 0
+    end
+
+    test "visual_row_offset renders the correct continuation slice and cursor position" do
+      line = "    alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu"
+      state = base_state(content: line, rows: 5, cols: 24)
+      buffer = state.workspace.buffers.active
+
+      _ = BufferProcess.set_option(buffer, :wrap, true)
+      _ = BufferProcess.set_option(buffer, :breakindent, true)
+      _ = BufferProcess.set_option(buffer, :linebreak, true)
+
+      content_width = wrapped_content_width(state, buffer)
+
+      wrap_entry =
+        WrapMap.compute([line], content_width,
+          breakindent: true,
+          linebreak: true,
+          tab_width: 2
+        )
+        |> hd()
+
+      assert length(wrap_entry) > 2
+
+      target_idx = 2
+      target_row = Enum.at(wrap_entry, target_idx)
+      BufferProcess.move_to(buffer, {0, target_row.byte_offset})
+
+      {scrolls, state, _layout} = run_through_scroll(state)
+      [{_win_id, scroll}] = Map.to_list(scrolls)
+      assert scroll.viewport.visual_row_offset > 0
+
+      {[wf], cursor_info, _state} = Content.build_content(state, scrolls)
+      top_row = Enum.min(Map.keys(wf.lines))
+
+      assert String.contains?(
+               layer_row_text(wf.lines, top_row),
+               Enum.at(wrap_entry, scroll.viewport.visual_row_offset).source_text
+             )
+
+      assert String.trim(layer_row_text(wf.gutter, top_row + 1)) == ""
+      assert %Cursor{row: row, col: col} = cursor_info
+      assert row == top_row + target_idx - scroll.viewport.visual_row_offset
+      assert col == scroll.gutter_w + target_row.indent_width
     end
   end
 end

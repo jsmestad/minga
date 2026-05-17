@@ -23,10 +23,10 @@ defmodule MingaEditor.Window do
   relative line numbering dirties every gutter entry without changing
   content. This avoids re-rendering line text when only line numbers change.
 
-  Tracking fields (`last_viewport_top`, `last_gutter_w`, `last_line_count`,
-  `last_cursor_line`, `last_buf_version`) store the values from the previous
-  frame. The Scroll stage compares current values against these to detect
-  full-invalidation triggers automatically.
+  Tracking fields (`last_viewport_top`, `last_viewport_cache_key`,
+  `last_gutter_w`, `last_line_count`, `last_cursor_line`, `last_buf_version`)
+  store the values from the previous frame. The Scroll stage compares current
+  values against these to detect full-invalidation triggers automatically.
   """
 
   alias Minga.Buffer
@@ -173,7 +173,7 @@ defmodule MingaEditor.Window do
     new_top = (vp.top + delta) |> max(0) |> min(max_top)
     pinned = delta > 0 and new_top >= max_top
 
-    %{window | viewport: %{vp | top: new_top}, pinned: pinned}
+    %{window | viewport: Viewport.put_top(vp, new_top), pinned: pinned}
   end
 
   @doc "Scrolls the window horizontally by display columns."
@@ -328,7 +328,7 @@ defmodule MingaEditor.Window do
     vp = window.viewport
 
     if vp.top > visible_cursor do
-      %{window | viewport: %{vp | top: max(visible_cursor - 5, 0)}}
+      %{window | viewport: Viewport.put_top(vp, max(visible_cursor - 5, 0))}
     else
       window
     end
@@ -461,6 +461,40 @@ defmodule MingaEditor.Window do
           RenderCache.detect_invalidation(
             cache,
             viewport_top,
+            viewport_top,
+            gutter_w,
+            line_count,
+            buf_version,
+            cursor_line
+          )
+    }
+  end
+
+  @spec detect_invalidation(
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: t()
+  def detect_invalidation(
+        %__MODULE__{render_cache: cache} = window,
+        viewport_top,
+        viewport_cache_key,
+        gutter_w,
+        line_count,
+        buf_version,
+        cursor_line
+      ) do
+    %{
+      window
+      | render_cache:
+          RenderCache.detect_invalidation(
+            cache,
+            viewport_top,
+            viewport_cache_key,
             gutter_w,
             line_count,
             buf_version,
@@ -485,8 +519,8 @@ defmodule MingaEditor.Window do
   @doc """
   Stores rendered gutter and content draws for a buffer line.
 
-  Does NOT remove the line from the dirty set; that happens in
-  `snapshot_after_render/5` when the full frame is complete.
+  Does NOT remove the line from the dirty set; that happens when the
+  full frame is snapshotted after render.
   """
   @spec cache_line(
           t(),
@@ -530,6 +564,43 @@ defmodule MingaEditor.Window do
           RenderCache.snapshot(
             cache,
             viewport_top,
+            viewport_top,
+            gutter_w,
+            line_count,
+            cursor_line,
+            buf_version,
+            ctx_fingerprint
+          )
+    }
+  end
+
+  @spec snapshot_after_render(
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          RenderCache.context_fingerprint()
+        ) :: t()
+  def snapshot_after_render(
+        %__MODULE__{render_cache: cache} = window,
+        viewport_top,
+        viewport_cache_key,
+        gutter_w,
+        line_count,
+        cursor_line,
+        buf_version,
+        ctx_fingerprint
+      ) do
+    %{
+      window
+      | render_cache:
+          RenderCache.snapshot(
+            cache,
+            viewport_top,
+            viewport_cache_key,
             gutter_w,
             line_count,
             cursor_line,

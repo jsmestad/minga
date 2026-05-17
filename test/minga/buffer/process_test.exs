@@ -1305,17 +1305,18 @@ defmodule Minga.Buffer.ProcessTest do
 
     test "local_options returns seeded defaults plus any overrides" do
       {:ok, pid} = BufferProcess.start_link(content: "hello")
-      # Seeded with global defaults (tab_width: 2, wrap: false, etc.)
+
+      # Seeded with filetype/global defaults. Nameless content defaults to :text, which wraps by default.
       defaults = BufferProcess.local_options(pid)
       assert defaults[:tab_width] == 2
-      assert defaults[:wrap] == false
+      assert defaults[:wrap] == true
 
       # Override one option
       BufferProcess.set_option(pid, :tab_width, 4)
       updated = BufferProcess.local_options(pid)
       assert updated[:tab_width] == 4
       # Other seeded defaults still present
-      assert updated[:wrap] == false
+      assert updated[:wrap] == true
     end
 
     test "local_option_overrides returns only explicitly set options" do

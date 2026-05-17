@@ -22,12 +22,13 @@ defmodule MingaEditor.Window.RenderCache do
 
   ## Tracking fields
 
-  `last_viewport_top`, `last_gutter_w`, `last_line_count`, `last_cursor_line`,
-  and `last_buf_version` store values from the previous frame. The Scroll
-  stage compares current values against these to detect full-invalidation
-  triggers. `last_context_fingerprint` captures all per-frame render context
-  inputs (visual selection, search matches, syntax highlights, signs, etc.)
-  so context changes trigger full redraws.
+  `last_viewport_top`, `last_viewport_cache_key`, `last_gutter_w`,
+  `last_line_count`, `last_cursor_line`, and `last_buf_version` store values
+  from the previous frame. The Scroll stage compares current values against
+  these to detect full-invalidation triggers. `last_context_fingerprint`
+  captures all per-frame render context inputs (visual selection, search
+  matches, syntax highlights, signs, etc.) so context changes trigger full
+  redraws.
   """
 
   alias MingaEditor.DisplayList
@@ -50,6 +51,7 @@ defmodule MingaEditor.Window.RenderCache do
           cached_gutter: %{optional(non_neg_integer()) => [DisplayList.draw()]},
           cached_content: %{optional(non_neg_integer()) => [DisplayList.draw()]},
           last_viewport_top: integer(),
+          last_viewport_cache_key: integer(),
           last_gutter_w: integer(),
           last_line_count: integer(),
           last_cursor_line: integer(),
@@ -61,6 +63,7 @@ defmodule MingaEditor.Window.RenderCache do
             cached_gutter: %{},
             cached_content: %{},
             last_viewport_top: -1,
+            last_viewport_cache_key: -1,
             last_gutter_w: -1,
             last_line_count: -1,
             last_cursor_line: -1,
@@ -120,6 +123,7 @@ defmodule MingaEditor.Window.RenderCache do
     detect_invalidation(
       cache,
       viewport_top,
+      viewport_top,
       gutter_w,
       line_count,
       buf_version,
@@ -141,6 +145,35 @@ defmodule MingaEditor.Window.RenderCache do
         gutter_w,
         line_count,
         buf_version,
+        cursor_line
+      ) do
+    detect_invalidation(
+      cache,
+      viewport_top,
+      viewport_top,
+      gutter_w,
+      line_count,
+      buf_version,
+      cursor_line
+    )
+  end
+
+  @spec detect_invalidation(
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: t()
+  def detect_invalidation(
+        %__MODULE__{} = cache,
+        viewport_top,
+        viewport_cache_key,
+        gutter_w,
+        line_count,
+        buf_version,
         _cursor_line
       ) do
     first_frame = cache.last_buf_version < 0
@@ -148,6 +181,7 @@ defmodule MingaEditor.Window.RenderCache do
     needs_full =
       first_frame or
         cache.last_viewport_top != viewport_top or
+        cache.last_viewport_cache_key != viewport_cache_key or
         cache.last_gutter_w != gutter_w or
         cache.last_line_count != line_count
 
@@ -216,10 +250,43 @@ defmodule MingaEditor.Window.RenderCache do
         buf_version,
         ctx_fingerprint
       ) do
+    snapshot(
+      cache,
+      viewport_top,
+      viewport_top,
+      gutter_w,
+      line_count,
+      cursor_line,
+      buf_version,
+      ctx_fingerprint
+    )
+  end
+
+  @spec snapshot(
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          context_fingerprint()
+        ) :: t()
+  def snapshot(
+        %__MODULE__{} = cache,
+        viewport_top,
+        viewport_cache_key,
+        gutter_w,
+        line_count,
+        cursor_line,
+        buf_version,
+        ctx_fingerprint
+      ) do
     %{
       cache
       | dirty_lines: %{},
         last_viewport_top: viewport_top,
+        last_viewport_cache_key: viewport_cache_key,
         last_gutter_w: gutter_w,
         last_line_count: line_count,
         last_cursor_line: cursor_line,

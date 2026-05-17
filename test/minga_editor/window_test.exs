@@ -37,6 +37,7 @@ defmodule MingaEditor.WindowTest do
     test "initializes tracking fields to sentinel values" do
       window = make_window()
       assert window.render_cache.last_viewport_top == -1
+      assert window.render_cache.last_viewport_cache_key == -1
       assert window.render_cache.last_gutter_w == -1
       assert window.render_cache.last_line_count == -1
       assert window.render_cache.last_cursor_line == -1
@@ -272,9 +273,10 @@ defmodule MingaEditor.WindowTest do
 
     test "updates all tracking fields" do
       window = make_window()
-      window = Window.snapshot_after_render(window, 10, 5, 200, 25, 42, :test_fp)
+      window = Window.snapshot_after_render(window, 10, 77, 5, 200, 25, 42, :test_fp)
 
       assert window.render_cache.last_viewport_top == 10
+      assert window.render_cache.last_viewport_cache_key == 77
       assert window.render_cache.last_gutter_w == 5
       assert window.render_cache.last_line_count == 200
       assert window.render_cache.last_cursor_line == 25
@@ -289,6 +291,22 @@ defmodule MingaEditor.WindowTest do
       assert window.render_cache.dirty_lines == %{}
 
       window = Window.detect_context_change(window, :fp_b)
+      assert window.render_cache.dirty_lines == :all
+    end
+
+    test "marks all dirty when measured oracle cache contents differ" do
+      oracle1 = Minga.Core.WidthOracle.Measured.new(%{"wide" => 50})
+      oracle2 = Minga.Core.WidthOracle.Measured.new(%{"narrow" => 7})
+
+      fp1 = Minga.Core.WidthOracle.fingerprint(oracle1)
+      fp2 = Minga.Core.WidthOracle.fingerprint(oracle2)
+
+      refute fp1 == fp2
+
+      window = make_window()
+      window = Window.snapshot_after_render(window, 0, 4, 100, 5, 1, fp1)
+      window = Window.detect_context_change(window, fp2)
+
       assert window.render_cache.dirty_lines == :all
     end
 

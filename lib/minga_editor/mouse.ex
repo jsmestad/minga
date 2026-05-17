@@ -1646,7 +1646,7 @@ defmodule MingaEditor.Mouse do
     visible_rows = Viewport.content_rows(vp)
     max_top = max(0, total_lines - visible_rows)
     new_top = (vp.top + delta) |> max(0) |> min(max_top)
-    %Viewport{vp | top: new_top}
+    Viewport.put_top(vp, new_top)
   end
 
   @spec clamp_cursor_to_horizontal_viewport(state()) :: state()

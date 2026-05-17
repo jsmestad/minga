@@ -7,6 +7,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
   alias MingaEditor.UI.Theme
   alias MingaEditor.Renderer.Context
   alias MingaEditor.RenderPipeline.ContentHelpers
+  alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.UI.Highlight
   alias MingaEditor.Viewport
   alias MingaEditor.Window
@@ -144,6 +145,49 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
       refute ContentHelpers.context_fingerprint(ctx, true) ==
                ContentHelpers.context_fingerprint(%{ctx | line_number_style: :relative}, true)
     end
+
+    test "changes when the width oracle revision changes" do
+      oracle = %Minga.Core.WidthOracle.Measured{cache: %{"hello" => 2}, revision: 0}
+
+      ctx = %Context{
+        viewport: Viewport.new(20, 80),
+        gutter_w: 4,
+        content_w: 76,
+        width_oracle: oracle
+      }
+
+      changed = %{oracle | revision: 1}
+
+      refute ContentHelpers.context_fingerprint(ctx, true) ==
+               ContentHelpers.context_fingerprint(%{ctx | width_oracle: changed}, true)
+    end
+  end
+
+  describe "build_render_ctx/3" do
+    test "threads the supplied width oracle into the render context" do
+      state = TestHelpers.base_state()
+      window = state.workspace.windows.map[state.workspace.windows.active]
+      oracle = %Minga.Core.WidthOracle.Measured{cache: %{"hello" => 2}}
+
+      {ctx, _state} =
+        ContentHelpers.build_render_ctx(state, window, %{
+          viewport: window.viewport,
+          cursor: {0, 0},
+          lines: ["hello"],
+          first_line: 0,
+          preview_matches: [],
+          gutter_w: 4,
+          content_w: 10,
+          has_sign_column: true,
+          is_active: true,
+          is_gui: false,
+          wrap_on: false,
+          line_number_style: :absolute,
+          width_oracle: oracle
+        })
+
+      assert ctx.width_oracle == oracle
+    end
   end
 
   describe "merge_search_decorations/5" do
@@ -240,7 +284,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
     end
   end
 
-  describe "render_lines_nowrap with visible_line_map and wrap_on" do
+  describe "render_lines_nowrap with visible_line_map ignores wrap_on" do
     setup do
       buf = start_supervised!({Minga.Buffer.Process, content: ""})
       viewport = Viewport.new(20, 20, 0)
@@ -503,11 +547,11 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
       assert face.fg == ctx.gutter_colors.fold_fg
     end
 
-    test "wrapped lines at screen_row > 0 render all visual rows", %{ctx: ctx, window: window} do
-      # Line 0: short (1 row). Line 1: long, wraps to 2+ rows at content_w=10.
+    test "wrapped lines at screen_row > 0 stay bounded to the visible rows", %{
+      ctx: ctx,
+      window: window
+    } do
       lines = ["short", "this line is longer than ten columns wide"]
-
-      # Both are normal buffer lines
       visible_line_map = [{0, :normal}, {1, :normal}]
 
       opts = %{
@@ -528,21 +572,16 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
       {_gutter_draws, line_draws, rendered_rows, _window} =
         ContentHelpers.render_lines_nowrap(lines, opts)
 
-      # Line 0 takes 1 row. Line 1 wraps to multiple rows at width 10.
-      # Total rendered_rows must be > 2 (proving wrapping happened).
-      assert rendered_rows > 2,
-             "expected wrapped lines to consume more than 2 rows, got #{rendered_rows}"
+      assert rendered_rows == 2
 
-      # There must be draw commands for rows beyond row 1 (the wrap continuation rows).
-      # Each draw is a {row, col, text, style} tuple.
       draw_rows = line_draws |> Enum.map(&elem(&1, 0)) |> Enum.uniq() |> Enum.sort()
-
-      assert length(draw_rows) > 2,
-             "expected draw commands on 3+ rows for wrapped content, got rows: #{inspect(draw_rows)}"
+      assert draw_rows == [0, 1]
     end
 
-    test "multiple wrapped lines each get correct row count", %{ctx: ctx, window: window} do
-      # Three lines, each longer than content_w=10
+    test "multiple long visible rows do not expand when wrap_on is true", %{
+      ctx: ctx,
+      window: window
+    } do
       lines = [
         "first line that wraps around",
         "second line also wraps here",
@@ -569,10 +608,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
       {_gutter_draws, _line_draws, rendered_rows, _window} =
         ContentHelpers.render_lines_nowrap(lines, opts)
 
-      # Each 27-28 char line at width 10 should wrap to 3 rows.
-      # Total should be ~9 rows (3 lines × 3 rows each).
-      assert rendered_rows >= 6,
-             "expected at least 6 rendered rows for 3 wrapped lines, got #{rendered_rows}"
+      assert rendered_rows == 3
     end
   end
 end

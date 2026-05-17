@@ -230,7 +230,7 @@ defmodule Minga.Project do
     known = if persist_known_projects?(), do: load_known_projects(), else: []
     recent = if persist_recent_files?(), do: load_recent_files(), else: %{}
     frecency = if persist_recent_files?(), do: load_frecency_events(), else: %{}
-    command_frecency = load_command_frecency()
+    command_frecency = Keyword.get_lazy(opts, :command_frecency, &load_command_frecency/0)
 
     {:ok,
      %__MODULE__{

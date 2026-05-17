@@ -45,16 +45,69 @@ defmodule Minga.Editing do
 
   # ── Visual line motions ──────────────────────────────────────────────
 
-  defdelegate visual_line_down(doc, pos, content_w),
+  @spec visual_line_down(
+          Minga.Buffer.Document.t(),
+          {non_neg_integer(), non_neg_integer()},
+          pos_integer()
+        ) :: {non_neg_integer(), non_neg_integer()}
+  def visual_line_down(doc, pos, content_w), do: visual_line_down(doc, pos, content_w, [])
+
+  @spec visual_line_down(
+          Minga.Buffer.Document.t(),
+          {non_neg_integer(), non_neg_integer()},
+          pos_integer(),
+          keyword()
+        ) :: {non_neg_integer(), non_neg_integer()}
+  defdelegate visual_line_down(doc, pos, content_w, opts),
     to: Minga.Editing.Motion.VisualLine,
     as: :visual_down
 
-  defdelegate visual_line_up(doc, pos, content_w),
+  @spec visual_line_up(
+          Minga.Buffer.Document.t(),
+          {non_neg_integer(), non_neg_integer()},
+          pos_integer()
+        ) :: {non_neg_integer(), non_neg_integer()}
+  def visual_line_up(doc, pos, content_w), do: visual_line_up(doc, pos, content_w, [])
+
+  @spec visual_line_up(
+          Minga.Buffer.Document.t(),
+          {non_neg_integer(), non_neg_integer()},
+          pos_integer(),
+          keyword()
+        ) :: {non_neg_integer(), non_neg_integer()}
+  defdelegate visual_line_up(doc, pos, content_w, opts),
     to: Minga.Editing.Motion.VisualLine,
     as: :visual_up
 
-  defdelegate visual_line_start(doc, pos, content_w), to: Minga.Editing.Motion.VisualLine
-  defdelegate visual_line_end(doc, pos, content_w), to: Minga.Editing.Motion.VisualLine
+  @spec visual_line_start(
+          Minga.Buffer.Document.t(),
+          {non_neg_integer(), non_neg_integer()},
+          pos_integer()
+        ) :: {non_neg_integer(), non_neg_integer()}
+  def visual_line_start(doc, pos, content_w), do: visual_line_start(doc, pos, content_w, [])
+
+  @spec visual_line_start(
+          Minga.Buffer.Document.t(),
+          {non_neg_integer(), non_neg_integer()},
+          pos_integer(),
+          keyword()
+        ) :: {non_neg_integer(), non_neg_integer()}
+  defdelegate visual_line_start(doc, pos, content_w, opts), to: Minga.Editing.Motion.VisualLine
+
+  @spec visual_line_end(
+          Minga.Buffer.Document.t(),
+          {non_neg_integer(), non_neg_integer()},
+          pos_integer()
+        ) :: {non_neg_integer(), non_neg_integer()}
+  def visual_line_end(doc, pos, content_w), do: visual_line_end(doc, pos, content_w, [])
+
+  @spec visual_line_end(
+          Minga.Buffer.Document.t(),
+          {non_neg_integer(), non_neg_integer()},
+          pos_integer(),
+          keyword()
+        ) :: {non_neg_integer(), non_neg_integer()}
+  defdelegate visual_line_end(doc, pos, content_w, opts), to: Minga.Editing.Motion.VisualLine
 
   # ── Text objects ───────────────────────────────────────────────────────
 

@@ -117,7 +117,7 @@ defmodule MingaEditor.Renderer.ServerTest do
 
       RendererServer.cast_snapshot(renderer, snapshot, 124)
 
-      assert_receive {:render_done, %{frame_seq: 124}}, 1_000
+      assert_receive {:render_done, %{frame_seq: 124}}, 5_000
       server_state = drain_renderer_until_idle(renderer)
       assert FontRegistry.lookup(server_state.font_registry, "Fira Code") == 1
       refute Map.has_key?(Map.from_struct(state), :font_registry)

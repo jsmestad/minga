@@ -20,15 +20,23 @@ defmodule Minga.Core.WrapMap do
     stores logical lines unchanged.
   """
 
-  alias Minga.Core.Unicode
+  alias Minga.Core.WidthOracle
+  alias Minga.Core.WidthOracle.Monospace
 
   @typedoc """
   A single visual row within a wrapped logical line.
 
-  - `text` — the slice of the logical line for this visual row
+  - `text` — the raw slice of the logical line for this visual row
+  - `source_text` — the slice of the logical line for this visual row, excluding artificial indent
   - `byte_offset` — byte offset from the start of the logical line
+  - `indent_width` — artificial display columns prefixed before `source_text`
   """
-  @type visual_row :: %{text: String.t(), byte_offset: non_neg_integer()}
+  @type visual_row :: %{
+          required(:text) => String.t(),
+          required(:source_text) => String.t(),
+          required(:byte_offset) => non_neg_integer(),
+          required(:indent_width) => non_neg_integer()
+        }
 
   @typedoc """
   Wrap entry for one logical line: a list of visual rows it expands to.
@@ -38,6 +46,14 @@ defmodule Minga.Core.WrapMap do
 
   @typedoc "A wrap map: one entry per logical line in the visible range."
   @type t :: [wrap_entry()]
+
+  @typep wrap_config :: %{
+           required(:continuation_width) => pos_integer(),
+           required(:indent_width) => non_neg_integer(),
+           required(:linebreak) => boolean(),
+           required(:oracle) => WidthOracle.t(),
+           required(:tab_width) => pos_integer()
+         }
 
   @doc """
   Computes the wrap map for a list of logical lines.
@@ -54,7 +70,10 @@ defmodule Minga.Core.WrapMap do
   def compute(lines, content_width, opts \\ []) do
     breakindent = Keyword.get(opts, :breakindent, true)
     linebreak = Keyword.get(opts, :linebreak, true)
-    Enum.map(lines, &wrap_line(&1, content_width, breakindent, linebreak))
+    oracle = Keyword.get(opts, :oracle, %Monospace{})
+    tab_width = Keyword.get(opts, :tab_width, 2)
+
+    Enum.map(lines, &wrap_line(&1, content_width, breakindent, linebreak, oracle, tab_width))
   end
 
   @doc """
@@ -78,41 +97,44 @@ defmodule Minga.Core.WrapMap do
 
   # ── Line wrapping ──────────────────────────────────────────────────────────
 
-  @spec wrap_line(String.t(), pos_integer(), boolean(), boolean()) :: wrap_entry()
-  defp wrap_line("", _width, _breakindent, _linebreak) do
-    [%{text: "", byte_offset: 0}]
+  @spec wrap_line(String.t(), pos_integer(), boolean(), boolean(), WidthOracle.t(), pos_integer()) ::
+          wrap_entry()
+  defp wrap_line("", _width, _breakindent, _linebreak, _oracle, _tab_width) do
+    [%{text: "", source_text: "", byte_offset: 0, indent_width: 0}]
   end
 
-  defp wrap_line(text, width, breakindent, linebreak) when width > 0 do
-    indent_width = if breakindent, do: leading_whitespace_width(text), else: 0
+  defp wrap_line(text, width, breakindent, linebreak, oracle, tab_width) when width > 0 do
+    indent_width =
+      if breakindent, do: leading_whitespace_width(text, oracle, tab_width), else: 0
+
     # First row gets the full width; continuation rows lose indent columns.
     # Ensure continuation width is at least 4 to avoid infinite loops on
     # deeply indented lines wider than the viewport.
     continuation_width = max(width - indent_width, 4)
-    indent_prefix = if indent_width > 0, do: String.duplicate(" ", indent_width), else: ""
-
     graphemes = String.graphemes(text)
-    do_wrap(graphemes, width, continuation_width, indent_prefix, linebreak, 0, [])
+
+    config = %{
+      continuation_width: continuation_width,
+      indent_width: indent_width,
+      linebreak: linebreak,
+      oracle: oracle,
+      tab_width: tab_width
+    }
+
+    do_wrap(graphemes, width, 0, [], config)
   end
 
-  @spec do_wrap(
-          [String.t()],
-          pos_integer(),
-          pos_integer(),
-          String.t(),
-          boolean(),
-          non_neg_integer(),
+  @spec do_wrap([String.t()], pos_integer(), non_neg_integer(), wrap_entry(), wrap_config()) ::
           wrap_entry()
-        ) :: wrap_entry()
-  defp do_wrap([], _row_width, _cont_width, _indent, _linebreak, _byte_off, acc) do
+  defp do_wrap([], _row_width, _byte_off, acc, _config) do
     Enum.reverse(acc)
   end
 
-  defp do_wrap(graphemes, row_width, cont_width, indent, linebreak, byte_off, acc) do
-    {row_text, rest, bytes_consumed} =
-      take_row(graphemes, row_width, linebreak)
+  defp do_wrap(graphemes, row_width, byte_off, acc, config) do
+    {source_text, rest, bytes_consumed} =
+      take_row(graphemes, row_width, config.linebreak, config.oracle)
 
-    entry = %{text: row_text, byte_offset: byte_off}
+    entry = visual_row(source_text, byte_off, config.indent_width)
     next_byte_off = byte_off + bytes_consumed
 
     case rest do
@@ -120,19 +142,43 @@ defmodule Minga.Core.WrapMap do
         Enum.reverse([entry | acc])
 
       _ ->
-        # Continuation rows get the indent prefix and narrower width.
-        # Prepend indent to the remaining graphemes conceptually by
-        # adjusting the visual row text at render time.
-        do_wrap(rest, cont_width, cont_width, indent, linebreak, next_byte_off, [entry | acc])
+        do_wrap(rest, config.continuation_width, next_byte_off, [entry | acc], config)
+    end
+  end
+
+  @spec visual_row(String.t(), non_neg_integer(), non_neg_integer()) :: visual_row()
+  defp visual_row(source_text, 0, _indent_width) do
+    %{text: source_text, source_text: source_text, byte_offset: 0, indent_width: 0}
+  end
+
+  defp visual_row(source_text, byte_off, indent_width) do
+    %{
+      text: source_text,
+      source_text: source_text,
+      byte_offset: byte_off,
+      indent_width: indent_width
+    }
+  end
+
+  @doc "Returns the display text for a visual row, including any breakindent prefix."
+  @spec display_text(visual_row() | map()) :: String.t()
+  def display_text(vrow) do
+    text = Map.get(vrow, :source_text, Map.get(vrow, :text, ""))
+    indent_width = Map.get(vrow, :indent_width, 0)
+
+    if indent_width > 0 do
+      String.duplicate(" ", indent_width) <> text
+    else
+      text
     end
   end
 
   # Takes graphemes for one visual row, breaking at word boundaries.
   # Returns {row_text, remaining_graphemes, bytes_consumed}.
-  @spec take_row([String.t()], pos_integer(), boolean()) ::
+  @spec take_row([String.t()], pos_integer(), boolean(), WidthOracle.t()) ::
           {String.t(), [String.t()], non_neg_integer()}
-  defp take_row(graphemes, max_width, linebreak) do
-    {taken, rest} = scan_row(graphemes, max_width, 0, [])
+  defp take_row(graphemes, max_width, linebreak, oracle) do
+    {taken, rest} = scan_row(graphemes, max_width, oracle, 0, [])
 
     case rest do
       [] ->
@@ -149,18 +195,28 @@ defmodule Minga.Core.WrapMap do
   end
 
   # Scans graphemes until the next one would exceed max_width.
-  @spec scan_row([String.t()], pos_integer(), non_neg_integer(), [String.t()]) ::
+  @spec scan_row([String.t()], pos_integer(), WidthOracle.t(), non_neg_integer(), [String.t()]) ::
           {[String.t()], [String.t()]}
-  defp scan_row([], _max, _col, acc), do: {Enum.reverse(acc), []}
+  defp scan_row([], _max, _oracle, _col, acc), do: {Enum.reverse(acc), []}
 
-  defp scan_row([g | rest] = remaining, max, col, acc) do
-    w = Unicode.grapheme_width(g)
+  defp scan_row([g | rest] = remaining, max, oracle, col, acc) do
+    w = WidthOracle.grapheme_width(oracle, g)
 
     if col + w > max do
-      {Enum.reverse(acc), remaining}
+      finish_overflow_row(g, rest, remaining, acc)
     else
-      scan_row(rest, max, col + w, [g | acc])
+      scan_row(rest, max, oracle, col + w, [g | acc])
     end
+  end
+
+  @spec finish_overflow_row(String.t(), [String.t()], [String.t()], [String.t()]) ::
+          {[String.t()], [String.t()]}
+  defp finish_overflow_row(g, rest, _remaining, []) do
+    {[g], rest}
+  end
+
+  defp finish_overflow_row(_g, _rest, remaining, acc) do
+    {Enum.reverse(acc), remaining}
   end
 
   # Finds the last whitespace in `taken` and breaks there.
@@ -197,16 +253,22 @@ defmodule Minga.Core.WrapMap do
   defp whitespace?("\t"), do: true
   defp whitespace?(_), do: false
 
-  @spec leading_whitespace_width(String.t()) :: non_neg_integer()
-  defp leading_whitespace_width(text) do
+  @spec leading_whitespace_width(String.t(), WidthOracle.t(), pos_integer()) ::
+          non_neg_integer()
+  defp leading_whitespace_width(text, oracle, tab_width) do
     text
     |> String.graphemes()
     |> Enum.reduce_while(0, fn g, acc ->
       case g do
-        " " -> {:cont, acc + 1}
-        "\t" -> {:cont, acc + 2}
+        " " -> {:cont, acc + WidthOracle.grapheme_width(oracle, " ")}
+        "\t" -> {:cont, acc + tab_stop_width(acc, tab_width)}
         _ -> {:halt, acc}
       end
     end)
+  end
+
+  @spec tab_stop_width(non_neg_integer(), pos_integer()) :: pos_integer()
+  defp tab_stop_width(col, tab_width) do
+    tab_width - rem(col, tab_width)
   end
 end

@@ -659,6 +659,7 @@ defmodule MingaEditor.MouseTest do
 
     test "drag past right edge scrolls horizontally and extends selection" do
       {editor, buffer} = start_editor(String.duplicate("abcdefghijklmnopqrstuvwxyz", 4))
+      BufferProcess.set_option(buffer, :wrap, false)
       s = state(editor)
       %{content: {row, col, width, _height}} = Layout.active_window_layout(Layout.get(s), s)
 
@@ -675,7 +676,8 @@ defmodule MingaEditor.MouseTest do
     end
 
     test "drag right from right visible column still autoscrolls" do
-      {editor, _buffer} = start_editor(String.duplicate("abcdefghijklmnopqrstuvwxyz", 4))
+      {editor, buffer} = start_editor(String.duplicate("abcdefghijklmnopqrstuvwxyz", 4))
+      BufferProcess.set_option(buffer, :wrap, false)
       s = state(editor)
       %{content: {row, col, width, _height}} = Layout.active_window_layout(Layout.get(s), s)
 
@@ -689,7 +691,8 @@ defmodule MingaEditor.MouseTest do
     end
 
     test "drag back left reverses horizontal scroll without losing anchor" do
-      {editor, _buffer} = start_editor(String.duplicate("abcdefghijklmnopqrstuvwxyz", 4))
+      {editor, buffer} = start_editor(String.duplicate("abcdefghijklmnopqrstuvwxyz", 4))
+      BufferProcess.set_option(buffer, :wrap, false)
       s = state(editor)
       %{content: {row, col, width, _height}} = Layout.active_window_layout(Layout.get(s), s)
 

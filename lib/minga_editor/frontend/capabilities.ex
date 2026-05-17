@@ -11,24 +11,31 @@ defmodule MingaEditor.Frontend.Capabilities do
   (TUI, RGB, wcwidth, no images, emulated floats, monospace).
   """
 
+  alias Minga.Core.WidthOracle
+  alias Minga.Core.WidthOracle.Measured
+  alias Minga.Core.WidthOracle.Monospace
+
   defstruct frontend_type: :tui,
             color_depth: :rgb,
             unicode_width: :wcwidth,
             image_support: :none,
-            float_support: :emulated
+            float_support: :emulated,
+            text_rendering: :monospace
 
   @type frontend_type :: :tui | :native_gui | :web
   @type color_depth :: :mono | :color_256 | :rgb
   @type unicode_width :: :wcwidth | :unicode_15
   @type image_support :: :none | :kitty | :sixel | :native
   @type float_support :: :emulated | :native
+  @type text_rendering :: :monospace | :proportional
 
   @type t :: %__MODULE__{
           frontend_type: frontend_type(),
           color_depth: color_depth(),
           unicode_width: unicode_width(),
           image_support: image_support(),
-          float_support: float_support()
+          float_support: float_support(),
+          text_rendering: text_rendering()
         }
 
   @doc "Returns the default capabilities (TUI with full RGB, monospace)."
@@ -39,14 +46,15 @@ defmodule MingaEditor.Frontend.Capabilities do
   @spec from_binary(binary()) :: t()
   def from_binary(
         <<frontend_type::8, color_depth::8, unicode_width::8, image_support::8, float_support::8,
-          _reserved::8>>
+          text_rendering::8>>
       ) do
     %__MODULE__{
       frontend_type: decode_frontend_type(frontend_type),
       color_depth: decode_color_depth(color_depth),
       unicode_width: decode_unicode_width(unicode_width),
       image_support: decode_image_support(image_support),
-      float_support: decode_float_support(float_support)
+      float_support: decode_float_support(float_support),
+      text_rendering: decode_text_rendering(text_rendering)
     }
   end
 
@@ -73,6 +81,22 @@ defmodule MingaEditor.Frontend.Capabilities do
   @spec gui?(t()) :: boolean()
   def gui?(%__MODULE__{frontend_type: :native_gui}), do: true
   def gui?(%__MODULE__{}), do: false
+
+  @doc "Returns true if the frontend reports proportional text rendering."
+  @spec proportional_text?(t()) :: boolean()
+  def proportional_text?(%__MODULE__{text_rendering: :proportional}), do: true
+  def proportional_text?(%__MODULE__{}), do: false
+
+  @doc "Returns the safe production width oracle, monospace for now."
+  @spec width_oracle(t()) :: WidthOracle.t()
+  def width_oracle(%__MODULE__{} = caps), do: width_oracle(caps, nil)
+
+  @doc "Returns a measured oracle only when the caller passes an owned measurement cache."
+  @spec width_oracle(t(), map() | nil) :: WidthOracle.t()
+  def width_oracle(%__MODULE__{text_rendering: :proportional}, cache) when is_map(cache),
+    do: Measured.new(cache)
+
+  def width_oracle(%__MODULE__{}, _cache), do: %Monospace{}
 
   # ── Decoders ──
 
@@ -104,4 +128,9 @@ defmodule MingaEditor.Frontend.Capabilities do
   defp decode_float_support(0), do: :emulated
   defp decode_float_support(1), do: :native
   defp decode_float_support(_), do: :emulated
+
+  @spec decode_text_rendering(non_neg_integer()) :: text_rendering()
+  defp decode_text_rendering(0), do: :monospace
+  defp decode_text_rendering(1), do: :proportional
+  defp decode_text_rendering(_), do: :monospace
 end

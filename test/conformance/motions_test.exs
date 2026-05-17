@@ -49,14 +49,7 @@ defmodule Minga.Conformance.MotionsTest do
       content: "abcd\nx\nlonger",
       cursor: %{line: 0, col: 3},
       keys: "j",
-      compare: :cursor,
-      tags: [:known_divergence],
-      known_divergence: %{
-        reason:
-          "Minga still keeps the cursor one column too far right when moving down onto a shorter line.",
-        failures: [:cursor],
-        actual: %{line: 1, col: 1}
-      }
+      compare: :cursor
     },
     %{
       name: "j stays on final line",
@@ -80,14 +73,7 @@ defmodule Minga.Conformance.MotionsTest do
       content: "x\nabcd",
       cursor: %{line: 1, col: 3},
       keys: "k",
-      compare: :cursor,
-      tags: [:known_divergence],
-      known_divergence: %{
-        reason:
-          "Minga still keeps the cursor one column too far right when moving up onto a shorter line.",
-        failures: [:cursor],
-        actual: %{line: 0, col: 1}
-      }
+      compare: :cursor
     },
     %{
       name: "k stays on first line",

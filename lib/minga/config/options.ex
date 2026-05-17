@@ -379,6 +379,12 @@ defmodule Minga.Config.Options do
 
   @defaults Map.new(@option_specs, fn {name, _type, default, _description} -> {name, default} end)
 
+  @filetype_defaults [
+    {{:filetype, :markdown, :wrap}, true},
+    {{:filetype, :gitcommit, :wrap}, true},
+    {{:filetype, :text, :wrap}, true}
+  ]
+
   @types Map.new(@option_specs, fn {name, type, _default, _description} -> {name, type} end)
 
   @descriptions Map.new(@option_specs, fn {name, _type, _default, description} ->
@@ -1123,7 +1129,7 @@ defmodule Minga.Config.Options do
   @spec seed_defaults(:ets.table()) :: true
   defp seed_defaults(table) do
     entries = Enum.map(@defaults, fn {name, value} -> {name, value} end)
-    :ets.insert(table, entries)
+    :ets.insert(table, entries ++ @filetype_defaults)
   end
 
   @spec seed_runtime_metadata(:ets.table(), server(), Minga.Events.registry()) :: true

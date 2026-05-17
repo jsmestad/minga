@@ -35,7 +35,8 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
     rows = Keyword.get(opts, :rows, 24)
     cols = Keyword.get(opts, :cols, 80)
     content = Keyword.get(opts, :content, "line one\nline two\nline three")
-    {:ok, buf} = BufferProcess.start_link(content: content)
+    filetype = Keyword.get(opts, :filetype, :elixir)
+    {:ok, buf} = BufferProcess.start_link(content: content, filetype: filetype)
 
     win_id = 1
     window = Window.new(win_id, buf, rows, cols)

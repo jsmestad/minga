@@ -133,7 +133,7 @@ defmodule MingaEditor.Renderer.BufferLine do
         if sr >= p.max_rows do
           {:halt, {g, c, sr}}
         else
-          is_first = sr == p.screen_row
+          is_first = vrow.byte_offset == 0
           {g_cmds, c_cmds} = render_visual_row(p, vrow, sr, is_first)
           {:cont, {prepend_all(g, g_cmds), prepend_all(c, c_cmds), sr + 1}}
         end
@@ -156,17 +156,19 @@ defmodule MingaEditor.Renderer.BufferLine do
     # is drawn directly and text shifted rightward. This avoids coordinate
     # mismatches between WrapMap (text-only) and the segment pipeline.
     vrow_display_off = Unicode.display_col(p.line_text, vrow.byte_offset)
-    vrow_display_w = Unicode.display_width(vrow.text)
-    vt_w = inline_vt_display_width(p.ctx.decorations, p.buf_line)
+    vrow_source_w = vrow |> source_text() |> Unicode.display_width()
+    vrow_indent_w = Map.get(vrow, :indent_width, 0)
+    base_ctx = maybe_reveal_conceals(p.ctx, p.buf_line, p.cursor_line)
+    vt_w = inline_vt_display_width(base_ctx.decorations, p.buf_line)
 
-    vrow_viewport = %{p.ctx.viewport | left: vrow_display_off}
+    vrow_viewport = %{base_ctx.viewport | left: vrow_display_off}
 
     vrow_ctx =
       if vt_w > 0 do
-        stripped = strip_inline_vts(p.ctx.decorations, p.buf_line)
-        %{p.ctx | viewport: vrow_viewport, content_w: vrow_display_w, decorations: stripped}
+        stripped = strip_inline_vts(base_ctx.decorations, p.buf_line)
+        %{base_ctx | viewport: vrow_viewport, content_w: vrow_source_w, decorations: stripped}
       else
-        %{p.ctx | viewport: vrow_viewport, content_w: vrow_display_w}
+        %{base_ctx | viewport: vrow_viewport, content_w: vrow_source_w}
       end
 
     content_cmds = LineRenderer.render(p.line_text, sr, p.buf_line, vrow_ctx, p.byte_offset)
@@ -174,15 +176,15 @@ defmodule MingaEditor.Renderer.BufferLine do
     content_cmds = maybe_apply_decoration_bg(content_cmds, sr, p)
     content_cmds = overlay_decoration_styles(content_cmds, sr, p)
 
+    content_cmds = maybe_apply_breakindent(content_cmds, sr, vrow_indent_w, p.ctx)
+
     content_cmds =
       if is_first, do: content_cmds ++ render_indent_guides(p, sr), else: content_cmds
 
     # Draw the border and shift text rightward to make room.
     content_cmds =
       if vt_w > 0 do
-        shifted =
-          Enum.map(content_cmds, fn {row, col, text, style} -> {row, col + vt_w, text, style} end)
-
+        shifted = shift_draws(content_cmds, vt_w)
         inline_vt_border_draw(p.ctx.decorations, p.buf_line, sr) ++ shifted
       else
         content_cmds
@@ -582,6 +584,37 @@ defmodule MingaEditor.Renderer.BufferLine do
       acc + seg_width
     end)
   end
+
+  @spec maybe_apply_breakindent(
+          [DisplayList.draw()],
+          non_neg_integer(),
+          non_neg_integer(),
+          Context.t()
+        ) ::
+          [DisplayList.draw()]
+  defp maybe_apply_breakindent(cmds, _sr, 0, _ctx), do: cmds
+
+  defp maybe_apply_breakindent(cmds, sr, indent_w, ctx) do
+    indent =
+      DisplayList.draw(
+        sr,
+        ctx.gutter_w,
+        String.duplicate(" ", indent_w),
+        Face.new(bg: ctx.editor_bg)
+      )
+
+    [indent | shift_draws(cmds, indent_w)]
+  end
+
+  @spec shift_draws([DisplayList.draw()], non_neg_integer()) :: [DisplayList.draw()]
+  defp shift_draws(cmds, 0), do: cmds
+
+  defp shift_draws(cmds, col_delta) do
+    Enum.map(cmds, fn {row, col, text, style} -> {row, col + col_delta, text, style} end)
+  end
+
+  @spec source_text(WrapMap.visual_row()) :: String.t()
+  defp source_text(vrow), do: Map.get(vrow, :source_text, vrow.text)
 
   # ── Gutter primitives ───────────────────────────────────────────────────
 

@@ -75,9 +75,9 @@ defmodule MingaEditor.Commands.LspTest do
     end
 
     test "shows 'no LSP server available' for unsupported filetype" do
-      state = base_state()
+      state = base_state(filetype: :unknown)
       result = LspCommands.execute(state, :lsp_start)
-      # The test buffer has :text filetype with no configured LSP server
+      # The test buffer has an unsupported filetype with no configured LSP server
       assert String.contains?(result.shell_state.status_msg, "No LSP server available")
     end
   end

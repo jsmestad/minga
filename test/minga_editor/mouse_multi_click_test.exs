@@ -29,7 +29,8 @@ defmodule MingaEditor.MouseMultiClickTest do
       )
 
     buffer =
-      start_supervised!({BufferProcess, content: content, events_registry: events_registry},
+      start_supervised!(
+        {BufferProcess, content: content, filetype: :elixir, events_registry: events_registry},
         id: {:buffer, id}
       )
 

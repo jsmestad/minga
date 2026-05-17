@@ -28,6 +28,7 @@ defmodule Minga.Integration.ToggleInvisibleTest do
 
     test "tab characters render as arrow when enabled" do
       ctx = start_editor("\thello")
+      BufferProcess.set_option(ctx.buffer, :wrap, false)
 
       send_keys_sync(ctx, "<SPC>ti")
 

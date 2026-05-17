@@ -13,7 +13,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   alias Minga.Config
   alias Minga.Core.Decorations
   alias Minga.Core.IndentGuide
-  alias Minga.Core.Decorations.ConcealRange
+
   alias Minga.Core.Decorations.FoldRegion
   alias Minga.Core.Face
   alias Minga.Core.Unicode
@@ -168,6 +168,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       document_highlight_colors: document_highlight_colors(state.theme),
       wrap_on: Map.get(params, :wrap_on, false),
       line_number_style: Map.get(params, :line_number_style, :absolute),
+      width_oracle: Map.get(params, :width_oracle, %Minga.Core.WidthOracle.Monospace{}),
       indent_guide_face:
         Face.new(fg: state.theme.editor.indent_guide_fg || state.theme.gutter.fg),
       indent_guide_active_face:
@@ -421,18 +422,17 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
     sign_w = Gutter.sign_column_width()
     sign_ctx = SignContext.from_render_context(ctx)
-    wrap_on = Map.get(opts, :wrap_on, false)
-
-    # Pre-compute wrap map for all visible buffer lines in one batch call
-    # (more efficient than per-line WrapMap.compute during the reduce).
+    # Soft wrap stays off on folded and visible-line paths until the display
+    # map owns wrapped cursor math and viewport bounds end to end.
     wrap_index =
       precompute_wrap_index(
-        wrap_on,
+        false,
         visible_line_map,
         lines,
         first_line,
         ctx.content_w,
-        ctx.decorations
+        ctx.decorations,
+        ctx.width_oracle
       )
 
     line_byte_offsets = build_line_byte_offsets(lines, first_line, first_byte_off)
@@ -531,83 +531,10 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
           [String.t()],
           non_neg_integer(),
           pos_integer(),
-          Decorations.t()
+          Decorations.t(),
+          Minga.Core.WidthOracle.t()
         ) :: %{non_neg_integer() => WrapMap.wrap_entry()}
-  defp precompute_wrap_index(false, _vlm, _lines, _first, _w, _decs), do: %{}
-
-  defp precompute_wrap_index(true, visible_line_map, lines, first_line, width, decorations) do
-    # Extract buffer lines that need wrapping (skip virtual lines, blocks, folds)
-    buffer_entries =
-      visible_line_map
-      |> Enum.filter(fn {_buf_line, fold_info} ->
-        match?(:normal, fold_info) or match?({:fold_start, _}, fold_info)
-      end)
-      |> Enum.map(fn {buf_line, fold_info} ->
-        line_index = buf_line - first_line
-        line_text = Enum.at(lines, line_index, "")
-        display_text = fold_display_text(line_text, fold_info)
-        {buf_line, display_text}
-      end)
-
-    # Compute wrap entries per-line, adjusting width for inline virtual text
-    # and conceal ranges. Inline VTs displace content rightward; conceals
-    # reduce visible width. Both affect where line breaks should occur.
-    wrap_entries =
-      Enum.map(buffer_entries, fn {buf_line, text} ->
-        vt_width = inline_vt_width(decorations, buf_line)
-        line_len = Unicode.display_width(text)
-        conceal_width = conceal_hidden_width(decorations, buf_line, line_len)
-        wrap_w = max(width - vt_width + conceal_width, 10)
-
-        [entry] = WrapMap.compute([text], wrap_w)
-        entry
-      end)
-
-    buf_lines = Enum.map(buffer_entries, &elem(&1, 0))
-
-    buf_lines
-    |> Enum.zip(wrap_entries)
-    |> Map.new()
-  end
-
-  # Returns the total display width of inline virtual texts on a line.
-  @spec inline_vt_width(Decorations.t(), non_neg_integer()) :: non_neg_integer()
-  defp inline_vt_width(decorations, buf_line) do
-    decorations
-    |> Decorations.inline_virtual_texts_for_line(buf_line)
-    |> Enum.reduce(0, fn vt, acc ->
-      seg_width = Enum.reduce(vt.segments, 0, fn {text, _style}, w -> w + String.length(text) end)
-      acc + seg_width
-    end)
-  end
-
-  # Returns the total number of buffer columns hidden by conceals on a line.
-  # This is the concealed width minus replacement width (0 or 1 per range).
-  # Used by the wrap map to compensate: concealed text doesn't consume
-  # display width, so the effective wrap width is larger than content_w.
-  @spec conceal_hidden_width(Decorations.t(), non_neg_integer(), non_neg_integer()) ::
-          non_neg_integer()
-  defp conceal_hidden_width(decorations, buf_line, line_len) do
-    conceals = Decorations.conceals_for_line(decorations, buf_line)
-
-    Enum.reduce(conceals, 0, fn conceal, acc ->
-      concealed = ConcealRange.concealed_width_on_line(conceal, buf_line, line_len)
-      replacement = ConcealRange.display_width(conceal)
-      acc + max(concealed - replacement, 0)
-    end)
-  end
-
-  @spec fold_display_text(String.t(), term()) :: String.t()
-  defp fold_display_text(text, :normal), do: text
-  defp fold_display_text(text, {:fold_start, hidden}), do: text <> " ··· #{hidden} lines"
-
-  defp fold_display_text(_text, {:decoration_fold, fold}) do
-    hidden = FoldRegion.hidden_count(fold)
-    " ··· #{hidden} lines"
-  end
-
-  defp fold_display_text(_text, {:virtual_line, _vt}), do: ""
-  defp fold_display_text(_text, {:block, _, _}), do: ""
+  defp precompute_wrap_index(false, _vlm, _lines, _first, _w, _decs, _oracle), do: %{}
 
   @spec fold_summary_ctx(Context.t(), non_neg_integer(), String.t(), term()) :: Context.t()
   defp fold_summary_ctx(ctx, buf_line, line_text, {:fold_start, hidden}) do
@@ -796,7 +723,12 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     linebreak = wrap_option(opts.buffer, :linebreak)
 
     wrap_map =
-      WrapMap.compute(lines, ctx.content_w, breakindent: breakindent, linebreak: linebreak)
+      WrapMap.compute(lines, ctx.content_w,
+        breakindent: breakindent,
+        linebreak: linebreak,
+        oracle: ctx.width_oracle,
+        tab_width: ctx.tab_width
+      )
 
     indent_guides_list = indent_guides_for_lines(lines, opts)
 
@@ -813,6 +745,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
         {[], [], 0, first_byte_off},
         fn {{{line_text, line_idx}, visual_rows}, indent_guide_cols}, {g, c, sr, byte_off} ->
           buf_line = first_line + line_idx
+          visual_rows = visible_visual_rows(visual_rows, line_idx, ctx.viewport.visual_row_offset)
 
           {g2, c2, rows_used} =
             BufferLine.render(%{
@@ -856,6 +789,17 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
     {Enum.reverse(gutters), Enum.reverse(contents), screen_row}
   end
+
+  @spec visible_visual_rows(WrapMap.wrap_entry(), non_neg_integer(), non_neg_integer()) ::
+          WrapMap.wrap_entry()
+  defp visible_visual_rows(visual_rows, 0, offset) when offset > 0 do
+    case Enum.drop(visual_rows, offset) do
+      [] -> [List.last(visual_rows)]
+      rows -> rows
+    end
+  end
+
+  defp visible_visual_rows(visual_rows, _line_idx, _offset), do: visual_rows
 
   # Renders a virtual line entry (from DisplayMap) into draw commands.
   # Virtual lines have no buffer content; they render their styled segments
@@ -1271,6 +1215,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       ctx.document_highlight_colors,
       ctx.wrap_on,
       ctx.line_number_style,
+      Minga.Core.WidthOracle.fingerprint(ctx.width_oracle),
       ctx.indent_guide_face,
       ctx.indent_guide_active_face,
       ctx.hl_todo_faces,
