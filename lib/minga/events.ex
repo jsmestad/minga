@@ -244,6 +244,14 @@ defmodule Minga.Events do
     @type t :: %__MODULE__{}
   end
 
+  defmodule OptionChangedEvent do
+    @moduledoc "Payload for `:option_changed` events. Published when a global config option changes at runtime."
+    @enforce_keys [:source, :name, :value]
+    defstruct [:source, :name, :value]
+
+    @type t :: %__MODULE__{source: GenServer.server(), name: atom(), value: term()}
+  end
+
   # ── Types ───────────────────────────────────────────────────────────────────
 
   @typedoc "Known event topics."
@@ -276,6 +284,7 @@ defmodule Minga.Events do
           | :changeset_merged
           | :changeset_budget_exhausted
           | :load_user_themes
+          | :option_changed
           | :buffer_fork_conflict
           | :file_written
           | :extension_updates_available
@@ -298,6 +307,7 @@ defmodule Minga.Events do
           | AgentHookEvent.t()
           | FaceOverridesChangedEvent.t()
           | LoadUserThemesEvent.t()
+          | OptionChangedEvent.t()
           | MingaAgent.SessionManager.SessionStoppedEvent.t()
           | MingaAgent.Subagent.Handle.t()
           | Minga.Distribution.Events.NodeConnectedEvent.t()
@@ -415,6 +425,7 @@ defmodule Minga.Events do
   @spec broadcast(:lsp_status_changed, LspStatusEvent.t()) :: :ok
   @spec broadcast(:supervisor_restarted, SupervisorRestartedEvent.t()) :: :ok
   @spec broadcast(:log_message, LogMessageEvent.t()) :: :ok
+  @spec broadcast(:option_changed, OptionChangedEvent.t()) :: :ok
   @spec broadcast(:face_overrides_changed, FaceOverridesChangedEvent.t()) :: :ok
   @spec broadcast(:agent_session_stopped, MingaAgent.SessionManager.SessionStoppedEvent.t()) ::
           :ok

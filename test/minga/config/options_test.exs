@@ -108,6 +108,7 @@ defmodule Minga.Config.OptionsTest do
                log_level_agent: :default,
                log_level_editor: :default,
                cursorline: true,
+               cursor_animate: true,
                nav_flash: true,
                nav_flash_threshold: 5,
                yank_flash: true,
@@ -331,6 +332,23 @@ defmodule Minga.Config.OptionsTest do
 
       assert Options.get(s, :tab_width) == 2
       assert Options.get(s, :autopair) == true
+    end
+
+    test "publishes cursor animation default when reset re-enables it" do
+      registry = :"#{__MODULE__}.reset_events.#{System.unique_integer([:positive])}"
+      start_supervised!({Registry, keys: :duplicate, name: registry})
+      server = start_supervised!({Options, name: nil, events_registry: registry})
+      Minga.Events.subscribe(:option_changed, registry)
+
+      assert {:ok, false} = Options.set(server, :cursor_animate, false)
+      Options.reset(server)
+
+      assert_receive {:minga_event, :option_changed,
+                      %Minga.Events.OptionChangedEvent{
+                        source: ^server,
+                        name: :cursor_animate,
+                        value: true
+                      }}
     end
   end
 

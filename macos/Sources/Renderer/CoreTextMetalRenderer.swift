@@ -47,10 +47,18 @@ struct BgParamsGPU {
 }
 
 /// Cursor geometry in device pixels for the current render frame.
-struct RenderCursor {
+struct RenderCursor: Equatable {
     let x: Float
     let y: Float
     let shape: CursorShape
+    let windowId: UInt16?
+
+    init(x: Float, y: Float, shape: CursorShape, windowId: UInt16? = nil) {
+        self.x = x
+        self.y = y
+        self.shape = shape
+        self.windowId = windowId
+    }
 }
 
 /// Default background clear color (dark gray matching the default bg).
@@ -88,6 +96,33 @@ final class CoreTextMetalRenderer {
     /// `.bgra8Unorm_srgb` framebuffer handles the sRGB→linear conversion
     /// for blending, so passing sRGB here is correct for visual accuracy.
     private(set) var cursorColor: SIMD3<Float>
+
+    /// Whether the cursor is currently gliding toward a new renderer-side target.
+    private(set) var cursorAnimating: Bool = false
+
+    /// Incremented each time a new cursor animation starts so the view can keep blink visible during movement.
+    private(set) var cursorAnimationGeneration: UInt64 = 0
+
+    /// Effective cursor animation setting after combining user config and Reduce Motion.
+    private(set) var cursorAnimateEnabled: Bool = true
+
+    /// User-configured cursor animation preference received from the BEAM.
+    private var cursorAnimateConfigEnabled: Bool = true
+
+    /// System accessibility Reduce Motion state, which always disables cursor animation.
+    private var cursorAnimationReduceMotionDisabled: Bool = false
+
+    private var hasCursorAnimationPosition: Bool = false
+    private var currentCursorX: Float = 0
+    private var currentCursorY: Float = 0
+    private var startCursorX: Float = 0
+    private var startCursorY: Float = 0
+    private var targetCursorX: Float = 0
+    private var targetCursorY: Float = 0
+    private var targetCursorShape: CursorShape = .block
+    private var targetCursorWindowId: UInt16?
+    private var cursorAnimationStartTime: CFTimeInterval = 0
+    private let cursorAnimationDuration: CFTimeInterval = 0.08
 
     /// Scroll indicator opacity (0.0 = hidden, 1.0 = fully visible).
     /// Set by EditorNSView based on scroll activity and fade timer.
@@ -262,7 +297,8 @@ final class CoreTextMetalRenderer {
                 gutterHoverWindowId: UInt16? = nil,
                 gutterHoverRow: UInt16? = nil,
                 drawable: CAMetalDrawable, viewportSize: CGSize,
-                contentScale: Float, scrollOffset: SIMD2<Float> = .zero) {
+                contentScale: Float, scrollOffset: SIMD2<Float> = .zero,
+                scrollTargetWindowId: UInt16? = nil) {
 
         // Store theme colors reference for helper methods.
         self.currentThemeColors = themeColors
@@ -273,6 +309,7 @@ final class CoreTextMetalRenderer {
         // Display cell height includes line spacing. Use for all row Y positioning
         // and quad heights. The original cellH is used for text texture sizing only.
         let displayCellH = cellH * frameState.lineSpacing
+        let smoothScrollOffsetPx = SIMD2<Float>(scrollOffset.x * scale, scrollOffset.y * scale)
 
         // Advance semantic content renderer.
         if let wcr = windowContentRenderer {
@@ -328,7 +365,7 @@ final class CoreTextMetalRenderer {
         let gutterPaddingPt: Float = frameState.gutterCol > 0 ? round(Float(Self.gutterRightGapPt) * scale) / scale : 0
         let gutterPaddingPx = gutterPaddingPt * scale
 
-        let renderCursor = CoreTextMetalRenderer.resolveCursor(
+        let resolvedCursor = CoreTextMetalRenderer.resolveCursor(
             frameState: frameState,
             windowContents: windowContents,
             cellW: cellW,
@@ -337,6 +374,7 @@ final class CoreTextMetalRenderer {
             gutterLeftMarginPx: gutterLeftMarginPx,
             gutterPaddingPx: gutterPaddingPx
         )
+        let renderCursor = animatedCursor(for: resolvedCursor, teleportLineThresholdPx: displayCellH * scale * 50.0)
 
         // Build background quads and line texture instances.
         var bgQuads: [QuadGPU] = []
@@ -344,7 +382,11 @@ final class CoreTextMetalRenderer {
 
         // Cursorline: draw a full-width bg fill on the cursor row.
         if frameState.cursorlineRow != 0xFFFF && frameState.cursorlineBg != 0 {
-            let yPos = Float(frameState.cursorlineRow) * displayCellH * scale
+            // gui_cursorline currently carries only a global screen row, not the owning window id.
+            // In side-by-side splits, row-only matching can apply one pane's fractional trackpad offset to another pane's cursorline.
+            // Keep the cursorline snapped until the protocol exposes an owning window id.
+            let cursorlineOffsetY: Float = 0
+            let yPos = Float(frameState.cursorlineRow) * displayCellH * scale - cursorlineOffsetY
             var clQuad = QuadGPU()
             clQuad.position = SIMD2<Float>(0, yPos)
             clQuad.size = SIMD2<Float>(Float(viewportSize.width), displayCellH * scale)
@@ -367,7 +409,13 @@ final class CoreTextMetalRenderer {
                     continue
                 }
 
+                let windowScrollOffsetPx = CoreTextMetalRenderer.smoothScrollOffset(
+                    for: content.windowId,
+                    targetWindowId: scrollTargetWindowId,
+                    scrollOffsetPx: smoothScrollOffsetPx
+                )
                 let windowRowOffset = Float(gutter.contentRow) * displayCellH * scale
+                let scrollableWindowRowOffset = windowRowOffset - windowScrollOffsetPx.y
                 let gutterWidth = Float(gutter.lineNumberWidth) + Float(gutter.signColWidth)
                 let contentColOffset = (Float(gutter.contentCol) + gutterWidth) * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
 
@@ -381,7 +429,7 @@ final class CoreTextMetalRenderer {
                 if let sel = content.selection {
                     appendSelectionQuads(
                         selection: sel,
-                        rowOffset: windowRowOffset,
+                        rowOffset: scrollableWindowRowOffset,
                         colOffset: contentColOffset,
                         scrollLeft: scrollLeftInt,
                         visibleRows: content.rows.count,
@@ -397,7 +445,7 @@ final class CoreTextMetalRenderer {
                 for highlight in content.documentHighlights {
                     // Document highlights are typically single-line (one identifier).
                     // Draw on startRow only; multi-row highlights are rare for this feature.
-                    let hlY = windowRowOffset + Float(highlight.startRow) * displayCellH * scale
+                    let hlY = scrollableWindowRowOffset + Float(highlight.startRow) * displayCellH * scale
                     let hlX = contentColOffset + Float(highlight.startCol) * cellW * scale - hScrollPx
                     let hlW = Float(highlight.endCol - highlight.startCol) * cellW * scale
 
@@ -415,7 +463,7 @@ final class CoreTextMetalRenderer {
 
                 // Search match overlay quads (drawn before text).
                 for match in content.searchMatches {
-                    let matchY = windowRowOffset + Float(match.row) * displayCellH * scale
+                    let matchY = scrollableWindowRowOffset + Float(match.row) * displayCellH * scale
                     let matchX = contentColOffset + Float(match.startCol) * cellW * scale - hScrollPx
                     let matchW = Float(match.endCol - match.startCol) * cellW * scale
 
@@ -445,7 +493,7 @@ final class CoreTextMetalRenderer {
                 // Render pre-clipped line textures into atlas.
                 for (rowIdx, clippedRow) in clippedRows.enumerated() {
                     if let atlas, let entry = wcr.renderRowToAtlas(displayRow: UInt16(rowIdx), row: clippedRow, atlas: atlas) {
-                        let yPos = windowRowOffset + Float(rowIdx) * displayCellH * scale
+                        let yPos = scrollableWindowRowOffset + Float(rowIdx) * displayCellH * scale
                         let textYOffset = (displayCellH - cellH) * scale * 0.5
 
                         let (uvOrigin, uvSize) = atlas.uvForSlot(entry.slotIndex, pixelWidth: entry.pixelWidth)
@@ -478,7 +526,7 @@ final class CoreTextMetalRenderer {
                             linePixelWidth = 0
                         }
 
-                        let rowY = windowRowOffset + Float(rowIndex) * displayCellH * scale
+                        let rowY = scrollableWindowRowOffset + Float(rowIndex) * displayCellH * scale
                         var cursorX = contentColOffset + linePixelWidth
                             + Float(wcr.annotationGap) * scale
 
@@ -516,7 +564,7 @@ final class CoreTextMetalRenderer {
                     case .hint:    SIMD3<Float>(0.33, 0.33, 0.33)  // gray
                     }
 
-                    let diagY = windowRowOffset + Float(diag.startRow) * displayCellH * scale + displayCellH * scale - 2.0 * scale
+                    let diagY = scrollableWindowRowOffset + Float(diag.startRow) * displayCellH * scale + displayCellH * scale - 2.0 * scale
                     let diagX = contentColOffset + Float(diag.startCol) * cellW * scale - hScrollPx
                     let diagW = Float(diag.endCol - diag.startCol) * cellW * scale
 
@@ -543,6 +591,11 @@ final class CoreTextMetalRenderer {
                 isMouseInGutter: isMouseInGutter,
                 gutterHoverWindowId: gutterHoverWindowId,
                 gutterHoverRow: gutterHoverRow,
+                scrollOffsetY: CoreTextMetalRenderer.smoothScrollOffset(
+                    for: windowGutter.windowId,
+                    targetWindowId: scrollTargetWindowId,
+                    scrollOffsetPx: smoothScrollOffsetPx
+                ).y,
                 bgQuads: &bgQuads,
                 lineInstances: &lineInstances
             )
@@ -558,9 +611,10 @@ final class CoreTextMetalRenderer {
         guard let cmdBuf = commandQueue.makeCommandBuffer(),
               let encoder = cmdBuf.makeRenderCommandEncoder(descriptor: renderDesc) else { return }
 
+        // Keep shader uniforms fixed. Smooth-scroll deltas are baked only into scrollable buffer content and cursor positions above, so fixed chrome such as gutters, split separators, labels, and scroll indicators does not drift during fractional scroll frames.
         var uniforms = CTUniformsGPU(
             viewportSize: SIMD2<Float>(Float(viewportSize.width), Float(viewportSize.height)),
-            scrollOffset: SIMD2<Float>(scrollOffset.x * scale, scrollOffset.y * scale)
+            scrollOffset: .zero
         )
 
         // Default fragment params: no corner radius (sharp rectangles).
@@ -584,8 +638,13 @@ final class CoreTextMetalRenderer {
             guard let gutter = frameState.windowGutters[guideData.windowId] else { continue }
             let gutterWidth = Float(gutter.lineNumberWidth) + Float(gutter.signColWidth)
             let windowContentColOffset = (Float(gutter.contentCol) + gutterWidth) * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
-            let contentTopY = Float(gutter.contentRow) * cellH * scale
-            let lineCellH = cellH * scale
+            let guideScrollOffsetY = CoreTextMetalRenderer.smoothScrollOffset(
+                for: guideData.windowId,
+                targetWindowId: scrollTargetWindowId,
+                scrollOffsetPx: smoothScrollOffsetPx
+            ).y
+            let contentTopY = Float(gutter.contentRow) * displayCellH * scale - guideScrollOffsetY
+            let lineCellH = displayCellH * scale
 
             let inactiveFg = colorFromU24(frameState.gutterColors.fg, default: SIMD3<Float>(0.33, 0.33, 0.33))
             let tabW = max(UInt16(guideData.tabWidth), 1)
@@ -593,7 +652,7 @@ final class CoreTextMetalRenderer {
             var guideQuads: [QuadGPU] = []
 
             if guideData.lineIndentLevels.isEmpty {
-                let contentHeightPx = Float(gutter.contentHeight) * cellH * scale
+                let contentHeightPx = Float(gutter.contentHeight) * displayCellH * scale
                 guideQuads.reserveCapacity(guideData.guideCols.count)
                 for col in guideData.guideCols {
                     let guideX = windowContentColOffset + Float(col) * cellW * scale
@@ -656,8 +715,15 @@ final class CoreTextMetalRenderer {
         // For block cursors, draw the cursor bg here so the text pass composites over it.
         // Beam and underline cursors are drawn AFTER text (pass 5).
         if let renderCursor, cursorBlinkVisible, renderCursor.shape == .block {
+            let cursorScrollOffsetPx = CoreTextMetalRenderer.smoothScrollOffset(
+                for: renderCursor.windowId,
+                targetWindowId: scrollTargetWindowId,
+                scrollOffsetPx: smoothScrollOffsetPx
+            )
+            let cursorX = renderCursor.x - cursorScrollOffsetPx.x
+            let cursorY = renderCursor.y - cursorScrollOffsetPx.y
             var cursorQuad = QuadGPU()
-            cursorQuad.position = SIMD2<Float>(CoreTextMetalRenderer.snapToPixel(renderCursor.x), CoreTextMetalRenderer.snapToPixel(renderCursor.y))
+            cursorQuad.position = SIMD2<Float>(CoreTextMetalRenderer.snapToPixel(cursorX), CoreTextMetalRenderer.snapToPixel(cursorY))
             cursorQuad.size = SIMD2<Float>(CoreTextMetalRenderer.snapToPixel(cellW * scale), CoreTextMetalRenderer.snapToPixel(displayCellH * scale))
             cursorQuad.color = cursorColor
             cursorQuad.alpha = 1.0
@@ -820,6 +886,13 @@ final class CoreTextMetalRenderer {
         // Block cursor is drawn in pass 2 (before text) so text shows on top.
         // Beam and underline are drawn AFTER text so they overlay it.
         if let renderCursor, cursorBlinkVisible, renderCursor.shape != .block {
+            let cursorScrollOffsetPx = CoreTextMetalRenderer.smoothScrollOffset(
+                for: renderCursor.windowId,
+                targetWindowId: scrollTargetWindowId,
+                scrollOffsetPx: smoothScrollOffsetPx
+            )
+            let cursorX = renderCursor.x - cursorScrollOffsetPx.x
+            let cursorY = renderCursor.y - cursorScrollOffsetPx.y
             var cursorQuad = QuadGPU()
             cursorQuad.color = cursorColor
             cursorQuad.alpha = 1.0
@@ -830,13 +903,13 @@ final class CoreTextMetalRenderer {
 
             case .beam:
                 let beamWidth: Float = 2.0 * scale
-                cursorQuad.position = SIMD2<Float>(CoreTextMetalRenderer.snapToPixel(renderCursor.x), CoreTextMetalRenderer.snapToPixel(renderCursor.y))
+                cursorQuad.position = SIMD2<Float>(CoreTextMetalRenderer.snapToPixel(cursorX), CoreTextMetalRenderer.snapToPixel(cursorY))
                 cursorQuad.size = SIMD2<Float>(CoreTextMetalRenderer.snapToPixel(beamWidth), CoreTextMetalRenderer.snapToPixel(displayCellH * scale))
 
             case .underline:
                 let ulHeight: Float = 2.0 * scale
-                let cellBottom = renderCursor.y + displayCellH * scale
-                cursorQuad.position = SIMD2<Float>(CoreTextMetalRenderer.snapToPixel(renderCursor.x), CoreTextMetalRenderer.snapToPixel(cellBottom - ulHeight))
+                let cellBottom = cursorY + displayCellH * scale
+                cursorQuad.position = SIMD2<Float>(CoreTextMetalRenderer.snapToPixel(cursorX), CoreTextMetalRenderer.snapToPixel(cellBottom - ulHeight))
                 cursorQuad.size = SIMD2<Float>(CoreTextMetalRenderer.snapToPixel(cellW * scale), CoreTextMetalRenderer.snapToPixel(ulHeight))
             }
 
@@ -902,6 +975,7 @@ final class CoreTextMetalRenderer {
         isMouseInGutter: Bool,
         gutterHoverWindowId: UInt16?,
         gutterHoverRow: UInt16?,
+        scrollOffsetY: Float,
         bgQuads: inout [QuadGPU],
         lineInstances: inout [LineGPU]
     ) {
@@ -911,7 +985,7 @@ final class CoreTextMetalRenderer {
 
         for (rowIndex, entry) in gutter.entries.enumerated() {
             let screenRow = baseRow + UInt16(rowIndex)
-            let yPos = Float(screenRow) * cellH * scale
+            let yPos = Float(screenRow) * cellH * scale - scrollOffsetY
             let xOffset = Float(baseCol) * cellW * scale + gutterLeftMarginPx
 
             // Sign column (leftmost in gutter)
@@ -1259,6 +1333,138 @@ final class CoreTextMetalRenderer {
 
     // MARK: - Private
 
+    /// Updates the user-configured cursor animation preference.
+    func setCursorAnimateConfigEnabled(_ enabled: Bool) {
+        cursorAnimateConfigEnabled = enabled
+        refreshCursorAnimateEnabled()
+    }
+
+    /// Updates the Reduce Motion override for cursor animation.
+    func setCursorAnimationReduceMotionDisabled(_ disabled: Bool) {
+        cursorAnimationReduceMotionDisabled = disabled
+        refreshCursorAnimateEnabled()
+    }
+
+    private func refreshCursorAnimateEnabled() {
+        cursorAnimateEnabled = cursorAnimateConfigEnabled && !cursorAnimationReduceMotionDisabled
+        guard !cursorAnimateEnabled else { return }
+        snapCursorAnimationToTarget()
+    }
+
+    func animatedCursor(for resolvedCursor: RenderCursor?, teleportLineThresholdPx: Float) -> RenderCursor? {
+        guard let resolvedCursor else {
+            cursorAnimating = false
+            hasCursorAnimationPosition = false
+            return nil
+        }
+
+        guard cursorAnimateEnabled else {
+            snapCursorAnimation(to: resolvedCursor)
+            return resolvedCursor
+        }
+
+        if !hasCursorAnimationPosition {
+            snapCursorAnimation(to: resolvedCursor)
+            return resolvedCursor
+        }
+
+        if cursorTargetChanged(resolvedCursor) {
+            updateCursorAnimation()
+            startCursorAnimation(to: resolvedCursor, teleportLineThresholdPx: teleportLineThresholdPx)
+        }
+
+        return updateCursorAnimation() ?? resolvedCursor
+    }
+
+    private func cursorTargetChanged(_ cursor: RenderCursor) -> Bool {
+        abs(targetCursorX - cursor.x) > 0.001 || abs(targetCursorY - cursor.y) > 0.001 || targetCursorShape != cursor.shape || targetCursorWindowId != cursor.windowId || !hasCursorAnimationPosition
+    }
+
+    private func startCursorAnimation(to cursor: RenderCursor, teleportLineThresholdPx: Float) {
+        let distanceY = abs(cursor.y - currentCursorY)
+        guard distanceY <= teleportLineThresholdPx else {
+            snapCursorAnimation(to: cursor)
+            return
+        }
+
+        startCursorX = currentCursorX
+        startCursorY = currentCursorY
+        targetCursorX = cursor.x
+        targetCursorY = cursor.y
+        targetCursorShape = cursor.shape
+        targetCursorWindowId = cursor.windowId
+        cursorAnimationStartTime = CACurrentMediaTime()
+        cursorAnimating = true
+        cursorAnimationGeneration &+= 1
+    }
+
+    @discardableResult
+    func updateCursorAnimation(now: CFTimeInterval = CACurrentMediaTime()) -> RenderCursor? {
+        guard hasCursorAnimationPosition else { return nil }
+        guard cursorAnimating else {
+            currentCursorX = targetCursorX
+            currentCursorY = targetCursorY
+            return RenderCursor(x: currentCursorX, y: currentCursorY, shape: targetCursorShape, windowId: targetCursorWindowId)
+        }
+
+        let progress = CoreTextMetalRenderer.cursorAnimationProgress(now: now, startTime: cursorAnimationStartTime, duration: cursorAnimationDuration)
+        let eased = CoreTextMetalRenderer.easeOutCubic(progress)
+        currentCursorX = CoreTextMetalRenderer.lerp(startCursorX, targetCursorX, eased)
+        currentCursorY = CoreTextMetalRenderer.lerp(startCursorY, targetCursorY, eased)
+
+        if progress >= 1.0 {
+            cursorAnimating = false
+            currentCursorX = targetCursorX
+            currentCursorY = targetCursorY
+        }
+
+        return RenderCursor(x: currentCursorX, y: currentCursorY, shape: targetCursorShape, windowId: targetCursorWindowId)
+    }
+
+    nonisolated static func cursorAnimationProgress(now: CFTimeInterval, startTime: CFTimeInterval, duration: CFTimeInterval) -> Float {
+        guard duration > 0 else { return 1.0 }
+        return min(max(Float((now - startTime) / duration), 0.0), 1.0)
+    }
+
+    nonisolated static func easeOutCubic(_ progress: Float) -> Float {
+        let clamped = min(max(progress, 0.0), 1.0)
+        return 1.0 - powf(1.0 - clamped, 3.0)
+    }
+
+    nonisolated static func lerp(_ start: Float, _ end: Float, _ progress: Float) -> Float {
+        start + (end - start) * progress
+    }
+
+    nonisolated static func smoothScrollOffset(for windowId: UInt16?, targetWindowId: UInt16?, scrollOffsetPx: SIMD2<Float>) -> SIMD2<Float> {
+        guard let windowId, let targetWindowId, windowId == targetWindowId else { return .zero }
+        return scrollOffsetPx
+    }
+
+    nonisolated static func interpolateCursor(start: RenderCursor, target: RenderCursor, progress: Float) -> RenderCursor {
+        let eased = easeOutCubic(progress)
+        return RenderCursor(x: lerp(start.x, target.x, eased), y: lerp(start.y, target.y, eased), shape: target.shape, windowId: target.windowId)
+    }
+
+    private func snapCursorAnimationToTarget() {
+        guard hasCursorAnimationPosition else { return }
+        currentCursorX = targetCursorX
+        currentCursorY = targetCursorY
+        cursorAnimating = false
+    }
+
+    private func snapCursorAnimation(to cursor: RenderCursor) {
+        hasCursorAnimationPosition = true
+        currentCursorX = cursor.x
+        currentCursorY = cursor.y
+        startCursorX = cursor.x
+        startCursorY = cursor.y
+        targetCursorX = cursor.x
+        targetCursorY = cursor.y
+        targetCursorShape = cursor.shape
+        targetCursorWindowId = cursor.windowId
+        cursorAnimating = false
+    }
+
     /// Resolve the cursor position in the same coordinate system as the text renderer.
     /// Semantic GUI window content is preferred because it carries window-relative cursor coordinates and horizontal scroll. Legacy frameState cursor data remains the fallback for transition frames and non-semantic surfaces.
     nonisolated static func resolveCursor(
@@ -1280,7 +1486,7 @@ final class CoreTextMetalRenderer {
             let cursorCol = resolvedSemanticCursorCol(content)
             let x = contentColOffset + Float(cursorCol) * cellW * scale - hScrollPx
             let y = (Float(gutter.contentRow) + Float(content.cursorRow)) * displayCellH * scale
-            return RenderCursor(x: x, y: y, shape: content.cursorShape)
+            return RenderCursor(x: x, y: y, shape: content.cursorShape, windowId: windowId)
         }
 
         guard frameState.cursorVisible else { return nil }

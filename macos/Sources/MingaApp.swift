@@ -931,6 +931,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         disp.onLineSpacingChanged = { [weak nsView] spacing in
             nsView?.lineSpacingChanged(spacing)
         }
+        disp.onCursorAnimationChanged = { [weak ctRenderer, weak nsView] enabled in
+            ctRenderer?.setCursorAnimateConfigEnabled(enabled)
+            nsView?.renderFrame()
+        }
         disp.onTitleChanged = { [weak appState] title in
             Task { @MainActor in
                 appState?.windowTitle = title

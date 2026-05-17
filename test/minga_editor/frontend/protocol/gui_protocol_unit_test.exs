@@ -341,6 +341,16 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
     end
   end
 
+  describe "encode_gui_cursor_animation/1" do
+    test "encodes enabled cursor animation" do
+      assert <<0x95, 1::16, 1::8>> = ProtocolGUI.encode_gui_cursor_animation(true)
+    end
+
+    test "encodes disabled cursor animation" do
+      assert <<0x95, 1::16, 0::8>> = ProtocolGUI.encode_gui_cursor_animation(false)
+    end
+  end
+
   describe "encode_gui_status_bar/1 background subagents" do
     test "encodes background subagent count and label in buffer agent section" do
       binary = ProtocolGUI.encode_gui_status_bar({:buffer, status_data()})

@@ -105,6 +105,12 @@ defmodule MingaEditor.Frontend do
     send_commands(port, [MingaEditor.Frontend.Protocol.GUI.encode_gui_line_spacing(spacing)])
   end
 
+  @doc "Sends whether GUI frontends should animate cursor movement."
+  @spec send_cursor_animation(GenServer.server(), boolean()) :: :ok
+  def send_cursor_animation(port, enabled) when is_boolean(enabled) do
+    send_commands(port, [MingaEditor.Frontend.Protocol.GUI.encode_gui_cursor_animation(enabled)])
+  end
+
   # ── Parser/Highlight commands ────────────────────────────────────────────
 
   @doc """
