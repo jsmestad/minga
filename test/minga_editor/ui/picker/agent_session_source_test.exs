@@ -1,5 +1,6 @@
 defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
-  use ExUnit.Case, async: true
+  # Uses real agent sessions through the global MingaAgent.Supervisor, so keep this file serialized.
+  use ExUnit.Case, async: false
 
   alias MingaEditor.UI.Picker
   alias MingaEditor.UI.Picker.Context

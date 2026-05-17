@@ -67,6 +67,8 @@ defmodule MingaEditor.Mouse do
            {:window_fold, Window.id(), non_neg_integer()} | {:decoration_fold, pid(), reference()}
 
   @typep fold_row_target :: {:window_fold, non_neg_integer()} | {:decoration_fold, reference()}
+  @typep drag_window_context ::
+           {Window.id(), Window.t(), pid(), integer(), integer(), pos_integer(), pos_integer()}
 
   @doc "Dispatches a mouse event routed to a focus-tree node."
   @spec handle_at_node(
@@ -121,7 +123,54 @@ defmodule MingaEditor.Mouse do
       ),
       do: state
 
-  # Ignore negative coordinates.
+  def handle(
+        %{workspace: %{mouse: %MouseState{dragging: true, anchor: anchor, drag_click_count: dcc}}} =
+          state,
+        row,
+        col,
+        :left,
+        _mods,
+        :drag,
+        _cc
+      ) do
+    handle_left_drag(state, row, col, anchor, dcc)
+  end
+
+  def handle(
+        %{workspace: %{mouse: %MouseState{dragging: true}, editing: %{mode: :visual}}} = state,
+        _r,
+        _c,
+        :left,
+        _m,
+        :release,
+        _cc
+      ) do
+    state =
+      EditorState.update_workspace(
+        state,
+        &WorkspaceState.set_mouse(&1, MouseState.stop_drag(&1.mouse))
+      )
+
+    # TUI keeps legacy selection auto-copy. Native GUI selection stays separate from the clipboard.
+    auto_copy_selection(state)
+  end
+
+  def handle(
+        %{workspace: %{mouse: %MouseState{dragging: true}}} = state,
+        _r,
+        _c,
+        :left,
+        _m,
+        :release,
+        _cc
+      ) do
+    EditorState.update_workspace(
+      state,
+      &WorkspaceState.set_mouse(&1, MouseState.stop_drag(&1.mouse))
+    )
+  end
+
+  # Ignore negative coordinates except active drags, which clamp to the originating window edge.
   def handle(state, row, _col, _button, _mods, _type, _cc) when row < 0, do: state
   def handle(state, _row, col, _button, _mods, _type, _cc) when col < 0, do: state
 
@@ -234,19 +283,6 @@ defmodule MingaEditor.Mouse do
     handle_separator_drag(state, :horizontal, sep_pos, row)
   end
 
-  def handle(
-        %{workspace: %{mouse: %MouseState{dragging: true, anchor: anchor, drag_click_count: dcc}}} =
-          state,
-        row,
-        col,
-        :left,
-        _mods,
-        :drag,
-        _cc
-      ) do
-    handle_left_drag(state, row, col, anchor, dcc)
-  end
-
   # ── Left release ──
 
   def handle(
@@ -261,40 +297,6 @@ defmodule MingaEditor.Mouse do
     EditorState.update_workspace(
       state,
       &WorkspaceState.set_mouse(&1, MouseState.stop_resize(&1.mouse))
-    )
-  end
-
-  def handle(
-        %{workspace: %{mouse: %MouseState{dragging: true}, editing: %{mode: :visual}}} = state,
-        _r,
-        _c,
-        :left,
-        _m,
-        :release,
-        _cc
-      ) do
-    state =
-      EditorState.update_workspace(
-        state,
-        &WorkspaceState.set_mouse(&1, MouseState.stop_drag(&1.mouse))
-      )
-
-    # TUI keeps legacy selection auto-copy. Native GUI selection stays separate from the clipboard.
-    auto_copy_selection(state)
-  end
-
-  def handle(
-        %{workspace: %{mouse: %MouseState{dragging: true}}} = state,
-        _r,
-        _c,
-        :left,
-        _m,
-        :release,
-        _cc
-      ) do
-    EditorState.update_workspace(
-      state,
-      &WorkspaceState.set_mouse(&1, MouseState.stop_drag(&1.mouse))
     )
   end
 
@@ -335,9 +337,12 @@ defmodule MingaEditor.Mouse do
   end
 
   defp handle_left_drag(state, row, col, anchor, dcc) do
-    case mouse_to_buffer_pos(state, row, col) do
+    state = maybe_auto_scroll(state, row, col)
+
+    case drag_mouse_to_buffer_pos(state, row, col) do
+      nil -> state
       ^anchor -> state
-      _target -> drag_to_mouse_pos(state, row, col, anchor, dcc)
+      _target -> drag_to_mouse_pos_after_scroll(state, row, col, anchor, dcc)
     end
   end
 
@@ -350,9 +355,26 @@ defmodule MingaEditor.Mouse do
         ) :: state()
   defp drag_to_mouse_pos(state, row, col, anchor, dcc) do
     state
-    |> maybe_auto_scroll(row)
-    |> move_to_mouse_pos(row, col)
-    |> update_drag_selection(anchor, dcc)
+    |> maybe_auto_scroll(row, col)
+    |> drag_to_mouse_pos_after_scroll(row, col, anchor, dcc)
+  end
+
+  @spec drag_to_mouse_pos_after_scroll(
+          state(),
+          integer(),
+          integer(),
+          {non_neg_integer(), non_neg_integer()},
+          pos_integer()
+        ) :: state()
+  defp drag_to_mouse_pos_after_scroll(state, row, col, anchor, dcc) do
+    case drag_mouse_to_buffer_pos(state, row, col) do
+      nil ->
+        state
+
+      {line, c} ->
+        move_drag_cursor(state, {line, c})
+        update_drag_selection(state, anchor, dcc)
+    end
   end
 
   @spec update_drag_selection(state(), {non_neg_integer(), non_neg_integer()}, pos_integer()) ::
@@ -507,6 +529,9 @@ defmodule MingaEditor.Mouse do
 
   @spec handle_double_click(state(), integer(), integer()) :: state()
   defp handle_double_click(state, row, col) do
+    state = maybe_focus_window_at(state, row, col)
+    origin_window = origin_window_id_at(state, row, col)
+
     case mouse_to_buffer_pos(state, row, col) do
       nil ->
         state
@@ -525,7 +550,7 @@ defmodule MingaEditor.Mouse do
 
             state = EditorState.transition_mode(state, :visual, visual_state)
 
-            update_mouse(state, &MouseState.start_drag(&1, {line, word_start}))
+            update_mouse(state, &MouseState.start_drag(&1, {line, word_start}, origin_window))
 
           nil ->
             state
@@ -536,7 +561,10 @@ defmodule MingaEditor.Mouse do
   # ── Triple-click: line selection ───────────────────────────────────────────
 
   @spec handle_triple_click(state(), integer(), integer()) :: state()
-  defp handle_triple_click(state, row, _col) do
+  defp handle_triple_click(state, row, col) do
+    state = maybe_focus_window_at(state, row, col)
+    origin_window = origin_window_id_at(state, row, col)
+
     case mouse_to_buffer_line(state, row) do
       nil ->
         state
@@ -560,7 +588,7 @@ defmodule MingaEditor.Mouse do
 
         state = EditorState.transition_mode(state, :visual, visual_state)
 
-        update_mouse(state, &MouseState.start_drag(&1, {line, 0}))
+        update_mouse(state, &MouseState.start_drag(&1, {line, 0}, origin_window))
     end
   end
 
@@ -1007,7 +1035,8 @@ defmodule MingaEditor.Mouse do
         state = cancel_mode_for_mouse(state)
         state = EditorState.transition_mode(state, :normal)
 
-        update_mouse(state, &MouseState.start_drag(&1, {target_line, target_col}))
+        origin_window = state.workspace.windows.active
+        update_mouse(state, &MouseState.start_drag(&1, {target_line, target_col}, origin_window))
     end
   end
 
@@ -1190,6 +1219,19 @@ defmodule MingaEditor.Mouse do
     end
   end
 
+  @spec origin_window_id_at(state(), integer(), integer()) :: Window.id() | nil
+  defp origin_window_id_at(%{workspace: %{windows: %{tree: nil, active: active}}}, _row, _col),
+    do: active
+
+  defp origin_window_id_at(state, row, col) do
+    screen = Layout.get(state).editor_area
+
+    case WindowTree.window_at(state.workspace.windows.tree, screen, row, col) do
+      {:ok, id, _rect} -> id
+      :error -> state.workspace.windows.active
+    end
+  end
+
   @spec gutter_width(state(), non_neg_integer()) :: non_neg_integer()
   defp gutter_width(%{workspace: %{buffers: %{active: buf}}}, total_lines) do
     buffer_gutter_width(buf, total_lines)
@@ -1312,6 +1354,106 @@ defmodule MingaEditor.Mouse do
       :error ->
         nil
     end
+  end
+
+  @spec drag_mouse_to_buffer_pos(state(), integer(), integer()) ::
+          {non_neg_integer(), non_neg_integer()} | nil
+  defp drag_mouse_to_buffer_pos(state, row, col) do
+    case drag_window_context(state) do
+      nil -> mouse_to_buffer_pos_for_drag_fallback(state, row, col)
+      context -> drag_mouse_to_buffer_pos(state, context, row, col)
+    end
+  end
+
+  @spec mouse_to_buffer_pos_for_drag_fallback(state(), integer(), integer()) ::
+          {non_neg_integer(), non_neg_integer()} | nil
+  defp mouse_to_buffer_pos_for_drag_fallback(_state, row, _col) when row < 0, do: nil
+  defp mouse_to_buffer_pos_for_drag_fallback(_state, _row, col) when col < 0, do: nil
+
+  defp mouse_to_buffer_pos_for_drag_fallback(state, row, col),
+    do: mouse_to_buffer_pos(state, row, col)
+
+  @spec drag_window_context(state()) :: drag_window_context() | nil
+  defp drag_window_context(state) do
+    layout = Layout.get(state)
+    win_id = state.workspace.mouse.drag_origin_window || state.workspace.windows.active
+
+    with id when is_integer(id) <- win_id,
+         %Window{} = window <- Map.get(state.workspace.windows.map, id),
+         %{content: {content_row, content_col, content_w, content_h}} <-
+           Map.get(layout.window_layouts, id),
+         buf when is_pid(buf) <- window.buffer do
+      {id, window, buf, content_row, content_col, content_w, max(content_h, 1)}
+    else
+      _ -> nil
+    end
+  end
+
+  @spec drag_mouse_to_buffer_pos(state(), drag_window_context(), integer(), integer()) ::
+          {non_neg_integer(), non_neg_integer()} | nil
+  defp drag_mouse_to_buffer_pos(
+         _state,
+         {_id, window, buf, content_row, content_col, content_w, content_h},
+         row,
+         col
+       ) do
+    total_lines = Buffer.line_count(buf)
+    gutter_w = buffer_gutter_width(buf, total_lines)
+    {cursor_line, _} = window.cursor
+    scroll_top = window_scroll_top(window, content_h, content_w, cursor_line, buf)
+    local_row = row - content_row
+    local_col = max(col - content_col - gutter_w, 0) + window.viewport.left
+
+    if local_row < 0 or local_row >= content_h do
+      resolve_drag_buffer_pos(buf, local_row, local_col, scroll_top, content_h, total_lines)
+    else
+      case resolve_with_display_map(
+             buf,
+             window,
+             local_row,
+             local_col,
+             scroll_top,
+             content_h,
+             content_w,
+             total_lines
+           ) do
+        nil ->
+          resolve_drag_buffer_pos(buf, local_row, local_col, scroll_top, content_h, total_lines)
+
+        pos ->
+          pos
+      end
+    end
+  catch
+    :exit, _ -> nil
+  end
+
+  @spec resolve_drag_buffer_pos(
+          pid(),
+          integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer(),
+          pos_integer()
+        ) :: {non_neg_integer(), non_neg_integer()}
+  defp resolve_drag_buffer_pos(buf, local_row, local_col, scroll_top, content_h, total_lines) do
+    line = drag_target_line(local_row, scroll_top, content_h, total_lines)
+    {line, clamp_col_to_line(buf, line, local_col)}
+  end
+
+  @spec drag_target_line(integer(), non_neg_integer(), pos_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp drag_target_line(local_row, scroll_top, _content_h, total_lines) when local_row < 0 do
+    min(scroll_top, total_lines - 1)
+  end
+
+  defp drag_target_line(local_row, scroll_top, content_h, total_lines)
+       when local_row >= content_h do
+    min(scroll_top + content_h - 1, total_lines - 1)
+  end
+
+  defp drag_target_line(local_row, scroll_top, _content_h, total_lines) do
+    (scroll_top + local_row) |> max(0) |> min(total_lines - 1)
   end
 
   # Resolves a click position using the DisplayMap to correctly handle
@@ -1627,36 +1769,69 @@ defmodule MingaEditor.Mouse do
     :exit, _ -> 5
   end
 
-  @spec maybe_auto_scroll(state(), integer()) :: state()
-  defp maybe_auto_scroll(%{workspace: %{buffers: %{active: buf}}} = state, row) when row <= 0 do
-    vp = current_viewport(state)
-    page_move(buf, vp, -1)
-    state
-  end
-
-  defp maybe_auto_scroll(%{workspace: %{buffers: %{active: buf}}} = state, row) do
-    vp = current_viewport(state)
-    scroll_threshold = Viewport.content_rows(vp) - 1
-    maybe_scroll_down(state, buf, vp, row, scroll_threshold)
-  end
-
-  defp maybe_scroll_down(state, buf, vp, row, threshold) when row >= threshold do
-    page_move(buf, vp, 1)
-    state
-  end
-
-  defp maybe_scroll_down(state, _buf, _vp, _row, _threshold), do: state
-
-  @spec move_to_mouse_pos(state(), non_neg_integer(), non_neg_integer()) :: state()
-  defp move_to_mouse_pos(state, row, col) do
-    case mouse_to_buffer_pos(state, row, col) do
+  @spec maybe_auto_scroll(state(), integer(), integer()) :: state()
+  defp maybe_auto_scroll(state, row, col) do
+    case drag_window_context(state) do
       nil ->
         state
 
-      {line, c} ->
-        Buffer.move_to(state.workspace.buffers.active, {line, c})
+      context ->
         state
+        |> maybe_auto_scroll_vertical(context, row)
+        |> maybe_auto_scroll_horizontal(context, col)
     end
+  end
+
+  @spec maybe_auto_scroll_vertical(state(), drag_window_context(), integer()) :: state()
+  defp maybe_auto_scroll_vertical(
+         state,
+         {win_id, _window, _buf, content_row, _content_col, _w, _h},
+         row
+       )
+       when row < content_row do
+    scroll_window_vertical(state, win_id, -1)
+  end
+
+  defp maybe_auto_scroll_vertical(
+         state,
+         {win_id, _window, _buf, content_row, _content_col, _w, content_h},
+         row
+       )
+       when row >= content_row + content_h do
+    scroll_window_vertical(state, win_id, 1)
+  end
+
+  defp maybe_auto_scroll_vertical(state, _context, _row), do: state
+
+  @spec maybe_auto_scroll_horizontal(state(), drag_window_context(), integer()) :: state()
+  defp maybe_auto_scroll_horizontal(
+         state,
+         {win_id, _window, _buf, _row, content_col, _w, _h},
+         col
+       )
+       when col < content_col do
+    scroll_window_horizontal(state, win_id, -@scroll_cols)
+  end
+
+  defp maybe_auto_scroll_horizontal(
+         state,
+         {win_id, _window, _buf, _row, content_col, content_w, _h},
+         col
+       )
+       when col >= content_col + content_w do
+    scroll_window_horizontal(state, win_id, @scroll_cols)
+  end
+
+  defp maybe_auto_scroll_horizontal(state, _context, _col), do: state
+
+  @spec move_drag_cursor(state(), {non_neg_integer(), non_neg_integer()}) :: state()
+  defp move_drag_cursor(state, {line, c}) do
+    case drag_window_context(state) do
+      {_win_id, _window, buf, _row, _col, _w, _h} -> Buffer.move_to(buf, {line, c})
+      nil -> Buffer.move_to(state.workspace.buffers.active, {line, c})
+    end
+
+    state
   end
 
   @spec enter_visual_if_needed(state(), {non_neg_integer(), non_neg_integer()}) :: state()
@@ -1685,25 +1860,6 @@ defmodule MingaEditor.Mouse do
   end
 
   defp cancel_mode_for_mouse(state), do: state
-
-  @spec page_move(pid(), Viewport.t(), integer()) :: :ok
-  defp page_move(buf, _vp, delta) do
-    {line, col} = Buffer.cursor(buf)
-    total_lines = Buffer.line_count(buf)
-    target_line = line + delta
-    target_line = max(0, min(target_line, total_lines - 1))
-
-    target_col =
-      case Buffer.lines(buf, target_line, 1) do
-        [text] when byte_size(text) > 0 ->
-          min(col, Unicode.last_grapheme_byte_offset(text))
-
-        _ ->
-          0
-      end
-
-    Buffer.move_to(buf, {target_line, target_col})
-  end
 
   # ── Tab bar close (middle-click) ─────────────────────────────────────────
 

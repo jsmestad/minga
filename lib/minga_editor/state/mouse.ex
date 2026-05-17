@@ -24,6 +24,7 @@ defmodule MingaEditor.State.Mouse do
 
   defstruct dragging: false,
             anchor: nil,
+            drag_origin_window: nil,
             resize_dragging: nil,
             last_press_time: nil,
             last_press_pos: nil,
@@ -35,6 +36,7 @@ defmodule MingaEditor.State.Mouse do
   @type t :: %__MODULE__{
           dragging: boolean(),
           anchor: {non_neg_integer(), non_neg_integer()} | nil,
+          drag_origin_window: MingaEditor.Window.id() | nil,
           resize_dragging: {WindowTree.direction() | :agent_separator, non_neg_integer()} | nil,
           last_press_time: integer() | nil,
           last_press_pos: {integer(), integer()} | nil,
@@ -47,13 +49,26 @@ defmodule MingaEditor.State.Mouse do
   @doc "Begins a content drag from the given buffer position."
   @spec start_drag(t(), {non_neg_integer(), non_neg_integer()}) :: t()
   def start_drag(%__MODULE__{} = mouse, anchor) do
-    %{mouse | dragging: true, anchor: anchor, drag_click_count: max(mouse.click_count, 1)}
+    start_drag(mouse, anchor, nil)
+  end
+
+  @doc "Begins a content drag from the given buffer position and originating window."
+  @spec start_drag(t(), {non_neg_integer(), non_neg_integer()}, MingaEditor.Window.id() | nil) ::
+          t()
+  def start_drag(%__MODULE__{} = mouse, anchor, origin_window) do
+    %{
+      mouse
+      | dragging: true,
+        anchor: anchor,
+        drag_origin_window: origin_window,
+        drag_click_count: max(mouse.click_count, 1)
+    }
   end
 
   @doc "Ends an active drag, clearing the anchor."
   @spec stop_drag(t()) :: t()
   def stop_drag(%__MODULE__{} = mouse) do
-    %{mouse | dragging: false, anchor: nil}
+    %{mouse | dragging: false, anchor: nil, drag_origin_window: nil}
   end
 
   @doc "Begins a separator resize drag in the given direction at the given position."

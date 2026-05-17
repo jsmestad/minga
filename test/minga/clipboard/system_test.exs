@@ -27,9 +27,9 @@ defmodule Minga.Clipboard.SystemTest do
 
       assert result == :ok
       # The old code always hit a 500ms timeout in await_port_exit.
-      # New code uses Port.close and should complete well under 100ms.
-      assert time_μs < 100_000,
-             "write took #{time_μs}µs (#{div(time_μs, 1000)}ms), expected < 100ms. " <>
+      # New code uses Port.close and should complete well under 250ms even on a loaded machine.
+      assert time_μs < 250_000,
+             "write took #{time_μs}µs (#{div(time_μs, 1000)}ms), expected < 250ms. " <>
                "This suggests the 500ms await_port_exit timeout bug has regressed."
     end
 

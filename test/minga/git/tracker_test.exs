@@ -1,5 +1,6 @@
 defmodule Minga.Git.TrackerTest do
-  use ExUnit.Case, async: true
+  # Uses the global Minga.Git.Repo.Supervisor and Git.Stub registry, so keep this file serialized.
+  use ExUnit.Case, async: false
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Events
@@ -8,6 +9,7 @@ defmodule Minga.Git.TrackerTest do
   alias Minga.Git.Tracker
 
   @moduletag :tmp_dir
+  @sync_timeout 15_000
 
   setup %{tmp_dir: dir} do
     id = System.unique_integer([:positive])
@@ -44,7 +46,7 @@ defmodule Minga.Git.TrackerTest do
 
   # Flushes the Tracker's mailbox so any pending events (:buffer_opened,
   # :DOWN, etc.) are processed before we check state.
-  defp flush_tracker(tracker), do: :sys.get_state(tracker)
+  defp flush_tracker(tracker), do: :sys.get_state(tracker, @sync_timeout)
 
   describe "lookup/1" do
     test "returns nil for untracked buffer", %{

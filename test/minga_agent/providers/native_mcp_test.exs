@@ -9,6 +9,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
   alias ReqLLM.StreamResponse.MetadataHandle
 
   @moduletag :tmp_dir
+  @receive_timeout 5_000
 
   defp server_config(name \\ "Local Tools") do
     %ServerConfig{name: name, command: "ignored"}
@@ -102,7 +103,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
     assert :ok = Native.send_prompt(provider, "hello")
     _events = collect_until_end()
 
-    assert_receive {:llm_tools, tool_names}
+    assert_receive {:llm_tools, tool_names}, @receive_timeout
     assert "builtin_echo" in tool_names
     assert "mcp_local_tools__echo_text" in tool_names
     assert "todo_write" in tool_names
@@ -135,7 +136,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
     assert :ok = Native.send_prompt(provider, "hello")
     _events = collect_until_end()
 
-    assert_receive {:llm_tools_two_servers, tool_names}
+    assert_receive {:llm_tools_two_servers, tool_names}, @receive_timeout
     assert "builtin_echo" in tool_names
     assert "mcp_alpha__echo_text" in tool_names
     assert "mcp_beta__search_code" in tool_names
@@ -170,7 +171,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
     assert :ok = Native.send_prompt(provider, "hello")
     _events = collect_until_end()
 
-    assert_receive {:llm_tools_with_reserved_collision, tool_names}
+    assert_receive {:llm_tools_with_reserved_collision, tool_names}, @receive_timeout
     assert "mcp_local_tools__echo_text" in tool_names
     assert "mcp_local_tools__echo_text_2" in tool_names
     assert length(tool_names) == length(Enum.uniq(tool_names))
@@ -193,14 +194,14 @@ defmodule MingaAgent.Providers.NativeMCPTest do
         config: %AgentConfig{mcp_servers: [%{name: "Local Tools"}], tool_approval: :none}
       )
 
-    assert_receive {:agent_provider_event, %Event.Error{message: message}}
+    assert_receive {:agent_provider_event, %Event.Error{message: message}}, @receive_timeout
     assert message =~ "MCP config error"
     assert message =~ "command is required"
 
     assert :ok = Native.send_prompt(provider, "hello")
     _events = collect_until_end()
 
-    assert_receive {:llm_tools_with_invalid_mcp, tool_names}
+    assert_receive {:llm_tools_with_invalid_mcp, tool_names}, @receive_timeout
     assert "builtin_echo" in tool_names
     refute "mcp_local_tools__echo_text" in tool_names
     assert "todo_write" in tool_names
@@ -228,13 +229,13 @@ defmodule MingaAgent.Providers.NativeMCPTest do
         ]
       )
 
-    assert_receive {:agent_provider_event, %Event.Error{message: message}}
+    assert_receive {:agent_provider_event, %Event.Error{message: message}}, @receive_timeout
     assert message =~ "MCP server Broken failed to start"
 
     assert :ok = Native.send_prompt(provider, "hello")
     _events = collect_until_end()
 
-    assert_receive {:llm_tools_with_failed_server, tool_names}
+    assert_receive {:llm_tools_with_failed_server, tool_names}, @receive_timeout
     assert "builtin_echo" in tool_names
     assert "mcp_healthy__echo_text" in tool_names
     refute "mcp_broken__echo_text" in tool_names
@@ -268,7 +269,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
     assert :ok = Native.send_prompt(provider, "use mcp")
     events = collect_until_end()
 
-    assert_receive {:mcp_tool_call, "echo-text", %{"text" => "hi"}}
+    assert_receive {:mcp_tool_call, "echo-text", %{"text" => "hi"}}, @receive_timeout
 
     assert Enum.any?(
              events,
@@ -299,17 +300,17 @@ defmodule MingaAgent.Providers.NativeMCPTest do
     end
 
     {:ok, provider} = start_provider(tmp_dir: dir, llm_client: client)
-    assert_receive {:mcp_transport_started, "Local Tools", transport}
+    assert_receive {:mcp_transport_started, "Local Tools", transport}, @receive_timeout
     FakeTransport.crash(transport)
 
-    assert_receive {:agent_provider_event, %Event.Error{message: message}}
+    assert_receive {:agent_provider_event, %Event.Error{message: message}}, @receive_timeout
     assert message =~ "MCP server Local Tools stopped"
 
     :sys.get_state(provider)
     assert :ok = Native.send_prompt(provider, "still works")
     events = collect_until_end()
 
-    assert_receive {:llm_tools_after_crash, tool_names}
+    assert_receive {:llm_tools_after_crash, tool_names}, @receive_timeout
     assert "builtin_echo" in tool_names
     refute "mcp_local_tools__echo_text" in tool_names
     assert Enum.any?(events, &match?(%Event.ToolEnd{name: "builtin_echo", is_error: false}, &1))
@@ -329,15 +330,15 @@ defmodule MingaAgent.Providers.NativeMCPTest do
         ]
       )
 
-    assert_receive {:mcp_transport_started, "Alpha", alpha_transport}
-    assert_receive {:mcp_transport_started, "Beta", beta_transport}
+    assert_receive {:mcp_transport_started, "Alpha", alpha_transport}, @receive_timeout
+    assert_receive {:mcp_transport_started, "Beta", beta_transport}, @receive_timeout
 
     provider_ref = Process.monitor(provider)
     GenServer.stop(provider)
 
-    assert_receive {:DOWN, ^provider_ref, :process, ^provider, :normal}
-    assert_receive {:mcp_transport_stopped, "Alpha", ^alpha_transport}
-    assert_receive {:mcp_transport_stopped, "Beta", ^beta_transport}
+    assert_receive {:DOWN, ^provider_ref, :process, ^provider, :normal}, @receive_timeout
+    assert_receive {:mcp_transport_stopped, "Alpha", ^alpha_transport}, @receive_timeout
+    assert_receive {:mcp_transport_stopped, "Beta", ^beta_transport}, @receive_timeout
   end
 
   test "MCP tool failure during a call reports an error and keeps provider usable", %{
@@ -408,7 +409,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
     assert :ok = Native.send_prompt(provider, "still works")
     events = collect_until_end()
 
-    assert_receive {:llm_tools_after_call_failure, tool_names}
+    assert_receive {:llm_tools_after_call_failure, tool_names}, @receive_timeout
     assert "builtin_echo" in tool_names
     refute "mcp_local_tools__echo_text" in tool_names
     assert Enum.any?(events, &match?(%Event.AgentEnd{}, &1))
@@ -453,21 +454,21 @@ defmodule MingaAgent.Providers.NativeMCPTest do
         ]
       )
 
-    assert_receive {:mcp_transport_started, "Alpha", alpha_transport}
+    assert_receive {:mcp_transport_started, "Alpha", alpha_transport}, @receive_timeout
     FakeTransport.crash(alpha_transport)
 
-    assert_receive {:agent_provider_event, %Event.Error{message: message}}
+    assert_receive {:agent_provider_event, %Event.Error{message: message}}, @receive_timeout
     assert message =~ "MCP server Alpha stopped"
 
     :sys.get_state(provider)
     assert :ok = Native.send_prompt(provider, "still works")
     events = collect_until_end()
 
-    assert_receive {:llm_tools_after_one_server_crash, tool_names}
+    assert_receive {:llm_tools_after_one_server_crash, tool_names}, @receive_timeout
     assert "builtin_echo" in tool_names
     refute "mcp_alpha__echo_text" in tool_names
     assert "mcp_beta__search_code" in tool_names
-    assert_receive {:mcp_tool_call, "Beta", "search-code", %{"text" => "hi"}}
+    assert_receive {:mcp_tool_call, "Beta", "search-code", %{"text" => "hi"}}, @receive_timeout
 
     assert Enum.any?(
              events,

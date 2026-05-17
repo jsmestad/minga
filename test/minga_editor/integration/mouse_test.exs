@@ -8,6 +8,7 @@ defmodule Minga.Integration.MouseTest do
   use Minga.Test.EditorCase, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree
   alias Minga.Test.HeadlessPort
@@ -201,6 +202,50 @@ defmodule Minga.Integration.MouseTest do
       send_mouse(ctx, 1, 15, :left, 0, :release, 1)
 
       assert editor_mode(ctx) == :visual
+    end
+
+    test "double-click-drag past viewport extends by word with autoscroll" do
+      ctx = start_editor(Enum.map_join(0..29, "\n", fn _ -> "alpha beta gamma" end))
+      state = editor_state(ctx)
+
+      %{content: {row, col, _width, height}} =
+        Layout.active_window_layout(Layout.get(state), state)
+
+      send_mouse(ctx, row, col + 3, :left, 0, :press, 2)
+      send_mouse(ctx, row + height, col + 8, :left, 0, :drag, 1)
+
+      state = editor_state(ctx)
+      {line, cursor_col} = buffer_cursor(ctx)
+
+      assert editor_mode(ctx) == :visual
+      assert state.workspace.editing.mode_state.visual_type == :char
+      assert state.workspace.editing.mode_state.visual_anchor == {0, 0}
+      assert state.workspace.mouse.drag_click_count == 2
+      assert line > 0
+      assert cursor_col == 4
+      assert EditorState.active_window_struct(state).viewport.top > 0
+    end
+
+    test "triple-click-drag past viewport extends by line with autoscroll" do
+      ctx = start_editor(Enum.map_join(0..29, "\n", fn _ -> "alpha beta gamma" end))
+      state = editor_state(ctx)
+
+      %{content: {row, col, _width, height}} =
+        Layout.active_window_layout(Layout.get(state), state)
+
+      send_mouse(ctx, row, col + 3, :left, 0, :press, 3)
+      send_mouse(ctx, row + height, col + 8, :left, 0, :drag, 1)
+
+      state = editor_state(ctx)
+      {line, cursor_col} = buffer_cursor(ctx)
+
+      assert editor_mode(ctx) == :visual
+      assert state.workspace.editing.mode_state.visual_type == :line
+      assert state.workspace.editing.mode_state.visual_anchor == {0, 0}
+      assert state.workspace.mouse.drag_click_count == 3
+      assert line > 0
+      assert cursor_col == 15
+      assert EditorState.active_window_struct(state).viewport.top > 0
     end
   end
 

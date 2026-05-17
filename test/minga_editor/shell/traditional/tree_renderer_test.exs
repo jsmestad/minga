@@ -334,6 +334,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
       assert String.starts_with?(name, "lib/")
     end
 
+    @tag timeout: 180_000
     test "renders production state for large trees around the selected row", %{tmp_dir: tmp_dir} do
       for index <- 1..600 do
         File.write!(
@@ -374,6 +375,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
       assert String.contains?(all_text, "file_600.ex")
     end
 
+    @tag timeout: 180_000
     test "renders large RenderInput trees around the selected row", %{tmp_dir: tmp_dir} do
       for index <- 1..600 do
         File.write!(

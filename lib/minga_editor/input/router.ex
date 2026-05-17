@@ -320,6 +320,19 @@ defmodule MingaEditor.Input.Router do
           atom(),
           pos_integer()
         ) :: EditorState.t()
+  def dispatch_mouse(
+        %{workspace: %{mouse: %{dragging: true}}} = state,
+        row,
+        col,
+        :left,
+        mods,
+        event_type,
+        click_count
+      )
+      when event_type in [:drag, :release] do
+    MingaEditor.Mouse.handle(state, row, col, :left, mods, event_type, click_count)
+  end
+
   def dispatch_mouse(state, row, col, _button, _mods, _event_type, _click_count)
       when row < 0 or col < 0 do
     state

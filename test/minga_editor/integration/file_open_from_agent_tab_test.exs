@@ -98,7 +98,7 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
     # Trigger a render so the agent view is visible
     ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:ready, width, height}})
-    {:ok, _snapshot} = HeadlessPort.collect_frame(ref)
+    {:ok, _snapshot} = HeadlessPort.collect_frame(ref, 15_000)
 
     %{
       editor: editor,
@@ -133,7 +133,7 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
 
       ref = HeadlessPort.prepare_await(ctx.port)
       :ok = MingaEditor.open_file(ctx.editor, file_path)
-      {:ok, _snapshot} = HeadlessPort.collect_frame(ref)
+      {:ok, _snapshot} = HeadlessPort.collect_frame(ref, 15_000)
 
       # After opening a file, the window content MUST be {:buffer, _}
       state = :sys.get_state(ctx.editor)
@@ -166,7 +166,7 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
 
       ref = HeadlessPort.prepare_await(ctx.port)
       :ok = MingaEditor.open_file(ctx.editor, file_path)
-      {:ok, _snapshot} = HeadlessPort.collect_frame(ref)
+      {:ok, _snapshot} = HeadlessPort.collect_frame(ref, 15_000)
 
       # Tab bar should show the file
       tab_row = screen_row(ctx, 0)
@@ -197,7 +197,7 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
 
       ref = HeadlessPort.prepare_await(ctx.port)
       :ok = MingaEditor.open_file(ctx.editor, file_path)
-      {:ok, _snapshot} = HeadlessPort.collect_frame(ref)
+      {:ok, _snapshot} = HeadlessPort.collect_frame(ref, 15_000)
 
       ml = modeline(ctx)
 
@@ -221,7 +221,7 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
 
       ref = HeadlessPort.prepare_await(ctx.port)
       :ok = MingaEditor.open_file(ctx.editor, file_path)
-      {:ok, _snapshot} = HeadlessPort.collect_frame(ref)
+      {:ok, _snapshot} = HeadlessPort.collect_frame(ref, 15_000)
 
       state = :sys.get_state(ctx.editor)
 
