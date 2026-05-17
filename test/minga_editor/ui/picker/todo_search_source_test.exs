@@ -1,6 +1,11 @@
 defmodule MingaEditor.UI.Picker.TodoSearchSourceTest do
   use ExUnit.Case, async: true
 
+  import MingaEditor.RenderPipeline.TestHelpers, only: [base_state: 1]
+
+  alias Minga.Buffer.Process, as: BufferProcess
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.TodoSearchSource
 
   describe "parse_output/1" do
@@ -37,6 +42,27 @@ defmodule MingaEditor.UI.Picker.TodoSearchSourceTest do
     test "empty and error results produce no items" do
       assert TodoSearchSource.build_candidates({:ok, ""}, File.cwd!()) == []
       assert TodoSearchSource.build_candidates({:error, "grep failed"}, File.cwd!()) == []
+    end
+  end
+
+  describe "on_select/2" do
+    test "switches to the matching buffer and moves to the requested line" do
+      path =
+        Path.join(System.tmp_dir!(), "minga-todo-search-#{System.unique_integer([:positive])}.ex")
+
+      File.write!(path, "first\nsecond\nthird\n")
+      on_exit(fn -> File.rm(path) end)
+
+      state = base_state(content: "scratch")
+      path_buffer = start_supervised!({BufferProcess, file_path: path})
+      state = EditorState.add_buffer(state, path_buffer)
+      state = EditorState.switch_buffer(state, 0)
+
+      item = %Item{id: %{path: path, line: 3}, label: "todo"}
+      new_state = TodoSearchSource.on_select(item, state)
+
+      assert EditorState.active_buffer(new_state) == 1
+      assert BufferProcess.cursor(path_buffer) == {2, 0}
     end
   end
 end

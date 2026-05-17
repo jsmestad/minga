@@ -231,9 +231,12 @@ defmodule MingaEditor.SemanticWindow.Builder do
           Context.t(),
           map()
         ) :: [VisualRow.t()]
-  defp build_visual_rows_folded(lines, first_line, visible_line_map, ctx, _snapshot) do
+  defp build_visual_rows_folded(lines, first_line, visible_line_map, ctx, snapshot) do
+    line_byte_offsets =
+      build_line_byte_offsets(lines, first_line, snapshot.first_line_byte_offset)
+
     Enum.map(visible_line_map, fn {buf_line, entry_type} ->
-      build_visual_row_entry(buf_line, entry_type, lines, first_line, ctx)
+      build_visual_row_entry(buf_line, entry_type, lines, first_line, ctx, line_byte_offsets)
     end)
   end
 
@@ -242,11 +245,13 @@ defmodule MingaEditor.SemanticWindow.Builder do
           DisplayMap.entry() | atom(),
           [String.t()],
           non_neg_integer(),
-          Context.t()
+          Context.t(),
+          %{non_neg_integer() => non_neg_integer()}
         ) :: VisualRow.t()
-  defp build_visual_row_entry(buf_line, :normal, lines, first_line, ctx) do
+  defp build_visual_row_entry(buf_line, :normal, lines, first_line, ctx, line_byte_offsets) do
     line_text = line_at(lines, buf_line, first_line)
-    {composed, spans} = compose_line(line_text, nil, ctx, buf_line, 0)
+    line_byte_offset = Map.get(line_byte_offsets, buf_line, 0)
+    {composed, spans} = compose_line(line_text, nil, ctx, buf_line, line_byte_offset)
 
     %VisualRow{
       row_type: :normal,
@@ -257,10 +262,18 @@ defmodule MingaEditor.SemanticWindow.Builder do
     }
   end
 
-  defp build_visual_row_entry(buf_line, {:fold_start, hidden_count}, lines, first_line, ctx) do
+  defp build_visual_row_entry(
+         buf_line,
+         {:fold_start, hidden_count},
+         lines,
+         first_line,
+         ctx,
+         line_byte_offsets
+       ) do
     line_text = line_at(lines, buf_line, first_line)
-    fold_text = line_text <> " ··· #{hidden_count} lines"
-    {composed, spans} = compose_line(fold_text, nil, ctx, buf_line, 0)
+    line_byte_offset = Map.get(line_byte_offsets, buf_line, 0)
+    {composed, spans} = compose_line(line_text, nil, ctx, buf_line, line_byte_offset)
+    {composed, spans} = append_fold_summary(composed, spans, hidden_count, ctx)
 
     %VisualRow{
       row_type: :fold_start,
@@ -271,7 +284,14 @@ defmodule MingaEditor.SemanticWindow.Builder do
     }
   end
 
-  defp build_visual_row_entry(buf_line, {:virtual_line, vt}, _lines, _first_line, _ctx) do
+  defp build_visual_row_entry(
+         buf_line,
+         {:virtual_line, vt},
+         _lines,
+         _first_line,
+         _ctx,
+         _line_byte_offsets
+       ) do
     text = virtual_text_to_string(vt)
 
     %VisualRow{
@@ -283,7 +303,14 @@ defmodule MingaEditor.SemanticWindow.Builder do
     }
   end
 
-  defp build_visual_row_entry(buf_line, {:block, block, line_idx}, _lines, _first_line, ctx) do
+  defp build_visual_row_entry(
+         buf_line,
+         {:block, block, line_idx},
+         _lines,
+         _first_line,
+         ctx,
+         _line_byte_offsets
+       ) do
     # Block decorations render via callback; capture the rendered text using the same text width as the draw path.
     rendered_lines = block.render.(ctx.content_w)
     normalized = BlockDecoration.normalize_render_result(rendered_lines)
@@ -300,7 +327,14 @@ defmodule MingaEditor.SemanticWindow.Builder do
     }
   end
 
-  defp build_visual_row_entry(buf_line, {:decoration_fold, fold}, _lines, _first_line, _ctx) do
+  defp build_visual_row_entry(
+         buf_line,
+         {:decoration_fold, fold},
+         _lines,
+         _first_line,
+         _ctx,
+         _line_byte_offsets
+       ) do
     hidden = FoldRegion.hidden_count(fold)
     text = " ··· #{hidden} lines"
 
@@ -358,6 +392,19 @@ defmodule MingaEditor.SemanticWindow.Builder do
 
     # Convert to composed text + spans
     Composition.segments_to_text_and_spans(segments)
+  end
+
+  @spec append_fold_summary(String.t(), [Span.t()], non_neg_integer(), Context.t()) ::
+          {String.t(), [Span.t()]}
+  defp append_fold_summary(composed, spans, hidden_count, ctx) do
+    suffix = " ··· #{hidden_count} lines"
+    start_col = Unicode.display_width(composed)
+    end_col = start_col + Unicode.display_width(suffix)
+
+    fold_span =
+      Span.from_face(Minga.Core.Face.new(fg: ctx.gutter_colors.fold_fg), start_col, end_col)
+
+    {composed <> suffix, spans ++ [fold_span]}
   end
 
   @spec todo_highlight_ranges(String.t(), non_neg_integer(), Context.t(), non_neg_integer()) :: [
@@ -556,6 +603,18 @@ defmodule MingaEditor.SemanticWindow.Builder do
       end)
 
     Enum.reverse(pairs_rev)
+  end
+
+  @spec build_line_byte_offsets([String.t()], non_neg_integer(), non_neg_integer()) :: %{
+          non_neg_integer() => non_neg_integer()
+        }
+  defp build_line_byte_offsets(lines, first_line, first_byte_off) do
+    lines
+    |> build_lines_with_offsets(first_byte_off)
+    |> Enum.with_index(first_line)
+    |> Map.new(fn {{_line_text, line_byte_offset}, buf_line} ->
+      {buf_line, line_byte_offset}
+    end)
   end
 
   @spec virtual_text_to_string(Decorations.VirtualText.t()) :: String.t()

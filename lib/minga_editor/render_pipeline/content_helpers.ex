@@ -50,7 +50,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
           row_off: non_neg_integer(),
           col_off: non_neg_integer(),
           window: Window.t(),
-          buffer: pid()
+          buffer: pid(),
+          line_byte_offsets: %{non_neg_integer() => non_neg_integer()}
         }
 
   @type visual_selection :: Context.visual_selection()
@@ -412,6 +413,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       ctx: ctx,
       ln_style: ln_style,
       gutter_w: gutter_w,
+      first_byte_off: first_byte_off,
       row_off: row_off,
       col_off: col_off,
       window: window
@@ -433,6 +435,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
         ctx.decorations
       )
 
+    line_byte_offsets = build_line_byte_offsets(lines, first_line, first_byte_off)
+
     render_opts = %{
       cursor_line: cursor_line,
       ctx: ctx,
@@ -446,7 +450,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       first_line: first_line,
       wrap_index: wrap_index,
       fold_start_lines: fold_start_lines(window.fold_ranges),
-      indent_guides_by_line: indent_guides_for_lines(lines, opts)
+      indent_guides_by_line: indent_guides_for_lines(lines, opts),
+      line_byte_offsets: line_byte_offsets
     }
 
     # block_render_cache is a within-window Map keyed by block ID.
@@ -502,7 +507,6 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
     line_index = buf_line - first_line
     line_text = Enum.at(lines, line_index, "")
-    display_text = fold_display_text(line_text, fold_info)
 
     wrap_entry = Map.get(wrap_index, buf_line)
     rows_for_line = if wrap_entry, do: length(wrap_entry), else: 1
@@ -514,7 +518,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       |> Map.put(:indent_guide_cols, indent_guides_for_buf_line(render_opts, buf_line))
 
     {new_g, new_c, win} =
-      render_folded_line(win, buf_line, display_text, fold_info, screen_row, line_opts, {g, c})
+      render_folded_line(win, buf_line, line_text, fold_info, screen_row, line_opts, {g, c})
 
     {new_g, new_c, screen_row + rows_for_line, win}
   end
@@ -604,6 +608,27 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
   defp fold_display_text(_text, {:virtual_line, _vt}), do: ""
   defp fold_display_text(_text, {:block, _, _}), do: ""
+
+  @spec fold_summary_ctx(Context.t(), non_neg_integer(), String.t(), term()) :: Context.t()
+  defp fold_summary_ctx(ctx, buf_line, line_text, {:fold_start, hidden}) do
+    suffix = " ··· #{hidden} lines"
+    face = Face.new(fg: ctx.gutter_colors.fold_fg)
+
+    decorations =
+      Decorations.add_virtual_text(
+        ctx.decorations,
+        {buf_line, String.length(line_text)},
+        segments: [{suffix, face}],
+        placement: :eol,
+        priority: 1000,
+        group: :fold_summary
+      )
+      |> elem(1)
+
+    %{ctx | decorations: decorations}
+  end
+
+  defp fold_summary_ctx(ctx, _buf_line, _line_text, _fold_info), do: ctx
 
   @spec fold_gutter_indicator(
           term(),
@@ -701,8 +726,9 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
           map(),
           {[DisplayList.draw()], [DisplayList.draw()]}
         ) :: {[DisplayList.draw()], [DisplayList.draw()], Window.t()}
-  defp render_folded_line(win, buf_line, display_text, fold_info, screen_row, render_opts, {g, c}) do
+  defp render_folded_line(win, buf_line, line_text, fold_info, screen_row, render_opts, {g, c}) do
     wrap_entry = Map.get(render_opts, :wrap_entry)
+    ctx = fold_summary_ctx(render_opts.ctx, buf_line, line_text, fold_info)
 
     if Window.dirty?(win, buf_line) do
       fold_render_pos =
@@ -725,12 +751,12 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
       {g_cmds, c_cmds, _rows} =
         BufferLine.render(%{
-          line_text: display_text,
+          line_text: line_text,
           buf_line: buf_line,
           cursor_line: render_opts.cursor_line,
-          byte_offset: 0,
+          byte_offset: Map.get(Map.get(render_opts, :line_byte_offsets, %{}), buf_line, 0),
           screen_row: screen_row,
-          ctx: render_opts.ctx,
+          ctx: ctx,
           sign_ctx: render_opts.sign_ctx,
           ln_style: render_opts.ln_style,
           gutter_w: render_opts.gutter_w,
@@ -1367,5 +1393,17 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       end)
 
     Enum.reverse(pairs_rev)
+  end
+
+  @spec build_line_byte_offsets([String.t()], non_neg_integer(), non_neg_integer()) :: %{
+          non_neg_integer() => non_neg_integer()
+        }
+  defp build_line_byte_offsets(lines, first_line, first_byte_off) do
+    lines
+    |> build_lines_with_offsets(first_byte_off)
+    |> Enum.with_index(first_line)
+    |> Map.new(fn {{_line_text, line_byte_offset}, buf_line} ->
+      {buf_line, line_byte_offset}
+    end)
   end
 end

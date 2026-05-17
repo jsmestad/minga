@@ -379,6 +379,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
         ctx: ctx,
         ln_style: :absolute,
         gutter_w: 6,
+        first_byte_off: 0,
         row_off: 0,
         col_off: 0,
         window: window,
@@ -393,6 +394,66 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
                Enum.find(gutter_draws, fn {_row, _col, text, _face} -> text == "▸" end)
 
       assert face.fg == ctx.gutter_colors.fold_fg
+    end
+
+    test "fold summary suffix stays neutral when hidden lines contain TODOs", %{
+      ctx: ctx,
+      window: window
+    } do
+      line0 = "alpha"
+      line1 = "  # TODO hidden"
+      line2 = "  # TODO visible"
+      lines = [line0, line1, line2]
+      first_byte_off = 0
+      line1_off = Highlight.byte_offset_for_line(lines, 1)
+      line2_off = Highlight.byte_offset_for_line(lines, 2)
+      todo_face = Minga.Core.Face.new(fg: 0xECBE7B, bold: true)
+      comment_face = [fg: 0x6A737D]
+      suffix = " ··· 1 lines"
+
+      highlight =
+        Highlight.new(%{"comment" => comment_face})
+        |> Highlight.put_names(["comment"])
+        |> Highlight.put_spans(1, [
+          %{start_byte: line1_off, end_byte: line1_off + byte_size(line1), capture_id: 0},
+          %{start_byte: line2_off, end_byte: line2_off + byte_size(line2), capture_id: 0}
+        ])
+
+      ctx = %{ctx | highlight: highlight, hl_todo_faces: %{todo: todo_face}}
+
+      opts = %{
+        first_line: 0,
+        cursor_line: 0,
+        ctx: ctx,
+        ln_style: :absolute,
+        gutter_w: 6,
+        first_byte_off: first_byte_off,
+        row_off: 0,
+        col_off: 0,
+        window: window,
+        buffer: window.buffer,
+        visible_line_map: [{0, {:fold_start, 1}}, {2, :normal}],
+        fold_map: %MingaEditor.FoldMap{folds: []}
+      }
+
+      {_gutter_draws, line_draws, _rendered_rows, _window} =
+        ContentHelpers.render_lines_nowrap(lines, opts)
+
+      assert {_row, _col, ^suffix, suffix_face} =
+               Enum.find(line_draws, fn {row, _col, text, _face} ->
+                 row == 0 and text == suffix
+               end)
+
+      assert suffix_face.fg == ctx.gutter_colors.fold_fg
+      refute suffix_face.bold
+
+      assert {_row, _col, "TODO", todo_draw_face} =
+               Enum.find(line_draws, fn {row, _col, text, _face} ->
+                 row == 1 and text == "TODO"
+               end)
+
+      assert todo_draw_face.fg == todo_face.fg
+      assert todo_draw_face.bold
     end
 
     test "custom decoration fold placeholders render chevron in the fold column", %{
@@ -418,6 +479,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
         ctx: ctx,
         ln_style: :absolute,
         gutter_w: 6,
+        first_byte_off: 0,
         row_off: 0,
         col_off: 0,
         window: window,
@@ -454,6 +516,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
         ctx: ctx,
         ln_style: :absolute,
         gutter_w: 6,
+        first_byte_off: 0,
         row_off: 0,
         col_off: 0,
         window: window,
@@ -494,6 +557,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
         ctx: ctx,
         ln_style: :absolute,
         gutter_w: 6,
+        first_byte_off: 0,
         row_off: 0,
         col_off: 0,
         window: window,
