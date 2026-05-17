@@ -1,5 +1,6 @@
 defmodule Minga.Buffer.SaveAllDirtyTest do
-  use ExUnit.Case, async: true
+  # Uses global Minga.Buffer.Registry; save_all_dirty/0 can save buffers owned by concurrent tests.
+  use ExUnit.Case, async: false
 
   alias Minga.Buffer
   alias Minga.Buffer.Process, as: BufferProcess

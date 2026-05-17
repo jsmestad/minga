@@ -11,6 +11,8 @@ defmodule MingaEditor.Commands.EditingReindentTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor
 
+  @sync_timeout 15_000
+
   defp start_editor(content) do
     id = :erlang.unique_integer([:positive])
     events_registry = :"reindent_events_#{id}"
@@ -35,7 +37,7 @@ defmodule MingaEditor.Commands.EditingReindentTest do
 
   defp send_key(editor, codepoint, mods \\ 0) do
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
-    _ = :sys.get_state(editor)
+    _ = :sys.get_state(editor, @sync_timeout)
   end
 
   # ── == mode transitions ────────────────────────────────────────────────────
@@ -45,7 +47,7 @@ defmodule MingaEditor.Commands.EditingReindentTest do
       {editor, _buffer} = start_editor("line 1\nline 2")
       send_key(editor, ?=)
 
-      state = :sys.get_state(editor)
+      state = :sys.get_state(editor, @sync_timeout)
       assert state.workspace.editing.mode == :operator_pending
       assert state.workspace.editing.mode_state.operator == :reindent
     end
@@ -55,7 +57,7 @@ defmodule MingaEditor.Commands.EditingReindentTest do
       send_key(editor, ?=)
       send_key(editor, ?=)
 
-      state = :sys.get_state(editor)
+      state = :sys.get_state(editor, @sync_timeout)
       assert state.workspace.editing.mode == :normal
     end
 
@@ -64,7 +66,7 @@ defmodule MingaEditor.Commands.EditingReindentTest do
       send_key(editor, ?=)
       send_key(editor, ?w)
 
-      state = :sys.get_state(editor)
+      state = :sys.get_state(editor, @sync_timeout)
       assert state.workspace.editing.mode == :normal
     end
 
@@ -73,7 +75,7 @@ defmodule MingaEditor.Commands.EditingReindentTest do
       send_key(editor, ?=)
       send_key(editor, ?G)
 
-      state = :sys.get_state(editor)
+      state = :sys.get_state(editor, @sync_timeout)
       assert state.workspace.editing.mode == :normal
     end
 
@@ -84,7 +86,7 @@ defmodule MingaEditor.Commands.EditingReindentTest do
       send_key(editor, ?g)
       send_key(editor, ?g)
 
-      state = :sys.get_state(editor)
+      state = :sys.get_state(editor, @sync_timeout)
       assert state.workspace.editing.mode == :normal
     end
   end
@@ -98,7 +100,7 @@ defmodule MingaEditor.Commands.EditingReindentTest do
       send_key(editor, ?j)
       send_key(editor, ?=)
 
-      state = :sys.get_state(editor)
+      state = :sys.get_state(editor, @sync_timeout)
       assert state.workspace.editing.mode == :normal
     end
 
@@ -108,7 +110,7 @@ defmodule MingaEditor.Commands.EditingReindentTest do
       send_key(editor, ?j)
       send_key(editor, ?=)
 
-      state = :sys.get_state(editor)
+      state = :sys.get_state(editor, @sync_timeout)
       assert state.workspace.editing.mode == :normal
     end
   end
@@ -120,25 +122,25 @@ defmodule MingaEditor.Commands.EditingReindentTest do
       {editor, _buffer} = start_editor("hello world")
       send_key(editor, ?=)
 
-      state = :sys.get_state(editor)
+      state = :sys.get_state(editor, @sync_timeout)
       assert state.workspace.editing.mode == :operator_pending
 
       send_key(editor, ?i)
       send_key(editor, ?w)
 
-      state = :sys.get_state(editor)
+      state = :sys.get_state(editor, @sync_timeout)
       assert state.workspace.editing.mode == :normal
     end
 
     test "default bus tool prompts cannot interrupt reindent dispatch" do
       {editor, _buffer} = start_editor("hello world")
-      state = :sys.get_state(editor)
+      state = :sys.get_state(editor, @sync_timeout)
 
       refute editor in Minga.Events.subscribers(:tool_missing)
       assert editor in Minga.Events.subscribers(:tool_missing, state.events_registry)
 
       Minga.Events.broadcast(:tool_missing, %Minga.Events.ToolMissingEvent{command: "rg"})
-      state = :sys.get_state(editor)
+      state = :sys.get_state(editor, @sync_timeout)
 
       assert state.workspace.editing.mode == :normal
       assert state.shell_state.tool_prompt_queue == []

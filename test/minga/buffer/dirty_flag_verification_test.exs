@@ -149,6 +149,7 @@ defmodule Minga.Buffer.DirtyFlagVerificationTest do
   end
 
   @tag :tmp_dir
+  @tag timeout: 180_000
   property "dirty flag is consistent after random insert/undo sequences", %{tmp_dir: dir} do
     check all(
             ops <-

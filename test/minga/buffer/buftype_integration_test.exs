@@ -100,6 +100,7 @@ defmodule Minga.Buffer.BuftypeIntegrationTest do
 
       ctx = start_editor("hello", file_path: path)
       buf = ctx.buffer
+      assert {:ok, 0} = BufferProcess.set_option(buf, :auto_save_delay_ms, 0)
 
       refute BufferProcess.dirty?(buf)
 

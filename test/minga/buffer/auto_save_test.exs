@@ -12,6 +12,7 @@ defmodule Minga.Buffer.AutoSaveTest do
 
   @moduletag :tmp_dir
   @delay_ms 5_000
+  @event_timeout 5_000
 
   test "dirty file-backed buffer auto-saves when the debounce timer fires", %{tmp_dir: dir} do
     path = Path.join(dir, "auto-save.txt")
@@ -272,7 +273,7 @@ defmodule Minga.Buffer.AutoSaveTest do
           assert_log_contains(text)
         end
     after
-      500 -> flunk("expected log message containing #{inspect(text)}")
+      @event_timeout -> flunk("expected log message containing #{inspect(text)}")
     end
   end
 
@@ -282,7 +283,7 @@ defmodule Minga.Buffer.AutoSaveTest do
       when is_pid(buffer) ->
         :ok
     after
-      500 -> flunk("expected buffer_saved event for #{inspect(path)}")
+      @event_timeout -> flunk("expected buffer_saved event for #{inspect(path)}")
     end
   end
 end

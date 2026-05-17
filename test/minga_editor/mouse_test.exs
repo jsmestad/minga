@@ -521,6 +521,42 @@ defmodule MingaEditor.MouseTest do
       assert Process.alive?(editor)
     end
 
+    test "rapid repeated presses still drive double-click drag semantics" do
+      {editor, buffer} = start_editor(Enum.map_join(0..29, "\n", fn _ -> "alpha beta gamma" end))
+      s = state(editor)
+      %{content: {row, col, _width, height}} = Layout.active_window_layout(Layout.get(s), s)
+
+      start_col = col + @gutter + 3
+      drag_col = col + @gutter + 8
+
+      send_mouse(editor, row, start_col, :left, :press)
+      send_mouse(editor, row, start_col, :left, :press)
+      send_mouse(editor, row + height, drag_col, :left, :drag)
+
+      s = state(editor)
+      {line, cursor_col} = BufferProcess.cursor(buffer)
+
+      assert s.workspace.mouse.drag_click_count == 2
+      assert s.workspace.editing.mode == :visual
+      assert s.workspace.editing.mode_state.visual_type == :char
+      assert s.workspace.editing.mode_state.visual_anchor == {0, 0}
+      assert line > 0
+      assert cursor_col == 9
+      assert EditorState.active_window_struct(s).viewport.top > 0
+    end
+
+    test "release outside buffer content after drag clears drag state" do
+      {editor, _buffer} = start_editor(Enum.map_join(0..29, "\n", &"line #{&1}"))
+      s = state(editor)
+      %{content: {row, col, width, height}} = Layout.active_window_layout(Layout.get(s), s)
+
+      send_mouse(editor, row, col + @gutter, :left, :press)
+      send_mouse(editor, row + height, col + width, :left, :drag)
+      send_mouse(editor, row + height, col + width, :left, :release)
+
+      assert state(editor).workspace.mouse.dragging == false
+    end
+
     test "release without movement (click) returns to normal mode" do
       {editor, _buffer} = start_editor("hello world")
       send_mouse(editor, @content_row, 3, :left, :press)
@@ -560,6 +596,139 @@ defmodule MingaEditor.MouseTest do
       {line, col} = BufferProcess.cursor(buffer)
       assert line == 0
       assert col <= 1
+    end
+
+    test "drag below viewport scrolls down and extends selection" do
+      {editor, buffer} = start_editor(Enum.map_join(0..29, "\n", &"line #{&1}"))
+      s = state(editor)
+      %{content: {row, col, width, height}} = Layout.active_window_layout(Layout.get(s), s)
+
+      send_mouse(editor, row, col + @gutter, :left, :press)
+      send_mouse(editor, row + height, col + width, :left, :drag)
+
+      s = state(editor)
+      window = EditorState.active_window_struct(s)
+      {line, _col} = BufferProcess.cursor(buffer)
+
+      assert window.viewport.top > 0
+      assert line >= height
+      assert s.workspace.editing.mode == :visual
+    end
+
+    test "drag below from bottom visible line still autoscrolls" do
+      {editor, _buffer} = start_editor(Enum.map_join(0..29, "\n", &"line #{&1}"))
+      s = state(editor)
+      %{content: {row, col, _width, height}} = Layout.active_window_layout(Layout.get(s), s)
+
+      send_mouse(editor, row + height - 1, col + @gutter, :left, :press)
+      send_mouse(editor, row + height, col + @gutter, :left, :drag)
+
+      s = state(editor)
+
+      assert EditorState.active_window_struct(s).viewport.top > 0
+      assert s.workspace.editing.mode == :visual
+    end
+
+    test "drag above viewport scrolls up and extends selection" do
+      {editor, buffer} = start_editor(Enum.map_join(0..29, "\n", &"line #{&1}"))
+
+      :sys.replace_state(editor, fn state ->
+        EditorState.update_window(
+          state,
+          state.workspace.windows.active,
+          &Window.scroll_viewport(&1, 5, 30)
+        )
+      end)
+
+      s = state(editor)
+      %{content: {row, col, _width, _height}} = Layout.active_window_layout(Layout.get(s), s)
+      before_top = EditorState.active_window_struct(s).viewport.top
+
+      send_mouse(editor, row + 2, col + @gutter, :left, :press)
+      send_mouse(editor, row - 1, col + @gutter, :left, :drag)
+
+      s = state(editor)
+      window = EditorState.active_window_struct(s)
+      {line, _col} = BufferProcess.cursor(buffer)
+
+      assert before_top > 0
+      assert window.viewport.top < before_top
+      assert line <= before_top
+      assert s.workspace.editing.mode == :visual
+    end
+
+    test "drag past right edge scrolls horizontally and extends selection" do
+      {editor, buffer} = start_editor(String.duplicate("abcdefghijklmnopqrstuvwxyz", 4))
+      s = state(editor)
+      %{content: {row, col, width, _height}} = Layout.active_window_layout(Layout.get(s), s)
+
+      send_mouse(editor, row, col + @gutter, :left, :press)
+      send_mouse(editor, row, col + width, :left, :drag)
+
+      s = state(editor)
+      window = EditorState.active_window_struct(s)
+      {_line, cursor_col} = BufferProcess.cursor(buffer)
+
+      assert window.viewport.left > 0
+      assert cursor_col > 0
+      assert s.workspace.editing.mode == :visual
+    end
+
+    test "drag right from right visible column still autoscrolls" do
+      {editor, _buffer} = start_editor(String.duplicate("abcdefghijklmnopqrstuvwxyz", 4))
+      s = state(editor)
+      %{content: {row, col, width, _height}} = Layout.active_window_layout(Layout.get(s), s)
+
+      send_mouse(editor, row, col + width - 1, :left, :press)
+      send_mouse(editor, row, col + width, :left, :drag)
+
+      s = state(editor)
+
+      assert EditorState.active_window_struct(s).viewport.left > 0
+      assert s.workspace.editing.mode == :visual
+    end
+
+    test "drag back left reverses horizontal scroll without losing anchor" do
+      {editor, _buffer} = start_editor(String.duplicate("abcdefghijklmnopqrstuvwxyz", 4))
+      s = state(editor)
+      %{content: {row, col, width, _height}} = Layout.active_window_layout(Layout.get(s), s)
+
+      send_mouse(editor, row, col + @gutter + 10, :left, :press)
+      send_mouse(editor, row, col + width, :left, :drag)
+      right_scrolled_left = EditorState.active_window_struct(state(editor)).viewport.left
+
+      send_mouse(editor, row, col - 1, :left, :drag)
+
+      s = state(editor)
+      window = EditorState.active_window_struct(s)
+
+      assert right_scrolled_left > 0
+      assert window.viewport.left < right_scrolled_left
+      assert s.workspace.editing.mode_state.visual_anchor == {0, 10}
+    end
+
+    test "drag crossing split boundary stays associated with originating window" do
+      {editor, _buffer} = start_editor("hello world\nsecond line\nthird line")
+
+      :sys.replace_state(editor, fn state -> Movement.execute(state, :split_vertical) end)
+      s = state(editor)
+      origin_id = s.workspace.windows.active
+      layout = Layout.get(s)
+      origin_layout = Map.fetch!(layout.window_layouts, origin_id)
+
+      {_other_id, %{content: {other_row, other_col, _other_width, _other_height}}} =
+        Enum.find(layout.window_layouts, fn {id, _layout} -> id != origin_id end)
+
+      %{content: {origin_row, origin_col, _origin_width, _origin_height}} = origin_layout
+
+      send_mouse(editor, origin_row, origin_col + @gutter, :left, :press)
+      send_mouse(editor, other_row, other_col + @gutter, :left, :drag)
+
+      s = state(editor)
+
+      assert s.workspace.windows.active == origin_id
+      assert s.workspace.mouse.drag_origin_window == origin_id
+      assert s.workspace.editing.mode == :visual
     end
 
     test "drag ignores events when not dragging" do
