@@ -22,6 +22,7 @@ defmodule MingaEditor.StatusBar.Data do
   alias Minga.Config.Options
   alias Minga.Git
   alias Minga.LSP.SyncServer
+  alias MingaEditor.Shell.Traditional.Modeline
   alias MingaEditor.UI.Theme
 
   # ── Types ──────────────────────────────────────────────────────────────────
@@ -43,6 +44,7 @@ defmodule MingaEditor.StatusBar.Data do
 
   @typedoc "Data for a focused buffer window."
   @type buffer_data :: %{
+          optional(:modeline_segments) => Modeline.gui_segments(),
           mode: Minga.Mode.mode(),
           mode_state: Minga.Mode.state() | nil,
           cursor_line: non_neg_integer(),
@@ -73,6 +75,7 @@ defmodule MingaEditor.StatusBar.Data do
 
   @typedoc "Data for a focused agent chat window. Includes background buffer context so the status bar layout stays stable across mode switches."
   @type agent_data :: %{
+          optional(:modeline_segments) => Modeline.gui_segments(),
           mode: Minga.Mode.mode(),
           mode_state: Minga.Mode.state() | nil,
           model_name: String.t(),
@@ -154,7 +157,7 @@ defmodule MingaEditor.StatusBar.Data do
     agent = AgentAccess.agent(state)
     background = background_subagent_summary(state)
 
-    %{
+    data = %{
       mode: mode,
       mode_state: mode_state,
       cursor_line: line,
@@ -181,6 +184,8 @@ defmodule MingaEditor.StatusBar.Data do
       active_background_subagent_label: background.label,
       status_msg: state.shell_state.status_msg
     }
+
+    attach_modeline_segments(data, state.theme)
   end
 
   @spec buf_display_name(pid()) :: String.t()
@@ -304,7 +309,7 @@ defmodule MingaEditor.StatusBar.Data do
     selection_info = selection_info(mode, mode_state, buf, {line, col})
     background = background_subagent_summary(state)
 
-    %{
+    data = %{
       mode: mode,
       mode_state: mode_state,
       model_name: model_name,
@@ -335,6 +340,17 @@ defmodule MingaEditor.StatusBar.Data do
       active_background_subagent_label: background.label,
       status_msg: state.shell_state.status_msg
     }
+
+    attach_modeline_segments(data, state.theme)
+  end
+
+  @spec attach_modeline_segments(map(), Theme.t()) :: buffer_data() | agent_data()
+  defp attach_modeline_segments(data, theme) do
+    Map.put(
+      data,
+      :modeline_segments,
+      Modeline.gui_segments(data_to_modeline_data(data), theme)
+    )
   end
 
   # ── Git helpers ────────────────────────────────────────────────────────────
@@ -440,7 +456,10 @@ defmodule MingaEditor.StatusBar.Data do
   Both variants carry the same buffer fields and produce identical modeline data.
   """
   @spec to_modeline_data(t()) :: MingaEditor.Shell.Traditional.Modeline.modeline_data()
-  def to_modeline_data({_variant, d}) do
+  def to_modeline_data({_variant, d}), do: data_to_modeline_data(d)
+
+  @spec data_to_modeline_data(map()) :: MingaEditor.Shell.Traditional.Modeline.modeline_data()
+  defp data_to_modeline_data(d) do
     %{
       mode: d.mode,
       mode_state: d.mode_state,

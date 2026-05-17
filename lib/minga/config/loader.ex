@@ -200,7 +200,8 @@ defmodule Minga.Config.Loader do
     Command.reset_registry()
     ExtRegistry.reset()
     PopupRegistry.clear()
-    ModelineSegments.reset()
+    ModelineSegments.unregister_source(:config)
+    ModelineSegments.reset_warnings()
 
     # Re-run the full load sequence (includes starting extensions)
     new_state = load_all(keymap_server, options_server)

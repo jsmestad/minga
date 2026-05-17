@@ -90,6 +90,22 @@ enum Wire {
         let icon: String
     }
 
+    // MARK: - Status bar
+
+    /// A configured modeline segment from the gui_status_bar modeline segment section.
+    struct StatusBarSegment: Sendable, Equatable, Identifiable {
+        let id: Int
+        let text: String
+        let fgColor: UInt32
+        let bgColor: UInt32
+        let attrs: UInt8
+        let command: String
+
+        var isBold: Bool { attrs & 0x01 != 0 }
+        var isUnderline: Bool { attrs & 0x02 != 0 }
+        var isItalic: Bool { attrs & 0x04 != 0 }
+    }
+
     // MARK: - Picker
 
     /// A picker item from gui_picker (v2 extended format).

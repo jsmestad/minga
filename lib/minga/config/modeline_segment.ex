@@ -29,33 +29,40 @@ defmodule Minga.Config.ModelineSegment do
           source: atom() | {:extension, atom()}
         }
 
+  @type validation_error :: {:invalid_side, term()} | {:invalid_priority, term()}
+
   @doc "Builds a custom modeline segment descriptor."
-  @spec new(atom(), keyword(), render_fun(), atom() | {:extension, atom()}) :: t()
+  @spec new(atom(), keyword(), render_fun(), atom() | {:extension, atom()}) ::
+          {:ok, t()} | {:error, validation_error()}
   def new(name, opts, render, source)
       when is_atom(name) and is_list(opts) and is_function(render, 1) do
-    %__MODULE__{
-      name: name,
-      side: side_from_opts(opts),
-      priority: priority_from_opts(opts),
-      render: render,
-      source: source
-    }
-  end
-
-  @spec side_from_opts(keyword()) :: side()
-  defp side_from_opts(opts) do
-    case Keyword.get(opts, :side, :right) do
-      :left -> :left
-      :right -> :right
-      _other -> :right
+    with {:ok, side} <- side_from_opts(opts),
+         {:ok, priority} <- priority_from_opts(opts) do
+      {:ok,
+       %__MODULE__{
+         name: name,
+         side: side,
+         priority: priority,
+         render: render,
+         source: source
+       }}
     end
   end
 
-  @spec priority_from_opts(keyword()) :: integer()
+  @spec side_from_opts(keyword()) :: {:ok, side()} | {:error, {:invalid_side, term()}}
+  defp side_from_opts(opts) do
+    case Keyword.get(opts, :side, :right) do
+      :left -> {:ok, :left}
+      :right -> {:ok, :right}
+      other -> {:error, {:invalid_side, other}}
+    end
+  end
+
+  @spec priority_from_opts(keyword()) :: {:ok, integer()} | {:error, {:invalid_priority, term()}}
   defp priority_from_opts(opts) do
     case Keyword.get(opts, :priority, 50) do
-      priority when is_integer(priority) -> priority
-      _other -> 50
+      priority when is_integer(priority) -> {:ok, priority}
+      other -> {:error, {:invalid_priority, other}}
     end
   end
 end

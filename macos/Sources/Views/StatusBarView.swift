@@ -25,6 +25,7 @@ private extension StatusBarUpdate.SelectionInfo {
     }
 }
 
+
 @MainActor
 @Observable
 final class StatusBarState {
@@ -63,6 +64,8 @@ final class StatusBarState {
     var backgroundSubagentCount: UInt16 = 0
     var backgroundSubagentLabel: String = ""
     var indent: StatusBarUpdate.IndentInfo = .init(kind: 0, size: 2)
+    var modelineLeftSegments: [Wire.StatusBarSegment] = []
+    var modelineRightSegments: [Wire.StatusBarSegment] = []
     var selection: StatusBarUpdate.SelectionInfo = .init(mode: 0, size: 0)
 
     /// Updates status bar properties, guarding each assignment with an
@@ -103,6 +106,8 @@ final class StatusBarState {
         if self.backgroundSubagentCount != data.backgroundSubagentCount { self.backgroundSubagentCount = data.backgroundSubagentCount }
         if self.backgroundSubagentLabel != data.backgroundSubagentLabel { self.backgroundSubagentLabel = data.backgroundSubagentLabel }
         if self.indent != data.indent { self.indent = data.indent }
+        if self.modelineLeftSegments != data.modelineLeftSegments { self.modelineLeftSegments = data.modelineLeftSegments }
+        if self.modelineRightSegments != data.modelineRightSegments { self.modelineRightSegments = data.modelineRightSegments }
         if self.selection != data.selection { self.selection = data.selection }
     }
 
@@ -181,16 +186,13 @@ struct StatusBarView: View {
             // Center (lowest priority, truncates first)
             centerSegment
 
-            // Left-aligned (unified: same layout for buffer and agent)
-            HStack(spacing: 0) {
+            // Side-aligned modeline content. The right controls keep their intrinsic width while long left-side configured segments truncate instead of covering them.
+            HStack(spacing: 8) {
                 leftSegment
-                Spacer(minLength: 0)
-            }
-
-            // Right-aligned (unified: same layout for buffer and agent)
-            HStack(spacing: 0) {
-                Spacer(minLength: 0)
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                    .clipped()
                 rightSegment
+                    .fixedSize(horizontal: true, vertical: false)
             }
         }
         .frame(height: barHeight)
@@ -274,20 +276,7 @@ struct StatusBarView: View {
                 .frame(width: 1, height: 14)
                 .padding(.horizontal, 4)
 
-            // Agent status (thinking/executing/error; hidden when idle)
-            agentStatusIcon
-
-            if state.hasRunningBackgroundSubagents {
-                backgroundSubagentSegment
-            }
-
-            // Git branch + diff stats
-            if state.hasGit && !state.gitBranch.isEmpty {
-                gitSegment
-            }
-
-            // Diagnostic counts (all 4 levels, theme-colored)
-            diagnosticIndicators
+            configuredModelineSegments(state.modelineLeftSegments)
         }
     }
 
@@ -508,45 +497,7 @@ struct StatusBarView: View {
                 encoder?.sendTogglePanel(panel: 3)
             }
 
-            // Parser status (only when degraded)
-            parserStatusIcon
-
-            // LSP status
-            if state.hasLsp {
-                lspIndicator
-            }
-
-            indentSegment
-
-            // Devicon + filetype (clickable to change language mode)
-            if !state.filetype.isEmpty {
-                Button(action: {
-                    encoder?.sendExecuteCommand(name: "set_language")
-                }) {
-                    HStack(spacing: 3) {
-                        if !state.icon.isEmpty {
-                            Text(state.icon)
-                                .font(.custom("Symbols Nerd Font Mono", size: 11))
-                                .foregroundStyle(state.iconColor)
-                        }
-                        Text(state.filetypeDisplay)
-                            .font(.system(size: 11))
-                            .foregroundStyle(theme.modelineBarFg.opacity(0.6))
-                    }
-                }
-                .buttonStyle(.plain)
-                .help("Change language mode (SPC b l)")
-                .onHover { isHovered in
-                    if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-                }
-            }
-
-            // Cursor position, selection size, or message count
-            positionSegment
-
-            // Vim mode badge
-            modeBadge
-                .help("\(state.modeName) mode")
+            configuredModelineSegments(state.modelineRightSegments)
         }
         .padding(.trailing, 8)
     }
@@ -631,6 +582,73 @@ struct StatusBarView: View {
         }
     }
 
+    @ViewBuilder
+    private func configuredModelineSegments(_ segments: [Wire.StatusBarSegment]) -> some View {
+        ForEach(segments) { segment in
+            StatusBarModelineSegmentView(segment: segment, encoder: encoder)
+        }
+    }
+
+}
+
+// MARK: - Configured modeline segment
+
+private struct StatusBarModelineSegmentView: View {
+    let segment: Wire.StatusBarSegment
+    let encoder: InputEncoder?
+
+    var body: some View {
+        if segment.command.isEmpty {
+            segmentText
+        } else {
+            Button(action: {
+                encoder?.sendExecuteCommand(name: segment.command)
+            }) {
+                segmentText
+            }
+            .buttonStyle(.plain)
+            .help(segment.command)
+            .onHover { isHovered in
+                if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var segmentText: some View {
+        let text = Text(segment.text)
+            .font(segmentFont)
+            .foregroundStyle(color(segment.fgColor))
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .underline(segment.isUnderline)
+
+        if segment.isItalic {
+            text
+                .italic()
+                .frame(maxWidth: 240, minHeight: 24, maxHeight: 24, alignment: .center)
+                .background(color(segment.bgColor))
+                .clipped()
+        } else {
+            text
+                .frame(maxWidth: 240, minHeight: 24, maxHeight: 24, alignment: .center)
+                .background(color(segment.bgColor))
+                .clipped()
+        }
+    }
+
+    private var segmentFont: Font {
+        let weight: Font.Weight = segment.isBold ? .semibold : .regular
+        return .system(size: 11, weight: weight)
+    }
+
+    private func color(_ value: UInt32) -> Color {
+        Color(
+            red: Double((value >> 16) & 0xFF) / 255.0,
+            green: Double((value >> 8) & 0xFF) / 255.0,
+            blue: Double(value & 0xFF) / 255.0
+        )
+    }
 }
 
 // MARK: - Reusable toolbar-style icon button with hover highlight

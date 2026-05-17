@@ -71,7 +71,7 @@ Invalid values show a clear error. Setting `:tab_width` to `-1` tells you it mus
 
 ## Modeline
 
-The modeline is the status line at the bottom of each editor window. It is built from named segments, so you can hide noisy information, move the important parts closer to the edge, or add your own project-specific status.
+The modeline is the status line at the bottom of each editor window. It is built from named segments, so you can hide noisy information, move the important parts closer to the edge, or add your own project-specific status. The same segment configuration drives the TUI modeline and the native GUI status bar.
 
 ### Built-in segments
 
@@ -140,7 +140,11 @@ modeline_segment :word_count, side: :right, priority: 50 do
 end
 ```
 
-The `side:` option is the default side when you do not list the segment explicitly. You can still place the segment yourself:
+The `side:` option is the default side when you do not list the segment explicitly. It must be `:left` or `:right`, and `priority:` must be an integer. Invalid declarations fail during config load so you see the mistake immediately. Custom segment names cannot reuse built-in names like `:mode`, `:filename`, or `:git`, because built-ins always win during rendering.
+
+Segment text and click command names are bounded to the GUI protocol's 16-bit string and section limits. Oversized strings are truncated at valid UTF-8 boundaries, and trailing segments are dropped if a GUI status-bar payload would exceed the wire-format limit.
+
+You can still place the segment yourself:
 
 ```elixir
 set :modeline_right_segments, [:word_count, :filetype, :position]
@@ -148,7 +152,8 @@ set :modeline_right_segments, [:word_count, :filetype, :position]
 
 ### Custom segments in extensions
 
-Extensions use the same DSL inside a `use Minga.Extension` module:
+Extensions use the same DSL inside a `use Minga.Extension` module. Segment names must be unique across config and loaded extensions; Minga rejects a duplicate rather than letting one source silently overwrite another.
+
 
 ```elixir
 defmodule MyModeline do
@@ -172,7 +177,7 @@ defmodule MyModeline do
 end
 ```
 
-Extension segments are removed automatically when the extension stops or config reloads.
+Extension segments are removed automatically when the owning extension stops or reloads.
 
 ### Responsive truncation
 

@@ -10,9 +10,28 @@ defmodule Minga.Config.ModelineSegments do
   alias Minga.Config.ModelineSegment
 
   @table __MODULE__
+  @warnings_table Module.concat(__MODULE__, Warnings)
+  @reserved_names [
+    :mode,
+    :filename,
+    :git,
+    :agent,
+    :background_agent,
+    :diagnostics,
+    :parser,
+    :lsp,
+    :filetype,
+    :position,
+    :percent,
+    :selection
+  ]
 
   @type table :: atom()
   @type source :: atom() | {:extension, atom()}
+  @type register_error ::
+          ModelineSegment.validation_error()
+          | {:reserved_name, atom()}
+          | {:duplicate_name, atom(), existing_source :: source(), attempted_source :: source()}
 
   @doc "Starts the process that owns the custom segment ETS table."
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -31,23 +50,85 @@ defmodule Minga.Config.ModelineSegments do
     }
   end
 
+  @doc "Returns built-in or otherwise reserved modeline segment names that custom segments cannot use."
+  @spec reserved_names() :: [atom()]
+  def reserved_names, do: @reserved_names
+
   @doc "Registers or replaces a custom modeline segment from user config."
-  @spec register(atom(), keyword(), ModelineSegment.render_fun()) :: :ok
+  @spec register(atom(), keyword(), ModelineSegment.render_fun()) ::
+          :ok | {:error, register_error()}
   def register(name, opts, render), do: register(@table, name, opts, render, :config)
 
   @doc "Registers or replaces a custom modeline segment for a source."
-  @spec register(atom(), keyword(), ModelineSegment.render_fun(), source()) :: :ok
+  @spec register(atom(), keyword(), ModelineSegment.render_fun(), source()) ::
+          :ok | {:error, register_error()}
   def register(name, opts, render, source), do: register(@table, name, opts, render, source)
 
-  @spec register(table(), atom(), keyword(), ModelineSegment.render_fun(), source()) :: :ok
+  @spec register(table(), atom(), keyword(), ModelineSegment.render_fun(), source()) ::
+          :ok | {:error, register_error()}
   def register(table, name, opts, render, source)
       when is_atom(table) and is_atom(name) and is_list(opts) and is_function(render, 1) do
-    with_writable_table(table, fn ->
-      segment = ModelineSegment.new(name, opts, render, source)
-      :ets.insert(table, {name, segment})
-    end)
+    case reserved_name?(name) do
+      true ->
+        {:error, {:reserved_name, name}}
 
-    :ok
+      false ->
+        case ModelineSegment.new(name, opts, render, source) do
+          {:ok, segment} -> insert_segment(table, name, segment, source)
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  @spec reserved_name?(atom()) :: boolean()
+  defp reserved_name?(name), do: name in @reserved_names
+
+  @doc "Registers a custom modeline segment and raises on invalid declarations or collisions."
+  @spec register!(atom(), keyword(), ModelineSegment.render_fun()) :: :ok
+  def register!(name, opts, render) do
+    case register(name, opts, render) do
+      :ok -> :ok
+      {:error, reason} -> raise ArgumentError, register_error_message(name, reason)
+    end
+  end
+
+  @spec insert_segment(table(), atom(), ModelineSegment.t(), source()) ::
+          :ok | {:error, register_error()}
+  defp insert_segment(table, name, segment, source) do
+    with_writable_table(table, fn ->
+      case lookup_existing(table, name) do
+        %ModelineSegment{source: ^source} ->
+          :ets.insert(table, {name, segment})
+          :ok
+
+        %ModelineSegment{source: existing_source} ->
+          {:error, {:duplicate_name, name, existing_source, source}}
+
+        nil ->
+          :ets.insert(table, {name, segment})
+          :ok
+      end
+    end)
+  end
+
+  @spec register_error_message(atom(), register_error()) :: String.t()
+  def register_error_message(name, {:invalid_side, side}) do
+    "Invalid modeline segment #{inspect(name)} side #{inspect(side)}. Expected :left or :right."
+  end
+
+  def register_error_message(name, {:invalid_priority, priority}) do
+    "Invalid modeline segment #{inspect(name)} priority #{inspect(priority)}. Expected an integer."
+  end
+
+  def register_error_message(name, {:reserved_name, _segment_name}) do
+    "Modeline segment #{inspect(name)} is reserved by a built-in segment and cannot be replaced."
+  end
+
+  def register_error_message(
+        name,
+        {:duplicate_name, _segment_name, existing_source, attempted_source}
+      ) do
+    "Modeline segment #{inspect(name)} is already registered by #{inspect(existing_source)} and cannot be replaced by #{inspect(attempted_source)}."
   end
 
   @doc "Unregisters one custom modeline segment."
@@ -99,7 +180,35 @@ defmodule Minga.Config.ModelineSegments do
   @spec reset(table()) :: :ok
   def reset(table) when is_atom(table) do
     with_writable_table(table, fn -> :ets.delete_all_objects(table) end)
+    reset_warnings(table)
     :ok
+  end
+
+  @doc "Clears warning-once modeline diagnostics without deleting registered segments."
+  @spec reset_warnings() :: :ok
+  def reset_warnings, do: reset_warnings(@table)
+
+  @spec reset_warnings(table()) :: :ok
+  def reset_warnings(table) when is_atom(table) do
+    warnings_table = warnings_table(table)
+    with_writable_table(warnings_table, fn -> :ets.delete_all_objects(warnings_table) end)
+    :ok
+  end
+
+  @doc "Logs a warning once for a render-time modeline segment diagnostic."
+  @spec warn_once(term(), String.t()) :: :ok
+  def warn_once(key, message), do: warn_once(@table, key, message)
+
+  @spec warn_once(table(), term(), String.t()) :: :ok
+  def warn_once(table, key, message) when is_atom(table) and is_binary(message) do
+    warnings_table = warnings_table(table)
+
+    with_writable_table(warnings_table, fn ->
+      case :ets.insert_new(warnings_table, {key, true}) do
+        true -> Minga.Log.warning(:config, message)
+        false -> :ok
+      end
+    end)
   end
 
   @doc "Looks up a custom segment by name."
@@ -144,6 +253,7 @@ defmodule Minga.Config.ModelineSegments do
   def init(opts) do
     table = Keyword.get(opts, :name, @table)
     create_owned_table(table)
+    create_owned_table(warnings_table(table))
     {:ok, table}
   end
 
@@ -162,14 +272,12 @@ defmodule Minga.Config.ModelineSegments do
     |> Enum.map(fn {_name, segment} -> segment end)
   end
 
-  @spec with_writable_table(table(), (-> term())) :: :ok
+  @spec with_writable_table(table(), (-> result)) :: result | :ok when result: term()
   defp with_writable_table(table, fun) do
     case ensure_writable_table(table) do
       :ok -> fun.()
       :missing -> :ok
     end
-
-    :ok
   end
 
   @spec ensure_writable_table(table()) :: :ok | :missing
@@ -196,6 +304,10 @@ defmodule Minga.Config.ModelineSegments do
     :ets.new(table, [:named_table, :set, :public, read_concurrency: true])
     :ok
   end
+
+  @spec warnings_table(table()) :: table()
+  defp warnings_table(@table), do: @warnings_table
+  defp warnings_table(table), do: Module.concat(table, Warnings)
 
   @spec delete_existing_table(table()) :: :ok
   defp delete_existing_table(table) do

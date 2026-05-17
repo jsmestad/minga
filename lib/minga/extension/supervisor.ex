@@ -144,9 +144,15 @@ defmodule Minga.Extension.Supervisor do
          :ok <- validate_behaviour(module, name),
          :ok <- register_and_validate_options(name, module, entry.config),
          {:ok, _state} <- call_init(module, entry.config) do
-      register_extension_commands(module, name, cmd_registry)
-      register_extension_keybinds(module, name, keymap)
-      start_child_and_register_modeline_segments(supervisor, registry, name, module, entry.config)
+      start_loaded_extension(
+        supervisor,
+        registry,
+        name,
+        module,
+        entry.config,
+        cmd_registry,
+        keymap
+      )
     else
       {:error, reason} ->
         msg = "Extension #{name} load error: #{inspect(reason)}"
@@ -156,21 +162,62 @@ defmodule Minga.Extension.Supervisor do
     end
   end
 
-  @spec start_child_and_register_modeline_segments(
+  @spec start_loaded_extension(
           GenServer.server(),
           GenServer.server(),
           atom(),
           module(),
-          keyword()
+          keyword(),
+          GenServer.server(),
+          GenServer.server()
         ) :: {:ok, pid()} | {:error, term()}
-  defp start_child_and_register_modeline_segments(supervisor, registry, name, module, config) do
-    case start_child(supervisor, registry, name, module, config) do
-      {:ok, _pid} = ok ->
-        register_extension_modeline_segments(module, name)
-        ok
+  defp start_loaded_extension(supervisor, registry, name, module, config, cmd_registry, keymap) do
+    case register_extension_modeline_segments(module, name) do
+      :ok ->
+        start_child_then_register_dsl(
+          supervisor,
+          registry,
+          name,
+          module,
+          config,
+          cmd_registry,
+          keymap
+        )
 
       {:error, _reason} = error ->
+        Minga.Config.ModelineSegments.unregister_source({:extension, name})
+        ExtRegistry.update(registry, name, status: :load_error, pid: nil)
         error
+    end
+  end
+
+  @spec start_child_then_register_dsl(
+          GenServer.server(),
+          GenServer.server(),
+          atom(),
+          module(),
+          keyword(),
+          GenServer.server(),
+          GenServer.server()
+        ) :: {:ok, pid()} | {:error, term()}
+  defp start_child_then_register_dsl(
+         supervisor,
+         registry,
+         name,
+         module,
+         config,
+         cmd_registry,
+         keymap
+       ) do
+    case start_child(supervisor, registry, name, module, config) do
+      {:ok, pid} ->
+        register_extension_commands(module, name, cmd_registry)
+        register_extension_keybinds(module, name, keymap)
+        {:ok, pid}
+
+      {:error, reason} ->
+        Minga.Config.ModelineSegments.unregister_source({:extension, name})
+        {:error, reason}
     end
   end
 
@@ -311,9 +358,15 @@ defmodule Minga.Extension.Supervisor do
          :ok <- validate_behaviour(module, name),
          :ok <- register_and_validate_options(name, module, entry.config),
          {:ok, _state} <- call_init(module, entry.config) do
-      register_extension_commands(module, name, cmd_registry)
-      register_extension_keybinds(module, name, keymap)
-      start_child_and_register_modeline_segments(supervisor, registry, name, module, entry.config)
+      start_loaded_extension(
+        supervisor,
+        registry,
+        name,
+        module,
+        entry.config,
+        cmd_registry,
+        keymap
+      )
     else
       {:error, reason} ->
         msg = "Extension #{name} load error: #{inspect(reason)}"
@@ -542,7 +595,7 @@ defmodule Minga.Extension.Supervisor do
     }
   end
 
-  @spec register_extension_modeline_segments(module(), atom()) :: :ok
+  @spec register_extension_modeline_segments(module(), atom()) :: :ok | {:error, term()}
   defp register_extension_modeline_segments(module, ext_name) do
     case function_exported?(module, :__modeline_segment_schema__, 0) do
       true ->
@@ -553,35 +606,46 @@ defmodule Minga.Extension.Supervisor do
     end
   rescue
     e ->
+      reason = {:modeline_segment_registration_failed, Exception.message(e)}
+
       Minga.Log.warning(
         :config,
         "Extension #{ext_name} modeline segment registration failed: #{Exception.message(e)}"
       )
 
-      :ok
+      {:error, reason}
   end
 
   @spec register_extension_modeline_segment_schema(
           [Minga.Extension.modeline_segment_spec()],
           atom()
-        ) :: :ok
+        ) :: :ok | {:error, term()}
   defp register_extension_modeline_segment_schema(schema, ext_name) do
-    for spec <- schema do
-      register_extension_modeline_segment(spec, ext_name)
-    end
-
-    :ok
+    Enum.reduce_while(schema, :ok, fn spec, :ok ->
+      case register_extension_modeline_segment(spec, ext_name) do
+        :ok -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
   end
 
   @spec register_extension_modeline_segment(Minga.Extension.modeline_segment_spec(), atom()) ::
-          :ok
+          :ok | {:error, term()}
   defp register_extension_modeline_segment({name, opts, {mod, fun}}, ext_name) do
-    Minga.Config.ModelineSegments.register(
-      name,
-      opts,
-      fn ctx -> apply(mod, fun, [ctx]) end,
-      {:extension, ext_name}
-    )
+    case Minga.Config.ModelineSegments.register(
+           name,
+           opts,
+           fn ctx -> apply(mod, fun, [ctx]) end,
+           {:extension, ext_name}
+         ) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        msg = Minga.Config.ModelineSegments.register_error_message(name, reason)
+        Minga.Log.warning(:config, "Extension #{ext_name} modeline segment rejected: #{msg}")
+        {:error, {:modeline_segment_rejected, name, reason}}
+    end
   end
 
   @spec register_extension_keybinds(module(), atom(), GenServer.server()) :: :ok

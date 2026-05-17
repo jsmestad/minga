@@ -158,7 +158,11 @@ struct BreadcrumbBarViewTests {
 @Suite("StatusBarView View Structure")
 struct StatusBarViewViewTests {
 
-    @Test("Buffer mode shows cursor position and mode badge")
+    private func segment(_ id: Int, _ text: String) -> Wire.StatusBarSegment {
+        Wire.StatusBarSegment(id: id, text: text, fgColor: 0xFFFFFF, bgColor: 0x000000, attrs: 0, command: "")
+    }
+
+    @Test("Buffer mode shows configured modeline segments")
     @MainActor func bufferMode() throws {
         let state = StatusBarState()
         state.update(from: StatusBarUpdate(
@@ -169,7 +173,9 @@ struct StatusBarViewViewTests {
             infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
-            backgroundSubagentCount: 0, backgroundSubagentLabel: ""
+            backgroundSubagentCount: 0, backgroundSubagentLabel: "",
+            modelineLeftSegments: [segment(0, " NORMAL ")],
+            modelineRightSegments: [segment(0, " Elixir "), segment(1, " 42:9 ")]
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
@@ -177,9 +183,9 @@ struct StatusBarViewViewTests {
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
 
-        #expect(strings.contains("Ln 42, Col 9"))
-        #expect(strings.contains("NORMAL"))
-        #expect(strings.contains("Elixir"))
+        #expect(strings.contains(" NORMAL "))
+        #expect(strings.contains(" Elixir "))
+        #expect(strings.contains(" 42:9 "))
     }
 
     @Test("Tabs indent renders in the status bar")
@@ -288,7 +294,9 @@ struct StatusBarViewViewTests {
             infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
-            backgroundSubagentCount: 0, backgroundSubagentLabel: ""
+            backgroundSubagentCount: 0, backgroundSubagentLabel: "",
+            modelineLeftSegments: [segment(0, " NORMAL ")],
+            modelineRightSegments: [segment(0, " 7 msgs ")]
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
@@ -298,8 +306,8 @@ struct StatusBarViewViewTests {
 
         // Model name no longer appears in the status bar (lives in agent chat header only)
         #expect(!strings.contains("claude-3-5-sonnet"))
-        #expect(strings.contains("7 msgs"))
-        #expect(strings.contains("NORMAL"))
+        #expect(strings.contains(" 7 msgs "))
+        #expect(strings.contains(" NORMAL "))
     }
 
     @Test("Git branch shown when flag is set")
@@ -313,7 +321,8 @@ struct StatusBarViewViewTests {
             infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
-            backgroundSubagentCount: 0, backgroundSubagentLabel: ""
+            backgroundSubagentCount: 0, backgroundSubagentLabel: "",
+            modelineLeftSegments: [segment(0, " main ")], modelineRightSegments: []
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
@@ -321,7 +330,7 @@ struct StatusBarViewViewTests {
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
 
-        #expect(strings.contains("main"))
+        #expect(strings.contains(" main "))
     }
 
     @Test("Diagnostic counts shown when non-zero")
@@ -335,7 +344,8 @@ struct StatusBarViewViewTests {
             infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
-            backgroundSubagentCount: 0, backgroundSubagentLabel: ""
+            backgroundSubagentCount: 0, backgroundSubagentLabel: "",
+            modelineLeftSegments: [], modelineRightSegments: [segment(0, " 3 "), segment(1, " 7 ")]
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
@@ -343,8 +353,8 @@ struct StatusBarViewViewTests {
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
 
-        #expect(strings.contains("3"))
-        #expect(strings.contains("7"))
+        #expect(strings.contains(" 3 "))
+        #expect(strings.contains(" 7 "))
     }
 
     @Test("Background subagent segment shows count and label")
@@ -358,7 +368,8 @@ struct StatusBarViewViewTests {
             infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
-            backgroundSubagentCount: 2, backgroundSubagentLabel: "session-2: tests"
+            backgroundSubagentCount: 2, backgroundSubagentLabel: "session-2: tests",
+            modelineLeftSegments: [segment(0, " bg:2 session-2: tests")], modelineRightSegments: []
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
@@ -366,7 +377,7 @@ struct StatusBarViewViewTests {
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
 
-        #expect(strings.contains("bg:2 session-2: tests"))
+        #expect(strings.contains(" bg:2 session-2: tests"))
     }
 
     @Test("Background subagent segment is hidden when count is zero")
@@ -380,7 +391,8 @@ struct StatusBarViewViewTests {
             infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
-            backgroundSubagentCount: 0, backgroundSubagentLabel: "session-2: hidden"
+            backgroundSubagentCount: 0, backgroundSubagentLabel: "session-2: hidden",
+            modelineLeftSegments: [], modelineRightSegments: []
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)

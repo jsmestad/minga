@@ -357,6 +357,186 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
         assert String.contains?(text, "test.ex")
       end)
     end
+
+    test "gui_segments exposes configured custom segment default side" do
+      segment_name = :gui_default_side_modeline_test
+      ModelineSegments.unregister(segment_name)
+
+      try do
+        assert :ok =
+                 ModelineSegments.register(segment_name, [side: :left, priority: 50], fn ctx ->
+                   {" LEFTY ", ctx.info_fg, ctx.bar_bg, [], nil}
+                 end)
+
+        segments = Modeline.gui_segments(@base_data)
+
+        assert Enum.any?(segments.left, fn {text, _fg, _bg, _opts, _target} ->
+                 text == " LEFTY "
+               end)
+
+        refute Enum.any?(segments.right, fn {text, _fg, _bg, _opts, _target} ->
+                 text == " LEFTY "
+               end)
+      after
+        ModelineSegments.unregister(segment_name)
+      end
+    end
+
+    test "explicit configured side overrides custom default side without duplication" do
+      segment_name = :gui_override_side_modeline_test
+      ModelineSegments.unregister(segment_name)
+
+      try do
+        assert :ok =
+                 ModelineSegments.register(segment_name, [side: :left, priority: 50], fn ctx ->
+                   {" MOVED ", ctx.info_fg, ctx.bar_bg, [], nil}
+                 end)
+
+        with_options(fn options ->
+          Options.set(options, :modeline_left_segments, [])
+          Options.set(options, :modeline_right_segments, [segment_name])
+
+          segments = Modeline.gui_segments(@base_data)
+          left_text = segment_text(segments.left)
+          right_text = segment_text(segments.right)
+
+          refute String.contains?(left_text, "MOVED")
+          assert String.contains?(right_text, "MOVED")
+          assert right_text |> String.split("MOVED") |> length() == 2
+        end)
+      after
+        ModelineSegments.unregister(segment_name)
+      end
+    end
+
+    test "registry rejects duplicate segment names from different sources" do
+      table = :"modeline_collision_#{System.unique_integer([:positive])}"
+      start_supervised!({ModelineSegments, name: table})
+
+      assert :ok =
+               ModelineSegments.register(
+                 table,
+                 :dup_segment,
+                 [side: :right],
+                 fn _ctx -> nil end,
+                 :config
+               )
+
+      assert {:error, {:duplicate_name, :dup_segment, :config, {:extension, :demo}}} =
+               ModelineSegments.register(
+                 table,
+                 :dup_segment,
+                 [side: :left],
+                 fn _ctx -> nil end,
+                 {:extension, :demo}
+               )
+
+      assert %{source: :config, side: :right} = ModelineSegments.lookup(table, :dup_segment)
+    end
+
+    test "unregister_source only removes segments owned by that source" do
+      table = :"modeline_source_#{System.unique_integer([:positive])}"
+      start_supervised!({ModelineSegments, name: table})
+
+      assert :ok =
+               ModelineSegments.register(
+                 table,
+                 :config_segment,
+                 [side: :right],
+                 fn _ctx -> nil end,
+                 :config
+               )
+
+      assert :ok =
+               ModelineSegments.register(
+                 table,
+                 :extension_segment,
+                 [side: :left],
+                 fn _ctx -> nil end,
+                 {:extension, :demo}
+               )
+
+      assert :ok = ModelineSegments.unregister_source(table, {:extension, :demo})
+
+      assert %{source: :config} = ModelineSegments.lookup(table, :config_segment)
+      assert ModelineSegments.lookup(table, :extension_segment) == nil
+    end
+
+    test "registry rejects invalid side and priority declarations" do
+      table = :"modeline_invalid_#{System.unique_integer([:positive])}"
+      start_supervised!({ModelineSegments, name: table})
+
+      assert {:error, {:invalid_side, :middle}} =
+               ModelineSegments.register(
+                 table,
+                 :bad_side,
+                 [side: :middle],
+                 fn _ctx -> nil end,
+                 :config
+               )
+
+      assert {:error, {:invalid_priority, "high"}} =
+               ModelineSegments.register(
+                 table,
+                 :bad_priority,
+                 [priority: "high"],
+                 fn _ctx -> nil end,
+                 :config
+               )
+    end
+
+    test "registry rejects names reserved by built-in segments" do
+      table = :"modeline_reserved_#{System.unique_integer([:positive])}"
+      start_supervised!({ModelineSegments, name: table})
+
+      assert {:error, {:reserved_name, :mode}} =
+               ModelineSegments.register(
+                 table,
+                 :mode,
+                 [side: :left],
+                 fn _ctx -> {" hacked ", 0xFFFFFF, 0x000000, [], nil} end,
+                 :config
+               )
+
+      assert ModelineSegments.lookup(table, :mode) == nil
+    end
+
+    test "custom segments with invalid colors are dropped" do
+      segment_name = :invalid_color_modeline_test
+      ModelineSegments.unregister(segment_name)
+
+      try do
+        assert :ok =
+                 ModelineSegments.register(segment_name, [side: :left], fn _ctx ->
+                   {" BAD_COLOR ", 0x1_000000, -1, [], nil}
+                 end)
+
+        segments = Modeline.gui_segments(@base_data)
+
+        refute String.contains?(segment_text(segments.left), "BAD_COLOR")
+        refute String.contains?(segment_text(segments.right), "BAD_COLOR")
+      after
+        ModelineSegments.unregister(segment_name)
+      end
+    end
+
+    test "custom segment exceptions are dropped without raising" do
+      segment_name = :raising_modeline_test
+      ModelineSegments.unregister(segment_name)
+
+      try do
+        assert :ok =
+                 ModelineSegments.register(segment_name, [side: :left], fn _ctx ->
+                   raise "boom"
+                 end)
+
+        assert %{left: left, right: right} = Modeline.gui_segments(@base_data)
+        refute String.contains?(segment_text(left), "boom")
+        refute String.contains?(segment_text(right), "boom")
+      after
+        ModelineSegments.unregister(segment_name)
+      end
+    end
   end
 
   describe "cursor_shape/1" do
@@ -417,6 +597,10 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
     |> Enum.find_value(fn {_row, col, segment, _opts} ->
       if String.contains?(segment, needle), do: col
     end)
+  end
+
+  defp segment_text(segments) do
+    Enum.map_join(segments, fn {text, _fg, _bg, _opts, _target} -> text end)
   end
 
   describe "parser status indicator" do

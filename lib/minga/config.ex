@@ -462,7 +462,7 @@ defmodule Minga.Config do
           :ok
   def register_modeline_segment(name, opts, render)
       when is_atom(name) and is_list(opts) and is_function(render, 1) do
-    ModelineSegments.register(name, opts, render)
+    ModelineSegments.register!(name, opts, render)
   end
 
   @doc """

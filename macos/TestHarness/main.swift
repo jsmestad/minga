@@ -134,6 +134,8 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         result["background_subagent_label"] = update.backgroundSubagentLabel
         result["indent_type"] = Int(update.indent.kind)
         result["indent_size"] = Int(update.indent.size)
+        result["modeline_left_segments"] = statusBarSegmentsToJSON(update.modelineLeftSegments)
+        result["modeline_right_segments"] = statusBarSegmentsToJSON(update.modelineRightSegments)
         result["selection_mode"] = Int(update.selection.mode)
         result["selection_size"] = Int(update.selection.size)
         return result
@@ -297,6 +299,18 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
 
     default:
         return nil
+    }
+}
+
+func statusBarSegmentsToJSON(_ segments: [Wire.StatusBarSegment]) -> [[String: Any]] {
+    return segments.map { segment in
+        [
+            "text": segment.text,
+            "fg_color": Int(segment.fgColor),
+            "bg_color": Int(segment.bgColor),
+            "attrs": Int(segment.attrs),
+            "command": segment.command
+        ]
     }
 }
 

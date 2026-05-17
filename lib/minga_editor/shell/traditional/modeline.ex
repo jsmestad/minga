@@ -62,6 +62,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   @type separator_style :: :powerline | :round | :slant | :none
   @type render_segment :: ModelineSegment.render_segment()
   @type segment_group :: %{name: atom(), priority: integer(), segments: [render_segment()]}
+  @type gui_segments :: %{left: [render_segment()], right: [render_segment()]}
   @type context :: %{
           data: modeline_data(),
           theme: Theme.t(),
@@ -106,7 +107,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
 
   @doc "Returns the built-in modeline segment names."
   @spec built_in_segments() :: [atom()]
-  def built_in_segments, do: Map.keys(@segment_priorities)
+  def built_in_segments, do: ModelineSegments.reserved_names()
 
   @doc """
   Renders the modeline at the given row using the provided data.
@@ -136,6 +137,21 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
         [{String.duplicate(" ", fill_width), ctx.bar_fg, ctx.bar_bg, [], nil}] ++ right_segments
 
     emit_segments(row, col_off, all_segments)
+  end
+
+  @doc "Returns configured modeline segments for native GUI status bars."
+  @spec gui_segments(modeline_data(), Theme.t()) :: gui_segments()
+  def gui_segments(data, theme \\ MingaEditor.UI.Theme.get!(:doom_one)) do
+    ctx = context(data, theme)
+    separator_style = Minga.Config.get(:modeline_separator)
+    {left_names, right_names} = configured_segment_names()
+    left_groups = build_segment_groups(left_names, ctx)
+    right_groups = build_segment_groups(right_names, ctx)
+
+    %{
+      left: left_segments(left_groups, separator_style, ctx.bar_bg),
+      right: right_segments(right_groups, separator_style, ctx.bar_bg)
+    }
   end
 
   @doc """
@@ -220,7 +236,11 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
 
   @spec unknown_segment(atom()) :: nil
   defp unknown_segment(name) do
-    Minga.Log.warning(:config, "Unknown modeline segment #{inspect(name)} ignored")
+    ModelineSegments.warn_once(
+      {:unknown_segment, name},
+      "Unknown modeline segment #{inspect(name)} ignored"
+    )
+
     nil
   end
 
@@ -229,7 +249,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
 
   @spec group_from_segments(atom(), integer(), term()) :: segment_group() | nil
   defp group_from_segments(name, priority, rendered) do
-    case normalize_segments(rendered) do
+    case normalize_segments(name, rendered) do
       [] -> nil
       segments -> %{name: name, priority: priority, segments: segments}
     end
@@ -240,43 +260,78 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     render.(ctx)
   rescue
     e ->
-      Minga.Log.warning(
-        :config,
+      ModelineSegments.warn_once(
+        {:custom_segment_exception, name},
         "Modeline segment #{inspect(name)} failed: #{Exception.message(e)}"
       )
 
       []
   catch
     kind, reason ->
-      Minga.Log.warning(
-        :config,
+      ModelineSegments.warn_once(
+        {:custom_segment_throw, name},
         "Modeline segment #{inspect(name)} crashed: #{inspect(kind)} #{inspect(reason)}"
       )
 
       []
   end
 
-  @spec normalize_segments(term()) :: [render_segment()]
-  defp normalize_segments(nil), do: []
-  defp normalize_segments([]), do: []
+  @spec normalize_segments(atom(), term()) :: [render_segment()]
+  defp normalize_segments(_name, nil), do: []
+  defp normalize_segments(_name, []), do: []
 
-  defp normalize_segments({text, fg, bg, opts, target}),
-    do: normalize_segment_tuple({text, fg, bg, opts, target})
+  defp normalize_segments(name, {text, fg, bg, opts, target}),
+    do: normalize_segment_tuple(name, {text, fg, bg, opts, target})
 
-  defp normalize_segments(segments) when is_list(segments) do
+  defp normalize_segments(name, segments) when is_list(segments) do
     segments
-    |> Enum.flat_map(&normalize_segments/1)
+    |> Enum.flat_map(&normalize_segments(name, &1))
   end
 
-  defp normalize_segments(_invalid), do: []
+  defp normalize_segments(name, invalid) do
+    invalid_segment_output(name, invalid)
+    []
+  end
 
-  @spec normalize_segment_tuple(term()) :: [render_segment()]
-  defp normalize_segment_tuple({text, fg, bg, opts, target})
+  @spec normalize_segment_tuple(atom(), term()) :: [render_segment()]
+  defp normalize_segment_tuple(name, {text, fg, bg, opts, target})
        when is_binary(text) and is_integer(fg) and is_integer(bg) and is_list(opts) and
-              (is_atom(target) or is_nil(target)),
-       do: [{text, fg, bg, opts, target}]
+              (is_atom(target) or is_nil(target)) do
+    case valid_color?(fg) and valid_color?(bg) do
+      true ->
+        [{text, fg, bg, opts, target}]
 
-  defp normalize_segment_tuple(_invalid), do: []
+      false ->
+        invalid_segment_colors(name, fg, bg)
+        []
+    end
+  end
+
+  defp normalize_segment_tuple(name, invalid) do
+    invalid_segment_output(name, invalid)
+    []
+  end
+
+  @spec valid_color?(integer()) :: boolean()
+  defp valid_color?(value), do: value >= 0 and value <= 0xFF_FFFF
+
+  @spec invalid_segment_colors(atom(), term(), term()) :: :ok
+  defp invalid_segment_colors(name, fg, bg) do
+    ModelineSegments.warn_once(
+      {:invalid_segment_colors, name},
+      "Invalid modeline segment #{inspect(name)} colors ignored: fg=#{inspect(fg)} bg=#{inspect(bg)}"
+    )
+  end
+
+  @spec invalid_segment_output(atom(), term()) :: :ok
+  defp invalid_segment_output(name, invalid) do
+    inspected = inspect(invalid, printable_limit: 200, limit: 20)
+
+    ModelineSegments.warn_once(
+      {:invalid_segment_output, name, inspected},
+      "Invalid modeline segment #{inspect(name)} output ignored: #{inspected}"
+    )
+  end
 
   @spec fit_segment_groups(
           [segment_group()],

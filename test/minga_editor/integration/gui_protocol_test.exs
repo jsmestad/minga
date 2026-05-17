@@ -129,7 +129,11 @@ defmodule Minga.Integration.GUIProtocolTest do
            macro_recording: {true, "q"},
            agent_status: :thinking,
            agent_theme_colors: nil,
-           status_msg: "Wrote foo.ex"
+           status_msg: "Wrote foo.ex",
+           modeline_segments: %{
+             left: [{" NORMAL ", 0xBBC2CF, 0x51AFEF, [bold: true], nil}],
+             right: [{" Elixir ", 0xC678DD, 0x282C34, [], :set_language}]
+           }
          }}
 
       cmd = ProtocolGUI.encode_gui_status_bar(data)
@@ -161,6 +165,12 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["diagnostic_hint"] == "✖ undefined function foo/0 [ElixirLS]"
       assert decoded["indent_type"] == 0
       assert decoded["indent_size"] == 2
+      assert [%{"text" => " NORMAL ", "attrs" => 1, "command" => ""}] =
+               decoded["modeline_left_segments"]
+
+      assert [%{"text" => " Elixir ", "command" => "set_language"}] =
+               decoded["modeline_right_segments"]
+
       assert decoded["selection_mode"] == 1
       assert decoded["selection_size"] == 42
     end

@@ -371,6 +371,8 @@ struct CommandDispatcherRoutingTests {
                                            filename: "editor.ex", diagnosticHint: "",
                                            backgroundSubagentCount: 0, backgroundSubagentLabel: "",
                                            indent: .init(kind: 1, size: 4),
+                                           modelineLeftSegments: [Wire.StatusBarSegment(id: 0, text: " NORMAL ", fgColor: 0xFFFFFF, bgColor: 0x000000, attrs: 1, command: "")],
+                                           modelineRightSegments: [],
                                            selection: .init(mode: 2, size: 3))))
 
         #expect(gui.statusBarState.mode == 1)
@@ -380,6 +382,8 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.statusBarState.errorCount == 3)
         #expect(gui.statusBarState.indent.kind == 1)
         #expect(gui.statusBarState.indent.size == 4)
+        #expect(gui.statusBarState.modelineLeftSegments.count == 1)
+        #expect(gui.statusBarState.modelineLeftSegments[0].text == " NORMAL ")
         #expect(gui.statusBarState.selection.mode == 2)
         #expect(gui.statusBarState.selection.size == 3)
     }
@@ -398,7 +402,8 @@ struct CommandDispatcherRoutingTests {
                                            gitAdded: 3, gitModified: 2, gitDeleted: 0,
                                            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0,
                                            filename: "editor.ex", diagnosticHint: "",
-                                           backgroundSubagentCount: 2, backgroundSubagentLabel: "session-2: tests")))
+                                           backgroundSubagentCount: 2, backgroundSubagentLabel: "session-2: tests",
+                                           modelineLeftSegments: [], modelineRightSegments: [])))
 
         #expect(gui.statusBarState.contentKind == 1)
         #expect(gui.statusBarState.isAgentWindow == true)
