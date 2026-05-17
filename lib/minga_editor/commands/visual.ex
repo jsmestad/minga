@@ -136,7 +136,7 @@ defmodule MingaEditor.Commands.Visual do
 
       {start_pos, end_pos} ->
         # Update visual anchor to start of text object, move cursor to end
-        new_ms = %{ms | visual_anchor: start_pos}
+        new_ms = %{ms | visual_anchor: start_pos, visual_type: visual_type_for_text_object(spec)}
         Buffer.move_to(buf, end_pos)
 
         EditorState.update_workspace(
@@ -168,6 +168,10 @@ defmodule MingaEditor.Commands.Visual do
 
     EditorState.transition_mode(state, :visual, visual_state)
   end
+
+  @spec visual_type_for_text_object(term()) :: :char | :line
+  defp visual_type_for_text_object(:paragraph), do: :line
+  defp visual_type_for_text_object(_spec), do: :char
 
   @impl Minga.Command.Provider
   def __commands__ do
