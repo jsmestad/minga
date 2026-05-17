@@ -1273,24 +1273,38 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @spec scope_keybinding_entries(Minga.Keymap.server()) :: [keybinding_entry()]
   defp scope_keybinding_entries(keymap_server) do
     Minga.Keymap.Scope.all_scopes()
-    |> Enum.flat_map(fn scope ->
-      case Minga.Keymap.Scope.module_for(scope) do
-        nil ->
-          []
+    |> Enum.flat_map(&scope_keybinding_entries(keymap_server, &1))
+  end
 
-        mod ->
-          Enum.flat_map([:normal, :insert, :input_normal, :cua], fn vim_state ->
-            mode = "#{scope}/#{vim_state}"
+  @spec scope_keybinding_entries(Minga.Keymap.server(), Minga.Keymap.Scope.scope_name()) ::
+          [keybinding_entry()]
+  defp scope_keybinding_entries(keymap_server, scope) do
+    case Minga.Keymap.Scope.module_for(scope) do
+      nil ->
+        []
 
-            [
-              mod.keymap(vim_state, []) |> trie_keybinding_entries(mode, []),
-              mod.shared_keymap() |> trie_keybinding_entries(mode, []),
-              safe_scope_trie(keymap_server, scope, vim_state)
-              |> trie_keybinding_entries(mode, [])
-            ]
-          end)
-      end
-    end)
+      mod ->
+        Enum.flat_map([:normal, :insert, :input_normal, :cua], fn vim_state ->
+          scope_vim_keybinding_entries(keymap_server, scope, mod, vim_state)
+        end)
+    end
+  end
+
+  @spec scope_vim_keybinding_entries(
+          Minga.Keymap.server(),
+          Minga.Keymap.Scope.scope_name(),
+          module(),
+          atom()
+        ) :: [keybinding_entry()]
+  defp scope_vim_keybinding_entries(keymap_server, scope, mod, vim_state) do
+    mode = "#{scope}/#{vim_state}"
+
+    [
+      mod.keymap(vim_state, []),
+      mod.shared_keymap(),
+      safe_scope_trie(keymap_server, scope, vim_state)
+    ]
+    |> Enum.flat_map(&trie_keybinding_entries(&1, mode, []))
   end
 
   @spec safe_normal_bindings(Minga.Keymap.server()) :: %{Bindings.key() => {atom(), String.t()}}
@@ -1361,9 +1375,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   @spec format_key_sequence([Bindings.key()]) :: String.t()
   defp format_key_sequence(sequence) do
-    sequence
-    |> Enum.map(&Bindings.format_key/1)
-    |> Enum.join(" ")
+    Enum.map_join(sequence, " ", &Bindings.format_key/1)
   end
 
   @spec command_to_string(atom() | tuple()) :: String.t()
@@ -2770,6 +2782,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
         <<key_len::8, key::binary-size(key_len), value_payload::binary>>
       ) do
     with {:ok, name} <- decode_existing_option_name(key),
+         true <- settings_option?(name),
          {:ok, value, <<>>} <- decode_config_value(value_payload) do
       {:ok, {:config_update, name, value}}
     else

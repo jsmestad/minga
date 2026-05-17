@@ -973,21 +973,14 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
             appendI32(Int32(clamping: number), to: &buf)
         case .string(let text):
             buf.append(SETTING_VALUE_STRING)
-            appendString16(text, to: &buf)
+            appendString16(&buf, text)
         case .atom(let text):
             buf.append(SETTING_VALUE_ATOM)
-            appendString16(text, to: &buf)
+            appendString16(&buf, text)
         case .float(let number):
             buf.append(SETTING_VALUE_FLOAT)
             appendFloat64(number, to: &buf)
         }
-    }
-
-    private func appendString16(_ text: String, to buf: inout Data) {
-        let bytes = Array(text.utf8.prefix(Int(UInt16.max)))
-        buf.append(UInt8((bytes.count >> 8) & 0xFF))
-        buf.append(UInt8(bytes.count & 0xFF))
-        buf.append(contentsOf: bytes)
     }
 
     private func appendI32(_ value: Int32, to buf: inout Data) {

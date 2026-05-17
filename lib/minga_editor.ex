@@ -2183,17 +2183,26 @@ defmodule MingaEditor do
   end
 
   defp handle_gui_action(state, {:config_update, name, value}) do
-    case Minga.Config.Options.set(EditorState.options_server(state), name, value) do
-      {:ok, persisted_value} ->
-        Minga.Config.Writer.persist(name, persisted_value)
+    if MingaEditor.Frontend.Protocol.GUI.settings_option?(name) do
+      case Minga.Config.Options.set(EditorState.options_server(state), name, value) do
+        {:ok, persisted_value} ->
+          Minga.Config.Writer.persist(name, persisted_value)
 
-        state
-        |> apply_runtime_config_option(name, persisted_value)
-        |> push_config_state_entry(name, persisted_value)
+          state
+          |> apply_runtime_config_option(name, persisted_value)
+          |> push_config_state_entry(name, persisted_value)
 
-      {:error, reason} ->
-        Minga.Log.warning(:config, "Ignored GUI config update for #{inspect(name)}: #{reason}")
-        state
+        {:error, reason} ->
+          Minga.Log.warning(:config, "Ignored GUI config update for #{inspect(name)}: #{reason}")
+          state
+      end
+    else
+      Minga.Log.warning(
+        :config,
+        "Ignored GUI config update outside settings panel for #{inspect(name)}"
+      )
+
+      state
     end
   end
 

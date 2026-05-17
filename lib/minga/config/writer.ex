@@ -19,7 +19,8 @@ defmodule Minga.Config.Writer do
           values: %{option_name() => term()},
           timer: reference() | nil,
           debounce_ms: pos_integer(),
-          reloading?: boolean()
+          reloading?: boolean(),
+          dirty?: boolean()
         }
 
   @doc "Starts the GUI settings writer."
@@ -68,6 +69,7 @@ defmodule Minga.Config.Writer do
   @impl true
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
+    Process.flag(:trap_exit, true)
     path = Keyword.get_lazy(opts, :path, &Loader.gui_settings_path/0)
     debounce_ms = Keyword.get(opts, :debounce_ms, @debounce_ms)
 
@@ -77,19 +79,20 @@ defmodule Minga.Config.Writer do
        values: read_existing_values(path),
        timer: nil,
        debounce_ms: debounce_ms,
-       reloading?: false
+       reloading?: false,
+       dirty?: false
      }}
   end
 
   @impl true
   def handle_call({:persist, name, value}, _from, state) do
     values = Map.put(state.values, name, value)
-    state = %{state | values: values}
+    state = %{state | values: values, dirty?: true}
     {:reply, :ok, schedule_flush(state)}
   end
 
   def handle_call({:set_reloading, reloading?}, _from, state) do
-    {:reply, :ok, %{state | reloading?: reloading?}}
+    {:reply, :ok, set_reloading_state(state, reloading?)}
   end
 
   def handle_call(:flush, _from, state) do
@@ -101,6 +104,35 @@ defmodule Minga.Config.Writer do
   def handle_info(:flush, state) do
     {:noreply, flush_state(%{state | timer: nil})}
   end
+
+  @impl true
+  def terminate(_reason, state) do
+    if state.dirty? and not state.reloading? do
+      state
+      |> cancel_timer()
+      |> flush_state()
+    end
+
+    :ok
+  end
+
+  @spec set_reloading_state(state(), boolean()) :: state()
+  defp set_reloading_state(%{dirty?: true} = state, true) do
+    state
+    |> cancel_timer()
+    |> flush_state()
+    |> Map.put(:reloading?, true)
+  end
+
+  defp set_reloading_state(state, true), do: %{state | reloading?: true}
+
+  defp set_reloading_state(%{dirty?: true, timer: nil} = state, false) do
+    state
+    |> Map.put(:reloading?, false)
+    |> schedule_flush()
+  end
+
+  defp set_reloading_state(state, false), do: %{state | reloading?: false}
 
   @spec schedule_flush(state()) :: state()
   defp schedule_flush(%{reloading?: true} = state), do: state
@@ -132,7 +164,7 @@ defmodule Minga.Config.Writer do
   defp flush_state(%{path: path, values: values} = state) do
     case write_values(path, values) do
       :ok ->
-        state
+        %{state | dirty?: false}
 
       {:error, reason} ->
         Minga.Log.warning(

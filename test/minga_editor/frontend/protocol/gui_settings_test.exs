@@ -17,6 +17,24 @@ defmodule MingaEditor.Frontend.Protocol.GUISettingsTest do
                Protocol.decode_event(payload)
     end
 
+    test "decodes boolean integer and string config_update values" do
+      assert {:ok, {:gui_action, {:config_update, :wrap, true}}} =
+               Protocol.decode_event(<<0x07, 0x42, 4, "wrap", 0x01, 1>>)
+
+      assert {:ok, {:gui_action, {:config_update, :tab_width, 4}}} =
+               Protocol.decode_event(<<0x07, 0x42, 9, "tab_width", 0x02, 4::32-signed>>)
+
+      assert {:ok, {:gui_action, {:config_update, :font_family, "Iosevka"}}} =
+               Protocol.decode_event(<<0x07, 0x42, 11, "font_family", 0x03, 7::16, "Iosevka">>)
+    end
+
+    test "rejects config_update for options outside the settings panel allowlist" do
+      key = "confirm_quit"
+      payload = <<0x07, 0x42, byte_size(key)::8, key::binary, 0x01, 0>>
+
+      assert {:error, :malformed} = Protocol.decode_event(payload)
+    end
+
     test "rejects unknown config option names" do
       payload = <<0x07, 0x42, 7, "unknown", 0x01, 1>>
 

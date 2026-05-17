@@ -35,15 +35,37 @@ defmodule Minga.Config.WriterTest do
       assert content =~ "set :wrap, true"
     end
 
-    test "reload guard skips writes while reload is active" do
+    test "pending writes flush before reload starts" do
+      path = tmp_path("gui_settings_reload_start.exs")
+      {:ok, writer} = start_supervised({Writer, name: nil, path: path, debounce_ms: 10_000})
+
+      assert :ok = Writer.persist(writer, :wrap, true)
+      assert :ok = Writer.set_reloading(writer, true)
+
+      content = File.read!(path)
+      assert content =~ "set :wrap, true"
+    end
+
+    test "reload guard skips a flush during reload and reschedules it after reload ends" do
       path = tmp_path("gui_settings_reloading.exs")
       {:ok, writer} = start_supervised({Writer, name: nil, path: path, debounce_ms: 10})
 
       assert :ok = Writer.set_reloading(writer, true)
       assert :ok = Writer.persist(writer, :wrap, true)
-      assert :ok = Writer.flush(writer)
+      send(writer, :flush)
+      :sys.get_state(writer)
 
       refute File.exists?(path)
+
+      assert :ok = Writer.set_reloading(writer, false)
+      state = :sys.get_state(writer)
+      assert state.timer != nil
+
+      send(writer, :flush)
+      :sys.get_state(writer)
+
+      content = File.read!(path)
+      assert content =~ "set :wrap, true"
     end
 
     test "write errors do not crash the writer" do
@@ -61,6 +83,17 @@ defmodule Minga.Config.WriterTest do
       assert :ok = Writer.flush(writer)
       refute_receive {:DOWN, ^ref, :process, ^writer, _reason}, 0
       Process.demonitor(ref, [:flush])
+    end
+
+    test "normal shutdown flushes pending writes before the debounce fires" do
+      path = tmp_path("gui_settings_shutdown.exs")
+      {:ok, writer} = Writer.start_link(name: nil, path: path, debounce_ms: 10_000)
+
+      assert :ok = Writer.persist(writer, :wrap, true)
+      GenServer.stop(writer, :normal)
+
+      content = File.read!(path)
+      assert content =~ "set :wrap, true"
     end
   end
 

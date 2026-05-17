@@ -415,6 +415,38 @@ struct EncoderSettingsTests {
         #expect(readU16(payload, 9) == 8)
         #expect(String(data: payload[11..<19], encoding: .utf8) == "doom_one")
     }
+
+    @Test("config_update encodes typed bool payload")
+    func configUpdateBoolLayout() {
+        let payload = captureFrame { $0.sendConfigUpdate(key: "wrap", value: .bool(true)) }
+
+        #expect(payload == Data([OP_GUI_ACTION, GUI_ACTION_CONFIG_UPDATE, 4, 0x77, 0x72, 0x61, 0x70, SETTING_VALUE_BOOL, 1]))
+    }
+
+    @Test("config_update encodes typed int payload")
+    func configUpdateIntLayout() {
+        let payload = captureFrame { $0.sendConfigUpdate(key: "tab_width", value: .int(4)) }
+
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_CONFIG_UPDATE)
+        #expect(payload[2] == 9)
+        #expect(String(data: payload[3..<12], encoding: .utf8) == "tab_width")
+        #expect(payload[12] == SETTING_VALUE_INT)
+        #expect(readU32(payload, 13) == 4)
+    }
+
+    @Test("config_update encodes typed string payload")
+    func configUpdateStringLayout() {
+        let payload = captureFrame { $0.sendConfigUpdate(key: "font_family", value: .string("Iosevka")) }
+
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_CONFIG_UPDATE)
+        #expect(payload[2] == 11)
+        #expect(String(data: payload[3..<14], encoding: .utf8) == "font_family")
+        #expect(payload[14] == SETTING_VALUE_STRING)
+        #expect(readU16(payload, 15) == 7)
+        #expect(String(data: payload[17..<24], encoding: .utf8) == "Iosevka")
+    }
 }
 
 // MARK: - Frame header
