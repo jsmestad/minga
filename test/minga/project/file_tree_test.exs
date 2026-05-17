@@ -611,4 +611,61 @@ defmodule Minga.Project.FileTreeTest do
       assert entry2.name == "b.txt"
     end
   end
+
+  describe "filtering and re-rooting" do
+    @tag :tmp_dir
+    test "set_filter narrows entries and descends into collapsed directories", %{tmp_dir: tmp_dir} do
+      File.mkdir_p!(Path.join(tmp_dir, "lib"))
+      File.write!(Path.join([tmp_dir, "lib", "target.ex"]), "")
+      File.write!(Path.join(tmp_dir, "other.txt"), "")
+
+      tree = FileTree.new(tmp_dir) |> FileTree.set_filter("target")
+      entries = FileTree.visible_entries(tree)
+
+      assert Enum.map(entries, & &1.name) == ["target.ex"]
+      assert hd(entries).depth == 1
+      assert FileTree.selected_entry(tree).name == "target.ex"
+    end
+
+    @tag :tmp_dir
+    test "filter does not match every entry just because the root path matches", %{
+      tmp_dir: tmp_dir
+    } do
+      matching_root = Path.join(tmp_dir, "rootneedle")
+      File.mkdir_p!(matching_root)
+      File.write!(Path.join(matching_root, "alpha.txt"), "")
+      File.write!(Path.join(matching_root, "beta.txt"), "")
+
+      tree = FileTree.new(matching_root) |> FileTree.set_filter("rootneedle")
+
+      assert FileTree.visible_entries(tree) == []
+    end
+
+    @tag :tmp_dir
+    test "clear_filter restores the unfiltered visible entries", %{tmp_dir: tmp_dir} do
+      File.write!(Path.join(tmp_dir, "alpha.txt"), "")
+      File.write!(Path.join(tmp_dir, "beta.txt"), "")
+
+      tree = tmp_dir |> FileTree.new() |> FileTree.set_filter("alpha") |> FileTree.clear_filter()
+
+      assert Enum.map(FileTree.visible_entries(tree), & &1.name) == ["alpha.txt", "beta.txt"]
+    end
+
+    @tag :tmp_dir
+    test "reroot preserves width, hidden setting, and filter", %{tmp_dir: tmp_dir} do
+      next_root = Path.join(tmp_dir, "child")
+      File.mkdir_p!(next_root)
+
+      tree =
+        FileTree.new(tmp_dir, width: 42) |> FileTree.toggle_hidden() |> FileTree.set_filter("ex")
+
+      rerooted = FileTree.reroot(tree, next_root)
+
+      assert rerooted.root == Path.expand(next_root)
+      assert rerooted.width == 42
+      assert rerooted.show_hidden == true
+      assert rerooted.filter == "ex"
+      assert MapSet.member?(rerooted.expanded, Path.expand(next_root))
+    end
+  end
 end

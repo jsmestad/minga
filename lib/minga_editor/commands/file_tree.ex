@@ -8,6 +8,7 @@ defmodule MingaEditor.Commands.FileTree do
 
   alias Minga.Buffer
   alias MingaEditor.Commands
+  alias MingaEditor.Commands.Helpers
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -138,6 +139,103 @@ defmodule MingaEditor.Commands.FileTree do
   def refresh(%{workspace: %{file_tree: %{tree: tree}}} = state) do
     tree = tree |> FileTree.refresh() |> FileTree.refresh_git_status()
     sync_and_update(state, tree)
+  end
+
+  @doc "Copies the selected entry's absolute path to the system clipboard."
+  @spec copy_path(state()) :: state()
+  def copy_path(%{workspace: %{file_tree: %{tree: nil}}} = state), do: state
+
+  def copy_path(%{workspace: %{file_tree: %{tree: tree}}} = state) do
+    case FileTree.selected_entry(tree) do
+      nil ->
+        state
+
+      %{path: path} ->
+        state
+        |> Helpers.force_clipboard_sync(Path.expand(path))
+        |> EditorState.set_status("Copied #{Path.expand(path)}")
+    end
+  end
+
+  @doc "Marks the selected entry for a later copy operation."
+  @spec mark_copy(state()) :: state()
+  def mark_copy(state), do: mark_for_paste(state, :copy)
+
+  @doc "Marks the selected entry for a later move operation."
+  @spec mark_move(state()) :: state()
+  def mark_move(state), do: mark_for_paste(state, :move)
+
+  @doc "Pastes the marked copy or move entry into the selected directory or file parent."
+  @spec paste(state()) :: state()
+  def paste(%{workspace: %{file_tree: %{tree: nil}}} = state), do: state
+
+  def paste(%{workspace: %{file_tree: %{clipboard_mark: nil}}} = state),
+    do: EditorState.set_status(state, "No file tree copy or move is pending")
+
+  def paste(%{workspace: %{file_tree: %{clipboard_mark: mark, tree: tree}}} = state) do
+    target_dir = selected_target_dir(tree)
+    destination = Path.join(target_dir, mark.name)
+    paste_marked_entry(state, mark, destination)
+  end
+
+  @doc "Changes the tree root to the parent directory of the current root."
+  @spec root_parent(state()) :: state()
+  def root_parent(%{workspace: %{file_tree: %{tree: nil}}} = state), do: state
+
+  def root_parent(%{workspace: %{file_tree: %{tree: %FileTree{root: root}}}} = state) do
+    parent = Path.dirname(root)
+
+    if parent == root do
+      state
+    else
+      reroot(state, parent)
+    end
+  end
+
+  @doc "Changes the tree root to the selected directory."
+  @spec root_selected(state()) :: state()
+  def root_selected(%{workspace: %{file_tree: %{tree: nil}}} = state), do: state
+
+  def root_selected(%{workspace: %{file_tree: %{tree: tree}}} = state) do
+    case FileTree.selected_entry(tree) do
+      %{dir?: true, path: path} -> reroot(state, path)
+      %{dir?: false} -> state
+      nil -> state
+    end
+  end
+
+  @doc "Restores the tree root to the original project directory."
+  @spec root_original(state()) :: state()
+  def root_original(%{workspace: %{file_tree: %{tree: nil}}} = state), do: state
+
+  def root_original(%{workspace: %{file_tree: %{original_root: root}}} = state)
+      when is_binary(root) do
+    reroot(state, root)
+  end
+
+  def root_original(%{workspace: %{file_tree: %{project_root: root}}} = state)
+      when is_binary(root) do
+    reroot(state, root)
+  end
+
+  def root_original(state), do: state
+
+  @doc "Starts inline file tree filtering."
+  @spec filter(state()) :: state()
+  def filter(state) do
+    update_file_tree(state, &FileTreeState.start_filtering/1)
+  end
+
+  @doc "Toggles the file tree help overlay."
+  @spec toggle_help(state()) :: state()
+  def toggle_help(state) do
+    update_file_tree(state, &FileTreeState.toggle_help/1)
+  end
+
+  @doc "Hides the file tree help overlay."
+  @spec hide_help(state()) :: state()
+  def hide_help(state) do
+    update_file_tree(state, &FileTreeState.hide_help/1)
   end
 
   @doc """
@@ -462,6 +560,192 @@ defmodule MingaEditor.Commands.FileTree do
   end
 
   # ── Private helpers ───────────────────────────────────────────────────────
+
+  @spec mark_for_paste(state(), FileTreeState.clipboard_operation()) :: state()
+  defp mark_for_paste(%{workspace: %{file_tree: %{tree: nil}}} = state, _operation), do: state
+
+  defp mark_for_paste(%{workspace: %{file_tree: %{tree: tree}}} = state, operation) do
+    case FileTree.selected_entry(tree) do
+      nil -> state
+      entry -> store_clipboard_mark(state, entry, operation)
+    end
+  end
+
+  @spec store_clipboard_mark(state(), FileTree.entry(), FileTreeState.clipboard_operation()) ::
+          state()
+  defp store_clipboard_mark(state, entry, operation) do
+    label = if operation == :copy, do: "copy", else: "move"
+
+    state =
+      update_file_tree(
+        state,
+        &FileTreeState.mark_clipboard(
+          &1,
+          Path.expand(entry.path),
+          entry.name,
+          entry.dir?,
+          operation
+        )
+      )
+
+    EditorState.set_status(state, "Marked #{entry.name} for #{label}")
+  end
+
+  @spec selected_target_dir(FileTree.t()) :: String.t()
+  defp selected_target_dir(%FileTree{} = tree) do
+    case FileTree.selected_entry(tree) do
+      %{dir?: true, path: path} -> path
+      %{dir?: false, path: path} -> Path.dirname(path)
+      nil -> tree.root
+    end
+  end
+
+  @spec paste_marked_entry(state(), FileTreeState.clipboard_mark(), String.t()) :: state()
+  defp paste_marked_entry(state, %{operation: :copy} = mark, destination) do
+    execute_copy(state, mark, destination)
+  end
+
+  defp paste_marked_entry(state, %{operation: :move} = mark, destination) do
+    if same_path?(mark.path, destination) do
+      state
+    else
+      execute_marked_move(state, mark, destination)
+    end
+  end
+
+  @spec execute_marked_move(state(), FileTreeState.clipboard_mark(), String.t()) :: state()
+  defp execute_marked_move(state, mark, destination) do
+    case guarded_rename(mark.path, destination) do
+      :ok -> marked_move_succeeded(state, mark, destination)
+      {:error, reason} -> marked_move_failed(state, mark.path, destination, reason)
+    end
+  end
+
+  @spec marked_move_succeeded(state(), FileTreeState.clipboard_mark(), String.t()) :: state()
+  defp marked_move_succeeded(state, mark, destination) do
+    state = sync_moved_buffer_path(state, mark.path, destination, "Move")
+    MingaEditor.log_to_messages("[file-tree] Moved: #{mark.name} → #{Path.dirname(destination)}")
+
+    state
+    |> refresh()
+    |> update_file_tree(&FileTreeState.clear_clipboard/1)
+  end
+
+  @spec marked_move_failed(state(), String.t(), String.t(), term()) :: state()
+  defp marked_move_failed(state, source, destination, reason) do
+    MingaEditor.log_to_messages(
+      "[file-tree] Move failed: #{source} → #{destination}: #{inspect(reason)}"
+    )
+
+    state
+  end
+
+  @spec execute_copy(state(), FileTreeState.clipboard_mark(), String.t()) :: state()
+  defp execute_copy(state, mark, destination) do
+    execute_copy_with_destination_check(
+      state,
+      mark,
+      destination,
+      copy_destination_status(mark, destination)
+    )
+  end
+
+  @spec copy_destination_status(FileTreeState.clipboard_mark(), String.t()) ::
+          :ok | {:error, term()}
+  defp copy_destination_status(%{dir?: true, path: source}, destination) do
+    expanded_source = Path.expand(source)
+    expanded_destination = Path.expand(destination)
+
+    if path_under_root?(expanded_destination, expanded_source) do
+      {:error, {:destination_inside_source, destination}}
+    else
+      copy_destination_exists_status(destination)
+    end
+  end
+
+  defp copy_destination_status(_mark, destination),
+    do: copy_destination_exists_status(destination)
+
+  @spec copy_destination_exists_status(String.t()) :: :ok | {:error, term()}
+  defp copy_destination_exists_status(destination) do
+    if path_entry_exists?(destination),
+      do: {:error, {:destination_exists, destination}},
+      else: :ok
+  end
+
+  @spec execute_copy_with_destination_check(
+          state(),
+          FileTreeState.clipboard_mark(),
+          String.t(),
+          :ok | {:error, term()}
+        ) :: state()
+  defp execute_copy_with_destination_check(state, mark, destination, :ok) do
+    do_copy_marked_entry(state, mark, destination)
+  end
+
+  defp execute_copy_with_destination_check(state, _mark, _destination, {:error, reason}) do
+    MingaEditor.log_to_messages("[file-tree] Copy failed: #{inspect(reason)}")
+    state
+  end
+
+  @spec do_copy_marked_entry(state(), FileTreeState.clipboard_mark(), String.t()) :: state()
+  defp do_copy_marked_entry(state, mark, destination) do
+    result =
+      if mark.dir?, do: File.cp_r(mark.path, destination), else: File.cp(mark.path, destination)
+
+    case result do
+      :ok ->
+        copy_succeeded(state, mark, destination)
+
+      {:ok, _files} ->
+        copy_succeeded(state, mark, destination)
+
+      {:error, reason, file} ->
+        copy_failed_with_cleanup(state, mark.path, destination, reason, file)
+
+      {:error, reason} ->
+        copy_failed(state, mark.path, destination, reason)
+    end
+  end
+
+  @spec copy_succeeded(state(), FileTreeState.clipboard_mark(), String.t()) :: state()
+  defp copy_succeeded(state, mark, destination) do
+    MingaEditor.log_to_messages("[file-tree] Copied: #{mark.name} → #{Path.dirname(destination)}")
+    refresh(state)
+  end
+
+  @spec copy_failed_with_cleanup(state(), String.t(), String.t(), term(), String.t()) :: state()
+  defp copy_failed_with_cleanup(state, source, destination, reason, file) do
+    cleanup_result = cleanup_partial_copy(destination)
+
+    MingaEditor.log_to_messages(
+      "[file-tree] Copy failed: #{source} → #{destination} at #{file}: #{inspect(reason)}. #{cleanup_result}"
+    )
+
+    state
+  end
+
+  @spec copy_failed(state(), String.t(), String.t(), term()) :: state()
+  defp copy_failed(state, source, destination, reason) do
+    MingaEditor.log_to_messages(
+      "[file-tree] Copy failed: #{source} → #{destination}: #{inspect(reason)}"
+    )
+
+    state
+  end
+
+  @spec reroot(state(), String.t()) :: state()
+  defp reroot(%{workspace: %{file_tree: %{tree: %FileTree{} = tree}}} = state, root) do
+    FileTreeFreshness.unwatch_expanded_dirs(tree)
+
+    new_tree =
+      tree
+      |> FileTree.reroot(root)
+      |> FileTree.refresh_git_status()
+
+    FileTreeFreshness.watch_expanded_dirs(new_tree)
+    sync_and_update(state, new_tree)
+  end
 
   # Mutual exclusivity: close git status panel when opening file tree.
   # Explicitly resets keymap_scope to :editor so we don't leave orphaned
@@ -1072,6 +1356,60 @@ defmodule MingaEditor.Commands.FileTree do
         description: "Refresh file tree",
         requires_buffer: false,
         execute: &refresh/1
+      },
+      %Minga.Command{
+        name: :tree_copy_path,
+        description: "Copy file tree path",
+        requires_buffer: false,
+        execute: &copy_path/1
+      },
+      %Minga.Command{
+        name: :tree_mark_copy,
+        description: "Mark file tree entry for copy",
+        requires_buffer: false,
+        execute: &mark_copy/1
+      },
+      %Minga.Command{
+        name: :tree_mark_move,
+        description: "Mark file tree entry for move",
+        requires_buffer: false,
+        execute: &mark_move/1
+      },
+      %Minga.Command{
+        name: :tree_paste,
+        description: "Paste marked file tree entry",
+        requires_buffer: false,
+        execute: &paste/1
+      },
+      %Minga.Command{
+        name: :tree_root_parent,
+        description: "Root file tree at parent directory",
+        requires_buffer: false,
+        execute: &root_parent/1
+      },
+      %Minga.Command{
+        name: :tree_root_selected,
+        description: "Root file tree at selected directory",
+        requires_buffer: false,
+        execute: &root_selected/1
+      },
+      %Minga.Command{
+        name: :tree_root_original,
+        description: "Restore file tree project root",
+        requires_buffer: false,
+        execute: &root_original/1
+      },
+      %Minga.Command{
+        name: :tree_filter,
+        description: "Filter file tree",
+        requires_buffer: false,
+        execute: &filter/1
+      },
+      %Minga.Command{
+        name: :tree_toggle_help,
+        description: "Toggle file tree help",
+        requires_buffer: false,
+        execute: &toggle_help/1
       },
       %Minga.Command{
         name: :tree_close,

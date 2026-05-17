@@ -22,10 +22,20 @@ defmodule MingaEditor.Input.FileTreeHandler do
   alias MingaEditor.Input
   alias Minga.Keymap
   alias Minga.Project.FileTree
+  alias Minga.Project.FileTree.BufferSync
   alias MingaEditor.Workspace.State, as: WorkspaceState
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
+
+  # Help overlay active: capture keys so Escape closes help instead of closing the tree.
+  def handle_key(
+        %{workspace: %{keymap_scope: :file_tree, file_tree: %{help_visible: true}}} = state,
+        cp,
+        mods
+      ) do
+    {:handled, handle_help_key(state, cp, mods)}
+  end
 
   # Inline editing active: capture all keys before they reach the mode FSM or scope trie
   def handle_key(
@@ -34,6 +44,15 @@ defmodule MingaEditor.Input.FileTreeHandler do
         mods
       ) do
     {:handled, handle_inline_edit_key(state, cp, mods)}
+  end
+
+  # Filter input active: capture text before it reaches vim search.
+  def handle_key(
+        %{workspace: %{keymap_scope: :file_tree, file_tree: %{filtering: true}}} = state,
+        cp,
+        mods
+      ) do
+    {:handled, handle_filter_key(state, cp, mods)}
   end
 
   # File tree scope with tree focused
@@ -306,6 +325,47 @@ defmodule MingaEditor.Input.FileTreeHandler do
   # All other keys (with modifiers, control chars): swallow them
   defp handle_inline_edit_key(state, _cp, _mods), do: state
 
+  # ── Help and filter key handlers ────────────────────────────────────────
+
+  @spec handle_help_key(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
+  defp handle_help_key(state, @escape, 0), do: Commands.FileTree.hide_help(state)
+  defp handle_help_key(state, ??, 0), do: Commands.FileTree.toggle_help(state)
+  defp handle_help_key(state, _cp, _mods), do: state
+
+  @spec handle_filter_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
+          EditorState.t()
+  defp handle_filter_key(state, @enter, 0) do
+    set_file_tree(state, FileTreeState.accept_filter(state.workspace.file_tree))
+  end
+
+  defp handle_filter_key(state, @escape, 0) do
+    set_file_tree(state, FileTreeState.clear_filter(state.workspace.file_tree))
+  end
+
+  defp handle_filter_key(state, @backspace, 0) do
+    text = current_filter_text(state)
+
+    if text == "" do
+      set_file_tree(state, FileTreeState.clear_filter(state.workspace.file_tree))
+    else
+      new_text = String.slice(text, 0, max(String.length(text) - 1, 0))
+      set_file_tree(state, FileTreeState.update_filter(state.workspace.file_tree, new_text))
+    end
+  end
+
+  defp handle_filter_key(state, cp, 0) when cp >= 32 do
+    new_text = current_filter_text(state) <> <<cp::utf8>>
+    set_file_tree(state, FileTreeState.update_filter(state.workspace.file_tree, new_text))
+  end
+
+  defp handle_filter_key(state, _cp, _mods), do: state
+
+  @spec current_filter_text(EditorState.t()) :: String.t()
+  defp current_filter_text(%{workspace: %{file_tree: %{tree: %FileTree{filter: filter}}}})
+       when is_binary(filter), do: filter
+
+  defp current_filter_text(_state), do: ""
+
   # ── Shared helpers ──────────────────────────────────────────────────────
 
   @spec set_active_buffer_override(EditorState.t(), pid() | nil) :: EditorState.t()
@@ -317,8 +377,19 @@ defmodule MingaEditor.Input.FileTreeHandler do
 
   @spec set_file_tree(EditorState.t(), FileTreeState.t()) :: EditorState.t()
   defp set_file_tree(state, file_tree) do
+    sync_buffer(file_tree)
     EditorState.update_workspace(state, &WorkspaceState.set_file_tree(&1, file_tree))
   end
+
+  @spec sync_buffer(FileTreeState.t()) :: :ok
+  defp sync_buffer(%FileTreeState{buffer: buffer, tree: %FileTree{} = tree})
+       when is_pid(buffer) do
+    BufferSync.sync(buffer, tree)
+  catch
+    :exit, _reason -> :ok
+  end
+
+  defp sync_buffer(%FileTreeState{}), do: :ok
 
   @spec update_file_tree(EditorState.t(), (FileTreeState.t() -> FileTreeState.t())) ::
           EditorState.t()

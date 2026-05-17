@@ -54,7 +54,10 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
       git_status: %{},
       dirty_paths: MapSet.new(),
       rows: nil,
-      status: :ready
+      status: :ready,
+      filter_text: nil,
+      filtering?: false,
+      help_visible?: false
     ]
 
     @type t :: %__MODULE__{
@@ -67,7 +70,10 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
             git_status: Minga.Project.FileTree.GitStatus.status_map(),
             dirty_paths: MapSet.t(String.t()),
             rows: [Row.t()] | nil,
-            status: FileTreeState.tree_status()
+            status: FileTreeState.tree_status(),
+            filter_text: String.t() | nil,
+            filtering?: boolean(),
+            help_visible?: boolean()
           }
   end
 
@@ -115,7 +121,10 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
       active_path: active_buffer_path(state),
       dirty_paths: dirty_paths(state),
       editing: Map.get(file_tree, :editing),
+      filter_text: Map.get(tree, :filter),
+      filtering?: Map.get(file_tree, :filtering, false),
       git_status: tree.git_status,
+      help_visible?: Map.get(file_tree, :help_visible, false),
       status: status_from_file_tree(file_tree)
     }
 
@@ -127,12 +136,12 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
        when width <= 0 or height <= 0,
        do: []
 
+  defp do_render(%RenderInput{help_visible?: true} = input), do: render_help_panel(input)
+
   defp do_render(
          %RenderInput{tree: tree, rect: {row_off, col_off, width, height}, theme: theme} = input
        ) do
-    # Header: project directory name with folder icon
-    project_name = Path.basename(tree.root)
-    header_text = " #{@folder_open} #{project_name}/"
+    header_text = header_text(input, tree)
     header_display = Unicode.pad_display_trailing(header_text, width)
 
     header = [
@@ -166,6 +175,178 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     sep_commands = render_separator(sep_col, row_off, height, theme)
 
     header ++ entry_commands ++ blank_commands ++ sep_commands
+  end
+
+  @spec render_help_panel(RenderInput.t()) :: [DisplayList.draw()]
+  defp render_help_panel(%RenderInput{rect: {row_off, col_off, width, height}, theme: theme}) do
+    blank = String.duplicate(" ", width)
+    bg_face = Face.new(fg: theme.tree.fg, bg: theme.tree.bg)
+
+    background =
+      for row <- 0..(height - 1) do
+        DisplayList.draw(row_off + row, col_off, blank, bg_face)
+      end
+
+    title_face = Face.new(fg: theme.tree.header_fg, bg: theme.tree.header_bg, bold: true)
+    label_face = Face.new(fg: theme.tree.dir_fg, bg: theme.tree.bg, bold: true)
+    key_face = Face.new(fg: theme.tree.fg, bg: theme.tree.bg, bold: true)
+    desc_face = Face.new(fg: theme.tree.separator_fg, bg: theme.tree.bg)
+
+    header = [
+      DisplayList.draw(
+        row_off,
+        col_off,
+        Unicode.pad_display_trailing(" Keyboard Shortcuts", width),
+        title_face
+      )
+    ]
+
+    help_draws =
+      render_help_groups(
+        Minga.Keymap.Scope.FileTree.help_groups(:default),
+        row_off + 2,
+        col_off,
+        width,
+        max(height - 2, 0),
+        label_face,
+        key_face,
+        desc_face
+      )
+
+    separator = render_separator(col_off + width, row_off, height, theme)
+    background ++ header ++ help_draws ++ separator
+  end
+
+  @spec render_help_groups(
+          [{String.t(), [{String.t(), String.t()}]}],
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer(),
+          non_neg_integer(),
+          Face.t(),
+          Face.t(),
+          Face.t()
+        ) :: [DisplayList.draw()]
+  defp render_help_groups(groups, row, col, width, rows_left, label_face, key_face, desc_face) do
+    {draws, _row, _remaining} =
+      Enum.reduce(groups, {[], row, rows_left}, fn group, acc ->
+        render_help_group_block(group, acc, col, width, label_face, key_face, desc_face)
+      end)
+
+    Enum.reverse(draws)
+  end
+
+  @spec render_help_group_block(
+          {String.t(), [{String.t(), String.t()}]},
+          {[DisplayList.draw()], non_neg_integer(), non_neg_integer()},
+          non_neg_integer(),
+          pos_integer(),
+          Face.t(),
+          Face.t(),
+          Face.t()
+        ) :: {[DisplayList.draw()], non_neg_integer(), non_neg_integer()}
+  defp render_help_group_block(
+         _group,
+         {draws, row, remaining},
+         _col,
+         _width,
+         _label_face,
+         _key_face,
+         _desc_face
+       )
+       when remaining <= 0,
+       do: {draws, row, 0}
+
+  defp render_help_group_block(
+         {title, bindings},
+         {draws, row, remaining},
+         col,
+         width,
+         label_face,
+         key_face,
+         desc_face
+       ) do
+    title_draw =
+      DisplayList.draw(
+        row,
+        col + 2,
+        Unicode.truncate_display_width(title, max(width - 4, 0)),
+        label_face
+      )
+
+    {binding_draws, row, remaining} =
+      render_help_bindings(bindings, row + 1, remaining - 1, col, width, key_face, desc_face)
+
+    {[title_draw | binding_draws] ++ draws, row + 1, remaining - 1}
+  end
+
+  @spec render_help_bindings(
+          [{String.t(), String.t()}],
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer(),
+          Face.t(),
+          Face.t()
+        ) :: {[DisplayList.draw()], non_neg_integer(), non_neg_integer()}
+  defp render_help_bindings(bindings, row, remaining, col, width, key_face, desc_face) do
+    Enum.reduce(bindings, {[], row, remaining}, fn binding, acc ->
+      render_help_binding_row(binding, acc, col, width, key_face, desc_face)
+    end)
+  end
+
+  @spec render_help_binding_row(
+          {String.t(), String.t()},
+          {[DisplayList.draw()], non_neg_integer(), non_neg_integer()},
+          non_neg_integer(),
+          pos_integer(),
+          Face.t(),
+          Face.t()
+        ) :: {[DisplayList.draw()], non_neg_integer(), non_neg_integer()}
+  defp render_help_binding_row(
+         _binding,
+         {draws, row, remaining},
+         _col,
+         _width,
+         _key_face,
+         _desc_face
+       )
+       when remaining <= 0,
+       do: {draws, row, 0}
+
+  defp render_help_binding_row(
+         {key, desc},
+         {draws, row, remaining},
+         col,
+         width,
+         key_face,
+         desc_face
+       ) do
+    key_width = min(div(width, 3), 12)
+    key_text = key |> String.pad_trailing(key_width) |> Unicode.truncate_display_width(key_width)
+    desc_text = Unicode.truncate_display_width(desc, max(width - key_width - 6, 0))
+
+    row_draws = [
+      DisplayList.draw(row, col + 4, key_text, key_face),
+      DisplayList.draw(row, col + 4 + key_width, desc_text, desc_face)
+    ]
+
+    {row_draws ++ draws, row + 1, remaining - 1}
+  end
+
+  @spec header_text(RenderInput.t(), FileTree.t()) :: String.t()
+  defp header_text(%RenderInput{filtering?: true, filter_text: filter}, _tree) do
+    " / " <> (filter || "") <> "▏"
+  end
+
+  defp header_text(%RenderInput{filter_text: filter}, _tree)
+       when is_binary(filter) and filter != "" do
+    " / " <> filter
+  end
+
+  defp header_text(%RenderInput{}, tree) do
+    project_name = Path.basename(tree.root)
+    " #{@folder_open} #{project_name}/"
   end
 
   @spec status_from_file_tree(FileTreeState.t() | map()) :: FileTreeState.tree_status()

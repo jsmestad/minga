@@ -8,6 +8,7 @@ defmodule MingaEditor.State.FileTree do
   """
 
   alias Minga.Project.FileTree
+  alias MingaEditor.State.FileTree.ClipboardMark
 
   @typedoc """
   Inline editing state for creating files/folders or renaming entries.
@@ -26,6 +27,9 @@ defmodule MingaEditor.State.FileTree do
           original_name: String.t() | nil
         }
 
+  @type clipboard_operation :: ClipboardMark.operation()
+  @type clipboard_mark :: ClipboardMark.t()
+
   @typedoc "Explicit presentation state for the file tree sidebar."
   @type tree_status :: :hidden | :loading | :empty | :ready | {:error, String.t()}
 
@@ -36,9 +40,13 @@ defmodule MingaEditor.State.FileTree do
           buffer: pid() | nil,
           editing: editing() | nil,
           project_root: String.t() | nil,
+          original_root: String.t() | nil,
           tree_status: tree_status(),
           tree_width: pos_integer(),
-          refresh_timer: reference() | nil
+          refresh_timer: reference() | nil,
+          clipboard_mark: clipboard_mark() | nil,
+          filtering: boolean(),
+          help_visible: boolean()
         }
 
   defstruct tree: nil,
@@ -46,9 +54,13 @@ defmodule MingaEditor.State.FileTree do
             buffer: nil,
             editing: nil,
             project_root: nil,
+            original_root: nil,
             tree_status: :hidden,
             tree_width: 30,
-            refresh_timer: nil
+            refresh_timer: nil,
+            clipboard_mark: nil,
+            filtering: false,
+            help_visible: false
 
   @doc "Returns true when the file tree is open."
   @spec open?(t()) :: boolean()
@@ -108,6 +120,7 @@ defmodule MingaEditor.State.FileTree do
         focused: true,
         buffer: buffer,
         project_root: tree.root,
+        original_root: ft.original_root || tree.root,
         tree_status: classify_tree(tree),
         tree_width: tree.width
     }
@@ -117,21 +130,36 @@ defmodule MingaEditor.State.FileTree do
   @spec replace_tree(t(), FileTree.t()) :: t()
   def replace_tree(%__MODULE__{} = ft, %FileTree{} = tree) do
     tree = ensure_tree_entries(tree)
-    %{ft | tree: tree, tree_status: classify_tree(tree), tree_width: tree.width}
+
+    %{
+      ft
+      | tree: tree,
+        project_root: tree.root,
+        tree_status: classify_tree(tree),
+        tree_width: tree.width
+    }
   end
 
   @doc "Marks the sidebar as loading."
   @spec loading(t()) :: t()
   def loading(%__MODULE__{} = ft) do
-    %{ft | focused: false, editing: nil, tree_status: :loading}
+    %{
+      ft
+      | focused: false,
+        editing: nil,
+        filtering: false,
+        help_visible: false,
+        tree_status: :loading
+    }
   end
 
   @doc "Updates the project root associated with the file tree."
   @spec set_project_root(t(), String.t() | nil) :: t()
-  def set_project_root(%__MODULE__{} = ft, nil), do: %{ft | project_root: nil}
+  def set_project_root(%__MODULE__{} = ft, nil), do: %{ft | project_root: nil, original_root: nil}
 
   def set_project_root(%__MODULE__{} = ft, root) when is_binary(root) do
-    %{ft | project_root: Path.expand(root)}
+    expanded = Path.expand(root)
+    %{ft | project_root: expanded, original_root: expanded}
   end
 
   @doc "Returns true when a filesystem refresh timer is pending."
@@ -158,7 +186,17 @@ defmodule MingaEditor.State.FileTree do
   @doc "Closes the tree and clears the buffer."
   @spec close(t()) :: t()
   def close(%__MODULE__{} = ft) do
-    %{ft | tree: nil, focused: false, buffer: nil, editing: nil, tree_status: :hidden}
+    %{
+      ft
+      | tree: nil,
+        focused: false,
+        buffer: nil,
+        editing: nil,
+        tree_status: :hidden,
+        clipboard_mark: nil,
+        filtering: false,
+        help_visible: false
+    }
   end
 
   @doc """
@@ -172,7 +210,12 @@ defmodule MingaEditor.State.FileTree do
       when type in [:new_file, :new_folder, :rename] and is_integer(index) and index >= 0 do
     original = if type == :rename, do: initial_text, else: nil
 
-    %{ft | editing: %{index: index, text: initial_text, type: type, original_name: original}}
+    %{
+      ft
+      | editing: %{index: index, text: initial_text, type: type, original_name: original},
+        filtering: false,
+        help_visible: false
+    }
   end
 
   @doc "Updates the text being typed in the inline editor."
@@ -183,6 +226,65 @@ defmodule MingaEditor.State.FileTree do
   end
 
   def update_editing_text(%__MODULE__{editing: nil} = ft, _new_text), do: ft
+
+  @doc "Stores a pending file tree clipboard operation."
+  @spec mark_clipboard(t(), String.t(), String.t(), boolean(), clipboard_operation()) :: t()
+  def mark_clipboard(%__MODULE__{} = ft, path, name, dir?, operation)
+      when is_binary(path) and is_binary(name) and is_boolean(dir?) and
+             operation in [:copy, :move] do
+    %{ft | clipboard_mark: ClipboardMark.new(path, name, dir?, operation)}
+  end
+
+  @doc "Clears a pending file tree clipboard operation."
+  @spec clear_clipboard(t()) :: t()
+  def clear_clipboard(%__MODULE__{} = ft), do: %{ft | clipboard_mark: nil}
+
+  @doc "Starts inline file tree filtering."
+  @spec start_filtering(t()) :: t()
+  def start_filtering(%__MODULE__{tree: %FileTree{} = tree} = ft) do
+    filter = tree.filter || ""
+
+    %{
+      ft
+      | tree: FileTree.set_filter(tree, filter),
+        filtering: true,
+        editing: nil,
+        help_visible: false
+    }
+  end
+
+  def start_filtering(%__MODULE__{} = ft), do: ft
+
+  @doc "Updates the active file tree filter."
+  @spec update_filter(t(), String.t()) :: t()
+  def update_filter(%__MODULE__{tree: %FileTree{} = tree} = ft, filter) when is_binary(filter) do
+    tree = FileTree.set_filter(tree, filter)
+    %{ft | tree: tree, tree_status: classify_tree(tree)}
+  end
+
+  def update_filter(%__MODULE__{} = ft, _filter), do: ft
+
+  @doc "Accepts the current filter and leaves the narrowed tree visible."
+  @spec accept_filter(t()) :: t()
+  def accept_filter(%__MODULE__{} = ft), do: %{ft | filtering: false}
+
+  @doc "Clears the active filter and exits filtering mode."
+  @spec clear_filter(t()) :: t()
+  def clear_filter(%__MODULE__{tree: %FileTree{} = tree} = ft) do
+    tree = FileTree.clear_filter(tree)
+    %{ft | tree: tree, filtering: false, tree_status: classify_tree(tree)}
+  end
+
+  def clear_filter(%__MODULE__{} = ft), do: %{ft | filtering: false}
+
+  @doc "Toggles the file tree help overlay."
+  @spec toggle_help(t()) :: t()
+  def toggle_help(%__MODULE__{} = ft),
+    do: %{ft | help_visible: not ft.help_visible, filtering: false}
+
+  @doc "Hides the file tree help overlay."
+  @spec hide_help(t()) :: t()
+  def hide_help(%__MODULE__{} = ft), do: %{ft | help_visible: false}
 
   @doc "Cancels inline editing, clearing the editing state back to nil."
   @spec cancel_editing(t()) :: t()
