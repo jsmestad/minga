@@ -544,25 +544,28 @@ defmodule MingaEditor.LspActions do
   end
 
   def code_lens(%{workspace: %{buffers: %{active: buf}}} = state) do
-    case lsp_client_for(state, buf) do
-      nil ->
-        state
+    request_code_lens(state, lsp_client_for(state, buf), buf)
+  end
 
-      client ->
-        file_path = Buffer.file_path(buf)
+  @spec request_code_lens(state(), pid() | nil, pid()) :: state()
+  defp request_code_lens(state, nil, _buf), do: state
 
-        case file_path do
-          nil ->
-            EditorState.set_status(state, "Buffer has no file path")
+  defp request_code_lens(state, client, buf) do
+    state
+    |> request_code_lens_for_path(client, Buffer.file_path(buf))
+  end
 
-          path ->
-            uri = SyncServer.path_to_uri(path)
-            params = %{"textDocument" => %{"uri" => uri}}
-            ref = Client.request(client, "textDocument/codeLens", params)
+  @spec request_code_lens_for_path(state(), pid(), String.t() | nil) :: state()
+  defp request_code_lens_for_path(state, _client, nil) do
+    EditorState.set_status(state, "Buffer has no file path")
+  end
 
-            put_lsp_pending(state, ref, :code_lens)
-        end
-    end
+  defp request_code_lens_for_path(state, client, path) do
+    uri = SyncServer.path_to_uri(path)
+    params = %{"textDocument" => %{"uri" => uri}}
+    ref = Client.request(client, "textDocument/codeLens", params)
+
+    put_lsp_pending(state, ref, :code_lens)
   end
 
   # ── Inlay hints ───────────────────────────────────────────────────────────
@@ -574,34 +577,34 @@ defmodule MingaEditor.LspActions do
   end
 
   def inlay_hints(%{workspace: %{buffers: %{active: buf}}} = state) do
-    case lsp_client_for(state, buf) do
-      nil ->
-        state
+    request_inlay_hints(state, lsp_client_for(state, buf), buf)
+  end
 
-      client ->
-        file_path = Buffer.file_path(buf)
+  @spec request_inlay_hints(state(), pid() | nil, pid()) :: state()
+  defp request_inlay_hints(state, nil, _buf), do: state
 
-        case file_path do
-          nil ->
-            state
+  defp request_inlay_hints(state, client, buf) do
+    request_inlay_hints_for_path(state, client, Buffer.file_path(buf))
+  end
 
-          path ->
-            uri = SyncServer.path_to_uri(path)
-            vp = state.terminal_viewport
+  @spec request_inlay_hints_for_path(state(), pid(), String.t() | nil) :: state()
+  defp request_inlay_hints_for_path(state, _client, nil), do: state
 
-            params = %{
-              "textDocument" => %{"uri" => uri},
-              "range" => %{
-                "start" => %{"line" => vp.top, "character" => 0},
-                "end" => %{"line" => vp.top + vp.rows, "character" => 0}
-              }
-            }
+  defp request_inlay_hints_for_path(state, client, path) do
+    uri = SyncServer.path_to_uri(path)
+    vp = state.terminal_viewport
 
-            ref = Client.request(client, "textDocument/inlayHint", params)
+    params = %{
+      "textDocument" => %{"uri" => uri},
+      "range" => %{
+        "start" => %{"line" => vp.top, "character" => 0},
+        "end" => %{"line" => vp.top + vp.rows, "character" => 0}
+      }
+    }
 
-            put_lsp_pending(state, ref, :inlay_hint)
-        end
-    end
+    ref = Client.request(client, "textDocument/inlayHint", params)
+
+    put_lsp_pending(state, ref, :inlay_hint)
   end
 
   @inlay_hint_scroll_debounce_ms 200
