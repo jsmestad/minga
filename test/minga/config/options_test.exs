@@ -46,6 +46,17 @@ defmodule Minga.Config.OptionsTest do
                lsp_auto_start: true,
                formatter: nil,
                title_format: "{filename} {dirty}({directory}) - Minga",
+               modeline_left_segments: [:mode, :filename, :git, :agent, :background_agent],
+               modeline_right_segments: [
+                 :diagnostics,
+                 :indent,
+                 :parser,
+                 :lsp,
+                 :filetype,
+                 :position,
+                 :percent
+               ],
+               modeline_separator: :powerline,
                recent_files_limit: 200,
                persist_recent_files: true,
                persist_known_projects: true,
@@ -188,6 +199,15 @@ defmodule Minga.Config.OptionsTest do
       assert Options.get(s, :startup_view) == :editor
     end
 
+    test "set and get modeline segments", %{server: s} do
+      assert {:ok, [:mode, :filename]} =
+               Options.set(s, :modeline_left_segments, [:mode, :filename])
+
+      assert Options.get(s, :modeline_left_segments) == [:mode, :filename]
+      assert {:ok, []} = Options.set(s, :modeline_right_segments, [])
+      assert Options.get(s, :modeline_right_segments) == []
+    end
+
     test "set and get agent_auto_context", %{server: s} do
       assert Options.get(s, :agent_auto_context) == true
       assert {:ok, false} = Options.set(s, :agent_auto_context, false)
@@ -243,6 +263,16 @@ defmodule Minga.Config.OptionsTest do
     test "unknown option returns error", %{server: s} do
       assert {:error, msg} = Options.set(s, :nonexistent, 42)
       assert msg =~ "unknown option"
+    end
+
+    test "atom_list rejects non-atoms", %{server: s} do
+      assert {:error, msg} = Options.set(s, :modeline_left_segments, [:mode, "filename"])
+      assert msg =~ "list of atoms"
+    end
+
+    test "modeline_separator rejects unknown style", %{server: s} do
+      assert {:error, msg} = Options.set(s, :modeline_separator, :triangle)
+      assert msg =~ "must be one of"
     end
 
     test "font_family accepts any string", %{server: s} do

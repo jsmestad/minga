@@ -146,13 +146,31 @@ defmodule Minga.Extension.Supervisor do
          {:ok, _state} <- call_init(module, entry.config) do
       register_extension_commands(module, name, cmd_registry)
       register_extension_keybinds(module, name, keymap)
-      start_child(supervisor, registry, name, module, entry.config)
+      start_child_and_register_modeline_segments(supervisor, registry, name, module, entry.config)
     else
       {:error, reason} ->
         msg = "Extension #{name} load error: #{inspect(reason)}"
         Minga.Log.warning(:config, msg)
         ExtRegistry.update(registry, name, status: :load_error, pid: nil)
         {:error, reason}
+    end
+  end
+
+  @spec start_child_and_register_modeline_segments(
+          GenServer.server(),
+          GenServer.server(),
+          atom(),
+          module(),
+          keyword()
+        ) :: {:ok, pid()} | {:error, term()}
+  defp start_child_and_register_modeline_segments(supervisor, registry, name, module, config) do
+    case start_child(supervisor, registry, name, module, config) do
+      {:ok, _pid} = ok ->
+        register_extension_modeline_segments(module, name)
+        ok
+
+      {:error, _reason} = error ->
+        error
     end
   end
 
@@ -198,12 +216,12 @@ defmodule Minga.Extension.Supervisor do
       end
     end
 
-    # Deregister DSL-declared commands and keybindings before purging the module.
-    # The module must still be loaded for __command_schema__/0 and
-    # __keybind_schema__/0 to work.
+    # Deregister DSL-declared commands, keybindings, and modeline segments before purging the module.
+    # The module must still be loaded for schema functions to work.
     if entry.module do
       deregister_extension_commands(entry.module, cmd_registry)
       deregister_extension_keybinds(entry.module, keymap)
+      Minga.Config.ModelineSegments.unregister_source({:extension, name})
       :code.purge(entry.module)
       :code.delete(entry.module)
     end
@@ -295,7 +313,7 @@ defmodule Minga.Extension.Supervisor do
          {:ok, _state} <- call_init(module, entry.config) do
       register_extension_commands(module, name, cmd_registry)
       register_extension_keybinds(module, name, keymap)
-      start_child(supervisor, registry, name, module, entry.config)
+      start_child_and_register_modeline_segments(supervisor, registry, name, module, entry.config)
     else
       {:error, reason} ->
         msg = "Extension #{name} load error: #{inspect(reason)}"
@@ -522,6 +540,48 @@ defmodule Minga.Extension.Supervisor do
       execute: fn state -> apply(mod, fun, [state]) end,
       requires_buffer: requires_buffer
     }
+  end
+
+  @spec register_extension_modeline_segments(module(), atom()) :: :ok
+  defp register_extension_modeline_segments(module, ext_name) do
+    case function_exported?(module, :__modeline_segment_schema__, 0) do
+      true ->
+        register_extension_modeline_segment_schema(module.__modeline_segment_schema__(), ext_name)
+
+      false ->
+        :ok
+    end
+  rescue
+    e ->
+      Minga.Log.warning(
+        :config,
+        "Extension #{ext_name} modeline segment registration failed: #{Exception.message(e)}"
+      )
+
+      :ok
+  end
+
+  @spec register_extension_modeline_segment_schema(
+          [Minga.Extension.modeline_segment_spec()],
+          atom()
+        ) :: :ok
+  defp register_extension_modeline_segment_schema(schema, ext_name) do
+    for spec <- schema do
+      register_extension_modeline_segment(spec, ext_name)
+    end
+
+    :ok
+  end
+
+  @spec register_extension_modeline_segment(Minga.Extension.modeline_segment_spec(), atom()) ::
+          :ok
+  defp register_extension_modeline_segment({name, opts, {mod, fun}}, ext_name) do
+    Minga.Config.ModelineSegments.register(
+      name,
+      opts,
+      fn ctx -> apply(mod, fun, [ctx]) end,
+      {:extension, ext_name}
+    )
   end
 
   @spec register_extension_keybinds(module(), atom(), GenServer.server()) :: :ok

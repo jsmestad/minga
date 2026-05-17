@@ -69,6 +69,115 @@ set :cursor_animate, false
 
 Invalid values show a clear error. Setting `:tab_width` to `-1` tells you it must be a positive integer.
 
+## Modeline
+
+The modeline is the status line at the bottom of each editor window. It is built from named segments, so you can hide noisy information, move the important parts closer to the edge, or add your own project-specific status.
+
+### Built-in segments
+
+| Segment | Shows |
+|---------|-------|
+| `:mode` | Current editing mode, such as `NORMAL`, `INSERT`, or `VISUAL` |
+| `:filename` | Buffer name, dirty marker, buffer index, and macro recording indicator |
+| `:git` | Git branch and diff counts when the buffer is in a Git repository |
+| `:agent` | Foreground agent status, such as plan, thinking, tool, or error |
+| `:background_agent` | Running background subagent count and active background task label |
+| `:diagnostics` | Error, warning, and info diagnostic counts |
+| `:parser` | Tree-sitter parser restart or unavailable indicator |
+| `:lsp` | LSP connection status |
+| `:filetype` | Filetype icon and label |
+| `:position` | Cursor line and column |
+| `:percent` | Cursor position as a file percentage |
+| `:selection` | Reserved for visual selection details |
+
+### Choosing segment order
+
+Use `:modeline_left_segments` and `:modeline_right_segments` to choose which segments appear. Omitting a segment hides it. The list order is the render order for that side.
+
+```elixir
+set :modeline_left_segments, [:mode, :filename, :git, :agent, :background_agent]
+set :modeline_right_segments, [:diagnostics, :parser, :lsp, :filetype, :position, :percent]
+```
+
+Move any built-in segment by putting it on the other side:
+
+```elixir
+# Put cursor position beside the filename and hide percent.
+set :modeline_left_segments, [:mode, :filename, :position, :git]
+set :modeline_right_segments, [:diagnostics, :lsp, :filetype]
+```
+
+### Separator style
+
+`:modeline_separator` controls the glyph inserted between adjacent color zones.
+
+| Style | Example |
+|-------|---------|
+| `:powerline` | Theme color transition, matching the historical Minga modeline |
+| `:round` | `NORMAL file.ex` |
+| `:slant` | `NORMAL file.ex` |
+| `:none` | `NORMAL file.ex` |
+
+```elixir
+set :modeline_separator, :round
+```
+
+### Custom segments in `config.exs`
+
+`modeline_segment/3` registers a segment from your config file. The block receives `ctx`, a map with the current modeline data and theme colors. Return one segment tuple, a list of segment tuples, `nil`, or `[]`. A segment tuple is `{text, fg, bg, opts, click_target}`.
+
+```elixir
+modeline_segment :word_count, side: :right, priority: 50 do
+  if ctx.data.filetype in [:markdown, :text, :org] do
+    words =
+      case Minga.API.content() do
+        {:ok, text} -> text |> String.split() |> length()
+        {:error, :no_buffer} -> 0
+      end
+
+    {" #{words}W ", ctx.info_fg, ctx.bar_bg, [], nil}
+  end
+end
+```
+
+The `side:` option is the default side when you do not list the segment explicitly. You can still place the segment yourself:
+
+```elixir
+set :modeline_right_segments, [:word_count, :filetype, :position]
+```
+
+### Custom segments in extensions
+
+Extensions use the same DSL inside a `use Minga.Extension` module:
+
+```elixir
+defmodule MyModeline do
+  use Minga.Extension
+
+  modeline_segment :project_name, side: :left, priority: 70 do
+    {" my-app ", ctx.info_fg, ctx.bar_bg, [], nil}
+  end
+
+  @impl true
+  def name, do: :my_modeline
+
+  @impl true
+  def description, do: "Project modeline segments"
+
+  @impl true
+  def version, do: "0.1.0"
+
+  @impl true
+  def init(_config), do: {:ok, %{}}
+end
+```
+
+Extension segments are removed automatically when the extension stops or config reloads.
+
+### Responsive truncation
+
+Each segment has a priority. When the window is too narrow, Minga drops the lowest-priority visible segment first, then recalculates the line. Built-in priorities keep mode, filename, position, filetype, and diagnostics longer than parser, percent, and background-agent details. Custom segments default to priority `50`; pass `priority:` to make them more or less important.
+
 ## Agent tool approval
 
 When the AI agent wants to run a destructive tool (writing a file, editing a file, or running a shell command), Minga pauses and shows a confirmation prompt:

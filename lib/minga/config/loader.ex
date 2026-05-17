@@ -28,6 +28,7 @@ defmodule Minga.Config.Loader do
   alias Minga.Command
   alias Minga.Config.Advice
   alias Minga.Config.Hooks
+  alias Minga.Config.ModelineSegments
   alias Minga.Config.Options
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Extension.Supervisor, as: ExtSupervisor
@@ -199,6 +200,7 @@ defmodule Minga.Config.Loader do
     Command.reset_registry()
     ExtRegistry.reset()
     PopupRegistry.clear()
+    ModelineSegments.reset()
 
     # Re-run the full load sequence (includes starting extensions)
     new_state = load_all(keymap_server, options_server)

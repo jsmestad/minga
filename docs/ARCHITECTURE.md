@@ -161,7 +161,7 @@ graph TD
 
 ### Foundation tier
 
-Stateless registries and configuration that everything else depends on. These rarely fail.
+Stateless registries and configuration that everything else depends on. These rarely fail. `Config.ModelineSegments` owns the ETS table for user and extension-provided modeline segment renderers, so config reloads can replace those renderers without coupling extensions to the editor renderer.
 
 ```mermaid
 graph TD
@@ -172,6 +172,7 @@ graph TD
     FOUND --> KEYMAP["Keymap.Active"]
     FOUND --> HOOKS["Config.Hooks"]
     FOUND --> ADVICE["Config.Advice"]
+    FOUND --> MODELINE["Config.ModelineSegments"]
     FOUND --> FT["Filetype.Registry"]
 
     style FOUND fill:#6c3483,stroke:#4a235a,color:#fff

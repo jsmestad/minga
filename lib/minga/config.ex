@@ -38,6 +38,7 @@ defmodule Minga.Config do
   alias Minga.Config.Advice
   alias Minga.Config.Completion
   alias Minga.Config.Loader
+  alias Minga.Config.ModelineSegments
   alias Minga.Config.Options
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Keymap
@@ -431,6 +432,37 @@ defmodule Minga.Config do
         unquote(block)
       end)
     end
+  end
+
+  @doc """
+  Defines a custom modeline segment from `config.exs`.
+
+  The block receives `ctx`, the same context map used by built-in modeline segments, and returns a segment tuple, a list of segment tuples, `nil`, or `[]`.
+
+  ## Examples
+
+      modeline_segment :word_count, side: :right, priority: 50 do
+        if ctx.data.filetype in [:markdown, :text, :org] do
+          {" WORDS ", ctx.info_fg, ctx.bar_bg, [], nil}
+        end
+      end
+  """
+  defmacro modeline_segment(name, opts \\ [], do: block) do
+    quote do
+      Minga.Config.register_modeline_segment(unquote(name), unquote(opts), fn var!(ctx) ->
+        unquote(block)
+      end)
+    end
+  end
+
+  @doc """
+  Registers a custom modeline segment render function.
+  """
+  @spec register_modeline_segment(atom(), keyword(), Minga.Config.ModelineSegment.render_fun()) ::
+          :ok
+  def register_modeline_segment(name, opts, render)
+      when is_atom(name) and is_list(opts) and is_function(render, 1) do
+    ModelineSegments.register(name, opts, render)
   end
 
   @doc """

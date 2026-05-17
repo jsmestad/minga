@@ -56,6 +56,9 @@ defmodule Minga.Config.Options do
           | :lsp_auto_start
           | :formatter
           | :title_format
+          | :modeline_left_segments
+          | :modeline_right_segments
+          | :modeline_separator
           | :recent_files_limit
           | :persist_recent_files
           | :persist_known_projects
@@ -155,6 +158,7 @@ defmodule Minga.Config.Options do
           | :string
           | :string_or_nil
           | :string_list
+          | :atom_list
           | :map_or_nil
           | :map_list
           | :float_or_nil
@@ -230,6 +234,13 @@ defmodule Minga.Config.Options do
     {:formatter, :string_or_nil, nil, "External formatter command for the current buffer."},
     {:title_format, :string, "{filename} {dirty}({directory}) - Minga",
      "Window title template with placeholder tokens."},
+    {:modeline_left_segments, :atom_list, [:mode, :filename, :git, :agent, :background_agent],
+     "Modeline segments shown on the left, in render order."},
+    {:modeline_right_segments, :atom_list,
+     [:diagnostics, :indent, :parser, :lsp, :filetype, :position, :percent],
+     "Modeline segments shown on the right, in render order."},
+    {:modeline_separator, {:enum, [:powerline, :round, :slant, :none]}, :powerline,
+     "Separator style between modeline color zones."},
     {:recent_files_limit, :pos_integer, 200, "Maximum number of recent files to keep."},
     {:persist_recent_files, :boolean, true,
      "Whether recent files are written to disk between sessions."},
@@ -952,6 +963,18 @@ defmodule Minga.Config.Options do
 
   defp validate_type(:string_list, name, value) do
     {:error, "#{name} must be a list of strings, got: #{inspect(value)}"}
+  end
+
+  defp validate_type(:atom_list, _name, value) when is_list(value) do
+    if Enum.all?(value, &is_atom/1) do
+      :ok
+    else
+      {:error, "expected a list of atoms, got non-atom elements"}
+    end
+  end
+
+  defp validate_type(:atom_list, name, value) do
+    {:error, "#{name} must be a list of atoms, got: #{inspect(value)}"}
   end
 
   defp validate_type(:map_or_nil, _name, nil), do: :ok

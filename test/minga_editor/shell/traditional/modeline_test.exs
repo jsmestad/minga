@@ -1,8 +1,10 @@
 defmodule MingaEditor.Shell.Traditional.ModelineTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.Shell.Traditional.Modeline
+  alias Minga.Config.ModelineSegments
+  alias Minga.Config.Options
   alias Minga.Mode
+  alias MingaEditor.Shell.Traditional.Modeline
 
   @base_data %{
     mode: :normal,
@@ -261,6 +263,102 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
     end
   end
 
+  describe "configurable segments" do
+    test "omitting a segment hides it" do
+      with_options(fn options ->
+        Options.set(options, :modeline_left_segments, [:mode, :filename])
+        data = Map.put(@base_data, :git_branch, "main")
+
+        {commands, _regions} = Modeline.render(0, 120, data)
+        text = combined_text(commands)
+
+        refute String.contains?(text, "main")
+        refute String.contains?(text, "\uE0A0")
+      end)
+    end
+
+    test "segment order controls render order" do
+      with_options(fn options ->
+        Options.set(options, :modeline_left_segments, [:filename, :mode])
+        Options.set(options, :modeline_right_segments, [])
+
+        {commands, _regions} = Modeline.render(0, 120, @base_data)
+
+        assert text_col(commands, "test.ex") < text_col(commands, "NORMAL")
+      end)
+    end
+
+    test "custom segment renders from registry on declared side" do
+      segment_name = :word_count_modeline_test
+      ModelineSegments.unregister(segment_name)
+
+      try do
+        ModelineSegments.register(segment_name, [side: :right, priority: 50], fn ctx ->
+          {" #{ctx.data.filetype}W ", ctx.info_fg, ctx.bar_bg, [], nil}
+        end)
+
+        {commands, _regions} = Modeline.render(0, 120, @base_data)
+        text = combined_text(commands)
+
+        assert String.contains?(text, "elixirW")
+      after
+        ModelineSegments.unregister(segment_name)
+      end
+    end
+
+    test "responsive truncation drops lower-priority segments first" do
+      with_options(fn options ->
+        Options.set(options, :modeline_left_segments, [:mode, :filename, :git])
+        Options.set(options, :modeline_right_segments, [])
+
+        data =
+          Map.merge(@base_data, %{
+            file_name: "very_long_file_name.ex",
+            git_branch: "very-long-branch-name"
+          })
+
+        {commands, _regions} = Modeline.render(0, 24, data)
+        text = combined_text(commands)
+
+        assert String.contains?(text, "NORMAL")
+        refute String.contains?(text, "very-long-branch-name")
+      end)
+    end
+
+    test "separator styles render configured characters" do
+      with_options(fn options ->
+        Options.set(options, :modeline_left_segments, [:mode, :filename])
+        Options.set(options, :modeline_right_segments, [])
+        Options.set(options, :modeline_separator, :round)
+        {round_commands, _regions} = Modeline.render(0, 120, @base_data)
+
+        Options.set(options, :modeline_separator, :slant)
+        {slant_commands, _regions} = Modeline.render(0, 120, @base_data)
+
+        Options.set(options, :modeline_separator, :none)
+        {none_commands, _regions} = Modeline.render(0, 120, @base_data)
+
+        assert String.contains?(combined_text(round_commands), "")
+        assert String.contains?(combined_text(slant_commands), "")
+        refute String.contains?(combined_text(none_commands), "")
+        refute String.contains?(combined_text(none_commands), "")
+      end)
+    end
+
+    test "unknown segment names are ignored" do
+      with_options(fn options ->
+        Options.set(options, :modeline_left_segments, [:mode, :missing_segment, :filename])
+        Options.set(options, :modeline_right_segments, [])
+
+        {commands, _regions} = Modeline.render(0, 120, @base_data)
+        text = combined_text(commands)
+
+        assert String.contains?(text, "NORMAL")
+        assert String.contains?(text, "test.ex")
+      end)
+    end
+  end
+
   describe "cursor_shape/1" do
     test "insert mode returns beam" do
       assert Modeline.cursor_shape(:insert) == :beam
@@ -293,6 +391,32 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
     test "operator_pending mode returns block" do
       assert Modeline.cursor_shape(:operator_pending) == :block
     end
+  end
+
+  defp with_options(fun) when is_function(fun, 1) do
+    options = start_supervised!({Options, name: nil})
+    previous = Process.get(:minga_config_options)
+    Process.put(:minga_config_options, options)
+
+    try do
+      fun.(options)
+    after
+      restore_options_server(previous)
+    end
+  end
+
+  defp restore_options_server(nil), do: Process.delete(:minga_config_options)
+  defp restore_options_server(previous), do: Process.put(:minga_config_options, previous)
+
+  defp combined_text(commands) do
+    Enum.map_join(commands, fn {_row, _col, segment, _opts} -> segment end)
+  end
+
+  defp text_col(commands, needle) do
+    commands
+    |> Enum.find_value(fn {_row, col, segment, _opts} ->
+      if String.contains?(segment, needle), do: col
+    end)
   end
 
   describe "parser status indicator" do
