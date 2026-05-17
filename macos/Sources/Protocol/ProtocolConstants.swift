@@ -1,76 +1,6 @@
-/// Port protocol opcode constants and capability values.
+/// Port protocol constants that are not opcode values.
 ///
-/// These must match the values in `lib/minga/port/protocol.ex` and
-/// `zig/src/protocol.zig`. See `docs/PROTOCOL.md` for the full spec.
-
-// MARK: - Event opcodes (frontend → BEAM)
-
-let OP_KEY_PRESS: UInt8 = 0x01
-let OP_RESIZE: UInt8 = 0x02
-let OP_READY: UInt8 = 0x03
-let OP_MOUSE_EVENT: UInt8 = 0x04
-let OP_PASTE_EVENT: UInt8 = 0x06
-
-// MARK: - Render command opcodes (BEAM → frontend)
-
-let OP_DRAW_TEXT: UInt8 = 0x10
-let OP_SET_CURSOR: UInt8 = 0x11
-let OP_CLEAR: UInt8 = 0x12
-let OP_BATCH_END: UInt8 = 0x13
-let OP_DEFINE_REGION: UInt8 = 0x14
-let OP_SET_CURSOR_SHAPE: UInt8 = 0x15
-let OP_SET_TITLE: UInt8 = 0x16
-let OP_SET_WINDOW_BG: UInt8 = 0x17
-let OP_CLEAR_REGION: UInt8 = 0x18
-let OP_DESTROY_REGION: UInt8 = 0x19
-let OP_SET_ACTIVE_REGION: UInt8 = 0x1A
-let OP_DRAW_STYLED_TEXT: UInt8 = 0x1C
-
-// MARK: - GUI chrome opcodes (BEAM → frontend)
-
-let OP_GUI_FILE_TREE: UInt8 = 0x93
-let OP_GUI_FILE_TREE_SELECTION: UInt8 = 0x94
-let OP_GUI_TAB_BAR: UInt8 = 0x71
-let OP_GUI_WHICH_KEY: UInt8 = 0x72
-let OP_GUI_COMPLETION: UInt8 = 0x73
-let OP_GUI_THEME: UInt8 = 0x74
-let OP_GUI_BREADCRUMB: UInt8 = 0x75
-let OP_GUI_STATUS_BAR: UInt8 = 0x76
-let OP_GUI_PICKER: UInt8 = 0x77
-let OP_GUI_AGENT_CHAT: UInt8 = 0x78
-let OP_GUI_GUTTER_SEP: UInt8 = 0x79
-let OP_GUI_CURSORLINE: UInt8 = 0x7A
-let OP_GUI_GUTTER: UInt8 = 0x7B
-let OP_GUI_BOTTOM_PANEL: UInt8 = 0x7C
-let OP_GUI_PICKER_PREVIEW: UInt8 = 0x7D
-let OP_GUI_TOOL_MANAGER: UInt8 = 0x7E
-let OP_GUI_MINIBUFFER: UInt8 = 0x7F
-
-// GUI window content opcode (semantic rendering data for buffer windows)
-let OP_GUI_WINDOW_CONTENT: UInt8 = 0x80
-
-// GUI overlay opcodes (native popup rendering)
-let OP_GUI_HOVER_POPUP: UInt8 = 0x81
-let OP_GUI_SIGNATURE_HELP: UInt8 = 0x82
-let OP_GUI_FLOAT_POPUP: UInt8 = 0x83
-let OP_GUI_SPLIT_SEPARATORS: UInt8 = 0x84
-let OP_GUI_GIT_STATUS: UInt8 = 0x85
-let OP_GUI_AGENT_GROUPS: UInt8 = 0x86
-let OP_GUI_BOARD: UInt8 = 0x87
-let OP_GUI_AGENT_CONTEXT: UInt8 = 0x88
-let OP_GUI_CHANGE_SUMMARY: UInt8 = 0x89
-let OP_GUI_HOVER_ACTION: UInt8 = 0x96
-let OP_GUI_CONFIG_STATE: UInt8 = 0x97
-
-// MARK: - Forward-compatible opcodes (0x90+, include a length prefix)
-// Most opcodes >= 0x90 use the format: opcode(1) + payload_length(2) + payload.
-// gui_file_tree uses a 32-bit payload length because expanded project trees can exceed 64KB.
-// Old frontends skip unknown 0x90+ opcodes by reading the standard 16-bit length.
-
-let OP_CLIPBOARD_WRITE: UInt8 = 0x90
-let OP_GUI_INDENT_GUIDES: UInt8 = 0x91
-let OP_GUI_LINE_SPACING: UInt8 = 0x92
-let OP_GUI_CURSOR_ANIMATION: UInt8 = 0x95
+/// Opcode and GUI action constants are generated in `ProtocolOpcodes.generated.swift` from `docs/protocol_schema.toml`.
 
 // MARK: - Sectioned format section IDs
 // Used by opcodes with self-describing sections (gui_status_bar, etc.).
@@ -176,23 +106,6 @@ let GUI_COLOR_AGENT_TOOL_HEADER: UInt8 = 0xAC
 let GUI_COLOR_AGENT_CODE_BG: UInt8 = 0xAD
 let GUI_COLOR_AGENT_CODE_BORDER: UInt8 = 0xAE
 
-// MARK: - Config opcodes (BEAM → frontend)
-
-let OP_SET_FONT: UInt8 = 0x50
-let OP_SET_FONT_FALLBACK: UInt8 = 0x51
-let OP_REGISTER_FONT: UInt8 = 0x52
-
-// MARK: - Highlight opcodes (ignored by GUI, handled by minga-parser)
-
-let OP_SET_LANGUAGE: UInt8 = 0x20
-let OP_PARSE_BUFFER: UInt8 = 0x21
-let OP_SET_HIGHLIGHT_QUERY: UInt8 = 0x22
-let OP_LOAD_GRAMMAR: UInt8 = 0x23
-let OP_SET_INJECTION_QUERY: UInt8 = 0x24
-let OP_QUERY_LANGUAGE_AT: UInt8 = 0x25
-let OP_EDIT_BUFFER: UInt8 = 0x26
-let OP_MEASURE_TEXT: UInt8 = 0x27
-
 // MARK: - Cursor shapes
 
 let CURSOR_BLOCK: UInt8 = 0x00
@@ -243,90 +156,13 @@ let MOUSE_SCROLL_DOWN: UInt8 = 0x41
 let MOUSE_SCROLL_RIGHT: UInt8 = 0x42
 let MOUSE_SCROLL_LEFT: UInt8 = 0x43
 
-// MARK: - GUI action opcode (frontend → BEAM)
-
-let OP_GUI_ACTION: UInt8 = 0x07
-
-// GUI action types (sub-opcodes within gui_action)
-let GUI_ACTION_SELECT_TAB: UInt8 = 0x01
-let GUI_ACTION_CLOSE_TAB: UInt8 = 0x02
-let GUI_ACTION_FILE_TREE_CLICK: UInt8 = 0x03
-let GUI_ACTION_FILE_TREE_TOGGLE: UInt8 = 0x04
-let GUI_ACTION_COMPLETION_SELECT: UInt8 = 0x05
-let GUI_ACTION_BREADCRUMB_CLICK: UInt8 = 0x06
-let GUI_ACTION_TOGGLE_PANEL: UInt8 = 0x07
-let GUI_ACTION_NEW_TAB: UInt8 = 0x08
-let GUI_ACTION_PANEL_SWITCH_TAB: UInt8 = 0x09
-let GUI_ACTION_PANEL_DISMISS: UInt8 = 0x0A
-let GUI_ACTION_PANEL_RESIZE: UInt8 = 0x0B
-let GUI_ACTION_OPEN_FILE: UInt8 = 0x0C
-let GUI_ACTION_FILE_TREE_NEW_FILE: UInt8 = 0x0D
-let GUI_ACTION_FILE_TREE_NEW_FOLDER: UInt8 = 0x0E
-let GUI_ACTION_FILE_TREE_COLLAPSE_ALL: UInt8 = 0x0F
-let GUI_ACTION_FILE_TREE_REFRESH: UInt8 = 0x10
-let GUI_ACTION_FILE_TREE_EDIT_CONFIRM: UInt8 = 0x2D
-let GUI_ACTION_FILE_TREE_EDIT_CANCEL: UInt8 = 0x2E
-let GUI_ACTION_TOOL_INSTALL: UInt8 = 0x11
-let GUI_ACTION_TOOL_UNINSTALL: UInt8 = 0x12
-let GUI_ACTION_TOOL_UPDATE: UInt8 = 0x13
-let GUI_ACTION_TOOL_DISMISS: UInt8 = 0x14
-let GUI_ACTION_AGENT_TOOL_TOGGLE: UInt8 = 0x15
-let GUI_ACTION_EXECUTE_COMMAND: UInt8 = 0x16
-let GUI_ACTION_MINIBUFFER_SELECT: UInt8 = 0x17
-
-let GUI_ACTION_GIT_STAGE_FILE: UInt8 = 0x18
-let GUI_ACTION_GIT_UNSTAGE_FILE: UInt8 = 0x19
-let GUI_ACTION_GIT_DISCARD_FILE: UInt8 = 0x1A
-let GUI_ACTION_GIT_STAGE_ALL: UInt8 = 0x1B
-let GUI_ACTION_GIT_UNSTAGE_ALL: UInt8 = 0x1C
-let GUI_ACTION_GIT_COMMIT: UInt8 = 0x1D
-let GUI_ACTION_GIT_OPEN_FILE: UInt8 = 0x1E
-let GUI_ACTION_GROUP_RENAME: UInt8 = 0x1F
-let GUI_ACTION_GROUP_SET_ICON: UInt8 = 0x20
-let GUI_ACTION_GROUP_CLOSE: UInt8 = 0x21
-let GUI_ACTION_SPACE_LEADER_CHORD: UInt8 = 0x22
-let GUI_ACTION_SPACE_LEADER_RETRACT: UInt8 = 0x23
-let GUI_ACTION_FIND_PASTEBOARD_SEARCH: UInt8 = 0x24
-let GUI_ACTION_BOARD_SELECT_CARD: UInt8 = 0x25
-let GUI_ACTION_BOARD_CLOSE_CARD: UInt8 = 0x26
-let GUI_ACTION_BOARD_REORDER: UInt8 = 0x27
-let GUI_ACTION_BOARD_DISPATCH_AGENT: UInt8 = 0x28
-let GUI_ACTION_AGENT_APPROVE: UInt8 = 0x29
-let GUI_ACTION_AGENT_REQUEST_CHANGES: UInt8 = 0x2A
-let GUI_ACTION_AGENT_DISMISS: UInt8 = 0x2B
-let GUI_ACTION_CHANGE_SUMMARY_CLICK: UInt8 = 0x2C
-let GUI_ACTION_SCROLL_TO_LINE: UInt8 = 0x2F
-let GUI_ACTION_FILE_TREE_DELETE: UInt8 = 0x30
-let GUI_ACTION_FILE_TREE_RENAME: UInt8 = 0x31
-let GUI_ACTION_FILE_TREE_DUPLICATE: UInt8 = 0x32
-let GUI_ACTION_FILE_TREE_MOVE: UInt8 = 0x33
-let GUI_ACTION_SYSTEM_WILL_SLEEP: UInt8 = 0x34
-let GUI_ACTION_SYSTEM_DID_WAKE: UInt8 = 0x35
-let GUI_ACTION_CMD_COPY: UInt8 = 0x36
-let GUI_ACTION_CMD_CUT: UInt8 = 0x37
-let GUI_ACTION_GIT_PUSH: UInt8 = 0x38
-let GUI_ACTION_GIT_PULL: UInt8 = 0x39
-let GUI_ACTION_GIT_FETCH: UInt8 = 0x3A
-let GUI_ACTION_GIT_COMMIT_AMEND: UInt8 = 0x3B
-let GUI_ACTION_GIT_PULL_AND_RETRY: UInt8 = 0x3C
-let GUI_ACTION_FILE_TREE_OPEN_IN_SPLIT: UInt8 = 0x3D
-let GUI_ACTION_TAB_COPY_PATH: UInt8 = 0x3E
-let GUI_ACTION_HOVER_OPEN_ACTION: UInt8 = 0x3F
-let GUI_ACTION_FILE_TREE_DROP: UInt8 = 0x40
-let GUI_ACTION_FOLD_TOGGLE_AT_LINE: UInt8 = 0x41
-let GUI_ACTION_GIT_OPEN_DIFF: UInt8 = 0x42
-let GUI_ACTION_CONFIG_UPDATE: UInt8 = 0x43
-let GUI_ACTION_CONFIG_QUERY: UInt8 = 0x44
+// MARK: - Settings value types
 
 let SETTING_VALUE_BOOL: UInt8 = 0x01
 let SETTING_VALUE_INT: UInt8 = 0x02
 let SETTING_VALUE_STRING: UInt8 = 0x03
 let SETTING_VALUE_ATOM: UInt8 = 0x04
 let SETTING_VALUE_FLOAT: UInt8 = 0x05
-
-// MARK: - Log message opcode (frontend → BEAM)
-
-let OP_LOG_MESSAGE: UInt8 = 0x60
 
 // MARK: - Log levels (must match Zig protocol.zig and Elixir protocol.ex)
 

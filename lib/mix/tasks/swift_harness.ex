@@ -19,6 +19,7 @@ defmodule Mix.Tasks.Swift.Harness do
   @spec run(list()) :: :ok
   def run(_args) do
     sources = [
+      "macos/Sources/Protocol/ProtocolOpcodes.generated.swift",
       "macos/Sources/Protocol/ProtocolConstants.swift",
       "macos/Sources/Protocol/ProtocolTypes.swift",
       "macos/Sources/Protocol/ProtocolDecoder.swift",

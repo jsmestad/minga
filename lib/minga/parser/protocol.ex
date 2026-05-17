@@ -16,8 +16,13 @@ defmodule Minga.Parser.Protocol do
   alias Minga.Language.Symbol
   alias Minga.Parser.StructuralNavResult
 
-  # ── Opcodes: commands (BEAM → Zig parser) ──
+  # --- BEGIN GENERATED (mix protocol.gen) ---
+  # Generated from docs/protocol_schema.toml. Do not edit by hand.
 
+  # Input
+  @op_log_message 0x60
+
+  # Parser Commands
   @op_set_language 0x20
   @op_parse_buffer 0x21
   @op_set_highlight_query 0x22
@@ -35,8 +40,7 @@ defmodule Minga.Parser.Protocol do
   @op_request_structural_nav 0x2F
   @op_set_tags_query 0x40
 
-  # ── Opcodes: responses (Zig parser → BEAM) ──
-
+  # Parser Responses
   @op_highlight_spans 0x30
   @op_highlight_names 0x31
   @op_grammar_loaded 0x32
@@ -51,9 +55,7 @@ defmodule Minga.Parser.Protocol do
   @op_match_item_result 0x3C
   @op_node_info 0x3D
   @op_document_symbols 0x3E
-
-  # Log messages (Zig → BEAM)
-  @op_log_message 0x60
+  # --- END GENERATED ---
 
   # Well-known textobject type IDs (match Zig constants)
   @textobj_function 0

@@ -1,0 +1,827 @@
+# Minga port protocol opcode registry.
+# This is the single source of truth for generated opcode constants across Elixir, Swift, and Zig.
+
+version = "1.0.0"
+description = "Minga port protocol opcode registry"
+
+# Directions:
+# - frontend_to_beam: emitted by a frontend or parser process and decoded by the BEAM
+# - beam_to_frontend: emitted by the BEAM and decoded by a frontend process
+# - beam_to_parser: emitted by the BEAM and decoded by the parser process
+# - parser_to_beam: emitted by the parser process and decoded by the BEAM
+
+# Input events and shared frontend/parser responses.
+[[opcodes]]
+category = "input"
+name = "key_press"
+value = 0x01
+direction = "frontend_to_beam"
+
+[[opcodes]]
+category = "input"
+name = "resize"
+value = 0x02
+direction = "frontend_to_beam"
+
+[[opcodes]]
+category = "input"
+name = "ready"
+value = 0x03
+direction = "frontend_to_beam"
+
+[[opcodes]]
+category = "input"
+name = "mouse_event"
+value = 0x04
+direction = "frontend_to_beam"
+
+[[opcodes]]
+category = "input"
+name = "capabilities_updated"
+value = 0x05
+direction = "frontend_to_beam"
+
+[[opcodes]]
+category = "input"
+name = "paste_event"
+value = 0x06
+direction = "frontend_to_beam"
+
+[[opcodes]]
+category = "input"
+name = "gui_action"
+value = 0x07
+direction = "frontend_to_beam"
+
+[[opcodes]]
+category = "input"
+name = "log_message"
+value = 0x60
+direction = "frontend_to_beam"
+
+# Cell-grid render commands.
+[[opcodes]]
+category = "render"
+name = "draw_text"
+value = 0x10
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "render"
+name = "set_cursor"
+value = 0x11
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "render"
+name = "clear"
+value = 0x12
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "render"
+name = "batch_end"
+value = 0x13
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "render"
+name = "define_region"
+value = 0x14
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "render"
+name = "set_cursor_shape"
+value = 0x15
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "render"
+name = "set_title"
+value = 0x16
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "render"
+name = "set_window_bg"
+value = 0x17
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "render"
+name = "clear_region"
+value = 0x18
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "render"
+name = "destroy_region"
+value = 0x19
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "render"
+name = "set_active_region"
+value = 0x1A
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "render"
+name = "scroll_region"
+value = 0x1B
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "render"
+name = "draw_styled_text"
+value = 0x1C
+direction = "beam_to_frontend"
+
+# Frontend configuration commands.
+[[opcodes]]
+category = "config"
+name = "set_font"
+value = 0x50
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "config"
+name = "set_font_fallback"
+value = 0x51
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "config"
+name = "register_font"
+value = 0x52
+direction = "beam_to_frontend"
+
+# Parser commands.
+[[opcodes]]
+category = "parser_commands"
+name = "set_language"
+value = 0x20
+direction = "beam_to_parser"
+
+[[opcodes]]
+category = "parser_commands"
+name = "parse_buffer"
+value = 0x21
+direction = "beam_to_parser"
+
+[[opcodes]]
+category = "parser_commands"
+name = "set_highlight_query"
+value = 0x22
+direction = "beam_to_parser"
+
+[[opcodes]]
+category = "parser_commands"
+name = "load_grammar"
+value = 0x23
+direction = "beam_to_parser"
+
+[[opcodes]]
+category = "parser_commands"
+name = "set_injection_query"
+value = 0x24
+direction = "beam_to_parser"
+
+[[opcodes]]
+category = "parser_commands"
+name = "query_language_at"
+value = 0x25
+direction = "beam_to_parser"
+
+[[opcodes]]
+category = "parser_commands"
+name = "edit_buffer"
+value = 0x26
+direction = "beam_to_parser"
+
+[[opcodes]]
+category = "parser_commands"
+name = "measure_text"
+value = 0x27
+direction = "beam_to_parser"
+
+[[opcodes]]
+category = "parser_commands"
+name = "set_fold_query"
+value = 0x28
+direction = "beam_to_parser"
+
+[[opcodes]]
+category = "parser_commands"
+name = "set_indent_query"
+value = 0x29
+direction = "beam_to_parser"
+
+[[opcodes]]
+category = "parser_commands"
+name = "request_indent"
+value = 0x2A
+direction = "beam_to_parser"
+
+[[opcodes]]
+category = "parser_commands"
+name = "set_textobject_query"
+value = 0x2B
+direction = "beam_to_parser"
+
+[[opcodes]]
+category = "parser_commands"
+name = "request_textobject"
+value = 0x2C
+direction = "beam_to_parser"
+
+[[opcodes]]
+category = "parser_commands"
+name = "close_buffer"
+value = 0x2D
+direction = "beam_to_parser"
+
+[[opcodes]]
+category = "parser_commands"
+name = "request_match_item"
+value = 0x2E
+direction = "beam_to_parser"
+
+[[opcodes]]
+category = "parser_commands"
+name = "request_structural_nav"
+value = 0x2F
+direction = "beam_to_parser"
+
+[[opcodes]]
+category = "parser_commands"
+name = "set_tags_query"
+value = 0x40
+direction = "beam_to_parser"
+
+# Parser responses.
+[[opcodes]]
+category = "parser_responses"
+name = "highlight_spans"
+value = 0x30
+direction = "parser_to_beam"
+
+[[opcodes]]
+category = "parser_responses"
+name = "highlight_names"
+value = 0x31
+direction = "parser_to_beam"
+
+[[opcodes]]
+category = "parser_responses"
+name = "grammar_loaded"
+value = 0x32
+direction = "parser_to_beam"
+
+[[opcodes]]
+category = "parser_responses"
+name = "language_at_response"
+value = 0x33
+direction = "parser_to_beam"
+
+[[opcodes]]
+category = "parser_responses"
+name = "injection_ranges"
+value = 0x34
+direction = "parser_to_beam"
+
+[[opcodes]]
+category = "parser_responses"
+name = "text_width"
+value = 0x35
+direction = "parser_to_beam"
+
+[[opcodes]]
+category = "parser_responses"
+name = "fold_ranges"
+value = 0x36
+direction = "parser_to_beam"
+
+[[opcodes]]
+category = "parser_responses"
+name = "indent_result"
+value = 0x37
+direction = "parser_to_beam"
+
+[[opcodes]]
+category = "parser_responses"
+name = "textobject_result"
+value = 0x38
+direction = "parser_to_beam"
+
+[[opcodes]]
+category = "parser_responses"
+name = "textobject_positions"
+value = 0x39
+direction = "parser_to_beam"
+
+[[opcodes]]
+category = "parser_responses"
+name = "conceal_spans"
+value = 0x3A
+direction = "parser_to_beam"
+
+[[opcodes]]
+category = "parser_responses"
+name = "request_reparse"
+value = 0x3B
+direction = "parser_to_beam"
+
+[[opcodes]]
+category = "parser_responses"
+name = "match_item_result"
+value = 0x3C
+direction = "parser_to_beam"
+
+[[opcodes]]
+category = "parser_responses"
+name = "node_info"
+value = 0x3D
+direction = "parser_to_beam"
+
+[[opcodes]]
+category = "parser_responses"
+name = "document_symbols"
+value = 0x3E
+direction = "parser_to_beam"
+
+# Native GUI chrome and forward-compatible GUI commands.
+[[opcodes]]
+category = "gui_chrome"
+name = "gui_tab_bar"
+value = 0x71
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_chrome"
+name = "gui_which_key"
+value = 0x72
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_chrome"
+name = "gui_completion"
+value = 0x73
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_chrome"
+name = "gui_theme"
+value = 0x74
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_chrome"
+name = "gui_breadcrumb"
+value = 0x75
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_chrome"
+name = "gui_status_bar"
+value = 0x76
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_chrome"
+name = "gui_picker"
+value = 0x77
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_chrome"
+name = "gui_agent_chat"
+value = 0x78
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_chrome"
+name = "gui_gutter_sep"
+value = 0x79
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_chrome"
+name = "gui_cursorline"
+value = 0x7A
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_chrome"
+name = "gui_gutter"
+value = 0x7B
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_chrome"
+name = "gui_bottom_panel"
+value = 0x7C
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_chrome"
+name = "gui_picker_preview"
+value = 0x7D
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_chrome"
+name = "gui_tool_manager"
+value = 0x7E
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_chrome"
+name = "gui_minibuffer"
+value = 0x7F
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_chrome"
+name = "clipboard_write"
+value = 0x90
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_chrome"
+name = "gui_indent_guides"
+value = 0x91
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_chrome"
+name = "gui_line_spacing"
+value = 0x92
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_chrome"
+name = "gui_file_tree"
+value = 0x93
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_chrome"
+name = "gui_file_tree_selection"
+value = 0x94
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_chrome"
+name = "gui_cursor_animation"
+value = 0x95
+direction = "beam_to_frontend"
+
+# Native GUI semantic rendering and overlays.
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_window_content"
+value = 0x80
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_hover_popup"
+value = 0x81
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_signature_help"
+value = 0x82
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_float_popup"
+value = 0x83
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_split_separators"
+value = 0x84
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_git_status"
+value = 0x85
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_agent_groups"
+value = 0x86
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_board"
+value = 0x87
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_agent_context"
+value = 0x88
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_change_summary"
+value = 0x89
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_hover_action"
+value = 0x96
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_config_state"
+value = 0x97
+direction = "beam_to_frontend"
+
+# Sub-opcodes inside gui_action (0x07).
+[[gui_actions]]
+name = "select_tab"
+value = 0x01
+
+[[gui_actions]]
+name = "close_tab"
+value = 0x02
+
+[[gui_actions]]
+name = "file_tree_click"
+value = 0x03
+
+[[gui_actions]]
+name = "file_tree_toggle"
+value = 0x04
+
+[[gui_actions]]
+name = "completion_select"
+value = 0x05
+
+[[gui_actions]]
+name = "breadcrumb_click"
+value = 0x06
+
+[[gui_actions]]
+name = "toggle_panel"
+value = 0x07
+
+[[gui_actions]]
+name = "new_tab"
+value = 0x08
+
+[[gui_actions]]
+name = "panel_switch_tab"
+value = 0x09
+
+[[gui_actions]]
+name = "panel_dismiss"
+value = 0x0A
+
+[[gui_actions]]
+name = "panel_resize"
+value = 0x0B
+
+[[gui_actions]]
+name = "open_file"
+value = 0x0C
+
+[[gui_actions]]
+name = "file_tree_new_file"
+value = 0x0D
+
+[[gui_actions]]
+name = "file_tree_new_folder"
+value = 0x0E
+
+[[gui_actions]]
+name = "file_tree_collapse_all"
+value = 0x0F
+
+[[gui_actions]]
+name = "file_tree_refresh"
+value = 0x10
+
+[[gui_actions]]
+name = "tool_install"
+value = 0x11
+
+[[gui_actions]]
+name = "tool_uninstall"
+value = 0x12
+
+[[gui_actions]]
+name = "tool_update"
+value = 0x13
+
+[[gui_actions]]
+name = "tool_dismiss"
+value = 0x14
+
+[[gui_actions]]
+name = "agent_tool_toggle"
+value = 0x15
+
+[[gui_actions]]
+name = "execute_command"
+value = 0x16
+
+[[gui_actions]]
+name = "minibuffer_select"
+value = 0x17
+
+[[gui_actions]]
+name = "git_stage_file"
+value = 0x18
+
+[[gui_actions]]
+name = "git_unstage_file"
+value = 0x19
+
+[[gui_actions]]
+name = "git_discard_file"
+value = 0x1A
+
+[[gui_actions]]
+name = "git_stage_all"
+value = 0x1B
+
+[[gui_actions]]
+name = "git_unstage_all"
+value = 0x1C
+
+[[gui_actions]]
+name = "git_commit"
+value = 0x1D
+
+[[gui_actions]]
+name = "git_open_file"
+value = 0x1E
+
+[[gui_actions]]
+name = "agent_group_rename"
+value = 0x1F
+
+[[gui_actions]]
+name = "agent_group_set_icon"
+value = 0x20
+
+[[gui_actions]]
+name = "agent_group_close"
+value = 0x21
+
+[[gui_actions]]
+name = "space_leader_chord"
+value = 0x22
+
+[[gui_actions]]
+name = "space_leader_retract"
+value = 0x23
+
+[[gui_actions]]
+name = "find_pasteboard_search"
+value = 0x24
+
+[[gui_actions]]
+name = "board_select_card"
+value = 0x25
+
+[[gui_actions]]
+name = "board_close_card"
+value = 0x26
+
+[[gui_actions]]
+name = "board_reorder"
+value = 0x27
+
+[[gui_actions]]
+name = "board_dispatch_agent"
+value = 0x28
+
+[[gui_actions]]
+name = "agent_approve"
+value = 0x29
+
+[[gui_actions]]
+name = "agent_request_changes"
+value = 0x2A
+
+[[gui_actions]]
+name = "agent_dismiss"
+value = 0x2B
+
+[[gui_actions]]
+name = "change_summary_click"
+value = 0x2C
+
+[[gui_actions]]
+name = "file_tree_edit_confirm"
+value = 0x2D
+
+[[gui_actions]]
+name = "file_tree_edit_cancel"
+value = 0x2E
+
+[[gui_actions]]
+name = "scroll_to_line"
+value = 0x2F
+
+[[gui_actions]]
+name = "file_tree_delete"
+value = 0x30
+
+[[gui_actions]]
+name = "file_tree_rename"
+value = 0x31
+
+[[gui_actions]]
+name = "file_tree_duplicate"
+value = 0x32
+
+[[gui_actions]]
+name = "file_tree_move"
+value = 0x33
+
+[[gui_actions]]
+name = "system_will_sleep"
+value = 0x34
+
+[[gui_actions]]
+name = "system_did_wake"
+value = 0x35
+
+[[gui_actions]]
+name = "cmd_copy"
+value = 0x36
+
+[[gui_actions]]
+name = "cmd_cut"
+value = 0x37
+
+[[gui_actions]]
+name = "git_push"
+value = 0x38
+
+[[gui_actions]]
+name = "git_pull"
+value = 0x39
+
+[[gui_actions]]
+name = "git_fetch"
+value = 0x3A
+
+[[gui_actions]]
+name = "git_commit_amend"
+value = 0x3B
+legacy = true
+canonical = "git_commit"
+
+[[gui_actions]]
+name = "git_pull_and_retry"
+value = 0x3C
+
+[[gui_actions]]
+name = "file_tree_open_in_split"
+value = 0x3D
+
+[[gui_actions]]
+name = "tab_copy_path"
+value = 0x3E
+
+[[gui_actions]]
+name = "hover_open_action"
+value = 0x3F
+
+[[gui_actions]]
+name = "file_tree_drop"
+value = 0x40
+
+[[gui_actions]]
+name = "fold_toggle_at_line"
+value = 0x41
+
+[[gui_actions]]
+name = "git_open_diff"
+value = 0x42
+
+[[gui_actions]]
+name = "config_update"
+value = 0x43
+
+[[gui_actions]]
+name = "config_query"
+value = 0x44

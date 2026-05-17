@@ -1083,7 +1083,16 @@ Note: GUI chrome commands are sent after `batch_end`. They are separate from the
 
 ## Implementation References
 
-### BEAM (canonical source of truth)
+### Schema and generation
+
+| Component | File | Language |
+|-----------|------|----------|
+| Opcode schema | `docs/protocol_schema.toml` | TOML |
+| Opcode generator | `lib/mix/tasks/protocol.gen.ex` | Elixir |
+| Generated Swift opcodes | `macos/Sources/Protocol/ProtocolOpcodes.generated.swift` | Swift |
+| Generated Zig opcodes | `zig/src/protocol_opcodes.zig` | Zig |
+
+### BEAM GUI protocol implementation
 
 | Component | File | Language |
 |-----------|------|----------|
@@ -1096,7 +1105,8 @@ Note: GUI chrome commands are sent after `batch_end`. They are separate from the
 | Component | File | Language |
 |-----------|------|----------|
 | Decoder | `macos/Sources/Protocol/ProtocolDecoder.swift` | Swift |
-| Constants | `macos/Sources/Protocol/ProtocolConstants.swift` | Swift |
+| Generated opcode constants | `macos/Sources/Protocol/ProtocolOpcodes.generated.swift` | Swift |
+| Non-opcode constants | `macos/Sources/Protocol/ProtocolConstants.swift` | Swift |
 | Test harness | `macos/TestHarness/main.swift` | Swift |
 
 ### Linux GUI (planned)

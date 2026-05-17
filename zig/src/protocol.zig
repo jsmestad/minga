@@ -20,89 +20,171 @@
 /// is NOT included in encode/decode here.
 const std = @import("std");
 
-// ── Opcodes ──
+// --- BEGIN GENERATED (mix protocol.gen) ---
+const opcodes = @import("protocol_opcodes.zig");
+// Generated from docs/protocol_schema.toml. Do not edit by hand.
 
-pub const OP_KEY_PRESS: u8 = 0x01;
-pub const OP_RESIZE: u8 = 0x02;
-pub const OP_READY: u8 = 0x03;
-pub const OP_MOUSE_EVENT: u8 = 0x04;
-pub const OP_CAPABILITIES_UPDATED: u8 = 0x05;
-pub const OP_PASTE_EVENT: u8 = 0x06;
-pub const OP_DRAW_TEXT: u8 = 0x10;
-pub const OP_SET_CURSOR: u8 = 0x11;
-pub const OP_CLEAR: u8 = 0x12;
-pub const OP_BATCH_END: u8 = 0x13;
-pub const OP_DEFINE_REGION: u8 = 0x14;
-pub const OP_SET_CURSOR_SHAPE: u8 = 0x15;
-pub const OP_SET_TITLE: u8 = 0x16;
-pub const OP_SET_WINDOW_BG: u8 = 0x17;
-pub const OP_CLEAR_REGION: u8 = 0x18;
-pub const OP_DESTROY_REGION: u8 = 0x19;
-pub const OP_SET_ACTIVE_REGION: u8 = 0x1A;
-pub const OP_SCROLL_REGION: u8 = 0x1B;
-pub const OP_DRAW_STYLED_TEXT: u8 = 0x1C;
+pub const OP_KEY_PRESS = opcodes.OP_KEY_PRESS;
+pub const OP_RESIZE = opcodes.OP_RESIZE;
+pub const OP_READY = opcodes.OP_READY;
+pub const OP_MOUSE_EVENT = opcodes.OP_MOUSE_EVENT;
+pub const OP_CAPABILITIES_UPDATED = opcodes.OP_CAPABILITIES_UPDATED;
+pub const OP_PASTE_EVENT = opcodes.OP_PASTE_EVENT;
+pub const OP_GUI_ACTION = opcodes.OP_GUI_ACTION;
+pub const OP_LOG_MESSAGE = opcodes.OP_LOG_MESSAGE;
+pub const OP_DRAW_TEXT = opcodes.OP_DRAW_TEXT;
+pub const OP_SET_CURSOR = opcodes.OP_SET_CURSOR;
+pub const OP_CLEAR = opcodes.OP_CLEAR;
+pub const OP_BATCH_END = opcodes.OP_BATCH_END;
+pub const OP_DEFINE_REGION = opcodes.OP_DEFINE_REGION;
+pub const OP_SET_CURSOR_SHAPE = opcodes.OP_SET_CURSOR_SHAPE;
+pub const OP_SET_TITLE = opcodes.OP_SET_TITLE;
+pub const OP_SET_WINDOW_BG = opcodes.OP_SET_WINDOW_BG;
+pub const OP_CLEAR_REGION = opcodes.OP_CLEAR_REGION;
+pub const OP_DESTROY_REGION = opcodes.OP_DESTROY_REGION;
+pub const OP_SET_ACTIVE_REGION = opcodes.OP_SET_ACTIVE_REGION;
+pub const OP_SCROLL_REGION = opcodes.OP_SCROLL_REGION;
+pub const OP_DRAW_STYLED_TEXT = opcodes.OP_DRAW_STYLED_TEXT;
+pub const OP_SET_FONT = opcodes.OP_SET_FONT;
+pub const OP_SET_FONT_FALLBACK = opcodes.OP_SET_FONT_FALLBACK;
+pub const OP_REGISTER_FONT = opcodes.OP_REGISTER_FONT;
+pub const OP_SET_LANGUAGE = opcodes.OP_SET_LANGUAGE;
+pub const OP_PARSE_BUFFER = opcodes.OP_PARSE_BUFFER;
+pub const OP_SET_HIGHLIGHT_QUERY = opcodes.OP_SET_HIGHLIGHT_QUERY;
+pub const OP_LOAD_GRAMMAR = opcodes.OP_LOAD_GRAMMAR;
+pub const OP_SET_INJECTION_QUERY = opcodes.OP_SET_INJECTION_QUERY;
+pub const OP_QUERY_LANGUAGE_AT = opcodes.OP_QUERY_LANGUAGE_AT;
+pub const OP_EDIT_BUFFER = opcodes.OP_EDIT_BUFFER;
+pub const OP_MEASURE_TEXT = opcodes.OP_MEASURE_TEXT;
+pub const OP_SET_FOLD_QUERY = opcodes.OP_SET_FOLD_QUERY;
+pub const OP_SET_INDENT_QUERY = opcodes.OP_SET_INDENT_QUERY;
+pub const OP_REQUEST_INDENT = opcodes.OP_REQUEST_INDENT;
+pub const OP_SET_TEXTOBJECT_QUERY = opcodes.OP_SET_TEXTOBJECT_QUERY;
+pub const OP_REQUEST_TEXTOBJECT = opcodes.OP_REQUEST_TEXTOBJECT;
+pub const OP_CLOSE_BUFFER = opcodes.OP_CLOSE_BUFFER;
+pub const OP_REQUEST_MATCH_ITEM = opcodes.OP_REQUEST_MATCH_ITEM;
+pub const OP_REQUEST_STRUCTURAL_NAV = opcodes.OP_REQUEST_STRUCTURAL_NAV;
+pub const OP_SET_TAGS_QUERY = opcodes.OP_SET_TAGS_QUERY;
+pub const OP_HIGHLIGHT_SPANS = opcodes.OP_HIGHLIGHT_SPANS;
+pub const OP_HIGHLIGHT_NAMES = opcodes.OP_HIGHLIGHT_NAMES;
+pub const OP_GRAMMAR_LOADED = opcodes.OP_GRAMMAR_LOADED;
+pub const OP_LANGUAGE_AT_RESPONSE = opcodes.OP_LANGUAGE_AT_RESPONSE;
+pub const OP_INJECTION_RANGES = opcodes.OP_INJECTION_RANGES;
+pub const OP_TEXT_WIDTH = opcodes.OP_TEXT_WIDTH;
+pub const OP_FOLD_RANGES = opcodes.OP_FOLD_RANGES;
+pub const OP_INDENT_RESULT = opcodes.OP_INDENT_RESULT;
+pub const OP_TEXTOBJECT_RESULT = opcodes.OP_TEXTOBJECT_RESULT;
+pub const OP_TEXTOBJECT_POSITIONS = opcodes.OP_TEXTOBJECT_POSITIONS;
+pub const OP_CONCEAL_SPANS = opcodes.OP_CONCEAL_SPANS;
+pub const OP_REQUEST_REPARSE = opcodes.OP_REQUEST_REPARSE;
+pub const OP_MATCH_ITEM_RESULT = opcodes.OP_MATCH_ITEM_RESULT;
+pub const OP_NODE_INFO = opcodes.OP_NODE_INFO;
+pub const OP_DOCUMENT_SYMBOLS = opcodes.OP_DOCUMENT_SYMBOLS;
+pub const OP_GUI_TAB_BAR = opcodes.OP_GUI_TAB_BAR;
+pub const OP_GUI_WHICH_KEY = opcodes.OP_GUI_WHICH_KEY;
+pub const OP_GUI_COMPLETION = opcodes.OP_GUI_COMPLETION;
+pub const OP_GUI_THEME = opcodes.OP_GUI_THEME;
+pub const OP_GUI_BREADCRUMB = opcodes.OP_GUI_BREADCRUMB;
+pub const OP_GUI_STATUS_BAR = opcodes.OP_GUI_STATUS_BAR;
+pub const OP_GUI_PICKER = opcodes.OP_GUI_PICKER;
+pub const OP_GUI_AGENT_CHAT = opcodes.OP_GUI_AGENT_CHAT;
+pub const OP_GUI_GUTTER_SEP = opcodes.OP_GUI_GUTTER_SEP;
+pub const OP_GUI_CURSORLINE = opcodes.OP_GUI_CURSORLINE;
+pub const OP_GUI_GUTTER = opcodes.OP_GUI_GUTTER;
+pub const OP_GUI_BOTTOM_PANEL = opcodes.OP_GUI_BOTTOM_PANEL;
+pub const OP_GUI_PICKER_PREVIEW = opcodes.OP_GUI_PICKER_PREVIEW;
+pub const OP_GUI_TOOL_MANAGER = opcodes.OP_GUI_TOOL_MANAGER;
+pub const OP_GUI_MINIBUFFER = opcodes.OP_GUI_MINIBUFFER;
+pub const OP_CLIPBOARD_WRITE = opcodes.OP_CLIPBOARD_WRITE;
+pub const OP_GUI_INDENT_GUIDES = opcodes.OP_GUI_INDENT_GUIDES;
+pub const OP_GUI_LINE_SPACING = opcodes.OP_GUI_LINE_SPACING;
+pub const OP_GUI_FILE_TREE = opcodes.OP_GUI_FILE_TREE;
+pub const OP_GUI_FILE_TREE_SELECTION = opcodes.OP_GUI_FILE_TREE_SELECTION;
+pub const OP_GUI_CURSOR_ANIMATION = opcodes.OP_GUI_CURSOR_ANIMATION;
+pub const OP_GUI_WINDOW_CONTENT = opcodes.OP_GUI_WINDOW_CONTENT;
+pub const OP_GUI_HOVER_POPUP = opcodes.OP_GUI_HOVER_POPUP;
+pub const OP_GUI_SIGNATURE_HELP = opcodes.OP_GUI_SIGNATURE_HELP;
+pub const OP_GUI_FLOAT_POPUP = opcodes.OP_GUI_FLOAT_POPUP;
+pub const OP_GUI_SPLIT_SEPARATORS = opcodes.OP_GUI_SPLIT_SEPARATORS;
+pub const OP_GUI_GIT_STATUS = opcodes.OP_GUI_GIT_STATUS;
+pub const OP_GUI_AGENT_GROUPS = opcodes.OP_GUI_AGENT_GROUPS;
+pub const OP_GUI_BOARD = opcodes.OP_GUI_BOARD;
+pub const OP_GUI_AGENT_CONTEXT = opcodes.OP_GUI_AGENT_CONTEXT;
+pub const OP_GUI_CHANGE_SUMMARY = opcodes.OP_GUI_CHANGE_SUMMARY;
+pub const OP_GUI_HOVER_ACTION = opcodes.OP_GUI_HOVER_ACTION;
+pub const OP_GUI_CONFIG_STATE = opcodes.OP_GUI_CONFIG_STATE;
 
-// Config commands (BEAM → frontend, TUI ignores)
-pub const OP_SET_FONT: u8 = 0x50;
-pub const OP_SET_FONT_FALLBACK: u8 = 0x51;
-pub const OP_REGISTER_FONT: u8 = 0x52;
+pub const GUI_ACTION_SELECT_TAB = opcodes.GUI_ACTION_SELECT_TAB;
+pub const GUI_ACTION_CLOSE_TAB = opcodes.GUI_ACTION_CLOSE_TAB;
+pub const GUI_ACTION_FILE_TREE_CLICK = opcodes.GUI_ACTION_FILE_TREE_CLICK;
+pub const GUI_ACTION_FILE_TREE_TOGGLE = opcodes.GUI_ACTION_FILE_TREE_TOGGLE;
+pub const GUI_ACTION_COMPLETION_SELECT = opcodes.GUI_ACTION_COMPLETION_SELECT;
+pub const GUI_ACTION_BREADCRUMB_CLICK = opcodes.GUI_ACTION_BREADCRUMB_CLICK;
+pub const GUI_ACTION_TOGGLE_PANEL = opcodes.GUI_ACTION_TOGGLE_PANEL;
+pub const GUI_ACTION_NEW_TAB = opcodes.GUI_ACTION_NEW_TAB;
+pub const GUI_ACTION_PANEL_SWITCH_TAB = opcodes.GUI_ACTION_PANEL_SWITCH_TAB;
+pub const GUI_ACTION_PANEL_DISMISS = opcodes.GUI_ACTION_PANEL_DISMISS;
+pub const GUI_ACTION_PANEL_RESIZE = opcodes.GUI_ACTION_PANEL_RESIZE;
+pub const GUI_ACTION_OPEN_FILE = opcodes.GUI_ACTION_OPEN_FILE;
+pub const GUI_ACTION_FILE_TREE_NEW_FILE = opcodes.GUI_ACTION_FILE_TREE_NEW_FILE;
+pub const GUI_ACTION_FILE_TREE_NEW_FOLDER = opcodes.GUI_ACTION_FILE_TREE_NEW_FOLDER;
+pub const GUI_ACTION_FILE_TREE_COLLAPSE_ALL = opcodes.GUI_ACTION_FILE_TREE_COLLAPSE_ALL;
+pub const GUI_ACTION_FILE_TREE_REFRESH = opcodes.GUI_ACTION_FILE_TREE_REFRESH;
+pub const GUI_ACTION_TOOL_INSTALL = opcodes.GUI_ACTION_TOOL_INSTALL;
+pub const GUI_ACTION_TOOL_UNINSTALL = opcodes.GUI_ACTION_TOOL_UNINSTALL;
+pub const GUI_ACTION_TOOL_UPDATE = opcodes.GUI_ACTION_TOOL_UPDATE;
+pub const GUI_ACTION_TOOL_DISMISS = opcodes.GUI_ACTION_TOOL_DISMISS;
+pub const GUI_ACTION_AGENT_TOOL_TOGGLE = opcodes.GUI_ACTION_AGENT_TOOL_TOGGLE;
+pub const GUI_ACTION_EXECUTE_COMMAND = opcodes.GUI_ACTION_EXECUTE_COMMAND;
+pub const GUI_ACTION_MINIBUFFER_SELECT = opcodes.GUI_ACTION_MINIBUFFER_SELECT;
+pub const GUI_ACTION_GIT_STAGE_FILE = opcodes.GUI_ACTION_GIT_STAGE_FILE;
+pub const GUI_ACTION_GIT_UNSTAGE_FILE = opcodes.GUI_ACTION_GIT_UNSTAGE_FILE;
+pub const GUI_ACTION_GIT_DISCARD_FILE = opcodes.GUI_ACTION_GIT_DISCARD_FILE;
+pub const GUI_ACTION_GIT_STAGE_ALL = opcodes.GUI_ACTION_GIT_STAGE_ALL;
+pub const GUI_ACTION_GIT_UNSTAGE_ALL = opcodes.GUI_ACTION_GIT_UNSTAGE_ALL;
+pub const GUI_ACTION_GIT_COMMIT = opcodes.GUI_ACTION_GIT_COMMIT;
+pub const GUI_ACTION_GIT_OPEN_FILE = opcodes.GUI_ACTION_GIT_OPEN_FILE;
+pub const GUI_ACTION_AGENT_GROUP_RENAME = opcodes.GUI_ACTION_AGENT_GROUP_RENAME;
+pub const GUI_ACTION_AGENT_GROUP_SET_ICON = opcodes.GUI_ACTION_AGENT_GROUP_SET_ICON;
+pub const GUI_ACTION_AGENT_GROUP_CLOSE = opcodes.GUI_ACTION_AGENT_GROUP_CLOSE;
+pub const GUI_ACTION_SPACE_LEADER_CHORD = opcodes.GUI_ACTION_SPACE_LEADER_CHORD;
+pub const GUI_ACTION_SPACE_LEADER_RETRACT = opcodes.GUI_ACTION_SPACE_LEADER_RETRACT;
+pub const GUI_ACTION_FIND_PASTEBOARD_SEARCH = opcodes.GUI_ACTION_FIND_PASTEBOARD_SEARCH;
+pub const GUI_ACTION_BOARD_SELECT_CARD = opcodes.GUI_ACTION_BOARD_SELECT_CARD;
+pub const GUI_ACTION_BOARD_CLOSE_CARD = opcodes.GUI_ACTION_BOARD_CLOSE_CARD;
+pub const GUI_ACTION_BOARD_REORDER = opcodes.GUI_ACTION_BOARD_REORDER;
+pub const GUI_ACTION_BOARD_DISPATCH_AGENT = opcodes.GUI_ACTION_BOARD_DISPATCH_AGENT;
+pub const GUI_ACTION_AGENT_APPROVE = opcodes.GUI_ACTION_AGENT_APPROVE;
+pub const GUI_ACTION_AGENT_REQUEST_CHANGES = opcodes.GUI_ACTION_AGENT_REQUEST_CHANGES;
+pub const GUI_ACTION_AGENT_DISMISS = opcodes.GUI_ACTION_AGENT_DISMISS;
+pub const GUI_ACTION_CHANGE_SUMMARY_CLICK = opcodes.GUI_ACTION_CHANGE_SUMMARY_CLICK;
+pub const GUI_ACTION_FILE_TREE_EDIT_CONFIRM = opcodes.GUI_ACTION_FILE_TREE_EDIT_CONFIRM;
+pub const GUI_ACTION_FILE_TREE_EDIT_CANCEL = opcodes.GUI_ACTION_FILE_TREE_EDIT_CANCEL;
+pub const GUI_ACTION_SCROLL_TO_LINE = opcodes.GUI_ACTION_SCROLL_TO_LINE;
+pub const GUI_ACTION_FILE_TREE_DELETE = opcodes.GUI_ACTION_FILE_TREE_DELETE;
+pub const GUI_ACTION_FILE_TREE_RENAME = opcodes.GUI_ACTION_FILE_TREE_RENAME;
+pub const GUI_ACTION_FILE_TREE_DUPLICATE = opcodes.GUI_ACTION_FILE_TREE_DUPLICATE;
+pub const GUI_ACTION_FILE_TREE_MOVE = opcodes.GUI_ACTION_FILE_TREE_MOVE;
+pub const GUI_ACTION_SYSTEM_WILL_SLEEP = opcodes.GUI_ACTION_SYSTEM_WILL_SLEEP;
+pub const GUI_ACTION_SYSTEM_DID_WAKE = opcodes.GUI_ACTION_SYSTEM_DID_WAKE;
+pub const GUI_ACTION_CMD_COPY = opcodes.GUI_ACTION_CMD_COPY;
+pub const GUI_ACTION_CMD_CUT = opcodes.GUI_ACTION_CMD_CUT;
+pub const GUI_ACTION_GIT_PUSH = opcodes.GUI_ACTION_GIT_PUSH;
+pub const GUI_ACTION_GIT_PULL = opcodes.GUI_ACTION_GIT_PULL;
+pub const GUI_ACTION_GIT_FETCH = opcodes.GUI_ACTION_GIT_FETCH;
+pub const GUI_ACTION_GIT_COMMIT_AMEND = opcodes.GUI_ACTION_GIT_COMMIT_AMEND;
+pub const GUI_ACTION_GIT_PULL_AND_RETRY = opcodes.GUI_ACTION_GIT_PULL_AND_RETRY;
+pub const GUI_ACTION_FILE_TREE_OPEN_IN_SPLIT = opcodes.GUI_ACTION_FILE_TREE_OPEN_IN_SPLIT;
+pub const GUI_ACTION_TAB_COPY_PATH = opcodes.GUI_ACTION_TAB_COPY_PATH;
+pub const GUI_ACTION_HOVER_OPEN_ACTION = opcodes.GUI_ACTION_HOVER_OPEN_ACTION;
+pub const GUI_ACTION_FILE_TREE_DROP = opcodes.GUI_ACTION_FILE_TREE_DROP;
+pub const GUI_ACTION_FOLD_TOGGLE_AT_LINE = opcodes.GUI_ACTION_FOLD_TOGGLE_AT_LINE;
+pub const GUI_ACTION_GIT_OPEN_DIFF = opcodes.GUI_ACTION_GIT_OPEN_DIFF;
+pub const GUI_ACTION_CONFIG_UPDATE = opcodes.GUI_ACTION_CONFIG_UPDATE;
+pub const GUI_ACTION_CONFIG_QUERY = opcodes.GUI_ACTION_CONFIG_QUERY;
+// --- END GENERATED ---
 
-// Incremental content sync (BEAM → Zig)
-pub const OP_EDIT_BUFFER: u8 = 0x26;
-
-// Text measurement (BEAM → Zig)
-pub const OP_MEASURE_TEXT: u8 = 0x27;
-
-// Highlight commands (BEAM → Zig)
-pub const OP_SET_LANGUAGE: u8 = 0x20;
-pub const OP_PARSE_BUFFER: u8 = 0x21;
-pub const OP_SET_HIGHLIGHT_QUERY: u8 = 0x22;
-pub const OP_LOAD_GRAMMAR: u8 = 0x23;
-pub const OP_SET_INJECTION_QUERY: u8 = 0x24;
-pub const OP_QUERY_LANGUAGE_AT: u8 = 0x25;
-pub const OP_SET_FOLD_QUERY: u8 = 0x28;
-pub const OP_SET_INDENT_QUERY: u8 = 0x29;
-pub const OP_REQUEST_INDENT: u8 = 0x2A;
-pub const OP_SET_TEXTOBJECT_QUERY: u8 = 0x2B;
-pub const OP_REQUEST_TEXTOBJECT: u8 = 0x2C;
-pub const OP_CLOSE_BUFFER: u8 = 0x2D;
-pub const OP_REQUEST_MATCH_ITEM: u8 = 0x2E;
-pub const OP_REQUEST_STRUCTURAL_NAV: u8 = 0x2F;
-pub const OP_SET_TAGS_QUERY: u8 = 0x40;
-
-// Highlight responses (Zig → BEAM)
-pub const OP_HIGHLIGHT_SPANS: u8 = 0x30;
-pub const OP_HIGHLIGHT_NAMES: u8 = 0x31;
-pub const OP_GRAMMAR_LOADED: u8 = 0x32;
-pub const OP_LANGUAGE_AT_RESPONSE: u8 = 0x33;
-pub const OP_INJECTION_RANGES: u8 = 0x34;
-
-// Text measurement responses (Zig → BEAM)
-pub const OP_TEXT_WIDTH: u8 = 0x35;
-
-// Fold responses (Zig → BEAM)
-pub const OP_FOLD_RANGES: u8 = 0x36;
-
-// Indent responses (Zig → BEAM)
-pub const OP_INDENT_RESULT: u8 = 0x37;
-
-// Textobject responses (Zig → BEAM)
-pub const OP_TEXTOBJECT_RESULT: u8 = 0x38;
-pub const OP_TEXTOBJECT_POSITIONS: u8 = 0x39;
-pub const OP_CONCEAL_SPANS: u8 = 0x3A;
-
-/// Requests that the BEAM send a full parse_buffer for this buffer_id.
-/// Sent when the parser detects stale edit deltas (byte offsets don't match
-/// the stored source), typically after system sleep/wake.
-pub const OP_REQUEST_REPARSE: u8 = 0x3B;
-pub const OP_MATCH_ITEM_RESULT: u8 = 0x3C;
-pub const OP_NODE_INFO: u8 = 0x3D;
-pub const OP_DOCUMENT_SYMBOLS: u8 = 0x3E;
-
-// Log messages (Zig → BEAM)
-pub const OP_LOG_MESSAGE: u8 = 0x60;
-
-// Log levels
+// Log levels// Log levels
 pub const LOG_LEVEL_ERR: u8 = 0;
 pub const LOG_LEVEL_WARN: u8 = 1;
 pub const LOG_LEVEL_INFO: u8 = 2;
@@ -2661,4 +2743,8 @@ test "decode draw_styled_text with underline style curl" {
 test "decode draw_styled_text truncated returns malformed" {
     const data = [_]u8{ 0x1C, 0x00, 0x03 }; // too short
     try std.testing.expectError(error.Malformed, decodeCommand(&data));
+}
+
+test {
+    _ = @import("protocol_schema_test.zig");
 }
