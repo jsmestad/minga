@@ -16,6 +16,7 @@ defmodule Minga.Editing.Motion.VisualLine do
   alias Minga.Core.WrapMap
 
   @type position :: Document.position()
+  @type wrap_opts :: keyword()
 
   @doc """
   Move down by one visual row within a wrapped buffer.
@@ -25,9 +26,12 @@ defmodule Minga.Editing.Motion.VisualLine do
   to the first visual row of the next logical line.
   """
   @spec visual_down(Document.t(), position(), pos_integer()) :: position()
-  def visual_down(doc, {line, col}, content_width) do
+  def visual_down(doc, pos, content_width), do: visual_down(doc, pos, content_width, [])
+
+  @spec visual_down(Document.t(), position(), pos_integer(), wrap_opts()) :: position()
+  def visual_down(doc, {line, col}, content_width, opts) do
     line_text = Document.line_at(doc, line)
-    wrap_entry = WrapMap.compute([line_text], content_width) |> hd()
+    wrap_entry = wrap_entry(line_text, content_width, opts)
     display_col = Unicode.display_col(line_text, col)
     {vrow_idx, vrow_col} = display_col_to_visual(wrap_entry, display_col)
 
@@ -46,7 +50,7 @@ defmodule Minga.Editing.Motion.VisualLine do
         {line, col}
       else
         next_text = Document.line_at(doc, next_line)
-        next_entry = WrapMap.compute([next_text], content_width) |> hd()
+        next_entry = wrap_entry(next_text, content_width, opts)
         first_vrow = hd(next_entry)
         target_col = min(vrow_col, max(visual_display_width(first_vrow) - 1, 0))
         byte_col = byte_col_in_vrow(first_vrow, target_col)
@@ -63,9 +67,12 @@ defmodule Minga.Editing.Motion.VisualLine do
   to the last visual row of the previous logical line.
   """
   @spec visual_up(Document.t(), position(), pos_integer()) :: position()
-  def visual_up(doc, {line, col}, content_width) do
+  def visual_up(doc, pos, content_width), do: visual_up(doc, pos, content_width, [])
+
+  @spec visual_up(Document.t(), position(), pos_integer(), wrap_opts()) :: position()
+  def visual_up(doc, {line, col}, content_width, opts) do
     line_text = Document.line_at(doc, line)
-    wrap_entry = WrapMap.compute([line_text], content_width) |> hd()
+    wrap_entry = wrap_entry(line_text, content_width, opts)
     display_col = Unicode.display_col(line_text, col)
     {vrow_idx, vrow_col} = display_col_to_visual(wrap_entry, display_col)
 
@@ -82,7 +89,7 @@ defmodule Minga.Editing.Motion.VisualLine do
       else
         prev_line = line - 1
         prev_text = Document.line_at(doc, prev_line)
-        prev_entry = WrapMap.compute([prev_text], content_width) |> hd()
+        prev_entry = wrap_entry(prev_text, content_width, opts)
         last_vrow = List.last(prev_entry)
         target_col = min(vrow_col, max(visual_display_width(last_vrow) - 1, 0))
         byte_col = byte_col_in_vrow(last_vrow, target_col)
@@ -98,9 +105,13 @@ defmodule Minga.Editing.Motion.VisualLine do
   the first column of that visual row (not the logical line start).
   """
   @spec visual_line_start(Document.t(), position(), pos_integer()) :: position()
-  def visual_line_start(doc, {line, col}, content_width) do
+  def visual_line_start(doc, pos, content_width),
+    do: visual_line_start(doc, pos, content_width, [])
+
+  @spec visual_line_start(Document.t(), position(), pos_integer(), wrap_opts()) :: position()
+  def visual_line_start(doc, {line, col}, content_width, opts) do
     line_text = Document.line_at(doc, line)
-    wrap_entry = WrapMap.compute([line_text], content_width) |> hd()
+    wrap_entry = wrap_entry(line_text, content_width, opts)
     display_col = Unicode.display_col(line_text, col)
     {_vrow_idx, _vrow_col, vrow} = find_visual_row(wrap_entry, display_col)
     {line, vrow.byte_offset}
@@ -113,9 +124,12 @@ defmodule Minga.Editing.Motion.VisualLine do
   the last column of that visual row.
   """
   @spec visual_line_end(Document.t(), position(), pos_integer()) :: position()
-  def visual_line_end(doc, {line, col}, content_width) do
+  def visual_line_end(doc, pos, content_width), do: visual_line_end(doc, pos, content_width, [])
+
+  @spec visual_line_end(Document.t(), position(), pos_integer(), wrap_opts()) :: position()
+  def visual_line_end(doc, {line, col}, content_width, opts) do
     line_text = Document.line_at(doc, line)
-    wrap_entry = WrapMap.compute([line_text], content_width) |> hd()
+    wrap_entry = wrap_entry(line_text, content_width, opts)
     display_col = Unicode.display_col(line_text, col)
     {_vrow_idx, _vrow_col, vrow} = find_visual_row(wrap_entry, display_col)
     trimmed = vrow |> source_text() |> String.trim_trailing()
@@ -124,6 +138,11 @@ defmodule Minga.Editing.Motion.VisualLine do
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────
+
+  @spec wrap_entry(String.t(), pos_integer(), wrap_opts()) :: WrapMap.wrap_entry()
+  defp wrap_entry(text, content_width, opts) do
+    WrapMap.compute([text], content_width, opts) |> hd()
+  end
 
   # Returns {visual_row_index, col_within_row, visual_row_map} for a display column.
   @spec find_visual_row(WrapMap.wrap_entry(), non_neg_integer()) ::

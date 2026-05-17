@@ -145,6 +145,22 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
       refute ContentHelpers.context_fingerprint(ctx, true) ==
                ContentHelpers.context_fingerprint(%{ctx | line_number_style: :relative}, true)
     end
+
+    test "changes when the width oracle revision changes" do
+      oracle = %Minga.Core.WidthOracle.Measured{cache: %{"hello" => 2}, revision: 0}
+
+      ctx = %Context{
+        viewport: Viewport.new(20, 80),
+        gutter_w: 4,
+        content_w: 76,
+        width_oracle: oracle
+      }
+
+      changed = %{oracle | revision: 1}
+
+      refute ContentHelpers.context_fingerprint(ctx, true) ==
+               ContentHelpers.context_fingerprint(%{ctx | width_oracle: changed}, true)
+    end
   end
 
   describe "build_render_ctx/3" do

@@ -443,7 +443,8 @@ defmodule MingaEditor.RenderPipeline.Scroll do
            content_w: content_w,
            visible_rows: visible_rows,
            scroll_margin: scroll_margin,
-           oracle: oracle
+           oracle: oracle,
+           fetch_count: fetch_count
          } = params
        ) do
     wrap_map = compute_wrap_map(buf, lines, content_w, oracle)
@@ -463,16 +464,41 @@ defmodule MingaEditor.RenderPipeline.Scroll do
       desired_visual_start(viewport.visual_row_offset, cursor_abs, visible_rows, effective_margin)
 
     {new_top, new_offset, top_count} = visual_start_to_top(wrap_map, first_line, desired_start)
+
+    total_lines = Buffer.line_count(buf)
+    near_eof = new_top + visible_rows >= total_lines - 1
+
+    total_visual_rows_to_eof =
+      if near_eof do
+        visual_rows_to_eof(buf, new_top, content_w, oracle)
+      else
+        top_count
+      end
+
+    new_offset =
+      if near_eof do
+        min(new_offset, Viewport.max_visual_row_offset(total_visual_rows_to_eof, visible_rows))
+      else
+        new_offset
+      end
+
+    top_count = max(top_count, total_visual_rows_to_eof)
     new_viewport = Viewport.put_top_visual(viewport, new_top, new_offset, top_count)
 
-    if new_top == first_line do
+    if new_top == first_line and not near_eof do
       text = cursor_line_text(lines, cursor_line, first_line)
 
       {new_viewport, first_line, snapshot, lines, text,
        Unicode.display_col(text, cursor_byte_col)}
     else
       refetch_wrapped_viewport(
-        Map.merge(params, %{viewport: new_viewport, top: new_top, offset: new_offset})
+        Map.merge(params, %{
+          viewport: new_viewport,
+          top: new_top,
+          offset: new_offset,
+          fetch_count:
+            if(near_eof, do: max(fetch_count, max(total_lines - new_top, 1)), else: fetch_count)
+        })
       )
     end
   end
@@ -548,13 +574,33 @@ defmodule MingaEditor.RenderPipeline.Scroll do
     end
   end
 
+  @spec visual_rows_to_eof(pid(), non_neg_integer(), pos_integer(), Minga.Core.WidthOracle.t()) ::
+          pos_integer()
+  defp visual_rows_to_eof(buf, start_line, content_w, oracle) do
+    total_lines = Buffer.line_count(buf)
+    fetch_count = max(total_lines - start_line, 1)
+    snapshot = Buffer.render_snapshot(buf, start_line, fetch_count)
+
+    WrapMap.compute(snapshot.lines, content_w,
+      breakindent: wrap_option(buf, :breakindent),
+      linebreak: wrap_option(buf, :linebreak),
+      oracle: oracle,
+      tab_width: tab_width(buf)
+    )
+    |> WrapMap.visual_row_count()
+    |> max(1)
+  catch
+    :exit, _ -> 1
+  end
+
   @spec compute_wrap_map(pid(), [String.t()], pos_integer(), Minga.Core.WidthOracle.t()) ::
           WrapMap.t()
   defp compute_wrap_map(buf, lines, content_w, oracle) do
     WrapMap.compute(lines, content_w,
       breakindent: wrap_option(buf, :breakindent),
       linebreak: wrap_option(buf, :linebreak),
-      oracle: oracle
+      oracle: oracle,
+      tab_width: tab_width(buf)
     )
   end
 
@@ -572,6 +618,13 @@ defmodule MingaEditor.RenderPipeline.Scroll do
     Buffer.get_option(buf, name)
   catch
     :exit, _ -> true
+  end
+
+  @spec tab_width(pid()) :: pos_integer()
+  defp tab_width(buf) do
+    Buffer.get_option(buf, :tab_width)
+  catch
+    :exit, _ -> 2
   end
 
   @spec maybe_scroll_active_window_to_cursor(

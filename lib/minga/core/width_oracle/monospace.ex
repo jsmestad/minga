@@ -21,4 +21,7 @@ defimpl Minga.Core.WidthOracle, for: Minga.Core.WidthOracle.Monospace do
 
   @spec display_width(Monospace.t(), String.t()) :: non_neg_integer()
   def display_width(%Monospace{}, text), do: Unicode.display_width(text)
+
+  @spec fingerprint(Monospace.t()) :: term()
+  def fingerprint(%Monospace{}), do: :monospace
 end

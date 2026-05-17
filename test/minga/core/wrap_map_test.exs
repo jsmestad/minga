@@ -7,14 +7,14 @@ defmodule Minga.Core.WrapMapTest do
     test "short line produces a single visual row" do
       [entry] = WrapMap.compute(["hello"], 40)
       assert length(entry) == 1
-      assert hd(entry).text == "hello"
+      assert WrapMap.display_text(hd(entry)) == "hello"
       assert hd(entry).byte_offset == 0
     end
 
     test "empty line produces a single empty visual row" do
       [entry] = WrapMap.compute([""], 40)
       assert length(entry) == 1
-      assert hd(entry).text == ""
+      assert WrapMap.display_text(hd(entry)) == ""
       assert hd(entry).source_text == ""
       assert hd(entry).indent_width == 0
     end
@@ -23,7 +23,7 @@ defmodule Minga.Core.WrapMapTest do
       line = String.duplicate("a", 40)
       [entry] = WrapMap.compute([line], 40)
       assert length(entry) == 1
-      assert hd(entry).text == line
+      assert WrapMap.display_text(hd(entry)) == line
     end
   end
 
@@ -32,8 +32,8 @@ defmodule Minga.Core.WrapMapTest do
       # "hello world foo" at width 12 should break after "hello world"
       [entry] = WrapMap.compute(["hello world foo"], 12)
       assert length(entry) == 2
-      assert Enum.at(entry, 0).text == "hello world "
-      assert Enum.at(entry, 1).text == "foo"
+      assert WrapMap.display_text(Enum.at(entry, 0)) == "hello world "
+      assert WrapMap.display_text(Enum.at(entry, 1)) == "foo"
     end
 
     test "wraps long text into multiple visual rows" do
@@ -59,7 +59,7 @@ defmodule Minga.Core.WrapMapTest do
   describe "compute/3 with linebreak: false" do
     test "breaks at exact width, not at word boundaries" do
       [entry] = WrapMap.compute(["hello world foobar"], 10, linebreak: false)
-      assert Enum.at(entry, 0).text == "hello worl"
+      assert WrapMap.display_text(Enum.at(entry, 0)) == "hello worl"
     end
   end
 
@@ -99,12 +99,17 @@ defmodule Minga.Core.WrapMapTest do
   end
 
   describe "breakindent" do
+    test "display_text accepts legacy plain map rows" do
+      assert WrapMap.display_text(%{text: "foo"}) == "foo"
+      assert WrapMap.display_text(%{text: "bar", indent_width: 2}) == "  bar"
+    end
+
     test "continuation rows preserve indentation in display text" do
       line = "    alpha beta gamma delta"
       [entry] = WrapMap.compute([line], 12, breakindent: true)
 
-      assert Enum.at(entry, 0).text == "    alpha "
-      assert Enum.at(entry, 1).text =~ ~r/^    /
+      assert WrapMap.display_text(Enum.at(entry, 0)) == "    alpha "
+      assert WrapMap.display_text(Enum.at(entry, 1)) =~ ~r/^    /
       assert Enum.at(entry, 1).source_text == "beta "
       assert Enum.at(entry, 1).indent_width == 4
     end
@@ -116,6 +121,15 @@ defmodule Minga.Core.WrapMapTest do
       [entry] = WrapMap.compute([line], 20, breakindent: true)
       # First row: 20 chars. Continuation: 16 chars each.
       assert length(entry) >= 3
+    end
+
+    test "tabs in leading whitespace count using the configured tab width" do
+      line = "\t" <> String.duplicate("x", 40)
+      [entry] = WrapMap.compute([line], 12, breakindent: true, tab_width: 4)
+
+      assert length(entry) >= 2
+      assert Enum.at(entry, 1).indent_width == 4
+      assert WrapMap.display_text(Enum.at(entry, 1)) =~ ~r/^ {4}/
     end
 
     test "no breakindent gives full width on continuation rows" do

@@ -49,7 +49,13 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
   @wrapped_cursor_col 500
 
   defp wrapped_scroll_state do
-    state = TestHelpers.base_state(content: String.duplicate("a", 600) <> "\n" <> "tail", rows: 10, cols: 40)
+    state =
+      TestHelpers.base_state(
+        content: String.duplicate("a", 600) <> "\n" <> "tail",
+        rows: 10,
+        cols: 40
+      )
+
     buffer = state.workspace.buffers.active
 
     _ = BufferProcess.set_option(buffer, :wrap, true)
@@ -119,7 +125,7 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
 
       send_key(editor, ?e, @ctrl)
       assert BufferProcess.cursor(buffer) == original_cursor
-      assert active_window(editor).viewport.visual_row_offset == 1
+      assert active_window(editor).viewport.visual_row_offset == 0
 
       send_key(editor, ?y, @ctrl)
       assert BufferProcess.cursor(buffer) == original_cursor
@@ -194,18 +200,65 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
 
       assert centered_row == cursor_visual_row
     end
+
+    test "clamps wrapped eof rows to the final visual row span" do
+      state =
+        TestHelpers.base_state(
+          content: "head\n" <> String.duplicate("a", 600),
+          rows: 10,
+          cols: 40
+        )
+
+      buffer = state.workspace.buffers.active
+
+      _ = BufferProcess.set_option(buffer, :wrap, true)
+      _ = BufferProcess.set_option(buffer, :line_numbers, :none)
+      _ = BufferProcess.set_option(buffer, :linebreak, false)
+      _ = BufferProcess.set_option(buffer, :breakindent, true)
+
+      content_width = wrapped_content_width(state, buffer)
+
+      [head_entry, eof_entry] =
+        WrapMap.compute(["head", String.duplicate("a", 600)], content_width,
+          breakindent: true,
+          linebreak: false,
+          tab_width: 2
+        )
+
+      head_rows = length(head_entry)
+      eof_visual_rows = length(eof_entry)
+      visible = Viewport.content_rows(EditorState.active_window_struct(state).viewport)
+      expected_top_offset = head_rows + max(eof_visual_rows - visible, 0)
+
+      BufferProcess.move_to(buffer, {1, List.last(eof_entry).byte_offset})
+
+      state = Movement.execute(state, :scroll_center)
+      win = EditorState.active_window_struct(state)
+      bottom_row = win.viewport.top + win.viewport.visual_row_offset + visible - 1
+
+      assert win.viewport.top + win.viewport.visual_row_offset == expected_top_offset
+      assert bottom_row == head_rows + eof_visual_rows - 1
+    end
   end
 
   describe "zt (scroll_cursor_top)" do
     test "scrolls a wrapped visual row to the top of the viewport" do
       state = wrapped_scroll_state()
       buffer = state.workspace.buffers.active
+      content_width = wrapped_content_width(state, buffer)
       cursor_visual_row = wrapped_cursor_visual_row(state, buffer)
+
+      total_visual_rows =
+        [String.duplicate("a", 600), "tail"]
+        |> WrapMap.compute(content_width)
+        |> WrapMap.visual_row_count()
 
       state = Movement.execute(state, :scroll_cursor_top)
       win = EditorState.active_window_struct(state)
+      visible = MingaEditor.Viewport.content_rows(win.viewport)
+      expected = min(cursor_visual_row, max(total_visual_rows - visible, 0))
 
-      assert win.viewport.top + win.viewport.visual_row_offset == cursor_visual_row
+      assert win.viewport.top + win.viewport.visual_row_offset == expected
     end
   end
 
@@ -221,6 +274,46 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
       bottom_row = win.viewport.top + win.viewport.visual_row_offset + visible - 1
 
       assert bottom_row == cursor_visual_row
+    end
+
+    test "clamps wrapped eof rows so the viewport ends at eof" do
+      state =
+        TestHelpers.base_state(
+          content: "head\n" <> String.duplicate("a", 600),
+          rows: 10,
+          cols: 40
+        )
+
+      buffer = state.workspace.buffers.active
+
+      _ = BufferProcess.set_option(buffer, :wrap, true)
+      _ = BufferProcess.set_option(buffer, :line_numbers, :none)
+      _ = BufferProcess.set_option(buffer, :linebreak, false)
+      _ = BufferProcess.set_option(buffer, :breakindent, true)
+
+      content_width = wrapped_content_width(state, buffer)
+
+      [head_entry, eof_entry] =
+        WrapMap.compute(["head", String.duplicate("a", 600)], content_width,
+          breakindent: true,
+          linebreak: false,
+          tab_width: 2
+        )
+
+      head_rows = length(head_entry)
+      eof_visual_rows = length(eof_entry)
+      visible = Viewport.content_rows(EditorState.active_window_struct(state).viewport)
+
+      BufferProcess.move_to(buffer, {1, List.last(eof_entry).byte_offset})
+
+      state = Movement.execute(state, :scroll_cursor_bottom)
+      win = EditorState.active_window_struct(state)
+      bottom_row = win.viewport.top + win.viewport.visual_row_offset + visible - 1
+
+      assert bottom_row == head_rows + eof_visual_rows - 1
+
+      assert win.viewport.top + win.viewport.visual_row_offset ==
+               head_rows + max(eof_visual_rows - visible, 0)
     end
   end
 end

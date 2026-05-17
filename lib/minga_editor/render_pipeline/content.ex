@@ -322,7 +322,8 @@ defmodule MingaEditor.RenderPipeline.Content do
     WrapMap.compute(relevant_lines, content_w,
       breakindent: wrap_option(buf, :breakindent),
       linebreak: wrap_option(buf, :linebreak),
-      oracle: oracle
+      oracle: oracle,
+      tab_width: wrap_tab_width(buf)
     )
   end
 
@@ -340,6 +341,13 @@ defmodule MingaEditor.RenderPipeline.Content do
     Buffer.get_option(buf, name)
   catch
     :exit, _ -> true
+  end
+
+  @spec wrap_tab_width(pid()) :: pos_integer()
+  defp wrap_tab_width(buf) do
+    Buffer.get_option(buf, :tab_width)
+  catch
+    :exit, _ -> 2
   end
 
   defp maybe_render_agent_window(

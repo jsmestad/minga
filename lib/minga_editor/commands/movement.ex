@@ -409,6 +409,7 @@ defmodule MingaEditor.Commands.Movement do
           cursor_line,
           cursor_col,
           content_width(state),
+          total_lines,
           :center,
           width_oracle(state)
         )
@@ -433,6 +434,7 @@ defmodule MingaEditor.Commands.Movement do
           cursor_line,
           cursor_col,
           content_width(state),
+          total_lines,
           :top,
           width_oracle(state)
         )
@@ -457,6 +459,7 @@ defmodule MingaEditor.Commands.Movement do
           cursor_line,
           cursor_col,
           content_width(state),
+          total_lines,
           :bottom,
           width_oracle(state)
         )
@@ -638,11 +641,12 @@ defmodule MingaEditor.Commands.Movement do
     doc = Buffer.snapshot(buf)
     pos = Document.cursor(doc)
     content_w = content_width(state)
+    opts = wrap_opts(buf, width_oracle(state))
 
     new_pos =
       case direction do
-        :down -> Minga.Editing.visual_line_down(doc, pos, content_w)
-        :up -> Minga.Editing.visual_line_up(doc, pos, content_w)
+        :down -> Minga.Editing.visual_line_down(doc, pos, content_w, opts)
+        :up -> Minga.Editing.visual_line_up(doc, pos, content_w, opts)
       end
 
     Buffer.move_to(buf, new_pos)
@@ -654,11 +658,12 @@ defmodule MingaEditor.Commands.Movement do
     doc = Buffer.snapshot(buf)
     pos = Document.cursor(doc)
     content_w = content_width(state)
+    opts = wrap_opts(buf, width_oracle(state))
 
     new_pos =
       case edge do
-        :start -> Minga.Editing.visual_line_start(doc, pos, content_w)
-        :end -> Minga.Editing.visual_line_end(doc, pos, content_w)
+        :start -> Minga.Editing.visual_line_start(doc, pos, content_w, opts)
+        :end -> Minga.Editing.visual_line_end(doc, pos, content_w, opts)
       end
 
     Buffer.move_to(buf, new_pos)
@@ -729,9 +734,11 @@ defmodule MingaEditor.Commands.Movement do
     current_row = cursor_visual_screen_row(buf, vp, cursor, content_w, oracle)
     new_vp = Viewport.scroll_visual_row_down(vp, top_rows, total_lines, scroll_margin(buf))
 
+    opts = wrap_opts(buf, oracle)
+
     new_cursor =
       if current_row <= 0 do
-        Minga.Editing.visual_line_down(Buffer.snapshot(buf), cursor, content_w)
+        Minga.Editing.visual_line_down(Buffer.snapshot(buf), cursor, content_w, opts)
       else
         cursor
       end
@@ -754,9 +761,11 @@ defmodule MingaEditor.Commands.Movement do
     new_vp = Viewport.scroll_visual_row_up(vp, prev_rows, total_lines, scroll_margin(buf))
     visible_rows = Viewport.content_rows(vp)
 
+    opts = wrap_opts(buf, oracle)
+
     new_cursor =
       if current_row >= visible_rows - 1 do
-        Minga.Editing.visual_line_up(Buffer.snapshot(buf), cursor, content_w)
+        Minga.Editing.visual_line_up(Buffer.snapshot(buf), cursor, content_w, opts)
       else
         cursor
       end
@@ -816,17 +825,35 @@ defmodule MingaEditor.Commands.Movement do
           non_neg_integer(),
           non_neg_integer(),
           pos_integer(),
+          non_neg_integer(),
           :center | :top | :bottom,
           Minga.Core.WidthOracle.t()
         ) :: Viewport.t()
-  defp center_wrapped_viewport(buf, vp, cursor_line, cursor_col, content_w, position, oracle) do
+  defp center_wrapped_viewport(
+         buf,
+         vp,
+         cursor_line,
+         cursor_col,
+         content_w,
+         _total_lines,
+         position,
+         oracle
+       ) do
     snapshot = Buffer.render_snapshot(buf, cursor_line, 1)
     text = List.first(snapshot.lines) || ""
     [entry] = WrapMap.compute([text], content_w, wrap_opts(buf, oracle))
     cursor_visual_row = visual_row_index(entry, cursor_col)
     visible = Viewport.content_rows(vp)
     target_offset = wrapped_target_offset(cursor_visual_row, visible, position)
-    Viewport.put_top_visual(vp, cursor_line, target_offset, max(length(entry), 1))
+    total_visual_rows_to_eof = visual_rows_to_eof(buf, cursor_line, content_w, oracle)
+    max_offset = Viewport.max_visual_row_offset(total_visual_rows_to_eof, visible)
+
+    Viewport.put_top_visual(
+      vp,
+      cursor_line,
+      min(target_offset, max_offset),
+      max(length(entry), 1)
+    )
   catch
     :exit, _ -> vp
   end
@@ -843,6 +870,21 @@ defmodule MingaEditor.Commands.Movement do
     max(cursor_visual_row - visible + 1, 0)
   end
 
+  @spec visual_rows_to_eof(pid(), non_neg_integer(), pos_integer(), Minga.Core.WidthOracle.t()) ::
+          pos_integer()
+  defp visual_rows_to_eof(buf, start_line, content_w, oracle) do
+    total_lines = Buffer.line_count(buf)
+    fetch_count = max(total_lines - start_line, 1)
+    snapshot = Buffer.render_snapshot(buf, start_line, fetch_count)
+
+    snapshot.lines
+    |> WrapMap.compute(content_w, wrap_opts(buf, oracle))
+    |> WrapMap.visual_row_count()
+    |> max(1)
+  catch
+    :exit, _ -> 1
+  end
+
   @spec visual_row_index(WrapMap.wrap_entry(), non_neg_integer()) :: non_neg_integer()
   defp visual_row_index(wrap_entry, cursor_col) do
     wrap_entry
@@ -857,10 +899,11 @@ defmodule MingaEditor.Commands.Movement do
     [
       breakindent: Buffer.get_option(buf, :breakindent),
       linebreak: Buffer.get_option(buf, :linebreak),
-      oracle: oracle
+      oracle: oracle,
+      tab_width: Buffer.get_option(buf, :tab_width)
     ]
   catch
-    :exit, _ -> [breakindent: true, linebreak: true, oracle: oracle]
+    :exit, _ -> [breakindent: true, linebreak: true, oracle: oracle, tab_width: 2]
   end
 
   @spec width_oracle(state()) :: Minga.Core.WidthOracle.t()
@@ -887,14 +930,14 @@ defmodule MingaEditor.Commands.Movement do
         false
 
       %Window{fold_map: fold_map} = window ->
-        if not FoldMap.empty?(fold_map) do
-          true
-        else
+        if FoldMap.empty?(fold_map) do
           try do
             DisplayMap.required?(window.fold_map, Buffer.decorations(buf))
           catch
             :exit, _ -> false
           end
+        else
+          true
         end
     end
   end

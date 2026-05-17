@@ -294,6 +294,22 @@ defmodule MingaEditor.WindowTest do
       assert window.render_cache.dirty_lines == :all
     end
 
+    test "marks all dirty when measured oracle cache contents differ" do
+      oracle1 = Minga.Core.WidthOracle.Measured.new(%{"wide" => 50})
+      oracle2 = Minga.Core.WidthOracle.Measured.new(%{"narrow" => 7})
+
+      fp1 = Minga.Core.WidthOracle.fingerprint(oracle1)
+      fp2 = Minga.Core.WidthOracle.fingerprint(oracle2)
+
+      refute fp1 == fp2
+
+      window = make_window()
+      window = Window.snapshot_after_render(window, 0, 4, 100, 5, 1, fp1)
+      window = Window.detect_context_change(window, fp2)
+
+      assert window.render_cache.dirty_lines == :all
+    end
+
     test "no-op when fingerprint is the same" do
       window = make_window()
       window = Window.snapshot_after_render(window, 0, 4, 100, 5, 1, :fp_a)

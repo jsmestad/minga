@@ -694,7 +694,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       WrapMap.compute(lines, ctx.content_w,
         breakindent: breakindent,
         linebreak: linebreak,
-        oracle: ctx.width_oracle
+        oracle: ctx.width_oracle,
+        tab_width: ctx.tab_width
       )
 
     sign_w = Gutter.sign_column_width()
@@ -1177,7 +1178,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       ctx.search_colors,
       ctx.document_highlight_colors,
       ctx.wrap_on,
-      ctx.line_number_style
+      ctx.line_number_style,
+      Minga.Core.WidthOracle.fingerprint(ctx.width_oracle)
     }
   end
 

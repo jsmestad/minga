@@ -302,6 +302,21 @@ defmodule MingaEditor.ViewportTest do
       assert vp.visual_row_offset == 2
     end
 
+    test "max_visual_row_offset/2 uses rows remaining to eof" do
+      assert Viewport.max_visual_row_offset(12, 5) == 7
+      assert Viewport.max_visual_row_offset(3, 5) == 0
+    end
+
+    test "clamp_visual_row_offset/3 caps the viewport offset for eof" do
+      vp = %{Viewport.new(24, 80, 0) | visual_row_offset: 9}
+      assert Viewport.clamp_visual_row_offset(vp, 12, 5).visual_row_offset == 7
+    end
+
+    test "clamp_visual_row_offset/3 preserves an already-valid smaller offset" do
+      vp = %{Viewport.new(24, 80, 0) | visual_row_offset: 3}
+      assert Viewport.clamp_visual_row_offset(vp, 12, 5).visual_row_offset == 3
+    end
+
     test "scroll_visual_row_down advances within wrapped logical line" do
       vp = Viewport.new(10, 80, 0) |> Viewport.put_top_visual(2, 0, 3)
       vp = Viewport.scroll_visual_row_down(vp, 3, 20, 0)
@@ -317,10 +332,18 @@ defmodule MingaEditor.ViewportTest do
     end
 
     test "scroll_visual_row_down stays at final visual row at eof" do
-      vp = Viewport.new(10, 80, 0) |> Viewport.put_top_visual(4, 2, 3)
+      vp = Viewport.new(1, 80, 0) |> Viewport.put_top_visual(4, 2, 3)
       vp = Viewport.scroll_visual_row_down(vp, 3, 5, 0)
       assert vp.top == 4
       assert vp.visual_row_offset == 2
+    end
+
+    test "scroll_visual_row_down clamps the final wrapped line to a full viewport" do
+      vp = Viewport.new(5, 80, 0) |> Viewport.put_top_visual(4, 9, 10)
+      vp = Viewport.scroll_visual_row_down(vp, 10, 5, 0)
+
+      assert vp.top == 4
+      assert vp.visual_row_offset == 5
     end
 
     test "scroll_visual_row_up moves to previous logical line last visual row" do

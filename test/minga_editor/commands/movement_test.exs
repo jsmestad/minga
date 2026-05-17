@@ -2,15 +2,19 @@ defmodule MingaEditor.Commands.MovementTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
-  alias Minga.Editing.Fold.Range, as: FoldRange
+  alias Minga.Core.WrapMap
   alias MingaEditor
   alias MingaEditor.Commands.Movement
+  alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline.TestHelpers
+  alias MingaEditor.Renderer.Gutter
+  alias MingaEditor.Viewport
   alias MingaEditor.Window
+  alias Minga.Editing.Fold.Range, as: FoldRange
 
   @sync_timeout 15_000
 
-  defp start_editor(content \\ "hello\nworld\nfoo") do
+  defp start_editor(content \\ "hello\nworld\nfoo", width \\ 40, height \\ 10) do
     id = :erlang.unique_integer([:positive])
     events_registry = :"movement_events_#{id}"
     project_root = isolated_project_root(id)
@@ -23,8 +27,8 @@ defmodule MingaEditor.Commands.MovementTest do
         name: :"editor_#{id}",
         port_manager: nil,
         buffer: buffer,
-        width: 40,
-        height: 10,
+        width: width,
+        height: height,
         editing_model: :vim,
         events_registry: events_registry,
         project_root: project_root,
@@ -38,6 +42,26 @@ defmodule MingaEditor.Commands.MovementTest do
     root = Path.join(System.tmp_dir!(), "minga-movement-#{id}")
     File.mkdir_p!(root)
     root
+  end
+
+  defp wrapped_content_width(state, buffer) do
+    layout = Layout.get(state)
+
+    content_width =
+      case Layout.active_window_layout(layout, state) do
+        %{content: {_row, _col, width, _height}} -> width
+        nil -> elem(layout.editor_area, 2)
+      end
+
+    line_count = BufferProcess.line_count(buffer)
+
+    gutter_width =
+      case BufferProcess.get_option(buffer, :line_numbers) do
+        :none -> Gutter.total_width(0)
+        _ -> Gutter.total_width(Viewport.gutter_width(line_count))
+      end
+
+    max(content_width - gutter_width, 1)
   end
 
   defp send_key(editor, codepoint, mods \\ 0) do
@@ -92,6 +116,25 @@ defmodule MingaEditor.Commands.MovementTest do
       send_key(editor, ?j)
       send_key(editor, ?k)
       assert elem(BufferProcess.cursor(buffer), 0) == 0
+    end
+
+    test "wrapped j and k honor tab width when computing visual rows" do
+      state = TestHelpers.base_state(content: "	" <> String.duplicate("a", 30), cols: 7, rows: 10)
+      buffer = state.workspace.buffers.active
+
+      _ = BufferProcess.set_option(buffer, :wrap, true)
+      _ = BufferProcess.set_option(buffer, :line_numbers, :none)
+      _ = BufferProcess.set_option(buffer, :linebreak, false)
+      _ = BufferProcess.set_option(buffer, :breakindent, true)
+      _ = BufferProcess.set_option(buffer, :tab_width, 4)
+
+      BufferProcess.move_to(buffer, {0, 4})
+
+      _ = Movement.execute(state, :move_down)
+      assert BufferProcess.cursor(buffer) == {0, 5}
+
+      _ = Movement.execute(state, :move_up)
+      assert BufferProcess.cursor(buffer) == {0, 4}
     end
 
     test "arrow keys move cursor without changing content" do
@@ -237,9 +280,15 @@ defmodule MingaEditor.Commands.MovementTest do
       state = Movement.execute(state, :split_vertical)
       _ = Movement.execute(state, :move_down)
 
-      {cursor_line, cursor_col} = BufferProcess.cursor(buffer)
-      assert cursor_line == 0
-      assert cursor_col > 0
+      expected_width = wrapped_content_width(state, buffer)
+
+      expected_offset =
+        WrapMap.compute([String.duplicate("a", 60)], expected_width)
+        |> hd()
+        |> Enum.at(1)
+        |> Map.fetch!(:byte_offset)
+
+      assert BufferProcess.cursor(buffer) == {0, expected_offset}
     end
   end
 
@@ -256,6 +305,77 @@ defmodule MingaEditor.Commands.MovementTest do
       send_key(editor, ?2)
       send_key(editor, ?j)
       assert elem(BufferProcess.cursor(buffer), 0) == 2
+    end
+  end
+
+  describe "wrap-aware scroll positioning" do
+    test "scroll_cursor_top keeps offset 0 when the wrapped file fits" do
+      penultimate = "    " <> String.duplicate("alpha beta ", 4)
+      last_line = "tail"
+
+      state =
+        TestHelpers.base_state(content: penultimate <> "\n" <> last_line, rows: 10, cols: 24)
+
+      buffer = state.workspace.buffers.active
+
+      _ = BufferProcess.set_option(buffer, :wrap, true)
+      _ = BufferProcess.set_option(buffer, :line_numbers, :none)
+      _ = BufferProcess.set_option(buffer, :linebreak, false)
+      _ = BufferProcess.set_option(buffer, :breakindent, true)
+
+      content_width = wrapped_content_width(state, buffer)
+
+      wrap_map =
+        WrapMap.compute([penultimate, last_line], content_width,
+          breakindent: true,
+          linebreak: false,
+          tab_width: 2
+        )
+
+      BufferProcess.move_to(buffer, {0, List.last(hd(wrap_map)).byte_offset})
+
+      state = Movement.execute(state, :scroll_cursor_top)
+      win = MingaEditor.State.active_window_struct(state)
+
+      assert win.viewport.top == 0
+      assert win.viewport.visual_row_offset == 0
+    end
+
+    test "scroll_cursor_top uses rows remaining to eof for penultimate wrapped lines" do
+      penultimate = "    " <> String.duplicate("alpha beta ", 4)
+      last_line = String.duplicate("omega psi ", 12)
+      state = TestHelpers.base_state(content: penultimate <> "\n" <> last_line, rows: 5, cols: 24)
+      buffer = state.workspace.buffers.active
+
+      _ = BufferProcess.set_option(buffer, :wrap, true)
+      _ = BufferProcess.set_option(buffer, :line_numbers, :none)
+      _ = BufferProcess.set_option(buffer, :linebreak, false)
+      _ = BufferProcess.set_option(buffer, :breakindent, true)
+
+      content_width = wrapped_content_width(state, buffer)
+
+      [penultimate_entry, last_entry] =
+        WrapMap.compute([penultimate, last_line], content_width,
+          breakindent: true,
+          linebreak: false,
+          tab_width: 2
+        )
+
+      total_visual_rows = WrapMap.visual_row_count([penultimate_entry, last_entry])
+      visible = Viewport.content_rows(Viewport.new(5, 24, 0))
+      cursor_visual_row = length(penultimate_entry) - 1
+
+      assert total_visual_rows > visible
+
+      BufferProcess.move_to(buffer, {0, List.last(penultimate_entry).byte_offset})
+
+      state = Movement.execute(state, :scroll_cursor_top)
+      win = MingaEditor.State.active_window_struct(state)
+
+      assert win.viewport.top == 0
+
+      assert win.viewport.visual_row_offset ==
+               min(cursor_visual_row, max(total_visual_rows - visible, 0))
     end
   end
 

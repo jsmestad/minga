@@ -29,5 +29,22 @@ defmodule Minga.Core.WidthOracleTest do
 
       assert WidthOracle.display_width(oracle, "wide") == 4
     end
+
+    test "fingerprint changes when measurements change" do
+      oracle = Measured.new()
+      before_fp = WidthOracle.fingerprint(oracle)
+      after_fp = oracle |> Measured.put_width("mmmm", 22) |> WidthOracle.fingerprint()
+
+      refute before_fp == after_fp
+      assert after_fp == {:measured, 1, :erlang.phash2(%{"mmmm" => 22})}
+    end
+
+    test "fingerprint distinguishes different initial cache contents" do
+      fp1 = WidthOracle.fingerprint(Measured.new(%{"wide" => 50}))
+      fp2 = WidthOracle.fingerprint(Measured.new(%{"narrow" => 7}))
+
+      refute fp1 == fp2
+      assert fp1 == {:measured, 0, :erlang.phash2(%{"wide" => 50})}
+    end
   end
 end

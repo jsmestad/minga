@@ -7,29 +7,36 @@ defmodule Minga.Core.WidthOracle.Measured do
 
   alias Minga.Core.Unicode
 
-  defstruct cache: %{}
+  defstruct cache: %{}, revision: 0
 
-  @type t :: %__MODULE__{cache: %{String.t() => non_neg_integer()}}
+  @type t :: %__MODULE__{
+          cache: %{String.t() => non_neg_integer()},
+          revision: non_neg_integer()
+        }
 
   @doc "Creates a measured oracle with an owned width cache."
   @spec new(%{String.t() => non_neg_integer()}) :: t()
-  def new(cache \\ %{}) when is_map(cache), do: %__MODULE__{cache: cache}
+  def new(cache \\ %{}) when is_map(cache), do: %__MODULE__{cache: cache, revision: 0}
 
   @doc "Stores a measured width for text in the oracle cache."
   @spec put_width(t(), String.t(), non_neg_integer()) :: t()
-  def put_width(%__MODULE__{cache: cache} = oracle, text, width)
+  def put_width(%__MODULE__{cache: cache, revision: revision} = oracle, text, width)
       when is_binary(text) and is_integer(width) and width >= 0 do
-    %{oracle | cache: Map.put(cache, text, width)}
+    %{oracle | cache: Map.put(cache, text, width), revision: revision + 1}
   end
 
   @doc "Clears cached measurements, for example after font or resize changes."
   @spec clear_cache(t()) :: t()
-  def clear_cache(%__MODULE__{} = oracle), do: %{oracle | cache: %{}}
+  def clear_cache(%__MODULE__{revision: revision} = oracle),
+    do: %{oracle | cache: %{}, revision: revision + 1}
 
   @doc "Returns a cached width or the monospace fallback when absent."
   @spec cached_or_fallback(t(), String.t()) :: non_neg_integer()
   def cached_or_fallback(%__MODULE__{cache: cache}, text) when is_binary(text) do
-    Map.get(cache, text, Unicode.display_width(text))
+    case Map.fetch(cache, text) do
+      {:ok, width} -> width
+      :error -> Unicode.display_width(text)
+    end
   end
 end
 
@@ -44,4 +51,8 @@ defimpl Minga.Core.WidthOracle, for: Minga.Core.WidthOracle.Measured do
 
   @spec display_width(Measured.t(), String.t()) :: non_neg_integer()
   def display_width(%Measured{} = oracle, text), do: Measured.cached_or_fallback(oracle, text)
+
+  @spec fingerprint(Measured.t()) :: term()
+  def fingerprint(%Measured{cache: cache, revision: revision}),
+    do: {:measured, revision, :erlang.phash2(cache)}
 end

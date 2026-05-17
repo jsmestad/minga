@@ -12,4 +12,8 @@ defprotocol Minga.Core.WidthOracle do
   @doc "Returns the display width of a text string."
   @spec display_width(t(), String.t()) :: non_neg_integer()
   def display_width(oracle, text)
+
+  @doc "Returns a compact fingerprint that changes when wrapped text measurement changes."
+  @spec fingerprint(t()) :: term()
+  def fingerprint(oracle)
 end

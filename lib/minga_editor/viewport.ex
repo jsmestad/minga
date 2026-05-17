@@ -148,6 +148,26 @@ defmodule MingaEditor.Viewport do
     %{vp | top: top, visual_row_offset: min(offset, visual_row_count - 1)}
   end
 
+  @doc "Returns the maximum visual row offset allowed for the rows remaining to EOF."
+  @spec max_visual_row_offset(pos_integer(), pos_integer()) :: non_neg_integer()
+  def max_visual_row_offset(total_visual_rows_to_eof, visible_rows)
+      when is_integer(total_visual_rows_to_eof) and total_visual_rows_to_eof > 0 and
+             is_integer(visible_rows) and visible_rows > 0 do
+    max(total_visual_rows_to_eof - visible_rows, 0)
+  end
+
+  @doc "Clamps the current visual row offset against the rows remaining to EOF."
+  @spec clamp_visual_row_offset(t(), pos_integer(), pos_integer()) :: t()
+  def clamp_visual_row_offset(%__MODULE__{} = vp, total_visual_rows_to_eof, visible_rows)
+      when is_integer(total_visual_rows_to_eof) and total_visual_rows_to_eof > 0 and
+             is_integer(visible_rows) and visible_rows > 0 do
+    %{
+      vp
+      | visual_row_offset:
+          min(vp.visual_row_offset, max_visual_row_offset(total_visual_rows_to_eof, visible_rows))
+    }
+  end
+
   @doc "Clamps the current visual row offset against the visual row count of `top`."
   @spec clamp_visual_row_offset(t(), pos_integer()) :: t()
   def clamp_visual_row_offset(%__MODULE__{} = vp, visual_row_count)
@@ -161,21 +181,24 @@ defmodule MingaEditor.Viewport do
       when is_integer(top_line_visual_rows) and top_line_visual_rows > 0 and
              is_integer(total_lines) and total_lines >= 0 do
     max_top = max(total_lines - 1, 0)
+    visible_rows = content_rows(vp)
+    max_offset = max(top_line_visual_rows - visible_rows, 0)
 
-    advance_visual_row_down(vp, top_line_visual_rows, max_top)
+    advance_visual_row_down(vp, top_line_visual_rows, max_top, max_offset)
   end
 
-  @spec advance_visual_row_down(t(), pos_integer(), non_neg_integer()) :: t()
-  defp advance_visual_row_down(vp, top_line_visual_rows, _max_top)
+  @spec advance_visual_row_down(t(), pos_integer(), non_neg_integer(), non_neg_integer()) :: t()
+  defp advance_visual_row_down(vp, _top_line_visual_rows, max_top, max_offset)
+       when vp.top >= max_top and vp.visual_row_offset >= max_offset do
+    %{vp | visual_row_offset: min(vp.visual_row_offset, max_offset)}
+  end
+
+  defp advance_visual_row_down(vp, top_line_visual_rows, _max_top, _max_offset)
        when vp.visual_row_offset + 1 < top_line_visual_rows do
     %{vp | visual_row_offset: vp.visual_row_offset + 1}
   end
 
-  defp advance_visual_row_down(vp, _top_line_visual_rows, max_top) when vp.top >= max_top do
-    vp
-  end
-
-  defp advance_visual_row_down(vp, _top_line_visual_rows, max_top) do
+  defp advance_visual_row_down(vp, _top_line_visual_rows, max_top, _max_offset) do
     put_top(vp, min(vp.top + 1, max_top))
   end
 
