@@ -9,6 +9,7 @@ defmodule MingaEditor.Commands.Movement do
   alias Minga.Buffer
   alias Minga.Buffer.Document
   alias Minga.Core.Unicode
+  alias Minga.Core.WrapMap
 
   alias MingaEditor.Commands.Helpers
   alias MingaEditor.FoldMap
@@ -357,7 +358,17 @@ defmodule MingaEditor.Commands.Movement do
     vp = active_viewport(state)
     {cursor_line, cursor_col} = Buffer.cursor(buf)
     total_lines = Buffer.line_count(buf)
-    {new_vp, clamped_cursor} = Viewport.scroll_line_down(vp, cursor_line, total_lines)
+
+    {new_vp, clamped_cursor} =
+      if wrap_enabled?(buf) do
+        top_rows =
+          visual_row_count_for_line(buf, vp.top, content_width(state), width_oracle(state))
+
+        {Viewport.scroll_visual_row_down(vp, top_rows, total_lines, scroll_margin(buf)),
+         cursor_line}
+      else
+        Viewport.scroll_line_down(vp, cursor_line, total_lines)
+      end
 
     if clamped_cursor != cursor_line do
       Buffer.move_to(buf, {clamped_cursor, cursor_col})
@@ -370,7 +381,22 @@ defmodule MingaEditor.Commands.Movement do
     vp = active_viewport(state)
     {cursor_line, cursor_col} = Buffer.cursor(buf)
     total_lines = Buffer.line_count(buf)
-    {new_vp, clamped_cursor} = Viewport.scroll_line_up(vp, cursor_line, total_lines)
+
+    {new_vp, clamped_cursor} =
+      if wrap_enabled?(buf) do
+        prev_rows =
+          visual_row_count_for_line(
+            buf,
+            max(vp.top - 1, 0),
+            content_width(state),
+            width_oracle(state)
+          )
+
+        {Viewport.scroll_visual_row_up(vp, prev_rows, total_lines, scroll_margin(buf)),
+         cursor_line}
+      else
+        Viewport.scroll_line_up(vp, cursor_line, total_lines)
+      end
 
     if clamped_cursor != cursor_line do
       Buffer.move_to(buf, {clamped_cursor, cursor_col})
@@ -381,27 +407,72 @@ defmodule MingaEditor.Commands.Movement do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :scroll_center) do
     vp = active_viewport(state)
-    {cursor_line, _cursor_col} = Buffer.cursor(buf)
+    {cursor_line, cursor_col} = Buffer.cursor(buf)
     total_lines = Buffer.line_count(buf)
-    new_vp = Viewport.center_on(vp, cursor_line, total_lines)
+
+    new_vp =
+      if wrap_enabled?(buf) do
+        center_wrapped_viewport(
+          buf,
+          vp,
+          cursor_line,
+          cursor_col,
+          content_width(state),
+          :center,
+          width_oracle(state)
+        )
+      else
+        Viewport.center_on(vp, cursor_line, total_lines)
+      end
+
     put_active_viewport(state, new_vp)
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :scroll_cursor_top) do
     vp = active_viewport(state)
-    {cursor_line, _cursor_col} = Buffer.cursor(buf)
+    {cursor_line, cursor_col} = Buffer.cursor(buf)
     total_lines = Buffer.line_count(buf)
     margin = scroll_margin(buf)
-    new_vp = Viewport.top_on(vp, cursor_line, total_lines, margin)
+
+    new_vp =
+      if wrap_enabled?(buf) do
+        center_wrapped_viewport(
+          buf,
+          vp,
+          cursor_line,
+          cursor_col,
+          content_width(state),
+          :top,
+          width_oracle(state)
+        )
+      else
+        Viewport.top_on(vp, cursor_line, total_lines, margin)
+      end
+
     put_active_viewport(state, new_vp)
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :scroll_cursor_bottom) do
     vp = active_viewport(state)
-    {cursor_line, _cursor_col} = Buffer.cursor(buf)
+    {cursor_line, cursor_col} = Buffer.cursor(buf)
     total_lines = Buffer.line_count(buf)
     margin = scroll_margin(buf)
-    new_vp = Viewport.bottom_on(vp, cursor_line, total_lines, margin)
+
+    new_vp =
+      if wrap_enabled?(buf) do
+        center_wrapped_viewport(
+          buf,
+          vp,
+          cursor_line,
+          cursor_col,
+          content_width(state),
+          :bottom,
+          width_oracle(state)
+        )
+      else
+        Viewport.bottom_on(vp, cursor_line, total_lines, margin)
+      end
+
     put_active_viewport(state, new_vp)
   end
 
@@ -629,6 +700,79 @@ defmodule MingaEditor.Commands.Movement do
     vp = Viewport.new(state.terminal_viewport.rows, state.terminal_viewport.cols)
     line_count = Buffer.line_count(state.workspace.buffers.active)
     Viewport.content_cols(vp, line_count)
+  end
+
+  @spec visual_row_count_for_line(
+          pid(),
+          non_neg_integer(),
+          pos_integer(),
+          Minga.Core.WidthOracle.t()
+        ) :: pos_integer()
+  defp visual_row_count_for_line(buf, line, content_w, oracle) do
+    snapshot = Buffer.render_snapshot(buf, line, 1)
+    text = List.first(snapshot.lines) || ""
+    [entry] = WrapMap.compute([text], content_w, wrap_opts(buf, oracle))
+    max(length(entry), 1)
+  catch
+    :exit, _ -> 1
+  end
+
+  @spec center_wrapped_viewport(
+          pid(),
+          Viewport.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer(),
+          :center | :top | :bottom,
+          Minga.Core.WidthOracle.t()
+        ) :: Viewport.t()
+  defp center_wrapped_viewport(buf, vp, cursor_line, cursor_col, content_w, position, oracle) do
+    snapshot = Buffer.render_snapshot(buf, cursor_line, 1)
+    text = List.first(snapshot.lines) || ""
+    [entry] = WrapMap.compute([text], content_w, wrap_opts(buf, oracle))
+    cursor_visual_row = visual_row_index(entry, cursor_col)
+    visible = Viewport.content_rows(vp)
+    target_offset = wrapped_target_offset(cursor_visual_row, visible, position)
+    Viewport.put_top_visual(vp, cursor_line, target_offset, max(length(entry), 1))
+  catch
+    :exit, _ -> vp
+  end
+
+  @spec wrapped_target_offset(non_neg_integer(), pos_integer(), :center | :top | :bottom) ::
+          non_neg_integer()
+  defp wrapped_target_offset(cursor_visual_row, visible, :center) do
+    max(cursor_visual_row - div(visible, 2), 0)
+  end
+
+  defp wrapped_target_offset(cursor_visual_row, _visible, :top), do: cursor_visual_row
+
+  defp wrapped_target_offset(cursor_visual_row, visible, :bottom) do
+    max(cursor_visual_row - visible + 1, 0)
+  end
+
+  @spec visual_row_index(WrapMap.wrap_entry(), non_neg_integer()) :: non_neg_integer()
+  defp visual_row_index(wrap_entry, cursor_col) do
+    wrap_entry
+    |> Enum.with_index()
+    |> Enum.filter(fn {row, _idx} -> row.byte_offset <= cursor_col end)
+    |> List.last({%{byte_offset: 0}, 0})
+    |> elem(1)
+  end
+
+  @spec wrap_opts(pid(), Minga.Core.WidthOracle.t()) :: keyword()
+  defp wrap_opts(buf, oracle) do
+    [
+      breakindent: Buffer.get_option(buf, :breakindent),
+      linebreak: Buffer.get_option(buf, :linebreak),
+      oracle: oracle
+    ]
+  catch
+    :exit, _ -> [breakindent: true, linebreak: true, oracle: oracle]
+  end
+
+  @spec width_oracle(state()) :: Minga.Core.WidthOracle.t()
+  defp width_oracle(state) do
+    MingaEditor.Frontend.Capabilities.width_oracle(state.capabilities)
   end
 
   @spec wrap_enabled?(pid()) :: boolean()

@@ -406,6 +406,13 @@ defmodule Minga.Config.OptionsTest do
       Options.reset(s)
       assert Options.get_for_filetype(s, :tab_width, :go) == 2
     end
+
+    test "built-in prose filetypes default to wrap enabled", %{server: s} do
+      assert Options.get_for_filetype(s, :wrap, :markdown) == true
+      assert Options.get_for_filetype(s, :wrap, :gitcommit) == true
+      assert Options.get_for_filetype(s, :wrap, :text) == true
+      assert Options.get_for_filetype(s, :wrap, :elixir) == false
+    end
   end
 
   describe "agent_tool_approval" do

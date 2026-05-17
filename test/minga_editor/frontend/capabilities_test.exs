@@ -27,6 +27,19 @@ defmodule MingaEditor.Frontend.CapabilitiesTest do
       assert Capabilities.gui?(%Capabilities{frontend_type: :native_gui})
       refute Capabilities.gui?(%Capabilities{frontend_type: :web})
     end
+
+    test "proportional_text?/1" do
+      refute Capabilities.proportional_text?(%Capabilities{text_rendering: :monospace})
+      assert Capabilities.proportional_text?(%Capabilities{text_rendering: :proportional})
+    end
+
+    test "width_oracle/1 selects the rendering mode oracle" do
+      assert %Minga.Core.WidthOracle.Monospace{} =
+               Capabilities.width_oracle(%Capabilities{text_rendering: :monospace})
+
+      assert %Minga.Core.WidthOracle.Measured{} =
+               Capabilities.width_oracle(%Capabilities{text_rendering: :proportional})
+    end
   end
 
   describe "from_binary/1" do
@@ -39,6 +52,7 @@ defmodule MingaEditor.Frontend.CapabilitiesTest do
       assert caps.unicode_width == :unicode_15
       assert caps.image_support == :kitty
       assert caps.float_support == :native
+      assert caps.text_rendering == :proportional
     end
 
     test "returns defaults for invalid binary" do

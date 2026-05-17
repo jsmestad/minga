@@ -11,7 +11,7 @@ defmodule MingaEditor.Viewport do
   alias Minga.Config
 
   @enforce_keys [:top, :left, :rows, :cols]
-  defstruct [:top, :left, :rows, :cols, reserved: 2]
+  defstruct [:top, :left, :rows, :cols, reserved: 2, visual_row_offset: 0]
 
   @typedoc """
   A viewport representing the visible terminal region.
@@ -26,13 +26,16 @@ defmodule MingaEditor.Viewport do
                  Defaults to `footer_rows()` (2) for the terminal-level viewport.
                  Set to 0 for per-window viewports where Layout already excluded
                  the modeline from the content rect.
+  * `visual_row_offset` — first visual row shown within `top` when wrapping is active.
+                          `{top: 5, visual_row_offset: 2}` starts on the third visual row of logical line 5.
   """
   @type t :: %__MODULE__{
           top: non_neg_integer(),
           left: non_neg_integer(),
           rows: pos_integer(),
           cols: pos_integer(),
-          reserved: non_neg_integer()
+          reserved: non_neg_integer(),
+          visual_row_offset: non_neg_integer()
         }
 
   @doc "Creates a new viewport with the given dimensions and default reserved rows (2)."
@@ -128,7 +131,163 @@ defmodule MingaEditor.Viewport do
     top = adjust_top(vp.top, cursor_line, visible_rows, effective_margin)
     left = adjust_left(vp.left, cursor_col, vp.cols)
 
-    %__MODULE__{vp | top: top, left: left}
+    %__MODULE__{vp | top: top, left: left, visual_row_offset: reset_visual_offset(vp.top, top)}
+  end
+
+  @doc "Stores a top logical line and clamps the visual row offset for that line."
+  @spec put_top_visual(t(), non_neg_integer(), non_neg_integer(), pos_integer()) :: t()
+  def put_top_visual(%__MODULE__{} = vp, top, offset, visual_row_count)
+      when is_integer(top) and top >= 0 and is_integer(offset) and offset >= 0 and
+             is_integer(visual_row_count) and visual_row_count > 0 do
+    %{vp | top: top, visual_row_offset: min(offset, visual_row_count - 1)}
+  end
+
+  @doc "Clamps the current visual row offset against the visual row count of `top`."
+  @spec clamp_visual_row_offset(t(), pos_integer()) :: t()
+  def clamp_visual_row_offset(%__MODULE__{} = vp, visual_row_count)
+      when is_integer(visual_row_count) and visual_row_count > 0 do
+    %{vp | visual_row_offset: min(vp.visual_row_offset, visual_row_count - 1)}
+  end
+
+  @doc "Scrolls down by one visual row when wrapping is active."
+  @spec scroll_visual_row_down(t(), pos_integer(), non_neg_integer(), non_neg_integer()) :: t()
+  def scroll_visual_row_down(%__MODULE__{} = vp, top_line_visual_rows, total_lines, _margin)
+      when is_integer(top_line_visual_rows) and top_line_visual_rows > 0 and
+             is_integer(total_lines) and total_lines >= 0 do
+    max_top = max(total_lines - 1, 0)
+
+    advance_visual_row_down(vp, top_line_visual_rows, max_top)
+  end
+
+  @spec advance_visual_row_down(t(), pos_integer(), non_neg_integer()) :: t()
+  defp advance_visual_row_down(vp, top_line_visual_rows, _max_top)
+       when vp.visual_row_offset + 1 < top_line_visual_rows do
+    %{vp | visual_row_offset: vp.visual_row_offset + 1}
+  end
+
+  defp advance_visual_row_down(vp, _top_line_visual_rows, max_top) when vp.top >= max_top do
+    vp
+  end
+
+  defp advance_visual_row_down(vp, _top_line_visual_rows, max_top) do
+    %{vp | top: min(vp.top + 1, max_top), visual_row_offset: 0}
+  end
+
+  @doc "Scrolls up by one visual row when wrapping is active."
+  @spec scroll_visual_row_up(t(), pos_integer(), non_neg_integer(), non_neg_integer()) :: t()
+  def scroll_visual_row_up(%__MODULE__{} = vp, previous_line_visual_rows, _total_lines, _margin)
+      when is_integer(previous_line_visual_rows) and previous_line_visual_rows > 0 do
+    if vp.visual_row_offset > 0 do
+      %{vp | visual_row_offset: vp.visual_row_offset - 1}
+    else
+      new_top = max(vp.top - 1, 0)
+      offset = if new_top == vp.top, do: 0, else: previous_line_visual_rows - 1
+      %{vp | top: new_top, visual_row_offset: offset}
+    end
+  end
+
+  @doc "Scrolls to a cursor visual row within its logical line when wrapping is active."
+  @spec scroll_to_cursor_visual(
+          t(),
+          {non_neg_integer(), non_neg_integer()},
+          non_neg_integer(),
+          pos_integer(),
+          non_neg_integer()
+        ) :: t()
+  def scroll_to_cursor_visual(
+        %__MODULE__{} = vp,
+        {cursor_line, cursor_col},
+        cursor_visual_row,
+        cursor_line_visual_rows,
+        margin
+      )
+      when is_integer(cursor_visual_row) and cursor_visual_row >= 0 and
+             is_integer(cursor_line_visual_rows) and cursor_line_visual_rows > 0 do
+    visible_rows = content_rows(vp)
+    effective_margin = min(margin, div(visible_rows - 1, 2))
+
+    vp
+    |> adjust_top_visual(
+      cursor_line,
+      cursor_visual_row,
+      cursor_line_visual_rows,
+      visible_rows,
+      effective_margin
+    )
+    |> Map.put(:left, adjust_left(vp.left, cursor_col, vp.cols))
+  end
+
+  @spec reset_visual_offset(non_neg_integer(), non_neg_integer()) :: non_neg_integer()
+  defp reset_visual_offset(old_top, old_top), do: 0
+  defp reset_visual_offset(_old_top, _new_top), do: 0
+
+  @spec adjust_top_visual(
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer(),
+          pos_integer(),
+          non_neg_integer()
+        ) :: t()
+  defp adjust_top_visual(
+         vp,
+         cursor_line,
+         cursor_visual_row,
+         cursor_line_visual_rows,
+         _visible,
+         margin
+       )
+       when cursor_line == vp.top and cursor_visual_row < vp.visual_row_offset + margin do
+    offset = max(cursor_visual_row - margin, 0)
+    put_top_visual(vp, cursor_line, offset, cursor_line_visual_rows)
+  end
+
+  defp adjust_top_visual(
+         vp,
+         cursor_line,
+         cursor_visual_row,
+         cursor_line_visual_rows,
+         visible,
+         margin
+       )
+       when cursor_line == vp.top and cursor_visual_row >= vp.visual_row_offset + visible - margin do
+    offset = max(cursor_visual_row - visible + 1 + margin, 0)
+    put_top_visual(vp, cursor_line, offset, cursor_line_visual_rows)
+  end
+
+  defp adjust_top_visual(
+         vp,
+         cursor_line,
+         cursor_visual_row,
+         cursor_line_visual_rows,
+         _visible,
+         _margin
+       )
+       when cursor_line < vp.top do
+    put_top_visual(vp, cursor_line, cursor_visual_row, cursor_line_visual_rows)
+  end
+
+  defp adjust_top_visual(
+         vp,
+         cursor_line,
+         _cursor_visual_row,
+         _cursor_line_visual_rows,
+         _visible,
+         _margin
+       )
+       when cursor_line > vp.top do
+    %{vp | top: cursor_line, visual_row_offset: 0}
+  end
+
+  defp adjust_top_visual(
+         vp,
+         _cursor_line,
+         _cursor_visual_row,
+         cursor_line_visual_rows,
+         _visible,
+         _margin
+       ) do
+    clamp_visual_row_offset(vp, cursor_line_visual_rows)
   end
 
   # Cursor is above the top margin: scroll up to give margin space.
@@ -174,6 +333,12 @@ defmodule MingaEditor.Viewport do
   @spec content_rows(t()) :: pos_integer()
   def content_rows(%__MODULE__{rows: rows, reserved: reserved}) do
     max(rows - reserved, 1)
+  end
+
+  @doc "Returns a cache key that changes for logical and visual scrolling."
+  @spec cache_key(t()) :: non_neg_integer()
+  def cache_key(%__MODULE__{top: top, visual_row_offset: offset}) do
+    top * 1_000_000 + offset
   end
 
   @doc """

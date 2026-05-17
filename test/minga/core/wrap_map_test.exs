@@ -97,6 +97,16 @@ defmodule Minga.Core.WrapMapTest do
   end
 
   describe "breakindent" do
+    test "continuation rows preserve indentation in display text" do
+      line = "    alpha beta gamma delta"
+      [entry] = WrapMap.compute([line], 12, breakindent: true)
+
+      assert Enum.at(entry, 0).text == "    alpha "
+      assert Enum.at(entry, 1).text =~ ~r/^    /
+      assert Enum.at(entry, 1).source_text == "beta "
+      assert Enum.at(entry, 1).indent_width == 4
+    end
+
     test "continuation rows use narrower width to leave room for indent" do
       # 4 spaces indent + text. At width 20, first row gets 20 cols,
       # continuation rows get 20 - 4 = 16 cols.
@@ -112,6 +122,22 @@ defmodule Minga.Core.WrapMapTest do
       [entry_no] = WrapMap.compute([line], 20, breakindent: false)
       # Without breakindent, fewer visual rows needed
       assert length(entry_no) <= length(entry_bi)
+    end
+  end
+
+  describe "width oracle" do
+    test "uses supplied oracle for wrap decisions" do
+      oracle = Minga.Core.WidthOracle.Measured.new(%{"a" => 2})
+      [entry] = WrapMap.compute(["aaaa"], 4, oracle: oracle, linebreak: false)
+
+      assert Enum.map(entry, & &1.text) == ["aa", "aa"]
+    end
+
+    test "always consumes an over-wide grapheme" do
+      oracle = Minga.Core.WidthOracle.Measured.new(%{"a" => 10})
+      [entry] = WrapMap.compute(["ab"], 4, oracle: oracle, linebreak: false)
+
+      assert Enum.map(entry, & &1.text) == ["a", "b"]
     end
   end
 

@@ -43,7 +43,7 @@ defmodule MingaEditor.UI.Picker.OptionScopeSourceTest do
 
   describe "on_select/2 — buffer scope" do
     test "sets option on the active buffer" do
-      {:ok, buf} = BufferProcess.start_link(content: "hello")
+      {:ok, buf} = BufferProcess.start_link(content: "hello", filetype: :elixir)
       assert BufferProcess.get_option(buf, :wrap) == false
 
       state = %{
@@ -102,7 +102,7 @@ defmodule MingaEditor.UI.Picker.OptionScopeSourceTest do
     # production).
 
     test "applies buffer-scoped option when modal is already :none" do
-      {:ok, buf} = BufferProcess.start_link(content: "hello")
+      {:ok, buf} = BufferProcess.start_link(content: "hello", filetype: :elixir)
       assert BufferProcess.get_option(buf, :wrap) == false
 
       state = %{

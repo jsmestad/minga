@@ -165,7 +165,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       search_colors: state.theme.search,
       document_highlight_colors: document_highlight_colors(state.theme),
       wrap_on: Map.get(params, :wrap_on, false),
-      line_number_style: Map.get(params, :line_number_style, :absolute)
+      line_number_style: Map.get(params, :line_number_style, :absolute),
+      width_oracle: Map.get(params, :width_oracle, %Minga.Core.WidthOracle.Monospace{})
     }
 
     {ctx, state}
@@ -416,7 +417,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
         lines,
         first_line,
         ctx.content_w,
-        ctx.decorations
+        ctx.decorations,
+        ctx.width_oracle
       )
 
     render_opts = %{
@@ -511,11 +513,20 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
           [String.t()],
           non_neg_integer(),
           pos_integer(),
-          Decorations.t()
+          Decorations.t(),
+          Minga.Core.WidthOracle.t()
         ) :: %{non_neg_integer() => WrapMap.wrap_entry()}
-  defp precompute_wrap_index(false, _vlm, _lines, _first, _w, _decs), do: %{}
+  defp precompute_wrap_index(false, _vlm, _lines, _first, _w, _decs, _oracle), do: %{}
 
-  defp precompute_wrap_index(true, visible_line_map, lines, first_line, width, decorations) do
+  defp precompute_wrap_index(
+         true,
+         visible_line_map,
+         lines,
+         first_line,
+         width,
+         decorations,
+         oracle
+       ) do
     # Extract buffer lines that need wrapping (skip virtual lines, blocks, folds)
     buffer_entries =
       visible_line_map
@@ -539,7 +550,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
         conceal_width = conceal_hidden_width(decorations, buf_line, line_len)
         wrap_w = max(width - vt_width + conceal_width, 10)
 
-        [entry] = WrapMap.compute([text], wrap_w)
+        [entry] = WrapMap.compute([text], wrap_w, oracle: oracle)
         entry
       end)
 
@@ -753,7 +764,11 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     linebreak = wrap_option(opts.buffer, :linebreak)
 
     wrap_map =
-      WrapMap.compute(lines, ctx.content_w, breakindent: breakindent, linebreak: linebreak)
+      WrapMap.compute(lines, ctx.content_w,
+        breakindent: breakindent,
+        linebreak: linebreak,
+        oracle: ctx.width_oracle
+      )
 
     sign_w = Gutter.sign_column_width()
     sign_ctx = SignContext.from_render_context(ctx)
@@ -767,6 +782,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
         {[], [], 0, first_byte_off},
         fn {{line_text, line_idx}, visual_rows}, {g, c, sr, byte_off} ->
           buf_line = first_line + line_idx
+          visual_rows = visible_visual_rows(visual_rows, line_idx, ctx.viewport.visual_row_offset)
 
           {g2, c2, rows_used} =
             BufferLine.render(%{
@@ -809,6 +825,17 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
     {Enum.reverse(gutters), Enum.reverse(contents), screen_row}
   end
+
+  @spec visible_visual_rows(WrapMap.wrap_entry(), non_neg_integer(), non_neg_integer()) ::
+          WrapMap.wrap_entry()
+  defp visible_visual_rows(visual_rows, 0, offset) when offset > 0 do
+    case Enum.drop(visual_rows, offset) do
+      [] -> [List.last(visual_rows)]
+      rows -> rows
+    end
+  end
+
+  defp visible_visual_rows(visual_rows, _line_idx, _offset), do: visual_rows
 
   # Renders a virtual line entry (from DisplayMap) into draw commands.
   # Virtual lines have no buffer content; they render their styled segments

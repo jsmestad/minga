@@ -34,7 +34,7 @@ defmodule Minga.Editing.Motion.VisualLine do
     if vrow_idx < length(wrap_entry) - 1 do
       # Move to the next visual row within the same logical line
       next_vrow = Enum.at(wrap_entry, vrow_idx + 1)
-      target_col = min(vrow_col, max(String.length(next_vrow.text) - 1, 0))
+      target_col = min(vrow_col, max(visual_display_width(next_vrow) - 1, 0))
       byte_col = byte_col_in_vrow(next_vrow, target_col)
       {line, next_vrow.byte_offset + byte_col}
     else
@@ -48,7 +48,7 @@ defmodule Minga.Editing.Motion.VisualLine do
         next_text = Document.line_at(doc, next_line)
         next_entry = WrapMap.compute([next_text], content_width) |> hd()
         first_vrow = hd(next_entry)
-        target_col = min(vrow_col, max(String.length(first_vrow.text) - 1, 0))
+        target_col = min(vrow_col, max(visual_display_width(first_vrow) - 1, 0))
         byte_col = byte_col_in_vrow(first_vrow, target_col)
         {next_line, byte_col}
       end
@@ -72,7 +72,7 @@ defmodule Minga.Editing.Motion.VisualLine do
     if vrow_idx > 0 do
       # Move to the previous visual row within the same logical line
       prev_vrow = Enum.at(wrap_entry, vrow_idx - 1)
-      target_col = min(vrow_col, max(String.length(prev_vrow.text) - 1, 0))
+      target_col = min(vrow_col, max(visual_display_width(prev_vrow) - 1, 0))
       byte_col = byte_col_in_vrow(prev_vrow, target_col)
       {line, prev_vrow.byte_offset + byte_col}
     else
@@ -84,7 +84,7 @@ defmodule Minga.Editing.Motion.VisualLine do
         prev_text = Document.line_at(doc, prev_line)
         prev_entry = WrapMap.compute([prev_text], content_width) |> hd()
         last_vrow = List.last(prev_entry)
-        target_col = min(vrow_col, max(String.length(last_vrow.text) - 1, 0))
+        target_col = min(vrow_col, max(visual_display_width(last_vrow) - 1, 0))
         byte_col = byte_col_in_vrow(last_vrow, target_col)
         {prev_line, last_vrow.byte_offset + byte_col}
       end
@@ -118,7 +118,7 @@ defmodule Minga.Editing.Motion.VisualLine do
     wrap_entry = WrapMap.compute([line_text], content_width) |> hd()
     display_col = Unicode.display_col(line_text, col)
     {_vrow_idx, _vrow_col, vrow} = find_visual_row(wrap_entry, display_col)
-    trimmed = String.trim_trailing(vrow.text)
+    trimmed = vrow |> source_text() |> String.trim_trailing()
     end_byte = max(byte_size(trimmed) - 1, 0)
     {line, vrow.byte_offset + end_byte}
   end
@@ -141,10 +141,10 @@ defmodule Minga.Editing.Motion.VisualLine do
     wrap_entry
     |> Enum.with_index()
     |> Enum.reduce_while({0, display_col}, fn {vrow, idx}, {_found_idx, remaining_col} ->
-      vrow_width = Unicode.display_width(vrow.text)
+      vrow_width = source_display_width(vrow)
 
       if remaining_col < vrow_width or idx == length(wrap_entry) - 1 do
-        {:halt, {idx, remaining_col}}
+        {:halt, {idx, remaining_col + indent_width(vrow)}}
       else
         {:cont, {idx + 1, remaining_col - vrow_width}}
       end
@@ -155,6 +155,23 @@ defmodule Minga.Editing.Motion.VisualLine do
   # within that visual row's text.
   @spec byte_col_in_vrow(WrapMap.visual_row(), non_neg_integer()) :: non_neg_integer()
   defp byte_col_in_vrow(vrow, target_display_col) do
-    Unicode.display_col_to_byte(vrow.text, target_display_col)
+    source_col = max(target_display_col - indent_width(vrow), 0)
+    Unicode.display_col_to_byte(source_text(vrow), source_col)
   end
+
+  @spec visual_display_width(WrapMap.visual_row()) :: non_neg_integer()
+  defp visual_display_width(vrow) do
+    indent_width(vrow) + source_display_width(vrow)
+  end
+
+  @spec source_display_width(WrapMap.visual_row()) :: non_neg_integer()
+  defp source_display_width(vrow) do
+    vrow |> source_text() |> Unicode.display_width()
+  end
+
+  @spec source_text(WrapMap.visual_row()) :: String.t()
+  defp source_text(vrow), do: Map.get(vrow, :source_text, vrow.text)
+
+  @spec indent_width(WrapMap.visual_row()) :: non_neg_integer()
+  defp indent_width(vrow), do: Map.get(vrow, :indent_width, 0)
 end

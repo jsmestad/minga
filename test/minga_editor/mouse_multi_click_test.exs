@@ -10,7 +10,7 @@ defmodule MingaEditor.MouseMultiClickTest do
   @content_row 1
 
   defp start_editor(content) do
-    {:ok, buffer} = BufferProcess.start_link(content: content)
+    {:ok, buffer} = BufferProcess.start_link(content: content, filetype: :elixir)
 
     {:ok, editor} =
       MingaEditor.start_link(

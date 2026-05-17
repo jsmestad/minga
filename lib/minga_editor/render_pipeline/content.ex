@@ -13,6 +13,7 @@ defmodule MingaEditor.RenderPipeline.Content do
   alias Minga.Buffer
   alias Minga.Core.Decorations
   alias Minga.Core.Unicode
+  alias Minga.Core.WrapMap
   alias MingaEditor.DisplayList
   alias MingaEditor.DisplayList.{Cursor, WindowFrame}
   alias MingaEditor.DisplayMap
@@ -113,7 +114,8 @@ defmodule MingaEditor.RenderPipeline.Content do
         is_active: is_active,
         is_gui: MingaEditor.Frontend.gui?(state.capabilities),
         wrap_on: wrap_on,
-        line_number_style: line_number_style
+        line_number_style: line_number_style,
+        width_oracle: MingaEditor.Frontend.Capabilities.width_oracle(state.capabilities)
       })
 
     # Compute context fingerprint and check for context changes.
@@ -182,18 +184,32 @@ defmodule MingaEditor.RenderPipeline.Content do
             FoldMap.buffer_to_visible(window.fold_map, cursor_line)
           end
 
-        cr = visible_cursor - viewport.top + row_off
+        {screen_row_delta, visual_row_byte_offset, visual_row_indent_width} =
+          cursor_visual_position(%{
+            wrap_on: wrap_on,
+            lines: lines,
+            first_line: first_line,
+            cursor_line: cursor_line,
+            cursor_byte_col: cursor_byte_col,
+            content_w: content_w,
+            viewport: viewport,
+            buf: window.buffer,
+            oracle: render_ctx.width_oracle
+          })
 
-        # Defensive clamp: fold/scroll misalignment can produce negative rows.
-        # Clamp to 0 so encode_cursor doesn't crash. The scroll stage will
-        # correct the viewport on the next frame.
-        cr = max(cr, 0)
+        cr = max(visible_cursor - viewport.top + screen_row_delta + row_off, 0)
 
         # Adjust cursor column for inline virtual text that shifts content right
         adjusted_cursor_col =
           Decorations.buf_col_to_display_col(render_ctx.decorations, cursor_line, cursor_col)
 
-        cc = gutter_w + adjusted_cursor_col - viewport.left + col_off
+        cursor_line_text = cursor_text_from_snapshot(lines, cursor_line, first_line)
+        visual_row_col = Unicode.display_col(cursor_line_text, visual_row_byte_offset)
+
+        cc =
+          gutter_w + visual_row_indent_width + adjusted_cursor_col - visual_row_col -
+            viewport.left + col_off
+
         Cursor.new(cr, cc, Minga.Editing.cursor_shape(state))
       else
         nil
@@ -226,7 +242,7 @@ defmodule MingaEditor.RenderPipeline.Content do
     updated_window =
       window
       |> Window.snapshot_after_render(
-        viewport.top,
+        Viewport.cache_key(viewport),
         gutter_w,
         snapshot.line_count,
         cursor_line,
@@ -240,6 +256,69 @@ defmodule MingaEditor.RenderPipeline.Content do
     state = %{state | workspace: %{ws | windows: %{ws.windows | map: new_map}}}
 
     {win_frame, cursor_info, state}
+  end
+
+  @spec cursor_visual_position(map()) :: {integer(), non_neg_integer(), non_neg_integer()}
+  defp cursor_visual_position(%{wrap_on: false}), do: {0, 0, 0}
+
+  defp cursor_visual_position(%{
+         wrap_on: true,
+         lines: lines,
+         first_line: first_line,
+         cursor_line: cursor_line,
+         cursor_byte_col: cursor_byte_col,
+         content_w: content_w,
+         viewport: viewport,
+         buf: buf,
+         oracle: oracle
+       }) do
+    line_idx = cursor_line - first_line
+
+    if line_idx >= 0 and line_idx < length(lines) do
+      wrap_map = wrap_map_for_cursor(lines, line_idx, content_w, buf, oracle)
+      cursor_entry = Enum.at(wrap_map, line_idx, [%{byte_offset: 0, text: ""}])
+      visual_row_idx = visual_row_index(cursor_entry, cursor_byte_col)
+      rows_before = wrap_map |> Enum.take(line_idx) |> WrapMap.visual_row_count()
+      logical_delta = cursor_line - viewport.top
+      screen_delta = rows_before + visual_row_idx - viewport.visual_row_offset - logical_delta
+      cursor_row = Enum.at(cursor_entry, visual_row_idx, %{byte_offset: 0, indent_width: 0})
+      {screen_delta, cursor_row.byte_offset, Map.get(cursor_row, :indent_width, 0)}
+    else
+      {0, 0, 0}
+    end
+  end
+
+  @spec wrap_map_for_cursor(
+          [String.t()],
+          non_neg_integer(),
+          pos_integer(),
+          pid(),
+          Minga.Core.WidthOracle.t()
+        ) :: WrapMap.t()
+  defp wrap_map_for_cursor(lines, line_idx, content_w, buf, oracle) do
+    relevant_lines = Enum.take(lines, line_idx + 1)
+
+    WrapMap.compute(relevant_lines, content_w,
+      breakindent: wrap_option(buf, :breakindent),
+      linebreak: wrap_option(buf, :linebreak),
+      oracle: oracle
+    )
+  end
+
+  @spec visual_row_index(WrapMap.wrap_entry(), non_neg_integer()) :: non_neg_integer()
+  defp visual_row_index(wrap_entry, cursor_byte_col) do
+    wrap_entry
+    |> Enum.with_index()
+    |> Enum.filter(fn {row, _idx} -> row.byte_offset <= cursor_byte_col end)
+    |> List.last({%{byte_offset: 0}, 0})
+    |> elem(1)
+  end
+
+  @spec wrap_option(pid(), atom()) :: boolean()
+  defp wrap_option(buf, name) do
+    Buffer.get_option(buf, name)
+  catch
+    :exit, _ -> true
   end
 
   defp maybe_render_agent_window(

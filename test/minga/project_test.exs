@@ -14,6 +14,7 @@ defmodule Minga.ProjectTest do
       opts
       |> Keyword.put(:name, name)
       |> Keyword.put_new(:subscribe, false)
+      |> Keyword.put_new(:command_frecency, %{})
       |> Project.start_link()
 
     {pid, name}

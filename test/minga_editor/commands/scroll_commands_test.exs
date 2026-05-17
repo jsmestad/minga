@@ -11,7 +11,7 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
   alias MingaEditor
 
   defp start_editor(content, opts \\ []) do
-    {:ok, buffer} = BufferProcess.start_link(content: content)
+    {:ok, buffer} = BufferProcess.start_link(content: content, filetype: :elixir)
 
     {:ok, editor} =
       MingaEditor.start_link(

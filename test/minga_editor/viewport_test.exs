@@ -283,6 +283,47 @@ defmodule MingaEditor.ViewportTest do
     end
   end
 
+  describe "visual row offset" do
+    test "new viewport starts at first visual row" do
+      vp = Viewport.new(24, 80)
+      assert vp.visual_row_offset == 0
+    end
+
+    test "put_top_visual clamps offset to line row count" do
+      vp = Viewport.new(24, 80) |> Viewport.put_top_visual(5, 9, 3)
+      assert vp.top == 5
+      assert vp.visual_row_offset == 2
+    end
+
+    test "scroll_visual_row_down advances within wrapped logical line" do
+      vp = Viewport.new(10, 80, 0) |> Viewport.put_top_visual(2, 0, 3)
+      vp = Viewport.scroll_visual_row_down(vp, 3, 20, 0)
+      assert vp.top == 2
+      assert vp.visual_row_offset == 1
+    end
+
+    test "scroll_visual_row_down rolls to next logical line" do
+      vp = Viewport.new(10, 80, 0) |> Viewport.put_top_visual(2, 2, 3)
+      vp = Viewport.scroll_visual_row_down(vp, 3, 20, 0)
+      assert vp.top == 3
+      assert vp.visual_row_offset == 0
+    end
+
+    test "scroll_visual_row_down stays at final visual row at eof" do
+      vp = Viewport.new(10, 80, 0) |> Viewport.put_top_visual(4, 2, 3)
+      vp = Viewport.scroll_visual_row_down(vp, 3, 5, 0)
+      assert vp.top == 4
+      assert vp.visual_row_offset == 2
+    end
+
+    test "scroll_visual_row_up moves to previous logical line last visual row" do
+      vp = Viewport.new(10, 80, 0) |> Viewport.put_top_visual(4, 0, 1)
+      vp = Viewport.scroll_visual_row_up(vp, 4, 20, 0)
+      assert vp.top == 3
+      assert vp.visual_row_offset == 3
+    end
+  end
+
   describe "content_cols/2" do
     test "subtracts gutter width from total cols" do
       vp = Viewport.new(24, 80)
