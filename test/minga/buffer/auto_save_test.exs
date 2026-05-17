@@ -12,7 +12,7 @@ defmodule Minga.Buffer.AutoSaveTest do
   alias Minga.Events.LogMessageEvent
 
   @moduletag :tmp_dir
-  @delay_ms 25
+  @delay_ms 100
   @event_timeout 5_000
   @no_event_timeout 150
 
