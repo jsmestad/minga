@@ -14,6 +14,7 @@ defmodule MingaEditor.StatusBar.Data do
   alias MingaAgent.Session
   alias Minga.Buffer
   alias Minga.Diagnostics
+  alias Minga.Config.ModelineSegments
   alias MingaEditor.Editing
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
@@ -130,6 +131,17 @@ defmodule MingaEditor.StatusBar.Data do
     end
   end
 
+  @doc "Attaches GUI-ready configured modeline segments to status bar data."
+  @spec with_modeline_segments(t(), Theme.t()) :: t()
+  @spec with_modeline_segments(t(), Theme.t(), ModelineSegments.table()) :: t()
+  def with_modeline_segments(status_bar_data, theme, modeline_segments_table \\ ModelineSegments)
+
+  def with_modeline_segments({:buffer, data}, theme, modeline_segments_table),
+    do: {:buffer, attach_modeline_segments(data, theme, modeline_segments_table)}
+
+  def with_modeline_segments({:agent, data}, theme, modeline_segments_table),
+    do: {:agent, attach_modeline_segments(data, theme, modeline_segments_table)}
+
   # ── Buffer variant ─────────────────────────────────────────────────────────
 
   @spec build_buffer_data(EditorState.t() | map()) :: buffer_data()
@@ -157,7 +169,7 @@ defmodule MingaEditor.StatusBar.Data do
     agent = AgentAccess.agent(state)
     background = background_subagent_summary(state)
 
-    data = %{
+    %{
       mode: mode,
       mode_state: mode_state,
       cursor_line: line,
@@ -184,8 +196,6 @@ defmodule MingaEditor.StatusBar.Data do
       active_background_subagent_label: background.label,
       status_msg: state.shell_state.status_msg
     }
-
-    attach_modeline_segments(data, state.theme)
   end
 
   @spec buf_display_name(pid()) :: String.t()
@@ -309,7 +319,7 @@ defmodule MingaEditor.StatusBar.Data do
     selection_info = selection_info(mode, mode_state, buf, {line, col})
     background = background_subagent_summary(state)
 
-    data = %{
+    %{
       mode: mode,
       mode_state: mode_state,
       model_name: model_name,
@@ -340,16 +350,15 @@ defmodule MingaEditor.StatusBar.Data do
       active_background_subagent_label: background.label,
       status_msg: state.shell_state.status_msg
     }
-
-    attach_modeline_segments(data, state.theme)
   end
 
-  @spec attach_modeline_segments(map(), Theme.t()) :: buffer_data() | agent_data()
-  defp attach_modeline_segments(data, theme) do
+  @spec attach_modeline_segments(map(), Theme.t(), ModelineSegments.table()) ::
+          buffer_data() | agent_data()
+  defp attach_modeline_segments(data, theme, modeline_segments_table) do
     Map.put(
       data,
       :modeline_segments,
-      Modeline.gui_segments(data_to_modeline_data(data), theme)
+      Modeline.gui_segments(data_to_modeline_data(data), theme, modeline_segments_table)
     )
   end
 

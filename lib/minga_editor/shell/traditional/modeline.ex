@@ -97,6 +97,11 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     none: {"", ""}
   }
 
+  @boolean_segment_attrs [:bold, :italic, :underline, :strikethrough, :reverse]
+  @underline_styles [:line, :curl, :dashed, :dotted, :double]
+  @font_weights [:thin, :light, :regular, :medium, :semibold, :bold, :heavy, :black]
+  @font_slants [:roman, :italic, :oblique]
+
   # Nerd Font branch icon (U+E0A0)
   @branch_icon "\uE0A0"
 
@@ -141,12 +146,17 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
 
   @doc "Returns configured modeline segments for native GUI status bars."
   @spec gui_segments(modeline_data(), Theme.t()) :: gui_segments()
-  def gui_segments(data, theme \\ MingaEditor.UI.Theme.get!(:doom_one)) do
+  @spec gui_segments(modeline_data(), Theme.t(), ModelineSegments.table()) :: gui_segments()
+  def gui_segments(
+        data,
+        theme \\ MingaEditor.UI.Theme.get!(:doom_one),
+        modeline_segments_table \\ ModelineSegments
+      ) do
     ctx = context(data, theme)
     separator_style = Minga.Config.get(:modeline_separator)
-    {left_names, right_names} = configured_segment_names()
-    left_groups = build_segment_groups(left_names, ctx)
-    right_groups = build_segment_groups(right_names, ctx)
+    {left_names, right_names} = configured_segment_names(modeline_segments_table)
+    left_groups = build_segment_groups(left_names, ctx, modeline_segments_table)
+    right_groups = build_segment_groups(right_names, ctx, modeline_segments_table)
 
     %{
       left: left_segments(left_groups, separator_style, ctx.bar_bg),
@@ -194,49 +204,57 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   end
 
   @spec configured_segment_names() :: {[atom()], [atom()]}
-  defp configured_segment_names do
+  @spec configured_segment_names(ModelineSegments.table()) :: {[atom()], [atom()]}
+  defp configured_segment_names(modeline_segments_table \\ ModelineSegments) do
     left = Minga.Config.get(:modeline_left_segments)
     right = Minga.Config.get(:modeline_right_segments)
     configured = MapSet.new(left ++ right)
 
     left_defaults =
-      ModelineSegments.names_for_side(:left) |> Enum.reject(&MapSet.member?(configured, &1))
+      modeline_segments_table
+      |> ModelineSegments.names_for_side(:left)
+      |> Enum.reject(&MapSet.member?(configured, &1))
 
     right_defaults =
-      ModelineSegments.names_for_side(:right) |> Enum.reject(&MapSet.member?(configured, &1))
+      modeline_segments_table
+      |> ModelineSegments.names_for_side(:right)
+      |> Enum.reject(&MapSet.member?(configured, &1))
 
     {left ++ left_defaults, right ++ right_defaults}
   end
 
   @spec build_segment_groups([atom()], context()) :: [segment_group()]
-  defp build_segment_groups(names, ctx) do
+  @spec build_segment_groups([atom()], context(), ModelineSegments.table()) :: [segment_group()]
+  defp build_segment_groups(names, ctx, modeline_segments_table \\ ModelineSegments) do
     names
-    |> Enum.map(&build_segment_group(&1, ctx))
+    |> Enum.map(&build_segment_group(&1, ctx, modeline_segments_table))
     |> Enum.reject(&is_nil/1)
   end
 
-  @spec build_segment_group(atom(), context()) :: segment_group() | nil
-  defp build_segment_group(name, ctx) do
+  @spec build_segment_group(atom(), context(), ModelineSegments.table()) :: segment_group() | nil
+  defp build_segment_group(name, ctx, modeline_segments_table) do
     case builtin_priority(name) do
       {:ok, priority} -> group_from_segments(name, priority, render_builtin(name, ctx))
-      :error -> build_custom_segment_group(name, ctx)
+      :error -> build_custom_segment_group(name, ctx, modeline_segments_table)
     end
   end
 
-  @spec build_custom_segment_group(atom(), context()) :: segment_group() | nil
-  defp build_custom_segment_group(name, ctx) do
-    case ModelineSegments.lookup(name) do
+  @spec build_custom_segment_group(atom(), context(), ModelineSegments.table()) ::
+          segment_group() | nil
+  defp build_custom_segment_group(name, ctx, modeline_segments_table) do
+    case ModelineSegments.lookup(modeline_segments_table, name) do
       %ModelineSegment{} = segment ->
         group_from_segments(name, segment.priority, render_custom(segment, ctx))
 
       nil ->
-        unknown_segment(name)
+        unknown_segment(name, modeline_segments_table)
     end
   end
 
-  @spec unknown_segment(atom()) :: nil
-  defp unknown_segment(name) do
+  @spec unknown_segment(atom(), ModelineSegments.table()) :: nil
+  defp unknown_segment(name, modeline_segments_table) do
     ModelineSegments.warn_once(
+      modeline_segments_table,
       {:unknown_segment, name},
       "Unknown modeline segment #{inspect(name)} ignored"
     )
@@ -297,13 +315,12 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   defp normalize_segment_tuple(name, {text, fg, bg, opts, target})
        when is_binary(text) and is_integer(fg) and is_integer(bg) and is_list(opts) and
               (is_atom(target) or is_nil(target)) do
-    case valid_color?(fg) and valid_color?(bg) do
-      true ->
-        [{text, fg, bg, opts, target}]
-
-      false ->
-        invalid_segment_colors(name, fg, bg)
-        []
+    with :ok <- validate_segment_text(name, text),
+         :ok <- validate_segment_colors(name, fg, bg),
+         {:ok, safe_opts} <- validate_segment_opts(name, opts) do
+      [{text, fg, bg, safe_opts, target}]
+    else
+      :error -> []
     end
   end
 
@@ -312,8 +329,96 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     []
   end
 
+  @spec validate_segment_text(atom(), binary()) :: :ok | :error
+  defp validate_segment_text(name, text) do
+    if String.valid?(text) do
+      :ok
+    else
+      invalid_segment_text(name, text)
+      :error
+    end
+  end
+
+  @spec validate_segment_colors(atom(), integer(), integer()) :: :ok | :error
+  defp validate_segment_colors(name, fg, bg) do
+    if valid_color?(fg) and valid_color?(bg) do
+      :ok
+    else
+      invalid_segment_colors(name, fg, bg)
+      :error
+    end
+  end
+
+  @spec validate_segment_opts(atom(), term()) :: {:ok, keyword()} | :error
+  defp validate_segment_opts(name, opts) do
+    if Keyword.keyword?(opts) do
+      normalize_segment_opts(name, opts)
+    else
+      invalid_segment_opts(name, opts)
+      :error
+    end
+  end
+
+  @spec normalize_segment_opts(atom(), keyword()) :: {:ok, keyword()} | :error
+  defp normalize_segment_opts(name, opts) do
+    opts
+    |> Enum.reduce_while({:ok, []}, fn {key, value}, {:ok, acc} ->
+      case normalize_segment_opt(key, value) do
+        {:ok, opt} -> {:cont, {:ok, [opt | acc]}}
+        :error -> {:halt, invalid_segment_opt(name, key, value)}
+      end
+    end)
+    |> normalize_segment_opts_result()
+  end
+
+  @spec normalize_segment_opts_result({:ok, keyword()} | :error) :: {:ok, keyword()} | :error
+  defp normalize_segment_opts_result({:ok, opts}), do: {:ok, Enum.reverse(opts)}
+  defp normalize_segment_opts_result(:error), do: :error
+
+  @spec normalize_segment_opt(atom(), term()) :: {:ok, {atom(), term()}} | :error
+  defp normalize_segment_opt(key, value) when key in @boolean_segment_attrs and is_boolean(value),
+    do: {:ok, {key, value}}
+
+  defp normalize_segment_opt(:underline_style, value) when value in @underline_styles,
+    do: {:ok, {:underline_style, value}}
+
+  defp normalize_segment_opt(:underline_color, value) when is_integer(value) do
+    if valid_color?(value), do: {:ok, {:underline_color, value}}, else: :error
+  end
+
+  defp normalize_segment_opt(:blend, value)
+       when is_integer(value) and value >= 0 and value <= 100,
+       do: {:ok, {:blend, value}}
+
+  defp normalize_segment_opt(:font_family, value) when is_binary(value),
+    do: {:ok, {:font_family, value}}
+
+  defp normalize_segment_opt(:font_weight, value) when value in @font_weights,
+    do: {:ok, {:font_weight, value}}
+
+  defp normalize_segment_opt(:font_slant, value) when value in @font_slants,
+    do: {:ok, {:font_slant, value}}
+
+  defp normalize_segment_opt(:font_features, value) when is_map(value) do
+    if Enum.all?(value, fn {feature, enabled} -> is_binary(feature) and is_boolean(enabled) end) do
+      {:ok, {:font_features, value}}
+    else
+      :error
+    end
+  end
+
+  defp normalize_segment_opt(_key, _value), do: :error
+
   @spec valid_color?(integer()) :: boolean()
   defp valid_color?(value), do: value >= 0 and value <= 0xFF_FFFF
+
+  @spec invalid_segment_text(atom(), binary()) :: :ok
+  defp invalid_segment_text(name, text) do
+    ModelineSegments.warn_once(
+      {:invalid_segment_text, name},
+      "Invalid modeline segment #{inspect(name)} text ignored because it is not valid UTF-8: #{inspect(text, binaries: :as_binaries)}"
+    )
+  end
 
   @spec invalid_segment_colors(atom(), term(), term()) :: :ok
   defp invalid_segment_colors(name, fg, bg) do
@@ -323,12 +428,32 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     )
   end
 
+  @spec invalid_segment_opts(atom(), term()) :: :error
+  defp invalid_segment_opts(name, opts) do
+    ModelineSegments.warn_once(
+      {:invalid_segment_opts, name},
+      "Invalid modeline segment #{inspect(name)} options ignored: expected a keyword list, got #{inspect(opts, limit: 20)}"
+    )
+
+    :error
+  end
+
+  @spec invalid_segment_opt(atom(), atom(), term()) :: :error
+  defp invalid_segment_opt(name, key, value) do
+    ModelineSegments.warn_once(
+      {:invalid_segment_opt, name, key},
+      "Invalid modeline segment #{inspect(name)} option ignored: #{inspect(key)}=#{inspect(value)}"
+    )
+
+    :error
+  end
+
   @spec invalid_segment_output(atom(), term()) :: :ok
   defp invalid_segment_output(name, invalid) do
     inspected = inspect(invalid, printable_limit: 200, limit: 20)
 
     ModelineSegments.warn_once(
-      {:invalid_segment_output, name, inspected},
+      {:invalid_segment_output, name},
       "Invalid modeline segment #{inspect(name)} output ignored: #{inspected}"
     )
   end
@@ -722,7 +847,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   defp maybe_add_diagnostic(segments, 0, _icon, _fg, _bar_bg), do: segments
 
   defp maybe_add_diagnostic(segments, count, icon, fg, bar_bg),
-    do: [{" #{icon} #{count}", fg, bar_bg, [], :diagnostic_list} | segments]
+    do: [{" #{icon} #{count}", fg, bar_bg, [], :diagnostic_picker} | segments]
 
   @spec build_lsp_segments(modeline_data(), non_neg_integer(), Theme.Modeline.t()) :: [
           render_segment()

@@ -165,6 +165,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["diagnostic_hint"] == "✖ undefined function foo/0 [ElixirLS]"
       assert decoded["indent_type"] == 0
       assert decoded["indent_size"] == 2
+
       assert [%{"text" => " NORMAL ", "attrs" => 1, "command" => ""}] =
                decoded["modeline_left_segments"]
 

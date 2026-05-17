@@ -520,6 +520,78 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
       end
     end
 
+    test "custom segments with invalid UTF-8 text are dropped" do
+      segment_name = :invalid_utf8_modeline_test
+      ModelineSegments.unregister(segment_name)
+
+      try do
+        assert :ok =
+                 ModelineSegments.register(segment_name, [side: :left], fn ctx ->
+                   {<<" BAD_UTF8 ", 0xFF>>, ctx.info_fg, ctx.bar_bg, [], nil}
+                 end)
+
+        assert %{left: left, right: right} = Modeline.gui_segments(@base_data)
+        refute String.contains?(segment_text(left), "BAD_UTF8")
+        refute String.contains?(segment_text(right), "BAD_UTF8")
+
+        {commands, _regions} = Modeline.render(0, 120, @base_data)
+        refute String.contains?(combined_text(commands), "BAD_UTF8")
+      after
+        ModelineSegments.unregister(segment_name)
+      end
+    end
+
+    test "custom segments with malformed opts are dropped" do
+      segment_name = :invalid_opts_modeline_test
+      ModelineSegments.unregister(segment_name)
+
+      try do
+        assert :ok =
+                 ModelineSegments.register(segment_name, [side: :left], fn ctx ->
+                   {" BAD_OPTS ", ctx.info_fg, ctx.bar_bg, [bold: :yes], nil}
+                 end)
+
+        assert %{left: left, right: right} = Modeline.gui_segments(@base_data)
+        refute String.contains?(segment_text(left), "BAD_OPTS")
+        refute String.contains?(segment_text(right), "BAD_OPTS")
+
+        {commands, _regions} = Modeline.render(0, 120, @base_data)
+        refute String.contains?(combined_text(commands), "BAD_OPTS")
+      after
+        ModelineSegments.unregister(segment_name)
+      end
+    end
+
+    test "invalid custom segment warnings use stable keys for changing output" do
+      segment_name = :dynamic_invalid_output_modeline_test
+      counter = :counters.new(1, [])
+      warnings_table = Minga.Config.ModelineSegments.Warnings
+      ModelineSegments.unregister(segment_name)
+      ModelineSegments.reset_warnings()
+
+      try do
+        assert :ok =
+                 ModelineSegments.register(segment_name, [side: :left], fn _ctx ->
+                   :counters.add(counter, 1, 1)
+                   {:bad_output, :counters.get(counter, 1)}
+                 end)
+
+        Modeline.render(0, 120, @base_data)
+        Modeline.render(0, 120, @base_data)
+
+        warning_keys =
+          warnings_table
+          |> :ets.tab2list()
+          |> Enum.map(fn {key, true} -> key end)
+
+        assert Enum.count(warning_keys, &(&1 == {:invalid_segment_output, segment_name})) == 1
+        refute Enum.any?(warning_keys, &match?({:invalid_segment_output, ^segment_name, _}, &1))
+      after
+        ModelineSegments.unregister(segment_name)
+        ModelineSegments.reset_warnings()
+      end
+    end
+
     test "custom segment exceptions are dropped without raising" do
       segment_name = :raising_modeline_test
       ModelineSegments.unregister(segment_name)

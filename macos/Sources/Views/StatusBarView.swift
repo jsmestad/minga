@@ -180,25 +180,64 @@ struct StatusBarView: View {
     var gitSyncing: Bool = false
 
     private let barHeight: CGFloat = 24
+    private let sideSpacing: CGFloat = 8
+    private let leftFixedControlsWidth: CGFloat = 101
+    private let rightFixedControlsWidth: CGFloat = 34
+    private let maxCenterStatusWidth: CGFloat = 320
 
     var body: some View {
-        ZStack {
-            // Center (lowest priority, truncates first)
-            centerSegment
+        GeometryReader { proxy in
+            let layout = modelineLayout(totalWidth: proxy.size.width)
 
-            // Side-aligned modeline content. The right controls keep their intrinsic width while long left-side configured segments truncate instead of covering them.
-            HStack(spacing: 8) {
-                leftSegment
-                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 0) {
+                leftStatusZone(layout)
+                    .frame(width: layout.leftRect.width, height: barHeight, alignment: .leading)
                     .clipped()
-                rightSegment
-                    .fixedSize(horizontal: true, vertical: false)
+                    .contentShape(Rectangle())
+
+                centerSegment
+                    .frame(width: layout.centerRect.width, height: barHeight, alignment: .center)
+                    .clipped()
+                    .contentShape(Rectangle())
+
+                rightStatusZone(layout)
+                    .frame(width: layout.rightRect.width, height: barHeight, alignment: .trailing)
+                    .clipped()
+                    .contentShape(Rectangle())
             }
+            .frame(width: layout.totalWidth, height: barHeight, alignment: .leading)
         }
         .frame(height: barHeight)
         .background(theme.modelineBarBg)
         .focusable(false)
         .focusEffectDisabled()
+    }
+
+    func modelineLayout(totalWidth: CGFloat) -> StatusBarModelineLayout {
+        StatusBarModelineLayout.compute(
+            totalWidth: totalWidth,
+            barHeight: barHeight,
+            hasCenter: hasCenterStatus,
+            leftFixedWidth: leftFixedControlsWidth,
+            rightFixedWidth: rightFixedControlsWidth,
+            sideSpacing: sideSpacing,
+            maxCenterWidth: maxCenterStatusWidth,
+            leftWeight: segmentTextWeight(state.modelineLeftSegments),
+            rightWeight: segmentTextWeight(state.modelineRightSegments)
+        )
+    }
+
+    func modelineLayoutBudgets(totalWidth: CGFloat) -> (leftModeline: CGFloat, rightModeline: CGFloat, center: CGFloat) {
+        let layout = modelineLayout(totalWidth: totalWidth)
+        return (layout.leftModelineWidth, layout.rightModelineWidth, layout.centerRect.width)
+    }
+
+    private var hasCenterStatus: Bool {
+        state.isRecordingMacro || !state.message.isEmpty || !state.diagnosticHint.isEmpty
+    }
+
+    private func segmentTextWeight(_ segments: [Wire.StatusBarSegment]) -> CGFloat {
+        CGFloat(max(0, segments.reduce(0) { $0 + $1.text.count }))
     }
 
     // MARK: - Center segment (transient indicators)
@@ -229,10 +268,10 @@ struct StatusBarView: View {
         }
     }
 
-    // MARK: - Left segment
+    // MARK: - Left fixed controls
 
     @ViewBuilder
-    private var leftSegment: some View {
+    private var leftFixedControls: some View {
         HStack(spacing: 2) {
             // File tree toggle
             StatusBarIconButton(
@@ -275,216 +314,14 @@ struct StatusBarView: View {
                 .fill(theme.modelineBarFg.opacity(0.1))
                 .frame(width: 1, height: 14)
                 .padding(.horizontal, 4)
-
-            configuredModelineSegments(state.modelineLeftSegments)
         }
     }
 
-    // MARK: - Agent status icon
+    // MARK: - Right fixed controls
 
     @ViewBuilder
-    private var agentStatusIcon: some View {
-        switch state.agentStatus {
-        case 1: // thinking
-            ProgressView()
-                .scaleEffect(0.45)
-                .frame(width: 14, height: barHeight)
-        case 2: // executing
-            Image(systemName: "bolt.fill")
-                .font(.system(size: 9))
-                .foregroundStyle(theme.statusbarAccentFg)
-                .frame(width: 14, height: barHeight)
-        case 3: // error
-            Image(systemName: "exclamationmark.circle.fill")
-                .font(.system(size: 9))
-                .foregroundStyle(theme.gutterErrorFg)
-                .frame(width: 14, height: barHeight)
-        case 4: // plan
-            Image(systemName: "pencil.and.outline")
-                .font(.system(size: 9))
-                .foregroundStyle(theme.agentStatusNeedsYou)
-                .frame(width: 14, height: barHeight)
-        default: // idle: show nothing
-            EmptyView()
-        }
-    }
-
-    // MARK: - Background sub-agents
-
-    @ViewBuilder
-    private var backgroundSubagentSegment: some View {
-        Button(action: {
-            encoder?.sendExecuteCommand(name: "agent_session_switcher")
-        }) {
-            HStack(spacing: 3) {
-                Image(systemName: "person.2.wave.2.fill")
-                    .font(.system(size: 9, weight: .medium))
-                Text(backgroundSubagentText)
-                    .font(.system(size: 11))
-                    .lineLimit(1)
-            }
-            .foregroundStyle(theme.modelineBarFg.opacity(0.65))
-        }
-        .buttonStyle(.plain)
-        .help("Background sub-agents")
-        .padding(.horizontal, 6)
-        .onHover { isHovered in
-            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-        }
-    }
-
-    private var backgroundSubagentText: String {
-        if state.backgroundSubagentLabel.isEmpty {
-            return "bg:\(state.backgroundSubagentCount)"
-        }
-
-        return "bg:\(state.backgroundSubagentCount) \(state.backgroundSubagentLabel)"
-    }
-
-    // MARK: - Git branch + diff stats
-
-    @State private var gitCopied = false
-
-    @ViewBuilder
-    private var gitSegment: some View {
-        Button(action: {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(state.gitBranch, forType: .string)
-            gitCopied = true
-            // Clear the "Copied" indicator after 2 seconds
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                gitCopied = false
-            }
-        }) {
-            HStack(spacing: 3) {
-                Image(systemName: gitCopied ? "checkmark" : "arrow.triangle.branch")
-                    .font(.system(size: 9, weight: .medium))
-                Text(gitCopied ? "Copied!" : state.gitBranch)
-                    .font(.system(size: 11))
-                    .lineLimit(1)
-
-                if !gitCopied && gitSyncing {
-                    ProgressView()
-                        .controlSize(.mini)
-                        .scaleEffect(0.45)
-                        .frame(width: 12, height: barHeight)
-                }
-
-                // Diff stats: +added ~modified -deleted
-                if !gitCopied, state.hasGitDiffStats {
-                    HStack(spacing: 4) {
-                        if state.gitAdded > 0 {
-                            Text("+\(state.gitAdded)")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(theme.gitAddedFg)
-                        }
-                        if state.gitModified > 0 {
-                            Text("~\(state.gitModified)")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(theme.gitModifiedFg)
-                        }
-                        if state.gitDeleted > 0 {
-                            Text("-\(state.gitDeleted)")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(theme.gitDeletedFg)
-                        }
-                    }
-                }
-            }
-            .foregroundStyle(theme.modelineBarFg.opacity(0.6))
-        }
-        .buttonStyle(.plain)
-        .help("Click to copy branch name")
-        .padding(.horizontal, 6)
-        .onHover { isHovered in
-            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-        }
-    }
-
-    // MARK: - LSP indicator (theme-colored)
-
-    @ViewBuilder
-    private var lspIndicator: some View {
-        let info = lspInfo(state.lspStatus)
-        Image(systemName: info.icon)
-            .font(.system(size: 9))
-            .foregroundStyle(info.color)
-            .padding(.horizontal, 4)
-            .help(info.tooltip)
-    }
-
-    // MARK: - Diagnostic counts (all 4 levels, theme-colored)
-
-    @ViewBuilder
-    private var diagnosticIndicators: some View {
-        let hasAny = state.errorCount > 0 || state.warningCount > 0 || state.infoCount > 0 || state.hintCount > 0
-        if hasAny {
-            Button(action: {
-                encoder?.sendTogglePanel(panel: 1)
-            }) {
-                HStack(spacing: 6) {
-                    if state.errorCount > 0 {
-                        HStack(spacing: 2) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 9))
-                            Text("\(state.errorCount)")
-                                .font(.system(size: 11))
-                        }
-                        .foregroundStyle(theme.gutterErrorFg)
-                    }
-                    if state.warningCount > 0 {
-                        HStack(spacing: 2) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.system(size: 9))
-                            Text("\(state.warningCount)")
-                                .font(.system(size: 11))
-                        }
-                        .foregroundStyle(theme.gutterWarningFg)
-                    }
-                    if state.infoCount > 0 {
-                        HStack(spacing: 2) {
-                            Image(systemName: "info.circle.fill")
-                                .font(.system(size: 9))
-                            Text("\(state.infoCount)")
-                                .font(.system(size: 11))
-                        }
-                        .foregroundStyle(theme.gutterInfoFg)
-                    }
-                    if state.hintCount > 0 {
-                        HStack(spacing: 2) {
-                            Image(systemName: "lightbulb.fill")
-                                .font(.system(size: 9))
-                            Text("\(state.hintCount)")
-                                .font(.system(size: 11))
-                        }
-                        .foregroundStyle(theme.gutterHintFg)
-                    }
-                }
-            }
-            .buttonStyle(.plain)
-            .help("Show diagnostics (SPC c d)")
-            .padding(.horizontal, 4)
-            .onHover { isHovered in
-                if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-            }
-        }
-    }
-
-    private func lspInfo(_ status: UInt8) -> (icon: String, tooltip: String, color: Color) {
-        switch status {
-        case 1:  return ("checkmark.circle.fill",         "LSP: ready",         theme.gitAddedFg)
-        case 2:  return ("arrow.triangle.2.circlepath",   "LSP: initializing…", theme.modelineBarFg.opacity(0.5))
-        case 3:  return ("arrow.triangle.2.circlepath",   "LSP: starting…",     theme.modelineBarFg.opacity(0.5))
-        case 4:  return ("exclamationmark.triangle.fill", "LSP: error",         theme.gutterErrorFg)
-        default: return ("circle",                        "LSP: inactive",      theme.modelineBarFg.opacity(0.3))
-        }
-    }
-
-    // MARK: - Right segment
-
-    @ViewBuilder
-    private var rightSegment: some View {
-        HStack(spacing: 8) {
+    private var rightFixedControls: some View {
+        HStack(spacing: 0) {
             // Agent chat toggle
             StatusBarIconButton(
                 icon: "bubble.left.and.text.bubble.right",
@@ -496,102 +333,167 @@ struct StatusBarView: View {
             ) {
                 encoder?.sendTogglePanel(panel: 3)
             }
-
-            configuredModelineSegments(state.modelineRightSegments)
         }
         .padding(.trailing, 8)
     }
 
-    @ViewBuilder
-    private var indentSegment: some View {
-        Button(action: {
-            encoder?.sendExecuteCommand(name: "indent_picker")
-        }) {
-            Text("\(state.indent.label):\(state.indent.size)")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(theme.modelineBarFg.opacity(0.65))
-        }
-        .buttonStyle(.plain)
-        .help("Indent settings")
-        .onHover { isHovered in
-            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-        }
-    }
+    private func leftStatusZone(_ layout: StatusBarModelineLayout) -> some View {
+        HStack(spacing: sideSpacing) {
+            leftFixedControls
+                .frame(width: min(leftFixedControlsWidth, layout.leftRect.width), height: barHeight, alignment: .leading)
+                .clipped()
+                .contentShape(Rectangle())
 
-    @ViewBuilder
-    private var positionSegment: some View {
-        if state.isAgentWindow {
-            Text("\(state.messageCount) msgs")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(theme.modelineBarFg.opacity(0.7))
-        } else if state.selection.isActive {
-            Text(state.selection.displayText)
-                .font(.system(size: 11, design: .monospaced))
-                .monospacedDigit()
-                .contentTransition(.numericText())
-                .foregroundStyle(theme.modelineBarFg.opacity(0.7))
-                .help(state.selection.displayText)
-        } else {
-            Text("Ln \(state.cursorLine), Col \(state.cursorCol)")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(theme.modelineBarFg.opacity(0.7))
-                .help("Line \(state.cursorLine), Column \(state.cursorCol)")
-        }
-    }
 
-    // MARK: - Parser status (only when degraded)
-
-    @ViewBuilder
-    private var parserStatusIcon: some View {
-        switch state.parserStatus {
-        case 1: // unavailable
-            Image(systemName: "leaf.fill")
-                .font(.system(size: 9))
-                .foregroundStyle(theme.gutterErrorFg)
-                .help("Tree-sitter parser unavailable")
-        case 2: // restarting
-            Image(systemName: "leaf.fill")
-                .font(.system(size: 9))
-                .foregroundStyle(theme.gutterWarningFg)
-                .help("Tree-sitter parser restarting")
-        default: // available: show nothing
-            EmptyView()
-        }
-    }
-
-    @ViewBuilder
-    private var modeBadge: some View {
-        let (bg, fg) = modeColors(state.mode)
-        Text(state.modeName)
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(fg)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 2)
-            .background(
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(bg)
+            boundedConfiguredModelineSegments(
+                state.modelineLeftSegments,
+                width: layout.leftModelineWidth,
+                alignment: .leading
             )
-    }
-
-    private func modeColors(_ mode: UInt8) -> (Color, Color) {
-        switch mode {
-        case 0: return (theme.modeNormalBg, theme.modeNormalFg)
-        case 1: return (theme.modeInsertBg, theme.modeInsertFg)
-        case 2: return (theme.modeVisualBg, theme.modeVisualFg)
-        default: return (theme.modelineInfoBg, theme.modelineInfoFg)
         }
+        .frame(width: layout.leftRect.width, height: barHeight, alignment: .leading)
+        .clipped()
+        .contentShape(Rectangle())
     }
 
-    @ViewBuilder
+    private func rightStatusZone(_ layout: StatusBarModelineLayout) -> some View {
+        HStack(spacing: sideSpacing) {
+            boundedConfiguredModelineSegments(
+                state.modelineRightSegments,
+                width: layout.rightModelineWidth,
+                alignment: .trailing
+            )
+
+            rightFixedControls
+                .frame(width: min(rightFixedControlsWidth, layout.rightRect.width), height: barHeight, alignment: .trailing)
+                .clipped()
+                .contentShape(Rectangle())
+        }
+        .frame(width: layout.rightRect.width, height: barHeight, alignment: .trailing)
+        .clipped()
+        .contentShape(Rectangle())
+    }
+
+    private func boundedConfiguredModelineSegments(_ segments: [Wire.StatusBarSegment], width: CGFloat, alignment: Alignment) -> some View {
+        configuredModelineSegments(segments)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(width: width, height: barHeight, alignment: alignment)
+            .contentShape(Rectangle())
+            .clipped()
+    }
+
     private func configuredModelineSegments(_ segments: [Wire.StatusBarSegment]) -> some View {
-        ForEach(segments) { segment in
-            StatusBarModelineSegmentView(segment: segment, encoder: encoder)
+        HStack(spacing: 0) {
+            ForEach(segments) { segment in
+                StatusBarModelineSegmentView(segment: segment, encoder: encoder)
+            }
         }
+        .contentShape(Rectangle())
     }
 
 }
 
+struct StatusBarModelineLayout: Equatable {
+    let totalWidth: CGFloat
+    let leftRect: CGRect
+    let centerRect: CGRect
+    let rightRect: CGRect
+    let leftModelineWidth: CGFloat
+    let rightModelineWidth: CGFloat
+
+    var centerIsProtected: Bool {
+        leftRect.maxX <= centerRect.minX && rightRect.minX >= centerRect.maxX
+    }
+
+    static func compute(
+        totalWidth: CGFloat,
+        barHeight: CGFloat,
+        hasCenter: Bool,
+        leftFixedWidth: CGFloat,
+        rightFixedWidth: CGFloat,
+        sideSpacing: CGFloat,
+        maxCenterWidth: CGFloat,
+        leftWeight: CGFloat,
+        rightWeight: CGFloat
+    ) -> StatusBarModelineLayout {
+        let safeWidth = max(0, totalWidth)
+        let leftMinimum = leftFixedWidth + sideSpacing
+        let rightMinimum = rightFixedWidth + sideSpacing
+        let sideMinimum = max(leftMinimum, rightMinimum)
+        let centerCapacity = max(0, safeWidth - (sideMinimum * 2))
+        let centerWidth = hasCenter ? min(maxCenterWidth, safeWidth * 0.34, centerCapacity) : 0
+
+        if centerWidth > 0 {
+            let sideWidth = max(0, (safeWidth - centerWidth) / 2)
+            let centerX = sideWidth
+            let rightX = centerX + centerWidth
+            return StatusBarModelineLayout(
+                totalWidth: safeWidth,
+                leftRect: CGRect(x: 0, y: 0, width: sideWidth, height: barHeight),
+                centerRect: CGRect(x: centerX, y: 0, width: centerWidth, height: barHeight),
+                rightRect: CGRect(x: rightX, y: 0, width: max(0, safeWidth - rightX), height: barHeight),
+                leftModelineWidth: max(0, sideWidth - leftMinimum),
+                rightModelineWidth: max(0, sideWidth - rightMinimum)
+            )
+        }
+
+        let leftZoneWidth = noCenterLeftZoneWidth(
+            safeWidth: safeWidth,
+            leftMinimum: leftMinimum,
+            rightMinimum: rightMinimum,
+            leftWeight: leftWeight,
+            rightWeight: rightWeight
+        )
+        let rightZoneWidth = max(0, safeWidth - leftZoneWidth)
+
+        return StatusBarModelineLayout(
+            totalWidth: safeWidth,
+            leftRect: CGRect(x: 0, y: 0, width: leftZoneWidth, height: barHeight),
+            centerRect: CGRect(x: leftZoneWidth, y: 0, width: 0, height: barHeight),
+            rightRect: CGRect(x: leftZoneWidth, y: 0, width: rightZoneWidth, height: barHeight),
+            leftModelineWidth: max(0, leftZoneWidth - leftMinimum),
+            rightModelineWidth: max(0, rightZoneWidth - rightMinimum)
+        )
+    }
+
+    private static func noCenterLeftZoneWidth(
+        safeWidth: CGFloat,
+        leftMinimum: CGFloat,
+        rightMinimum: CGFloat,
+        leftWeight: CGFloat,
+        rightWeight: CGFloat
+    ) -> CGFloat {
+        if safeWidth <= leftMinimum {
+            return safeWidth
+        }
+
+        if safeWidth <= leftMinimum + rightMinimum {
+            return leftMinimum
+        }
+
+        let flexibleWidth = safeWidth - leftMinimum - rightMinimum
+        let totalWeight = leftWeight + rightWeight
+        let leftFlexibleWidth = totalWeight > 0 ? flexibleWidth * (leftWeight / totalWeight) : flexibleWidth / 2
+        return leftMinimum + leftFlexibleWidth
+    }
+}
+
 // MARK: - Configured modeline segment
+
+enum StatusBarModelineFont {
+    static func containsPrivateUseGlyph(_ text: String) -> Bool {
+        text.unicodeScalars.contains { scalar in
+            isPrivateUseScalar(scalar.value)
+        }
+    }
+
+    private static func isPrivateUseScalar(_ value: UInt32) -> Bool {
+        (value >= 0xE000 && value <= 0xF8FF) ||
+            (value >= 0xF0000 && value <= 0xFFFFD) ||
+            (value >= 0x100000 && value <= 0x10FFFD)
+    }
+}
 
 private struct StatusBarModelineSegmentView: View {
     let segment: Wire.StatusBarSegment
@@ -600,13 +502,16 @@ private struct StatusBarModelineSegmentView: View {
     var body: some View {
         if segment.command.isEmpty {
             segmentText
+                .contentShape(Rectangle())
         } else {
             Button(action: {
                 encoder?.sendExecuteCommand(name: segment.command)
             }) {
                 segmentText
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .contentShape(Rectangle())
             .help(segment.command)
             .onHover { isHovered in
                 if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
@@ -618,6 +523,7 @@ private struct StatusBarModelineSegmentView: View {
     private var segmentText: some View {
         let text = Text(segment.text)
             .font(segmentFont)
+            .fontWeight(segmentFontWeight)
             .foregroundStyle(color(segment.fgColor))
             .lineLimit(1)
             .truncationMode(.tail)
@@ -626,20 +532,29 @@ private struct StatusBarModelineSegmentView: View {
         if segment.isItalic {
             text
                 .italic()
-                .frame(maxWidth: 240, minHeight: 24, maxHeight: 24, alignment: .center)
+                .frame(minHeight: 24, maxHeight: 24, alignment: .center)
                 .background(color(segment.bgColor))
+                .contentShape(Rectangle())
                 .clipped()
         } else {
             text
-                .frame(maxWidth: 240, minHeight: 24, maxHeight: 24, alignment: .center)
+                .frame(minHeight: 24, maxHeight: 24, alignment: .center)
                 .background(color(segment.bgColor))
+                .contentShape(Rectangle())
                 .clipped()
         }
     }
 
     private var segmentFont: Font {
-        let weight: Font.Weight = segment.isBold ? .semibold : .regular
-        return .system(size: 11, weight: weight)
+        if StatusBarModelineFont.containsPrivateUseGlyph(segment.text) {
+            return .custom("Symbols Nerd Font Mono", size: 11)
+        }
+
+        return .system(size: 11)
+    }
+
+    private var segmentFontWeight: Font.Weight {
+        segment.isBold ? .semibold : .regular
     }
 
     private func color(_ value: UInt32) -> Color {

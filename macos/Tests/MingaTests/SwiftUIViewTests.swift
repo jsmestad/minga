@@ -158,8 +158,30 @@ struct BreadcrumbBarViewTests {
 @Suite("StatusBarView View Structure")
 struct StatusBarViewViewTests {
 
-    private func segment(_ id: Int, _ text: String) -> Wire.StatusBarSegment {
-        Wire.StatusBarSegment(id: id, text: text, fgColor: 0xFFFFFF, bgColor: 0x000000, attrs: 0, command: "")
+    private func segment(_ id: Int, _ text: String, command: String = "") -> Wire.StatusBarSegment {
+        Wire.StatusBarSegment(id: id, text: text, fgColor: 0xFFFFFF, bgColor: 0x000000, attrs: 0, command: command)
+    }
+
+    @MainActor private func statusBarState(
+        message: String = "",
+        diagnosticHint: String = "",
+        leftSegments: [Wire.StatusBarSegment] = [],
+        rightSegments: [Wire.StatusBarSegment] = []
+    ) -> StatusBarState {
+        let state = StatusBarState()
+        state.update(from: StatusBarUpdate(
+            contentKind: 0, mode: 0, cursorLine: 42, cursorCol: 9,
+            lineCount: 500, flags: 0, lspStatus: 0, gitBranch: "",
+            message: message, filetype: "elixir", errorCount: 0, warningCount: 0,
+            modelName: "", messageCount: 0, sessionStatus: 0,
+            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
+            gitAdded: 0, gitModified: 0, gitDeleted: 0,
+            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: diagnosticHint,
+            backgroundSubagentCount: 0, backgroundSubagentLabel: "",
+            modelineLeftSegments: leftSegments,
+            modelineRightSegments: rightSegments
+        ))
+        return state
     }
 
     @Test("Buffer mode shows configured modeline segments")
@@ -188,83 +210,155 @@ struct StatusBarViewViewTests {
         #expect(strings.contains(" 42:9 "))
     }
 
-    @Test("Tabs indent renders in the status bar")
-    @MainActor func tabsIndent() throws {
-        let state = StatusBarState()
-        state.indent = .init(kind: 1, size: 4)
+    @Test("Configured modeline groups receive bounded budgets")
+    @MainActor func configuredModelineGroupsReceiveBoundedBudgets() throws {
+        let longLeftSegments = (0..<20).map { segment($0, " LEFT-SEGMENT-WITH-LONG-TEXT-\($0) ") }
+        let longRightSegments = [segment(100, " CLICKABLE-RIGHT-SEGMENT-WITH-LONG-TEXT ", command: "buffer_list")] +
+            (0..<20).map { segment(101 + $0, " RIGHT-SEGMENT-WITH-LONG-TEXT-\($0) ") }
+        let state = statusBarState(
+            message: "A very long center status message that must stay inside its budget",
+            leftSegments: longLeftSegments,
+            rightSegments: longRightSegments
+        )
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
-        let body = try sut.inspect()
-        let texts = body.findAll(ViewInspectorQuery.text)
-        let strings = texts.compactMap { try? $0.string() }
+        let layout = sut.modelineLayout(totalWidth: 360)
 
-        #expect(strings.contains("Tabs:4"))
+        #expect(layout.centerRect.width > 0)
+        #expect(layout.centerRect.width <= 320)
+        #expect(layout.leftModelineWidth > 0)
+        #expect(layout.rightModelineWidth > 0)
+        #expect(layout.centerIsProtected)
+        #expect(layout.leftRect.maxX <= layout.centerRect.minX)
+        #expect(layout.rightRect.minX >= layout.centerRect.maxX)
+        #expect(layout.leftRect.width + layout.centerRect.width + layout.rightRect.width <= 360.5)
+
+        let body = try sut.inspect()
+        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        #expect(strings.contains(" CLICKABLE-RIGHT-SEGMENT-WITH-LONG-TEXT "))
     }
 
-    @Test("Visual char selection renders grapheme count")
-    @MainActor func visualCharSelection() throws {
-        let state = StatusBarState()
-        state.selection = .init(mode: 1, size: 42)
-
+    @Test("Layout protects center lane with huge left and tiny right groups")
+    @MainActor func layoutProtectsCenterWithHugeLeftTinyRight() {
+        let state = statusBarState(
+            message: "Indexing project",
+            leftSegments: (0..<40).map { segment($0, " LEFT-SEGMENT-\($0)-WITH-LONG-TEXT ") },
+            rightSegments: [segment(200, " R ")]
+        )
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
-        let body = try sut.inspect()
-        let texts = body.findAll(ViewInspectorQuery.text)
-        let strings = texts.compactMap { try? $0.string() }
+        let layout = sut.modelineLayout(totalWidth: 720)
 
-        #expect(strings.contains("42 chars"))
+        #expect(layout.centerRect.width > 0)
+        #expect(layout.centerIsProtected)
+        #expect(layout.leftRect.maxX <= layout.centerRect.minX)
+        #expect(layout.rightRect.minX >= layout.centerRect.maxX)
     }
 
-    @Test("Visual line selection renders line count")
-    @MainActor func visualLineSelection() throws {
-        let state = StatusBarState()
-        state.selection = .init(mode: 2, size: 3)
-
+    @Test("Layout protects center lane with tiny left and huge right groups")
+    @MainActor func layoutProtectsCenterWithTinyLeftHugeRight() {
+        let state = statusBarState(
+            message: "Saving buffer",
+            leftSegments: [segment(1, " L ")],
+            rightSegments: (0..<40).map { segment($0, " RIGHT-SEGMENT-\($0)-WITH-LONG-TEXT ") }
+        )
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
-        let body = try sut.inspect()
-        let texts = body.findAll(ViewInspectorQuery.text)
-        let strings = texts.compactMap { try? $0.string() }
+        let layout = sut.modelineLayout(totalWidth: 720)
 
-        #expect(strings.contains("3 lines"))
+        #expect(layout.centerRect.width > 0)
+        #expect(layout.centerIsProtected)
+        #expect(layout.leftRect.maxX <= layout.centerRect.minX)
+        #expect(layout.rightRect.minX >= layout.centerRect.maxX)
     }
 
-    @Test("Status bar update populates indent and selection")
-    @MainActor func statusBarUpdateRendersIndentAndSelection() throws {
-        let state = StatusBarState()
-        state.update(from: StatusBarUpdate(
-            contentKind: 0, mode: 2, cursorLine: 42, cursorCol: 9,
-            lineCount: 500, flags: 0, lspStatus: 0, gitBranch: "",
-            message: "", filetype: "", errorCount: 0, warningCount: 0,
-            modelName: "", messageCount: 0, sessionStatus: 0,
-            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
-            gitAdded: 0, gitModified: 0, gitDeleted: 0,
-            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
-            backgroundSubagentCount: 0, backgroundSubagentLabel: "",
-            indent: .init(kind: 1, size: 4),
-            selection: .init(mode: 1, size: 42)
-        ))
-
+    @Test("Layout collapses center before fixed controls in narrow windows")
+    @MainActor func layoutCollapsesCenterInNarrowWindow() {
+        let state = statusBarState(
+            message: "Long center message",
+            leftSegments: [segment(1, " LEFT ")],
+            rightSegments: [segment(2, " RIGHT ")]
+        )
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
-        let body = try sut.inspect()
-        let texts = body.findAll(ViewInspectorQuery.text)
-        let strings = texts.compactMap { try? $0.string() }
+        let layout = sut.modelineLayout(totalWidth: 180)
 
-        #expect(strings.contains("Tabs:4"))
-        #expect(strings.contains("42 chars"))
+        #expect(layout.centerRect.width == 0)
+        #expect(layout.centerIsProtected)
+        #expect(layout.leftRect.width + layout.rightRect.width <= 180.5)
     }
 
-    @Test("No selection falls back to cursor position text")
-    @MainActor func noSelectionFallsBackToCursorPosition() throws {
-        let state = StatusBarState()
-        state.cursorLine = 42
-        state.cursorCol = 9
-
+    @Test("Layout preserves bounded fixed zones at app minimum width")
+    @MainActor func layoutPreservesBoundedFixedZonesAtAppMinimumWidth() {
+        let state = statusBarState(
+            message: "Long center message",
+            leftSegments: [segment(1, " LEFT ")],
+            rightSegments: [segment(2, " RIGHT ")]
+        )
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
-        let body = try sut.inspect()
-        let texts = body.findAll(ViewInspectorQuery.text)
-        let strings = texts.compactMap { try? $0.string() }
+        let layout = sut.modelineLayout(totalWidth: 160)
 
-        #expect(strings.contains("Ln 42, Col 9"))
-        #expect(strings.contains("Spaces:2"))
+        #expect(layout.totalWidth == 160)
+        #expect(layout.centerRect.width == 0)
+        #expect(layout.centerIsProtected)
+        #expect(layout.leftRect.minX == 0)
+        #expect(layout.rightRect.maxX <= 160.5)
+        #expect(layout.leftModelineWidth >= 0)
+        #expect(layout.rightModelineWidth >= 0)
+        #expect(layout.leftModelineWidth <= 8)
+        #expect(layout.rightModelineWidth <= 8)
+    }
+
+    @Test("Layout uses side budgets when no center message is present")
+    @MainActor func layoutWithoutCenterMessageUsesSideBudgets() {
+        let state = statusBarState(
+            leftSegments: (0..<10).map { segment($0, " LEFT-\($0) ") },
+            rightSegments: [segment(20, " RIGHT ")]
+        )
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
+        let layout = sut.modelineLayout(totalWidth: 480)
+
+        #expect(layout.centerRect.width == 0)
+        #expect(layout.centerIsProtected)
+        #expect(layout.leftModelineWidth > layout.rightModelineWidth)
+        #expect(layout.leftRect.width + layout.rightRect.width <= 480.5)
+    }
+
+    @Test("Clickable configured modeline segment emits execute command")
+    @MainActor func clickableConfiguredModelineSegmentEmitsCommand() throws {
+        let spy = SpyEncoder()
+        let state = statusBarState(leftSegments: [segment(1, " Buffers ", command: "buffer_list")])
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: spy)
+        let buttons = try sut.inspect().findAll(ViewType.Button.self)
+
+        for button in buttons {
+            try button.tap()
+        }
+
+        #expect(spy.guiActions.contains(.executeCommand(name: "buffer_list")))
+    }
+
+    // ViewInspector verifies structure, deterministic layout budgets, and Button action wiring, but it does not exercise AppKit pixel hit regions after SwiftUI clipping. An NSHostingView smoke test did not dispatch SwiftUI Button actions reliably in this noninteractive harness, so clipped-region hit-test regressions still need AppKit/UI coverage.
+    @Test("Passive configured modeline segment does not emit execute command")
+    @MainActor func passiveConfiguredModelineSegmentDoesNotEmitCommand() throws {
+        let spy = SpyEncoder()
+        let state = statusBarState(leftSegments: [segment(1, " Passive ")])
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: spy)
+        let buttons = try sut.inspect().findAll(ViewType.Button.self)
+
+        for button in buttons {
+            try button.tap()
+        }
+
+        #expect(!spy.guiActions.contains(.executeCommand(name: "")))
+        #expect(!spy.guiActions.contains(.executeCommand(name: "Passive")))
+        #expect(!spy.guiActions.contains(.executeCommand(name: "buffer_list")))
+    }
+
+    @Test("Private-use glyph detection covers Nerd Font symbols")
+    func privateUseGlyphDetection() {
+        #expect(StatusBarModelineFont.containsPrivateUseGlyph("\u{E0B0}"))
+        #expect(StatusBarModelineFont.containsPrivateUseGlyph("branch \u{F0001} ahead"))
+        #expect(StatusBarModelineFont.containsPrivateUseGlyph("wide \u{100001}"))
+        #expect(!StatusBarModelineFont.containsPrivateUseGlyph("Elixir"))
+
     }
 
     @Test("Filetype display is titleized")

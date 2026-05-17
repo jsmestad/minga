@@ -2,6 +2,7 @@ defmodule MingaEditor.StatusBar.DataTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Config.ModelineSegments
   alias Minga.Config.Options
   alias Minga.Mode.VisualState
   alias MingaAgent.Subagent.Handle
@@ -15,6 +16,38 @@ defmodule MingaEditor.StatusBar.DataTest do
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
   alias MingaEditor.Workspace.State, as: WorkspaceState
+
+  test "from_state leaves GUI modeline segments detached by default" do
+    state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
+    data = Data.from_state(state)
+
+    assert {:buffer, buffer_data} = data
+    refute Map.has_key?(buffer_data, :modeline_segments)
+  end
+
+  test "with_modeline_segments attaches GUI modeline segments from supplied registry" do
+    table = :"status_bar_data_modeline_segments_#{System.unique_integer([:positive])}"
+    start_supervised!({ModelineSegments, name: table})
+
+    assert :ok =
+             ModelineSegments.register(
+               table,
+               :status_bar_data_modeline_test,
+               [side: :left],
+               fn ctx -> {" GUI_ONLY ", ctx.info_fg, ctx.bar_bg, [], nil} end,
+               :config
+             )
+
+    state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
+    data = Data.from_state(state)
+
+    assert {:buffer, buffer_data} = Data.with_modeline_segments(data, state.theme, table)
+    assert %{left: left, right: right} = buffer_data.modeline_segments
+
+    assert Enum.any?(left ++ right, fn {text, _fg, _bg, _opts, _target} ->
+             text == " GUI_ONLY "
+           end)
+  end
 
   test "projects running background subagent count and active label" do
     handle1 = handle("session-2", "tests")

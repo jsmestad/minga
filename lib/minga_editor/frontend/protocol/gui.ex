@@ -139,6 +139,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   @max_u16 65_535
   @max_u32 4_294_967_295
+  @max_modeline_segments 128
   @chat_message_limit 100
   @max_chat_text_bytes 60_000
   @truncation_suffix "\n… [truncated]"
@@ -1466,6 +1467,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp encode_modeline_segments(nil), do: <<1::8, 0::16, 0::16>>
 
   defp encode_modeline_segments(%{left: left, right: right}) do
+    {left, right} = capped_modeline_segments(left, right)
     {encoded_left, left_count, remaining} = bounded_modeline_side(left, @max_u16 - 5)
     {encoded_right, right_count, _remaining} = bounded_modeline_side(right, remaining)
 
@@ -1474,6 +1476,13 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       encoded_left,
       encoded_right
     ])
+  end
+
+  @spec capped_modeline_segments([tuple()], [tuple()]) :: {[tuple()], [tuple()]}
+  defp capped_modeline_segments(left, right) do
+    left = Enum.take(left, @max_modeline_segments)
+    right = Enum.take(right, max(0, @max_modeline_segments - length(left)))
+    {left, right}
   end
 
   @spec bounded_modeline_side([tuple()], non_neg_integer()) ::
@@ -1505,10 +1514,23 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @spec bounded_modeline_text_and_target(String.t(), String.t(), non_neg_integer()) ::
           {binary(), binary()}
   defp bounded_modeline_text_and_target(text, target, budget) do
-    target_bytes = utf8_prefix_bytes(target, min(byte_size(target), budget))
+    target_bytes = modeline_target_bytes(target, budget)
     text_budget = budget - byte_size(target_bytes)
     text_bytes = utf8_prefix_bytes(text, min(byte_size(text), text_budget))
     {text_bytes, target_bytes}
+  end
+
+  @spec modeline_target_bytes(String.t(), non_neg_integer()) :: binary()
+  defp modeline_target_bytes("", _budget), do: ""
+
+  defp modeline_target_bytes(target, budget) do
+    target_bytes = :erlang.iolist_to_binary([target])
+
+    if byte_size(target_bytes) <= budget do
+      target_bytes
+    else
+      ""
+    end
   end
 
   @spec encode_modeline_target(atom() | nil) :: String.t()
@@ -2250,7 +2272,11 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   @spec utf8_prefix_bytes(String.t(), non_neg_integer()) :: binary()
   defp utf8_prefix_bytes(text, max_bytes) when byte_size(text) <= max_bytes do
-    :erlang.iolist_to_binary([text])
+    if String.valid?(text) do
+      :erlang.iolist_to_binary([text])
+    else
+      valid_utf8_prefix(text, max_bytes)
+    end
   end
 
   defp utf8_prefix_bytes(text, max_bytes) do
