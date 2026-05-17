@@ -71,6 +71,10 @@ final class CommandDispatcher {
     /// Non-optional: forgetting to wire this is a compile-time error.
     let guiState: GUIState
 
+    /// Window ids that arrived in the current frame batch. Used for input hit testing so stale
+    /// retained gutter data can still render without being clickable.
+    private(set) var currentFrameGutterWindowIds: Set<UInt16> = []
+
     init(cols: UInt16, rows: UInt16, guiState: GUIState) {
         self.frameState = FrameState(cols: cols, rows: rows)
         self.guiState = guiState
@@ -82,6 +86,7 @@ final class CommandDispatcher {
         case .clear:
             frameState.beginFrame()
             guiState.beginFrame()
+            currentFrameGutterWindowIds.removeAll(keepingCapacity: true)
 
         case .drawText, .drawStyledText:
             // Legacy cell-grid text rendering. All content now flows through
@@ -299,6 +304,7 @@ final class CommandDispatcher {
 
         case .guiGutter(let data):
             frameState.windowGutters[data.windowId] = data
+            currentFrameGutterWindowIds.insert(data.windowId)
             if data.isActive {
                 frameState.gutterCol = UInt16(data.lineNumberWidth) + UInt16(data.signColWidth)
                 // Derive viewport top from the first gutter entry's buffer line.

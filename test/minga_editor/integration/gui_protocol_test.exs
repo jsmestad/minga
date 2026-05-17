@@ -525,6 +525,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         content_row: 0,
         content_col: 5,
         content_height: 24,
+        content_width: 80,
         is_active: true,
         cursor_line: 10,
         line_number_style: :hybrid,
@@ -547,6 +548,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["window_id"] == 1
       assert decoded["content_col"] == 5
       assert decoded["content_height"] == 24
+      assert decoded["content_width"] == 80
       assert decoded["is_active"] == true
       assert decoded["cursor_line"] == 10
       assert decoded["line_number_style"] == 0
@@ -559,6 +561,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert e1["display_type"] == 0
       assert e1["sign_type"] == 1
       assert e2["display_type"] == 1
+      assert e2["fold_end_line"] == nil
       assert e3["display_type"] == 3
       assert e3["sign_type"] == 4
     end

@@ -34,7 +34,7 @@ struct CommandDispatcherRoutingTests {
 
         let gutter = Wire.WindowGutter(
             windowId: 1, contentRow: 0, contentCol: 5, contentHeight: 24,
-            isActive: true, cursorLine: 10, lineNumberStyle: .hybrid,
+            isActive: true, contentWidth: 80, cursorLine: 10, lineNumberStyle: .hybrid,
             lineNumberWidth: 4, signColWidth: 1, entries: []
         )
         dispatcher.dispatch(.guiGutter(data: gutter))
@@ -50,6 +50,7 @@ struct CommandDispatcherRoutingTests {
         // windowGutters persists through clear (gutter positions are
         // stable between frames, only change on resize/split)
         #expect(dispatcher.frameState.windowGutters[1] != nil)
+        #expect(dispatcher.currentFrameGutterWindowIds.isEmpty)
     }
 
     @Test("setCursor updates frameState cursor position")
@@ -549,12 +550,13 @@ struct CommandDispatcherRoutingTests {
         let (dispatcher, _) = makeDispatcher()
         let gutter = Wire.WindowGutter(
             windowId: 1, contentRow: 0, contentCol: 5, contentHeight: 24,
-            isActive: true, cursorLine: 10, lineNumberStyle: .hybrid,
+            isActive: true, contentWidth: 80, cursorLine: 10, lineNumberStyle: .hybrid,
             lineNumberWidth: 4, signColWidth: 1, entries: []
         )
         dispatcher.dispatch(.guiGutter(data: gutter))
 
         #expect(dispatcher.frameState.windowGutters[1] != nil)
+        #expect(dispatcher.currentFrameGutterWindowIds.contains(1))
         // Active window gutter syncs gutterCol
         #expect(dispatcher.frameState.gutterCol == 5) // 4 + 1
     }

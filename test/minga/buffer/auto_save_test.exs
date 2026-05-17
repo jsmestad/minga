@@ -17,7 +17,7 @@ defmodule Minga.Buffer.AutoSaveTest do
     path = Path.join(dir, "auto-save.txt")
     File.write!(path, "hello")
     {:ok, pid} = BufferProcess.start_link(file_path: path)
-    assert {:ok, 1} = BufferProcess.set_option(pid, :auto_save_delay_ms, 1)
+    assert {:ok, @delay_ms} = BufferProcess.set_option(pid, :auto_save_delay_ms, @delay_ms)
 
     Events.subscribe(:log_message)
     Events.subscribe(:buffer_saved)

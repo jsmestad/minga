@@ -258,6 +258,9 @@ final class CoreTextMetalRenderer {
                 cursorBlinkVisible: Bool = true,
                 windowContents: [UInt16: GUIWindowContent] = [:],
                 themeColors: ThemeColors? = nil,
+                isMouseInGutter: Bool = false,
+                gutterHoverWindowId: UInt16? = nil,
+                gutterHoverRow: UInt16? = nil,
                 drawable: CAMetalDrawable, viewportSize: CGSize,
                 contentScale: Float, scrollOffset: SIMD2<Float> = .zero) {
 
@@ -535,6 +538,11 @@ final class CoreTextMetalRenderer {
                 frameState: frameState,
                 cellW: cellW, cellH: displayCellH, scale: scale,
                 gutterLeftMarginPx: gutterLeftMarginPx,
+                gutterPaddingPx: gutterPaddingPx,
+                viewportWidthPx: Float(viewportSize.width),
+                isMouseInGutter: isMouseInGutter,
+                gutterHoverWindowId: gutterHoverWindowId,
+                gutterHoverRow: gutterHoverRow,
                 bgQuads: &bgQuads,
                 lineInstances: &lineInstances
             )
@@ -563,9 +571,7 @@ final class CoreTextMetalRenderer {
         // Pass 1: Background fills.
         if !bgQuads.isEmpty {
             encoder.setRenderPipelineState(bgPipeline)
-            encoder.setVertexBytes(&bgQuads, length: bgQuads.count * MemoryLayout<QuadGPU>.stride, index: 0)
-            encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
-            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: bgQuads.count)
+            drawQuadBatches(bgQuads, encoder: encoder, uniforms: &uniforms)
         }
 
         // Pass 1.25: Indent guides (vertical lines at indentation levels).
@@ -643,9 +649,7 @@ final class CoreTextMetalRenderer {
         // Metal quads instead of being baked into line textures.
         if !semanticOverlayQuads.isEmpty {
             encoder.setRenderPipelineState(bgPipeline)
-            encoder.setVertexBytes(&semanticOverlayQuads, length: semanticOverlayQuads.count * MemoryLayout<QuadGPU>.stride, index: 0)
-            encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
-            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: semanticOverlayQuads.count)
+            drawQuadBatches(semanticOverlayQuads, encoder: encoder, uniforms: &uniforms)
         }
 
         // Pass 2: Cursor background (drawn BEFORE text so text is visible on top).
@@ -689,9 +693,7 @@ final class CoreTextMetalRenderer {
         // Pass 3.5: Diagnostic underline quads (drawn after text, before gutter).
         if !diagnosticQuads.isEmpty {
             encoder.setRenderPipelineState(bgPipeline)
-            encoder.setVertexBytes(&diagnosticQuads, length: diagnosticQuads.count * MemoryLayout<QuadGPU>.stride, index: 0)
-            encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
-            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: diagnosticQuads.count)
+            drawQuadBatches(diagnosticQuads, encoder: encoder, uniforms: &uniforms)
         }
 
         // Pass 4: Gutter gap fills (left margin + right padding).
@@ -895,6 +897,11 @@ final class CoreTextMetalRenderer {
         frameState: FrameState,
         cellW: Float, cellH: Float, scale: Float,
         gutterLeftMarginPx: Float,
+        gutterPaddingPx: Float,
+        viewportWidthPx: Float,
+        isMouseInGutter: Bool,
+        gutterHoverWindowId: UInt16?,
+        gutterHoverRow: UInt16?,
         bgQuads: inout [QuadGPU],
         lineInstances: inout [LineGPU]
     ) {
@@ -919,12 +926,28 @@ final class CoreTextMetalRenderer {
 
             // Fold indicator (dedicated cell after the diagnostic/git sign column)
             if signColWidth >= 3 {
-                renderGutterFoldIndicator(
-                    entry: entry, screenRow: screenRow, yPos: yPos, xOffset: xOffset,
+                appendFoldRangeHighlight(
+                    entry: entry, rowIndex: rowIndex, screenRow: screenRow, yPos: yPos,
+                    gutter: gutter, xOffset: xOffset,
                     signColWidth: signColWidth,
-                    cellW: cellW, scale: scale,
+                    cellW: cellW, cellH: cellH, scale: scale,
+                    gutterPaddingPx: gutterPaddingPx,
+                    viewportWidthPx: viewportWidthPx,
+                    gutterHoverWindowId: gutterHoverWindowId,
+                    gutterHoverRow: gutterHoverRow,
                     frameState: frameState,
-                    lineInstances: &lineInstances,
+                    bgQuads: &bgQuads,
+                )
+
+                renderGutterFoldIndicator(
+                    entry: entry, yPos: yPos, xOffset: xOffset,
+                    signColWidth: signColWidth,
+                    cellW: cellW, cellH: cellH, scale: scale,
+                    isMouseInGutter: isMouseInGutter,
+                    gutterHoverWindowId: gutterHoverWindowId,
+                    gutter: gutter,
+                    frameState: frameState,
+                    bgQuads: &bgQuads,
                 )
             }
 
@@ -1021,39 +1044,118 @@ final class CoreTextMetalRenderer {
         }
     }
 
-    /// Renders the fold indicator for one gutter row.
-    private func renderGutterFoldIndicator(
-        entry: Wire.GutterEntry, screenRow: UInt16, yPos: Float, xOffset: Float,
+    /// Draws a subtle range highlight while hovering an unfolded fold chevron.
+    private func appendFoldRangeHighlight(
+        entry: Wire.GutterEntry, rowIndex: Int, screenRow: UInt16, yPos: Float,
+        gutter: Wire.WindowGutter, xOffset: Float,
         signColWidth: Int,
-        cellW: Float, scale: Float,
+        cellW: Float, cellH: Float, scale: Float,
+        gutterPaddingPx: Float,
+        viewportWidthPx: Float,
+        gutterHoverWindowId: UInt16?,
+        gutterHoverRow: UInt16?,
         frameState: FrameState,
-        lineInstances: inout [LineGPU],
+        bgQuads: inout [QuadGPU],
     ) {
-        let text: String
+        guard gutterHoverWindowId == gutter.windowId else { return }
+        guard gutterHoverRow == screenRow else { return }
+        guard entry.displayType == .foldOpen else { return }
+        guard let foldEndLine = entry.foldEndLine, foldEndLine > entry.bufLine else { return }
+
+        let rowsInRange = Int(foldEndLine - entry.bufLine + 1)
+        let visibleRows = max(0, min(rowsInRange, Int(gutter.contentHeight) - rowIndex))
+        guard visibleRows > 0 else { return }
+
+        let gutterWidth = Float(gutter.lineNumberWidth) + Float(signColWidth)
+        let contentX = xOffset + gutterWidth * cellW * scale + gutterPaddingPx
+        let windowRightX = (Float(gutter.contentCol) + Float(gutter.contentWidth)) * cellW * scale
+        let width = max(0, min(windowRightX, viewportWidthPx) - contentX)
+        guard width > 0 else { return }
+
+        var quad = QuadGPU()
+        quad.position = SIMD2<Float>(contentX, yPos)
+        quad.size = SIMD2<Float>(width, Float(visibleRows) * cellH * scale)
+        quad.color = colorFromU24(frameState.gutterColors.foldFg, default: SIMD3<Float>(0.33, 0.33, 0.33))
+        quad.alpha = 0.10
+        bgQuads.append(quad)
+    }
+
+    /// Renders the fold indicator for one gutter row as a path-style chevron.
+    private func renderGutterFoldIndicator(
+        entry: Wire.GutterEntry, yPos: Float, xOffset: Float,
+        signColWidth: Int,
+        cellW: Float, cellH: Float, scale: Float,
+        isMouseInGutter: Bool,
+        gutterHoverWindowId: UInt16?,
+        gutter: Wire.WindowGutter,
+        frameState: FrameState,
+        bgQuads: inout [QuadGPU],
+    ) {
+        let collapsed: Bool
         switch entry.displayType {
         case .foldStart:
-            text = "▸"
+            collapsed = true
         case .foldOpen:
-            text = "▾"
+            guard isMouseInGutter && gutterHoverWindowId == gutter.windowId else { return }
+            collapsed = false
         case .normal, .foldContinuation, .wrapContinuation:
             return
         }
 
-        let fg = frameState.gutterColors.foldFg
-        let cacheKey = UInt16(0xA000) &+ screenRow
-        let contentHash = gutterContentHash(text: text, fg: fg)
-        if let atlas, let wcr = windowContentRenderer,
-           let atlasEntry = wcr.renderSimpleText(text, fg: fg, bold: false,
-                                                  key: cacheKey, contentHash: contentHash, atlas: atlas) {
-            let (uvOrigin, uvSize) = atlas.uvForSlot(atlasEntry.slotIndex, pixelWidth: atlasEntry.pixelWidth)
-            let foldColumnOffset = signColWidth - 1
-            let xPos = xOffset + Float(foldColumnOffset) * cellW * scale
-            var lineGPU = LineGPU()
-            lineGPU.position = SIMD2<Float>(xPos, yPos)
-            lineGPU.size = SIMD2<Float>(Float(atlasEntry.pixelWidth), Float(atlasEntry.pixelHeight))
-            lineGPU.uvOrigin = uvOrigin
-            lineGPU.uvSize = uvSize
-            lineInstances.append(lineGPU)
+        let foldColumnOffset = signColWidth - 1
+        let cellX = xOffset + Float(foldColumnOffset) * cellW * scale
+        let centerX = cellX + cellW * scale * 0.5
+        let centerY = yPos + cellH * scale * 0.5
+        let size = cellH * scale * 0.42
+        let half = size * 0.5
+        let color = colorFromU24(frameState.gutterColors.foldFg, default: SIMD3<Float>(0.33, 0.33, 0.33))
+        let lineWidth = max(1.0, round(1.5 * scale))
+
+        if collapsed {
+            appendChevronSegment(from: SIMD2<Float>(centerX - half * 0.35, centerY - half), to: SIMD2<Float>(centerX + half * 0.35, centerY), lineWidth: lineWidth, color: color, quads: &bgQuads)
+            appendChevronSegment(from: SIMD2<Float>(centerX + half * 0.35, centerY), to: SIMD2<Float>(centerX - half * 0.35, centerY + half), lineWidth: lineWidth, color: color, quads: &bgQuads)
+        } else {
+            appendChevronSegment(from: SIMD2<Float>(centerX - half, centerY - half * 0.25), to: SIMD2<Float>(centerX, centerY + half * 0.45), lineWidth: lineWidth, color: color, quads: &bgQuads)
+            appendChevronSegment(from: SIMD2<Float>(centerX, centerY + half * 0.45), to: SIMD2<Float>(centerX + half, centerY - half * 0.25), lineWidth: lineWidth, color: color, quads: &bgQuads)
+        }
+    }
+
+    /// Approximates a diagonal chevron stroke with overlapping square Metal quads.
+    private func appendChevronSegment(
+        from start: SIMD2<Float>, to end: SIMD2<Float>, lineWidth: Float,
+        color: SIMD3<Float>, quads: inout [QuadGPU]
+    ) {
+        let delta = end - start
+        let length = max(1.0, sqrt(delta.x * delta.x + delta.y * delta.y))
+        let steps = max(2, Int(ceil(length / max(1.0, lineWidth * 0.55))))
+
+        for index in 0...steps {
+            let t = Float(index) / Float(steps)
+            let point = start + delta * t
+            var quad = QuadGPU()
+            quad.position = SIMD2<Float>(CoreTextMetalRenderer.snapToPixel(point.x - lineWidth * 0.5), CoreTextMetalRenderer.snapToPixel(point.y - lineWidth * 0.5))
+            quad.size = SIMD2<Float>(lineWidth, lineWidth)
+            quad.color = color
+            quad.alpha = 1.0
+            quads.append(quad)
+        }
+    }
+
+    /// Draws quads in batches that fit Metal's 4 KB inline `setVertexBytes` limit.
+    private func drawQuadBatches(_ quads: [QuadGPU], encoder: MTLRenderCommandEncoder, uniforms: inout CTUniformsGPU) {
+        let stride = MemoryLayout<QuadGPU>.stride
+        let maxPerBatch = max(1, 4096 / stride)
+        var batchStart = 0
+
+        while batchStart < quads.count {
+            let batchCount = min(quads.count - batchStart, maxPerBatch)
+            quads.withUnsafeBufferPointer { ptr in
+                let base = ptr.baseAddress! + batchStart
+                encoder.setVertexBytes(base, length: batchCount * stride, index: 0)
+            }
+            encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: batchCount)
+            batchStart += batchCount
         }
     }
 

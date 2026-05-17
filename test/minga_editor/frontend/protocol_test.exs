@@ -1525,6 +1525,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
         content_col: 10,
         content_height: 30,
         is_active: true,
+        content_width: 80,
         cursor_line: 42,
         line_number_style: :hybrid,
         line_number_width: 4,
@@ -1541,14 +1542,15 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       # Sectioned: opcode(1) + section_count(1) + sections...
       assert <<0x7B, 3, _sections::binary>> = encoded
 
-      # Extract window section (0x01): wid(2) + row(2) + col(2) + height(2) + active(1)
-      <<0x7B, _sc::8, 0x01, _wlen::16, wid::16, c_row::16, c_col::16, c_h::16, active::8,
+      # Extract window section (0x01): wid(2) + row(2) + col(2) + height(2) + active(1) + width(2)
+      <<0x7B, _sc::8, 0x01, _wlen::16, wid::16, c_row::16, c_col::16, c_h::16, active::8, c_w::16,
         _rest2::binary>> = encoded
 
       assert wid == 1
       assert c_row == 2
       assert c_col == 10
       assert c_h == 30
+      assert c_w == 80
       assert active == 1
     end
 
@@ -1569,8 +1571,8 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       encoded = ProtocolGUI.encode_gui_gutter(data)
 
       # Sectioned: verify opcode and window section
-      assert <<0x7B, 3, 0x01, _wlen::16, 1::16, 25::16, 0::16, 20::16, 0::8, _rest::binary>> =
-               encoded
+      assert <<0x7B, 3, 0x01, _wlen::16, 1::16, 25::16, 0::16, 20::16, 0::8, 0::16,
+               _rest::binary>> = encoded
     end
 
     test "encodes empty gutter (no entries)" do
@@ -1627,12 +1629,31 @@ defmodule MingaEditor.Frontend.ProtocolTest do
         line_number_style: :hybrid,
         line_number_width: 4,
         sign_col_width: 3,
-        entries: [%{buf_line: 0, display_type: :fold_open, sign_type: :none}]
+        entries: [%{buf_line: 0, display_type: :fold_open, sign_type: :none, fold_end_line: 12}]
       }
 
       encoded = ProtocolGUI.encode_gui_gutter(data)
 
-      assert :binary.match(encoded, <<4::8, 0::8>>) != :nomatch
+      assert :binary.match(encoded, <<0::32, 4::8, 0::8, 12::32>>) != :nomatch
+    end
+
+    test "encodes no fold range sentinel for normal gutter entries" do
+      data = %{
+        window_id: 1,
+        content_row: 0,
+        content_col: 0,
+        content_height: 1,
+        is_active: true,
+        cursor_line: 0,
+        line_number_style: :hybrid,
+        line_number_width: 4,
+        sign_col_width: 3,
+        entries: [%{buf_line: 0, display_type: :normal, sign_type: :none}]
+      }
+
+      encoded = ProtocolGUI.encode_gui_gutter(data)
+
+      assert :binary.match(encoded, <<0::32, 0::8, 0::8, 0xFFFF_FFFF::32>>) != :nomatch
     end
 
     test "encodes all sign types" do

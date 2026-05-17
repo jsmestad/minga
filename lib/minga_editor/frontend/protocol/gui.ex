@@ -83,6 +83,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x3E       | tab_copy_path           |
   | 0x3F       | hover_open_action       |
   | 0x40       | file_tree_drop          |
+  | 0x41       | fold_toggle_at_line     |
   | 0x34       | system_will_sleep      |
   | 0x35       | system_did_wake        |
 
@@ -255,6 +256,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_tab_copy_path 0x3E
   @gui_action_hover_open_action 0x3F
   @gui_action_file_tree_drop 0x40
+  @gui_action_fold_toggle_at_line 0x41
+
+  @no_fold_range 0xFFFF_FFFF
 
   # ── Types ──
 
@@ -313,6 +317,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:file_tree_move, source_index :: non_neg_integer(),
              target_dir_index :: non_neg_integer()}
           | {:file_tree_drop, DropIntent.t()}
+          | {:fold_toggle_at_line, window_id :: non_neg_integer(),
+             buffer_line :: non_neg_integer()}
           | {:file_tree_open_in_split, index :: non_neg_integer()}
           | {:tab_copy_path, id :: pos_integer()}
           | :hover_open_action
@@ -384,6 +390,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           required(:buf_line) => non_neg_integer(),
           required(:display_type) => display_type(),
           required(:sign_type) => sign_type(),
+          optional(:fold_end_line) => non_neg_integer(),
           optional(:sign_fg) => non_neg_integer(),
           optional(:sign_text) => String.t()
         }
@@ -395,6 +402,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           content_col: non_neg_integer(),
           content_height: non_neg_integer(),
           is_active: boolean(),
+          content_width: non_neg_integer(),
           cursor_line: non_neg_integer(),
           line_number_style: line_number_style(),
           line_number_width: non_neg_integer(),
@@ -410,34 +418,41 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   Wire format:
     opcode(1) + window_id(2) + content_row(2) + content_col(2) + content_height(2)
-    + is_active(1) + cursor_line(4) + line_number_style(1)
+    + is_active(1) + content_width(2) + cursor_line(4) + line_number_style(1)
     + line_number_width(1) + sign_col_width(1) + line_count(2) + entries...
 
   Per entry:
-    buf_line(4) + display_type(1) + sign_type(1)
+    buf_line(4) + display_type(1) + sign_type(1) + fold_end_line(4)
+
+  `fold_end_line` is `0xFFFFFFFF` when the row has no fold range.
   """
   @spec encode_gui_gutter(gutter_data()) :: binary()
-  def encode_gui_gutter(%{
-        window_id: window_id,
-        content_row: row,
-        content_col: col,
-        content_height: height,
-        is_active: active,
-        cursor_line: cursor_line,
-        line_number_style: style,
-        line_number_width: ln_width,
-        sign_col_width: sign_width,
-        entries: entries
-      }) do
+  def encode_gui_gutter(
+        %{
+          window_id: window_id,
+          content_row: row,
+          content_col: col,
+          content_height: height,
+          is_active: active,
+          cursor_line: cursor_line,
+          line_number_style: style,
+          line_number_width: ln_width,
+          sign_col_width: sign_width,
+          entries: entries
+        } = data
+      ) do
+    content_width = Map.get(data, :content_width, 0)
     style_byte = encode_line_number_style(style)
     active_byte = if active, do: 1, else: 0
     count = length(entries)
 
     entry_binaries =
       Enum.map(entries, fn entry ->
+        fold_end_line = Map.get(entry, :fold_end_line, @no_fold_range)
+
         base =
           <<entry.buf_line::32, encode_display_type(entry.display_type)::8,
-            encode_sign_type(entry.sign_type)::8>>
+            encode_sign_type(entry.sign_type)::8, fold_end_line::32>>
 
         case entry.sign_type do
           :annotation ->
@@ -459,7 +474,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     sections = [
       encode_section(
         @section_gutter_window,
-        <<window_id::16, row::16, col::16, height::16, active_byte::8>>
+        <<window_id::16, row::16, col::16, height::16, active_byte::8, content_width::16>>
       ),
       encode_section(
         @section_gutter_config,
@@ -2382,6 +2397,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       do: {:ok, {:file_tree_move, source_index, target_dir_index}}
 
   def decode_gui_action(@gui_action_file_tree_drop, payload), do: decode_file_tree_drop(payload)
+
+  def decode_gui_action(@gui_action_fold_toggle_at_line, <<window_id::16, buffer_line::32>>),
+    do: {:ok, {:fold_toggle_at_line, window_id, buffer_line}}
 
   def decode_gui_action(@gui_action_system_will_sleep, <<>>),
     do: {:ok, :system_will_sleep}

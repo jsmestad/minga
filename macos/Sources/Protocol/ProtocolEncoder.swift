@@ -107,6 +107,7 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendAgentDismiss()
     func sendChangeSummaryClick(index: UInt32)
     func sendScrollToLine(line: UInt32)
+    func sendFoldToggleAtLine(windowId: UInt16, bufferLine: UInt32)
 }
 
 extension InputEncoder {
@@ -919,6 +920,16 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_SCROLL_TO_LINE
         writeU32(&buf, 2, line)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: fold_toggle_at_line. Layout: opcode(1) + action_type(1) + window_id(2) + buffer_line(4).
+    func sendFoldToggleAtLine(windowId: UInt16, bufferLine: UInt32) {
+        var buf = Data(count: 8)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_FOLD_TOGGLE_AT_LINE
+        writeU16(&buf, 2, windowId)
+        writeU32(&buf, 4, bufferLine)
         writeFrame(buf)
     }
 

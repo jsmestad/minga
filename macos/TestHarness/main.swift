@@ -224,11 +224,13 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         let entries = data.entries.map { e -> [String: Any] in
             ["buf_line": Int(e.bufLine),
              "display_type": Int(e.displayType.rawValue),
-             "sign_type": Int(e.signType.rawValue)]
+             "sign_type": Int(e.signType.rawValue),
+             "fold_end_line": e.foldEndLine.map { Int($0) } ?? NSNull()]
         }
         return ["type": "gui_gutter", "window_id": Int(data.windowId),
                 "content_row": Int(data.contentRow), "content_col": Int(data.contentCol),
-                "content_height": Int(data.contentHeight), "is_active": data.isActive,
+                "content_height": Int(data.contentHeight),
+                "content_width": Int(data.contentWidth), "is_active": data.isActive,
                 "cursor_line": Int(data.cursorLine),
                 "line_number_style": Int(data.lineNumberStyle.rawValue),
                 "line_number_width": Int(data.lineNumberWidth),
