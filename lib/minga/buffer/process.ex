@@ -1827,6 +1827,7 @@ defmodule Minga.Buffer.Process do
     :breakindent,
     :scroll_margin,
     :autopair,
+    :autopair_block,
     :clipboard,
     :show_invisible,
     :trim_trailing_whitespace,

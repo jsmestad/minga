@@ -43,6 +43,7 @@ defmodule Minga.Config.Options do
           | :line_numbers
           | :show_gutter_separator
           | :autopair
+          | :autopair_block
           | :scroll_margin
           | :scroll_lines
           | :theme
@@ -215,6 +216,8 @@ defmodule Minga.Config.Options do
     {:show_gutter_separator, :boolean, true,
      "Whether to draw a separator between the gutter and buffer text."},
     {:autopair, :boolean, true, "Whether insert mode automatically inserts matching delimiters."},
+    {:autopair_block, :boolean, true,
+     "Whether Insert mode Enter automatically inserts language-aware block-closing keywords."},
     {:scroll_margin, :non_neg_integer, 5,
      "Minimum number of context lines kept around the cursor while scrolling."},
     {:scroll_lines, :pos_integer, 1, "Number of lines moved for each wheel-scroll step."},

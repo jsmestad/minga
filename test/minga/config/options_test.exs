@@ -21,6 +21,10 @@ defmodule Minga.Config.OptionsTest do
       assert Options.get(s, :autopair) == true
     end
 
+    test "autopair_block defaults to true", %{server: s} do
+      assert Options.get(s, :autopair_block) == true
+    end
+
     test "scroll_margin defaults to 5", %{server: s} do
       assert Options.get(s, :scroll_margin) == 5
     end
@@ -33,6 +37,7 @@ defmodule Minga.Config.OptionsTest do
                line_numbers: :hybrid,
                show_gutter_separator: true,
                autopair: true,
+               autopair_block: true,
                scroll_margin: 5,
                scroll_lines: 1,
                theme: :doom_one,
@@ -170,6 +175,11 @@ defmodule Minga.Config.OptionsTest do
       assert Options.get(s, :autopair) == false
     end
 
+    test "set and get autopair_block", %{server: s} do
+      assert {:ok, false} = Options.set(s, :autopair_block, false)
+      assert Options.get(s, :autopair_block) == false
+    end
+
     test "set and get scroll_margin", %{server: s} do
       assert {:ok, 10} = Options.set(s, :scroll_margin, 10)
       assert Options.get(s, :scroll_margin) == 10
@@ -250,6 +260,11 @@ defmodule Minga.Config.OptionsTest do
 
     test "autopair rejects non-boolean", %{server: s} do
       assert {:error, msg} = Options.set(s, :autopair, 1)
+      assert msg =~ "boolean"
+    end
+
+    test "autopair_block rejects non-boolean", %{server: s} do
+      assert {:error, msg} = Options.set(s, :autopair_block, 1)
       assert msg =~ "boolean"
     end
 
@@ -359,10 +374,12 @@ defmodule Minga.Config.OptionsTest do
     test "restores all options to defaults", %{server: s} do
       Options.set(s, :tab_width, 8)
       Options.set(s, :autopair, false)
+      Options.set(s, :autopair_block, false)
       Options.reset(s)
 
       assert Options.get(s, :tab_width) == 2
       assert Options.get(s, :autopair) == true
+      assert Options.get(s, :autopair_block) == true
     end
 
     test "publishes cursor animation default when reset re-enables it" do
@@ -396,6 +413,7 @@ defmodule Minga.Config.OptionsTest do
       assert :tab_width in names
       assert :line_numbers in names
       assert :autopair in names
+      assert :autopair_block in names
       assert :scroll_margin in names
     end
   end
@@ -660,6 +678,7 @@ defmodule Minga.Config.OptionsTest do
     test "returns type descriptor for known options" do
       assert Options.type_for(:tab_width) == :pos_integer
       assert Options.type_for(:autopair) == :boolean
+      assert Options.type_for(:autopair_block) == :boolean
       assert Options.type_for(:line_numbers) == {:enum, [:hybrid, :absolute, :relative, :none]}
       assert Options.type_for(:theme) == :theme_atom
       assert Options.type_for(:font_family) == :string

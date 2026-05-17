@@ -29,6 +29,9 @@ defmodule MingaEditor.UI.Highlight do
   @typedoc "A styled text segment for rendering."
   @type styled_segment :: {text :: String.t(), style :: Face.t()}
 
+  @typedoc "Source scope at a byte offset, derived from highlight captures."
+  @type scope :: :code | :string | :comment
+
   @doc "Creates an empty highlight state with the default theme."
   @spec new() :: t()
   def new do
@@ -103,6 +106,199 @@ defmodule MingaEditor.UI.Highlight do
     lines
     |> Enum.take(line_index)
     |> Enum.reduce(0, fn line, acc -> acc + byte_size(line) + 1 end)
+  end
+
+  @doc """
+  Returns the tree-sitter scope at a document byte offset.
+
+  Empty or unavailable highlight data degrades to `:code` so editing features keep their existing behavior when no parser data is available.
+  """
+  @spec scope_at(t(), non_neg_integer()) :: scope()
+  def scope_at(hl, byte_offset), do: scope_at(hl, byte_offset, nil)
+
+  @doc """
+  Returns the tree-sitter scope at a document byte offset, using source text to disambiguate style captures that are not semantic scopes.
+  """
+  @spec scope_at(t(), non_neg_integer(), String.t() | nil) :: scope()
+  def scope_at(hl, byte_offset, source_text)
+
+  def scope_at(%__MODULE__{spans: spans}, _byte_offset, _source_text)
+      when (is_tuple(spans) and tuple_size(spans) == 0) or spans == [] do
+    :code
+  end
+
+  def scope_at(%__MODULE__{spans: spans} = hl, byte_offset, source_text)
+      when is_tuple(spans) and is_integer(byte_offset) and byte_offset >= 0 do
+    spans
+    |> do_scope_at(tuple_size(spans), 0, byte_offset, hl, nil)
+    |> classify_scope(hl, source_text, byte_offset)
+  end
+
+  def scope_at(%__MODULE__{spans: spans} = hl, byte_offset, source_text)
+      when is_list(spans) and is_integer(byte_offset) and byte_offset >= 0 do
+    scope_at(%{hl | spans: List.to_tuple(spans)}, byte_offset, source_text)
+  end
+
+  def scope_at(_hl, _byte_offset, _source_text), do: :code
+
+  @typep scope_candidate ::
+           {layer :: non_neg_integer(), width :: non_neg_integer(),
+            pattern_index :: non_neg_integer(), capture_id :: non_neg_integer(),
+            start_byte :: non_neg_integer(), end_byte :: non_neg_integer()}
+
+  @spec do_scope_at(
+          tuple(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          t(),
+          scope_candidate() | nil
+        ) :: scope_candidate() | nil
+  defp do_scope_at(_spans, count, index, _byte_offset, _hl, winner) when index >= count,
+    do: winner
+
+  defp do_scope_at(spans, count, index, byte_offset, hl, winner) do
+    span = elem(spans, index)
+
+    winner = maybe_scope_winner(span_contains?(span, byte_offset), span, hl, winner)
+    do_scope_at(spans, count, index + 1, byte_offset, hl, winner)
+  end
+
+  @spec maybe_scope_winner(boolean(), map(), t(), scope_candidate() | nil) ::
+          scope_candidate() | nil
+  defp maybe_scope_winner(false, _span, _hl, winner), do: winner
+
+  defp maybe_scope_winner(true, span, hl, winner) do
+    if internal_capture?(hl, span.capture_id) do
+      winner
+    else
+      scope_entry = scope_entry(span)
+      better_scope_candidate(scope_entry, winner)
+    end
+  end
+
+  @spec span_contains?(map(), non_neg_integer()) :: boolean()
+  defp span_contains?(span, byte_offset),
+    do: span.start_byte <= byte_offset and span.end_byte > byte_offset
+
+  @spec scope_entry(map()) :: scope_candidate()
+  defp scope_entry(span) do
+    layer = Map.get(span, :layer, 0)
+    width = span.end_byte - span.start_byte
+    pattern_index = Map.get(span, :pattern_index, 0)
+    {layer, width, pattern_index, span.capture_id, span.start_byte, span.end_byte}
+  end
+
+  @spec better_scope_candidate(scope_candidate(), scope_candidate() | nil) :: scope_candidate()
+  defp better_scope_candidate(candidate, nil), do: candidate
+
+  defp better_scope_candidate(
+         {layer, _width, _pattern_index, _capture_id, _start_byte, _end_byte} = candidate,
+         {winner_layer, _winner_width, _winner_pattern_index, _winner_capture_id,
+          _winner_start_byte, _winner_end_byte}
+       )
+       when layer > winner_layer,
+       do: candidate
+
+  defp better_scope_candidate(
+         {layer, _width, _pattern_index, _capture_id, _start_byte, _end_byte},
+         {winner_layer, _winner_width, _winner_pattern_index, _winner_capture_id,
+          _winner_start_byte, _winner_end_byte} = winner
+       )
+       when layer < winner_layer,
+       do: winner
+
+  defp better_scope_candidate(
+         {_layer, width, _pattern_index, _capture_id, _start_byte, _end_byte} = candidate,
+         {_winner_layer, winner_width, _winner_pattern_index, _winner_capture_id,
+          _winner_start_byte, _winner_end_byte}
+       )
+       when width < winner_width,
+       do: candidate
+
+  defp better_scope_candidate(
+         {_layer, width, _pattern_index, _capture_id, _start_byte, _end_byte},
+         {_winner_layer, winner_width, _winner_pattern_index, _winner_capture_id,
+          _winner_start_byte, _winner_end_byte} = winner
+       )
+       when width > winner_width,
+       do: winner
+
+  defp better_scope_candidate(
+         {_layer, _width, pattern_index, _capture_id, _start_byte, _end_byte} = candidate,
+         {_winner_layer, _winner_width, winner_pattern_index, _winner_capture_id,
+          _winner_start_byte, _winner_end_byte}
+       )
+       when pattern_index > winner_pattern_index,
+       do: candidate
+
+  defp better_scope_candidate(_candidate, winner), do: winner
+
+  @spec classify_scope(scope_candidate() | nil, t(), String.t() | nil, non_neg_integer()) ::
+          scope()
+  defp classify_scope(nil, _hl, _source_text, _byte_offset), do: :code
+
+  defp classify_scope(
+         {_layer, _width, _pattern_index, capture_id, start_byte, end_byte},
+         hl,
+         source_text,
+         _byte_offset
+       ) do
+    hl
+    |> capture_name_at(capture_id)
+    |> classify_capture_name(source_text, start_byte, end_byte)
+  end
+
+  @spec classify_capture_name(
+          String.t() | nil,
+          String.t() | nil,
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: scope()
+  defp classify_capture_name("string", _source_text, _start_byte, _end_byte), do: :string
+  defp classify_capture_name("string.escape", _source_text, _start_byte, _end_byte), do: :string
+  defp classify_capture_name("string.regexp", _source_text, _start_byte, _end_byte), do: :string
+
+  defp classify_capture_name(
+         "comment.documentation" <> _suffix,
+         _source_text,
+         _start_byte,
+         _end_byte
+       ),
+       do: :comment
+
+  defp classify_capture_name("comment", nil, _start_byte, _end_byte), do: :comment
+
+  defp classify_capture_name("comment", source_text, start_byte, end_byte),
+    do: comment_scope_from_source(source_text, start_byte, end_byte)
+
+  defp classify_capture_name(_name, _source_text, _start_byte, _end_byte), do: :code
+
+  @comment_delimiters ["#", "//", "/*", "--", "%", "\"", "<!--", "<%!--", ";", "{-", "(*"]
+
+  @spec comment_scope_from_source(String.t(), non_neg_integer(), non_neg_integer()) :: scope()
+  defp comment_scope_from_source(source_text, start_byte, end_byte) do
+    source_text
+    |> text_slice(start_byte, end_byte)
+    |> comment_scope_from_span_text()
+  end
+
+  @spec text_slice(String.t(), non_neg_integer(), non_neg_integer()) :: String.t()
+  defp text_slice(source_text, start_byte, end_byte) do
+    clamped_start = min(start_byte, byte_size(source_text))
+    clamped_end = min(max(end_byte, clamped_start), byte_size(source_text))
+    binary_part(source_text, clamped_start, clamped_end - clamped_start)
+  end
+
+  @spec comment_scope_from_span_text(String.t()) :: scope()
+  defp comment_scope_from_span_text(span_text) do
+    trimmed = String.trim_leading(span_text)
+
+    if Enum.any?(@comment_delimiters, &String.starts_with?(trimmed, &1)) do
+      :comment
+    else
+      :code
+    end
   end
 
   @doc """

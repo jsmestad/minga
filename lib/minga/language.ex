@@ -25,6 +25,7 @@ defmodule Minga.Language do
   Runtime registrations override built-in definitions for the same name.
   """
 
+  alias Minga.Language.BlockPair
   alias Minga.LSP.ServerConfig
 
   @typedoc "A per-language configuration."
@@ -105,6 +106,10 @@ defmodule Minga.Language do
   @doc "Returns the language definition for a name atom (e.g., `:elixir`), or nil."
   @spec get(atom()) :: t() | nil
   defdelegate get(name), to: Minga.Language.Registry
+
+  @doc "Returns language-owned block auto-close metadata for a language name."
+  @spec block_pairs(atom()) :: [BlockPair.t()]
+  defdelegate block_pairs(name), to: BlockPair, as: :for_language
 
   @doc "Returns all registered language definitions."
   @spec all() :: [t()]
