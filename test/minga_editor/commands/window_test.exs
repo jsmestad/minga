@@ -209,6 +209,29 @@ defmodule MingaEditor.Commands.WindowTest do
       assert state.workspace.buffers.active == buffer
       refute EditorState.split?(state)
     end
+
+    test "closing a split restores the surviving window cursor into the buffer" do
+      {editor, buffer} = start_editor("hello\nworld")
+      split_vertical(editor)
+
+      # Move to the right split and move the cursor so the active window
+      # cursor differs from the surviving window's saved cursor.
+      send_keys(editor, [?\s, ?w, ?l])
+      send_key(editor, ?l)
+      send_key(editor, ?l)
+
+      state = get_state(editor)
+      assert state.workspace.windows.active == 2
+      assert state.workspace.windows.map[2].cursor == {0, 2}
+
+      close_window(editor)
+      state = get_state(editor)
+
+      assert BufferProcess.cursor(buffer) == {0, 0}
+      assert state.workspace.windows.active == 1
+      assert state.workspace.windows.map[1].cursor == {0, 0}
+      refute EditorState.split?(state)
+    end
   end
 
   describe "editing in split windows" do

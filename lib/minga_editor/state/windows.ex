@@ -51,6 +51,51 @@ defmodule MingaEditor.State.Windows do
   @spec set_next_id(t(), Window.id()) :: t()
   def set_next_id(%__MODULE__{} = windows, id), do: %{windows | next_id: id}
 
+  @doc "Allocates the next window id and advances the allocator."
+  @spec allocate_id(t()) :: {Window.id(), t()}
+  def allocate_id(%__MODULE__{next_id: id} = windows) do
+    {id, set_next_id(windows, id + 1)}
+  end
+
+  @doc "Adds a window to the container using the window's id."
+  @spec add_window(t(), Window.t()) :: t()
+  def add_window(%__MODULE__{map: map} = windows, %Window{id: id} = window) do
+    set_map(windows, Map.put(map, id, window))
+  end
+
+  @doc "Removes a tree-managed window from the container."
+  @spec remove_window(t(), Window.id()) :: {:ok, t()} | :error
+  def remove_window(%__MODULE__{tree: nil}, _id), do: :error
+
+  def remove_window(%__MODULE__{tree: tree} = windows, id) do
+    case WindowTree.close(tree, id) do
+      {:ok, new_tree} ->
+        {:ok,
+         windows
+         |> set_tree(new_tree)
+         |> delete_window(id)}
+
+      :error ->
+        :error
+    end
+  end
+
+  @doc "Deletes a window from the map without touching the window tree."
+  @spec delete_window(t(), Window.id()) :: t()
+  def delete_window(%__MODULE__{map: map} = windows, id) do
+    set_map(windows, Map.delete(map, id))
+  end
+
+  @doc "Fetches a window by id."
+  @spec fetch(t(), Window.id()) :: {:ok, Window.t()} | :error
+  def fetch(%__MODULE__{map: map}, id), do: Map.fetch(map, id)
+
+  @doc "Finds the first window matching the given predicate."
+  @spec find_by_content(t(), (Window.t() -> boolean())) :: {Window.id(), Window.t()} | nil
+  def find_by_content(%__MODULE__{map: map}, predicate) when is_function(predicate, 1) do
+    Enum.find(map, fn {_id, window} -> predicate.(window) end)
+  end
+
   @doc """
   Updates the window struct for the given window id.
 

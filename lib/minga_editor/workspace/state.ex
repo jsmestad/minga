@@ -118,10 +118,12 @@ defmodule MingaEditor.Workspace.State do
   """
   @spec invalidate_all_windows(t()) :: t()
   def invalidate_all_windows(%__MODULE__{windows: ws} = wspace) do
-    new_map =
-      Map.new(ws.map, fn {id, window} -> {id, Window.invalidate(window)} end)
+    windows =
+      Enum.reduce(ws.map, ws, fn {id, _window}, acc ->
+        Windows.update(acc, id, &Window.invalidate/1)
+      end)
 
-    %{wspace | windows: %{ws | map: new_map}}
+    %{wspace | windows: windows}
   end
 
   @doc """
@@ -144,19 +146,21 @@ defmodule MingaEditor.Workspace.State do
   @spec sync_active_window_buffer(t()) :: t()
   def sync_active_window_buffer(%__MODULE__{buffers: %{active: nil}} = wspace), do: wspace
 
-  def sync_active_window_buffer(
-        %__MODULE__{windows: %{map: windows, active: id} = ws, buffers: buffers} = wspace
-      ) do
-    case Map.fetch(windows, id) do
-      {:ok, %Window{buffer: existing, content: {:buffer, _}} = window}
-      when existing != buffers.active ->
-        window = %{
-          Window.invalidate(window)
-          | buffer: buffers.active,
-            content: Content.buffer(buffers.active)
-        }
+  def sync_active_window_buffer(%__MODULE__{windows: ws, buffers: buffers} = wspace) do
+    id = ws.active
 
-        %{wspace | windows: %{ws | map: Map.put(windows, id, window)}}
+    case Windows.fetch(ws, id) do
+      {:ok, %Window{buffer: existing, content: {:buffer, _}}} when existing != buffers.active ->
+        windows =
+          Windows.update(ws, id, fn window ->
+            %{
+              Window.invalidate(window)
+              | buffer: buffers.active,
+                content: Content.buffer(buffers.active)
+            }
+          end)
+
+        %{wspace | windows: windows}
 
       _ ->
         wspace

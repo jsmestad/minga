@@ -104,20 +104,24 @@ defmodule MingaEditor.LayoutPresetTest do
   describe "restore_default/1" do
     test "switches active window away from agent before removing" do
       state = make_state()
+      file_buffer = state.workspace.buffers.active
       buf = agent_buffer()
 
-      state = LayoutPreset.apply(state, :agent_right, buf)
-
-      # Set agent window as active
-      state = %{
+      state =
         state
-        | workspace: %{state.workspace | windows: %{state.workspace.windows | active: 2}}
-      }
+        |> LayoutPreset.apply(:agent_right, buf)
+        |> EditorState.focus_window(2)
+
+      assert state.workspace.windows.active == 2
+      assert state.workspace.buffers.active == buf
+      assert state.workspace.keymap_scope == :agent
 
       state = LayoutPreset.restore_default(state)
 
       # Active should be the file buffer window (1), not the deleted agent window (2)
       assert state.workspace.windows.active == 1
+      assert state.workspace.buffers.active == file_buffer
+      assert state.workspace.keymap_scope == :editor
       refute Map.has_key?(state.workspace.windows.map, 2)
     end
   end

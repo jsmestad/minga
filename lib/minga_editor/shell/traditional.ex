@@ -577,26 +577,26 @@ defmodule MingaEditor.Shell.Traditional do
   # Resets the active window's content type from agent_chat back to buffer.
   @spec reset_active_window_to_buffer(WorkspaceState.t()) :: WorkspaceState.t()
   defp reset_active_window_to_buffer(workspace) do
-    %{windows: %{map: map, active: id}, buffers: buffers} = workspace
-    window = Map.get(map, id)
+    %{windows: windows, buffers: buffers} = workspace
+    id = windows.active
 
-    case window do
-      %Window{content: {:buffer, _}} ->
+    case Windows.fetch(windows, id) do
+      {:ok, %Window{content: {:buffer, _}}} ->
         workspace
 
-      %Window{} ->
-        updated = %{
-          Window.invalidate(window)
-          | buffer: buffers.active,
-            content: Content.buffer(buffers.active)
-        }
+      {:ok, %Window{}} ->
+        windows =
+          Windows.update(windows, id, fn window ->
+            %{
+              Window.invalidate(window)
+              | buffer: buffers.active,
+                content: Content.buffer(buffers.active)
+            }
+          end)
 
-        WorkspaceState.set_windows(
-          workspace,
-          Windows.set_map(workspace.windows, Map.put(map, id, updated))
-        )
+        WorkspaceState.set_windows(workspace, windows)
 
-      nil ->
+      :error ->
         workspace
     end
   end

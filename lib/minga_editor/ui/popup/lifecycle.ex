@@ -35,6 +35,7 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
   alias MingaEditor.FloatingWindow
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
@@ -82,7 +83,7 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
   """
   @spec close_popup(state(), Window.id()) :: state()
   def close_popup(state, window_id) when is_integer(window_id) do
-    case Map.fetch(state.workspace.windows.map, window_id) do
+    case Windows.fetch(state.workspace.windows, window_id) do
       {:ok, %Window{popup_meta: %PopupActive{} = meta}} ->
         do_close(state, window_id, meta)
 
@@ -111,8 +112,8 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
   @spec close_all_popups(state()) :: state()
   def close_all_popups(state) do
     popup_ids =
-      state.workspace.windows.map
-      |> Enum.filter(fn {_id, w} -> Window.popup?(w) end)
+      state.workspace.windows
+      |> Windows.popup_windows()
       |> Enum.sort_by(fn {id, _w} -> id end, :desc)
       |> Enum.map(fn {id, _w} -> id end)
 
@@ -124,9 +125,9 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
   """
   @spec active_is_popup?(state()) :: boolean()
   def active_is_popup?(state) do
-    case Map.fetch(state.workspace.windows.map, state.workspace.windows.active) do
-      {:ok, window} -> Window.popup?(window)
-      :error -> false
+    case Windows.active_struct(state.workspace.windows) do
+      %Window{} = window -> Window.popup?(window)
+      nil -> false
     end
   end
 
@@ -139,7 +140,8 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
   """
   @spec render_float_overlays(state()) :: [DisplayList.Overlay.t()]
   def render_float_overlays(state) do
-    state.workspace.windows.map
+    state.workspace.windows
+    |> Windows.popup_windows()
     |> Enum.filter(fn {_id, w} -> float_popup?(w) end)
     |> Enum.map(fn {_id, window} -> render_float_overlay(state, window) end)
   end
@@ -151,7 +153,8 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
   """
   @spec click_inside_float?(state(), integer(), integer()) :: boolean()
   def click_inside_float?(state, row, col) do
-    state.workspace.windows.map
+    state.workspace.windows
+    |> Windows.popup_windows()
     |> Enum.any?(fn {_id, w} ->
       float_popup?(w) and inside_float_box?(state, w, row, col)
     end)
@@ -269,7 +272,7 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
     previous_active = ws.active
 
     # Create the popup window
-    next_id = ws.next_id
+    {next_id, ws} = Windows.allocate_id(ws)
     {rows, cols} = viewport_size(state)
     popup_window = Window.new(next_id, buffer_pid, rows, cols)
 
@@ -295,11 +298,12 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
         popup_window = %{popup_window | popup_meta: active}
 
         # Update state
-        new_map = Map.put(ws.map, next_id, popup_window)
-        new_windows = %{ws | tree: new_tree, map: new_map, next_id: next_id + 1}
+        windows =
+          ws
+          |> Windows.set_tree(new_tree)
+          |> Windows.add_window(popup_window)
 
-        windows = if rule.focus, do: %{new_windows | active: next_id}, else: new_windows
-        state = EditorState.update_workspace(state, &WorkspaceState.set_windows(&1, windows))
+        state = update_popup_windows(state, windows, next_id, rule.focus)
 
         Layout.invalidate(state)
 
@@ -312,7 +316,7 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
     previous_active = ws.active
 
     # Create the popup window (not added to the tree, only the map)
-    next_id = ws.next_id
+    {next_id, ws} = Windows.allocate_id(ws)
     {rows, cols} = viewport_size(state)
     popup_window = Window.new(next_id, buffer_pid, rows, cols)
 
@@ -321,21 +325,21 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
     popup_window = %{popup_window | popup_meta: active}
 
     # Add window to map but NOT to the tree (floats overlay the layout)
-    new_map = Map.put(ws.map, next_id, popup_window)
-    new_windows = %{ws | map: new_map, next_id: next_id + 1}
-    state = EditorState.update_workspace(state, &WorkspaceState.set_windows(&1, new_windows))
-
-    # Optionally switch focus to the popup
-    state =
-      if rule.focus do
-        EditorState.update_workspace(state, fn wspace ->
-          WorkspaceState.set_windows(wspace, %{wspace.windows | active: next_id})
-        end)
-      else
-        state
-      end
+    windows = Windows.add_window(ws, popup_window)
+    state = update_popup_windows(state, windows, next_id, rule.focus)
 
     Layout.invalidate(state)
+  end
+
+  @spec update_popup_windows(state(), Windows.t(), Window.id(), boolean()) :: state()
+  defp update_popup_windows(state, windows, next_id, true) do
+    state
+    |> EditorState.update_workspace(&WorkspaceState.set_windows(&1, windows))
+    |> EditorState.focus_window(next_id)
+  end
+
+  defp update_popup_windows(state, windows, _next_id, false) do
+    EditorState.update_workspace(state, &WorkspaceState.set_windows(&1, windows))
   end
 
   @spec do_close(state(), Window.id(), PopupActive.t()) :: state()
@@ -347,15 +351,12 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
       if ws.active == window_id do
         # Restore focus to the previous active window, or find any non-popup window
         restore_id =
-          if Map.has_key?(ws.map, meta.previous_active) do
-            meta.previous_active
-          else
-            find_non_popup_window(ws.map, window_id)
+          case Windows.fetch(ws, meta.previous_active) do
+            {:ok, _window} -> meta.previous_active
+            :error -> find_non_popup_window(ws, window_id)
           end
 
-        EditorState.update_workspace(state, fn wspace ->
-          WorkspaceState.set_windows(wspace, %{wspace.windows | active: restore_id})
-        end)
+        EditorState.focus_window(state, restore_id)
       else
         state
       end
@@ -365,15 +366,7 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
     # Remove just this popup's window from the current tree (like
     # delete-window in Emacs). We used to restore a full tree snapshot,
     # but that clobbers any other popups that were opened after this one.
-    new_tree =
-      case WindowTree.close(ws.tree, window_id) do
-        {:ok, tree} -> tree
-        :error -> ws.tree
-      end
-
-    # Remove the popup window from the map
-    new_map = Map.delete(ws.map, window_id)
-    new_windows = %{ws | tree: new_tree, map: new_map}
+    new_windows = remove_popup_window(ws, window_id, meta)
     state = EditorState.update_workspace(state, &WorkspaceState.set_windows(&1, new_windows))
 
     Layout.invalidate(state)
@@ -431,9 +424,23 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
   defp viewport_size(%{viewport: %Viewport{rows: r, cols: c}}), do: {r, c}
   defp viewport_size(_state), do: {24, 80}
 
-  @spec find_non_popup_window(%{Window.id() => Window.t()}, Window.id()) :: Window.id()
-  defp find_non_popup_window(window_map, exclude_id) do
-    case Enum.find(window_map, fn {id, w} -> id != exclude_id and not Window.popup?(w) end) do
+  @spec remove_popup_window(Windows.t(), Window.id(), PopupActive.t()) :: Windows.t()
+  defp remove_popup_window(ws, window_id, %PopupActive{rule: %Rule{display: :float}}) do
+    Windows.delete_window(ws, window_id)
+  end
+
+  defp remove_popup_window(ws, window_id, %PopupActive{}) do
+    case Windows.remove_window(ws, window_id) do
+      {:ok, windows} -> windows
+      :error -> Windows.delete_window(ws, window_id)
+    end
+  end
+
+  @spec find_non_popup_window(Windows.t(), Window.id()) :: Window.id()
+  defp find_non_popup_window(windows, exclude_id) do
+    case Windows.find_by_content(windows, fn window ->
+           window.id != exclude_id and not Window.popup?(window)
+         end) do
       {id, _window} -> id
       nil -> exclude_id
     end
