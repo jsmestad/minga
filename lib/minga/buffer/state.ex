@@ -104,6 +104,12 @@ defmodule Minga.Buffer.State do
     restore_version(state, version(state))
   end
 
+  @doc "Retargets the buffer to a new file path without changing content or dirty state."
+  @spec retarget_path(t(), String.t()) :: t()
+  def retarget_path(%__MODULE__{} = state, file_path) when is_binary(file_path) do
+    %{state | file_path: file_path}
+  end
+
   @doc "Returns save state for content loaded from storage."
   @spec loaded_save_state(String.t() | nil, SaveState.metadata(), String.t()) :: SaveState.t()
   def loaded_save_state(path, metadata, content) do

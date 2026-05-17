@@ -628,6 +628,25 @@ defmodule Minga.Project.FileTreeTest do
     end
 
     @tag :tmp_dir
+    test "set_filter skips symlinked directories while descending", %{tmp_dir: tmp_dir} do
+      root = Path.join(tmp_dir, "root")
+      nested = Path.join(root, "nested")
+      link = Path.join(root, "link")
+      File.mkdir_p!(nested)
+      File.write!(Path.join(nested, "target.ex"), "")
+
+      case File.ln_s(nested, link) do
+        :ok -> :ok
+        {:error, reason} -> flunk("symlink creation failed: #{inspect(reason)}")
+      end
+
+      tree = FileTree.new(root) |> FileTree.set_filter("target")
+      entries = FileTree.visible_entries(tree)
+
+      assert Enum.map(entries, & &1.path) == [Path.join(nested, "target.ex")]
+    end
+
+    @tag :tmp_dir
     test "filter does not match every entry just because the root path matches", %{
       tmp_dir: tmp_dir
     } do

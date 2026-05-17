@@ -288,6 +288,11 @@ defmodule MingaEditor.Input.FileTreeHandler do
   @enter 13
   @escape 27
   @backspace 127
+  defguardp special_text_key?(cp)
+            when cp in 57_348..57_376 or cp in 0xF700..0xF728
+
+  defguardp printable_text_key?(cp, mods)
+            when mods == 0 and cp >= 32 and not special_text_key?(cp)
 
   @spec handle_inline_edit_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
@@ -314,7 +319,7 @@ defmodule MingaEditor.Input.FileTreeHandler do
   end
 
   # Printable characters: append to editing text
-  defp handle_inline_edit_key(state, cp, 0) when cp >= 32 do
+  defp handle_inline_edit_key(state, cp, mods) when printable_text_key?(cp, mods) do
     char = <<cp::utf8>>
     editing = state.workspace.file_tree.editing
     new_text = editing.text <> char
@@ -329,6 +334,7 @@ defmodule MingaEditor.Input.FileTreeHandler do
 
   @spec handle_help_key(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
   defp handle_help_key(state, @escape, 0), do: Commands.FileTree.hide_help(state)
+  defp handle_help_key(state, ?/, 0), do: Commands.FileTree.filter(state)
   defp handle_help_key(state, ??, 0), do: Commands.FileTree.toggle_help(state)
   defp handle_help_key(state, _cp, _mods), do: state
 
@@ -342,6 +348,8 @@ defmodule MingaEditor.Input.FileTreeHandler do
     set_file_tree(state, FileTreeState.clear_filter(state.workspace.file_tree))
   end
 
+  defp handle_filter_key(state, ??, 0), do: Commands.FileTree.toggle_help(state)
+
   defp handle_filter_key(state, @backspace, 0) do
     text = current_filter_text(state)
 
@@ -353,7 +361,7 @@ defmodule MingaEditor.Input.FileTreeHandler do
     end
   end
 
-  defp handle_filter_key(state, cp, 0) when cp >= 32 do
+  defp handle_filter_key(state, cp, mods) when printable_text_key?(cp, mods) do
     new_text = current_filter_text(state) <> <<cp::utf8>>
     set_file_tree(state, FileTreeState.update_filter(state.workspace.file_tree, new_text))
   end

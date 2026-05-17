@@ -305,6 +305,10 @@ defmodule Minga.Buffer do
   @spec save_as(t(), String.t()) :: :ok | {:error, term()}
   defdelegate save_as(server, file_path), to: BufferProcess
 
+  @doc "Retargets the buffer to a new file path without writing content."
+  @spec retarget_path(t(), String.t()) :: :ok | {:error, term()}
+  defdelegate retarget_path(server, file_path), to: BufferProcess
+
   # ── Identity and metadata ──────────────────────────────────────────
 
   @doc "File path of the buffer, or nil for scratch buffers."

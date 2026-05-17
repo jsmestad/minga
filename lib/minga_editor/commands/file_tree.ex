@@ -615,9 +615,15 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec execute_marked_move(state(), FileTreeState.clipboard_mark(), String.t()) :: state()
   defp execute_marked_move(state, mark, destination) do
-    case guarded_rename(mark.path, destination) do
-      :ok -> marked_move_succeeded(state, mark, destination)
-      {:error, reason} -> marked_move_failed(state, mark.path, destination, reason)
+    case move_destination_status(mark, destination) do
+      :ok ->
+        case guarded_rename(mark.path, destination) do
+          :ok -> marked_move_succeeded(state, mark, destination)
+          {:error, reason} -> marked_move_failed(state, mark.path, destination, reason)
+        end
+
+      {:error, reason} ->
+        marked_move_failed(state, mark.path, destination, reason)
     end
   end
 
@@ -672,6 +678,22 @@ defmodule MingaEditor.Commands.FileTree do
       do: {:error, {:destination_exists, destination}},
       else: :ok
   end
+
+  @spec move_destination_status(FileTreeState.clipboard_mark(), String.t()) ::
+          :ok | {:error, term()}
+  defp move_destination_status(%{dir?: true, path: source}, destination) do
+    expanded_source = Path.expand(source)
+    expanded_destination = Path.expand(destination)
+
+    if path_under_root?(expanded_destination, expanded_source) do
+      {:error, {:destination_inside_source, destination}}
+    else
+      copy_destination_exists_status(destination)
+    end
+  end
+
+  defp move_destination_status(_mark, destination),
+    do: copy_destination_exists_status(destination)
 
   @spec execute_copy_with_destination_check(
           state(),
@@ -1226,7 +1248,7 @@ defmodule MingaEditor.Commands.FileTree do
         errors
 
       path ->
-        save_moved_buffer_path(pid, path, moved_buffer_path(path, old_path, new_path), errors)
+        retarget_moved_buffer_path(pid, path, moved_buffer_path(path, old_path, new_path), errors)
     end
   end
 
@@ -1237,12 +1259,12 @@ defmodule MingaEditor.Commands.FileTree do
     :exit, _ -> nil
   end
 
-  @spec save_moved_buffer_path(pid(), String.t(), String.t() | nil, [{String.t(), term()}]) ::
+  @spec retarget_moved_buffer_path(pid(), String.t(), String.t() | nil, [{String.t(), term()}]) ::
           [{String.t(), term()}]
-  defp save_moved_buffer_path(_pid, _path, nil, errors), do: errors
+  defp retarget_moved_buffer_path(_pid, _path, nil, errors), do: errors
 
-  defp save_moved_buffer_path(pid, path, moved_path, errors) do
-    case Buffer.save_as(pid, moved_path) do
+  defp retarget_moved_buffer_path(pid, path, moved_path, errors) do
+    case Buffer.retarget_path(pid, moved_path) do
       :ok -> errors
       {:error, reason} -> [{path, reason} | errors]
     end

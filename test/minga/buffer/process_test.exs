@@ -1,6 +1,7 @@
 defmodule Minga.Buffer.ProcessTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer
   alias Minga.Buffer.Document
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Config.Options
@@ -295,6 +296,65 @@ defmodule Minga.Buffer.ProcessTest do
       assert BufferProcess.file_path(pid) == path
       refute BufferProcess.dirty?(pid)
       assert File.read!(path) == "Xcontent"
+    end
+  end
+
+  describe "retarget_path/2" do
+    test "retargets a clean buffer without writing content", %{tmp_dir: tmp_dir} do
+      source = Path.join(tmp_dir, "source.txt")
+      target = Path.join(tmp_dir, "target.txt")
+      File.write!(source, "alpha")
+
+      {:ok, pid} = BufferProcess.start_link(file_path: source)
+
+      assert :ok = BufferProcess.retarget_path(pid, target)
+      assert BufferProcess.file_path(pid) == target
+      refute BufferProcess.dirty?(pid)
+      assert File.exists?(source)
+      refute File.exists?(target)
+      assert :not_found = BufferProcess.pid_for_path(source)
+      assert {:ok, ^pid} = BufferProcess.pid_for_path(target)
+    end
+
+    test "retargets a dirty buffer and preserves dirty state until explicit save", %{
+      tmp_dir: tmp_dir
+    } do
+      source = Path.join(tmp_dir, "source.txt")
+      target = Path.join(tmp_dir, "target.txt")
+      File.write!(source, "alpha")
+
+      {:ok, pid} = BufferProcess.start_link(file_path: source)
+      BufferProcess.replace_content(pid, "dirty", :user)
+      assert BufferProcess.dirty?(pid)
+
+      assert :ok = BufferProcess.retarget_path(pid, target)
+      assert BufferProcess.file_path(pid) == target
+      assert BufferProcess.dirty?(pid)
+      assert File.read!(source) == "alpha"
+      refute File.exists?(target)
+
+      assert :ok = BufferProcess.save(pid)
+      assert File.read!(target) == "dirty"
+      assert File.exists?(source)
+    end
+
+    test "retarget_path/2 updates registry for nowrite buffers and still blocks save", %{
+      tmp_dir: tmp_dir
+    } do
+      source = Path.join(tmp_dir, "source.txt")
+      target = Path.join(tmp_dir, "target.txt")
+      File.write!(source, "display only")
+
+      {:ok, pid} = BufferProcess.start_link(file_path: source, buffer_type: :nowrite)
+      assert BufferProcess.buffer_type(pid) == :nowrite
+      assert {:ok, ^pid} = Buffer.pid_for_path(source)
+
+      assert :ok = Buffer.retarget_path(pid, target)
+      assert BufferProcess.file_path(pid) == target
+      assert BufferProcess.buffer_type(pid) == :nowrite
+      assert :not_found = Buffer.pid_for_path(source)
+      assert {:ok, ^pid} = Buffer.pid_for_path(target)
+      assert Buffer.save(pid) == {:error, :buffer_not_saveable}
     end
   end
 

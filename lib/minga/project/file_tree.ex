@@ -351,7 +351,7 @@ defmodule Minga.Project.FileTree do
       guides: parent_guides
     }
 
-    if is_dir and descend_into_directory?(tree, full) do
+    if is_dir and descend_into_directory?(tree, full) and not symlinked_directory?(full) do
       # Children need to know: at this entry's depth, are there more siblings?
       # If this entry is NOT the last child, its depth column should draw │.
       child_guides = parent_guides ++ [not is_last]
@@ -381,6 +381,14 @@ defmodule Minga.Project.FileTree do
 
     entry.name |> String.downcase() |> String.contains?(needle) or
       relative_path |> String.downcase() |> String.contains?(needle)
+  end
+
+  @spec symlinked_directory?(String.t()) :: boolean()
+  defp symlinked_directory?(path) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :symlink}} -> true
+      _ -> false
+    end
   end
 
   @spec active_filter?(t()) :: boolean()

@@ -6,9 +6,11 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
 
   import Hammox
 
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Project.FileTree
   alias MingaEditor.Commands.FileTree, as: FileTreeCommands
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.Viewport
   alias MingaEditor.Workspace.State, as: WorkspaceState
@@ -77,6 +79,126 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
     end
 
     @tag :tmp_dir
+    test "moves a dirty open file buffer without saving it during retarget", %{tmp_dir: tmp_dir} do
+      source = Path.join(tmp_dir, "alpha.txt")
+      target_dir = Path.join(tmp_dir, "dest")
+      target = Path.join(target_dir, "alpha.txt")
+      File.write!(source, "alpha")
+      File.mkdir_p!(target_dir)
+
+      buffer = start_supervised!({BufferProcess, file_path: source})
+      BufferProcess.replace_content(buffer, "dirty", :user)
+      assert BufferProcess.dirty?(buffer)
+
+      state =
+        tmp_dir
+        |> build_state(Buffers.add(%Buffers{}, buffer))
+        |> select_entry("alpha.txt")
+        |> FileTreeCommands.mark_move()
+
+      state = state |> select_entry("dest") |> FileTreeCommands.paste()
+
+      assert BufferProcess.file_path(buffer) == target
+      assert BufferProcess.dirty?(buffer)
+      assert :not_found = BufferProcess.pid_for_path(source)
+      assert {:ok, ^buffer} = BufferProcess.pid_for_path(target)
+      assert File.read!(target) == "alpha"
+      refute File.exists?(source)
+
+      assert :ok = BufferProcess.save(buffer)
+      assert File.read!(target) == "dirty"
+      assert state.workspace.file_tree.clipboard_mark == nil
+    end
+
+    @tag :tmp_dir
+    test "move failure on existing destination leaves source, target, and mark intact", %{
+      tmp_dir: tmp_dir
+    } do
+      source = Path.join(tmp_dir, "alpha.txt")
+      target_dir = Path.join(tmp_dir, "dest")
+      target = Path.join(target_dir, "alpha.txt")
+      File.write!(source, "source")
+      File.mkdir_p!(target_dir)
+      File.write!(target, "existing")
+
+      state =
+        tmp_dir |> build_state() |> select_entry("alpha.txt") |> FileTreeCommands.mark_move()
+
+      state = state |> select_entry("dest") |> FileTreeCommands.paste()
+
+      assert File.read!(source) == "source"
+      assert File.read!(target) == "existing"
+      assert state.workspace.file_tree.clipboard_mark.operation == :move
+    end
+
+    @tag :tmp_dir
+    test "move failure into a descendant keeps the directory and mark intact", %{tmp_dir: tmp_dir} do
+      source_dir = Path.join(tmp_dir, "src")
+      child_dir = Path.join(source_dir, "child")
+      File.mkdir_p!(child_dir)
+      File.write!(Path.join(source_dir, "file.txt"), "content")
+
+      state =
+        tmp_dir
+        |> build_state()
+        |> expand_path(source_dir)
+        |> select_entry("src")
+        |> FileTreeCommands.mark_move()
+
+      state = state |> select_entry("child") |> FileTreeCommands.paste()
+
+      refute File.exists?(Path.join(child_dir, "src"))
+      assert File.exists?(source_dir)
+      assert state.workspace.file_tree.clipboard_mark.operation == :move
+    end
+
+    @tag :tmp_dir
+    test "successful move retargets an open buffer path and saves to the new path", %{
+      tmp_dir: tmp_dir
+    } do
+      source = Path.join(tmp_dir, "alpha.txt")
+      target_dir = Path.join(tmp_dir, "dest")
+      target = Path.join(target_dir, "alpha.txt")
+      File.write!(source, "source")
+      File.mkdir_p!(target_dir)
+
+      buffer = start_supervised!({BufferProcess, file_path: source})
+
+      state =
+        tmp_dir
+        |> build_state(Buffers.add(%Buffers{}, buffer))
+        |> select_entry("alpha.txt")
+        |> FileTreeCommands.mark_move()
+
+      _state = state |> select_entry("dest") |> FileTreeCommands.paste()
+
+      assert BufferProcess.file_path(buffer) == target
+      assert File.read!(target) == "source"
+
+      BufferProcess.replace_content(buffer, "updated", :user)
+      assert :ok = BufferProcess.save(buffer)
+
+      assert File.read!(target) == "updated"
+      refute File.exists?(source)
+    end
+
+    @tag :tmp_dir
+    test "failed move keeps the clipboard mark for retry", %{tmp_dir: tmp_dir} do
+      source = Path.join(tmp_dir, "retry.txt")
+      target_dir = Path.join(tmp_dir, "dest")
+      File.write!(source, "retry")
+      File.mkdir_p!(target_dir)
+      File.write!(Path.join(target_dir, "retry.txt"), "existing")
+
+      state =
+        tmp_dir |> build_state() |> select_entry("retry.txt") |> FileTreeCommands.mark_move()
+
+      state = state |> select_entry("dest") |> FileTreeCommands.paste()
+
+      assert state.workspace.file_tree.clipboard_mark.operation == :move
+    end
+
+    @tag :tmp_dir
     test "copy paste rejects directory destinations inside the source", %{tmp_dir: tmp_dir} do
       source_dir = Path.join(tmp_dir, "src")
       child_dir = Path.join(source_dir, "child")
@@ -114,6 +236,42 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
       state |> select_entry("target.txt") |> FileTreeCommands.paste()
 
       assert File.read!(Path.join(tmp_dir, "alpha.txt")) == "alpha"
+    end
+
+    @tag :tmp_dir
+    test "moves a dirty open descendant buffer when renaming a directory", %{tmp_dir: tmp_dir} do
+      source_dir = Path.join(tmp_dir, "src")
+      source_file = Path.join([source_dir, "nested", "alpha.txt"])
+      target_dir = Path.join(tmp_dir, "dest")
+      target_file = Path.join([target_dir, "src", "nested", "alpha.txt"])
+      File.mkdir_p!(Path.dirname(source_file))
+      File.write!(source_file, "alpha")
+      File.mkdir_p!(target_dir)
+
+      buffer = start_supervised!({BufferProcess, file_path: source_file})
+      BufferProcess.replace_content(buffer, "dirty", :user)
+      assert BufferProcess.dirty?(buffer)
+
+      state =
+        tmp_dir
+        |> build_state(Buffers.add(%Buffers{}, buffer))
+        |> expand_path(source_dir)
+        |> select_entry("src")
+        |> FileTreeCommands.mark_move()
+
+      state = state |> select_entry("dest") |> FileTreeCommands.paste()
+
+      assert BufferProcess.file_path(buffer) == target_file
+      assert BufferProcess.dirty?(buffer)
+      assert File.read!(target_file) == "alpha"
+      refute File.exists?(source_file)
+      refute File.exists?(source_dir)
+      assert {:ok, ^buffer} = BufferProcess.pid_for_path(target_file)
+      assert :not_found = BufferProcess.pid_for_path(source_file)
+
+      assert :ok = BufferProcess.save(buffer)
+      assert File.read!(target_file) == "dirty"
+      assert state.workspace.file_tree.clipboard_mark == nil
     end
 
     @tag :tmp_dir
@@ -202,12 +360,13 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
     end
   end
 
-  defp build_state(root) do
+  defp build_state(root, buffers \\ %Buffers{}) do
     tree = root |> FileTree.new() |> FileTree.refresh()
 
     %EditorState{
       port_manager: nil,
       workspace: %WorkspaceState{
+        buffers: buffers,
         viewport: Viewport.new(24, 80),
         file_tree: FileTreeState.open(%FileTreeState{}, tree, nil)
       }

@@ -258,6 +258,12 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, {:save_as, file_path}, @file_io_call_timeout)
   end
 
+  @doc "Retargets the buffer to a new file path without writing content."
+  @spec retarget_path(GenServer.server(), String.t()) :: :ok | {:error, term()}
+  def retarget_path(server, file_path) do
+    GenServer.call(server, {:retarget_path, file_path}, @file_io_call_timeout)
+  end
+
   @doc "Replaces the entire buffer content, pushing the old content onto the undo stack."
   @spec replace_content(GenServer.server(), String.t(), BufState.edit_source()) ::
           :ok | {:error, :read_only}
@@ -1119,10 +1125,28 @@ defmodule Minga.Buffer.Process do
         unregister_path(state.file_path)
         register_path(file_path)
 
-        {:reply, :ok, mark_saved(%{state | file_path: file_path}, {new_mtime, new_size}, content)}
+        new_state = BufState.retarget_path(state, file_path)
+        {:reply, :ok, mark_saved(new_state, {new_mtime, new_size}, content)}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:retarget_path, _file_path}, _from, %{file_path: nil} = state) do
+    {:reply, {:error, :no_file_path}, state}
+  end
+
+  def handle_call({:retarget_path, file_path}, _from, state) do
+    new_path = Path.expand(file_path)
+    old_path = state.file_path && Path.expand(state.file_path)
+
+    if old_path == new_path do
+      {:reply, :ok, state}
+    else
+      unregister_path(state.file_path)
+      register_path(new_path)
+      {:reply, :ok, BufState.retarget_path(state, new_path)}
     end
   end
 
