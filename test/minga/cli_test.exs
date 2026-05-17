@@ -4,6 +4,14 @@ defmodule Minga.CLITest do
 
   alias Minga.CLI
 
+  setup do
+    if Process.whereis(Minga.EventBus) == nil do
+      start_supervised!(Minga.Events.child_spec(name: Minga.EventBus))
+    end
+
+    :ok
+  end
+
   describe "parse_args/1" do
     test "no arguments returns {:open, nil, default_flags}" do
       assert {:open, nil, %{view_mode: :auto, no_context: false, config_file: nil}} =
@@ -118,6 +126,54 @@ defmodule Minga.CLITest do
       assert message =~ "--config"
     end
 
+    test "--debug-log sets expanded debug log path" do
+      assert {:open, nil, %{debug_log: path}} =
+               CLI.parse_args(["--debug-log", "~/minga-debug.log"])
+
+      assert path == Path.expand("~/minga-debug.log")
+    end
+
+    test "-D sets expanded debug log path" do
+      assert {:open, nil, %{debug_log: path}} = CLI.parse_args(["-D", "debug.log"])
+      assert path == Path.expand("debug.log")
+    end
+
+    test "--debug-log without a following argument returns error" do
+      assert {:error, message} = CLI.parse_args(["--debug-log"])
+      assert message =~ "--debug-log requires a path argument"
+    end
+
+    test "--debug-log followed by another flag returns error" do
+      assert {:error, message} = CLI.parse_args(["--debug-log", "--editor"])
+      assert message =~ "--debug-log requires a path argument, not a flag"
+    end
+
+    test "-D followed by another flag returns error" do
+      assert {:error, message} = CLI.parse_args(["-D", "--editor"])
+      assert message =~ "-D requires a path argument, not a flag"
+    end
+
+    test "--debug-log with empty string returns error" do
+      assert {:error, message} = CLI.parse_args(["--debug-log", ""])
+      assert message =~ "--debug-log requires a non-empty path argument"
+    end
+
+    test "-D with empty string returns error" do
+      assert {:error, message} = CLI.parse_args(["-D", ""])
+      assert message =~ "-D requires a non-empty path argument"
+    end
+
+    test "-D without a following argument returns error" do
+      assert {:error, message} = CLI.parse_args(["-D"])
+      assert message =~ "-D requires a path argument"
+    end
+
+    test "--debug-log flag appears in help output" do
+      assert {:error, message} = CLI.parse_args(["--help"])
+      assert message =~ "--debug-log"
+      assert message =~ "-D"
+    end
+
     test "--headless sets headless flag" do
       assert {:open, nil, %{headless: true}} = CLI.parse_args(["--headless"])
     end
@@ -181,11 +237,12 @@ defmodule Minga.CLITest do
       assert message =~ "unknown flag: --unknown"
     end
 
-    test "usage text includes --editor, --no-context, --config, and --minimal" do
+    test "usage text includes --editor, --no-context, --config, --debug-log, and --minimal" do
       assert {:error, message} = CLI.parse_args(["--help"])
       assert message =~ "--editor"
       assert message =~ "--no-context"
       assert message =~ "--config"
+      assert message =~ "--debug-log"
       assert message =~ "--minimal"
     end
 
@@ -251,6 +308,25 @@ defmodule Minga.CLITest do
       assert %{view_mode: :auto, config_file: "/tmp/test_config.exs"} = CLI.startup_flags()
     after
       Application.delete_env(:minga, :cli_startup_flags)
+    end
+
+    test "main stores debug_log path in application env" do
+      path =
+        Path.join(System.tmp_dir!(), "minga_cli_debug_#{System.unique_integer([:positive])}.log")
+
+      Application.delete_env(:minga, :cli_startup_flags)
+
+      CLI.main(["--debug-log", path])
+
+      assert %{debug_log: ^path} = CLI.startup_flags()
+      assert Application.get_env(:minga, :debug_log_path) == path
+    after
+      if pid = Process.whereis(Minga.DebugLog) do
+        assert :ok = Minga.DebugLog.stop(pid)
+      end
+
+      Application.delete_env(:minga, :cli_startup_flags)
+      Application.delete_env(:minga, :debug_log_path)
     end
   end
 

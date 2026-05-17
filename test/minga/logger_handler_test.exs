@@ -1,13 +1,21 @@
 defmodule Minga.LoggerHandlerTest do
+  # async: false because Logger handler tests mutate the global Logger/EventBus routing state and shared ETS buffer.
   use ExUnit.Case, async: false
 
   alias Minga.Buffer
+  alias Minga.Events
+  alias Minga.Events.LogMessageEvent
   alias Minga.LoggerHandler
 
   @buffer_table :minga_log_buffer
 
   setup do
     LoggerHandler.ensure_buffer_table()
+
+    if Process.whereis(Minga.EventBus) == nil do
+      start_supervised!(Minga.Events.child_spec(name: Minga.EventBus))
+    end
+
     :ets.delete_all_objects(@buffer_table)
     :ok
   end
@@ -53,6 +61,23 @@ defmodule Minga.LoggerHandlerTest do
       )
 
       assert_messages_buffer_contains(tag)
+    end
+
+    test "reports critical logger events as error severity" do
+      Events.subscribe(:log_message)
+
+      on_exit(fn -> Events.unsubscribe(:log_message) end)
+
+      for level <- [:critical, :alert, :emergency] do
+        tag = "logger-handler-#{level}-#{System.unique_integer([:positive])}"
+
+        LoggerHandler.log(%{level: level, msg: {:string, tag}, meta: %{}}, %{})
+
+        assert_receive {:minga_event, :log_message, %LogMessageEvent{text: text, level: :error}},
+                       500
+
+        assert text =~ tag
+      end
     end
   end
 
