@@ -13,7 +13,22 @@ defmodule MingaEditor.Input.PopupTest do
   alias Minga.Popup.Rule
 
   defp fake_pid do
-    spawn(fn -> Process.sleep(:infinity) end)
+    spawn(fn -> fake_pid_loop() end)
+  end
+
+  defp fake_pid_loop do
+    receive do
+      {:"$gen_call", from, :cursor} ->
+        GenServer.reply(from, {0, 0})
+        fake_pid_loop()
+
+      {:"$gen_call", from, {:move_to, _pos}} ->
+        GenServer.reply(from, :ok)
+        fake_pid_loop()
+
+      _ ->
+        fake_pid_loop()
+    end
   end
 
   defp build_state_with_popup(opts \\ []) do
@@ -32,7 +47,7 @@ defmodule MingaEditor.Input.PopupTest do
 
     vim = %VimState{VimState.new() | mode: mode}
 
-    %EditorState{
+    state = %EditorState{
       port_manager: nil,
       workspace: %MingaEditor.Workspace.State{
         viewport: Viewport.new(24, 80),
@@ -41,11 +56,17 @@ defmodule MingaEditor.Input.PopupTest do
         windows: %Windows{
           tree: {:split, :horizontal, {:leaf, 1}, {:leaf, 2}, 16},
           map: %{1 => main_window, 2 => popup_window},
-          active: if(focus_popup, do: 2, else: 1),
+          active: 1,
           next_id: 3
         }
       }
     }
+
+    if focus_popup do
+      EditorState.focus_window(state, 2)
+    else
+      state
+    end
   end
 
   defp build_state_no_popup do

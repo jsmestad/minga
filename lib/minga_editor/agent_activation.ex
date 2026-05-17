@@ -104,18 +104,15 @@ defmodule MingaEditor.AgentActivation do
   @spec set_agent_chat_window_content(EditorState.t(), pid()) :: EditorState.t()
   defp set_agent_chat_window_content(state, session) do
     active_id = state.workspace.windows.active
-    active_win = Map.get(state.workspace.windows.map, active_id)
 
-    if active_win do
-      updated_win = %{active_win | content: Content.agent_chat(session)}
-      new_map = Map.put(state.workspace.windows.map, active_id, updated_win)
+    EditorState.update_workspace(state, fn ws ->
+      windows =
+        Windows.update(ws.windows, active_id, fn active_win ->
+          %{active_win | content: Content.agent_chat(session)}
+        end)
 
-      EditorState.update_workspace(state, fn ws ->
-        WorkspaceState.set_windows(ws, Windows.set_map(ws.windows, new_map))
-      end)
-    else
-      state
-    end
+      WorkspaceState.set_windows(ws, windows)
+    end)
   end
 
   @spec focus_prompt(EditorState.t()) :: EditorState.t()

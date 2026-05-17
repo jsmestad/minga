@@ -6,6 +6,7 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Windows
+  alias MingaEditor.UI.Popup.Active, as: PopupActive
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
@@ -24,6 +25,14 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
     receive do
       {:"$gen_call", from, :display_name} ->
         GenServer.reply(from, "[test]")
+        fake_pid_loop()
+
+      {:"$gen_call", from, :cursor} ->
+        GenServer.reply(from, {0, 0})
+        fake_pid_loop()
+
+      {:"$gen_call", from, {:move_to, _pos}} ->
+        GenServer.reply(from, :ok)
         fake_pid_loop()
 
       _ ->
@@ -165,10 +174,37 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
 
       # Focus is on the popup
       assert with_popup.workspace.windows.active == 2
+      assert with_popup.workspace.buffers.active == popup_buf
 
       # Close restores focus to window 1
       restored = Lifecycle.close_popup(with_popup, 2)
       assert restored.workspace.windows.active == 1
+      assert restored.workspace.buffers.active == state.workspace.buffers.active
+    end
+
+    test "falls back to a remaining editor window when previous_active is gone", %{
+      state: state,
+      popup_buf: popup_buf
+    } do
+      rule = Rule.new("*Warnings*", focus: true)
+      popup_window = Window.new(3, popup_buf, 24, 80)
+      popup_window = %{popup_window | popup_meta: PopupActive.new(rule, 3, 2)}
+
+      {:ok, tree} = WindowTree.split(WindowTree.new(1), 1, :vertical, 3)
+
+      state =
+        put_in(state.workspace.windows, %Windows{
+          tree: tree,
+          map: %{1 => state.workspace.windows.map[1], 3 => popup_window},
+          active: 3,
+          next_id: 4
+        })
+
+      restored = Lifecycle.close_popup(state, 3)
+
+      assert restored.workspace.windows.active == 1
+      assert restored.workspace.buffers.active == state.workspace.buffers.active
+      refute Map.has_key?(restored.workspace.windows.map, 3)
     end
 
     test "is a no-op for non-popup windows", %{state: state, table: _t} do

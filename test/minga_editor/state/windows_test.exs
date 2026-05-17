@@ -65,6 +65,67 @@ defmodule MingaEditor.State.WindowsTest do
     end
   end
 
+  # ── container API ─────────────────────────────────────────────────────────────
+
+  describe "allocate_id/1" do
+    test "returns the next id and bumps the allocator" do
+      ws = new_windows()
+
+      assert {2, updated} = Windows.allocate_id(ws)
+      assert updated.next_id == 3
+    end
+  end
+
+  describe "add_window/2" do
+    test "inserts the window by id" do
+      ws = new_windows()
+      window = Window.new(2, self(), 24, 80)
+
+      updated = Windows.add_window(ws, window)
+
+      assert Windows.fetch(updated, 2) == {:ok, window}
+    end
+  end
+
+  describe "remove_window/2" do
+    test "removes the window from the map and tree" do
+      ws = split_windows()
+
+      assert {:ok, updated} = Windows.remove_window(ws, 2)
+      assert Windows.fetch(updated, 2) == :error
+      assert updated.tree == {:leaf, 1}
+    end
+
+    test "returns error when closing the last window" do
+      assert Windows.remove_window(new_windows(), 1) == :error
+    end
+  end
+
+  describe "delete_window/2" do
+    test "removes a window from the map without changing the tree" do
+      ws = split_windows()
+
+      updated = Windows.delete_window(ws, 2)
+
+      assert Windows.fetch(updated, 2) == :error
+      assert updated.tree == ws.tree
+    end
+  end
+
+  describe "find_by_content/2" do
+    test "returns the first matching window" do
+      ws = split_windows()
+
+      assert {2, %Window{id: 2}} = Windows.find_by_content(ws, fn window -> window.id == 2 end)
+    end
+
+    test "returns nil when no window matches" do
+      ws = split_windows()
+
+      assert Windows.find_by_content(ws, fn window -> window.id == 99 end) == nil
+    end
+  end
+
   # ── update/3 ─────────────────────────────────────────────────────────────────
 
   describe "update/3" do

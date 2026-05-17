@@ -432,36 +432,37 @@ defmodule MingaEditor.Commands.Movement do
   defp split_window(state, direction) do
     ws = state.workspace.windows
     active_id = ws.active
-    new_id = ws.next_id
+    {new_id, ws} = Windows.allocate_id(ws)
 
     case WindowTree.split(ws.tree, active_id, direction, new_id) do
-      {:ok, new_tree} -> apply_split(state, new_tree, active_id, new_id)
+      {:ok, new_tree} -> apply_split(state, ws, new_tree, active_id, new_id)
       :error -> state
     end
   end
 
-  @spec apply_split(state(), WindowTree.t(), Window.id(), Window.id()) :: state()
-  defp apply_split(state, new_tree, active_id, new_id) do
-    active_window = Map.fetch!(state.workspace.windows.map, active_id)
-    cursor = Buffer.cursor(active_window.buffer)
+  @spec apply_split(state(), Windows.t(), WindowTree.t(), Window.id(), Window.id()) :: state()
+  defp apply_split(state, ws, new_tree, active_id, new_id) do
+    case Windows.fetch(ws, active_id) do
+      {:ok, active_window} ->
+        cursor = Buffer.cursor(active_window.buffer)
 
-    # New window gets a copy of the current cursor position
-    new_window = Window.new(new_id, active_window.buffer, 24, 80, cursor)
+        # New window gets a copy of the current cursor position
+        new_window = Window.new(new_id, active_window.buffer, 24, 80, cursor)
 
-    # Also snapshot the current cursor into the active window
-    state = EditorState.update_window(state, active_id, &%{&1 | cursor: cursor})
+        # Also snapshot the current cursor into the active window
+        new_windows =
+          ws
+          |> Windows.update(active_id, &%{&1 | cursor: cursor})
+          |> Windows.set_tree(new_tree)
+          |> Windows.add_window(new_window)
 
-    ws = state.workspace.windows
+        state = EditorState.update_workspace(state, &WorkspaceState.set_windows(&1, new_windows))
 
-    new_windows =
-      ws
-      |> Windows.set_tree(new_tree)
-      |> Windows.set_map(Map.put(ws.map, new_id, new_window))
-      |> Windows.set_next_id(new_id + 1)
+        resize_windows_to_layout(state)
 
-    state = EditorState.update_workspace(state, &WorkspaceState.set_windows(&1, new_windows))
-
-    resize_windows_to_layout(state)
+      :error ->
+        state
+    end
   end
 
   @spec resize_windows_to_layout(state()) :: state()
@@ -523,34 +524,42 @@ defmodule MingaEditor.Commands.Movement do
   defp close_window(state) do
     ws = state.workspace.windows
 
-    case WindowTree.close(ws.tree, ws.active) do
-      {:ok, new_tree} ->
-        old_id = ws.active
-        remaining = WindowTree.leaves(new_tree)
-        new_active = hd(remaining)
-        new_active_window = Map.fetch!(ws.map, new_active)
-
-        # Restore the surviving window's cursor into the buffer
-        Buffer.move_to(new_active_window.buffer, new_active_window.cursor)
-
-        new_windows =
-          ws
-          |> Windows.set_tree(new_tree)
-          |> Windows.set_map(Map.delete(ws.map, old_id))
-          |> Windows.set_active(new_active)
-
-        new_buffers =
-          Buffers.set_active_override(state.workspace.buffers, new_active_window.buffer)
-
-        EditorState.update_workspace(state, fn workspace ->
-          workspace
-          |> WorkspaceState.set_windows(new_windows)
-          |> WorkspaceState.set_buffers(new_buffers)
-        end)
+    case Windows.remove_window(ws, ws.active) do
+      {:ok, removed_windows} ->
+        focus_remaining_window(state, removed_windows)
 
       :error ->
         EditorState.set_status(state, "Cannot close the last window")
     end
+  end
+
+  @spec focus_remaining_window(state(), Windows.t()) :: state()
+  defp focus_remaining_window(state, removed_windows) do
+    remaining = WindowTree.leaves(removed_windows.tree)
+    new_active = hd(remaining)
+
+    case Windows.fetch(removed_windows, new_active) do
+      {:ok, new_active_window} ->
+        apply_remaining_window_focus(state, removed_windows, new_active, new_active_window)
+
+      :error ->
+        state
+    end
+  end
+
+  @spec apply_remaining_window_focus(state(), Windows.t(), Window.id(), Window.t()) :: state()
+  defp apply_remaining_window_focus(state, removed_windows, new_active, new_active_window) do
+    # Restore the surviving window's cursor into the buffer
+    Buffer.move_to(new_active_window.buffer, new_active_window.cursor)
+
+    new_windows = Windows.set_active(removed_windows, new_active)
+    new_buffers = Buffers.set_active_override(state.workspace.buffers, new_active_window.buffer)
+
+    EditorState.update_workspace(state, fn workspace ->
+      workspace
+      |> WorkspaceState.set_windows(new_windows)
+      |> WorkspaceState.set_buffers(new_buffers)
+    end)
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────
