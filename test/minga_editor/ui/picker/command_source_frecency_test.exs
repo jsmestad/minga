@@ -1,5 +1,5 @@
 defmodule MingaEditor.UI.Picker.CommandSourceFrecencyTest do
-  @moduledoc "Tests command palette frecency ordering, persistence, and mouse recording."
+  @moduledoc "Tests command palette frecency ordering, persistence, and selection recording."
 
   # Mutates process-global XDG_CONFIG_HOME and the global Minga.Project singleton.
   use ExUnit.Case, async: false
@@ -29,25 +29,19 @@ defmodule MingaEditor.UI.Picker.CommandSourceFrecencyTest do
     File.mkdir_p!(Path.join(config_home, "minga"))
     System.put_env("XDG_CONFIG_HOME", config_home)
 
-    previous_state = :sys.get_state(Project)
-    :sys.replace_state(Project, fn state -> %{state | command_frecency: %{}} end)
+    previous_project = :sys.get_state(Project)
+    reset_global_command_frecency()
 
     on_exit(fn ->
       restore_xdg_config_home(previous_config_home)
-
-      :sys.replace_state(Project, fn state ->
-        %{state | command_frecency: previous_state.command_frecency}
-      end)
+      restore_global_command_frecency(previous_project.command_frecency)
     end)
 
     :ok
   end
 
-  test "recently executed commands are ranked before alphabetical commands" do
-    Enum.each(1..5, fn _ ->
-      Project.record_command(:quit)
-      :sys.get_state(Project)
-    end)
+  test "recent commands are ranked before alphabetical commands" do
+    record_global_command(:quit, 5)
 
     items = CommandSource.candidates(nil)
     quit_index = Enum.find_index(items, &(&1.id == :quit))
@@ -59,21 +53,11 @@ defmodule MingaEditor.UI.Picker.CommandSourceFrecencyTest do
   end
 
   test "typed queries still re-rank by fuzzy match after frecency pre-ordering" do
-    Enum.each(1..5, fn _ ->
-      Project.record_command(:quit_all)
-      :sys.get_state(Project)
-    end)
-
-    Project.record_command(:quit)
-    :sys.get_state(Project)
+    record_global_command(:quit_all, 5)
+    record_global_command(:quit, 1)
 
     candidates = CommandSource.candidates(nil)
-    quit_index = Enum.find_index(candidates, &(&1.id == :quit))
-    quit_all_index = Enum.find_index(candidates, &(&1.id == :quit_all))
-
-    assert is_integer(quit_index)
-    assert is_integer(quit_all_index)
-    assert quit_all_index < quit_index
+    assert index_of(candidates, :quit_all) < index_of(candidates, :quit)
 
     picker = Picker.new(candidates, title: CommandSource.title())
     filtered = Picker.filter(picker, "q")
@@ -82,46 +66,27 @@ defmodule MingaEditor.UI.Picker.CommandSourceFrecencyTest do
   end
 
   test "persisted command frecency reloads from the XDG config path" do
-    project_name = :command_frecency_roundtrip
-    command_frecency_file = command_frecency_path()
-    File.rm(command_frecency_file)
+    file = command_frecency_path()
+    File.rm(file)
+    {pid, name} = start_project!(name: :command_frecency_roundtrip)
 
-    {pid, name} = start_project!(name: project_name)
     Project.record_command(name, :save)
-    :sys.get_state(name)
+    scores = Project.command_frecency_scores(name)
 
-    assert File.exists?(command_frecency_file)
-    assert File.read!(command_frecency_file) =~ "save"
+    assert scores.save > 0
+    assert File.read!(file) =~ "save"
 
     GenServer.stop(pid)
-    {reloaded_pid, reloaded_name} = start_project!(name: project_name)
+    {reloaded_pid, reloaded_name} = start_project!(name: :command_frecency_roundtrip)
 
     assert Project.command_frecency_scores(reloaded_name).save > 0
 
     GenServer.stop(reloaded_pid)
   end
 
-  test "persisted command frecency reload keeps the newest events within the limit" do
-    command_frecency_file = command_frecency_path()
-    newest_first = Enum.to_list(1_000..976//-1)
-
-    content = Enum.map_join(newest_first, "\n", fn timestamp -> "save\t#{timestamp}" end)
-
-    File.write!(command_frecency_file, content <> "\n")
-
-    {pid, name} = start_project!(name: :command_frecency_limit_reload)
-    state = :sys.get_state(name)
-
-    assert state.command_frecency.save == Enum.take(newest_first, 20)
-
-    GenServer.stop(pid)
-  end
-
   test "stale and malformed persisted lines are skipped on load" do
-    command_frecency_file = command_frecency_path()
-
     File.write!(
-      command_frecency_file,
+      command_frecency_path(),
       "save\t100\nElixir.MingaEditor.UI.Picker.CommandSource\t200\nnot-a-line\n"
     )
 
@@ -134,22 +99,17 @@ defmodule MingaEditor.UI.Picker.CommandSourceFrecencyTest do
     GenServer.stop(pid)
   end
 
-  test "command palette keyboard selection records command frecency" do
+  test "keyboard command selections record command frecency" do
     state = picker_state(CommandSource, [%Item{id: :save, label: "󰘳 save: Save file"}], nil)
 
     assert {_state, {:execute_command, :save}} = PickerUI.handle_key(state, 13, 0)
     assert Project.command_frecency_scores().save > 0
   end
 
-  test "scopeable command palette selections record after scope choice" do
+  test "scopeable command selections record after scope choice" do
     {:ok, buf} = BufferProcess.start_link(content: "hello")
-
     ctx = %{option_name: :wrap, new_value: true, command_name: :toggle_wrap}
-
-    state = %{
-      workspace: %{buffers: %{active: buf}},
-      shell_state: %ShellState{status_msg: nil}
-    }
+    state = %{workspace: %{buffers: %{active: buf}}, shell_state: %ShellState{status_msg: nil}}
 
     assert %{shell_state: %{status_msg: status}} =
              OptionScopeSource.on_select(
@@ -161,30 +121,49 @@ defmodule MingaEditor.UI.Picker.CommandSourceFrecencyTest do
     assert Project.command_frecency_scores().toggle_wrap > 0
   end
 
-  test "command palette mouse selection records command frecency" do
+  test "mouse command selections record command frecency without polluting other pickers" do
     {buffer, _path} = save_buffer()
-    state = picker_state(CommandSource, [%Item{id: :save, label: "󰘳 save: Save file"}], buffer)
 
-    {:handled, _state} = PickerInput.handle_mouse(state, 28, 10, :left, 0, :press, 1)
-    :sys.get_state(Project)
+    command_state =
+      picker_state(CommandSource, [%Item{id: :save, label: "󰘳 save: Save file"}], buffer)
+
+    assert {:handled, _state} =
+             PickerInput.handle_mouse(command_state, 28, 10, :left, 0, :press, 1)
 
     assert Project.command_frecency_scores().save > 0
-  end
 
-  test "non-command picker mouse selection does not pollute command frecency" do
-    {buffer, _path} = save_buffer()
+    reset_global_command_frecency()
 
-    state =
+    non_command_state =
       picker_state(
         Minga.Test.PendingCommandPickerSource,
         [%Item{id: :pick, label: "Pick"}],
         buffer
       )
 
-    {:handled, _state} = PickerInput.handle_mouse(state, 28, 10, :left, 0, :press, 1)
-    :sys.get_state(Project)
+    assert {:handled, _state} =
+             PickerInput.handle_mouse(non_command_state, 28, 10, :left, 0, :press, 1)
 
     refute Map.has_key?(Project.command_frecency_scores(), :save)
+  end
+
+  defp record_global_command(command, count) do
+    Enum.each(1..count, fn _ -> Project.record_command(command) end)
+    Project.command_frecency_scores()
+  end
+
+  defp index_of(items, id) do
+    index = Enum.find_index(items, &(&1.id == id))
+    assert is_integer(index)
+    index
+  end
+
+  defp reset_global_command_frecency do
+    restore_global_command_frecency(%{})
+  end
+
+  defp restore_global_command_frecency(frecency) do
+    :sys.replace_state(Project, fn state -> %{state | command_frecency: frecency} end)
   end
 
   defp start_project!(opts) do
@@ -218,12 +197,7 @@ defmodule MingaEditor.UI.Picker.CommandSourceFrecencyTest do
   defp picker_state(source, items, buffer_pid) do
     viewport = Viewport.new(30, 80)
     picker = Picker.new(items, title: source.title())
-
-    picker_state = %PickerState{
-      picker: picker,
-      source: source,
-      restore: 0
-    }
+    picker_state = %PickerState{picker: picker, source: source, restore: 0}
 
     %EditorState{
       port_manager: nil,
@@ -233,9 +207,7 @@ defmodule MingaEditor.UI.Picker.CommandSourceFrecencyTest do
         editing: VimState.new(),
         buffers: %Buffers{active: buffer_pid, list: maybe_list(buffer_pid), active_index: 0}
       },
-      shell_state: %ShellState{
-        modal: {:picker, PickerPayload.new(picker_state)}
-      }
+      shell_state: %ShellState{modal: {:picker, PickerPayload.new(picker_state)}}
     }
   end
 

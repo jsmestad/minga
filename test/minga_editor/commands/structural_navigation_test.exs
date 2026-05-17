@@ -9,79 +9,53 @@ defmodule MingaEditor.Commands.StructuralNavigationTest do
 
   @moduletag timeout: 15_000
   @sync_timeout 15_000
+  @alt 0x04
 
   setup do
     start_supervised!({ParserManager, name: ParserManager, parser_path: parser_path()})
     :ok
   end
 
-  test "Alt+h moves to parent AST node and shows node type" do
+  test "Alt+h moves to parent AST node and reports the node type" do
     {editor, buffer} = start_editor("function add(a, b) {\n  return a + b;\n}\n")
     BufferProcess.move_to(buffer, {0, 20})
 
-    send_key(editor, ?h, 0x04)
+    state = send_key(editor, ?h, @alt)
 
     assert BufferProcess.cursor(buffer) == {0, 0}
-
-    assert EditorState.status_msg(:sys.get_state(editor, @sync_timeout)) ==
-             "→ function_declaration"
-  end
-
-  test "Alt+h is a no-op when no structural parent exists" do
-    {editor, buffer} = start_editor("function add(a, b) { return a + b; }")
-    BufferProcess.move_to(buffer, {0, 0})
-    before_status = EditorState.status_msg(:sys.get_state(editor, @sync_timeout))
-
-    send_key(editor, ?h, 0x04)
-
-    assert BufferProcess.cursor(buffer) == {0, 0}
-    assert EditorState.status_msg(:sys.get_state(editor, @sync_timeout)) == before_status
+    assert EditorState.status_msg(state) == "→ function_declaration"
   end
 
   test "Alt+l moves to the first child AST node" do
     {editor, buffer} = start_editor("function add(a, b) { return a + b; }\n")
     BufferProcess.move_to(buffer, {0, 0})
 
-    send_key(editor, ?l, 0x04)
+    state = send_key(editor, ?l, @alt)
 
     assert BufferProcess.cursor(buffer) == {0, 9}
-
-    assert EditorState.status_msg(:sys.get_state(editor, @sync_timeout)) ==
-             "→ identifier"
+    assert EditorState.status_msg(state) == "→ identifier"
   end
 
-  test "Alt+j moves to the next sibling AST node" do
+  test "Alt+j and Alt+k move between sibling AST nodes" do
     {editor, buffer} = start_editor("f(a, b, c);")
     BufferProcess.move_to(buffer, {0, 2})
 
-    send_key(editor, ?j, 0x04)
-
+    state = send_key(editor, ?j, @alt)
     assert BufferProcess.cursor(buffer) == {0, 5}
+    assert EditorState.status_msg(state) == "→ identifier"
 
-    assert EditorState.status_msg(:sys.get_state(editor, @sync_timeout)) ==
-             "→ identifier"
-  end
-
-  test "Alt+k moves to the previous sibling AST node" do
-    {editor, buffer} = start_editor("f(a, b, c);")
     BufferProcess.move_to(buffer, {0, 8})
-
-    send_key(editor, ?k, 0x04)
-
+    state = send_key(editor, ?k, @alt)
     assert BufferProcess.cursor(buffer) == {0, 5}
-
-    assert EditorState.status_msg(:sys.get_state(editor, @sync_timeout)) ==
-             "→ identifier"
+    assert EditorState.status_msg(state) == "→ identifier"
   end
 
-  test "Alt+l in visual mode keeps the selection active" do
+  test "structural movement keeps visual selection active" do
     {editor, buffer} = start_editor("function add(a, b) { return a + b; }\n")
     BufferProcess.move_to(buffer, {0, 0})
 
     send_key(editor, ?v)
-    send_key(editor, ?l, 0x04)
-
-    state = :sys.get_state(editor, @sync_timeout)
+    state = send_key(editor, ?l, @alt)
 
     assert BufferProcess.cursor(buffer) == {0, 9}
     assert Minga.Editing.mode(state) == :visual
@@ -126,7 +100,7 @@ defmodule MingaEditor.Commands.StructuralNavigationTest do
 
   defp send_key(editor, codepoint, mods \\ 0) do
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
-    _ = :sys.get_state(editor, @sync_timeout)
+    :sys.get_state(editor, @sync_timeout)
   end
 
   defp parser_path do

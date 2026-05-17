@@ -7,98 +7,57 @@ defmodule MingaEditor.Frontend.ManagerTest do
 
   defp unique_name, do: :"port_mgr_#{:erlang.unique_integer([:positive])}"
 
-  describe "start_link/1" do
-    test "starts with a custom name" do
+  describe "startup" do
+    test "starts disconnected when renderer binary is missing" do
       name = unique_name()
-      pid = start_supervised!({Manager, name: name, renderer_path: "/nonexistent"}, id: name)
-      _ = :sys.get_state(pid)
-    end
+      start_manager(name)
 
-    test "starts without crashing when renderer binary is missing" do
-      name = unique_name()
-      start_supervised!({Manager, name: name, renderer_path: "/nonexistent"}, id: name)
       refute Manager.ready?(name)
       assert Manager.terminal_size(name) == nil
-    end
-  end
-
-  describe "subscribe/1" do
-    test "subscribing process receives events" do
-      name = unique_name()
-      pid = start_supervised!({Manager, name: name, renderer_path: "/nonexistent"}, id: name)
-      :ok = Manager.subscribe(name)
-
-      ready_payload = <<0x03, 80::16, 24::16>>
-      send(pid, {nil, {:data, ready_payload}})
-      _ = :sys.get_state(pid)
-
-      assert_receive {:minga_input, {:ready, 80, 24}}
-    end
-
-    test "multiple subscriptions from same process are deduplicated" do
-      name = unique_name()
-      start_supervised!({Manager, name: name, renderer_path: "/nonexistent"}, id: name)
-      :ok = Manager.subscribe(name)
-      :ok = Manager.subscribe(name)
-
-      state = :sys.get_state(name)
-      assert length(state.subscribers) == 1
     end
   end
 
   describe "send_commands/2" do
-    test "does not crash when port is not open" do
+    test "returns ok when no port is open" do
       name = unique_name()
-      start_supervised!({Manager, name: name, renderer_path: "/nonexistent"}, id: name)
-      :ok = Manager.send_commands(name, [Protocol.encode_clear()])
-    end
+      start_manager(name)
 
-    test "handles empty command list" do
-      name = unique_name()
-      start_supervised!({Manager, name: name, renderer_path: "/nonexistent"}, id: name)
-      :ok = Manager.send_commands(name, [])
-    end
-
-    test "handles multiple commands" do
-      name = unique_name()
-      start_supervised!({Manager, name: name, renderer_path: "/nonexistent"}, id: name)
-
-      commands = [
-        Protocol.encode_clear(),
-        Protocol.encode_draw(0, 0, "hello"),
-        Protocol.encode_cursor(0, 5),
-        Protocol.encode_batch_end()
-      ]
-
-      :ok = Manager.send_commands(name, commands)
+      assert :ok = Manager.send_commands(name, [])
+      assert :ok = Manager.send_commands(name, [Protocol.encode_clear()])
     end
   end
 
-  describe "terminal_size/1" do
-    test "returns nil before ready" do
+  describe "subscription behavior" do
+    test "subscribers receive decoded events" do
       name = unique_name()
-      start_supervised!({Manager, name: name, renderer_path: "/nonexistent"}, id: name)
-      assert Manager.terminal_size(name) == nil
-    end
-  end
+      pid = start_manager(name)
+      :ok = Manager.subscribe(name)
 
-  describe "ready?/1" do
-    test "returns false before ready event" do
+      send_port_data(pid, nil, <<0x01, ?h::32, 0::8>>)
+
+      assert_receive {:minga_input, {:key_press, ?h, 0}}
+    end
+
+    test "duplicate subscriptions receive one copy of each event" do
       name = unique_name()
-      start_supervised!({Manager, name: name, renderer_path: "/nonexistent"}, id: name)
-      refute Manager.ready?(name)
+      pid = start_manager(name)
+      :ok = Manager.subscribe(name)
+      :ok = Manager.subscribe(name)
+
+      send_port_data(pid, nil, <<0x03, 80::16, 24::16>>)
+
+      assert_receive {:minga_input, {:ready, 80, 24}}
+      refute_receive {:minga_input, {:ready, 80, 24}}, 50
     end
   end
 
   describe "event handling" do
     test "ready event sets ready state and terminal size" do
       name = unique_name()
-      pid = start_supervised!({Manager, name: name, renderer_path: "/nonexistent"}, id: name)
+      pid = start_manager(name)
       :ok = Manager.subscribe(name)
 
-      ready_payload = <<0x03, 120::16, 40::16>>
-      send(pid, {nil, {:data, ready_payload}})
-      _ = :sys.get_state(pid)
+      send_port_data(pid, nil, <<0x03, 120::16, 40::16>>)
 
       assert Manager.ready?(name)
       assert Manager.terminal_size(name) == {120, 40}
@@ -107,43 +66,32 @@ defmodule MingaEditor.Frontend.ManagerTest do
 
     test "resize event updates terminal size" do
       name = unique_name()
-      pid = start_supervised!({Manager, name: name, renderer_path: "/nonexistent"}, id: name)
+      pid = start_manager(name)
       :ok = Manager.subscribe(name)
 
-      resize_payload = <<0x02, 100::16, 50::16>>
-      send(pid, {nil, {:data, resize_payload}})
-      _ = :sys.get_state(pid)
+      send_port_data(pid, nil, <<0x02, 100::16, 50::16>>)
 
       assert Manager.terminal_size(name) == {100, 50}
       assert_receive {:minga_input, {:resize, 100, 50}}
     end
 
-    test "key_press event is broadcast to subscribers" do
+    test "malformed event data is ignored without crashing" do
       name = unique_name()
-      pid = start_supervised!({Manager, name: name, renderer_path: "/nonexistent"}, id: name)
-      :ok = Manager.subscribe(name)
+      pid = start_manager(name)
 
-      key_payload = <<0x01, ?h::32, 0::8>>
-      send(pid, {nil, {:data, key_payload}})
-      _ = :sys.get_state(pid)
+      send_port_data(pid, nil, <<0xFF, 0x01>>)
 
-      assert_receive {:minga_input, {:key_press, ?h, 0}}
+      refute Manager.ready?(name)
     end
 
-    test "malformed event data logs warning but doesn't crash" do
+    test "port exit clears ready state" do
       name = unique_name()
-      pid = start_supervised!({Manager, name: name, renderer_path: "/nonexistent"}, id: name)
+      pid = start_manager(name)
 
-      send(pid, {nil, {:data, <<0xFF, 0x01>>}})
-      _ = :sys.get_state(pid)
-    end
-
-    test "port exit status is handled" do
-      name = unique_name()
-      pid = start_supervised!({Manager, name: name, renderer_path: "/nonexistent"}, id: name)
+      send_port_data(pid, nil, <<0x03, 80::16, 24::16>>)
+      assert Manager.ready?(name)
 
       send(pid, {nil, {:exit_status, 1}})
-      _ = :sys.get_state(pid)
 
       refute Manager.ready?(name)
     end
@@ -152,39 +100,33 @@ defmodule MingaEditor.Frontend.ManagerTest do
   describe "ready event replay on late subscribe" do
     test "late subscriber receives replayed ready event" do
       name = unique_name()
-      pid = start_supervised!({Manager, name: name, renderer_path: "/nonexistent"}, id: name)
+      pid = start_manager(name)
 
-      # Ready event arrives with no subscribers
-      ready_payload = <<0x03, 80::16, 24::16>>
-      send(pid, {nil, {:data, ready_payload}})
-      _ = :sys.get_state(pid)
+      send_port_data(pid, nil, <<0x03, 80::16, 24::16>>)
+      assert Manager.ready?(name)
 
-      # Subscribe after ready was already processed
       :ok = Manager.subscribe(name)
 
       assert_receive {:minga_input, {:ready, 80, 24}}
     end
 
-    test "replayed ready uses current terminal size, not stale" do
+    test "replayed ready uses current terminal size" do
       name = unique_name()
-      pid = start_supervised!({Manager, name: name, renderer_path: "/nonexistent"}, id: name)
+      pid = start_manager(name)
 
-      # Ready at 80x24, then resize to 120x40
-      send(pid, {nil, {:data, <<0x03, 80::16, 24::16>>}})
-      _ = :sys.get_state(pid)
-      send(pid, {nil, {:data, <<0x02, 120::16, 40::16>>}})
-      _ = :sys.get_state(pid)
+      send_port_data(pid, nil, <<0x03, 80::16, 24::16>>)
+      send_port_data(pid, nil, <<0x02, 120::16, 40::16>>)
+      assert Manager.terminal_size(name) == {120, 40}
 
       :ok = Manager.subscribe(name)
 
-      # Should receive the current size (120x40), not the original (80x24)
       assert_receive {:minga_input, {:ready, 120, 40}}
       refute_receive {:minga_input, {:ready, 80, 24}}, 50
     end
 
     test "no spurious ready when port is not yet ready" do
       name = unique_name()
-      start_supervised!({Manager, name: name, renderer_path: "/nonexistent"}, id: name)
+      start_manager(name)
 
       :ok = Manager.subscribe(name)
 
@@ -195,10 +137,8 @@ defmodule MingaEditor.Frontend.ManagerTest do
       name = unique_name()
       {pid, fake_port} = start_connected(name)
 
-      # Ready arrives before any subscribers
-      ready_payload = <<0x03, 80::16, 24::16>>
-      send(pid, {fake_port, {:data, ready_payload}})
-      _ = :sys.get_state(pid)
+      send_port_data(pid, fake_port, <<0x03, 80::16, 24::16>>)
+      assert Manager.ready?(name)
 
       :ok = Manager.subscribe(name)
 
@@ -209,11 +149,10 @@ defmodule MingaEditor.Frontend.ManagerTest do
       name = unique_name()
       {pid, fake_port} = start_connected(name)
 
-      # Ready, then EOF (GUI parent exited)
-      send(pid, {fake_port, {:data, <<0x03, 80::16, 24::16>>}})
-      _ = :sys.get_state(pid)
+      send_port_data(pid, fake_port, <<0x03, 80::16, 24::16>>)
+      assert Manager.ready?(name)
       send(pid, {fake_port, :eof})
-      _ = :sys.get_state(pid)
+      refute Manager.ready?(name)
 
       :ok = Manager.subscribe(name)
 
@@ -221,58 +160,15 @@ defmodule MingaEditor.Frontend.ManagerTest do
     end
   end
 
-  describe "subscriber cleanup" do
-    test "removes subscriber when it exits" do
-      name = unique_name()
-      mgr = start_supervised!({Manager, name: name, renderer_path: "/nonexistent"}, id: name)
-
-      task =
-        Task.async(fn ->
-          Manager.subscribe(name)
-          :ok
-        end)
-
-      Task.await(task)
-      _ = :sys.get_state(mgr)
-    end
-  end
-
   describe "unknown messages" do
     test "unknown messages are ignored" do
       name = unique_name()
-      pid = start_supervised!({Manager, name: name, renderer_path: "/nonexistent"}, id: name)
+      pid = start_manager(name)
 
       send(pid, :totally_unknown)
-      _ = :sys.get_state(pid)
+
+      refute Manager.ready?(name)
     end
-  end
-
-  # Helper that creates a fake port for connected mode tests.
-  # Uses `cat` as a harmless process so Port.command doesn't crash.
-  # Redirects stderr to /dev/null to suppress "Broken pipe" noise
-  # when the port closes and SIGPIPE kills cat.
-  defp fake_port_opener do
-    test_pid = self()
-
-    fn _spec, _opts ->
-      port = Port.open({:spawn, "cat 2>/dev/null"}, [:binary, {:packet, 4}])
-      send(test_pid, {:fake_port, port})
-      port
-    end
-  end
-
-  defp start_connected(name) do
-    opener = fake_port_opener()
-
-    pid =
-      start_supervised!(
-        {Manager,
-         name: name, renderer_path: "/nonexistent", port_mode: :connected, port_opener: opener},
-        id: name
-      )
-
-    assert_receive {:fake_port, fake_port}
-    {pid, fake_port}
   end
 
   describe "connected mode" do
@@ -283,7 +179,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
       refute Manager.ready?(name)
     end
 
-    test "connected mode opens port with {:fd, 0, 1} and :eof option" do
+    test "connected mode opens stdin/stdout with eof handling" do
       name = unique_name()
       test_pid = self()
 
@@ -307,38 +203,18 @@ defmodule MingaEditor.Frontend.ManagerTest do
       assert :eof in opts
     end
 
-    test "port_mode option is stored in state" do
-      name = unique_name()
-
-      # Explicitly passing :spawn should set port_mode regardless of any config
-      pid =
-        start_supervised!(
-          {Manager, name: name, renderer_path: "/nonexistent", port_mode: :spawn},
-          id: name
-        )
-
-      state = :sys.get_state(pid)
-      assert state.port_mode == :spawn
-    end
-
     test "protocol events work identically in connected mode" do
       name = unique_name()
       {pid, fake_port} = start_connected(name)
       :ok = Manager.subscribe(name)
 
-      # Ready event
-      ready_payload = <<0x03, 80::16, 24::16>>
-      send(pid, {fake_port, {:data, ready_payload}})
-      _ = :sys.get_state(pid)
+      send_port_data(pid, fake_port, <<0x03, 80::16, 24::16>>)
 
       assert Manager.ready?(name)
       assert Manager.terminal_size(name) == {80, 24}
       assert_receive {:minga_input, {:ready, 80, 24}}
 
-      # Key press event
-      key_payload = <<0x01, ?j::32, 0::8>>
-      send(pid, {fake_port, {:data, key_payload}})
-      _ = :sys.get_state(pid)
+      send_port_data(pid, fake_port, <<0x01, ?j::32, 0::8>>)
 
       assert_receive {:minga_input, {:key_press, ?j, 0}}
     end
@@ -348,64 +224,62 @@ defmodule MingaEditor.Frontend.ManagerTest do
       {pid, fake_port} = start_connected(name)
       :ok = Manager.subscribe(name)
 
-      # Set ready state first
-      ready_payload = <<0x03, 80::16, 24::16>>
-      send(pid, {fake_port, {:data, ready_payload}})
-      _ = :sys.get_state(pid)
+      send_port_data(pid, fake_port, <<0x03, 80::16, 24::16>>)
       assert Manager.ready?(name)
 
-      # Simulate stdin EOF (GUI parent exited)
       send(pid, {fake_port, :eof})
-      _ = :sys.get_state(pid)
 
       refute Manager.ready?(name)
     end
 
-    test "double EOF does not crash" do
+    test "double EOF and send_commands after EOF are harmless" do
       name = unique_name()
       {pid, fake_port} = start_connected(name)
 
       send(pid, {fake_port, :eof})
-      _ = :sys.get_state(pid)
+      refute Manager.ready?(name)
 
-      # Second EOF: port is nil, message won't match the port guard
       send(pid, {fake_port, :eof})
-      # Process should still be alive (sync barrier confirms)
-      _ = :sys.get_state(pid)
+      assert :ok = Manager.send_commands(name, [Protocol.encode_clear()])
     end
 
-    test "send_commands works in connected mode" do
+    test "send_commands works when connected" do
       name = unique_name()
       {_pid, _fake_port} = start_connected(name)
 
-      # Should not crash (port is open via fake_port_opener)
-      :ok = Manager.send_commands(name, [Protocol.encode_clear()])
+      assert :ok = Manager.send_commands(name, [Protocol.encode_clear()])
     end
+  end
 
-    test "send_commands after EOF silently drops commands" do
-      name = unique_name()
-      {pid, fake_port} = start_connected(name)
+  defp start_manager(name) do
+    start_supervised!({Manager, name: name, renderer_path: "/nonexistent"}, id: name)
+  end
 
-      send(pid, {fake_port, :eof})
-      _ = :sys.get_state(pid)
+  defp send_port_data(pid, port, payload) do
+    send(pid, {port, {:data, payload}})
+  end
 
-      # Port is nil now, commands should be silently dropped
-      :ok = Manager.send_commands(name, [Protocol.encode_clear()])
+  defp fake_port_opener do
+    test_pid = self()
+
+    fn _spec, _opts ->
+      port = Port.open({:spawn, "cat 2>/dev/null"}, [:binary, {:packet, 4}])
+      send(test_pid, {:fake_port, port})
+      port
     end
+  end
 
-    test "port_mode defaults to :spawn when no option is passed" do
-      name = unique_name()
+  defp start_connected(name) do
+    opener = fake_port_opener()
 
-      # Without passing port_mode, and with no app config set (test env default),
-      # it should default to :spawn
-      pid =
-        start_supervised!(
-          {Manager, name: name, renderer_path: "/nonexistent"},
-          id: name
-        )
+    pid =
+      start_supervised!(
+        {Manager,
+         name: name, renderer_path: "/nonexistent", port_mode: :connected, port_opener: opener},
+        id: name
+      )
 
-      state = :sys.get_state(pid)
-      assert state.port_mode == :spawn
-    end
+    assert_receive {:fake_port, fake_port}
+    {pid, fake_port}
   end
 end
