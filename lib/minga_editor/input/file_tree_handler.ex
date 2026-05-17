@@ -17,6 +17,7 @@ defmodule MingaEditor.Input.FileTreeHandler do
   alias MingaEditor.FocusTree
   alias MingaEditor.FocusTree.Node, as: FocusNode
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.Input
   alias Minga.Keymap
@@ -173,7 +174,7 @@ defmodule MingaEditor.Input.FileTreeHandler do
        )
        when is_pid(buf) do
     real_active = state.workspace.buffers.active
-    state = put_in(state.workspace.buffers.active, buf)
+    state = set_active_buffer_override(state, buf)
     state = MingaEditor.do_handle_key(state, cp, mods)
 
     state =
@@ -183,7 +184,7 @@ defmodule MingaEditor.Input.FileTreeHandler do
         state
       end
 
-    state = put_in(state.workspace.buffers.active, real_active)
+    state = set_active_buffer_override(state, real_active)
 
     if state.workspace.file_tree.tree == nil do
       state
@@ -198,10 +199,7 @@ defmodule MingaEditor.Input.FileTreeHandler do
   defp sync_tree_cursor_from_buffer(%{workspace: %{file_tree: %{tree: tree}}} = state, buf) do
     {cursor_line, _col} = Buffer.cursor(buf)
 
-    put_in(
-      state.workspace.file_tree,
-      FileTreeState.replace_tree(state.workspace.file_tree, FileTree.select(tree, cursor_line))
-    )
+    update_file_tree(state, &FileTreeState.set_tree(&1, FileTree.select(tree, cursor_line)))
   end
 
   # ── File tree mouse helpers ────────────────────────────────────────────
@@ -219,12 +217,9 @@ defmodule MingaEditor.Input.FileTreeHandler do
        when button in [:wheel_up, :wheel_down] do
     delta = if button == :wheel_down, do: 3, else: -3
 
-    put_in(
-      state.workspace.file_tree,
-      FileTreeState.replace_tree(
-        state.workspace.file_tree,
-        FileTree.select(tree, tree.cursor + delta)
-      )
+    update_file_tree(
+      state,
+      &FileTreeState.set_tree(&1, FileTree.select(tree, tree.cursor + delta))
     )
   end
 
@@ -245,13 +240,7 @@ defmodule MingaEditor.Input.FileTreeHandler do
 
         entry ->
           state =
-            put_in(
-              state.workspace.file_tree,
-              FileTreeState.replace_tree(
-                state.workspace.file_tree,
-                FileTree.select(tree, entry_idx)
-              )
-            )
+            update_file_tree(state, &FileTreeState.set_tree(&1, FileTree.select(tree, entry_idx)))
 
           handle_tree_entry_click(state, entry, click_count)
       end
@@ -301,7 +290,7 @@ defmodule MingaEditor.Input.FileTreeHandler do
       # Use String.slice/3 (start, length) to avoid negative index issues.
       new_text = String.slice(editing.text, 0, max(String.length(editing.text) - 1, 0))
       ft = FileTreeState.update_editing_text(state.workspace.file_tree, new_text)
-      put_in(state.workspace.file_tree, ft)
+      set_file_tree(state, ft)
     end
   end
 
@@ -311,11 +300,31 @@ defmodule MingaEditor.Input.FileTreeHandler do
     editing = state.workspace.file_tree.editing
     new_text = editing.text <> char
     ft = FileTreeState.update_editing_text(state.workspace.file_tree, new_text)
-    put_in(state.workspace.file_tree, ft)
+    set_file_tree(state, ft)
   end
 
   # All other keys (with modifiers, control chars): swallow them
   defp handle_inline_edit_key(state, _cp, _mods), do: state
 
   # ── Shared helpers ──────────────────────────────────────────────────────
+
+  @spec set_active_buffer_override(EditorState.t(), pid() | nil) :: EditorState.t()
+  defp set_active_buffer_override(state, pid) do
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.set_buffers(ws, Buffers.set_active_override(ws.buffers, pid))
+    end)
+  end
+
+  @spec set_file_tree(EditorState.t(), FileTreeState.t()) :: EditorState.t()
+  defp set_file_tree(state, file_tree) do
+    EditorState.update_workspace(state, &WorkspaceState.set_file_tree(&1, file_tree))
+  end
+
+  @spec update_file_tree(EditorState.t(), (FileTreeState.t() -> FileTreeState.t())) ::
+          EditorState.t()
+  defp update_file_tree(state, fun) when is_function(fun, 1) do
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.set_file_tree(ws, fun.(ws.file_tree))
+    end)
+  end
 end

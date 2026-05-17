@@ -190,6 +190,11 @@ defmodule MingaEditor.State.FileTree do
     %{ft | editing: nil}
   end
 
+  @doc "Replaces the tree data."
+  @spec set_tree(t(), FileTree.t() | nil) :: t()
+  def set_tree(%__MODULE__{} = ft, nil), do: %{ft | tree: nil, tree_status: :hidden}
+  def set_tree(%__MODULE__{} = ft, %FileTree{} = tree), do: replace_tree(ft, tree)
+
   @spec ensure_tree_entries(FileTree.t()) :: FileTree.t()
   defp ensure_tree_entries(%FileTree{} = tree), do: FileTree.ensure_entries(tree)
 

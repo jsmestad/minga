@@ -30,6 +30,7 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
   alias Minga.Buffer
   alias MingaEditor.Commands
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias Minga.Keymap
   alias Minga.Keymap.Bindings
 
@@ -130,12 +131,12 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
 
   @spec put_space_leader_pending(EditorState.t(), boolean()) :: EditorState.t()
   defp put_space_leader_pending(state, value) do
-    %{state | shell_state: %{state.shell_state | space_leader_pending: value}}
+    EditorState.update_shell_state(state, &ShellState.set_space_leader_pending(&1, value))
   end
 
   @spec put_space_leader_timer(EditorState.t(), reference() | nil) :: EditorState.t()
   defp put_space_leader_timer(state, timer) do
-    %{state | shell_state: %{state.shell_state | space_leader_timer: timer}}
+    EditorState.update_shell_state(state, &ShellState.set_space_leader_timer(&1, timer))
   end
 
   @spec cancel_timer(EditorState.t()) :: EditorState.t()
@@ -143,7 +144,7 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
 
   defp cancel_timer(%{shell_state: %{space_leader_timer: timer}} = state) do
     Process.cancel_timer(timer)
-    %{state | shell_state: %{state.shell_state | space_leader_timer: nil}}
+    put_space_leader_timer(state, nil)
   end
 
   @spec retract_space(EditorState.t()) :: EditorState.t()

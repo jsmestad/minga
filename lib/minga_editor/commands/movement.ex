@@ -14,6 +14,9 @@ defmodule MingaEditor.Commands.Movement do
   alias MingaEditor.FoldMap
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Buffers
+  alias MingaEditor.State.FileTree, as: FileTreeState
+  alias MingaEditor.State.Windows
   alias MingaEditor.VimState
   alias MingaEditor.Viewport
   alias MingaEditor.Workspace.State, as: WorkspaceState
@@ -450,13 +453,13 @@ defmodule MingaEditor.Commands.Movement do
 
     ws = state.workspace.windows
 
-    state =
-      put_in(state.workspace.windows, %{
-        ws
-        | tree: new_tree,
-          map: Map.put(ws.map, new_id, new_window),
-          next_id: new_id + 1
-      })
+    new_windows =
+      ws
+      |> Windows.set_tree(new_tree)
+      |> Windows.set_map(Map.put(ws.map, new_id, new_window))
+      |> Windows.set_next_id(new_id + 1)
+
+    state = EditorState.update_workspace(state, &WorkspaceState.set_windows(&1, new_windows))
 
     resize_windows_to_layout(state)
   end
@@ -480,7 +483,7 @@ defmodule MingaEditor.Commands.Movement do
   # When file tree is focused, navigating right unfocuses the tree
   # and restores the scope based on the active window's content type.
   defp navigate_window(%{workspace: %{file_tree: %{focused: true}}} = state, :right) do
-    state = put_in(state.workspace.file_tree.focused, false)
+    state = update_file_tree(state, &FileTreeState.unfocus/1)
     scope = EditorState.scope_for_active_window(state)
     EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, scope))
   end
@@ -508,7 +511,7 @@ defmodule MingaEditor.Commands.Movement do
          %{workspace: %{file_tree: %{tree: %Minga.Project.FileTree{}}}} = state,
          :left
        ) do
-    state = put_in(state.workspace.file_tree.focused, true)
+    state = update_file_tree(state, &FileTreeState.focus/1)
     EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :file_tree))
   end
 
@@ -530,19 +533,20 @@ defmodule MingaEditor.Commands.Movement do
         # Restore the surviving window's cursor into the buffer
         Buffer.move_to(new_active_window.buffer, new_active_window.cursor)
 
-        %{
-          state
-          | workspace: %{
-              state.workspace
-              | windows: %{
-                  ws
-                  | tree: new_tree,
-                    map: Map.delete(ws.map, old_id),
-                    active: new_active
-                },
-                buffers: %{state.workspace.buffers | active: new_active_window.buffer}
-            }
-        }
+        new_windows =
+          ws
+          |> Windows.set_tree(new_tree)
+          |> Windows.set_map(Map.delete(ws.map, old_id))
+          |> Windows.set_active(new_active)
+
+        new_buffers =
+          Buffers.set_active_override(state.workspace.buffers, new_active_window.buffer)
+
+        EditorState.update_workspace(state, fn workspace ->
+          workspace
+          |> WorkspaceState.set_windows(new_windows)
+          |> WorkspaceState.set_buffers(new_buffers)
+        end)
 
       :error ->
         EditorState.set_status(state, "Cannot close the last window")
@@ -550,6 +554,13 @@ defmodule MingaEditor.Commands.Movement do
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────
+
+  @spec update_file_tree(state(), (FileTreeState.t() -> FileTreeState.t())) :: state()
+  defp update_file_tree(state, fun) when is_function(fun, 1) do
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.set_file_tree(ws, fun.(ws.file_tree))
+    end)
+  end
 
   @spec visual_line_move(GenServer.server(), state(), :up | :down) :: state()
   defp visual_line_move(buf, state, direction) do

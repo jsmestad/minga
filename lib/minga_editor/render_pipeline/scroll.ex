@@ -20,6 +20,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.Renderer.SearchHighlight
   alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
   alias MingaEditor.Window
 
@@ -169,10 +170,17 @@ defmodule MingaEditor.RenderPipeline.Scroll do
 
         scroll = %{scroll | window: updated_window}
         new_map = Map.put(st.workspace.windows.map, win_id, updated_window)
-        st = %{st | workspace: %{st.workspace | windows: %{st.workspace.windows | map: new_map}}}
+
+        windows = Windows.set_map(st.workspace.windows, new_map)
+        st = %{st | workspace: put_windows(st.workspace, windows)}
+
         {Map.put(acc, win_id, scroll), st}
     end
   end
+
+  @spec put_windows(map(), Windows.t()) :: map()
+  defp put_windows(workspace, windows) when is_map(workspace),
+    do: Map.put(workspace, :windows, windows)
 
   # Wraps scroll_window with a catch for dead buffer processes. Returns
   # {:ok, scroll} on success, :skip if the buffer died mid-call.

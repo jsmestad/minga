@@ -18,6 +18,8 @@ defmodule MingaEditor.Commands.Help do
   alias MingaEditor.KeystrokeHistory
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Buffers
+  alias MingaEditor.Workspace.State, as: WorkspaceState
   alias Minga.Mode
 
   @type state :: EditorState.t()
@@ -905,7 +907,13 @@ defmodule MingaEditor.Commands.Help do
   @spec start_help_buffer(state()) :: {state(), pid()}
   defp start_help_buffer(state) do
     {:ok, pid} = start_special_buffer("*Help*")
-    {put_in(state.workspace.buffers.help, pid), pid}
+
+    state =
+      EditorState.update_workspace(state, fn ws ->
+        WorkspaceState.set_buffers(ws, Buffers.set_help(ws.buffers, pid))
+      end)
+
+    {state, pid}
   end
 
   @spec start_named_buffer(state(), String.t()) :: {state(), pid()}

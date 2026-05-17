@@ -309,18 +309,19 @@ defmodule MingaEditor.Mouse do
         state
       end
 
-    %{
-      state
-      | workspace: %{
-          state.workspace
-          | mouse: MouseState.set_hover(state.workspace.mouse, row, col, backend: state.backend)
-        }
-    }
+    update_mouse(state, &MouseState.set_hover(&1, row, col, backend: state.backend))
   end
 
   # ── Ignore all other mouse events ──
 
   def handle(state, _row, _col, _button, _mods, _type, _cc), do: state
+
+  @spec update_mouse(state(), (MouseState.t() -> MouseState.t())) :: state()
+  defp update_mouse(state, fun) when is_function(fun, 1) do
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.set_mouse(ws, fun.(ws.mouse))
+    end)
+  end
 
   @spec handle_left_drag(
           state(),
@@ -524,13 +525,7 @@ defmodule MingaEditor.Mouse do
 
             state = EditorState.transition_mode(state, :visual, visual_state)
 
-            %{
-              state
-              | workspace: %{
-                  state.workspace
-                  | mouse: MouseState.start_drag(state.workspace.mouse, {line, word_start})
-                }
-            }
+            update_mouse(state, &MouseState.start_drag(&1, {line, word_start}))
 
           nil ->
             state
@@ -565,13 +560,7 @@ defmodule MingaEditor.Mouse do
 
         state = EditorState.transition_mode(state, :visual, visual_state)
 
-        %{
-          state
-          | workspace: %{
-              state.workspace
-              | mouse: MouseState.start_drag(state.workspace.mouse, {line, 0})
-            }
-        }
+        update_mouse(state, &MouseState.start_drag(&1, {line, 0}))
     end
   end
 
@@ -776,13 +765,7 @@ defmodule MingaEditor.Mouse do
 
     case WindowTree.separator_at(state.workspace.windows.tree, screen, row, col) do
       {:ok, {dir, sep_pos}} ->
-        %{
-          state
-          | workspace: %{
-              state.workspace
-              | mouse: MouseState.start_resize(state.workspace.mouse, dir, sep_pos)
-            }
-        }
+        update_mouse(state, &MouseState.start_resize(&1, dir, sep_pos))
 
       :error ->
         state
@@ -921,13 +904,7 @@ defmodule MingaEditor.Mouse do
         state = cancel_mode_for_mouse(state)
         state = EditorState.transition_mode(state, :normal)
 
-        %{
-          state
-          | workspace: %{
-              state.workspace
-              | mouse: MouseState.start_drag(state.workspace.mouse, {target_line, target_col})
-            }
-        }
+        update_mouse(state, &MouseState.start_drag(&1, {target_line, target_col}))
     end
   end
 

@@ -94,6 +94,9 @@ defmodule MingaEditor do
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.FileTree, as: FileTreeState
+  alias MingaEditor.State.Search, as: SearchData
+  alias MingaEditor.State.Windows
   alias MingaEditor.State.Tab.Context, as: TabContext
 
   alias MingaEditor.MinibufferData
@@ -593,27 +596,27 @@ defmodule MingaEditor do
   def handle_info({:lsp_response, ref, result}, state) do
     case Map.pop(state.workspace.lsp_pending, ref) do
       {:completion_resolve, pending} ->
-        new_state = put_in(state.workspace.lsp_pending, pending)
+        new_state = set_lsp_pending(state, pending)
         new_state = CompletionHandling.handle_resolve_response(new_state, result)
         {:noreply, Renderer.render_or_async(new_state)}
 
       {:signature_help, pending} ->
-        new_state = put_in(state.workspace.lsp_pending, pending)
+        new_state = set_lsp_pending(state, pending)
         new_state = CompletionHandling.handle_signature_help_response(new_state, result)
         {:noreply, Renderer.render_or_async(new_state)}
 
       {{:semantic_tokens, buf_pid}, pending} ->
-        new_state = put_in(state.workspace.lsp_pending, pending)
+        new_state = set_lsp_pending(state, pending)
         new_state = SemanticTokenSync.handle_response(new_state, buf_pid, result)
         {:noreply, Renderer.render_or_async(new_state)}
 
       {kind, pending} when is_atom(kind) ->
-        new_state = put_in(state.workspace.lsp_pending, pending)
+        new_state = set_lsp_pending(state, pending)
         new_state = dispatch_lsp_response(kind, new_state, result)
         {:noreply, Renderer.render_or_async(new_state)}
 
       {kind, pending} when is_tuple(kind) ->
-        new_state = put_in(state.workspace.lsp_pending, pending)
+        new_state = set_lsp_pending(state, pending)
         new_state = dispatch_lsp_response(kind, new_state, result)
         {:noreply, Renderer.render_or_async(new_state)}
 
@@ -1234,6 +1237,11 @@ defmodule MingaEditor do
 
   # ── LSP response dispatch ──────────────────────────────────────────────────
 
+  @spec set_lsp_pending(state(), %{reference() => atom() | tuple()}) :: state()
+  defp set_lsp_pending(state, pending) do
+    EditorState.update_workspace(state, &WorkspaceState.set_lsp_pending(&1, pending))
+  end
+
   # Dispatches an LSP response to the appropriate handler based on the kind atom.
   @spec dispatch_lsp_response(term(), EditorState.t(), term()) :: EditorState.t()
   defp dispatch_lsp_response(:definition, state, result),
@@ -1846,7 +1854,13 @@ defmodule MingaEditor do
   @spec do_file_tree_open(state(), pid(), String.t(), FileTree.t()) :: state()
   def do_file_tree_open(state, pid, path, tree) do
     new_state = register_buffer(state, pid, path)
-    put_in(new_state.workspace.file_tree.tree, FileTree.reveal(tree, path))
+
+    EditorState.update_workspace(new_state, fn ws ->
+      WorkspaceState.set_file_tree(
+        ws,
+        FileTreeState.set_tree(ws.file_tree, FileTree.reveal(tree, path))
+      )
+    end)
   end
 
   @spec recover_swap_entries(state(), [Minga.Session.swap_entry()]) :: state()
@@ -1984,13 +1998,10 @@ defmodule MingaEditor do
   # the user explicitly opens the buffer.
   @spec register_buffer_background(state(), pid(), String.t()) :: state()
   defp register_buffer_background(state, buffer_pid, file_path) do
-    state = %{
-      state
-      | workspace: %{
-          state.workspace
-          | buffers: Buffers.add_background(state.workspace.buffers, buffer_pid)
-        }
-    }
+    state =
+      EditorState.update_workspace(state, fn ws ->
+        WorkspaceState.set_buffers(ws, Buffers.add_background(ws.buffers, buffer_pid))
+      end)
 
     state = EditorState.monitor_buffer(state, buffer_pid)
     log_message(state, "Opened (agent): #{file_path}")
@@ -2110,8 +2121,11 @@ defmodule MingaEditor do
         state
 
       %{} ->
-        ft = MingaEditor.State.FileTree.update_editing_text(state.workspace.file_tree, text)
-        state = put_in(state.workspace.file_tree, ft)
+        ft = FileTreeState.update_editing_text(state.workspace.file_tree, text)
+
+        state =
+          EditorState.update_workspace(state, &WorkspaceState.set_file_tree(&1, ft))
+
         Commands.FileTree.confirm_editing(state)
     end
   end
@@ -2404,13 +2418,10 @@ defmodule MingaEditor do
        )
        when is_pid(buf) do
     # Set the search pattern and execute search_next/search_prev
-    state = %{
-      state
-      | workspace: %{
-          state.workspace
-          | search: %{state.workspace.search | last_pattern: text, last_direction: :forward}
-        }
-    }
+    state =
+      EditorState.update_workspace(state, fn ws ->
+        WorkspaceState.set_search(ws, SearchData.record(ws.search, text, :forward))
+      end)
 
     cmd = if direction == 1, do: :search_prev, else: :search_next
     MingaEditor.Commands.execute(state, cmd)
@@ -2428,9 +2439,14 @@ defmodule MingaEditor do
       window ->
         vp = window.viewport
         new_vp = %{vp | top: max(line, 0)}
-        new_win = %{window | viewport: new_vp}
+        new_win = MingaEditor.Window.set_viewport(window, new_vp)
         new_map = Map.put(win_map, active_win_id, new_win)
-        new_state = put_in(state.workspace.windows.map, new_map)
+
+        new_state =
+          EditorState.update_workspace(state, fn ws ->
+            WorkspaceState.set_windows(ws, Windows.set_map(ws.windows, new_map))
+          end)
+
         Renderer.render_or_async(new_state)
     end
   end
@@ -2492,7 +2508,10 @@ defmodule MingaEditor do
   defp move_tree_cursor(%{workspace: %{file_tree: %{tree: nil}}} = state, _index), do: state
 
   defp move_tree_cursor(state, index) do
-    put_in(state.workspace.file_tree.tree.cursor, index)
+    EditorState.update_workspace(state, fn ws ->
+      tree = FileTree.select(ws.file_tree.tree, index)
+      WorkspaceState.set_file_tree(ws, FileTreeState.set_tree(ws.file_tree, tree))
+    end)
   end
 
   @spec git_action(state(), (String.t() -> :ok | {:error, String.t()}), String.t()) :: state()
@@ -2770,8 +2789,7 @@ defmodule MingaEditor do
     do: state
 
   defp gui_tree_action(state, index, action) do
-    tree = %{state.workspace.file_tree.tree | cursor: index}
-    state = put_in(state.workspace.file_tree.tree, tree)
+    state = move_tree_cursor(state, index)
 
     case action do
       :click -> Commands.FileTree.open_or_toggle(state)

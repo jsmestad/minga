@@ -32,7 +32,7 @@ defmodule MingaEditor.Commands.FileTree do
 
     EditorState.update_workspace(state, fn ws ->
       ws
-      |> Map.put(:file_tree, FileTreeState.close(ws.file_tree))
+      |> WorkspaceState.set_file_tree(FileTreeState.close(ws.file_tree))
       |> WorkspaceState.set_keymap_scope(scope)
     end)
     |> Layout.invalidate()
@@ -45,7 +45,7 @@ defmodule MingaEditor.Commands.FileTree do
 
     EditorState.update_workspace(state, fn ws ->
       ws
-      |> Map.put(:file_tree, FileTreeState.close(ws.file_tree))
+      |> WorkspaceState.set_file_tree(FileTreeState.close(ws.file_tree))
       |> WorkspaceState.set_keymap_scope(scope)
     end)
     |> Layout.invalidate()
@@ -57,7 +57,7 @@ defmodule MingaEditor.Commands.FileTree do
 
     EditorState.update_workspace(state, fn ws ->
       ws
-      |> Map.put(:file_tree, FileTreeState.close(ws.file_tree))
+      |> WorkspaceState.set_file_tree(FileTreeState.close(ws.file_tree))
       |> WorkspaceState.set_keymap_scope(scope)
     end)
     |> Layout.invalidate()
@@ -66,6 +66,18 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec restore_scope(state()) :: atom()
   defp restore_scope(state), do: EditorState.scope_for_active_window(state)
+
+  @spec set_file_tree(state(), FileTreeState.t()) :: state()
+  defp set_file_tree(state, file_tree) do
+    EditorState.update_workspace(state, &WorkspaceState.set_file_tree(&1, file_tree))
+  end
+
+  @spec update_file_tree(state(), (FileTreeState.t() -> FileTreeState.t())) :: state()
+  defp update_file_tree(state, fun) when is_function(fun, 1) do
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.set_file_tree(ws, fun.(ws.file_tree))
+    end)
+  end
 
   @spec open_or_toggle(state()) :: state()
   def open_or_toggle(%{workspace: %{file_tree: %{tree: nil}}} = state), do: state
@@ -77,7 +89,7 @@ defmodule MingaEditor.Commands.FileTree do
         sync_and_update(state, new_tree)
 
       %{dir?: false, path: path} ->
-        state = put_in(state.workspace.file_tree.focused, false)
+        state = update_file_tree(state, &FileTreeState.unfocus/1)
         # Opening a file buffer always uses :editor scope (not restore_scope)
         # because the new buffer becomes the active window content.
         state = EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :editor))
@@ -146,7 +158,7 @@ defmodule MingaEditor.Commands.FileTree do
       |> FileTreeState.start_editing(index, :new_file)
       |> FileTreeState.replace_tree(tree)
 
-    state = put_in(state.workspace.file_tree, ft)
+    state = set_file_tree(state, ft)
     sync_buffer(state)
   end
 
@@ -166,7 +178,7 @@ defmodule MingaEditor.Commands.FileTree do
       |> FileTreeState.start_editing(index, :new_folder)
       |> FileTreeState.replace_tree(tree)
 
-    state = put_in(state.workspace.file_tree, ft)
+    state = set_file_tree(state, ft)
     sync_buffer(state)
   end
 
@@ -192,7 +204,7 @@ defmodule MingaEditor.Commands.FileTree do
             entry.name
           )
 
-        put_in(state.workspace.file_tree, ft)
+        set_file_tree(state, ft)
     end
   end
 
@@ -387,7 +399,7 @@ defmodule MingaEditor.Commands.FileTree do
 
   def cancel_editing(state) do
     ft = FileTreeState.cancel_editing(state.workspace.file_tree)
-    put_in(state.workspace.file_tree, ft)
+    set_file_tree(state, ft)
   end
 
   @doc """
@@ -410,7 +422,7 @@ defmodule MingaEditor.Commands.FileTree do
         state = ensure_tree_open(state)
         tree = FileTree.reveal(state.workspace.file_tree.tree, path)
         state = sync_and_update(state, tree)
-        state = put_in(state.workspace.file_tree.focused, true)
+        state = update_file_tree(state, &FileTreeState.focus/1)
 
         EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :file_tree))
         |> Layout.invalidate()
@@ -434,7 +446,7 @@ defmodule MingaEditor.Commands.FileTree do
 
     EditorState.update_workspace(state, fn ws ->
       ws
-      |> Map.put(:file_tree, FileTreeState.close(ws.file_tree))
+      |> WorkspaceState.set_file_tree(FileTreeState.close(ws.file_tree))
       |> WorkspaceState.set_keymap_scope(scope)
     end)
   end
@@ -444,7 +456,7 @@ defmodule MingaEditor.Commands.FileTree do
 
     EditorState.update_workspace(state, fn ws ->
       ws
-      |> Map.put(:file_tree, FileTreeState.close(ws.file_tree))
+      |> WorkspaceState.set_file_tree(FileTreeState.close(ws.file_tree))
       |> WorkspaceState.set_keymap_scope(scope)
     end)
   end
@@ -490,10 +502,7 @@ defmodule MingaEditor.Commands.FileTree do
             EditorState.switch_buffer(state, idx)
           end
 
-        put_in(
-          state.workspace.file_tree,
-          FileTreeState.replace_tree(state.workspace.file_tree, FileTree.reveal(tree, path))
-        )
+        update_file_tree(state, &FileTreeState.set_tree(&1, FileTree.reveal(tree, path)))
     end
   end
 
@@ -516,7 +525,7 @@ defmodule MingaEditor.Commands.FileTree do
 
     EditorState.update_workspace(state, fn ws ->
       ws
-      |> Map.put(:file_tree, FileTreeState.open(ws.file_tree, tree, buf))
+      |> WorkspaceState.set_file_tree(FileTreeState.open(ws.file_tree, tree, buf))
       |> WorkspaceState.set_keymap_scope(:file_tree)
     end)
     |> Layout.invalidate()
@@ -539,19 +548,13 @@ defmodule MingaEditor.Commands.FileTree do
     FileTreeFreshness.watch_expanded_dirs(new_tree)
     BufferSync.sync(buf, new_tree)
 
-    put_in(
-      state.workspace.file_tree,
-      FileTreeState.replace_tree(state.workspace.file_tree, new_tree)
-    )
+    update_file_tree(state, &FileTreeState.set_tree(&1, new_tree))
   end
 
   defp sync_and_update(state, new_tree) do
     FileTreeFreshness.watch_expanded_dirs(new_tree)
 
-    put_in(
-      state.workspace.file_tree,
-      FileTreeState.replace_tree(state.workspace.file_tree, new_tree)
-    )
+    update_file_tree(state, &FileTreeState.set_tree(&1, new_tree))
   end
 
   # Computes the insertion index for a new file/folder.
@@ -832,7 +835,7 @@ defmodule MingaEditor.Commands.FileTree do
   @spec clear_editing_and_refresh(state()) :: state()
   defp clear_editing_and_refresh(state) do
     ft = FileTreeState.cancel_editing(state.workspace.file_tree)
-    state = put_in(state.workspace.file_tree, ft)
+    state = set_file_tree(state, ft)
     refresh(state)
   end
 

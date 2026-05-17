@@ -8,6 +8,7 @@ defmodule MingaEditor.HighlightSync do
 
   alias Minga.Buffer
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Highlighting
   alias MingaEditor.Frontend.Protocol
   alias MingaEditor.Workspace.State, as: WorkspaceState
   alias Minga.Parser.Manager, as: ParserManager
@@ -179,17 +180,14 @@ defmodule MingaEditor.HighlightSync do
         hl2.syntax_overrides
       end
 
-    state = %{
-      state
-      | workspace: %{
-          state.workspace
-          | highlight: %{
-              hl2
-              | version: version,
-                syntax_overrides: syntax_overrides
-            }
-        }
-    }
+    state =
+      EditorState.update_workspace(state, fn ws ->
+        WorkspaceState.update_highlight(ws, fn highlight ->
+          highlight
+          |> Highlighting.set_version(version)
+          |> Highlighting.set_syntax_overrides(syntax_overrides)
+        end)
+      end)
 
     touch_buffer(state, buf_pid)
   end
@@ -271,18 +269,11 @@ defmodule MingaEditor.HighlightSync do
     )
 
     state = put_active_highlight(state, Highlight.from_theme(state.theme))
-    hl2 = state.workspace.highlight
 
-    state = %{
-      state
-      | workspace: %{
-          state.workspace
-          | highlight: %{
-              hl2
-              | version: version
-            }
-        }
-    }
+    state =
+      EditorState.update_workspace(state, fn ws ->
+        WorkspaceState.update_highlight(ws, &Highlighting.set_version(&1, version))
+      end)
 
     touch_active(state)
   end
@@ -338,14 +329,12 @@ defmodule MingaEditor.HighlightSync do
         ParserManager.close_buffer(buffer_id)
         ParserManager.unregister_buffer(buffer_id)
 
-        put_in(state.workspace.highlight, %{
-          hl
-          | buffer_ids: remaining_ids,
-            reverse_buffer_ids: Map.delete(hl.reverse_buffer_ids, buffer_id),
-            highlights: Map.delete(hl.highlights, buffer_pid),
-            last_active_at: Map.delete(hl.last_active_at, buffer_pid),
-            syntax_overrides: Map.delete(hl.syntax_overrides, buffer_pid)
-        })
+        EditorState.update_workspace(state, fn ws ->
+          WorkspaceState.update_highlight(
+            ws,
+            &Highlighting.remove_buffer(&1, buffer_pid, buffer_id, remaining_ids)
+          )
+        end)
     end
   end
 
@@ -685,28 +674,20 @@ defmodule MingaEditor.HighlightSync do
     do: state
 
   def put_active_highlight(
-        %EditorState{workspace: %{highlight: hl, buffers: %{active: buf}}} = state,
+        %EditorState{workspace: %{buffers: %{active: buf}}} = state,
         hl_data
       ) do
-    %{
-      state
-      | workspace: %{
-          state.workspace
-          | highlight: %{hl | highlights: Map.put(hl.highlights, buf, hl_data)}
-        }
-    }
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.update_highlight(ws, &Highlighting.put_highlight(&1, buf, hl_data))
+    end)
   end
 
   @doc "Stores highlight data for a specific buffer PID."
   @spec put_highlight(EditorState.t(), pid(), Highlight.t()) :: EditorState.t()
-  def put_highlight(%EditorState{workspace: %{highlight: hl}} = state, buf_pid, hl_data) do
-    %{
-      state
-      | workspace: %{
-          state.workspace
-          | highlight: %{hl | highlights: Map.put(hl.highlights, buf_pid, hl_data)}
-        }
-    }
+  def put_highlight(%EditorState{} = state, buf_pid, hl_data) do
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.update_highlight(ws, &Highlighting.put_highlight(&1, buf_pid, hl_data))
+    end)
   end
 
   # Updates the active buffer's highlight via a function.

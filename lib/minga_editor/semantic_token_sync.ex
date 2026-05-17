@@ -26,6 +26,7 @@ defmodule MingaEditor.SemanticTokenSync do
 
   alias Minga.Buffer
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Highlighting
   alias Minga.LSP.Client
   alias MingaEditor.Workspace.State, as: WorkspaceState
   alias Minga.LSP.SemanticTokens
@@ -127,7 +128,10 @@ defmodule MingaEditor.SemanticTokenSync do
       hl = %{hl | spans: List.to_tuple(merged)}
 
       highlights = Map.put(state.workspace.highlight.highlights, buf_pid, hl)
-      put_in(state.workspace.highlight.highlights, highlights)
+
+      EditorState.update_workspace(state, fn ws ->
+        WorkspaceState.update_highlight(ws, &Highlighting.set_highlights(&1, highlights))
+      end)
     end
   end
 

@@ -12,6 +12,7 @@ defmodule MingaEditor.Commands.Search do
   alias Minga.Core.Unicode
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Search, as: SearchData
   alias MingaEditor.Window
   alias MingaEditor.Workspace.State, as: WorkspaceState
   alias Minga.Mode
@@ -218,7 +219,11 @@ defmodule MingaEditor.Commands.Search do
       {:ok, matches, truncated?} ->
         msg = if truncated?, do: "Results truncated to 10,000", else: nil
 
-        state = put_in(state.workspace.search.project_results, matches)
+        state =
+          EditorState.update_workspace(state, fn ws ->
+            WorkspaceState.update_search(ws, &SearchData.set_project_results(&1, matches))
+          end)
+
         state = PickerUI.open(state, MingaEditor.UI.Picker.ProjectSearchSource)
         if msg, do: EditorState.set_status(state, msg), else: state
 
@@ -313,13 +318,10 @@ defmodule MingaEditor.Commands.Search do
     text = word_at_cursor(gb, cursor)
 
     if text != "" do
-      state = %{
-        state
-        | workspace: %{
-            state.workspace
-            | search: %{state.workspace.search | last_pattern: text, last_direction: :forward}
-          }
-      }
+      state =
+        EditorState.update_workspace(state, fn ws ->
+          WorkspaceState.set_search(ws, SearchData.record(ws.search, text, :forward))
+        end)
 
       if state.backend in [:gui, :native_gui] and state.port_manager do
         MingaEditor.Frontend.clipboard_write(state.port_manager, text, :find)
@@ -408,18 +410,14 @@ defmodule MingaEditor.Commands.Search do
 
   @spec put_in_search(state(), atom(), term()) :: state()
   defp put_in_search(state, :last_pattern, value) do
-    %{
-      state
-      | workspace: %{
-          state.workspace
-          | search: MingaEditor.State.Search.record_pattern(state.workspace.search, value)
-        }
-    }
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.update_search(ws, &SearchData.record_pattern(&1, value))
+    end)
   end
 
   defp put_in_search(state, :last_direction, value) do
     EditorState.update_workspace(state, fn ws ->
-      WorkspaceState.update_search(ws, fn s -> %{s | last_direction: value} end)
+      WorkspaceState.update_search(ws, &SearchData.set_last_direction(&1, value))
     end)
   end
 

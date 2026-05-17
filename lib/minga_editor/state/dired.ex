@@ -54,4 +54,8 @@ defmodule MingaEditor.State.Dired do
   def exit_confirmation(%__MODULE__{} = state) do
     %{state | confirming?: false, pending_ops: []}
   end
+
+  @doc "Sets the pending keymap prefix node."
+  @spec set_pending_prefix(t(), Minga.Keymap.Bindings.node_t() | nil) :: t()
+  def set_pending_prefix(%__MODULE__{} = state, prefix), do: %{state | pending_prefix: prefix}
 end

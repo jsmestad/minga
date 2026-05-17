@@ -138,10 +138,7 @@ defmodule MingaEditor.LspActions do
 
             ref = Client.request(client, "textDocument/references", params)
 
-            put_in(
-              state.workspace.lsp_pending,
-              Map.put(state.workspace.lsp_pending, ref, :references)
-            )
+            put_lsp_pending(state, ref, :references)
         end
     end
   end
@@ -212,7 +209,7 @@ defmodule MingaEditor.LspActions do
   def clear_document_highlights(state) do
     state
     |> cancel_highlight_timer()
-    |> then(fn s -> put_in(s.workspace.document_highlights, nil) end)
+    |> then(&set_document_highlights(&1, nil))
   end
 
   @spec cancel_highlight_timer(state()) :: state()
@@ -259,10 +256,7 @@ defmodule MingaEditor.LspActions do
 
             ref = Client.request(client, "textDocument/codeAction", params)
 
-            put_in(
-              state.workspace.lsp_pending,
-              Map.put(state.workspace.lsp_pending, ref, :code_action)
-            )
+            put_lsp_pending(state, ref, :code_action)
         end
     end
   end
@@ -315,10 +309,7 @@ defmodule MingaEditor.LspActions do
 
             ref = Client.request(client, "textDocument/rename", params)
 
-            put_in(
-              state.workspace.lsp_pending,
-              Map.put(state.workspace.lsp_pending, ref, :rename)
-            )
+            put_lsp_pending(state, ref, :rename)
         end
     end
   end
@@ -386,10 +377,7 @@ defmodule MingaEditor.LspActions do
 
             ref = Client.request(client, "textDocument/documentSymbol", params)
 
-            put_in(
-              state.workspace.lsp_pending,
-              Map.put(state.workspace.lsp_pending, ref, :document_symbol)
-            )
+            put_lsp_pending(state, ref, :document_symbol)
         end
     end
   end
@@ -411,10 +399,7 @@ defmodule MingaEditor.LspActions do
         params = %{"query" => query}
         ref = Client.request(client, "workspace/symbol", params)
 
-        put_in(
-          state.workspace.lsp_pending,
-          Map.put(state.workspace.lsp_pending, ref, :workspace_symbol)
-        )
+        put_lsp_pending(state, ref, :workspace_symbol)
     end
   end
 
@@ -449,10 +434,7 @@ defmodule MingaEditor.LspActions do
 
             ref = Client.request(client, "textDocument/selectionRange", params)
 
-            put_in(
-              state.workspace.lsp_pending,
-              Map.put(state.workspace.lsp_pending, ref, :selection_range)
-            )
+            put_lsp_pending(state, ref, :selection_range)
         end
     end
   end
@@ -578,10 +560,7 @@ defmodule MingaEditor.LspActions do
             params = %{"textDocument" => %{"uri" => uri}}
             ref = Client.request(client, "textDocument/codeLens", params)
 
-            put_in(
-              state.workspace.lsp_pending,
-              Map.put(state.workspace.lsp_pending, ref, :code_lens)
-            )
+            put_lsp_pending(state, ref, :code_lens)
         end
     end
   end
@@ -620,10 +599,7 @@ defmodule MingaEditor.LspActions do
 
             ref = Client.request(client, "textDocument/inlayHint", params)
 
-            put_in(
-              state.workspace.lsp_pending,
-              Map.put(state.workspace.lsp_pending, ref, :inlay_hint)
-            )
+            put_lsp_pending(state, ref, :inlay_hint)
         end
     end
   end
@@ -1406,8 +1382,23 @@ defmodule MingaEditor.LspActions do
         }
 
         ref = Client.request(client, method, params)
-        put_in(state.workspace.lsp_pending, Map.put(state.workspace.lsp_pending, ref, kind))
+
+        EditorState.update_workspace(state, fn ws ->
+          WorkspaceState.set_lsp_pending(ws, Map.put(ws.lsp_pending, ref, kind))
+        end)
     end
+  end
+
+  @spec put_lsp_pending(state(), reference(), atom() | tuple()) :: state()
+  defp put_lsp_pending(state, ref, kind) do
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.set_lsp_pending(ws, Map.put(ws.lsp_pending, ref, kind))
+    end)
+  end
+
+  @spec set_document_highlights(state(), [DocumentHighlight.t()] | nil) :: state()
+  defp set_document_highlights(state, highlights) do
+    EditorState.update_workspace(state, &WorkspaceState.set_document_highlights(&1, highlights))
   end
 
   @spec parse_single_location(map()) ::
@@ -1713,10 +1704,7 @@ defmodule MingaEditor.LspActions do
         Enum.reduce(unresolved, state, fn lens, st ->
           ref = Client.request(client, "codeLens/resolve", lens)
 
-          put_in(
-            st.workspace.lsp_pending,
-            Map.put(st.workspace.lsp_pending, ref, :code_lens_resolve)
-          )
+          put_lsp_pending(st, ref, :code_lens_resolve)
         end)
     end
   end
@@ -1937,10 +1925,7 @@ defmodule MingaEditor.LspActions do
         params = %{"item" => item}
         ref = Client.request(client, "callHierarchy/incomingCalls", params)
 
-        put_in(
-          state.workspace.lsp_pending,
-          Map.put(state.workspace.lsp_pending, ref, :incoming_calls)
-        )
+        put_lsp_pending(state, ref, :incoming_calls)
     end
   end
 
@@ -1956,10 +1941,7 @@ defmodule MingaEditor.LspActions do
         params = %{"item" => item}
         ref = Client.request(client, "callHierarchy/outgoingCalls", params)
 
-        put_in(
-          state.workspace.lsp_pending,
-          Map.put(state.workspace.lsp_pending, ref, :outgoing_calls)
-        )
+        put_lsp_pending(state, ref, :outgoing_calls)
     end
   end
 
