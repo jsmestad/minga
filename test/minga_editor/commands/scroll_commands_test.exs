@@ -56,6 +56,20 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
       assert cursor_line >= 1
     end
 
+    test "wrapped scroll keeps the viewport on a visual row" do
+      content = String.duplicate("a", 200)
+      {editor, buffer} = start_editor(content, width: 40, height: 10)
+      BufferProcess.set_option(buffer, :wrap, true)
+
+      send_key(editor, ?e, @ctrl)
+
+      win = active_window(editor)
+      assert win.viewport.visual_row_offset == 1
+      {cursor_line, cursor_col} = BufferProcess.cursor(buffer)
+      assert cursor_line == 0
+      assert cursor_col > 0
+    end
+
     test "does not scroll past end of file" do
       {editor, buffer} = start_editor("a\nb\nc")
 
@@ -104,6 +118,24 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
 
       win_after = active_window(editor)
       assert win_after.viewport.top == 4
+    end
+
+    test "wrapped scroll up keeps the viewport on a visual row" do
+      content = String.duplicate("a", 200)
+      {editor, buffer} = start_editor(content, width: 40, height: 10)
+      BufferProcess.set_option(buffer, :wrap, true)
+
+      send_key(editor, ?e, @ctrl)
+      {_, cursor_col_down} = BufferProcess.cursor(buffer)
+      assert cursor_col_down > 0
+
+      send_key(editor, ?y, @ctrl)
+
+      win = active_window(editor)
+      assert win.viewport.visual_row_offset == 0
+      {cursor_line, cursor_col_up} = BufferProcess.cursor(buffer)
+      assert cursor_line == 0
+      assert cursor_col_up == 0
     end
   end
 

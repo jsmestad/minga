@@ -10,6 +10,7 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.Scroll
+  alias MingaEditor.Window
   alias MingaEditor.State, as: EditorState
 
   import MingaEditor.RenderPipeline.TestHelpers
@@ -56,6 +57,27 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       assert wf.modeline == %{}
     end
 
+    test "wraps production content when visible_line_map is present" do
+      state = base_state(content: String.duplicate("a", 120) <> "\n" <> String.duplicate("b", 120) <> "\nvisible")
+      buffer = state.workspace.buffers.active
+      Minga.Buffer.Process.set_option(buffer, :wrap, true)
+
+      win_id = state.workspace.windows.active
+      window = Map.fetch!(state.workspace.windows.map, win_id)
+      window = Window.set_fold_ranges(window, [Minga.Editing.Fold.Range.new!(1, 2)])
+      window = Window.fold_at(window, 1)
+      state = put_in(state.workspace.windows.map[win_id], window)
+
+      {scrolls, state, _layout} = run_through_scroll(state)
+      [{_scroll_win_id, scroll}] = Map.to_list(scrolls)
+      assert scroll.visible_line_map != nil
+
+      {[wf], _cursor, _state} = Content.build_content(state, scrolls)
+
+      assert map_size(wf.lines) > 2
+      assert Enum.any?(Map.keys(wf.lines), &(&1 > 1))
+    end
+
     test "updates window tracking fields after render" do
       state = base_state()
       {scrolls, state, _layout} = run_through_scroll(state)
@@ -68,6 +90,7 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       assert window.render_cache.dirty_lines == %{}
       # Tracking fields should be set (no longer sentinels)
       assert window.render_cache.last_viewport_top >= 0
+      assert window.render_cache.last_viewport_cache_key >= 0
       assert window.render_cache.last_gutter_w >= 0
       assert window.render_cache.last_line_count > 0
       assert window.render_cache.last_buf_version >= 0

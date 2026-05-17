@@ -33,9 +33,9 @@ defmodule Minga.Core.WrapMap do
   """
   @type visual_row :: %{
           required(:text) => String.t(),
+          required(:source_text) => String.t(),
           required(:byte_offset) => non_neg_integer(),
-          optional(:source_text) => String.t(),
-          optional(:indent_width) => non_neg_integer()
+          required(:indent_width) => non_neg_integer()
         }
 
   @typedoc """
@@ -98,7 +98,7 @@ defmodule Minga.Core.WrapMap do
   @spec wrap_line(String.t(), pos_integer(), boolean(), boolean(), WidthOracle.t()) ::
           wrap_entry()
   defp wrap_line("", _width, _breakindent, _linebreak, _oracle) do
-    [%{text: "", byte_offset: 0}]
+    [%{text: "", source_text: "", byte_offset: 0, indent_width: 0}]
   end
 
   defp wrap_line(text, width, breakindent, linebreak, oracle) when width > 0 do

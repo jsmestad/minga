@@ -89,8 +89,14 @@ defmodule MingaEditor.Frontend.Capabilities do
 
   @doc "Returns the width oracle matching the frontend text rendering mode."
   @spec width_oracle(t()) :: WidthOracle.t()
-  def width_oracle(%__MODULE__{text_rendering: :proportional}), do: %Measured{}
-  def width_oracle(%__MODULE__{}), do: %Monospace{}
+  def width_oracle(%__MODULE__{} = caps), do: width_oracle(caps, nil)
+
+  @doc "Returns the width oracle for the frontend, optionally using an owned measurement cache."
+  @spec width_oracle(t(), map() | nil) :: WidthOracle.t()
+  def width_oracle(%__MODULE__{text_rendering: :proportional}, cache) when is_map(cache),
+    do: Measured.new(cache)
+
+  def width_oracle(%__MODULE__{}, _cache), do: %Monospace{}
 
   # ── Decoders ──
 

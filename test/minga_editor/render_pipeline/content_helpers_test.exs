@@ -7,6 +7,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
   alias MingaEditor.UI.Theme
   alias MingaEditor.Renderer.Context
   alias MingaEditor.RenderPipeline.ContentHelpers
+  alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.UI.Highlight
   alias MingaEditor.Viewport
   alias MingaEditor.Window
@@ -143,6 +144,33 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
 
       refute ContentHelpers.context_fingerprint(ctx, true) ==
                ContentHelpers.context_fingerprint(%{ctx | line_number_style: :relative}, true)
+    end
+  end
+
+  describe "build_render_ctx/3" do
+    test "threads the supplied width oracle into the render context" do
+      state = TestHelpers.base_state()
+      window = state.workspace.windows.map[state.workspace.windows.active]
+      oracle = %Minga.Core.WidthOracle.Measured{cache: %{"hello" => 2}}
+
+      {ctx, _state} =
+        ContentHelpers.build_render_ctx(state, window, %{
+          viewport: window.viewport,
+          cursor: {0, 0},
+          lines: ["hello"],
+          first_line: 0,
+          preview_matches: [],
+          gutter_w: 4,
+          content_w: 10,
+          has_sign_column: true,
+          is_active: true,
+          is_gui: false,
+          wrap_on: false,
+          line_number_style: :absolute,
+          width_oracle: oracle
+        })
+
+      assert ctx.width_oracle == oracle
     end
   end
 

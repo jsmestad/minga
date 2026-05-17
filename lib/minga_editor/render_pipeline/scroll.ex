@@ -156,6 +156,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
           window
           |> Window.set_viewport(scroll.viewport)
           |> Window.detect_invalidation(
+            scroll.viewport.top,
             Viewport.cache_key(scroll.viewport),
             scroll.gutter_w,
             scroll.snapshot.line_count,
@@ -317,7 +318,8 @@ defmodule MingaEditor.RenderPipeline.Scroll do
         visible_rows: visible_rows,
         scroll_margin: scroll_margin,
         fetch_count: fetch_count,
-        oracle: width_oracle
+        oracle: width_oracle,
+        visible_line_map: visible_line_map
       })
 
     # Horizontal scroll (disabled when wrapping).
@@ -395,6 +397,19 @@ defmodule MingaEditor.RenderPipeline.Scroll do
          %{
            wrap_on: true,
            is_active: true,
+           visible_line_map: visible_line_map
+         } = params
+       )
+       when not is_nil(visible_line_map) do
+    text = cursor_line_text(params.lines, params.cursor_line, params.first_line)
+    {params.viewport, params.first_line, params.snapshot, params.lines, text,
+     Unicode.display_col(text, params.cursor_byte_col)}
+  end
+
+  defp maybe_adjust_wrapped_viewport(
+         %{
+           wrap_on: true,
+           is_active: true,
            first_line: first_line,
            lines: lines,
            cursor_line: cursor_line
@@ -426,7 +441,12 @@ defmodule MingaEditor.RenderPipeline.Scroll do
        ) do
     wrap_map = compute_wrap_map(buf, lines, content_w, oracle)
     cursor_idx = cursor_line - first_line
-    cursor_entry = Enum.at(wrap_map, cursor_idx, [%{byte_offset: 0, text: ""}])
+
+    cursor_entry =
+      Enum.at(wrap_map, cursor_idx, [
+        %{byte_offset: 0, text: "", source_text: "", indent_width: 0}
+      ])
+
     cursor_visual_row = visual_row_index(cursor_entry, cursor_byte_col)
     rows_before_cursor = wrap_map |> Enum.take(cursor_idx) |> WrapMap.visual_row_count()
     cursor_abs = rows_before_cursor + cursor_visual_row
@@ -466,7 +486,13 @@ defmodule MingaEditor.RenderPipeline.Scroll do
     snapshot = Buffer.render_snapshot(buf, top, fetch_count)
     lines = snapshot.lines
     wrap_map = compute_wrap_map(buf, lines, content_w, oracle)
-    top_count = wrap_map |> List.first([%{byte_offset: 0, text: ""}]) |> length() |> max(1)
+
+    top_count =
+      wrap_map
+      |> List.first([%{byte_offset: 0, text: "", source_text: "", indent_width: 0}])
+      |> length()
+      |> max(1)
+
     viewport = Viewport.put_top_visual(viewport, top, offset, top_count)
     text = cursor_line_text(lines, cursor_line, top)
     {viewport, top, snapshot, lines, text, Unicode.display_col(text, cursor_byte_col)}
@@ -481,7 +507,11 @@ defmodule MingaEditor.RenderPipeline.Scroll do
           non_neg_integer()
   defp desired_visual_start(current_start, cursor_abs, _visible_rows, margin)
        when cursor_abs < current_start + margin do
-    max(cursor_abs - margin, 0)
+    if current_start > 0 and cursor_abs >= current_start do
+      current_start
+    else
+      max(cursor_abs - margin, 0)
+    end
   end
 
   defp desired_visual_start(current_start, cursor_abs, visible_rows, margin)

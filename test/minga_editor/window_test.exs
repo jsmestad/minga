@@ -37,6 +37,7 @@ defmodule MingaEditor.WindowTest do
     test "initializes tracking fields to sentinel values" do
       window = make_window()
       assert window.render_cache.last_viewport_top == -1
+      assert window.render_cache.last_viewport_cache_key == -1
       assert window.render_cache.last_gutter_w == -1
       assert window.render_cache.last_line_count == -1
       assert window.render_cache.last_cursor_line == -1
@@ -272,9 +273,10 @@ defmodule MingaEditor.WindowTest do
 
     test "updates all tracking fields" do
       window = make_window()
-      window = Window.snapshot_after_render(window, 10, 5, 200, 25, 42, :test_fp)
+      window = Window.snapshot_after_render(window, 10, 77, 5, 200, 25, 42, :test_fp)
 
       assert window.render_cache.last_viewport_top == 10
+      assert window.render_cache.last_viewport_cache_key == 77
       assert window.render_cache.last_gutter_w == 5
       assert window.render_cache.last_line_count == 200
       assert window.render_cache.last_cursor_line == 25

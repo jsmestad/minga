@@ -248,8 +248,8 @@ defmodule MingaEditor.Renderer.BufferLineTest do
 
     test "each visual row renders the correct text slice" do
       wrap_entry = [
-        %{text: "hello ", byte_offset: 0},
-        %{text: "world", byte_offset: 6}
+        %{text: "hello ", source_text: "hello ", byte_offset: 0, indent_width: 0},
+        %{text: "world", source_text: "world", byte_offset: 6, indent_width: 0}
       ]
 
       {_g, content, 2} =
@@ -275,6 +275,31 @@ defmodule MingaEditor.Renderer.BufferLineTest do
 
       assert row0_text == "hello "
       assert row1_text == "world"
+    end
+
+    test "breakindent rows render source text with an artificial indent prefix" do
+      wrap_entry = [
+        %{text: "    alpha ", source_text: "    alpha ", byte_offset: 0, indent_width: 0},
+        %{text: "    beta", source_text: "beta", byte_offset: 10, indent_width: 4}
+      ]
+
+      {_g, content, 2} =
+        BufferLine.render(
+          make_params(%{
+            line_text: "    alpha beta",
+            wrap_entry: wrap_entry,
+            gutter_w: 4
+          })
+        )
+
+      decoded = decode_all(content)
+
+      row1_text =
+        decoded
+        |> Enum.filter(fn cmd -> cmd.row == 1 end)
+        |> Enum.map_join("", fn cmd -> cmd.text end)
+
+      assert row1_text == "    beta"
     end
 
     test "three visual rows are handled correctly" do

@@ -359,19 +359,16 @@ defmodule MingaEditor.Commands.Movement do
     {cursor_line, cursor_col} = Buffer.cursor(buf)
     total_lines = Buffer.line_count(buf)
 
-    {new_vp, clamped_cursor} =
+    {new_vp, new_cursor} =
       if wrap_enabled?(buf) do
-        top_rows =
-          visual_row_count_for_line(buf, vp.top, content_width(state), width_oracle(state))
-
-        {Viewport.scroll_visual_row_down(vp, top_rows, total_lines, scroll_margin(buf)),
-         cursor_line}
+        wrapped_scroll_down_line(state, buf, vp, {cursor_line, cursor_col}, total_lines)
       else
-        Viewport.scroll_line_down(vp, cursor_line, total_lines)
+        {viewport, new_cursor_line} = Viewport.scroll_line_down(vp, cursor_line, total_lines)
+        {viewport, {new_cursor_line, cursor_col}}
       end
 
-    if clamped_cursor != cursor_line do
-      Buffer.move_to(buf, {clamped_cursor, cursor_col})
+    if new_cursor != {cursor_line, cursor_col} do
+      Buffer.move_to(buf, new_cursor)
     end
 
     put_active_viewport(state, new_vp)
@@ -382,24 +379,16 @@ defmodule MingaEditor.Commands.Movement do
     {cursor_line, cursor_col} = Buffer.cursor(buf)
     total_lines = Buffer.line_count(buf)
 
-    {new_vp, clamped_cursor} =
+    {new_vp, new_cursor} =
       if wrap_enabled?(buf) do
-        prev_rows =
-          visual_row_count_for_line(
-            buf,
-            max(vp.top - 1, 0),
-            content_width(state),
-            width_oracle(state)
-          )
-
-        {Viewport.scroll_visual_row_up(vp, prev_rows, total_lines, scroll_margin(buf)),
-         cursor_line}
+        wrapped_scroll_up_line(state, buf, vp, {cursor_line, cursor_col}, total_lines)
       else
-        Viewport.scroll_line_up(vp, cursor_line, total_lines)
+        {viewport, new_cursor_line} = Viewport.scroll_line_up(vp, cursor_line, total_lines)
+        {viewport, {new_cursor_line, cursor_col}}
       end
 
-    if clamped_cursor != cursor_line do
-      Buffer.move_to(buf, {clamped_cursor, cursor_col})
+    if new_cursor != {cursor_line, cursor_col} do
+      Buffer.move_to(buf, new_cursor)
     end
 
     put_active_viewport(state, new_vp)
@@ -700,6 +689,38 @@ defmodule MingaEditor.Commands.Movement do
     vp = Viewport.new(state.terminal_viewport.rows, state.terminal_viewport.cols)
     line_count = Buffer.line_count(state.workspace.buffers.active)
     Viewport.content_cols(vp, line_count)
+  end
+
+  @spec wrapped_scroll_down_line(
+          state(),
+          pid(),
+          Viewport.t(),
+          {non_neg_integer(), non_neg_integer()},
+          non_neg_integer()
+        ) :: {Viewport.t(), {non_neg_integer(), non_neg_integer()}}
+  defp wrapped_scroll_down_line(state, buf, vp, cursor, total_lines) do
+    content_w = content_width(state)
+    oracle = width_oracle(state)
+    top_rows = visual_row_count_for_line(buf, vp.top, content_w, oracle)
+    new_vp = Viewport.scroll_visual_row_down(vp, top_rows, total_lines, scroll_margin(buf))
+    new_cursor = Minga.Editing.visual_line_down(Buffer.snapshot(buf), cursor, content_w)
+    {new_vp, new_cursor}
+  end
+
+  @spec wrapped_scroll_up_line(
+          state(),
+          pid(),
+          Viewport.t(),
+          {non_neg_integer(), non_neg_integer()},
+          non_neg_integer()
+        ) :: {Viewport.t(), {non_neg_integer(), non_neg_integer()}}
+  defp wrapped_scroll_up_line(state, buf, vp, cursor, total_lines) do
+    content_w = content_width(state)
+    oracle = width_oracle(state)
+    prev_rows = visual_row_count_for_line(buf, max(vp.top - 1, 0), content_w, oracle)
+    new_vp = Viewport.scroll_visual_row_up(vp, prev_rows, total_lines, scroll_margin(buf))
+    new_cursor = Minga.Editing.visual_line_up(Buffer.snapshot(buf), cursor, content_w)
+    {new_vp, new_cursor}
   end
 
   @spec visual_row_count_for_line(

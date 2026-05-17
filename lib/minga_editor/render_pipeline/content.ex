@@ -137,14 +137,16 @@ defmodule MingaEditor.RenderPipeline.Content do
       window: window,
       buffer: window.buffer,
       visible_line_map: scroll.visible_line_map,
-      fold_map: window.fold_map
+      fold_map: window.fold_map,
+      wrap_on: wrap_on
     }
 
     {gutter_layer, line_layer, rows_used, window} =
       cond do
-        wrap_on ->
-          # Wrapping and folding are mutually exclusive for now.
-          # Strip fold-specific keys so the type matches line_render_opts.
+        wrap_on and scroll.visible_line_map == nil ->
+          # Wrapping currently runs only on the plain sequential path.
+          # When a visible_line_map is present, folding/virtual-line bookkeeping
+          # takes priority so we do not count hidden display-map entries as rows.
           wrap_opts = Map.drop(line_opts, [:visible_line_map, :fold_map])
           {g, l, r} = ContentHelpers.render_lines_wrapped(lines, visible_rows, wrap_opts)
           {DisplayList.draws_to_layer_sorted(g), DisplayList.draws_to_layer_sorted(l), r, window}
@@ -194,7 +196,8 @@ defmodule MingaEditor.RenderPipeline.Content do
             content_w: content_w,
             viewport: viewport,
             buf: window.buffer,
-            oracle: render_ctx.width_oracle
+            oracle: render_ctx.width_oracle,
+            visible_line_map: scroll.visible_line_map
           })
 
         cr = max(visible_cursor - viewport.top + screen_row_delta + row_off, 0)
@@ -242,6 +245,7 @@ defmodule MingaEditor.RenderPipeline.Content do
     updated_window =
       window
       |> Window.snapshot_after_render(
+        viewport.top,
         Viewport.cache_key(viewport),
         gutter_w,
         snapshot.line_count,
@@ -261,6 +265,9 @@ defmodule MingaEditor.RenderPipeline.Content do
   @spec cursor_visual_position(map()) :: {integer(), non_neg_integer(), non_neg_integer()}
   defp cursor_visual_position(%{wrap_on: false}), do: {0, 0, 0}
 
+  defp cursor_visual_position(%{wrap_on: true, visible_line_map: visible_line_map})
+       when not is_nil(visible_line_map), do: {0, 0, 0}
+
   defp cursor_visual_position(%{
          wrap_on: true,
          lines: lines,
@@ -276,12 +283,25 @@ defmodule MingaEditor.RenderPipeline.Content do
 
     if line_idx >= 0 and line_idx < length(lines) do
       wrap_map = wrap_map_for_cursor(lines, line_idx, content_w, buf, oracle)
-      cursor_entry = Enum.at(wrap_map, line_idx, [%{byte_offset: 0, text: ""}])
+
+      cursor_entry =
+        Enum.at(wrap_map, line_idx, [
+          %{byte_offset: 0, text: "", source_text: "", indent_width: 0}
+        ])
+
       visual_row_idx = visual_row_index(cursor_entry, cursor_byte_col)
       rows_before = wrap_map |> Enum.take(line_idx) |> WrapMap.visual_row_count()
       logical_delta = cursor_line - viewport.top
       screen_delta = rows_before + visual_row_idx - viewport.visual_row_offset - logical_delta
-      cursor_row = Enum.at(cursor_entry, visual_row_idx, %{byte_offset: 0, indent_width: 0})
+
+      cursor_row =
+        Enum.at(cursor_entry, visual_row_idx, %{
+          byte_offset: 0,
+          text: "",
+          source_text: "",
+          indent_width: 0
+        })
+
       {screen_delta, cursor_row.byte_offset, Map.get(cursor_row, :indent_width, 0)}
     else
       {0, 0, 0}
@@ -491,7 +511,8 @@ defmodule MingaEditor.RenderPipeline.Content do
         is_active: is_active,
         is_gui: MingaEditor.Frontend.gui?(state.capabilities),
         wrap_on: true,
-        line_number_style: line_number_style
+        line_number_style: line_number_style,
+        width_oracle: MingaEditor.Frontend.Capabilities.width_oracle(state.capabilities)
       })
 
     # Compute the display map (block decorations, fold regions, virtual lines).
@@ -516,7 +537,17 @@ defmodule MingaEditor.RenderPipeline.Content do
     # buffer version). The normal buffer path does this in the Scroll stage;
     # agent chat skips that stage, so we must do it here.
     buf_version = Buffer.version(buf)
-    window = Window.detect_invalidation(window, viewport.top, gutter_w, line_count, buf_version)
+
+    window =
+      Window.detect_invalidation(
+        window,
+        viewport.top,
+        Viewport.cache_key(viewport),
+        gutter_w,
+        line_count,
+        buf_version,
+        cursor_line
+      )
 
     # Detect context changes to invalidate dirty-line cache
     ctx_fp = ContentHelpers.context_fingerprint(render_ctx, is_active)
@@ -553,6 +584,7 @@ defmodule MingaEditor.RenderPipeline.Content do
       window
       |> Window.snapshot_after_render(
         viewport.top,
+        Viewport.cache_key(viewport),
         gutter_w,
         line_count,
         cursor_line,
@@ -731,7 +763,7 @@ defmodule MingaEditor.RenderPipeline.Content do
 
     if window.pinned do
       visible = Viewport.content_rows(viewport)
-      %Viewport{viewport | top: max(line_count - visible, 0)}
+      Viewport.put_top(viewport, max(line_count - visible, 0))
     else
       Viewport.scroll_to_cursor(viewport, {cursor_line, 0}, buf)
     end

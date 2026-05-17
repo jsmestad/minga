@@ -15,6 +15,8 @@ defmodule Minga.Core.WrapMapTest do
       [entry] = WrapMap.compute([""], 40)
       assert length(entry) == 1
       assert hd(entry).text == ""
+      assert hd(entry).source_text == ""
+      assert hd(entry).indent_width == 0
     end
 
     test "line exactly at width produces a single visual row" do

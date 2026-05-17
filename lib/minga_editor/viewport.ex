@@ -52,6 +52,12 @@ defmodule MingaEditor.Viewport do
     %__MODULE__{top: 0, left: 0, rows: rows, cols: cols, reserved: reserved}
   end
 
+  @doc "Stores a logical top line and resets wrapped row offset."
+  @spec put_top(t(), non_neg_integer()) :: t()
+  def put_top(%__MODULE__{} = vp, top) when is_integer(top) and top >= 0 do
+    %{vp | top: top, visual_row_offset: 0}
+  end
+
   @doc """
   Number of rows reserved for the footer (modeline + minibuffer).
   """
@@ -131,7 +137,7 @@ defmodule MingaEditor.Viewport do
     top = adjust_top(vp.top, cursor_line, visible_rows, effective_margin)
     left = adjust_left(vp.left, cursor_col, vp.cols)
 
-    %__MODULE__{vp | top: top, left: left, visual_row_offset: reset_visual_offset(vp.top, top)}
+    %{put_top(vp, top) | left: left}
   end
 
   @doc "Stores a top logical line and clamps the visual row offset for that line."
@@ -170,7 +176,7 @@ defmodule MingaEditor.Viewport do
   end
 
   defp advance_visual_row_down(vp, _top_line_visual_rows, max_top) do
-    %{vp | top: min(vp.top + 1, max_top), visual_row_offset: 0}
+    put_top(vp, min(vp.top + 1, max_top))
   end
 
   @doc "Scrolls up by one visual row when wrapping is active."
@@ -182,7 +188,7 @@ defmodule MingaEditor.Viewport do
     else
       new_top = max(vp.top - 1, 0)
       offset = if new_top == vp.top, do: 0, else: previous_line_visual_rows - 1
-      %{vp | top: new_top, visual_row_offset: offset}
+      %{put_top(vp, new_top) | visual_row_offset: offset}
     end
   end
 
@@ -216,10 +222,6 @@ defmodule MingaEditor.Viewport do
     )
     |> Map.put(:left, adjust_left(vp.left, cursor_col, vp.cols))
   end
-
-  @spec reset_visual_offset(non_neg_integer(), non_neg_integer()) :: non_neg_integer()
-  defp reset_visual_offset(old_top, old_top), do: 0
-  defp reset_visual_offset(_old_top, _new_top), do: 0
 
   @spec adjust_top_visual(
           t(),
@@ -276,7 +278,7 @@ defmodule MingaEditor.Viewport do
          _margin
        )
        when cursor_line > vp.top do
-    %{vp | top: cursor_line, visual_row_offset: 0}
+    put_top(vp, cursor_line)
   end
 
   defp adjust_top_visual(
@@ -395,7 +397,7 @@ defmodule MingaEditor.Viewport do
     # Scrolling down: enforce top margin (push cursor away from top edge)
     min_cursor = new_top + effective_margin
     clamped_cursor = cursor_line |> max(new_top) |> max(min(min_cursor, new_top + visible - 1))
-    {%__MODULE__{vp | top: new_top}, clamped_cursor}
+    {put_top(vp, new_top), clamped_cursor}
   end
 
   @doc """
@@ -425,7 +427,7 @@ defmodule MingaEditor.Viewport do
     # Scrolling up: enforce bottom margin (push cursor away from bottom edge)
     max_cursor = new_top + visible - 1 - effective_margin
     clamped_cursor = cursor_line |> min(new_top + visible - 1) |> min(max(max_cursor, new_top))
-    {%__MODULE__{vp | top: new_top}, clamped_cursor}
+    {put_top(vp, new_top), clamped_cursor}
   end
 
   # Default scroll margin. Reads from config, falls back to 5.
@@ -447,7 +449,7 @@ defmodule MingaEditor.Viewport do
     target_top = cursor_line - div(visible, 2)
     max_top = max(total_lines - visible, 0)
     new_top = min(max(target_top, 0), max_top)
-    %__MODULE__{vp | top: new_top}
+    put_top(vp, new_top)
   end
 
   @doc """
@@ -462,7 +464,7 @@ defmodule MingaEditor.Viewport do
     target_top = max(cursor_line - effective_margin, 0)
     max_top = max(total_lines - visible, 0)
     new_top = min(target_top, max_top)
-    %__MODULE__{vp | top: new_top}
+    put_top(vp, new_top)
   end
 
   @doc """
@@ -477,7 +479,7 @@ defmodule MingaEditor.Viewport do
     target_top = cursor_line - visible + 1 + effective_margin
     max_top = max(total_lines - visible, 0)
     new_top = min(max(target_top, 0), max_top)
-    %__MODULE__{vp | top: new_top}
+    put_top(vp, new_top)
   end
 
   # ── Decoration-aware helpers ─────────────────────────────────────────────

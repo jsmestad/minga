@@ -289,6 +289,13 @@ defmodule MingaEditor.ViewportTest do
       assert vp.visual_row_offset == 0
     end
 
+    test "put_top resets visual row offset" do
+      vp = Viewport.new(24, 80) |> Viewport.put_top_visual(5, 2, 3) |> Viewport.put_top(7)
+
+      assert vp.top == 7
+      assert vp.visual_row_offset == 0
+    end
+
     test "put_top_visual clamps offset to line row count" do
       vp = Viewport.new(24, 80) |> Viewport.put_top_visual(5, 9, 3)
       assert vp.top == 5
