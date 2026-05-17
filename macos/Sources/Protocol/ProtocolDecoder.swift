@@ -9,6 +9,123 @@
 
 import Foundation
 
+/// Typed snapshot of status bar data from the BEAM. Named fields prevent transposition bugs.
+struct StatusBarUpdate: Sendable {
+    struct IndentInfo: Sendable, Equatable {
+        let kind: UInt8
+        let size: UInt8
+    }
+
+    struct SelectionInfo: Sendable, Equatable {
+        let mode: UInt8
+        let size: UInt32
+    }
+
+    let contentKind: UInt8
+    let mode: UInt8
+    let cursorLine: UInt32
+    let cursorCol: UInt32
+    let lineCount: UInt32
+    let flags: UInt8
+    let lspStatus: UInt8
+    let gitBranch: String
+    let message: String
+    let filetype: String
+    let errorCount: UInt16
+    let warningCount: UInt16
+    let modelName: String
+    let messageCount: UInt32
+    let sessionStatus: UInt8
+    let infoCount: UInt16
+    let hintCount: UInt16
+    let macroRecording: UInt8
+    let parserStatus: UInt8
+    let agentStatus: UInt8
+    let gitAdded: UInt16
+    let gitModified: UInt16
+    let gitDeleted: UInt16
+    let icon: String
+    let iconColorR: UInt8
+    let iconColorG: UInt8
+    let iconColorB: UInt8
+    let filename: String
+    let diagnosticHint: String
+    let backgroundSubagentCount: UInt16
+    let backgroundSubagentLabel: String
+    let indent: IndentInfo
+    let selection: SelectionInfo
+
+    init(
+        contentKind: UInt8,
+        mode: UInt8,
+        cursorLine: UInt32,
+        cursorCol: UInt32,
+        lineCount: UInt32,
+        flags: UInt8,
+        lspStatus: UInt8,
+        gitBranch: String,
+        message: String,
+        filetype: String,
+        errorCount: UInt16,
+        warningCount: UInt16,
+        modelName: String,
+        messageCount: UInt32,
+        sessionStatus: UInt8,
+        infoCount: UInt16,
+        hintCount: UInt16,
+        macroRecording: UInt8,
+        parserStatus: UInt8,
+        agentStatus: UInt8,
+        gitAdded: UInt16,
+        gitModified: UInt16,
+        gitDeleted: UInt16,
+        icon: String,
+        iconColorR: UInt8,
+        iconColorG: UInt8,
+        iconColorB: UInt8,
+        filename: String,
+        diagnosticHint: String,
+        backgroundSubagentCount: UInt16,
+        backgroundSubagentLabel: String,
+        indent: IndentInfo = .init(kind: 0, size: 2),
+        selection: SelectionInfo = .init(mode: 0, size: 0)
+    ) {
+        self.contentKind = contentKind
+        self.mode = mode
+        self.cursorLine = cursorLine
+        self.cursorCol = cursorCol
+        self.lineCount = lineCount
+        self.flags = flags
+        self.lspStatus = lspStatus
+        self.gitBranch = gitBranch
+        self.message = message
+        self.filetype = filetype
+        self.errorCount = errorCount
+        self.warningCount = warningCount
+        self.modelName = modelName
+        self.messageCount = messageCount
+        self.sessionStatus = sessionStatus
+        self.infoCount = infoCount
+        self.hintCount = hintCount
+        self.macroRecording = macroRecording
+        self.parserStatus = parserStatus
+        self.agentStatus = agentStatus
+        self.gitAdded = gitAdded
+        self.gitModified = gitModified
+        self.gitDeleted = gitDeleted
+        self.icon = icon
+        self.iconColorR = iconColorR
+        self.iconColorG = iconColorG
+        self.iconColorB = iconColorB
+        self.filename = filename
+        self.diagnosticHint = diagnosticHint
+        self.backgroundSubagentCount = backgroundSubagentCount
+        self.backgroundSubagentLabel = backgroundSubagentLabel
+        self.indent = indent
+        self.selection = selection
+    }
+}
+
 // MARK: - Render command types
 
 /// A decoded render command from the BEAM.
@@ -37,7 +154,7 @@ enum RenderCommand: Sendable {
     case guiCompletion(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, items: [Wire.CompletionItem])
     case guiWhichKey(visible: Bool, prefix: String, page: UInt8, pageCount: UInt8, bindings: [Wire.WhichKeyBinding])
     case guiBreadcrumb(segments: [String])
-    case guiStatusBar(contentKind: UInt8, mode: UInt8, cursorLine: UInt32, cursorCol: UInt32, lineCount: UInt32, flags: UInt8, lspStatus: UInt8, gitBranch: String, message: String, filetype: String, errorCount: UInt16, warningCount: UInt16, modelName: String, messageCount: UInt32, sessionStatus: UInt8, infoCount: UInt16, hintCount: UInt16, macroRecording: UInt8, parserStatus: UInt8, agentStatus: UInt8, gitAdded: UInt16, gitModified: UInt16, gitDeleted: UInt16, icon: String, iconColorR: UInt8, iconColorG: UInt8, iconColorB: UInt8, filename: String, diagnosticHint: String, backgroundSubagentCount: UInt16, backgroundSubagentLabel: String)
+    case guiStatusBar(StatusBarUpdate)
     case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, title: String, query: String, hasPreview: Bool, items: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?)
     case guiPickerPreview(visible: Bool, lines: [Wire.PickerPreviewLine])
     case guiAgentChat(visible: Bool, status: UInt8, model: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [Wire.HelpGroup], messages: [Wire.ChatMessage])
@@ -59,7 +176,7 @@ enum RenderCommand: Sendable {
     case guiLineSpacing(spacing: Float)
     case guiCursorAnimation(enabled: Bool)
     case guiSplitSeparators(borderColor: UInt32, verticals: [Wire.VerticalSeparator], horizontals: [Wire.HorizontalSeparator])
-    case guiGitStatus(repoState: UInt8, syncing: Bool, ahead: UInt16, behind: UInt16, branchName: String, entries: [Wire.GitStatusEntry], toast: (message: String, level: UInt8, action: UInt8)?)
+    case guiGitStatus(repoState: UInt8, syncing: Bool, ahead: UInt16, behind: UInt16, branchName: String, entries: [Wire.GitStatusEntry], toast: (message: String, level: UInt8, action: UInt8)?, entryBasePath: String, lastCommitMessage: String)
     case guiAgentGroups(activeGroupId: UInt16, agentGroups: [Wire.AgentGroupEntry])
     case guiBoard(visible: Bool, focusedCardId: UInt32, cards: [BoardCard], filterMode: Bool, filterText: String)
     case guiAgentContext(visible: Bool, task: String, dispatchTimestamp: Date, status: CardStatus, canApprove: Bool)
@@ -587,6 +704,8 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         var messageCount: UInt32 = 0
         var sessionStatus: UInt8 = 0
         var agentStatus: UInt8 = 0
+        var indent = StatusBarUpdate.IndentInfo(kind: 0, size: 2)
+        var selection = StatusBarUpdate.SelectionInfo(mode: 0, size: 0)
 
         for _ in 0..<sectionCount {
             guard data.count >= pos + 3 else { throw ProtocolDecodeError.malformed }
@@ -690,6 +809,14 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                     }
                 }
 
+            case 0x0A: // Indent: indent_type(1) + indent_size(1)
+                guard sectionLen >= 2 else { break }
+                indent = StatusBarUpdate.IndentInfo(kind: data[sStart], size: data[sStart + 1])
+
+            case 0x0C: // Selection: selection_mode(1) + selection_size(4)
+                guard sectionLen >= 5 else { break }
+                selection = StatusBarUpdate.SelectionInfo(mode: data[sStart], size: readU32(data, sStart + 1))
+
             default:
                 break // Skip unknown sections (forward compatibility)
             }
@@ -697,7 +824,24 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             pos = sStart + sectionLen
         }
 
-        return (.guiStatusBar(contentKind: contentKind, mode: mode, cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount, flags: flags, lspStatus: lspStatus, gitBranch: gitBranch, message: message, filetype: filetype, errorCount: errorCount, warningCount: warningCount, modelName: modelName, messageCount: messageCount, sessionStatus: sessionStatus, infoCount: infoCount, hintCount: hintCount, macroRecording: macroRecording, parserStatus: parserStatus, agentStatus: agentStatus, gitAdded: gitAdded, gitModified: gitModified, gitDeleted: gitDeleted, icon: icon, iconColorR: iconColorR, iconColorG: iconColorG, iconColorB: iconColorB, filename: filename, diagnosticHint: diagnosticHint, backgroundSubagentCount: backgroundSubagentCount, backgroundSubagentLabel: backgroundSubagentLabel), pos - offset)
+        let update = StatusBarUpdate(
+            contentKind: contentKind, mode: mode,
+            cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount,
+            flags: flags, lspStatus: lspStatus, gitBranch: gitBranch,
+            message: message, filetype: filetype,
+            errorCount: errorCount, warningCount: warningCount,
+            modelName: modelName, messageCount: messageCount, sessionStatus: sessionStatus,
+            infoCount: infoCount, hintCount: hintCount, macroRecording: macroRecording,
+            parserStatus: parserStatus, agentStatus: agentStatus,
+            gitAdded: gitAdded, gitModified: gitModified, gitDeleted: gitDeleted,
+            icon: icon, iconColorR: iconColorR, iconColorG: iconColorG, iconColorB: iconColorB,
+            filename: filename, diagnosticHint: diagnosticHint,
+            backgroundSubagentCount: backgroundSubagentCount,
+            backgroundSubagentLabel: backgroundSubagentLabel,
+            indent: indent,
+            selection: selection
+        )
+        return (.guiStatusBar(update), pos - offset)
 
     case OP_GUI_PICKER:
         // Sectioned format: opcode(1) + section_count(1) + sections...
@@ -1921,7 +2065,22 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             gsPos += gsToastMsgLen
             gsToast = (message: gsToastMsg, level: gsToastLevel, action: gsToastAction)
         }
-        return (.guiGitStatus(repoState: gsRepoState, syncing: gsSyncing, ahead: gsAhead, behind: gsBehind, branchName: gsBranchName, entries: gsEntries, toast: gsToast),
+
+        guard data.count >= gsPos + 2 else { throw ProtocolDecodeError.malformed }
+        let gsEntryBasePathLen = Int(readU16(data, gsPos))
+        gsPos += 2
+        guard data.count >= gsPos + gsEntryBasePathLen + 2 else { throw ProtocolDecodeError.malformed }
+        let gsEntryBasePathData = data[gsPos..<(gsPos + gsEntryBasePathLen)]
+        let gsEntryBasePath = try readRequiredUTF8(gsEntryBasePathData)
+        gsPos += gsEntryBasePathLen
+
+        let gsLastCommitMessageLen = Int(readU16(data, gsPos))
+        gsPos += 2
+        guard data.count >= gsPos + gsLastCommitMessageLen else { throw ProtocolDecodeError.malformed }
+        let gsLastCommitMessageData = data[gsPos..<(gsPos + gsLastCommitMessageLen)]
+        let gsLastCommitMessage = try readRequiredUTF8(gsLastCommitMessageData)
+        gsPos += gsLastCommitMessageLen
+        return (.guiGitStatus(repoState: gsRepoState, syncing: gsSyncing, ahead: gsAhead, behind: gsBehind, branchName: gsBranchName, entries: gsEntries, toast: gsToast, entryBasePath: gsEntryBasePath, lastCommitMessage: gsLastCommitMessage),
                 gsPos - offset)
 
     case OP_GUI_AGENT_GROUPS:

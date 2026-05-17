@@ -155,9 +155,19 @@ defmodule Minga.Application do
     # This only runs when the application is stopping gracefully, not on
     # Editor crashes (where the LoggerHandler stays installed so crash
     # reports flow through the ETS buffer and get replayed on restart).
+    Logger.flush()
+
     case :logger.get_handler_config(:minga_messages) do
       {:ok, _} -> Minga.LoggerHandler.uninstall()
       _ -> :ok
+    end
+
+    case Minga.DebugLog.stop() do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        IO.puts(:stderr, "Failed to stop debug log during shutdown: #{inspect(reason)}")
     end
 
     :ok

@@ -9,6 +9,8 @@ defmodule MingaEditor.Commands.Movement do
   alias Minga.Buffer
   alias Minga.Buffer.Document
   alias Minga.Core.Unicode
+  alias Minga.Parser.Manager, as: ParserManager
+  alias Minga.Parser.StructuralNavResult
 
   alias MingaEditor.Commands.Helpers
   alias MingaEditor.FoldMap
@@ -25,6 +27,7 @@ defmodule MingaEditor.Commands.Movement do
   alias Minga.Mode
 
   @type state :: EditorState.t()
+  @type structural_nav_action :: :parent | :first_child | :next_sibling | :prev_sibling
 
   @command_specs [
     {:move_left, "Move cursor left", true},
@@ -51,6 +54,10 @@ defmodule MingaEditor.Commands.Movement do
     {:repeat_find_char, "Repeat last find-char", true},
     {:repeat_find_char_reverse, "Repeat last find-char (reverse)", true},
     {:match_bracket, "Jump to matching bracket", true},
+    {:nav_parent, "Move to parent AST node", true},
+    {:nav_first_child, "Move to first child AST node", true},
+    {:nav_next_sibling, "Move to next sibling AST node", true},
+    {:nav_prev_sibling, "Move to previous sibling AST node", true},
     {:paragraph_forward, "Move to next paragraph", true},
     {:paragraph_backward, "Move to previous paragraph", true},
     {:half_page_down, "Scroll half page down", true},
@@ -286,6 +293,13 @@ defmodule MingaEditor.Commands.Movement do
 
     state
   end
+
+  # ── Structural AST navigation ─────────────────────────────────────────────
+
+  def execute(state, :nav_parent), do: structural_nav(state, :parent)
+  def execute(state, :nav_first_child), do: structural_nav(state, :first_child)
+  def execute(state, :nav_next_sibling), do: structural_nav(state, :next_sibling)
+  def execute(state, :nav_prev_sibling), do: structural_nav(state, :prev_sibling)
 
   # ── Paragraph motions ─────────────────────────────────────────────────────
 
@@ -563,6 +577,43 @@ defmodule MingaEditor.Commands.Movement do
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────
+
+  @spec structural_nav(state(), structural_nav_action()) :: state()
+  defp structural_nav(%{workspace: %{buffers: %{active: buf}}} = state, action)
+       when is_pid(buf) do
+    command = structural_nav_command(action)
+    state = Helpers.setup_for_motion(state, command)
+    buffer_id = Helpers.buffer_id_for_motion(state, buf, command)
+    {row, col} = Buffer.cursor(buf)
+
+    case ParserManager.request_structural_nav(
+           buffer_id,
+           row,
+           col,
+           structural_nav_action_code(action)
+         ) do
+      %StructuralNavResult{type_name: type_name} = result ->
+        Buffer.move_to(buf, StructuralNavResult.start_position(result))
+        EditorState.set_status(state, "→ #{type_name}")
+
+      nil ->
+        state
+    end
+  end
+
+  defp structural_nav(state, _action), do: state
+
+  @spec structural_nav_command(structural_nav_action()) :: atom()
+  defp structural_nav_command(:parent), do: :nav_parent
+  defp structural_nav_command(:first_child), do: :nav_first_child
+  defp structural_nav_command(:next_sibling), do: :nav_next_sibling
+  defp structural_nav_command(:prev_sibling), do: :nav_prev_sibling
+
+  @spec structural_nav_action_code(structural_nav_action()) :: 0..3
+  defp structural_nav_action_code(:parent), do: 0
+  defp structural_nav_action_code(:first_child), do: 1
+  defp structural_nav_action_code(:next_sibling), do: 2
+  defp structural_nav_action_code(:prev_sibling), do: 3
 
   @spec update_file_tree(state(), (FileTreeState.t() -> FileTreeState.t())) :: state()
   defp update_file_tree(state, fun) when is_function(fun, 1) do

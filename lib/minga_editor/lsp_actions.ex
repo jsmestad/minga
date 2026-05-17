@@ -160,14 +160,25 @@ defmodule MingaEditor.LspActions do
         state
 
       client ->
-        send_lsp_request(
-          state,
-          client,
-          buf,
-          "textDocument/documentHighlight",
-          :document_highlight
-        )
+        if supports_capability?(client, "documentHighlightProvider") do
+          send_lsp_request(
+            state,
+            client,
+            buf,
+            "textDocument/documentHighlight",
+            :document_highlight
+          )
+        else
+          state
+        end
     end
+  end
+
+  @spec supports_capability?(pid(), String.t()) :: boolean()
+  defp supports_capability?(client, key) do
+    caps = Client.capabilities(client)
+    provider = caps[key]
+    provider == true or is_map(provider)
   end
 
   @doc """
@@ -552,7 +563,18 @@ defmodule MingaEditor.LspActions do
 
   defp request_code_lens(state, client, buf) do
     state
-    |> request_code_lens_for_path(client, Buffer.file_path(buf))
+    |> request_code_lens_for_capability(
+      client,
+      supports_capability?(client, "codeLensProvider"),
+      buf
+    )
+  end
+
+  @spec request_code_lens_for_capability(state(), pid(), boolean(), pid()) :: state()
+  defp request_code_lens_for_capability(state, _client, false, _buf), do: state
+
+  defp request_code_lens_for_capability(state, client, true, buf) do
+    request_code_lens_for_path(state, client, Buffer.file_path(buf))
   end
 
   @spec request_code_lens_for_path(state(), pid(), String.t() | nil) :: state()
@@ -584,6 +606,18 @@ defmodule MingaEditor.LspActions do
   defp request_inlay_hints(state, nil, _buf), do: state
 
   defp request_inlay_hints(state, client, buf) do
+    request_inlay_hints_for_capability(
+      state,
+      client,
+      supports_capability?(client, "inlayHintProvider"),
+      buf
+    )
+  end
+
+  @spec request_inlay_hints_for_capability(state(), pid(), boolean(), pid()) :: state()
+  defp request_inlay_hints_for_capability(state, _client, false, _buf), do: state
+
+  defp request_inlay_hints_for_capability(state, client, true, buf) do
     request_inlay_hints_for_path(state, client, Buffer.file_path(buf))
   end
 

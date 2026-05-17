@@ -106,6 +106,14 @@ defmodule MingaEditor.Handlers.HighlightHandler do
     handle_textobject_positions(state, pid, buffer_id, positions)
   end
 
+  # ── document_symbols ─────────────────────────────────────────────────────
+
+  def handle(state, {tag, {:document_symbols, buffer_id, _version, symbols}})
+      when tag in [:minga_highlight, :minga_input] do
+    pid = HighlightSync.resolve_buffer_pid(state, buffer_id)
+    handle_document_symbols(state, pid, buffer_id, symbols)
+  end
+
   # ── grammar_loaded ───────────────────────────────────────────────────────
 
   def handle(state, {tag, {:grammar_loaded, true, name}})
@@ -356,6 +364,30 @@ defmodule MingaEditor.Handlers.HighlightHandler do
   defp handle_textobject_positions(state, _pid, _buffer_id, _positions) do
     # Response for a non-active buffer; discard.
     {state, []}
+  end
+
+  @spec handle_document_symbols(EditorState.t(), pid() | nil, non_neg_integer(), [
+          Minga.Language.Symbol.t()
+        ]) :: {EditorState.t(), [highlight_effect()]}
+  defp handle_document_symbols(state, nil, buffer_id, _symbols) do
+    {state,
+     [
+       {:log, :editor, :warning,
+        "document_symbols for unknown buffer_id=#{buffer_id}, discarding"}
+     ]}
+  end
+
+  defp handle_document_symbols(state, pid, _buffer_id, symbols) do
+    new_state =
+      EditorState.update_workspace(state, fn ws ->
+        WorkspaceState.update_windows_for_buffer(
+          ws,
+          pid,
+          &Window.set_document_symbols(&1, symbols)
+        )
+      end)
+
+    {new_state, []}
   end
 
   @spec handle_request_reparse(EditorState.t(), non_neg_integer()) ::

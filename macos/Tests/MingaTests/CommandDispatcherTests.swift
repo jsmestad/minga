@@ -212,7 +212,7 @@ struct CommandDispatcherRoutingTests {
             Wire.GitStatusEntry(pathHash: 12345, section: 1, status: 1, path: "lib/editor.ex")
         ]
         dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 2, behind: 0,
-                                           branchName: "main", entries: rawEntries, toast: nil))
+                                           branchName: "main", entries: rawEntries, toast: nil, entryBasePath: "", lastCommitMessage: ""))
 
         #expect(gui.gitStatusState.visible == true)
         #expect(gui.gitStatusState.branchName == "main")
@@ -229,12 +229,12 @@ struct CommandDispatcherRoutingTests {
             Wire.GitStatusEntry(pathHash: 12345, section: 1, status: 1, path: "lib/editor.ex")
         ]
         dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
-                                           branchName: "main", entries: rawEntries, toast: nil))
+                                           branchName: "main", entries: rawEntries, toast: nil, entryBasePath: "", lastCommitMessage: ""))
         #expect(gui.gitStatusState.visible == true)
 
         // Then send the "panel closed" sentinel: notARepo (1) + empty entries. Syncing and toast still update because remote operations can finish while the panel is hidden.
         dispatcher.dispatch(.guiGitStatus(repoState: 1, syncing: true, ahead: 0, behind: 0,
-                                           branchName: "", entries: [], toast: (message: "Push failed", level: 1, action: 1)))
+                                           branchName: "", entries: [], toast: (message: "Push failed", level: 1, action: 1), entryBasePath: "", lastCommitMessage: ""))
         #expect(gui.gitStatusState.visible == false)
         #expect(gui.gitStatusState.syncing == true)
         #expect(gui.gitStatusState.toastMessage == "Push failed")
@@ -249,7 +249,7 @@ struct CommandDispatcherRoutingTests {
             Wire.GitStatusEntry(pathHash: 12346, section: 1, status: 99, path: "lib/invalid-status.ex")
         ]
         dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
-                                           branchName: "main", entries: rawEntries, toast: nil))
+                                           branchName: "main", entries: rawEntries, toast: nil, entryBasePath: "", lastCommitMessage: ""))
 
         #expect(gui.gitStatusState.changedEntries.count == 2)
         #expect(gui.gitStatusState.changedEntries[0].status == .unknown)
@@ -263,9 +263,21 @@ struct CommandDispatcherRoutingTests {
             Wire.GitStatusEntry(pathHash: 12345, section: 99, status: 1, path: "lib/bad-section.ex")
         ]
         dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
-                                           branchName: "main", entries: rawEntries, toast: nil))
+                                           branchName: "main", entries: rawEntries, toast: nil, entryBasePath: "", lastCommitMessage: ""))
 
         #expect(gui.gitStatusState.totalCount == 0)
+    }
+
+    @Test("guiGitStatus shows not-a-repo panel when BEAM sends a project root")
+    @MainActor func guiGitStatusShowsNotARepoPanel() {
+        let (dispatcher, gui) = makeDispatcher()
+
+        dispatcher.dispatch(.guiGitStatus(repoState: 1, syncing: false, ahead: 0, behind: 0,
+                                           branchName: "", entries: [], toast: nil, entryBasePath: "/project", lastCommitMessage: ""))
+
+        #expect(gui.gitStatusState.visible == true)
+        #expect(gui.gitStatusState.repoState == .notARepo)
+        #expect(gui.gitStatusState.entryBasePath == "/project")
     }
 
     @Test("guiGitStatus shows panel for normal repo with clean working tree")
@@ -274,7 +286,7 @@ struct CommandDispatcherRoutingTests {
         // Normal repo (0) with zero entries is a clean working tree, NOT
         // a hide signal. Only notARepo + empty triggers hide.
         dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
-                                           branchName: "main", entries: [], toast: nil))
+                                           branchName: "main", entries: [], toast: nil, entryBasePath: "", lastCommitMessage: ""))
         #expect(gui.gitStatusState.visible == true)
         #expect(gui.gitStatusState.branchName == "main")
     }
@@ -283,14 +295,14 @@ struct CommandDispatcherRoutingTests {
     @MainActor func guiGitStatusToastFallback() {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
-                                           branchName: "main", entries: [], toast: (message: "Remote failed", level: 99, action: 99)))
+                                           branchName: "main", entries: [], toast: (message: "Remote failed", level: 99, action: 99), entryBasePath: "", lastCommitMessage: ""))
 
         #expect(gui.gitStatusState.toastMessage == "Remote failed")
         #expect(gui.gitStatusState.toastLevel == .error)
         #expect(gui.gitStatusState.toastAction == .none)
 
         dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
-                                           branchName: "main", entries: [], toast: nil))
+                                           branchName: "main", entries: [], toast: nil, entryBasePath: "", lastCommitMessage: ""))
 
         #expect(gui.gitStatusState.toastMessage == nil)
         #expect(gui.gitStatusState.toastLevel == .success)
@@ -346,7 +358,7 @@ struct CommandDispatcherRoutingTests {
     @Test("guiStatusBar updates statusBarState")
     @MainActor func guiStatusBarRouting() {
         let (dispatcher, gui) = makeDispatcher()
-        dispatcher.dispatch(.guiStatusBar(contentKind: 0, mode: 1, cursorLine: 42,
+        dispatcher.dispatch(.guiStatusBar(StatusBarUpdate(contentKind: 0, mode: 1, cursorLine: 42,
                                            cursorCol: 9, lineCount: 500, flags: 0x03,
                                            lspStatus: 1, gitBranch: "main",
                                            message: "-- INSERT --", filetype: "elixir",
@@ -357,19 +369,25 @@ struct CommandDispatcherRoutingTests {
                                            gitAdded: 5, gitModified: 3, gitDeleted: 1,
                                            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0,
                                            filename: "editor.ex", diagnosticHint: "",
-                                           backgroundSubagentCount: 0, backgroundSubagentLabel: ""))
+                                           backgroundSubagentCount: 0, backgroundSubagentLabel: "",
+                                           indent: .init(kind: 1, size: 4),
+                                           selection: .init(mode: 2, size: 3))))
 
         #expect(gui.statusBarState.mode == 1)
         #expect(gui.statusBarState.cursorLine == 42)
         #expect(gui.statusBarState.gitBranch == "main")
         #expect(gui.statusBarState.filetype == "elixir")
         #expect(gui.statusBarState.errorCount == 3)
+        #expect(gui.statusBarState.indent.kind == 1)
+        #expect(gui.statusBarState.indent.size == 4)
+        #expect(gui.statusBarState.selection.mode == 2)
+        #expect(gui.statusBarState.selection.size == 3)
     }
 
     @Test("guiStatusBar agent variant populates background buffer fields")
     @MainActor func guiStatusBarAgentRouting() {
         let (dispatcher, gui) = makeDispatcher()
-        dispatcher.dispatch(.guiStatusBar(contentKind: 1, mode: 0, cursorLine: 11,
+        dispatcher.dispatch(.guiStatusBar(StatusBarUpdate(contentKind: 1, mode: 0, cursorLine: 11,
                                            cursorCol: 6, lineCount: 100, flags: 0x03,
                                            lspStatus: 1, gitBranch: "feat/agent",
                                            message: "", filetype: "elixir",
@@ -380,7 +398,7 @@ struct CommandDispatcherRoutingTests {
                                            gitAdded: 3, gitModified: 2, gitDeleted: 0,
                                            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0,
                                            filename: "editor.ex", diagnosticHint: "",
-                                           backgroundSubagentCount: 2, backgroundSubagentLabel: "session-2: tests"))
+                                           backgroundSubagentCount: 2, backgroundSubagentLabel: "session-2: tests")))
 
         #expect(gui.statusBarState.contentKind == 1)
         #expect(gui.statusBarState.isAgentWindow == true)

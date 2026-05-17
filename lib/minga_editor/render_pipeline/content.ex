@@ -103,6 +103,7 @@ defmodule MingaEditor.RenderPipeline.Content do
       ContentHelpers.build_render_ctx(state, window, %{
         viewport: viewport,
         cursor: cursor,
+        cursor_col: cursor_col,
         lines: lines,
         first_line: first_line,
         preview_matches: preview_matches,
@@ -403,6 +404,7 @@ defmodule MingaEditor.RenderPipeline.Content do
       ContentHelpers.build_render_ctx(state, window, %{
         viewport: viewport,
         cursor: {cursor_line, cursor_byte_col},
+        cursor_col: cursor_col,
         lines: snapshot.lines,
         first_line: first_line,
         preview_matches: [],

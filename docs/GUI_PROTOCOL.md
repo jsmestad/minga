@@ -243,6 +243,9 @@ opcode(1) + section_count(1) + [section_id(1) + section_len(2) + payload(section
 | 0x07 | Message | msg_len(2) + msg |
 | 0x08 | Recording | macro_recording(1) |
 | 0x09 | Agent | buffer variant: agent_status(1) + background_count(2) + background_label_len(2) + background_label. Agent variant: model_name_len(1) + model_name + message_count(4) + session_status(1) + agent_status(1) + background_count(2) + background_label_len(2) + background_label |
+| 0x0A | Indent | indent_type(1: 0=spaces, 1=tabs) + indent_size(1) |
+| 0x0B | Reserved | Reserved for future encoding section |
+| 0x0C | Selection | selection_mode(1: 0=none, 1=chars, 2=lines) + selection_size(4) |
 
 `content_kind`: 0 = buffer window, 1 = agent chat window. When `content_kind == 1`, the standard sections (cursor, git, diagnostics, etc.) contain background buffer data and section 0x09 includes agent-specific fields. `background_count` is the number of currently running background sub-agents. `background_label` is the active background child label when focused, otherwise the first running child label.
 
@@ -736,7 +739,7 @@ When no splits are active, the BEAM sends counts of 0 for both separator types.
 Git status panel data for the native sidebar, plus remote operation feedback used by the sidebar and status bar.
 
 ```
-opcode(1) + repo_state(1) + syncing(1) + ahead(2) + behind(2) + branch_len(2) + branch(branch_len) + entry_count(2) + entries... + toast_present(1) + toast?
+opcode(1) + repo_state(1) + syncing(1) + ahead(2) + behind(2) + branch_len(2) + branch(branch_len) + entry_count(2) + entries... + toast_present(1) + toast? + entry_base_path_len(2) + entry_base_path(entry_base_path_len) + last_commit_message_len(2) + last_commit_message(last_commit_message_len)
 
 Per entry:
   path_hash(4) + section(1) + status(1) + path_len(2) + path(path_len)
@@ -746,13 +749,14 @@ Toast when toast_present == 1:
 ```
 
 `repo_state`: 0 = normal, 1 = not_a_repo, 2 = loading.
+`entry_base_path`: absolute base path for the displayed entry paths. This is usually the project root, and can differ from the repository root in monorepos.
 `syncing`: 1 while a git remote operation is in flight, otherwise 0.
 `section`: 0 = staged, 1 = changed, 2 = untracked, 3 = conflicted.
 `status`: 0 = unknown, 1 = modified, 2 = added, 3 = deleted, 4 = renamed, 5 = copied, 6 = untracked, 7 = conflict.
 `level`: 0 = success, 1 = error.
 `action`: 0 = none, 1 = pull_and_retry.
 
-When the git status panel is closed, the BEAM sends `repo_state = not_a_repo` with no entries as the hide signal. The frontend should still copy `syncing` and `toast` so remote operation feedback remains accurate while the panel is hidden.
+When the git status panel is closed, the BEAM sends `repo_state = not_a_repo`, no entries, and an empty `entry_base_path` as the hide signal. A non-git project opened in the Source Control tab also uses `repo_state = not_a_repo`, but includes the project root so the frontend can show the native "Not a git repository" empty state instead of hiding the panel. The frontend should still copy `syncing` and `toast` so remote operation feedback remains accurate while the panel is hidden.
 
 ### 0x86 — gui_agent_groups
 
@@ -813,7 +817,7 @@ opcode(1) + action_type(1) + payload...
 | 0x1A | git_discard_file | path_len(2) + path(path_len) | Discard working-tree changes |
 | 0x1B | git_stage_all | (empty) | Stage all changes |
 | 0x1C | git_unstage_all | (empty) | Unstage all |
-| 0x1D | git_commit | msg_len(2) + msg(msg_len) | Commit with message |
+| 0x1D | git_commit | amend(1) + msg_len(2) + msg(msg_len) | Commit with message, or amend when `amend` is 1. New frontends should use this action for both normal and amend commits. |
 | 0x1E | git_open_file | path_len(2) + path(path_len) | Open file in editor |
 | 0x1F | agent_group_rename | id(2) + name_len(2) + name(name_len) | Rename an agent workspace group |
 | 0x20 | agent_group_set_icon | id(2) + icon_len(1) + icon(icon_len) | Change an agent workspace icon |
@@ -845,11 +849,14 @@ opcode(1) + action_type(1) + payload...
 | 0x38 | git_push | (empty) | Push the current branch |
 | 0x39 | git_pull | (empty) | Pull from the upstream branch |
 | 0x3A | git_fetch | (empty) | Fetch remote refs |
-| 0x3B | git_commit_amend | msg_len(2) + msg(msg_len) | Amend the previous commit message |
+| 0x3B | git_commit_amend | msg_len(2) + msg(msg_len) | Legacy compatibility action for amending the previous commit; new frontends should send `git_commit` with `amend = 1` instead |
 | 0x3C | git_pull_and_retry | (empty) | Pull, then retry the failed push |
 | 0x3D | file_tree_open_in_split | index(2) | Open a file tree entry in a vertical split |
 | 0x3E | tab_copy_path | tab_id(4) | Copy a tab's file path |
 | 0x3F | hover_open_action | (empty) | Accept the current hover popup action |
+| 0x42 | git_open_diff | path_len(2) + path(path_len) + section(1) | Open a diff view for a git status file in the selected section |
+
+Older path-only `git_open_diff` payloads are accepted as a compatibility fallback only when the path is unambiguous. Native frontends should always send the section-aware form.
 
 For `file_tree_drop`, `target_kind` is `1` for a directory and `0` for a file. Each source is encoded as `path_len(2) + path(path_len)`. Frontends should send both the target index and stable target identity so the BEAM can reject stale drops safely; drops onto files are resolved to the file's parent directory by the BEAM.
 

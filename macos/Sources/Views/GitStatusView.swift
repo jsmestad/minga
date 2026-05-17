@@ -13,6 +13,7 @@ struct GitStatusView: View {
 
     private let rowHeight: CGFloat = 24
     private let sectionHeaderHeight: CGFloat = 26
+    @Namespace private var fileMoveNamespace
 
     private var animDuration: Double {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.15
@@ -131,6 +132,7 @@ struct GitStatusView: View {
                 sectionBlock(.untracked)
             }
             .padding(.top, 2)
+            .animation(.easeInOut(duration: animDuration), value: state.entriesRevision)
         }
     }
 
@@ -280,9 +282,11 @@ struct GitStatusView: View {
         .onHover { hovered in
             hoveredEntryId = hovered ? entry.id : nil
         }
+        .matchedGeometryEffect(id: state.animationID(for: entry), in: fileMoveNamespace)
         .onTapGesture {
             encoder?.sendGitOpenFile(path: entry.path)
         }
+        .contextMenu { fileContextMenu(entry) }
         .accessibilityLabel("\(statusAccessibilityLabel(entry.status)) file: \(entry.filename)")
     }
 
@@ -314,6 +318,58 @@ struct GitStatusView: View {
     }
 
     @ViewBuilder
+    private func fileContextMenu(_ entry: GitStatusEntry) -> some View {
+        Button("Open File") {
+            encoder?.sendGitOpenFile(path: entry.path)
+        }
+        Button("Open Diff") {
+            encoder?.sendGitOpenDiff(path: entry.path, section: entry.section.rawValue)
+        }
+
+        Divider()
+
+        switch entry.section {
+        case .staged:
+            Button("Unstage") {
+                encoder?.sendGitUnstageFile(path: entry.path)
+            }
+        case .changed, .untracked, .conflicted:
+            Button(entry.section == .conflicted ? "Stage (Mark Resolved)" : "Stage") {
+                encoder?.sendGitStageFile(path: entry.path)
+            }
+            Button(role: .destructive) {
+                fileToDiscard = entry
+            } label: {
+                Text("Discard Changes")
+            }
+        }
+
+        Divider()
+
+        Button("Copy Path") {
+            copyToClipboard(entry.path)
+        }
+        Button("Reveal in Finder") {
+            revealInFinder(entry)
+        }
+    }
+
+    private func copyToClipboard(_ string: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(string, forType: .string)
+    }
+
+    private func revealInFinder(_ entry: GitStatusEntry) {
+        let path = fullPath(for: entry)
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+    }
+
+    private func fullPath(for entry: GitStatusEntry) -> String {
+        guard !state.entryBasePath.isEmpty else { return entry.path }
+        return URL(fileURLWithPath: state.entryBasePath).appendingPathComponent(entry.path).path
+    }
+
+    @ViewBuilder
     private func rowBackground(isHovered: Bool) -> some View {
         if isHovered {
             RoundedRectangle(cornerRadius: 4)
@@ -336,7 +392,10 @@ struct GitStatusView: View {
             VStack(spacing: 6) {
                 // Amend toggle
                 HStack {
-                    Toggle(isOn: Bindable(state).amendMode) {
+                    Toggle(isOn: Binding(
+                        get: { state.amendMode },
+                        set: { state.setAmendMode($0) }
+                    )) {
                         Text("Amend")
                             .font(.system(size: 11))
                             .foregroundStyle(theme.treeFg.opacity(0.6))
@@ -431,7 +490,7 @@ struct GitStatusView: View {
     private var charCounter: some View {
         let firstLine = state.commitMessage.components(separatedBy: "\n").first ?? ""
         let count = firstLine.count
-        let color: Color = count > 50 ? theme.gutterWarningFg : theme.treeFg.opacity(0.3)
+        let color = subjectCountColor(count)
 
         if !state.commitMessage.isEmpty {
             Text("\(count)")
@@ -443,11 +502,21 @@ struct GitStatusView: View {
         }
     }
 
+    private func subjectCountColor(_ count: Int) -> Color {
+        if count >= 72 {
+            return theme.gutterErrorFg
+        }
+        if count >= 50 {
+            return theme.gutterWarningFg
+        }
+        return theme.treeFg.opacity(0.3)
+    }
+
     private var commitBorderColor: Color {
         let firstLine = state.commitMessage.components(separatedBy: "\n").first ?? ""
-        if firstLine.count > 72 {
+        if firstLine.count >= 72 {
             return theme.gutterErrorFg.opacity(0.5)
-        } else if firstLine.count > 50 {
+        } else if firstLine.count >= 50 {
             return theme.gutterWarningFg.opacity(0.5)
         }
         return theme.treeSeparatorFg

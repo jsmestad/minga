@@ -186,6 +186,74 @@ defmodule MingaEditor.Renderer.LineHighlightTest do
       assert String.contains?(first.text, "hello")
     end
 
+    test "TODO keywords use TODO face without tree-sitter" do
+      ctx = %{
+        base_ctx(highlight: nil)
+        | hl_todo_faces: %{todo: Minga.Core.Face.new(fg: 0xECBE7B, bold: true)}
+      }
+
+      cmds = LineRenderer.render("# TODO ship", 0, 0, ctx, 0)
+      todo = cmds |> Enum.map(&decode_draw/1) |> Enum.find(fn draw -> draw.text == "TODO" end)
+
+      assert todo.fg == 0xECBE7B
+      assert :bold in todo.attrs
+    end
+
+    test "TODO keyword ranges account for multibyte characters before the marker" do
+      ctx = %{
+        base_ctx(highlight: nil)
+        | hl_todo_faces: %{todo: Minga.Core.Face.new(fg: 0xECBE7B, bold: true)}
+      }
+
+      cmds = LineRenderer.render("é # TODO ship", 0, 0, ctx, 0)
+      todo = cmds |> Enum.map(&decode_draw/1) |> Enum.find(fn draw -> draw.text == "TODO" end)
+      text = Enum.map_join(cmds, "", fn cmd -> decode_draw(cmd).text end)
+
+      assert text == "é # TODO ship"
+      assert todo.fg == 0xECBE7B
+    end
+
+    test "TODO keywords override tree-sitter comment styling only inside comments" do
+      hl =
+        highlight_with(
+          [%{start_byte: 0, end_byte: 11, capture_id: 0}],
+          ["comment"],
+          %{"comment" => [fg: @comment_color, italic: true]}
+        )
+
+      ctx = %{
+        base_ctx(highlight: hl)
+        | hl_todo_faces: %{todo: Minga.Core.Face.new(fg: 0xECBE7B, bold: true)}
+      }
+
+      cmds = LineRenderer.render("# TODO ship", 0, 0, ctx, 0)
+      todo = cmds |> Enum.map(&decode_draw/1) |> Enum.find(fn draw -> draw.text == "TODO" end)
+
+      assert todo.fg == 0xECBE7B
+      assert :bold in todo.attrs
+    end
+
+    test "TODO keywords do not override non-comment tree-sitter captures" do
+      hl =
+        highlight_with(
+          [%{start_byte: 0, end_byte: 13, capture_id: 0}],
+          ["string"],
+          %{"string" => [fg: @string_color]}
+        )
+
+      ctx = %{
+        base_ctx(highlight: hl)
+        | hl_todo_faces: %{todo: Minga.Core.Face.new(fg: 0xECBE7B, bold: true)}
+      }
+
+      cmds = LineRenderer.render("\"# TODO ship\"", 0, 0, ctx, 0)
+      text = Enum.map_join(cmds, "", fn cmd -> decode_draw(cmd).text end)
+      colors = cmds |> Enum.map(&decode_draw/1) |> Enum.map(& &1.fg) |> Enum.uniq()
+
+      assert text == "\"# TODO ship\""
+      assert colors == [@string_color]
+    end
+
     test "with gutter offset, columns are shifted" do
       hl =
         highlight_with(

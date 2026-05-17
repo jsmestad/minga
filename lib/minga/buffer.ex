@@ -118,6 +118,10 @@ defmodule Minga.Buffer do
   @spec text_between_inclusive(t(), position(), position()) :: String.t()
   defdelegate text_between_inclusive(server, start_pos, end_pos), to: BufferProcess
 
+  @doc "Grapheme count between two positions (end inclusive, includes the character at end_pos)."
+  @spec content_range_length(t(), position(), position()) :: non_neg_integer()
+  defdelegate content_range_length(server, start_pos, end_pos), to: BufferProcess
+
   @doc "Number of lines in the buffer."
   @spec line_count(t()) :: pos_integer()
   defdelegate line_count(server), to: BufferProcess

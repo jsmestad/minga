@@ -13,6 +13,14 @@ defmodule MingaEditor.UI.Theme.Catppuccin do
     %MingaEditor.UI.Theme{
       name: name,
       syntax: syntax(p),
+      hl_todo: %{
+        todo: Minga.Core.Face.new(fg: p.yellow, bold: true),
+        fixme: Minga.Core.Face.new(fg: p.red, bold: true),
+        note: Minga.Core.Face.new(fg: p.blue, bold: true),
+        hack: Minga.Core.Face.new(fg: p.peach, bold: true),
+        review: Minga.Core.Face.new(fg: p.mauve, bold: true),
+        deprecated: Minga.Core.Face.new(fg: p.overlay0, strikethrough: true)
+      },
       editor: %MingaEditor.UI.Theme.Editor{
         bg: p.base,
         fg: p.text,
@@ -24,7 +32,9 @@ defmodule MingaEditor.UI.Theme.Catppuccin do
         highlight_read_bg: p.surface1,
         highlight_write_bg: p.surface2,
         selection_bg: p.surface2,
-        whitespace_fg: p.overlay0
+        whitespace_fg: p.overlay0,
+        indent_guide_fg: p.surface1,
+        indent_guide_active_fg: p.overlay0
       },
       gutter: %MingaEditor.UI.Theme.Gutter{
         fg: p.overlay0,

@@ -54,6 +54,12 @@ defmodule MingaEditor.Commands.Help do
         execute: fn state -> execute(state, :describe_option) end
       },
       %Command{
+        name: :indent_picker,
+        description: "Open indent settings picker",
+        requires_buffer: false,
+        execute: fn state -> execute(state, :indent_picker) end
+      },
+      %Command{
         name: :describe_lossage,
         description: "Show keystroke history",
         requires_buffer: false,
@@ -97,6 +103,10 @@ defmodule MingaEditor.Commands.Help do
 
   def execute(state, :describe_option) do
     PickerUI.open(state, MingaEditor.UI.Picker.OptionSource)
+  end
+
+  def execute(state, :indent_picker) do
+    PickerUI.open(state, MingaEditor.UI.Picker.IndentOptionSource)
   end
 
   def execute(state, :describe_lossage) do

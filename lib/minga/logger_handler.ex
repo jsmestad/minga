@@ -184,16 +184,19 @@ defmodule Minga.LoggerHandler do
     # yet (Minga.Log.MessagesBuffer hasn't booted). Once the wrapper subscribes,
     # broadcasts reach it directly and the ETS buffer is drained on its init.
     if has_subscribers?() do
-      event_level = if level in [:warning, :error], do: :warning, else: :info
-
       Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{
         text: text,
-        level: event_level
+        level: event_level(level)
       })
     else
       buffer_message(text, level)
     end
   end
+
+  @spec event_level(atom()) :: Minga.Events.LogMessageEvent.level()
+  defp event_level(level) when level in [:error, :critical, :alert, :emergency], do: :error
+  defp event_level(:warning), do: :warning
+  defp event_level(_level), do: :info
 
   @spec has_subscribers?() :: boolean()
   defp has_subscribers? do

@@ -82,6 +82,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x3D       | file_tree_open_in_split |
   | 0x3E       | tab_copy_path           |
   | 0x3F       | hover_open_action       |
+  | 0x42       | git_open_diff           |
   | 0x40       | file_tree_drop          |
   | 0x41       | fold_toggle_at_line     |
   | 0x34       | system_will_sleep      |
@@ -137,6 +138,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @op_gui_change_summary 0x89
 
   @max_u16 65_535
+  @max_u32 4_294_967_295
   @chat_message_limit 100
   @max_chat_text_bytes 60_000
   @truncation_suffix "\n… [truncated]"
@@ -157,6 +159,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @section_message 0x07
   @section_recording 0x08
   @section_agent 0x09
+  @section_indent 0x0A
+  # 0x0B reserved for future encoding section
+  @section_selection 0x0C
 
   # gui_gutter sections
   @section_gutter_window 0x01
@@ -253,6 +258,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_git_fetch 0x3A
   @gui_action_git_commit_amend 0x3B
   @gui_action_git_pull_and_retry 0x3C
+  @gui_action_git_open_diff 0x42
   @gui_action_file_tree_open_in_split 0x3D
   @gui_action_tab_copy_path 0x3E
   @gui_action_hover_open_action 0x3F
@@ -296,7 +302,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | :git_stage_all
           | :git_unstage_all
           | {:git_commit, message :: String.t()}
+          | {:git_commit, message :: String.t(), amend? :: boolean()}
           | {:git_open_file, path :: String.t()}
+          | {:git_open_diff, path :: String.t(), section :: non_neg_integer()}
           | {:agent_group_rename, id :: non_neg_integer(), name :: String.t()}
           | {:agent_group_set_icon, id :: non_neg_integer(), icon :: String.t()}
           | {:agent_group_close, id :: non_neg_integer()}
@@ -1349,6 +1357,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     0x07 - Message: status message
     0x08 - Recording: macro_recording
     0x09 - Agent: model_name, message_count, session_status, agent_status
+    0x0A - Indent: indent_type, indent_size
+    0x0B - Reserved for future encoding section
+    0x0C - Selection: selection_mode, selection_size
   """
   @spec encode_gui_status_bar(MingaEditor.StatusBar.Data.t()) :: binary()
   def encode_gui_status_bar({:buffer, d}) do
@@ -1368,6 +1379,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     lsp_byte = encode_lsp_status(d.lsp_status)
     parser_byte = encode_parser_status(d.parser_status)
     agent_byte = encode_agent_session_status(d.agent_status)
+    indent_type_byte = encode_indent_type(Map.get(d, :indent_type, :spaces))
+    indent_size = clamp_u8(Map.get(d, :indent_size, 2))
+    {selection_mode, selection_size} = encode_selection_info(Map.get(d, :selection_info))
 
     git_branch = :erlang.iolist_to_binary([d.git_branch || ""])
     filetype = :erlang.iolist_to_binary([Atom.to_string(d.filetype || :text)])
@@ -1413,7 +1427,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           byte_size(filename)::16, filename::binary, byte_size(filetype)::8, filetype::binary>>
       ),
       encode_section(@section_message, <<byte_size(message)::16, message::binary>>),
-      encode_section(@section_recording, <<macro_byte::8>>)
+      encode_section(@section_recording, <<macro_byte::8>>),
+      encode_section(@section_indent, <<indent_type_byte::8, indent_size::8>>),
+      encode_section(@section_selection, <<selection_mode::8, selection_size::32>>)
     ]
 
     # Agent section (only when content_kind == 1)
@@ -1453,6 +1469,20 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp encode_vim_mode(:search_prompt), do: 5
   defp encode_vim_mode(:replace), do: 6
   defp encode_vim_mode(_), do: 0
+
+  @spec encode_indent_type(atom()) :: non_neg_integer()
+  defp encode_indent_type(:tabs), do: 1
+  defp encode_indent_type(_indent_type), do: 0
+
+  @spec encode_selection_info(MingaEditor.StatusBar.Data.selection_info()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp encode_selection_info({:chars, count}), do: {1, min(count, @max_u32)}
+  defp encode_selection_info({:lines, count}), do: {2, min(count, @max_u32)}
+  defp encode_selection_info(_selection_info), do: {0, 0}
+
+  @spec clamp_u8(term()) :: non_neg_integer()
+  defp clamp_u8(value) when is_integer(value), do: value |> max(0) |> min(255)
+  defp clamp_u8(_value), do: 0
 
   @spec encode_lsp_status(atom() | nil) :: non_neg_integer()
   defp encode_lsp_status(:ready), do: 1
@@ -2311,11 +2341,28 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   def decode_gui_action(@gui_action_git_unstage_all, <<>>),
     do: {:ok, :git_unstage_all}
 
+  def decode_gui_action(
+        @gui_action_git_commit,
+        <<amend_byte::8, msg_len::16, message::binary-size(msg_len)>>
+      )
+      when amend_byte in [0, 1],
+      do: {:ok, {:git_commit, message, amend_byte == 1}}
+
   def decode_gui_action(@gui_action_git_commit, <<msg_len::16, message::binary-size(msg_len)>>),
     do: {:ok, {:git_commit, message}}
 
   def decode_gui_action(@gui_action_git_open_file, <<path_len::16, path::binary-size(path_len)>>),
     do: {:ok, {:git_open_file, path}}
+
+  def decode_gui_action(
+        @gui_action_git_open_diff,
+        <<path_len::16, path::binary-size(path_len), section::8>>
+      )
+      when section in 0..3,
+      do: {:ok, {:git_open_diff, path, section}}
+
+  def decode_gui_action(@gui_action_git_open_diff, <<path_len::16, path::binary-size(path_len)>>),
+    do: {:ok, {:git_open_diff, path, 255}}
 
   def decode_gui_action(@gui_action_git_push, <<>>),
     do: {:ok, :git_push}
@@ -2944,7 +2991,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           branch: String.t(),
           ahead: non_neg_integer(),
           behind: non_neg_integer(),
-          entries: [Minga.Git.StatusEntry.t()]
+          entries: [Minga.Git.StatusEntry.t()],
+          entry_base_path: String.t(),
+          last_commit_message: String.t()
         }
 
   @typedoc "Git status data enriched with syncing/toast for protocol encoding."
@@ -2955,6 +3004,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           ahead: non_neg_integer(),
           behind: non_neg_integer(),
           entries: [Minga.Git.StatusEntry.t()],
+          entry_base_path: String.t(),
+          last_commit_message: String.t(),
           git_toast: git_toast() | nil
         }
 
@@ -2967,6 +3018,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       path_hash:4, section:1, status:1, path_len:2, path
     then toast section:
       toast_present:1, [toast_level:1, action:1, msg_len:2, msg]
+    then repo metadata:
+      entry_base_path_len:2, entry_base_path, last_commit_message_len:2, last_commit_message
   """
   @spec encode_gui_git_status(git_status_data()) :: binary()
   def encode_gui_git_status(
@@ -2996,11 +3049,22 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
     toast_binary = encode_git_toast(Map.get(data, :git_toast))
 
+    entry_base_path_bytes =
+      utf8_prefix_bytes(
+        Map.get(data, :entry_base_path) || Map.get(data, :git_root) || "",
+        @max_u16
+      )
+
+    last_commit_message_bytes =
+      utf8_prefix_bytes(Map.get(data, :last_commit_message) || "", @max_u16)
+
     IO.iodata_to_binary([
       <<@op_gui_git_status, repo_state_byte::8, syncing_byte::8, ahead::16, behind::16,
         byte_size(branch_bytes)::16, branch_bytes::binary, entry_count::16>>,
       entry_binaries,
-      toast_binary
+      toast_binary,
+      <<byte_size(entry_base_path_bytes)::16, entry_base_path_bytes::binary,
+        byte_size(last_commit_message_bytes)::16, last_commit_message_bytes::binary>>
     ])
   end
 

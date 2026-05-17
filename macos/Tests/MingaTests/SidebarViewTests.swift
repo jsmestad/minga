@@ -480,16 +480,16 @@ struct GitStatusViewSectionTests {
         state.repoState = .normal
         state.branchName = "main"
         state.stagedEntries = [
-            GitStatusEntry(id: 1, section: .staged, status: .modified, path: "lib/a.ex"),
+            GitStatusEntry(pathHash: 1, section: .staged, status: .modified, path: "lib/a.ex"),
         ]
         state.changedEntries = [
-            GitStatusEntry(id: 2, section: .changed, status: .modified, path: "lib/b.ex"),
+            GitStatusEntry(pathHash: 2, section: .changed, status: .modified, path: "lib/b.ex"),
         ]
         state.untrackedEntries = [
-            GitStatusEntry(id: 3, section: .untracked, status: .untracked, path: "lib/c.ex"),
+            GitStatusEntry(pathHash: 3, section: .untracked, status: .untracked, path: "lib/c.ex"),
         ]
         state.conflictedEntries = [
-            GitStatusEntry(id: 4, section: .conflicted, status: .conflicted, path: "lib/d.ex"),
+            GitStatusEntry(pathHash: 4, section: .conflicted, status: .conflicted, path: "lib/d.ex"),
         ]
 
         let sut = GitStatusView(state: state, theme: ThemeColors(), encoder: nil)
@@ -504,13 +504,27 @@ struct GitStatusViewSectionTests {
         #expect(strings.contains(where: { $0.localizedCaseInsensitiveContains("Merge Conflicts") || $0.localizedCaseInsensitiveContains("Conflicted") }))
     }
 
+    @Test("Amend mode pre-fills previous commit message without clobbering user text")
+    @MainActor func amendModePrefillsPreviousCommitMessageWithoutClobberingUserText() {
+        let state = GitStatusState()
+        state.update(repoState: .normal, branchName: "main", ahead: 0, behind: 0, syncing: false, entries: [], toast: nil, entryBasePath: "/repo", lastCommitMessage: "feat: previous subject")
+
+        state.setAmendMode(true)
+        #expect(state.commitMessage == "feat: previous subject")
+
+        state.setAmendMode(false)
+        state.commitMessage = "fix: user typed subject"
+        state.setAmendMode(true)
+        #expect(state.commitMessage == "fix: user typed subject")
+    }
+
     @Test("File entries show status letter and filename")
     @MainActor func fileEntriesShowStatusAndName() throws {
         let state = GitStatusState()
         state.repoState = .normal
         state.branchName = "main"
         state.changedEntries = [
-            GitStatusEntry(id: 1, section: .changed, status: .modified, path: "lib/minga/editor.ex"),
+            GitStatusEntry(pathHash: 1, section: .changed, status: .modified, path: "lib/minga/editor.ex"),
         ]
 
         let sut = GitStatusView(state: state, theme: ThemeColors(), encoder: nil)
