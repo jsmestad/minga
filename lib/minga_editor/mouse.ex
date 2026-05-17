@@ -877,20 +877,123 @@ defmodule MingaEditor.Mouse do
   @spec handle_context_click(state(), non_neg_integer(), non_neg_integer()) :: state()
   defp handle_context_click(state, row, col) do
     state = maybe_unfocus_file_tree_for_content_click(state)
+    target = mouse_to_buffer_pos(state, row, col)
+    preserve_selection? = context_click_preserves_visual_selection?(state, row, col, target)
     state = maybe_focus_window_at(state, row, col)
 
-    case mouse_to_buffer_pos(state, row, col) do
+    case target do
       nil ->
         state
 
       {target_line, target_col} ->
-        Buffer.move_to(state.workspace.buffers.active, {target_line, target_col})
-
-        state
-        |> cancel_mode_for_mouse()
-        |> EditorState.transition_mode(:normal)
+        handle_context_click_at_buffer_pos(state, target_line, target_col, preserve_selection?)
     end
   end
+
+  @spec context_click_preserves_visual_selection?(
+          state(),
+          non_neg_integer(),
+          non_neg_integer(),
+          {non_neg_integer(), non_neg_integer()} | nil
+        ) ::
+          boolean()
+  defp context_click_preserves_visual_selection?(_state, _row, _col, nil), do: false
+
+  defp context_click_preserves_visual_selection?(state, row, col, {target_line, target_col}) do
+    context_click_targets_active_buffer?(state, row, col) and
+      click_inside_visual_selection?(state, target_line, target_col)
+  end
+
+  @spec handle_context_click_at_buffer_pos(
+          state(),
+          non_neg_integer(),
+          non_neg_integer(),
+          boolean()
+        ) :: state()
+  defp handle_context_click_at_buffer_pos(state, _target_line, _target_col, true), do: state
+
+  defp handle_context_click_at_buffer_pos(state, target_line, target_col, false) do
+    Buffer.move_to(state.workspace.buffers.active, {target_line, target_col})
+
+    state
+    |> cancel_mode_for_mouse()
+    |> EditorState.transition_mode(:normal)
+  end
+
+  @spec context_click_targets_active_buffer?(state(), non_neg_integer(), non_neg_integer()) ::
+          boolean()
+  defp context_click_targets_active_buffer?(%{workspace: %{windows: %{tree: nil}}}, _row, _col),
+    do: true
+
+  defp context_click_targets_active_buffer?(
+         %{workspace: %{buffers: %{active: active}}} = state,
+         row,
+         col
+       ) do
+    screen = Layout.get(state).editor_area
+
+    case WindowTree.window_at(state.workspace.windows.tree, screen, row, col) do
+      {:ok, id, _rect} ->
+        case Map.fetch(state.workspace.windows.map, id) do
+          {:ok, %Window{buffer: ^active}} -> true
+          _ -> false
+        end
+
+      :error ->
+        false
+    end
+  end
+
+  @spec click_inside_visual_selection?(state(), non_neg_integer(), non_neg_integer()) :: boolean()
+  defp click_inside_visual_selection?(
+         %{
+           workspace: %{
+             editing: %{mode: :visual, mode_state: %VisualState{visual_type: :char} = mode_state},
+             buffers: %{active: buf}
+           }
+         },
+         target_line,
+         target_col
+       )
+       when is_pid(buf) do
+    {cursor_line, cursor_col} = Buffer.cursor(buf)
+    {anchor_line, anchor_col} = mode_state.visual_anchor
+
+    {start_pos, end_pos} =
+      normalize_position_range({anchor_line, anchor_col}, {cursor_line, cursor_col})
+
+    target_pos = {target_line, target_col}
+
+    target_pos >= start_pos and target_pos <= end_pos
+  end
+
+  defp click_inside_visual_selection?(
+         %{
+           workspace: %{
+             editing: %{mode: :visual, mode_state: %VisualState{visual_type: :line} = mode_state},
+             buffers: %{active: buf}
+           }
+         },
+         target_line,
+         _target_col
+       )
+       when is_pid(buf) do
+    {cursor_line, _cursor_col} = Buffer.cursor(buf)
+    {anchor_line, _anchor_col} = mode_state.visual_anchor
+    min_line = min(anchor_line, cursor_line)
+    max_line = max(anchor_line, cursor_line)
+
+    target_line >= min_line and target_line <= max_line
+  end
+
+  defp click_inside_visual_selection?(_state, _target_line, _target_col), do: false
+
+  @spec normalize_position_range(
+          {non_neg_integer(), non_neg_integer()},
+          {non_neg_integer(), non_neg_integer()}
+        ) :: {{non_neg_integer(), non_neg_integer()}, {non_neg_integer(), non_neg_integer()}}
+  defp normalize_position_range(first, second) when first <= second, do: {first, second}
+  defp normalize_position_range(first, second), do: {second, first}
 
   @spec handle_buffer_content_click(state(), non_neg_integer(), non_neg_integer()) :: state()
   defp handle_buffer_content_click(state, row, col) do

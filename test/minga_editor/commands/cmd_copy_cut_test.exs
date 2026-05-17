@@ -118,6 +118,18 @@ defmodule MingaEditor.Commands.CmdCopyCutTest do
       assert BufferProcess.content(buf) == "hello world"
     end
 
+    test "cmd_copy from preserved visual selection copies selection text" do
+      buf = start_buffer("selected text\nsecond line")
+      BufferProcess.move_to(buf, {0, 7})
+      state = build_state(buf) |> with_visual_mode(buf, {0, 0}, :char)
+
+      new_state = Editing.execute(state, :cmd_copy)
+
+      assert register_entry(new_state) == {"selected", :charwise}
+      assert BufferProcess.content(buf) == "selected text\nsecond line"
+      assert_receive {:clipboard_written, "selected"}, 200
+    end
+
     test "copies linewise selection with cursor above anchor" do
       buf = start_buffer("aaa\nbbb\nccc")
       BufferProcess.move_to(buf, {0, 0})
