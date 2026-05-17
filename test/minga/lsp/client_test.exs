@@ -1,10 +1,7 @@
 defmodule Minga.LSP.ClientTest do
-  # async: false because mock LSP server spawns OS processes that may not
-  # start in time under heavy parallel test load
+  # async: false because MockLSPServer spawns OS processes that can race under heavy parallel load.
   use ExUnit.Case, async: false
 
-  # OS process startup (MockLSPServer) makes these inherently slow (~250ms each).
-  # Excluded from test.llm; runs in test.heavy and full suite.
   @moduletag :heavy
 
   alias Minga.Diagnostics
@@ -12,6 +9,8 @@ defmodule Minga.LSP.ClientTest do
   alias Minga.Test.MockLSPServer
 
   @ready_timeout 10_000
+  @event_timeout 5_000
+  @uri "file:///tmp/test.ex"
 
   setup context do
     diag_server = start_supervised!({Diagnostics, name: :"diag_#{System.unique_integer()}"})
@@ -29,7 +28,6 @@ defmodule Minga.LSP.ClientTest do
       Minga.Events.subscribe(:diagnostics_updated)
     end
 
-    # Subscribe to LSP status events and wait for the client to be ready.
     Minga.Events.subscribe(:lsp_status_changed)
 
     client =
@@ -38,58 +36,37 @@ defmodule Minga.LSP.ClientTest do
          server_config: server_config, root_path: System.tmp_dir!(), diagnostics: diag_server}
       )
 
-    case Client.status(client) do
-      :ready ->
-        :ok
-
-      _ ->
-        assert_receive {:minga_event, :lsp_status_changed,
-                        %Minga.Events.LspStatusEvent{name: :mock_lsp, status: :ready}},
-                       @ready_timeout
-    end
+    wait_until_ready(client)
 
     %{client: client, diag_server: diag_server}
   end
 
   describe "initialize handshake" do
-    test "client reaches ready status", %{client: client} do
-      assert Client.status(client) == :ready
-    end
-
-    test "parses server capabilities", %{client: client} do
+    test "client exposes negotiated server metadata", %{client: client} do
       caps = Client.capabilities(client)
+
+      assert Client.status(client) == :ready
       assert is_map(caps)
       assert caps["textDocumentSync"]["openClose"] == true
-    end
-
-    test "negotiates position encoding", %{client: client} do
-      # Mock server advertises utf-8
       assert Client.encoding(client) == :utf8
-    end
-
-    test "reports server name", %{client: client} do
       assert Client.server_name(client) == :mock_lsp
     end
   end
 
   describe "document sync" do
-    @uri "file:///tmp/test.ex"
-
-    test "didOpen sends notification and receives diagnostics", %{
+    test "didOpen sends notification and stores diagnostics", %{
       client: client,
       diag_server: diag_server
     } do
       Minga.Events.subscribe(:diagnostics_updated)
+
       Client.did_open(client, @uri, "elixir", "defmodule Test do\nend\n")
 
       assert_receive {:minga_event, :diagnostics_updated,
                       %Minga.Events.DiagnosticsUpdatedEvent{uri: @uri}},
-                     5_000
+                     @event_timeout
 
-      diags = Diagnostics.for_uri(diag_server, @uri)
-      assert length(diags) == 1
-
-      [diag] = diags
+      assert [diag] = Diagnostics.for_uri(diag_server, @uri)
       assert diag.severity == :warning
       assert diag.message == "mock warning on line 1"
       assert diag.source == "mock_lsp"
@@ -98,7 +75,7 @@ defmodule Minga.LSP.ClientTest do
       assert diag.range.start_col == 0
     end
 
-    test "didOpen before initialization is sent once the client becomes ready", %{
+    test "didOpen during startup is sent once the client becomes ready", %{
       diag_server: diag_server
     } do
       uri = "file:///tmp/queued_open.ex"
@@ -123,37 +100,26 @@ defmodule Minga.LSP.ClientTest do
 
       Client.did_open(client, uri, "elixir", "defmodule QueuedOpen do\nend\n")
 
-      assert_receive {:minga_event, :lsp_status_changed,
-                      %Minga.Events.LspStatusEvent{name: :mock_lsp, status: :ready}},
-                     5_000
+      wait_until_ready(client)
 
       assert_receive {:minga_event, :diagnostics_updated,
                       %Minga.Events.DiagnosticsUpdatedEvent{uri: ^uri}},
-                     5_000
+                     @event_timeout
 
-      state = :sys.get_state(client)
-      assert Map.has_key?(state.open_documents, uri)
-      assert state.pending_document_opens == %{}
+      assert [_diag] = Diagnostics.for_uri(diag_server, uri)
     end
 
-    test "didChange does not crash", %{client: client} do
+    test "didChange, didSave, and unknown-uri didChange are safe no-ops", %{client: client} do
       Client.did_open(client, @uri, "elixir", "original")
-      :sys.get_state(client)
+      assert Client.status(client) == :ready
 
       Client.did_change(client, @uri, "modified")
-      :sys.get_state(client)
-
-      # Still alive and ready
       assert Client.status(client) == :ready
-    end
-
-    test "didSave does not crash", %{client: client} do
-      Client.did_open(client, @uri, "elixir", "content")
-      :sys.get_state(client)
 
       Client.did_save(client, @uri)
-      :sys.get_state(client)
+      assert Client.status(client) == :ready
 
+      Client.did_change(client, "file:///unknown", "text")
       assert Client.status(client) == :ready
     end
 
@@ -164,7 +130,7 @@ defmodule Minga.LSP.ClientTest do
 
       assert_receive {:minga_event, :diagnostics_updated,
                       %Minga.Events.DiagnosticsUpdatedEvent{uri: @uri}},
-                     5_000
+                     @event_timeout
 
       assert Diagnostics.for_uri(diag_server, @uri) != []
 
@@ -172,26 +138,15 @@ defmodule Minga.LSP.ClientTest do
 
       assert_receive {:minga_event, :diagnostics_updated,
                       %Minga.Events.DiagnosticsUpdatedEvent{uri: @uri}},
-                     5_000
+                     @event_timeout
 
       assert Diagnostics.for_uri(diag_server, @uri) == []
-    end
-
-    test "didChange on unknown URI is a no-op", %{client: client} do
-      Client.did_change(client, "file:///unknown", "text")
-      :sys.get_state(client)
-      assert Client.status(client) == :ready
     end
   end
 
   describe "workspace/configuration" do
     @tag request_configuration: true,
-         server_settings: %{
-           "mock_lsp" => %{
-             "nested" => %{"enabled" => true},
-             "value" => 1
-           }
-         }
+         server_settings: %{"mock_lsp" => %{"nested" => %{"enabled" => true}, "value" => 1}}
     test "responds to server configuration requests with section results", %{
       diag_server: diag_server
     } do
@@ -199,7 +154,7 @@ defmodule Minga.LSP.ClientTest do
                       %Minga.Events.DiagnosticsUpdatedEvent{
                         uri: "file:///tmp/configuration-test.ex"
                       }},
-                     5_000
+                     @event_timeout
 
       [diag] = Diagnostics.for_uri(diag_server, "file:///tmp/configuration-test.ex")
 
@@ -218,7 +173,7 @@ defmodule Minga.LSP.ClientTest do
                       %Minga.Events.DiagnosticsUpdatedEvent{
                         uri: "file:///tmp/unknown-request-test.ex"
                       }},
-                     5_000
+                     @event_timeout
 
       [diag] = Diagnostics.for_uri(diag_server, "file:///tmp/unknown-request-test.ex")
 
@@ -228,16 +183,15 @@ defmodule Minga.LSP.ClientTest do
   end
 
   describe "status events" do
-    test "client broadcasts :lsp_status_changed with :stopped on shutdown", %{client: client} do
-      # Setup already proved :ready fires (via assert_receive). Test :stopped.
+    test "client broadcasts stopped without a spurious crash event on shutdown", %{client: client} do
       Minga.Events.subscribe(:lsp_status_changed)
+
       Client.shutdown(client)
 
       assert_receive {:minga_event, :lsp_status_changed,
                       %Minga.Events.LspStatusEvent{name: :mock_lsp, status: :stopped}},
-                     5_000
+                     @event_timeout
 
-      # Clean shutdown must not produce a spurious :crashed event.
       refute_receive {:minga_event, :lsp_status_changed,
                       %Minga.Events.LspStatusEvent{status: :crashed}},
                      200
@@ -245,26 +199,31 @@ defmodule Minga.LSP.ClientTest do
   end
 
   describe "async request/response" do
-    test "request/3 returns a reference", %{client: client} do
-      ref =
+    test "request/3 returns unique references while the client stays ready", %{client: client} do
+      ref1 =
         Client.request(client, "textDocument/completion", %{
-          "textDocument" => %{"uri" => "file:///tmp/test.ex"},
+          "textDocument" => %{"uri" => @uri},
           "position" => %{"line" => 0, "character" => 0}
         })
 
-      assert is_reference(ref)
-
-      # This test only verifies the async request can be sent without crashing.
-      assert Client.status(client) == :ready
-    end
-
-    test "multiple requests return unique references", %{client: client} do
-      ref1 = Client.request(client, "textDocument/hover", %{})
       ref2 = Client.request(client, "textDocument/hover", %{})
 
       assert is_reference(ref1)
       assert is_reference(ref2)
       assert ref1 != ref2
+      assert Client.status(client) == :ready
+    end
+  end
+
+  defp wait_until_ready(client) do
+    case Client.status(client) do
+      :ready ->
+        :ok
+
+      _ ->
+        assert_receive {:minga_event, :lsp_status_changed,
+                        %Minga.Events.LspStatusEvent{name: :mock_lsp, status: :ready}},
+                       @ready_timeout
     end
   end
 end
