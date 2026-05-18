@@ -251,6 +251,25 @@ defmodule MingaAgent.SessionTest do
     :ok
   end
 
+  defp start_subscribed_session(provider \\ MockProvider, provider_opts \\ []) do
+    {:ok, session} = Session.start_link(provider: provider, provider_opts: provider_opts)
+    Session.subscribe(session)
+    session
+  end
+
+  defp send_approval(session, reply_to \\ self()) do
+    approval = %Event.ToolApproval{
+      tool_call_id: "tc1",
+      name: "shell",
+      args: %{"command" => "rm -rf /"},
+      reply_to: reply_to
+    }
+
+    send_provider_event(session, approval)
+    assert_receive {:agent_event, _, {:approval_pending, _}}, @event_timeout
+    :ok
+  end
+
   defp mcp_session_builtin_tool do
     ReqLLM.Tool.new!(
       name: "builtin_echo",
@@ -353,36 +372,31 @@ defmodule MingaAgent.SessionTest do
              end)
     end
 
-    test "provider working events do not leave plan mode", %{session: session} do
+    test "plan mode survives provider events and abort", %{session: session} do
       assert :ok = Session.enter_plan(session)
-      send(session, {:agent_provider_event, %Event.AgentStart{}})
 
-      send(
-        session,
-        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc", name: "read_file"}}
-      )
+      events = [
+        %Event.AgentStart{},
+        %Event.ToolStart{tool_call_id: "tc", name: "read_file"},
+        %Event.Error{message: "something broke"}
+      ]
 
+      for event <- events do
+        send_provider_event(session, event)
+        assert Session.status(session) == :plan
+      end
+
+      assert :ok = Session.abort(session)
       assert Session.status(session) == :plan
     end
 
     test "AgentEnd preserves plan mode status" do
-      {:ok, session} =
-        Session.start_link(
-          provider: SlowMockProvider,
-          provider_opts: []
-        )
+      session = start_subscribed_session(SlowMockProvider)
 
-      Session.subscribe(session)
       assert :ok = Session.enter_plan(session)
       assert :ok = Session.send_prompt(session, "hello")
       SlowMockProvider.proceed(Session.get_provider(session))
       assert_receive {:agent_event, _, :messages_changed}, @event_timeout
-      assert Session.status(session) == :plan
-    end
-
-    test "abort preserves plan mode", %{session: session} do
-      assert :ok = Session.enter_plan(session)
-      assert :ok = Session.abort(session)
       assert Session.status(session) == :plan
     end
 
@@ -391,18 +405,6 @@ defmodule MingaAgent.SessionTest do
       assert :ok = Session.enter_exec(session)
       assert Session.status(session) == :idle
       assert length(Session.messages(session)) == msg_count_before
-    end
-
-    test "error event preserves plan mode", %{session: session} do
-      assert :ok = Session.enter_plan(session)
-
-      send(
-        session,
-        {:agent_provider_event, %Event.Error{message: "something broke"}}
-      )
-
-      # Sync via a GenServer.call to ensure the handle_info has been processed
-      assert Session.status(session) == :plan
     end
   end
 
@@ -820,59 +822,21 @@ defmodule MingaAgent.SessionTest do
       refute Map.has_key?(data, :reply_to)
     end
 
-    test "respond_to_approval sends decision to reply_to pid", %{session: session} do
-      # Register ourselves as the reply_to (simulating the Task)
-      approval = %Event.ToolApproval{
-        tool_call_id: "tc1",
-        name: "write_file",
-        args: %{"path" => "foo.ex"},
-        reply_to: self()
-      }
+    test "respond_to_approval resolves each supported decision" do
+      for decision <- [:approve, :reject, :approve_all] do
+        session = start_subscribed_session()
+        send_approval(session)
 
-      send_provider_event(session, approval)
-      assert_receive {:agent_event, _, {:approval_pending, _}}, @event_timeout
+        assert :ok = Session.respond_to_approval(session, decision)
+        assert_receive {:tool_approval_response, "tc1", ^decision}, @event_timeout
+        assert_receive {:agent_event, _, {:approval_resolved, ^decision}}, @event_timeout
+        assert {:error, :no_pending_approval} = Session.respond_to_approval(session, :approve)
 
-      :ok = Session.respond_to_approval(session, :approve)
-
-      # Should receive the response directly
-      assert_receive {:tool_approval_response, "tc1", :approve}
-      # And the resolution broadcast
-      assert_receive {:agent_event, _, {:approval_resolved, :approve}}, @event_timeout
-    end
-
-    test "respond_to_approval with :reject sends reject", %{session: session} do
-      approval = %Event.ToolApproval{
-        tool_call_id: "tc1",
-        name: "shell",
-        args: %{},
-        reply_to: self()
-      }
-
-      send_provider_event(session, approval)
-      assert_receive {:agent_event, _, {:approval_pending, _}}, @event_timeout
-
-      :ok = Session.respond_to_approval(session, :reject)
-      assert_receive {:tool_approval_response, "tc1", :reject}
-
-      messages = Session.messages(session)
-      assert Enum.any?(messages, &match?({:system, "Denied shell" <> _, :info}, &1))
-    end
-
-    test "respond_to_approval with :approve_all sends approve_all", %{session: session} do
-      approval = %Event.ToolApproval{
-        tool_call_id: "tc1",
-        name: "shell",
-        args: %{},
-        reply_to: self()
-      }
-
-      send_provider_event(session, approval)
-      assert_receive {:agent_event, _, {:approval_pending, _}}, @event_timeout
-
-      :ok = Session.respond_to_approval(session, :approve_all)
-      assert_receive {:tool_approval_response, "tc1", :approve_all}
-      assert_receive {:agent_event, _, {:approval_resolved, :approve_all}}, @event_timeout
-      assert {:error, :no_pending_approval} = Session.respond_to_approval(session, :approve)
+        if decision == :reject do
+          messages = Session.messages(session)
+          assert Enum.any?(messages, &match?({:system, "Denied shell" <> _, :info}, &1))
+        end
+      end
     end
 
     test "respond_to_approval with no pending returns error", %{session: session} do
@@ -880,19 +844,10 @@ defmodule MingaAgent.SessionTest do
     end
 
     test "abort clears pending approval", %{session: session} do
-      approval = %Event.ToolApproval{
-        tool_call_id: "tc1",
-        name: "shell",
-        args: %{},
-        reply_to: self()
-      }
-
-      send_provider_event(session, approval)
-      assert_receive {:agent_event, _, {:approval_pending, _}}, @event_timeout
+      send_approval(session)
 
       :ok = Session.abort(session)
 
-      # Pending approval should be cleared
       assert {:error, :no_pending_approval} = Session.respond_to_approval(session, :approve)
     end
   end
