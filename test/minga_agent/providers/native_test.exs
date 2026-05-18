@@ -41,6 +41,34 @@ defmodule MingaAgent.Providers.NativeTest do
     {:ok, stream_response}
   end
 
+  defp blocking_text_stream do
+    parent = self()
+    ref = make_ref()
+
+    stream =
+      Stream.resource(
+        fn ->
+          send(parent, {:blocking_stream_waiting, ref})
+          ref
+        end,
+        fn ^ref ->
+          receive do
+            {^ref, :emit, text} -> {[ReqLLM.StreamChunk.text(text)], ref}
+            {^ref, :halt} -> {:halt, ref}
+          end
+        end,
+        fn _ -> :ok end
+      )
+
+    {stream, ref}
+  end
+
+  defp assert_streaming_started(pid, stream_ref) do
+    assert_receive {:agent_provider_event, %Event.AgentStart{}}, 500
+    assert_receive {:blocking_stream_waiting, ^stream_ref}, 500
+    assert {:ok, %{is_streaming: true}} = Native.get_state(pid)
+  end
+
   defp fake_error_client(error_reason) do
     fn _model, _messages, _opts ->
       {:error, error_reason}
@@ -494,28 +522,15 @@ defmodule MingaAgent.Providers.NativeTest do
 
   describe "abort" do
     test "stops a running prompt", %{tmp_dir: dir} do
-      # Create a slow client that will still be streaming when we abort
-      client = fn _model, _messages, _opts ->
-        slow_stream =
-          Stream.unfold(0, fn n ->
-            Process.sleep(100)
-            {ReqLLM.StreamChunk.text("chunk #{n}"), n + 1}
-          end)
-
-        build_stream_response(slow_stream)
-      end
+      {slow_stream, stream_ref} = blocking_text_stream()
+      client = fn _model, _messages, _opts -> build_stream_response(slow_stream) end
 
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client)
       :ok = Native.send_prompt(pid, "Tell me a very long story")
-
-      # Wait for streaming to actually start (AgentStart proves streaming: true)
-      assert_receive {:agent_provider_event, %Event.AgentStart{}}, 500
+      assert_streaming_started(pid, stream_ref)
 
       assert :ok = Native.abort(pid)
-
-      # Should no longer be streaming
-      assert {:ok, state} = Native.get_state(pid)
-      assert state.is_streaming == false
+      assert {:ok, %{is_streaming: false}} = Native.get_state(pid)
     end
   end
 
@@ -617,19 +632,12 @@ defmodule MingaAgent.Providers.NativeTest do
     end
 
     test "continue fails while already streaming", %{tmp_dir: dir} do
-      client = fn _model, _messages, _opts ->
-        slow_stream =
-          Stream.unfold(0, fn n ->
-            Process.sleep(100)
-            {ReqLLM.StreamChunk.text("chunk #{n}"), n + 1}
-          end)
-
-        build_stream_response(slow_stream)
-      end
+      {slow_stream, stream_ref} = blocking_text_stream()
+      client = fn _model, _messages, _opts -> build_stream_response(slow_stream) end
 
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client)
       :ok = Native.send_prompt(pid, "Long story")
-      assert_receive {:agent_provider_event, %Event.AgentStart{}}, 500
+      assert_streaming_started(pid, stream_ref)
 
       assert {:error, "Already streaming"} = Native.continue(pid)
 
@@ -665,24 +673,15 @@ defmodule MingaAgent.Providers.NativeTest do
 
   describe "concurrent prompt rejection" do
     test "rejects second prompt while streaming", %{tmp_dir: dir} do
-      client = fn _model, _messages, _opts ->
-        slow_stream =
-          Stream.unfold(0, fn n ->
-            Process.sleep(100)
-            {ReqLLM.StreamChunk.text("chunk #{n}"), n + 1}
-          end)
-
-        build_stream_response(slow_stream)
-      end
+      {slow_stream, stream_ref} = blocking_text_stream()
+      client = fn _model, _messages, _opts -> build_stream_response(slow_stream) end
 
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client)
       :ok = Native.send_prompt(pid, "First prompt")
-
-      assert_receive {:agent_provider_event, %Event.AgentStart{}}, 500
+      assert_streaming_started(pid, stream_ref)
 
       assert {:error, :already_streaming} = Native.send_prompt(pid, "Second prompt")
 
-      # Clean up
       Native.abort(pid)
     end
   end
