@@ -6,7 +6,7 @@ defmodule Minga.Tool.ManagerTest do
   alias Minga.Tool.Installer.Stub
 
   @moduletag timeout: 10_000
-  # Sleep-based synchronization in installer stub (~500ms).
+  # Exercises the singleton Manager and async install tasks.
   # Excluded from test.llm; runs in test.heavy and full suite.
   @moduletag :heavy
 
@@ -82,9 +82,13 @@ defmodule Minga.Tool.ManagerTest do
     end
 
     test "returns error when already installing" do
-      Stub.set_install_delay(500)
+      gate_ref = Stub.block_next_install()
       assert :ok = Manager.install(:black)
+      assert_receive {:install_blocked, ^gate_ref, install_pid, :black}, 1_000
+
       assert {:error, :already_installing} = Manager.install(:black)
+
+      Stub.release_install(install_pid, gate_ref)
       await_install(:black)
     end
 

@@ -1,4 +1,5 @@
 defmodule Minga.Language.TreeSitterTest do
+  # Serial because grammar compilation shells out to cc and writes fixed shared-library cache paths.
   use ExUnit.Case, async: false
 
   alias Minga.Language.TreeSitter
@@ -51,7 +52,7 @@ defmodule Minga.Language.TreeSitterTest do
       assert {:ok, lib_path} = TreeSitter.compile_grammar("test_cache", source_dir)
 
       # Record the library's mtime, then backdate source files so the cache
-      # looks newer than the sources (avoids Process.sleep for mtime gap).
+      # looks newer than the sources without waiting for an mtime gap.
       {:ok, lib_stat} = File.stat(lib_path, time: :posix)
 
       for src <- Path.wildcard(Path.join(source_dir, "*.c")) do

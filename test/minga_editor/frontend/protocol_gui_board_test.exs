@@ -94,7 +94,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIBoardTest do
 
     test "does not set you-card flag for agent card" do
       state = State.new()
-      fake_pid = spawn(fn -> Process.sleep(:infinity) end)
+      fake_pid = self()
       {state, card} = State.create_card(state, task: "agent task")
       state = State.update_card(state, card.id, &Card.attach_session(&1, fake_pid))
 

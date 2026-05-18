@@ -37,7 +37,7 @@ defmodule MingaEditor.State.AgentTest do
     end
 
     test "reset_cache preserves buffer pid (rendering stays on the same buffer)" do
-      buf = spawn(fn -> Process.sleep(:infinity) end)
+      buf = self()
       agent = new_agent() |> AgentState.set_buffer(buf) |> AgentState.reset_cache()
       assert agent.buffer == buf
     end

@@ -49,7 +49,7 @@ defmodule Minga.Tool.Installer.Stub do
     :ets.insert(@table, {:uninstall_result, :ok})
     :ets.insert(@table, {:installed_version, {:ok, "1.0.0-stub"}})
     :ets.insert(@table, {:latest_version, {:ok, "2.0.0-stub"}})
-    :ets.insert(@table, {:install_delay_ms, 0})
+    :ets.insert(@table, {:install_gate, nil})
     :ets.insert(@table, {:installs, []})
     :ets.insert(@table, {:uninstalls, []})
     :ok
@@ -83,10 +83,18 @@ defmodule Minga.Tool.Installer.Stub do
     :ok
   end
 
-  @doc "Sets a delay in milliseconds before install completes."
-  @spec set_install_delay(non_neg_integer()) :: :ok
-  def set_install_delay(ms) when is_integer(ms) and ms >= 0 do
-    :ets.insert(@table, {:install_delay_ms, ms})
+  @doc "Blocks the next install until the test releases it."
+  @spec block_next_install(pid()) :: reference()
+  def block_next_install(test_pid \\ self()) when is_pid(test_pid) do
+    ref = make_ref()
+    :ets.insert(@table, {:install_gate, {test_pid, ref}})
+    ref
+  end
+
+  @doc "Releases a blocked install task."
+  @spec release_install(pid(), reference()) :: :ok
+  def release_install(installer_pid, ref) when is_pid(installer_pid) and is_reference(ref) do
+    send(installer_pid, {ref, :continue})
     :ok
   end
 
@@ -124,10 +132,7 @@ defmodule Minga.Tool.Installer.Stub do
 
     progress.(:installing, "Stub installing #{name}...")
 
-    # Simulate delay if configured (test stub only, not production code)
-    delay = get_value(:install_delay_ms, 0)
-    # credo:disable-for-next-line Minga.Credo.NoProcessSleepCheck
-    if delay > 0, do: Process.sleep(delay)
+    maybe_gate_install(name)
 
     progress.(:verifying, "Stub verifying #{name}...")
 
@@ -156,6 +161,28 @@ defmodule Minga.Tool.Installer.Stub do
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────
+
+  @spec maybe_gate_install(atom()) :: :ok
+  defp maybe_gate_install(name) do
+    case get_value(:install_gate, nil) do
+      {test_pid, ref} when is_pid(test_pid) and is_reference(ref) ->
+        :ets.insert(@table, {:install_gate, nil})
+        monitor_ref = Process.monitor(test_pid)
+        send(test_pid, {:install_blocked, ref, self(), name})
+
+        receive do
+          {^ref, :continue} ->
+            Process.demonitor(monitor_ref, [:flush])
+            :ok
+
+          {:DOWN, ^monitor_ref, :process, ^test_pid, _reason} ->
+            :ok
+        end
+
+      _ ->
+        :ok
+    end
+  end
 
   @spec get_value(atom(), term()) :: term()
   defp get_value(key, default) do

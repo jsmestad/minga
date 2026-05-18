@@ -1,4 +1,5 @@
 defmodule MingaEditor.Shell.Board.SessionLifecycleTest do
+  # Serial because one test temporarily unregisters the global MingaAgent.SessionManager.
   use ExUnit.Case, async: false
 
   alias MingaAgent.SessionManager
@@ -44,7 +45,7 @@ defmodule MingaEditor.Shell.Board.SessionLifecycleTest do
     end
 
     test "no-ops when card already has a session" do
-      fake_pid = spawn(fn -> Process.sleep(:infinity) end)
+      fake_pid = self()
       board = BoardState.new()
       {board, card} = BoardState.create_card(board, task: "Agent", session: fake_pid)
       state = make_state(board)

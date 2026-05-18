@@ -12,7 +12,7 @@ defmodule MingaEditor.HighlightSyncTest do
 
   # Minimal state for testing with a fake active buffer PID.
   defp base_state do
-    pid = spawn(fn -> Process.sleep(:infinity) end)
+    pid = self()
 
     %EditorState{
       port_manager: nil,
