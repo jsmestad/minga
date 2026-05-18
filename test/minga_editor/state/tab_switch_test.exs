@@ -15,6 +15,7 @@ defmodule MingaEditor.State.TabSwitchTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Context
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
@@ -22,6 +23,9 @@ defmodule MingaEditor.State.TabSwitchTest do
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
   alias MingaEditor.Workspace.State, as: WorkspaceState
+
+  alias MingaEditor.State.Highlighting
+  alias MingaEditor.UI.Highlight
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -300,22 +304,73 @@ defmodule MingaEditor.State.TabSwitchTest do
       assert new_state.layout == nil
     end
 
-    test "clears attention flag on target tab" do
-      {state, _buf1, _buf2} = state_with_two_file_tabs()
+    test "tab switch restores the target tab's pending LSP refs" do
+      {state, _buf1, buf2} = state_with_two_file_tabs()
+      tb = state.shell_state.tab_bar
+      current_id = tb.active_id
+      target_id = Enum.find(tb.tabs, &(&1.id != tb.active_id)).id
+
+      pending_current = %{make_ref() => :completion_resolve}
+      pending_target = %{make_ref() => {:semantic_tokens, buf2}}
+
+      state = put_in(state.workspace.lsp_pending, pending_current)
+      tab2 = TabBar.get(tb, target_id)
+      tab2_context = Context.put_fields(tab2.context, lsp_pending: pending_target)
+      state = EditorState.set_tab_bar(state, TabBar.update_context(tb, target_id, tab2_context))
+
+      {switched, _effects} = EditorState.switch_tab_pure(state, target_id)
+
+      assert switched.workspace.lsp_pending == pending_target
+
+      assert TabBar.get(switched.shell_state.tab_bar, current_id).context.lsp_pending ==
+               pending_current
+
+      {switched_back, _effects} = EditorState.switch_tab_pure(switched, current_id)
+
+      assert switched_back.workspace.lsp_pending == pending_current
+
+      assert TabBar.get(switched_back.shell_state.tab_bar, target_id).context.lsp_pending ==
+               pending_target
+    end
+
+    test "tab switch does not clobber highlight buffer_id mappings" do
+      {state, buf1, buf2} = state_with_two_file_tabs()
       tb = state.shell_state.tab_bar
       tab2_id = Enum.find(tb.tabs, &(&1.id != tb.active_id)).id
 
-      # Set attention flag on tab 2
-      tb = TabBar.update_tab(tb, tab2_id, &Tab.set_attention(&1, true))
-      state = EditorState.set_tab_bar(state, tb)
+      hl_data = Highlight.new()
 
-      # Confirm attention is set
-      assert TabBar.get(state.shell_state.tab_bar, tab2_id).attention == true
+      live_highlight = %Highlighting{
+        buffer_ids: %{buf1 => 1, buf2 => 2},
+        reverse_buffer_ids: %{1 => buf1, 2 => buf2},
+        next_buffer_id: 3,
+        version: 5,
+        highlights: %{buf1 => hl_data, buf2 => hl_data},
+        last_active_at: %{buf1 => 100, buf2 => 200}
+      }
+
+      state = put_in(state.workspace.highlight, live_highlight)
 
       {new_state, _effects} = EditorState.switch_tab_pure(state, tab2_id)
 
-      # Attention should be cleared on the tab we switched to
-      assert TabBar.get(new_state.shell_state.tab_bar, tab2_id).attention == false
+      hl = new_state.workspace.highlight
+      assert hl.buffer_ids == %{buf1 => 1, buf2 => 2}
+      assert hl.reverse_buffer_ids == %{1 => buf1, 2 => buf2}
+      assert hl.next_buffer_id == 3
+      assert hl.version == 5
+    end
+
+    test "tab switch does not clobber injection_ranges" do
+      {state, buf1, _buf2} = state_with_two_file_tabs()
+      tb = state.shell_state.tab_bar
+      tab2_id = Enum.find(tb.tabs, &(&1.id != tb.active_id)).id
+
+      live_ranges = %{buf1 => [:some_range]}
+      state = put_in(state.workspace.injection_ranges, live_ranges)
+
+      {new_state, _effects} = EditorState.switch_tab_pure(state, tab2_id)
+
+      assert new_state.workspace.injection_ranges == live_ranges
     end
   end
 end

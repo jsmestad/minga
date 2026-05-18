@@ -50,7 +50,9 @@ defmodule MingaEditor.State.SnapshotTest do
 
     test "captures all per-tab fields" do
       {:ok, buf} = BufferProcess.start_link(content: "hello")
+      pending = %{make_ref() => :signature_help}
       state = make_state(buffer: buf, mode: :insert, keymap_scope: :editor)
+      state = put_in(state.workspace.lsp_pending, pending)
 
       ctx = EditorState.snapshot_tab_context(state)
 
@@ -58,10 +60,12 @@ defmodule MingaEditor.State.SnapshotTest do
       assert ctx.editing == state.workspace.editing
       assert ctx.viewport == state.workspace.viewport
       assert ctx.mouse == state.workspace.mouse
-      assert ctx.highlight == state.workspace.highlight
-      assert ctx.lsp_pending == state.workspace.lsp_pending
-      assert ctx.injection_ranges == state.workspace.injection_ranges
+      assert ctx.lsp_pending == pending
       assert ctx.search == state.workspace.search
+
+      # PID/process-keyed highlight and injection cache state stays out of the snapshot.
+      refute Map.has_key?(Map.from_struct(ctx), :highlight)
+      refute Map.has_key?(Map.from_struct(ctx), :injection_ranges)
     end
 
     test "normalises transient editing state before snapshotting" do
@@ -371,9 +375,6 @@ defmodule MingaEditor.State.SnapshotTest do
       assert new_ctx.dired == old_ctx.dired
       assert new_ctx.viewport == old_ctx.viewport
       assert new_ctx.mouse == old_ctx.mouse
-      assert new_ctx.highlight == old_ctx.highlight
-      assert new_ctx.lsp_pending == old_ctx.lsp_pending
-      assert new_ctx.injection_ranges == old_ctx.injection_ranges
       assert new_ctx.search == old_ctx.search
       assert new_ctx.editing == old_ctx.editing
       assert new_ctx.document_highlights == old_ctx.document_highlights
@@ -388,12 +389,14 @@ defmodule MingaEditor.State.SnapshotTest do
 
     test "round-trips through to_workspace_map preserving all fields" do
       {:ok, buf} = BufferProcess.start_link(content: "round-trip")
+      pending = %{make_ref() => {:semantic_tokens, buf}}
 
       ws = %MingaEditor.Workspace.State{
         viewport: Viewport.new(30, 100),
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
         buffers: %Buffers{active: buf, list: [buf]},
-        keymap_scope: :editor
+        keymap_scope: :editor,
+        lsp_pending: pending
       }
 
       ctx = Context.from_workspace(ws)
@@ -405,8 +408,12 @@ defmodule MingaEditor.State.SnapshotTest do
       assert restored_map.viewport == ws.viewport
       assert restored_map.windows == ws.windows
       assert restored_map.mouse == ws.mouse
-      assert restored_map.highlight == ws.highlight
       assert restored_map.search == ws.search
+      assert restored_map.lsp_pending == pending
+
+      # PID/process-keyed highlight and injection cache state stays out of the round-trip.
+      refute Map.has_key?(restored_map, :highlight)
+      refute Map.has_key?(restored_map, :injection_ranges)
     end
 
     test "normalises transient vim state" do
