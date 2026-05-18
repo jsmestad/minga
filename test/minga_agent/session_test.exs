@@ -1159,122 +1159,30 @@ defmodule MingaAgent.SessionTest do
   # ── Stable message IDs ───────────────────────────────────────────────────
 
   describe "message IDs" do
-    test "initial session has one message with ID 1", %{session: session} do
-      pairs = Session.messages_with_ids(session)
-      assert [{1, {:system, _, :info}}] = pairs
-    end
+    test "IDs increment across turns and reset for new or loaded sessions", %{session: session} do
+      assert [{1, {:system, _, :info}}] = Session.messages_with_ids(session)
 
-    test "send_prompt assigns incrementing IDs", %{session: session} do
-      :ok = Session.send_prompt(session, "Hello!")
-      await_turn_complete()
-
-      pairs = Session.messages_with_ids(session)
-      ids = Enum.map(pairs, &elem(&1, 0))
-
-      # system(1), user(2), assistant(3), usage(4)
-      assert ids == [1, 2, 3, 4]
-      assert length(pairs) == length(Session.messages(session))
-    end
-
-    test "IDs are monotonically increasing after multiple turns", %{session: session} do
       :ok = Session.send_prompt(session, "first")
       await_turn_complete()
+      pairs_after_first = Session.messages_with_ids(session)
+      assert Enum.map(pairs_after_first, &elem(&1, 0)) == [1, 2, 3, 4]
 
       :ok = Session.send_prompt(session, "second")
       await_turn_complete()
-
-      pairs = Session.messages_with_ids(session)
-      ids = Enum.map(pairs, &elem(&1, 0))
-
-      assert ids == Enum.sort(ids)
-      assert ids == Enum.uniq(ids)
-      assert length(pairs) == length(Session.messages(session))
-    end
-
-    test "streaming text deltas don't create new IDs" do
-      {:ok, slow_session} =
-        Session.start_link(provider: SlowMockProvider, provider_opts: [])
-
-      Session.subscribe(slow_session)
-      assert is_pid(Session.get_provider(slow_session))
-
-      :ok = Session.send_prompt(slow_session, "hello")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
-
-      # Mid-stream: system(1), user(2), assistant(3)
-      # The SlowMockProvider sends one TextDelta with the prompt text,
-      # which creates an assistant message.
-      pairs_during = Session.messages_with_ids(slow_session)
-      ids_during = Enum.map(pairs_during, &elem(&1, 0))
-      assert ids_during == [1, 2, 3]
-
-      # Send another text delta manually (simulates streaming tokens)
-      send(slow_session, {:agent_provider_event, %Event.TextDelta{delta: " world"}})
-
-      # The assistant message at ID 3 should still be there, not a new ID
-      pairs_after_delta = Session.messages_with_ids(slow_session)
-      ids_after_delta = Enum.map(pairs_after_delta, &elem(&1, 0))
-      assert ids_after_delta == [1, 2, 3]
-
-      # Content grew but ID is stable
-      {3, {:assistant, text}} = List.last(pairs_after_delta)
-      assert String.contains?(text, "world")
-
-      SlowMockProvider.proceed(Session.get_provider(slow_session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
-
-      # After turn completes, usage message gets the next ID
-      pairs_final = Session.messages_with_ids(slow_session)
-      ids_final = Enum.map(pairs_final, &elem(&1, 0))
-      assert ids_final == [1, 2, 3, 4]
-      assert length(pairs_final) == length(Session.messages(slow_session))
-    end
-
-    test "thinking deltas get one stable ID, then assistant gets the next", %{session: session} do
-      # Inject events directly: thinking then text
-      send(session, {:agent_provider_event, %Event.AgentStart{}})
-      send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: "hmm"}})
-      send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: " ok"}})
-
-      # Sync: call forces processing of all prior handle_info messages
-      pairs_thinking = Session.messages_with_ids(session)
-      ids = Enum.map(pairs_thinking, &elem(&1, 0))
-
-      # system(1), thinking(2). Two ThinkingDeltas, but one message.
-      assert ids == [1, 2]
-      assert {2, {:thinking, "hmm ok", _collapsed}} = List.last(pairs_thinking)
-
-      # Now assistant text arrives (collapses thinking, creates new assistant msg)
-      send(session, {:agent_provider_event, %Event.TextDelta{delta: "answer"}})
-      pairs_with_assistant = Session.messages_with_ids(session)
-      ids2 = Enum.map(pairs_with_assistant, &elem(&1, 0))
-
-      # system(1), thinking(2), assistant(3)
-      assert ids2 == [1, 2, 3]
-      assert {3, {:assistant, "answer"}} = List.last(pairs_with_assistant)
-      assert length(pairs_with_assistant) == length(Session.messages(session))
-    end
-
-    test "new_session resets IDs to 1", %{session: session} do
-      :ok = Session.send_prompt(session, "Hello!")
-      await_turn_complete()
-
-      # IDs are now [1, 2, 3, 4]
-      pairs_before = Session.messages_with_ids(session)
-      assert length(pairs_before) == 4
+      pairs_after_second = Session.messages_with_ids(session)
+      ids_after_second = Enum.map(pairs_after_second, &elem(&1, 0))
+      assert ids_after_second == Enum.sort(ids_after_second)
+      assert ids_after_second == Enum.uniq(ids_after_second)
+      assert length(pairs_after_second) == length(Session.messages(session))
 
       :ok = Session.new_session(session)
-      # Drain the broadcasts from new_session
       assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
+      assert [{1, {:system, _, :info}}] = Session.messages_with_ids(session)
 
-      pairs_after = Session.messages_with_ids(session)
-      assert [{1, {:system, _, :info}}] = pairs_after
-      assert length(pairs_after) == length(Session.messages(session))
-    end
+      loaded_id = "id-test-session-#{System.unique_integer([:positive])}"
 
-    test "load_session resets IDs starting from 1", %{session: session} do
       SessionStore.save(%{
-        id: "id-test-session",
+        id: loaded_id,
         timestamp: DateTime.to_iso8601(DateTime.utc_now()),
         model_name: "test-model",
         messages: [{:user, "loaded"}, {:assistant, "reply"}],
@@ -1287,18 +1195,51 @@ defmodule MingaAgent.SessionTest do
         }
       })
 
-      :ok = Session.load_session(session, "id-test-session")
-      # Drain the broadcasts
+      :ok = Session.load_session(session, loaded_id)
       assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
 
-      pairs = Session.messages_with_ids(session)
-      ids = Enum.map(pairs, &elem(&1, 0))
-      assert ids == [1, 2]
-      assert {1, {:user, "loaded"}} = hd(pairs)
-      assert length(pairs) == length(Session.messages(session))
+      assert [{1, {:user, "loaded"}}, {2, {:assistant, "reply"}}] =
+               Session.messages_with_ids(session)
     end
 
-    test "tool start/update/end keeps a stable ID for the tool message", %{session: session} do
+    test "streaming text deltas keep one assistant ID" do
+      slow_session = start_slow_turn("hello")
+
+      pairs_during = Session.messages_with_ids(slow_session)
+      assert Enum.map(pairs_during, &elem(&1, 0)) == [1, 2, 3]
+
+      send(slow_session, {:agent_provider_event, %Event.TextDelta{delta: " world"}})
+
+      pairs_after_delta = Session.messages_with_ids(slow_session)
+      assert Enum.map(pairs_after_delta, &elem(&1, 0)) == [1, 2, 3]
+      assert {3, {:assistant, text}} = List.last(pairs_after_delta)
+      assert String.contains?(text, "world")
+
+      finish_slow_turn(slow_session)
+
+      pairs_final = Session.messages_with_ids(slow_session)
+      assert Enum.map(pairs_final, &elem(&1, 0)) == [1, 2, 3, 4]
+      assert length(pairs_final) == length(Session.messages(slow_session))
+    end
+
+    test "thinking deltas get one stable ID, then assistant gets the next", %{session: session} do
+      send(session, {:agent_provider_event, %Event.AgentStart{}})
+      send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: "hmm"}})
+      send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: " ok"}})
+
+      pairs_thinking = Session.messages_with_ids(session)
+      assert Enum.map(pairs_thinking, &elem(&1, 0)) == [1, 2]
+      assert {2, {:thinking, "hmm ok", _collapsed}} = List.last(pairs_thinking)
+
+      send(session, {:agent_provider_event, %Event.TextDelta{delta: "answer"}})
+      pairs_with_assistant = Session.messages_with_ids(session)
+
+      assert Enum.map(pairs_with_assistant, &elem(&1, 0)) == [1, 2, 3]
+      assert {3, {:assistant, "answer"}} = List.last(pairs_with_assistant)
+      assert length(pairs_with_assistant) == length(Session.messages(session))
+    end
+
+    test "tool updates keep a stable tool message ID", %{session: session} do
       send(
         session,
         {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}}
@@ -1308,7 +1249,6 @@ defmodule MingaAgent.SessionTest do
       {tool_id, {:tool_call, tc_start}} = List.last(pairs_start)
       assert tc_start.status == :running
 
-      # ToolUpdate: in-place mutation, same ID
       send(
         session,
         {:agent_provider_event,
@@ -1316,52 +1256,19 @@ defmodule MingaAgent.SessionTest do
       )
 
       pairs_update = Session.messages_with_ids(session)
-      {^tool_id, {:tool_call, tc_update}} = List.last(pairs_update)
-      assert tc_update.result == "output"
+      assert {^tool_id, {:tool_call, %{result: "output"}}} = List.last(pairs_update)
 
-      # ToolEnd: in-place mutation, same ID
       send(
         session,
         {:agent_provider_event, %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "done"}}
       )
 
       pairs_end = Session.messages_with_ids(session)
-      {^tool_id, {:tool_call, tc_end}} = List.last(pairs_end)
-      assert tc_end.status == :complete
-
-      # IDs list length always matches messages
+      assert {^tool_id, {:tool_call, %{status: :complete}}} = List.last(pairs_end)
       assert length(pairs_end) == length(Session.messages(session))
     end
 
-    test "toggle_tool_collapse does not change IDs", %{session: session} do
-      send(
-        session,
-        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}}
-      )
-
-      send(
-        session,
-        {:agent_provider_event,
-         %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "output"}}
-      )
-
-      pairs_before = Session.messages_with_ids(session)
-      ids_before = Enum.map(pairs_before, &elem(&1, 0))
-
-      tool_index =
-        Enum.find_index(pairs_before, fn {_id, msg} -> match?({:tool_call, _}, msg) end)
-
-      :ok = Session.toggle_tool_collapse(session, tool_index)
-
-      pairs_after = Session.messages_with_ids(session)
-      ids_after = Enum.map(pairs_after, &elem(&1, 0))
-
-      assert ids_before == ids_after
-      assert length(pairs_after) == length(Session.messages(session))
-    end
-
-    test "toggle_all_tool_collapses does not change IDs", %{session: session} do
-      # Add a thinking block and a tool call
+    test "message mutations preserve existing IDs", %{session: session} do
       send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: "thinking..."}})
 
       send(
@@ -1377,72 +1284,41 @@ defmodule MingaAgent.SessionTest do
       pairs_before = Session.messages_with_ids(session)
       ids_before = Enum.map(pairs_before, &elem(&1, 0))
 
+      tool_index =
+        Enum.find_index(pairs_before, fn {_id, msg} -> match?({:tool_call, _}, msg) end)
+
+      :ok = Session.toggle_tool_collapse(session, tool_index)
+      assert Enum.map(Session.messages_with_ids(session), &elem(&1, 0)) == ids_before
+
       :ok = Session.toggle_all_tool_collapses(session)
-
-      pairs_after = Session.messages_with_ids(session)
-      ids_after = Enum.map(pairs_after, &elem(&1, 0))
-
-      assert ids_before == ids_after
-    end
-
-    test "abort maps messages in place without changing IDs", %{session: session} do
-      send(
-        session,
-        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}}
-      )
-
-      pairs_before = Session.messages_with_ids(session)
-      ids_before = Enum.map(pairs_before, &elem(&1, 0))
+      assert Enum.map(Session.messages_with_ids(session), &elem(&1, 0)) == ids_before
 
       :ok = Session.abort(session)
-
-      pairs_after = Session.messages_with_ids(session)
-      ids_after = Enum.map(pairs_after, &elem(&1, 0))
-
-      # Abort adds one "Aborted" system message at the end
-      assert Enum.take(ids_after, length(ids_before)) == ids_before
-      assert length(ids_after) == length(ids_before) + 1
-      assert length(pairs_after) == length(Session.messages(session))
+      ids_after_abort = Session.messages_with_ids(session) |> Enum.map(&elem(&1, 0))
+      assert Enum.take(ids_after_abort, length(ids_before)) == ids_before
+      assert length(ids_after_abort) == length(ids_before) + 1
+      assert length(Session.messages_with_ids(session)) == length(Session.messages(session))
     end
 
-    test "dequeue_steering adds messages with incrementing IDs" do
-      {:ok, slow_session} =
-        Session.start_link(provider: SlowMockProvider, provider_opts: [])
-
-      Session.subscribe(slow_session)
-      assert is_pid(Session.get_provider(slow_session))
-
-      :ok = Session.send_prompt(slow_session, "first")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
-
-      # Queue two steering messages
+    test "dequeue_steering and system messages assign later IDs", %{session: session} do
+      slow_session = start_slow_turn()
       assert {:queued, :steering} = Session.send_prompt(slow_session, "steer 1")
       assert {:queued, :steering} = Session.send_prompt(slow_session, "steer 2")
 
-      # Dequeue: adds user messages to history
       _steering = Session.dequeue_steering(slow_session)
-
       pairs = Session.messages_with_ids(slow_session)
       ids = Enum.map(pairs, &elem(&1, 0))
-
-      # system(1), user(2), assistant(3), steer1-user(4), steer2-user(5)
       assert ids == Enum.sort(ids)
       assert ids == Enum.uniq(ids)
       assert length(pairs) == length(Session.messages(slow_session))
 
-      # Clean up
       Session.clear_queues(slow_session)
-      SlowMockProvider.proceed(Session.get_provider(slow_session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
-    end
+      finish_slow_turn(slow_session)
 
-    test "add_system_message (cast) assigns a new ID", %{session: session} do
       pairs_before = Session.messages_with_ids(session)
       max_id_before = pairs_before |> Enum.map(&elem(&1, 0)) |> Enum.max()
 
       Session.add_system_message(session, "hello from test")
-
-      # The cast is async. Use messages_with_ids as a sync barrier.
       pairs_after = Session.messages_with_ids(session)
       ids_after = Enum.map(pairs_after, &elem(&1, 0))
 
