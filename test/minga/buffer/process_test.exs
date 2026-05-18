@@ -721,34 +721,33 @@ defmodule Minga.Buffer.ProcessTest do
       assert BufferProcess.last_undo_source(pid) == :user
     end
 
-    test "replace_generated_content clears stale undo history" do
-      pid = start_supervised!({BufferProcess, content: "hello"})
-      BufferProcess.insert_char(pid, "X")
-      assert BufferProcess.content(pid) == "Xhello"
+    test "generated replacement APIs clear stale undo history" do
+      cases = [
+        {"generated", fn pid -> BufferProcess.replace_generated_content(pid, "generated") end},
+        {"decorated",
+         fn pid ->
+           BufferProcess.replace_content_with_decorations(pid, "decorated", fn decs -> decs end)
+         end}
+      ]
 
-      BufferProcess.replace_generated_content(pid, "generated")
+      for {expected_content, operation} <- cases do
+        pid =
+          start_supervised!({BufferProcess, content: "hello"},
+            id: {:generated_replace, expected_content}
+          )
 
-      assert BufferProcess.content(pid) == "generated"
-      assert BufferProcess.last_undo_source(pid) == nil
-      assert BufferProcess.last_redo_source(pid) == nil
+        BufferProcess.insert_char(pid, "X")
+        assert BufferProcess.content(pid) == "Xhello"
 
-      BufferProcess.undo(pid)
-      assert BufferProcess.content(pid) == "generated"
-    end
+        operation.(pid)
 
-    test "replace_content_with_decorations clears stale undo history" do
-      pid = start_supervised!({BufferProcess, content: "hello"})
-      BufferProcess.insert_char(pid, "X")
-      assert BufferProcess.content(pid) == "Xhello"
+        assert BufferProcess.content(pid) == expected_content
+        assert BufferProcess.last_undo_source(pid) == nil
+        assert BufferProcess.last_redo_source(pid) == nil
 
-      BufferProcess.replace_content_with_decorations(pid, "decorated", fn decs -> decs end)
-
-      assert BufferProcess.content(pid) == "decorated"
-      assert BufferProcess.last_undo_source(pid) == nil
-      assert BufferProcess.last_redo_source(pid) == nil
-
-      BufferProcess.undo(pid)
-      assert BufferProcess.content(pid) == "decorated"
+        BufferProcess.undo(pid)
+        assert BufferProcess.content(pid) == expected_content
+      end
     end
 
     test "interleaved user and agent edits preserve correct sources" do
@@ -1263,51 +1262,14 @@ defmodule Minga.Buffer.ProcessTest do
   end
 
   describe "pid_for_path/1" do
-    test "returns :not_found for unregistered path" do
-      assert :not_found = BufferProcess.pid_for_path("/no/such/file.ex")
-    end
-
-    test "registered buffer is findable by its file path", %{tmp_dir: dir} do
-      path = Path.join(dir, "test.ex")
-      File.write!(path, "hello")
-      pid = start_supervised!({BufferProcess, file_path: path})
-
-      assert {:ok, ^pid} = BufferProcess.pid_for_path(path)
-    end
-
-    test "opening a new file unregisters the old path", %{tmp_dir: dir} do
-      path_a = Path.join(dir, "a.ex")
-      path_b = Path.join(dir, "b.ex")
-      File.write!(path_a, "aaa")
-      File.write!(path_b, "bbb")
-      pid = start_supervised!({BufferProcess, file_path: path_a})
-
-      assert {:ok, ^pid} = BufferProcess.pid_for_path(path_a)
-
-      BufferProcess.open(pid, path_b)
-      assert :not_found = BufferProcess.pid_for_path(path_a)
-      assert {:ok, ^pid} = BufferProcess.pid_for_path(path_b)
-    end
-
-    test "save_as unregisters old path and registers new path", %{tmp_dir: dir} do
-      path_a = Path.join(dir, "a.ex")
-      path_b = Path.join(dir, "b.ex")
-      File.write!(path_a, "aaa")
-      pid = start_supervised!({BufferProcess, file_path: path_a})
-
-      assert {:ok, ^pid} = BufferProcess.pid_for_path(path_a)
-
-      BufferProcess.save_as(pid, path_b)
-      assert :not_found = BufferProcess.pid_for_path(path_a)
-      assert {:ok, ^pid} = BufferProcess.pid_for_path(path_b)
-    end
-
-    test "buffer without file_path does not register" do
+    test "returns :not_found for unknown or pathless buffers" do
       _pid = start_supervised!({BufferProcess, content: "scratch"})
+
+      assert :not_found = BufferProcess.pid_for_path("/no/such/file.ex")
       assert :not_found = BufferProcess.pid_for_path("/nonexistent")
     end
 
-    test "two buffers with different paths coexist", %{tmp_dir: dir} do
+    test "registered buffers are findable by independent file paths", %{tmp_dir: dir} do
       path_a = Path.join(dir, "a.ex")
       path_b = Path.join(dir, "b.ex")
       File.write!(path_a, "aaa")
@@ -1318,6 +1280,28 @@ defmodule Minga.Buffer.ProcessTest do
 
       assert {:ok, ^pid_a} = BufferProcess.pid_for_path(path_a)
       assert {:ok, ^pid_b} = BufferProcess.pid_for_path(path_b)
+    end
+
+    test "path-changing APIs unregister the old path and register the new path", %{tmp_dir: dir} do
+      cases = [
+        {:open, fn pid, path -> BufferProcess.open(pid, path) end},
+        {:save_as, fn pid, path -> BufferProcess.save_as(pid, path) end}
+      ]
+
+      for {name, operation} <- cases do
+        path_a = Path.join(dir, "#{name}_a.ex")
+        path_b = Path.join(dir, "#{name}_b.ex")
+        File.write!(path_a, "aaa")
+        File.write!(path_b, "bbb")
+        pid = start_supervised!({BufferProcess, file_path: path_a}, id: {:path_case, name})
+
+        assert {:ok, ^pid} = BufferProcess.pid_for_path(path_a)
+
+        operation.(pid, path_b)
+
+        assert :not_found = BufferProcess.pid_for_path(path_a)
+        assert {:ok, ^pid} = BufferProcess.pid_for_path(path_b)
+      end
     end
   end
 
