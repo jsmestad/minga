@@ -15,6 +15,7 @@ defmodule MingaEditor.State.TabSwitchTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Context
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
@@ -303,22 +304,33 @@ defmodule MingaEditor.State.TabSwitchTest do
       assert new_state.layout == nil
     end
 
-    test "clears attention flag on target tab" do
-      {state, _buf1, _buf2} = state_with_two_file_tabs()
+    test "tab switch restores the target tab's pending LSP refs" do
+      {state, _buf1, buf2} = state_with_two_file_tabs()
       tb = state.shell_state.tab_bar
-      tab2_id = Enum.find(tb.tabs, &(&1.id != tb.active_id)).id
+      current_id = tb.active_id
+      target_id = Enum.find(tb.tabs, &(&1.id != tb.active_id)).id
 
-      # Set attention flag on tab 2
-      tb = TabBar.update_tab(tb, tab2_id, &Tab.set_attention(&1, true))
-      state = EditorState.set_tab_bar(state, tb)
+      pending_current = %{make_ref() => :completion_resolve}
+      pending_target = %{make_ref() => {:semantic_tokens, buf2}}
 
-      # Confirm attention is set
-      assert TabBar.get(state.shell_state.tab_bar, tab2_id).attention == true
+      state = put_in(state.workspace.lsp_pending, pending_current)
+      tab2 = TabBar.get(tb, target_id)
+      tab2_context = Context.put_fields(tab2.context, lsp_pending: pending_target)
+      state = EditorState.set_tab_bar(state, TabBar.update_context(tb, target_id, tab2_context))
 
-      {new_state, _effects} = EditorState.switch_tab_pure(state, tab2_id)
+      {switched, _effects} = EditorState.switch_tab_pure(state, target_id)
 
-      # Attention should be cleared on the tab we switched to
-      assert TabBar.get(new_state.shell_state.tab_bar, tab2_id).attention == false
+      assert switched.workspace.lsp_pending == pending_target
+
+      assert TabBar.get(switched.shell_state.tab_bar, current_id).context.lsp_pending ==
+               pending_current
+
+      {switched_back, _effects} = EditorState.switch_tab_pure(switched, current_id)
+
+      assert switched_back.workspace.lsp_pending == pending_current
+
+      assert TabBar.get(switched_back.shell_state.tab_bar, target_id).context.lsp_pending ==
+               pending_target
     end
 
     test "tab switch does not clobber highlight buffer_id mappings" do

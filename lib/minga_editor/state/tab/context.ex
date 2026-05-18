@@ -27,6 +27,7 @@ defmodule MingaEditor.State.Tab.Context do
     :dired,
     :viewport,
     :mouse,
+    :lsp_pending,
     :search,
     :editing,
     :document_highlights,
@@ -42,6 +43,7 @@ defmodule MingaEditor.State.Tab.Context do
           | :dired
           | :viewport
           | :mouse
+          | :lsp_pending
           | :search
           | :editing
           | :document_highlights
@@ -63,6 +65,7 @@ defmodule MingaEditor.State.Tab.Context do
           dired: DiredState.t() | nil,
           viewport: Viewport.t() | nil,
           mouse: Mouse.t() | nil,
+          lsp_pending: %{reference() => atom() | tuple()} | nil,
           search: Search.t() | nil,
           editing: VimState.t() | nil,
           document_highlights: [document_highlight()] | nil,
@@ -78,6 +81,7 @@ defmodule MingaEditor.State.Tab.Context do
             dired: nil,
             viewport: nil,
             mouse: nil,
+            lsp_pending: nil,
             search: nil,
             editing: nil,
             document_highlights: nil,
@@ -116,6 +120,7 @@ defmodule MingaEditor.State.Tab.Context do
       dired: ws.dired,
       viewport: ws.viewport,
       mouse: ws.mouse,
+      lsp_pending: ws.lsp_pending,
       search: ws.search,
       editing: editing,
       document_highlights: ws.document_highlights,
@@ -221,6 +226,7 @@ defmodule MingaEditor.State.Tab.Context do
   defp valid_field?(:dired, %DiredState{}), do: true
   defp valid_field?(:viewport, %Viewport{}), do: true
   defp valid_field?(:mouse, %Mouse{}), do: true
+  defp valid_field?(:lsp_pending, value) when is_map(value), do: true
   defp valid_field?(:search, %Search{}), do: true
   defp valid_field?(:editing, %VimState{}), do: true
   defp valid_field?(:document_highlights, nil), do: true
