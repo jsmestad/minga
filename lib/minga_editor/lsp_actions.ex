@@ -174,13 +174,6 @@ defmodule MingaEditor.LspActions do
     end
   end
 
-  @spec supports_capability?(pid(), String.t()) :: boolean()
-  defp supports_capability?(client, key) do
-    caps = Client.capabilities(client)
-    provider = caps[key]
-    provider == true or is_map(provider)
-  end
-
   @doc """
   Schedules a debounced document highlight request.
 
@@ -1392,6 +1385,13 @@ defmodule MingaEditor.LspActions do
   def extract_hover_text(_), do: ""
 
   # ── Private ────────────────────────────────────────────────────────────────
+
+  @spec supports_capability?(GenServer.server(), String.t()) :: boolean()
+  defp supports_capability?(client, key) do
+    caps = Client.capabilities(client)
+    provider = caps[key]
+    provider == true or is_map(provider)
+  end
 
   @spec lsp_client_for(state(), pid()) :: pid() | nil
   defp lsp_client_for(_state, buffer_pid) do
