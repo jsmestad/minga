@@ -118,7 +118,7 @@ defmodule Minga.Test.EditorCase do
     # :setup_highlight, :debounced_render). Without this, a background
     # render can produce a spurious batch_end that satisfies the next
     # send_key's frame waiter before the key press is actually processed.
-    _ = get_editor_state(editor)
+    _ = sync_editor(editor)
     _ = sync_port(port)
 
     Map.merge(ctx, %{
@@ -180,7 +180,7 @@ defmodule Minga.Test.EditorCase do
     Process.put({:last_frame_snapshot, port}, snapshot)
 
     # Drain deferred messages from :ready (see start_editor/2 comment).
-    _ = get_editor_state(editor)
+    _ = sync_editor(editor)
     _ = sync_port(port)
 
     %{
@@ -203,7 +203,7 @@ defmodule Minga.Test.EditorCase do
   @spec inject_highlights(editor_ctx(), [String.t()], non_neg_integer(), [map()]) :: editor_ctx()
   def inject_highlights(ctx, capture_names, version \\ 1, spans) do
     # Flush pending messages (e.g. :setup_highlight from :ready)
-    _ = get_editor_state(ctx.editor)
+    _ = sync_editor(ctx.editor)
 
     # Ensure the active buffer has a registered parser buffer_id so the
     # highlight event handlers can route the message correctly. Previously
@@ -219,7 +219,7 @@ defmodule Minga.Test.EditorCase do
     send(ctx.editor, {:minga_input, {:highlight_names, buffer_id, capture_names}})
     send(ctx.editor, {:minga_input, {:highlight_spans, buffer_id, version, spans}})
     # Sync: ensure both messages have been processed before returning
-    _ = get_editor_state(ctx.editor)
+    _ = sync_editor(ctx.editor)
     ctx
   end
 
@@ -271,7 +271,7 @@ defmodule Minga.Test.EditorCase do
     # Drain any pending async messages (timers, highlight events, etc.)
     # before registering the frame waiter. This prevents a pending render
     # from satisfying our waiter instead of the intended key's render.
-    _ = get_editor_state(editor)
+    _ = sync_editor(editor)
     ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
     {:ok, snapshot} = HeadlessPort.collect_frame(ref, @sync_timeout)
@@ -282,12 +282,12 @@ defmodule Minga.Test.EditorCase do
 
   @doc """
   Sends a key and waits for the editor GenServer to process it.
-  Uses `:sys.get_state` as a synchronization barrier instead of waiting
+  Uses a public GenServer call as a synchronization barrier instead of waiting
   for a render frame. Safe for both editor/buffer state reads AND
   port/screen state reads: because the editor sends the render cast to
-  the port before processing the `:sys.get_state` message, BEAM message
-  ordering guarantees the render reaches the port's mailbox ahead of any
-  subsequent `screen_cursor` or `modeline` call from the test process.
+  the port before processing the barrier call, BEAM message ordering guarantees
+  the render reaches the port's mailbox ahead of any subsequent `screen_cursor`
+  or `modeline` call from the test process.
 
   This is the preferred sync primitive for navigation tests. Use
   `send_key/3` only when you need the captured frame snapshot for
@@ -304,7 +304,7 @@ defmodule Minga.Test.EditorCase do
 
   @doc """
   Sends a vim-style key sequence and returns the editor state after
-  all keys are processed. Uses `:sys.get_state` as a barrier after
+  all keys are processed. Uses a public GenServer call as a barrier after
   each key to ensure re-sent messages (like passthrough from file tree
   or which-key timeouts) are fully processed before the next key.
   """
@@ -313,7 +313,7 @@ defmodule Minga.Test.EditorCase do
     parse_key_sequence(sequence)
     |> Enum.each(fn {cp, mods} ->
       send(editor, {:minga_input, {:key_press, cp, mods}})
-      get_editor_state(editor)
+      sync_editor(editor)
     end)
 
     # Clear any stale frame snapshot so assert_screen_snapshot falls back
@@ -327,8 +327,8 @@ defmodule Minga.Test.EditorCase do
 
   After `send_keys_sync` returns, the editor has finished processing all
   keys and sent the render cast to the port. But the port processes that
-  cast asynchronously. This function uses `:sys.get_state` on the port as
-  a barrier, ensuring the port has processed all pending render commands
+  cast asynchronously. This function reads a port snapshot as a barrier,
+  ensuring the port has processed all pending render commands
   before the test reads the screen.
 
   Call this before `assert_screen_snapshot` when using `send_keys_sync`.
@@ -443,8 +443,11 @@ defmodule Minga.Test.EditorCase do
   @spec get_editor_state(pid()) :: MingaEditor.State.t()
   defp get_editor_state(editor), do: :sys.get_state(editor, @sync_timeout)
 
-  @spec sync_port(pid()) :: map()
-  defp sync_port(port), do: :sys.get_state(port, @sync_timeout)
+  @spec sync_editor(pid()) :: atom()
+  defp sync_editor(editor), do: GenServer.call(editor, :api_mode, @sync_timeout)
+
+  @spec sync_port(pid()) :: HeadlessPort.screen()
+  defp sync_port(port), do: HeadlessPort.get_screen(port)
 
   @doc "Returns the current editor mode."
   @spec editor_mode(editor_ctx()) :: atom()
@@ -458,7 +461,7 @@ defmodule Minga.Test.EditorCase do
     BufferProcess.cursor(buffer)
   end
 
-  @doc "Returns the full editor state (via :sys.get_state). Race-free."
+  @doc "Returns the full editor state after synchronizing with the editor process. Prefer narrower helpers when possible."
   @spec editor_state(editor_ctx()) :: MingaEditor.State.t()
   def editor_state(%{editor: editor}) do
     get_editor_state(editor)
@@ -744,7 +747,7 @@ defmodule Minga.Test.EditorCase do
   end
 
   defp do_wait_screen(editor, port, condition, remaining, interval, message) when remaining > 0 do
-    get_editor_state(editor)
+    sync_editor(editor)
     sync_port(port)
 
     if condition.() do
@@ -792,7 +795,7 @@ defmodule Minga.Test.EditorCase do
         event_type \\ :press,
         click_count \\ 1
       ) do
-    _ = get_editor_state(editor)
+    _ = sync_editor(editor)
     ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:mouse_event, row, col, button, mods, event_type, click_count}})
     {:ok, snapshot} = HeadlessPort.collect_frame(ref, @sync_timeout)
@@ -806,7 +809,7 @@ defmodule Minga.Test.EditorCase do
   """
   @spec send_resize(editor_ctx(), pos_integer(), pos_integer()) :: editor_ctx()
   def send_resize(%{editor: editor, port: port} = ctx, new_width, new_height) do
-    _ = get_editor_state(editor)
+    _ = sync_editor(editor)
     HeadlessPort.resize(port, new_width, new_height)
     ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:resize, new_width, new_height}})
