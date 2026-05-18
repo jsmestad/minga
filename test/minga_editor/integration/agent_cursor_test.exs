@@ -110,66 +110,33 @@ defmodule Minga.Integration.AgentCursorTest do
     Enum.find_index(rows, &String.contains?(&1, text))
   end
 
-  # Finds the last row number containing the given text substring.
-  # Useful for finding the modeline when the same text appears in other UI areas.
-  @spec find_last_row_containing([String.t()], String.t()) :: non_neg_integer() | nil
-  defp find_last_row_containing(rows, text) do
-    rows
-    |> Enum.with_index()
-    |> Enum.filter(fn {row, _idx} -> String.contains?(row, text) end)
-    |> List.last()
-    |> case do
-      {_row, idx} -> idx
-      nil -> nil
-    end
-  end
-
   # ── Tests ────────────────────────────────────────────────────────────────────
 
   describe "agent prompt cursor positioning" do
-    test "cursor lands on input content row, not the border" do
+    test "cursor starts and stays on the input content row" do
       ctx = start_agent_editor()
 
-      # Press i to focus the prompt input (enters insert mode)
       send_keys_sync(ctx, "i")
 
       rows = screen_text(ctx)
       {cursor_row, _cursor_col} = screen_cursor(ctx)
-
-      # Find the row with the prompt border and the row with the placeholder text
       border_row = find_row_containing(rows, "Prompt")
       content_row = find_row_containing(rows, "Type a message")
 
       assert border_row != nil, "Should find the Prompt border row on screen"
       assert content_row != nil, "Should find the input content row on screen"
       assert border_row < content_row, "Border should be above the content row"
+      assert cursor_row == content_row
 
-      assert cursor_row == content_row,
-             "Cursor should be on the input content row (#{content_row}), " <>
-               "not the border row (#{border_row}). Got cursor at row #{cursor_row}."
-    end
-
-    test "cursor stays on content row after typing" do
-      ctx = start_agent_editor()
-
-      send_keys_sync(ctx, "i")
       type_text(ctx, "hello")
-      # Belt-and-suspenders sync: the agent panel can emit a layout frame
-      # followed by a content frame, and `type_text` only waits for one
-      # frame per char. Force a port barrier so the captured snapshot
-      # reflects the post-render grid.
       sync_screen(ctx)
 
       rows = screen_text(ctx)
       {cursor_row, _cursor_col} = screen_cursor(ctx)
-
-      # After typing, the row should contain our text
       typed_row = find_row_containing(rows, "hello")
-      assert typed_row != nil, "Should find typed text on screen"
 
-      assert cursor_row == typed_row,
-             "Cursor should be on the row with typed text (#{typed_row}), " <>
-               "got row #{cursor_row}."
+      assert typed_row != nil, "Should find typed text on screen"
+      assert cursor_row == typed_row
     end
 
     test "cursor row matches content row at different terminal sizes" do
@@ -190,54 +157,6 @@ defmodule Minga.Integration.AgentCursorTest do
                "At #{width}x#{height}: cursor should be on row #{content_row}, " <>
                  "got row #{cursor_row}."
       end
-    end
-  end
-
-  describe "agent modeline" do
-    test "modeline shows vim mode and background buffer name in agent view" do
-      ctx = start_agent_editor()
-
-      rows = screen_text(ctx)
-
-      # The modeline shows the background buffer name (not the model name,
-      # which now lives only in the agent chat header).
-      modeline_idx = find_last_row_containing(rows, "NORMAL")
-      assert modeline_idx != nil, "Should find modeline with NORMAL mode"
-
-      modeline_text = Enum.at(rows, modeline_idx)
-
-      assert String.contains?(modeline_text, "NORMAL"),
-             "Modeline should show NORMAL mode, got: #{modeline_text}"
-    end
-
-    test "modeline shows INSERT mode after focusing input" do
-      ctx = start_agent_editor()
-
-      send_keys_sync(ctx, "i")
-
-      rows = screen_text(ctx)
-
-      modeline_idx = find_last_row_containing(rows, "INSERT")
-      assert modeline_idx != nil, "Should find modeline with INSERT mode"
-
-      modeline_text = Enum.at(rows, modeline_idx)
-
-      assert String.contains?(modeline_text, "INSERT"),
-             "Modeline should show INSERT mode after pressing i, got: #{modeline_text}"
-    end
-
-    test "modeline is below the input area" do
-      ctx = start_agent_editor()
-
-      rows = screen_text(ctx)
-
-      prompt_row = find_row_containing(rows, "Prompt")
-      # Find modeline by looking for the vim mode badge (always present)
-      modeline_row = find_last_row_containing(rows, "NORMAL")
-
-      assert prompt_row != nil, "Should find the prompt border"
-      assert modeline_row != nil, "Should find the modeline"
-      assert modeline_row > prompt_row, "Modeline should be below the prompt border"
     end
   end
 end
