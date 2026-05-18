@@ -247,7 +247,8 @@ defmodule MingaAgent.SessionTest do
 
   defp send_provider_event(session, event) do
     send(session, {:agent_provider_event, event})
-    :sys.get_state(session)
+    Session.status(session)
+    :ok
   end
 
   defp mcp_session_builtin_tool do
@@ -290,17 +291,11 @@ defmodule MingaAgent.SessionTest do
   end
 
   describe "initial state" do
-    test "starts with idle status", %{session: session} do
+    test "starts idle with a system message and zero usage", %{session: session} do
       assert Session.status(session) == :idle
-    end
-
-    test "starts with a session-started system message", %{session: session} do
-      messages = Session.messages(session)
-      assert [{:system, text, :info}] = messages
+      assert [{:system, text, :info}] = Session.messages(session)
       assert String.starts_with?(text, "Session started")
-    end
 
-    test "starts with zero usage", %{session: session} do
       usage = Session.usage(session)
       assert usage.input == 0
       assert usage.output == 0
@@ -412,58 +407,24 @@ defmodule MingaAgent.SessionTest do
   end
 
   describe "send_prompt/2" do
-    test "adds user message and streams response", %{session: session} do
+    test "adds messages, broadcasts stream events, and records usage", %{session: session} do
       :ok = Session.send_prompt(session, "Hello!")
-      await_turn_complete()
+
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
+      assert_receive {:agent_event, _, {:text_delta, "Hello "}}, @event_timeout
+      assert_receive {:agent_event, _, {:text_delta, "world!"}}, @event_timeout
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
 
       messages = Session.messages(session)
-
-      # Should have system message + user message + assistant message + usage
-      assert length(messages) >= 3
       assert {:system, _, :info} = Enum.at(messages, 0)
       assert {:user, "Hello!"} = Enum.at(messages, 1)
       assert {:assistant, "Hello world!"} = Enum.at(messages, 2)
-    end
-
-    test "accumulates token usage", %{session: session} do
-      :ok = Session.send_prompt(session, "Test")
-      await_turn_complete()
+      assert Enum.any?(messages, &match?({:usage, %{input: 100, output: 50, cost: 0.01}}, &1))
 
       usage = Session.usage(session)
       assert usage.input == 100
       assert usage.output == 50
       assert usage.cost == 0.01
-    end
-
-    test "broadcasts status changes", %{session: session} do
-      :ok = Session.send_prompt(session, "Test")
-
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
-    end
-
-    test "broadcasts text deltas", %{session: session} do
-      :ok = Session.send_prompt(session, "Test")
-
-      assert_receive {:agent_event, _, {:text_delta, "Hello "}}, @event_timeout
-      assert_receive {:agent_event, _, {:text_delta, "world!"}}, @event_timeout
-    end
-  end
-
-  describe "per-turn usage" do
-    test "appends usage message after AgentEnd", %{session: session} do
-      :ok = Session.send_prompt(session, "Test")
-      await_turn_complete()
-
-      messages = Session.messages(session)
-
-      usage_msg =
-        Enum.find(messages, fn
-          {:usage, _} -> true
-          _ -> false
-        end)
-
-      assert {:usage, %{input: 100, output: 50, cost: 0.01}} = usage_msg
     end
   end
 
@@ -512,25 +473,16 @@ defmodule MingaAgent.SessionTest do
   end
 
   describe "new_session/1" do
-    test "clears messages and resets status", %{session: session} do
+    test "clears messages, resets status, and resets usage", %{session: session} do
       :ok = Session.send_prompt(session, "First")
       await_turn_complete()
-
       assert length(Session.messages(session)) > 1
 
       :ok = Session.new_session(session)
 
-      messages = Session.messages(session)
-      assert [{:system, text, :info}] = messages
+      assert [{:system, text, :info}] = Session.messages(session)
       assert String.starts_with?(text, "Session cleared")
       assert Session.status(session) == :idle
-    end
-
-    test "resets usage counters", %{session: session} do
-      :ok = Session.send_prompt(session, "Test")
-      await_turn_complete()
-
-      :ok = Session.new_session(session)
 
       usage = Session.usage(session)
       assert usage.input == 0
@@ -808,7 +760,7 @@ defmodule MingaAgent.SessionTest do
 
       current_id = Session.session_id(session)
       Session.add_system_message(session, "unsaved local note")
-      :sys.get_state(session)
+      assert {:system, "unsaved local note", :info} in Session.messages(session)
 
       SessionStore.save(
         %{
@@ -1004,7 +956,7 @@ defmodule MingaAgent.SessionTest do
   end
 
   describe "metadata/1" do
-    test "returns session metadata with id, model, and created_at", %{session: session} do
+    test "returns idle session metadata before any user prompt", %{session: session} do
       meta = Session.metadata(session)
 
       assert is_binary(meta.id)
@@ -1012,61 +964,43 @@ defmodule MingaAgent.SessionTest do
       assert meta.message_count >= 1
       assert meta.cost == 0.0
       assert meta.status == :idle
-    end
-
-    test "first_prompt is nil when no user messages", %{session: session} do
-      meta = Session.metadata(session)
       assert meta.first_prompt == nil
     end
 
     test "first_prompt returns first user message text", %{session: session} do
       Session.send_prompt(session, "Hello there")
-      # Wait for prompt to be added to messages
       assert_receive {:agent_event, _, :messages_changed}, @event_timeout
 
-      meta = Session.metadata(session)
-      assert meta.first_prompt == "Hello there"
+      assert Session.metadata(session).first_prompt == "Hello there"
     end
   end
 
   # ── Queue API ──────────────────────────────────────────────────────────────
 
   describe "combine_queue_entries_to_text/1" do
-    test "returns empty string for empty list" do
+    test "handles empty, single, and multiple string queues" do
       assert Session.combine_queue_entries_to_text([]) == ""
-    end
-
-    test "returns a single string unchanged" do
       assert Session.combine_queue_entries_to_text(["hello"]) == "hello"
+
+      assert Session.combine_queue_entries_to_text(["first", "second", "third"]) ==
+               "first\n\nsecond\n\nthird"
     end
 
-    test "joins multiple strings with double newlines" do
-      result = Session.combine_queue_entries_to_text(["first", "second", "third"])
-      assert result == "first\n\nsecond\n\nthird"
-    end
-
-    test "extracts text from ContentPart lists" do
+    test "extracts text content parts and skips non-text parts" do
       parts = [
         %ReqLLM.Message.ContentPart{type: :text, text: "hello "},
+        %ReqLLM.Message.ContentPart{type: :image, text: nil},
         %ReqLLM.Message.ContentPart{type: :text, text: "world"}
       ]
 
       assert Session.combine_queue_entries_to_text([parts]) == "hello world"
     end
 
-    test "skips image ContentParts when extracting text" do
-      parts = [
-        %ReqLLM.Message.ContentPart{type: :text, text: "describe this"},
-        %ReqLLM.Message.ContentPart{type: :image, text: nil}
-      ]
-
-      assert Session.combine_queue_entries_to_text([parts]) == "describe this"
-    end
-
     test "mixes strings and ContentPart lists" do
       parts = [%ReqLLM.Message.ContentPart{type: :text, text: "part text"}]
-      result = Session.combine_queue_entries_to_text(["string entry", parts])
-      assert result == "string entry\n\npart text"
+
+      assert Session.combine_queue_entries_to_text(["string entry", parts]) ==
+               "string entry\n\npart text"
     end
   end
 
@@ -1080,8 +1014,7 @@ defmodule MingaAgent.SessionTest do
 
       Session.subscribe(slow_session)
 
-      # Wait for provider to start
-      :sys.get_state(slow_session)
+      assert is_pid(Session.get_provider(slow_session))
 
       %{slow_session: slow_session}
     end
@@ -1278,7 +1211,7 @@ defmodule MingaAgent.SessionTest do
         )
 
       Session.subscribe(slow_session)
-      :sys.get_state(slow_session)
+      assert is_pid(Session.get_provider(slow_session))
 
       %{slow_session: slow_session}
     end
@@ -1426,7 +1359,7 @@ defmodule MingaAgent.SessionTest do
         Session.start_link(provider: SlowMockProvider, provider_opts: [])
 
       Session.subscribe(slow_session)
-      :sys.get_state(slow_session)
+      assert is_pid(Session.get_provider(slow_session))
 
       :ok = Session.send_prompt(slow_session, "hello")
       assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
@@ -1640,7 +1573,7 @@ defmodule MingaAgent.SessionTest do
         Session.start_link(provider: SlowMockProvider, provider_opts: [])
 
       Session.subscribe(slow_session)
-      :sys.get_state(slow_session)
+      assert is_pid(Session.get_provider(slow_session))
 
       :ok = Session.send_prompt(slow_session, "first")
       assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
