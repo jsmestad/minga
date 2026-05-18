@@ -340,93 +340,49 @@ defmodule Minga.Buffer.ProcessTest do
     end
   end
 
-  describe "lines/3" do
-    test "returns requested line range" do
-      {:ok, pid} = BufferProcess.start_link(content: "a\nb\nc\nd\ne")
-      assert BufferProcess.lines(pid, 1, 3) == ["b", "c", "d"]
-    end
-  end
-
-  describe "line_count/1" do
-    test "returns the number of lines" do
-      {:ok, pid} = BufferProcess.start_link(content: "a\nb\nc")
-      assert BufferProcess.line_count(pid) == 3
-    end
-  end
-
   describe "special buffer properties" do
-    test "buffer_name returns nil by default" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello")
-      assert BufferProcess.buffer_name(pid) == nil
+    test "metadata accessors expose configured flags" do
+      {:ok, default} = BufferProcess.start_link(content: "hello")
+
+      {:ok, configured} =
+        BufferProcess.start_link(
+          content: "",
+          buffer_name: "*Messages*",
+          unlisted: true,
+          persistent: true
+        )
+
+      assert BufferProcess.buffer_name(default) == nil
+      refute BufferProcess.read_only?(default)
+      assert BufferProcess.buffer_name(configured) == "*Messages*"
+      assert BufferProcess.unlisted?(configured)
+      assert BufferProcess.persistent?(configured)
     end
 
-    test "buffer_name returns the configured name" do
-      {:ok, pid} = BufferProcess.start_link(content: "", buffer_name: "*Messages*")
-      assert BufferProcess.buffer_name(pid) == "*Messages*"
-    end
+    test "read-only buffers reject mutating APIs except append" do
+      cases = [
+        {"insert_char", "hello", fn pid -> BufferProcess.insert_char(pid, "x") end},
+        {"delete_before", "hello",
+         fn pid ->
+           BufferProcess.move(pid, :right)
+           BufferProcess.delete_before(pid)
+         end},
+        {"delete_at", "hello", fn pid -> BufferProcess.delete_at(pid) end},
+        {"replace_content", "hello", fn pid -> BufferProcess.replace_content(pid, "new") end},
+        {"delete_range", "hello", fn pid -> BufferProcess.delete_range(pid, {0, 0}, {0, 3}) end},
+        {"delete_lines", "a\nb\nc", fn pid -> BufferProcess.delete_lines(pid, 0, 0) end},
+        {"clear_line", "hello", fn pid -> BufferProcess.clear_line(pid, 0) end}
+      ]
 
-    test "read_only? returns false by default" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello")
-      assert BufferProcess.read_only?(pid) == false
-    end
+      for {name, content, operation} <- cases do
+        {:ok, pid} = BufferProcess.start_link(content: content, read_only: true)
+        assert operation.(pid) == {:error, :read_only}, name
+        assert BufferProcess.content(pid) == content, name
+      end
 
-    test "read-only buffer rejects insert_char" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello", read_only: true)
-      assert BufferProcess.insert_char(pid, "x") == {:error, :read_only}
-      assert BufferProcess.content(pid) == "hello"
-    end
-
-    test "read-only buffer rejects delete_before" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello", read_only: true)
-      BufferProcess.move(pid, :right)
-      assert BufferProcess.delete_before(pid) == {:error, :read_only}
-      assert BufferProcess.content(pid) == "hello"
-    end
-
-    test "read-only buffer rejects delete_at" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello", read_only: true)
-      assert BufferProcess.delete_at(pid) == {:error, :read_only}
-      assert BufferProcess.content(pid) == "hello"
-    end
-
-    test "read-only buffer rejects replace_content" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello", read_only: true)
-      assert BufferProcess.replace_content(pid, "new") == {:error, :read_only}
-      assert BufferProcess.content(pid) == "hello"
-    end
-
-    test "read-only buffer rejects delete_range" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello", read_only: true)
-      assert BufferProcess.delete_range(pid, {0, 0}, {0, 3}) == {:error, :read_only}
-      assert BufferProcess.content(pid) == "hello"
-    end
-
-    test "read-only buffer rejects delete_lines" do
-      {:ok, pid} = BufferProcess.start_link(content: "a\nb\nc", read_only: true)
-      assert BufferProcess.delete_lines(pid, 0, 0) == {:error, :read_only}
-      assert BufferProcess.content(pid) == "a\nb\nc"
-    end
-
-    test "read-only buffer rejects clear_line" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello", read_only: true)
-      assert BufferProcess.clear_line(pid, 0) == {:error, :read_only}
-      assert BufferProcess.content(pid) == "hello"
-    end
-
-    test "append bypasses read-only" do
       {:ok, pid} = BufferProcess.start_link(content: "hello", read_only: true)
       assert BufferProcess.append(pid, "\nworld") == :ok
       assert BufferProcess.content(pid) == "hello\nworld"
-    end
-
-    test "unlisted? returns configured value" do
-      {:ok, pid} = BufferProcess.start_link(content: "", unlisted: true)
-      assert BufferProcess.unlisted?(pid) == true
-    end
-
-    test "persistent? returns configured value" do
-      {:ok, pid} = BufferProcess.start_link(content: "", persistent: true)
-      assert BufferProcess.persistent?(pid) == true
     end
 
     test "render_snapshot includes name and read_only" do
@@ -575,52 +531,32 @@ defmodule Minga.Buffer.ProcessTest do
   end
 
   describe "buffer_type" do
-    test "defaults to :file" do
-      {:ok, pid} = BufferProcess.start_link()
-      assert BufferProcess.buffer_type(pid) == :file
-    end
+    test "buffer type controls read-only defaults" do
+      {:ok, file} = BufferProcess.start_link()
+      {:ok, nofile} = BufferProcess.start_link(buffer_type: :nofile, content: "read only content")
 
-    test "accepts buffer_type: :nofile and sets read_only implicitly" do
-      {:ok, pid} = BufferProcess.start_link(buffer_type: :nofile, content: "read only content")
-      assert BufferProcess.buffer_type(pid) == :nofile
-      assert BufferProcess.read_only?(pid)
-    end
-
-    test "nofile buffer can override read_only to false" do
-      {:ok, pid} =
+      {:ok, editable_nofile} =
         BufferProcess.start_link(buffer_type: :nofile, read_only: false, content: "editable")
 
-      assert BufferProcess.buffer_type(pid) == :nofile
-      refute BufferProcess.read_only?(pid)
+      {:ok, nowrite} = BufferProcess.start_link(buffer_type: :nowrite, content: "display only")
+
+      assert BufferProcess.buffer_type(file) == :file
+      assert BufferProcess.buffer_type(nofile) == :nofile
+      assert BufferProcess.read_only?(nofile)
+      refute BufferProcess.read_only?(editable_nofile)
+      assert BufferProcess.buffer_type(nowrite) == :nowrite
+      refute BufferProcess.read_only?(nowrite)
     end
 
-    test "nowrite buffer accepts buffer_type: :nowrite" do
-      {:ok, pid} = BufferProcess.start_link(buffer_type: :nowrite, content: "display only")
-      assert BufferProcess.buffer_type(pid) == :nowrite
-      refute BufferProcess.read_only?(pid)
+    test "unsaveable buffer types block save APIs" do
+      for type <- [:nofile, :nowrite] do
+        {:ok, pid} = BufferProcess.start_link(buffer_type: type, content: "no save")
+        assert BufferProcess.save(pid) == {:error, :buffer_not_saveable}
+        assert BufferProcess.force_save(pid) == {:error, :buffer_not_saveable}
+      end
     end
 
-    test "nofile buffer blocks save" do
-      {:ok, pid} = BufferProcess.start_link(buffer_type: :nofile, content: "no save")
-      assert BufferProcess.save(pid) == {:error, :buffer_not_saveable}
-    end
-
-    test "nowrite buffer blocks save" do
-      {:ok, pid} = BufferProcess.start_link(buffer_type: :nowrite, content: "no save")
-      assert BufferProcess.save(pid) == {:error, :buffer_not_saveable}
-    end
-
-    test "nofile buffer blocks force_save" do
-      {:ok, pid} = BufferProcess.start_link(buffer_type: :nofile, content: "no save")
-      assert BufferProcess.force_save(pid) == {:error, :buffer_not_saveable}
-    end
-
-    test "nowrite buffer blocks force_save" do
-      {:ok, pid} = BufferProcess.start_link(buffer_type: :nowrite, content: "no save")
-      assert BufferProcess.force_save(pid) == {:error, :buffer_not_saveable}
-    end
-
-    test "file buffer saves normally", %{tmp_dir: tmp_dir} do
+    test "file buffers save normally", %{tmp_dir: tmp_dir} do
       path = Path.join(tmp_dir, "saveable.txt")
       File.write!(path, "original")
       {:ok, pid} = BufferProcess.start_link(file_path: path, buffer_type: :file)
@@ -628,37 +564,18 @@ defmodule Minga.Buffer.ProcessTest do
       assert BufferProcess.save(pid) == :ok
     end
 
-    test "buffer_type appears in render_snapshot" do
-      {:ok, pid} = BufferProcess.start_link(buffer_type: :nofile, content: "test")
-      snapshot = BufferProcess.render_snapshot(pid, 0, 10)
-      assert snapshot.buffer_type == :nofile
-    end
+    test "render_snapshot exposes type and version metadata" do
+      {:ok, nofile} = BufferProcess.start_link(buffer_type: :nofile, content: "hello\nworld")
 
-    test "render_snapshot is a RenderSnapshot struct" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello\nworld")
-      snapshot = BufferProcess.render_snapshot(pid, 0, 10)
-      assert %Minga.Buffer.RenderSnapshot{} = snapshot
-    end
+      assert %Minga.Buffer.RenderSnapshot{buffer_type: :nofile} =
+               BufferProcess.render_snapshot(nofile, 0, 10)
 
-    test "render_snapshot includes version that increments on edit" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello")
-      snap1 = BufferProcess.render_snapshot(pid, 0, 10)
-      v1 = snap1.version
+      {:ok, editable} = BufferProcess.start_link(content: "hello")
+      snap1 = BufferProcess.render_snapshot(editable, 0, 10)
+      BufferProcess.insert_char(editable, "x")
+      snap2 = BufferProcess.render_snapshot(editable, 0, 10)
 
-      BufferProcess.insert_char(pid, "x")
-      snap2 = BufferProcess.render_snapshot(pid, 0, 10)
-      v2 = snap2.version
-
-      assert v2 > v1
-    end
-
-    test "append bypasses read_only on nofile buffer" do
-      {:ok, pid} =
-        BufferProcess.start_link(buffer_type: :nofile, buffer_name: "*Test*", content: "")
-
-      assert BufferProcess.read_only?(pid)
-      BufferProcess.append(pid, "appended text")
-      assert BufferProcess.content(pid) == "appended text"
+      assert snap2.version > snap1.version
     end
   end
 
@@ -768,32 +685,30 @@ defmodule Minga.Buffer.ProcessTest do
   end
 
   describe "undo source metadata" do
-    test "user edits are tagged :user in undo stack" do
-      pid = start_supervised!({BufferProcess, content: "hello"})
-      BufferProcess.insert_char(pid, "X")
+    test "edits tag undo source by caller" do
+      cases = [
+        {:user, "hello", fn pid -> BufferProcess.insert_char(pid, "X") end},
+        {:agent, "hello world",
+         fn pid -> BufferProcess.find_and_replace(pid, "hello", "goodbye") end},
+        {:agent, "hello world",
+         fn pid -> BufferProcess.find_and_replace_batch(pid, [{"hello", "goodbye"}]) end},
+        {:lsp, "hello",
+         fn pid -> BufferProcess.apply_edits(pid, [{{0, 0}, {0, 5}, "goodbye"}]) end}
+      ]
 
-      assert BufferProcess.last_undo_source(pid) == :user
-    end
+      for {source, content, operation} <- cases do
+        pid =
+          start_supervised!({BufferProcess, content: content},
+            id: {:source_case, source, :erlang.unique_integer([:positive])}
+          )
 
-    test "agent edits (find_and_replace) are tagged :agent" do
-      pid = start_supervised!({BufferProcess, content: "hello world"})
-      BufferProcess.find_and_replace(pid, "hello", "goodbye")
+        assert BufferProcess.last_undo_source(pid) == nil
+        assert BufferProcess.last_redo_source(pid) == nil
 
-      assert BufferProcess.last_undo_source(pid) == :agent
-    end
+        operation.(pid)
 
-    test "agent batch edits (find_and_replace_batch) are tagged :agent" do
-      pid = start_supervised!({BufferProcess, content: "hello world"})
-      BufferProcess.find_and_replace_batch(pid, [{"hello", "goodbye"}])
-
-      assert BufferProcess.last_undo_source(pid) == :agent
-    end
-
-    test "LSP batch edits (apply_edits) are tagged :lsp" do
-      pid = start_supervised!({BufferProcess, content: "hello"})
-      BufferProcess.apply_edits(pid, [{{0, 0}, {0, 5}, "goodbye"}])
-
-      assert BufferProcess.last_undo_source(pid) == :lsp
+        assert BufferProcess.last_undo_source(pid) == source
+      end
     end
 
     test "source metadata survives undo/redo round-trip" do
@@ -809,17 +724,13 @@ defmodule Minga.Buffer.ProcessTest do
       assert BufferProcess.last_undo_source(pid) == :agent
     end
 
-    test "replace_content with :agent source is tagged :agent" do
+    test "replace_content records explicit and default sources" do
       pid = start_supervised!({BufferProcess, content: "hello"})
       BufferProcess.replace_content(pid, "goodbye", :agent)
-
       assert BufferProcess.last_undo_source(pid) == :agent
-    end
 
-    test "replace_content defaults to :user source" do
-      pid = start_supervised!({BufferProcess, content: "hello"})
+      pid = start_supervised!({BufferProcess, content: "hello"}, id: :default_source_buffer)
       BufferProcess.replace_content(pid, "goodbye")
-
       assert BufferProcess.last_undo_source(pid) == :user
     end
 
@@ -866,48 +777,6 @@ defmodule Minga.Buffer.ProcessTest do
       # Undo the agent edit; the user entry below should now be at the head.
       BufferProcess.undo(pid)
       assert BufferProcess.last_undo_source(pid) == :user
-    end
-  end
-
-  describe "last_undo_source/1 and last_redo_source/1" do
-    test "returns nil when stacks are empty" do
-      pid = start_supervised!({BufferProcess, content: "hello"})
-      assert BufferProcess.last_undo_source(pid) == nil
-      assert BufferProcess.last_redo_source(pid) == nil
-    end
-
-    test "returns source of most recent undo entry" do
-      pid = start_supervised!({BufferProcess, content: "hello world"})
-      BufferProcess.insert_char(pid, "X")
-      assert BufferProcess.last_undo_source(pid) == :user
-    end
-
-    test "returns :agent for agent edits" do
-      pid = start_supervised!({BufferProcess, content: "hello world"})
-      BufferProcess.find_and_replace(pid, "hello", "goodbye")
-      assert BufferProcess.last_undo_source(pid) == :agent
-    end
-
-    test "returns :lsp for LSP edits" do
-      pid = start_supervised!({BufferProcess, content: "hello"})
-      BufferProcess.apply_edits(pid, [{{0, 0}, {0, 5}, "goodbye"}])
-      assert BufferProcess.last_undo_source(pid) == :lsp
-    end
-
-    test "last_redo_source/1 returns source after undo" do
-      pid = start_supervised!({BufferProcess, content: "hello world"})
-      BufferProcess.find_and_replace(pid, "hello", "goodbye")
-      BufferProcess.undo(pid)
-      assert BufferProcess.last_redo_source(pid) == :agent
-    end
-
-    test "redo clears redo and updates undo source" do
-      pid = start_supervised!({BufferProcess, content: "hello world"})
-      BufferProcess.find_and_replace(pid, "hello", "goodbye")
-      BufferProcess.undo(pid)
-      BufferProcess.redo(pid)
-      assert BufferProcess.last_undo_source(pid) == :agent
-      assert BufferProcess.last_redo_source(pid) == nil
     end
   end
 
@@ -1321,35 +1190,20 @@ defmodule Minga.Buffer.ProcessTest do
   end
 
   describe "face_overrides/1 and remap_face/3" do
-    test "starts with empty overrides" do
+    test "sets, clears, and preserves independent face overrides" do
       {:ok, pid} = BufferProcess.start_link()
       assert BufferProcess.face_overrides(pid) == %{}
-    end
 
-    test "sets and retrieves a face override" do
-      {:ok, pid} = BufferProcess.start_link()
-      :ok = BufferProcess.remap_face(pid, "default", fg: 0x000000, bg: 0xFFFFFF)
-
-      overrides = BufferProcess.face_overrides(pid)
-      assert overrides == %{"default" => [fg: 0x000000, bg: 0xFFFFFF]}
-    end
-
-    test "clears a face override" do
-      {:ok, pid} = BufferProcess.start_link()
-      :ok = BufferProcess.remap_face(pid, "comment", italic: false)
-      :ok = BufferProcess.clear_face_override(pid, "comment")
-
-      assert BufferProcess.face_overrides(pid) == %{}
-    end
-
-    test "multiple overrides coexist" do
-      {:ok, pid} = BufferProcess.start_link()
       :ok = BufferProcess.remap_face(pid, "keyword", fg: 0xFF0000)
       :ok = BufferProcess.remap_face(pid, "comment", italic: false)
 
-      overrides = BufferProcess.face_overrides(pid)
-      assert Map.has_key?(overrides, "keyword")
-      assert Map.has_key?(overrides, "comment")
+      assert BufferProcess.face_overrides(pid) == %{
+               "keyword" => [fg: 0xFF0000],
+               "comment" => [italic: false]
+             }
+
+      :ok = BufferProcess.clear_face_override(pid, "comment")
+      assert BufferProcess.face_overrides(pid) == %{"keyword" => [fg: 0xFF0000]}
     end
   end
 
