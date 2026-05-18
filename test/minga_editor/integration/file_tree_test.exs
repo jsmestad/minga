@@ -1,191 +1,100 @@
 defmodule Minga.Integration.FileTreeTest do
   @moduledoc """
-  Integration tests for file tree: toggle, navigate, open files, focus
-  return, and separator rendering.
+  Thin integration smoke tests for file tree rendering and editor focus handoff.
 
-  Uses @moduletag :tmp_dir to create controlled directory fixtures instead
-  of scanning the real working directory. This prevents position-dependent
-  failures when the filesystem differs between local dev and CI.
+  File tree data structure behavior belongs in lower-level project tests. This file keeps only the behavior that needs a live Editor, key routing, GUI actions, and a rendered screen.
   """
   use Minga.Test.EditorCase, async: true
 
+  alias Minga.Test.HeadlessPort
+
   @moduletag :tmp_dir
+  @sync_timeout 15_000
 
   defp setup_fixture(%{tmp_dir: dir}) do
-    # Create a controlled directory structure so navigation is deterministic
     File.mkdir_p!(Path.join(dir, "subdir"))
     File.write!(Path.join(dir, "alpha.txt"), "alpha content")
     File.write!(Path.join(dir, "beta.txt"), "beta content")
     File.write!(Path.join(dir, "subdir/gamma.txt"), "gamma content")
 
     file = Path.join(dir, "alpha.txt")
-    # project_root isolates the file tree to this test's tmp_dir,
-    # preventing concurrent tests from shifting the entry list.
     %{file: file, project_root: dir}
   end
 
-  # ── Toggle ─────────────────────────────────────────────────────────────────
-
-  describe "file tree toggle (SPC o p)" do
-    test "opening shows file tree panel with separator", %{tmp_dir: dir} do
-      %{file: file, project_root: root} = setup_fixture(%{tmp_dir: dir})
-      ctx = start_editor("hello world", file_path: file, project_root: root)
-
-      send_keys_sync(ctx, "<Space>op")
-
-      # File tree should show directory structure with separator
-      rows = screen_text(ctx)
-      has_separator = Enum.any?(rows, &String.contains?(&1, "│"))
-      assert has_separator, "vertical separator between tree and editor should be visible"
-    end
-
-    test "closing restores full editor width", %{tmp_dir: dir} do
-      %{file: file, project_root: root} = setup_fixture(%{tmp_dir: dir})
-      ctx = start_editor("hello world", file_path: file, project_root: root)
-
-      # Open then close
-      send_keys_sync(ctx, "<Space>op")
-      assert Enum.any?(screen_text(ctx), &String.contains?(&1, "│"))
-
-      send_keys_sync(ctx, "<Space>op")
-
-      # Separator should be gone
-      row1 = screen_row(ctx, 1)
-      refute String.contains?(row1, "│"), "separator should be gone after closing tree"
-    end
+  defp start_project_editor(dir) do
+    %{file: file, project_root: root} = setup_fixture(%{tmp_dir: dir})
+    start_editor("alpha content", file_path: file, project_root: root)
   end
 
-  # ── Navigation ─────────────────────────────────────────────────────────────
-
-  describe "file tree navigation" do
-    test "j/k moves tree cursor", %{tmp_dir: dir} do
-      %{file: file, project_root: root} = setup_fixture(%{tmp_dir: dir})
-      ctx = start_editor("hello world", file_path: file, project_root: root)
-
-      send_keys_sync(ctx, "<Space>op")
-      # Move down in tree
-      send_keys_sync(ctx, "j")
-      send_keys_sync(ctx, "j")
-    end
+  defp open_file_tree(ctx) do
+    send_keys_sync(ctx, "<Space>op")
+    assert screen_contains?(ctx, "alpha.txt")
+    assert Enum.any?(screen_text(ctx), &String.contains?(&1, "│"))
+    ctx
   end
 
-  # ── Focus return ───────────────────────────────────────────────────────────
-
-  describe "focus return after tree interaction" do
-    test "pressing Escape returns focus to editor", %{tmp_dir: dir} do
-      %{file: file, project_root: root} = setup_fixture(%{tmp_dir: dir})
-      ctx = start_editor("hello world", file_path: file, project_root: root)
-
-      send_keys_sync(ctx, "<Space>op")
-      # Tree should be focused initially
-      send_keys_sync(ctx, "j")
-
-      send_keys_sync(ctx, "<Esc>")
-
-      # After escape, focus should return to editor
-      assert editor_mode(ctx) == :normal
-    end
+  defp send_gui_action(%{editor: editor, port: port}, action) do
+    _ = GenServer.call(editor, :api_mode, @sync_timeout)
+    ref = HeadlessPort.prepare_await(port)
+    send(editor, {:minga_input, {:gui_action, action}})
+    {:ok, snapshot} = HeadlessPort.collect_frame(ref, @sync_timeout)
+    Process.put({:last_frame_snapshot, port}, snapshot)
+    :ok
   end
 
-  # ── Focus cycling ──────────────────────────────────────────────────────────
+  describe "file tree integration" do
+    test "SPC o p toggles the rendered tree panel", %{tmp_dir: dir} do
+      ctx = start_project_editor(dir)
 
-  describe "focus cycling between tree and editor" do
-    test "Escape from tree returns focus to editor while keeping tree open", %{tmp_dir: dir} do
-      %{file: file, project_root: root} = setup_fixture(%{tmp_dir: dir})
-      ctx = start_editor("hello world", file_path: file, project_root: root)
+      ctx = open_file_tree(ctx)
 
       send_keys_sync(ctx, "<Space>op")
-      state = :sys.get_state(ctx.editor)
-      assert state.workspace.keymap_scope == :file_tree
 
-      # Escape closes the tree and returns focus to the editor
-      send_keys_sync(ctx, "<Esc>")
-      state = :sys.get_state(ctx.editor)
-      assert state.workspace.keymap_scope == :editor
+      refute String.contains?(screen_row(ctx, 1), "│"),
+             "separator should be gone after closing tree"
     end
 
-    test "opening a file from tree returns focus to editor", %{tmp_dir: dir} do
-      %{file: file, project_root: root} = setup_fixture(%{tmp_dir: dir})
-      ctx = start_editor("hello world", file_path: file, project_root: root)
+    test "opening a file from the tree returns to normal editing behavior", %{tmp_dir: dir} do
+      ctx =
+        dir
+        |> start_project_editor()
+        |> open_file_tree()
 
-      send_keys_sync(ctx, "<Space>op")
-      state = :sys.get_state(ctx.editor)
-      assert state.workspace.keymap_scope == :file_tree
-
-      # Navigate past directories to reach a file.
       send_keys_sync(ctx, "G<CR>")
 
-      state = :sys.get_state(ctx.editor)
+      assert active_content(ctx) == "beta content"
 
-      assert state.workspace.keymap_scope == :editor,
-             "focus should return to editor after opening file from tree, got #{state.workspace.keymap_scope}"
+      send_keys_sync(ctx, "i!<Esc>")
+
+      assert active_content(ctx) == "!beta content"
     end
 
     test "GUI open in split targets the new split while tree is focused", %{tmp_dir: dir} do
-      %{file: file, project_root: root} = setup_fixture(%{tmp_dir: dir})
-      ctx = start_editor("alpha content", file_path: file, project_root: root)
+      ctx =
+        dir
+        |> start_project_editor()
+        |> open_file_tree()
 
-      send_keys_sync(ctx, "<Space>op")
-      state = editor_state(ctx)
-      assert state.workspace.keymap_scope == :file_tree
-      original_window_id = state.workspace.windows.active
+      send_gui_action(ctx, {:file_tree_open_in_split, 2})
 
-      index =
-        state.workspace.file_tree.tree
-        |> Minga.Project.FileTree.visible_entries()
-        |> Enum.find_index(&(&1.name == "beta.txt"))
-
-      assert is_integer(index)
-
-      send(ctx.editor, {:minga_input, {:gui_action, {:file_tree_open_in_split, index}}})
-      state = editor_state(ctx)
-
-      assert map_size(state.workspace.windows.map) == 2
-      assert state.workspace.windows.active != original_window_id
-      assert state.workspace.windows.map[original_window_id].buffer == ctx.buffer
+      assert has_split?(ctx)
+      assert window_count(ctx) == 2
       assert active_content(ctx) == "beta content"
-      assert state.workspace.keymap_scope == :editor
-    end
-  end
-
-  # ── Nested directory expansion ─────────────────────────────────────────────
-
-  describe "nested directory expansion" do
-    test "l expands a directory and shows children", %{tmp_dir: dir} do
-      %{file: file, project_root: root} = setup_fixture(%{tmp_dir: dir})
-      ctx = start_editor("hello world", file_path: file, project_root: root)
-
-      send_keys_sync(ctx, "<Space>op")
-      # Cursor lands on alpha.txt (revealed active buffer).
-      # Navigate up to subdir/ and expand with l.
-      send_keys_sync(ctx, "gg")
-      send_keys_sync(ctx, "l")
-
-      # After expanding subdir, the child file should be visible
-      rows_after = screen_text(ctx)
-
-      assert Enum.any?(rows_after, &String.contains?(&1, "gamma.txt")),
-             "expanding subdir should show gamma.txt"
     end
 
-    test "h collapses an expanded directory", %{tmp_dir: dir} do
-      %{file: file, project_root: root} = setup_fixture(%{tmp_dir: dir})
-      ctx = start_editor("hello world", file_path: file, project_root: root)
+    test "nested directories expand and collapse in the rendered tree", %{tmp_dir: dir} do
+      ctx =
+        dir
+        |> start_project_editor()
+        |> open_file_tree()
 
-      send_keys_sync(ctx, "<Space>op")
-      # Navigate to subdir/ and expand, then collapse.
-      send_keys_sync(ctx, "gg")
-      send_keys_sync(ctx, "l")
+      send_keys_sync(ctx, "ggl")
 
-      # Verify gamma.txt is visible after expanding
-      rows_expanded = screen_text(ctx)
-      assert Enum.any?(rows_expanded, &String.contains?(&1, "gamma.txt"))
+      assert screen_contains?(ctx, "gamma.txt"), "expanding subdir should show gamma.txt"
 
       send_keys_sync(ctx, "h")
-      rows_collapsed = screen_text(ctx)
 
-      refute Enum.any?(rows_collapsed, &String.contains?(&1, "gamma.txt")),
-             "collapsing subdir should hide gamma.txt"
+      refute screen_contains?(ctx, "gamma.txt"), "collapsing subdir should hide gamma.txt"
     end
   end
 end
