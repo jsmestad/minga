@@ -40,7 +40,6 @@ defmodule MingaEditor.State do
   alias MingaEditor.State.Session, as: SessionState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
-  alias MingaEditor.State.Highlighting
   alias MingaEditor.State.Mouse
   alias MingaEditor.State.Remote
   alias MingaEditor.State.Search
@@ -1159,9 +1158,7 @@ defmodule MingaEditor.State do
       file_tree: %FileTreeState{project_root: state.workspace.file_tree.project_root},
       viewport: state.terminal_viewport,
       mouse: %Mouse{},
-      highlight: %Highlighting{},
       lsp_pending: %{},
-      injection_ranges: %{},
       search: %Search{},
       editing: VimState.new(),
       document_highlights: nil,
@@ -1189,9 +1186,7 @@ defmodule MingaEditor.State do
       file_tree: %FileTreeState{project_root: state.workspace.file_tree.project_root},
       viewport: state.terminal_viewport,
       mouse: %Mouse{},
-      highlight: %Highlighting{},
       lsp_pending: %{},
-      injection_ranges: %{},
       search: %Search{},
       editing: VimState.new(),
       document_highlights: nil,
