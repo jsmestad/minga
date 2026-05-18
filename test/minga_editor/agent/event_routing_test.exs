@@ -28,6 +28,18 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
   defp workspace, do: %WorkspaceState{viewport: Viewport.new(24, 80), editing: VimState.new()}
 
+  defp fake_session_pid do
+    pid =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    on_exit(fn -> if Process.alive?(pid), do: send(pid, :stop) end)
+    pid
+  end
+
   defp tab(%TabBar{tabs: tabs}, id), do: Enum.find(tabs, &(&1.id == id))
 
   defp tab_bar(tabs, active_id) do
@@ -46,8 +58,8 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
   describe "Traditional.on_agent_event/4" do
     setup do
-      session_a = spawn_link(fn -> Process.sleep(:infinity) end)
-      session_b = spawn_link(fn -> Process.sleep(:infinity) end)
+      session_a = fake_session_pid()
+      session_b = fake_session_pid()
 
       tabs = [
         Tab.new_agent(1, "A") |> Tab.set_session(session_a),
@@ -146,8 +158,8 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
   describe "Board.on_agent_event/4" do
     setup do
-      session_a = spawn_link(fn -> Process.sleep(:infinity) end)
-      session_b = spawn_link(fn -> Process.sleep(:infinity) end)
+      session_a = fake_session_pid()
+      session_b = fake_session_pid()
 
       board = BoardState.new()
       {board, _card_a} = BoardState.create_card(board, task: "A", session: session_a)
