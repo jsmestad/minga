@@ -3,6 +3,14 @@ defmodule Minga.ProtocolGeneratedEditsScriptTest do
   use ExUnit.Case, async: false
 
   @script Path.expand("../../scripts/check_protocol_generated_edits", __DIR__)
+  @git_env [
+    {"GIT_CONFIG_NOSYSTEM", "1"},
+    {"GIT_CONFIG_GLOBAL", "/dev/null"},
+    {"GIT_AUTHOR_NAME", "Test User"},
+    {"GIT_AUTHOR_EMAIL", "test@example.com"},
+    {"GIT_COMMITTER_NAME", "Test User"},
+    {"GIT_COMMITTER_EMAIL", "test@example.com"}
+  ]
 
   test "passes when generated source files are only deleted" do
     with_git_repo(fn dir ->
@@ -87,6 +95,7 @@ defmodule Minga.ProtocolGeneratedEditsScriptTest do
       git!(dir, ["init", "-b", "main"])
       git!(dir, ["config", "user.email", "test@example.com"])
       git!(dir, ["config", "user.name", "Test User"])
+      git!(dir, ["config", "core.hooksPath", "/dev/null"])
       fun.(dir)
     after
       File.rm_rf!(dir)
@@ -108,7 +117,7 @@ defmodule Minga.ProtocolGeneratedEditsScriptTest do
 
   @spec git!(Path.t(), [String.t()]) :: :ok
   defp git!(dir, args) do
-    case System.cmd("git", args, cd: dir, stderr_to_stdout: true) do
+    case System.cmd("git", args, cd: dir, stderr_to_stdout: true, env: @git_env) do
       {_output, 0} -> :ok
       {output, code} -> flunk("git #{Enum.join(args, " ")} failed with #{code}: #{output}")
     end

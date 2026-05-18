@@ -73,12 +73,12 @@ defmodule MingaAgent.Notifier do
 
   `message` is a short summary shown in the OS notification body.
   """
-  @spec notify(trigger(), String.t()) :: :ok
-  def notify(trigger, message) do
+  @spec notify(trigger(), String.t(), keyword()) :: :ok
+  def notify(trigger, message, opts \\ []) do
     if enabled?() and trigger in active_triggers() and not debounced?() do
       record_notification()
-      send_bell()
-      send_os_notification(trigger, message)
+      maybe_send_bell(Keyword.get(opts, :bell, true))
+      send_os_notification(trigger, message, Keyword.get(opts, :os_adapter, @os_adapter))
     end
 
     :ok
@@ -130,6 +130,10 @@ defmodule MingaAgent.Notifier do
     :ok
   end
 
+  @spec maybe_send_bell(boolean()) :: :ok
+  defp maybe_send_bell(false), do: :ok
+  defp maybe_send_bell(true), do: send_bell()
+
   @spec send_bell() :: :ok
   defp send_bell do
     # Write BEL to stderr (the terminal) to trigger tab flash / dock bounce
@@ -141,10 +145,10 @@ defmodule MingaAgent.Notifier do
       :ok
   end
 
-  @spec send_os_notification(trigger(), String.t()) :: :ok
-  defp send_os_notification(trigger, message) do
+  @spec send_os_notification(trigger(), String.t(), module()) :: :ok
+  defp send_os_notification(trigger, message, os_adapter) do
     title = title_for(trigger)
-    @os_adapter.send_notification(title, message)
+    os_adapter.send_notification(title, message)
   end
 
   @spec title_for(trigger()) :: String.t()
