@@ -11,8 +11,20 @@ defmodule MingaEditor.Agent.AgentGroupAssociationTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
 
+  defp fake_session_pid do
+    pid =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    on_exit(fn -> if Process.alive?(pid), do: send(pid, :stop) end)
+    pid
+  end
+
   defp build_agent_scenario do
-    fake_session = spawn(fn -> Process.sleep(:infinity) end)
+    fake_session = fake_session_pid()
 
     tab1 = %Tab{id: 1, kind: :file, label: "editor.ex", group_id: 0}
     tab2 = %Tab{id: 2, kind: :file, label: "main.ex", group_id: 0}
@@ -59,7 +71,7 @@ defmodule MingaEditor.Agent.AgentGroupAssociationTest do
   describe "workspace lifecycle" do
     test "creating agent workspace assigns session" do
       tb = TabBar.new(Tab.new_file(1, "a.ex"))
-      fake_session = spawn(fn -> Process.sleep(:infinity) end)
+      fake_session = fake_session_pid()
 
       {tb, ws} = TabBar.add_agent_group(tb, "Research", fake_session)
       assert ws.session == fake_session

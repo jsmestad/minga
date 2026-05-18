@@ -65,6 +65,18 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
   defp stop_session(_pid), do: :ok
 
+  defp fake_session_pid do
+    pid =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    on_exit(fn -> if Process.alive?(pid), do: send(pid, :stop) end)
+    pid
+  end
+
   # ── Grid navigation ────────────────────────────────────────────────────
 
   describe "grid navigation" do
@@ -147,7 +159,7 @@ defmodule MingaEditor.Shell.Board.InputTest do
       # Set up a board with one agent card that has a session but no workspace.
       # The shell carries the agent buffer pid that the bootstrap helper uses
       # to construct the agent-chat window.
-      fake_session = spawn(fn -> Process.sleep(:infinity) end)
+      fake_session = fake_session_pid()
       {:ok, agent_buf} = Minga.Buffer.start_link(content: "")
 
       board =
@@ -188,7 +200,7 @@ defmodule MingaEditor.Shell.Board.InputTest do
     test "first-time zoom matches re-zoom shape (modulo prompt content)" do
       # The acceptance criterion: first-zoom and re-zoom land in the same
       # workspace shape — agent scope, agent-chat window, fresh agent_ui.
-      fake_session = spawn(fn -> Process.sleep(:infinity) end)
+      fake_session = fake_session_pid()
       {:ok, agent_buf} = Minga.Buffer.start_link(content: "")
 
       board =
@@ -295,7 +307,7 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
     test "does not double-start when card already has a session" do
       {:ok, agent_buf} = Minga.Buffer.start_link(content: "")
-      fake_session = spawn(fn -> Process.sleep(:infinity) end)
+      fake_session = fake_session_pid()
 
       board =
         BoardState.new()
@@ -347,7 +359,7 @@ defmodule MingaEditor.Shell.Board.InputTest do
       # (zoomed_into == nil), so active_session/1 reports nil. The session
       # itself is not killed; the card retains its pid for the next zoom-in.
       state = editor_zoomed_into(3, 1)
-      fake_pid = spawn(fn -> Process.sleep(:infinity) end)
+      fake_pid = fake_session_pid()
 
       board =
         BoardState.update_card(state.shell_state, 1, fn card ->
@@ -401,8 +413,8 @@ defmodule MingaEditor.Shell.Board.InputTest do
     test "zoom A → out → zoom B does not leak A's session into B's rendering cache" do
       # Two cards with distinct sessions. After zooming through A and into
       # B, the active session must report as B's pid (no leak from A).
-      session_a = spawn(fn -> Process.sleep(:infinity) end)
-      session_b = spawn(fn -> Process.sleep(:infinity) end)
+      session_a = fake_session_pid()
+      session_b = fake_session_pid()
       {:ok, agent_buf} = Minga.Buffer.start_link(content: "")
 
       board =
