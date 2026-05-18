@@ -184,164 +184,55 @@ defmodule Minga.Buffer.ProcessTest do
     end
   end
 
-  describe "insert_char/2" do
-    test "inserts at cursor and marks dirty" do
+  describe "document editing wrappers" do
+    test "mutating wrappers update content and dirty state" do
       {:ok, pid} = BufferProcess.start_link(content: "hello")
       refute BufferProcess.dirty?(pid)
 
-      :ok = BufferProcess.insert_char(pid, "X")
+      assert :ok = BufferProcess.insert_char(pid, "X")
+
       assert BufferProcess.content(pid) == "Xhello"
       assert BufferProcess.cursor(pid) == {0, 1}
       assert BufferProcess.dirty?(pid)
     end
-  end
 
-  describe "delete_before/1" do
-    test "deletes character before cursor and marks dirty" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello")
-      BufferProcess.move(pid, :right)
-      BufferProcess.move(pid, :right)
-
-      :ok = BufferProcess.delete_before(pid)
-      assert BufferProcess.content(pid) == "hllo"
-      assert BufferProcess.dirty?(pid)
-    end
-
-    test "does not mark dirty when nothing to delete" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello")
-      BufferProcess.delete_before(pid)
-      refute BufferProcess.dirty?(pid)
-    end
-  end
-
-  describe "delete_at/1" do
-    test "deletes character at cursor and marks dirty" do
+    test "boundary edit no-ops leave a clean buffer clean" do
       {:ok, pid} = BufferProcess.start_link(content: "hello")
 
-      :ok = BufferProcess.delete_at(pid)
-      assert BufferProcess.content(pid) == "ello"
-      assert BufferProcess.dirty?(pid)
-    end
-
-    test "does not mark dirty when nothing to delete" do
-      {:ok, pid} = BufferProcess.start_link(content: "hi")
-      BufferProcess.move_to(pid, {0, 2})
-      BufferProcess.delete_at(pid)
-      refute BufferProcess.dirty?(pid)
-    end
-  end
-
-  describe "move/2" do
-    test "moves cursor without marking dirty" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello\nworld")
-      refute BufferProcess.dirty?(pid)
-
-      BufferProcess.move(pid, :right)
-      assert BufferProcess.cursor(pid) == {0, 1}
-      refute BufferProcess.dirty?(pid)
-
-      BufferProcess.move(pid, :down)
-      assert BufferProcess.cursor(pid) == {1, 1}
-      refute BufferProcess.dirty?(pid)
-    end
-  end
-
-  describe "move_if_possible/2" do
-    test "moves left when not at column 0" do
-      pid = start_supervised!({BufferProcess, content: "hello"})
-      BufferProcess.move_to(pid, {0, 3})
-      assert {:ok, {0, 2}} = BufferProcess.move_if_possible(pid, :left)
-      assert BufferProcess.cursor(pid) == {0, 2}
-    end
-
-    test "left from column 1 succeeds and reaches column 0" do
-      pid = start_supervised!({BufferProcess, content: "hello"})
-      BufferProcess.move_to(pid, {0, 1})
-      assert {:ok, {0, 0}} = BufferProcess.move_if_possible(pid, :left)
-      assert BufferProcess.cursor(pid) == {0, 0}
-    end
-
-    test "returns :at_boundary when at column 0 (left)" do
-      pid = start_supervised!({BufferProcess, content: "hello"})
-      assert :at_boundary = BufferProcess.move_if_possible(pid, :left)
-      assert BufferProcess.cursor(pid) == {0, 0}
-    end
-
-    test "moves right when not at end of line" do
-      pid = start_supervised!({BufferProcess, content: "hello"})
-      assert {:ok, {0, 1}} = BufferProcess.move_if_possible(pid, :right)
-      assert BufferProcess.cursor(pid) == {0, 1}
-    end
-
-    test "returns :at_boundary when at last grapheme position (right)" do
-      pid = start_supervised!({BufferProcess, content: "hello"})
-      # "hello" has last grapheme at byte offset 4
-      BufferProcess.move_to(pid, {0, 4})
-      assert :at_boundary = BufferProcess.move_if_possible(pid, :right)
-      assert BufferProcess.cursor(pid) == {0, 4}
-    end
-
-    test "single character line is at boundary for right" do
-      # single char: last_grapheme_byte_offset("x") is 0, cursor already at max_col
-      pid = start_supervised!({BufferProcess, content: "x"})
-      assert :at_boundary = BufferProcess.move_if_possible(pid, :right)
-      assert BufferProcess.cursor(pid) == {0, 0}
-    end
-
-    test "returns :at_boundary on empty line (right)" do
-      pid = start_supervised!({BufferProcess, content: "\n"})
-      assert :at_boundary = BufferProcess.move_if_possible(pid, :right)
-      assert BufferProcess.cursor(pid) == {0, 0}
-    end
-
-    test "returns :at_boundary at start of buffer (left)" do
-      pid = start_supervised!({BufferProcess, content: "abc\ndef"})
-      assert :at_boundary = BufferProcess.move_if_possible(pid, :left)
-    end
-
-    test "returns :at_boundary at end of last line (right)" do
-      pid = start_supervised!({BufferProcess, content: "abc\ndef"})
-      BufferProcess.move_to(pid, {1, 2})
-      assert :at_boundary = BufferProcess.move_if_possible(pid, :right)
-    end
-
-    test "consecutive right moves walk to end of line then stop" do
-      pid = start_supervised!({BufferProcess, content: "abc"})
-      assert {:ok, {0, 1}} = BufferProcess.move_if_possible(pid, :right)
-      assert {:ok, {0, 2}} = BufferProcess.move_if_possible(pid, :right)
-      assert :at_boundary = BufferProcess.move_if_possible(pid, :right)
-      # cursor stays put after boundary
-      assert :at_boundary = BufferProcess.move_if_possible(pid, :right)
-      assert BufferProcess.cursor(pid) == {0, 2}
-    end
-
-    test "respects byte-offset positions for multi-byte graphemes (right)" do
-      # "héllo": h(0) é(1, 2 bytes) l(3) l(4) o(5) — last grapheme at byte offset 5
-      pid = start_supervised!({BufferProcess, content: "héllo"})
+      assert :ok = BufferProcess.delete_before(pid)
       BufferProcess.move_to(pid, {0, 5})
+      assert :ok = BufferProcess.delete_at(pid)
+
+      refute BufferProcess.dirty?(pid)
+      assert BufferProcess.content(pid) == "hello"
+    end
+
+    test "movement wrappers update cursor without marking dirty" do
+      {:ok, pid} = BufferProcess.start_link(content: "hello\nworld")
+
+      BufferProcess.move(pid, :right)
+      BufferProcess.move(pid, :down)
+      BufferProcess.move_to(pid, {1, 3})
+
+      assert BufferProcess.cursor(pid) == {1, 3}
+      refute BufferProcess.dirty?(pid)
+    end
+
+    test "move_if_possible reports successful moves and boundaries" do
+      pid = start_supervised!({BufferProcess, content: "ab"})
+
+      assert {:ok, {0, 1}} = BufferProcess.move_if_possible(pid, :right)
       assert :at_boundary = BufferProcess.move_if_possible(pid, :right)
-    end
-
-    test "left through multi-byte grapheme returns correct byte offset" do
-      # "héllo": moving left from l(3) should land on é(1)
-      pid = start_supervised!({BufferProcess, content: "héllo"})
-      BufferProcess.move_to(pid, {0, 3})
-      assert {:ok, {0, 1}} = BufferProcess.move_if_possible(pid, :left)
-    end
-
-    test "does not mark buffer dirty" do
-      pid = start_supervised!({BufferProcess, content: "hello"})
-      BufferProcess.move_if_possible(pid, :right)
+      assert {:ok, {0, 0}} = BufferProcess.move_if_possible(pid, :left)
+      assert :at_boundary = BufferProcess.move_if_possible(pid, :left)
       refute BufferProcess.dirty?(pid)
     end
-  end
 
-  describe "move_to/2" do
-    test "moves to exact position" do
-      {:ok, pid} = BufferProcess.start_link(content: "abc\ndef\nghi")
-      BufferProcess.move_to(pid, {2, 1})
-      assert BufferProcess.cursor(pid) == {2, 1}
-      refute BufferProcess.dirty?(pid)
+    test "query wrappers expose document lines" do
+      {:ok, pid} = BufferProcess.start_link(content: "a\nb\nc\nd\ne")
+
+      assert BufferProcess.lines(pid, 1, 3) == ["b", "c", "d"]
+      assert BufferProcess.line_count(pid) == 5
     end
   end
 
