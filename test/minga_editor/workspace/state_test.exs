@@ -51,7 +51,7 @@ defmodule MingaEditor.Workspace.StateTest do
       win_id = ws.windows.active
 
       # Set the window's content to agent_chat
-      agent_pid = spawn(fn -> Process.sleep(:infinity) end)
+      agent_pid = self()
       window = Map.get(ws.windows.map, win_id)
       agent_window = %{window | content: Content.agent_chat(agent_pid)}
       ws = %{ws | windows: %{ws.windows | map: Map.put(ws.windows.map, win_id, agent_window)}}

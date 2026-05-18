@@ -32,7 +32,7 @@ defmodule MingaEditor.AgentActivationTest do
 
   defp activated_state do
     # Simulate an activated agent: session attached to active tab, scope is :agent, prompt focused
-    fake_pid = spawn(fn -> Process.sleep(:infinity) end)
+    fake_pid = self()
 
     state = base_state()
 

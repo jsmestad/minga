@@ -497,8 +497,9 @@ defmodule MingaAgent.Tools.SubagentTest do
     test "falls back to default context when parent session is already dead", %{tmp_dir: dir} do
       ref = make_ref()
       parent = start_parent_session(dir, ref)
-      MingaAgent.Supervisor.stop_session(parent)
-      Process.sleep(50)
+      monitor_ref = Process.monitor(parent)
+      assert :ok = MingaAgent.Supervisor.stop_session(parent)
+      assert_receive {:DOWN, ^monitor_ref, :process, ^parent, _reason}, 1_000
 
       assert {:ok, "child response"} =
                Subagent.execute("do child task",

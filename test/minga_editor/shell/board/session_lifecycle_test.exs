@@ -44,7 +44,7 @@ defmodule MingaEditor.Shell.Board.SessionLifecycleTest do
     end
 
     test "no-ops when card already has a session" do
-      fake_pid = spawn(fn -> Process.sleep(:infinity) end)
+      fake_pid = self()
       board = BoardState.new()
       {board, card} = BoardState.create_card(board, task: "Agent", session: fake_pid)
       state = make_state(board)

@@ -18,8 +18,9 @@ defmodule MingaAgent.Hooks.ModuleRunnerTest do
   defmodule SlowPolicy do
     @spec check(map()) :: :allow
     def check(_payload) do
-      Process.sleep(5_000)
-      :allow
+      receive do
+        :allow -> :allow
+      end
     end
   end
 
