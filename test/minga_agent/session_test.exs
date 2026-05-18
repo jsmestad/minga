@@ -251,6 +251,38 @@ defmodule MingaAgent.SessionTest do
     :ok
   end
 
+  defp start_subscribed_session(provider \\ MockProvider, provider_opts \\ []) do
+    {:ok, session} = Session.start_link(provider: provider, provider_opts: provider_opts)
+    Session.subscribe(session)
+    session
+  end
+
+  defp send_approval(session, reply_to \\ self()) do
+    approval = %Event.ToolApproval{
+      tool_call_id: "tc1",
+      name: "shell",
+      args: %{"command" => "rm -rf /"},
+      reply_to: reply_to
+    }
+
+    send_provider_event(session, approval)
+    assert_receive {:agent_event, _, {:approval_pending, _}}, @event_timeout
+    :ok
+  end
+
+  defp start_slow_turn(prompt \\ "first") do
+    session = start_subscribed_session(SlowMockProvider)
+    assert is_pid(Session.get_provider(session))
+    assert :ok = Session.send_prompt(session, prompt)
+    assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
+    session
+  end
+
+  defp finish_slow_turn(session) do
+    SlowMockProvider.proceed(Session.get_provider(session))
+    assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
+  end
+
   defp mcp_session_builtin_tool do
     ReqLLM.Tool.new!(
       name: "builtin_echo",
@@ -353,36 +385,31 @@ defmodule MingaAgent.SessionTest do
              end)
     end
 
-    test "provider working events do not leave plan mode", %{session: session} do
+    test "plan mode survives provider events and abort", %{session: session} do
       assert :ok = Session.enter_plan(session)
-      send(session, {:agent_provider_event, %Event.AgentStart{}})
 
-      send(
-        session,
-        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc", name: "read_file"}}
-      )
+      events = [
+        %Event.AgentStart{},
+        %Event.ToolStart{tool_call_id: "tc", name: "read_file"},
+        %Event.Error{message: "something broke"}
+      ]
 
+      for event <- events do
+        send_provider_event(session, event)
+        assert Session.status(session) == :plan
+      end
+
+      assert :ok = Session.abort(session)
       assert Session.status(session) == :plan
     end
 
     test "AgentEnd preserves plan mode status" do
-      {:ok, session} =
-        Session.start_link(
-          provider: SlowMockProvider,
-          provider_opts: []
-        )
+      session = start_subscribed_session(SlowMockProvider)
 
-      Session.subscribe(session)
       assert :ok = Session.enter_plan(session)
       assert :ok = Session.send_prompt(session, "hello")
       SlowMockProvider.proceed(Session.get_provider(session))
       assert_receive {:agent_event, _, :messages_changed}, @event_timeout
-      assert Session.status(session) == :plan
-    end
-
-    test "abort preserves plan mode", %{session: session} do
-      assert :ok = Session.enter_plan(session)
-      assert :ok = Session.abort(session)
       assert Session.status(session) == :plan
     end
 
@@ -391,18 +418,6 @@ defmodule MingaAgent.SessionTest do
       assert :ok = Session.enter_exec(session)
       assert Session.status(session) == :idle
       assert length(Session.messages(session)) == msg_count_before
-    end
-
-    test "error event preserves plan mode", %{session: session} do
-      assert :ok = Session.enter_plan(session)
-
-      send(
-        session,
-        {:agent_provider_event, %Event.Error{message: "something broke"}}
-      )
-
-      # Sync via a GenServer.call to ensure the handle_info has been processed
-      assert Session.status(session) == :plan
     end
   end
 
@@ -820,59 +835,21 @@ defmodule MingaAgent.SessionTest do
       refute Map.has_key?(data, :reply_to)
     end
 
-    test "respond_to_approval sends decision to reply_to pid", %{session: session} do
-      # Register ourselves as the reply_to (simulating the Task)
-      approval = %Event.ToolApproval{
-        tool_call_id: "tc1",
-        name: "write_file",
-        args: %{"path" => "foo.ex"},
-        reply_to: self()
-      }
+    test "respond_to_approval resolves each supported decision" do
+      for decision <- [:approve, :reject, :approve_all] do
+        session = start_subscribed_session()
+        send_approval(session)
 
-      send_provider_event(session, approval)
-      assert_receive {:agent_event, _, {:approval_pending, _}}, @event_timeout
+        assert :ok = Session.respond_to_approval(session, decision)
+        assert_receive {:tool_approval_response, "tc1", ^decision}, @event_timeout
+        assert_receive {:agent_event, _, {:approval_resolved, ^decision}}, @event_timeout
+        assert {:error, :no_pending_approval} = Session.respond_to_approval(session, :approve)
 
-      :ok = Session.respond_to_approval(session, :approve)
-
-      # Should receive the response directly
-      assert_receive {:tool_approval_response, "tc1", :approve}
-      # And the resolution broadcast
-      assert_receive {:agent_event, _, {:approval_resolved, :approve}}, @event_timeout
-    end
-
-    test "respond_to_approval with :reject sends reject", %{session: session} do
-      approval = %Event.ToolApproval{
-        tool_call_id: "tc1",
-        name: "shell",
-        args: %{},
-        reply_to: self()
-      }
-
-      send_provider_event(session, approval)
-      assert_receive {:agent_event, _, {:approval_pending, _}}, @event_timeout
-
-      :ok = Session.respond_to_approval(session, :reject)
-      assert_receive {:tool_approval_response, "tc1", :reject}
-
-      messages = Session.messages(session)
-      assert Enum.any?(messages, &match?({:system, "Denied shell" <> _, :info}, &1))
-    end
-
-    test "respond_to_approval with :approve_all sends approve_all", %{session: session} do
-      approval = %Event.ToolApproval{
-        tool_call_id: "tc1",
-        name: "shell",
-        args: %{},
-        reply_to: self()
-      }
-
-      send_provider_event(session, approval)
-      assert_receive {:agent_event, _, {:approval_pending, _}}, @event_timeout
-
-      :ok = Session.respond_to_approval(session, :approve_all)
-      assert_receive {:tool_approval_response, "tc1", :approve_all}
-      assert_receive {:agent_event, _, {:approval_resolved, :approve_all}}, @event_timeout
-      assert {:error, :no_pending_approval} = Session.respond_to_approval(session, :approve)
+        if decision == :reject do
+          messages = Session.messages(session)
+          assert Enum.any?(messages, &match?({:system, "Denied shell" <> _, :info}, &1))
+        end
+      end
     end
 
     test "respond_to_approval with no pending returns error", %{session: session} do
@@ -880,19 +857,10 @@ defmodule MingaAgent.SessionTest do
     end
 
     test "abort clears pending approval", %{session: session} do
-      approval = %Event.ToolApproval{
-        tool_call_id: "tc1",
-        name: "shell",
-        args: %{},
-        reply_to: self()
-      }
-
-      send_provider_event(session, approval)
-      assert_receive {:agent_event, _, {:approval_pending, _}}, @event_timeout
+      send_approval(session)
 
       :ok = Session.abort(session)
 
-      # Pending approval should be cleared
       assert {:error, :no_pending_approval} = Session.respond_to_approval(session, :approve)
     end
   end
@@ -978,466 +946,172 @@ defmodule MingaAgent.SessionTest do
   # ── Queue API ──────────────────────────────────────────────────────────────
 
   describe "combine_queue_entries_to_text/1" do
-    test "handles empty, single, and multiple string queues" do
-      assert Session.combine_queue_entries_to_text([]) == ""
-      assert Session.combine_queue_entries_to_text(["hello"]) == "hello"
-
-      assert Session.combine_queue_entries_to_text(["first", "second", "third"]) ==
-               "first\n\nsecond\n\nthird"
-    end
-
-    test "extracts text content parts and skips non-text parts" do
-      parts = [
+    test "formats string and content-part queues" do
+      text_parts = [
         %ReqLLM.Message.ContentPart{type: :text, text: "hello "},
         %ReqLLM.Message.ContentPart{type: :image, text: nil},
         %ReqLLM.Message.ContentPart{type: :text, text: "world"}
       ]
 
-      assert Session.combine_queue_entries_to_text([parts]) == "hello world"
-    end
+      cases = [
+        {[], ""},
+        {["hello"], "hello"},
+        {["first", "second", "third"], "first\n\nsecond\n\nthird"},
+        {[text_parts], "hello world"},
+        {["string entry", [%ReqLLM.Message.ContentPart{type: :text, text: "part text"}]],
+         "string entry\n\npart text"}
+      ]
 
-    test "mixes strings and ContentPart lists" do
-      parts = [%ReqLLM.Message.ContentPart{type: :text, text: "part text"}]
-
-      assert Session.combine_queue_entries_to_text(["string entry", parts]) ==
-               "string entry\n\npart text"
+      for {entries, expected} <- cases do
+        assert Session.combine_queue_entries_to_text(entries) == expected
+      end
     end
   end
 
   describe "message queuing during streaming" do
-    setup do
-      {:ok, slow_session} =
-        Session.start_link(
-          provider: SlowMockProvider,
-          provider_opts: []
-        )
-
-      Session.subscribe(slow_session)
-
-      assert is_pid(Session.get_provider(slow_session))
-
-      %{slow_session: slow_session}
-    end
-
-    test "send_prompt while streaming queues message as steering", %{slow_session: session} do
-      assert :ok = Session.send_prompt(session, "first message")
-      # Wait for AgentStart to be processed (status becomes :thinking)
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
-
-      # Second send_prompt while streaming: should queue, not submit
-      result = Session.send_prompt(session, "steer me")
-      assert result == {:queued, :steering}
-
-      # Steering queue should hold the message
-      {steering, follow_up} = Session.get_queued_messages(session)
-      assert steering == ["steer me"]
-      assert follow_up == []
-
-      # Clear queues before proceeding so the auto-send doesn't trigger.
-      # The auto-send behaviour is covered by the "follow-up auto-send" tests.
-      Session.clear_queues(session)
-
-      # Let the run finish
-      SlowMockProvider.proceed(Session.get_provider(session))
-
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
-    end
-
-    test "multiple messages accumulate in the steering queue", %{slow_session: session} do
-      assert :ok = Session.send_prompt(session, "first")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
+    test "queues steering and follow-up messages during streaming and broadcasts each enqueue" do
+      session = start_slow_turn()
 
       assert {:queued, :steering} = Session.send_prompt(session, "steer 1")
+      assert_receive {:agent_event, _, {:prompt_queued, "steer 1", :steering}}, @event_timeout
+
       assert {:queued, :steering} = Session.send_prompt(session, "steer 2")
+      assert_receive {:agent_event, _, {:prompt_queued, "steer 2", :steering}}, @event_timeout
 
-      {steering, _} = Session.get_queued_messages(session)
-      assert steering == ["steer 1", "steer 2"]
+      assert {:queued, :follow_up} = Session.queue_follow_up(session, "follow")
+      assert_receive {:agent_event, _, {:prompt_queued, "follow", :follow_up}}, @event_timeout
 
-      # Clear queues before proceeding so the auto-send doesn't trigger.
+      assert Session.get_queued_messages(session) == {["steer 1", "steer 2"], ["follow"]}
+
       Session.clear_queues(session)
-
-      SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
+      finish_slow_turn(session)
     end
 
-    test "queue_follow_up while streaming queues message as follow_up", %{slow_session: session} do
-      assert :ok = Session.send_prompt(session, "first")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
-
-      result = Session.queue_follow_up(session, "follow this up")
-      assert result == {:queued, :follow_up}
-
-      {steering, follow_up} = Session.get_queued_messages(session)
-      assert steering == []
-      assert follow_up == ["follow this up"]
-
-      # Clear the follow-up before proceeding so the auto-send doesn't trigger.
-      # The follow-up auto-send behaviour is covered by the dedicated describe block.
-      Session.clear_queues(session)
-      SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
-    end
-
-    test "dequeue_steering returns and clears only the steering queue", %{slow_session: session} do
-      assert :ok = Session.send_prompt(session, "first")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
+    test "dequeue_steering returns steering, keeps follow-up, and records user messages" do
+      session = start_slow_turn()
 
       Session.send_prompt(session, "steer me")
       Session.queue_follow_up(session, "follow up later")
 
-      steering = Session.dequeue_steering(session)
-      assert steering == ["steer me"]
+      assert Session.dequeue_steering(session) == ["steer me"]
+      assert Session.get_queued_messages(session) == {[], ["follow up later"]}
+      assert Enum.any?(Session.messages(session), &match?({:user, "steer me"}, &1))
 
-      # Follow-up queue is untouched
-      {remaining_steering, follow_up} = Session.get_queued_messages(session)
-      assert remaining_steering == []
-      assert follow_up == ["follow up later"]
-
-      # Steering messages are added to conversation history on dequeue
-      messages = Session.messages(session)
-      assert Enum.any?(messages, &match?({:user, "steer me"}, &1))
-
-      # Clear the follow-up so it doesn't auto-send during cleanup.
       Session.clear_queues(session)
-      SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
+      finish_slow_turn(session)
     end
 
-    test "recall_queues returns both queues and clears them", %{slow_session: session} do
-      assert :ok = Session.send_prompt(session, "first")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
+    test "recall, clear, and new_session empty queued messages" do
+      recalled = start_slow_turn()
+      Session.send_prompt(recalled, "steer")
+      Session.queue_follow_up(recalled, "follow")
+      assert Session.recall_queues(recalled) == {["steer"], ["follow"]}
+      assert Session.get_queued_messages(recalled) == {[], []}
+      finish_slow_turn(recalled)
 
-      Session.send_prompt(session, "steer")
-      Session.queue_follow_up(session, "follow")
+      cleared = start_slow_turn()
+      Session.send_prompt(cleared, "steer")
+      Session.queue_follow_up(cleared, "follow")
+      assert :ok = Session.clear_queues(cleared)
+      assert Session.get_queued_messages(cleared) == {[], []}
+      finish_slow_turn(cleared)
 
-      {steering, follow_up} = Session.recall_queues(session)
-      assert steering == ["steer"]
-      assert follow_up == ["follow"]
-
-      # Both queues are now empty
-      {s2, f2} = Session.get_queued_messages(session)
-      assert s2 == []
-      assert f2 == []
-
-      SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
+      reset = start_slow_turn()
+      Session.send_prompt(reset, "steer")
+      Session.queue_follow_up(reset, "follow")
+      assert :ok = Session.new_session(reset)
+      assert Session.get_queued_messages(reset) == {[], []}
     end
 
-    test "clear_queues empties both queues", %{slow_session: session} do
-      assert :ok = Session.send_prompt(session, "first")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
+    test "queue_follow_up when idle sends immediately like send_prompt" do
+      session = start_subscribed_session(SlowMockProvider)
 
-      Session.send_prompt(session, "steer")
-      Session.queue_follow_up(session, "follow")
-
-      :ok = Session.clear_queues(session)
-
-      {steering, follow_up} = Session.get_queued_messages(session)
-      assert steering == []
-      assert follow_up == []
-
-      SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
-    end
-
-    test "queue_follow_up when idle sends immediately like send_prompt", %{slow_session: session} do
-      result = Session.queue_follow_up(session, "immediate follow-up")
-      assert result == :ok
-
-      # Message should be in conversation history right away
+      assert :ok = Session.queue_follow_up(session, "immediate follow-up")
       assert_receive {:agent_event, _, :messages_changed}, @event_timeout
-      messages = Session.messages(session)
-      assert Enum.any?(messages, &match?({:user, "immediate follow-up"}, &1))
-
-      SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
-    end
-
-    test "new_session clears both queues", %{slow_session: session} do
-      assert :ok = Session.send_prompt(session, "first")
       assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
+      assert Enum.any?(Session.messages(session), &match?({:user, "immediate follow-up"}, &1))
 
-      Session.send_prompt(session, "steer")
-      Session.queue_follow_up(session, "follow")
-
-      # Clear queues before proceeding so follow-up auto-send doesn't trigger.
-      Session.clear_queues(session)
-      SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
-
-      # Re-queue to verify new_session clears them
-      Session.send_prompt(session, "second run")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
-
-      Session.send_prompt(session, "steer2")
-      Session.queue_follow_up(session, "follow2")
-
-      # new_session while idle-ish (we clear queues first then call new_session)
-      Session.clear_queues(session)
-      SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
-
-      Session.new_session(session)
-      {steering, follow_up} = Session.get_queued_messages(session)
-      assert steering == []
-      assert follow_up == []
-    end
-
-    test "prompt_queued event is broadcast when queuing during streaming",
-         %{slow_session: session} do
-      assert :ok = Session.send_prompt(session, "first")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
-
-      Session.send_prompt(session, "steer me")
-      assert_receive {:agent_event, _, {:prompt_queued, "steer me", :steering}}, @event_timeout
-
-      Session.queue_follow_up(session, "follow")
-      assert_receive {:agent_event, _, {:prompt_queued, "follow", :follow_up}}, @event_timeout
-
-      # Clear queues so neither the steering (already dequeued by time proceed is called)
-      # nor the follow-up triggers an extra run during cleanup.
-      Session.clear_queues(session)
-      SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
+      finish_slow_turn(session)
     end
   end
 
   describe "follow-up auto-send at AgentEnd" do
-    setup do
-      {:ok, slow_session} =
-        Session.start_link(
-          provider: SlowMockProvider,
-          provider_opts: []
-        )
+    test "queued single-message follow-ups are auto-sent when the agent finishes" do
+      cases = [
+        {:follow_up, "now follow up",
+         fn session, text -> Session.queue_follow_up(session, text) end},
+        {:steering, "steering msg", fn session, text -> Session.send_prompt(session, text) end}
+      ]
 
-      Session.subscribe(slow_session)
-      assert is_pid(Session.get_provider(slow_session))
+      for {kind, text, enqueue} <- cases do
+        session = start_slow_turn()
+        assert {:queued, ^kind} = enqueue.(session, text)
 
-      %{slow_session: slow_session}
+        SlowMockProvider.proceed(Session.get_provider(session))
+        assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
+        assert Enum.any?(Session.messages(session), &match?({:user, ^text}, &1))
+        assert Session.get_queued_messages(session) == {[], []}
+
+        finish_slow_turn(session)
+      end
     end
 
-    test "queued follow-up is auto-sent when agent finishes", %{slow_session: session} do
-      assert :ok = Session.send_prompt(session, "first")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
-
-      Session.queue_follow_up(session, "now follow up")
-
-      # Complete the first run - should trigger the follow-up
-      SlowMockProvider.proceed(Session.get_provider(session))
-
-      # Session should NOT go idle yet - it should start a new turn
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
-
-      # Follow-up message should appear in conversation history
-      messages = Session.messages(session)
-      assert Enum.any?(messages, &match?({:user, "now follow up"}, &1))
-
-      # Follow-up queue should be cleared
-      {_, follow_up} = Session.get_queued_messages(session)
-      assert follow_up == []
-
-      # Complete the follow-up run
-      SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
+    test "no queued messages means normal idle transition" do
+      session = start_slow_turn("simple")
+      finish_slow_turn(session)
     end
 
-    test "no follow-ups means normal idle transition", %{slow_session: session} do
-      assert :ok = Session.send_prompt(session, "simple")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
+    test "mixed steering and follow-up messages are combined at AgentEnd" do
+      session = start_slow_turn()
 
-      SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
-    end
-
-    test "queued steering messages are auto-sent when agent finishes", %{slow_session: session} do
-      assert :ok = Session.send_prompt(session, "first")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
-
-      # Queue a steering message (this is what happens when a user sends a prompt
-      # while the agent is busy)
-      assert {:queued, :steering} = Session.send_prompt(session, "steering msg")
-
-      # Complete the first run. The steering message should be auto-sent as a new
-      # turn instead of being orphaned.
-      SlowMockProvider.proceed(Session.get_provider(session))
-
-      # Session should start a new turn (not go idle) because the steering queue
-      # had a pending message.
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
-
-      # Steering message should appear in conversation history
-      messages = Session.messages(session)
-      assert Enum.any?(messages, &match?({:user, "steering msg"}, &1))
-
-      # Steering queue should be cleared
-      {steering, _} = Session.get_queued_messages(session)
-      assert steering == []
-
-      # Complete the follow-up run
-      SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
-    end
-
-    test "mixed steering and follow-up messages are combined at AgentEnd", %{
-      slow_session: session
-    } do
-      assert :ok = Session.send_prompt(session, "first")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
-
-      # Queue both types
       assert {:queued, :steering} = Session.send_prompt(session, "steer this")
       assert {:queued, :follow_up} = Session.queue_follow_up(session, "and follow up")
 
-      # Complete the first run. Both messages should be combined into one prompt.
       SlowMockProvider.proceed(Session.get_provider(session))
-
-      # Should start a new turn
       assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
+      assert Session.get_queued_messages(session) == {[], []}
 
-      # Both queues should be cleared
-      {steering, follow_up} = Session.get_queued_messages(session)
-      assert steering == []
-      assert follow_up == []
-
-      # Both messages should appear in the combined user message
       messages = Session.messages(session)
 
-      combined_msg =
-        Enum.find(messages, fn
-          {:user, text} ->
-            String.contains?(text, "steer this") and String.contains?(text, "and follow up")
+      assert Enum.any?(messages, fn
+               {:user, text} ->
+                 String.contains?(text, "steer this") and String.contains?(text, "and follow up")
 
-          _ ->
-            false
-        end)
+               _ ->
+                 false
+             end)
 
-      assert combined_msg != nil
-
-      # Complete the second run
-      SlowMockProvider.proceed(Session.get_provider(session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
+      finish_slow_turn(session)
     end
   end
 
   # ── Stable message IDs ───────────────────────────────────────────────────
 
   describe "message IDs" do
-    test "initial session has one message with ID 1", %{session: session} do
-      pairs = Session.messages_with_ids(session)
-      assert [{1, {:system, _, :info}}] = pairs
-    end
+    test "IDs increment across turns and reset for new or loaded sessions", %{session: session} do
+      assert [{1, {:system, _, :info}}] = Session.messages_with_ids(session)
 
-    test "send_prompt assigns incrementing IDs", %{session: session} do
-      :ok = Session.send_prompt(session, "Hello!")
-      await_turn_complete()
-
-      pairs = Session.messages_with_ids(session)
-      ids = Enum.map(pairs, &elem(&1, 0))
-
-      # system(1), user(2), assistant(3), usage(4)
-      assert ids == [1, 2, 3, 4]
-      assert length(pairs) == length(Session.messages(session))
-    end
-
-    test "IDs are monotonically increasing after multiple turns", %{session: session} do
       :ok = Session.send_prompt(session, "first")
       await_turn_complete()
+      pairs_after_first = Session.messages_with_ids(session)
+      assert Enum.map(pairs_after_first, &elem(&1, 0)) == [1, 2, 3, 4]
 
       :ok = Session.send_prompt(session, "second")
       await_turn_complete()
-
-      pairs = Session.messages_with_ids(session)
-      ids = Enum.map(pairs, &elem(&1, 0))
-
-      assert ids == Enum.sort(ids)
-      assert ids == Enum.uniq(ids)
-      assert length(pairs) == length(Session.messages(session))
-    end
-
-    test "streaming text deltas don't create new IDs" do
-      {:ok, slow_session} =
-        Session.start_link(provider: SlowMockProvider, provider_opts: [])
-
-      Session.subscribe(slow_session)
-      assert is_pid(Session.get_provider(slow_session))
-
-      :ok = Session.send_prompt(slow_session, "hello")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
-
-      # Mid-stream: system(1), user(2), assistant(3)
-      # The SlowMockProvider sends one TextDelta with the prompt text,
-      # which creates an assistant message.
-      pairs_during = Session.messages_with_ids(slow_session)
-      ids_during = Enum.map(pairs_during, &elem(&1, 0))
-      assert ids_during == [1, 2, 3]
-
-      # Send another text delta manually (simulates streaming tokens)
-      send(slow_session, {:agent_provider_event, %Event.TextDelta{delta: " world"}})
-
-      # The assistant message at ID 3 should still be there, not a new ID
-      pairs_after_delta = Session.messages_with_ids(slow_session)
-      ids_after_delta = Enum.map(pairs_after_delta, &elem(&1, 0))
-      assert ids_after_delta == [1, 2, 3]
-
-      # Content grew but ID is stable
-      {3, {:assistant, text}} = List.last(pairs_after_delta)
-      assert String.contains?(text, "world")
-
-      SlowMockProvider.proceed(Session.get_provider(slow_session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
-
-      # After turn completes, usage message gets the next ID
-      pairs_final = Session.messages_with_ids(slow_session)
-      ids_final = Enum.map(pairs_final, &elem(&1, 0))
-      assert ids_final == [1, 2, 3, 4]
-      assert length(pairs_final) == length(Session.messages(slow_session))
-    end
-
-    test "thinking deltas get one stable ID, then assistant gets the next", %{session: session} do
-      # Inject events directly: thinking then text
-      send(session, {:agent_provider_event, %Event.AgentStart{}})
-      send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: "hmm"}})
-      send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: " ok"}})
-
-      # Sync: call forces processing of all prior handle_info messages
-      pairs_thinking = Session.messages_with_ids(session)
-      ids = Enum.map(pairs_thinking, &elem(&1, 0))
-
-      # system(1), thinking(2). Two ThinkingDeltas, but one message.
-      assert ids == [1, 2]
-      assert {2, {:thinking, "hmm ok", _collapsed}} = List.last(pairs_thinking)
-
-      # Now assistant text arrives (collapses thinking, creates new assistant msg)
-      send(session, {:agent_provider_event, %Event.TextDelta{delta: "answer"}})
-      pairs_with_assistant = Session.messages_with_ids(session)
-      ids2 = Enum.map(pairs_with_assistant, &elem(&1, 0))
-
-      # system(1), thinking(2), assistant(3)
-      assert ids2 == [1, 2, 3]
-      assert {3, {:assistant, "answer"}} = List.last(pairs_with_assistant)
-      assert length(pairs_with_assistant) == length(Session.messages(session))
-    end
-
-    test "new_session resets IDs to 1", %{session: session} do
-      :ok = Session.send_prompt(session, "Hello!")
-      await_turn_complete()
-
-      # IDs are now [1, 2, 3, 4]
-      pairs_before = Session.messages_with_ids(session)
-      assert length(pairs_before) == 4
+      pairs_after_second = Session.messages_with_ids(session)
+      ids_after_second = Enum.map(pairs_after_second, &elem(&1, 0))
+      assert ids_after_second == Enum.sort(ids_after_second)
+      assert ids_after_second == Enum.uniq(ids_after_second)
+      assert length(pairs_after_second) == length(Session.messages(session))
 
       :ok = Session.new_session(session)
-      # Drain the broadcasts from new_session
       assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
+      assert [{1, {:system, _, :info}}] = Session.messages_with_ids(session)
 
-      pairs_after = Session.messages_with_ids(session)
-      assert [{1, {:system, _, :info}}] = pairs_after
-      assert length(pairs_after) == length(Session.messages(session))
-    end
+      loaded_id = "id-test-session-#{System.unique_integer([:positive])}"
 
-    test "load_session resets IDs starting from 1", %{session: session} do
       SessionStore.save(%{
-        id: "id-test-session",
+        id: loaded_id,
         timestamp: DateTime.to_iso8601(DateTime.utc_now()),
         model_name: "test-model",
         messages: [{:user, "loaded"}, {:assistant, "reply"}],
@@ -1450,18 +1124,51 @@ defmodule MingaAgent.SessionTest do
         }
       })
 
-      :ok = Session.load_session(session, "id-test-session")
-      # Drain the broadcasts
+      :ok = Session.load_session(session, loaded_id)
       assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
 
-      pairs = Session.messages_with_ids(session)
-      ids = Enum.map(pairs, &elem(&1, 0))
-      assert ids == [1, 2]
-      assert {1, {:user, "loaded"}} = hd(pairs)
-      assert length(pairs) == length(Session.messages(session))
+      assert [{1, {:user, "loaded"}}, {2, {:assistant, "reply"}}] =
+               Session.messages_with_ids(session)
     end
 
-    test "tool start/update/end keeps a stable ID for the tool message", %{session: session} do
+    test "streaming text deltas keep one assistant ID" do
+      slow_session = start_slow_turn("hello")
+
+      pairs_during = Session.messages_with_ids(slow_session)
+      assert Enum.map(pairs_during, &elem(&1, 0)) == [1, 2, 3]
+
+      send(slow_session, {:agent_provider_event, %Event.TextDelta{delta: " world"}})
+
+      pairs_after_delta = Session.messages_with_ids(slow_session)
+      assert Enum.map(pairs_after_delta, &elem(&1, 0)) == [1, 2, 3]
+      assert {3, {:assistant, text}} = List.last(pairs_after_delta)
+      assert String.contains?(text, "world")
+
+      finish_slow_turn(slow_session)
+
+      pairs_final = Session.messages_with_ids(slow_session)
+      assert Enum.map(pairs_final, &elem(&1, 0)) == [1, 2, 3, 4]
+      assert length(pairs_final) == length(Session.messages(slow_session))
+    end
+
+    test "thinking deltas get one stable ID, then assistant gets the next", %{session: session} do
+      send(session, {:agent_provider_event, %Event.AgentStart{}})
+      send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: "hmm"}})
+      send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: " ok"}})
+
+      pairs_thinking = Session.messages_with_ids(session)
+      assert Enum.map(pairs_thinking, &elem(&1, 0)) == [1, 2]
+      assert {2, {:thinking, "hmm ok", _collapsed}} = List.last(pairs_thinking)
+
+      send(session, {:agent_provider_event, %Event.TextDelta{delta: "answer"}})
+      pairs_with_assistant = Session.messages_with_ids(session)
+
+      assert Enum.map(pairs_with_assistant, &elem(&1, 0)) == [1, 2, 3]
+      assert {3, {:assistant, "answer"}} = List.last(pairs_with_assistant)
+      assert length(pairs_with_assistant) == length(Session.messages(session))
+    end
+
+    test "tool updates keep a stable tool message ID", %{session: session} do
       send(
         session,
         {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}}
@@ -1471,7 +1178,6 @@ defmodule MingaAgent.SessionTest do
       {tool_id, {:tool_call, tc_start}} = List.last(pairs_start)
       assert tc_start.status == :running
 
-      # ToolUpdate: in-place mutation, same ID
       send(
         session,
         {:agent_provider_event,
@@ -1479,52 +1185,19 @@ defmodule MingaAgent.SessionTest do
       )
 
       pairs_update = Session.messages_with_ids(session)
-      {^tool_id, {:tool_call, tc_update}} = List.last(pairs_update)
-      assert tc_update.result == "output"
+      assert {^tool_id, {:tool_call, %{result: "output"}}} = List.last(pairs_update)
 
-      # ToolEnd: in-place mutation, same ID
       send(
         session,
         {:agent_provider_event, %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "done"}}
       )
 
       pairs_end = Session.messages_with_ids(session)
-      {^tool_id, {:tool_call, tc_end}} = List.last(pairs_end)
-      assert tc_end.status == :complete
-
-      # IDs list length always matches messages
+      assert {^tool_id, {:tool_call, %{status: :complete}}} = List.last(pairs_end)
       assert length(pairs_end) == length(Session.messages(session))
     end
 
-    test "toggle_tool_collapse does not change IDs", %{session: session} do
-      send(
-        session,
-        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}}
-      )
-
-      send(
-        session,
-        {:agent_provider_event,
-         %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "output"}}
-      )
-
-      pairs_before = Session.messages_with_ids(session)
-      ids_before = Enum.map(pairs_before, &elem(&1, 0))
-
-      tool_index =
-        Enum.find_index(pairs_before, fn {_id, msg} -> match?({:tool_call, _}, msg) end)
-
-      :ok = Session.toggle_tool_collapse(session, tool_index)
-
-      pairs_after = Session.messages_with_ids(session)
-      ids_after = Enum.map(pairs_after, &elem(&1, 0))
-
-      assert ids_before == ids_after
-      assert length(pairs_after) == length(Session.messages(session))
-    end
-
-    test "toggle_all_tool_collapses does not change IDs", %{session: session} do
-      # Add a thinking block and a tool call
+    test "message mutations preserve existing IDs", %{session: session} do
       send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: "thinking..."}})
 
       send(
@@ -1540,72 +1213,41 @@ defmodule MingaAgent.SessionTest do
       pairs_before = Session.messages_with_ids(session)
       ids_before = Enum.map(pairs_before, &elem(&1, 0))
 
+      tool_index =
+        Enum.find_index(pairs_before, fn {_id, msg} -> match?({:tool_call, _}, msg) end)
+
+      :ok = Session.toggle_tool_collapse(session, tool_index)
+      assert Enum.map(Session.messages_with_ids(session), &elem(&1, 0)) == ids_before
+
       :ok = Session.toggle_all_tool_collapses(session)
-
-      pairs_after = Session.messages_with_ids(session)
-      ids_after = Enum.map(pairs_after, &elem(&1, 0))
-
-      assert ids_before == ids_after
-    end
-
-    test "abort maps messages in place without changing IDs", %{session: session} do
-      send(
-        session,
-        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}}
-      )
-
-      pairs_before = Session.messages_with_ids(session)
-      ids_before = Enum.map(pairs_before, &elem(&1, 0))
+      assert Enum.map(Session.messages_with_ids(session), &elem(&1, 0)) == ids_before
 
       :ok = Session.abort(session)
-
-      pairs_after = Session.messages_with_ids(session)
-      ids_after = Enum.map(pairs_after, &elem(&1, 0))
-
-      # Abort adds one "Aborted" system message at the end
-      assert Enum.take(ids_after, length(ids_before)) == ids_before
-      assert length(ids_after) == length(ids_before) + 1
-      assert length(pairs_after) == length(Session.messages(session))
+      ids_after_abort = Session.messages_with_ids(session) |> Enum.map(&elem(&1, 0))
+      assert Enum.take(ids_after_abort, length(ids_before)) == ids_before
+      assert length(ids_after_abort) == length(ids_before) + 1
+      assert length(Session.messages_with_ids(session)) == length(Session.messages(session))
     end
 
-    test "dequeue_steering adds messages with incrementing IDs" do
-      {:ok, slow_session} =
-        Session.start_link(provider: SlowMockProvider, provider_opts: [])
-
-      Session.subscribe(slow_session)
-      assert is_pid(Session.get_provider(slow_session))
-
-      :ok = Session.send_prompt(slow_session, "first")
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
-
-      # Queue two steering messages
+    test "dequeue_steering and system messages assign later IDs", %{session: session} do
+      slow_session = start_slow_turn()
       assert {:queued, :steering} = Session.send_prompt(slow_session, "steer 1")
       assert {:queued, :steering} = Session.send_prompt(slow_session, "steer 2")
 
-      # Dequeue: adds user messages to history
       _steering = Session.dequeue_steering(slow_session)
-
       pairs = Session.messages_with_ids(slow_session)
       ids = Enum.map(pairs, &elem(&1, 0))
-
-      # system(1), user(2), assistant(3), steer1-user(4), steer2-user(5)
       assert ids == Enum.sort(ids)
       assert ids == Enum.uniq(ids)
       assert length(pairs) == length(Session.messages(slow_session))
 
-      # Clean up
       Session.clear_queues(slow_session)
-      SlowMockProvider.proceed(Session.get_provider(slow_session))
-      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
-    end
+      finish_slow_turn(slow_session)
 
-    test "add_system_message (cast) assigns a new ID", %{session: session} do
       pairs_before = Session.messages_with_ids(session)
       max_id_before = pairs_before |> Enum.map(&elem(&1, 0)) |> Enum.max()
 
       Session.add_system_message(session, "hello from test")
-
-      # The cast is async. Use messages_with_ids as a sync barrier.
       pairs_after = Session.messages_with_ids(session)
       ids_after = Enum.map(pairs_after, &elem(&1, 0))
 
