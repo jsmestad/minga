@@ -23,6 +23,9 @@ defmodule MingaEditor.State.TabSwitchTest do
   alias MingaEditor.WindowTree
   alias MingaEditor.Workspace.State, as: WorkspaceState
 
+  alias MingaEditor.State.Highlighting
+  alias MingaEditor.UI.Highlight
+
   import MingaEditor.RenderPipeline.TestHelpers
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -316,6 +319,46 @@ defmodule MingaEditor.State.TabSwitchTest do
 
       # Attention should be cleared on the tab we switched to
       assert TabBar.get(new_state.shell_state.tab_bar, tab2_id).attention == false
+    end
+
+    test "tab switch does not clobber highlight buffer_id mappings" do
+      {state, buf1, buf2} = state_with_two_file_tabs()
+      tb = state.shell_state.tab_bar
+      tab2_id = Enum.find(tb.tabs, &(&1.id != tb.active_id)).id
+
+      hl_data = Highlight.new()
+
+      live_highlight = %Highlighting{
+        buffer_ids: %{buf1 => 1, buf2 => 2},
+        reverse_buffer_ids: %{1 => buf1, 2 => buf2},
+        next_buffer_id: 3,
+        version: 5,
+        highlights: %{buf1 => hl_data, buf2 => hl_data},
+        last_active_at: %{buf1 => 100, buf2 => 200}
+      }
+
+      state = put_in(state.workspace.highlight, live_highlight)
+
+      {new_state, _effects} = EditorState.switch_tab_pure(state, tab2_id)
+
+      hl = new_state.workspace.highlight
+      assert hl.buffer_ids == %{buf1 => 1, buf2 => 2}
+      assert hl.reverse_buffer_ids == %{1 => buf1, 2 => buf2}
+      assert hl.next_buffer_id == 3
+      assert hl.version == 5
+    end
+
+    test "tab switch does not clobber injection_ranges" do
+      {state, buf1, _buf2} = state_with_two_file_tabs()
+      tb = state.shell_state.tab_bar
+      tab2_id = Enum.find(tb.tabs, &(&1.id != tb.active_id)).id
+
+      live_ranges = %{buf1 => [:some_range]}
+      state = put_in(state.workspace.injection_ranges, live_ranges)
+
+      {new_state, _effects} = EditorState.switch_tab_pure(state, tab2_id)
+
+      assert new_state.workspace.injection_ranges == live_ranges
     end
   end
 end

@@ -10,7 +10,6 @@ defmodule MingaEditor.State.Tab.Context do
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Dired, as: DiredState
   alias MingaEditor.State.FileTree, as: FileTreeState
-  alias MingaEditor.State.Highlighting
   alias MingaEditor.State.Mouse
   alias MingaEditor.State.Search
   alias MingaEditor.State.Windows
@@ -28,9 +27,6 @@ defmodule MingaEditor.State.Tab.Context do
     :dired,
     :viewport,
     :mouse,
-    :highlight,
-    :lsp_pending,
-    :injection_ranges,
     :search,
     :editing,
     :document_highlights,
@@ -46,9 +42,6 @@ defmodule MingaEditor.State.Tab.Context do
           | :dired
           | :viewport
           | :mouse
-          | :highlight
-          | :lsp_pending
-          | :injection_ranges
           | :search
           | :editing
           | :document_highlights
@@ -70,9 +63,6 @@ defmodule MingaEditor.State.Tab.Context do
           dired: DiredState.t() | nil,
           viewport: Viewport.t() | nil,
           mouse: Mouse.t() | nil,
-          highlight: Highlighting.t() | nil,
-          lsp_pending: %{reference() => atom() | tuple()} | nil,
-          injection_ranges: %{pid() => [Minga.Language.Highlight.InjectionRange.t()]} | nil,
           search: Search.t() | nil,
           editing: VimState.t() | nil,
           document_highlights: [document_highlight()] | nil,
@@ -88,9 +78,6 @@ defmodule MingaEditor.State.Tab.Context do
             dired: nil,
             viewport: nil,
             mouse: nil,
-            highlight: nil,
-            lsp_pending: nil,
-            injection_ranges: nil,
             search: nil,
             editing: nil,
             document_highlights: nil,
@@ -129,9 +116,6 @@ defmodule MingaEditor.State.Tab.Context do
       dired: ws.dired,
       viewport: ws.viewport,
       mouse: ws.mouse,
-      highlight: ws.highlight,
-      lsp_pending: ws.lsp_pending,
-      injection_ranges: ws.injection_ranges,
       search: ws.search,
       editing: editing,
       document_highlights: ws.document_highlights,
@@ -237,9 +221,6 @@ defmodule MingaEditor.State.Tab.Context do
   defp valid_field?(:dired, %DiredState{}), do: true
   defp valid_field?(:viewport, %Viewport{}), do: true
   defp valid_field?(:mouse, %Mouse{}), do: true
-  defp valid_field?(:highlight, %Highlighting{}), do: true
-  defp valid_field?(:lsp_pending, value) when is_map(value), do: true
-  defp valid_field?(:injection_ranges, value) when is_map(value), do: true
   defp valid_field?(:search, %Search{}), do: true
   defp valid_field?(:editing, %VimState{}), do: true
   defp valid_field?(:document_highlights, nil), do: true

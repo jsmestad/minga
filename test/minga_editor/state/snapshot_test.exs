@@ -58,10 +58,12 @@ defmodule MingaEditor.State.SnapshotTest do
       assert ctx.editing == state.workspace.editing
       assert ctx.viewport == state.workspace.viewport
       assert ctx.mouse == state.workspace.mouse
-      assert ctx.highlight == state.workspace.highlight
-      assert ctx.lsp_pending == state.workspace.lsp_pending
-      assert ctx.injection_ranges == state.workspace.injection_ranges
       assert ctx.search == state.workspace.search
+
+      # Ephemeral PID-keyed state is not snapshotted
+      refute Map.has_key?(Map.from_struct(ctx), :highlight)
+      refute Map.has_key?(Map.from_struct(ctx), :lsp_pending)
+      refute Map.has_key?(Map.from_struct(ctx), :injection_ranges)
     end
 
     test "normalises transient editing state before snapshotting" do
@@ -371,9 +373,6 @@ defmodule MingaEditor.State.SnapshotTest do
       assert new_ctx.dired == old_ctx.dired
       assert new_ctx.viewport == old_ctx.viewport
       assert new_ctx.mouse == old_ctx.mouse
-      assert new_ctx.highlight == old_ctx.highlight
-      assert new_ctx.lsp_pending == old_ctx.lsp_pending
-      assert new_ctx.injection_ranges == old_ctx.injection_ranges
       assert new_ctx.search == old_ctx.search
       assert new_ctx.editing == old_ctx.editing
       assert new_ctx.document_highlights == old_ctx.document_highlights
@@ -405,8 +404,12 @@ defmodule MingaEditor.State.SnapshotTest do
       assert restored_map.viewport == ws.viewport
       assert restored_map.windows == ws.windows
       assert restored_map.mouse == ws.mouse
-      assert restored_map.highlight == ws.highlight
       assert restored_map.search == ws.search
+
+      # Ephemeral fields are excluded from the round-trip
+      refute Map.has_key?(restored_map, :highlight)
+      refute Map.has_key?(restored_map, :injection_ranges)
+      refute Map.has_key?(restored_map, :lsp_pending)
     end
 
     test "normalises transient vim state" do
