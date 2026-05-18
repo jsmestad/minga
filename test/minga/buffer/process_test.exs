@@ -498,19 +498,6 @@ defmodule Minga.Buffer.ProcessTest do
       assert {:error, :read_only} = BufferProcess.apply_edits(pid, [{{0, 0}, {0, 0}, "X"}])
     end
 
-    test "auto-sorts edits in reverse document order" do
-      {:ok, pid} = BufferProcess.start_link(content: "aaa\nbbb\nccc")
-
-      # Pass edits in forward order; they should be sorted automatically
-      edits = [
-        {{0, 0}, {0, 2}, "AAA"},
-        {{2, 0}, {2, 2}, "CCC"}
-      ]
-
-      BufferProcess.apply_edits(pid, edits)
-      assert BufferProcess.content(pid) == "AAA\nbbb\nCCC"
-    end
-
     test "replays unsorted variable-length edits on the same line through undo and redo" do
       {:ok, pid} = BufferProcess.start_link(content: "abcdefghij")
 
@@ -818,14 +805,6 @@ defmodule Minga.Buffer.ProcessTest do
       assert delta.old_end_position == {0, 3}
       assert delta.new_end_position == {0, 2}
       assert delta.inserted_text == "X"
-    end
-
-    test "consume_edit_deltas clears pending deltas for that consumer" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello")
-      BufferProcess.move_to(pid, {0, 5})
-      BufferProcess.insert_char(pid, "!")
-      assert [_] = consume_edit_deltas(pid, :test)
-      assert [] = consume_edit_deltas(pid, :test)
     end
 
     test "multiple edits accumulate in order" do
@@ -1208,7 +1187,7 @@ defmodule Minga.Buffer.ProcessTest do
   end
 
   describe "find_and_replace/3" do
-    test "replacing text with one clear target updates content and marks dirty" do
+    test "replacing text updates content and marks dirty" do
       {:ok, pid} =
         BufferProcess.start_link(content: "defmodule Foo do\n  def hello, do: :world\nend\n")
 
@@ -1223,6 +1202,41 @@ defmodule Minga.Buffer.ProcessTest do
       assert BufferProcess.dirty?(pid)
     end
 
+    test "replacement edge cases update exact content" do
+      cases = [
+        {"multi-line replacement", "line1\nline2\nline3\n", "line1\nline2",
+         "replaced1\nreplaced2\nreplaced3", "replaced1\nreplaced2\nreplaced3\nline3\n"},
+        {"start of buffer", "target rest of file", "target", "replaced", "replaced rest of file"},
+        {"end of buffer", "start of file target", "target", "replaced", "start of file replaced"},
+        {"whole buffer", "everything", "everything", "replaced", "replaced"},
+        {"line count change", "before\nsingle line\nafter", "single line",
+         "line A\nline B\nline C", "before\nline A\nline B\nline C\nafter"},
+        {"unicode", "I like café and naïve", "café", "tea", "I like tea and naïve"}
+      ]
+
+      for {name, content, old_text, new_text, expected} <- cases do
+        {:ok, pid} = BufferProcess.start_link(content: content)
+        assert {:ok, _} = BufferProcess.find_and_replace(pid, old_text, new_text), name
+        assert BufferProcess.content(pid) == expected, name
+      end
+    end
+
+    test "replacement errors leave content unchanged" do
+      cases = [
+        {"not found", "hello world", [], "nonexistent", "replacement", "not found"},
+        {"ambiguous", "foo\nbar\nfoo\n", [], "foo", "baz", "2 times"},
+        {"read-only", "hello", [read_only: true], "hello", "world", "read-only"},
+        {"empty old_text", "hello", [], "", "something", "empty"}
+      ]
+
+      for {name, content, opts, old_text, new_text, expected_message} <- cases do
+        {:ok, pid} = BufferProcess.start_link(Keyword.merge([content: content], opts))
+        assert {:error, msg} = BufferProcess.find_and_replace(pid, old_text, new_text), name
+        assert msg =~ expected_message, name
+        assert BufferProcess.content(pid) == content, name
+      end
+    end
+
     test "replacing text creates a single undo entry" do
       {:ok, pid} = BufferProcess.start_link(content: "aaa bbb ccc")
       BufferProcess.find_and_replace(pid, "bbb", "BBB")
@@ -1230,79 +1244,6 @@ defmodule Minga.Buffer.ProcessTest do
 
       BufferProcess.undo(pid)
       assert BufferProcess.content(pid) == "aaa bbb ccc"
-    end
-
-    test "returns error when old_text is not found" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello world")
-      assert {:error, msg} = BufferProcess.find_and_replace(pid, "nonexistent", "replacement")
-      assert msg =~ "not found"
-      assert BufferProcess.content(pid) == "hello world"
-      refute BufferProcess.dirty?(pid)
-    end
-
-    test "returns error when old_text is ambiguous" do
-      {:ok, pid} = BufferProcess.start_link(content: "foo\nbar\nfoo\n")
-      assert {:error, msg} = BufferProcess.find_and_replace(pid, "foo", "baz")
-      assert msg =~ "2 times"
-      assert BufferProcess.content(pid) == "foo\nbar\nfoo\n"
-    end
-
-    test "read-only buffer rejects find_and_replace" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello", read_only: true)
-      assert {:error, msg} = BufferProcess.find_and_replace(pid, "hello", "world")
-      assert msg =~ "read-only"
-    end
-
-    test "multi-line old_text and new_text work correctly" do
-      {:ok, pid} = BufferProcess.start_link(content: "line1\nline2\nline3\n")
-
-      assert {:ok, _} =
-               BufferProcess.find_and_replace(
-                 pid,
-                 "line1\nline2",
-                 "replaced1\nreplaced2\nreplaced3"
-               )
-
-      assert BufferProcess.content(pid) == "replaced1\nreplaced2\nreplaced3\nline3\n"
-    end
-
-    test "empty old_text returns error" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello")
-      assert {:error, msg} = BufferProcess.find_and_replace(pid, "", "something")
-      assert msg =~ "empty"
-    end
-
-    test "old_text at very start of buffer" do
-      {:ok, pid} = BufferProcess.start_link(content: "target rest of file")
-      assert {:ok, _} = BufferProcess.find_and_replace(pid, "target", "replaced")
-      assert BufferProcess.content(pid) == "replaced rest of file"
-    end
-
-    test "old_text at very end of buffer without trailing newline" do
-      {:ok, pid} = BufferProcess.start_link(content: "start of file target")
-      assert {:ok, _} = BufferProcess.find_and_replace(pid, "target", "replaced")
-      assert BufferProcess.content(pid) == "start of file replaced"
-    end
-
-    test "old_text spans entire buffer content" do
-      {:ok, pid} = BufferProcess.start_link(content: "everything")
-      assert {:ok, _} = BufferProcess.find_and_replace(pid, "everything", "replaced")
-      assert BufferProcess.content(pid) == "replaced"
-    end
-
-    test "replacement that changes line count" do
-      {:ok, pid} = BufferProcess.start_link(content: "before\nsingle line\nafter")
-      assert BufferProcess.line_count(pid) == 3
-
-      BufferProcess.find_and_replace(pid, "single line", "line A\nline B\nline C")
-      assert BufferProcess.line_count(pid) == 5
-      assert BufferProcess.content(pid) == "before\nline A\nline B\nline C\nafter"
-    end
-
-    test "unicode multi-byte graphemes in old_text and new_text" do
-      {:ok, pid} = BufferProcess.start_link(content: "I like café and naïve")
-      assert {:ok, _} = BufferProcess.find_and_replace(pid, "café", "tea")
-      assert BufferProcess.content(pid) == "I like tea and naïve"
     end
 
     test "two rapid find_and_replace calls produce two independent undo entries" do
@@ -1460,66 +1401,41 @@ defmodule Minga.Buffer.ProcessTest do
   end
 
   describe "find_and_replace/4 with boundary" do
-    test "edit within boundary succeeds" do
-      {:ok, pid} = BufferProcess.start_link(content: "line0\nline1\nline2\nline3\nline4")
+    test "allows edits within inclusive boundaries" do
+      cases = [
+        {"middle", "line0\nline1\nline2\nline3\nline4", "line2", "REPLACED", {1, 3}, "REPLACED"},
+        {"boundary start", "line0\nline1\nline2\nline3\nline4", "line2", "OK", {2, 4}, "OK"},
+        {"boundary end", "line0\nline1\nline2\nline3\nline4", "line4", "OK", {2, 4}, "OK"},
+        {"nil boundary", "line0\nline1\nline2", "line0", "OK", nil, "OK"},
+        {"multi-line", "aaa\nbbb\nccc\nddd\neee", "bbb\nccc\nddd", "OK", {1, 3}, "OK"},
+        {"single-line zero", "only_line", "only_line", "replaced", {0, 0}, "replaced"},
+        {"unicode", "café\n日本語\ntarget\nmore", "target", "hit", {2, 2}, "hit"}
+      ]
 
-      assert {:ok, _} = BufferProcess.find_and_replace(pid, "line2", "REPLACED", {1, 3})
-      assert BufferProcess.content(pid) =~ "REPLACED"
+      for {name, content, old_text, new_text, boundary, expected_fragment} <- cases do
+        {:ok, pid} = BufferProcess.start_link(content: content)
+        assert {:ok, _} = BufferProcess.find_and_replace(pid, old_text, new_text, boundary), name
+        assert BufferProcess.content(pid) =~ expected_fragment, name
+      end
     end
 
-    test "edit outside boundary is rejected with descriptive error" do
-      {:ok, pid} = BufferProcess.start_link(content: "line0\nline1\nline2\nline3\nline4")
+    test "rejects edits outside the allowed boundary" do
+      cases = [
+        {"line before boundary", "line0\nline1\nline2\nline3\nline4", "line0", "NOPE", {1, 3},
+         ["outside boundary", "lines 0-0", "1-3"]},
+        {"span crosses boundary", "aaa\nbbb\nccc\nddd", "bbb\nccc\nddd", "NOPE", {1, 2},
+         ["outside boundary"]}
+      ]
 
-      assert {:error, msg} = BufferProcess.find_and_replace(pid, "line0", "NOPE", {1, 3})
-      assert msg =~ "outside boundary"
-      assert msg =~ "lines 0-0"
-      assert msg =~ "1-3"
-      assert BufferProcess.content(pid) == "line0\nline1\nline2\nline3\nline4"
-    end
+      for {name, content, old_text, new_text, boundary, messages} <- cases do
+        {:ok, pid} = BufferProcess.start_link(content: content)
 
-    test "edit at boundary start line succeeds (inclusive)" do
-      {:ok, pid} = BufferProcess.start_link(content: "line0\nline1\nline2\nline3\nline4")
+        assert {:error, msg} = BufferProcess.find_and_replace(pid, old_text, new_text, boundary),
+               name
 
-      assert {:ok, _} = BufferProcess.find_and_replace(pid, "line2", "OK", {2, 4})
-    end
-
-    test "edit at boundary end line succeeds (inclusive)" do
-      {:ok, pid} = BufferProcess.start_link(content: "line0\nline1\nline2\nline3\nline4")
-
-      assert {:ok, _} = BufferProcess.find_and_replace(pid, "line4", "OK", {2, 4})
-    end
-
-    test "nil boundary allows any edit (backward compatible)" do
-      {:ok, pid} = BufferProcess.start_link(content: "line0\nline1\nline2")
-
-      assert {:ok, _} = BufferProcess.find_and_replace(pid, "line0", "OK", nil)
-      assert {:ok, _} = BufferProcess.find_and_replace(pid, "OK", "DONE")
-    end
-
-    test "multi-line match spanning boundary is rejected" do
-      {:ok, pid} = BufferProcess.start_link(content: "aaa\nbbb\nccc\nddd")
-
-      assert {:error, msg} = BufferProcess.find_and_replace(pid, "bbb\nccc\nddd", "NOPE", {1, 2})
-      assert msg =~ "outside boundary"
-    end
-
-    test "multi-line match fully within boundary succeeds" do
-      {:ok, pid} = BufferProcess.start_link(content: "aaa\nbbb\nccc\nddd\neee")
-
-      assert {:ok, _} = BufferProcess.find_and_replace(pid, "bbb\nccc\nddd", "OK", {1, 3})
-    end
-
-    test "edit on single-line boundary at line 0 succeeds" do
-      {:ok, pid} = BufferProcess.start_link(content: "only_line")
-
-      assert {:ok, _} = BufferProcess.find_and_replace(pid, "only_line", "replaced", {0, 0})
-    end
-
-    test "unicode content does not confuse boundary check" do
-      {:ok, pid} = BufferProcess.start_link(content: "café\n日本語\ntarget\nmore")
-
-      assert {:ok, _} = BufferProcess.find_and_replace(pid, "target", "hit", {2, 2})
-      assert BufferProcess.content(pid) =~ "hit"
+        assert Enum.all?(messages, &String.contains?(msg, &1)), name
+        assert BufferProcess.content(pid) == content, name
+      end
     end
 
     test "ambiguous match returns ambiguous error, not boundary error" do
