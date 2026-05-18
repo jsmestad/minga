@@ -1,4 +1,5 @@
 defmodule MingaEditor.Shell.Board.SessionLifecycleTest do
+  # Serial because one test temporarily unregisters the global MingaAgent.SessionManager.
   use ExUnit.Case, async: false
 
   alias MingaAgent.SessionManager

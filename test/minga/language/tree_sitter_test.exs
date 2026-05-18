@@ -1,4 +1,5 @@
 defmodule Minga.Language.TreeSitterTest do
+  # Serial because grammar compilation shells out to cc and writes fixed shared-library cache paths.
   use ExUnit.Case, async: false
 
   alias Minga.Language.TreeSitter
