@@ -61,6 +61,17 @@ defmodule MingaEditor.Commands.Eval do
   @spec eval_in_sandbox(String.t(), pid()) ::
           {:ok, term()} | {:error, atom(), term(), Exception.stacktrace()}
   defp eval_in_sandbox(input, editor_pid) do
+    {result, diagnostics} =
+      Code.with_diagnostics(fn ->
+        do_eval_in_sandbox(input, editor_pid)
+      end)
+
+    enrich_compile_error(result, diagnostics)
+  end
+
+  @spec do_eval_in_sandbox(String.t(), pid()) ::
+          {:ok, term()} | {:error, atom(), term(), Exception.stacktrace()}
+  defp do_eval_in_sandbox(input, editor_pid) do
     env = %{__ENV__ | file: "eval", line: 1}
     {result, _bindings} = Code.eval_string(input, [editor: editor_pid], env)
     {:ok, result}
@@ -68,6 +79,33 @@ defmodule MingaEditor.Commands.Eval do
     e -> {:error, :error, e, __STACKTRACE__}
   catch
     kind, value -> {:error, kind, value, __STACKTRACE__}
+  end
+
+  @spec enrich_compile_error(
+          {:ok, term()} | {:error, atom(), term(), Exception.stacktrace()},
+          [map()]
+        ) :: {:ok, term()} | {:error, atom(), term(), Exception.stacktrace()}
+  defp enrich_compile_error({:error, :error, %CompileError{} = error, stacktrace}, diagnostics) do
+    case first_error_diagnostic(diagnostics) do
+      nil ->
+        {:error, :error, error, stacktrace}
+
+      diagnostic ->
+        {:error, :error,
+         %CompileError{
+           error
+           | description: diagnostic.message,
+             file: diagnostic.file || error.file,
+             line: diagnostic.position || error.line
+         }, stacktrace}
+    end
+  end
+
+  defp enrich_compile_error(result, _diagnostics), do: result
+
+  @spec first_error_diagnostic([map()]) :: map() | nil
+  defp first_error_diagnostic(diagnostics) do
+    Enum.find(diagnostics, &(&1.severity == :error))
   end
 
   @spec format_error_oneline(atom(), term()) :: String.t()

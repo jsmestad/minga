@@ -389,6 +389,15 @@ defmodule Minga.Git.Repo do
   defp start_git_watcher(state) do
     git_dir = Path.join(state.git_root, ".git")
 
+    if File.dir?(git_dir) do
+      do_start_git_watcher(state, git_dir)
+    else
+      state
+    end
+  end
+
+  @spec do_start_git_watcher(t(), String.t()) :: t()
+  defp do_start_git_watcher(state, git_dir) do
     case FileSystem.start_link(dirs: [git_dir]) do
       {:ok, pid} ->
         FileSystem.subscribe(pid)

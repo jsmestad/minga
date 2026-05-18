@@ -54,6 +54,10 @@ Minga.Config.Options.set(:auto_save_delay_ms, 0)
 # not leak real language-server clients into tests that assert no LSP is active.
 Minga.Config.Options.set(:lsp_auto_start, false)
 
+# Disable agent notifications during tests to avoid terminal bells and OS
+# notification subprocesses from ordinary session tests.
+Minga.Config.Options.set(:agent_notifications, false)
+
 # Disable persisting known projects and recent files during tests to avoid
 # polluting ~/.config/minga/known-projects with test fixture directories.
 Minga.Config.Options.set(:persist_known_projects, false)

@@ -311,16 +311,28 @@ defmodule Minga.FileWatcher do
   end
 
   defp ensure_watcher(existing_watcher, dirs) do
-    if existing_watcher do
-      try do
-        GenServer.stop(existing_watcher)
-      catch
-        :exit, _ -> :ok
-      end
+    stop_watcher(existing_watcher)
+
+    dir_list = dirs |> Map.keys() |> Enum.filter(&File.dir?/1)
+
+    if dir_list == [] do
+      nil
+    else
+      start_watcher(dir_list)
     end
+  end
 
-    dir_list = Map.keys(dirs)
+  @spec stop_watcher(pid() | nil) :: :ok
+  defp stop_watcher(nil), do: :ok
 
+  defp stop_watcher(pid) do
+    GenServer.stop(pid)
+  catch
+    :exit, _ -> :ok
+  end
+
+  @spec start_watcher([String.t()]) :: pid() | nil
+  defp start_watcher(dir_list) do
     case FileSystem.start_link(dirs: dir_list) do
       {:ok, pid} ->
         FileSystem.subscribe(pid)
