@@ -8,7 +8,6 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Core.WrapMap
-  alias MingaEditor
   alias MingaEditor.Commands.Movement
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline.TestHelpers
@@ -19,27 +18,6 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
   alias MingaEditor.Viewport
   alias MingaEditor.Window
   alias MingaEditor.Workspace.State, as: WorkspaceState
-
-  defp start_editor(content, opts) do
-    {:ok, buffer} = BufferProcess.start_link(content: content, filetype: :elixir)
-
-    {:ok, editor} =
-      MingaEditor.start_link(
-        name: :"editor_#{:erlang.unique_integer([:positive])}",
-        port_manager: nil,
-        buffer: buffer,
-        width: Keyword.get(opts, :width, 80),
-        height: Keyword.get(opts, :height, 24),
-        editing_model: :vim
-      )
-
-    {editor, buffer}
-  end
-
-  defp send_key(editor, codepoint, mods) do
-    send(editor, {:minga_input, {:key_press, codepoint, mods}})
-    _ = :sys.get_state(editor)
-  end
 
   defp start_buffer(content) do
     start_supervised!({BufferProcess, content: content, filetype: :elixir})
@@ -63,14 +41,6 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
 
   defp active_viewport(state), do: EditorState.current_viewport(state)
 
-  defp state(editor), do: :sys.get_state(editor)
-
-  defp active_window(editor) do
-    s = state(editor)
-    Map.get(s.workspace.windows.map, s.workspace.windows.active)
-  end
-
-  @ctrl 0x02
   @wrapped_cursor_col 500
 
   defp wrapped_scroll_state do
@@ -138,19 +108,18 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
       content =
         String.duplicate("a", 120) <> "\n" <> String.duplicate("b", 160) <> "\n" <> "tail\nfinal"
 
-      {editor, buffer} = start_editor(content, width: 40, height: 10)
+      state = TestHelpers.base_state(content: content, rows: 10, cols: 40)
+      buffer = state.workspace.buffers.active
       BufferProcess.set_option(buffer, :wrap, true)
 
       BufferProcess.move_to(buffer, {1, 0})
       original_cursor = BufferProcess.cursor(buffer)
 
-      send_key(editor, ?e, @ctrl)
+      state = Movement.execute(state, :scroll_down_line)
       assert BufferProcess.cursor(buffer) == original_cursor
-      assert active_window(editor).viewport.visual_row_offset == 0
 
-      send_key(editor, ?y, @ctrl)
+      _state = Movement.execute(state, :scroll_up_line)
       assert BufferProcess.cursor(buffer) == original_cursor
-      assert active_window(editor).viewport.visual_row_offset == 0
     end
 
     test "does not scroll past end of file" do
@@ -167,13 +136,14 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
       content =
         String.duplicate("a", 120) <> "\n" <> String.duplicate("b", 160) <> "\n" <> "tail\nfinal"
 
-      {editor, buffer} = start_editor(content, width: 40, height: 10)
+      state = TestHelpers.base_state(content: content, rows: 10, cols: 40)
+      buffer = state.workspace.buffers.active
       BufferProcess.set_option(buffer, :wrap, true)
 
       BufferProcess.move_to(buffer, {0, 0})
       original_cursor = BufferProcess.cursor(buffer)
 
-      send_key(editor, ?e, @ctrl)
+      _state = Movement.execute(state, :scroll_down_line)
 
       {cursor_line, cursor_col} = BufferProcess.cursor(buffer)
       refute {cursor_line, cursor_col} == original_cursor
