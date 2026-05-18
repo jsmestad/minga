@@ -548,18 +548,17 @@ defmodule MingaEditor.Commands.EditingTest do
       {editor, _buffer} = start_editor("hello")
       send_key(editor, ?:)
 
-      state = :sys.get_state(editor)
-      assert state.workspace.editing.mode == :command
+      assert sync_editor(editor) == :command
     end
 
     test "paste events route in normal and insert modes" do
       {editor, buffer} = start_editor("start")
 
       send(editor, {:minga_input, {:paste_event, " normal"}})
-      _ = :sys.get_state(editor)
+      _ = sync_editor(editor)
       send_key(editor, ?i)
       send(editor, {:minga_input, {:paste_event, " insert"}})
-      _ = :sys.get_state(editor)
+      _ = sync_editor(editor)
 
       content = BufferProcess.content(buffer)
       assert String.contains?(content, "normal")
@@ -602,8 +601,10 @@ defmodule MingaEditor.Commands.EditingTest do
 
   defp send_key(editor, codepoint, mods \\ 0) do
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
-    _ = :sys.get_state(editor, @sync_timeout)
+    _ = sync_editor(editor)
   end
+
+  defp sync_editor(editor), do: GenServer.call(editor, :api_mode, @sync_timeout)
 
   defp command_state_with_highlight(buffer, highlight) do
     state = command_state(buffer)

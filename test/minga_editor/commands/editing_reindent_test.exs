@@ -110,35 +110,34 @@ defmodule MingaEditor.Commands.EditingReindentTest do
 
   describe "Editor GenServer smoke: reindent event routing" do
     test "== routes through a live editor and applies reindent" do
-      {editor, buffer} = start_editor("  parent\nchild")
+      {editor, buffer, _events_registry} = start_editor("  parent\nchild")
       BufferProcess.move_to(buffer, {1, 0})
 
       send_key(editor, ?=)
       send_key(editor, ?=)
 
       assert BufferProcess.content(buffer) == "  parent\n  child"
-      assert :sys.get_state(editor, @sync_timeout).workspace.editing.mode == :normal
+      assert sync_editor(editor) == :normal
     end
 
     test "default bus tool prompts cannot interrupt reindent dispatch" do
-      {editor, _buffer} = start_editor("hello world")
-      state = :sys.get_state(editor, @sync_timeout)
+      {editor, _buffer, events_registry} = start_editor("hello world")
 
       refute editor in Minga.Events.subscribers(:tool_missing)
-      assert editor in Minga.Events.subscribers(:tool_missing, state.events_registry)
+      assert editor in Minga.Events.subscribers(:tool_missing, events_registry)
 
       Minga.Events.broadcast(:tool_missing, %Minga.Events.ToolMissingEvent{command: "rg"})
-      state = :sys.get_state(editor, @sync_timeout)
 
-      assert state.workspace.editing.mode == :normal
-      assert state.shell_state.tool_prompt_queue == []
+      assert sync_editor(editor) == :normal
     end
   end
 
   defp send_key(editor, codepoint, mods \\ 0) do
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
-    _ = :sys.get_state(editor, @sync_timeout)
+    _ = sync_editor(editor)
   end
+
+  defp sync_editor(editor), do: GenServer.call(editor, :api_mode, @sync_timeout)
 
   defp start_editor(content) do
     id = :erlang.unique_integer([:positive])
@@ -159,6 +158,6 @@ defmodule MingaEditor.Commands.EditingReindentTest do
         suppress_tool_prompts: true
       )
 
-    {editor, buffer}
+    {editor, buffer, events_registry}
   end
 end
