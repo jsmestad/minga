@@ -1004,134 +1004,55 @@ defmodule Minga.Buffer.ProcessTest do
   # ── Buffer-local options ──────────────────────────────────────────────────
 
   describe "buffer-local options" do
-    test "get_option falls back to global default when no local override" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello")
-      # tab_width global default is 2
-      assert BufferProcess.get_option(pid, :tab_width) == 2
-    end
-
-    test "set_option stores a buffer-local override" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello")
-      assert {:ok, 8} = BufferProcess.set_option(pid, :tab_width, 8)
-      assert BufferProcess.get_option(pid, :tab_width) == 8
-    end
-
-    test "buffer-local override wins over global default" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello")
-      BufferProcess.set_option(pid, :tab_width, 4)
-      assert BufferProcess.get_option(pid, :tab_width) == 4
-    end
-
-    test "two buffers have independent options" do
+    test "local overrides are isolated and visible through option APIs" do
       {:ok, a} = BufferProcess.start_link(content: "alpha")
       {:ok, b} = BufferProcess.start_link(content: "bravo")
-      BufferProcess.set_option(a, :tab_width, 8)
+
+      assert BufferProcess.get_option(a, :tab_width) == 2
+      assert BufferProcess.local_options(a)[:wrap] == true
+      assert BufferProcess.local_option_overrides(a) == %{}
+
+      assert {:ok, 8} = BufferProcess.set_option(a, :tab_width, 8)
+
       assert BufferProcess.get_option(a, :tab_width) == 8
       assert BufferProcess.get_option(b, :tab_width) == 2
+      assert BufferProcess.local_options(a)[:tab_width] == 8
+      assert BufferProcess.local_option_overrides(a) == %{tab_width: 8}
     end
 
-    test "set_option rejects invalid values" do
+    test "set_option rejects invalid or unknown options without changing existing values" do
       {:ok, pid} = BufferProcess.start_link(content: "hello")
+
       assert {:error, _} = BufferProcess.set_option(pid, :tab_width, -1)
-      # Original value unchanged
-      assert BufferProcess.get_option(pid, :tab_width) == 2
-    end
-
-    test "set_option rejects unknown option names" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello")
       assert {:error, _} = BufferProcess.set_option(pid, :nonexistent, true)
-    end
-
-    test "local_options returns seeded defaults plus any overrides" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello")
-
-      # Seeded with filetype/global defaults. Nameless content defaults to :text, which wraps by default.
-      defaults = BufferProcess.local_options(pid)
-      assert defaults[:tab_width] == 2
-      assert defaults[:wrap] == true
-
-      # Override one option
-      BufferProcess.set_option(pid, :tab_width, 4)
-      updated = BufferProcess.local_options(pid)
-      assert updated[:tab_width] == 4
-      # Other seeded defaults still present
-      assert updated[:wrap] == true
-    end
-
-    test "local_option_overrides returns only explicitly set options" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello")
-      assert BufferProcess.local_option_overrides(pid) == %{}
-
-      BufferProcess.set_option(pid, :tab_width, 4)
-      assert BufferProcess.local_option_overrides(pid) == %{tab_width: 4}
-    end
-
-    test "filetype default wins over global when seeded at creation" do
-      # Set filetype override BEFORE creating buffer (eager seeding)
-      Options.set_for_filetype(:go, :tab_width, 8)
-
-      on_exit(fn ->
-        try do
-          Options.set_for_filetype(:go, :tab_width, 2)
-        catch
-          :exit, _ -> :ok
-        end
-      end)
-
-      {:ok, pid} = BufferProcess.start_link(content: "package main", filetype: :go)
-      assert BufferProcess.get_option(pid, :tab_width) == 8
-    end
-
-    test "buffer-local wins over filetype default" do
-      Options.set_for_filetype(:go, :tab_width, 8)
-
-      on_exit(fn ->
-        try do
-          Options.set_for_filetype(:go, :tab_width, 2)
-        catch
-          :exit, _ -> :ok
-        end
-      end)
-
-      {:ok, pid} = BufferProcess.start_link(content: "package main", filetype: :go)
-      # Buffer was seeded with filetype default of 8
-      assert BufferProcess.get_option(pid, :tab_width) == 8
-      # Override locally
-      BufferProcess.set_option(pid, :tab_width, 3)
-      assert BufferProcess.get_option(pid, :tab_width) == 3
-    end
-
-    test "set_filetype preserves explicitly set options" do
-      {:ok, pid} = BufferProcess.start_link(content: "hello")
-
-      # Explicitly set clipboard to :none (like EditorCase does)
-      BufferProcess.set_option(pid, :clipboard, :none)
-      assert BufferProcess.get_option(pid, :clipboard) == :none
-
-      # Change filetype, which reseeds options from global defaults
-      BufferProcess.set_filetype(pid, :python)
-
-      # The explicit override should survive the reseed
-      assert BufferProcess.get_option(pid, :clipboard) == :none
-    end
-
-    test "set_filetype reseeds non-explicit options for new filetype" do
-      Options.set_for_filetype(:go, :tab_width, 8)
-
-      on_exit(fn ->
-        try do
-          Options.set_for_filetype(:go, :tab_width, 2)
-        catch
-          :exit, _ -> :ok
-        end
-      end)
-
-      {:ok, pid} = BufferProcess.start_link(content: "hello", filetype: :text)
       assert BufferProcess.get_option(pid, :tab_width) == 2
+    end
 
-      # Change to Go filetype; non-explicit tab_width should reseed to 8
-      BufferProcess.set_filetype(pid, :go)
-      assert BufferProcess.get_option(pid, :tab_width) == 8
+    test "filetype reseeding preserves explicit overrides and updates defaults" do
+      Options.set_for_filetype(:go, :tab_width, 8)
+
+      on_exit(fn ->
+        try do
+          Options.set_for_filetype(:go, :tab_width, 2)
+        catch
+          :exit, _ -> :ok
+        end
+      end)
+
+      {:ok, seeded} = BufferProcess.start_link(content: "package main", filetype: :go)
+      assert BufferProcess.get_option(seeded, :tab_width) == 8
+      BufferProcess.set_option(seeded, :tab_width, 3)
+      assert BufferProcess.get_option(seeded, :tab_width) == 3
+
+      {:ok, reseeded} = BufferProcess.start_link(content: "hello", filetype: :text)
+      assert BufferProcess.get_option(reseeded, :tab_width) == 2
+      BufferProcess.set_filetype(reseeded, :go)
+      assert BufferProcess.get_option(reseeded, :tab_width) == 8
+
+      {:ok, explicit} = BufferProcess.start_link(content: "hello")
+      BufferProcess.set_option(explicit, :clipboard, :none)
+      BufferProcess.set_filetype(explicit, :python)
+      assert BufferProcess.get_option(explicit, :clipboard) == :none
     end
 
     test "get_option falls back to builtin defaults when a private options server dies" do
