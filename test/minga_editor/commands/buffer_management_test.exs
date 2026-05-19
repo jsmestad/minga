@@ -121,7 +121,7 @@ defmodule MingaEditor.Commands.BufferManagementTest do
 
       send_key(editor, ?s, @ctrl)
 
-      assert Process.alive?(editor)
+      refute_process_down(editor)
     end
   end
 
@@ -138,16 +138,77 @@ defmodule MingaEditor.Commands.BufferManagementTest do
 
       assert tab_count(result) == 1
       refute closed_tab_id in remaining_tab_ids
-      assert Process.alive?(closed_tab_buffer)
+      refute_process_down(closed_tab_buffer)
     end
 
-    test ":q with a single tab leaves an empty editor buffer open" do
-      {state, _buffer} = start_command_state("first file")
+    test ":q with a single clean file tab prompts before exiting" do
+      {state, buffer} = start_command_state("first file")
+      initial_tab_labels = tab_labels(state)
+      initial_active_id = EditorState.tab_bar(state).active_id
 
       result = BufferManagement.execute(state, {:execute_ex_command, {:quit, []}})
 
+      assert result.pending_quit == :quit
+      assert result.shell_state.status_msg == "Quit Minga? (y/n)"
       assert tab_count(result) == 1
-      assert BufferProcess.content(result.workspace.buffers.active) == ""
+      assert result.workspace.buffers.active == buffer
+      assert BufferProcess.content(result.workspace.buffers.active) == "first file"
+      assert EditorState.tab_bar(result).active_id == initial_active_id
+      assert tab_labels(result) == initial_tab_labels
+      refute Enum.any?(tab_labels(result), &String.starts_with?(&1, "[new"))
+    end
+
+    test ":q with a single clean file tab cancels without changing state" do
+      {state, buffer} = start_command_state("first file")
+      initial_tab_labels = tab_labels(state)
+      initial_active_id = EditorState.tab_bar(state).active_id
+
+      prompted = BufferManagement.execute(state, {:execute_ex_command, {:quit, []}})
+
+      assert prompted.pending_quit == :quit
+      assert prompted.shell_state.status_msg == "Quit Minga? (y/n)"
+      refute Enum.any?(tab_labels(prompted), &String.starts_with?(&1, "[new"))
+
+      result = BufferManagement.execute(prompted, :confirm_quit_no)
+
+      assert result.pending_quit == nil
+      assert result.shell_state.status_msg == nil
+      assert result.workspace.buffers.active == buffer
+      assert BufferProcess.content(result.workspace.buffers.active) == "first file"
+      assert EditorState.tab_bar(result).active_id == initial_active_id
+      assert tab_labels(result) == initial_tab_labels
+      refute Enum.any?(tab_labels(result), &String.starts_with?(&1, "[new"))
+    end
+
+    test ":q with the last file tab and an agent tab prompts instead of activating the agent" do
+      {state, _buffer} = start_command_state("first file")
+      {state, _agent_tab_id} = add_agent_tab_after_active_and_return_to_file(state)
+      active_tab_id = EditorState.tab_bar(state).active_id
+
+      result = BufferManagement.execute(state, {:execute_ex_command, {:quit, []}})
+
+      assert result.pending_quit == :quit
+      assert result.shell_state.status_msg == "Quit Minga? (y/n)"
+      assert tab_count(result) == 2
+      assert EditorState.tab_bar(result).active_id == active_tab_id
+      assert EditorState.active_tab_kind(result) == :file
+      refute Enum.any?(tab_labels(result), &String.starts_with?(&1, "[new"))
+    end
+
+    test ":q with a file and agent neighbor activates another file tab" do
+      {state, _buffer} = start_command_state("first file")
+      {state, closed_tab_buffer} = add_file_tab_with_buffer(state)
+      closed_tab_id = EditorState.tab_bar(state).active_id
+      {state, agent_tab_id} = add_agent_tab_after_active_and_return_to_file(state)
+
+      result = BufferManagement.execute(state, {:execute_ex_command, {:quit, []}})
+
+      assert tab_count(result) == 2
+      assert EditorState.active_tab_kind(result) == :file
+      refute EditorState.tab_bar(result).active_id == agent_tab_id
+      refute EditorState.tab_bar(result).active_id == closed_tab_id
+      refute Enum.any?(tab_labels(result), &String.starts_with?(&1, "[new"))
+      refute_process_down(closed_tab_buffer)
     end
   end
 
@@ -191,10 +252,13 @@ defmodule MingaEditor.Commands.BufferManagementTest do
       state = BufferManagement.execute(state, {:execute_ex_command, {:quit, []}})
       assert state.pending_quit == :quit
       assert state.shell_state.status_msg =~ "Modified buffers"
+      refute Enum.any?(tab_labels(state), &String.starts_with?(&1, "[new"))
 
       result = BufferManagement.execute(state, :confirm_quit_no)
       assert result.pending_quit == nil
       assert result.shell_state.status_msg == nil
+      assert tab_labels(result) == tab_labels(state)
+      refute Enum.any?(tab_labels(result), &String.starts_with?(&1, "[new"))
     end
 
     test "Escape cancels dirty quit confirmation through the input router" do
@@ -203,9 +267,11 @@ defmodule MingaEditor.Commands.BufferManagementTest do
 
       state = send_keys(editor, ":q\r")
       assert state.pending_quit == :quit
+      refute Enum.any?(tab_labels(state), &String.starts_with?(&1, "[new"))
 
       state = send_key(editor, 27)
       assert state.pending_quit == nil
+      refute Enum.any?(tab_labels(state), &String.starts_with?(&1, "[new"))
     end
   end
 
@@ -272,6 +338,26 @@ defmodule MingaEditor.Commands.BufferManagementTest do
   defp add_file_tab_with_buffer(state) do
     {:ok, buffer} = BufferProcess.start_link(content: "second.txt content")
     {EditorState.add_buffer(state, buffer, context: :open), buffer}
+  end
+
+  defp add_agent_tab_after_active_and_return_to_file(state) do
+    active_file_tab_id = EditorState.tab_bar(state).active_id
+    {tb, agent_tab} = TabBar.add(EditorState.tab_bar(state), :agent, "Agent")
+    tb = TabBar.switch_to(tb, active_file_tab_id)
+    {EditorState.set_tab_bar(state, tb), agent_tab.id}
+  end
+
+  defp refute_process_down(pid) do
+    ref = Process.monitor(pid)
+    refute_receive {:DOWN, ^ref, :process, ^pid, _reason}
+    Process.demonitor(ref, [:flush])
+  end
+
+  defp tab_labels(state) do
+    state
+    |> EditorState.tab_bar()
+    |> Map.fetch!(:tabs)
+    |> Enum.map(& &1.label)
   end
 
   defp tab_count(state), do: state |> EditorState.tab_bar() |> TabBar.count()

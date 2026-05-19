@@ -1130,22 +1130,40 @@ defmodule MingaEditor.Commands.BufferManagement do
   # For file tabs, this closes the tab without killing the buffer (matching
   # Neovim where `:q` closes the window but the buffer stays in memory).
   # For agent tabs, session cleanup is needed so we delegate to close_agent_tab.
-  # Checks whether a quit should be confirmed (dirty buffers + confirm_quit enabled).
-  # If confirmation is needed, sets `pending_quit` and a status message.
-  # Otherwise, proceeds with the quit immediately.
+  # Checks whether a quit should be confirmed. Dirty buffers use the existing
+  # confirm_quit option; last-file `:q` always asks before exiting so Vim-style
+  # close semantics do not surprise users by terminating the app.
   @spec maybe_confirm_quit(state(), :quit | :quit_all) :: state()
-  defp maybe_confirm_quit(state, kind) do
-    if confirm_quit_enabled?(state) and any_buffer_dirty?(state) do
+  defp maybe_confirm_quit(state, :quit) do
+    dirty? = dirty_quit_confirmation_needed?(state)
+
+    if dirty? or quit_would_exit_editor?(state) do
       state
-      |> EditorState.set_pending_quit(kind)
-      |> EditorState.set_status("Modified buffers exist. Really quit? (y/n)")
+      |> EditorState.set_pending_quit(:quit)
+      |> EditorState.set_status(quit_confirmation_message(dirty?))
     else
-      case kind do
-        :quit -> close_tab_or_quit(state)
-        :quit_all -> shutdown_editor(state)
-      end
+      close_tab_or_quit(state)
     end
   end
+
+  defp maybe_confirm_quit(state, :quit_all) do
+    if dirty_quit_confirmation_needed?(state) do
+      state
+      |> EditorState.set_pending_quit(:quit_all)
+      |> EditorState.set_status("Modified buffers exist. Really quit? (y/n)")
+    else
+      shutdown_editor(state)
+    end
+  end
+
+  @spec dirty_quit_confirmation_needed?(state()) :: boolean()
+  defp dirty_quit_confirmation_needed?(state) do
+    confirm_quit_enabled?(state) and any_buffer_dirty?(state)
+  end
+
+  @spec quit_confirmation_message(boolean()) :: String.t()
+  defp quit_confirmation_message(true), do: "Modified buffers exist. Quit Minga? (y/n)"
+  defp quit_confirmation_message(false), do: "Quit Minga? (y/n)"
 
   @spec any_buffer_dirty?(state()) :: boolean()
   defp any_buffer_dirty?(state) do
@@ -1178,44 +1196,51 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   @spec close_tab_or_quit(state()) :: state()
-  defp close_tab_or_quit(%{shell_state: %{tab_bar: %TabBar{tabs: [_, _ | _]}}} = state) do
-    case EditorState.active_tab_kind(state) do
-      :agent -> close_agent_tab(state)
-      _ -> close_file_tab(state)
-    end
-  end
-
-  # Last tab: replace with an empty buffer instead of quitting.
-  # Matches VS Code/Zed behavior where closing the last tab leaves
-  # an empty editor, not an exited process.
-  defp close_tab_or_quit(%{shell_state: %{tab_bar: %TabBar{tabs: [only]}}} = state) do
-    # For agent tabs, clean up the session first (no tab navigation;
-    # cleanup_agent_session is pure resource teardown).
-    state = if only.kind == :agent, do: cleanup_agent_session(state), else: state
-
-    {:ok, buf} =
-      DynamicSupervisor.start_child(
-        Minga.Buffer.Supervisor,
-        {Minga.Buffer,
-         content: "", buffer_name: "[new]", options_server: EditorState.options_server(state)}
-      )
-
-    # add_buffer creates a new file tab (for agent tabs, via
-    # add_buffer_as_new_tab which resets keymap_scope to :editor
-    # and resets the agent UI). For file tabs it replaces in place.
-    state = EditorState.add_buffer(state, buf)
-
-    # Now we have 2 tabs; remove the old one. add_buffer may have reused
-    # the existing tab (replaced in-place), leaving only one tab, so
-    # TabBar.remove returns :last_tab. That's fine: the buffer was
-    # already swapped.
-    case TabBar.remove(state.shell_state.tab_bar, only.id) do
-      {:ok, tb} -> EditorState.set_tab_bar(state, tb)
-      :last_tab -> state
+  defp close_tab_or_quit(%{shell_state: %{tab_bar: %TabBar{}}} = state) do
+    case EditorState.active_tab(state) do
+      %Tab{kind: :agent} -> close_agent_tab_or_quit(state)
+      %Tab{kind: :file, id: active_id} -> close_file_tab_or_quit(state, active_id)
+      _ -> shutdown_editor(state)
     end
   end
 
   defp close_tab_or_quit(state), do: shutdown_editor(state)
+
+  @spec close_agent_tab_or_quit(state()) :: state()
+  defp close_agent_tab_or_quit(%{shell_state: %{tab_bar: %TabBar{tabs: [_single]}}} = state) do
+    state
+    |> cleanup_agent_session()
+    |> shutdown_editor()
+  end
+
+  defp close_agent_tab_or_quit(state), do: close_agent_tab(state)
+
+  @spec close_file_tab_or_quit(state(), Tab.id()) :: state()
+  defp close_file_tab_or_quit(state, active_id) do
+    tb = EditorState.tab_bar(state)
+
+    if has_other_file_tab?(tb, active_id) do
+      close_file_tab(state)
+    else
+      shutdown_editor(state)
+    end
+  end
+
+  @spec quit_would_exit_editor?(state()) :: boolean()
+  defp quit_would_exit_editor?(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+    case EditorState.active_tab(state) do
+      %Tab{kind: :file, id: active_id} -> not has_other_file_tab?(tb, active_id)
+      %Tab{kind: :agent} -> TabBar.count(tb) == 1
+      _ -> true
+    end
+  end
+
+  defp quit_would_exit_editor?(_state), do: true
+
+  @spec has_other_file_tab?(TabBar.t(), Tab.id()) :: boolean()
+  defp has_other_file_tab?(%TabBar{tabs: tabs}, active_id) do
+    Enum.any?(tabs, &(&1.kind == :file and &1.id != active_id))
+  end
 
   @spec close_other_tabs(state()) :: state()
   defp close_other_tabs(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
@@ -1290,13 +1315,14 @@ defmodule MingaEditor.Commands.BufferManagement do
   # stays in the buffer pool (matching Neovim's `:q` which closes the
   # window but leaves the buffer in the background buffer list).
   @spec close_file_tab(state()) :: state()
-  defp close_file_tab(%{shell_state: %{tab_bar: %TabBar{}}} = state) do
+  defp close_file_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
     active_tab = EditorState.active_tab(state)
     label = if active_tab, do: active_tab.label, else: "tab"
+    replacement_id = active_tab && replacement_file_tab_id(tb, active_tab.id)
     MingaEditor.log_to_messages("Closed: #{label}")
 
     state
-    |> remove_current_tab()
+    |> remove_current_tab(replacement_id)
     |> restore_active_tab_context()
   end
 
@@ -1323,15 +1349,43 @@ defmodule MingaEditor.Commands.BufferManagement do
     create_fallback_buffer(state, old_buffers)
   end
 
-  @spec remove_current_tab(state()) :: state()
-  defp remove_current_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+  @spec remove_current_tab(state(), Tab.id() | nil) :: state()
+  defp remove_current_tab(state, replacement_id \\ nil)
+
+  defp remove_current_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, replacement_id) do
     case TabBar.remove(tb, tb.active_id) do
-      {:ok, new_tb} -> EditorState.set_tab_bar(state, new_tb)
-      :last_tab -> state
+      {:ok, new_tb} ->
+        EditorState.set_tab_bar(state, maybe_switch_to_replacement(new_tb, replacement_id))
+
+      :last_tab ->
+        state
     end
   end
 
-  defp remove_current_tab(state), do: state
+  defp remove_current_tab(state, _replacement_id), do: state
+
+  @spec maybe_switch_to_replacement(TabBar.t(), Tab.id() | nil) :: TabBar.t()
+  defp maybe_switch_to_replacement(tb, nil), do: tb
+  defp maybe_switch_to_replacement(tb, replacement_id), do: TabBar.switch_to(tb, replacement_id)
+
+  @spec replacement_file_tab_id(TabBar.t(), Tab.id()) :: Tab.id() | nil
+  defp replacement_file_tab_id(%TabBar{tabs: tabs}, active_id) do
+    case Enum.find_index(tabs, &(&1.id == active_id)) do
+      nil -> nil
+      idx -> replacement_file_tab_id(tabs, idx)
+    end
+  end
+
+  @spec replacement_file_tab_id([Tab.t()], non_neg_integer()) :: Tab.id() | nil
+  defp replacement_file_tab_id(tabs, idx) do
+    right = tabs |> Enum.drop(idx + 1) |> Enum.find(&(&1.kind == :file))
+    left = tabs |> Enum.take(idx) |> Enum.reverse() |> Enum.find(&(&1.kind == :file))
+
+    case right || left do
+      %Tab{id: id} -> id
+      nil -> nil
+    end
+  end
 
   # Restores the now-active tab's snapshotted context into live editor state.
   # Called after removing a tab to switch the editor to the neighbor tab's

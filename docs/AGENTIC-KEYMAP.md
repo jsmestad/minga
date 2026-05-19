@@ -115,8 +115,8 @@ See [Agent tool approval](CONFIGURATION.md#agent-tool-approval) for how to confi
 
 | Key | Action |
 |-----|--------|
-| `q` | Close agentic view |
-| `Esc` | Close agentic view |
+| `q` | Return to editor |
+| `Esc` | Return to editor (after dismissing transient UI) |
 | `?` | Show help overlay |
 
 ### Search
@@ -135,7 +135,7 @@ See [Agent tool approval](CONFIGURATION.md#agent-tool-approval) for how to confi
 | `SPC a s` | Stop / abort agent |
 | `SPC a m` | Pick agent model |
 | `SPC a T` | Cycle thinking level |
-| `SPC a t` | Toggle agentic view (close) |
+| `SPC a t` | Toggle agentic view (return to editor) |
 
 ## Chat Input Mode
 
@@ -161,7 +161,7 @@ Active when the file viewer panel has focus (after pressing `Tab`).
 | `Ctrl-d` / `Ctrl-u` | Scroll half page |
 | `gg` / `G` | Top / bottom |
 | `Tab` | Switch focus back to chat |
-| `q` / `Esc` | Close agentic view |
+| `q` / `Esc` | Return to editor |
 | `}` / `{` | Grow / shrink chat panel |
 | `=` | Reset panel split |
 

@@ -195,6 +195,30 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
 
       assert without_agent.workspace.keymap_scope == :editor
     end
+
+    test "agent scope close returns to file without stopping the session" do
+      session = fake_session()
+      state = base_state(active: true, session: session)
+
+      without_agent = AgentCommands.scope_close(state)
+
+      assert EditorState.active_tab_kind(without_agent) == :file
+      assert without_agent.workspace.keymap_scope == :editor
+      refute_process_down(session)
+      assert TabBar.find_by_session(without_agent.shell_state.tab_bar, session) != nil
+    end
+
+    test "agent ESC behavior returns to file without stopping the session" do
+      session = fake_session()
+      state = base_state(active: true, session: session)
+
+      without_agent = AgentCommands.scope_dismiss_or_noop(state)
+
+      assert EditorState.active_tab_kind(without_agent) == :file
+      assert without_agent.workspace.keymap_scope == :editor
+      refute_process_down(session)
+      assert TabBar.find_by_session(without_agent.shell_state.tab_bar, session) != nil
+    end
   end
 
   describe "kill_buffer on agent tab" do
@@ -223,6 +247,12 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
       new_state = BufferManagement.execute(state, :kill_buffer)
       assert TabBar.filter_by_kind(new_state.shell_state.tab_bar, :agent) == []
     end
+  end
+
+  defp refute_process_down(pid) do
+    ref = Process.monitor(pid)
+    refute_receive {:DOWN, ^ref, :process, ^pid, _reason}
+    Process.demonitor(ref, [:flush])
   end
 
   describe "round-trip toggle" do

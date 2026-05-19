@@ -130,8 +130,8 @@ defmodule Minga.Keymap.Scope.Agent do
     |> Bindings.bind([{?s, 0}], :agent_session_switcher, "Session switcher")
     # Help
     |> Bindings.bind([{??, 0}], :agent_toggle_help, "Toggle help overlay")
-    # Close
-    |> Bindings.bind([{?q, 0}], :agent_close, "Close agent split")
+    # Return to editor
+    |> Bindings.bind([{?q, 0}], :agent_close, "Return to editor")
     |> Bindings.bind([{@escape, 0}], :agent_dismiss_or_noop, "Dismiss/cancel")
     # Clear
     |> Bindings.bind([{?l, @ctrl}], :agent_clear_chat, "Clear chat display")
@@ -250,7 +250,7 @@ defmodule Minga.Keymap.Scope.Agent do
        ]},
       {"View",
        [
-         {"q", "Close agent split"},
+         {"q", "Return to editor"},
          {"?", "This help overlay"}
        ]}
     ]
@@ -271,13 +271,13 @@ defmodule Minga.Keymap.Scope.Agent do
        ]},
       {"Panel",
        [
-         {"Tab / Escape", "Switch focus to chat"},
+         {"Tab", "Switch focus to chat"},
          {"{ / }", "Shrink / grow chat panel"},
          {"=", "Reset panel split"}
        ]},
       {"View",
        [
-         {"q", "Close agent split"},
+         {"q", "Return to editor"},
          {"?", "This help overlay"}
        ]}
     ]

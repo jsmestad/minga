@@ -192,7 +192,7 @@ defmodule MingaEditor.Input.ScopedTest do
       end
     end
 
-    test "q switches from agent tab back to file tab", %{state: state} do
+    test "q switches from agent tab back to file tab and keeps agent tab", %{state: state} do
       # The base_state with agentic_active: true already sets up:
       # - file tab (id 1) and agent tab (id 2)
       # - agent tab is active, keymap_scope is :agent
@@ -200,6 +200,17 @@ defmodule MingaEditor.Input.ScopedTest do
 
       {:handled, new_state} = Scoped.handle_key(state, ?q, 0)
       assert new_state.workspace.keymap_scope == :editor
+      assert TabBar.filter_by_kind(new_state.shell_state.tab_bar, :agent) != []
+    end
+
+    test "ESC switches from agent tab back to file tab when nothing transient is open", %{
+      state: state
+    } do
+      assert state.workspace.keymap_scope == :agent
+
+      {:handled, new_state} = Scoped.handle_key(state, 27, 0)
+      assert new_state.workspace.keymap_scope == :editor
+      assert TabBar.filter_by_kind(new_state.shell_state.tab_bar, :agent) != []
     end
 
     test "? toggles help", %{state: state} do

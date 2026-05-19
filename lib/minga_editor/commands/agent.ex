@@ -900,17 +900,17 @@ defmodule MingaEditor.Commands.Agent do
 
   # ── Close / dismiss ────────────────────────────────────────────────────────
 
-  @doc "Closes the agent split pane."
+  @doc "Returns from the agent view to the most recent file tab."
   @spec scope_close(state()) :: state()
   def scope_close(state), do: toggle_agent_split(state)
 
-  @doc "Dismisses active overlays or does nothing (ESC behavior)."
+  @doc "Dismisses active overlays or returns to the editor (ESC behavior)."
   @spec scope_dismiss_or_noop(state()) :: state()
   def scope_dismiss_or_noop(state) do
     if AgentAccess.view(state).help_visible do
       update_agent_ui(state, &UIState.dismiss_help/1)
     else
-      state
+      toggle_agent_split(state)
     end
   end
 
@@ -1333,7 +1333,7 @@ defmodule MingaEditor.Commands.Agent do
     {:agent_prev_search_match, "Previous agent search match", :scope_prev_search_match},
     {:agent_session_switcher, "Agent session switcher", :scope_session_switcher},
     {:agent_toggle_help, "Toggle agent help", :scope_toggle_help},
-    {:agent_close, "Close agent panel", :scope_close},
+    {:agent_close, "Return to editor", :scope_close},
     {:agent_dismiss_or_noop, "Dismiss agent or no-op", :scope_dismiss_or_noop},
     {:agent_accept_hunk, "Accept agent hunk", :scope_accept_hunk},
     {:agent_reject_hunk, "Reject agent hunk", :scope_reject_hunk},
