@@ -79,8 +79,9 @@ defmodule MingaEditor.State.TabBarTest do
   end
 
   describe "keep_only/2" do
-    test "keeps the selected tab and prunes orphaned workspaces" do
+    test "keeps the selected tab, manual workspace, and prunes orphaned agent workspaces" do
       tb = TabBar.new(file_tab(1, "a"))
+      {tb, _} = TabBar.add(tb, :file, "b")
       {tb, group1} = TabBar.add_workspace(tb, "Agent 1")
       {tb, group2} = TabBar.add_workspace(tb, "Agent 2")
       {tb, tab2} = TabBar.add(tb, :agent, "agent one")
@@ -92,7 +93,24 @@ defmodule MingaEditor.State.TabBarTest do
 
       assert TabBar.count(tb) == 1
       assert TabBar.active(tb).id == tab2.id
-      assert Enum.map(tb.workspaces, & &1.id) == [group1.id]
+      assert Enum.map(tb.workspaces, & &1.id) == [0, group1.id]
+    end
+
+    test "preserves manual workspace metadata when a tab later moves back to workspace 0" do
+      tb = TabBar.new(file_tab(1, "a"))
+      {tb, group} = TabBar.add_workspace(tb, "Agent")
+      {tb, tab2} = TabBar.add(tb, :agent, "agent")
+      tb = TabBar.move_tab_to_workspace(tb, tab2.id, group.id)
+      tb = TabBar.update_workspace(tb, 0, &Workspace.rename(&1, "Manual Root"))
+      tb = TabBar.keep_only(tb, tab2.id)
+      tb = TabBar.move_tab_to_workspace(tb, tab2.id, 0)
+
+      assert Enum.map(tb.workspaces, & &1.id) == [0, group.id]
+      assert TabBar.get_workspace(tb, 0).label == "Manual Root"
+      assert TabBar.get_workspace(tb, 0).custom_name == "Manual Root"
+
+      tb = TabBar.switch_to_workspace(tb, 0)
+      assert TabBar.active_workspace(tb).label == "Manual Root"
     end
   end
 

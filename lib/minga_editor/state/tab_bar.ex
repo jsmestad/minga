@@ -142,13 +142,27 @@ defmodule MingaEditor.State.TabBar do
 
   @spec keep_only_tab(t(), Tab.t()) :: t()
   defp keep_only_tab(%__MODULE__{} = tb, %Tab{} = tab) do
-    %{tb | tabs: [tab], active_id: tab.id, workspaces: workspaces_for_tabs(tb.workspaces, [tab])}
+    workspaces = workspaces_for_tabs(tb.workspaces, [tab])
+
+    %{
+      tb
+      | tabs: [tab],
+        active_id: tab.id,
+        workspaces: preserve_manual_workspace(tb.workspaces, workspaces)
+    }
   end
 
   @spec workspaces_for_tabs([Workspace.t()], [Tab.t()]) :: [Workspace.t()]
   defp workspaces_for_tabs(workspaces, tabs) do
     workspace_ids = tabs |> Enum.map(& &1.group_id) |> MapSet.new()
     Enum.filter(workspaces, &MapSet.member?(workspace_ids, &1.id))
+  end
+
+  @spec preserve_manual_workspace([Workspace.t()], [Workspace.t()]) :: [Workspace.t()]
+  defp preserve_manual_workspace(all_workspaces, workspaces) do
+    manual_workspace = Enum.find(all_workspaces, &(&1.id == 0)) || Workspace.new_manual(nil)
+    agent_workspaces = Enum.reject(workspaces, &(&1.id == 0))
+    [manual_workspace | agent_workspaces]
   end
 
   @doc "Returns true if a tab with the given id exists."

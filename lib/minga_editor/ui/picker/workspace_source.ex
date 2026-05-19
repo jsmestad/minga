@@ -64,10 +64,8 @@ defmodule MingaEditor.UI.Picker.WorkspaceSource do
         %Item{id: workspace_id},
         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state
       ) do
-    # switch_to_workspace activates the first tab in the target workspace,
-    # then switch_tab does the full context snapshot/restore cycle.
-    tb = TabBar.switch_to_workspace(tb, workspace_id)
-    EditorState.switch_tab(EditorState.set_tab_bar(state, tb), tb.active_id)
+    target_id = TabBar.switch_to_workspace(tb, workspace_id).active_id
+    EditorState.switch_tab(state, target_id)
   end
 
   def on_select(_, state), do: state
