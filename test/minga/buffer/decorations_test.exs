@@ -4,8 +4,6 @@ defmodule Minga.Core.DecorationsTest do
   alias Minga.Core.Decorations
   alias Minga.Core.Face
 
-  # ── Helpers ──────────────────────────────────────────────────────────────
-
   defp add_hl(decs, start_pos, end_pos, opts \\ []) do
     style = Keyword.get(opts, :style, Face.new(bg: 0x3E4452))
     priority = Keyword.get(opts, :priority, 0)
@@ -17,59 +15,86 @@ defmodule Minga.Core.DecorationsTest do
     Decorations.add_highlight(decs, start_pos, end_pos, all_opts)
   end
 
-  # ── Construction ─────────────────────────────────────────────────────────
+  defp add_hls(specs) do
+    Enum.reduce(specs, Decorations.new(), fn
+      {start_pos, end_pos}, decs ->
+        {_id, decs} = add_hl(decs, start_pos, end_pos)
+        decs
 
-  describe "new/0" do
-    test "creates empty decorations" do
+      {start_pos, end_pos, opts}, decs ->
+        {_id, decs} = add_hl(decs, start_pos, end_pos, opts)
+        decs
+    end)
+  end
+
+  defp add_annotation(decs, line, text, opts \\ []) do
+    {_id, decs} = Decorations.add_annotation(decs, line, text, opts)
+    decs
+  end
+
+  defp add_annotations(specs) do
+    Enum.reduce(specs, Decorations.new(), fn
+      {line, text}, decs -> add_annotation(decs, line, text)
+      {line, text, opts}, decs -> add_annotation(decs, line, text, opts)
+    end)
+  end
+
+  defp range(start_pos, end_pos, opts \\ []) do
+    %{
+      id: make_ref(),
+      start: start_pos,
+      end_: end_pos,
+      style: Keyword.get(opts, :style, Face.new(bg: 0x3E4452)),
+      priority: Keyword.get(opts, :priority, 0),
+      group: Keyword.get(opts, :group)
+    }
+  end
+
+  defp single_highlight_after_edit(
+         initial_start,
+         initial_end,
+         edit_start,
+         edit_end,
+         new_end,
+         query_line
+       ) do
+    decs = add_hls([{initial_start, initial_end}])
+    decs = Decorations.adjust_for_edit(decs, edit_start, edit_end, new_end)
+    [range] = Decorations.highlights_for_line(decs, query_line)
+    range
+  end
+
+  defp annotation_lines(decs), do: Enum.map(decs.annotations, & &1.line)
+
+  defp annotation_texts(decs, line),
+    do: decs |> Decorations.annotations_for_line(line) |> Enum.map(& &1.text)
+
+  describe "highlight storage" do
+    test "new decorations are empty" do
       decs = Decorations.new()
+
       assert Decorations.empty?(decs)
       assert Decorations.highlight_count(decs) == 0
     end
-  end
 
-  # ── Add/Remove highlight ranges ─────────────────────────────────────────
-
-  describe "add_highlight/4" do
-    test "adds a highlight range and returns its ID" do
-      decs = Decorations.new()
-      {id, decs} = add_hl(decs, {0, 0}, {0, 10})
-
-      assert is_reference(id)
-      refute Decorations.empty?(decs)
-      assert Decorations.highlight_count(decs) == 1
-    end
-
-    test "adds multiple non-overlapping ranges" do
-      decs = Decorations.new()
-      {_id1, decs} = add_hl(decs, {0, 0}, {0, 10})
-      {_id2, decs} = add_hl(decs, {5, 0}, {5, 10})
-      {_id3, decs} = add_hl(decs, {10, 0}, {10, 10})
-
-      assert Decorations.highlight_count(decs) == 3
-    end
-
-    test "adds overlapping ranges" do
-      decs = Decorations.new()
-      {_id1, decs} = add_hl(decs, {0, 0}, {5, 0}, style: Face.new(bg: 0xFF0000))
-      {_id2, decs} = add_hl(decs, {3, 0}, {8, 0}, style: Face.new(bg: 0x00FF00))
-
-      assert Decorations.highlight_count(decs) == 2
-    end
-
-    test "increments version on each add" do
+    test "adds highlight ranges with ids, overlap support, counts, and version bumps" do
       decs = Decorations.new()
       assert decs.version == 0
 
-      {_, decs} = add_hl(decs, {0, 0}, {0, 10})
+      {id, decs} = add_hl(decs, {0, 0}, {0, 10})
+      assert is_reference(id)
+      refute Decorations.empty?(decs)
+      assert Decorations.highlight_count(decs) == 1
       assert decs.version == 1
 
-      {_, decs} = add_hl(decs, {1, 0}, {1, 10})
-      assert decs.version == 2
-    end
-  end
+      {_id, decs} = add_hl(decs, {5, 0}, {5, 10})
+      {_id, decs} = add_hl(decs, {3, 0}, {8, 0}, style: Face.new(bg: 0x00FF00))
 
-  describe "remove_highlight/2" do
-    test "removes a specific range by ID" do
+      assert Decorations.highlight_count(decs) == 3
+      assert decs.version == 3
+    end
+
+    test "removes highlights by id and ignores missing ids" do
       decs = Decorations.new()
       {id1, decs} = add_hl(decs, {0, 0}, {0, 10}, style: Face.new(bg: 0xFF0000))
       {_id2, decs} = add_hl(decs, {5, 0}, {5, 10}, style: Face.new(bg: 0x00FF00))
@@ -77,73 +102,42 @@ defmodule Minga.Core.DecorationsTest do
       decs = Decorations.remove_highlight(decs, id1)
       assert Decorations.highlight_count(decs) == 1
 
-      # Remaining range should be the second one
-      ranges = Decorations.highlights_for_line(decs, 5)
-      assert length(ranges) == 1
-      assert hd(ranges).style.bg == 0x00FF00
+      assert Decorations.highlights_for_line(decs, 5)
+             |> hd()
+             |> Map.fetch!(:style)
+             |> Map.fetch!(:bg) == 0x00FF00
+
+      assert Decorations.remove_highlight(decs, make_ref()) |> Decorations.highlight_count() == 1
     end
 
-    test "no-op for non-existent ID" do
-      decs = Decorations.new()
-      {_id, decs} = add_hl(decs, {0, 0}, {0, 10})
-
-      decs2 = Decorations.remove_highlight(decs, make_ref())
-      assert Decorations.highlight_count(decs2) == 1
-    end
-  end
-
-  describe "remove_group/2" do
-    test "removes all ranges in a group" do
-      decs = Decorations.new()
-      {_id1, decs} = add_hl(decs, {0, 0}, {0, 10}, group: :search)
-      {_id2, decs} = add_hl(decs, {3, 0}, {3, 10}, group: :search)
-      {_id3, decs} = add_hl(decs, {5, 0}, {5, 10}, group: :diagnostics)
+    test "removes highlight groups and clears all decorations" do
+      decs =
+        add_hls([
+          {{0, 0}, {0, 10}, [group: :search]},
+          {{3, 0}, {3, 10}, [group: :search]},
+          {{5, 0}, {5, 10}, [group: :diagnostics]}
+        ])
 
       decs = Decorations.remove_group(decs, :search)
       assert Decorations.highlight_count(decs) == 1
 
-      ranges = Decorations.highlights_for_line(decs, 5)
-      assert length(ranges) == 1
-      assert hd(ranges).group == :diagnostics
-    end
+      assert Decorations.highlights_for_line(decs, 5) |> hd() |> Map.fetch!(:group) ==
+               :diagnostics
 
-    test "no-op for non-existent group" do
-      decs = Decorations.new()
-      {_id, decs} = add_hl(decs, {0, 0}, {0, 10}, group: :search)
+      assert Decorations.remove_group(decs, :missing) |> Decorations.highlight_count() == 1
 
-      decs2 = Decorations.remove_group(decs, :nonexistent)
-      assert Decorations.highlight_count(decs2) == 1
-    end
-  end
-
-  describe "clear/1" do
-    test "removes all decorations" do
-      decs = Decorations.new()
-      {_, decs} = add_hl(decs, {0, 0}, {0, 10})
-      {_, decs} = add_hl(decs, {5, 0}, {5, 10})
-
+      version = decs.version
       decs = Decorations.clear(decs)
       assert Decorations.empty?(decs)
       assert Decorations.highlight_count(decs) == 0
-    end
-
-    test "bumps version" do
-      decs = Decorations.new()
-      {_, decs} = add_hl(decs, {0, 0}, {0, 10})
-      v = decs.version
-
-      decs = Decorations.clear(decs)
-      assert decs.version > v
+      assert decs.version > version
     end
   end
 
-  # ── Batch operations ─────────────────────────────────────────────────────
-
   describe "batch/2" do
-    test "collects operations and applies them in one rebuild" do
-      decs = Decorations.new()
-      {_id1, decs} = add_hl(decs, {0, 0}, {0, 10}, group: :old)
-      {_id2, decs} = add_hl(decs, {5, 0}, {5, 10}, group: :old)
+    test "applies queued operations with a single version bump" do
+      decs = add_hls([{{0, 0}, {0, 10}, [group: :old]}, {{5, 0}, {5, 10}, [group: :old]}])
+      version = decs.version
 
       decs =
         Decorations.batch(decs, fn d ->
@@ -153,517 +147,214 @@ defmodule Minga.Core.DecorationsTest do
           d
         end)
 
+      assert decs.version == version + 1
       assert Decorations.highlight_count(decs) == 2
 
-      ranges = Decorations.highlights_for_lines(decs, 0, 20)
-      groups = Enum.map(ranges, & &1.group) |> Enum.uniq()
-      assert groups == [:new]
+      assert decs
+             |> Decorations.highlights_for_lines(0, 20)
+             |> Enum.map(& &1.group)
+             |> Enum.uniq() == [:new]
     end
+  end
 
-    test "version only bumps once for the whole batch" do
-      decs = Decorations.new()
-      v = decs.version
-
+  describe "highlight queries" do
+    test "returns ranges intersecting the line query and sorts by priority" do
       decs =
-        Decorations.batch(decs, fn d ->
-          {_, d} = add_hl(d, {0, 0}, {0, 10})
-          {_, d} = add_hl(d, {1, 0}, {1, 10})
-          {_, d} = add_hl(d, {2, 0}, {2, 10})
-          d
-        end)
+        add_hls([
+          {{0, 0}, {3, 0}, [style: Face.new(bg: 0xFF0000)]},
+          {{5, 0}, {8, 0}, [style: Face.new(bg: 0x00FF00), priority: 10]},
+          {{5, 5}, {5, 15}, [style: Face.new(fg: 0x00FF00), priority: 5]},
+          {{5, 0}, {5, 20}, [style: Face.new(bold: true), priority: 20]}
+        ])
 
-      assert decs.version == v + 1
-    end
-  end
+      assert decs |> Decorations.highlights_for_lines(4, 9) |> Enum.map(& &1.priority) == [
+               5,
+               10,
+               20
+             ]
 
-  # ── Query ────────────────────────────────────────────────────────────────
-
-  describe "highlights_for_lines/3" do
-    test "returns ranges intersecting the line range" do
-      decs = Decorations.new()
-      {_, decs} = add_hl(decs, {0, 0}, {3, 0}, style: Face.new(bg: 0xFF0000))
-      {_, decs} = add_hl(decs, {5, 0}, {8, 0}, style: Face.new(bg: 0x00FF00))
-      {_, decs} = add_hl(decs, {10, 0}, {15, 0}, style: Face.new(bg: 0x0000FF))
-
-      results = Decorations.highlights_for_lines(decs, 4, 9)
-      assert length(results) == 1
-      assert hd(results).style.bg == 0x00FF00
+      assert Decorations.highlights_for_lines(Decorations.new(), 0, 100) == []
     end
 
-    test "returns ranges sorted by priority" do
-      decs = Decorations.new()
-      {_, decs} = add_hl(decs, {5, 0}, {5, 20}, style: Face.new(bg: 0xFF0000), priority: 10)
-      {_, decs} = add_hl(decs, {5, 5}, {5, 15}, style: Face.new(fg: 0x00FF00), priority: 5)
-      {_, decs} = add_hl(decs, {5, 0}, {5, 20}, style: Face.new(bold: true), priority: 20)
-
-      results = Decorations.highlights_for_lines(decs, 5, 5)
-      priorities = Enum.map(results, & &1.priority)
-      assert priorities == [5, 10, 20]
-    end
-
-    test "empty decorations returns empty list" do
-      decs = Decorations.new()
-      assert Decorations.highlights_for_lines(decs, 0, 100) == []
-    end
-  end
-
-  describe "highlights_for_line/2" do
-    test "returns ranges for a single line" do
-      decs = Decorations.new()
-      {_, decs} = add_hl(decs, {5, 0}, {5, 10})
-      {_, decs} = add_hl(decs, {10, 0}, {10, 10})
+    test "returns highlights for single lines including multi-line ranges" do
+      decs = add_hls([{{5, 0}, {5, 10}}, {{10, 0}, {10, 10}}, {{20, 0}, {25, 0}}])
 
       assert length(Decorations.highlights_for_line(decs, 5)) == 1
       assert length(Decorations.highlights_for_line(decs, 10)) == 1
+      assert length(Decorations.highlights_for_line(decs, 22)) == 1
       assert Decorations.highlights_for_line(decs, 7) == []
     end
-
-    test "multi-line range found on middle line" do
-      decs = Decorations.new()
-      {_, decs} = add_hl(decs, {5, 0}, {10, 0})
-
-      assert length(Decorations.highlights_for_line(decs, 7)) == 1
-    end
   end
-
-  # ── Anchor adjustment ───────────────────────────────────────────────────
 
   describe "adjust_for_edit/4" do
-    test "insertion before range shifts it right" do
-      decs = Decorations.new()
-      {_, decs} = add_hl(decs, {5, 0}, {5, 10})
+    test "adjusts highlight anchors around insertions and deletions" do
+      cases = [
+        {{5, 0}, {5, 10}, {2, 0}, {2, 0}, {5, 0}, 8, {8, 0}, {8, 10}},
+        {{5, 0}, {10, 0}, {7, 0}, {7, 0}, {9, 0}, 5, {5, 0}, {12, 0}},
+        {{10, 0}, {10, 10}, {2, 0}, {5, 0}, {2, 0}, 7, {7, 0}, {7, 10}},
+        {{5, 0}, {15, 0}, {8, 0}, {11, 0}, {8, 0}, 5, {5, 0}, {12, 0}},
+        {{5, 10}, {5, 20}, {5, 5}, {5, 5}, {5, 10}, 5, {5, 15}, {5, 25}},
+        {{5, 10}, {5, 20}, {5, 15}, {5, 15}, {5, 18}, 5, {5, 10}, {5, 23}},
+        {{10, 0}, {10, 10}, {20, 0}, {20, 0}, {21, 0}, 10, {10, 0}, {10, 10}}
+      ]
 
-      # Insert 3 lines at line 2 (edit_start == edit_end for pure insert)
-      decs = Decorations.adjust_for_edit(decs, {2, 0}, {2, 0}, {5, 0})
+      for {start_pos, end_pos, edit_start, edit_end, new_end, query_line, expected_start,
+           expected_end} <- cases do
+        range =
+          single_highlight_after_edit(
+            start_pos,
+            end_pos,
+            edit_start,
+            edit_end,
+            new_end,
+            query_line
+          )
 
-      ranges = Decorations.highlights_for_line(decs, 8)
-      assert length(ranges) == 1
-      assert hd(ranges).start == {8, 0}
-      assert hd(ranges).end_ == {8, 10}
+        assert range.start == expected_start
+        assert range.end_ == expected_end
+      end
     end
 
-    test "insertion within range expands it" do
-      decs = Decorations.new()
-      {_, decs} = add_hl(decs, {5, 0}, {10, 0})
-
-      # Insert 2 lines at line 7
-      decs = Decorations.adjust_for_edit(decs, {7, 0}, {7, 0}, {9, 0})
-
-      ranges = Decorations.highlights_for_line(decs, 5)
-      assert length(ranges) == 1
-      range = hd(ranges)
-      assert range.start == {5, 0}
-      assert range.end_ == {12, 0}
-    end
-
-    test "deletion before range shifts it left" do
-      decs = Decorations.new()
-      {_, decs} = add_hl(decs, {10, 0}, {10, 10})
-
-      # Delete lines 2-4 (3 lines)
-      decs = Decorations.adjust_for_edit(decs, {2, 0}, {5, 0}, {2, 0})
-
-      ranges = Decorations.highlights_for_line(decs, 7)
-      assert length(ranges) == 1
-      assert hd(ranges).start == {7, 0}
-    end
-
-    test "deletion spanning entire range removes it" do
-      decs = Decorations.new()
-      {_, decs} = add_hl(decs, {5, 0}, {8, 0})
-
-      # Delete lines 3-10 (contains the entire range)
+    test "removes highlights fully covered by deletion and no-ops on empty decorations" do
+      decs = add_hls([{{5, 0}, {8, 0}}])
       decs = Decorations.adjust_for_edit(decs, {3, 0}, {10, 0}, {3, 0})
-
       assert Decorations.empty?(decs)
-    end
 
-    test "deletion within range shrinks it" do
-      decs = Decorations.new()
-      {_, decs} = add_hl(decs, {5, 0}, {15, 0})
-
-      # Delete lines 8-10 (3 lines within the range)
-      decs = Decorations.adjust_for_edit(decs, {8, 0}, {11, 0}, {8, 0})
-
-      ranges = Decorations.highlights_for_line(decs, 5)
-      assert length(ranges) == 1
-      range = hd(ranges)
-      assert range.start == {5, 0}
-      assert range.end_ == {12, 0}
-    end
-
-    test "same-line column insertion shifts end column" do
-      decs = Decorations.new()
-      {_, decs} = add_hl(decs, {5, 10}, {5, 20})
-
-      # Insert 5 characters at column 5 on line 5 (before the range)
-      decs = Decorations.adjust_for_edit(decs, {5, 5}, {5, 5}, {5, 10})
-
-      ranges = Decorations.highlights_for_line(decs, 5)
-      assert length(ranges) == 1
-      range = hd(ranges)
-      assert range.start == {5, 15}
-      assert range.end_ == {5, 25}
-    end
-
-    test "same-line column insertion within range expands it" do
-      decs = Decorations.new()
-      {_, decs} = add_hl(decs, {5, 10}, {5, 20})
-
-      # Insert 3 characters at column 15 on line 5 (within the range)
-      decs = Decorations.adjust_for_edit(decs, {5, 15}, {5, 15}, {5, 18})
-
-      ranges = Decorations.highlights_for_line(decs, 5)
-      assert length(ranges) == 1
-      range = hd(ranges)
-      assert range.start == {5, 10}
-      assert range.end_ == {5, 23}
-    end
-
-    test "no-op on empty decorations" do
-      decs = Decorations.new()
-      decs2 = Decorations.adjust_for_edit(decs, {0, 0}, {0, 0}, {1, 0})
-      assert Decorations.empty?(decs2)
-    end
-
-    test "range after edit is unaffected" do
-      decs = Decorations.new()
-      {_, decs} = add_hl(decs, {10, 0}, {10, 10})
-
-      # Edit at line 20 (after the range)
-      decs = Decorations.adjust_for_edit(decs, {20, 0}, {20, 0}, {21, 0})
-
-      ranges = Decorations.highlights_for_line(decs, 10)
-      assert length(ranges) == 1
-      assert hd(ranges).start == {10, 0}
+      assert Decorations.adjust_for_edit(Decorations.new(), {0, 0}, {0, 0}, {1, 0})
+             |> Decorations.empty?()
     end
   end
 
-  # ── Style merging ───────────────────────────────────────────────────────
-
   describe "merge_highlights/3" do
-    test "no ranges returns segments unchanged" do
+    test "returns original segments when no ranges are present" do
       segments = [{"hello", Face.new(fg: 0xFF0000)}, {" world", Face.new(fg: 0x00FF00)}]
       assert Decorations.merge_highlights(segments, [], 0) == segments
     end
 
-    test "full-line range applies bg to all segments" do
+    test "applies full-line and partial ranges while preserving base properties" do
       segments = [{"hello", Face.new(fg: 0xFF0000)}, {" world", Face.new(fg: 0x00FF00)}]
+      result = Decorations.merge_highlights(segments, [range({0, 0}, {1, 0})], 0)
 
-      ranges = [
-        %{
-          id: make_ref(),
-          start: {0, 0},
-          end_: {1, 0},
-          style: Face.new(bg: 0x3E4452),
-          priority: 0,
-          group: nil
-        }
-      ]
+      assert Enum.all?(result, fn {_text, style} -> style.bg == 0x3E4452 end)
+      assert result |> hd() |> elem(1) |> Map.fetch!(:fg) == 0xFF0000
 
-      result = Decorations.merge_highlights(segments, ranges, 0)
+      result =
+        Decorations.merge_highlights(
+          [{"hello world", Face.new(fg: 0xFF0000)}],
+          [range({0, 0}, {0, 5})],
+          0
+        )
 
-      # All segments should have bg added but fg preserved
-      Enum.each(result, fn {_text, style} ->
-        assert style.bg == 0x3E4452
-      end)
-
-      # First segment should still have its original fg
-      {_, first_style} = hd(result)
-      assert first_style.fg == 0xFF0000
-    end
-
-    test "partial range splits segment at boundary" do
-      segments = [{"hello world", Face.new(fg: 0xFF0000)}]
-
-      ranges = [
-        %{
-          id: make_ref(),
-          start: {0, 0},
-          end_: {0, 5},
-          style: Face.new(bg: 0x3E4452),
-          priority: 0,
-          group: nil
-        }
-      ]
-
-      result = Decorations.merge_highlights(segments, ranges, 0)
-
-      # Should be split into "hello" (with bg) and " world" (without bg)
-      assert length(result) == 2
-      [{text1, style1}, {text2, style2}] = result
-      assert text1 == "hello"
+      assert [{"hello", style1}, {" world", style2}] = result
       assert style1.bg == 0x3E4452
       assert style1.fg == 0xFF0000
-      assert text2 == " world"
       assert style2.bg == nil
       assert style2.fg == 0xFF0000
     end
 
-    test "overlapping ranges with priority resolution" do
-      segments = [{"abcdef", Face.new()}]
-
+    test "resolves overlapping ranges by priority" do
       ranges = [
-        %{
-          id: make_ref(),
-          start: {0, 0},
-          end_: {0, 6},
-          style: Face.new(bg: 0xFF0000),
-          priority: 1,
-          group: nil
-        },
-        %{
-          id: make_ref(),
-          start: {0, 2},
-          end_: {0, 4},
-          style: Face.new(bg: 0x00FF00),
-          priority: 10,
-          group: nil
-        }
+        range({0, 0}, {0, 6}, style: Face.new(bg: 0xFF0000), priority: 1),
+        range({0, 2}, {0, 4}, style: Face.new(bg: 0x00FF00), priority: 10)
       ]
 
-      result = Decorations.merge_highlights(segments, ranges, 0)
-
-      # Should be split into "ab" (red bg), "cd" (green bg, higher priority), "ef" (red bg)
-      assert length(result) == 3
-      [{_, s1}, {_, s2}, {_, s3}] = result
-      assert s1.bg == 0xFF0000
-      assert s2.bg == 0x00FF00
-      assert s3.bg == 0xFF0000
+      result = Decorations.merge_highlights([{"abcdef", Face.new()}], ranges, 0)
+      assert Enum.map(result, fn {_text, style} -> style.bg end) == [0xFF0000, 0x00FF00, 0xFF0000]
     end
 
-    test "range spanning multiple segments" do
+    test "applies ranges across multiple segments" do
       segments = [
         {"aaa", Face.new(fg: 0xFF0000)},
         {"bbb", Face.new(fg: 0x00FF00)},
         {"ccc", Face.new(fg: 0x0000FF)}
       ]
 
-      ranges = [
-        %{
-          id: make_ref(),
-          start: {0, 1},
-          end_: {0, 8},
-          style: Face.new(bold: true),
-          priority: 0,
-          group: nil
-        }
-      ]
+      result =
+        Decorations.merge_highlights(
+          segments,
+          [range({0, 1}, {0, 8}, style: Face.new(bold: true))],
+          0
+        )
 
-      result = Decorations.merge_highlights(segments, ranges, 0)
-
-      # The range starts at col 1 (within first segment) and ends at col 8 (within third segment)
-      # First segment "aaa" should be split: "a" (no bold) + "aa" (bold)
-      # Second segment "bbb" should be entirely bold
-      # Third segment "ccc" should be split: "bb" (bold) + "c" (no bold) -- wait, "ccc" starts at col 6
-      # Actually: segments are "aaa" (cols 0-2), "bbb" (cols 3-5), "ccc" (cols 6-8)
-      # Range is cols 1-7 (end exclusive at 8)
-      # "a" (col 0, no bold) + "aa" (cols 1-2, bold)
-      # "bbb" (cols 3-5, bold)
-      # "cc" (cols 6-7, bold) + "c" (col 8, no bold)
       assert length(result) >= 4
-
-      # Verify bold is applied where expected
-      {first_text, first_style} = hd(result)
-      assert first_text == "a"
+      assert {"a", first_style} = hd(result)
       refute first_style.bold || false
+      assert Enum.any?(result, fn {_text, style} -> style.bold == true end)
     end
 
-    test "range on a different line from segments is ignored" do
-      segments = [{"hello", Face.new(fg: 0xFF0000)}]
+    test "handles multi-line ranges on intermediate, start, and end lines" do
+      intermediate =
+        Decorations.merge_highlights(
+          [{"full line content", Face.new(fg: 0xFF0000)}],
+          [range({3, 5}, {8, 10})],
+          5
+        )
 
-      ranges = [
-        %{
-          id: make_ref(),
-          start: {5, 0},
-          end_: {5, 5},
-          style: Face.new(bg: 0x3E4452),
-          priority: 0,
-          group: nil
-        }
-      ]
-
-      # Rendering line 0, range is on line 5
-      result = Decorations.merge_highlights(segments, ranges, 0)
-
-      # Range doesn't intersect line 0, so no overlay should apply
-      # The overlay extraction converts the range to column bounds for the given line.
-      # Since range starts and ends on line 5, for line 0 both start_col and end_col
-      # will be 0 (start_line > line -> start_col would be beyond, end_line > line -> end_col = :infinity)
-      # Actually: rs_line (5) > line (0), so start_col = rs_col (0), but
-      # wait, the condition is: if rs_line < line, do: 0, else: rs_col
-      # For rs_line (5) < line (0)? No, 5 is not < 0, so start_col = 0
-      # For re_line (5) > line (0)? Yes, so end_col = :infinity
-      # So the overlay would cover cols 0..infinity on line 0, which is wrong.
-      # This is a bug in the test: the caller (highlights_for_line) filters by line
-      # before calling merge_highlights. The merge function assumes ranges
-      # have already been filtered to only include ranges that intersect the line.
-      # This test is testing an invalid scenario. Let me fix it.
-
-      # Actually, the caller is responsible for filtering. This is expected behavior.
-      # The function trusts that ranges passed to it actually intersect the line.
-      # Remove this test or change it to test the caller's filtering.
-      assert is_list(result)
-    end
-
-    test "multi-line range on an intermediate line covers full width" do
-      segments = [{"full line content", Face.new(fg: 0xFF0000)}]
-
-      # Range spans lines 3-8, rendering line 5 (in the middle)
-      ranges = [
-        %{
-          id: make_ref(),
-          start: {3, 5},
-          end_: {8, 10},
-          style: Face.new(bg: 0x3E4452),
-          priority: 0,
-          group: nil
-        }
-      ]
-
-      result = Decorations.merge_highlights(segments, ranges, 5)
-
-      # On line 5 (between start line 3 and end line 8), the overlay
-      # covers cols 0..infinity
-      assert length(result) == 1
-      {_, style} = hd(result)
+      assert [{_, style}] = intermediate
       assert style.bg == 0x3E4452
       assert style.fg == 0xFF0000
-    end
 
-    test "range on start line only covers from start_col onward" do
-      segments = [{"0123456789", Face.new(fg: 0xFF0000)}]
+      start_line =
+        Decorations.merge_highlights(
+          [{"0123456789", Face.new(fg: 0xFF0000)}],
+          [range({0, 5}, {2, 0})],
+          0
+        )
 
-      # Range starts at line 0 col 5, extends to line 2
-      ranges = [
-        %{
-          id: make_ref(),
-          start: {0, 5},
-          end_: {2, 0},
-          style: Face.new(bg: 0x3E4452),
-          priority: 0,
-          group: nil
-        }
-      ]
+      assert [{"01234", no_bg}, {"56789", with_bg}] = start_line
+      assert no_bg.bg == nil
+      assert with_bg.bg == 0x3E4452
 
-      result = Decorations.merge_highlights(segments, ranges, 0)
+      end_line =
+        Decorations.merge_highlights(
+          [{"0123456789", Face.new(fg: 0xFF0000)}],
+          [range({0, 0}, {3, 5})],
+          3
+        )
 
-      # On line 0 (start line), overlay covers cols 5..infinity
-      assert length(result) == 2
-      [{text1, style1}, {text2, style2}] = result
-      assert text1 == "01234"
-      refute style1.bg != nil
-      assert text2 == "56789"
-      assert style2.bg == 0x3E4452
-    end
-
-    test "range on end line only covers up to end_col" do
-      segments = [{"0123456789", Face.new(fg: 0xFF0000)}]
-
-      # Range starts at line 0, ends at this line col 5
-      ranges = [
-        %{
-          id: make_ref(),
-          start: {0, 0},
-          end_: {3, 5},
-          style: Face.new(bg: 0x3E4452),
-          priority: 0,
-          group: nil
-        }
-      ]
-
-      result = Decorations.merge_highlights(segments, ranges, 3)
-
-      # On line 3 (end line), overlay covers cols 0..5
-      assert length(result) == 2
-      [{text1, style1}, {text2, style2}] = result
-      assert text1 == "01234"
-      assert style1.bg == 0x3E4452
-      assert text2 == "56789"
-      refute style2.bg != nil
+      assert [{"01234", with_bg}, {"56789", no_bg}] = end_line
+      assert with_bg.bg == 0x3E4452
+      assert no_bg.bg == nil
     end
   end
 
   describe "merge_style_props/2" do
-    alias Minga.Core.Face
-
-    test "overlay properties override base" do
-      result = Decorations.merge_style_props(Face.new(fg: 0xFF0000), Face.new(fg: 0x00FF00))
-      assert result.fg == 0x00FF00
-    end
-
-    test "base properties are preserved when not overridden" do
+    test "overlays explicit properties and preserves base properties otherwise" do
       result =
-        Decorations.merge_style_props(Face.new(fg: 0xFF0000, bold: true), Face.new(bg: 0x3E4452))
+        Decorations.merge_style_props(
+          Face.new(fg: 0xFF0000, bold: true),
+          Face.new(fg: 0x00FF00, bg: 0x3E4452)
+        )
 
-      assert result.fg == 0xFF0000
+      assert result.fg == 0x00FF00
       assert result.bold == true
       assert result.bg == 0x3E4452
-    end
 
-    test "empty overlay returns base unchanged" do
       base = Face.new(fg: 0xFF0000, bold: true)
       assert Decorations.merge_style_props(base, Face.new()) == base
-    end
-
-    test "empty base returns overlay" do
-      overlay = Face.new(bg: 0x3E4452)
-      result = Decorations.merge_style_props(Face.new(), overlay)
-      assert result.bg == 0x3E4452
+      assert Decorations.merge_style_props(Face.new(), Face.new(bg: 0x3E4452)).bg == 0x3E4452
     end
   end
 
   describe "add_fold_region/4" do
-    test "single-line range is a no-op (start == end)" do
+    test "ignores single-line ranges and adds valid ranges" do
       decs = Decorations.new()
-      {_id, result} = Decorations.add_fold_region(decs, 5, 5, closed: true)
+      {_id, unchanged} = Decorations.add_fold_region(decs, 5, 5, closed: true)
+      assert unchanged.fold_regions == []
+      assert unchanged.version == decs.version
 
-      assert result.fold_regions == []
-      assert result.version == decs.version
-    end
-
-    test "valid range adds a fold region" do
-      decs = Decorations.new()
       {_id, result} = Decorations.add_fold_region(decs, 5, 10, closed: true)
-
       assert length(result.fold_regions) == 1
       assert result.version == decs.version + 1
     end
   end
 
-  # ── Line annotation tests ──────────────────────────────────────────────
-
-  describe "add_annotation/4" do
-    test "adds an annotation and returns its ID" do
+  describe "annotations" do
+    test "adds annotations with ids, options, version bumps, and cache invalidation" do
       decs = Decorations.new()
-      {id, decs} = Decorations.add_annotation(decs, 5, "3 errors")
+      version = decs.version
 
-      assert is_reference(id)
-      assert Decorations.has_annotations?(decs)
-    end
-
-    test "bumps version on add" do
-      decs = Decorations.new()
-      v0 = decs.version
-      {_id, decs} = Decorations.add_annotation(decs, 5, "test")
-
-      assert decs.version == v0 + 1
-    end
-
-    test "invalidates ann_line_cache on add" do
-      decs = Decorations.new()
-      {_id, decs} = Decorations.add_annotation(decs, 5, "first")
-      decs = Decorations.build_ann_line_cache(decs)
-      assert decs.ann_line_cache != nil
-
-      {_id, decs} = Decorations.add_annotation(decs, 10, "second")
-      assert decs.ann_line_cache == nil
-    end
-
-    test "respects kind, fg, bg, group, priority options" do
-      decs = Decorations.new()
-
-      {_id, decs} =
+      {id, decs} =
         Decorations.add_annotation(decs, 3, "urgent",
           kind: :inline_text,
           fg: 0xFF0000,
@@ -672,6 +363,15 @@ defmodule Minga.Core.DecorationsTest do
           priority: 10
         )
 
+      assert is_reference(id)
+      assert Decorations.has_annotations?(decs)
+      assert decs.version == version + 1
+
+      decs = Decorations.build_ann_line_cache(decs)
+      assert decs.ann_line_cache != nil
+      decs = add_annotation(decs, 10, "second")
+      assert decs.ann_line_cache == nil
+
       [ann] = Decorations.annotations_for_line(decs, 3)
       assert ann.kind == :inline_text
       assert ann.fg == 0xFF0000
@@ -679,197 +379,95 @@ defmodule Minga.Core.DecorationsTest do
       assert ann.group == :tags
       assert ann.priority == 10
     end
-  end
 
-  describe "remove_annotation/2" do
-    test "removes a specific annotation by ID" do
+    test "removes annotations by id and ignores missing ids" do
       decs = Decorations.new()
       {id1, decs} = Decorations.add_annotation(decs, 5, "first")
       {_id2, decs} = Decorations.add_annotation(decs, 10, "second")
 
       decs = Decorations.remove_annotation(decs, id1)
-
       assert Decorations.annotations_for_line(decs, 5) == []
-      assert length(Decorations.annotations_for_line(decs, 10)) == 1
+      assert annotation_texts(decs, 10) == ["second"]
+
+      version = decs.version
+      assert Decorations.remove_annotation(decs, make_ref()).version == version
     end
 
-    test "no-op for non-existent ID" do
-      decs = Decorations.new()
-      {_id, decs} = Decorations.add_annotation(decs, 5, "test")
-      v = decs.version
+    test "queries annotations by line with priority ordering and cache support" do
+      decs =
+        add_annotations([
+          {5, "high", [priority: 20]},
+          {5, "low", [priority: 5]},
+          {5, "mid", [priority: 10]},
+          {0, "other"}
+        ])
 
-      decs = Decorations.remove_annotation(decs, make_ref())
-
-      assert Decorations.has_annotations?(decs)
-      assert decs.version == v
-    end
-  end
-
-  describe "annotations_for_line/2" do
-    test "returns annotations sorted by priority" do
-      decs = Decorations.new()
-      {_id, decs} = Decorations.add_annotation(decs, 5, "high", priority: 20)
-      {_id, decs} = Decorations.add_annotation(decs, 5, "low", priority: 5)
-      {_id, decs} = Decorations.add_annotation(decs, 5, "mid", priority: 10)
-
-      anns = Decorations.annotations_for_line(decs, 5)
-      texts = Enum.map(anns, & &1.text)
-      assert texts == ["low", "mid", "high"]
-    end
-
-    test "returns empty list for line with no annotations" do
-      decs = Decorations.new()
-      {_id, decs} = Decorations.add_annotation(decs, 5, "test")
-
+      assert annotation_texts(decs, 5) == ["low", "mid", "high"]
       assert Decorations.annotations_for_line(decs, 10) == []
+      assert length(Decorations.annotations_for_line(decs, 0)) == 1
+
+      cached = Decorations.build_ann_line_cache(decs)
+      assert cached.ann_line_cache != nil
+      assert annotation_texts(cached, 5) == ["low", "mid", "high"]
+      assert Decorations.annotations_for_line(cached, 3) == []
+      assert Decorations.build_ann_line_cache(cached) == cached
+      assert Decorations.build_ann_line_cache(Decorations.new()).ann_line_cache == %{}
     end
 
-    test "returns all annotations on a line" do
-      decs = Decorations.new()
-      {_id, decs} = Decorations.add_annotation(decs, 0, "a")
-      {_id, decs} = Decorations.add_annotation(decs, 0, "b")
-      {_id, decs} = Decorations.add_annotation(decs, 0, "c")
-
-      assert length(Decorations.annotations_for_line(decs, 0)) == 3
-    end
-  end
-
-  describe "build_ann_line_cache/1" do
-    test "builds cache and subsequent queries use it" do
-      decs = Decorations.new()
-      {_id, decs} = Decorations.add_annotation(decs, 0, "a")
-      {_id, decs} = Decorations.add_annotation(decs, 5, "b")
-      {_id, decs} = Decorations.add_annotation(decs, 10, "c")
-
-      decs = Decorations.build_ann_line_cache(decs)
-      assert decs.ann_line_cache != nil
-
-      # Queries should still work correctly with cache
-      assert length(Decorations.annotations_for_line(decs, 5)) == 1
-      assert Decorations.annotations_for_line(decs, 3) == []
-    end
-
-    test "returns unchanged when cache already built" do
-      decs = Decorations.new()
-      {_id, decs} = Decorations.add_annotation(decs, 5, "test")
-      decs = Decorations.build_ann_line_cache(decs)
-
-      assert decs == Decorations.build_ann_line_cache(decs)
-    end
-
-    test "handles empty annotations" do
-      decs = Decorations.new()
-      decs = Decorations.build_ann_line_cache(decs)
-
-      assert decs.ann_line_cache == %{}
-    end
-  end
-
-  describe "remove_group/2 with annotations" do
-    test "removes all annotations in a group" do
-      decs = Decorations.new()
-      {_id, decs} = Decorations.add_annotation(decs, 5, "lsp1", group: :lsp)
-      {_id, decs} = Decorations.add_annotation(decs, 10, "lsp2", group: :lsp)
-      {_id, decs} = Decorations.add_annotation(decs, 15, "agent", group: :agent)
+    test "removes annotation groups and ignores missing groups" do
+      decs =
+        add_annotations([
+          {5, "lsp1", [group: :lsp]},
+          {10, "lsp2", [group: :lsp]},
+          {15, "agent", [group: :agent]}
+        ])
 
       decs = Decorations.remove_group(decs, :lsp)
-
       assert Decorations.annotations_for_line(decs, 5) == []
       assert Decorations.annotations_for_line(decs, 10) == []
-      assert length(Decorations.annotations_for_line(decs, 15)) == 1
-    end
+      assert annotation_texts(decs, 15) == ["agent"]
 
-    test "no-op on non-existent group" do
-      decs = Decorations.new()
-      {_id, decs} = Decorations.add_annotation(decs, 5, "test", group: :lsp)
-
-      decs = Decorations.remove_group(decs, :nonexistent)
-
-      assert length(Decorations.annotations_for_line(decs, 5)) == 1
+      assert Decorations.remove_group(decs, :missing)
+             |> Decorations.annotations_for_line(15)
+             |> length() == 1
     end
   end
 
   describe "adjust_for_edit/4 with annotations" do
-    test "insertion before annotation line shifts it forward" do
-      decs = Decorations.new()
-      {_id, decs} = Decorations.add_annotation(decs, 10, "test")
+    test "adjusts annotation lines around insertions and deletions" do
+      cases = [
+        {10, {2, 0}, {2, 0}, {5, 0}, [13]},
+        {5, {20, 0}, {20, 0}, {23, 0}, [5]},
+        {10, {2, 0}, {5, 0}, {2, 0}, [7]},
+        {0, {0, 0}, {0, 0}, {2, 0}, [0]}
+      ]
 
-      # Insert 3 lines at line 2
-      decs = Decorations.adjust_for_edit(decs, {2, 0}, {2, 0}, {5, 0})
-
-      [ann] = decs.annotations
-      assert ann.line == 13
+      for {line, edit_start, edit_end, new_end, expected_lines} <- cases do
+        decs = add_annotation(Decorations.new(), line, "test")
+        decs = Decorations.adjust_for_edit(decs, edit_start, edit_end, new_end)
+        assert annotation_lines(decs) == expected_lines
+      end
     end
 
-    test "insertion after annotation line leaves it unchanged" do
-      decs = Decorations.new()
-      {_id, decs} = Decorations.add_annotation(decs, 5, "test")
-
-      decs = Decorations.adjust_for_edit(decs, {20, 0}, {20, 0}, {23, 0})
-
-      [ann] = decs.annotations
-      assert ann.line == 5
-    end
-
-    test "deletion before annotation line shifts it back" do
-      decs = Decorations.new()
-      {_id, decs} = Decorations.add_annotation(decs, 10, "test")
-
-      # Delete lines 2-5 (3 lines)
-      decs = Decorations.adjust_for_edit(decs, {2, 0}, {5, 0}, {2, 0})
-
-      [ann] = decs.annotations
-      assert ann.line == 7
-    end
-
-    test "deletion spanning annotation line removes it" do
-      decs = Decorations.new()
-      {_id, decs} = Decorations.add_annotation(decs, 5, "test")
-
-      # Delete lines 3-8
+    test "removes annotations covered by deletion and no-ops on empty annotations" do
+      decs = add_annotation(Decorations.new(), 5, "test")
       decs = Decorations.adjust_for_edit(decs, {3, 0}, {8, 0}, {3, 0})
+      refute Decorations.has_annotations?(decs)
 
-      assert not Decorations.has_annotations?(decs)
-    end
-
-    test "annotation on line 0 survives insertion at line 0" do
-      decs = Decorations.new()
-      {_id, decs} = Decorations.add_annotation(decs, 0, "test")
-
-      # Insert at line 0 (pushes content down)
-      decs = Decorations.adjust_for_edit(decs, {0, 0}, {0, 0}, {2, 0})
-
-      [ann] = decs.annotations
-      # Annotation at line 0 is within the edit region; clamped to edit start
-      assert ann.line == 0
-    end
-
-    test "no-op on empty annotations" do
-      decs = Decorations.new()
-      decs = Decorations.adjust_for_edit(decs, {0, 0}, {0, 0}, {1, 0})
-
-      assert not Decorations.has_annotations?(decs)
+      decs = Decorations.adjust_for_edit(Decorations.new(), {0, 0}, {0, 0}, {1, 0})
+      refute Decorations.has_annotations?(decs)
     end
   end
 
-  describe "has_annotations?/1" do
-    test "false for new decorations" do
-      assert not Decorations.has_annotations?(Decorations.new())
-    end
-
-    test "true after adding an annotation" do
-      {_id, decs} = Decorations.add_annotation(Decorations.new(), 0, "test")
-      assert Decorations.has_annotations?(decs)
-    end
-  end
-
-  describe "empty?/1 with annotations" do
-    test "annotations count as non-empty" do
+  describe "annotation emptiness" do
+    test "annotations affect has_annotations?/1 and empty?/1" do
       decs = Decorations.new()
+      refute Decorations.has_annotations?(decs)
       assert Decorations.empty?(decs)
 
-      {_id, decs} = Decorations.add_annotation(decs, 0, "test")
-      assert not Decorations.empty?(decs)
+      decs = add_annotation(decs, 0, "test")
+      assert Decorations.has_annotations?(decs)
+      refute Decorations.empty?(decs)
     end
   end
 end
