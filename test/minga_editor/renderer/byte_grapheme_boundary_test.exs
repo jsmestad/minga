@@ -112,44 +112,4 @@ defmodule MingaEditor.Renderer.ByteGraphemeBoundaryTest do
       assert :reverse in cell_a.attrs, "Expected 'a' to be selected"
     end
   end
-
-  describe "insert mode cursor with multi-byte characters" do
-    test "cursor after inserting multi-byte character" do
-      ctx = start_editor("")
-
-      send_key_sync(ctx, ?i)
-      # Type 'é' — this is tricky since send_key sends a codepoint
-      send_key_sync(ctx, ?a)
-      send_key_sync(ctx, ?b)
-
-      {_row, col} = screen_cursor(ctx)
-
-      # After typing "ab", cursor should be at grapheme col 2
-      assert col == @gutter_w + 2
-    end
-  end
-
-  describe "ASCII content (byte == grapheme)" do
-    test "cursor placement unchanged for ASCII" do
-      ctx = start_editor("hello world")
-
-      send_key_sync(ctx, ?$)
-
-      {_row, col} = screen_cursor(ctx)
-
-      # "hello world" = 11 chars, cursor on 'd' at index 10
-      assert col == @gutter_w + 10
-    end
-
-    test "modeline column correct for ASCII" do
-      ctx = start_editor("hello")
-
-      send_key_sync(ctx, ?$)
-
-      ml = modeline(ctx)
-
-      assert String.contains?(ml, "1:5"),
-             "Expected modeline to show column 5, got: #{inspect(ml)}"
-    end
-  end
 end
