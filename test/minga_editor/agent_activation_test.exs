@@ -1,11 +1,17 @@
 defmodule MingaEditor.AgentActivationTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Test.StubServer
+
   alias MingaEditor.Agent.UIState
   alias MingaEditor.AgentActivation
+  alias MingaEditor.Commands.Agent, as: AgentCommands
+  alias MingaEditor.Shell.Board.Card
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
+  alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -55,6 +61,26 @@ defmodule MingaEditor.AgentActivationTest do
       end)
 
     {state, fake_pid}
+  end
+
+  defp file_active_state do
+    {:ok, buf} = BufferProcess.start_link(content: "hello")
+
+    state = base_state()
+
+    state = %{
+      state
+      | workspace: %{
+          state.workspace
+          | buffers: %Buffers{active: buf, list: [buf], active_index: 0}
+        }
+    }
+
+    {tb, file_tab} = TabBar.insert(state.shell_state.tab_bar, :file, "file.ex")
+    state = EditorState.set_tab_bar(state, tb)
+    state = EditorState.switch_tab(state, file_tab.id)
+
+    {state, buf, file_tab.id}
   end
 
   # ── deactivate/1 ─────────────────────────────────────────────────────────────
@@ -126,6 +152,37 @@ defmodule MingaEditor.AgentActivationTest do
       assert result.workspace.windows == windows
       assert result.workspace.file_tree == file_tree
       assert result.workspace.keymap_scope == :file_tree
+      assert AgentAccess.input_focused?(result) == true
+    end
+
+    test "return_to_editor keeps the fallback tab's own keymap scope" do
+      {state, _buf, file_tab_id} = file_active_state()
+      {tb, fallback_tab} = TabBar.insert(state.shell_state.tab_bar, :file, "fallback.ex")
+      state = EditorState.set_tab_bar(state, tb)
+      state = EditorState.switch_tab(state, fallback_tab.id)
+      state = put_in(state.workspace.keymap_scope, :file_tree)
+      state = EditorState.switch_tab(state, file_tab_id)
+      state = AgentCommands.toggle_agentic_view(state)
+      {:ok, tb} = TabBar.remove(state.shell_state.tab_bar, file_tab_id)
+      state = put_in(state.shell_state.tab_bar, tb)
+
+      result = AgentCommands.return_to_editor(state)
+
+      assert result.shell_state.tab_bar.active_id == fallback_tab.id
+      assert result.workspace.keymap_scope == :file_tree
+    end
+
+    test "activate_for_card records the current editor return target" do
+      {state, buf, file_tab_id} = file_active_state()
+      session = start_supervised!(StubServer)
+      card = Card.new(2, session: session, task: "Agent")
+
+      result = AgentActivation.activate_for_card(state, card)
+
+      assert AgentAccess.view(result).return_target.active_tab_id == file_tab_id
+      assert AgentAccess.view(result).return_target.active_buffer == buf
+      assert AgentAccess.view(result).return_target.prompt_focused == false
+      assert result.workspace.keymap_scope == :agent
       assert AgentAccess.input_focused?(result) == true
     end
 

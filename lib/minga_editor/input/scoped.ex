@@ -171,7 +171,10 @@ defmodule MingaEditor.Input.Scoped do
   @spec handle_focused_input_normal(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
   defp handle_focused_input_normal(state, 27, 0) do
-    {:handled, AgentCommands.scope_unfocus_input(state)}
+    case Minga.Editing.mode(state) do
+      :normal -> {:handled, AgentCommands.scope_unfocus_input(state)}
+      _ -> {:handled, AgentPanel.dispatch_prompt_via_mode_fsm(state, 27, 0)}
+    end
   end
 
   defp handle_focused_input_normal(state, cp, mods) do

@@ -182,9 +182,8 @@ defmodule MingaEditor.Commands.Agent do
   defp find_agent_tab(%{shell_state: %{tab_bar: nil}}), do: nil
   defp find_agent_tab(%{shell_state: %{tab_bar: tb}}), do: TabBar.find_by_kind(tb, :agent)
 
-  # Creates a new file tab for the active buffer and switches to it.
-  # Used when deactivating the agentic view and no file tab exists yet
-  # (e.g., cold boot into agent mode). The new tab starts with an empty
+  # Starts an agent session after switching into the agent tab.
+  # Called only after the tab switch so AgentAccess.session/1 sees the tab's pid.
   @spec maybe_start_session(state()) :: state()
   defp maybe_start_session(state) do
     if AgentAccess.session(state) == nil do
@@ -230,11 +229,16 @@ defmodule MingaEditor.Commands.Agent do
     return_target = AgentAccess.view(state).return_target
 
     case target_file_tab_id(EditorState.tab_bar(state), return_target) do
-      id when is_integer(id) ->
+      {:exact, id} ->
         state
         |> mark_agent_view_inactive()
         |> EditorState.switch_tab(id)
         |> restore_return_keymap_scope(return_target)
+
+      {:fallback, id} ->
+        state
+        |> mark_agent_view_inactive()
+        |> EditorState.switch_tab(id)
 
       nil ->
         restore_return_target_without_tab(state, return_target)
@@ -242,10 +246,10 @@ defmodule MingaEditor.Commands.Agent do
   end
 
   @spec target_file_tab_id(TabBar.t() | nil, UIState.View.return_target() | nil) ::
-          pos_integer() | nil
+          {:exact, pos_integer()} | {:fallback, pos_integer()} | nil
   defp target_file_tab_id(%TabBar{} = tb, %{active_tab_id: id}) when is_integer(id) do
     case TabBar.get(tb, id) do
-      %Tab{kind: :file, id: file_id} -> file_id
+      %Tab{kind: :file, id: file_id} -> {:exact, file_id}
       _ -> fallback_file_tab_id(tb)
     end
   end
@@ -253,10 +257,10 @@ defmodule MingaEditor.Commands.Agent do
   defp target_file_tab_id(%TabBar{} = tb, _return_target), do: fallback_file_tab_id(tb)
   defp target_file_tab_id(_tb, _return_target), do: nil
 
-  @spec fallback_file_tab_id(TabBar.t()) :: pos_integer() | nil
+  @spec fallback_file_tab_id(TabBar.t()) :: {:fallback, pos_integer()} | nil
   defp fallback_file_tab_id(%TabBar{} = tb) do
     case TabBar.most_recent_of_kind(tb, :file) do
-      %Tab{id: id} -> id
+      %Tab{id: id} -> {:fallback, id}
       nil -> nil
     end
   end
@@ -298,7 +302,18 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec restore_return_target_buffer(WorkspaceState.t(), pid() | nil) :: WorkspaceState.t()
   defp restore_return_target_buffer(workspace, active_buffer) when is_pid(active_buffer) do
-    WorkspaceState.set_buffers(workspace, Buffers.switch_to_pid(workspace.buffers, active_buffer))
+    buffers = Buffers.switch_to_pid(workspace.buffers, active_buffer)
+
+    buffers =
+      if buffers.active == active_buffer do
+        buffers
+      else
+        Buffers.replace_list(buffers, [active_buffer | buffers.list], 0)
+      end
+
+    workspace
+    |> WorkspaceState.set_buffers(buffers)
+    |> WorkspaceState.sync_active_window_buffer()
   end
 
   defp restore_return_target_buffer(workspace, _active_buffer), do: workspace
