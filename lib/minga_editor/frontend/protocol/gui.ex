@@ -677,7 +677,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   Each tab entry includes: flags byte (is_active, is_dirty, is_agent,
   has_attention, agent_status in upper bits), tab id, group_id for
-  workspace grouping, Nerd Font icon, and display label.
+  workspace grouping, Nerd Font icon, and display label. When the active
+  tab is omitted from `ChromeState.visible_tabs`, active_index is 255 to
+  signal that no visible tab is active.
   """
   @spec encode_gui_tab_bar(TabBar.t() | ChromeState.t(), pid() | nil) :: binary()
   def encode_gui_tab_bar(tab_bar_or_chrome_state, active_win_buffer \\ nil)
@@ -712,9 +714,14 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     ])
   end
 
+  @no_visible_active_tab 255
+
   @spec active_summary_index(ChromeState.t()) :: non_neg_integer()
   defp active_summary_index(%ChromeState{visible_tabs: tabs, active_tab_id: active_id}) do
-    Enum.find_index(tabs, &(&1.id == active_id)) || 0
+    case Enum.find_index(tabs, &(&1.id == active_id)) do
+      nil -> @no_visible_active_tab
+      index -> index
+    end
   end
 
   @spec encode_gui_tab_entry(Tab.t(), pos_integer(), pid() | nil) :: binary()

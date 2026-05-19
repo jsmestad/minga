@@ -114,6 +114,35 @@ defmodule MingaEditor.Workspace.ChromeStateTest do
       assert Enum.map(chrome.visible_tabs, & &1.kind) == [:file]
       assert Enum.map(chrome.visible_tabs, & &1.label) == ["agent.ex"]
     end
+
+    test "falls back to the tab context when the active buffer is dead", %{tmp_dir: tmp_dir} do
+      stale_path = Path.join(tmp_dir, "stale.ex")
+      stale_buffer = start_file_buffer(stale_path)
+      stale_ref = Process.monitor(stale_buffer)
+      GenServer.stop(stale_buffer)
+      assert_receive {:DOWN, ^stale_ref, :process, ^stale_buffer, _}
+
+      context_path = Path.join(tmp_dir, "context.ex")
+      context_buffer = start_file_buffer(context_path)
+
+      context =
+        TabContext.from_workspace_map(%{
+          buffers: %Buffers{active: context_buffer, list: [context_buffer]}
+        })
+
+      tab =
+        Tab.new_file(1, "context.ex")
+        |> Tab.set_context(context)
+
+      tb = %TabBar{tabs: [tab], active_id: 1, next_id: 2}
+
+      chrome =
+        ChromeState.from_editor_state(
+          state(tab_bar: tb, active_buffer: stale_buffer, project_root: tmp_dir)
+        )
+
+      assert [%{path: ^context_path}] = chrome.visible_tabs
+    end
   end
 
   test "draft and conflict counts default to zero", %{tmp_dir: tmp_dir} do

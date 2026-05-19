@@ -33,7 +33,8 @@ struct AgentGroupEntry: Identifiable {
 @Observable
 final class TabBarState {
     var tabs: [TabEntry] = []
-    var activeIndex: Int = 0
+    /// Visible-tab active index from gui_tab_bar, or 255 when the active tab is hidden.
+    var activeIndex: UInt8 = 0
     var agentGroups: [AgentGroupEntry] = []
     var activeGroupId: UInt16 = 0
 
@@ -50,7 +51,7 @@ final class TabBarState {
 
     /// Update from a decoded gui_tab_bar protocol message.
     func update(activeIndex: UInt8, entries: [Wire.TabEntry]) {
-        self.activeIndex = Int(activeIndex)
+        self.activeIndex = activeIndex
         self.tabs = entries.map { entry in
             TabEntry(
                 id: entry.id,

@@ -209,17 +209,21 @@ defmodule MingaEditor.Workspace.ChromeState do
   @spec tab_buffer(map(), Tab.t()) :: pid() | nil
   defp tab_buffer(state, %Tab{id: id, context: context}) do
     if id == active_tab_id(tab_bar(state)) do
-      active_state_buffer(state)
+      active_state_buffer(state) || context_buffer(context)
     else
       context_buffer(context)
     end
   end
 
   @spec active_state_buffer(map()) :: pid() | nil
-  defp active_state_buffer(%{workspace: %{buffers: %Buffers{active: buf}}}) when is_pid(buf),
-    do: buf
+  defp active_state_buffer(%{workspace: %{buffers: %Buffers{active: buf}}}) when is_pid(buf) do
+    if Process.alive?(buf), do: buf, else: nil
+  end
 
-  defp active_state_buffer(%{buffers: %Buffers{active: buf}}) when is_pid(buf), do: buf
+  defp active_state_buffer(%{buffers: %Buffers{active: buf}}) when is_pid(buf) do
+    if Process.alive?(buf), do: buf, else: nil
+  end
+
   defp active_state_buffer(_state), do: nil
 
   @spec context_buffer(Tab.context() | Tab.legacy_context()) :: pid() | nil

@@ -5,6 +5,8 @@ defmodule MingaEditor.Shell.Traditional.TabBarRendererTest do
   alias MingaEditor.State.TabBar
   alias MingaEditor.Shell.Traditional.TabBarRenderer
   alias MingaEditor.UI.Theme
+  alias MingaEditor.Workspace.ChromeState
+  alias MingaEditor.Workspace.ChromeState.TabSummary
 
   defp doom_theme, do: Theme.get!(:doom_one)
 
@@ -25,6 +27,49 @@ defmodule MingaEditor.Shell.Traditional.TabBarRendererTest do
       assert Enum.any?(regions, fn {_, _, cmd} -> cmd == :tab_goto_1 end)
     end
 
+    test "render_chrome_state does not mark a hidden active tab as active" do
+      chrome_state = %ChromeState{
+        workspaces: [],
+        visible_tabs: [
+          TabSummary.new(
+            id: 1,
+            workspace_id: 1,
+            kind: :file,
+            label: "agent.ex",
+            path: "/tmp/agent.ex",
+            icon: "A",
+            dirty?: false,
+            draft_state: :none,
+            attention?: false
+          )
+        ],
+        mode: :agent,
+        active_workspace_id: 1,
+        active_tab_id: 99,
+        background_count: 0,
+        attention_count: 0,
+        draft_count: 0,
+        conflict_count: 0
+      }
+
+      {draws, regions} =
+        TabBarRenderer.render_chrome_state(0, 80, chrome_state, doom_theme(), nil)
+
+      colors = Map.from_struct(doom_theme().tab_bar)
+
+      assert Enum.any?(regions, fn {_, _, cmd} -> cmd == :tab_goto_1 end)
+      assert Enum.any?(regions, fn {_, _, cmd} -> cmd == :tab_close_1 end)
+
+      tab_draw = Enum.find(draws, fn {_, _, text, _} -> String.contains?(text, "agent.ex") end)
+      assert tab_draw != nil
+
+      {_, _, _, style} = tab_draw
+      assert style.bg == colors.inactive_bg
+      refute style.bg == colors.active_bg
+    end
+  end
+
+  describe "render/5 styling" do
     test "active tab uses active colors, inactive uses inactive" do
       tab1 = Tab.new_file(1, "one.ex")
       tb = TabBar.new(tab1)

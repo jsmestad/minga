@@ -131,7 +131,7 @@ Frontends should apply this only to the current file-tree model. If no full `gui
 
 ### 0x71 — gui_tab_bar
 
-Tab bar state with all open tabs.
+Tab bar state with visible tab entries.
 
 ```
 opcode(1) + active_index(1) + tab_count(1) + entries...
@@ -149,6 +149,10 @@ Flags bits:
 group_id: workspace group this tab belongs to. 0 = manual/ungrouped workspace.
 Non-zero values match workspace IDs from gui_agent_groups (0x86). The frontend
 renders group separators at group_id transitions in the tab strip.
+
+active_index: zero-based index into the visible tab entries, or 255 when the
+current active tab is not present in the visible list (for example, an active
+agent chat tab with only its workspace's file tabs shown).
 ```
 
 ### 0x72 — gui_which_key

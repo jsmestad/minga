@@ -44,9 +44,22 @@ defmodule MingaEditor.Workspace.ChromeState.WorkspaceSummary do
   @doc "Builds a workspace summary."
   @spec new(keyword()) :: t()
   def new(attrs) when is_list(attrs) do
+    kind = Keyword.fetch!(attrs, :kind)
+
+    if kind not in [:manual, :agent] do
+      raise ArgumentError,
+            "WorkspaceSummary only supports manual or agent workspaces, got #{inspect(kind)}"
+    end
+
+    closeable? = Keyword.get(attrs, :closeable?, kind == :agent)
+
+    if kind == :manual and closeable? do
+      raise ArgumentError, "manual workspaces cannot be closeable"
+    end
+
     %__MODULE__{
       id: Keyword.fetch!(attrs, :id),
-      kind: Keyword.fetch!(attrs, :kind),
+      kind: kind,
       label: Keyword.fetch!(attrs, :label),
       icon: Keyword.fetch!(attrs, :icon),
       color: Keyword.get(attrs, :color, 0),
@@ -56,7 +69,7 @@ defmodule MingaEditor.Workspace.ChromeState.WorkspaceSummary do
       draft_count: Keyword.get(attrs, :draft_count, 0),
       conflict_count: Keyword.get(attrs, :conflict_count, 0),
       running_background_count: Keyword.get(attrs, :running_background_count, 0),
-      closeable?: Keyword.get(attrs, :closeable?, false)
+      closeable?: closeable?
     }
   end
 end

@@ -63,6 +63,33 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUITest do
       assert is_list(chrome.tab_bar)
     end
 
+    test "renders visible file tab as inactive when the active agent tab is hidden" do
+      state = base_state(cols: 140)
+
+      tb = TabBar.new(Tab.new_agent(1, "Agent"))
+      {tb, file_tab} = TabBar.add(tb, :file, "main.ex")
+      tb = TabBar.switch_to(tb, 1)
+      {tb, _} = TabBar.add_agent_group(tb, "Active")
+      {tb, _} = TabBar.add_agent_group(tb, "Research")
+      {tb, _} = TabBar.add_agent_group(tb, "Review")
+      tb = TabBar.move_tab_to_group(tb, 1, 1)
+      tb = TabBar.move_tab_to_group(tb, file_tab.id, 1)
+
+      state = with_tab_bar(state, tb)
+      {scrolls, cursor_info, state, layout} = run_through_content(state)
+
+      chrome = ChromeTUI.build(state, layout, scrolls, cursor_info)
+      colors = Map.from_struct(state.theme.tab_bar)
+
+      tab_draw =
+        Enum.find(chrome.tab_bar, fn {_, _, text, _} -> String.contains?(text, "main.ex") end)
+
+      assert tab_draw != nil
+      {_, _, _, face} = tab_draw
+      assert face.bg == colors.inactive_bg
+      refute face.bg == colors.active_bg
+    end
+
     test "includes minibuffer draw" do
       state = base_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)
