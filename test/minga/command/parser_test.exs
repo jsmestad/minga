@@ -4,483 +4,180 @@ defmodule Minga.Command.ParserTest do
 
   alias Minga.Command.Parser
 
-  describe "parse/1 — write commands" do
-    test ":w parses to {:save, []}" do
-      assert {:save, []} = Parser.parse("w")
-    end
-
-    test "leading/trailing whitespace is trimmed" do
-      assert {:save, []} = Parser.parse("  w  ")
-    end
-  end
-
-  describe "parse/1 — quit commands" do
-    test ":q parses to {:quit, []}" do
-      assert {:quit, []} = Parser.parse("q")
-    end
-
-    test ":q! parses to {:force_quit, []}" do
-      assert {:force_quit, []} = Parser.parse("q!")
-    end
-
-    test ":wq parses to {:save_quit, []}" do
-      assert {:save_quit, []} = Parser.parse("wq")
-    end
-
-    test ":wqa parses to {:save_quit_all, []}" do
-      assert {:save_quit_all, []} = Parser.parse("wqa")
-    end
-
-    test ":wqall parses to {:save_quit_all, []}" do
-      assert {:save_quit_all, []} = Parser.parse("wqall")
-    end
-
-    test ":qa parses to {:quit_all, []}" do
-      assert {:quit_all, []} = Parser.parse("qa")
-    end
-
-    test ":qa! parses to {:force_quit_all, []}" do
-      assert {:force_quit_all, []} = Parser.parse("qa!")
-    end
-
-    test ":qall parses to {:quit_all, []}" do
-      assert {:quit_all, []} = Parser.parse("qall")
-    end
-
-    test ":qall! parses to {:force_quit_all, []}" do
-      assert {:force_quit_all, []} = Parser.parse("qall!")
-    end
-
-    test ":cq parses to {:abort_quit, []}" do
-      assert {:abort_quit, []} = Parser.parse("cq")
-    end
-
-    test ":cquit parses to {:abort_quit, []}" do
-      assert {:abort_quit, []} = Parser.parse("cquit")
-    end
-
-    test ":cq! parses to {:abort_quit, []}" do
-      assert {:abort_quit, []} = Parser.parse("cq!")
-    end
-
-    test ":cquit! parses to {:abort_quit, []}" do
-      assert {:abort_quit, []} = Parser.parse("cquit!")
+  describe "parse/1 basics" do
+    test "write, quit, edit, buffer navigation, line jumps, and unknown commands" do
+      assert_parse_cases([
+        {"w", {:save, []}},
+        {"  w  ", {:save, []}},
+        {"q", {:quit, []}},
+        {"q!", {:force_quit, []}},
+        {"wq", {:save_quit, []}},
+        {"wqa", {:save_quit_all, []}},
+        {"wqall", {:save_quit_all, []}},
+        {"qa", {:quit_all, []}},
+        {"qa!", {:force_quit_all, []}},
+        {"qall", {:quit_all, []}},
+        {"qall!", {:force_quit_all, []}},
+        {"cq", {:abort_quit, []}},
+        {"cquit", {:abort_quit, []}},
+        {"cq!", {:abort_quit, []}},
+        {"cquit!", {:abort_quit, []}},
+        {"e README.md", {:edit, "README.md"}},
+        {"e my file.txt", {:edit, "my file.txt"}},
+        {"e", {:unknown, "e"}},
+        {"buffers", {:buffers, []}},
+        {"ls", {:buffers, []}},
+        {"bnext", {:buffer_next, []}},
+        {"bn", {:buffer_next, []}},
+        {"bprev", {:buffer_prev, []}},
+        {"bp", {:buffer_prev, []}},
+        {"42", {:goto_line, 42}},
+        {"1", {:goto_line, 1}},
+        {"999", {:goto_line, 999}},
+        {"0", {:unknown, "0"}},
+        {"-5", {:unknown, "-5"}},
+        {"xyz", {:unknown, "xyz"}},
+        {"", {:unknown, ""}},
+        {"wo", {:unknown, "wo"}},
+        {"agent-provider native", {:unknown, "agent-provider native"}}
+      ])
     end
   end
 
-  describe "parse/1 — edit command" do
-    test ":e filename parses to {:edit, filename}" do
-      assert {:edit, "README.md"} = Parser.parse("e README.md")
-    end
-
-    test ":e with path containing spaces (first word is filename)" do
-      assert {:edit, "my file.txt"} = Parser.parse("e my file.txt")
-    end
-
-    test ":e with no filename falls back to :unknown" do
-      assert {:unknown, "e"} = Parser.parse("e")
-    end
-  end
-
-  describe "parse/1 — range prefixes" do
-    test "% for whole buffer still works with %s" do
-      assert {:substitute, "old", "new", []} = Parser.parse("%s/old/new/")
-    end
-
-    test "single number is treated as goto_line, not a range" do
-      assert {:goto_line, 42} = Parser.parse("42")
-    end
-  end
-
-  describe "parse/1 — buffer navigation commands" do
-    test ":buffers parses to {:buffers, []}" do
-      assert {:buffers, []} = Parser.parse("buffers")
-    end
-
-    test ":ls parses to {:buffers, []}" do
-      assert {:buffers, []} = Parser.parse("ls")
-    end
-
-    test ":bnext parses to {:buffer_next, []}" do
-      assert {:buffer_next, []} = Parser.parse("bnext")
-    end
-
-    test ":bn parses to {:buffer_next, []}" do
-      assert {:buffer_next, []} = Parser.parse("bn")
-    end
-
-    test ":bprev parses to {:buffer_prev, []}" do
-      assert {:buffer_prev, []} = Parser.parse("bprev")
-    end
-
-    test ":bp parses to {:buffer_prev, []}" do
-      assert {:buffer_prev, []} = Parser.parse("bp")
+  describe "options and filetypes" do
+    test "set, setglobal, and set filetype aliases map to option commands" do
+      assert_parse_cases([
+        {"set number", {:set, :number}},
+        {"set nu", {:set, :number}},
+        {"set nonumber", {:set, :nonumber}},
+        {"set nonu", {:set, :nonumber}},
+        {"set relativenumber", {:set, :relativenumber}},
+        {"set rnu", {:set, :relativenumber}},
+        {"set norelativenumber", {:set, :norelativenumber}},
+        {"set nornu", {:set, :norelativenumber}},
+        {"setglobal number", {:setglobal, :number}},
+        {"setglobal nu", {:setglobal, :number}},
+        {"setglobal nonumber", {:setglobal, :nonumber}},
+        {"setglobal nonu", {:setglobal, :nonumber}},
+        {"setglobal relativenumber", {:setglobal, :relativenumber}},
+        {"setglobal rnu", {:setglobal, :relativenumber}},
+        {"setglobal norelativenumber", {:setglobal, :norelativenumber}},
+        {"setglobal nornu", {:setglobal, :norelativenumber}},
+        {"setglobal wrap", {:setglobal, :wrap}},
+        {"setglobal nowrap", {:setglobal, :nowrap}},
+        {"set ft=python", {:set_filetype, ["python"]}},
+        {"set filetype=elixir", {:set_filetype, ["elixir"]}},
+        {"setf ruby", {:set_filetype, ["ruby"]}},
+        {"setfiletype go", {:set_filetype, ["go"]}},
+        {"set ft=  python  ", {:set_filetype, ["python"]}}
+      ])
     end
   end
 
-  describe "parse/1 — goto line" do
-    test ":42 parses to {:goto_line, 42}" do
-      assert {:goto_line, 42} = Parser.parse("42")
-    end
-
-    test ":1 parses to {:goto_line, 1}" do
-      assert {:goto_line, 1} = Parser.parse("1")
-    end
-
-    test ":999 parses to {:goto_line, 999}" do
-      assert {:goto_line, 999} = Parser.parse("999")
-    end
-
-    test "zero is treated as unknown (lines are 1-indexed)" do
-      assert {:unknown, "0"} = Parser.parse("0")
-    end
-
-    test "negative number is treated as unknown" do
-      assert {:unknown, _} = Parser.parse("-5")
+  describe "substitute and ranges" do
+    test "substitute handles whole-buffer ranges, flags, missing trailing delimiters, escaped delimiters, empty replacements, and alternate delimiters" do
+      assert_parse_cases([
+        {"%s/old/new/", {:substitute, "old", "new", []}},
+        {"%s/old/new/g", {:substitute, "old", "new", [:global]}},
+        {"s/old/new/", {:substitute, "old", "new", []}},
+        {"%s/old/new/gc", {:substitute, "old", "new", [:global, :confirm]}},
+        {"%s/old/new", {:substitute, "old", "new", []}},
+        {"%s/a\\/b/c/", {:substitute, "a\\/b", "c", []}},
+        {"%s/old//g", {:substitute, "old", "", [:global]}},
+        {"%s#old#new#g", {:substitute, "old", "new", [:global]}}
+      ])
     end
   end
 
-  describe "parse/1 — set commands" do
-    test ":set number" do
-      assert {:set, :number} = Parser.parse("set number")
-      assert {:set, :number} = Parser.parse("set nu")
-    end
-
-    test ":set nonumber" do
-      assert {:set, :nonumber} = Parser.parse("set nonumber")
-      assert {:set, :nonumber} = Parser.parse("set nonu")
-    end
-
-    test ":set relativenumber" do
-      assert {:set, :relativenumber} = Parser.parse("set relativenumber")
-      assert {:set, :relativenumber} = Parser.parse("set rnu")
-    end
-
-    test ":set norelativenumber" do
-      assert {:set, :norelativenumber} = Parser.parse("set norelativenumber")
-      assert {:set, :norelativenumber} = Parser.parse("set nornu")
+  describe "help, agent, and parser commands" do
+    test "describe, agent, and parser restart commands parse their arguments and aliases" do
+      assert_parse_cases([
+        {"describe", {:describe_option, []}},
+        {"describe tab_width", {:describe_option_named, ["tab_width"]}},
+        {"describe-command", {:describe_command, []}},
+        {"describe-command save", {:describe_command_named, ["save"]}},
+        {"describe-command   save  ", {:describe_command_named, ["save"]}},
+        {"agent-clear-history", {:agent_clear_history, []}},
+        {"agent-stop", {:agent_abort, []}},
+        {"agent-new", {:agent_new_session, []}},
+        {"parser-restart", {:parser_restart, []}},
+        {"ParserRestart", {:parser_restart, []}}
+      ])
     end
   end
 
-  describe "parse/1 — setglobal commands" do
-    test ":setglobal number" do
-      assert {:setglobal, :number} = Parser.parse("setglobal number")
-      assert {:setglobal, :number} = Parser.parse("setglobal nu")
+  describe "sort, read, shell, and global commands" do
+    test "sort parses whole-buffer and explicit ranges with combinable flags" do
+      assert_parse_cases([
+        {"sort", {:sort, :whole_buffer, []}},
+        {"sort r", {:sort, :whole_buffer, [:reverse]}},
+        {"sort n", {:sort, :whole_buffer, [:numeric]}},
+        {"sort rn", {:sort, :whole_buffer, [:reverse, :numeric]}},
+        {"sort ru", {:sort, :whole_buffer, [:reverse, :unique]}},
+        {"%sort", {:sort, :whole_buffer, []}},
+        {"1,10sort", {:sort, {:absolute, 1, 10}, []}},
+        {"1,10sort r", {:sort, {:absolute, 1, 10}, [:reverse]}}
+      ])
     end
 
-    test ":setglobal nonumber" do
-      assert {:setglobal, :nonumber} = Parser.parse("setglobal nonumber")
-      assert {:setglobal, :nonumber} = Parser.parse("setglobal nonu")
-    end
-
-    test ":setglobal relativenumber" do
-      assert {:setglobal, :relativenumber} = Parser.parse("setglobal relativenumber")
-      assert {:setglobal, :relativenumber} = Parser.parse("setglobal rnu")
-    end
-
-    test ":setglobal norelativenumber" do
-      assert {:setglobal, :norelativenumber} = Parser.parse("setglobal norelativenumber")
-      assert {:setglobal, :norelativenumber} = Parser.parse("setglobal nornu")
-    end
-
-    test ":setglobal wrap" do
-      assert {:setglobal, :wrap} = Parser.parse("setglobal wrap")
-    end
-
-    test ":setglobal nowrap" do
-      assert {:setglobal, :nowrap} = Parser.parse("setglobal nowrap")
-    end
-  end
-
-  describe "parse/1 — substitute commands" do
-    test ":%s/old/new/g parses to {:substitute, ...}" do
-      assert {:substitute, "old", "new", [:global]} = Parser.parse("%s/old/new/g")
-    end
-
-    test ":s/old/new/ parses without flags" do
-      assert {:substitute, "old", "new", []} = Parser.parse("s/old/new/")
-    end
-
-    test ":%s/old/new/gc parses both flags" do
-      assert {:substitute, "old", "new", flags} = Parser.parse("%s/old/new/gc")
-      assert :global in flags
-      assert :confirm in flags
-    end
-
-    test ":%s/old/new parses without trailing delimiter" do
-      assert {:substitute, "old", "new", []} = Parser.parse("%s/old/new")
-    end
-
-    test "handles escaped delimiters in pattern" do
-      assert {:substitute, "a\\/b", "c", []} = Parser.parse("%s/a\\/b/c/")
-    end
-
-    test "handles empty replacement (delete)" do
-      assert {:substitute, "old", "", [:global]} = Parser.parse("%s/old//g")
-    end
-
-    test "handles alternate delimiter #" do
-      assert {:substitute, "old", "new", [:global]} = Parser.parse("%s#old#new#g")
+    test "read, shell, and global commands preserve arguments" do
+      assert_parse_cases([
+        {"read file.txt", {:read, "file.txt"}},
+        {"r file.txt", {:read, "file.txt"}},
+        {"read path/to/file.txt", {:read, "path/to/file.txt"}},
+        {"read", {:unknown, "read"}},
+        {"!ls", {:shell_command, "ls"}},
+        {"!make test", {:shell_command, "make test"}},
+        {"!", {:shell_command, ""}},
+        {"g/pattern/cmd", {:global, "pattern", "cmd"}},
+        {"g/foo/delete", {:global, "foo", "delete"}},
+        {"g/test/s/old/new/g", {:global, "test", "s/old/new/g"}},
+        {"gpattern", {:unknown, "gpattern"}}
+      ])
     end
   end
 
-  describe "parse/1 — describe commands" do
-    test ":describe opens the option picker" do
-      assert {:describe_option, []} = Parser.parse("describe")
-    end
-
-    test ":describe option parses the option name" do
-      assert {:describe_option_named, ["tab_width"]} = Parser.parse("describe tab_width")
-    end
-
-    test ":describe-command opens the command picker" do
-      assert {:describe_command, []} = Parser.parse("describe-command")
-    end
-
-    test ":describe-command with name parses the command name" do
-      assert {:describe_command_named, ["save"]} = Parser.parse("describe-command save")
-    end
-
-    test ":describe-command trims whitespace from name" do
-      assert {:describe_command_named, ["save"]} = Parser.parse("describe-command   save  ")
+  describe "normal command" do
+    test "normal and norm parse key strings with supported ranges and reject missing keys" do
+      assert_parse_cases([
+        {"normal dd", {:normal, :whole_buffer, "dd"}},
+        {"norm w", {:normal, :whole_buffer, "w"}},
+        {"normal j", {:normal, :whole_buffer, "j"}},
+        {"normal dw", {:normal, :whole_buffer, "dw"}},
+        {"normal ^d", {:normal, :whole_buffer, "^d"}},
+        {"normal gJ", {:normal, :whole_buffer, "gJ"}},
+        {"%normal dd", {:normal, :whole_buffer, "dd"}},
+        {"1,5normal w", {:normal, {:absolute, 1, 5}, "w"}},
+        {".normal dd", {:normal, :current_line, "dd"}},
+        {"$normal dd", {:normal, :last_line, "dd"}},
+        {"normal", {:unknown, "normal"}},
+        {"norm", {:unknown, "norm"}},
+        {"normal    ", {:unknown, "normal"}}
+      ])
     end
   end
 
-  describe "parse/1 — unknown commands" do
-    test "unrecognised command returns {:unknown, raw}" do
-      assert {:unknown, "xyz"} = Parser.parse("xyz")
-    end
-
-    test "empty string returns {:unknown, \"\"}" do
-      assert {:unknown, ""} = Parser.parse("")
-    end
-
-    test "partial command returns {:unknown, raw}" do
-      assert {:unknown, "wo"} = Parser.parse("wo")
-    end
-
-    test "agent-provider is no longer a dedicated command" do
-      assert {:unknown, "agent-provider native"} = Parser.parse("agent-provider native")
+  describe "dired / oil" do
+    test "dired and oil parse optional paths" do
+      assert_parse_cases([
+        {"dired", {:dired, nil}},
+        {"oil", {:dired, nil}},
+        {"dired /tmp/foo", {:dired, "/tmp/foo"}},
+        {"oil /tmp/foo", {:dired, "/tmp/foo"}},
+        {"dired   ", {:dired, nil}},
+        {"oil   ", {:dired, nil}}
+      ])
     end
   end
 
-  describe "set filetype commands" do
-    test ":set ft=python parses to set_filetype" do
-      assert {:set_filetype, ["python"]} = Parser.parse("set ft=python")
-    end
-
-    test ":set filetype=elixir parses to set_filetype" do
-      assert {:set_filetype, ["elixir"]} = Parser.parse("set filetype=elixir")
-    end
-
-    test ":setf ruby parses to set_filetype" do
-      assert {:set_filetype, ["ruby"]} = Parser.parse("setf ruby")
-    end
-
-    test ":setfiletype go parses to set_filetype" do
-      assert {:set_filetype, ["go"]} = Parser.parse("setfiletype go")
-    end
-
-    test "trims whitespace from filetype name" do
-      assert {:set_filetype, ["python"]} = Parser.parse("set ft=  python  ")
+  defp assert_parse_cases(cases) do
+    for {input, expected} <- cases do
+      assert normalize(Parser.parse(input)) == normalize(expected),
+             "expected #{inspect(input)} to parse as #{inspect(expected)}"
     end
   end
 
-  describe "parse/1 — agent commands" do
-    test ":agent-clear-history parses to {:agent_clear_history, []}" do
-      assert {:agent_clear_history, []} = Parser.parse("agent-clear-history")
-    end
-
-    test ":agent-stop parses to {:agent_abort, []}" do
-      assert {:agent_abort, []} = Parser.parse("agent-stop")
-    end
-
-    test ":agent-new parses to {:agent_new_session, []}" do
-      assert {:agent_new_session, []} = Parser.parse("agent-new")
-    end
-  end
-
-  describe "parse/1 — parser commands" do
-    test ":parser-restart parses to {:parser_restart, []}" do
-      assert {:parser_restart, []} = Parser.parse("parser-restart")
-    end
-
-    test ":ParserRestart parses to {:parser_restart, []}" do
-      assert {:parser_restart, []} = Parser.parse("ParserRestart")
-    end
-  end
-
-  describe "parse/1 — sort command" do
-    test ":sort parses to {:sort, :whole_buffer, []}" do
-      assert {:sort, :whole_buffer, []} = Parser.parse("sort")
-    end
-
-    test ":sort r parses with reverse flag" do
-      assert {:sort, :whole_buffer, [:reverse]} = Parser.parse("sort r")
-    end
-
-    test ":sort n parses with numeric flag" do
-      assert {:sort, :whole_buffer, [:numeric]} = Parser.parse("sort n")
-    end
-
-    test ":sort rn parses with reverse and numeric flags" do
-      result = Parser.parse("sort rn")
-      assert {:sort, :whole_buffer, flags} = result
-      assert :reverse in flags
-      assert :numeric in flags
-    end
-
-    test ":sort ru parses with reverse and unique flags" do
-      result = Parser.parse("sort ru")
-      assert {:sort, :whole_buffer, flags} = result
-      assert :reverse in flags
-      assert :unique in flags
-    end
-
-    test ":% sort parses with range" do
-      assert {:sort, :whole_buffer, []} = Parser.parse("%sort")
-    end
-
-    test ":1,10 sort parses with numeric range" do
-      assert {:sort, {:absolute, 1, 10}, []} = Parser.parse("1,10sort")
-    end
-
-    test ":1,10 sort r parses with numeric range and flags" do
-      assert {:sort, {:absolute, 1, 10}, [:reverse]} = Parser.parse("1,10sort r")
-    end
-  end
-
-  describe "parse/1 — read/r command" do
-    test ":read file.txt parses to {:read, filename}" do
-      assert {:read, "file.txt"} = Parser.parse("read file.txt")
-    end
-
-    test ":r file.txt parses to {:read, filename}" do
-      assert {:read, "file.txt"} = Parser.parse("r file.txt")
-    end
-
-    test ":read with path containing spaces" do
-      assert {:read, "path/to/file.txt"} = Parser.parse("read path/to/file.txt")
-    end
-
-    test ":read with no filename falls back to unknown" do
-      assert {:unknown, "read"} = Parser.parse("read")
-    end
-  end
-
-  describe "parse/1 — shell command" do
-    test ":!ls parses to {:shell_command, cmd}" do
-      assert {:shell_command, "ls"} = Parser.parse("!ls")
-    end
-
-    test ":!make test parses with full command" do
-      assert {:shell_command, "make test"} = Parser.parse("!make test")
-    end
-
-    test ":! with no command parses to empty string" do
-      assert {:shell_command, ""} = Parser.parse("!")
-    end
-  end
-
-  describe "parse/1 — global command" do
-    test ":g/pattern/cmd parses to {:global, pattern, cmd}" do
-      assert {:global, "pattern", "cmd"} = Parser.parse("g/pattern/cmd")
-    end
-
-    test ":g/foo/delete parses pattern and command" do
-      assert {:global, "foo", "delete"} = Parser.parse("g/foo/delete")
-    end
-
-    test ":g/test/s/old/new/g parses substitute as command" do
-      assert {:global, "test", "s/old/new/g"} = Parser.parse("g/test/s/old/new/g")
-    end
-
-    test ":g/pattern/cmd without trailing slash" do
-      assert {:global, "pattern", "cmd"} = Parser.parse("g/pattern/cmd")
-    end
-
-    test ":g without slash falls back to unknown" do
-      assert {:unknown, _} = Parser.parse("gpattern")
-    end
-  end
-
-  describe "parse/1 — normal command" do
-    test ":normal dd parses to {:normal, :whole_buffer, keys}" do
-      assert {:normal, :whole_buffer, "dd"} = Parser.parse("normal dd")
-    end
-
-    test ":norm w parses to {:normal, :whole_buffer, keys}" do
-      assert {:normal, :whole_buffer, "w"} = Parser.parse("norm w")
-    end
-
-    test ":normal j parses single key" do
-      assert {:normal, :whole_buffer, "j"} = Parser.parse("normal j")
-    end
-
-    test ":normal with multiple keys" do
-      assert {:normal, :whole_buffer, "dw"} = Parser.parse("normal dw")
-    end
-
-    test ":normal with ^" do
-      assert {:normal, :whole_buffer, "^d"} = Parser.parse("normal ^d")
-    end
-
-    test ":normal with gJ (g motion)" do
-      assert {:normal, :whole_buffer, "gJ"} = Parser.parse("normal gJ")
-    end
-
-    test ":% normal dd parses with whole_buffer range" do
-      assert {:normal, :whole_buffer, "dd"} = Parser.parse("%normal dd")
-    end
-
-    test ":1,5 normal w parses with numeric range" do
-      assert {:normal, {:absolute, 1, 5}, "w"} = Parser.parse("1,5normal w")
-    end
-
-    test ":. normal dd parses with current_line range" do
-      assert {:normal, :current_line, "dd"} = Parser.parse(".normal dd")
-    end
-
-    test ":$ normal dd parses with last_line range" do
-      assert {:normal, :last_line, "dd"} = Parser.parse("$normal dd")
-    end
-
-    test ":normal with no keys falls back to unknown" do
-      assert {:unknown, "normal"} = Parser.parse("normal")
-    end
-
-    test ":norm with no keys falls back to unknown" do
-      assert {:unknown, "norm"} = Parser.parse("norm")
-    end
-
-    test ":normal with only spaces falls back to unknown" do
-      assert {:unknown, "normal"} = Parser.parse("normal    ")
-    end
-  end
-
-  describe "parse/1 — dired / oil commands" do
-    test ":dired parses to {:dired, nil}" do
-      assert {:dired, nil} = Parser.parse("dired")
-    end
-
-    test ":oil parses to {:dired, nil}" do
-      assert {:dired, nil} = Parser.parse("oil")
-    end
-
-    test ":dired with path" do
-      assert {:dired, "/tmp/foo"} = Parser.parse("dired /tmp/foo")
-    end
-
-    test ":oil with path" do
-      assert {:dired, "/tmp/foo"} = Parser.parse("oil /tmp/foo")
-    end
-
-    test ":dired with whitespace-only arg" do
-      assert {:dired, nil} = Parser.parse("dired   ")
-    end
-
-    test ":oil with whitespace-only arg" do
-      assert {:dired, nil} = Parser.parse("oil   ")
-    end
-  end
+  defp normalize({:substitute, old, new, flags}), do: {:substitute, old, new, Enum.sort(flags)}
+  defp normalize({:sort, range, flags}), do: {:sort, range, Enum.sort(flags)}
+  defp normalize(other), do: other
 end
