@@ -31,6 +31,20 @@ defmodule MingaEditor.Commands.BufferManagementShutdownTest do
       assert_receive {:shutdown_called, 0}
     end
 
+    test "last-tab :q prompts, then confirmation exits" do
+      {editor, _buffer, _options} = start_editor("hello")
+
+      type_string(editor, ":q\r")
+      state = :sys.get_state(editor)
+      assert state.pending_quit == :quit
+      assert state.shell_state.status_msg == "Quit Minga? (y/n)"
+      refute Enum.any?(state.shell_state.tab_bar.tabs, &String.starts_with?(&1.label, "[new"))
+
+      send_key(editor, ?y)
+
+      assert_receive {:shutdown_called, 0}
+    end
+
     test "force quit all bypasses dirty-buffer confirmation" do
       {editor, buffer, _options} = start_editor("hello")
       BufferProcess.insert_char(buffer, "X")
