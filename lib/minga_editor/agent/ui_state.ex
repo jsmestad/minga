@@ -149,6 +149,12 @@ defmodule MingaEditor.Agent.UIState do
     %{state | panel: %{panel | visible: !panel.visible}}
   end
 
+  @doc "Clears the active file mention completion."
+  @spec clear_mention_completion(t()) :: t()
+  def clear_mention_completion(%__MODULE__{panel: panel} = state) do
+    %{state | panel: Panel.clear_mention_completion(panel)}
+  end
+
   @doc "Advances the spinner animation frame."
   @spec tick_spinner(t()) :: t()
   def tick_spinner(%__MODULE__{panel: panel} = state) do
@@ -488,10 +494,55 @@ defmodule MingaEditor.Agent.UIState do
   # View functions (delegate to View sub-struct)
   # ══════════════════════════════════════════════════════════════════════════
 
+  @doc "Builds a return target from the current editor context."
+  @spec return_target(
+          pos_integer() | nil,
+          pid() | nil,
+          Windows.t(),
+          FileTreeState.t(),
+          Minga.Keymap.Scope.scope_name(),
+          boolean()
+        ) :: View.return_target()
+  def return_target(
+        active_tab_id,
+        active_buffer,
+        windows,
+        file_tree,
+        keymap_scope,
+        prompt_focused
+      ) do
+    View.return_target(
+      active_tab_id,
+      active_buffer,
+      windows,
+      file_tree,
+      keymap_scope,
+      prompt_focused
+    )
+  end
+
   @doc "Activates the view, saving the current window layout."
   @spec activate(t(), Windows.t(), FileTreeState.t()) :: t()
   def activate(%__MODULE__{view: view} = state, windows, file_tree) do
     %{state | view: View.activate(view, windows, file_tree)}
+  end
+
+  @doc "Activates the view with a recorded editor return target."
+  @spec activate(t(), Windows.t(), FileTreeState.t(), View.return_target() | nil) :: t()
+  def activate(%__MODULE__{view: view} = state, windows, file_tree, return_target) do
+    %{state | view: View.activate(view, windows, file_tree, return_target)}
+  end
+
+  @doc "Sets the editor return target."
+  @spec set_return_target(t(), View.return_target() | nil) :: t()
+  def set_return_target(%__MODULE__{view: view} = state, return_target) do
+    %{state | view: View.set_return_target(view, return_target)}
+  end
+
+  @doc "Clears the editor return target."
+  @spec clear_return_target(t()) :: t()
+  def clear_return_target(%__MODULE__{view: view} = state) do
+    %{state | view: View.clear_return_target(view)}
   end
 
   @doc "Deactivates the view and returns the restored window layout."

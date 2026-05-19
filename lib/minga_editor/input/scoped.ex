@@ -164,10 +164,20 @@ defmodule MingaEditor.Input.Scoped do
       # Enter, Backspace, Ctrl combos, etc.
       resolve_agent_key(state, :insert, cp, mods)
     else
-      # Normal, visual, operator-pending: route through Mode FSM
-      # targeting the prompt buffer.
-      {:handled, AgentPanel.dispatch_prompt_via_mode_fsm(state, cp, mods)}
+      handle_focused_input_normal(state, cp, mods)
     end
+  end
+
+  @spec handle_focused_input_normal(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
+          MingaEditor.Input.Handler.result()
+  defp handle_focused_input_normal(state, 27, 0) do
+    {:handled, AgentCommands.scope_unfocus_input(state)}
+  end
+
+  defp handle_focused_input_normal(state, cp, mods) do
+    # Normal, visual, operator-pending: route through Mode FSM
+    # targeting the prompt buffer.
+    {:handled, AgentPanel.dispatch_prompt_via_mode_fsm(state, cp, mods)}
   end
 
   @spec cua_active?(map()) :: boolean()

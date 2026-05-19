@@ -71,6 +71,24 @@ defmodule MingaEditor.Input.ScopedTest do
     }
   end
 
+  defp with_return_target(state, tab_id, keymap_scope \\ :editor) do
+    return_target =
+      UIState.return_target(
+        tab_id,
+        state.workspace.buffers.active,
+        state.workspace.windows,
+        state.workspace.file_tree,
+        keymap_scope,
+        AgentAccess.input_focused?(state)
+      )
+
+    AgentAccess.update_agent_ui(state, &UIState.set_return_target(&1, return_target))
+  end
+
+  defp with_active_agent_session(state, session) do
+    EditorState.set_tab_session(state, state.shell_state.tab_bar.active_id, session)
+  end
+
   # ══════════════════════════════════════════════════════════════════════════
   # Editor scope (no panel)
   # ══════════════════════════════════════════════════════════════════════════
@@ -192,25 +210,67 @@ defmodule MingaEditor.Input.ScopedTest do
       end
     end
 
-    test "q switches from agent tab back to file tab and keeps agent tab", %{state: state} do
-      # The base_state with agentic_active: true already sets up:
-      # - file tab (id 1) and agent tab (id 2)
-      # - agent tab is active, keymap_scope is :agent
+    test "q returns to the recorded file tab and keeps the agent session", %{state: state} do
+      session = self()
+
+      state =
+        state
+        |> with_return_target(1)
+        |> with_active_agent_session(session)
+
       assert state.workspace.keymap_scope == :agent
 
       {:handled, new_state} = Scoped.handle_key(state, ?q, 0)
       assert new_state.workspace.keymap_scope == :editor
+      assert new_state.shell_state.tab_bar.active_id == 1
       assert TabBar.filter_by_kind(new_state.shell_state.tab_bar, :agent) != []
+
+      assert Enum.any?(
+               new_state.shell_state.tab_bar.tabs,
+               &(&1.kind == :agent and &1.session == session)
+             )
     end
 
-    test "ESC switches from agent tab back to file tab when nothing transient is open", %{
-      state: state
-    } do
+    test "ESC returns to the recorded file tab when nothing transient is open", %{state: state} do
+      state = with_return_target(state, 1)
       assert state.workspace.keymap_scope == :agent
 
       {:handled, new_state} = Scoped.handle_key(state, 27, 0)
       assert new_state.workspace.keymap_scope == :editor
+      assert new_state.shell_state.tab_bar.active_id == 1
       assert TabBar.filter_by_kind(new_state.shell_state.tab_bar, :agent) != []
+    end
+
+    test "return falls back to the most recent remaining file tab when the target closed", %{
+      state: state
+    } do
+      state = with_return_target(state, 1)
+      {tb, fallback_tab} = TabBar.insert(state.shell_state.tab_bar, :file, "fallback.ex")
+      {:ok, tb} = TabBar.remove(tb, 1)
+      state = put_in(state.shell_state.tab_bar, tb)
+
+      {:handled, new_state} = Scoped.handle_key(state, ?q, 0)
+      assert new_state.workspace.keymap_scope == :editor
+      assert new_state.shell_state.tab_bar.active_id == fallback_tab.id
+    end
+
+    test "return restores the recorded workspace keymap scope", %{state: state} do
+      state = with_return_target(state, 1, :file_tree)
+
+      {:handled, new_state} = Scoped.handle_key(state, ?q, 0)
+      assert new_state.workspace.keymap_scope == :file_tree
+      assert new_state.shell_state.tab_bar.active_id == 1
+    end
+
+    test "return without file tabs does not create an untitled fallback", %{state: state} do
+      state = with_return_target(state, 1)
+      {:ok, tb} = TabBar.remove(state.shell_state.tab_bar, 1)
+      state = put_in(state.shell_state.tab_bar, tb)
+
+      {:handled, new_state} = Scoped.handle_key(state, ?q, 0)
+      assert new_state.workspace.keymap_scope == :editor
+      assert TabBar.filter_by_kind(new_state.shell_state.tab_bar, :file) == []
+      assert new_state.shell_state.status_msg == "No file tabs in this workspace"
     end
 
     test "? toggles help", %{state: state} do
@@ -260,12 +320,32 @@ defmodule MingaEditor.Input.ScopedTest do
                AgentAccess.view(state).chat_width_pct
     end
 
-    test "ESC dismisses help when visible", %{state: state} do
+    test "ESC dismisses help before returning to the editor", %{state: state} do
       state =
-        AgentAccess.update_view(state, fn v -> %{v | help_visible: true} end)
+        state
+        |> with_return_target(1)
+        |> AgentAccess.update_view(fn v -> %{v | help_visible: true} end)
 
       {:handled, new_state} = Scoped.handle_key(state, 27, 0)
       refute AgentAccess.view(new_state).help_visible
+      assert new_state.workspace.keymap_scope == :agent
+      assert new_state.shell_state.tab_bar.active_id == state.shell_state.tab_bar.active_id
+    end
+
+    test "ESC leaves prompt focus without clearing prompt text before returning", %{state: state} do
+      state =
+        state
+        |> with_return_target(1)
+        |> AgentAccess.update_agent_ui(fn ui ->
+          ui
+          |> UIState.set_input_focused(true)
+          |> UIState.set_prompt_text("keep this")
+        end)
+
+      {:handled, new_state} = Scoped.handle_key(state, 27, 0)
+      refute AgentAccess.input_focused?(new_state)
+      assert UIState.prompt_text(AgentAccess.agent_ui(new_state)) == "keep this"
+      assert new_state.workspace.keymap_scope == :agent
     end
   end
 

@@ -250,7 +250,7 @@ defmodule Minga.Keymap.Scope.Agent do
        ]},
       {"View",
        [
-         {"q", "Return to editor"},
+         {"q / Esc", "Return to editor"},
          {"?", "This help overlay"}
        ]}
     ]
@@ -277,7 +277,7 @@ defmodule Minga.Keymap.Scope.Agent do
        ]},
       {"View",
        [
-         {"q", "Return to editor"},
+         {"q / Esc", "Return to editor"},
          {"?", "This help overlay"}
        ]}
     ]

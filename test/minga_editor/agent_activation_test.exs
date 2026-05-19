@@ -6,8 +6,10 @@ defmodule MingaEditor.AgentActivationTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
 
@@ -89,13 +91,42 @@ defmodule MingaEditor.AgentActivationTest do
       assert result.workspace.keymap_scope == :editor
     end
 
-    test "unfocuses the prompt" do
+    test "unfocuses the prompt when no return target was recorded" do
       {state, _pid} = activated_state()
       assert AgentAccess.input_focused?(state) == true
 
       result = AgentActivation.deactivate(state)
 
       assert AgentAccess.input_focused?(result) == false
+    end
+
+    test "restores the recorded workspace return target" do
+      {state, _pid} = activated_state()
+      windows = %Windows{tree: nil, map: %{}, active: 7, next_id: 8}
+      file_tree = %FileTreeState{focused: true}
+
+      return_target =
+        UIState.return_target(
+          nil,
+          state.workspace.buffers.active,
+          windows,
+          file_tree,
+          :file_tree,
+          true
+        )
+
+      state =
+        AgentAccess.update_agent_ui(
+          state,
+          &UIState.activate(&1, windows, file_tree, return_target)
+        )
+
+      result = AgentActivation.deactivate(state)
+
+      assert result.workspace.windows == windows
+      assert result.workspace.file_tree == file_tree
+      assert result.workspace.keymap_scope == :file_tree
+      assert AgentAccess.input_focused?(result) == true
     end
 
     test "is idempotent on already-deactivated state" do
