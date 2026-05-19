@@ -193,62 +193,41 @@ defmodule Minga.Config.LoaderTest do
     end
   end
 
-  describe "loading config with syntax error" do
-    test "captures syntax error and stores it" do
-      {_dir, cleanup} =
-        make_config_dir("""
-        this is not valid elixir %%%
-        """)
+  describe "loading invalid config" do
+    test "captures syntax, option validation, and migration errors" do
+      cases = [
+        {"syntax",
+         """
+         this is not valid elixir %%%
+         """, {:any, ["syntax", "error", "Error"]}},
+        {"runtime",
+         """
+         use Minga.Config
 
-      on_exit(cleanup)
+         set :tab_width, -1
+         """, {:any, ["positive integer", "error", "Error"]}},
+        {"legacy_provider",
+         """
+         use Minga.Config
 
-      name = :"loader_syntax_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
+         set :agent_provider, :pi_rpc
+         """, {:all, ["agent_provider no longer supports :pi_rpc", "Use :native instead"]}}
+      ]
 
-      error = Loader.load_error(pid)
-      assert is_binary(error)
-      assert error =~ "syntax" or error =~ "error" or error =~ "Error"
-    end
-  end
+      for {label, config, expected_fragments} <- cases do
+        {_dir, cleanup} = make_config_dir(config)
 
-  describe "loading config with runtime error" do
-    test "captures runtime error from invalid option value" do
-      {_dir, cleanup} =
-        make_config_dir("""
-        use Minga.Config
+        try do
+          name = :"loader_#{label}_#{System.unique_integer([:positive])}"
+          {:ok, pid} = Loader.start_link(name: name)
 
-        set :tab_width, -1
-        """)
-
-      on_exit(cleanup)
-
-      name = :"loader_runtime_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
-
-      error = Loader.load_error(pid)
-      assert is_binary(error)
-      assert error =~ "positive integer" or error =~ "error" or error =~ "Error"
-    end
-  end
-
-  describe "loading config with a removed agent provider" do
-    test "fails with a native-provider migration hint" do
-      {_dir, cleanup} =
-        make_config_dir("""
-        use Minga.Config
-
-        set :agent_provider, :pi_rpc
-        """)
-
-      on_exit(cleanup)
-
-      name = :"loader_legacy_provider_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Loader.start_link(name: name)
-
-      error = Loader.load_error(pid)
-      assert is_binary(error)
-      assert error =~ "agent_provider no longer supports :pi_rpc"
-      assert error =~ "Use :native instead"
+          error = Loader.load_error(pid)
+          assert is_binary(error)
+          assert_error_fragments(error, expected_fragments)
+        after
+          cleanup.()
+        end
+      end
     end
   end
 
@@ -1130,6 +1109,14 @@ defmodule Minga.Config.LoaderTest do
   end
 
   # ── Helpers ─────────────────────────────────────────────────────────────────
+
+  defp assert_error_fragments(error, {:any, fragments}) do
+    assert Enum.any?(fragments, &String.contains?(error, &1))
+  end
+
+  defp assert_error_fragments(error, {:all, fragments}) do
+    for fragment <- fragments, do: assert(error =~ fragment)
+  end
 
   # Creates a temporary directory structure that mimics XDG_CONFIG_HOME with
   # a minga/config.exs file. Returns `{minga_dir, cleanup_fn}`.
