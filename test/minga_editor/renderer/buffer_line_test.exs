@@ -30,6 +30,33 @@ defmodule MingaEditor.Renderer.BufferLineTest do
     |> Enum.filter(&is_map/1)
   end
 
+  defp rendered_text(cmds) do
+    cmds
+    |> decode_all()
+    |> Enum.map_join("", fn cmd -> cmd.text end)
+  end
+
+  defp rendered_text_for_row(cmds, row) do
+    cmds
+    |> decode_all()
+    |> Enum.filter(fn cmd -> cmd.row == row end)
+    |> Enum.map_join("", fn cmd -> cmd.text end)
+  end
+
+  defp rendered_rows(cmds) do
+    cmds
+    |> decode_all()
+    |> Enum.map(& &1.row)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  defp full_width_fill(cmds, width) do
+    cmds
+    |> decode_all()
+    |> Enum.find(fn cmd -> String.length(cmd.text) == width end)
+  end
+
   # Builds a minimal valid line_params map for testing.
   defp make_params(overrides \\ %{}) do
     ctx = %Context{
@@ -71,74 +98,47 @@ defmodule MingaEditor.Renderer.BufferLineTest do
   # ── No-wrap rendering ───────────────────────────────────────────────────
 
   describe "render/1 without wrap" do
-    test "returns exactly 1 row consumed" do
-      {_g, _c, rows} = BufferLine.render(make_params())
-      assert rows == 1
-    end
-
-    test "produces content commands with text on the correct screen row" do
-      {_g, content, 1} = BufferLine.render(make_params(%{screen_row: 5}))
-      decoded = decode_all(content)
-      assert decoded != []
-      Enum.each(decoded, fn cmd -> assert cmd.row == 5 end)
-    end
-
-    test "content commands start at the gutter width column" do
+    test "renders unwrapped line content at the expected row and column" do
       ctx = make_ctx(%{gutter_w: 6, content_w: 74})
 
-      {_g, content, 1} =
-        BufferLine.render(make_params(%{gutter_w: 6, ctx: ctx}))
+      {_g, content, rows} =
+        BufferLine.render(
+          make_params(%{line_text: "fn hello do", screen_row: 5, gutter_w: 6, ctx: ctx})
+        )
 
       decoded = decode_all(content)
-      # At least one content command should start at gutter_w
+
+      assert rows == 1
+      assert rendered_text(content) == "fn hello do"
+      assert decoded != []
+      assert Enum.all?(decoded, fn cmd -> cmd.row == 5 end)
       assert Enum.any?(decoded, fn cmd -> cmd.col == 6 end)
     end
 
-    test "produces gutter commands (line number)" do
+    test "renders gutter line number and reserved sign column" do
       {gutters, _c, 1} = BufferLine.render(make_params(%{ln_style: :absolute}))
       decoded = decode_all(gutters)
-      assert decoded != []
-      # Line number for buf_line 0 in :absolute mode is "1"
-      number_cmd = Enum.find(decoded, fn cmd -> String.contains?(cmd.text, "1") end)
-      assert number_cmd != nil
-    end
 
-    test "always includes sign column" do
-      {gutters, _c, 1} = BufferLine.render(make_params(%{}))
-      decoded = decode_all(gutters)
-      # Sign column is always reserved: sign command + line number command
       assert length(decoded) == 2
+      assert Enum.any?(decoded, fn cmd -> String.contains?(cmd.text, "1") end)
     end
 
-    test "diagnostic sign appears when buffer line has a diagnostic" do
-      ctx = make_ctx(%{has_sign_column: true, diagnostic_signs: %{0 => :error}})
+    test "renders diagnostic and git signs with their configured colors" do
+      cases = [
+        {%{diagnostic_signs: %{0 => :error}}, "E ", fn ctx -> ctx.gutter_colors.error_fg end},
+        {%{git_signs: %{0 => :added}}, "▎ ", fn ctx -> ctx.git_colors.added_fg end}
+      ]
 
-      {gutters, _c, 1} =
-        BufferLine.render(make_params(%{ctx: ctx, sign_w: 2, gutter_w: 6, buf_line: 0}))
+      for {ctx_overrides, text, color} <- cases do
+        ctx = make_ctx(Map.put(ctx_overrides, :has_sign_column, true))
 
-      decoded = decode_all(gutters)
-      sign_cmd = Enum.find(decoded, fn cmd -> cmd.text == "E " end)
-      assert sign_cmd != nil
-      assert sign_cmd.fg == ctx.gutter_colors.error_fg
-    end
+        {gutters, _c, 1} =
+          BufferLine.render(make_params(%{ctx: ctx, sign_w: 2, gutter_w: 6, buf_line: 0}))
 
-    test "git sign appears when buffer line has a git change" do
-      ctx = make_ctx(%{has_sign_column: true, git_signs: %{0 => :added}})
-
-      {gutters, _c, 1} =
-        BufferLine.render(make_params(%{ctx: ctx, sign_w: 2, gutter_w: 6, buf_line: 0}))
-
-      decoded = decode_all(gutters)
-      sign_cmd = Enum.find(decoded, fn cmd -> cmd.text == "▎ " end)
-      assert sign_cmd != nil
-      assert sign_cmd.fg == ctx.git_colors.added_fg
-    end
-
-    test "content text matches the line_text" do
-      {_g, content, 1} = BufferLine.render(make_params(%{line_text: "fn hello do"}))
-      decoded = decode_all(content)
-      all_text = Enum.map_join(decoded, "", fn cmd -> cmd.text end)
-      assert all_text == "fn hello do"
+        sign_cmd = Enum.find(decode_all(gutters), fn cmd -> cmd.text == text end)
+        assert sign_cmd != nil
+        assert sign_cmd.fg == color.(ctx)
+      end
     end
 
     test "renders indent guides over leading whitespace" do
@@ -172,25 +172,27 @@ defmodule MingaEditor.Renderer.BufferLineTest do
   # ── Wrapped rendering ──────────────────────────────────────────────────
 
   describe "render/1 with wrap" do
-    test "returns the correct number of rows consumed" do
-      wrap_entry = [
-        %{text: "hello ", byte_offset: 0},
-        %{text: "world", byte_offset: 6}
+    test "reports rows consumed for wrap entries" do
+      cases = [
+        {"hello world", [%{text: "hello ", byte_offset: 0}, %{text: "world", byte_offset: 6}], 2},
+        {"short", [%{text: "short", byte_offset: 0}], 1},
+        {"aaa bbb ccc",
+         [
+           %{text: "aaa ", byte_offset: 0},
+           %{text: "bbb ", byte_offset: 4},
+           %{text: "ccc", byte_offset: 8}
+         ], 3}
       ]
 
-      {_g, _c, rows} =
-        BufferLine.render(make_params(%{line_text: "hello world", wrap_entry: wrap_entry}))
+      for {line_text, wrap_entry, expected_rows} <- cases do
+        {_g, _c, rows} =
+          BufferLine.render(make_params(%{line_text: line_text, wrap_entry: wrap_entry}))
 
-      assert rows == 2
+        assert rows == expected_rows
+      end
     end
 
-    test "single-element wrap entry produces 1 row" do
-      wrap_entry = [%{text: "short", byte_offset: 0}]
-      {_g, _c, rows} = BufferLine.render(make_params(%{wrap_entry: wrap_entry}))
-      assert rows == 1
-    end
-
-    test "content commands are placed on consecutive screen rows" do
+    test "content commands are placed on consecutive screen rows with matching text" do
       wrap_entry = [
         %{text: "hello ", byte_offset: 0},
         %{text: "world", byte_offset: 6}
@@ -205,12 +207,14 @@ defmodule MingaEditor.Renderer.BufferLineTest do
           })
         )
 
-      decoded = decode_all(content)
-      rows = decoded |> Enum.map(& &1.row) |> Enum.uniq() |> Enum.sort()
-      assert rows == [3, 4]
+      assert rendered_rows(content) == [3, 4]
+      assert rendered_text_for_row(content, 3) == "hello "
+      assert rendered_text_for_row(content, 4) == "world"
     end
 
-    test "gutter line number only on first visual row" do
+    test "gutter line number and sign only appear on the first visual row" do
+      ctx = make_ctx(%{has_sign_column: true, diagnostic_signs: %{5 => :warning}})
+
       wrap_entry = [
         %{text: "hello ", byte_offset: 0},
         %{text: "world", byte_offset: 6}
@@ -222,36 +226,7 @@ defmodule MingaEditor.Renderer.BufferLineTest do
             line_text: "hello world",
             wrap_entry: wrap_entry,
             buf_line: 5,
-            ln_style: :absolute
-          })
-        )
-
-      decoded = decode_all(gutters)
-      # First row should have line number "6" (buf_line 5, 1-indexed)
-      first_row_cmds = Enum.filter(decoded, fn cmd -> cmd.row == 0 end)
-      assert Enum.any?(first_row_cmds, fn cmd -> String.contains?(cmd.text, "6") end)
-
-      # Second row should have blank gutter (no digits)
-      second_row_cmds = Enum.filter(decoded, fn cmd -> cmd.row == 1 end)
-
-      Enum.each(second_row_cmds, fn cmd ->
-        assert String.trim(cmd.text) == ""
-      end)
-    end
-
-    test "sign column only on first visual row" do
-      ctx = make_ctx(%{has_sign_column: true, diagnostic_signs: %{0 => :warning}})
-
-      wrap_entry = [
-        %{text: "hello ", byte_offset: 0},
-        %{text: "world", byte_offset: 6}
-      ]
-
-      {gutters, _c, 2} =
-        BufferLine.render(
-          make_params(%{
-            line_text: "hello world",
-            wrap_entry: wrap_entry,
+            ln_style: :absolute,
             ctx: ctx,
             sign_w: 2,
             gutter_w: 6
@@ -259,49 +234,17 @@ defmodule MingaEditor.Renderer.BufferLineTest do
         )
 
       decoded = decode_all(gutters)
-      # Sign column command on row 0
-      row0_signs = Enum.filter(decoded, fn cmd -> cmd.row == 0 and cmd.col == 0 end)
-      assert length(row0_signs) == 1
-      assert String.contains?(hd(row0_signs).text, "W")
+      row0 = Enum.filter(decoded, fn cmd -> cmd.row == 0 end)
+      row1 = Enum.filter(decoded, fn cmd -> cmd.row == 1 end)
 
-      # No sign column command on row 1 (just blank gutter)
-      row1_at_col0 = Enum.filter(decoded, fn cmd -> cmd.row == 1 and cmd.col == 0 end)
-      # Continuation row should not have diagnostic sign
-      Enum.each(row1_at_col0, fn cmd ->
+      assert Enum.any?(row0, fn cmd -> String.contains?(cmd.text, "6") end)
+      assert Enum.any?(row0, fn cmd -> cmd.col == 0 and String.contains?(cmd.text, "W") end)
+
+      Enum.each(row1, fn cmd ->
+        assert String.trim(cmd.text) == ""
         refute String.contains?(cmd.text, "W")
         refute String.contains?(cmd.text, "E")
       end)
-    end
-
-    test "each visual row renders the correct text slice" do
-      wrap_entry = [
-        %{text: "hello ", source_text: "hello ", byte_offset: 0, indent_width: 0},
-        %{text: "world", source_text: "world", byte_offset: 6, indent_width: 0}
-      ]
-
-      {_g, content, 2} =
-        BufferLine.render(
-          make_params(%{
-            line_text: "hello world",
-            wrap_entry: wrap_entry,
-            gutter_w: 4
-          })
-        )
-
-      decoded = decode_all(content)
-
-      row0_text =
-        decoded
-        |> Enum.filter(fn cmd -> cmd.row == 0 end)
-        |> Enum.map_join("", fn cmd -> cmd.text end)
-
-      row1_text =
-        decoded
-        |> Enum.filter(fn cmd -> cmd.row == 1 end)
-        |> Enum.map_join("", fn cmd -> cmd.text end)
-
-      assert row0_text == "hello "
-      assert row1_text == "world"
     end
 
     test "breakindent rows render source text with an artificial indent prefix" do
@@ -328,53 +271,26 @@ defmodule MingaEditor.Renderer.BufferLineTest do
 
       assert row1_text == "    beta"
     end
-
-    test "three visual rows are handled correctly" do
-      wrap_entry = [
-        %{text: "aaa ", byte_offset: 0},
-        %{text: "bbb ", byte_offset: 4},
-        %{text: "ccc", byte_offset: 8}
-      ]
-
-      {_g, _c, rows} =
-        BufferLine.render(make_params(%{line_text: "aaa bbb ccc", wrap_entry: wrap_entry}))
-
-      assert rows == 3
-    end
   end
 
   # ── Row/col offset (split windows) ─────────────────────────────────────
 
   describe "render/1 with row/col offset" do
-    test "offsets gutter commands by row_offset and col_offset" do
-      {gutters, _c, 1} =
-        BufferLine.render(make_params(%{row_offset: 10, col_offset: 20, screen_row: 0}))
+    test "offsets gutter and content commands by row_offset and col_offset" do
+      cases = [
+        {:gutters, %{row_offset: 10, col_offset: 20, screen_row: 0}, 10, 20},
+        {:content, %{row_offset: 5, col_offset: 30, screen_row: 0, gutter_w: 4}, 5, 34}
+      ]
 
-      decoded = decode_all(gutters)
+      for {command_group, params, min_row, min_col} <- cases do
+        {gutters, content, 1} = BufferLine.render(make_params(params))
+        commands = if command_group == :gutters, do: gutters, else: content
 
-      Enum.each(decoded, fn cmd ->
-        assert cmd.row >= 10
-        assert cmd.col >= 20
-      end)
-    end
-
-    test "offsets content commands by row_offset and col_offset" do
-      {_g, content, 1} =
-        BufferLine.render(
-          make_params(%{
-            row_offset: 5,
-            col_offset: 30,
-            screen_row: 0,
-            gutter_w: 4
-          })
-        )
-
-      decoded = decode_all(content)
-
-      Enum.each(decoded, fn cmd ->
-        assert cmd.row >= 5
-        assert cmd.col >= 34
-      end)
+        Enum.each(decode_all(commands), fn cmd ->
+          assert cmd.row >= min_row
+          assert cmd.col >= min_col
+        end)
+      end
     end
 
     test "zero offset leaves commands unchanged" do
@@ -410,36 +326,22 @@ defmodule MingaEditor.Renderer.BufferLineTest do
   # ── Line number styles ─────────────────────────────────────────────────
 
   describe "line number styles" do
-    test "absolute style shows 1-indexed line number" do
-      {gutters, _c, 1} =
-        BufferLine.render(make_params(%{buf_line: 9, ln_style: :absolute}))
+    test "line number styles render the expected value" do
+      cases = [
+        {%{buf_line: 9, ln_style: :absolute}, "10"},
+        {%{buf_line: 0, ln_style: :absolute}, "1"},
+        {%{buf_line: 5, cursor_line: 3, ln_style: :relative}, "2"},
+        {%{buf_line: 3, cursor_line: 3, ln_style: :hybrid}, "4"},
+        {%{buf_line: 7, cursor_line: 3, ln_style: :hybrid}, "4"}
+      ]
 
-      decoded = decode_all(gutters)
-      assert Enum.any?(decoded, fn cmd -> String.contains?(cmd.text, "10") end)
-    end
+      for {params, expected_text} <- cases do
+        {gutters, _c, 1} = BufferLine.render(make_params(params))
 
-    test "relative style shows distance from cursor" do
-      {gutters, _c, 1} =
-        BufferLine.render(make_params(%{buf_line: 5, cursor_line: 3, ln_style: :relative}))
-
-      decoded = decode_all(gutters)
-      assert Enum.any?(decoded, fn cmd -> String.contains?(cmd.text, "2") end)
-    end
-
-    test "hybrid shows absolute on cursor line, relative elsewhere" do
-      # On cursor line
-      {gutters_at, _c, 1} =
-        BufferLine.render(make_params(%{buf_line: 3, cursor_line: 3, ln_style: :hybrid}))
-
-      decoded_at = decode_all(gutters_at)
-      assert Enum.any?(decoded_at, fn cmd -> String.contains?(cmd.text, "4") end)
-
-      # Away from cursor line
-      {gutters_away, _c, 1} =
-        BufferLine.render(make_params(%{buf_line: 7, cursor_line: 3, ln_style: :hybrid}))
-
-      decoded_away = decode_all(gutters_away)
-      assert Enum.any?(decoded_away, fn cmd -> String.contains?(cmd.text, "4") end)
+        assert Enum.any?(decode_all(gutters), fn cmd ->
+                 String.contains?(cmd.text, expected_text)
+               end)
+      end
     end
 
     test ":none style produces only sign column command" do
@@ -456,111 +358,69 @@ defmodule MingaEditor.Renderer.BufferLineTest do
   # ── max_rows clamping ───────────────────────────────────────────────────
 
   describe "max_rows clamping for wrapped lines" do
-    test "stops rendering when screen_row reaches max_rows" do
-      # 5 visual rows but only 3 fit on screen
-      wrap_entry = [
-        %{text: "aaa ", byte_offset: 0},
-        %{text: "bbb ", byte_offset: 4},
-        %{text: "ccc ", byte_offset: 8},
-        %{text: "ddd ", byte_offset: 12},
-        %{text: "eee", byte_offset: 16}
+    test "renders only wrapped rows that fit before max_rows" do
+      cases = [
+        %{
+          line_text: "aaa bbb ccc ddd eee",
+          wrap_entry: [
+            %{text: "aaa ", byte_offset: 0},
+            %{text: "bbb ", byte_offset: 4},
+            %{text: "ccc ", byte_offset: 8},
+            %{text: "ddd ", byte_offset: 12},
+            %{text: "eee", byte_offset: 16}
+          ],
+          screen_row: 0,
+          max_rows: 3,
+          expected_rows: 3,
+          expected_rendered_rows: [0, 1, 2]
+        },
+        %{
+          line_text: "aaa bbb",
+          wrap_entry: [%{text: "aaa ", byte_offset: 0}, %{text: "bbb", byte_offset: 4}],
+          screen_row: 0,
+          max_rows: 100,
+          expected_rows: 2,
+          expected_rendered_rows: [0, 1]
+        },
+        %{
+          line_text: "aaa bbb ccc",
+          wrap_entry: [
+            %{text: "aaa ", byte_offset: 0},
+            %{text: "bbb ", byte_offset: 4},
+            %{text: "ccc", byte_offset: 8}
+          ],
+          screen_row: 8,
+          max_rows: 10,
+          expected_rows: 2,
+          expected_rendered_rows: [8, 9]
+        }
       ]
 
-      {_g, content, rows} =
-        BufferLine.render(
-          make_params(%{
-            line_text: "aaa bbb ccc ddd eee",
-            wrap_entry: wrap_entry,
-            screen_row: 0,
-            max_rows: 3
-          })
-        )
+      for params <- cases do
+        render_params = Map.take(params, [:line_text, :wrap_entry, :screen_row, :max_rows])
+        {_g, content, rows} = BufferLine.render(make_params(render_params))
 
-      assert rows == 3
-
-      decoded = decode_all(content)
-      rows_rendered = decoded |> Enum.map(& &1.row) |> Enum.uniq() |> Enum.sort()
-      assert rows_rendered == [0, 1, 2]
-      # No commands on row 3 or 4
-      refute Enum.any?(decoded, fn cmd -> cmd.row >= 3 end)
-    end
-
-    test "renders all rows when max_rows is large enough" do
-      wrap_entry = [
-        %{text: "aaa ", byte_offset: 0},
-        %{text: "bbb", byte_offset: 4}
-      ]
-
-      {_g, _c, rows} =
-        BufferLine.render(
-          make_params(%{
-            line_text: "aaa bbb",
-            wrap_entry: wrap_entry,
-            max_rows: 100
-          })
-        )
-
-      assert rows == 2
-    end
-
-    test "starting mid-screen respects max_rows boundary" do
-      wrap_entry = [
-        %{text: "aaa ", byte_offset: 0},
-        %{text: "bbb ", byte_offset: 4},
-        %{text: "ccc", byte_offset: 8}
-      ]
-
-      # Start at row 8 with max 10 rows: only 2 visual rows fit (rows 8, 9)
-      {_g, content, rows} =
-        BufferLine.render(
-          make_params(%{
-            line_text: "aaa bbb ccc",
-            wrap_entry: wrap_entry,
-            screen_row: 8,
-            max_rows: 10
-          })
-        )
-
-      assert rows == 2
-
-      decoded = decode_all(content)
-      refute Enum.any?(decoded, fn cmd -> cmd.row >= 10 end)
+        assert rows == params.expected_rows
+        assert rendered_rows(content) == params.expected_rendered_rows
+        refute Enum.any?(decode_all(content), fn cmd -> cmd.row >= params.max_rows end)
+      end
     end
   end
 
   # ── Edge cases ─────────────────────────────────────────────────────────
 
   describe "edge cases" do
-    test "empty line text produces valid output" do
-      {_g, content, 1} = BufferLine.render(make_params(%{line_text: ""}))
-      decoded = decode_all(content)
-      all_text = Enum.map_join(decoded, "", fn cmd -> cmd.text end)
-      assert all_text == ""
-    end
-
-    test "unicode line text renders correctly" do
-      {_g, content, 1} = BufferLine.render(make_params(%{line_text: "café 日本語"}))
-      decoded = decode_all(content)
-      all_text = Enum.map_join(decoded, "", fn cmd -> cmd.text end)
-      assert all_text == "café 日本語"
+    test "renders empty and unicode line text" do
+      for line_text <- ["", "café 日本語"] do
+        {_g, content, 1} = BufferLine.render(make_params(%{line_text: line_text}))
+        assert rendered_text(content) == line_text
+      end
     end
 
     test "wrapped empty line produces 1 row" do
       wrap_entry = [%{text: "", byte_offset: 0}]
       {_g, _c, rows} = BufferLine.render(make_params(%{line_text: "", wrap_entry: wrap_entry}))
       assert rows == 1
-    end
-
-    test "screen_row is respected for first visual row" do
-      {_g, content, 1} = BufferLine.render(make_params(%{screen_row: 15}))
-      decoded = decode_all(content)
-      Enum.each(decoded, fn cmd -> assert cmd.row == 15 end)
-    end
-
-    test "buf_line 0 with absolute style shows 1" do
-      {gutters, _c, 1} = BufferLine.render(make_params(%{buf_line: 0, ln_style: :absolute}))
-      decoded = decode_all(gutters)
-      assert Enum.any?(decoded, fn cmd -> String.contains?(cmd.text, "1") end)
     end
   end
 
@@ -577,13 +437,7 @@ defmodule MingaEditor.Renderer.BufferLineTest do
       {_g2, content_wrap, 1} =
         BufferLine.render(make_params(Map.put(base, :wrap_entry, wrap_entry)))
 
-      text_nowrap =
-        content_nowrap |> decode_all() |> Enum.map_join("", fn c -> c.text end)
-
-      text_wrap =
-        content_wrap |> decode_all() |> Enum.map_join("", fn c -> c.text end)
-
-      assert text_nowrap == text_wrap
+      assert rendered_text(content_nowrap) == rendered_text(content_wrap)
     end
   end
 
@@ -592,54 +446,38 @@ defmodule MingaEditor.Renderer.BufferLineTest do
   describe "cursorline highlighting" do
     @cursorline_bg 0x2C323C
 
-    test "applies cursorline bg to content draws on the cursor line" do
+    test "applies cursorline bg and full-width fill on the cursor line" do
       ctx = make_ctx(%{cursorline_bg: @cursorline_bg})
       params = make_params(%{buf_line: 3, cursor_line: 3, ctx: ctx})
       {_g, content, 1} = BufferLine.render(params)
-      decoded = decode_all(content)
 
-      # Every draw should have the cursorline bg
-      Enum.each(decoded, fn cmd ->
+      Enum.each(decode_all(content), fn cmd ->
         assert cmd.bg == @cursorline_bg,
                "expected cursorline bg #{inspect(@cursorline_bg)}, got #{inspect(cmd.bg)} in #{inspect(cmd)}"
       end)
-    end
 
-    test "includes a full-width fill draw on the cursor line" do
-      ctx = make_ctx(%{cursorline_bg: @cursorline_bg})
-      params = make_params(%{buf_line: 0, cursor_line: 0, ctx: ctx})
-      {_g, content, 1} = BufferLine.render(params)
-      decoded = decode_all(content)
-
-      fill =
-        Enum.find(decoded, fn cmd ->
-          cmd.bg == @cursorline_bg and String.length(cmd.text) == ctx.content_w
-        end)
-
+      fill = full_width_fill(content, ctx.content_w)
       assert fill != nil, "expected a full-width fill draw with cursorline bg"
+      assert fill.bg == @cursorline_bg
     end
 
-    test "does not apply cursorline bg to non-cursor lines" do
-      ctx = make_ctx(%{cursorline_bg: @cursorline_bg})
-      params = make_params(%{buf_line: 5, cursor_line: 3, ctx: ctx})
-      {_g, content, 1} = BufferLine.render(params)
-      decoded = decode_all(content)
+    test "does not apply cursorline bg outside the enabled cursor line" do
+      cases = [
+        {%{cursorline_bg: @cursorline_bg}, %{buf_line: 5, cursor_line: 3},
+         "non-cursor line should not have cursorline bg"},
+        {%{cursorline_bg: nil}, %{buf_line: 0, cursor_line: 0},
+         "nil cursorline_bg should not apply cursorline bg"}
+      ]
 
-      Enum.each(decoded, fn cmd ->
-        refute cmd.bg == @cursorline_bg,
-               "non-cursor line should not have cursorline bg"
-      end)
-    end
+      for {ctx_overrides, params_overrides, message} <- cases do
+        ctx = make_ctx(ctx_overrides)
+        params = make_params(Map.put(params_overrides, :ctx, ctx))
+        {_g, content, 1} = BufferLine.render(params)
 
-    test "does not apply cursorline bg when cursorline_bg is nil" do
-      ctx = make_ctx(%{cursorline_bg: nil})
-      params = make_params(%{buf_line: 0, cursor_line: 0, ctx: ctx})
-      {_g, content, 1} = BufferLine.render(params)
-      decoded = decode_all(content)
-
-      Enum.each(decoded, fn cmd ->
-        refute cmd.bg == @cursorline_bg
-      end)
+        Enum.each(decode_all(content), fn cmd ->
+          refute cmd.bg == @cursorline_bg, message
+        end)
+      end
     end
 
     test "does not apply cursorline bg to reversed (selected) draws on cursor line" do
@@ -678,29 +516,30 @@ defmodule MingaEditor.Renderer.BufferLineTest do
     @cursorline_bg 0x2C323C
     @editor_bg 0x282C34
 
-    test "flash overrides cursorline bg on the flash line" do
-      flash = %MingaEditor.NavFlash{line: 5, step: 0, max_steps: 3, timer: nil}
+    test "flash line fill color follows flash interpolation step" do
+      cases = [
+        {5, 0, @flash_bg},
+        {0, 2, @cursorline_bg}
+      ]
 
-      ctx =
-        make_ctx(%{
-          cursorline_bg: @cursorline_bg,
-          nav_flash: flash,
-          nav_flash_bg: @flash_bg,
-          editor_bg: @editor_bg
-        })
+      for {line, step, expected_bg} <- cases do
+        flash = %MingaEditor.NavFlash{line: line, step: step, max_steps: 3, timer: nil}
 
-      params = make_params(%{buf_line: 5, cursor_line: 5, ctx: ctx})
-      {_g, content, 1} = BufferLine.render(params)
-      decoded = decode_all(content)
+        ctx =
+          make_ctx(%{
+            cursorline_bg: @cursorline_bg,
+            nav_flash: flash,
+            nav_flash_bg: @flash_bg,
+            editor_bg: @editor_bg
+          })
 
-      # At step 0, the bg should be the full flash_bg (not cursorline_bg)
-      fill =
-        Enum.find(decoded, fn cmd ->
-          String.length(cmd.text) == ctx.content_w
-        end)
+        params = make_params(%{buf_line: line, cursor_line: line, ctx: ctx})
+        {_g, content, 1} = BufferLine.render(params)
+        fill = full_width_fill(content, ctx.content_w)
 
-      assert fill != nil
-      assert fill.bg == @flash_bg
+        assert fill != nil
+        assert fill.bg == expected_bg
+      end
     end
 
     test "flash does not affect non-flash lines" do
@@ -724,31 +563,6 @@ defmodule MingaEditor.Renderer.BufferLineTest do
         refute cmd.bg == @flash_bg,
                "non-flash line should not have flash bg"
       end)
-    end
-
-    test "later flash steps produce interpolated colors" do
-      flash = %MingaEditor.NavFlash{line: 0, step: 2, max_steps: 3, timer: nil}
-
-      ctx =
-        make_ctx(%{
-          cursorline_bg: @cursorline_bg,
-          nav_flash: flash,
-          nav_flash_bg: @flash_bg,
-          editor_bg: @editor_bg
-        })
-
-      params = make_params(%{buf_line: 0, cursor_line: 0, ctx: ctx})
-      {_g, content, 1} = BufferLine.render(params)
-      decoded = decode_all(content)
-
-      fill =
-        Enum.find(decoded, fn cmd ->
-          String.length(cmd.text) == ctx.content_w
-        end)
-
-      assert fill != nil
-      # At final step (2 of 3), should be the target (cursorline_bg)
-      assert fill.bg == @cursorline_bg
     end
   end
 end

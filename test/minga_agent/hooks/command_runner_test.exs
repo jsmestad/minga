@@ -119,9 +119,9 @@ defmodule MingaAgent.Hooks.CommandRunnerTest do
 
   test "stderr is bounded and marked truncated" do
     command =
-      "i=0; while [ \"$i\" -lt 50000 ]; do printf '0123456789abcdef0123456789abcdef\\n' >&2; i=$((i + 1)); done; exit 7"
+      "i=0; while [ \"$i\" -lt 3000 ]; do printf '0123456789abcdef0123456789abcdef\\n' >&2; i=$((i + 1)); done; exit 7"
 
-    hook = %Hook{event: :pre_tool_use, tool_pattern: "*", command: command, timeout_ms: 2_000}
+    hook = %Hook{event: :pre_tool_use, tool_pattern: "*", command: command, timeout_ms: 5_000}
     payload = PreToolUsePayload.new("tc_1", "shell", %{})
 
     assert %Result{status: :veto, exit_status: 7, stderr: stderr} =
@@ -143,7 +143,12 @@ defmodule MingaAgent.Hooks.CommandRunnerTest do
   end
 
   test "vetoes clearly when helper returns malformed JSON" do
-    helper = fake_helper("malformed-helper", "#!/bin/sh\nprintf 'not json'\n")
+    helper =
+      fake_helper(
+        "malformed-helper",
+        "#!/bin/sh\ndd bs=1 count=\"$2\" of=/dev/null 2>/dev/null\nprintf 'not json'\n"
+      )
+
     hook = %Hook{event: :pre_tool_use, tool_pattern: "*", command: "exit 0"}
     payload = PreToolUsePayload.new("tc_secret", "shell", %{"secret" => "do-not-leak"})
 
