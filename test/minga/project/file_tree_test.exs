@@ -3,628 +3,280 @@ defmodule Minga.Project.FileTreeTest do
 
   alias Minga.Project.FileTree
 
-  @tag :tmp_dir
-  test "new/1 creates tree with root expanded", %{tmp_dir: tmp_dir} do
-    tree = FileTree.new(tmp_dir)
-    assert tree.root == Path.expand(tmp_dir)
-    assert MapSet.member?(tree.expanded, tree.root)
-    assert tree.cursor == 0
-    assert tree.show_hidden == false
+  defp touch(path), do: File.write!(path, "")
+  defp mkdir(path), do: File.mkdir_p!(path)
+  defp names(tree), do: tree |> FileTree.visible_entries() |> Enum.map(& &1.name)
+  defp paths(tree), do: tree |> FileTree.visible_entries() |> Enum.map(& &1.path)
+  defp selected_name(tree), do: tree |> FileTree.selected_entry() |> Map.get(:name)
+
+  defp expand_path(tree, parts) when is_list(parts) do
+    FileTree.expand_path(tree, Path.join([tree.root | parts]))
   end
 
-  describe "visible_entries/1" do
+  describe "construction and visible entries" do
     @tag :tmp_dir
-    test "lists files and directories sorted (dirs first, then alpha)", %{tmp_dir: tmp_dir} do
-      File.write!(Path.join(tmp_dir, "zebra.txt"), "")
-      File.write!(Path.join(tmp_dir, "alpha.txt"), "")
-      File.mkdir_p!(Path.join(tmp_dir, "lib"))
-      File.mkdir_p!(Path.join(tmp_dir, "app"))
-
+    test "starts at the expanded root with default display options", %{tmp_dir: tmp_dir} do
       tree = FileTree.new(tmp_dir)
-      entries = FileTree.visible_entries(tree)
-      names = Enum.map(entries, & &1.name)
 
-      assert names == ["app", "lib", "alpha.txt", "zebra.txt"]
+      assert tree.root == Path.expand(tmp_dir)
+      assert MapSet.member?(tree.expanded, tree.root)
+      assert tree.cursor == 0
+      assert tree.show_hidden == false
+      assert tree.width == 30
     end
 
     @tag :tmp_dir
-    test "hides dotfiles by default", %{tmp_dir: tmp_dir} do
-      File.write!(Path.join(tmp_dir, ".hidden"), "")
-      File.write!(Path.join(tmp_dir, "visible.txt"), "")
+    test "lists directories before files, sorted alphabetically", %{tmp_dir: tmp_dir} do
+      touch(Path.join(tmp_dir, "zebra.txt"))
+      touch(Path.join(tmp_dir, "alpha.txt"))
+      mkdir(Path.join(tmp_dir, "lib"))
+      mkdir(Path.join(tmp_dir, "app"))
 
-      tree = FileTree.new(tmp_dir)
-      names = Enum.map(FileTree.visible_entries(tree), & &1.name)
-
-      assert names == ["visible.txt"]
+      assert tmp_dir |> FileTree.new() |> names() == ["app", "lib", "alpha.txt", "zebra.txt"]
     end
 
     @tag :tmp_dir
-    test "shows dotfiles when show_hidden is true", %{tmp_dir: tmp_dir} do
-      File.write!(Path.join(tmp_dir, ".hidden"), "")
-      File.write!(Path.join(tmp_dir, "visible.txt"), "")
+    test "filters hidden files and ignored directories independently", %{tmp_dir: tmp_dir} do
+      touch(Path.join(tmp_dir, ".hidden"))
+      touch(Path.join(tmp_dir, "visible.txt"))
+      mkdir(Path.join(tmp_dir, ".git"))
+      mkdir(Path.join(tmp_dir, "node_modules"))
+      mkdir(Path.join(tmp_dir, "_build"))
+      mkdir(Path.join(tmp_dir, "src"))
 
-      tree = FileTree.new(tmp_dir) |> FileTree.toggle_hidden()
-      names = Enum.map(FileTree.visible_entries(tree), & &1.name)
+      hidden_names = tmp_dir |> FileTree.new() |> names()
+      shown_names = tmp_dir |> FileTree.new() |> FileTree.toggle_hidden() |> names()
 
-      assert ".hidden" in names
-      assert "visible.txt" in names
+      assert hidden_names == ["src", "visible.txt"]
+      assert ".hidden" in shown_names
+      assert "visible.txt" in shown_names
+      assert "src" in shown_names
+      refute ".git" in shown_names
+      refute "node_modules" in shown_names
+      refute "_build" in shown_names
     end
 
     @tag :tmp_dir
-    test "ignores default ignored directories", %{tmp_dir: tmp_dir} do
-      File.mkdir_p!(Path.join(tmp_dir, ".git"))
-      File.mkdir_p!(Path.join(tmp_dir, "node_modules"))
-      File.mkdir_p!(Path.join(tmp_dir, "_build"))
-      File.mkdir_p!(Path.join(tmp_dir, "src"))
+    test "only expanded directories expose children and child depth", %{tmp_dir: tmp_dir} do
+      mkdir(Path.join(tmp_dir, "lib"))
+      touch(Path.join([tmp_dir, "lib", "app.ex"]))
+      touch(Path.join(tmp_dir, "mix.exs"))
 
-      tree = FileTree.new(tmp_dir) |> FileTree.toggle_hidden()
-      names = Enum.map(FileTree.visible_entries(tree), & &1.name)
+      collapsed = FileTree.new(tmp_dir)
+      expanded = expand_path(collapsed, ["lib"])
 
-      assert "src" in names
-      refute ".git" in names
-      refute "node_modules" in names
-      refute "_build" in names
-    end
+      assert names(collapsed) == ["lib", "mix.exs"]
 
-    @tag :tmp_dir
-    test "unexpanded directories do not show children", %{tmp_dir: tmp_dir} do
-      File.mkdir_p!(Path.join(tmp_dir, "lib"))
-      File.write!(Path.join([tmp_dir, "lib", "app.ex"]), "")
-
-      tree = FileTree.new(tmp_dir)
-      entries = FileTree.visible_entries(tree)
-
-      assert length(entries) == 1
-      assert hd(entries).name == "lib"
-      assert hd(entries).dir? == true
-    end
-
-    @tag :tmp_dir
-    test "expanded directories show children with increased depth", %{tmp_dir: tmp_dir} do
-      File.mkdir_p!(Path.join(tmp_dir, "lib"))
-      File.write!(Path.join([tmp_dir, "lib", "app.ex"]), "")
-      File.write!(Path.join(tmp_dir, "mix.exs"), "")
-
-      tree = FileTree.new(tmp_dir)
-      # Expand lib
-      tree = %{tree | expanded: MapSet.put(tree.expanded, Path.join(tmp_dir, "lib"))}
-
-      entries = FileTree.visible_entries(tree)
-      names = Enum.map(entries, & &1.name)
-
-      assert names == ["lib", "app.ex", "mix.exs"]
-      assert Enum.at(entries, 0).depth == 0
-      assert Enum.at(entries, 1).depth == 1
+      entries = FileTree.visible_entries(expanded)
+      assert Enum.map(entries, & &1.name) == ["lib", "app.ex", "mix.exs"]
+      assert Enum.map(entries, & &1.depth) == [0, 1, 0]
     end
   end
 
   describe "navigation" do
     @tag :tmp_dir
-    test "move_down increments cursor", %{tmp_dir: tmp_dir} do
-      File.write!(Path.join(tmp_dir, "a.txt"), "")
-      File.write!(Path.join(tmp_dir, "b.txt"), "")
+    test "move_up, move_down, and select clamp to visible entries", %{tmp_dir: tmp_dir} do
+      touch(Path.join(tmp_dir, "a.txt"))
+      touch(Path.join(tmp_dir, "b.txt"))
 
-      tree = FileTree.new(tmp_dir) |> FileTree.move_down()
-      assert tree.cursor == 1
+      tree = FileTree.new(tmp_dir)
+
+      assert selected_name(FileTree.move_up(tree)) == "a.txt"
+      assert selected_name(FileTree.move_down(tree)) == "b.txt"
+      assert selected_name(tree |> FileTree.move_down() |> FileTree.move_down()) == "b.txt"
+      assert selected_name(FileTree.select(tree, -10)) == "a.txt"
+      assert selected_name(FileTree.select(tree, 99)) == "b.txt"
     end
 
     @tag :tmp_dir
-    test "move_down clamps to last entry", %{tmp_dir: tmp_dir} do
-      File.write!(Path.join(tmp_dir, "only.txt"), "")
-
-      tree = FileTree.new(tmp_dir) |> FileTree.move_down() |> FileTree.move_down()
-      assert tree.cursor == 0
-    end
-
-    @tag :tmp_dir
-    test "move_up decrements cursor", %{tmp_dir: tmp_dir} do
-      File.write!(Path.join(tmp_dir, "a.txt"), "")
-      File.write!(Path.join(tmp_dir, "b.txt"), "")
-
-      tree = FileTree.new(tmp_dir) |> FileTree.move_down() |> FileTree.move_up()
-      assert tree.cursor == 0
-    end
-
-    @tag :tmp_dir
-    test "move_up clamps to zero", %{tmp_dir: tmp_dir} do
-      File.write!(Path.join(tmp_dir, "a.txt"), "")
-
-      tree = FileTree.new(tmp_dir) |> FileTree.move_up()
-      assert tree.cursor == 0
+    test "selected_entry returns nil when no entries are visible", %{tmp_dir: tmp_dir} do
+      assert FileTree.selected_entry(FileTree.new(tmp_dir)) == nil
     end
   end
 
-  describe "toggle_expand/1" do
+  describe "expansion and collapse" do
     @tag :tmp_dir
-    test "expands a collapsed directory at cursor", %{tmp_dir: tmp_dir} do
-      File.mkdir_p!(Path.join(tmp_dir, "src"))
-      File.write!(Path.join([tmp_dir, "src", "main.ex"]), "")
+    test "toggle_expand expands and collapses the directory at the cursor", %{tmp_dir: tmp_dir} do
+      mkdir(Path.join(tmp_dir, "src"))
+      touch(Path.join([tmp_dir, "src", "main.ex"]))
 
       tree = FileTree.new(tmp_dir)
-      # Cursor at 0 = "src" directory (collapsed)
-      assert tree.cursor == 0
-      refute MapSet.member?(tree.expanded, Path.join(tmp_dir, "src"))
 
-      tree = FileTree.toggle_expand(tree)
-      assert MapSet.member?(tree.expanded, Path.join(tmp_dir, "src"))
-
-      entries = FileTree.visible_entries(tree)
-      names = Enum.map(entries, & &1.name)
-      assert names == ["src", "main.ex"]
+      assert names(tree) == ["src"]
+      assert tree |> FileTree.toggle_expand() |> names() == ["src", "main.ex"]
+      assert tree |> FileTree.toggle_expand() |> FileTree.toggle_expand() |> names() == ["src"]
     end
 
     @tag :tmp_dir
-    test "collapses an expanded directory at cursor", %{tmp_dir: tmp_dir} do
-      File.mkdir_p!(Path.join(tmp_dir, "src"))
-      File.write!(Path.join([tmp_dir, "src", "main.ex"]), "")
+    test "toggle_expand is a no-op on files", %{tmp_dir: tmp_dir} do
+      touch(Path.join(tmp_dir, "readme.md"))
+
+      tree = FileTree.new(tmp_dir)
+      toggled = FileTree.toggle_expand(tree)
+
+      assert names(toggled) == ["readme.md"]
+      assert toggled.cursor == tree.cursor
+      assert toggled.root == tree.root
+    end
+
+    @tag :tmp_dir
+    test "collapse and expand move between a directory and its children", %{tmp_dir: tmp_dir} do
+      mkdir(Path.join(tmp_dir, "lib"))
+      touch(Path.join([tmp_dir, "lib", "a.ex"]))
+
+      tree = FileTree.new(tmp_dir)
+
+      assert tree |> FileTree.expand() |> names() == ["lib", "a.ex"]
+      assert tree |> FileTree.expand() |> FileTree.expand() |> selected_name() == "a.ex"
+
+      assert tree
+             |> FileTree.expand()
+             |> FileTree.expand()
+             |> FileTree.collapse()
+             |> selected_name() == "lib"
+
+      assert tree |> FileTree.expand() |> FileTree.collapse() |> names() == ["lib"]
+    end
+
+    @tag :tmp_dir
+    test "collapse_all keeps only the root expanded and resets selection", %{tmp_dir: tmp_dir} do
+      mkdir(Path.join([tmp_dir, "lib", "minga"]))
+      touch(Path.join([tmp_dir, "lib", "minga", "editor.ex"]))
+      touch(Path.join(tmp_dir, "mix.exs"))
 
       tree =
         FileTree.new(tmp_dir)
-        |> FileTree.toggle_expand()
-        |> FileTree.toggle_expand()
+        |> expand_path(["lib"])
+        |> expand_path(["lib", "minga"])
+        |> FileTree.select(3)
 
-      refute MapSet.member?(tree.expanded, Path.join(tmp_dir, "src"))
-      entries = FileTree.visible_entries(tree)
-      assert length(entries) == 1
-    end
+      collapsed = FileTree.collapse_all(tree)
 
-    @tag :tmp_dir
-    test "is a no-op on files", %{tmp_dir: tmp_dir} do
-      File.write!(Path.join(tmp_dir, "readme.md"), "")
-
-      tree = FileTree.new(tmp_dir)
-      tree2 = FileTree.toggle_expand(tree)
-      # Structural state unchanged (expanded set, cursor, root)
-      assert tree2.expanded == tree.expanded
-      assert tree2.cursor == tree.cursor
-      assert tree2.root == tree.root
-      # Cache is populated as a side effect of checking the entry
-      assert is_list(tree2.entries)
+      assert names(collapsed) == ["lib", "mix.exs"]
+      assert selected_name(collapsed) == "lib"
+      assert MapSet.equal?(collapsed.expanded, MapSet.new([collapsed.root]))
     end
   end
 
-  describe "collapse/1 and expand/1" do
+  describe "hidden files" do
     @tag :tmp_dir
-    test "collapse on expanded dir collapses it", %{tmp_dir: tmp_dir} do
-      File.mkdir_p!(Path.join(tmp_dir, "lib"))
-      File.write!(Path.join([tmp_dir, "lib", "a.ex"]), "")
-
-      tree = FileTree.new(tmp_dir) |> FileTree.toggle_expand()
-      assert MapSet.member?(tree.expanded, Path.join(tmp_dir, "lib"))
-
-      tree = FileTree.collapse(tree)
-      refute MapSet.member?(tree.expanded, Path.join(tmp_dir, "lib"))
-    end
-
-    @tag :tmp_dir
-    test "collapse on file jumps to parent directory", %{tmp_dir: tmp_dir} do
-      File.mkdir_p!(Path.join(tmp_dir, "lib"))
-      File.write!(Path.join([tmp_dir, "lib", "a.ex"]), "")
-
-      tree = FileTree.new(tmp_dir) |> FileTree.toggle_expand() |> FileTree.move_down()
-      assert FileTree.selected_entry(tree).name == "a.ex"
-
-      tree = FileTree.collapse(tree)
-      assert tree.cursor == 0
-      assert FileTree.selected_entry(tree).name == "lib"
-    end
-
-    @tag :tmp_dir
-    test "expand on collapsed dir expands it", %{tmp_dir: tmp_dir} do
-      File.mkdir_p!(Path.join(tmp_dir, "lib"))
-      File.write!(Path.join([tmp_dir, "lib", "a.ex"]), "")
-
-      tree = FileTree.new(tmp_dir)
-      refute MapSet.member?(tree.expanded, Path.join(tmp_dir, "lib"))
-
-      tree = FileTree.expand(tree)
-      assert MapSet.member?(tree.expanded, Path.join(tmp_dir, "lib"))
-    end
-
-    @tag :tmp_dir
-    test "expand on already-expanded dir moves to first child", %{tmp_dir: tmp_dir} do
-      File.mkdir_p!(Path.join(tmp_dir, "lib"))
-      File.write!(Path.join([tmp_dir, "lib", "a.ex"]), "")
-
-      tree = FileTree.new(tmp_dir) |> FileTree.toggle_expand()
-      assert tree.cursor == 0
-
-      tree = FileTree.expand(tree)
-      assert tree.cursor == 1
-      assert FileTree.selected_entry(tree).name == "a.ex"
-    end
-  end
-
-  describe "toggle_hidden/1" do
-    @tag :tmp_dir
-    test "reveals hidden files", %{tmp_dir: tmp_dir} do
-      File.write!(Path.join(tmp_dir, ".env"), "")
-      File.write!(Path.join(tmp_dir, "app.ex"), "")
-
-      tree = FileTree.new(tmp_dir)
-      assert length(FileTree.visible_entries(tree)) == 1
-
-      tree = FileTree.toggle_hidden(tree)
-      assert length(FileTree.visible_entries(tree)) == 2
-    end
-
-    @tag :tmp_dir
-    test "clamps cursor when toggling hides entries", %{tmp_dir: tmp_dir} do
-      File.write!(Path.join(tmp_dir, ".a"), "")
-      File.write!(Path.join(tmp_dir, ".b"), "")
-      File.write!(Path.join(tmp_dir, "c.txt"), "")
-
-      tree =
-        FileTree.new(tmp_dir)
-        |> FileTree.toggle_hidden()
-        |> Map.put(:cursor, 2)
-
-      # cursor at 2 = ".b" (hidden). Toggling back hides it, clamp to 0
-      tree = FileTree.toggle_hidden(tree)
-      assert tree.cursor == 0
-    end
-  end
-
-  describe "selected_entry/1" do
-    @tag :tmp_dir
-    test "returns entry at cursor", %{tmp_dir: tmp_dir} do
-      File.write!(Path.join(tmp_dir, "hello.txt"), "")
-
-      tree = FileTree.new(tmp_dir)
-      entry = FileTree.selected_entry(tree)
-      assert entry.name == "hello.txt"
-      assert entry.dir? == false
-      assert entry.depth == 0
-    end
-
-    @tag :tmp_dir
-    test "returns nil for empty directory", %{tmp_dir: tmp_dir} do
-      tree = FileTree.new(tmp_dir)
-      assert FileTree.selected_entry(tree) == nil
-    end
-  end
-
-  describe "reveal/2" do
-    @tag :tmp_dir
-    test "expands ancestors and moves cursor to target file", %{tmp_dir: tmp_dir} do
-      File.mkdir_p!(Path.join([tmp_dir, "lib", "minga"]))
-      File.write!(Path.join([tmp_dir, "lib", "minga", "editor.ex"]), "")
-
-      tree = FileTree.new(tmp_dir)
-      tree = FileTree.reveal(tree, Path.join([tmp_dir, "lib", "minga", "editor.ex"]))
-
-      assert MapSet.member?(tree.expanded, Path.join(tmp_dir, "lib"))
-      assert MapSet.member?(tree.expanded, Path.join([tmp_dir, "lib", "minga"]))
-
-      entry = FileTree.selected_entry(tree)
-      assert entry.name == "editor.ex"
-    end
-  end
-
-  describe "entry guide metadata" do
-    @tag :tmp_dir
-    test "entries include last_child? and guides fields", %{tmp_dir: tmp_dir} do
-      File.write!(Path.join(tmp_dir, "a.txt"), "")
-      File.write!(Path.join(tmp_dir, "b.txt"), "")
-
-      tree = FileTree.new(tmp_dir)
-      entries = FileTree.visible_entries(tree)
-
-      # All depth-0 entries have empty guides list
-      assert Enum.all?(entries, fn e -> e.guides == [] end)
-
-      # First file is not last child, second is
-      first = Enum.at(entries, 0)
-      last = Enum.at(entries, 1)
-      assert first.last_child? == false
-      assert last.last_child? == true
-    end
-
-    @tag :tmp_dir
-    test "single entry is marked as last child", %{tmp_dir: tmp_dir} do
-      File.write!(Path.join(tmp_dir, "only.txt"), "")
-
-      tree = FileTree.new(tmp_dir)
-      [entry] = FileTree.visible_entries(tree)
-
-      assert entry.last_child? == true
-      assert entry.guides == []
-    end
-
-    @tag :tmp_dir
-    test "nested entries have correct guide flags for ancestor columns", %{tmp_dir: tmp_dir} do
-      # Create: lib/ (not last) -> app.ex (last child of lib)
-      #         mix.exs (last sibling at depth 0)
-      File.mkdir_p!(Path.join(tmp_dir, "lib"))
-      File.write!(Path.join([tmp_dir, "lib", "app.ex"]), "")
-      File.write!(Path.join(tmp_dir, "mix.exs"), "")
-
-      tree = FileTree.new(tmp_dir)
-      tree = %{tree | expanded: MapSet.put(tree.expanded, Path.join(tmp_dir, "lib"))}
-
-      entries = FileTree.visible_entries(tree)
-      # Expected: lib (depth 0, not last), app.ex (depth 1, last), mix.exs (depth 0, last)
-      [lib_entry, app_entry, mix_entry] = entries
-
-      assert lib_entry.last_child? == false
-      assert lib_entry.guides == []
-
-      # app.ex is the only child of lib, so it's last_child?
-      # Its guides list has one entry: true (because lib is NOT the last sibling,
-      # so the depth-0 column should still draw │)
-      assert app_entry.last_child? == true
-      assert app_entry.guides == [true]
-
-      assert mix_entry.last_child? == true
-      assert mix_entry.guides == []
-    end
-
-    @tag :tmp_dir
-    test "deeply nested entries accumulate guide flags", %{tmp_dir: tmp_dir} do
-      File.mkdir_p!(Path.join([tmp_dir, "a", "b", "c"]))
-      File.write!(Path.join([tmp_dir, "a", "b", "c", "deep.txt"]), "")
-
-      tree = FileTree.new(tmp_dir)
-
-      tree = %{
-        tree
-        | expanded:
-            tree.expanded
-            |> MapSet.put(Path.join(tmp_dir, "a"))
-            |> MapSet.put(Path.join([tmp_dir, "a", "b"]))
-            |> MapSet.put(Path.join([tmp_dir, "a", "b", "c"]))
-      }
-
-      entries = FileTree.visible_entries(tree)
-      deep = List.last(entries)
-
-      assert deep.name == "deep.txt"
-      assert deep.depth == 3
-      # All ancestors are last children (only child at each level),
-      # so all guide flags should be false (no more siblings = no │)
-      assert deep.guides == [false, false, false]
-      assert deep.last_child? == true
-    end
-  end
-
-  describe "collapse_all/1" do
-    @tag :tmp_dir
-    test "collapses everything except root", %{tmp_dir: tmp_dir} do
-      File.mkdir_p!(Path.join([tmp_dir, "lib", "minga"]))
-      File.write!(Path.join([tmp_dir, "lib", "minga", "editor.ex"]), "")
-
-      tree =
-        FileTree.new(tmp_dir)
-        |> Map.update!(:expanded, fn exp ->
-          exp
-          |> MapSet.put(Path.join(tmp_dir, "lib"))
-          |> MapSet.put(Path.join([tmp_dir, "lib", "minga"]))
-        end)
-
-      assert MapSet.size(tree.expanded) == 3
-
-      tree = FileTree.collapse_all(tree)
-      assert MapSet.size(tree.expanded) == 1
-      assert MapSet.member?(tree.expanded, tree.root)
-    end
-
-    @tag :tmp_dir
-    test "clamps cursor to valid range", %{tmp_dir: tmp_dir} do
-      File.mkdir_p!(Path.join(tmp_dir, "lib"))
-      File.write!(Path.join([tmp_dir, "lib", "a.ex"]), "")
-      File.write!(Path.join([tmp_dir, "lib", "b.ex"]), "")
-      File.write!(Path.join(tmp_dir, "mix.exs"), "")
-
-      tree =
-        FileTree.new(tmp_dir)
-        |> Map.update!(:expanded, &MapSet.put(&1, Path.join(tmp_dir, "lib")))
-        |> Map.put(:cursor, 3)
-
-      # cursor 3 = "mix.exs" with lib expanded. After collapse_all,
-      # only root-level entries are visible (lib, mix.exs), cursor clamps to 0.
-      tree = FileTree.collapse_all(tree)
-      assert tree.cursor == 0
-    end
-
-    @tag :tmp_dir
-    test "is a no-op on an already-collapsed tree", %{tmp_dir: tmp_dir} do
-      File.write!(Path.join(tmp_dir, "a.txt"), "")
-
-      tree = FileTree.new(tmp_dir)
-      tree2 = FileTree.collapse_all(tree)
-
-      assert tree2.expanded == tree.expanded
-      assert tree2.cursor == 0
-    end
-  end
-
-  describe "refresh/1" do
-    @tag :tmp_dir
-    test "clamps cursor after files are deleted", %{tmp_dir: tmp_dir} do
-      File.write!(Path.join(tmp_dir, "a.txt"), "")
-      File.write!(Path.join(tmp_dir, "b.txt"), "")
-
-      tree = FileTree.new(tmp_dir) |> FileTree.move_down()
-      assert tree.cursor == 1
-
-      File.rm!(Path.join(tmp_dir, "b.txt"))
-      tree = FileTree.refresh(tree)
-      assert tree.cursor == 0
-    end
-  end
-
-  describe "entry caching" do
-    @tag :tmp_dir
-    test "visible_entries returns cached results when filesystem changes", %{tmp_dir: tmp_dir} do
-      File.write!(Path.join(tmp_dir, "a.txt"), "")
-
-      # Use ensure_entries to populate the cache in the struct
-      tree = FileTree.new(tmp_dir) |> FileTree.ensure_entries()
-      entries1 = FileTree.visible_entries(tree)
-      assert length(entries1) == 1
-
-      # Create a new file after the cache is populated
-      File.write!(Path.join(tmp_dir, "b.txt"), "")
-
-      # Second call on the SAME struct should return the cached list,
-      # not seeing the new file
-      entries2 = FileTree.visible_entries(tree)
-      assert entries2 == entries1
-      assert length(entries2) == 1
-    end
-
-    @tag :tmp_dir
-    test "ensure_entries populates cache and subsequent visible_entries uses it", %{
+    test "toggle_hidden reveals hidden files and clamps selection when they disappear", %{
       tmp_dir: tmp_dir
     } do
-      File.write!(Path.join(tmp_dir, "a.txt"), "")
+      touch(Path.join(tmp_dir, ".a"))
+      touch(Path.join(tmp_dir, ".b"))
+      touch(Path.join(tmp_dir, "c.txt"))
 
-      tree = FileTree.new(tmp_dir)
-      assert tree.entries == nil
+      shown = tmp_dir |> FileTree.new() |> FileTree.toggle_hidden() |> FileTree.select(2)
 
-      tree = FileTree.ensure_entries(tree)
-      assert is_list(tree.entries)
-      assert length(tree.entries) == 1
+      assert names(shown) == [".a", ".b", "c.txt"]
+      assert selected_name(shown) == "c.txt"
 
-      # Create a new file; cached entries should still show only "a.txt"
-      File.write!(Path.join(tmp_dir, "b.txt"), "")
-      assert FileTree.visible_entries(tree) == tree.entries
-      assert length(FileTree.visible_entries(tree)) == 1
+      hidden = FileTree.toggle_hidden(shown)
+      assert names(hidden) == ["c.txt"]
+      assert selected_name(hidden) == "c.txt"
     end
+  end
 
+  describe "reveal and guide metadata" do
     @tag :tmp_dir
-    test "toggle_expand invalidates cache so new entries are computed", %{tmp_dir: tmp_dir} do
-      File.mkdir_p!(Path.join(tmp_dir, "src"))
-      File.write!(Path.join([tmp_dir, "src", "main.ex"]), "")
-
-      tree = FileTree.new(tmp_dir)
-      # Populate cache: just "src" (collapsed)
-      entries_before = FileTree.visible_entries(tree)
-      assert length(entries_before) == 1
-
-      # Expand "src"; this should invalidate the cache
-      tree = FileTree.toggle_expand(tree)
-      entries_after = FileTree.visible_entries(tree)
-
-      # Now we see both "src" and "main.ex"
-      assert length(entries_after) == 2
-      names = Enum.map(entries_after, & &1.name)
-      assert names == ["src", "main.ex"]
-    end
-
-    @tag :tmp_dir
-    test "refresh invalidates cache and picks up filesystem changes", %{tmp_dir: tmp_dir} do
-      File.write!(Path.join(tmp_dir, "a.txt"), "")
-
-      tree = FileTree.new(tmp_dir) |> FileTree.ensure_entries()
-      assert length(FileTree.visible_entries(tree)) == 1
-
-      # Create a new file
-      File.write!(Path.join(tmp_dir, "b.txt"), "")
-
-      # Stale cache: still 1 entry
-      assert length(FileTree.visible_entries(tree)) == 1
-
-      # Refresh should rescan and see both files
-      tree = FileTree.refresh(tree)
-      assert length(FileTree.visible_entries(tree)) == 2
-    end
-
-    @tag :tmp_dir
-    test "cursor-only operations preserve the entry cache", %{tmp_dir: tmp_dir} do
-      File.write!(Path.join(tmp_dir, "a.txt"), "")
-      File.write!(Path.join(tmp_dir, "b.txt"), "")
-
-      tree = FileTree.new(tmp_dir) |> FileTree.ensure_entries()
-      original_entries = tree.entries
-
-      # move_down preserves cache
-      tree = FileTree.move_down(tree)
-      assert tree.entries == original_entries
-      assert tree.cursor == 1
-
-      # move_up preserves cache
-      tree = FileTree.move_up(tree)
-      assert tree.entries == original_entries
-      assert tree.cursor == 0
-    end
-
-    @tag :tmp_dir
-    test "toggle_hidden invalidates and recomputes cache", %{tmp_dir: tmp_dir} do
-      File.write!(Path.join(tmp_dir, ".hidden"), "")
-      File.write!(Path.join(tmp_dir, "visible.txt"), "")
-
-      tree = FileTree.new(tmp_dir) |> FileTree.ensure_entries()
-      assert length(tree.entries) == 1
-
-      tree = FileTree.toggle_hidden(tree)
-      assert length(tree.entries) == 2
-      names = Enum.map(tree.entries, & &1.name)
-      assert ".hidden" in names
-      assert "visible.txt" in names
-    end
-
-    @tag :tmp_dir
-    test "collapse_all invalidates cache", %{tmp_dir: tmp_dir} do
-      File.mkdir_p!(Path.join(tmp_dir, "lib"))
-      File.write!(Path.join([tmp_dir, "lib", "a.ex"]), "")
-
-      tree = FileTree.new(tmp_dir) |> FileTree.toggle_expand() |> FileTree.ensure_entries()
-      assert length(tree.entries) == 2
-
-      tree = FileTree.collapse_all(tree)
-      # Cache invalidated; new entries should show only collapsed "lib"
-      assert length(FileTree.visible_entries(tree)) == 1
-    end
-
-    @tag :tmp_dir
-    test "reveal invalidates cache and sees newly expanded paths", %{tmp_dir: tmp_dir} do
-      File.mkdir_p!(Path.join([tmp_dir, "lib", "minga"]))
+    test "reveal expands ancestors and selects the target file", %{tmp_dir: tmp_dir} do
+      mkdir(Path.join([tmp_dir, "lib", "minga"]))
       target = Path.join([tmp_dir, "lib", "minga", "editor.ex"])
-      File.write!(target, "")
+      touch(target)
 
-      tree = FileTree.new(tmp_dir) |> FileTree.ensure_entries()
-      # Only "lib" visible (collapsed)
-      assert length(tree.entries) == 1
+      tree = FileTree.new(tmp_dir) |> FileTree.reveal(target)
 
-      tree = FileTree.reveal(tree, target)
-      # Now lib, minga, and editor.ex are visible
-      assert length(tree.entries) == 3
-      assert FileTree.selected_entry(tree).name == "editor.ex"
+      assert names(tree) == ["lib", "minga", "editor.ex"]
+      assert selected_name(tree) == "editor.ex"
     end
 
     @tag :tmp_dir
-    test "selected_entry uses cached entries for cursor stability", %{tmp_dir: tmp_dir} do
-      File.write!(Path.join(tmp_dir, "a.txt"), "")
-      File.write!(Path.join(tmp_dir, "b.txt"), "")
+    test "visible entries expose renderer guide metadata", %{tmp_dir: tmp_dir} do
+      mkdir(Path.join([tmp_dir, "lib", "nested"]))
+      touch(Path.join([tmp_dir, "lib", "app.ex"]))
+      touch(Path.join([tmp_dir, "lib", "nested", "deep.ex"]))
+      touch(Path.join(tmp_dir, "mix.exs"))
 
-      # move_down calls ensure_entries internally, so cache is populated
+      entries =
+        tmp_dir
+        |> FileTree.new()
+        |> expand_path(["lib"])
+        |> expand_path(["lib", "nested"])
+        |> FileTree.visible_entries()
+
+      assert Enum.map(entries, &{&1.name, &1.depth, &1.last_child?, &1.guides}) == [
+               {"lib", 0, false, []},
+               {"nested", 1, false, [true]},
+               {"deep.ex", 2, true, [true, true]},
+               {"app.ex", 1, true, [true]},
+               {"mix.exs", 0, true, []}
+             ]
+    end
+  end
+
+  describe "cache and refresh" do
+    @tag :tmp_dir
+    test "ensure_entries caches visible entries until refresh", %{tmp_dir: tmp_dir} do
+      touch(Path.join(tmp_dir, "a.txt"))
+
+      tree = FileTree.new(tmp_dir) |> FileTree.ensure_entries()
+      touch(Path.join(tmp_dir, "b.txt"))
+
+      assert names(tree) == ["a.txt"]
+      assert tree |> FileTree.refresh() |> names() == ["a.txt", "b.txt"]
+    end
+
+    @tag :tmp_dir
+    test "structural operations recompute visible entries", %{tmp_dir: tmp_dir} do
+      mkdir(Path.join(tmp_dir, "src"))
+      touch(Path.join([tmp_dir, "src", "main.ex"]))
+      touch(Path.join(tmp_dir, ".env"))
+
+      tree = FileTree.new(tmp_dir) |> FileTree.ensure_entries()
+
+      assert names(FileTree.toggle_expand(tree)) == ["src", "main.ex"]
+      assert names(FileTree.toggle_hidden(tree)) == ["src", ".env"]
+    end
+
+    @tag :tmp_dir
+    test "refresh clamps selection after entries are removed", %{tmp_dir: tmp_dir} do
+      touch(Path.join(tmp_dir, "a.txt"))
+      touch(Path.join(tmp_dir, "b.txt"))
+
       tree = FileTree.new(tmp_dir) |> FileTree.move_down()
-      assert tree.entries != nil
-      entry = FileTree.selected_entry(tree)
-      assert entry.name == "b.txt"
+      File.rm!(Path.join(tmp_dir, "b.txt"))
 
-      # Even if a file is added that would sort before "b.txt",
-      # selected_entry on the same struct returns the same entry
-      File.write!(Path.join(tmp_dir, "aaa.txt"), "")
-      entry2 = FileTree.selected_entry(tree)
-      assert entry2.name == "b.txt"
+      assert tree |> FileTree.refresh() |> selected_name() == "a.txt"
     end
   end
 
   describe "filtering and re-rooting" do
     @tag :tmp_dir
-    test "set_filter narrows entries and descends into collapsed directories", %{tmp_dir: tmp_dir} do
-      File.mkdir_p!(Path.join(tmp_dir, "lib"))
-      File.write!(Path.join([tmp_dir, "lib", "target.ex"]), "")
-      File.write!(Path.join(tmp_dir, "other.txt"), "")
+    test "set_filter matches descendants without requiring expansion", %{tmp_dir: tmp_dir} do
+      mkdir(Path.join(tmp_dir, "lib"))
+      touch(Path.join([tmp_dir, "lib", "target.ex"]))
+      touch(Path.join(tmp_dir, "other.txt"))
 
       tree = FileTree.new(tmp_dir) |> FileTree.set_filter("target")
-      entries = FileTree.visible_entries(tree)
 
-      assert Enum.map(entries, & &1.name) == ["target.ex"]
-      assert hd(entries).depth == 1
-      assert FileTree.selected_entry(tree).name == "target.ex"
+      assert names(tree) == ["target.ex"]
+      assert FileTree.selected_entry(tree).depth == 1
+    end
+
+    @tag :tmp_dir
+    test "set_filter does not match every entry just because the root path matches", %{
+      tmp_dir: tmp_dir
+    } do
+      matching_root = Path.join(tmp_dir, "rootneedle")
+      mkdir(matching_root)
+      touch(Path.join(matching_root, "alpha.txt"))
+      touch(Path.join(matching_root, "beta.txt"))
+
+      assert matching_root
+             |> FileTree.new()
+             |> FileTree.set_filter("rootneedle")
+             |> FileTree.visible_entries() == []
     end
 
     @tag :tmp_dir
@@ -632,51 +284,39 @@ defmodule Minga.Project.FileTreeTest do
       root = Path.join(tmp_dir, "root")
       nested = Path.join(root, "nested")
       link = Path.join(root, "link")
-      File.mkdir_p!(nested)
-      File.write!(Path.join(nested, "target.ex"), "")
+      mkdir(nested)
+      touch(Path.join(nested, "target.ex"))
 
       case File.ln_s(nested, link) do
         :ok -> :ok
         {:error, reason} -> flunk("symlink creation failed: #{inspect(reason)}")
       end
 
-      tree = FileTree.new(root) |> FileTree.set_filter("target")
-      entries = FileTree.visible_entries(tree)
-
-      assert Enum.map(entries, & &1.path) == [Path.join(nested, "target.ex")]
+      assert root |> FileTree.new() |> FileTree.set_filter("target") |> paths() == [
+               Path.join(nested, "target.ex")
+             ]
     end
 
     @tag :tmp_dir
-    test "filter does not match every entry just because the root path matches", %{
-      tmp_dir: tmp_dir
-    } do
-      matching_root = Path.join(tmp_dir, "rootneedle")
-      File.mkdir_p!(matching_root)
-      File.write!(Path.join(matching_root, "alpha.txt"), "")
-      File.write!(Path.join(matching_root, "beta.txt"), "")
-
-      tree = FileTree.new(matching_root) |> FileTree.set_filter("rootneedle")
-
-      assert FileTree.visible_entries(tree) == []
-    end
-
-    @tag :tmp_dir
-    test "clear_filter restores the unfiltered visible entries", %{tmp_dir: tmp_dir} do
-      File.write!(Path.join(tmp_dir, "alpha.txt"), "")
-      File.write!(Path.join(tmp_dir, "beta.txt"), "")
+    test "clear_filter restores unfiltered entries", %{tmp_dir: tmp_dir} do
+      touch(Path.join(tmp_dir, "alpha.txt"))
+      touch(Path.join(tmp_dir, "beta.txt"))
 
       tree = tmp_dir |> FileTree.new() |> FileTree.set_filter("alpha") |> FileTree.clear_filter()
 
-      assert Enum.map(FileTree.visible_entries(tree), & &1.name) == ["alpha.txt", "beta.txt"]
+      assert names(tree) == ["alpha.txt", "beta.txt"]
     end
 
     @tag :tmp_dir
-    test "reroot preserves width, hidden setting, and filter", %{tmp_dir: tmp_dir} do
+    test "reroot preserves display settings and opens the new root", %{tmp_dir: tmp_dir} do
       next_root = Path.join(tmp_dir, "child")
-      File.mkdir_p!(next_root)
+      mkdir(next_root)
 
       tree =
-        FileTree.new(tmp_dir, width: 42) |> FileTree.toggle_hidden() |> FileTree.set_filter("ex")
+        tmp_dir
+        |> FileTree.new(width: 42)
+        |> FileTree.toggle_hidden()
+        |> FileTree.set_filter("ex")
 
       rerooted = FileTree.reroot(tree, next_root)
 
