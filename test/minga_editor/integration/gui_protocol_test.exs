@@ -36,6 +36,12 @@ defmodule Minga.Integration.GUIProtocolTest do
     %{port: port}
   end
 
+  defp round_trip(port, command) do
+    Port.command(port, command)
+    assert_receive {^port, {:data, json}}, 5_000
+    Jason.decode!(json)
+  end
+
   describe "GUI chrome opcode round-trip" do
     test "gui_theme encodes and decodes correctly", %{port: port} do
       theme = MingaEditor.UI.Theme.get!(:doom_one)
@@ -238,16 +244,6 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["indent_size"] == 4
       assert decoded["selection_mode"] == 2
       assert decoded["selection_size"] == 3
-    end
-
-    test "gui_agent_chat hidden encodes and decodes correctly", %{port: port} do
-      cmd = ProtocolGUI.encode_gui_agent_chat(%{visible: false})
-      Port.command(port, cmd)
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
-
-      assert decoded["type"] == "gui_agent_chat"
-      assert decoded["visible"] == false
     end
 
     test "gui_agent_chat visible with messages", %{port: port} do
@@ -477,69 +473,28 @@ defmodule Minga.Integration.GUIProtocolTest do
     end
   end
 
-  describe "gui_completion hidden" do
-    test "round-trips hidden completion", %{port: port} do
-      cmd = ProtocolGUI.encode_gui_completion(nil, 0, 0)
-      Port.command(port, cmd)
-
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
-
-      assert decoded["type"] == "gui_completion"
-      assert decoded["visible"] == false
-    end
-  end
-
-  describe "gui_which_key hidden" do
-    test "round-trips hidden which-key", %{port: port} do
-      cmd = ProtocolGUI.encode_gui_which_key(%{show: false})
-      Port.command(port, cmd)
-
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
-
-      assert decoded["type"] == "gui_which_key"
-      assert decoded["visible"] == false
-    end
-  end
-
-  describe "gui_picker hidden" do
-    test "round-trips hidden picker", %{port: port} do
-      cmd = ProtocolGUI.encode_gui_picker(nil)
-      Port.command(port, cmd)
-
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
-
-      assert decoded["type"] == "gui_picker"
-      assert decoded["visible"] == false
-    end
-  end
-
-  describe "gui_bottom_panel hidden" do
-    test "round-trips hidden bottom panel", %{port: port} do
+  describe "hidden GUI chrome commands" do
+    test "round-trip visible false for hidden overlays", %{port: port} do
       alias MingaEditor.UI.Panel.MessageStore
-      {cmd, _store} = ProtocolGUI.encode_gui_bottom_panel(%{visible: false}, %MessageStore{})
-      Port.command(port, cmd)
 
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+      {bottom_panel_cmd, _store} =
+        ProtocolGUI.encode_gui_bottom_panel(%{visible: false}, %MessageStore{})
 
-      assert decoded["type"] == "gui_bottom_panel"
-      assert decoded["visible"] == false
-    end
-  end
+      cases = [
+        {"gui_agent_chat", ProtocolGUI.encode_gui_agent_chat(%{visible: false})},
+        {"gui_completion", ProtocolGUI.encode_gui_completion(nil, 0, 0)},
+        {"gui_which_key", ProtocolGUI.encode_gui_which_key(%{show: false})},
+        {"gui_picker", ProtocolGUI.encode_gui_picker(nil)},
+        {"gui_bottom_panel", bottom_panel_cmd},
+        {"gui_tool_manager", ProtocolGUI.encode_gui_tool_manager(nil)}
+      ]
 
-  describe "gui_tool_manager hidden" do
-    test "round-trips hidden tool manager", %{port: port} do
-      cmd = ProtocolGUI.encode_gui_tool_manager(nil)
-      Port.command(port, cmd)
+      for {type, command} <- cases do
+        decoded = round_trip(port, command)
 
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
-
-      assert decoded["type"] == "gui_tool_manager"
-      assert decoded["visible"] == false
+        assert decoded["type"] == type
+        assert decoded["visible"] == false
+      end
     end
   end
 
@@ -974,26 +929,16 @@ defmodule Minga.Integration.GUIProtocolTest do
   end
 
   describe "gui_cursorline" do
-    test "round-trips cursorline row and bg color", %{port: port} do
-      cmd = ProtocolGUI.encode_gui_cursorline(12, 0x2C323C)
-      Port.command(port, cmd)
-
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+    test "round-trips visible and hidden cursorline states", %{port: port} do
+      decoded = round_trip(port, ProtocolGUI.encode_gui_cursorline(12, 0x2C323C))
 
       assert decoded["type"] == "gui_cursorline"
       assert decoded["row"] == 12
       assert decoded["r"] == 0x2C
       assert decoded["g"] == 0x32
       assert decoded["b"] == 0x3C
-    end
 
-    test "round-trips no cursorline (0xFFFF)", %{port: port} do
-      cmd = ProtocolGUI.encode_gui_cursorline(0xFFFF, 0)
-      Port.command(port, cmd)
-
-      assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+      decoded = round_trip(port, ProtocolGUI.encode_gui_cursorline(0xFFFF, 0))
 
       assert decoded["type"] == "gui_cursorline"
       assert decoded["row"] == 0xFFFF
