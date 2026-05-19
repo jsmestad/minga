@@ -75,8 +75,14 @@ pub const Highlighter = struct {
     indent_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     textobject_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     tags_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
-    /// Currently active predicate table (set during setLanguage)
-    current_predicates: ?*const predicates_mod.PredicateTable = null,
+    /// Currently active predicate table (set during setLanguage).
+    ///
+    /// This is a shallow copy of the cached table value, not a pointer into
+    /// `predicate_cache`. `StringHashMapUnmanaged` can rehash when the
+    /// background prewarm thread inserts another language, which invalidates
+    /// value pointers returned by `getPtr` while leaving the table's owned
+    /// slices stable.
+    current_predicates: ?predicates_mod.PredicateTable = null,
     /// Capture id for @conceal in the active highlight query, if present.
     current_conceal_capture_id: ?u32 = null,
     /// Last highlight result sizes, used to pre-size hot-path result buffers.
@@ -324,8 +330,8 @@ pub const Highlighter = struct {
                 }
             }
             // Restore predicate table and hot capture metadata for current language
-            if (self.predicate_cache.getPtr(name)) |cached_ptr| {
-                self.current_predicates = cached_ptr;
+            if (self.predicate_cache.get(name)) |cached| {
+                self.current_predicates = cached;
             } else {
                 self.current_predicates = null;
             }
