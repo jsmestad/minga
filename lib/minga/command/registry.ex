@@ -62,7 +62,7 @@ defmodule Minga.Command.Registry do
     MingaEditor.Commands.Tutor,
     MingaEditor.Commands.UI,
     MingaEditor.Commands.Tool,
-    MingaEditor.Commands.AgentGroup
+    MingaEditor.Commands.Workspace
   ]
 
   # Compile-time check: verify no duplicate command names across providers.

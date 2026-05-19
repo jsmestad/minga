@@ -7,7 +7,7 @@ defmodule MingaEditor.Workspace.ChromeState do
 
   alias Minga.Buffer
   alias Minga.Language
-  alias MingaEditor.State.AgentGroup
+  alias MingaEditor.State.Workspace
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
@@ -82,7 +82,7 @@ defmodule MingaEditor.Workspace.ChromeState do
   defp tab_bar(_state), do: nil
 
   @spec active_workspace_id(TabBar.t() | nil) :: non_neg_integer()
-  defp active_workspace_id(%TabBar{} = tb), do: TabBar.active_group_id(tb)
+  defp active_workspace_id(%TabBar{} = tb), do: TabBar.active_workspace_id(tb)
   defp active_workspace_id(nil), do: @manual_workspace_id
 
   @spec active_tab_id(TabBar.t() | nil) :: Tab.id() | nil
@@ -98,14 +98,15 @@ defmodule MingaEditor.Workspace.ChromeState do
 
   @spec manual_workspace_summary(map(), TabBar.t() | nil) :: WorkspaceSummary.t()
   defp manual_workspace_summary(state, tb) do
+    manual_workspace = tab_bar_manual_workspace(tb)
     manual_tabs = workspace_tabs(tb, @manual_workspace_id)
 
     WorkspaceSummary.new(
       id: @manual_workspace_id,
       kind: :manual,
-      label: manual_workspace_label(state),
-      icon: "folder",
-      color: @manual_workspace_color,
+      label: manual_workspace_label(state, manual_workspace),
+      icon: manual_workspace_icon(manual_workspace),
+      color: manual_workspace_color(manual_workspace),
       status: :idle,
       attention?: Enum.any?(manual_tabs, & &1.attention),
       tab_count: length(manual_tabs),
@@ -116,21 +117,48 @@ defmodule MingaEditor.Workspace.ChromeState do
     )
   end
 
-  @spec manual_workspace_label(map()) :: String.t()
-  defp manual_workspace_label(%{workspace: %{custom_name: custom_name}})
+  @spec tab_bar_manual_workspace(TabBar.t() | nil) :: Workspace.t() | nil
+  defp tab_bar_manual_workspace(%TabBar{} = tb),
+    do: TabBar.get_workspace(tb, @manual_workspace_id)
+
+  defp tab_bar_manual_workspace(nil), do: nil
+
+  @spec manual_workspace_label(map(), Workspace.t() | nil) :: String.t()
+  defp manual_workspace_label(_state, %Workspace{custom_name: custom_name})
        when is_binary(custom_name) and custom_name != "" do
     custom_name
   end
 
-  defp manual_workspace_label(%{workspace: %{file_tree: %FileTreeState{project_root: root}}}) do
+  defp manual_workspace_label(%{workspace: %{custom_name: custom_name}}, _workspace)
+       when is_binary(custom_name) and custom_name != "" do
+    custom_name
+  end
+
+  defp manual_workspace_label(
+         %{workspace: %{file_tree: %FileTreeState{project_root: root}}},
+         _workspace
+       ) do
     project_label(root)
   end
 
-  defp manual_workspace_label(%{file_tree: %FileTreeState{project_root: root}}) do
+  defp manual_workspace_label(%{file_tree: %FileTreeState{project_root: root}}, _workspace) do
     project_label(root)
   end
 
-  defp manual_workspace_label(_state), do: "Files"
+  defp manual_workspace_label(_state, %Workspace{label: label})
+       when is_binary(label) and label != "" do
+    label
+  end
+
+  defp manual_workspace_label(_state, _workspace), do: "Files"
+
+  @spec manual_workspace_icon(Workspace.t() | nil) :: String.t()
+  defp manual_workspace_icon(%Workspace{icon: icon}) when is_binary(icon) and icon != "", do: icon
+  defp manual_workspace_icon(_workspace), do: "folder"
+
+  @spec manual_workspace_color(Workspace.t() | nil) :: non_neg_integer()
+  defp manual_workspace_color(%Workspace{color: color}) when is_integer(color), do: color
+  defp manual_workspace_color(_workspace), do: @manual_workspace_color
 
   @spec project_label(String.t() | nil) :: String.t()
   defp project_label(root) when is_binary(root) and root != "" do
@@ -144,11 +172,13 @@ defmodule MingaEditor.Workspace.ChromeState do
 
   @spec agent_workspace_summaries(TabBar.t()) :: [WorkspaceSummary.t()]
   defp agent_workspace_summaries(%TabBar{} = tb) do
-    Enum.map(tb.agent_groups, &agent_workspace_summary(tb, &1))
+    tb.workspaces
+    |> Enum.filter(&(&1.kind == :agent))
+    |> Enum.map(&agent_workspace_summary(tb, &1))
   end
 
-  @spec agent_workspace_summary(TabBar.t(), AgentGroup.t()) :: WorkspaceSummary.t()
-  defp agent_workspace_summary(%TabBar{} = tb, %AgentGroup{} = group) do
+  @spec agent_workspace_summary(TabBar.t(), Workspace.t()) :: WorkspaceSummary.t()
+  defp agent_workspace_summary(%TabBar{} = tb, %Workspace{} = group) do
     tabs = workspace_tabs(tb, group.id)
 
     WorkspaceSummary.new(
@@ -167,12 +197,12 @@ defmodule MingaEditor.Workspace.ChromeState do
     )
   end
 
-  @spec running_background_count(AgentGroup.t()) :: non_neg_integer()
-  defp running_background_count(%AgentGroup{agent_status: status})
+  @spec running_background_count(Workspace.t()) :: non_neg_integer()
+  defp running_background_count(%Workspace{agent_status: status})
        when status in [:plan, :thinking, :tool_executing],
        do: 1
 
-  defp running_background_count(%AgentGroup{}), do: 0
+  defp running_background_count(%Workspace{}), do: 0
 
   @spec visible_tabs(map(), TabBar.t() | nil, non_neg_integer()) :: [TabSummary.t()]
   defp visible_tabs(_state, nil, _active_workspace_id), do: []
@@ -185,7 +215,9 @@ defmodule MingaEditor.Workspace.ChromeState do
   end
 
   @spec workspace_tabs(TabBar.t() | nil, non_neg_integer()) :: [Tab.t()]
-  defp workspace_tabs(%TabBar{} = tb, workspace_id), do: TabBar.tabs_in_group(tb, workspace_id)
+  defp workspace_tabs(%TabBar{} = tb, workspace_id),
+    do: TabBar.tabs_in_workspace(tb, workspace_id)
+
   defp workspace_tabs(nil, _workspace_id), do: []
 
   @spec tab_summary(map(), Tab.t(), non_neg_integer()) :: TabSummary.t()

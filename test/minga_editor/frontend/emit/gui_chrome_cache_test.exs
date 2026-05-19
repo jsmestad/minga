@@ -574,9 +574,9 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       refute caches2.last_gui_minibuffer == caches.last_gui_minibuffer
     end
 
-    test "agent group cache changes when active group changes" do
+    test "workspace cache changes when active group changes" do
       state = gui_state()
-      tb = tab_bar_with_two_agent_groups()
+      tb = tab_bar_with_two_workspaces()
       state_a = put_in(state.shell_state.tab_bar, tb)
       sb_data = StatusBarData.from_state(state_a)
 
@@ -593,7 +593,7 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
 
       flush_port_casts()
 
-      refute caches2.last_gui_agent_groups_fp == caches.last_gui_agent_groups_fp
+      refute caches2.last_gui_workspaces_fp == caches.last_gui_workspaces_fp
     end
 
     test "agent chat cache changes when prompt cursor moves without text changes" do
@@ -683,15 +683,15 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
     }
   end
 
-  defp tab_bar_with_two_agent_groups do
+  defp tab_bar_with_two_workspaces do
     tb = TabBar.new(Tab.new_file(1, "a.ex"))
-    {tb, group_a} = TabBar.add_agent_group(tb, "A")
-    {tb, group_b} = TabBar.add_agent_group(tb, "B")
+    {tb, group_a} = TabBar.add_workspace(tb, "A")
+    {tb, group_b} = TabBar.add_workspace(tb, "B")
     {tb, tab_b} = TabBar.insert(tb, :file, "b.ex")
 
     tb
-    |> TabBar.move_tab_to_group(1, group_a.id)
-    |> TabBar.move_tab_to_group(tab_b.id, group_b.id)
+    |> TabBar.move_tab_to_workspace(1, group_a.id)
+    |> TabBar.move_tab_to_workspace(tab_b.id, group_b.id)
   end
 
   defp agent_chat_state do

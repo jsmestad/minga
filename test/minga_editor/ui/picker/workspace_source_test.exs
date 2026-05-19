@@ -1,4 +1,4 @@
-defmodule MingaEditor.UI.Picker.AgentGroupSourceTest do
+defmodule MingaEditor.UI.Picker.WorkspaceSourceTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.State.Buffers
@@ -7,7 +7,7 @@ defmodule MingaEditor.UI.Picker.AgentGroupSourceTest do
   alias MingaEditor.State.TabBar
   alias MingaEditor.VimState
   alias MingaEditor.Viewport
-  alias MingaEditor.UI.Picker.AgentGroupSource
+  alias MingaEditor.UI.Picker.WorkspaceSource
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Theme
 
@@ -27,33 +27,32 @@ defmodule MingaEditor.UI.Picker.AgentGroupSourceTest do
   end
 
   describe "candidates/1" do
-    test "returns one item per agent group with tabs" do
+    test "returns one item per workspace with tabs, including manual" do
       tb = TabBar.new(Tab.new_file(1, "a.ex"))
       {tb, _} = TabBar.add(tb, :agent, "Agent")
-      {tb, group} = TabBar.add_agent_group(tb, "Research")
-      tb = TabBar.move_tab_to_group(tb, 2, group.id)
+      {tb, group} = TabBar.add_workspace(tb, "Research")
+      tb = TabBar.move_tab_to_workspace(tb, 2, group.id)
 
-      items = AgentGroupSource.candidates(fake_context(tb))
-      assert length(items) == 1
-      assert hd(items).id == group.id
+      items = WorkspaceSource.candidates(fake_context(tb))
+      assert Enum.map(items, & &1.id) == [0, group.id]
     end
 
-    test "filters out groups with no tabs" do
+    test "filters out agent workspaces with no tabs" do
       tb = TabBar.new(Tab.new_file(1, "a.ex"))
-      {tb, _} = TabBar.add_agent_group(tb, "Empty")
+      {tb, _} = TabBar.add_workspace(tb, "Empty")
 
-      items = AgentGroupSource.candidates(fake_context(tb))
-      assert items == []
+      items = WorkspaceSource.candidates(fake_context(tb))
+      assert Enum.map(items, & &1.id) == [0]
     end
 
     test "shows file names in description" do
       tb = TabBar.new(Tab.new_file(1, "editor.ex"))
       {tb, _} = TabBar.add(tb, :file, "main.ex")
-      {tb, group} = TabBar.add_agent_group(tb, "Work")
-      tb = TabBar.move_tab_to_group(tb, 1, group.id)
-      tb = TabBar.move_tab_to_group(tb, 2, group.id)
+      {tb, group} = TabBar.add_workspace(tb, "Work")
+      tb = TabBar.move_tab_to_workspace(tb, 1, group.id)
+      tb = TabBar.move_tab_to_workspace(tb, 2, group.id)
 
-      [item] = AgentGroupSource.candidates(fake_context(tb))
+      [item] = WorkspaceSource.candidates(fake_context(tb))
       assert item.description =~ "editor.ex"
       assert item.description =~ "main.ex"
     end
@@ -72,7 +71,7 @@ defmodule MingaEditor.UI.Picker.AgentGroupSourceTest do
         theme: Theme.get!(:doom_one)
       }
 
-      assert AgentGroupSource.candidates(ctx) == []
+      assert WorkspaceSource.candidates(ctx) == []
     end
   end
 
@@ -80,12 +79,12 @@ defmodule MingaEditor.UI.Picker.AgentGroupSourceTest do
     test "switches active tab to first tab in selected group" do
       tb = TabBar.new(Tab.new_file(1, "a.ex"))
       {tb, _} = TabBar.add(tb, :file, "b.ex")
-      {tb, group} = TabBar.add_agent_group(tb, "Agent")
-      tb = TabBar.move_tab_to_group(tb, 2, group.id)
+      {tb, group} = TabBar.add_workspace(tb, "Agent")
+      tb = TabBar.move_tab_to_workspace(tb, 2, group.id)
       tb = TabBar.switch_to(tb, 1)
 
-      tb = TabBar.switch_to_group(tb, group.id)
-      assert TabBar.active_group_id(tb) == group.id
+      tb = TabBar.switch_to_workspace(tb, group.id)
+      assert TabBar.active_workspace_id(tb) == group.id
       assert tb.active_id == 2
     end
   end
@@ -93,7 +92,7 @@ defmodule MingaEditor.UI.Picker.AgentGroupSourceTest do
   describe "on_cancel/1" do
     test "returns state unchanged" do
       state = %{shell_state: %{tab_bar: TabBar.new(Tab.new_file(1, "a.ex"))}}
-      assert AgentGroupSource.on_cancel(state) == state
+      assert WorkspaceSource.on_cancel(state) == state
     end
   end
 end

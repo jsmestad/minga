@@ -36,7 +36,7 @@ defmodule MingaEditor.Shell.Traditional do
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer
-  alias MingaEditor.State.AgentGroup
+  alias MingaEditor.State.Workspace
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
@@ -120,26 +120,26 @@ defmodule MingaEditor.Shell.Traditional do
   def handle_gui_action(
         %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
         workspace,
-        {:agent_group_close, ws_id}
+        {:workspace_close, ws_id}
       ) do
-    {%{shell_state | tab_bar: TabBar.remove_group(tb, ws_id)}, workspace}
+    {%{shell_state | tab_bar: TabBar.remove_workspace(tb, ws_id)}, workspace}
   end
 
   def handle_gui_action(
         %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
         workspace,
-        {:agent_group_rename, ws_id, name}
+        {:workspace_rename, ws_id, name}
       ) do
-    tb = TabBar.update_group(tb, ws_id, &AgentGroup.rename(&1, name))
+    tb = TabBar.update_workspace(tb, ws_id, &Workspace.rename(&1, name))
     {%{shell_state | tab_bar: tb}, workspace}
   end
 
   def handle_gui_action(
         %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
         workspace,
-        {:agent_group_set_icon, ws_id, icon}
+        {:workspace_set_icon, ws_id, icon}
       ) do
-    tb = TabBar.update_group(tb, ws_id, &AgentGroup.set_icon(&1, icon))
+    tb = TabBar.update_workspace(tb, ws_id, &Workspace.set_icon(&1, icon))
     {%{shell_state | tab_bar: tb}, workspace}
   end
 

@@ -42,7 +42,7 @@ defmodule MingaEditor.Renderer.Caches do
     # ── GUI chrome fingerprints ───────────────────────────────────────────────
     last_gui_theme: nil,
     last_gui_tab_bar_fp: nil,
-    last_gui_agent_groups_fp: nil,
+    last_gui_workspaces_fp: nil,
     last_gui_file_tree_fp: nil,
     last_gui_git_status_fp: nil,
     last_gui_which_key_fp: nil,
@@ -74,7 +74,7 @@ defmodule MingaEditor.Renderer.Caches do
           last_window_bg: non_neg_integer() | nil,
           last_gui_theme: integer() | nil,
           last_gui_tab_bar_fp: integer() | nil,
-          last_gui_agent_groups_fp: integer() | nil,
+          last_gui_workspaces_fp: integer() | nil,
           last_gui_file_tree_fp:
             integer()
             | {:ready, non_neg_integer(), non_neg_integer()}

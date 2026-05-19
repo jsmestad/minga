@@ -36,7 +36,7 @@ defmodule MingaEditor.State.Tab do
   @typedoc "Remote connection status for a tab backed by a remote session."
   @type connection_status :: :connected | :disconnected | :ended | :unavailable | nil
 
-  @typedoc "Workspace group id. 0 = manual/ungrouped workspace."
+  @typedoc "Workspace id. 0 = manual workspace."
   @type group_id :: non_neg_integer()
 
   @typedoc "A tab."

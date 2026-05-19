@@ -1,4 +1,4 @@
-defmodule MingaEditor.UI.Picker.AgentGroupIconSource do
+defmodule MingaEditor.UI.Picker.WorkspaceIconSource do
   @moduledoc """
   Picker source for selecting a workspace icon from curated SF Symbols.
 
@@ -8,7 +8,7 @@ defmodule MingaEditor.UI.Picker.AgentGroupIconSource do
 
   @behaviour MingaEditor.UI.Picker.Source
 
-  alias MingaEditor.State.AgentGroup
+  alias MingaEditor.State.Workspace
   alias MingaEditor.State.TabBar
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
@@ -73,8 +73,8 @@ defmodule MingaEditor.UI.Picker.AgentGroupIconSource do
   @spec candidates(Context.t()) :: [Item.t()]
   def candidates(%Context{tab_bar: %TabBar{} = tb}) do
     current_icon =
-      case TabBar.active_group(tb) do
-        %AgentGroup{icon: icon} -> icon
+      case TabBar.active_workspace(tb) do
+        %Workspace{icon: icon} -> icon
         _ -> ""
       end
 
@@ -97,8 +97,8 @@ defmodule MingaEditor.UI.Picker.AgentGroupIconSource do
         %Item{id: icon_name},
         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state
       ) do
-    ws_id = TabBar.active_group_id(tb)
-    tb = TabBar.update_group(tb, ws_id, &AgentGroup.set_icon(&1, icon_name))
+    ws_id = TabBar.active_workspace_id(tb)
+    tb = TabBar.update_workspace(tb, ws_id, &Workspace.set_icon(&1, icon_name))
     MingaEditor.State.set_tab_bar(state, tb)
   end
 

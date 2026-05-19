@@ -1984,18 +1984,18 @@ struct GUIToolManagerDecoderTests {
     }
 }
 
-// MARK: - gui_agent_groups (0x86)
+// MARK: - gui_workspaces (0x86)
 
 @Suite("GUI Agent Groups Decoder")
-struct GUIAgentGroupsDecoderTests {
-    @Test("Decode agent groups with one group")
+struct GUIWorkspacesDecoderTests {
+    @Test("Decode workspaces with one group")
     func decodeOneGroup() throws {
         var data = Data()
-        data.append(OP_GUI_AGENT_GROUPS)
+        data.append(OP_GUI_WORKSPACES)
         appendU16(&data, 1) // active_group_id
         data.append(1) // group_count
 
-        // Agent group (no kind byte, all groups are agents)
+        // Agent workspace (no kind byte, all entries are agent workspaces)
         appendU16(&data, 1) // id
         data.append(1) // agent_status = thinking
         appendRGB(&data, 0xC6, 0x78, 0xDD) // color
@@ -2006,8 +2006,8 @@ struct GUIAgentGroupsDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiAgentGroups(let activeId, let groups) = cmd else {
-            Issue.record("Expected .guiAgentGroups, got \(String(describing: cmd))")
+        guard case .guiWorkspaces(let activeId, let groups) = cmd else {
+            Issue.record("Expected .guiWorkspaces, got \(String(describing: cmd))")
             return
         }
 
@@ -2023,26 +2023,26 @@ struct GUIAgentGroupsDecoderTests {
         #expect(groups[0].icon == "cpu")
     }
 
-    @Test("Decode agent groups with zero groups")
+    @Test("Decode workspaces with zero groups")
     func decodeEmpty() throws {
         var data = Data()
-        data.append(OP_GUI_AGENT_GROUPS)
+        data.append(OP_GUI_WORKSPACES)
         appendU16(&data, 0) // active_group_id
         data.append(0) // group_count
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == 4)
 
-        guard case .guiAgentGroups(_, let groups) = cmd else {
-            Issue.record("Expected .guiAgentGroups"); return
+        guard case .guiWorkspaces(_, let groups) = cmd else {
+            Issue.record("Expected .guiWorkspaces"); return
         }
         #expect(groups.isEmpty)
     }
 
-    @Test("Decode agent group with long label")
+    @Test("Decode workspace with long label")
     func decodeLongLabel() throws {
         var data = Data()
-        data.append(OP_GUI_AGENT_GROUPS)
+        data.append(OP_GUI_WORKSPACES)
         appendU16(&data, 1) // active_group_id
         data.append(1) // group_count
 
@@ -2057,8 +2057,8 @@ struct GUIAgentGroupsDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiAgentGroups(let activeId, let groups) = cmd else {
-            Issue.record("Expected .guiAgentGroups"); return
+        guard case .guiWorkspaces(let activeId, let groups) = cmd else {
+            Issue.record("Expected .guiWorkspaces"); return
         }
 
         #expect(activeId == 1)

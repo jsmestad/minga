@@ -1,8 +1,8 @@
-defmodule MingaEditor.UI.Picker.AgentGroupSource do
+defmodule MingaEditor.UI.Picker.WorkspaceSource do
   @moduledoc """
   Picker source that lists all workspaces.
 
-  Shows agent group name, status, and tab count.
+  Shows workspace name, status, and tab count.
   The active workspace is marked. Selecting a workspace switches to it.
   """
 
@@ -12,7 +12,7 @@ defmodule MingaEditor.UI.Picker.AgentGroupSource do
   alias MingaEditor.UI.Picker.Item
 
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.AgentGroup
+  alias MingaEditor.State.Workspace
   alias MingaEditor.State.TabBar
 
   @impl true
@@ -23,15 +23,15 @@ defmodule MingaEditor.UI.Picker.AgentGroupSource do
   @spec candidates(Context.t()) :: [Item.t()]
   def candidates(%Context{tab_bar: %TabBar{} = tb}) do
     # Filter out workspaces with no tabs (empty manual workspace)
-    tb.agent_groups
+    tb.workspaces
     |> Enum.filter(fn ws ->
-      TabBar.tabs_in_group(tb, ws.id) != []
+      TabBar.tabs_in_workspace(tb, ws.id) != []
     end)
     |> Enum.map(fn ws ->
       icon = group_icon(ws)
       label = "#{icon} #{ws.label}"
-      active_marker = if ws.id == TabBar.active_group_id(tb), do: " \u{2022}", else: ""
-      tabs = TabBar.tabs_in_group(tb, ws.id)
+      active_marker = if ws.id == TabBar.active_workspace_id(tb), do: " \u{2022}", else: ""
+      tabs = TabBar.tabs_in_workspace(tb, ws.id)
       tab_count = length(tabs)
       status = agent_status_text(ws)
 
@@ -64,9 +64,9 @@ defmodule MingaEditor.UI.Picker.AgentGroupSource do
         %Item{id: workspace_id},
         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state
       ) do
-    # switch_to_group activates the first tab in the target workspace,
+    # switch_to_workspace activates the first tab in the target workspace,
     # then switch_tab does the full context snapshot/restore cycle.
-    tb = TabBar.switch_to_group(tb, workspace_id)
+    tb = TabBar.switch_to_workspace(tb, workspace_id)
     EditorState.switch_tab(EditorState.set_tab_bar(state, tb), tb.active_id)
   end
 
@@ -78,30 +78,30 @@ defmodule MingaEditor.UI.Picker.AgentGroupSource do
 
   # ── Helpers ──────────────────────────────────────────────────────────────
 
-  @spec group_icon(AgentGroup.t()) :: String.t()
-  defp group_icon(%AgentGroup{}), do: "\u{F024B}"
+  @spec group_icon(Workspace.t()) :: String.t()
+  defp group_icon(%Workspace{}), do: "\u{F024B}"
 
-  @spec agent_status_text(AgentGroup.t()) :: String.t()
-  defp agent_status_text(%AgentGroup{agent_status: :thinking}),
+  @spec agent_status_text(Workspace.t()) :: String.t()
+  defp agent_status_text(%Workspace{agent_status: :thinking}),
     do: " \u{21BB} thinking"
 
-  defp agent_status_text(%AgentGroup{agent_status: :tool_executing}),
+  defp agent_status_text(%Workspace{agent_status: :tool_executing}),
     do: " \u{2699} executing"
 
-  defp agent_status_text(%AgentGroup{agent_status: :plan}), do: " ✎ plan"
-  defp agent_status_text(%AgentGroup{agent_status: :error}), do: " \u{26A0} error"
-  defp agent_status_text(%AgentGroup{agent_status: :idle}), do: " \u{2713} idle"
+  defp agent_status_text(%Workspace{agent_status: :plan}), do: " ✎ plan"
+  defp agent_status_text(%Workspace{agent_status: :error}), do: " \u{26A0} error"
+  defp agent_status_text(%Workspace{agent_status: :idle}), do: " \u{2713} idle"
   defp agent_status_text(_), do: ""
 
-  @spec status_annotation(AgentGroup.t()) :: String.t() | nil
-  defp status_annotation(%AgentGroup{agent_status: :thinking}),
+  @spec status_annotation(Workspace.t()) :: String.t() | nil
+  defp status_annotation(%Workspace{agent_status: :thinking}),
     do: "\u{21BB} thinking"
 
-  defp status_annotation(%AgentGroup{agent_status: :tool_executing}),
+  defp status_annotation(%Workspace{agent_status: :tool_executing}),
     do: "\u{2699} executing"
 
-  defp status_annotation(%AgentGroup{agent_status: :plan}), do: "✎ plan"
-  defp status_annotation(%AgentGroup{agent_status: :error}), do: "\u{26A0} error"
-  defp status_annotation(%AgentGroup{agent_status: :idle}), do: "\u{2713} idle"
+  defp status_annotation(%Workspace{agent_status: :plan}), do: "✎ plan"
+  defp status_annotation(%Workspace{agent_status: :error}), do: "\u{26A0} error"
+  defp status_annotation(%Workspace{agent_status: :idle}), do: "\u{2713} idle"
   defp status_annotation(_), do: nil
 end

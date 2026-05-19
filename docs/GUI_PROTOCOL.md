@@ -146,8 +146,8 @@ Flags bits:
   bit 3: has_attention
   bits 4-6: agent_status (0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan)
 
-group_id: workspace group this tab belongs to. 0 = manual/ungrouped workspace.
-Non-zero values match workspace IDs from gui_agent_groups (0x86). The frontend
+group_id: workspace id this tab belongs to. 0 = manual workspace.
+Non-zero values match workspace IDs from gui_workspaces (0x86). The frontend
 renders group separators at group_id transitions in the tab strip.
 ```
 
@@ -762,14 +762,14 @@ Toast when toast_present == 1:
 
 When the git status panel is closed, the BEAM sends `repo_state = not_a_repo`, no entries, and an empty `entry_base_path` as the hide signal. A non-git project opened in the Source Control tab also uses `repo_state = not_a_repo`, but includes the project root so the frontend can show the native "Not a git repository" empty state instead of hiding the panel. The frontend should still copy `syncing` and `toast` so remote operation feedback remains accurate while the panel is hidden.
 
-### 0x86 — gui_agent_groups
+### 0x86 — gui_workspaces
 
 Agent-workspace indicator and dropdown data for progressive tab grouping. Sent alongside gui_tab_bar when agent workspaces exist.
 
 This is the legacy agent-group opcode. The BEAM-side `Workspace.ChromeState` projection includes the synthesized manual workspace, but this opcode sends only agent workspaces so existing native decoders do not infer a manual workspace from the agent-group payload. A later canonical workspace opcode can carry manual-vs-agent kind explicitly.
 
 ```
-opcode(1) + active_group_id(2) + agent_workspace_count(1) + agent_workspaces...
+opcode(1) + active_workspace_id(2) + agent_workspace_count(1) + agent_workspaces...
 
 Per agent workspace:
   id(2) + agent_status(1) + color_r(1) + color_g(1) + color_b(1)
@@ -782,7 +782,7 @@ tab_count: number of tabs currently in this agent workspace
 
 Agent workspaces are auto-created when an agent session starts and removed when the session ends (their tabs migrate to the manual workspace).
 
-The frontend uses `active_group_id` to highlight the active agent workspace in the indicator/dropdown. Tab entries in gui_tab_bar carry a `group_id` field that matches workspace IDs, enabling the frontend to render group separators at group transitions.
+The frontend uses `active_workspace_id` to highlight the active agent workspace in the indicator/dropdown. Tab entries in gui_tab_bar carry a `group_id` field that matches workspace IDs, enabling the frontend to render group separators at group transitions.
 
 ## GUI Action Input Opcode (Frontend → BEAM)
 
@@ -824,9 +824,9 @@ opcode(1) + action_type(1) + payload...
 | 0x1C | git_unstage_all | (empty) | Unstage all |
 | 0x1D | git_commit | amend(1) + msg_len(2) + msg(msg_len) | Commit with message, or amend when `amend` is 1. New frontends should use this action for both normal and amend commits. |
 | 0x1E | git_open_file | path_len(2) + path(path_len) | Open file in editor |
-| 0x1F | agent_group_rename | id(2) + name_len(2) + name(name_len) | Rename an agent workspace group |
-| 0x20 | agent_group_set_icon | id(2) + icon_len(1) + icon(icon_len) | Change an agent workspace icon |
-| 0x21 | agent_group_close | id(2) | Close an agent workspace group |
+| 0x1F | workspace_rename | id(2) + name_len(2) + name(name_len) | Rename an agent workspace group |
+| 0x20 | workspace_set_icon | id(2) + icon_len(1) + icon(icon_len) | Change an agent workspace icon |
+| 0x21 | workspace_close | id(2) | Close an agent workspace |
 | 0x22 | space_leader_chord | codepoint(4) + modifiers(1) | Enter leader mode from a clean Space chord |
 | 0x23 | space_leader_retract | codepoint(4) + modifiers(1) | Retract a literal Space and enter leader mode |
 | 0x24 | find_pasteboard_search | direction(1) + text_len(2) + text(text_len) | Search from the macOS find pasteboard |

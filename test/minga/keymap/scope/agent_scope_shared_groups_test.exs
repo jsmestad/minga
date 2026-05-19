@@ -1,4 +1,4 @@
-defmodule Minga.Keymap.Scope.AgentGroupsTest do
+defmodule Minga.Keymap.Scope.AgentScopeSharedGroupsTest do
   @moduledoc "Verifies the agent scope uses shared groups correctly."
   use ExUnit.Case, async: true
 
