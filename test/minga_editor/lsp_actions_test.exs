@@ -1,5 +1,5 @@
 defmodule MingaEditor.LspActionsTest do
-  @moduledoc "Tests for LspActions: definition and hover response parsing and navigation."
+  @moduledoc "Tests for public LspActions parsing, response handling, and picker source behavior."
 
   use ExUnit.Case, async: true
 
@@ -9,660 +9,396 @@ defmodule MingaEditor.LspActionsTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Highlighting
-  alias MingaEditor.VimState
-  alias MingaEditor.Viewport
   alias MingaEditor.UI.Picker.CodeActionSource
   alias MingaEditor.UI.Picker.Context, as: PickerContext
+  alias MingaEditor.VimState
+  alias MingaEditor.Viewport
   alias MingaEditor.Workspace.State, as: WorkspaceState
 
-  # ── parse_location/1 ──────────────────────────────────────────────────────
-
   describe "parse_location/1" do
-    test "parses a single Location" do
-      location = %{
-        "uri" => "file:///tmp/foo.ex",
-        "range" => %{
-          "start" => %{"line" => 10, "character" => 5},
-          "end" => %{"line" => 10, "character" => 15}
-        }
-      }
-
-      assert {"file:///tmp/foo.ex", 10, 5} = LspActions.parse_location(location)
-    end
-
-    test "parses an array of Locations (picks first)" do
-      locations = [
-        %{
-          "uri" => "file:///tmp/first.ex",
-          "range" => %{
-            "start" => %{"line" => 1, "character" => 0},
-            "end" => %{"line" => 1, "character" => 10}
-          }
-        },
-        %{
-          "uri" => "file:///tmp/second.ex",
-          "range" => %{
-            "start" => %{"line" => 20, "character" => 3},
-            "end" => %{"line" => 20, "character" => 8}
-          }
-        }
+    test "extracts the first target URI and start position from supported LSP shapes" do
+      cases = [
+        {location("file:///tmp/foo.ex", 10, 5), {"file:///tmp/foo.ex", 10, 5}},
+        {[location("file:///tmp/first.ex", 1, 0), location("file:///tmp/second.ex", 20, 3)],
+         {"file:///tmp/first.ex", 1, 0}},
+        {%{
+           "targetUri" => "file:///tmp/target.ex",
+           "targetRange" => %{
+             "start" => %{"line" => 42, "character" => 2},
+             "end" => %{"line" => 42, "character" => 20}
+           },
+           "originSelectionRange" => %{
+             "start" => %{"line" => 5, "character" => 0},
+             "end" => %{"line" => 5, "character" => 10}
+           }
+         }, {"file:///tmp/target.ex", 42, 2}}
       ]
 
-      assert {"file:///tmp/first.ex", 1, 0} = LspActions.parse_location(locations)
+      for {input, expected} <- cases do
+        assert LspActions.parse_location(input) == expected
+      end
     end
 
-    test "parses a LocationLink" do
-      link = %{
-        "targetUri" => "file:///tmp/target.ex",
-        "targetRange" => %{
-          "start" => %{"line" => 42, "character" => 2},
-          "end" => %{"line" => 42, "character" => 20}
-        },
-        "originSelectionRange" => %{
-          "start" => %{"line" => 5, "character" => 0},
-          "end" => %{"line" => 5, "character" => 10}
-        }
-      }
-
-      assert {"file:///tmp/target.ex", 42, 2} = LspActions.parse_location(link)
-    end
-
-    test "returns nil for empty array" do
-      assert LspActions.parse_location([]) == nil
-    end
-
-    test "returns nil for nil" do
-      assert LspActions.parse_location(nil) == nil
-    end
-
-    test "returns nil for unrecognized format" do
-      assert LspActions.parse_location("garbage") == nil
+    test "returns nil for unsupported location responses" do
+      for input <- [[], nil, "garbage"] do
+        assert LspActions.parse_location(input) == nil
+      end
     end
   end
-
-  # ── extract_hover_text/1 ──────────────────────────────────────────────────
 
   describe "extract_hover_text/1" do
-    test "extracts plain text from MarkupContent" do
-      content = %{"kind" => "plaintext", "value" => "some docs"}
-      assert LspActions.extract_hover_text(content) == "some docs"
-    end
-
-    test "extracts and strips markdown from MarkupContent" do
-      content = %{
-        "kind" => "markdown",
-        "value" => "```elixir\ndef hello, do: :world\n```\n\nSome description."
-      }
-
-      result = LspActions.extract_hover_text(content)
-      assert result == "def hello, do: :world Some description."
-    end
-
-    test "handles plain string" do
-      assert LspActions.extract_hover_text("just a string") == "just a string"
-    end
-
-    test "handles MarkedString array" do
-      items = [
-        %{"language" => "elixir", "value" => "def foo()"},
-        "Some docs"
+    test "normalizes hover content from supported LSP shapes" do
+      cases = [
+        {%{"kind" => "plaintext", "value" => "some docs"}, "some docs"},
+        {%{
+           "kind" => "markdown",
+           "value" => "```elixir\ndef hello, do: :world\n```\n\nSome description."
+         }, "def hello, do: :world Some description."},
+        {"just a string", "just a string"},
+        {[%{"language" => "elixir", "value" => "def foo()"}, "Some docs"],
+         "def foo() | Some docs"},
+        {nil, ""},
+        {"", ""},
+        {"```\ncode here\n```", "code here"}
       ]
 
-      result = LspActions.extract_hover_text(items)
-      assert result == "def foo() | Some docs"
-    end
-
-    test "handles nil gracefully" do
-      assert LspActions.extract_hover_text(nil) == ""
-    end
-
-    test "handles empty string" do
-      assert LspActions.extract_hover_text("") == ""
-    end
-
-    test "strips code fences from markdown" do
-      text = "```\ncode here\n```"
-      result = LspActions.extract_hover_text(text)
-      assert result == "code here"
+      for {input, expected} <- cases do
+        assert LspActions.extract_hover_text(input) == expected
+      end
     end
   end
 
-  # ── handle_definition_response/2 ──────────────────────────────────────────
+  describe "definition and hover responses" do
+    test "definition response reports errors and empty results" do
+      cases = [
+        {{:error, %{"message" => "fail"}}, "Definition request failed"},
+        {{:ok, nil}, "No definition found"},
+        {{:ok, []}, "No definition found"}
+      ]
 
-  describe "handle_definition_response/2" do
-    test "sets status message on error" do
-      state = fake_state()
-      result = LspActions.handle_definition_response(state, {:error, %{"message" => "fail"}})
-      assert result.shell_state.status_msg == "Definition request failed"
+      for {response, expected_status} <- cases do
+        result = LspActions.handle_definition_response(fake_state(), response)
+        assert result.shell_state.status_msg == expected_status
+      end
     end
 
-    test "sets status message when result is nil" do
-      state = fake_state()
-      result = LspActions.handle_definition_response(state, {:ok, nil})
-      assert result.shell_state.status_msg == "No definition found"
-    end
-
-    test "sets status message when result is empty list" do
-      state = fake_state()
-      result = LspActions.handle_definition_response(state, {:ok, []})
-      assert result.shell_state.status_msg == "No definition found"
-    end
-  end
-
-  # ── handle_peek_definition_response/2 ──────────────────────────────────────
-
-  describe "handle_peek_definition_response/2" do
-    test "creates focused popup with source preview and open action" do
-      path = Path.join(System.tmp_dir!(), "minga_peek_#{:erlang.unique_integer([:positive])}.ex")
+    @tag :tmp_dir
+    test "peek definition opens a focused popup with source preview and open action", %{
+      tmp_dir: tmp_dir
+    } do
+      path = Path.join(tmp_dir, "peek_target.ex")
       File.write!(path, "defmodule Example do\n  def target do\n    :ok\n  end\nend\n")
 
-      location = %{
-        "uri" => "file://#{path}",
-        "range" => %{"start" => %{"line" => 1, "character" => 6}}
-      }
-
-      result = LspActions.handle_peek_definition_response(fake_state(), {:ok, location})
-
-      assert %HoverPopup{} = result.shell_state.hover_popup
-      assert result.shell_state.hover_popup.focused == true
-
-      assert result.shell_state.hover_popup.open_action ==
-               {:goto_location, "file://#{path}", 1, 6}
-
-      File.rm(path)
-    end
-  end
-
-  # ── handle_hover_response/2 ────────────────────────────────────────────────
-
-  describe "handle_hover_response/2" do
-    test "sets status message on error" do
-      state = fake_state()
-      result = LspActions.handle_hover_response(state, {:error, %{"message" => "fail"}})
-      assert result.shell_state.status_msg == "Hover request failed"
-    end
-
-    test "sets status message when result is nil" do
-      state = fake_state()
-      result = LspActions.handle_hover_response(state, {:ok, nil})
-      assert result.shell_state.status_msg == "No hover information"
-    end
-
-    test "creates hover popup for content" do
-      state = fake_state()
-      hover = %{"contents" => %{"kind" => "plaintext", "value" => "Returns :ok"}}
-      result = LspActions.handle_hover_response(state, {:ok, hover})
-      assert %HoverPopup{} = result.shell_state.hover_popup
-      assert result.shell_state.hover_popup.focused == false
-    end
-
-    test "creates hover popup for markdown content" do
-      state = fake_state()
-
-      hover = %{
-        "contents" => %{
-          "kind" => "markdown",
-          "value" => "```elixir\n@spec foo() :: :ok\n```"
-        }
-      }
-
-      result = LspActions.handle_hover_response(state, {:ok, hover})
-      assert %HoverPopup{} = result.shell_state.hover_popup
-      assert result.shell_state.hover_popup.content_lines != []
-    end
-
-    test "handles hover with no contents key" do
-      state = fake_state()
-      result = LspActions.handle_hover_response(state, {:ok, %{"range" => %{}}})
-      assert result.shell_state.status_msg == "No hover information"
-    end
-  end
-
-  # ── code_lens/1 ───────────────────────────────────────────────────────────
-
-  describe "code_lens/1" do
-    test "sets status_msg when no active buffer" do
-      state = fake_state()
-      result = LspActions.code_lens(state)
-      assert result.shell_state.status_msg == "No active buffer"
-    end
-
-    test "silently no-ops when no LSP client is registered" do
-      buf = start_supervised!({BufferProcess, content: "hello"})
-      state = fake_state_with_buffer(buf)
-      result = LspActions.code_lens(state)
-      assert result.shell_state.status_msg == nil
-    end
-  end
-
-  # ── handle_code_lens_response/2 ──────────────────────────────────────────
-
-  describe "handle_code_lens_response/2" do
-    test "stores resolved lenses with commands directly" do
-      {:ok, buf} = BufferProcess.start_link(content: "def hello do\n  :ok\nend")
-      state = fake_state_with_buffer(buf)
-
-      lens = %{
-        "range" => %{
-          "start" => %{"line" => 0, "character" => 0},
-          "end" => %{"line" => 0, "character" => 5}
-        },
-        "command" => %{"title" => "1 reference", "command" => "refs"}
-      }
-
-      result = LspActions.handle_code_lens_response(state, {:ok, [lens]})
-      assert length(result.lsp.code_lenses) == 1
-      assert hd(result.lsp.code_lenses).title == "1 reference"
-      assert hd(result.lsp.code_lenses).line == 0
-
-      GenServer.stop(buf)
-    end
-
-    test "error returns state unchanged" do
-      state = fake_state()
-      result = LspActions.handle_code_lens_response(state, {:error, "timeout"})
-      assert result == state
-    end
-
-    test "nil returns state unchanged" do
-      state = fake_state()
-      result = LspActions.handle_code_lens_response(state, {:ok, nil})
-      assert result == state
-    end
-
-    test "empty list returns state unchanged" do
-      state = fake_state()
-      result = LspActions.handle_code_lens_response(state, {:ok, []})
-      assert result == state
-    end
-  end
-
-  # ── handle_code_lens_resolve_response/2 ─────────────────────────────────
-
-  describe "handle_code_lens_resolve_response/2" do
-    test "merges resolved lens into existing lenses" do
-      {:ok, buf} = BufferProcess.start_link(content: "def hello do\n  :ok\nend")
-      state = fake_state_with_buffer(buf)
-
-      resolved = %{
-        "range" => %{
-          "start" => %{"line" => 0, "character" => 0},
-          "end" => %{"line" => 0, "character" => 5}
-        },
-        "command" => %{"title" => "2 references", "command" => "refs"}
-      }
-
-      result = LspActions.handle_code_lens_resolve_response(state, {:ok, resolved})
-      assert length(result.lsp.code_lenses) == 1
-      assert hd(result.lsp.code_lenses).title == "2 references"
-
-      GenServer.stop(buf)
-    end
-
-    test "ignores errors gracefully" do
-      state = fake_state()
-
-      state =
-        put_in(
-          state.lsp,
-          MingaEditor.State.LSP.set_code_lenses(state.lsp, [%{line: 0, title: "existing"}])
-        )
-
-      result = LspActions.handle_code_lens_resolve_response(state, {:error, "timeout"})
-      assert result.lsp.code_lenses == [%{line: 0, title: "existing"}]
-    end
-
-    test "ignores nil result" do
-      state = fake_state()
-      result = LspActions.handle_code_lens_resolve_response(state, {:ok, nil})
-      assert result == state
-    end
-  end
-
-  # ── handle_inlay_hint_response/2 ──────────────────────────────────────────
-
-  describe "handle_inlay_hint_response/2" do
-    test "stores parsed hints with correct line/col/label" do
-      {:ok, buf} = BufferProcess.start_link(content: "x = 1 + 2")
-      state = fake_state_with_buffer(buf)
-
-      hint = %{
-        "position" => %{"line" => 0, "character" => 2},
-        "label" => ": integer",
-        "kind" => 1,
-        "paddingLeft" => true,
-        "paddingRight" => false
-      }
-
-      result = LspActions.handle_inlay_hint_response(state, {:ok, [hint]})
-      assert length(result.lsp.inlay_hints) == 1
-      parsed = hd(result.lsp.inlay_hints)
-      assert parsed.line == 0
-      assert parsed.col == 2
-      assert parsed.label == ": integer"
-      assert parsed.kind == :type
-      assert parsed.padding_left == true
-      assert parsed.padding_right == false
-
-      GenServer.stop(buf)
-    end
-
-    test "handles label as array of InlayHintLabelPart" do
-      {:ok, buf} = BufferProcess.start_link(content: "x = 1")
-      state = fake_state_with_buffer(buf)
-
-      hint = %{
-        "position" => %{"line" => 0, "character" => 2},
-        "label" => [%{"value" => ": "}, %{"value" => "int"}],
-        "kind" => 1
-      }
-
-      result = LspActions.handle_inlay_hint_response(state, {:ok, [hint]})
-      assert hd(result.lsp.inlay_hints).label == ": int"
-
-      GenServer.stop(buf)
-    end
-
-    test "error is a no-op" do
-      state = fake_state()
-      state = put_in(state.lsp, MingaEditor.State.LSP.set_inlay_hints(state.lsp, [%{line: 0}]))
-      result = LspActions.handle_inlay_hint_response(state, {:error, "fail"})
-      assert result == state
-    end
-
-    test "nil is a no-op" do
-      state = fake_state()
-      state = put_in(state.lsp, MingaEditor.State.LSP.set_inlay_hints(state.lsp, [%{line: 0}]))
-      result = LspActions.handle_inlay_hint_response(state, {:ok, nil})
-      assert result == state
-    end
-
-    test "empty list is a no-op" do
-      state = fake_state()
-      state = put_in(state.lsp, MingaEditor.State.LSP.set_inlay_hints(state.lsp, [%{line: 0}]))
-      result = LspActions.handle_inlay_hint_response(state, {:ok, []})
-      assert result == state
-    end
-  end
-
-  # ── schedule_inlay_hints_on_scroll/1 ────────────────────────────────────
-
-  describe "schedule_inlay_hints_on_scroll/1" do
-    test "no-op when viewport hasn't changed" do
-      state = fake_state()
-      state = put_in(state.lsp, %{state.lsp | last_inlay_viewport_top: 0})
-
-      result = LspActions.schedule_inlay_hints_on_scroll(state)
-      assert result.lsp.inlay_hint_debounce_timer == nil
-    end
-
-    test "sets timer when viewport top changes" do
-      {:ok, buf} = BufferProcess.start_link(content: "hello")
-
-      state = %{fake_state() | backend: :zig}
-
-      ws = %{state.workspace | buffers: %{state.workspace.buffers | active: buf}}
-
-      state = %{
-        state
-        | workspace: ws,
-          terminal_viewport: %{state.terminal_viewport | top: 10}
-      }
-
-      result = LspActions.schedule_inlay_hints_on_scroll(state)
-      assert result.lsp.inlay_hint_debounce_timer != nil
-      assert result.lsp.last_inlay_viewport_top == 10
-      # Clean up timer
-      Process.cancel_timer(result.lsp.inlay_hint_debounce_timer)
-      GenServer.stop(buf)
-    end
-
-    test "skips timer in headless mode" do
-      {:ok, buf} = BufferProcess.start_link(content: "hello")
-
-      state = fake_state()
-
-      ws = %{state.workspace | buffers: %{state.workspace.buffers | active: buf}}
-
-      state = %{
-        state
-        | workspace: ws,
-          terminal_viewport: %{state.terminal_viewport | top: 10}
-      }
-
-      result = LspActions.schedule_inlay_hints_on_scroll(state)
-      assert result.lsp.inlay_hint_debounce_timer == nil
-      GenServer.stop(buf)
-    end
-
-    test "cancels previous timer and sets new one" do
-      {:ok, buf} = BufferProcess.start_link(content: "hello")
-
-      state = %{fake_state() | backend: :zig}
-
-      ws = %{state.workspace | buffers: %{state.workspace.buffers | active: buf}}
-
-      state = %{
-        state
-        | workspace: ws,
-          terminal_viewport: %{state.terminal_viewport | top: 5}
-      }
-
-      state1 = LspActions.schedule_inlay_hints_on_scroll(state)
-      timer1 = state1.lsp.inlay_hint_debounce_timer
-
-      state2 = %{state1 | terminal_viewport: %{state1.terminal_viewport | top: 15}}
-
-      state2 = LspActions.schedule_inlay_hints_on_scroll(state2)
-      timer2 = state2.lsp.inlay_hint_debounce_timer
-
-      assert timer1 != timer2
-      assert state2.lsp.last_inlay_viewport_top == 15
-      # Clean up
-      Process.cancel_timer(timer2)
-      GenServer.stop(buf)
-    end
-  end
-
-  # ── handle_prepare_rename_response/2 with Range ─────────────────────────
-
-  describe "handle_prepare_rename_response/2" do
-    test "prepareRename with placeholder uses placeholder directly" do
-      state = fake_state_with_vim()
+      uri = "file://#{path}"
 
       result =
-        LspActions.handle_prepare_rename_response(state, {:ok, %{"placeholder" => "myVar"}})
+        LspActions.handle_peek_definition_response(
+          fake_state(),
+          {:ok, location(uri, 1, 6)}
+        )
 
-      assert result.workspace.editing.mode == :command
-      assert result.workspace.editing.mode_state.input == "rename myVar"
+      assert %HoverPopup{focused: true, open_action: {:goto_location, ^uri, 1, 6}} =
+               result.shell_state.hover_popup
     end
 
-    test "prepareRename with Range + placeholder uses placeholder" do
-      state = fake_state_with_vim()
+    test "hover response reports empty results or creates an unfocused popup" do
+      empty_cases = [
+        {{:error, %{"message" => "fail"}}, "Hover request failed"},
+        {{:ok, nil}, "No hover information"},
+        {{:ok, %{"range" => %{}}}, "No hover information"}
+      ]
 
-      resp = %{
-        "range" => %{
-          "start" => %{"line" => 0, "character" => 4},
-          "end" => %{"line" => 0, "character" => 15}
-        },
-        "placeholder" => "hello_world"
-      }
+      for {response, expected_status} <- empty_cases do
+        assert LspActions.handle_hover_response(fake_state(), response).shell_state.status_msg ==
+                 expected_status
+      end
 
-      result = LspActions.handle_prepare_rename_response(state, {:ok, resp})
-      assert result.workspace.editing.mode == :command
-      assert result.workspace.editing.mode_state.input == "rename hello_world"
+      for hover <- [
+            %{"contents" => %{"kind" => "plaintext", "value" => "Returns :ok"}},
+            %{
+              "contents" => %{
+                "kind" => "markdown",
+                "value" => "```elixir\n@spec foo() :: :ok\n```"
+              }
+            }
+          ] do
+        result = LspActions.handle_hover_response(fake_state(), {:ok, hover})
+        assert %HoverPopup{focused: false} = result.shell_state.hover_popup
+        assert result.shell_state.hover_popup.content_lines != []
+      end
     end
 
-    test "prepareRename with Range only reads text from buffer" do
-      {:ok, buf} = BufferProcess.start_link(content: "def hello_world do\n  :ok\nend")
-      state = fake_state_with_buffer(buf)
-      state = %{state | workspace: %{state.workspace | editing: VimState.new()}}
+    test "mouse hover creates positioned popup for content and no-ops for empty responses" do
+      plaintext = %{"contents" => %{"kind" => "plaintext", "value" => "Returns :ok"}}
 
-      resp = %{
-        "start" => %{"line" => 0, "character" => 4},
-        "end" => %{"line" => 0, "character" => 15}
-      }
-
-      result = LspActions.handle_prepare_rename_response(state, {:ok, resp})
-      assert result.workspace.editing.mode == :command
-      assert result.workspace.editing.mode_state.input == "rename hello_world"
-
-      GenServer.stop(buf)
-    end
-
-    test "prepareRename with wrapped Range reads text from buffer" do
-      {:ok, buf} = BufferProcess.start_link(content: "def hello_world do\n  :ok\nend")
-      state = fake_state_with_buffer(buf)
-      state = %{state | workspace: %{state.workspace | editing: VimState.new()}}
-
-      resp = %{
-        "range" => %{
-          "start" => %{"line" => 0, "character" => 4},
-          "end" => %{"line" => 0, "character" => 15}
-        }
-      }
-
-      result = LspActions.handle_prepare_rename_response(state, {:ok, resp})
-      assert result.workspace.editing.mode == :command
-      assert result.workspace.editing.mode_state.input == "rename hello_world"
-
-      GenServer.stop(buf)
-    end
-
-    test "prepareRename error shows status message" do
-      state = fake_state_with_vim()
-      result = LspActions.handle_prepare_rename_response(state, {:error, "not renameable"})
-      assert result.shell_state.status_msg == "Cannot rename at this position"
-    end
-
-    test "prepareRename nil shows cannot-rename message" do
-      state = fake_state_with_vim()
-      result = LspActions.handle_prepare_rename_response(state, {:ok, nil})
-      assert result.shell_state.status_msg == "Cannot rename at this position"
-    end
-
-    test "prepareRename with Range but no buffer falls back to empty" do
-      state = fake_state_with_vim()
-
-      resp = %{
-        "start" => %{"line" => 0, "character" => 0},
-        "end" => %{"line" => 0, "character" => 5}
-      }
-
-      result = LspActions.handle_prepare_rename_response(state, {:ok, resp})
-      assert result.workspace.editing.mode == :command
-      assert result.workspace.editing.mode_state.input == "rename "
-    end
-  end
-
-  # ── handle_hover_mouse_response/4 ────────────────────────────────────────
-
-  describe "handle_hover_mouse_response/4" do
-    test "creates hover popup at mouse position for valid content" do
-      state = fake_state()
-      hover = %{"contents" => %{"kind" => "plaintext", "value" => "Returns :ok"}}
-      result = LspActions.handle_hover_mouse_response(state, {:ok, hover}, 5, 20)
-      assert %HoverPopup{} = result.shell_state.hover_popup
-    end
-
-    test "is a no-op on error" do
-      state = fake_state()
-      result = LspActions.handle_hover_mouse_response(state, {:error, "fail"}, 5, 20)
-      assert result == state
-    end
-
-    test "is a no-op when result is nil" do
-      state = fake_state()
-      result = LspActions.handle_hover_mouse_response(state, {:ok, nil}, 5, 20)
-      assert result == state
-    end
-
-    test "is a no-op for empty hover contents" do
-      state = fake_state()
-      hover = %{"contents" => %{"kind" => "plaintext", "value" => ""}}
-      result = LspActions.handle_hover_mouse_response(state, {:ok, hover}, 5, 20)
-      assert result == state
-    end
-
-    test "creates hover popup for markdown content at mouse position" do
-      state = fake_state()
-
-      hover = %{
+      markdown = %{
         "contents" => %{"kind" => "markdown", "value" => "```elixir\n@spec foo() :: :ok\n```"}
       }
 
-      result = LspActions.handle_hover_mouse_response(state, {:ok, hover}, 10, 30)
-      assert %HoverPopup{} = result.shell_state.hover_popup
-      assert result.shell_state.hover_popup.content_lines != []
+      for hover <- [plaintext, markdown] do
+        result = LspActions.handle_hover_mouse_response(fake_state(), {:ok, hover}, 5, 20)
+        assert %HoverPopup{} = result.shell_state.hover_popup
+        assert result.shell_state.hover_popup.content_lines != []
+      end
+
+      for response <- [
+            {:error, "fail"},
+            {:ok, nil},
+            {:ok, %{"contents" => %{"kind" => "plaintext", "value" => ""}}}
+          ] do
+        state = fake_state()
+        assert LspActions.handle_hover_mouse_response(state, response, 5, 20) == state
+      end
     end
   end
 
-  # ── CodeActionSource resolve logic (Item 10) ────────────────────────────
+  describe "code lens responses" do
+    test "code_lens reports missing buffers and no-ops when no client is registered" do
+      assert LspActions.code_lens(fake_state()).shell_state.status_msg == "No active buffer"
 
-  describe "CodeActionSource resolve logic" do
-    test "on_select applies edit directly when present" do
-      # CodeActionSource.on_select handles actions with edit fields by applying
-      # them via LspActions.apply_workspace_edit. We can't test the full picker
-      # path without a real LSP client, but we verify the code action source
-      # module loads and its candidates function works.
-      assert Code.ensure_loaded?(CodeActionSource)
+      state = fake_state_with_buffer(start_buffer!("hello"))
+      assert LspActions.code_lens(state).shell_state.status_msg == nil
     end
 
-    test "candidates returns items from actions context" do
+    test "stores resolved lenses with commands directly" do
+      state = fake_state_with_buffer(start_buffer!("def hello do\n  :ok\nend"))
+      result = LspActions.handle_code_lens_response(state, {:ok, [code_lens("1 reference")]})
+
+      assert [%{title: "1 reference", line: 0}] = result.lsp.code_lenses
+    end
+
+    test "code lens response leaves state unchanged for empty or failed responses" do
+      for response <- [{:error, "timeout"}, {:ok, nil}, {:ok, []}] do
+        state = fake_state()
+        assert LspActions.handle_code_lens_response(state, response) == state
+      end
+    end
+
+    test "resolve response merges commands and preserves existing lenses on ignored responses" do
+      state = fake_state_with_buffer(start_buffer!("def hello do\n  :ok\nend"))
+      resolved = code_lens("2 references")
+
+      result = LspActions.handle_code_lens_resolve_response(state, {:ok, resolved})
+      assert [%{title: "2 references"}] = result.lsp.code_lenses
+
+      existing_state = fake_state()
+
+      existing_state =
+        put_in(
+          existing_state.lsp,
+          MingaEditor.State.LSP.set_code_lenses(existing_state.lsp, [
+            %{line: 0, title: "existing"}
+          ])
+        )
+
+      assert LspActions.handle_code_lens_resolve_response(existing_state, {:error, "timeout"}).lsp.code_lenses ==
+               [%{line: 0, title: "existing"}]
+
+      state = fake_state()
+      assert LspActions.handle_code_lens_resolve_response(state, {:ok, nil}) == state
+    end
+  end
+
+  describe "inlay hints" do
+    test "stores parsed hints from string labels and label parts" do
+      state = fake_state_with_buffer(start_buffer!("x = 1 + 2"))
+
+      hints = [
+        %{
+          "position" => %{"line" => 0, "character" => 2},
+          "label" => ": integer",
+          "kind" => 1,
+          "paddingLeft" => true,
+          "paddingRight" => false
+        },
+        %{
+          "position" => %{"line" => 0, "character" => 4},
+          "label" => [%{"value" => ": "}, %{"value" => "int"}],
+          "kind" => 1
+        }
+      ]
+
+      result = LspActions.handle_inlay_hint_response(state, {:ok, hints})
+
+      assert [first, second] = result.lsp.inlay_hints
+
+      assert %{
+               line: 0,
+               col: 2,
+               label: ": integer",
+               kind: :type,
+               padding_left: true,
+               padding_right: false
+             } = first
+
+      assert second.label == ": int"
+    end
+
+    test "leaves existing hints unchanged for empty or failed responses" do
+      for response <- [{:error, "fail"}, {:ok, nil}, {:ok, []}] do
+        state = fake_state()
+        state = put_in(state.lsp, MingaEditor.State.LSP.set_inlay_hints(state.lsp, [%{line: 0}]))
+        assert LspActions.handle_inlay_hint_response(state, response) == state
+      end
+    end
+
+    test "schedules hints only when a Zig viewport changes, replacing existing timers" do
+      state = fake_state()
+      state = put_in(state.lsp, %{state.lsp | last_inlay_viewport_top: 0})
+      assert LspActions.schedule_inlay_hints_on_scroll(state).lsp.inlay_hint_debounce_timer == nil
+
+      headless_state = state_with_active_buffer(fake_state(), start_buffer!("hello"), top: 10)
+
+      assert LspActions.schedule_inlay_hints_on_scroll(headless_state).lsp.inlay_hint_debounce_timer ==
+               nil
+
+      zig_state = %{
+        state_with_active_buffer(fake_state(), start_buffer!("hello"), top: 5)
+        | backend: :zig
+      }
+
+      scheduled = LspActions.schedule_inlay_hints_on_scroll(zig_state)
+      first_timer = scheduled.lsp.inlay_hint_debounce_timer
+      assert first_timer != nil
+      assert scheduled.lsp.last_inlay_viewport_top == 5
+
+      rescheduled =
+        LspActions.schedule_inlay_hints_on_scroll(%{
+          scheduled
+          | terminal_viewport: %{scheduled.terminal_viewport | top: 15}
+        })
+
+      assert rescheduled.lsp.inlay_hint_debounce_timer != first_timer
+      assert rescheduled.lsp.last_inlay_viewport_top == 15
+      Process.cancel_timer(rescheduled.lsp.inlay_hint_debounce_timer)
+    end
+  end
+
+  describe "prepare rename response" do
+    test "opens rename command with placeholders or range text" do
+      cases = [
+        {{:ok, %{"placeholder" => "myVar"}}, nil, "rename myVar"},
+        {{:ok, %{"range" => range(0, 4, 15), "placeholder" => "hello_world"}}, nil,
+         "rename hello_world"},
+        {{:ok, flat_range(0, 4, 15)}, "def hello_world do\n  :ok\nend", "rename hello_world"},
+        {{:ok, %{"range" => range(0, 4, 15)}}, "def hello_world do\n  :ok\nend",
+         "rename hello_world"},
+        {{:ok, flat_range(0, 0, 5)}, nil, "rename "}
+      ]
+
+      for {response, buffer_content, expected_input} <- cases do
+        state =
+          if buffer_content,
+            do: fake_state_with_buffer(start_buffer!(buffer_content)),
+            else: fake_state_with_vim()
+
+        state = %{state | workspace: %{state.workspace | editing: VimState.new()}}
+        result = LspActions.handle_prepare_rename_response(state, response)
+
+        assert result.workspace.editing.mode == :command
+        assert result.workspace.editing.mode_state.input == expected_input
+      end
+    end
+
+    test "reports cannot-rename for failed responses" do
+      for response <- [{:error, "not renameable"}, {:ok, nil}] do
+        result = LspActions.handle_prepare_rename_response(fake_state_with_vim(), response)
+        assert result.shell_state.status_msg == "Cannot rename at this position"
+      end
+    end
+  end
+
+  describe "CodeActionSource" do
+    test "candidates expose quickfix labels, preferred marker, and empty context behavior" do
       actions = [
         %{"title" => "Fix import", "kind" => "quickfix"},
         %{"title" => "Extract variable", "kind" => "refactor.extract", "isPreferred" => true}
       ]
 
-      tab = MingaEditor.State.Tab.new_file(1, "test")
-
-      ctx = %PickerContext{
-        buffers: %Buffers{},
-        editing: VimState.new(),
-        search: %MingaEditor.State.Search{},
-        viewport: Viewport.new(24, 80),
-        tab_bar: MingaEditor.State.TabBar.new(tab),
-        picker_ui: %{context: %{actions: actions}},
-        capabilities: %{},
-        theme: MingaEditor.UI.Theme.get!(:doom_one)
-      }
-
-      items = CodeActionSource.candidates(ctx)
+      items = CodeActionSource.candidates(picker_context(actions))
 
       assert length(items) == 2
       assert Enum.any?(items, fn item -> String.contains?(item.label, "Fix import") end)
       assert Enum.any?(items, fn item -> String.contains?(item.label, "★") end)
-    end
-
-    test "candidates returns empty list when no actions" do
-      assert [] == CodeActionSource.candidates(%{})
+      assert CodeActionSource.candidates(%{}) == []
     end
   end
 
-  # ── Helpers ────────────────────────────────────────────────────────────────
+  defp location(uri, line, character) do
+    %{
+      "uri" => uri,
+      "range" => %{
+        "start" => %{"line" => line, "character" => character},
+        "end" => %{"line" => line, "character" => character + 10}
+      }
+    }
+  end
+
+  defp range(line, start_col, end_col) do
+    %{
+      "start" => %{"line" => line, "character" => start_col},
+      "end" => %{"line" => line, "character" => end_col}
+    }
+  end
+
+  defp flat_range(line, start_col, end_col) do
+    %{
+      "start" => %{"line" => line, "character" => start_col},
+      "end" => %{"line" => line, "character" => end_col}
+    }
+  end
+
+  defp code_lens(title) do
+    %{
+      "range" => range(0, 0, 5),
+      "command" => %{"title" => title, "command" => "refs"}
+    }
+  end
+
+  defp start_buffer!(content) do
+    {:ok, pid} = BufferProcess.start_link(content: content)
+    on_exit(fn -> Process.exit(pid, :normal) end)
+    pid
+  end
+
+  defp state_with_active_buffer(state, buf, opts) do
+    top = Keyword.fetch!(opts, :top)
+    state = %{state | workspace: %{state.workspace | buffers: %Buffers{active: buf, list: [buf]}}}
+    %{state | terminal_viewport: %{state.terminal_viewport | top: top}}
+  end
+
+  defp picker_context(actions) do
+    tab = MingaEditor.State.Tab.new_file(1, "test")
+
+    %PickerContext{
+      buffers: %Buffers{},
+      editing: VimState.new(),
+      search: %MingaEditor.State.Search{},
+      viewport: Viewport.new(24, 80),
+      tab_bar: MingaEditor.State.TabBar.new(tab),
+      picker_ui: %{context: %{actions: actions}},
+      capabilities: %{},
+      theme: MingaEditor.UI.Theme.get!(:doom_one)
+    }
+  end
 
   defp fake_state do
-    vp = Viewport.new(24, 80)
+    viewport = Viewport.new(24, 80)
 
     %EditorState{
       port_manager: nil,
-      terminal_viewport: vp,
-      workspace: %WorkspaceState{
-        viewport: vp,
-        highlight: %Highlighting{}
-      }
+      terminal_viewport: viewport,
+      workspace: %WorkspaceState{viewport: viewport, highlight: %Highlighting{}}
     }
   end
 
   defp fake_state_with_buffer(buf) do
     state = fake_state()
-    ws = %{state.workspace | buffers: %Buffers{active: buf, list: [buf]}}
-    %{state | workspace: ws}
+    %{state | workspace: %{state.workspace | buffers: %Buffers{active: buf, list: [buf]}}}
   end
 
   defp fake_state_with_vim do
     state = fake_state()
-    ws = %{state.workspace | editing: VimState.new()}
-    %{state | workspace: ws}
+    %{state | workspace: %{state.workspace | editing: VimState.new()}}
   end
 end
