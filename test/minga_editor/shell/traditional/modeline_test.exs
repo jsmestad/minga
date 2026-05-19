@@ -51,28 +51,16 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
              "Should not show OPERATOR badge in operator_pending mode"
     end
 
-    test "renders with dirty marker" do
-      data = Map.put(@base_data, :dirty_marker, " ● ")
-      {commands, _} = Modeline.render(0, 80, data)
-      assert commands != []
-    end
-
-    test "renders with multiple buffers" do
-      data = Map.merge(@base_data, %{buf_index: 2, buf_count: 3})
-      {commands, _} = Modeline.render(0, 80, data)
-      assert commands != []
-    end
-
-    test "renders with single buffer (no indicator)" do
-      data = Map.merge(@base_data, %{buf_index: 1, buf_count: 1})
-      {commands, _} = Modeline.render(0, 80, data)
-      assert commands != []
-    end
-
-    test "renders at top of file (line 0)" do
-      data = Map.merge(@base_data, %{cursor_line: 0, line_count: 1})
-      {commands, _} = Modeline.render(0, 80, data)
-      assert commands != []
+    test "renders common file state variants" do
+      for data <- [
+            Map.put(@base_data, :dirty_marker, " ● "),
+            Map.merge(@base_data, %{buf_index: 2, buf_count: 3}),
+            Map.merge(@base_data, %{buf_index: 1, buf_count: 1}),
+            Map.merge(@base_data, %{cursor_line: 0, line_count: 1})
+          ] do
+        {commands, _} = Modeline.render(0, 80, data)
+        assert commands != []
+      end
     end
 
     test "click regions include buffer_list for file segment" do
@@ -136,130 +124,48 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
       assert String.contains?(combined, "PLAN")
     end
 
-    test "LSP indicator shows green dot when ready" do
-      data = Map.put(@base_data, :lsp_status, :ready)
-      {commands, _regions} = Modeline.render(0, 120, data)
+    test "LSP indicator reflects status and click target" do
+      for {status, marker} <- [ready: "●", initializing: "⟳", starting: "◯", error: "✗"] do
+        data = Map.put(@base_data, :lsp_status, status)
+        {commands, regions} = Modeline.render(0, 120, data)
+        text = combined_text(commands)
 
-      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
-      combined = Enum.join(texts)
-      assert String.contains?(combined, "●")
+        assert String.contains?(text, marker)
+        assert has_region?(regions, :lsp_info)
+      end
     end
 
-    test "LSP indicator shows spinner when initializing" do
-      data = Map.put(@base_data, :lsp_status, :initializing)
-      {commands, _regions} = Modeline.render(0, 120, data)
+    test "LSP indicator is omitted when status is absent or none" do
+      for data <- [@base_data, Map.put(@base_data, :lsp_status, :none)] do
+        {commands, _regions} = Modeline.render(0, 120, data)
+        text = combined_text(commands)
 
-      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
-      combined = Enum.join(texts)
-      assert String.contains?(combined, "⟳")
-    end
-
-    test "LSP indicator shows dimmed circle when starting" do
-      data = Map.put(@base_data, :lsp_status, :starting)
-      {commands, _regions} = Modeline.render(0, 120, data)
-
-      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
-      combined = Enum.join(texts)
-      assert String.contains?(combined, "◯")
-    end
-
-    test "LSP indicator shows error mark when errored" do
-      data = Map.put(@base_data, :lsp_status, :error)
-      {commands, _regions} = Modeline.render(0, 120, data)
-
-      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
-      combined = Enum.join(texts)
-      assert String.contains?(combined, "✗")
-    end
-
-    test "no LSP indicator when status is none" do
-      data = Map.put(@base_data, :lsp_status, :none)
-      {commands, _regions} = Modeline.render(0, 120, data)
-
-      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
-      combined = Enum.join(texts)
-      refute String.contains?(combined, "●")
-      refute String.contains?(combined, "⟳")
-      refute String.contains?(combined, "✗")
-    end
-
-    test "no LSP indicator when lsp_status key is absent" do
-      {commands, _regions} = Modeline.render(0, 120, @base_data)
-
-      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
-      combined = Enum.join(texts)
-      refute String.contains?(combined, "●")
-      refute String.contains?(combined, "⟳")
-      refute String.contains?(combined, "✗")
-    end
-
-    test "LSP indicator is clickable with lsp_info target" do
-      data = Map.put(@base_data, :lsp_status, :ready)
-      {_commands, regions} = Modeline.render(0, 120, data)
-      assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :lsp_info end)
+        refute String.contains?(text, "●")
+        refute String.contains?(text, "⟳")
+        refute String.contains?(text, "✗")
+      end
     end
   end
 
   describe "git branch and diff summary" do
-    test "shows branch name with icon when git_branch is set" do
-      data = Map.put(@base_data, :git_branch, "main")
-      {commands, _regions} = Modeline.render(0, 120, data)
+    test "renders branch and diff variants" do
+      cases = [
+        {%{git_branch: "main"}, ["main", "\uE0A0"], []},
+        {%{git_branch: "feat/x", git_diff_summary: {3, 2, 1}}, ["+3", "~2", "-1"], []},
+        {%{git_branch: "main", git_diff_summary: {5, 0, 0}}, ["+5"], ["~0", "-0"]},
+        {%{git_branch: "main", git_diff_summary: {0, 0, 0}}, ["main"], ["+", "~"]},
+        {%{}, [], ["\uE0A0"]},
+        {%{git_branch: ""}, [], ["\uE0A0"]}
+      ]
 
-      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
-      combined = Enum.join(texts)
-      assert String.contains?(combined, "main")
-      assert String.contains?(combined, "\uE0A0")
-    end
+      for {overrides, includes, excludes} <- cases do
+        data = Map.merge(@base_data, overrides)
+        {commands, _regions} = Modeline.render(0, 120, data)
+        text = combined_text(commands)
 
-    test "shows diff stats with colors when git_diff_summary is set" do
-      data = Map.merge(@base_data, %{git_branch: "feat/x", git_diff_summary: {3, 2, 1}})
-      {commands, _regions} = Modeline.render(0, 120, data)
-
-      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
-      combined = Enum.join(texts)
-      assert String.contains?(combined, "+3")
-      assert String.contains?(combined, "~2")
-      assert String.contains?(combined, "-1")
-    end
-
-    test "shows only non-zero diff stats" do
-      data = Map.merge(@base_data, %{git_branch: "main", git_diff_summary: {5, 0, 0}})
-      {commands, _regions} = Modeline.render(0, 120, data)
-
-      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
-      combined = Enum.join(texts)
-      assert String.contains?(combined, "+5")
-      refute String.contains?(combined, "~0")
-      refute String.contains?(combined, "-0")
-    end
-
-    test "no diff stats when summary is {0, 0, 0}" do
-      data = Map.merge(@base_data, %{git_branch: "main", git_diff_summary: {0, 0, 0}})
-      {commands, _regions} = Modeline.render(0, 120, data)
-
-      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
-      combined = Enum.join(texts)
-      assert String.contains?(combined, "main")
-      refute String.contains?(combined, "+")
-      refute String.contains?(combined, "~")
-    end
-
-    test "no git segment when git_branch is nil" do
-      {commands, _regions} = Modeline.render(0, 120, @base_data)
-
-      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
-      combined = Enum.join(texts)
-      # The branch icon  (U+E0A0) should not appear in the modeline
-      refute String.contains?(combined, "\uE0A0")
-    end
-
-    test "no git segment when git_branch is empty string" do
-      data = Map.put(@base_data, :git_branch, "")
-      {commands, _regions} = Modeline.render(0, 120, data)
-
-      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
-      combined = Enum.join(texts)
-      refute String.contains?(combined, "\uE0A0")
+        for expected <- includes, do: assert(String.contains?(text, expected))
+        for unexpected <- excludes, do: refute(String.contains?(text, unexpected))
+      end
     end
   end
 
@@ -612,36 +518,21 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
   end
 
   describe "cursor_shape/1" do
-    test "insert mode returns beam" do
-      assert Modeline.cursor_shape(:insert) == :beam
-    end
+    test "maps modes to cursor shapes" do
+      cases = %{
+        insert: :beam,
+        replace: :underline,
+        normal: :block,
+        visual: :block,
+        command: :beam,
+        eval: :beam,
+        search_prompt: :beam,
+        operator_pending: :block
+      }
 
-    test "replace mode returns underline" do
-      assert Modeline.cursor_shape(:replace) == :underline
-    end
-
-    test "normal mode returns block" do
-      assert Modeline.cursor_shape(:normal) == :block
-    end
-
-    test "visual mode returns block" do
-      assert Modeline.cursor_shape(:visual) == :block
-    end
-
-    test "command mode returns beam (text input mode)" do
-      assert Modeline.cursor_shape(:command) == :beam
-    end
-
-    test "eval mode returns beam (text input mode)" do
-      assert Modeline.cursor_shape(:eval) == :beam
-    end
-
-    test "search_prompt mode returns beam (text input mode)" do
-      assert Modeline.cursor_shape(:search_prompt) == :beam
-    end
-
-    test "operator_pending mode returns block" do
-      assert Modeline.cursor_shape(:operator_pending) == :block
+      for {mode, shape} <- cases do
+        assert Modeline.cursor_shape(mode) == shape
+      end
     end
   end
 
@@ -675,89 +566,63 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
     Enum.map_join(segments, fn {_name, text, _fg, _bg, _opts, _target} -> text end)
   end
 
+  defp has_region?(regions, target) do
+    Enum.any?(regions, fn {_start, _end, command} -> command == target end)
+  end
+
   describe "parser status indicator" do
-    test "shows nothing when parser is available" do
+    test "reflects parser status and restart click target" do
       data = Map.put(@base_data, :parser_status, :available)
       {commands, _regions} = Modeline.render(0, 120, data)
-      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
-      refute Enum.any?(texts, &String.contains?(&1, "🌳"))
-    end
+      refute String.contains?(combined_text(commands), "🌳")
 
-    test "shows tree icon with ✗ when parser is unavailable" do
-      data = Map.put(@base_data, :parser_status, :unavailable)
-      {commands, _regions} = Modeline.render(0, 120, data)
-      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
-      assert Enum.any?(texts, &String.contains?(&1, "🌳✗"))
-    end
+      for {status, marker} <- [unavailable: "🌳✗", restarting: "🌳⟳"] do
+        data = Map.put(@base_data, :parser_status, status)
+        {commands, regions} = Modeline.render(0, 120, data)
 
-    test "shows tree icon with spinner when parser is restarting" do
-      data = Map.put(@base_data, :parser_status, :restarting)
-      {commands, _regions} = Modeline.render(0, 120, data)
-      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
-      assert Enum.any?(texts, &String.contains?(&1, "🌳⟳"))
-    end
-
-    test "parser unavailable indicator is clickable to parser_restart" do
-      data = Map.put(@base_data, :parser_status, :unavailable)
-      {_commands, regions} = Modeline.render(0, 120, data)
-      assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :parser_restart end)
+        assert String.contains?(combined_text(commands), marker)
+        assert has_region?(regions, :parser_restart)
+      end
     end
   end
 
   describe "diagnostic counts" do
-    test "shows error count with icon when errors present" do
-      data = Map.put(@base_data, :diagnostic_counts, {3, 0, 0, 0})
-      {commands, _regions} = Modeline.render(0, 120, data)
-      texts = Enum.map(commands, fn {_r, _c, text, _s} -> text end)
-      assert Enum.any?(texts, &String.contains?(&1, "3"))
-    end
+    test "shows counts and diagnostic picker target" do
+      cases = [
+        {{3, 0, 0, 0}, ["3"]},
+        {{0, 5, 0, 0}, ["5"]},
+        {{2, 3, 0, 0}, ["2", "3"]}
+      ]
 
-    test "shows warning count with icon when warnings present" do
-      data = Map.put(@base_data, :diagnostic_counts, {0, 5, 0, 0})
-      {commands, _regions} = Modeline.render(0, 120, data)
-      texts = Enum.map(commands, fn {_r, _c, text, _s} -> text end)
-      assert Enum.any?(texts, &String.contains?(&1, "5"))
-    end
+      for {counts, expected_counts} <- cases do
+        data = Map.put(@base_data, :diagnostic_counts, counts)
+        {commands, regions} = Modeline.render(0, 120, data)
+        text = combined_text(commands)
 
-    test "shows both error and warning counts" do
-      data = Map.put(@base_data, :diagnostic_counts, {2, 3, 0, 0})
-      {commands, _regions} = Modeline.render(0, 120, data)
-      texts = Enum.map(commands, fn {_r, _c, text, _s} -> text end)
-      assert Enum.any?(texts, &String.contains?(&1, "2"))
-      assert Enum.any?(texts, &String.contains?(&1, "3"))
+        for expected <- expected_counts, do: assert(String.contains?(text, expected))
+        assert has_region?(regions, :diagnostic_picker)
+      end
     end
 
     test "shows nothing when no diagnostics" do
       data = Map.put(@base_data, :diagnostic_counts, nil)
       {commands_with, _} = Modeline.render(0, 120, data)
       {commands_without, _} = Modeline.render(0, 120, @base_data)
-      # Both should produce the same output (no diagnostic segment)
-      assert length(commands_with) == length(commands_without)
-    end
 
-    test "diagnostic counts are clickable to diagnostic_picker" do
-      data = Map.put(@base_data, :diagnostic_counts, {1, 0, 0, 0})
-      {_commands, regions} = Modeline.render(0, 120, data)
-      assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :diagnostic_picker end)
+      assert length(commands_with) == length(commands_without)
     end
   end
 
   describe "indent and selection segments" do
-    test "shows spaces indentation and exposes indent picker click target" do
-      data = Map.merge(@base_data, %{indent_type: :spaces, indent_size: 2})
-      {commands, regions} = Modeline.render(0, 120, data)
-      text = Enum.map_join(commands, fn {_r, _c, segment, _s} -> segment end)
+    test "shows indentation and exposes indent picker click target" do
+      for {type, size, label} <- [{:spaces, 2, "Spaces:2"}, {:tabs, 4, "Tabs:4"}] do
+        data = Map.merge(@base_data, %{indent_type: type, indent_size: size})
+        {commands, regions} = Modeline.render(0, 120, data)
+        text = combined_text(commands)
 
-      assert String.contains?(text, "Spaces:2")
-      assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :indent_picker end)
-    end
-
-    test "shows tabs indentation" do
-      data = Map.merge(@base_data, %{indent_type: :tabs, indent_size: 4})
-      {commands, _regions} = Modeline.render(0, 120, data)
-      text = Enum.map_join(commands, fn {_r, _c, segment, _s} -> segment end)
-
-      assert String.contains?(text, "Tabs:4")
+        assert String.contains?(text, label)
+        assert has_region?(regions, :indent_picker)
+      end
     end
 
     test "selection info replaces cursor position" do
