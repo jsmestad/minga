@@ -469,6 +469,37 @@ end
 - **Edge cases always tested**: empty state, boundaries, unicode
 - **Screen snapshot tests** for UI regression detection. See [docs/SNAPSHOT_TESTING.md](docs/SNAPSHOT_TESTING.md) for how to write, update, and review snapshot tests. When your change modifies the rendered UI, run `UPDATE_SNAPSHOTS=1 mix test test/minga/integration/` to regenerate baselines, then review the diffs before committing.
 
+#### Sandi Metz-style test boundaries
+
+Write tests against the public promise of the object at the cheapest useful layer. A good test should answer four questions before it asserts anything: what behavior is promised, who relies on that behavior, what is the cheapest layer that proves it, and would this fail after a refactor that kept the public behavior unchanged?
+
+Think in clients, not implementation. The client of `Minga.Mode.*` is the input dispatcher, so mode tests should mostly assert emitted commands and transitions. The client of `Minga.Command.Parser` is command execution, so parser tests should assert parsed command values. The client of a protocol encoder is another process or frontend, so exhaustive wire-format compatibility tests are legitimate. The client of `Window.RenderCache` is the render pipeline, so render-cache tests may assert cache fields because the cache is the object under test.
+
+Prefer behavior tests that read like documentation:
+
+- `"linewise paste inserts full lines below the cursor"`
+- `"operator-pending multiplies operator count by motion count"`
+- `"parser preserves shell command arguments"`
+- `"window invalidates cached draws when the viewport changes"`
+
+Avoid tests that mostly prove the implementation stayed the same:
+
+- Retesting the same command through pure function, command module, Editor GenServer, and rendered screen layers.
+- One test per key, alias, status, or flag when one table-driven contract test is clearer.
+- Full `EditorCase` tests for pure functions, parser behavior, mode FSM dispatch, or command-state behavior.
+- `:sys.get_state` field assertions when a public query helper or visible outcome exists.
+- Assertions on internal structs unless that struct is the unit under test.
+- Test names like `"works"`, `"handles foo"`, or `"test function_name/2"`.
+
+Exceptions are intentional, not loopholes:
+
+- Protocol and wire-format suites may stay exhaustive because compatibility is the public contract.
+- Core data structures (`Document`, interval trees, unicode helpers, folds, decorations) should use examples plus property tests when invariants matter.
+- Render-cache and state-machine modules may assert internal fields when those fields are the public behavior of the unit under test.
+- Integration smoke tests should stay thin and prove wiring only, not re-cover every behavior from cheaper layers.
+
+When consolidating tests, preserve the public promise even if the raw test count drops sharply. If removing a test would make a future behavior regression invisible at every layer, keep or replace it. If a cheaper boundary already proves the promise, delete the duplicate heavier test.
+
 #### Test Layer Selection
 
 Pick the lightest test layer that covers the behavior. Heavier tests are slower, flakier, and more sensitive to unrelated changes. Use this decision tree:

@@ -240,45 +240,44 @@ When a PR adds or modifies test files, check these in addition to the code quali
 - [ ] Mox stubs/expects actually get called in the test. Dead stubs copied between files are cleanup items.
 - [ ] Tests asserting on lists of filesystem entries (file tree, directory listings) assert on content/presence, not index position.
 
-## Test Design Review
+## Test Design Boundary Review
 
-This step runs after CI checks pass but before issuing a verdict. It enforces the project rule that test-advisor must be consulted before writing significant new tests. Without this gate, LLMs write tests at the wrong layer (EditorCase integration tests for pure function behavior), with internal state assertions (`:sys.get_state` + field checks), and without considering the right test strategy. Those tests pass locally, flake on CI, and break on the next refactor.
+This step runs after CI checks pass but before issuing a verdict. It enforces the Sandi Metz-style rule from AGENTS.md: tests should verify the public promise at the cheapest useful layer. Do not block solely because test-advisor was not consulted. Block for the actual test-quality problem: wrong layer, brittle internal assertions, duplicated full-stack coverage, weak or missing public behavior coverage, or unsafe synchronization.
 
-### Step 1: Count new test functions in the diff
+### Step 1: Identify changed test intent
 
-```bash
-git diff main -- '*.exs' | grep -c '^\+.*test "'
-git diff main -- '*.swift' | grep -c '^\+.*@Test('
-```
+Use the diff to answer these questions for each changed test file:
 
-If both counts are zero, skip this section entirely. No new tests means no gate to enforce.
+- What public behavior is being promised?
+- Who is the client of that behavior?
+- What is the cheapest useful layer that proves it?
+- Does the diff remove a public behavior check that is not covered elsewhere?
 
-### Step 2: Determine if the additions are exempt
+For large consolidations, compare the before/after intent, not raw test count. A large drop is acceptable when table-driven or scenario tests still cover the same public contract.
 
-New tests are exempt from the test-advisor gate when **all** of these are true:
-- The diff adds 1-2 new test functions total (across all files)
-- The new tests are inside an existing `describe` block (not a new one)
-- The new tests clearly follow the exact structure of the test immediately above them in the same file
+### Step 2: Enforce layer boundaries
 
-Check exemption by inspecting context around each new `test "` line in the diff. If the test is in a new file or a new `describe` block, it is not exempt regardless of count.
+Flag these as **Critical** when introduced or left in changed test code:
 
-### Step 3: Check for test-advisor consultation
+- Pure functions, Mode FSMs, parsers, text objects, motions, or command-state behavior tested through `EditorCase` or a live Editor GenServer when a direct call would prove the contract.
+- Integration tests that retest every key, alias, status, or flag after a cheaper unit or command test already proves the behavior.
+- `:sys.get_state` field assertions when public query helpers, buffer content, emitted commands, events, or rendered output can prove the same behavior.
+- `Process.sleep` used as synchronization for GenServers, events, timers, or rendering.
+- Tests whose names describe implementation details instead of behavior.
+- Consolidations that delete meaningful edge-case coverage without replacing it at any layer.
 
-If the diff adds 3+ new test functions, or the additions are not exempt per Step 2:
+### Step 3: Respect intentional exceptions
 
-1. Check whether the implementing agent mentioned consulting test-advisor in their review request or task description. Look for phrases like "consulted test-advisor", "test-advisor recommended", or evidence that test strategy was discussed with the subagent.
-2. If no evidence of consultation exists, issue a **BLOCKED** verdict with: "New tests written without consulting test-advisor. Run test-advisor with a description of what you built and what tests you need, then re-request review."
+Do not block these solely for being exhaustive or internal-looking:
 
-### Step 4: Verify tests follow advisor recommendations
+- Protocol and wire-format compatibility tests where the public contract is byte-level or cross-process compatibility.
+- Core data structure tests that use many examples or property tests to protect invariants (`Document`, interval trees, unicode, folds, decorations).
+- Render-cache, state-machine, and parser-range tests that assert internal fields because those fields are the public behavior of the unit under test.
+- Thin integration smoke tests whose purpose is wiring only.
 
-If test-advisor was consulted, verify the resulting tests align with the project's test layer selection rules (from AGENTS.md):
+### Step 4: Test-advisor evidence is supporting evidence, not a gate
 
-- [ ] Pure functions are tested directly, not through EditorCase or GenServer wrappers
-- [ ] No `:sys.get_state` field assertions (use EditorCase query helpers like `buffer_content`, `buffer_cursor`, `editor_mode` instead)
-- [ ] Test layer matches the behavior being tested (pure function test for pure functions, GenServer test for GenServer operations, EditorCase only for input dispatch or rendered output)
-- [ ] No `Process.sleep` for synchronization in unit or integration tests
-
-Violations here are **Critical** items, same as any other code quality issue.
+If test-advisor was consulted, use its recommendation as context for whether the layer and assertions make sense. If it was not consulted, judge the tests directly. Only mention missing test-advisor as a cleanup/process note when the test strategy is genuinely risky or unclear; never make missing consultation the only blocker.
 
 ## Output Format
 
