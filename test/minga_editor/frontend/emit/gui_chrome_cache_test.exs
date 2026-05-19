@@ -9,6 +9,7 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Diagnostics
   alias Minga.Diagnostics.Diagnostic
   alias Minga.LSP.SyncServer
@@ -120,6 +121,24 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
 
       assert length(theme_cmds) == 1, "expected theme command after theme change"
       assert length(all_cmds) > 1, "expected more than just status bar after theme change"
+    end
+
+    test "tab bar cache changes when active buffer dirty state changes" do
+      state = put_in(gui_state().shell_state.tab_bar, TabBar.new(Tab.new_file(1, "test.ex")))
+      sb_data = StatusBarData.from_state(state)
+
+      {_ctx, caches} =
+        EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state), sb_data, nil, %Caches{})
+
+      flush_port_casts()
+      BufferProcess.insert_text(state.workspace.buffers.active, "!")
+
+      EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state), sb_data, nil, caches)
+      casts = collect_port_casts()
+      all_cmds = List.flatten(casts)
+
+      assert Enum.any?(all_cmds, &match?(<<0x71, _::binary>>, &1)),
+             "expected gui_tab_bar command after dirty state changes"
     end
 
     test "theme cache changes when same-name theme colors change" do

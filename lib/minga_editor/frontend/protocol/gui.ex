@@ -111,6 +111,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   alias Minga.Language
   alias MingaEditor.UI.Devicon
   alias MingaEditor.UI.Theme.Slots
+  alias MingaEditor.Workspace.ChromeState
+  alias MingaEditor.Workspace.ChromeState.TabSummary
+  alias MingaEditor.Workspace.ChromeState.WorkspaceSummary
 
   alias Minga.Protocol.Opcodes
 
@@ -676,8 +679,25 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   has_attention, agent_status in upper bits), tab id, group_id for
   workspace grouping, Nerd Font icon, and display label.
   """
-  @spec encode_gui_tab_bar(TabBar.t(), pid() | nil) :: binary()
-  def encode_gui_tab_bar(%TabBar{} = tb, active_win_buffer \\ nil) do
+  @spec encode_gui_tab_bar(TabBar.t() | ChromeState.t(), pid() | nil) :: binary()
+  def encode_gui_tab_bar(tab_bar_or_chrome_state, active_win_buffer \\ nil)
+
+  def encode_gui_tab_bar(%ChromeState{} = chrome_state, _active_win_buffer) do
+    active_index = active_summary_index(chrome_state)
+
+    entries =
+      Enum.map(chrome_state.visible_tabs, fn tab ->
+        encode_gui_tab_entry(tab, chrome_state.active_tab_id)
+      end)
+
+    IO.iodata_to_binary([
+      @op_gui_tab_bar,
+      <<active_index::8, length(chrome_state.visible_tabs)::8>>
+      | entries
+    ])
+  end
+
+  def encode_gui_tab_bar(%TabBar{} = tb, active_win_buffer) do
     active_index = TabBar.active_index(tb)
 
     entries =
@@ -690,6 +710,11 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       <<active_index::8, length(tb.tabs)::8>>
       | entries
     ])
+  end
+
+  @spec active_summary_index(ChromeState.t()) :: non_neg_integer()
+  defp active_summary_index(%ChromeState{visible_tabs: tabs, active_tab_id: active_id}) do
+    Enum.find_index(tabs, &(&1.id == active_id)) || 0
   end
 
   @spec encode_gui_tab_entry(Tab.t(), pos_integer(), pid() | nil) :: binary()
@@ -706,6 +731,17 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       byte_size(label_bytes)::16, label_bytes::binary>>
   end
 
+  @spec encode_gui_tab_entry(TabSummary.t(), Tab.id() | nil) :: binary()
+  defp encode_gui_tab_entry(%TabSummary{} = tab, active_id) do
+    is_active = if tab.id == active_id, do: 1, else: 0
+    flags = build_tab_summary_flags(tab, is_active)
+    icon_bytes = :erlang.iolist_to_binary([tab.icon])
+    label_bytes = :erlang.iolist_to_binary([tab.label])
+
+    <<flags::8, tab.id::32, tab.workspace_id::16, byte_size(icon_bytes)::8, icon_bytes::binary,
+      byte_size(label_bytes)::16, label_bytes::binary>>
+  end
+
   @spec build_tab_flags(Tab.t(), 0 | 1, pid() | nil) :: non_neg_integer()
   defp build_tab_flags(tab, is_active, active_win_buffer) do
     is_dirty = tab_dirty_bit(tab, is_active, active_win_buffer)
@@ -713,6 +749,19 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     has_attention = if tab.attention, do: 1, else: 0
     agent_status = encode_agent_status(tab.agent_status)
 
+    tab_flags(is_active, is_dirty, is_agent, has_attention, agent_status)
+  end
+
+  @spec build_tab_summary_flags(TabSummary.t(), 0 | 1) :: non_neg_integer()
+  defp build_tab_summary_flags(%TabSummary{} = tab, is_active) do
+    is_dirty = if tab.dirty?, do: 1, else: 0
+    is_agent = if tab.kind == :agent, do: 1, else: 0
+    has_attention = if tab.attention?, do: 1, else: 0
+    tab_flags(is_active, is_dirty, is_agent, has_attention, 0)
+  end
+
+  @spec tab_flags(0 | 1, 0 | 1, 0 | 1, 0 | 1, non_neg_integer()) :: non_neg_integer()
+  defp tab_flags(is_active, is_dirty, is_agent, has_attention, agent_status) do
     bor(
       bor(is_active, bsl(is_dirty, 1)),
       bor(
@@ -759,19 +808,31 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   # ── Workspace bar ──
 
   @doc """
-  Encodes a gui_agent_groups command with the current workspace state.
+  Encodes a gui_agent_groups command for the existing agent-workspace GUI consumer.
+
+  `ChromeState` includes the synthesized manual workspace, but this legacy opcode intentionally sends only agent workspaces. A later canonical workspace protocol can carry manual-vs-agent kind explicitly without overloading this agent-group contract.
 
   Wire format:
-    opcode(1) + active_group_id(2) + workspace_count(1) + workspaces...
+    opcode(1) + active_group_id(2) + agent_workspace_count(1) + agent_workspaces...
 
-  Per workspace:
-    id(2) + kind(1) + agent_status(1) + color_r(1) + color_g(1) + color_b(1)
+  Per agent workspace:
+    id(2) + agent_status(1) + color_r(1) + color_g(1) + color_b(1)
     + tab_count(2) + label_len(1) + label(label_len) + icon_len(1) + icon(icon_len)
 
-  Kind: 0 = manual, 1 = agent.
   Agent status: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan.
   """
-  @spec encode_gui_agent_groups(TabBar.t()) :: binary()
+  @spec encode_gui_agent_groups(TabBar.t() | ChromeState.t()) :: binary()
+  def encode_gui_agent_groups(%ChromeState{} = chrome_state) do
+    agent_workspaces = Enum.filter(chrome_state.workspaces, &(&1.kind == :agent))
+    entries = Enum.map(agent_workspaces, &encode_gui_workspace_summary/1)
+
+    IO.iodata_to_binary([
+      @op_gui_agent_groups,
+      <<chrome_state.active_workspace_id::16, length(agent_workspaces)::8>>
+      | entries
+    ])
+  end
+
   def encode_gui_agent_groups(%TabBar{} = tb) do
     entries =
       Enum.map(tb.agent_groups, fn group ->
@@ -793,6 +854,20 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       <<TabBar.active_group_id(tb)::16, length(tb.agent_groups)::8>>
       | entries
     ])
+  end
+
+  @spec encode_gui_workspace_summary(WorkspaceSummary.t()) :: binary()
+  defp encode_gui_workspace_summary(%WorkspaceSummary{} = workspace) do
+    status_byte = encode_agent_status(workspace.status)
+    r = Bitwise.bsr(Bitwise.band(workspace.color, 0xFF0000), 16)
+    g = Bitwise.bsr(Bitwise.band(workspace.color, 0x00FF00), 8)
+    b = Bitwise.band(workspace.color, 0x0000FF)
+    label_bytes = :erlang.iolist_to_binary([workspace.label])
+    icon_bytes = :erlang.iolist_to_binary([workspace.icon])
+
+    <<workspace.id::16, status_byte::8, r::8, g::8, b::8, workspace.tab_count::16,
+      byte_size(label_bytes)::8, label_bytes::binary, byte_size(icon_bytes)::8,
+      icon_bytes::binary>>
   end
 
   # ── Board ──
