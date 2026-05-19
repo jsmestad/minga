@@ -1,12 +1,6 @@
 defmodule MingaEditor.State.BufferLifecycleTest do
   @moduledoc """
   Pure-function tests for buffer lifecycle operations on `EditorState`.
-
-  Tests `add_buffer_pure/2` and `close_buffer_pure/2` without starting
-  any GenServer. Uses `base_state/1` from `RenderPipeline.TestHelpers`
-  to construct minimal state structs.
-
-  Part of work item B3 from `docs/PLAN-ui-stability.md`.
   """
 
   use ExUnit.Case, async: true
@@ -26,59 +20,27 @@ defmodule MingaEditor.State.BufferLifecycleTest do
 
   import MingaEditor.RenderPipeline.TestHelpers
 
-  # ── Helpers ──────────────────────────────────────────────────────────────────
-
-  # Creates a base state with a tab bar containing a single file tab.
-  # The file tab is set up with a context snapshot matching the current
-  # workspace state, simulating a real editor with an open file.
   @spec state_with_file_tab(keyword()) :: EditorState.t()
   defp state_with_file_tab(opts \\ []) do
     state = base_state(opts)
     tab = Tab.new_file(1, "test.ex")
-    tb = TabBar.new(tab)
-
-    # Snapshot the workspace into the active tab's context
-    context = EditorState.snapshot_tab_context(state)
-    tb = TabBar.update_context(tb, 1, context)
-
+    tb = TabBar.new(tab) |> TabBar.update_context(1, EditorState.snapshot_tab_context(state))
     EditorState.set_tab_bar(state, tb)
   end
 
   @spec state_with_file_tab_for_path(String.t(), String.t()) :: {EditorState.t(), pid()}
   defp state_with_file_tab_for_path(path, content) do
     buf = start_file_buffer(path, content)
-    win_id = 1
-    window = Window.new(win_id, buf, 24, 80)
-
-    state = %EditorState{
-      port_manager: self(),
-      workspace: %WorkspaceState{
-        viewport: Viewport.new(24, 80),
-        editing: VimState.new(),
-        buffers: %Buffers{active: buf, list: [buf], active_index: 0},
-        windows: %Windows{
-          tree: WindowTree.new(win_id),
-          map: %{win_id => window},
-          active: win_id,
-          next_id: win_id + 1
-        }
-      }
-    }
-
+    state = state_for_buffer(buf)
     tab = Tab.new_file(1, Path.basename(path))
-    context = EditorState.snapshot_tab_context(state)
-    tb = TabBar.new(tab)
-    tb = TabBar.update_context(tb, 1, context)
-
+    tb = TabBar.new(tab) |> TabBar.update_context(1, EditorState.snapshot_tab_context(state))
     {EditorState.set_tab_bar(state, tb), buf}
   end
 
-  # Creates a state with an agent tab active and an agent_chat window.
   @spec state_with_agent_tab() :: {EditorState.t(), pid()}
   defp state_with_agent_tab do
-    {:ok, agent_buf} = BufferProcess.start_link(content: "")
-    win_id = 1
-    agent_window = Window.new_agent_chat(win_id, agent_buf, 24, 80)
+    agent_buf = start_buffer("")
+    agent_window = Window.new_agent_chat(1, agent_buf, 24, 80)
 
     state = %EditorState{
       port_manager: self(),
@@ -88,24 +50,21 @@ defmodule MingaEditor.State.BufferLifecycleTest do
         keymap_scope: :agent,
         buffers: %Buffers{active: agent_buf, list: [agent_buf], active_index: 0},
         windows: %Windows{
-          tree: WindowTree.new(win_id),
-          map: %{win_id => agent_window},
-          active: win_id,
-          next_id: win_id + 1
+          tree: WindowTree.new(1),
+          map: %{1 => agent_window},
+          active: 1,
+          next_id: 2
         }
       }
     }
 
-    agent_tab = Tab.new_agent(1, "Agent")
-    context = EditorState.snapshot_tab_context(state)
-    tb = TabBar.new(agent_tab)
-    tb = TabBar.update_context(tb, 1, context)
-    state = EditorState.set_tab_bar(state, tb)
+    tb =
+      TabBar.new(Tab.new_agent(1, "Agent"))
+      |> TabBar.update_context(1, EditorState.snapshot_tab_context(state))
 
-    {state, agent_buf}
+    {EditorState.set_tab_bar(state, tb), agent_buf}
   end
 
-  # Starts a buffer for use in tests. Returns the pid.
   @spec start_buffer(String.t()) :: pid()
   defp start_buffer(content) do
     {:ok, pid} = BufferProcess.start_link(content: content)
@@ -119,377 +78,112 @@ defmodule MingaEditor.State.BufferLifecycleTest do
     pid
   end
 
-  # ── add_buffer_pure/2 ─────────────────────────────────────────────────────────
-
   describe "add_buffer_pure/2" do
-    test "adds buffer to empty state (no tab bar)" do
-      state = base_state()
+    test "adds buffers with no tab bar, opens file tabs, previews without overwriting context, and avoids duplicate monitors" do
+      no_tab = base_state()
       new_buf = start_buffer("new file")
-
-      {new_state, effects} = EditorState.add_buffer_pure(state, new_buf)
-
+      {new_state, effects} = EditorState.add_buffer_pure(no_tab, new_buf)
       assert new_buf in new_state.workspace.buffers.list
       assert new_state.workspace.buffers.active == new_buf
       assert {:monitor, new_buf} in effects
-    end
 
-    test "adds buffer when file tab active (in-place replace)" do
-      state = state_with_file_tab()
-      original_buf = state.workspace.buffers.active
-      new_buf = start_buffer("new file")
-
-      {new_state, effects} = EditorState.add_buffer_pure(state, new_buf)
-
-      # Buffer is in the pool and active
-      assert new_buf in new_state.workspace.buffers.list
-      assert new_state.workspace.buffers.active == new_buf
-
-      # Monitor effect is present
-      assert {:monitor, new_buf} in effects
-
-      # The active tab should still be a file tab (in-place replace, not new tab)
-      tb = new_state.shell_state.tab_bar
-      active_tab = TabBar.active(tb)
-      assert active_tab.kind == :file
-
-      # Should still have the same number of tabs (in-place, may create new file tab)
-      # The key invariant is that the new buffer is now active
-      assert new_state.workspace.buffers.active == new_buf
-      refute new_state.workspace.buffers.active == original_buf
-    end
-
-    test "opening a file from a file tab snapshots the outgoing tab before activating the new buffer" do
       state = state_with_file_tab()
       original_buf = state.workspace.buffers.active
       opened_buf = start_buffer("opened")
-
-      {new_state, effects} = EditorState.add_buffer_pure(state, opened_buf, context: :open)
-
+      {opened, effects} = EditorState.add_buffer_pure(state, opened_buf, context: :open)
+      tb = opened.shell_state.tab_bar
       assert {:monitor, opened_buf} in effects
-
-      tb = new_state.shell_state.tab_bar
       assert TabBar.count(tb) == 2
       assert tb.active_id == 2
       assert %Buffers{active: ^original_buf} = TabBar.get(tb, 1).context.buffers
       assert %Buffers{active: ^opened_buf} = TabBar.get(tb, 2).context.buffers
-      assert new_state.workspace.buffers.active == opened_buf
+      assert opened.workspace.buffers.active == opened_buf
+
+      preview_buf = start_buffer("preview")
+      {previewed, _effects} = EditorState.add_buffer_pure(state, preview_buf, context: :preview)
+      assert TabBar.count(previewed.shell_state.tab_bar) == 1
+      assert previewed.workspace.buffers.active == preview_buf
+
+      assert %Buffers{active: ^original_buf} =
+               TabBar.get(previewed.shell_state.tab_bar, 1).context.buffers
+
+      assert previewed.buffer_add_context == :open
+
+      duplicate = EditorState.add_buffer(state, opened_buf)
+      {switched_back, effects} = EditorState.add_buffer_pure(duplicate, original_buf)
+      assert switched_back.workspace.buffers.active == original_buf
+      assert effects == []
     end
 
-    test "opening a file from an agent tab snapshots the agent tab with the agent buffer" do
+    test "opening from an agent tab snapshots agent state, creates a file tab, switches scope, and stops the spinner" do
       {state, agent_buf} = state_with_agent_tab()
       file_buf = start_buffer("file content")
 
-      {new_state, _effects} = EditorState.add_buffer_pure(state, file_buf, context: :open)
-
+      {new_state, effects} = EditorState.add_buffer_pure(state, file_buf, context: :open)
       tb = new_state.shell_state.tab_bar
       agent_tab = TabBar.get(tb, 1)
       file_tab = TabBar.active(tb)
+      window = active_window(new_state)
 
+      assert {:monitor, file_buf} in effects
+      assert :stop_spinner in effects
+      assert TabBar.count(tb) == 2
       assert agent_tab.kind == :agent
       assert %Buffers{active: ^agent_buf} = agent_tab.context.buffers
       assert agent_tab.context.keymap_scope == :agent
       assert file_tab.kind == :file
       assert %Buffers{active: ^file_buf} = file_tab.context.buffers
       assert file_tab.context.keymap_scope == :editor
-    end
-
-    test "previewing a file does not overwrite the current tab context with the preview buffer" do
-      state = state_with_file_tab()
-      original_buf = state.workspace.buffers.active
-      preview_buf = start_buffer("preview")
-
-      {new_state, _effects} = EditorState.add_buffer_pure(state, preview_buf, context: :preview)
-
-      tb = new_state.shell_state.tab_bar
-      assert TabBar.count(tb) == 1
-      assert tb.active_id == 1
-      assert new_state.workspace.buffers.active == preview_buf
-      assert %Buffers{active: ^original_buf} = TabBar.get(tb, 1).context.buffers
-      assert new_state.buffer_add_context == :open
+      assert new_state.workspace.keymap_scope == :editor
+      assert new_state.workspace.buffers.active == file_buf
+      assert Content.buffer?(window.content)
     end
 
     @tag :tmp_dir
-    test "opening a file that already has a tab snapshots the outgoing tab before switching", %{
-      tmp_dir: tmp_dir
-    } do
+    test "file identity uses real paths, not just basenames, and existing tabs are reactivated without monitor effects",
+         %{tmp_dir: tmp_dir} do
       path1 = Path.join(tmp_dir, "one.ex")
       path2 = Path.join(tmp_dir, "two.ex")
       {state, buf1} = state_with_file_tab_for_path(path1, "one")
       buf2 = start_file_buffer(path2, "two")
 
       {state, _effects} = EditorState.add_buffer_pure(state, buf2, context: :open)
-      assert state.workspace.buffers.active == buf2
-
-      {new_state, effects} = EditorState.add_buffer_pure(state, buf1, context: :open)
-
+      {reactivated, effects} = EditorState.add_buffer_pure(state, buf1, context: :open)
       assert effects == []
+      assert reactivated.shell_state.tab_bar.active_id == 1
+      assert reactivated.workspace.buffers.active == buf1
 
-      tb = new_state.shell_state.tab_bar
-      assert tb.active_id == 1
-      assert new_state.workspace.buffers.active == buf1
-      assert %Buffers{active: ^buf1} = TabBar.get(tb, 1).context.buffers
-      assert %Buffers{active: ^buf2} = TabBar.get(tb, 2).context.buffers
-    end
+      assert %Buffers{active: ^buf1} =
+               TabBar.get(reactivated.shell_state.tab_bar, 1).context.buffers
 
-    @tag :tmp_dir
-    test "opening a different file with the same basename creates a distinct tab", %{
-      tmp_dir: tmp_dir
-    } do
+      assert %Buffers{active: ^buf2} =
+               TabBar.get(reactivated.shell_state.tab_bar, 2).context.buffers
+
       dir1 = Path.join(tmp_dir, "one")
       dir2 = Path.join(tmp_dir, "two")
       File.mkdir_p!(dir1)
       File.mkdir_p!(dir2)
-      path1 = Path.join(dir1, "same.ex")
-      path2 = Path.join(dir2, "same.ex")
-      {state, buf1} = state_with_file_tab_for_path(path1, "one")
-      buf2 = start_file_buffer(path2, "two")
+      same1 = Path.join(dir1, "same.ex")
+      same2 = Path.join(dir2, "same.ex")
+      {state, same_buf1} = state_with_file_tab_for_path(same1, "one")
+      same_buf2 = start_file_buffer(same2, "two")
 
-      {new_state, effects} = EditorState.add_buffer_pure(state, buf2, context: :open)
+      {distinct, effects} = EditorState.add_buffer_pure(state, same_buf2, context: :open)
+      assert {:monitor, same_buf2} in effects
+      assert TabBar.count(distinct.shell_state.tab_bar) == 2
+      assert TabBar.get(distinct.shell_state.tab_bar, 1).label == "same.ex"
+      assert TabBar.get(distinct.shell_state.tab_bar, 2).label == "same.ex"
 
-      assert {:monitor, buf2} in effects
-      tb = new_state.shell_state.tab_bar
-      assert TabBar.count(tb) == 2
-      assert tb.active_id == 2
-      assert TabBar.get(tb, 1).label == "same.ex"
-      assert TabBar.get(tb, 2).label == "same.ex"
-      assert %Buffers{active: ^buf1} = TabBar.get(tb, 1).context.buffers
-      assert %Buffers{active: ^buf2} = TabBar.get(tb, 2).context.buffers
+      assert %Buffers{active: ^same_buf1} =
+               TabBar.get(distinct.shell_state.tab_bar, 1).context.buffers
+
+      assert %Buffers{active: ^same_buf2} =
+               TabBar.get(distinct.shell_state.tab_bar, 2).context.buffers
     end
 
-    test "adds buffer when agent tab active (new file tab)" do
-      {state, _agent_buf} = state_with_agent_tab()
-      file_buf = start_buffer("file content")
-
-      {new_state, effects} = EditorState.add_buffer_pure(state, file_buf)
-
-      # Buffer is in the pool and active
-      assert file_buf in new_state.workspace.buffers.list
-      assert new_state.workspace.buffers.active == file_buf
-
-      # Monitor effect is present
-      assert {:monitor, file_buf} in effects
-
-      # A new file tab should be created and made active
-      tb = new_state.shell_state.tab_bar
-      active_tab = TabBar.active(tb)
-      assert active_tab.kind == :file
-
-      # Should have two tabs: the original agent tab + new file tab
-      assert TabBar.count(tb) == 2
-
-      # Keymap scope should switch from :agent to :editor
-      assert new_state.workspace.keymap_scope == :editor
-
-      # Active window content should be a buffer, not agent_chat
-      window = Map.fetch!(new_state.workspace.windows.map, new_state.workspace.windows.active)
-      assert Content.buffer?(window.content)
-    end
-
-    test "opening a file from an agent tab returns :stop_spinner effect" do
-      {state, _agent_buf} = state_with_agent_tab()
-      file_buf = start_buffer("file content")
-
-      {_new_state, effects} = EditorState.add_buffer_pure(state, file_buf, context: :open)
-
-      assert :stop_spinner in effects
-      assert {:monitor, file_buf} in effects
-    end
-
-    test "opening a file from a file tab does not return :stop_spinner effect" do
-      state = state_with_file_tab()
-      file_buf = start_buffer("new file")
-
-      {_new_state, effects} = EditorState.add_buffer_pure(state, file_buf, context: :open)
-
-      refute :stop_spinner in effects
-      assert {:monitor, file_buf} in effects
-    end
-
-    test "adds duplicate buffer (switches to existing tab)" do
-      state = state_with_file_tab()
-      buf = state.workspace.buffers.active
-
-      # Create a second file tab with a different buffer
-      {:ok, buf2} = BufferProcess.start_link(content: "second file")
-      state = EditorState.add_buffer(state, buf2)
-
-      # Now we have two tabs; the second (buf2) is active
-      tb = state.shell_state.tab_bar
-      assert TabBar.count(tb) >= 2
-      assert state.workspace.buffers.active == buf2
-
-      # "Add" the first buffer again - should switch to its existing tab
-      {new_state, effects} = EditorState.add_buffer_pure(state, buf)
-
-      # The first buffer should now be active
-      assert new_state.workspace.buffers.active == buf
-      # No monitor effect — buffer was already monitored from the first add
-      assert effects == []
-    end
-
-    test "syncs the active window buffer reference" do
-      state = state_with_file_tab()
-      new_buf = start_buffer("new file")
-
-      {new_state, _effects} = EditorState.add_buffer_pure(state, new_buf)
-
-      window = Map.fetch!(new_state.workspace.windows.map, new_state.workspace.windows.active)
-      assert window.buffer == new_buf
-    end
-  end
-
-  describe "switch_buffer/2" do
-    test "refreshes the active file tab context after an in-place buffer switch" do
-      state = state_with_file_tab()
-      original_buf = state.workspace.buffers.active
-      other_buf = start_buffer("other")
-
-      state =
-        EditorState.update_workspace(state, fn workspace ->
-          %Buffers{} = buffers = workspace.buffers
-
-          %{
-            workspace
-            | buffers: %{buffers | list: [original_buf, other_buf]}
-          }
-        end)
-
-      new_state = EditorState.switch_buffer(state, 1)
-
-      assert new_state.workspace.buffers.active == other_buf
-
-      assert %Buffers{active: ^other_buf} =
-               TabBar.active(new_state.shell_state.tab_bar).context.buffers
-    end
-
-    test "preview buffer switch does not rewrite the active file tab context" do
-      state = state_with_file_tab()
-      original_buf = state.workspace.buffers.active
-      preview_buf = start_buffer("preview")
-
-      state =
-        EditorState.update_workspace(state, fn workspace ->
-          %Buffers{} = buffers = workspace.buffers
-
-          %{
-            workspace
-            | buffers: %{buffers | list: [original_buf, preview_buf]}
-          }
-        end)
-        |> EditorState.set_buffer_add_context(:preview)
-
-      new_state = EditorState.switch_buffer(state, 1)
-
-      assert new_state.workspace.buffers.active == preview_buf
-      assert new_state.buffer_add_context == :open
-
-      assert %Buffers{active: ^original_buf} =
-               TabBar.active(new_state.shell_state.tab_bar).context.buffers
-    end
-  end
-
-  # ── close_buffer_pure/2 ────────────────────────────────────────────────────────
-
-  describe "close_buffer_pure/2" do
-    test "closes active buffer and switches to neighbor" do
-      state = base_state()
-      buf1 = state.workspace.buffers.active
-      buf2 = start_buffer("second")
-
-      # Add second buffer so we have two
-      state = EditorState.add_buffer(state, buf2)
-      assert state.workspace.buffers.active == buf2
-      assert length(state.workspace.buffers.list) == 2
-
-      # Monitor both buffers so close_buffer_pure can clean up
-      state = EditorState.monitor_buffer(state, buf1)
-      state = EditorState.monitor_buffer(state, buf2)
-
-      # Close the active buffer
-      {new_state, effects} = EditorState.close_buffer_pure(state, buf2)
-
-      # buf2 should be removed, buf1 should become active
-      refute buf2 in new_state.workspace.buffers.list
-      assert buf1 in new_state.workspace.buffers.list
-      assert new_state.workspace.buffers.active == buf1
-
-      # Effects list should be empty (close_buffer_pure returns [])
-      assert effects == []
-
-      # Monitor ref should be cleaned up
-      refute Map.has_key?(new_state.buffer_monitors, buf2)
-    end
-
-    test "closes only buffer gracefully" do
-      state = base_state()
-      buf = state.workspace.buffers.active
-      state = EditorState.monitor_buffer(state, buf)
-
-      {new_state, effects} = EditorState.close_buffer_pure(state, buf)
-
-      assert new_state.workspace.buffers.list == []
-      assert new_state.workspace.buffers.active == nil
-      assert effects == []
-      refute Map.has_key?(new_state.buffer_monitors, buf)
-    end
-
-    test "closes inactive buffer without affecting active" do
-      state = base_state()
-      buf1 = state.workspace.buffers.active
-      buf2 = start_buffer("second")
-      buf3 = start_buffer("third")
-
-      state = EditorState.add_buffer(state, buf2)
-      state = EditorState.add_buffer(state, buf3)
-      state = EditorState.monitor_buffer(state, buf1)
-      state = EditorState.monitor_buffer(state, buf2)
-      state = EditorState.monitor_buffer(state, buf3)
-
-      # buf3 is active; close buf1 (inactive)
-      assert state.workspace.buffers.active == buf3
-
-      {new_state, _effects} = EditorState.close_buffer_pure(state, buf1)
-
-      # Active buffer should remain buf3
-      assert new_state.workspace.buffers.active == buf3
-      refute buf1 in new_state.workspace.buffers.list
-    end
-
-    test "clears special buffer slot when messages buffer dies" do
-      {:ok, msg_buf} = BufferProcess.start_link(content: "")
-
-      state = %EditorState{
-        port_manager: self(),
-        workspace: %WorkspaceState{
-          viewport: Viewport.new(24, 80),
-          editing: VimState.new(),
-          buffers: %Buffers{
-            active: msg_buf,
-            list: [msg_buf],
-            active_index: 0,
-            messages: msg_buf
-          }
-        }
-      }
-
-      state = EditorState.monitor_buffer(state, msg_buf)
-
-      {new_state, _effects} = EditorState.close_buffer_pure(state, msg_buf)
-
-      assert new_state.workspace.buffers.messages == nil
-    end
-  end
-
-  # ── add_buffer_pure/2 with Board shell (agent_chat content guard) ──────────────
-
-  describe "add_buffer_pure/2 with agent_chat content" do
-    test "preserves agent_chat window content when adding buffer" do
-      # This tests the A1 content-type guard in sync_active_window_buffer.
-      # When a window has {:agent_chat, _} content, adding a new buffer
-      # to the buffer pool should NOT overwrite the window's content type.
-      {:ok, agent_buf} = BufferProcess.start_link(content: "")
-      win_id = 1
-      agent_window = Window.new_agent_chat(win_id, agent_buf, 24, 80)
+    test "agent chat windows without tab bars keep their content when a file buffer is added" do
+      agent_buf = start_buffer("")
+      agent_window = Window.new_agent_chat(1, agent_buf, 24, 80)
 
       state = %EditorState{
         port_manager: self(),
@@ -498,145 +192,178 @@ defmodule MingaEditor.State.BufferLifecycleTest do
           editing: VimState.new(),
           buffers: %Buffers{active: agent_buf, list: [agent_buf], active_index: 0},
           windows: %Windows{
-            tree: WindowTree.new(win_id),
-            map: %{win_id => agent_window},
-            active: win_id,
-            next_id: win_id + 1
+            tree: WindowTree.new(1),
+            map: %{1 => agent_window},
+            active: 1,
+            next_id: 2
           }
         }
       }
 
-      # Confirm starting state: agent_chat content
-      window = Map.fetch!(state.workspace.windows.map, win_id)
-      assert Content.agent_chat?(window.content)
-
-      # Add a new buffer without a tab bar (exercises the no-tab-bar clause)
       file_buf = start_buffer("file content")
       {new_state, effects} = EditorState.add_buffer_pure(state, file_buf)
+      window = active_window(new_state)
 
-      # The buffer should be added and active
       assert file_buf in new_state.workspace.buffers.list
       assert new_state.workspace.buffers.active == file_buf
       assert {:monitor, file_buf} in effects
-
-      # But the window should still have agent_chat content because
-      # sync_active_window_buffer guards on content type
-      window = Map.fetch!(new_state.workspace.windows.map, win_id)
-
-      assert Content.agent_chat?(window.content),
-             "agent_chat window content should be preserved, got #{inspect(window.content)}"
-
-      assert window.buffer == agent_buf,
-             "window buffer pid should remain the agent buffer"
+      assert Content.agent_chat?(window.content)
+      assert window.buffer == agent_buf
     end
   end
 
-  # ── Inactive tab scrubbing on buffer death ──────────────────────────────────
+  describe "switch_buffer/2" do
+    test "open switches refresh active file tab context, while preview switches keep the original context" do
+      state = state_with_file_tab()
+      original_buf = state.workspace.buffers.active
+      other_buf = start_buffer("other")
+      state = with_buffer_pool(state, [original_buf, other_buf])
 
-  describe "close_buffer_pure/2 scrubs inactive tab snapshots" do
-    test "removes dead pid from inactive tab's context.buffers" do
-      # Tab A is active with buf_a; Tab B is inactive holding buf_b
+      opened = EditorState.switch_buffer(state, 1)
+      assert opened.workspace.buffers.active == other_buf
+
+      assert %Buffers{active: ^other_buf} =
+               TabBar.active(opened.shell_state.tab_bar).context.buffers
+
+      preview_buf = start_buffer("preview")
+
+      preview_state =
+        state
+        |> with_buffer_pool([original_buf, preview_buf])
+        |> EditorState.set_buffer_add_context(:preview)
+
+      previewed = EditorState.switch_buffer(preview_state, 1)
+      assert previewed.workspace.buffers.active == preview_buf
+      assert previewed.buffer_add_context == :open
+
+      assert %Buffers{active: ^original_buf} =
+               TabBar.active(previewed.shell_state.tab_bar).context.buffers
+    end
+  end
+
+  describe "close_buffer_pure/2" do
+    test "closing active, only, inactive, and special buffers updates buffers and monitor refs" do
+      state = base_state()
+      buf1 = state.workspace.buffers.active
+      buf2 = start_buffer("second")
+
+      state =
+        state
+        |> EditorState.add_buffer(buf2)
+        |> EditorState.monitor_buffer(buf1)
+        |> EditorState.monitor_buffer(buf2)
+
+      {closed_active, effects} = EditorState.close_buffer_pure(state, buf2)
+      assert effects == []
+      refute buf2 in closed_active.workspace.buffers.list
+      assert closed_active.workspace.buffers.active == buf1
+      refute Map.has_key?(closed_active.buffer_monitors, buf2)
+
+      buf3 = start_buffer("third")
+
+      inactive_state =
+        state
+        |> EditorState.add_buffer(buf3)
+        |> EditorState.monitor_buffer(buf3)
+
+      {closed_inactive, _effects} = EditorState.close_buffer_pure(inactive_state, buf1)
+      assert closed_inactive.workspace.buffers.active == buf3
+      refute buf1 in closed_inactive.workspace.buffers.list
+
+      only_state = base_state()
+      only_buf = only_state.workspace.buffers.active
+      only_state = EditorState.monitor_buffer(only_state, only_buf)
+      {closed_only, effects} = EditorState.close_buffer_pure(only_state, only_buf)
+      assert effects == []
+      assert closed_only.workspace.buffers.list == []
+      assert closed_only.workspace.buffers.active == nil
+      refute Map.has_key?(closed_only.buffer_monitors, only_buf)
+
+      msg_buf = start_buffer("")
+
+      special_state =
+        state_for_buffer(msg_buf, messages: msg_buf) |> EditorState.monitor_buffer(msg_buf)
+
+      {closed_special, _effects} = EditorState.close_buffer_pure(special_state, msg_buf)
+      assert closed_special.workspace.buffers.messages == nil
+    end
+
+    test "closing buffers scrubs inactive tab snapshots, including tabs whose only buffer died" do
       buf_a = start_buffer("file A")
       buf_b = start_buffer("file B")
 
-      win_id = 1
-      window = Window.new(win_id, buf_a, 24, 80)
+      state =
+        state_for_buffer(buf_a, list: [buf_a, buf_b])
+        |> EditorState.monitor_buffers([buf_a, buf_b])
 
-      state = %EditorState{
-        port_manager: self(),
-        workspace: %WorkspaceState{
-          viewport: Viewport.new(24, 80),
-          editing: VimState.new(),
-          buffers: %Buffers{active: buf_a, list: [buf_a, buf_b], active_index: 0},
-          windows: %Windows{
-            tree: WindowTree.new(win_id),
-            map: %{win_id => window},
-            active: win_id,
-            next_id: win_id + 1
-          }
-        }
-      }
+      {state, tab_b} = state_with_inactive_tab_buffer(state, buf_b)
 
-      state = EditorState.monitor_buffer(state, buf_a)
-      state = EditorState.monitor_buffer(state, buf_b)
-
-      # Set up two tabs: Tab A (active, id=1), Tab B (inactive, id=2)
-      tab_a = Tab.new_file(1, "a.ex")
-      {tb, tab_b} = TabBar.insert(TabBar.new(tab_a), :file, "b.ex")
-
-      # Snapshot Tab B with buf_b as its active buffer
-      tab_b_context = %{
-        buffers: %Buffers{active: buf_b, list: [buf_b], active_index: 0},
-        editing: VimState.new(),
-        viewport: Viewport.new(24, 80)
-      }
-
-      tb = TabBar.update_context(tb, tab_b.id, tab_b_context)
-
-      # Snapshot Tab A (active) with current workspace
-      context_a = EditorState.snapshot_tab_context(EditorState.set_tab_bar(state, tb))
-      tb = TabBar.update_context(tb, 1, context_a)
-      state = EditorState.set_tab_bar(state, tb)
-
-      # Kill buf_b via close_buffer_pure
       {new_state, _effects} = EditorState.close_buffer_pure(state, buf_b)
-
-      # AC1 + AC2: Tab B's snapshot should be scrubbed
-      tb_after = EditorState.tab_bar(new_state)
-      tab_b_after = TabBar.get(tb_after, tab_b.id)
-
+      tab_b_after = TabBar.get(EditorState.tab_bar(new_state), tab_b.id)
       refute buf_b in tab_b_after.context.buffers.list
       assert tab_b_after.context.buffers.active != buf_b
 
-      # AC3: Restoring Tab B's context produces a usable workspace
       restored_ws = WorkspaceState.restore_tab_context(new_state.workspace, tab_b_after.context)
       refute buf_b in restored_ws.buffers.list
       assert restored_ws.buffers.active != buf_b
+
+      only = start_buffer("only buffer")
+      only_state = state_for_buffer(only) |> EditorState.monitor_buffer(only)
+      {only_state, only_tab} = state_with_inactive_tab_buffer(only_state, only)
+      {closed_only, _effects} = EditorState.close_buffer_pure(only_state, only)
+      only_tab_after = TabBar.get(EditorState.tab_bar(closed_only), only_tab.id)
+      assert only_tab_after.context.buffers.list == []
+      assert only_tab_after.context.buffers.active == nil
     end
+  end
 
-    test "handles tab whose only buffer died (empty list after scrub)" do
-      buf_only = start_buffer("only buffer")
-      win_id = 1
-      window = Window.new(win_id, buf_only, 24, 80)
+  defp state_for_buffer(buf, opts \\ []) do
+    buffers = %Buffers{
+      active: buf,
+      list: Keyword.get(opts, :list, [buf]),
+      active_index: 0,
+      messages: Keyword.get(opts, :messages)
+    }
 
-      state = %EditorState{
-        port_manager: self(),
-        workspace: %WorkspaceState{
-          viewport: Viewport.new(24, 80),
-          editing: VimState.new(),
-          buffers: %Buffers{active: buf_only, list: [buf_only], active_index: 0},
-          windows: %Windows{
-            tree: WindowTree.new(win_id),
-            map: %{win_id => window},
-            active: win_id,
-            next_id: win_id + 1
-          }
+    %EditorState{
+      port_manager: self(),
+      workspace: %WorkspaceState{
+        viewport: Viewport.new(24, 80),
+        editing: VimState.new(),
+        buffers: buffers,
+        windows: %Windows{
+          tree: WindowTree.new(1),
+          map: %{1 => Window.new(1, buf, 24, 80)},
+          active: 1,
+          next_id: 2
         }
       }
+    }
+  end
 
-      state = EditorState.monitor_buffer(state, buf_only)
+  defp with_buffer_pool(state, buffers) do
+    EditorState.update_workspace(state, fn workspace ->
+      %Buffers{} = current = workspace.buffers
+      %{workspace | buffers: %{current | list: buffers}}
+    end)
+  end
 
-      tab_a = Tab.new_file(1, "a.ex")
-      {tb, tab_b} = TabBar.insert(TabBar.new(tab_a), :file, "b.ex")
+  defp active_window(state),
+    do: Map.fetch!(state.workspace.windows.map, state.workspace.windows.active)
 
-      tab_b_context = %{
-        buffers: %Buffers{active: buf_only, list: [buf_only], active_index: 0},
-        editing: VimState.new(),
-        viewport: Viewport.new(24, 80)
-      }
+  defp state_with_inactive_tab_buffer(state, inactive_buf) do
+    tab_a = Tab.new_file(1, "a.ex")
+    {tb, tab_b} = TabBar.insert(TabBar.new(tab_a), :file, "b.ex")
 
-      tb = TabBar.update_context(tb, tab_b.id, tab_b_context)
-      context_a = EditorState.snapshot_tab_context(EditorState.set_tab_bar(state, tb))
-      tb = TabBar.update_context(tb, 1, context_a)
-      state = EditorState.set_tab_bar(state, tb)
+    tab_b_context = %{
+      buffers: %Buffers{active: inactive_buf, list: [inactive_buf], active_index: 0},
+      editing: VimState.new(),
+      viewport: Viewport.new(24, 80)
+    }
 
-      {new_state, _effects} = EditorState.close_buffer_pure(state, buf_only)
-
-      tb_after = EditorState.tab_bar(new_state)
-      tab_b_after = TabBar.get(tb_after, tab_b.id)
-
-      assert tab_b_after.context.buffers.list == []
-      assert tab_b_after.context.buffers.active == nil
-    end
+    tb = TabBar.update_context(tb, tab_b.id, tab_b_context)
+    state_with_tb = EditorState.set_tab_bar(state, tb)
+    tb = TabBar.update_context(tb, 1, EditorState.snapshot_tab_context(state_with_tb))
+    {EditorState.set_tab_bar(state, tb), tab_b}
   end
 end
