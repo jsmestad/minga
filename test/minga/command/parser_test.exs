@@ -101,7 +101,9 @@ defmodule Minga.Command.ParserTest do
         {"agent-stop", {:agent_abort, []}},
         {"agent-new", {:agent_new_session, []}},
         {"parser-restart", {:parser_restart, []}},
-        {"ParserRestart", {:parser_restart, []}}
+        {"ParserRestart", {:parser_restart, []}},
+        {"reload-highlights", {:reload_highlights, []}},
+        {"rh", {:reload_highlights, []}}
       ])
     end
   end

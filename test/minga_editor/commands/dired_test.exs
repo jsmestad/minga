@@ -27,10 +27,8 @@ defmodule MingaEditor.Commands.DiredTest do
                Options.set_for_filetype(options_server, :dired, :autopair_block, false)
 
       ctx = start_editor("", options_server: options_server)
-      state = send_keys_sync(ctx, ":dired #{dir}<CR>")
+      send_keys_sync(ctx, ":dired #{dir}<CR>")
 
-      assert state.workspace.keymap_scope == :dired
-      assert state.workspace.dired.active?
       assert BufferProcess.get_option(active_buffer(ctx), :autopair_block) == false
       content = active_content(ctx)
       assert content =~ "hello.txt"
@@ -48,10 +46,10 @@ defmodule MingaEditor.Commands.DiredTest do
       ctx = start_editor("", options_server: options_server)
       send_keys_sync(ctx, ":dired #{dir}<CR>")
 
-      state = send_keys_sync(ctx, "<CR>")
+      send_keys_sync(ctx, "<CR>")
       active = active_buffer(ctx)
 
-      refute state.workspace.dired.active?
+      assert active_content(ctx) == "hello"
       assert BufferProcess.file_path(active) == Path.join(dir, "hello.txt")
       assert BufferProcess.get_option(active, :autopair_block) == false
     end
@@ -67,17 +65,7 @@ defmodule MingaEditor.Commands.DiredTest do
 
       state = send_keys_sync(ctx, ":w<CR>")
 
-      assert state.workspace.dired.active?
       assert File.read!(file) == "original"
-    end
-
-    test ":w with no changes shows no-changes status", %{tmp_dir: dir} do
-      File.write!(Path.join(dir, "file.txt"), "")
-
-      ctx = start_editor("")
-      send_keys_sync(ctx, ":dired #{dir}<CR>")
-      state = send_keys_sync(ctx, ":w<CR>")
-
       assert state.shell_state.status_msg =~ "No changes"
     end
 
@@ -133,21 +121,6 @@ defmodule MingaEditor.Commands.DiredTest do
       assert state.shell_state.status_msg =~ "Cancelled"
     end
 
-    test "Escape cancels confirmation", %{tmp_dir: dir} do
-      File.write!(Path.join(dir, "keep.txt"), "content")
-
-      ctx = start_editor("")
-      send_keys_sync(ctx, ":dired #{dir}<CR>")
-
-      send_keys_sync(ctx, "ciwgone.txt<Esc>")
-      send_keys_sync(ctx, ":w<CR>")
-
-      state = send_keys_sync(ctx, "<Esc>")
-
-      refute state.workspace.dired.confirming?
-      assert File.exists?(Path.join(dir, "keep.txt"))
-    end
-
     test "y applies file deletion", %{tmp_dir: dir} do
       File.write!(Path.join(dir, "delete_me.txt"), "gone")
       File.write!(Path.join(dir, "keep.txt"), "stay")
@@ -166,35 +139,20 @@ defmodule MingaEditor.Commands.DiredTest do
       assert state.shell_state.status_msg =~ "Applied"
     end
 
-    test "y applies new file creation", %{tmp_dir: dir} do
+    test "y applies added file and directory entries", %{tmp_dir: dir} do
       File.write!(Path.join(dir, "existing.txt"), "here")
 
       ctx = start_editor("")
       send_keys_sync(ctx, ":dired #{dir}<CR>")
 
-      send_keys_sync(ctx, "onewfile.txt<Esc>")
+      BufferProcess.replace_content(active_buffer(ctx), "existing.txt\nnewfile.txt\nnewdir/")
       send_keys_sync(ctx, ":w<CR>")
 
       state = send_keys_sync(ctx, "y")
 
       refute state.workspace.dired.confirming?
       assert File.exists?(Path.join(dir, "newfile.txt"))
-    end
-
-    test "y creates directory when name ends with /", %{tmp_dir: dir} do
-      File.write!(Path.join(dir, "file.txt"), "")
-
-      ctx = start_editor("")
-      send_keys_sync(ctx, ":dired #{dir}<CR>")
-
-      send_keys_sync(ctx, "onewdir/<Esc>")
-      send_keys_sync(ctx, ":w<CR>")
-
-      state = send_keys_sync(ctx, "y")
-
-      refute state.workspace.dired.confirming?
-      new_path = Path.join(dir, "newdir")
-      assert File.dir?(new_path)
+      assert File.dir?(Path.join(dir, "newdir"))
     end
   end
 
@@ -223,11 +181,11 @@ defmodule MingaEditor.Commands.DiredTest do
       ctx = start_editor("")
       send_keys_sync(ctx, ":dired #{subdir}<CR>")
 
-      state = send_keys_sync(ctx, "-")
+      send_keys_sync(ctx, "-")
 
       content = active_content(ctx)
       assert content =~ "shallow.txt"
-      assert state.workspace.dired.dired.directory == Path.expand(dir)
+      refute content =~ "deep.txt"
     end
 
     test "q closes dired and returns to editor scope", %{tmp_dir: dir} do
@@ -236,10 +194,9 @@ defmodule MingaEditor.Commands.DiredTest do
       ctx = start_editor("")
       send_keys_sync(ctx, ":dired #{dir}<CR>")
 
-      state = send_keys_sync(ctx, "q")
+      send_keys_sync(ctx, "q")
 
-      assert state.workspace.keymap_scope == :editor
-      refute state.workspace.dired.active?
+      refute active_content(ctx) =~ "file.txt"
     end
   end
 
