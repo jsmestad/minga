@@ -30,15 +30,7 @@ defmodule MingaEditor.WarningsBufferTest do
   end
 
   describe "warnings in TUI" do
-    test "SPC b W opens the Messages buffer fallback" do
-      ctx = start_editor("hello")
-
-      send_keys_sync(ctx, "<SPC>bW")
-
-      assert Enum.join(screen_text(ctx), "\n") =~ "*Messages*"
-    end
-
-    test "warnings are stored with warning level" do
+    test "warnings are stored and SPC b W opens the Messages buffer fallback" do
       ctx = start_editor("hello")
 
       MingaEditor.log_to_warnings("something broke", ctx.editor)
@@ -49,6 +41,10 @@ defmodule MingaEditor.WarningsBufferTest do
       assert Enum.any?(warning_entries, fn entry ->
                String.contains?(entry.text, "something broke")
              end)
+
+      send_keys_sync(ctx, "<SPC>bW")
+
+      assert Enum.join(screen_text(ctx), "\n") =~ "*Messages*"
     end
   end
 
