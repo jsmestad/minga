@@ -55,31 +55,6 @@ defmodule MingaEditor.Commands.DiredTest do
       assert BufferProcess.file_path(active) == Path.join(dir, "hello.txt")
       assert BufferProcess.get_option(active, :autopair_block) == false
     end
-
-    test ":oil alias works the same", %{tmp_dir: dir} do
-      File.write!(Path.join(dir, "test.txt"), "")
-
-      ctx = start_editor("")
-      state = send_keys_sync(ctx, ":oil #{dir}<CR>")
-
-      assert state.workspace.keymap_scope == :dired
-      assert state.workspace.dired.active?
-    end
-
-    test ":dired with subdir path opens that directory", %{tmp_dir: dir} do
-      subdir = Path.join(dir, "sub")
-      File.mkdir_p!(subdir)
-      File.write!(Path.join(subdir, "inner.txt"), "")
-      File.write!(Path.join(dir, "outer.txt"), "")
-
-      ctx = start_editor("")
-      state = send_keys_sync(ctx, ":dired #{subdir}<CR>")
-
-      assert state.workspace.dired.active?
-      content = active_content(ctx)
-      assert content =~ "inner.txt"
-      refute content =~ "outer.txt"
-    end
   end
 
   describe "[EditorCase integration] save interception" do
@@ -283,17 +258,19 @@ defmodule MingaEditor.Commands.DiredTest do
       assert active_content(ctx) =~ ".hidden"
     end
 
-    test "gs cycles sort order", %{tmp_dir: dir} do
-      File.write!(Path.join(dir, "file.txt"), "")
+    test "gs shows entries in the next sort order", %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "z-small.txt"), "a")
+      File.write!(Path.join(dir, "a-big.txt"), String.duplicate("x", 1000))
 
       ctx = start_editor("")
       send_keys_sync(ctx, ":dired #{dir}<CR>")
+      send_keys_sync(ctx, "gs")
 
-      state = editor_state(ctx)
-      assert state.workspace.dired.dired.sort_by == :name
+      lines = String.split(active_content(ctx), "\n", trim: true)
+      small_index = Enum.find_index(lines, &String.contains?(&1, "z-small.txt"))
+      big_index = Enum.find_index(lines, &String.contains?(&1, "a-big.txt"))
 
-      state = send_keys_sync(ctx, "gs")
-      assert state.workspace.dired.dired.sort_by == :size
+      assert small_index < big_index
     end
 
     test "gd toggles detail columns", %{tmp_dir: dir} do

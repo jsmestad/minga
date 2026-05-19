@@ -3,7 +3,10 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer
   alias Minga.Buffer.Process, as: BufferProcess
+  alias MingaEditor.RenderPipeline.TestHelpers
+  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Search
   alias MingaEditor.VimState
@@ -13,6 +16,7 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Theme
+  alias MingaEditor.Workspace.State, as: WorkspaceState
 
   defp start_buffer(opts) do
     {:ok, pid} = BufferProcess.start_link(opts)
@@ -46,6 +50,18 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
       capabilities: %{},
       theme: Theme.get!(:doom_one)
     }
+  end
+
+  defp state_with_buffers([first_content | rest]) do
+    state = TestHelpers.base_state(content: first_content)
+
+    buffers =
+      Enum.reduce(rest, state.workspace.buffers, fn content, acc ->
+        pid = start_buffer(content: content)
+        Buffers.add_background(acc, pid)
+      end)
+
+    EditorState.update_workspace(state, &WorkspaceState.set_buffers(&1, buffers))
   end
 
   describe "special?/1" do
@@ -98,6 +114,27 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
 
       candidates = BufferSource.candidates(fake_state([buf]))
       assert candidates == []
+    end
+
+    test "labels dirty buffers" do
+      buf = start_buffer(content: "clean")
+      Buffer.insert_text(buf, "x")
+
+      candidates = BufferSource.candidates(fake_state([buf]))
+      labels = Enum.map(candidates, fn %Item{label: label} -> label end)
+
+      assert Enum.any?(labels, &String.contains?(&1, "[+]"))
+    end
+  end
+
+  describe "selection" do
+    test "selecting an indexed buffer switches the active buffer" do
+      state = state_with_buffers(["alpha", "beta"])
+      item = %Item{id: 1, label: "beta"}
+
+      selected = BufferSource.on_select(item, state)
+
+      assert Buffer.content(selected.workspace.buffers.active) == "beta"
     end
   end
 
