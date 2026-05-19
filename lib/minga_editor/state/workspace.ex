@@ -5,6 +5,8 @@ defmodule MingaEditor.State.Workspace do
   A workspace owns a task context. The manual workspace represents project-owned file work, while agent workspaces attach one optional agent session and later become the home for workspace files, agent UI, ProjectView, and review state.
   """
 
+  alias Minga.Project.FileRef
+
   @typedoc "Workspace kind."
   @type kind :: :manual | :agent
 
@@ -24,8 +26,8 @@ defmodule MingaEditor.State.Workspace do
           agent_status: agent_status(),
           session: pid() | nil,
           custom_name: String.t() | nil,
-          files: [term()],
-          active_file: term() | nil,
+          files: [FileRef.t()],
+          active_file: FileRef.t() | nil,
           agent_ui: term() | nil,
           project_view: term() | nil,
           review: term() | nil
@@ -102,6 +104,47 @@ defmodule MingaEditor.State.Workspace do
     |> prompt_name()
     |> apply_auto_name(workspace)
   end
+
+  @doc "Adds a file membership to the workspace, preserving existing membership order."
+  @spec add_file(t(), FileRef.t()) :: t()
+  def add_file(%__MODULE__{} = workspace, %FileRef{} = file_ref) do
+    if has_file?(workspace, file_ref) do
+      workspace
+    else
+      %{workspace | files: workspace.files ++ [file_ref]}
+    end
+  end
+
+  @doc "Removes a file membership from the workspace."
+  @spec remove_file(t(), FileRef.t()) :: t()
+  def remove_file(%__MODULE__{} = workspace, %FileRef{} = file_ref) do
+    files = Enum.reject(workspace.files, &FileRef.equal?(&1, file_ref))
+    active_file = remove_active_file(workspace.active_file, file_ref)
+    %{workspace | files: files, active_file: active_file}
+  end
+
+  @doc "Returns true when the workspace already contains the file membership."
+  @spec has_file?(t(), FileRef.t()) :: boolean()
+  def has_file?(%__MODULE__{files: files}, %FileRef{} = file_ref) do
+    Enum.any?(files, &FileRef.equal?(&1, file_ref))
+  end
+
+  @doc "Sets the active file membership for the workspace."
+  @spec set_active_file(t(), FileRef.t() | nil) :: t()
+  def set_active_file(%__MODULE__{} = workspace, nil), do: %{workspace | active_file: nil}
+
+  def set_active_file(%__MODULE__{} = workspace, %FileRef{} = file_ref) do
+    workspace
+    |> add_file(file_ref)
+    |> Map.put(:active_file, file_ref)
+  end
+
+  @spec remove_active_file(FileRef.t() | nil, FileRef.t()) :: FileRef.t() | nil
+  defp remove_active_file(%FileRef{} = active_file, %FileRef{} = removed_file) do
+    if FileRef.equal?(active_file, removed_file), do: nil, else: active_file
+  end
+
+  defp remove_active_file(nil, %FileRef{}), do: nil
 
   @spec manual_label(String.t() | nil) :: String.t()
   defp manual_label(nil), do: "Files"

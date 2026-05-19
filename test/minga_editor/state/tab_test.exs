@@ -1,6 +1,7 @@
 defmodule MingaEditor.State.TabTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Project.FileRef
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context
@@ -96,6 +97,17 @@ defmodule MingaEditor.State.TabTest do
       tab = Tab.new_agent(1)
       assert Tab.agent?(tab)
       refute Tab.file?(tab)
+    end
+  end
+
+  describe "set_file_ref/2" do
+    test "stores and clears a logical file ref" do
+      {:ok, file_ref} = FileRef.from_path("/tmp/minga", "lib/user.ex")
+
+      tab = Tab.new_file(1, "user.ex") |> Tab.set_file_ref(file_ref)
+      assert tab.file_ref == file_ref
+
+      assert Tab.set_file_ref(tab, nil).file_ref == nil
     end
   end
 

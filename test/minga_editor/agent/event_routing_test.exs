@@ -14,14 +14,21 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Project.FileRef
+  alias MingaEditor.Agent.Events
   alias MingaEditor.Shell.Board
   alias MingaEditor.Shell.Board.Card
   alias MingaEditor.Shell.Board.State, as: BoardState
   alias MingaEditor.Shell.Traditional
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
+  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
+  alias MingaEditor.State.Buffers
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Workspace.State, as: WorkspaceState
@@ -151,6 +158,82 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         Traditional.on_agent_event(ss, workspace(), ghost, {:status_changed, :error})
 
       assert ss2.tab_bar == ss.tab_bar
+    end
+  end
+
+  describe "Agent.Events.handle/2 file association" do
+    test "file_changed associates by exact file ref, not duplicate basename" do
+      root = Path.join(System.tmp_dir!(), "minga-event-routing")
+      lib_path = Path.join([root, "lib", "user.ex"])
+      test_path = Path.join([root, "test", "user.ex"])
+      assert {:ok, lib_ref} = FileRef.from_path(root, lib_path)
+      assert {:ok, test_ref} = FileRef.from_path(root, test_path)
+
+      session = fake_session_pid()
+      tab1 = Tab.new_file(1, "user.ex") |> Tab.set_file_ref(lib_ref)
+      tab2 = Tab.new_file(2, "user.ex") |> Tab.set_file_ref(test_ref)
+      agent_tab = Tab.new_agent(3, "Agent") |> Tab.set_session(session)
+
+      tb = TabBar.new(tab1, root)
+      tb = %{tb | tabs: [tab1, tab2, agent_tab], active_id: 3, next_id: 4}
+      {tb, workspace} = TabBar.add_workspace(tb, "Agent", session)
+      tb = TabBar.move_tab_to_workspace(tb, agent_tab.id, workspace.id)
+
+      state = %EditorState{
+        port_manager: self(),
+        shell: Traditional,
+        workspace: %WorkspaceState{
+          viewport: Viewport.new(24, 80),
+          file_tree: %FileTreeState{project_root: root}
+        },
+        shell_state: %TraditionalState{agent: %AgentState{}, tab_bar: tb}
+      }
+
+      {state, _effects} = Events.handle(state, {:file_changed, test_path, "before", "after"})
+
+      tb = state.shell_state.tab_bar
+      assert TabBar.get(tb, tab1.id).group_id == 0
+      assert TabBar.get(tb, tab2.id).group_id == workspace.id
+      assert Workspace.has_file?(TabBar.get_workspace(tb, workspace.id), test_ref)
+      refute Workspace.has_file?(TabBar.get_workspace(tb, workspace.id), lib_ref)
+    end
+
+    test "file_changed derives missing tab file ref from snapshotted buffer context" do
+      root = Path.join(System.tmp_dir!(), "minga-event-routing")
+      path = Path.join([root, "lib", "initial.ex"])
+      File.mkdir_p!(Path.dirname(path))
+      File.write!(path, "before")
+      {:ok, buffer} = start_supervised({BufferProcess, content: "before", file_path: path})
+      assert {:ok, expected_ref} = FileRef.from_path(root, path)
+
+      session = fake_session_pid()
+
+      file_tab =
+        Tab.new_file(1, "initial.ex")
+        |> Tab.set_context(%{buffers: %Buffers{active: buffer, list: [buffer], active_index: 0}})
+
+      agent_tab = Tab.new_agent(2, "Agent") |> Tab.set_session(session)
+
+      tb = TabBar.new(file_tab, root)
+      tb = %{tb | tabs: [file_tab, agent_tab], active_id: 2, next_id: 3}
+      {tb, workspace} = TabBar.add_workspace(tb, "Agent", session)
+      tb = TabBar.move_tab_to_workspace(tb, agent_tab.id, workspace.id)
+
+      state = %EditorState{
+        port_manager: self(),
+        shell: Traditional,
+        workspace: %WorkspaceState{
+          viewport: Viewport.new(24, 80),
+          file_tree: %FileTreeState{project_root: root}
+        },
+        shell_state: %TraditionalState{agent: %AgentState{}, tab_bar: tb}
+      }
+
+      {state, _effects} = Events.handle(state, {:file_changed, path, "before", "after"})
+
+      tb = state.shell_state.tab_bar
+      assert TabBar.get(tb, file_tab.id).group_id == workspace.id
+      assert Workspace.has_file?(TabBar.get_workspace(tb, workspace.id), expected_ref)
     end
   end
 

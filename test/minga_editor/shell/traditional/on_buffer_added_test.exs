@@ -11,17 +11,49 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Dashboard
+  alias Minga.Project.FileRef
   alias MingaEditor.Shell.Traditional
   alias MingaEditor.Shell.Traditional.State, as: ShellState
+  alias MingaEditor.State.Buffers
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.ModalOverlay.Dashboard, as: DashboardPayload
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.Picker, as: PickerLegacy
+  alias MingaEditor.State.Tab
+  alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace
   alias MingaEditor.UI.Picker, as: UIPicker
   alias MingaEditor.Viewport
   alias MingaEditor.Workspace.State, as: WorkspaceState
 
   defp blank_workspace do
     %WorkspaceState{viewport: Viewport.new(24, 80)}
+  end
+
+  describe "file refs" do
+    test "populates file refs when opening file tabs" do
+      root = Path.join(System.tmp_dir!(), "minga-on-buffer-added")
+      path = Path.join([root, "lib", "user.ex"])
+      File.mkdir_p!(Path.dirname(path))
+      File.write!(path, "hello")
+      {:ok, buf} = BufferProcess.start_link(content: "hello", file_path: path)
+
+      workspace = %WorkspaceState{
+        viewport: Viewport.new(24, 80),
+        buffers: %Buffers{active: buf, list: [buf]},
+        file_tree: %FileTreeState{project_root: root}
+      }
+
+      shell_state = %ShellState{tab_bar: TabBar.new(Tab.new_file(1, "initial.ex"), root)}
+
+      {new_shell, _workspace, _effects} =
+        Traditional.on_buffer_added(shell_state, workspace, buf, :open)
+
+      active_tab = TabBar.active(new_shell.tab_bar)
+      assert {:ok, expected_ref} = FileRef.from_path(root, path)
+      assert active_tab.file_ref == expected_ref
+      assert Workspace.has_file?(TabBar.get_workspace(new_shell.tab_bar, 0), expected_ref)
+    end
   end
 
   describe "dashboard auto-dismiss" do

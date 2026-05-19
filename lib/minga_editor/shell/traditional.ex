@@ -36,6 +36,7 @@ defmodule MingaEditor.Shell.Traditional do
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer
+  alias Minga.Project.FileRef
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
@@ -284,8 +285,13 @@ defmodule MingaEditor.Shell.Traditional do
     case TabBar.active(tb) do
       %Tab{kind: :file} ->
         label = buffer_label(workspace.buffers.active)
-        tb = TabBar.update_label(tb, tb.active_id, label)
-        tb = TabBar.update_context(tb, tb.active_id, WorkspaceState.to_tab_context(workspace))
+
+        tb =
+          tb
+          |> TabBar.update_label(tb.active_id, label)
+          |> sync_file_tab_ref(tb.active_id, workspace.buffers.active, workspace)
+          |> TabBar.update_context(tb.active_id, WorkspaceState.to_tab_context(workspace))
+
         {%{shell_state | tab_bar: tb}, workspace, []}
 
       %Tab{} ->
@@ -537,7 +543,11 @@ defmodule MingaEditor.Shell.Traditional do
 
     # Snapshot the new tab's context
     new_context = WorkspaceState.to_tab_context(workspace)
-    tb = TabBar.update_context(tb, new_tab.id, new_context)
+
+    tb =
+      tb
+      |> sync_file_tab_ref(new_tab.id, workspace.buffers.active, workspace)
+      |> TabBar.update_context(new_tab.id, new_context)
 
     Log.debug(:editor, fn -> "[tab] on_buffer_added new tab=#{new_tab.id} label=#{label}" end)
 
@@ -569,7 +579,11 @@ defmodule MingaEditor.Shell.Traditional do
 
     # Snapshot the new tab's context
     new_context = WorkspaceState.to_tab_context(workspace)
-    tb = TabBar.update_context(tb, new_tab.id, new_context)
+
+    tb =
+      tb
+      |> sync_file_tab_ref(new_tab.id, workspace.buffers.active, workspace)
+      |> TabBar.update_context(new_tab.id, new_context)
 
     {%{shell_state | tab_bar: tb}, workspace, []}
   end
@@ -599,6 +613,65 @@ defmodule MingaEditor.Shell.Traditional do
       :error ->
         workspace
     end
+  end
+
+  @spec sync_file_tab_ref(TabBar.t(), Tab.id(), pid() | nil, WorkspaceState.t()) :: TabBar.t()
+  defp sync_file_tab_ref(%TabBar{} = tb, tab_id, buffer_pid, %WorkspaceState{} = workspace) do
+    case file_ref_for_buffer(buffer_pid, workspace) do
+      %FileRef{} = file_ref ->
+        tb
+        |> TabBar.update_tab(tab_id, &Tab.set_file_ref(&1, file_ref))
+        |> add_file_to_tab_workspace(tab_id, file_ref)
+
+      nil ->
+        tb
+    end
+  end
+
+  @spec add_file_to_tab_workspace(TabBar.t(), Tab.id(), FileRef.t()) :: TabBar.t()
+  defp add_file_to_tab_workspace(%TabBar{} = tb, tab_id, %FileRef{} = file_ref) do
+    case TabBar.get(tb, tab_id) do
+      %Tab{group_id: workspace_id} ->
+        TabBar.update_workspace(tb, workspace_id, fn workspace ->
+          workspace
+          |> Workspace.add_file(file_ref)
+          |> Workspace.set_active_file(file_ref)
+        end)
+
+      nil ->
+        tb
+    end
+  end
+
+  @spec file_ref_for_buffer(pid() | nil, WorkspaceState.t()) :: FileRef.t() | nil
+  defp file_ref_for_buffer(buffer_pid, %WorkspaceState{} = workspace) when is_pid(buffer_pid) do
+    case {buffer_path(buffer_pid), project_root(workspace)} do
+      {path, root} when is_binary(path) and is_binary(root) ->
+        path_file_ref(root, path, buffer_pid)
+
+      _ ->
+        FileRef.from_buffer(buffer_pid)
+    end
+  end
+
+  defp file_ref_for_buffer(_buffer_pid, %WorkspaceState{}), do: nil
+
+  @spec path_file_ref(String.t(), String.t(), pid()) :: FileRef.t()
+  defp path_file_ref(root, path, buffer_pid) do
+    case FileRef.from_path(root, path) do
+      {:ok, file_ref} -> file_ref
+      {:error, :outside_project} -> FileRef.from_buffer(buffer_pid)
+    end
+  end
+
+  @spec project_root(WorkspaceState.t()) :: String.t() | nil
+  defp project_root(%WorkspaceState{file_tree: %{project_root: root}}), do: root
+
+  @spec buffer_path(pid()) :: String.t() | nil
+  defp buffer_path(pid) when is_pid(pid) do
+    Buffer.file_path(pid)
+  catch
+    :exit, _ -> nil
   end
 
   @spec buffer_label(pid()) :: String.t()

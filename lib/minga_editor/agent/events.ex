@@ -10,6 +10,7 @@ defmodule MingaEditor.Agent.Events do
   """
 
   alias Minga.Distribution.ConnectionManager
+  alias Minga.Project.FileRef
   alias MingaEditor.Agent.DiffReview
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
@@ -19,9 +20,11 @@ defmodule MingaEditor.Agent.Events do
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias Minga.Buffer
+  alias MingaEditor.State.Buffers
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Remote
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
 
   @type effect ::
@@ -494,9 +497,8 @@ defmodule MingaEditor.Agent.Events do
     end
   end
 
-  # Associates a file tab with the agent's workspace when the agent
-  # modifies the file. Finds the file tab by label match, then moves
-  # it to the agent session's workspace.
+  # Associates a file tab with the agent's workspace when the agent modifies the file.
+  # Uses the tab's logical file ref so duplicate basenames route to the exact file.
   @spec associate_file_with_agent_workspace(EditorState.t(), String.t()) :: EditorState.t()
   defp associate_file_with_agent_workspace(%{shell_state: %{tab_bar: nil}} = state, _path),
     do: state
@@ -506,9 +508,19 @@ defmodule MingaEditor.Agent.Events do
     tb = EditorState.tab_bar(state)
 
     with pid when is_pid(pid) <- session,
+         {:ok, file_ref} <- file_ref_for_path(state, path),
          %Workspace{id: ws_id} <- TabBar.find_workspace_by_session(tb, pid),
-         %Tab{id: tab_id} <- find_unassociated_file_tab(tb, path, ws_id) do
-      EditorState.set_tab_bar(state, TabBar.move_tab_to_workspace(tb, tab_id, ws_id))
+         %Tab{id: tab_id} <- find_unassociated_file_tab(tb, file_ref, ws_id, state) do
+      tb =
+        tb
+        |> TabBar.move_tab_to_workspace(tab_id, ws_id)
+        |> TabBar.update_workspace(ws_id, fn workspace ->
+          workspace
+          |> Workspace.add_file(file_ref)
+          |> Workspace.set_active_file(file_ref)
+        end)
+
+      EditorState.set_tab_bar(state, tb)
     else
       _ -> state
     end
@@ -543,12 +555,45 @@ defmodule MingaEditor.Agent.Events do
     end
   end
 
-  @spec find_unassociated_file_tab(TabBar.t(), String.t(), non_neg_integer()) :: Tab.t() | nil
-  defp find_unassociated_file_tab(tb, path, ws_id) do
-    filename = Path.basename(path)
+  @spec file_ref_for_path(EditorState.t(), String.t()) :: {:ok, FileRef.t()} | {:error, term()}
+  defp file_ref_for_path(state, path) do
+    case project_root(state) do
+      root when is_binary(root) -> FileRef.from_path(root, path)
+      _ -> {:error, :missing_project_root}
+    end
+  end
 
+  @spec project_root(EditorState.t()) :: String.t() | nil
+  defp project_root(%{workspace: %{file_tree: %{project_root: root}}}), do: root
+
+  @spec find_unassociated_file_tab(TabBar.t(), FileRef.t(), non_neg_integer(), EditorState.t()) ::
+          Tab.t() | nil
+  defp find_unassociated_file_tab(tb, %FileRef{} = file_ref, ws_id, state) do
     Enum.find(tb.tabs, fn tab ->
-      tab.kind == :file and tab.group_id != ws_id and tab.label == filename
+      tab.kind == :file and tab.group_id != ws_id and
+        FileRef.equal?(tab_file_ref(tab, state), file_ref)
     end)
+  end
+
+  @spec tab_file_ref(Tab.t(), EditorState.t()) :: FileRef.t() | nil
+  defp tab_file_ref(%Tab{file_ref: %FileRef{} = file_ref}, _state), do: file_ref
+
+  defp tab_file_ref(%Tab{context: context}, state) do
+    with %{buffers: %Buffers{active: buffer}} when is_pid(buffer) <-
+           TabContext.to_workspace_map(context),
+         path when is_binary(path) <- safe_buffer_path(buffer),
+         root when is_binary(root) <- project_root(state),
+         {:ok, file_ref} <- FileRef.from_path(root, path) do
+      file_ref
+    else
+      _ -> nil
+    end
+  end
+
+  @spec safe_buffer_path(pid()) :: String.t() | nil
+  defp safe_buffer_path(buffer) when is_pid(buffer) do
+    Buffer.file_path(buffer)
+  catch
+    :exit, _ -> nil
   end
 end

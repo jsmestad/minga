@@ -1,6 +1,7 @@
 defmodule MingaEditor.State.WorkspaceTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Project.FileRef
   alias MingaEditor.State.Workspace
 
   describe "new_manual/1" do
@@ -100,6 +101,52 @@ defmodule MingaEditor.State.WorkspaceTest do
       updated = Workspace.set_icon(workspace, "star")
       assert updated.label == workspace.label
       assert updated.color == workspace.color
+    end
+  end
+
+  describe "file membership" do
+    test "add_file/2 stores FileRef values without duplicates" do
+      {:ok, file_ref} = FileRef.from_path("/tmp/minga", "lib/user.ex")
+
+      workspace =
+        Workspace.new_manual("/tmp/minga")
+        |> Workspace.add_file(file_ref)
+        |> Workspace.add_file(file_ref)
+
+      assert workspace.files == [file_ref]
+    end
+
+    test "same logical file can be a member of two workspaces" do
+      {:ok, file_ref} = FileRef.from_path("/tmp/minga", "lib/user.ex")
+
+      manual = Workspace.new_manual("/tmp/minga") |> Workspace.add_file(file_ref)
+      agent = Workspace.new_agent(1, "Agent") |> Workspace.add_file(file_ref)
+
+      assert manual.files == [file_ref]
+      assert agent.files == [file_ref]
+    end
+
+    test "remove_file/2 removes matching ref and clears active file" do
+      {:ok, file_ref} = FileRef.from_path("/tmp/minga", "lib/user.ex")
+
+      workspace =
+        Workspace.new_manual("/tmp/minga")
+        |> Workspace.add_file(file_ref)
+        |> Workspace.set_active_file(file_ref)
+        |> Workspace.remove_file(file_ref)
+
+      assert workspace.files == []
+      assert workspace.active_file == nil
+    end
+
+    test "set_active_file/2 also adds missing membership" do
+      {:ok, file_ref} = FileRef.from_path("/tmp/minga", "lib/user.ex")
+
+      workspace = Workspace.new_manual("/tmp/minga") |> Workspace.set_active_file(file_ref)
+
+      assert workspace.files == [file_ref]
+      assert workspace.active_file == file_ref
+      assert Workspace.has_file?(workspace, file_ref)
     end
   end
 
