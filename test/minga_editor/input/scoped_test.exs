@@ -102,10 +102,11 @@ defmodule MingaEditor.Input.ScopedTest do
       {:ok, state: state, agent_buf: agent_buf}
     end
 
-    test "q toggles the agent split", %{state: state} do
-      {:handled, new_state} = walk_surface_handlers(state, ?q, 0)
-      # q calls toggle_agent_split which closes the agent pane
-      refute is_nil(new_state)
+    test "q and ESC toggle the agent split", %{state: state} do
+      for key <- [?q, 27] do
+        {:handled, new_state} = walk_surface_handlers(state, key, 0)
+        refute is_nil(new_state)
+      end
     end
 
     test "i focuses the input", %{state: state} do
@@ -118,12 +119,6 @@ defmodule MingaEditor.Input.ScopedTest do
       {:handled, _new_state} = walk_surface_handlers(state, ?j, 0)
       {line, _col} = BufferProcess.cursor(agent_buf)
       assert line >= 1
-    end
-
-    test "ESC toggles the agent split", %{state: state} do
-      {:handled, new_state} = walk_surface_handlers(state, 27, 0)
-      # ESC calls toggle_agent_split which closes the agent pane
-      refute is_nil(new_state)
     end
 
     test "passthrough when panel not visible" do
@@ -163,16 +158,10 @@ defmodule MingaEditor.Input.ScopedTest do
       assert new_state.workspace.editing.mode == :normal
     end
 
-    test "Backspace on empty input is safe", %{state: state} do
-      {:handled, _new_state} = walk_surface_handlers(state, 127, 0)
-    end
-
-    test "Ctrl+C with empty input is handled", %{state: state} do
-      {:handled, _new_state} = walk_surface_handlers(state, ?c, 0x02)
-    end
-
-    test "Ctrl+D scrolls chat down", %{state: state} do
-      {:handled, _new_state} = walk_surface_handlers(state, ?d, 0x02)
+    test "safe control keys are handled", %{state: state} do
+      for {key, mods} <- [{127, 0}, {?c, 0x02}, {?d, 0x02}] do
+        assert {:handled, _new_state} = walk_surface_handlers(state, key, mods)
+      end
     end
 
     test "Enter on empty prompt is no-op", %{state: state} do
@@ -180,14 +169,11 @@ defmodule MingaEditor.Input.ScopedTest do
       assert AgentAccess.input_focused?(new_state) == true
     end
 
-    test "Shift+Enter inserts newline", %{state: state} do
-      {:handled, new_state} = walk_surface_handlers(state, 13, 0x01)
-      assert length(UIState.input_lines(AgentAccess.panel(new_state))) > 1
-    end
-
-    test "Alt+Enter inserts newline", %{state: state} do
-      {:handled, new_state} = walk_surface_handlers(state, 13, 0x04)
-      assert length(UIState.input_lines(AgentAccess.panel(new_state))) > 1
+    test "modified Enter inserts newline", %{state: state} do
+      for mods <- [0x01, 0x04] do
+        {:handled, new_state} = walk_surface_handlers(state, 13, mods)
+        assert length(UIState.input_lines(AgentAccess.panel(new_state))) > 1
+      end
     end
   end
 
@@ -200,22 +186,10 @@ defmodule MingaEditor.Input.ScopedTest do
       {:ok, state: base_state(keymap_scope: :agent, agentic_active: true)}
     end
 
-    test "j passthrough (handled by AgentNav → Mode FSM)", %{state: state} do
-      assert {:passthrough, _} = Scoped.handle_key(state, ?j, 0)
-      # Full chain handling (through AgentNav)
-      assert {:handled, _} = walk_surface_handlers(state, ?j, 0)
-    end
-
-    test "k passthrough (handled by AgentNav → Mode FSM)", %{state: state} do
-      assert {:passthrough, _} = Scoped.handle_key(state, ?k, 0)
-      # Full chain handling
-      assert {:handled, _} = walk_surface_handlers(state, ?k, 0)
-    end
-
-    test "G passthrough (handled by AgentNav → Mode FSM)", %{state: state} do
-      assert {:passthrough, _} = Scoped.handle_key(state, ?G, 0)
-      # Full chain handling
-      assert {:handled, _} = walk_surface_handlers(state, ?G, 0)
+    test "navigation keys pass through Scoped and are handled by AgentNav", %{state: state} do
+      for {key, mods} <- [{?j, 0}, {?k, 0}, {?G, 0}, {?d, 0x02}, {?u, 0x02}, {?~, 0}] do
+        assert_passthrough_then_handled(state, key, mods)
+      end
     end
 
     test "q switches from agent tab back to file tab", %{state: state} do
@@ -243,46 +217,16 @@ defmodule MingaEditor.Input.ScopedTest do
       assert AgentAccess.input_focused?(new_state)
     end
 
-    test "SPC passes through for leader key", %{state: state} do
-      assert {:passthrough, _} = Scoped.handle_key(state, ?\s, 0)
-    end
-
-    test "leader sequence in progress passes through", %{state: state} do
-      # Simulate a leader sequence in progress
-      leader_state = put_in(state.workspace.editing.mode_state.leader_node, %{})
-
-      assert {:passthrough, _} = Scoped.handle_key(leader_state, ?f, 0)
-    end
-
-    test "g starts a prefix sequence", %{state: state} do
-      {:handled, new_state} = Scoped.handle_key(state, ?g, 0)
-      assert AgentAccess.view(new_state).pending_prefix != nil
-    end
-
-    test "z starts a prefix sequence", %{state: state} do
-      {:handled, new_state} = Scoped.handle_key(state, ?z, 0)
-      assert AgentAccess.view(new_state).pending_prefix != nil
-    end
-
-    test "] starts a prefix sequence", %{state: state} do
-      {:handled, new_state} = Scoped.handle_key(state, ?], 0)
-      assert AgentAccess.view(new_state).pending_prefix != nil
-    end
-
-    test "[ starts a prefix sequence", %{state: state} do
-      {:handled, new_state} = Scoped.handle_key(state, ?[, 0)
-      assert AgentAccess.view(new_state).pending_prefix != nil
+    test "prefix keys start a prefix sequence", %{state: state} do
+      for key <- [?g, ?z, 93, 91] do
+        {:handled, new_state} = Scoped.handle_key(state, key, 0)
+        assert AgentAccess.view(new_state).pending_prefix != nil
+      end
     end
 
     test "gg scrolls to top via prefix", %{state: state} do
       {:handled, g_state} = Scoped.handle_key(state, ?g, 0)
       assert {:handled, _} = Scoped.handle_key(g_state, ?g, 0)
-    end
-
-    test "/ passthrough for standard vim search", %{state: state} do
-      # After #631, `/` is no longer bound in the agent scope trie.
-      # It passes through to AgentNav → Mode FSM for standard buffer search.
-      assert {:passthrough, _} = Scoped.handle_key(state, ?/, 0)
     end
 
     test "panel resize keys work", %{state: state} do
@@ -305,31 +249,12 @@ defmodule MingaEditor.Input.ScopedTest do
                AgentAccess.view(state).chat_width_pct
     end
 
-    test "Ctrl+D passthrough (handled by AgentNav → Mode FSM)", %{state: state} do
-      assert {:passthrough, _} = Scoped.handle_key(state, ?d, 0x02)
-      # Full chain handling
-      assert {:handled, _} = walk_surface_handlers(state, ?d, 0x02)
-    end
-
-    test "Ctrl+U passthrough (handled by AgentNav → Mode FSM)", %{state: state} do
-      assert {:passthrough, _} = Scoped.handle_key(state, ?u, 0x02)
-      # Full chain handling
-      assert {:handled, _} = walk_surface_handlers(state, ?u, 0x02)
-    end
-
     test "ESC dismisses help when visible", %{state: state} do
       state =
         AgentAccess.update_view(state, fn v -> %{v | help_visible: true} end)
 
       {:handled, new_state} = Scoped.handle_key(state, 27, 0)
       refute AgentAccess.view(new_state).help_visible
-    end
-
-    test "unbound key passthrough to Mode FSM", %{state: state} do
-      # tilde is not bound in agent scope, passes through to AgentNav → Mode FSM
-      assert {:passthrough, _} = Scoped.handle_key(state, ?~, 0)
-      # Full chain handling (AgentNav routes to Mode FSM)
-      assert {:handled, _} = walk_surface_handlers(state, ?~, 0)
     end
   end
 
@@ -356,13 +281,9 @@ defmodule MingaEditor.Input.ScopedTest do
       assert UIState.input_text(AgentAccess.panel(new_state)) =~ "x"
     end
 
-    test "Backspace deletes from input", %{state: state} do
-      # Insert a char first
+    test "editing control keys are handled", %{state: state} do
       {:handled, with_char} = Scoped.handle_key(state, ?a, 0)
       assert {:handled, _} = Scoped.handle_key(with_char, 127, 0)
-    end
-
-    test "Ctrl+C with empty input is handled", %{state: state} do
       assert {:handled, _} = Scoped.handle_key(state, ?c, 0x02)
     end
 
@@ -450,24 +371,13 @@ defmodule MingaEditor.Input.ScopedTest do
       {:handled, _new_state} = walk_surface_handlers(leader_state, ?f, 0)
     end
 
-    test "h collapses directory (scope binding)", %{tmp_dir: tmp_dir} do
+    test "tree scope bindings are handled", %{tmp_dir: tmp_dir} do
       File.mkdir_p!(Path.join(tmp_dir, "subdir"))
-      state = make_tree_state(tmp_dir, 0)
 
-      # h is bound in file_tree scope to :tree_collapse
-      {:handled, _new_state} = walk_surface_handlers(state, ?h, 0)
-    end
-
-    test "l expands directory (scope binding)", %{tmp_dir: tmp_dir} do
-      File.mkdir_p!(Path.join(tmp_dir, "subdir"))
-      state = make_tree_state(tmp_dir, 0)
-
-      {:handled, _new_state} = walk_surface_handlers(state, ?l, 0)
-    end
-
-    test "r refreshes tree (scope binding)", %{tmp_dir: tmp_dir} do
-      state = make_tree_state(tmp_dir, 3)
-      {:handled, _new_state} = walk_surface_handlers(state, ?r, 0)
+      for {key, file_count} <- [{?h, 0}, {?l, 0}, {?r, 3}] do
+        state = make_tree_state(tmp_dir, file_count)
+        assert {:handled, _new_state} = walk_surface_handlers(state, key, 0)
+      end
     end
 
     test "H toggles hidden files (scope binding)", %{tmp_dir: tmp_dir} do
@@ -504,9 +414,17 @@ defmodule MingaEditor.Input.ScopedTest do
   # ══════════════════════════════════════════════════════════════════════════
 
   describe "leader sequences work across all scopes" do
-    test "SPC passes through in agent scope (normal mode)" do
-      state = base_state(keymap_scope: :agent, agentic_active: true)
-      assert {:passthrough, _} = Scoped.handle_key(state, ?\s, 0)
+    test "SPC and pending leader pass through in non-input scopes" do
+      agent_state = base_state(keymap_scope: :agent, agentic_active: true)
+      leader_state = put_in(agent_state.workspace.editing.mode_state.leader_node, %{})
+
+      for {state, key} <- [
+            {agent_state, ?\s},
+            {base_state(keymap_scope: :editor), ?\s},
+            {leader_state, ?a}
+          ] do
+        assert {:passthrough, _} = Scoped.handle_key(state, key, 0)
+      end
     end
 
     test "SPC self-inserts in agent insert mode" do
@@ -520,19 +438,6 @@ defmodule MingaEditor.Input.ScopedTest do
 
       {:handled, new_state} = walk_surface_handlers(state, ?\s, 0)
       assert UIState.input_text(AgentAccess.panel(new_state)) =~ " "
-    end
-
-    test "leader node pending passes through in agent scope" do
-      state = base_state(keymap_scope: :agent, agentic_active: true)
-
-      state = put_in(state.workspace.editing.mode_state.leader_node, %{})
-
-      assert {:passthrough, _} = Scoped.handle_key(state, ?a, 0)
-    end
-
-    test "SPC passes through in editor scope (no panel)" do
-      state = base_state(keymap_scope: :editor)
-      assert {:passthrough, _} = Scoped.handle_key(state, ?\s, 0)
     end
   end
 
@@ -556,18 +461,10 @@ defmodule MingaEditor.Input.ScopedTest do
       {:ok, state: state}
     end
 
-    test "y is handled (dispatches approve command)", %{state: state} do
-      {:handled, _new_state} = walk_surface_handlers(state, ?y, 0)
-      # Without a live session, approve_tool is a no-op (guard fails),
-      # but the key IS handled (not passed through)
-    end
-
-    test "n is handled (dispatches deny command)", %{state: state} do
-      {:handled, _new_state} = walk_surface_handlers(state, ?n, 0)
-    end
-
-    test "Y is handled (approve all)", %{state: state} do
-      {:handled, _new_state} = walk_surface_handlers(state, ?Y, 0)
+    test "approval decision keys are handled", %{state: state} do
+      for key <- [?y, ?n, ?Y] do
+        assert {:handled, _new_state} = walk_surface_handlers(state, key, 0)
+      end
     end
 
     test "unrelated key is swallowed during approval", %{state: state} do
@@ -609,24 +506,10 @@ defmodule MingaEditor.Input.ScopedTest do
       {:ok, state: state}
     end
 
-    test "y accepts hunk", %{state: state} do
-      {:handled, _new_state} = walk_surface_handlers(state, ?y, 0)
-    end
-
-    test "x rejects hunk", %{state: state} do
-      {:handled, _new_state} = walk_surface_handlers(state, ?x, 0)
-    end
-
-    test "Y accepts all hunks", %{state: state} do
-      {:handled, _new_state} = walk_surface_handlers(state, ?Y, 0)
-    end
-
-    test "X rejects all hunks", %{state: state} do
-      {:handled, _new_state} = walk_surface_handlers(state, ?X, 0)
-    end
-
-    test "navigation keys still work during diff review", %{state: state} do
-      {:handled, _new_state} = walk_surface_handlers(state, ?j, 0)
+    test "diff review action and navigation keys are handled", %{state: state} do
+      for key <- [?y, ?x, ?Y, ?X, ?j] do
+        assert {:handled, _new_state} = walk_surface_handlers(state, key, 0)
+      end
     end
 
     test "diff review only triggers in file_viewer focus" do
@@ -668,14 +551,11 @@ defmodule MingaEditor.Input.ScopedTest do
       assert AgentAccess.panel(new_state).mention_completion.selected == 1
     end
 
-    test "Enter accepts the selected candidate", %{state: state} do
-      {:handled, new_state} = walk_surface_handlers(state, 13, 0)
-      assert AgentAccess.panel(new_state).mention_completion == nil
-    end
-
-    test "Escape cancels mention completion", %{state: state} do
-      {:handled, new_state} = walk_surface_handlers(state, 27, 0)
-      assert AgentAccess.panel(new_state).mention_completion == nil
+    test "Enter and Escape clear mention completion", %{state: state} do
+      for key <- [13, 27] do
+        {:handled, new_state} = walk_surface_handlers(state, key, 0)
+        assert AgentAccess.panel(new_state).mention_completion == nil
+      end
     end
 
     test "printable char narrows candidates", %{state: state} do
@@ -733,31 +613,27 @@ defmodule MingaEditor.Input.ScopedTest do
   # Mouse handling
   # ══════════════════════════════════════════════════════════════════════════
 
-  describe "handle_mouse — agentic view" do
-    test "routes to AgentViewMouse when agentic is active" do
-      state = base_state(keymap_scope: :agent, agentic_active: true)
-      result = walk_surface_mouse(state, 5, 5, :left, 0, :press, 1)
-      assert elem(result, 0) in [:handled, :passthrough]
-    end
-  end
+  describe "handle_mouse" do
+    test "routes or passes through by active surface", %{tmp_dir: tmp_dir} do
+      for state <- [
+            base_state(keymap_scope: :agent, agentic_active: true),
+            make_tree_state(tmp_dir)
+          ] do
+        result = walk_surface_mouse(state, 5, 5, :left, 0, :press, 1)
+        assert elem(result, 0) in [:handled, :passthrough]
+      end
 
-  describe "handle_mouse — file tree" do
-    test "handles click when file tree exists", %{tmp_dir: tmp_dir} do
-      state = make_tree_state(tmp_dir)
-      result = walk_surface_mouse(state, 5, 5, :left, 0, :press, 1)
-      assert elem(result, 0) in [:handled, :passthrough]
-    end
-  end
-
-  describe "handle_mouse — other scopes" do
-    test "passes through for editor scope" do
       state = base_state(keymap_scope: :editor)
-      result = FileTreeHandler.handle_mouse(state, 5, 5, :left, 0, :press, 1)
-      assert {:passthrough, _} = result
+      assert {:passthrough, _} = FileTreeHandler.handle_mouse(state, 5, 5, :left, 0, :press, 1)
     end
   end
 
   # ── Helpers ────────────────────────────────────────────────────────────────
+
+  defp assert_passthrough_then_handled(state, cp, mods) do
+    assert {:passthrough, _} = Scoped.handle_key(state, cp, mods)
+    assert {:handled, _} = walk_surface_handlers(state, cp, mods)
+  end
 
   # Walks all surface handlers (including the new sub-state handlers)
   # in order, returning the result from the first handler that handles
