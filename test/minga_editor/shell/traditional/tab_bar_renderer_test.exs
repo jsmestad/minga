@@ -231,7 +231,7 @@ defmodule MingaEditor.Shell.Traditional.TabBarRendererTest do
   end
 
   describe "click regions" do
-    test "each tab has goto and close click regions" do
+    test "each visible file tab has goto and close click regions" do
       tab1 = Tab.new_file(1, "a.ex")
       tb = TabBar.new(tab1)
       {tb, _} = TabBar.add(tb, :file, "b.ex")
@@ -241,15 +241,13 @@ defmodule MingaEditor.Shell.Traditional.TabBarRendererTest do
 
       commands = Enum.map(regions, fn {_, _, cmd} -> cmd end) |> MapSet.new()
 
-      # Goto regions
       assert :tab_goto_1 in commands
       assert :tab_goto_2 in commands
-      assert :tab_goto_3 in commands
+      refute :tab_goto_3 in commands
 
-      # Close regions
       assert :tab_close_1 in commands
       assert :tab_close_2 in commands
-      assert :tab_close_3 in commands
+      refute :tab_close_3 in commands
     end
 
     test "goto and close regions for the same tab don't overlap" do
@@ -368,14 +366,15 @@ defmodule MingaEditor.Shell.Traditional.TabBarRendererTest do
   end
 
   describe "agent tabs" do
-    test "agent tab shows agent icon" do
+    test "agent tabs are not rendered in the file tab strip" do
       tab = Tab.new_agent(1, "My Session")
       tb = TabBar.new(tab)
 
-      {draws, _} = TabBarRenderer.render(0, 80, tb, doom_theme())
+      {draws, regions} = TabBarRenderer.render(0, 80, tb, doom_theme())
 
       all_text = Enum.map_join(draws, fn {_, _, text, _} -> text end)
-      assert String.contains?(all_text, "\u{F06A9}")
+      refute String.contains?(all_text, "\u{F06A9}")
+      assert regions == []
     end
   end
 end

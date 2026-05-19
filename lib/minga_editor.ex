@@ -20,6 +20,7 @@ defmodule MingaEditor do
   alias Minga.Clipboard
   alias Minga.Config
   alias Minga.Editing.Completion
+  alias Minga.FileRef
   alias Minga.FileWatcher
   alias Minga.Git
   alias Minga.LSP.Supervisor, as: LspSupervisor
@@ -307,10 +308,8 @@ defmodule MingaEditor do
   @impl true
   @spec handle_call(term(), GenServer.from(), state()) :: {:reply, term(), state()}
   def handle_call({:open_file, file_path}, _from, state) do
-    case Commands.start_buffer(file_path, EditorState.options_server(state)) do
-      {:ok, pid} ->
-        new_state = register_buffer(state, pid, file_path)
-        new_state = AgentLifecycle.maybe_set_auto_context(new_state, file_path, pid)
+    case open_file_by_path_result(state, file_path) do
+      {:ok, new_state} ->
         new_state = Renderer.render_or_async(new_state)
         {:reply, :ok, new_state}
 
@@ -2877,43 +2876,115 @@ defmodule MingaEditor do
 
   @spec open_file_by_path(state(), String.t()) :: state()
   defp open_file_by_path(state, abs_path) do
-    idx = buffer_index_for_path(state, abs_path)
+    case open_file_by_path_result(state, abs_path) do
+      {:ok, new_state} -> new_state
+      {:error, _reason} -> EditorState.set_status(state, "Could not open #{abs_path}")
+    end
+  end
 
-    case idx do
-      nil ->
-        case Commands.start_buffer(abs_path, EditorState.options_server(state)) do
-          {:ok, pid} -> Commands.add_buffer(state, pid)
-          {:error, _reason} -> EditorState.set_status(state, "Could not open #{abs_path}")
-        end
+  @spec open_file_by_path_result(state(), String.t()) :: {:ok, state()} | {:error, term()}
+  defp open_file_by_path_result(state, abs_path) do
+    case file_tab_for_path_in_active_workspace(state, abs_path) do
+      %Tab{id: id} -> {:ok, EditorState.switch_tab(state, id)}
+      nil -> start_and_register_file(state, abs_path)
+    end
+  end
 
-      i ->
-        EditorState.switch_buffer(state, i)
+  @spec start_and_register_file(state(), String.t()) :: {:ok, state()} | {:error, term()}
+  defp start_and_register_file(state, abs_path) do
+    case Commands.start_buffer(abs_path, EditorState.options_server(state)) do
+      {:ok, pid} ->
+        new_state = register_buffer(state, pid, abs_path)
+        {:ok, AgentLifecycle.maybe_set_auto_context(new_state, abs_path, pid)}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
   @spec open_file_by_path_in_active_window(state(), String.t()) :: state()
   defp open_file_by_path_in_active_window(state, abs_path) do
-    case buffer_index_for_path(state, abs_path) do
+    case file_tab_for_path_in_active_workspace(state, abs_path) do
+      %Tab{} = tab ->
+        open_tab_buffer_in_active_window(state, tab, abs_path)
+
       nil ->
         case Commands.start_buffer(abs_path, EditorState.options_server(state)) do
           {:ok, pid} -> register_buffer_in_active_window(state, pid, abs_path)
           {:error, _reason} -> EditorState.set_status(state, "Could not open #{abs_path}")
         end
-
-      i ->
-        EditorState.switch_buffer(state, i)
     end
   end
 
-  @spec buffer_index_for_path(state(), String.t()) :: non_neg_integer() | nil
-  defp buffer_index_for_path(state, abs_path) do
-    Enum.find_index(state.workspace.buffers.list, fn buf ->
-      try do
-        Buffer.file_path(buf) == abs_path
-      catch
-        :exit, _ -> false
-      end
+  @spec open_tab_buffer_in_active_window(state(), Tab.t(), String.t()) :: state()
+  defp open_tab_buffer_in_active_window(state, tab, abs_path) do
+    case tab_active_buffer(tab) do
+      pid when is_pid(pid) -> show_buffer_in_active_window(state, pid)
+      nil -> EditorState.set_status(state, "Could not open #{abs_path}")
+    end
+  end
+
+  @spec show_buffer_in_active_window(state(), pid()) :: state()
+  defp show_buffer_in_active_window(state, pid) when is_pid(pid) do
+    EditorState.update_workspace(state, fn workspace ->
+      buffers =
+        case Enum.find_index(workspace.buffers.list, &(&1 == pid)) do
+          nil -> Buffers.add(workspace.buffers, pid)
+          idx -> Buffers.switch_to(workspace.buffers, idx)
+        end
+
+      workspace
+      |> WorkspaceState.set_buffers(buffers)
+      |> WorkspaceState.sync_active_window_buffer()
     end)
+  end
+
+  @spec tab_active_buffer(Tab.t()) :: pid() | nil
+  defp tab_active_buffer(%Tab{context: context}) when is_map(context) do
+    case TabContext.to_workspace_map(context) do
+      %{buffers: %Buffers{active: pid}} when is_pid(pid) -> pid
+      _ -> nil
+    end
+  end
+
+  @spec file_tab_for_path_in_active_workspace(state(), String.t()) :: Tab.t() | nil
+  defp file_tab_for_path_in_active_workspace(
+         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         path
+       ) do
+    file_ref = FileRef.new(path)
+
+    if active_buffer_matches_file_ref?(state, file_ref) do
+      EditorState.active_tab(state)
+    else
+      TabBar.find_file_tab_in_workspace(tb, TabBar.active_group_id(tb), file_ref)
+    end
+  end
+
+  defp file_tab_for_path_in_active_workspace(_state, _path), do: nil
+
+  @spec active_buffer_matches_file_ref?(state(), FileRef.t()) :: boolean()
+  defp active_buffer_matches_file_ref?(
+         %{workspace: %{buffers: %{active: active}}},
+         %FileRef{} = file_ref
+       )
+       when is_pid(active) do
+    case buffer_file_ref(active) do
+      %FileRef{} = active_ref -> FileRef.same?(active_ref, file_ref)
+      nil -> false
+    end
+  end
+
+  defp active_buffer_matches_file_ref?(_state, _file_ref), do: false
+
+  @spec buffer_file_ref(pid()) :: FileRef.t() | nil
+  defp buffer_file_ref(pid) when is_pid(pid) do
+    case Buffer.file_path(pid) do
+      path when is_binary(path) -> FileRef.new(path)
+      _ -> nil
+    end
+  catch
+    :exit, _ -> nil
   end
 
   @spec register_buffer_in_active_window(state(), pid(), String.t()) :: state()

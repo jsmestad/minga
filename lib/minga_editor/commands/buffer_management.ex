@@ -8,6 +8,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   alias MingaAgent.Session
   alias Minga.Buffer
+  alias Minga.FileRef
   alias Minga.Buffer.Document
   alias Minga.Config
 
@@ -253,20 +254,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   def execute(state, {:execute_ex_command, {:edit, file_path}}) do
-    case EditorState.find_buffer_by_path(state, file_path) do
-      nil ->
-        case Commands.start_buffer(file_path, EditorState.options_server(state)) do
-          {:ok, pid} ->
-            Commands.add_buffer(state, pid)
-
-          {:error, reason} ->
-            Minga.Log.error(:editor, "Failed to open file: #{inspect(reason)}")
-            state
-        end
-
-      idx ->
-        switch_to_buffer(state, idx)
-    end
+    open_file_in_active_workspace(state, file_path)
   end
 
   def execute(
@@ -676,6 +664,60 @@ defmodule MingaEditor.Commands.BufferManagement do
     EditorState.set_status(state, "Terminal not yet available")
   end
 
+  @spec open_file_in_active_workspace(state(), String.t()) :: state()
+  defp open_file_in_active_workspace(
+         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         file_path
+       ) do
+    file_ref = FileRef.new(file_path)
+    workspace_id = TabBar.active_group_id(tb)
+
+    case existing_file_tab_in_workspace(state, tb, workspace_id, file_ref) do
+      %Tab{id: id} -> EditorState.switch_tab(state, id)
+      nil -> start_file_buffer(state, file_path)
+    end
+  end
+
+  defp open_file_in_active_workspace(state, file_path) do
+    start_file_buffer(state, file_path)
+  end
+
+  @spec existing_file_tab_in_workspace(state(), TabBar.t(), non_neg_integer(), FileRef.t()) ::
+          Tab.t() | nil
+  defp existing_file_tab_in_workspace(state, tb, workspace_id, file_ref) do
+    if active_buffer_matches_file_ref?(state, file_ref) do
+      EditorState.active_tab(state)
+    else
+      TabBar.find_file_tab_in_workspace(tb, workspace_id, file_ref)
+    end
+  end
+
+  @spec active_buffer_matches_file_ref?(state(), FileRef.t()) :: boolean()
+  defp active_buffer_matches_file_ref?(
+         %{workspace: %{buffers: %{active: active}}},
+         %FileRef{} = file_ref
+       )
+       when is_pid(active) do
+    case buffer_file_ref(active) do
+      %FileRef{} = active_ref -> FileRef.same?(active_ref, file_ref)
+      nil -> false
+    end
+  end
+
+  defp active_buffer_matches_file_ref?(_state, _file_ref), do: false
+
+  @spec start_file_buffer(state(), String.t()) :: state()
+  defp start_file_buffer(state, file_path) do
+    case Commands.start_buffer(file_path, EditorState.options_server(state)) do
+      {:ok, pid} ->
+        Commands.add_buffer(state, pid)
+
+      {:error, reason} ->
+        Minga.Log.error(:editor, "Failed to open file: #{inspect(reason)}")
+        state
+    end
+  end
+
   @spec switch_to_buffer(state(), non_neg_integer()) :: state()
   defp switch_to_buffer(
          %{shell_state: %{tab_bar: %TabBar{} = tb}, workspace: %{buffers: %{list: buffers}}} =
@@ -724,15 +766,15 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec buffer_cycle_order([pid()], state()) :: [pid()]
   defp buffer_cycle_order(buffers, %{shell_state: %{tab_bar: %TabBar{} = tb}}) do
-    tab_buffers = file_tab_buffers(tb)
+    tab_buffers = visible_file_tab_buffers(tb)
     buffers ++ Enum.reject(tab_buffers, &(&1 in buffers))
   end
 
   defp buffer_cycle_order(buffers, _state), do: buffers
 
-  @spec file_tab_buffers(TabBar.t()) :: [pid()]
-  defp file_tab_buffers(%TabBar{tabs: tabs}) do
-    Enum.flat_map(tabs, fn tab ->
+  @spec visible_file_tab_buffers(TabBar.t()) :: [pid()]
+  defp visible_file_tab_buffers(%TabBar{} = tb) do
+    Enum.flat_map(TabBar.visible_file_tabs(tb), fn tab ->
       case tab_context_active_buffer(tab) do
         pid when is_pid(pid) -> [pid]
         _ -> []
@@ -767,16 +809,12 @@ defmodule MingaEditor.Commands.BufferManagement do
   @spec find_tab_for_buffer(TabBar.t(), pid() | nil) :: Tab.id() | nil
   defp find_tab_for_buffer(_tb, nil), do: nil
 
-  defp find_tab_for_buffer(%TabBar{tabs: tabs}, target_buf) do
-    Enum.find_value(tabs, fn
-      %{kind: :file, id: id} = tab ->
-        case tab_context_active_buffer(tab) do
-          ^target_buf -> id
-          _ -> nil
-        end
-
-      _ ->
-        nil
+  defp find_tab_for_buffer(%TabBar{} = tb, target_buf) do
+    Enum.find_value(TabBar.visible_file_tabs(tb), fn %{id: id} = tab ->
+      case tab_context_active_buffer(tab) do
+        ^target_buf -> id
+        _ -> nil
+      end
     end)
   end
 
@@ -789,6 +827,16 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   defp tab_context_active_buffer(_tab), do: nil
+
+  @spec buffer_file_ref(pid()) :: FileRef.t() | nil
+  defp buffer_file_ref(pid) when is_pid(pid) do
+    case Buffer.file_path(pid) do
+      path when is_binary(path) -> FileRef.new(path)
+      _ -> nil
+    end
+  catch
+    :exit, _ -> nil
+  end
 
   @spec next_tab(state()) :: state()
   defp next_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
@@ -1216,10 +1264,10 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp close_agent_tab_or_quit(state), do: close_agent_tab(state)
 
   @spec close_file_tab_or_quit(state(), Tab.id()) :: state()
-  defp close_file_tab_or_quit(state, active_id) do
+  defp close_file_tab_or_quit(state, _active_id) do
     tb = EditorState.tab_bar(state)
 
-    if has_other_file_tab?(tb, active_id) do
+    if TabBar.count(tb) > 1 do
       close_file_tab(state)
     else
       shutdown_editor(state)
@@ -1229,7 +1277,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   @spec quit_would_exit_editor?(state()) :: boolean()
   defp quit_would_exit_editor?(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
     case EditorState.active_tab(state) do
-      %Tab{kind: :file, id: active_id} -> not has_other_file_tab?(tb, active_id)
+      %Tab{kind: :file} -> TabBar.count(tb) == 1
       %Tab{kind: :agent} -> TabBar.count(tb) == 1
       _ -> true
     end
@@ -1237,43 +1285,27 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   defp quit_would_exit_editor?(_state), do: true
 
-  @spec has_other_file_tab?(TabBar.t(), Tab.id()) :: boolean()
-  defp has_other_file_tab?(%TabBar{tabs: tabs}, active_id) do
-    Enum.any?(tabs, &(&1.kind == :file and &1.id != active_id))
-  end
-
   @spec close_other_tabs(state()) :: state()
   defp close_other_tabs(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
     active_id = tb.active_id
+    closed_tabs = Enum.reject(TabBar.visible_file_tabs(tb), &(&1.id == active_id))
+    tb = remove_tabs(tb, closed_tabs)
 
-    closed_tabs = Enum.reject(tb.tabs, &(&1.id == active_id))
-    Enum.each(closed_tabs, &stop_closed_agent_tab/1)
-
-    tb = TabBar.keep_only(tb, active_id)
     MingaEditor.log_to_messages("Closed other tabs")
     EditorState.set_tab_bar(state, tb)
   end
 
   defp close_other_tabs(state), do: state
 
-  @spec stop_closed_agent_tab(Tab.t()) :: :ok
-  defp stop_closed_agent_tab(%Tab{kind: :agent, session: session}) when is_pid(session) do
-    try do
-      Session.unsubscribe(session)
-    catch
-      :exit, _ -> :ok
-    end
-
-    try do
-      GenServer.stop(session, :normal)
-    catch
-      :exit, _ -> :ok
-    end
-
-    :ok
+  @spec remove_tabs(TabBar.t(), [Tab.t()]) :: TabBar.t()
+  defp remove_tabs(tb, tabs) do
+    Enum.reduce(tabs, tb, fn tab, acc ->
+      case TabBar.remove(acc, tab.id) do
+        {:ok, new_tb} -> new_tb
+        :last_tab -> acc
+      end
+    end)
   end
-
-  defp stop_closed_agent_tab(%Tab{}), do: :ok
 
   # Saves all dirty buffers in the buffer list. Called by :wqa before
   # shutting down. Returns state unchanged (side-effectual only).
@@ -1318,7 +1350,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp close_file_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
     active_tab = EditorState.active_tab(state)
     label = if active_tab, do: active_tab.label, else: "tab"
-    replacement_id = active_tab && replacement_file_tab_id(tb, active_tab.id)
+    replacement_id = active_tab && replacement_tab_id(tb, active_tab)
     MingaEditor.log_to_messages("Closed: #{label}")
 
     state
@@ -1368,8 +1400,16 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp maybe_switch_to_replacement(tb, nil), do: tb
   defp maybe_switch_to_replacement(tb, replacement_id), do: TabBar.switch_to(tb, replacement_id)
 
+  @spec replacement_tab_id(TabBar.t(), Tab.t()) :: Tab.id() | nil
+  defp replacement_tab_id(%TabBar{} = tb, %Tab{id: active_id, group_id: group_id}) do
+    replacement_file_tab_id(tb, active_id) ||
+      replacement_tab_in_workspace_id(tb, active_id, group_id)
+  end
+
   @spec replacement_file_tab_id(TabBar.t(), Tab.id()) :: Tab.id() | nil
-  defp replacement_file_tab_id(%TabBar{tabs: tabs}, active_id) do
+  defp replacement_file_tab_id(%TabBar{} = tb, active_id) do
+    tabs = TabBar.visible_file_tabs(tb)
+
     case Enum.find_index(tabs, &(&1.id == active_id)) do
       nil -> nil
       idx -> replacement_file_tab_id(tabs, idx)
@@ -1378,10 +1418,18 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec replacement_file_tab_id([Tab.t()], non_neg_integer()) :: Tab.id() | nil
   defp replacement_file_tab_id(tabs, idx) do
-    right = tabs |> Enum.drop(idx + 1) |> Enum.find(&(&1.kind == :file))
-    left = tabs |> Enum.take(idx) |> Enum.reverse() |> Enum.find(&(&1.kind == :file))
+    right = Enum.drop(tabs, idx + 1)
+    left = tabs |> Enum.take(idx) |> Enum.reverse()
 
-    case right || left do
+    case right ++ left do
+      [%Tab{id: id} | _] -> id
+      [] -> nil
+    end
+  end
+
+  @spec replacement_tab_in_workspace_id(TabBar.t(), Tab.id(), non_neg_integer()) :: Tab.id() | nil
+  defp replacement_tab_in_workspace_id(%TabBar{tabs: tabs}, active_id, group_id) do
+    case Enum.find(tabs, &(&1.group_id == group_id and &1.id != active_id)) do
       %Tab{id: id} -> id
       nil -> nil
     end

@@ -180,19 +180,35 @@ defmodule MingaEditor.Commands.BufferManagementTest do
       refute Enum.any?(tab_labels(result), &String.starts_with?(&1, "[new"))
     end
 
-    test ":q with the last file tab and an agent tab prompts instead of activating the agent" do
+    test ":q with the last file tab and an agent tab closes the file tab" do
       {state, _buffer} = start_command_state("first file")
-      {state, _agent_tab_id} = add_agent_tab_after_active_and_return_to_file(state)
+      {state, agent_tab_id} = add_agent_tab_after_active_and_return_to_file(state)
       active_tab_id = EditorState.tab_bar(state).active_id
 
       result = BufferManagement.execute(state, {:execute_ex_command, {:quit, []}})
 
-      assert result.pending_quit == :quit
-      assert result.shell_state.status_msg == "Quit Minga? (y/n)"
-      assert tab_count(result) == 2
-      assert EditorState.tab_bar(result).active_id == active_tab_id
-      assert EditorState.active_tab_kind(result) == :file
+      assert result.pending_quit == nil
+      assert tab_count(result) == 1
+      assert EditorState.tab_bar(result).active_id == agent_tab_id
+      refute active_tab_id in Enum.map(EditorState.tab_bar(result).tabs, & &1.id)
       refute Enum.any?(tab_labels(result), &String.starts_with?(&1, "[new"))
+    end
+
+    test ":q closes only the active workspace file tab when another workspace has a file tab" do
+      {state, _buffer} = start_command_state("first file")
+      {state, hidden_buffer} = add_file_tab_with_buffer(state)
+      hidden_tab_id = EditorState.tab_bar(state).active_id
+      {tb, group} = TabBar.add_agent_group(EditorState.tab_bar(state), "Agent")
+      tb = TabBar.move_tab_to_group(tb, hidden_tab_id, group.id)
+      tb = TabBar.switch_to(tb, 1)
+      state = EditorState.set_tab_bar(state, tb)
+
+      result = BufferManagement.execute(state, {:execute_ex_command, {:quit, []}})
+
+      assert tab_count(result) == 1
+      assert EditorState.tab_bar(result).active_id == hidden_tab_id
+      assert TabBar.get(EditorState.tab_bar(result), hidden_tab_id) != nil
+      refute_process_down(hidden_buffer)
     end
 
     test ":q with a file and agent neighbor activates another file tab" do
@@ -213,7 +229,7 @@ defmodule MingaEditor.Commands.BufferManagementTest do
   end
 
   describe "close_other_tabs command state" do
-    test "closes all tabs except the active tab" do
+    test "closes all visible workspace tabs except the active tab" do
       {state, _buffer} = start_command_state("first file")
 
       state =
@@ -227,6 +243,24 @@ defmodule MingaEditor.Commands.BufferManagementTest do
 
       assert tab_count(result) == 1
       assert EditorState.tab_bar(result).active_id == active_tab_id
+    end
+
+    test "close_other_tabs leaves tabs from other workspaces alone" do
+      {state, _buffer} = start_command_state("first file")
+      state = add_file_tab(state, "manual sibling")
+      visible_tab_id = EditorState.tab_bar(state).active_id
+      state = add_file_tab(state, "hidden workspace")
+      hidden_tab_id = EditorState.tab_bar(state).active_id
+      {tb, group} = TabBar.add_agent_group(EditorState.tab_bar(state), "Agent")
+      tb = TabBar.move_tab_to_group(tb, hidden_tab_id, group.id)
+      tb = TabBar.switch_to(tb, visible_tab_id)
+      state = EditorState.set_tab_bar(state, tb)
+
+      result = BufferManagement.execute(state, :close_other_tabs)
+
+      assert TabBar.get(EditorState.tab_bar(result), visible_tab_id) != nil
+      assert TabBar.get(EditorState.tab_bar(result), hidden_tab_id) != nil
+      refute TabBar.has_tab?(EditorState.tab_bar(result), 1)
     end
 
     test "ignores stopped-session events for tabs that were already removed" do

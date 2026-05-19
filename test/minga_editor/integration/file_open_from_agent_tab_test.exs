@@ -10,8 +10,10 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
+  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
+  alias MingaEditor.Workspace.State, as: WorkspaceState
   alias MingaEditor.Window
   alias Minga.Test.HeadlessPort
   alias Minga.Test.StubServer
@@ -51,7 +53,14 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
         | map: Map.put(state.workspace.windows.map, win_id, agent_window)
       }
 
-      agent_tab_bar = TabBar.new(Tab.new_agent(1, "Agent"))
+      manual_tab =
+        Tab.new_file(1, "unnamed")
+        |> Tab.set_context(WorkspaceState.to_tab_context(state.workspace))
+
+      agent_tab_bar = TabBar.new(manual_tab)
+      {agent_tab_bar, agent_tab} = TabBar.add(agent_tab_bar, :agent, "Agent")
+      {agent_tab_bar, group} = TabBar.add_agent_group(agent_tab_bar, "Agent")
+      agent_tab_bar = TabBar.move_tab_to_group(agent_tab_bar, agent_tab.id, group.id)
 
       agent_state =
         state.shell_state.agent
@@ -115,6 +124,36 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
       send_keys_sync(ctx, "i# <Esc>")
 
       assert screen_contains?(ctx, "# configs = [:editor]")
+    end
+
+    test "opens the same path as separate file tabs in different workspaces", %{tmp_dir: tmp_dir} do
+      ctx = start_editor_in_agent_mode()
+      file_path = Path.join(tmp_dir, "shared.ex")
+      File.write!(file_path, "value = :shared\n")
+
+      open_file_and_wait(ctx, file_path)
+
+      agent_state = :sys.get_state(ctx.editor)
+      agent_workspace_id = TabBar.active_group_id(agent_state.shell_state.tab_bar)
+      agent_file_tabs = TabBar.visible_file_tabs(agent_state.shell_state.tab_bar)
+      assert Enum.map(agent_file_tabs, & &1.group_id) == [agent_workspace_id]
+
+      :sys.replace_state(ctx.editor, &EditorState.switch_tab(&1, 1))
+      open_file_and_wait(ctx, file_path)
+
+      state = :sys.get_state(ctx.editor)
+      manual_tabs = TabBar.visible_file_tabs(state.shell_state.tab_bar, 0)
+      agent_tabs = TabBar.visible_file_tabs(state.shell_state.tab_bar, agent_workspace_id)
+
+      assert length(manual_tabs) == 2
+      assert length(agent_tabs) == 1
+      assert Enum.map(manual_tabs ++ agent_tabs, & &1.id) |> Enum.uniq() |> length() == 3
+
+      :ok = MingaEditor.open_file(ctx.editor, file_path)
+      reopened_state = :sys.get_state(ctx.editor)
+
+      assert length(TabBar.visible_file_tabs(reopened_state.shell_state.tab_bar, 0)) == 2
+      assert TabBar.active_group_id(reopened_state.shell_state.tab_bar) == 0
     end
   end
 end
