@@ -191,6 +191,10 @@ defmodule MingaAgent.Changeset.Server do
     {:reply, :ok, state}
   end
 
+  def handle_call(:preflight_merge, _from, state) do
+    {:reply, build_merge_plan(state), state}
+  end
+
   def handle_call(:merge, _from, state) do
     case do_merge(state) do
       :ok ->
@@ -227,101 +231,229 @@ defmodule MingaAgent.Changeset.Server do
 
   @spec do_merge(state()) :: :ok | {:ok, :merged_with_conflicts, list()} | {:error, term()}
   defp do_merge(state) do
-    modification_results =
-      Enum.map(state.modifications, fn {path, changeset_content} ->
-        merge_one_file(state, path, changeset_content)
-      end)
-
-    deletion_results =
-      Enum.map(state.deletions, fn path ->
-        merge_one_deletion(state, path)
-      end)
-
-    all_results = modification_results ++ deletion_results
-
-    case Enum.find(all_results, &match?({:error, _}, &1)) do
-      {:error, reason} ->
-        {:error, reason}
-
-      nil ->
-        conflicts = Enum.filter(all_results, &match?({:conflict, _, _}, &1))
-
-        if conflicts == [] do
-          :ok
-        else
-          {:ok, :merged_with_conflicts, all_results}
-        end
+    with {:ok, plan} <- build_merge_plan(state) do
+      apply_merge_plan(plan)
     end
   end
 
-  @spec merge_one_file(state(), String.t(), binary()) :: tuple() | {:error, term()}
-  defp merge_one_file(state, path, changeset_content) do
-    with {:ok, real_path} <- safe_real_path(state, path) do
+  @spec build_merge_plan(state()) :: {:ok, [map()]} | {:error, term()}
+  defp build_merge_plan(state) do
+    with {:ok, modification_plans} <- build_modification_plans(state),
+         {:ok, deletion_plans} <- build_deletion_plans(state) do
+      {:ok, modification_plans ++ deletion_plans}
+    end
+  end
+
+  @spec build_modification_plans(state()) :: {:ok, [map()]} | {:error, term()}
+  defp build_modification_plans(state) do
+    state.modifications
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.reduce_while({:ok, []}, fn {path, changeset_content}, {:ok, plans} ->
+      case plan_merge_one_file(state, path, changeset_content) do
+        {:ok, plan} -> {:cont, {:ok, [plan | plans]}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, plans} -> {:ok, Enum.reverse(plans)}
+      {:error, _} = error -> error
+    end
+  end
+
+  @spec build_deletion_plans(state()) :: {:ok, [map()]} | {:error, term()}
+  defp build_deletion_plans(state) do
+    state.deletions
+    |> MapSet.to_list()
+    |> Enum.sort()
+    |> Enum.reduce_while({:ok, []}, fn path, {:ok, plans} ->
+      case plan_merge_one_deletion(state, path) do
+        {:ok, plan} -> {:cont, {:ok, [plan | plans]}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, plans} -> {:ok, Enum.reverse(plans)}
+      {:error, _} = error -> error
+    end
+  end
+
+  @spec plan_merge_one_file(state(), String.t(), binary()) :: {:ok, map()} | {:error, term()}
+  defp plan_merge_one_file(state, path, changeset_content) do
+    with {:ok, real_path} <- safe_real_path(state, path),
+         {:ok, current_real} <- read_current_real(real_path) do
       original = Map.get(state.originals, path)
-
-      current_real =
-        case File.read(real_path) do
-          {:ok, c} -> c
-          {:error, :enoent} -> nil
-        end
-
-      merge_strategy(real_path, path, original, current_real, changeset_content)
+      plan_merge_action(path, real_path, original, current_real, changeset_content)
     end
   end
 
-  # New file: didn't exist when changeset was created
-  @spec merge_strategy(String.t(), String.t(), binary() | nil, binary() | nil, binary()) ::
-          tuple()
-  defp merge_strategy(real_path, path, nil = _original, nil = _current_real, changeset_content) do
-    File.mkdir_p!(Path.dirname(real_path))
-    File.write!(real_path, changeset_content)
-    {:ok, path, :created}
+  @spec plan_merge_action(String.t(), String.t(), binary() | nil, binary() | nil, binary()) ::
+          {:ok, map()}
+  defp plan_merge_action(path, real_path, nil, nil, changeset_content) do
+    {:ok,
+     %{
+       kind: :write,
+       mkdir_p: true,
+       real_path: real_path,
+       content: changeset_content,
+       result: {path, :ok}
+     }}
   end
 
-  # New file but someone else also created it
-  defp merge_strategy(_real_path, path, nil = _original, _current_real, _changeset_content) do
-    {:conflict, path, :both_created}
+  defp plan_merge_action(path, _real_path, nil, _current_real, _changeset_content) do
+    {:ok, %{kind: :result, result: {path, {:conflict, :both_created}}}}
   end
 
-  # Real file unchanged since changeset was created: apply directly
-  defp merge_strategy(real_path, path, original, current_real, changeset_content)
+  defp plan_merge_action(path, real_path, original, current_real, changeset_content)
+       when current_real == original and is_binary(original) do
+    {:ok,
+     %{
+       kind: :write,
+       mkdir_p: false,
+       real_path: real_path,
+       content: changeset_content,
+       result: {path, :ok}
+     }}
+  end
+
+  defp plan_merge_action(path, _real_path, original, nil, _changeset_content)
+       when is_binary(original) do
+    {:ok, %{kind: :result, result: {path, {:conflict, :deleted_before_merge}}}}
+  end
+
+  defp plan_merge_action(path, real_path, original, current_real, changeset_content)
+       when is_binary(original) and is_binary(current_real) do
+    {:ok,
+     %{
+       kind: :merge3,
+       path: path,
+       real_path: real_path,
+       original: original,
+       current_real: current_real,
+       content: changeset_content
+     }}
+  end
+
+  @spec plan_merge_one_deletion(state(), String.t()) :: {:ok, map()} | {:error, term()}
+  defp plan_merge_one_deletion(state, path) do
+    with {:ok, real_path} <- safe_real_path(state, path),
+         {:ok, current_real} <- read_current_real(real_path) do
+      original = Map.get(state.originals, path)
+      plan_delete_action(path, real_path, original, current_real)
+    end
+  end
+
+  @spec plan_delete_action(String.t(), String.t(), binary() | nil, binary() | nil) ::
+          {:ok, map()}
+  defp plan_delete_action(path, _real_path, _original, nil) do
+    {:ok, %{kind: :result, result: {path, :ok}}}
+  end
+
+  defp plan_delete_action(path, real_path, original, current_real)
        when current_real == original do
-    File.write!(real_path, changeset_content)
-    {:ok, path, :applied}
+    {:ok,
+     %{
+       kind: :delete,
+       real_path: real_path,
+       result: {path, :ok}
+     }}
   end
 
-  # Real file was also modified: three-way merge
-  defp merge_strategy(real_path, path, original, current_real, changeset_content) do
+  defp plan_delete_action(path, _real_path, nil, _current_real) do
+    {:ok, %{kind: :result, result: {path, {:conflict, :both_created}}}}
+  end
+
+  defp plan_delete_action(path, _real_path, _original, _current_real) do
+    {:ok, %{kind: :result, result: {path, {:conflict, :modified_before_delete}}}}
+  end
+
+  @spec apply_merge_plan([map()]) ::
+          :ok | {:ok, :merged_with_conflicts, list()} | {:error, term()}
+  defp apply_merge_plan(plan) do
+    plan
+    |> Enum.reduce_while({:ok, []}, &apply_merge_plan_reducer/2)
+    |> merge_plan_result()
+  end
+
+  @spec apply_merge_plan_reducer(map(), {:ok, [tuple()]}) ::
+          {:cont, {:ok, [tuple()]}} | {:halt, {:error, term()}}
+  defp apply_merge_plan_reducer(entry, {:ok, results}) do
+    case apply_merge_plan_entry(entry) do
+      {:error, reason} -> {:halt, {:error, reason}}
+      result -> {:cont, {:ok, [result | results]}}
+    end
+  end
+
+  @spec merge_plan_result({:ok, [tuple()]} | {:error, term()}) ::
+          :ok | {:ok, :merged_with_conflicts, list()} | {:error, term()}
+  defp merge_plan_result({:error, reason}), do: {:error, reason}
+
+  defp merge_plan_result({:ok, results}) do
+    results
+    |> Enum.reverse()
+    |> merge_plan_success_result()
+  end
+
+  @spec merge_plan_success_result([tuple()]) :: :ok | {:ok, :merged_with_conflicts, list()}
+  defp merge_plan_success_result(results) do
+    if Enum.any?(results, &match?({_path, {:conflict, _}}, &1)) do
+      {:ok, :merged_with_conflicts, results}
+    else
+      :ok
+    end
+  end
+
+  @spec apply_merge_plan_entry(map()) :: tuple() | {:error, term()}
+  defp apply_merge_plan_entry(%{kind: :result, result: result}), do: result
+
+  defp apply_merge_plan_entry(
+         %{
+           kind: :write,
+           real_path: real_path,
+           content: content,
+           result: result
+         } = entry
+       ) do
+    if Map.get(entry, :mkdir_p, false) do
+      File.mkdir_p!(Path.dirname(real_path))
+    end
+
+    File.write!(real_path, content)
+    result
+  end
+
+  defp apply_merge_plan_entry(%{
+         kind: :merge3,
+         real_path: real_path,
+         path: path,
+         original: original,
+         current_real: current_real,
+         content: content
+       }) do
     ancestor_lines = String.split(original, "\n", trim: false)
-    ours_lines = String.split(changeset_content, "\n", trim: false)
+    ours_lines = String.split(content, "\n", trim: false)
     theirs_lines = String.split(current_real, "\n", trim: false)
 
     case Minga.Core.Diff.merge3(ancestor_lines, ours_lines, theirs_lines) do
       {:ok, merged_lines} ->
         File.write!(real_path, Enum.join(merged_lines, "\n"))
-        {:ok, path, :merged_three_way}
+        {path, :ok}
 
       {:conflict, _hunks} ->
-        {:conflict, path, :concurrent_edit}
+        {path, {:conflict, :concurrent_edit}}
     end
   end
 
-  @spec merge_one_deletion(state(), String.t()) :: tuple() | {:error, term()}
-  defp merge_one_deletion(state, path) do
-    with {:ok, real_path} <- safe_real_path(state, path) do
-      original = Map.get(state.originals, path)
+  defp apply_merge_plan_entry(%{kind: :delete, real_path: real_path, result: result}) do
+    File.rm!(real_path)
+    result
+  end
 
-      case File.read(real_path) do
-        {:ok, content} when content == original ->
-          File.rm!(real_path)
-          {:ok, path, :deleted}
-
-        {:ok, _changed} ->
-          {:conflict, path, :modified_before_delete}
-
-        {:error, :enoent} ->
-          {:ok, path, :already_deleted}
-      end
+  @spec read_current_real(String.t()) :: {:ok, binary() | nil} | {:error, term()}
+  defp read_current_real(real_path) do
+    case File.read(real_path) do
+      {:ok, content} -> {:ok, content}
+      {:error, :enoent} -> {:ok, nil}
+      {:error, reason} -> {:error, reason}
     end
   end
 

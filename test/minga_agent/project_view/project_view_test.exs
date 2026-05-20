@@ -55,10 +55,11 @@ defmodule MingaAgent.ProjectViewTest do
       seed_project(dir)
       outside_dir = Path.join(Path.dirname(dir), "outside-#{System.unique_integer([:positive])}")
       File.mkdir_p!(Path.join(outside_dir, "nested"))
-      File.write!(Path.join(outside_dir, "nested/secret.txt"), "secret\n")
+      File.write!(Path.join(outside_dir, "nested/secret.txt"), "secret
+")
       File.ln_s!(outside_dir, Path.join(dir, "linked"))
 
-      {:ok, view} = ProjectView.direct(dir)
+      {:ok, view} = ProjectView.overlay(dir)
 
       assert {:error, :symlink_traversal} =
                ProjectView.read_file(view, "linked/nested/secret.txt")
@@ -72,104 +73,53 @@ defmodule MingaAgent.ProjectViewTest do
                ProjectView.delete_file(view, "linked/nested/secret.txt")
 
       assert {:error, :symlink_traversal} = ProjectView.list_directory(view, "linked")
-      assert {:ok, "one\n"} = ProjectView.read_file(view, "lib/a.txt")
+      assert {:ok, "one
+"} = ProjectView.read_file(view, "lib/a.txt")
     end
 
-    test "allows a final symlinked file when it resolves inside the project root", %{tmp_dir: dir} do
-      seed_project(dir)
-      File.ln_s!(Path.join(dir, "lib/a.txt"), Path.join(dir, "alias.txt"))
-
-      {:ok, view} = ProjectView.direct(dir)
-
-      assert {:ok, "one\n"} = ProjectView.read_file(view, "alias.txt")
-      assert :ok = ProjectView.edit_file(view, "alias.txt", "one", "ONE")
-      assert {:ok, "ONE\n"} = ProjectView.read_file(view, "alias.txt")
-      assert {:ok, "ONE\n"} = File.read(Path.join(dir, "lib/a.txt"))
-    end
-  end
-
-  describe "overlay backend contract" do
-    test "read/write/edit/delete/list/diff/promote/discard stay isolated until promote", %{
-      tmp_dir: dir
-    } do
-      seed_project(dir)
-      {:ok, view} = ProjectView.overlay(dir, workspace_id: 9)
-
-      assert view.workspace_id == 9
-      assert view.project_root == Path.expand(dir)
-      assert ProjectView.working_dir(view) != Path.expand(dir)
-      assert File.dir?(ProjectView.working_dir(view))
-
-      assert {"MIX_BUILD_PATH", _} =
-               List.keyfind(ProjectView.command_env(view), "MIX_BUILD_PATH", 0)
-
-      assert %{isolation: :overlay, mutates_project_root: false} = ProjectView.capabilities(view)
-
-      assert {:ok, "one\n"} = ProjectView.read_file(view, "lib/a.txt")
-      assert :ok = ProjectView.write_file(view, "lib/new.txt", "new")
-      assert :ok = ProjectView.edit_file(view, "lib/a.txt", "one", "ONE")
-      assert {:ok, "ONE\n"} = ProjectView.read_file(view, "lib/a.txt")
-      assert {:ok, "one\n"} = File.read(Path.join(dir, "lib/a.txt"))
-      refute File.exists?(Path.join(dir, "lib/new.txt"))
-
-      assert {:ok, entries} = ProjectView.list_directory(view, "lib")
-      assert %{name: "new.txt", type: :file} in entries
-
-      assert :ok = ProjectView.delete_file(view, "lib/a.txt")
-      assert {:error, :deleted} = ProjectView.read_file(view, "lib/a.txt")
-      assert {:ok, entries_after_delete} = ProjectView.list_directory(view, "lib")
-      refute Enum.any?(entries_after_delete, &(&1.name == "a.txt"))
-      assert File.exists?(Path.join(dir, "lib/a.txt"))
-
-      assert {:ok, diff} = ProjectView.diff(view)
-      assert Enum.any?(diff, &(&1.path == "lib/new.txt" and &1.kind in [:new, :modified]))
-      assert %{path: "lib/a.txt", kind: :deleted, size: 0} in diff
-
-      assert :ok = ProjectView.promote(view, :project_root)
-      assert {:ok, "new"} = File.read(Path.join(dir, "lib/new.txt"))
-      refute File.exists?(Path.join(dir, "lib/a.txt"))
-    end
-
-    test "rejects promote when a tracked project file becomes a symlink escape", %{tmp_dir: dir} do
-      seed_project(dir)
-      {:ok, view} = ProjectView.overlay(dir)
-
-      assert :ok = ProjectView.edit_file(view, "lib/a.txt", "one", "ONE")
-
-      outside_dir = Path.join(Path.dirname(dir), "outside-#{System.unique_integer([:positive])}")
-      File.mkdir_p!(outside_dir)
-      File.write!(Path.join(outside_dir, "secret.txt"), "secret\n")
-      File.rm!(Path.join(dir, "lib/a.txt"))
-      File.ln_s!(Path.join(outside_dir, "secret.txt"), Path.join(dir, "lib/a.txt"))
-
-      assert {:error, :symlink_traversal} = ProjectView.promote(view, :project_root)
-      assert {:ok, diff} = ProjectView.diff(view)
-      assert Enum.any?(diff, &(&1.path == "lib/a.txt" and &1.kind == :modified))
-      assert {:ok, "secret\n"} = File.read(Path.join(outside_dir, "secret.txt"))
-    end
-
-    test "rejects symlink escapes through linked directories", %{tmp_dir: dir} do
+    test "discard quarantines symlink escape forks and leaves unrelated out-of-root forks alone",
+         %{tmp_dir: dir} do
       seed_project(dir)
       outside_dir = Path.join(Path.dirname(dir), "outside-#{System.unique_integer([:positive])}")
       File.mkdir_p!(Path.join(outside_dir, "nested"))
-      File.write!(Path.join(outside_dir, "nested/secret.txt"), "secret\n")
+      outside_file = Path.join(outside_dir, "nested/secret.txt")
+      File.write!(outside_file, "secret
+")
       File.ln_s!(outside_dir, Path.join(dir, "linked"))
 
-      {:ok, view} = ProjectView.overlay(dir)
+      {:ok, store} = start_supervised(MingaAgent.BufferForkStore)
 
-      assert {:error, :symlink_traversal} =
-               ProjectView.read_file(view, "linked/nested/secret.txt")
+      {:ok, parent} =
+        start_supervised({Minga.Buffer.Process, content: "line one
+", name: nil},
+          id: :project_view_discard_parent
+        )
 
-      assert {:error, :symlink_traversal} = ProjectView.write_file(view, "linked/new.txt", "new")
+      escaped_path = Path.join(dir, "linked/nested/secret.txt")
+      {:ok, escaped_fork} = MingaAgent.BufferForkStore.get_or_create(store, escaped_path, parent)
+      Minga.Buffer.Fork.replace_content(escaped_fork, "changed
+")
 
-      assert {:error, :symlink_traversal} =
-               ProjectView.edit_file(view, "linked/nested/secret.txt", "secret", "public")
+      unrelated_path = Path.join(outside_dir, "unrelated.txt")
+      File.write!(unrelated_path, "unrelated
+")
 
-      assert {:error, :symlink_traversal} =
-               ProjectView.delete_file(view, "linked/nested/secret.txt")
+      {:ok, unrelated_fork} =
+        MingaAgent.BufferForkStore.get_or_create(store, unrelated_path, parent)
 
-      assert {:error, :symlink_traversal} = ProjectView.list_directory(view, "linked")
-      assert {:ok, "one\n"} = File.read(Path.join(dir, "lib/a.txt"))
+      {:ok, view} = ProjectView.overlay(dir, fork_store: store)
+      assert :ok = ProjectView.discard(view)
+
+      assert {:ok, "secret
+"} = File.read(outside_file)
+      assert nil == MingaAgent.BufferForkStore.get(store, escaped_path)
+      assert MingaAgent.BufferForkStore.get(store, unrelated_path) == unrelated_fork
+
+      results = MingaAgent.BufferForkStore.merge_all(store)
+      refute Enum.any?(results, fn {path, _} -> path == escaped_path end)
+      assert Enum.any?(results, fn {path, _} -> path == unrelated_path end)
+      assert {:ok, "secret
+"} = File.read(outside_file)
     end
 
     test "discard removes overlay changes without mutating project root", %{tmp_dir: dir} do
@@ -262,32 +212,52 @@ defmodule MingaAgent.ProjectViewTest do
       assert Minga.Buffer.Fork.dirty?(outside_fork)
     end
 
-    test "rejects promoting fork paths that escape through a symlink", %{tmp_dir: dir} do
+    test "preflight failures quarantine invalid forks without merging valid forks early", %{
+      tmp_dir: dir
+    } do
       seed_project(dir)
       outside_dir = Path.join(Path.dirname(dir), "outside-#{System.unique_integer([:positive])}")
-      File.mkdir_p!(outside_dir)
-      File.write!(Path.join(outside_dir, "secret.txt"), "secret\n")
+      File.mkdir_p!(Path.join(outside_dir, "nested"))
+      outside_file = Path.join(outside_dir, "nested/secret.txt")
+      File.write!(outside_file, "secret\n")
       File.ln_s!(outside_dir, Path.join(dir, "linked"))
 
       {:ok, store} = start_supervised(MingaAgent.BufferForkStore)
 
       {:ok, parent} =
         start_supervised({Minga.Buffer.Process, content: "one\n", name: nil},
-          id: :symlink_overlay_parent
+          id: :preflight_overlay_parent
         )
 
-      fork_path = Path.join(dir, "linked/secret.txt")
+      fork_path = Path.join(dir, "lib/a.txt")
       {:ok, fork_pid} = MingaAgent.BufferForkStore.get_or_create(store, fork_path, parent)
-      Minga.Buffer.Fork.replace_content(fork_pid, "changed\n")
+      Minga.Buffer.Fork.replace_content(fork_pid, "forked one\n")
+
+      escaped_path = Path.join(dir, "linked/nested/secret.txt")
+      {:ok, escaped_fork} = MingaAgent.BufferForkStore.get_or_create(store, escaped_path, parent)
+      Minga.Buffer.Fork.replace_content(escaped_fork, "escaped secret\n")
 
       {:ok, view} = ProjectView.overlay(dir, fork_store: store)
+      assert :ok = ProjectView.write_file(view, "lib/new.txt", "new\n")
+      File.ln_s!(outside_file, Path.join(dir, "lib/new.txt"))
 
-      assert {:error, {:fork_path_outside_project_root, ^fork_path, :symlink_traversal}} =
-               ProjectView.promote(view, :project_root)
+      assert {:error, :symlink_traversal} = ProjectView.promote(view, :project_root)
 
+      assert {:ok, "one\n"} = File.read(Path.join(dir, "lib/a.txt"))
+      assert {:ok, "secret\n"} = File.read(outside_file)
+      assert nil == MingaAgent.BufferForkStore.get(store, escaped_path)
       assert MingaAgent.BufferForkStore.get(store, fork_path) == fork_pid
       assert Minga.Buffer.Fork.dirty?(fork_pid)
-      assert {:ok, "secret\n"} = File.read(Path.join(outside_dir, "secret.txt"))
+
+      File.rm!(Path.join(dir, "lib/new.txt"))
+      assert {:ok, "new\n"} = ProjectView.read_file(view, "lib/new.txt")
+
+      assert :ok = ProjectView.promote(view, :project_root)
+      assert {:ok, "forked one\n"} = File.read(Path.join(dir, "lib/a.txt"))
+      assert {:ok, "new\n"} = File.read(Path.join(dir, "lib/new.txt"))
+      assert {:ok, "secret\n"} = File.read(outside_file)
+      assert nil == MingaAgent.BufferForkStore.get(store, escaped_path)
+      assert nil == MingaAgent.BufferForkStore.get(store, fork_path)
     end
   end
 

@@ -87,8 +87,15 @@ defmodule MingaAgent.ProjectView.Overlay do
   @impl true
   @spec promote(ProjectView.t(), term()) :: :ok | {:ok, term()} | {:error, term()}
   def promote(%ProjectView{} = view, :project_root) do
-    with :ok <- promote_forks(view) do
-      Changeset.merge(changeset(view))
+    case preflight_changeset_merge(view) do
+      :ok ->
+        with :ok <- promote_forks(view) do
+          Changeset.merge(changeset(view))
+        end
+
+      {:error, reason} ->
+        quarantine_invalid_scoped_forks(view)
+        {:error, reason}
     end
   end
 
@@ -145,8 +152,8 @@ defmodule MingaAgent.ProjectView.Overlay do
 
   @spec fork_diff(ProjectView.t()) :: [map()]
   defp fork_diff(%ProjectView{} = view) do
-    case scoped_fork_paths(view, on_invalid: :ignore) do
-      {:ok, paths} ->
+    case scoped_fork_partition(view) do
+      {:ok, %{valid: paths}} ->
         Enum.map(paths, &%{path: Path.relative_to(&1, view.project_root), kind: :modified})
 
       {:error, _} ->
@@ -154,20 +161,63 @@ defmodule MingaAgent.ProjectView.Overlay do
     end
   end
 
-  @spec promote_forks(ProjectView.t()) :: :ok | {:error, {:fork_merge_failed, [term()]}}
+  @spec promote_forks(ProjectView.t()) :: :ok | {:error, term()}
   defp promote_forks(%ProjectView{} = view) do
     case fork_store(view) do
       nil ->
         :ok
 
       store ->
-        with {:ok, paths} <- scoped_fork_paths(view, on_invalid: :error),
-             results <- BufferForkStore.merge_paths_keep_failed(store, paths) do
-          fork_merge_result(results)
-        end
+        view
+        |> scoped_fork_partition()
+        |> promote_partition(store)
     end
   catch
     :exit, reason -> {:error, {:fork_merge_failed, [{:exit, reason}]}}
+  end
+
+  @spec promote_partition(
+          {:ok, %{valid: [String.t()], invalid: [{String.t(), term()}]}} | {:error, term()},
+          GenServer.server()
+        ) :: :ok | {:error, term()}
+  defp promote_partition({:ok, %{valid: valid_paths, invalid: []}}, store) do
+    store
+    |> BufferForkStore.merge_paths_keep_failed(valid_paths)
+    |> fork_merge_result()
+  end
+
+  defp promote_partition({:ok, %{invalid: [{_path, reason} | _] = invalid_paths}}, store) do
+    discard_scoped_paths(store, Enum.map(invalid_paths, &elem(&1, 0)))
+    {:error, reason}
+  end
+
+  defp promote_partition({:error, reason}, _store), do: {:error, reason}
+
+  @spec preflight_changeset_merge(ProjectView.t()) :: :ok | {:error, term()}
+  defp preflight_changeset_merge(%ProjectView{} = view) do
+    case Changeset.preflight_merge(changeset(view)) do
+      {:ok, _plan} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec quarantine_invalid_scoped_forks(ProjectView.t()) :: :ok
+  defp quarantine_invalid_scoped_forks(%ProjectView{} = view) do
+    case fork_store(view) do
+      nil ->
+        :ok
+
+      store ->
+        case scoped_fork_partition(view) do
+          {:ok, %{invalid: invalid_paths}} ->
+            discard_scoped_paths(store, Enum.map(invalid_paths, &elem(&1, 0)))
+
+          {:error, _} ->
+            :ok
+        end
+    end
+  catch
+    :exit, _ -> :ok
   end
 
   @spec fork_merge_result([{String.t(), :ok | {:conflict, term()} | {:error, term()}}]) ::
@@ -184,59 +234,60 @@ defmodule MingaAgent.ProjectView.Overlay do
         :ok
 
       store ->
-        case scoped_fork_paths(view, on_invalid: :ignore) do
-          {:ok, paths} -> BufferForkStore.discard_paths(store, paths)
-          {:error, _} -> :ok
+        case scoped_fork_partition(view) do
+          {:ok, %{valid: valid_paths, invalid: invalid_paths}} ->
+            discard_scoped_paths(store, valid_paths ++ Enum.map(invalid_paths, &elem(&1, 0)))
+
+          {:error, _} ->
+            :ok
         end
     end
   catch
     :exit, _ -> :ok
   end
 
-  @spec scoped_fork_paths(ProjectView.t(), keyword()) :: {:ok, [String.t()]} | {:error, term()}
-  defp scoped_fork_paths(%ProjectView{} = view, opts) do
-    on_invalid = Keyword.get(opts, :on_invalid, :error)
-
+  @spec scoped_fork_partition(ProjectView.t()) ::
+          {:ok, %{valid: [String.t()], invalid: [{String.t(), term()}]}} | {:error, term()}
+  defp scoped_fork_partition(%ProjectView{} = view) do
     case fork_store(view) do
       nil ->
-        {:ok, []}
+        {:ok, %{valid: [], invalid: []}}
 
       store ->
         try do
-          paths =
+          {valid_paths, invalid_paths} =
             store
             |> BufferForkStore.all()
             |> Map.keys()
-            |> Enum.reduce_while([], fn path, acc ->
+            |> Enum.reduce({[], []}, fn path, {valid_acc, invalid_acc} ->
               case scoped_fork_path(view.project_root, path) do
                 {:ok, scoped_path} ->
-                  {:cont, [scoped_path | acc]}
+                  {[scoped_path | valid_acc], invalid_acc}
 
                 :skip ->
-                  {:cont, acc}
+                  {valid_acc, invalid_acc}
 
                 {:error, reason} ->
-                  if on_invalid == :ignore do
-                    {:cont, acc}
-                  else
-                    {:halt, {:error, reason}}
-                  end
+                  {valid_acc, [{path, reason} | invalid_acc]}
               end
             end)
 
-          case paths do
-            {:error, _} = error -> error
-            paths -> {:ok, Enum.sort(paths)}
-          end
+          {:ok,
+           %{
+             valid: Enum.sort(valid_paths),
+             invalid: Enum.sort_by(invalid_paths, &elem(&1, 0))
+           }}
         catch
-          :exit, reason ->
-            if on_invalid == :ignore do
-              {:ok, []}
-            else
-              {:error, {:fork_store_unreachable, reason}}
-            end
+          :exit, reason -> {:error, {:fork_store_unreachable, reason}}
         end
     end
+  end
+
+  @spec discard_scoped_paths(GenServer.server(), [String.t()]) :: :ok
+  defp discard_scoped_paths(store, paths) do
+    BufferForkStore.discard_paths(store, Enum.uniq(paths))
+  catch
+    :exit, _ -> :ok
   end
 
   @spec scoped_fork_path(String.t(), String.t()) :: :skip | {:ok, String.t()} | {:error, term()}
