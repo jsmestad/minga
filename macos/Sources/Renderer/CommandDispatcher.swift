@@ -186,7 +186,8 @@ final class CommandDispatcher {
         case .guiTabBar(let activeIndex, let tabs):
             guiState.tabBarState.update(activeIndex: activeIndex, entries: tabs)
 
-        case .guiWorkspaces(_, let activeWorkspaceId, let mode, let flags, let workspaces, let visibleTabs):
+        case .guiWorkspaces(let version, let activeWorkspaceId, let mode, let flags, let workspaces, let visibleTabs):
+            guiState.workspaceState.update(version: version, activeWorkspaceId: activeWorkspaceId, mode: mode, flags: flags, workspaces: workspaces, visibleTabs: visibleTabs)
             guiState.tabBarState.updateWorkspaces(activeWorkspaceId: activeWorkspaceId, mode: mode, flags: flags, entries: workspaces, visibleTabs: visibleTabs)
 
         case .guiBoard(let visible, let focusedCardId, let cards, let filterMode, let filterText):

@@ -43,6 +43,9 @@ struct WorkspaceTabEntry: Identifiable {
     let icon: String
     let label: String
     let path: String
+
+    var isDirty: Bool { flags & 0x0001 != 0 }
+    var hasAttention: Bool { flags & 0x0002 != 0 }
 }
 
 /// Observable state for the tab bar, driven by BEAM protocol messages.
@@ -57,6 +60,7 @@ final class TabBarState {
     var activeWorkspaceId: UInt16 = 0
     var workspaceMode: UInt8 = 0
     var workspaceFlags: UInt8 = 0
+    var hasCanonicalWorkspaceTabs: Bool = false
 
     /// Whether any agent workspaces exist (controls visibility of group UI).
     var hasWorkspaces: Bool {
@@ -92,6 +96,7 @@ final class TabBarState {
         self.activeWorkspaceId = activeWorkspaceId
         self.workspaceMode = mode
         self.workspaceFlags = flags
+        self.hasCanonicalWorkspaceTabs = true
         self.workspaces = entries.map { entry in
             WorkspaceEntry(
                 id: entry.id,
@@ -135,5 +140,6 @@ final class TabBarState {
         activeWorkspaceId = 0
         workspaceMode = 0
         workspaceFlags = 0
+        hasCanonicalWorkspaceTabs = false
     }
 }
