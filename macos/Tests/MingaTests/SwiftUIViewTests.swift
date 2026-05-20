@@ -623,6 +623,62 @@ struct TabBarViewViewTests {
         #expect(strings.contains("editor.ex"))
         #expect(strings.contains("test.ex"))
     }
+
+    @Test("Tab bar shows inactive agent capsules when visible tabs only cover the active workspace")
+    @MainActor func showsInactiveAgentCapsules() throws {
+        let state = TabBarState()
+        state.update(activeIndex: 255, entries: [
+            Wire.TabEntry(id: 1, groupId: 1, isActive: false, isDirty: false, isAgent: false,
+                       hasAttention: false, agentStatus: 0, icon: "", label: "active.ex")
+        ])
+        state.updateWorkspaces(activeWorkspaceId: 1, entries: [
+            Wire.WorkspaceEntry(id: 1, agentStatus: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
+                              tabCount: 1, label: "Active", icon: "folder"),
+            Wire.WorkspaceEntry(id: 2, agentStatus: 1, colorR: 0x44, colorG: 0x55, colorB: 0x66,
+                              tabCount: 3, label: "Research", icon: "cpu")
+        ])
+
+        let sut = TabBarView(tabBarState: state, theme: ThemeColors(), encoder: nil)
+        let body = try sut.inspect()
+        let texts = body.findAll(ViewInspectorQuery.text)
+        let strings = texts.compactMap { try? $0.string() }
+
+        #expect(strings.contains("active.ex"))
+        #expect(strings.contains("Research"))
+    }
+
+    @Test("Second inactive agent capsule emits workspace goto command")
+    @MainActor func secondInactiveAgentCapsuleEmitsWorkspaceGotoCommand() throws {
+        let state = TabBarState()
+        state.update(activeIndex: 255, entries: [
+            Wire.TabEntry(id: 42, groupId: 1, isActive: false, isDirty: false, isAgent: false,
+                       hasAttention: false, agentStatus: 0, icon: "", label: "main.ex")
+        ])
+        state.updateWorkspaces(activeWorkspaceId: 1, entries: [
+            Wire.WorkspaceEntry(id: 1, agentStatus: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
+                              tabCount: 1, label: "Active", icon: "folder"),
+            Wire.WorkspaceEntry(id: 2, agentStatus: 1, colorR: 0x44, colorG: 0x55, colorB: 0x66,
+                              tabCount: 2, label: "Research", icon: "cpu"),
+            Wire.WorkspaceEntry(id: 3, agentStatus: 2, colorR: 0x77, colorG: 0x88, colorB: 0x99,
+                              tabCount: 3, label: "Review", icon: "cpu")
+        ])
+
+        let spy = SpyEncoder()
+        let sut = TabBarView(tabBarState: state, theme: ThemeColors(), encoder: spy)
+        let buttons = try sut.inspect().findAll(ViewType.Button.self)
+
+        var tapped = false
+        for button in buttons {
+            if (try? button.accessibilityLabel().string()) == "Switch to workspace Review" {
+                try button.tap()
+                tapped = true
+                break
+            }
+        }
+
+        #expect(tapped)
+        #expect(spy.guiActions == [.executeCommand(name: "workspace_goto_3")])
+    }
 }
 
 // MARK: - AgentChatView

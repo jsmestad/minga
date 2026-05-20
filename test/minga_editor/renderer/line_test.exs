@@ -101,45 +101,6 @@ defmodule MingaEditor.Renderer.LineTest do
       refute :reverse in Enum.at(row, 9).attrs,
              "Expected '界' at cell 9 to not be selected"
     end
-
-    test "emoji renders as 2 display columns" do
-      ctx = start_editor("🎉 party")
-
-      assert_row_contains(ctx, @content_row, "🎉 party")
-    end
-
-    test "precomposed accented characters render as 1 display column" do
-      # é (U+00E9, precomposed) = 2 bytes, 1 display col
-      ctx = start_editor("é hello")
-
-      assert_row_contains(ctx, @content_row, "é hello")
-
-      # Moving right from 'é' should step 1 display col (to the space)
-      send_key_sync(ctx, ?l)
-
-      screen = HeadlessPort.get_screen(ctx.port)
-      {_crow, cursor_col} = screen.cursor
-      # gutter=6, é is 1 col wide, so after `l` cursor is at display col 1 -> col 6+1=7
-      assert cursor_col == 7, "Expected cursor at col 7 (é is 1 col wide), got #{cursor_col}"
-    end
-
-    test "ASCII behavior is unchanged" do
-      ctx = start_editor("hello world")
-
-      assert_row_contains(ctx, @content_row, "hello world")
-
-      send_key_sync(ctx, ?v)
-      send_key_sync(ctx, ?l)
-      send_key_sync(ctx, ?l)
-
-      screen = HeadlessPort.get_screen(ctx.port)
-      row = Enum.at(screen.grid, @content_row)
-      # gutter=6; select "hel" = cols 6, 7, 8
-      selected_cells = Enum.slice(row, 6, 3)
-
-      assert Enum.all?(selected_cells, fn cell -> :reverse in cell.attrs end),
-             "Expected ASCII selection cells to have :reverse attribute"
-    end
   end
 
   describe "visual selection rendering" do

@@ -19,6 +19,8 @@ defmodule MingaEditor.AgentActivation do
   alias MingaEditor.State.Windows
   alias MingaEditor.Workspace.State, as: WorkspaceState
   alias MingaEditor.State.Agent, as: AgentState
+  alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Tab
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.Window.Content
   alias MingaEditor.Shell.Board.Card
@@ -39,8 +41,11 @@ defmodule MingaEditor.AgentActivation do
     if Card.you_card?(card) or card.session == nil do
       state
     else
+      return_target = build_return_target(state)
+
       state
       |> refresh_agent_cache(card.session)
+      |> activate_agent_view(return_target)
       |> set_agent_scope()
       |> set_agent_chat_window_content(card.session)
       |> focus_prompt()
@@ -50,23 +55,51 @@ defmodule MingaEditor.AgentActivation do
   @doc """
   Deactivates the agent view, reversing the activation steps.
 
-  Resets the rendering cache (status/error/pending_approval) to idle,
-  resets keymap scope to `:editor`, and unfocuses the prompt. Does NOT
-  modify `workspace.windows` — that is handled by the workspace restore
-  in zoom_out. Does NOT clear the card's `:session` field; the session
-  keeps running in the background and the card retains its pid.
+  Resets the rendering cache (status/error/pending_approval) to idle and restores the recorded editor return target when one exists. The return target includes window layout, file tree state, keymap scope, active buffer, and prompt focus. Without a return target, deactivation falls back to editor scope with the prompt unfocused. It does NOT clear the card's `:session` field; the session keeps running in the background and the card retains its pid.
 
   Symmetric counterpart to `activate_for_card/2`.
   """
   @spec deactivate(EditorState.t()) :: EditorState.t()
   def deactivate(state) do
+    return_target = AgentAccess.view(state).return_target
+
     state
     |> reset_cache()
-    |> reset_scope()
-    |> unfocus_prompt()
+    |> deactivate_agent_view()
+    |> restore_return_target(return_target)
+    |> restore_deactivated_scope(return_target)
+    |> restore_deactivated_prompt_focus(return_target)
   end
 
   # ── Private steps ───────────────────────────────────────────────────────
+
+  @spec build_return_target(EditorState.t()) :: UIState.View.return_target()
+  defp build_return_target(state) do
+    UIState.return_target(
+      active_tab_id(state),
+      state.workspace.buffers.active,
+      state.workspace.windows,
+      state.workspace.file_tree,
+      state.workspace.keymap_scope,
+      AgentAccess.input_focused?(state)
+    )
+  end
+
+  @spec active_tab_id(EditorState.t()) :: pos_integer() | nil
+  defp active_tab_id(state) do
+    case EditorState.active_tab(state) do
+      %Tab{id: id} -> id
+      nil -> nil
+    end
+  end
+
+  @spec activate_agent_view(EditorState.t(), UIState.View.return_target()) :: EditorState.t()
+  defp activate_agent_view(state, return_target) do
+    AgentAccess.update_agent_ui(
+      state,
+      &UIState.activate(&1, return_target.windows, return_target.file_tree, return_target)
+    )
+  end
 
   # Populates the rendering cache (status, error, pending_approval) from
   # the session process. The session pid itself lives on the card, not
@@ -124,20 +157,60 @@ defmodule MingaEditor.AgentActivation do
 
   # ── Deactivation steps ─────────────────────────────────────────────────
 
+  @spec deactivate_agent_view(EditorState.t()) :: EditorState.t()
+  defp deactivate_agent_view(state) do
+    AgentAccess.update_agent_ui(state, fn ui ->
+      {ui, _windows, _file_tree} = UIState.deactivate(ui)
+      ui
+    end)
+  end
+
+  @spec restore_return_target(EditorState.t(), UIState.View.return_target() | nil) ::
+          EditorState.t()
+  defp restore_return_target(state, nil), do: state
+
+  defp restore_return_target(state, return_target) do
+    EditorState.update_workspace(state, &restore_workspace(&1, return_target))
+  end
+
+  @spec restore_workspace(WorkspaceState.t(), UIState.View.return_target()) :: WorkspaceState.t()
+  defp restore_workspace(workspace, return_target) do
+    workspace
+    |> WorkspaceState.set_keymap_scope(return_target.keymap_scope)
+    |> WorkspaceState.set_windows(return_target.windows)
+    |> WorkspaceState.set_file_tree(return_target.file_tree)
+    |> restore_active_buffer(return_target.active_buffer)
+  end
+
+  @spec restore_active_buffer(WorkspaceState.t(), pid() | nil) :: WorkspaceState.t()
+  defp restore_active_buffer(workspace, active_buffer) when is_pid(active_buffer) do
+    WorkspaceState.set_buffers(workspace, Buffers.switch_to_pid(workspace.buffers, active_buffer))
+  end
+
+  defp restore_active_buffer(workspace, _active_buffer), do: workspace
+
+  @spec restore_deactivated_prompt_focus(EditorState.t(), UIState.View.return_target() | nil) ::
+          EditorState.t()
+  defp restore_deactivated_prompt_focus(state, %{prompt_focused: true}) do
+    AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, true))
+  end
+
+  defp restore_deactivated_prompt_focus(state, _return_target) do
+    AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, false))
+  end
+
   @spec reset_cache(EditorState.t()) :: EditorState.t()
   defp reset_cache(state) do
     AgentAccess.update_agent(state, &AgentState.reset_cache/1)
   end
 
-  @spec reset_scope(EditorState.t()) :: EditorState.t()
-  defp reset_scope(state) do
-    EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :editor))
+  @spec restore_deactivated_scope(EditorState.t(), UIState.View.return_target() | nil) ::
+          EditorState.t()
+  defp restore_deactivated_scope(state, %{keymap_scope: keymap_scope}) do
+    EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, keymap_scope))
   end
 
-  @spec unfocus_prompt(EditorState.t()) :: EditorState.t()
-  defp unfocus_prompt(state) do
-    AgentAccess.update_agent_ui(state, fn ui ->
-      UIState.set_input_focused(ui, false)
-    end)
+  defp restore_deactivated_scope(state, _return_target) do
+    EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :editor))
   end
 end

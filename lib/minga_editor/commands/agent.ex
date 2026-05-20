@@ -31,9 +31,12 @@ defmodule MingaEditor.Commands.Agent do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
+  alias MingaEditor.State.Buffers
+  alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
+  alias MingaEditor.Workspace.State, as: WorkspaceState
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
   alias MingaEditor.Input.AgentPanel
@@ -59,15 +62,12 @@ defmodule MingaEditor.Commands.Agent do
   def toggle_agent_split(state) do
     case EditorState.active_tab_kind(state) do
       :agent ->
-        # On agent tab: switch back to most recent file tab
-        case TabBar.most_recent_of_kind(EditorState.tab_bar(state), :file) do
-          %Tab{id: file_id} -> EditorState.switch_tab(state, file_id)
-          nil -> state
-        end
+        return_to_editor(state)
 
       _ ->
-        # On file tab: ensure agent tab exists and switch to it
+        # On file tab: ensure agent tab exists, record the return target, and switch to it.
         state = ensure_agent_state(state)
+        return_target = build_return_target(state)
 
         case find_agent_tab(state) do
           %Tab{id: agent_id} ->
@@ -76,6 +76,7 @@ defmodule MingaEditor.Commands.Agent do
             # switch — otherwise it would always see nil from the file tab.
             state
             |> EditorState.switch_tab(agent_id)
+            |> activate_agent_view(return_target)
             |> maybe_start_session()
 
           nil ->
@@ -181,9 +182,8 @@ defmodule MingaEditor.Commands.Agent do
   defp find_agent_tab(%{shell_state: %{tab_bar: nil}}), do: nil
   defp find_agent_tab(%{shell_state: %{tab_bar: tb}}), do: TabBar.find_by_kind(tb, :agent)
 
-  # Creates a new file tab for the active buffer and switches to it.
-  # Used when deactivating the agentic view and no file tab exists yet
-  # (e.g., cold boot into agent mode). The new tab starts with an empty
+  # Starts an agent session after switching into the agent tab.
+  # Called only after the tab switch so AgentAccess.session/1 sees the tab's pid.
   @spec maybe_start_session(state()) :: state()
   defp maybe_start_session(state) do
     if AgentAccess.session(state) == nil do
@@ -191,6 +191,146 @@ defmodule MingaEditor.Commands.Agent do
     else
       state
     end
+  end
+
+  @spec build_return_target(state()) :: UIState.View.return_target()
+  defp build_return_target(state) do
+    active_tab_id = active_tab_id(state)
+
+    UIState.return_target(
+      active_tab_id,
+      state.workspace.buffers.active,
+      state.workspace.windows,
+      state.workspace.file_tree,
+      state.workspace.keymap_scope,
+      AgentAccess.input_focused?(state)
+    )
+  end
+
+  @spec active_tab_id(state()) :: pos_integer() | nil
+  defp active_tab_id(state) do
+    case EditorState.active_tab(state) do
+      %Tab{id: id} -> id
+      nil -> nil
+    end
+  end
+
+  @spec activate_agent_view(state(), UIState.View.return_target()) :: state()
+  defp activate_agent_view(state, return_target) do
+    update_agent_ui(
+      state,
+      &UIState.activate(&1, return_target.windows, return_target.file_tree, return_target)
+    )
+  end
+
+  @doc "Returns from the agent view to the recorded editor context without stopping the session."
+  @spec return_to_editor(state()) :: state()
+  def return_to_editor(state) do
+    return_target = AgentAccess.view(state).return_target
+
+    case target_file_tab_id(EditorState.tab_bar(state), return_target) do
+      {:exact, id} ->
+        state
+        |> mark_agent_view_inactive()
+        |> EditorState.switch_tab(id)
+        |> restore_return_keymap_scope(return_target)
+
+      {:fallback, id} ->
+        state
+        |> mark_agent_view_inactive()
+        |> EditorState.switch_tab(id)
+
+      nil ->
+        restore_return_target_without_tab(state, return_target)
+    end
+  end
+
+  @spec target_file_tab_id(TabBar.t() | nil, UIState.View.return_target() | nil) ::
+          {:exact, pos_integer()} | {:fallback, pos_integer()} | nil
+  defp target_file_tab_id(%TabBar{} = tb, %{active_tab_id: id}) when is_integer(id) do
+    case TabBar.get(tb, id) do
+      %Tab{kind: :file, id: file_id} -> {:exact, file_id}
+      _ -> fallback_file_tab_id(tb)
+    end
+  end
+
+  defp target_file_tab_id(%TabBar{} = tb, _return_target), do: fallback_file_tab_id(tb)
+  defp target_file_tab_id(_tb, _return_target), do: nil
+
+  @spec fallback_file_tab_id(TabBar.t()) :: {:fallback, pos_integer()} | nil
+  defp fallback_file_tab_id(%TabBar{} = tb) do
+    case TabBar.most_recent_of_kind(tb, :file) do
+      %Tab{id: id} -> {:fallback, id}
+      nil -> nil
+    end
+  end
+
+  @spec restore_return_keymap_scope(state(), UIState.View.return_target() | nil) :: state()
+  defp restore_return_keymap_scope(state, %{keymap_scope: keymap_scope}) do
+    EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, keymap_scope))
+  end
+
+  defp restore_return_keymap_scope(state, _return_target) do
+    EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :editor))
+  end
+
+  @spec restore_return_target_without_tab(state(), UIState.View.return_target() | nil) :: state()
+  defp restore_return_target_without_tab(state, nil) do
+    state
+    |> mark_agent_view_inactive()
+    |> EditorState.update_workspace(&WorkspaceState.set_keymap_scope(&1, :editor))
+    |> EditorState.set_status("No file tabs in this workspace")
+  end
+
+  defp restore_return_target_without_tab(state, return_target) do
+    state
+    |> mark_agent_view_inactive()
+    |> EditorState.update_workspace(&restore_workspace_return_target(&1, return_target))
+    |> restore_prompt_focus(return_target.prompt_focused)
+    |> EditorState.set_status("No file tabs in this workspace")
+  end
+
+  @spec restore_workspace_return_target(WorkspaceState.t(), UIState.View.return_target()) ::
+          WorkspaceState.t()
+  defp restore_workspace_return_target(workspace, return_target) do
+    workspace
+    |> WorkspaceState.set_keymap_scope(return_target.keymap_scope)
+    |> WorkspaceState.set_windows(return_target.windows)
+    |> WorkspaceState.set_file_tree(return_target.file_tree)
+    |> restore_return_target_buffer(return_target.active_buffer)
+  end
+
+  @spec restore_return_target_buffer(WorkspaceState.t(), pid() | nil) :: WorkspaceState.t()
+  defp restore_return_target_buffer(workspace, active_buffer) when is_pid(active_buffer) do
+    buffers = Buffers.switch_to_pid(workspace.buffers, active_buffer)
+
+    buffers =
+      if buffers.active == active_buffer do
+        buffers
+      else
+        Buffers.replace_list(buffers, [active_buffer | buffers.list], 0)
+      end
+
+    workspace
+    |> WorkspaceState.set_buffers(buffers)
+    |> WorkspaceState.sync_active_window_buffer()
+  end
+
+  defp restore_return_target_buffer(workspace, _active_buffer), do: workspace
+
+  @spec restore_prompt_focus(state(), boolean()) :: state()
+  defp restore_prompt_focus(state, true),
+    do: update_agent_ui(state, &UIState.set_input_focused(&1, true))
+
+  defp restore_prompt_focus(state, false),
+    do: update_agent_ui(state, &UIState.set_input_focused(&1, false))
+
+  @spec mark_agent_view_inactive(state()) :: state()
+  defp mark_agent_view_inactive(state) do
+    update_agent_ui(state, fn ui ->
+      {ui, _windows, _file_tree} = UIState.deactivate(ui)
+      UIState.set_input_focused(ui, false)
+    end)
   end
 
   @doc "Starts a local session, or opens a server picker when remotes are connected."
@@ -900,17 +1040,71 @@ defmodule MingaEditor.Commands.Agent do
 
   # ── Close / dismiss ────────────────────────────────────────────────────────
 
-  @doc "Returns from the agent view to the most recent file tab."
+  @doc "Returns from the agent view to the recorded editor context."
   @spec scope_close(state()) :: state()
-  def scope_close(state), do: toggle_agent_split(state)
+  def scope_close(state), do: return_to_editor(state)
 
   @doc "Dismisses active overlays or returns to the editor (ESC behavior)."
   @spec scope_dismiss_or_noop(state()) :: state()
-  def scope_dismiss_or_noop(state) do
-    if AgentAccess.view(state).help_visible do
-      update_agent_ui(state, &UIState.dismiss_help/1)
+  def scope_dismiss_or_noop(state), do: dismiss_agent_transient_or_return(state)
+
+  @spec dismiss_agent_transient_or_return(state()) :: state()
+  defp dismiss_agent_transient_or_return(state) do
+    view = AgentAccess.view(state)
+    panel = AgentAccess.panel(state)
+
+    dismiss_agent_transient_or_return(state, view, panel)
+  end
+
+  @spec dismiss_agent_transient_or_return(state(), UIState.View.t(), Panel.t()) :: state()
+  defp dismiss_agent_transient_or_return(state, %{help_visible: true}, _panel) do
+    update_agent_ui(state, &UIState.dismiss_help/1)
+  end
+
+  defp dismiss_agent_transient_or_return(state, view, _panel) do
+    if UIState.searching?(view) do
+      update_agent_ui(state, &UIState.cancel_search/1)
     else
-      toggle_agent_split(state)
+      dismiss_agent_prefix_or_modal(state, view)
+    end
+  end
+
+  @spec dismiss_agent_prefix_or_modal(state(), UIState.View.t()) :: state()
+  defp dismiss_agent_prefix_or_modal(state, %{pending_prefix: nil}) do
+    panel = AgentAccess.panel(state)
+    dismiss_agent_panel_or_modal(state, panel)
+  end
+
+  defp dismiss_agent_prefix_or_modal(state, _view) do
+    update_agent_ui(state, &UIState.clear_prefix/1)
+  end
+
+  @spec dismiss_agent_panel_or_modal(state(), Panel.t()) :: state()
+  defp dismiss_agent_panel_or_modal(state, %{mention_completion: nil}) do
+    dismiss_agent_modal_or_hover(state, EditorState.modal(state))
+  end
+
+  defp dismiss_agent_panel_or_modal(state, _panel) do
+    update_agent_ui(state, &UIState.clear_mention_completion/1)
+  end
+
+  @spec dismiss_agent_modal_or_hover(state(), ModalOverlay.t()) :: state()
+  defp dismiss_agent_modal_or_hover(state, :none) do
+    dismiss_agent_hover_or_input(state, EditorState.hover_popup(state))
+  end
+
+  defp dismiss_agent_modal_or_hover(state, _modal), do: ModalOverlay.dismiss(state)
+
+  @spec dismiss_agent_hover_or_input(state(), term()) :: state()
+  defp dismiss_agent_hover_or_input(state, nil), do: dismiss_agent_input_or_return(state)
+  defp dismiss_agent_hover_or_input(state, _hover), do: EditorState.dismiss_hover_popup(state)
+
+  @spec dismiss_agent_input_or_return(state()) :: state()
+  defp dismiss_agent_input_or_return(state) do
+    if AgentAccess.input_focused?(state) do
+      scope_unfocus_input(state)
+    else
+      return_to_editor(state)
     end
   end
 

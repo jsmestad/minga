@@ -124,10 +124,13 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
       File.mkdir_p!(target_dir)
 
       target_buffer = start_supervised!({BufferProcess, file_path: source})
+
       active_buffer =
         start_supervised!(%{
           id: {:active_buffer, System.unique_integer([:positive])},
-          start: {BufferProcess, :start_link, [[content: "active", buffer_name: "active-#{System.unique_integer([:positive])}"]]},
+          start:
+            {BufferProcess, :start_link,
+             [[content: "active", buffer_name: "active-#{System.unique_integer([:positive])}"]]},
           restart: :temporary
         })
 

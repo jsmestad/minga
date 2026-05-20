@@ -25,6 +25,8 @@ Also read the existing test file for the module (if one exists) to understand es
 
 ## Testing Philosophy: What to Test and What to Skip
 
+Start with the public contract, not the test tool. Before naming test files or helpers, identify what behavior is promised, who relies on it, what layer proves it cheapest, and what should not be tested because it is an implementation detail or already covered at a cheaper layer.
+
 Follow Sandi Metz's message-origin grid (from "The Magic Tricks of Testing" and "99 Bottles of OOP"), adapted for Elixir/OTP. Classify every piece of behavior by where the message originates and whether it's a query (returns data) or a command (causes a side effect). This tells you what deserves a test and what doesn't.
 
 ### The Grid
@@ -45,7 +47,7 @@ Follow Sandi Metz's message-origin grid (from "The Magic Tricks of Testing" and 
 **Sent to self** is everything internal. Don't test it directly.
 
 - `defp` functions. Test them only through the public function that calls them. If a private function is complex enough that you want to test it in isolation, that's a signal it should be extracted into its own module with its own public API.
-- `handle_info` clauses triggered by `Process.send_after(self(), ...)` or internal scheduling. These are implementation details of how a GenServer manages timing. Test the observable outcome ("after the interval elapses, the public API returns X"), not the message itself. Don't send `:tick` to a process in a test; that couples you to the internal scheduling strategy.
+- `handle_info` clauses triggered by `Process.send_after(self(), ...)` or internal scheduling. These are implementation details of how a GenServer manages timing. Test the observable outcome, not the private scheduling mechanism. In Minga tests, prefer the deterministic AGENTS.md pattern for timers: send the exact timer message directly when it is the trigger you need, follow it with a synchronization barrier, then assert the public outcome. Do not assert that a timer ref exists or that an internal `:tick` was scheduled.
 - Internal GenServer state shape. Use `:sys.get_state/1` only as a synchronization barrier in tests (to ensure messages have been processed), never to assert on state fields. If you're pattern-matching on `%State{some_field: value}` in a test, you're testing implementation and the test will break on any refactor.
 - Private helper modules that exist only to organize code for one parent module. Test through the parent's public API.
 
@@ -114,43 +116,61 @@ Don't list 20 edge cases for completeness. Pick the 3-5 that are most likely to 
 
 ## Output Format
 
+Start every answer with the boundary decision. Do not bury the most important guidance after a long list of possible tests.
+
 ```markdown
 ## Test Design: {what's being tested}
 
+### Public Contract
+{One or two sentences naming the behavior callers rely on. Example: "The command parser promises to turn user command-line text into command tuples without losing arguments."}
+
+### Cheapest Useful Layer
+{Name the layer and why it is enough: pure function, Mode FSM, command module, single GenServer, EditorCase wiring, renderer output, protocol compatibility. If you recommend a heavier layer, justify the specific user-visible or cross-process contract it proves.}
+
 ### Behavior Tests
-{List each test with a descriptive name and what it verifies. Include the key assertion.}
+{List each test with a descriptive name and the key setup/action/assertion. Prefer one contract test with table cases over one test per alias or key when the behavior is the same.}
 
 1. **"inserting text at cursor position moves cursor forward"**
-   - Insert "hello" at {0, 0}, assert cursor is at {0, 5}
-   - Insert at middle of existing text, assert surrounding text preserved
+   - Setup: buffer with "abc" and cursor at {0, 1}
+   - Action: insert "X"
+   - Assert: content is "aXbc" and cursor is {0, 2}
 
 2. **"undo reverses the last edit"**
-   - Insert, undo, assert content matches original
-   - Multiple edits, multiple undos, assert each step reverses correctly
+   - Setup: buffer with "hello"
+   - Action: insert, then undo
+   - Assert: content matches the original
 
 ### Property Tests (if applicable)
-{Generator design and properties to verify.}
+{Generator design and properties to verify. Use property tests for true data structures and broad invariants, not for every scenario.}
 
-- **Generator:** `StreamData.string(:printable)` for content, `{StreamData.integer(0..max_line), StreamData.integer(0..max_col)}` for positions
-- **Property:** "insert then delete at same position produces original content"
+- **Generator:** `StreamData.string(:printable)` for content, plus valid positions derived from the generated document
+- **Property:** "insert then delete at the same position produces original content"
 - **Property:** "cursor position after insert is always within buffer bounds"
 
 ### Edge Cases
-{The 3-5 most important ones.}
+{The 3-5 boundaries most likely to expose bugs.}
 
 1. Empty buffer + delete = no crash, buffer unchanged
-2. Insert at end of file (no trailing newline)
+2. Insert at end of file with no trailing newline
 3. Multi-byte unicode: cursor advances by grapheme, not byte
 
-### Skip
-{What doesn't need a test and why, referencing the grid.}
+### Tests Not to Write
+{Explicitly name duplicate or too-deep tests to avoid. This is part of the deliverable, not an afterthought.}
 
-- `content/1` is a pure delegation to Document.content, tested there (outgoing query)
-- GenServer plumbing (start_link, init) covered by existing test helpers (framework)
-- Internal state shape: don't assert on `:sys.get_state` fields (sent-to-self)
+- Do not use EditorCase for pure parser or Mode FSM behavior.
+- Do not assert `:sys.get_state` fields when public helpers can observe the outcome.
+- Do not retest every key through the full editor when a cheaper mode or command test already proves the contract.
+
+### Exceptions
+{If protocol compatibility, render-cache internals, or core data-structure invariants justify heavier or more exhaustive tests, say so explicitly.}
 
 ### Existing Patterns
-{If you read the existing test file, note any helpers, setup conventions, or patterns the new tests should follow for consistency.}
+{If you read the existing test file, note helpers, setup conventions, and nearby examples to follow or intentionally avoid.}
+
+### Concurrency
+- **async:** true/false, with the exact global resource if false
+- **Synchronization:** {barrier, event, monitor, or public query}
+- **Isolation:** {ETS tables, Application env, temp dirs, OS process stubs}
 ```
 
 ## Concurrency Safety

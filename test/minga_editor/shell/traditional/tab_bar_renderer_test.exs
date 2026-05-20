@@ -5,6 +5,8 @@ defmodule MingaEditor.Shell.Traditional.TabBarRendererTest do
   alias MingaEditor.State.TabBar
   alias MingaEditor.Shell.Traditional.TabBarRenderer
   alias MingaEditor.UI.Theme
+  alias MingaEditor.Workspace.ChromeState
+  alias MingaEditor.Workspace.ChromeState.TabSummary
 
   defp doom_theme, do: Theme.get!(:doom_one)
 
@@ -25,6 +27,49 @@ defmodule MingaEditor.Shell.Traditional.TabBarRendererTest do
       assert Enum.any?(regions, fn {_, _, cmd} -> cmd == :tab_goto_1 end)
     end
 
+    test "render_chrome_state does not mark a hidden active tab as active" do
+      chrome_state = %ChromeState{
+        workspaces: [],
+        visible_tabs: [
+          TabSummary.new(
+            id: 1,
+            workspace_id: 1,
+            kind: :file,
+            label: "agent.ex",
+            path: "/tmp/agent.ex",
+            icon: "A",
+            dirty?: false,
+            draft_state: :none,
+            attention?: false
+          )
+        ],
+        mode: :agent,
+        active_workspace_id: 1,
+        active_tab_id: 99,
+        background_count: 0,
+        attention_count: 0,
+        draft_count: 0,
+        conflict_count: 0
+      }
+
+      {draws, regions} =
+        TabBarRenderer.render_chrome_state(0, 80, chrome_state, doom_theme(), nil)
+
+      colors = Map.from_struct(doom_theme().tab_bar)
+
+      assert Enum.any?(regions, fn {_, _, cmd} -> cmd == :tab_goto_1 end)
+      assert Enum.any?(regions, fn {_, _, cmd} -> cmd == :tab_close_1 end)
+
+      tab_draw = Enum.find(draws, fn {_, _, text, _} -> String.contains?(text, "agent.ex") end)
+      assert tab_draw != nil
+
+      {_, _, _, style} = tab_draw
+      assert style.bg == colors.inactive_bg
+      refute style.bg == colors.active_bg
+    end
+  end
+
+  describe "render/5 styling" do
     test "active tab uses active colors, inactive uses inactive" do
       tab1 = Tab.new_file(1, "one.ex")
       tb = TabBar.new(tab1)
@@ -186,7 +231,7 @@ defmodule MingaEditor.Shell.Traditional.TabBarRendererTest do
   end
 
   describe "click regions" do
-    test "each tab has goto and close click regions" do
+    test "each visible file tab has goto and close click regions" do
       tab1 = Tab.new_file(1, "a.ex")
       tb = TabBar.new(tab1)
       {tb, _} = TabBar.add(tb, :file, "b.ex")
@@ -196,15 +241,13 @@ defmodule MingaEditor.Shell.Traditional.TabBarRendererTest do
 
       commands = Enum.map(regions, fn {_, _, cmd} -> cmd end) |> MapSet.new()
 
-      # Goto regions
       assert :tab_goto_1 in commands
       assert :tab_goto_2 in commands
-      assert :tab_goto_3 in commands
+      refute :tab_goto_3 in commands
 
-      # Close regions
       assert :tab_close_1 in commands
       assert :tab_close_2 in commands
-      assert :tab_close_3 in commands
+      refute :tab_close_3 in commands
     end
 
     test "goto and close regions for the same tab don't overlap" do
@@ -323,14 +366,15 @@ defmodule MingaEditor.Shell.Traditional.TabBarRendererTest do
   end
 
   describe "agent tabs" do
-    test "agent tab shows agent icon" do
+    test "agent tabs are not rendered in the file tab strip" do
       tab = Tab.new_agent(1, "My Session")
       tb = TabBar.new(tab)
 
-      {draws, _} = TabBarRenderer.render(0, 80, tb, doom_theme())
+      {draws, regions} = TabBarRenderer.render(0, 80, tb, doom_theme())
 
       all_text = Enum.map_join(draws, fn {_, _, text, _} -> text end)
-      assert String.contains?(all_text, "\u{F06A9}")
+      refute String.contains?(all_text, "\u{F06A9}")
+      assert regions == []
     end
   end
 end

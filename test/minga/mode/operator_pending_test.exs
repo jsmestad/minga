@@ -5,463 +5,157 @@ defmodule Minga.Mode.OperatorPendingTest do
   alias Minga.Mode.OperatorPending
   alias Minga.Mode.OperatorPendingState
 
-  # Build the FSM state as it would look after transitioning from Normal on `d`.
-  defp op_state(operator, op_count \\ 1) do
-    %OperatorPendingState{operator: operator, op_count: op_count}
-  end
+  defp op_state(operator, op_count \\ 1),
+    do: %OperatorPendingState{operator: operator, op_count: op_count}
 
-  # ── d + motion ─────────────────────────────────────────────────────────────
+  describe "motion operators" do
+    test "delete, change, and yank map motions to operator commands and target modes" do
+      cases = [
+        {:delete, ?w, 0, {:delete_motion, :word_forward}, :normal},
+        {:delete, ?b, 0, {:delete_motion, :word_backward}, :normal},
+        {:delete, ?e, 0, {:delete_motion, :word_end}, :normal},
+        {:delete, ?0, 0, {:delete_motion, :line_start}, :normal},
+        {:delete, ?$, 0, {:delete_motion, :line_end}, :normal},
+        {:delete, ?G, 0, {:delete_motion, :document_end}, :normal},
+        {:change, ?w, 0, {:change_motion, :word_forward}, :insert},
+        {:change, ?e, 0, {:change_motion, :word_end}, :insert},
+        {:change, ?$, 0, {:change_motion, :line_end}, :insert},
+        {:yank, ?w, 0, {:yank_motion, :word_forward}, :normal},
+        {:yank, ?b, 0, {:yank_motion, :word_backward}, :normal},
+        {:delete, ?d, 0x02, {:delete_motion, :half_page_down}, :normal},
+        {:delete, ?u, 0x02, {:delete_motion, :half_page_up}, :normal},
+        {:yank, ?f, 0x02, {:yank_motion, :page_down}, :normal},
+        {:change, ?b, 0x02, {:change_motion, :page_up}, :insert}
+      ]
 
-  describe "delete operator with motion" do
-    test "d+w emits {:delete_motion, :word_forward} and transitions to :normal" do
-      state = op_state(:delete)
+      for {operator, key, mods, command, mode} <- cases do
+        assert {:execute_then_transition, [^command], ^mode, _state} =
+                 OperatorPending.handle_key({key, mods}, op_state(operator))
+      end
 
-      assert {:execute_then_transition, [{:delete_motion, :word_forward}], :normal, _} =
-               OperatorPending.handle_key({?w, 0}, state)
+      {:continue, pending_g} = OperatorPending.handle_key({?g, 0}, op_state(:delete))
+
+      assert {:execute_then_transition, [{:delete_motion, :document_start}], :normal, _state} =
+               OperatorPending.handle_key({?g, 0}, pending_g)
     end
 
-    test "d+b emits {:delete_motion, :word_backward} and transitions to :normal" do
-      state = op_state(:delete)
-
-      assert {:execute_then_transition, [{:delete_motion, :word_backward}], :normal, _} =
-               OperatorPending.handle_key({?b, 0}, state)
-    end
-
-    test "d+e emits {:delete_motion, :word_end} and transitions to :normal" do
-      state = op_state(:delete)
-
-      assert {:execute_then_transition, [{:delete_motion, :word_end}], :normal, _} =
-               OperatorPending.handle_key({?e, 0}, state)
-    end
-
-    test "d+0 emits {:delete_motion, :line_start} and transitions to :normal" do
-      state = op_state(:delete)
-
-      assert {:execute_then_transition, [{:delete_motion, :line_start}], :normal, _} =
-               OperatorPending.handle_key({?0, 0}, state)
-    end
-
-    test "d+$ emits {:delete_motion, :line_end} and transitions to :normal" do
-      state = op_state(:delete)
-
-      assert {:execute_then_transition, [{:delete_motion, :line_end}], :normal, _} =
-               OperatorPending.handle_key({?$, 0}, state)
-    end
-
-    test "d+G emits {:delete_motion, :document_end} and transitions to :normal" do
-      state = op_state(:delete)
-
-      assert {:execute_then_transition, [{:delete_motion, :document_end}], :normal, _} =
-               OperatorPending.handle_key({?G, 0}, state)
-    end
-
-    test "d+g+g emits {:delete_motion, :document_start} and transitions to :normal" do
-      state = op_state(:delete)
-      {:continue, state2} = OperatorPending.handle_key({?g, 0}, state)
-
-      assert {:execute_then_transition, [{:delete_motion, :document_start}], :normal, _} =
-               OperatorPending.handle_key({?g, 0}, state2)
-    end
-  end
-
-  # ── c + motion ─────────────────────────────────────────────────────────────
-
-  describe "change operator with motion" do
-    test "c+w emits {:change_motion, :word_forward} and transitions to :insert" do
-      state = op_state(:change)
-
-      assert {:execute_then_transition, [{:change_motion, :word_forward}], :insert, _} =
-               OperatorPending.handle_key({?w, 0}, state)
-    end
-
-    test "c+e emits {:change_motion, :word_end} and transitions to :insert" do
-      state = op_state(:change)
-
-      assert {:execute_then_transition, [{:change_motion, :word_end}], :insert, _} =
-               OperatorPending.handle_key({?e, 0}, state)
-    end
-
-    test "c+$ emits {:change_motion, :line_end} and transitions to :insert" do
-      state = op_state(:change)
-
-      assert {:execute_then_transition, [{:change_motion, :line_end}], :insert, _} =
-               OperatorPending.handle_key({?$, 0}, state)
-    end
-  end
-
-  # ── y + motion ─────────────────────────────────────────────────────────────
-
-  describe "yank operator with motion" do
-    test "y+w emits {:yank_motion, :word_forward} and transitions to :normal" do
-      state = op_state(:yank)
-
-      assert {:execute_then_transition, [{:yank_motion, :word_forward}], :normal, _} =
-               OperatorPending.handle_key({?w, 0}, state)
-    end
-
-    test "y+b emits {:yank_motion, :word_backward} and transitions to :normal" do
-      state = op_state(:yank)
-
-      assert {:execute_then_transition, [{:yank_motion, :word_backward}], :normal, _} =
-               OperatorPending.handle_key({?b, 0}, state)
-    end
-  end
-
-  # ── Double-operator (line-wise) ────────────────────────────────────────────
-
-  describe "dd (delete line)" do
-    test "d+d emits {:delete_lines_counted, 1} and transitions to :normal" do
-      state = op_state(:delete)
-
-      assert {:execute_then_transition, [{:delete_lines_counted, 1}], :normal, _} =
-               OperatorPending.handle_key({?d, 0}, state)
-    end
-
-    test "dd with op_count=3 emits {:delete_lines_counted, 3}" do
-      state = op_state(:delete, 3)
-
-      assert {:execute_then_transition, [{:delete_lines_counted, 3}], :normal, _} =
-               OperatorPending.handle_key({?d, 0}, state)
-    end
-  end
-
-  describe "cc (change line)" do
-    test "c+c emits {:change_lines_counted, 1} and transitions to :insert" do
-      state = op_state(:change)
-
-      assert {:execute_then_transition, [{:change_lines_counted, 1}], :insert, _} =
-               OperatorPending.handle_key({?c, 0}, state)
-    end
-  end
-
-  describe "yy (yank line)" do
-    test "y+y emits {:yank_lines_counted, 1} and transitions to :normal" do
-      state = op_state(:yank)
-
-      assert {:execute_then_transition, [{:yank_lines_counted, 1}], :normal, _} =
-               OperatorPending.handle_key({?y, 0}, state)
-    end
-  end
-
-  # ── Escape cancels ─────────────────────────────────────────────────────────
-
-  describe "page / half-page motions" do
-    test "d+Ctrl+d emits {:delete_motion, :half_page_down}" do
-      ctrl = 0x02
-      state = %OperatorPendingState{operator: :delete, op_count: 1}
-
-      assert {:execute_then_transition, [{:delete_motion, :half_page_down}], :normal, _} =
-               OperatorPending.handle_key({?d, ctrl}, state)
-    end
-
-    test "d+Ctrl+u emits {:delete_motion, :half_page_up}" do
-      ctrl = 0x02
-      state = %OperatorPendingState{operator: :delete, op_count: 1}
-
-      assert {:execute_then_transition, [{:delete_motion, :half_page_up}], :normal, _} =
-               OperatorPending.handle_key({?u, ctrl}, state)
-    end
-
-    test "y+Ctrl+f emits {:yank_motion, :page_down}" do
-      ctrl = 0x02
-      state = %OperatorPendingState{operator: :yank, op_count: 1}
-
-      assert {:execute_then_transition, [{:yank_motion, :page_down}], :normal, _} =
-               OperatorPending.handle_key({?f, ctrl}, state)
-    end
-
-    test "c+Ctrl+b emits {:change_motion, :page_up} and transitions to insert" do
-      ctrl = 0x02
-      state = %OperatorPendingState{operator: :change, op_count: 1}
-
-      assert {:execute_then_transition, [{:change_motion, :page_up}], :insert, _} =
-               OperatorPending.handle_key({?b, ctrl}, state)
-    end
-  end
-
-  describe "Escape" do
-    test "Escape transitions back to :normal" do
-      state = op_state(:delete)
-      assert {:transition, :normal, _} = OperatorPending.handle_key({27, 0}, state)
-    end
-
-    test "Escape returns base Mode.State without operator fields" do
-      state = op_state(:delete)
-      {:transition, :normal, new_state} = OperatorPending.handle_key({27, 0}, state)
-      assert %Mode.State{} = new_state
-    end
-  end
-
-  # ── Count accumulation ─────────────────────────────────────────────────────
-
-  describe "count prefix inside operator-pending" do
-    test "digit accumulates count" do
-      state = op_state(:delete)
-      {:continue, s2} = OperatorPending.handle_key({?3, 0}, state)
-      assert s2.count == 3
-    end
-
-    test "two digits accumulate" do
-      state = op_state(:delete)
-      {:continue, s2} = OperatorPending.handle_key({?1, 0}, state)
-      {:continue, s3} = OperatorPending.handle_key({?2, 0}, s2)
-      assert s3.count == 12
-    end
-
-    test "0 after digit extends count" do
-      state = op_state(:delete)
-      {:continue, s2} = OperatorPending.handle_key({?1, 0}, state)
+    test "counts accumulate inside operator-pending and multiply pre-operator counts" do
+      {:continue, s1} = OperatorPending.handle_key({?1, 0}, op_state(:delete))
+      {:continue, s2} = OperatorPending.handle_key({?2, 0}, s1)
       {:continue, s3} = OperatorPending.handle_key({?0, 0}, s2)
-      assert s3.count == 10
-    end
+      assert s3.count == 120
 
-    test "motion count multiplies op_count" do
-      # op_count=2 (from `2d`), then press `3w` (motion count=3) → 6 commands
-      state = %OperatorPendingState{operator: :delete, op_count: 2}
-      {:continue, s2} = OperatorPending.handle_key({?3, 0}, state)
+      {:continue, counted_motion} = OperatorPending.handle_key({?3, 0}, op_state(:delete, 2))
 
-      assert {:execute_then_transition, cmds, :normal, _} =
-               OperatorPending.handle_key({?w, 0}, s2)
+      assert {:execute_then_transition, commands, :normal, _state} =
+               OperatorPending.handle_key({?w, 0}, counted_motion)
 
-      assert length(cmds) == 6
-      assert Enum.all?(cmds, &(&1 == {:delete_motion, :word_forward}))
+      assert length(commands) == 6
+      assert Enum.all?(commands, &(&1 == {:delete_motion, :word_forward}))
     end
   end
 
-  # ── Mode.process integration ───────────────────────────────────────────────
+  describe "linewise operators and cancellation" do
+    test "repeating operators emits counted linewise commands with the right target mode" do
+      cases = [
+        {:delete, ?d, 1, {:delete_lines_counted, 1}, :normal},
+        {:delete, ?d, 3, {:delete_lines_counted, 3}, :normal},
+        {:change, ?c, 1, {:change_lines_counted, 1}, :insert},
+        {:yank, ?y, 1, {:yank_lines_counted, 1}, :normal},
+        {:indent, ?>, 1, {:indent_lines, 1}, :normal},
+        {:indent, ?>, 3, {:indent_lines, 3}, :normal},
+        {:dedent, ?<, 1, {:dedent_lines, 1}, :normal},
+        {:dedent, ?<, 3, {:dedent_lines, 3}, :normal},
+        {:reindent, ?=, 1, {:reindent_lines, 1}, :normal},
+        {:reindent, ?=, 3, {:reindent_lines, 3}, :normal}
+      ]
 
-  describe "integration via Mode.process/3" do
-    test "d in normal transitions to operator_pending" do
-      state = Mode.initial_state()
-      {new_mode, _cmds, new_state} = Mode.process(:normal, {?d, 0}, state)
-      assert new_mode == :operator_pending
-      assert new_state.operator == :delete
+      for {operator, key, count, command, mode} <- cases do
+        assert {:execute_then_transition, [^command], ^mode, _state} =
+                 OperatorPending.handle_key({key, 0}, op_state(operator, count))
+      end
     end
 
-    test "c in normal transitions to operator_pending with :change" do
-      state = Mode.initial_state()
-      {new_mode, _cmds, new_state} = Mode.process(:normal, {?c, 0}, state)
-      assert new_mode == :operator_pending
-      assert new_state.operator == :change
-    end
-
-    test "y in normal transitions to operator_pending with :yank" do
-      state = Mode.initial_state()
-      {new_mode, _cmds, new_state} = Mode.process(:normal, {?y, 0}, state)
-      assert new_mode == :operator_pending
-      assert new_state.operator == :yank
-    end
-
-    test "d then w produces delete_motion command and normal mode" do
-      state = Mode.initial_state()
-      {op_mode, _, op_state} = Mode.process(:normal, {?d, 0}, state)
-      assert op_mode == :operator_pending
-
-      {new_mode, cmds, _} = Mode.process(:operator_pending, {?w, 0}, op_state)
-      assert new_mode == :normal
-      assert [{:delete_motion, :word_forward}] = cmds
-    end
-
-    test "d then d produces {:delete_lines_counted, 1} command and normal mode" do
-      state = Mode.initial_state()
-      {_, _, op_state} = Mode.process(:normal, {?d, 0}, state)
-      {new_mode, cmds, _} = Mode.process(:operator_pending, {?d, 0}, op_state)
-      assert new_mode == :normal
-      assert cmds == [{:delete_lines_counted, 1}]
-    end
-
-    test "Escape from operator_pending returns to normal" do
-      state = Mode.initial_state()
-      {_, _, op_state} = Mode.process(:normal, {?d, 0}, state)
-      {new_mode, cmds, _} = Mode.process(:operator_pending, {27, 0}, op_state)
-      assert new_mode == :normal
-      assert cmds == []
-    end
-
-    test "3d saves op_count and transitions" do
-      state = Mode.initial_state()
-      {_, _, s1} = Mode.process(:normal, {?3, 0}, state)
-      {mode, _, op_state} = Mode.process(:normal, {?d, 0}, s1)
-      assert mode == :operator_pending
-      # op_count preserved (count was reset by reset_count, but op_count was saved first)
-      assert op_state.op_count == 3
-      assert op_state.count == nil
-    end
-  end
-
-  # ── Unknown key ────────────────────────────────────────────────────────────
-
-  describe "unknown key" do
-    test "unknown key is a no-op continue" do
+    test "escape returns base mode state and unknown keys continue unchanged" do
       state = op_state(:delete)
+      assert {:transition, :normal, %Mode.State{}} = OperatorPending.handle_key({27, 0}, state)
       assert {:continue, ^state} = OperatorPending.handle_key({?z, 0}, state)
     end
   end
 
-  # ── Indent operator (#57) ──────────────────────────────────────────────────
+  describe "Mode.process integration" do
+    test "normal mode enters operator-pending with operators and counts, then resolves commands" do
+      for {key, operator} <- [
+            {?d, :delete},
+            {?c, :change},
+            {?y, :yank},
+            {?>, :indent},
+            {?<, :dedent}
+          ] do
+        assert {:operator_pending, _commands, %{operator: ^operator, op_count: 1}} =
+                 Mode.process(:normal, {key, 0}, Mode.initial_state())
+      end
 
-  describe ">< (indent/dedent) operator entry from Normal" do
-    test "> from Normal transitions to :operator_pending with :indent" do
-      state = Mode.initial_state()
-      {mode, _cmds, op_state} = Mode.process(:normal, {?>, 0}, state)
-      assert mode == :operator_pending
-      assert op_state.operator == :indent
-      assert op_state.op_count == 1
-    end
+      {_, _, counted} = Mode.process(:normal, {?3, 0}, Mode.initial_state())
 
-    test "< from Normal transitions to :operator_pending with :dedent" do
-      state = Mode.initial_state()
-      {mode, _cmds, op_state} = Mode.process(:normal, {?<, 0}, state)
-      assert mode == :operator_pending
-      assert op_state.operator == :dedent
-      assert op_state.op_count == 1
-    end
+      assert {:operator_pending, _commands, %{operator: :delete, op_count: 3, count: nil}} =
+               Mode.process(:normal, {?d, 0}, counted)
 
-    test "3> from Normal gives op_count=3 for indent" do
-      state = Mode.initial_state()
-      {_, _, s1} = Mode.process(:normal, {?3, 0}, state)
-      {mode, _, op_state} = Mode.process(:normal, {?>, 0}, s1)
-      assert mode == :operator_pending
-      assert op_state.operator == :indent
-      assert op_state.op_count == 3
-    end
-  end
+      {_, _, op_state} = Mode.process(:normal, {?d, 0}, Mode.initial_state())
 
-  describe ">> (indent current lines)" do
-    test ">> emits {:indent_lines, 1} and returns to :normal" do
-      state = op_state(:indent)
+      assert {:normal, [{:delete_motion, :word_forward}], _state} =
+               Mode.process(:operator_pending, {?w, 0}, op_state)
 
-      assert {:execute_then_transition, [{:indent_lines, 1}], :normal, _} =
-               OperatorPending.handle_key({?>, 0}, state)
-    end
+      assert {:normal, [{:delete_lines_counted, 1}], _state} =
+               Mode.process(:operator_pending, {?d, 0}, op_state)
 
-    test ">> with op_count=3 emits {:indent_lines, 3}" do
-      state = op_state(:indent, 3)
-
-      assert {:execute_then_transition, [{:indent_lines, 3}], :normal, _} =
-               OperatorPending.handle_key({?>, 0}, state)
+      assert {:normal, [], _state} = Mode.process(:operator_pending, {27, 0}, op_state)
     end
   end
 
-  describe "<< (dedent current lines)" do
-    test "<< emits {:dedent_lines, 1} and returns to :normal" do
-      state = op_state(:dedent)
+  describe "indent, dedent, and reindent motions" do
+    test "formatting operators support line motions, paragraph/document motions, and gg" do
+      cases = [
+        {:indent, ?w, 0, {:indent_motion, :word_forward}},
+        {:indent, ?}, 0, {:indent_motion, :paragraph_forward}},
+        {:indent, ?G, 0, {:indent_motion, :document_end}},
+        {:dedent, ?w, 0, {:dedent_motion, :word_forward}},
+        {:reindent, ?w, 0, {:reindent_motion, :word_forward}},
+        {:reindent, ?G, 0, {:reindent_motion, :document_end}}
+      ]
 
-      assert {:execute_then_transition, [{:dedent_lines, 1}], :normal, _} =
-               OperatorPending.handle_key({?<, 0}, state)
+      for {operator, key, mods, command} <- cases do
+        assert {:execute_then_transition, [^command], :normal, _state} =
+                 OperatorPending.handle_key({key, mods}, op_state(operator))
+      end
+
+      for {operator, command} <- [
+            dedent: {:dedent_motion, :document_start},
+            reindent: {:reindent_motion, :document_start}
+          ] do
+        state = %OperatorPendingState{operator: operator, op_count: 1, pending_g: true}
+
+        assert {:execute_then_transition, [^command], :normal, _state} =
+                 OperatorPending.handle_key({?g, 0}, state)
+      end
     end
 
-    test "<< with op_count=3 emits {:dedent_lines, 3}" do
-      state = op_state(:dedent, 3)
+    test "reindent text objects emit structural object commands for inner and around modifiers" do
+      cases = [
+        {:inner, {:reindent_text_object, :inner, {:structural, :function}}},
+        {:around, {:reindent_text_object, :around, {:structural, :function}}}
+      ]
 
-      assert {:execute_then_transition, [{:dedent_lines, 3}], :normal, _} =
-               OperatorPending.handle_key({?<, 0}, state)
-    end
-  end
+      for {modifier, command} <- cases do
+        state = %OperatorPendingState{
+          operator: :reindent,
+          op_count: 1,
+          text_object_modifier: modifier
+        }
 
-  describe ">motion (indent to motion target)" do
-    test ">w emits {:indent_motion, :word_forward} and returns to :normal" do
-      state = op_state(:indent)
-
-      assert {:execute_then_transition, [{:indent_motion, :word_forward}], :normal, _} =
-               OperatorPending.handle_key({?w, 0}, state)
-    end
-
-    test ">} emits {:indent_motion, :paragraph_forward} and returns to :normal" do
-      state = op_state(:indent)
-
-      assert {:execute_then_transition, [{:indent_motion, :paragraph_forward}], :normal, _} =
-               OperatorPending.handle_key({?}, 0}, state)
-    end
-
-    test ">G emits {:indent_motion, :document_end} and returns to :normal" do
-      state = op_state(:indent)
-
-      assert {:execute_then_transition, [{:indent_motion, :document_end}], :normal, _} =
-               OperatorPending.handle_key({?G, 0}, state)
-    end
-  end
-
-  describe "<motion (dedent to motion target)" do
-    test "<w emits {:dedent_motion, :word_forward} and returns to :normal" do
-      state = op_state(:dedent)
-
-      assert {:execute_then_transition, [{:dedent_motion, :word_forward}], :normal, _} =
-               OperatorPending.handle_key({?w, 0}, state)
-    end
-
-    test "<gg emits {:dedent_motion, :document_start} and returns to :normal" do
-      state = %OperatorPendingState{operator: :dedent, op_count: 1, pending_g: true}
-
-      assert {:execute_then_transition, [{:dedent_motion, :document_start}], :normal, _} =
-               OperatorPending.handle_key({?g, 0}, state)
-    end
-  end
-
-  # ── Reindent (= operator) ─────────────────────────────────────────────────
-
-  describe "== (reindent current lines)" do
-    test "== emits {:reindent_lines, 1} and returns to :normal" do
-      state = op_state(:reindent)
-
-      assert {:execute_then_transition, [{:reindent_lines, 1}], :normal, _} =
-               OperatorPending.handle_key({?=, 0}, state)
-    end
-
-    test "== with op_count=3 emits {:reindent_lines, 3}" do
-      state = op_state(:reindent, 3)
-
-      assert {:execute_then_transition, [{:reindent_lines, 3}], :normal, _} =
-               OperatorPending.handle_key({?=, 0}, state)
-    end
-  end
-
-  describe "=motion (reindent to motion target)" do
-    test "=w emits {:reindent_motion, :word_forward} and returns to :normal" do
-      state = op_state(:reindent)
-
-      assert {:execute_then_transition, [{:reindent_motion, :word_forward}], :normal, _} =
-               OperatorPending.handle_key({?w, 0}, state)
-    end
-
-    test "=G emits {:reindent_motion, :document_end} and returns to :normal" do
-      state = op_state(:reindent)
-
-      assert {:execute_then_transition, [{:reindent_motion, :document_end}], :normal, _} =
-               OperatorPending.handle_key({?G, 0}, state)
-    end
-
-    test "=gg emits {:reindent_motion, :document_start} and returns to :normal" do
-      state = %OperatorPendingState{operator: :reindent, op_count: 1, pending_g: true}
-
-      assert {:execute_then_transition, [{:reindent_motion, :document_start}], :normal, _} =
-               OperatorPending.handle_key({?g, 0}, state)
-    end
-  end
-
-  describe "=<text_object> (reindent text object)" do
-    test "=if emits {:reindent_text_object, :inner, {:structural, :function}}" do
-      state = %OperatorPendingState{
-        operator: :reindent,
-        op_count: 1,
-        text_object_modifier: :inner
-      }
-
-      assert {:execute_then_transition,
-              [{:reindent_text_object, :inner, {:structural, :function}}], :normal, _} =
-               OperatorPending.handle_key({?f, 0}, state)
-    end
-
-    test "=af emits {:reindent_text_object, :around, {:structural, :function}}" do
-      state = %OperatorPendingState{
-        operator: :reindent,
-        op_count: 1,
-        text_object_modifier: :around
-      }
-
-      assert {:execute_then_transition,
-              [{:reindent_text_object, :around, {:structural, :function}}], :normal, _} =
-               OperatorPending.handle_key({?f, 0}, state)
+        assert {:execute_then_transition, [^command], :normal, _state} =
+                 OperatorPending.handle_key({?f, 0}, state)
+      end
     end
   end
 end

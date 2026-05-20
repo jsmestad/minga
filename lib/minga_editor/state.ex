@@ -886,7 +886,8 @@ defmodule MingaEditor.State do
   """
   @spec rebind_buffer_file_identity(t(), pid()) :: t()
   def rebind_buffer_file_identity(%__MODULE__{} = state, buffer_pid) when is_pid(buffer_pid) do
-    case {matching_file_tabs(state.shell_state.tab_bar, buffer_pid), buffer_file_ref(buffer_pid, state.workspace)} do
+    case {matching_file_tabs(state.shell_state.tab_bar, buffer_pid),
+          buffer_file_ref(buffer_pid, state.workspace)} do
       {[], _} ->
         state
 
@@ -894,22 +895,37 @@ defmodule MingaEditor.State do
         state
 
       {tabs, %FileRef{} = file_ref} ->
-        active_tab_id = tab_bar_active_id(state.shell_state.tab_bar)
-
-        updated_tab_bar =
-          Enum.reduce(tabs, state.shell_state.tab_bar, fn %Tab{id: tab_id}, acc ->
-            TabBar.update_tab(acc, tab_id, &Tab.set_file_ref(&1, file_ref))
-          end)
-
-        updated_tab_bar =
-          Enum.reduce(tabs, updated_tab_bar, fn %Tab{id: tab_id, group_id: workspace_id, file_ref: old_file_ref}, acc ->
-            TabBar.update_workspace(acc, workspace_id, fn workspace ->
-              WorkspaceModel.retarget_file(workspace, old_file_ref, file_ref, tab_id == active_tab_id)
-            end)
-          end)
-
+        updated_tab_bar = rebind_tabs_to_file_ref(state.shell_state.tab_bar, tabs, file_ref)
         %{state | shell_state: %{state.shell_state | tab_bar: updated_tab_bar}}
     end
+  end
+
+  @spec rebind_tabs_to_file_ref(TabBar.t(), [Tab.t()], FileRef.t()) :: TabBar.t()
+  defp rebind_tabs_to_file_ref(%TabBar{} = tab_bar, tabs, %FileRef{} = file_ref) do
+    active_tab_id = tab_bar_active_id(tab_bar)
+
+    tabs
+    |> Enum.reduce(tab_bar, &set_tab_file_ref(&2, &1, file_ref))
+    |> then(fn updated_tab_bar ->
+      Enum.reduce(tabs, updated_tab_bar, &retarget_tab_workspace(&2, &1, file_ref, active_tab_id))
+    end)
+  end
+
+  @spec set_tab_file_ref(TabBar.t(), Tab.t(), FileRef.t()) :: TabBar.t()
+  defp set_tab_file_ref(%TabBar{} = tab_bar, %Tab{id: tab_id}, %FileRef{} = file_ref) do
+    TabBar.update_tab(tab_bar, tab_id, &Tab.set_file_ref(&1, file_ref))
+  end
+
+  @spec retarget_tab_workspace(TabBar.t(), Tab.t(), FileRef.t(), Tab.id() | nil) :: TabBar.t()
+  defp retarget_tab_workspace(
+         %TabBar{} = tab_bar,
+         %Tab{id: tab_id, group_id: workspace_id, file_ref: old_file_ref},
+         %FileRef{} = file_ref,
+         active_tab_id
+       ) do
+    TabBar.update_workspace(tab_bar, workspace_id, fn workspace ->
+      WorkspaceModel.retarget_file(workspace, old_file_ref, file_ref, tab_id == active_tab_id)
+    end)
   end
 
   @spec matching_file_tabs(TabBar.t() | nil, pid()) :: [Tab.t()]
@@ -920,7 +936,11 @@ defmodule MingaEditor.State do
   end
 
   @spec tab_matches_buffer_identity?(Tab.t(), pid()) :: boolean()
-  defp tab_matches_buffer_identity?(%Tab{kind: :file, file_ref: %FileRef{kind: :buffer, buffer_pid: pid}}, pid), do: true
+  defp tab_matches_buffer_identity?(
+         %Tab{kind: :file, file_ref: %FileRef{kind: :buffer, buffer_pid: pid}},
+         pid
+       ),
+       do: true
 
   defp tab_matches_buffer_identity?(%Tab{kind: :file, context: context}, pid) do
     case TabContext.to_workspace_map(context) do
@@ -950,8 +970,7 @@ defmodule MingaEditor.State do
     |> Enum.uniq()
   end
 
-  @spec tab_bar_active_id(TabBar.t() | nil) :: Tab.id() | nil
-  defp tab_bar_active_id(nil), do: nil
+  @spec tab_bar_active_id(TabBar.t()) :: Tab.id()
   defp tab_bar_active_id(%TabBar{active_id: active_id}), do: active_id
 
   @spec buffer_file_ref(pid(), WorkspaceState.t()) :: FileRef.t() | nil

@@ -151,71 +151,62 @@ struct TabBarView: View {
         }
     }
 
-    /// Grouped tab strip: only the active workspace's tabs are expanded.
-    /// All other workspaces collapse to capsules automatically.
-    /// Groups are consolidated by groupId so tabs from the same workspace
-    /// always appear together.
+    /// Grouped tab strip: the active workspace expands to tabs, while
+    /// inactive agent workspaces remain available as collapsed capsules.
     @ViewBuilder
     private var groupedTabStrip: some View {
-        let groups = groupedTabs()
-        let activeWsId = tabBarState.activeWorkspaceId
+        let groupsById = Dictionary(uniqueKeysWithValues: groupedTabs().map { ($0.groupId, $0) })
+        let workspacesById = Dictionary(uniqueKeysWithValues: tabBarState.workspaces.map { ($0.id, $0) })
+        let allWorkspaceIds = Set(groupsById.keys).union(workspacesById.keys)
+        let workspaceIds = [tabBarState.activeWorkspaceId] + allWorkspaceIds.subtracting([tabBarState.activeWorkspaceId]).sorted()
 
-        ForEach(groups, id: \.groupId) { group in
-            // Group separator before non-first groups
-            if group.groupId != groups.first?.groupId {
-                groupSeparator(color: workspaceColor(for: group.groupId))
+        ForEach(Array(workspaceIds.enumerated()), id: \.element) { index, groupId in
+            if index > 0 {
+                groupSeparator(color: workspaceColor(for: groupId))
             }
 
-            if group.groupId == 0 || group.groupId == activeWsId {
-                // Manual workspace is always expanded; active workspace is expanded
-                ForEach(Array(group.tabs.enumerated()), id: \.element.id) { tabIndex, tab in
-                    tabItem(tab)
-
-                    if tabIndex < group.tabs.count - 1 {
-                        verticalSeparator
-                    }
-                }
-            } else {
-                // Inactive agent workspace: show collapsed capsule
-                collapsedGroupCapsule(group)
+            if let group = groupsById[groupId] {
+                visibleGroupTabs(group)
+            } else if let workspace = workspacesById[groupId] {
+                collapsedWorkspaceCapsule(workspace)
             }
         }
     }
 
-    // MARK: - Collapsed group capsule
+    @ViewBuilder
+    private func visibleGroupTabs(_ group: TabGroup) -> some View {
+        ForEach(Array(group.tabs.enumerated()), id: \.element.id) { tabIndex, tab in
+            tabItem(tab)
+
+            if tabIndex < group.tabs.count - 1 {
+                verticalSeparator
+            }
+        }
+    }
+
+    // MARK: - Collapsed workspace capsule
 
     @ViewBuilder
-    private func collapsedGroupCapsule(_ group: TabGroup) -> some View {
-        let ws = tabBarState.workspaces.first { $0.id == group.groupId }
-        let color = ws?.color ?? theme.tabInactiveFg
+    private func collapsedWorkspaceCapsule(_ workspace: WorkspaceEntry) -> some View {
+        let color = workspace.color
 
         Button(action: {
             // Switch to this workspace by id (activates its first tab on the BEAM side)
-            if group.groupId == 0 {
-                encoder?.sendExecuteCommand(name: "manual_workspace")
-            } else if let idx = tabBarState.workspaces.firstIndex(where: { $0.id == group.groupId }),
-                      idx < 9 {
-                encoder?.sendExecuteCommand(name: "workspace_goto_\(idx + 1)")
-            } else {
-                encoder?.sendExecuteCommand(name: "workspace_next_agent")
-            }
+            encoder?.sendExecuteCommand(name: workspaceGotoCommand(for: workspace))
         }) {
             HStack(spacing: 4) {
-                Image(systemName: ws?.icon ?? "cpu")
+                Image(systemName: workspace.icon.isEmpty ? "cpu" : workspace.icon)
                     .font(.system(size: 10))
                     .foregroundStyle(color)
 
-                Text(ws?.label ?? "Agent")
+                Text(workspace.label)
                     .font(.system(size: 11))
                     .lineLimit(1)
                     .foregroundStyle(theme.tabInactiveFg)
 
-                if let ws = ws {
-                    agentStatusDot(ws.agentStatus, color: color)
-                }
+                agentStatusDot(workspace.agentStatus, color: color)
 
-                // Tab count badge
-                Text("(\(group.tabs.count))")
+                Text("(\(workspace.tabCount))")
                     .font(.system(size: 10))
                     .foregroundStyle(theme.tabInactiveFg.opacity(0.7))
             }
@@ -224,6 +215,7 @@ struct TabBarView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Switch to workspace \(workspace.label)")
         .help("Switch to workspace")
         .onHover { isHovered in
             if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
@@ -233,22 +225,22 @@ struct TabBarView: View {
         }
         .contextMenu {
             Button("Switch to Workspace") {
-                if group.groupId == 0 {
-                    encoder?.sendExecuteCommand(name: "manual_workspace")
-                } else if let idx = tabBarState.workspaces.firstIndex(where: { $0.id == group.groupId }),
-                          idx < 9 {
-                    encoder?.sendExecuteCommand(name: "workspace_goto_\(idx + 1)")
-                } else {
-                    encoder?.sendExecuteCommand(name: "workspace_next_agent")
-                }
+                encoder?.sendExecuteCommand(name: workspaceGotoCommand(for: workspace))
             }
             Divider()
-            if group.groupId != 0 {
-                Button("Close Workspace") {
-                    encoder?.sendWorkspaceClose(id: group.groupId)
-                }
+            Button("Close Workspace") {
+                encoder?.sendWorkspaceClose(id: workspace.id)
             }
         }
+    }
+
+    @MainActor
+    private func workspaceGotoCommand(for workspace: WorkspaceEntry) -> String {
+        guard let idx = tabBarState.workspaces.firstIndex(where: { $0.id == workspace.id }), idx < 9 else {
+            return "workspace_next_agent"
+        }
+
+        return "workspace_goto_\(idx + 1)"
     }
 
     // MARK: - Workspace indicator

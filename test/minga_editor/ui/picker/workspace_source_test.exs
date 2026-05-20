@@ -1,15 +1,20 @@
 defmodule MingaEditor.UI.Picker.WorkspaceSourceTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Mode
+  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Search
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
-  alias MingaEditor.VimState
-  alias MingaEditor.Viewport
-  alias MingaEditor.UI.Picker.WorkspaceSource
+  alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.Item
+  alias MingaEditor.UI.Picker.WorkspaceSource
   alias MingaEditor.UI.Theme
+  alias MingaEditor.Viewport
+  alias MingaEditor.VimState
 
   defp fake_context(tab_bar) do
     %Context{
@@ -23,6 +28,19 @@ defmodule MingaEditor.UI.Picker.WorkspaceSourceTest do
       picker_ui: %{},
       capabilities: %{},
       theme: Theme.get!(:doom_one)
+    }
+  end
+
+  defp editor_state(tab_bar, buffer, mode) do
+    %EditorState{
+      port_manager: nil,
+      workspace: %MingaEditor.Workspace.State{
+        viewport: Viewport.new(80, 24),
+        editing: %VimState{mode: mode, mode_state: Mode.initial_state()},
+        buffers: %Buffers{list: [buffer], active: buffer, active_index: 0},
+        keymap_scope: :editor
+      },
+      shell_state: %ShellState{tab_bar: tab_bar}
     }
   end
 
@@ -75,17 +93,38 @@ defmodule MingaEditor.UI.Picker.WorkspaceSourceTest do
     end
   end
 
+  defp start_buffer(content) do
+    start_supervised!({BufferProcess, content: content},
+      id: {:workspace_source_buffer, :erlang.unique_integer([:positive])}
+    )
+  end
+
   describe "on_select/2" do
-    test "switches active tab to first tab in selected group" do
+    test "switches through the editor path and restores the selected workspace" do
+      buf_a = start_buffer("a")
+      buf_b = start_buffer("b")
+
       tb = TabBar.new(Tab.new_file(1, "a.ex"))
-      {tb, _} = TabBar.add(tb, :file, "b.ex")
+      {tb, tab2} = TabBar.add(tb, :file, "b.ex")
       {tb, group} = TabBar.add_workspace(tb, "Agent")
-      tb = TabBar.move_tab_to_workspace(tb, 2, group.id)
+      tb = TabBar.move_tab_to_workspace(tb, tab2.id, group.id)
       tb = TabBar.switch_to(tb, 1)
 
-      tb = TabBar.switch_to_workspace(tb, group.id)
-      assert TabBar.active_workspace_id(tb) == group.id
-      assert tb.active_id == 2
+      target_context =
+        editor_state(nil, buf_b, :insert)
+        |> EditorState.snapshot_tab_context()
+
+      tb = TabBar.update_context(tb, tab2.id, target_context)
+      state = editor_state(tb, buf_a, :normal)
+
+      switched = WorkspaceSource.on_select(%Item{id: group.id, label: "Agent"}, state)
+
+      assert switched.workspace.buffers.active == buf_b
+      assert switched.workspace.editing.mode == :insert
+      assert switched.shell_state.tab_bar.active_id == tab2.id
+      assert EditorState.active_tab(switched).id == tab2.id
+      assert TabBar.get(switched.shell_state.tab_bar, 1).context.buffers.active == buf_a
+      assert TabBar.get(switched.shell_state.tab_bar, tab2.id).context.buffers.active == buf_b
     end
   end
 

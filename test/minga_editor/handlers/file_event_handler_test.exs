@@ -352,7 +352,8 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       buffer =
         start_supervised!(%{
           id: {:buffer, uniq},
-          start: {BufferProcess, :start_link, [[content: "scratch", buffer_name: "*scratch-#{uniq}*"]]},
+          start:
+            {BufferProcess, :start_link, [[content: "scratch", buffer_name: "*scratch-#{uniq}*"]]},
           restart: :temporary
         })
 
@@ -380,15 +381,23 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       :ok = BufferProcess.save_as(buffer, path)
 
       event =
-        {:minga_event, :buffer_saved,
-         %Minga.Events.BufferEvent{buffer: buffer, path: path}}
+        {:minga_event, :buffer_saved, %Minga.Events.BufferEvent{buffer: buffer, path: path}}
 
       {new_state, effects} = FileEventHandler.handle(state, event)
 
       assert TabBar.active(new_state.shell_state.tab_bar).file_ref == new_ref
       assert TabBar.get_workspace(new_state.shell_state.tab_bar, 0).active_file == new_ref
-      assert WorkspaceModel.has_file?(TabBar.get_workspace(new_state.shell_state.tab_bar, 0), new_ref)
-      refute WorkspaceModel.has_file?(TabBar.get_workspace(new_state.shell_state.tab_bar, 0), old_ref)
+
+      assert WorkspaceModel.has_file?(
+               TabBar.get_workspace(new_state.shell_state.tab_bar, 0),
+               new_ref
+             )
+
+      refute WorkspaceModel.has_file?(
+               TabBar.get_workspace(new_state.shell_state.tab_bar, 0),
+               old_ref
+             )
+
       assert {:request_code_lens} in effects
       assert {:request_inlay_hints} in effects
     end
@@ -402,16 +411,19 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       target_buffer =
         start_supervised!(%{
           id: {:target_buffer, uniq},
-          start: {BufferProcess, :start_link, [[content: "scratch", buffer_name: "*scratch-#{uniq}*"]]},
+          start:
+            {BufferProcess, :start_link, [[content: "scratch", buffer_name: "*scratch-#{uniq}*"]]},
           restart: :temporary
         })
 
       active_buffer =
         start_supervised!(%{
           id: {:active_buffer, uniq},
-          start: {BufferProcess, :start_link, [[content: "active", buffer_name: "active-#{uniq}"]]},
+          start:
+            {BufferProcess, :start_link, [[content: "active", buffer_name: "active-#{uniq}"]]},
           restart: :temporary
         })
+
       old_ref = FileRef.from_buffer(target_buffer)
       {:ok, new_ref} = FileRef.from_path(root, path)
       {:ok, active_ref} = FileRef.from_path(root, "lib/active.ex")
@@ -419,12 +431,16 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       tab =
         Tab.new_file(1, "active.ex")
         |> Tab.set_file_ref(active_ref)
-        |> Tab.set_context(%{buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0}})
+        |> Tab.set_context(%{
+          buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0}
+        })
 
       inactive_tab =
         Tab.new_file(2, "scratch")
         |> Tab.set_file_ref(old_ref)
-        |> Tab.set_context(%{buffers: %Buffers{active: nil, list: [target_buffer], active_index: 0}})
+        |> Tab.set_context(%{
+          buffers: %Buffers{active: nil, list: [target_buffer], active_index: 0}
+        })
 
       tab_bar =
         TabBar.new(tab, root)
@@ -437,12 +453,22 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
           |> WorkspaceModel.set_active_file(active_ref)
         end)
 
-      state = %EditorState{port_manager: self(), workspace: %WorkspaceState{viewport: Viewport.new(24, 80), file_tree: %FileTreeState{project_root: root}, buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0}}}
+      state = %EditorState{
+        port_manager: self(),
+        workspace: %WorkspaceState{
+          viewport: Viewport.new(24, 80),
+          file_tree: %FileTreeState{project_root: root},
+          buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0}
+        }
+      }
+
       state = EditorState.update_shell_state(state, fn _ -> %ShellState{tab_bar: tab_bar} end)
 
       :ok = BufferProcess.save_as(target_buffer, path)
 
-      event = {:minga_event, :buffer_saved, %Minga.Events.BufferEvent{buffer: target_buffer, path: path}}
+      event =
+        {:minga_event, :buffer_saved,
+         %Minga.Events.BufferEvent{buffer: target_buffer, path: path}}
 
       {new_state, _effects} = FileEventHandler.handle(state, event)
       updated_tb = new_state.shell_state.tab_bar

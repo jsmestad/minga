@@ -204,11 +204,16 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       source = Path.join(dir, "target.txt")
       renamed = Path.join(dir, "renamed.txt")
       File.write!(source, "content")
-      target_buffer = start_supervised!({Buffer, file_path: source, events_registry: events_registry})
+
+      target_buffer =
+        start_supervised!({Buffer, file_path: source, events_registry: events_registry})
+
       active_buffer =
         start_supervised!(%{
           id: {:active_buffer, System.unique_integer([:positive])},
-          start: {Buffer, :start_link, [[content: "active", buffer_name: "active-#{System.unique_integer([:positive])}"]]},
+          start:
+            {Buffer, :start_link,
+             [[content: "active", buffer_name: "active-#{System.unique_integer([:positive])}"]]},
           restart: :temporary
         })
 
@@ -250,7 +255,8 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
         workspace: %WorkspaceState{
           viewport: Viewport.new(24, 80),
           buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0},
-          file_tree: FileTreeState.open(%FileTreeState{}, FileTree.new(dir) |> FileTree.refresh(), nil)
+          file_tree:
+            FileTreeState.open(%FileTreeState{}, FileTree.new(dir) |> FileTree.refresh(), nil)
         },
         shell_state: %ShellState{tab_bar: tab_bar},
         focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
@@ -285,7 +291,13 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       state =
         dir
         |> make_state(events_registry)
-        |> EditorState.update_workspace(&WorkspaceState.set_buffers(&1, %Buffers{active: buffer, list: [buffer], active_index: 0}))
+        |> EditorState.update_workspace(
+          &WorkspaceState.set_buffers(&1, %Buffers{
+            active: buffer,
+            list: [buffer],
+            active_index: 0
+          })
+        )
         |> select_entry("target.txt")
         |> Commands.FileTree.rename()
         |> replace_editing_text("renamed.txt")
@@ -399,7 +411,9 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
     {workspace, shell_state} =
       case active_buffer do
-        nil -> {workspace, %ShellState{}}
+        nil ->
+          {workspace, %ShellState{}}
+
         buffer when is_pid(buffer) ->
           file_ref = file_ref_for_buffer(dir, buffer)
 
@@ -410,7 +424,9 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
           tab_bar =
             TabBar.new(tab, dir)
-            |> TabBar.update_workspace(0, fn ws -> WorkspaceModel.set_active_file(ws, file_ref) end)
+            |> TabBar.update_workspace(0, fn ws ->
+              WorkspaceModel.set_active_file(ws, file_ref)
+            end)
 
           {workspace, %ShellState{tab_bar: tab_bar}}
       end
@@ -426,7 +442,9 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
   defp file_ref_for_buffer(root, buffer) when is_pid(buffer) do
     case Buffer.file_path(buffer) do
-      nil -> FileRef.from_buffer(buffer)
+      nil ->
+        FileRef.from_buffer(buffer)
+
       path ->
         case FileRef.from_path(root, path) do
           {:ok, file_ref} -> file_ref

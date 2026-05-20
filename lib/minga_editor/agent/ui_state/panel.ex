@@ -60,6 +60,12 @@ defmodule MingaEditor.Agent.UIState.Panel do
   @spec new() :: t()
   def new, do: %__MODULE__{}
 
+  @doc "Clears the active file mention completion."
+  @spec clear_mention_completion(t()) :: t()
+  def clear_mention_completion(%__MODULE__{} = panel) do
+    %{panel | mention_completion: nil}
+  end
+
   # ── Buffer readers ──────────────────────────────────────────────────────
 
   @doc "Returns the input lines as a list of strings."

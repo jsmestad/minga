@@ -5,495 +5,135 @@ defmodule Minga.Mode.VisualTest do
   alias Minga.Mode
   alias Minga.Mode.Normal
   alias Minga.Mode.Visual
-
   alias Minga.Mode.VisualState
 
-  # Build a fresh FSM state as if visual mode was just entered with anchor at
-  # the given position and the given type.
-  defp visual_state(anchor \\ {0, 0}, type \\ :char) do
-    %VisualState{visual_anchor: anchor, visual_type: type}
-  end
+  defp visual_state(anchor \\ {0, 0}, type \\ :char),
+    do: %VisualState{visual_anchor: anchor, visual_type: type}
 
-  # ── Entering visual from Normal ──────────────────────────────────────────────
+  describe "entering and leaving visual mode" do
+    test "v and V enter visual variants, display correctly, and round-trip out" do
+      assert {:visual, [], %VisualState{visual_type: :char, visual_anchor: {0, 0}}} =
+               Mode.process(:normal, {?v, 0}, Mode.initial_state())
 
-  describe "entering visual mode from Normal via 'v' (characterwise)" do
-    test "v transitions to :visual mode" do
-      state = Mode.initial_state()
-      {new_mode, commands, new_state} = Mode.process(:normal, {?v, 0}, state)
-      assert new_mode == :visual
-      assert commands == []
-      assert new_state.visual_type == :char
-    end
+      assert {:transition, :visual, %VisualState{visual_type: :char, visual_anchor: {0, 0}}} =
+               Normal.handle_key({?v, 0}, Mode.initial_state())
 
-    test "v sets visual_type to :char in the mode state" do
-      {:transition, :visual, new_state} = Normal.handle_key({?v, 0}, Mode.initial_state())
-      assert new_state.visual_type == :char
-    end
+      assert {:visual, [], %VisualState{visual_type: :line} = line_state} =
+               Mode.process(:normal, {?V, 0}, Mode.initial_state())
 
-    test "v returns VisualState with default anchor (editor overrides it)" do
-      {:transition, :visual, new_state} = Normal.handle_key({?v, 0}, Mode.initial_state())
-      assert %VisualState{} = new_state
-      # Default anchor is {0, 0}; the editor overwrites this with the real cursor position
-      assert new_state.visual_anchor == {0, 0}
-    end
-  end
+      assert {:transition, :visual, %VisualState{visual_type: :line}} =
+               Normal.handle_key({?V, 0}, Mode.initial_state())
 
-  describe "entering visual mode from Normal via 'V' (linewise)" do
-    test "V transitions to :visual mode" do
-      state = Mode.initial_state()
-      {new_mode, commands, new_state} = Mode.process(:normal, {?V, 0}, state)
-      assert new_mode == :visual
-      assert commands == []
-      assert new_state.visual_type == :line
-    end
-
-    test "V sets visual_type to :line in the mode state" do
-      {:transition, :visual, new_state} = Normal.handle_key({?V, 0}, Mode.initial_state())
-      assert new_state.visual_type == :line
-    end
-  end
-
-  # ── Escape cancels visual selection ─────────────────────────────────────────
-
-  describe "Escape cancels visual selection" do
-    test "Escape transitions back to :normal" do
-      state = visual_state({0, 0}, :char)
-      assert {:transition, :normal, _} = Visual.handle_key({27, 0}, state)
-    end
-
-    test "Escape with modifier also transitions to :normal" do
-      state = visual_state({2, 3}, :line)
-      assert {:transition, :normal, _} = Visual.handle_key({27, 4}, state)
-    end
-
-    test "Mode.process: Escape in visual returns :normal with no commands" do
-      state = visual_state({0, 0})
-      {new_mode, commands, _} = Mode.process(:visual, {27, 0}, state)
-      assert new_mode == :normal
-      assert commands == []
-    end
-  end
-
-  # ── Movement extends selection ───────────────────────────────────────────────
-
-  describe "movement keys in visual mode" do
-    test "h emits :move_left" do
-      state = visual_state()
-      assert {:execute, :move_left, _} = Visual.handle_key({?h, 0}, state)
-    end
-
-    test "j emits :move_down" do
-      state = visual_state()
-      assert {:execute, :move_down, _} = Visual.handle_key({?j, 0}, state)
-    end
-
-    test "k emits :move_up" do
-      state = visual_state()
-      assert {:execute, :move_up, _} = Visual.handle_key({?k, 0}, state)
-    end
-
-    test "l emits :move_right" do
-      state = visual_state()
-      assert {:execute, :move_right, _} = Visual.handle_key({?l, 0}, state)
-    end
-
-    test "Alt+h emits structural parent navigation" do
-      state = visual_state()
-      assert {:execute, :nav_parent, _} = Visual.handle_key({?h, 0x04}, state)
-    end
-
-    test "Alt+l emits structural first child navigation" do
-      state = visual_state()
-      assert {:execute, :nav_first_child, _} = Visual.handle_key({?l, 0x04}, state)
-    end
-
-    test "Alt+j emits structural next sibling navigation" do
-      state = visual_state()
-      assert {:execute, :nav_next_sibling, _} = Visual.handle_key({?j, 0x04}, state)
-    end
-
-    test "Alt+k emits structural previous sibling navigation" do
-      state = visual_state()
-      assert {:execute, :nav_prev_sibling, _} = Visual.handle_key({?k, 0x04}, state)
-    end
-
-    test "w emits :word_forward" do
-      state = visual_state()
-      assert {:execute, :word_forward, _} = Visual.handle_key({?w, 0}, state)
-    end
-
-    test "b emits :word_backward" do
-      state = visual_state()
-      assert {:execute, :word_backward, _} = Visual.handle_key({?b, 0}, state)
-    end
-
-    test "e emits :word_end" do
-      state = visual_state()
-      assert {:execute, :word_end, _} = Visual.handle_key({?e, 0}, state)
-    end
-
-    test "Mode.process: j in visual emits :move_down and stays in :visual" do
-      state = visual_state()
-      {new_mode, commands, _} = Mode.process(:visual, {?j, 0}, state)
-      assert new_mode == :visual
-      assert commands == [:move_down]
-    end
-
-    test "Mode.process: movement stays in visual mode (does not cancel selection)" do
-      state = visual_state({1, 2})
-      {new_mode, _, new_state} = Mode.process(:visual, {?l, 0}, state)
-      assert new_mode == :visual
-      # anchor is preserved through movements
-      assert new_state.visual_anchor == {1, 2}
-    end
-  end
-
-  describe "page / half-page scrolling in visual mode" do
-    test "Ctrl+d emits :half_page_down" do
-      assert {:execute, :half_page_down, _} = Visual.handle_key({?d, 0x02}, visual_state())
-    end
-
-    test "Ctrl+u emits :half_page_up" do
-      assert {:execute, :half_page_up, _} = Visual.handle_key({?u, 0x02}, visual_state())
-    end
-
-    test "Ctrl+f emits :page_down" do
-      assert {:execute, :page_down, _} = Visual.handle_key({?f, 0x02}, visual_state())
-    end
-
-    test "Ctrl+b emits :page_up" do
-      assert {:execute, :page_up, _} = Visual.handle_key({?b, 0x02}, visual_state())
-    end
-  end
-
-  describe "arrow keys in visual mode" do
-    test "up arrow (57_352) emits :move_up" do
-      assert {:execute, :move_up, _} = Visual.handle_key({57_352, 0}, visual_state())
-    end
-
-    test "down arrow (57_353) emits :move_down" do
-      assert {:execute, :move_down, _} = Visual.handle_key({57_353, 0}, visual_state())
-    end
-
-    test "left arrow (57_350) emits :move_left" do
-      assert {:execute, :move_left, _} = Visual.handle_key({57_350, 0}, visual_state())
-    end
-
-    test "right arrow (57_351) emits :move_right" do
-      assert {:execute, :move_right, _} = Visual.handle_key({57_351, 0}, visual_state())
-    end
-  end
-
-  # ── Operators on selection ───────────────────────────────────────────────────
-
-  describe "d — delete selection, transition to Normal" do
-    test "d emits :delete_visual_selection and transitions to :normal" do
-      state = visual_state({0, 0}, :char)
-
-      assert {:execute_then_transition, [:delete_visual_selection], :normal, _} =
-               Visual.handle_key({?d, 0}, state)
-    end
-
-    test "Mode.process: d returns :normal mode with :delete_visual_selection command" do
-      state = visual_state()
-      {new_mode, commands, _} = Mode.process(:visual, {?d, 0}, state)
-      assert new_mode == :normal
-      assert commands == [:delete_visual_selection]
-    end
-
-    test "d works identically in linewise visual mode" do
-      state = visual_state({2, 0}, :line)
-
-      assert {:execute_then_transition, [:delete_visual_selection], :normal, _} =
-               Visual.handle_key({?d, 0}, state)
-    end
-  end
-
-  describe "x deletes selection and transitions to Normal" do
-    test "x behaves exactly like d for visual delete" do
-      state = visual_state({0, 0}, :char)
-
-      assert Visual.handle_key({?x, 0}, state) == Visual.handle_key({?d, 0}, state)
-    end
-
-    test "x emits :delete_visual_selection and transitions to :normal" do
-      state = visual_state({0, 0}, :char)
-
-      assert {:execute_then_transition, [:delete_visual_selection], :normal, _} =
-               Visual.handle_key({?x, 0}, state)
-    end
-
-    test "Mode.process: x returns :normal mode with :delete_visual_selection command" do
-      state = visual_state()
-      {new_mode, commands, _} = Mode.process(:visual, {?x, 0}, state)
-      assert new_mode == :normal
-      assert commands == [:delete_visual_selection]
-    end
-
-    test "x works identically in linewise visual mode" do
-      state = visual_state({2, 0}, :line)
-
-      assert {:execute_then_transition, [:delete_visual_selection], :normal, _} =
-               Visual.handle_key({?x, 0}, state)
-    end
-  end
-
-  describe "c — delete selection, transition to Insert" do
-    test "c emits :delete_visual_selection and transitions to :insert" do
-      state = visual_state({0, 3}, :char)
-
-      assert {:execute_then_transition, [:delete_visual_selection], :insert, _} =
-               Visual.handle_key({?c, 0}, state)
-    end
-
-    test "Mode.process: c returns :insert mode with :delete_visual_selection command" do
-      state = visual_state()
-      {new_mode, commands, _} = Mode.process(:visual, {?c, 0}, state)
-      assert new_mode == :insert
-      assert commands == [:delete_visual_selection]
-    end
-  end
-
-  describe "y — yank selection, transition to Normal" do
-    test "y emits :yank_visual_selection and transitions to :normal" do
-      state = visual_state({1, 4}, :char)
-
-      assert {:execute_then_transition, [:yank_visual_selection], :normal, _} =
-               Visual.handle_key({?y, 0}, state)
-    end
-
-    test "Mode.process: y returns :normal mode with :yank_visual_selection command" do
-      state = visual_state()
-      {new_mode, commands, _} = Mode.process(:visual, {?y, 0}, state)
-      assert new_mode == :normal
-      assert commands == [:yank_visual_selection]
-    end
-
-    test "y does not modify the state (buffer unchanged at mode level)" do
-      state = visual_state({0, 0})
-      {:execute_then_transition, _, _, returned_state} = Visual.handle_key({?y, 0}, state)
-      assert returned_state == state
-    end
-  end
-
-  # ── Linewise vs characterwise ────────────────────────────────────────────────
-
-  describe "linewise visual mode (V)" do
-    test "visual_type is :line when entered via V" do
-      {:transition, :visual, new_state} = Normal.handle_key({?V, 0}, Mode.initial_state())
-      assert new_state.visual_type == :line
-    end
-
-    test "operators in linewise visual still emit the same commands" do
-      state = visual_state({3, 0}, :line)
-
-      assert {:execute_then_transition, [:delete_visual_selection], :normal, _} =
-               Visual.handle_key({?d, 0}, state)
-    end
-
-    test "Mode.display shows -- VISUAL LINE -- for linewise" do
       assert Mode.display(:visual, %VisualState{visual_type: :line}) == "-- VISUAL LINE --"
-    end
-
-    test "Mode.display shows -- VISUAL -- for characterwise" do
       assert Mode.display(:visual, %{visual_type: :char}) == "-- VISUAL --"
-    end
-
-    test "Mode.display/1 still shows -- VISUAL -- for backward compat" do
       assert Mode.display(:visual) == "-- VISUAL --"
+
+      assert {:normal, [], _state} = Mode.process(:visual, {27, 0}, visual_state())
+      assert {:transition, :normal, _state} = Visual.handle_key({27, 4}, line_state)
+    end
+
+    test "movement, structural navigation, scrolling, and arrows stay in visual mode and preserve anchor" do
+      cases = [
+        {{?h, 0}, :move_left},
+        {{?j, 0}, :move_down},
+        {{?k, 0}, :move_up},
+        {{?l, 0}, :move_right},
+        {{?h, 0x04}, :nav_parent},
+        {{?l, 0x04}, :nav_first_child},
+        {{?j, 0x04}, :nav_next_sibling},
+        {{?k, 0x04}, :nav_prev_sibling},
+        {{?w, 0}, :word_forward},
+        {{?b, 0}, :word_backward},
+        {{?e, 0}, :word_end},
+        {{?d, 0x02}, :half_page_down},
+        {{?u, 0x02}, :half_page_up},
+        {{?f, 0x02}, :page_down},
+        {{?b, 0x02}, :page_up},
+        {{57_352, 0}, :move_up},
+        {{57_353, 0}, :move_down},
+        {{57_350, 0}, :move_left},
+        {{57_351, 0}, :move_right}
+      ]
+
+      for {key, command} <- cases do
+        assert {:execute, ^command, _state} = Visual.handle_key(key, visual_state({1, 2}))
+
+        assert {:visual, [^command], %VisualState{visual_anchor: {1, 2}}} =
+                 Mode.process(:visual, key, visual_state({1, 2}))
+      end
     end
   end
 
-  # ── Unknown keys ────────────────────────────────────────────────────────────
+  describe "selection operators" do
+    test "delete, change, yank, indent, and dedent emit selection commands and transition appropriately" do
+      cases = [
+        {?d, :normal, [:delete_visual_selection]},
+        {?x, :normal, [:delete_visual_selection]},
+        {?c, :insert, [:delete_visual_selection]},
+        {?y, :normal, [:yank_visual_selection]},
+        {?>, :normal, [:indent_visual_selection]},
+        {?<, :normal, [:dedent_visual_selection]}
+      ]
 
-  describe "> and < indent/dedent in visual mode (#57)" do
-    test "> emits :indent_visual_selection and transitions to :normal" do
-      state = visual_state({0, 0}, :char)
+      for {key, mode, commands} <- cases do
+        assert {:execute_then_transition, ^commands, ^mode, returned_state} =
+                 Visual.handle_key({key, 0}, visual_state({2, 0}, :line))
 
-      assert {:execute_then_transition, [:indent_visual_selection], :normal, _} =
-               Visual.handle_key({?>, 0}, state)
+        assert returned_state == visual_state({2, 0}, :line)
+        assert {^mode, ^commands, _state} = Mode.process(:visual, {key, 0}, visual_state())
+      end
+
+      assert Visual.handle_key({?x, 0}, visual_state()) ==
+               Visual.handle_key({?d, 0}, visual_state())
     end
 
-    test "< emits :dedent_visual_selection and transitions to :normal" do
-      state = visual_state({0, 0}, :char)
-
-      assert {:execute_then_transition, [:dedent_visual_selection], :normal, _} =
-               Visual.handle_key({?<, 0}, state)
-    end
-
-    test "> works in linewise visual mode" do
-      state = visual_state({2, 0}, :line)
-
-      assert {:execute_then_transition, [:indent_visual_selection], :normal, _} =
-               Visual.handle_key({?>, 0}, state)
-    end
-
-    test "< works in linewise visual mode" do
-      state = visual_state({2, 0}, :line)
-
-      assert {:execute_then_transition, [:dedent_visual_selection], :normal, _} =
-               Visual.handle_key({?<, 0}, state)
-    end
-
-    test "Mode.process: > returns :normal mode with :indent_visual_selection command" do
-      state = visual_state()
-      {new_mode, commands, _} = Mode.process(:visual, {?>, 0}, state)
-      assert new_mode == :normal
-      assert commands == [:indent_visual_selection]
-    end
-
-    test "Mode.process: < returns :normal mode with :dedent_visual_selection command" do
-      state = visual_state()
-      {new_mode, commands, _} = Mode.process(:visual, {?<, 0}, state)
-      assert new_mode == :normal
-      assert commands == [:dedent_visual_selection]
-    end
-  end
-
-  describe "unknown keys in visual mode" do
-    test "unknown key produces {:continue, state}" do
-      state = visual_state({0, 0})
-      assert {:continue, ^state} = Visual.handle_key({?z, 0}, state)
-    end
-
-    test "control character is ignored" do
-      state = visual_state()
-      assert {:continue, _} = Visual.handle_key({?x, 2}, state)
-    end
-
-    test "unknown key does not alter mode state" do
+    test "unknown and modified keys continue without mutating state" do
       state = visual_state({2, 5}, :line)
-      {:continue, returned} = Visual.handle_key({?q, 0}, state)
-      assert returned.visual_anchor == {2, 5}
-      assert returned.visual_type == :line
+      assert {:continue, ^state} = Visual.handle_key({?z, 0}, state)
+      assert {:continue, ^state} = Visual.handle_key({?q, 0}, state)
+      assert {:continue, ^state} = Visual.handle_key({?x, 2}, state)
     end
   end
 
-  # ── Round-trip: Normal → Visual → Normal ────────────────────────────────────
-
-  describe "Normal → Visual → Normal round-trip" do
-    test "v enters visual, Escape returns to normal" do
-      s0 = Mode.initial_state()
-      {mode1, _, s1} = Mode.process(:normal, {?v, 0}, s0)
-      assert mode1 == :visual
-
-      {mode2, _, _} = Mode.process(:visual, {27, 0}, s1)
-      assert mode2 == :normal
-    end
-
-    test "V enters visual line, d exits to normal" do
-      s0 = Mode.initial_state()
-      {mode1, _, s1} = Mode.process(:normal, {?V, 0}, s0)
-      assert mode1 == :visual
-      assert s1.visual_type == :line
-
-      {mode2, cmds, _} = Mode.process(:visual, {?d, 0}, s1)
-      assert mode2 == :normal
-      assert cmds == [:delete_visual_selection]
-    end
-
-    test "v enters visual, c exits to insert" do
-      s0 = Mode.initial_state()
-      {_mode, _, s1} = Mode.process(:normal, {?v, 0}, s0)
-      {mode2, cmds, _} = Mode.process(:visual, {?c, 0}, s1)
-      assert mode2 == :insert
-      assert cmds == [:delete_visual_selection]
-    end
-  end
-
-  # ── Integration: buffer operations ──────────────────────────────────────────
-
-  describe "delete_visual_selection with real buffer (characterwise)" do
-    setup do
+  describe "buffer selection behavior" do
+    test "characterwise selection deletes and yanks inclusive ranges" do
       {:ok, buf} = BufferProcess.start_link(content: "hello world\nfoo bar")
-      {:ok, buf: buf}
-    end
-
-    test "deleting 'hello' from start of line", %{buf: buf} do
-      # Place cursor at col 4 (on 'o')
       BufferProcess.move_to(buf, {0, 4})
 
-      # Simulate: anchor={0,0}, cursor={0,4}, delete char selection
-      anchor = {0, 0}
-      cursor = BufferProcess.cursor(buf)
-      assert cursor == {0, 4}
+      assert BufferProcess.text_between_inclusive(buf, {0, 0}, BufferProcess.cursor(buf)) ==
+               "hello"
 
-      # delete_range is inclusive on both ends
-      BufferProcess.delete_range(buf, anchor, cursor)
-
+      BufferProcess.delete_range(buf, {0, 0}, BufferProcess.cursor(buf))
       assert BufferProcess.content(buf) == " world\nfoo bar"
     end
 
-    test "yanking a range returns correct text", %{buf: buf} do
-      BufferProcess.move_to(buf, {0, 4})
-      text = BufferProcess.text_between_inclusive(buf, {0, 0}, {0, 4})
-      assert text == "hello"
-    end
-  end
-
-  describe "delete_visual_selection with real buffer (linewise)" do
-    setup do
+    test "linewise selection deletes line ranges and reads joined content" do
       {:ok, buf} = BufferProcess.start_link(content: "line one\nline two\nline three")
-      {:ok, buf: buf}
-    end
+      assert BufferProcess.content_on_lines(buf, 0, 1) == "line one\nline two"
 
-    test "deleting first two lines leaves only the third", %{buf: buf} do
-      BufferProcess.delete_lines(buf, 0, 1)
-      assert BufferProcess.content(buf) == "line three"
-    end
-
-    test "deleting the middle line preserves surrounding lines", %{buf: buf} do
       BufferProcess.delete_lines(buf, 1, 1)
       assert BufferProcess.content(buf) == "line one\nline three"
-    end
 
-    test "deleting all lines leaves an empty buffer", %{buf: buf} do
-      BufferProcess.delete_lines(buf, 0, 2)
+      BufferProcess.delete_lines(buf, 0, 1)
       assert BufferProcess.content(buf) == ""
-    end
-
-    test "content_on_lines returns joined text of a range", %{buf: buf} do
-      text = BufferProcess.content_on_lines(buf, 0, 1)
-      assert text == "line one\nline two"
     end
   end
 
-  # ── Visual wrapping ────────────────────────────────────────────────────────
+  describe "wrapping selections" do
+    test "paired delimiter keys wrap visual selections" do
+      cases = [
+        {?(, "(", ")"},
+        {?[, "[", "]"},
+        {?", "\"", "\""},
+        {?', "'", "'"},
+        {?`, "`", "`"}
+      ]
 
-  describe "wrapping with paired delimiters" do
-    test "( wraps selection in parens" do
-      state = visual_state({0, 0}, :char)
-      result = Visual.handle_key({?(, 0}, state)
-      assert {:execute_then_transition, [{:wrap_visual_selection, "(", ")"}], :normal, _} = result
-    end
-
-    test "[ wraps selection in brackets" do
-      state = visual_state({0, 0}, :char)
-      result = Visual.handle_key({?[, 0}, state)
-      assert {:execute_then_transition, [{:wrap_visual_selection, "[", "]"}], :normal, _} = result
-    end
-
-    # Note: { is paragraph-backward in Visual mode, so wrapping in braces
-    # is not available. Use operator-pending text objects instead.
-
-    test "\" wraps selection in double quotes" do
-      state = visual_state({0, 0}, :char)
-      result = Visual.handle_key({?", 0}, state)
-
-      assert {:execute_then_transition, [{:wrap_visual_selection, "\"", "\""}], :normal, _} =
-               result
-    end
-
-    test "' wraps selection in single quotes" do
-      state = visual_state({0, 0}, :char)
-      result = Visual.handle_key({?', 0}, state)
-      assert {:execute_then_transition, [{:wrap_visual_selection, "'", "'"}], :normal, _} = result
-    end
-
-    test "` wraps selection in backticks" do
-      state = visual_state({0, 0}, :char)
-      result = Visual.handle_key({?`, 0}, state)
-      assert {:execute_then_transition, [{:wrap_visual_selection, "`", "`"}], :normal, _} = result
+      for {key, left, right} <- cases do
+        assert {:execute_then_transition, [{:wrap_visual_selection, ^left, ^right}], :normal,
+                _state} =
+                 Visual.handle_key({key, 0}, visual_state())
+      end
     end
   end
 end

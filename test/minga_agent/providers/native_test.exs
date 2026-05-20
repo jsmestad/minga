@@ -127,60 +127,39 @@ defmodule MingaAgent.Providers.NativeTest do
 
   # ── Lifecycle tests ─────────────────────────────────────────────────────────
 
-  describe "init and get_state" do
-    test "starts with correct initial state", %{tmp_dir: dir} do
-      {:ok, pid} = start_provider(tmp_dir: dir)
-
-      assert {:ok, session_state} = Native.get_state(pid)
-      assert session_state.model.provider == "native"
-      assert session_state.is_streaming == false
-    end
-
-    test "get_state exposes context fields used by subagents", %{tmp_dir: dir} do
+  describe "init, context, and thinking level" do
+    test "get_state exposes initial model, project context, skills, and AGENTS instructions", %{
+      tmp_dir: dir
+    } do
       write_project_skill(dir, "plan", "PLAN SKILL 1419")
+      File.write!(Path.join(dir, "AGENTS.md"), "PROJECT RULE 1419")
 
       {:ok, pid} =
         start_provider(tmp_dir: dir, thinking_level: "high", active_skill_names: ["plan"])
 
       assert {:ok, session_state} = Native.get_state(pid)
+      assert session_state.model.provider == "native"
       assert session_state.model.id == "anthropic:claude-sonnet-4-20250514"
+      assert session_state.is_streaming == false
       assert session_state.thinking_level == "high"
       assert session_state.active_skill_names == ["plan"]
       assert session_state.project_root == dir
       assert session_state.system_prompt =~ "PLAN SKILL 1419"
-    end
-
-    test "system prompt includes project AGENTS.md instructions for the inherited project root",
-         %{tmp_dir: dir} do
-      File.write!(Path.join(dir, "AGENTS.md"), "PROJECT RULE 1419")
-      {:ok, pid} = start_provider(tmp_dir: dir)
-
-      assert {:ok, session_state} = Native.get_state(pid)
       assert session_state.system_prompt =~ "PROJECT RULE 1419"
     end
-  end
 
-  describe "thinking level" do
-    test "set_thinking_level accepts valid levels", %{tmp_dir: dir} do
+    test "thinking level accepts known values, rejects unknown values, and cycles in order", %{
+      tmp_dir: dir
+    } do
       {:ok, pid} = start_provider(tmp_dir: dir)
 
-      assert :ok = Native.set_thinking_level(pid, "low")
-      assert :ok = Native.set_thinking_level(pid, "medium")
-      assert :ok = Native.set_thinking_level(pid, "high")
-      assert :ok = Native.set_thinking_level(pid, "off")
-    end
-
-    test "set_thinking_level rejects unknown levels", %{tmp_dir: dir} do
-      {:ok, pid} = start_provider(tmp_dir: dir)
+      for level <- ["low", "medium", "high", "off"] do
+        assert :ok = Native.set_thinking_level(pid, level)
+      end
 
       assert {:error, msg} = Native.set_thinking_level(pid, "turbo")
       assert msg =~ "unknown thinking level"
-    end
 
-    test "cycle_thinking_level rotates through levels", %{tmp_dir: dir} do
-      {:ok, pid} = start_provider(tmp_dir: dir)
-
-      # Default is "off", cycling should go: off -> low -> medium -> high -> off
       assert {:ok, %{"level" => "low"}} = Native.cycle_thinking_level(pid)
       assert {:ok, %{"level" => "medium"}} = Native.cycle_thinking_level(pid)
       assert {:ok, %{"level" => "high"}} = Native.cycle_thinking_level(pid)
@@ -229,73 +208,10 @@ defmodule MingaAgent.Providers.NativeTest do
     end
   end
 
-  describe "set_model" do
-    test "updates the model without resetting context", %{tmp_dir: dir} do
-      # Track what messages the LLM client receives on each call.
-      # The client runs inside a Task, so we send to the test pid explicitly.
-      test_pid = self()
-      calls = :counters.new(1, [:atomics])
-      messages_ref = make_ref()
-
-      client = fn _model, messages, _opts ->
-        count = :counters.get(calls, 1)
-        :counters.add(calls, 1, 1)
-        send(test_pid, {messages_ref, count, messages})
-
-        chunks = [
-          ReqLLM.StreamChunk.text("Response #{count}"),
-          ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
-        ]
-
-        build_stream_response(chunks)
-      end
-
-      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client)
-
-      # First prompt builds context
-      :ok = Native.send_prompt(pid, "Hello")
-      _events = collect_events(500)
-
-      # Switch model
-      assert :ok = Native.set_model(pid, "anthropic:claude-opus-4-20250514")
-
-      # Verify model changed
-      assert {:ok, state} = Native.get_state(pid)
-      assert state.model.id == "anthropic:claude-opus-4-20250514"
-
-      # Second prompt should carry the conversation context from the first
-      :ok = Native.send_prompt(pid, "Follow up")
-      _events = collect_events(500)
-
-      # The second LLM call (count=1) should have received prior messages
-      assert_received {^messages_ref, 1, messages}
-
-      # Should have at least: system prompt, user "Hello", assistant "Response 0", user "Follow up"
-      assert length(messages) >= 4
-    end
-
-    test "returns the model in get_state after set_model", %{tmp_dir: dir} do
-      {:ok, pid} = start_provider(tmp_dir: dir)
-
-      assert :ok = Native.set_model(pid, "openai:gpt-4o")
-
-      assert {:ok, state} = Native.get_state(pid)
-      assert state.model.id == "openai:gpt-4o"
-    end
-
-    test "set_model preserves the semantic thinking level across providers", %{tmp_dir: dir} do
-      {:ok, pid} = start_provider(tmp_dir: dir, thinking_level: "medium")
-
-      assert :ok = Native.set_model(pid, "openai:o4-mini")
-
-      assert {:ok, state} = Native.get_state(pid)
-      assert state.model.id == "openai:o4-mini"
-      assert state.thinking_level == "medium"
-    end
-  end
-
-  describe "cycle_model preserves context" do
-    test "conversation history survives model cycling", %{tmp_dir: dir} do
+  describe "model changes" do
+    test "set_model updates state, preserves thinking level, and keeps conversation context", %{
+      tmp_dir: dir
+    } do
       test_pid = self()
       calls = :counters.new(1, [:atomics])
       messages_ref = make_ref()
@@ -305,38 +221,26 @@ defmodule MingaAgent.Providers.NativeTest do
         :counters.add(calls, 1, 1)
         send(test_pid, {messages_ref, count, model, messages})
 
-        chunks = [
+        build_stream_response([
           ReqLLM.StreamChunk.text("Response #{count}"),
           ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
-        ]
-
-        build_stream_response(chunks)
+        ])
       end
 
-      {:ok, pid} =
-        start_provider(
-          tmp_dir: dir,
-          llm_client: client,
-          model: "anthropic:claude-sonnet-4-20250514"
-        )
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, thinking_level: "medium")
 
-      # Build some conversation context
-      :ok = Native.send_prompt(pid, "First message")
-      _events = collect_events(500)
+      :ok = Native.send_prompt(pid, "Hello")
+      collect_events(500)
 
-      # Use set_model to switch (cycle_model requires agent_models config;
-      # set_model uses the same state update path without config lookup)
-      assert :ok = Native.set_model(pid, "anthropic:claude-opus-4-20250514")
+      assert :ok = Native.set_model(pid, "openai:o4-mini")
+      assert {:ok, state} = Native.get_state(pid)
+      assert state.model.id == "openai:o4-mini"
+      assert state.thinking_level == "medium"
 
-      # Send another prompt; context should be preserved
-      :ok = Native.send_prompt(pid, "Second message after model switch")
-      _events = collect_events(500)
+      :ok = Native.send_prompt(pid, "Follow up")
+      collect_events(500)
 
-      # Verify the second call used the new model
-      assert_received {^messages_ref, 1, model, messages}
-      assert model == "anthropic:claude-opus-4-20250514"
-
-      # Verify prior conversation was included
+      assert_received {^messages_ref, 1, "openai:o4-mini", messages}
       assert length(messages) >= 4
     end
   end
@@ -353,56 +257,35 @@ defmodule MingaAgent.Providers.NativeTest do
 
   # ── Streaming tests ─────────────────────────────────────────────────────────
 
-  describe "send_prompt with text-only response" do
-    test "emits AgentStart, TextDelta, and AgentEnd events", %{tmp_dir: dir} do
+  describe "send_prompt streaming" do
+    test "emits start, text, thinking, and end events", %{tmp_dir: dir} do
       chunks = [
+        ReqLLM.StreamChunk.thinking("Let me think..."),
         ReqLLM.StreamChunk.text("Hello "),
         ReqLLM.StreamChunk.text("world!"),
         ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
       ]
 
-      client = fake_llm_client(chunks, %{input_tokens: 10, output_tokens: 5})
-      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client)
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: fake_llm_client(chunks, %{input_tokens: 10, output_tokens: 5})
+        )
 
       assert :ok = Native.send_prompt(pid, "Hi")
 
       events = collect_events(500)
-
-      # Should have: AgentStart, TextDelta("Hello "), TextDelta("world!"), AgentEnd
       assert %Event.AgentStart{} = Enum.at(events, 0)
 
-      text_deltas = Enum.filter(events, &match?(%Event.TextDelta{}, &1))
-      assert length(text_deltas) == 2
-      assert Enum.at(text_deltas, 0).delta == "Hello "
-      assert Enum.at(text_deltas, 1).delta == "world!"
+      assert [%Event.ThinkingDelta{delta: "Let me think..."}] =
+               Enum.filter(events, &match?(%Event.ThinkingDelta{}, &1))
 
-      agent_end = Enum.find(events, &match?(%Event.AgentEnd{}, &1))
-      assert agent_end != nil
-    end
-  end
+      assert Enum.map(Enum.filter(events, &match?(%Event.TextDelta{}, &1)), & &1.delta) == [
+               "Hello ",
+               "world!"
+             ]
 
-  describe "send_prompt with thinking response" do
-    test "emits ThinkingDelta events", %{tmp_dir: dir} do
-      chunks = [
-        ReqLLM.StreamChunk.thinking("Let me think..."),
-        ReqLLM.StreamChunk.text("The answer is 42."),
-        ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
-      ]
-
-      client = fake_llm_client(chunks)
-      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client)
-
-      assert :ok = Native.send_prompt(pid, "What is the answer?")
-
-      events = collect_events(500)
-
-      thinking = Enum.filter(events, &match?(%Event.ThinkingDelta{}, &1))
-      assert length(thinking) == 1
-      assert hd(thinking).delta == "Let me think..."
-
-      text = Enum.filter(events, &match?(%Event.TextDelta{}, &1))
-      assert length(text) == 1
-      assert hd(text).delta == "The answer is 42."
+      assert Enum.any?(events, &match?(%Event.AgentEnd{}, &1))
     end
   end
 
@@ -828,49 +711,31 @@ defmodule MingaAgent.Providers.NativeTest do
   # ── Cost budget tests (#404) ────────────────────────────────────────────────
 
   describe "cost budget" do
-    test "get_budget returns current session cost and limits", %{tmp_dir: dir} do
-      {:ok, pid} = start_provider(tmp_dir: dir, max_cost: 5.0)
+    test "budget can be read, changed, disabled, and reset by new_session", %{tmp_dir: dir} do
+      usage = %{input_tokens: 1000, output_tokens: 500, total_cost: 0.05}
+
+      client =
+        fake_llm_client(
+          [ReqLLM.StreamChunk.text("Hello"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})],
+          usage
+        )
+
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_cost: 5.0)
 
       assert {:ok, budget} = GenServer.call(pid, :get_budget)
       assert budget.session_cost == 0.0
       assert budget.max_cost == 5.0
       assert budget.max_turns == 100
-    end
-
-    test "set_max_cost updates the budget", %{tmp_dir: dir} do
-      {:ok, pid} = start_provider(tmp_dir: dir)
 
       assert :ok = GenServer.call(pid, {:set_max_cost, 10.0})
-      assert {:ok, budget} = GenServer.call(pid, :get_budget)
-      assert budget.max_cost == 10.0
-    end
-
-    test "set_max_cost nil disables the budget", %{tmp_dir: dir} do
-      {:ok, pid} = start_provider(tmp_dir: dir, max_cost: 5.0)
+      assert {:ok, %{max_cost: 10.0}} = GenServer.call(pid, :get_budget)
 
       assert :ok = GenServer.call(pid, {:set_max_cost, nil})
-      assert {:ok, budget} = GenServer.call(pid, :get_budget)
-      assert budget.max_cost == nil
-    end
-
-    test "session cost resets on new_session", %{tmp_dir: dir} do
-      chunks = [
-        ReqLLM.StreamChunk.text("Hello"),
-        ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
-      ]
-
-      usage = %{input_tokens: 1000, output_tokens: 500, total_cost: 0.05}
-      client = fake_llm_client(chunks, usage)
-
-      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client)
+      assert {:ok, %{max_cost: nil}} = GenServer.call(pid, :get_budget)
 
       :ok = Native.send_prompt(pid, "test")
-      _events = collect_events(500)
+      collect_events(500)
 
-      # Cost should have accumulated
-      # (exact amount depends on cost calculation, but should be > 0 after a turn)
-
-      # Reset
       :ok = Native.new_session(pid)
       assert {:ok, budget} = GenServer.call(pid, :get_budget)
       assert budget.session_cost == 0.0
@@ -956,131 +821,52 @@ defmodule MingaAgent.Providers.NativeTest do
   end
 
   describe "custom API base URL" do
-    test "API base URL override injects base_url into stream opts", %{tmp_dir: dir} do
-      test_pid = self()
+    test "base_url option follows override, per-provider, global, and unset precedence", %{
+      tmp_dir: dir
+    } do
+      cases = [
+        {agent_config(api_base_url_override: "https://gateway.corp.com/v1"),
+         "https://gateway.corp.com/v1"},
+        {%AgentConfig{}, nil},
+        {agent_config(
+           api_base_url: "https://global.example.com/v1",
+           api_endpoints: %{
+             "anthropic" => "https://anthropic-gw.corp.com/v1",
+             "openai" => "https://openai-gw.corp.com/v1"
+           }
+         ), "https://anthropic-gw.corp.com/v1"},
+        {agent_config(
+           api_base_url: "https://global.example.com/v1",
+           api_endpoints: %{"openai" => "https://openai-only.com/v1"}
+         ), "https://global.example.com/v1"},
+        {agent_config(
+           api_base_url_override: "https://env-override.com/v1",
+           api_endpoints: %{"anthropic" => "https://should-lose.com"}
+         ), "https://env-override.com/v1"}
+      ]
 
-      capturing_client = fn _model, _messages, opts ->
-        send(test_pid, {:captured_opts, opts})
-        build_stream_response([{:text, "ok"}])
+      for {config, expected_base_url} <- cases do
+        ref = make_ref()
+        test_pid = self()
+
+        capturing_client = fn _model, _messages, opts ->
+          send(test_pid, {ref, opts})
+          build_stream_response([{:text, "ok"}])
+        end
+
+        {:ok, pid} = start_provider(tmp_dir: dir, llm_client: capturing_client, config: config)
+        :ok = Native.send_prompt(pid, "test")
+
+        assert_receive {^ref, opts}, 2_000
+
+        if expected_base_url do
+          assert Keyword.get(opts, :base_url) == expected_base_url
+        else
+          refute Keyword.has_key?(opts, :base_url)
+        end
+
+        collect_events(500)
       end
-
-      {:ok, pid} =
-        start_provider(
-          tmp_dir: dir,
-          llm_client: capturing_client,
-          config: agent_config(api_base_url_override: "https://gateway.corp.com/v1")
-        )
-
-      :ok = Native.send_prompt(pid, "test")
-
-      assert_receive {:captured_opts, opts}, 2_000
-      assert Keyword.get(opts, :base_url) == "https://gateway.corp.com/v1"
-
-      # Collect remaining events so the process winds down
-      collect_events(500)
-    end
-
-    test "no base_url when no base URL config is set", %{tmp_dir: dir} do
-      test_pid = self()
-
-      capturing_client = fn _model, _messages, opts ->
-        send(test_pid, {:captured_opts, opts})
-        build_stream_response([{:text, "ok"}])
-      end
-
-      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: capturing_client)
-      :ok = Native.send_prompt(pid, "test")
-
-      assert_receive {:captured_opts, opts}, 2_000
-      refute Keyword.has_key?(opts, :base_url)
-
-      collect_events(500)
-    end
-
-    test "per-provider endpoint from config takes precedence over global", %{tmp_dir: dir} do
-      test_pid = self()
-
-      capturing_client = fn _model, _messages, opts ->
-        send(test_pid, {:captured_opts, opts})
-        build_stream_response([{:text, "ok"}])
-      end
-
-      config =
-        agent_config(
-          api_base_url: "https://global.example.com/v1",
-          api_endpoints: %{
-            "anthropic" => "https://anthropic-gw.corp.com/v1",
-            "openai" => "https://openai-gw.corp.com/v1"
-          }
-        )
-
-      {:ok, pid} =
-        start_provider(
-          tmp_dir: dir,
-          llm_client: capturing_client,
-          model: "anthropic:claude-sonnet-4-20250514",
-          config: config
-        )
-
-      :ok = Native.send_prompt(pid, "test")
-
-      assert_receive {:captured_opts, opts}, 2_000
-      assert Keyword.get(opts, :base_url) == "https://anthropic-gw.corp.com/v1"
-
-      collect_events(500)
-    end
-
-    test "global base_url is used when no per-provider match", %{tmp_dir: dir} do
-      test_pid = self()
-
-      capturing_client = fn _model, _messages, opts ->
-        send(test_pid, {:captured_opts, opts})
-        build_stream_response([{:text, "ok"}])
-      end
-
-      config =
-        agent_config(
-          api_base_url: "https://global.example.com/v1",
-          api_endpoints: %{"openai" => "https://openai-only.com/v1"}
-        )
-
-      {:ok, pid} =
-        start_provider(
-          tmp_dir: dir,
-          llm_client: capturing_client,
-          model: "anthropic:claude-sonnet-4-20250514",
-          config: config
-        )
-
-      :ok = Native.send_prompt(pid, "test")
-
-      assert_receive {:captured_opts, opts}, 2_000
-      assert Keyword.get(opts, :base_url) == "https://global.example.com/v1"
-
-      collect_events(500)
-    end
-
-    test "base URL override takes precedence over per-provider endpoint", %{tmp_dir: dir} do
-      test_pid = self()
-
-      capturing_client = fn _model, _messages, opts ->
-        send(test_pid, {:captured_opts, opts})
-        build_stream_response([{:text, "ok"}])
-      end
-
-      config =
-        agent_config(
-          api_base_url_override: "https://env-override.com/v1",
-          api_endpoints: %{"anthropic" => "https://should-lose.com"}
-        )
-
-      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: capturing_client, config: config)
-      :ok = Native.send_prompt(pid, "test")
-
-      assert_receive {:captured_opts, opts}, 2_000
-      assert Keyword.get(opts, :base_url) == "https://env-override.com/v1"
-
-      collect_events(500)
     end
   end
 

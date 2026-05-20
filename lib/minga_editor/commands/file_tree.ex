@@ -1228,27 +1228,50 @@ defmodule MingaEditor.Commands.FileTree do
     buffer_pids = EditorState.known_open_buffer_pids(state)
 
     Enum.reduce(buffer_pids, {state, []}, fn pid, {acc_state, errors} ->
-      case safe_buffer_file_path(pid) do
-        nil ->
-          {acc_state, errors}
-
-        path ->
-          case moved_buffer_path(path, old_path, new_path) do
-            nil ->
-              {acc_state, errors}
-
-            moved_path ->
-              try do
-                case Buffer.retarget_path(pid, moved_path) do
-                  :ok -> {EditorState.rebind_buffer_file_identity(acc_state, pid), errors}
-                  {:error, reason} -> {acc_state, [{path, reason} | errors]}
-                end
-              catch
-                :exit, reason -> {acc_state, [{path, {:exit, reason}} | errors]}
-              end
-          end
-      end
+      update_buffer_pid_path(pid, acc_state, errors, old_path, new_path)
     end)
+  end
+
+  @spec update_buffer_pid_path(pid(), state(), [{String.t(), term()}], String.t(), String.t()) ::
+          {state(), [{String.t(), term()}]}
+  defp update_buffer_pid_path(pid, state, errors, old_path, new_path) do
+    case safe_buffer_file_path(pid) do
+      nil ->
+        {state, errors}
+
+      path ->
+        retarget_moved_buffer(
+          pid,
+          state,
+          errors,
+          path,
+          moved_buffer_path(path, old_path, new_path)
+        )
+    end
+  end
+
+  @spec retarget_moved_buffer(
+          pid(),
+          state(),
+          [{String.t(), term()}],
+          String.t(),
+          String.t() | nil
+        ) ::
+          {state(), [{String.t(), term()}]}
+  defp retarget_moved_buffer(_pid, state, errors, _path, nil), do: {state, errors}
+
+  defp retarget_moved_buffer(pid, state, errors, path, moved_path) do
+    case safe_retarget_path(pid, moved_path) do
+      :ok -> {EditorState.rebind_buffer_file_identity(state, pid), errors}
+      {:error, reason} -> {state, [{path, reason} | errors]}
+    end
+  end
+
+  @spec safe_retarget_path(pid(), String.t()) :: :ok | {:error, term()}
+  defp safe_retarget_path(pid, moved_path) do
+    Buffer.retarget_path(pid, moved_path)
+  catch
+    :exit, reason -> {:error, {:exit, reason}}
   end
 
   @spec safe_buffer_file_path(pid()) :: String.t() | nil

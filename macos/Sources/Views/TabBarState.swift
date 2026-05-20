@@ -33,7 +33,8 @@ struct WorkspaceEntry: Identifiable {
 @Observable
 final class TabBarState {
     var tabs: [TabEntry] = []
-    var activeIndex: Int = 0
+    /// Visible-tab active index from gui_tab_bar, or 255 when the active tab is hidden.
+    var activeIndex: UInt8 = 0
     var workspaces: [WorkspaceEntry] = []
     var activeWorkspaceId: UInt16 = 0
 
@@ -43,14 +44,14 @@ final class TabBarState {
     }
 
     /// The active agent workspace, if the active tab belongs to one. Nil when
-    /// the user is viewing ungrouped tabs.
+    /// the user is viewing the manual workspace.
     var activeWorkspace: WorkspaceEntry? {
         workspaces.first { $0.id == activeWorkspaceId }
     }
 
     /// Update from a decoded gui_tab_bar protocol message.
     func update(activeIndex: UInt8, entries: [Wire.TabEntry]) {
-        self.activeIndex = Int(activeIndex)
+        self.activeIndex = activeIndex
         self.tabs = entries.map { entry in
             TabEntry(
                 id: entry.id,

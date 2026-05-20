@@ -216,11 +216,13 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       tb = %{tb | tabs: [tab1, tab2, agent_tab], active_id: 3, next_id: 4}
       {tb, workspace} = TabBar.add_workspace(tb, "Agent", session)
       tb = TabBar.move_tab_to_workspace(tb, agent_tab.id, workspace.id)
-      tb = TabBar.update_workspace(tb, workspace.id, fn ws ->
-        ws
-        |> Workspace.add_file(active_ref)
-        |> Workspace.set_active_file(active_ref)
-      end)
+
+      tb =
+        TabBar.update_workspace(tb, workspace.id, fn ws ->
+          ws
+          |> Workspace.add_file(active_ref)
+          |> Workspace.set_active_file(active_ref)
+        end)
 
       state = %EditorState{
         port_manager: self(),

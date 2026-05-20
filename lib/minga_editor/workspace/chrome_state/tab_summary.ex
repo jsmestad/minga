@@ -9,10 +9,12 @@ defmodule MingaEditor.Workspace.ChromeState.TabSummary do
 
   @type draft_state :: :none | :draft | :draft_elsewhere | :conflict
 
+  @type kind :: :file
+
   @type t :: %__MODULE__{
           id: Tab.id(),
           workspace_id: non_neg_integer(),
-          kind: Tab.kind(),
+          kind: kind(),
           label: String.t(),
           path: String.t() | nil,
           icon: String.t(),
@@ -37,10 +39,16 @@ defmodule MingaEditor.Workspace.ChromeState.TabSummary do
   @doc "Builds a tab summary."
   @spec new(keyword()) :: t()
   def new(attrs) when is_list(attrs) do
+    kind = Keyword.fetch!(attrs, :kind)
+
+    if kind != :file do
+      raise ArgumentError, "TabSummary only supports file tabs, got #{inspect(kind)}"
+    end
+
     %__MODULE__{
       id: Keyword.fetch!(attrs, :id),
       workspace_id: Keyword.fetch!(attrs, :workspace_id),
-      kind: Keyword.fetch!(attrs, :kind),
+      kind: :file,
       label: Keyword.fetch!(attrs, :label),
       path: Keyword.get(attrs, :path),
       icon: Keyword.fetch!(attrs, :icon),
