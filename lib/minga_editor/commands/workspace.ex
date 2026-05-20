@@ -95,6 +95,12 @@ defmodule MingaEditor.Commands.Workspace do
     end
   end
 
+  @doc "Jump directly to a workspace by id."
+  @spec workspace_goto_by_id(state(), non_neg_integer()) :: state()
+  def workspace_goto_by_id(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, workspace_id) do
+    switch_via_workspace(state, TabBar.switch_to_workspace(tb, workspace_id))
+  end
+
   # Takes a TabBar with a potentially new active_id from a workspace switch.
   # Routes through EditorState.switch_tab so snapshots and restores happen properly.
   # No-op if the active tab didn't change.

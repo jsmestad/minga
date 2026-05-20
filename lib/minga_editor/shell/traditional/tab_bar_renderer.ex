@@ -34,9 +34,11 @@ defmodule MingaEditor.Shell.Traditional.TabBarRenderer do
 
   @typedoc "A clickable region: column range mapping to a command."
   @type click_region ::
-          {col_start :: non_neg_integer(), col_end :: non_neg_integer(), command :: atom()}
+          {col_start :: non_neg_integer(), col_end :: non_neg_integer(),
+           command :: atom() | {:workspace_goto, non_neg_integer()}}
           | {row :: non_neg_integer(), col_start :: non_neg_integer(),
-             col_end :: non_neg_integer(), command :: atom()}
+             col_end :: non_neg_integer(),
+             command :: atom() | {:workspace_goto, non_neg_integer()}}
 
   # Powerline separators (right-pointing triangle)
   @sep_right "\u{E0B0}"

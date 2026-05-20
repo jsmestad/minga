@@ -17,9 +17,12 @@ defmodule MingaEditor.MouseTest do
   alias MingaEditor.Mouse
   alias MingaEditor.Startup
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace, as: WorkspaceDomain
   alias MingaEditor.State.Windows
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
+  alias MingaEditor.Workspace.ChromeState
   alias MingaEditor.Workspace.State, as: WorkspaceState
 
   @content_row 1
@@ -300,6 +303,67 @@ defmodule MingaEditor.MouseTest do
   end
 
   describe "tab bar clicks" do
+    test "row 0 workspace clicks ignore row 1 tab actions" do
+      {state, agent_workspace_id} = start_workspace_tab_state()
+
+      state =
+        set_tab_click_regions(state, [
+          {1, 0, 4, :tab_goto_1},
+          {1, 5, 7, :tab_close_3},
+          {0, 0, 4, {:workspace_goto, agent_workspace_id}}
+        ])
+
+      state = mouse(state, 0, 2, :left, :press)
+
+      assert ChromeState.from_editor_state(state).active_workspace_id == agent_workspace_id
+      assert state.shell_state.tab_bar.active_id == 2
+    end
+
+    test "row 1 tab goto and close still work" do
+      {state, _agent_workspace_id} = start_workspace_tab_state()
+
+      state =
+        set_tab_click_regions(state, [
+          {1, 0, 4, :tab_goto_1},
+          {1, 5, 7, :tab_close_3},
+          {0, 0, 4, {:workspace_goto, 1}}
+        ])
+
+      state = mouse(state, 1, 2, :left, :press)
+
+      assert state.shell_state.tab_bar.active_id == 1
+
+      state = mouse(state, 1, 6, :left, :press)
+
+      assert length(state.shell_state.tab_bar.tabs) == 2
+    end
+
+    test "clicking workspace id 10 selects workspace id 10 instead of ordinal 10" do
+      {state, _buffer} = start_mouse_state("manual one\nmanual two", width: 120)
+
+      second_buffer =
+        start_supervised!({BufferProcess, [content: "agent tab"]},
+          id: {:workspace_tab, System.unique_integer([:positive])}
+        )
+
+      state = EditorState.add_buffer(state, second_buffer, context: :open)
+      tab_bar = state.shell_state.tab_bar
+      manual_workspace = hd(tab_bar.workspaces)
+      workspace_10 = WorkspaceDomain.new_agent(10, "Tests", self())
+
+      tab_bar =
+        %{tab_bar | workspaces: [manual_workspace, workspace_10], next_workspace_id: 11}
+        |> TabBar.move_tab_to_workspace(2, 10)
+
+      state = EditorState.set_tab_bar(state, tab_bar)
+      state = set_tab_click_regions(state, [{0, 0, 4, {:workspace_goto, 10}}])
+
+      state = mouse(state, 0, 2, :left, :press)
+
+      assert ChromeState.from_editor_state(state).active_workspace_id == 10
+      assert state.shell_state.tab_bar.active_id == 2
+    end
+
     test "clicking tab close removes a non-last tab but leaves the final tab alone" do
       {state, _buf1, _buf2} = start_two_tab_state()
       active_id = state.shell_state.tab_bar.active_id
@@ -446,5 +510,28 @@ defmodule MingaEditor.MouseTest do
 
   defp set_tab_click_regions(state, regions) do
     EditorState.update_shell_state(state, &%{&1 | tab_bar_click_regions: regions})
+  end
+
+  defp start_workspace_tab_state do
+    {state, _buf1} = start_mouse_state("manual one\nmanual two", width: 120)
+
+    buf2 =
+      start_supervised!({BufferProcess, [content: "agent tab"]},
+        id: {:workspace_tab, System.unique_integer([:positive])}
+      )
+
+    buf3 =
+      start_supervised!({BufferProcess, [content: "manual three"]},
+        id: {:workspace_tab, System.unique_integer([:positive])}
+      )
+
+    state = EditorState.add_buffer(state, buf2, context: :open)
+    state = EditorState.add_buffer(state, buf3, context: :open)
+
+    {tab_bar, agent_workspace} = TabBar.add_workspace(state.shell_state.tab_bar, "Tests", self())
+    tab_bar = TabBar.move_tab_to_workspace(tab_bar, 2, agent_workspace.id)
+
+    state = EditorState.set_tab_bar(state, tab_bar)
+    {state, agent_workspace.id}
   end
 end
