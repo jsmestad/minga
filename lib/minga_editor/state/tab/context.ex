@@ -6,7 +6,6 @@ defmodule MingaEditor.State.Tab.Context do
   """
 
   alias Minga.Keymap.Scope
-  alias MingaEditor.Agent.UIState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Dired, as: DiredState
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -30,8 +29,7 @@ defmodule MingaEditor.State.Tab.Context do
     :lsp_pending,
     :search,
     :editing,
-    :document_highlights,
-    :agent_ui
+    :document_highlights
   ]
 
   @typedoc "Workspace fields carried by a tab context."
@@ -47,7 +45,6 @@ defmodule MingaEditor.State.Tab.Context do
           | :search
           | :editing
           | :document_highlights
-          | :agent_ui
 
   @typedoc "Legacy map persisted or built before tab contexts became typed structs."
   @type legacy :: map()
@@ -68,8 +65,7 @@ defmodule MingaEditor.State.Tab.Context do
           lsp_pending: %{reference() => atom() | tuple()} | nil,
           search: Search.t() | nil,
           editing: VimState.t() | nil,
-          document_highlights: [document_highlight()] | nil,
-          agent_ui: UIState.t() | nil
+          document_highlights: [document_highlight()] | nil
         }
 
   defstruct version: @version,
@@ -84,8 +80,7 @@ defmodule MingaEditor.State.Tab.Context do
             lsp_pending: nil,
             search: nil,
             editing: nil,
-            document_highlights: nil,
-            agent_ui: nil
+            document_highlights: nil
 
   @doc "Returns the workspace field names represented by this context."
   @spec field_names() :: [field_name()]
@@ -124,7 +119,6 @@ defmodule MingaEditor.State.Tab.Context do
       search: ws.search,
       editing: editing,
       document_highlights: ws.document_highlights,
-      agent_ui: ws.agent_ui,
       present_fields: @workspace_fields
     }
   end
@@ -231,7 +225,6 @@ defmodule MingaEditor.State.Tab.Context do
   defp valid_field?(:editing, %VimState{}), do: true
   defp valid_field?(:document_highlights, nil), do: true
   defp valid_field?(:document_highlights, value) when is_list(value), do: true
-  defp valid_field?(:agent_ui, %UIState{}), do: true
   defp valid_field?(_field, _value), do: false
 
   @spec fetch_version(map()) :: pos_integer()

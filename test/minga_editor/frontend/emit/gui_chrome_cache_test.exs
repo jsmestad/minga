@@ -416,7 +416,15 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
     }
 
     tab = Tab.new_agent(1, "Agent") |> Tab.set_session(session)
-    tab_bar = TabBar.new(tab)
+
+    tab_bar =
+      tab
+      |> TabBar.new()
+      |> TabBar.update_workspace(0, fn active_workspace ->
+        active_workspace
+        |> MingaEditor.State.Workspace.set_session(session)
+        |> MingaEditor.State.Workspace.set_agent_ui(workspace.agent_ui)
+      end)
 
     state
     |> Map.put(:workspace, workspace)

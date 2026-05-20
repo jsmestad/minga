@@ -76,8 +76,8 @@ defmodule MingaEditor.Commands.Agent do
             # switch — otherwise it would always see nil from the file tab.
             state
             |> EditorState.switch_tab(agent_id)
-            |> activate_agent_view(return_target)
             |> maybe_start_session()
+            |> activate_agent_view(return_target)
 
           nil ->
             state
@@ -129,11 +129,13 @@ defmodule MingaEditor.Commands.Agent do
         # Create agent tab in the background (don't switch to it).
         # Group creation happens later in start_agent_session when
         # the session pid is available (ensure_agent_workspace/2).
-        {tb, new_tab} = TabBar.add(EditorState.tab_bar(state), :agent, "Agent")
+        tab_bar = EditorState.tab_bar(state) || TabBar.new(Tab.new_file(1, "File"))
+        original_active_id = tab_bar.active_id
+        {tb, new_tab} = TabBar.add(tab_bar, :agent, "Agent")
         tb = TabBar.update_context(tb, new_tab.id, context)
 
         # Switch back to the original active tab
-        tb = %{tb | active_id: EditorState.tab_bar(state).active_id}
+        tb = TabBar.switch_to(tb, original_active_id)
         EditorState.set_tab_bar(state, tb)
 
       _existing ->

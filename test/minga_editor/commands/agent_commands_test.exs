@@ -61,10 +61,17 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       }
     }
 
-    # Active tab is an agent tab carrying the session pid; AgentAccess.session/1
-    # reads it through the Traditional shell's active_session/1.
+    # Active workspace owns the session pid; the tab field is a legacy mirror only.
     agent_tab = Tab.new_agent(1, "Agent") |> Tab.set_session(default_session)
-    tb = TabBar.new(agent_tab)
+
+    tb =
+      agent_tab
+      |> TabBar.new()
+      |> TabBar.update_workspace(0, fn workspace ->
+        workspace
+        |> WorkspaceModel.set_session(default_session)
+        |> WorkspaceModel.set_agent_ui(agentic)
+      end)
 
     %EditorState{
       port_manager: nil,

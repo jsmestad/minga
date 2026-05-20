@@ -6,6 +6,8 @@ defmodule MingaEditor.State.Workspace do
   """
 
   alias Minga.Project.FileRef
+  alias MingaEditor.Agent.UIState
+  alias MingaEditor.State.Workspace.RemoteSession
 
   @typedoc "Workspace kind."
   @type kind :: :manual | :agent
@@ -13,6 +15,9 @@ defmodule MingaEditor.State.Workspace do
   @typedoc "Agent status for workspace display."
   @type agent_status ::
           :idle | :plan | :thinking | :tool_executing | :error | :needs_review | :done | nil
+
+  @typedoc "Remote connection status for workspace-owned remote sessions."
+  @type connection_status :: RemoteSession.connection_status()
 
   @typedoc "Workspace icon identifier."
   @type icon :: String.t()
@@ -26,10 +31,11 @@ defmodule MingaEditor.State.Workspace do
           color: non_neg_integer(),
           agent_status: agent_status(),
           session: pid() | nil,
+          remote_session: RemoteSession.t() | nil,
           custom_name: String.t() | nil,
           files: [FileRef.t()],
           active_file: FileRef.t() | nil,
-          agent_ui: term() | nil,
+          agent_ui: UIState.t() | nil,
           project_view: term() | nil,
           review: term() | nil
         }
@@ -42,6 +48,7 @@ defmodule MingaEditor.State.Workspace do
             color: 0x51AFEF,
             agent_status: :idle,
             session: nil,
+            remote_session: nil,
             custom_name: nil,
             files: [],
             active_file: nil,
@@ -59,7 +66,8 @@ defmodule MingaEditor.State.Workspace do
       icon: "folder",
       color: 0x51AFEF,
       agent_status: nil,
-      session: nil
+      session: nil,
+      remote_session: nil
     }
   end
 
@@ -73,8 +81,93 @@ defmodule MingaEditor.State.Workspace do
       icon: "cpu",
       color: agent_color(id),
       agent_status: :idle,
-      session: session
+      session: session,
+      agent_ui: UIState.new()
     }
+  end
+
+  @doc "Sets the agent session pid on the workspace."
+  @spec set_session(t(), pid() | nil) :: t()
+  def set_session(%__MODULE__{} = workspace, session) when is_pid(session) or is_nil(session) do
+    %{workspace | session: session}
+  end
+
+  @doc "Clears the live agent session pid and returns the workspace to idle lifecycle status. Durable remote identity is preserved."
+  @spec clear_session(t()) :: t()
+  def clear_session(%__MODULE__{} = workspace) do
+    workspace
+    |> set_session(nil)
+    |> set_agent_status(:idle)
+  end
+
+  @doc "Sets durable remote metadata on the workspace."
+  @spec set_remote_session(t(), RemoteSession.t() | nil) :: t()
+  def set_remote_session(%__MODULE__{} = workspace, %RemoteSession{} = remote_session) do
+    %{workspace | remote_session: remote_session}
+  end
+
+  def set_remote_session(%__MODULE__{} = workspace, nil) do
+    %{workspace | remote_session: nil}
+  end
+
+  @doc "Sets durable remote metadata from its fields."
+  @spec put_remote_session(t(), String.t(), String.t(), connection_status()) :: t()
+  def put_remote_session(%__MODULE__{} = workspace, server_name, session_id, status \\ :connected) do
+    set_remote_session(workspace, RemoteSession.new(server_name, session_id, status))
+  end
+
+  @doc "Updates durable remote connection status when the workspace has remote metadata."
+  @spec set_remote_connection_status(t(), connection_status()) :: t()
+  def set_remote_connection_status(
+        %__MODULE__{remote_session: %RemoteSession{} = remote_session} = workspace,
+        status
+      ) do
+    set_remote_session(workspace, RemoteSession.set_connection_status(remote_session, status))
+  end
+
+  def set_remote_connection_status(%__MODULE__{} = workspace, _status), do: workspace
+
+  @doc "Clears durable remote metadata. Use only when the workspace no longer represents a remote session."
+  @spec clear_remote_session(t()) :: t()
+  def clear_remote_session(%__MODULE__{} = workspace) do
+    set_remote_session(workspace, nil)
+  end
+
+  @doc "Returns true when the workspace has durable remote metadata."
+  @spec remote?(t()) :: boolean()
+  def remote?(%__MODULE__{remote_session: %RemoteSession{}}), do: true
+  def remote?(%__MODULE__{}), do: false
+
+  @doc "Returns true when the workspace represents the remote server/session pair."
+  @spec matches_remote_session?(t(), String.t(), String.t()) :: boolean()
+  def matches_remote_session?(
+        %__MODULE__{remote_session: %RemoteSession{} = remote_session},
+        server_name,
+        session_id
+      ) do
+    RemoteSession.matches?(remote_session, server_name, session_id)
+  end
+
+  def matches_remote_session?(%__MODULE__{}, _server_name, _session_id), do: false
+
+  @doc "Returns true when the workspace represents any session on the remote server."
+  @spec remote_server?(t(), String.t()) :: boolean()
+  def remote_server?(%__MODULE__{remote_session: %RemoteSession{} = remote_session}, server_name) do
+    RemoteSession.server?(remote_session, server_name)
+  end
+
+  def remote_server?(%__MODULE__{}, _server_name), do: false
+
+  @doc "Sets the agent UI state on the workspace."
+  @spec set_agent_ui(t(), UIState.t()) :: t()
+  def set_agent_ui(%__MODULE__{} = workspace, %UIState{} = agent_ui) do
+    Map.put(workspace, :agent_ui, agent_ui)
+  end
+
+  @doc "Updates the agent UI state on the workspace."
+  @spec update_agent_ui(t(), (UIState.t() -> UIState.t())) :: t()
+  def update_agent_ui(%__MODULE__{} = workspace, fun) when is_function(fun, 1) do
+    set_agent_ui(workspace, fun.(workspace.agent_ui || UIState.new()))
   end
 
   @doc "Sets the agent status on the workspace."

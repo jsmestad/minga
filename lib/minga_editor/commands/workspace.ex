@@ -9,6 +9,7 @@ defmodule MingaEditor.Commands.Workspace do
 
   use MingaEditor.Commands.Provider
 
+  alias MingaEditor.Commands.AgentSession
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.TabBar
 
@@ -51,7 +52,12 @@ defmodule MingaEditor.Commands.Workspace do
   """
   @spec workspace_close(state()) :: state()
   def workspace_close(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
-    EditorState.set_tab_bar(state, TabBar.remove_workspace(tb, TabBar.active_workspace_id(tb)))
+    workspace_id = TabBar.active_workspace_id(tb)
+    stop_workspace_session(TabBar.get_workspace(tb, workspace_id))
+
+    state
+    |> EditorState.set_tab_bar(TabBar.remove_workspace(tb, workspace_id))
+    |> EditorState.sync_agent_ui_from_active_workspace()
   end
 
   @doc "Open the workspace picker."
@@ -100,6 +106,15 @@ defmodule MingaEditor.Commands.Workspace do
   def workspace_goto_by_id(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, workspace_id) do
     switch_via_workspace(state, TabBar.switch_to_workspace(tb, workspace_id))
   end
+
+  @spec stop_workspace_session(MingaEditor.State.Workspace.t() | nil) :: :ok
+  defp stop_workspace_session(%MingaEditor.State.Workspace{session: session})
+       when is_pid(session) do
+    AgentSession.stop_session_pid(session)
+    :ok
+  end
+
+  defp stop_workspace_session(_workspace), do: :ok
 
   # Takes a TabBar with a potentially new active_id from a workspace switch.
   # Routes through EditorState.switch_tab so snapshots and restores happen properly.

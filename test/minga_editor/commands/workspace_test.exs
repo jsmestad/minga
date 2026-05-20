@@ -3,6 +3,8 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Command
+  alias MingaAgent.SessionManager
+  alias MingaEditor.Commands.AgentSession
   alias MingaEditor.Commands.Workspace
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -10,6 +12,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
+  alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.WorkspaceIconSource
   alias MingaEditor.UI.Picker.WorkspaceSource
@@ -224,6 +227,28 @@ defmodule MingaEditor.Commands.WorkspaceTest do
       state = make_state()
       assert Workspace.workspace_close(state) == state
     end
+
+    test "stops the session owned by the closed workspace" do
+      {:ok, _session_id, session} = SessionManager.start_session([])
+      on_exit(fn -> stop_session(session) end)
+      ref = Process.monitor(session)
+
+      state = make_state() |> Workspace.workspace_next()
+
+      tab_bar =
+        TabBar.update_workspace(
+          state.shell_state.tab_bar,
+          1,
+          &WorkspaceModel.set_session(&1, session)
+        )
+
+      state = EditorState.set_tab_bar(state, tab_bar)
+      result = Workspace.workspace_close(state)
+
+      assert_receive {:DOWN, ^ref, :process, ^session, _reason}
+      assert TabBar.get_workspace(result.shell_state.tab_bar, 1) == nil
+      assert SessionManager.session_id_for_pid(session) == {:error, :not_found}
+    end
   end
 
   describe "workspace_list/1" do
@@ -245,6 +270,12 @@ defmodule MingaEditor.Commands.WorkspaceTest do
       assert String.ends_with?(active_item.label, " •")
     end
   end
+
+  defp stop_session(pid) when is_pid(pid) do
+    AgentSession.stop_session_pid(pid)
+  end
+
+  defp stop_session(_pid), do: :ok
 
   describe "workspace_set_icon/1" do
     test "opens the icon picker for the active workspace" do
