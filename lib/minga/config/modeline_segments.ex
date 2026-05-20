@@ -13,6 +13,7 @@ defmodule Minga.Config.ModelineSegments do
   @warnings_table Module.concat(__MODULE__, Warnings)
   @reserved_names [
     :mode,
+    :workspace,
     :filename,
     :git,
     :agent,
@@ -23,6 +24,8 @@ defmodule Minga.Config.ModelineSegments do
     :filetype,
     :position,
     :percent,
+    :draft,
+    :conflict,
     :selection
   ]
 
