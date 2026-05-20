@@ -3,6 +3,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Command
+  alias MingaAgent.ProjectView
   alias MingaEditor.Commands.Workspace
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -19,7 +20,11 @@ defmodule MingaEditor.Commands.WorkspaceTest do
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
+  alias MingaEditor.State.Workspace, as: WorkspaceModel
+  alias MingaEditor.State.WorkspaceReview
   alias MingaEditor.Workspace.State, as: WorkspaceState
+
+  @moduletag :tmp_dir
 
   # Builds an EditorState with a manual workspace file tab and two agent workspaces.
   # The manual tab is id 1 / workspace 0; agent tabs are ids 2 and 3 / workspaces 1 and 2.
@@ -89,6 +94,35 @@ defmodule MingaEditor.Commands.WorkspaceTest do
     }
   end
 
+  defp put_active_workspace_project_view(state, project_view) do
+    tb = state.shell_state.tab_bar
+    workspace_id = TabBar.active_workspace_id(tb)
+
+    EditorState.set_tab_bar(
+      state,
+      TabBar.update_workspace(
+        tb,
+        workspace_id,
+        &WorkspaceModel.set_project_view(&1, project_view)
+      )
+    )
+  end
+
+  defp put_active_workspace_review(state, review) do
+    tb = state.shell_state.tab_bar
+    workspace_id = TabBar.active_workspace_id(tb)
+
+    EditorState.set_tab_bar(
+      state,
+      TabBar.update_workspace(tb, workspace_id, &WorkspaceModel.set_review(&1, review))
+    )
+  end
+
+  defp file_ref do
+    {:ok, ref} = Minga.Project.FileRef.from_path("/tmp/minga", "lib/a.ex")
+    ref
+  end
+
   defp make_workspace_switch_state do
     manual_saved_buf =
       start_supervised!(
@@ -151,6 +185,12 @@ defmodule MingaEditor.Commands.WorkspaceTest do
             :manual_workspace,
             :workspace_toggle,
             :workspace_close,
+            :workspace_close_keep,
+            :workspace_review_drafts,
+            :workspace_promote,
+            :workspace_discard,
+            :workspace_resolve_conflicts,
+            :workspace_discard_and_close,
             :workspace_list,
             :workspace_rename,
             :workspace_set_icon,
@@ -223,6 +263,66 @@ defmodule MingaEditor.Commands.WorkspaceTest do
     test "leaving the manual workspace alone is a no-op" do
       state = make_state()
       assert Workspace.workspace_close(state) == state
+    end
+
+    test "requires confirmation when active workspace has drafts" do
+      state =
+        make_state()
+        |> Workspace.workspace_next()
+        |> put_active_workspace_review(%WorkspaceReview{
+          state: :needs_review,
+          changed_files: [file_ref()]
+        })
+
+      result = Workspace.workspace_close(state)
+
+      assert result.shell_state.tab_bar == state.shell_state.tab_bar
+
+      assert EditorState.status_msg(result) =~
+               "Actions: Keep workspace, Review drafts, Discard drafts and close"
+
+      assert EditorState.status_msg(result) =~ "Dirty buffers are separate"
+    end
+
+    test "discard and close removes a workspace with drafts" do
+      state =
+        make_state()
+        |> Workspace.workspace_next()
+        |> put_active_workspace_review(%WorkspaceReview{
+          state: :needs_review,
+          changed_files: [file_ref()]
+        })
+
+      result = Workspace.workspace_discard_and_close(state)
+
+      assert TabBar.get_workspace(result.shell_state.tab_bar, 1) == nil
+      assert TabBar.active_workspace_id(result.shell_state.tab_bar) == 0
+    end
+
+    test "resolve conflicts keeps workspace conflicted when promote still conflicts", %{
+      tmp_dir: dir
+    } do
+      File.mkdir_p!(Path.join(dir, "lib"))
+      File.write!(Path.join(dir, "lib/a.ex"), "base")
+      {:ok, project_view} = ProjectView.overlay(dir)
+      :ok = ProjectView.write_file(project_view, "lib/a.ex", "draft")
+      File.write!(Path.join(dir, "lib/a.ex"), "current file")
+
+      state =
+        make_state()
+        |> Workspace.workspace_next()
+        |> put_active_workspace_project_view(project_view)
+        |> put_active_workspace_review(%WorkspaceReview{
+          state: :conflict,
+          changed_files: [file_ref()],
+          conflict_files: [file_ref()]
+        })
+
+      result = Workspace.workspace_resolve_conflicts(state)
+      review = TabBar.get_workspace(result.shell_state.tab_bar, 1).review
+
+      assert review.state == :conflict
+      assert review.conflict_files != []
     end
   end
 

@@ -19,7 +19,7 @@ defmodule MingaEditor.State.WorkspaceTest do
       assert workspace.active_file == nil
       assert workspace.agent_ui == nil
       assert workspace.project_view == nil
-      assert workspace.review == nil
+      assert workspace.review.state == :clean
     end
 
     test "falls back to Files when no project root is recognized" do
@@ -43,7 +43,7 @@ defmodule MingaEditor.State.WorkspaceTest do
       assert workspace.active_file == nil
       assert workspace.agent_ui == nil
       assert workspace.project_view == nil
-      assert workspace.review == nil
+      assert workspace.review.state == :clean
     end
 
     test "stores session pid" do

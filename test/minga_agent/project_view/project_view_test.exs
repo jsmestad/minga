@@ -94,6 +94,19 @@ defmodule MingaAgent.ProjectViewTest do
       refute File.exists?(Path.join(dir, "lib/a.txt"))
     end
 
+    test "promote returns structured conflicts without stopping the overlay", %{tmp_dir: dir} do
+      seed_project(dir)
+      {:ok, view} = ProjectView.overlay(dir)
+
+      assert :ok = ProjectView.write_file(view, "lib/a.txt", "agent version")
+      File.write!(Path.join(dir, "lib/a.txt"), "current file version")
+
+      assert {:conflict, %{conflicts: [{:conflict, "lib/a.txt", :concurrent_edit}]}} =
+               ProjectView.promote(view, :project_root)
+
+      assert {:ok, "agent version"} = ProjectView.read_file(view, "lib/a.txt")
+    end
+
     test "discard removes overlay changes without mutating project root", %{tmp_dir: dir} do
       seed_project(dir)
       {:ok, view} = ProjectView.overlay(dir)

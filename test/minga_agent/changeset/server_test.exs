@@ -308,10 +308,30 @@ defmodule MingaAgent.Changeset.ServerTest do
       # Simulate concurrent edit to the real project
       File.write!(Path.join(project, "hello.txt"), "human version")
 
-      # Merge should detect the conflict and attempt three-way merge
+      # Merge should detect the conflict and keep the changeset alive for review
       result = GenServer.call(server, :merge)
       # Both sides completely replaced the content, so it's a conflict
-      assert {:ok, :merged_with_conflicts, _details} = result
+      assert {:conflict, %{conflicts: [{:conflict, "hello.txt", :concurrent_edit}]}} = result
+      assert Process.alive?(server)
+    end
+
+    test "conflict retry does not reprocess files already applied during partial merge", %{
+      project: project
+    } do
+      server = start_server(project)
+
+      GenServer.call(server, {:write_file, "lib/new.ex", "defmodule New do\nend"})
+      GenServer.call(server, {:write_file, "hello.txt", "agent version"})
+      File.write!(Path.join(project, "hello.txt"), "human version")
+
+      assert {:conflict, %{conflicts: [{:conflict, "hello.txt", :concurrent_edit}]}} =
+               GenServer.call(server, :merge)
+
+      assert File.read!(Path.join(project, "lib/new.ex")) == "defmodule New do\nend"
+      File.write!(Path.join(project, "hello.txt"), "original content")
+      assert :ok = GenServer.call(server, :merge)
+      assert File.read!(Path.join(project, "hello.txt")) == "agent version"
+      assert File.read!(Path.join(project, "lib/new.ex")) == "defmodule New do\nend"
     end
 
     test "three-way merges non-overlapping concurrent edits", %{project: project} do

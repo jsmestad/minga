@@ -89,7 +89,7 @@ defmodule MingaAgent.ProjectView do
   def diff(%__MODULE__{} = view), do: view.backend.diff(view)
 
   @doc "Promotes view-local changes to `target`."
-  @spec promote(t(), term()) :: :ok | {:ok, term()} | {:error, term()}
+  @spec promote(t(), term()) :: :ok | {:conflict, map()} | {:error, term()}
   def promote(%__MODULE__{} = view, target), do: view.backend.promote(view, target)
 
   @doc "Discards view-local state."

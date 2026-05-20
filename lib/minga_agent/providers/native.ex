@@ -867,8 +867,13 @@ defmodule MingaAgent.Providers.Native do
       :ok ->
         Minga.Log.info(:agent, "[Agent.Native] changeset merged successfully")
 
-      {:ok, :merged_with_conflicts, _details} ->
-        Minga.Log.warning(:agent, "[Agent.Native] changeset merged with conflicts")
+      {:conflict, _details} ->
+        Minga.Log.warning(
+          :agent,
+          "[Agent.Native] changeset merge found conflicts; discarding legacy changeset"
+        )
+
+        MingaAgent.Changeset.discard(cs)
 
       {:error, merge_reason} ->
         Minga.Log.warning(

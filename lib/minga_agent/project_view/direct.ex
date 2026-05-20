@@ -100,7 +100,7 @@ defmodule MingaAgent.ProjectView.Direct do
   end
 
   @impl true
-  @spec promote(ProjectView.t(), term()) :: :ok | {:error, term()}
+  @spec promote(ProjectView.t(), term()) :: :ok | {:conflict, map()} | {:error, term()}
   def promote(%ProjectView{}, :project_root), do: :ok
 
   def promote(%ProjectView{project_root: root}, target) when is_binary(target) do

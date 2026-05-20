@@ -98,10 +98,10 @@ defmodule MingaAgent.Changeset do
 
   If someone edited the same files since the changeset was created,
   a three-way merge is attempted. Returns `:ok` for clean merges, or
-  `{:ok, :merged_with_conflicts, details}` listing what couldn't be
-  auto-merged. Stops the GenServer on success.
+  `{:conflict, details}` listing what couldn't be auto-merged. Stops the
+  GenServer only on success; conflict results keep the changeset alive for review.
   """
-  @spec merge(changeset()) :: :ok | {:ok, :merged_with_conflicts, list()} | {:error, term()}
+  @spec merge(changeset()) :: :ok | {:conflict, map()} | {:error, term()}
   def merge(cs) do
     GenServer.call(cs, :merge)
   end

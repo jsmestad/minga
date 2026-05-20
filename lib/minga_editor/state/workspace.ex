@@ -6,6 +6,7 @@ defmodule MingaEditor.State.Workspace do
   """
 
   alias Minga.Project.FileRef
+  alias MingaEditor.State.WorkspaceReview
 
   @typedoc "Workspace kind."
   @type kind :: :manual | :agent
@@ -30,7 +31,7 @@ defmodule MingaEditor.State.Workspace do
           active_file: FileRef.t() | nil,
           agent_ui: term() | nil,
           project_view: term() | nil,
-          review: term() | nil
+          review: WorkspaceReview.t()
         }
 
   @enforce_keys [:id, :kind]
@@ -46,7 +47,7 @@ defmodule MingaEditor.State.Workspace do
             active_file: nil,
             agent_ui: nil,
             project_view: nil,
-            review: nil
+            review: WorkspaceReview.new()
 
   @doc "Creates the manual project workspace."
   @spec new_manual(String.t() | nil) :: t()
@@ -80,6 +81,33 @@ defmodule MingaEditor.State.Workspace do
   @spec set_agent_status(t(), agent_status()) :: t()
   def set_agent_status(%__MODULE__{} = workspace, status) do
     %{workspace | agent_status: status}
+  end
+
+  @doc "Sets the ProjectView owned by the workspace."
+  @spec set_project_view(t(), term() | nil) :: t()
+  def set_project_view(%__MODULE__{} = workspace, project_view) do
+    %{workspace | project_view: project_view}
+  end
+
+  @doc "Sets review state through the owning workspace module."
+  @spec set_review(t(), WorkspaceReview.t()) :: t()
+  def set_review(%__MODULE__{} = workspace, %WorkspaceReview{} = review) do
+    %{workspace | review: review}
+  end
+
+  @doc "Returns true when drafts or conflicts require user action before close."
+  @spec review_pending?(t()) :: boolean()
+  def review_pending?(%__MODULE__{review: %WorkspaceReview{} = review}),
+    do: WorkspaceReview.pending?(review)
+
+  @doc "Moves review state through a legal transition."
+  @spec transition_review(t(), atom(), [FileRef.t()] | nil | term()) ::
+          {:ok, t()} | {:error, term()}
+  def transition_review(%__MODULE__{} = workspace, event, payload \\ nil) do
+    case apply_review_transition(workspace.review, event, payload) do
+      {:ok, review} -> {:ok, set_review(workspace, review)}
+      {:error, _reason} = error -> error
+    end
   end
 
   @doc "Renames the workspace and protects it from future auto-naming."
@@ -182,6 +210,39 @@ defmodule MingaEditor.State.Workspace do
     |> add_file(file_ref)
     |> Map.put(:active_file, file_ref)
   end
+
+  @spec apply_review_transition(WorkspaceReview.t(), atom(), term()) ::
+          {:ok, WorkspaceReview.t()} | {:error, term()}
+  defp apply_review_transition(%WorkspaceReview{} = review, :agent_started_editing, files),
+    do: WorkspaceReview.agent_started_editing(review, files || [])
+
+  defp apply_review_transition(%WorkspaceReview{} = review, :agent_made_more_edits, files),
+    do: WorkspaceReview.agent_made_more_edits(review, files || [])
+
+  defp apply_review_transition(%WorkspaceReview{} = review, :agent_completed, files),
+    do: WorkspaceReview.agent_completed(review, files || [])
+
+  defp apply_review_transition(%WorkspaceReview{} = review, :agent_resumed, _payload),
+    do: WorkspaceReview.agent_resumed(review)
+
+  defp apply_review_transition(%WorkspaceReview{} = review, :promote_succeeded, _payload),
+    do: WorkspaceReview.promote_succeeded(review)
+
+  defp apply_review_transition(
+         %WorkspaceReview{} = review,
+         :promote_found_overlaps,
+         {files, error}
+       ),
+       do: WorkspaceReview.promote_found_overlaps(review, files, error)
+
+  defp apply_review_transition(%WorkspaceReview{} = review, :discard, _payload),
+    do: WorkspaceReview.discard(review)
+
+  defp apply_review_transition(%WorkspaceReview{} = review, :resolved_and_promoted, _payload),
+    do: WorkspaceReview.resolved_and_promoted(review)
+
+  defp apply_review_transition(%WorkspaceReview{state: from}, event, _payload),
+    do: {:error, {:invalid_transition, from, event}}
 
   @spec maybe_rebind_active_file(t(), FileRef.t(), boolean()) :: t()
   defp maybe_rebind_active_file(%__MODULE__{} = workspace, %FileRef{} = new_file_ref, true) do

@@ -80,7 +80,7 @@ defmodule MingaAgent.ProjectView.Overlay do
   end
 
   @impl true
-  @spec promote(ProjectView.t(), term()) :: :ok | {:ok, term()} | {:error, term()}
+  @spec promote(ProjectView.t(), term()) :: :ok | {:conflict, map()} | {:error, term()}
   def promote(%ProjectView{} = view, :project_root) do
     with :ok <- promote_forks(view) do
       Changeset.merge(changeset(view))
@@ -154,7 +154,7 @@ defmodule MingaAgent.ProjectView.Overlay do
     :exit, _ -> []
   end
 
-  @spec promote_forks(ProjectView.t()) :: :ok | {:error, {:fork_merge_failed, [term()]}}
+  @spec promote_forks(ProjectView.t()) :: :ok | {:conflict, map()}
   defp promote_forks(%ProjectView{} = view) do
     case fork_store(view) do
       nil ->
@@ -166,14 +166,14 @@ defmodule MingaAgent.ProjectView.Overlay do
         |> fork_merge_result()
     end
   catch
-    :exit, reason -> {:error, {:fork_merge_failed, [{:exit, reason}]}}
+    :exit, reason -> {:conflict, %{conflicts: [{:exit, reason}], results: []}}
   end
 
   @spec fork_merge_result([{String.t(), :ok | {:conflict, term()} | {:error, term()}}]) ::
-          :ok | {:error, {:fork_merge_failed, [term()]}}
+          :ok | {:conflict, map()}
   defp fork_merge_result(results) do
     failures = Enum.reject(results, &match?({_path, :ok}, &1))
-    if failures == [], do: :ok, else: {:error, {:fork_merge_failed, failures}}
+    if failures == [], do: :ok, else: {:conflict, %{conflicts: failures, results: results}}
   end
 
   @spec discard_forks(ProjectView.t()) :: :ok

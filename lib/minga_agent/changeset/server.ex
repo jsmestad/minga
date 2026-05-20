@@ -197,10 +197,9 @@ defmodule MingaAgent.Changeset.Server do
         broadcast_merged(state)
         {:stop, :normal, :ok, state}
 
-      {:ok, :merged_with_conflicts, details} ->
-        Overlay.cleanup(state.overlay)
-        broadcast_merged(state)
-        {:stop, :normal, {:ok, :merged_with_conflicts, details}, state}
+      {:conflict, details} ->
+        state = prune_successful_merge_results(state, details.results)
+        {:reply, {:conflict, details}, state}
     end
   rescue
     e ->
@@ -221,7 +220,7 @@ defmodule MingaAgent.Changeset.Server do
 
   # ── Merge logic ─────────────────────────────────────────────────────────────
 
-  @spec do_merge(state()) :: :ok | {:ok, :merged_with_conflicts, list()} | {:error, term()}
+  @spec do_merge(state()) :: :ok | {:conflict, map()} | {:error, term()}
   defp do_merge(state) do
     modification_results =
       Enum.map(state.modifications, fn {path, changeset_content} ->
@@ -239,9 +238,27 @@ defmodule MingaAgent.Changeset.Server do
     if conflicts == [] do
       :ok
     else
-      {:ok, :merged_with_conflicts, all_results}
+      {:conflict, %{conflicts: conflicts, results: all_results}}
     end
   end
+
+  @spec prune_successful_merge_results(state(), [tuple()]) :: state()
+  defp prune_successful_merge_results(state, results) do
+    Enum.reduce(results, state, &prune_successful_merge_result/2)
+  end
+
+  @spec prune_successful_merge_result(tuple(), state()) :: state()
+  defp prune_successful_merge_result({:ok, path, _kind}, state) do
+    %{
+      state
+      | modifications: Map.delete(state.modifications, path),
+        originals: Map.delete(state.originals, path),
+        deletions: MapSet.delete(state.deletions, path),
+        history: Map.delete(state.history, path)
+    }
+  end
+
+  defp prune_successful_merge_result(_result, state), do: state
 
   @spec merge_one_file(state(), String.t(), binary()) :: tuple()
   defp merge_one_file(state, path, changeset_content) do
