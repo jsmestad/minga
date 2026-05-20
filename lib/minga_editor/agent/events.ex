@@ -515,9 +515,7 @@ defmodule MingaEditor.Agent.Events do
         tb
         |> TabBar.move_tab_to_workspace(tab_id, ws_id)
         |> TabBar.update_workspace(ws_id, fn workspace ->
-          workspace
-          |> Workspace.add_file(file_ref)
-          |> Workspace.set_active_file(file_ref)
+          Workspace.retarget_file(workspace, nil, file_ref, tab_id == tb.active_id)
         end)
 
       EditorState.set_tab_bar(state, tb)

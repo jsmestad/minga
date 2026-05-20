@@ -109,6 +109,24 @@ defmodule MingaEditor.State.TabTest do
 
       assert Tab.set_file_ref(tab, nil).file_ref == nil
     end
+
+    test "swaps logical file refs without disturbing other fields" do
+      {:ok, old_ref} = FileRef.from_path("/tmp/minga", "lib/old.ex")
+      {:ok, new_ref} = FileRef.from_path("/tmp/minga", "lib/new.ex")
+      context = %Context{editing: VimState.new(), keymap_scope: :editor}
+
+      tab =
+        Tab.new_file(1, "old.ex")
+        |> Tab.set_context(context)
+        |> Tab.set_group(7)
+        |> Tab.set_file_ref(old_ref)
+
+      updated = Tab.set_file_ref(tab, new_ref)
+
+      assert updated.file_ref == new_ref
+      assert updated.context == context
+      assert updated.group_id == 7
+    end
   end
 
   describe "set_attention/2" do

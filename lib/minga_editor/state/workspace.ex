@@ -123,6 +123,50 @@ defmodule MingaEditor.State.Workspace do
     %{workspace | files: files, active_file: active_file}
   end
 
+  @doc "Rebinds the active file membership from one logical file ref to another."
+  @spec rebind_file(t(), FileRef.t() | nil, FileRef.t()) :: t()
+  def rebind_file(%__MODULE__{} = workspace, old_file_ref, %FileRef{} = new_file_ref) do
+    workspace =
+      case old_file_ref do
+        %FileRef{} = old ->
+          if FileRef.equal?(old, new_file_ref), do: workspace, else: remove_file(workspace, old)
+
+        nil ->
+          workspace
+      end
+
+    set_active_file(workspace, new_file_ref)
+  end
+
+  @doc "Retargets a file membership for a tab, preserving unrelated active file state."
+  @spec retarget_file(t(), FileRef.t() | nil, FileRef.t(), boolean()) :: t()
+  def retarget_file(
+        %__MODULE__{} = workspace,
+        old_file_ref,
+        %FileRef{} = new_file_ref,
+        is_active_tab
+      )
+      when is_boolean(is_active_tab) do
+    was_active_file = active_file_matches?(workspace.active_file, old_file_ref)
+
+    workspace =
+      case old_file_ref do
+        %FileRef{} = old ->
+          if FileRef.equal?(old, new_file_ref) do
+            workspace
+          else
+            workspace
+            |> remove_file(old)
+            |> add_file(new_file_ref)
+          end
+
+        nil ->
+          add_file(workspace, new_file_ref)
+      end
+
+    maybe_rebind_active_file(workspace, new_file_ref, is_active_tab or was_active_file)
+  end
+
   @doc "Returns true when the workspace already contains the file membership."
   @spec has_file?(t(), FileRef.t()) :: boolean()
   def has_file?(%__MODULE__{files: files}, %FileRef{} = file_ref) do
@@ -138,6 +182,21 @@ defmodule MingaEditor.State.Workspace do
     |> add_file(file_ref)
     |> Map.put(:active_file, file_ref)
   end
+
+  @spec maybe_rebind_active_file(t(), FileRef.t(), boolean()) :: t()
+  defp maybe_rebind_active_file(%__MODULE__{} = workspace, %FileRef{} = new_file_ref, true) do
+    set_active_file(workspace, new_file_ref)
+  end
+
+  defp maybe_rebind_active_file(%__MODULE__{} = workspace, %FileRef{} = _new_file_ref, false),
+    do: workspace
+
+  @spec active_file_matches?(FileRef.t() | nil, FileRef.t() | nil) :: boolean()
+  defp active_file_matches?(%FileRef{} = active_file, %FileRef{} = old_file_ref) do
+    FileRef.equal?(active_file, old_file_ref)
+  end
+
+  defp active_file_matches?(_active_file, _old_file_ref), do: false
 
   @spec remove_active_file(FileRef.t() | nil, FileRef.t()) :: FileRef.t() | nil
   defp remove_active_file(%FileRef{} = active_file, %FileRef{} = removed_file) do

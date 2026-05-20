@@ -617,28 +617,15 @@ defmodule MingaEditor.Shell.Traditional do
 
   @spec sync_file_tab_ref(TabBar.t(), Tab.id(), pid() | nil, WorkspaceState.t()) :: TabBar.t()
   defp sync_file_tab_ref(%TabBar{} = tb, tab_id, buffer_pid, %WorkspaceState{} = workspace) do
-    case file_ref_for_buffer(buffer_pid, workspace) do
-      %FileRef{} = file_ref ->
+    case {TabBar.get(tb, tab_id), file_ref_for_buffer(buffer_pid, workspace)} do
+      {%Tab{file_ref: old_file_ref, group_id: workspace_id}, %FileRef{} = file_ref} ->
         tb
         |> TabBar.update_tab(tab_id, &Tab.set_file_ref(&1, file_ref))
-        |> add_file_to_tab_workspace(tab_id, file_ref)
-
-      nil ->
-        tb
-    end
-  end
-
-  @spec add_file_to_tab_workspace(TabBar.t(), Tab.id(), FileRef.t()) :: TabBar.t()
-  defp add_file_to_tab_workspace(%TabBar{} = tb, tab_id, %FileRef{} = file_ref) do
-    case TabBar.get(tb, tab_id) do
-      %Tab{group_id: workspace_id} ->
-        TabBar.update_workspace(tb, workspace_id, fn workspace ->
-          workspace
-          |> Workspace.add_file(file_ref)
-          |> Workspace.set_active_file(file_ref)
+        |> TabBar.update_workspace(workspace_id, fn workspace ->
+          Workspace.retarget_file(workspace, old_file_ref, file_ref, true)
         end)
 
-      nil ->
+      _ ->
         tb
     end
   end

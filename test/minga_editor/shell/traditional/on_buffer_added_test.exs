@@ -36,7 +36,7 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
       path = Path.join([root, "lib", "user.ex"])
       File.mkdir_p!(Path.dirname(path))
       File.write!(path, "hello")
-      {:ok, buf} = BufferProcess.start_link(content: "hello", file_path: path)
+      buf = start_supervised!({BufferProcess, file_path: path})
 
       workspace = %WorkspaceState{
         viewport: Viewport.new(24, 80),
@@ -54,6 +54,57 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
       assert active_tab.file_ref == expected_ref
       assert Workspace.has_file?(TabBar.get_workspace(new_shell.tab_bar, 0), expected_ref)
     end
+
+    test "falls back to a buffer ref for unsaved scratch buffers" do
+      root = Path.join(System.tmp_dir!(), "minga-on-buffer-added-scratch")
+      buf = start_supervised!({BufferProcess, content: "scratch", buffer_name: "*scratch*"})
+      expected_ref = FileRef.from_buffer(buf)
+
+      workspace = %WorkspaceState{
+        viewport: Viewport.new(24, 80),
+        buffers: %Buffers{active: buf, list: [buf]},
+        file_tree: %FileTreeState{project_root: root}
+      }
+
+      shell_state = %ShellState{tab_bar: TabBar.new(Tab.new_file(1, "initial.ex"), root)}
+
+      {new_shell, _workspace, _effects} =
+        Traditional.on_buffer_added(shell_state, workspace, buf, :open)
+
+      active_tab = TabBar.active(new_shell.tab_bar)
+      workspace = TabBar.get_workspace(new_shell.tab_bar, 0)
+
+      assert active_tab.file_ref == expected_ref
+      assert workspace.active_file == expected_ref
+      assert Workspace.has_file?(workspace, expected_ref)
+    end
+
+    test "falls back to a buffer ref for paths outside the project root" do
+      root = Path.join(System.tmp_dir!(), "minga-on-buffer-added-outside-root")
+      path = Path.join(System.tmp_dir!(), "minga-on-buffer-added-outside-root-file.ex")
+      File.mkdir_p!(Path.dirname(path))
+      File.write!(path, "hello")
+      buf = start_supervised!({BufferProcess, file_path: path})
+      expected_ref = FileRef.from_buffer(buf)
+
+      workspace = %WorkspaceState{
+        viewport: Viewport.new(24, 80),
+        buffers: %Buffers{active: buf, list: [buf]},
+        file_tree: %FileTreeState{project_root: root}
+      }
+
+      shell_state = %ShellState{tab_bar: TabBar.new(Tab.new_file(1, "initial.ex"), root)}
+
+      {new_shell, _workspace, _effects} =
+        Traditional.on_buffer_added(shell_state, workspace, buf, :open)
+
+      active_tab = TabBar.active(new_shell.tab_bar)
+      workspace = TabBar.get_workspace(new_shell.tab_bar, 0)
+
+      assert active_tab.file_ref == expected_ref
+      assert workspace.active_file == expected_ref
+      assert Workspace.has_file?(workspace, expected_ref)
+    end
   end
 
   describe "dashboard auto-dismiss" do
@@ -62,7 +113,7 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
         modal: {:dashboard, DashboardPayload.new(Dashboard.new_state())}
       }
 
-      {:ok, buf} = BufferProcess.start_link(content: "hello")
+      buf = start_supervised!({BufferProcess, content: "hello"})
 
       {new_shell, _ws, _effects} =
         Traditional.on_buffer_added(shell_state, blank_workspace(), buf, :open)
@@ -80,7 +131,7 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
 
       shell_state = %ShellState{modal: {:picker, picker_payload}}
 
-      {:ok, buf} = BufferProcess.start_link(content: "hello")
+      buf = start_supervised!({BufferProcess, content: "hello"})
 
       {new_shell, _ws, _effects} =
         Traditional.on_buffer_added(shell_state, blank_workspace(), buf, :open)
@@ -90,7 +141,7 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
 
     test "is a no-op when no modal is active" do
       shell_state = %ShellState{modal: :none}
-      {:ok, buf} = BufferProcess.start_link(content: "hello")
+      buf = start_supervised!({BufferProcess, content: "hello"})
 
       {new_shell, _ws, _effects} =
         Traditional.on_buffer_added(shell_state, blank_workspace(), buf, :open)

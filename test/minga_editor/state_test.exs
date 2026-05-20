@@ -2,8 +2,11 @@ defmodule MingaEditor.StateTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Project.FileRef
+  alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
@@ -12,6 +15,8 @@ defmodule MingaEditor.StateTest do
   alias MingaEditor.Window
   alias MingaEditor.Window.Content
   alias MingaEditor.WindowTree
+  alias MingaEditor.State.Workspace, as: WorkspaceModel
+  alias MingaEditor.Workspace.State, as: WorkspaceState
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -162,6 +167,163 @@ defmodule MingaEditor.StateTest do
       assert Map.fetch!(new_state.workspace.windows.map, 1).buffer == buf1
       # Window 2 unchanged
       assert Map.fetch!(new_state.workspace.windows.map, 2).buffer == buf2
+    end
+  end
+
+  describe "rebind_buffer_file_identity/2" do
+    test "only retargets file tabs whose active buffer matches the buffer pid" do
+      uniq = System.unique_integer([:positive])
+      root = Path.join(System.tmp_dir!(), "minga-state-rebind-buffer-identity-#{uniq}")
+      target_path = Path.join([root, "lib", "target.ex"])
+      other_path = Path.join([root, "lib", "other.ex"])
+      File.mkdir_p!(Path.dirname(target_path))
+      File.write!(target_path, "target")
+      File.write!(other_path, "other")
+
+      target_buffer =
+        start_supervised!(%{
+          id: {:target_buffer, uniq},
+          start: {BufferProcess, :start_link, [[file_path: target_path, buffer_name: "target-#{uniq}"]]},
+          restart: :temporary
+        })
+
+      other_buffer =
+        start_supervised!(%{
+          id: {:other_buffer, uniq},
+          start: {BufferProcess, :start_link, [[file_path: other_path, buffer_name: "other-#{uniq}"]]},
+          restart: :temporary
+        })
+
+      {:ok, target_ref} = FileRef.from_path(root, target_path)
+      {:ok, old_active_ref} = FileRef.from_path(root, "lib/active.ex")
+      {:ok, old_list_ref} = FileRef.from_path(root, "lib/list-only.ex")
+      {:ok, agent_ref} = FileRef.from_path(root, "lib/agent.ex")
+
+      matching_tab =
+        Tab.new_file(1, "target")
+        |> Tab.set_file_ref(old_active_ref)
+        |> Tab.set_context(%{buffers: %Buffers{active: target_buffer, list: [target_buffer], active_index: 0}})
+
+      list_only_tab =
+        Tab.new_file(2, "list-only")
+        |> Tab.set_file_ref(old_list_ref)
+        |> Tab.set_context(%{
+          buffers: %Buffers{active: other_buffer, list: [other_buffer, target_buffer], active_index: 0}
+        })
+
+      agent_tab =
+        Tab.new_agent(3, "Agent")
+        |> Tab.set_file_ref(agent_ref)
+        |> Tab.set_context(%{buffers: %Buffers{active: target_buffer, list: [target_buffer], active_index: 0}})
+
+      tab_bar = TabBar.new(matching_tab, root)
+      tab_bar = %{tab_bar | tabs: [matching_tab, list_only_tab, agent_tab], active_id: 1, next_id: 4}
+
+      {tab_bar, agent_workspace} = TabBar.add_workspace(tab_bar, "Agent")
+
+      tab_bar =
+        tab_bar
+        |> TabBar.move_tab_to_workspace(agent_tab.id, agent_workspace.id)
+        |> TabBar.update_workspace(0, fn ws ->
+          ws
+          |> WorkspaceModel.add_file(old_active_ref)
+          |> WorkspaceModel.add_file(old_list_ref)
+          |> WorkspaceModel.set_active_file(old_active_ref)
+        end)
+        |> TabBar.update_workspace(agent_workspace.id, fn ws ->
+          ws
+          |> WorkspaceModel.add_file(agent_ref)
+          |> WorkspaceModel.set_active_file(agent_ref)
+        end)
+
+      state = %EditorState{
+        port_manager: self(),
+        workspace: %WorkspaceState{
+          viewport: Viewport.new(24, 80),
+          file_tree: %FileTreeState{project_root: root}
+        },
+        shell_state: %ShellState{tab_bar: tab_bar}
+      }
+
+      updated_state = EditorState.rebind_buffer_file_identity(state, target_buffer)
+      updated_tb = updated_state.shell_state.tab_bar
+
+      assert TabBar.get(updated_tb, matching_tab.id).file_ref == target_ref
+      assert TabBar.get(updated_tb, list_only_tab.id).file_ref == old_list_ref
+      assert TabBar.get(updated_tb, agent_tab.id).file_ref == agent_ref
+      assert TabBar.get_workspace(updated_tb, 0).active_file == target_ref
+      assert WorkspaceModel.has_file?(TabBar.get_workspace(updated_tb, 0), target_ref)
+      assert WorkspaceModel.has_file?(TabBar.get_workspace(updated_tb, 0), old_list_ref)
+      assert TabBar.get_workspace(updated_tb, agent_workspace.id).active_file == agent_ref
+      assert WorkspaceModel.has_file?(TabBar.get_workspace(updated_tb, agent_workspace.id), agent_ref)
+    end
+
+    test "rebinds an inactive saved buffer ref even when its context lacks an active buffer" do
+      uniq = System.unique_integer([:positive])
+      root = Path.join(System.tmp_dir!(), "minga-state-rebind-buffer-identity-minimal-#{uniq}")
+      path = Path.join([root, "lib", "target.ex"])
+      active_path = Path.join([root, "lib", "active.ex"])
+      File.mkdir_p!(Path.dirname(path))
+      File.write!(active_path, "active")
+
+      target_buffer =
+        start_supervised!(%{
+          id: {:target_buffer, uniq},
+          start: {BufferProcess, :start_link, [[content: "target", buffer_name: "target-#{uniq}"]]},
+          restart: :temporary
+        })
+
+      active_buffer =
+        start_supervised!(%{
+          id: {:active_buffer, uniq},
+          start: {BufferProcess, :start_link, [[file_path: active_path, buffer_name: "active-#{uniq}"]]},
+          restart: :temporary
+        })
+
+      {:ok, active_ref} = FileRef.from_path(root, active_path)
+      {:ok, new_ref} = FileRef.from_path(root, path)
+      old_ref = FileRef.from_buffer(target_buffer)
+
+      :ok = BufferProcess.save_as(target_buffer, path)
+
+      active_tab =
+        Tab.new_file(1, "active.ex")
+        |> Tab.set_file_ref(active_ref)
+        |> Tab.set_context(%{buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0}})
+
+      inactive_tab =
+        Tab.new_file(2, "scratch")
+        |> Tab.set_file_ref(old_ref)
+        |> Tab.set_context(%{buffers: %Buffers{active: nil, list: [target_buffer], active_index: 0}})
+
+      tab_bar = TabBar.new(active_tab, root)
+      tab_bar = %{tab_bar | tabs: [active_tab, inactive_tab], active_id: active_tab.id, next_id: 3}
+
+      tab_bar =
+        TabBar.update_workspace(tab_bar, 0, fn ws ->
+          ws
+          |> WorkspaceModel.add_file(active_ref)
+          |> WorkspaceModel.set_active_file(active_ref)
+        end)
+
+      state = %EditorState{
+        port_manager: self(),
+        workspace: %WorkspaceState{
+          viewport: Viewport.new(24, 80),
+          file_tree: %FileTreeState{project_root: root},
+          buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0}
+        },
+        shell_state: %ShellState{tab_bar: tab_bar}
+      }
+
+      updated_state = EditorState.rebind_buffer_file_identity(state, target_buffer)
+      updated_tb = updated_state.shell_state.tab_bar
+
+      assert TabBar.get(updated_tb, inactive_tab.id).file_ref == new_ref
+      assert TabBar.get(updated_tb, active_tab.id).file_ref == active_ref
+      assert TabBar.get_workspace(updated_tb, 0).active_file == active_ref
+      assert WorkspaceModel.has_file?(TabBar.get_workspace(updated_tb, 0), new_ref)
+      refute WorkspaceModel.has_file?(TabBar.get_workspace(updated_tb, 0), old_ref)
     end
   end
 

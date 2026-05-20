@@ -1210,46 +1210,45 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec sync_moved_buffer_path(state(), String.t(), String.t(), String.t()) :: state()
   defp sync_moved_buffer_path(state, old_path, new_path, action) do
-    case update_buffer_path(state, old_path, new_path) do
-      {:ok, state} ->
-        state
+    {state, errors} = update_buffer_path(state, old_path, new_path)
 
-      {:error, reason} ->
-        MingaEditor.log_to_messages(
-          "[file-tree] #{action} completed on disk, but open buffer path update failed: #{old_path} → #{new_path}: #{inspect(reason)}"
-        )
-
-        state
+    if errors != [] do
+      MingaEditor.log_to_messages(
+        "[file-tree] #{action} completed on disk, but open buffer path update failed: #{old_path} → #{new_path}: #{inspect(errors)}"
+      )
     end
+
+    state
   end
 
-  @spec update_buffer_path(state(), String.t(), String.t()) ::
-          {:ok, state()} | {:error, [{String.t(), term()}]}
+  @spec update_buffer_path(state(), String.t(), String.t()) :: {state(), [{String.t(), term()}]}
   defp update_buffer_path(state, old_path, new_path) do
     old_path = Path.expand(old_path)
     new_path = Path.expand(new_path)
+    buffer_pids = EditorState.known_open_buffer_pids(state)
 
-    errors =
-      state.workspace.buffers.list
-      |> Enum.reduce([], &retarget_moved_buffer(&1, &2, old_path, new_path))
-      |> Enum.reverse()
+    Enum.reduce(buffer_pids, {state, []}, fn pid, {acc_state, errors} ->
+      case safe_buffer_file_path(pid) do
+        nil ->
+          {acc_state, errors}
 
-    case errors do
-      [] -> {:ok, state}
-      [_ | _] -> {:error, errors}
-    end
-  end
+        path ->
+          case moved_buffer_path(path, old_path, new_path) do
+            nil ->
+              {acc_state, errors}
 
-  @spec retarget_moved_buffer(pid(), [{String.t(), term()}], String.t(), String.t()) ::
-          [{String.t(), term()}]
-  defp retarget_moved_buffer(pid, errors, old_path, new_path) do
-    case safe_buffer_file_path(pid) do
-      nil ->
-        errors
-
-      path ->
-        retarget_moved_buffer_path(pid, path, moved_buffer_path(path, old_path, new_path), errors)
-    end
+            moved_path ->
+              try do
+                case Buffer.retarget_path(pid, moved_path) do
+                  :ok -> {EditorState.rebind_buffer_file_identity(acc_state, pid), errors}
+                  {:error, reason} -> {acc_state, [{path, reason} | errors]}
+                end
+              catch
+                :exit, reason -> {acc_state, [{path, {:exit, reason}} | errors]}
+              end
+          end
+      end
+    end)
   end
 
   @spec safe_buffer_file_path(pid()) :: String.t() | nil
@@ -1257,19 +1256,6 @@ defmodule MingaEditor.Commands.FileTree do
     Buffer.file_path(pid)
   catch
     :exit, _ -> nil
-  end
-
-  @spec retarget_moved_buffer_path(pid(), String.t(), String.t() | nil, [{String.t(), term()}]) ::
-          [{String.t(), term()}]
-  defp retarget_moved_buffer_path(_pid, _path, nil, errors), do: errors
-
-  defp retarget_moved_buffer_path(pid, path, moved_path, errors) do
-    case Buffer.retarget_path(pid, moved_path) do
-      :ok -> errors
-      {:error, reason} -> [{path, reason} | errors]
-    end
-  catch
-    :exit, reason -> [{path, {:exit, reason}} | errors]
   end
 
   @spec moved_buffer_path(String.t(), String.t(), String.t()) :: String.t() | nil

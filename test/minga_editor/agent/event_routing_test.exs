@@ -198,6 +198,50 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       refute Workspace.has_file?(TabBar.get_workspace(tb, workspace.id), lib_ref)
     end
 
+    test "file_changed keeps an existing active file when associating a background file" do
+      root = Path.join(System.tmp_dir!(), "minga-event-routing-active-file")
+      lib_path = Path.join([root, "lib", "user.ex"])
+      test_path = Path.join([root, "test", "user.ex"])
+      active_path = Path.join([root, "lib", "active.ex"])
+      assert {:ok, lib_ref} = FileRef.from_path(root, lib_path)
+      assert {:ok, test_ref} = FileRef.from_path(root, test_path)
+      assert {:ok, active_ref} = FileRef.from_path(root, active_path)
+
+      session = fake_session_pid()
+      tab1 = Tab.new_file(1, "user.ex") |> Tab.set_file_ref(lib_ref)
+      tab2 = Tab.new_file(2, "user.ex") |> Tab.set_file_ref(test_ref)
+      agent_tab = Tab.new_agent(3, "Agent") |> Tab.set_session(session)
+
+      tb = TabBar.new(tab1, root)
+      tb = %{tb | tabs: [tab1, tab2, agent_tab], active_id: 3, next_id: 4}
+      {tb, workspace} = TabBar.add_workspace(tb, "Agent", session)
+      tb = TabBar.move_tab_to_workspace(tb, agent_tab.id, workspace.id)
+      tb = TabBar.update_workspace(tb, workspace.id, fn ws ->
+        ws
+        |> Workspace.add_file(active_ref)
+        |> Workspace.set_active_file(active_ref)
+      end)
+
+      state = %EditorState{
+        port_manager: self(),
+        shell: Traditional,
+        workspace: %WorkspaceState{
+          viewport: Viewport.new(24, 80),
+          file_tree: %FileTreeState{project_root: root}
+        },
+        shell_state: %TraditionalState{agent: %AgentState{}, tab_bar: tb}
+      }
+
+      {state, _effects} = Events.handle(state, {:file_changed, test_path, "before", "after"})
+
+      tb = state.shell_state.tab_bar
+      agent_workspace = TabBar.get_workspace(tb, workspace.id)
+      assert TabBar.get(tb, tab2.id).group_id == workspace.id
+      assert Workspace.has_file?(agent_workspace, test_ref)
+      assert Workspace.has_file?(agent_workspace, active_ref)
+      assert agent_workspace.active_file == active_ref
+    end
+
     test "file_changed derives missing tab file ref from snapshotted buffer context" do
       root = Path.join(System.tmp_dir!(), "minga-event-routing")
       path = Path.join([root, "lib", "initial.ex"])
@@ -234,6 +278,37 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       tb = state.shell_state.tab_bar
       assert TabBar.get(tb, file_tab.id).group_id == workspace.id
       assert Workspace.has_file?(TabBar.get_workspace(tb, workspace.id), expected_ref)
+    end
+
+    test "file_changed outside the project root leaves workspace associations untouched" do
+      root = Path.join(System.tmp_dir!(), "minga-event-routing-root")
+      path = Path.join(System.tmp_dir!(), "minga-event-routing-outside.ex")
+      session = fake_session_pid()
+
+      file_tab = Tab.new_file(1, "initial.ex")
+      agent_tab = Tab.new_agent(2, "Agent") |> Tab.set_session(session)
+
+      tb = TabBar.new(file_tab, root)
+      tb = %{tb | tabs: [file_tab, agent_tab], active_id: 2, next_id: 3}
+      {tb, workspace} = TabBar.add_workspace(tb, "Agent", session)
+      tb = TabBar.move_tab_to_workspace(tb, agent_tab.id, workspace.id)
+
+      state = %EditorState{
+        port_manager: self(),
+        shell: Traditional,
+        workspace: %WorkspaceState{
+          viewport: Viewport.new(24, 80),
+          file_tree: %FileTreeState{project_root: root}
+        },
+        shell_state: %TraditionalState{agent: %AgentState{}, tab_bar: tb}
+      }
+
+      {state, _effects} = Events.handle(state, {:file_changed, path, "before", "after"})
+
+      tb = state.shell_state.tab_bar
+      assert TabBar.get(tb, file_tab.id).group_id == 0
+      assert TabBar.get(tb, agent_tab.id).group_id == workspace.id
+      assert TabBar.get_workspace(tb, workspace.id).files == []
     end
   end
 

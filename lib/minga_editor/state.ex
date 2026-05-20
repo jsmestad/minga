@@ -57,11 +57,13 @@ defmodule MingaEditor.State do
   alias MingaEditor.Frontend.Capabilities
   alias Minga.Log
   alias Minga.Mode
+  alias Minga.Project.FileRef
   alias Minga.Project.FileTree
 
   alias MingaEditor.UI.Panel.MessageStore
   alias MingaEditor.UI.Theme
   alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.State.Workspace, as: WorkspaceModel
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -866,6 +868,113 @@ defmodule MingaEditor.State do
   @spec sync_active_window_buffer(t()) :: t()
   def sync_active_window_buffer(%__MODULE__{} = state) do
     update_workspace(state, &WorkspaceState.sync_active_window_buffer/1)
+  end
+
+  @doc "Returns the set of buffer pids known to the live workspace and tab snapshots."
+  @spec known_open_buffer_pids(t()) :: [pid()]
+  def known_open_buffer_pids(%__MODULE__{} = state) do
+    (state.workspace.buffers.list ++ tab_context_buffer_pids(state.shell_state.tab_bar))
+    |> Enum.filter(&is_pid/1)
+    |> Enum.uniq()
+  end
+
+  @doc """
+  Rebinds the logical file identity for matching tabs and their workspaces.
+
+  Use this after a buffer save, save-as, or path retarget so the live tab and its workspace
+  stop pointing at stale buffer refs and start pointing at the new path ref.
+  """
+  @spec rebind_buffer_file_identity(t(), pid()) :: t()
+  def rebind_buffer_file_identity(%__MODULE__{} = state, buffer_pid) when is_pid(buffer_pid) do
+    case {matching_file_tabs(state.shell_state.tab_bar, buffer_pid), buffer_file_ref(buffer_pid, state.workspace)} do
+      {[], _} ->
+        state
+
+      {_, nil} ->
+        state
+
+      {tabs, %FileRef{} = file_ref} ->
+        active_tab_id = tab_bar_active_id(state.shell_state.tab_bar)
+
+        updated_tab_bar =
+          Enum.reduce(tabs, state.shell_state.tab_bar, fn %Tab{id: tab_id}, acc ->
+            TabBar.update_tab(acc, tab_id, &Tab.set_file_ref(&1, file_ref))
+          end)
+
+        updated_tab_bar =
+          Enum.reduce(tabs, updated_tab_bar, fn %Tab{id: tab_id, group_id: workspace_id, file_ref: old_file_ref}, acc ->
+            TabBar.update_workspace(acc, workspace_id, fn workspace ->
+              WorkspaceModel.retarget_file(workspace, old_file_ref, file_ref, tab_id == active_tab_id)
+            end)
+          end)
+
+        %{state | shell_state: %{state.shell_state | tab_bar: updated_tab_bar}}
+    end
+  end
+
+  @spec matching_file_tabs(TabBar.t() | nil, pid()) :: [Tab.t()]
+  defp matching_file_tabs(nil, _buffer_pid), do: []
+
+  defp matching_file_tabs(%TabBar{tabs: tabs}, buffer_pid) do
+    Enum.filter(tabs, &tab_matches_buffer_identity?(&1, buffer_pid))
+  end
+
+  @spec tab_matches_buffer_identity?(Tab.t(), pid()) :: boolean()
+  defp tab_matches_buffer_identity?(%Tab{kind: :file, file_ref: %FileRef{kind: :buffer, buffer_pid: pid}}, pid), do: true
+
+  defp tab_matches_buffer_identity?(%Tab{kind: :file, context: context}, pid) do
+    case TabContext.to_workspace_map(context) do
+      %{buffers: %Buffers{active: ^pid}} -> true
+      _ -> false
+    end
+  end
+
+  defp tab_matches_buffer_identity?(_tab, _pid), do: false
+
+  @spec tab_context_buffer_pids(TabBar.t() | nil) :: [pid()]
+  defp tab_context_buffer_pids(nil), do: []
+
+  defp tab_context_buffer_pids(%TabBar{tabs: tabs}) do
+    Enum.flat_map(tabs, fn %Tab{context: context} ->
+      case TabContext.to_workspace_map(context) do
+        %{buffers: %Buffers{} = buffers} -> tab_buffer_pids(buffers)
+        _ -> []
+      end
+    end)
+  end
+
+  @spec tab_buffer_pids(Buffers.t()) :: [pid()]
+  defp tab_buffer_pids(%Buffers{active: active, list: list}) do
+    [active | list]
+    |> Enum.filter(&is_pid/1)
+    |> Enum.uniq()
+  end
+
+  @spec tab_bar_active_id(TabBar.t() | nil) :: Tab.id() | nil
+  defp tab_bar_active_id(nil), do: nil
+  defp tab_bar_active_id(%TabBar{active_id: active_id}), do: active_id
+
+  @spec buffer_file_ref(pid(), WorkspaceState.t()) :: FileRef.t() | nil
+  defp buffer_file_ref(buffer_pid, %WorkspaceState{} = workspace) do
+    case {buffer_path(buffer_pid), workspace.file_tree.project_root} do
+      {path, root} when is_binary(path) and is_binary(root) ->
+        case FileRef.from_path(root, path) do
+          {:ok, file_ref} -> file_ref
+          {:error, :outside_project} -> FileRef.from_buffer(buffer_pid)
+        end
+
+      _ ->
+        FileRef.from_buffer(buffer_pid)
+    end
+  catch
+    :exit, _ -> nil
+  end
+
+  @spec buffer_path(pid()) :: String.t() | nil
+  defp buffer_path(pid) when is_pid(pid) do
+    Buffer.file_path(pid)
+  catch
+    :exit, _ -> nil
   end
 
   @doc """
