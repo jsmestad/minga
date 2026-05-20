@@ -98,6 +98,13 @@ defmodule MingaAgent.ProjectView.Overlay do
   def promote(%ProjectView{}, target), do: {:error, {:unsupported_target, target}}
 
   @impl true
+  @spec discard_file(ProjectView.t(), String.t()) :: :ok | {:error, term()}
+  def discard_file(%ProjectView{} = view, relative_path) do
+    discard_fork(view, relative_path)
+    Changeset.discard_file(changeset(view), relative_path)
+  end
+
+  @impl true
   @spec discard(ProjectView.t()) :: :ok | {:error, term()}
   def discard(%ProjectView{} = view) do
     discard_forks(view)
@@ -174,6 +181,16 @@ defmodule MingaAgent.ProjectView.Overlay do
   defp fork_merge_result(results) do
     failures = Enum.reject(results, &match?({_path, :ok}, &1))
     if failures == [], do: :ok, else: {:conflict, %{conflicts: failures, results: results}}
+  end
+
+  @spec discard_fork(ProjectView.t(), String.t()) :: :ok
+  defp discard_fork(%ProjectView{} = view, relative_path) do
+    case fork_store(view) do
+      nil -> :ok
+      store -> BufferForkStore.discard(store, Path.join(view.project_root, relative_path))
+    end
+  catch
+    :exit, _ -> :ok
   end
 
   @spec discard_forks(ProjectView.t()) :: :ok

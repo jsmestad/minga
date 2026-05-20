@@ -101,6 +101,13 @@ defmodule MingaAgent.ProjectView.RecordingBackend do
   end
 
   @impl true
+  @spec discard_file(ProjectView.t(), String.t()) :: :ok | {:error, term()}
+  def discard_file(%ProjectView{} = view, relative_path) do
+    record(view, {:discard_file, relative_path})
+    :ok
+  end
+
+  @impl true
   @spec discard(ProjectView.t()) :: :ok | {:error, term()}
   def discard(%ProjectView{} = view) do
     record(view, :discard)

@@ -225,7 +225,8 @@ Minga has a built-in AI agent you can chat with for help:
 
       SPC a a   toggle the agent panel
       SPC a n   start a new agent session
-      SPC a m   pick a model
+      SPC a m   move file to workspace
+      SPC a c   copy file to workspace
 
 Practice: press  SPC a a  to open the agent panel, look around, then
 press  SPC a a  again to close it and return to the tutorial.

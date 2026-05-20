@@ -106,6 +106,12 @@ defmodule MingaAgent.Changeset do
     GenServer.call(cs, :merge)
   end
 
+  @doc "Discards one changed file from the changeset view."
+  @spec discard_file(changeset(), String.t()) :: :ok | {:error, term()}
+  def discard_file(cs, relative_path) when is_binary(relative_path) do
+    GenServer.call(cs, {:discard_file, relative_path})
+  end
+
   @doc "Discards all changes, cleans up the overlay, and stops the GenServer."
   @spec discard(changeset()) :: :ok
   def discard(cs) do

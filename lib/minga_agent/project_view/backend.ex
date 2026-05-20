@@ -33,6 +33,7 @@ defmodule MingaAgent.ProjectView.Backend do
   @callback command_env(ProjectView.t()) :: [{String.t(), String.t()}]
   @callback diff(ProjectView.t()) :: {:ok, [map()]} | {:error, term()}
   @callback promote(ProjectView.t(), term()) :: :ok | {:conflict, map()} | {:error, term()}
+  @callback discard_file(ProjectView.t(), String.t()) :: :ok | {:error, term()}
   @callback discard(ProjectView.t()) :: :ok | {:error, term()}
   @callback capabilities(ProjectView.t()) :: capabilities()
 end

@@ -15,6 +15,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
   alias MingaEditor.UI.Picker.PendingReviewsSource
   alias MingaEditor.UI.Picker.WorkspaceIconSource
   alias MingaEditor.UI.Picker.WorkspaceSource
+  alias MingaEditor.UI.Picker.WorkspaceTargetSource
   alias MingaEditor.UI.Prompt.WorkspaceRename
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
@@ -194,6 +195,8 @@ defmodule MingaEditor.Commands.WorkspaceTest do
             :workspace_discard_and_close,
             :workspace_list,
             :workspace_pending_reviews,
+            :workspace_move_file,
+            :workspace_copy_file,
             :workspace_rename,
             :workspace_set_icon,
             :workspace_next_agent
@@ -362,6 +365,43 @@ defmodule MingaEditor.Commands.WorkspaceTest do
       assert {:picker,
               %{picker_ui: %{source: PendingReviewsSource, picker: %{title: "Pending reviews"}}}} =
                result.shell_state.modal
+    end
+  end
+
+  describe "workspace_move_file/1 and workspace_copy_file/1" do
+    test "workspace_move_file opens the target workspace picker" do
+      state = make_state()
+
+      result = Workspace.workspace_move_file(state)
+
+      assert {:picker,
+              %{picker_ui: %{source: WorkspaceTargetSource, context: %{operation: :move}}}} =
+               result.shell_state.modal
+    end
+
+    test "workspace_copy_file opens the target workspace picker" do
+      state = make_state()
+
+      result = Workspace.workspace_copy_file(state)
+
+      assert {:picker,
+              %{picker_ui: %{source: WorkspaceTargetSource, context: %{operation: :copy}}}} =
+               result.shell_state.modal
+    end
+
+    test "workspace_move_file reports when no other workspaces exist" do
+      file_tab = Tab.new_file(1, "file.ex") |> Tab.set_file_ref(file_ref())
+      tb = TabBar.new(file_tab)
+
+      state = %EditorState{
+        port_manager: self(),
+        workspace: %SessionState{viewport: Viewport.new(24, 80)},
+        shell_state: %TraditionalState{tab_bar: tb}
+      }
+
+      result = Workspace.workspace_move_file(state)
+
+      assert EditorState.status_msg(result) == "No other workspaces"
     end
   end
 

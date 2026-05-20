@@ -190,6 +190,27 @@ defmodule MingaAgent.Changeset.Server do
     {:reply, :ok, state}
   end
 
+  def handle_call({:discard_file, relative_path}, _from, state) do
+    case normalize_path(state, relative_path) do
+      {:ok, path} ->
+        restore_original(state, path)
+        prune_empty_overlay_dirs(state, path)
+
+        state = %{
+          state
+          | modifications: Map.delete(state.modifications, path),
+            originals: Map.delete(state.originals, path),
+            deletions: MapSet.delete(state.deletions, path),
+            history: Map.delete(state.history, path)
+        }
+
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
   def handle_call(:merge, _from, state) do
     case do_merge(state) do
       :ok ->
@@ -404,6 +425,30 @@ defmodule MingaAgent.Changeset.Server do
 
     history = Map.get(state.history, path, [])
     put_in(state.history[path], [current | history])
+  end
+
+  @spec prune_empty_overlay_dirs(state(), String.t()) :: :ok
+  defp prune_empty_overlay_dirs(state, path) do
+    path
+    |> Path.dirname()
+    |> prune_empty_overlay_dir(state)
+  end
+
+  @spec prune_empty_overlay_dir(String.t(), state()) :: :ok
+  defp prune_empty_overlay_dir(".", _state), do: :ok
+
+  defp prune_empty_overlay_dir(relative_dir, state) do
+    overlay_dir = Path.join(state.overlay.overlay_dir, relative_dir)
+    project_dir = Path.join(state.project_root, relative_dir)
+
+    if File.dir?(project_dir) do
+      :ok
+    else
+      case File.rmdir(overlay_dir) do
+        :ok -> relative_dir |> Path.dirname() |> prune_empty_overlay_dir(state)
+        {:error, _reason} -> :ok
+      end
+    end
   end
 
   @spec restore_original(state(), String.t()) :: :ok

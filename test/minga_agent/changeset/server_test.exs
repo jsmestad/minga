@@ -68,6 +68,21 @@ defmodule MingaAgent.Changeset.ServerTest do
     end
   end
 
+  describe "discard_file" do
+    test "removes empty overlay directories for discarded new files", %{project: project} do
+      server = start_server(project)
+
+      assert :ok = GenServer.call(server, {:write_file, "new_dir/nested/file.ex", "draft"})
+      overlay = GenServer.call(server, :overlay_path)
+      assert File.dir?(Path.join(overlay, "new_dir"))
+
+      assert :ok = GenServer.call(server, {:discard_file, "new_dir/nested/file.ex"})
+
+      refute File.exists?(Path.join(overlay, "new_dir"))
+      refute File.exists?(Path.join(project, "new_dir"))
+    end
+  end
+
   describe "edit_file" do
     test "replaces text in an existing file", %{project: project} do
       server = start_server(project)

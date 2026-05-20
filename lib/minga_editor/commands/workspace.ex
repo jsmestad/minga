@@ -9,6 +9,7 @@ defmodule MingaEditor.Commands.Workspace do
 
   use MingaEditor.Commands.Provider
 
+  alias Minga.Buffer
   alias Minga.Project.FileRef
   alias MingaAgent.ProjectView
   alias MingaEditor.State, as: EditorState
@@ -115,6 +116,18 @@ defmodule MingaEditor.Commands.Workspace do
     MingaEditor.PickerUI.open(state, MingaEditor.UI.Picker.PendingReviewsSource)
   end
 
+  @doc "Open a workspace picker to move the active file membership."
+  @spec workspace_move_file(state()) :: state()
+  def workspace_move_file(state) do
+    open_workspace_target_picker(state, :move)
+  end
+
+  @doc "Open a workspace picker to copy the active file membership."
+  @spec workspace_copy_file(state()) :: state()
+  def workspace_copy_file(state) do
+    open_workspace_target_picker(state, :copy)
+  end
+
   @doc "Open the icon picker for the active workspace."
   @spec workspace_set_icon(state()) :: state()
   def workspace_set_icon(state) do
@@ -153,6 +166,69 @@ defmodule MingaEditor.Commands.Workspace do
   @spec active_workspace(state()) :: WorkspaceModel.t() | nil
   defp active_workspace(%{shell_state: %{tab_bar: %TabBar{} = tb}}),
     do: TabBar.active_workspace(tb)
+
+  @spec open_workspace_target_picker(state(), :move | :copy) :: state()
+  defp open_workspace_target_picker(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, operation) do
+    with {:ok, file_ref} <- active_file_ref(state, tb),
+         :ok <- other_workspace_available?(tb) do
+      MingaEditor.PickerUI.open(state, MingaEditor.UI.Picker.WorkspaceTargetSource, %{
+        operation: operation,
+        source_workspace_id: TabBar.active_workspace_id(tb),
+        file_ref: file_ref
+      })
+    else
+      {:error, message} when is_binary(message) -> EditorState.set_status(state, message)
+    end
+  end
+
+  defp open_workspace_target_picker(state, _operation),
+    do: EditorState.set_status(state, "No workspace tab bar")
+
+  @spec active_file_ref(state(), TabBar.t()) :: {:ok, FileRef.t()} | {:error, String.t()}
+  defp active_file_ref(
+         %{workspace: %{buffers: %{active: active}, file_tree: file_tree}},
+         %TabBar{} = tb
+       ) do
+    case TabBar.active(tb) do
+      %{kind: :file, file_ref: %FileRef{} = file_ref} -> {:ok, file_ref}
+      %{kind: :file} -> active_buffer_file_ref(active, file_tree.project_root)
+      _tab -> {:error, "Move and copy file require a file tab"}
+    end
+  end
+
+  @spec active_buffer_file_ref(pid() | nil, String.t() | nil) ::
+          {:ok, FileRef.t()} | {:error, String.t()}
+  defp active_buffer_file_ref(active, project_root) when is_pid(active) do
+    case Buffer.file_path(active) do
+      path when is_binary(path) -> {:ok, path_file_ref_or_buffer(project_root, path, active)}
+      _path -> {:ok, FileRef.from_buffer(active)}
+    end
+  catch
+    :exit, _ -> {:error, "No active file"}
+  end
+
+  defp active_buffer_file_ref(_active, _project_root), do: {:error, "No active file"}
+
+  @spec path_file_ref_or_buffer(String.t() | nil, String.t(), pid()) :: FileRef.t()
+  defp path_file_ref_or_buffer(project_root, path, active) when is_binary(project_root) do
+    case FileRef.from_path(project_root, path) do
+      {:ok, file_ref} -> file_ref
+      {:error, :outside_project} -> FileRef.from_buffer(active)
+    end
+  end
+
+  defp path_file_ref_or_buffer(_project_root, _path, active), do: FileRef.from_buffer(active)
+
+  @spec other_workspace_available?(TabBar.t()) :: :ok | {:error, String.t()}
+  defp other_workspace_available?(%TabBar{} = tb) do
+    active_workspace_id = TabBar.active_workspace_id(tb)
+
+    if Enum.any?(tb.workspaces, &(&1.id != active_workspace_id)) do
+      :ok
+    else
+      {:error, "No other workspaces"}
+    end
+  end
 
   @spec close_active_workspace(state()) :: state()
   defp close_active_workspace(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
@@ -381,6 +457,8 @@ defmodule MingaEditor.Commands.Workspace do
 
   command(:workspace_list, "List workspaces", execute: &workspace_list/1)
   command(:workspace_pending_reviews, "Pending reviews", execute: &workspace_pending_reviews/1)
+  command(:workspace_move_file, "Move file to workspace…", execute: &workspace_move_file/1)
+  command(:workspace_copy_file, "Copy file to workspace…", execute: &workspace_copy_file/1)
   command(:workspace_rename, "Rename workspace", execute: &workspace_rename/1)
   command(:workspace_set_icon, "Set workspace icon", execute: &workspace_set_icon/1)
 

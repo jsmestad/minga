@@ -110,6 +110,20 @@ defmodule MingaAgent.ProjectView.Direct do
   def promote(%ProjectView{}, target), do: {:error, {:unsupported_target, target}}
 
   @impl true
+  @spec discard_file(ProjectView.t(), String.t()) :: :ok | {:error, term()}
+  def discard_file(%ProjectView{} = view, relative_path) do
+    Agent.update(view.ref, fn state ->
+      %{
+        state
+        | modified: MapSet.delete(state.modified, relative_path),
+          deleted: MapSet.delete(state.deleted, relative_path)
+      }
+    end)
+  catch
+    :exit, _ -> :ok
+  end
+
+  @impl true
   @spec discard(ProjectView.t()) :: :ok | {:error, term()}
   def discard(%ProjectView{} = view) do
     Agent.update(view.ref, fn _ -> %{modified: MapSet.new(), deleted: MapSet.new()} end)

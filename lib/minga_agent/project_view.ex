@@ -92,6 +92,14 @@ defmodule MingaAgent.ProjectView do
   @spec promote(t(), term()) :: :ok | {:conflict, map()} | {:error, term()}
   def promote(%__MODULE__{} = view, target), do: view.backend.promote(view, target)
 
+  @doc "Discards one file from view-local state."
+  @spec discard_file(t(), String.t()) :: :ok | {:error, term()}
+  def discard_file(%__MODULE__{} = view, relative_path) when is_binary(relative_path) do
+    with {:ok, path} <- normalize_relative_path(relative_path) do
+      view.backend.discard_file(view, path)
+    end
+  end
+
   @doc "Discards view-local state."
   @spec discard(t()) :: :ok | {:error, term()}
   def discard(%__MODULE__{} = view), do: view.backend.discard(view)

@@ -76,6 +76,12 @@ defmodule MingaAgent.BufferForkStore do
     GenServer.call(store, :merge_all_keep_failed, 30_000)
   end
 
+  @doc "Discards one fork without merging."
+  @spec discard(GenServer.server(), String.t()) :: :ok
+  def discard(store, path) when is_binary(path) do
+    GenServer.call(store, {:discard, path})
+  end
+
   @doc "Discards all forks without merging."
   @spec discard_all(GenServer.server()) :: :ok
   def discard_all(store) do
@@ -140,6 +146,11 @@ defmodule MingaAgent.BufferForkStore do
     successful_paths = successful_merge_paths(results)
     state = stop_forks_for_paths(state, successful_paths)
     {:reply, results, state}
+  end
+
+  def handle_call({:discard, path}, _from, state) do
+    state = stop_forks_for_paths(state, MapSet.new([path]))
+    {:reply, :ok, state}
   end
 
   def handle_call(:discard_all, _from, state) do
