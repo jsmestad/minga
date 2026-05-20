@@ -11,7 +11,8 @@ defmodule MingaEditor.State.Workspace do
   @type kind :: :manual | :agent
 
   @typedoc "Agent status for workspace display."
-  @type agent_status :: :idle | :plan | :thinking | :tool_executing | :error | nil
+  @type agent_status ::
+          :idle | :plan | :thinking | :tool_executing | :error | :needs_review | :done | nil
 
   @typedoc "Workspace icon identifier."
   @type icon :: String.t()
