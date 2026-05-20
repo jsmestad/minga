@@ -29,8 +29,8 @@ defmodule MingaEditor.Shell.Traditional.TabBarRenderer do
   alias Minga.Language
   alias MingaEditor.UI.Devicon
   alias MingaEditor.UI.Theme
-  alias MingaEditor.Workspace.ChromeState
-  alias MingaEditor.Workspace.ChromeState.TabSummary
+  alias MingaEditor.Session.ChromeState
+  alias MingaEditor.Session.ChromeState.TabSummary
 
   @typedoc "A clickable region: column range mapping to a command."
   @type click_region ::

@@ -18,7 +18,7 @@ defmodule MingaEditor.Commands.Editing do
   alias MingaEditor.UI.Highlight
   alias MingaEditor.State.Registers
   alias MingaEditor.VimState
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
   alias Minga.Mode
   alias Minga.Mode.ReplaceState
   alias Minga.Mode.VisualState
@@ -256,7 +256,7 @@ defmodule MingaEditor.Commands.Editing do
     new_ms = %{ms | original_chars: [original | ms.original_chars]}
 
     EditorState.update_workspace(state, fn ws ->
-      WorkspaceState.update_editing(ws, &VimState.set_mode_state(&1, new_ms))
+      SessionState.update_editing(ws, &VimState.set_mode_state(&1, new_ms))
     end)
   end
 
@@ -277,7 +277,7 @@ defmodule MingaEditor.Commands.Editing do
     new_ms = %{ms | original_chars: rest}
 
     EditorState.update_workspace(state, fn ws ->
-      WorkspaceState.update_editing(ws, &VimState.set_mode_state(&1, new_ms))
+      SessionState.update_editing(ws, &VimState.set_mode_state(&1, new_ms))
     end)
   end
 

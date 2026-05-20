@@ -13,7 +13,7 @@ defmodule MingaEditor.RenderPipeline.Input do
   ## Structural compatibility
 
   Pipeline modules pattern-match on `state.workspace.X` throughout. Input keeps
-  a `workspace` field (a plain map, not a WorkspaceState struct) so those
+  a `workspace` field (a plain map, not a SessionState struct) so those
   pattern-matches work unchanged. Top-level fields (`theme`, `capabilities`,
   `shell`, `shell_state`, etc.) are directly on Input, matching EditorState's
   shape.

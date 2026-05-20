@@ -42,7 +42,7 @@ defmodule MingaEditor.Mouse do
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Mouse, as: MouseState
   alias MingaEditor.State.Windows
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State.WhichKey, as: WhichKeyState
   alias MingaEditor.Viewport
   alias MingaEditor.Window
@@ -150,7 +150,7 @@ defmodule MingaEditor.Mouse do
     state =
       EditorState.update_workspace(
         state,
-        &WorkspaceState.set_mouse(&1, MouseState.stop_drag(&1.mouse))
+        &SessionState.set_mouse(&1, MouseState.stop_drag(&1.mouse))
       )
 
     # TUI keeps legacy selection auto-copy. Native GUI selection stays separate from the clipboard.
@@ -168,7 +168,7 @@ defmodule MingaEditor.Mouse do
       ) do
     EditorState.update_workspace(
       state,
-      &WorkspaceState.set_mouse(&1, MouseState.stop_drag(&1.mouse))
+      &SessionState.set_mouse(&1, MouseState.stop_drag(&1.mouse))
     )
   end
 
@@ -298,7 +298,7 @@ defmodule MingaEditor.Mouse do
       ) do
     EditorState.update_workspace(
       state,
-      &WorkspaceState.set_mouse(&1, MouseState.stop_resize(&1.mouse))
+      &SessionState.set_mouse(&1, MouseState.stop_resize(&1.mouse))
     )
   end
 
@@ -323,7 +323,7 @@ defmodule MingaEditor.Mouse do
   @spec update_mouse(state(), (MouseState.t() -> MouseState.t())) :: state()
   defp update_mouse(state, fun) when is_function(fun, 1) do
     EditorState.update_workspace(state, fn ws ->
-      WorkspaceState.set_mouse(ws, fun.(ws.mouse))
+      SessionState.set_mouse(ws, fun.(ws.mouse))
     end)
   end
 
@@ -461,7 +461,7 @@ defmodule MingaEditor.Mouse do
   defp handle_left_press(state, row, col, mods, native_click_count) do
     # Record press for multi-click detection
     mouse = MouseState.record_press(state.workspace.mouse, row, col, native_click_count)
-    state = EditorState.update_workspace(state, &WorkspaceState.set_mouse(&1, mouse))
+    state = EditorState.update_workspace(state, &SessionState.set_mouse(&1, mouse))
     click_count = mouse.click_count
 
     # Check modifier clicks first
@@ -840,7 +840,7 @@ defmodule MingaEditor.Mouse do
 
       state =
         EditorState.update_workspace(state, fn workspace ->
-          WorkspaceState.set_windows(workspace, windows)
+          SessionState.set_windows(workspace, windows)
         end)
 
       {:ok, resize_windows_to_layout(state)}
@@ -862,8 +862,8 @@ defmodule MingaEditor.Mouse do
         state =
           EditorState.update_workspace(state, fn workspace ->
             workspace
-            |> WorkspaceState.set_windows(windows)
-            |> WorkspaceState.set_mouse(mouse)
+            |> SessionState.set_windows(windows)
+            |> SessionState.set_mouse(mouse)
           end)
 
         resize_windows_to_layout(state)
@@ -1201,8 +1201,8 @@ defmodule MingaEditor.Mouse do
        ) do
     EditorState.update_workspace(state, fn workspace ->
       workspace
-      |> WorkspaceState.set_file_tree(FileTreeState.unfocus(workspace.file_tree))
-      |> WorkspaceState.set_keymap_scope(:editor)
+      |> SessionState.set_file_tree(FileTreeState.unfocus(workspace.file_tree))
+      |> SessionState.set_keymap_scope(:editor)
     end)
   end
 

@@ -617,7 +617,7 @@ defmodule MingaEditor.Commands do
     if state.workspace.file_tree.tree != nil do
       EditorState.update_workspace(
         state,
-        &MingaEditor.Workspace.State.set_keymap_scope(&1, :file_tree)
+        &MingaEditor.Session.State.set_keymap_scope(&1, :file_tree)
       )
     else
       state

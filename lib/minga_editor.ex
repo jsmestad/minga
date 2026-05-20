@@ -88,9 +88,9 @@ defmodule MingaEditor do
 
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.VimState
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State.LSP, as: LSPState
-  alias MingaEditor.State.Session, as: SessionState
+  alias MingaEditor.State.Session, as: EditorSessionState
 
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
@@ -439,7 +439,7 @@ defmodule MingaEditor do
     new_state = %{
       (state
        |> EditorState.set_terminal_viewport(vp)
-       |> EditorState.update_workspace(&WorkspaceState.set_viewport(&1, vp)))
+       |> EditorState.update_workspace(&SessionState.set_viewport(&1, vp)))
       | capabilities: caps,
         layout: nil
     }
@@ -459,7 +459,7 @@ defmodule MingaEditor do
     # to avoid non-deterministic timer messages during tests.
     new_state =
       if new_state.backend != :headless do
-        %{new_state | session: SessionState.start_timer(new_state.session)}
+        %{new_state | session: EditorSessionState.start_timer(new_state.session)}
       else
         new_state
       end
@@ -488,7 +488,7 @@ defmodule MingaEditor do
     new_state =
       state
       |> EditorState.set_terminal_viewport(vp)
-      |> EditorState.update_workspace(&WorkspaceState.set_viewport(&1, vp))
+      |> EditorState.update_workspace(&SessionState.set_viewport(&1, vp))
 
     # Invalidate the cached layout so resize_all_windows computes fresh
     # rectangles from the new viewport dimensions.
@@ -1411,7 +1411,7 @@ defmodule MingaEditor do
 
   @spec set_lsp_pending(state(), %{reference() => atom() | tuple()}) :: state()
   defp set_lsp_pending(state, pending) do
-    EditorState.update_workspace(state, &WorkspaceState.set_lsp_pending(&1, pending))
+    EditorState.update_workspace(state, &SessionState.set_lsp_pending(&1, pending))
   end
 
   @spec delete_lsp_pending(state(), reference()) :: state()
@@ -1719,10 +1719,10 @@ defmodule MingaEditor do
   end
 
   defp apply_effect(state, {:restart_session_timer}),
-    do: %{state | session: SessionState.restart_timer(state.session)}
+    do: %{state | session: EditorSessionState.restart_timer(state.session)}
 
   defp apply_effect(state, {:cancel_session_timer}),
-    do: %{state | session: SessionState.cancel_timer(state.session)}
+    do: %{state | session: EditorSessionState.cancel_timer(state.session)}
 
   defp apply_effect(state, {:recover_swap_entries, entries}),
     do: recover_swap_entries(state, entries)
@@ -2033,7 +2033,7 @@ defmodule MingaEditor do
     new_state = register_buffer(state, pid, path)
 
     EditorState.update_workspace(new_state, fn ws ->
-      WorkspaceState.set_file_tree(
+      SessionState.set_file_tree(
         ws,
         FileTreeState.set_tree(ws.file_tree, FileTree.reveal(tree, path))
       )
@@ -2064,7 +2064,7 @@ defmodule MingaEditor do
 
   @spec maybe_check_swap_recovery(state()) :: :ok
   defp maybe_check_swap_recovery(state) do
-    if SessionState.swap_enabled?(state.session) and state.backend != :headless do
+    if EditorSessionState.swap_enabled?(state.session) and state.backend != :headless do
       send(self(), :check_swap_recovery)
     end
 
@@ -2074,7 +2074,7 @@ defmodule MingaEditor do
   # Restores open files and cursor positions from the previous session.
   @spec restore_session(state()) :: state()
   defp restore_session(state) do
-    case Session.load(SessionState.session_opts(state.session)) do
+    case Session.load(EditorSessionState.session_opts(state.session)) do
       {:ok, session} ->
         state = log_message(state, "Restored from previous session")
         Enum.reduce(session.buffers, state, &restore_session_buffer/2)
@@ -2177,7 +2177,7 @@ defmodule MingaEditor do
   defp register_buffer_background(state, buffer_pid, file_path) do
     state =
       EditorState.update_workspace(state, fn ws ->
-        WorkspaceState.set_buffers(ws, Buffers.add_background(ws.buffers, buffer_pid))
+        SessionState.set_buffers(ws, Buffers.add_background(ws.buffers, buffer_pid))
       end)
 
     state = EditorState.monitor_buffer(state, buffer_pid)
@@ -2331,7 +2331,7 @@ defmodule MingaEditor do
         ft = FileTreeState.update_editing_text(state.workspace.file_tree, text)
 
         state =
-          EditorState.update_workspace(state, &WorkspaceState.set_file_tree(&1, ft))
+          EditorState.update_workspace(state, &SessionState.set_file_tree(&1, ft))
 
         Commands.FileTree.confirm_editing(state)
     end
@@ -2619,7 +2619,7 @@ defmodule MingaEditor do
     # Set the search pattern and execute search_next/search_prev
     state =
       EditorState.update_workspace(state, fn ws ->
-        WorkspaceState.set_search(ws, SearchData.record(ws.search, text, :forward))
+        SessionState.set_search(ws, SearchData.record(ws.search, text, :forward))
       end)
 
     cmd = if direction == 1, do: :search_prev, else: :search_next
@@ -2643,7 +2643,7 @@ defmodule MingaEditor do
 
         new_state =
           EditorState.update_workspace(state, fn ws ->
-            WorkspaceState.set_windows(ws, Windows.set_map(ws.windows, new_map))
+            SessionState.set_windows(ws, Windows.set_map(ws.windows, new_map))
           end)
 
         Renderer.render_or_async(new_state)
@@ -2852,7 +2852,7 @@ defmodule MingaEditor do
   defp move_tree_cursor(state, index) do
     EditorState.update_workspace(state, fn ws ->
       tree = FileTree.select(ws.file_tree.tree, index)
-      WorkspaceState.set_file_tree(ws, FileTreeState.set_tree(ws.file_tree, tree))
+      SessionState.set_file_tree(ws, FileTreeState.set_tree(ws.file_tree, tree))
     end)
   end
 
@@ -2934,8 +2934,8 @@ defmodule MingaEditor do
         end
 
       workspace
-      |> WorkspaceState.set_buffers(buffers)
-      |> WorkspaceState.sync_active_window_buffer()
+      |> SessionState.set_buffers(buffers)
+      |> SessionState.sync_active_window_buffer()
     end)
   end
 
@@ -2993,8 +2993,8 @@ defmodule MingaEditor do
       state
       |> EditorState.update_workspace(fn workspace ->
         workspace
-        |> WorkspaceState.set_buffers(Buffers.add(workspace.buffers, buffer_pid))
-        |> WorkspaceState.sync_active_window_buffer()
+        |> SessionState.set_buffers(Buffers.add(workspace.buffers, buffer_pid))
+        |> SessionState.sync_active_window_buffer()
       end)
       |> EditorState.monitor_buffer(buffer_pid)
 
@@ -3192,8 +3192,8 @@ defmodule MingaEditor do
   defp unfocus_file_tree_for_split(state) do
     EditorState.update_workspace(state, fn workspace ->
       workspace
-      |> WorkspaceState.set_file_tree(MingaEditor.State.FileTree.unfocus(workspace.file_tree))
-      |> WorkspaceState.set_keymap_scope(:editor)
+      |> SessionState.set_file_tree(MingaEditor.State.FileTree.unfocus(workspace.file_tree))
+      |> SessionState.set_keymap_scope(:editor)
     end)
   end
 
@@ -3297,7 +3297,7 @@ defmodule MingaEditor do
   @spec set_vim_mode_state(state(), term()) :: state()
   defp set_vim_mode_state(state, new_ms) do
     EditorState.update_workspace(state, fn ws ->
-      WorkspaceState.update_editing(ws, &VimState.set_mode_state(&1, new_ms))
+      SessionState.update_editing(ws, &VimState.set_mode_state(&1, new_ms))
     end)
   end
 end

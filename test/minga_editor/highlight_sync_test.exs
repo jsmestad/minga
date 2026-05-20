@@ -16,7 +16,7 @@ defmodule MingaEditor.HighlightSyncTest do
 
     %EditorState{
       port_manager: nil,
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new()
       }
@@ -92,7 +92,7 @@ defmodule MingaEditor.HighlightSyncTest do
     test "returns state unchanged when no buffer" do
       state = %EditorState{
         port_manager: nil,
-        workspace: %MingaEditor.Workspace.State{
+        workspace: %MingaEditor.Session.State{
           viewport: Viewport.new(24, 80),
           editing: VimState.new()
         }
@@ -208,7 +208,7 @@ defmodule MingaEditor.HighlightSyncTest do
     test "returns state unchanged when no buffer" do
       state = %EditorState{
         port_manager: nil,
-        workspace: %MingaEditor.Workspace.State{
+        workspace: %MingaEditor.Session.State{
           viewport: Viewport.new(24, 80),
           editing: VimState.new()
         }

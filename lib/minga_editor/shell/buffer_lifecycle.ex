@@ -9,7 +9,7 @@ defmodule MingaEditor.Shell.BufferLifecycle do
   @type shell_state :: term()
 
   @typedoc "Workspace state."
-  @type workspace :: MingaEditor.Workspace.State.t()
+  @type workspace :: MingaEditor.Session.State.t()
 
   @typedoc """
   Why a buffer was added. Shells use this to decide tab presentation.

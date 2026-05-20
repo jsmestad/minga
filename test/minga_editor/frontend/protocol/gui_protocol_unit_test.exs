@@ -9,9 +9,9 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
-  alias MingaEditor.Workspace.ChromeState
-  alias MingaEditor.Workspace.ChromeState.TabSummary
-  alias MingaEditor.Workspace.ChromeState.WorkspaceSummary
+  alias MingaEditor.Session.ChromeState
+  alias MingaEditor.Session.ChromeState.TabSummary
+  alias MingaEditor.Session.ChromeState.WorkspaceSummary
 
   describe "encode_gui_tab_bar/1 with group_id" do
     test "tab entry includes group_id in wire format" do

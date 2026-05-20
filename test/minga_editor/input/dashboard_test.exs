@@ -12,7 +12,7 @@ defmodule MingaEditor.Input.DashboardTest do
   defp state_with_dashboard do
     base = %EditorState{
       port_manager: self(),
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: nil}
       },
@@ -93,7 +93,7 @@ defmodule MingaEditor.Input.DashboardTest do
 
       state = %EditorState{
         port_manager: self(),
-        workspace: %MingaEditor.Workspace.State{
+        workspace: %MingaEditor.Session.State{
           viewport: Viewport.new(24, 80),
           buffers: %Buffers{active: buf, list: [buf]}
         },
@@ -106,7 +106,7 @@ defmodule MingaEditor.Input.DashboardTest do
     test "passes through when modal is :none" do
       state = %EditorState{
         port_manager: self(),
-        workspace: %MingaEditor.Workspace.State{
+        workspace: %MingaEditor.Session.State{
           viewport: Viewport.new(24, 80),
           buffers: %Buffers{active: nil}
         },

@@ -26,7 +26,7 @@ defmodule MingaEditor.State.KeymapServerThreadingTest do
     %EditorState{
       port_manager: self(),
       keymap_server: keymap_server,
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
         buffers: %Buffers{active: nil, list: []},
@@ -67,7 +67,7 @@ defmodule MingaEditor.State.KeymapServerThreadingTest do
   test "EditorState defaults keymap_server to Minga.Keymap.default_server/0" do
     state = %EditorState{
       port_manager: self(),
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
         buffers: %Buffers{active: nil, list: []}

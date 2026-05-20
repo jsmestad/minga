@@ -20,7 +20,7 @@ defmodule MingaEditor.MouseTest do
   alias MingaEditor.State.Windows
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   @content_row 1
   @gutter 6
@@ -429,7 +429,7 @@ defmodule MingaEditor.MouseTest do
 
   defp set_window_tree(state, tree) do
     windows = Windows.set_tree(state.workspace.windows, tree)
-    EditorState.update_workspace(state, &WorkspaceState.set_windows(&1, windows))
+    EditorState.update_workspace(state, &SessionState.set_windows(&1, windows))
   end
 
   defp set_active_fold_ranges(state, ranges) do

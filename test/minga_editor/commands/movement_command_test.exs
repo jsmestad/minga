@@ -19,7 +19,7 @@ defmodule MingaEditor.Commands.MovementCommandTest do
   alias MingaEditor.VimState
   alias MingaEditor.Viewport
   alias MingaEditor.Window
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   defp start_buffer(content) do
     start_supervised!({BufferProcess, content: content})
@@ -34,7 +34,7 @@ defmodule MingaEditor.Commands.MovementCommandTest do
     %EditorState{
       port_manager: nil,
       terminal_viewport: Viewport.new(rows, cols),
-      workspace: %WorkspaceState{
+      workspace: %SessionState{
         viewport: Viewport.new(rows, cols),
         buffers: %Buffers{active: buf, list: [buf]},
         windows: %Windows{tree: {:leaf, 1}, map: %{1 => window}, active: 1, next_id: 2},

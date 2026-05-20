@@ -7,12 +7,12 @@ defmodule MingaEditor.Commands.BufferManagement.FrontendTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.Viewport
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   defp base_state(opts \\ []) do
     %EditorState{
       port_manager: nil,
-      workspace: %WorkspaceState{
+      workspace: %SessionState{
         viewport: Viewport.new(40, 120),
         buffers: %Buffers{messages: Keyword.get(opts, :messages)}
       }

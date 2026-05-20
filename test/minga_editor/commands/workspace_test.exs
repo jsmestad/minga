@@ -22,7 +22,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.State.WorkspaceReview
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   @moduletag :tmp_dir
 
@@ -50,7 +50,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
     %EditorState{
       port_manager: self(),
-      workspace: %WorkspaceState{
+      workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: buf, list: [buf]},
         windows: %Windows{
@@ -65,7 +65,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
   end
 
   defp manual_workspace_state(buffer, mode) do
-    %WorkspaceState{
+    %SessionState{
       viewport: Viewport.new(24, 80),
       keymap_scope: :editor,
       buffers: %Buffers{active: buffer, list: [buffer], active_index: 0},
@@ -80,7 +80,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
   end
 
   defp agent_workspace_state(buffer, mode) do
-    %WorkspaceState{
+    %SessionState{
       viewport: Viewport.new(24, 80),
       keymap_scope: :agent,
       buffers: %Buffers{active: buffer, list: [buffer], active_index: 0},

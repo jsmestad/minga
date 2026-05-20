@@ -42,7 +42,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
 
       state = %EditorState{
         port_manager: self(),
-        workspace: %MingaEditor.Workspace.State{
+        workspace: %MingaEditor.Session.State{
           viewport: Viewport.new(24, 80),
           buffers: %Buffers{},
           windows: %Windows{},
@@ -266,7 +266,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
   defp state_without_agent_tabs do
     %EditorState{
       port_manager: self(),
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{},
         windows: %Windows{},
@@ -348,7 +348,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
 
     %EditorState{
       port_manager: self(),
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{},
         windows: %Windows{},
@@ -374,7 +374,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
 
     %EditorState{
       port_manager: self(),
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{},
         windows: %Windows{},
@@ -413,7 +413,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
 
     %EditorState{
       port_manager: self(),
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{},
         windows: %Windows{},

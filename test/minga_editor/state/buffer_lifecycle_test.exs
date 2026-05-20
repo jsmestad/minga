@@ -16,7 +16,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
   alias MingaEditor.Window
   alias MingaEditor.Window.Content
   alias MingaEditor.WindowTree
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -44,7 +44,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
 
     state = %EditorState{
       port_manager: self(),
-      workspace: %WorkspaceState{
+      workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         keymap_scope: :agent,
@@ -187,7 +187,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
 
       state = %EditorState{
         port_manager: self(),
-        workspace: %WorkspaceState{
+        workspace: %SessionState{
           viewport: Viewport.new(24, 80),
           editing: VimState.new(),
           buffers: %Buffers{active: agent_buf, list: [agent_buf], active_index: 0},
@@ -303,7 +303,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       refute buf_b in tab_b_after.context.buffers.list
       assert tab_b_after.context.buffers.active != buf_b
 
-      restored_ws = WorkspaceState.restore_tab_context(new_state.workspace, tab_b_after.context)
+      restored_ws = SessionState.restore_tab_context(new_state.workspace, tab_b_after.context)
       refute buf_b in restored_ws.buffers.list
       assert restored_ws.buffers.active != buf_b
 
@@ -327,7 +327,7 @@ defmodule MingaEditor.State.BufferLifecycleTest do
 
     %EditorState{
       port_manager: self(),
-      workspace: %WorkspaceState{
+      workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         buffers: buffers,

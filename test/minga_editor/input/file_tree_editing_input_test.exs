@@ -34,7 +34,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
 
     %EditorState{
       port_manager: self(),
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         file_tree: %FileTreeState{} |> FileTreeState.open(tree, buf),
         keymap_scope: :file_tree
@@ -153,7 +153,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       state =
         EditorState.update_workspace(
           state,
-          &MingaEditor.Workspace.State.set_file_tree(&1, file_tree)
+          &MingaEditor.Session.State.set_file_tree(&1, file_tree)
         )
 
       {:handled, state} = FileTreeHandler.handle_key(state, ?/, 0)
@@ -181,7 +181,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       state =
         EditorState.update_workspace(
           state,
-          &MingaEditor.Workspace.State.set_file_tree(&1, file_tree)
+          &MingaEditor.Session.State.set_file_tree(&1, file_tree)
         )
 
       {:handled, state} = FileTreeHandler.handle_key(state, @escape, 0)
@@ -236,7 +236,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
 
     EditorState.update_workspace(
       state,
-      &MingaEditor.Workspace.State.set_file_tree(&1, file_tree)
+      &MingaEditor.Session.State.set_file_tree(&1, file_tree)
     )
   end
 

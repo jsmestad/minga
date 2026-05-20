@@ -7,12 +7,12 @@ defmodule MingaEditor.Shell.Traditional.BackgroundSubagentTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.Viewport
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   test "background subagent event creates one agent tab for the child session" do
     handle = background_handle(session_id: "session-2", pid: self(), task: "write tests")
     shell_state = %ShellState{tab_bar: TabBar.new(Tab.new_file(1, "editor.ex"))}
-    workspace = %WorkspaceState{viewport: Viewport.new(24, 80)}
+    workspace = %SessionState{viewport: Viewport.new(24, 80)}
 
     {shell_state, ^workspace} =
       Traditional.handle_event(shell_state, workspace, {:background_subagent_started, handle})
@@ -31,7 +31,7 @@ defmodule MingaEditor.Shell.Traditional.BackgroundSubagentTest do
   test "duplicate background subagent event for the same pid does not create another tab" do
     handle = background_handle(session_id: "session-3", pid: self(), task: "avoid duplicates")
     shell_state = %ShellState{tab_bar: TabBar.new(Tab.new_file(1, "editor.ex"))}
-    workspace = %WorkspaceState{viewport: Viewport.new(24, 80)}
+    workspace = %SessionState{viewport: Viewport.new(24, 80)}
 
     {shell_state, ^workspace} =
       Traditional.handle_event(shell_state, workspace, {:background_subagent_started, handle})

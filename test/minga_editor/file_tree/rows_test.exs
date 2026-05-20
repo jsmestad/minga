@@ -12,7 +12,7 @@ defmodule MingaEditor.FileTree.RowsTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -318,7 +318,7 @@ defmodule MingaEditor.FileTree.RowsTest do
     tree = FileTree.new(root)
     file_tree = FileTreeState.open(%FileTreeState{}, tree, nil)
 
-    EditorState.update_workspace(base_state(), &WorkspaceState.set_file_tree(&1, file_tree))
+    EditorState.update_workspace(base_state(), &SessionState.set_file_tree(&1, file_tree))
   end
 
   defp put_buffers(state, [active | _rest] = buffers) do

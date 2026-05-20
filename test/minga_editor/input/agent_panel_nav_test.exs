@@ -46,7 +46,7 @@ defmodule MingaEditor.Input.AgentPanelNavTest do
 
     %EditorState{
       port_manager: self(),
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         agent_ui: agentic
       },

@@ -25,7 +25,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
   alias MingaEditor.Shell.Traditional.Modeline
   alias MingaEditor.Shell.Traditional.GitStatusRenderer
   alias MingaEditor.Shell.Traditional.TreeRenderer
-  alias MingaEditor.Workspace.ChromeState
+  alias MingaEditor.Session.ChromeState
   alias MingaEditor.UI.Popup.Lifecycle, as: PopupLifecycle
 
   @typedoc "Internal editor state."

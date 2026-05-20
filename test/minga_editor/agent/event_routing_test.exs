@@ -31,9 +31,9 @@ defmodule MingaEditor.Agent.EventRoutingTest do
   alias MingaEditor.State.Workspace
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
-  defp workspace, do: %WorkspaceState{viewport: Viewport.new(24, 80), editing: VimState.new()}
+  defp workspace, do: %SessionState{viewport: Viewport.new(24, 80), editing: VimState.new()}
 
   defp fake_session_pid do
     pid =
@@ -182,7 +182,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       state = %EditorState{
         port_manager: self(),
         shell: Traditional,
-        workspace: %WorkspaceState{
+        workspace: %SessionState{
           viewport: Viewport.new(24, 80),
           file_tree: %FileTreeState{project_root: root}
         },
@@ -227,7 +227,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       state = %EditorState{
         port_manager: self(),
         shell: Traditional,
-        workspace: %WorkspaceState{
+        workspace: %SessionState{
           viewport: Viewport.new(24, 80),
           file_tree: %FileTreeState{project_root: root}
         },
@@ -268,7 +268,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       state = %EditorState{
         port_manager: self(),
         shell: Traditional,
-        workspace: %WorkspaceState{
+        workspace: %SessionState{
           viewport: Viewport.new(24, 80),
           file_tree: %FileTreeState{project_root: root}
         },
@@ -298,7 +298,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       state = %EditorState{
         port_manager: self(),
         shell: Traditional,
-        workspace: %WorkspaceState{
+        workspace: %SessionState{
           viewport: Viewport.new(24, 80),
           file_tree: %FileTreeState{project_root: root}
         },

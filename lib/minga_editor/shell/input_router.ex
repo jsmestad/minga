@@ -12,7 +12,7 @@ defmodule MingaEditor.Shell.InputRouter do
   @type shell_state :: term()
 
   @typedoc "Workspace state (the editing context shared by all shells)."
-  @type workspace :: MingaEditor.Workspace.State.t()
+  @type workspace :: MingaEditor.Session.State.t()
 
   @doc """
   Returns the input handler stack for this shell. Overlay handlers

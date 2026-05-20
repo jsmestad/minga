@@ -17,7 +17,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceSymbolSource do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.VimState
   alias Minga.LSP.Client
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
   alias Minga.LSP.SyncServer
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
@@ -121,7 +121,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceSymbolSource do
     pos = Buffer.cursor(buf)
 
     EditorState.update_workspace(state, fn ws ->
-      WorkspaceState.update_editing(ws, &VimState.set_last_jump_pos(&1, pos))
+      SessionState.update_editing(ws, &VimState.set_last_jump_pos(&1, pos))
     end)
   end
 

@@ -16,12 +16,12 @@ defmodule MingaEditor.StateTest do
   alias MingaEditor.Window
   alias MingaEditor.Window.Content
   alias MingaEditor.WindowTree
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   defp new_state do
     %EditorState{
       port_manager: nil,
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new()
       }
@@ -240,7 +240,7 @@ defmodule MingaEditor.StateTest do
 
       state = %EditorState{
         port_manager: self(),
-        workspace: %WorkspaceState{
+        workspace: %SessionState{
           viewport: Viewport.new(24, 80),
           file_tree: %FileTreeState{project_root: root}
         },
@@ -327,7 +327,7 @@ defmodule MingaEditor.StateTest do
 
       state = %EditorState{
         port_manager: self(),
-        workspace: %WorkspaceState{
+        workspace: %SessionState{
           viewport: Viewport.new(24, 80),
           file_tree: %FileTreeState{project_root: root},
           buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0}

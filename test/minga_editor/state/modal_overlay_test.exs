@@ -14,12 +14,12 @@ defmodule MingaEditor.State.ModalOverlayTest do
   alias MingaEditor.State.Prompt, as: PromptLegacy
   alias MingaEditor.UI.Picker, as: UIPicker
   alias MingaEditor.Viewport
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   defp base_state do
     %EditorState{
       port_manager: nil,
-      workspace: %WorkspaceState{
+      workspace: %SessionState{
         viewport: %Viewport{top: 0, left: 0, rows: 10, cols: 40}
       },
       shell_state: %ShellState{}

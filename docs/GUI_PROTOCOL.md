@@ -768,7 +768,7 @@ When the git status panel is closed, the BEAM sends `repo_state = not_a_repo`, n
 
 Agent-workspace indicator and dropdown data for progressive tab grouping. Sent alongside gui_tab_bar when agent workspaces exist.
 
-This is the legacy agent-group opcode. The BEAM-side `Workspace.ChromeState` projection includes the synthesized manual workspace, but this opcode sends only agent workspaces so existing native decoders do not infer a manual workspace from the agent-group payload. A later canonical workspace opcode can carry manual-vs-agent kind explicitly.
+This is the legacy agent-group opcode. The BEAM-side `Session.ChromeState` projection includes the synthesized manual workspace, but this opcode sends only agent workspaces so existing native decoders do not infer a manual workspace from the agent-group payload. A later canonical workspace opcode can carry manual-vs-agent kind explicitly.
 
 ```
 opcode(1) + active_workspace_id(2) + agent_workspace_count(1) + agent_workspaces...

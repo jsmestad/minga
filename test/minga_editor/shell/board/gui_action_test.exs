@@ -12,7 +12,7 @@ defmodule MingaEditor.Shell.Board.GUIActionTest do
   alias MingaEditor.State.Tab.Context
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   @moduletag :tmp_dir
 
@@ -24,7 +24,7 @@ defmodule MingaEditor.Shell.Board.GUIActionTest do
       restore_env("HOME", old_home)
     end)
 
-    %{workspace: %WorkspaceState{viewport: Viewport.new(24, 80)}}
+    %{workspace: %SessionState{viewport: Viewport.new(24, 80)}}
   end
 
   describe "handle_event/3" do
@@ -101,13 +101,13 @@ defmodule MingaEditor.Shell.Board.GUIActionTest do
          } do
       transient_vim = %VimState{mode: :normal, mode_state: %Minga.Mode.CommandState{}}
       workspace = %{workspace | editing: transient_vim}
-      previous_workspace = %WorkspaceState{viewport: Viewport.new(10, 20), keymap_scope: :agent}
+      previous_workspace = %SessionState{viewport: Viewport.new(10, 20), keymap_scope: :agent}
       board = BoardState.new()
 
       {board, card} =
         BoardState.create_card(board,
           task: "Agent",
-          workspace: WorkspaceState.to_tab_context(previous_workspace)
+          workspace: SessionState.to_tab_context(previous_workspace)
         )
 
       {board, restored_workspace} =

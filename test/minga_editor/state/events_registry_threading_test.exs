@@ -15,7 +15,7 @@ defmodule MingaEditor.State.EventsRegistryThreadingTest do
     %EditorState{
       port_manager: self(),
       events_registry: events_registry,
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
         buffers: %Buffers{active: nil, list: []}
@@ -56,7 +56,7 @@ defmodule MingaEditor.State.EventsRegistryThreadingTest do
   test "EditorState defaults events_registry to Minga.Events.default_registry/0" do
     state = %EditorState{
       port_manager: self(),
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
         buffers: %Buffers{active: nil, list: []}

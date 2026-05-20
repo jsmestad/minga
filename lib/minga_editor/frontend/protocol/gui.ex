@@ -111,9 +111,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   alias Minga.Language
   alias MingaEditor.UI.Devicon
   alias MingaEditor.UI.Theme.Slots
-  alias MingaEditor.Workspace.ChromeState
-  alias MingaEditor.Workspace.ChromeState.TabSummary
-  alias MingaEditor.Workspace.ChromeState.WorkspaceSummary
+  alias MingaEditor.Session.ChromeState
+  alias MingaEditor.Session.ChromeState.TabSummary
+  alias MingaEditor.Session.ChromeState.WorkspaceSummary
 
   alias Minga.Protocol.Opcodes
 

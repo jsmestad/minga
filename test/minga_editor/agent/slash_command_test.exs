@@ -131,7 +131,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       %EditorState{
         port_manager: nil,
         shell: MingaEditor.Shell.Traditional,
-        workspace: %MingaEditor.Workspace.State{
+        workspace: %MingaEditor.Session.State{
           viewport: Viewport.new(24, 80),
           editing: VimState.new(),
           agent_ui: UIState.new()

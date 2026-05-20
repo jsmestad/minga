@@ -1,4 +1,4 @@
-defmodule MingaEditor.Workspace.ChromeState do
+defmodule MingaEditor.Session.ChromeState do
   @moduledoc """
   Shared workspace chrome projection for GUI and TUI renderers.
 
@@ -15,8 +15,8 @@ defmodule MingaEditor.Workspace.ChromeState do
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
   alias MingaEditor.UI.Devicon
-  alias MingaEditor.Workspace.ChromeState.TabSummary
-  alias MingaEditor.Workspace.ChromeState.WorkspaceSummary
+  alias MingaEditor.Session.ChromeState.TabSummary
+  alias MingaEditor.Session.ChromeState.WorkspaceSummary
 
   @manual_workspace_id 0
   @manual_workspace_color 0

@@ -15,7 +15,7 @@ defmodule MingaEditor.State.Tab.Context do
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   @version 1
 
@@ -107,8 +107,8 @@ defmodule MingaEditor.State.Tab.Context do
   end
 
   @doc "Creates a tab context directly from a workspace struct, without intermediate map conversion."
-  @spec from_workspace(WorkspaceState.t()) :: t()
-  def from_workspace(%WorkspaceState{} = ws) do
+  @spec from_workspace(SessionState.t()) :: t()
+  def from_workspace(%SessionState{} = ws) do
     editing = VimState.normalize(ws.editing)
 
     %__MODULE__{

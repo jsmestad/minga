@@ -13,7 +13,7 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Window
   alias Minga.Test.HeadlessPort
   alias Minga.Test.StubServer
@@ -55,7 +55,7 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
 
       manual_tab =
         Tab.new_file(1, "unnamed")
-        |> Tab.set_context(WorkspaceState.to_tab_context(state.workspace))
+        |> Tab.set_context(SessionState.to_tab_context(state.workspace))
 
       agent_tab_bar = TabBar.new(manual_tab)
       {agent_tab_bar, agent_tab} = TabBar.add(agent_tab_bar, :agent, "Agent")

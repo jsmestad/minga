@@ -15,7 +15,7 @@ defmodule MingaEditor.StatusBar.DataTest do
   alias MingaEditor.Viewport
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   test "from_state leaves GUI modeline segments detached by default" do
     state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
@@ -89,7 +89,7 @@ defmodule MingaEditor.StatusBar.DataTest do
     state = %EditorState{
       port_manager: self(),
       options_server: options,
-      workspace: %WorkspaceState{viewport: Viewport.new(24, 80)},
+      workspace: %SessionState{viewport: Viewport.new(24, 80)},
       shell_state: %MingaEditor.Shell.Traditional.State{}
     }
 
@@ -145,7 +145,7 @@ defmodule MingaEditor.StatusBar.DataTest do
   defp state_with_tab_bar(tab_bar) do
     %EditorState{
       port_manager: self(),
-      workspace: %WorkspaceState{viewport: Viewport.new(24, 80)},
+      workspace: %SessionState{viewport: Viewport.new(24, 80)},
       shell_state: %MingaEditor.Shell.Traditional.State{tab_bar: tab_bar}
     }
   end
@@ -167,7 +167,7 @@ defmodule MingaEditor.StatusBar.DataTest do
   end
 
   defp workspace_with_buffer(buf) do
-    %WorkspaceState{
+    %SessionState{
       viewport: Viewport.new(24, 80),
       buffers: %Buffers{list: [buf], active_index: 0, active: buf},
       windows: %Windows{

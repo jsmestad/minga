@@ -23,7 +23,7 @@ defmodule MingaEditor.Input.CompletionMouseTest do
         modal: {:completion, payload},
         whichkey: %WhichKey{}
       },
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         editing: %VimState{mode: mode, mode_state: Mode.initial_state()},
         viewport: Viewport.new(30, 80)
       }
@@ -61,7 +61,7 @@ defmodule MingaEditor.Input.CompletionMouseTest do
       state = %EditorState{
         port_manager: nil,
         shell_state: %MingaEditor.Shell.Traditional.State{whichkey: %WhichKey{}},
-        workspace: %MingaEditor.Workspace.State{
+        workspace: %MingaEditor.Session.State{
           editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
           viewport: Viewport.new(30, 80)
         }

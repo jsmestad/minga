@@ -23,7 +23,7 @@ defmodule MingaEditor.Shell.Board.SessionLifecycleTest do
       port_manager: self(),
       shell: Board,
       shell_state: board,
-      workspace: %MingaEditor.Workspace.State{viewport: Viewport.new(24, 80)},
+      workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
       focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
     }
   end

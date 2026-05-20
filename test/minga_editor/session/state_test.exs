@@ -1,6 +1,6 @@
-defmodule MingaEditor.Workspace.StateTest do
+defmodule MingaEditor.Session.StateTest do
   @moduledoc """
-  Pure-function tests for `MingaEditor.Workspace.State`.
+  Pure-function tests for `MingaEditor.Session.State`.
 
   Uses `RenderPipeline.TestHelpers.base_state/1` to construct state
   without starting a GenServer.
@@ -15,7 +15,7 @@ defmodule MingaEditor.Workspace.StateTest do
   alias MingaEditor.State.Tab.Context
   alias MingaEditor.Window
   alias MingaEditor.Window.Content
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -38,7 +38,7 @@ defmodule MingaEditor.Workspace.StateTest do
       assert window.content == {:buffer, original_buf}
 
       # sync should update the window to point at the new buffer
-      ws = WorkspaceState.sync_active_window_buffer(ws)
+      ws = SessionState.sync_active_window_buffer(ws)
 
       updated_window = Map.get(ws.windows.map, win_id)
       assert updated_window.buffer == new_buf
@@ -61,7 +61,7 @@ defmodule MingaEditor.Workspace.StateTest do
       ws = %{ws | buffers: %{ws.buffers | active: new_buf}}
 
       # sync should NOT touch the agent_chat window
-      ws = WorkspaceState.sync_active_window_buffer(ws)
+      ws = SessionState.sync_active_window_buffer(ws)
 
       result_window = Map.get(ws.windows.map, win_id)
       assert result_window.content == {:agent_chat, agent_pid}
@@ -77,7 +77,7 @@ defmodule MingaEditor.Workspace.StateTest do
 
       workspace =
         state.workspace
-        |> WorkspaceState.update_window(win_id, &Window.set_document_symbols(&1, symbols))
+        |> SessionState.update_window(win_id, &Window.set_document_symbols(&1, symbols))
         |> then(fn ws ->
           %{
             ws
@@ -90,7 +90,7 @@ defmodule MingaEditor.Workspace.StateTest do
           }
         end)
 
-      synced = WorkspaceState.sync_active_window_buffer(workspace)
+      synced = SessionState.sync_active_window_buffer(workspace)
       window = Map.fetch!(synced.windows.map, win_id)
 
       assert window.document_symbols == []
@@ -102,7 +102,7 @@ defmodule MingaEditor.Workspace.StateTest do
       ws = base_state().workspace
       replacement = %{ws.buffers | active: nil, list: [], active_index: 0}
 
-      restored = WorkspaceState.restore_tab_context(ws, %{buffers: replacement})
+      restored = SessionState.restore_tab_context(ws, %{buffers: replacement})
 
       assert restored.buffers == replacement
       assert restored.windows == ws.windows
@@ -112,7 +112,7 @@ defmodule MingaEditor.Workspace.StateTest do
     test "ignores fields that are not part of the workspace" do
       ws = base_state().workspace
 
-      restored = WorkspaceState.restore_tab_context(ws, %{unknown_field: :ignored})
+      restored = SessionState.restore_tab_context(ws, %{unknown_field: :ignored})
 
       assert restored == ws
     end
@@ -121,13 +121,13 @@ defmodule MingaEditor.Workspace.StateTest do
   describe "to_tab_context/1" do
     test "returns a typed context of workspace fields" do
       ws = base_state().workspace
-      ctx = WorkspaceState.to_tab_context(ws)
+      ctx = SessionState.to_tab_context(ws)
 
       assert %Context{} = ctx
       assert ctx.buffers == ws.buffers
       assert ctx.windows == ws.windows
       assert ctx.viewport == ws.viewport
-      assert Enum.sort(WorkspaceState.field_names()) == Enum.sort(ctx.present_fields)
+      assert Enum.sort(SessionState.field_names()) == Enum.sort(ctx.present_fields)
     end
 
     test "normalises an in-flight CommandState back to %Mode.State{} when mode is :normal" do
@@ -139,7 +139,7 @@ defmodule MingaEditor.Workspace.StateTest do
       mismatched = %VimState{mode: :normal, mode_state: %Mode.CommandState{input: ""}}
       ws = %{ws | editing: mismatched}
 
-      ctx = WorkspaceState.to_tab_context(ws)
+      ctx = SessionState.to_tab_context(ws)
 
       assert ctx.editing.mode == :normal
       assert match?(%Mode.State{}, ctx.editing.mode_state)
@@ -151,7 +151,7 @@ defmodule MingaEditor.Workspace.StateTest do
       vim = %VimState{mode: :visual, mode_state: visual_state}
       ws = %{ws | editing: vim}
 
-      ctx = WorkspaceState.to_tab_context(ws)
+      ctx = SessionState.to_tab_context(ws)
 
       # Visual is a context-required mode and the snapshot already had a
       # properly-typed VisualState — the visual_anchor must be preserved

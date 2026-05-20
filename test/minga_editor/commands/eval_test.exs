@@ -24,7 +24,7 @@ defmodule MingaEditor.Commands.EvalTest do
   defp build_state(messages_buf \\ nil) do
     %EditorState{
       port_manager: nil,
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{messages: messages_buf}
       }

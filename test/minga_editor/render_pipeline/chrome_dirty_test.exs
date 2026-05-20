@@ -4,7 +4,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.TestHelpers
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Traditional.GitStatus.TuiState
   alias MingaEditor.Shell.Traditional.State, as: ShellState
 
@@ -190,7 +190,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
             list: [first_buf, second_buf],
             active_index: 1
         })
-        |> update_in([Access.key!(:workspace)], &WorkspaceState.sync_active_window_buffer/1)
+        |> update_in([Access.key!(:workspace)], &SessionState.sync_active_window_buffer/1)
 
       state2 = TestHelpers.run_pipeline(switched)
       fp_after = state2.caches.chrome_prev_fingerprint

@@ -23,7 +23,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
   alias MingaEditor.Window
   alias MingaEditor.Window.Content
   alias MingaEditor.WindowTree
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -53,7 +53,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
 
     state = %EditorState{
       port_manager: self(),
-      workspace: %WorkspaceState{
+      workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         keymap_scope: :agent,
@@ -78,7 +78,7 @@ defmodule MingaEditor.State.ShellCallbacksTest do
 
     state = %EditorState{
       port_manager: self(),
-      workspace: %WorkspaceState{
+      workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         keymap_scope: :agent,

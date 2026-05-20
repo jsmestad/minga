@@ -16,7 +16,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.Viewport
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   @moduletag :tmp_dir
 
@@ -235,7 +235,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
     %EditorState{
       port_manager: self(),
       events_registry: events_registry,
-      workspace: %WorkspaceState{
+      workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: buffers,
         file_tree: FileTreeState.open(%FileTreeState{}, tree, nil),

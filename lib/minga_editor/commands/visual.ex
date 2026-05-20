@@ -13,7 +13,7 @@ defmodule MingaEditor.Commands.Visual do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.VimState
   alias Minga.Mode
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
   alias Minga.Mode.VisualState
 
   @type state :: EditorState.t()
@@ -141,7 +141,7 @@ defmodule MingaEditor.Commands.Visual do
 
         EditorState.update_workspace(
           state,
-          &WorkspaceState.set_editing(&1, VimState.set_mode_state(vim, new_ms))
+          &SessionState.set_editing(&1, VimState.set_mode_state(vim, new_ms))
         )
     end
   end

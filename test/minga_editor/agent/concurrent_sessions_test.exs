@@ -34,7 +34,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
     %EditorState{
       port_manager: self(),
       shell: MingaEditor.Shell.Traditional,
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         keymap_scope: :editor,

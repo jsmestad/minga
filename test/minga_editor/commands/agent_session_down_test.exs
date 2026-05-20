@@ -16,12 +16,12 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.Viewport
-  alias MingaEditor.Workspace
+  alias MingaEditor.Session
 
   defp build_state(tab_bar) do
     state = %EditorState{
       port_manager: nil,
-      workspace: %Workspace.State{viewport: Viewport.new(80, 24)}
+      workspace: %Session.State{viewport: Viewport.new(80, 24)}
     }
 
     EditorState.set_tab_bar(state, tab_bar)

@@ -24,7 +24,7 @@ defmodule MingaEditor.Commands.Movement do
   alias MingaEditor.State.Windows
   alias MingaEditor.VimState
   alias MingaEditor.Viewport
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
   alias Minga.Mode
@@ -259,7 +259,7 @@ defmodule MingaEditor.Commands.Movement do
     Helpers.apply_find_char(buf, dir, char)
 
     EditorState.update_workspace(state, fn ws ->
-      WorkspaceState.update_editing(ws, &VimState.set_last_find_char(&1, {dir, char}))
+      SessionState.update_editing(ws, &VimState.set_last_find_char(&1, {dir, char}))
     end)
   end
 
@@ -535,7 +535,7 @@ defmodule MingaEditor.Commands.Movement do
           |> Windows.set_tree(new_tree)
           |> Windows.add_window(new_window)
 
-        state = EditorState.update_workspace(state, &WorkspaceState.set_windows(&1, new_windows))
+        state = EditorState.update_workspace(state, &SessionState.set_windows(&1, new_windows))
 
         resize_windows_to_layout(state)
 
@@ -565,7 +565,7 @@ defmodule MingaEditor.Commands.Movement do
   defp navigate_window(%{workspace: %{file_tree: %{focused: true}}} = state, :right) do
     state = update_file_tree(state, &FileTreeState.unfocus/1)
     scope = EditorState.scope_for_active_window(state)
-    EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, scope))
+    EditorState.update_workspace(state, &SessionState.set_keymap_scope(&1, scope))
   end
 
   defp navigate_window(state, direction) do
@@ -592,7 +592,7 @@ defmodule MingaEditor.Commands.Movement do
          :left
        ) do
     state = update_file_tree(state, &FileTreeState.focus/1)
-    EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :file_tree))
+    EditorState.update_workspace(state, &SessionState.set_keymap_scope(&1, :file_tree))
   end
 
   defp maybe_focus_file_tree(state, _direction), do: state
@@ -636,8 +636,8 @@ defmodule MingaEditor.Commands.Movement do
 
     EditorState.update_workspace(state, fn workspace ->
       workspace
-      |> WorkspaceState.set_windows(new_windows)
-      |> WorkspaceState.set_buffers(new_buffers)
+      |> SessionState.set_windows(new_windows)
+      |> SessionState.set_buffers(new_buffers)
     end)
   end
 
@@ -683,7 +683,7 @@ defmodule MingaEditor.Commands.Movement do
   @spec update_file_tree(state(), (FileTreeState.t() -> FileTreeState.t())) :: state()
   defp update_file_tree(state, fun) when is_function(fun, 1) do
     EditorState.update_workspace(state, fn ws ->
-      WorkspaceState.set_file_tree(ws, fun.(ws.file_tree))
+      SessionState.set_file_tree(ws, fun.(ws.file_tree))
     end)
   end
 

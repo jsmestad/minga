@@ -36,7 +36,7 @@ defmodule MingaEditor.Input.GitStatusInputTest do
 
     %EditorState{
       port_manager: self(),
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         keymap_scope: :git_status
       },

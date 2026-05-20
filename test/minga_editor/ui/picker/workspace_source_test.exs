@@ -34,7 +34,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceSourceTest do
   defp editor_state(tab_bar, buffer, mode) do
     %EditorState{
       port_manager: nil,
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(80, 24),
         editing: %VimState{mode: mode, mode_state: Mode.initial_state()},
         buffers: %Buffers{list: [buffer], active: buffer, active_index: 0},

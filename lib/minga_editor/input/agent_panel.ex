@@ -25,7 +25,7 @@ defmodule MingaEditor.Input.AgentPanel do
   alias MingaEditor.LayoutPreset
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.Input
   alias MingaEditor.Input.AgentNav
@@ -161,7 +161,7 @@ defmodule MingaEditor.Input.AgentPanel do
   @spec set_active_buffer_override(EditorState.t(), pid() | nil) :: EditorState.t()
   defp set_active_buffer_override(state, pid) do
     EditorState.update_workspace(state, fn ws ->
-      WorkspaceState.set_buffers(ws, Buffers.set_active_override(ws.buffers, pid))
+      SessionState.set_buffers(ws, Buffers.set_active_override(ws.buffers, pid))
     end)
   end
 
