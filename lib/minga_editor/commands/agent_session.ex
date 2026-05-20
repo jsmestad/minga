@@ -15,8 +15,10 @@ defmodule MingaEditor.Commands.AgentSession do
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
+  alias MingaEditor.Workspace.State, as: WorkspaceState
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
 
@@ -92,12 +94,7 @@ defmodule MingaEditor.Commands.AgentSession do
             state
           end
 
-        # Set the session PID on the agent tab that was just created
-        # (or the active agent tab). find_sessionless_agent avoids the
-        # ambiguity of find_by_kind(:agent) when multiple agent tabs exist.
-        # Tab.session is the source of truth; the rendering cache on
-        # state.shell_state.agent (status, error, pending_approval) is
-        # populated lazily on tab switch via rebuild_agent_from_session/2.
+        # Attach the new session as a temporary tab locator until the workspace owns it.
         state = assign_session_to_tab(state, pid)
 
         # Create an workspace for this session (if one doesn't exist yet)
@@ -224,8 +221,12 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec assign_session_to_tab(state(), pid()) :: state()
   defp assign_session_to_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, pid) do
     case TabBar.find_sessionless_agent(tb) do
-      %Tab{id: agent_tab_id} -> EditorState.set_tab_session(state, agent_tab_id, pid)
-      nil -> state
+      %Tab{id: agent_tab_id} ->
+        tb = TabBar.update_tab(tb, agent_tab_id, &Tab.set_session(&1, pid))
+        EditorState.set_tab_bar(state, tb)
+
+      nil ->
+        state
     end
   end
 
@@ -465,17 +466,25 @@ defmodule MingaEditor.Commands.AgentSession do
         state
 
       nil ->
-        # Create workspace and assign the agent tab to it
+        # Create workspace and assign the agent tab to it.
         {tb, ws} = TabBar.add_workspace(tb, "Agent", session_pid)
 
-        # Find the agent tab with this session and move it into the workspace
         tb =
           case TabBar.find_by_session(tb, session_pid) do
-            %Tab{id: tab_id} -> TabBar.move_tab_to_workspace(tb, tab_id, ws.id)
-            nil -> tb
+            %Tab{id: tab_id} = tab ->
+              tb
+              |> TabBar.move_tab_to_workspace(tab_id, ws.id)
+              |> TabBar.update_context(
+                tab_id,
+                TabContext.put_fields(tab.context, keymap_scope: :agent)
+              )
+
+            nil ->
+              tb
           end
 
-        EditorState.set_tab_bar(state, tb)
+        state = EditorState.set_tab_bar(state, tb)
+        EditorState.update_workspace(state, &WorkspaceState.set_agent_ui(&1, ws.agent_ui))
     end
   end
 

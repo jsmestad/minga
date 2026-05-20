@@ -2,26 +2,9 @@ defmodule MingaEditor.State.AgentAccess do
   @moduledoc """
   Direct accessors for agent state on EditorState.
 
-  Agent-related state is split across three locations:
+  Agent lifecycle data is workspace-owned for the Traditional shell. The active agent workspace stores its session pid and `MingaEditor.Agent.UIState`; `state.workspace.agent_ui` is only a live mirror for renderers that still read the current workspace struct directly.
 
-  - `state.shell_state.agent` (`MingaEditor.State.Agent`) — rendering
-    cache for the user's current view. Holds `runtime` (status), `error`,
-    `pending_approval`, `spinner_timer`, and `buffer`. Repopulated on
-    every tab/card switch from the active session's
-    `MingaAgent.Session.editor_snapshot/1`. **Not the source of truth
-    for the session pid.**
-  - The active session pid lives on `Tab.session` (Traditional shell)
-    or `Card.session` (Board shell). `session/1` reads it through
-    `Shell.active_session/1`.
-  - `state.workspace.agent_ui` (`Agent.UIState`) — full UI state
-    wrapping Panel and View. Per-tab.
-    - `state.workspace.agent_ui.panel` (`UIState.Panel`) — prompt
-      editing and chat display.
-    - `state.workspace.agent_ui.view` (`UIState.View`) — layout,
-      search, preview, toasts.
-
-  This module provides read/write functions so callers don't need to
-  know the field layout.
+  The Board shell still owns session pids on cards until it moves to the same workspace model.
   """
 
   alias MingaEditor.Agent.UIState
@@ -29,6 +12,9 @@ defmodule MingaEditor.State.AgentAccess do
   alias MingaEditor.Agent.UIState.View
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
+  alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace
+  alias MingaEditor.Workspace.State, as: WorkspaceState
 
   # ── Readers ────────────────────────────────────────────────────────────────
 
@@ -41,34 +27,38 @@ defmodule MingaEditor.State.AgentAccess do
 
   @doc "Returns the full agent UI state (wrapping Panel and View)."
   @spec agent_ui(EditorState.t() | map()) :: UIState.t()
-  def agent_ui(%EditorState{workspace: %{agent_ui: a}}), do: a
-  def agent_ui(%{workspace: %{agent_ui: a}}), do: a
-  def agent_ui(%{agent_ui: a}), do: a
+  def agent_ui(%EditorState{} = state),
+    do: active_workspace_agent_ui(state) || state.workspace.agent_ui
+
+  def agent_ui(%{shell_state: %{tab_bar: %TabBar{}}, workspace: %{agent_ui: agent_ui}} = state),
+    do: active_workspace_agent_ui(state) || agent_ui || UIState.new()
+
+  def agent_ui(%{workspace: %{agent_ui: a}}), do: a || UIState.new()
+  def agent_ui(%{agent_ui: a}), do: a || UIState.new()
   def agent_ui(_), do: UIState.new()
 
   @doc "Returns the agent panel state (prompt editing and chat display)."
   @spec panel(EditorState.t() | map()) :: Panel.t()
-  def panel(%EditorState{workspace: %{agent_ui: %UIState{panel: p}}}), do: p
-  def panel(%{workspace: %{agent_ui: %UIState{panel: p}}}), do: p
-  def panel(%{agent_ui: %UIState{panel: p}}), do: p
-  def panel(_), do: Panel.new()
+  def panel(state), do: agent_ui(state).panel
 
   @doc "Returns the agent view state (layout, search, preview, toasts)."
   @spec view(EditorState.t() | map()) :: View.t()
-  def view(%EditorState{workspace: %{agent_ui: %UIState{view: v}}}), do: v
-  def view(%{workspace: %{agent_ui: %UIState{view: v}}}), do: v
-  def view(%{agent_ui: %UIState{view: v}}), do: v
-  def view(_), do: View.new()
+  def view(state), do: agent_ui(state).view
 
   @doc """
   Returns the agent session pid for the user's current view, or `nil`.
 
-  Reads through the shell behaviour: Traditional returns the active tab's
-  session, Board returns the zoomed card's session. The session pid is
-  owned by the tab/card; `state.shell_state.agent` only caches the
-  rendering fields (status, error, pending_approval) for that session.
+  Traditional reads the active workspace. Board reads through the shell behaviour until Board moves onto the same workspace model.
   """
   @spec session(EditorState.t() | map()) :: pid() | nil
+  def session(%EditorState{shell: MingaEditor.Shell.Traditional} = state) do
+    active_workspace_session(state)
+  end
+
+  def session(%{shell: MingaEditor.Shell.Traditional} = state) do
+    active_workspace_session(state)
+  end
+
   def session(%EditorState{shell: shell, shell_state: shell_state})
       when is_atom(shell) and not is_nil(shell) do
     shell.active_session(shell_state)
@@ -110,12 +100,16 @@ defmodule MingaEditor.State.AgentAccess do
   @doc "Updates the full agent UI state. Prefer update_panel/2 or update_view/2."
   @spec update_agent_ui(EditorState.t() | map(), (UIState.t() -> UIState.t())) ::
           EditorState.t() | map()
-  def update_agent_ui(%EditorState{workspace: ws} = state, fun) do
-    %{state | workspace: %{ws | agent_ui: fun.(ws.agent_ui)}}
+  def update_agent_ui(%EditorState{} = state, fun) do
+    update_workspace_agent_ui(state, fun)
+  end
+
+  def update_agent_ui(%{shell_state: %{tab_bar: %TabBar{}}} = state, fun) do
+    update_workspace_agent_ui(state, fun)
   end
 
   def update_agent_ui(%{workspace: %{agent_ui: a} = ws} = state, fun) do
-    %{state | workspace: %{ws | agent_ui: fun.(a)}}
+    %{state | workspace: %{ws | agent_ui: fun.(a || UIState.new())}}
   end
 
   def update_agent_ui(%{agent_ui: a} = state, fun) do
@@ -125,33 +119,84 @@ defmodule MingaEditor.State.AgentAccess do
   @doc "Updates just the panel sub-struct via a transform function."
   @spec update_panel(EditorState.t() | map(), (Panel.t() -> Panel.t())) ::
           EditorState.t() | map()
-  def update_panel(
-        %EditorState{workspace: %{agent_ui: %UIState{panel: p} = ui} = ws} = state,
-        fun
-      ) do
-    %{state | workspace: %{ws | agent_ui: %{ui | panel: fun.(p)}}}
-  end
-
-  def update_panel(%{workspace: %{agent_ui: %UIState{panel: p} = ui} = ws} = state, fun) do
-    %{state | workspace: %{ws | agent_ui: %{ui | panel: fun.(p)}}}
-  end
-
-  def update_panel(%{agent_ui: %UIState{panel: p} = ui} = state, fun) do
-    %{state | agent_ui: %{ui | panel: fun.(p)}}
+  def update_panel(state, fun) do
+    update_agent_ui(state, fn
+      %UIState{panel: %Panel{} = panel} = ui -> %{ui | panel: fun.(panel)}
+      _ -> %{UIState.new() | panel: fun.(Panel.new())}
+    end)
   end
 
   @doc "Updates just the view sub-struct via a transform function."
   @spec update_view(EditorState.t() | map(), (View.t() -> View.t())) ::
           EditorState.t() | map()
-  def update_view(%EditorState{workspace: %{agent_ui: %UIState{view: v} = ui} = ws} = state, fun) do
-    %{state | workspace: %{ws | agent_ui: %{ui | view: fun.(v)}}}
+  def update_view(state, fun) do
+    update_agent_ui(state, fn
+      %UIState{view: %View{} = view} = ui -> %{ui | view: fun.(view)}
+      _ -> %{UIState.new() | view: fun.(View.new())}
+    end)
   end
 
-  def update_view(%{workspace: %{agent_ui: %UIState{view: v} = ui} = ws} = state, fun) do
-    %{state | workspace: %{ws | agent_ui: %{ui | view: fun.(v)}}}
+  @spec active_workspace_agent_ui(EditorState.t() | map()) :: UIState.t() | nil
+  defp active_workspace_agent_ui(%{shell_state: %{tab_bar: %TabBar{} = tab_bar}}) do
+    case TabBar.active_workspace(tab_bar) do
+      %Workspace{agent_ui: %UIState{} = agent_ui} -> agent_ui
+      _ -> nil
+    end
   end
 
-  def update_view(%{agent_ui: %UIState{view: v} = ui} = state, fun) do
-    %{state | agent_ui: %{ui | view: fun.(v)}}
+  defp active_workspace_agent_ui(_state), do: nil
+
+  @spec active_workspace_session(EditorState.t() | map()) :: pid() | nil
+  defp active_workspace_session(%{shell_state: %{tab_bar: %TabBar{} = tab_bar}}) do
+    case TabBar.active_workspace(tab_bar) do
+      %Workspace{session: session} when is_pid(session) -> session
+      _ -> nil
+    end
+  end
+
+  defp active_workspace_session(_state), do: nil
+
+  @spec update_workspace_agent_ui(EditorState.t() | map(), (UIState.t() -> UIState.t())) ::
+          EditorState.t() | map()
+  defp update_workspace_agent_ui(
+         %{shell_state: %{tab_bar: %TabBar{} = tab_bar}, workspace: workspace} = state,
+         fun
+       ) do
+    current_ui =
+      active_workspace_agent_ui(state) || Map.get(workspace, :agent_ui) || UIState.new()
+
+    next_ui = fun.(current_ui)
+
+    tab_bar =
+      case TabBar.active_workspace(tab_bar) do
+        %Workspace{kind: :agent, id: workspace_id} ->
+          TabBar.update_workspace(tab_bar, workspace_id, &Workspace.set_agent_ui(&1, next_ui))
+
+        %Workspace{session: session, id: workspace_id} when is_pid(session) ->
+          TabBar.update_workspace(tab_bar, workspace_id, &Workspace.set_agent_ui(&1, next_ui))
+
+        _workspace ->
+          tab_bar
+      end
+
+    %{
+      state
+      | shell_state: %{state.shell_state | tab_bar: tab_bar},
+        workspace: set_live_agent_ui(workspace, next_ui)
+    }
+  end
+
+  defp update_workspace_agent_ui(%{workspace: %{agent_ui: agent_ui} = workspace} = state, fun) do
+    next_ui = fun.(agent_ui || UIState.new())
+    %{state | workspace: set_live_agent_ui(workspace, next_ui)}
+  end
+
+  @spec set_live_agent_ui(WorkspaceState.t() | map(), UIState.t()) :: WorkspaceState.t() | map()
+  defp set_live_agent_ui(%WorkspaceState{} = workspace, %UIState{} = agent_ui) do
+    WorkspaceState.set_agent_ui(workspace, agent_ui)
+  end
+
+  defp set_live_agent_ui(workspace, %UIState{} = agent_ui) when is_map(workspace) do
+    Map.put(workspace, :agent_ui, agent_ui)
   end
 end

@@ -6,6 +6,7 @@ defmodule MingaEditor.State.Workspace do
   """
 
   alias Minga.Project.FileRef
+  alias MingaEditor.Agent.UIState
 
   @typedoc "Workspace kind."
   @type kind :: :manual | :agent
@@ -29,7 +30,7 @@ defmodule MingaEditor.State.Workspace do
           custom_name: String.t() | nil,
           files: [FileRef.t()],
           active_file: FileRef.t() | nil,
-          agent_ui: term() | nil,
+          agent_ui: UIState.t() | nil,
           project_view: term() | nil,
           review: term() | nil
         }
@@ -73,8 +74,27 @@ defmodule MingaEditor.State.Workspace do
       icon: "cpu",
       color: agent_color(id),
       agent_status: :idle,
-      session: session
+      session: session,
+      agent_ui: UIState.new()
     }
+  end
+
+  @doc "Sets the agent session pid on the workspace."
+  @spec set_session(t(), pid() | nil) :: t()
+  def set_session(%__MODULE__{} = workspace, session) when is_pid(session) or is_nil(session) do
+    %{workspace | session: session}
+  end
+
+  @doc "Sets the agent UI state on the workspace."
+  @spec set_agent_ui(t(), UIState.t()) :: t()
+  def set_agent_ui(%__MODULE__{} = workspace, %UIState{} = agent_ui) do
+    Map.put(workspace, :agent_ui, agent_ui)
+  end
+
+  @doc "Updates the agent UI state on the workspace."
+  @spec update_agent_ui(t(), (UIState.t() -> UIState.t())) :: t()
+  def update_agent_ui(%__MODULE__{} = workspace, fun) when is_function(fun, 1) do
+    set_agent_ui(workspace, fun.(workspace.agent_ui || UIState.new()))
   end
 
   @doc "Sets the agent status on the workspace."
