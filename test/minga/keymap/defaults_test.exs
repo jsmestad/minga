@@ -79,6 +79,24 @@ defmodule Minga.Keymap.DefaultsTest do
       assert {:command, :kill_buffer} = Bindings.lookup(b_node, {?d, 0})
     end
 
+    # ── Tab / workspace bindings ───────────────────────────────────────────────
+
+    test "SPC t routes workspace bindings to workspace commands" do
+      trie = Defaults.leader_trie()
+      {:prefix, t_node} = Bindings.lookup(trie, {9, 0})
+
+      assert t_node.description == "+tab"
+      assert {:command, :workspace_toggle} = Bindings.lookup(t_node, {9, 0})
+      assert {:command, :workspace_next} = Bindings.lookup(t_node, {?N, 0})
+      assert {:command, :workspace_prev} = Bindings.lookup(t_node, {?P, 0})
+      assert {:command, :workspace_next_agent} = Bindings.lookup(t_node, {?A, 0})
+      assert {:command, :manual_workspace} = Bindings.lookup(t_node, {?m, 0})
+      assert {:command, :workspace_list} = Bindings.lookup(t_node, {?l, 0})
+      assert {:command, :workspace_rename} = Bindings.lookup(t_node, {?r, 0})
+      assert {:command, :workspace_set_icon} = Bindings.lookup(t_node, {?i, 0})
+      assert {:command, :workspace_close} = Bindings.lookup(t_node, {?D, 0})
+    end
+
     # ── Window bindings ────────────────────────────────────────────────────────
 
     test "SPC w h → :window_left" do

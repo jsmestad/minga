@@ -37,7 +37,7 @@ defmodule MingaEditor.Shell.Traditional do
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer
   alias Minga.FileRef
-  alias MingaEditor.State.AgentGroup
+  alias MingaEditor.State.Workspace
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
@@ -121,26 +121,26 @@ defmodule MingaEditor.Shell.Traditional do
   def handle_gui_action(
         %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
         workspace,
-        {:agent_group_close, ws_id}
+        {:workspace_close, ws_id}
       ) do
-    {%{shell_state | tab_bar: TabBar.remove_group(tb, ws_id)}, workspace}
+    {%{shell_state | tab_bar: TabBar.remove_workspace(tb, ws_id)}, workspace}
   end
 
   def handle_gui_action(
         %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
         workspace,
-        {:agent_group_rename, ws_id, name}
+        {:workspace_rename, ws_id, name}
       ) do
-    tb = TabBar.update_group(tb, ws_id, &AgentGroup.rename(&1, name))
+    tb = TabBar.update_workspace(tb, ws_id, &Workspace.rename(&1, name))
     {%{shell_state | tab_bar: tb}, workspace}
   end
 
   def handle_gui_action(
         %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
         workspace,
-        {:agent_group_set_icon, ws_id, icon}
+        {:workspace_set_icon, ws_id, icon}
       ) do
-    tb = TabBar.update_group(tb, ws_id, &AgentGroup.set_icon(&1, icon))
+    tb = TabBar.update_workspace(tb, ws_id, &Workspace.set_icon(&1, icon))
     {%{shell_state | tab_bar: tb}, workspace}
   end
 
@@ -464,7 +464,7 @@ defmodule MingaEditor.Shell.Traditional do
   defp find_tab_for_buffer(%TabBar{} = tb, pid) when is_pid(pid) do
     case buffer_file_ref(pid) do
       %FileRef{} = file_ref ->
-        TabBar.find_file_tab_in_workspace(tb, TabBar.active_group_id(tb), file_ref)
+        TabBar.find_file_tab_in_workspace(tb, TabBar.active_workspace_id(tb), file_ref)
 
       nil ->
         find_visible_tab_for_buffer(tb, pid)
@@ -535,11 +535,11 @@ defmodule MingaEditor.Shell.Traditional do
     context = WorkspaceState.to_tab_context(prev_workspace)
     tb = TabBar.update_context(tb, tb.active_id, context)
 
-    workspace_id = TabBar.active_group_id(tb)
+    workspace_id = TabBar.active_workspace_id(tb)
 
     # Create file tab (TabBar.add auto-activates it)
     {tb, new_tab} = TabBar.add(tb, :file, label)
-    tb = TabBar.move_tab_to_group(tb, new_tab.id, workspace_id)
+    tb = TabBar.move_tab_to_workspace(tb, new_tab.id, workspace_id)
 
     # Leave agent UI view: reset to editor scope and window content type
     workspace =
@@ -578,11 +578,11 @@ defmodule MingaEditor.Shell.Traditional do
     context = WorkspaceState.to_tab_context(prev_workspace)
     tb = TabBar.update_context(tb, tb.active_id, context)
 
-    workspace_id = TabBar.active_group_id(tb)
+    workspace_id = TabBar.active_workspace_id(tb)
 
     # Create file tab (TabBar.add auto-activates it)
     {tb, new_tab} = TabBar.add(tb, :file, label)
-    tb = TabBar.move_tab_to_group(tb, new_tab.id, workspace_id)
+    tb = TabBar.move_tab_to_workspace(tb, new_tab.id, workspace_id)
     workspace = WorkspaceState.sync_active_window_buffer(workspace)
 
     # Snapshot the new tab's context

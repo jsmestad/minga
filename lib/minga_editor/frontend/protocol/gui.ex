@@ -35,7 +35,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x83   | gui_float_popup | Float popup window            |
   | 0x84   | gui_split_separators | Split pane separator lines |
   | 0x85   | gui_git_status       | Git status panel data      |
-  | 0x86   | gui_agent_groups    | Workspace indicator + list |
+  | 0x86   | gui_workspaces    | Workspace indicator + list |
   | 0x87   | gui_board           | Board card grid state      |
   | 0x97   | gui_config_state    | Settings panel state       |
 
@@ -77,9 +77,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x1C       | git_unstage_all      |
   | 0x1D       | git_commit           |
   | 0x1E       | git_open_file        |
-  | 0x1F       | agent_group_rename     |
-  | 0x20       | agent_group_set_icon   |
-  | 0x21       | agent_group_close      |
+  | 0x1F       | workspace_rename     |
+  | 0x20       | workspace_set_icon   |
+  | 0x21       | workspace_close      |
   | 0x3D       | file_tree_open_in_split |
   | 0x3E       | tab_copy_path           |
   | 0x3F       | hover_open_action       |
@@ -143,7 +143,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @op_gui_float_popup Opcodes.gui_float_popup()
   @op_gui_split_separators Opcodes.gui_split_separators()
   @op_gui_git_status Opcodes.gui_git_status()
-  @op_gui_agent_groups Opcodes.gui_agent_groups()
+  @op_gui_workspaces Opcodes.gui_workspaces()
   @op_gui_board Opcodes.gui_board()
   @op_gui_agent_context Opcodes.gui_agent_context()
   @op_gui_change_summary Opcodes.gui_change_summary()
@@ -180,9 +180,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_git_unstage_all Opcodes.gui_action_git_unstage_all()
   @gui_action_git_commit Opcodes.gui_action_git_commit()
   @gui_action_git_open_file Opcodes.gui_action_git_open_file()
-  @gui_action_agent_group_rename Opcodes.gui_action_agent_group_rename()
-  @gui_action_agent_group_set_icon Opcodes.gui_action_agent_group_set_icon()
-  @gui_action_agent_group_close Opcodes.gui_action_agent_group_close()
+  @gui_action_workspace_rename Opcodes.gui_action_workspace_rename()
+  @gui_action_workspace_set_icon Opcodes.gui_action_workspace_set_icon()
+  @gui_action_workspace_close Opcodes.gui_action_workspace_close()
   @gui_action_space_leader_chord Opcodes.gui_action_space_leader_chord()
   @gui_action_space_leader_retract Opcodes.gui_action_space_leader_retract()
   @gui_action_find_pasteboard_search Opcodes.gui_action_find_pasteboard_search()
@@ -325,9 +325,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:git_commit, message :: String.t(), amend? :: boolean()}
           | {:git_open_file, path :: String.t()}
           | {:git_open_diff, path :: String.t(), section :: non_neg_integer()}
-          | {:agent_group_rename, id :: non_neg_integer(), name :: String.t()}
-          | {:agent_group_set_icon, id :: non_neg_integer(), icon :: String.t()}
-          | {:agent_group_close, id :: non_neg_integer()}
+          | {:workspace_rename, id :: non_neg_integer(), name :: String.t()}
+          | {:workspace_set_icon, id :: non_neg_integer(), icon :: String.t()}
+          | {:workspace_close, id :: non_neg_integer()}
           | {:space_leader_chord, codepoint :: non_neg_integer(), modifiers :: non_neg_integer()}
           | {:space_leader_retract, codepoint :: non_neg_integer(),
              modifiers :: non_neg_integer()}
@@ -821,7 +821,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   # ── Workspace bar ──
 
   @doc """
-  Encodes a gui_agent_groups command for the existing agent-workspace GUI consumer.
+  Encodes a gui_workspaces command for the existing agent-workspace GUI consumer.
 
   `ChromeState` includes the synthesized manual workspace, but this legacy opcode intentionally sends only agent workspaces. A later canonical workspace protocol can carry manual-vs-agent kind explicitly without overloading this agent-group contract.
 
@@ -837,37 +837,39 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   name.
   Agent status: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan.
   """
-  @spec encode_gui_agent_groups(TabBar.t() | ChromeState.t()) :: binary()
-  def encode_gui_agent_groups(%ChromeState{} = chrome_state) do
+  @spec encode_gui_workspaces(TabBar.t() | ChromeState.t()) :: binary()
+  def encode_gui_workspaces(%ChromeState{} = chrome_state) do
     agent_workspaces = Enum.filter(chrome_state.workspaces, &(&1.kind == :agent))
     entries = Enum.map(agent_workspaces, &encode_gui_workspace_summary/1)
 
     IO.iodata_to_binary([
-      @op_gui_agent_groups,
+      @op_gui_workspaces,
       <<chrome_state.active_workspace_id::16, length(agent_workspaces)::8>>
       | entries
     ])
   end
 
-  def encode_gui_agent_groups(%TabBar{} = tb) do
-    entries =
-      Enum.map(tb.agent_groups, fn group ->
-        status_byte = encode_agent_status(group.agent_status)
-        r = Bitwise.bsr(Bitwise.band(group.color, 0xFF0000), 16)
-        g = Bitwise.bsr(Bitwise.band(group.color, 0x00FF00), 8)
-        b = Bitwise.band(group.color, 0x0000FF)
-        tab_count = length(TabBar.tabs_in_group(tb, group.id))
-        label_bytes = :erlang.iolist_to_binary([group.label])
-        icon_bytes = :erlang.iolist_to_binary([group.icon || "cpu"])
+  def encode_gui_workspaces(%TabBar{} = tb) do
+    agent_workspaces = Enum.filter(tb.workspaces, &(&1.kind == :agent))
 
-        <<group.id::16, status_byte::8, r::8, g::8, b::8, tab_count::16,
+    entries =
+      Enum.map(agent_workspaces, fn workspace ->
+        status_byte = encode_agent_status(workspace.agent_status)
+        r = Bitwise.bsr(Bitwise.band(workspace.color, 0xFF0000), 16)
+        g = Bitwise.bsr(Bitwise.band(workspace.color, 0x00FF00), 8)
+        b = Bitwise.band(workspace.color, 0x0000FF)
+        tab_count = length(TabBar.tabs_in_workspace(tb, workspace.id))
+        label_bytes = :erlang.iolist_to_binary([workspace.label])
+        icon_bytes = :erlang.iolist_to_binary([workspace.icon || "cpu"])
+
+        <<workspace.id::16, status_byte::8, r::8, g::8, b::8, tab_count::16,
           byte_size(label_bytes)::8, label_bytes::binary, byte_size(icon_bytes)::8,
           icon_bytes::binary>>
       end)
 
     IO.iodata_to_binary([
-      @op_gui_agent_groups,
-      <<TabBar.active_group_id(tb)::16, length(tb.agent_groups)::8>>
+      @op_gui_workspaces,
+      <<TabBar.active_workspace_id(tb)::16, length(agent_workspaces)::8>>
       | entries
     ])
   end
@@ -2333,7 +2335,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   end
 
   # Encodes help overlay data: help_visible flag + optional help groups.
-  # Wire format: visible(1) [group_count(1) [title_len(2) title(utf8)
+  # Wire format: visible(1) [workspace_count(1) [title_len(2) title(utf8)
   #   binding_count(1) [key_len(1) key(utf8) desc_len(2) desc(utf8)]...]*]
   @spec encode_help_overlay(boolean() | nil, [{String.t(), [{String.t(), String.t()}]}] | nil) ::
           binary()
@@ -2920,19 +2922,19 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       do: {:ok, {:git_commit_amend, message}}
 
   def decode_gui_action(
-        @gui_action_agent_group_rename,
+        @gui_action_workspace_rename,
         <<ws_id::16, name_len::16, name::binary-size(name_len)>>
       ),
-      do: {:ok, {:agent_group_rename, ws_id, name}}
+      do: {:ok, {:workspace_rename, ws_id, name}}
 
   def decode_gui_action(
-        @gui_action_agent_group_set_icon,
+        @gui_action_workspace_set_icon,
         <<ws_id::16, icon_len::8, icon::binary-size(icon_len)>>
       ),
-      do: {:ok, {:agent_group_set_icon, ws_id, icon}}
+      do: {:ok, {:workspace_set_icon, ws_id, icon}}
 
-  def decode_gui_action(@gui_action_agent_group_close, <<ws_id::16>>),
-    do: {:ok, {:agent_group_close, ws_id}}
+  def decode_gui_action(@gui_action_workspace_close, <<ws_id::16>>),
+    do: {:ok, {:workspace_close, ws_id}}
 
   def decode_gui_action(
         @gui_action_space_leader_chord,

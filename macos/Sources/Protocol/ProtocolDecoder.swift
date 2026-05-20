@@ -186,7 +186,7 @@ enum RenderCommand: Sendable {
     case guiCursorAnimation(enabled: Bool)
     case guiSplitSeparators(borderColor: UInt32, verticals: [Wire.VerticalSeparator], horizontals: [Wire.HorizontalSeparator])
     case guiGitStatus(repoState: UInt8, syncing: Bool, ahead: UInt16, behind: UInt16, branchName: String, entries: [Wire.GitStatusEntry], toast: (message: String, level: UInt8, action: UInt8)?, entryBasePath: String, lastCommitMessage: String)
-    case guiAgentGroups(activeGroupId: UInt16, agentGroups: [Wire.AgentGroupEntry])
+    case guiWorkspaces(activeWorkspaceId: UInt16, workspaces: [Wire.WorkspaceEntry])
     case guiBoard(visible: Bool, focusedCardId: UInt32, cards: [BoardCard], filterMode: Bool, filterText: String)
     case guiAgentContext(visible: Bool, task: String, dispatchTimestamp: Date, status: CardStatus, canApprove: Bool)
     case guiChangeSummary(visible: Bool, entries: [ChangeSummaryEntry], selectedIndex: Int)
@@ -2120,13 +2120,13 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         return (.guiGitStatus(repoState: gsRepoState, syncing: gsSyncing, ahead: gsAhead, behind: gsBehind, branchName: gsBranchName, entries: gsEntries, toast: gsToast, entryBasePath: gsEntryBasePath, lastCommitMessage: gsLastCommitMessage),
                 gsPos - offset)
 
-    case OP_GUI_AGENT_GROUPS:
-        // active_group_id:2, group_count:1, then per group:
+    case OP_GUI_WORKSPACES:
+        // active_workspace_id:2, workspace_count:1, then per workspace:
         // id:2, agent_status:1, r:1, g:1, b:1, tab_count:2, label_len:1, label, icon_len:1, icon
         guard data.count >= rest + 3 else { throw ProtocolDecodeError.malformed }
         let activeGId = readU16(data, rest)
         let groupCount = Int(data[rest + 2])
-        var groups: [Wire.AgentGroupEntry] = []
+        var groups: [Wire.WorkspaceEntry] = []
         groups.reserveCapacity(groupCount)
         var gPos = rest + 3
         for _ in 0..<groupCount {
@@ -2147,7 +2147,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             guard data.count >= gIconBase + 1 + gIconLen else { throw ProtocolDecodeError.malformed }
             let gIconData = data[(gIconBase + 1)..<(gIconBase + 1 + gIconLen)]
             let gIcon = String(data: gIconData, encoding: .utf8) ?? "cpu"
-            groups.append(Wire.AgentGroupEntry(
+            groups.append(Wire.WorkspaceEntry(
                 id: gId,
                 agentStatus: gStatus,
                 colorR: gR,
@@ -2159,7 +2159,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             ))
             gPos += 9 + gLabelLen + 1 + gIconLen
         }
-        return (.guiAgentGroups(activeGroupId: activeGId, agentGroups: groups),
+        return (.guiWorkspaces(activeWorkspaceId: activeGId, workspaces: groups),
                 gPos - offset)
 
     case OP_GUI_BOARD:

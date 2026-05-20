@@ -18,8 +18,8 @@ struct TabEntry: Identifiable {
     let label: String
 }
 
-/// An agent group entry for the tab bar capsules and indicator.
-struct AgentGroupEntry: Identifiable {
+/// An agent workspace entry for the tab bar capsules and indicator.
+struct WorkspaceEntry: Identifiable {
     let id: UInt16
     let agentStatus: UInt8
     let color: Color
@@ -35,18 +35,18 @@ final class TabBarState {
     var tabs: [TabEntry] = []
     /// Visible-tab active index from gui_tab_bar, or 255 when the active tab is hidden.
     var activeIndex: UInt8 = 0
-    var agentGroups: [AgentGroupEntry] = []
-    var activeGroupId: UInt16 = 0
+    var workspaces: [WorkspaceEntry] = []
+    var activeWorkspaceId: UInt16 = 0
 
-    /// Whether any agent groups exist (controls visibility of group UI).
-    var hasAgentGroups: Bool {
-        !agentGroups.isEmpty
+    /// Whether any agent workspaces exist (controls visibility of group UI).
+    var hasWorkspaces: Bool {
+        !workspaces.isEmpty
     }
 
-    /// The active agent group, if the active tab belongs to one. Nil when
-    /// the user is viewing ungrouped tabs.
-    var activeGroup: AgentGroupEntry? {
-        agentGroups.first { $0.id == activeGroupId }
+    /// The active agent workspace, if the active tab belongs to one. Nil when
+    /// the user is viewing the manual workspace.
+    var activeWorkspace: WorkspaceEntry? {
+        workspaces.first { $0.id == activeWorkspaceId }
     }
 
     /// Update from a decoded gui_tab_bar protocol message.
@@ -67,11 +67,11 @@ final class TabBarState {
         }
     }
 
-    /// Update from a decoded gui_agent_groups protocol message.
-    func updateAgentGroups(activeGroupId: UInt16, entries: [Wire.AgentGroupEntry]) {
-        self.activeGroupId = activeGroupId
-        self.agentGroups = entries.map { entry in
-            AgentGroupEntry(
+    /// Update from a decoded gui_workspaces protocol message.
+    func updateWorkspaces(activeWorkspaceId: UInt16, entries: [Wire.WorkspaceEntry]) {
+        self.activeWorkspaceId = activeWorkspaceId
+        self.workspaces = entries.map { entry in
+            WorkspaceEntry(
                 id: entry.id,
                 agentStatus: entry.agentStatus,
                 color: Color(
@@ -91,7 +91,7 @@ final class TabBarState {
     func hide() {
         tabs = []
         activeIndex = 0
-        agentGroups = []
-        activeGroupId = 0
+        workspaces = []
+        activeWorkspaceId = 0
     }
 }

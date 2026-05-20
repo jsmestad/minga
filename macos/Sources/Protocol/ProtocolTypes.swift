@@ -67,8 +67,8 @@ enum Wire {
         let label: String
     }
 
-    /// An agent group entry decoded from the gui_agent_groups protocol message.
-    struct AgentGroupEntry: Sendable {
+    /// A workspace entry decoded from the gui_workspaces protocol message.
+    struct WorkspaceEntry: Sendable {
         let id: UInt16
         let agentStatus: UInt8
         let colorR: UInt8

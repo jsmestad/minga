@@ -430,6 +430,42 @@ struct EncoderGUIActionTests {
         let name = String(data: payload[4..<(4 + Int(nameLen))], encoding: .utf8)
         #expect(name == "buffer_prev")
     }
+
+    @Test("workspace_rename encodes id and name with length prefix")
+    func workspaceRenameLayout() {
+        let payload = captureFrame { $0.sendWorkspaceRename(id: 7, name: "Research Bot") }
+
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_WORKSPACE_RENAME)
+        #expect(readU16(payload, 2) == 7)
+        let nameLen = readU16(payload, 4)
+        #expect(payload.count == 6 + Int(nameLen))
+        let (name, end) = readString16(payload, 4)
+        #expect(name == "Research Bot")
+        #expect(end == payload.count)
+    }
+
+    @Test("workspace_set_icon encodes id and icon with compact length prefix")
+    func workspaceSetIconLayout() {
+        let payload = captureFrame { $0.sendWorkspaceSetIcon(id: 7, icon: "cpu") }
+
+        #expect(payload.count == 8)
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_WORKSPACE_SET_ICON)
+        #expect(readU16(payload, 2) == 7)
+        #expect(payload[4] == 3)
+        #expect(String(data: payload[5..<8], encoding: .utf8) == "cpu")
+    }
+
+    @Test("workspace_close encodes just action type and workspace id")
+    func workspaceCloseLayout() {
+        let payload = captureFrame { $0.sendWorkspaceClose(id: 7) }
+
+        #expect(payload.count == 4)
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_WORKSPACE_CLOSE)
+        #expect(readU16(payload, 2) == 7)
+    }
 }
 
 // MARK: - Settings

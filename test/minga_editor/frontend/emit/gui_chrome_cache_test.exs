@@ -35,8 +35,7 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       assert first_cmds != []
 
       {_ctx, _caches, second_cmds} = sync_chrome(state, caches)
-      assert opcode_count(second_cmds, 0x76) == 1
-      assert length(second_cmds) == 1
+      assert Enum.map(second_cmds, &opcode!/1) == [0x76]
     end
 
     test "theme fingerprint includes color content, not only theme name" do
@@ -233,15 +232,15 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       refute caches2.last_gui_minibuffer == caches.last_gui_minibuffer
     end
 
-    test "agent group, agent chat, and board fingerprints include encoded content" do
+    test "workspace, agent chat, and board fingerprints include encoded content" do
       state = gui_state()
-      tab_bar = tab_bar_with_two_agent_groups()
+      tab_bar = tab_bar_with_two_workspaces()
       state_a = put_in(state.shell_state.tab_bar, tab_bar)
       {_ctx, caches, _cmds} = sync_chrome(state_a)
       [_, tab_b] = tab_bar.tabs
       state_b = put_in(state.shell_state.tab_bar, %{tab_bar | active_id: tab_b.id})
       {_ctx, caches2, _cmds} = sync_chrome(state_b, caches)
-      refute caches2.last_gui_agent_groups_fp == caches.last_gui_agent_groups_fp
+      refute caches2.last_gui_workspaces_fp == caches.last_gui_workspaces_fp
 
       chat_state = agent_chat_state()
       {_ctx, chat_caches, _cmds} = sync_chrome(chat_state)
@@ -259,6 +258,32 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
         sync_chrome(%{board_state | shell_state: board_b}, board_caches)
 
       refute board_caches2.last_gui_board_fp == board_caches.last_gui_board_fp
+    end
+
+    test "workspace fingerprint clears when the last agent workspace disappears" do
+      state = gui_state()
+      tab_bar = tab_bar_with_two_workspaces()
+      state_with_agents = put_in(state.shell_state.tab_bar, tab_bar)
+      {_ctx, caches, first_cmds} = sync_chrome(state_with_agents)
+
+      assert Enum.any?(first_cmds, &opcode?(&1, 0x86))
+      assert caches.last_gui_workspaces_fp != nil
+
+      tab_bar_without_agents =
+        tab_bar
+        |> TabBar.remove_workspace(1)
+        |> TabBar.remove_workspace(2)
+
+      state_without_agents = put_in(state.shell_state.tab_bar, tab_bar_without_agents)
+      {_ctx, caches2, second_cmds} = sync_chrome(state_without_agents, caches)
+
+      workspaces_cmd = Enum.find(second_cmds, &opcode?(&1, 0x86))
+      assert <<0x86, _active::16, 0::8>> = workspaces_cmd
+      assert caches2.last_gui_workspaces_fp == nil
+
+      {_ctx, caches3, third_cmds} = sync_chrome(state_without_agents, caches2)
+      refute Enum.any?(third_cmds, &opcode?(&1, 0x86))
+      assert caches3.last_gui_workspaces_fp == nil
     end
 
     test "agent chat survives dead prompt buffer process" do
@@ -303,6 +328,7 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
   defp has_opcode?(cmds, opcode), do: Enum.any?(cmds, &opcode?(&1, opcode))
   defp opcode_count(cmds, opcode), do: cmds |> opcode_cmds(opcode) |> length()
   defp opcode_cmds(cmds, opcode), do: Enum.filter(cmds, &opcode?(&1, opcode))
+  defp opcode!(<<opcode, _::binary>>), do: opcode
   defp opcode?(<<opcode, _::binary>>, opcode), do: true
   defp opcode?(_, _opcode), do: false
 
@@ -359,15 +385,15 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
     }
   end
 
-  defp tab_bar_with_two_agent_groups do
+  defp tab_bar_with_two_workspaces do
     tab_bar = TabBar.new(Tab.new_file(1, "a.ex"))
-    {tab_bar, group_a} = TabBar.add_agent_group(tab_bar, "A")
-    {tab_bar, group_b} = TabBar.add_agent_group(tab_bar, "B")
+    {tab_bar, workspace_a} = TabBar.add_workspace(tab_bar, "A")
+    {tab_bar, workspace_b} = TabBar.add_workspace(tab_bar, "B")
     {tab_bar, tab_b} = TabBar.insert(tab_bar, :file, "b.ex")
 
     tab_bar
-    |> TabBar.move_tab_to_group(1, group_a.id)
-    |> TabBar.move_tab_to_group(tab_b.id, group_b.id)
+    |> TabBar.move_tab_to_workspace(1, workspace_a.id)
+    |> TabBar.move_tab_to_workspace(tab_b.id, workspace_b.id)
   end
 
   defp agent_chat_state do

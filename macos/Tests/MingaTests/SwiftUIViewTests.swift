@@ -631,10 +631,10 @@ struct TabBarViewViewTests {
             Wire.TabEntry(id: 1, groupId: 1, isActive: false, isDirty: false, isAgent: false,
                        hasAttention: false, agentStatus: 0, icon: "", label: "active.ex")
         ])
-        state.updateAgentGroups(activeGroupId: 1, entries: [
-            Wire.AgentGroupEntry(id: 1, agentStatus: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
+        state.updateWorkspaces(activeWorkspaceId: 1, entries: [
+            Wire.WorkspaceEntry(id: 1, agentStatus: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
                               tabCount: 1, label: "Active", icon: "folder"),
-            Wire.AgentGroupEntry(id: 2, agentStatus: 1, colorR: 0x44, colorG: 0x55, colorB: 0x66,
+            Wire.WorkspaceEntry(id: 2, agentStatus: 1, colorR: 0x44, colorG: 0x55, colorB: 0x66,
                               tabCount: 3, label: "Research", icon: "cpu")
         ])
 
@@ -654,12 +654,12 @@ struct TabBarViewViewTests {
             Wire.TabEntry(id: 42, groupId: 1, isActive: false, isDirty: false, isAgent: false,
                        hasAttention: false, agentStatus: 0, icon: "", label: "main.ex")
         ])
-        state.updateAgentGroups(activeGroupId: 1, entries: [
-            Wire.AgentGroupEntry(id: 1, agentStatus: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
+        state.updateWorkspaces(activeWorkspaceId: 1, entries: [
+            Wire.WorkspaceEntry(id: 1, agentStatus: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
                               tabCount: 1, label: "Active", icon: "folder"),
-            Wire.AgentGroupEntry(id: 2, agentStatus: 1, colorR: 0x44, colorG: 0x55, colorB: 0x66,
+            Wire.WorkspaceEntry(id: 2, agentStatus: 1, colorR: 0x44, colorG: 0x55, colorB: 0x66,
                               tabCount: 2, label: "Research", icon: "cpu"),
-            Wire.AgentGroupEntry(id: 3, agentStatus: 2, colorR: 0x77, colorG: 0x88, colorB: 0x99,
+            Wire.WorkspaceEntry(id: 3, agentStatus: 2, colorR: 0x77, colorG: 0x88, colorB: 0x99,
                               tabCount: 3, label: "Review", icon: "cpu")
         ])
 
@@ -669,7 +669,7 @@ struct TabBarViewViewTests {
 
         var tapped = false
         for button in buttons {
-            if (try? button.accessibilityLabel().string()) == "Switch to group Review" {
+            if (try? button.accessibilityLabel().string()) == "Switch to workspace Review" {
                 try button.tap()
                 tapped = true
                 break

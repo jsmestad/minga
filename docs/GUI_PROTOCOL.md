@@ -133,7 +133,7 @@ Frontends should apply this only to the current file-tree model. If no full `gui
 
 Visible file tabs for the active workspace.
 
-Only file tabs from the active workspace are sent here. Agent tabs and tabs from inactive workspaces are omitted; native GUI frontends use gui_agent_groups (0x86) to render inactive workspace capsules and workspace switching UI.
+Only file tabs from the active workspace are sent here. Agent tabs and tabs from inactive workspaces are omitted; native GUI frontends use gui_workspaces (0x86) to render inactive workspace capsules and workspace switching UI.
 
 ```
 opcode(1) + active_index(1) + tab_count(1) + entries...
@@ -148,8 +148,7 @@ Flags bits:
   bit 3: has_attention
   bits 4-6: agent_status (0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan)
 
-group_id: workspace group this tab belongs to. 0 = manual/ungrouped workspace.
-Non-zero values match workspace IDs from gui_agent_groups (0x86). Frontends use this to keep file open/close/navigation scoped to the active workspace while rendering inactive workspace capsules from gui_agent_groups.
+group_id: workspace id this tab belongs to. 0 = manual workspace. Non-zero values match workspace IDs from gui_workspaces (0x86). Frontends use this to keep file open/close/navigation scoped to the active workspace while rendering inactive workspace capsules from gui_workspaces.
 
 active_index: zero-based index into the visible tab entries, or 255 when the current active tab is not present in the visible list (for example, an active agent chat tab with only its workspace's file tabs shown).
 ```
@@ -765,7 +764,7 @@ Toast when toast_present == 1:
 
 When the git status panel is closed, the BEAM sends `repo_state = not_a_repo`, no entries, and an empty `entry_base_path` as the hide signal. A non-git project opened in the Source Control tab also uses `repo_state = not_a_repo`, but includes the project root so the frontend can show the native "Not a git repository" empty state instead of hiding the panel. The frontend should still copy `syncing` and `toast` so remote operation feedback remains accurate while the panel is hidden.
 
-### 0x86 — gui_agent_groups
+### 0x86 — gui_workspaces
 
 Agent-workspace indicator and dropdown data for progressive tab grouping. Sent alongside gui_tab_bar when agent workspaces exist.
 
@@ -783,7 +782,7 @@ color: 24-bit sRGB accent color for group separators and workspace indicator
 tab_count: number of tabs currently in this agent workspace
 ```
 
-There is no kind byte in the payload. The implicit manual/ungrouped workspace is represented by `active_workspace_id = 0` and `group_id = 0` file tabs in gui_tab_bar; the emitted workspace list contains only agent workspaces created by agents. The icon fields carry the workspace icon name, and the BEAM currently falls back to `cpu` when no icon is set.
+There is no kind byte in the payload. The implicit manual workspace is represented by `active_workspace_id = 0` and `group_id = 0` file tabs in gui_tab_bar; the emitted workspace list contains only agent workspaces created by agents. The icon fields carry the workspace icon name, and the BEAM currently falls back to `cpu` when no icon is set.
 
 The frontend uses `active_workspace_id` to highlight the active agent workspace in the indicator/dropdown. Inactive workspace capsules in the tab strip should be rendered from this agent-workspace list, not from gui_tab_bar entries. Tab entries in gui_tab_bar carry a `group_id` field that matches workspace IDs, enabling the frontend to render group separators for the active workspace projection.
 
@@ -827,9 +826,9 @@ opcode(1) + action_type(1) + payload...
 | 0x1C | git_unstage_all | (empty) | Unstage all |
 | 0x1D | git_commit | amend(1) + msg_len(2) + msg(msg_len) | Commit with message, or amend when `amend` is 1. New frontends should use this action for both normal and amend commits. |
 | 0x1E | git_open_file | path_len(2) + path(path_len) | Open file in editor |
-| 0x1F | agent_group_rename | id(2) + name_len(2) + name(name_len) | Rename an agent workspace group |
-| 0x20 | agent_group_set_icon | id(2) + icon_len(1) + icon(icon_len) | Change an agent workspace icon |
-| 0x21 | agent_group_close | id(2) | Close an agent workspace group |
+| 0x1F | workspace_rename | id(2) + name_len(2) + name(name_len) | Rename an agent workspace group |
+| 0x20 | workspace_set_icon | id(2) + icon_len(1) + icon(icon_len) | Change an agent workspace icon |
+| 0x21 | workspace_close | id(2) | Close an agent workspace |
 | 0x22 | space_leader_chord | codepoint(4) + modifiers(1) | Enter leader mode from a clean Space chord |
 | 0x23 | space_leader_retract | codepoint(4) + modifiers(1) | Retract a literal Space and enter leader mode |
 | 0x24 | find_pasteboard_search | direction(1) + text_len(2) + text(text_len) | Search from the macOS find pasteboard |

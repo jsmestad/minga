@@ -19,7 +19,7 @@ defmodule MingaEditor.Agent.Events do
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias Minga.Buffer
-  alias MingaEditor.State.AgentGroup
+  alias MingaEditor.State.Workspace
   alias MingaEditor.State.Remote
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -479,9 +479,9 @@ defmodule MingaEditor.Agent.Events do
         tb = TabBar.update_tab(EditorState.tab_bar(state), id, &Tab.set_agent_status(&1, status))
         # Also sync workspace agent status
         tb =
-          case TabBar.find_group_by_session(tb, session) do
-            %AgentGroup{id: ws_id} ->
-              TabBar.update_group(tb, ws_id, &AgentGroup.set_agent_status(&1, status))
+          case TabBar.find_workspace_by_session(tb, session) do
+            %Workspace{id: ws_id} ->
+              TabBar.update_workspace(tb, ws_id, &Workspace.set_agent_status(&1, status))
 
             nil ->
               tb
@@ -496,7 +496,7 @@ defmodule MingaEditor.Agent.Events do
 
   # Associates a file tab with the agent's workspace when the agent
   # modifies the file. Finds the file tab by label match, then moves
-  # it to the agent session's workspace group.
+  # it to the agent session's workspace.
   @spec associate_file_with_agent_workspace(EditorState.t(), String.t()) :: EditorState.t()
   defp associate_file_with_agent_workspace(%{shell_state: %{tab_bar: nil}} = state, _path),
     do: state
@@ -506,9 +506,9 @@ defmodule MingaEditor.Agent.Events do
     tb = EditorState.tab_bar(state)
 
     with pid when is_pid(pid) <- session,
-         %AgentGroup{id: ws_id} <- TabBar.find_group_by_session(tb, pid),
+         %Workspace{id: ws_id} <- TabBar.find_workspace_by_session(tb, pid),
          %Tab{id: tab_id} <- find_unassociated_file_tab(tb, path, ws_id) do
-      EditorState.set_tab_bar(state, TabBar.move_tab_to_group(tb, tab_id, ws_id))
+      EditorState.set_tab_bar(state, TabBar.move_tab_to_workspace(tb, tab_id, ws_id))
     else
       _ -> state
     end
@@ -524,20 +524,20 @@ defmodule MingaEditor.Agent.Events do
     tb = EditorState.tab_bar(state)
 
     with pid when is_pid(pid) <- session,
-         %AgentGroup{} = ws <- TabBar.find_group_by_session(tb, pid) do
+         %Workspace{} = ws <- TabBar.find_workspace_by_session(tb, pid) do
       maybe_apply_auto_name(state, ws, prompt)
     else
       _ -> state
     end
   end
 
-  @spec maybe_apply_auto_name(EditorState.t(), AgentGroup.t(), String.t()) :: EditorState.t()
+  @spec maybe_apply_auto_name(EditorState.t(), Workspace.t(), String.t()) :: EditorState.t()
   defp maybe_apply_auto_name(state, ws, prompt) do
-    updated_ws = AgentGroup.auto_name(ws, prompt)
+    updated_ws = Workspace.auto_name(ws, prompt)
 
     if updated_ws.label != ws.label do
       tb = EditorState.tab_bar(state)
-      EditorState.set_tab_bar(state, TabBar.update_group(tb, ws.id, fn _ -> updated_ws end))
+      EditorState.set_tab_bar(state, TabBar.update_workspace(tb, ws.id, fn _ -> updated_ws end))
     else
       state
     end

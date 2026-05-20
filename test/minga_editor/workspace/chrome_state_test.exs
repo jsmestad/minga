@@ -4,7 +4,7 @@ defmodule MingaEditor.Workspace.ChromeStateTest do
   @moduletag :tmp_dir
 
   alias Minga.Buffer.Process, as: BufferProcess
-  alias MingaEditor.State.AgentGroup
+  alias MingaEditor.State.Workspace
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
@@ -57,7 +57,7 @@ defmodule MingaEditor.Workspace.ChromeStateTest do
 
       tb =
         tb
-        |> TabBar.update_group(group.id, &AgentGroup.set_agent_status(&1, :thinking))
+        |> TabBar.update_workspace(group.id, &Workspace.set_agent_status(&1, :thinking))
         |> TabBar.update_tab(3, &Tab.set_attention(&1, true))
         |> TabBar.switch_to(1)
 
@@ -175,14 +175,14 @@ defmodule MingaEditor.Workspace.ChromeStateTest do
     manual = file_tab(1, "manual.ex", Path.join(tmp_dir, "manual.ex"), 0)
     agent_chat = Tab.new_agent(2, "Agent") |> Tab.set_group(1)
     agent_file = file_tab(3, "agent.ex", Path.join(tmp_dir, "agent.ex"), 1)
-    group = AgentGroup.new(1, "Agent", self())
+    group = Workspace.new_agent(1, "Agent", self())
 
     {%TabBar{
        tabs: [manual, agent_chat, agent_file],
        active_id: 1,
        next_id: 4,
-       agent_groups: [group],
-       next_group_id: 2
+       workspaces: [group],
+       next_workspace_id: 2
      }, group}
   end
 
@@ -190,14 +190,14 @@ defmodule MingaEditor.Workspace.ChromeStateTest do
     manual = file_tab(1, "same.ex", path, 0)
     agent_chat = Tab.new_agent(2, "Agent") |> Tab.set_group(1)
     agent_file = file_tab(3, "same.ex", path, 1)
-    group = AgentGroup.new(1, "Agent", self())
+    group = Workspace.new_agent(1, "Agent", self())
 
     {%TabBar{
        tabs: [manual, agent_chat, agent_file],
        active_id: 1,
        next_id: 4,
-       agent_groups: [group],
-       next_group_id: 2
+       workspaces: [group],
+       next_workspace_id: 2
      }, group}
   end
 

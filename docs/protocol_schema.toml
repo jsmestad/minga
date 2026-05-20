@@ -517,7 +517,7 @@ direction = "beam_to_frontend"
 
 [[opcodes]]
 category = "gui_semantic"
-name = "gui_agent_groups"
+name = "gui_workspaces"
 value = 0x86
 direction = "beam_to_frontend"
 
@@ -673,15 +673,15 @@ name = "git_open_file"
 value = 0x1E
 
 [[gui_actions]]
-name = "agent_group_rename"
+name = "workspace_rename"
 value = 0x1F
 
 [[gui_actions]]
-name = "agent_group_set_icon"
+name = "workspace_set_icon"
 value = 0x20
 
 [[gui_actions]]
-name = "agent_group_close"
+name = "workspace_close"
 value = 0x21
 
 [[gui_actions]]

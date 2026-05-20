@@ -13,7 +13,7 @@ defmodule MingaEditor.Commands.AgentSession do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
-  alias MingaEditor.State.AgentGroup
+  alias MingaEditor.State.Workspace
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
@@ -100,7 +100,7 @@ defmodule MingaEditor.Commands.AgentSession do
         # populated lazily on tab switch via rebuild_agent_from_session/2.
         state = assign_session_to_tab(state, pid)
 
-        # Create an agent group for this session (if one doesn't exist yet)
+        # Create an workspace for this session (if one doesn't exist yet)
         ensure_agent_workspace(state, pid)
 
       {:error, reason} ->
@@ -459,19 +459,19 @@ defmodule MingaEditor.Commands.AgentSession do
   # a workspace (e.g., session restart).
   @spec ensure_agent_workspace(state(), pid()) :: state()
   defp ensure_agent_workspace(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, session_pid) do
-    case TabBar.find_group_by_session(tb, session_pid) do
-      %AgentGroup{} ->
+    case TabBar.find_workspace_by_session(tb, session_pid) do
+      %Workspace{} ->
         # Workspace already exists for this session
         state
 
       nil ->
         # Create workspace and assign the agent tab to it
-        {tb, ws} = TabBar.add_agent_group(tb, "Agent", session_pid)
+        {tb, ws} = TabBar.add_workspace(tb, "Agent", session_pid)
 
         # Find the agent tab with this session and move it into the workspace
         tb =
           case TabBar.find_by_session(tb, session_pid) do
-            %Tab{id: tab_id} -> TabBar.move_tab_to_group(tb, tab_id, ws.id)
+            %Tab{id: tab_id} -> TabBar.move_tab_to_workspace(tb, tab_id, ws.id)
             nil -> tb
           end
 

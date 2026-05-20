@@ -2011,18 +2011,18 @@ struct GUIToolManagerDecoderTests {
     }
 }
 
-// MARK: - gui_agent_groups (0x86)
+// MARK: - gui_workspaces (0x86)
 
-@Suite("GUI Agent Groups Decoder")
-struct GUIAgentGroupsDecoderTests {
-    @Test("Decode agent groups with one group")
-    func decodeOneGroup() throws {
+@Suite("GUI Workspaces Decoder")
+struct GUIWorkspacesDecoderTests {
+    @Test("Decode workspaces with one workspace")
+    func decodeOneWorkspace() throws {
         var data = Data()
-        data.append(OP_GUI_AGENT_GROUPS)
-        appendU16(&data, 1) // active_group_id
-        data.append(1) // group_count
+        data.append(OP_GUI_WORKSPACES)
+        appendU16(&data, 1) // active_workspace_id
+        data.append(1) // workspace_count
 
-        // Agent group (no kind byte, all groups are agents)
+        // Agent workspace entry (no kind byte, all entries are agent workspaces)
         appendU16(&data, 1) // id
         data.append(1) // agent_status = thinking
         appendRGB(&data, 0xC6, 0x78, 0xDD) // color
@@ -2033,45 +2033,45 @@ struct GUIAgentGroupsDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiAgentGroups(let activeId, let groups) = cmd else {
-            Issue.record("Expected .guiAgentGroups, got \(String(describing: cmd))")
+        guard case .guiWorkspaces(let activeId, let workspaces) = cmd else {
+            Issue.record("Expected .guiWorkspaces, got \(String(describing: cmd))")
             return
         }
 
         #expect(activeId == 1)
-        #expect(groups.count == 1)
-        #expect(groups[0].id == 1)
-        #expect(groups[0].agentStatus == 1)
-        #expect(groups[0].colorR == 0xC6)
-        #expect(groups[0].colorG == 0x78)
-        #expect(groups[0].colorB == 0xDD)
-        #expect(groups[0].tabCount == 2)
-        #expect(groups[0].label == "Research")
-        #expect(groups[0].icon == "cpu")
+        #expect(workspaces.count == 1)
+        #expect(workspaces[0].id == 1)
+        #expect(workspaces[0].agentStatus == 1)
+        #expect(workspaces[0].colorR == 0xC6)
+        #expect(workspaces[0].colorG == 0x78)
+        #expect(workspaces[0].colorB == 0xDD)
+        #expect(workspaces[0].tabCount == 2)
+        #expect(workspaces[0].label == "Research")
+        #expect(workspaces[0].icon == "cpu")
     }
 
-    @Test("Decode agent groups with zero groups")
+    @Test("Decode workspaces with zero workspaces")
     func decodeEmpty() throws {
         var data = Data()
-        data.append(OP_GUI_AGENT_GROUPS)
-        appendU16(&data, 0) // active_group_id
-        data.append(0) // group_count
+        data.append(OP_GUI_WORKSPACES)
+        appendU16(&data, 0) // active_workspace_id
+        data.append(0) // workspace_count
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == 4)
 
-        guard case .guiAgentGroups(_, let groups) = cmd else {
-            Issue.record("Expected .guiAgentGroups"); return
+        guard case .guiWorkspaces(_, let workspaces) = cmd else {
+            Issue.record("Expected .guiWorkspaces"); return
         }
-        #expect(groups.isEmpty)
+        #expect(workspaces.isEmpty)
     }
 
-    @Test("Decode agent group with long label")
+    @Test("Decode workspaces with long label")
     func decodeLongLabel() throws {
         var data = Data()
-        data.append(OP_GUI_AGENT_GROUPS)
-        appendU16(&data, 1) // active_group_id
-        data.append(1) // group_count
+        data.append(OP_GUI_WORKSPACES)
+        appendU16(&data, 1) // active_workspace_id
+        data.append(1) // workspace_count
 
         let longLabel = String(repeating: "A", count: 200)
         appendU16(&data, 1) // id
@@ -2084,13 +2084,13 @@ struct GUIAgentGroupsDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiAgentGroups(let activeId, let groups) = cmd else {
-            Issue.record("Expected .guiAgentGroups"); return
+        guard case .guiWorkspaces(let activeId, let workspaces) = cmd else {
+            Issue.record("Expected .guiWorkspaces"); return
         }
 
         #expect(activeId == 1)
-        #expect(groups[0].label == longLabel)
-        #expect(groups[0].icon == "hammer")
+        #expect(workspaces[0].label == longLabel)
+        #expect(workspaces[0].icon == "hammer")
     }
 }
 

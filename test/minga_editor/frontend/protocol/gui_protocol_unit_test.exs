@@ -5,7 +5,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
   """
   use ExUnit.Case, async: true
 
-  alias MingaEditor.State.AgentGroup
+  alias MingaEditor.State.Workspace
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
@@ -102,22 +102,22 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
     end
   end
 
-  describe "encode_gui_agent_groups/1" do
+  describe "encode_gui_workspaces/1" do
     test "encodes header with group count" do
       tb = TabBar.new(Tab.new_file(1, "a.ex"))
-      {tb, _} = TabBar.add_agent_group(tb, "Agent")
+      {tb, _} = TabBar.add_workspace(tb, "Agent")
 
       <<0x86, _active::16, count::8, _rest::binary>> =
-        ProtocolGUI.encode_gui_agent_groups(tb)
+        ProtocolGUI.encode_gui_workspaces(tb)
 
       assert count == 1
     end
 
-    test "agent group encodes with correct color and no kind byte" do
+    test "workspace encodes with correct color and no kind byte" do
       tb = TabBar.new(Tab.new_file(1, "a.ex"))
-      {tb, group} = TabBar.add_agent_group(tb, "Agent")
+      {tb, group} = TabBar.add_workspace(tb, "Agent")
 
-      binary = ProtocolGUI.encode_gui_agent_groups(tb)
+      binary = ProtocolGUI.encode_gui_workspaces(tb)
       <<0x86, _active::16, 1::8, rest::binary>> = binary
 
       # No kind byte: id(2) + status(1) + r(1) + g(1) + b(1) + tab_count(2) + label_len(1) + label + icon_len(1) + icon
@@ -140,10 +140,10 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
 
     test "icon field is encoded" do
       tb = TabBar.new(Tab.new_file(1, "a.ex"))
-      {tb, group} = TabBar.add_agent_group(tb, "Test")
-      tb = TabBar.update_group(tb, group.id, &AgentGroup.set_icon(&1, "star"))
+      {tb, group} = TabBar.add_workspace(tb, "Test")
+      tb = TabBar.update_workspace(tb, group.id, &Workspace.set_icon(&1, "star"))
 
-      binary = ProtocolGUI.encode_gui_agent_groups(tb)
+      binary = ProtocolGUI.encode_gui_workspaces(tb)
 
       <<0x86, _active::16, 1::8, _id::16, _status::8, _r::8, _g::8, _b::8, _tc::16, label_len::8,
         _label::binary-size(label_len), icon_len::8, icon::binary-size(icon_len), _rest::binary>> =
@@ -152,7 +152,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       assert icon == "star"
     end
 
-    test "ChromeState encoding keeps manual workspace out of legacy agent groups" do
+    test "ChromeState encoding keeps manual workspace out of legacy workspaces" do
       chrome_state = %ChromeState{
         workspaces: [
           workspace_summary(id: 0, kind: :manual, label: "Files", icon: "folder"),
@@ -169,7 +169,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       }
 
       <<0x86, 0::16, 1::8, id::16, _rest::binary>> =
-        ProtocolGUI.encode_gui_agent_groups(chrome_state)
+        ProtocolGUI.encode_gui_workspaces(chrome_state)
 
       assert id == 1
     end
@@ -233,26 +233,26 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
     end
   end
 
-  describe "decode_gui_action for agent group actions" do
-    test "decodes agent group rename" do
+  describe "decode_gui_action for workspace actions" do
+    test "decodes workspace rename" do
       name = "My Research"
       payload = <<42::16, byte_size(name)::16, name::binary>>
 
-      assert {:ok, {:agent_group_rename, 42, "My Research"}} ==
+      assert {:ok, {:workspace_rename, 42, "My Research"}} ==
                ProtocolGUI.decode_gui_action(0x1F, payload)
     end
 
-    test "decodes agent group set icon" do
+    test "decodes workspace set icon" do
       icon = "brain"
       payload = <<7::16, byte_size(icon)::8, icon::binary>>
 
-      assert {:ok, {:agent_group_set_icon, 7, "brain"}} ==
+      assert {:ok, {:workspace_set_icon, 7, "brain"}} ==
                ProtocolGUI.decode_gui_action(0x20, payload)
     end
 
-    test "decodes agent group close" do
+    test "decodes workspace close" do
       payload = <<3::16>>
-      assert {:ok, {:agent_group_close, 3}} == ProtocolGUI.decode_gui_action(0x21, payload)
+      assert {:ok, {:workspace_close, 3}} == ProtocolGUI.decode_gui_action(0x21, payload)
     end
   end
 

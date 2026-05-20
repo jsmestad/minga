@@ -14,7 +14,7 @@ defmodule MingaEditor.UI.Picker.Context do
   - `file_tree` — file tree state (if available)
   - `search` — search state (buffer search, project search results)
   - `viewport` — viewport dimensions
-  - `tab_bar` — tab bar state (tabs, active tab, agent groups)
+  - `tab_bar` — tab bar state (tabs, active tab, workspaces)
   - `agent_session` — agent session PID (if available)
   - `picker_ui` — picker UI state (context map for sources)
   - `document_symbols` — tree-sitter document symbols for the active window

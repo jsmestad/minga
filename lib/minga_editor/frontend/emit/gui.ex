@@ -139,7 +139,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     builders = [
       &build_gui_theme_cmd/2,
       &build_gui_tab_bar_cmd/2,
-      &build_gui_agent_groups_cmd/2,
+      &build_gui_workspaces_cmd/2,
       &build_gui_file_tree_cmd/2,
       &build_gui_git_status_cmd/2,
       &build_gui_which_key_cmd/2,
@@ -222,34 +222,32 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   defp build_gui_tab_bar_cmd(%{shell_state: %{tab_bar: nil}}, caches), do: {nil, caches}
 
-  @spec build_gui_agent_groups_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
-  defp build_gui_agent_groups_cmd(%{shell_state: %{tab_bar: %TabBar{}}} = ctx, caches) do
+  @spec build_gui_workspaces_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
+  defp build_gui_workspaces_cmd(%{shell_state: %{tab_bar: %TabBar{}}} = ctx, caches) do
     chrome_state = ChromeState.from_editor_state(ctx)
     agent_workspaces = Enum.filter(chrome_state.workspaces, &(&1.kind == :agent))
 
     if agent_workspaces != [] do
-      fp = agent_groups_fingerprint(chrome_state)
+      fp = workspaces_fingerprint(chrome_state)
 
-      if fp != caches.last_gui_agent_groups_fp do
-        {ProtocolGUI.encode_gui_agent_groups(chrome_state),
-         %{caches | last_gui_agent_groups_fp: fp}}
+      if fp != caches.last_gui_workspaces_fp do
+        {ProtocolGUI.encode_gui_workspaces(chrome_state), %{caches | last_gui_workspaces_fp: fp}}
       else
         {nil, caches}
       end
     else
-      if caches.last_gui_agent_groups_fp != nil do
-        {ProtocolGUI.encode_gui_agent_groups(chrome_state),
-         %{caches | last_gui_agent_groups_fp: nil}}
+      if caches.last_gui_workspaces_fp != nil do
+        {ProtocolGUI.encode_gui_workspaces(chrome_state), %{caches | last_gui_workspaces_fp: nil}}
       else
         {nil, caches}
       end
     end
   end
 
-  defp build_gui_agent_groups_cmd(_ctx, caches), do: {nil, caches}
+  defp build_gui_workspaces_cmd(_ctx, caches), do: {nil, caches}
 
-  @spec agent_groups_fingerprint(ChromeState.t()) :: integer()
-  defp agent_groups_fingerprint(%ChromeState{} = chrome_state) do
+  @spec workspaces_fingerprint(ChromeState.t()) :: integer()
+  defp workspaces_fingerprint(%ChromeState{} = chrome_state) do
     :erlang.phash2({
       chrome_state.active_workspace_id,
       chrome_state.background_count,

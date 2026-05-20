@@ -1,4 +1,4 @@
-defmodule MingaEditor.UI.Prompt.AgentGroupRename do
+defmodule MingaEditor.UI.Prompt.WorkspaceRename do
   @moduledoc """
   Prompt handler for renaming the active workspace.
 
@@ -8,7 +8,7 @@ defmodule MingaEditor.UI.Prompt.AgentGroupRename do
 
   @behaviour MingaEditor.UI.Prompt.Handler
 
-  alias MingaEditor.State.AgentGroup
+  alias MingaEditor.State.Workspace
   alias MingaEditor.State.TabBar
 
   @impl true
@@ -24,8 +24,8 @@ defmodule MingaEditor.UI.Prompt.AgentGroupRename do
       ss = state.shell_state
       %{state | shell_state: %{ss | status_msg: "Workspace name cannot be empty"}}
     else
-      ws_id = TabBar.active_group_id(tb)
-      tb = TabBar.update_group(tb, ws_id, &AgentGroup.rename(&1, trimmed))
+      ws_id = TabBar.active_workspace_id(tb)
+      tb = TabBar.update_workspace(tb, ws_id, &Workspace.rename(&1, trimmed))
       ss = state.shell_state
       %{state | shell_state: %{ss | tab_bar: tb, status_msg: "Renamed: #{trimmed}"}}
     end

@@ -2582,21 +2582,21 @@ defmodule MingaEditor do
     commit_from_gui(state, message, true)
   end
 
-  defp handle_gui_action(state, {:agent_group_close, _ws_id} = action) do
+  defp handle_gui_action(state, {:workspace_close, _ws_id} = action) do
     {shell_state, workspace} =
       state.shell.handle_gui_action(state.shell_state, state.workspace, action)
 
     %{state | shell_state: shell_state, workspace: workspace}
   end
 
-  defp handle_gui_action(state, {:agent_group_rename, _ws_id, _name} = action) do
+  defp handle_gui_action(state, {:workspace_rename, _ws_id, _name} = action) do
     {shell_state, workspace} =
       state.shell.handle_gui_action(state.shell_state, state.workspace, action)
 
     %{state | shell_state: shell_state, workspace: workspace}
   end
 
-  defp handle_gui_action(state, {:agent_group_set_icon, _ws_id, _icon} = action) do
+  defp handle_gui_action(state, {:workspace_set_icon, _ws_id, _icon} = action) do
     {shell_state, workspace} =
       state.shell.handle_gui_action(state.shell_state, state.workspace, action)
 
@@ -2957,7 +2957,7 @@ defmodule MingaEditor do
     if active_buffer_matches_file_ref?(state, file_ref) do
       EditorState.active_tab(state)
     else
-      TabBar.find_file_tab_in_workspace(tb, TabBar.active_group_id(tb), file_ref)
+      TabBar.find_file_tab_in_workspace(tb, TabBar.active_workspace_id(tb), file_ref)
     end
   end
 

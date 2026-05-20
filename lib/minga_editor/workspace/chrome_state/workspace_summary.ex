@@ -5,10 +5,10 @@ defmodule MingaEditor.Workspace.ChromeState.WorkspaceSummary do
   This is presentation data derived from editor state. It is not a source of truth for workspace membership or session lifecycle.
   """
 
-  alias MingaEditor.State.AgentGroup
+  alias MingaEditor.State.Workspace
 
   @type kind :: :manual | :agent
-  @type status :: AgentGroup.agent_status()
+  @type status :: Workspace.agent_status()
 
   @type t :: %__MODULE__{
           id: non_neg_integer(),

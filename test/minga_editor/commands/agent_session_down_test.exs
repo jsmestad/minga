@@ -6,7 +6,7 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
   `:agent_session_stopped` events, so handlers receive notifications for
   every agent session in the BEAM, not only the ones this editor owns.
   These tests pin the contract: only act on sessions referenced by a tab
-  or agent group on this editor's tab bar.
+  or workspace on this editor's tab bar.
   """
 
   use ExUnit.Case, async: true
@@ -93,9 +93,9 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
       assert result.shell_state.status_msg == "Agent session ended"
     end
 
-    test "treats agent_groups membership as ownership" do
+    test "treats workspaces membership as ownership" do
       session_pid = spawn(fn -> :ok end)
-      {tb, _group} = TabBar.add_agent_group(empty_tab_bar(), "Workgroup", session_pid)
+      {tb, _group} = TabBar.add_workspace(empty_tab_bar(), "Workgroup", session_pid)
       state = build_state(tb)
 
       result = BufferManagement.handle_agent_session_down(state, session_pid, :killed)

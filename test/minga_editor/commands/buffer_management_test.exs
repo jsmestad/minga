@@ -198,8 +198,8 @@ defmodule MingaEditor.Commands.BufferManagementTest do
       {state, _buffer} = start_command_state("first file")
       {state, hidden_buffer} = add_file_tab_with_buffer(state)
       hidden_tab_id = EditorState.tab_bar(state).active_id
-      {tb, group} = TabBar.add_agent_group(EditorState.tab_bar(state), "Agent")
-      tb = TabBar.move_tab_to_group(tb, hidden_tab_id, group.id)
+      {tb, group} = TabBar.add_workspace(EditorState.tab_bar(state), "Agent")
+      tb = TabBar.move_tab_to_workspace(tb, hidden_tab_id, group.id)
       tb = TabBar.switch_to(tb, 1)
       state = EditorState.set_tab_bar(state, tb)
 
@@ -251,8 +251,8 @@ defmodule MingaEditor.Commands.BufferManagementTest do
       visible_tab_id = EditorState.tab_bar(state).active_id
       state = add_file_tab(state, "hidden workspace")
       hidden_tab_id = EditorState.tab_bar(state).active_id
-      {tb, group} = TabBar.add_agent_group(EditorState.tab_bar(state), "Agent")
-      tb = TabBar.move_tab_to_group(tb, hidden_tab_id, group.id)
+      {tb, group} = TabBar.add_workspace(EditorState.tab_bar(state), "Agent")
+      tb = TabBar.move_tab_to_workspace(tb, hidden_tab_id, group.id)
       tb = TabBar.switch_to(tb, visible_tab_id)
       state = EditorState.set_tab_bar(state, tb)
 

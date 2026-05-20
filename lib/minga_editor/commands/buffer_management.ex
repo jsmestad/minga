@@ -670,7 +670,7 @@ defmodule MingaEditor.Commands.BufferManagement do
          file_path
        ) do
     file_ref = FileRef.new(file_path)
-    workspace_id = TabBar.active_group_id(tb)
+    workspace_id = TabBar.active_workspace_id(tb)
 
     case existing_file_tab_in_workspace(state, tb, workspace_id, file_ref) do
       %Tab{id: id} -> EditorState.switch_tab(state, id)
@@ -977,7 +977,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   Cleans up editor state after an agent session dies (`:DOWN` handler).
 
   The session is already dead, so no stop/unsubscribe is needed. This
-  clears the spinner, agent state, tab session/status, and agent group.
+  clears the spinner, agent state, tab session/status, and workspace.
   """
   @spec handle_agent_session_down(state(), pid(), term()) :: state()
   def handle_agent_session_down(state, session_pid, :noconnection) do
@@ -1047,7 +1047,7 @@ defmodule MingaEditor.Commands.BufferManagement do
       ) do
     owned? =
       Enum.any?(tb.tabs, &(&1.session == session_pid)) or
-        TabBar.find_group_by_session(tb, session_pid) != nil
+        TabBar.find_workspace_by_session(tb, session_pid) != nil
 
     if owned? do
       tab_status = if reason in [:normal, :shutdown], do: :idle, else: :error
@@ -1113,8 +1113,8 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   defp handle_remote_session_disconnected(state, _session_pid), do: state
 
-  # Shared state cleanup for agent sessions: stops spinner, clears
-  # agent state session, clears Tab.session/agent_status, removes group.
+  # Shared state cleanup for agent sessions: stops spinner, clears agent state session,
+  # clears Tab.session/agent_status, and removes the agent workspace.
   @spec scrub_agent_tab_state(state(), pid() | nil, Tab.agent_status()) :: state()
   defp scrub_agent_tab_state(state, session, tab_status \\ :idle) do
     state = AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
@@ -1129,9 +1129,12 @@ defmodule MingaEditor.Commands.BufferManagement do
       end
 
     # Remove the agent's group from the tab bar.
-    case session && TabBar.find_group_by_session(state.shell_state.tab_bar, session) do
-      %{id: group_id} ->
-        EditorState.set_tab_bar(state, TabBar.remove_group(state.shell_state.tab_bar, group_id))
+    case session && TabBar.find_workspace_by_session(state.shell_state.tab_bar, session) do
+      %{id: workspace_id} ->
+        EditorState.set_tab_bar(
+          state,
+          TabBar.remove_workspace(state.shell_state.tab_bar, workspace_id)
+        )
 
       _ ->
         state
