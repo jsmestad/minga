@@ -67,7 +67,7 @@ enum Wire {
         let label: String
     }
 
-    /// An agent workspace entry decoded from the gui_workspaces protocol message.
+    /// A workspace entry decoded from the gui_workspaces protocol message.
     struct WorkspaceEntry: Sendable {
         let id: UInt16
         let agentStatus: UInt8

@@ -5,11 +5,21 @@ defmodule MingaEditor.Commands.WorkspaceTest do
   alias Minga.Command
   alias MingaEditor.Commands.Workspace
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.Tab
-  alias MingaEditor.State.TabBar
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Context, as: TabContext
+  alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Windows
+  alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.WorkspaceIconSource
+  alias MingaEditor.UI.Picker.WorkspaceSource
+  alias MingaEditor.UI.Prompt.WorkspaceRename
   alias MingaEditor.Viewport
+  alias MingaEditor.VimState
   alias MingaEditor.Window
+  alias MingaEditor.WindowTree
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
+  alias MingaEditor.Workspace.State, as: WorkspaceState
 
   # Builds an EditorState with a manual workspace file tab and two agent workspaces.
   # The manual tab is id 1 / workspace 0; agent tabs are ids 2 and 3 / workspaces 1 and 2.
@@ -35,18 +45,98 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
     %EditorState{
       port_manager: self(),
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %WorkspaceState{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: buf, list: [buf]},
-        windows: %MingaEditor.State.Windows{
+        windows: %Windows{
           tree: {:leaf, 1},
           map: %{1 => window},
           active: 1,
           next_id: 2
         }
       },
-      shell_state: %MingaEditor.Shell.Traditional.State{tab_bar: tb}
+      shell_state: %TraditionalState{tab_bar: tb}
     }
+  end
+
+  defp manual_workspace_state(buffer, mode) do
+    %WorkspaceState{
+      viewport: Viewport.new(24, 80),
+      keymap_scope: :editor,
+      buffers: %Buffers{active: buffer, list: [buffer], active_index: 0},
+      windows: %Windows{
+        tree: WindowTree.new(1),
+        map: %{1 => Window.new(1, buffer, 24, 80)},
+        active: 1,
+        next_id: 2
+      },
+      editing: VimState.transition(VimState.new(), mode)
+    }
+  end
+
+  defp agent_workspace_state(buffer, mode) do
+    %WorkspaceState{
+      viewport: Viewport.new(24, 80),
+      keymap_scope: :agent,
+      buffers: %Buffers{active: buffer, list: [buffer], active_index: 0},
+      windows: %Windows{
+        tree: WindowTree.new(1),
+        map: %{1 => Window.new_agent_chat(1, buffer, 24, 80)},
+        active: 1,
+        next_id: 2
+      },
+      editing: VimState.transition(VimState.new(), mode)
+    }
+  end
+
+  defp make_workspace_switch_state do
+    manual_saved_buf =
+      start_supervised!(
+        Supervisor.child_spec({BufferProcess, [content: "manual saved"]},
+          id: {:buffer_process, :manual_saved}
+        )
+      )
+
+    manual_live_buf =
+      start_supervised!(
+        Supervisor.child_spec({BufferProcess, [content: "manual live"]},
+          id: {:buffer_process, :manual_live}
+        )
+      )
+
+    agent_buf =
+      start_supervised!(
+        Supervisor.child_spec({BufferProcess, [content: "agent"]},
+          id: {:buffer_process, :agent}
+        )
+      )
+
+    manual_saved_ctx =
+      manual_saved_buf
+      |> manual_workspace_state(:normal)
+      |> TabContext.from_workspace()
+
+    agent_ctx =
+      agent_buf
+      |> agent_workspace_state(:normal)
+      |> TabContext.from_workspace()
+
+    manual_tab = Tab.new_file(1, "manual.ex") |> Tab.set_context(manual_saved_ctx)
+
+    {tb, agent_workspace} = TabBar.add_workspace(TabBar.new(manual_tab), "Agent")
+
+    agent_tab =
+      Tab.new_agent(2, "Agent") |> Tab.set_group(agent_workspace.id) |> Tab.set_context(agent_ctx)
+
+    tb = %{tb | tabs: [manual_tab, agent_tab], active_id: 1, next_id: 3}
+
+    state = %EditorState{
+      port_manager: self(),
+      workspace: manual_workspace_state(manual_live_buf, :insert),
+      shell_state: %TraditionalState{tab_bar: tb}
+    }
+
+    {state, manual_live_buf, agent_buf}
   end
 
   describe "__commands__/0" do
@@ -54,8 +144,20 @@ defmodule MingaEditor.Commands.WorkspaceTest do
       commands = Workspace.__commands__()
 
       assert Enum.all?(commands, &match?(%Command{}, &1))
-      assert Enum.any?(commands, &(&1.name == :workspace_next))
-      assert Enum.any?(commands, &(&1.name == :workspace_next_agent))
+
+      for name <- [
+            :workspace_next,
+            :workspace_prev,
+            :manual_workspace,
+            :workspace_toggle,
+            :workspace_close,
+            :workspace_list,
+            :workspace_rename,
+            :workspace_set_icon,
+            :workspace_next_agent
+          ] do
+        assert Enum.any?(commands, &(&1.name == name))
+      end
 
       for n <- 1..9 do
         assert Enum.any?(commands, &(&1.name == String.to_atom("workspace_goto_#{n}")))
@@ -90,12 +192,94 @@ defmodule MingaEditor.Commands.WorkspaceTest do
   end
 
   describe "workspace_toggle/1" do
-    test "switches from manual workspace tabs to the last workspace" do
-      state = make_state()
+    test "restores the incoming workspace context and snapshots the tab left behind" do
+      {state, manual_live_buf, agent_buf} = make_workspace_switch_state()
       result = Workspace.workspace_toggle(state)
 
       assert %EditorState{} = result
-      assert result.shell_state.tab_bar.active_id == 3
+      assert result.shell_state.tab_bar.active_id == 2
+      assert result.workspace.buffers.active == agent_buf
+      assert result.workspace.editing.mode == :normal
+
+      manual_tab = TabBar.get(result.shell_state.tab_bar, 1)
+      assert manual_tab.context.buffers.active == manual_live_buf
+      assert manual_tab.context.editing.mode == :insert
+    end
+  end
+
+  describe "workspace_close/1" do
+    test "migrates the active agent workspace tabs back to manual" do
+      state = make_state() |> Workspace.workspace_next()
+      result = Workspace.workspace_close(state)
+
+      assert %EditorState{} = result
+      tab_bar = result.shell_state.tab_bar
+      assert TabBar.active_workspace_id(tab_bar) == 0
+      assert TabBar.get_workspace(tab_bar, 1) == nil
+      assert Enum.map(TabBar.tabs_in_workspace(tab_bar, 0), & &1.id) == [1, 2]
+      assert Enum.map(TabBar.tabs_in_workspace(tab_bar, 2), & &1.id) == [3]
+    end
+
+    test "leaving the manual workspace alone is a no-op" do
+      state = make_state()
+      assert Workspace.workspace_close(state) == state
+    end
+  end
+
+  describe "workspace_list/1" do
+    test "opens the picker with the active workspace selected" do
+      state = make_state() |> Workspace.workspace_next()
+      result = Workspace.workspace_list(state)
+
+      assert {:picker,
+              %{picker_ui: %{source: WorkspaceSource, picker: %{title: "Switch Workspace"}}}} =
+               result.shell_state.modal
+
+      active_item =
+        result
+        |> Context.from_editor_state()
+        |> WorkspaceSource.candidates()
+        |> Enum.find(&(&1.id == 1))
+
+      assert active_item.label =~ "Agent 1"
+      assert String.ends_with?(active_item.label, " •")
+    end
+  end
+
+  describe "workspace_set_icon/1" do
+    test "opens the icon picker for the active workspace" do
+      state = make_state() |> Workspace.workspace_next()
+      result = Workspace.workspace_set_icon(state)
+
+      assert {:picker,
+              %{picker_ui: %{source: WorkspaceIconSource, picker: %{title: "Set Workspace Icon"}}}} =
+               result.shell_state.modal
+
+      current_icon =
+        result
+        |> Context.from_editor_state()
+        |> WorkspaceIconSource.candidates()
+        |> Enum.find(&(&1.label == "cpu •"))
+
+      assert current_icon != nil
+    end
+  end
+
+  describe "workspace_rename/1" do
+    test "opens the prompt with the active workspace label prefilled" do
+      state = make_state() |> Workspace.workspace_next()
+      result = Workspace.workspace_rename(state)
+
+      assert {:prompt,
+              %{
+                prompt_ui: %{
+                  handler: WorkspaceRename,
+                  label: "Rename workspace: ",
+                  text: "Agent 1",
+                  cursor: 7
+                }
+              }} =
+               result.shell_state.modal
     end
   end
 

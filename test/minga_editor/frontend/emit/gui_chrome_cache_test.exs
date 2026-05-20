@@ -35,8 +35,7 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       assert first_cmds != []
 
       {_ctx, _caches, second_cmds} = sync_chrome(state, caches)
-      assert opcode_count(second_cmds, 0x76) == 1
-      assert length(second_cmds) == 1
+      assert Enum.map(second_cmds, &opcode!/1) == [0x76]
     end
 
     test "theme fingerprint includes color content, not only theme name" do
@@ -261,6 +260,32 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       refute board_caches2.last_gui_board_fp == board_caches.last_gui_board_fp
     end
 
+    test "workspace fingerprint clears when the last agent workspace disappears" do
+      state = gui_state()
+      tab_bar = tab_bar_with_two_workspaces()
+      state_with_agents = put_in(state.shell_state.tab_bar, tab_bar)
+      {_ctx, caches, first_cmds} = sync_chrome(state_with_agents)
+
+      assert Enum.any?(first_cmds, &opcode?(&1, 0x86))
+      assert caches.last_gui_workspaces_fp != nil
+
+      tab_bar_without_agents =
+        tab_bar
+        |> TabBar.remove_workspace(1)
+        |> TabBar.remove_workspace(2)
+
+      state_without_agents = put_in(state.shell_state.tab_bar, tab_bar_without_agents)
+      {_ctx, caches2, second_cmds} = sync_chrome(state_without_agents, caches)
+
+      workspaces_cmd = Enum.find(second_cmds, &opcode?(&1, 0x86))
+      assert <<0x86, _active::16, 0::8>> = workspaces_cmd
+      assert caches2.last_gui_workspaces_fp == nil
+
+      {_ctx, caches3, third_cmds} = sync_chrome(state_without_agents, caches2)
+      refute Enum.any?(third_cmds, &opcode?(&1, 0x86))
+      assert caches3.last_gui_workspaces_fp == nil
+    end
+
     test "agent chat survives dead prompt buffer process" do
       state = gui_state()
       {:ok, dead_pid} = Agent.start(fn -> nil end)
@@ -303,6 +328,7 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
   defp has_opcode?(cmds, opcode), do: Enum.any?(cmds, &opcode?(&1, opcode))
   defp opcode_count(cmds, opcode), do: cmds |> opcode_cmds(opcode) |> length()
   defp opcode_cmds(cmds, opcode), do: Enum.filter(cmds, &opcode?(&1, opcode))
+  defp opcode!(<<opcode, _::binary>>), do: opcode
   defp opcode?(<<opcode, _::binary>>, opcode), do: true
   defp opcode?(_, _opcode), do: false
 
