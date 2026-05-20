@@ -1,6 +1,7 @@
 defmodule MingaEditor.State.WorkspaceTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Project.FileRef
   alias MingaEditor.State.Workspace
 
   describe "new_manual/1" do
@@ -100,6 +101,185 @@ defmodule MingaEditor.State.WorkspaceTest do
       updated = Workspace.set_icon(workspace, "star")
       assert updated.label == workspace.label
       assert updated.color == workspace.color
+    end
+  end
+
+  describe "file membership" do
+    test "add_file/2 stores FileRef values without duplicates" do
+      {:ok, file_ref} = FileRef.from_path("/tmp/minga", "lib/user.ex")
+
+      workspace =
+        Workspace.new_manual("/tmp/minga")
+        |> Workspace.add_file(file_ref)
+        |> Workspace.add_file(file_ref)
+
+      assert workspace.files == [file_ref]
+    end
+
+    test "same logical file can be a member of two workspaces" do
+      {:ok, file_ref} = FileRef.from_path("/tmp/minga", "lib/user.ex")
+
+      manual = Workspace.new_manual("/tmp/minga") |> Workspace.add_file(file_ref)
+      agent = Workspace.new_agent(1, "Agent") |> Workspace.add_file(file_ref)
+
+      assert manual.files == [file_ref]
+      assert agent.files == [file_ref]
+    end
+
+    test "remove_file/2 removes matching ref and clears active file" do
+      {:ok, file_ref} = FileRef.from_path("/tmp/minga", "lib/user.ex")
+
+      workspace =
+        Workspace.new_manual("/tmp/minga")
+        |> Workspace.add_file(file_ref)
+        |> Workspace.set_active_file(file_ref)
+        |> Workspace.remove_file(file_ref)
+
+      assert workspace.files == []
+      assert workspace.active_file == nil
+    end
+
+    test "set_active_file/2 also adds missing membership" do
+      {:ok, file_ref} = FileRef.from_path("/tmp/minga", "lib/user.ex")
+
+      workspace = Workspace.new_manual("/tmp/minga") |> Workspace.set_active_file(file_ref)
+
+      assert workspace.files == [file_ref]
+      assert workspace.active_file == file_ref
+      assert Workspace.has_file?(workspace, file_ref)
+    end
+  end
+
+  describe "rebind_file/3" do
+    test "replaces an unsaved buffer ref with a saved path ref" do
+      root = Path.join(System.tmp_dir!(), "minga-workspace-rebind-buffer")
+      path = Path.join([root, "lib", "user.ex"])
+      File.mkdir_p!(Path.dirname(path))
+
+      buffer =
+        start_supervised!({Minga.Buffer.Process, content: "scratch", buffer_name: "*scratch*"})
+
+      old_ref = FileRef.from_buffer(buffer)
+      {:ok, new_ref} = FileRef.from_path(root, path)
+      {:ok, other_ref} = FileRef.from_path(root, "lib/other.ex")
+
+      workspace =
+        Workspace.new_manual(root)
+        |> Workspace.add_file(other_ref)
+        |> Workspace.add_file(old_ref)
+        |> Workspace.set_active_file(old_ref)
+        |> Workspace.rebind_file(old_ref, new_ref)
+
+      assert workspace.files == [other_ref, new_ref]
+      assert workspace.active_file == new_ref
+      refute Workspace.has_file?(workspace, old_ref)
+    end
+
+    test "replaces a saved path ref without accumulating stale membership" do
+      root = Path.join(System.tmp_dir!(), "minga-workspace-rebind-path")
+      old_path = Path.join([root, "lib", "user.ex"])
+      new_path = Path.join([root, "lib", "user_saved.ex"])
+      {:ok, old_ref} = FileRef.from_path(root, old_path)
+      {:ok, new_ref} = FileRef.from_path(root, new_path)
+      {:ok, other_ref} = FileRef.from_path(root, "lib/other.ex")
+
+      workspace =
+        Workspace.new_manual(root)
+        |> Workspace.add_file(other_ref)
+        |> Workspace.add_file(old_ref)
+        |> Workspace.set_active_file(old_ref)
+        |> Workspace.rebind_file(old_ref, new_ref)
+
+      assert workspace.files == [other_ref, new_ref]
+      assert workspace.active_file == new_ref
+      refute Workspace.has_file?(workspace, old_ref)
+    end
+  end
+
+  describe "retarget_file/4" do
+    test "preserves an unrelated active file when retargeting an inactive tab" do
+      root = Path.join(System.tmp_dir!(), "minga-workspace-retarget-inactive")
+      {:ok, old_ref} = FileRef.from_path(root, "lib/old.ex")
+      {:ok, new_ref} = FileRef.from_path(root, "lib/new.ex")
+      {:ok, active_ref} = FileRef.from_path(root, "lib/active.ex")
+
+      workspace =
+        Workspace.new_manual(root)
+        |> Workspace.add_file(active_ref)
+        |> Workspace.add_file(old_ref)
+        |> Workspace.set_active_file(active_ref)
+        |> Workspace.retarget_file(old_ref, new_ref, false)
+
+      assert workspace.files == [active_ref, new_ref]
+      assert workspace.active_file == active_ref
+      refute Workspace.has_file?(workspace, old_ref)
+    end
+
+    test "does not rebind an unrelated active file when the old ref is unknown" do
+      root = Path.join(System.tmp_dir!(), "minga-workspace-retarget-unknown")
+      {:ok, new_ref} = FileRef.from_path(root, "lib/new.ex")
+      {:ok, active_ref} = FileRef.from_path(root, "lib/active.ex")
+
+      workspace =
+        Workspace.new_manual(root)
+        |> Workspace.add_file(active_ref)
+        |> Workspace.set_active_file(active_ref)
+        |> Workspace.retarget_file(nil, new_ref, false)
+
+      assert workspace.files == [active_ref, new_ref]
+      assert workspace.active_file == active_ref
+      assert Workspace.has_file?(workspace, new_ref)
+    end
+
+    test "does not steal an existing active file when the old ref is unknown" do
+      root = Path.join(System.tmp_dir!(), "minga-workspace-retarget-unknown-old")
+      {:ok, old_ref} = FileRef.from_path(root, "lib/old.ex")
+      {:ok, new_ref} = FileRef.from_path(root, "lib/new.ex")
+      {:ok, active_ref} = FileRef.from_path(root, "lib/active.ex")
+
+      workspace =
+        Workspace.new_manual(root)
+        |> Workspace.add_file(active_ref)
+        |> Workspace.set_active_file(active_ref)
+        |> Workspace.retarget_file(old_ref, new_ref, false)
+
+      assert workspace.files == [active_ref, new_ref]
+      assert workspace.active_file == active_ref
+      assert Workspace.has_file?(workspace, new_ref)
+      refute Workspace.has_file?(workspace, old_ref)
+    end
+
+    test "keeps active_file nil when retargeting an inactive tab into an empty active slot" do
+      root = Path.join(System.tmp_dir!(), "minga-workspace-retarget-nil-active")
+      {:ok, old_ref} = FileRef.from_path(root, "lib/old.ex")
+      {:ok, new_ref} = FileRef.from_path(root, "lib/new.ex")
+
+      workspace =
+        Workspace.new_manual(root)
+        |> Workspace.add_file(old_ref)
+        |> Workspace.retarget_file(old_ref, new_ref, false)
+
+      assert workspace.files == [new_ref]
+      assert workspace.active_file == nil
+      assert Workspace.has_file?(workspace, new_ref)
+      refute Workspace.has_file?(workspace, old_ref)
+    end
+
+    test "preserves active file identity when retargeting the workspace active file from an inactive tab" do
+      root = Path.join(System.tmp_dir!(), "minga-workspace-retarget-active-inactive")
+      {:ok, old_ref} = FileRef.from_path(root, "lib/old.ex")
+      {:ok, new_ref} = FileRef.from_path(root, "lib/new.ex")
+
+      workspace =
+        Workspace.new_manual(root)
+        |> Workspace.add_file(old_ref)
+        |> Workspace.set_active_file(old_ref)
+        |> Workspace.retarget_file(old_ref, new_ref, false)
+
+      assert workspace.files == [new_ref]
+      assert workspace.active_file == new_ref
+      assert Workspace.has_file?(workspace, new_ref)
+      refute Workspace.has_file?(workspace, old_ref)
     end
   end
 

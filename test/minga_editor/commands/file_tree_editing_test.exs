@@ -9,12 +9,17 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
   alias Minga.Buffer
   alias Minga.Events
+  alias Minga.Project.FileRef
   alias Minga.Project.FileTree
   alias MingaEditor.Commands
   alias MingaEditor.Input.FileTreeHandler
+  alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
+  alias MingaEditor.State.Tab
+  alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.Viewport
   alias MingaEditor.Workspace.State, as: WorkspaceState
 
@@ -163,6 +168,8 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       renamed = Path.join(dir, "renamed.txt")
       File.write!(file, "content")
       buffer = start_supervised!({Buffer, file_path: file, events_registry: events_registry})
+      {:ok, old_ref} = FileRef.from_path(dir, file)
+      {:ok, new_ref} = FileRef.from_path(dir, renamed)
 
       :ok = Buffer.insert_char(buffer, "!")
       assert Buffer.dirty?(buffer)
@@ -181,9 +188,125 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       assert Buffer.dirty?(buffer)
       assert File.read!(renamed) == "content"
       refute File.exists?(file)
+      assert TabBar.active(state.shell_state.tab_bar).file_ref == new_ref
+      assert TabBar.get_workspace(state.shell_state.tab_bar, 0).active_file == new_ref
+      assert WorkspaceModel.has_file?(TabBar.get_workspace(state.shell_state.tab_bar, 0), new_ref)
+      refute WorkspaceModel.has_file?(TabBar.get_workspace(state.shell_state.tab_bar, 0), old_ref)
 
       assert :ok = Buffer.save(buffer)
       assert File.read!(renamed) == "!content"
+    end
+
+    test "rename retargets an inactive tab without stealing its workspace active file", %{
+      tmp_dir: dir,
+      events_registry: events_registry
+    } do
+      source = Path.join(dir, "target.txt")
+      renamed = Path.join(dir, "renamed.txt")
+      File.write!(source, "content")
+
+      target_buffer =
+        start_supervised!({Buffer, file_path: source, events_registry: events_registry})
+
+      active_buffer =
+        start_supervised!(%{
+          id: {:active_buffer, System.unique_integer([:positive])},
+          start:
+            {Buffer, :start_link,
+             [[content: "active", buffer_name: "active-#{System.unique_integer([:positive])}"]]},
+          restart: :temporary
+        })
+
+      {:ok, old_ref} = FileRef.from_path(dir, source)
+      {:ok, new_ref} = FileRef.from_path(dir, renamed)
+      {:ok, active_ref} = FileRef.from_path(dir, "active.txt")
+
+      inactive_workspace = %WorkspaceState{
+        viewport: Viewport.new(24, 80),
+        buffers: %Buffers{active: target_buffer, list: [target_buffer], active_index: 0}
+      }
+
+      active_workspace = %WorkspaceState{
+        viewport: Viewport.new(24, 80),
+        buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0}
+      }
+
+      inactive_tab =
+        Tab.new_file(1, "target.txt")
+        |> Tab.set_file_ref(old_ref)
+        |> Tab.set_context(WorkspaceState.to_tab_context(inactive_workspace))
+
+      {tab_bar, active_tab} = TabBar.add(TabBar.new(inactive_tab, dir), :file, "active.txt")
+
+      tab_bar =
+        tab_bar
+        |> TabBar.update_tab(active_tab.id, fn tab ->
+          tab
+          |> Tab.set_file_ref(active_ref)
+          |> Tab.set_context(WorkspaceState.to_tab_context(active_workspace))
+        end)
+        |> TabBar.update_workspace(0, fn ws ->
+          WorkspaceModel.add_file(ws, active_ref) |> WorkspaceModel.set_active_file(active_ref)
+        end)
+
+      state = %EditorState{
+        port_manager: self(),
+        events_registry: events_registry,
+        workspace: %WorkspaceState{
+          viewport: Viewport.new(24, 80),
+          buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0},
+          file_tree:
+            FileTreeState.open(%FileTreeState{}, FileTree.new(dir) |> FileTree.refresh(), nil)
+        },
+        shell_state: %ShellState{tab_bar: tab_bar},
+        focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
+      }
+
+      state =
+        state
+        |> select_entry("target.txt")
+        |> Commands.FileTree.rename()
+        |> replace_editing_text("renamed.txt")
+
+      state = Commands.FileTree.confirm_editing(state)
+
+      assert state.workspace.file_tree.editing == nil
+      assert Buffer.file_path(target_buffer) == renamed
+      assert TabBar.active(state.shell_state.tab_bar).id == active_tab.id
+      assert TabBar.get(state.shell_state.tab_bar, inactive_tab.id).file_ref == new_ref
+      assert TabBar.get_workspace(state.shell_state.tab_bar, 0).active_file == active_ref
+      assert WorkspaceModel.has_file?(TabBar.get_workspace(state.shell_state.tab_bar, 0), new_ref)
+      refute WorkspaceModel.has_file?(TabBar.get_workspace(state.shell_state.tab_bar, 0), old_ref)
+    end
+
+    test "rename reports a dead buffer retarget as an error instead of crashing", %{
+      tmp_dir: dir,
+      events_registry: events_registry
+    } do
+      file = Path.join(dir, "target.txt")
+      renamed = Path.join(dir, "renamed.txt")
+      File.write!(file, "content")
+      buffer = one_shot_buffer(file)
+
+      state =
+        dir
+        |> make_state(events_registry)
+        |> EditorState.update_workspace(
+          &WorkspaceState.set_buffers(&1, %Buffers{
+            active: buffer,
+            list: [buffer],
+            active_index: 0
+          })
+        )
+        |> select_entry("target.txt")
+        |> Commands.FileTree.rename()
+        |> replace_editing_text("renamed.txt")
+
+      state = Commands.FileTree.confirm_editing(state)
+
+      assert state.workspace.file_tree.editing == nil
+      assert File.exists?(renamed)
+      refute File.exists?(file)
     end
 
     test "rename leaves a dirty open buffer on the original path when destination exists", %{
@@ -279,17 +402,64 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
   defp make_state(dir, events_registry, active_buffer \\ nil) do
     tree = FileTree.new(dir)
 
+    workspace = %WorkspaceState{
+      viewport: Viewport.new(24, 80),
+      buffers: buffers_for_active_buffer(active_buffer),
+      file_tree: FileTreeState.open(%FileTreeState{}, tree, nil),
+      keymap_scope: :file_tree
+    }
+
+    {workspace, shell_state} =
+      case active_buffer do
+        nil ->
+          {workspace, %ShellState{}}
+
+        buffer when is_pid(buffer) ->
+          file_ref = file_ref_for_buffer(dir, buffer)
+
+          tab =
+            Tab.new_file(1, Path.basename(file_ref.display_name))
+            |> Tab.set_file_ref(file_ref)
+            |> Tab.set_context(WorkspaceState.to_tab_context(workspace))
+
+          tab_bar =
+            TabBar.new(tab, dir)
+            |> TabBar.update_workspace(0, fn ws ->
+              WorkspaceModel.set_active_file(ws, file_ref)
+            end)
+
+          {workspace, %ShellState{tab_bar: tab_bar}}
+      end
+
     %EditorState{
       port_manager: self(),
       events_registry: events_registry,
-      workspace: %WorkspaceState{
-        viewport: Viewport.new(24, 80),
-        buffers: buffers_for_active_buffer(active_buffer),
-        file_tree: FileTreeState.open(%FileTreeState{}, tree, nil),
-        keymap_scope: :file_tree
-      },
+      workspace: workspace,
+      shell_state: shell_state,
       focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
     }
+  end
+
+  defp file_ref_for_buffer(root, buffer) when is_pid(buffer) do
+    case Buffer.file_path(buffer) do
+      nil ->
+        FileRef.from_buffer(buffer)
+
+      path ->
+        case FileRef.from_path(root, path) do
+          {:ok, file_ref} -> file_ref
+          {:error, :outside_project} -> FileRef.from_buffer(buffer)
+        end
+    end
+  end
+
+  defp one_shot_buffer(file_path) do
+    spawn_link(fn ->
+      receive do
+        {:"$gen_call", from, :file_path} ->
+          GenServer.reply(from, file_path)
+      end
+    end)
   end
 
   defp private_events_registry(%{module: module, test: test}) do

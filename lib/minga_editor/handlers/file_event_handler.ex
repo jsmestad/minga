@@ -132,6 +132,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
       state
       |> FileTreeFreshness.refresh_git_status_from_disk()
       |> MingaEditor.Commands.Git.refresh_diff_views_for_buffer(saved_buf)
+      |> EditorState.rebind_buffer_file_identity(saved_buf)
 
     effects = [
       {:request_code_lens},

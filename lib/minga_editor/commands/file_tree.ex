@@ -1210,46 +1210,68 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec sync_moved_buffer_path(state(), String.t(), String.t(), String.t()) :: state()
   defp sync_moved_buffer_path(state, old_path, new_path, action) do
-    case update_buffer_path(state, old_path, new_path) do
-      {:ok, state} ->
-        state
+    {state, errors} = update_buffer_path(state, old_path, new_path)
 
-      {:error, reason} ->
-        MingaEditor.log_to_messages(
-          "[file-tree] #{action} completed on disk, but open buffer path update failed: #{old_path} → #{new_path}: #{inspect(reason)}"
-        )
-
-        state
+    if errors != [] do
+      MingaEditor.log_to_messages(
+        "[file-tree] #{action} completed on disk, but open buffer path update failed: #{old_path} → #{new_path}: #{inspect(errors)}"
+      )
     end
+
+    state
   end
 
-  @spec update_buffer_path(state(), String.t(), String.t()) ::
-          {:ok, state()} | {:error, [{String.t(), term()}]}
+  @spec update_buffer_path(state(), String.t(), String.t()) :: {state(), [{String.t(), term()}]}
   defp update_buffer_path(state, old_path, new_path) do
     old_path = Path.expand(old_path)
     new_path = Path.expand(new_path)
+    buffer_pids = EditorState.known_open_buffer_pids(state)
 
-    errors =
-      state.workspace.buffers.list
-      |> Enum.reduce([], &retarget_moved_buffer(&1, &2, old_path, new_path))
-      |> Enum.reverse()
+    Enum.reduce(buffer_pids, {state, []}, fn pid, {acc_state, errors} ->
+      update_buffer_pid_path(pid, acc_state, errors, old_path, new_path)
+    end)
+  end
 
-    case errors do
-      [] -> {:ok, state}
-      [_ | _] -> {:error, errors}
+  @spec update_buffer_pid_path(pid(), state(), [{String.t(), term()}], String.t(), String.t()) ::
+          {state(), [{String.t(), term()}]}
+  defp update_buffer_pid_path(pid, state, errors, old_path, new_path) do
+    case safe_buffer_file_path(pid) do
+      nil ->
+        {state, errors}
+
+      path ->
+        retarget_moved_buffer(
+          pid,
+          state,
+          errors,
+          path,
+          moved_buffer_path(path, old_path, new_path)
+        )
     end
   end
 
-  @spec retarget_moved_buffer(pid(), [{String.t(), term()}], String.t(), String.t()) ::
-          [{String.t(), term()}]
-  defp retarget_moved_buffer(pid, errors, old_path, new_path) do
-    case safe_buffer_file_path(pid) do
-      nil ->
-        errors
+  @spec retarget_moved_buffer(
+          pid(),
+          state(),
+          [{String.t(), term()}],
+          String.t(),
+          String.t() | nil
+        ) ::
+          {state(), [{String.t(), term()}]}
+  defp retarget_moved_buffer(_pid, state, errors, _path, nil), do: {state, errors}
 
-      path ->
-        retarget_moved_buffer_path(pid, path, moved_buffer_path(path, old_path, new_path), errors)
+  defp retarget_moved_buffer(pid, state, errors, path, moved_path) do
+    case safe_retarget_path(pid, moved_path) do
+      :ok -> {EditorState.rebind_buffer_file_identity(state, pid), errors}
+      {:error, reason} -> {state, [{path, reason} | errors]}
     end
+  end
+
+  @spec safe_retarget_path(pid(), String.t()) :: :ok | {:error, term()}
+  defp safe_retarget_path(pid, moved_path) do
+    Buffer.retarget_path(pid, moved_path)
+  catch
+    :exit, reason -> {:error, {:exit, reason}}
   end
 
   @spec safe_buffer_file_path(pid()) :: String.t() | nil
@@ -1257,19 +1279,6 @@ defmodule MingaEditor.Commands.FileTree do
     Buffer.file_path(pid)
   catch
     :exit, _ -> nil
-  end
-
-  @spec retarget_moved_buffer_path(pid(), String.t(), String.t() | nil, [{String.t(), term()}]) ::
-          [{String.t(), term()}]
-  defp retarget_moved_buffer_path(_pid, _path, nil, errors), do: errors
-
-  defp retarget_moved_buffer_path(pid, path, moved_path, errors) do
-    case Buffer.retarget_path(pid, moved_path) do
-      :ok -> errors
-      {:error, reason} -> [{path, reason} | errors]
-    end
-  catch
-    :exit, reason -> [{path, {:exit, reason}} | errors]
   end
 
   @spec moved_buffer_path(String.t(), String.t(), String.t()) :: String.t() | nil

@@ -12,6 +12,7 @@ defmodule MingaEditor.State.Tab do
   The canonical context is `MingaEditor.State.Tab.Context`, a struct with explicit workspace fields. Restore still accepts legacy maps for migration, including empty maps for brand-new tabs.
   """
 
+  alias Minga.Project.FileRef
   alias MingaEditor.State.Tab.Context
 
   @typedoc "Unique tab identifier."
@@ -52,6 +53,7 @@ defmodule MingaEditor.State.Tab do
           connection_status: connection_status(),
           attention: boolean(),
           group_id: group_id(),
+          file_ref: FileRef.t() | nil,
           background_subagent: MingaAgent.Subagent.Handle.t() | nil
         }
 
@@ -67,6 +69,7 @@ defmodule MingaEditor.State.Tab do
             connection_status: nil,
             attention: false,
             group_id: 0,
+            file_ref: nil,
             background_subagent: nil
 
   @doc "Creates a new file tab."
@@ -180,6 +183,11 @@ defmodule MingaEditor.State.Tab do
   def set_group(%__MODULE__{} = tab, group_id) when is_integer(group_id) and group_id >= 0 do
     %{tab | group_id: group_id}
   end
+
+  @doc "Sets the logical file identity for a file tab."
+  @spec set_file_ref(t(), FileRef.t() | nil) :: t()
+  def set_file_ref(%__MODULE__{} = tab, %FileRef{} = file_ref), do: %{tab | file_ref: file_ref}
+  def set_file_ref(%__MODULE__{} = tab, nil), do: %{tab | file_ref: nil}
 
   @doc "Marks this tab as the UI projection of a background sub-agent."
   @spec mark_background_subagent(t(), MingaAgent.Subagent.Handle.t()) :: t()
