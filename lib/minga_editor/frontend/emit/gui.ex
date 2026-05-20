@@ -225,22 +225,12 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   @spec build_gui_workspaces_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
   defp build_gui_workspaces_cmd(%{shell_state: %{tab_bar: %TabBar{}}} = ctx, caches) do
     chrome_state = ChromeState.from_editor_state(ctx)
-    agent_workspaces = Enum.filter(chrome_state.workspaces, &(&1.kind == :agent))
+    fp = workspaces_fingerprint(chrome_state)
 
-    if agent_workspaces != [] do
-      fp = workspaces_fingerprint(chrome_state)
-
-      if fp != caches.last_gui_workspaces_fp do
-        {ProtocolGUI.encode_gui_workspaces(chrome_state), %{caches | last_gui_workspaces_fp: fp}}
-      else
-        {nil, caches}
-      end
+    if fp != caches.last_gui_workspaces_fp do
+      {ProtocolGUI.encode_gui_workspaces(chrome_state), %{caches | last_gui_workspaces_fp: fp}}
     else
-      if caches.last_gui_workspaces_fp != nil do
-        {ProtocolGUI.encode_gui_workspaces(chrome_state), %{caches | last_gui_workspaces_fp: nil}}
-      else
-        {nil, caches}
-      end
+      {nil, caches}
     end
   end
 
@@ -254,6 +244,8 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       chrome_state.attention_count,
       chrome_state.draft_count,
       chrome_state.conflict_count,
+      chrome_state.mode,
+      chrome_state.visible_tabs,
       chrome_state.workspaces
     })
   end
@@ -581,7 +573,8 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   @spec build_gui_status_bar_cmd(ctx(), StatusBarData.t(), Caches.t()) :: {binary(), Caches.t()}
   defp build_gui_status_bar_cmd(ctx, status_bar_data, caches) do
     status_bar_data = StatusBarData.with_modeline_segments(status_bar_data, ctx.theme)
-    {ProtocolGUI.encode_gui_status_bar(status_bar_data), caches}
+    chrome_state = ChromeState.from_editor_state(ctx)
+    {ProtocolGUI.encode_gui_status_bar(status_bar_data, chrome_state), caches}
   end
 
   # ── Minibuffer ──

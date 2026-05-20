@@ -236,7 +236,12 @@ struct TabBarView: View {
 
     @MainActor
     private func workspaceGotoCommand(for workspace: WorkspaceEntry) -> String {
-        guard let idx = tabBarState.workspaces.firstIndex(where: { $0.id == workspace.id }), idx < 9 else {
+        if workspace.kind == 0 {
+            return "manual_workspace"
+        }
+
+        let agentWorkspaces = tabBarState.workspaces.filter { $0.kind == 1 }
+        guard let idx = agentWorkspaces.firstIndex(where: { $0.id == workspace.id }), idx < 9 else {
             return "workspace_next_agent"
         }
 

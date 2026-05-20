@@ -67,16 +67,35 @@ enum Wire {
         let label: String
     }
 
-    /// A workspace entry decoded from the gui_workspaces protocol message.
+    /// A workspace entry decoded from the canonical gui_workspaces protocol message.
     struct WorkspaceEntry: Sendable {
         let id: UInt16
-        let agentStatus: UInt8
+        let kind: UInt8
+        let status: UInt8
+        let flags: UInt16
         let colorR: UInt8
         let colorG: UInt8
         let colorB: UInt8
         let tabCount: UInt16
+        let draftCount: UInt16
+        let conflictCount: UInt16
+        let runningBackgroundCount: UInt16
         let label: String
         let icon: String
+
+        var agentStatus: UInt8 { status }
+    }
+
+    /// A visible file tab decoded from the canonical gui_workspaces protocol message.
+    struct WorkspaceTabEntry: Sendable {
+        let id: UInt32
+        let workspaceId: UInt16
+        let kind: UInt8
+        let flags: UInt16
+        let pathHash: UInt32
+        let icon: String
+        let label: String
+        let path: String
     }
 
     // MARK: - File tree
