@@ -13,7 +13,8 @@ defmodule MingaAgent.Tools.Shell do
   @typedoc "Options for shell execution."
   @type execute_opts :: [
           on_output: (String.t() -> :ok),
-          running_indicator_ms: pos_integer()
+          running_indicator_ms: pos_integer(),
+          env: [{String.t(), String.t()}]
         ]
 
   @debounce_ms 200
@@ -32,6 +33,7 @@ defmodule MingaAgent.Tools.Shell do
       indicator is sent.
     - `:running_indicator_ms` — override the silence threshold before sending
       a "running..." indicator (default: #{@running_indicator_ms})
+    - `:env` — additional environment variables to include in the command process.
   """
   @spec execute(String.t(), String.t(), pos_integer(), execute_opts()) ::
           {:ok, String.t()} | {:error, String.t()}
@@ -40,6 +42,7 @@ defmodule MingaAgent.Tools.Shell do
     on_output = Keyword.get(opts, :on_output)
     indicator_ms = Keyword.get(opts, :running_indicator_ms, @running_indicator_ms)
     timeout_ms = timeout_secs * 1_000
+    env = Keyword.get(opts, :env, [])
 
     port =
       Port.open(
@@ -50,7 +53,7 @@ defmodule MingaAgent.Tools.Shell do
           :stderr_to_stdout,
           args: ["-c", command],
           cd: cwd,
-          env: safe_env_charlist()
+          env: safe_env_charlist(env)
         ]
       )
 
@@ -191,12 +194,16 @@ defmodule MingaAgent.Tools.Shell do
   end
 
   # Port env requires charlist tuples, not string tuples.
-  @spec safe_env_charlist() :: [{charlist(), charlist()}]
-  defp safe_env_charlist do
-    [
-      {~c"PAGER", ~c"cat"},
-      {~c"GIT_PAGER", ~c"cat"},
-      {~c"TERM", ~c"dumb"}
+  @spec safe_env_charlist([{String.t(), String.t()}]) :: [{charlist(), charlist()}]
+  defp safe_env_charlist(extra_env) do
+    base = [
+      {"PAGER", "cat"},
+      {"GIT_PAGER", "cat"},
+      {"TERM", "dumb"}
     ]
+
+    Enum.map(base ++ extra_env, fn {key, value} ->
+      {String.to_charlist(key), String.to_charlist(value)}
+    end)
   end
 end

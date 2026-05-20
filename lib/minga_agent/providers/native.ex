@@ -248,6 +248,7 @@ defmodule MingaAgent.Providers.Native do
     model = Keyword.get(opts, :model, config.model)
     thinking_level = Keyword.get(opts, :thinking_level, "off")
     project_root = Keyword.get(opts, :project_root) || detect_project_root()
+    project_view = Keyword.get(opts, :project_view)
 
     max_tokens = Keyword.get(opts, :max_tokens, config.max_tokens)
     max_retries = Keyword.get(opts, :max_retries, config.max_retries)
@@ -287,6 +288,7 @@ defmodule MingaAgent.Providers.Native do
       Keyword.get(opts, :tools) ||
         Tools.all(
           project_root: project_root,
+          project_view: project_view,
           fork_store: fork_store,
           changeset: changeset,
           parent_session: subscriber
