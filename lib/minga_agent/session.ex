@@ -78,6 +78,7 @@ defmodule MingaAgent.Session do
           provider_name: String.t(),
           notifier: module() | {module(), term()},
           background_subagent: boolean(),
+          persist?: boolean(),
           save_timer: reference() | nil,
           session_store_dir: String.t() | nil,
           created_at: DateTime.t(),
@@ -119,6 +120,12 @@ defmodule MingaAgent.Session do
   @spec new_session(GenServer.server()) :: :ok | {:error, term()}
   def new_session(session) do
     GenServer.call(session, :new_session)
+  end
+
+  @doc "Seeds a session transcript without sending a prompt."
+  @spec seed_messages(GenServer.server(), [Message.t()]) :: :ok
+  def seed_messages(session, messages) when is_list(messages) do
+    GenServer.call(session, {:seed_messages, messages})
   end
 
   @doc "Returns the current session status."
@@ -519,6 +526,7 @@ defmodule MingaAgent.Session do
       provider_name: provider_name,
       notifier: Keyword.get(opts, :notifier, Notifier),
       background_subagent: Keyword.get(opts, :background_subagent, false),
+      persist?: Keyword.get(opts, :persist?, true),
       save_timer: nil,
       session_store_dir: Keyword.get(opts, :session_store_dir),
       created_at: now,
@@ -537,6 +545,16 @@ defmodule MingaAgent.Session do
   end
 
   @impl GenServer
+  def handle_call({:seed_messages, messages}, _from, state) do
+    state =
+      state
+      |> append_msgs(messages)
+      |> seed_provider_messages(messages)
+      |> notify_messages_changed()
+
+    {:reply, :ok, state}
+  end
+
   def handle_call({:send_prompt, _text}, _from, %{provider: nil} = state) do
     {:reply, {:error, :provider_not_ready}, state}
   end
@@ -1049,6 +1067,7 @@ defmodule MingaAgent.Session do
       {:ok, pid} ->
         Process.monitor(pid)
         state = %{state | provider: pid}
+        state = seed_provider_messages(state, state.messages)
         state = apply_pending_thinking_level(state)
         state = maybe_show_auth_onboarding(state)
         dispatch_session_start(state)
@@ -1483,6 +1502,27 @@ defmodule MingaAgent.Session do
     schedule_save(state)
   end
 
+  @spec seed_provider_messages(state(), [Message.t()]) :: state()
+  defp seed_provider_messages(%{provider: provider, provider_module: module} = state, messages)
+       when is_pid(provider) do
+    case module.seed_messages(provider, messages) do
+      :ok ->
+        state
+
+      {:error, reason} ->
+        append_system_message(
+          state,
+          "Failed to seed provider context: #{inspect(reason)}",
+          :error
+        )
+    end
+  catch
+    :exit, reason ->
+      append_system_message(state, "Failed to seed provider context: #{inspect(reason)}", :error)
+  end
+
+  defp seed_provider_messages(state, _messages), do: state
+
   # ── Provider startup ────────────────────────────────────────────────────────
 
   @spec start_provider(state()) :: {:ok, pid()} | {:error, term()}
@@ -1626,6 +1666,8 @@ defmodule MingaAgent.Session do
   @save_debounce_ms 500
 
   @spec schedule_save(state()) :: state()
+  defp schedule_save(%{persist?: false} = state), do: state
+
   defp schedule_save(state) do
     state = cancel_save_timer(state)
     ref = Process.send_after(self(), :save_session, @save_debounce_ms)

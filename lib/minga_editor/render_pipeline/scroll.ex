@@ -19,6 +19,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
   alias MingaEditor.FoldMap.VisibleLines
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Layout
+  alias MingaEditor.InlineAsk.Render, as: InlineAskRender
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.Renderer.SearchHighlight
   alias MingaEditor.RenderPipeline.Input
@@ -272,7 +273,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
     # The DisplayMap merges per-window folds, decoration folds, and virtual
     # lines into a unified mapping. Falls back to VisibleLines when there
     # are no decoration folds or virtual lines (pure window-fold case).
-    decorations = fetch_decorations(window.buffer)
+    decorations = fetch_decorations(state, window.buffer)
 
     # Two-pass scroll: compute DisplayMap, then verify cursor is visible.
     # If decorations push the cursor off-screen, adjust first_line and recompute.
@@ -667,9 +668,11 @@ defmodule MingaEditor.RenderPipeline.Scroll do
     |> Map.put(:left, saved_left)
   end
 
-  @spec fetch_decorations(pid()) :: Decorations.t()
-  defp fetch_decorations(buf) do
-    Buffer.decorations(buf)
+  @spec fetch_decorations(term(), pid()) :: Decorations.t()
+  defp fetch_decorations(state, buf) do
+    buf
+    |> Buffer.decorations()
+    |> InlineAskRender.merge_decorations(state, buf)
   catch
     :exit, _ -> Decorations.new()
   end

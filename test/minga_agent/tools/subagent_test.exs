@@ -31,6 +31,9 @@ defmodule MingaAgent.Tools.SubagentTest do
     def new_session(pid), do: GenServer.call(pid, :new_session)
 
     @impl MingaAgent.Provider
+    def seed_messages(_pid, _messages), do: :ok
+
+    @impl MingaAgent.Provider
     def get_state(_pid), do: {:ok, %{model: nil, is_streaming: false, token_usage: nil}}
 
     @spec proceed(GenServer.server(), String.t()) :: :ok
@@ -75,6 +78,9 @@ defmodule MingaAgent.Tools.SubagentTest do
 
     @impl MingaAgent.Provider
     def new_session(pid), do: GenServer.call(pid, :new_session)
+
+    @impl MingaAgent.Provider
+    def seed_messages(_pid, _messages), do: :ok
 
     @impl MingaAgent.Provider
     def get_state(_pid), do: {:ok, %{model: nil, is_streaming: false, token_usage: nil}}
@@ -131,6 +137,9 @@ defmodule MingaAgent.Tools.SubagentTest do
       GenServer.cast(pid, :new_session)
       :ok
     end
+
+    @impl MingaAgent.Provider
+    def seed_messages(_pid, _messages), do: :ok
 
     @impl MingaAgent.Provider
     def get_state(pid) do
@@ -234,6 +243,9 @@ defmodule MingaAgent.Tools.SubagentTest do
 
     @impl MingaAgent.Provider
     def new_session(pid), do: RecordingProvider.new_session(pid)
+
+    @impl MingaAgent.Provider
+    def seed_messages(_pid, _messages), do: :ok
 
     @impl MingaAgent.Provider
     def get_state(pid), do: RecordingProvider.get_state(pid)

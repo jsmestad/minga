@@ -189,6 +189,12 @@ defmodule MingaAgent.Providers.Native do
   end
 
   @impl MingaAgent.Provider
+  @spec seed_messages(GenServer.server(), [MingaAgent.Message.t()]) :: :ok | {:error, term()}
+  def seed_messages(pid, messages) when is_list(messages) do
+    GenServer.call(pid, {:seed_messages, messages})
+  end
+
+  @impl MingaAgent.Provider
   @spec get_state(GenServer.server()) ::
           {:ok, MingaAgent.Provider.session_state()} | {:error, term()}
   def get_state(pid) do
@@ -284,6 +290,8 @@ defmodule MingaAgent.Providers.Native do
         end
       end
 
+    read_only? = Keyword.get(opts, :read_only?, false)
+
     base_tools =
       Keyword.get(opts, :tools) ||
         Tools.all(
@@ -294,10 +302,20 @@ defmodule MingaAgent.Providers.Native do
           parent_session: subscriber
         )
 
+    base_tools =
+      if read_only?, do: Enum.filter(base_tools, &Tools.read_only_name?/1), else: base_tools
+
     active_skills = load_active_skills(project_root, Keyword.get(opts, :active_skill_names, []))
-    internal_tools = build_internal_tools(provider_pid)
+    internal_tools = if read_only?, do: [], else: build_internal_tools(provider_pid)
     reserved_tool_names = Enum.map(base_tools ++ internal_tools, & &1.name)
-    {mcp_registry, mcp_tools} = start_mcp_servers(opts, config, subscriber, reserved_tool_names)
+
+    {mcp_registry, mcp_tools} =
+      if read_only? do
+        {nil, []}
+      else
+        start_mcp_servers(opts, config, subscriber, reserved_tool_names)
+      end
+
     tools = base_tools ++ mcp_tools ++ internal_tools
     system_prompt = build_system_prompt(project_root, active_skills)
     context = Context.new([Context.system(system_prompt)])
@@ -488,6 +506,11 @@ defmodule MingaAgent.Providers.Native do
     all = Skills.discover(state.project_root)
     active_names = Enum.map(state.active_skills, & &1.name)
     {:reply, {:ok, all, active_names}, state}
+  end
+
+  def handle_call({:seed_messages, messages}, _from, state) do
+    context = Enum.reduce(messages, state.context, &append_seed_message/2)
+    {:reply, :ok, %{state | context: context}}
   end
 
   def handle_call(:new_session, _from, state) do
@@ -1923,6 +1946,18 @@ defmodule MingaAgent.Providers.Native do
       )
     ]
   end
+
+  @spec append_seed_message(MingaAgent.Message.t(), Context.t()) :: Context.t()
+  defp append_seed_message({:user, text}, context) when is_binary(text),
+    do: Context.append(context, Context.user(text))
+
+  defp append_seed_message({:user, text, _attachments}, context) when is_binary(text),
+    do: Context.append(context, Context.user(text))
+
+  defp append_seed_message({:assistant, text}, context) when is_binary(text),
+    do: Context.append(context, Context.assistant(text))
+
+  defp append_seed_message(_message, context), do: context
 
   @spec system_prompt_from_context(Context.t()) :: String.t() | nil
   defp system_prompt_from_context(%Context{

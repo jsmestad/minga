@@ -74,6 +74,7 @@ defmodule MingaAgent.Tools do
         ]
 
   @default_destructive_tools ~w(write_file edit_file multi_edit_file delete_file shell git_stage git_commit rename)
+  @read_only_tools ~w(read_file list_directory find grep git_status git_diff git_log diagnostics definition references hover document_symbols workspace_symbols describe_runtime describe_tools)
 
   @doc """
   Returns true if the named tool is classified as destructive.
@@ -157,6 +158,19 @@ defmodule MingaAgent.Tools do
       describe_tools()
     ]
   end
+
+  @doc "Returns the read-only tool subset for ephemeral inline ask sessions."
+  @spec read_only(tools_opts()) :: [Tool.t()]
+  def read_only(opts \\ []) do
+    opts
+    |> all()
+    |> Enum.filter(&read_only_name?/1)
+  end
+
+  @doc "Returns true when the tool name is allowed in read-only sessions."
+  @spec read_only_name?(Tool.t() | String.t()) :: boolean()
+  def read_only_name?(%Tool{name: name}), do: read_only_name?(name)
+  def read_only_name?(name) when is_binary(name), do: name in @read_only_tools
 
   # ── Tool definitions ────────────────────────────────────────────────────────
 

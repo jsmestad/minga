@@ -39,6 +39,7 @@ defmodule MingaEditor do
   alias MingaEditor.HighlightSync
   alias MingaEditor.KeyDispatch
   alias MingaEditor.Layout
+  alias MingaEditor.InlineAsk.Events, as: InlineAskEvents
   alias MingaEditor.LspActions
   alias MingaEditor.MessageLog
   alias MingaEditor.NavFlash
@@ -770,19 +771,29 @@ defmodule MingaEditor do
   def handle_info({:agent_event, session_pid, event}, state) do
     Minga.Log.debug(:agent, "[event] #{inspect(event)}")
 
-    if AgentAccess.session(state) == session_pid do
-      state = dispatch_agent_event(state, event)
-      {:noreply, state}
-    else
-      # Background session: dispatch to shell for presentation updates
-      # (tab badges, card status, attention flags, etc.)
-      {shell_state, workspace, shell_effects} =
-        state.shell.on_agent_event(state.shell_state, state.workspace, session_pid, event)
-
-      state = %{state | shell_state: shell_state, workspace: workspace}
-      state = apply_effects(state, shell_effects)
+    if InlineAskEvents.session?(state, session_pid) do
+      state = InlineAskEvents.handle_event(state, session_pid, event)
       {:noreply, schedule_render(state, 16)}
+    else
+      if AgentAccess.session(state) == session_pid do
+        state = dispatch_agent_event(state, event)
+        {:noreply, state}
+      else
+        # Background session: dispatch to shell for presentation updates
+        # (tab badges, card status, attention flags, etc.)
+        {shell_state, workspace, shell_effects} =
+          state.shell.on_agent_event(state.shell_state, state.workspace, session_pid, event)
+
+        state = %{state | shell_state: shell_state, workspace: workspace}
+        state = apply_effects(state, shell_effects)
+        {:noreply, schedule_render(state, 16)}
+      end
     end
+  end
+
+  def handle_info({:inline_ask_prompt_sent, session_pid, result}, state) do
+    state = InlineAskEvents.handle_prompt_result(state, session_pid, result)
+    {:noreply, schedule_render(state, 16)}
   end
 
   def handle_info(:agent_spinner_tick, state) do

@@ -225,6 +225,7 @@ Minga has a built-in AI agent you can chat with for help:
 
       SPC a a   toggle the agent panel
       SPC a n   start a new agent session
+      SPC a ?   ask about line or selection inline
       SPC a m   move file to workspace
       SPC a c   copy file to workspace
 

@@ -38,6 +38,9 @@ defmodule MingaAgent.SessionTest do
     def new_session(pid), do: GenServer.cast(pid, :new_session)
 
     @impl MingaAgent.Provider
+    def seed_messages(_pid, _messages), do: :ok
+
+    @impl MingaAgent.Provider
     def get_state(_pid), do: {:ok, %{model: nil, is_streaming: false, token_usage: nil}}
 
     @doc false
@@ -101,6 +104,9 @@ defmodule MingaAgent.SessionTest do
       GenServer.cast(pid, :new_session)
       :ok
     end
+
+    @impl MingaAgent.Provider
+    def seed_messages(_pid, _messages), do: :ok
 
     @impl MingaAgent.Provider
     def get_state(_pid) do
@@ -173,6 +179,9 @@ defmodule MingaAgent.SessionTest do
       GenServer.cast(pid, :new_session)
       :ok
     end
+
+    @impl MingaAgent.Provider
+    def seed_messages(_pid, _messages), do: :ok
 
     @impl MingaAgent.Provider
     def get_state(_pid), do: {:ok, %{model: nil, is_streaming: false, token_usage: nil}}

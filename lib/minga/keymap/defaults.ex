@@ -151,6 +151,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?a, @none}, {?s, @none}], :agent_abort, "Abort agent turn"},
     {[{?a, @none}, {?S, @none}], :agent_stop_session, "Stop agent session"},
     {[{?a, @none}, {?n, @none}], :agent_new_session, "New agent session"},
+    {[{?a, @none}, {??, @none}], :inline_ask, "Ask about line or selection"},
     {[{?a, @none}, {?m, @none}], :workspace_move_file, "Move file to workspace…"},
     {[{?a, @none}, {?c, @none}], :workspace_copy_file, "Copy file to workspace…"},
     {[{?a, @none}, {?M, @none}], :agent_cycle_model, "Cycle agent model"},

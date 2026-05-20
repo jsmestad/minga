@@ -102,6 +102,7 @@ See [Agent tool approval](CONFIGURATION.md#agent-tool-approval) for how to confi
 | `s` | Open session switcher |
 | `SPC a h` | Browse session history (load past conversations) |
 | `SPC a r` | Pending reviews |
+| `SPC a ?` | Ask about the current line or visual selection inline |
 | `SPC a m` | Move file to workspace… |
 | `SPC a c` | Copy file to workspace… |
 
@@ -136,6 +137,7 @@ See [Agent tool approval](CONFIGURATION.md#agent-tool-approval) for how to confi
 |-----|--------|
 | `SPC a n` | New agent session |
 | `SPC a s` | Stop / abort agent |
+| `SPC a ?` | Ask about the current line or visual selection inline |
 | `SPC a m` | Move file to workspace… |
 | `SPC a c` | Copy file to workspace… |
 | `SPC a r` | Pending reviews |

@@ -20,6 +20,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   alias Minga.Diagnostics
   alias MingaEditor.DisplayList
   alias MingaEditor.DisplayMap
+  alias MingaEditor.InlineAsk.Render, as: InlineAskRender
   alias MingaEditor.RenderPosition
   alias MingaEditor.Renderer.BufferLine
   alias MingaEditor.Renderer.Context
@@ -78,7 +79,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       is_active: is_active
     } = params
 
-    decorations = window_decorations(window)
+    decorations = window_decorations(state, window)
 
     visual_selection =
       if is_active do
@@ -1034,16 +1035,17 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   end
 
   @doc "Returns the decorations for a window's buffer."
-  @spec window_decorations(Window.t()) :: Decorations.t()
-  def window_decorations(%{buffer: buf}) when is_pid(buf) do
+  @spec window_decorations(term(), Window.t()) :: Decorations.t()
+  def window_decorations(state, %{buffer: buf}) when is_pid(buf) do
     buf
     |> Buffer.decorations()
+    |> InlineAskRender.merge_decorations(state, buf)
     |> maybe_build_vt_line_cache()
   catch
     :exit, _ -> Decorations.new()
   end
 
-  def window_decorations(_window), do: Decorations.new()
+  def window_decorations(_state, _window), do: Decorations.new()
 
   @spec maybe_build_vt_line_cache(Decorations.t()) :: Decorations.t()
   defp maybe_build_vt_line_cache(%Decorations{virtual_texts: []} = decorations), do: decorations

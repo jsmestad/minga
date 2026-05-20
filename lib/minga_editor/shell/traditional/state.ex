@@ -17,6 +17,7 @@ defmodule MingaEditor.Shell.Traditional.State do
   alias MingaEditor.NavFlash
   alias MingaEditor.YankFlash
   alias MingaEditor.State.Agent, as: AgentState
+  alias MingaEditor.State.InlineAsk
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.WhichKey
@@ -40,6 +41,7 @@ defmodule MingaEditor.Shell.Traditional.State do
           tab_bar: TabBar.t() | nil,
           agent: AgentState.t(),
           modal: ModalOverlay.t(),
+          inline_asks: InlineAsk.store(),
           modeline_click_regions: [MingaEditor.Shell.Traditional.Modeline.click_region()],
           tab_bar_click_regions: [MingaEditor.Shell.Traditional.TabBarRenderer.click_region()],
           warning_popup_timer: reference() | nil,
@@ -63,6 +65,7 @@ defmodule MingaEditor.Shell.Traditional.State do
             tab_bar: nil,
             agent: %AgentState{},
             modal: :none,
+            inline_asks: %{},
             modeline_click_regions: [],
             tab_bar_click_regions: [],
             warning_popup_timer: nil,
@@ -272,6 +275,21 @@ defmodule MingaEditor.Shell.Traditional.State do
   def set_modal(%{} = ss, modal) do
     %{ss | modal: modal}
   end
+
+  # ── Inline ask ─────────────────────────────────────────────────────────────
+
+  @doc "Returns the inline ask store."
+  @spec inline_asks(t() | map()) :: InlineAsk.store()
+  def inline_asks(%{inline_asks: asks}), do: asks
+  def inline_asks(_ss), do: %{}
+
+  @doc "Replaces the inline ask store."
+  @spec set_inline_asks(t() | map(), InlineAsk.store()) :: t() | map()
+  def set_inline_asks(%{inline_asks: _} = ss, asks) when is_map(asks) do
+    %{ss | inline_asks: asks}
+  end
+
+  def set_inline_asks(ss, _asks), do: ss
 
   # ── Tool prompt helpers ────────────────────────────────────────────────────
 
