@@ -68,10 +68,32 @@ defmodule MingaAgent.BufferForkStore do
     GenServer.call(store, :merge_all, 30_000)
   end
 
+  @doc "Merges forks and keeps failed forks alive for later conflict handling."
+  @spec merge_all_keep_failed(GenServer.server()) :: [
+          {String.t(), :ok | {:conflict, term()} | {:error, term()}}
+        ]
+  def merge_all_keep_failed(store) do
+    GenServer.call(store, :merge_all_keep_failed, 30_000)
+  end
+
+  @doc "Merges only the forks whose paths are listed, keeping failed forks alive."
+  @spec merge_paths_keep_failed(GenServer.server(), [String.t()]) :: [
+          {String.t(), :ok | {:conflict, term()} | {:error, term()}}
+        ]
+  def merge_paths_keep_failed(store, paths) when is_list(paths) do
+    GenServer.call(store, {:merge_paths_keep_failed, paths}, 30_000)
+  end
+
   @doc "Discards all forks without merging."
   @spec discard_all(GenServer.server()) :: :ok
   def discard_all(store) do
     GenServer.call(store, :discard_all)
+  end
+
+  @doc "Discards only the forks whose paths are listed."
+  @spec discard_paths(GenServer.server(), [String.t()]) :: :ok
+  def discard_paths(store, paths) when is_list(paths) do
+    GenServer.call(store, {:discard_paths, paths})
   end
 
   @doc "Stops the store, cleaning up all forks."
@@ -127,9 +149,24 @@ defmodule MingaAgent.BufferForkStore do
     {:reply, results, %{state | forks: %{}, monitors: %{}}}
   end
 
+  def handle_call(:merge_all_keep_failed, _from, state) do
+    {results, state} = merge_paths_keep_failed_state(state, Map.keys(state.forks))
+    {:reply, results, state}
+  end
+
+  def handle_call({:merge_paths_keep_failed, paths}, _from, state) do
+    {results, state} = merge_paths_keep_failed_state(state, paths)
+    {:reply, results, state}
+  end
+
   def handle_call(:discard_all, _from, state) do
-    stop_all_forks(state)
-    {:reply, :ok, %{state | forks: %{}, monitors: %{}}}
+    state = discard_paths_state(state, Map.keys(state.forks))
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:discard_paths, paths}, _from, state) do
+    state = discard_paths_state(state, paths)
+    {:reply, :ok, state}
   end
 
   @impl true
@@ -166,8 +203,10 @@ defmodule MingaAgent.BufferForkStore do
   defp do_merge_fork(path, fork_pid) do
     case Fork.merge(fork_pid) do
       {:ok, merged_text} ->
-        apply_merge_to_parent(path, merged_text)
-        {path, :ok}
+        case apply_merge_to_parent(path, merged_text) do
+          :ok -> {path, :ok}
+          {:error, reason} -> {path, {:error, reason}}
+        end
 
       {:conflict, hunks} ->
         {path, {:conflict, hunks}}
@@ -175,6 +214,64 @@ defmodule MingaAgent.BufferForkStore do
       {:error, reason} ->
         {path, {:error, reason}}
     end
+  end
+
+  @spec successful_merge_paths([{String.t(), :ok | {:conflict, term()} | {:error, term()}}]) ::
+          MapSet.t(String.t())
+  defp successful_merge_paths(results) do
+    results
+    |> Enum.flat_map(fn
+      {path, :ok} -> [path]
+      {_path, _result} -> []
+    end)
+    |> MapSet.new()
+  end
+
+  @spec merge_paths_keep_failed_state(state(), [String.t()]) ::
+          {[{String.t(), :ok | {:conflict, term()} | {:error, term()}}], state()}
+  defp merge_paths_keep_failed_state(state, paths) do
+    paths_to_merge =
+      paths
+      |> Enum.uniq()
+      |> Enum.sort()
+      |> Enum.flat_map(fn path ->
+        case Map.fetch(state.forks, path) do
+          {:ok, fork_pid} -> [{path, fork_pid}]
+          :error -> []
+        end
+      end)
+
+    results = Enum.map(paths_to_merge, fn {path, fork_pid} -> merge_fork(path, fork_pid) end)
+    successful_paths = successful_merge_paths(results)
+    state = stop_forks_for_paths(state, successful_paths)
+    {results, state}
+  end
+
+  @spec discard_paths_state(state(), [String.t()]) :: state()
+  defp discard_paths_state(state, paths) do
+    stop_forks_for_paths(state, MapSet.new(paths))
+  end
+
+  @spec stop_forks_for_paths(state(), MapSet.t(String.t())) :: state()
+  defp stop_forks_for_paths(state, paths) do
+    {refs_to_stop, monitors} =
+      split_map_by_paths(state.monitors, paths, fn {_ref, path} -> path end)
+
+    {forks_to_stop, forks} = split_map_by_paths(state.forks, paths, fn {path, _pid} -> path end)
+
+    Enum.each(refs_to_stop, fn {ref, _path} -> Process.demonitor(ref, [:flush]) end)
+
+    Enum.each(forks_to_stop, fn {_path, fork_pid} ->
+      if Process.alive?(fork_pid), do: GenServer.stop(fork_pid, :normal)
+    end)
+
+    %{state | forks: Map.new(forks), monitors: Map.new(monitors)}
+  end
+
+  @spec split_map_by_paths(map(), MapSet.t(String.t()), (term() -> String.t())) ::
+          {[term()], [term()]}
+  defp split_map_by_paths(map, paths, path_fun) do
+    Enum.split_with(map, fn entry -> MapSet.member?(paths, path_fun.(entry)) end)
   end
 
   @spec stop_all_forks(state()) :: :ok
@@ -194,15 +291,18 @@ defmodule MingaAgent.BufferForkStore do
   defp apply_merge_to_parent(path, merged_text) do
     case Minga.Buffer.pid_for_path(path) do
       {:ok, buf_pid} ->
-        Minga.Buffer.replace_content(buf_pid, merged_text, :agent)
-        :ok
+        try do
+          case Minga.Buffer.replace_content(buf_pid, merged_text, :agent) do
+            :ok -> :ok
+            {:error, reason} -> {:error, reason}
+          end
+        catch
+          :exit, _ -> {:error, :parent_unreachable}
+        end
 
       :not_found ->
         # Buffer was closed while fork was active; write to disk
         File.write(path, merged_text)
-        :ok
     end
-  rescue
-    _ -> {:error, :parent_unreachable}
   end
 end
