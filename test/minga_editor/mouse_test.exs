@@ -239,6 +239,29 @@ defmodule MingaEditor.MouseTest do
     end
   end
 
+  describe "block decoration clicks" do
+    test "clicking a block decoration dispatches its on_click callback" do
+      test_pid = self()
+      {state, buffer} = start_mouse_state("agent output\nline two")
+
+      BufferProcess.batch_decorations(buffer, fn decorations ->
+        {_id, decorations} =
+          Decorations.add_block_decoration(decorations, 0,
+            placement: :above,
+            render: fn _width -> [{"clickable", Minga.Core.Face.new()}] end,
+            on_click: fn line_index, col -> send(test_pid, {:block_clicked, line_index, col}) end
+          )
+
+        decorations
+      end)
+
+      {row, col} = active_content_origin(state)
+      mouse(state, row, col + @gutter + 4, :left, :press)
+
+      assert_receive {:block_clicked, 0, 4}
+    end
+  end
+
   describe "fold gutter clicks" do
     test "clicking a fold indicator toggles the window fold" do
       {state, _buffer} = start_mouse_state("defmodule Example do\n  def run, do: :ok\nend")
