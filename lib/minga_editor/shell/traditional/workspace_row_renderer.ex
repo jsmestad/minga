@@ -14,7 +14,7 @@ defmodule MingaEditor.Shell.Traditional.WorkspaceRowRenderer do
 
   @type click_region ::
           {row :: non_neg_integer(), col_start :: non_neg_integer(), col_end :: non_neg_integer(),
-           command :: atom()}
+           command :: atom() | {:workspace_goto, non_neg_integer()}}
 
   @overflow_left "◂"
   @overflow_right "▸"
@@ -48,13 +48,11 @@ defmodule MingaEditor.Shell.Traditional.WorkspaceRowRenderer do
            width: non_neg_integer(),
            fg: non_neg_integer(),
            bg: non_neg_integer(),
-           command: atom()
+           command: atom() | {:workspace_goto, non_neg_integer()}
          }
 
   @spec build_segments(ChromeState.t(), map()) :: [segment()]
   defp build_segments(%ChromeState{} = chrome_state, colors) do
-    agent_ordinals = agent_ordinals(chrome_state.workspaces)
-
     Enum.map(chrome_state.workspaces, fn workspace ->
       active? = workspace.id == chrome_state.active_workspace_id
       text = workspace_text(workspace, active?)
@@ -70,28 +68,13 @@ defmodule MingaEditor.Shell.Traditional.WorkspaceRowRenderer do
         width: Unicode.display_width(text),
         fg: fg,
         bg: bg,
-        command: workspace_command(workspace, agent_ordinals)
+        command: workspace_command(workspace)
       }
     end)
   end
 
-  @spec agent_ordinals([WorkspaceSummary.t()]) :: %{non_neg_integer() => pos_integer()}
-  defp agent_ordinals(workspaces) do
-    workspaces
-    |> Enum.filter(&(&1.kind == :agent))
-    |> Enum.with_index(1)
-    |> Map.new(fn {workspace, idx} -> {workspace.id, idx} end)
-  end
-
-  @spec workspace_command(WorkspaceSummary.t(), %{non_neg_integer() => pos_integer()}) :: atom()
-  defp workspace_command(%WorkspaceSummary{kind: :manual}, _ordinals), do: :manual_workspace
-
-  defp workspace_command(%WorkspaceSummary{id: id}, ordinals) do
-    case Map.get(ordinals, id) do
-      idx when is_integer(idx) and idx in 1..9 -> String.to_existing_atom("workspace_goto_#{idx}")
-      _idx -> :workspace_next_agent
-    end
-  end
+  @spec workspace_command(WorkspaceSummary.t()) :: {:workspace_goto, non_neg_integer()}
+  defp workspace_command(%WorkspaceSummary{id: id}), do: {:workspace_goto, id}
 
   @spec workspace_text(WorkspaceSummary.t(), boolean()) :: String.t()
   defp workspace_text(%WorkspaceSummary{} = workspace, active?) do

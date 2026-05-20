@@ -817,7 +817,12 @@ defmodule MingaEditor.Mouse do
     end
   end
 
-  @spec dispatch_tab_bar_command(state(), atom()) :: state()
+  @spec dispatch_tab_bar_command(state(), atom() | {:workspace_goto, non_neg_integer()}) ::
+          state()
+  defp dispatch_tab_bar_command(state, {:workspace_goto, _} = cmd) do
+    MingaEditor.dispatch_command(state, cmd)
+  end
+
   defp dispatch_tab_bar_command(state, cmd) do
     case Atom.to_string(cmd) do
       "tab_close_" <> _ -> close_tab_by_command(state, cmd)
@@ -1646,7 +1651,7 @@ defmodule MingaEditor.Mouse do
   end
 
   @spec parse_tab_id(atom()) :: {:ok, pos_integer()} | :error
-  defp parse_tab_id(cmd) do
+  defp parse_tab_id(cmd) when is_atom(cmd) do
     case Atom.to_string(cmd) do
       "tab_goto_" <> id_str ->
         case Integer.parse(id_str) do
@@ -1665,10 +1670,12 @@ defmodule MingaEditor.Mouse do
     end
   end
 
+  defp parse_tab_id(_cmd), do: :error
+
   # ── Tab bar click detection ──────────────────────────────────────────────
 
   @spec tab_bar_click(state(), non_neg_integer(), non_neg_integer()) ::
-          {:command, atom()} | :not_tab_bar
+          {:command, atom() | {:workspace_goto, non_neg_integer()}} | :not_tab_bar
   defp tab_bar_click(state, row, col) do
     layout = Layout.get(state)
 
@@ -1690,7 +1697,7 @@ defmodule MingaEditor.Mouse do
           [MingaEditor.Shell.Traditional.TabBarRenderer.click_region()],
           non_neg_integer(),
           non_neg_integer()
-        ) :: {:command, atom()} | :not_tab_bar
+        ) :: {:command, atom() | {:workspace_goto, non_neg_integer()}} | :not_tab_bar
   defp find_tab_bar_region(regions, row, col) do
     case Enum.find(regions, &tab_bar_region_hit?(&1, row, col)) do
       {_, _, cmd} -> {:command, cmd}

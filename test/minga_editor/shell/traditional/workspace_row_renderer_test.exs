@@ -73,7 +73,7 @@ defmodule MingaEditor.Shell.Traditional.WorkspaceRowRendererTest do
     assert String.contains?(text, "[2]")
 
     assert Enum.any?(regions, fn
-             {0, _start, _end, :workspace_goto_1} -> true
+             {0, _start, _end, {:workspace_goto, 1}} -> true
              _ -> false
            end)
   end
@@ -131,7 +131,34 @@ defmodule MingaEditor.Shell.Traditional.WorkspaceRowRendererTest do
     assert String.contains?(text, "VeryLongWorkspace6*")
 
     assert Enum.any?(regions, fn
-             {0, _start, _end, :workspace_goto_6} -> true
+             {0, _start, _end, {:workspace_goto, 6}} -> true
+             _ -> false
+           end)
+  end
+
+  test "targets the actual workspace id even after ordinal nine" do
+    workspaces =
+      [workspace(id: 0, kind: :manual, label: "m", icon: "folder")] ++
+        Enum.map(1..10, fn id ->
+          workspace(
+            id: id,
+            kind: :agent,
+            label: "W#{id}",
+            icon: "cpu",
+            closeable?: true
+          )
+        end)
+
+    {_draws, regions} =
+      WorkspaceRowRenderer.render(
+        0,
+        120,
+        chrome_state(workspaces: workspaces, active_workspace_id: 10),
+        doom_theme()
+      )
+
+    assert Enum.any?(regions, fn
+             {0, _start, _end, {:workspace_goto, 10}} -> true
              _ -> false
            end)
   end
