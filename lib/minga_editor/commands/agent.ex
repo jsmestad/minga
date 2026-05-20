@@ -135,7 +135,7 @@ defmodule MingaEditor.Commands.Agent do
         tb = TabBar.update_context(tb, new_tab.id, context)
 
         # Switch back to the original active tab
-        tb = %{tb | active_id: original_active_id}
+        tb = TabBar.switch_to(tb, original_active_id)
         EditorState.set_tab_bar(state, tb)
 
       _existing ->

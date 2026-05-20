@@ -9,6 +9,7 @@ defmodule MingaEditor.Commands.Workspace do
 
   use MingaEditor.Commands.Provider
 
+  alias MingaEditor.Commands.AgentSession
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.TabBar
 
@@ -109,9 +110,8 @@ defmodule MingaEditor.Commands.Workspace do
   @spec stop_workspace_session(MingaEditor.State.Workspace.t() | nil) :: :ok
   defp stop_workspace_session(%MingaEditor.State.Workspace{session: session})
        when is_pid(session) do
-    MingaAgent.SessionManager.stop_session_by_pid(session)
-  catch
-    :exit, _ -> :ok
+    AgentSession.stop_session_pid(session)
+    :ok
   end
 
   defp stop_workspace_session(_workspace), do: :ok

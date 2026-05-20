@@ -41,14 +41,10 @@ defmodule MingaEditor.Commands.AgentSession do
     session = AgentAccess.session(state)
 
     if session do
-      try do
-        MingaAgent.SessionManager.stop_session_by_pid(session)
-      catch
-        :exit, _ -> :ok
-      end
+      stop_session_pid(session)
     end
 
-    state = state |> clear_active_tab_session() |> reset_agent_cache()
+    state = state |> clear_restart_session(session) |> reset_agent_cache()
     state = EditorState.set_status(state, message)
     if AgentAccess.panel(state).visible, do: start_agent_session(state), else: state
   end
@@ -57,12 +53,37 @@ defmodule MingaEditor.Commands.AgentSession do
     EditorState.set_status(state, "Session restart is not supported on this shell")
   end
 
-  @spec clear_active_tab_session(state()) :: state()
-  defp clear_active_tab_session(%{shell_state: %{tab_bar: %TabBar{active_id: id}}} = state) do
-    EditorState.set_tab_session(state, id, nil)
+  @spec clear_restart_session(state(), pid() | nil) :: state()
+  defp clear_restart_session(state, nil), do: state
+
+  defp clear_restart_session(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, session) do
+    tb = tb |> clear_tab_sessions(session) |> clear_workspace_sessions(session)
+    EditorState.set_tab_bar(state, tb)
   end
 
-  defp clear_active_tab_session(state), do: state
+  defp clear_restart_session(state, _session), do: state
+
+  @spec clear_tab_sessions(TabBar.t(), pid()) :: TabBar.t()
+  defp clear_tab_sessions(%TabBar{} = tb, session) do
+    Enum.reduce(tb.tabs, tb, fn
+      %Tab{id: tab_id, session: ^session}, acc ->
+        TabBar.update_tab(acc, tab_id, &Tab.set_session(&1, nil))
+
+      _tab, acc ->
+        acc
+    end)
+  end
+
+  @spec clear_workspace_sessions(TabBar.t(), pid()) :: TabBar.t()
+  defp clear_workspace_sessions(%TabBar{} = tb, session) do
+    Enum.reduce(tb.workspaces, tb, fn
+      %Workspace{id: workspace_id, session: ^session}, acc ->
+        TabBar.update_workspace(acc, workspace_id, &Workspace.clear_session/1)
+
+      _workspace, acc ->
+        acc
+    end)
+  end
 
   @spec reset_agent_cache(state()) :: state()
   defp reset_agent_cache(state) do
@@ -105,6 +126,30 @@ defmodule MingaEditor.Commands.AgentSession do
         Minga.Log.error(:agent, "[Agent] #{msg}")
         AgentAccess.update_agent(state, &AgentState.set_error(&1, msg))
     end
+  end
+
+  @doc "Stops a session pid, routing remote pids to their owning node."
+  @spec stop_session_pid(pid()) :: :ok | {:error, term()}
+  def stop_session_pid(session) when is_pid(session) and node(session) == node() do
+    MingaAgent.SessionManager.stop_session_by_pid(session)
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
+  def stop_session_pid(session) when is_pid(session) do
+    case :erpc.call(
+           node(session),
+           MingaAgent.SessionManager,
+           :stop_session_by_pid,
+           [session],
+           5_000
+         ) do
+      :ok -> :ok
+      {:error, _reason} = error -> error
+      other -> {:error, other}
+    end
+  catch
+    :exit, reason -> {:error, reason}
   end
 
   @doc "Connects the local GUI to an existing remote agent session."
@@ -220,7 +265,7 @@ defmodule MingaEditor.Commands.AgentSession do
 
   @spec assign_session_to_tab(state(), pid()) :: state()
   defp assign_session_to_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, pid) do
-    case TabBar.find_sessionless_agent(tb) do
+    case preferred_sessionless_agent(tb) do
       %Tab{id: agent_tab_id} ->
         tb = TabBar.update_tab(tb, agent_tab_id, &Tab.set_session(&1, pid))
         EditorState.set_tab_bar(state, tb)
@@ -231,6 +276,28 @@ defmodule MingaEditor.Commands.AgentSession do
   end
 
   defp assign_session_to_tab(state, _pid), do: state
+
+  @spec preferred_sessionless_agent(TabBar.t()) :: Tab.t() | nil
+  defp preferred_sessionless_agent(%TabBar{} = tb) do
+    active_workspace_sessionless_agent(tb) || TabBar.find_sessionless_agent(tb)
+  end
+
+  @spec active_workspace_sessionless_agent(TabBar.t()) :: Tab.t() | nil
+  defp active_workspace_sessionless_agent(%TabBar{} = tb) do
+    case TabBar.active_workspace(tb) do
+      %Workspace{id: workspace_id, kind: :agent} ->
+        tb
+        |> TabBar.tabs_in_workspace(workspace_id)
+        |> Enum.find(&sessionless_agent?/1)
+
+      _workspace ->
+        nil
+    end
+  end
+
+  @spec sessionless_agent?(Tab.t()) :: boolean()
+  defp sessionless_agent?(%Tab{kind: :agent, session: nil}), do: true
+  defp sessionless_agent?(%Tab{}), do: false
 
   @spec start_and_subscribe(keyword()) :: {:ok, pid()} | {:error, term()}
   defp start_and_subscribe(opts) do
@@ -466,27 +533,83 @@ defmodule MingaEditor.Commands.AgentSession do
         state
 
       nil ->
-        # Create workspace and assign the agent tab to it.
-        {tb, ws} = TabBar.add_workspace(tb, "Agent", session_pid)
-
-        tb =
-          case TabBar.find_by_session(tb, session_pid) do
-            %Tab{id: tab_id} = tab ->
-              tb
-              |> TabBar.move_tab_to_workspace(tab_id, ws.id)
-              |> TabBar.update_context(
-                tab_id,
-                TabContext.put_fields(tab.context, keymap_scope: :agent)
-              )
-
-            nil ->
-              tb
-          end
-
-        state = EditorState.set_tab_bar(state, tb)
-        EditorState.update_workspace(state, &WorkspaceState.set_agent_ui(&1, ws.agent_ui))
+        bind_session_to_agent_workspace(state, tb, session_pid)
     end
   end
 
   defp ensure_agent_workspace(state, _session_pid), do: state
+
+  @spec bind_session_to_agent_workspace(state(), TabBar.t(), pid()) :: state()
+  defp bind_session_to_agent_workspace(state, %TabBar{} = tb, session_pid) do
+    case reusable_active_agent_workspace(tb) do
+      %Workspace{id: workspace_id} ->
+        tb =
+          tb
+          |> bind_session_to_workspace_agent_tab(workspace_id, session_pid)
+          |> TabBar.update_workspace(workspace_id, &Workspace.set_session(&1, session_pid))
+
+        sync_state_to_workspace(state, tb, workspace_id)
+
+      nil ->
+        create_agent_workspace(state, tb, session_pid)
+    end
+  end
+
+  @spec reusable_active_agent_workspace(TabBar.t()) :: Workspace.t() | nil
+  defp reusable_active_agent_workspace(%TabBar{} = tb) do
+    case TabBar.active_workspace(tb) do
+      %Workspace{kind: :agent} = workspace -> workspace
+      _workspace -> nil
+    end
+  end
+
+  @spec bind_session_to_workspace_agent_tab(TabBar.t(), non_neg_integer(), pid()) :: TabBar.t()
+  defp bind_session_to_workspace_agent_tab(%TabBar{} = tb, workspace_id, session_pid) do
+    case sessionless_agent_in_workspace(tb, workspace_id) do
+      %Tab{id: tab_id} -> TabBar.update_tab(tb, tab_id, &Tab.set_session(&1, session_pid))
+      nil -> tb
+    end
+  end
+
+  @spec sessionless_agent_in_workspace(TabBar.t(), non_neg_integer()) :: Tab.t() | nil
+  defp sessionless_agent_in_workspace(%TabBar{} = tb, workspace_id) do
+    tb
+    |> TabBar.tabs_in_workspace(workspace_id)
+    |> Enum.find(&sessionless_agent?/1)
+  end
+
+  @spec create_agent_workspace(state(), TabBar.t(), pid()) :: state()
+  defp create_agent_workspace(state, %TabBar{} = tb, session_pid) do
+    # Create workspace and assign the agent tab to it.
+    {tb, ws} = TabBar.add_workspace(tb, "Agent", session_pid)
+
+    tb =
+      case TabBar.find_by_session(tb, session_pid) do
+        %Tab{id: tab_id} = tab ->
+          tb
+          |> TabBar.move_tab_to_workspace(tab_id, ws.id)
+          |> TabBar.update_context(
+            tab_id,
+            TabContext.put_fields(tab.context, keymap_scope: :agent)
+          )
+
+        nil ->
+          tb
+      end
+
+    sync_state_to_workspace(state, tb, ws.id)
+  end
+
+  @spec sync_state_to_workspace(state(), TabBar.t(), non_neg_integer()) :: state()
+  defp sync_state_to_workspace(state, %TabBar{} = tb, workspace_id) do
+    agent_ui =
+      case TabBar.get_workspace(tb, workspace_id) do
+        %Workspace{agent_ui: %MingaEditor.Agent.UIState{} = agent_ui} -> agent_ui
+        _ -> MingaEditor.Agent.UIState.new()
+      end
+
+    state
+    |> EditorState.set_tab_bar(tb)
+    |> EditorState.update_workspace(&WorkspaceState.set_agent_ui(&1, agent_ui))
+  end
 end

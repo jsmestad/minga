@@ -85,6 +85,14 @@ defmodule MingaEditor.State.Workspace do
     %{workspace | session: session}
   end
 
+  @doc "Clears the agent session pid and returns the workspace to idle lifecycle status."
+  @spec clear_session(t()) :: t()
+  def clear_session(%__MODULE__{} = workspace) do
+    workspace
+    |> set_session(nil)
+    |> set_agent_status(:idle)
+  end
+
   @doc "Sets the agent UI state on the workspace."
   @spec set_agent_ui(t(), UIState.t()) :: t()
   def set_agent_ui(%__MODULE__{} = workspace, %UIState{} = agent_ui) do

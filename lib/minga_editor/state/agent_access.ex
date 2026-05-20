@@ -14,6 +14,7 @@ defmodule MingaEditor.State.AgentAccess do
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
+  alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.Workspace.State, as: WorkspaceState
 
   # ── Readers ────────────────────────────────────────────────────────────────
@@ -179,16 +180,33 @@ defmodule MingaEditor.State.AgentAccess do
           tab_bar
       end
 
-    %{
-      state
-      | shell_state: %{state.shell_state | tab_bar: tab_bar},
-        workspace: set_live_agent_ui(workspace, next_ui)
-    }
+    state
+    |> set_tab_bar(tab_bar)
+    |> set_workspace(set_live_agent_ui(workspace, next_ui))
   end
 
   defp update_workspace_agent_ui(%{workspace: %{agent_ui: agent_ui} = workspace} = state, fun) do
     next_ui = fun.(agent_ui || UIState.new())
     %{state | workspace: set_live_agent_ui(workspace, next_ui)}
+  end
+
+  @spec set_tab_bar(EditorState.t() | map(), TabBar.t()) :: EditorState.t() | map()
+  defp set_tab_bar(%EditorState{} = state, %TabBar{} = tab_bar) do
+    EditorState.set_tab_bar(state, tab_bar)
+  end
+
+  defp set_tab_bar(%{shell_state: shell_state} = state, %TabBar{} = tab_bar) do
+    %{state | shell_state: ShellState.set_tab_bar(shell_state, tab_bar)}
+  end
+
+  @spec set_workspace(EditorState.t() | map(), WorkspaceState.t() | map()) ::
+          EditorState.t() | map()
+  defp set_workspace(%EditorState{} = state, workspace) do
+    EditorState.update_workspace(state, fn _workspace -> workspace end)
+  end
+
+  defp set_workspace(%{workspace: _workspace} = state, workspace) do
+    %{state | workspace: workspace}
   end
 
   @spec set_live_agent_ui(WorkspaceState.t() | map(), UIState.t()) :: WorkspaceState.t() | map()

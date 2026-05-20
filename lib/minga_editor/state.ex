@@ -1465,7 +1465,7 @@ defmodule MingaEditor.State do
   @doc "Syncs the live workspace agent UI mirror from the active workspace."
   @spec sync_agent_ui_from_active_workspace(t()) :: t()
   def sync_agent_ui_from_active_workspace(
-        %__MODULE__{shell_state: %{tab_bar: %TabBar{} = tab_bar}, workspace: workspace} = state
+        %__MODULE__{shell_state: %{tab_bar: %TabBar{} = tab_bar}} = state
       ) do
     agent_ui =
       case TabBar.active_workspace(tab_bar) do
@@ -1473,7 +1473,7 @@ defmodule MingaEditor.State do
         _ -> UIState.new()
       end
 
-    %{state | workspace: %{workspace | agent_ui: agent_ui}}
+    update_workspace(state, &WorkspaceState.set_agent_ui(&1, agent_ui))
   end
 
   def sync_agent_ui_from_active_workspace(state), do: state

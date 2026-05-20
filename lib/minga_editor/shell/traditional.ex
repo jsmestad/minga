@@ -35,6 +35,7 @@ defmodule MingaEditor.Shell.Traditional do
 
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Commands.AgentSession
   alias Minga.Buffer
   alias Minga.Project.FileRef
   alias MingaEditor.State.Workspace
@@ -130,7 +131,10 @@ defmodule MingaEditor.Shell.Traditional do
         {:workspace_close, ws_id}
       ) do
     stop_workspace_session(TabBar.get_workspace(tb, ws_id))
-    {%{shell_state | tab_bar: TabBar.remove_workspace(tb, ws_id)}, workspace}
+    tab_bar = TabBar.remove_workspace(tb, ws_id)
+    shell_state = ShellState.set_tab_bar(shell_state, tab_bar)
+    workspace = sync_workspace_agent_ui(tab_bar, workspace)
+    {shell_state, workspace}
   end
 
   def handle_gui_action(
@@ -731,11 +735,21 @@ defmodule MingaEditor.Shell.Traditional do
 
   defp buffer_label(_), do: "[unknown]"
 
+  @spec sync_workspace_agent_ui(TabBar.t(), WorkspaceState.t()) :: WorkspaceState.t()
+  defp sync_workspace_agent_ui(%TabBar{} = tab_bar, %WorkspaceState{} = workspace) do
+    agent_ui =
+      case TabBar.active_workspace(tab_bar) do
+        %Workspace{agent_ui: %UIState{} = agent_ui} -> agent_ui
+        _ -> UIState.new()
+      end
+
+    WorkspaceState.set_agent_ui(workspace, agent_ui)
+  end
+
   @spec stop_workspace_session(Workspace.t() | nil) :: :ok
   defp stop_workspace_session(%Workspace{session: session}) when is_pid(session) do
-    MingaAgent.SessionManager.stop_session_by_pid(session)
-  catch
-    :exit, _ -> :ok
+    AgentSession.stop_session_pid(session)
+    :ok
   end
 
   defp stop_workspace_session(_workspace), do: :ok

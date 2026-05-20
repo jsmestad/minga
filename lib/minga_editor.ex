@@ -50,6 +50,7 @@ defmodule MingaEditor do
   alias MingaEditor.State.Remote
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace
   alias MingaEditor.Viewport
 
   alias MingaEditor.Handlers.FileEventHandler
@@ -1332,8 +1333,17 @@ defmodule MingaEditor do
 
   @spec restore_ended_remote_tab(EditorState.t(), Tab.t(), [term()]) :: EditorState.t()
   defp restore_ended_remote_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, tab, messages) do
-    tb = TabBar.update_tab(tb, tab.id, &Tab.set_connection_status(&1, :ended))
-    state = EditorState.set_tab_bar(state, tb)
+    tb =
+      TabBar.update_tab(tb, tab.id, fn remote_tab ->
+        remote_tab
+        |> Tab.set_session(nil)
+        |> Tab.set_connection_status(:ended)
+      end)
+
+    state =
+      state
+      |> EditorState.set_tab_bar(tb)
+      |> clear_remote_workspace_session(tab)
 
     if tb.active_id == tab.id do
       case AgentAccess.agent(state).buffer do
@@ -1362,7 +1372,10 @@ defmodule MingaEditor do
         |> Tab.set_connection_status(:connected)
       end)
 
-    state = EditorState.set_tab_bar(state, tb)
+    state =
+      state
+      |> EditorState.set_tab_bar(tb)
+      |> sync_remote_workspace_session(tab, pid)
 
     if tb.active_id == tab.id do
       state
@@ -1391,13 +1404,78 @@ defmodule MingaEditor do
   @spec mark_remote_tab_status(EditorState.t(), Tab.t(), Tab.connection_status()) ::
           EditorState.t()
   defp mark_remote_tab_status(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, tab, status) do
-    EditorState.set_tab_bar(
-      state,
-      TabBar.update_tab(tb, tab.id, &Tab.set_connection_status(&1, status))
-    )
+    tb = TabBar.update_tab(tb, tab.id, &mark_remote_tab(&1, status))
+
+    state
+    |> EditorState.set_tab_bar(tb)
+    |> maybe_clear_remote_workspace_session(tab, status)
   end
 
   defp mark_remote_tab_status(state, _tab, _status), do: state
+
+  @spec mark_remote_tab(Tab.t(), Tab.connection_status()) :: Tab.t()
+  defp mark_remote_tab(%Tab{} = tab, status) when status in [:ended, :unavailable] do
+    tab
+    |> Tab.set_session(nil)
+    |> Tab.set_connection_status(status)
+  end
+
+  defp mark_remote_tab(%Tab{} = tab, status), do: Tab.set_connection_status(tab, status)
+
+  @spec sync_remote_workspace_session(EditorState.t(), Tab.t(), pid()) :: EditorState.t()
+  defp sync_remote_workspace_session(
+         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         %Tab{group_id: workspace_id},
+         pid
+       )
+       when is_pid(pid) do
+    case TabBar.get_workspace(tb, workspace_id) do
+      %Workspace{kind: :agent} ->
+        EditorState.set_tab_bar(
+          state,
+          TabBar.update_workspace(tb, workspace_id, &Workspace.set_session(&1, pid))
+        )
+
+      _workspace ->
+        state
+    end
+  end
+
+  defp sync_remote_workspace_session(state, _tab, _pid), do: state
+
+  @spec maybe_clear_remote_workspace_session(EditorState.t(), Tab.t(), Tab.connection_status()) ::
+          EditorState.t()
+  defp maybe_clear_remote_workspace_session(state, tab, status)
+       when status in [:ended, :unavailable] do
+    clear_remote_workspace_session(state, tab)
+  end
+
+  defp maybe_clear_remote_workspace_session(state, _tab, _status), do: state
+
+  @spec clear_remote_workspace_session(EditorState.t(), Tab.t()) :: EditorState.t()
+  defp clear_remote_workspace_session(
+         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         %Tab{group_id: workspace_id, session: stale_session}
+       ) do
+    case TabBar.get_workspace(tb, workspace_id) do
+      %Workspace{kind: :agent, session: ^stale_session} when is_pid(stale_session) ->
+        EditorState.set_tab_bar(
+          state,
+          TabBar.update_workspace(tb, workspace_id, &Workspace.clear_session/1)
+        )
+
+      %Workspace{kind: :agent, session: nil} ->
+        EditorState.set_tab_bar(
+          state,
+          TabBar.update_workspace(tb, workspace_id, &Workspace.clear_session/1)
+        )
+
+      _workspace ->
+        state
+    end
+  end
+
+  defp clear_remote_workspace_session(state, _tab), do: state
 
   @spec active_remote_server?(EditorState.t(), String.t()) :: boolean()
   defp active_remote_server?(state, server_name) do
@@ -2586,7 +2664,10 @@ defmodule MingaEditor do
     {shell_state, workspace} =
       state.shell.handle_gui_action(state.shell_state, state.workspace, action)
 
-    %{state | shell_state: shell_state, workspace: workspace}
+    state
+    |> EditorState.update_shell_state(fn _shell_state -> shell_state end)
+    |> EditorState.update_workspace(fn _workspace -> workspace end)
+    |> EditorState.sync_agent_ui_from_active_workspace()
   end
 
   defp handle_gui_action(state, {:workspace_rename, _ws_id, _name} = action) do
