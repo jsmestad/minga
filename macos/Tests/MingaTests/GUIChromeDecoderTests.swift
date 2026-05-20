@@ -2149,6 +2149,37 @@ struct GUIWorkspacesDecoderTests {
         }
     }
 
+    @Test("Invalid UTF-8 in canonical workspace payload throws malformed")
+    func invalidUTF8Throws() {
+        var payload = Data()
+        payload.append(1) // version
+        appendU16(&payload, 1) // active_workspace_id
+        payload.append(1) // mode = agent
+        payload.append(0) // flags
+        payload.append(1) // workspace_count
+        appendU16(&payload, 1) // id
+        payload.append(1) // kind = agent
+        payload.append(0) // status = idle
+        appendU16(&payload, 0) // flags
+        appendRGB(&payload, 0xC6, 0x78, 0xDD)
+        appendU16(&payload, 1) // tab_count
+        appendU16(&payload, 0) // draft_count
+        appendU16(&payload, 0) // conflict_count
+        appendU16(&payload, 0) // running_background_count
+        payload.append(1) // label_len
+        payload.append(0xFF) // invalid UTF-8 label
+        payload.append(0) // icon_len
+        appendU16(&payload, 0) // visible_tab_count
+
+        var data = Data([OP_GUI_WORKSPACES])
+        appendU16(&data, UInt16(payload.count))
+        data.append(payload)
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
     private func appendWorkspace(_ data: inout Data, id: UInt16, kind: UInt8, status: UInt8, flags: UInt16, r: UInt8, g: UInt8, b: UInt8, tabCount: UInt16, draftCount: UInt16, conflictCount: UInt16, runningBackgroundCount: UInt16, label: String, icon: String) {
         appendU16(&data, id)
         data.append(kind)

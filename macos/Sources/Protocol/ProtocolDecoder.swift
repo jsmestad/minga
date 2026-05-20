@@ -2203,11 +2203,11 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             let runningBackgroundCount = readU16(data, pos + 15)
             let labelLen = Int(data[pos + 17])
             guard pos + 18 + labelLen + 1 <= payloadEnd else { throw ProtocolDecodeError.malformed }
-            let label = String(data: data[(pos + 18)..<(pos + 18 + labelLen)], encoding: .utf8) ?? ""
+            let label = try readRequiredUTF8(data[(pos + 18)..<(pos + 18 + labelLen)])
             let iconLenPos = pos + 18 + labelLen
             let iconLen = Int(data[iconLenPos])
             guard iconLenPos + 1 + iconLen <= payloadEnd else { throw ProtocolDecodeError.malformed }
-            let icon = String(data: data[(iconLenPos + 1)..<(iconLenPos + 1 + iconLen)], encoding: .utf8) ?? ""
+            let icon = try readRequiredUTF8(data[(iconLenPos + 1)..<(iconLenPos + 1 + iconLen)])
 
             workspaces.append(Wire.WorkspaceEntry(
                 id: id,
@@ -2242,15 +2242,15 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             let pathHash = readU32(data, pos + 9)
             let iconLen = Int(data[pos + 13])
             guard pos + 14 + iconLen + 2 <= payloadEnd else { throw ProtocolDecodeError.malformed }
-            let icon = String(data: data[(pos + 14)..<(pos + 14 + iconLen)], encoding: .utf8) ?? ""
+            let icon = try readRequiredUTF8(data[(pos + 14)..<(pos + 14 + iconLen)])
             let labelLenPos = pos + 14 + iconLen
             let labelLen = Int(readU16(data, labelLenPos))
             guard labelLenPos + 2 + labelLen + 2 <= payloadEnd else { throw ProtocolDecodeError.malformed }
-            let label = String(data: data[(labelLenPos + 2)..<(labelLenPos + 2 + labelLen)], encoding: .utf8) ?? ""
+            let label = try readRequiredUTF8(data[(labelLenPos + 2)..<(labelLenPos + 2 + labelLen)])
             let pathLenPos = labelLenPos + 2 + labelLen
             let pathLen = Int(readU16(data, pathLenPos))
             guard pathLenPos + 2 + pathLen <= payloadEnd else { throw ProtocolDecodeError.malformed }
-            let path = String(data: data[(pathLenPos + 2)..<(pathLenPos + 2 + pathLen)], encoding: .utf8) ?? ""
+            let path = try readRequiredUTF8(data[(pathLenPos + 2)..<(pathLenPos + 2 + pathLen)])
 
             visibleTabs.append(Wire.WorkspaceTabEntry(
                 id: id,

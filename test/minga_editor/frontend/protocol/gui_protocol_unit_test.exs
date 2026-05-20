@@ -199,6 +199,39 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       assert label == "agent.ex"
       assert path == "/tmp/agent.ex"
     end
+
+    test "caps visible tabs to the 16-bit payload budget" do
+      large_label = String.duplicate("l", 30_000)
+      large_path = "/tmp/" <> String.duplicate("p", 30_000)
+
+      visible_tabs =
+        for id <- 1..2 do
+          TabSummary.new(
+            id: id,
+            workspace_id: 1,
+            kind: :file,
+            label: large_label,
+            path: large_path,
+            icon: "x",
+            dirty?: false,
+            draft_state: :none,
+            attention?: false
+          )
+        end
+
+      chrome_state =
+        chrome_state(active_workspace_id: 1, workspaces: [], visible_tabs: visible_tabs)
+
+      <<0x98, payload_len::16, payload::binary-size(payload_len)>> =
+        ProtocolGUI.encode_gui_workspaces(chrome_state)
+
+      assert payload_len <= 65_535
+
+      <<_version::8, _active::16, _mode::8, _flags::8, 0::8, visible_tab_count::16,
+        _rest::binary>> = payload
+
+      assert visible_tab_count == 1
+    end
   end
 
   defp chrome_state(attrs) do

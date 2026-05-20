@@ -219,6 +219,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_config_update Opcodes.gui_action_config_update()
   @gui_action_config_query Opcodes.gui_action_config_query()
 
+  @max_u8 255
   @max_u16 65_535
   @max_u32 4_294_967_295
   @max_modeline_segments 128
@@ -839,8 +840,23 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   @spec encode_gui_workspaces_payload(ChromeState.t()) :: binary()
   defp encode_gui_workspaces_payload(%ChromeState{} = chrome_state) do
-    workspace_entries = Enum.map(chrome_state.workspaces, &encode_gui_workspace_summary/1)
-    visible_tab_entries = Enum.map(chrome_state.visible_tabs, &encode_gui_visible_tab/1)
+    workspace_budget = @max_u16 - 6 - 2
+
+    {workspace_entries, remaining_budget} =
+      bounded_entries(
+        chrome_state.workspaces,
+        &encode_gui_workspace_summary/1,
+        @max_u8,
+        workspace_budget
+      )
+
+    {visible_tab_entries, _remaining_budget} =
+      bounded_entries(
+        chrome_state.visible_tabs,
+        &encode_gui_visible_tab/1,
+        @max_u16,
+        remaining_budget
+      )
 
     IO.iodata_to_binary([
       <<1::8, chrome_state.active_workspace_id::16, encode_workspace_mode(chrome_state.mode)::8,
@@ -850,6 +866,36 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       visible_tab_entries
     ])
   end
+
+  @spec bounded_entries([term()], (term() -> binary()), non_neg_integer(), non_neg_integer()) ::
+          {[binary()], non_neg_integer()}
+  defp bounded_entries(items, encode_fun, max_count, budget) do
+    {entries, remaining_budget, _count} =
+      Enum.reduce_while(items, {[], budget, 0}, fn item, acc ->
+        item |> encode_fun.() |> maybe_add_bounded_entry(acc, max_count)
+      end)
+
+    {Enum.reverse(entries), remaining_budget}
+  end
+
+  @spec maybe_add_bounded_entry(
+          binary(),
+          {[binary()], non_neg_integer(), non_neg_integer()},
+          non_neg_integer()
+        ) ::
+          {:cont, {[binary()], non_neg_integer(), non_neg_integer()}}
+          | {:halt, {[binary()], non_neg_integer(), non_neg_integer()}}
+  defp maybe_add_bounded_entry(_entry, acc = {_entries, _budget, count}, max_count)
+       when count >= max_count do
+    {:halt, acc}
+  end
+
+  defp maybe_add_bounded_entry(entry, {entries, budget, count}, _max_count)
+       when byte_size(entry) <= budget do
+    {:cont, {[entry | entries], budget - byte_size(entry), count + 1}}
+  end
+
+  defp maybe_add_bounded_entry(_entry, acc, _max_count), do: {:halt, acc}
 
   @spec encode_gui_workspace_summary(WorkspaceSummary.t()) :: binary()
   defp encode_gui_workspace_summary(%WorkspaceSummary{} = workspace) do
