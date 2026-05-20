@@ -109,6 +109,12 @@ defmodule MingaEditor.Commands.Workspace do
     MingaEditor.PickerUI.open(state, MingaEditor.UI.Picker.WorkspaceSource)
   end
 
+  @doc "Open the pending workspace reviews picker."
+  @spec workspace_pending_reviews(state()) :: state()
+  def workspace_pending_reviews(state) do
+    MingaEditor.PickerUI.open(state, MingaEditor.UI.Picker.PendingReviewsSource)
+  end
+
   @doc "Open the icon picker for the active workspace."
   @spec workspace_set_icon(state()) :: state()
   def workspace_set_icon(state) do
@@ -374,6 +380,7 @@ defmodule MingaEditor.Commands.Workspace do
   )
 
   command(:workspace_list, "List workspaces", execute: &workspace_list/1)
+  command(:workspace_pending_reviews, "Pending reviews", execute: &workspace_pending_reviews/1)
   command(:workspace_rename, "Rename workspace", execute: &workspace_rename/1)
   command(:workspace_set_icon, "Set workspace icon", execute: &workspace_set_icon/1)
 
