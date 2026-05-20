@@ -238,6 +238,104 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     assert TabBar.get_workspace(state.shell_state.tab_bar, workspace_id) == nil
   end
 
+  test "closing a remote agent workspace stops the session and scrubs migrated tab projections" do
+    {:ok, _session_id, session} = SessionManager.start_session([])
+    ref = Process.monitor(session)
+
+    {state, workspace_id, _file_ref, agent_tab_id} =
+      state_with_active_remote_agent_workspace(session)
+
+    state = MingaEditor.Commands.Workspace.workspace_close(state)
+    assert_receive {:DOWN, ^ref, :process, ^session, _reason}
+
+    tab_bar = state.shell_state.tab_bar
+    agent_tab = TabBar.get(tab_bar, agent_tab_id)
+
+    assert TabBar.get_workspace(tab_bar, workspace_id) == nil
+    assert agent_tab.group_id == 0
+    assert agent_tab.session == nil
+    assert agent_tab.server_name == nil
+    assert agent_tab.remote_session_id == nil
+    assert agent_tab.connection_status == nil
+    assert agent_tab.agent_status == nil
+    refute agent_tab.attention
+  end
+
+  test "closing the agent tab preserves workspace files draft and remote metadata" do
+    {:ok, _session_id, session} = SessionManager.start_session([])
+    on_exit(fn -> stop_session(session) end)
+
+    {state, workspace_id, file_ref, agent_tab_id} =
+      state_with_active_remote_agent_workspace(session)
+
+    state = BufferManagement.execute(state, :force_quit)
+    tab_bar = state.shell_state.tab_bar
+    workspace = TabBar.get_workspace(tab_bar, workspace_id)
+
+    assert TabBar.get(tab_bar, agent_tab_id) == nil
+    assert workspace.session == session
+    assert workspace.files == [file_ref]
+    assert prompt_text(workspace.agent_ui) == "restart draft"
+    assert workspace.remote_session.server_name == "home"
+    assert workspace.remote_session.session_id == "session-1"
+    assert workspace.remote_session.connection_status == :connected
+  end
+
+  test "stop_current_session from file tab after closing remote agent tab routes through workspace metadata" do
+    {:ok, session_id, session} = SessionManager.start_session([])
+    on_exit(fn -> stop_session(session) end)
+    ref = Process.monitor(session)
+
+    {state, workspace_id, file_ref, agent_tab_id} =
+      state_with_active_remote_agent_workspace(session, session_id)
+
+    state =
+      state
+      |> BufferManagement.execute(:force_quit)
+      |> EditorState.switch_tab(1)
+
+    tab_bar = state.shell_state.tab_bar
+    workspace = TabBar.get_workspace(tab_bar, workspace_id)
+
+    assert TabBar.get(tab_bar, agent_tab_id) == nil
+    assert TabBar.active(tab_bar).kind == :file
+    assert TabBar.active_workspace_id(tab_bar) == workspace_id
+    assert workspace.session == session
+    assert workspace.remote_session.session_id == session_id
+
+    state = AgentSession.stop_current_session(state)
+    assert_receive {:DOWN, ^ref, :process, ^session, _reason}
+
+    state = BufferManagement.handle_agent_session_down(state, session, :normal)
+    workspace = TabBar.get_workspace(state.shell_state.tab_bar, workspace_id)
+
+    assert workspace.session == nil
+    assert workspace.agent_status == :idle
+    assert workspace.files == [file_ref]
+    assert prompt_text(workspace.agent_ui) == "restart draft"
+    assert workspace.remote_session.server_name == "home"
+    assert workspace.remote_session.session_id == session_id
+    assert workspace.remote_session.connection_status == :connected
+    refute Enum.any?(state.shell_state.tab_bar.tabs, &(&1.kind == :agent))
+  end
+
+  test "stop_current_session from file tab stops workspace session and preserves files and draft after cleanup" do
+    {:ok, _session_id, session} = SessionManager.start_session([])
+    ref = Process.monitor(session)
+    {state, workspace_id, file_ref} = state_with_active_agent_workspace(session)
+    state = EditorState.switch_tab(state, 1)
+
+    state = AgentSession.stop_current_session(state)
+    assert_receive {:DOWN, ^ref, :process, ^session, _reason}
+
+    state = BufferManagement.handle_agent_session_down(state, session, :shutdown)
+    workspace = TabBar.get_workspace(state.shell_state.tab_bar, workspace_id)
+
+    assert workspace.session == nil
+    assert workspace.files == [file_ref]
+    assert prompt_text(workspace.agent_ui) == "restart draft"
+  end
+
   defp state_with_agent_workspace_tabs do
     state = state_with_tabs()
     {tab_bar, workspace} = TabBar.add_workspace(state.shell_state.tab_bar, "Agent")
@@ -277,6 +375,22 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
       |> EditorState.update_workspace(&MingaEditor.Workspace.State.set_agent_ui(&1, ui))
 
     {state, workspace.id, file_ref}
+  end
+
+  defp state_with_active_remote_agent_workspace(session, remote_session_id \\ "session-1")
+       when is_pid(session) and is_binary(remote_session_id) do
+    {state, workspace_id, file_ref} = state_with_active_agent_workspace(session)
+    agent_tab_id = TabBar.active(state.shell_state.tab_bar).id
+
+    tab_bar =
+      state.shell_state.tab_bar
+      |> TabBar.update_workspace(workspace_id, fn workspace ->
+        Workspace.put_remote_session(workspace, "home", remote_session_id, :connected)
+      end)
+      |> TabBar.sync_workspace_agent_tab_projection(workspace_id)
+
+    state = EditorState.set_tab_bar(state, tab_bar)
+    {state, workspace_id, file_ref, agent_tab_id}
   end
 
   defp state_with_tabs do

@@ -26,6 +26,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace
   alias MingaEditor.Window
   alias Minga.Mode
   alias Minga.Mode.ToolConfirmState
@@ -1047,9 +1048,16 @@ defmodule MingaEditor.Commands.BufferManagement do
          %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
          session_pid
        ) do
-    case TabBar.find_by_session(tb, session_pid) do
-      %Tab{id: tab_id, server_name: server_name} when is_binary(server_name) ->
-        tb = TabBar.update_tab(tb, tab_id, &Tab.set_connection_status(&1, :disconnected))
+    case TabBar.find_workspace_by_session(tb, session_pid) do
+      %Workspace{id: workspace_id, remote_session: %{server_name: server_name}}
+      when is_binary(server_name) ->
+        tb =
+          tb
+          |> TabBar.update_workspace(
+            workspace_id,
+            &Workspace.set_remote_connection_status(&1, :disconnected)
+          )
+          |> TabBar.sync_workspace_agent_tab_projection(workspace_id)
 
         state
         |> EditorState.set_tab_bar(tb)
@@ -1057,7 +1065,7 @@ defmodule MingaEditor.Commands.BufferManagement do
         |> AgentAccess.update_agent(&AgentState.set_error(&1, "Disconnected from #{server_name}"))
         |> EditorState.set_status("[#{server_name}] disconnected, reconnecting...")
 
-      _ ->
+      _workspace ->
         state
     end
   end
@@ -1135,14 +1143,9 @@ defmodule MingaEditor.Commands.BufferManagement do
       Enum.reduce(tb.workspaces, tb, fn
         %{id: workspace_id, session: ^session_pid}, acc ->
           acc
-          |> TabBar.update_workspace(
-            workspace_id,
-            &MingaEditor.State.Workspace.set_session(&1, nil)
-          )
-          |> TabBar.update_workspace(
-            workspace_id,
-            &MingaEditor.State.Workspace.set_agent_status(&1, status)
-          )
+          |> TabBar.update_workspace(workspace_id, &Workspace.set_session(&1, nil))
+          |> TabBar.update_workspace(workspace_id, &Workspace.set_agent_status(&1, status))
+          |> TabBar.sync_workspace_agent_tab_projection(workspace_id)
 
         _workspace, acc ->
           acc
@@ -1171,7 +1174,8 @@ defmodule MingaEditor.Commands.BufferManagement do
   #
   # For file tabs, this closes the tab without killing the buffer (matching
   # Neovim where `:q` closes the window but the buffer stays in memory).
-  # For agent tabs, session cleanup is needed so we delegate to close_agent_tab.
+  # For agent tabs, workspace close is the session teardown path, so closing
+  # the tab only removes the projection.
   # Checks whether a quit should be confirmed. Dirty buffers use the existing
   # confirm_quit option; last-file `:q` always asks before exiting so Vim-style
   # close semantics do not surprise users by terminating the app.

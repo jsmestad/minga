@@ -14,6 +14,7 @@ defmodule MingaEditor.Commands.AgentSession do
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Workspace
+  alias MingaEditor.State.Workspace.RemoteSession
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
@@ -167,6 +168,7 @@ defmodule MingaEditor.Commands.AgentSession do
         |> rebuild_agent_from_tab(tab_id)
         |> apply_remote_snapshot(snapshot)
         |> ensure_agent_workspace(remote_pid)
+        |> set_remote_workspace(server_name, session_id, remote_pid, :connected)
         |> EditorState.set_status("Connected to #{server_name} session #{session_id}")
 
       {:error, reason} ->
@@ -193,15 +195,8 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec stop_current_session(state()) :: state()
   def stop_current_session(state) do
     case AgentAccess.session(state) do
-      nil ->
-        state
-
-      session when node(session) == node() ->
-        MingaAgent.SessionManager.stop_session_by_pid(session)
-        state
-
-      session ->
-        stop_remote_session(state, session)
+      nil -> state
+      session -> stop_current_session_pid(state, session)
     end
   catch
     :exit, reason -> EditorState.set_status(state, "Failed to stop session: #{inspect(reason)}")
@@ -420,6 +415,40 @@ defmodule MingaEditor.Commands.AgentSession do
 
   defp set_remote_tab(state, _tab_id, _server_name, _session_id, _remote_pid), do: state
 
+  @spec set_remote_workspace(
+          state(),
+          String.t(),
+          String.t(),
+          pid(),
+          RemoteSession.connection_status()
+        ) :: state()
+  defp set_remote_workspace(
+         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         server_name,
+         session_id,
+         remote_pid,
+         status
+       ) do
+    case TabBar.find_workspace_by_session(tb, remote_pid) do
+      %Workspace{id: workspace_id} ->
+        tb =
+          tb
+          |> TabBar.update_workspace(workspace_id, fn workspace ->
+            workspace
+            |> Workspace.set_session(remote_pid)
+            |> Workspace.put_remote_session(server_name, session_id, status)
+          end)
+          |> TabBar.sync_workspace_agent_tab_projection(workspace_id)
+
+        EditorState.set_tab_bar(state, tb)
+
+      nil ->
+        state
+    end
+  end
+
+  defp set_remote_workspace(state, _server_name, _session_id, _remote_pid, _status), do: state
+
   @spec rebuild_agent_from_tab(state(), Tab.id()) :: state()
   defp rebuild_agent_from_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, tab_id) do
     case TabBar.get(tb, tab_id) do
@@ -441,10 +470,36 @@ defmodule MingaEditor.Commands.AgentSession do
     end)
   end
 
+  @spec stop_current_session_pid(state(), pid()) :: state()
+  defp stop_current_session_pid(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, session)
+       when is_pid(session) do
+    case remote_session_for_live_pid(tb, session) do
+      %RemoteSession{} ->
+        stop_remote_session(state, session)
+
+      nil when node(session) == node() ->
+        MingaAgent.SessionManager.stop_session_by_pid(session)
+        state
+
+      nil ->
+        stop_remote_session(state, session)
+    end
+  end
+
+  defp stop_current_session_pid(state, session)
+       when is_pid(session) and node(session) == node() do
+    MingaAgent.SessionManager.stop_session_by_pid(session)
+    state
+  end
+
+  defp stop_current_session_pid(state, session) when is_pid(session) do
+    stop_remote_session(state, session)
+  end
+
   @spec stop_remote_session(state(), pid()) :: state()
   defp stop_remote_session(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, session) do
-    case TabBar.find_by_session(tb, session) do
-      %Tab{remote_session_id: session_id} when is_binary(session_id) ->
+    case remote_session_for_live_pid(tb, session) do
+      %RemoteSession{session_id: session_id} ->
         case :erpc.call(
                node(session),
                MingaAgent.SessionManager,
@@ -459,7 +514,7 @@ defmodule MingaEditor.Commands.AgentSession do
             EditorState.set_status(state, "Failed to stop remote session: #{inspect(reason)}")
         end
 
-      _ ->
+      nil ->
         EditorState.set_status(state, "Remote session id is unavailable")
     end
   catch
@@ -468,6 +523,29 @@ defmodule MingaEditor.Commands.AgentSession do
   end
 
   defp stop_remote_session(state, _session), do: state
+
+  @spec remote_session_for_live_pid(TabBar.t(), pid()) :: RemoteSession.t() | nil
+  defp remote_session_for_live_pid(%TabBar{} = tb, session) when is_pid(session) do
+    case TabBar.find_workspace_by_session(tb, session) do
+      %Workspace{remote_session: %RemoteSession{} = remote_session} ->
+        remote_session
+
+      _workspace ->
+        remote_session_for_tab_pid(tb, session)
+    end
+  end
+
+  @spec remote_session_for_tab_pid(TabBar.t(), pid()) :: RemoteSession.t() | nil
+  defp remote_session_for_tab_pid(%TabBar{} = tb, session) when is_pid(session) do
+    case TabBar.find_by_session(tb, session) do
+      %Tab{server_name: server_name, remote_session_id: session_id}
+      when is_binary(server_name) and is_binary(session_id) ->
+        RemoteSession.new(server_name, session_id, :connected)
+
+      _tab ->
+        nil
+    end
+  end
 
   @spec buffer_name_for_language(String.t()) :: String.t()
   defp buffer_name_for_language(""), do: "*Agent: text*"
