@@ -25,6 +25,7 @@ struct WorkspaceHeaderView: View {
                 }
 
                 badges(for: activeWorkspace)
+                backgroundBadges
 
                 Spacer(minLength: 8)
 
@@ -159,6 +160,28 @@ struct WorkspaceHeaderView: View {
             }
         }
         .accessibilityLabel("Workspace badges")
+    }
+
+    @ViewBuilder
+    private var backgroundBadges: some View {
+        HStack(spacing: 5) {
+            if workspaceState.backgroundRunningCount > 0 {
+                badge("bg ⚡\(workspaceState.backgroundRunningCount)", help: "Background workspace agents are running")
+            }
+            if workspaceState.backgroundDraftCount > 0 {
+                badge("bg ✓\(workspaceState.backgroundDraftCount)", help: "Background workspace drafts need review")
+            }
+            if workspaceState.backgroundConflictCount > 0 {
+                badge("bg ⚠︎\(workspaceState.backgroundConflictCount)", help: "Background workspace conflicts need resolution", color: .orange)
+            }
+            if workspaceState.backgroundAttentionCount > 0 {
+                badge("bg !\(workspaceState.backgroundAttentionCount)", help: "Background workspaces need attention", color: .red)
+            }
+            if workspaceState.backgroundErrorCount > 0 {
+                badge("bg ✕\(workspaceState.backgroundErrorCount)", help: "Background workspace agents have errors", color: .red)
+            }
+        }
+        .accessibilityLabel("Background workspace badges")
     }
 
     private func closeButton(_ workspace: WorkspaceSummaryEntry) -> some View {

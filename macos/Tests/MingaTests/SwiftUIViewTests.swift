@@ -685,6 +685,27 @@ struct WorkspaceHeaderViewTests {
         #expect(strings.contains("!"))
     }
 
+    @Test("Header exposes background workspace badges without activating them")
+    @MainActor func showsBackgroundWorkspaceBadges() throws {
+        let state = WorkspaceState()
+        state.update(version: 1, activeWorkspaceId: 0, mode: 0, flags: 0, workspaces: [
+            Wire.WorkspaceEntry(id: 0, kind: 0, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
+                                tabCount: 1, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "minga", icon: "folder"),
+            Wire.WorkspaceEntry(id: 1, kind: 1, status: 3, flags: 0x0001, colorR: 0x44, colorG: 0x55, colorB: 0x66,
+                                tabCount: 2, draftCount: 1, conflictCount: 1, runningBackgroundCount: 1, label: "Background", icon: "cpu")
+        ], visibleTabs: [])
+
+        let sut = WorkspaceHeaderView(workspaceState: state, theme: ThemeColors(), encoder: nil)
+        let strings = try sut.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(strings.contains("minga"))
+        #expect(strings.contains("bg ⚡1"))
+        #expect(strings.contains("bg ✓1"))
+        #expect(strings.contains("bg ⚠︎1"))
+        #expect(strings.contains("bg !1"))
+        #expect(strings.contains("bg ✕1"))
+    }
+
     @Test("Switcher uses manual workspace and agent ordinals")
     @MainActor func switcherUsesManualAndAgentOrdinals() throws {
         let state = populatedState()

@@ -57,6 +57,30 @@ final class WorkspaceState {
         flags & 0x01 != 0 || workspaces.contains(where: { $0.hasAttention })
     }
 
+    var backgroundWorkspaces: [WorkspaceSummaryEntry] {
+        workspaces.filter { $0.id != activeWorkspaceId }
+    }
+
+    var backgroundRunningCount: Int {
+        backgroundWorkspaces.reduce(0) { $0 + Int($1.runningBackgroundCount) }
+    }
+
+    var backgroundDraftCount: Int {
+        backgroundWorkspaces.reduce(0) { $0 + Int($1.draftCount) }
+    }
+
+    var backgroundConflictCount: Int {
+        backgroundWorkspaces.reduce(0) { $0 + Int($1.conflictCount) }
+    }
+
+    var backgroundAttentionCount: Int {
+        backgroundWorkspaces.filter { $0.hasAttention }.count
+    }
+
+    var backgroundErrorCount: Int {
+        backgroundWorkspaces.filter { $0.agentStatus == 3 }.count
+    }
+
     func update(version: UInt8, activeWorkspaceId: UInt16, mode: UInt8, flags: UInt8, workspaces: [Wire.WorkspaceEntry], visibleTabs: [Wire.WorkspaceTabEntry]) {
         self.activeWorkspaceId = activeWorkspaceId
         self.viewMode = mode
