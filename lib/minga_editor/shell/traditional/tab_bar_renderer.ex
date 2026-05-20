@@ -113,7 +113,8 @@ defmodule MingaEditor.Shell.Traditional.TabBarRenderer do
 
   @spec build_segments(TabBar.t(), map()) :: [segment()]
   defp build_segments(tb, colors) do
-    tb.tabs
+    tb
+    |> TabBar.visible_file_tabs()
     |> Enum.with_index(1)
     |> Enum.map(fn {tab, position} ->
       is_active = tab.id == tb.active_id

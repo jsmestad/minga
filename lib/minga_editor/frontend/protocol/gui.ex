@@ -681,6 +681,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   tab is omitted from `ChromeState.visible_tabs`, active_index is 255 to
   signal that no visible tab is active.
   """
+  @no_visible_active_tab 255
+
   @spec encode_gui_tab_bar(TabBar.t() | ChromeState.t(), pid() | nil) :: binary()
   def encode_gui_tab_bar(tab_bar_or_chrome_state, active_win_buffer \\ nil)
 
@@ -700,21 +702,25 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   end
 
   def encode_gui_tab_bar(%TabBar{} = tb, active_win_buffer) do
-    active_index = TabBar.active_index(tb)
+    visible_tabs = TabBar.visible_file_tabs(tb)
+
+    active_index =
+      case Enum.find_index(visible_tabs, &(&1.id == tb.active_id)) do
+        nil -> @no_visible_active_tab
+        index -> index
+      end
 
     entries =
-      Enum.map(tb.tabs, fn tab ->
+      Enum.map(visible_tabs, fn tab ->
         encode_gui_tab_entry(tab, tb.active_id, active_win_buffer)
       end)
 
     IO.iodata_to_binary([
       @op_gui_tab_bar,
-      <<active_index::8, length(tb.tabs)::8>>
+      <<active_index::8, length(visible_tabs)::8>>
       | entries
     ])
   end
-
-  @no_visible_active_tab 255
 
   @spec active_summary_index(ChromeState.t()) :: non_neg_integer()
   defp active_summary_index(%ChromeState{visible_tabs: tabs, active_tab_id: active_id}) do
@@ -820,12 +826,15 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   `ChromeState` includes the synthesized manual workspace, but this legacy opcode intentionally sends only agent workspaces. A later canonical workspace protocol can carry manual-vs-agent kind explicitly without overloading this agent-group contract.
 
   Wire format:
-    opcode(1) + active_group_id(2) + agent_workspace_count(1) + agent_workspaces...
+    opcode(1) + active_workspace_id(2) + agent_workspace_count(1) + agent_workspaces...
 
   Per agent workspace:
     id(2) + agent_status(1) + color_r(1) + color_g(1) + color_b(1)
     + tab_count(2) + label_len(1) + label(label_len) + icon_len(1) + icon(icon_len)
 
+  There is no kind byte in the payload. The emitted list contains only agent
+  workspaces created by agents, and the icon fields carry the workspace icon
+  name.
   Agent status: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan.
   """
   @spec encode_gui_agent_groups(TabBar.t() | ChromeState.t()) :: binary()

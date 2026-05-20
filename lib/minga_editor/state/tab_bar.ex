@@ -13,8 +13,12 @@ defmodule MingaEditor.State.TabBar do
   - Tab ids are unique and monotonically increasing.
   """
 
+  alias Minga.Buffer
+  alias Minga.FileRef
   alias MingaEditor.State.AgentGroup
+  alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Context, as: TabContext
 
   @typedoc "Tab bar state."
   @type t :: %__MODULE__{
@@ -182,27 +186,16 @@ defmodule MingaEditor.State.TabBar do
     end
   end
 
-  @doc "Switches to the next tab, wrapping around."
+  @doc "Switches to the next visible file tab in the active workspace, wrapping around."
   @spec next(t()) :: t()
-  def next(%__MODULE__{tabs: [_single]} = tb), do: tb
-
-  def next(%__MODULE__{tabs: tabs} = tb) do
-    idx = active_index(tb)
-    next_idx = rem(idx + 1, length(tabs))
-    next_tab = Enum.at(tabs, next_idx)
-    %{tb | active_id: next_tab.id}
+  def next(%__MODULE__{} = tb) do
+    cycle_visible_file_tab(tb, 1)
   end
 
-  @doc "Switches to the previous tab, wrapping around."
+  @doc "Switches to the previous visible file tab in the active workspace, wrapping around."
   @spec prev(t()) :: t()
-  def prev(%__MODULE__{tabs: [_single]} = tb), do: tb
-
-  def prev(%__MODULE__{tabs: tabs} = tb) do
-    idx = active_index(tb)
-    len = length(tabs)
-    prev_idx = if idx == 0, do: len - 1, else: idx - 1
-    prev_tab = Enum.at(tabs, prev_idx)
-    %{tb | active_id: prev_tab.id}
+  def prev(%__MODULE__{} = tb) do
+    cycle_visible_file_tab(tb, -1)
   end
 
   @doc "Updates the context of the tab with the given id."
@@ -400,6 +393,81 @@ defmodule MingaEditor.State.TabBar do
       nil -> 0
     end
   end
+
+  @doc "Returns visible file tabs for the active workspace."
+  @spec visible_file_tabs(t()) :: [Tab.t()]
+  def visible_file_tabs(%__MODULE__{} = tb) do
+    visible_file_tabs(tb, active_group_id(tb))
+  end
+
+  @doc "Returns visible file tabs for the given workspace id. Agent chat tabs are excluded."
+  @spec visible_file_tabs(t(), non_neg_integer()) :: [Tab.t()]
+  def visible_file_tabs(%__MODULE__{tabs: tabs}, workspace_id)
+      when is_integer(workspace_id) and workspace_id >= 0 do
+    Enum.filter(tabs, &visible_file_tab?(&1, workspace_id))
+  end
+
+  @doc "Finds the file tab in a workspace that represents the given file reference."
+  @spec find_file_tab_in_workspace(t(), non_neg_integer(), FileRef.t()) :: Tab.t() | nil
+  def find_file_tab_in_workspace(%__MODULE__{} = tb, workspace_id, %FileRef{} = file_ref)
+      when is_integer(workspace_id) and workspace_id >= 0 do
+    tb
+    |> visible_file_tabs(workspace_id)
+    |> Enum.find(&tab_matches_file_ref?(&1, file_ref))
+  end
+
+  @spec visible_file_tab?(Tab.t(), non_neg_integer()) :: boolean()
+  defp visible_file_tab?(%Tab{kind: :file, group_id: workspace_id}, workspace_id), do: true
+  defp visible_file_tab?(%Tab{}, _workspace_id), do: false
+
+  @spec tab_matches_file_ref?(Tab.t(), FileRef.t()) :: boolean()
+  defp tab_matches_file_ref?(%Tab{} = tab, %FileRef{} = file_ref) do
+    case tab_file_ref(tab) do
+      %FileRef{} = tab_ref -> FileRef.same?(tab_ref, file_ref)
+      nil -> false
+    end
+  end
+
+  @spec tab_file_ref(Tab.t()) :: FileRef.t() | nil
+  defp tab_file_ref(%Tab{context: context}) when is_map(context) do
+    case TabContext.to_workspace_map(context) do
+      %{buffers: %Buffers{active: pid}} when is_pid(pid) -> buffer_file_ref(pid)
+      _ -> nil
+    end
+  end
+
+  @spec buffer_file_ref(pid()) :: FileRef.t() | nil
+  defp buffer_file_ref(pid) do
+    case Buffer.file_path(pid) do
+      path when is_binary(path) -> FileRef.new(path)
+      _ -> nil
+    end
+  catch
+    :exit, _ -> nil
+  end
+
+  @spec cycle_visible_file_tab(t(), 1 | -1) :: t()
+  defp cycle_visible_file_tab(%__MODULE__{} = tb, step) do
+    case visible_file_tabs(tb) do
+      [] -> tb
+      [_single] -> tb
+      tabs -> switch_to_cycle_neighbor(tb, tabs, step)
+    end
+  end
+
+  @spec switch_to_cycle_neighbor(t(), [Tab.t()], 1 | -1) :: t()
+  defp switch_to_cycle_neighbor(%__MODULE__{active_id: active_id} = tb, tabs, step) do
+    idx = Enum.find_index(tabs, &(&1.id == active_id))
+    target_idx = cycle_target_index(idx, length(tabs), step)
+    %{tb | active_id: Enum.at(tabs, target_idx).id}
+  end
+
+  @spec cycle_target_index(non_neg_integer() | nil, pos_integer(), 1 | -1) :: non_neg_integer()
+  defp cycle_target_index(nil, _len, 1), do: 0
+  defp cycle_target_index(nil, len, -1), do: len - 1
+  defp cycle_target_index(idx, len, 1), do: rem(idx + 1, len)
+  defp cycle_target_index(0, len, -1), do: len - 1
+  defp cycle_target_index(idx, _len, -1), do: idx - 1
 
   @doc """
   Adds an agent agent group and returns `{updated_tab_bar, agent group}`.

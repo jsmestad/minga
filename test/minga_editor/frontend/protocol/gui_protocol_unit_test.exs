@@ -34,8 +34,8 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       assert group_id == 0
     end
 
-    test "multiple tabs each carry their own group_id" do
-      tab1 = %Tab{id: 1, kind: :file, label: "a.ex", group_id: 0}
+    test "multiple visible tabs each carry their own group_id" do
+      tab1 = %Tab{id: 1, kind: :file, label: "a.ex", group_id: 5}
       tab2 = %Tab{id: 2, kind: :file, label: "b.ex", group_id: 5}
       tb = %TabBar{tabs: [tab1, tab2], active_id: 1, next_id: 3}
 
@@ -47,7 +47,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
 
       <<_flags2::8, _id2::32, gid2::16, _rest3::binary>> = rest2
 
-      assert gid1 == 0
+      assert gid1 == 5
       assert gid2 == 5
     end
 
@@ -86,6 +86,19 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       assert active_index == 255
       assert tab_count == 1
       assert Bitwise.band(flags, 0x01) == 0
+    end
+
+    test "agent tabs and file tabs from other workspaces are omitted" do
+      tab1 = %Tab{id: 1, kind: :file, label: "a.ex", group_id: 0}
+      tab2 = %Tab{id: 2, kind: :agent, label: "Agent", group_id: 7}
+      tab3 = %Tab{id: 3, kind: :file, label: "b.ex", group_id: 7}
+      tb = %TabBar{tabs: [tab1, tab2, tab3], active_id: 2, next_id: 4}
+
+      <<0x71, active_index::8, 1::8, rest::binary>> = ProtocolGUI.encode_gui_tab_bar(tb)
+      <<_flags::8, id::32, _rest::binary>> = rest
+
+      assert active_index == 255
+      assert id == 3
     end
   end
 
