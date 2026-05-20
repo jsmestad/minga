@@ -44,7 +44,7 @@ final class TabBarState {
     }
 
     /// The active agent workspace, if the active tab belongs to one. Nil when
-    /// the user is viewing ungrouped tabs.
+    /// the user is viewing the manual workspace.
     var activeWorkspace: WorkspaceEntry? {
         workspaces.first { $0.id == activeWorkspaceId }
     }

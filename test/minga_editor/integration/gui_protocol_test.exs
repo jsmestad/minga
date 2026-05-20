@@ -71,30 +71,18 @@ defmodule Minga.Integration.GUIProtocolTest do
       cmd = ProtocolGUI.encode_gui_tab_bar(tb)
       Port.command(port, cmd)
 
-      # With 2 tabs, the harness sends both a JSON report and a gui_action.
-      # Find the JSON one.
-      messages =
-        for _ <- 1..2,
-            do:
-              (
-                assert_receive {^port, {:data, d}}, 5_000
-                d
-              )
-
-      json = Enum.find(messages, &String.starts_with?(&1, "{"))
+      assert_receive {^port, {:data, json}}, 5_000
       decoded = Jason.decode!(json)
 
       assert decoded["type"] == "gui_tab_bar"
       assert decoded["active_index"] == 0
-      assert length(decoded["tabs"]) == 2
+      assert length(decoded["tabs"]) == 1
 
-      [t1, t2] = decoded["tabs"]
+      [t1] = decoded["tabs"]
       assert t1["id"] == 1
       assert t1["label"] == "editor.ex"
       assert t1["is_active"] == true
-      assert t2["id"] == 2
-      assert t2["label"] == "Agent"
-      assert t2["is_agent"] == true
+      assert t1["is_agent"] == false
     end
 
     test "gui_breadcrumb encodes and decodes correctly", %{port: port} do

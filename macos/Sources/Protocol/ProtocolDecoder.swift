@@ -2121,7 +2121,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 gsPos - offset)
 
     case OP_GUI_WORKSPACES:
-        // active_group_id:2, group_count:1, then per group:
+        // active_workspace_id:2, workspace_count:1, then per workspace:
         // id:2, agent_status:1, r:1, g:1, b:1, tab_count:2, label_len:1, label, icon_len:1, icon
         guard data.count >= rest + 3 else { throw ProtocolDecodeError.malformed }
         let activeGId = readU16(data, rest)

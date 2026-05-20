@@ -1,6 +1,8 @@
 defmodule MingaEditor.State.TabBarTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.FileRef
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
@@ -23,6 +25,15 @@ defmodule MingaEditor.State.TabBarTest do
 
   defp labels(tb), do: Enum.map(tb.tabs, & &1.label)
   defp active_label(tb), do: TabBar.active(tb).label
+
+  defp buffer_for_path(path) do
+    {:ok, pid} = BufferProcess.start_link(file_path: path)
+    pid
+  end
+
+  defp tab_with_active_buffer(tab, buffer) do
+    Tab.set_context(tab, %{buffers: %Buffers{active: buffer, list: [buffer], active_index: 0}})
+  end
 
   defp two_workspaces do
     tb = TabBar.new(file_tab(1, "a.ex"))
@@ -173,6 +184,31 @@ defmodule MingaEditor.State.TabBarTest do
       assert TabBar.next(single) == single
       assert TabBar.prev(single) == single
     end
+
+    test "cycles only within the active workspace" do
+      tb =
+        tab_bar(
+          file: "manual-a",
+          file: "manual-b",
+          agent: "Agent",
+          file: "agent-a",
+          file: "agent-b"
+        )
+
+      {tb, group} = TabBar.add_workspace(tb, "Agent")
+      tb = TabBar.move_tab_to_workspace(tb, 3, group.id)
+      tb = TabBar.move_tab_to_workspace(tb, 4, group.id)
+      tb = TabBar.move_tab_to_workspace(tb, 5, group.id)
+
+      tb = TabBar.switch_to(tb, 4)
+      assert TabBar.next(tb).active_id == 5
+      assert TabBar.next(TabBar.next(tb)).active_id == 4
+      assert TabBar.prev(tb).active_id == 5
+
+      tb = TabBar.switch_to(tb, 1)
+      assert TabBar.next(tb).active_id == 2
+      assert TabBar.prev(tb).active_id == 2
+    end
   end
 
   describe "tab updates" do
@@ -199,6 +235,39 @@ defmodule MingaEditor.State.TabBarTest do
       assert TabBar.find_by_kind(TabBar.new(file_tab(1)), :agent) == nil
       assert length(TabBar.filter_by_kind(tb, :file)) == 2
       assert length(TabBar.filter_by_kind(tb, :agent)) == 1
+    end
+  end
+
+  describe "visible_file_tabs/1 and visible_file_tabs/2" do
+    test "returns only file tabs in the active workspace" do
+      tb = tab_bar(file: "manual.ex", agent: "Agent", file: "agent.ex", file: "other.ex")
+      {tb, group} = TabBar.add_workspace(tb, "Agent")
+      tb = TabBar.move_tab_to_workspace(tb, 2, group.id)
+      tb = TabBar.move_tab_to_workspace(tb, 3, group.id)
+      tb = TabBar.switch_to(tb, 2)
+
+      assert Enum.map(TabBar.visible_file_tabs(tb), & &1.label) == ["agent.ex"]
+      assert Enum.map(TabBar.visible_file_tabs(tb, 0), & &1.label) == ["manual.ex", "other.ex"]
+    end
+
+    test "finds same-path file tabs by workspace and excludes agent tabs" do
+      path = "/tmp/minga-tab-bar-same-file.ex"
+      manual_buffer = buffer_for_path(path)
+      agent_buffer = buffer_for_path(path)
+
+      manual_tab = tab_with_active_buffer(file_tab(1, "same.ex"), manual_buffer)
+      agent_tab = Tab.new_agent(2, "Agent")
+      agent_file_tab = tab_with_active_buffer(file_tab(3, "same.ex"), agent_buffer)
+
+      tb = %TabBar{tabs: [manual_tab, agent_tab, agent_file_tab], active_id: 2, next_id: 4}
+      {tb, group} = TabBar.add_workspace(tb, "Agent")
+      tb = TabBar.move_tab_to_workspace(tb, 2, group.id)
+      tb = TabBar.move_tab_to_workspace(tb, 3, group.id)
+      file_ref = FileRef.new(path)
+
+      assert TabBar.find_file_tab_in_workspace(tb, 0, file_ref).id == 1
+      assert TabBar.find_file_tab_in_workspace(tb, group.id, file_ref).id == 3
+      refute Enum.any?(TabBar.visible_file_tabs(tb), &(&1.kind == :agent))
     end
   end
 

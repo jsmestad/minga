@@ -1356,7 +1356,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       # First byte is opcode 0x71 (gui_tab_bar)
       assert <<0x71, active_index::8, tab_count::8, rest::binary>> = encoded
       assert active_index == 0
-      assert tab_count == 2
+      assert tab_count == 1
 
       # First tab: flags has is_active=1
       assert <<flags1::8, id1::32, _rest1::binary>> = rest

@@ -126,7 +126,7 @@ private func randomGuiTabBar() -> Data {
 private func randomGuiWorkspaces() -> Data {
     let wsCount = UInt8.random(in: 0...4)
     var data = Data([OP_GUI_WORKSPACES])
-    appendRandomU16(&data) // active_group_id
+    appendRandomU16(&data) // active_workspace_id
     data.append(wsCount)
     for _ in 0..<wsCount {
         appendRandomU16(&data) // id

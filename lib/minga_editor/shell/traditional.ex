@@ -36,6 +36,7 @@ defmodule MingaEditor.Shell.Traditional do
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer
+  alias Minga.FileRef
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
@@ -382,9 +383,9 @@ defmodule MingaEditor.Shell.Traditional do
   def find_tab_by_buffer(%ShellState{tab_bar: nil}, _pid), do: nil
 
   def find_tab_by_buffer(%ShellState{tab_bar: tb}, pid) do
-    Enum.find(tb.tabs, fn tab ->
-      tab.kind == :file and tab_has_active_buffer?(tab, pid)
-    end)
+    tb
+    |> TabBar.visible_file_tabs()
+    |> Enum.find(&tab_has_active_buffer?(&1, pid))
   end
 
   @impl true
@@ -460,10 +461,21 @@ defmodule MingaEditor.Shell.Traditional do
   defp background_agent_windows(_agent_buf, _rows, _cols), do: %Windows{}
 
   @spec find_tab_for_buffer(TabBar.t(), pid()) :: Tab.t() | nil
-  defp find_tab_for_buffer(%TabBar{tabs: tabs}, pid) when is_pid(pid) do
-    Enum.find(tabs, fn tab ->
-      tab.kind == :file and tab_has_active_buffer?(tab, pid)
-    end)
+  defp find_tab_for_buffer(%TabBar{} = tb, pid) when is_pid(pid) do
+    case buffer_file_ref(pid) do
+      %FileRef{} = file_ref ->
+        TabBar.find_file_tab_in_workspace(tb, TabBar.active_workspace_id(tb), file_ref)
+
+      nil ->
+        find_visible_tab_for_buffer(tb, pid)
+    end
+  end
+
+  @spec find_visible_tab_for_buffer(TabBar.t(), pid()) :: Tab.t() | nil
+  defp find_visible_tab_for_buffer(%TabBar{} = tb, pid) when is_pid(pid) do
+    tb
+    |> TabBar.visible_file_tabs()
+    |> Enum.find(&tab_has_active_buffer?(&1, pid))
   end
 
   # Switch to an existing file tab that matches the buffer being opened.
@@ -523,8 +535,11 @@ defmodule MingaEditor.Shell.Traditional do
     context = WorkspaceState.to_tab_context(prev_workspace)
     tb = TabBar.update_context(tb, tb.active_id, context)
 
+    workspace_id = TabBar.active_workspace_id(tb)
+
     # Create file tab (TabBar.add auto-activates it)
     {tb, new_tab} = TabBar.add(tb, :file, label)
+    tb = TabBar.move_tab_to_workspace(tb, new_tab.id, workspace_id)
 
     # Leave agent UI view: reset to editor scope and window content type
     workspace =
@@ -563,8 +578,11 @@ defmodule MingaEditor.Shell.Traditional do
     context = WorkspaceState.to_tab_context(prev_workspace)
     tb = TabBar.update_context(tb, tb.active_id, context)
 
+    workspace_id = TabBar.active_workspace_id(tb)
+
     # Create file tab (TabBar.add auto-activates it)
     {tb, new_tab} = TabBar.add(tb, :file, label)
+    tb = TabBar.move_tab_to_workspace(tb, new_tab.id, workspace_id)
     workspace = WorkspaceState.sync_active_window_buffer(workspace)
 
     # Snapshot the new tab's context
@@ -625,5 +643,15 @@ defmodule MingaEditor.Shell.Traditional do
       %{buffers: %Buffers{active: ^pid}} -> true
       _ -> false
     end
+  end
+
+  @spec buffer_file_ref(pid()) :: FileRef.t() | nil
+  defp buffer_file_ref(pid) when is_pid(pid) do
+    case Buffer.file_path(pid) do
+      path when is_binary(path) -> FileRef.new(path)
+      _ -> nil
+    end
+  catch
+    :exit, _ -> nil
   end
 end
