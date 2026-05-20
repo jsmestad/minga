@@ -5,9 +5,6 @@ defmodule Minga.Mode.NormalTest do
   alias Minga.Mode
   alias Minga.Mode.Normal
 
-  # Shorthand: call Normal.handle_key directly with a fresh state.
-  # Populates leader_trie and normal_bindings so the FSM can resolve
-  # leader sequences and normal bindings without calling the Keymap GenServer.
   defp fresh_state do
     %{
       Mode.initial_state()
@@ -16,549 +13,228 @@ defmodule Minga.Mode.NormalTest do
     }
   end
 
+  defp handle(key, state \\ fresh_state()), do: Normal.handle_key(key, state)
+
   describe "mode transitions" do
-    test "i produces {:transition, :insert, state}" do
-      assert {:transition, :insert, _} = Normal.handle_key({?i, 0}, fresh_state())
-    end
+    test "insert, command, eval, visual, and replace transitions" do
+      transition_cases = [
+        {{?i, 0}, :insert},
+        {{?:, 0}, :command},
+        {{?:, 0x04}, :eval},
+        {{?R, 0}, :replace}
+      ]
 
-    test "a produces {:execute_then_transition, [:move_right], :insert, state}" do
-      assert {:execute_then_transition, [:move_right], :insert, _} =
-               Normal.handle_key({?a, 0}, fresh_state())
-    end
+      for {key, mode} <- transition_cases do
+        assert {:transition, ^mode, _state} = handle(key)
+      end
 
-    test "A produces {:execute_then_transition, [:move_to_line_end, :move_right], :insert, state}" do
-      assert {:execute_then_transition, [:move_to_line_end, :move_right], :insert, _} =
-               Normal.handle_key({?A, 0}, fresh_state())
-    end
+      execute_transition_cases = [
+        {{?a, 0}, [:move_right], :insert},
+        {{?A, 0}, [:move_to_line_end, :move_right], :insert},
+        {{?I, 0}, [:move_to_line_start], :insert},
+        {{?o, 0}, [:insert_line_below], :insert},
+        {{?O, 0}, [:insert_line_above], :insert},
+        {{?s, 0}, [{:delete_chars_at, 1}], :insert},
+        {{?S, 0}, [:change_line], :insert},
+        {{?C, 0}, [{:delete_motion, :line_end}], :insert}
+      ]
 
-    test "I produces {:execute_then_transition, [:move_to_line_start], :insert, state}" do
-      assert {:execute_then_transition, [:move_to_line_start], :insert, _} =
-               Normal.handle_key({?I, 0}, fresh_state())
-    end
+      for {key, commands, mode} <- execute_transition_cases do
+        assert {:execute_then_transition, ^commands, ^mode, _state} = handle(key)
+      end
 
-    test "o produces {:execute_then_transition, [:insert_line_below], :insert, state}" do
-      assert {:execute_then_transition, [:insert_line_below], :insert, _} =
-               Normal.handle_key({?o, 0}, fresh_state())
-    end
+      assert {:transition, :visual, %{visual_type: :char}} = handle({?v, 0})
+      assert {:transition, :visual, %{visual_type: :line}} = handle({?V, 0})
 
-    test "O produces {:execute_then_transition, [:insert_line_above], :insert, state}" do
-      assert {:execute_then_transition, [:insert_line_above], :insert, _} =
-               Normal.handle_key({?O, 0}, fresh_state())
-    end
-
-    test ": enters command mode" do
-      assert {:transition, :command, _} = Normal.handle_key({?:, 0}, fresh_state())
-    end
-
-    test "Alt+: enters eval mode" do
-      # Alt modifier = 0x04
-      assert {:transition, :eval, _} = Normal.handle_key({?:, 0x04}, fresh_state())
-    end
-
-    test "v enters characterwise visual mode" do
-      {:transition, :visual, state} = Normal.handle_key({?v, 0}, fresh_state())
-      assert state.visual_type == :char
-    end
-
-    test "V enters linewise visual mode" do
-      {:transition, :visual, state} = Normal.handle_key({?V, 0}, fresh_state())
-      assert state.visual_type == :line
+      assert {:transition, :replace, %Minga.Mode.ReplaceState{original_chars: []}} =
+               handle({?R, 0})
     end
   end
 
-  describe "movement keys" do
-    test "h produces {:execute, :move_left, state}" do
-      assert {:execute, :move_left, _} = Normal.handle_key({?h, 0}, fresh_state())
-    end
+  describe "normal commands" do
+    test "movement, paste, scrolling, undo, redo, and dot-repeat keys execute commands" do
+      cases = [
+        {{?h, 0}, :move_left},
+        {{?j, 0}, :move_down},
+        {{?k, 0}, :move_up},
+        {{?l, 0}, :move_right},
+        {{?h, 0x04}, :nav_parent},
+        {{?l, 0x04}, :nav_first_child},
+        {{?j, 0x04}, :nav_next_sibling},
+        {{?k, 0x04}, :nav_prev_sibling},
+        {{?0, 0}, :move_to_line_start},
+        {{?w, 0}, :word_forward},
+        {{?b, 0}, :word_backward},
+        {{?e, 0}, :word_end},
+        {{?$, 0}, :move_to_line_end},
+        {{?^, 0}, :move_to_first_non_blank},
+        {{?G, 0}, :move_to_document_end},
+        {{57_352, 0}, :move_up},
+        {{57_353, 0}, :move_down},
+        {{57_350, 0}, :move_left},
+        {{57_351, 0}, :move_right},
+        {{57_352, 0x02}, :move_up},
+        {{57_353, 0x01}, :move_down},
+        {{?p, 0}, :paste_after},
+        {{?P, 0}, :paste_before},
+        {{?d, 0x02}, :half_page_down},
+        {{?u, 0x02}, :half_page_up},
+        {{?f, 0x02}, :page_down},
+        {{?b, 0x02}, :page_up},
+        {{?u, 0}, :undo},
+        {{?r, 0x02}, :redo},
+        {{?D, 0}, {:delete_motion, :line_end}},
+        {{?., 0}, {:dot_repeat, nil}}
+      ]
 
-    test "j produces {:execute, :move_down, state}" do
-      assert {:execute, :move_down, _} = Normal.handle_key({?j, 0}, fresh_state())
-    end
-
-    test "k produces {:execute, :move_up, state}" do
-      assert {:execute, :move_up, _} = Normal.handle_key({?k, 0}, fresh_state())
-    end
-
-    test "l produces {:execute, :move_right, state}" do
-      assert {:execute, :move_right, _} = Normal.handle_key({?l, 0}, fresh_state())
-    end
-
-    test "Alt+h produces structural parent navigation" do
-      assert {:execute, :nav_parent, _} = Normal.handle_key({?h, 0x04}, fresh_state())
-    end
-
-    test "Alt+l produces structural first child navigation" do
-      assert {:execute, :nav_first_child, _} = Normal.handle_key({?l, 0x04}, fresh_state())
-    end
-
-    test "Alt+j produces structural next sibling navigation" do
-      assert {:execute, :nav_next_sibling, _} = Normal.handle_key({?j, 0x04}, fresh_state())
-    end
-
-    test "Alt+k produces structural previous sibling navigation" do
-      assert {:execute, :nav_prev_sibling, _} = Normal.handle_key({?k, 0x04}, fresh_state())
-    end
-
-    test "0 with no count produces {:execute, :move_to_line_start, state}" do
-      assert {:execute, :move_to_line_start, _} =
-               Normal.handle_key({?0, 0}, fresh_state())
-    end
-
-    test "w produces word_forward" do
-      assert {:execute, :word_forward, _} = Normal.handle_key({?w, 0}, fresh_state())
-    end
-
-    test "b produces word_backward" do
-      assert {:execute, :word_backward, _} = Normal.handle_key({?b, 0}, fresh_state())
-    end
-
-    test "e produces word_end" do
-      assert {:execute, :word_end, _} = Normal.handle_key({?e, 0}, fresh_state())
-    end
-
-    test "$ produces move_to_line_end" do
-      assert {:execute, :move_to_line_end, _} = Normal.handle_key({?$, 0}, fresh_state())
-    end
-
-    test "^ produces move_to_first_non_blank" do
-      assert {:execute, :move_to_first_non_blank, _} =
-               Normal.handle_key({?^, 0}, fresh_state())
-    end
-
-    test "G produces move_to_document_end" do
-      assert {:execute, :move_to_document_end, _} =
-               Normal.handle_key({?G, 0}, fresh_state())
-    end
-  end
-
-  describe "arrow keys" do
-    test "up arrow (57_352) produces :move_up" do
-      assert {:execute, :move_up, _} = Normal.handle_key({57_352, 0}, fresh_state())
-    end
-
-    test "down arrow (57_353) produces :move_down" do
-      assert {:execute, :move_down, _} = Normal.handle_key({57_353, 0}, fresh_state())
-    end
-
-    test "left arrow (57_350) produces :move_left" do
-      assert {:execute, :move_left, _} = Normal.handle_key({57_350, 0}, fresh_state())
-    end
-
-    test "right arrow (57_351) produces :move_right" do
-      assert {:execute, :move_right, _} = Normal.handle_key({57_351, 0}, fresh_state())
-    end
-
-    test "arrow keys work with modifiers" do
-      assert {:execute, :move_up, _} = Normal.handle_key({57_352, 0x02}, fresh_state())
-      assert {:execute, :move_down, _} = Normal.handle_key({57_353, 0x01}, fresh_state())
-    end
-  end
-
-  describe "operator entry" do
-    test "d enters operator_pending with :delete operator" do
-      {:transition, :operator_pending, state} = Normal.handle_key({?d, 0}, fresh_state())
-      assert state.operator == :delete
-      assert state.op_count == 1
-    end
-
-    test "c enters operator_pending with :change operator" do
-      {:transition, :operator_pending, state} = Normal.handle_key({?c, 0}, fresh_state())
-      assert state.operator == :change
-      assert state.op_count == 1
-    end
-
-    test "y enters operator_pending with :yank operator" do
-      {:transition, :operator_pending, state} = Normal.handle_key({?y, 0}, fresh_state())
-      assert state.operator == :yank
-      assert state.op_count == 1
-    end
-
-    test "count prefix is passed as op_count to operator_pending" do
-      {:continue, s1} = Normal.handle_key({?3, 0}, fresh_state())
-      {:transition, :operator_pending, state} = Normal.handle_key({?d, 0}, s1)
-      assert state.operator == :delete
-      assert state.op_count == 3
-    end
-  end
-
-  describe "paste" do
-    test "p produces :paste_after" do
-      assert {:execute, :paste_after, _} = Normal.handle_key({?p, 0}, fresh_state())
-    end
-
-    test "P produces :paste_before" do
-      assert {:execute, :paste_before, _} = Normal.handle_key({?P, 0}, fresh_state())
-    end
-  end
-
-  describe "page / half-page scrolling" do
-    test "Ctrl+d produces :half_page_down" do
-      assert {:execute, :half_page_down, _} = Normal.handle_key({?d, 0x02}, fresh_state())
-    end
-
-    test "Ctrl+u produces :half_page_up" do
-      assert {:execute, :half_page_up, _} = Normal.handle_key({?u, 0x02}, fresh_state())
-    end
-
-    test "Ctrl+f produces :page_down" do
-      assert {:execute, :page_down, _} = Normal.handle_key({?f, 0x02}, fresh_state())
-    end
-
-    test "Ctrl+b produces :page_up" do
-      assert {:execute, :page_up, _} = Normal.handle_key({?b, 0x02}, fresh_state())
-    end
-  end
-
-  describe "undo / redo" do
-    test "u produces :undo" do
-      assert {:execute, :undo, _} = Normal.handle_key({?u, 0}, fresh_state())
-    end
-
-    test "Ctrl+r produces :redo" do
-      assert {:execute, :redo, _} = Normal.handle_key({?r, 0x02}, fresh_state())
-    end
-  end
-
-  describe "count prefix accumulation" do
-    test "digit 3 sets count to 3 and continues" do
-      {:continue, new_state} = Normal.handle_key({?3, 0}, fresh_state())
-      assert new_state.count == 3
-    end
-
-    test "digits 1 then 2 accumulate to 12" do
-      {:continue, s1} = Normal.handle_key({?1, 0}, fresh_state())
-      {:continue, s2} = Normal.handle_key({?2, 0}, s1)
-      assert s2.count == 12
-    end
-
-    test "0 after digit continues count (e.g. 10)" do
-      {:continue, s1} = Normal.handle_key({?1, 0}, fresh_state())
-      {:continue, s2} = Normal.handle_key({?0, 0}, s1)
-      assert s2.count == 10
-    end
-
-    test "0 with no prior count is :move_to_line_start (not a count digit)" do
-      assert {:execute, :move_to_line_start, _} =
-               Normal.handle_key({?0, 0}, fresh_state())
-    end
-
-    test "count is preserved in state after digit key" do
-      {:continue, state_with_count} = Normal.handle_key({?5, 0}, fresh_state())
-      {:execute, :move_down, state_after} = Normal.handle_key({?j, 0}, state_with_count)
-      assert state_after.count == 5
-    end
-
-    test "all digits 1-9 start a count" do
-      for digit <- ?1..?9 do
-        {:continue, state} = Normal.handle_key({digit, 0}, fresh_state())
-        assert state.count == digit - ?0
+      for {key, command} <- cases do
+        assert {:execute, ^command, _state} = handle(key)
       end
     end
 
-    test "multi-digit count like 123" do
-      {:continue, s1} = Normal.handle_key({?1, 0}, fresh_state())
-      {:continue, s2} = Normal.handle_key({?2, 0}, s1)
-      {:continue, s3} = Normal.handle_key({?3, 0}, s2)
+    test "count prefix accumulates and is passed to operators and dot repeat" do
+      {:continue, s1} = handle({?1, 0})
+      {:continue, s2} = handle({?2, 0}, s1)
+      {:continue, s3} = handle({?3, 0}, s2)
       assert s3.count == 123
+
+      {:continue, ten} = handle({?0, 0}, s1)
+      assert ten.count == 10
+
+      {:execute, :move_down, after_move} = handle({?j, 0}, s3)
+      assert after_move.count == 123
+
+      for digit <- ?1..?9 do
+        {:continue, state} = handle({digit, 0})
+        assert state.count == digit - ?0
+      end
+
+      {:transition, :operator_pending, %{operator: :delete, op_count: 3}} =
+        handle({?d, 0}, handle_count(3))
+
+      {:transition, :operator_pending, %{operator: :indent, op_count: 3}} =
+        handle({?>, 0}, handle_count(3))
+
+      {:transition, :operator_pending, %{operator: :dedent, op_count: 3}} =
+        handle({?<, 0}, handle_count(3))
+
+      {:execute, {:dot_repeat, 15}, %{count: nil}} = handle({?., 0}, handle_count(15))
     end
-  end
 
-  describe "Escape key" do
-    test "Escape clears any accumulated count" do
-      {:continue, s1} = Normal.handle_key({?5, 0}, fresh_state())
-      {:continue, s2} = Normal.handle_key({27, 0}, s1)
-      assert s2.count == nil
+    test "operator entry records operator and default count" do
+      for {key, operator} <- [
+            {?d, :delete},
+            {?c, :change},
+            {?y, :yank},
+            {?>, :indent},
+            {?<, :dedent}
+          ] do
+        {:transition, :operator_pending, state} = handle({key, 0})
+        assert state.operator == operator
+        assert state.op_count == 1
+      end
+
+      refute Map.has_key?(fresh_state(), :pending_shift)
     end
 
-    test "Escape with no count is a no-op continue" do
-      assert {:continue, _} = Normal.handle_key({27, 0}, fresh_state())
-    end
+    test "escape and unknown keys clear or preserve the right state" do
+      {:continue, counted} = handle({?5, 0})
+      {:continue, cleared} = handle({27, 0}, counted)
+      assert cleared.count == nil
+      assert {:continue, _} = handle({27, 0})
 
-    test "Escape cancels leader mode" do
-      # Simulate being in leader mode
-      leader_trie = Defaults.leader_trie()
+      assert {:continue, state} = handle({?z, 0})
+      assert state.count == nil
 
-      state =
-        fresh_state()
-        |> Map.put(:leader_node, leader_trie)
-        |> Map.put(:leader_keys, ["SPC"])
-
-      {:execute, :leader_cancel, new_state} = Normal.handle_key({27, 0}, state)
-      assert new_state.leader_node == nil
-      assert new_state.leader_keys == []
-      assert new_state.count == nil
+      custom = %{count: 3}
+      assert {:continue, ^custom} = handle({?z, 0}, custom)
     end
   end
 
   describe "leader key sequences" do
-    test "SPC starts leader mode" do
-      {:execute, {:leader_start, node}, state} = Normal.handle_key({32, 0}, fresh_state())
-      assert state.leader_node == node
-      assert state.leader_keys == ["SPC"]
+    test "space starts leader mode, progress advances, repeated space restarts, and invalid keys cancel" do
+      {:execute, {:leader_start, node}, leader_state} = handle({32, 0})
+      assert leader_state.leader_node == node
+      assert leader_state.leader_keys == ["SPC"]
+
+      {:execute, repeated_commands, repeated_state} = handle({32, 0}, leader_state)
+      assert is_list(repeated_commands)
+      assert :leader_cancel in repeated_commands
+      assert repeated_state.leader_keys == ["SPC"]
+
+      case handle({?f, 0}, leader_state) do
+        {:execute, {:leader_progress, sub_node}, progressed} ->
+          assert progressed.leader_node == sub_node
+          assert "f" in progressed.leader_keys
+
+        {:execute, [_command, :leader_cancel], progressed} ->
+          assert progressed.leader_node == nil
+      end
+
+      for {key, count, pending} <- [
+            {{?z, 0}, nil, nil},
+            {{?Z, 0}, 5, nil},
+            {{27, 0}, 3, nil},
+            {{27, 0}, nil, :replace}
+          ] do
+        state = leader_state |> Map.put(:count, count) |> Map.put(:pending, pending)
+        {:execute, :leader_cancel, cancelled} = handle(key, state)
+        assert cancelled.leader_node == nil
+        assert cancelled.leader_keys == []
+        assert cancelled.count == nil
+      end
     end
 
-    test "SPC while already in leader mode cancels and restarts" do
-      # First SPC to enter leader mode
-      {:execute, {:leader_start, _node}, state} = Normal.handle_key({32, 0}, fresh_state())
-
-      # Second SPC should cancel and restart
-      {:execute, commands, new_state} = Normal.handle_key({32, 0}, state)
-      assert is_list(commands)
-      assert :leader_cancel in commands
-      assert new_state.leader_keys == ["SPC"]
-    end
-
-    test "unknown key during leader mode cancels leader" do
+    test "which-key pagination keeps leader state" do
       leader_trie = Defaults.leader_trie()
 
       state =
-        fresh_state()
-        |> Map.put(:leader_node, leader_trie)
-        |> Map.put(:leader_keys, ["SPC"])
+        fresh_state() |> Map.put(:leader_node, leader_trie) |> Map.put(:leader_keys, ["SPC"])
 
-      # Press a key that's not in the leader trie (e.g., 'z')
-      {:execute, :leader_cancel, new_state} = Normal.handle_key({?z, 0}, state)
-      assert new_state.leader_node == nil
-      assert new_state.leader_keys == []
-    end
-
-    test "escape during leader mode clears count" do
-      state =
-        fresh_state()
-        |> Map.put(:count, 3)
-        |> Map.put(:leader_node, Defaults.leader_trie())
-        |> Map.put(:leader_keys, ["SPC"])
-
-      {:execute, :leader_cancel, new_state} = Normal.handle_key({27, 0}, state)
-      assert new_state.count == nil
-      assert new_state.leader_node == nil
-    end
-
-    test "escape during leader mode clears pending" do
-      state =
-        fresh_state()
-        |> Map.put(:pending, :replace)
-        |> Map.put(:leader_node, Defaults.leader_trie())
-        |> Map.put(:leader_keys, ["SPC"])
-
-      {:execute, :leader_cancel, new_state} = Normal.handle_key({27, 0}, state)
-      assert new_state.pending == nil
-      assert new_state.leader_node == nil
-    end
-
-    test "unbound key during leader mode clears count" do
-      state =
-        fresh_state()
-        |> Map.put(:count, 5)
-        |> Map.put(:leader_node, Defaults.leader_trie())
-        |> Map.put(:leader_keys, ["SPC"])
-
-      # Press an unbound key (unlikely to be in leader trie)
-      {:execute, :leader_cancel, new_state} = Normal.handle_key({?Z, 0}, state)
-      assert new_state.count == nil
-    end
-
-    test "valid leader prefix key advances trie" do
-      # SPC f should be a prefix (file commands)
-      {:execute, {:leader_start, _node}, state} = Normal.handle_key({32, 0}, fresh_state())
-      result = Normal.handle_key({?f, 0}, state)
-
-      case result do
-        {:execute, {:leader_progress, sub_node}, new_state} ->
-          assert new_state.leader_node == sub_node
-          assert "f" in new_state.leader_keys
-
-        {:execute, [_cmd, :leader_cancel], new_state} ->
-          # If 'f' is a direct command rather than prefix, that's also valid
-          assert new_state.leader_node == nil
+      for {key, command} <- [{{?d, 0x02}, :whichkey_next_page}, {{?u, 0x02}, :whichkey_prev_page}] do
+        {:execute, ^command, new_state} = handle(key, state)
+        assert new_state.leader_node == leader_trie
+        assert new_state.leader_keys == ["SPC"]
       end
     end
   end
 
-  describe "which-key pagination during leader mode" do
-    test "Ctrl+D emits :whichkey_next_page without cancelling leader" do
-      leader_trie = Defaults.leader_trie()
-
-      state =
-        fresh_state()
-        |> Map.put(:leader_node, leader_trie)
-        |> Map.put(:leader_keys, ["SPC"])
-
-      {:execute, :whichkey_next_page, new_state} = Normal.handle_key({?d, 0x02}, state)
-      assert new_state.leader_node == leader_trie
-      assert new_state.leader_keys == ["SPC"]
-    end
-
-    test "Ctrl+U emits :whichkey_prev_page without cancelling leader" do
-      leader_trie = Defaults.leader_trie()
-
-      state =
-        fresh_state()
-        |> Map.put(:leader_node, leader_trie)
-        |> Map.put(:leader_keys, ["SPC"])
-
-      {:execute, :whichkey_prev_page, new_state} = Normal.handle_key({?u, 0x02}, state)
-      assert new_state.leader_node == leader_trie
-      assert new_state.leader_keys == ["SPC"]
-    end
-  end
-
-  describe "unknown keys" do
-    test "unknown key produces {:continue, state}" do
-      assert {:continue, state} = Normal.handle_key({?z, 0}, fresh_state())
-      assert state.count == nil
-    end
-
-    test "unknown key does not change state" do
-      s = %{count: 3}
-      {:continue, s2} = Normal.handle_key({?z, 0}, s)
-      assert s2 == s
-    end
-  end
-
-  describe "s/S/C/D shortcuts (#51)" do
-    test "s emits [{:delete_chars_at, 1}] and transitions to :insert" do
-      assert {:execute_then_transition, [{:delete_chars_at, 1}], :insert, _} =
-               Normal.handle_key({?s, 0}, fresh_state())
-    end
-
-    test "S emits [:change_line] and transitions to :insert" do
-      assert {:execute_then_transition, [:change_line], :insert, _} =
-               Normal.handle_key({?S, 0}, fresh_state())
-    end
-
-    test "C emits [{:delete_motion, :line_end}] and transitions to :insert" do
-      assert {:execute_then_transition, [{:delete_motion, :line_end}], :insert, _} =
-               Normal.handle_key({?C, 0}, fresh_state())
-    end
-
-    test "D emits {:delete_motion, :line_end} and stays in normal mode" do
-      assert {:execute, {:delete_motion, :line_end}, _} =
-               Normal.handle_key({?D, 0}, fresh_state())
-    end
-  end
-
-  describe "R enters replace mode (#52)" do
-    test "R transitions to :replace mode" do
-      assert {:transition, :replace, state} = Normal.handle_key({?R, 0}, fresh_state())
-      assert %Minga.Mode.ReplaceState{} = state
-    end
-
-    test "R mode state has empty original_chars stack" do
-      {:transition, :replace, state} = Normal.handle_key({?R, 0}, fresh_state())
-      assert state.original_chars == []
-    end
-  end
-
-  describe "> and < as indent/dedent operators (#57)" do
-    test "> transitions to :operator_pending with :indent operator" do
-      {:transition, :operator_pending, state} = Normal.handle_key({?>, 0}, fresh_state())
-      assert state.operator == :indent
-      assert state.op_count == 1
-    end
-
-    test "< transitions to :operator_pending with :dedent operator" do
-      {:transition, :operator_pending, state} = Normal.handle_key({?<, 0}, fresh_state())
-      assert state.operator == :dedent
-      assert state.op_count == 1
-    end
-
-    test "3> transitions to :operator_pending with :indent and op_count 3" do
-      {:continue, s1} = Normal.handle_key({?3, 0}, fresh_state())
-      {:transition, :operator_pending, state} = Normal.handle_key({?>, 0}, s1)
-      assert state.operator == :indent
-      assert state.op_count == 3
-    end
-
-    test "3< transitions to :operator_pending with :dedent and op_count 3" do
-      {:continue, s1} = Normal.handle_key({?3, 0}, fresh_state())
-      {:transition, :operator_pending, state} = Normal.handle_key({?<, 0}, s1)
-      assert state.operator == :dedent
-      assert state.op_count == 3
-    end
-
-    test "pending_shift field no longer exists on Mode.State" do
-      state = fresh_state()
-      refute Map.has_key?(state, :pending_shift)
-    end
-  end
-
-  describe "describe-key (SPC h k)" do
-    test "describe_key captures a normal key and emits describe_key_result" do
-      state = %{fresh_state() | describe_key: %Minga.Mode.DescribeKey{}}
-      result = Normal.handle_key({?j, 0}, state)
-
-      assert {:execute, {:describe_key_result, "j", :move_down, "Move cursor down"}, new_state} =
-               result
-
-      assert new_state.describe_key == nil
-    end
-
-    test "describe_key on unbound key emits describe_key_not_found" do
-      state = %{fresh_state() | describe_key: %Minga.Mode.DescribeKey{}}
-      # Use a key that has no normal binding
-      result = Normal.handle_key({?Z, 0}, state)
-
-      assert {:execute, {:describe_key_not_found, "Z"}, new_state} = result
-      assert new_state.describe_key == nil
-    end
-
-    test "Escape cancels describe-key" do
-      state = %{fresh_state() | describe_key: %Minga.Mode.DescribeKey{}}
-      assert {:continue, new_state} = Normal.handle_key({27, 0}, state)
-      assert new_state.describe_key == nil
-    end
-
-    test "SPC in describe-key starts leader trie walk" do
-      state = %{fresh_state() | describe_key: %Minga.Mode.DescribeKey{}}
-      assert {:continue, new_state} = Normal.handle_key({32, 0}, state)
-      assert new_state.describe_key.leader_node != nil
-      assert new_state.describe_key.keys == ["SPC"]
-    end
-
-    test "SPC f f in describe-key resolves to find_file" do
+  describe "describe-key" do
+    test "normal, unbound, escape, and leader describe-key paths" do
       state = %{fresh_state() | describe_key: %Minga.Mode.DescribeKey{}}
 
-      # SPC → start leader walk
-      {:continue, s1} = Normal.handle_key({32, 0}, state)
-      # f → prefix (stored reversed)
-      {:continue, s2} = Normal.handle_key({?f, 0}, s1)
+      assert {:execute, {:describe_key_result, "j", :move_down, "Move cursor down"},
+              %{describe_key: nil}} = handle({?j, 0}, state)
+
+      assert {:execute, {:describe_key_not_found, "Z"}, %{describe_key: nil}} =
+               handle({?Z, 0}, state)
+
+      assert {:continue, %{describe_key: nil}} = handle({27, 0}, state)
+
+      {:continue, s1} = handle({32, 0}, state)
+      assert s1.describe_key.leader_node != nil
+      assert s1.describe_key.keys == ["SPC"]
+
+      {:continue, s2} = handle({?f, 0}, s1)
       assert s2.describe_key.keys == ["f", "SPC"]
-      # f → command
-      {:execute, {:describe_key_result, "SPC f f", :find_file, "Find file"}, s3} =
-        Normal.handle_key({?f, 0}, s2)
 
-      assert s3.describe_key == nil
-    end
+      assert {:execute, {:describe_key_result, "SPC f f", :find_file, "Find file"},
+              %{describe_key: nil}} = handle({?f, 0}, s2)
 
-    test "SPC z in describe-key reports not found" do
-      state = %{fresh_state() | describe_key: %Minga.Mode.DescribeKey{}}
+      {:continue, leader} = handle({32, 0}, state)
 
-      {:continue, s1} = Normal.handle_key({32, 0}, state)
-
-      {:execute, {:describe_key_not_found, "SPC z"}, s2} =
-        Normal.handle_key({?z, 0}, s1)
-
-      assert s2.describe_key == nil
+      assert {:execute, {:describe_key_not_found, "SPC z"}, %{describe_key: nil}} =
+               handle({?z, 0}, leader)
     end
   end
 
-  describe "dot repeat (#49)" do
-    test ". emits {:dot_repeat, nil} with no count" do
-      assert {:execute, {:dot_repeat, nil}, _} = Normal.handle_key({?., 0}, fresh_state())
-    end
-
-    test ". emits {:dot_repeat, 3} with count prefix 3" do
-      {:continue, s1} = Normal.handle_key({?3, 0}, fresh_state())
-      assert {:execute, {:dot_repeat, 3}, state} = Normal.handle_key({?., 0}, s1)
-      # Count is consumed — reset to nil
-      assert state.count == nil
-    end
-
-    test ". emits {:dot_repeat, 15} with count prefix 15" do
-      {:continue, s1} = Normal.handle_key({?1, 0}, fresh_state())
-      {:continue, s2} = Normal.handle_key({?5, 0}, s1)
-      assert {:execute, {:dot_repeat, 15}, _} = Normal.handle_key({?., 0}, s2)
-    end
+  defp handle_count(count) do
+    count
+    |> Integer.to_string()
+    |> String.to_charlist()
+    |> Enum.reduce(fresh_state(), fn digit, state ->
+      {:continue, next_state} = handle({digit, 0}, state)
+      next_state
+    end)
   end
 end

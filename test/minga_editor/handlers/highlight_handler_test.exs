@@ -1,23 +1,18 @@
 defmodule MingaEditor.Handlers.HighlightHandlerTest do
   @moduledoc """
   Pure-function tests for `MingaEditor.Handlers.HighlightHandler`.
-
-  Uses `RenderPipeline.TestHelpers.base_state/1` to construct state
-  without starting a GenServer. Each test calls `handle/2` directly
-  and asserts on the returned `{state, effects}` tuple.
   """
 
   use ExUnit.Case, async: true
 
   alias MingaEditor.Handlers.HighlightHandler
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.UI.Highlight
   alias MingaEditor.Window
   alias MingaEditor.Workspace.State, as: WorkspaceState
-  alias MingaEditor.UI.Highlight
 
   import MingaEditor.RenderPipeline.TestHelpers
 
-  # Helper to register a buffer_id mapping in the highlight state.
   @spec with_buffer_id(EditorState.t(), pid(), non_neg_integer()) :: EditorState.t()
   defp with_buffer_id(state, pid, buffer_id) do
     hl = state.workspace.highlight
@@ -32,18 +27,16 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
     %{state | workspace: %{state.workspace | highlight: updated_hl}}
   end
 
-  # Helper to put a highlight entry for a buffer.
   @spec with_highlight(EditorState.t(), pid()) :: EditorState.t()
   defp with_highlight(state, pid) do
     hl = state.workspace.highlight
     theme = state.theme
-    syntax = theme.syntax
 
     buf_hl = %Highlight{
       version: 0,
       spans: {},
       capture_names: {},
-      theme: syntax,
+      theme: theme.syntax,
       face_registry: MingaEditor.UI.Face.Registry.from_theme(theme)
     }
 
@@ -51,467 +44,308 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
     %{state | workspace: %{state.workspace | highlight: updated_hl}}
   end
 
-  describe "setup_highlight" do
-    test "returns request_semantic_tokens effect" do
-      state = base_state()
-      {_state, effects} = HighlightHandler.handle(state, :setup_highlight)
-      assert {:request_semantic_tokens} in effects
-    end
-  end
+  describe "setup and parser lifecycle" do
+    test "setup, parser status, eviction, and catch-all messages return the expected effects" do
+      {_, setup_effects} = HighlightHandler.handle(base_state(), :setup_highlight)
+      assert {:request_semantic_tokens} in setup_effects
 
-  describe "highlight_names" do
-    test "unknown buffer_id returns log warning effect" do
-      state = base_state()
+      {crashed, effects} =
+        HighlightHandler.handle(base_state(), {:minga_highlight, :parser_crashed})
 
-      {new_state, effects} =
-        HighlightHandler.handle(state, {:minga_highlight, {:highlight_names, 999, ["keyword"]}})
-
-      assert new_state == state
-
-      assert Enum.any?(effects, fn
-               {:log, :editor, :warning, msg} -> String.contains?(msg, "999")
-               _ -> false
-             end)
-    end
-
-    test "active buffer delegates to HighlightEvents" do
-      state = base_state()
-      buf = state.workspace.buffers.active
-      state = with_buffer_id(state, buf, 1)
-      state = with_highlight(state, buf)
-
-      {_new_state, effects} =
-        HighlightHandler.handle(state, {:minga_highlight, {:highlight_names, 1, ["keyword"]}})
-
-      # Should succeed without errors; no render effect for names
+      assert crashed.parser_status == :restarting
       assert effects == []
-    end
 
-    test "non-active buffer stores names in highlights map" do
-      state = base_state()
-      # Create a secondary buffer
-      {:ok, other_buf} = Minga.Buffer.Process.start_link(content: "other")
-      state = with_buffer_id(state, other_buf, 2)
-      state = with_highlight(state, other_buf)
+      restart_base = base_state()
 
-      {new_state, effects} =
-        HighlightHandler.handle(state, {:minga_highlight, {:highlight_names, 2, ["string"]}})
+      restarted_state =
+        restart_base |> with_highlight(active_buffer(restart_base)) |> mark_parser_restarting()
 
-      assert effects == []
-      # Verify names were stored
-      other_hl = new_state.workspace.highlight.highlights[other_buf]
-      assert other_hl != nil
-    end
+      {restarted, effects} =
+        HighlightHandler.handle(restarted_state, {:minga_highlight, :parser_restarted})
 
-    test "works with :minga_input tag" do
-      state = base_state()
-      buf = state.workspace.buffers.active
-      state = with_buffer_id(state, buf, 1)
-      state = with_highlight(state, buf)
+      assert restarted.parser_status == :available
+      assert restarted.workspace.highlight.version == 0
 
-      {_state, _effects} =
-        HighlightHandler.handle(state, {:minga_input, {:highlight_names, 1, ["keyword"]}})
-    end
-  end
+      assert Enum.all?(restarted.workspace.highlight.highlights, fn {_pid, hl} ->
+               hl.version == 0
+             end)
 
-  describe "injection_ranges" do
-    test "unknown buffer_id returns log warning" do
-      state = base_state()
+      assert {:log_message, "Parser restarted, syntax highlighting recovered"} in effects
 
-      {new_state, effects} =
-        HighlightHandler.handle(state, {:minga_highlight, {:injection_ranges, 999, []}})
+      {unavailable, effects} =
+        HighlightHandler.handle(base_state(), {:minga_highlight, :parser_gave_up})
 
-      assert new_state == state
+      assert unavailable.parser_status == :unavailable
 
       assert Enum.any?(effects, fn
-               {:log, :editor, :warning, _} -> true
+               {:log_message, msg} -> String.contains?(msg, "syntax highlighting disabled")
                _ -> false
              end)
+
+      {_, headless_effects} = HighlightHandler.handle(base_state(), :evict_parser_trees)
+      refute {:evict_parser_trees_timer} in headless_effects
+
+      tui_state = %{base_state() | backend: :tui}
+      {_, tui_effects} = HighlightHandler.handle(tui_state, :evict_parser_trees)
+      assert {:evict_parser_trees_timer} in tui_effects
+
+      catch_all_state = base_state()
+
+      assert {^catch_all_state, []} =
+               HighlightHandler.handle(catch_all_state, {:minga_highlight, :unknown_event})
     end
 
-    test "valid buffer stores ranges" do
-      state = base_state()
-      buf = state.workspace.buffers.active
-      state = with_buffer_id(state, buf, 1)
-      ranges = [%{start: 0, end: 10, language: "elixir"}]
+    test "grammar and port log messages are translated to log effects" do
+      success_state = base_state()
 
-      {new_state, effects} =
-        HighlightHandler.handle(state, {:minga_highlight, {:injection_ranges, 1, ranges}})
+      assert {^success_state, [{:log, :editor, :info, "Grammar loaded: elixir"}]} =
+               HighlightHandler.handle(
+                 success_state,
+                 {:minga_highlight, {:grammar_loaded, true, "elixir"}}
+               )
 
-      assert effects == []
-      assert new_state.workspace.injection_ranges[buf] == ranges
-    end
-  end
+      failure_state = base_state()
 
-  describe "language_at_response" do
-    test "is a no-op" do
-      state = base_state()
+      assert {^failure_state, [{:log, :editor, :warning, "Grammar failed to load: unknown"}]} =
+               HighlightHandler.handle(
+                 failure_state,
+                 {:minga_highlight, {:grammar_loaded, false, "unknown"}}
+               )
 
-      {new_state, effects} =
-        HighlightHandler.handle(state, {:minga_highlight, {:language_at_response, 1, "elixir"}})
-
-      assert new_state == state
-      assert effects == []
-    end
-  end
-
-  describe "highlight_spans" do
-    test "unknown buffer_id returns log warning" do
-      state = base_state()
-
-      {new_state, effects} =
-        HighlightHandler.handle(state, {:minga_highlight, {:highlight_spans, 999, 1, []}})
-
-      assert new_state == state
-
-      assert Enum.any?(effects, fn
-               {:log, :editor, :warning, _} -> true
-               _ -> false
-             end)
-    end
-
-    test "active buffer returns render and prettify effects" do
-      state = base_state()
-      buf = state.workspace.buffers.active
-      state = with_buffer_id(state, buf, 1)
-      state = with_highlight(state, buf)
-
-      {_new_state, effects} =
-        HighlightHandler.handle(state, {:minga_highlight, {:highlight_spans, 1, 1, []}})
-
-      assert :render in effects
-
-      assert Enum.any?(effects, fn
-               {:prettify_symbols, _} -> true
-               _ -> false
-             end)
-    end
-
-    test "non-active buffer stores spans" do
-      state = base_state()
-      {:ok, other_buf} = Minga.Buffer.Process.start_link(content: "other")
-      state = with_buffer_id(state, other_buf, 2)
-      state = with_highlight(state, other_buf)
-
-      {_new_state, effects} =
-        HighlightHandler.handle(state, {:minga_highlight, {:highlight_spans, 2, 1, []}})
-
-      # Not visible in any window, so no render
-      assert effects == []
-    end
-  end
-
-  describe "conceal_spans" do
-    test "unknown buffer_id returns log warning" do
-      state = base_state()
-
-      {_state, effects} =
-        HighlightHandler.handle(state, {:minga_highlight, {:conceal_spans, 999, 1, []}})
-
-      assert Enum.any?(effects, fn
-               {:log, :editor, :warning, _} -> true
-               _ -> false
-             end)
-    end
-
-    test "valid buffer returns conceal_spans effect" do
-      state = base_state()
-      buf = state.workspace.buffers.active
-      state = with_buffer_id(state, buf, 1)
-      spans = [%{start_byte: 0, end_byte: 5, replacement: ""}]
-
-      {_state, effects} =
-        HighlightHandler.handle(state, {:minga_highlight, {:conceal_spans, 1, 1, spans}})
-
-      assert {:conceal_spans, ^buf, ^spans} =
-               Enum.find(effects, &match?({:conceal_spans, _, _}, &1))
-    end
-  end
-
-  describe "fold_ranges" do
-    test "unknown buffer_id returns log warning" do
-      state = base_state()
-
-      {_state, effects} =
-        HighlightHandler.handle(state, {:minga_highlight, {:fold_ranges, 999, 1, []}})
-
-      assert Enum.any?(effects, fn
-               {:log, :editor, :warning, _} -> true
-               _ -> false
-             end)
-    end
-
-    test "active buffer sets fold ranges on the window" do
-      state = base_state()
-      buf = state.workspace.buffers.active
-      state = with_buffer_id(state, buf, 1)
-
-      ranges = [{0, 5}, {10, 15}]
-
-      {new_state, _effects} =
-        HighlightHandler.handle(state, {:minga_highlight, {:fold_ranges, 1, 1, ranges}})
-
-      win_id = new_state.workspace.windows.active
-      window = Map.get(new_state.workspace.windows.map, win_id)
-      assert length(window.fold_ranges) == 2
-    end
-
-    test "non-active buffer is a no-op" do
-      state = base_state()
-      {:ok, other_buf} = Minga.Buffer.Process.start_link(content: "other")
-      state = with_buffer_id(state, other_buf, 2)
-
-      {new_state, effects} =
-        HighlightHandler.handle(state, {:minga_highlight, {:fold_ranges, 2, 1, [{0, 5}]}})
-
-      assert new_state == state
-      assert effects == []
-    end
-  end
-
-  describe "textobject_positions" do
-    test "unknown buffer_id returns log warning" do
-      state = base_state()
-
-      {_state, effects} =
-        HighlightHandler.handle(state, {:minga_highlight, {:textobject_positions, 999, 1, %{}}})
-
-      assert Enum.any?(effects, fn
-               {:log, :editor, :warning, _} -> true
-               _ -> false
-             end)
-    end
-
-    test "active buffer sets positions on the window" do
-      state = base_state()
-      buf = state.workspace.buffers.active
-      state = with_buffer_id(state, buf, 1)
-
-      positions = %{function: [{0, 5}]}
-
-      {new_state, effects} =
+      {_, parser_effects} =
         HighlightHandler.handle(
-          state,
-          {:minga_highlight, {:textobject_positions, 1, 1, positions}}
+          base_state(),
+          {:minga_highlight, {:log_message, :info, "test msg"}}
         )
 
-      assert effects == []
-      win_id = new_state.workspace.windows.active
-      window = Map.get(new_state.workspace.windows.map, win_id)
-      assert window.textobject_positions == positions
-    end
+      assert {:log_message, "[PARSER/info] test msg"} in parser_effects
 
-    test "non-active buffer is a no-op" do
-      state = base_state()
-      {:ok, other_buf} = Minga.Buffer.Process.start_link(content: "other")
-      state = with_buffer_id(state, other_buf, 2)
+      {_, input_effects} =
+        HighlightHandler.handle(base_state(), {:minga_input, {:log_message, :info, "test msg"}})
 
-      {new_state, effects} =
-        HighlightHandler.handle(state, {:minga_highlight, {:textobject_positions, 2, 1, %{}}})
-
-      assert new_state == state
-      assert effects == []
-    end
-  end
-
-  describe "document_symbols" do
-    test "unknown buffer_id returns log warning" do
-      state = base_state()
-
-      {_state, effects} =
-        HighlightHandler.handle(state, {:minga_highlight, {:document_symbols, 999, 1, []}})
-
-      assert Enum.any?(effects, fn
-               {:log, :editor, :warning, msg} -> String.contains?(msg, "document_symbols")
-               _ -> false
-             end)
-    end
-
-    test "active buffer sets document symbols on the window" do
-      state = base_state()
-      buf = state.workspace.buffers.active
-      state = with_buffer_id(state, buf, 1)
-      symbols = [%Minga.Language.Symbol{kind: :function, name: "run", range: {0, 0, 3, 3}}]
-
-      {new_state, effects} =
-        HighlightHandler.handle(state, {:minga_highlight, {:document_symbols, 1, 1, symbols}})
-
-      assert effects == []
-      win_id = new_state.workspace.windows.active
-      window = Map.get(new_state.workspace.windows.map, win_id)
-      assert window.document_symbols == symbols
-    end
-
-    test "updates a visible matching window even when another buffer is active" do
-      state = base_state()
-      first_buf = state.workspace.buffers.active
-      {:ok, other_buf} = Minga.Buffer.Process.start_link(content: "other")
-      stale_symbols = [%Minga.Language.Symbol{kind: :function, name: "old", range: {0, 0, 0, 3}}]
-      fresh_symbols = [%Minga.Language.Symbol{kind: :function, name: "new", range: {0, 0, 0, 3}}]
-
-      state = with_buffer_id(state, first_buf, 1)
-      win_id = state.workspace.windows.active
-
-      state =
-        EditorState.update_workspace(state, fn ws ->
-          WorkspaceState.update_window(ws, win_id, fn window ->
-            Window.set_document_symbols(window, stale_symbols)
-          end)
-        end)
-
-      second_window = Window.new(2, other_buf, 24, 80)
-
-      workspace =
-        %{state.workspace | buffers: %{state.workspace.buffers | active: other_buf}}
-        |> then(fn ws ->
-          %{
-            ws
-            | windows: %{
-                ws.windows
-                | map: Map.put(ws.windows.map, 2, second_window),
-                  active: 2,
-                  next_id: 3
-              }
-          }
-        end)
-
-      state = %{state | workspace: workspace}
-
-      {new_state, effects} =
-        HighlightHandler.handle(
-          state,
-          {:minga_highlight, {:document_symbols, 1, 1, fresh_symbols}}
-        )
-
-      assert effects == []
-      assert Map.fetch!(new_state.workspace.windows.map, 1).document_symbols == fresh_symbols
-      assert Map.fetch!(new_state.workspace.windows.map, 2).document_symbols == []
-    end
-  end
-
-  describe "grammar_loaded" do
-    test "success returns info log effect" do
-      state = base_state()
-
-      {new_state, effects} =
-        HighlightHandler.handle(state, {:minga_highlight, {:grammar_loaded, true, "elixir"}})
-
-      assert new_state == state
-      assert {:log, :editor, :info, "Grammar loaded: elixir"} in effects
-    end
-
-    test "failure returns warning log effect" do
-      state = base_state()
-
-      {new_state, effects} =
-        HighlightHandler.handle(state, {:minga_highlight, {:grammar_loaded, false, "unknown"}})
-
-      assert new_state == state
-      assert {:log, :editor, :warning, "Grammar failed to load: unknown"} in effects
-    end
-  end
-
-  describe "log_message" do
-    test "from parser port prefixes with PARSER" do
-      state = base_state()
-
-      {_state, effects} =
-        HighlightHandler.handle(state, {:minga_highlight, {:log_message, :info, "test msg"}})
-
-      assert {:log_message, "[PARSER/info] test msg"} in effects
-    end
-
-    test "from renderer port prefixes with frontend type" do
-      state = base_state()
-
-      {_state, effects} =
-        HighlightHandler.handle(state, {:minga_input, {:log_message, :info, "test msg"}})
-
-      assert Enum.any?(effects, fn
+      assert Enum.any?(input_effects, fn
                {:log_message, msg} -> String.contains?(msg, "test msg")
                _ -> false
              end)
     end
   end
 
-  describe "parser_crashed" do
-    test "sets parser_status to :restarting" do
+  describe "unknown buffer ids" do
+    test "highlight messages for missing buffer ids log warnings without changing state" do
       state = base_state()
-      {new_state, effects} = HighlightHandler.handle(state, {:minga_highlight, :parser_crashed})
-      assert new_state.parser_status == :restarting
-      assert effects == []
+
+      messages = [
+        {:minga_highlight, {:highlight_names, 999, ["keyword"]}},
+        {:minga_highlight, {:injection_ranges, 999, []}},
+        {:minga_highlight, {:highlight_spans, 999, 1, []}},
+        {:minga_highlight, {:conceal_spans, 999, 1, []}},
+        {:minga_highlight, {:fold_ranges, 999, 1, []}},
+        {:minga_highlight, {:textobject_positions, 999, 1, %{}}},
+        {:minga_highlight, {:document_symbols, 999, 1, []}}
+      ]
+
+      for message <- messages do
+        {new_state, effects} = HighlightHandler.handle(state, message)
+        assert new_state == state
+        assert warning_effect?(effects)
+      end
     end
   end
 
-  describe "parser_restarted" do
-    test "resets highlight versions and sets parser_status to :available" do
+  describe "highlight metadata" do
+    test "highlight names support active, non-active, and input-tagged buffers" do
       state = base_state()
-      buf = state.workspace.buffers.active
-      state = with_highlight(state, buf)
+      buf = active_buffer(state)
+      state = state |> with_buffer_id(buf, 1) |> with_highlight(buf)
 
-      # Set a non-zero version
-      hl = state.workspace.highlight
-      buf_hl = Map.get(hl.highlights, buf)
+      assert {_, []} =
+               HighlightHandler.handle(
+                 state,
+                 {:minga_highlight, {:highlight_names, 1, ["keyword"]}}
+               )
 
-      updated_hl = %{
-        hl
-        | version: 5,
-          highlights: Map.put(hl.highlights, buf, %{buf_hl | version: 3})
-      }
+      assert {_, []} =
+               HighlightHandler.handle(state, {:minga_input, {:highlight_names, 1, ["keyword"]}})
 
-      state = %{
-        state
-        | workspace: %{state.workspace | highlight: updated_hl},
-          parser_status: :restarting
-      }
+      {state, other_buf} = state_with_other_buffer(base_state(), 2)
+      state = with_highlight(state, other_buf)
 
-      {new_state, effects} = HighlightHandler.handle(state, {:minga_highlight, :parser_restarted})
-      assert new_state.parser_status == :available
-      assert new_state.workspace.highlight.version == 0
-      # All per-buffer highlights should have version 0
-      Enum.each(new_state.workspace.highlight.highlights, fn {_pid, bhl} ->
-        assert bhl.version == 0
+      {new_state, []} =
+        HighlightHandler.handle(state, {:minga_highlight, {:highlight_names, 2, ["string"]}})
+
+      assert new_state.workspace.highlight.highlights[other_buf] != nil
+    end
+
+    test "injection ranges and language responses update only the public highlight state" do
+      state = base_state()
+      buf = active_buffer(state)
+      state = with_buffer_id(state, buf, 1)
+      ranges = [%{start: 0, end: 10, language: "elixir"}]
+
+      {new_state, []} =
+        HighlightHandler.handle(state, {:minga_highlight, {:injection_ranges, 1, ranges}})
+
+      assert new_state.workspace.injection_ranges[buf] == ranges
+
+      assert {^new_state, []} =
+               HighlightHandler.handle(
+                 new_state,
+                 {:minga_highlight, {:language_at_response, 1, "elixir"}}
+               )
+    end
+
+    test "highlight and conceal spans produce visible-buffer effects and skip invisible buffers" do
+      state = base_state()
+      buf = active_buffer(state)
+      state = state |> with_buffer_id(buf, 1) |> with_highlight(buf)
+
+      {_, effects} =
+        HighlightHandler.handle(state, {:minga_highlight, {:highlight_spans, 1, 1, []}})
+
+      assert :render in effects
+      assert Enum.any?(effects, &match?({:prettify_symbols, _}, &1))
+
+      spans = [%{start_byte: 0, end_byte: 5, replacement: ""}]
+
+      {_, effects} =
+        HighlightHandler.handle(state, {:minga_highlight, {:conceal_spans, 1, 1, spans}})
+
+      assert {:conceal_spans, buf, spans} in effects
+
+      {state, other_buf} = state_with_other_buffer(base_state(), 2)
+      state = with_highlight(state, other_buf)
+
+      assert {_, []} =
+               HighlightHandler.handle(state, {:minga_highlight, {:highlight_spans, 2, 1, []}})
+    end
+  end
+
+  describe "window metadata" do
+    test "fold ranges and textobject positions update the active window and ignore invisible buffers" do
+      state = base_state()
+      buf = active_buffer(state)
+      state = with_buffer_id(state, buf, 1)
+
+      {new_state, _effects} =
+        HighlightHandler.handle(
+          state,
+          {:minga_highlight, {:fold_ranges, 1, 1, [{0, 5}, {10, 15}]}}
+        )
+
+      assert length(active_window(new_state).fold_ranges) == 2
+
+      positions = %{function: [{0, 5}]}
+
+      {new_state, []} =
+        HighlightHandler.handle(
+          new_state,
+          {:minga_highlight, {:textobject_positions, 1, 1, positions}}
+        )
+
+      assert active_window(new_state).textobject_positions == positions
+
+      {other_state, _other_buf} = state_with_other_buffer(base_state(), 2)
+
+      assert {^other_state, []} =
+               HighlightHandler.handle(
+                 other_state,
+                 {:minga_highlight, {:fold_ranges, 2, 1, [{0, 5}]}}
+               )
+
+      assert {^other_state, []} =
+               HighlightHandler.handle(
+                 other_state,
+                 {:minga_highlight, {:textobject_positions, 2, 1, %{}}}
+               )
+    end
+
+    test "document symbols update active and visible matching windows" do
+      state = base_state()
+      buf = active_buffer(state)
+      state = with_buffer_id(state, buf, 1)
+      symbols = [%Minga.Language.Symbol{kind: :function, name: "run", range: {0, 0, 3, 3}}]
+
+      {new_state, []} =
+        HighlightHandler.handle(state, {:minga_highlight, {:document_symbols, 1, 1, symbols}})
+
+      assert active_window(new_state).document_symbols == symbols
+
+      visible_state = state_with_visible_inactive_buffer_symbols(state)
+      fresh_symbols = [%Minga.Language.Symbol{kind: :function, name: "new", range: {0, 0, 0, 3}}]
+
+      {updated, []} =
+        HighlightHandler.handle(
+          visible_state,
+          {:minga_highlight, {:document_symbols, 1, 1, fresh_symbols}}
+        )
+
+      assert Map.fetch!(updated.workspace.windows.map, 1).document_symbols == fresh_symbols
+      assert Map.fetch!(updated.workspace.windows.map, 2).document_symbols == []
+    end
+  end
+
+  defp active_buffer(state), do: state.workspace.buffers.active
+
+  defp active_window(state),
+    do: Map.fetch!(state.workspace.windows.map, state.workspace.windows.active)
+
+  defp state_with_other_buffer(state, buffer_id) do
+    {:ok, other_buf} = Minga.Buffer.Process.start_link(content: "other")
+    {with_buffer_id(state, other_buf, buffer_id), other_buf}
+  end
+
+  defp warning_effect?(effects) do
+    Enum.any?(effects, fn
+      {:log, :editor, :warning, _message} -> true
+      _ -> false
+    end)
+  end
+
+  defp mark_parser_restarting(state) do
+    buf = active_buffer(state)
+    hl = state.workspace.highlight
+    buf_hl = Map.fetch!(hl.highlights, buf)
+
+    updated_hl = %{
+      hl
+      | version: 5,
+        highlights: Map.put(hl.highlights, buf, %{buf_hl | version: 3})
+    }
+
+    %{state | workspace: %{state.workspace | highlight: updated_hl}, parser_status: :restarting}
+  end
+
+  defp state_with_visible_inactive_buffer_symbols(state) do
+    first_buf = active_buffer(state)
+    {:ok, other_buf} = Minga.Buffer.Process.start_link(content: "other")
+    stale_symbols = [%Minga.Language.Symbol{kind: :function, name: "old", range: {0, 0, 0, 3}}]
+
+    state = with_buffer_id(state, first_buf, 1)
+    win_id = state.workspace.windows.active
+
+    state =
+      EditorState.update_workspace(state, fn ws ->
+        WorkspaceState.update_window(ws, win_id, fn window ->
+          Window.set_document_symbols(window, stale_symbols)
+        end)
       end)
 
-      assert {:log_message, "Parser restarted, syntax highlighting recovered"} in effects
-    end
-  end
+    second_window = Window.new(2, other_buf, 24, 80)
 
-  describe "parser_gave_up" do
-    test "sets parser_status to :unavailable with log message" do
-      state = base_state()
-      {new_state, effects} = HighlightHandler.handle(state, {:minga_highlight, :parser_gave_up})
-      assert new_state.parser_status == :unavailable
+    workspace =
+      %{state.workspace | buffers: %{state.workspace.buffers | active: other_buf}}
+      |> then(fn ws ->
+        %{
+          ws
+          | windows: %{
+              ws.windows
+              | map: Map.put(ws.windows.map, 2, second_window),
+                active: 2,
+                next_id: 3
+            }
+        }
+      end)
 
-      assert Enum.any?(effects, fn
-               {:log_message, msg} -> String.contains?(msg, "syntax highlighting disabled")
-               _ -> false
-             end)
-    end
-  end
-
-  describe "evict_parser_trees" do
-    test "returns timer effect in non-headless mode" do
-      state = base_state()
-      state = %{state | backend: :tui}
-      {_new_state, effects} = HighlightHandler.handle(state, :evict_parser_trees)
-      assert {:evict_parser_trees_timer} in effects
-    end
-
-    test "returns no timer effect in headless mode" do
-      state = base_state()
-      # base_state defaults to headless
-      {_new_state, effects} = HighlightHandler.handle(state, :evict_parser_trees)
-      refute {:evict_parser_trees_timer} in effects
-    end
-  end
-
-  describe "catch-all" do
-    test "unknown messages return no-op" do
-      state = base_state()
-      {new_state, effects} = HighlightHandler.handle(state, {:minga_highlight, :unknown_event})
-      assert new_state == state
-      assert effects == []
-    end
+    %{state | workspace: workspace}
   end
 end

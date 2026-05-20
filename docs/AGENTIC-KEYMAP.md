@@ -17,7 +17,7 @@ See `Minga.Keymap.Scope` for the behaviour contract, `Minga.Input.Scoped` for th
 ## Design Principles
 
 1. **Sacred vim motions stay.** j/k, gg/G, Ctrl-d/u, /, n/N work exactly as a vim user expects.
-2. **Editing keys are repurposed.** i/a focus the input (semantic parallel to "enter insert mode"). o toggles collapse (magit precedent). y copies (yank = copy). q closes (Doom special buffer convention).
+2. **Editing keys are repurposed.** i/a focus the input (semantic parallel to "enter insert mode"). o toggles collapse (magit precedent). y copies (yank = copy). q/Esc returns to the editor context for the same workspace.
 3. **Standard prefixes for multi-key sequences.** `z` for folds, `]`/`[` for next/prev navigation, `g` for go-to actions.
 4. **SPC leader always works.** In navigation mode, SPC delegates to the mode FSM so leader sequences and which-key popups function normally.
 
@@ -115,8 +115,8 @@ See [Agent tool approval](CONFIGURATION.md#agent-tool-approval) for how to confi
 
 | Key | Action |
 |-----|--------|
-| `q` | Return to editor |
-| `Esc` | Return to editor (after dismissing transient UI) |
+| `q` | Return to the recorded editor context for this workspace |
+| `Esc` | Dismiss transient UI, then return to the recorded editor context |
 | `?` | Show help overlay |
 
 ### Search
@@ -135,7 +135,7 @@ See [Agent tool approval](CONFIGURATION.md#agent-tool-approval) for how to confi
 | `SPC a s` | Stop / abort agent |
 | `SPC a m` | Pick agent model |
 | `SPC a T` | Cycle thinking level |
-| `SPC a t` | Toggle agentic view (return to editor) |
+| `SPC a t` | Toggle agentic view (return to editor context) |
 
 ## Chat Input Mode
 
@@ -161,7 +161,7 @@ Active when the file viewer panel has focus (after pressing `Tab`).
 | `Ctrl-d` / `Ctrl-u` | Scroll half page |
 | `gg` / `G` | Top / bottom |
 | `Tab` | Switch focus back to chat |
-| `q` / `Esc` | Return to editor |
+| `q` / `Esc` | Return to editor context |
 | `}` / `{` | Grow / shrink chat panel |
 | `=` | Reset panel split |
 

@@ -12,6 +12,7 @@ defmodule MingaEditor.Shell.Board.InputTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
+  alias MingaEditor.Agent.UIState
   alias MingaEditor.Viewport
   alias MingaEditor.Window.Content
   alias MingaEditor.Shell.Board
@@ -55,6 +56,44 @@ defmodule MingaEditor.Shell.Board.InputTest do
     state = editor_with_board(card_count)
     board = BoardState.zoom_into(state.shell_state, card_id, %{fake: :workspace})
     %{state | shell_state: board}
+  end
+
+  defp zoomed_board_prompt_state(mode, prompt_text) do
+    fake_session = fake_session_pid()
+    {:ok, agent_buf} = Minga.Buffer.start_link(content: "")
+
+    board =
+      BoardState.new()
+      |> then(fn b ->
+        {b, _card} = BoardState.create_card(b, task: "Agent 1", session: fake_session)
+        b
+      end)
+      |> Map.put(:agent, %AgentState{buffer: agent_buf})
+
+    state = %EditorState{
+      port_manager: self(),
+      shell: Board,
+      shell_state: board,
+      workspace: %MingaEditor.Workspace.State{viewport: Viewport.new(24, 80)},
+      focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
+    }
+
+    {:handled, state} = BoardInput.handle_key(state, @enter, 0)
+
+    mode_state =
+      case mode do
+        :normal -> nil
+        :visual -> %Minga.Mode.VisualState{visual_type: :char}
+        :operator_pending -> Minga.Mode.OperatorPendingState.new(:delete)
+      end
+
+    state
+    |> EditorState.transition_mode(mode, mode_state)
+    |> AgentAccess.update_agent_ui(fn ui ->
+      ui
+      |> UIState.set_input_focused(true)
+      |> UIState.set_prompt_text(prompt_text)
+    end)
   end
 
   defp stop_session(pid) when is_pid(pid) do
@@ -199,7 +238,8 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
     test "first-time zoom matches re-zoom shape (modulo prompt content)" do
       # The acceptance criterion: first-zoom and re-zoom land in the same
-      # workspace shape — agent scope, agent-chat window, fresh agent_ui.
+      # workspace shape, and the real board handler stack requires two
+      # Escape presses after zooming in when the prompt is focused.
       fake_session = fake_session_pid()
       {:ok, agent_buf} = Minga.Buffer.start_link(content: "")
 
@@ -222,8 +262,15 @@ defmodule MingaEditor.Shell.Board.InputTest do
       # First zoom: bootstrap path
       {:handled, after_first_zoom} = BoardInput.handle_key(state, @enter, 0)
 
-      # Zoom out then back in: snapshot/restore path
-      {:handled, after_zoom_out} = ZoomOut.handle_key(after_first_zoom, @escape, 0)
+      # First Escape only unfocuses the prompt on the real Board stack.
+      {:handled, after_unfocus} = walk_board_surface_handlers(after_first_zoom, @escape, 0)
+      assert after_unfocus.shell_state.zoomed_into == after_first_zoom.shell_state.zoomed_into
+      refute AgentAccess.input_focused?(after_unfocus)
+      assert UIState.prompt_text(AgentAccess.panel(after_unfocus)) == ""
+
+      # Second Escape zooms out, then re-zooming should restore the same shape.
+      {:handled, after_zoom_out} = walk_board_surface_handlers(after_unfocus, @escape, 0)
+      assert after_zoom_out.shell_state.zoomed_into == nil
       {:handled, after_second_zoom} = BoardInput.handle_key(after_zoom_out, @enter, 0)
 
       # Both zoom-ins should produce the same shape.
@@ -343,6 +390,86 @@ defmodule MingaEditor.Shell.Board.InputTest do
   # ── Zoom out ───────────────────────────────────────────────────────────
 
   describe "Escape zooms out when zoomed" do
+    test "real board handler stack keeps a focused normal prompt from zooming out on q" do
+      state = zoomed_board_prompt_state(:normal, "focused draft")
+      zoomed_card_id = state.shell_state.zoomed_into
+
+      {:handled, new_state} = walk_board_surface_handlers(state, ?q, 0)
+      assert new_state.shell_state.zoomed_into == zoomed_card_id
+      assert AgentAccess.input_focused?(new_state)
+      assert UIState.prompt_text(AgentAccess.panel(new_state)) == "focused draft"
+    end
+
+    test "real board handler stack keeps a focused normal prompt zoomed on first Escape" do
+      state = zoomed_board_prompt_state(:normal, "normal draft")
+      zoomed_card_id = state.shell_state.zoomed_into
+
+      {:handled, unfocused_state} = walk_board_surface_handlers(state, @escape, 0)
+      assert unfocused_state.shell_state.zoomed_into == zoomed_card_id
+      refute AgentAccess.input_focused?(unfocused_state)
+      assert UIState.prompt_text(AgentAccess.panel(unfocused_state)) == "normal draft"
+      assert unfocused_state.workspace.keymap_scope == :agent
+      assert unfocused_state.workspace.editing.mode == :normal
+
+      {:handled, zoomed_out_state} = walk_board_surface_handlers(unfocused_state, @escape, 0)
+      assert zoomed_out_state.shell_state.zoomed_into == nil
+    end
+
+    test "real board handler stack lets leader q continue without zooming out" do
+      state = zoomed_board_prompt_state(:normal, "leader draft")
+      zoomed_card_id = state.shell_state.zoomed_into
+
+      {:handled, unfocused_state} = walk_board_surface_handlers(state, @escape, 0)
+      assert unfocused_state.shell_state.zoomed_into == zoomed_card_id
+      refute AgentAccess.input_focused?(unfocused_state)
+      assert UIState.prompt_text(AgentAccess.panel(unfocused_state)) == "leader draft"
+
+      leader_state =
+        put_in(
+          unfocused_state.workspace.editing.mode_state.leader_node,
+          Minga.Keymap.Defaults.leader_trie()
+        )
+
+      {:handled, new_state} = walk_board_surface_handlers(leader_state, ?q, 0)
+      assert new_state.shell_state.zoomed_into == zoomed_card_id
+      assert Minga.Editing.in_leader?(new_state)
+      assert UIState.prompt_text(AgentAccess.panel(new_state)) == "leader draft"
+      assert new_state.workspace.keymap_scope == :agent
+    end
+
+    test "real board handler stack keeps q zoomed out after the prompt is unfocused" do
+      state = zoomed_board_prompt_state(:normal, "normal draft")
+      zoomed_card_id = state.shell_state.zoomed_into
+      session = state.shell_state.cards[zoomed_card_id].session
+
+      {:handled, unfocused_state} = walk_board_surface_handlers(state, @escape, 0)
+      assert unfocused_state.shell_state.zoomed_into == zoomed_card_id
+      refute AgentAccess.input_focused?(unfocused_state)
+      assert UIState.prompt_text(AgentAccess.panel(unfocused_state)) == "normal draft"
+
+      {:handled, zoomed_out_state} = walk_board_surface_handlers(unfocused_state, ?q, 0)
+      assert zoomed_out_state.shell_state.zoomed_into == nil
+      assert zoomed_out_state.shell_state.cards[zoomed_card_id].session == session
+      assert AgentAccess.session(zoomed_out_state) == nil
+    end
+
+    test "real board handler stack keeps visual and operator-pending prompts zoomed while Esc normalizes the prompt" do
+      for {mode, draft} <- [
+            {:visual, "visual draft"},
+            {:operator_pending, "operator draft"}
+          ] do
+        state = zoomed_board_prompt_state(mode, draft)
+        zoomed_card_id = state.shell_state.zoomed_into
+
+        {:handled, new_state} = walk_board_surface_handlers(state, @escape, 0)
+        assert new_state.shell_state.zoomed_into == zoomed_card_id
+        assert AgentAccess.input_focused?(new_state)
+        assert UIState.prompt_text(AgentAccess.panel(new_state)) == draft
+        assert new_state.workspace.keymap_scope == :agent
+        assert new_state.workspace.editing.mode == :normal
+      end
+    end
+
     test "clears zoomed_into and snapshots workspace" do
       state = editor_zoomed_into(3, 1)
       assert state.shell_state.zoomed_into == 1
@@ -443,8 +570,13 @@ defmodule MingaEditor.Shell.Board.InputTest do
       {:handled, state} = BoardInput.handle_key(state, @enter, 0)
       assert AgentAccess.session(state) == session_a
 
-      # Zoom out: cache reset, grid view has no active session.
-      {:handled, state} = ZoomOut.handle_key(state, @escape, 0)
+      # Zoom out now takes two Esc presses because the first one is handled
+      # by the focused prompt and only the second one reaches ZoomOut.
+      {:handled, state} = walk_board_surface_handlers(state, @escape, 0)
+      refute AgentAccess.input_focused?(state)
+      assert state.shell_state.zoomed_into == 1
+
+      {:handled, state} = walk_board_surface_handlers(state, @escape, 0)
       assert AgentAccess.session(state) == nil
 
       # Focus B, zoom in. The active session must be B, not A.
@@ -589,5 +721,20 @@ defmodule MingaEditor.Shell.Board.InputTest do
       # Board.Input should passthrough since we're zoomed
       {:passthrough, _state} = BoardInput.handle_key(state, ?j, 0)
     end
+  end
+
+  # ── Helpers ────────────────────────────────────────────────────────────
+
+  defp walk_board_surface_handlers(state, cp, mods) do
+    Enum.reduce_while(
+      MingaEditor.Shell.Board.input_handlers(state).surface,
+      {:passthrough, state},
+      fn handler, {_, acc} ->
+        case handler.handle_key(acc, cp, mods) do
+          {:handled, new_state} -> {:halt, {:handled, new_state}}
+          {:passthrough, new_state} -> {:cont, {:passthrough, new_state}}
+        end
+      end
+    )
   end
 end

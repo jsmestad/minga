@@ -11,6 +11,7 @@ defmodule MingaEditor.Agent.UIState.View do
   this struct directly.
   """
 
+  alias MingaEditor.Agent.UIState.ReturnTarget
   alias MingaEditor.Agent.View.Preview
   alias Minga.Config
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -39,6 +40,9 @@ defmodule MingaEditor.Agent.UIState.View do
   @typedoc "A notification toast."
   @type toast :: %{message: String.t(), icon: String.t(), level: :info | :warning | :error}
 
+  @typedoc "Editor context to restore when leaving the agent view."
+  @type return_target :: ReturnTarget.t()
+
   @typedoc "Layout, search, preview, and toast state."
   @type t :: %__MODULE__{
           active: boolean(),
@@ -48,6 +52,7 @@ defmodule MingaEditor.Agent.UIState.View do
           pending_prefix: prefix(),
           chat_width_pct: non_neg_integer(),
           saved_file_tree: FileTreeState.t() | nil,
+          return_target: return_target() | nil,
           help_visible: boolean(),
           search: search_state() | nil,
           toast: toast() | nil,
@@ -67,6 +72,7 @@ defmodule MingaEditor.Agent.UIState.View do
             pending_prefix: nil,
             chat_width_pct: 65,
             saved_file_tree: nil,
+            return_target: nil,
             help_visible: false,
             search: nil,
             toast: nil,
@@ -80,18 +86,62 @@ defmodule MingaEditor.Agent.UIState.View do
 
   # ── Layout ──────────────────────────────────────────────────────────────────
 
+  @doc "Builds a return target from the current editor context."
+  @spec return_target(
+          pos_integer() | nil,
+          pid() | nil,
+          Windows.t(),
+          FileTreeState.t(),
+          Minga.Keymap.Scope.scope_name(),
+          boolean()
+        ) :: return_target()
+  def return_target(
+        active_tab_id,
+        active_buffer,
+        windows,
+        file_tree,
+        keymap_scope,
+        prompt_focused
+      ) do
+    ReturnTarget.new(
+      active_tab_id,
+      active_buffer,
+      windows,
+      file_tree,
+      keymap_scope,
+      prompt_focused
+    )
+  end
+
   @doc "Activates the view, saving the current window layout."
   @spec activate(t(), Windows.t(), FileTreeState.t()) :: t()
   def activate(%__MODULE__{} = view, windows, file_tree) do
+    activate(view, windows, file_tree, nil)
+  end
+
+  @doc "Activates the view with a recorded editor return target."
+  @spec activate(t(), Windows.t(), FileTreeState.t(), return_target() | nil) :: t()
+  def activate(%__MODULE__{} = view, windows, file_tree, return_target) do
     %{
       view
       | active: true,
         focus: :chat,
         saved_windows: windows,
         saved_file_tree: file_tree,
+        return_target: return_target,
         pending_prefix: nil
     }
   end
+
+  @doc "Sets the editor return target."
+  @spec set_return_target(t(), return_target() | nil) :: t()
+  def set_return_target(%__MODULE__{} = view, return_target) do
+    %{view | return_target: return_target}
+  end
+
+  @doc "Clears the editor return target."
+  @spec clear_return_target(t()) :: t()
+  def clear_return_target(%__MODULE__{} = view), do: %{view | return_target: nil}
 
   @doc "Deactivates the view and returns the restored window layout."
   @spec deactivate(t()) :: {t(), Windows.t() | nil, FileTreeState.t() | nil}
@@ -104,6 +154,7 @@ defmodule MingaEditor.Agent.UIState.View do
          focus: :chat,
          saved_windows: nil,
          saved_file_tree: nil,
+         return_target: nil,
          pending_prefix: nil
      }, saved_windows, saved_file_tree}
   end

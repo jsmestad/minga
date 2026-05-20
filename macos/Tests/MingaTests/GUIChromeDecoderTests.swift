@@ -166,6 +166,33 @@ struct GUITabBarDecoderTests {
         #expect(tabs[1].label == "Agent")
     }
 
+    @Test("Decode gui_tab_bar with hidden active index sentinel")
+    func decodeHiddenActiveIndex() throws {
+        var data = Data()
+        data.append(OP_GUI_TAB_BAR)
+        data.append(255) // active_index sentinel for hidden active tab
+        data.append(1) // tab_count
+
+        data.append(0) // flags: inactive file tab
+        appendU32(&data, 7)
+        appendU16(&data, 1)
+        appendString8(&data, "")
+        appendString16(&data, "hidden.ex")
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiTabBar(let activeIndex, let tabs) = cmd else {
+            Issue.record("Expected .guiTabBar, got \(String(describing: cmd))")
+            return
+        }
+
+        #expect(activeIndex == 255)
+        #expect(tabs.count == 1)
+        #expect(tabs[0].isActive == false)
+        #expect(tabs[0].label == "hidden.ex")
+    }
+
     @Test("Decode gui_tab_bar with zero tabs")
     func decodeEmptyTabBar() throws {
         var data = Data()

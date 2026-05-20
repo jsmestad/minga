@@ -24,32 +24,38 @@ defmodule MingaEditor.Shell.Board.ZoomOut do
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
 
-  # Escape when zoomed: zoom out back to the grid.
-  # But when the agent panel is in insert mode, let ESC pass through
-  # so it switches to normal mode first. The user presses ESC again
-  # (in normal mode) to zoom out.
-  def handle_key(
-        %{shell: Board, shell_state: %BoardState{zoomed_into: card_id}} = state,
-        @key_escape,
-        0
-      )
-      when card_id != nil do
-    if agent_panel_in_insert_mode?(state) do
+  # Escape or q when zoomed: zoom out back to the grid.
+  # Leader sequences must keep flowing to the normal handler stack, so they
+  # always pass through before zoom-out gets a chance to run.
+  # When the agent panel is focused, let the key pass through so the prompt
+  # handler can apply its own normal/visual/operator semantics first.
+  def handle_key(%{shell: Board} = state, cp, mods) do
+    if Minga.Editing.in_leader?(state) do
+      {:passthrough, state}
+    else
+      handle_zoomed_key(state, cp, mods)
+    end
+  end
+
+  def handle_key(state, _cp, _mods), do: {:passthrough, state}
+
+  defp handle_zoomed_key(%{shell_state: %BoardState{zoomed_into: card_id}} = state, cp, 0)
+       when card_id != nil and cp in [@key_escape, ?q] do
+    if agent_panel_focused?(state) do
       {:passthrough, state}
     else
       {:handled, zoom_out(state)}
     end
   end
 
-  def handle_key(state, _cp, _mods), do: {:passthrough, state}
+  defp handle_zoomed_key(state, _cp, _mods), do: {:passthrough, state}
 
-  # Returns true when the agent panel is focused and in insert mode.
-  # In this state, ESC should toggle vim mode, not zoom out.
-  @spec agent_panel_in_insert_mode?(EditorState.t()) :: boolean()
-  defp agent_panel_in_insert_mode?(state) do
+  # Returns true when the agent panel is focused.
+  # In this state, ESC should be handled by the prompt stack, not zoom out.
+  @spec agent_panel_focused?(EditorState.t()) :: boolean()
+  defp agent_panel_focused?(state) do
     state.workspace.keymap_scope == :agent and
-      state.workspace.agent_ui.panel.input_focused and
-      Minga.Editing.mode(state) == :insert
+      state.workspace.agent_ui.panel.input_focused
   end
 
   # ── Zoom out ───────────────────────────────────────────────────────────

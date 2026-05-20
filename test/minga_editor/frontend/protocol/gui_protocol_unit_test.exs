@@ -10,6 +10,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
   alias MingaEditor.State.TabBar
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.Workspace.ChromeState
+  alias MingaEditor.Workspace.ChromeState.TabSummary
   alias MingaEditor.Workspace.ChromeState.WorkspaceSummary
 
   describe "encode_gui_tab_bar/1 with group_id" do
@@ -48,6 +49,43 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
 
       assert gid1 == 0
       assert gid2 == 5
+    end
+
+    test "uses 255 active index when the active tab is hidden from visible tabs" do
+      chrome_state = %ChromeState{
+        workspaces: [
+          workspace_summary(id: 0, kind: :manual, label: "Files", icon: "folder"),
+          workspace_summary(id: 1, kind: :agent, label: "Agent", icon: "cpu")
+        ],
+        visible_tabs: [
+          TabSummary.new(
+            id: 1,
+            workspace_id: 1,
+            kind: :file,
+            label: "agent.ex",
+            path: "/tmp/agent.ex",
+            icon: "A",
+            dirty?: false,
+            draft_state: :none,
+            attention?: false
+          )
+        ],
+        mode: :agent,
+        active_workspace_id: 1,
+        active_tab_id: 99,
+        background_count: 0,
+        attention_count: 0,
+        draft_count: 0,
+        conflict_count: 0
+      }
+
+      <<0x71, active_index::8, tab_count::8, flags::8, _id::32, _workspace::16, icon_len::8,
+        _icon::binary-size(icon_len), label_len::16, _label::binary-size(label_len)>> =
+        ProtocolGUI.encode_gui_tab_bar(chrome_state)
+
+      assert active_index == 255
+      assert tab_count == 1
+      assert Bitwise.band(flags, 0x01) == 0
     end
   end
 
