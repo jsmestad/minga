@@ -5,7 +5,6 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
   """
   use ExUnit.Case, async: true
 
-  alias MingaEditor.State.Workspace
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
@@ -103,76 +102,117 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
   end
 
   describe "encode_gui_workspaces/1" do
-    test "encodes header with group count" do
-      tb = TabBar.new(Tab.new_file(1, "a.ex"))
-      {tb, _} = TabBar.add_workspace(tb, "Agent")
+    test "encodes length-prefixed canonical header with manual and agent workspaces" do
+      chrome_state =
+        chrome_state(
+          active_workspace_id: 0,
+          mode: :editor,
+          workspaces: [
+            workspace_summary(id: 0, kind: :manual, label: "minga", icon: "folder"),
+            workspace_summary(id: 1, kind: :agent, label: "Agent", icon: "cpu")
+          ],
+          visible_tabs: []
+        )
 
-      <<0x86, _active::16, count::8, _rest::binary>> =
-        ProtocolGUI.encode_gui_workspaces(tb)
-
-      assert count == 1
-    end
-
-    test "workspace encodes with correct color and no kind byte" do
-      tb = TabBar.new(Tab.new_file(1, "a.ex"))
-      {tb, group} = TabBar.add_workspace(tb, "Agent")
-
-      binary = ProtocolGUI.encode_gui_workspaces(tb)
-      <<0x86, _active::16, 1::8, rest::binary>> = binary
-
-      # No kind byte: id(2) + status(1) + r(1) + g(1) + b(1) + tab_count(2) + label_len(1) + label + icon_len(1) + icon
-      <<agent_id::16, agent_status::8, r::8, g::8, b::8, _tc::16, label_len::8,
-        label::binary-size(label_len), icon_len::8, icon::binary-size(icon_len), _rest2::binary>> =
-        rest
-
-      assert agent_id == group.id
-      assert agent_status == 0
-
-      expected_r = Bitwise.bsr(Bitwise.band(group.color, 0xFF0000), 16)
-      expected_g = Bitwise.bsr(Bitwise.band(group.color, 0x00FF00), 8)
-      expected_b = Bitwise.band(group.color, 0x0000FF)
-      assert r == expected_r
-      assert g == expected_g
-      assert b == expected_b
-      assert label == "Agent"
-      assert icon == "cpu"
-    end
-
-    test "icon field is encoded" do
-      tb = TabBar.new(Tab.new_file(1, "a.ex"))
-      {tb, group} = TabBar.add_workspace(tb, "Test")
-      tb = TabBar.update_workspace(tb, group.id, &Workspace.set_icon(&1, "star"))
-
-      binary = ProtocolGUI.encode_gui_workspaces(tb)
-
-      <<0x86, _active::16, 1::8, _id::16, _status::8, _r::8, _g::8, _b::8, _tc::16, label_len::8,
-        _label::binary-size(label_len), icon_len::8, icon::binary-size(icon_len), _rest::binary>> =
-        binary
-
-      assert icon == "star"
-    end
-
-    test "ChromeState encoding keeps manual workspace out of legacy workspaces" do
-      chrome_state = %ChromeState{
-        workspaces: [
-          workspace_summary(id: 0, kind: :manual, label: "Files", icon: "folder"),
-          workspace_summary(id: 1, kind: :agent, label: "Agent", icon: "cpu")
-        ],
-        visible_tabs: [],
-        mode: :editor,
-        active_workspace_id: 0,
-        active_tab_id: nil,
-        background_count: 0,
-        attention_count: 0,
-        draft_count: 0,
-        conflict_count: 0
-      }
-
-      <<0x86, 0::16, 1::8, id::16, _rest::binary>> =
+      <<0x98, payload_len::16, payload::binary-size(payload_len)>> =
         ProtocolGUI.encode_gui_workspaces(chrome_state)
 
-      assert id == 1
+      <<1::8, 0::16, 0::8, _flags::8, 2::8, rest::binary>> = payload
+
+      <<0::16, 0::8, _manual_status::8, _manual_flags::16, _manual_r::8, _manual_g::8,
+        _manual_b::8, _manual_tab_count::16, _manual_drafts::16, _manual_conflicts::16,
+        _manual_background::16, manual_label_len::8, manual_label::binary-size(manual_label_len),
+        manual_icon_len::8, manual_icon::binary-size(manual_icon_len), agent_rest::binary>> = rest
+
+      <<1::16, 1::8, _agent_status::8, _agent_flags::16, _agent_rest::binary>> = agent_rest
+
+      assert manual_label == "minga"
+      assert manual_icon == "folder"
     end
+
+    test "encodes agent workspace counts and status fields" do
+      chrome_state =
+        chrome_state(
+          active_workspace_id: 1,
+          mode: :agent,
+          workspaces: [
+            workspace_summary(
+              id: 1,
+              kind: :agent,
+              label: "Review",
+              icon: "spark",
+              status: :tool_executing,
+              color: 0xC678DD,
+              tab_count: 3,
+              draft_count: 4,
+              conflict_count: 2,
+              running_background_count: 1,
+              attention?: true
+            )
+          ],
+          visible_tabs: [],
+          attention_count: 1
+        )
+
+      <<0x98, payload_len::16, payload::binary-size(payload_len)>> =
+        ProtocolGUI.encode_gui_workspaces(chrome_state)
+
+      <<1::8, 1::16, 1::8, 1::8, 1::8, rest::binary>> = payload
+
+      <<1::16, 1::8, 2::8, flags::16, 0xC6::8, 0x78::8, 0xDD::8, 3::16, 4::16, 2::16, 1::16,
+        label_len::8, label::binary-size(label_len), icon_len::8, icon::binary-size(icon_len),
+        0::16>> = rest
+
+      assert Bitwise.band(flags, 0x01) == 0x01
+      assert label == "Review"
+      assert icon == "spark"
+    end
+
+    test "encodes visible active-workspace tabs with path hash and labels" do
+      tab =
+        TabSummary.new(
+          id: 42,
+          workspace_id: 1,
+          kind: :file,
+          label: "agent.ex",
+          path: "/tmp/agent.ex",
+          icon: "",
+          dirty?: true,
+          draft_state: :conflict,
+          attention?: true
+        )
+
+      chrome_state = chrome_state(active_workspace_id: 1, workspaces: [], visible_tabs: [tab])
+
+      <<0x98, payload_len::16, payload::binary-size(payload_len)>> =
+        ProtocolGUI.encode_gui_workspaces(chrome_state)
+
+      <<_version::8, _active::16, _mode::8, _flags::8, 0::8, 1::16, 42::32, 1::16, 0::8,
+        tab_flags::16, path_hash::32, icon_len::8, icon::binary-size(icon_len), label_len::16,
+        label::binary-size(label_len), path_len::16, path::binary-size(path_len)>> = payload
+
+      assert Bitwise.band(tab_flags, 0x01) == 0x01
+      assert Bitwise.band(tab_flags, 0x02) == 0x02
+      assert Bitwise.band(tab_flags, 0x10) == 0x10
+      assert path_hash != 0
+      assert icon == ""
+      assert label == "agent.ex"
+      assert path == "/tmp/agent.ex"
+    end
+  end
+
+  defp chrome_state(attrs) do
+    %ChromeState{
+      workspaces: Keyword.get(attrs, :workspaces, []),
+      visible_tabs: Keyword.get(attrs, :visible_tabs, []),
+      mode: Keyword.get(attrs, :mode, :editor),
+      active_workspace_id: Keyword.get(attrs, :active_workspace_id, 0),
+      active_tab_id: Keyword.get(attrs, :active_tab_id),
+      background_count: Keyword.get(attrs, :background_count, 0),
+      attention_count: Keyword.get(attrs, :attention_count, 0),
+      draft_count: Keyword.get(attrs, :draft_count, 0),
+      conflict_count: Keyword.get(attrs, :conflict_count, 0)
+    }
   end
 
   defp workspace_summary(attrs) do
@@ -183,12 +223,12 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       icon: Keyword.fetch!(attrs, :icon),
       color: Keyword.get(attrs, :color, 0),
       status: Keyword.get(attrs, :status, :idle),
-      attention?: false,
-      tab_count: 0,
-      draft_count: 0,
-      conflict_count: 0,
-      running_background_count: 0,
-      closeable?: Keyword.get(attrs, :kind) == :agent
+      attention?: Keyword.get(attrs, :attention?, false),
+      tab_count: Keyword.get(attrs, :tab_count, 0),
+      draft_count: Keyword.get(attrs, :draft_count, 0),
+      conflict_count: Keyword.get(attrs, :conflict_count, 0),
+      running_background_count: Keyword.get(attrs, :running_background_count, 0),
+      closeable?: Keyword.get(attrs, :closeable?, Keyword.get(attrs, :kind) == :agent)
     )
   end
 
@@ -591,6 +631,38 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       {segment, ""} = take_modeline_segment(segments)
 
       assert segment.text == "BAD"
+    end
+
+    test "encodes active workspace section" do
+      chrome_state =
+        chrome_state(
+          active_workspace_id: 1,
+          attention_count: 3,
+          workspaces: [
+            workspace_summary(
+              id: 1,
+              kind: :agent,
+              label: "Review",
+              icon: "cpu",
+              status: :tool_executing,
+              draft_count: 4,
+              conflict_count: 1,
+              running_background_count: 2,
+              attention?: true
+            )
+          ]
+        )
+
+      binary = ProtocolGUI.encode_gui_status_bar({:buffer, status_data()}, chrome_state)
+      sections = status_sections(binary)
+
+      <<1::16, 1::8, 2::8, flags::16, 4::16, 1::16, 2::16, 3::16, label_len::8,
+        label::binary-size(label_len), icon_len::8, icon::binary-size(icon_len)>> =
+        Map.fetch!(sections, 0x0D)
+
+      assert Bitwise.band(flags, 0x01) == 0x01
+      assert label == "Review"
+      assert icon == "cpu"
     end
 
     test "encodes background subagent count and label in agent variant" do

@@ -500,6 +500,55 @@ struct GUIStatusBarDecoderTests {
 
     }
 
+    @Test("Decode gui_status_bar workspace section")
+    func decodeWorkspaceSection() throws {
+        var identity = Data()
+        identity.append(0) // contentKind = buffer
+        identity.append(0) // mode = normal
+        identity.append(0) // flags
+
+        var workspace = Data()
+        appendU16(&workspace, 7) // id
+        workspace.append(1) // kind = agent
+        workspace.append(2) // status = tool_executing
+        appendU16(&workspace, 0x0003) // flags
+        appendU16(&workspace, 4) // draft count
+        appendU16(&workspace, 1) // conflict count
+        appendU16(&workspace, 2) // background count
+        appendU16(&workspace, 3) // attention count
+        appendString8(&workspace, "Review")
+        appendString8(&workspace, "cpu")
+
+        let sections = [
+            buildSection(SECTION_IDENTITY, identity),
+            buildSection(SECTION_WORKSPACE, workspace),
+        ]
+
+        var data = Data()
+        data.append(OP_GUI_STATUS_BAR)
+        data.append(UInt8(sections.count))
+        for section in sections { data.append(section) }
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiStatusBar(let update) = cmd else {
+            Issue.record("Expected .guiStatusBar")
+            return
+        }
+
+        #expect(update.workspace?.id == 7)
+        #expect(update.workspace?.kind == 1)
+        #expect(update.workspace?.status == 2)
+        #expect(update.workspace?.flags == 0x0003)
+        #expect(update.workspace?.draftCount == 4)
+        #expect(update.workspace?.conflictCount == 1)
+        #expect(update.workspace?.backgroundCount == 2)
+        #expect(update.workspace?.attentionCount == 3)
+        #expect(update.workspace?.label == "Review")
+        #expect(update.workspace?.icon == "cpu")
+    }
+
     @Test("Decode gui_status_bar agent variant (sectioned format)")
     func decodeAgentVariant() throws {
         var identity = Data()
@@ -2011,86 +2060,118 @@ struct GUIToolManagerDecoderTests {
     }
 }
 
-// MARK: - gui_workspaces (0x86)
+// MARK: - gui_workspaces (0x98)
 
 @Suite("GUI Workspaces Decoder")
 struct GUIWorkspacesDecoderTests {
-    @Test("Decode workspaces with one workspace")
-    func decodeOneWorkspace() throws {
-        var data = Data()
-        data.append(OP_GUI_WORKSPACES)
-        appendU16(&data, 1) // active_workspace_id
-        data.append(1) // workspace_count
+    @Test("Decode canonical workspaces with visible tabs")
+    func decodeCanonicalWorkspaces() throws {
+        var payload = Data()
+        payload.append(1) // version
+        appendU16(&payload, 1) // active_workspace_id
+        payload.append(1) // mode = agent
+        payload.append(1) // flags = has attention
+        payload.append(2) // workspace_count
 
-        // Agent workspace entry (no kind byte, all entries are agent workspaces)
-        appendU16(&data, 1) // id
-        data.append(1) // agent_status = thinking
-        appendRGB(&data, 0xC6, 0x78, 0xDD) // color
-        appendU16(&data, 2) // tab_count
-        appendString8(&data, "Research") // label
-        appendString8(&data, "cpu") // icon
+        appendWorkspace(&payload, id: 0, kind: 0, status: 0, flags: 0, r: 0x51, g: 0xAF, b: 0xEF, tabCount: 2, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "minga", icon: "folder")
+        appendWorkspace(&payload, id: 1, kind: 1, status: 2, flags: 0x0003, r: 0xC6, g: 0x78, b: 0xDD, tabCount: 1, draftCount: 4, conflictCount: 2, runningBackgroundCount: 1, label: "Review", icon: "cpu")
+
+        appendU16(&payload, 1) // visible_tab_count
+        appendVisibleTab(&payload, id: 42, workspaceId: 1, kind: 0, flags: 0x0013, pathHash: 0x12345678, icon: "", label: "agent.ex", path: "/tmp/agent.ex")
+
+        var data = Data([OP_GUI_WORKSPACES])
+        appendU16(&data, UInt16(payload.count))
+        data.append(payload)
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiWorkspaces(let activeId, let workspaces) = cmd else {
+        guard case .guiWorkspaces(let version, let activeId, let mode, let flags, let workspaces, let visibleTabs) = cmd else {
             Issue.record("Expected .guiWorkspaces, got \(String(describing: cmd))")
             return
         }
 
+        #expect(version == 1)
         #expect(activeId == 1)
-        #expect(workspaces.count == 1)
-        #expect(workspaces[0].id == 1)
-        #expect(workspaces[0].agentStatus == 1)
-        #expect(workspaces[0].colorR == 0xC6)
-        #expect(workspaces[0].colorG == 0x78)
-        #expect(workspaces[0].colorB == 0xDD)
-        #expect(workspaces[0].tabCount == 2)
-        #expect(workspaces[0].label == "Research")
-        #expect(workspaces[0].icon == "cpu")
+        #expect(mode == 1)
+        #expect(flags == 1)
+        #expect(workspaces.count == 2)
+        #expect(workspaces[0].kind == 0)
+        #expect(workspaces[0].label == "minga")
+        #expect(workspaces[1].id == 1)
+        #expect(workspaces[1].kind == 1)
+        #expect(workspaces[1].agentStatus == 2)
+        #expect(workspaces[1].flags == 0x0003)
+        #expect(workspaces[1].draftCount == 4)
+        #expect(workspaces[1].conflictCount == 2)
+        #expect(workspaces[1].runningBackgroundCount == 1)
+        #expect(workspaces[1].icon == "cpu")
+        #expect(visibleTabs.count == 1)
+        #expect(visibleTabs[0].id == 42)
+        #expect(visibleTabs[0].workspaceId == 1)
+        #expect(visibleTabs[0].flags == 0x0013)
+        #expect(visibleTabs[0].pathHash == 0x12345678)
+        #expect(visibleTabs[0].label == "agent.ex")
+        #expect(visibleTabs[0].path == "/tmp/agent.ex")
     }
 
-    @Test("Decode workspaces with zero workspaces")
+    @Test("Decode canonical workspaces with zero workspaces and tabs")
     func decodeEmpty() throws {
-        var data = Data()
-        data.append(OP_GUI_WORKSPACES)
-        appendU16(&data, 0) // active_workspace_id
-        data.append(0) // workspace_count
+        var payload = Data()
+        payload.append(1) // version
+        appendU16(&payload, 0) // active_workspace_id
+        payload.append(0) // mode = editor
+        payload.append(0) // flags
+        payload.append(0) // workspace_count
+        appendU16(&payload, 0) // visible_tab_count
 
-        let (cmd, size) = try decodeCommand(data: data, offset: 0)
-        #expect(size == 4)
-
-        guard case .guiWorkspaces(_, let workspaces) = cmd else {
-            Issue.record("Expected .guiWorkspaces"); return
-        }
-        #expect(workspaces.isEmpty)
-    }
-
-    @Test("Decode workspaces with long label")
-    func decodeLongLabel() throws {
-        var data = Data()
-        data.append(OP_GUI_WORKSPACES)
-        appendU16(&data, 1) // active_workspace_id
-        data.append(1) // workspace_count
-
-        let longLabel = String(repeating: "A", count: 200)
-        appendU16(&data, 1) // id
-        data.append(2) // agent_status = tool_executing
-        appendRGB(&data, 0x98, 0xBE, 0x65) // color
-        appendU16(&data, 0) // tab_count
-        appendString8(&data, longLabel) // label
-        appendString8(&data, "hammer") // icon
+        var data = Data([OP_GUI_WORKSPACES])
+        appendU16(&data, UInt16(payload.count))
+        data.append(payload)
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiWorkspaces(let activeId, let workspaces) = cmd else {
-            Issue.record("Expected .guiWorkspaces"); return
+        guard case .guiWorkspaces(_, _, _, _, let workspaces, let visibleTabs) = cmd else {
+            Issue.record("Expected .guiWorkspaces")
+            return
         }
+        #expect(workspaces.isEmpty)
+        #expect(visibleTabs.isEmpty)
+    }
 
-        #expect(activeId == 1)
-        #expect(workspaces[0].label == longLabel)
-        #expect(workspaces[0].icon == "hammer")
+    @Test("Truncated canonical workspace payload throws malformed")
+    func truncatedPayloadThrows() {
+        let data = Data([OP_GUI_WORKSPACES, 0, 8, 1, 0, 0, 0])
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    private func appendWorkspace(_ data: inout Data, id: UInt16, kind: UInt8, status: UInt8, flags: UInt16, r: UInt8, g: UInt8, b: UInt8, tabCount: UInt16, draftCount: UInt16, conflictCount: UInt16, runningBackgroundCount: UInt16, label: String, icon: String) {
+        appendU16(&data, id)
+        data.append(kind)
+        data.append(status)
+        appendU16(&data, flags)
+        appendRGB(&data, r, g, b)
+        appendU16(&data, tabCount)
+        appendU16(&data, draftCount)
+        appendU16(&data, conflictCount)
+        appendU16(&data, runningBackgroundCount)
+        appendString8(&data, label)
+        appendString8(&data, icon)
+    }
+
+    private func appendVisibleTab(_ data: inout Data, id: UInt32, workspaceId: UInt16, kind: UInt8, flags: UInt16, pathHash: UInt32, icon: String, label: String, path: String) {
+        appendU32(&data, id)
+        appendU16(&data, workspaceId)
+        data.append(kind)
+        appendU16(&data, flags)
+        appendU32(&data, pathHash)
+        appendString8(&data, icon)
+        appendString16(&data, label)
+        appendString16(&data, path)
     }
 }
 

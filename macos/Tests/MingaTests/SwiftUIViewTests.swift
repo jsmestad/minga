@@ -631,12 +631,14 @@ struct TabBarViewViewTests {
             Wire.TabEntry(id: 1, groupId: 1, isActive: false, isDirty: false, isAgent: false,
                        hasAttention: false, agentStatus: 0, icon: "", label: "active.ex")
         ])
-        state.updateWorkspaces(activeWorkspaceId: 1, entries: [
-            Wire.WorkspaceEntry(id: 1, agentStatus: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
-                              tabCount: 1, label: "Active", icon: "folder"),
-            Wire.WorkspaceEntry(id: 2, agentStatus: 1, colorR: 0x44, colorG: 0x55, colorB: 0x66,
-                              tabCount: 3, label: "Research", icon: "cpu")
-        ])
+        state.updateWorkspaces(activeWorkspaceId: 1, mode: 1, flags: 0, entries: [
+            Wire.WorkspaceEntry(id: 0, kind: 0, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
+                                tabCount: 1, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "minga", icon: "folder"),
+            Wire.WorkspaceEntry(id: 1, kind: 1, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
+                                tabCount: 1, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "Active", icon: "cpu"),
+            Wire.WorkspaceEntry(id: 2, kind: 1, status: 1, flags: 0, colorR: 0x44, colorG: 0x55, colorB: 0x66,
+                                tabCount: 3, draftCount: 0, conflictCount: 0, runningBackgroundCount: 1, label: "Research", icon: "cpu")
+        ], visibleTabs: [])
 
         let sut = TabBarView(tabBarState: state, theme: ThemeColors(), encoder: nil)
         let body = try sut.inspect()
@@ -654,14 +656,16 @@ struct TabBarViewViewTests {
             Wire.TabEntry(id: 42, groupId: 1, isActive: false, isDirty: false, isAgent: false,
                        hasAttention: false, agentStatus: 0, icon: "", label: "main.ex")
         ])
-        state.updateWorkspaces(activeWorkspaceId: 1, entries: [
-            Wire.WorkspaceEntry(id: 1, agentStatus: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
-                              tabCount: 1, label: "Active", icon: "folder"),
-            Wire.WorkspaceEntry(id: 2, agentStatus: 1, colorR: 0x44, colorG: 0x55, colorB: 0x66,
-                              tabCount: 2, label: "Research", icon: "cpu"),
-            Wire.WorkspaceEntry(id: 3, agentStatus: 2, colorR: 0x77, colorG: 0x88, colorB: 0x99,
-                              tabCount: 3, label: "Review", icon: "cpu")
-        ])
+        state.updateWorkspaces(activeWorkspaceId: 1, mode: 1, flags: 0, entries: [
+            Wire.WorkspaceEntry(id: 0, kind: 0, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
+                                tabCount: 1, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "minga", icon: "folder"),
+            Wire.WorkspaceEntry(id: 1, kind: 1, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
+                                tabCount: 1, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "Active", icon: "cpu"),
+            Wire.WorkspaceEntry(id: 2, kind: 1, status: 1, flags: 0, colorR: 0x44, colorG: 0x55, colorB: 0x66,
+                                tabCount: 2, draftCount: 0, conflictCount: 0, runningBackgroundCount: 1, label: "Research", icon: "cpu"),
+            Wire.WorkspaceEntry(id: 3, kind: 1, status: 2, flags: 0, colorR: 0x77, colorG: 0x88, colorB: 0x99,
+                                tabCount: 3, draftCount: 0, conflictCount: 0, runningBackgroundCount: 1, label: "Review", icon: "cpu")
+        ], visibleTabs: [])
 
         let spy = SpyEncoder()
         let sut = TabBarView(tabBarState: state, theme: ThemeColors(), encoder: spy)
