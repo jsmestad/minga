@@ -25,10 +25,13 @@ branch=$1
 base_ref=${2:-main}
 repo_root=$(git rev-parse --show-toplevel)
 main_worktree=$(git -C "$repo_root" worktree list --porcelain | awk '
-  NR == 1 && $1 == "worktree" {
+  $1 == "worktree" && main_worktree == "" {
     sub(/^worktree /, "")
-    print
-    exit
+    main_worktree = $0
+  }
+
+  END {
+    print main_worktree
   }
 ')
 
