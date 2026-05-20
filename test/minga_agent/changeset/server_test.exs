@@ -52,6 +52,34 @@ defmodule MingaAgent.Changeset.ServerTest do
       refute File.exists?(escaped)
     end
 
+    test "rejects symlink escapes through linked directories", %{project: project} do
+      outside_dir =
+        Path.join(Path.dirname(project), "escape-root-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(Path.join(outside_dir, "nested"))
+      File.write!(Path.join(outside_dir, "nested/secret.txt"), "secret")
+      File.ln_s!(outside_dir, Path.join(project, "linked"))
+
+      server = start_server(project)
+
+      assert {:error, :symlink_traversal} =
+               GenServer.call(server, {:read_file, "linked/nested/secret.txt"})
+
+      assert {:error, :symlink_traversal} =
+               GenServer.call(server, {:write_file, "linked/new.txt", "pwned"})
+
+      assert {:error, :symlink_traversal} =
+               GenServer.call(
+                 server,
+                 {:edit_file, "linked/nested/secret.txt", "secret", "public"}
+               )
+
+      assert {:error, :symlink_traversal} =
+               GenServer.call(server, {:delete_file, "linked/nested/secret.txt"})
+
+      assert {:ok, "original content"} = GenServer.call(server, {:read_file, "hello.txt"})
+    end
+
     test "failed overlay writes do not create undo history", %{project: project} do
       dep_file = Path.join(project, "deps/some_dep/lib/real.ex")
       File.mkdir_p!(Path.dirname(dep_file))
@@ -279,6 +307,27 @@ defmodule MingaAgent.Changeset.ServerTest do
 
       # Project has the merged content
       assert File.read!(Path.join(project, "hello.txt")) == "merged content"
+    end
+
+    test "rejects merge when a tracked project file becomes a symlink escape", %{project: project} do
+      server = start_server(project)
+
+      GenServer.call(server, {:write_file, "hello.txt", "merged content"})
+
+      outside_dir =
+        Path.join(Path.dirname(project), "merge-escape-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(outside_dir)
+      outside_file = Path.join(outside_dir, "secret.txt")
+      File.write!(outside_file, "secret")
+      File.rm!(Path.join(project, "hello.txt"))
+      File.ln_s!(outside_file, Path.join(project, "hello.txt"))
+
+      assert {:error, :symlink_traversal} = GenServer.call(server, :merge)
+      assert File.read!(outside_file) == "secret"
+
+      modified = GenServer.call(server, :modified_files)
+      assert "hello.txt" in modified.modified
     end
 
     test "creates new files in the project", %{project: project} do

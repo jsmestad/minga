@@ -10,6 +10,7 @@ defmodule MingaAgent.ProjectView.Overlay do
   alias MingaAgent.BufferForkStore
   alias MingaAgent.Changeset
   alias MingaAgent.ProjectView
+  alias MingaAgent.ProjectView.PathResolver
 
   @type ref :: %{changeset: pid(), fork_store: pid() | nil}
 
@@ -52,14 +53,18 @@ defmodule MingaAgent.ProjectView.Overlay do
   @spec list_directory(ProjectView.t(), String.t()) ::
           {:ok, [ProjectView.Backend.directory_entry()]} | {:error, term()}
   def list_directory(%ProjectView{} = view, relative_path) do
-    dir = Path.join(working_dir(view), relative_path)
+    with {:ok, project_dir} <-
+           PathResolver.resolve(view.project_root, relative_path, allow_root: true) do
+      relative_dir = Path.relative_to(project_dir, view.project_root)
+      dir = Path.join(working_dir(view), relative_dir)
 
-    case File.ls(dir) do
-      {:ok, entries} ->
-        {:ok, entries |> reject_tombstones() |> Enum.map(&directory_entry(dir, &1))}
+      case File.ls(dir) do
+        {:ok, entries} ->
+          {:ok, entries |> reject_tombstones() |> Enum.map(&directory_entry(dir, &1))}
 
-      {:error, reason} ->
-        {:error, reason}
+        {:error, reason} ->
+          {:error, reason}
+      end
     end
   end
 
@@ -140,18 +145,13 @@ defmodule MingaAgent.ProjectView.Overlay do
 
   @spec fork_diff(ProjectView.t()) :: [map()]
   defp fork_diff(%ProjectView{} = view) do
-    case fork_store(view) do
-      nil ->
-        []
+    case scoped_fork_paths(view, on_invalid: :ignore) do
+      {:ok, paths} ->
+        Enum.map(paths, &%{path: Path.relative_to(&1, view.project_root), kind: :modified})
 
-      store ->
-        store
-        |> BufferForkStore.all()
-        |> Map.keys()
-        |> Enum.map(&%{path: Path.relative_to(&1, view.project_root), kind: :modified})
+      {:error, _} ->
+        []
     end
-  catch
-    :exit, _ -> []
   end
 
   @spec promote_forks(ProjectView.t()) :: :ok | {:error, {:fork_merge_failed, [term()]}}
@@ -161,9 +161,10 @@ defmodule MingaAgent.ProjectView.Overlay do
         :ok
 
       store ->
-        store
-        |> BufferForkStore.merge_all_keep_failed()
-        |> fork_merge_result()
+        with {:ok, paths} <- scoped_fork_paths(view, on_invalid: :error),
+             results <- BufferForkStore.merge_paths_keep_failed(store, paths) do
+          fork_merge_result(results)
+        end
     end
   catch
     :exit, reason -> {:error, {:fork_merge_failed, [{:exit, reason}]}}
@@ -179,10 +180,81 @@ defmodule MingaAgent.ProjectView.Overlay do
   @spec discard_forks(ProjectView.t()) :: :ok
   defp discard_forks(%ProjectView{} = view) do
     case fork_store(view) do
-      nil -> :ok
-      store -> BufferForkStore.discard_all(store)
+      nil ->
+        :ok
+
+      store ->
+        case scoped_fork_paths(view, on_invalid: :ignore) do
+          {:ok, paths} -> BufferForkStore.discard_paths(store, paths)
+          {:error, _} -> :ok
+        end
     end
   catch
     :exit, _ -> :ok
   end
+
+  @spec scoped_fork_paths(ProjectView.t(), keyword()) :: {:ok, [String.t()]} | {:error, term()}
+  defp scoped_fork_paths(%ProjectView{} = view, opts) do
+    on_invalid = Keyword.get(opts, :on_invalid, :error)
+
+    case fork_store(view) do
+      nil ->
+        {:ok, []}
+
+      store ->
+        try do
+          paths =
+            store
+            |> BufferForkStore.all()
+            |> Map.keys()
+            |> Enum.reduce_while([], fn path, acc ->
+              case scoped_fork_path(view.project_root, path) do
+                {:ok, scoped_path} ->
+                  {:cont, [scoped_path | acc]}
+
+                :skip ->
+                  {:cont, acc}
+
+                {:error, reason} ->
+                  if on_invalid == :ignore do
+                    {:cont, acc}
+                  else
+                    {:halt, {:error, reason}}
+                  end
+              end
+            end)
+
+          case paths do
+            {:error, _} = error -> error
+            paths -> {:ok, Enum.sort(paths)}
+          end
+        catch
+          :exit, reason ->
+            if on_invalid == :ignore do
+              {:ok, []}
+            else
+              {:error, {:fork_store_unreachable, reason}}
+            end
+        end
+    end
+  end
+
+  @spec scoped_fork_path(String.t(), String.t()) :: :skip | {:ok, String.t()} | {:error, term()}
+  defp scoped_fork_path(root, path) do
+    expanded_path = Path.expand(path)
+
+    if inside_root?(expanded_path, root) do
+      relative_path = Path.relative_to(expanded_path, root)
+
+      case PathResolver.resolve(root, relative_path, allow_root: true) do
+        {:ok, _resolved} -> {:ok, expanded_path}
+        {:error, reason} -> {:error, {:fork_path_outside_project_root, expanded_path, reason}}
+      end
+    else
+      :skip
+    end
+  end
+
+  @spec inside_root?(String.t(), String.t()) :: boolean()
+  defp inside_root?(path, root), do: path == root or String.starts_with?(path, root <> "/")
 end

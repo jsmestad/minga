@@ -11,6 +11,7 @@ defmodule MingaAgent.Changeset.Server do
 
   alias Minga.Core.Overlay
   alias MingaAgent.Changeset.MergedEvent
+  alias MingaAgent.ProjectView.PathResolver
 
   @typedoc "Internal server state."
   @type state :: %{
@@ -201,6 +202,9 @@ defmodule MingaAgent.Changeset.Server do
         Overlay.cleanup(state.overlay)
         broadcast_merged(state)
         {:stop, :normal, {:ok, :merged_with_conflicts, details}, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
     end
   rescue
     e ->
@@ -234,27 +238,35 @@ defmodule MingaAgent.Changeset.Server do
       end)
 
     all_results = modification_results ++ deletion_results
-    conflicts = Enum.filter(all_results, &match?({:conflict, _, _}, &1))
 
-    if conflicts == [] do
-      :ok
-    else
-      {:ok, :merged_with_conflicts, all_results}
+    case Enum.find(all_results, &match?({:error, _}, &1)) do
+      {:error, reason} ->
+        {:error, reason}
+
+      nil ->
+        conflicts = Enum.filter(all_results, &match?({:conflict, _, _}, &1))
+
+        if conflicts == [] do
+          :ok
+        else
+          {:ok, :merged_with_conflicts, all_results}
+        end
     end
   end
 
-  @spec merge_one_file(state(), String.t(), binary()) :: tuple()
+  @spec merge_one_file(state(), String.t(), binary()) :: tuple() | {:error, term()}
   defp merge_one_file(state, path, changeset_content) do
-    real_path = Path.join(state.project_root, path)
-    original = Map.get(state.originals, path)
+    with {:ok, real_path} <- safe_real_path(state, path) do
+      original = Map.get(state.originals, path)
 
-    current_real =
-      case File.read(real_path) do
-        {:ok, c} -> c
-        {:error, :enoent} -> nil
-      end
+      current_real =
+        case File.read(real_path) do
+          {:ok, c} -> c
+          {:error, :enoent} -> nil
+        end
 
-    merge_strategy(real_path, path, original, current_real, changeset_content)
+      merge_strategy(real_path, path, original, current_real, changeset_content)
+    end
   end
 
   # New file: didn't exist when changeset was created
@@ -294,21 +306,22 @@ defmodule MingaAgent.Changeset.Server do
     end
   end
 
-  @spec merge_one_deletion(state(), String.t()) :: tuple()
+  @spec merge_one_deletion(state(), String.t()) :: tuple() | {:error, term()}
   defp merge_one_deletion(state, path) do
-    real_path = Path.join(state.project_root, path)
-    original = Map.get(state.originals, path)
+    with {:ok, real_path} <- safe_real_path(state, path) do
+      original = Map.get(state.originals, path)
 
-    case File.read(real_path) do
-      {:ok, content} when content == original ->
-        File.rm!(real_path)
-        {:ok, path, :deleted}
+      case File.read(real_path) do
+        {:ok, content} when content == original ->
+          File.rm!(real_path)
+          {:ok, path, :deleted}
 
-      {:ok, _changed} ->
-        {:conflict, path, :modified_before_delete}
+        {:ok, _changed} ->
+          {:conflict, path, :modified_before_delete}
 
-      {:error, :enoent} ->
-        {:ok, path, :already_deleted}
+        {:error, :enoent} ->
+          {:ok, path, :already_deleted}
+      end
     end
   end
 
@@ -392,14 +405,19 @@ defmodule MingaAgent.Changeset.Server do
   @spec restore_original(state(), String.t()) :: :ok
   defp restore_original(state, path) do
     overlay_path = Path.join(state.overlay.overlay_dir, path)
-    project_path = Path.join(state.project_root, path)
 
     File.rm(overlay_path)
     File.rm(overlay_path <> ".__changeset_deleted__")
 
-    if File.regular?(project_path) do
-      File.mkdir_p!(Path.dirname(overlay_path))
-      relink_file(state.overlay, project_path, overlay_path)
+    case safe_real_path(state, path) do
+      {:ok, project_path} ->
+        if File.regular?(project_path) do
+          File.mkdir_p!(Path.dirname(overlay_path))
+          relink_file(state.overlay, project_path, overlay_path)
+        end
+
+      {:error, _reason} ->
+        :ok
     end
 
     :ok
@@ -418,24 +436,18 @@ defmodule MingaAgent.Changeset.Server do
   end
 
   @spec normalize_path(state(), String.t()) ::
-          {:ok, String.t()} | {:error, :invalid_path | :path_traversal}
+          {:ok, String.t()} | {:error, :invalid_path | :path_traversal | :symlink_traversal}
   defp normalize_path(state, path) do
-    root = Path.expand(state.project_root)
-    target = Path.join(root, path) |> Path.expand()
-
-    normalize_target(root, target)
+    case safe_real_path(state, path) do
+      {:ok, target} -> {:ok, Path.relative_to(target, Path.expand(state.project_root))}
+      {:error, _} = error -> error
+    end
   end
 
-  @spec normalize_target(String.t(), String.t()) ::
-          {:ok, String.t()} | {:error, :invalid_path | :path_traversal}
-  defp normalize_target(root, root), do: {:error, :invalid_path}
-
-  defp normalize_target(root, target) do
-    if String.starts_with?(target, root <> "/") do
-      {:ok, Path.relative_to(target, root)}
-    else
-      {:error, :path_traversal}
-    end
+  @spec safe_real_path(state(), String.t()) ::
+          {:ok, String.t()} | {:error, :invalid_path | :path_traversal | :symlink_traversal}
+  defp safe_real_path(%{project_root: project_root}, path) do
+    PathResolver.resolve(project_root, path)
   end
 
   @spec broadcast_merged(state()) :: :ok
