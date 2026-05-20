@@ -25,6 +25,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
   alias MingaEditor.Shell.Traditional.Modeline
   alias MingaEditor.Shell.Traditional.GitStatusRenderer
   alias MingaEditor.Shell.Traditional.TreeRenderer
+  alias MingaEditor.Workspace.ChromeState
   alias MingaEditor.UI.Popup.Lifecycle, as: PopupLifecycle
 
   @typedoc "Internal editor state."
@@ -149,7 +150,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
       state.workspace.windows.tree,
       state.workspace.file_tree,
       state.workspace.keymap_scope,
-      state.shell_state |> Map.get(:tab_bar),
+      ChromeState.from_editor_state(state),
       state.shell_state |> Map.get(:git_status_panel),
       state.shell_state |> Map.get(:git_status_tui_state),
       state.workspace.editing.mode,

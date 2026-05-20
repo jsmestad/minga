@@ -29,6 +29,8 @@ defmodule MingaEditor.Shell.Traditional.TabBarRenderer do
   alias Minga.Language
   alias MingaEditor.UI.Devicon
   alias MingaEditor.UI.Theme
+  alias MingaEditor.Workspace.ChromeState
+  alias MingaEditor.Workspace.ChromeState.TabSummary
 
   @typedoc "A clickable region: column range mapping to a command."
   @type click_region ::
@@ -56,17 +58,42 @@ defmodule MingaEditor.Shell.Traditional.TabBarRenderer do
           {[DisplayList.draw()], [click_region()]}
   def render(row, cols, %TabBar{} = tb, %Theme{} = theme, hover_col \\ nil) do
     colors = tab_bar_colors(theme)
-
-    # Build logical segments for each tab (text, colors, tab id, width)
     segments = build_segments(tb, colors)
+    render_segment_list(row, cols, segments, tb.active_id, colors, hover_col)
+  end
 
-    # Calculate total width to detect overflow
+  @doc "Renders the active workspace's visible file tabs from shared workspace chrome."
+  @spec render_chrome_state(
+          non_neg_integer(),
+          pos_integer(),
+          ChromeState.t(),
+          Theme.t(),
+          non_neg_integer() | nil
+        ) :: {[DisplayList.draw()], [click_region()]}
+  def render_chrome_state(row, cols, %ChromeState{} = chrome_state, %Theme{} = theme, hover_col) do
+    colors = tab_bar_colors(theme)
+
+    segments =
+      build_summary_segments(chrome_state.visible_tabs, chrome_state.active_tab_id, colors)
+
+    render_segment_list(row, cols, segments, chrome_state.active_tab_id || 0, colors, hover_col)
+  end
+
+  @spec render_segment_list(
+          non_neg_integer(),
+          pos_integer(),
+          [segment()],
+          non_neg_integer(),
+          map(),
+          non_neg_integer() | nil
+        ) :: {[DisplayList.draw()], [click_region()]}
+  defp render_segment_list(row, cols, segments, active_id, colors, hover_col) do
     total_width = Enum.reduce(segments, 0, fn seg, acc -> acc + seg.width + 1 end)
 
     if total_width <= cols do
       render_segments(row, cols, segments, colors, hover_col)
     else
-      render_overflow(row, cols, segments, tb.active_id, colors, hover_col)
+      render_overflow(row, cols, segments, active_id, colors, hover_col)
     end
   end
 
@@ -113,6 +140,43 @@ defmodule MingaEditor.Shell.Traditional.TabBarRenderer do
 
       # Override color for attention tabs (not active) to make the badge visible
       fg = if tab.attention and not is_active, do: colors.attention_fg, else: fg
+
+      %{
+        body_text: body_text,
+        close_text: close_text,
+        fg: fg,
+        bg: bg,
+        tab_id: tab.id,
+        body_width: body_width,
+        close_width: close_width,
+        width: body_width + close_width,
+        is_active: is_active
+      }
+    end)
+  end
+
+  @spec build_summary_segments([TabSummary.t()], Tab.id() | nil, map()) :: [segment()]
+  defp build_summary_segments(tabs, active_tab_id, colors) do
+    tabs
+    |> Enum.with_index(1)
+    |> Enum.map(fn {tab, position} ->
+      is_active = tab.id == active_tab_id
+
+      {fg, bg} =
+        if is_active do
+          {colors.active_fg, colors.active_bg}
+        else
+          {colors.inactive_fg, colors.inactive_bg}
+        end
+
+      dirty = if tab.dirty?, do: " ●", else: ""
+      attention = if tab.attention? and not is_active, do: " !", else: ""
+      number = tab_number(position)
+      body_text = " #{number}#{tab.icon} #{tab.label}#{dirty}#{attention} "
+      close_text = "#{@close_icon} "
+      body_width = Unicode.display_width(body_text)
+      close_width = Unicode.display_width(close_text)
+      fg = if tab.attention? and not is_active, do: colors.attention_fg, else: fg
 
       %{
         body_text: body_text,

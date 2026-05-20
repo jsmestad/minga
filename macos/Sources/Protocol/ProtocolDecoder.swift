@@ -557,7 +557,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         return (.guiFileTreeSelection(selectedId: selectedId, focused: flags & 0x01 != 0), 3 + payloadLen)
 
     case OP_GUI_TAB_BAR:
-        // active_index:1, tab_count:1, then per tab: flags:1, id:4, group_id:2, icon_len:1, icon, label_len:2, label
+        // active_index:1 (255 means the active tab is hidden from the visible tab list), tab_count:1, then per tab: flags:1, id:4, group_id:2, icon_len:1, icon, label_len:2, label
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
         let activeIndex = data[rest]
         let tabCount = Int(data[rest + 1])

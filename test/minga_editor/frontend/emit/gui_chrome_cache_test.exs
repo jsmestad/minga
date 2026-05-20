@@ -3,6 +3,7 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Diagnostics
   alias Minga.Diagnostics.Diagnostic
   alias Minga.LSP.SyncServer
@@ -55,6 +56,29 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       assert opcode_count(cmds, 0x74) == 1
       assert length(cmds) > 1
       refute caches2.last_gui_theme == caches.last_gui_theme
+    end
+
+    test "re-sends chrome when state changes between calls" do
+      state = gui_state(content: long_content(50))
+      {_ctx, caches, _cmds} = sync_chrome(state)
+
+      changed_state = %{state | theme: MingaEditor.UI.Theme.get!(:one_dark)}
+      {_ctx, _caches2, cmds} = sync_chrome(changed_state, caches)
+
+      assert opcode_count(cmds, 0x74) == 1, "expected theme command after theme change"
+      assert length(cmds) > 1, "expected more than just status bar after theme change"
+    end
+
+    test "tab bar cache changes when active buffer dirty state changes" do
+      state = put_in(gui_state().shell_state.tab_bar, TabBar.new(Tab.new_file(1, "test.ex")))
+      {_ctx, caches, _cmds} = sync_chrome(state)
+
+      BufferProcess.insert_text(state.workspace.buffers.active, "!")
+
+      {_ctx, _caches2, cmds} = sync_chrome(state, caches)
+
+      assert Enum.any?(cmds, &match?(<<0x71, _::binary>>, &1)),
+             "expected gui_tab_bar command after dirty state changes"
     end
 
     test "hidden file tree cache includes project root and resends when it changes" do

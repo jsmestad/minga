@@ -42,6 +42,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.TabBar
   alias MingaEditor.StatusBar.Data, as: StatusBarData
+  alias MingaEditor.Workspace.ChromeState
   alias MingaEditor.Viewport
   alias MingaEditor.Window.Content
   alias MingaEditor.Frontend.Emit.Context
@@ -202,12 +203,18 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   # Board: no tab bar (Board manages its own navigation)
   defp build_gui_tab_bar_cmd(%{shell: MingaEditor.Shell.Board}, caches), do: {nil, caches}
 
-  defp build_gui_tab_bar_cmd(%{shell_state: %{tab_bar: %TabBar{} = tb}} = ctx, caches) do
-    active_buf = active_window_buffer(ctx)
-    fp = :erlang.phash2({tb, active_buf})
+  defp build_gui_tab_bar_cmd(%{shell_state: %{tab_bar: %TabBar{}}} = ctx, caches) do
+    chrome_state = ChromeState.from_editor_state(ctx)
+
+    fp =
+      :erlang.phash2({
+        chrome_state.active_workspace_id,
+        chrome_state.active_tab_id,
+        chrome_state.visible_tabs
+      })
 
     if fp != caches.last_gui_tab_bar_fp do
-      {ProtocolGUI.encode_gui_tab_bar(tb, active_buf), %{caches | last_gui_tab_bar_fp: fp}}
+      {ProtocolGUI.encode_gui_tab_bar(chrome_state), %{caches | last_gui_tab_bar_fp: fp}}
     else
       {nil, caches}
     end
@@ -216,22 +223,23 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   defp build_gui_tab_bar_cmd(%{shell_state: %{tab_bar: nil}}, caches), do: {nil, caches}
 
   @spec build_gui_agent_groups_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
-  defp build_gui_agent_groups_cmd(%{shell_state: %{tab_bar: %TabBar{} = tb}}, caches) do
-    # Only send workspace bar when agent workspaces exist (tier >= 1).
-    # Also include workspace count so the GUI hides the indicator when
-    # all agent workspaces are removed.
-    if TabBar.has_agent_groups?(tb) do
-      fp = agent_groups_fingerprint(tb)
+  defp build_gui_agent_groups_cmd(%{shell_state: %{tab_bar: %TabBar{}}} = ctx, caches) do
+    chrome_state = ChromeState.from_editor_state(ctx)
+    agent_workspaces = Enum.filter(chrome_state.workspaces, &(&1.kind == :agent))
+
+    if agent_workspaces != [] do
+      fp = agent_groups_fingerprint(chrome_state)
 
       if fp != caches.last_gui_agent_groups_fp do
-        {ProtocolGUI.encode_gui_agent_groups(tb), %{caches | last_gui_agent_groups_fp: fp}}
+        {ProtocolGUI.encode_gui_agent_groups(chrome_state),
+         %{caches | last_gui_agent_groups_fp: fp}}
       else
         {nil, caches}
       end
     else
-      # No agent workspaces: send empty workspace bar to clear the GUI
       if caches.last_gui_agent_groups_fp != nil do
-        {ProtocolGUI.encode_gui_agent_groups(tb), %{caches | last_gui_agent_groups_fp: nil}}
+        {ProtocolGUI.encode_gui_agent_groups(chrome_state),
+         %{caches | last_gui_agent_groups_fp: nil}}
       else
         {nil, caches}
       end
@@ -240,23 +248,16 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   defp build_gui_agent_groups_cmd(_ctx, caches), do: {nil, caches}
 
-  @spec agent_groups_fingerprint(TabBar.t()) :: integer()
-  defp agent_groups_fingerprint(%TabBar{} = tb) do
+  @spec agent_groups_fingerprint(ChromeState.t()) :: integer()
+  defp agent_groups_fingerprint(%ChromeState{} = chrome_state) do
     :erlang.phash2({
-      TabBar.active_group_id(tb),
-      Enum.map(tb.agent_groups, fn group ->
-        {group.id, group.label, group.icon, group.color, group.agent_status,
-         length(TabBar.tabs_in_group(tb, group.id))}
-      end)
+      chrome_state.active_workspace_id,
+      chrome_state.background_count,
+      chrome_state.attention_count,
+      chrome_state.draft_count,
+      chrome_state.conflict_count,
+      chrome_state.workspaces
     })
-  end
-
-  @spec active_window_buffer(ctx()) :: pid() | nil
-  defp active_window_buffer(%{windows: %{active: win_id, map: map}}) do
-    case Map.get(map, win_id) do
-      %{buffer: buf} when is_pid(buf) -> buf
-      _ -> nil
-    end
   end
 
   # ── File tree ──

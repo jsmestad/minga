@@ -13,6 +13,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.Helpers do
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Shell.Traditional.TabBarRenderer
+  alias MingaEditor.Workspace.ChromeState
   alias MingaEditor.Viewport
   alias MingaEditor.WindowTree
   alias MingaEditor.UI.Theme
@@ -37,7 +38,8 @@ defmodule MingaEditor.Shell.Traditional.Chrome.Helpers do
         _ -> nil
       end
 
-    TabBarRenderer.render(tab_row, tab_width, state.shell_state.tab_bar, state.theme, hover_col)
+    chrome_state = ChromeState.from_editor_state(state)
+    TabBarRenderer.render_chrome_state(tab_row, tab_width, chrome_state, state.theme, hover_col)
   end
 
   # ── Separators ─────────────────────────────────────────────────────────────

@@ -131,7 +131,7 @@ Frontends should apply this only to the current file-tree model. If no full `gui
 
 ### 0x71 — gui_tab_bar
 
-Tab bar state with all open tabs.
+Tab bar state with visible tab entries.
 
 ```
 opcode(1) + active_index(1) + tab_count(1) + entries...
@@ -149,6 +149,10 @@ Flags bits:
 group_id: workspace group this tab belongs to. 0 = manual/ungrouped workspace.
 Non-zero values match workspace IDs from gui_agent_groups (0x86). The frontend
 renders group separators at group_id transitions in the tab strip.
+
+active_index: zero-based index into the visible tab entries, or 255 when the
+current active tab is not present in the visible list (for example, an active
+agent chat tab with only its workspace's file tabs shown).
 ```
 
 ### 0x72 — gui_which_key
@@ -764,24 +768,25 @@ When the git status panel is closed, the BEAM sends `repo_state = not_a_repo`, n
 
 ### 0x86 — gui_agent_groups
 
-Workspace indicator and dropdown data for progressive tab grouping. Sent alongside gui_tab_bar when agent workspaces exist.
+Agent-workspace indicator and dropdown data for progressive tab grouping. Sent alongside gui_tab_bar when agent workspaces exist.
+
+This is the legacy agent-group opcode. The BEAM-side `Workspace.ChromeState` projection includes the synthesized manual workspace, but this opcode sends only agent workspaces so existing native decoders do not infer a manual workspace from the agent-group payload. A later canonical workspace opcode can carry manual-vs-agent kind explicitly.
 
 ```
-opcode(1) + active_workspace_id(2) + workspace_count(1) + workspaces...
+opcode(1) + active_group_id(2) + agent_workspace_count(1) + agent_workspaces...
 
-Per workspace:
-  id(2) + kind(1) + agent_status(1) + color_r(1) + color_g(1) + color_b(1)
-  + tab_count(2) + label_len(1) + label(label_len)
+Per agent workspace:
+  id(2) + agent_status(1) + color_r(1) + color_g(1) + color_b(1)
+  + tab_count(2) + label_len(1) + label(label_len) + icon_len(1) + icon(icon_len)
 
-kind: 0 = manual (default user workspace), 1 = agent
 agent_status: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan
 color: 24-bit sRGB accent color for group separators and workspace indicator
-tab_count: number of tabs currently in this workspace
+tab_count: number of tabs currently in this agent workspace
 ```
 
-The manual workspace (id 0) always exists and cannot be removed. Agent workspaces are auto-created when an agent session starts and removed when the session ends (their tabs migrate to the manual workspace).
+Agent workspaces are auto-created when an agent session starts and removed when the session ends (their tabs migrate to the manual workspace).
 
-The frontend uses `active_workspace_id` to highlight the active workspace in the indicator/dropdown. Tab entries in gui_tab_bar carry a `group_id` field that matches workspace IDs, enabling the frontend to render group separators at group transitions.
+The frontend uses `active_group_id` to highlight the active agent workspace in the indicator/dropdown. Tab entries in gui_tab_bar carry a `group_id` field that matches workspace IDs, enabling the frontend to render group separators at group transitions.
 
 ## GUI Action Input Opcode (Frontend → BEAM)
 
