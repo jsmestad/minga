@@ -68,6 +68,14 @@ defmodule MingaAgent.BufferForkStore do
     GenServer.call(store, :merge_all, 30_000)
   end
 
+  @doc "Merges forks and keeps failed forks alive for later conflict handling."
+  @spec merge_all_keep_failed(GenServer.server()) :: [
+          {String.t(), :ok | {:conflict, term()} | {:error, term()}}
+        ]
+  def merge_all_keep_failed(store) do
+    GenServer.call(store, :merge_all_keep_failed, 30_000)
+  end
+
   @doc "Discards all forks without merging."
   @spec discard_all(GenServer.server()) :: :ok
   def discard_all(store) do
@@ -127,6 +135,13 @@ defmodule MingaAgent.BufferForkStore do
     {:reply, results, %{state | forks: %{}, monitors: %{}}}
   end
 
+  def handle_call(:merge_all_keep_failed, _from, state) do
+    results = Enum.map(state.forks, fn {path, fork_pid} -> merge_fork(path, fork_pid) end)
+    successful_paths = successful_merge_paths(results)
+    state = stop_forks_for_paths(state, successful_paths)
+    {:reply, results, state}
+  end
+
   def handle_call(:discard_all, _from, state) do
     stop_all_forks(state)
     {:reply, :ok, %{state | forks: %{}, monitors: %{}}}
@@ -175,6 +190,39 @@ defmodule MingaAgent.BufferForkStore do
       {:error, reason} ->
         {path, {:error, reason}}
     end
+  end
+
+  @spec successful_merge_paths([{String.t(), :ok | {:conflict, term()} | {:error, term()}}]) ::
+          MapSet.t(String.t())
+  defp successful_merge_paths(results) do
+    results
+    |> Enum.flat_map(fn
+      {path, :ok} -> [path]
+      {_path, _result} -> []
+    end)
+    |> MapSet.new()
+  end
+
+  @spec stop_forks_for_paths(state(), MapSet.t(String.t())) :: state()
+  defp stop_forks_for_paths(state, paths) do
+    {refs_to_stop, monitors} =
+      split_map_by_paths(state.monitors, paths, fn {_ref, path} -> path end)
+
+    {forks_to_stop, forks} = split_map_by_paths(state.forks, paths, fn {path, _pid} -> path end)
+
+    Enum.each(refs_to_stop, fn {ref, _path} -> Process.demonitor(ref, [:flush]) end)
+
+    Enum.each(forks_to_stop, fn {_path, fork_pid} ->
+      if Process.alive?(fork_pid), do: GenServer.stop(fork_pid, :normal)
+    end)
+
+    %{state | forks: Map.new(forks), monitors: Map.new(monitors)}
+  end
+
+  @spec split_map_by_paths(map(), MapSet.t(String.t()), (term() -> String.t())) ::
+          {[term()], [term()]}
+  defp split_map_by_paths(map, paths, path_fun) do
+    Enum.split_with(map, fn entry -> MapSet.member?(paths, path_fun.(entry)) end)
   end
 
   @spec stop_all_forks(state()) :: :ok
