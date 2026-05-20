@@ -35,6 +35,8 @@ defmodule MingaEditor.Mouse do
   alias MingaEditor.FocusTree.Node, as: FocusNode
   alias MingaEditor.FoldMap
   alias MingaEditor.Layout
+  alias MingaEditor.Mouse.HitTest
+  alias MingaEditor.Mouse.Target.Buffer, as: BufferTarget
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -1111,7 +1113,7 @@ defmodule MingaEditor.Mouse do
          buf when is_pid(buf) <- window.buffer do
       total_lines = Buffer.line_count(buf)
       {cursor_line, _} = window.cursor
-      scroll_top = window_scroll_top(window, win_h, content_w, cursor_line, buf)
+      scroll_top = HitTest.scroll_top(window, win_h, content_w, cursor_line, buf)
 
       case fold_target_line_at_row(
              buf,
@@ -1145,7 +1147,7 @@ defmodule MingaEditor.Mouse do
 
     first_buf_line = display_map_scroll_top(window, scroll_top)
 
-    text_width = display_map_content_width(buf, total_lines, content_w)
+    text_width = HitTest.content_text_width(buf, total_lines, content_w)
 
     case DisplayMap.compute(window.fold_map, decs, first_buf_line, win_h, total_lines, text_width) do
       nil ->
@@ -1232,37 +1234,17 @@ defmodule MingaEditor.Mouse do
     end
   end
 
-  @spec gutter_width(state(), non_neg_integer()) :: non_neg_integer()
-  defp gutter_width(%{workspace: %{buffers: %{active: buf}}}, total_lines) do
-    buffer_gutter_width(buf, total_lines)
-  end
-
-  @spec buffer_gutter_width(pid() | nil, non_neg_integer()) :: non_neg_integer()
-  defp buffer_gutter_width(buf, total_lines) do
-    ln_style =
-      if buf, do: Buffer.get_option(buf, :line_numbers), else: :none
-
-    number_w =
-      if ln_style == :none, do: 0, else: Viewport.gutter_width(total_lines)
-
-    # Sign column is always reserved for consistent gutter layout.
-    Gutter.total_width(number_w)
-  end
-
-  @spec display_map_content_width(pid(), non_neg_integer(), pos_integer()) :: pos_integer()
-  defp display_map_content_width(buf, total_lines, content_w) do
-    max(content_w - buffer_gutter_width(buf, total_lines), 1)
-  end
-
   # ── Screen-to-buffer coordinate translation ────────────────────────────────
 
-  @spec mouse_to_buffer_pos(state(), non_neg_integer(), non_neg_integer()) ::
+  @spec mouse_to_buffer_pos(state(), integer(), integer()) ::
           {non_neg_integer(), non_neg_integer()} | nil
   defp mouse_to_buffer_pos(state, row, col) do
-    if EditorState.split?(state) do
-      mouse_to_buffer_pos_split(state, row, col)
-    else
-      mouse_to_buffer_pos_single(state, row, col)
+    case HitTest.resolve_buffer(state, row, col) do
+      {:buffer, target} ->
+        BufferTarget.position(target)
+
+      :miss ->
+        nil
     end
   end
 
@@ -1276,7 +1258,7 @@ defmodule MingaEditor.Mouse do
         window = EditorState.active_window_struct(state)
         total_lines = Buffer.line_count(buf)
         {cursor_line, _} = Buffer.cursor(buf)
-        scroll_top = window_scroll_top(window, win_h, content_w, cursor_line, buf)
+        scroll_top = HitTest.scroll_top(window, win_h, content_w, cursor_line, buf)
         local_row = row - win_row
         target_line = local_row + scroll_top
 
@@ -1287,71 +1269,6 @@ defmodule MingaEditor.Mouse do
         end
 
       nil ->
-        nil
-    end
-  end
-
-  @spec mouse_to_buffer_pos_single(state(), non_neg_integer(), non_neg_integer()) ::
-          {non_neg_integer(), non_neg_integer()} | nil
-  defp mouse_to_buffer_pos_single(%{workspace: %{buffers: %{active: buf}}} = state, row, col) do
-    layout = Layout.get(state)
-
-    case Layout.active_window_layout(layout, state) do
-      %{content: {win_row, win_col, content_w, win_h}} ->
-        window = EditorState.active_window_struct(state)
-        total_lines = Buffer.line_count(buf)
-        gutter_w = gutter_width(state, total_lines)
-        {cursor_line, _} = Buffer.cursor(buf)
-        scroll_top = window_scroll_top(window, win_h, content_w, cursor_line, buf)
-        local_row = row - win_row
-        local_col = max(col - win_col - gutter_w, 0) + current_viewport(state).left
-
-        resolve_with_display_map(
-          buf,
-          window,
-          local_row,
-          local_col,
-          scroll_top,
-          win_h,
-          content_w,
-          total_lines
-        )
-
-      nil ->
-        nil
-    end
-  end
-
-  @spec mouse_to_buffer_pos_split(state(), non_neg_integer(), non_neg_integer()) ::
-          {non_neg_integer(), non_neg_integer()} | nil
-  defp mouse_to_buffer_pos_split(state, row, col) do
-    layout = Layout.get(state)
-
-    case WindowTree.window_at(state.workspace.windows.tree, layout.editor_area, row, col) do
-      {:ok, id, {win_row, win_col, _win_w, _win_h}} ->
-        window = Map.fetch!(state.workspace.windows.map, id)
-        win_layout = Map.fetch!(layout.window_layouts, id)
-        {_cr, _cc, content_w, content_h} = win_layout.content
-        buf = window.buffer
-        total_lines = Buffer.line_count(buf)
-        gutter_w = buffer_gutter_width(buf, total_lines)
-        {cursor_line, _} = window.cursor
-        scroll_top = window_scroll_top(window, content_h, content_w, cursor_line, buf)
-        local_row = row - win_row
-        local_col = max(col - win_col - gutter_w, 0) + window.viewport.left
-
-        resolve_with_display_map(
-          buf,
-          window,
-          local_row,
-          local_col,
-          scroll_top,
-          content_h,
-          content_w,
-          total_lines
-        )
-
-      :error ->
         nil
     end
   end
@@ -1398,16 +1315,16 @@ defmodule MingaEditor.Mouse do
          col
        ) do
     total_lines = Buffer.line_count(buf)
-    gutter_w = buffer_gutter_width(buf, total_lines)
+    gutter_w = HitTest.buffer_gutter_width(buf, total_lines)
     {cursor_line, _} = window.cursor
-    scroll_top = window_scroll_top(window, content_h, content_w, cursor_line, buf)
+    scroll_top = HitTest.scroll_top(window, content_h, content_w, cursor_line, buf)
     local_row = row - content_row
     local_col = max(col - content_col - gutter_w, 0) + window.viewport.left
 
     if local_row < 0 or local_row >= content_h do
       resolve_drag_buffer_pos(buf, local_row, local_col, scroll_top, content_h, total_lines)
     else
-      case resolve_with_display_map(
+      case HitTest.position(
              buf,
              window,
              local_row,
@@ -1417,11 +1334,11 @@ defmodule MingaEditor.Mouse do
              content_w,
              total_lines
            ) do
-        nil ->
-          resolve_drag_buffer_pos(buf, local_row, local_col, scroll_top, content_h, total_lines)
-
-        pos ->
+        {:position, pos} ->
           pos
+
+        _target_or_miss ->
+          resolve_drag_buffer_pos(buf, local_row, local_col, scroll_top, content_h, total_lines)
       end
     end
   catch
@@ -1438,7 +1355,7 @@ defmodule MingaEditor.Mouse do
         ) :: {non_neg_integer(), non_neg_integer()}
   defp resolve_drag_buffer_pos(buf, local_row, local_col, scroll_top, content_h, total_lines) do
     line = drag_target_line(local_row, scroll_top, content_h, total_lines)
-    {line, clamp_col_to_line(buf, line, local_col)}
+    {line, HitTest.clamp_col_to_line(buf, line, local_col)}
   end
 
   @spec drag_target_line(integer(), non_neg_integer(), pos_integer(), non_neg_integer()) ::
@@ -1454,122 +1371,6 @@ defmodule MingaEditor.Mouse do
 
   defp drag_target_line(local_row, scroll_top, _content_h, total_lines) do
     (scroll_top + local_row) |> max(0) |> min(total_lines - 1)
-  end
-
-  # Resolves a click position using the DisplayMap to correctly handle
-  # block decorations, virtual lines, and folds. If the clicked display
-  # row is a block decoration, dispatches on_click and returns nil.
-  @spec resolve_with_display_map(
-          pid(),
-          Window.t() | nil,
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          pos_integer(),
-          pos_integer(),
-          non_neg_integer()
-        ) :: {non_neg_integer(), non_neg_integer()} | nil
-  defp resolve_with_display_map(
-         buf,
-         window,
-         local_row,
-         local_col,
-         scroll_top,
-         win_h,
-         content_w,
-         total_lines
-       ) do
-    decs = Buffer.decorations(buf)
-    fold_map = if window, do: window.fold_map, else: FoldMap.new()
-
-    text_width = display_map_content_width(buf, total_lines, content_w)
-
-    case DisplayMap.compute(fold_map, decs, scroll_top, win_h, total_lines, text_width) do
-      nil ->
-        # No display map needed, use direct line mapping
-        target_line = local_row + scroll_top
-        resolve_buffer_pos(buf, local_row, win_h, target_line, local_col, total_lines)
-
-      %DisplayMap{} = dm ->
-        # Look up what's at this display row
-        case DisplayMap.buf_line_for_display_row(dm, local_row) do
-          nil ->
-            nil
-
-          target_line ->
-            entry = Enum.at(dm.entries, local_row)
-
-            handle_display_row_click(
-              entry,
-              buf,
-              local_row,
-              local_col,
-              win_h,
-              target_line,
-              total_lines
-            )
-        end
-    end
-  catch
-    :exit, _ ->
-      target_line = local_row + scroll_top
-      resolve_buffer_pos(buf, local_row, win_h, target_line, local_col, total_lines)
-  end
-
-  defp handle_display_row_click(
-         {_line, {:block, block, line_idx}},
-         _buf,
-         _row,
-         col,
-         _win_h,
-         _target,
-         _total
-       ) do
-    if block.on_click, do: block.on_click.(line_idx, col)
-    nil
-  end
-
-  defp handle_display_row_click(
-         {_line, {:virtual_line, _}},
-         _buf,
-         _row,
-         _col,
-         _win_h,
-         _target,
-         _total
-       ) do
-    nil
-  end
-
-  defp handle_display_row_click(
-         _entry,
-         buf,
-         local_row,
-         local_col,
-         win_h,
-         target_line,
-         total_lines
-       ) do
-    resolve_buffer_pos(buf, local_row, win_h, target_line, local_col, total_lines)
-  end
-
-  defp resolve_buffer_pos(_buf, row, visible_rows, _line, _col, _total)
-       when row >= visible_rows,
-       do: nil
-
-  defp resolve_buffer_pos(_buf, _row, _visible, target_line, _col, total)
-       when target_line >= total,
-       do: nil
-
-  defp resolve_buffer_pos(_buf, _row, _visible, target_line, _col, _total)
-       when target_line < 0,
-       do: nil
-
-  defp resolve_buffer_pos(buf, _row, _visible, target_line, target_col, _total) do
-    # Adjust for inline virtual text: the target_col is a display column,
-    # but if inline virtual text is present, the buffer column is different.
-    adjusted_col = adjust_col_for_virtual_text(buf, target_line, target_col)
-    {target_line, clamp_col_to_line(buf, target_line, adjusted_col)}
   end
 
   @spec auto_copy_selection(EditorState.t()) :: EditorState.t()
@@ -1610,34 +1411,6 @@ defmodule MingaEditor.Mouse do
   end
 
   defp maybe_copy_to_clipboard(_state, _text), do: :ok
-
-  @spec adjust_col_for_virtual_text(pid(), non_neg_integer(), non_neg_integer()) ::
-          non_neg_integer()
-  defp adjust_col_for_virtual_text(buf, line, display_col) do
-    Decorations.display_col_to_buf_col(Buffer.decorations(buf), line, display_col)
-  catch
-    :exit, _ -> display_col
-  end
-
-  # Computes the scroll top the same way the render pipeline does:
-  # Returns the viewport's scroll top. Now reads from the window's
-  # persistent viewport instead of computing a throwaway one each time.
-  @spec window_scroll_top(
-          Window.t() | nil,
-          pos_integer(),
-          pos_integer(),
-          non_neg_integer(),
-          pid()
-        ) ::
-          non_neg_integer()
-  defp window_scroll_top(%Window{viewport: vp}, _h, _w, _cursor, _buf), do: vp.top
-
-  defp window_scroll_top(nil, content_height, content_width, cursor_line, buf) do
-    # Fallback when no window struct is available
-    vp = Viewport.new(content_height, content_width, 0)
-    vp = Viewport.scroll_to_cursor(vp, {cursor_line, 0}, buf)
-    vp.top
-  end
 
   # ── Viewport helpers ───────────────────────────────────────────────────────
 
@@ -1730,7 +1503,7 @@ defmodule MingaEditor.Mouse do
       clamp_with_margin(cursor_line, first_line, last_line, effective_margin, direction)
 
     if target_line != cursor_line do
-      Buffer.move_to(buf, {target_line, clamp_col_to_line(buf, target_line, cursor_col)})
+      Buffer.move_to(buf, {target_line, HitTest.clamp_col_to_line(buf, target_line, cursor_col)})
     end
 
     state
@@ -1841,17 +1614,6 @@ defmodule MingaEditor.Mouse do
   defp enter_visual_if_needed(state, anchor) do
     visual_state = %VisualState{visual_anchor: anchor, visual_type: :char}
     EditorState.transition_mode(state, :visual, visual_state)
-  end
-
-  @spec clamp_col_to_line(pid(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
-  defp clamp_col_to_line(buf, line, col) do
-    case Buffer.lines(buf, line, 1) do
-      [text] when byte_size(text) > 0 ->
-        min(col, Unicode.last_grapheme_byte_offset(text))
-
-      _ ->
-        0
-    end
   end
 
   @spec cancel_mode_for_mouse(state()) :: state()
