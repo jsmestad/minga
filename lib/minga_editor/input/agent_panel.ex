@@ -83,6 +83,8 @@ defmodule MingaEditor.Input.AgentPanel do
 
   @spec handle_panel_input(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
+  defp handle_panel_input(state, 27, 0), do: handle_panel_escape(state)
+
   defp handle_panel_input(state, cp, mods) do
     binding_state = Minga.Editing.binding_state(state)
 
@@ -113,6 +115,14 @@ defmodule MingaEditor.Input.AgentPanel do
       # Normal, visual, operator-pending: route through Mode FSM
       # targeting the prompt buffer
       dispatch_prompt_via_mode_fsm(state, cp, mods)
+    end
+  end
+
+  @spec handle_panel_escape(EditorState.t()) :: EditorState.t()
+  defp handle_panel_escape(state) do
+    case Minga.Editing.mode(state) do
+      :normal -> AgentCommands.scope_unfocus_input(state)
+      _ -> dispatch_prompt_via_mode_fsm(state, 27, 0)
     end
   end
 

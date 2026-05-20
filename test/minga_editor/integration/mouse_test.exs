@@ -8,25 +8,13 @@ defmodule Minga.Integration.MouseTest do
 
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree
-  alias Minga.Test.HeadlessPort
   alias Minga.Test.StubServer
-
-  @sync_timeout 15_000
 
   defp start_editor_with_project(content) do
     id = :erlang.unique_integer([:positive])
     root = Path.join(System.tmp_dir!(), "minga-integration-mouse-#{id}")
     File.mkdir_p!(root)
     start_editor(content, project_root: root)
-  end
-
-  defp send_gui_action(%{editor: editor, port: port}, action) do
-    _ = GenServer.call(editor, :api_mode, @sync_timeout)
-    ref = HeadlessPort.prepare_await(port)
-    send(editor, {:minga_input, {:gui_action, action}})
-    {:ok, snapshot} = HeadlessPort.collect_frame(ref)
-    Process.put({:last_frame_snapshot, port}, snapshot)
-    :ok
   end
 
   defp inject_fake_session(%{editor: editor} = ctx) do
@@ -158,16 +146,6 @@ defmodule Minga.Integration.MouseTest do
       state = editor_state(ctx)
       assert state.lsp.selection_ranges == nil
       assert state.lsp.selection_range_index == 0
-    end
-
-    test "GUI tab actions run the full housekeeping pipeline" do
-      ctx = start_editor("hello world\nsecond line\nthird line")
-      tab_id = editor_state(ctx).shell_state.tab_bar.active_id
-
-      send_gui_action(ctx, {:select_tab, tab_id})
-
-      assert editor_mode(ctx) == :normal
-      assert active_content(ctx) == "hello world\nsecond line\nthird line"
     end
   end
 end

@@ -139,14 +139,19 @@ defmodule MingaEditor.Input.AgentPanelNavTest do
   end
 
   describe "agent panel input mode (via Scoped)" do
-    test "Escape switches to input normal mode" do
+    test "Escape unfocuses a normal-mode input without clearing the draft" do
       state = make_state()
 
       state =
-        AgentAccess.update_agent_ui(state, fn ui -> put_in(ui.panel.input_focused, true) end)
+        AgentAccess.update_agent_ui(state, fn ui ->
+          ui
+          |> UIState.set_input_focused(true)
+          |> UIState.set_prompt_text("draft")
+        end)
 
       {:handled, new_state} = walk_surface_handlers(state, 27, 0)
-      assert AgentAccess.input_focused?(new_state) == true
+      refute AgentAccess.input_focused?(new_state)
+      assert UIState.input_text(AgentAccess.panel(new_state)) == "draft"
       assert new_state.workspace.editing.mode == :normal
     end
 
