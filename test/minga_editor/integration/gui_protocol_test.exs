@@ -71,17 +71,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       cmd = ProtocolGUI.encode_gui_tab_bar(tb)
       Port.command(port, cmd)
 
-      # With visible tabs, the harness sends both a JSON report and a gui_action.
-      # Find the JSON one.
-      messages =
-        for _ <- 1..2,
-            do:
-              (
-                assert_receive {^port, {:data, d}}, 5_000
-                d
-              )
-
-      json = Enum.find(messages, &String.starts_with?(&1, "{"))
+      assert_receive {^port, {:data, json}}, 5_000
       decoded = Jason.decode!(json)
 
       assert decoded["type"] == "gui_tab_bar"

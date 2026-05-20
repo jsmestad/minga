@@ -826,12 +826,15 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   `ChromeState` includes the synthesized manual workspace, but this legacy opcode intentionally sends only agent workspaces. A later canonical workspace protocol can carry manual-vs-agent kind explicitly without overloading this agent-group contract.
 
   Wire format:
-    opcode(1) + active_group_id(2) + agent_workspace_count(1) + agent_workspaces...
+    opcode(1) + active_workspace_id(2) + agent_workspace_count(1) + agent_workspaces...
 
   Per agent workspace:
     id(2) + agent_status(1) + color_r(1) + color_g(1) + color_b(1)
     + tab_count(2) + label_len(1) + label(label_len) + icon_len(1) + icon(icon_len)
 
+  There is no kind byte in the payload. The emitted list contains only agent
+  workspaces created by agents, and the icon fields carry the workspace icon
+  name.
   Agent status: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan.
   """
   @spec encode_gui_agent_groups(TabBar.t() | ChromeState.t()) :: binary()
