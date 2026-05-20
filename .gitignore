@@ -52,6 +52,9 @@ test/tmp/
 macos/build/
 macos/DerivedData/
 
+# Minga project-local state
+.minga/workspaces/
+
 # Agent / experiment scratch files
 .standup/
 CLAUDE.md

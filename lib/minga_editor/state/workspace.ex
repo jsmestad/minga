@@ -6,13 +6,14 @@ defmodule MingaEditor.State.Workspace do
   """
 
   alias Minga.Project.FileRef
+  alias MingaEditor.State.Workspace.Persistence
   alias MingaEditor.State.WorkspaceReview
 
   @typedoc "Workspace kind."
   @type kind :: :manual | :agent
 
   @typedoc "Agent status for workspace display."
-  @type agent_status :: :idle | :plan | :thinking | :tool_executing | :error | nil
+  @type agent_status :: :idle | :plan | :thinking | :tool_executing | :error | :stopped | nil
 
   @typedoc "Workspace icon identifier."
   @type icon :: String.t()
@@ -31,7 +32,8 @@ defmodule MingaEditor.State.Workspace do
           active_file: FileRef.t() | nil,
           agent_ui: term() | nil,
           project_view: term() | nil,
-          review: WorkspaceReview.t()
+          review: WorkspaceReview.t(),
+          project_root: String.t() | nil
         }
 
   @enforce_keys [:id, :kind]
@@ -47,7 +49,8 @@ defmodule MingaEditor.State.Workspace do
             active_file: nil,
             agent_ui: nil,
             project_view: nil,
-            review: WorkspaceReview.new()
+            review: WorkspaceReview.new(),
+            project_root: nil
 
   @doc "Creates the manual project workspace."
   @spec new_manual(String.t() | nil) :: t()
@@ -59,13 +62,14 @@ defmodule MingaEditor.State.Workspace do
       icon: "folder",
       color: 0x51AFEF,
       agent_status: nil,
-      session: nil
+      session: nil,
+      project_root: normalize_project_root(project_root)
     }
   end
 
   @doc "Creates a new agent workspace with a unique id."
-  @spec new_agent(pos_integer(), String.t(), pid() | nil) :: t()
-  def new_agent(id, label, session \\ nil) when is_integer(id) and id > 0 do
+  @spec new_agent(pos_integer(), String.t(), pid() | nil, String.t() | nil) :: t()
+  def new_agent(id, label, session \\ nil, project_root \\ nil) when is_integer(id) and id > 0 do
     %__MODULE__{
       id: id,
       kind: :agent,
@@ -73,7 +77,8 @@ defmodule MingaEditor.State.Workspace do
       icon: "cpu",
       color: agent_color(id),
       agent_status: :idle,
-      session: session
+      session: session,
+      project_root: normalize_project_root(project_root)
     }
   end
 
@@ -89,10 +94,18 @@ defmodule MingaEditor.State.Workspace do
     %{workspace | project_view: project_view}
   end
 
+  @doc "Returns a copy scoped to a project root for persistence."
+  @spec with_project_root(t(), String.t() | nil) :: t()
+  def with_project_root(%__MODULE__{} = workspace, project_root) do
+    %{workspace | project_root: normalize_project_root(project_root)}
+  end
+
   @doc "Sets review state through the owning workspace module."
   @spec set_review(t(), WorkspaceReview.t()) :: t()
   def set_review(%__MODULE__{} = workspace, %WorkspaceReview{} = review) do
-    %{workspace | review: review}
+    workspace
+    |> Map.put(:review, review)
+    |> persist()
   end
 
   @doc "Returns true when drafts or conflicts require user action before close."
@@ -113,13 +126,17 @@ defmodule MingaEditor.State.Workspace do
   @doc "Renames the workspace and protects it from future auto-naming."
   @spec rename(t(), String.t()) :: t()
   def rename(%__MODULE__{} = workspace, name) when is_binary(name) do
-    %{workspace | label: name, custom_name: name}
+    workspace
+    |> Map.merge(%{label: name, custom_name: name})
+    |> persist()
   end
 
   @doc "Sets the workspace icon."
   @spec set_icon(t(), String.t()) :: t()
   def set_icon(%__MODULE__{} = workspace, icon) when is_binary(icon) do
-    %{workspace | icon: icon}
+    workspace
+    |> Map.put(:icon, icon)
+    |> persist()
   end
 
   @doc "Auto-names an agent workspace from an agent prompt unless the user renamed it."
@@ -139,7 +156,9 @@ defmodule MingaEditor.State.Workspace do
     if has_file?(workspace, file_ref) do
       workspace
     else
-      %{workspace | files: workspace.files ++ [file_ref]}
+      workspace
+      |> Map.put(:files, workspace.files ++ [file_ref])
+      |> persist()
     end
   end
 
@@ -148,7 +167,10 @@ defmodule MingaEditor.State.Workspace do
   def remove_file(%__MODULE__{} = workspace, %FileRef{} = file_ref) do
     files = Enum.reject(workspace.files, &FileRef.equal?(&1, file_ref))
     active_file = remove_active_file(workspace.active_file, file_ref)
-    %{workspace | files: files, active_file: active_file}
+
+    workspace
+    |> Map.merge(%{files: files, active_file: active_file})
+    |> persist()
   end
 
   @doc "Rebinds the active file membership from one logical file ref to another."
@@ -203,13 +225,60 @@ defmodule MingaEditor.State.Workspace do
 
   @doc "Sets the active file membership for the workspace."
   @spec set_active_file(t(), FileRef.t() | nil) :: t()
-  def set_active_file(%__MODULE__{} = workspace, nil), do: %{workspace | active_file: nil}
+  def set_active_file(%__MODULE__{} = workspace, nil) do
+    workspace
+    |> Map.put(:active_file, nil)
+    |> persist()
+  end
 
   def set_active_file(%__MODULE__{} = workspace, %FileRef{} = file_ref) do
     workspace
     |> add_file(file_ref)
     |> Map.put(:active_file, file_ref)
+    |> persist()
   end
+
+  @doc "Serializes the persisted workspace fields to a JSON-ready map."
+  @spec to_persisted_map(t()) :: map()
+  def to_persisted_map(%__MODULE__{} = workspace) do
+    %{
+      "schema_version" => 1,
+      "id" => workspace.id,
+      "kind" => Atom.to_string(workspace.kind),
+      "label" => workspace.label,
+      "custom_name" => workspace.custom_name,
+      "icon" => workspace.icon,
+      "color" => workspace.color,
+      "files" => Enum.map(workspace.files, &file_ref_to_map/1),
+      "active_file" => file_ref_to_map(workspace.active_file),
+      "review" => review_to_map(workspace.review)
+    }
+  end
+
+  @doc "Restores a workspace from persisted JSON data, ignoring unknown fields and using defaults for missing fields."
+  @spec from_persisted_map(map(), String.t()) :: {:ok, t()} | {:error, term()}
+  def from_persisted_map(data, project_root) when is_map(data) and is_binary(project_root) do
+    root = normalize_project_root(project_root)
+    kind = persisted_kind(Map.get(data, "kind"), Map.get(data, "id", 0))
+    workspace = default_persisted_workspace(kind, persisted_id(Map.get(data, "id")), root)
+
+    {:ok,
+     %{
+       workspace
+       | label: persisted_string(Map.get(data, "label"), workspace.label),
+         custom_name: persisted_nullable_string(Map.get(data, "custom_name")),
+         icon: persisted_string(Map.get(data, "icon"), workspace.icon),
+         color: persisted_color(Map.get(data, "color"), workspace.color),
+         files: persisted_file_refs(Map.get(data, "files"), root),
+         active_file: persisted_file_ref(Map.get(data, "active_file"), root),
+         review: persisted_review(Map.get(data, "review"), root),
+         session: nil,
+         agent_status: :stopped,
+         project_root: root
+     }}
+  end
+
+  def from_persisted_map(_data, _project_root), do: {:error, :invalid_workspace_json}
 
   @spec apply_review_transition(WorkspaceReview.t(), atom(), term()) ::
           {:ok, WorkspaceReview.t()} | {:error, term()}
@@ -243,6 +312,137 @@ defmodule MingaEditor.State.Workspace do
 
   defp apply_review_transition(%WorkspaceReview{state: from}, event, _payload),
     do: {:error, {:invalid_transition, from, event}}
+
+  @spec default_persisted_workspace(kind(), non_neg_integer(), String.t() | nil) :: t()
+  defp default_persisted_workspace(:manual, _id, project_root), do: new_manual(project_root)
+
+  defp default_persisted_workspace(:agent, id, project_root),
+    do: new_agent(max(id, 1), "Agent #{id}", nil, project_root)
+
+  @spec file_ref_to_map(FileRef.t() | nil) :: map() | nil
+  defp file_ref_to_map(nil), do: nil
+
+  defp file_ref_to_map(%FileRef{kind: :path} = file_ref) do
+    %{
+      "kind" => "path",
+      "project_root" => file_ref.project_root,
+      "relative_path" => file_ref.relative_path,
+      "display_name" => file_ref.display_name
+    }
+  end
+
+  defp file_ref_to_map(%FileRef{kind: :buffer} = file_ref) do
+    %{"kind" => "buffer", "display_name" => file_ref.display_name}
+  end
+
+  @spec review_to_map(WorkspaceReview.t()) :: map()
+  defp review_to_map(%WorkspaceReview{} = review) do
+    %{
+      "state" => Atom.to_string(review.state),
+      "changed_files" => Enum.map(review.changed_files, &file_ref_to_map/1),
+      "conflict_files" => Enum.map(review.conflict_files, &file_ref_to_map/1),
+      "last_error" => json_safe(review.last_error),
+      "in_progress" => review.in_progress?
+    }
+  end
+
+  @spec json_safe(term()) :: term()
+  defp json_safe(value)
+       when is_nil(value) or is_binary(value) or is_number(value) or is_boolean(value), do: value
+
+  defp json_safe(value) when is_atom(value), do: Atom.to_string(value)
+  defp json_safe(value) when is_list(value), do: Enum.map(value, &json_safe/1)
+
+  defp json_safe(value) when is_map(value) do
+    Map.new(value, fn {key, item} -> {json_safe_key(key), json_safe(item)} end)
+  end
+
+  defp json_safe(value), do: inspect(value)
+
+  @spec json_safe_key(term()) :: String.t()
+  defp json_safe_key(key) when is_binary(key), do: key
+  defp json_safe_key(key) when is_atom(key), do: Atom.to_string(key)
+  defp json_safe_key(key), do: inspect(key)
+
+  @spec persisted_id(term()) :: non_neg_integer()
+  defp persisted_id(id) when is_integer(id) and id >= 0, do: id
+  defp persisted_id(_id), do: 0
+
+  @spec persisted_kind(term(), term()) :: kind()
+  defp persisted_kind("manual", _id), do: :manual
+  defp persisted_kind("agent", _id), do: :agent
+  defp persisted_kind(_kind, 0), do: :manual
+  defp persisted_kind(_kind, _id), do: :agent
+
+  @spec persisted_string(term(), String.t()) :: String.t()
+  defp persisted_string(value, _default) when is_binary(value), do: value
+  defp persisted_string(_value, default), do: default
+
+  @spec persisted_nullable_string(term()) :: String.t() | nil
+  defp persisted_nullable_string(value) when is_binary(value), do: value
+  defp persisted_nullable_string(_value), do: nil
+
+  @spec persisted_color(term(), non_neg_integer() | nil) :: non_neg_integer() | nil
+  defp persisted_color(value, _default) when is_integer(value) and value >= 0, do: value
+  defp persisted_color(nil, _default), do: nil
+  defp persisted_color(_value, default), do: default
+
+  @spec persisted_file_refs(term(), String.t() | nil) :: [FileRef.t()]
+  defp persisted_file_refs(files, project_root) when is_list(files) do
+    Enum.flat_map(files, fn file -> persisted_file_ref_list(file, project_root) end)
+  end
+
+  defp persisted_file_refs(_files, _project_root), do: []
+
+  @spec persisted_file_ref_list(term(), String.t() | nil) :: [FileRef.t()]
+  defp persisted_file_ref_list(file, project_root) do
+    case persisted_file_ref(file, project_root) do
+      %FileRef{} = file_ref -> [file_ref]
+      nil -> []
+    end
+  end
+
+  @spec persisted_file_ref(term(), String.t() | nil) :: FileRef.t() | nil
+  defp persisted_file_ref(%{"kind" => "path", "relative_path" => path}, project_root)
+       when is_binary(path) and is_binary(project_root) do
+    case FileRef.from_path(project_root, path) do
+      {:ok, file_ref} -> file_ref
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp persisted_file_ref(_file, _project_root), do: nil
+
+  @spec persisted_review(term(), String.t() | nil) :: WorkspaceReview.t()
+  defp persisted_review(%{"state" => state} = data, project_root) do
+    %WorkspaceReview{
+      state: persisted_review_state(state),
+      changed_files: persisted_file_refs(Map.get(data, "changed_files"), project_root),
+      conflict_files: persisted_file_refs(Map.get(data, "conflict_files"), project_root),
+      last_error: Map.get(data, "last_error"),
+      in_progress?: false
+    }
+  end
+
+  defp persisted_review(_data, _project_root), do: WorkspaceReview.new()
+
+  @spec persisted_review_state(term()) :: WorkspaceReview.state()
+  defp persisted_review_state("draft"), do: :draft
+  defp persisted_review_state("needs_review"), do: :needs_review
+  defp persisted_review_state("conflict"), do: :conflict
+  defp persisted_review_state(_state), do: :clean
+
+  @spec persist(t()) :: t()
+  defp persist(%__MODULE__{project_root: project_root} = workspace) do
+    Persistence.write(workspace, project_root)
+    workspace
+  end
+
+  @spec normalize_project_root(String.t() | nil) :: String.t() | nil
+  defp normalize_project_root(project_root) when is_binary(project_root),
+    do: Path.expand(project_root)
+
+  defp normalize_project_root(_project_root), do: nil
 
   @spec maybe_rebind_active_file(t(), FileRef.t(), boolean()) :: t()
   defp maybe_rebind_active_file(%__MODULE__{} = workspace, %FileRef{} = new_file_ref, true) do
@@ -291,7 +491,12 @@ defmodule MingaEditor.State.Workspace do
 
   @spec apply_auto_name(String.t(), t()) :: t()
   defp apply_auto_name("", workspace), do: workspace
-  defp apply_auto_name(name, workspace), do: %{workspace | label: name}
+
+  defp apply_auto_name(name, workspace) do
+    workspace
+    |> Map.put(:label, name)
+    |> persist()
+  end
 
   @workspace_colors [
     0xC678DD,

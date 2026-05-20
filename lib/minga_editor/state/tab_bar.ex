@@ -17,6 +17,7 @@ defmodule MingaEditor.State.TabBar do
   alias Minga.FileRef
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Workspace
+  alias MingaEditor.State.Workspace.Persistence, as: WorkspacePersistence
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
 
@@ -496,7 +497,8 @@ defmodule MingaEditor.State.TabBar do
   """
   @spec add_workspace(t(), String.t(), pid() | nil) :: {t(), Workspace.t()}
   def add_workspace(%__MODULE__{} = tb, label, session \\ nil) do
-    ws = Workspace.new_agent(tb.next_workspace_id, label, session)
+    ws = Workspace.new_agent(tb.next_workspace_id, label, session, project_root(tb))
+    WorkspacePersistence.write(ws, ws.project_root)
 
     # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
     workspaces = tb.workspaces ++ [ws]
@@ -513,6 +515,7 @@ defmodule MingaEditor.State.TabBar do
   def remove_workspace(%__MODULE__{} = tb, 0), do: tb
 
   def remove_workspace(%__MODULE__{} = tb, workspace_id) do
+    WorkspacePersistence.delete(workspace_id, project_root(tb))
     workspaces = Enum.reject(tb.workspaces, &(&1.id == workspace_id))
 
     tabs =
@@ -616,11 +619,20 @@ defmodule MingaEditor.State.TabBar do
       when is_function(fun, 1) do
     new_workspaces =
       Enum.map(workspaces, fn
-        %Workspace{id: ^id} = ws -> fun.(ws)
+        %Workspace{id: ^id} = ws -> persist_if_changed(ws, fun.(ws))
         ws -> ws
       end)
 
     %{tb | workspaces: new_workspaces}
+  end
+
+  @doc "Replaces restored workspaces and recalculates the next workspace id."
+  @spec restore_workspaces(t(), [Workspace.t()], String.t() | nil) :: t()
+  def restore_workspaces(%__MODULE__{} = tb, [], _project_root), do: tb
+
+  def restore_workspaces(%__MODULE__{} = tb, workspaces, project_root) when is_list(workspaces) do
+    workspaces = ensure_manual_workspace(workspaces, project_root)
+    %{tb | workspaces: workspaces, next_workspace_id: next_restored_workspace_id(workspaces)}
   end
 
   @doc "Returns true if any agent workspaces exist."
@@ -640,6 +652,41 @@ defmodule MingaEditor.State.TabBar do
       n when n <= 4 -> 2
       _ -> 3
     end
+  end
+
+  @spec persist_if_changed(Workspace.t(), Workspace.t()) :: Workspace.t()
+  defp persist_if_changed(%Workspace{} = old, %Workspace{} = new) do
+    if Workspace.to_persisted_map(old) == Workspace.to_persisted_map(new) do
+      new
+    else
+      WorkspacePersistence.write(new, new.project_root)
+      new
+    end
+  end
+
+  @spec project_root(t()) :: String.t() | nil
+  defp project_root(%__MODULE__{workspaces: workspaces}) do
+    case Enum.find(workspaces, &(&1.id == 0)) do
+      %Workspace{project_root: root} -> root
+      nil -> nil
+    end
+  end
+
+  @spec ensure_manual_workspace([Workspace.t()], String.t() | nil) :: [Workspace.t()]
+  defp ensure_manual_workspace(workspaces, project_root) do
+    case Enum.find(workspaces, &(&1.id == 0)) do
+      %Workspace{} -> workspaces
+      nil -> [Workspace.new_manual(project_root) | workspaces]
+    end
+  end
+
+  @spec next_restored_workspace_id([Workspace.t()]) :: pos_integer()
+  defp next_restored_workspace_id(workspaces) do
+    workspaces
+    |> Enum.map(& &1.id)
+    |> Enum.max(fn -> 0 end)
+    |> Kernel.+(1)
+    |> max(1)
   end
 
   @spec agent_workspaces(t()) :: [Workspace.t()]
