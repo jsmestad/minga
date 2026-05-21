@@ -2,12 +2,11 @@ defmodule MingaAgent.EphemeralSession do
   @moduledoc """
   Short-lived read-only agent sessions for inline ask.
 
-  These sessions are not persisted and are stopped after the editor has captured the answer. The tool list is intentionally restricted to project read/search operations.
+  These sessions are not persisted and are stopped after the editor has captured the answer. Inline asks send the selected context directly in the prompt and intentionally expose no tools, so the provider cannot silently read or search unrelated project files.
   """
 
   alias MingaAgent.Session
   alias MingaAgent.SessionManager
-  alias MingaAgent.Tools
 
   @doc "Starts a read-only ephemeral ask session and sends its prompt."
   @spec ask(String.t(), String.t(), keyword()) :: {:ok, pid()} | {:error, term()}
@@ -20,9 +19,11 @@ defmodule MingaAgent.EphemeralSession do
       session_store_dir: nil,
       startup_notice: nil,
       persist?: false,
+      hooks_enabled?: false,
       provider_opts: [
         project_root: project_root,
         read_only?: true,
+        tool_allowlist: [],
         tools: read_only_tools(project_root)
       ]
     ]
@@ -67,10 +68,11 @@ defmodule MingaAgent.EphemeralSession do
     :exit, _ -> ""
   end
 
-  @doc "Builds the read-only tool list for inline ask sessions."
+  @doc "Builds the final inline ask tool list. Inline asks use prompt-provided context only."
   @spec read_only_tools(String.t()) :: [ReqLLM.Tool.t()]
   def read_only_tools(project_root) when is_binary(project_root) do
-    Tools.read_only(project_root: project_root)
+    _project_root = project_root
+    []
   end
 
   @spec send_prompt_when_ready(pid(), String.t()) :: :ok

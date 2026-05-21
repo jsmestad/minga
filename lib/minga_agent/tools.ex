@@ -75,6 +75,7 @@ defmodule MingaAgent.Tools do
 
   @default_destructive_tools ~w(write_file edit_file multi_edit_file delete_file shell git_stage git_commit rename)
   @read_only_tools ~w(read_file list_directory find grep git_status git_diff git_log diagnostics definition references hover document_symbols workspace_symbols describe_runtime describe_tools)
+  @max_symlink_depth 40
 
   @doc """
   Returns true if the named tool is classified as destructive.
@@ -1194,15 +1195,206 @@ defmodule MingaAgent.Tools do
   """
   @spec resolve_and_validate_path!(String.t(), String.t()) :: String.t()
   def resolve_and_validate_path!(root, relative_path) do
-    # Expand to handle ".." segments
-    resolved = Path.expand(relative_path, root)
     normalized_root = Path.expand(root)
+    resolved = Path.expand(relative_path, normalized_root)
 
-    unless String.starts_with?(resolved, normalized_root <> "/") or resolved == normalized_root do
-      raise ArgumentError, "path escapes project root: #{relative_path}"
+    validate_inside_root!(resolved, normalized_root, relative_path)
+
+    canonical_root = canonical_root!(normalized_root, relative_path)
+
+    canonical_resolved =
+      resolve_inside_root!(
+        canonical_root,
+        relative_parts(resolved, normalized_root),
+        relative_path
+      )
+
+    validate_inside_root!(canonical_resolved, canonical_root, relative_path)
+
+    canonical_resolved
+  end
+
+  @spec canonical_root!(String.t(), String.t()) :: String.t()
+  defp canonical_root!(root, original_path) do
+    root
+    |> Path.expand()
+    |> absolute_parts()
+    |> resolve_existing_parts!(filesystem_anchor(root), original_path, %{}, 0)
+  end
+
+  @spec absolute_parts(String.t()) :: [String.t()]
+  defp absolute_parts(path) do
+    case Path.split(path) do
+      ["/" | parts] -> parts
+      parts -> parts
+    end
+  end
+
+  @spec filesystem_anchor(String.t()) :: String.t()
+  defp filesystem_anchor(path) do
+    case Path.split(Path.expand(path)) do
+      ["/" | _parts] -> "/"
+      [anchor | _parts] -> anchor
+      [] -> "/"
+    end
+  end
+
+  @spec resolve_existing_parts!(
+          [String.t()],
+          String.t(),
+          String.t(),
+          %{String.t() => true},
+          non_neg_integer()
+        ) :: String.t()
+  defp resolve_existing_parts!([], current, _original_path, _seen_links, _depth), do: current
+
+  defp resolve_existing_parts!(_parts, _current, original_path, _seen_links, depth)
+       when depth >= @max_symlink_depth do
+    raise ArgumentError, "too many symlinks while resolving #{original_path}"
+  end
+
+  defp resolve_existing_parts!([part | rest], current, original_path, seen_links, depth) do
+    next = Path.join(current, part)
+
+    case File.lstat(next) do
+      {:ok, %File.Stat{type: :symlink}} ->
+        canonical_link = Path.expand(next)
+        ensure_new_symlink!(canonical_link, seen_links, original_path)
+        seen_links = Map.put(seen_links, canonical_link, true)
+        target = read_link_target!(next, current)
+
+        target =
+          resolve_existing_parts!(
+            absolute_parts(target),
+            filesystem_anchor(target),
+            original_path,
+            seen_links,
+            depth + 1
+          )
+
+        resolve_existing_parts!(rest, target, original_path, seen_links, depth + 1)
+
+      {:ok, _stat} ->
+        resolve_existing_parts!(rest, next, original_path, seen_links, depth)
+
+      {:error, reason} ->
+        raise ArgumentError,
+              "cannot resolve project root for #{original_path}: #{inspect(reason)}"
+    end
+  end
+
+  @spec resolve_inside_root!(String.t(), [String.t()], String.t()) :: String.t()
+  defp resolve_inside_root!(canonical_root, parts, original_path) do
+    resolve_parts!(parts, canonical_root, canonical_root, original_path, %{}, 0)
+  end
+
+  @spec relative_parts(String.t(), String.t()) :: [String.t()]
+  defp relative_parts(path, root) do
+    case Path.relative_to(path, root) do
+      "." -> []
+      relative -> Path.split(relative)
+    end
+  end
+
+  @spec resolve_parts!(
+          [String.t()],
+          String.t(),
+          String.t(),
+          String.t(),
+          %{String.t() => true},
+          non_neg_integer()
+        ) :: String.t()
+  defp resolve_parts!([], _root, current, _original_path, _seen_links, _depth), do: current
+
+  defp resolve_parts!([part | rest], root, current, original_path, seen_links, depth) do
+    next = Path.join(current, part)
+    validate_inside_root!(next, root, original_path)
+
+    case File.lstat(next) do
+      {:ok, %File.Stat{type: :symlink}} ->
+        {target, seen_links} =
+          resolve_symlink_target!(next, current, root, original_path, seen_links, depth)
+
+        resolve_parts!(rest, root, target, original_path, seen_links, depth + 1)
+
+      {:ok, _stat} ->
+        resolve_parts!(rest, root, next, original_path, seen_links, depth)
+
+      {:error, _reason} ->
+        resolve_missing_parts!(rest, root, next, original_path)
+    end
+  end
+
+  @spec resolve_missing_parts!([String.t()], String.t(), String.t(), String.t()) :: String.t()
+  defp resolve_missing_parts!([], _root, current, _original_path), do: current
+
+  defp resolve_missing_parts!([part | rest], root, current, original_path) do
+    next = Path.join(current, part)
+    validate_inside_root!(next, root, original_path)
+    resolve_missing_parts!(rest, root, next, original_path)
+  end
+
+  @spec resolve_symlink_target!(
+          String.t(),
+          String.t(),
+          String.t(),
+          String.t(),
+          %{String.t() => true},
+          non_neg_integer()
+        ) :: {String.t(), %{String.t() => true}}
+  defp resolve_symlink_target!(_link_path, _parent, _root, original_path, _seen_links, depth)
+       when depth >= @max_symlink_depth do
+    raise ArgumentError, "too many symlinks while resolving #{original_path}"
+  end
+
+  defp resolve_symlink_target!(link_path, parent, root, original_path, seen_links, depth) do
+    canonical_link = Path.expand(link_path)
+    ensure_new_symlink!(canonical_link, seen_links, original_path)
+    seen_links = Map.put(seen_links, canonical_link, true)
+
+    target = read_link_target!(link_path, parent)
+    validate_inside_root!(target, root, original_path)
+
+    target_parts = relative_parts(target, root)
+    target = resolve_parts!(target_parts, root, root, original_path, seen_links, depth + 1)
+    validate_inside_root!(target, root, original_path)
+
+    {target, seen_links}
+  end
+
+  @spec ensure_new_symlink!(String.t(), %{String.t() => true}, String.t()) :: :ok
+  defp ensure_new_symlink!(link_path, seen_links, original_path) do
+    if Map.has_key?(seen_links, link_path) do
+      raise ArgumentError, "symlink loop while resolving #{original_path}"
     end
 
-    resolved
+    :ok
+  end
+
+  @spec read_link_target!(String.t(), String.t()) :: String.t()
+  defp read_link_target!(path, parent) do
+    case File.read_link(path) do
+      {:ok, target} ->
+        Path.expand(target, parent)
+
+      {:error, reason} ->
+        raise ArgumentError, "cannot resolve symlink #{path}: #{inspect(reason)}"
+    end
+  end
+
+  @spec validate_inside_root!(String.t(), String.t(), String.t()) :: :ok
+  defp validate_inside_root!(_path, "/", _original_path), do: :ok
+
+  defp validate_inside_root!(path, root, original_path) do
+    expanded_path = Path.expand(path)
+    expanded_root = Path.expand(root)
+
+    unless String.starts_with?(expanded_path, expanded_root <> "/") or
+             expanded_path == expanded_root do
+      raise ArgumentError, "path escapes project root: #{original_path}"
+    end
+
+    :ok
   end
 
   # Applies offset/limit slicing to content read from a changeset.

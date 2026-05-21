@@ -69,18 +69,20 @@ defmodule MingaEditor.Commands.AgentSession do
 
   @doc "Starts a new agent session and subscribes to its events."
   @spec start_agent_session(state()) :: state()
-  def start_agent_session(state) do
+  @spec start_agent_session(state(), keyword()) :: state()
+  def start_agent_session(state, opts \\ []) do
     panel = AgentAccess.panel(state)
 
-    opts = [
+    session_opts = [
       thinking_level: panel.thinking_level,
+      session_start_hook_enabled?: Keyword.get(opts, :session_start_hook_enabled?, true),
       provider_opts: [
         provider: panel.provider_name,
         model: panel.model_name
       ]
     ]
 
-    case start_and_subscribe(opts) do
+    case start_and_subscribe(session_opts) do
       {:ok, pid} ->
         state =
           if AgentAccess.agent(state).buffer == nil do

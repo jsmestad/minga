@@ -1,6 +1,7 @@
 defmodule MingaAgent.ToolsReadOnlyTest do
   use ExUnit.Case, async: true
 
+  alias MingaAgent.EphemeralSession
   alias MingaAgent.Tools
 
   test "read_only excludes write and execution tools" do
@@ -17,5 +18,9 @@ defmodule MingaAgent.ToolsReadOnlyTest do
     refute "subagent" in names
     refute "git_commit" in names
     refute "memory_write" in names
+  end
+
+  test "inline ask exposes no tools" do
+    assert EphemeralSession.read_only_tools(File.cwd!()) == []
   end
 end

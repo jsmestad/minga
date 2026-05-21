@@ -159,7 +159,8 @@ defmodule MingaAgent.Providers.Native do
           session_cost: float(),
           fork_store: pid() | nil,
           changeset: pid() | nil,
-          mcp_registry: MCPRegistry.t() | nil
+          mcp_registry: MCPRegistry.t() | nil,
+          read_only?: boolean()
         }
 
   # ── Provider callbacks ──────────────────────────────────────────────────────
@@ -259,6 +260,8 @@ defmodule MingaAgent.Providers.Native do
     max_tokens = Keyword.get(opts, :max_tokens, config.max_tokens)
     max_retries = Keyword.get(opts, :max_retries, config.max_retries)
     max_turns = Keyword.get(opts, :max_turns, config.max_turns)
+    read_only? = Keyword.get(opts, :read_only?, false)
+    config = disable_hooks_for_read_only(config, read_only?)
     max_cost = Keyword.get(opts, :max_cost, config.max_cost)
     llm_client = Keyword.get(opts, :llm_client, &ReqLLM.stream_text/3)
     hook_runner = Keyword.get(opts, :hook_runner, &CommandRunner.run_pre_tool_use/2)
@@ -290,8 +293,6 @@ defmodule MingaAgent.Providers.Native do
         end
       end
 
-    read_only? = Keyword.get(opts, :read_only?, false)
-
     base_tools =
       Keyword.get(opts, :tools) ||
         Tools.all(
@@ -316,7 +317,10 @@ defmodule MingaAgent.Providers.Native do
         start_mcp_servers(opts, config, subscriber, reserved_tool_names)
       end
 
-    tools = base_tools ++ mcp_tools ++ internal_tools
+    tools =
+      (base_tools ++ mcp_tools ++ internal_tools)
+      |> filter_tool_allowlist(Keyword.get(opts, :tool_allowlist, :all))
+
     system_prompt = build_system_prompt(project_root, active_skills)
     context = Context.new([Context.system(system_prompt)])
 
@@ -351,12 +355,26 @@ defmodule MingaAgent.Providers.Native do
       session_cost: 0.0,
       fork_store: fork_store,
       changeset: changeset,
-      mcp_registry: mcp_registry
+      mcp_registry: mcp_registry,
+      read_only?: read_only?
     }
 
     Minga.Log.info(:agent, "[Agent.Native] started with model=#{model} root=#{project_root}")
 
     {:ok, state}
+  end
+
+  @spec disable_hooks_for_read_only(AgentConfig.t(), boolean()) :: AgentConfig.t()
+  defp disable_hooks_for_read_only(%AgentConfig{} = config, true),
+    do: AgentConfig.without_hooks(config)
+
+  defp disable_hooks_for_read_only(%AgentConfig{} = config, false), do: config
+
+  @spec filter_tool_allowlist([ReqLLM.Tool.t()], :all | [String.t()]) :: [ReqLLM.Tool.t()]
+  defp filter_tool_allowlist(tools, :all) when is_list(tools), do: tools
+
+  defp filter_tool_allowlist(tools, allowlist) when is_list(tools) and is_list(allowlist) do
+    Enum.filter(tools, &(&1.name in allowlist))
   end
 
   @impl GenServer

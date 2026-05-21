@@ -1,6 +1,8 @@
 defmodule MingaAgent.Providers.NativeReadOnlyTest do
   use ExUnit.Case, async: true
 
+  alias MingaAgent.Config, as: AgentConfig
+  alias MingaAgent.Hooks.Hook
   alias MingaAgent.Providers.Native
   alias ReqLLM.Tool
 
@@ -28,6 +30,45 @@ defmodule MingaAgent.Providers.NativeReadOnlyTest do
     refute "write_file" in names
     refute "todo_write" in names
     refute "notebook_write" in names
+  end
+
+  test "tool_allowlist is enforced after read_only filtering" do
+    provider =
+      start_supervised!(
+        {Native,
+         subscriber: self(),
+         project_root: File.cwd!(),
+         skip_api_key_env: true,
+         provider: :test,
+         model: "test",
+         read_only?: true,
+         tool_allowlist: [],
+         tools: [tool("read_file")]},
+        id: {:native_read_only_allowlist, make_ref()}
+      )
+
+    assert %{tools: []} = :sys.get_state(provider)
+  end
+
+  test "read_only provider clears configured hooks" do
+    hook = %Hook{event: :pre_tool_use, tool_pattern: "read_file", command: "policy"}
+    config = %AgentConfig{agent_hooks: [hook]}
+
+    provider =
+      start_supervised!(
+        {Native,
+         subscriber: self(),
+         project_root: File.cwd!(),
+         skip_api_key_env: true,
+         provider: :test,
+         model: "test",
+         read_only?: true,
+         config: config,
+         tools: [tool("read_file")]},
+        id: {:native_read_only_hooks, make_ref()}
+      )
+
+    assert %{config: %{agent_hooks: []}} = :sys.get_state(provider)
   end
 
   defp tool(name) do

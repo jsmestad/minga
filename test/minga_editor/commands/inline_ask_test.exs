@@ -3,6 +3,8 @@ defmodule MingaEditor.Commands.InlineAskTest do
 
   alias Minga.Buffer
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Keymap.Bindings
+  alias Minga.Keymap.Defaults
   alias MingaEditor.Commands.InlineAsk, as: InlineAskCommand
   alias MingaEditor.Input.InlineAsk, as: InlineAskInput
   alias MingaEditor.Session.State, as: SessionState
@@ -49,6 +51,47 @@ defmodule MingaEditor.Commands.InlineAskTest do
     assert length(state.shell_state.tab_bar.workspaces) == original_workspace_count
   end
 
+  test "input handler ignores modified printable keys", %{tmp_dir: root} do
+    {state, buffer} = state_with_file(root, "lib/auth.ex")
+    state = InlineAskCommand.open(state)
+
+    assert {:handled, state} = InlineAskInput.handle_key(state, ?s, 0x02)
+    assert active_ask(state, buffer).prompt == ""
+
+    assert {:handled, state} = InlineAskInput.handle_key(state, ?s, 0x04)
+    assert active_ask(state, buffer).prompt == ""
+
+    assert {:handled, state} = InlineAskInput.handle_key(state, ?s, 0x08)
+    assert active_ask(state, buffer).prompt == ""
+
+    assert {:handled, state} = InlineAskInput.handle_key(state, ?S, 0x01)
+    assert active_ask(state, buffer).prompt == "S"
+  end
+
+  test "enter submits through an injected ephemeral session asker", %{tmp_dir: root} do
+    {state, buffer} = state_with_file(root, "lib/auth.ex")
+    state = InlineAskCommand.open(state)
+    assert {:handled, state} = InlineAskInput.handle_key(state, ?w, 0)
+    parent = self()
+
+    asker = fn prompt, project_root, opts ->
+      send(parent, {:asked, prompt, project_root, opts})
+      {:ok, parent}
+    end
+
+    assert {:handled, state} = InlineAskInput.handle_key(state, 13, 0, session_asker: asker)
+    assert_receive {:asked, prompt, ^root, opts}
+    assert prompt =~ "Question:\nw"
+    assert Keyword.get(opts, :subscriber) == self()
+    assert %InlineAsk{status: :thinking, session_pid: ^parent} = active_ask(state, buffer)
+  end
+
+  test "SPC a ? is bound and inline ask is an overlay handler" do
+    assert {:prefix, ai_node} = Bindings.lookup(Defaults.leader_trie(), {?a, 0})
+    assert {:command, :inline_ask} = Bindings.lookup(ai_node, {??, 0})
+    assert MingaEditor.Input.InlineAsk in MingaEditor.Input.overlay_handlers()
+  end
+
   test "asks are independent per buffer", %{tmp_dir: root} do
     {state, first} = state_with_file(root, "lib/one.ex")
     second_path = Path.join(root, "lib/two.ex")
@@ -90,7 +133,10 @@ defmodule MingaEditor.Commands.InlineAskTest do
     state = InlineAskCommand.open(state)
 
     ask =
-      %{active_ask(state, buffer) | prompt: "What is this?", response: "It authenticates users."}
+      state
+      |> active_ask(buffer)
+      |> InlineAsk.append_input("What is this?")
+      |> InlineAsk.append_response("It authenticates users.")
       |> InlineAsk.answered()
 
     parent = self()

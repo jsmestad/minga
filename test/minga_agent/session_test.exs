@@ -430,6 +430,22 @@ defmodule MingaAgent.SessionTest do
     end
   end
 
+  describe "inline read-only safety" do
+    test "hooks can be disabled for non-persistent inline sessions" do
+      session =
+        start_supervised!(
+          {Session,
+           provider: Minga.Test.StubProvider,
+           persist?: false,
+           hooks_enabled?: false,
+           provider_opts: [provider: :test, model: "test"]},
+          id: {:inline_hooks_disabled, make_ref()}
+        )
+
+      assert %{persist?: false, hooks_enabled?: false} = :sys.get_state(session)
+    end
+  end
+
   describe "send_prompt/2" do
     test "adds messages, broadcasts stream events, and records usage", %{session: session} do
       :ok = Session.send_prompt(session, "Hello!")

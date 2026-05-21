@@ -79,6 +79,8 @@ defmodule MingaAgent.Session do
           notifier: module() | {module(), term()},
           background_subagent: boolean(),
           persist?: boolean(),
+          hooks_enabled?: boolean(),
+          session_start_hook_enabled?: boolean(),
           save_timer: reference() | nil,
           session_store_dir: String.t() | nil,
           created_at: DateTime.t(),
@@ -527,6 +529,9 @@ defmodule MingaAgent.Session do
       notifier: Keyword.get(opts, :notifier, Notifier),
       background_subagent: Keyword.get(opts, :background_subagent, false),
       persist?: Keyword.get(opts, :persist?, true),
+      hooks_enabled?: Keyword.get(opts, :hooks_enabled?, true),
+      session_start_hook_enabled?:
+        Keyword.get(opts, :session_start_hook_enabled?, Keyword.get(opts, :hooks_enabled?, true)),
       save_timer: nil,
       session_store_dir: Keyword.get(opts, :session_store_dir),
       created_at: now,
@@ -1930,6 +1935,9 @@ defmodule MingaAgent.Session do
   # ── Hook dispatching ──────────────────────────────────────────────────────
 
   @spec dispatch_session_start(state()) :: :ok
+  defp dispatch_session_start(%{hooks_enabled?: false}), do: :ok
+  defp dispatch_session_start(%{session_start_hook_enabled?: false}), do: :ok
+
   defp dispatch_session_start(state) do
     payload = SessionStartPayload.new(state.session_id, state.model_name, state.provider_name)
 
@@ -1945,6 +1953,8 @@ defmodule MingaAgent.Session do
   end
 
   @spec dispatch_session_end(state(), term()) :: :ok
+  defp dispatch_session_end(%{hooks_enabled?: false}, _reason), do: :ok
+
   defp dispatch_session_end(state, reason) do
     payload = SessionEndPayload.new(state.session_id, reason, state.status)
 
@@ -1960,6 +1970,8 @@ defmodule MingaAgent.Session do
   end
 
   @spec dispatch_stop(state()) :: :ok
+  defp dispatch_stop(%{hooks_enabled?: false}), do: :ok
+
   defp dispatch_stop(state) do
     last_message = extract_last_assistant_text(state.messages)
     payload = StopPayload.new(state.session_id, :end_turn, last_message)
@@ -1971,6 +1983,8 @@ defmodule MingaAgent.Session do
   end
 
   @spec dispatch_notification(state(), atom(), String.t()) :: :ok
+  defp dispatch_notification(%{hooks_enabled?: false}, _trigger, _message), do: :ok
+
   defp dispatch_notification(state, trigger, message) do
     payload = NotificationPayload.new(state.session_id, trigger, message)
 
@@ -1987,6 +2001,8 @@ defmodule MingaAgent.Session do
 
   @spec dispatch_user_prompt_submit(state(), String.t() | [term()]) ::
           :ok | {:error, HookResult.t()}
+  defp dispatch_user_prompt_submit(%{hooks_enabled?: false}, _content), do: :ok
+
   defp dispatch_user_prompt_submit(state, content) do
     payload = UserPromptSubmitPayload.new(state.session_id, content)
 

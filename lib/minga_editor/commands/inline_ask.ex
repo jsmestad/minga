@@ -72,7 +72,7 @@ defmodule MingaEditor.Commands.InlineAsk do
   end
 
   def promote(state, %InlineAsk{} = ask, opts) do
-    session_starter = Keyword.get(opts, :session_starter, &AgentSession.start_agent_session/1)
+    session_starter = Keyword.get(opts, :session_starter, &start_promoted_agent_session/1)
     seeder = Keyword.get(opts, :seeder, &seed_agent_session/2)
 
     state = dismiss_without_stop(state, ask.buffer_pid)
@@ -81,6 +81,11 @@ defmodule MingaEditor.Commands.InlineAsk do
     state = seeder.(state, ask)
     state = add_file_to_active_workspace(state, ask.file_ref)
     EditorState.set_status(state, "Promoted inline ask to workspace")
+  end
+
+  @spec start_promoted_agent_session(state()) :: state()
+  defp start_promoted_agent_session(state) do
+    AgentSession.start_agent_session(state, session_start_hook_enabled?: false)
   end
 
   @spec create_agent_tab(state()) :: state()
