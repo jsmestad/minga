@@ -15,6 +15,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
   alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.PendingReviewsSource
   alias MingaEditor.UI.Picker.WorkspaceIconSource
   alias MingaEditor.UI.Picker.WorkspaceSource
   alias MingaEditor.UI.Prompt.WorkspaceRename
@@ -228,6 +229,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
             :workspace_resolve_conflicts,
             :workspace_discard_and_close,
             :workspace_list,
+            :workspace_pending_reviews,
             :workspace_rename,
             :workspace_set_icon,
             :workspace_next_agent
@@ -704,6 +706,23 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
       assert active_item.label =~ "Agent 1"
       assert String.ends_with?(active_item.label, " •")
+    end
+  end
+
+  describe "workspace_pending_reviews/1" do
+    test "opens the pending reviews picker" do
+      state =
+        make_state()
+        |> put_active_workspace_review(%WorkspaceReview{
+          state: :needs_review,
+          changed_files: [file_ref()]
+        })
+
+      result = Workspace.workspace_pending_reviews(state)
+
+      assert {:picker,
+              %{picker_ui: %{source: PendingReviewsSource, picker: %{title: "Pending reviews"}}}} =
+               result.shell_state.modal
     end
   end
 

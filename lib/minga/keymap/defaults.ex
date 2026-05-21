@@ -154,6 +154,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?a, @none}, {?m, @none}], :agent_pick_model, "Pick agent model"},
     {[{?a, @none}, {?M, @none}], :agent_cycle_model, "Cycle agent model"},
     {[{?a, @none}, {?h, @none}], :agent_session_history, "Resume session"},
+    {[{?a, @none}, {?r, @none}], :workspace_pending_reviews, "Pending reviews"},
     {[{?a, @none}, {?o, @none}], :remote_find_file, "Open remote file"},
     {[{?a, @none}, {?T, @none}], :agent_cycle_thinking, "Cycle thinking level"},
     {[{?a, @none}, {?e, @none}], :agent_summarize, "Summarize session to artifact"},
