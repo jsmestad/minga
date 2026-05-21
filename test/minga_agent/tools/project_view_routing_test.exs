@@ -277,52 +277,6 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     assert Minga.Buffer.content(buffer) == "dirty\n"
   end
 
-  test "multi_edit fails closed when configured ProjectView is dead", %{tmp_dir: dir} do
-    root = Path.join(dir, "dead-multi-root")
-    File.mkdir_p!(Path.join(root, "lib"))
-    file = Path.join(root, "lib/file.txt")
-    File.write!(file, "root text\n")
-    {:ok, view} = ProjectView.overlay(root)
-    changeset = view.ref.changeset
-    ref = Process.monitor(changeset)
-    tools = Tools.all(project_root: root, project_view: view)
-
-    Process.exit(changeset, :kill)
-    assert_receive {:DOWN, ^ref, :process, ^changeset, _reason}
-
-    assert {:error, message} =
-             call_tool(tools, "multi_edit_file", %{
-               "path" => "lib/file.txt",
-               "edits" => [%{"old_text" => "root", "new_text" => "changed"}]
-             })
-
-    assert message =~ "dead_project_view"
-    assert File.read!(file) == "root text\n"
-  end
-
-  test "shell checks dead ProjectView before flushing dirty buffers", %{tmp_dir: dir} do
-    root = Path.join(dir, "dead-shell-root")
-    File.mkdir_p!(Path.join(root, "lib"))
-    file = Path.join(root, "lib/file.txt")
-    File.write!(file, "root text\n")
-    buffer = start_supervised!({BufferProcess, file_path: file}, id: make_ref())
-    :ok = BufferProcess.insert_text(buffer, " dirty")
-    assert BufferProcess.dirty?(buffer)
-    {:ok, view} = ProjectView.overlay(root)
-    changeset = view.ref.changeset
-    ref = Process.monitor(changeset)
-    tools = Tools.all(project_root: root, project_view: view)
-
-    Process.exit(changeset, :kill)
-    assert_receive {:DOWN, ^ref, :process, ^changeset, _reason}
-
-    assert {:error, :dead_project_view} =
-             call_tool(tools, "shell", %{"command" => "printf should-not-run"})
-
-    assert BufferProcess.dirty?(buffer)
-    assert File.read!(file) == "root text\n"
-  end
-
   defp call_tool(tools, name, args) do
     tool = Enum.find(tools, &(&1.name == name))
     tool.callback.(args)

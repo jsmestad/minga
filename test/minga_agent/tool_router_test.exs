@@ -223,18 +223,6 @@ defmodule MingaAgent.ToolRouterTest do
       ctx = ToolRouter.context(nil, nil)
       assert nil == ToolRouter.working_dir(ctx)
     end
-
-    test "returns an error when a configured ProjectView backend is dead", %{path: path} do
-      project_dir = Path.dirname(path)
-      {:ok, view} = ProjectView.overlay(project_dir)
-      changeset = view.ref.changeset
-      ref = Process.monitor(changeset)
-      ctx = ToolRouter.context(view, nil, nil)
-
-      Process.exit(changeset, :kill)
-      assert_receive {:DOWN, ^ref, :process, ^changeset, _reason}
-      assert {:error, :dead_project_view} = ToolRouter.working_dir(ctx)
-    end
   end
 
   describe "active?/1" do
@@ -246,22 +234,6 @@ defmodule MingaAgent.ToolRouterTest do
     test "returns true with active fork store", %{store: store} do
       ctx = ToolRouter.context(store, nil)
       assert ToolRouter.active?(ctx)
-    end
-
-    test "falls back to the filesystem when the ProjectView backend dies", %{path: path} do
-      project_dir = Path.dirname(path)
-      other_path = Path.join(project_dir, "README.md")
-      File.write!(other_path, "filesystem content")
-
-      {:ok, view} = ProjectView.overlay(project_dir)
-      changeset = view.ref.changeset
-      ref = Process.monitor(changeset)
-      ctx = ToolRouter.context(view, nil, nil)
-
-      Process.exit(changeset, :kill)
-      assert_receive {:DOWN, ^ref, :process, ^changeset, _reason}
-      assert {:ok, content} = ToolRouter.read_file(ctx, other_path)
-      assert content == "filesystem content"
     end
   end
 

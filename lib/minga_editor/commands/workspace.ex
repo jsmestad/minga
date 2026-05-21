@@ -15,15 +15,12 @@ defmodule MingaEditor.Commands.Workspace do
   alias Minga.Buffer
   alias Minga.Project.FileRef
   alias MingaAgent.ProjectView
-  alias MingaAgent.Session
-  alias MingaEditor.Commands.AgentSession
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.State.WorkspaceReview
 
   @type state :: EditorState.t()
-  @type workspace_project_view_action :: :keep | :refresh | :clear
 
   @doc "Switch to the next workspace's first tab."
   @spec workspace_next(state()) :: state()
@@ -61,9 +58,8 @@ defmodule MingaEditor.Commands.Workspace do
   The manual workspace (id 0) cannot be closed.
   """
   @spec workspace_close(state()) :: state()
-  def workspace_close(%{shell_state: %{tab_bar: %TabBar{}}} = state) do
-    state = sync_active_workspace_review(state)
-    workspace = active_workspace(state)
+  def workspace_close(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+    workspace = TabBar.active_workspace(tb)
 
     if workspace_closure_requires_review?(workspace) do
       EditorState.set_status(state, workspace_close_confirmation_copy(workspace))
@@ -156,21 +152,6 @@ defmodule MingaEditor.Commands.Workspace do
       nil ->
         EditorState.set_status(state, "No active workspace")
     end
-  end
-
-  defp handle_discard_and_close_result({:error, :dead_project_view}, state, workspace_id) do
-    keep_workspace_after_dead_project_view(state, workspace_id)
-  end
-
-  defp handle_discard_and_close_result({:error, reason}, state, _workspace_id) do
-    EditorState.set_status(state, "Workspace discard and close failed: #{inspect(reason)}")
-  end
-
-  @spec keep_workspace_after_dead_project_view(state(), non_neg_integer()) :: state()
-  defp keep_workspace_after_dead_project_view(state, workspace_id) do
-    state
-    |> clear_dead_workspace_project_view(workspace_id)
-    |> EditorState.set_status("Workspace ProjectView became unavailable; workspace kept open")
   end
 
   @doc "Open the workspace picker."
@@ -422,63 +403,21 @@ defmodule MingaEditor.Commands.Workspace do
 
   @spec update_active_workspace_review(
           state(),
-          (WorkspaceModel.t() ->
-             {:ok, WorkspaceModel.t(), workspace_project_view_action()} | {:error, term()})
+          (WorkspaceModel.t() -> {:ok, WorkspaceModel.t()} | {:error, term()})
         ) :: state()
   defp update_active_workspace_review(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, fun)
        when is_function(fun, 1) do
-    state = sync_active_workspace_review(state)
-    workspace_id = TabBar.active_workspace_id(tb)
-    workspace = TabBar.get_workspace(state.shell_state.tab_bar, workspace_id)
-    apply_workspace_review_update(state, state.shell_state.tab_bar, workspace_id, workspace, fun)
-  end
-
-  @spec sync_active_workspace_review(state()) :: state()
-  defp sync_active_workspace_review(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
     workspace_id = TabBar.active_workspace_id(tb)
     workspace = TabBar.get_workspace(tb, workspace_id)
-    sync_workspace_review_result(state, tb, workspace_id, workspace)
+    apply_workspace_review_update(state, tb, workspace_id, workspace, fun)
   end
-
-  defp sync_active_workspace_review(state), do: state
-
-  @spec sync_workspace_review_result(
-          state(),
-          TabBar.t(),
-          non_neg_integer(),
-          WorkspaceModel.t() | nil
-        ) :: state()
-  defp sync_workspace_review_result(state, tb, workspace_id, %WorkspaceModel{} = workspace) do
-    workspace
-    |> review_drafts_workspace()
-    |> put_synced_workspace_review(state, tb, workspace_id)
-  end
-
-  defp sync_workspace_review_result(state, _tb, _workspace_id, nil), do: state
-
-  @spec put_synced_workspace_review(
-          {:ok, WorkspaceModel.t(), workspace_project_view_action()} | {:error, term()},
-          state(),
-          TabBar.t(),
-          non_neg_integer()
-        ) :: state()
-  defp put_synced_workspace_review({:ok, updated, _action}, state, tb, workspace_id) do
-    EditorState.set_tab_bar(state, TabBar.update_workspace(tb, workspace_id, fn _ -> updated end))
-  end
-
-  defp put_synced_workspace_review({:error, :dead_project_view}, state, _tb, workspace_id) do
-    clear_dead_workspace_project_view(state, workspace_id)
-  end
-
-  defp put_synced_workspace_review({:error, _reason}, state, _tb, _workspace_id), do: state
 
   @spec apply_workspace_review_update(
           state(),
           TabBar.t(),
           non_neg_integer(),
           WorkspaceModel.t() | nil,
-          (WorkspaceModel.t() ->
-             {:ok, WorkspaceModel.t(), workspace_project_view_action()} | {:error, term()})
+          (WorkspaceModel.t() -> {:ok, WorkspaceModel.t()} | {:error, term()})
         ) :: state()
   defp apply_workspace_review_update(state, tb, workspace_id, %WorkspaceModel{} = workspace, fun) do
     workspace
@@ -491,27 +430,13 @@ defmodule MingaEditor.Commands.Workspace do
   end
 
   @spec put_workspace_review_result(
-          {:ok, WorkspaceModel.t(), workspace_project_view_action()} | {:error, term()},
+          {:ok, WorkspaceModel.t()} | {:error, term()},
           state(),
           TabBar.t(),
           non_neg_integer()
         ) :: state()
-  defp put_workspace_review_result({:ok, updated, action}, state, tb, workspace_id) do
-    state =
-      EditorState.set_tab_bar(
-        state,
-        TabBar.update_workspace(tb, workspace_id, fn _ -> updated end)
-      )
-
-    apply_workspace_project_view_action(state, workspace_id, action)
-  end
-
-  defp put_workspace_review_result({:error, :dead_project_view}, state, _tb, workspace_id) do
-    state
-    |> clear_dead_workspace_project_view(workspace_id)
-    |> EditorState.set_status(
-      "Workspace ProjectView became unavailable; workspace review was cleared"
-    )
+  defp put_workspace_review_result({:ok, updated}, state, tb, workspace_id) do
+    EditorState.set_tab_bar(state, TabBar.update_workspace(tb, workspace_id, fn _ -> updated end))
   end
 
   defp put_workspace_review_result({:error, reason}, state, _tb, _workspace_id) do
@@ -519,7 +444,7 @@ defmodule MingaEditor.Commands.Workspace do
   end
 
   @spec review_drafts_workspace(WorkspaceModel.t()) ::
-          {:ok, WorkspaceModel.t(), workspace_project_view_action()} | {:error, term()}
+          {:ok, WorkspaceModel.t()} | {:error, term()}
   defp review_drafts_workspace(%WorkspaceModel{} = workspace) do
     with {:ok, files} <- project_view_changed_files(workspace) do
       review_drafts_workspace(workspace, files, workspace.review.state)
@@ -527,23 +452,20 @@ defmodule MingaEditor.Commands.Workspace do
   end
 
   @spec review_drafts_workspace(WorkspaceModel.t(), [FileRef.t()], WorkspaceReview.state()) ::
-          {:ok, WorkspaceModel.t(), workspace_project_view_action()} | {:error, term()}
+          {:ok, WorkspaceModel.t()} | {:error, term()}
   defp review_drafts_workspace(%WorkspaceModel{} = workspace, [], _state) do
-    {:ok, WorkspaceModel.set_review(workspace, WorkspaceReview.clean(workspace.review)), :keep}
+    {:ok, WorkspaceModel.set_review(workspace, WorkspaceReview.clean(workspace.review))}
   end
 
   defp review_drafts_workspace(%WorkspaceModel{} = workspace, files, :clean) do
     with {:ok, workspace} <-
-           WorkspaceModel.transition_review(workspace, :agent_started_editing, files),
-         {:ok, workspace} <- WorkspaceModel.transition_review(workspace, :agent_completed, files) do
-      {:ok, workspace, :keep}
+           WorkspaceModel.transition_review(workspace, :agent_started_editing, files) do
+      WorkspaceModel.transition_review(workspace, :agent_completed, files)
     end
   end
 
   defp review_drafts_workspace(%WorkspaceModel{} = workspace, files, :draft) do
-    with {:ok, workspace} <- WorkspaceModel.transition_review(workspace, :agent_completed, files) do
-      {:ok, workspace, :keep}
-    end
+    WorkspaceModel.transition_review(workspace, :agent_completed, files)
   end
 
   defp review_drafts_workspace(%WorkspaceModel{} = workspace, files, _state) do
@@ -551,7 +473,7 @@ defmodule MingaEditor.Commands.Workspace do
      WorkspaceModel.set_review(
        workspace,
        WorkspaceReview.set_changed_files(workspace.review, files)
-     ), :keep}
+     )}
   end
 
   @spec project_view_changed_files(WorkspaceModel.t()) ::
@@ -560,8 +482,6 @@ defmodule MingaEditor.Commands.Workspace do
     with {:ok, entries} <- safe_project_view_diff(view) do
       {:ok, diff_entries_to_file_refs(view.project_root, entries)}
     end
-  catch
-    :exit, _ -> :dead_project_view
   end
 
   defp project_view_changed_files(%WorkspaceModel{}), do: {:ok, []}
@@ -612,25 +532,18 @@ defmodule MingaEditor.Commands.Workspace do
   defp promote_workspace(%WorkspaceModel{project_view: %ProjectView{} = view} = workspace) do
     case safe_project_view_promote(view) do
       :ok ->
-        with {:ok, workspace} <- WorkspaceModel.transition_review(workspace, :promote_succeeded) do
-          {:ok, workspace, :refresh}
-        end
+        WorkspaceModel.transition_review(workspace, :promote_succeeded)
 
       {:conflict, details} ->
-        with {:ok, workspace} <-
-               WorkspaceModel.transition_review(
-                 workspace,
-                 :promote_found_overlaps,
-                 {conflict_files(view.project_root, details), details}
-               ) do
-          {:ok, workspace, :keep}
-        end
+        WorkspaceModel.transition_review(
+          workspace,
+          :promote_found_overlaps,
+          {conflict_files(view.project_root, details), details}
+        )
 
       {:error, _reason} = error ->
         error
     end
-  catch
-    :exit, _ -> {:error, :dead_project_view}
   end
 
   defp promote_workspace(%WorkspaceModel{}), do: {:error, :missing_project_view}
@@ -650,232 +563,15 @@ defmodule MingaEditor.Commands.Workspace do
   defp conflict_path({path, {:error, _reason}}) when is_binary(path), do: path
   defp conflict_path(_conflict), do: nil
 
-  @spec discard_workspace(WorkspaceModel.t()) ::
-          {:ok, WorkspaceModel.t(), workspace_project_view_action()} | {:error, term()}
-  defp discard_workspace(
-         %WorkspaceModel{project_view: %ProjectView{}, review: %WorkspaceReview{state: :clean}} =
-           workspace
-       ) do
-    {:ok, workspace, :refresh}
-  end
-
-  defp discard_workspace(
-         %WorkspaceModel{project_view: nil, review: %WorkspaceReview{state: :clean}} = workspace
-       ) do
-    {:ok, workspace, :keep}
-  end
-
+  @spec discard_workspace(WorkspaceModel.t()) :: {:ok, WorkspaceModel.t()} | {:error, term()}
   defp discard_workspace(%WorkspaceModel{project_view: %ProjectView{} = view} = workspace) do
     with :ok <- safe_project_view_discard(view) do
       WorkspaceModel.transition_review(workspace, :discard)
     end
   end
 
-  @spec discard_workspace_and_close(WorkspaceModel.t()) ::
-          {:ok, WorkspaceModel.t(), workspace_project_view_action()} | {:error, term()}
-  defp discard_workspace_and_close(
-         %WorkspaceModel{project_view: %ProjectView{} = view} = workspace
-       ) do
-    with :ok <- ProjectView.discard(view),
-         {:ok, workspace} <- WorkspaceModel.transition_review(workspace, :discard) do
-      {:ok, workspace, :clear}
-    end
-  catch
-    :exit, _ -> {:error, :dead_project_view}
-  end
-
-  defp discard_workspace_and_close(%WorkspaceModel{} = workspace) do
-    if WorkspaceReview.pending?(workspace.review) do
-      with {:ok, workspace} <- WorkspaceModel.transition_review(workspace, :discard) do
-        {:ok, workspace, :keep}
-      end
-    else
-      {:ok, workspace, :keep}
-    end
-  end
-
-  @spec apply_workspace_project_view_action(
-          state(),
-          non_neg_integer(),
-          workspace_project_view_action()
-        ) :: state()
-  defp apply_workspace_project_view_action(state, _workspace_id, :keep), do: state
-
-  defp apply_workspace_project_view_action(state, workspace_id, :refresh) do
-    refresh_workspace_project_view(state, workspace_id)
-  end
-
-  defp apply_workspace_project_view_action(state, workspace_id, :clear) do
-    case TabBar.get_workspace(state.shell_state.tab_bar, workspace_id) do
-      %WorkspaceModel{} = workspace ->
-        state
-        |> update_workspace_project_view(workspace_id, nil)
-        |> maybe_refresh_workspace_provider_project_view(workspace, nil)
-
-      nil ->
-        state
-    end
-  end
-
-  @spec refresh_workspace_project_view(state(), non_neg_integer()) :: state()
-  defp refresh_workspace_project_view(state, workspace_id) do
-    workspace = TabBar.get_workspace(state.shell_state.tab_bar, workspace_id)
-    refresh_workspace_project_view(state, workspace_id, workspace)
-  end
-
-  @spec refresh_workspace_project_view(state(), non_neg_integer(), WorkspaceModel.t() | nil) ::
-          state()
-  defp refresh_workspace_project_view(state, workspace_id, %WorkspaceModel{} = workspace) do
-    case workspace_project_root(state, workspace) do
-      nil -> state
-      root -> refresh_workspace_project_view(state, workspace_id, workspace, root)
-    end
-  end
-
-  defp refresh_workspace_project_view(state, _workspace_id, nil), do: state
-
-  @spec refresh_workspace_project_view(state(), non_neg_integer(), WorkspaceModel.t(), String.t()) ::
-          state()
-  defp refresh_workspace_project_view(state, workspace_id, workspace, root) do
-    case ProjectView.overlay(root) do
-      {:ok, project_view} ->
-        replace_workspace_project_view(state, workspace_id, workspace, project_view)
-
-      {:error, _reason} ->
-        keep_or_clear_failed_project_view_refresh(state, workspace_id, workspace)
-    end
-  end
-
-  @spec replace_workspace_project_view(
-          state(),
-          non_neg_integer(),
-          WorkspaceModel.t(),
-          ProjectView.t()
-        ) :: state()
-  defp replace_workspace_project_view(state, workspace_id, workspace, project_view) do
-    state =
-      state
-      |> update_workspace_project_view(workspace_id, project_view)
-      |> maybe_refresh_workspace_provider_project_view(workspace, project_view)
-
-    _ = discard_workspace_project_view(workspace)
-    state
-  end
-
-  @spec keep_or_clear_failed_project_view_refresh(state(), non_neg_integer(), WorkspaceModel.t()) ::
-          state()
-  defp keep_or_clear_failed_project_view_refresh(state, workspace_id, workspace) do
-    if WorkspaceModel.project_view_active?(workspace) do
-      state
-    else
-      clear_dead_workspace_project_view(state, workspace_id)
-    end
-  end
-
-  @spec workspace_project_root(state(), WorkspaceModel.t()) :: String.t() | nil
-  defp workspace_project_root(%{workspace: %{file_tree: %{project_root: root}}}, _workspace)
-       when is_binary(root), do: root
-
-  defp workspace_project_root(_state, %WorkspaceModel{project_view: %ProjectView{} = view}),
-    do: view.project_root
-
-  defp workspace_project_root(_state, _workspace), do: nil
-
-  @spec update_workspace_project_view(state(), non_neg_integer(), ProjectView.t() | nil) ::
-          state()
-  defp update_workspace_project_view(
-         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
-         workspace_id,
-         project_view
-       ) do
-    tb =
-      TabBar.update_workspace(
-        tb,
-        workspace_id,
-        &WorkspaceModel.set_project_view(&1, project_view)
-      )
-
-    EditorState.set_tab_bar(state, tb)
-  end
-
-  defp update_workspace_project_view(state, _workspace_id, _project_view), do: state
-
-  @spec discard_workspace_project_view(ProjectView.t() | WorkspaceModel.t()) ::
-          :ok | {:error, term()}
-  defp discard_workspace_project_view(%ProjectView{} = view) do
-    ProjectView.discard(view)
-  catch
-    :exit, _ -> {:error, :dead_project_view}
-  end
-
-  defp discard_workspace_project_view(%WorkspaceModel{project_view: %ProjectView{} = view}),
-    do: discard_workspace_project_view(view)
-
-  defp discard_workspace_project_view(%WorkspaceModel{}), do: :ok
-
-  @spec clear_dead_workspace_project_view(state(), non_neg_integer()) :: state()
-  defp clear_dead_workspace_project_view(
-         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
-         workspace_id
-       ) do
-    case TabBar.get_workspace(tb, workspace_id) do
-      %WorkspaceModel{} = workspace ->
-        cleared_workspace =
-          workspace
-          |> WorkspaceModel.set_project_view(nil)
-          |> WorkspaceModel.set_review(WorkspaceReview.clean(workspace.review))
-
-        state
-        |> EditorState.set_tab_bar(
-          TabBar.update_workspace(tb, workspace_id, fn _ -> cleared_workspace end)
-        )
-        |> maybe_refresh_workspace_provider_project_view(workspace, nil)
-
-      nil ->
-        state
-    end
-  end
-
-  defp clear_dead_workspace_project_view(state, _workspace_id), do: state
-
-  @spec maybe_refresh_workspace_provider_project_view(
-          state(),
-          WorkspaceModel.t() | nil,
-          ProjectView.t() | nil
-        ) :: state()
-  defp maybe_refresh_workspace_provider_project_view(
-         state,
-         %WorkspaceModel{session: session},
-         project_view
-       )
-       when is_pid(session) do
-    case Session.get_provider(session) do
-      nil -> state
-      provider -> refresh_workspace_provider_project_view(state, provider, project_view)
-    end
-  catch
-    :exit, _ -> state
-  end
-
-  defp maybe_refresh_workspace_provider_project_view(state, _workspace, _project_view), do: state
-
-  @spec refresh_workspace_provider_project_view(state(), pid(), ProjectView.t() | nil) :: state()
-  defp refresh_workspace_provider_project_view(state, provider, project_view) do
-    case MingaAgent.Providers.Native.refresh_project_view(provider, project_view) do
-      :ok -> state
-      {:error, _reason} -> state
-    end
-  catch
-    :exit, _ -> state
-  end
-
-  @spec stop_workspace_session(WorkspaceModel.t() | nil) :: :ok
-  defp stop_workspace_session(%WorkspaceModel{session: session}) when is_pid(session) do
-    AgentSession.stop_session_pid(session)
-    :ok
-  end
-
-  defp stop_workspace_session(_workspace), do: :ok
+  defp discard_workspace(%WorkspaceModel{} = workspace),
+    do: WorkspaceModel.transition_review(workspace, :discard)
 
   @spec review_status_copy(WorkspaceModel.t()) :: String.t()
   defp review_status_copy(%WorkspaceModel{review: %WorkspaceReview{} = review}) do

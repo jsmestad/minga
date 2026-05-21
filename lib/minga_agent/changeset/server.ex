@@ -21,7 +21,6 @@ defmodule MingaAgent.Changeset.Server do
   @type state :: %{
           project_root: String.t(),
           overlay: Overlay.t(),
-          snapshots: %{String.t() => binary()},
           modifications: %{String.t() => binary()},
           originals: %{String.t() => binary()},
           deletions: MapSet.t(String.t()),
@@ -29,8 +28,6 @@ defmodule MingaAgent.Changeset.Server do
           budget: pos_integer() | :unlimited,
           attempts: non_neg_integer()
         }
-
-  @skip_dirs MapSet.new(~w(_build .git .elixir_ls node_modules .hex deps))
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
@@ -45,14 +42,11 @@ defmodule MingaAgent.Changeset.Server do
 
     case Overlay.create(project_root) do
       {:ok, overlay} ->
-        baselines = baseline_overlay_files(project_root, overlay.overlay_dir)
-
         state = %{
           project_root: project_root,
           overlay: overlay,
-          snapshots: snapshot_overlay_files(project_root, overlay.overlay_dir),
           modifications: %{},
-          originals: baselines,
+          originals: %{},
           deletions: MapSet.new(),
           history: %{},
           budget: budget,
@@ -107,11 +101,10 @@ defmodule MingaAgent.Changeset.Server do
   def handle_call({:delete_file, relative_path}, _from, state) do
     case normalize_path(state, relative_path) do
       {:ok, path} ->
-        previous = previous_content(state, path)
-
         case Overlay.delete_file(state.overlay, path) do
           :ok ->
-            state = push_history(state, path, previous)
+            state = capture_original(state, path)
+            state = push_history(state, path)
             state = %{state | deletions: MapSet.put(state.deletions, path)}
             state = %{state | modifications: Map.delete(state.modifications, path)}
             {:reply, :ok, state}
@@ -152,21 +145,24 @@ defmodule MingaAgent.Changeset.Server do
   end
 
   def handle_call(:modified_files, _from, state) do
-    tracked = tracked_entries(state)
-
-    modified =
-      tracked |> Enum.reject(&(&1.kind == :deleted)) |> Enum.map(& &1.path) |> Enum.sort()
-
-    deleted = tracked |> Enum.filter(&(&1.kind == :deleted)) |> Enum.map(& &1.path) |> Enum.sort()
+    modified = state.modifications |> Map.keys() |> Enum.sort()
+    deleted = state.deletions |> MapSet.to_list() |> Enum.sort()
     {:reply, %{modified: modified, deleted: deleted}, state}
   end
 
   def handle_call(:summary, _from, state) do
-    tracked = tracked_entries(state)
-    filesystem = filesystem_summary(state) |> Enum.reject(&tracked_path?(state, &1.path))
+    modified =
+      Enum.map(state.modifications, fn {path, content} ->
+        kind = if Map.has_key?(state.originals, path), do: :modified, else: :new
+        %{path: path, kind: kind, size: byte_size(content)}
+      end)
 
-    entries = tracked ++ filesystem
-    {:reply, Enum.sort_by(Enum.uniq_by(entries, & &1.path), & &1.path), state}
+    deleted =
+      Enum.map(state.deletions, fn path ->
+        %{path: path, kind: :deleted, size: 0}
+      end)
+
+    {:reply, Enum.sort_by(modified ++ deleted, & &1.path), state}
   end
 
   def handle_call(:record_attempt, _from, state) do
@@ -235,9 +231,6 @@ defmodule MingaAgent.Changeset.Server do
       {:conflict, details} ->
         state = prune_successful_merge_results(state, details.results)
         {:reply, {:conflict, details}, state}
-
-      {:error, errors} ->
-        {:reply, {:error, errors}, state}
     end
   rescue
     e ->
@@ -258,7 +251,7 @@ defmodule MingaAgent.Changeset.Server do
 
   # ── Merge logic ─────────────────────────────────────────────────────────────
 
-  @spec do_merge(state()) :: :ok | {:conflict, map()} | {:error, [tuple()]}
+  @spec do_merge(state()) :: :ok | {:conflict, map()} | {:error, term()}
   defp do_merge(state) do
     modification_results =
       Enum.map(state.modifications, fn {path, changeset_content} ->
@@ -270,24 +263,13 @@ defmodule MingaAgent.Changeset.Server do
         merge_one_deletion(state, path)
       end)
 
-    filesystem_results =
-      state
-      |> filesystem_summary()
-      |> Enum.reject(&tracked_path?(state, &1.path))
-      |> Enum.map(&merge_filesystem_entry(state, &1.path))
-
-    all_results = modification_results ++ deletion_results ++ filesystem_results
-    errors = Enum.filter(all_results, &match?({:error, _, _}, &1))
+    all_results = modification_results ++ deletion_results
     conflicts = Enum.filter(all_results, &match?({:conflict, _, _}, &1))
 
-    if errors == [] do
-      if conflicts == [] do
-        :ok
-      else
-        {:conflict, %{conflicts: conflicts, results: all_results}}
-      end
+    if conflicts == [] do
+      :ok
     else
-      {:error, errors}
+      {:conflict, %{conflicts: conflicts, results: all_results}}
     end
   end
 
@@ -298,81 +280,29 @@ defmodule MingaAgent.Changeset.Server do
 
   @spec prune_successful_merge_result(tuple(), state()) :: state()
   defp prune_successful_merge_result({:ok, path, _kind}, state) do
-    state
-    |> sync_merge_snapshot(path)
-    |> sync_merge_baseline(path)
-    |> drop_merge_tracking(path)
-  end
-
-  defp prune_successful_merge_result(_result, state), do: state
-
-  @spec drop_merge_tracking(state(), String.t()) :: state()
-  defp drop_merge_tracking(state, path) do
     %{
       state
       | modifications: Map.delete(state.modifications, path),
+        originals: Map.delete(state.originals, path),
         deletions: MapSet.delete(state.deletions, path),
         history: Map.delete(state.history, path)
     }
   end
 
-  @spec sync_merge_snapshot(state(), String.t()) :: state()
-  defp sync_merge_snapshot(state, path) do
-    overlay_path = Path.join(state.overlay.overlay_dir, path)
-
-    case File.read(overlay_path) do
-      {:ok, content} -> put_in(state.snapshots[path], file_signature_from_content(content))
-      {:error, :enoent} -> %{state | snapshots: Map.delete(state.snapshots, path)}
-      {:error, _reason} -> state
-    end
-  end
-
-  @spec sync_merge_baseline(state(), String.t()) :: state()
-  defp sync_merge_baseline(state, path) do
-    overlay_path = Path.join(state.overlay.overlay_dir, path)
-
-    case File.read(overlay_path) do
-      {:ok, content} -> put_in(state.originals[path], content)
-      {:error, :enoent} -> %{state | originals: Map.delete(state.originals, path)}
-      {:error, _reason} -> state
-    end
-  end
+  defp prune_successful_merge_result(_result, state), do: state
 
   @spec merge_one_file(state(), String.t(), binary()) :: tuple()
-  defp merge_one_file(state, path, _changeset_content) do
-    merge_overlay_state(state, path, current_overlay_state(state, path))
-  end
-
-  @spec merge_overlay_state(state(), String.t(), {:ok, binary()} | :deleted | {:error, term()}) ::
-          tuple()
-  defp merge_overlay_state(state, path, {:ok, current_changeset_content}) do
+  defp merge_one_file(state, path, changeset_content) do
     real_path = Path.join(state.project_root, path)
-    merge_current_content(state, path, real_path, current_changeset_content)
-  end
+    original = Map.get(state.originals, path)
 
-  defp merge_overlay_state(state, path, :deleted), do: merge_one_deletion(state, path)
-  defp merge_overlay_state(_state, path, {:error, reason}), do: {:error, path, reason}
+    current_real =
+      case File.read(real_path) do
+        {:ok, c} -> c
+        {:error, :enoent} -> nil
+      end
 
-  @spec merge_current_content(state(), String.t(), String.t(), binary()) :: tuple()
-  defp merge_current_content(state, path, real_path, current_changeset_content) do
-    case current_real_content(real_path) do
-      {:ok, current_real} ->
-        merge_with_ancestor(state, path, real_path, current_real, current_changeset_content)
-
-      {:error, reason} ->
-        {:error, path, reason}
-    end
-  end
-
-  @spec merge_with_ancestor(state(), String.t(), String.t(), binary() | nil, binary()) :: tuple()
-  defp merge_with_ancestor(state, path, real_path, current_real, current_changeset_content) do
-    case merge_ancestor_content(state, path, current_real) do
-      {:ok, original} ->
-        merge_strategy(real_path, path, original, current_real, current_changeset_content)
-
-      {:conflict, conflict_path, reason} ->
-        {:conflict, conflict_path, reason}
-    end
+    merge_strategy(real_path, path, original, current_real, changeset_content)
   end
 
   # New file: didn't exist when changeset was created
@@ -387,13 +317,6 @@ defmodule MingaAgent.Changeset.Server do
   # New file but someone else also created it
   defp merge_strategy(_real_path, path, nil = _original, _current_real, _changeset_content) do
     {:conflict, path, :both_created}
-  end
-
-  # Real file disappeared, restore the changeset content.
-  defp merge_strategy(real_path, path, _original, nil, changeset_content) do
-    File.mkdir_p!(Path.dirname(real_path))
-    File.write!(real_path, changeset_content)
-    {:ok, path, :restored}
   end
 
   # Real file unchanged since changeset was created: apply directly
@@ -422,82 +345,20 @@ defmodule MingaAgent.Changeset.Server do
   @spec merge_one_deletion(state(), String.t()) :: tuple()
   defp merge_one_deletion(state, path) do
     real_path = Path.join(state.project_root, path)
-    merge_deletion_overlay_state(state, path, real_path, current_overlay_state(state, path))
-  end
+    original = Map.get(state.originals, path)
 
-  @spec merge_deletion_overlay_state(
-          state(),
-          String.t(),
-          String.t(),
-          {:ok, binary()} | :deleted | {:error, term()}
-        ) :: tuple()
-  defp merge_deletion_overlay_state(state, path, real_path, {:ok, current_changeset_content}) do
-    merge_current_content(state, path, real_path, current_changeset_content)
-  end
-
-  defp merge_deletion_overlay_state(state, path, real_path, :deleted) do
-    case current_real_content(real_path) do
-      {:ok, current_real} -> merge_deleted_file(state, path, real_path, current_real)
-      {:error, reason} -> {:error, path, reason}
-    end
-  end
-
-  defp merge_deletion_overlay_state(_state, path, _real_path, {:error, reason}),
-    do: {:error, path, reason}
-
-  @spec merge_deleted_file(state(), String.t(), String.t(), binary() | nil) :: tuple()
-  defp merge_deleted_file(state, path, _real_path, nil) do
-    case merge_ancestor_content(state, path, nil) do
-      {:ok, _original} -> {:ok, path, :already_deleted}
-      {:conflict, conflict_path, reason} -> {:conflict, conflict_path, reason}
-    end
-  end
-
-  defp merge_deleted_file(state, path, real_path, content) do
-    case merge_ancestor_content(state, path, content) do
-      {:ok, ^content} ->
+    case File.read(real_path) do
+      {:ok, content} when content == original ->
         File.rm!(real_path)
         {:ok, path, :deleted}
 
-      {:ok, _original} ->
+      {:ok, _changed} ->
         {:conflict, path, :modified_before_delete}
 
-      {:conflict, conflict_path, reason} ->
-        {:conflict, conflict_path, reason}
+      {:error, :enoent} ->
+        {:ok, path, :already_deleted}
     end
   end
-
-  @spec merge_ancestor_content(state(), String.t(), binary() | nil) ::
-          {:ok, binary() | nil} | {:conflict, String.t(), term()}
-  defp merge_ancestor_content(state, path, current_real) do
-    case Map.fetch(state.originals, path) do
-      {:ok, original} -> {:ok, original}
-      :error -> merge_snapshot_ancestor(state, path, current_real)
-    end
-  end
-
-  @spec merge_snapshot_ancestor(state(), String.t(), binary() | nil) ::
-          {:ok, binary() | nil} | {:conflict, String.t(), term()}
-  defp merge_snapshot_ancestor(%{snapshots: snapshots}, path, current_real) do
-    case Map.fetch(snapshots, path) do
-      :error -> {:ok, nil}
-      {:ok, snapshot_signature} -> merge_snapshot_ancestor(path, current_real, snapshot_signature)
-    end
-  end
-
-  @spec merge_snapshot_ancestor(String.t(), binary() | nil, binary()) ::
-          {:ok, binary() | nil} | {:conflict, String.t(), term()}
-  defp merge_snapshot_ancestor(path, current_real, snapshot_signature)
-       when is_binary(current_real) do
-    if file_signature_from_content(current_real) == snapshot_signature do
-      {:ok, current_real}
-    else
-      {:conflict, path, :missing_merge_base}
-    end
-  end
-
-  defp merge_snapshot_ancestor(path, _current_real, _snapshot_signature),
-    do: {:conflict, path, :missing_merge_base}
 
   # ── Private helpers ─────────────────────────────────────────────────────────
 
@@ -558,12 +419,8 @@ defmodule MingaAgent.Changeset.Server do
       state = push_history(state, path)
 
       case Overlay.materialize_file(state.overlay, path, new_content) do
-        :ok ->
-          state = push_history(state, path, content)
-          {:ok, put_in(state.modifications[path], new_content)}
-
-        {:error, reason} ->
-          {:error, reason}
+        :ok -> {:ok, put_in(state.modifications[path], new_content)}
+        {:error, reason} -> {:error, reason}
       end
     else
       {:error, reason} -> {:error, reason}
@@ -572,32 +429,22 @@ defmodule MingaAgent.Changeset.Server do
 
   @spec current_content(state(), String.t()) :: {:ok, binary()} | {:error, term()}
   defp current_content(state, path) do
-    case current_overlay_state(state, path) do
-      {:ok, content} -> {:ok, content}
-      :deleted -> {:error, :deleted}
-      {:error, reason} -> {:error, reason}
+    case {MapSet.member?(state.deletions, path), Map.fetch(state.modifications, path)} do
+      {true, _} -> {:error, :deleted}
+      {_, {:ok, content}} -> {:ok, content}
+      {_, :error} -> File.read(Path.join(state.project_root, path))
     end
   end
 
-  @spec current_overlay_state(state(), String.t()) ::
-          {:ok, binary()} | :deleted | {:error, term()}
-  defp current_overlay_state(state, path) do
-    overlay_path = Path.join(state.overlay.overlay_dir, path)
-    root_path = Path.join(state.project_root, path)
-
-    case File.read(overlay_path) do
-      {:ok, content} ->
-        {:ok, content}
-
-      {:error, :enoent} ->
-        if Map.has_key?(state.snapshots, path) or File.exists?(tombstone_path(overlay_path)) do
-          :deleted
-        else
-          File.read(root_path)
-        end
-
-      {:error, reason} ->
-        {:error, reason}
+  @spec capture_original(state(), String.t()) :: state()
+  defp capture_original(state, path) do
+    if Map.has_key?(state.originals, path) do
+      state
+    else
+      case File.read(Path.join(state.project_root, path)) do
+        {:ok, content} -> put_in(state.originals[path], content)
+        {:error, _} -> state
+      end
     end
   end
 
@@ -610,28 +457,6 @@ defmodule MingaAgent.Changeset.Server do
         {false, :error} -> :unmodified
       end
 
-  @spec source_content(state(), String.t()) :: {:ok, binary()} | {:error, term()}
-  defp source_content(state, path) do
-    case current_overlay_state(state, path) do
-      {:ok, content} -> {:ok, content}
-      :deleted -> {:error, :deleted}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  @spec previous_content(state(), String.t()) :: binary() | :unmodified
-  defp previous_content(state, path) do
-    case source_content(state, path) do
-      {:ok, content} -> content
-      {:error, _} -> :unmodified
-    end
-  end
-
-  @spec tombstone_path(String.t()) :: String.t()
-  defp tombstone_path(path), do: path <> ".__changeset_deleted__"
-
-  @spec push_history(state(), String.t(), binary() | :unmodified) :: state()
-  defp push_history(state, path, current) do
     history = Map.get(state.history, path, [])
     put_in(state.history[path], [current | history])
   end

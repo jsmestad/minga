@@ -1267,16 +1267,9 @@ defmodule MingaEditor.Commands.BufferManagement do
          %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
          session_pid
        ) do
-    case TabBar.find_workspace_by_session(tb, session_pid) do
-      %Workspace{id: workspace_id, remote_session: %{server_name: server_name}}
-      when is_binary(server_name) ->
-        tb =
-          tb
-          |> TabBar.update_workspace(
-            workspace_id,
-            &Workspace.set_remote_connection_status(&1, :disconnected)
-          )
-          |> TabBar.sync_workspace_agent_tab_projection(workspace_id)
+    case TabBar.find_by_session(tb, session_pid) do
+      %Tab{id: tab_id, server_name: server_name} when is_binary(server_name) ->
+        tb = TabBar.update_tab(tb, tab_id, &Tab.set_connection_status(&1, :disconnected))
 
         state
         |> EditorState.set_tab_bar(tb)
@@ -1284,7 +1277,7 @@ defmodule MingaEditor.Commands.BufferManagement do
         |> AgentAccess.update_agent(&AgentState.set_error(&1, "Disconnected from #{server_name}"))
         |> EditorState.set_status("[#{server_name}] disconnected, reconnecting...")
 
-      _workspace ->
+      _ ->
         state
     end
   end
@@ -1470,8 +1463,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   #
   # For file tabs, this closes the tab without killing the buffer (matching
   # Neovim where `:q` closes the window but the buffer stays in memory).
-  # For agent tabs, workspace close is the session teardown path, so closing
-  # the tab only removes the projection.
+  # For agent tabs, session cleanup is needed so we delegate to close_agent_tab.
   # Checks whether a quit should be confirmed. Dirty buffers use the existing
   # confirm_quit option; last-file `:q` always asks before exiting so Vim-style
   # close semantics do not surprise users by terminating the app.
@@ -1550,7 +1542,9 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec close_agent_tab_or_quit(state()) :: state()
   defp close_agent_tab_or_quit(%{shell_state: %{tab_bar: %TabBar{tabs: [_single]}}} = state) do
-    shutdown_editor(state)
+    state
+    |> cleanup_agent_session()
+    |> shutdown_editor()
   end
 
   defp close_agent_tab_or_quit(state), do: close_agent_tab(state)
@@ -1735,7 +1729,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     case EditorState.active_tab(state) do
       %Tab{context: context} when is_map(context) ->
         if TabContext.empty?(context) do
-          EditorState.sync_agent_ui_from_active_workspace(state)
+          state
         else
           EditorState.restore_tab_context(state, context)
         end
