@@ -98,6 +98,7 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSourceTest do
 
       [item] = PendingReviewsSource.candidates(fake_context(tb))
 
+      assert item.id == workspace.id
       assert item.label == "Review me"
       assert item.description =~ "Needs review"
       assert item.description =~ "2 draft file(s)"
@@ -147,7 +148,7 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSourceTest do
 
       switched =
         PendingReviewsSource.on_select(
-          %Item{id: {workspace.id, 0}, label: "Restored review"},
+          %Item{id: workspace.id, label: "Restored review"},
           state
         )
 
@@ -178,7 +179,7 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSourceTest do
       state = editor_state(tb, buf_a)
 
       switched =
-        PendingReviewsSource.on_select(%Item{id: {workspace.id, 0}, label: "Needs review"}, state)
+        PendingReviewsSource.on_select(%Item{id: workspace.id, label: "Needs review"}, state)
 
       assert switched.shell_state.tab_bar.active_id == tab2.id
       assert switched.workspace.buffers.active == buf_b
@@ -191,6 +192,39 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSourceTest do
       state = editor_state(tb, start_buffer("a"))
 
       assert PendingReviewsSource.on_cancel(state) == state
+    end
+  end
+
+  describe "candidates/1 exclusion coverage" do
+    test "excludes clean and in-progress workspaces", %{tmp_dir: dir} do
+      tb = TabBar.new(Tab.new_file(1, "a.ex"), dir)
+      {tb, clean_workspace} = TabBar.add_workspace(tb, "Clean")
+      {tb, in_progress_workspace} = TabBar.add_workspace(tb, "In progress")
+      {tb, pending_workspace} = TabBar.add_workspace(tb, "Pending")
+
+      tb =
+        tb
+        |> put_workspace(clean_workspace.id, fn ws ->
+          Workspace.set_review(ws, WorkspaceReview.new())
+        end)
+        |> put_workspace(in_progress_workspace.id, fn ws ->
+          ws
+          |> Workspace.set_review(%WorkspaceReview{
+            state: :draft,
+            changed_files: [file_ref()],
+            in_progress?: true
+          })
+          |> touch_workspace({{2026, 5, 20}, {11, 0, 0}})
+        end)
+        |> put_workspace(pending_workspace.id, fn ws ->
+          ws
+          |> Workspace.set_review(review(:needs_review))
+          |> touch_workspace({{2026, 5, 20}, {12, 0, 0}})
+        end)
+
+      assert Enum.map(PendingReviewsSource.candidates(fake_context(tb)), & &1.label) == [
+               "Pending"
+             ]
     end
   end
 end
