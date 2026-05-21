@@ -123,16 +123,10 @@ defmodule MingaEditor.Commands.AgentSession do
             state
           end
 
-        # Set the session PID on the agent tab that was just created
-        # (or the active agent tab). find_sessionless_agent avoids the
-        # ambiguity of find_by_kind(:agent) when multiple agent tabs exist.
-        # Tab.session is the source of truth; the rendering cache on
-        # state.shell_state.agent (status, error, pending_approval) is
-        # populated lazily on tab switch via rebuild_agent_from_session/2.
-        state = assign_session_to_tab(state, pid)
-
-        # Create an workspace for this session (if one doesn't exist yet)
-        ensure_agent_workspace(state, pid, project_view)
+        # Create a workspace before assigning the session to the tab. `set_tab_session/3` also projects the session onto the tab's current workspace, so doing this in the opposite order can temporarily attach the session to the manual workspace.
+        state
+        |> ensure_agent_workspace(pid, project_view)
+        |> assign_session_to_tab(pid)
 
       {:error, reason} ->
         maybe_discard_project_view(project_view, created_project_view?)
@@ -615,7 +609,7 @@ defmodule MingaEditor.Commands.AgentSession do
     {tb, ws} = TabBar.add_workspace(tb, "Agent", session_pid)
 
     tb =
-      case TabBar.find_by_session(tb, session_pid) do
+      case TabBar.find_by_session(tb, session_pid) || TabBar.find_sessionless_agent(tb) do
         %Tab{id: tab_id} = tab ->
           tb
           |> TabBar.move_tab_to_workspace(tab_id, ws.id)
