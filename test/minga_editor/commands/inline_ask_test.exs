@@ -4,6 +4,7 @@ defmodule MingaEditor.Commands.InlineAskTest do
   alias Minga.Buffer
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Commands.InlineAsk, as: InlineAskCommand
+  alias MingaEditor.InlineAsk.Events, as: InlineAskEvents
   alias MingaEditor.Input.InlineAsk, as: InlineAskInput
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
@@ -47,6 +48,20 @@ defmodule MingaEditor.Commands.InlineAskTest do
     assert active_ask(state, buffer) == nil
     assert Buffer.content(buffer) == original_content
     assert length(state.shell_state.tab_bar.workspaces) == original_workspace_count
+  end
+
+  test "prompt send failure marks ask failed and clears session", %{tmp_dir: root} do
+    {state, buffer} = state_with_file(root, "lib/auth.ex")
+    session_pid = self()
+
+    state = InlineAskCommand.open(state)
+    ask = active_ask(state, buffer) |> InlineAsk.thinking(session_pid)
+    state = EditorState.set_inline_asks(state, InlineAsk.put(EditorState.inline_asks(state), ask))
+
+    state = InlineAskEvents.handle_prompt_result(state, session_pid, {:error, :provider_down})
+
+    assert %InlineAsk{status: :error, session_pid: nil, response: "Failed to ask: :provider_down"} =
+             active_ask(state, buffer)
   end
 
   test "asks are independent per buffer", %{tmp_dir: root} do

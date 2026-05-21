@@ -31,6 +31,7 @@ defmodule MingaEditor.Input do
   alias MingaEditor.Input.GlobalBindings
   alias MingaEditor.Input.Hover
   alias MingaEditor.Input.InlineAsk
+  alias MingaEditor.Input.InlineEdit
   alias MingaEditor.Input.Interrupt
   alias MingaEditor.Input.MentionCompletion
   alias MingaEditor.Input.ModeFSM
@@ -88,6 +89,7 @@ defmodule MingaEditor.Input do
     [
       Interrupt,
       ConflictPrompt,
+      InlineEdit,
       InlineAsk,
       Prompt,
       Picker,

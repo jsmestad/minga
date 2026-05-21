@@ -21,6 +21,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   alias MingaEditor.DisplayList
   alias MingaEditor.DisplayMap
   alias MingaEditor.InlineAsk.Render, as: InlineAskRender
+  alias MingaEditor.InlineEdit.Render, as: InlineEditRender
   alias MingaEditor.RenderPosition
   alias MingaEditor.Renderer.BufferLine
   alias MingaEditor.Renderer.Context
@@ -1040,6 +1041,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     buf
     |> Buffer.decorations()
     |> InlineAskRender.merge_decorations(state, buf)
+    |> InlineEditRender.merge_decorations(state, buf)
     |> maybe_build_vt_line_cache()
   catch
     :exit, _ -> Decorations.new()

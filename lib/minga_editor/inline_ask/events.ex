@@ -29,6 +29,8 @@ defmodule MingaEditor.InlineAsk.Events do
   def handle_prompt_result(state, _session_pid, :ok), do: state
 
   def handle_prompt_result(state, session_pid, {:error, reason}) do
+    EphemeralSession.stop(session_pid)
+
     update_for_session(state, session_pid, fn ask ->
       InlineAsk.fail(ask, "Failed to ask: #{inspect(reason)}")
     end)

@@ -18,6 +18,7 @@ defmodule MingaEditor.Shell.Traditional.State do
   alias MingaEditor.YankFlash
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.InlineAsk
+  alias MingaEditor.State.InlineEdit
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.WhichKey
@@ -42,6 +43,7 @@ defmodule MingaEditor.Shell.Traditional.State do
           agent: AgentState.t(),
           modal: ModalOverlay.t(),
           inline_asks: InlineAsk.store(),
+          inline_edits: InlineEdit.store(),
           modeline_click_regions: [MingaEditor.Shell.Traditional.Modeline.click_region()],
           tab_bar_click_regions: [MingaEditor.Shell.Traditional.TabBarRenderer.click_region()],
           warning_popup_timer: reference() | nil,
@@ -66,6 +68,7 @@ defmodule MingaEditor.Shell.Traditional.State do
             agent: %AgentState{},
             modal: :none,
             inline_asks: %{},
+            inline_edits: %{},
             modeline_click_regions: [],
             tab_bar_click_regions: [],
             warning_popup_timer: nil,
@@ -290,6 +293,19 @@ defmodule MingaEditor.Shell.Traditional.State do
   end
 
   def set_inline_asks(ss, _asks), do: ss
+
+  @doc "Returns the inline edit store."
+  @spec inline_edits(t() | map()) :: InlineEdit.store()
+  def inline_edits(%{inline_edits: edits}), do: edits
+  def inline_edits(_ss), do: %{}
+
+  @doc "Replaces the inline edit store."
+  @spec set_inline_edits(t() | map(), InlineEdit.store()) :: t() | map()
+  def set_inline_edits(%{inline_edits: _} = ss, edits) when is_map(edits) do
+    %{ss | inline_edits: edits}
+  end
+
+  def set_inline_edits(ss, _edits), do: ss
 
   # ── Tool prompt helpers ────────────────────────────────────────────────────
 
