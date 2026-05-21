@@ -88,6 +88,12 @@ defmodule MingaEditor.State.Workspace do
     %{workspace | agent_status: status}
   end
 
+  @doc "Binds the live agent session to the workspace. The session itself is not persisted."
+  @spec set_session(t(), pid() | nil) :: t()
+  def set_session(%__MODULE__{} = workspace, session) when is_pid(session) or is_nil(session) do
+    %{workspace | session: session}
+  end
+
   @doc "Sets the ProjectView owned by the workspace."
   @spec set_project_view(t(), term() | nil) :: t()
   def set_project_view(%__MODULE__{} = workspace, project_view) do
@@ -384,7 +390,6 @@ defmodule MingaEditor.State.Workspace do
 
   @spec persisted_color(term(), non_neg_integer() | nil) :: non_neg_integer() | nil
   defp persisted_color(value, _default) when is_integer(value) and value >= 0, do: value
-  defp persisted_color(nil, _default), do: nil
   defp persisted_color(_value, default), do: default
 
   @spec persisted_file_refs(term(), String.t() | nil) :: [FileRef.t()]

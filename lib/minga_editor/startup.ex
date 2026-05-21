@@ -103,7 +103,7 @@ defmodule MingaEditor.Startup do
     windows =
       if initial_window, do: %{initial_window_id => initial_window}, else: %{}
 
-    project_root = Keyword.get(opts, :project_root)
+    project_root = Keyword.get_lazy(opts, :project_root, &startup_project_root/0)
 
     workspace = %MingaEditor.Workspace.State{
       buffers: %Buffers{
@@ -259,6 +259,24 @@ defmodule MingaEditor.Startup do
   @spec restore_persisted_workspaces(TabBar.t(), String.t() | nil) :: TabBar.t()
   defp restore_persisted_workspaces(%TabBar{} = tab_bar, project_root) do
     TabBar.restore_workspaces(tab_bar, WorkspacePersistence.scan(project_root), project_root)
+  end
+
+  @spec startup_project_root() :: String.t() | nil
+  defp startup_project_root do
+    Minga.CLI.startup_project_root() || Minga.CLI.argv_startup_project_root() ||
+      Minga.CLI.cwd_startup_project_root() || current_project_root()
+  end
+
+  @spec current_project_root() :: String.t() | nil
+  defp current_project_root do
+    case Minga.Project.root() do
+      root when is_binary(root) -> root
+      nil -> nil
+    end
+  catch
+    :exit, reason ->
+      Minga.Log.warning(:editor, "Startup project root lookup failed: #{inspect(reason)}")
+      nil
   end
 
   @doc """

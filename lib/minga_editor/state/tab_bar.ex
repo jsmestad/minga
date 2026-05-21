@@ -515,7 +515,14 @@ defmodule MingaEditor.State.TabBar do
   def remove_workspace(%__MODULE__{} = tb, 0), do: tb
 
   def remove_workspace(%__MODULE__{} = tb, workspace_id) do
-    WorkspacePersistence.delete(workspace_id, project_root(tb))
+    case WorkspacePersistence.delete(workspace_id, project_root(tb)) do
+      :ok -> remove_workspace_in_memory(tb, workspace_id)
+      {:error, _reason} -> tb
+    end
+  end
+
+  @spec remove_workspace_in_memory(t(), non_neg_integer()) :: t()
+  defp remove_workspace_in_memory(%__MODULE__{} = tb, workspace_id) do
     workspaces = Enum.reject(tb.workspaces, &(&1.id == workspace_id))
 
     tabs =
@@ -632,7 +639,15 @@ defmodule MingaEditor.State.TabBar do
 
   def restore_workspaces(%__MODULE__{} = tb, workspaces, project_root) when is_list(workspaces) do
     workspaces = ensure_manual_workspace(workspaces, project_root)
-    %{tb | workspaces: workspaces, next_workspace_id: next_restored_workspace_id(workspaces)}
+    {tabs, next_id} = ensure_restored_workspace_tabs(tb.tabs, tb.next_id, workspaces)
+
+    %{
+      tb
+      | tabs: tabs,
+        next_id: next_id,
+        workspaces: workspaces,
+        next_workspace_id: next_restored_workspace_id(workspaces)
+    }
   end
 
   @doc "Returns true if any agent workspaces exist."
@@ -679,6 +694,32 @@ defmodule MingaEditor.State.TabBar do
       nil -> [Workspace.new_manual(project_root) | workspaces]
     end
   end
+
+  @spec ensure_restored_workspace_tabs([Tab.t()], Tab.id(), [Workspace.t()]) ::
+          {[Tab.t()], Tab.id()}
+  defp ensure_restored_workspace_tabs(tabs, next_id, workspaces) do
+    Enum.reduce(workspaces, {tabs, next_id}, &ensure_restored_workspace_tab/2)
+  end
+
+  @spec ensure_restored_workspace_tab(Workspace.t(), {[Tab.t()], Tab.id()}) ::
+          {[Tab.t()], Tab.id()}
+  defp ensure_restored_workspace_tab(
+         %Workspace{kind: :agent, id: workspace_id, label: label},
+         {tabs, next_id}
+       ) do
+    if Enum.any?(tabs, &(&1.group_id == workspace_id)) do
+      {tabs, next_id}
+    else
+      restored_tab =
+        next_id
+        |> Tab.new_agent(label)
+        |> Tab.set_group(workspace_id)
+
+      {tabs ++ [restored_tab], next_id + 1}
+    end
+  end
+
+  defp ensure_restored_workspace_tab(%Workspace{}, acc), do: acc
 
   @spec next_restored_workspace_id([Workspace.t()]) :: pos_integer()
   defp next_restored_workspace_id(workspaces) do

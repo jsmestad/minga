@@ -465,19 +465,50 @@ defmodule MingaEditor.Commands.AgentSession do
         state
 
       nil ->
-        # Create workspace and assign the agent tab to it
-        {tb, ws} = TabBar.add_workspace(tb, "Agent", session_pid)
-
-        # Find the agent tab with this session and move it into the workspace
-        tb =
-          case TabBar.find_by_session(tb, session_pid) do
-            %Tab{id: tab_id} -> TabBar.move_tab_to_workspace(tb, tab_id, ws.id)
-            nil -> tb
-          end
-
-        EditorState.set_tab_bar(state, tb)
+        bind_or_create_agent_workspace(state, tb, session_pid)
     end
   end
 
   defp ensure_agent_workspace(state, _session_pid), do: state
+
+  @spec bind_or_create_agent_workspace(state(), TabBar.t(), pid()) :: state()
+  defp bind_or_create_agent_workspace(state, tb, session_pid) do
+    case workspace_for_session_tab(tb, session_pid) do
+      %Workspace{id: workspace_id, session: nil} ->
+        tb = TabBar.update_workspace(tb, workspace_id, &Workspace.set_session(&1, session_pid))
+        EditorState.set_tab_bar(state, tb)
+
+      _workspace ->
+        create_agent_workspace_for_session(state, tb, session_pid)
+    end
+  end
+
+  @spec workspace_for_session_tab(TabBar.t(), pid()) :: Workspace.t() | nil
+  defp workspace_for_session_tab(tb, session_pid) do
+    case TabBar.find_by_session(tb, session_pid) do
+      %Tab{kind: :agent, group_id: workspace_id} when workspace_id > 0 ->
+        case TabBar.get_workspace(tb, workspace_id) do
+          %Workspace{kind: :agent} = workspace -> workspace
+          _other -> nil
+        end
+
+      _other ->
+        nil
+    end
+  end
+
+  @spec create_agent_workspace_for_session(state(), TabBar.t(), pid()) :: state()
+  defp create_agent_workspace_for_session(state, tb, session_pid) do
+    # Create workspace and assign the agent tab to it
+    {tb, ws} = TabBar.add_workspace(tb, "Agent", session_pid)
+
+    # Find the agent tab with this session and move it into the workspace
+    tb =
+      case TabBar.find_by_session(tb, session_pid) do
+        %Tab{id: tab_id} -> TabBar.move_tab_to_workspace(tb, tab_id, ws.id)
+        nil -> tb
+      end
+
+    EditorState.set_tab_bar(state, tb)
+  end
 end

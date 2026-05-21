@@ -1231,7 +1231,7 @@ defmodule MingaEditor.State do
   def restore_tab_context(%__MODULE__{} = state, context) when is_map(context) do
     {context, state} =
       if TabContext.empty?(context) do
-        synthesized = build_file_tab_defaults(state)
+        synthesized = build_empty_tab_defaults(state)
 
         state =
           case tab_bar(state) do
@@ -1250,7 +1250,32 @@ defmodule MingaEditor.State do
     %{state | workspace: WorkspaceState.restore_tab_context(state.workspace, context)}
   end
 
-  # Builds a typed file-tab context for a brand-new tab.
+  # Builds a typed context for a brand-new tab. Agent tabs need an agent-shaped context because restoring them as file tabs leaves the editor in the wrong keymap scope and window content.
+  @spec build_empty_tab_defaults(t()) :: Tab.context()
+  defp build_empty_tab_defaults(state) do
+    case active_tab_for_defaults(state) do
+      %Tab{kind: :agent} -> build_empty_agent_tab_defaults(state)
+      _tab -> build_file_tab_defaults(state)
+    end
+  end
+
+  @spec active_tab_for_defaults(t()) :: Tab.t() | nil
+  defp active_tab_for_defaults(state) do
+    case tab_bar(state) do
+      %TabBar{} = tb -> TabBar.active(tb)
+      _other -> nil
+    end
+  end
+
+  @spec build_empty_agent_tab_defaults(t()) :: Tab.context()
+  defp build_empty_agent_tab_defaults(state) do
+    agent_buf = AgentBufferSync.start_buffer(normalize_options_server(state.options_server))
+    rows = max(state.terminal_viewport.rows, 1)
+    cols = max(state.terminal_viewport.cols, 1)
+    windows = build_agent_card_windows(agent_buf, rows, cols)
+    build_agent_tab_defaults(state, windows, agent_buf)
+  end
+
   @spec build_file_tab_defaults(t()) :: Tab.context()
   defp build_file_tab_defaults(state) do
     win_id = state.workspace.windows.next_id
@@ -1323,7 +1348,7 @@ defmodule MingaEditor.State do
       search: %Search{},
       editing: VimState.new(),
       document_highlights: nil,
-      agent_ui: UIState.new()
+      agent_ui: UIState.activate(UIState.new(), %Windows{}, %FileTreeState{})
     })
   end
 
