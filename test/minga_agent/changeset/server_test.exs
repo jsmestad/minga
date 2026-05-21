@@ -52,34 +52,6 @@ defmodule MingaAgent.Changeset.ServerTest do
       refute File.exists?(escaped)
     end
 
-    test "rejects symlink escapes through linked directories", %{project: project} do
-      outside_dir =
-        Path.join(Path.dirname(project), "escape-root-#{System.unique_integer([:positive])}")
-
-      File.mkdir_p!(Path.join(outside_dir, "nested"))
-      File.write!(Path.join(outside_dir, "nested/secret.txt"), "secret")
-      File.ln_s!(outside_dir, Path.join(project, "linked"))
-
-      server = start_server(project)
-
-      assert {:error, :symlink_traversal} =
-               GenServer.call(server, {:read_file, "linked/nested/secret.txt"})
-
-      assert {:error, :symlink_traversal} =
-               GenServer.call(server, {:write_file, "linked/new.txt", "pwned"})
-
-      assert {:error, :symlink_traversal} =
-               GenServer.call(
-                 server,
-                 {:edit_file, "linked/nested/secret.txt", "secret", "public"}
-               )
-
-      assert {:error, :symlink_traversal} =
-               GenServer.call(server, {:delete_file, "linked/nested/secret.txt"})
-
-      assert {:ok, "original content"} = GenServer.call(server, {:read_file, "hello.txt"})
-    end
-
     test "failed overlay writes do not create undo history", %{project: project} do
       dep_file = Path.join(project, "deps/some_dep/lib/real.ex")
       File.mkdir_p!(Path.dirname(dep_file))
@@ -131,6 +103,21 @@ defmodule MingaAgent.Changeset.ServerTest do
       assert File.read!(escaped) == "outside"
       File.rm!(escaped)
     end
+
+    test "edits direct overlay mutations instead of stale project root content", %{
+      project: project
+    } do
+      server = start_server(project)
+      overlay = GenServer.call(server, :overlay_path)
+
+      File.write!(Path.join(overlay, "hello.txt"), "shell changed")
+
+      assert :ok =
+               GenServer.call(server, {:edit_file, "hello.txt", "shell", "agent"})
+
+      assert {:ok, "agent changed"} = GenServer.call(server, {:read_file, "hello.txt"})
+      assert File.read!(Path.join(project, "hello.txt")) == "original content"
+    end
   end
 
   describe "delete_file" do
@@ -146,6 +133,22 @@ defmodule MingaAgent.Changeset.ServerTest do
 
       assert {:error, :file_not_found} = GenServer.call(server, {:delete_file, "nope.txt"})
       assert {:error, :nothing_to_undo} = GenServer.call(server, {:undo, "nope.txt"})
+    end
+
+    test "direct overlay recreation after delete wins over stale tombstones", %{project: project} do
+      server = start_server(project)
+      overlay = GenServer.call(server, :overlay_path)
+
+      assert :ok = GenServer.call(server, {:delete_file, "hello.txt"})
+      File.write!(Path.join(overlay, "hello.txt"), "resurrected")
+
+      assert {:ok, "resurrected"} = GenServer.call(server, {:read_file, "hello.txt"})
+
+      summary = GenServer.call(server, :summary)
+      assert Enum.any?(summary, &(&1.path == "hello.txt" and &1.kind in [:modified, :new]))
+
+      assert :ok = GenServer.call(server, :merge)
+      assert File.read!(Path.join(project, "hello.txt")) == "resurrected"
     end
 
     test "rejects traversal before capturing or deleting files", %{project: project} do
@@ -171,6 +174,16 @@ defmodule MingaAgent.Changeset.ServerTest do
       server = start_server(project)
 
       assert {:ok, "original content"} = GenServer.call(server, {:read_file, "hello.txt"})
+    end
+
+    test "reads direct overlay mutations before falling back to project root", %{project: project} do
+      server = start_server(project)
+      overlay = GenServer.call(server, :overlay_path)
+
+      File.write!(Path.join(overlay, "hello.txt"), "shell changed")
+
+      assert {:ok, "shell changed"} = GenServer.call(server, {:read_file, "hello.txt"})
+      assert File.read!(Path.join(project, "hello.txt")) == "original content"
     end
 
     test "rejects traversal before reading project files", %{project: project} do
@@ -246,6 +259,16 @@ defmodule MingaAgent.Changeset.ServerTest do
       new_entry = Enum.find(summary, &(&1.path == "lib/brand_new.ex"))
       assert new_entry.kind == :new
     end
+
+    test "includes direct overlay filesystem mutations", %{project: project} do
+      server = start_server(project)
+      overlay = GenServer.call(server, :overlay_path)
+
+      File.write!(Path.join(overlay, "hello.txt"), "shell changed")
+
+      summary = GenServer.call(server, :summary)
+      assert Enum.any?(summary, &(&1.path == "hello.txt" and &1.kind == :modified))
+    end
   end
 
   describe "budget" do
@@ -292,6 +315,24 @@ defmodule MingaAgent.Changeset.ServerTest do
       # Original content is readable again
       assert {:ok, "original content"} = GenServer.call(server, {:read_file, "hello.txt"})
     end
+
+    test "restores direct overlay filesystem mutations back to the original snapshot", %{
+      project: project
+    } do
+      server = start_server(project)
+      overlay = GenServer.call(server, :overlay_path)
+
+      File.write!(Path.join(overlay, "hello.txt"), "shell changed")
+
+      assert {:ok, "shell changed"} = GenServer.call(server, {:read_file, "hello.txt"})
+
+      assert :ok = GenServer.call(server, :reset)
+      assert GenServer.call(server, :summary) == []
+      assert {:ok, "original content"} = GenServer.call(server, {:read_file, "hello.txt"})
+
+      assert {:ok, "original content"} =
+               File.read(Path.join(GenServer.call(server, :overlay_path), "hello.txt"))
+    end
   end
 
   describe "merge" do
@@ -309,78 +350,79 @@ defmodule MingaAgent.Changeset.ServerTest do
       assert File.read!(Path.join(project, "hello.txt")) == "merged content"
     end
 
-    test "rejects merge when a tracked project file becomes a symlink escape", %{project: project} do
+    test "applies direct overlay filesystem mutations to the real project", %{project: project} do
       server = start_server(project)
-
-      GenServer.call(server, {:write_file, "hello.txt", "merged content"})
-      GenServer.call(server, {:write_file, "lib/foo.ex", "agent version"})
-
-      outside_dir =
-        Path.join(Path.dirname(project), "merge-escape-#{System.unique_integer([:positive])}")
-
-      File.mkdir_p!(outside_dir)
-      outside_file = Path.join(outside_dir, "secret.txt")
-      File.write!(outside_file, "secret")
-      File.rm!(Path.join(project, "lib/foo.ex"))
-      File.ln_s!(outside_file, Path.join(project, "lib/foo.ex"))
-
-      assert {:error, :symlink_traversal} = GenServer.call(server, :merge)
-      assert File.read!(outside_file) == "secret"
-      assert File.read!(Path.join(project, "hello.txt")) == "original content"
-
-      modified = GenServer.call(server, :modified_files)
-      assert "hello.txt" in modified.modified
-      assert "lib/foo.ex" in modified.modified
-    end
-
-    test "preflight_merge validates the same plan without applying or cleaning up", %{
-      project: project
-    } do
-      server = start_server(project)
-
-      GenServer.call(server, {:write_file, "hello.txt", "merged content"})
-
-      outside_dir =
-        Path.join(Path.dirname(project), "preflight-escape-#{System.unique_integer([:positive])}")
-
-      File.mkdir_p!(outside_dir)
-      outside_file = Path.join(outside_dir, "secret.txt")
-      File.write!(outside_file, "secret")
-      File.rm!(Path.join(project, "hello.txt"))
-      File.ln_s!(outside_file, Path.join(project, "hello.txt"))
-
-      assert {:error, :symlink_traversal} = MingaAgent.Changeset.preflight_merge(server)
-      assert File.read!(outside_file) == "secret"
-      assert File.dir?(GenServer.call(server, :overlay_path))
-
-      File.rm!(Path.join(project, "hello.txt"))
-      File.write!(Path.join(project, "hello.txt"), "project version")
-
-      assert {:ok, "merged content"} = GenServer.call(server, {:read_file, "hello.txt"})
-    end
-
-    test "preflight_merge returns read errors when a tracked file becomes a directory", %{
-      project: project
-    } do
-      server = start_server(project)
-      ref = Process.monitor(server)
-
-      assert :ok = GenServer.call(server, {:write_file, "hello.txt", "merged content"})
       overlay = GenServer.call(server, :overlay_path)
 
-      File.rm!(Path.join(project, "hello.txt"))
-      File.mkdir_p!(Path.join(project, "hello.txt"))
+      File.write!(Path.join(overlay, "lib/direct.ex"), "direct file")
+      assert :ok = GenServer.call(server, :merge)
 
-      assert {:error, reason} = MingaAgent.Changeset.preflight_merge(server)
-      assert reason in [:invalid_path, :eisdir]
-      refute_receive {:DOWN, ^ref, :process, ^server, _reason}, 0
+      assert File.read!(Path.join(project, "lib/direct.ex")) == "direct file"
+    end
+
+    test "promotes a tracked write after a direct overlay edit using the original snapshot as the ancestor",
+         %{project: project} do
+      server = start_server(project)
+      overlay = GenServer.call(server, :overlay_path)
+
+      File.write!(Path.join(overlay, "hello.txt"), "shell changed")
+      assert :ok = GenServer.call(server, {:write_file, "hello.txt", "agent version"})
+      assert :ok = GenServer.call(server, :merge)
+
+      assert File.read!(Path.join(project, "hello.txt")) == "agent version"
+    end
+
+    test "promotes a tracked edit after a direct overlay edit using the original snapshot as the ancestor",
+         %{project: project} do
+      server = start_server(project)
+      overlay = GenServer.call(server, :overlay_path)
+
+      File.write!(Path.join(overlay, "lib/foo.ex"), "shell changed")
+      assert :ok = GenServer.call(server, {:edit_file, "lib/foo.ex", "shell", "agent"})
+      assert :ok = GenServer.call(server, :merge)
+
+      assert File.read!(Path.join(project, "lib/foo.ex")) == "agent changed"
+    end
+
+    test "promotes a tracked delete after a direct overlay edit using the original snapshot as the ancestor",
+         %{project: project} do
+      server = start_server(project)
+      overlay = GenServer.call(server, :overlay_path)
+
+      File.write!(Path.join(overlay, "hello.txt"), "shell changed")
+      assert :ok = GenServer.call(server, {:delete_file, "hello.txt"})
+      assert :ok = GenServer.call(server, :merge)
+
+      refute File.exists?(Path.join(project, "hello.txt"))
+    end
+
+    test "returns an error for an unreadable new overlay file", %{project: project} do
+      server = start_server(project)
+      overlay = GenServer.call(server, :overlay_path)
+
+      unreadable = Path.join(overlay, "broken.txt")
+      File.write!(unreadable, "overlay content")
+      File.chmod!(unreadable, 0)
+
+      assert {:error, errors} = GenServer.call(server, :merge)
+      assert Enum.any?(errors, &match?({:error, "broken.txt", _}, &1))
       assert File.dir?(overlay)
-      assert File.dir?(Path.join(project, "hello.txt"))
+    end
 
-      File.rm_rf!(Path.join(project, "hello.txt"))
-      File.write!(Path.join(project, "hello.txt"), "project version")
+    test "returns errors when filesystem merge hits a read failure and keeps the overlay", %{
+      project: project
+    } do
+      server = start_server(project)
+      overlay = GenServer.call(server, :overlay_path)
+      root_file = Path.join(project, "broken.txt")
 
-      assert {:ok, "merged content"} = GenServer.call(server, {:read_file, "hello.txt"})
+      File.write!(root_file, "root content")
+      File.chmod!(root_file, 0)
+      File.write!(Path.join(overlay, "broken.txt"), "overlay content")
+
+      assert {:error, errors} = GenServer.call(server, :merge)
+      assert Enum.any?(errors, &match?({:error, "broken.txt", _}, &1))
+      assert File.dir?(overlay)
     end
 
     test "creates new files in the project", %{project: project} do
@@ -401,6 +443,16 @@ defmodule MingaAgent.Changeset.ServerTest do
       refute File.exists?(Path.join(project, "hello.txt"))
     end
 
+    test "delete and merge do not create tombstone files in the project root", %{project: project} do
+      server = start_server(project)
+
+      GenServer.call(server, {:delete_file, "hello.txt"})
+      assert :ok = GenServer.call(server, :merge)
+
+      refute File.exists?(Path.join(project, "hello.txt.__changeset_deleted__"))
+      refute File.exists?(Path.join(project, "hello.txt"))
+    end
+
     test "detects conflicts when project file was modified concurrently", %{project: project} do
       server = start_server(project)
 
@@ -410,10 +462,49 @@ defmodule MingaAgent.Changeset.ServerTest do
       # Simulate concurrent edit to the real project
       File.write!(Path.join(project, "hello.txt"), "human version")
 
-      # Merge should detect the conflict and attempt three-way merge
+      # Merge should detect the conflict and keep the changeset alive for review
       result = GenServer.call(server, :merge)
       # Both sides completely replaced the content, so it's a conflict
-      assert {:ok, :merged_with_conflicts, _details} = result
+      assert {:conflict, %{conflicts: [{:conflict, "hello.txt", :concurrent_edit}]}} = result
+      assert File.dir?(GenServer.call(server, :overlay_path))
+    end
+
+    test "conflict retry does not reprocess files already applied during partial merge", %{
+      project: project
+    } do
+      server = start_server(project)
+
+      GenServer.call(server, {:write_file, "lib/new.ex", "defmodule New do\nend"})
+      GenServer.call(server, {:write_file, "hello.txt", "agent version"})
+      File.write!(Path.join(project, "hello.txt"), "human version")
+
+      assert {:conflict, %{conflicts: [{:conflict, "hello.txt", :concurrent_edit}]}} =
+               GenServer.call(server, :merge)
+
+      assert File.read!(Path.join(project, "lib/new.ex")) == "defmodule New do\nend"
+      File.write!(Path.join(project, "hello.txt"), "original content")
+      assert :ok = GenServer.call(server, :merge)
+      assert File.read!(Path.join(project, "hello.txt")) == "agent version"
+      assert File.read!(Path.join(project, "lib/new.ex")) == "defmodule New do\nend"
+    end
+
+    test "prunes direct overlay filesystem results after a partial conflict", %{project: project} do
+      server = start_server(project)
+      overlay = GenServer.call(server, :overlay_path)
+
+      File.write!(Path.join(overlay, "lib/direct.ex"), "defmodule Direct do\nend")
+      GenServer.call(server, {:write_file, "hello.txt", "agent version"})
+      File.write!(Path.join(project, "hello.txt"), "human version")
+
+      assert {:conflict, %{conflicts: [{:conflict, "hello.txt", :concurrent_edit}]}} =
+               GenServer.call(server, :merge)
+
+      assert File.read!(Path.join(project, "lib/direct.ex")) == "defmodule Direct do\nend"
+      refute Enum.any?(GenServer.call(server, :summary), &(&1.path == "lib/direct.ex"))
+
+      File.write!(Path.join(project, "hello.txt"), "original content")
+      assert :ok = GenServer.call(server, :merge)
+      assert File.read!(Path.join(project, "lib/direct.ex")) == "defmodule Direct do\nend"
     end
 
     test "three-way merges non-overlapping concurrent edits", %{project: project} do

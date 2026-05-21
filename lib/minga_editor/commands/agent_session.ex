@@ -7,6 +7,7 @@ defmodule MingaEditor.Commands.AgentSession do
   """
 
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
+  alias MingaAgent.ProjectView
   alias MingaAgent.Session
   alias Minga.Buffer
   alias MingaEditor.AgentLifecycle
@@ -42,7 +43,11 @@ defmodule MingaEditor.Commands.AgentSession do
     session = AgentAccess.session(state)
 
     if session do
-      stop_session_pid(session)
+      try do
+        MingaAgent.SessionManager.stop_session_by_pid(session)
+      catch
+        :exit, _ -> :ok
+      end
     end
 
     state = state |> clear_restart_session(session) |> reset_agent_cache()
@@ -95,12 +100,14 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec start_agent_session(state()) :: state()
   def start_agent_session(state) do
     panel = AgentAccess.panel(state)
+    {project_view, created_project_view?} = session_project_view(state)
 
     opts = [
       thinking_level: panel.thinking_level,
       provider_opts: [
         provider: panel.provider_name,
-        model: panel.model_name
+        model: panel.model_name,
+        project_view: project_view
       ]
     ]
 
@@ -116,16 +123,54 @@ defmodule MingaEditor.Commands.AgentSession do
             state
           end
 
-        # Attach the new session as a temporary tab locator until the workspace owns it.
-        state = assign_session_to_tab(state, pid)
-
-        # Create an workspace for this session (if one doesn't exist yet)
-        ensure_agent_workspace(state, pid)
+        # Create the workspace first so set_tab_session/3 does not project the session onto the manual workspace.
+        state
+        |> ensure_agent_workspace(pid, project_view)
+        |> assign_session_to_tab(pid)
 
       {:error, reason} ->
+        maybe_discard_project_view(project_view, created_project_view?)
         msg = format_session_error(reason)
         Minga.Log.error(:agent, "[Agent] #{msg}")
         AgentAccess.update_agent(state, &AgentState.set_error(&1, msg))
+    end
+  end
+
+  @doc "Connects the local GUI to an existing remote agent session."
+  @spec connect_remote_session(state(), String.t(), String.t(), pid()) :: state()
+  def connect_remote_session(state, server_name, session_id, remote_pid)
+      when is_binary(server_name) and is_binary(session_id) and is_pid(remote_pid) do
+    case subscribe_and_snapshot(remote_pid) do
+      {:ok, messages, snapshot} ->
+        {state, tab_id, buffer} = create_remote_agent_tab(state, server_name)
+        AgentBufferSync.sync(buffer, messages)
+
+        state
+        |> set_remote_tab(tab_id, server_name, session_id, remote_pid)
+        |> AgentAccess.update_agent(&AgentState.set_buffer(&1, buffer))
+        |> rebuild_agent_from_tab(tab_id)
+        |> apply_remote_snapshot(snapshot)
+        |> ensure_agent_workspace(remote_pid, nil)
+        |> set_remote_workspace(server_name, session_id, remote_pid, :connected)
+        |> EditorState.set_status("Connected to #{server_name} session #{session_id}")
+
+      {:error, reason} ->
+        EditorState.set_status(state, "Remote session unavailable: #{inspect(reason)}")
+    end
+  end
+
+  @doc "Starts a new agent session on a connected remote server and opens it locally."
+  @spec start_remote_session(state(), String.t()) :: state()
+  def start_remote_session(state, server_name) when is_binary(server_name) do
+    case Minga.Distribution.ConnectionManager.node_for_server(server_name) do
+      {:ok, remote_node} ->
+        start_remote_session_on_node(state, server_name, remote_node)
+
+      {:error, :disconnected} ->
+        EditorState.set_status(state, "Remote server #{server_name} is disconnected")
+
+      {:error, :not_found} ->
+        EditorState.set_status(state, "Unknown remote server #{server_name}")
     end
   end
 
@@ -153,50 +198,19 @@ defmodule MingaEditor.Commands.AgentSession do
     :exit, reason -> {:error, reason}
   end
 
-  @doc "Connects the local GUI to an existing remote agent session."
-  @spec connect_remote_session(state(), String.t(), String.t(), pid()) :: state()
-  def connect_remote_session(state, server_name, session_id, remote_pid)
-      when is_binary(server_name) and is_binary(session_id) and is_pid(remote_pid) do
-    case subscribe_and_snapshot(remote_pid) do
-      {:ok, messages, snapshot} ->
-        {state, tab_id, buffer} = create_remote_agent_tab(state, server_name)
-        AgentBufferSync.sync(buffer, messages)
-
-        state
-        |> set_remote_tab(tab_id, server_name, session_id, remote_pid)
-        |> AgentAccess.update_agent(&AgentState.set_buffer(&1, buffer))
-        |> rebuild_agent_from_tab(tab_id)
-        |> apply_remote_snapshot(snapshot)
-        |> ensure_agent_workspace(remote_pid)
-        |> set_remote_workspace(server_name, session_id, remote_pid, :connected)
-        |> EditorState.set_status("Connected to #{server_name} session #{session_id}")
-
-      {:error, reason} ->
-        EditorState.set_status(state, "Remote session unavailable: #{inspect(reason)}")
-    end
-  end
-
-  @doc "Starts a new agent session on a connected remote server and opens it locally."
-  @spec start_remote_session(state(), String.t()) :: state()
-  def start_remote_session(state, server_name) when is_binary(server_name) do
-    case Minga.Distribution.ConnectionManager.node_for_server(server_name) do
-      {:ok, remote_node} ->
-        start_remote_session_on_node(state, server_name, remote_node)
-
-      {:error, :disconnected} ->
-        EditorState.set_status(state, "Remote server #{server_name} is disconnected")
-
-      {:error, :not_found} ->
-        EditorState.set_status(state, "Unknown remote server #{server_name}")
-    end
-  end
-
   @doc "Stops the current agent session, routing remote sessions to their remote manager."
   @spec stop_current_session(state()) :: state()
   def stop_current_session(state) do
     case AgentAccess.session(state) do
-      nil -> state
-      session -> stop_current_session_pid(state, session)
+      nil ->
+        state
+
+      session when node(session) == node() ->
+        MingaAgent.SessionManager.stop_session_by_pid(session)
+        state
+
+      session ->
+        stop_remote_session(state, session)
     end
   catch
     :exit, reason -> EditorState.set_status(state, "Failed to stop session: #{inspect(reason)}")
@@ -260,35 +274,13 @@ defmodule MingaEditor.Commands.AgentSession do
 
   @spec assign_session_to_tab(state(), pid()) :: state()
   defp assign_session_to_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, pid) do
-    case preferred_sessionless_agent(tb) do
-      %Tab{id: agent_tab_id} ->
-        tb = TabBar.update_tab(tb, agent_tab_id, &Tab.set_session(&1, pid))
-        EditorState.set_tab_bar(state, tb)
-
-      nil ->
-        state
+    case TabBar.find_sessionless_agent(tb) do
+      %Tab{id: agent_tab_id} -> EditorState.set_tab_session(state, agent_tab_id, pid)
+      nil -> state
     end
   end
 
   defp assign_session_to_tab(state, _pid), do: state
-
-  @spec preferred_sessionless_agent(TabBar.t()) :: Tab.t() | nil
-  defp preferred_sessionless_agent(%TabBar{} = tb) do
-    active_workspace_sessionless_agent(tb) || TabBar.find_sessionless_agent(tb)
-  end
-
-  @spec active_workspace_sessionless_agent(TabBar.t()) :: Tab.t() | nil
-  defp active_workspace_sessionless_agent(%TabBar{} = tb) do
-    case TabBar.active_workspace(tb) do
-      %Workspace{id: workspace_id, kind: :agent} ->
-        tb
-        |> TabBar.tabs_in_workspace(workspace_id)
-        |> Enum.find(&sessionless_agent?/1)
-
-      _workspace ->
-        nil
-    end
-  end
 
   @spec sessionless_agent?(Tab.t()) :: boolean()
   defp sessionless_agent?(%Tab{kind: :agent, session: nil}), do: true
@@ -470,36 +462,10 @@ defmodule MingaEditor.Commands.AgentSession do
     end)
   end
 
-  @spec stop_current_session_pid(state(), pid()) :: state()
-  defp stop_current_session_pid(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, session)
-       when is_pid(session) do
-    case remote_session_for_live_pid(tb, session) do
-      %RemoteSession{} ->
-        stop_remote_session(state, session)
-
-      nil when node(session) == node() ->
-        MingaAgent.SessionManager.stop_session_by_pid(session)
-        state
-
-      nil ->
-        stop_remote_session(state, session)
-    end
-  end
-
-  defp stop_current_session_pid(state, session)
-       when is_pid(session) and node(session) == node() do
-    MingaAgent.SessionManager.stop_session_by_pid(session)
-    state
-  end
-
-  defp stop_current_session_pid(state, session) when is_pid(session) do
-    stop_remote_session(state, session)
-  end
-
   @spec stop_remote_session(state(), pid()) :: state()
   defp stop_remote_session(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, session) do
-    case remote_session_for_live_pid(tb, session) do
-      %RemoteSession{session_id: session_id} ->
+    case TabBar.find_by_session(tb, session) do
+      %Tab{remote_session_id: session_id} when is_binary(session_id) ->
         case :erpc.call(
                node(session),
                MingaAgent.SessionManager,
@@ -514,7 +480,7 @@ defmodule MingaEditor.Commands.AgentSession do
             EditorState.set_status(state, "Failed to stop remote session: #{inspect(reason)}")
         end
 
-      nil ->
+      _ ->
         EditorState.set_status(state, "Remote session id is unavailable")
     end
   catch
@@ -523,29 +489,6 @@ defmodule MingaEditor.Commands.AgentSession do
   end
 
   defp stop_remote_session(state, _session), do: state
-
-  @spec remote_session_for_live_pid(TabBar.t(), pid()) :: RemoteSession.t() | nil
-  defp remote_session_for_live_pid(%TabBar{} = tb, session) when is_pid(session) do
-    case TabBar.find_workspace_by_session(tb, session) do
-      %Workspace{remote_session: %RemoteSession{} = remote_session} ->
-        remote_session
-
-      _workspace ->
-        remote_session_for_tab_pid(tb, session)
-    end
-  end
-
-  @spec remote_session_for_tab_pid(TabBar.t(), pid()) :: RemoteSession.t() | nil
-  defp remote_session_for_tab_pid(%TabBar{} = tb, session) when is_pid(session) do
-    case TabBar.find_by_session(tb, session) do
-      %Tab{server_name: server_name, remote_session_id: session_id}
-      when is_binary(server_name) and is_binary(session_id) ->
-        RemoteSession.new(server_name, session_id, :connected)
-
-      _tab ->
-        nil
-    end
-  end
 
   @spec buffer_name_for_language(String.t()) :: String.t()
   defp buffer_name_for_language(""), do: "*Agent: text*"
@@ -603,19 +546,24 @@ defmodule MingaEditor.Commands.AgentSession do
   # Creates an agent workspace when a session starts, and assigns
   # the current agent tab to it. No-op if the session already has
   # a workspace (e.g., session restart).
-  @spec ensure_agent_workspace(state(), pid()) :: state()
-  defp ensure_agent_workspace(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, session_pid) do
+  @spec ensure_agent_workspace(state(), pid(), ProjectView.t() | nil) :: state()
+  defp ensure_agent_workspace(
+         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         session_pid,
+         project_view
+       ) do
     case TabBar.find_workspace_by_session(tb, session_pid) do
-      %Workspace{} ->
-        # Workspace already exists for this session
-        state
+      %Workspace{} = workspace ->
+        maybe_update_workspace_project_view(state, workspace, project_view)
 
       nil ->
-        bind_session_to_agent_workspace(state, tb, session_pid)
+        state
+        |> bind_session_to_agent_workspace(tb, session_pid)
+        |> maybe_update_bound_workspace_project_view(session_pid, project_view)
     end
   end
 
-  defp ensure_agent_workspace(state, _session_pid), do: state
+  defp ensure_agent_workspace(state, _session_pid, _project_view), do: state
 
   @spec bind_session_to_agent_workspace(state(), TabBar.t(), pid()) :: state()
   defp bind_session_to_agent_workspace(state, %TabBar{} = tb, session_pid) do
@@ -658,11 +606,10 @@ defmodule MingaEditor.Commands.AgentSession do
 
   @spec create_agent_workspace(state(), TabBar.t(), pid()) :: state()
   defp create_agent_workspace(state, %TabBar{} = tb, session_pid) do
-    # Create workspace and assign the agent tab to it.
     {tb, ws} = TabBar.add_workspace(tb, "Agent", session_pid)
 
     tb =
-      case TabBar.find_by_session(tb, session_pid) do
+      case TabBar.find_by_session(tb, session_pid) || TabBar.find_sessionless_agent(tb) do
         %Tab{id: tab_id} = tab ->
           tb
           |> TabBar.move_tab_to_workspace(tab_id, ws.id)
@@ -689,5 +636,105 @@ defmodule MingaEditor.Commands.AgentSession do
     state
     |> EditorState.set_tab_bar(tb)
     |> EditorState.update_workspace(&WorkspaceState.set_agent_ui(&1, agent_ui))
+  end
+
+  @spec maybe_update_bound_workspace_project_view(state(), pid(), ProjectView.t() | nil) ::
+          state()
+  defp maybe_update_bound_workspace_project_view(
+         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         session_pid,
+         project_view
+       ) do
+    case TabBar.find_workspace_by_session(tb, session_pid) do
+      %Workspace{} = workspace ->
+        maybe_update_workspace_project_view(state, workspace, project_view)
+
+      nil ->
+        state
+    end
+  end
+
+  defp maybe_update_bound_workspace_project_view(state, _session_pid, _project_view), do: state
+
+  @spec session_project_view(state()) :: {ProjectView.t() | nil, boolean()}
+  defp session_project_view(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+    case TabBar.active_workspace(tb) do
+      %Workspace{kind: :agent} = workspace ->
+        if Workspace.project_view_active?(workspace) do
+          {workspace.project_view, false}
+        else
+          project_view_from_root(state)
+        end
+
+      _ ->
+        project_view_from_root(state)
+    end
+  end
+
+  defp session_project_view(state), do: project_view_from_root(state)
+
+  @spec project_view_from_root(state()) :: {ProjectView.t() | nil, boolean()}
+  defp project_view_from_root(%{workspace: %{file_tree: %{project_root: root}}})
+       when is_binary(root) do
+    case ProjectView.overlay(root) do
+      {:ok, project_view} -> {project_view, true}
+      {:error, _reason} -> {nil, false}
+    end
+  end
+
+  defp project_view_from_root(_state), do: {nil, false}
+
+  @spec maybe_discard_project_view(ProjectView.t() | nil, boolean()) :: :ok
+  defp maybe_discard_project_view(%ProjectView{} = project_view, true) do
+    ProjectView.discard(project_view)
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp maybe_discard_project_view(_project_view, _created?), do: :ok
+
+  @spec maybe_update_workspace_project_view(state(), Workspace.t(), ProjectView.t() | nil) ::
+          state()
+  defp maybe_update_workspace_project_view(state, %Workspace{} = workspace, project_view) do
+    state
+    |> update_workspace_project_view(workspace.id, project_view)
+    |> maybe_refresh_provider_project_view(workspace.session, project_view)
+  end
+
+  @spec update_workspace_project_view(state(), non_neg_integer(), ProjectView.t() | nil) ::
+          state()
+  defp update_workspace_project_view(
+         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         workspace_id,
+         project_view
+       ) do
+    tb = TabBar.update_workspace(tb, workspace_id, &Workspace.set_project_view(&1, project_view))
+    EditorState.set_tab_bar(state, tb)
+  end
+
+  defp update_workspace_project_view(state, _workspace_id, _project_view), do: state
+
+  @spec maybe_refresh_provider_project_view(state(), pid() | nil, ProjectView.t() | nil) ::
+          state()
+  defp maybe_refresh_provider_project_view(state, session, project_view) when is_pid(session) do
+    case Session.get_provider(session) do
+      nil ->
+        state
+
+      provider ->
+        refresh_provider_project_view(state, provider, project_view)
+    end
+  catch
+    :exit, _ -> state
+  end
+
+  defp maybe_refresh_provider_project_view(state, _session, _project_view), do: state
+
+  @spec refresh_provider_project_view(state(), pid(), ProjectView.t() | nil) :: state()
+  defp refresh_provider_project_view(state, provider, project_view) do
+    :ok = MingaAgent.Providers.Native.refresh_project_view(provider, project_view)
+    state
+  catch
+    :exit, _ -> state
   end
 end

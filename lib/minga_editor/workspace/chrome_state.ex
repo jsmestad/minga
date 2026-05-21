@@ -8,6 +8,7 @@ defmodule MingaEditor.Workspace.ChromeState do
   alias Minga.Buffer
   alias Minga.Language
   alias MingaEditor.State.Workspace
+  alias MingaEditor.State.WorkspaceReview
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
@@ -63,8 +64,8 @@ defmodule MingaEditor.Workspace.ChromeState do
       active_tab_id: active_tab_id(tb),
       background_count: background_count(workspaces, active_workspace_id),
       attention_count: attention_count(workspaces),
-      draft_count: 0,
-      conflict_count: 0
+      draft_count: total_draft_count(workspaces),
+      conflict_count: total_conflict_count(workspaces)
     }
   end
 
@@ -110,8 +111,8 @@ defmodule MingaEditor.Workspace.ChromeState do
       status: :idle,
       attention?: Enum.any?(manual_tabs, & &1.attention),
       tab_count: length(manual_tabs),
-      draft_count: 0,
-      conflict_count: 0,
+      draft_count: workspace_draft_count(manual_workspace),
+      conflict_count: workspace_conflict_count(manual_workspace),
       running_background_count: 0,
       closeable?: false
     )
@@ -190,12 +191,34 @@ defmodule MingaEditor.Workspace.ChromeState do
       status: group.agent_status,
       attention?: Enum.any?(tabs, & &1.attention),
       tab_count: length(tabs),
-      draft_count: 0,
-      conflict_count: 0,
+      draft_count: workspace_draft_count(group),
+      conflict_count: workspace_conflict_count(group),
       running_background_count: running_background_count(group),
       closeable?: true
     )
   end
+
+  @spec total_draft_count([WorkspaceSummary.t()]) :: non_neg_integer()
+  defp total_draft_count(workspaces) do
+    Enum.reduce(workspaces, 0, &(&1.draft_count + &2))
+  end
+
+  @spec total_conflict_count([WorkspaceSummary.t()]) :: non_neg_integer()
+  defp total_conflict_count(workspaces) do
+    Enum.reduce(workspaces, 0, &(&1.conflict_count + &2))
+  end
+
+  @spec workspace_draft_count(Workspace.t() | nil) :: non_neg_integer()
+  defp workspace_draft_count(%Workspace{review: %WorkspaceReview{} = review}),
+    do: WorkspaceReview.draft_count(review)
+
+  defp workspace_draft_count(_workspace), do: 0
+
+  @spec workspace_conflict_count(Workspace.t() | nil) :: non_neg_integer()
+  defp workspace_conflict_count(%Workspace{review: %WorkspaceReview{} = review}),
+    do: WorkspaceReview.conflict_count(review)
+
+  defp workspace_conflict_count(_workspace), do: 0
 
   @spec running_background_count(Workspace.t()) :: non_neg_integer()
   defp running_background_count(%Workspace{agent_status: status})

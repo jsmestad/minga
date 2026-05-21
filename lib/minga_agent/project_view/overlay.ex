@@ -10,7 +10,6 @@ defmodule MingaAgent.ProjectView.Overlay do
   alias MingaAgent.BufferForkStore
   alias MingaAgent.Changeset
   alias MingaAgent.ProjectView
-  alias MingaAgent.ProjectView.PathResolver
 
   @type ref :: %{changeset: pid(), fork_store: pid() | nil}
 
@@ -53,18 +52,14 @@ defmodule MingaAgent.ProjectView.Overlay do
   @spec list_directory(ProjectView.t(), String.t()) ::
           {:ok, [ProjectView.Backend.directory_entry()]} | {:error, term()}
   def list_directory(%ProjectView{} = view, relative_path) do
-    with {:ok, project_dir} <-
-           PathResolver.resolve(view.project_root, relative_path, allow_root: true) do
-      relative_dir = Path.relative_to(project_dir, view.project_root)
-      dir = Path.join(working_dir(view), relative_dir)
+    dir = Path.join(working_dir(view), relative_path)
 
-      case File.ls(dir) do
-        {:ok, entries} ->
-          {:ok, entries |> reject_tombstones() |> Enum.map(&directory_entry(dir, &1))}
+    case File.ls(dir) do
+      {:ok, entries} ->
+        {:ok, entries |> reject_tombstones() |> Enum.map(&directory_entry(dir, &1))}
 
-        {:error, reason} ->
-          {:error, reason}
-      end
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -85,17 +80,10 @@ defmodule MingaAgent.ProjectView.Overlay do
   end
 
   @impl true
-  @spec promote(ProjectView.t(), term()) :: :ok | {:ok, term()} | {:error, term()}
+  @spec promote(ProjectView.t(), term()) :: :ok | {:conflict, map()} | {:error, term()}
   def promote(%ProjectView{} = view, :project_root) do
-    case preflight_changeset_merge(view) do
-      :ok ->
-        with :ok <- promote_forks(view) do
-          Changeset.merge(changeset(view))
-        end
-
-      {:error, reason} ->
-        quarantine_invalid_scoped_forks(view)
-        {:error, reason}
+    with :ok <- promote_forks(view) do
+      Changeset.merge(changeset(view))
     end
   end
 
@@ -137,10 +125,7 @@ defmodule MingaAgent.ProjectView.Overlay do
   @spec reject_tombstones([String.t()]) :: [String.t()]
   defp reject_tombstones(entries) do
     entries
-    |> Enum.reject(fn entry ->
-      String.ends_with?(entry, ".__changeset_deleted__") or
-        Enum.member?(entries, entry <> ".__changeset_deleted__")
-    end)
+    |> Enum.reject(&String.ends_with?(&1, ".__changeset_deleted__"))
     |> Enum.sort()
   end
 
@@ -152,160 +137,49 @@ defmodule MingaAgent.ProjectView.Overlay do
 
   @spec fork_diff(ProjectView.t()) :: [map()]
   defp fork_diff(%ProjectView{} = view) do
-    case scoped_fork_partition(view) do
-      {:ok, %{valid: paths}} ->
-        Enum.map(paths, &%{path: Path.relative_to(&1, view.project_root), kind: :modified})
-
-      {:error, _} ->
+    case fork_store(view) do
+      nil ->
         []
+
+      store ->
+        store
+        |> BufferForkStore.all()
+        |> Map.keys()
+        |> Enum.map(&%{path: Path.relative_to(&1, view.project_root), kind: :modified})
     end
+  catch
+    :exit, _ -> []
   end
 
-  @spec promote_forks(ProjectView.t()) :: :ok | {:error, term()}
+  @spec promote_forks(ProjectView.t()) :: :ok | {:conflict, map()}
   defp promote_forks(%ProjectView{} = view) do
     case fork_store(view) do
       nil ->
         :ok
 
       store ->
-        view
-        |> scoped_fork_partition()
-        |> promote_partition(store)
+        store
+        |> BufferForkStore.merge_all_keep_failed()
+        |> fork_merge_result()
     end
   catch
-    :exit, reason -> {:error, {:fork_merge_failed, [{:exit, reason}]}}
-  end
-
-  @spec promote_partition(
-          {:ok, %{valid: [String.t()], invalid: [{String.t(), term()}]}} | {:error, term()},
-          GenServer.server()
-        ) :: :ok | {:error, term()}
-  defp promote_partition({:ok, %{valid: valid_paths, invalid: []}}, store) do
-    store
-    |> BufferForkStore.merge_paths_keep_failed(valid_paths)
-    |> fork_merge_result()
-  end
-
-  defp promote_partition({:ok, %{invalid: [{_path, reason} | _] = invalid_paths}}, store) do
-    discard_scoped_paths(store, Enum.map(invalid_paths, &elem(&1, 0)))
-    {:error, reason}
-  end
-
-  defp promote_partition({:error, reason}, _store), do: {:error, reason}
-
-  @spec preflight_changeset_merge(ProjectView.t()) :: :ok | {:error, term()}
-  defp preflight_changeset_merge(%ProjectView{} = view) do
-    case Changeset.preflight_merge(changeset(view)) do
-      {:ok, _plan} -> :ok
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  @spec quarantine_invalid_scoped_forks(ProjectView.t()) :: :ok
-  defp quarantine_invalid_scoped_forks(%ProjectView{} = view) do
-    case fork_store(view) do
-      nil ->
-        :ok
-
-      store ->
-        case scoped_fork_partition(view) do
-          {:ok, %{invalid: invalid_paths}} ->
-            discard_scoped_paths(store, Enum.map(invalid_paths, &elem(&1, 0)))
-
-          {:error, _} ->
-            :ok
-        end
-    end
-  catch
-    :exit, _ -> :ok
+    :exit, reason -> {:conflict, %{conflicts: [{:exit, reason}], results: []}}
   end
 
   @spec fork_merge_result([{String.t(), :ok | {:conflict, term()} | {:error, term()}}]) ::
-          :ok | {:error, {:fork_merge_failed, [term()]}}
+          :ok | {:conflict, map()}
   defp fork_merge_result(results) do
     failures = Enum.reject(results, &match?({_path, :ok}, &1))
-    if failures == [], do: :ok, else: {:error, {:fork_merge_failed, failures}}
+    if failures == [], do: :ok, else: {:conflict, %{conflicts: failures, results: results}}
   end
 
   @spec discard_forks(ProjectView.t()) :: :ok
   defp discard_forks(%ProjectView{} = view) do
     case fork_store(view) do
-      nil ->
-        :ok
-
-      store ->
-        case scoped_fork_partition(view) do
-          {:ok, %{valid: valid_paths, invalid: invalid_paths}} ->
-            discard_scoped_paths(store, valid_paths ++ Enum.map(invalid_paths, &elem(&1, 0)))
-
-          {:error, _} ->
-            :ok
-        end
+      nil -> :ok
+      store -> BufferForkStore.discard_all(store)
     end
   catch
     :exit, _ -> :ok
   end
-
-  @spec scoped_fork_partition(ProjectView.t()) ::
-          {:ok, %{valid: [String.t()], invalid: [{String.t(), term()}]}} | {:error, term()}
-  defp scoped_fork_partition(%ProjectView{} = view) do
-    case fork_store(view) do
-      nil ->
-        {:ok, %{valid: [], invalid: []}}
-
-      store ->
-        try do
-          {valid_paths, invalid_paths} =
-            store
-            |> BufferForkStore.all()
-            |> Map.keys()
-            |> Enum.reduce({[], []}, fn path, {valid_acc, invalid_acc} ->
-              case scoped_fork_path(view.project_root, path) do
-                {:ok, scoped_path} ->
-                  {[scoped_path | valid_acc], invalid_acc}
-
-                :skip ->
-                  {valid_acc, invalid_acc}
-
-                {:error, reason} ->
-                  {valid_acc, [{path, reason} | invalid_acc]}
-              end
-            end)
-
-          {:ok,
-           %{
-             valid: Enum.sort(valid_paths),
-             invalid: Enum.sort_by(invalid_paths, &elem(&1, 0))
-           }}
-        catch
-          :exit, reason -> {:error, {:fork_store_unreachable, reason}}
-        end
-    end
-  end
-
-  @spec discard_scoped_paths(GenServer.server(), [String.t()]) :: :ok
-  defp discard_scoped_paths(store, paths) do
-    BufferForkStore.discard_paths(store, Enum.uniq(paths))
-  catch
-    :exit, _ -> :ok
-  end
-
-  @spec scoped_fork_path(String.t(), String.t()) :: :skip | {:ok, String.t()} | {:error, term()}
-  defp scoped_fork_path(root, path) do
-    expanded_path = Path.expand(path)
-
-    if inside_root?(expanded_path, root) do
-      relative_path = Path.relative_to(expanded_path, root)
-
-      case PathResolver.resolve(root, relative_path, allow_root: true) do
-        {:ok, _resolved} -> {:ok, expanded_path}
-        {:error, reason} -> {:error, {:fork_path_outside_project_root, expanded_path, reason}}
-      end
-    else
-      :skip
-    end
-  end
-
-  @spec inside_root?(String.t(), String.t()) :: boolean()
-  defp inside_root?(path, root), do: path == root or String.starts_with?(path, root <> "/")
 end

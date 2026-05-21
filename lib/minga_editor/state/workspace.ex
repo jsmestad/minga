@@ -6,8 +6,10 @@ defmodule MingaEditor.State.Workspace do
   """
 
   alias Minga.Project.FileRef
+  alias MingaAgent.ProjectView
   alias MingaEditor.Agent.UIState
   alias MingaEditor.State.Workspace.RemoteSession
+  alias MingaEditor.State.WorkspaceReview
 
   @typedoc "Workspace kind."
   @type kind :: :manual | :agent
@@ -36,8 +38,8 @@ defmodule MingaEditor.State.Workspace do
           files: [FileRef.t()],
           active_file: FileRef.t() | nil,
           agent_ui: UIState.t() | nil,
-          project_view: term() | nil,
-          review: term() | nil
+          project_view: ProjectView.t() | nil,
+          review: WorkspaceReview.t()
         }
 
   @enforce_keys [:id, :kind]
@@ -54,7 +56,7 @@ defmodule MingaEditor.State.Workspace do
             active_file: nil,
             agent_ui: nil,
             project_view: nil,
-            review: nil
+            review: WorkspaceReview.new()
 
   @doc "Creates the manual project workspace."
   @spec new_manual(String.t() | nil) :: t()
@@ -86,7 +88,29 @@ defmodule MingaEditor.State.Workspace do
     }
   end
 
-  @doc "Sets the agent session pid on the workspace."
+  @doc "Sets the agent status on the workspace."
+  @spec set_agent_status(t(), agent_status()) :: t()
+  def set_agent_status(%__MODULE__{} = workspace, status) do
+    %{workspace | agent_status: status}
+  end
+
+  @doc "Sets the workspace-owned agent UI projection."
+  @spec set_agent_ui(t(), UIState.t() | nil) :: t()
+  def set_agent_ui(%__MODULE__{} = workspace, %UIState{} = agent_ui) do
+    struct!(workspace, agent_ui: agent_ui)
+  end
+
+  def set_agent_ui(%__MODULE__{} = workspace, nil) do
+    struct!(workspace, agent_ui: nil)
+  end
+
+  @doc "Sets the ProjectView owned by the workspace."
+  @spec set_project_view(t(), ProjectView.t() | nil) :: t()
+  def set_project_view(%__MODULE__{} = workspace, project_view) do
+    %{workspace | project_view: project_view}
+  end
+
+  @doc "Sets the session owned by the workspace."
   @spec set_session(t(), pid() | nil) :: t()
   def set_session(%__MODULE__{} = workspace, session) when is_pid(session) or is_nil(session) do
     %{workspace | session: session}
@@ -138,6 +162,14 @@ defmodule MingaEditor.State.Workspace do
   def remote?(%__MODULE__{remote_session: %RemoteSession{}}), do: true
   def remote?(%__MODULE__{}), do: false
 
+  @doc "Returns true when the workspace belongs to the named remote server."
+  @spec remote_server?(t(), String.t()) :: boolean()
+  def remote_server?(%__MODULE__{remote_session: %RemoteSession{} = remote_session}, server_name) do
+    remote_session.server_name == server_name
+  end
+
+  def remote_server?(%__MODULE__{}, _server_name), do: false
+
   @doc "Returns true when the workspace represents the remote server/session pair."
   @spec matches_remote_session?(t(), String.t(), String.t()) :: boolean()
   def matches_remote_session?(
@@ -150,30 +182,33 @@ defmodule MingaEditor.State.Workspace do
 
   def matches_remote_session?(%__MODULE__{}, _server_name, _session_id), do: false
 
-  @doc "Returns true when the workspace represents any session on the remote server."
-  @spec remote_server?(t(), String.t()) :: boolean()
-  def remote_server?(%__MODULE__{remote_session: %RemoteSession{} = remote_session}, server_name) do
-    RemoteSession.server?(remote_session, server_name)
+  @doc "Returns true when the workspace still has a live ProjectView."
+  @spec project_view_active?(t()) :: boolean()
+  def project_view_active?(%__MODULE__{project_view: %ProjectView{} = project_view}) do
+    ProjectView.active?(project_view)
   end
 
-  def remote_server?(%__MODULE__{}, _server_name), do: false
+  def project_view_active?(%__MODULE__{}), do: false
 
-  @doc "Sets the agent UI state on the workspace."
-  @spec set_agent_ui(t(), UIState.t()) :: t()
-  def set_agent_ui(%__MODULE__{} = workspace, %UIState{} = agent_ui) do
-    Map.put(workspace, :agent_ui, agent_ui)
+  @doc "Sets review state through the owning workspace module."
+  @spec set_review(t(), WorkspaceReview.t()) :: t()
+  def set_review(%__MODULE__{} = workspace, %WorkspaceReview{} = review) do
+    %{workspace | review: review}
   end
 
-  @doc "Updates the agent UI state on the workspace."
-  @spec update_agent_ui(t(), (UIState.t() -> UIState.t())) :: t()
-  def update_agent_ui(%__MODULE__{} = workspace, fun) when is_function(fun, 1) do
-    set_agent_ui(workspace, fun.(workspace.agent_ui || UIState.new()))
-  end
+  @doc "Returns true when drafts or conflicts require user action before close."
+  @spec review_pending?(t()) :: boolean()
+  def review_pending?(%__MODULE__{review: %WorkspaceReview{} = review}),
+    do: WorkspaceReview.pending?(review)
 
-  @doc "Sets the agent status on the workspace."
-  @spec set_agent_status(t(), agent_status()) :: t()
-  def set_agent_status(%__MODULE__{} = workspace, status) do
-    %{workspace | agent_status: status}
+  @doc "Moves review state through a legal transition."
+  @spec transition_review(t(), atom(), [FileRef.t()] | nil | term()) ::
+          {:ok, t()} | {:error, term()}
+  def transition_review(%__MODULE__{} = workspace, event, payload \\ nil) do
+    case apply_review_transition(workspace.review, event, payload) do
+      {:ok, review} -> {:ok, set_review(workspace, review)}
+      {:error, _reason} = error -> error
+    end
   end
 
   @doc "Renames the workspace and protects it from future auto-naming."
@@ -276,6 +311,39 @@ defmodule MingaEditor.State.Workspace do
     |> add_file(file_ref)
     |> Map.put(:active_file, file_ref)
   end
+
+  @spec apply_review_transition(WorkspaceReview.t(), atom(), term()) ::
+          {:ok, WorkspaceReview.t()} | {:error, term()}
+  defp apply_review_transition(%WorkspaceReview{} = review, :agent_started_editing, files),
+    do: WorkspaceReview.agent_started_editing(review, files || [])
+
+  defp apply_review_transition(%WorkspaceReview{} = review, :agent_made_more_edits, files),
+    do: WorkspaceReview.agent_made_more_edits(review, files || [])
+
+  defp apply_review_transition(%WorkspaceReview{} = review, :agent_completed, files),
+    do: WorkspaceReview.agent_completed(review, files || [])
+
+  defp apply_review_transition(%WorkspaceReview{} = review, :agent_resumed, _payload),
+    do: WorkspaceReview.agent_resumed(review)
+
+  defp apply_review_transition(%WorkspaceReview{} = review, :promote_succeeded, _payload),
+    do: WorkspaceReview.promote_succeeded(review)
+
+  defp apply_review_transition(
+         %WorkspaceReview{} = review,
+         :promote_found_overlaps,
+         {files, error}
+       ),
+       do: WorkspaceReview.promote_found_overlaps(review, files, error)
+
+  defp apply_review_transition(%WorkspaceReview{} = review, :discard, _payload),
+    do: WorkspaceReview.discard(review)
+
+  defp apply_review_transition(%WorkspaceReview{} = review, :resolved_and_promoted, _payload),
+    do: WorkspaceReview.resolved_and_promoted(review)
+
+  defp apply_review_transition(%WorkspaceReview{state: from}, event, _payload),
+    do: {:error, {:invalid_transition, from, event}}
 
   @spec maybe_rebind_active_file(t(), FileRef.t(), boolean()) :: t()
   defp maybe_rebind_active_file(%__MODULE__{} = workspace, %FileRef{} = new_file_ref, true) do

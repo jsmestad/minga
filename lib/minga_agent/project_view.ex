@@ -89,7 +89,7 @@ defmodule MingaAgent.ProjectView do
   def diff(%__MODULE__{} = view), do: view.backend.diff(view)
 
   @doc "Promotes view-local changes to `target`."
-  @spec promote(t(), term()) :: :ok | {:ok, term()} | {:error, term()}
+  @spec promote(t(), term()) :: :ok | {:conflict, map()} | {:error, term()}
   def promote(%__MODULE__{} = view, target), do: view.backend.promote(view, target)
 
   @doc "Discards view-local state."
@@ -99,6 +99,15 @@ defmodule MingaAgent.ProjectView do
   @doc "Returns capability flags for this view."
   @spec capabilities(t()) :: ProjectView.Backend.capabilities()
   def capabilities(%__MODULE__{} = view), do: view.backend.capabilities(view)
+
+  @doc "Returns true when the underlying backend is still available."
+  @spec active?(t()) :: boolean()
+  def active?(%__MODULE__{} = view) do
+    _ = working_dir(view)
+    true
+  catch
+    :exit, _ -> false
+  end
 
   @doc false
   @spec new(module(), String.t(), ProjectView.Backend.ref(), keyword()) :: t()

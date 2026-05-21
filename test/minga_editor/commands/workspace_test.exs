@@ -3,8 +3,10 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Command
-  alias MingaAgent.SessionManager
-  alias MingaEditor.Commands.AgentSession
+  alias Minga.Project.FileRef
+  alias MingaAgent.ProjectView
+  alias MingaAgent.Providers.RecordingProvider
+  alias MingaAgent.Session
   alias MingaEditor.Commands.Workspace
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -12,7 +14,6 @@ defmodule MingaEditor.Commands.WorkspaceTest do
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
-  alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.WorkspaceIconSource
   alias MingaEditor.UI.Picker.WorkspaceSource
@@ -22,7 +23,11 @@ defmodule MingaEditor.Commands.WorkspaceTest do
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
+  alias MingaEditor.State.Workspace, as: WorkspaceModel
+  alias MingaEditor.State.WorkspaceReview
   alias MingaEditor.Workspace.State, as: WorkspaceState
+
+  @moduletag :tmp_dir
 
   # Builds an EditorState with a manual workspace file tab and two agent workspaces.
   # The manual tab is id 1 / workspace 0; agent tabs are ids 2 and 3 / workspaces 1 and 2.
@@ -92,6 +97,68 @@ defmodule MingaEditor.Commands.WorkspaceTest do
     }
   end
 
+  defp put_active_workspace_project_view(state, project_view) do
+    put_workspace_project_view(
+      state,
+      TabBar.active_workspace_id(state.shell_state.tab_bar),
+      project_view
+    )
+  end
+
+  defp put_workspace_project_view(state, workspace_id, project_view) do
+    tb = state.shell_state.tab_bar
+
+    EditorState.set_tab_bar(
+      state,
+      TabBar.update_workspace(
+        tb,
+        workspace_id,
+        &WorkspaceModel.set_project_view(&1, project_view)
+      )
+    )
+  end
+
+  defp put_active_workspace_review(state, review) do
+    put_workspace_review(state, TabBar.active_workspace_id(state.shell_state.tab_bar), review)
+  end
+
+  defp put_workspace_review(state, workspace_id, review) do
+    tb = state.shell_state.tab_bar
+
+    EditorState.set_tab_bar(
+      state,
+      TabBar.update_workspace(tb, workspace_id, &WorkspaceModel.set_review(&1, review))
+    )
+  end
+
+  defp put_workspace_session(state, session, workspace_id \\ 1) do
+    tb = state.shell_state.tab_bar
+
+    EditorState.set_tab_bar(
+      state,
+      TabBar.update_workspace(tb, workspace_id, &WorkspaceModel.set_session(&1, session))
+    )
+  end
+
+  defp put_file_tab_in_workspace(state, workspace_id) do
+    tb = state.shell_state.tab_bar
+    tb = TabBar.move_tab_to_workspace(tb, 1, workspace_id)
+    EditorState.set_tab_bar(state, tb)
+  end
+
+  defp start_recording_session do
+    session =
+      start_supervised!({Session, provider: RecordingProvider, provider_opts: [test_pid: self()]})
+
+    :sys.get_state(session)
+    session
+  end
+
+  defp file_ref do
+    {:ok, ref} = Minga.Project.FileRef.from_path("/tmp/minga", "lib/a.ex")
+    ref
+  end
+
   defp make_workspace_switch_state do
     manual_saved_buf =
       start_supervised!(
@@ -154,6 +221,12 @@ defmodule MingaEditor.Commands.WorkspaceTest do
             :manual_workspace,
             :workspace_toggle,
             :workspace_close,
+            :workspace_close_keep,
+            :workspace_review_drafts,
+            :workspace_promote,
+            :workspace_discard,
+            :workspace_resolve_conflicts,
+            :workspace_discard_and_close,
             :workspace_list,
             :workspace_rename,
             :workspace_set_icon,
@@ -228,26 +301,389 @@ defmodule MingaEditor.Commands.WorkspaceTest do
       assert Workspace.workspace_close(state) == state
     end
 
-    test "stops the session owned by the closed workspace" do
-      {:ok, _session_id, session} = SessionManager.start_session([])
-      on_exit(fn -> stop_session(session) end)
-      ref = Process.monitor(session)
+    test "clears the provider and discards the overlay when closing a clean workspace with a file tab active",
+         %{
+           tmp_dir: dir
+         } do
+      File.mkdir_p!(Path.join(dir, "lib"))
+      File.write!(Path.join(dir, "lib/a.ex"), "base")
+      {:ok, project_view} = ProjectView.overlay(dir)
+      changeset = project_view.ref.changeset
+      ref = Process.monitor(changeset)
+      overlay_path = ProjectView.working_dir(project_view)
+      session = start_recording_session()
 
-      state = make_state() |> Workspace.workspace_next()
+      state =
+        make_state()
+        |> put_file_tab_in_workspace(1)
+        |> put_workspace_session(session)
+        |> put_workspace_project_view(1, project_view)
 
-      tab_bar =
-        TabBar.update_workspace(
-          state.shell_state.tab_bar,
-          1,
-          &WorkspaceModel.set_session(&1, session)
-        )
-
-      state = EditorState.set_tab_bar(state, tab_bar)
       result = Workspace.workspace_close(state)
 
-      assert_receive {:DOWN, ^ref, :process, ^session, _reason}
+      assert_receive {:provider_refresh, nil}
+      assert_receive {:DOWN, ^ref, :process, ^changeset, :normal}
+      refute File.dir?(overlay_path)
       assert TabBar.get_workspace(result.shell_state.tab_bar, 1) == nil
-      assert SessionManager.session_id_for_pid(session) == {:error, :not_found}
+      assert TabBar.active_workspace_id(result.shell_state.tab_bar) == 0
+    end
+
+    test "clears a dead ProjectView when reviewing drafts", %{tmp_dir: dir} do
+      File.mkdir_p!(Path.join(dir, "lib"))
+      File.write!(Path.join(dir, "lib/a.ex"), "base")
+      {:ok, project_view} = ProjectView.overlay(dir)
+      changeset = project_view.ref.changeset
+      overlay_path = ProjectView.working_dir(project_view)
+      ref = Process.monitor(changeset)
+
+      Process.exit(changeset, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^changeset, _reason}
+
+      state =
+        make_state()
+        |> Workspace.workspace_next()
+        |> put_active_workspace_project_view(project_view)
+        |> put_active_workspace_review(%WorkspaceReview{
+          state: :needs_review,
+          changed_files: [file_ref()]
+        })
+
+      result = Workspace.workspace_review_drafts(state)
+      workspace = TabBar.get_workspace(result.shell_state.tab_bar, 1)
+
+      assert workspace.project_view == nil
+      assert workspace.review.state == :clean
+      File.rm_rf!(overlay_path)
+    end
+
+    test "clears a dead ProjectView when promoting drafts", %{tmp_dir: dir} do
+      File.mkdir_p!(Path.join(dir, "lib"))
+      File.write!(Path.join(dir, "lib/a.ex"), "base")
+      {:ok, project_view} = ProjectView.overlay(dir)
+      changeset = project_view.ref.changeset
+      overlay_path = ProjectView.working_dir(project_view)
+      ref = Process.monitor(changeset)
+
+      Process.exit(changeset, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^changeset, _reason}
+
+      state =
+        make_state()
+        |> Workspace.workspace_next()
+        |> put_active_workspace_project_view(project_view)
+        |> put_active_workspace_review(%WorkspaceReview{
+          state: :needs_review,
+          changed_files: [file_ref()]
+        })
+
+      result = Workspace.workspace_promote(state)
+      workspace = TabBar.get_workspace(result.shell_state.tab_bar, 1)
+
+      assert workspace.project_view == nil
+      assert workspace.review.state == :clean
+      File.rm_rf!(overlay_path)
+    end
+
+    test "clears a dead ProjectView when discarding drafts", %{tmp_dir: dir} do
+      File.mkdir_p!(Path.join(dir, "lib"))
+      File.write!(Path.join(dir, "lib/a.ex"), "base")
+      {:ok, project_view} = ProjectView.overlay(dir)
+      changeset = project_view.ref.changeset
+      overlay_path = ProjectView.working_dir(project_view)
+      ref = Process.monitor(changeset)
+
+      Process.exit(changeset, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^changeset, _reason}
+
+      state =
+        make_state()
+        |> Workspace.workspace_next()
+        |> put_active_workspace_project_view(project_view)
+        |> put_active_workspace_review(%WorkspaceReview{
+          state: :needs_review,
+          changed_files: [file_ref()]
+        })
+
+      result = Workspace.workspace_discard(state)
+      workspace = TabBar.get_workspace(result.shell_state.tab_bar, 1)
+
+      assert workspace.project_view == nil
+      assert workspace.review.state == :clean
+      File.rm_rf!(overlay_path)
+    end
+
+    test "discard and close keeps the workspace open when the ProjectView is dead", %{
+      tmp_dir: dir
+    } do
+      File.mkdir_p!(Path.join(dir, "lib"))
+      File.write!(Path.join(dir, "lib/a.ex"), "base")
+      {:ok, project_view} = ProjectView.overlay(dir)
+      changeset = project_view.ref.changeset
+      overlay_path = ProjectView.working_dir(project_view)
+      ref = Process.monitor(changeset)
+
+      Process.exit(changeset, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^changeset, _reason}
+
+      state =
+        make_state()
+        |> Workspace.workspace_next()
+        |> put_active_workspace_project_view(project_view)
+        |> put_active_workspace_review(%WorkspaceReview{
+          state: :needs_review,
+          changed_files: [file_ref()]
+        })
+
+      result = Workspace.workspace_discard_and_close(state)
+      workspace = TabBar.get_workspace(result.shell_state.tab_bar, 1)
+
+      assert workspace != nil
+      assert workspace.project_view == nil
+      assert workspace.review.state == :clean
+      File.rm_rf!(overlay_path)
+    end
+
+    test "requires confirmation when active workspace has drafts" do
+      {:ok, changed_ref} = FileRef.from_path("/tmp/minga", "lib/a.ex")
+
+      state =
+        make_state()
+        |> Workspace.workspace_next()
+        |> put_active_workspace_review(%WorkspaceReview{
+          state: :needs_review,
+          changed_files: [changed_ref]
+        })
+
+      result = Workspace.workspace_close(state)
+
+      assert result.shell_state.tab_bar == state.shell_state.tab_bar
+
+      assert EditorState.status_msg(result) =~
+               "Actions: Keep workspace, Review drafts, Discard drafts and close"
+
+      assert EditorState.status_msg(result) =~ "Dirty buffers are separate"
+    end
+
+    test "prompts to review when ProjectView diffs exist but cached review is clean", %{
+      tmp_dir: dir
+    } do
+      File.mkdir_p!(Path.join(dir, "lib"))
+      File.write!(Path.join(dir, "lib/a.ex"), "base")
+      {:ok, project_view} = ProjectView.overlay(dir)
+      File.write!(Path.join(ProjectView.working_dir(project_view), "lib/a.ex"), "shell draft")
+
+      state =
+        make_state()
+        |> put_file_tab_in_workspace(1)
+        |> put_workspace_project_view(1, project_view)
+        |> put_workspace_review(1, %WorkspaceReview{state: :clean})
+
+      result = Workspace.workspace_close(state)
+
+      assert TabBar.get_workspace(result.shell_state.tab_bar, 1) != nil
+      assert TabBar.active_workspace_id(result.shell_state.tab_bar) == 1
+
+      assert EditorState.status_msg(result) =~
+               "Actions: Keep workspace, Review drafts, Discard drafts and close"
+
+      assert EditorState.status_msg(result) =~ "Workspace has 1 draft file(s)"
+    end
+
+    test "discard and close removes a workspace with drafts" do
+      state =
+        make_state()
+        |> Workspace.workspace_next()
+        |> put_active_workspace_review(%WorkspaceReview{
+          state: :needs_review,
+          changed_files: [file_ref()]
+        })
+
+      result = Workspace.workspace_discard_and_close(state)
+
+      assert TabBar.get_workspace(result.shell_state.tab_bar, 1) == nil
+      assert TabBar.active_workspace_id(result.shell_state.tab_bar) == 0
+    end
+
+    test "resolve conflicts keeps workspace conflicted when promote still conflicts", %{
+      tmp_dir: dir
+    } do
+      File.mkdir_p!(Path.join(dir, "lib"))
+      File.write!(Path.join(dir, "lib/a.ex"), "base")
+      {:ok, project_view} = ProjectView.overlay(dir)
+      :ok = ProjectView.write_file(project_view, "lib/a.ex", "draft")
+      File.write!(Path.join(dir, "lib/a.ex"), "current file")
+
+      state =
+        make_state()
+        |> Workspace.workspace_next()
+        |> put_active_workspace_project_view(project_view)
+        |> put_active_workspace_review(%WorkspaceReview{
+          state: :conflict,
+          changed_files: [file_ref()],
+          conflict_files: [file_ref()]
+        })
+
+      result = Workspace.workspace_resolve_conflicts(state)
+      review = TabBar.get_workspace(result.shell_state.tab_bar, 1).review
+
+      assert review.state == :conflict
+      assert review.conflict_files != []
+    end
+  end
+
+  describe "workspace_review_drafts/1" do
+    test "populates needs_review from ProjectView.diff when cached review is clean", %{
+      tmp_dir: dir
+    } do
+      File.mkdir_p!(Path.join(dir, "lib"))
+      File.write!(Path.join(dir, "lib/a.ex"), "base")
+      {:ok, project_view} = ProjectView.overlay(dir)
+      :ok = ProjectView.write_file(project_view, "lib/a.ex", "draft")
+      {:ok, changed_ref} = FileRef.from_path(dir, "lib/a.ex")
+
+      state =
+        make_state()
+        |> Workspace.workspace_next()
+        |> put_active_workspace_project_view(project_view)
+
+      result = Workspace.workspace_review_drafts(state)
+      review = TabBar.get_workspace(result.shell_state.tab_bar, 1).review
+
+      assert review.state == :needs_review
+      assert review.changed_files == [changed_ref]
+    end
+  end
+
+  describe "workspace_promote/1" do
+    test "promotes clean ProjectView drafts and refreshes the workspace to clean", %{tmp_dir: dir} do
+      File.mkdir_p!(Path.join(dir, "lib"))
+      File.write!(Path.join(dir, "lib/a.ex"), "base")
+      {:ok, project_view} = ProjectView.overlay(dir)
+      :ok = ProjectView.write_file(project_view, "lib/a.ex", "draft")
+      session = start_recording_session()
+
+      state =
+        make_state()
+        |> put_file_tab_in_workspace(1)
+        |> put_workspace_session(session)
+        |> put_workspace_project_view(1, project_view)
+        |> put_workspace_review(1, %WorkspaceReview{
+          state: :needs_review,
+          changed_files: [file_ref()]
+        })
+
+      result = Workspace.workspace_promote(state)
+      workspace = TabBar.get_workspace(result.shell_state.tab_bar, 1)
+
+      assert_receive {:provider_refresh, refreshed_view}
+      assert workspace.review.state == :clean
+      assert {:ok, []} = ProjectView.diff(workspace.project_view)
+      assert {:ok, []} = ProjectView.diff(refreshed_view)
+    end
+
+    test "refreshes a clean ProjectView without leaving a stale ref", %{tmp_dir: dir} do
+      File.mkdir_p!(Path.join(dir, "lib"))
+      File.write!(Path.join(dir, "lib/a.ex"), "base")
+      {:ok, project_view} = ProjectView.overlay(dir)
+      session = start_recording_session()
+
+      state =
+        make_state()
+        |> put_file_tab_in_workspace(1)
+        |> put_workspace_session(session)
+        |> put_workspace_project_view(1, project_view)
+        |> put_workspace_review(1, %WorkspaceReview{state: :clean})
+
+      result = Workspace.workspace_promote(state)
+      workspace = TabBar.get_workspace(result.shell_state.tab_bar, 1)
+
+      assert_receive {:provider_refresh, refreshed_view}
+      assert workspace.review.state == :clean
+      assert workspace.project_view != nil
+      assert ProjectView.active?(workspace.project_view)
+      refute ProjectView.active?(project_view)
+      assert {:ok, []} = ProjectView.diff(workspace.project_view)
+      assert {:ok, []} = ProjectView.diff(refreshed_view)
+    end
+  end
+
+  describe "workspace_discard/1" do
+    test "clears drafts and keeps the workspace open", %{tmp_dir: dir} do
+      File.mkdir_p!(Path.join(dir, "lib"))
+      File.write!(Path.join(dir, "lib/a.ex"), "base")
+      {:ok, project_view} = ProjectView.overlay(dir)
+      :ok = ProjectView.write_file(project_view, "lib/a.ex", "draft")
+      session = start_recording_session()
+
+      state =
+        make_state()
+        |> put_file_tab_in_workspace(1)
+        |> put_workspace_session(session)
+        |> put_workspace_project_view(1, project_view)
+        |> put_workspace_review(1, %WorkspaceReview{
+          state: :needs_review,
+          changed_files: [file_ref()]
+        })
+
+      result = Workspace.workspace_discard(state)
+      workspace = TabBar.get_workspace(result.shell_state.tab_bar, 1)
+
+      assert_receive {:provider_refresh, refreshed_view}
+      assert workspace != nil
+      assert workspace.review.state == :clean
+      assert {:ok, []} = ProjectView.diff(workspace.project_view)
+      assert {:ok, []} = ProjectView.diff(refreshed_view)
+    end
+
+    test "refreshes a clean ProjectView without leaving a stale ref", %{tmp_dir: dir} do
+      File.mkdir_p!(Path.join(dir, "lib"))
+      File.write!(Path.join(dir, "lib/a.ex"), "base")
+      {:ok, project_view} = ProjectView.overlay(dir)
+      session = start_recording_session()
+
+      state =
+        make_state()
+        |> put_file_tab_in_workspace(1)
+        |> put_workspace_session(session)
+        |> put_workspace_project_view(1, project_view)
+        |> put_workspace_review(1, %WorkspaceReview{state: :clean})
+
+      result = Workspace.workspace_discard(state)
+      workspace = TabBar.get_workspace(result.shell_state.tab_bar, 1)
+
+      assert_receive {:provider_refresh, refreshed_view}
+      assert workspace.review.state == :clean
+      assert workspace.project_view != nil
+      assert ProjectView.active?(workspace.project_view)
+      refute ProjectView.active?(project_view)
+      assert {:ok, []} = ProjectView.diff(workspace.project_view)
+      assert {:ok, []} = ProjectView.diff(refreshed_view)
+    end
+  end
+
+  describe "workspace_resolve_conflicts/1" do
+    test "promotes a resolved conflict back to clean", %{tmp_dir: dir} do
+      File.mkdir_p!(Path.join(dir, "lib"))
+      File.write!(Path.join(dir, "lib/a.ex"), "base")
+      {:ok, project_view} = ProjectView.overlay(dir)
+      :ok = ProjectView.write_file(project_view, "lib/a.ex", "draft")
+      {:ok, changed_ref} = FileRef.from_path(dir, "lib/a.ex")
+
+      state =
+        make_state()
+        |> Workspace.workspace_next()
+        |> put_active_workspace_project_view(project_view)
+        |> put_active_workspace_review(%WorkspaceReview{
+          state: :conflict,
+          changed_files: [changed_ref],
+          conflict_files: [changed_ref]
+        })
+
+      result = Workspace.workspace_resolve_conflicts(state)
+      workspace = TabBar.get_workspace(result.shell_state.tab_bar, 1)
+
+      assert workspace.review.state == :clean
+      assert {:ok, []} = ProjectView.diff(workspace.project_view)
     end
   end
 
@@ -270,12 +706,6 @@ defmodule MingaEditor.Commands.WorkspaceTest do
       assert String.ends_with?(active_item.label, " •")
     end
   end
-
-  defp stop_session(pid) when is_pid(pid) do
-    AgentSession.stop_session_pid(pid)
-  end
-
-  defp stop_session(_pid), do: :ok
 
   describe "workspace_set_icon/1" do
     test "opens the icon picker for the active workspace" do

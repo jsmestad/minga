@@ -20,4 +20,8 @@ defmodule MingaAgent.ToolRouter.Context do
         }
 
   defstruct project_view: nil, fork_store: nil, changeset: nil
+
+  @doc "Clears the captured ProjectView so routing can fall back to forks or changesets."
+  @spec clear_project_view(t()) :: t()
+  def clear_project_view(%__MODULE__{} = context), do: %{context | project_view: nil}
 end
