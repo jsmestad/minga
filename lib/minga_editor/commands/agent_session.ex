@@ -123,7 +123,7 @@ defmodule MingaEditor.Commands.AgentSession do
             state
           end
 
-        # Create a workspace before assigning the session to the tab. `set_tab_session/3` also projects the session onto the tab's current workspace, so doing this in the opposite order can temporarily attach the session to the manual workspace.
+        # Create the workspace first so set_tab_session/3 does not project the session onto the manual workspace.
         state
         |> ensure_agent_workspace(pid, project_view)
         |> assign_session_to_tab(pid)
