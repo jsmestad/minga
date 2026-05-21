@@ -1254,7 +1254,7 @@ defmodule MingaEditor.State do
     |> sync_agent_ui_from_active_workspace()
   end
 
-  # Builds a typed context for a brand-new tab. Agent tabs need an agent-shaped context because restoring them as file tabs leaves the editor in the wrong keymap scope and window content.
+  # Builds a typed context for a brand-new tab, using agent-shaped defaults for agent tabs.
   @spec build_empty_tab_defaults(t()) :: Tab.context()
   defp build_empty_tab_defaults(state) do
     case active_tab_for_defaults(state) do
@@ -1500,10 +1500,24 @@ defmodule MingaEditor.State do
         _ -> UIState.new()
       end
 
+    agent_ui = maybe_activate_synced_agent_ui(state, agent_ui)
+
     update_workspace(state, &SessionState.set_agent_ui(&1, agent_ui))
   end
 
   def sync_agent_ui_from_active_workspace(state), do: state
+
+  @spec maybe_activate_synced_agent_ui(t(), UIState.t()) :: UIState.t()
+  defp maybe_activate_synced_agent_ui(
+         %__MODULE__{workspace: %{keymap_scope: :agent} = workspace},
+         agent_ui
+       ) do
+    UIState.activate(agent_ui, workspace.windows, workspace.file_tree)
+  end
+
+  defp maybe_activate_synced_agent_ui(%__MODULE__{}, agent_ui) do
+    agent_ui
+  end
 
   @spec active_tab(t()) :: Tab.t() | nil
   def active_tab(%__MODULE__{} = state), do: state.shell.active_tab(state.shell_state)
