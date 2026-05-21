@@ -13,7 +13,7 @@ defmodule MingaEditor.LspActionsTest do
   alias MingaEditor.UI.Picker.Context, as: PickerContext
   alias MingaEditor.VimState
   alias MingaEditor.Viewport
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   describe "parse_location/1" do
     test "extracts the first target URI and start position from supported LSP shapes" do
@@ -388,7 +388,7 @@ defmodule MingaEditor.LspActionsTest do
     %EditorState{
       port_manager: nil,
       terminal_viewport: viewport,
-      workspace: %WorkspaceState{viewport: viewport, highlight: %Highlighting{}}
+      workspace: %SessionState{viewport: viewport, highlight: %Highlighting{}}
     }
   end
 

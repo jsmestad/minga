@@ -27,7 +27,7 @@ defmodule MingaEditor.State.OptionsServerThreadingTest do
     %EditorState{
       port_manager: self(),
       options_server: options_server,
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
         buffers: %Buffers{active: nil, list: []},
@@ -78,7 +78,7 @@ defmodule MingaEditor.State.OptionsServerThreadingTest do
   test "EditorState defaults options_server to Minga.Config.Options.default_server/0" do
     state = %EditorState{
       port_manager: self(),
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
         buffers: %Buffers{active: nil, list: []}

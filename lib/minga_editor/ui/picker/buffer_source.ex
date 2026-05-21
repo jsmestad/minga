@@ -17,7 +17,7 @@ defmodule MingaEditor.UI.Picker.BufferSource do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.UI.Devicon
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   @impl true
   @spec title() :: String.t()
@@ -132,7 +132,7 @@ defmodule MingaEditor.UI.Picker.BufferSource do
 
         EditorState.update_workspace(
           state,
-          &WorkspaceState.set_buffers(&1, Buffers.switch_to(new_bs, new_active))
+          &SessionState.set_buffers(&1, Buffers.switch_to(new_bs, new_active))
         )
         |> EditorState.sync_active_window_buffer()
     end

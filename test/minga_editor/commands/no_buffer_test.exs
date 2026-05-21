@@ -10,12 +10,12 @@ defmodule MingaEditor.Commands.NoBufferTest do
   alias MingaEditor.State.Buffers
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   defp no_buffer_state do
     %EditorState{
       port_manager: nil,
-      workspace: %WorkspaceState{
+      workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: nil, list: []},
         editing: VimState.new()

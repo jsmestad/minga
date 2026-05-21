@@ -141,7 +141,7 @@ defmodule MingaEditor.Commands.GitRemoteTest do
       Map.merge(
         %EditorState{
           port_manager: nil,
-          workspace: %MingaEditor.Workspace.State{viewport: Viewport.new(80, 24)}
+          workspace: %MingaEditor.Session.State{viewport: Viewport.new(80, 24)}
         },
         overrides
       )

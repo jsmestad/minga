@@ -341,7 +341,7 @@ defmodule MingaEditor.Commands.GitDiffDecorationsTest do
   defp build_state do
     %EditorState{
       port_manager: self(),
-      workspace: %MingaEditor.Workspace.State{viewport: Viewport.new(24, 80)}
+      workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)}
     }
   end
 

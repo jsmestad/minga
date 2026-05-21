@@ -15,7 +15,7 @@ defmodule MingaEditor.Commands.Dired do
   alias MingaEditor.Commands
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Dired, as: DiredState
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   @type state :: EditorState.t()
 
@@ -151,8 +151,8 @@ defmodule MingaEditor.Commands.Dired do
       |> Commands.add_buffer(pid)
       |> EditorState.update_workspace(fn ws ->
         ws
-        |> WorkspaceState.set_dired(dired_state)
-        |> WorkspaceState.set_keymap_scope(:dired)
+        |> SessionState.set_dired(dired_state)
+        |> SessionState.set_keymap_scope(:dired)
       end)
       |> EditorState.set_status("Dired: #{dired.directory}")
     else
@@ -196,7 +196,7 @@ defmodule MingaEditor.Commands.Dired do
             dired_state = DiredState.update_dired(state.workspace.dired, new_dired)
 
             state
-            |> EditorState.update_workspace(&WorkspaceState.set_dired(&1, dired_state))
+            |> EditorState.update_workspace(&SessionState.set_dired(&1, dired_state))
             |> EditorState.set_status("Dired: #{new_dired.directory}")
 
           {:error, reason} ->
@@ -227,14 +227,14 @@ defmodule MingaEditor.Commands.Dired do
         state =
           EditorState.update_workspace(state, fn ws ->
             ws
-            |> WorkspaceState.set_dired(DiredState.deactivate(ws.dired))
-            |> WorkspaceState.set_keymap_scope(:editor)
+            |> SessionState.set_dired(DiredState.deactivate(ws.dired))
+            |> SessionState.set_keymap_scope(:editor)
           end)
 
         Commands.execute(state, :kill_buffer)
 
       _ ->
-        EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :editor))
+        EditorState.update_workspace(state, &SessionState.set_keymap_scope(&1, :editor))
     end
   end
 
@@ -252,7 +252,7 @@ defmodule MingaEditor.Commands.Dired do
             dired_state = DiredState.update_dired(state.workspace.dired, new_dired)
 
             state
-            |> EditorState.update_workspace(&WorkspaceState.set_dired(&1, dired_state))
+            |> EditorState.update_workspace(&SessionState.set_dired(&1, dired_state))
             |> EditorState.set_status(status_for_dired(new_dired))
 
           {:error, reason} ->
@@ -272,7 +272,7 @@ defmodule MingaEditor.Commands.Dired do
   @spec clear_confirming(state()) :: state()
   defp clear_confirming(state) do
     new_dired = DiredState.exit_confirmation(state.workspace.dired)
-    EditorState.update_workspace(state, &WorkspaceState.set_dired(&1, new_dired))
+    EditorState.update_workspace(state, &SessionState.set_dired(&1, new_dired))
   end
 
   @spec compute_pending_ops(pid(), [Dired.entry()], String.t()) :: [Dired.operation()]
@@ -291,7 +291,7 @@ defmodule MingaEditor.Commands.Dired do
 
     state
     |> EditorState.update_workspace(fn ws ->
-      WorkspaceState.set_dired(ws, DiredState.enter_confirmation(ws.dired, ops))
+      SessionState.set_dired(ws, DiredState.enter_confirmation(ws.dired, ops))
     end)
     |> EditorState.set_status("#{summary} — apply? (y/n)")
   end

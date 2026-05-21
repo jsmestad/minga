@@ -30,7 +30,7 @@ defmodule MingaEditor.Input.CompletionKeyTest do
         modal: {:completion, payload},
         whichkey: %WhichKey{}
       },
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         editing: %VimState{mode: :insert, mode_state: Mode.initial_state()},
         viewport: Viewport.new(30, 80)
       }

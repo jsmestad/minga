@@ -52,7 +52,7 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
 
     state = %EditorState{
       port_manager: nil,
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         buffers: %Buffers{active: main_buf, list: [main_buf]},

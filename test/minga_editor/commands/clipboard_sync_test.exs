@@ -48,7 +48,7 @@ defmodule MingaEditor.Commands.ClipboardSyncTest do
   defp make_state do
     %State{
       port_manager: nil,
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80)
       }
     }

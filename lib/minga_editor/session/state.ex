@@ -1,4 +1,4 @@
-defmodule MingaEditor.Workspace.State do
+defmodule MingaEditor.Session.State do
   @moduledoc """
   Core editing context that exists regardless of presentation.
 
@@ -68,7 +68,7 @@ defmodule MingaEditor.Workspace.State do
   @doc """
   Converts a workspace into a typed tab context suitable for storing on a `MingaEditor.State.Tab` and later restoring via `restore_tab_context/2`.
 
-  The single chokepoint for snapshots. Delegates to `TabContext.from_workspace/1` which constructs the context struct directly from the workspace struct (no intermediate map). The vim state is normalised so the snapshotted editing state is a valid resting state, not a transient mid-transition pair where `mode_state` belongs to the leaving mode (see `VimState.normalize/1`). Use this everywhere the editor captures `state.workspace` into a tab context.
+  The single chokepoint for snapshots. Delegates to `TabContext.from_workspace/1` which constructs the context struct directly from the session struct (no intermediate map). The vim state is normalised so the snapshotted editing state is a valid resting state, not a transient mid-transition pair where `mode_state` belongs to the leaving mode (see `VimState.normalize/1`). Use this everywhere the editor captures `state.workspace` into a tab context.
   """
   @spec to_tab_context(t()) :: TabContext.t()
   def to_tab_context(%__MODULE__{} = ws) do
@@ -88,7 +88,7 @@ defmodule MingaEditor.Workspace.State do
 
   # ── Pure workspace operations ─────────────────────────────────────────────
   #
-  # These are pure functions (no side effects) on WorkspaceState. The
+  # These are pure functions (no side effects) on SessionState. The
   # Editor GenServer calls these through EditorState wrappers that handle
   # cross-cutting concerns (tab bar sync, process monitoring, etc.).
 

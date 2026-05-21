@@ -33,7 +33,7 @@ defmodule MingaEditor.Input.PickerMouseTest do
     %EditorState{
       port_manager: nil,
       terminal_viewport: vp,
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         editing: VimState.new(),
         viewport: vp
       },
@@ -96,7 +96,7 @@ defmodule MingaEditor.Input.PickerMouseTest do
 
       %EditorState{
         port_manager: nil,
-        workspace: %MingaEditor.Workspace.State{
+        workspace: %MingaEditor.Session.State{
           editing: VimState.new(),
           viewport: Viewport.new(24, 80)
         },
@@ -153,7 +153,7 @@ defmodule MingaEditor.Input.PickerMouseTest do
     test "passes through when no picker is active" do
       state = %EditorState{
         port_manager: nil,
-        workspace: %MingaEditor.Workspace.State{
+        workspace: %MingaEditor.Session.State{
           editing: VimState.new(),
           viewport: Viewport.new(30, 80)
         }

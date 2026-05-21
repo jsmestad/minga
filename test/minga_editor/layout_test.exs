@@ -21,7 +21,7 @@ defmodule MingaEditor.LayoutTest do
     %EditorState{
       port_manager: nil,
       terminal_viewport: vp,
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: vp,
         editing: VimState.new()
       }

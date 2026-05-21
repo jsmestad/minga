@@ -25,7 +25,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.Viewport
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -360,7 +360,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       old_ref = FileRef.from_buffer(buffer)
       {:ok, new_ref} = FileRef.from_path(root, path)
 
-      workspace = %WorkspaceState{
+      workspace = %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: buffer, list: [buffer], active_index: 0},
         file_tree: %FileTreeState{project_root: root}
@@ -369,7 +369,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       tab =
         Tab.new_file(1, "scratch")
         |> Tab.set_file_ref(old_ref)
-        |> Tab.set_context(WorkspaceState.to_tab_context(workspace))
+        |> Tab.set_context(SessionState.to_tab_context(workspace))
 
       tab_bar =
         TabBar.new(tab, root)
@@ -455,7 +455,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
 
       state = %EditorState{
         port_manager: self(),
-        workspace: %WorkspaceState{
+        workspace: %SessionState{
           viewport: Viewport.new(24, 80),
           file_tree: %FileTreeState{project_root: root},
           buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0}
@@ -544,7 +544,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
     tree = FileTree.new(root)
     file_tree = FileTreeState.open(%FileTreeState{}, tree, nil)
 
-    EditorState.update_workspace(base_state(), &WorkspaceState.set_file_tree(&1, file_tree))
+    EditorState.update_workspace(base_state(), &SessionState.set_file_tree(&1, file_tree))
   end
 
   defp put_active_buffer(state, buffer) do

@@ -16,7 +16,7 @@ defmodule MingaEditor.MouseClipboardTest do
   alias MingaEditor.State.Mouse, as: MouseState
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   setup :verify_on_exit!
 
@@ -60,7 +60,7 @@ defmodule MingaEditor.MouseClipboardTest do
     %EditorState{
       port_manager: nil,
       capabilities: %Capabilities{frontend_type: frontend_type},
-      workspace: %WorkspaceState{
+      workspace: %SessionState{
         viewport: Viewport.new(10, 40),
         buffers: %Buffers{active: buffer, list: [buffer]},
         editing: editing,

@@ -13,7 +13,7 @@ Moves files from:
   lib/minga/frontend.ex -> lib/minga_editor/frontend.ex
   lib/minga/ui/         -> lib/minga_editor/ui/
   lib/minga/ui.ex       -> lib/minga_editor/ui.ex
-  lib/minga/workspace/  -> lib/minga_editor/workspace/
+  lib/minga/workspace/  -> lib/minga_editor/session/
   lib/minga/agent/*     -> lib/minga_editor/agent/  (remaining presentation)
 
 Updates defmodule declarations and all references across the codebase.
@@ -74,8 +74,8 @@ def compute_new_module_name(old_name):
         ("Minga.Frontend",     "MingaEditor.Frontend"),
         ("Minga.UI.",          "MingaEditor.UI."),
         ("Minga.UI",           "MingaEditor.UI"),
-        ("Minga.Workspace.",   "MingaEditor.Workspace."),
-        ("Minga.Workspace",    "MingaEditor.Workspace"),
+        ("Minga.Workspace.",   "MingaEditor.Session."),
+        ("Minga.Workspace",    "MingaEditor.Session"),
         # Agent presentation modules
         ("Minga.Agent.",       "MingaEditor.Agent."),
     ]
@@ -107,7 +107,7 @@ def compute_dest_path(src_path, base):
         ("lib/minga/input/",     "lib/minga_editor/input/"),
         ("lib/minga/frontend/",  "lib/minga_editor/frontend/"),
         ("lib/minga/ui/",        "lib/minga_editor/ui/"),
-        ("lib/minga/workspace/", "lib/minga_editor/workspace/"),
+        ("lib/minga/workspace/", "lib/minga_editor/session/"),
         ("lib/minga/agent/",     "lib/minga_editor/agent/"),
     ]
     for old_dir, new_dir in dir_maps:
@@ -127,7 +127,7 @@ def compute_test_dest_path(src_path, base):
         ("test/minga/input/",        "test/minga_editor/input/"),
         ("test/minga/frontend/",     "test/minga_editor/frontend/"),
         ("test/minga/ui/",           "test/minga_editor/ui/"),
-        ("test/minga/workspace/",    "test/minga_editor/workspace/"),
+        ("test/minga/workspace/",    "test/minga_editor/session/"),
         ("test/minga/integration/",  "test/minga_editor/integration/"),
         ("test/minga/agent/",        "test/minga_editor/agent/"),
     ]

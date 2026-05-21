@@ -9,7 +9,7 @@ defmodule MingaEditor.Commands.FoldingTest do
   alias MingaEditor.Viewport
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   describe "execute_at_line/2" do
     test "toggles the fold at the given line without using the cursor line" do
@@ -61,8 +61,8 @@ defmodule MingaEditor.Commands.FoldingTest do
       |> Windows.set_active(1)
 
     workspace =
-      %WorkspaceState{viewport: Viewport.new(24, 80)}
-      |> WorkspaceState.set_windows(windows)
+      %SessionState{viewport: Viewport.new(24, 80)}
+      |> SessionState.set_windows(windows)
 
     %EditorState{port_manager: nil, workspace: workspace}
   end
@@ -87,8 +87,8 @@ defmodule MingaEditor.Commands.FoldingTest do
       |> Windows.set_active(1)
 
     workspace =
-      %WorkspaceState{viewport: Viewport.new(24, 80)}
-      |> WorkspaceState.set_windows(windows)
+      %SessionState{viewport: Viewport.new(24, 80)}
+      |> SessionState.set_windows(windows)
 
     %EditorState{port_manager: nil, workspace: workspace}
   end

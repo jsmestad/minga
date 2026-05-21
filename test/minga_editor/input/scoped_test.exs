@@ -61,7 +61,7 @@ defmodule MingaEditor.Input.ScopedTest do
 
     %EditorState{
       port_manager: self(),
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: %VimState{mode: mode, mode_state: Mode.initial_state()},
         buffers: %Buffers{active: buf, list: [buf]},
@@ -103,7 +103,7 @@ defmodule MingaEditor.Input.ScopedTest do
     %EditorState{
       port_manager: self(),
       shell: MingaEditor.Shell.Board,
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: %VimState{mode: mode, mode_state: Mode.initial_state()},
         buffers: %Buffers{active: buf, list: [buf]},

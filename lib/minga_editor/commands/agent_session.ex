@@ -20,7 +20,7 @@ defmodule MingaEditor.Commands.AgentSession do
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: WorkspaceState
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
 
@@ -123,16 +123,10 @@ defmodule MingaEditor.Commands.AgentSession do
             state
           end
 
-        # Set the session PID on the agent tab that was just created
-        # (or the active agent tab). find_sessionless_agent avoids the
-        # ambiguity of find_by_kind(:agent) when multiple agent tabs exist.
-        # Tab.session is the source of truth; the rendering cache on
-        # state.shell_state.agent (status, error, pending_approval) is
-        # populated lazily on tab switch via rebuild_agent_from_session/2.
-        state = assign_session_to_tab(state, pid)
-
-        # Create an workspace for this session (if one doesn't exist yet)
-        ensure_agent_workspace(state, pid, project_view)
+        # Create the workspace first so set_tab_session/3 does not project the session onto the manual workspace.
+        state
+        |> ensure_agent_workspace(pid, project_view)
+        |> assign_session_to_tab(pid)
 
       {:error, reason} ->
         maybe_discard_project_view(project_view, created_project_view?)
@@ -559,10 +553,10 @@ defmodule MingaEditor.Commands.AgentSession do
          project_view
        ) do
     case TabBar.find_workspace_by_session(tb, session_pid) do
-      %Workspace{kind: :agent} = workspace ->
+      %Workspace{} = workspace ->
         maybe_update_workspace_project_view(state, workspace, project_view)
 
-      _workspace ->
+      nil ->
         state
         |> bind_session_to_agent_workspace(tb, session_pid)
         |> maybe_update_bound_workspace_project_view(session_pid, project_view)
@@ -573,9 +567,7 @@ defmodule MingaEditor.Commands.AgentSession do
 
   @spec bind_session_to_agent_workspace(state(), TabBar.t(), pid()) :: state()
   defp bind_session_to_agent_workspace(state, %TabBar{} = tb, session_pid) do
-    tb = clear_non_agent_session_owner(tb, session_pid)
-
-    case reusable_active_agent_workspace(tb) do
+    case reusable_agent_workspace(tb, session_pid) do
       %Workspace{id: workspace_id} ->
         tb =
           tb
@@ -589,20 +581,23 @@ defmodule MingaEditor.Commands.AgentSession do
     end
   end
 
-  @spec clear_non_agent_session_owner(TabBar.t(), pid()) :: TabBar.t()
-  defp clear_non_agent_session_owner(%TabBar{workspaces: workspaces} = tb, session_pid) do
-    case Enum.find(workspaces, &non_agent_session_owner?(&1, session_pid)) do
-      %Workspace{id: workspace_id} ->
-        TabBar.update_workspace(tb, workspace_id, &Workspace.set_session(&1, nil))
-
-      nil ->
-        tb
-    end
+  @spec reusable_agent_workspace(TabBar.t(), pid()) :: Workspace.t() | nil
+  defp reusable_agent_workspace(%TabBar{} = tb, session_pid) do
+    workspace_for_session_tab(tb, session_pid) || reusable_active_agent_workspace(tb)
   end
 
-  @spec non_agent_session_owner?(Workspace.t(), pid()) :: boolean()
-  defp non_agent_session_owner?(%Workspace{kind: kind, session: session}, session_pid) do
-    kind != :agent and session == session_pid
+  @spec workspace_for_session_tab(TabBar.t(), pid()) :: Workspace.t() | nil
+  defp workspace_for_session_tab(%TabBar{} = tb, session_pid) do
+    case TabBar.find_by_session(tb, session_pid) do
+      %Tab{kind: :agent, group_id: workspace_id} when workspace_id > 0 ->
+        case TabBar.get_workspace(tb, workspace_id) do
+          %Workspace{kind: :agent} = workspace -> workspace
+          _other -> nil
+        end
+
+      _other ->
+        nil
+    end
   end
 
   @spec reusable_active_agent_workspace(TabBar.t()) :: Workspace.t() | nil
@@ -633,7 +628,7 @@ defmodule MingaEditor.Commands.AgentSession do
     {tb, ws} = TabBar.add_workspace(tb, "Agent", session_pid)
 
     tb =
-      case TabBar.find_by_session(tb, session_pid) do
+      case TabBar.find_by_session(tb, session_pid) || TabBar.find_sessionless_agent(tb) do
         %Tab{id: tab_id} = tab ->
           tb
           |> TabBar.move_tab_to_workspace(tab_id, ws.id)

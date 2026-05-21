@@ -517,7 +517,7 @@ defmodule MingaEditor.StartupTest do
   defp state_for_frontend(frontend_type, server \\ nil) do
     %EditorState{
       port_manager: self(),
-      workspace: %MingaEditor.Workspace.State{viewport: Viewport.new(24, 80)},
+      workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
       options_server: server || Options.default_server(),
       capabilities: %Capabilities{frontend_type: frontend_type}
     }
@@ -526,7 +526,7 @@ defmodule MingaEditor.StartupTest do
   defp window_state(scope, window) do
     %EditorState{
       port_manager: self(),
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         keymap_scope: scope,

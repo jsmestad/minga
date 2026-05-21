@@ -18,14 +18,14 @@ defmodule MingaEditor.Commands.HelpersRegisterTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Registers
   alias MingaEditor.Viewport
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   setup :verify_on_exit!
 
   defp make_state(active_register) do
     %EditorState{
       port_manager: nil,
-      workspace: %WorkspaceState{
+      workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         editing: %MingaEditor.VimState{
           mode: :normal,

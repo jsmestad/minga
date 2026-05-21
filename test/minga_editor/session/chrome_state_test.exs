@@ -1,4 +1,4 @@
-defmodule MingaEditor.Workspace.ChromeStateTest do
+defmodule MingaEditor.Session.ChromeStateTest do
   use ExUnit.Case, async: true
 
   @moduletag :tmp_dir
@@ -11,8 +11,8 @@ defmodule MingaEditor.Workspace.ChromeStateTest do
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
   alias MingaEditor.Viewport
-  alias MingaEditor.Workspace.ChromeState
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.ChromeState
+  alias MingaEditor.Session.State, as: SessionState
 
   describe "from_editor_state/1 manual workspace" do
     test "includes non-agent workspace label from project root", %{tmp_dir: tmp_dir} do
@@ -161,7 +161,7 @@ defmodule MingaEditor.Workspace.ChromeStateTest do
     active_buffer = Keyword.get(opts, :active_buffer) || buffer_for_tab(TabBar.active(tb))
 
     %{
-      workspace: %WorkspaceState{
+      workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         keymap_scope: :editor,
         file_tree: %FileTreeState{project_root: project_root},

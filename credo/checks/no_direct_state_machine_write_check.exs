@@ -46,10 +46,10 @@ defmodule Minga.Credo.NoDirectStateMachineWriteCheck do
       guarded_struct_fields: [
         # VimState fields: must use VimState.set_*/transition instead of direct writes
         {:editing, [:mode_state, :marks, :last_jump_pos, :last_find_char, :macro_recorder, :change_recorder, :reg]},
-        # Workspace.State fields: must use WorkspaceState.set_* instead of direct writes
+        # Session.State fields: must use SessionState.set_* instead of direct writes
         {:workspace, [:keymap_scope, :completion, :completion_trigger, :highlight, :mouse, :document_highlights, :search, :lsp_pending, :viewport, :windows, :buffers, :agent_ui, :injection_ranges, :editing]}
       ],
-      allowed_files: ["vim_state.ex", "state.ex", "workspace/state.ex"]
+      allowed_files: ["vim_state.ex", "state.ex", "session/state.ex"]
     ],
     explanations: [
       check: """
@@ -61,7 +61,7 @@ defmodule Minga.Credo.NoDirectStateMachineWriteCheck do
       Use `EditorState.transition_mode(state, mode)` or
       `VimState.transition(vim, mode)` instead of setting `mode:` directly.
 
-      Use `WorkspaceState.set_completion(ws, completion)` instead of
+      Use `SessionState.set_completion(ws, completion)` instead of
       `%{ws | completion: completion}`.
       """,
       params: [
@@ -124,7 +124,7 @@ defmodule Minga.Credo.NoDirectStateMachineWriteCheck do
             format_issue(issue_meta,
               message:
                 "Direct put_in through `#{parent}.#{child}` bypasses the owning state module. " <>
-                  "Use the appropriate WorkspaceState and sub-state setter instead.",
+                  "Use the appropriate SessionState and sub-state setter instead.",
               trigger: "put_in",
               line_no: meta[:line] || extract_line(ast)
             )
@@ -182,7 +182,7 @@ defmodule Minga.Credo.NoDirectStateMachineWriteCheck do
       format_issue(issue_meta,
         message:
           "Direct write through `#{parent}.#{child}` bypasses the owning state module. " <>
-            "Use the appropriate WorkspaceState and sub-state setter instead.",
+            "Use the appropriate SessionState and sub-state setter instead.",
         trigger: "#{field}:",
         line_no: extract_line(value) || extract_line(ast)
       )

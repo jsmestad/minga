@@ -34,7 +34,7 @@ if signature_help != nil      → render signature help
 if whichkey.show              → render which-key popup
 ```
 
-These fields live in `ShellState` and `WorkspaceState` as independent values. The set of possible visual states is the cartesian product: 2^6 = 64 overlay combinations. Most are nonsensical (picker + prompt + completion all visible), but the type system allows every one.
+These fields live in `ShellState` and `SessionState` as independent values. The set of possible visual states is the cartesian product: 2^6 = 64 overlay combinations. Most are nonsensical (picker + prompt + completion all visible), but the type system allows every one.
 
 A state machine would make the illegal combinations unrepresentable:
 

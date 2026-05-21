@@ -22,9 +22,9 @@ defmodule MingaEditor.State.Workspace do
           | :thinking
           | :tool_executing
           | :error
+          | :stopped
           | :needs_review
           | :done
-          | :stopped
           | nil
 
   @typedoc "Remote connection status for workspace-owned remote sessions."
@@ -129,12 +129,6 @@ defmodule MingaEditor.State.Workspace do
     %{workspace | session: session}
   end
 
-  @doc "Returns a copy scoped to a project root for persistence."
-  @spec with_project_root(t(), String.t() | nil) :: t()
-  def with_project_root(%__MODULE__{} = workspace, project_root) do
-    %{workspace | project_root: normalize_project_root(project_root)}
-  end
-
   @doc "Clears the live agent session pid and returns the workspace to idle lifecycle status. Durable remote identity is preserved."
   @spec clear_session(t()) :: t()
   def clear_session(%__MODULE__{} = workspace) do
@@ -208,6 +202,12 @@ defmodule MingaEditor.State.Workspace do
   end
 
   def project_view_active?(%__MODULE__{}), do: false
+
+  @doc "Returns a copy scoped to a project root for persistence."
+  @spec with_project_root(t(), String.t() | nil) :: t()
+  def with_project_root(%__MODULE__{} = workspace, project_root) do
+    %{workspace | project_root: normalize_project_root(project_root)}
+  end
 
   @doc "Sets review state through the owning workspace module."
   @spec set_review(t(), WorkspaceReview.t()) :: t()
@@ -425,18 +425,8 @@ defmodule MingaEditor.State.Workspace do
   @spec default_persisted_workspace(kind(), non_neg_integer(), String.t() | nil) :: t()
   defp default_persisted_workspace(:manual, _id, project_root), do: new_manual(project_root)
 
-  defp default_persisted_workspace(:agent, id, project_root) do
-    id = max(id, 1)
-
-    id
-    |> new_agent("Agent #{id}", nil, project_root)
-    |> set_agent_ui(restored_agent_ui())
-  end
-
-  @spec restored_agent_ui() :: UIState.t()
-  defp restored_agent_ui do
-    UIState.activate(UIState.new(), %MingaEditor.State.Windows{}, %MingaEditor.State.FileTree{})
-  end
+  defp default_persisted_workspace(:agent, id, project_root),
+    do: new_agent(max(id, 1), "Agent #{id}", nil, project_root)
 
   @spec file_ref_to_map(FileRef.t() | nil) :: map() | nil
   defp file_ref_to_map(nil), do: nil

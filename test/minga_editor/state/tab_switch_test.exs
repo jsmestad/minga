@@ -22,7 +22,7 @@ defmodule MingaEditor.State.TabSwitchTest do
   alias MingaEditor.VimState
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   alias MingaEditor.State.Highlighting
   alias MingaEditor.UI.Highlight
@@ -43,7 +43,7 @@ defmodule MingaEditor.State.TabSwitchTest do
 
     state = %EditorState{
       port_manager: self(),
-      workspace: %WorkspaceState{
+      workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         keymap_scope: :editor,
@@ -69,7 +69,7 @@ defmodule MingaEditor.State.TabSwitchTest do
     # Build tab 2's context: a workspace with buf2 active
     win2 = Window.new(win_id, buf2, 24, 80)
 
-    tab2_ws = %WorkspaceState{
+    tab2_ws = %SessionState{
       viewport: Viewport.new(24, 80),
       editing: VimState.new(),
       keymap_scope: :editor,
@@ -106,7 +106,7 @@ defmodule MingaEditor.State.TabSwitchTest do
 
     state = %EditorState{
       port_manager: self(),
-      workspace: %WorkspaceState{
+      workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         keymap_scope: :editor,
@@ -131,7 +131,7 @@ defmodule MingaEditor.State.TabSwitchTest do
     # Build agent tab context with :agent keymap_scope and agent_chat window
     agent_window = Window.new_agent_chat(win_id, agent_buf, 24, 80)
 
-    agent_ws = %WorkspaceState{
+    agent_ws = %SessionState{
       viewport: Viewport.new(24, 80),
       editing: VimState.new(),
       keymap_scope: :agent,

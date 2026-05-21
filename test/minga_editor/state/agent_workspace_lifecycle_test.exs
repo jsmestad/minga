@@ -46,7 +46,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     state =
       state
       |> EditorState.set_tab_bar(tab_bar)
-      |> EditorState.update_workspace(&MingaEditor.Workspace.State.set_agent_ui(&1, ui_two))
+      |> EditorState.update_workspace(&MingaEditor.Session.State.set_agent_ui(&1, ui_two))
 
     state = EditorState.switch_tab(state, 1)
 
@@ -67,7 +67,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     state =
       state
       |> EditorState.set_tab_bar(tab_bar)
-      |> EditorState.update_workspace(&MingaEditor.Workspace.State.set_agent_ui(&1, ui_two))
+      |> EditorState.update_workspace(&MingaEditor.Session.State.set_agent_ui(&1, ui_two))
 
     state = MingaEditor.Commands.Workspace.workspace_close(state)
 
@@ -113,7 +113,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     state =
       state
       |> EditorState.set_tab_bar(tab_bar)
-      |> EditorState.update_workspace(&MingaEditor.Workspace.State.set_agent_ui(&1, ui_one))
+      |> EditorState.update_workspace(&MingaEditor.Session.State.set_agent_ui(&1, ui_one))
 
     state = EditorState.switch_tab(state, 2)
 
@@ -372,7 +372,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     state =
       state
       |> EditorState.set_tab_bar(tab_bar)
-      |> EditorState.update_workspace(&MingaEditor.Workspace.State.set_agent_ui(&1, ui))
+      |> EditorState.update_workspace(&MingaEditor.Session.State.set_agent_ui(&1, ui))
 
     {state, workspace.id, file_ref}
   end
@@ -411,7 +411,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     %EditorState{
       port_manager: nil,
       shell: MingaEditor.Shell.Traditional,
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         buffers: %Buffers{active: buf_one, list: [buf_one, buf_two], active_index: 0},

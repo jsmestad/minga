@@ -49,7 +49,7 @@ defmodule MingaEditor.Input.PopupTest do
 
     state = %EditorState{
       port_manager: nil,
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: vim,
         buffers: %Buffers{active: main_buf, list: [main_buf]},
@@ -75,7 +75,7 @@ defmodule MingaEditor.Input.PopupTest do
 
     %EditorState{
       port_manager: nil,
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: main_buf, list: [main_buf]},
         windows: %Windows{
@@ -162,7 +162,7 @@ defmodule MingaEditor.Input.PopupTest do
 
       %EditorState{
         port_manager: nil,
-        workspace: %MingaEditor.Workspace.State{
+        workspace: %MingaEditor.Session.State{
           viewport: Viewport.new(24, 80),
           buffers: %Buffers{active: main_buf, list: [main_buf]},
           windows: %Windows{

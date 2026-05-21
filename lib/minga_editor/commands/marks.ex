@@ -12,7 +12,7 @@ defmodule MingaEditor.Commands.Marks do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.VimState
   alias Minga.Mode
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   @type state :: EditorState.t()
 
@@ -33,7 +33,7 @@ defmodule MingaEditor.Commands.Marks do
     new_marks = Map.put(marks, buf, Map.put(buf_marks, char, pos))
 
     EditorState.update_workspace(state, fn ws ->
-      WorkspaceState.update_editing(ws, &VimState.set_marks(&1, new_marks))
+      SessionState.update_editing(ws, &VimState.set_marks(&1, new_marks))
     end)
   end
 
@@ -89,7 +89,7 @@ defmodule MingaEditor.Commands.Marks do
     Buffer.move_to(buf, target)
 
     EditorState.update_workspace(state, fn ws ->
-      WorkspaceState.update_editing(ws, &VimState.set_last_jump_pos(&1, current_pos))
+      SessionState.update_editing(ws, &VimState.set_last_jump_pos(&1, current_pos))
     end)
   end
 
@@ -104,7 +104,7 @@ defmodule MingaEditor.Commands.Marks do
     Buffer.move_to(buf, last_pos)
 
     EditorState.update_workspace(state, fn ws ->
-      WorkspaceState.update_editing(ws, &VimState.set_last_jump_pos(&1, current_pos))
+      SessionState.update_editing(ws, &VimState.set_last_jump_pos(&1, current_pos))
     end)
   end
 

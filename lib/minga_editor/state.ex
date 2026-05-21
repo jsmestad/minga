@@ -6,7 +6,7 @@ defmodule MingaEditor.State do
 
   EditorState fields fall into three categories:
 
-  **Workspace fields** live in `state.workspace` (`MingaEditor.Workspace.State`)
+  **Workspace fields** live in `state.workspace` (`MingaEditor.Session.State`)
   and are saved/restored when switching tabs. Each tab carries a snapshot
   of the workspace so switching tabs restores the full editing context.
 
@@ -21,7 +21,7 @@ defmodule MingaEditor.State do
 
   ## Composed sub-structs
 
-  * `MingaEditor.Workspace.State`           — per-tab editing context (buffers, windows, vim, etc.)
+  * `MingaEditor.Session.State`           — per-tab editing context (buffers, windows, vim, etc.)
   * `MingaEditor.Shell.Traditional.State`   — presentation state (nav_flash, hover, dashboard, etc.)
   * `MingaEditor.State.WhichKey`     — which-key popup node, timer, visibility
   * `MingaEditor.State.Registers`    — named registers and active register selection
@@ -37,7 +37,7 @@ defmodule MingaEditor.State do
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.LSP, as: LSPState
-  alias MingaEditor.State.Session, as: SessionState
+  alias MingaEditor.State.Session, as: EditorSessionState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Highlighting
@@ -62,7 +62,7 @@ defmodule MingaEditor.State do
 
   alias MingaEditor.UI.Panel.MessageStore
   alias MingaEditor.UI.Theme
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State.Workspace, as: WorkspaceModel
 
   @typedoc "Line number display style."
@@ -116,7 +116,7 @@ defmodule MingaEditor.State do
             diff_views: %{},
             face_override_registries: %{},
             caches: MingaEditor.Renderer.Caches.new(),
-            session: %SessionState{},
+            session: %EditorSessionState{},
             buffer_add_context: :open,
             remote: %Remote{},
             stashed_board_state: nil,
@@ -134,7 +134,7 @@ defmodule MingaEditor.State do
           keymap_server: keymap_server(),
           options_server: options_server(),
           events_registry: events_registry(),
-          workspace: WorkspaceState.t(),
+          workspace: SessionState.t(),
           terminal_viewport: Viewport.t(),
           editing_model: :vim | :cua,
           shell: module(),
@@ -158,7 +158,7 @@ defmodule MingaEditor.State do
           caches: MingaEditor.Renderer.Caches.t(),
           buffer_add_context: MingaEditor.Shell.buffer_add_context(),
           remote: Remote.t(),
-          session: SessionState.t(),
+          session: EditorSessionState.t(),
           stashed_board_state: MingaEditor.Shell.Board.State.t() | nil,
           keystroke_history: KeystrokeHistory.t(),
           git_commit_gen_ref: reference() | nil
@@ -188,7 +188,7 @@ defmodule MingaEditor.State do
   # ── Workspace helpers ──────────────────────────────────────────────────────
 
   @doc "Applies a function to the workspace and returns the updated state."
-  @spec update_workspace(t(), (WorkspaceState.t() -> WorkspaceState.t())) :: t()
+  @spec update_workspace(t(), (SessionState.t() -> SessionState.t())) :: t()
   def update_workspace(%__MODULE__{workspace: ws} = state, fun) when is_function(fun, 1) do
     %{state | workspace: fun.(ws)}
   end
@@ -600,7 +600,7 @@ defmodule MingaEditor.State do
     new_bs = Buffers.remove(bs, pid)
 
     state = %{
-      update_workspace(state, &WorkspaceState.set_buffers(&1, new_bs))
+      update_workspace(state, &SessionState.set_buffers(&1, new_bs))
       | buffer_monitors: monitors
     }
 
@@ -715,16 +715,16 @@ defmodule MingaEditor.State do
   @doc "Returns the active window struct, or nil if windows aren't initialized."
   @spec active_window_struct(t()) :: Window.t() | nil
   def active_window_struct(%__MODULE__{workspace: ws}),
-    do: WorkspaceState.active_window_struct(ws)
+    do: SessionState.active_window_struct(ws)
 
   @doc "Returns true if the editor has more than one window."
   @spec split?(t()) :: boolean()
-  def split?(%__MODULE__{workspace: ws}), do: WorkspaceState.split?(ws)
+  def split?(%__MODULE__{workspace: ws}), do: SessionState.split?(ws)
 
   @doc "Updates the window struct for the given window id via a mapper function."
   @spec update_window(t(), Window.id(), (Window.t() -> Window.t())) :: t()
   def update_window(%__MODULE__{} = state, id, fun) do
-    update_workspace(state, &WorkspaceState.update_window(&1, id, fun))
+    update_workspace(state, &SessionState.update_window(&1, id, fun))
   end
 
   @doc """
@@ -736,7 +736,7 @@ defmodule MingaEditor.State do
   """
   @spec invalidate_all_windows(t()) :: t()
   def invalidate_all_windows(%__MODULE__{} = state) do
-    update_workspace(state, &WorkspaceState.invalidate_all_windows/1)
+    update_workspace(state, &SessionState.invalidate_all_windows/1)
   end
 
   @doc """
@@ -867,7 +867,7 @@ defmodule MingaEditor.State do
   """
   @spec sync_active_window_buffer(t()) :: t()
   def sync_active_window_buffer(%__MODULE__{} = state) do
-    update_workspace(state, &WorkspaceState.sync_active_window_buffer/1)
+    update_workspace(state, &SessionState.sync_active_window_buffer/1)
   end
 
   @doc "Returns the set of buffer pids known to the live workspace and tab snapshots."
@@ -973,8 +973,8 @@ defmodule MingaEditor.State do
   @spec tab_bar_active_id(TabBar.t()) :: Tab.id()
   defp tab_bar_active_id(%TabBar{active_id: active_id}), do: active_id
 
-  @spec buffer_file_ref(pid(), WorkspaceState.t()) :: FileRef.t() | nil
-  defp buffer_file_ref(buffer_pid, %WorkspaceState{} = workspace) do
+  @spec buffer_file_ref(pid(), SessionState.t()) :: FileRef.t() | nil
+  defp buffer_file_ref(buffer_pid, %SessionState{} = workspace) do
     case {buffer_path(buffer_pid), workspace.file_tree.project_root} do
       {path, root} when is_binary(path) and is_binary(root) ->
         case FileRef.from_path(root, path) do
@@ -1038,7 +1038,7 @@ defmodule MingaEditor.State do
       end
 
     prev_workspace = state.workspace
-    state = update_workspace(state, &WorkspaceState.set_buffers(&1, new_bs))
+    state = update_workspace(state, &SessionState.set_buffers(&1, new_bs))
 
     # Dispatch to the active shell for presentation logic
     {shell_state, workspace, shell_effects} =
@@ -1077,7 +1077,7 @@ defmodule MingaEditor.State do
   """
   @spec switch_buffer(t(), non_neg_integer()) :: t()
   def switch_buffer(%__MODULE__{} = state, idx) do
-    state = update_workspace(state, &WorkspaceState.switch_buffer(&1, idx))
+    state = update_workspace(state, &SessionState.switch_buffer(&1, idx))
 
     case state.buffer_add_context do
       :preview ->
@@ -1187,7 +1187,7 @@ defmodule MingaEditor.State do
   """
   @spec scope_for_content(Content.t(), Minga.Keymap.Scope.scope_name()) ::
           Minga.Keymap.Scope.scope_name()
-  defdelegate scope_for_content(content, current_scope), to: WorkspaceState
+  defdelegate scope_for_content(content, current_scope), to: SessionState
 
   @doc """
   Returns the appropriate keymap scope for the active window's content type.
@@ -1197,7 +1197,7 @@ defmodule MingaEditor.State do
   """
   @spec scope_for_active_window(t()) :: atom()
   def scope_for_active_window(%{workspace: ws}) do
-    WorkspaceState.scope_for_active_window(ws)
+    SessionState.scope_for_active_window(ws)
   end
 
   # ── Tab bar helpers ───────────────────────────────────────────────────────
@@ -1219,9 +1219,9 @@ defmodule MingaEditor.State do
     snapshot_workspace_fields(ws)
   end
 
-  @spec snapshot_workspace_fields(WorkspaceState.t()) :: Tab.context()
-  defp snapshot_workspace_fields(%WorkspaceState{} = ws) do
-    WorkspaceState.to_tab_context(ws)
+  @spec snapshot_workspace_fields(SessionState.t()) :: Tab.context()
+  defp snapshot_workspace_fields(%SessionState{} = ws) do
+    SessionState.to_tab_context(ws)
   end
 
   @doc """
@@ -1250,12 +1250,11 @@ defmodule MingaEditor.State do
       end
 
     state
-    |> Map.put(:workspace, WorkspaceState.restore_tab_context(state.workspace, context))
+    |> Map.put(:workspace, SessionState.restore_tab_context(state.workspace, context))
     |> sync_agent_ui_from_active_workspace()
   end
 
-  # Builds a typed context for a brand-new tab. Agent tabs need an agent-shaped context
-  # because restoring them as file tabs leaves the editor in the wrong keymap scope and window content.
+  # Builds a typed context for a brand-new tab, using agent-shaped defaults for agent tabs.
   @spec build_empty_tab_defaults(t()) :: Tab.context()
   defp build_empty_tab_defaults(state) do
     case active_tab_for_defaults(state) do
@@ -1351,8 +1350,7 @@ defmodule MingaEditor.State do
       injection_ranges: %{},
       search: %Search{},
       editing: VimState.new(),
-      document_highlights: nil,
-      agent_ui: UIState.activate(UIState.new(), %Windows{}, %FileTreeState{})
+      document_highlights: nil
     })
   end
 
@@ -1502,10 +1500,24 @@ defmodule MingaEditor.State do
         _ -> UIState.new()
       end
 
-    update_workspace(state, &WorkspaceState.set_agent_ui(&1, agent_ui))
+    agent_ui = maybe_activate_synced_agent_ui(state, agent_ui)
+
+    update_workspace(state, &SessionState.set_agent_ui(&1, agent_ui))
   end
 
   def sync_agent_ui_from_active_workspace(state), do: state
+
+  @spec maybe_activate_synced_agent_ui(t(), UIState.t()) :: UIState.t()
+  defp maybe_activate_synced_agent_ui(
+         %__MODULE__{workspace: %{keymap_scope: :agent} = workspace},
+         agent_ui
+       ) do
+    UIState.activate(agent_ui, workspace.windows, workspace.file_tree)
+  end
+
+  defp maybe_activate_synced_agent_ui(%__MODULE__{}, agent_ui) do
+    agent_ui
+  end
 
   @spec active_tab(t()) :: Tab.t() | nil
   def active_tab(%__MODULE__{} = state), do: state.shell.active_tab(state.shell_state)
@@ -1614,7 +1626,7 @@ defmodule MingaEditor.State do
   """
   @spec transition_mode(t(), Mode.mode(), Mode.state() | nil) :: t()
   def transition_mode(%__MODULE__{} = state, mode, mode_state \\ nil) do
-    update_workspace(state, &WorkspaceState.transition_mode(&1, mode, mode_state))
+    update_workspace(state, &SessionState.transition_mode(&1, mode, mode_state))
   end
 
   # ── Tool prompt helpers ──────────────────────────────────────────────────────

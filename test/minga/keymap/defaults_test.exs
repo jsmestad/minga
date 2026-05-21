@@ -191,6 +191,12 @@ defmodule Minga.Keymap.DefaultsTest do
       assert {:command, :agent_session_history} = Bindings.lookup(a_node, {?h, 0})
     end
 
+    test "SPC a r → :workspace_pending_reviews" do
+      trie = Defaults.leader_trie()
+      {:prefix, a_node} = Bindings.lookup(trie, {?a, 0})
+      assert {:command, :workspace_pending_reviews} = Bindings.lookup(a_node, {?r, 0})
+    end
+
     # ── Search bindings ─────────────────────────────────────────────────────────
 
     test "SPC s s → :search_buffer" do

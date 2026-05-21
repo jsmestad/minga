@@ -33,7 +33,7 @@ defmodule MingaEditor.Input.InterruptTest do
 
     %EditorState{
       port_manager: self(),
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         buffers: %Buffers{

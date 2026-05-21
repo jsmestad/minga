@@ -15,7 +15,7 @@ defmodule MingaEditor.State.AgentAccess do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
   alias MingaEditor.Shell.Traditional.State, as: ShellState
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: WorkspaceState
 
   # ── Readers ────────────────────────────────────────────────────────────────
 

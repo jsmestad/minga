@@ -11,7 +11,7 @@ defmodule MingaEditor.CommandStateHelpers do
   alias MingaEditor.State.Registers
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   @type state :: EditorState.t()
   @type register_type :: Registers.reg_type()
@@ -35,7 +35,7 @@ defmodule MingaEditor.CommandStateHelpers do
     %EditorState{
       backend: Keyword.get(opts, :backend, :headless),
       port_manager: Keyword.get(opts, :port_manager, nil),
-      workspace: %WorkspaceState{
+      workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: buffers,
         editing: editing
@@ -73,7 +73,7 @@ defmodule MingaEditor.CommandStateHelpers do
   @spec update_registers(state(), (Registers.t() -> Registers.t())) :: state()
   def update_registers(%EditorState{} = state, fun) when is_function(fun, 1) do
     EditorState.update_workspace(state, fn workspace ->
-      WorkspaceState.update_editing(workspace, fn vim ->
+      SessionState.update_editing(workspace, fn vim ->
         VimState.set_registers(vim, fun.(vim.reg))
       end)
     end)

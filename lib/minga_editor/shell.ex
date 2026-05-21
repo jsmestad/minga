@@ -42,7 +42,7 @@ defmodule MingaEditor.Shell do
   @type shell_state :: term()
 
   @typedoc "Workspace state (the editing context shared by all shells)."
-  @type workspace :: MingaEditor.Workspace.State.t()
+  @type workspace :: MingaEditor.Session.State.t()
 
   @typedoc """
   Why a buffer was added — re-exported here from `Shell.BufferLifecycle`

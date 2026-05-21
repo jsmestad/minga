@@ -9,7 +9,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.Highlight
   alias MingaEditor.Window
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -325,7 +325,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
 
     state =
       EditorState.update_workspace(state, fn ws ->
-        WorkspaceState.update_window(ws, win_id, fn window ->
+        SessionState.update_window(ws, win_id, fn window ->
           Window.set_document_symbols(window, stale_symbols)
         end)
       end)

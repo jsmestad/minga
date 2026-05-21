@@ -45,7 +45,7 @@ defmodule MingaEditor.Shell.Board.InputTest do
       port_manager: self(),
       shell: Board,
       shell_state: board,
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80)
       },
       focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
@@ -74,7 +74,7 @@ defmodule MingaEditor.Shell.Board.InputTest do
       port_manager: self(),
       shell: Board,
       shell_state: board,
-      workspace: %MingaEditor.Workspace.State{viewport: Viewport.new(24, 80)},
+      workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
       focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
     }
 
@@ -219,7 +219,7 @@ defmodule MingaEditor.Shell.Board.InputTest do
         port_manager: self(),
         shell: Board,
         shell_state: board,
-        workspace: %MingaEditor.Workspace.State{viewport: Viewport.new(24, 80)},
+        workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
         focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
       }
 
@@ -255,7 +255,7 @@ defmodule MingaEditor.Shell.Board.InputTest do
         port_manager: self(),
         shell: Board,
         shell_state: board,
-        workspace: %MingaEditor.Workspace.State{viewport: Viewport.new(24, 80)},
+        workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
         focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
       }
 
@@ -310,7 +310,7 @@ defmodule MingaEditor.Shell.Board.InputTest do
         port_manager: self(),
         shell: Board,
         shell_state: board,
-        workspace: %MingaEditor.Workspace.State{viewport: Viewport.new(24, 80)},
+        workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
         focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
       }
 
@@ -339,7 +339,7 @@ defmodule MingaEditor.Shell.Board.InputTest do
         port_manager: self(),
         shell: Board,
         shell_state: board,
-        workspace: %MingaEditor.Workspace.State{viewport: Viewport.new(24, 80)},
+        workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
         focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
       }
 
@@ -376,7 +376,7 @@ defmodule MingaEditor.Shell.Board.InputTest do
         port_manager: self(),
         shell: Board,
         shell_state: board,
-        workspace: %MingaEditor.Workspace.State{viewport: Viewport.new(24, 80)},
+        workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
         focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
       }
 
@@ -525,7 +525,7 @@ defmodule MingaEditor.Shell.Board.InputTest do
         port_manager: self(),
         shell: Board,
         shell_state: board,
-        workspace: %MingaEditor.Workspace.State{viewport: Viewport.new(24, 80)},
+        workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
         focus_stack: [ZoomOut, MingaEditor.Input.GlobalBindings]
       }
 
@@ -560,7 +560,7 @@ defmodule MingaEditor.Shell.Board.InputTest do
         port_manager: self(),
         shell: Board,
         shell_state: board,
-        workspace: %MingaEditor.Workspace.State{viewport: Viewport.new(24, 80)},
+        workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
         focus_stack: [BoardInput, ZoomOut, MingaEditor.Input.GlobalBindings]
       }
 
@@ -708,7 +708,7 @@ defmodule MingaEditor.Shell.Board.InputTest do
         port_manager: self(),
         shell: MingaEditor.Shell.Traditional,
         shell_state: %MingaEditor.Shell.Traditional.State{},
-        workspace: %MingaEditor.Workspace.State{viewport: Viewport.new(24, 80)},
+        workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
         focus_stack: []
       }
 

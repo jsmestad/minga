@@ -14,12 +14,12 @@ defmodule MingaEditor.CompletionDocPreviewTest do
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.Viewport
   alias MingaEditor.UI.Theme
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   @theme Theme.get!(:doom_one)
 
   defp make_state(completion) do
-    ws = %WorkspaceState{viewport: %Viewport{top: 0, left: 0, rows: 24, cols: 80}}
+    ws = %SessionState{viewport: %Viewport{top: 0, left: 0, rows: 24, cols: 80}}
 
     modal =
       case completion do

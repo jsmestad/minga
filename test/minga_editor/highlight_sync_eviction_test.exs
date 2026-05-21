@@ -131,7 +131,7 @@ defmodule MingaEditor.HighlightSyncEvictionTest do
   defp base_state do
     %EditorState{
       port_manager: nil,
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new()
       }

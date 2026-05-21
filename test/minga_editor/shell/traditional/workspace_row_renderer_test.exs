@@ -3,9 +3,9 @@ defmodule MingaEditor.Shell.Traditional.WorkspaceRowRendererTest do
 
   alias MingaEditor.Shell.Traditional.WorkspaceRowRenderer
   alias MingaEditor.UI.Theme
-  alias MingaEditor.Workspace.ChromeState
-  alias MingaEditor.Workspace.ChromeState.TabSummary
-  alias MingaEditor.Workspace.ChromeState.WorkspaceSummary
+  alias MingaEditor.Session.ChromeState
+  alias MingaEditor.Session.ChromeState.TabSummary
+  alias MingaEditor.Session.ChromeState.WorkspaceSummary
 
   defp doom_theme, do: Theme.get!(:doom_one)
 

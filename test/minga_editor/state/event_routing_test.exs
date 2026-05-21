@@ -20,7 +20,7 @@ defmodule MingaEditor.State.EventRoutingTest do
     state = %EditorState{
       port_manager: self(),
       shell: MingaEditor.Shell.Traditional,
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80)
       },
       shell_state: %MingaEditor.Shell.Traditional.State{

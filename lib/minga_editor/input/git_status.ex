@@ -22,7 +22,7 @@ defmodule MingaEditor.Input.GitStatus do
   alias Minga.Keymap
   alias MingaEditor.PromptUI
   alias MingaEditor.UI.Prompt.GitCommit, as: CommitPrompt
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
@@ -251,7 +251,7 @@ defmodule MingaEditor.Input.GitStatus do
   @spec close_panel(EditorState.t()) :: EditorState.t()
   defp close_panel(state) do
     state
-    |> EditorState.update_workspace(&WorkspaceState.set_keymap_scope(&1, :editor))
+    |> EditorState.update_workspace(&SessionState.set_keymap_scope(&1, :editor))
     |> EditorState.close_git_status_panel()
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()

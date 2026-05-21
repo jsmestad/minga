@@ -6,7 +6,7 @@ defmodule MingaEditor.Commands.VisualTextObjectTest do
   alias MingaEditor.Commands.Visual
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Viewport
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   defp start_buffer(content) do
     start_supervised!({BufferProcess, content: content})
@@ -15,7 +15,7 @@ defmodule MingaEditor.Commands.VisualTextObjectTest do
   defp build_state(buf, anchor \\ {0, 0}) do
     state = %EditorState{
       port_manager: nil,
-      workspace: %WorkspaceState{
+      workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: %MingaEditor.State.Buffers{active: buf, list: [buf]}
       }

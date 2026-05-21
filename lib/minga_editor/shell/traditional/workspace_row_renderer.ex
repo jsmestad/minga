@@ -9,8 +9,8 @@ defmodule MingaEditor.Shell.Traditional.WorkspaceRowRenderer do
   alias Minga.Core.Unicode
   alias MingaEditor.DisplayList
   alias MingaEditor.UI.Theme
-  alias MingaEditor.Workspace.ChromeState
-  alias MingaEditor.Workspace.ChromeState.WorkspaceSummary
+  alias MingaEditor.Session.ChromeState
+  alias MingaEditor.Session.ChromeState.WorkspaceSummary
 
   @type click_region ::
           {row :: non_neg_integer(), col_start :: non_neg_integer(), col_end :: non_neg_integer(),

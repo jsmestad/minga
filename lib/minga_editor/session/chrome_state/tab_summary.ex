@@ -1,4 +1,4 @@
-defmodule MingaEditor.Workspace.ChromeState.TabSummary do
+defmodule MingaEditor.Session.ChromeState.TabSummary do
   @moduledoc """
   User-facing summary for one file tab in workspace chrome.
 

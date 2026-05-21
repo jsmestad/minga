@@ -36,7 +36,7 @@ defmodule MingaEditor.Commands.Agent do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
   alias MingaEditor.Input.AgentPanel
@@ -127,8 +127,7 @@ defmodule MingaEditor.Commands.Agent do
         context = EditorState.build_agent_tab_defaults(state, windows, agent_buf)
 
         # Create agent tab in the background (don't switch to it).
-        # Group creation happens later in start_agent_session when
-        # the session pid is available (ensure_agent_workspace/2).
+        # Group creation happens later in start_agent_session when the session pid is available.
         tab_bar = EditorState.tab_bar(state) || TabBar.new(Tab.new_file(1, "File"))
         original_active_id = tab_bar.active_id
         {tb, new_tab} = TabBar.add(tab_bar, :agent, "Agent")
@@ -269,18 +268,18 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec restore_return_keymap_scope(state(), UIState.View.return_target() | nil) :: state()
   defp restore_return_keymap_scope(state, %{keymap_scope: keymap_scope}) do
-    EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, keymap_scope))
+    EditorState.update_workspace(state, &SessionState.set_keymap_scope(&1, keymap_scope))
   end
 
   defp restore_return_keymap_scope(state, _return_target) do
-    EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :editor))
+    EditorState.update_workspace(state, &SessionState.set_keymap_scope(&1, :editor))
   end
 
   @spec restore_return_target_without_tab(state(), UIState.View.return_target() | nil) :: state()
   defp restore_return_target_without_tab(state, nil) do
     state
     |> mark_agent_view_inactive()
-    |> EditorState.update_workspace(&WorkspaceState.set_keymap_scope(&1, :editor))
+    |> EditorState.update_workspace(&SessionState.set_keymap_scope(&1, :editor))
     |> EditorState.set_status("No file tabs in this workspace")
   end
 
@@ -292,17 +291,17 @@ defmodule MingaEditor.Commands.Agent do
     |> EditorState.set_status("No file tabs in this workspace")
   end
 
-  @spec restore_workspace_return_target(WorkspaceState.t(), UIState.View.return_target()) ::
-          WorkspaceState.t()
+  @spec restore_workspace_return_target(SessionState.t(), UIState.View.return_target()) ::
+          SessionState.t()
   defp restore_workspace_return_target(workspace, return_target) do
     workspace
-    |> WorkspaceState.set_keymap_scope(return_target.keymap_scope)
-    |> WorkspaceState.set_windows(return_target.windows)
-    |> WorkspaceState.set_file_tree(return_target.file_tree)
+    |> SessionState.set_keymap_scope(return_target.keymap_scope)
+    |> SessionState.set_windows(return_target.windows)
+    |> SessionState.set_file_tree(return_target.file_tree)
     |> restore_return_target_buffer(return_target.active_buffer)
   end
 
-  @spec restore_return_target_buffer(WorkspaceState.t(), pid() | nil) :: WorkspaceState.t()
+  @spec restore_return_target_buffer(SessionState.t(), pid() | nil) :: SessionState.t()
   defp restore_return_target_buffer(workspace, active_buffer) when is_pid(active_buffer) do
     buffers = Buffers.switch_to_pid(workspace.buffers, active_buffer)
 
@@ -314,8 +313,8 @@ defmodule MingaEditor.Commands.Agent do
       end
 
     workspace
-    |> WorkspaceState.set_buffers(buffers)
-    |> WorkspaceState.sync_active_window_buffer()
+    |> SessionState.set_buffers(buffers)
+    |> SessionState.sync_active_window_buffer()
   end
 
   defp restore_return_target_buffer(workspace, _active_buffer), do: workspace
