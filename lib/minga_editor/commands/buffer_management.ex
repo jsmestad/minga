@@ -1177,7 +1177,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
     updated_workspace =
       workspace
-      |> WorkspaceModel.detach_session()
+      |> WorkspaceModel.clear_session()
       |> WorkspaceModel.set_agent_status(:error)
       |> WorkspaceModel.set_review(review)
 

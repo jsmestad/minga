@@ -344,7 +344,6 @@ defmodule MingaAgent.Providers.Native do
       context: context,
       tools: tools,
       project_root: project_root,
-      project_view: project_view,
       thinking_level: thinking_level,
       max_tokens: max_tokens,
       max_retries: max_retries,

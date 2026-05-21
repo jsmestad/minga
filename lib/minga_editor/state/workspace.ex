@@ -123,6 +123,13 @@ defmodule MingaEditor.State.Workspace do
     %{workspace | project_view: project_view}
   end
 
+  @doc "Releases the workspace's owned ProjectView resources, if any."
+  @spec close_project_view(t()) :: :ok | {:error, term()}
+  def close_project_view(%__MODULE__{project_view: %ProjectView{} = project_view}),
+    do: ProjectView.close(project_view)
+
+  def close_project_view(%__MODULE__{}), do: :ok
+
   @doc "Sets the session owned by the workspace."
   @spec set_session(t(), pid() | nil) :: t()
   def set_session(%__MODULE__{} = workspace, session) when is_pid(session) or is_nil(session) do
