@@ -82,13 +82,13 @@ defmodule MingaAgent.Changeset do
   end
 
   @doc "Undoes the last edit to a specific file."
-  @spec undo(changeset(), String.t()) :: :ok | {:error, :nothing_to_undo}
+  @spec undo(changeset(), String.t()) :: :ok | {:error, :nothing_to_undo | term()}
   def undo(cs, relative_path) when is_binary(relative_path) do
     GenServer.call(cs, {:undo, relative_path})
   end
 
   @doc "Resets the entire changeset, restoring all files to their original state."
-  @spec reset(changeset()) :: :ok
+  @spec reset(changeset()) :: :ok | {:error, term()}
   def reset(cs) do
     GenServer.call(cs, :reset)
   end
@@ -158,6 +158,12 @@ defmodule MingaAgent.Changeset do
   @spec project_root(changeset()) :: String.t()
   def project_root(cs) do
     GenServer.call(cs, :project_root)
+  end
+
+  @doc "Returns environment variables shell commands should use for this changeset."
+  @spec command_env(changeset()) :: [{String.t(), String.t()}]
+  def command_env(cs) do
+    GenServer.call(cs, :command_env)
   end
 
   @doc "Returns modified and deleted file lists."

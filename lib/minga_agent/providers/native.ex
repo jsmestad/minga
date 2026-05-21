@@ -1,3 +1,5 @@
+# credo:disable-for-this-file Credo.Check.Refactor.Nesting
+
 defmodule MingaAgent.Providers.Native do
   @moduledoc """
   Native Elixir agent provider backed by ReqLLM.
@@ -50,6 +52,7 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Memory
   alias MingaAgent.ModelCatalog
   alias MingaAgent.ModelLimits
+  alias MingaAgent.ProjectView
   alias MingaAgent.Retry
   alias MingaAgent.Session
   alias MingaAgent.Skills
@@ -143,6 +146,7 @@ defmodule MingaAgent.Providers.Native do
           context: Context.t(),
           tools: [term()],
           project_root: String.t(),
+          project_view: ProjectView.t() | nil,
           thinking_level: String.t(),
           max_tokens: pos_integer(),
           max_retries: non_neg_integer(),
@@ -257,31 +261,38 @@ defmodule MingaAgent.Providers.Native do
     llm_client = Keyword.get(opts, :llm_client, &ReqLLM.stream_text/3)
     hook_runner = Keyword.get(opts, :hook_runner, &CommandRunner.run_pre_tool_use/2)
     provider_pid = self()
-    # Start a fork store for in-memory buffer isolation. Forks are created
-    # lazily when agent tools write to files that have open buffers.
-    # Not linked: fork store crash degrades gracefully (tools fall through
-    # to changeset or direct I/O) rather than killing the provider.
-    {:ok, fork_store} = GenServer.start(MingaAgent.BufferForkStore, :ok)
-    Process.monitor(fork_store)
 
-    # Optionally create a changeset for filesystem-level isolation.
-    # When enabled, file tools write to an overlay directory instead of
-    # the real project. Three-way merge on session completion.
-    changeset =
-      if Keyword.get(opts, :changeset, false) do
-        case MingaAgent.Changeset.create(project_root) do
-          {:ok, cs} ->
-            Process.monitor(cs)
-            cs
+    {fork_store, changeset} =
+      case project_view do
+        %ProjectView{} ->
+          {nil, nil}
 
-          {:error, reason} ->
-            Minga.Log.warning(
-              :agent,
-              "[Agent.Native] changeset creation failed: #{inspect(reason)}"
-            )
+        _ ->
+          # Start a fork store for in-memory buffer isolation. Forks are created
+          # lazily when agent tools write to files that have open buffers.
+          # Not linked: fork store crash degrades gracefully (tools fall through
+          # to changeset or direct I/O) rather than killing the provider.
+          {:ok, fork_store} = GenServer.start(MingaAgent.BufferForkStore, :ok)
+          Process.monitor(fork_store)
 
-            nil
-        end
+          changeset =
+            if Keyword.get(opts, :changeset, false) do
+              case MingaAgent.Changeset.create(project_root) do
+                {:ok, cs} ->
+                  Process.monitor(cs)
+                  cs
+
+                {:error, reason} ->
+                  Minga.Log.warning(
+                    :agent,
+                    "[Agent.Native] changeset creation failed: #{inspect(reason)}"
+                  )
+
+                  nil
+              end
+            end
+
+          {fork_store, changeset}
       end
 
     base_tools =
@@ -317,6 +328,7 @@ defmodule MingaAgent.Providers.Native do
       context: context,
       tools: tools,
       project_root: project_root,
+      project_view: project_view,
       thinking_level: thinking_level,
       max_tokens: max_tokens,
       max_retries: max_retries,
@@ -724,7 +736,7 @@ defmodule MingaAgent.Providers.Native do
       "[Agent.Native] fork store crashed, continuing without fork isolation"
     )
 
-    {:noreply, %{state | fork_store: nil}}
+    {:noreply, rebuild_tools(%{state | fork_store: nil})}
   end
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, %{changeset: pid} = state)
@@ -734,7 +746,7 @@ defmodule MingaAgent.Providers.Native do
       "[Agent.Native] changeset crashed, continuing without filesystem isolation"
     )
 
-    {:noreply, %{state | changeset: nil}}
+    {:noreply, rebuild_tools(%{state | changeset: nil})}
   end
 
   def handle_info({:mcp_client_down, pid, server_name, reason}, state) when is_pid(pid) do
@@ -817,6 +829,30 @@ defmodule MingaAgent.Providers.Native do
     %{state | tools: tools, mcp_registry: registry}
   end
 
+  @spec rebuild_tools(map()) :: map()
+  defp rebuild_tools(state) do
+    base_tools =
+      Tools.all(
+        project_root: state.project_root,
+        project_view: state.project_view,
+        fork_store: state.fork_store,
+        changeset: state.changeset,
+        parent_session: state.subscriber
+      )
+
+    base_tool_names = MapSet.new(Enum.map(base_tools, & &1.name))
+    internal_tools = build_internal_tools(self())
+    internal_tool_names = MapSet.new(Enum.map(internal_tools, & &1.name))
+
+    mcp_tools =
+      Enum.reject(state.tools, fn tool ->
+        MapSet.member?(base_tool_names, tool.name) or
+          MapSet.member?(internal_tool_names, tool.name)
+      end)
+
+    %{state | tools: base_tools ++ mcp_tools ++ internal_tools}
+  end
+
   # ── Terminate cleanup ──────────────────────────────────────────────────────
 
   @spec cleanup_fork_store(pid() | nil) :: :ok
@@ -824,7 +860,7 @@ defmodule MingaAgent.Providers.Native do
 
   defp cleanup_fork_store(fs) when is_pid(fs) do
     if Process.alive?(fs) do
-      results = MingaAgent.BufferForkStore.merge_all(fs)
+      results = MingaAgent.BufferForkStore.merge_all_keep_failed(fs)
 
       Enum.each(results, fn
         {_path, :ok} ->
@@ -837,7 +873,14 @@ defmodule MingaAgent.Providers.Native do
           Minga.Log.warning(:agent, "[Agent.Native] fork merge failed for #{p}: #{inspect(r)}")
       end)
 
-      MingaAgent.BufferForkStore.stop(fs)
+      if Enum.all?(results, fn {_path, result} -> result == :ok end) do
+        MingaAgent.BufferForkStore.stop(fs)
+      else
+        Minga.Log.warning(
+          :agent,
+          "[Agent.Native] preserving failed fork drafts after merge cleanup"
+        )
+      end
     end
 
     :ok

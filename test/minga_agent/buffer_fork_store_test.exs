@@ -4,6 +4,8 @@ defmodule MingaAgent.BufferForkStoreTest do
   alias MingaAgent.BufferForkStore
   alias Minga.Buffer.Fork
 
+  @moduletag :tmp_dir
+
   setup do
     # Start a parent buffer with known content
     {:ok, parent} =
@@ -63,25 +65,113 @@ defmodule MingaAgent.BufferForkStoreTest do
   end
 
   describe "merge_all/1" do
-    test "merges dirty forks back", %{store: store, parent: parent} do
-      {:ok, fork_pid} = BufferForkStore.get_or_create(store, "/test/foo.ex", parent)
+    test "merges dirty forks back", %{tmp_dir: dir, store: store, parent: parent} do
+      path = Path.join(dir, "merge-success/lib/foo.ex")
+      File.mkdir_p!(Path.dirname(path))
+      File.write!(path, "line one\n")
+      assert :ok = Minga.Buffer.open(parent, path)
 
-      # Edit the fork
+      {:ok, fork_pid} = BufferForkStore.get_or_create(store, path, parent)
+
       Fork.replace_content(fork_pid, "modified content\n")
       assert Fork.dirty?(fork_pid)
 
       results = BufferForkStore.merge_all(store)
-      assert [{"/test/foo.ex", :ok}] = results
+      assert [{^path, :ok}] = results
 
-      # Store is empty after merge
       assert %{} == BufferForkStore.all(store)
     end
 
-    test "skips clean forks", %{store: store, parent: parent} do
-      BufferForkStore.get_or_create(store, "/test/foo.ex", parent)
+    test "skips clean forks", %{tmp_dir: dir, store: store, parent: parent} do
+      path = Path.join(dir, "merge-clean/lib/foo.ex")
+      File.mkdir_p!(Path.dirname(path))
+      File.write!(path, "line one\n")
+      assert :ok = Minga.Buffer.open(parent, path)
+
+      {:ok, _fork_pid} = BufferForkStore.get_or_create(store, path, parent)
 
       results = BufferForkStore.merge_all(store)
-      assert [{"/test/foo.ex", :ok}] = results
+      assert [{^path, :ok}] = results
+      assert %{} == BufferForkStore.all(store)
+    end
+
+    test "keeps failed forks when the parent write fails", %{
+      tmp_dir: dir,
+      store: store,
+      parent: parent
+    } do
+      path = Path.join(dir, "missing/project/lib/foo.ex")
+
+      {:ok, fork_pid} = BufferForkStore.get_or_create(store, path, parent)
+      Fork.replace_content(fork_pid, "merged\n")
+
+      results = BufferForkStore.merge_all_keep_failed(store)
+      assert [{^path, {:error, reason}}] = results
+      assert reason != nil
+      assert BufferForkStore.get(store, path) == fork_pid
+      assert %{^path => ^fork_pid} = BufferForkStore.all(store)
+    end
+
+    test "keeps failed forks when replace_content is rejected by a read-only parent",
+         %{tmp_dir: dir, store: store} do
+      failed_path = Path.join(dir, "readonly/lib/foo.ex")
+      ok_path = Path.join(dir, "merge-ok/lib/bar.ex")
+      File.mkdir_p!(Path.dirname(failed_path))
+      File.mkdir_p!(Path.dirname(ok_path))
+      File.write!(failed_path, "original\n")
+      File.write!(ok_path, "base\n")
+
+      {:ok, read_only_parent} =
+        start_supervised(
+          {Minga.Buffer.Process, content: "original\n", file_path: failed_path, read_only: true},
+          id: :read_only_parent
+        )
+
+      {:ok, ok_parent} =
+        start_supervised(
+          {Minga.Buffer.Process, content: "base\n", file_path: ok_path},
+          id: :ok_parent
+        )
+
+      {:ok, failed_fork} = BufferForkStore.get_or_create(store, failed_path, read_only_parent)
+      {:ok, ok_fork} = BufferForkStore.get_or_create(store, ok_path, ok_parent)
+
+      Fork.replace_content(failed_fork, "failed merge\n")
+      Fork.replace_content(ok_fork, "merged ok\n")
+
+      results = BufferForkStore.merge_all_keep_failed(store)
+      result_map = Map.new(results)
+
+      assert result_map[failed_path] == {:error, :read_only}
+      assert result_map[ok_path] == :ok
+      assert BufferForkStore.get(store, failed_path) == failed_fork
+      assert nil == BufferForkStore.get(store, ok_path)
+      assert File.read!(failed_path) == "original\n"
+      assert Minga.Buffer.Process.content(ok_parent) == "merged ok\n"
+    end
+
+    test "keeps failed forks when the parent process dies during merge",
+         %{tmp_dir: dir, store: store} do
+      path = Path.join(dir, "dying/lib/foo.ex")
+      File.mkdir_p!(Path.dirname(path))
+      File.write!(path, "original\n")
+
+      {:ok, parent} =
+        start_supervised({Minga.Buffer.Process, content: "original\n", file_path: path},
+          id: :dying_parent
+        )
+
+      {:ok, fork_pid} = BufferForkStore.get_or_create(store, path, parent)
+      Fork.replace_content(fork_pid, "merged\n")
+
+      Process.exit(parent, :kill)
+
+      results = BufferForkStore.merge_all_keep_failed(store)
+      result_map = Map.new(results)
+
+      assert match?({:error, _reason}, result_map[path])
+      assert BufferForkStore.get(store, path) == fork_pid
+      assert %{^path => ^fork_pid} = BufferForkStore.all(store)
     end
   end
 

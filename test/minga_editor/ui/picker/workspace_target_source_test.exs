@@ -3,6 +3,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
 
   alias Minga.Project.FileRef
   alias MingaAgent.ProjectView
+  alias MingaAgent.Test.ProjectView.FailingBackend
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
@@ -172,12 +173,60 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
       tmp_dir: root
     } do
       {state, ref, agent_a, _agent_b} = state_with_workspaces(root, agent_a_id_placeholder())
-      state = activate_workspace(state, agent_a.id, ref)
+      {:ok, view} = ProjectView.overlay(root)
+
+      state =
+        state
+        |> activate_workspace(agent_a.id, ref)
+        |> update_workspace(agent_a.id, fn workspace ->
+          Workspace.set_project_view(workspace, view)
+        end)
 
       result = WorkspaceTargetSource.on_select(transfer_item(:move, agent_a.id, 0, ref), state)
 
       refute Workspace.has_file?(workspace(result, agent_a.id), ref)
       assert Workspace.has_file?(workspace(result, 0), ref)
+    end
+
+    test "stale review metadata still prompts when live diff shows a draft", %{tmp_dir: root} do
+      {state, ref, agent_a, _agent_b} = state_with_workspaces(root)
+      {:ok, view} = ProjectView.overlay(root)
+      :ok = ProjectView.write_file(view, ref.relative_path, "draft version")
+
+      state =
+        update_workspace(state, agent_a.id, fn workspace ->
+          workspace
+          |> Workspace.set_project_view(view)
+          |> Workspace.set_review(review(:clean, []))
+        end)
+
+      result = WorkspaceTargetSource.on_select(transfer_item(:move, agent_a.id, 0, ref), state)
+
+      assert Workspace.has_file?(workspace(result, agent_a.id), ref)
+      assert workspace(result, agent_a.id).review.changed_files == [ref]
+      assert {:picker, %{picker_ui: %{source: WorkspaceTargetSource}}} = result.shell_state.modal
+
+      assert EditorState.status_msg(result) ==
+               "Drafts for auth.ex will be discarded. Continue / Promote first / Cancel."
+    end
+
+    test "blocks agent moves when live diff cannot be refreshed", %{tmp_dir: root} do
+      {state, ref, agent_a, _agent_b} = state_with_workspaces(root)
+      view = ProjectView.new(FailingBackend, root, :failing_ref, workspace_id: agent_a.id)
+
+      state =
+        update_workspace(state, agent_a.id, fn workspace ->
+          workspace
+          |> Workspace.set_project_view(view)
+          |> Workspace.set_review(review(:clean, []))
+        end)
+
+      result = WorkspaceTargetSource.on_select(transfer_item(:move, agent_a.id, 0, ref), state)
+
+      assert Workspace.has_file?(workspace(result, agent_a.id), ref)
+      assert Workspace.has_file?(workspace(result, 0), ref)
+      assert workspace(result, agent_a.id).review.changed_files == []
+      assert EditorState.status_msg(result) == "Workspace move failed: :diff_failed"
     end
 
     test "blocks agent to agent moves", %{tmp_dir: root} do
@@ -196,11 +245,17 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
 
     test "draft moves open confirmation before changing state", %{tmp_dir: root} do
       {state, ref, agent_a, _agent_b} = state_with_workspaces(root)
+      {:ok, view} = ProjectView.overlay(root)
+      :ok = ProjectView.write_file(view, ref.relative_path, "draft version")
 
       state =
         state
         |> activate_workspace(agent_a.id, ref)
-        |> update_workspace(agent_a.id, &Workspace.set_review(&1, review(:needs_review, [ref])))
+        |> update_workspace(agent_a.id, fn workspace ->
+          workspace
+          |> Workspace.set_project_view(view)
+          |> Workspace.set_review(review(:needs_review, [ref]))
+        end)
 
       result = WorkspaceTargetSource.on_select(transfer_item(:move, agent_a.id, 0, ref), state)
 
@@ -237,11 +292,196 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
       assert EditorState.status_msg(result) == "Cancelled"
     end
 
-    test "promote first records conflicts without moving", %{tmp_dir: root} do
+    test "promote first moves the file after a successful promote", %{tmp_dir: root} do
+      {state, ref, agent_a, _agent_b} = state_with_workspaces(root)
+      {:ok, view} = ProjectView.overlay(root)
+      :ok = ProjectView.write_file(view, ref.relative_path, "agent version")
+      changeset_ref = Process.monitor(view.ref.changeset)
+
+      state =
+        state
+        |> update_workspace(agent_a.id, fn workspace ->
+          workspace
+          |> Workspace.set_project_view(view)
+          |> Workspace.set_review(review(:needs_review, [ref]))
+        end)
+        |> update_workspace(0, &Workspace.remove_file(&1, ref))
+
+      result =
+        WorkspaceTargetSource.on_select(
+          %Item{
+            id:
+              {:confirm, :promote_first,
+               %{
+                 operation: :move,
+                 source_workspace_id: agent_a.id,
+                 destination_workspace_id: 0,
+                 file_ref: ref
+               }},
+            label: "Promote first"
+          },
+          state
+        )
+
+      assert_receive {:DOWN, ^changeset_ref, :process, _, :normal}
+      refute Workspace.has_file?(workspace(result, agent_a.id), ref)
+      assert Workspace.has_file?(workspace(result, 0), ref)
+      assert workspace(result, agent_a.id).review.state == :clean
+      assert File.read!(Path.join(root, ref.relative_path)) == "agent version"
+
+      assert EditorState.status_msg(result) ==
+               "Moved `auth.ex` to `#{workspace(result, 0).label}`"
+    end
+
+    test "promote first keeps the file in the source workspace when promote conflicts", %{
+      tmp_dir: root
+    } do
       {state, ref, agent_a, _agent_b} = state_with_workspaces(root)
       {:ok, view} = ProjectView.overlay(root)
       :ok = ProjectView.write_file(view, ref.relative_path, "agent version")
       File.write!(Path.join(root, ref.relative_path), "human version")
+
+      state =
+        state
+        |> update_workspace(agent_a.id, fn workspace ->
+          workspace
+          |> Workspace.set_project_view(view)
+          |> Workspace.set_review(review(:needs_review, [ref]))
+        end)
+        |> update_workspace(0, &Workspace.remove_file(&1, ref))
+
+      result =
+        WorkspaceTargetSource.on_select(
+          %Item{
+            id:
+              {:confirm, :promote_first,
+               %{
+                 operation: :move,
+                 source_workspace_id: agent_a.id,
+                 destination_workspace_id: 0,
+                 file_ref: ref
+               }},
+            label: "Promote first"
+          },
+          state
+        )
+
+      assert Workspace.has_file?(workspace(result, agent_a.id), ref)
+      refute Workspace.has_file?(workspace(result, 0), ref)
+
+      review = workspace(result, agent_a.id).review
+      assert review.state == :conflict
+      assert review.changed_files == [ref]
+      assert review.conflict_files == [ref]
+      assert EditorState.status_msg(result) =~ "Workspace promote found conflicts"
+      refute EditorState.status_msg(result) =~ "Moved `auth.ex`"
+    end
+
+    test "continue reports a missing project view instead of silently moving", %{tmp_dir: root} do
+      {state, file_ref, agent_a, _agent_b} = state_with_workspaces(root)
+
+      state =
+        update_workspace(state, agent_a.id, fn workspace ->
+          workspace
+          |> Workspace.set_review(review(:needs_review, [file_ref]))
+        end)
+
+      result =
+        WorkspaceTargetSource.on_select(
+          %Item{
+            id:
+              {:confirm, :continue,
+               %{
+                 operation: :move,
+                 source_workspace_id: agent_a.id,
+                 destination_workspace_id: 0,
+                 file_ref: file_ref
+               }},
+            label: "Continue"
+          },
+          state
+        )
+
+      assert Workspace.has_file?(workspace(result, agent_a.id), file_ref)
+      assert workspace(result, agent_a.id).review.changed_files == [file_ref]
+      assert EditorState.status_msg(result) == "Workspace move failed: missing project view"
+    end
+
+    test "continue reports a dead project view instead of crashing", %{tmp_dir: root} do
+      {state, file_ref, agent_a, _agent_b} = state_with_workspaces(root)
+      {:ok, view} = ProjectView.overlay(root)
+      :ok = ProjectView.write_file(view, file_ref.relative_path, "draft")
+      monitor_ref = Process.monitor(view.ref.changeset)
+      Process.exit(view.ref.changeset, :kill)
+      assert_receive {:DOWN, ^monitor_ref, :process, _, _}
+
+      state =
+        update_workspace(state, agent_a.id, fn workspace ->
+          workspace
+          |> Workspace.set_project_view(view)
+          |> Workspace.set_review(review(:needs_review, [file_ref]))
+        end)
+
+      result =
+        WorkspaceTargetSource.on_select(
+          %Item{
+            id:
+              {:confirm, :continue,
+               %{
+                 operation: :move,
+                 source_workspace_id: agent_a.id,
+                 destination_workspace_id: 0,
+                 file_ref: file_ref
+               }},
+            label: "Continue"
+          },
+          state
+        )
+
+      assert Workspace.has_file?(workspace(result, agent_a.id), file_ref)
+      assert workspace(result, agent_a.id).review.changed_files == [file_ref]
+      assert EditorState.status_msg(result) =~ "Workspace move failed"
+    end
+
+    test "promote first reports a dead project view instead of crashing", %{tmp_dir: root} do
+      {state, file_ref, agent_a, _agent_b} = state_with_workspaces(root)
+      {:ok, view} = ProjectView.overlay(root)
+      :ok = ProjectView.write_file(view, file_ref.relative_path, "draft")
+      monitor_ref = Process.monitor(view.ref.changeset)
+      Process.exit(view.ref.changeset, :kill)
+      assert_receive {:DOWN, ^monitor_ref, :process, _, _}
+
+      state =
+        update_workspace(state, agent_a.id, fn workspace ->
+          workspace
+          |> Workspace.set_project_view(view)
+          |> Workspace.set_review(review(:needs_review, [file_ref]))
+        end)
+
+      result =
+        WorkspaceTargetSource.on_select(
+          %Item{
+            id:
+              {:confirm, :promote_first,
+               %{
+                 operation: :move,
+                 source_workspace_id: agent_a.id,
+                 destination_workspace_id: 0,
+                 file_ref: file_ref
+               }},
+            label: "Promote first"
+          },
+          state
+        )
+
+      assert Workspace.has_file?(workspace(result, agent_a.id), file_ref)
+      assert workspace(result, agent_a.id).review.changed_files == [file_ref]
+      assert EditorState.status_msg(result) =~ "Workspace promote failed"
+    end
+
+    test "promote first reports diff errors instead of hiding them", %{tmp_dir: root} do
+      {state, ref, agent_a, _agent_b} = state_with_workspaces(root)
+      view = ProjectView.new(FailingBackend, root, :failing_ref, workspace_id: agent_a.id)
 
       state =
         update_workspace(state, agent_a.id, fn workspace ->
@@ -267,9 +507,8 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSourceTest do
         )
 
       assert Workspace.has_file?(workspace(result, agent_a.id), ref)
-      assert workspace(result, agent_a.id).review.state == :conflict
-      assert workspace(result, agent_a.id).review.conflict_files == [ref]
-      assert EditorState.status_msg(result) =~ "Workspace promote found conflicts"
+      assert workspace(result, agent_a.id).review.state == :needs_review
+      assert EditorState.status_msg(result) == "Workspace promote failed: :diff_failed"
     end
 
     test "continue after draft confirmation discards the file draft and moves", %{tmp_dir: root} do

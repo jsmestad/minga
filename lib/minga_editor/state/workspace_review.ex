@@ -30,10 +30,10 @@ defmodule MingaEditor.State.WorkspaceReview do
   @spec new() :: t()
   def new, do: %__MODULE__{state: :clean}
 
-  @doc "Returns true when the review has unapplied drafts or conflicts."
+  @doc "Returns true when the review has unapplied drafts, conflicts, or a recorded error."
   @spec pending?(t()) :: boolean()
-  def pending?(%__MODULE__{changed_files: changed, conflict_files: conflicts}) do
-    changed != [] or conflicts != []
+  def pending?(%__MODULE__{changed_files: changed, conflict_files: conflicts, last_error: error}) do
+    changed != [] or conflicts != [] or not is_nil(error)
   end
 
   @doc "Returns the number of changed draft files."
@@ -59,6 +59,19 @@ defmodule MingaEditor.State.WorkspaceReview do
         changed_files: [],
         conflict_files: [],
         last_error: nil,
+        in_progress?: false
+    }
+  end
+
+  @doc "Marks the workspace as needing review, optionally recording an error."
+  @spec mark_needs_review(t(), [FileRef.t()], error() | nil) :: t()
+  def mark_needs_review(%__MODULE__{} = review, files, error \\ nil) when is_list(files) do
+    %{
+      review
+      | state: :needs_review,
+        changed_files: files,
+        conflict_files: [],
+        last_error: error,
         in_progress?: false
     }
   end

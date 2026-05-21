@@ -6,6 +6,7 @@ defmodule MingaEditor.State.Workspace do
   """
 
   alias Minga.Project.FileRef
+  alias MingaAgent.ProjectView
   alias MingaEditor.State.Workspace.Persistence
   alias MingaEditor.State.WorkspaceReview
 
@@ -31,7 +32,7 @@ defmodule MingaEditor.State.Workspace do
           files: [FileRef.t()],
           active_file: FileRef.t() | nil,
           agent_ui: term() | nil,
-          project_view: term() | nil,
+          project_view: ProjectView.t() | nil,
           review: WorkspaceReview.t(),
           project_root: String.t() | nil
         }
@@ -89,9 +90,28 @@ defmodule MingaEditor.State.Workspace do
   end
 
   @doc "Sets the ProjectView owned by the workspace."
-  @spec set_project_view(t(), term() | nil) :: t()
+  @spec set_project_view(t(), ProjectView.t() | nil) :: t()
   def set_project_view(%__MODULE__{} = workspace, project_view) do
     %{workspace | project_view: project_view}
+  end
+
+  @doc "Releases the workspace's owned ProjectView resources, if any."
+  @spec close_project_view(t()) :: :ok | {:error, term()}
+  def close_project_view(%__MODULE__{project_view: %ProjectView{} = project_view}),
+    do: ProjectView.close(project_view)
+
+  def close_project_view(%__MODULE__{}), do: :ok
+
+  @doc "Sets the agent session on the workspace."
+  @spec set_session(t(), pid() | nil) :: t()
+  def set_session(%__MODULE__{} = workspace, session) when is_pid(session) or is_nil(session) do
+    %{workspace | session: session}
+  end
+
+  @doc "Detaches the current agent session from the workspace."
+  @spec detach_session(t()) :: t()
+  def detach_session(%__MODULE__{} = workspace) do
+    set_session(workspace, nil)
   end
 
   @doc "Returns a copy scoped to a project root for persistence."
