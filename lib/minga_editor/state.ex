@@ -1501,10 +1501,24 @@ defmodule MingaEditor.State do
         _ -> UIState.new()
       end
 
+    agent_ui = maybe_activate_synced_agent_ui(state, agent_ui)
+
     update_workspace(state, &WorkspaceState.set_agent_ui(&1, agent_ui))
   end
 
   def sync_agent_ui_from_active_workspace(state), do: state
+
+  @spec maybe_activate_synced_agent_ui(t(), UIState.t()) :: UIState.t()
+  defp maybe_activate_synced_agent_ui(
+         %__MODULE__{workspace: %{keymap_scope: :agent} = workspace},
+         agent_ui
+       ) do
+    UIState.activate(agent_ui, workspace.windows, workspace.file_tree)
+  end
+
+  defp maybe_activate_synced_agent_ui(%__MODULE__{}, agent_ui) do
+    agent_ui
+  end
 
   @spec active_tab(t()) :: Tab.t() | nil
   def active_tab(%__MODULE__{} = state), do: state.shell.active_tab(state.shell_state)
