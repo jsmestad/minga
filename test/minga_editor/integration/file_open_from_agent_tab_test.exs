@@ -112,11 +112,11 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
 
       open_file_and_wait(ctx, file_path)
 
-      wait_until_screen(ctx, fn -> String.contains?(screen_row(ctx, 0), ".credo.exs") end,
+      wait_until_screen(ctx, fn -> String.contains?(screen_row(ctx, 1), ".credo.exs") end,
         message: "Expected opened file tab to become visible"
       )
 
-      assert String.contains?(screen_row(ctx, 0), ".credo.exs")
+      assert String.contains?(screen_row(ctx, 1), ".credo.exs")
       assert screen_contains?(ctx, "configs = [:editor]")
       assert_modeline_contains(ctx, "NORMAL")
       refute String.contains?(modeline(ctx), "Prompt")

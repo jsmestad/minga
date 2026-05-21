@@ -120,6 +120,7 @@ defmodule MingaAgent.ProjectViewTest do
                List.keyfind(ProjectView.command_env(view), "MIX_BUILD_PATH", 0)
 
       assert %{isolation: :overlay, mutates_project_root: false} = ProjectView.capabilities(view)
+      assert {:ok, []} = ProjectView.diff(view)
 
       assert {:ok, "one\n"} = ProjectView.read_file(view, "lib/a.txt")
       assert :ok = ProjectView.write_file(view, "lib/new.txt", "new")
@@ -376,6 +377,19 @@ defmodule MingaAgent.ProjectViewTest do
       assert BufferForkStore.all(store) == %{}
       assert "one\n" = Minga.Buffer.content(parent)
       refute_receive {:DOWN, ^store_ref, :process, ^store, _}
+    end
+  end
+
+  describe "overlay liveness" do
+    test "active?/1 returns false after the overlay backend process exits", %{tmp_dir: dir} do
+      seed_project(dir)
+      {:ok, view} = ProjectView.overlay(dir)
+      changeset = view.ref.changeset
+      ref = Process.monitor(changeset)
+
+      Process.exit(changeset, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^changeset, _reason}
+      refute ProjectView.active?(view)
     end
   end
 

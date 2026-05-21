@@ -13,6 +13,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.Helpers do
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Shell.Traditional.TabBarRenderer
+  alias MingaEditor.Shell.Traditional.WorkspaceRowRenderer
   alias MingaEditor.Session.ChromeState
   alias MingaEditor.Viewport
   alias MingaEditor.WindowTree
@@ -30,7 +31,9 @@ defmodule MingaEditor.Shell.Traditional.Chrome.Helpers do
   def render_tab_bar(_state, %{shell_state: %{tab_bar: nil}}), do: {[], []}
 
   def render_tab_bar(state, layout) do
-    {tab_row, _col, tab_width, _h} = layout.tab_bar
+    {top_row, _col, tab_width, height} = layout.tab_bar
+    tab_row = top_row + height - 1
+    workspace_row = if height > 1, do: top_row, else: nil
 
     hover_col =
       case state.workspace.mouse.hover_pos do
@@ -39,7 +42,22 @@ defmodule MingaEditor.Shell.Traditional.Chrome.Helpers do
       end
 
     chrome_state = ChromeState.from_editor_state(state)
-    TabBarRenderer.render_chrome_state(tab_row, tab_width, chrome_state, state.theme, hover_col)
+
+    {workspace_draws, workspace_regions} =
+      render_workspace_row(workspace_row, tab_width, chrome_state, state.theme)
+
+    {tab_draws, tab_regions} =
+      TabBarRenderer.render_chrome_state(tab_row, tab_width, chrome_state, state.theme, hover_col)
+
+    {workspace_draws ++ tab_draws, workspace_regions ++ tab_regions}
+  end
+
+  @spec render_workspace_row(non_neg_integer() | nil, pos_integer(), ChromeState.t(), Theme.t()) ::
+          {[DisplayList.draw()], [WorkspaceRowRenderer.click_region()]}
+  defp render_workspace_row(nil, _tab_width, _chrome_state, _theme), do: {[], []}
+
+  defp render_workspace_row(row, tab_width, chrome_state, theme) do
+    WorkspaceRowRenderer.render(row, tab_width, chrome_state, theme)
   end
 
   # ── Separators ─────────────────────────────────────────────────────────────

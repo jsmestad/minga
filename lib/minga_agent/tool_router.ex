@@ -135,10 +135,12 @@ defmodule MingaAgent.ToolRouter do
   end
 
   @doc """
-  Deletes a file, routing through changeset if active.
+  Deletes a file, refusing to remove an open buffered file.
 
-  Buffer forks don't support deletion (you can't delete an open buffer
-  through a fork). Falls through to changeset or passthrough.
+  No safe buffer-aware deletion route exists yet, so deleting a file that
+  is open in a live buffer would leave that buffer stale and able to
+  recreate the file later. ProjectView, changeset, and direct fallback all
+  share that guard.
   """
   @spec delete_file(context(), String.t()) :: :ok | :passthrough | {:error, term()}
   def delete_file(%Context{project_view: %ProjectView{} = view}, path) do
@@ -154,7 +156,7 @@ defmodule MingaAgent.ToolRouter do
     end
   end
 
-  def delete_file(_ctx, _path), do: :passthrough
+  defp delete_file_unchecked(_ctx, _path), do: :passthrough
 
   @doc """
   Lists a directory through ProjectView when available.
@@ -167,7 +169,7 @@ defmodule MingaAgent.ToolRouter do
     end)
   end
 
-  def list_directory(%Context{}, _path), do: :passthrough
+  def list_directory(%Context{} = _ctx, _path), do: :passthrough
 
   @doc "Returns the filesystem path corresponding to `path` in the routed view."
   @spec filesystem_path(context(), String.t()) :: String.t()
@@ -178,7 +180,7 @@ defmodule MingaAgent.ToolRouter do
     end
   end
 
-  def filesystem_path(%Context{}, path), do: path
+  def filesystem_path(%Context{} = _ctx, path), do: path
 
   @doc "Returns the working directory for shell commands."
   @spec working_dir(context()) :: String.t() | nil
@@ -267,14 +269,20 @@ defmodule MingaAgent.ToolRouter do
 
   @doc "Returns true when the context includes a ProjectView."
   @spec project_view?(context()) :: boolean()
-  def project_view?(%Context{project_view: %ProjectView{}}), do: true
-  def project_view?(%Context{}), do: false
+  def project_view?(%Context{} = ctx), do: live_project_view(ctx) != nil
+
+  @doc "Returns true when the context was configured with a ProjectView, even if its backend is dead."
+  @spec project_view_configured?(context()) :: boolean()
+  def project_view_configured?(%Context{project_view: %ProjectView{}}), do: true
+  def project_view_configured?(%Context{}), do: false
 
   @doc "Returns a short label for routed workspace output."
   @spec workspace_label(context()) :: String.t() | nil
-  def workspace_label(%Context{project_view: %ProjectView{} = view}) do
-    workspace =
-      if view.workspace_id == nil, do: "unbound", else: Integer.to_string(view.workspace_id)
+  def workspace_label(%Context{} = ctx) do
+    case live_project_view(ctx) do
+      %ProjectView{} = view ->
+        workspace =
+          if view.workspace_id == nil, do: "unbound", else: Integer.to_string(view.workspace_id)
 
     cwd =
       try do
@@ -289,17 +297,25 @@ defmodule MingaAgent.ToolRouter do
     "ProjectView workspace #{workspace} cwd=#{cwd}"
   end
 
-  def workspace_label(%Context{}), do: nil
-
   @doc "Returns true if any routing is active."
   @spec active?(context()) :: boolean()
-  def active?(%Context{project_view: %ProjectView{}}), do: true
-
-  def active?(%Context{fork_store: fs, changeset: cs}) do
-    (fs != nil and Process.alive?(fs)) or (cs != nil and Process.alive?(cs))
+  def active?(%Context{} = ctx) do
+    live_project_view(ctx) != nil or active_forks_or_changeset?(ctx)
   end
 
-  def active?(_), do: false
+  @spec live_project_view(context()) :: ProjectView.t() | nil
+  defp live_project_view(%Context{project_view: %ProjectView{} = view}) do
+    if ProjectView.active?(view), do: view, else: nil
+  catch
+    :exit, _ -> nil
+  end
+
+  defp live_project_view(%Context{}), do: nil
+
+  @spec active_forks_or_changeset?(context()) :: boolean()
+  defp active_forks_or_changeset?(%Context{fork_store: fs, changeset: cs}) do
+    (fs != nil and Process.alive?(fs)) or (cs != nil and Process.alive?(cs))
+  end
 
   @doc "Returns true if the context has any routing configured, even if it is currently dead."
   @spec routing_configured?(context()) :: boolean()

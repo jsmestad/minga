@@ -133,7 +133,7 @@ Frontends should apply this only to the current file-tree model. If no full `gui
 
 Visible file tabs for the active workspace.
 
-Only file tabs from the active workspace are sent here. Agent tabs and tabs from inactive workspaces are omitted; native GUI frontends use gui_workspaces (0x86) to render inactive workspace capsules and workspace switching UI.
+Only file tabs from the active workspace are sent here. Agent tabs and tabs from inactive workspaces are omitted; native GUI frontends use gui_workspaces (0x98) to render inactive workspace capsules and workspace switching UI.
 
 ```
 opcode(1) + active_index(1) + tab_count(1) + entries...
@@ -148,7 +148,7 @@ Flags bits:
   bit 3: has_attention
   bits 4-6: agent_status (0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan)
 
-group_id: workspace id this tab belongs to. 0 = manual workspace. Non-zero values match workspace IDs from gui_workspaces (0x86). Frontends use this to keep file open/close/navigation scoped to the active workspace while rendering inactive workspace capsules from gui_workspaces.
+group_id: workspace id this tab belongs to. 0 = manual workspace. Non-zero values match workspace IDs from gui_workspaces (0x98). Frontends use this to keep file open/close/navigation scoped to the active workspace while rendering inactive workspace capsules from gui_workspaces.
 
 active_index: zero-based index into the visible tab entries, or 255 when the current active tab is not present in the visible list (for example, an active agent chat tab with only its workspace's file tabs shown).
 ```
@@ -248,6 +248,7 @@ opcode(1) + section_count(1) + [section_id(1) + section_len(2) + payload(section
 | 0x0A | Indent | indent_type(1: 0=spaces, 1=tabs) + indent_size(1) |
 | 0x0B | ModelineSegments | version(1, currently 2) + left_count(2) + right_count(2) + left segments + right segments. Each v2 segment is name_len(1) + name + fg(3) + bg(3) + attrs(1) + text_len(2) + text + command_len(2) + command. |
 | 0x0C | Selection | selection_mode(1: 0=none, 1=chars, 2=lines) + selection_size(4) |
+| 0x0D | Workspace | id(2) + kind(1) + status(1) + flags(2) + draft_count(2) + conflict_count(2) + background_count(2) + attention_count(2) + label_len(1) + label + icon_len(1) + icon |
 
 `content_kind`: 0 = buffer window, 1 = agent chat window. When `content_kind == 1`, the standard sections (cursor, git, diagnostics, etc.) contain background buffer data and section 0x09 includes agent-specific fields. `background_count` is the number of currently running background sub-agents. `background_label` is the active background child label when focused, otherwise the first running child label.
 
@@ -262,6 +263,8 @@ LSP status: 0=none, 1=ready, 2=initializing, 3=starting, 4=error
 Parser status: 0=available, 1=unavailable, 2=restarting
 
 Agent status: 0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan
+
+Workspace kind: 0=manual, 1=agent. Workspace status uses the same values as agent status. Workspace flags: bit 0=attention, bit 1=closeable.
 
 Session status (agent variant): 0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan
 
@@ -764,27 +767,31 @@ Toast when toast_present == 1:
 
 When the git status panel is closed, the BEAM sends `repo_state = not_a_repo`, no entries, and an empty `entry_base_path` as the hide signal. A non-git project opened in the Source Control tab also uses `repo_state = not_a_repo`, but includes the project root so the frontend can show the native "Not a git repository" empty state instead of hiding the panel. The frontend should still copy `syncing` and `toast` so remote operation feedback remains accurate while the panel is hidden.
 
-### 0x86 — gui_workspaces
+### 0x98 — gui_workspaces
 
-Agent-workspace indicator and dropdown data for progressive tab grouping. Sent alongside gui_tab_bar when agent workspaces exist.
-
-This is the legacy agent-group opcode. The BEAM-side `Session.ChromeState` projection includes the synthesized manual workspace, but this opcode sends only agent workspaces so existing native decoders do not infer a manual workspace from the agent-group payload. A later canonical workspace opcode can carry manual-vs-agent kind explicitly.
+Canonical workspace state for native frontends. This is the source of truth for workspace headers, active-workspace file tabs, badges, and workspace view mode. The old agent-group payload is gone; frontends should not infer workspace state from tab order or legacy agent-only lists.
 
 ```
-opcode(1) + active_workspace_id(2) + agent_workspace_count(1) + agent_workspaces...
+opcode(1) + payload_len(2) + payload(payload_len)
 
-Per agent workspace:
-  id(2) + agent_status(1) + color_r(1) + color_g(1) + color_b(1)
-  + tab_count(2) + label_len(1) + label(label_len) + icon_len(1) + icon(icon_len)
+Payload:
+  version(1) + active_workspace_id(2) + mode(1) + flags(1) + workspace_count(1)
+  + workspaces... + visible_tab_count(2) + visible_tabs...
 
-agent_status: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan
-color: 24-bit sRGB accent color for group separators and workspace indicator
-tab_count: number of tabs currently in this agent workspace
+Per workspace:
+  id(2) + kind(1) + status(1) + flags(2) + color_r(1) + color_g(1) + color_b(1)
+  + tab_count(2) + draft_count(2) + conflict_count(2) + running_background_count(2)
+  + label_len(1) + label(label_len) + icon_len(1) + icon(icon_len)
+
+Per visible tab:
+  id(4) + workspace_id(2) + kind(1) + flags(2) + path_hash(4)
+  + icon_len(1) + icon(icon_len) + label_len(2) + label(label_len)
+  + path_len(2) + path(path_len)
 ```
 
-There is no kind byte in the payload. The implicit manual workspace is represented by `active_workspace_id = 0` and `group_id = 0` file tabs in gui_tab_bar; the emitted workspace list contains only agent workspaces created by agents. The icon fields carry the workspace icon name, and the BEAM currently falls back to `cpu` when no icon is set.
+`version` is currently 1. `mode`: 0 = editor, 1 = agent, 2 = file_tree, 3 = other. Workspace `kind`: 0 = manual, 1 = agent. Visible tab `kind`: 0 = file. `status`: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan. Workspace flags: bit 0 = attention, bit 1 = closeable. Visible tab flags: bit 0 = dirty, bit 1 = attention, bit 2 = draft, bit 3 = draft_elsewhere, bit 4 = conflict.
 
-The frontend uses `active_workspace_id` to highlight the active agent workspace in the indicator/dropdown. Inactive workspace capsules in the tab strip should be rendered from this agent-workspace list, not from gui_tab_bar entries. Tab entries in gui_tab_bar carry a `group_id` field that matches workspace IDs, enabling the frontend to render group separators for the active workspace projection.
+The workspace list includes the manual project workspace and all agent workspaces. The visible tab list includes only file tabs for the active workspace. Agent view remains a workspace zoom surface, so it is not encoded as a normal file tab.
 
 ## GUI Action Input Opcode (Frontend → BEAM)
 

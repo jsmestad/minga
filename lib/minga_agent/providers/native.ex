@@ -50,6 +50,7 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.MCP.Registry, as: MCPRegistry
   alias MingaAgent.MCP.ServerConfig, as: MCPServerConfig
   alias MingaAgent.Memory
+  alias MingaAgent.ProjectView
   alias MingaAgent.ModelCatalog
   alias MingaAgent.ModelLimits
   alias MingaAgent.ProjectView
@@ -85,6 +86,7 @@ defmodule MingaAgent.Providers.Native do
       :model,
       :config,
       :tools,
+      :project_root,
       :thinking_level,
       :max_tokens,
       :max_retries,
@@ -98,6 +100,7 @@ defmodule MingaAgent.Providers.Native do
       :model,
       :config,
       :tools,
+      :project_root,
       :thinking_level,
       :max_tokens,
       :max_retries,
@@ -115,6 +118,7 @@ defmodule MingaAgent.Providers.Native do
             model: String.t(),
             config: MingaAgent.Config.t(),
             tools: [term()],
+            project_root: String.t(),
             thinking_level: String.t(),
             max_tokens: pos_integer(),
             max_retries: non_neg_integer(),
@@ -163,6 +167,11 @@ defmodule MingaAgent.Providers.Native do
           session_cost: float(),
           fork_store: pid() | nil,
           changeset: pid() | nil,
+          project_view: ProjectView.t() | nil,
+          base_tools: [term()],
+          mcp_tools: [term()],
+          internal_tools: [term()],
+          custom_tools?: boolean(),
           mcp_registry: MCPRegistry.t() | nil
         }
 
@@ -241,6 +250,12 @@ defmodule MingaAgent.Providers.Native do
     GenServer.call(pid, :continue)
   end
 
+  @doc "Refreshes the project view and rebuilds file tools around the new overlay."
+  @spec refresh_project_view(GenServer.server(), ProjectView.t() | nil) :: :ok | {:error, term()}
+  def refresh_project_view(pid, project_view) do
+    GenServer.call(pid, {:refresh_project_view, project_view})
+  end
+
   # ── GenServer callbacks ─────────────────────────────────────────────────────
 
   @impl GenServer
@@ -305,6 +320,7 @@ defmodule MingaAgent.Providers.Native do
           parent_session: subscriber
         )
 
+    custom_tools? = Keyword.has_key?(opts, :tools)
     active_skills = load_active_skills(project_root, Keyword.get(opts, :active_skill_names, []))
     internal_tools = build_internal_tools(provider_pid)
     reserved_tool_names = Enum.map(base_tools ++ internal_tools, & &1.name)
@@ -345,6 +361,11 @@ defmodule MingaAgent.Providers.Native do
       session_cost: 0.0,
       fork_store: fork_store,
       changeset: changeset,
+      project_view: project_view,
+      base_tools: base_tools,
+      mcp_tools: mcp_tools,
+      internal_tools: internal_tools,
+      custom_tools?: custom_tools?,
       mcp_registry: mcp_registry
     }
 
@@ -389,6 +410,7 @@ defmodule MingaAgent.Providers.Native do
         model: state.model,
         config: state.config,
         tools: state.tools,
+        project_root: state.project_root,
         thinking_level: state.thinking_level,
         max_tokens: state.max_tokens,
         max_retries: state.max_retries,
@@ -449,6 +471,7 @@ defmodule MingaAgent.Providers.Native do
       model: state.model,
       config: state.config,
       tools: state.tools,
+      project_root: state.project_root,
       thinking_level: state.thinking_level,
       max_tokens: state.max_tokens,
       max_retries: state.max_retries,
@@ -638,6 +661,12 @@ defmodule MingaAgent.Providers.Native do
   def handle_call({:set_model, model}, _from, state) do
     Minga.Log.info(:agent, "[Agent.Native] model set to #{model}")
     {:reply, :ok, %{state | model: model}}
+  end
+
+  def handle_call({:refresh_project_view, project_view}, _from, state) do
+    base_tools = refresh_base_tools(state, project_view)
+    tools = base_tools ++ state.mcp_tools ++ state.internal_tools
+    {:reply, :ok, %{state | project_view: project_view, base_tools: base_tools, tools: tools}}
   end
 
   def handle_call({:update_internal_state, fun}, _from, state) when is_function(fun, 1) do
@@ -1145,16 +1174,7 @@ defmodule MingaAgent.Providers.Native do
     assistant_msg = Context.assistant(text, tool_calls: reqllm_tool_calls)
     context = Context.append(context, assistant_msg)
 
-    context =
-      execute_tools(
-        lctx.provider_pid,
-        lctx.session_pid,
-        context,
-        tool_calls,
-        lctx.tools,
-        lctx.config,
-        lctx.hook_runner
-      )
+    context = execute_tools(lctx, context, tool_calls, lctx.tools)
 
     # Inject any steering messages queued by the user while tools were executing.
     context = inject_steering_messages(lctx, context)
@@ -1203,44 +1223,27 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  @spec execute_tools(
-          pid(),
-          pid() | nil,
-          Context.t(),
-          [map()],
-          [ReqLLM.Tool.t()],
-          AgentConfig.t(),
-          hook_runner()
-        ) ::
-          Context.t()
-  defp execute_tools(
-         provider_pid,
-         session_pid,
-         context,
-         tool_calls,
-         available_tools,
-         config,
-         hook_runner
-       ) do
-    initial_mode = approval_mode(config)
+  @spec execute_tools(loop_ctx(), Context.t(), [map()], [ReqLLM.Tool.t()]) :: Context.t()
+  defp execute_tools(lctx, context, tool_calls, available_tools) do
+    initial_mode = approval_mode(lctx.config)
 
     {final_ctx, _mode} =
       Enum.reduce(tool_calls, {context, initial_mode}, fn tool_call, {ctx, approval_mode} ->
-        before_content = capture_file_before(tool_call)
+        before_content = capture_file_before(tool_call, lctx.project_root)
 
         {result_text, is_error, new_mode} =
           execute_with_approval(
-            provider_pid,
-            session_pid,
+            lctx.provider_pid,
+            lctx.session_pid,
             tool_call,
             available_tools,
             approval_mode,
-            config,
-            hook_runner
+            lctx.config,
+            lctx.hook_runner
           )
 
         send(
-          provider_pid,
+          lctx.provider_pid,
           {:agent_event,
            %Event.ToolEnd{
              tool_call_id: tool_call.id,
@@ -1250,8 +1253,15 @@ defmodule MingaAgent.Providers.Native do
            }}
         )
 
-        dispatch_post_tool_use(tool_call, result_text, is_error, config)
-        maybe_emit_file_changed(provider_pid, tool_call, before_content, is_error)
+        dispatch_post_tool_use(tool_call, result_text, is_error, lctx.config)
+
+        maybe_emit_file_changed(
+          lctx.provider_pid,
+          tool_call,
+          before_content,
+          is_error,
+          lctx.project_root
+        )
 
         meta = if is_error, do: %{is_error: true}, else: %{}
 
@@ -1508,26 +1518,68 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  @file_tools ~w(edit_file multi_edit_file write_file)
+  @file_tools ~w(edit_file multi_edit_file write_file delete_file)
 
-  @spec capture_file_before(map()) :: String.t() | nil
-  defp capture_file_before(%{name: name, arguments: %{"path" => path}})
+  @spec capture_file_before(map(), String.t()) :: String.t() | nil
+  defp capture_file_before(%{name: name, arguments: %{"path" => path}}, project_root)
        when name in @file_tools do
-    case File.read(path) do
+    resolved_path = resolved_tool_path(project_root, path)
+
+    case File.read(resolved_path) do
       {:ok, content} -> content
       {:error, _} -> nil
     end
   end
 
-  defp capture_file_before(_tool_call), do: nil
+  defp capture_file_before(_tool_call, _project_root), do: nil
 
-  @spec maybe_emit_file_changed(pid(), map(), String.t() | nil, boolean()) :: :ok
-  defp maybe_emit_file_changed(provider_pid, tool_call, before_content, false = _is_error)
+  @spec maybe_emit_file_changed(pid(), map(), String.t() | nil, boolean(), String.t()) :: :ok
+  defp maybe_emit_file_changed(
+         provider_pid,
+         %{name: "delete_file", arguments: %{"path" => path}} = tool_call,
+         before_content,
+         false,
+         project_root
+       )
        when is_binary(before_content) do
-    path = tool_call.arguments["path"]
+    resolved_path = resolved_tool_path(project_root, path)
 
     after_content =
-      case File.read(path) do
+      case File.read(resolved_path) do
+        {:ok, content} -> content
+        {:error, :enoent} -> ""
+        {:error, _} -> nil
+      end
+
+    if is_binary(after_content) and after_content != before_content do
+      send(
+        provider_pid,
+        {:agent_event,
+         %Event.ToolFileChanged{
+           tool_call_id: tool_call.id,
+           path: resolved_path,
+           before_content: before_content,
+           after_content: after_content
+         }}
+      )
+    end
+
+    :ok
+  end
+
+  defp maybe_emit_file_changed(
+         provider_pid,
+         tool_call,
+         before_content,
+         false = _is_error,
+         project_root
+       )
+       when is_binary(before_content) and tool_call.name in @file_tools do
+    path = tool_call.arguments["path"]
+    resolved_path = resolved_tool_path(project_root, path)
+
+    after_content =
+      case File.read(resolved_path) do
         {:ok, content} -> content
         {:error, _} -> nil
       end
@@ -1538,7 +1590,7 @@ defmodule MingaAgent.Providers.Native do
         {:agent_event,
          %Event.ToolFileChanged{
            tool_call_id: tool_call.id,
-           path: path,
+           path: resolved_path,
            before_content: before_content,
            after_content: after_content
          }}
@@ -1548,7 +1600,17 @@ defmodule MingaAgent.Providers.Native do
     :ok
   end
 
-  defp maybe_emit_file_changed(_provider_pid, _tool_call, _before_content, _is_error), do: :ok
+  defp maybe_emit_file_changed(
+         _provider_pid,
+         _tool_call,
+         _before_content,
+         _is_error,
+         _project_root
+       ),
+       do: :ok
+
+  @spec resolved_tool_path(String.t(), String.t()) :: String.t()
+  defp resolved_tool_path(project_root, path), do: Path.expand(path, project_root)
 
   # Re-checks plan mode after approval: the user may have entered /plan between
   # the approval prompt and the approval response.
@@ -1890,6 +1952,29 @@ defmodule MingaAgent.Providers.Native do
   defp non_empty(nil), do: nil
   defp non_empty(""), do: nil
   defp non_empty(str) when is_binary(str), do: str
+
+  @spec refresh_base_tools(state(), ProjectView.t() | nil) :: [ReqLLM.Tool.t()]
+  defp refresh_base_tools(%{custom_tools?: true, base_tools: base_tools}, _project_view) do
+    base_tools
+  end
+
+  defp refresh_base_tools(
+         %{
+           project_root: project_root,
+           fork_store: fork_store,
+           changeset: changeset,
+           subscriber: subscriber
+         },
+         project_view
+       ) do
+    Tools.all(
+      project_root: project_root,
+      project_view: project_view,
+      fork_store: fork_store,
+      changeset: changeset,
+      parent_session: subscriber
+    )
+  end
 
   # Builds tools that interact with the provider's internal state (todo, notebook).
   # These are created in init with a closure over the provider PID.

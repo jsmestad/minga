@@ -50,6 +50,12 @@ private func appendRandomRGB(_ data: inout Data) {
     data.append(UInt8.random(in: 0...255))
 }
 
+/// Appends a big-endian UInt16.
+private func appendU16(_ data: inout Data, _ value: UInt16) {
+    data.append(UInt8(value >> 8))
+    data.append(UInt8(value & 0xFF))
+}
+
 /// Appends a random big-endian UInt16.
 private func appendRandomU16(_ data: inout Data, range: ClosedRange<UInt16> = 0...UInt16.max) {
     let v = UInt16.random(in: range)
@@ -125,19 +131,42 @@ private func randomGuiTabBar() -> Data {
 
 private func randomGuiWorkspaces() -> Data {
     let wsCount = UInt8.random(in: 0...4)
-    var data = Data([OP_GUI_WORKSPACES])
-    appendRandomU16(&data) // active_workspace_id
-    data.append(wsCount)
+    let tabCount = UInt16.random(in: 0...4)
+    var payload = Data()
+    payload.append(1) // version
+    appendRandomU16(&payload) // active_workspace_id
+    payload.append(UInt8.random(in: 0...3)) // mode
+    payload.append(UInt8.random(in: 0...0xFF)) // flags
+    payload.append(wsCount)
     for _ in 0..<wsCount {
-        appendRandomU16(&data) // id
-        data.append(UInt8.random(in: 0...3)) // agent_status
-        data.append(UInt8.random(in: 0...0xFF)) // r
-        data.append(UInt8.random(in: 0...0xFF)) // g
-        data.append(UInt8.random(in: 0...0xFF)) // b
-        appendRandomU16(&data) // tab_count
-        data.append(randomString8Field(maxLen: 20)) // label
-        data.append(randomString8Field(maxLen: 15)) // icon
+        appendRandomU16(&payload) // id
+        payload.append(UInt8.random(in: 0...1)) // kind
+        payload.append(UInt8.random(in: 0...4)) // status
+        appendRandomU16(&payload) // flags
+        payload.append(UInt8.random(in: 0...0xFF)) // r
+        payload.append(UInt8.random(in: 0...0xFF)) // g
+        payload.append(UInt8.random(in: 0...0xFF)) // b
+        appendRandomU16(&payload) // tab_count
+        appendRandomU16(&payload) // draft_count
+        appendRandomU16(&payload) // conflict_count
+        appendRandomU16(&payload) // running_background_count
+        payload.append(randomString8Field(maxLen: 20)) // label
+        payload.append(randomString8Field(maxLen: 15)) // icon
     }
+    appendU16(&payload, tabCount)
+    for _ in 0..<tabCount {
+        appendRandomU32(&payload) // id
+        appendRandomU16(&payload) // workspace_id
+        payload.append(0) // kind = file
+        appendRandomU16(&payload) // flags
+        appendRandomU32(&payload) // path_hash
+        payload.append(randomString8Field(maxLen: 10)) // icon
+        payload.append(randomString16Field(maxLen: 20)) // label
+        payload.append(randomString16Field(maxLen: 30)) // path
+    }
+    var data = Data([OP_GUI_WORKSPACES])
+    appendU16(&data, UInt16(payload.count))
+    data.append(payload)
     return data
 }
 

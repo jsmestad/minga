@@ -44,12 +44,19 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
 
   defp tab_bar_with_remote_session(session_pid) do
     {tb, agent_tab} = TabBar.insert(empty_tab_bar(), :agent, "Agent")
+    {tb, workspace} = TabBar.add_workspace(tb, "Remote", session_pid)
 
-    TabBar.update_tab(
-      tb,
+    tb
+    |> TabBar.update_tab(
       agent_tab.id,
       &Tab.set_remote_session(&1, "home", "session-1", session_pid)
     )
+    |> TabBar.move_tab_to_workspace(agent_tab.id, workspace.id)
+    |> TabBar.update_workspace(workspace.id, fn workspace ->
+      workspace
+      |> WorkspaceModel.set_session(session_pid)
+      |> WorkspaceModel.put_remote_session("home", "session-1", :connected)
+    end)
   end
 
   defp workspace_state_with_project_view(session_pid, project_view) do
@@ -217,8 +224,10 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
       state = build_state(tab_bar_with_remote_session(session_pid))
 
       result = BufferManagement.handle_agent_session_down(state, session_pid, :noconnection)
+      remote_workspace = TabBar.find_workspace_by_session(result.shell_state.tab_bar, session_pid)
       remote_tab = Enum.find(result.shell_state.tab_bar.tabs, &(&1.session == session_pid))
 
+      assert remote_workspace.remote_session.connection_status == :disconnected
       assert remote_tab.connection_status == :disconnected
       assert result.shell_state.status_msg == "[home] disconnected, reconnecting..."
     end

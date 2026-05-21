@@ -406,6 +406,9 @@ defmodule MingaAgent.Tools do
                "deleted #{path} (via #{route_name(router_ctx)})"
              )}
 
+          {:error, reason} when is_binary(reason) ->
+            {:error, reason}
+
           {:error, reason} ->
             {:error, inspect(reason)}
         end
@@ -1161,8 +1164,8 @@ defmodule MingaAgent.Tools do
     end
   end
 
-  @spec routed_result(ToolRouter.context(), {:ok, String.t()} | {:error, String.t()}) ::
-          {:ok, String.t()} | {:error, String.t()}
+  @spec routed_result(ToolRouter.context(), {:ok, String.t()} | {:error, term()}) ::
+          {:ok, String.t()} | {:error, term()}
   defp routed_result(router_ctx, {:ok, message}) do
     {:ok, append_workspace_context(router_ctx, message)}
   end

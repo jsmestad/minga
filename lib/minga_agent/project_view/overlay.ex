@@ -436,10 +436,7 @@ defmodule MingaAgent.ProjectView.Overlay do
   @spec reject_tombstones([String.t()]) :: [String.t()]
   defp reject_tombstones(entries) do
     entries
-    |> Enum.reject(fn entry ->
-      String.ends_with?(entry, ".__changeset_deleted__") or
-        Enum.member?(entries, entry <> ".__changeset_deleted__")
-    end)
+    |> Enum.reject(&String.ends_with?(&1, ".__changeset_deleted__"))
     |> Enum.sort()
   end
 

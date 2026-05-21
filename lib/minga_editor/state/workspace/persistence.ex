@@ -11,7 +11,7 @@ defmodule MingaEditor.State.Workspace.Persistence do
 
   @type write_opt :: {:rename, (Path.t(), Path.t() -> :ok | {:error, term()})}
 
-  @doc "Writes a workspace JSON file under the project root. Returns `:ok` when persistence is disabled."
+  @doc "Writes a workspace JSON file under the project root. Returns `:ok` when persistence is disabled with a nil project root."
   @spec write(Workspace.t(), String.t() | nil) :: :ok | {:error, term()}
   def write(workspace, project_root), do: write(workspace, project_root, [])
 
@@ -48,15 +48,17 @@ defmodule MingaEditor.State.Workspace.Persistence do
     case normalize_project_root(project_root) do
       {:ok, root} -> scan_root(root)
       :disabled -> []
+      {:error, reason} -> log_scan_root_warning(project_root, reason)
     end
   end
 
-  @doc "Deletes one persisted workspace file. Returns `:ok` when persistence is disabled or the file is absent."
+  @doc "Deletes one persisted workspace file. Returns `:ok` when persistence is disabled with a nil project root or the file is absent."
   @spec delete(non_neg_integer(), String.t() | nil) :: :ok | {:error, term()}
   def delete(id, project_root) when is_integer(id) and id >= 0 do
     case normalize_project_root(project_root) do
-      {:ok, root} -> delete_path(path_for(root, id))
+      {:ok, root} -> delete_path(path_for(root, id), project_root, id)
       :disabled -> :ok
+      {:error, reason} = error -> log_delete_root_error(project_root, id, reason, error)
     end
   end
 
@@ -70,10 +72,20 @@ defmodule MingaEditor.State.Workspace.Persistence do
 
   @spec scan_root(String.t()) :: [Workspace.t()]
   defp scan_root(root) do
-    root
-    |> workspace_dir()
-    |> Path.join("*.json")
-    |> Path.wildcard()
+    dir = workspace_dir(root)
+
+    case File.ls(dir) do
+      {:ok, entries} -> scan_entries(dir, entries, root)
+      {:error, :enoent} -> []
+      {:error, reason} -> log_scan_directory_warning(dir, reason)
+    end
+  end
+
+  @spec scan_entries(Path.t(), [String.t()], String.t()) :: [Workspace.t()]
+  defp scan_entries(dir, entries, root) do
+    entries
+    |> Enum.filter(&String.ends_with?(&1, ".json"))
+    |> Enum.map(&Path.join(dir, &1))
     |> Enum.flat_map(&read_scanned_file(&1, root))
     |> Enum.sort_by(& &1.id)
   end
@@ -100,20 +112,28 @@ defmodule MingaEditor.State.Workspace.Persistence do
     end
   end
 
-  @spec normalize_project_root(String.t() | nil) :: {:ok, String.t()} | :disabled
+  @spec normalize_project_root(String.t() | nil) ::
+          {:ok, String.t()} | :disabled | {:error, term()}
+  defp normalize_project_root(nil), do: :disabled
+
   defp normalize_project_root(project_root) when is_binary(project_root) do
     root = Path.expand(project_root)
-    if File.dir?(root), do: {:ok, root}, else: :disabled
+
+    if File.dir?(root) do
+      {:ok, root}
+    else
+      {:error, {:invalid_project_root, root}}
+    end
   end
 
   defp normalize_project_root(_project_root), do: :disabled
 
-  @spec delete_path(Path.t()) :: :ok | {:error, term()}
-  defp delete_path(path) do
+  @spec delete_path(Path.t(), String.t() | nil, non_neg_integer()) :: :ok | {:error, term()}
+  defp delete_path(path, project_root, id) do
     case File.rm(path) do
       :ok -> :ok
       {:error, :enoent} -> :ok
-      {:error, reason} -> {:error, reason}
+      {:error, reason} = error -> log_delete_error(project_root, id, path, reason, error)
     end
   end
 
@@ -126,6 +146,48 @@ defmodule MingaEditor.State.Workspace.Persistence do
     )
 
     error
+  end
+
+  @spec log_delete_error(String.t() | nil, non_neg_integer(), Path.t(), term(), {:error, term()}) ::
+          {:error, term()}
+  defp log_delete_error(project_root, id, path, reason, error) do
+    Minga.Log.warning(
+      :editor,
+      "Workspace persistence delete failed for #{inspect(project_root)}/#{id} at #{path}: #{inspect(reason)}"
+    )
+
+    error
+  end
+
+  @spec log_delete_root_error(String.t() | nil, non_neg_integer(), term(), {:error, term()}) ::
+          {:error, term()}
+  defp log_delete_root_error(project_root, id, reason, error) do
+    Minga.Log.warning(
+      :editor,
+      "Workspace persistence delete failed for #{inspect(project_root)}/#{id}: #{inspect(reason)}"
+    )
+
+    error
+  end
+
+  @spec log_scan_directory_warning(Path.t(), term()) :: []
+  defp log_scan_directory_warning(path, reason) do
+    Minga.Log.warning(
+      :editor,
+      "Could not scan workspace persistence directory #{path}: #{inspect(reason)}"
+    )
+
+    []
+  end
+
+  @spec log_scan_root_warning(String.t() | nil, term()) :: []
+  defp log_scan_root_warning(project_root, reason) do
+    Minga.Log.warning(
+      :editor,
+      "Could not scan workspace persistence root #{inspect(project_root)}: #{inspect(reason)}"
+    )
+
+    []
   end
 
   @spec log_scan_warning(Path.t(), term()) :: []

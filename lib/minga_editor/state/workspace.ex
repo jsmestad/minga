@@ -8,13 +8,26 @@ defmodule MingaEditor.State.Workspace do
   alias Minga.Project.FileRef
   alias MingaAgent.ProjectView
   alias MingaEditor.State.Workspace.Persistence
+  alias MingaEditor.State.Workspace.RemoteSession
   alias MingaEditor.State.WorkspaceReview
 
   @typedoc "Workspace kind."
   @type kind :: :manual | :agent
 
   @typedoc "Agent status for workspace display."
-  @type agent_status :: :idle | :plan | :thinking | :tool_executing | :error | :stopped | nil
+  @type agent_status ::
+          :idle
+          | :plan
+          | :thinking
+          | :tool_executing
+          | :error
+          | :stopped
+          | :needs_review
+          | :done
+          | nil
+
+  @typedoc "Remote connection status for workspace-owned remote sessions."
+  @type connection_status :: RemoteSession.connection_status()
 
   @typedoc "Workspace icon identifier."
   @type icon :: String.t()
@@ -28,6 +41,7 @@ defmodule MingaEditor.State.Workspace do
           color: non_neg_integer(),
           agent_status: agent_status(),
           session: pid() | nil,
+          remote_session: RemoteSession.t() | nil,
           custom_name: String.t() | nil,
           files: [FileRef.t()],
           active_file: FileRef.t() | nil,
@@ -45,6 +59,7 @@ defmodule MingaEditor.State.Workspace do
             color: 0x51AFEF,
             agent_status: :idle,
             session: nil,
+            remote_session: nil,
             custom_name: nil,
             files: [],
             active_file: nil,
@@ -64,6 +79,7 @@ defmodule MingaEditor.State.Workspace do
       color: 0x51AFEF,
       agent_status: nil,
       session: nil,
+      remote_session: nil,
       project_root: normalize_project_root(project_root)
     }
   end
@@ -79,6 +95,7 @@ defmodule MingaEditor.State.Workspace do
       color: agent_color(id),
       agent_status: :idle,
       session: session,
+      agent_ui: UIState.new(),
       project_root: normalize_project_root(project_root)
     }
   end
@@ -87,6 +104,16 @@ defmodule MingaEditor.State.Workspace do
   @spec set_agent_status(t(), agent_status()) :: t()
   def set_agent_status(%__MODULE__{} = workspace, status) do
     %{workspace | agent_status: status}
+  end
+
+  @doc "Sets the workspace-owned agent UI projection."
+  @spec set_agent_ui(t(), UIState.t() | nil) :: t()
+  def set_agent_ui(%__MODULE__{} = workspace, %UIState{} = agent_ui) do
+    struct!(workspace, agent_ui: agent_ui)
+  end
+
+  def set_agent_ui(%__MODULE__{} = workspace, nil) do
+    struct!(workspace, agent_ui: nil)
   end
 
   @doc "Sets the ProjectView owned by the workspace."
@@ -404,7 +431,6 @@ defmodule MingaEditor.State.Workspace do
 
   @spec persisted_color(term(), non_neg_integer() | nil) :: non_neg_integer() | nil
   defp persisted_color(value, _default) when is_integer(value) and value >= 0, do: value
-  defp persisted_color(nil, _default), do: nil
   defp persisted_color(_value, default), do: default
 
   @spec persisted_file_refs(term(), String.t() | nil) :: [FileRef.t()]

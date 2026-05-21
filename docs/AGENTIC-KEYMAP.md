@@ -134,7 +134,7 @@ See [Agent tool approval](CONFIGURATION.md#agent-tool-approval) for how to confi
 
 | Key | Action |
 |-----|--------|
-| `SPC a n` | New agent session |
+| `SPC a n` | New agent workspace |
 | `SPC a s` | Stop / abort agent |
 | `SPC a m` | Move file to workspace… |
 | `SPC a c` | Copy file to workspace… |
