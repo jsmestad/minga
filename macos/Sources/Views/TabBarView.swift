@@ -45,8 +45,8 @@ struct TabBarView: View {
             // Thin separator after nav arrows
             verticalSeparator
 
-            // Workspace indicator (visible when active tab is in a group)
-            if let activeWorkspace = tabBarState.activeWorkspace {
+            // Legacy workspace indicator, hidden when the canonical workspace header is active.
+            if !tabBarState.hasCanonicalWorkspaceTabs, let activeWorkspace = tabBarState.activeWorkspace {
                 workspaceIndicator(activeWorkspace)
                 groupSeparator(color: activeWorkspace.color)
             }
@@ -54,7 +54,7 @@ struct TabBarView: View {
             // Tab strip with collapsible groups
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
-                    if tabBarState.hasWorkspaces {
+                    if tabBarState.hasWorkspaces && !tabBarState.hasCanonicalWorkspaceTabs {
                         groupedTabStrip
                     } else {
                         flatTabStrip
@@ -137,15 +137,35 @@ struct TabBarView: View {
         )
     }
 
+    private var displayTabs: [TabEntry] {
+        if tabBarState.hasCanonicalWorkspaceTabs {
+            return tabBarState.workspaceTabs.enumerated().map { index, tab in
+                TabEntry(
+                    id: tab.id,
+                    groupId: tab.workspaceId,
+                    isActive: index == Int(tabBarState.activeIndex),
+                    isDirty: tab.isDirty,
+                    isAgent: false,
+                    hasAttention: tab.hasAttention,
+                    agentStatus: 0,
+                    icon: tab.icon,
+                    label: tab.label
+                )
+            }
+        }
+
+        return tabBarState.tabs
+    }
+
     // MARK: - Tab strip layouts
 
     /// Flat tab strip (no workspaces active, Tier 0).
     @ViewBuilder
     private var flatTabStrip: some View {
-        ForEach(tabBarState.tabs) { tab in
+        ForEach(displayTabs) { tab in
             tabItem(tab)
 
-            if tab.id != tabBarState.tabs.last?.id {
+            if tab.id != displayTabs.last?.id {
                 verticalSeparator
             }
         }
@@ -236,7 +256,12 @@ struct TabBarView: View {
 
     @MainActor
     private func workspaceGotoCommand(for workspace: WorkspaceEntry) -> String {
-        guard let idx = tabBarState.workspaces.firstIndex(where: { $0.id == workspace.id }), idx < 9 else {
+        if workspace.kind == 0 {
+            return "manual_workspace"
+        }
+
+        let agentWorkspaces = tabBarState.workspaces.filter { $0.kind == 1 }
+        guard let idx = agentWorkspaces.firstIndex(where: { $0.id == workspace.id }), idx < 9 else {
             return "workspace_next_agent"
         }
 
@@ -443,6 +468,9 @@ struct TabBarView: View {
                 hoverTabId = hovering ? tab.id : nil
             }
         }
+        .accessibilityIdentifier("workspace-file-tab-\(tab.id)")
+        .accessibilityLabel("File tab \(tab.label)")
+        .accessibilityValue(tab.isDirty ? "modified" : "clean")
         .contextMenu {
             Button("Close") {
                 encoder?.sendCloseTab(id: tab.id)
@@ -468,7 +496,7 @@ struct TabBarView: View {
     /// Group 0 (manual) always comes first; agent workspaces sorted by id.
     /// Within each group, tab order is preserved from the BEAM's tab list.
     private func groupedTabs() -> [TabGroup] {
-        Dictionary(grouping: tabBarState.tabs, by: \.groupId)
+        Dictionary(grouping: displayTabs, by: \.groupId)
             .sorted { $0.key < $1.key }
             .map { TabGroup(groupId: $0.key, tabs: $0.value) }
     }

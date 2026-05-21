@@ -1174,6 +1174,8 @@ defmodule MingaEditor.State do
       _ ->
         state
     end
+  catch
+    :exit, _ -> state
   end
 
   @doc """
@@ -1231,7 +1233,7 @@ defmodule MingaEditor.State do
   def restore_tab_context(%__MODULE__{} = state, context) when is_map(context) do
     {context, state} =
       if TabContext.empty?(context) do
-        synthesized = build_file_tab_defaults(state)
+        synthesized = build_empty_tab_defaults(state)
 
         state =
           case tab_bar(state) do
@@ -1247,10 +1249,37 @@ defmodule MingaEditor.State do
         {TabContext.from_map(context), state}
       end
 
-    %{state | workspace: SessionState.restore_tab_context(state.workspace, context)}
+    state
+    |> Map.put(:workspace, SessionState.restore_tab_context(state.workspace, context))
+    |> sync_agent_ui_from_active_workspace()
   end
 
-  # Builds a typed file-tab context for a brand-new tab.
+  # Builds a typed context for a brand-new tab. Agent tabs need an agent-shaped context because restoring them as file tabs leaves the editor in the wrong keymap scope and window content.
+  @spec build_empty_tab_defaults(t()) :: Tab.context()
+  defp build_empty_tab_defaults(state) do
+    case active_tab_for_defaults(state) do
+      %Tab{kind: :agent} -> build_empty_agent_tab_defaults(state)
+      _tab -> build_file_tab_defaults(state)
+    end
+  end
+
+  @spec active_tab_for_defaults(t()) :: Tab.t() | nil
+  defp active_tab_for_defaults(state) do
+    case tab_bar(state) do
+      %TabBar{} = tb -> TabBar.active(tb)
+      _other -> nil
+    end
+  end
+
+  @spec build_empty_agent_tab_defaults(t()) :: Tab.context()
+  defp build_empty_agent_tab_defaults(state) do
+    agent_buf = AgentBufferSync.start_buffer(normalize_options_server(state.options_server))
+    rows = max(state.terminal_viewport.rows, 1)
+    cols = max(state.terminal_viewport.cols, 1)
+    windows = build_agent_card_windows(agent_buf, rows, cols)
+    build_agent_tab_defaults(state, windows, agent_buf)
+  end
+
   @spec build_file_tab_defaults(t()) :: Tab.context()
   defp build_file_tab_defaults(state) do
     win_id = state.workspace.windows.next_id
@@ -1292,8 +1321,7 @@ defmodule MingaEditor.State do
       injection_ranges: %{},
       search: %Search{},
       editing: VimState.new(),
-      document_highlights: nil,
-      agent_ui: UIState.new()
+      document_highlights: nil
     })
   end
 
@@ -1322,8 +1350,7 @@ defmodule MingaEditor.State do
       injection_ranges: %{},
       search: %Search{},
       editing: VimState.new(),
-      document_highlights: nil,
-      agent_ui: UIState.new()
+      document_highlights: nil
     })
   end
 
@@ -1331,8 +1358,7 @@ defmodule MingaEditor.State do
   Builds a fresh agent-shaped workspace context for a Board card on first zoom.
 
   Returns a `Tab.context()` carrying a single agent-chat window sized to the
-  current viewport, with the agent keymap scope and a fresh `agent_ui`. The
-  caller restores it via `restore_tab_context/2` and then runs
+  current viewport, with the agent keymap scope. The caller restores it via `restore_tab_context/2` and then runs
   `AgentActivation.activate_for_card/2` to attach the card's session pid to
   the window content.
 
@@ -1420,6 +1446,7 @@ defmodule MingaEditor.State do
         state = set_tab_bar(state, tb)
 
         state = restore_tab_context(state, target.context)
+        state = sync_agent_ui_from_active_workspace(state)
 
         # If the active modal is completion belonging to the leaving tab,
         # dismiss it so it doesn't follow us to the new tab.
@@ -1461,6 +1488,22 @@ defmodule MingaEditor.State do
     {state, effects} = switch_tab_pure(state, target_id)
     apply_buffer_effects(state, effects)
   end
+
+  @doc "Syncs the live workspace agent UI mirror from the active workspace."
+  @spec sync_agent_ui_from_active_workspace(t()) :: t()
+  def sync_agent_ui_from_active_workspace(
+        %__MODULE__{shell_state: %{tab_bar: %TabBar{} = tab_bar}} = state
+      ) do
+    agent_ui =
+      case TabBar.active_workspace(tab_bar) do
+        %{agent_ui: %UIState{} = agent_ui} -> agent_ui
+        _ -> UIState.new()
+      end
+
+    update_workspace(state, &SessionState.set_agent_ui(&1, agent_ui))
+  end
+
+  def sync_agent_ui_from_active_workspace(state), do: state
 
   @spec active_tab(t()) :: Tab.t() | nil
   def active_tab(%__MODULE__{} = state), do: state.shell.active_tab(state.shell_state)

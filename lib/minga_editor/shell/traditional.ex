@@ -35,6 +35,7 @@ defmodule MingaEditor.Shell.Traditional do
 
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Commands.AgentSession
   alias Minga.Buffer
   alias Minga.Project.FileRef
   alias MingaEditor.State.Workspace
@@ -84,7 +85,13 @@ defmodule MingaEditor.Shell.Traditional do
         |> Tab.set_agent_status(:thinking)
         |> Tab.mark_background_subagent(handle)
 
-      tb = TabBar.update_tab(tb, tab.id, fn _ -> tab end)
+      {tb, agent_workspace} = TabBar.add_workspace(tb, label, handle.pid)
+
+      tb =
+        tb
+        |> TabBar.update_tab(tab.id, fn _ -> tab end)
+        |> TabBar.move_tab_to_workspace(tab.id, agent_workspace.id)
+
       context = background_agent_context(workspace)
       tb = TabBar.update_context(tb, tab.id, context)
       {%{shell_state | tab_bar: tb}, workspace}
@@ -123,7 +130,11 @@ defmodule MingaEditor.Shell.Traditional do
         workspace,
         {:workspace_close, ws_id}
       ) do
-    {%{shell_state | tab_bar: TabBar.remove_workspace(tb, ws_id)}, workspace}
+    stop_workspace_session(TabBar.get_workspace(tb, ws_id))
+    tab_bar = TabBar.remove_workspace(tb, ws_id)
+    shell_state = ShellState.set_tab_bar(shell_state, tab_bar)
+    workspace = sync_workspace_agent_ui(tab_bar, workspace)
+    {shell_state, workspace}
   end
 
   def handle_gui_action(
@@ -328,7 +339,16 @@ defmodule MingaEditor.Shell.Traditional do
         session_pid,
         {:status_changed, status}
       ) do
-    # Update the tab's agent status badge
+    # Update workspace and legacy tab status badges.
+    tb =
+      case TabBar.find_workspace_by_session(tb, session_pid) do
+        %Workspace{id: id} ->
+          TabBar.update_workspace(tb, id, &Workspace.set_agent_status(&1, status))
+
+        nil ->
+          tb
+      end
+
     tb =
       case TabBar.find_by_session(tb, session_pid) do
         %Tab{id: id} -> TabBar.update_tab(tb, id, &Tab.set_agent_status(&1, status))
@@ -409,6 +429,15 @@ defmodule MingaEditor.Shell.Traditional do
   end
 
   def set_tab_session(%ShellState{tab_bar: tb} = shell_state, tab_id, session_pid) do
+    tb =
+      case TabBar.get(tb, tab_id) do
+        %Tab{group_id: workspace_id} ->
+          TabBar.update_workspace(tb, workspace_id, &Workspace.set_session(&1, session_pid))
+
+        nil ->
+          tb
+      end
+
     %{shell_state | tab_bar: TabBar.update_tab(tb, tab_id, &Tab.set_session(&1, session_pid))}
   end
 
@@ -417,8 +446,8 @@ defmodule MingaEditor.Shell.Traditional do
   def active_session(%ShellState{tab_bar: nil}), do: nil
 
   def active_session(%ShellState{tab_bar: tb}) do
-    case TabBar.active(tb) do
-      %Tab{session: pid} -> pid
+    case TabBar.active_workspace(tb) do
+      %Workspace{session: pid} when is_pid(pid) -> pid
       _ -> nil
     end
   end
@@ -705,6 +734,25 @@ defmodule MingaEditor.Shell.Traditional do
   end
 
   defp buffer_label(_), do: "[unknown]"
+
+  @spec sync_workspace_agent_ui(TabBar.t(), SessionState.t()) :: SessionState.t()
+  defp sync_workspace_agent_ui(%TabBar{} = tab_bar, %SessionState{} = workspace) do
+    agent_ui =
+      case TabBar.active_workspace(tab_bar) do
+        %Workspace{agent_ui: %UIState{} = agent_ui} -> agent_ui
+        _ -> UIState.new()
+      end
+
+    SessionState.set_agent_ui(workspace, agent_ui)
+  end
+
+  @spec stop_workspace_session(Workspace.t() | nil) :: :ok
+  defp stop_workspace_session(%Workspace{session: session}) when is_pid(session) do
+    AgentSession.stop_session_pid(session)
+    :ok
+  end
+
+  defp stop_workspace_session(_workspace), do: :ok
 
   @spec tab_has_active_buffer?(Tab.t(), pid()) :: boolean()
   defp tab_has_active_buffer?(%Tab{context: context}, pid) do

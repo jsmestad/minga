@@ -517,12 +517,6 @@ direction = "beam_to_frontend"
 
 [[opcodes]]
 category = "gui_semantic"
-name = "gui_workspaces"
-value = 0x86
-direction = "beam_to_frontend"
-
-[[opcodes]]
-category = "gui_semantic"
 name = "gui_board"
 value = 0x87
 direction = "beam_to_frontend"
@@ -549,6 +543,12 @@ direction = "beam_to_frontend"
 category = "gui_semantic"
 name = "gui_config_state"
 value = 0x97
+direction = "beam_to_frontend"
+
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_workspaces"
+value = 0x98
 direction = "beam_to_frontend"
 
 # Sub-opcodes inside gui_action (0x07).

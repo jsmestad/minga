@@ -477,23 +477,27 @@ defmodule MingaEditor.Agent.Events do
   defp sync_tab_agent_status(state, status) do
     session = AgentAccess.session(state)
 
-    case session && TabBar.find_by_session(EditorState.tab_bar(state), session) do
-      %Tab{id: id} ->
-        tb = TabBar.update_tab(EditorState.tab_bar(state), id, &Tab.set_agent_status(&1, status))
-        # Also sync workspace agent status
-        tb =
-          case TabBar.find_workspace_by_session(tb, session) do
-            %Workspace{id: ws_id} ->
-              TabBar.update_workspace(tb, ws_id, &Workspace.set_agent_status(&1, status))
+    if is_pid(session) do
+      tb = EditorState.tab_bar(state)
 
-            nil ->
-              tb
-          end
+      tb =
+        case TabBar.find_workspace_by_session(tb, session) do
+          %Workspace{id: ws_id} ->
+            TabBar.update_workspace(tb, ws_id, &Workspace.set_agent_status(&1, status))
 
-        EditorState.set_tab_bar(state, tb)
+          nil ->
+            tb
+        end
 
-      _ ->
-        state
+      tb =
+        case TabBar.find_by_session(tb, session) do
+          %Tab{id: id} -> TabBar.update_tab(tb, id, &Tab.set_agent_status(&1, status))
+          nil -> tb
+        end
+
+      EditorState.set_tab_bar(state, tb)
+    else
+      state
     end
   end
 

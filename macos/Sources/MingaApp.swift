@@ -309,6 +309,11 @@ struct ContentView: View {
     /// Single toolbar row spanning the full window width. Contains the
     /// sidebar header (when visible) and the tab bar, sharing one background.
     private let contentHeight: CGFloat = 28
+    private let workspaceHeaderHeight: CGFloat = 30
+
+    private var toolbarContentHeight: CGFloat {
+        appState.gui.workspaceState.hasCanonicalPayload ? contentHeight + workspaceHeaderHeight : contentHeight
+    }
 
     private var toolbarTopPadding: CGFloat {
         max(appState.trafficLightMidY - contentHeight / 2, 0)
@@ -330,17 +335,28 @@ struct ContentView: View {
                     compactProjectBranchHeader
                 }
 
-                if !appState.gui.tabBarState.tabs.isEmpty {
-                    TabBarView(
-                        tabBarState: appState.gui.tabBarState,
-                        theme: theme,
-                        encoder: appState.encoder
-                    )
-                } else {
-                    Spacer()
+                VStack(spacing: 0) {
+                    if appState.gui.workspaceState.hasCanonicalPayload {
+                        WorkspaceHeaderView(
+                            workspaceState: appState.gui.workspaceState,
+                            theme: theme,
+                            encoder: appState.encoder
+                        )
+                    }
+
+                    if !appState.gui.tabBarState.tabs.isEmpty || !appState.gui.workspaceState.visibleTabs.isEmpty {
+                        TabBarView(
+                            tabBarState: appState.gui.tabBarState,
+                            theme: theme,
+                            encoder: appState.encoder
+                        )
+                        .accessibilityIdentifier("workspace-tabbar")
+                    } else {
+                        Spacer()
+                    }
                 }
             }
-            .frame(height: contentHeight)
+            .frame(height: toolbarContentHeight)
             .padding(.top, toolbarTopPadding)
             .frame(maxHeight: .infinity, alignment: .top)
 
@@ -348,7 +364,7 @@ struct ContentView: View {
                 .fill(theme.tabSeparatorFg.opacity(0.3))
                 .frame(height: 1)
         }
-        .frame(height: contentHeight + toolbarTopPadding + 4)
+        .frame(height: toolbarContentHeight + toolbarTopPadding + 4)
         .background {
             ZStack {
                 theme.tabBg

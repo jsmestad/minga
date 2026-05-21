@@ -324,9 +324,13 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
   defp state_with_agent_tab(session_pid) do
     tb = TabBar.new(Tab.new_file(1, "main.ex"))
     {tb, agent_tab} = TabBar.add(tb, :agent, "Agent 1")
-    tb = TabBar.update_tab(tb, agent_tab.id, &Tab.set_session(&1, session_pid))
-    # Make the agent tab active
-    tb = TabBar.switch_to(tb, agent_tab.id)
+    {tb, workspace} = TabBar.add_workspace(tb, "Agent 1", session_pid)
+
+    tb =
+      tb
+      |> TabBar.update_tab(agent_tab.id, &Tab.set_session(&1, session_pid))
+      |> TabBar.move_tab_to_workspace(agent_tab.id, workspace.id)
+      |> TabBar.switch_to(agent_tab.id)
 
     agent_ctx = %{
       shell_state: %MingaEditor.Shell.Traditional.State{
@@ -363,11 +367,21 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
   defp state_with_two_agent_tabs(session1, session2) do
     tb = TabBar.new(Tab.new_file(1, "main.ex"))
     {tb, tab1} = TabBar.add(tb, :agent, "Agent 1")
-    tb = TabBar.update_tab(tb, tab1.id, &Tab.set_session(&1, session1))
+    {tb, workspace1} = TabBar.add_workspace(tb, "Agent 1", session1)
+
+    tb =
+      tb
+      |> TabBar.update_tab(tab1.id, &Tab.set_session(&1, session1))
+      |> TabBar.move_tab_to_workspace(tab1.id, workspace1.id)
+
     {tb, tab2} = TabBar.add(tb, :agent, "Agent 2")
-    tb = TabBar.update_tab(tb, tab2.id, &Tab.set_session(&1, session2))
-    # First agent tab is active
-    tb = TabBar.switch_to(tb, tab1.id)
+    {tb, workspace2} = TabBar.add_workspace(tb, "Agent 2", session2)
+
+    tb =
+      tb
+      |> TabBar.update_tab(tab2.id, &Tab.set_session(&1, session2))
+      |> TabBar.move_tab_to_workspace(tab2.id, workspace2.id)
+      |> TabBar.switch_to(tab1.id)
 
     agent = %AgentState{runtime: %RuntimeState{status: :idle}}
     agentic = %UIState{view: %UIState.View{active: true, focus: :chat}}
@@ -389,7 +403,12 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
   defp state_with_two_tabs_file_active(session_pid) do
     tb = TabBar.new(Tab.new_file(1, "main.ex"))
     {tb, agent_tab} = TabBar.add(tb, :agent, "Agent 1")
-    tb = TabBar.update_tab(tb, agent_tab.id, &Tab.set_session(&1, session_pid))
+    {tb, workspace} = TabBar.add_workspace(tb, "Agent 1", session_pid)
+
+    tb =
+      tb
+      |> TabBar.update_tab(agent_tab.id, &Tab.set_session(&1, session_pid))
+      |> TabBar.move_tab_to_workspace(agent_tab.id, workspace.id)
 
     agent_ctx = %{
       shell_state: %MingaEditor.Shell.Traditional.State{

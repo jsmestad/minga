@@ -128,6 +128,14 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       tab =
         MingaEditor.State.Tab.new_agent(1, "Agent") |> MingaEditor.State.Tab.set_session(session)
 
+      tab_bar =
+        tab
+        |> MingaEditor.State.TabBar.new()
+        |> MingaEditor.State.TabBar.update_workspace(
+          0,
+          &MingaEditor.State.Workspace.set_session(&1, session)
+        )
+
       %EditorState{
         port_manager: nil,
         shell: MingaEditor.Shell.Traditional,
@@ -138,7 +146,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
         },
         shell_state: %MingaEditor.Shell.Traditional.State{
           status_msg: nil,
-          tab_bar: MingaEditor.State.TabBar.new(tab),
+          tab_bar: tab_bar,
           agent: %AgentState{
             runtime: %RuntimeState{status: :idle},
             error: nil,

@@ -94,6 +94,18 @@ defmodule MingaAgent.Changeset do
   end
 
   @doc """
+  Validates the merge plan back to the real project without applying it.
+
+  This performs the same path validation and conflict planning as `merge/1`
+  but does not write, delete, or clean up anything. It is useful when a caller
+  needs to know whether a merge would succeed before mutating other state.
+  """
+  @spec preflight_merge(changeset()) :: {:ok, [map()]} | {:error, term()}
+  def preflight_merge(cs) do
+    GenServer.call(cs, :preflight_merge)
+  end
+
+  @doc """
   Merges changes back to the real project with three-way merge.
 
   If someone edited the same files since the changeset was created,

@@ -378,7 +378,6 @@ defmodule MingaEditor.State.SnapshotTest do
       assert new_ctx.search == old_ctx.search
       assert new_ctx.editing == old_ctx.editing
       assert new_ctx.document_highlights == old_ctx.document_highlights
-      assert new_ctx.agent_ui == old_ctx.agent_ui
 
       # present_fields contain the same fields (order is not semantically significant)
       assert Enum.sort(new_ctx.present_fields) == Enum.sort(old_ctx.present_fields)

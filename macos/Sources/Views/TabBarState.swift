@@ -18,14 +18,34 @@ struct TabEntry: Identifiable {
     let label: String
 }
 
-/// An agent workspace entry for the tab bar capsules and indicator.
+/// A workspace entry for the tab bar capsules and indicator.
 struct WorkspaceEntry: Identifiable {
     let id: UInt16
+    let kind: UInt8
     let agentStatus: UInt8
+    let flags: UInt16
     let color: Color
     let tabCount: UInt16
+    let draftCount: UInt16
+    let conflictCount: UInt16
+    let runningBackgroundCount: UInt16
     let label: String
     let icon: String
+}
+
+/// A visible file tab entry from the canonical workspace protocol.
+struct WorkspaceTabEntry: Identifiable {
+    let id: UInt32
+    let workspaceId: UInt16
+    let kind: UInt8
+    let flags: UInt16
+    let pathHash: UInt32
+    let icon: String
+    let label: String
+    let path: String
+
+    var isDirty: Bool { flags & 0x0001 != 0 }
+    var hasAttention: Bool { flags & 0x0002 != 0 }
 }
 
 /// Observable state for the tab bar, driven by BEAM protocol messages.
@@ -36,7 +56,11 @@ final class TabBarState {
     /// Visible-tab active index from gui_tab_bar, or 255 when the active tab is hidden.
     var activeIndex: UInt8 = 0
     var workspaces: [WorkspaceEntry] = []
+    var workspaceTabs: [WorkspaceTabEntry] = []
     var activeWorkspaceId: UInt16 = 0
+    var workspaceMode: UInt8 = 0
+    var workspaceFlags: UInt8 = 0
+    var hasCanonicalWorkspaceTabs: Bool = false
 
     /// Whether any agent workspaces exist (controls visibility of group UI).
     var hasWorkspaces: Bool {
@@ -68,12 +92,17 @@ final class TabBarState {
     }
 
     /// Update from a decoded gui_workspaces protocol message.
-    func updateWorkspaces(activeWorkspaceId: UInt16, entries: [Wire.WorkspaceEntry]) {
+    func updateWorkspaces(activeWorkspaceId: UInt16, mode: UInt8, flags: UInt8, entries: [Wire.WorkspaceEntry], visibleTabs: [Wire.WorkspaceTabEntry]) {
         self.activeWorkspaceId = activeWorkspaceId
+        self.workspaceMode = mode
+        self.workspaceFlags = flags
+        self.hasCanonicalWorkspaceTabs = true
         self.workspaces = entries.map { entry in
             WorkspaceEntry(
                 id: entry.id,
+                kind: entry.kind,
                 agentStatus: entry.agentStatus,
+                flags: entry.flags,
                 color: Color(
                     .sRGB,
                     red: Double(entry.colorR) / 255.0,
@@ -81,8 +110,23 @@ final class TabBarState {
                     blue: Double(entry.colorB) / 255.0
                 ),
                 tabCount: entry.tabCount,
+                draftCount: entry.draftCount,
+                conflictCount: entry.conflictCount,
+                runningBackgroundCount: entry.runningBackgroundCount,
                 label: entry.label,
                 icon: entry.icon
+            )
+        }
+        self.workspaceTabs = visibleTabs.map { entry in
+            WorkspaceTabEntry(
+                id: entry.id,
+                workspaceId: entry.workspaceId,
+                kind: entry.kind,
+                flags: entry.flags,
+                pathHash: entry.pathHash,
+                icon: entry.icon,
+                label: entry.label,
+                path: entry.path
             )
         }
     }
@@ -92,6 +136,10 @@ final class TabBarState {
         tabs = []
         activeIndex = 0
         workspaces = []
+        workspaceTabs = []
         activeWorkspaceId = 0
+        workspaceMode = 0
+        workspaceFlags = 0
+        hasCanonicalWorkspaceTabs = false
     }
 }
