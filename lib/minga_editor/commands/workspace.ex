@@ -12,6 +12,7 @@ defmodule MingaEditor.Commands.Workspace do
   alias Minga.Project.FileRef
   alias MingaAgent.ProjectView
   alias MingaAgent.Session
+  alias MingaEditor.Commands.AgentSession
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace, as: WorkspaceModel
@@ -207,6 +208,12 @@ defmodule MingaEditor.Commands.Workspace do
     end
   end
 
+  @doc "Jump directly to a workspace by id."
+  @spec workspace_goto_by_id(state(), non_neg_integer()) :: state()
+  def workspace_goto_by_id(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, workspace_id) do
+    switch_via_workspace(state, TabBar.switch_to_workspace(tb, workspace_id))
+  end
+
   @spec active_workspace(state()) :: WorkspaceModel.t() | nil
   defp active_workspace(%{shell_state: %{tab_bar: %TabBar{} = tb}}),
     do: TabBar.active_workspace(tb)
@@ -219,9 +226,13 @@ defmodule MingaEditor.Commands.Workspace do
       %WorkspaceModel{} = workspace ->
         case discard_workspace_project_view(workspace) do
           :ok ->
-            state = update_workspace_project_view(state, workspace_id, nil)
-            state = maybe_refresh_workspace_provider_project_view(state, workspace, nil)
-            EditorState.set_tab_bar(state, TabBar.remove_workspace(tb, workspace_id))
+            stop_workspace_session(workspace)
+
+            state
+            |> update_workspace_project_view(workspace_id, nil)
+            |> maybe_refresh_workspace_provider_project_view(workspace, nil)
+            |> EditorState.set_tab_bar(TabBar.remove_workspace(tb, workspace_id))
+            |> EditorState.sync_agent_ui_from_active_workspace()
 
           {:error, reason} ->
             EditorState.set_status(
@@ -710,6 +721,14 @@ defmodule MingaEditor.Commands.Workspace do
   catch
     :exit, _ -> state
   end
+
+  @spec stop_workspace_session(WorkspaceModel.t() | nil) :: :ok
+  defp stop_workspace_session(%WorkspaceModel{session: session}) when is_pid(session) do
+    AgentSession.stop_session_pid(session)
+    :ok
+  end
+
+  defp stop_workspace_session(_workspace), do: :ok
 
   @spec review_status_copy(WorkspaceModel.t() | nil) :: String.t()
   defp review_status_copy(%WorkspaceModel{review: %WorkspaceReview{} = review}) do

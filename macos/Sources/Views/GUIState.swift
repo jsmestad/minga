@@ -18,6 +18,9 @@ final class GUIState {
     /// Tab bar state.
     let tabBarState = TabBarState()
 
+    /// Workspace header and active-workspace file tab state.
+    let workspaceState = WorkspaceState()
+
     /// File tree sidebar state.
     let fileTreeState = FileTreeState()
     let gitStatusState = GitStatusState()

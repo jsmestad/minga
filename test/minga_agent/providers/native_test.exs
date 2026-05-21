@@ -3,6 +3,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Event
+  alias MingaAgent.ProjectView.RecordingBackend
   alias MingaAgent.Providers.Native
   alias MingaAgent.Tools
   alias ReqLLM.StreamResponse.MetadataHandle
@@ -342,6 +343,114 @@ defmodule MingaAgent.Providers.NativeTest do
       # Should eventually get a text response and AgentEnd
       assert Enum.any?(events, &match?(%Event.TextDelta{}, &1))
       assert Enum.any?(events, &match?(%Event.AgentEnd{}, &1))
+    end
+
+    test "uses ProjectView-backed tools when project_view is passed to Native.start_link", %{
+      tmp_dir: dir
+    } do
+      root = Path.join(dir, "root")
+      working_dir = Path.join(dir, "working")
+      File.mkdir_p!(Path.join(root, "lib"))
+      File.mkdir_p!(Path.join(working_dir, "lib"))
+      File.write!(Path.join(root, "lib/file.txt"), "root text")
+      File.write!(Path.join(working_dir, "lib/file.txt"), "view text")
+
+      {:ok, project_view} =
+        RecordingBackend.create(root,
+          parent: self(),
+          working_dir: working_dir,
+          workspace_id: 7,
+          env: [{"PROJECT_VIEW_SENTINEL", "present"}]
+        )
+
+      call_count = :counters.new(1, [:atomics])
+
+      client = fn _model, _messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          if count == 0 do
+            [
+              ReqLLM.StreamChunk.tool_call("read_file", %{"path" => "lib/file.txt"}, %{
+                id: "tc_project_view",
+                index: 0
+              }),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+            ]
+          else
+            [
+              ReqLLM.StreamChunk.text("done"),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+            ]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      {:ok, pid} =
+        start_provider(tmp_dir: root, llm_client: client, project_view: project_view, tools: nil)
+
+      assert :ok = Native.send_prompt(pid, "Read the file through ProjectView")
+      assert_receive {:project_view_call, {:read_file, "lib/file.txt"}}
+
+      events = collect_events(1_000)
+      tool_end = Enum.find(events, &match?(%Event.ToolEnd{name: "read_file"}, &1))
+      assert tool_end != nil
+      assert tool_end.result =~ "view text"
+      assert tool_end.result =~ "ProjectView workspace 7"
+    end
+
+    test "tracks delete_file as a file change and marks the file deleted", %{tmp_dir: dir} do
+      path = "delete-me.txt"
+      absolute_path = Path.join(dir, path)
+      File.write!(absolute_path, "delete me")
+
+      call_count = :counters.new(1, [:atomics])
+
+      client = fn _model, _messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          if count == 0 do
+            [
+              ReqLLM.StreamChunk.tool_call("delete_file", %{"path" => path}, %{
+                id: "tc_delete_file",
+                index: 0
+              }),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+            ]
+          else
+            [
+              ReqLLM.StreamChunk.text("deleted"),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+            ]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: client,
+          tools: nil,
+          config: agent_config(tool_approval: :none)
+        )
+
+      assert :ok = Native.send_prompt(pid, "Delete the file")
+      events = collect_events(1_000)
+
+      assert Enum.any?(events, &match?(%Event.ToolStart{name: "delete_file"}, &1))
+      assert Enum.any?(events, &match?(%Event.ToolEnd{name: "delete_file", is_error: false}, &1))
+
+      file_changed = Enum.find(events, &match?(%Event.ToolFileChanged{}, &1))
+      assert file_changed != nil
+      assert file_changed.path == absolute_path
+      assert file_changed.before_content == "delete me"
+      assert file_changed.after_content == ""
+      refute File.exists?(absolute_path)
     end
 
     test "passes is_error metadata on tool result message when tool fails", %{tmp_dir: dir} do

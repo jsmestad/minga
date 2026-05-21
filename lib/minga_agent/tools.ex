@@ -404,6 +404,9 @@ defmodule MingaAgent.Tools do
                "deleted #{path} (via #{route_name(router_ctx)})"
              )}
 
+          {:error, reason} when is_binary(reason) ->
+            {:error, reason}
+
           {:error, reason} ->
             {:error, inspect(reason)}
         end
