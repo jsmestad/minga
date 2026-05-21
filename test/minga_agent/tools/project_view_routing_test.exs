@@ -2,7 +2,10 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
   # Uses find, grep, and shell tool callbacks, which spawn OS processes.
   use ExUnit.Case, async: false
 
+  alias Minga.Buffer.Process, as: BufferProcess
+  alias MingaAgent.Changeset
   alias MingaAgent.ProjectView.RecordingBackend
+  alias MingaAgent.ProjectView.UnavailableBackend
   alias MingaAgent.Tools
 
   @moduletag :tmp_dir
@@ -13,6 +16,8 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     File.mkdir_p!(Path.join(root, "lib"))
     File.mkdir_p!(Path.join(working_dir, "lib"))
     File.write!(Path.join(root, "lib/file.txt"), "root text\n")
+    File.write!(Path.join(root, "lib/root_only.txt"), "root only\n")
+    File.write!(Path.join(root, "lib/edit_target.txt"), "editable root text\n")
     File.write!(Path.join(working_dir, "lib/file.txt"), "view text\n")
     File.write!(Path.join(working_dir, "lib/overlay_only.txt"), "needle\n")
 
@@ -76,6 +81,45 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     assert_receive {:project_view_call, {:delete_file, "lib/new.txt"}}
   end
 
+  test "multi_edit_file through ProjectView rejects empty old_text without writing", %{
+    root: root,
+    working_dir: working_dir,
+    tools: tools
+  } do
+    assert {:ok, result} =
+             call_tool(tools, "multi_edit_file", %{
+               "path" => "lib/file.txt",
+               "edits" => [%{"old_text" => "", "new_text" => "ignored"}]
+             })
+
+    assert result =~ "applied 0/1 edits"
+    assert result =~ "old_text is empty"
+    assert_receive {:project_view_call, {:read_file, "lib/file.txt"}}
+    refute_receive {:project_view_call, {:write_file, "lib/file.txt", _}}
+    assert File.read!(Path.join(working_dir, "lib/file.txt")) == "view text\n"
+    assert File.read!(Path.join(root, "lib/file.txt")) == "root text\n"
+  end
+
+  test "multi_edit_file through ProjectView rejects ambiguous old_text without writing", %{
+    working_dir: working_dir,
+    tools: tools
+  } do
+    ambiguous_path = Path.join(working_dir, "lib/ambiguous.txt")
+    File.write!(ambiguous_path, "hello world hello world")
+
+    assert {:ok, result} =
+             call_tool(tools, "multi_edit_file", %{
+               "path" => "lib/ambiguous.txt",
+               "edits" => [%{"old_text" => "hello world", "new_text" => "goodbye"}]
+             })
+
+    assert result =~ "applied 0/1 edits"
+    assert result =~ "old_text found 2 times (ambiguous)"
+    assert_receive {:project_view_call, {:read_file, "lib/ambiguous.txt"}}
+    refute_receive {:project_view_call, {:write_file, "lib/ambiguous.txt", _}}
+    assert File.read!(ambiguous_path) == "hello world hello world"
+  end
+
   test "discovery and shell tools use ProjectView working dir and env", %{tools: tools} do
     assert {:ok, list_result} = call_tool(tools, "list_directory", %{"path" => "lib"})
     assert list_result =~ "overlay_only.txt"
@@ -109,24 +153,128 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     assert_receive {:project_view_call, :command_env}
   end
 
-  test "multi_edit falls back to direct filesystem when only fork store is active and file is unopened",
-       %{tmp_dir: dir} do
-    root = Path.join(dir, "fallback-root")
+  test "project view operation errors stay visible while cwd-dependent tools report unavailability",
+       %{tmp_dir: root} do
+    view_root = Path.join(root, "view")
     File.mkdir_p!(Path.join(root, "lib"))
-    file = Path.join(root, "lib/unopened.txt")
-    File.write!(file, "old text\n")
-    {:ok, fork_store} = start_supervised(MingaAgent.BufferForkStore)
-    tools = Tools.all(project_root: root, fork_store: fork_store)
+    File.mkdir_p!(Path.join(view_root, "lib"))
+    File.write!(Path.join(root, "lib/root_only.txt"), "root only\n")
+    File.write!(Path.join(root, "lib/edit_target.txt"), "editable root text\n")
+    File.write!(Path.join(view_root, "lib/view_only.txt"), "view only\n")
+
+    {:ok, view} =
+      UnavailableBackend.create(root,
+        parent: self(),
+        working_dir: view_root,
+        workspace_id: 99
+      )
+
+    tools = Tools.all(project_root: root, project_view: view)
+
+    for {name, args, expected} <- [
+          {"read_file", %{"path" => "lib/view_only.txt"}, ":read_failed"},
+          {"write_file", %{"path" => "lib/new.txt", "content" => "new"}, ":write_failed"},
+          {"edit_file",
+           %{"path" => "lib/edit_target.txt", "old_text" => "editable", "new_text" => "changed"},
+           ":edit_failed"},
+          {"delete_file", %{"path" => "lib/root_only.txt"}, ":delete_failed"},
+          {"multi_edit_file",
+           %{
+             "path" => "lib/edit_target.txt",
+             "edits" => [%{"old_text" => "editable", "new_text" => "changed"}]
+           }, ":read_failed"},
+          {"list_directory", %{"path" => "lib"}, ":list_failed"}
+        ] do
+      assert {:error, message} = call_tool(tools, name, args)
+      refute message =~ "project_view_unavailable"
+      assert message =~ expected
+    end
+
+    for {name, args} <- [
+          {"find", %{"pattern" => "view_only.txt", "path" => "lib"}},
+          {"grep", %{"pattern" => "view only", "path" => "lib"}},
+          {"shell", %{"command" => "test -f lib/view_only.txt && echo fallback"}}
+        ] do
+      assert {:error, message} = call_tool(tools, name, args)
+      assert message =~ "project_view_unavailable"
+    end
+
+    assert File.exists?(Path.join(root, "lib/root_only.txt"))
+    assert File.read!(Path.join(root, "lib/edit_target.txt")) == "editable root text\n"
+    refute File.exists?(Path.join(root, "lib/new.txt"))
+  end
+
+  test "multi_edit_file through changeset applies exact edits and leaves real files unchanged",
+       %{tmp_dir: root} do
+    File.mkdir_p!(Path.join(root, "lib"))
+    target_path = Path.join(root, "lib/edit_target.txt")
+    File.write!(target_path, "one two one\n")
+
+    {:ok, changeset} = start_supervised({Changeset.Server, project_root: root})
+    tools = Tools.all(project_root: root, changeset: changeset)
 
     assert {:ok, result} =
              call_tool(tools, "multi_edit_file", %{
-               "path" => "lib/unopened.txt",
-               "edits" => [%{"old_text" => "old", "new_text" => "new"}]
+               "path" => "lib/edit_target.txt",
+               "edits" => [%{"old_text" => "one two", "new_text" => "ONE TWO"}]
              })
 
-    assert result =~ "1/1 edits applied"
-    assert {:ok, buffer} = Minga.Buffer.pid_for_path(file)
-    assert Minga.Buffer.content(buffer) == "new text\n"
+    assert result =~ "via changeset"
+    assert {:ok, changed} = Changeset.read_file(changeset, "lib/edit_target.txt")
+    assert changed == "ONE TWO one\n"
+    assert File.read!(target_path) == "one two one\n"
+  end
+
+  test "dead changeset multi_edit_file returns an unavailable error without mutating the project",
+       %{tmp_dir: root} do
+    File.mkdir_p!(Path.join(root, "lib"))
+    target_path = Path.join(root, "lib/edit_target.txt")
+    File.write!(target_path, "one two one\n")
+
+    {:ok, changeset} = start_supervised({Changeset.Server, project_root: root})
+    tools = Tools.all(project_root: root, changeset: changeset)
+    ref = Process.monitor(changeset)
+    Process.exit(changeset, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^changeset, _reason}
+
+    assert {:error, message} =
+             call_tool(tools, "multi_edit_file", %{
+               "path" => "lib/edit_target.txt",
+               "edits" => [%{"old_text" => "one", "new_text" => "ONE"}]
+             })
+
+    assert message =~ "changeset_unavailable"
+    assert File.read!(target_path) == "one two one\n"
+  end
+
+  test "shell does not flush dirty buffers when routed cwd resolution fails", %{tmp_dir: dir} do
+    root = Path.join(dir, "shell-root")
+    view_root = Path.join(dir, "shell-view")
+    File.mkdir_p!(Path.join(root, "lib"))
+    File.mkdir_p!(Path.join(view_root, "lib"))
+    file = Path.join(root, "lib/dirty.txt")
+    File.write!(file, "original\n")
+
+    {:ok, buffer} =
+      start_supervised({BufferProcess, content: "original\n", file_path: file},
+        id: :dirty_shell_buffer
+      )
+
+    :ok = Minga.Buffer.replace_content(buffer, "dirty\n")
+
+    {:ok, view} =
+      UnavailableBackend.create(root,
+        parent: self(),
+        working_dir: view_root,
+        workspace_id: 100
+      )
+
+    tools = Tools.all(project_root: root, project_view: view)
+
+    assert {:error, message} = call_tool(tools, "shell", %{"command" => "cat lib/dirty.txt"})
+    assert message =~ "project_view_unavailable"
+    assert File.read!(file) == "original\n"
+    assert Minga.Buffer.content(buffer) == "dirty\n"
   end
 
   defp call_tool(tools, name, args) do

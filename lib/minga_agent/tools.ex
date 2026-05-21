@@ -38,6 +38,8 @@ defmodule MingaAgent.Tools do
   | `describe_tools`  | List all available tools with descriptions            |
   """
 
+  alias Minga.Buffer.Document
+  alias Minga.Buffer.Replace
   alias MingaAgent.ProjectView
   alias MingaAgent.ToolRouter
   alias MingaAgent.Tools.DeleteFile
@@ -376,7 +378,7 @@ defmodule MingaAgent.Tools do
         path = resolve_and_validate_path!(root, args["path"])
         edits = args["edits"] || []
 
-        if ToolRouter.active?(router_ctx) do
+        if ToolRouter.routing_configured?(router_ctx) do
           apply_multi_edit_via_router(router_ctx, path, edits)
         else
           case MultiEditFile.execute(path, edits) do
@@ -498,8 +500,14 @@ defmodule MingaAgent.Tools do
       },
       callback: fn args ->
         path = resolve_and_validate_path!(root, args["path"] || ".")
-        search_path = ToolRouter.filesystem_path(router_ctx, path)
-        routed_result(router_ctx, Find.execute(args["pattern"], search_path, args))
+
+        case ToolRouter.filesystem_path_result(router_ctx, path) do
+          {:ok, search_path} ->
+            routed_result(router_ctx, Find.execute(args["pattern"], search_path, args))
+
+          {:error, reason} ->
+            {:error, inspect(reason)}
+        end
       end
     )
   end
@@ -543,8 +551,14 @@ defmodule MingaAgent.Tools do
       },
       callback: fn args ->
         path = resolve_and_validate_path!(root, args["path"] || ".")
-        search_path = ToolRouter.filesystem_path(router_ctx, path)
-        routed_result(router_ctx, Grep.execute(args["pattern"], search_path, args))
+
+        case ToolRouter.filesystem_path_result(router_ctx, path) do
+          {:ok, search_path} ->
+            routed_result(router_ctx, Grep.execute(args["pattern"], search_path, args))
+
+          {:error, reason} ->
+            {:error, inspect(reason)}
+        end
       end
     )
   end
@@ -574,12 +588,23 @@ defmodule MingaAgent.Tools do
         "required" => ["command"]
       },
       callback: fn args ->
-        flush_before_shell()
         timeout_secs = min(args["timeout"] || 30, 300)
-        cwd = ToolRouter.working_dir(router_ctx) || root
 
-        env = ToolRouter.command_env(router_ctx)
-        routed_result(router_ctx, Shell.execute(args["command"], cwd, timeout_secs, env: env))
+        with {:ok, cwd} <- ToolRouter.working_dir_result(router_ctx),
+             {:ok, env} <- ToolRouter.command_env_result(router_ctx) do
+          shell_root = cwd || root
+
+          if is_nil(cwd) do
+            flush_before_shell()
+          end
+
+          routed_result(
+            router_ctx,
+            Shell.execute(args["command"], shell_root, timeout_secs, env: env)
+          )
+        else
+          {:error, reason} -> {:error, inspect(reason)}
+        end
       end
     )
   end
@@ -1139,11 +1164,15 @@ defmodule MingaAgent.Tools do
   @spec read_file_fallback(ToolRouter.context(), String.t(), term(), map()) ::
           {:ok, String.t()} | {:error, String.t()}
   defp read_file_fallback(router_ctx, path, reason, args) do
-    if ToolRouter.project_view?(router_ctx) do
-      {:error,
-       "failed to read #{path} from #{ToolRouter.workspace_label(router_ctx)}: #{inspect(reason)}"}
+    if routing_error?(reason) do
+      {:error, inspect(reason)}
     else
-      routed_result(router_ctx, ReadFile.execute(path, build_read_opts(args)))
+      if ToolRouter.project_view?(router_ctx) do
+        {:error,
+         "failed to read #{path} from #{ToolRouter.workspace_label(router_ctx)}: #{inspect(reason)}"}
+      else
+        routed_result(router_ctx, ReadFile.execute(path, build_read_opts(args)))
+      end
     end
   end
 
@@ -1154,6 +1183,13 @@ defmodule MingaAgent.Tools do
   end
 
   defp routed_result(_router_ctx, {:error, _message} = error), do: error
+
+  @spec routing_error?(term()) :: boolean()
+  defp routing_error?({:fork_unavailable, _}), do: true
+  defp routing_error?({:project_view_unavailable, _}), do: true
+  defp routing_error?({:changeset_unavailable, _}), do: true
+  defp routing_error?(:deleted), do: true
+  defp routing_error?(_), do: false
 
   @spec append_workspace_context(ToolRouter.context(), String.t()) :: String.t()
   defp append_workspace_context(router_ctx, message) do
@@ -1434,20 +1470,15 @@ defmodule MingaAgent.Tools do
 
   @spec reduce_edits(String.t(), [map()]) :: {String.t(), [{:ok | :error, String.t()}]}
   defp reduce_edits(content, edits) do
-    {final, reversed} =
-      Enum.reduce(edits, {content, []}, fn edit, {current, acc} ->
-        old_text = edit["old_text"] || ""
-        new_text = edit["new_text"] || ""
-
-        if String.contains?(current, old_text) do
-          updated = String.replace(current, old_text, new_text, global: false)
-          {updated, [{:ok, old_text} | acc]}
-        else
-          {current, [{:error, old_text} | acc]}
-        end
+    edit_pairs =
+      Enum.map(edits, fn edit ->
+        {edit["old_text"] || "", edit["new_text"] || ""}
       end)
 
-    {final, Enum.reverse(reversed)}
+    {final_doc, results, _any_applied?} =
+      Replace.apply_batch(Document.new(content), edit_pairs, nil)
+
+    {Document.content(final_doc), results}
   end
 
   @spec commit_multi_edits(
@@ -1460,10 +1491,18 @@ defmodule MingaAgent.Tools do
   defp commit_multi_edits(router_ctx, path, edits, final_content, results) do
     ok_count = Enum.count(results, &match?({:ok, _}, &1))
 
-    if ok_count == 0 do
-      {:error, "no edits matched in #{path}"}
-    else
-      commit_multi_edit_write(router_ctx, path, edits, final_content, results, ok_count)
+    case ok_count do
+      0 ->
+        msg =
+          append_workspace_context(
+            router_ctx,
+            format_multi_edit_result(router_ctx, path, results, ok_count)
+          )
+
+        {:ok, maybe_append_diagnostics(path, msg)}
+
+      _ ->
+        commit_multi_edit_write(router_ctx, path, edits, final_content, results, ok_count)
     end
   end
 

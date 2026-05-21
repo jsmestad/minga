@@ -26,8 +26,9 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSource do
   def candidates(%Context{tab_bar: %TabBar{} = tab_bar}) do
     tab_bar.workspaces
     |> Enum.filter(&pending_review?/1)
-    |> Enum.map(&workspace_item/1)
-    |> Enum.sort_by(&sort_key/1, :asc)
+    |> Enum.map(&workspace_candidate/1)
+    |> Enum.sort_by(& &1.sort_key, :asc)
+    |> Enum.map(& &1.item)
     |> empty_state_if_needed()
   end
 
@@ -38,9 +39,10 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSource do
   def on_select(%Item{id: :empty}, state), do: state
 
   def on_select(
-        %Item{id: {workspace_id, _last_activity}},
+        %Item{id: workspace_id},
         %{shell_state: %{tab_bar: %TabBar{} = tab_bar}} = state
-      ) do
+      )
+      when is_integer(workspace_id) do
     switch_to_workspace(state, tab_bar, workspace_id)
   end
 
@@ -83,32 +85,33 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSource do
 
   defp pending_review?(%Workspace{}), do: false
 
-  @spec workspace_item(Workspace.t()) :: Item.t()
-  defp workspace_item(%Workspace{} = workspace) do
+  @spec workspace_candidate(Workspace.t()) :: %{
+          item: Item.t(),
+          sort_key: {0 | 1 | 2, integer(), String.t()}
+        }
+  defp workspace_candidate(%Workspace{} = workspace) do
     activity = last_activity(workspace)
     review = workspace.review
+    review_state = review.state
+    state_label = state_label(review_state)
 
-    %Item{
-      id: {workspace.id, activity.unix},
-      label: workspace.label,
-      description:
-        "#{state_label(review.state)} • #{WorkspaceReview.draft_count(review)} draft file(s) • #{WorkspaceReview.conflict_count(review)} conflict file(s) • Last activity #{activity.label}",
-      annotation: state_label(review.state),
-      icon_color: workspace.color,
-      two_line: true
+    %{
+      sort_key: {state_rank(review_state), -activity.unix, workspace.label},
+      item: %Item{
+        id: workspace.id,
+        label: workspace.label,
+        description:
+          "#{state_label} • #{WorkspaceReview.draft_count(review)} draft file(s) • #{WorkspaceReview.conflict_count(review)} conflict file(s) • Last activity #{activity.label}",
+        annotation: state_label,
+        icon_color: workspace.color,
+        two_line: true
+      }
     }
   end
 
-  @spec sort_key(Item.t()) :: {non_neg_integer(), integer(), String.t()}
-  defp sort_key(%Item{id: :empty}), do: {2, 0, ""}
-
-  defp sort_key(%Item{id: {_workspace_id, last_activity}, annotation: state_label, label: label}) do
-    {state_rank(state_label), -last_activity, label}
-  end
-
-  @spec state_rank(String.t() | nil) :: 0 | 1 | 2
-  defp state_rank("Conflict"), do: 0
-  defp state_rank("Needs review"), do: 1
+  @spec state_rank(WorkspaceReview.state() | term()) :: 0 | 1 | 2
+  defp state_rank(:conflict), do: 0
+  defp state_rank(:needs_review), do: 1
   defp state_rank(_state), do: 2
 
   @spec state_label(WorkspaceReview.state()) :: String.t()

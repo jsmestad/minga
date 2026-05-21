@@ -1,3 +1,6 @@
+# credo:disable-for-this-file Credo.Check.Refactor.Nesting
+# credo:disable-for-this-file Credo.Check.Readability.WithSingleClause
+
 defmodule MingaAgent.Changeset.Server do
   @moduledoc """
   GenServer managing a single changeset's lifecycle.
@@ -9,6 +12,8 @@ defmodule MingaAgent.Changeset.Server do
 
   use GenServer, restart: :temporary
 
+  alias Minga.Buffer.Document
+  alias Minga.Buffer.Replace
   alias Minga.Core.Overlay
   alias MingaAgent.Changeset.MergedEvent
 
@@ -19,7 +24,7 @@ defmodule MingaAgent.Changeset.Server do
           modifications: %{String.t() => binary()},
           originals: %{String.t() => binary()},
           deletions: MapSet.t(String.t()),
-          history: %{String.t() => [binary() | :unmodified]},
+          history: %{String.t() => [binary() | :unmodified | :deleted]},
           budget: pos_integer() | :unlimited,
           attempts: non_neg_integer()
         }
@@ -61,14 +66,16 @@ defmodule MingaAgent.Changeset.Server do
   def handle_call({:write_file, relative_path, content}, _from, state) do
     case normalize_path(state, relative_path) do
       {:ok, path} ->
-        case Overlay.materialize_file(state.overlay, path, content) do
-          :ok ->
-            state = capture_original(state, path)
-            state = push_history(state, path)
-            state = put_in(state.modifications[path], content)
-            state = %{state | deletions: MapSet.delete(state.deletions, path)}
-            {:reply, :ok, state}
+        was_deleted = MapSet.member?(state.deletions, path)
 
+        with :ok <- clear_deleted_marker(state, path, was_deleted),
+             :ok <- Overlay.materialize_file(state.overlay, path, content) do
+          state = capture_original(state, path)
+          state = push_history(state, path)
+          state = put_in(state.modifications[path], content)
+          state = %{state | deletions: MapSet.delete(state.deletions, path)}
+          {:reply, :ok, state}
+        else
           {:error, reason} ->
             {:reply, {:error, reason}, state}
         end
@@ -178,33 +185,36 @@ defmodule MingaAgent.Changeset.Server do
   end
 
   def handle_call(:reset, _from, state) do
-    Enum.each(state.modifications, fn {path, _} ->
-      restore_original(state, path)
-    end)
+    case restore_all(state) do
+      {:ok, new_state} ->
+        {:reply, :ok, new_state}
 
-    Enum.each(state.deletions, fn path ->
-      restore_original(state, path)
-    end)
-
-    state = %{state | modifications: %{}, deletions: MapSet.new(), history: %{}}
-    {:reply, :ok, state}
+      {:error, reason, new_state} ->
+        {:reply, {:error, reason}, new_state}
+    end
   end
 
   def handle_call({:discard_file, relative_path}, _from, state) do
     case normalize_path(state, relative_path) do
       {:ok, path} ->
-        restore_original(state, path)
-        prune_empty_overlay_dirs(state, path)
+        case {tracked_path?(state, path), discard_file_cleanup(state, path)} do
+          {true, :ok} ->
+            state = %{
+              state
+              | modifications: Map.delete(state.modifications, path),
+                originals: Map.delete(state.originals, path),
+                deletions: MapSet.delete(state.deletions, path),
+                history: Map.delete(state.history, path)
+            }
 
-        state = %{
-          state
-          | modifications: Map.delete(state.modifications, path),
-            originals: Map.delete(state.originals, path),
-            deletions: MapSet.delete(state.deletions, path),
-            history: Map.delete(state.history, path)
-        }
+            {:reply, :ok, state}
 
-        {:reply, :ok, state}
+          {true, {:error, reason}} ->
+            {:reply, {:error, reason}, state}
+
+          {false, _cleanup_result} ->
+            {:reply, :ok, state}
+        end
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -356,18 +366,42 @@ defmodule MingaAgent.Changeset.Server do
   defp undo_path(path, state) do
     case Map.get(state.history, path) do
       [prev | rest] ->
-        state = put_in(state.history[path], rest)
+        case prev do
+          :unmodified ->
+            case restore_original(state, path) do
+              :ok ->
+                state = put_in(state.history[path], rest)
+                state = %{state | modifications: Map.delete(state.modifications, path)}
+                state = %{state | deletions: MapSet.delete(state.deletions, path)}
+                {:reply, :ok, state}
 
-        if prev == :unmodified do
-          state = %{state | modifications: Map.delete(state.modifications, path)}
-          state = %{state | deletions: MapSet.delete(state.deletions, path)}
-          restore_original(state, path)
-          {:reply, :ok, state}
-        else
-          Overlay.materialize_file(state.overlay, path, prev)
-          state = put_in(state.modifications[path], prev)
-          state = %{state | deletions: MapSet.delete(state.deletions, path)}
-          {:reply, :ok, state}
+              {:error, reason} ->
+                {:reply, {:error, reason}, state}
+            end
+
+          :deleted ->
+            case restore_deleted_overlay(state, path) do
+              :ok ->
+                state = put_in(state.history[path], rest)
+                state = %{state | modifications: Map.delete(state.modifications, path)}
+                state = %{state | deletions: MapSet.put(state.deletions, path)}
+                {:reply, :ok, state}
+
+              {:error, reason} ->
+                {:reply, {:error, reason}, state}
+            end
+
+          prev ->
+            case Overlay.materialize_file(state.overlay, path, prev) do
+              :ok ->
+                state = put_in(state.history[path], rest)
+                state = put_in(state.modifications[path], prev)
+                state = %{state | deletions: MapSet.delete(state.deletions, path)}
+                {:reply, :ok, state}
+
+              {:error, reason} ->
+                {:reply, {:error, reason}, state}
+            end
         end
 
       _ ->
@@ -379,8 +413,8 @@ defmodule MingaAgent.Changeset.Server do
           {:ok, state()} | {:error, term()}
   defp apply_edit(state, path, old_text, new_text) do
     with {:ok, content} <- current_content(state, path),
-         true <- String.contains?(content, old_text) do
-      new_content = String.replace(content, old_text, new_text, global: false)
+         {:ok, edited_doc, _msg} <- Replace.apply(Document.new(content), old_text, new_text, nil) do
+      new_content = Document.content(edited_doc)
       state = capture_original(state, path)
       state = push_history(state, path)
 
@@ -389,7 +423,6 @@ defmodule MingaAgent.Changeset.Server do
         {:error, reason} -> {:error, reason}
       end
     else
-      false -> {:error, :text_not_found}
       {:error, reason} -> {:error, reason}
     end
   end
@@ -418,23 +451,133 @@ defmodule MingaAgent.Changeset.Server do
   @spec push_history(state(), String.t()) :: state()
   defp push_history(state, path) do
     current =
-      case Map.get(state.modifications, path) do
-        nil -> :unmodified
-        content -> content
+      case {MapSet.member?(state.deletions, path), Map.fetch(state.modifications, path)} do
+        {true, _} -> :deleted
+        {false, {:ok, content}} -> content
+        {false, :error} -> :unmodified
       end
 
     history = Map.get(state.history, path, [])
     put_in(state.history[path], [current | history])
   end
 
-  @spec prune_empty_overlay_dirs(state(), String.t()) :: :ok
+  @spec clear_deleted_marker(state(), String.t(), boolean()) :: :ok | {:error, term()}
+  defp clear_deleted_marker(_state, _path, false), do: :ok
+
+  defp clear_deleted_marker(state, path, true) do
+    remove_overlay_artifact(
+      Path.join(state.overlay.overlay_dir, path) <> ".__changeset_deleted__"
+    )
+  end
+
+  @spec restore_deleted_overlay(state(), String.t()) :: :ok | {:error, term()}
+  defp restore_deleted_overlay(state, path) do
+    overlay_path = Path.join(state.overlay.overlay_dir, path)
+    tombstone_path = overlay_path <> ".__changeset_deleted__"
+
+    with :ok <- remove_overlay_artifact(overlay_path),
+         :ok <- File.mkdir_p(Path.dirname(tombstone_path)),
+         :ok <- File.write(tombstone_path, "") do
+      :ok
+    else
+      {:error, reason} -> {:error, {:deleted_restore_failed, reason}}
+    end
+  end
+
+  @spec discard_file_cleanup(state(), String.t()) :: :ok | {:error, term()}
+  defp discard_file_cleanup(state, path) do
+    overlay_path = Path.join(state.overlay.overlay_dir, path)
+    project_path = Path.join(state.project_root, path)
+    tombstone_path = overlay_path <> ".__changeset_deleted__"
+    backup_path = overlay_path <> ".__discard_backup__"
+
+    if File.regular?(project_path) do
+      with :ok <- remove_overlay_artifact(backup_path),
+           :ok <- remove_overlay_artifact(tombstone_path),
+           :ok <- prune_empty_overlay_dirs(state, path),
+           :ok <-
+             restore_project_file(state.overlay, state.project_root, overlay_path, backup_path),
+           :ok <- remove_overlay_artifact(backup_path) do
+        :ok
+      else
+        {:error, reason} ->
+          case restore_overlay_backup(overlay_path, backup_path) do
+            :ok -> {:error, reason}
+            {:error, rollback_reason} -> {:error, {:cleanup_failed, reason, rollback_reason}}
+          end
+      end
+    else
+      with :ok <- remove_overlay_artifact(overlay_path),
+           :ok <- remove_overlay_artifact(tombstone_path),
+           :ok <- prune_empty_overlay_dirs(state, path) do
+        :ok
+      else
+        {:error, reason} ->
+          case restore_discarded_overlay(state, path, tombstone_path) do
+            :ok -> {:error, reason}
+            {:error, rollback_reason} -> {:error, {:cleanup_failed, reason, rollback_reason}}
+          end
+      end
+    end
+  end
+
+  @spec restore_discarded_overlay(state(), String.t(), String.t()) :: :ok | {:error, term()}
+  defp restore_discarded_overlay(state, path, tombstone_path) do
+    case restore_discarded_overlay_content(state, path) do
+      :ok -> restore_discarded_tombstone(state, path, tombstone_path)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec restore_discarded_overlay_content(state(), String.t()) :: :ok | {:error, term()}
+  defp restore_discarded_overlay_content(state, path) do
+    if Map.has_key?(state.modifications, path) do
+      case Map.fetch(state.modifications, path) do
+        {:ok, content} ->
+          case Overlay.materialize_file(state.overlay, path, content) do
+            :ok -> :ok
+            {:error, reason} -> {:error, {:materialize_failed, reason}}
+          end
+
+        :error ->
+          :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  @spec restore_discarded_tombstone(state(), String.t(), String.t()) :: :ok | {:error, term()}
+  defp restore_discarded_tombstone(state, path, tombstone_path) do
+    if MapSet.member?(state.deletions, path) do
+      with :ok <- File.mkdir_p(Path.dirname(tombstone_path)),
+           :ok <- File.write(tombstone_path, "") do
+        :ok
+      else
+        {:error, reason} -> {:error, {:tombstone_restore_failed, reason}}
+      end
+    else
+      :ok
+    end
+  end
+
+  @spec remove_overlay_artifact(String.t()) :: :ok | {:error, term()}
+  defp remove_overlay_artifact(path) do
+    case File.rm(path) do
+      :ok -> :ok
+      {:error, :enoent} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec prune_empty_overlay_dirs(state(), String.t()) :: :ok | {:error, term()}
   defp prune_empty_overlay_dirs(state, path) do
     path
     |> Path.dirname()
     |> prune_empty_overlay_dir(state)
   end
 
-  @spec prune_empty_overlay_dir(String.t(), state()) :: :ok
+  @spec prune_empty_overlay_dir(String.t(), state()) :: :ok | {:error, term()}
   defp prune_empty_overlay_dir(".", _state), do: :ok
 
   defp prune_empty_overlay_dir(relative_dir, state) do
@@ -446,37 +589,163 @@ defmodule MingaAgent.Changeset.Server do
     else
       case File.rmdir(overlay_dir) do
         :ok -> relative_dir |> Path.dirname() |> prune_empty_overlay_dir(state)
-        {:error, _reason} -> :ok
+        {:error, :enoent} -> relative_dir |> Path.dirname() |> prune_empty_overlay_dir(state)
+        {:error, :enotempty} -> :ok
+        {:error, reason} -> {:error, reason}
       end
     end
   end
 
-  @spec restore_original(state(), String.t()) :: :ok
+  @spec restore_project_file(Overlay.t(), String.t(), String.t(), String.t()) ::
+          :ok | {:error, term()}
+  defp restore_project_file(%Overlay{} = overlay, project_root, overlay_path, backup_path) do
+    project_path = Path.join(project_root, Path.relative_to(overlay_path, overlay.overlay_dir))
+    temp_path = overlay_path <> ".__restore_tmp__"
+
+    if File.regular?(project_path) do
+      with :ok <- remove_overlay_artifact(temp_path),
+           :ok <- relink_file(overlay, project_path, temp_path) do
+        swap_overlay_with_temp(overlay_path, temp_path, backup_path)
+      end
+    else
+      :ok
+    end
+  end
+
+  @spec restore_original(state(), String.t()) :: :ok | {:error, term()}
   defp restore_original(state, path) do
     overlay_path = Path.join(state.overlay.overlay_dir, path)
     project_path = Path.join(state.project_root, path)
-
-    File.rm(overlay_path)
-    File.rm(overlay_path <> ".__changeset_deleted__")
+    tombstone_path = overlay_path <> ".__changeset_deleted__"
+    backup_path = overlay_path <> ".__restore_backup__"
 
     if File.regular?(project_path) do
-      File.mkdir_p!(Path.dirname(overlay_path))
-      relink_file(state.overlay, project_path, overlay_path)
+      with :ok <- remove_overlay_artifact(backup_path),
+           :ok <- remove_overlay_artifact(tombstone_path),
+           :ok <- prune_empty_overlay_dirs(state, path),
+           :ok <-
+             restore_project_file(state.overlay, state.project_root, overlay_path, backup_path),
+           :ok <- remove_overlay_artifact(backup_path) do
+        :ok
+      else
+        {:error, reason} ->
+          case restore_overlay_backup(overlay_path, backup_path) do
+            :ok -> {:error, reason}
+            {:error, rollback_reason} -> {:error, {:cleanup_failed, reason, rollback_reason}}
+          end
+      end
+    else
+      with :ok <- remove_overlay_artifact(overlay_path),
+           :ok <- remove_overlay_artifact(tombstone_path),
+           :ok <- prune_empty_overlay_dirs(state, path) do
+        :ok
+      else
+        {:error, reason} ->
+          case restore_discarded_overlay(state, path, tombstone_path) do
+            :ok -> {:error, reason}
+            {:error, rollback_reason} -> {:error, {:cleanup_failed, reason, rollback_reason}}
+          end
+      end
     end
-
-    :ok
   end
 
-  @spec relink_file(Overlay.t(), String.t(), String.t()) :: :ok
+  @spec swap_overlay_with_temp(String.t(), String.t(), String.t()) :: :ok | {:error, term()}
+  defp swap_overlay_with_temp(overlay_path, temp_path, backup_path) do
+    if File.exists?(overlay_path) do
+      with :ok <- rename_overlay_to_backup(overlay_path, backup_path),
+           :ok <- File.rename(temp_path, overlay_path) do
+        :ok
+      else
+        {:error, reason} ->
+          case restore_overlay_backup(overlay_path, backup_path) do
+            :ok ->
+              _ = remove_overlay_artifact(temp_path)
+              {:error, reason}
+
+            {:error, rollback_reason} ->
+              _ = remove_overlay_artifact(temp_path)
+              {:error, {:swap_failed, reason, rollback_reason}}
+          end
+      end
+    else
+      case File.rename(temp_path, overlay_path) do
+        :ok ->
+          :ok
+
+        {:error, reason} ->
+          _ = remove_overlay_artifact(temp_path)
+          {:error, reason}
+      end
+    end
+  end
+
+  @spec relink_file(Overlay.t(), String.t(), String.t()) :: :ok | {:error, term()}
   defp relink_file(%Overlay{link_mode: :hardlink}, source, target) do
     case File.ln(source, target) do
       :ok -> :ok
-      {:error, _} -> File.cp!(source, target)
+      {:error, _} -> File.cp(source, target)
     end
   end
 
   defp relink_file(%Overlay{link_mode: :copy}, source, target) do
-    File.cp!(source, target)
+    File.cp(source, target)
+  end
+
+  @spec rename_overlay_to_backup(String.t(), String.t()) :: :ok | {:error, term()}
+  defp rename_overlay_to_backup(path, backup_path) do
+    case File.rename(path, backup_path) do
+      :ok -> :ok
+      {:error, :enoent} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec restore_overlay_backup(String.t(), String.t()) :: :ok | {:error, term()}
+  defp restore_overlay_backup(path, backup_path) do
+    case File.rename(backup_path, path) do
+      :ok -> :ok
+      {:error, :enoent} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec restore_all(state()) :: {:ok, state()} | {:error, term(), state()}
+  defp restore_all(state) do
+    paths =
+      state.modifications
+      |> Map.keys()
+      |> Kernel.++(MapSet.to_list(state.deletions))
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    restore_all(paths, state)
+  end
+
+  @spec restore_all([String.t()], state()) :: {:ok, state()} | {:error, term(), state()}
+  defp restore_all([], state), do: {:ok, state}
+
+  defp restore_all([path | rest], state) do
+    case restore_original(state, path) do
+      :ok -> restore_all(rest, forget_restored_path(state, path))
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  @spec forget_restored_path(state(), String.t()) :: state()
+  defp forget_restored_path(state, path) do
+    %{
+      state
+      | modifications: Map.delete(state.modifications, path),
+        originals: Map.delete(state.originals, path),
+        deletions: MapSet.delete(state.deletions, path),
+        history: Map.delete(state.history, path)
+    }
+  end
+
+  @spec tracked_path?(state(), String.t()) :: boolean()
+  defp tracked_path?(state, path) do
+    Map.has_key?(state.modifications, path) or Map.has_key?(state.originals, path) or
+      MapSet.member?(state.deletions, path) or Map.has_key?(state.history, path)
   end
 
   @spec normalize_path(state(), String.t()) ::

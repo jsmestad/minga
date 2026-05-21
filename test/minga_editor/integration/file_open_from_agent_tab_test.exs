@@ -97,10 +97,11 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
   end
 
   defp open_file_and_wait(ctx, file_path) do
-    ref = HeadlessPort.prepare_await(ctx.port)
+    Process.delete({:last_frame_snapshot, ctx.port})
     :ok = MingaEditor.open_file(ctx.editor, file_path)
-    {:ok, snapshot} = HeadlessPort.collect_frame(ref, 15_000)
-    Process.put({:last_frame_snapshot, ctx.port}, snapshot)
+    _state = GenServer.call(ctx.editor, :api_mode, 15_000)
+    _screen = HeadlessPort.get_screen(ctx.port)
+    Process.delete({:last_frame_snapshot, ctx.port})
     :ok
   end
 
@@ -112,17 +113,25 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
 
       open_file_and_wait(ctx, file_path)
 
-      wait_until_screen(ctx, fn -> String.contains?(screen_row(ctx, 0), ".credo.exs") end,
-        message: "Expected opened file tab to become visible"
+      assert active_content(ctx) == "configs = [:editor]\n"
+      assert BufferProcess.file_path(active_buffer(ctx)) == file_path
+
+      wait_until_screen(
+        ctx,
+        fn ->
+          screen_contains?(ctx, ".credo.exs") and screen_contains?(ctx, "configs = [:editor]")
+        end,
+        message: "Expected opened file editing surface to become visible"
       )
 
-      assert String.contains?(screen_row(ctx, 0), ".credo.exs")
+      assert screen_contains?(ctx, ".credo.exs")
       assert screen_contains?(ctx, "configs = [:editor]")
       assert_modeline_contains(ctx, "NORMAL")
       refute String.contains?(modeline(ctx), "Prompt")
 
       send_keys_sync(ctx, "i# <Esc>")
 
+      assert active_content(ctx) == "# configs = [:editor]\n"
       assert screen_contains?(ctx, "# configs = [:editor]")
     end
 

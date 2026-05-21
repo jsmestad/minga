@@ -1,3 +1,5 @@
+# credo:disable-for-this-file Credo.Check.Readability.PreferImplicitTry
+
 defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
   @moduledoc """
   Picker source for moving or copying the active file membership to another workspace.
@@ -177,16 +179,27 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
     EditorState.set_status(state, @agent_move_block)
   end
 
-  defp move_or_confirm(context, state, _tab_bar, %Workspace{kind: :agent} = source, _destination) do
+  defp move_or_confirm(context, state, tab_bar, %Workspace{kind: :agent} = source, _destination) do
     file_ref = Map.fetch!(context, :file_ref)
 
-    if draft_for_file?(source, file_ref) do
-      PickerUI.open(state, __MODULE__, Map.put(context, :confirm?, true))
-      |> EditorState.set_status(
-        "Drafts for #{FileRef.display_label(file_ref)} will be discarded. Continue / Promote first / Cancel."
-      )
-    else
-      do_move(context, state)
+    case refresh_agent_source_review(tab_bar, source) do
+      {:ok, refreshed_tab_bar, refreshed_source, _fresh_files} ->
+        refreshed_state = EditorState.set_tab_bar(state, refreshed_tab_bar)
+
+        if draft_for_file?(refreshed_source, file_ref) do
+          PickerUI.open(refreshed_state, __MODULE__, Map.put(context, :confirm?, true))
+          |> EditorState.set_status(
+            "Drafts for #{FileRef.display_label(file_ref)} will be discarded. Continue / Promote first / Cancel."
+          )
+        else
+          do_move(context, refreshed_state)
+        end
+
+      {:error, :missing_project_view} ->
+        EditorState.set_status(state, "Workspace move failed: missing project view")
+
+      {:error, reason} ->
+        EditorState.set_status(state, "Workspace move failed: #{inspect(reason)}")
     end
   end
 
@@ -230,7 +243,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
   defp promote_then_move(context, state) do
     with {:ok, tab_bar, source, _destination} <- fetch_transfer_workspaces(state, context),
          %ProjectView{} = view <- source.project_view,
-         :ok <- ProjectView.promote(view, :project_root) do
+         :ok <- safe_project_view_promote(view) do
       tab_bar =
         TabBar.update_workspace(
           tab_bar,
@@ -276,19 +289,58 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
   @spec promote_conflict_review(Workspace.t(), ProjectView.t(), map()) ::
           {:ok, WorkspaceReview.t()} | {:error, term()}
   defp promote_conflict_review(%Workspace{} = source, %ProjectView{} = view, details) do
-    source.review
-    |> WorkspaceReview.set_changed_files(project_view_changed_files(view))
-    |> WorkspaceReview.promote_found_overlaps(
-      conflict_files(source.project_root, details),
-      details
-    )
+    with {:ok, changed_files} <- project_view_changed_files(view) do
+      source.review
+      |> WorkspaceReview.set_changed_files(changed_files)
+      |> WorkspaceReview.promote_found_overlaps(
+        conflict_files(source.project_root, details),
+        details
+      )
+    end
   end
 
-  @spec project_view_changed_files(ProjectView.t()) :: [FileRef.t()]
+  @spec refresh_agent_source_review(TabBar.t(), Workspace.t()) ::
+          {:ok, TabBar.t(), Workspace.t(), [FileRef.t()]} | {:error, term()}
+  defp refresh_agent_source_review(
+         tab_bar,
+         %Workspace{project_view: %ProjectView{} = view} = source
+       ) do
+    with {:ok, fresh_files} <- project_view_changed_files(view) do
+      review = sync_review_from_diff(source.review, fresh_files)
+      refreshed_source = Workspace.set_review(source, review)
+
+      refreshed_tab_bar =
+        TabBar.update_workspace(tab_bar, source.id, fn _ -> refreshed_source end)
+
+      {:ok, refreshed_tab_bar, refreshed_source, fresh_files}
+    end
+  end
+
+  defp refresh_agent_source_review(_tab_bar, %Workspace{kind: :agent}),
+    do: {:error, :missing_project_view}
+
+  @spec sync_review_from_diff(WorkspaceReview.t(), [FileRef.t()]) :: WorkspaceReview.t()
+  defp sync_review_from_diff(review, []) do
+    WorkspaceReview.clean(review)
+  end
+
+  defp sync_review_from_diff(review, fresh_files) when is_list(fresh_files) do
+    review = WorkspaceReview.set_changed_files(review, fresh_files)
+
+    if review.state == :clean do
+      case WorkspaceReview.agent_started_editing(review, fresh_files) do
+        {:ok, synced} -> synced
+        {:error, _reason} -> review
+      end
+    else
+      review
+    end
+  end
+
+  @spec project_view_changed_files(ProjectView.t()) :: {:ok, [FileRef.t()]} | {:error, term()}
   defp project_view_changed_files(%ProjectView{} = view) do
-    case ProjectView.diff(view) do
-      {:ok, entries} -> diff_entries_to_file_refs(view.project_root, entries)
-      {:error, _reason} -> []
+    with {:ok, entries} <- safe_project_view_diff(view) do
+      {:ok, diff_entries_to_file_refs(view.project_root, entries)}
     end
   end
 
@@ -350,7 +402,10 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
     case {source.project_view, file_ref} do
       {%ProjectView{} = view, %FileRef{kind: :path, relative_path: relative_path}}
       when is_binary(relative_path) ->
-        ProjectView.discard_file(view, relative_path)
+        safe_project_view_discard_file(view, relative_path)
+
+      {nil, %FileRef{kind: :path}} ->
+        {:error, "Workspace move failed: missing project view"}
 
       _ ->
         :ok
@@ -358,6 +413,30 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
   end
 
   defp maybe_discard_file_drafts(%Workspace{}, %FileRef{}, false), do: :ok
+
+  @spec safe_project_view_discard_file(ProjectView.t(), String.t()) :: :ok | {:error, term()}
+  defp safe_project_view_discard_file(%ProjectView{} = view, relative_path) do
+    safe_project_view_call(fn -> ProjectView.discard_file(view, relative_path) end)
+  end
+
+  @spec safe_project_view_promote(ProjectView.t()) :: :ok | {:conflict, map()} | {:error, term()}
+  defp safe_project_view_promote(%ProjectView{} = view) do
+    safe_project_view_call(fn -> ProjectView.promote(view, :project_root) end)
+  end
+
+  @spec safe_project_view_diff(ProjectView.t()) :: {:ok, [map()]} | {:error, term()}
+  defp safe_project_view_diff(%ProjectView{} = view) do
+    safe_project_view_call(fn -> ProjectView.diff(view) end)
+  end
+
+  @spec safe_project_view_call((-> term())) :: term()
+  defp safe_project_view_call(fun) do
+    try do
+      fun.()
+    catch
+      :exit, reason -> {:error, {:project_view_unavailable, reason}}
+    end
+  end
 
   @spec remove_source_file(Workspace.t(), FileRef.t(), boolean()) :: Workspace.t()
   defp remove_source_file(%Workspace{} = source, %FileRef{} = file_ref, true) do

@@ -1,3 +1,5 @@
+# credo:disable-for-this-file Credo.Check.Refactor.RedundantWithClauseResult
+
 defmodule MingaAgent.ProjectView.Direct do
   @moduledoc """
   Direct project view backend.
@@ -7,6 +9,8 @@ defmodule MingaAgent.ProjectView.Direct do
 
   @behaviour MingaAgent.ProjectView.Backend
 
+  alias Minga.Buffer.Document
+  alias Minga.Buffer.Replace
   alias MingaAgent.ProjectView
 
   @type direct_state :: %{modified: MapSet.t(String.t()), deleted: MapSet.t(String.t())}
@@ -35,9 +39,11 @@ defmodule MingaAgent.ProjectView.Direct do
   def write_file(%ProjectView{} = view, relative_path, content) do
     target = target_path(view, relative_path)
 
-    with :ok <- File.mkdir_p(Path.dirname(target)),
-         :ok <- File.write(target, content) do
-      track_modified(view, relative_path)
+    with :ok <- ensure_tracking_agent_available(view),
+         :ok <- File.mkdir_p(Path.dirname(target)),
+         :ok <- File.write(target, content),
+         :ok <- track_modified(view, relative_path) do
+      :ok
     end
   end
 
@@ -45,17 +51,21 @@ defmodule MingaAgent.ProjectView.Direct do
   @spec edit_file(ProjectView.t(), String.t(), String.t(), String.t()) :: :ok | {:error, term()}
   def edit_file(%ProjectView{} = view, relative_path, old_text, new_text) do
     with {:ok, content} <- read_file(view, relative_path),
-         {:ok, edited} <- replace_exact(content, old_text, new_text) do
-      write_file(view, relative_path, edited)
+         {:ok, edited_doc, _msg} <- Replace.apply(Document.new(content), old_text, new_text, nil),
+         :ok <- write_file(view, relative_path, Document.content(edited_doc)) do
+      :ok
     end
   end
 
   @impl true
   @spec delete_file(ProjectView.t(), String.t()) :: :ok | {:error, term()}
   def delete_file(%ProjectView{} = view, relative_path) do
-    case view |> target_path(relative_path) |> File.rm() do
-      :ok -> track_deleted(view, relative_path)
-      {:error, reason} -> {:error, reason}
+    target = target_path(view, relative_path)
+
+    with :ok <- ensure_tracking_agent_available(view),
+         :ok <- File.rm(target),
+         :ok <- track_deleted(view, relative_path) do
+      :ok
     end
   end
 
@@ -111,22 +121,20 @@ defmodule MingaAgent.ProjectView.Direct do
 
   @impl true
   @spec discard_file(ProjectView.t(), String.t()) :: :ok | {:error, term()}
-  def discard_file(%ProjectView{} = view, relative_path) do
-    Agent.update(view.ref, fn state ->
-      %{
-        state
-        | modified: MapSet.delete(state.modified, relative_path),
-          deleted: MapSet.delete(state.deleted, relative_path)
-      }
-    end)
-  catch
-    :exit, _ -> :ok
+  def discard_file(%ProjectView{} = _view, _relative_path) do
+    {:error, :discard_not_supported}
   end
 
   @impl true
   @spec discard(ProjectView.t()) :: :ok | {:error, term()}
-  def discard(%ProjectView{} = view) do
-    Agent.update(view.ref, fn _ -> %{modified: MapSet.new(), deleted: MapSet.new()} end)
+  def discard(%ProjectView{} = _view) do
+    {:error, :discard_not_supported}
+  end
+
+  @impl true
+  @spec close(ProjectView.t()) :: :ok | {:error, term()}
+  def close(%ProjectView{} = view) do
+    Agent.stop(view.ref)
   catch
     :exit, _ -> :ok
   end
@@ -148,37 +156,44 @@ defmodule MingaAgent.ProjectView.Direct do
     Path.join(project_root, relative_path)
   end
 
-  @spec replace_exact(binary(), String.t(), String.t()) ::
-          {:ok, binary()} | {:error, :old_text_not_found}
-  defp replace_exact(content, old_text, new_text) do
-    if String.contains?(content, old_text) do
-      {:ok, String.replace(content, old_text, new_text, global: false)}
-    else
-      {:error, :old_text_not_found}
-    end
-  end
-
   @spec directory_entry(String.t(), String.t()) :: ProjectView.Backend.directory_entry()
   defp directory_entry(dir, name) do
     type = if File.dir?(Path.join(dir, name)), do: :directory, else: :file
     %{name: name, type: type}
   end
 
-  @spec track_modified(ProjectView.t(), String.t()) :: :ok
+  @spec ensure_tracking_agent_available(ProjectView.t()) :: :ok | {:error, term()}
+  defp ensure_tracking_agent_available(%ProjectView{} = view) do
+    if Process.alive?(view.ref) do
+      :ok
+    else
+      {:error, {:direct_view_unavailable, :agent_dead}}
+    end
+  end
+
+  @spec track_modified(ProjectView.t(), String.t()) :: :ok | {:error, term()}
   defp track_modified(%ProjectView{} = view, relative_path) do
     Agent.update(view.ref, fn state ->
       state
       |> Map.update!(:modified, &MapSet.put(&1, relative_path))
       |> Map.update!(:deleted, &MapSet.delete(&1, relative_path))
     end)
+
+    :ok
+  catch
+    :exit, reason -> {:error, {:direct_view_unavailable, reason}}
   end
 
-  @spec track_deleted(ProjectView.t(), String.t()) :: :ok
+  @spec track_deleted(ProjectView.t(), String.t()) :: :ok | {:error, term()}
   defp track_deleted(%ProjectView{} = view, relative_path) do
     Agent.update(view.ref, fn state ->
       state
       |> Map.update!(:modified, &MapSet.delete(&1, relative_path))
       |> Map.update!(:deleted, &MapSet.put(&1, relative_path))
     end)
+
+    :ok
+  catch
+    :exit, reason -> {:error, {:direct_view_unavailable, reason}}
   end
 end

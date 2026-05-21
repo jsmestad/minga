@@ -6,14 +6,29 @@ defmodule MingaEditor.State.Workspace do
   """
 
   alias Minga.Project.FileRef
+  alias MingaAgent.ProjectView
+  alias MingaEditor.Agent.UIState
   alias MingaEditor.State.Workspace.Persistence
+  alias MingaEditor.State.Workspace.RemoteSession
   alias MingaEditor.State.WorkspaceReview
 
   @typedoc "Workspace kind."
   @type kind :: :manual | :agent
 
   @typedoc "Agent status for workspace display."
-  @type agent_status :: :idle | :plan | :thinking | :tool_executing | :error | :stopped | nil
+  @type agent_status ::
+          :idle
+          | :plan
+          | :thinking
+          | :tool_executing
+          | :error
+          | :stopped
+          | :needs_review
+          | :done
+          | nil
+
+  @typedoc "Remote connection status for workspace-owned remote sessions."
+  @type connection_status :: RemoteSession.connection_status()
 
   @typedoc "Workspace icon identifier."
   @type icon :: String.t()
@@ -27,11 +42,12 @@ defmodule MingaEditor.State.Workspace do
           color: non_neg_integer(),
           agent_status: agent_status(),
           session: pid() | nil,
+          remote_session: RemoteSession.t() | nil,
           custom_name: String.t() | nil,
           files: [FileRef.t()],
           active_file: FileRef.t() | nil,
-          agent_ui: term() | nil,
-          project_view: term() | nil,
+          agent_ui: UIState.t() | nil,
+          project_view: ProjectView.t() | nil,
           review: WorkspaceReview.t(),
           project_root: String.t() | nil
         }
@@ -44,6 +60,7 @@ defmodule MingaEditor.State.Workspace do
             color: 0x51AFEF,
             agent_status: :idle,
             session: nil,
+            remote_session: nil,
             custom_name: nil,
             files: [],
             active_file: nil,
@@ -63,6 +80,7 @@ defmodule MingaEditor.State.Workspace do
       color: 0x51AFEF,
       agent_status: nil,
       session: nil,
+      remote_session: nil,
       project_root: normalize_project_root(project_root)
     }
   end
@@ -78,6 +96,7 @@ defmodule MingaEditor.State.Workspace do
       color: agent_color(id),
       agent_status: :idle,
       session: session,
+      agent_ui: UIState.new(),
       project_root: normalize_project_root(project_root)
     }
   end
@@ -88,11 +107,108 @@ defmodule MingaEditor.State.Workspace do
     %{workspace | agent_status: status}
   end
 
+  @doc "Sets the workspace-owned agent UI projection."
+  @spec set_agent_ui(t(), UIState.t() | nil) :: t()
+  def set_agent_ui(%__MODULE__{} = workspace, %UIState{} = agent_ui) do
+    struct!(workspace, agent_ui: agent_ui)
+  end
+
+  def set_agent_ui(%__MODULE__{} = workspace, nil) do
+    struct!(workspace, agent_ui: nil)
+  end
+
   @doc "Sets the ProjectView owned by the workspace."
-  @spec set_project_view(t(), term() | nil) :: t()
+  @spec set_project_view(t(), ProjectView.t() | nil) :: t()
   def set_project_view(%__MODULE__{} = workspace, project_view) do
     %{workspace | project_view: project_view}
   end
+
+  @doc "Releases the workspace's owned ProjectView resources, if any."
+  @spec close_project_view(t()) :: :ok | {:error, term()}
+  def close_project_view(%__MODULE__{project_view: %ProjectView{} = project_view}),
+    do: ProjectView.close(project_view)
+
+  def close_project_view(%__MODULE__{}), do: :ok
+
+  @doc "Sets the session owned by the workspace."
+  @spec set_session(t(), pid() | nil) :: t()
+  def set_session(%__MODULE__{} = workspace, session) when is_pid(session) or is_nil(session) do
+    %{workspace | session: session}
+  end
+
+  @doc "Clears the live agent session pid and returns the workspace to idle lifecycle status. Durable remote identity is preserved."
+  @spec clear_session(t()) :: t()
+  def clear_session(%__MODULE__{} = workspace) do
+    workspace
+    |> set_session(nil)
+    |> set_agent_status(:idle)
+  end
+
+  @doc "Sets durable remote metadata on the workspace."
+  @spec set_remote_session(t(), RemoteSession.t() | nil) :: t()
+  def set_remote_session(%__MODULE__{} = workspace, %RemoteSession{} = remote_session) do
+    %{workspace | remote_session: remote_session}
+  end
+
+  def set_remote_session(%__MODULE__{} = workspace, nil) do
+    %{workspace | remote_session: nil}
+  end
+
+  @doc "Sets durable remote metadata from its fields."
+  @spec put_remote_session(t(), String.t(), String.t(), connection_status()) :: t()
+  def put_remote_session(%__MODULE__{} = workspace, server_name, session_id, status \\ :connected) do
+    set_remote_session(workspace, RemoteSession.new(server_name, session_id, status))
+  end
+
+  @doc "Updates durable remote connection status when the workspace has remote metadata."
+  @spec set_remote_connection_status(t(), connection_status()) :: t()
+  def set_remote_connection_status(
+        %__MODULE__{remote_session: %RemoteSession{} = remote_session} = workspace,
+        status
+      ) do
+    set_remote_session(workspace, RemoteSession.set_connection_status(remote_session, status))
+  end
+
+  def set_remote_connection_status(%__MODULE__{} = workspace, _status), do: workspace
+
+  @doc "Clears durable remote metadata. Use only when the workspace no longer represents a remote session."
+  @spec clear_remote_session(t()) :: t()
+  def clear_remote_session(%__MODULE__{} = workspace) do
+    set_remote_session(workspace, nil)
+  end
+
+  @doc "Returns true when the workspace has durable remote metadata."
+  @spec remote?(t()) :: boolean()
+  def remote?(%__MODULE__{remote_session: %RemoteSession{}}), do: true
+  def remote?(%__MODULE__{}), do: false
+
+  @doc "Returns true when the workspace belongs to the named remote server."
+  @spec remote_server?(t(), String.t()) :: boolean()
+  def remote_server?(%__MODULE__{remote_session: %RemoteSession{} = remote_session}, server_name) do
+    remote_session.server_name == server_name
+  end
+
+  def remote_server?(%__MODULE__{}, _server_name), do: false
+
+  @doc "Returns true when the workspace represents the remote server/session pair."
+  @spec matches_remote_session?(t(), String.t(), String.t()) :: boolean()
+  def matches_remote_session?(
+        %__MODULE__{remote_session: %RemoteSession{} = remote_session},
+        server_name,
+        session_id
+      ) do
+    RemoteSession.matches?(remote_session, server_name, session_id)
+  end
+
+  def matches_remote_session?(%__MODULE__{}, _server_name, _session_id), do: false
+
+  @doc "Returns true when the workspace still has a live ProjectView."
+  @spec project_view_active?(t()) :: boolean()
+  def project_view_active?(%__MODULE__{project_view: %ProjectView{} = project_view}) do
+    ProjectView.active?(project_view)
+  end
+
+  def project_view_active?(%__MODULE__{}), do: false
 
   @doc "Returns a copy scoped to a project root for persistence."
   @spec with_project_root(t(), String.t() | nil) :: t()
@@ -384,7 +500,6 @@ defmodule MingaEditor.State.Workspace do
 
   @spec persisted_color(term(), non_neg_integer() | nil) :: non_neg_integer() | nil
   defp persisted_color(value, _default) when is_integer(value) and value >= 0, do: value
-  defp persisted_color(nil, _default), do: nil
   defp persisted_color(_value, default), do: default
 
   @spec persisted_file_refs(term(), String.t() | nil) :: [FileRef.t()]

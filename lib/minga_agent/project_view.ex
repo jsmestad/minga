@@ -77,11 +77,11 @@ defmodule MingaAgent.ProjectView do
   end
 
   @doc "Returns the directory shell commands should run in for this view."
-  @spec working_dir(t()) :: String.t()
+  @spec working_dir(t()) :: String.t() | {:error, term()}
   def working_dir(%__MODULE__{} = view), do: view.backend.working_dir(view)
 
   @doc "Returns environment variables shell commands should use for this view."
-  @spec command_env(t()) :: [{String.t(), String.t()}]
+  @spec command_env(t()) :: [{String.t(), String.t()}] | {:error, term()}
   def command_env(%__MODULE__{} = view), do: view.backend.command_env(view)
 
   @doc "Returns backend-specific diff data for the view."
@@ -104,9 +104,22 @@ defmodule MingaAgent.ProjectView do
   @spec discard(t()) :: :ok | {:error, term()}
   def discard(%__MODULE__{} = view), do: view.backend.discard(view)
 
+  @doc "Releases backend-owned resources for the view."
+  @spec close(t()) :: :ok | {:error, term()}
+  def close(%__MODULE__{} = view), do: view.backend.close(view)
+
   @doc "Returns capability flags for this view."
   @spec capabilities(t()) :: ProjectView.Backend.capabilities()
   def capabilities(%__MODULE__{} = view), do: view.backend.capabilities(view)
+
+  @doc "Returns true when the underlying backend is still available."
+  @spec active?(t()) :: boolean()
+  def active?(%__MODULE__{} = view) do
+    _ = working_dir(view)
+    true
+  catch
+    :exit, _ -> false
+  end
 
   @doc false
   @spec new(module(), String.t(), ProjectView.Backend.ref(), keyword()) :: t()
