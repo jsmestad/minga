@@ -567,7 +567,7 @@ defmodule MingaEditor.Commands.AgentSession do
 
   @spec bind_session_to_agent_workspace(state(), TabBar.t(), pid()) :: state()
   defp bind_session_to_agent_workspace(state, %TabBar{} = tb, session_pid) do
-    case reusable_active_agent_workspace(tb) do
+    case reusable_agent_workspace(tb, session_pid) do
       %Workspace{id: workspace_id} ->
         tb =
           tb
@@ -578,6 +578,25 @@ defmodule MingaEditor.Commands.AgentSession do
 
       nil ->
         create_agent_workspace(state, tb, session_pid)
+    end
+  end
+
+  @spec reusable_agent_workspace(TabBar.t(), pid()) :: Workspace.t() | nil
+  defp reusable_agent_workspace(%TabBar{} = tb, session_pid) do
+    workspace_for_session_tab(tb, session_pid) || reusable_active_agent_workspace(tb)
+  end
+
+  @spec workspace_for_session_tab(TabBar.t(), pid()) :: Workspace.t() | nil
+  defp workspace_for_session_tab(%TabBar{} = tb, session_pid) do
+    case TabBar.find_by_session(tb, session_pid) do
+      %Tab{kind: :agent, group_id: workspace_id} when workspace_id > 0 ->
+        case TabBar.get_workspace(tb, workspace_id) do
+          %Workspace{kind: :agent} = workspace -> workspace
+          _other -> nil
+        end
+
+      _other ->
+        nil
     end
   end
 

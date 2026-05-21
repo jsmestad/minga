@@ -22,6 +22,7 @@ defmodule MingaEditor.Startup do
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace.Persistence, as: WorkspacePersistence
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
@@ -102,7 +103,7 @@ defmodule MingaEditor.Startup do
     windows =
       if initial_window, do: %{initial_window_id => initial_window}, else: %{}
 
-    project_root = Keyword.get(opts, :project_root)
+    project_root = project_root_from_opts(opts)
 
     workspace = %MingaEditor.Workspace.State{
       buffers: %Buffers{
@@ -150,7 +151,8 @@ defmodule MingaEditor.Startup do
       session: SessionState.new(Keyword.take(opts, [:swap_dir, :session_dir]))
     }
 
-    state = EditorState.set_tab_bar(state, initial_tab_bar(active_buf, keymap_scope))
+    state =
+      EditorState.set_tab_bar(state, initial_tab_bar(active_buf, keymap_scope, project_root))
 
     # Store the agent buffer reference if one was created.
     state =
@@ -232,12 +234,13 @@ defmodule MingaEditor.Startup do
   @doc """
   Builds the initial tab bar based on the active buffer and keymap scope.
   """
-  @spec initial_tab_bar(pid() | nil, atom()) :: TabBar.t()
-  def initial_tab_bar(_active_buf, :agent) do
-    TabBar.new(Tab.new_agent(1, "Agent"))
+  @spec initial_tab_bar(pid() | nil, atom(), String.t() | nil) :: TabBar.t()
+  def initial_tab_bar(_active_buf, :agent, project_root) do
+    TabBar.new(Tab.new_agent(1, "Agent"), project_root)
+    |> restore_persisted_workspaces(project_root)
   end
 
-  def initial_tab_bar(active_buf, _scope) do
+  def initial_tab_bar(active_buf, _scope, project_root) do
     file_label =
       if active_buf do
         try do
@@ -249,7 +252,51 @@ defmodule MingaEditor.Startup do
         "[no file]"
       end
 
-    TabBar.new(Tab.new_file(1, file_label))
+    TabBar.new(Tab.new_file(1, file_label), project_root)
+    |> restore_persisted_workspaces(project_root)
+  end
+
+  @spec restore_persisted_workspaces(TabBar.t(), String.t() | nil) :: TabBar.t()
+  defp restore_persisted_workspaces(%TabBar{} = tab_bar, project_root) do
+    TabBar.restore_workspaces(tab_bar, WorkspacePersistence.scan(project_root), project_root)
+  end
+
+  @spec project_root_from_opts(keyword()) :: String.t() | nil
+  defp project_root_from_opts(opts) do
+    if Keyword.has_key?(opts, :project_root) do
+      Keyword.get(opts, :project_root)
+    else
+      maybe_infer_project_root(opts)
+    end
+  end
+
+  @spec maybe_infer_project_root(keyword()) :: String.t() | nil
+  defp maybe_infer_project_root(opts) do
+    default = Application.get_env(:minga, :infer_startup_project_root, true)
+
+    if Keyword.get(opts, :infer_project_root, default) do
+      startup_project_root()
+    else
+      nil
+    end
+  end
+
+  @spec startup_project_root() :: String.t() | nil
+  defp startup_project_root do
+    Minga.CLI.startup_project_root() || Minga.CLI.argv_startup_project_root() ||
+      current_project_root()
+  end
+
+  @spec current_project_root() :: String.t() | nil
+  defp current_project_root do
+    case Minga.Project.root() do
+      root when is_binary(root) -> root
+      nil -> nil
+    end
+  catch
+    :exit, reason ->
+      Minga.Log.warning(:editor, "Startup project root lookup failed: #{inspect(reason)}")
+      nil
   end
 
   @doc """
