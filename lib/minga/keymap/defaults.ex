@@ -152,6 +152,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?a, @none}, {?S, @none}], :agent_stop_session, "Stop agent session"},
     {[{?a, @none}, {?n, @none}], :agent_new_session, "New agent session"},
     {[{?a, @none}, {??, @none}], :inline_ask, "Ask about line or selection"},
+    {[{?a, @none}, {?e, @none}], :inline_edit, "Rewrite selection inline"},
     {[{?a, @none}, {?m, @none}], :workspace_move_file, "Move file to workspace…"},
     {[{?a, @none}, {?c, @none}], :workspace_copy_file, "Copy file to workspace…"},
     {[{?a, @none}, {?M, @none}], :agent_cycle_model, "Cycle agent model"},
@@ -159,7 +160,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?a, @none}, {?r, @none}], :workspace_pending_reviews, "Pending reviews"},
     {[{?a, @none}, {?o, @none}], :remote_find_file, "Open remote file"},
     {[{?a, @none}, {?T, @none}], :agent_cycle_thinking, "Cycle thinking level"},
-    {[{?a, @none}, {?e, @none}], :agent_summarize, "Summarize session to artifact"},
+    {[{?a, @none}, {?z, @none}], :agent_summarize, "Summarize session to artifact"},
     {[{?a, @none}, {?q, @none}], :agent_dequeue, "Dequeue queued messages to editor"},
     {[{?a, @none}, {?f, @none}], :agent_queue_follow_up, "Queue current input as follow-up"},
 

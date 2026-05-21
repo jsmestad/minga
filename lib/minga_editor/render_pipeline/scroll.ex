@@ -20,6 +20,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Layout
   alias MingaEditor.InlineAsk.Render, as: InlineAskRender
+  alias MingaEditor.InlineEdit.Render, as: InlineEditRender
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.Renderer.SearchHighlight
   alias MingaEditor.RenderPipeline.Input
@@ -673,6 +674,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
     buf
     |> Buffer.decorations()
     |> InlineAskRender.merge_decorations(state, buf)
+    |> InlineEditRender.merge_decorations(state, buf)
   catch
     :exit, _ -> Decorations.new()
   end

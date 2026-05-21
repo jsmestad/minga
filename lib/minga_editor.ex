@@ -40,6 +40,7 @@ defmodule MingaEditor do
   alias MingaEditor.KeyDispatch
   alias MingaEditor.Layout
   alias MingaEditor.InlineAsk.Events, as: InlineAskEvents
+  alias MingaEditor.InlineEdit.Events, as: InlineEditEvents
   alias MingaEditor.LspActions
   alias MingaEditor.MessageLog
   alias MingaEditor.NavFlash
@@ -772,29 +773,16 @@ defmodule MingaEditor do
 
   def handle_info({:agent_event, session_pid, event}, state) do
     Minga.Log.debug(:agent, "[event] #{inspect(event)}")
-
-    if InlineAskEvents.session?(state, session_pid) do
-      state = InlineAskEvents.handle_event(state, session_pid, event)
-      {:noreply, schedule_render(state, 16)}
-    else
-      if AgentAccess.session(state) == session_pid do
-        state = dispatch_agent_event(state, event)
-        {:noreply, state}
-      else
-        # Background session: dispatch to shell for presentation updates
-        # (tab badges, card status, attention flags, etc.)
-        {shell_state, workspace, shell_effects} =
-          state.shell.on_agent_event(state.shell_state, state.workspace, session_pid, event)
-
-        state = %{state | shell_state: shell_state, workspace: workspace}
-        state = apply_effects(state, shell_effects)
-        {:noreply, schedule_render(state, 16)}
-      end
-    end
+    route_agent_event(state, session_pid, event)
   end
 
   def handle_info({:inline_ask_prompt_sent, session_pid, result}, state) do
     state = InlineAskEvents.handle_prompt_result(state, session_pid, result)
+    {:noreply, schedule_render(state, 16)}
+  end
+
+  def handle_info({:inline_edit_prompt_sent, session_pid, result}, state) do
+    state = InlineEditEvents.handle_prompt_result(state, session_pid, result)
     {:noreply, schedule_render(state, 16)}
   end
 
@@ -1588,6 +1576,61 @@ defmodule MingaEditor do
   end
 
   # ── Agent event dispatch ──────────────────────────────────────────────────
+
+  @spec route_agent_event(EditorState.t(), pid(), term()) :: {:noreply, EditorState.t()}
+  defp route_agent_event(state, session_pid, event) do
+    route_agent_event(state, session_pid, event, agent_event_owner(state, session_pid))
+  end
+
+  @spec route_agent_event(EditorState.t(), pid(), term(), atom()) :: {:noreply, EditorState.t()}
+  defp route_agent_event(state, session_pid, event, :inline_edit) do
+    state = InlineEditEvents.handle_event(state, session_pid, event)
+    {:noreply, schedule_render(state, 16)}
+  end
+
+  defp route_agent_event(state, session_pid, event, :inline_ask) do
+    state = InlineAskEvents.handle_event(state, session_pid, event)
+    {:noreply, schedule_render(state, 16)}
+  end
+
+  defp route_agent_event(state, _session_pid, event, :active_agent) do
+    state = dispatch_agent_event(state, event)
+    {:noreply, state}
+  end
+
+  defp route_agent_event(state, session_pid, event, :background) do
+    {shell_state, workspace, shell_effects} =
+      state.shell.on_agent_event(state.shell_state, state.workspace, session_pid, event)
+
+    state = %{state | shell_state: shell_state, workspace: workspace}
+    state = apply_effects(state, shell_effects)
+    {:noreply, schedule_render(state, 16)}
+  end
+
+  @spec agent_event_owner(EditorState.t(), pid()) ::
+          :inline_edit | :inline_ask | :active_agent | :background
+  defp agent_event_owner(state, session_pid) do
+    if InlineEditEvents.session?(state, session_pid) do
+      :inline_edit
+    else
+      agent_event_owner_without_inline_edit(state, session_pid)
+    end
+  end
+
+  @spec agent_event_owner_without_inline_edit(EditorState.t(), pid()) ::
+          :inline_ask | :active_agent | :background
+  defp agent_event_owner_without_inline_edit(state, session_pid) do
+    if InlineAskEvents.session?(state, session_pid) do
+      :inline_ask
+    else
+      active_or_background_agent_event(state, session_pid)
+    end
+  end
+
+  @spec active_or_background_agent_event(EditorState.t(), pid()) :: :active_agent | :background
+  defp active_or_background_agent_event(state, session_pid) do
+    if AgentAccess.session(state) == session_pid, do: :active_agent, else: :background
+  end
 
   @spec dispatch_agent_event(EditorState.t(), term()) :: EditorState.t()
   defp dispatch_agent_event(state, event) do

@@ -76,7 +76,8 @@ defmodule MingaAgent.Tools do
         ]
 
   @default_destructive_tools ~w(write_file edit_file multi_edit_file delete_file shell git_stage git_commit rename)
-  @read_only_tools ~w(read_file list_directory find grep git_status git_diff git_log diagnostics definition references hover document_symbols workspace_symbols describe_runtime describe_tools)
+  @file_read_tools ~w(read_file list_directory find grep)
+  @read_only_tools ~w(read_file list_directory find grep git_status git_diff git_log diagnostics definition references hover document_symbols workspace_symbols describe_runtime describe_tools produce_rewrite)
   @max_symlink_depth 40
 
   @doc """
@@ -169,6 +170,19 @@ defmodule MingaAgent.Tools do
     |> all()
     |> Enum.filter(&read_only_name?/1)
   end
+
+  @doc "Returns the file/project read tool subset for constrained rewrite sessions."
+  @spec file_read(tools_opts()) :: [Tool.t()]
+  def file_read(opts \\ []) do
+    opts
+    |> all()
+    |> Enum.filter(&file_read_name?/1)
+  end
+
+  @doc "Returns true when the tool name is allowed in constrained file-read sessions."
+  @spec file_read_name?(Tool.t() | String.t()) :: boolean()
+  def file_read_name?(%Tool{name: name}), do: file_read_name?(name)
+  def file_read_name?(name) when is_binary(name), do: name in @file_read_tools
 
   @doc "Returns true when the tool name is allowed in read-only sessions."
   @spec read_only_name?(Tool.t() | String.t()) :: boolean()

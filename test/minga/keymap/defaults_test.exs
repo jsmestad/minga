@@ -209,6 +209,23 @@ defmodule Minga.Keymap.DefaultsTest do
       assert {:command, :workspace_copy_file} = Bindings.lookup(a_node, {?c, 0})
     end
 
+    test "SPC a e → :inline_edit" do
+      trie = Defaults.leader_trie()
+      {:prefix, a_node} = Bindings.lookup(trie, {?a, 0})
+      assert {:command, :inline_edit} = Bindings.lookup(a_node, {?e, 0})
+      assert {:command, :agent_summarize} = Bindings.lookup(a_node, {?z, 0})
+    end
+
+    test "leader bindings do not define duplicate key sequences" do
+      duplicates =
+        Defaults.all_bindings()
+        |> Enum.map(fn {keys, _command, _description} -> keys end)
+        |> Enum.frequencies()
+        |> Enum.filter(fn {_keys, count} -> count > 1 end)
+
+      assert duplicates == []
+    end
+
     # ── Search bindings ─────────────────────────────────────────────────────────
 
     test "SPC s s → :search_buffer" do

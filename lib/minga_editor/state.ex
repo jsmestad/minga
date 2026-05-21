@@ -415,6 +415,12 @@ defmodule MingaEditor.State do
   @spec set_inline_asks(t(), MingaEditor.State.InlineAsk.store()) :: t()
   def set_inline_asks(s, asks), do: update_shell_state(s, &ShellState.set_inline_asks(&1, asks))
 
+  @spec inline_edits(t()) :: MingaEditor.State.InlineEdit.store()
+  def inline_edits(%{shell_state: ss}), do: ShellState.inline_edits(ss)
+  @spec set_inline_edits(t(), MingaEditor.State.InlineEdit.store()) :: t()
+  def set_inline_edits(s, edits),
+    do: update_shell_state(s, &ShellState.set_inline_edits(&1, edits))
+
   # ── Global field accessors ─────────────────────────────────────────────────
 
   @typedoc "Metadata for an open diff view buffer."
