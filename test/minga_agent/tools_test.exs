@@ -32,6 +32,75 @@ defmodule MingaAgent.ToolsTest do
       result = Tools.resolve_and_validate_path!(dir, "a/b/../c")
       assert result == Path.join(dir, "a/c")
     end
+
+    test "raises when a symlink escapes root", %{tmp_dir: dir} do
+      outside = Path.join(dir, "../outside-secret") |> Path.expand()
+      File.mkdir_p!(outside)
+      File.write!(Path.join(outside, "secret.txt"), "secret")
+      File.ln_s!(outside, Path.join(dir, "link"))
+
+      assert_raise ArgumentError, ~r/escapes project root/, fn ->
+        Tools.resolve_and_validate_path!(dir, "link/secret.txt")
+      end
+    end
+
+    test "raises when a missing path would be created through an escaping symlink", %{
+      tmp_dir: dir
+    } do
+      outside = Path.join(dir, "../outside-write") |> Path.expand()
+      File.mkdir_p!(outside)
+      File.ln_s!(outside, Path.join(dir, "link"))
+
+      assert_raise ArgumentError, ~r/escapes project root/, fn ->
+        Tools.resolve_and_validate_path!(dir, "link/new.txt")
+      end
+    end
+
+    test "raises when chained symlinks escape root", %{tmp_dir: dir} do
+      outside = Path.join(dir, "../outside-chain") |> Path.expand()
+      File.mkdir_p!(outside)
+      File.write!(Path.join(outside, "secret.txt"), "secret")
+      File.ln_s!("second", Path.join(dir, "first"))
+      File.ln_s!(outside, Path.join(dir, "second"))
+
+      assert_raise ArgumentError, ~r/escapes project root/, fn ->
+        Tools.resolve_and_validate_path!(dir, "first/secret.txt")
+      end
+    end
+
+    test "raises when an intermediate symlink target later escapes root", %{tmp_dir: dir} do
+      outside = Path.join(dir, "../outside-intermediate") |> Path.expand()
+      safe = Path.join(dir, "safe")
+      File.mkdir_p!(outside)
+      File.mkdir_p!(safe)
+      File.write!(Path.join(outside, "secret.txt"), "secret")
+      File.ln_s!("safe", Path.join(dir, "dir_link"))
+      File.ln_s!(outside, Path.join(safe, "escape"))
+
+      assert_raise ArgumentError, ~r/escapes project root/, fn ->
+        Tools.resolve_and_validate_path!(dir, "dir_link/escape/secret.txt")
+      end
+    end
+
+    test "resolves missing descendants through safe symlink chains", %{tmp_dir: dir} do
+      safe = Path.join(dir, "safe")
+      nested = Path.join(safe, "nested")
+      File.mkdir_p!(nested)
+      File.ln_s!("nested", Path.join(safe, "next"))
+      File.ln_s!("safe", Path.join(dir, "first"))
+
+      assert Tools.resolve_and_validate_path!(dir, "first/next/new/file.txt") ==
+               Path.join(nested, "new/file.txt")
+    end
+
+    test "raises on symlink loops", %{tmp_dir: dir} do
+      File.ln_s!("b", Path.join(dir, "a"))
+      File.ln_s!("a", Path.join(dir, "b"))
+
+      assert_raise ArgumentError, ~r/symlink loop/, fn ->
+        Tools.resolve_and_validate_path!(dir, "a/file.txt")
+      end
+    end
   end
 
   describe "all/1" do

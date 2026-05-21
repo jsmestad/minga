@@ -38,6 +38,9 @@ defmodule MingaAgent.SessionTest do
     def new_session(pid), do: GenServer.cast(pid, :new_session)
 
     @impl MingaAgent.Provider
+    def seed_messages(_pid, _messages), do: :ok
+
+    @impl MingaAgent.Provider
     def get_state(_pid), do: {:ok, %{model: nil, is_streaming: false, token_usage: nil}}
 
     @doc false
@@ -101,6 +104,9 @@ defmodule MingaAgent.SessionTest do
       GenServer.cast(pid, :new_session)
       :ok
     end
+
+    @impl MingaAgent.Provider
+    def seed_messages(_pid, _messages), do: :ok
 
     @impl MingaAgent.Provider
     def get_state(_pid) do
@@ -173,6 +179,9 @@ defmodule MingaAgent.SessionTest do
       GenServer.cast(pid, :new_session)
       :ok
     end
+
+    @impl MingaAgent.Provider
+    def seed_messages(_pid, _messages), do: :ok
 
     @impl MingaAgent.Provider
     def get_state(_pid), do: {:ok, %{model: nil, is_streaming: false, token_usage: nil}}
@@ -418,6 +427,22 @@ defmodule MingaAgent.SessionTest do
       assert :ok = Session.enter_exec(session)
       assert Session.status(session) == :idle
       assert length(Session.messages(session)) == msg_count_before
+    end
+  end
+
+  describe "inline read-only safety" do
+    test "hooks can be disabled for non-persistent inline sessions" do
+      session =
+        start_supervised!(
+          {Session,
+           provider: Minga.Test.StubProvider,
+           persist?: false,
+           hooks_enabled?: false,
+           provider_opts: [provider: :test, model: "test"]},
+          id: {:inline_hooks_disabled, make_ref()}
+        )
+
+      assert %{persist?: false, hooks_enabled?: false} = :sys.get_state(session)
     end
   end
 

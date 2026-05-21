@@ -24,6 +24,10 @@ defmodule MingaAgent.Providers.RecordingProvider do
   def new_session(_pid), do: :ok
 
   @impl MingaAgent.Provider
+  @spec seed_messages(GenServer.server(), [MingaAgent.Message.t()]) :: :ok | {:error, term()}
+  def seed_messages(_pid, _messages), do: :ok
+
+  @impl MingaAgent.Provider
   @spec get_state(GenServer.server()) :: {:ok, map()} | {:error, term()}
   def get_state(_pid) do
     {:ok,

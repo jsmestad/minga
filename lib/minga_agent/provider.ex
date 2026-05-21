@@ -71,6 +71,9 @@ defmodule MingaAgent.Provider do
   @doc "Starts a fresh agent session, clearing conversation history."
   @callback new_session(provider()) :: :ok | {:error, term()}
 
+  @doc "Seeds conversation history without sending a prompt."
+  @callback seed_messages(provider(), [MingaAgent.Message.t()]) :: :ok | {:error, term()}
+
   @doc "Returns the current session state (model info, streaming status, etc.)."
   @callback get_state(provider()) :: {:ok, session_state()} | {:error, term()}
 

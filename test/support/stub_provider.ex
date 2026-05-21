@@ -31,6 +31,9 @@ defmodule Minga.Test.StubProvider do
   def new_session(_pid), do: :ok
 
   @impl MingaAgent.Provider
+  def seed_messages(_pid, _messages), do: :ok
+
+  @impl MingaAgent.Provider
   def get_state(_pid) do
     {:ok,
      %{
