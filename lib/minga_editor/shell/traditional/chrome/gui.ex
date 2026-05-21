@@ -36,7 +36,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.GUI do
   def build(state, layout, _scrolls, _cursor_info) do
     # Compute status bar data (used by Emit.GUI to encode the 0x76 opcode).
     # No cell rendering for the GUI — SwiftUI owns the status bar surface.
-    status_bar_data = StatusBarData.from_state(state)
+    status_bar_data = status_bar_data(state)
 
     # Split separators are sent via the dedicated 0x84 opcode in
     # Emit.GUI.build_metal_commands. No cell-grid draws needed.
@@ -67,6 +67,10 @@ defmodule MingaEditor.Shell.Traditional.Chrome.GUI do
       regions: regions
     }
   end
+
+  @spec status_bar_data(state()) :: StatusBarData.t() | nil
+  defp status_bar_data(%MingaEditor.RenderPipeline.Input{status_bar_data: data}), do: data
+  defp status_bar_data(state), do: StatusBarData.from_state(state)
 
   # ── Overlays ──────────────────────────────────────────────────────────────
 

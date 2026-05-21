@@ -1418,7 +1418,9 @@ defmodule Minga.Buffer.Process do
       name: state.name,
       read_only: state.read_only,
       first_line_byte_offset: first_line_byte_offset,
-      version: BufState.version(state)
+      version: BufState.version(state),
+      options: resolved_buffer_local_options(state),
+      decorations: state.decorations
     }
 
     {:reply, snapshot, state}
@@ -1864,6 +1866,11 @@ defmodule Minga.Buffer.Process do
     :formatter,
     :line_numbers
   ]
+
+  @spec resolved_buffer_local_options(state()) :: %{atom() => term()}
+  defp resolved_buffer_local_options(state) do
+    Map.new(@buffer_local_options, fn name -> {name, resolve_option(state, name)} end)
+  end
 
   @spec normalize_options_server(term() | nil) :: Minga.Config.Options.server()
   defp normalize_options_server(nil), do: Minga.Config.Options.default_server()

@@ -77,6 +77,7 @@ defmodule MingaEditor.RenderPipeline.Input do
     :lsp,
     :parser_status,
     :diff_views,
+    :status_bar_data,
     # Workspace as a plain map (enables state.workspace.X pattern-matching)
     :workspace,
     # Terminal-level viewport (screen dimensions reported by frontend on resize)
@@ -124,6 +125,7 @@ defmodule MingaEditor.RenderPipeline.Input do
           lsp: LSPState.t(),
           parser_status: atom(),
           diff_views: %{pid() => EditorState.diff_view_info()},
+          status_bar_data: StatusBarData.t() | nil,
           caches: Caches.t(),
           terminal_viewport: Viewport.t(),
           workspace: workspace()
@@ -153,6 +155,7 @@ defmodule MingaEditor.RenderPipeline.Input do
       lsp: state.lsp,
       parser_status: state.parser_status,
       diff_views: state.diff_views,
+      status_bar_data: safe_status_bar_data(state),
       caches: state.caches,
       terminal_viewport: state.terminal_viewport,
       workspace: %{
@@ -169,6 +172,7 @@ defmodule MingaEditor.RenderPipeline.Input do
         keymap_scope: ws.keymap_scope
       }
     }
+    |> sync_active_window_cursor()
   end
 
   @doc "Returns a copy of the render input with the renderer-owned font registry attached."
@@ -266,11 +270,14 @@ defmodule MingaEditor.RenderPipeline.Input do
 
   @spec status_bar_fingerprint(t()) :: integer()
   defp status_bar_fingerprint(%__MODULE__{} = input) do
-    input
-    |> StatusBarData.from_state()
-    |> :erlang.phash2()
+    :erlang.phash2(input.status_bar_data)
+  end
+
+  @spec safe_status_bar_data(EditorState.t()) :: StatusBarData.t() | nil
+  defp safe_status_bar_data(%EditorState{} = state) do
+    StatusBarData.from_state(state)
   catch
-    :exit, _ -> 0
+    :exit, _ -> nil
   end
 
   @spec buffer_fingerprint_data(pid() | nil) ::

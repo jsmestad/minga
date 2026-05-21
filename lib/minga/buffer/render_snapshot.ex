@@ -3,8 +3,8 @@ defmodule Minga.Buffer.RenderSnapshot do
   All data needed to render a single frame for one buffer.
 
   Constructed atomically inside `BufferProcess.handle_call/3` so the
-  caller gets a consistent snapshot of cursor, lines, metadata, and
-  version in a single GenServer round-trip. Previously a bare map;
+  caller gets a consistent snapshot of cursor, lines, metadata, options,
+  decorations, and version in a single GenServer round-trip. Previously a bare map;
   promoted to a struct for compile-time field enforcement and better
   type-system support.
   """
@@ -23,7 +23,9 @@ defmodule Minga.Buffer.RenderSnapshot do
     :name,
     :read_only,
     :first_line_byte_offset,
-    :version
+    :version,
+    :options,
+    :decorations
   ]
 
   defstruct [
@@ -37,7 +39,9 @@ defmodule Minga.Buffer.RenderSnapshot do
     :name,
     :read_only,
     :first_line_byte_offset,
-    :version
+    :version,
+    :options,
+    :decorations
   ]
 
   @type t :: %__MODULE__{
@@ -51,6 +55,8 @@ defmodule Minga.Buffer.RenderSnapshot do
           name: String.t() | nil,
           read_only: boolean(),
           first_line_byte_offset: non_neg_integer(),
-          version: non_neg_integer()
+          version: non_neg_integer(),
+          options: %{atom() => term()},
+          decorations: Minga.Core.Decorations.t()
         }
 end

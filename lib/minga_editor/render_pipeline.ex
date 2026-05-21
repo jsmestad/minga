@@ -6,7 +6,7 @@ defmodule MingaEditor.RenderPipeline do
 
   1. **Invalidation** — decides what needs redrawing (currently a stub).
   2. **Layout** — computes screen rectangles via `Layout.put/1`.
-  3. **Scroll** — per-window viewport adjustment + buffer data fetch.
+  3. **Scroll** — applies pre-fetched per-window viewport and buffer data without process calls.
      See `RenderPipeline.Scroll`.
   4. **Content** — builds display list draws for each window's lines,
      gutter, and tildes. See `RenderPipeline.Content`.
@@ -31,6 +31,7 @@ defmodule MingaEditor.RenderPipeline do
   alias MingaEditor.FocusTree
   alias MingaEditor.Layout
 
+  alias MingaEditor.RenderPipeline.BufferPrefetch
   alias MingaEditor.RenderPipeline.Compose
   alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.Input
@@ -70,9 +71,6 @@ defmodule MingaEditor.RenderPipeline do
     window_count = window_count(input)
 
     Telemetry.span([:minga, :render, :pipeline], %{window_count: window_count}, fn ->
-      # Pre-pipeline: sync cursor
-      input = Input.sync_active_window_cursor(input)
-
       # Stage 1: Invalidation (global triggers: visual selection, search, theme)
       input =
         Telemetry.span([:minga, :render, :stage], %{stage: :invalidation}, fn ->
@@ -100,10 +98,13 @@ defmodule MingaEditor.RenderPipeline do
   """
   @spec run_windows_pipeline(input(), Layout.t()) :: input()
   def run_windows_pipeline(input, layout) do
-    # Stage 3: Scroll (also runs per-window invalidation detection)
+    # Pre-stage snapshot boundary: Buffer GenServer reads happen before the named render stages.
+    {prefetched_scrolls, input} = BufferPrefetch.prefetch_scrolls(input, layout)
+
+    # Stage 3: Scroll consumes pre-fetched per-window data without process calls.
     {scrolls, input} =
       Telemetry.span([:minga, :render, :stage], %{stage: :scroll}, fn ->
-        Scroll.scroll_windows(input, layout)
+        Scroll.scroll_windows(input, layout, prefetched_scrolls)
       end)
 
     # Scroll updates per-window viewports; rebuild the tree so overlay hit regions match what chrome renders.
@@ -115,10 +116,12 @@ defmodule MingaEditor.RenderPipeline do
         Content.build_content(input, scrolls)
       end)
 
+    prefetched_agent_chats = BufferPrefetch.prefetch_agent_chat_windows(input, layout)
+
     # Stage 4b: Agent chat window content (buffer pipeline + prompt chrome)
     {agent_chat_frames, agent_cursor, input} =
       Telemetry.span([:minga, :render, :stage], %{stage: :agent_content}, fn ->
-        Content.build_agent_chat_content(input, layout)
+        Content.build_agent_chat_content(input, layout, prefetched_agent_chats)
       end)
 
     # If the agent chat window set a cursor, use it (overrides buffer cursor).

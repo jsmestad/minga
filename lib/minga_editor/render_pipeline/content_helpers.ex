@@ -80,7 +80,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       is_active: is_active
     } = params
 
-    decorations = window_decorations(state, window)
+    decorations = window_decorations(state, window, Map.get(params, :decorations))
 
     visual_selection =
       if is_active do
@@ -142,7 +142,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     is_gui = Map.get(params, :is_gui, false)
 
     {show_invisible, tab_width, whitespace_face} =
-      invisible_char_settings(window.buffer, state.theme)
+      invisible_char_settings(Map.get(params, :options, %{}), state.theme)
 
     ctx = %Context{
       viewport: viewport,
@@ -160,7 +160,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       has_sign_column: has_sign_column,
       decorations: decorations,
       diagnostic_signs: diagnostic_signs_for_path(Map.get(params, :file_path)),
-      git_signs: diff_or_git_signs(state, window),
+      git_signs: prefetched_git_signs(params, state, window),
       gutter_colors: state.theme.gutter,
       git_colors: state.theme.git,
       show_invisible: show_invisible,
@@ -721,8 +721,9 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       col_off: col_off
     } = opts
 
-    breakindent = wrap_option(opts.buffer, :breakindent)
-    linebreak = wrap_option(opts.buffer, :linebreak)
+    options = Map.get(opts, :options, %{})
+    breakindent = Map.get(options, :breakindent, true)
+    linebreak = Map.get(options, :linebreak, true)
 
     wrap_map =
       WrapMap.compute(lines, ctx.content_w,
@@ -1036,18 +1037,15 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   end
 
   @doc "Returns the decorations for a window's buffer."
-  @spec window_decorations(term(), Window.t()) :: Decorations.t()
-  def window_decorations(state, %{buffer: buf}) when is_pid(buf) do
-    buf
-    |> Buffer.decorations()
+  @spec window_decorations(term(), Window.t(), Decorations.t() | nil) :: Decorations.t()
+  def window_decorations(state, %{buffer: buf}, %Decorations{} = decorations) when is_pid(buf) do
+    decorations
     |> InlineAskRender.merge_decorations(state, buf)
     |> InlineEditRender.merge_decorations(state, buf)
     |> maybe_build_vt_line_cache()
-  catch
-    :exit, _ -> Decorations.new()
   end
 
-  def window_decorations(_state, _window), do: Decorations.new()
+  def window_decorations(_state, _window, _decorations), do: Decorations.new()
 
   @spec maybe_build_vt_line_cache(Decorations.t()) :: Decorations.t()
   defp maybe_build_vt_line_cache(%Decorations{virtual_texts: []} = decorations), do: decorations
@@ -1083,16 +1081,17 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     end
   end
 
-  @spec diff_or_git_signs(state(), Window.t()) :: %{non_neg_integer() => atom()}
-  defp diff_or_git_signs(%{diff_views: diff_views}, %{buffer: buf} = window)
-       when is_pid(buf) and is_map(diff_views) do
+  @doc "Returns diff-view signs when a diff view is active, otherwise git signs for a window's buffer."
+  @spec signs_for_window(state(), Window.t()) :: %{non_neg_integer() => atom()}
+  def signs_for_window(%{diff_views: diff_views}, %{buffer: buf} = window)
+      when is_pid(buf) and is_map(diff_views) do
     case Map.get(diff_views, buf) do
       nil -> git_signs_for_window(window)
       info -> diff_signs_from_metadata(info.line_metadata)
     end
   end
 
-  defp diff_or_git_signs(_state, window), do: git_signs_for_window(window)
+  def signs_for_window(_state, window), do: git_signs_for_window(window)
 
   @spec diff_signs_from_metadata([Minga.Core.DiffView.line_meta()]) ::
           %{non_neg_integer() => atom()}
@@ -1105,6 +1104,10 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       _, acc -> acc
     end)
   end
+
+  @spec prefetched_git_signs(map(), state(), Window.t()) :: %{non_neg_integer() => atom()}
+  defp prefetched_git_signs(%{git_signs: signs}, _state, _window) when is_map(signs), do: signs
+  defp prefetched_git_signs(_params, state, window), do: signs_for_window(state, window)
 
   @doc "Returns git signs for a window's buffer."
   @spec git_signs_for_window(Window.t()) :: %{non_neg_integer() => atom()}
@@ -1266,11 +1269,11 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     Unicode.display_col(line_text, byte_col)
   end
 
-  @spec invisible_char_settings(pid(), MingaEditor.UI.Theme.t()) ::
+  @spec invisible_char_settings(%{atom() => term()}, MingaEditor.UI.Theme.t()) ::
           {boolean(), pos_integer(), Face.t() | nil}
-  defp invisible_char_settings(buf, theme) when is_pid(buf) do
-    show = Buffer.get_option(buf, :show_invisible)
-    tab_w = Buffer.get_option(buf, :tab_width)
+  defp invisible_char_settings(options, theme) when is_map(options) do
+    show = Map.get(options, :show_invisible, false)
+    tab_w = Map.get(options, :tab_width, 2)
 
     face =
       if show do
@@ -1281,15 +1284,6 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       end
 
     {show, tab_w, face}
-  catch
-    :exit, _ -> {false, 2, nil}
-  end
-
-  @spec wrap_option(pid(), atom()) :: boolean()
-  defp wrap_option(buf, name) do
-    Buffer.get_option(buf, name)
-  catch
-    :exit, _ -> true
   end
 
   @spec byte_col_to_display(
