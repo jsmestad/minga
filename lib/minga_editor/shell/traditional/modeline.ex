@@ -34,6 +34,9 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
           :mode => Mode.mode(),
           :mode_state => Mode.state() | nil,
           :file_name => String.t(),
+          :workspace_label => String.t(),
+          :workspace_draft_count => non_neg_integer(),
+          :workspace_conflict_count => non_neg_integer(),
           :filetype => atom(),
           :dirty_marker => String.t(),
           :cursor_line => non_neg_integer(),
@@ -78,6 +81,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
 
   @segment_priorities %{
     mode: 100,
+    workspace: 95,
     filename: 90,
     git: 60,
     agent: 50,
@@ -88,6 +92,8 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     filetype: 80,
     position: 85,
     percent: 40,
+    draft: 42,
+    conflict: 43,
     indent: 35,
     selection: 75
   }
@@ -669,6 +675,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
 
   @spec render_builtin(atom(), context()) :: [render_segment()]
   defp render_builtin(:mode, ctx), do: render_mode(ctx)
+  defp render_builtin(:workspace, ctx), do: render_workspace(ctx)
   defp render_builtin(:filename, ctx), do: render_filename(ctx)
   defp render_builtin(:git, ctx), do: build_git_segments(ctx.data, ctx.bar_bg, ctx.theme)
   defp render_builtin(:agent, ctx), do: build_agent_segments(ctx.data, ctx.bar_bg)
@@ -686,6 +693,8 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   defp render_builtin(:filetype, ctx), do: render_filetype(ctx)
   defp render_builtin(:position, ctx), do: render_position(ctx)
   defp render_builtin(:percent, ctx), do: render_percent(ctx)
+  defp render_builtin(:draft, ctx), do: render_draft(ctx)
+  defp render_builtin(:conflict, ctx), do: render_conflict(ctx)
   defp render_builtin(:indent, ctx), do: render_indent(ctx)
   defp render_builtin(:selection, _ctx), do: []
   defp render_builtin(_name, _ctx), do: []
@@ -694,6 +703,12 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   defp render_mode(ctx) do
     badge = ctx.data[:mode_override] || mode_badge(ctx.data.mode, ctx.data.mode_state)
     [{" #{badge} ", ctx.mode_fg, ctx.mode_bg, [bold: true], nil}]
+  end
+
+  @spec render_workspace(context()) :: [render_segment()]
+  defp render_workspace(ctx) do
+    label = Map.get(ctx.data, :workspace_label, "Files")
+    [{" W:#{label} ", ctx.info_fg, ctx.bar_bg, [], :workspace_list}]
   end
 
   @spec render_filename(context()) :: [render_segment()]
@@ -736,6 +751,27 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
       {" #{ctx.data.cursor_line + 1}:#{ctx.data.cursor_col + 1} ", ctx.info_fg, ctx.info_bg, [],
        nil}
     ]
+
+  @spec render_draft(context()) :: [render_segment()]
+  defp render_draft(ctx) do
+    render_count_segment(ctx, :workspace_draft_count, "D", :workspace_list)
+  end
+
+  @spec render_conflict(context()) :: [render_segment()]
+  defp render_conflict(ctx) do
+    render_count_segment(ctx, :workspace_conflict_count, "C", :workspace_list)
+  end
+
+  @spec render_count_segment(context(), atom(), String.t(), atom()) :: [render_segment()]
+  defp render_count_segment(ctx, key, label, target) do
+    count = Map.get(ctx.data, key, 0)
+
+    if count > 0 do
+      [{" #{label}#{count} ", ctx.info_fg, ctx.bar_bg, [bold: true], target}]
+    else
+      []
+    end
+  end
 
   @spec render_indent(context()) :: [render_segment()]
   defp render_indent(%{data: %{indent_type: type, indent_size: size}} = ctx) do

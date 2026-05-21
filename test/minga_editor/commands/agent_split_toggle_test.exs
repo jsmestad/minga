@@ -13,6 +13,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
@@ -93,9 +94,15 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
       }
 
       {tb, at} = TabBar.add(tb, :agent, "Agent")
-      tb = TabBar.update_tab(tb, at.id, &Tab.set_session(&1, session_pid))
-      tb = TabBar.update_context(tb, at.id, agent_ctx)
-      tb = TabBar.switch_to(tb, file_tab.id)
+      {tb, agent_workspace} = TabBar.add_workspace(tb, "Agent", session_pid)
+
+      tb =
+        tb
+        |> TabBar.update_tab(at.id, &Tab.set_session(&1, session_pid))
+        |> TabBar.move_tab_to_workspace(at.id, agent_workspace.id)
+        |> TabBar.update_workspace(agent_workspace.id, &Workspace.set_agent_ui(&1, agentic))
+        |> TabBar.update_context(at.id, agent_ctx)
+        |> TabBar.switch_to(file_tab.id)
 
       state =
         put_in(state.workspace.agent_ui, %{
@@ -121,9 +128,16 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
       }
 
       {tb, at} = TabBar.add(tb, :agent, "Agent")
-      tb = TabBar.update_tab(tb, at.id, &Tab.set_session(&1, session_pid))
-      tb = TabBar.update_context(tb, at.id, agent_ctx)
-      tb = TabBar.switch_to(tb, file_tab.id)
+      {tb, agent_workspace} = TabBar.add_workspace(tb, "Agent", session_pid)
+
+      tb =
+        tb
+        |> TabBar.update_tab(at.id, &Tab.set_session(&1, session_pid))
+        |> TabBar.move_tab_to_workspace(at.id, agent_workspace.id)
+        |> TabBar.update_workspace(agent_workspace.id, &Workspace.set_agent_ui(&1, agentic))
+        |> TabBar.update_context(at.id, agent_ctx)
+        |> TabBar.switch_to(file_tab.id)
+
       MingaEditor.State.set_tab_bar(state, tb)
     end
   end

@@ -35,7 +35,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x83   | gui_float_popup | Float popup window            |
   | 0x84   | gui_split_separators | Split pane separator lines |
   | 0x85   | gui_git_status       | Git status panel data      |
-  | 0x86   | gui_workspaces    | Workspace indicator + list |
+  | 0x98   | gui_workspaces    | Canonical workspace state |
   | 0x87   | gui_board           | Board card grid state      |
   | 0x97   | gui_config_state    | Settings panel state       |
 
@@ -219,6 +219,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_config_update Opcodes.gui_action_config_update()
   @gui_action_config_query Opcodes.gui_action_config_query()
 
+  @max_u8 255
   @max_u16 65_535
   @max_u32 4_294_967_295
   @max_modeline_segments 128
@@ -245,6 +246,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @section_indent 0x0A
   @section_modeline_segments 0x0B
   @section_selection 0x0C
+  @section_workspace 0x0D
 
   # gui_gutter sections
   @section_gutter_window 0x01
@@ -821,72 +823,155 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   # ── Workspace bar ──
 
   @doc """
-  Encodes a gui_workspaces command for the existing agent-workspace GUI consumer.
-
-  `ChromeState` includes the synthesized manual workspace, but this legacy opcode intentionally sends only agent workspaces. A later canonical workspace protocol can carry manual-vs-agent kind explicitly without overloading this agent-group contract.
+  Encodes the canonical gui_workspaces command.
 
   Wire format:
-    opcode(1) + active_workspace_id(2) + agent_workspace_count(1) + agent_workspaces...
+    opcode(1) + payload_len(2) + payload
 
-  Per agent workspace:
-    id(2) + agent_status(1) + color_r(1) + color_g(1) + color_b(1)
-    + tab_count(2) + label_len(1) + label(label_len) + icon_len(1) + icon(icon_len)
-
-  There is no kind byte in the payload. The emitted list contains only agent
-  workspaces created by agents, and the icon fields carry the workspace icon
-  name.
-  Agent status: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan.
+  Payload:
+    version(1) + active_workspace_id(2) + mode(1) + flags(1) + workspace_count(1)
+    + workspaces... + visible_tab_count(2) + visible_tabs...
   """
-  @spec encode_gui_workspaces(TabBar.t() | ChromeState.t()) :: binary()
+  @spec encode_gui_workspaces(ChromeState.t()) :: binary()
   def encode_gui_workspaces(%ChromeState{} = chrome_state) do
-    agent_workspaces = Enum.filter(chrome_state.workspaces, &(&1.kind == :agent))
-    entries = Enum.map(agent_workspaces, &encode_gui_workspace_summary/1)
+    payload = encode_gui_workspaces_payload(chrome_state)
+    <<@op_gui_workspaces, byte_size(payload)::16, payload::binary>>
+  end
+
+  @spec encode_gui_workspaces_payload(ChromeState.t()) :: binary()
+  defp encode_gui_workspaces_payload(%ChromeState{} = chrome_state) do
+    workspace_budget = @max_u16 - 6 - 2
+
+    {workspace_entries, remaining_budget} =
+      bounded_entries(
+        chrome_state.workspaces,
+        &encode_gui_workspace_summary/1,
+        @max_u8,
+        workspace_budget
+      )
+
+    {visible_tab_entries, _remaining_budget} =
+      bounded_entries(
+        chrome_state.visible_tabs,
+        &encode_gui_visible_tab/1,
+        @max_u16,
+        remaining_budget
+      )
 
     IO.iodata_to_binary([
-      @op_gui_workspaces,
-      <<chrome_state.active_workspace_id::16, length(agent_workspaces)::8>>
-      | entries
+      <<1::8, chrome_state.active_workspace_id::16, encode_workspace_mode(chrome_state.mode)::8,
+        encode_workspace_flags(chrome_state)::8, length(workspace_entries)::8>>,
+      workspace_entries,
+      <<length(visible_tab_entries)::16>>,
+      visible_tab_entries
     ])
   end
 
-  def encode_gui_workspaces(%TabBar{} = tb) do
-    agent_workspaces = Enum.filter(tb.workspaces, &(&1.kind == :agent))
-
-    entries =
-      Enum.map(agent_workspaces, fn workspace ->
-        status_byte = encode_agent_status(workspace.agent_status)
-        r = Bitwise.bsr(Bitwise.band(workspace.color, 0xFF0000), 16)
-        g = Bitwise.bsr(Bitwise.band(workspace.color, 0x00FF00), 8)
-        b = Bitwise.band(workspace.color, 0x0000FF)
-        tab_count = length(TabBar.tabs_in_workspace(tb, workspace.id))
-        label_bytes = :erlang.iolist_to_binary([workspace.label])
-        icon_bytes = :erlang.iolist_to_binary([workspace.icon || "cpu"])
-
-        <<workspace.id::16, status_byte::8, r::8, g::8, b::8, tab_count::16,
-          byte_size(label_bytes)::8, label_bytes::binary, byte_size(icon_bytes)::8,
-          icon_bytes::binary>>
+  @spec bounded_entries([term()], (term() -> binary()), non_neg_integer(), non_neg_integer()) ::
+          {[binary()], non_neg_integer()}
+  defp bounded_entries(items, encode_fun, max_count, budget) do
+    {entries, remaining_budget, _count} =
+      Enum.reduce_while(items, {[], budget, 0}, fn item, acc ->
+        item |> encode_fun.() |> maybe_add_bounded_entry(acc, max_count)
       end)
 
-    IO.iodata_to_binary([
-      @op_gui_workspaces,
-      <<TabBar.active_workspace_id(tb)::16, length(agent_workspaces)::8>>
-      | entries
-    ])
+    {Enum.reverse(entries), remaining_budget}
   end
+
+  @spec maybe_add_bounded_entry(
+          binary(),
+          {[binary()], non_neg_integer(), non_neg_integer()},
+          non_neg_integer()
+        ) ::
+          {:cont, {[binary()], non_neg_integer(), non_neg_integer()}}
+          | {:halt, {[binary()], non_neg_integer(), non_neg_integer()}}
+  defp maybe_add_bounded_entry(_entry, acc = {_entries, _budget, count}, max_count)
+       when count >= max_count do
+    {:halt, acc}
+  end
+
+  defp maybe_add_bounded_entry(entry, {entries, budget, count}, _max_count)
+       when byte_size(entry) <= budget do
+    {:cont, {[entry | entries], budget - byte_size(entry), count + 1}}
+  end
+
+  defp maybe_add_bounded_entry(_entry, acc, _max_count), do: {:halt, acc}
 
   @spec encode_gui_workspace_summary(WorkspaceSummary.t()) :: binary()
   defp encode_gui_workspace_summary(%WorkspaceSummary{} = workspace) do
-    status_byte = encode_agent_status(workspace.status)
-    r = Bitwise.bsr(Bitwise.band(workspace.color, 0xFF0000), 16)
-    g = Bitwise.bsr(Bitwise.band(workspace.color, 0x00FF00), 8)
-    b = Bitwise.band(workspace.color, 0x0000FF)
-    label_bytes = :erlang.iolist_to_binary([workspace.label])
-    icon_bytes = :erlang.iolist_to_binary([workspace.icon])
+    {r, g, b} = encode_rgb(workspace.color)
+    label_bytes = utf8_prefix_bytes(workspace.label, 255)
+    icon_bytes = utf8_prefix_bytes(workspace.icon, 255)
 
-    <<workspace.id::16, status_byte::8, r::8, g::8, b::8, workspace.tab_count::16,
+    <<workspace.id::16, encode_workspace_kind(workspace.kind)::8,
+      encode_agent_status(workspace.status)::8, encode_workspace_entry_flags(workspace)::16, r::8,
+      g::8, b::8, workspace.tab_count::16, workspace.draft_count::16,
+      workspace.conflict_count::16, workspace.running_background_count::16,
       byte_size(label_bytes)::8, label_bytes::binary, byte_size(icon_bytes)::8,
       icon_bytes::binary>>
   end
+
+  @spec encode_gui_visible_tab(TabSummary.t()) :: binary()
+  defp encode_gui_visible_tab(%TabSummary{} = tab) do
+    icon_bytes = utf8_prefix_bytes(tab.icon, 255)
+    label_bytes = utf8_prefix_bytes(tab.label, @max_u16)
+    path_bytes = utf8_prefix_bytes(tab.path || "", @max_u16)
+
+    <<tab.id::32, tab.workspace_id::16, encode_tab_kind(tab.kind)::8,
+      encode_visible_tab_flags(tab)::16, path_hash(tab.path)::32, byte_size(icon_bytes)::8,
+      icon_bytes::binary, byte_size(label_bytes)::16, label_bytes::binary,
+      byte_size(path_bytes)::16, path_bytes::binary>>
+  end
+
+  @spec encode_workspace_mode(ChromeState.mode()) :: non_neg_integer()
+  defp encode_workspace_mode(:editor), do: 0
+  defp encode_workspace_mode(:agent), do: 1
+  defp encode_workspace_mode(:file_tree), do: 2
+  defp encode_workspace_mode(:other), do: 3
+
+  @spec encode_workspace_flags(ChromeState.t()) :: non_neg_integer()
+  defp encode_workspace_flags(%ChromeState{} = chrome_state) do
+    if chrome_state.attention_count > 0, do: 0x01, else: 0x00
+  end
+
+  @spec encode_workspace_kind(WorkspaceSummary.kind() | TabSummary.kind()) :: non_neg_integer()
+  defp encode_workspace_kind(:manual), do: 0
+  defp encode_workspace_kind(:agent), do: 1
+  defp encode_workspace_kind(:file), do: 0
+
+  @spec encode_workspace_entry_flags(WorkspaceSummary.t()) :: non_neg_integer()
+  defp encode_workspace_entry_flags(%WorkspaceSummary{} = workspace) do
+    0
+    |> maybe_workspace_flag(workspace.attention?, 0x01)
+    |> maybe_workspace_flag(workspace.closeable?, 0x02)
+  end
+
+  @spec encode_tab_kind(TabSummary.kind()) :: non_neg_integer()
+  defp encode_tab_kind(:file), do: 0
+
+  @spec encode_visible_tab_flags(TabSummary.t()) :: non_neg_integer()
+  defp encode_visible_tab_flags(%TabSummary{} = tab) do
+    0
+    |> maybe_workspace_flag(tab.dirty?, 0x01)
+    |> maybe_workspace_flag(tab.attention?, 0x02)
+    |> maybe_workspace_flag(tab.draft_state == :draft, 0x04)
+    |> maybe_workspace_flag(tab.draft_state == :draft_elsewhere, 0x08)
+    |> maybe_workspace_flag(tab.draft_state == :conflict, 0x10)
+  end
+
+  @spec maybe_workspace_flag(non_neg_integer(), boolean(), non_neg_integer()) :: non_neg_integer()
+  defp maybe_workspace_flag(flags, true, bit), do: flags ||| bit
+  defp maybe_workspace_flag(flags, false, _bit), do: flags
+
+  @spec encode_rgb(non_neg_integer()) :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
+  defp encode_rgb(color) when is_integer(color) do
+    {Bitwise.bsr(Bitwise.band(color, 0xFF0000), 16),
+     Bitwise.bsr(Bitwise.band(color, 0x00FF00), 8), Bitwise.band(color, 0x0000FF)}
+  end
+
+  @spec path_hash(String.t() | nil) :: non_neg_integer()
+  defp path_hash(nil), do: 0
+  defp path_hash(path) when is_binary(path), do: :erlang.phash2(path, @max_u32)
 
   # ── Board ──
 
@@ -1786,20 +1871,24 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     0x0A - Indent: indent_type, indent_size
     0x0B - ModelineSegments: named configured left/right styled modeline segments
     0x0C - Selection: selection_mode, selection_size
+    0x0D - Workspace: active workspace summary
   """
   @spec encode_gui_status_bar(MingaEditor.StatusBar.Data.t()) :: binary()
-  def encode_gui_status_bar({:buffer, d}) do
-    sections = encode_status_bar_sections(d, 0)
+  def encode_gui_status_bar(status_bar_data), do: encode_gui_status_bar(status_bar_data, nil)
+
+  @spec encode_gui_status_bar(MingaEditor.StatusBar.Data.t(), ChromeState.t() | nil) :: binary()
+  def encode_gui_status_bar({:buffer, d}, chrome_state) do
+    sections = encode_status_bar_sections(d, 0, chrome_state)
     IO.iodata_to_binary([<<@op_gui_status_bar, length(sections)::8>> | sections])
   end
 
-  def encode_gui_status_bar({:agent, d}) do
-    sections = encode_status_bar_sections(d, 1)
+  def encode_gui_status_bar({:agent, d}, chrome_state) do
+    sections = encode_status_bar_sections(d, 1, chrome_state)
     IO.iodata_to_binary([<<@op_gui_status_bar, length(sections)::8>> | sections])
   end
 
-  @spec encode_status_bar_sections(map(), 0 | 1) :: [binary()]
-  defp encode_status_bar_sections(d, content_kind) do
+  @spec encode_status_bar_sections(map(), 0 | 1, ChromeState.t() | nil) :: [binary()]
+  defp encode_status_bar_sections(d, content_kind, chrome_state) do
     mode_byte = encode_vim_mode(d.mode)
     flags = build_status_flags(d)
     lsp_byte = encode_lsp_status(d.lsp_status)
@@ -1862,6 +1951,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     sections =
       sections ++ [encode_section(@section_selection, <<selection_mode::8, selection_size::32>>)]
 
+    sections = sections ++ workspace_status_bar_sections(chrome_state)
+
     # Agent section (only when content_kind == 1)
     if content_kind == 1 do
       model_name = :erlang.iolist_to_binary([d.model_name || "Agent"])
@@ -1886,6 +1977,32 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           )
         ]
     end
+  end
+
+  @spec workspace_status_bar_sections(ChromeState.t() | nil) :: [binary()]
+  defp workspace_status_bar_sections(%ChromeState{} = chrome_state) do
+    case Enum.find(chrome_state.workspaces, &(&1.id == chrome_state.active_workspace_id)) do
+      %WorkspaceSummary{} = workspace ->
+        [encode_section(@section_workspace, encode_status_workspace(workspace, chrome_state))]
+
+      nil ->
+        []
+    end
+  end
+
+  defp workspace_status_bar_sections(nil), do: []
+
+  @spec encode_status_workspace(WorkspaceSummary.t(), ChromeState.t()) :: binary()
+  defp encode_status_workspace(%WorkspaceSummary{} = workspace, %ChromeState{} = chrome_state) do
+    label_bytes = utf8_prefix_bytes(workspace.label, 255)
+    icon_bytes = utf8_prefix_bytes(workspace.icon, 255)
+
+    <<workspace.id::16, encode_workspace_kind(workspace.kind)::8,
+      encode_agent_status(workspace.status)::8, encode_workspace_entry_flags(workspace)::16,
+      workspace.draft_count::16, workspace.conflict_count::16,
+      workspace.running_background_count::16, chrome_state.attention_count::16,
+      byte_size(label_bytes)::8, label_bytes::binary, byte_size(icon_bytes)::8,
+      icon_bytes::binary>>
   end
 
   @spec modeline_segment_sections(%{left: [tuple()], right: [tuple()]} | nil) :: [binary()]

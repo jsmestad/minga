@@ -4,10 +4,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
   switching tabs while one session is mid-stream does not interrupt
   it or route its events to the wrong tab.
 
-  These tests exercise per-tab session ownership: `Tab.session` is the
-  source of truth, and `AgentAccess.session/1` reads it through the
-  shell's `active_session/1` callback. The editor's
-  `state.shell_state.agent` struct holds rendering caches only.
+  These tests exercise per-workspace session ownership: workspaces are the source of truth, while legacy tab session fields remain only as locators for event routing and migration paths. The editor's `state.shell_state.agent` struct holds rendering caches only.
   """
 
   use ExUnit.Case, async: true
@@ -55,7 +52,20 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
         %{acc | tabs: acc.tabs ++ [tab], next_id: max(acc.next_id, tab.id + 1)}
       end)
 
-    %{tb | active_id: active_id}
+    tb
+    |> attach_agent_workspaces()
+    |> Map.put(:active_id, active_id)
+  end
+
+  defp attach_agent_workspaces(%TabBar{} = tb) do
+    Enum.reduce(tb.tabs, tb, fn
+      %Tab{kind: :agent, id: tab_id, label: label, session: session}, acc when is_pid(session) ->
+        {acc, workspace} = TabBar.add_workspace(acc, label, session)
+        TabBar.move_tab_to_workspace(acc, tab_id, workspace.id)
+
+      _tab, acc ->
+        acc
+    end)
   end
 
   defp agent_tab_context(agent_buf) do
@@ -73,8 +83,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
         active: win_id,
         next_id: win_id + 1
       },
-      viewport: Viewport.new(rows, cols),
-      agent_ui: UIState.new()
+      viewport: Viewport.new(rows, cols)
     }
   end
 

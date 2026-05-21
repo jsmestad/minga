@@ -21,6 +21,19 @@ struct StatusBarUpdate: Sendable {
         let size: UInt32
     }
 
+    struct WorkspaceInfo: Sendable, Equatable {
+        let id: UInt16
+        let kind: UInt8
+        let status: UInt8
+        let flags: UInt16
+        let draftCount: UInt16
+        let conflictCount: UInt16
+        let backgroundCount: UInt16
+        let attentionCount: UInt16
+        let label: String
+        let icon: String
+    }
+
     let contentKind: UInt8
     let mode: UInt8
     let cursorLine: UInt32
@@ -57,6 +70,7 @@ struct StatusBarUpdate: Sendable {
     let modelineLeftSegments: [Wire.StatusBarSegment]
     let modelineRightSegments: [Wire.StatusBarSegment]
     let selection: SelectionInfo
+    let workspace: WorkspaceInfo?
 
     init(
         contentKind: UInt8,
@@ -94,7 +108,8 @@ struct StatusBarUpdate: Sendable {
         modelineSegmentsPresent: Bool = false,
         modelineLeftSegments: [Wire.StatusBarSegment] = [],
         modelineRightSegments: [Wire.StatusBarSegment] = [],
-        selection: SelectionInfo = .init(mode: 0, size: 0)
+        selection: SelectionInfo = .init(mode: 0, size: 0),
+        workspace: WorkspaceInfo? = nil
     ) {
         self.contentKind = contentKind
         self.mode = mode
@@ -132,6 +147,7 @@ struct StatusBarUpdate: Sendable {
         self.modelineLeftSegments = modelineLeftSegments
         self.modelineRightSegments = modelineRightSegments
         self.selection = selection
+        self.workspace = workspace
     }
 }
 
@@ -186,7 +202,7 @@ enum RenderCommand: Sendable {
     case guiCursorAnimation(enabled: Bool)
     case guiSplitSeparators(borderColor: UInt32, verticals: [Wire.VerticalSeparator], horizontals: [Wire.HorizontalSeparator])
     case guiGitStatus(repoState: UInt8, syncing: Bool, ahead: UInt16, behind: UInt16, branchName: String, entries: [Wire.GitStatusEntry], toast: (message: String, level: UInt8, action: UInt8)?, entryBasePath: String, lastCommitMessage: String)
-    case guiWorkspaces(activeWorkspaceId: UInt16, workspaces: [Wire.WorkspaceEntry])
+    case guiWorkspaces(version: UInt8, activeWorkspaceId: UInt16, mode: UInt8, flags: UInt8, workspaces: [Wire.WorkspaceEntry], visibleTabs: [Wire.WorkspaceTabEntry])
     case guiBoard(visible: Bool, focusedCardId: UInt32, cards: [BoardCard], filterMode: Bool, filterText: String)
     case guiAgentContext(visible: Bool, task: String, dispatchTimestamp: Date, status: CardStatus, canApprove: Bool)
     case guiChangeSummary(visible: Bool, entries: [ChangeSummaryEntry], selectedIndex: Int)
@@ -727,6 +743,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         var modelineLeftSegments: [Wire.StatusBarSegment] = []
         var modelineRightSegments: [Wire.StatusBarSegment] = []
         var selection = StatusBarUpdate.SelectionInfo(mode: 0, size: 0)
+        var workspace: StatusBarUpdate.WorkspaceInfo? = nil
 
         for _ in 0..<sectionCount {
             guard data.count >= pos + 3 else { throw ProtocolDecodeError.malformed }
@@ -851,6 +868,36 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 guard sectionLen >= 5 else { break }
                 selection = StatusBarUpdate.SelectionInfo(mode: data[sStart], size: readU32(data, sStart + 1))
 
+            case 0x0D: // Workspace: active workspace summary
+                guard sectionLen >= 15 else { break }
+                let workspaceId = readU16(data, sStart)
+                let workspaceKind = data[sStart + 2]
+                let workspaceStatus = data[sStart + 3]
+                let workspaceFlags = readU16(data, sStart + 4)
+                let draftCount = readU16(data, sStart + 6)
+                let conflictCount = readU16(data, sStart + 8)
+                let backgroundCount = readU16(data, sStart + 10)
+                let attentionCount = readU16(data, sStart + 12)
+                let labelLen = Int(data[sStart + 14])
+                guard sectionLen >= 15 + labelLen + 1 else { break }
+                let label = String(data: data[(sStart + 15)..<(sStart + 15 + labelLen)], encoding: .utf8) ?? ""
+                let iconLenPos = sStart + 15 + labelLen
+                let iconLen = Int(data[iconLenPos])
+                guard sectionLen >= 16 + labelLen + iconLen else { break }
+                let icon = String(data: data[(iconLenPos + 1)..<(iconLenPos + 1 + iconLen)], encoding: .utf8) ?? ""
+                workspace = StatusBarUpdate.WorkspaceInfo(
+                    id: workspaceId,
+                    kind: workspaceKind,
+                    status: workspaceStatus,
+                    flags: workspaceFlags,
+                    draftCount: draftCount,
+                    conflictCount: conflictCount,
+                    backgroundCount: backgroundCount,
+                    attentionCount: attentionCount,
+                    label: label,
+                    icon: icon
+                )
+
             default:
                 break // Skip unknown sections (forward compatibility)
             }
@@ -876,7 +923,8 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             modelineSegmentsPresent: modelineSegmentsPresent,
             modelineLeftSegments: modelineLeftSegments,
             modelineRightSegments: modelineRightSegments,
-            selection: selection
+            selection: selection,
+            workspace: workspace
         )
         return (.guiStatusBar(update), pos - offset)
 
@@ -2121,46 +2169,105 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 gsPos - offset)
 
     case OP_GUI_WORKSPACES:
-        // active_workspace_id:2, workspace_count:1, then per workspace:
-        // id:2, agent_status:1, r:1, g:1, b:1, tab_count:2, label_len:1, label, icon_len:1, icon
-        guard data.count >= rest + 3 else { throw ProtocolDecodeError.malformed }
-        let activeGId = readU16(data, rest)
-        let groupCount = Int(data[rest + 2])
-        var groups: [Wire.WorkspaceEntry] = []
-        groups.reserveCapacity(groupCount)
-        var gPos = rest + 3
-        for _ in 0..<groupCount {
-            guard data.count >= gPos + 9 else { throw ProtocolDecodeError.malformed }
-            let gId = readU16(data, gPos)
-            let gStatus = data[gPos + 2]
-            let gR = data[gPos + 3]
-            let gG = data[gPos + 4]
-            let gB = data[gPos + 5]
-            let gTabCount = readU16(data, gPos + 6)
-            let gLabelLen = Int(data[gPos + 8])
-            guard data.count >= gPos + 9 + gLabelLen else { throw ProtocolDecodeError.malformed }
-            let gLabelData = data[(gPos + 9)..<(gPos + 9 + gLabelLen)]
-            let gLabel = String(data: gLabelData, encoding: .utf8) ?? ""
-            let gIconBase = gPos + 9 + gLabelLen
-            guard data.count >= gIconBase + 1 else { throw ProtocolDecodeError.malformed }
-            let gIconLen = Int(data[gIconBase])
-            guard data.count >= gIconBase + 1 + gIconLen else { throw ProtocolDecodeError.malformed }
-            let gIconData = data[(gIconBase + 1)..<(gIconBase + 1 + gIconLen)]
-            let gIcon = String(data: gIconData, encoding: .utf8) ?? "cpu"
-            groups.append(Wire.WorkspaceEntry(
-                id: gId,
-                agentStatus: gStatus,
-                colorR: gR,
-                colorG: gG,
-                colorB: gB,
-                tabCount: gTabCount,
-                label: gLabel,
-                icon: gIcon
+        // Canonical length-prefixed workspace payload.
+        // opcode(1) + payload_len(2) + version(1) + active_workspace_id(2) + mode(1) + flags(1)
+        // + workspace_count(1) + workspaces... + visible_tab_count(2) + visible_tabs...
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let payloadLen = Int(readU16(data, rest))
+        let payloadStart = rest + 2
+        let payloadEnd = payloadStart + payloadLen
+        guard data.count >= payloadEnd else { throw ProtocolDecodeError.malformed }
+        guard payloadLen >= 6 else { throw ProtocolDecodeError.malformed }
+
+        let version = data[payloadStart]
+        let activeGId = readU16(data, payloadStart + 1)
+        let mode = data[payloadStart + 3]
+        let workspaceFlags = data[payloadStart + 4]
+        let workspaceCount = Int(data[payloadStart + 5])
+        var workspaces: [Wire.WorkspaceEntry] = []
+        workspaces.reserveCapacity(workspaceCount)
+        var pos = payloadStart + 6
+
+        for _ in 0..<workspaceCount {
+            guard pos + 18 <= payloadEnd else { throw ProtocolDecodeError.malformed }
+            let id = readU16(data, pos)
+            let kind = data[pos + 2]
+            let status = data[pos + 3]
+            let flags = readU16(data, pos + 4)
+            let colorR = data[pos + 6]
+            let colorG = data[pos + 7]
+            let colorB = data[pos + 8]
+            let tabCount = readU16(data, pos + 9)
+            let draftCount = readU16(data, pos + 11)
+            let conflictCount = readU16(data, pos + 13)
+            let runningBackgroundCount = readU16(data, pos + 15)
+            let labelLen = Int(data[pos + 17])
+            guard pos + 18 + labelLen + 1 <= payloadEnd else { throw ProtocolDecodeError.malformed }
+            let label = try readRequiredUTF8(data[(pos + 18)..<(pos + 18 + labelLen)])
+            let iconLenPos = pos + 18 + labelLen
+            let iconLen = Int(data[iconLenPos])
+            guard iconLenPos + 1 + iconLen <= payloadEnd else { throw ProtocolDecodeError.malformed }
+            let icon = try readRequiredUTF8(data[(iconLenPos + 1)..<(iconLenPos + 1 + iconLen)])
+
+            workspaces.append(Wire.WorkspaceEntry(
+                id: id,
+                kind: kind,
+                status: status,
+                flags: flags,
+                colorR: colorR,
+                colorG: colorG,
+                colorB: colorB,
+                tabCount: tabCount,
+                draftCount: draftCount,
+                conflictCount: conflictCount,
+                runningBackgroundCount: runningBackgroundCount,
+                label: label,
+                icon: icon
             ))
-            gPos += 9 + gLabelLen + 1 + gIconLen
+            pos = iconLenPos + 1 + iconLen
         }
-        return (.guiWorkspaces(activeWorkspaceId: activeGId, workspaces: groups),
-                gPos - offset)
+
+        guard pos + 2 <= payloadEnd else { throw ProtocolDecodeError.malformed }
+        let visibleTabCount = Int(readU16(data, pos))
+        pos += 2
+        var visibleTabs: [Wire.WorkspaceTabEntry] = []
+        visibleTabs.reserveCapacity(visibleTabCount)
+
+        for _ in 0..<visibleTabCount {
+            guard pos + 14 <= payloadEnd else { throw ProtocolDecodeError.malformed }
+            let id = readU32(data, pos)
+            let workspaceId = readU16(data, pos + 4)
+            let kind = data[pos + 6]
+            let flags = readU16(data, pos + 7)
+            let pathHash = readU32(data, pos + 9)
+            let iconLen = Int(data[pos + 13])
+            guard pos + 14 + iconLen + 2 <= payloadEnd else { throw ProtocolDecodeError.malformed }
+            let icon = try readRequiredUTF8(data[(pos + 14)..<(pos + 14 + iconLen)])
+            let labelLenPos = pos + 14 + iconLen
+            let labelLen = Int(readU16(data, labelLenPos))
+            guard labelLenPos + 2 + labelLen + 2 <= payloadEnd else { throw ProtocolDecodeError.malformed }
+            let label = try readRequiredUTF8(data[(labelLenPos + 2)..<(labelLenPos + 2 + labelLen)])
+            let pathLenPos = labelLenPos + 2 + labelLen
+            let pathLen = Int(readU16(data, pathLenPos))
+            guard pathLenPos + 2 + pathLen <= payloadEnd else { throw ProtocolDecodeError.malformed }
+            let path = try readRequiredUTF8(data[(pathLenPos + 2)..<(pathLenPos + 2 + pathLen)])
+
+            visibleTabs.append(Wire.WorkspaceTabEntry(
+                id: id,
+                workspaceId: workspaceId,
+                kind: kind,
+                flags: flags,
+                pathHash: pathHash,
+                icon: icon,
+                label: label,
+                path: path
+            ))
+            pos = pathLenPos + 2 + pathLen
+        }
+
+        guard pos == payloadEnd else { throw ProtocolDecodeError.malformed }
+        return (.guiWorkspaces(version: version, activeWorkspaceId: activeGId, mode: mode, flags: workspaceFlags, workspaces: workspaces, visibleTabs: visibleTabs),
+                payloadEnd - offset)
 
     case OP_GUI_BOARD:
         // visible(1) + focused_card_id(4) + card_count(2) + filter_mode(1) + filter_len(2) + filter

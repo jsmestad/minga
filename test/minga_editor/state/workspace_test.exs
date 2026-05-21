@@ -2,6 +2,7 @@ defmodule MingaEditor.State.WorkspaceTest do
   use ExUnit.Case, async: true
 
   alias Minga.Project.FileRef
+  alias MingaEditor.Agent.UIState
   alias MingaEditor.State.Workspace
 
   describe "new_manual/1" do
@@ -41,7 +42,7 @@ defmodule MingaEditor.State.WorkspaceTest do
       assert is_integer(workspace.color)
       assert workspace.files == []
       assert workspace.active_file == nil
-      assert workspace.agent_ui == nil
+      assert %UIState{} = workspace.agent_ui
       assert workspace.project_view == nil
       assert workspace.review.state == :clean
     end
