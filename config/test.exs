@@ -26,6 +26,10 @@ config :minga, platform_module: Minga.Platform.Stub
 # instead of the production default (50ms × 20 = 1s).
 config :minga, editor_wait_params: {5, 4}
 
+# Keep generic editor startup tests hermetic. Tests that verify startup root
+# inference opt in with `infer_project_root: true`.
+config :minga, infer_startup_project_root: false
+
 # Use a lightweight stub provider for agent sessions in tests.
 # The real native provider takes ~700ms to start because it loads tools
 # and resolves API keys. The stub starts instantly and satisfies the

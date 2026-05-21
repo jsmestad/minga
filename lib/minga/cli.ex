@@ -144,8 +144,7 @@ defmodule Minga.CLI do
   @spec cwd_startup_project_root() :: String.t() | nil
   def cwd_startup_project_root do
     File.cwd!()
-    |> Path.expand()
-    |> detect_marked_project_root_from_dir(Minga.Project.Detector.default_markers())
+    |> cwd_startup_project_root()
   rescue
     error ->
       log_cwd_startup_project_root_failure({error, __STACKTRACE__})
@@ -154,6 +153,14 @@ defmodule Minga.CLI do
     kind, reason ->
       log_cwd_startup_project_root_failure({kind, reason})
       nil
+  end
+
+  @doc false
+  @spec cwd_startup_project_root(String.t()) :: String.t() | nil
+  def cwd_startup_project_root(cwd) when is_binary(cwd) do
+    cwd
+    |> Path.expand()
+    |> detect_marked_project_root_from_dir(Minga.Project.Detector.default_markers())
   end
 
   @doc "Returns the project root inferred from raw CLI args, if they name a project or file inside a project."
@@ -671,7 +678,11 @@ defmodule Minga.CLI do
 
   @spec store_startup_project_root(String.t() | nil) :: :ok
   defp store_startup_project_root(nil) do
-    Application.delete_env(:minga, :cli_startup_project_root)
+    case cwd_startup_project_root() do
+      root when is_binary(root) -> Application.put_env(:minga, :cli_startup_project_root, root)
+      nil -> Application.delete_env(:minga, :cli_startup_project_root)
+    end
+
     :ok
   end
 
@@ -712,8 +723,6 @@ defmodule Minga.CLI do
 
   @spec detect_marked_project_root_from_dir(String.t(), [{String.t(), atom()}]) ::
           String.t() | nil
-  defp detect_marked_project_root_from_dir(_dir, []), do: nil
-
   defp detect_marked_project_root_from_dir(dir, markers) do
     case directory_marker_type(dir, markers) do
       {:ok, _type} -> dir

@@ -295,12 +295,10 @@ defmodule Minga.CLITest do
       File.write!(Path.join(root, "mix.exs"), "defmodule Example.MixProject do\nend\n")
       File.mkdir_p!(nested)
 
-      File.cd!(nested, fn ->
-        assert canonical_path(CLI.cwd_startup_project_root()) == canonical_path(root)
-      end)
+      assert canonical_path(CLI.cwd_startup_project_root(nested)) == canonical_path(root)
 
       unmarked = tmp_dir("cli-cwd-unmarked")
-      File.cd!(unmarked, fn -> assert CLI.cwd_startup_project_root() == nil end)
+      assert CLI.cwd_startup_project_root(unmarked) == nil
     end
 
     test "argv inference logs unexpected failures instead of silently swallowing them" do

@@ -103,7 +103,7 @@ defmodule MingaEditor.Startup do
     windows =
       if initial_window, do: %{initial_window_id => initial_window}, else: %{}
 
-    project_root = Keyword.get_lazy(opts, :project_root, &startup_project_root/0)
+    project_root = project_root_from_opts(opts)
 
     workspace = %MingaEditor.Workspace.State{
       buffers: %Buffers{
@@ -261,10 +261,30 @@ defmodule MingaEditor.Startup do
     TabBar.restore_workspaces(tab_bar, WorkspacePersistence.scan(project_root), project_root)
   end
 
+  @spec project_root_from_opts(keyword()) :: String.t() | nil
+  defp project_root_from_opts(opts) do
+    if Keyword.has_key?(opts, :project_root) do
+      Keyword.get(opts, :project_root)
+    else
+      maybe_infer_project_root(opts)
+    end
+  end
+
+  @spec maybe_infer_project_root(keyword()) :: String.t() | nil
+  defp maybe_infer_project_root(opts) do
+    default = Application.get_env(:minga, :infer_startup_project_root, true)
+
+    if Keyword.get(opts, :infer_project_root, default) do
+      startup_project_root()
+    else
+      nil
+    end
+  end
+
   @spec startup_project_root() :: String.t() | nil
   defp startup_project_root do
     Minga.CLI.startup_project_root() || Minga.CLI.argv_startup_project_root() ||
-      Minga.CLI.cwd_startup_project_root() || current_project_root()
+      current_project_root()
   end
 
   @spec current_project_root() :: String.t() | nil

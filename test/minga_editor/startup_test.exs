@@ -213,7 +213,8 @@ defmodule MingaEditor.StartupTest do
           parser_manager: nil,
           options_server: nil,
           width: 80,
-          height: 24
+          height: 24,
+          infer_project_root: true
         )
 
       tab_bar = EditorState.tab_bar(state)
@@ -245,7 +246,8 @@ defmodule MingaEditor.StartupTest do
           parser_manager: nil,
           options_server: nil,
           width: 80,
-          height: 24
+          height: 24,
+          infer_project_root: true
         )
 
       tab_bar = EditorState.tab_bar(state)
@@ -273,45 +275,14 @@ defmodule MingaEditor.StartupTest do
           parser_manager: nil,
           options_server: nil,
           width: 80,
-          height: 24
+          height: 24,
+          infer_project_root: true
         )
 
       tab_bar = EditorState.tab_bar(state)
 
       assert state.workspace.file_tree.project_root == invalid_root
       refute TabBar.get_workspace(tab_bar, 2)
-    after
-      Application.delete_env(:minga, :cli_startup_project_root)
-    end
-
-    test "uses cwd project root for no-argument startup when CLI env and argv are absent" do
-      original_argv = System.argv()
-      on_exit(fn -> System.argv(original_argv) end)
-      dir = tmp_dir("startup-cwd-project-root")
-      nested = Path.join([dir, "apps", "web"])
-      File.write!(Path.join(dir, "mix.exs"), "defmodule Example.MixProject do\nend\n")
-      File.mkdir_p!(nested)
-      workspace = Workspace.new_agent(2, "Cwd Agent", nil, dir)
-      assert :ok = Persistence.write(workspace, dir)
-      Application.delete_env(:minga, :cli_startup_project_root)
-      System.argv([])
-
-      state =
-        File.cd!(nested, fn ->
-          Startup.build_initial_state(
-            backend: :headless,
-            port_manager: nil,
-            parser_manager: nil,
-            options_server: nil,
-            width: 80,
-            height: 24
-          )
-        end)
-
-      tab_bar = EditorState.tab_bar(state)
-
-      assert canonical_path(state.workspace.file_tree.project_root) == canonical_path(dir)
-      assert %Workspace{label: "Cwd Agent"} = TabBar.get_workspace(tab_bar, 2)
     after
       Application.delete_env(:minga, :cli_startup_project_root)
     end
@@ -329,7 +300,8 @@ defmodule MingaEditor.StartupTest do
           parser_manager: nil,
           options_server: nil,
           width: 80,
-          height: 24
+          height: 24,
+          infer_project_root: true
         )
 
       agent_tab =
@@ -375,7 +347,8 @@ defmodule MingaEditor.StartupTest do
           parser_manager: nil,
           options_server: nil,
           width: 80,
-          height: 24
+          height: 24,
+          infer_project_root: true
         )
 
       restored_tab =
@@ -446,12 +419,6 @@ defmodule MingaEditor.StartupTest do
       assert {:leaf, 1} = agent_state.workspace.windows.tree
       assert map_size(agent_state.workspace.windows.map) == 1
     end
-  end
-
-  defp canonical_path(path) do
-    path
-    |> Path.expand()
-    |> String.replace_prefix("/private/var/", "/var/")
   end
 
   defp tmp_dir(name) do
