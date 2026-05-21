@@ -6,6 +6,7 @@ defmodule MingaEditor.State.Workspace do
   """
 
   alias Minga.Project.FileRef
+  alias MingaAgent.ProjectView
   alias MingaEditor.State.WorkspaceReview
 
   @typedoc "Workspace kind."
@@ -30,7 +31,7 @@ defmodule MingaEditor.State.Workspace do
           files: [FileRef.t()],
           active_file: FileRef.t() | nil,
           agent_ui: term() | nil,
-          project_view: term() | nil,
+          project_view: ProjectView.t() | nil,
           review: WorkspaceReview.t()
         }
 
@@ -84,10 +85,24 @@ defmodule MingaEditor.State.Workspace do
   end
 
   @doc "Sets the ProjectView owned by the workspace."
-  @spec set_project_view(t(), term() | nil) :: t()
+  @spec set_project_view(t(), ProjectView.t() | nil) :: t()
   def set_project_view(%__MODULE__{} = workspace, project_view) do
     %{workspace | project_view: project_view}
   end
+
+  @doc "Sets the session owned by the workspace."
+  @spec set_session(t(), pid() | nil) :: t()
+  def set_session(%__MODULE__{} = workspace, session) when is_pid(session) or is_nil(session) do
+    %{workspace | session: session}
+  end
+
+  @doc "Returns true when the workspace still has a live ProjectView."
+  @spec project_view_active?(t()) :: boolean()
+  def project_view_active?(%__MODULE__{project_view: %ProjectView{} = project_view}) do
+    ProjectView.active?(project_view)
+  end
+
+  def project_view_active?(%__MODULE__{}), do: false
 
   @doc "Sets review state through the owning workspace module."
   @spec set_review(t(), WorkspaceReview.t()) :: t()

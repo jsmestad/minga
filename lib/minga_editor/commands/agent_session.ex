@@ -7,6 +7,7 @@ defmodule MingaEditor.Commands.AgentSession do
   """
 
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
+  alias MingaAgent.ProjectView
   alias MingaAgent.Session
   alias Minga.Buffer
   alias MingaEditor.AgentLifecycle
@@ -71,12 +72,14 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec start_agent_session(state()) :: state()
   def start_agent_session(state) do
     panel = AgentAccess.panel(state)
+    {project_view, created_project_view?} = session_project_view(state)
 
     opts = [
       thinking_level: panel.thinking_level,
       provider_opts: [
         provider: panel.provider_name,
-        model: panel.model_name
+        model: panel.model_name,
+        project_view: project_view
       ]
     ]
 
@@ -101,9 +104,10 @@ defmodule MingaEditor.Commands.AgentSession do
         state = assign_session_to_tab(state, pid)
 
         # Create an workspace for this session (if one doesn't exist yet)
-        ensure_agent_workspace(state, pid)
+        ensure_agent_workspace(state, pid, project_view)
 
       {:error, reason} ->
+        maybe_discard_project_view(project_view, created_project_view?)
         msg = format_session_error(reason)
         Minga.Log.error(:agent, "[Agent] #{msg}")
         AgentAccess.update_agent(state, &AgentState.set_error(&1, msg))
@@ -124,7 +128,7 @@ defmodule MingaEditor.Commands.AgentSession do
         |> AgentAccess.update_agent(&AgentState.set_buffer(&1, buffer))
         |> rebuild_agent_from_tab(tab_id)
         |> apply_remote_snapshot(snapshot)
-        |> ensure_agent_workspace(remote_pid)
+        |> ensure_agent_workspace(remote_pid, nil)
         |> EditorState.set_status("Connected to #{server_name} session #{session_id}")
 
       {:error, reason} ->
@@ -457,12 +461,15 @@ defmodule MingaEditor.Commands.AgentSession do
   # Creates an agent workspace when a session starts, and assigns
   # the current agent tab to it. No-op if the session already has
   # a workspace (e.g., session restart).
-  @spec ensure_agent_workspace(state(), pid()) :: state()
-  defp ensure_agent_workspace(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, session_pid) do
+  @spec ensure_agent_workspace(state(), pid(), ProjectView.t() | nil) :: state()
+  defp ensure_agent_workspace(
+         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         session_pid,
+         project_view
+       ) do
     case TabBar.find_workspace_by_session(tb, session_pid) do
-      %Workspace{} ->
-        # Workspace already exists for this session
-        state
+      %Workspace{} = workspace ->
+        maybe_update_workspace_project_view(state, workspace, project_view)
 
       nil ->
         # Create workspace and assign the agent tab to it
@@ -475,9 +482,93 @@ defmodule MingaEditor.Commands.AgentSession do
             nil -> tb
           end
 
-        EditorState.set_tab_bar(state, tb)
+        state
+        |> EditorState.set_tab_bar(tb)
+        |> maybe_update_workspace_project_view(ws, project_view)
     end
   end
 
-  defp ensure_agent_workspace(state, _session_pid), do: state
+  defp ensure_agent_workspace(state, _session_pid, _project_view), do: state
+
+  @spec session_project_view(state()) :: {ProjectView.t() | nil, boolean()}
+  defp session_project_view(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+    case TabBar.active_workspace(tb) do
+      %Workspace{kind: :agent} = workspace ->
+        if Workspace.project_view_active?(workspace) do
+          {workspace.project_view, false}
+        else
+          project_view_from_root(state)
+        end
+
+      _ ->
+        project_view_from_root(state)
+    end
+  end
+
+  defp session_project_view(state), do: project_view_from_root(state)
+
+  @spec project_view_from_root(state()) :: {ProjectView.t() | nil, boolean()}
+  defp project_view_from_root(%{workspace: %{file_tree: %{project_root: root}}})
+       when is_binary(root) do
+    case ProjectView.overlay(root) do
+      {:ok, project_view} -> {project_view, true}
+      {:error, _reason} -> {nil, false}
+    end
+  end
+
+  defp project_view_from_root(_state), do: {nil, false}
+
+  @spec maybe_discard_project_view(ProjectView.t() | nil, boolean()) :: :ok
+  defp maybe_discard_project_view(%ProjectView{} = project_view, true) do
+    ProjectView.discard(project_view)
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp maybe_discard_project_view(_project_view, _created?), do: :ok
+
+  @spec maybe_update_workspace_project_view(state(), Workspace.t(), ProjectView.t() | nil) ::
+          state()
+  defp maybe_update_workspace_project_view(state, %Workspace{} = workspace, project_view) do
+    state
+    |> update_workspace_project_view(workspace.id, project_view)
+    |> maybe_refresh_provider_project_view(workspace.session, project_view)
+  end
+
+  @spec update_workspace_project_view(state(), non_neg_integer(), ProjectView.t() | nil) ::
+          state()
+  defp update_workspace_project_view(
+         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         workspace_id,
+         project_view
+       ) do
+    tb = TabBar.update_workspace(tb, workspace_id, &Workspace.set_project_view(&1, project_view))
+    EditorState.set_tab_bar(state, tb)
+  end
+
+  defp update_workspace_project_view(state, _workspace_id, _project_view), do: state
+
+  @spec maybe_refresh_provider_project_view(state(), pid() | nil, ProjectView.t() | nil) ::
+          state()
+  defp maybe_refresh_provider_project_view(state, session, project_view) when is_pid(session) do
+    case Session.get_provider(session) do
+      nil ->
+        state
+
+      provider ->
+        refresh_provider_project_view(state, provider, project_view)
+    end
+  catch
+    :exit, _ -> state
+  end
+
+  defp maybe_refresh_provider_project_view(state, _session, _project_view), do: state
+
+  @spec refresh_provider_project_view(state(), pid(), ProjectView.t() | nil) :: state()
+  defp refresh_provider_project_view(state, provider, project_view) do
+    :ok = MingaAgent.Providers.Native.refresh_project_view(provider, project_view)
+    state
+  catch
+    :exit, _ -> state
+  end
 end

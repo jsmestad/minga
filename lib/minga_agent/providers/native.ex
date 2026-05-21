@@ -48,6 +48,7 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.MCP.Registry, as: MCPRegistry
   alias MingaAgent.MCP.ServerConfig, as: MCPServerConfig
   alias MingaAgent.Memory
+  alias MingaAgent.ProjectView
   alias MingaAgent.ModelCatalog
   alias MingaAgent.ModelLimits
   alias MingaAgent.Retry
@@ -159,6 +160,11 @@ defmodule MingaAgent.Providers.Native do
           session_cost: float(),
           fork_store: pid() | nil,
           changeset: pid() | nil,
+          project_view: ProjectView.t() | nil,
+          base_tools: [term()],
+          mcp_tools: [term()],
+          internal_tools: [term()],
+          custom_tools?: boolean(),
           mcp_registry: MCPRegistry.t() | nil
         }
 
@@ -237,6 +243,12 @@ defmodule MingaAgent.Providers.Native do
     GenServer.call(pid, :continue)
   end
 
+  @doc "Refreshes the project view and rebuilds file tools around the new overlay."
+  @spec refresh_project_view(GenServer.server(), ProjectView.t() | nil) :: :ok | {:error, term()}
+  def refresh_project_view(pid, project_view) do
+    GenServer.call(pid, {:refresh_project_view, project_view})
+  end
+
   # ── GenServer callbacks ─────────────────────────────────────────────────────
 
   @impl GenServer
@@ -294,6 +306,7 @@ defmodule MingaAgent.Providers.Native do
           parent_session: subscriber
         )
 
+    custom_tools? = Keyword.has_key?(opts, :tools)
     active_skills = load_active_skills(project_root, Keyword.get(opts, :active_skill_names, []))
     internal_tools = build_internal_tools(provider_pid)
     reserved_tool_names = Enum.map(base_tools ++ internal_tools, & &1.name)
@@ -333,6 +346,11 @@ defmodule MingaAgent.Providers.Native do
       session_cost: 0.0,
       fork_store: fork_store,
       changeset: changeset,
+      project_view: project_view,
+      base_tools: base_tools,
+      mcp_tools: mcp_tools,
+      internal_tools: internal_tools,
+      custom_tools?: custom_tools?,
       mcp_registry: mcp_registry
     }
 
@@ -626,6 +644,12 @@ defmodule MingaAgent.Providers.Native do
   def handle_call({:set_model, model}, _from, state) do
     Minga.Log.info(:agent, "[Agent.Native] model set to #{model}")
     {:reply, :ok, %{state | model: model}}
+  end
+
+  def handle_call({:refresh_project_view, project_view}, _from, state) do
+    base_tools = refresh_base_tools(state, project_view)
+    tools = base_tools ++ state.mcp_tools ++ state.internal_tools
+    {:reply, :ok, %{state | project_view: project_view, base_tools: base_tools, tools: tools}}
   end
 
   def handle_call({:update_internal_state, fun}, _from, state) when is_function(fun, 1) do
@@ -1847,6 +1871,29 @@ defmodule MingaAgent.Providers.Native do
   defp non_empty(nil), do: nil
   defp non_empty(""), do: nil
   defp non_empty(str) when is_binary(str), do: str
+
+  @spec refresh_base_tools(state(), ProjectView.t() | nil) :: [ReqLLM.Tool.t()]
+  defp refresh_base_tools(%{custom_tools?: true, base_tools: base_tools}, _project_view) do
+    base_tools
+  end
+
+  defp refresh_base_tools(
+         %{
+           project_root: project_root,
+           fork_store: fork_store,
+           changeset: changeset,
+           subscriber: subscriber
+         },
+         project_view
+       ) do
+    Tools.all(
+      project_root: project_root,
+      project_view: project_view,
+      fork_store: fork_store,
+      changeset: changeset,
+      parent_session: subscriber
+    )
+  end
 
   # Builds tools that interact with the provider's internal state (todo, notebook).
   # These are created in init with a closure over the provider PID.

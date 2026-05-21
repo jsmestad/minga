@@ -100,6 +100,15 @@ defmodule MingaAgent.ProjectView do
   @spec capabilities(t()) :: ProjectView.Backend.capabilities()
   def capabilities(%__MODULE__{} = view), do: view.backend.capabilities(view)
 
+  @doc "Returns true when the underlying backend is still available."
+  @spec active?(t()) :: boolean()
+  def active?(%__MODULE__{} = view) do
+    _ = working_dir(view)
+    true
+  catch
+    :exit, _ -> false
+  end
+
   @doc false
   @spec new(module(), String.t(), ProjectView.Backend.ref(), keyword()) :: t()
   def new(backend, project_root, ref, opts) when is_atom(backend) and is_binary(project_root) do
