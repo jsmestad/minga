@@ -4,12 +4,17 @@ defmodule MingaEditor.StartupTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Config.Options
+  alias Minga.Project.FileRef
   alias Minga.Test.RecordingFrontend
+  alias MingaEditor.Commands.AgentSession
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Input
   alias MingaEditor.LayoutPreset
   alias MingaEditor.Startup
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace
+  alias MingaEditor.State.Workspace.Persistence
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
@@ -194,6 +199,183 @@ defmodule MingaEditor.StartupTest do
       assert BufferProcess.get_option(custom_state.workspace.buffers.active, :autopair_block) ==
                false
     end
+
+    test "uses the CLI startup project root for initial workspace restore when opts omit project_root" do
+      dir = tmp_dir("startup-project-root")
+      workspace = Workspace.new_agent(2, "Persisted Agent", nil, dir)
+      assert :ok = Persistence.write(workspace, dir)
+      Application.put_env(:minga, :cli_startup_project_root, dir)
+
+      state =
+        Startup.build_initial_state(
+          backend: :headless,
+          port_manager: nil,
+          parser_manager: nil,
+          options_server: nil,
+          width: 80,
+          height: 24,
+          infer_project_root: true
+        )
+
+      tab_bar = EditorState.tab_bar(state)
+
+      assert state.workspace.file_tree.project_root == dir
+      assert %Workspace{label: "Persisted Agent"} = TabBar.get_workspace(tab_bar, 2)
+      assert tab_bar |> TabBar.switch_to_workspace(2) |> TabBar.active_workspace_id() == 2
+    after
+      Application.delete_env(:minga, :cli_startup_project_root)
+    end
+
+    test "uses argv-inferred project root for initial workspace restore when CLI env is absent" do
+      original_argv = System.argv()
+      on_exit(fn -> System.argv(original_argv) end)
+      dir = tmp_dir("startup-argv-project-root")
+      File.write!(Path.join(dir, "mix.exs"), "defmodule Example.MixProject do\nend\n")
+      file = Path.join([dir, "lib", "example.ex"])
+      File.mkdir_p!(Path.dirname(file))
+      File.write!(file, "defmodule Example do\nend\n")
+      workspace = Workspace.new_agent(2, "Argv Agent", nil, dir)
+      assert :ok = Persistence.write(workspace, dir)
+      Application.delete_env(:minga, :cli_startup_project_root)
+      System.argv([file])
+
+      state =
+        Startup.build_initial_state(
+          backend: :headless,
+          port_manager: nil,
+          parser_manager: nil,
+          options_server: nil,
+          width: 80,
+          height: 24,
+          infer_project_root: true
+        )
+
+      tab_bar = EditorState.tab_bar(state)
+
+      assert state.workspace.file_tree.project_root == dir
+      assert %Workspace{label: "Argv Agent"} = TabBar.get_workspace(tab_bar, 2)
+    after
+      Application.delete_env(:minga, :cli_startup_project_root)
+    end
+
+    test "invalid CLI startup project root does not break boot or restore workspaces" do
+      original_argv = System.argv()
+      on_exit(fn -> System.argv(original_argv) end)
+      dir = tmp_dir("startup-invalid-project-root")
+      invalid_root = Path.join(dir, "missing")
+      workspace = Workspace.new_agent(2, "Hidden Agent", nil, dir)
+      assert :ok = Persistence.write(workspace, dir)
+      Application.put_env(:minga, :cli_startup_project_root, invalid_root)
+      System.argv([])
+
+      state =
+        Startup.build_initial_state(
+          backend: :headless,
+          port_manager: nil,
+          parser_manager: nil,
+          options_server: nil,
+          width: 80,
+          height: 24,
+          infer_project_root: true
+        )
+
+      tab_bar = EditorState.tab_bar(state)
+
+      assert state.workspace.file_tree.project_root == invalid_root
+      refute TabBar.get_workspace(tab_bar, 2)
+    after
+      Application.delete_env(:minga, :cli_startup_project_root)
+    end
+
+    test "switching to a restored agent workspace tab restores an agent-shaped editor context" do
+      dir = tmp_dir("startup-restored-agent-tab")
+      workspace = Workspace.new_agent(2, "Persisted Agent", nil, dir)
+      assert :ok = Persistence.write(workspace, dir)
+      Application.put_env(:minga, :cli_startup_project_root, dir)
+
+      state =
+        Startup.build_initial_state(
+          backend: :headless,
+          port_manager: nil,
+          parser_manager: nil,
+          options_server: nil,
+          width: 80,
+          height: 24,
+          infer_project_root: true
+        )
+
+      agent_tab =
+        Enum.find(EditorState.tab_bar(state).tabs, &(&1.kind == :agent and &1.group_id == 2))
+
+      assert %MingaEditor.State.Tab{} = agent_tab
+
+      {restored, _effects} = EditorState.switch_tab_pure(state, agent_tab.id)
+      active_window = Windows.active_struct(restored.workspace.windows)
+      restored_tab = TabBar.active(EditorState.tab_bar(restored))
+
+      assert restored.workspace.keymap_scope == :agent
+      assert restored.workspace.agent_ui.view.active
+      assert restored_tab.context.keymap_scope == :agent
+      assert restored_tab.context.agent_ui.view.active
+      assert Content.agent_chat?(active_window.content)
+      assert is_pid(restored.workspace.buffers.active)
+    after
+      Application.delete_env(:minga, :cli_startup_project_root)
+    end
+
+    test "starting a session from a restored agent workspace reuses the restored workspace" do
+      dir = tmp_dir("startup-restored-agent-session")
+      file = Path.join([dir, "lib", "tracked.ex"])
+      File.mkdir_p!(Path.dirname(file))
+      File.write!(file, "defmodule Tracked do\nend\n")
+      {:ok, file_ref} = FileRef.from_path(dir, file)
+
+      {:ok, workspace} =
+        2
+        |> Workspace.new_agent("Persisted Agent", nil, dir)
+        |> Workspace.add_file(file_ref)
+        |> Workspace.transition_review(:agent_started_editing, [file_ref])
+
+      {:ok, workspace} = Workspace.transition_review(workspace, :agent_completed, [file_ref])
+      assert :ok = Persistence.write(workspace, dir)
+      Application.put_env(:minga, :cli_startup_project_root, dir)
+
+      state =
+        Startup.build_initial_state(
+          backend: :headless,
+          port_manager: nil,
+          parser_manager: nil,
+          options_server: nil,
+          width: 80,
+          height: 24,
+          infer_project_root: true
+        )
+
+      restored_tab =
+        Enum.find(EditorState.tab_bar(state).tabs, &(&1.kind == :agent and &1.group_id == 2))
+
+      assert %MingaEditor.State.Tab{} = restored_tab
+      {state, _effects} = EditorState.switch_tab_pure(state, restored_tab.id)
+      state = AgentSession.start_agent_session(state)
+      tab_bar = EditorState.tab_bar(state)
+      active_tab = TabBar.active(tab_bar)
+      session = active_tab.session
+      on_exit(fn -> stop_session(session) end)
+
+      agent_workspaces = Enum.filter(tab_bar.workspaces, &(&1.kind == :agent))
+      rebound_workspace = TabBar.get_workspace(tab_bar, 2)
+
+      assert is_pid(session)
+      assert Enum.map(agent_workspaces, & &1.id) == [2]
+      assert active_tab.group_id == 2
+      assert rebound_workspace.session == session
+      assert rebound_workspace.label == "Persisted Agent"
+      assert rebound_workspace.files == [file_ref]
+      assert rebound_workspace.review.state == :needs_review
+      assert rebound_workspace.review.changed_files == [file_ref]
+    after
+      Application.delete_env(:minga, :cli_startup_project_root)
+    end
   end
 
   describe "build_initial_window/5" do
@@ -238,6 +420,24 @@ defmodule MingaEditor.StartupTest do
       assert map_size(agent_state.workspace.windows.map) == 1
     end
   end
+
+  defp tmp_dir(name) do
+    path =
+      Path.join(System.tmp_dir!(), "minga-startup-#{name}-#{System.unique_integer([:positive])}")
+
+    File.rm_rf!(path)
+    File.mkdir_p!(path)
+    on_exit(fn -> File.rm_rf!(path) end)
+    path
+  end
+
+  defp stop_session(pid) when is_pid(pid) do
+    MingaAgent.SessionManager.stop_session_by_pid(pid)
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp stop_session(_pid), do: :ok
 
   defp assert_startup_scope(backend, view_mode, expected_scope, expected_active?) do
     Application.put_env(:minga, :cli_startup_flags, %{view_mode: view_mode, no_context: false})

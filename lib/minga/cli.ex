@@ -113,6 +113,65 @@ defmodule Minga.CLI do
     Map.merge(@default_flags, stored)
   end
 
+  @doc "Returns the project root inferred from the stored startup CLI target, if any."
+  @spec startup_project_root() :: String.t() | nil
+  def startup_project_root do
+    Application.get_env(:minga, :cli_startup_project_root)
+  end
+
+  @doc "Returns the project root inferred from the current CLI argv before startup flags are stored."
+  @spec argv_startup_project_root() :: String.t() | nil
+  def argv_startup_project_root do
+    argv_startup_project_root(&Args.argv/0)
+  end
+
+  @doc false
+  @spec argv_startup_project_root((-> [String.t()])) :: String.t() | nil
+  def argv_startup_project_root(fetch_argv) when is_function(fetch_argv, 0) do
+    fetch_argv.()
+    |> startup_project_root_from_args()
+  rescue
+    error ->
+      log_argv_startup_project_root_failure({error, __STACKTRACE__})
+      nil
+  catch
+    kind, reason ->
+      log_argv_startup_project_root_failure({kind, reason})
+      nil
+  end
+
+  @doc "Returns the marked project root inferred from the current working directory, if any."
+  @spec cwd_startup_project_root() :: String.t() | nil
+  def cwd_startup_project_root do
+    File.cwd!()
+    |> cwd_startup_project_root()
+  rescue
+    error ->
+      log_cwd_startup_project_root_failure({error, __STACKTRACE__})
+      nil
+  catch
+    kind, reason ->
+      log_cwd_startup_project_root_failure({kind, reason})
+      nil
+  end
+
+  @doc false
+  @spec cwd_startup_project_root(String.t()) :: String.t() | nil
+  def cwd_startup_project_root(cwd) when is_binary(cwd) do
+    cwd
+    |> Path.expand()
+    |> detect_marked_project_root_from_dir(Minga.Project.Detector.default_markers())
+  end
+
+  @doc "Returns the project root inferred from raw CLI args, if they name a project or file inside a project."
+  @spec startup_project_root_from_args([String.t()]) :: String.t() | nil
+  def startup_project_root_from_args(args) when is_list(args) do
+    case parse_args(args) do
+      {:open, file, _flags} -> detect_startup_project_root(file)
+      {:error, _message} -> nil
+    end
+  end
+
   # ── Argument parsing ────────────────────────────────────────────────────────
 
   @spec parse_args([String.t()], String.t() | nil, flags()) :: parsed()
@@ -611,9 +670,107 @@ defmodule Minga.CLI do
   defp store_startup_flags(flags, file) do
     effective = apply_flag_implications(flags, file)
     Application.put_env(:minga, :cli_startup_flags, effective)
+    store_startup_project_root(file)
     store_debug_log_path(effective.debug_log)
     if effective.minimal, do: Application.put_env(:minga, :minimal_mode, true)
     :ok
+  end
+
+  @spec store_startup_project_root(String.t() | nil) :: :ok
+  defp store_startup_project_root(nil) do
+    case cwd_startup_project_root() do
+      root when is_binary(root) -> Application.put_env(:minga, :cli_startup_project_root, root)
+      nil -> Application.delete_env(:minga, :cli_startup_project_root)
+    end
+
+    :ok
+  end
+
+  defp store_startup_project_root(path) when is_binary(path) do
+    case detect_startup_project_root(path) do
+      root when is_binary(root) -> Application.put_env(:minga, :cli_startup_project_root, root)
+      nil -> Application.delete_env(:minga, :cli_startup_project_root)
+    end
+
+    :ok
+  end
+
+  @spec detect_startup_project_root(String.t() | nil) :: String.t() | nil
+  defp detect_startup_project_root(nil), do: nil
+
+  defp detect_startup_project_root(path) do
+    path
+    |> Path.expand()
+    |> detect_expanded_startup_project_root()
+  end
+
+  @spec detect_expanded_startup_project_root(String.t()) :: String.t() | nil
+  defp detect_expanded_startup_project_root(path) do
+    if File.dir?(path) do
+      detect_directory_project_root(path)
+    else
+      detect_file_project_root(path)
+    end
+  end
+
+  @spec detect_directory_project_root(String.t()) :: String.t()
+  defp detect_directory_project_root(path) do
+    case detect_marked_project_root_from_dir(path, Minga.Project.Detector.default_markers()) do
+      root when is_binary(root) -> root
+      nil -> path
+    end
+  end
+
+  @spec detect_marked_project_root_from_dir(String.t(), [{String.t(), atom()}]) ::
+          String.t() | nil
+  defp detect_marked_project_root_from_dir(dir, markers) do
+    case directory_marker_type(dir, markers) do
+      {:ok, _type} -> dir
+      :none -> detect_marked_project_root_from_parent(dir, markers)
+    end
+  end
+
+  @spec detect_marked_project_root_from_parent(String.t(), [{String.t(), atom()}]) ::
+          String.t() | nil
+  defp detect_marked_project_root_from_parent(dir, markers) do
+    parent = Path.dirname(dir)
+
+    if parent == dir do
+      nil
+    else
+      detect_marked_project_root_from_dir(parent, markers)
+    end
+  end
+
+  @spec directory_marker_type(String.t(), [{String.t(), atom()}]) :: {:ok, atom()} | :none
+  defp directory_marker_type(dir, markers) do
+    Enum.find_value(markers, :none, fn {marker, type} ->
+      if File.exists?(Path.join(dir, marker)), do: {:ok, type}, else: nil
+    end)
+  end
+
+  @spec detect_file_project_root(String.t()) :: String.t() | nil
+  defp detect_file_project_root(path) do
+    case Minga.Project.Detector.detect(path) do
+      {:ok, root, _type} -> root
+      :none -> nil
+    end
+  end
+
+  @spec log_argv_startup_project_root_failure(term()) :: :ok
+  defp log_argv_startup_project_root_failure(reason) do
+    Minga.Log.warning(
+      :editor,
+      "Could not infer startup project root from argv: #{inspect(reason)}"
+    )
+  end
+
+  @spec log_cwd_startup_project_root_failure(term()) :: :ok
+  defp log_cwd_startup_project_root_failure(reason) do
+    Minga.Log.warning(
+      :editor,
+      "Could not infer startup project root from cwd: #{inspect(reason)}"
+    )
   end
 
   @spec store_debug_log_path(String.t() | nil) :: :ok

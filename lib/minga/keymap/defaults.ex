@@ -150,7 +150,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?a, @none}, {?v, @none}], :toggle_agent_split, "Toggle agent split pane"},
     {[{?a, @none}, {?s, @none}], :agent_abort, "Abort agent turn"},
     {[{?a, @none}, {?S, @none}], :agent_stop_session, "Stop agent session"},
-    {[{?a, @none}, {?n, @none}], :agent_new_session, "New agent session"},
+    {[{?a, @none}, {?n, @none}], :agent_new_session, "New agent workspace"},
     {[{?a, @none}, {?m, @none}], :agent_pick_model, "Pick agent model"},
     {[{?a, @none}, {?M, @none}], :agent_cycle_model, "Cycle agent model"},
     {[{?a, @none}, {?h, @none}], :agent_session_history, "Resume session"},

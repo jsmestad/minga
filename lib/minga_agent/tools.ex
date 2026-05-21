@@ -361,7 +361,7 @@ defmodule MingaAgent.Tools do
         path = resolve_and_validate_path!(root, args["path"])
         edits = args["edits"] || []
 
-        if ToolRouter.active?(router_ctx) do
+        if ToolRouter.project_view_configured?(router_ctx) or ToolRouter.active?(router_ctx) do
           apply_multi_edit_via_router(router_ctx, path, edits)
         else
           case MultiEditFile.execute(path, edits) do
@@ -403,6 +403,9 @@ defmodule MingaAgent.Tools do
                router_ctx,
                "deleted #{path} (via #{route_name(router_ctx)})"
              )}
+
+          {:error, reason} when is_binary(reason) ->
+            {:error, reason}
 
           {:error, reason} ->
             {:error, inspect(reason)}
@@ -559,12 +562,21 @@ defmodule MingaAgent.Tools do
         "required" => ["command"]
       },
       callback: fn args ->
-        flush_before_shell()
         timeout_secs = min(args["timeout"] || 30, 300)
-        cwd = ToolRouter.working_dir(router_ctx) || root
 
-        env = ToolRouter.command_env(router_ctx)
-        routed_result(router_ctx, Shell.execute(args["command"], cwd, timeout_secs, env: env))
+        case ToolRouter.working_dir(router_ctx) do
+          {:error, :dead_project_view} ->
+            routed_result(router_ctx, {:error, :dead_project_view})
+
+          cwd ->
+            flush_before_shell()
+            env = ToolRouter.command_env(router_ctx)
+
+            routed_result(
+              router_ctx,
+              Shell.execute(args["command"], cwd || root, timeout_secs, env: env)
+            )
+        end
       end
     )
   end
@@ -1132,8 +1144,8 @@ defmodule MingaAgent.Tools do
     end
   end
 
-  @spec routed_result(ToolRouter.context(), {:ok, String.t()} | {:error, String.t()}) ::
-          {:ok, String.t()} | {:error, String.t()}
+  @spec routed_result(ToolRouter.context(), {:ok, String.t()} | {:error, term()}) ::
+          {:ok, String.t()} | {:error, term()}
   defp routed_result(router_ctx, {:ok, message}) do
     {:ok, append_workspace_context(router_ctx, message)}
   end

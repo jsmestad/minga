@@ -10,6 +10,15 @@ defmodule MingaEditor.Shell.Traditional.TabBarRendererTest do
 
   defp doom_theme, do: Theme.get!(:doom_one)
 
+  defp region_command({_start, _end, cmd}), do: cmd
+  defp region_command({_row, _start, _end, cmd}), do: cmd
+
+  defp region_start({start, _end, _cmd}), do: start
+  defp region_start({_row, start, _end, _cmd}), do: start
+
+  defp region_end({_start, ending, _cmd}), do: ending
+  defp region_end({_row, _start, ending, _cmd}), do: ending
+
   describe "render/5 basics" do
     test "produces draws and click regions for a single tab" do
       tab = Tab.new_file(1, "main.ex")
@@ -24,7 +33,7 @@ defmodule MingaEditor.Shell.Traditional.TabBarRendererTest do
       assert Enum.all?(draws, fn {row, _, _, _} -> row == 0 end)
 
       # Click region maps to tab_goto_1
-      assert Enum.any?(regions, fn {_, _, cmd} -> cmd == :tab_goto_1 end)
+      assert Enum.any?(regions, &(region_command(&1) == :tab_goto_1))
     end
 
     test "render_chrome_state does not mark a hidden active tab as active" do
@@ -57,8 +66,8 @@ defmodule MingaEditor.Shell.Traditional.TabBarRendererTest do
 
       colors = Map.from_struct(doom_theme().tab_bar)
 
-      assert Enum.any?(regions, fn {_, _, cmd} -> cmd == :tab_goto_1 end)
-      assert Enum.any?(regions, fn {_, _, cmd} -> cmd == :tab_close_1 end)
+      assert Enum.any?(regions, &(region_command(&1) == :tab_goto_1))
+      assert Enum.any?(regions, &(region_command(&1) == :tab_close_1))
 
       tab_draw = Enum.find(draws, fn {_, _, text, _} -> String.contains?(text, "agent.ex") end)
       assert tab_draw != nil
@@ -239,7 +248,7 @@ defmodule MingaEditor.Shell.Traditional.TabBarRendererTest do
 
       {_, regions} = TabBarRenderer.render(0, 80, tb, doom_theme())
 
-      commands = Enum.map(regions, fn {_, _, cmd} -> cmd end) |> MapSet.new()
+      commands = Enum.map(regions, &region_command/1) |> MapSet.new()
 
       assert :tab_goto_1 in commands
       assert :tab_goto_2 in commands
@@ -259,14 +268,14 @@ defmodule MingaEditor.Shell.Traditional.TabBarRendererTest do
 
       # Check each tab's goto and close regions don't overlap
       for tab_id <- [1, 2] do
-        goto = Enum.find(regions, fn {_, _, cmd} -> cmd == :"tab_goto_#{tab_id}" end)
-        close = Enum.find(regions, fn {_, _, cmd} -> cmd == :"tab_close_#{tab_id}" end)
+        goto = Enum.find(regions, &(region_command(&1) == :"tab_goto_#{tab_id}"))
+        close = Enum.find(regions, &(region_command(&1) == :"tab_close_#{tab_id}"))
 
         assert goto != nil, "Missing goto region for tab #{tab_id}"
         assert close != nil, "Missing close region for tab #{tab_id}"
 
-        {_, goto_end, _} = goto
-        {close_start, _, _} = close
+        goto_end = region_end(goto)
+        close_start = region_start(close)
 
         assert goto_end < close_start,
                "Tab #{tab_id} goto (end=#{goto_end}) overlaps close (start=#{close_start})"
@@ -281,10 +290,12 @@ defmodule MingaEditor.Shell.Traditional.TabBarRendererTest do
 
       {_, regions} = TabBarRenderer.render(0, 120, tb, doom_theme())
 
-      sorted = Enum.sort_by(regions, fn {start, _, _} -> start end)
+      sorted = Enum.sort_by(regions, &region_start/1)
 
       Enum.chunk_every(sorted, 2, 1, :discard)
-      |> Enum.each(fn [{_, end1, _}, {start2, _, _}] ->
+      |> Enum.each(fn [left, right] ->
+        end1 = region_end(left)
+        start2 = region_start(right)
         assert end1 < start2, "Regions overlap: end=#{end1} >= start=#{start2}"
       end)
     end
@@ -295,13 +306,10 @@ defmodule MingaEditor.Shell.Traditional.TabBarRendererTest do
 
       {_, regions} = TabBarRenderer.render(0, 80, tb, doom_theme())
 
-      goto = Enum.find(regions, fn {_, _, cmd} -> cmd == :tab_goto_1 end)
-      close = Enum.find(regions, fn {_, _, cmd} -> cmd == :tab_close_1 end)
+      goto = Enum.find(regions, &(region_command(&1) == :tab_goto_1))
+      close = Enum.find(regions, &(region_command(&1) == :tab_close_1))
 
-      {goto_start, _, _} = goto
-      {close_start, _, _} = close
-
-      assert close_start > goto_start
+      assert region_start(close) > region_start(goto)
     end
   end
 
@@ -341,7 +349,7 @@ defmodule MingaEditor.Shell.Traditional.TabBarRendererTest do
       {draws, regions} = TabBarRenderer.render(0, 50, tb, doom_theme())
 
       # The active tab's click region should exist
-      assert Enum.any?(regions, fn {_, _, cmd} -> cmd == :tab_goto_8 end)
+      assert Enum.any?(regions, &(region_command(&1) == :tab_goto_8))
 
       # The active tab's label should appear in the draws
       all_text = Enum.map_join(draws, fn {_, _, text, _} -> text end)
