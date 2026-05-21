@@ -34,7 +34,11 @@ defmodule MingaEditor.Shell.Traditional.TabBarRenderer do
 
   @typedoc "A clickable region: column range mapping to a command."
   @type click_region ::
-          {col_start :: non_neg_integer(), col_end :: non_neg_integer(), command :: atom()}
+          {col_start :: non_neg_integer(), col_end :: non_neg_integer(),
+           command :: atom() | {:workspace_goto, non_neg_integer()}}
+          | {row :: non_neg_integer(), col_start :: non_neg_integer(),
+             col_end :: non_neg_integer(),
+             command :: atom() | {:workspace_goto, non_neg_integer()}}
 
   # Powerline separators (right-pointing triangle)
   @sep_right "\u{E0B0}"
@@ -323,8 +327,8 @@ defmodule MingaEditor.Shell.Traditional.TabBarRenderer do
       close_end = body_end + seg.close_width
 
       # Click regions: body for tab switch, close icon for tab close
-      body_region = {col, body_end - 1, :"tab_goto_#{seg.tab_id}"}
-      close_region = {body_end, close_end - 1, :"tab_close_#{seg.tab_id}"}
+      body_region = {row, col, body_end - 1, :"tab_goto_#{seg.tab_id}"}
+      close_region = {row, body_end, close_end - 1, :"tab_close_#{seg.tab_id}"}
 
       # Powerline separator
       {sep_draws, sep_end} = powerline_sep(row, close_end, seg.bg, colors.bg, colors)
@@ -393,6 +397,7 @@ defmodule MingaEditor.Shell.Traditional.TabBarRenderer do
 
     body_region =
       clipped_region(
+        row,
         screen_col,
         body_screen_end,
         screen_start,
@@ -402,6 +407,7 @@ defmodule MingaEditor.Shell.Traditional.TabBarRenderer do
 
     close_region =
       clipped_region(
+        row,
         body_screen_end,
         close_screen_end,
         screen_start,
@@ -423,11 +429,11 @@ defmodule MingaEditor.Shell.Traditional.TabBarRenderer do
   defp maybe_add_region(regions, nil), do: regions
   defp maybe_add_region(regions, region), do: [region | regions]
 
-  @spec clipped_region(integer(), integer(), integer(), integer(), atom()) ::
+  @spec clipped_region(non_neg_integer(), integer(), integer(), integer(), integer(), atom()) ::
           click_region() | nil
-  defp clipped_region(screen_col, region_end, screen_start, screen_end, command) do
+  defp clipped_region(row, screen_col, region_end, screen_start, screen_end, command) do
     if region_end > screen_start and screen_col < screen_end do
-      {max(screen_col, screen_start), min(region_end - 1, screen_end - 1), command}
+      {row, max(screen_col, screen_start), min(region_end - 1, screen_end - 1), command}
     else
       nil
     end

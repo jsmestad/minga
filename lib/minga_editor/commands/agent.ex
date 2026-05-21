@@ -76,8 +76,8 @@ defmodule MingaEditor.Commands.Agent do
             # switch — otherwise it would always see nil from the file tab.
             state
             |> EditorState.switch_tab(agent_id)
-            |> activate_agent_view(return_target)
             |> maybe_start_session()
+            |> activate_agent_view(return_target)
 
           nil ->
             state
@@ -129,11 +129,13 @@ defmodule MingaEditor.Commands.Agent do
         # Create agent tab in the background (don't switch to it).
         # Group creation happens later in start_agent_session when
         # the session pid is available (ensure_agent_workspace/2).
-        {tb, new_tab} = TabBar.add(EditorState.tab_bar(state), :agent, "Agent")
+        tab_bar = EditorState.tab_bar(state) || TabBar.new(Tab.new_file(1, "File"))
+        original_active_id = tab_bar.active_id
+        {tb, new_tab} = TabBar.add(tab_bar, :agent, "Agent")
         tb = TabBar.update_context(tb, new_tab.id, context)
 
         # Switch back to the original active tab
-        tb = %{tb | active_id: EditorState.tab_bar(state).active_id}
+        tb = TabBar.switch_to(tb, original_active_id)
         EditorState.set_tab_bar(state, tb)
 
       _existing ->
@@ -655,23 +657,71 @@ defmodule MingaEditor.Commands.Agent do
   end
 
   @doc """
-  Creates a new agent tab with a fresh session.
+  Creates a new active agent workspace with a fresh session.
 
-  If the current tab is a file tab, snapshots it and switches to a new
-  agent tab. If already on an agent tab, creates a new one alongside it.
+  The new workspace starts with no file membership. The agent tab is the zoom surface for the workspace, not a file tab copied from the source workspace.
   """
   @spec new_agent_session(state()) :: state()
   def new_agent_session(state) do
-    # Reset agent state for a fresh session, then start it.
-    # The agent buffer is reused (content will be cleared by buffer sync).
-    state =
-      AgentAccess.update_agent(state, fn _a ->
-        %AgentState{buffer: AgentAccess.agent(state).buffer}
-      end)
-
-    state = AgentAccess.update_agent_ui(state, fn _a -> UIState.new() end)
-    AgentSession.start_agent_session(state)
+    state
+    |> create_active_agent_tab()
+    |> reset_agent_state_for_new_session()
+    |> AgentLifecycle.setup_agent_highlight()
+    |> AgentSession.start_agent_session()
   end
+
+  @spec reset_agent_state_for_new_session(state()) :: state()
+  defp reset_agent_state_for_new_session(state) do
+    agent_buf = AgentAccess.agent(state).buffer
+
+    state
+    |> AgentAccess.update_agent(fn _a -> %AgentState{buffer: agent_buf} end)
+    |> AgentAccess.update_agent_ui(fn _a -> UIState.new() end)
+  end
+
+  @spec create_active_agent_tab(state()) :: state()
+  defp create_active_agent_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+    {state, agent_buf} = create_fresh_agent_buffer(state)
+    rows = max(state.terminal_viewport.rows, 1)
+    cols = max(state.terminal_viewport.cols, 1)
+    windows = agent_tab_windows(agent_buf, rows, cols)
+    context = EditorState.build_agent_tab_defaults(state, windows, agent_buf)
+    {tb, tab} = TabBar.insert(tb, :agent, "Agent")
+    tb = TabBar.update_context(tb, tab.id, context)
+
+    state
+    |> EditorState.set_tab_bar(tb)
+    |> EditorState.switch_tab(tab.id)
+  end
+
+  defp create_active_agent_tab(state), do: state
+
+  @spec create_fresh_agent_buffer(state()) :: {state(), pid() | nil}
+  defp create_fresh_agent_buffer(state) do
+    case AgentBufferSync.start_buffer(EditorState.options_server(state)) do
+      pid when is_pid(pid) ->
+        state = AgentAccess.update_agent(state, &AgentState.set_buffer(&1, pid))
+        {EditorState.monitor_buffer(state, pid), pid}
+
+      _ ->
+        {state, nil}
+    end
+  end
+
+  @spec agent_tab_windows(pid() | nil, pos_integer(), pos_integer()) :: Windows.t()
+  defp agent_tab_windows(agent_buf, rows, cols) when is_pid(agent_buf) do
+    win_id = 1
+    agent_window = Window.new_agent_chat(win_id, agent_buf, rows, cols)
+
+    %Windows{
+      tree: WindowTree.new(win_id),
+      map: %{win_id => agent_window},
+      active: win_id,
+      next_id: win_id + 1
+    }
+  end
+
+  defp agent_tab_windows(_agent_buf, _rows, _cols), do: %Windows{}
 
   @doc "Stops the current agent session process."
   @spec stop_current_session(state()) :: state()
@@ -1470,7 +1520,7 @@ defmodule MingaEditor.Commands.Agent do
     {:cycle_agent_tabs, "Cycle agent tabs (opens split if none)", :cycle_agent_tabs},
     {:agent_abort, "Abort current AI agent turn", :abort_agent},
     {:agent_stop_session, "Stop AI agent session", :stop_current_session},
-    {:agent_new_session, "New AI agent session", :start_session_picker},
+    {:agent_new_session, "New agent workspace", :start_session_picker},
     {:agent_cycle_model, "Cycle AI agent model", :cycle_model},
     {:agent_summarize, "Summarize session to context artifact", :summarize},
     {:agent_cycle_thinking, "Cycle AI thinking level", :cycle_thinking_level},

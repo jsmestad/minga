@@ -9,6 +9,7 @@ defmodule MingaAgent.ProjectView.Direct do
 
   alias Minga.Events
   alias MingaAgent.ProjectView
+  alias MingaAgent.ProjectView.PathResolver
 
   @type direct_state :: %{modified: MapSet.t(String.t()), deleted: MapSet.t(String.t())}
 
@@ -28,15 +29,16 @@ defmodule MingaAgent.ProjectView.Direct do
   @impl true
   @spec read_file(ProjectView.t(), String.t()) :: {:ok, binary()} | {:error, term()}
   def read_file(%ProjectView{} = view, relative_path) do
-    view |> target_path(relative_path) |> File.read()
+    with {:ok, target} <- safe_target(view, relative_path) do
+      File.read(target)
+    end
   end
 
   @impl true
   @spec write_file(ProjectView.t(), String.t(), binary()) :: :ok | {:error, term()}
   def write_file(%ProjectView{} = view, relative_path, content) do
-    target = target_path(view, relative_path)
-
-    with :ok <- File.mkdir_p(Path.dirname(target)),
+    with {:ok, target} <- safe_target(view, relative_path),
+         :ok <- File.mkdir_p(Path.dirname(target)),
          :ok <- File.write(target, content) do
       track_modified(view, relative_path)
     end
@@ -54,15 +56,10 @@ defmodule MingaAgent.ProjectView.Direct do
   @impl true
   @spec delete_file(ProjectView.t(), String.t()) :: :ok | {:error, term()}
   def delete_file(%ProjectView{} = view, relative_path) do
-    target = target_path(view, relative_path)
-
-    case File.rm(target) do
-      :ok ->
-        track_deleted(view, relative_path)
-        broadcast_file_written(target)
-
-      {:error, reason} ->
-        {:error, reason}
+    with {:ok, target} <- safe_target(view, relative_path),
+         :ok <- File.rm(target) do
+      track_deleted(view, relative_path)
+      broadcast_file_written(target)
     end
   end
 
@@ -70,11 +67,11 @@ defmodule MingaAgent.ProjectView.Direct do
   @spec list_directory(ProjectView.t(), String.t()) ::
           {:ok, [ProjectView.Backend.directory_entry()]} | {:error, term()}
   def list_directory(%ProjectView{} = view, relative_path) do
-    dir = target_path(view, relative_path)
-
-    case File.ls(dir) do
-      {:ok, entries} -> {:ok, Enum.map(Enum.sort(entries), &directory_entry(dir, &1))}
-      {:error, reason} -> {:error, reason}
+    with {:ok, dir} <- safe_target(view, relative_path, allow_root: true) do
+      case File.ls(dir) do
+        {:ok, entries} -> {:ok, Enum.map(Enum.sort(entries), &directory_entry(dir, &1))}
+        {:error, reason} -> {:error, reason}
+      end
     end
   end
 
@@ -136,9 +133,10 @@ defmodule MingaAgent.ProjectView.Direct do
     }
   end
 
-  @spec target_path(ProjectView.t(), String.t()) :: String.t()
-  defp target_path(%ProjectView{project_root: project_root}, relative_path) do
-    Path.join(project_root, relative_path)
+  @spec safe_target(ProjectView.t(), String.t(), keyword()) ::
+          {:ok, String.t()} | {:error, :invalid_path | :path_traversal | :symlink_traversal}
+  defp safe_target(%ProjectView{project_root: project_root}, relative_path, opts \\ []) do
+    PathResolver.resolve(project_root, relative_path, opts)
   end
 
   @spec replace_exact(binary(), String.t(), String.t()) ::

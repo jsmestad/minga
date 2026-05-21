@@ -14,6 +14,7 @@ defmodule MingaEditor.State.Tab do
 
   alias Minga.Project.FileRef
   alias MingaEditor.State.Tab.Context
+  alias MingaEditor.State.Workspace.RemoteSession
 
   @typedoc "Unique tab identifier."
   @type id :: pos_integer()
@@ -120,13 +121,41 @@ defmodule MingaEditor.State.Tab do
   @spec set_remote_session(t(), String.t(), String.t(), pid()) :: t()
   def set_remote_session(%__MODULE__{} = tab, server_name, session_id, pid)
       when is_binary(server_name) and is_binary(session_id) and is_pid(pid) do
+    tab
+    |> set_remote_projection(RemoteSession.new(server_name, session_id, :connected))
+    |> set_session(pid)
+  end
+
+  @doc "Projects workspace-owned remote metadata onto this tab for display."
+  @spec set_remote_projection(t(), RemoteSession.t()) :: t()
+  def set_remote_projection(%__MODULE__{} = tab, %RemoteSession{} = remote_session) do
     %{
       tab
-      | server_name: server_name,
-        remote_session_id: session_id,
-        session: pid,
-        connection_status: :connected
+      | server_name: remote_session.server_name,
+        remote_session_id: remote_session.session_id,
+        connection_status: remote_session.connection_status
     }
+  end
+
+  @doc "Clears projected remote metadata from this tab."
+  @spec clear_remote_projection(t()) :: t()
+  def clear_remote_projection(%__MODULE__{} = tab) do
+    %{
+      tab
+      | server_name: nil,
+        remote_session_id: nil,
+        connection_status: nil
+    }
+  end
+
+  @doc "Clears agent lifecycle projection data from this tab."
+  @spec clear_agent_projection(t()) :: t()
+  def clear_agent_projection(%__MODULE__{} = tab) do
+    tab
+    |> set_session(nil)
+    |> clear_remote_projection()
+    |> set_agent_status(nil)
+    |> set_attention(false)
   end
 
   @doc "Updates remote connection status for the tab."

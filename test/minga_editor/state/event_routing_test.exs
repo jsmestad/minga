@@ -7,7 +7,7 @@ defmodule MingaEditor.State.EventRoutingTest do
   alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
-  alias MingaEditor.State.{Tab, TabBar}
+  alias MingaEditor.State.{Tab, TabBar, Workspace}
   alias MingaEditor.Viewport
 
   defp make_state(opts \\ []) do
@@ -194,7 +194,9 @@ defmodule MingaEditor.State.EventRoutingTest do
       state = EditorState.set_tab_session(state, tab.id, new_session)
 
       tab = TabBar.get(state.shell_state.tab_bar, tab.id)
+      workspace = TabBar.active_workspace(state.shell_state.tab_bar)
       assert tab.session == new_session
+      assert workspace.session == new_session
     end
   end
 
@@ -205,6 +207,7 @@ defmodule MingaEditor.State.EventRoutingTest do
 
       refute Map.has_key?(ctx, :agent)
       refute Map.has_key?(ctx, :agentic)
+      refute Map.has_key?(ctx, :agent_ui)
     end
   end
 
@@ -213,7 +216,12 @@ defmodule MingaEditor.State.EventRoutingTest do
       %{state: state, session: session} = make_state()
 
       {tb, agent_tab} = TabBar.add(state.shell_state.tab_bar, :agent, "Agent")
-      tb = TabBar.update_tab(tb, agent_tab.id, &Tab.set_session(&1, session))
+
+      tb =
+        tb
+        |> TabBar.update_tab(agent_tab.id, &Tab.set_session(&1, session))
+        |> TabBar.update_workspace(agent_tab.group_id, &Workspace.set_session(&1, session))
+
       state = MingaEditor.State.set_tab_bar(state, tb)
 
       {new_state, _effects} = AgentEvents.handle(state, {:status_changed, :thinking})
@@ -226,7 +234,12 @@ defmodule MingaEditor.State.EventRoutingTest do
       %{state: state, session: session} = make_state()
 
       {tb, agent_tab} = TabBar.add(state.shell_state.tab_bar, :agent, "Agent")
-      tb = TabBar.update_tab(tb, agent_tab.id, &Tab.set_session(&1, session))
+
+      tb =
+        tb
+        |> TabBar.update_tab(agent_tab.id, &Tab.set_session(&1, session))
+        |> TabBar.update_workspace(agent_tab.group_id, &Workspace.set_session(&1, session))
+
       state = MingaEditor.State.set_tab_bar(state, tb)
 
       {state, _} = AgentEvents.handle(state, {:status_changed, :thinking})
