@@ -83,33 +83,15 @@ defmodule Minga.Editing.AutoPair do
   def on_insert(%Document{} = buffer, {line, col}, char) do
     char_at_cursor = char_at(buffer, line, col)
 
-    cond do
-      # Typing a closing delimiter that matches char under cursor → skip
-      MapSet.member?(@closing_chars, char) and char_at_cursor == char ->
-        {:skip, char}
-
-      # Symmetric quote that matches char under cursor → skip
-      Map.has_key?(@quote_pairs, char) and char_at_cursor == char ->
-        {:skip, char}
-
-      # Opening bracket → always pair
-      Map.has_key?(@pair_map, char) ->
-        {:pair, char, Map.fetch!(@pair_map, char)}
-
-      # Quote character → pair only if not preceded by a word character
-      Map.has_key?(@quote_pairs, char) ->
-        char_before = char_before(buffer, line, col)
-
-        if word_char?(char_before) do
-          {:passthrough, char}
-        else
-          {:pair, char, Map.fetch!(@quote_pairs, char)}
-        end
-
-      # Everything else
-      true ->
-        {:passthrough, char}
-    end
+    on_insert_action(
+      buffer,
+      {line, col},
+      char,
+      MapSet.member?(@closing_chars, char) and char_at_cursor == char,
+      Map.has_key?(@quote_pairs, char) and char_at_cursor == char,
+      Map.has_key?(@pair_map, char),
+      Map.has_key?(@quote_pairs, char)
+    )
   end
 
   @doc """
@@ -158,6 +140,43 @@ defmodule Minga.Editing.AutoPair do
   """
   @spec closing_for(String.t()) :: String.t() | nil
   def closing_for(char), do: Map.get(@all_pairs, char)
+
+  @spec on_insert_action(
+          Document.t(),
+          position(),
+          String.t(),
+          boolean(),
+          boolean(),
+          boolean(),
+          boolean()
+        ) ::
+          insert_action()
+  defp on_insert_action(_buffer, _position, char, true, _quote_match?, _opening?, _quote?),
+    do: {:skip, char}
+
+  defp on_insert_action(_buffer, _position, char, false, true, _opening?, _quote?),
+    do: {:skip, char}
+
+  defp on_insert_action(_buffer, _position, char, false, false, true, _quote?),
+    do: {:pair, char, Map.fetch!(@pair_map, char)}
+
+  defp on_insert_action(buffer, {line, col}, char, false, false, false, true) do
+    quote_insert_action(char, char_before(buffer, line, col))
+  end
+
+  defp on_insert_action(_buffer, _position, char, false, false, false, false),
+    do: {:passthrough, char}
+
+  @spec quote_insert_action(String.t(), String.t() | nil) :: insert_action()
+  defp quote_insert_action(char, char_before) do
+    quote_insert_action_for_word_char(char, word_char?(char_before))
+  end
+
+  @spec quote_insert_action_for_word_char(String.t(), boolean()) :: insert_action()
+  defp quote_insert_action_for_word_char(char, true), do: {:passthrough, char}
+
+  defp quote_insert_action_for_word_char(char, false),
+    do: {:pair, char, Map.fetch!(@quote_pairs, char)}
 
   # ── Private helpers ──────────────────────────────────────────────────────────
 

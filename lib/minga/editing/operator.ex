@@ -119,30 +119,40 @@ defmodule Minga.Editing.Operator do
     line_text =
       Minga.Buffer.lines(server, line_index, 1) |> List.first() |> then(&(&1 || ""))
 
-    line_len = byte_size(line_text)
+    line_range(server, line_index, total_lines, line_text, byte_size(line_text))
+  end
 
-    cond do
-      # Only line in the buffer — delete from col 0 through last byte of last grapheme.
-      # If the line is empty, delete_range handles it gracefully (delete_count clamped to 0).
-      total_lines == 1 ->
-        last_col = if line_len == 0, do: 0, else: Unicode.last_grapheme_byte_offset(line_text)
-        {{0, 0}, {0, last_col}}
+  @spec line_range(
+          GenServer.server(),
+          non_neg_integer(),
+          pos_integer(),
+          String.t(),
+          non_neg_integer()
+        ) ::
+          {position(), position()}
+  # Only line in the buffer — delete from col 0 through last byte of last grapheme.
+  # If the line is empty, delete_range handles it gracefully (delete_count clamped to 0).
+  defp line_range(_server, _line_index, 1, line_text, line_len) do
+    last_col = if line_len == 0, do: 0, else: Unicode.last_grapheme_byte_offset(line_text)
+    {{0, 0}, {0, last_col}}
+  end
 
-      # Last line — also consume the preceding newline so no orphan line remains.
-      # The newline lives at byte_col == byte_size(prev_text) on the previous line.
-      line_index >= total_lines - 1 ->
-        prev_text =
-          Minga.Buffer.lines(server, line_index - 1, 1)
-          |> List.first()
-          |> then(&(&1 || ""))
+  # Last line — also consume the preceding newline so no orphan line remains.
+  # The newline lives at byte_col == byte_size(prev_text) on the previous line.
+  defp line_range(server, line_index, total_lines, line_text, line_len)
+       when line_index >= total_lines - 1 do
+    prev_text =
+      Minga.Buffer.lines(server, line_index - 1, 1)
+      |> List.first()
+      |> then(&(&1 || ""))
 
-        prev_len = byte_size(prev_text)
-        last_col = if line_len == 0, do: 0, else: Unicode.last_grapheme_byte_offset(line_text)
-        {{line_index - 1, prev_len}, {line_index, last_col}}
+    prev_len = byte_size(prev_text)
+    last_col = if line_len == 0, do: 0, else: Unicode.last_grapheme_byte_offset(line_text)
+    {{line_index - 1, prev_len}, {line_index, last_col}}
+  end
 
-      # Any other line — include the trailing newline using byte_col == byte_size(line).
-      true ->
-        {{line_index, 0}, {line_index, line_len}}
-    end
+  # Any other line — include the trailing newline using byte_col == byte_size(line).
+  defp line_range(_server, line_index, _total_lines, _line_text, line_len) do
+    {{line_index, 0}, {line_index, line_len}}
   end
 end

@@ -10,7 +10,7 @@ defmodule Minga.Editing.BlockPair do
   @doc """
   Returns the closing keyword for a block-opening line, or `nil` when the line is not a block opener.
 
-  The matcher rejects keywords embedded in longer identifiers and treats Ruby line-head keywords as block openers only when they start the trimmed line. That avoids modifier forms such as `return x if cond`.
+  The matcher rejects keywords embedded in longer identifiers and treats Ruby line-head keywords as block openers only when they start the trimmed line. That avoids modifier forms such as `return x if ready`.
   """
   @spec closing_for([BlockPairSpec.t()], String.t()) :: String.t() | nil
   def closing_for(block_pairs, line_text) when is_list(block_pairs) and is_binary(line_text) do
