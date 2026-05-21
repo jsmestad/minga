@@ -624,60 +624,96 @@ struct TabBarViewViewTests {
         #expect(strings.contains("test.ex"))
     }
 
-    @Test("Tab bar shows inactive agent capsules when visible tabs only cover the active workspace")
-    @MainActor func showsInactiveAgentCapsules() throws {
+    @Test("Tab bar uses canonical active-workspace visible tabs")
+    @MainActor func usesCanonicalVisibleTabs() throws {
         let state = TabBarState()
-        state.update(activeIndex: 255, entries: [
-            Wire.TabEntry(id: 1, groupId: 1, isActive: false, isDirty: false, isAgent: false,
-                       hasAttention: false, agentStatus: 0, icon: "", label: "active.ex")
+        state.update(activeIndex: 0, entries: [
+            Wire.TabEntry(id: 1, groupId: 1, isActive: true, isDirty: false, isAgent: false,
+                       hasAttention: false, agentStatus: 0, icon: "", label: "legacy-agent-chat"),
+            Wire.TabEntry(id: 2, groupId: 2, isActive: false, isDirty: false, isAgent: false,
+                       hasAttention: false, agentStatus: 0, icon: "", label: "background.ex")
         ])
-        state.updateWorkspaces(activeWorkspaceId: 1, entries: [
-            Wire.WorkspaceEntry(id: 1, agentStatus: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
-                              tabCount: 1, label: "Active", icon: "folder"),
-            Wire.WorkspaceEntry(id: 2, agentStatus: 1, colorR: 0x44, colorG: 0x55, colorB: 0x66,
-                              tabCount: 3, label: "Research", icon: "cpu")
+        state.updateWorkspaces(activeWorkspaceId: 1, mode: 1, flags: 0, entries: [
+            Wire.WorkspaceEntry(id: 1, kind: 1, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
+                                tabCount: 1, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "Active", icon: "cpu"),
+            Wire.WorkspaceEntry(id: 2, kind: 1, status: 1, flags: 0, colorR: 0x44, colorG: 0x55, colorB: 0x66,
+                                tabCount: 3, draftCount: 0, conflictCount: 0, runningBackgroundCount: 1, label: "Research", icon: "cpu")
+        ], visibleTabs: [
+            Wire.WorkspaceTabEntry(id: 42, workspaceId: 1, kind: 0, flags: 0, pathHash: 0, icon: "", label: "active.ex", path: "/tmp/active.ex")
         ])
 
         let sut = TabBarView(tabBarState: state, theme: ThemeColors(), encoder: nil)
-        let body = try sut.inspect()
-        let texts = body.findAll(ViewInspectorQuery.text)
-        let strings = texts.compactMap { try? $0.string() }
+        let strings = try sut.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
         #expect(strings.contains("active.ex"))
-        #expect(strings.contains("Research"))
+        #expect(!strings.contains("legacy-agent-chat"))
+        #expect(!strings.contains("background.ex"))
+        #expect(!strings.contains("Research"))
+    }
+}
+
+// MARK: - WorkspaceHeaderView
+
+@Suite("WorkspaceHeaderView View Structure")
+struct WorkspaceHeaderViewTests {
+
+    @MainActor private func populatedState() -> WorkspaceState {
+        let state = WorkspaceState()
+        state.update(version: 1, activeWorkspaceId: 2, mode: 1, flags: 1, workspaces: [
+            Wire.WorkspaceEntry(id: 0, kind: 0, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
+                                tabCount: 1, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "minga", icon: "folder"),
+            Wire.WorkspaceEntry(id: 1, kind: 1, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
+                                tabCount: 1, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "Research", icon: "cpu"),
+            Wire.WorkspaceEntry(id: 2, kind: 1, status: 2, flags: 0x0003, colorR: 0x44, colorG: 0x55, colorB: 0x66,
+                                tabCount: 2, draftCount: 1, conflictCount: 1, runningBackgroundCount: 1, label: "Review", icon: "cpu")
+        ], visibleTabs: [
+            Wire.WorkspaceTabEntry(id: 42, workspaceId: 2, kind: 0, flags: 0, pathHash: 0, icon: "", label: "active.ex", path: "/tmp/active.ex")
+        ])
+        return state
     }
 
-    @Test("Second inactive agent capsule emits workspace goto command")
-    @MainActor func secondInactiveAgentCapsuleEmitsWorkspaceGotoCommand() throws {
-        let state = TabBarState()
-        state.update(activeIndex: 255, entries: [
-            Wire.TabEntry(id: 42, groupId: 1, isActive: false, isDirty: false, isAgent: false,
-                       hasAttention: false, agentStatus: 0, icon: "", label: "main.ex")
-        ])
-        state.updateWorkspaces(activeWorkspaceId: 1, entries: [
-            Wire.WorkspaceEntry(id: 1, agentStatus: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
-                              tabCount: 1, label: "Active", icon: "folder"),
-            Wire.WorkspaceEntry(id: 2, agentStatus: 1, colorR: 0x44, colorG: 0x55, colorB: 0x66,
-                              tabCount: 2, label: "Research", icon: "cpu"),
-            Wire.WorkspaceEntry(id: 3, agentStatus: 2, colorR: 0x77, colorG: 0x88, colorB: 0x99,
-                              tabCount: 3, label: "Review", icon: "cpu")
-        ])
+    @Test("Header shows active workspace metadata and badges")
+    @MainActor func showsActiveWorkspaceMetadataAndBadges() throws {
+        let sut = WorkspaceHeaderView(workspaceState: populatedState(), theme: ThemeColors(), encoder: nil)
+        let strings = try sut.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
-        let spy = SpyEncoder()
-        let sut = TabBarView(tabBarState: state, theme: ThemeColors(), encoder: spy)
-        let buttons = try sut.inspect().findAll(ViewType.Button.self)
+        #expect(strings.contains("Review"))
+        #expect(strings.contains("Using tools"))
+        #expect(strings.contains("⚡1"))
+        #expect(strings.contains("✓1"))
+        #expect(strings.contains("⚠︎1"))
+        #expect(strings.contains("!"))
+    }
 
-        var tapped = false
-        for button in buttons {
-            if (try? button.accessibilityLabel().string()) == "Switch to workspace Review" {
-                try button.tap()
-                tapped = true
-                break
-            }
-        }
+    @Test("Header exposes background workspace badges without activating them")
+    @MainActor func showsBackgroundWorkspaceBadges() throws {
+        let state = WorkspaceState()
+        state.update(version: 1, activeWorkspaceId: 0, mode: 0, flags: 0, workspaces: [
+            Wire.WorkspaceEntry(id: 0, kind: 0, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
+                                tabCount: 1, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "minga", icon: "folder"),
+            Wire.WorkspaceEntry(id: 1, kind: 1, status: 3, flags: 0x0001, colorR: 0x44, colorG: 0x55, colorB: 0x66,
+                                tabCount: 2, draftCount: 1, conflictCount: 1, runningBackgroundCount: 1, label: "Background", icon: "cpu")
+        ], visibleTabs: [])
 
-        #expect(tapped)
-        #expect(spy.guiActions == [.executeCommand(name: "workspace_goto_3")])
+        let sut = WorkspaceHeaderView(workspaceState: state, theme: ThemeColors(), encoder: nil)
+        let strings = try sut.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(strings.contains("minga"))
+        #expect(strings.contains("bg ⚡1"))
+        #expect(strings.contains("bg ✓1"))
+        #expect(strings.contains("bg ⚠︎1"))
+        #expect(strings.contains("bg !1"))
+        #expect(strings.contains("bg ✕1"))
+    }
+
+    @Test("Switcher uses manual workspace and agent ordinals")
+    @MainActor func switcherUsesManualAndAgentOrdinals() throws {
+        let state = populatedState()
+        let manualWorkspace = try #require(state.workspaces.first { $0.isManual })
+        let reviewWorkspace = try #require(state.workspaces.first { $0.label == "Review" })
+
+        #expect(state.switchCommand(for: manualWorkspace) == "manual_workspace")
+        #expect(state.switchCommand(for: reviewWorkspace) == "workspace_goto_2")
     }
 }
 

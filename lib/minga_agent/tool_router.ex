@@ -56,8 +56,14 @@ defmodule MingaAgent.ToolRouter do
   Otherwise try the changeset. If neither, fall through to buffer/filesystem.
   """
   @spec read_file(context(), String.t()) :: {:ok, binary()} | {:error, term()}
-  def read_file(%Context{project_view: %ProjectView{} = view}, path) do
-    ProjectView.read_file(view, project_view_relative_path(view, path))
+  def read_file(%Context{project_view: %ProjectView{}} = ctx, path) do
+    case live_project_view(ctx) do
+      %ProjectView{} = live_view ->
+        ProjectView.read_file(live_view, project_view_relative_path(live_view, path))
+
+      nil ->
+        read_file(Context.clear_project_view(ctx), path)
+    end
   end
 
   def read_file(%Context{fork_store: fs} = ctx, path) when fs != nil do
@@ -79,8 +85,14 @@ defmodule MingaAgent.ToolRouter do
   Returns `:passthrough` if neither is active.
   """
   @spec write_file(context(), String.t(), binary()) :: :ok | :passthrough | {:error, term()}
-  def write_file(%Context{project_view: %ProjectView{} = view}, path, content) do
-    ProjectView.write_file(view, project_view_relative_path(view, path), content)
+  def write_file(%Context{project_view: %ProjectView{}} = ctx, path, content) do
+    case live_project_view(ctx) do
+      %ProjectView{} = live_view ->
+        ProjectView.write_file(live_view, project_view_relative_path(live_view, path), content)
+
+      nil ->
+        {:error, :dead_project_view}
+    end
   end
 
   def write_file(%Context{fork_store: fs} = ctx, path, content) when fs != nil do
@@ -97,8 +109,19 @@ defmodule MingaAgent.ToolRouter do
   """
   @spec edit_file(context(), String.t(), String.t(), String.t()) ::
           :ok | :passthrough | {:error, term()}
-  def edit_file(%Context{project_view: %ProjectView{} = view}, path, old_text, new_text) do
-    ProjectView.edit_file(view, project_view_relative_path(view, path), old_text, new_text)
+  def edit_file(%Context{project_view: %ProjectView{}} = ctx, path, old_text, new_text) do
+    case live_project_view(ctx) do
+      %ProjectView{} = live_view ->
+        ProjectView.edit_file(
+          live_view,
+          project_view_relative_path(live_view, path),
+          old_text,
+          new_text
+        )
+
+      nil ->
+        {:error, :dead_project_view}
+    end
   end
 
   def edit_file(%Context{fork_store: fs} = ctx, path, old_text, new_text) when fs != nil do
@@ -114,46 +137,99 @@ defmodule MingaAgent.ToolRouter do
   end
 
   @doc """
-  Deletes a file, routing through changeset if active.
+  Deletes a file, refusing to remove an open buffered file.
 
-  Buffer forks don't support deletion (you can't delete an open buffer
-  through a fork). Falls through to changeset or passthrough.
+  No safe buffer-aware deletion route exists yet, so deleting a file that
+  is open in a live buffer would leave that buffer stale and able to
+  recreate the file later. ProjectView, changeset, and direct fallback all
+  share that guard.
   """
   @spec delete_file(context(), String.t()) :: :ok | :passthrough | {:error, term()}
-  def delete_file(%Context{project_view: %ProjectView{} = view}, path) do
-    ProjectView.delete_file(view, project_view_relative_path(view, path))
+  def delete_file(%Context{project_view: %ProjectView{}} = ctx, path) do
+    case live_project_view(ctx) do
+      %ProjectView{} -> delete_file_after_buffer_check(ctx, path)
+      nil -> {:error, :dead_project_view}
+    end
   end
 
-  def delete_file(%Context{changeset: cs}, path) when cs != nil and is_pid(cs) do
+  def delete_file(ctx, path), do: delete_file_after_buffer_check(ctx, path)
+
+  @spec delete_file_after_buffer_check(context(), String.t()) ::
+          :ok | :passthrough | {:error, term()}
+  defp delete_file_after_buffer_check(ctx, path) do
+    case Minga.Buffer.pid_for_path(path) do
+      {:ok, _pid} ->
+        {:error,
+         "cannot delete open buffer for #{path}; close the buffer or save/discard it first"}
+
+      :not_found ->
+        delete_file_unchecked(ctx, path)
+    end
+  catch
+    :exit, _ ->
+      {:error, "unable to verify buffer state for #{path}; close the buffer or retry the delete"}
+  end
+
+  @spec delete_file_unchecked(context(), String.t()) :: :ok | :passthrough | {:error, term()}
+  defp delete_file_unchecked(%Context{project_view: %ProjectView{}} = ctx, path) do
+    case live_project_view(ctx) do
+      %ProjectView{} = live_view ->
+        ProjectView.delete_file(live_view, project_view_relative_path(live_view, path))
+
+      nil ->
+        {:error, :dead_project_view}
+    end
+  end
+
+  defp delete_file_unchecked(%Context{changeset: cs}, path) when cs != nil and is_pid(cs) do
     relative = normalize_path(cs, path)
     Changeset.delete_file(cs, relative)
   end
 
-  def delete_file(_ctx, _path), do: :passthrough
+  defp delete_file_unchecked(_ctx, _path), do: :passthrough
 
   @doc """
   Lists a directory through ProjectView when available.
   """
   @spec list_directory(context(), String.t()) ::
           {:ok, [ProjectView.Backend.directory_entry()]} | :passthrough | {:error, term()}
-  def list_directory(%Context{project_view: %ProjectView{} = view}, path) do
-    ProjectView.list_directory(view, project_view_relative_path(view, path))
+  def list_directory(%Context{project_view: %ProjectView{}} = ctx, path) do
+    case live_project_view(ctx) do
+      %ProjectView{} = live_view ->
+        ProjectView.list_directory(live_view, project_view_relative_path(live_view, path))
+
+      nil ->
+        list_directory(Context.clear_project_view(ctx), path)
+    end
   end
 
-  def list_directory(%Context{}, _path), do: :passthrough
+  def list_directory(%Context{} = _ctx, _path), do: :passthrough
 
   @doc "Returns the filesystem path corresponding to `path` in the routed view."
   @spec filesystem_path(context(), String.t()) :: String.t()
-  def filesystem_path(%Context{project_view: %ProjectView{} = view}, path) do
-    Path.join(ProjectView.working_dir(view), project_view_relative_path(view, path))
+  def filesystem_path(%Context{project_view: %ProjectView{}} = ctx, path) do
+    case live_project_view(ctx) do
+      %ProjectView{} = live_view ->
+        Path.join(ProjectView.working_dir(live_view), project_view_relative_path(live_view, path))
+
+      nil ->
+        filesystem_path(Context.clear_project_view(ctx), path)
+    end
   end
 
-  def filesystem_path(%Context{}, path), do: path
+  def filesystem_path(%Context{} = _ctx, path), do: path
 
   @doc "Returns the working directory for shell commands."
-  @spec working_dir(context()) :: String.t() | nil
-  def working_dir(%Context{project_view: %ProjectView{} = view}),
-    do: ProjectView.working_dir(view)
+  @spec working_dir(context()) :: String.t() | nil | {:error, :dead_project_view}
+  def working_dir(%Context{project_view: %ProjectView{}} = ctx) do
+    case live_project_view(ctx) do
+      %ProjectView{} = live_view ->
+        ProjectView.working_dir(live_view)
+
+      nil ->
+        {:error, :dead_project_view}
+    end
+  end
 
   def working_dir(%Context{changeset: cs}) when cs != nil and is_pid(cs) do
     Changeset.overlay_path(cs)
@@ -163,36 +239,61 @@ defmodule MingaAgent.ToolRouter do
 
   @doc "Returns environment variables for shell commands."
   @spec command_env(context()) :: [{String.t(), String.t()}]
-  def command_env(%Context{project_view: %ProjectView{} = view}),
-    do: ProjectView.command_env(view)
+  def command_env(%Context{project_view: %ProjectView{}} = ctx) do
+    case live_project_view(ctx) do
+      %ProjectView{} = live_view ->
+        ProjectView.command_env(live_view)
+
+      nil ->
+        command_env(Context.clear_project_view(ctx))
+    end
+  end
 
   def command_env(%Context{}), do: []
 
-  @doc "Returns true when the context includes a ProjectView."
+  @doc "Returns true when the context includes a live ProjectView."
   @spec project_view?(context()) :: boolean()
-  def project_view?(%Context{project_view: %ProjectView{}}), do: true
-  def project_view?(%Context{}), do: false
+  def project_view?(%Context{} = ctx), do: live_project_view(ctx) != nil
+
+  @doc "Returns true when the context was configured with a ProjectView, even if its backend is dead."
+  @spec project_view_configured?(context()) :: boolean()
+  def project_view_configured?(%Context{project_view: %ProjectView{}}), do: true
+  def project_view_configured?(%Context{}), do: false
 
   @doc "Returns a short label for routed workspace output."
   @spec workspace_label(context()) :: String.t() | nil
-  def workspace_label(%Context{project_view: %ProjectView{} = view}) do
-    workspace =
-      if view.workspace_id == nil, do: "unbound", else: Integer.to_string(view.workspace_id)
+  def workspace_label(%Context{} = ctx) do
+    case live_project_view(ctx) do
+      %ProjectView{} = view ->
+        workspace =
+          if view.workspace_id == nil, do: "unbound", else: Integer.to_string(view.workspace_id)
 
-    "ProjectView workspace #{workspace} cwd=#{ProjectView.working_dir(view)}"
+        "ProjectView workspace #{workspace} cwd=#{ProjectView.working_dir(view)}"
+
+      nil ->
+        nil
+    end
   end
-
-  def workspace_label(%Context{}), do: nil
 
   @doc "Returns true if any routing is active."
   @spec active?(context()) :: boolean()
-  def active?(%Context{project_view: %ProjectView{}}), do: true
-
-  def active?(%Context{fork_store: fs, changeset: cs}) do
-    (fs != nil and Process.alive?(fs)) or (cs != nil and Process.alive?(cs))
+  def active?(%Context{} = ctx) do
+    live_project_view(ctx) != nil or active_forks_or_changeset?(ctx)
   end
 
-  def active?(_), do: false
+  @spec live_project_view(context()) :: ProjectView.t() | nil
+  defp live_project_view(%Context{project_view: %ProjectView{} = view}) do
+    if ProjectView.active?(view), do: view, else: nil
+  catch
+    :exit, _ -> nil
+  end
+
+  defp live_project_view(%Context{}), do: nil
+
+  @spec active_forks_or_changeset?(context()) :: boolean()
+  defp active_forks_or_changeset?(%Context{fork_store: fs, changeset: cs}) do
+    (fs != nil and Process.alive?(fs)) or (cs != nil and Process.alive?(cs))
+  end
 
   @doc """
   Returns true if a fork store is active and has forks.

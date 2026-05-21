@@ -260,13 +260,13 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       refute board_caches2.last_gui_board_fp == board_caches.last_gui_board_fp
     end
 
-    test "workspace fingerprint clears when the last agent workspace disappears" do
+    test "workspace fingerprint updates when the last agent workspace disappears" do
       state = gui_state()
       tab_bar = tab_bar_with_two_workspaces()
       state_with_agents = put_in(state.shell_state.tab_bar, tab_bar)
       {_ctx, caches, first_cmds} = sync_chrome(state_with_agents)
 
-      assert Enum.any?(first_cmds, &opcode?(&1, 0x86))
+      assert Enum.any?(first_cmds, &opcode?(&1, 0x98))
       assert caches.last_gui_workspaces_fp != nil
 
       tab_bar_without_agents =
@@ -277,13 +277,14 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       state_without_agents = put_in(state.shell_state.tab_bar, tab_bar_without_agents)
       {_ctx, caches2, second_cmds} = sync_chrome(state_without_agents, caches)
 
-      workspaces_cmd = Enum.find(second_cmds, &opcode?(&1, 0x86))
-      assert <<0x86, _active::16, 0::8>> = workspaces_cmd
-      assert caches2.last_gui_workspaces_fp == nil
+      workspaces_cmd = Enum.find(second_cmds, &opcode?(&1, 0x98))
+      assert <<0x98, payload_len::16, payload::binary-size(payload_len)>> = workspaces_cmd
+      assert <<1::8, _active::16, _mode::8, _flags::8, 1::8, _rest::binary>> = payload
+      assert caches2.last_gui_workspaces_fp != nil
 
       {_ctx, caches3, third_cmds} = sync_chrome(state_without_agents, caches2)
-      refute Enum.any?(third_cmds, &opcode?(&1, 0x86))
-      assert caches3.last_gui_workspaces_fp == nil
+      refute Enum.any?(third_cmds, &opcode?(&1, 0x98))
+      assert caches3.last_gui_workspaces_fp == caches2.last_gui_workspaces_fp
     end
 
     test "agent chat survives dead prompt buffer process" do
@@ -415,7 +416,15 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
     }
 
     tab = Tab.new_agent(1, "Agent") |> Tab.set_session(session)
-    tab_bar = TabBar.new(tab)
+
+    tab_bar =
+      tab
+      |> TabBar.new()
+      |> TabBar.update_workspace(0, fn active_workspace ->
+        active_workspace
+        |> MingaEditor.State.Workspace.set_session(session)
+        |> MingaEditor.State.Workspace.set_agent_ui(workspace.agent_ui)
+      end)
 
     state
     |> Map.put(:workspace, workspace)

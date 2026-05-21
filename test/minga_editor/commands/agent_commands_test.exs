@@ -14,17 +14,23 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Project.FileRef
   alias MingaEditor.Commands.Agent, as: AgentCommands
+  alias MingaEditor.Commands.AgentSession
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.State.Windows
+  alias MingaEditor.Workspace.State, as: WorkspaceState
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
+  alias MingaEditor.WindowTree
   alias MingaEditor.Input
   alias Minga.Test.StubServer
 
@@ -55,10 +61,17 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       }
     }
 
-    # Active tab is an agent tab carrying the session pid; AgentAccess.session/1
-    # reads it through the Traditional shell's active_session/1.
+    # Active workspace owns the session pid; the tab field is a legacy mirror only.
     agent_tab = Tab.new_agent(1, "Agent") |> Tab.set_session(default_session)
-    tb = TabBar.new(agent_tab)
+
+    tb =
+      agent_tab
+      |> TabBar.new()
+      |> TabBar.update_workspace(0, fn workspace ->
+        workspace
+        |> WorkspaceModel.set_session(default_session)
+        |> WorkspaceModel.set_agent_ui(agentic)
+      end)
 
     %EditorState{
       port_manager: nil,
@@ -77,6 +90,61 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       },
       shell_state: %MingaEditor.Shell.Traditional.State{agent: agent, tab_bar: tb},
       focus_stack: Input.default_stack()
+    }
+  end
+
+  defp source_workspace_state do
+    state = base_state(session: nil)
+    source_ref = FileRef.from_buffer(state.workspace.buffers.active)
+
+    file_tab =
+      Tab.new_file(1, FileRef.display_label(source_ref))
+      |> Tab.set_file_ref(source_ref)
+      |> Tab.set_context(WorkspaceState.to_tab_context(state.workspace))
+
+    tab_bar =
+      file_tab
+      |> TabBar.new()
+      |> TabBar.update_workspace(0, fn workspace ->
+        workspace
+        |> WorkspaceModel.add_file(source_ref)
+        |> WorkspaceModel.set_active_file(source_ref)
+      end)
+
+    %{state | shell_state: %{state.shell_state | tab_bar: tab_bar}}
+  end
+
+  defp source_workspace_with_background_agent_tab do
+    state = source_workspace_state()
+    {tab_bar, _agent_tab} = TabBar.insert(state.shell_state.tab_bar, :agent, "Agent")
+    %{state | shell_state: %{state.shell_state | tab_bar: tab_bar}}
+  end
+
+  defp active_agent_workspace_state do
+    {:ok, agent_buf} = BufferProcess.start_link(content: "old chat")
+    state = base_state(agent_buffer: agent_buf)
+    windows = agent_windows(agent_buf)
+
+    EditorState.update_workspace(state, fn workspace ->
+      workspace
+      |> WorkspaceState.set_buffers(%Buffers{
+        active: agent_buf,
+        list: [agent_buf],
+        active_index: 0
+      })
+      |> WorkspaceState.set_windows(windows)
+      |> WorkspaceState.set_agent_ui(UIState.new())
+    end)
+  end
+
+  defp agent_windows(agent_buf) when is_pid(agent_buf) do
+    win_id = 1
+
+    %Windows{
+      tree: WindowTree.new(win_id),
+      map: %{win_id => Window.new_agent_chat(win_id, agent_buf, 24, 80)},
+      active: win_id,
+      next_id: win_id + 1
     }
   end
 
@@ -283,14 +351,67 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert AgentAccess.agent(new_state).error == nil
     end
 
-    test "preserves the agent buffer across reset" do
+    test "creates a fresh agent buffer for the new workspace" do
       {:ok, agent_buf} = BufferProcess.start_link(content: "old chat")
       state = base_state(agent_buffer: agent_buf)
 
       new_state = AgentCommands.new_agent_session(state)
 
-      # Buffer should be preserved across session reset
-      assert AgentAccess.agent(new_state).buffer == agent_buf
+      assert is_pid(AgentAccess.agent(new_state).buffer)
+      assert AgentAccess.agent(new_state).buffer != agent_buf
+    end
+
+    test "creates an active agent workspace with no file context" do
+      state = source_workspace_state()
+      source_workspace = TabBar.get_workspace(state.shell_state.tab_bar, 0)
+
+      new_state = AgentCommands.new_agent_session(state)
+      tab_bar = new_state.shell_state.tab_bar
+      active_workspace = TabBar.active_workspace(tab_bar)
+
+      assert active_workspace.kind == :agent
+      assert active_workspace.files == []
+      assert active_workspace.active_file == nil
+      assert is_pid(active_workspace.session)
+      assert EditorState.active_tab_kind(new_state) == :agent
+      assert new_state.workspace.buffers.active == AgentAccess.agent(new_state).buffer
+      assert TabBar.get_workspace(tab_bar, 0) == source_workspace
+      assert TabBar.active(tab_bar).session == active_workspace.session
+    end
+
+    test "creating from an existing agent workspace preserves the source tab context" do
+      state = active_agent_workspace_state()
+      old_tab = TabBar.active(state.shell_state.tab_bar)
+      old_buffer = AgentAccess.agent(state).buffer
+      old_session = old_tab.session
+
+      new_state = AgentCommands.new_agent_session(state)
+      tab_bar = new_state.shell_state.tab_bar
+      updated_old_tab = TabBar.get(tab_bar, old_tab.id)
+      old_context = TabContext.to_workspace_map(updated_old_tab.context)
+      new_session = TabBar.active(tab_bar).session
+
+      assert old_context.buffers.active == old_buffer
+      assert old_session != nil
+      assert new_session != old_session
+      assert AgentAccess.agent(new_state).buffer != old_buffer
+      assert new_state.workspace.buffers.active == AgentAccess.agent(new_state).buffer
+    end
+
+    test "background agent session creation does not switch active workspace" do
+      state = source_workspace_with_background_agent_tab()
+      source_active_id = state.shell_state.tab_bar.active_id
+      source_workspace = TabBar.get_workspace(state.shell_state.tab_bar, 0)
+
+      new_state = AgentSession.start_agent_session(state)
+      tab_bar = new_state.shell_state.tab_bar
+      agent_workspaces = Enum.filter(tab_bar.workspaces, &(&1.kind == :agent))
+
+      assert tab_bar.active_id == source_active_id
+      assert TabBar.active_workspace_id(tab_bar) == 0
+      assert TabBar.get_workspace(tab_bar, 0) == source_workspace
+      assert [%{files: [], active_file: nil, session: session}] = agent_workspaces
+      assert is_pid(session)
     end
   end
 

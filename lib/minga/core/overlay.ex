@@ -1,16 +1,12 @@
 defmodule Minga.Core.Overlay do
   @moduledoc """
-  Filesystem overlay using hardlinks for copy-on-write isolation.
+  Filesystem overlay using file copies for copy-on-write isolation.
 
-  Mirrors a project directory by hardlinking every source file into a
-  temporary overlay directory. Unmodified files are zero-cost hardlinks
-  that appear as regular files to every tool (grep, compilers, test
-  runners). When a file is modified, the hardlink is replaced with a
-  real file containing new content. The original project file stays
-  untouched.
-
-  On filesystems where hardlinks fail (cross-device mounts), falls back
-  to file copies automatically.
+  Mirrors a project directory by copying every source file into a
+  temporary overlay directory. Unmodified files are regular writable
+  files that appear to shell commands, compilers, and test runners.
+  When a file is modified, the overlay copy changes and the original
+  project file stays untouched.
 
   Build artifact directories (`_build`, `.git`, `.elixir_ls`) are skipped
   entirely. `deps` is symlinked for read-only sharing. Shell commands run
@@ -29,6 +25,8 @@ defmodule Minga.Core.Overlay do
   @enforce_keys [:overlay_dir, :project_root, :build_dir, :link_mode]
   defstruct [:overlay_dir, :project_root, :build_dir, :link_mode]
 
+  @tombstone_suffix ".__changeset_deleted__"
+
   # Directories skipped entirely during mirroring.
   # _build gets its own isolated path. deps is symlinked for sharing.
   @skip_dirs MapSet.new(~w(_build .git .elixir_ls node_modules .hex))
@@ -39,8 +37,8 @@ defmodule Minga.Core.Overlay do
   @doc """
   Creates a new overlay directory mirroring the project.
 
-  Walks the project tree, creating real directories and hardlinking (or
-  copying) every source file. Returns `{:ok, overlay}` or `{:error, reason}`.
+  Walks the project tree, creating real directories and copying every
+  source file. Returns `{:ok, overlay}` or `{:error, reason}`.
   """
   @spec create(String.t()) :: {:ok, t()} | {:error, term()}
   def create(project_root) do
@@ -77,17 +75,18 @@ defmodule Minga.Core.Overlay do
   end
 
   @doc """
-  Writes a file into the overlay, replacing any hardlink with real content.
+  Writes a file into the overlay, replacing the copied content with real content.
 
-  Deletes the existing file first (to break the hardlink), then writes
-  the new content. Creates parent directories as needed.
+  Deletes the existing file first, then writes the new content. Creates
+  parent directories as needed.
   """
   @spec materialize_file(t(), String.t(), binary()) :: :ok | {:error, term()}
   def materialize_file(%__MODULE__{} = overlay, relative_path, content) do
     with {:ok, target} <- safe_target(overlay, relative_path),
          :ok <- File.mkdir_p(Path.dirname(target)) do
-      # Must delete before writing. Writing through a hardlink would
-      # modify the original file.
+      # Must delete before writing. Writing to the copied file is what
+      # keeps the original project file untouched.
+      File.rm(tombstone_path(target))
       File.rm(target)
       File.write(target, content)
     end
@@ -96,16 +95,15 @@ defmodule Minga.Core.Overlay do
   @doc """
   Deletes a file from the overlay.
 
-  Removes the hardlink (or copy) and writes a tombstone marker so the
-  overlay can distinguish "intentionally deleted" from "never existed".
+  Removes the copy and writes a tombstone marker so the overlay can
+  distinguish "intentionally deleted" from "never existed".
   """
   @spec delete_file(t(), String.t()) :: :ok | {:error, term()}
   def delete_file(%__MODULE__{} = overlay, relative_path) do
     with {:ok, target} <- safe_target(overlay, relative_path) do
       case File.rm(target) do
         :ok ->
-          marker = target <> ".__changeset_deleted__"
-          File.write!(marker, "")
+          File.write!(tombstone_path(target), "")
           :ok
 
         {:error, :enoent} ->
@@ -117,24 +115,23 @@ defmodule Minga.Core.Overlay do
   @doc "Returns true if a file was explicitly deleted in this overlay."
   @spec deleted?(t(), String.t()) :: boolean()
   def deleted?(%__MODULE__{} = overlay, relative_path) do
-    marker = safe_target!(overlay, relative_path <> ".__changeset_deleted__")
+    marker = safe_target!(overlay, tombstone_relative_path(relative_path))
     File.exists?(marker)
   end
 
   @doc """
   Returns true if the overlay's copy of a file differs from the project's.
 
-  Compares inodes: a hardlink shares the project file's inode, so a
-  different inode means the overlay has a modified copy. A file that
-  exists only in the overlay (new file) is also considered modified.
+  Compares file contents directly. A file that exists only in the overlay
+  (new file) is also considered modified.
   """
   @spec modified?(t(), String.t()) :: boolean()
   def modified?(%__MODULE__{} = overlay, relative_path) do
     overlay_file = safe_target!(overlay, relative_path)
     project_file = Path.join(overlay.project_root, relative_path)
 
-    case {File.stat(overlay_file), File.stat(project_file)} do
-      {{:ok, o}, {:ok, p}} -> o.inode != p.inode
+    case {File.read(overlay_file), File.read(project_file)} do
+      {{:ok, overlay_content}, {:ok, project_content}} -> overlay_content != project_content
       {{:ok, _}, {:error, _}} -> true
       _ -> false
     end
@@ -202,6 +199,12 @@ defmodule Minga.Core.Overlay do
     end
   end
 
+  @spec tombstone_path(String.t()) :: String.t()
+  defp tombstone_path(path), do: path <> @tombstone_suffix
+
+  @spec tombstone_relative_path(String.t()) :: String.t()
+  defp tombstone_relative_path(relative_path), do: tombstone_path(relative_path)
+
   @spec safe_target!(t(), String.t()) :: String.t() | no_return()
   defp safe_target!(%__MODULE__{} = overlay, relative_path) do
     case safe_target(overlay, relative_path) do
@@ -236,39 +239,7 @@ defmodule Minga.Core.Overlay do
   end
 
   @spec detect_link_mode(String.t(), String.t()) :: :hardlink | :copy
-  defp detect_link_mode(project_root, overlay_dir) do
-    test_source = find_any_file(project_root)
-
-    if test_source do
-      test_target = Path.join(overlay_dir, ".link_test")
-
-      case File.ln(test_source, test_target) do
-        :ok ->
-          File.rm!(test_target)
-          :hardlink
-
-        {:error, _} ->
-          :copy
-      end
-    else
-      # Empty project, default to hardlink (will fail gracefully per-file)
-      :hardlink
-    end
-  end
-
-  @spec find_any_file(String.t()) :: String.t() | nil
-  defp find_any_file(dir) do
-    case File.ls(dir) do
-      {:ok, entries} -> Enum.find_value(entries, &regular_file(dir, &1))
-      _ -> nil
-    end
-  end
-
-  @spec regular_file(String.t(), String.t()) :: String.t() | nil
-  defp regular_file(dir, entry) do
-    path = Path.join(dir, entry)
-    if File.regular?(path), do: path, else: nil
-  end
+  defp detect_link_mode(_project_root, _overlay_dir), do: :copy
 
   @spec mirror_directory(t(), String.t(), String.t()) :: :ok
   defp mirror_directory(%__MODULE__{} = overlay, source_dir, target_dir) do
@@ -323,14 +294,7 @@ defmodule Minga.Core.Overlay do
   end
 
   @spec link_or_copy(t(), String.t(), String.t()) :: :ok
-  defp link_or_copy(%__MODULE__{link_mode: :hardlink}, source, target) do
-    case File.ln(source, target) do
-      :ok -> :ok
-      {:error, _} -> File.cp!(source, target)
-    end
-  end
-
-  defp link_or_copy(%__MODULE__{link_mode: :copy}, source, target) do
+  defp link_or_copy(%__MODULE__{}, source, target) do
     File.cp!(source, target)
   end
 

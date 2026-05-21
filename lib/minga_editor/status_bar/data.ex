@@ -25,6 +25,7 @@ defmodule MingaEditor.StatusBar.Data do
   alias Minga.LSP.SyncServer
   alias MingaEditor.Shell.Traditional.Modeline
   alias MingaEditor.UI.Theme
+  alias MingaEditor.Workspace.ChromeState
 
   # ── Types ──────────────────────────────────────────────────────────────────
 
@@ -71,7 +72,10 @@ defmodule MingaEditor.StatusBar.Data do
           agent_theme_colors: Theme.Agent.t() | nil,
           background_subagent_count: non_neg_integer(),
           active_background_subagent_label: String.t() | nil,
-          status_msg: String.t() | nil
+          status_msg: String.t() | nil,
+          workspace_label: String.t(),
+          workspace_draft_count: non_neg_integer(),
+          workspace_conflict_count: non_neg_integer()
         }
 
   @typedoc "Data for a focused agent chat window. Includes background buffer context so the status bar layout stays stable across mode switches."
@@ -106,7 +110,10 @@ defmodule MingaEditor.StatusBar.Data do
           buf_count: non_neg_integer(),
           background_subagent_count: non_neg_integer(),
           active_background_subagent_label: String.t() | nil,
-          status_msg: String.t() | nil
+          status_msg: String.t() | nil,
+          workspace_label: String.t(),
+          workspace_draft_count: non_neg_integer(),
+          workspace_conflict_count: non_neg_integer()
         }
 
   @typedoc "Tagged union: buffer or agent variant."
@@ -168,6 +175,7 @@ defmodule MingaEditor.StatusBar.Data do
 
     agent = AgentAccess.agent(state)
     background = background_subagent_summary(state)
+    workspace = workspace_modeline_summary(state)
 
     %{
       mode: mode,
@@ -194,7 +202,10 @@ defmodule MingaEditor.StatusBar.Data do
       agent_theme_colors: if(agent.runtime.status, do: Theme.agent_theme(state.theme), else: nil),
       background_subagent_count: background.count,
       active_background_subagent_label: background.label,
-      status_msg: state.shell_state.status_msg
+      status_msg: state.shell_state.status_msg,
+      workspace_label: workspace.label,
+      workspace_draft_count: workspace.draft_count,
+      workspace_conflict_count: workspace.conflict_count
     }
   end
 
@@ -318,6 +329,7 @@ defmodule MingaEditor.StatusBar.Data do
     {indent_type, indent_size} = indent_info(state, buf, filetype)
     selection_info = selection_info(mode, mode_state, buf, {line, col})
     background = background_subagent_summary(state)
+    workspace = workspace_modeline_summary(state)
 
     %{
       mode: mode,
@@ -348,7 +360,10 @@ defmodule MingaEditor.StatusBar.Data do
       buf_count: length(state.workspace.buffers.list),
       background_subagent_count: background.count,
       active_background_subagent_label: background.label,
-      status_msg: state.shell_state.status_msg
+      status_msg: state.shell_state.status_msg,
+      workspace_label: workspace.label,
+      workspace_draft_count: workspace.draft_count,
+      workspace_conflict_count: workspace.conflict_count
     }
   end
 
@@ -492,7 +507,30 @@ defmodule MingaEditor.StatusBar.Data do
       indent_size: d.indent_size,
       selection_info: d.selection_info,
       background_subagent_count: d.background_subagent_count,
-      active_background_subagent_label: d.active_background_subagent_label
+      active_background_subagent_label: d.active_background_subagent_label,
+      workspace_label: d.workspace_label,
+      workspace_draft_count: d.workspace_draft_count,
+      workspace_conflict_count: d.workspace_conflict_count
+    }
+  end
+
+  @spec workspace_modeline_summary(EditorState.t() | map()) :: %{
+          label: String.t(),
+          draft_count: non_neg_integer(),
+          conflict_count: non_neg_integer()
+        }
+  defp workspace_modeline_summary(state) do
+    chrome_state = ChromeState.from_editor_state(state)
+
+    active_workspace =
+      Enum.find(chrome_state.workspaces, fn workspace ->
+        workspace.id == chrome_state.active_workspace_id
+      end)
+
+    %{
+      label: if(active_workspace, do: active_workspace.label, else: "Files"),
+      draft_count: chrome_state.draft_count,
+      conflict_count: chrome_state.conflict_count
     }
   end
 

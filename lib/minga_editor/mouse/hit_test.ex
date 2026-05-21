@@ -57,6 +57,8 @@ defmodule MingaEditor.Mouse.HitTest do
     else
       _ -> :miss
     end
+  catch
+    :exit, _ -> :miss
   end
 
   @spec position(
