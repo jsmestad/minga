@@ -53,7 +53,7 @@ defmodule MingaEditor.PromptUITest do
   defp base_state do
     %EditorState{
       port_manager: nil,
-      workspace: %MingaEditor.Workspace.State{viewport: Viewport.new(24, 80)}
+      workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)}
     }
   end
 

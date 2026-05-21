@@ -18,7 +18,7 @@ defmodule MingaEditor.Startup do
   alias MingaEditor.FileWatcherHelpers
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
-  alias MingaEditor.State.Session, as: SessionState
+  alias MingaEditor.State.Session, as: EditorSessionState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -105,7 +105,7 @@ defmodule MingaEditor.Startup do
 
     project_root = project_root_from_opts(opts)
 
-    workspace = %MingaEditor.Workspace.State{
+    workspace = %MingaEditor.Session.State{
       buffers: %Buffers{
         active: active_buf,
         list: buffers,
@@ -148,7 +148,7 @@ defmodule MingaEditor.Startup do
       focus_stack: MingaEditor.Input.default_stack(),
       shell: resolve_shell(opts),
       shell_state: init_shell_state(resolve_shell(opts), dashboard, opts),
-      session: SessionState.new(Keyword.take(opts, [:swap_dir, :session_dir]))
+      session: EditorSessionState.new(Keyword.take(opts, [:swap_dir, :session_dir]))
     }
 
     state =

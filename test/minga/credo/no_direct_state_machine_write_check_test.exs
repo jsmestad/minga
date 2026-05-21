@@ -50,13 +50,13 @@ defmodule Minga.Credo.NoDirectStateMachineWriteCheckTest do
 
   test "allows owning workspace state module" do
     """
-    defmodule MingaEditor.Workspace.State do
+    defmodule MingaEditor.Session.State do
       def set_buffers(workspace, buffers) do
         %{workspace | buffers: buffers}
       end
     end
     """
-    |> check("lib/minga_editor/workspace/state.ex")
+    |> check("lib/minga_editor/session/state.ex")
     |> refute_issues()
   end
 end

@@ -14,7 +14,7 @@ defmodule MingaEditor.Commands.Search do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Search, as: SearchData
   alias MingaEditor.Window
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
   alias Minga.Mode
   alias Minga.Mode.CommandState
   alias Minga.Mode.SearchState
@@ -221,7 +221,7 @@ defmodule MingaEditor.Commands.Search do
 
         state =
           EditorState.update_workspace(state, fn ws ->
-            WorkspaceState.update_search(ws, &SearchData.set_project_results(&1, matches))
+            SessionState.update_search(ws, &SearchData.set_project_results(&1, matches))
           end)
 
         state = PickerUI.open(state, MingaEditor.UI.Picker.ProjectSearchSource)
@@ -320,7 +320,7 @@ defmodule MingaEditor.Commands.Search do
     if text != "" do
       state =
         EditorState.update_workspace(state, fn ws ->
-          WorkspaceState.set_search(ws, SearchData.record(ws.search, text, :forward))
+          SessionState.set_search(ws, SearchData.record(ws.search, text, :forward))
         end)
 
       if state.backend in [:gui, :native_gui] and state.port_manager do
@@ -411,13 +411,13 @@ defmodule MingaEditor.Commands.Search do
   @spec put_in_search(state(), atom(), term()) :: state()
   defp put_in_search(state, :last_pattern, value) do
     EditorState.update_workspace(state, fn ws ->
-      WorkspaceState.update_search(ws, &SearchData.record_pattern(&1, value))
+      SessionState.update_search(ws, &SearchData.record_pattern(&1, value))
     end)
   end
 
   defp put_in_search(state, :last_direction, value) do
     EditorState.update_workspace(state, fn ws ->
-      WorkspaceState.update_search(ws, &SearchData.set_last_direction(&1, value))
+      SessionState.update_search(ws, &SearchData.set_last_direction(&1, value))
     end)
   end
 

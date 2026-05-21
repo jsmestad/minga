@@ -42,7 +42,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.TabBar
   alias MingaEditor.StatusBar.Data, as: StatusBarData
-  alias MingaEditor.Workspace.ChromeState
+  alias MingaEditor.Session.ChromeState
   alias MingaEditor.Viewport
   alias MingaEditor.Window.Content
   alias MingaEditor.Frontend.Emit.Context

@@ -20,7 +20,7 @@ defmodule MingaEditor.Commands.AgentSession do
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: WorkspaceState
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
 

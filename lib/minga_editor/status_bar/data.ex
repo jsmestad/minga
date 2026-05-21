@@ -25,7 +25,7 @@ defmodule MingaEditor.StatusBar.Data do
   alias Minga.LSP.SyncServer
   alias MingaEditor.Shell.Traditional.Modeline
   alias MingaEditor.UI.Theme
-  alias MingaEditor.Workspace.ChromeState
+  alias MingaEditor.Session.ChromeState
 
   # ── Types ──────────────────────────────────────────────────────────────────
 

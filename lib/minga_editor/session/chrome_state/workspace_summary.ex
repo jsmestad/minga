@@ -1,4 +1,4 @@
-defmodule MingaEditor.Workspace.ChromeState.WorkspaceSummary do
+defmodule MingaEditor.Session.ChromeState.WorkspaceSummary do
   @moduledoc """
   User-facing summary for one workspace in shared chrome.
 

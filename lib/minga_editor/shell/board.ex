@@ -36,7 +36,7 @@ defmodule MingaEditor.Shell.Board do
   alias MingaEditor.Shell.Board.Card
   alias MingaEditor.Shell.Board.SessionLifecycle
   alias MingaEditor.Shell.Board.State, as: BoardState
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   @impl true
   @spec init(keyword()) :: MingaEditor.Shell.shell_state()
@@ -61,8 +61,8 @@ defmodule MingaEditor.Shell.Board do
   end
 
   @impl true
-  @spec handle_event(BoardState.t(), MingaEditor.Workspace.State.t(), term()) ::
-          {BoardState.t(), MingaEditor.Workspace.State.t()}
+  @spec handle_event(BoardState.t(), MingaEditor.Session.State.t(), term()) ::
+          {BoardState.t(), MingaEditor.Session.State.t()}
   def handle_event(shell_state, workspace, {:background_subagent_started, %Handle{} = handle}) do
     if card_for_session?(shell_state, handle.pid) do
       {shell_state, workspace}
@@ -74,7 +74,7 @@ defmodule MingaEditor.Shell.Board do
           status: :working,
           kind: :agent,
           session: handle.pid,
-          workspace: WorkspaceState.to_tab_context(workspace)
+          workspace: SessionState.to_tab_context(workspace)
         )
 
       Minga.Log.info(
@@ -92,14 +92,14 @@ defmodule MingaEditor.Shell.Board do
   end
 
   @impl true
-  @spec handle_gui_action(BoardState.t(), MingaEditor.Workspace.State.t(), term()) ::
-          {BoardState.t(), MingaEditor.Workspace.State.t()}
+  @spec handle_gui_action(BoardState.t(), MingaEditor.Session.State.t(), term()) ::
+          {BoardState.t(), MingaEditor.Session.State.t()}
   def handle_gui_action(shell_state, workspace, {:board_select_card, card_id}) do
     # GUI card click: focus, zoom in, activate agent view.
     # Same logic as Board.Input's Enter key handler.
     shell_state = BoardState.focus_card(shell_state, card_id)
     card = BoardState.focused(shell_state)
-    workspace_snapshot = WorkspaceState.to_tab_context(workspace)
+    workspace_snapshot = SessionState.to_tab_context(workspace)
     shell_state = BoardState.zoom_into(shell_state, card_id, workspace_snapshot)
     workspace = restore_workspace(card && card.workspace, workspace)
 
@@ -432,38 +432,38 @@ defmodule MingaEditor.Shell.Board do
   @impl true
   @spec on_buffer_added(
           BoardState.t(),
-          MingaEditor.Workspace.State.t(),
-          MingaEditor.Workspace.State.t(),
+          MingaEditor.Session.State.t(),
+          MingaEditor.Session.State.t(),
           pid(),
           atom()
-        ) :: {BoardState.t(), MingaEditor.Workspace.State.t(), [MingaEditor.effect()]}
+        ) :: {BoardState.t(), MingaEditor.Session.State.t(), [MingaEditor.effect()]}
   def on_buffer_added(shell_state, _prev_workspace, workspace, _buffer_pid, _context) do
     # Board: sync the active window buffer. A1's content-type guard
     # ensures agent_chat windows are left untouched.
-    workspace = MingaEditor.Workspace.State.sync_active_window_buffer(workspace)
+    workspace = MingaEditor.Session.State.sync_active_window_buffer(workspace)
     {shell_state, workspace, []}
   end
 
-  @spec on_buffer_added(BoardState.t(), MingaEditor.Workspace.State.t(), pid(), atom()) ::
-          {BoardState.t(), MingaEditor.Workspace.State.t(), [MingaEditor.effect()]}
+  @spec on_buffer_added(BoardState.t(), MingaEditor.Session.State.t(), pid(), atom()) ::
+          {BoardState.t(), MingaEditor.Session.State.t(), [MingaEditor.effect()]}
   def on_buffer_added(shell_state, workspace, buffer_pid, context \\ :open) do
     on_buffer_added(shell_state, workspace, workspace, buffer_pid, context)
   end
 
   @impl true
-  @spec on_buffer_switched(BoardState.t(), MingaEditor.Workspace.State.t()) ::
-          {BoardState.t(), MingaEditor.Workspace.State.t(), [MingaEditor.effect()]}
+  @spec on_buffer_switched(BoardState.t(), MingaEditor.Session.State.t()) ::
+          {BoardState.t(), MingaEditor.Session.State.t(), [MingaEditor.effect()]}
   def on_buffer_switched(shell_state, workspace) do
     {shell_state, workspace, []}
   end
 
   @impl true
-  @spec on_buffer_died(BoardState.t(), MingaEditor.Workspace.State.t(), pid()) ::
-          {BoardState.t(), MingaEditor.Workspace.State.t(), [MingaEditor.effect()]}
+  @spec on_buffer_died(BoardState.t(), MingaEditor.Session.State.t(), pid()) ::
+          {BoardState.t(), MingaEditor.Session.State.t(), [MingaEditor.effect()]}
   def on_buffer_died(shell_state, workspace, _dead_pid) do
     # Board: sync the window if it's showing a buffer. The content-type
     # guard in sync_active_window_buffer ensures agent_chat is untouched.
-    workspace = MingaEditor.Workspace.State.sync_active_window_buffer(workspace)
+    workspace = MingaEditor.Session.State.sync_active_window_buffer(workspace)
     {shell_state, workspace, []}
   end
 
@@ -501,8 +501,8 @@ defmodule MingaEditor.Shell.Board do
   # -------------------------------------------------------------------
 
   @impl true
-  @spec on_agent_event(BoardState.t(), MingaEditor.Workspace.State.t(), pid(), term()) ::
-          {BoardState.t(), MingaEditor.Workspace.State.t(), [MingaEditor.effect()]}
+  @spec on_agent_event(BoardState.t(), MingaEditor.Session.State.t(), pid(), term()) ::
+          {BoardState.t(), MingaEditor.Session.State.t(), [MingaEditor.effect()]}
   def on_agent_event(shell_state, workspace, session_pid, {:status_changed, status}) do
     card_status = Card.from_agent_status(status)
 
@@ -548,14 +548,14 @@ defmodule MingaEditor.Shell.Board do
   end
 
   # Zoom out from a card: store the live workspace on the card, restore the grid workspace.
-  @spec zoom_out_card(BoardState.t(), MingaEditor.Workspace.State.t(), String.t()) ::
-          {BoardState.t(), MingaEditor.Workspace.State.t()}
+  @spec zoom_out_card(BoardState.t(), MingaEditor.Session.State.t(), String.t()) ::
+          {BoardState.t(), MingaEditor.Session.State.t()}
   defp zoom_out_card(shell_state, workspace, card_id) do
     card = Map.get(shell_state.cards, card_id)
 
     if card do
       grid_workspace = card.workspace
-      live_workspace = WorkspaceState.to_tab_context(workspace)
+      live_workspace = SessionState.to_tab_context(workspace)
       updated_card = Card.store_workspace(card, live_workspace)
       shell_state = %{shell_state | cards: Map.put(shell_state.cards, card_id, updated_card)}
       shell_state = %{shell_state | zoomed_into: nil}
@@ -569,11 +569,11 @@ defmodule MingaEditor.Shell.Board do
     end
   end
 
-  @spec restore_workspace(map() | nil, MingaEditor.Workspace.State.t()) ::
-          MingaEditor.Workspace.State.t()
+  @spec restore_workspace(map() | nil, MingaEditor.Session.State.t()) ::
+          MingaEditor.Session.State.t()
   defp restore_workspace(workspace_snapshot, fallback)
        when is_map(workspace_snapshot) and map_size(workspace_snapshot) > 0 do
-    WorkspaceState.restore_tab_context(fallback, workspace_snapshot)
+    SessionState.restore_tab_context(fallback, workspace_snapshot)
   end
 
   defp restore_workspace(_workspace_snapshot, fallback), do: fallback

@@ -179,7 +179,7 @@ defmodule MingaEditor.DashboardTest do
 
       state = %EditorState{
         port_manager: self(),
-        workspace: %MingaEditor.Workspace.State{
+        workspace: %MingaEditor.Session.State{
           viewport: Viewport.new(24, 80),
           buffers: %Buffers{active: nil}
         },

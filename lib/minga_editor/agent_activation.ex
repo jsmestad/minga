@@ -17,7 +17,7 @@ defmodule MingaEditor.AgentActivation do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Windows
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
@@ -131,7 +131,7 @@ defmodule MingaEditor.AgentActivation do
 
   @spec set_agent_scope(EditorState.t()) :: EditorState.t()
   defp set_agent_scope(state) do
-    EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :agent))
+    EditorState.update_workspace(state, &SessionState.set_keymap_scope(&1, :agent))
   end
 
   @spec set_agent_chat_window_content(EditorState.t(), pid()) :: EditorState.t()
@@ -144,7 +144,7 @@ defmodule MingaEditor.AgentActivation do
           %{active_win | content: Content.agent_chat(session)}
         end)
 
-      WorkspaceState.set_windows(ws, windows)
+      SessionState.set_windows(ws, windows)
     end)
   end
 
@@ -173,18 +173,18 @@ defmodule MingaEditor.AgentActivation do
     EditorState.update_workspace(state, &restore_workspace(&1, return_target))
   end
 
-  @spec restore_workspace(WorkspaceState.t(), UIState.View.return_target()) :: WorkspaceState.t()
+  @spec restore_workspace(SessionState.t(), UIState.View.return_target()) :: SessionState.t()
   defp restore_workspace(workspace, return_target) do
     workspace
-    |> WorkspaceState.set_keymap_scope(return_target.keymap_scope)
-    |> WorkspaceState.set_windows(return_target.windows)
-    |> WorkspaceState.set_file_tree(return_target.file_tree)
+    |> SessionState.set_keymap_scope(return_target.keymap_scope)
+    |> SessionState.set_windows(return_target.windows)
+    |> SessionState.set_file_tree(return_target.file_tree)
     |> restore_active_buffer(return_target.active_buffer)
   end
 
-  @spec restore_active_buffer(WorkspaceState.t(), pid() | nil) :: WorkspaceState.t()
+  @spec restore_active_buffer(SessionState.t(), pid() | nil) :: SessionState.t()
   defp restore_active_buffer(workspace, active_buffer) when is_pid(active_buffer) do
-    WorkspaceState.set_buffers(workspace, Buffers.switch_to_pid(workspace.buffers, active_buffer))
+    SessionState.set_buffers(workspace, Buffers.switch_to_pid(workspace.buffers, active_buffer))
   end
 
   defp restore_active_buffer(workspace, _active_buffer), do: workspace
@@ -207,10 +207,10 @@ defmodule MingaEditor.AgentActivation do
   @spec restore_deactivated_scope(EditorState.t(), UIState.View.return_target() | nil) ::
           EditorState.t()
   defp restore_deactivated_scope(state, %{keymap_scope: keymap_scope}) do
-    EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, keymap_scope))
+    EditorState.update_workspace(state, &SessionState.set_keymap_scope(&1, keymap_scope))
   end
 
   defp restore_deactivated_scope(state, _return_target) do
-    EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :editor))
+    EditorState.update_workspace(state, &SessionState.set_keymap_scope(&1, :editor))
   end
 end

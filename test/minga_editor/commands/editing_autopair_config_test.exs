@@ -15,7 +15,7 @@ defmodule MingaEditor.Commands.EditingAutopairConfigTest do
   defp command_state(buffer, highlight) do
     %MingaEditor.State{
       port_manager: nil,
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: %MingaEditor.Viewport{top: 0, left: 0, rows: 10, cols: 40},
         buffers: %MingaEditor.State.Buffers{active: buffer, list: [buffer]},
         editing: MingaEditor.VimState.new(),

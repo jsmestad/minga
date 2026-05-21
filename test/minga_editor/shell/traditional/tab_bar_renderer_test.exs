@@ -5,8 +5,8 @@ defmodule MingaEditor.Shell.Traditional.TabBarRendererTest do
   alias MingaEditor.State.TabBar
   alias MingaEditor.Shell.Traditional.TabBarRenderer
   alias MingaEditor.UI.Theme
-  alias MingaEditor.Workspace.ChromeState
-  alias MingaEditor.Workspace.ChromeState.TabSummary
+  alias MingaEditor.Session.ChromeState
+  alias MingaEditor.Session.ChromeState.TabSummary
 
   defp doom_theme, do: Theme.get!(:doom_one)
 

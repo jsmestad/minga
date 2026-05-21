@@ -187,7 +187,7 @@ These are pure functions and data structures. They take values in and return val
 These are GenServers, registries, and OTP processes. They manage state and coordinate work. They use Layer 0 data structures and algorithms but don't know anything about how the editor presents itself.
 
 **Layer 2 — Orchestration and presentation (depends on everything):**
-`Editor.*`, `Shell.*`, `Input.*`, `Editor.Commands.*`, `Editor.RenderPipeline.*`, `Workspace.State`
+`Editor.*`, `Shell.*`, `Input.*`, `Editor.Commands.*`, `Editor.RenderPipeline.*`, `Session.State`
 
 This is where editing state, input dispatch, layout, rendering, and chrome live. It consumes everything from Layers 0 and 1. This layer changes the most because it's where UX experiments happen.
 
@@ -211,7 +211,7 @@ If you need to change a struct's field from outside its owning module, add a fun
 
 **The test:** grep for `%{thing |` and `%Module{thing |` across the codebase. Every instance should be in the struct's owning module. Violations mean someone is scattering mutation logic that should be centralized.
 
-**No struct may have more than ~15 fields.** If a struct is growing beyond that, it's accumulating unrelated concerns. Group related fields into sub-structs with their own modules and mutation functions. `Editor.State` is the biggest offender here and is being decomposed into `Workspace.State`, `Shell.Traditional.State`, and focused sub-structs (`State.Buffers`, `State.Windows`, `State.Search`, etc.).
+**No struct may have more than ~15 fields.** If a struct is growing beyond that, it's accumulating unrelated concerns. Group related fields into sub-structs with their own modules and mutation functions. `Editor.State` is the biggest offender here and is being decomposed into `Session.State`, `Shell.Traditional.State`, and focused sub-structs (`State.Buffers`, `State.Windows`, `State.Search`, etc.).
 
 ### Rule 3: Extract, don't branch
 
@@ -281,7 +281,7 @@ Minga uses three namespaces that enforce dependency direction: `Minga.*` (Layer 
 | `input/` | `MingaEditor.Input` | Input handler behaviour, focus stack, all handler modules |
 | `frontend/` | `MingaEditor.Frontend` | Frontend communication, protocol encoding, capabilities |
 | `ui/` | `MingaEditor.UI` | Themes, faces, highlighting, picker, prompts, which-key |
-| `workspace/` | `MingaEditor.Workspace.State` | Shared editing state across shells |
+| `session/` | `MingaEditor.Session.State` | Shared editing state across shells |
 | `agent/` | `MingaEditor.Agent.Events` | Agent UI state, view renderers, slash commands |
 
 ### Shell architecture

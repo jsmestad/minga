@@ -24,10 +24,10 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
   alias MingaEditor.State.Workspace
   alias MingaEditor.UI.Picker, as: UIPicker
   alias MingaEditor.Viewport
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   defp blank_workspace do
-    %WorkspaceState{viewport: Viewport.new(24, 80)}
+    %SessionState{viewport: Viewport.new(24, 80)}
   end
 
   describe "file refs" do
@@ -38,7 +38,7 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
       File.write!(path, "hello")
       buf = start_supervised!({BufferProcess, file_path: path})
 
-      workspace = %WorkspaceState{
+      workspace = %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: buf, list: [buf]},
         file_tree: %FileTreeState{project_root: root}
@@ -60,7 +60,7 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
       buf = start_supervised!({BufferProcess, content: "scratch", buffer_name: "*scratch*"})
       expected_ref = FileRef.from_buffer(buf)
 
-      workspace = %WorkspaceState{
+      workspace = %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: buf, list: [buf]},
         file_tree: %FileTreeState{project_root: root}
@@ -87,7 +87,7 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
       buf = start_supervised!({BufferProcess, file_path: path})
       expected_ref = FileRef.from_buffer(buf)
 
-      workspace = %WorkspaceState{
+      workspace = %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: buf, list: [buf]},
         file_tree: %FileTreeState{project_root: root}

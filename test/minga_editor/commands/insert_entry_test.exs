@@ -16,7 +16,7 @@ defmodule MingaEditor.Commands.InsertEntryTest do
   alias MingaEditor.State.Buffers
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   defp start_read_only_buffer do
     start_supervised!({BufferProcess, content: "read only", read_only: true})
@@ -25,7 +25,7 @@ defmodule MingaEditor.Commands.InsertEntryTest do
   defp build_state(buffer) do
     %EditorState{
       port_manager: nil,
-      workspace: %WorkspaceState{
+      workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: buffer, list: [buffer]},
         editing: VimState.new()

@@ -46,7 +46,7 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
     %EditorState{
       port_manager: self(),
       terminal_viewport: vp,
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: vp,
         editing: VimState.new(),
         buffers: %Buffers{active: buf, list: [buf], active_index: 0},

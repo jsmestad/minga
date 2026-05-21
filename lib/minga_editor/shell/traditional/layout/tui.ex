@@ -11,7 +11,7 @@ defmodule MingaEditor.Shell.Traditional.Layout.TUI do
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
-  alias MingaEditor.Workspace.ChromeState
+  alias MingaEditor.Session.ChromeState
 
   # Default row where editor content starts (below the tab bar).
   @default_content_start 1

@@ -61,7 +61,7 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
 
     %EditorState{
       port_manager: self(),
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         file_tree: %FileTreeState{tree: tree, focused: true, buffer: buf},
         keymap_scope: :file_tree

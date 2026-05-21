@@ -1,4 +1,4 @@
-defmodule MingaEditor.Workspace.ChromeStateReviewTest do
+defmodule MingaEditor.Session.ChromeStateReviewTest do
   use ExUnit.Case, async: true
 
   alias Minga.Project.FileRef
@@ -6,7 +6,7 @@ defmodule MingaEditor.Workspace.ChromeStateReviewTest do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.State.WorkspaceReview
-  alias MingaEditor.Workspace.ChromeState
+  alias MingaEditor.Session.ChromeState
 
   test "draft and conflict counts come from WorkspaceReview file lists" do
     {:ok, draft_ref} = FileRef.from_path("/tmp/minga", "lib/draft.ex")

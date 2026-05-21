@@ -21,7 +21,7 @@ defmodule MingaEditor.PickerUITest do
   alias MingaEditor.VimState
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   defp theme_picker do
     Theme.get!(:doom_one).picker
@@ -34,7 +34,7 @@ defmodule MingaEditor.PickerUITest do
     original_window = Window.new(win_id, original_buf, 24, 80)
     preview_window = %{original_window | buffer: preview_buf, content: {:buffer, preview_buf}}
 
-    original_workspace = %WorkspaceState{
+    original_workspace = %SessionState{
       viewport: Viewport.new(24, 80),
       editing: VimState.new(),
       buffers: %Buffers{active: original_buf, list: [original_buf], active_index: 0},
@@ -54,7 +54,7 @@ defmodule MingaEditor.PickerUITest do
 
     tab = Tab.new_file(1, "original.ex")
     tb = TabBar.new(tab)
-    tb = TabBar.update_context(tb, 1, WorkspaceState.to_tab_context(original_workspace))
+    tb = TabBar.update_context(tb, 1, SessionState.to_tab_context(original_workspace))
 
     picker = Picker.new([%Item{id: "preview", label: "preview.ex"}], title: "Files")
 

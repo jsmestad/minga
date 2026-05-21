@@ -19,7 +19,7 @@ defmodule MingaEditor.Commands.Help do
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
   alias Minga.Mode
 
   @type state :: EditorState.t()
@@ -884,7 +884,7 @@ defmodule MingaEditor.Commands.Help do
 
     state =
       EditorState.update_workspace(state, fn ws ->
-        WorkspaceState.set_buffers(ws, Buffers.set_help(ws.buffers, pid))
+        SessionState.set_buffers(ws, Buffers.set_help(ws.buffers, pid))
       end)
 
     {state, pid}

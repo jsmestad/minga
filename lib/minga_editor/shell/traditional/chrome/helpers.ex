@@ -14,7 +14,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.Helpers do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Shell.Traditional.TabBarRenderer
   alias MingaEditor.Shell.Traditional.WorkspaceRowRenderer
-  alias MingaEditor.Workspace.ChromeState
+  alias MingaEditor.Session.ChromeState
   alias MingaEditor.Viewport
   alias MingaEditor.WindowTree
   alias MingaEditor.UI.Theme

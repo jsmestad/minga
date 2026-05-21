@@ -21,7 +21,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.Viewport
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   @backspace 127
 
@@ -221,12 +221,12 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       {:ok, new_ref} = FileRef.from_path(dir, renamed)
       {:ok, active_ref} = FileRef.from_path(dir, "active.txt")
 
-      inactive_workspace = %WorkspaceState{
+      inactive_workspace = %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: target_buffer, list: [target_buffer], active_index: 0}
       }
 
-      active_workspace = %WorkspaceState{
+      active_workspace = %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0}
       }
@@ -234,7 +234,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       inactive_tab =
         Tab.new_file(1, "target.txt")
         |> Tab.set_file_ref(old_ref)
-        |> Tab.set_context(WorkspaceState.to_tab_context(inactive_workspace))
+        |> Tab.set_context(SessionState.to_tab_context(inactive_workspace))
 
       {tab_bar, active_tab} = TabBar.add(TabBar.new(inactive_tab, dir), :file, "active.txt")
 
@@ -243,7 +243,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
         |> TabBar.update_tab(active_tab.id, fn tab ->
           tab
           |> Tab.set_file_ref(active_ref)
-          |> Tab.set_context(WorkspaceState.to_tab_context(active_workspace))
+          |> Tab.set_context(SessionState.to_tab_context(active_workspace))
         end)
         |> TabBar.update_workspace(0, fn ws ->
           WorkspaceModel.add_file(ws, active_ref) |> WorkspaceModel.set_active_file(active_ref)
@@ -252,7 +252,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       state = %EditorState{
         port_manager: self(),
         events_registry: events_registry,
-        workspace: %WorkspaceState{
+        workspace: %SessionState{
           viewport: Viewport.new(24, 80),
           buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0},
           file_tree:
@@ -292,7 +292,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
         dir
         |> make_state(events_registry)
         |> EditorState.update_workspace(
-          &WorkspaceState.set_buffers(&1, %Buffers{
+          &SessionState.set_buffers(&1, %Buffers{
             active: buffer,
             list: [buffer],
             active_index: 0
@@ -402,7 +402,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
   defp make_state(dir, events_registry, active_buffer \\ nil) do
     tree = FileTree.new(dir)
 
-    workspace = %WorkspaceState{
+    workspace = %SessionState{
       viewport: Viewport.new(24, 80),
       buffers: buffers_for_active_buffer(active_buffer),
       file_tree: FileTreeState.open(%FileTreeState{}, tree, nil),
@@ -420,7 +420,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
           tab =
             Tab.new_file(1, Path.basename(file_ref.display_name))
             |> Tab.set_file_ref(file_ref)
-            |> Tab.set_context(WorkspaceState.to_tab_context(workspace))
+            |> Tab.set_context(SessionState.to_tab_context(workspace))
 
           tab_bar =
             TabBar.new(tab, dir)
@@ -471,7 +471,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
   defp replace_editing_text(%EditorState{} = state, text) when is_binary(text) do
     ft = FileTreeState.update_editing_text(state.workspace.file_tree, text)
-    EditorState.update_workspace(state, &WorkspaceState.set_file_tree(&1, ft))
+    EditorState.update_workspace(state, &SessionState.set_file_tree(&1, ft))
   end
 
   defp select_entry(%EditorState{} = state, name) when is_binary(name) do
@@ -485,6 +485,6 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
   defp replace_tree(%EditorState{} = state, %FileTree{} = tree) do
     ft = FileTreeState.replace_tree(state.workspace.file_tree, tree)
-    EditorState.update_workspace(state, &WorkspaceState.set_file_tree(&1, ft))
+    EditorState.update_workspace(state, &SessionState.set_file_tree(&1, ft))
   end
 end

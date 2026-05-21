@@ -17,7 +17,7 @@ defmodule MingaEditor.State.SnapshotTest do
 
     %EditorState{
       port_manager: nil,
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: %VimState{mode: mode, mode_state: Mode.initial_state()},
         buffers: %Buffers{
@@ -114,7 +114,7 @@ defmodule MingaEditor.State.SnapshotTest do
     test "older bare-field contexts are not migrated; only canonical keys are read" do
       # Pre-#1440, contexts stored bare fields like :active_buffer / :mode and
       # were silently migrated. Now restore_tab_context only reads canonical
-      # keys (those in WorkspaceState.field_names()), so legacy fields are
+      # keys (those in SessionState.field_names()), so legacy fields are
       # ignored and the workspace falls back to whatever the live state already
       # holds. No crash, no migration, no warning.
       {:ok, buf_a} = BufferProcess.start_link(content: "a")
@@ -349,7 +349,7 @@ defmodule MingaEditor.State.SnapshotTest do
     test "produces identical output to the legacy Map.from_struct path" do
       {:ok, buf} = BufferProcess.start_link(content: "hello")
 
-      ws = %MingaEditor.Workspace.State{
+      ws = %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :insert, mode_state: Mode.initial_state()},
         buffers: %Buffers{active: buf, list: [buf]},
@@ -390,7 +390,7 @@ defmodule MingaEditor.State.SnapshotTest do
       {:ok, buf} = BufferProcess.start_link(content: "round-trip")
       pending = %{make_ref() => {:semantic_tokens, buf}}
 
-      ws = %MingaEditor.Workspace.State{
+      ws = %MingaEditor.Session.State{
         viewport: Viewport.new(30, 100),
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
         buffers: %Buffers{active: buf, list: [buf]},
@@ -416,7 +416,7 @@ defmodule MingaEditor.State.SnapshotTest do
     end
 
     test "normalises transient vim state" do
-      ws = %MingaEditor.Workspace.State{
+      ws = %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :normal, mode_state: %Mode.CommandState{input: ""}},
         buffers: %Buffers{},

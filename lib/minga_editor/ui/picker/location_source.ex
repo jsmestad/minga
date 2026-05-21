@@ -26,7 +26,7 @@ defmodule MingaEditor.UI.Picker.LocationSource do
   alias MingaEditor.VimState
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.UI.Picker.Source
 
   @impl true
@@ -130,7 +130,7 @@ defmodule MingaEditor.UI.Picker.LocationSource do
     pos = Buffer.cursor(buf)
 
     EditorState.update_workspace(state, fn ws ->
-      WorkspaceState.update_editing(ws, &VimState.set_last_jump_pos(&1, pos))
+      SessionState.update_editing(ws, &VimState.set_last_jump_pos(&1, pos))
     end)
   end
 

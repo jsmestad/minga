@@ -16,7 +16,7 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Theme
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   defp start_buffer(opts) do
     {:ok, pid} = BufferProcess.start_link(opts)
@@ -61,7 +61,7 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
         Buffers.add_background(acc, pid)
       end)
 
-    EditorState.update_workspace(state, &WorkspaceState.set_buffers(&1, buffers))
+    EditorState.update_workspace(state, &SessionState.set_buffers(&1, buffers))
   end
 
   describe "special?/1" do

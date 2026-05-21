@@ -49,7 +49,7 @@ defmodule MingaEditor.Agent.View.PromptRendererTest do
 
     %EditorState{
       port_manager: self(),
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(rows, cols),
         editing: VimState.new(),
         buffers: %Buffers{active: buf, list: [buf], active_index: 0},

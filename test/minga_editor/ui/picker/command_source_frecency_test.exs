@@ -21,7 +21,7 @@ defmodule MingaEditor.UI.Picker.CommandSourceFrecencyTest do
   alias MingaEditor.UI.Picker.OptionScopeSource
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   setup %{tmp_dir: tmp_dir} do
     previous_config_home = System.get_env("XDG_CONFIG_HOME")
@@ -202,7 +202,7 @@ defmodule MingaEditor.UI.Picker.CommandSourceFrecencyTest do
     %EditorState{
       port_manager: nil,
       terminal_viewport: viewport,
-      workspace: %WorkspaceState{
+      workspace: %SessionState{
         viewport: viewport,
         editing: VimState.new(),
         buffers: %Buffers{active: buffer_pid, list: maybe_list(buffer_pid), active_index: 0}

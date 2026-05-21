@@ -10,7 +10,7 @@ defmodule MingaEditor.HighlightSync do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Highlighting
   alias MingaEditor.Frontend.Protocol
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
   alias Minga.Parser.Manager, as: ParserManager
   alias MingaEditor.UI.Highlight
   alias MingaEditor.UI.Highlight.Grammar
@@ -94,7 +94,7 @@ defmodule MingaEditor.HighlightSync do
         state =
           EditorState.update_workspace(
             state,
-            &WorkspaceState.update_highlight(&1, fn h -> %{h | version: version} end)
+            &SessionState.update_highlight(&1, fn h -> %{h | version: version} end)
           )
 
         touch_buffer(state, buf_pid)
@@ -118,7 +118,7 @@ defmodule MingaEditor.HighlightSync do
        )
        when is_pid(active_buf) do
     EditorState.update_workspace(state, fn ws ->
-      WorkspaceState.update_windows_for_buffer(
+      SessionState.update_windows_for_buffer(
         ws,
         active_buf,
         &Window.set_document_symbols(&1, [])
@@ -204,7 +204,7 @@ defmodule MingaEditor.HighlightSync do
 
     state =
       EditorState.update_workspace(state, fn ws ->
-        WorkspaceState.update_highlight(ws, fn highlight ->
+        SessionState.update_highlight(ws, fn highlight ->
           highlight
           |> Highlighting.set_version(version)
           |> Highlighting.set_syntax_overrides(syntax_overrides)
@@ -237,7 +237,7 @@ defmodule MingaEditor.HighlightSync do
 
     EditorState.update_workspace(
       state,
-      &WorkspaceState.update_highlight(&1, fn h -> %{h | last_active_at: timestamps} end)
+      &SessionState.update_highlight(&1, fn h -> %{h | last_active_at: timestamps} end)
     )
   end
 
@@ -297,7 +297,7 @@ defmodule MingaEditor.HighlightSync do
 
     state =
       EditorState.update_workspace(state, fn ws ->
-        WorkspaceState.update_highlight(ws, &Highlighting.set_version(&1, version))
+        SessionState.update_highlight(ws, &Highlighting.set_version(&1, version))
       end)
 
     touch_active(state)
@@ -335,7 +335,7 @@ defmodule MingaEditor.HighlightSync do
         next_buffer_id: id + 1
     }
 
-    {id, EditorState.update_workspace(state, &WorkspaceState.set_highlight(&1, new_hl))}
+    {id, EditorState.update_workspace(state, &SessionState.set_highlight(&1, new_hl))}
   end
 
   @doc """
@@ -355,7 +355,7 @@ defmodule MingaEditor.HighlightSync do
         ParserManager.unregister_buffer(buffer_id)
 
         EditorState.update_workspace(state, fn ws ->
-          WorkspaceState.update_highlight(
+          SessionState.update_highlight(
             ws,
             &Highlighting.remove_buffer(&1, buffer_pid, buffer_id, remaining_ids)
           )
@@ -530,7 +530,7 @@ defmodule MingaEditor.HighlightSync do
     state =
       EditorState.update_workspace(
         state,
-        &WorkspaceState.update_highlight(&1, fn h -> %{h | version: version} end)
+        &SessionState.update_highlight(&1, fn h -> %{h | version: version} end)
       )
 
     touch_active(state)
@@ -562,7 +562,7 @@ defmodule MingaEditor.HighlightSync do
 
     EditorState.update_workspace(
       state,
-      &WorkspaceState.update_highlight(&1, fn h -> %{h | last_active_at: timestamps} end)
+      &SessionState.update_highlight(&1, fn h -> %{h | last_active_at: timestamps} end)
     )
   end
 
@@ -645,7 +645,7 @@ defmodule MingaEditor.HighlightSync do
     new_hl =
       compute_post_eviction_state(state.workspace.highlight, evicted_ids, remaining_timestamps)
 
-    EditorState.update_workspace(state, &WorkspaceState.set_highlight(&1, new_hl))
+    EditorState.update_workspace(state, &SessionState.set_highlight(&1, new_hl))
   end
 
   # Pure calculation: produces the new Highlighting struct with evicted entries removed.
@@ -727,7 +727,7 @@ defmodule MingaEditor.HighlightSync do
         hl_data
       ) do
     EditorState.update_workspace(state, fn ws ->
-      WorkspaceState.update_highlight(ws, &Highlighting.put_highlight(&1, buf, hl_data))
+      SessionState.update_highlight(ws, &Highlighting.put_highlight(&1, buf, hl_data))
     end)
   end
 
@@ -735,7 +735,7 @@ defmodule MingaEditor.HighlightSync do
   @spec put_highlight(EditorState.t(), pid(), Highlight.t()) :: EditorState.t()
   def put_highlight(%EditorState{} = state, buf_pid, hl_data) do
     EditorState.update_workspace(state, fn ws ->
-      WorkspaceState.update_highlight(ws, &Highlighting.put_highlight(&1, buf_pid, hl_data))
+      SessionState.update_highlight(ws, &Highlighting.put_highlight(&1, buf_pid, hl_data))
     end)
   end
 

@@ -7,7 +7,7 @@ defmodule Minga.Credo.NoRawWorkspaceSnapshotCheck do
   `Map.from_struct(workspace)` produces a bare map that strips the struct
   tag and loses compile-time key checking. Code that snapshots a workspace
   this way silently breaks whenever a field is added or removed from
-  `WorkspaceState`, because the intermediate map has no contract.
+  `SessionState`, because the intermediate map has no contract.
 
   Issue #1592 replaced the last `Map.from_struct(workspace)` call site with
   `TabContext.from_workspace/1`, which constructs the snapshot struct
@@ -45,7 +45,7 @@ defmodule Minga.Credo.NoRawWorkspaceSnapshotCheck do
       check: """
       Use `TabContext.from_workspace/1` instead of `Map.from_struct` on
       workspace structs. The intermediate map loses the struct tag and
-      silently breaks when WorkspaceState fields change. See #1403.
+      silently breaks when SessionState fields change. See #1403.
       """,
       params: [
         allowed_files:

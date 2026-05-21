@@ -25,7 +25,7 @@ defmodule MingaEditor.UI.Picker.CommandHelpSourceTest do
       port_manager: nil,
       keymap_server: keymap,
       options_server: options,
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: buf, list: [buf]}
       }

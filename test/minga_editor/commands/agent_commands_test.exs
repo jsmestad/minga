@@ -26,7 +26,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.State.Windows
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: WorkspaceState
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
@@ -76,7 +76,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     %EditorState{
       port_manager: nil,
       shell: MingaEditor.Shell.Traditional,
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
         buffers: %Buffers{active: buf, list: [buf], active_index: 0},

@@ -10,7 +10,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     LSP.*, Git.*, Project.*, Keymap.*, Parser.*, Frontend.Manager/Protocol.
     May depend on Layer 0 only.
   - **Layer 2** (orchestration/presentation): Editor.*, Shell.*, Input.*,
-    Workspace.*, plus presentation sub-namespaces from Frontend (Emit,
+    Session.*, plus presentation sub-namespaces from Frontend (Emit,
     Protocol.GUI), UI (Picker, Popup.Lifecycle, Prompt), and Agent (View,
     UIState, Events, SlashCommand). May depend on Layers 0 and 1.
 
@@ -80,7 +80,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "MingaEditor",
     "MingaEditor.Shell",
     "MingaEditor.Input",
-    "MingaEditor.Workspace",
+    "MingaEditor.Session",
     # Render pipeline tail (emit + GUI protocol encoding)
     "MingaEditor.Frontend.Emit",
     "MingaEditor.Frontend.Protocol.GUI",

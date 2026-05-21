@@ -13,7 +13,7 @@ defmodule MingaEditor.Commands.CmdCopyCutTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Registers
   alias MingaEditor.Viewport
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
   alias Minga.Mode.VisualState
 
   setup :verify_on_exit!
@@ -38,7 +38,7 @@ defmodule MingaEditor.Commands.CmdCopyCutTest do
   defp build_state(buf) do
     %EditorState{
       port_manager: nil,
-      workspace: %WorkspaceState{
+      workspace: %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: %MingaEditor.State.Buffers{active: buf, list: [buf]}
       }

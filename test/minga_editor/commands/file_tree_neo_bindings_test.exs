@@ -18,7 +18,7 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.Viewport
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   setup :verify_on_exit!
 
@@ -138,12 +138,12 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
       {:ok, new_ref} = FileRef.from_path(tmp_dir, target)
       {:ok, active_ref} = FileRef.from_path(tmp_dir, "active.txt")
 
-      inactive_workspace = %WorkspaceState{
+      inactive_workspace = %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: target_buffer, list: [target_buffer], active_index: 0}
       }
 
-      active_workspace = %WorkspaceState{
+      active_workspace = %SessionState{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0}
       }
@@ -151,7 +151,7 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
       inactive_tab =
         Tab.new_file(1, "alpha.txt")
         |> Tab.set_file_ref(old_ref)
-        |> Tab.set_context(WorkspaceState.to_tab_context(inactive_workspace))
+        |> Tab.set_context(SessionState.to_tab_context(inactive_workspace))
 
       {tab_bar, active_tab} = TabBar.add(TabBar.new(inactive_tab, tmp_dir), :file, "active.txt")
 
@@ -160,7 +160,7 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
         |> TabBar.update_tab(active_tab.id, fn tab ->
           tab
           |> Tab.set_file_ref(active_ref)
-          |> Tab.set_context(WorkspaceState.to_tab_context(active_workspace))
+          |> Tab.set_context(SessionState.to_tab_context(active_workspace))
         end)
         |> TabBar.update_workspace(0, fn ws ->
           WorkspaceModel.add_file(ws, active_ref) |> WorkspaceModel.set_active_file(active_ref)
@@ -446,7 +446,7 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
     tab =
       Tab.new_file(1, Path.basename(file_ref.display_name))
       |> Tab.set_file_ref(file_ref)
-      |> Tab.set_context(WorkspaceState.to_tab_context(state.workspace))
+      |> Tab.set_context(SessionState.to_tab_context(state.workspace))
 
     tab_bar =
       TabBar.new(tab, root)
@@ -460,7 +460,7 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
 
     %EditorState{
       port_manager: nil,
-      workspace: %WorkspaceState{
+      workspace: %SessionState{
         buffers: buffers,
         viewport: Viewport.new(24, 80),
         file_tree: FileTreeState.open(%FileTreeState{}, tree, nil)
@@ -471,7 +471,7 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
   defp expand_path(state, path) do
     tree = FileTree.expand_path(state.workspace.file_tree.tree, path)
     file_tree = FileTreeState.replace_tree(state.workspace.file_tree, tree)
-    EditorState.update_workspace(state, &WorkspaceState.set_file_tree(&1, file_tree))
+    EditorState.update_workspace(state, &SessionState.set_file_tree(&1, file_tree))
   end
 
   defp select_entry(state, name) do
@@ -481,6 +481,6 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
 
     tree = FileTree.select(state.workspace.file_tree.tree, index)
     file_tree = FileTreeState.replace_tree(state.workspace.file_tree, tree)
-    EditorState.update_workspace(state, &WorkspaceState.set_file_tree(&1, file_tree))
+    EditorState.update_workspace(state, &SessionState.set_file_tree(&1, file_tree))
   end
 end

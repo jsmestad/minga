@@ -12,7 +12,7 @@ defmodule Minga.Credo.NoRawWorkspaceSnapshotCheckTest do
     :ok
   end
 
-  defp check(source_code, filename \\ "lib/minga_editor/workspace/snapshot.ex") do
+  defp check(source_code, filename \\ "lib/minga_editor/session/snapshot.ex") do
     source_code
     |> to_source_file(filename)
     |> run_check(NoRawWorkspaceSnapshotCheck, [])
@@ -90,13 +90,13 @@ defmodule Minga.Credo.NoRawWorkspaceSnapshotCheckTest do
   describe "skips test files" do
     test "allows Map.from_struct(workspace) in test files" do
       """
-      defmodule MingaEditor.WorkspaceTest do
+      defmodule MingaEditor.SessionTest do
         def test_helper(workspace) do
           Map.from_struct(workspace)
         end
       end
       """
-      |> check("test/minga_editor/workspace_test.exs")
+      |> check("test/minga_editor/session_test.exs")
       |> refute_issues()
     end
   end

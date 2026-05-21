@@ -150,7 +150,7 @@ defmodule MingaEditor.Renderer.ServerTest do
   defp build_editor_state(backend, renderer_pid) do
     buf = start_supervised!({Minga.Buffer, content: "test"})
 
-    workspace = %MingaEditor.Workspace.State{
+    workspace = %MingaEditor.Session.State{
       buffers: %MingaEditor.State.Buffers{
         active: buf,
         list: [buf],

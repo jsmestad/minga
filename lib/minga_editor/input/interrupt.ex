@@ -35,7 +35,7 @@ defmodule MingaEditor.Input.Interrupt do
   alias MingaEditor.State.WhichKey
   alias MingaEditor.VimState
   alias Minga.Mode
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.Session.State, as: SessionState
 
   # Ctrl-G sends codepoint 7 (BEL / ASCII control code for ^G).
   @ctrl_g 7
@@ -72,7 +72,7 @@ defmodule MingaEditor.Input.Interrupt do
     do: {state, resets}
 
   defp maybe_reset_scope(%{workspace: %{keymap_scope: scope}} = state, resets) do
-    {EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :editor)),
+    {EditorState.update_workspace(state, &SessionState.set_keymap_scope(&1, :editor)),
      ["scope #{scope} → :editor" | resets]}
   end
 
@@ -88,7 +88,7 @@ defmodule MingaEditor.Input.Interrupt do
     if mode_state_dirty?(vim.mode_state, fresh_state) do
       new_vim = VimState.set_mode_state(vim, fresh_state)
 
-      {EditorState.update_workspace(state, &WorkspaceState.set_editing(&1, new_vim)),
+      {EditorState.update_workspace(state, &SessionState.set_editing(&1, new_vim)),
        ["mode state reset (pending sequence cleared)" | resets]}
     else
       {state, resets}

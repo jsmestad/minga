@@ -25,7 +25,7 @@ defmodule MingaEditor.LayoutInvalidationTest do
   defp new_state(rows \\ 24, cols \\ 80) do
     %EditorState{
       port_manager: nil,
-      workspace: %MingaEditor.Workspace.State{
+      workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(rows, cols),
         editing: VimState.new()
       }
