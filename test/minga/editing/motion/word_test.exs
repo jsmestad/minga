@@ -54,6 +54,11 @@ defmodule Minga.Editing.Motion.WordTest do
       assert Motion.word_forward(b, {0, 0}) == {0, 3}
     end
 
+    test "treats Unicode letters as word characters" do
+      b = buf("éclair café")
+      assert Motion.word_forward(b, {0, 0}) == {0, 8}
+    end
+
     test "moves across multiple lines to find next word" do
       b = buf("a\n\nbc")
       assert Motion.word_forward(b, {0, 0}) == {2, 0}
@@ -96,6 +101,11 @@ defmodule Minga.Editing.Motion.WordTest do
       b = buf("foo   bar")
       assert Motion.word_backward(b, {0, 8}) == {0, 6}
     end
+
+    test "moves backward to Unicode word starts" do
+      b = buf("éclair café")
+      assert Motion.word_backward(b, {0, 11}) == {0, 8}
+    end
   end
 
   describe "word_end/2" do
@@ -127,6 +137,11 @@ defmodule Minga.Editing.Motion.WordTest do
     test "works across lines" do
       b = buf("hi\nworld")
       assert Motion.word_end(b, {0, 1}) == {1, 4}
+    end
+
+    test "moves to the end of Unicode words" do
+      b = buf("éclair café")
+      assert Motion.word_end(b, {0, 0}) == {0, 6}
     end
 
     test "word_end on single character" do

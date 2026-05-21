@@ -29,6 +29,7 @@ defmodule MingaEditor.Mouse do
 
   alias Minga.Buffer
   alias Minga.Config
+  alias Minga.Editing
   alias Minga.Core.Decorations
   alias Minga.Core.Unicode
   alias MingaEditor.DisplayMap
@@ -374,16 +375,28 @@ defmodule MingaEditor.Mouse do
         state
 
       {line, c} ->
-        move_drag_cursor(state, {line, c})
-        update_drag_selection(state, anchor, dcc)
+        update_drag_selection(state, anchor, dcc, {line, c})
     end
   end
 
-  @spec update_drag_selection(state(), {non_neg_integer(), non_neg_integer()}, pos_integer()) ::
-          state()
-  defp update_drag_selection(state, anchor, 2), do: snap_selection_to_words(state, anchor)
-  defp update_drag_selection(state, anchor, 3), do: snap_selection_to_lines(state, anchor)
-  defp update_drag_selection(state, anchor, _dcc), do: enter_visual_if_needed(state, anchor)
+  @spec update_drag_selection(
+          state(),
+          {non_neg_integer(), non_neg_integer()},
+          pos_integer(),
+          {non_neg_integer(), non_neg_integer()}
+        ) :: state()
+  defp update_drag_selection(state, anchor, 2, target),
+    do: snap_selection_to_words(state, anchor, target)
+
+  defp update_drag_selection(state, anchor, 3, target) do
+    move_drag_cursor(state, target)
+    snap_selection_to_lines(state, anchor)
+  end
+
+  defp update_drag_selection(state, anchor, _dcc, target) do
+    move_drag_cursor(state, target)
+    enter_visual_if_needed(state, anchor)
+  end
 
   @spec handle_buffer_scroll_at_window(
           state(),
@@ -542,17 +555,20 @@ defmodule MingaEditor.Mouse do
         buf = state.workspace.buffers.active
 
         case word_boundaries_at(buf, line, buf_col) do
-          {word_start, word_end} ->
-            Buffer.move_to(buf, {line, word_end})
+          {{word_start_line, word_start}, {word_end_line, word_end}} ->
+            Buffer.move_to(buf, {word_end_line, word_end})
 
             visual_state = %VisualState{
-              visual_anchor: {line, word_start},
+              visual_anchor: {word_start_line, word_start},
               visual_type: :char
             }
 
             state = EditorState.transition_mode(state, :visual, visual_state)
 
-            update_mouse(state, &MouseState.start_drag(&1, {line, word_start}, origin_window))
+            update_mouse(
+              state,
+              &MouseState.start_drag(&1, {word_start_line, word_start}, origin_window)
+            )
 
           nil ->
             state
@@ -647,29 +663,56 @@ defmodule MingaEditor.Mouse do
 
   @spec snap_selection_to_words(
           state(),
+          {non_neg_integer(), non_neg_integer()},
           {non_neg_integer(), non_neg_integer()}
         ) :: state()
-  defp snap_selection_to_words(state, anchor) do
+  defp snap_selection_to_words(state, anchor, {cursor_line, cursor_col} = target) do
     buf = state.workspace.buffers.active
-    {cursor_line, cursor_col} = Buffer.cursor(buf)
+    {anchor_line, anchor_col} = anchor
+    target_bounds = word_boundaries_at(buf, cursor_line, cursor_col)
+    anchor_bounds = word_boundaries_at(buf, anchor_line, anchor_col)
 
-    # Snap cursor to word boundary
-    case word_boundaries_at(buf, cursor_line, cursor_col) do
-      {word_start, word_end} ->
-        {anchor_line, _anchor_col} = anchor
-
-        # If cursor is after anchor, extend to word end; otherwise to word start
-        if {cursor_line, cursor_col} >= {anchor_line, 0} do
-          Buffer.move_to(buf, {cursor_line, word_end})
+    case {target_bounds, anchor_bounds} do
+      {{{target_start_line, target_start}, {target_end_line, target_end}}, anchor_bounds} ->
+        if target >= anchor do
+          Buffer.move_to(buf, {target_end_line, target_end})
         else
-          Buffer.move_to(buf, {cursor_line, word_start})
+          Buffer.move_to(buf, {target_start_line, target_start})
         end
 
-        enter_visual_if_needed(state, anchor)
+        set_char_visual_selection(state, word_drag_anchor(target, anchor, anchor_bounds))
 
-      nil ->
+      {nil,
+       anchor_bounds = {{_anchor_start_line, _anchor_start}, {_anchor_end_line, _anchor_end}}} ->
+        move_drag_cursor(state, target)
+        set_char_visual_selection(state, word_drag_anchor(target, anchor, anchor_bounds))
+
+      _ ->
+        move_drag_cursor(state, target)
         enter_visual_if_needed(state, anchor)
     end
+  end
+
+  @spec word_drag_anchor(
+          {non_neg_integer(), non_neg_integer()},
+          {non_neg_integer(), non_neg_integer()},
+          {Minga.Editing.TextObject.position(), Minga.Editing.TextObject.position()}
+        ) :: Minga.Editing.TextObject.position()
+  defp word_drag_anchor(
+         target,
+         anchor,
+         {{anchor_start_line, anchor_start}, {_anchor_end_line, _anchor_end}}
+       )
+       when target >= anchor do
+    {anchor_start_line, anchor_start}
+  end
+
+  defp word_drag_anchor(
+         _target,
+         _anchor,
+         {{_anchor_start_line, _anchor_start}, {anchor_end_line, anchor_end}}
+       ) do
+    {anchor_end_line, anchor_end}
   end
 
   # ── Line-by-line drag snapping ─────────────────────────────────────────────
@@ -708,80 +751,17 @@ defmodule MingaEditor.Mouse do
   # ── Word boundary detection ────────────────────────────────────────────────
 
   @spec word_boundaries_at(pid(), non_neg_integer(), non_neg_integer()) ::
-          {non_neg_integer(), non_neg_integer()} | nil
+          {Minga.Editing.TextObject.position(), Minga.Editing.TextObject.position()} | nil
   defp word_boundaries_at(buf, line, col) do
     case Buffer.lines(buf, line, 1) do
       [text] when byte_size(text) > 0 ->
-        find_word_at(text, col)
+        buf
+        |> Buffer.snapshot()
+        |> Editing.select_inner_word({line, col})
 
       _ ->
         nil
     end
-  end
-
-  @spec find_word_at(String.t(), non_neg_integer()) ::
-          {non_neg_integer(), non_neg_integer()} | nil
-  defp find_word_at("", _col), do: nil
-
-  defp find_word_at(text, col) do
-    {graphemes, byte_offsets} = Unicode.graphemes_with_byte_offsets(text)
-    byte_col = Unicode.clamp_to_grapheme_boundary(text, col)
-    idx = Unicode.byte_offset_to_grapheme_index(byte_offsets, byte_col)
-    char = elem(graphemes, idx)
-
-    {start_idx, end_idx} = word_boundary_indexes(graphemes, idx, char)
-
-    {
-      Unicode.grapheme_index_to_byte_offset(byte_offsets, start_idx, byte_size(text)),
-      Unicode.grapheme_index_to_byte_offset(byte_offsets, end_idx, byte_size(text))
-    }
-  end
-
-  @spec word_boundary_indexes(tuple(), non_neg_integer(), String.t()) ::
-          {non_neg_integer(), non_neg_integer()}
-  defp word_boundary_indexes(graphemes, idx, char) do
-    if word_char?(char) do
-      {scan_word_start(graphemes, idx), scan_word_end(graphemes, idx)}
-    else
-      {idx, idx}
-    end
-  end
-
-  @spec scan_word_start(tuple(), non_neg_integer()) :: non_neg_integer()
-  defp scan_word_start(_graphemes, 0), do: 0
-
-  defp scan_word_start(graphemes, idx) do
-    prev = elem(graphemes, idx - 1)
-
-    if word_char?(prev) do
-      scan_word_start(graphemes, idx - 1)
-    else
-      idx
-    end
-  end
-
-  @spec scan_word_end(tuple(), non_neg_integer()) :: non_neg_integer()
-  defp scan_word_end(graphemes, idx) do
-    last_idx = tuple_size(graphemes) - 1
-    scan_word_end(graphemes, idx, last_idx)
-  end
-
-  @spec scan_word_end(tuple(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
-  defp scan_word_end(_graphemes, idx, last_idx) when idx >= last_idx, do: idx
-
-  defp scan_word_end(graphemes, idx, last_idx) do
-    next = elem(graphemes, idx + 1)
-
-    if word_char?(next) do
-      scan_word_end(graphemes, idx + 1, last_idx)
-    else
-      idx
-    end
-  end
-
-  @spec word_char?(String.t()) :: boolean()
-  defp word_char?(char) do
-    char =~ ~r/[\w]/u
   end
 
   # ── Separator resize helpers ──────────────────────────────────────────────
@@ -1616,7 +1596,10 @@ defmodule MingaEditor.Mouse do
   defp enter_visual_if_needed(%{workspace: %{editing: %{mode: :visual}}} = state, _anchor),
     do: state
 
-  defp enter_visual_if_needed(state, anchor) do
+  defp enter_visual_if_needed(state, anchor), do: set_char_visual_selection(state, anchor)
+
+  @spec set_char_visual_selection(state(), {non_neg_integer(), non_neg_integer()}) :: state()
+  defp set_char_visual_selection(state, anchor) do
     visual_state = %VisualState{visual_anchor: anchor, visual_type: :char}
     EditorState.transition_mode(state, :visual, visual_state)
   end

@@ -26,7 +26,6 @@ defmodule MingaEditor.MouseTest do
   alias MingaEditor.Session.State, as: SessionState
 
   @content_row 1
-  @gutter 6
   @ctrl 0x02
 
   describe "scrolling" do
@@ -77,9 +76,10 @@ defmodule MingaEditor.MouseTest do
   describe "click-to-position" do
     test "left click moves the cursor to the clicked buffer position" do
       {state, buffer} = start_mouse_state("hello\nworld\nfoo bar baz")
+      {row, col} = buffer_screen_pos(state, 1, 3)
 
-      state = mouse(state, @content_row + 1, @gutter + 3, :left, :press)
-      mouse(state, @content_row + 1, @gutter + 3, :left, :release)
+      state = mouse(state, row, col, :left, :press)
+      mouse(state, row, col, :left, :release)
 
       assert BufferProcess.cursor(buffer) == {1, 3}
     end
@@ -97,15 +97,17 @@ defmodule MingaEditor.MouseTest do
 
     test "right click inside an active selection preserves it, outside clears it" do
       {state, buffer} = start_mouse_state("hello world\nsecond line")
+      {inside_row, inside_col} = buffer_screen_pos(state, 0, 2)
+      {outside_row, outside_col} = buffer_screen_pos(state, 1, 2)
       state = set_visual_selection(state, buffer, {0, 0}, {0, 4}, :char)
 
-      state = mouse(state, @content_row, @gutter + 2, :right, :press)
+      state = mouse(state, inside_row, inside_col, :right, :press)
 
       assert state.workspace.editing.mode == :visual
       assert state.workspace.editing.mode_state.visual_anchor == {0, 0}
       assert BufferProcess.cursor(buffer) == {0, 4}
 
-      state = mouse(state, @content_row + 1, @gutter + 2, :right, :press)
+      state = mouse(state, outside_row, outside_col, :right, :press)
 
       assert state.workspace.editing.mode == :normal
       assert BufferProcess.cursor(buffer) == {1, 2}
@@ -114,8 +116,9 @@ defmodule MingaEditor.MouseTest do
     test "native GUI Ctrl-left click positions the cursor without TUI goto-definition feedback" do
       {state, buffer} = start_mouse_state("hello\nworld\nfoo bar baz")
       state = set_capabilities(state, :native_gui)
+      {row, col} = buffer_screen_pos(state, 1, 3)
 
-      state = mouse(state, @content_row, @gutter + 3, :left, :press, @ctrl)
+      state = mouse(state, row, col, :left, :press, @ctrl)
 
       assert BufferProcess.cursor(buffer) == {1, 3}
       refute EditorState.status_msg(state) == "No language server"
@@ -123,8 +126,9 @@ defmodule MingaEditor.MouseTest do
 
     test "TUI Ctrl-left click keeps goto-definition feedback" do
       {state, buffer} = start_mouse_state("hello\nworld\nfoo bar baz")
+      {row, col} = buffer_screen_pos(state, 1, 3)
 
-      state = mouse(state, @content_row + 1, @gutter + 3, :left, :press, @ctrl)
+      state = mouse(state, row, col, :left, :press, @ctrl)
 
       assert BufferProcess.cursor(buffer) == {1, 3}
       assert EditorState.status_msg(state) == "No language server"
@@ -132,12 +136,121 @@ defmodule MingaEditor.MouseTest do
 
     test "double-click selects a Unicode word by character offsets" do
       {state, buffer} = start_mouse_state("éclair test")
+      {row, col} = buffer_screen_pos(state, 0, 1)
 
-      state = mouse(state, @content_row, @gutter + 1, :left, :press, 0, 2)
+      state = mouse(state, row, col, :left, :press, 0, 2)
 
       assert BufferProcess.cursor(buffer) == {0, 6}
       assert state.workspace.editing.mode == :visual
       assert state.workspace.editing.mode_state.visual_anchor == {0, 0}
+    end
+  end
+
+  describe "double-click word selection" do
+    test "selects ASCII identifiers and snake_case as Vim words" do
+      {state, buffer} = start_mouse_state("let foo_bar123 = value")
+      {row, col} = buffer_screen_pos(state, 0, 8)
+
+      state = mouse(state, row, col, :left, :press, 0, 2)
+
+      assert BufferProcess.cursor(buffer) == {0, 13}
+      assert state.workspace.editing.mode == :visual
+      assert state.workspace.editing.mode_state.visual_anchor == {0, 4}
+    end
+
+    test "selects punctuation runs separately from words" do
+      {state, buffer} = start_mouse_state("foo...bar")
+      {row, col} = buffer_screen_pos(state, 0, 4)
+
+      state = mouse(state, row, col, :left, :press, 0, 2)
+
+      assert BufferProcess.cursor(buffer) == {0, 5}
+      assert state.workspace.editing.mode_state.visual_anchor == {0, 3}
+    end
+
+    test "keeps kebab-case hyphens as punctuation boundaries" do
+      {state, buffer} = start_mouse_state("foo-bar")
+      {row, col} = buffer_screen_pos(state, 0, 5)
+
+      state = mouse(state, row, col, :left, :press, 0, 2)
+
+      assert BufferProcess.cursor(buffer) == {0, 6}
+      assert state.workspace.editing.mode_state.visual_anchor == {0, 4}
+    end
+
+    test "keeps module separators as punctuation boundaries" do
+      {state, buffer} = start_mouse_state("Minga.Editor.State")
+      {row, col} = buffer_screen_pos(state, 0, 8)
+
+      state = mouse(state, row, col, :left, :press, 0, 2)
+
+      assert BufferProcess.cursor(buffer) == {0, 11}
+      assert state.workspace.editing.mode_state.visual_anchor == {0, 6}
+    end
+
+    test "selects whitespace runs with inner-word semantics" do
+      {state, buffer} = start_mouse_state("foo   bar")
+      {row, col} = buffer_screen_pos(state, 0, 4)
+
+      state = mouse(state, row, col, :left, :press, 0, 2)
+
+      assert BufferProcess.cursor(buffer) == {0, 5}
+      assert state.workspace.editing.mode_state.visual_anchor == {0, 3}
+    end
+
+    test "clicks at word start and end select the whole word" do
+      {start_state, start_buffer} = start_mouse_state("hello world")
+      {start_row, start_col} = buffer_screen_pos(start_state, 0, 0)
+      start_state = mouse(start_state, start_row, start_col, :left, :press, 0, 2)
+
+      assert BufferProcess.cursor(start_buffer) == {0, 4}
+      assert start_state.workspace.editing.mode_state.visual_anchor == {0, 0}
+
+      {end_state, end_buffer} = start_mouse_state("hello world")
+      {end_row, end_col} = buffer_screen_pos(end_state, 0, 4)
+      end_state = mouse(end_state, end_row, end_col, :left, :press, 0, 2)
+
+      assert BufferProcess.cursor(end_buffer) == {0, 4}
+      assert end_state.workspace.editing.mode_state.visual_anchor == {0, 0}
+    end
+
+    test "double-click drag extends backward by word boundaries" do
+      {state, buffer} = start_mouse_state("alpha beta gamma")
+      {press_row, press_col} = buffer_screen_pos(state, 0, 8)
+      {drag_row, drag_col} = buffer_screen_pos(state, 0, 2)
+
+      state = mouse(state, press_row, press_col, :left, :press, 0, 2)
+      state = mouse(state, drag_row, drag_col, :left, :drag)
+
+      assert BufferProcess.cursor(buffer) == {0, 0}
+      assert state.workspace.editing.mode == :visual
+      assert state.workspace.editing.mode_state.visual_anchor == {0, 9}
+    end
+
+    test "double-click drag extends forward by word boundaries" do
+      {state, buffer} = start_mouse_state("alpha beta gamma")
+      {press_row, press_col} = buffer_screen_pos(state, 0, 2)
+      {drag_row, drag_col} = buffer_screen_pos(state, 0, 7)
+
+      state = mouse(state, press_row, press_col, :left, :press, 0, 2)
+      state = mouse(state, drag_row, drag_col, :left, :drag)
+
+      assert BufferProcess.cursor(buffer) == {0, 9}
+      assert state.workspace.editing.mode == :visual
+      assert state.workspace.editing.mode_state.visual_anchor == {0, 0}
+    end
+
+    test "double-click drag backward onto an empty line keeps the original word selected" do
+      {state, buffer} = start_mouse_state("alpha\n\nbeta gamma")
+      {press_row, press_col} = buffer_screen_pos(state, 2, 1)
+      {drag_row, drag_col} = buffer_screen_pos(state, 1, 0)
+
+      state = mouse(state, press_row, press_col, :left, :press, 0, 2)
+      state = mouse(state, drag_row, drag_col, :left, :drag)
+
+      assert BufferProcess.cursor(buffer) == {1, 0}
+      assert state.workspace.editing.mode == :visual
+      assert state.workspace.editing.mode_state.visual_anchor == {2, 3}
     end
   end
 
@@ -177,9 +290,11 @@ defmodule MingaEditor.MouseTest do
   describe "drag selection" do
     test "left press and drag creates a visual selection" do
       {state, buffer} = start_mouse_state("hello world foo")
+      {press_row, press_col} = buffer_screen_pos(state, 0, 2)
+      {drag_row, drag_col} = buffer_screen_pos(state, 0, 8)
 
-      state = mouse(state, @content_row, @gutter + 2, :left, :press)
-      state = mouse(state, @content_row, @gutter + 8, :left, :drag)
+      state = mouse(state, press_row, press_col, :left, :press)
+      state = mouse(state, drag_row, drag_col, :left, :drag)
 
       assert BufferProcess.cursor(buffer) == {0, 8}
       assert state.workspace.editing.mode == :visual
@@ -187,10 +302,12 @@ defmodule MingaEditor.MouseTest do
 
     test "release after drag stops dragging and keeps the selection" do
       {state, _buffer} = start_mouse_state("hello world foo")
+      {press_row, press_col} = buffer_screen_pos(state, 0, 2)
+      {drag_row, drag_col} = buffer_screen_pos(state, 0, 8)
 
-      state = mouse(state, @content_row, @gutter + 2, :left, :press)
-      state = mouse(state, @content_row, @gutter + 8, :left, :drag)
-      state = mouse(state, @content_row, @gutter + 8, :left, :release)
+      state = mouse(state, press_row, press_col, :left, :press)
+      state = mouse(state, drag_row, drag_col, :left, :drag)
+      state = mouse(state, drag_row, drag_col, :left, :release)
 
       assert state.workspace.editing.mode == :visual
       refute state.workspace.mouse.dragging
@@ -204,8 +321,9 @@ defmodule MingaEditor.MouseTest do
 
       BufferProcess.set_option(buffer, :wrap, false)
       %{content: {row, col, width, height}} = active_window_layout(state)
+      {press_row, press_col} = buffer_screen_pos(state, 0, 0)
 
-      state = mouse(state, row, col + @gutter, :left, :press)
+      state = mouse(state, press_row, press_col, :left, :press)
       state = mouse(state, row + height, col + width, :left, :drag)
 
       assert active_viewport(state).top > 0 or active_viewport(state).left > 0
@@ -217,15 +335,21 @@ defmodule MingaEditor.MouseTest do
       state = Movement.execute(state, :split_vertical)
       origin_id = state.workspace.windows.active
       layout = Layout.get(state)
-      origin_layout = Map.fetch!(layout.window_layouts, origin_id)
 
-      {_other_id, %{content: {other_row, other_col, _other_width, _other_height}}} =
+      {other_id, _other_layout} =
         Enum.find(layout.window_layouts, fn {id, _layout} -> id != origin_id end)
 
-      %{content: {origin_row, origin_col, _origin_width, _origin_height}} = origin_layout
+      other_state =
+        EditorState.update_workspace(
+          state,
+          &SessionState.set_windows(&1, Windows.set_active(&1.windows, other_id))
+        )
 
-      state = mouse(state, origin_row, origin_col + @gutter, :left, :press)
-      state = mouse(state, other_row, other_col + @gutter, :left, :drag)
+      {origin_press_row, origin_press_col} = buffer_screen_pos(state, 0, 0)
+      {other_drag_row, other_drag_col} = buffer_screen_pos(other_state, 0, 0)
+
+      state = mouse(state, origin_press_row, origin_press_col, :left, :press)
+      state = mouse(state, other_drag_row, other_drag_col, :left, :drag)
 
       assert state.workspace.windows.active == origin_id
       assert state.workspace.mouse.drag_origin_window == origin_id
@@ -234,9 +358,10 @@ defmodule MingaEditor.MouseTest do
 
     test "drag events without an active drag are ignored" do
       {state, buffer} = start_mouse_state("hello world")
+      {row, col} = buffer_screen_pos(state, 0, 5)
       original_cursor = BufferProcess.cursor(buffer)
 
-      mouse(state, @content_row, 5, :left, :drag)
+      mouse(state, row, col, :left, :drag)
 
       assert BufferProcess.cursor(buffer) == original_cursor
     end
@@ -258,8 +383,8 @@ defmodule MingaEditor.MouseTest do
         decorations
       end)
 
-      {row, col} = active_content_origin(state)
-      mouse(state, row, col + @gutter + 4, :left, :press)
+      {row, col} = buffer_screen_pos(state, 0, 4)
+      mouse(state, row, col, :left, :press)
 
       assert_receive {:block_clicked, 0, 4}
     end
@@ -304,56 +429,60 @@ defmodule MingaEditor.MouseTest do
 
   describe "tab bar clicks" do
     test "row 0 workspace clicks ignore row 1 tab actions" do
-      {state, agent_workspace_id} = start_workspace_tab_state()
+      {state, agent_workspace_id, agent_tab_id} = start_workspace_tab_state()
+      [first_tab_id | _] = Enum.map(state.shell_state.tab_bar.tabs, & &1.id)
+      close_tab_id = last_tab_id(state)
 
       state =
         set_tab_click_regions(state, [
-          {1, 0, 4, :tab_goto_1},
-          {1, 5, 7, :tab_close_3},
+          {1, 0, 4, :"tab_goto_#{first_tab_id}"},
+          {1, 5, 7, :"tab_close_#{close_tab_id}"},
           {0, 0, 4, {:workspace_goto, agent_workspace_id}}
         ])
 
       state = mouse(state, 0, 2, :left, :press)
 
       assert ChromeState.from_editor_state(state).active_workspace_id == agent_workspace_id
-      assert state.shell_state.tab_bar.active_id == 2
+      assert state.shell_state.tab_bar.active_id == agent_tab_id
     end
 
     test "row 1 tab goto and close still work" do
-      {state, _agent_workspace_id} = start_workspace_tab_state()
+      {state, _agent_workspace_id, _agent_tab_id} = start_workspace_tab_state()
+      [first_tab_id | _] = Enum.map(state.shell_state.tab_bar.tabs, & &1.id)
+      close_tab_id = last_tab_id(state)
+      initial_count = length(state.shell_state.tab_bar.tabs)
 
       state =
         set_tab_click_regions(state, [
-          {1, 0, 4, :tab_goto_1},
-          {1, 5, 7, :tab_close_3},
+          {1, 0, 4, :"tab_goto_#{first_tab_id}"},
+          {1, 5, 7, :"tab_close_#{close_tab_id}"},
           {0, 0, 4, {:workspace_goto, 1}}
         ])
 
       state = mouse(state, 1, 2, :left, :press)
 
-      assert state.shell_state.tab_bar.active_id == 1
+      assert state.shell_state.tab_bar.active_id == first_tab_id
 
       state = mouse(state, 1, 6, :left, :press)
 
-      assert length(state.shell_state.tab_bar.tabs) == 2
+      assert length(state.shell_state.tab_bar.tabs) == initial_count - 1
     end
 
     test "clicking workspace id 10 selects workspace id 10 instead of ordinal 10" do
       {state, _buffer} = start_mouse_state("manual one\nmanual two", width: 120)
 
-      second_buffer =
-        start_supervised!({BufferProcess, [content: "agent tab"]},
-          id: {:workspace_tab, System.unique_integer([:positive])}
-        )
+      second_buffer = start_test_buffer(state, "agent tab", :workspace_tab)
 
       state = EditorState.add_buffer(state, second_buffer, context: :open)
       tab_bar = state.shell_state.tab_bar
       manual_workspace = hd(tab_bar.workspaces)
       workspace_10 = WorkspaceDomain.new_agent(10, "Tests", self())
 
+      agent_tab_id = state.shell_state.tab_bar.active_id
+
       tab_bar =
         %{tab_bar | workspaces: [manual_workspace, workspace_10], next_workspace_id: 11}
-        |> TabBar.move_tab_to_workspace(2, 10)
+        |> TabBar.move_tab_to_workspace(agent_tab_id, 10)
 
       state = EditorState.set_tab_bar(state, tab_bar)
       state = set_tab_click_regions(state, [{0, 0, 4, {:workspace_goto, 10}}])
@@ -361,19 +490,23 @@ defmodule MingaEditor.MouseTest do
       state = mouse(state, 0, 2, :left, :press)
 
       assert ChromeState.from_editor_state(state).active_workspace_id == 10
-      assert state.shell_state.tab_bar.active_id == 2
+      assert state.shell_state.tab_bar.active_id == agent_tab_id
     end
 
     test "clicking tab close removes a non-last tab but leaves the final tab alone" do
       {state, _buf1, _buf2} = start_two_tab_state()
+      initial_count = length(state.shell_state.tab_bar.tabs)
       active_id = state.shell_state.tab_bar.active_id
-      state = set_tab_click_regions(state, [{5, 7, :"tab_close_#{active_id}"}])
+      state = set_tab_click_regions(state, [{0, 5, 7, :"tab_close_#{active_id}"}])
 
       state = mouse(state, 0, 6, :left, :press)
 
-      assert length(state.shell_state.tab_bar.tabs) == 1
+      assert length(state.shell_state.tab_bar.tabs) == initial_count - 1
+
       remaining_id = state.shell_state.tab_bar.active_id
-      state = set_tab_click_regions(state, [{5, 7, :"tab_close_#{remaining_id}"}])
+      single_tab_bar = TabBar.keep_only(state.shell_state.tab_bar, remaining_id)
+      state = EditorState.set_tab_bar(state, single_tab_bar)
+      state = set_tab_click_regions(state, [{0, 5, 7, :"tab_close_#{remaining_id}"}])
 
       state = mouse(state, 0, 6, :left, :press)
 
@@ -382,18 +515,19 @@ defmodule MingaEditor.MouseTest do
 
     test "clicking tab goto switches tabs without closing" do
       {state, _buf1, _buf2} = start_two_tab_state()
+      initial_count = length(state.shell_state.tab_bar.tabs)
       active_id = state.shell_state.tab_bar.active_id
       other_id = Enum.find(state.shell_state.tab_bar.tabs, &(&1.id != active_id)).id
 
       state =
         set_tab_click_regions(state, [
-          {0, 4, :"tab_goto_#{other_id}"},
-          {5, 7, :"tab_close_#{other_id}"}
+          {0, 0, 4, :"tab_goto_#{other_id}"},
+          {0, 5, 7, :"tab_close_#{other_id}"}
         ])
 
       state = mouse(state, 0, 2, :left, :press)
 
-      assert length(state.shell_state.tab_bar.tabs) == 2
+      assert length(state.shell_state.tab_bar.tabs) == initial_count
       assert state.shell_state.tab_bar.active_id == other_id
     end
   end
@@ -449,13 +583,25 @@ defmodule MingaEditor.MouseTest do
 
   defp start_two_tab_state do
     {state, buf1} = start_mouse_state("hello", width: 80)
-    {:ok, buf2} = BufferProcess.start_link(content: "world")
+    buf2 = start_test_buffer(state, "world", :two_tab)
     state = EditorState.add_buffer(state, buf2, context: :open)
     {state, buf1, buf2}
   end
 
   defp mouse(state, row, col, button, event_type, mods \\ 0, click_count \\ 1) do
     Mouse.handle(state, row, col, button, mods, event_type, click_count)
+  end
+
+  defp start_test_buffer(state, content, id_prefix) do
+    start_supervised!(
+      {BufferProcess,
+       [
+         content: content,
+         events_registry: state.events_registry,
+         options_server: state.options_server
+       ]},
+      id: {id_prefix, System.unique_integer([:positive])}
+    )
   end
 
   defp lines(range), do: Enum.map_join(range, "\n", &"line #{&1}")
@@ -477,6 +623,17 @@ defmodule MingaEditor.MouseTest do
     %{content: {row, col, _width, _height}} = active_window_layout(state)
     {row, col}
   end
+
+  defp buffer_screen_pos(state, buffer_line, buffer_col) do
+    {content_row, content_col} = active_content_origin(state)
+    buffer = state.workspace.buffers.active
+    total_lines = BufferProcess.line_count(buffer)
+    gutter_width = MingaEditor.Mouse.HitTest.buffer_gutter_width(buffer, total_lines)
+
+    {content_row + buffer_line, content_col + gutter_width + buffer_col}
+  end
+
+  defp last_tab_id(state), do: List.last(state.shell_state.tab_bar.tabs).id
 
   defp set_visual_selection(state, buffer, anchor, cursor, visual_type) do
     BufferProcess.move_to(buffer, cursor)
@@ -515,23 +672,17 @@ defmodule MingaEditor.MouseTest do
   defp start_workspace_tab_state do
     {state, _buf1} = start_mouse_state("manual one\nmanual two", width: 120)
 
-    buf2 =
-      start_supervised!({BufferProcess, [content: "agent tab"]},
-        id: {:workspace_tab, System.unique_integer([:positive])}
-      )
-
-    buf3 =
-      start_supervised!({BufferProcess, [content: "manual three"]},
-        id: {:workspace_tab, System.unique_integer([:positive])}
-      )
+    buf2 = start_test_buffer(state, "agent tab", :workspace_tab)
+    buf3 = start_test_buffer(state, "manual three", :workspace_tab)
 
     state = EditorState.add_buffer(state, buf2, context: :open)
     state = EditorState.add_buffer(state, buf3, context: :open)
 
+    agent_tab_id = state.shell_state.tab_bar.active_id
     {tab_bar, agent_workspace} = TabBar.add_workspace(state.shell_state.tab_bar, "Tests", self())
-    tab_bar = TabBar.move_tab_to_workspace(tab_bar, 2, agent_workspace.id)
+    tab_bar = TabBar.move_tab_to_workspace(tab_bar, agent_tab_id, agent_workspace.id)
 
     state = EditorState.set_tab_bar(state, tab_bar)
-    {state, agent_workspace.id}
+    {state, agent_workspace.id, agent_tab_id}
   end
 end
