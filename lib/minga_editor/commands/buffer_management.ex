@@ -1081,7 +1081,13 @@ defmodule MingaEditor.Commands.BufferManagement do
 
     if owned? do
       tab_status = if reason in [:normal, :shutdown], do: :idle, else: :error
-      state = scrub_agent_tab_state(state, session_pid, tab_status)
+
+      state =
+        state
+        |> AgentAccess.update_agent(&AgentState.stop_spinner_timer/1)
+        |> AgentAccess.update_agent(&AgentState.reset_cache/1)
+        |> clear_session_from_tabs(session_pid, tab_status)
+        |> clear_session_from_workspace(workspace.id, tab_status)
 
       msg =
         if reason in [:normal, :shutdown],
@@ -1119,7 +1125,12 @@ defmodule MingaEditor.Commands.BufferManagement do
       {:ok, []} ->
         case WorkspaceModel.close_project_view(workspace) do
           :ok ->
-            handle_standard_workspace_session_down(state, tb, workspace, session_pid, reason)
+            remove_clean_project_view_workspace_after_session_down(
+              state,
+              workspace,
+              session_pid,
+              reason
+            )
 
           {:error, error} ->
             keep_workspace_after_session_down(
@@ -1147,6 +1158,39 @@ defmodule MingaEditor.Commands.BufferManagement do
           reason
         )
     end
+  end
+
+  @spec remove_clean_project_view_workspace_after_session_down(
+          state(),
+          WorkspaceModel.t(),
+          pid(),
+          term()
+        ) :: state()
+  defp remove_clean_project_view_workspace_after_session_down(
+         state,
+         workspace,
+         session_pid,
+         reason
+       ) do
+    tab_status = if reason in [:normal, :shutdown], do: :idle, else: :error
+
+    state =
+      state
+      |> AgentAccess.update_agent(&AgentState.stop_spinner_timer/1)
+      |> AgentAccess.update_agent(&AgentState.reset_cache/1)
+      |> clear_session_from_tabs(session_pid, tab_status)
+
+    state =
+      state
+      |> EditorState.set_tab_bar(TabBar.remove_workspace(state.shell_state.tab_bar, workspace.id))
+      |> EditorState.sync_agent_ui_from_active_workspace()
+
+    msg =
+      if reason in [:normal, :shutdown],
+        do: "Agent session ended",
+        else: "Agent session crashed (SPC a n to restart)"
+
+    EditorState.set_status(state, msg)
   end
 
   @spec keep_workspace_after_session_down(
@@ -1347,6 +1391,26 @@ defmodule MingaEditor.Commands.BufferManagement do
     EditorState.set_tab_bar(state, updated_tb)
   end
 
+  @spec clear_session_from_workspace(state(), non_neg_integer(), Tab.agent_status()) :: state()
+  defp clear_session_from_workspace(
+         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         workspace_id,
+         status
+       ) do
+    updated_tb =
+      TabBar.update_workspace(tb, workspace_id, fn
+        %WorkspaceModel{} = workspace ->
+          workspace
+          |> WorkspaceModel.clear_session()
+          |> WorkspaceModel.set_agent_status(status)
+
+        workspace ->
+          workspace
+      end)
+
+    EditorState.set_tab_bar(state, updated_tb)
+  end
+
   # Closes the active agent tab. ProjectView-backed workspaces get a
   # cleanup/preservation pass first, and only cleanly closed workspaces have
   # their tab removed.
@@ -1387,16 +1451,10 @@ defmodule MingaEditor.Commands.BufferManagement do
         )
         |> finish_agent_tab_close(workspace.id)
 
-      {session_pid, %WorkspaceModel{} = workspace} ->
+      {_session_pid, %WorkspaceModel{}} ->
         state
-        |> cleanup_agent_session()
-        |> handle_standard_workspace_session_down(
-          state.shell_state.tab_bar,
-          workspace,
-          session_pid,
-          :normal
-        )
-        |> finish_agent_tab_close(workspace.id)
+        |> remove_current_tab()
+        |> restore_active_tab_context()
     end
   end
 

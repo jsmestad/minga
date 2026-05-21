@@ -15,6 +15,7 @@ defmodule MingaEditor.Commands.Workspace do
   alias Minga.Buffer
   alias Minga.Project.FileRef
   alias MingaAgent.ProjectView
+  alias MingaEditor.Commands.AgentSession
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace, as: WorkspaceModel
@@ -287,36 +288,30 @@ defmodule MingaEditor.Commands.Workspace do
     workspace_id = TabBar.active_workspace_id(tb)
 
     case TabBar.get_workspace(tb, workspace_id) do
+      %WorkspaceModel{project_view: %ProjectView{}} = workspace ->
+        close_project_view_workspace(state, tb, workspace, workspace_id)
+
       %WorkspaceModel{} = workspace ->
-        case workspace_session_alive?(workspace) do
-          true ->
-            EditorState.set_status(state, "Stop the agent session before closing this workspace")
+        close_standard_workspace(state, tb, workspace, workspace_id)
 
-          false ->
-            case project_view_changed_files(workspace) do
-              {:ok, []} ->
-                case WorkspaceModel.close_project_view(workspace) do
-                  :ok ->
-                    EditorState.set_tab_bar(state, TabBar.remove_workspace(tb, workspace_id))
+      nil ->
+        state
+    end
+  end
 
-                  {:error, reason} ->
-                    keep_workspace_open_after_close_failure(
-                      state,
-                      tb,
-                      workspace,
-                      workspace.review.changed_files,
-                      reason
-                    )
-                end
+  @spec close_project_view_workspace(state(), TabBar.t(), WorkspaceModel.t(), non_neg_integer()) ::
+          state()
+  defp close_project_view_workspace(state, tb, workspace, workspace_id) do
+    case workspace_session_alive?(workspace) do
+      true ->
+        EditorState.set_status(state, "Stop the agent session before closing this workspace")
 
-              {:ok, files} ->
-                keep_workspace_open_after_close_failure(
-                  state,
-                  tb,
-                  workspace,
-                  files,
-                  :project_view_dirty
-                )
+      false ->
+        case project_view_changed_files(workspace) do
+          {:ok, []} ->
+            case WorkspaceModel.close_project_view(workspace) do
+              :ok ->
+                remove_workspace_and_sync_agent_ui(state, tb, workspace_id)
 
               {:error, reason} ->
                 keep_workspace_open_after_close_failure(
@@ -327,11 +322,44 @@ defmodule MingaEditor.Commands.Workspace do
                   reason
                 )
             end
-        end
 
-      nil ->
-        state
+          {:ok, files} ->
+            keep_workspace_open_after_close_failure(
+              state,
+              tb,
+              workspace,
+              files,
+              :project_view_dirty
+            )
+
+          {:error, reason} ->
+            keep_workspace_open_after_close_failure(
+              state,
+              tb,
+              workspace,
+              workspace.review.changed_files,
+              reason
+            )
+        end
     end
+  end
+
+  @spec close_standard_workspace(state(), TabBar.t(), WorkspaceModel.t(), non_neg_integer()) ::
+          state()
+  defp close_standard_workspace(state, tb, workspace, workspace_id) do
+    if workspace_session_alive?(workspace) and not WorkspaceModel.remote?(workspace) do
+      EditorState.set_status(state, "Stop the agent session before closing this workspace")
+    else
+      stop_workspace_session(workspace)
+      remove_workspace_and_sync_agent_ui(state, tb, workspace_id)
+    end
+  end
+
+  @spec remove_workspace_and_sync_agent_ui(state(), TabBar.t(), non_neg_integer()) :: state()
+  defp remove_workspace_and_sync_agent_ui(state, tb, workspace_id) do
+    state
+    |> EditorState.set_tab_bar(TabBar.remove_workspace(tb, workspace_id))
+    |> EditorState.sync_agent_ui_from_active_workspace()
   end
 
   @spec close_discarded_active_workspace(state()) :: state()
@@ -347,7 +375,7 @@ defmodule MingaEditor.Commands.Workspace do
           false ->
             case WorkspaceModel.close_project_view(workspace) do
               :ok ->
-                EditorState.set_tab_bar(state, TabBar.remove_workspace(tb, workspace_id))
+                remove_workspace_and_sync_agent_ui(state, tb, workspace_id)
 
               {:error, reason} ->
                 keep_workspace_open_after_close_failure(
@@ -578,6 +606,14 @@ defmodule MingaEditor.Commands.Workspace do
 
   defp discard_workspace(%WorkspaceModel{} = workspace),
     do: WorkspaceModel.transition_review(workspace, :discard)
+
+  @spec stop_workspace_session(WorkspaceModel.t() | nil) :: :ok
+  defp stop_workspace_session(%WorkspaceModel{session: session}) when is_pid(session) do
+    AgentSession.stop_session_pid(session)
+    :ok
+  end
+
+  defp stop_workspace_session(_workspace), do: :ok
 
   @spec review_status_copy(WorkspaceModel.t()) :: String.t()
   defp review_status_copy(%WorkspaceModel{review: %WorkspaceReview{} = review}) do

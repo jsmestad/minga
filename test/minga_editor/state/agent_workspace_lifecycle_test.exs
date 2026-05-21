@@ -235,7 +235,11 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     assert workspace.files == [file_ref]
 
     state = MingaEditor.Commands.Workspace.workspace_close(state)
-    assert TabBar.get_workspace(state.shell_state.tab_bar, workspace_id) == nil
+    workspace = TabBar.get_workspace(state.shell_state.tab_bar, workspace_id)
+
+    assert workspace.session == session
+    assert workspace.files == [file_ref]
+    assert state.shell_state.status_msg == "Stop the agent session before closing this workspace"
   end
 
   test "closing a remote agent workspace stops the session and scrubs migrated tab projections" do
