@@ -114,22 +114,39 @@ defmodule MingaAgent.ToolRouter do
   end
 
   @doc """
-  Deletes a file, routing through changeset if active.
+  Deletes a file, refusing to remove an open buffered file.
 
-  Buffer forks don't support deletion (you can't delete an open buffer
-  through a fork). Falls through to changeset or passthrough.
+  No safe buffer-aware deletion route exists yet, so deleting a file that
+  is open in a live buffer would leave that buffer stale and able to
+  recreate the file later. ProjectView, changeset, and direct fallback all
+  share that guard.
   """
   @spec delete_file(context(), String.t()) :: :ok | :passthrough | {:error, term()}
-  def delete_file(%Context{project_view: %ProjectView{} = view}, path) do
+  def delete_file(ctx, path) do
+    case Minga.Buffer.pid_for_path(path) do
+      {:ok, _pid} ->
+        {:error,
+         "cannot delete open buffer for #{path}; close the buffer or save/discard it first"}
+
+      :not_found ->
+        delete_file_unchecked(ctx, path)
+    end
+  catch
+    :exit, _ ->
+      {:error, "unable to verify buffer state for #{path}; close the buffer or retry the delete"}
+  end
+
+  @spec delete_file_unchecked(context(), String.t()) :: :ok | :passthrough | {:error, term()}
+  defp delete_file_unchecked(%Context{project_view: %ProjectView{} = view}, path) do
     ProjectView.delete_file(view, project_view_relative_path(view, path))
   end
 
-  def delete_file(%Context{changeset: cs}, path) when cs != nil and is_pid(cs) do
+  defp delete_file_unchecked(%Context{changeset: cs}, path) when cs != nil and is_pid(cs) do
     relative = normalize_path(cs, path)
     Changeset.delete_file(cs, relative)
   end
 
-  def delete_file(_ctx, _path), do: :passthrough
+  defp delete_file_unchecked(_ctx, _path), do: :passthrough
 
   @doc """
   Lists a directory through ProjectView when available.

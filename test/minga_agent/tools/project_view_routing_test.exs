@@ -2,6 +2,9 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
   # Uses find, grep, and shell tool callbacks, which spawn OS processes.
   use ExUnit.Case, async: false
 
+  alias Minga.Events
+  alias Minga.Events.FileWrittenEvent
+  alias MingaAgent.ProjectView
   alias MingaAgent.ProjectView.RecordingBackend
   alias MingaAgent.Tools
 
@@ -74,6 +77,38 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     assert delete_result =~ "ProjectView"
     refute File.exists?(Path.join(working_dir, "lib/new.txt"))
     assert_receive {:project_view_call, {:delete_file, "lib/new.txt"}}
+  end
+
+  test "direct ProjectView deletes broadcast a deleted file_written event", %{tmp_dir: dir} do
+    root = Path.join(dir, "direct-root")
+    File.mkdir_p!(Path.join(root, "lib"))
+    path = Path.join(root, "lib/direct.txt")
+    File.write!(path, "direct text\n")
+
+    {:ok, view} = ProjectView.direct(root, workspace_id: 99)
+    tools = Tools.all(project_root: root, project_view: view)
+
+    Events.subscribe(:file_written)
+
+    assert {:ok, delete_result} = call_tool(tools, "delete_file", %{"path" => "lib/direct.txt"})
+    assert delete_result =~ "ProjectView"
+    refute File.exists?(path)
+
+    assert_receive {:minga_event, :file_written,
+                    %FileWrittenEvent{path: ^path, change_type: :deleted}}
+  end
+
+  test "read_file stops at a ProjectView error instead of falling back to root contents", %{
+    root: root,
+    tools: tools
+  } do
+    File.write!(Path.join(root, "lib/root_only.txt"), "root text\n")
+
+    assert {:error, error} = call_tool(tools, "read_file", %{"path" => "lib/root_only.txt"})
+    assert error =~ "failed to read"
+    assert error =~ "ProjectView workspace 42"
+    refute error =~ "root text"
+    assert_receive {:project_view_call, {:read_file, "lib/root_only.txt"}}
   end
 
   test "discovery and shell tools use ProjectView working dir and env", %{tools: tools} do

@@ -7,6 +7,7 @@ defmodule MingaAgent.ProjectView.Direct do
 
   @behaviour MingaAgent.ProjectView.Backend
 
+  alias Minga.Events
   alias MingaAgent.ProjectView
 
   @type direct_state :: %{modified: MapSet.t(String.t()), deleted: MapSet.t(String.t())}
@@ -53,9 +54,15 @@ defmodule MingaAgent.ProjectView.Direct do
   @impl true
   @spec delete_file(ProjectView.t(), String.t()) :: :ok | {:error, term()}
   def delete_file(%ProjectView{} = view, relative_path) do
-    case view |> target_path(relative_path) |> File.rm() do
-      :ok -> track_deleted(view, relative_path)
-      {:error, reason} -> {:error, reason}
+    target = target_path(view, relative_path)
+
+    case File.rm(target) do
+      :ok ->
+        track_deleted(view, relative_path)
+        broadcast_file_written(target)
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -166,5 +173,10 @@ defmodule MingaAgent.ProjectView.Direct do
       |> Map.update!(:modified, &MapSet.delete(&1, relative_path))
       |> Map.update!(:deleted, &MapSet.put(&1, relative_path))
     end)
+  end
+
+  @spec broadcast_file_written(String.t()) :: :ok
+  defp broadcast_file_written(path) do
+    Events.broadcast(:file_written, %Events.FileWrittenEvent{path: path, change_type: :deleted})
   end
 end
