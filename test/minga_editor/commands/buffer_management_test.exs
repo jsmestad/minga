@@ -9,12 +9,17 @@ defmodule MingaEditor.Commands.BufferManagementTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Command
   alias Minga.Config.Options
+  alias Minga.Test.StubServer
+  alias MingaAgent.ProjectView
   alias MingaEditor
   alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.Startup
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
+  alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace, as: WorkspaceModel
+  alias MingaEditor.Session.State, as: SessionState
 
   @sync_timeout 30_000
   @ctrl 0x02
@@ -228,6 +233,101 @@ defmodule MingaEditor.Commands.BufferManagementTest do
     end
   end
 
+  describe "kill_buffer on active agent workspace project views" do
+    @tag :tmp_dir
+    test "clean ProjectView closes and removes the workspace", %{tmp_dir: dir} do
+      session_pid = start_supervised!({StubServer, []})
+      {:ok, project_view} = ProjectView.overlay(dir)
+      changeset_ref = Process.monitor(project_view.ref.changeset)
+      fork_store_ref = Process.monitor(project_view.ref.fork_store)
+
+      state = command_state_with_active_agent_workspace(project_view, session_pid)
+      result = BufferManagement.execute(state, :kill_buffer)
+
+      assert EditorState.active_tab_kind(result) == :file
+      refute Enum.any?(result.shell_state.tab_bar.workspaces, &(&1.id == 1))
+      assert [0] = Enum.map(result.shell_state.tab_bar.workspaces, & &1.id)
+      assert_receive {:DOWN, ^changeset_ref, :process, _, _}
+      assert_receive {:DOWN, ^fork_store_ref, :process, _, _}
+    end
+
+    @tag :tmp_dir
+    test "clean ProjectView with no live session removes the workspace", %{tmp_dir: dir} do
+      session_pid = nil
+      {:ok, project_view} = ProjectView.overlay(dir)
+
+      state = command_state_with_active_agent_workspace(project_view, session_pid)
+      result = BufferManagement.execute(state, :kill_buffer)
+
+      assert EditorState.active_tab_kind(result) == :file
+      refute Enum.any?(result.shell_state.tab_bar.workspaces, &(&1.id == 1))
+      assert [0] = Enum.map(result.shell_state.tab_bar.workspaces, & &1.id)
+    end
+
+    @tag :tmp_dir
+    test "dirty ProjectView keeps the workspace open for review", %{tmp_dir: dir} do
+      session_pid = start_supervised!({StubServer, []})
+      {:ok, project_view} = ProjectView.overlay(dir)
+      :ok = ProjectView.write_file(project_view, "lib/a.txt", "draft\n")
+
+      state = command_state_with_active_agent_workspace(project_view, session_pid)
+      result = BufferManagement.execute(state, :kill_buffer)
+      workspace = TabBar.get_workspace(result.shell_state.tab_bar, 1)
+
+      assert EditorState.active_tab_kind(result) == :agent
+      assert workspace != nil
+      assert workspace.session == nil
+      assert workspace.agent_status == :error
+      assert workspace.review.state == :needs_review
+      assert workspace.review.last_error == nil
+      assert workspace.review.changed_files != []
+      assert EditorState.status_msg(result) =~ "workspace drafts need review"
+      assert {:ok, "draft\n"} = ProjectView.read_file(project_view, "lib/a.txt")
+    end
+
+    @tag :tmp_dir
+    test "dirty ProjectView with no live session keeps unrelated nil-session tabs unchanged", %{
+      tmp_dir: dir
+    } do
+      {:ok, project_view} = ProjectView.overlay(dir)
+      :ok = ProjectView.write_file(project_view, "lib/a.txt", "draft\n")
+
+      state = command_state_with_active_agent_workspace(project_view, nil)
+
+      manual_tab_id =
+        state.shell_state.tab_bar.tabs
+        |> Enum.find(&(&1.group_id == 0 and &1.kind == :file))
+        |> then(& &1.id)
+
+      state =
+        EditorState.update_shell_state(state, fn shell_state ->
+          %{
+            shell_state
+            | tab_bar:
+                TabBar.update_tab(
+                  shell_state.tab_bar,
+                  manual_tab_id,
+                  &Tab.set_agent_status(&1, :plan)
+                )
+          }
+        end)
+
+      result = BufferManagement.execute(state, :kill_buffer)
+      workspace = TabBar.get_workspace(result.shell_state.tab_bar, 1)
+      manual_tab = TabBar.get(result.shell_state.tab_bar, manual_tab_id)
+
+      assert EditorState.active_tab_kind(result) == :agent
+      assert workspace != nil
+      assert workspace.session == nil
+      assert workspace.agent_status == :error
+      assert workspace.review.state == :needs_review
+      assert workspace.review.changed_files != []
+      assert manual_tab.agent_status == :plan
+      assert EditorState.status_msg(result) =~ "workspace drafts need review"
+      assert {:ok, "draft\n"} = ProjectView.read_file(project_view, "lib/a.txt")
+    end
+  end
+
   describe "close_other_tabs command state" do
     test "closes all visible workspace tabs except the active tab" do
       {state, _buffer} = start_command_state("first file")
@@ -379,6 +479,27 @@ defmodule MingaEditor.Commands.BufferManagementTest do
     {tb, agent_tab} = TabBar.add(EditorState.tab_bar(state), :agent, "Agent")
     tb = TabBar.switch_to(tb, active_file_tab_id)
     {EditorState.set_tab_bar(state, tb), agent_tab.id}
+  end
+
+  defp command_state_with_active_agent_workspace(project_view, session_pid) do
+    {state, _buffer} = start_command_state("first file")
+    {tb, workspace} = TabBar.add_workspace(EditorState.tab_bar(state), "Agent", session_pid)
+    {tb, agent_tab} = TabBar.insert(tb, :agent, "Agent")
+    tb = TabBar.update_tab(tb, agent_tab.id, &Tab.set_group(&1, workspace.id))
+    tb = TabBar.update_tab(tb, agent_tab.id, &Tab.set_session(&1, session_pid))
+
+    tb =
+      TabBar.update_workspace(
+        tb,
+        workspace.id,
+        &WorkspaceModel.set_project_view(&1, project_view)
+      )
+
+    tb = TabBar.switch_to(tb, agent_tab.id)
+
+    state
+    |> EditorState.set_tab_bar(tb)
+    |> EditorState.update_workspace(&SessionState.set_keymap_scope(&1, :agent))
   end
 
   defp refute_process_down(pid) do

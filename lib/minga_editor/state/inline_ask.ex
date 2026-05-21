@@ -81,7 +81,7 @@ defmodule MingaEditor.State.InlineAsk do
   @spec agent_prompt(t()) :: String.t()
   def agent_prompt(%__MODULE__{} = ask) do
     """
-    You are answering a read-only inline question inside Minga. Do not edit files. Use only read/search tools if you need context.
+    You are answering a read-only inline question inside Minga. Do not edit files or request unrelated project context. Answer from the provided file context.
 
     #{header(ask)}
     File: #{file_identity(ask.file_ref)}

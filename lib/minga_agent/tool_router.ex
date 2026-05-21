@@ -1,3 +1,5 @@
+# credo:disable-for-this-file Credo.Check.Readability.PreferImplicitTry
+
 defmodule MingaAgent.ToolRouter do
   @moduledoc """
   Routes file tool operations through ProjectView, buffer forks, and changesets.
@@ -57,16 +59,18 @@ defmodule MingaAgent.ToolRouter do
   """
   @spec read_file(context(), String.t()) :: {:ok, binary()} | {:error, term()}
   def read_file(%Context{project_view: %ProjectView{} = view}, path) do
-    ProjectView.read_file(view, project_view_relative_path(view, path))
+    project_view_result(fn ->
+      ProjectView.read_file(view, project_view_relative_path(view, path))
+    end)
   end
 
   def read_file(%Context{fork_store: fs} = ctx, path) when fs != nil do
-    case BufferForkStore.get(fs, path) do
-      nil -> read_file_changeset_or_passthrough(ctx, path)
-      fork_pid -> {:ok, Minga.Buffer.Fork.content(fork_pid)}
+    with :ok <- fork_store_available(fs) do
+      case BufferForkStore.get(fs, path) do
+        nil -> read_file_changeset_or_passthrough(ctx, path)
+        fork_pid -> {:ok, Minga.Buffer.Fork.content(fork_pid)}
+      end
     end
-  catch
-    :exit, _ -> read_file_changeset_or_passthrough(ctx, path)
   end
 
   def read_file(ctx, path), do: read_file_changeset_or_passthrough(ctx, path)
@@ -80,13 +84,22 @@ defmodule MingaAgent.ToolRouter do
   """
   @spec write_file(context(), String.t(), binary()) :: :ok | :passthrough | {:error, term()}
   def write_file(%Context{project_view: %ProjectView{} = view}, path, content) do
-    ProjectView.write_file(view, project_view_relative_path(view, path), content)
+    project_view_result(fn ->
+      ProjectView.write_file(view, project_view_relative_path(view, path), content)
+    end)
   end
 
   def write_file(%Context{fork_store: fs} = ctx, path, content) when fs != nil do
-    case try_fork_write(fs, path, content) do
-      {:ok, :forked} -> :ok
-      :no_buffer -> write_file_changeset(ctx, path, content)
+    case fork_store_available(fs) do
+      :ok ->
+        case try_fork_write(fs, path, content) do
+          {:ok, :forked} -> :ok
+          {:error, _} = error -> error
+          :no_buffer -> write_file_changeset(ctx, path, content)
+        end
+
+      {:error, _} = error ->
+        error
     end
   end
 
@@ -98,14 +111,22 @@ defmodule MingaAgent.ToolRouter do
   @spec edit_file(context(), String.t(), String.t(), String.t()) ::
           :ok | :passthrough | {:error, term()}
   def edit_file(%Context{project_view: %ProjectView{} = view}, path, old_text, new_text) do
-    ProjectView.edit_file(view, project_view_relative_path(view, path), old_text, new_text)
+    project_view_result(fn ->
+      ProjectView.edit_file(view, project_view_relative_path(view, path), old_text, new_text)
+    end)
   end
 
   def edit_file(%Context{fork_store: fs} = ctx, path, old_text, new_text) when fs != nil do
-    case try_fork_edit(fs, path, old_text, new_text) do
-      {:ok, :forked} -> :ok
-      {:error, _} = err -> err
-      :no_buffer -> edit_file_changeset(ctx, path, old_text, new_text)
+    case fork_store_available(fs) do
+      :ok ->
+        case try_fork_edit(fs, path, old_text, new_text) do
+          {:ok, :forked} -> :ok
+          {:error, _} = err -> err
+          :no_buffer -> edit_file_changeset(ctx, path, old_text, new_text)
+        end
+
+      {:error, _} = error ->
+        error
     end
   end
 
@@ -121,12 +142,16 @@ defmodule MingaAgent.ToolRouter do
   """
   @spec delete_file(context(), String.t()) :: :ok | :passthrough | {:error, term()}
   def delete_file(%Context{project_view: %ProjectView{} = view}, path) do
-    ProjectView.delete_file(view, project_view_relative_path(view, path))
+    project_view_result(fn ->
+      ProjectView.delete_file(view, project_view_relative_path(view, path))
+    end)
   end
 
   def delete_file(%Context{changeset: cs}, path) when cs != nil and is_pid(cs) do
-    relative = normalize_path(cs, path)
-    Changeset.delete_file(cs, relative)
+    with :ok <- changeset_available(cs) do
+      relative = normalize_path(cs, path)
+      Changeset.delete_file(cs, relative)
+    end
   end
 
   def delete_file(_ctx, _path), do: :passthrough
@@ -137,7 +162,9 @@ defmodule MingaAgent.ToolRouter do
   @spec list_directory(context(), String.t()) ::
           {:ok, [ProjectView.Backend.directory_entry()]} | :passthrough | {:error, term()}
   def list_directory(%Context{project_view: %ProjectView{} = view}, path) do
-    ProjectView.list_directory(view, project_view_relative_path(view, path))
+    project_view_result(fn ->
+      ProjectView.list_directory(view, project_view_relative_path(view, path))
+    end)
   end
 
   def list_directory(%Context{}, _path), do: :passthrough
@@ -145,28 +172,98 @@ defmodule MingaAgent.ToolRouter do
   @doc "Returns the filesystem path corresponding to `path` in the routed view."
   @spec filesystem_path(context(), String.t()) :: String.t()
   def filesystem_path(%Context{project_view: %ProjectView{} = view}, path) do
-    Path.join(ProjectView.working_dir(view), project_view_relative_path(view, path))
+    case ProjectView.working_dir(view) do
+      {:error, _reason} -> path
+      cwd -> Path.join(cwd, project_view_relative_path(view, path))
+    end
   end
 
   def filesystem_path(%Context{}, path), do: path
 
   @doc "Returns the working directory for shell commands."
   @spec working_dir(context()) :: String.t() | nil
-  def working_dir(%Context{project_view: %ProjectView{} = view}),
-    do: ProjectView.working_dir(view)
+  def working_dir(%Context{project_view: %ProjectView{} = view}) do
+    case ProjectView.working_dir(view) do
+      {:error, _reason} -> nil
+      cwd -> cwd
+    end
+  end
 
   def working_dir(%Context{changeset: cs}) when cs != nil and is_pid(cs) do
-    Changeset.overlay_path(cs)
+    try do
+      Changeset.overlay_path(cs)
+    catch
+      :exit, _ -> nil
+    end
   end
 
   def working_dir(_ctx), do: nil
 
   @doc "Returns environment variables for shell commands."
   @spec command_env(context()) :: [{String.t(), String.t()}]
-  def command_env(%Context{project_view: %ProjectView{} = view}),
-    do: ProjectView.command_env(view)
+  def command_env(%Context{project_view: %ProjectView{} = view}) do
+    case ProjectView.command_env(view) do
+      {:error, _reason} -> []
+      env -> env
+    end
+  end
 
   def command_env(%Context{}), do: []
+
+  @doc "Returns the filesystem path for search tools, or a tagged error if ProjectView is unavailable."
+  @spec filesystem_path_result(context(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  def filesystem_path_result(%Context{project_view: %ProjectView{} = view}, path) do
+    case project_view_result(fn -> ProjectView.working_dir(view) end) do
+      {:ok, cwd} -> {:ok, Path.join(cwd, project_view_relative_path(view, path))}
+      cwd when is_binary(cwd) -> {:ok, Path.join(cwd, project_view_relative_path(view, path))}
+      {:error, {:project_view_unavailable, _}} = error -> error
+      {:error, reason} -> {:error, {:project_view_unavailable, {:working_dir_failed, reason}}}
+    end
+  end
+
+  def filesystem_path_result(%Context{}, path), do: {:ok, path}
+
+  @doc "Returns the working directory for shell commands, or a tagged error if ProjectView is unavailable."
+  @spec working_dir_result(context()) :: {:ok, String.t() | nil} | {:error, term()}
+  def working_dir_result(%Context{project_view: %ProjectView{} = view}) do
+    case project_view_result(fn -> ProjectView.working_dir(view) end) do
+      {:ok, cwd} -> {:ok, cwd}
+      cwd when is_binary(cwd) -> {:ok, cwd}
+      {:error, {:project_view_unavailable, _}} = error -> error
+      {:error, reason} -> {:error, {:project_view_unavailable, {:working_dir_failed, reason}}}
+    end
+  end
+
+  def working_dir_result(%Context{changeset: cs}) when cs != nil and is_pid(cs) do
+    try do
+      {:ok, Changeset.overlay_path(cs)}
+    catch
+      :exit, reason -> {:error, {:changeset_unavailable, reason}}
+    end
+  end
+
+  def working_dir_result(_ctx), do: {:ok, nil}
+
+  @doc "Returns environment variables for shell commands, or a tagged error if ProjectView is unavailable."
+  @spec command_env_result(context()) :: {:ok, [{String.t(), String.t()}]} | {:error, term()}
+  def command_env_result(%Context{project_view: %ProjectView{} = view}) do
+    case project_view_result(fn -> ProjectView.command_env(view) end) do
+      {:ok, env} -> {:ok, env}
+      env when is_list(env) -> {:ok, env}
+      {:error, {:project_view_unavailable, _}} = error -> error
+      {:error, reason} -> {:error, {:project_view_unavailable, {:command_env_failed, reason}}}
+    end
+  end
+
+  def command_env_result(%Context{changeset: cs}) when cs != nil and is_pid(cs) do
+    try do
+      {:ok, Changeset.command_env(cs)}
+    catch
+      :exit, reason -> {:error, {:changeset_unavailable, reason}}
+    end
+  end
+
+  def command_env_result(_ctx), do: {:ok, []}
 
   @doc "Returns true when the context includes a ProjectView."
   @spec project_view?(context()) :: boolean()
@@ -179,7 +276,17 @@ defmodule MingaAgent.ToolRouter do
     workspace =
       if view.workspace_id == nil, do: "unbound", else: Integer.to_string(view.workspace_id)
 
-    "ProjectView workspace #{workspace} cwd=#{ProjectView.working_dir(view)}"
+    cwd =
+      try do
+        case ProjectView.working_dir(view) do
+          {:error, _reason} -> "unavailable"
+          path -> path
+        end
+      catch
+        :exit, _ -> "unavailable"
+      end
+
+    "ProjectView workspace #{workspace} cwd=#{cwd}"
   end
 
   def workspace_label(%Context{}), do: nil
@@ -194,6 +301,12 @@ defmodule MingaAgent.ToolRouter do
 
   def active?(_), do: false
 
+  @doc "Returns true if the context has any routing configured, even if it is currently dead."
+  @spec routing_configured?(context()) :: boolean()
+  def routing_configured?(%Context{project_view: %ProjectView{}}), do: true
+  def routing_configured?(%Context{fork_store: fs, changeset: cs}), do: fs != nil or cs != nil
+  def routing_configured?(_), do: false
+
   @doc """
   Returns true if a fork store is active and has forks.
   """
@@ -206,9 +319,19 @@ defmodule MingaAgent.ToolRouter do
     :exit, _ -> false
   end
 
+  @spec project_view_result((-> term())) :: term() | {:error, term()}
+  defp project_view_result(fun) do
+    try do
+      fun.()
+    catch
+      :exit, reason -> {:error, {:project_view_unavailable, reason}}
+    end
+  end
+
   # ── Private: fork operations ────────────────────────────────────────────────
 
-  @spec try_fork_write(pid(), String.t(), binary()) :: {:ok, :forked} | :no_buffer
+  @spec try_fork_write(pid(), String.t(), binary()) ::
+          {:ok, :forked} | {:error, term()} | :no_buffer
   defp try_fork_write(fork_store, path, content) do
     case Minga.Buffer.pid_for_path(path) do
       {:ok, buf_pid} ->
@@ -221,7 +344,7 @@ defmodule MingaAgent.ToolRouter do
         :no_buffer
     end
   catch
-    :exit, _ -> :no_buffer
+    :exit, reason -> {:error, {:fork_unavailable, reason}}
   end
 
   @spec try_fork_edit(pid(), String.t(), String.t(), String.t()) ::
@@ -240,7 +363,7 @@ defmodule MingaAgent.ToolRouter do
         :no_buffer
     end
   catch
-    :exit, _ -> :no_buffer
+    :exit, reason -> {:error, {:fork_unavailable, reason}}
   end
 
   # ── Private: changeset fallback ─────────────────────────────────────────────
@@ -249,8 +372,10 @@ defmodule MingaAgent.ToolRouter do
           {:ok, binary()} | {:error, term()} | :passthrough
   defp read_file_changeset_or_passthrough(%Context{changeset: cs}, path)
        when cs != nil and is_pid(cs) do
-    relative = normalize_path(cs, path)
-    Changeset.read_file(cs, relative)
+    with :ok <- changeset_available(cs) do
+      relative = normalize_path(cs, path)
+      Changeset.read_file(cs, relative)
+    end
   end
 
   defp read_file_changeset_or_passthrough(_ctx, path) do
@@ -267,8 +392,10 @@ defmodule MingaAgent.ToolRouter do
           :ok | :passthrough | {:error, term()}
   defp write_file_changeset(%Context{changeset: cs}, path, content)
        when cs != nil and is_pid(cs) do
-    relative = normalize_path(cs, path)
-    Changeset.write_file(cs, relative, content)
+    with :ok <- changeset_available(cs) do
+      relative = normalize_path(cs, path)
+      Changeset.write_file(cs, relative, content)
+    end
   end
 
   defp write_file_changeset(_ctx, _path, _content), do: :passthrough
@@ -277,11 +404,33 @@ defmodule MingaAgent.ToolRouter do
           :ok | :passthrough | {:error, term()}
   defp edit_file_changeset(%Context{changeset: cs}, path, old_text, new_text)
        when cs != nil and is_pid(cs) do
-    relative = normalize_path(cs, path)
-    Changeset.edit_file(cs, relative, old_text, new_text)
+    with :ok <- changeset_available(cs) do
+      relative = normalize_path(cs, path)
+      Changeset.edit_file(cs, relative, old_text, new_text)
+    end
   end
 
   defp edit_file_changeset(_ctx, _path, _old_text, _new_text), do: :passthrough
+
+  @spec fork_store_available(pid()) :: :ok | {:error, {:fork_unavailable, term()}}
+  defp fork_store_available(fork_store) do
+    try do
+      _ = BufferForkStore.all(fork_store)
+      :ok
+    catch
+      :exit, reason -> {:error, {:fork_unavailable, reason}}
+    end
+  end
+
+  @spec changeset_available(pid()) :: :ok | {:error, {:changeset_unavailable, term()}}
+  defp changeset_available(changeset) do
+    try do
+      _ = Changeset.overlay_path(changeset)
+      :ok
+    catch
+      :exit, reason -> {:error, {:changeset_unavailable, reason}}
+    end
+  end
 
   # ── Private: path normalization ─────────────────────────────────────────────
 

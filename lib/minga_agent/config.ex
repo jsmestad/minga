@@ -176,6 +176,10 @@ defmodule MingaAgent.Config do
   @spec default_model() :: String.t()
   def default_model, do: @default_model
 
+  @doc "Returns a config with agent hooks disabled."
+  @spec without_hooks(t()) :: t()
+  def without_hooks(%__MODULE__{} = config), do: %{config | agent_hooks: []}
+
   @doc "Normalizes raw `:agent_hooks` config declarations into hook structs."
   @spec normalize_hooks(term()) :: [Hook.t()]
   def normalize_hooks(nil), do: []

@@ -1,6 +1,7 @@
 defmodule MingaAgent.Tools.MultiEditFileTest do
   use ExUnit.Case, async: true
 
+  alias MingaAgent.Tools
   alias MingaAgent.Tools.MultiEditFile
   alias Minga.Buffer
   alias Minga.Buffer.Process, as: BufferProcess
@@ -101,8 +102,6 @@ defmodule MingaAgent.Tools.MultiEditFileTest do
       path = Path.join(dir, "test.txt")
       File.write!(path, "foo bar baz")
 
-      # First edit changes "foo" to "bar", making "bar" appear twice.
-      # Second edit tries to change "bar" and should fail due to ambiguity.
       edits = [
         %{"old_text" => "foo", "new_text" => "bar"},
         %{"old_text" => "bar", "new_text" => "qux"}
@@ -111,7 +110,6 @@ defmodule MingaAgent.Tools.MultiEditFileTest do
       assert {:ok, result} = MultiEditFile.execute(path, edits)
       assert result =~ "1/2 edits applied"
 
-      # "foo" was replaced with "bar", but "bar" is now ambiguous
       assert buffer_content(path) == "bar bar baz"
     end
 
@@ -124,8 +122,6 @@ defmodule MingaAgent.Tools.MultiEditFileTest do
       ]
 
       assert {:ok, _} = MultiEditFile.execute(path, edits)
-
-      # Buffer content should be unchanged (the failed edit was a no-op)
       assert buffer_content(path) == "original content"
     end
   end
@@ -143,15 +139,10 @@ defmodule MingaAgent.Tools.MultiEditFileTest do
 
       assert {:ok, result} = MultiEditFile.execute(path, edits)
       assert result =~ "2/2 edits applied"
-
-      # Edit went through buffer
       assert BufferProcess.content(pid) == "AAA bbb CCC"
       assert BufferProcess.dirty?(pid)
-
-      # Disk unchanged
       assert File.read!(path) == "aaa bbb ccc"
 
-      # Single undo reverts entire batch
       BufferProcess.undo(pid)
       assert BufferProcess.content(pid) == "aaa bbb ccc"
     end
@@ -163,14 +154,42 @@ defmodule MingaAgent.Tools.MultiEditFileTest do
       edits = [%{"old_text" => "aaa", "new_text" => "AAA"}]
       assert {:ok, _} = MultiEditFile.execute(path, edits)
 
-      # Buffer was created by ensure_for_path; edit went through buffer
       {:ok, pid} = Buffer.pid_for_path(Path.expand(path))
       assert BufferProcess.content(pid) == "AAA bbb"
       assert BufferProcess.dirty?(pid)
     end
   end
 
-  # Helper to read content from the buffer that ensure_for_path created.
+  describe "execute/2 via Tools when fork store routing is dead" do
+    test "returns a routing error instead of falling back to direct filesystem edits", %{
+      tmp_dir: dir
+    } do
+      root = Path.join(dir, "root")
+      File.mkdir_p!(Path.join(root, "lib"))
+      file = Path.join(root, "lib/unopened.txt")
+      File.write!(file, "old text\n")
+
+      {:ok, fork_store} = start_supervised(MingaAgent.BufferForkStore)
+      Process.exit(fork_store, :kill)
+
+      tools = Tools.all(project_root: root, fork_store: fork_store)
+
+      assert {:error, message} =
+               call_tool(tools, "multi_edit_file", %{
+                 "path" => "lib/unopened.txt",
+                 "edits" => [%{"old_text" => "old", "new_text" => "new"}]
+               })
+
+      assert message =~ "fork_unavailable"
+      assert File.read!(file) == "old text\n"
+    end
+  end
+
+  defp call_tool(tools, name, args) do
+    tool = Enum.find(tools, &(&1.name == name))
+    tool.callback.(args)
+  end
+
   defp buffer_content(path) do
     {:ok, pid} = Buffer.pid_for_path(Path.expand(path))
     BufferProcess.content(pid)

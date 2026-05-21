@@ -38,6 +38,8 @@ defmodule MingaAgent.Tools do
   | `describe_tools`  | List all available tools with descriptions            |
   """
 
+  alias Minga.Buffer.Document
+  alias Minga.Buffer.Replace
   alias MingaAgent.ProjectView
   alias MingaAgent.ToolRouter
   alias MingaAgent.Tools.DeleteFile
@@ -76,6 +78,7 @@ defmodule MingaAgent.Tools do
   @default_destructive_tools ~w(write_file edit_file multi_edit_file delete_file shell git_stage git_commit rename)
   @file_read_tools ~w(read_file list_directory find grep)
   @read_only_tools ~w(read_file list_directory find grep git_status git_diff git_log diagnostics definition references hover document_symbols workspace_symbols describe_runtime describe_tools produce_rewrite)
+  @max_symlink_depth 40
 
   @doc """
   Returns true if the named tool is classified as destructive.
@@ -389,7 +392,7 @@ defmodule MingaAgent.Tools do
         path = resolve_and_validate_path!(root, args["path"])
         edits = args["edits"] || []
 
-        if ToolRouter.active?(router_ctx) do
+        if ToolRouter.routing_configured?(router_ctx) do
           apply_multi_edit_via_router(router_ctx, path, edits)
         else
           case MultiEditFile.execute(path, edits) do
@@ -511,8 +514,14 @@ defmodule MingaAgent.Tools do
       },
       callback: fn args ->
         path = resolve_and_validate_path!(root, args["path"] || ".")
-        search_path = ToolRouter.filesystem_path(router_ctx, path)
-        routed_result(router_ctx, Find.execute(args["pattern"], search_path, args))
+
+        case ToolRouter.filesystem_path_result(router_ctx, path) do
+          {:ok, search_path} ->
+            routed_result(router_ctx, Find.execute(args["pattern"], search_path, args))
+
+          {:error, reason} ->
+            {:error, inspect(reason)}
+        end
       end
     )
   end
@@ -556,8 +565,14 @@ defmodule MingaAgent.Tools do
       },
       callback: fn args ->
         path = resolve_and_validate_path!(root, args["path"] || ".")
-        search_path = ToolRouter.filesystem_path(router_ctx, path)
-        routed_result(router_ctx, Grep.execute(args["pattern"], search_path, args))
+
+        case ToolRouter.filesystem_path_result(router_ctx, path) do
+          {:ok, search_path} ->
+            routed_result(router_ctx, Grep.execute(args["pattern"], search_path, args))
+
+          {:error, reason} ->
+            {:error, inspect(reason)}
+        end
       end
     )
   end
@@ -587,12 +602,23 @@ defmodule MingaAgent.Tools do
         "required" => ["command"]
       },
       callback: fn args ->
-        flush_before_shell()
         timeout_secs = min(args["timeout"] || 30, 300)
-        cwd = ToolRouter.working_dir(router_ctx) || root
 
-        env = ToolRouter.command_env(router_ctx)
-        routed_result(router_ctx, Shell.execute(args["command"], cwd, timeout_secs, env: env))
+        with {:ok, cwd} <- ToolRouter.working_dir_result(router_ctx),
+             {:ok, env} <- ToolRouter.command_env_result(router_ctx) do
+          shell_root = cwd || root
+
+          if is_nil(cwd) do
+            flush_before_shell()
+          end
+
+          routed_result(
+            router_ctx,
+            Shell.execute(args["command"], shell_root, timeout_secs, env: env)
+          )
+        else
+          {:error, reason} -> {:error, inspect(reason)}
+        end
       end
     )
   end
@@ -1152,11 +1178,15 @@ defmodule MingaAgent.Tools do
   @spec read_file_fallback(ToolRouter.context(), String.t(), term(), map()) ::
           {:ok, String.t()} | {:error, String.t()}
   defp read_file_fallback(router_ctx, path, reason, args) do
-    if ToolRouter.project_view?(router_ctx) do
-      {:error,
-       "failed to read #{path} from #{ToolRouter.workspace_label(router_ctx)}: #{inspect(reason)}"}
+    if routing_error?(reason) do
+      {:error, inspect(reason)}
     else
-      routed_result(router_ctx, ReadFile.execute(path, build_read_opts(args)))
+      if ToolRouter.project_view?(router_ctx) do
+        {:error,
+         "failed to read #{path} from #{ToolRouter.workspace_label(router_ctx)}: #{inspect(reason)}"}
+      else
+        routed_result(router_ctx, ReadFile.execute(path, build_read_opts(args)))
+      end
     end
   end
 
@@ -1167,6 +1197,13 @@ defmodule MingaAgent.Tools do
   end
 
   defp routed_result(_router_ctx, {:error, _message} = error), do: error
+
+  @spec routing_error?(term()) :: boolean()
+  defp routing_error?({:fork_unavailable, _}), do: true
+  defp routing_error?({:project_view_unavailable, _}), do: true
+  defp routing_error?({:changeset_unavailable, _}), do: true
+  defp routing_error?(:deleted), do: true
+  defp routing_error?(_), do: false
 
   @spec append_workspace_context(ToolRouter.context(), String.t()) :: String.t()
   defp append_workspace_context(router_ctx, message) do
@@ -1208,15 +1245,206 @@ defmodule MingaAgent.Tools do
   """
   @spec resolve_and_validate_path!(String.t(), String.t()) :: String.t()
   def resolve_and_validate_path!(root, relative_path) do
-    # Expand to handle ".." segments
-    resolved = Path.expand(relative_path, root)
     normalized_root = Path.expand(root)
+    resolved = Path.expand(relative_path, normalized_root)
 
-    unless String.starts_with?(resolved, normalized_root <> "/") or resolved == normalized_root do
-      raise ArgumentError, "path escapes project root: #{relative_path}"
+    validate_inside_root!(resolved, normalized_root, relative_path)
+
+    canonical_root = canonical_root!(normalized_root, relative_path)
+
+    canonical_resolved =
+      resolve_inside_root!(
+        canonical_root,
+        relative_parts(resolved, normalized_root),
+        relative_path
+      )
+
+    validate_inside_root!(canonical_resolved, canonical_root, relative_path)
+
+    canonical_resolved
+  end
+
+  @spec canonical_root!(String.t(), String.t()) :: String.t()
+  defp canonical_root!(root, original_path) do
+    root
+    |> Path.expand()
+    |> absolute_parts()
+    |> resolve_existing_parts!(filesystem_anchor(root), original_path, %{}, 0)
+  end
+
+  @spec absolute_parts(String.t()) :: [String.t()]
+  defp absolute_parts(path) do
+    case Path.split(path) do
+      ["/" | parts] -> parts
+      parts -> parts
+    end
+  end
+
+  @spec filesystem_anchor(String.t()) :: String.t()
+  defp filesystem_anchor(path) do
+    case Path.split(Path.expand(path)) do
+      ["/" | _parts] -> "/"
+      [anchor | _parts] -> anchor
+      [] -> "/"
+    end
+  end
+
+  @spec resolve_existing_parts!(
+          [String.t()],
+          String.t(),
+          String.t(),
+          %{String.t() => true},
+          non_neg_integer()
+        ) :: String.t()
+  defp resolve_existing_parts!([], current, _original_path, _seen_links, _depth), do: current
+
+  defp resolve_existing_parts!(_parts, _current, original_path, _seen_links, depth)
+       when depth >= @max_symlink_depth do
+    raise ArgumentError, "too many symlinks while resolving #{original_path}"
+  end
+
+  defp resolve_existing_parts!([part | rest], current, original_path, seen_links, depth) do
+    next = Path.join(current, part)
+
+    case File.lstat(next) do
+      {:ok, %File.Stat{type: :symlink}} ->
+        canonical_link = Path.expand(next)
+        ensure_new_symlink!(canonical_link, seen_links, original_path)
+        seen_links = Map.put(seen_links, canonical_link, true)
+        target = read_link_target!(next, current)
+
+        target =
+          resolve_existing_parts!(
+            absolute_parts(target),
+            filesystem_anchor(target),
+            original_path,
+            seen_links,
+            depth + 1
+          )
+
+        resolve_existing_parts!(rest, target, original_path, seen_links, depth + 1)
+
+      {:ok, _stat} ->
+        resolve_existing_parts!(rest, next, original_path, seen_links, depth)
+
+      {:error, reason} ->
+        raise ArgumentError,
+              "cannot resolve project root for #{original_path}: #{inspect(reason)}"
+    end
+  end
+
+  @spec resolve_inside_root!(String.t(), [String.t()], String.t()) :: String.t()
+  defp resolve_inside_root!(canonical_root, parts, original_path) do
+    resolve_parts!(parts, canonical_root, canonical_root, original_path, %{}, 0)
+  end
+
+  @spec relative_parts(String.t(), String.t()) :: [String.t()]
+  defp relative_parts(path, root) do
+    case Path.relative_to(path, root) do
+      "." -> []
+      relative -> Path.split(relative)
+    end
+  end
+
+  @spec resolve_parts!(
+          [String.t()],
+          String.t(),
+          String.t(),
+          String.t(),
+          %{String.t() => true},
+          non_neg_integer()
+        ) :: String.t()
+  defp resolve_parts!([], _root, current, _original_path, _seen_links, _depth), do: current
+
+  defp resolve_parts!([part | rest], root, current, original_path, seen_links, depth) do
+    next = Path.join(current, part)
+    validate_inside_root!(next, root, original_path)
+
+    case File.lstat(next) do
+      {:ok, %File.Stat{type: :symlink}} ->
+        {target, seen_links} =
+          resolve_symlink_target!(next, current, root, original_path, seen_links, depth)
+
+        resolve_parts!(rest, root, target, original_path, seen_links, depth + 1)
+
+      {:ok, _stat} ->
+        resolve_parts!(rest, root, next, original_path, seen_links, depth)
+
+      {:error, _reason} ->
+        resolve_missing_parts!(rest, root, next, original_path)
+    end
+  end
+
+  @spec resolve_missing_parts!([String.t()], String.t(), String.t(), String.t()) :: String.t()
+  defp resolve_missing_parts!([], _root, current, _original_path), do: current
+
+  defp resolve_missing_parts!([part | rest], root, current, original_path) do
+    next = Path.join(current, part)
+    validate_inside_root!(next, root, original_path)
+    resolve_missing_parts!(rest, root, next, original_path)
+  end
+
+  @spec resolve_symlink_target!(
+          String.t(),
+          String.t(),
+          String.t(),
+          String.t(),
+          %{String.t() => true},
+          non_neg_integer()
+        ) :: {String.t(), %{String.t() => true}}
+  defp resolve_symlink_target!(_link_path, _parent, _root, original_path, _seen_links, depth)
+       when depth >= @max_symlink_depth do
+    raise ArgumentError, "too many symlinks while resolving #{original_path}"
+  end
+
+  defp resolve_symlink_target!(link_path, parent, root, original_path, seen_links, depth) do
+    canonical_link = Path.expand(link_path)
+    ensure_new_symlink!(canonical_link, seen_links, original_path)
+    seen_links = Map.put(seen_links, canonical_link, true)
+
+    target = read_link_target!(link_path, parent)
+    validate_inside_root!(target, root, original_path)
+
+    target_parts = relative_parts(target, root)
+    target = resolve_parts!(target_parts, root, root, original_path, seen_links, depth + 1)
+    validate_inside_root!(target, root, original_path)
+
+    {target, seen_links}
+  end
+
+  @spec ensure_new_symlink!(String.t(), %{String.t() => true}, String.t()) :: :ok
+  defp ensure_new_symlink!(link_path, seen_links, original_path) do
+    if Map.has_key?(seen_links, link_path) do
+      raise ArgumentError, "symlink loop while resolving #{original_path}"
     end
 
-    resolved
+    :ok
+  end
+
+  @spec read_link_target!(String.t(), String.t()) :: String.t()
+  defp read_link_target!(path, parent) do
+    case File.read_link(path) do
+      {:ok, target} ->
+        Path.expand(target, parent)
+
+      {:error, reason} ->
+        raise ArgumentError, "cannot resolve symlink #{path}: #{inspect(reason)}"
+    end
+  end
+
+  @spec validate_inside_root!(String.t(), String.t(), String.t()) :: :ok
+  defp validate_inside_root!(_path, "/", _original_path), do: :ok
+
+  defp validate_inside_root!(path, root, original_path) do
+    expanded_path = Path.expand(path)
+    expanded_root = Path.expand(root)
+
+    unless String.starts_with?(expanded_path, expanded_root <> "/") or
+             expanded_path == expanded_root do
+      raise ArgumentError, "path escapes project root: #{original_path}"
+    end
+
+    :ok
   end
 
   # Applies offset/limit slicing to content read from a changeset.
@@ -1256,20 +1484,15 @@ defmodule MingaAgent.Tools do
 
   @spec reduce_edits(String.t(), [map()]) :: {String.t(), [{:ok | :error, String.t()}]}
   defp reduce_edits(content, edits) do
-    {final, reversed} =
-      Enum.reduce(edits, {content, []}, fn edit, {current, acc} ->
-        old_text = edit["old_text"] || ""
-        new_text = edit["new_text"] || ""
-
-        if String.contains?(current, old_text) do
-          updated = String.replace(current, old_text, new_text, global: false)
-          {updated, [{:ok, old_text} | acc]}
-        else
-          {current, [{:error, old_text} | acc]}
-        end
+    edit_pairs =
+      Enum.map(edits, fn edit ->
+        {edit["old_text"] || "", edit["new_text"] || ""}
       end)
 
-    {final, Enum.reverse(reversed)}
+    {final_doc, results, _any_applied?} =
+      Replace.apply_batch(Document.new(content), edit_pairs, nil)
+
+    {Document.content(final_doc), results}
   end
 
   @spec commit_multi_edits(
@@ -1282,10 +1505,18 @@ defmodule MingaAgent.Tools do
   defp commit_multi_edits(router_ctx, path, edits, final_content, results) do
     ok_count = Enum.count(results, &match?({:ok, _}, &1))
 
-    if ok_count == 0 do
-      {:error, "no edits matched in #{path}"}
-    else
-      commit_multi_edit_write(router_ctx, path, edits, final_content, results, ok_count)
+    case ok_count do
+      0 ->
+        msg =
+          append_workspace_context(
+            router_ctx,
+            format_multi_edit_result(router_ctx, path, results, ok_count)
+          )
+
+        {:ok, maybe_append_diagnostics(path, msg)}
+
+      _ ->
+        commit_multi_edit_write(router_ctx, path, edits, final_content, results, ok_count)
     end
   end
 

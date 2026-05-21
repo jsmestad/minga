@@ -1,3 +1,5 @@
+# credo:disable-for-this-file Credo.Check.Refactor.Nesting
+
 defmodule MingaAgent.Providers.Native do
   @moduledoc """
   Native Elixir agent provider backed by ReqLLM.
@@ -48,8 +50,10 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.MCP.Registry, as: MCPRegistry
   alias MingaAgent.MCP.ServerConfig, as: MCPServerConfig
   alias MingaAgent.Memory
+  alias MingaAgent.ProjectView
   alias MingaAgent.ModelCatalog
   alias MingaAgent.ModelLimits
+  alias MingaAgent.ProjectView
   alias MingaAgent.Retry
   alias MingaAgent.Session
   alias MingaAgent.Skills
@@ -82,6 +86,7 @@ defmodule MingaAgent.Providers.Native do
       :model,
       :config,
       :tools,
+      :project_root,
       :thinking_level,
       :max_tokens,
       :max_retries,
@@ -95,6 +100,7 @@ defmodule MingaAgent.Providers.Native do
       :model,
       :config,
       :tools,
+      :project_root,
       :thinking_level,
       :max_tokens,
       :max_retries,
@@ -112,6 +118,7 @@ defmodule MingaAgent.Providers.Native do
             model: String.t(),
             config: MingaAgent.Config.t(),
             tools: [term()],
+            project_root: String.t(),
             thinking_level: String.t(),
             max_tokens: pos_integer(),
             max_retries: non_neg_integer(),
@@ -143,6 +150,7 @@ defmodule MingaAgent.Providers.Native do
           context: Context.t(),
           tools: [term()],
           project_root: String.t(),
+          project_view: ProjectView.t() | nil,
           thinking_level: String.t(),
           max_tokens: pos_integer(),
           max_retries: non_neg_integer(),
@@ -159,7 +167,12 @@ defmodule MingaAgent.Providers.Native do
           session_cost: float(),
           fork_store: pid() | nil,
           changeset: pid() | nil,
-          mcp_registry: MCPRegistry.t() | nil
+          base_tools: [term()],
+          mcp_tools: [term()],
+          internal_tools: [term()],
+          custom_tools?: boolean(),
+          mcp_registry: MCPRegistry.t() | nil,
+          read_only?: boolean()
         }
 
   # ── Provider callbacks ──────────────────────────────────────────────────────
@@ -243,6 +256,12 @@ defmodule MingaAgent.Providers.Native do
     GenServer.call(pid, :continue)
   end
 
+  @doc "Refreshes the project view and rebuilds file tools around the new overlay."
+  @spec refresh_project_view(GenServer.server(), ProjectView.t() | nil) :: :ok | {:error, term()}
+  def refresh_project_view(pid, project_view) do
+    GenServer.call(pid, {:refresh_project_view, project_view})
+  end
+
   # ── GenServer callbacks ─────────────────────────────────────────────────────
 
   @impl GenServer
@@ -259,38 +278,45 @@ defmodule MingaAgent.Providers.Native do
     max_tokens = Keyword.get(opts, :max_tokens, config.max_tokens)
     max_retries = Keyword.get(opts, :max_retries, config.max_retries)
     max_turns = Keyword.get(opts, :max_turns, config.max_turns)
+    read_only? = Keyword.get(opts, :read_only?, false)
+    config = disable_hooks_for_read_only(config, read_only?)
     max_cost = Keyword.get(opts, :max_cost, config.max_cost)
     llm_client = Keyword.get(opts, :llm_client, &ReqLLM.stream_text/3)
     hook_runner = Keyword.get(opts, :hook_runner, &CommandRunner.run_pre_tool_use/2)
     provider_pid = self()
-    # Start a fork store for in-memory buffer isolation. Forks are created
-    # lazily when agent tools write to files that have open buffers.
-    # Not linked: fork store crash degrades gracefully (tools fall through
-    # to changeset or direct I/O) rather than killing the provider.
-    {:ok, fork_store} = GenServer.start(MingaAgent.BufferForkStore, :ok)
-    Process.monitor(fork_store)
 
-    # Optionally create a changeset for filesystem-level isolation.
-    # When enabled, file tools write to an overlay directory instead of
-    # the real project. Three-way merge on session completion.
-    changeset =
-      if Keyword.get(opts, :changeset, false) do
-        case MingaAgent.Changeset.create(project_root) do
-          {:ok, cs} ->
-            Process.monitor(cs)
-            cs
+    {fork_store, changeset} =
+      case project_view do
+        %ProjectView{} ->
+          {nil, nil}
 
-          {:error, reason} ->
-            Minga.Log.warning(
-              :agent,
-              "[Agent.Native] changeset creation failed: #{inspect(reason)}"
-            )
+        _ ->
+          # Start a fork store for in-memory buffer isolation. Forks are created
+          # lazily when agent tools write to files that have open buffers.
+          # Not linked: fork store crash degrades gracefully (tools fall through
+          # to changeset or direct I/O) rather than killing the provider.
+          {:ok, fork_store} = GenServer.start(MingaAgent.BufferForkStore, :ok)
+          Process.monitor(fork_store)
 
-            nil
-        end
+          changeset =
+            if Keyword.get(opts, :changeset, false) do
+              case MingaAgent.Changeset.create(project_root) do
+                {:ok, cs} ->
+                  Process.monitor(cs)
+                  cs
+
+                {:error, reason} ->
+                  Minga.Log.warning(
+                    :agent,
+                    "[Agent.Native] changeset creation failed: #{inspect(reason)}"
+                  )
+
+                  nil
+              end
+            end
+
+          {fork_store, changeset}
       end
-
-    read_only? = Keyword.get(opts, :read_only?, false)
 
     base_tools =
       Keyword.get(opts, :tools) ||
@@ -302,9 +328,9 @@ defmodule MingaAgent.Providers.Native do
           parent_session: subscriber
         )
 
-    base_tools =
-      if read_only?, do: Enum.filter(base_tools, &Tools.read_only_name?/1), else: base_tools
+    base_tools = filter_base_tools_for_read_only(base_tools, read_only?)
 
+    custom_tools? = Keyword.has_key?(opts, :tools)
     active_skills = load_active_skills(project_root, Keyword.get(opts, :active_skill_names, []))
     internal_tools = if read_only?, do: [], else: build_internal_tools(provider_pid)
     reserved_tool_names = Enum.map(base_tools ++ internal_tools, & &1.name)
@@ -316,7 +342,10 @@ defmodule MingaAgent.Providers.Native do
         start_mcp_servers(opts, config, subscriber, reserved_tool_names)
       end
 
-    tools = base_tools ++ mcp_tools ++ internal_tools
+    tools =
+      (base_tools ++ mcp_tools ++ internal_tools)
+      |> filter_tool_allowlist(Keyword.get(opts, :tool_allowlist, :all))
+
     system_prompt = build_system_prompt(project_root, active_skills)
     context = Context.new([Context.system(system_prompt)])
 
@@ -351,12 +380,37 @@ defmodule MingaAgent.Providers.Native do
       session_cost: 0.0,
       fork_store: fork_store,
       changeset: changeset,
-      mcp_registry: mcp_registry
+      project_view: project_view,
+      base_tools: base_tools,
+      mcp_tools: mcp_tools,
+      internal_tools: internal_tools,
+      custom_tools?: custom_tools?,
+      mcp_registry: mcp_registry,
+      read_only?: read_only?
     }
 
     Minga.Log.info(:agent, "[Agent.Native] started with model=#{model} root=#{project_root}")
 
     {:ok, state}
+  end
+
+  @spec disable_hooks_for_read_only(AgentConfig.t(), boolean()) :: AgentConfig.t()
+  defp disable_hooks_for_read_only(%AgentConfig{} = config, true),
+    do: AgentConfig.without_hooks(config)
+
+  defp disable_hooks_for_read_only(%AgentConfig{} = config, false), do: config
+
+  @spec filter_base_tools_for_read_only([ReqLLM.Tool.t()], boolean()) :: [ReqLLM.Tool.t()]
+  defp filter_base_tools_for_read_only(base_tools, true),
+    do: Enum.filter(base_tools, &Tools.read_only_name?/1)
+
+  defp filter_base_tools_for_read_only(base_tools, false), do: base_tools
+
+  @spec filter_tool_allowlist([ReqLLM.Tool.t()], :all | [String.t()]) :: [ReqLLM.Tool.t()]
+  defp filter_tool_allowlist(tools, :all) when is_list(tools), do: tools
+
+  defp filter_tool_allowlist(tools, allowlist) when is_list(tools) and is_list(allowlist) do
+    Enum.filter(tools, &(&1.name in allowlist))
   end
 
   @impl GenServer
@@ -395,6 +449,7 @@ defmodule MingaAgent.Providers.Native do
         model: state.model,
         config: state.config,
         tools: state.tools,
+        project_root: state.project_root,
         thinking_level: state.thinking_level,
         max_tokens: state.max_tokens,
         max_retries: state.max_retries,
@@ -455,6 +510,7 @@ defmodule MingaAgent.Providers.Native do
       model: state.model,
       config: state.config,
       tools: state.tools,
+      project_root: state.project_root,
       thinking_level: state.thinking_level,
       max_tokens: state.max_tokens,
       max_retries: state.max_retries,
@@ -651,6 +707,12 @@ defmodule MingaAgent.Providers.Native do
     {:reply, :ok, %{state | model: model}}
   end
 
+  def handle_call({:refresh_project_view, project_view}, _from, state) do
+    base_tools = refresh_base_tools(state, project_view)
+    tools = base_tools ++ state.mcp_tools ++ state.internal_tools
+    {:reply, :ok, %{state | project_view: project_view, base_tools: base_tools, tools: tools}}
+  end
+
   def handle_call({:update_internal_state, fun}, _from, state) when is_function(fun, 1) do
     new_internal = fun.(state.internal_state)
     {:reply, :ok, %{state | internal_state: new_internal}}
@@ -747,7 +809,7 @@ defmodule MingaAgent.Providers.Native do
       "[Agent.Native] fork store crashed, continuing without fork isolation"
     )
 
-    {:noreply, %{state | fork_store: nil}}
+    {:noreply, rebuild_tools(%{state | fork_store: nil})}
   end
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, %{changeset: pid} = state)
@@ -757,7 +819,7 @@ defmodule MingaAgent.Providers.Native do
       "[Agent.Native] changeset crashed, continuing without filesystem isolation"
     )
 
-    {:noreply, %{state | changeset: nil}}
+    {:noreply, rebuild_tools(%{state | changeset: nil})}
   end
 
   def handle_info({:mcp_client_down, pid, server_name, reason}, state) when is_pid(pid) do
@@ -840,6 +902,30 @@ defmodule MingaAgent.Providers.Native do
     %{state | tools: tools, mcp_registry: registry}
   end
 
+  @spec rebuild_tools(map()) :: map()
+  defp rebuild_tools(state) do
+    base_tools =
+      Tools.all(
+        project_root: state.project_root,
+        project_view: state.project_view,
+        fork_store: state.fork_store,
+        changeset: state.changeset,
+        parent_session: state.subscriber
+      )
+
+    base_tool_names = MapSet.new(Enum.map(base_tools, & &1.name))
+    internal_tools = build_internal_tools(self())
+    internal_tool_names = MapSet.new(Enum.map(internal_tools, & &1.name))
+
+    mcp_tools =
+      Enum.reject(state.tools, fn tool ->
+        MapSet.member?(base_tool_names, tool.name) or
+          MapSet.member?(internal_tool_names, tool.name)
+      end)
+
+    %{state | tools: base_tools ++ mcp_tools ++ internal_tools}
+  end
+
   # ── Terminate cleanup ──────────────────────────────────────────────────────
 
   @spec cleanup_fork_store(pid() | nil) :: :ok
@@ -847,7 +933,7 @@ defmodule MingaAgent.Providers.Native do
 
   defp cleanup_fork_store(fs) when is_pid(fs) do
     if Process.alive?(fs) do
-      results = MingaAgent.BufferForkStore.merge_all(fs)
+      results = MingaAgent.BufferForkStore.merge_all_keep_failed(fs)
 
       Enum.each(results, fn
         {_path, :ok} ->
@@ -860,7 +946,14 @@ defmodule MingaAgent.Providers.Native do
           Minga.Log.warning(:agent, "[Agent.Native] fork merge failed for #{p}: #{inspect(r)}")
       end)
 
-      MingaAgent.BufferForkStore.stop(fs)
+      if Enum.all?(results, fn {_path, result} -> result == :ok end) do
+        MingaAgent.BufferForkStore.stop(fs)
+      else
+        Minga.Log.warning(
+          :agent,
+          "[Agent.Native] preserving failed fork drafts after merge cleanup"
+        )
+      end
     end
 
     :ok
@@ -1125,16 +1218,7 @@ defmodule MingaAgent.Providers.Native do
     assistant_msg = Context.assistant(text, tool_calls: reqllm_tool_calls)
     context = Context.append(context, assistant_msg)
 
-    context =
-      execute_tools(
-        lctx.provider_pid,
-        lctx.session_pid,
-        context,
-        tool_calls,
-        lctx.tools,
-        lctx.config,
-        lctx.hook_runner
-      )
+    context = execute_tools(lctx, context, tool_calls, lctx.tools)
 
     # Inject any steering messages queued by the user while tools were executing.
     context = inject_steering_messages(lctx, context)
@@ -1183,44 +1267,27 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  @spec execute_tools(
-          pid(),
-          pid() | nil,
-          Context.t(),
-          [map()],
-          [ReqLLM.Tool.t()],
-          AgentConfig.t(),
-          hook_runner()
-        ) ::
-          Context.t()
-  defp execute_tools(
-         provider_pid,
-         session_pid,
-         context,
-         tool_calls,
-         available_tools,
-         config,
-         hook_runner
-       ) do
-    initial_mode = approval_mode(config)
+  @spec execute_tools(loop_ctx(), Context.t(), [map()], [ReqLLM.Tool.t()]) :: Context.t()
+  defp execute_tools(lctx, context, tool_calls, available_tools) do
+    initial_mode = approval_mode(lctx.config)
 
     {final_ctx, _mode} =
       Enum.reduce(tool_calls, {context, initial_mode}, fn tool_call, {ctx, approval_mode} ->
-        before_content = capture_file_before(tool_call)
+        before_content = capture_file_before(tool_call, lctx.project_root)
 
         {result_text, is_error, new_mode} =
           execute_with_approval(
-            provider_pid,
-            session_pid,
+            lctx.provider_pid,
+            lctx.session_pid,
             tool_call,
             available_tools,
             approval_mode,
-            config,
-            hook_runner
+            lctx.config,
+            lctx.hook_runner
           )
 
         send(
-          provider_pid,
+          lctx.provider_pid,
           {:agent_event,
            %Event.ToolEnd{
              tool_call_id: tool_call.id,
@@ -1230,8 +1297,15 @@ defmodule MingaAgent.Providers.Native do
            }}
         )
 
-        dispatch_post_tool_use(tool_call, result_text, is_error, config)
-        maybe_emit_file_changed(provider_pid, tool_call, before_content, is_error)
+        dispatch_post_tool_use(tool_call, result_text, is_error, lctx.config)
+
+        maybe_emit_file_changed(
+          lctx.provider_pid,
+          tool_call,
+          before_content,
+          is_error,
+          lctx.project_root
+        )
 
         meta = if is_error, do: %{is_error: true}, else: %{}
 
@@ -1488,26 +1562,68 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  @file_tools ~w(edit_file multi_edit_file write_file)
+  @file_tools ~w(edit_file multi_edit_file write_file delete_file)
 
-  @spec capture_file_before(map()) :: String.t() | nil
-  defp capture_file_before(%{name: name, arguments: %{"path" => path}})
+  @spec capture_file_before(map(), String.t()) :: String.t() | nil
+  defp capture_file_before(%{name: name, arguments: %{"path" => path}}, project_root)
        when name in @file_tools do
-    case File.read(path) do
+    resolved_path = resolved_tool_path(project_root, path)
+
+    case File.read(resolved_path) do
       {:ok, content} -> content
       {:error, _} -> nil
     end
   end
 
-  defp capture_file_before(_tool_call), do: nil
+  defp capture_file_before(_tool_call, _project_root), do: nil
 
-  @spec maybe_emit_file_changed(pid(), map(), String.t() | nil, boolean()) :: :ok
-  defp maybe_emit_file_changed(provider_pid, tool_call, before_content, false = _is_error)
+  @spec maybe_emit_file_changed(pid(), map(), String.t() | nil, boolean(), String.t()) :: :ok
+  defp maybe_emit_file_changed(
+         provider_pid,
+         %{name: "delete_file", arguments: %{"path" => path}} = tool_call,
+         before_content,
+         false,
+         project_root
+       )
        when is_binary(before_content) do
-    path = tool_call.arguments["path"]
+    resolved_path = resolved_tool_path(project_root, path)
 
     after_content =
-      case File.read(path) do
+      case File.read(resolved_path) do
+        {:ok, content} -> content
+        {:error, :enoent} -> ""
+        {:error, _} -> nil
+      end
+
+    if is_binary(after_content) and after_content != before_content do
+      send(
+        provider_pid,
+        {:agent_event,
+         %Event.ToolFileChanged{
+           tool_call_id: tool_call.id,
+           path: resolved_path,
+           before_content: before_content,
+           after_content: after_content
+         }}
+      )
+    end
+
+    :ok
+  end
+
+  defp maybe_emit_file_changed(
+         provider_pid,
+         tool_call,
+         before_content,
+         false = _is_error,
+         project_root
+       )
+       when is_binary(before_content) and tool_call.name in @file_tools do
+    path = tool_call.arguments["path"]
+    resolved_path = resolved_tool_path(project_root, path)
+
+    after_content =
+      case File.read(resolved_path) do
         {:ok, content} -> content
         {:error, _} -> nil
       end
@@ -1518,7 +1634,7 @@ defmodule MingaAgent.Providers.Native do
         {:agent_event,
          %Event.ToolFileChanged{
            tool_call_id: tool_call.id,
-           path: path,
+           path: resolved_path,
            before_content: before_content,
            after_content: after_content
          }}
@@ -1528,7 +1644,17 @@ defmodule MingaAgent.Providers.Native do
     :ok
   end
 
-  defp maybe_emit_file_changed(_provider_pid, _tool_call, _before_content, _is_error), do: :ok
+  defp maybe_emit_file_changed(
+         _provider_pid,
+         _tool_call,
+         _before_content,
+         _is_error,
+         _project_root
+       ),
+       do: :ok
+
+  @spec resolved_tool_path(String.t(), String.t()) :: String.t()
+  defp resolved_tool_path(project_root, path), do: Path.expand(path, project_root)
 
   # Re-checks plan mode after approval: the user may have entered /plan between
   # the approval prompt and the approval response.
@@ -1870,6 +1996,29 @@ defmodule MingaAgent.Providers.Native do
   defp non_empty(nil), do: nil
   defp non_empty(""), do: nil
   defp non_empty(str) when is_binary(str), do: str
+
+  @spec refresh_base_tools(state(), ProjectView.t() | nil) :: [ReqLLM.Tool.t()]
+  defp refresh_base_tools(%{custom_tools?: true, base_tools: base_tools}, _project_view) do
+    base_tools
+  end
+
+  defp refresh_base_tools(
+         %{
+           project_root: project_root,
+           fork_store: fork_store,
+           changeset: changeset,
+           subscriber: subscriber
+         },
+         project_view
+       ) do
+    Tools.all(
+      project_root: project_root,
+      project_view: project_view,
+      fork_store: fork_store,
+      changeset: changeset,
+      parent_session: subscriber
+    )
+  end
 
   # Builds tools that interact with the provider's internal state (todo, notebook).
   # These are created in init with a closure over the provider PID.

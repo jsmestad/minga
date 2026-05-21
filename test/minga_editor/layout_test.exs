@@ -49,6 +49,14 @@ defmodule MingaEditor.LayoutTest do
     put_in(state.workspace.file_tree.tree, tree)
   end
 
+  defp with_agent_workspace(state) do
+    file_tab = %MingaEditor.State.Tab{id: 1, kind: :file, label: "scratch"}
+    tb = MingaEditor.State.tab_bar(state) || TabBar.new(file_tab)
+    {tb, _workspace} = TabBar.add_workspace(tb, "Agent: tests")
+    ss = state.shell_state
+    %{state | shell_state: %{ss | tab_bar: tb}}
+  end
+
   defp with_agent_panel(state) do
     agent = %AgentState{}
     base = UIState.new()
@@ -147,6 +155,22 @@ defmodule MingaEditor.LayoutTest do
       assert wl.modeline == {22, 0, 80, 0}
       # Global status bar occupies row 22 (one row above minibuffer).
       assert layout.status_bar == {22, 0, 80, 1}
+    end
+
+    test "workspace context reserves a workspace row when terminal height allows it" do
+      state = new_state(24, 80) |> with_window() |> with_agent_workspace()
+      layout = Layout.compute(state)
+
+      assert layout.tab_bar == {0, 0, 80, 2}
+      assert layout.editor_area == {2, 0, 80, 20}
+    end
+
+    test "workspace context collapses into modeline on short terminals" do
+      state = new_state(6, 80) |> with_window() |> with_agent_workspace()
+      layout = Layout.compute(state)
+
+      assert layout.tab_bar == {0, 0, 80, 1}
+      assert layout.editor_area == {1, 0, 80, 3}
     end
   end
 

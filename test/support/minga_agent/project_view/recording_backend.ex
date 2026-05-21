@@ -115,12 +115,19 @@ defmodule MingaAgent.ProjectView.RecordingBackend do
   end
 
   @impl true
+  @spec close(ProjectView.t()) :: :ok | {:error, term()}
+  def close(%ProjectView{} = view) do
+    record(view, :close)
+    :ok
+  end
+
+  @impl true
   @spec capabilities(ProjectView.t()) :: ProjectView.Backend.capabilities()
   def capabilities(%ProjectView{} = view) do
     record(view, :capabilities)
 
     %{
-      isolation: :recording,
+      isolation: :overlay,
       mutates_project_root: false,
       supports_promote: true,
       supports_discard: true,

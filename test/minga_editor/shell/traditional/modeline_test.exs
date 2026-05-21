@@ -97,6 +97,28 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
       refute String.contains?(text, "unique-bg-label")
     end
 
+    test "always renders workspace identity and review counters when configured" do
+      with_options(fn options ->
+        Options.set(options, :modeline_left_segments, [:mode, :workspace, :filename])
+        Options.set(options, :modeline_right_segments, [:draft, :conflict])
+
+        data =
+          Map.merge(@base_data, %{
+            workspace_label: "Agent: tests",
+            workspace_draft_count: 2,
+            workspace_conflict_count: 1
+          })
+
+        {commands, regions} = Modeline.render(0, 140, data)
+        text = Enum.map_join(commands, fn {_row, _col, segment, _opts} -> segment end)
+
+        assert String.contains?(text, "W:Agent: tests")
+        assert String.contains?(text, "D2")
+        assert String.contains?(text, "C1")
+        assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :workspace_list end)
+      end)
+    end
+
     test "filetype segment includes devicon for known filetype" do
       {commands, _regions} = Modeline.render(0, 120, @base_data)
 

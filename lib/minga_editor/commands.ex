@@ -39,6 +39,7 @@ defmodule MingaEditor.Commands do
   alias MingaEditor.Commands.Operators
   alias MingaEditor.Commands.Tool
   alias MingaEditor.Commands.Visual
+  alias MingaEditor.Commands.Workspace, as: WorkspaceCommands
   alias MingaEditor.Editing
   alias MingaEditor.LspActions
   alias MingaEditor.MinibufferData
@@ -263,6 +264,11 @@ defmodule MingaEditor.Commands do
 
   def execute(state, {:move_to_screen, _} = cmd) do
     guard_buffer(state, fn -> Movement.execute(state, cmd) end)
+  end
+
+  def execute(state, {:workspace_goto, workspace_id})
+      when is_integer(workspace_id) and workspace_id >= 0 do
+    WorkspaceCommands.workspace_goto_by_id(state, workspace_id)
   end
 
   # ── Parameterized editing ─────────────────────────────────────────────────

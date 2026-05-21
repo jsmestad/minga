@@ -2,6 +2,8 @@ defmodule Minga.CLITest do
   # Not async: CLI startup flag tests mutate Application env, which races with editor startup tests.
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureLog
+
   alias Minga.CLI
 
   setup do
@@ -257,6 +259,57 @@ defmodule Minga.CLITest do
     end
   end
 
+  describe "startup_project_root_from_args/1" do
+    test "detects directory targets and files inside marked projects" do
+      root = tmp_dir("cli-project-root")
+      File.write!(Path.join(root, "mix.exs"), "defmodule Example.MixProject do\nend\n")
+      file = Path.join([root, "lib", "example.ex"])
+      File.mkdir_p!(Path.dirname(file))
+      File.write!(file, "defmodule Example do\nend\n")
+
+      assert CLI.startup_project_root_from_args([root]) == root
+      assert CLI.startup_project_root_from_args([file]) == root
+      assert CLI.startup_project_root_from_args(["--help"]) == nil
+    end
+
+    test "directory targets prefer the nearest marked project root over the literal directory" do
+      root = tmp_dir("cli-nested-project-root")
+      nested = Path.join([root, "apps", "web"])
+      File.write!(Path.join(root, "mix.exs"), "defmodule Example.MixProject do\nend\n")
+      File.mkdir_p!(nested)
+
+      assert CLI.startup_project_root_from_args([nested]) == root
+    end
+
+    test "unmarked directory targets fall back to the literal directory" do
+      root = tmp_dir("cli-unmarked-project-root")
+      nested = Path.join(root, "notes")
+      File.mkdir_p!(nested)
+
+      assert CLI.startup_project_root_from_args([nested]) == nested
+    end
+
+    test "cwd inference returns only marked project roots" do
+      root = tmp_dir("cli-cwd-project-root")
+      nested = Path.join([root, "apps", "web"])
+      File.write!(Path.join(root, "mix.exs"), "defmodule Example.MixProject do\nend\n")
+      File.mkdir_p!(nested)
+
+      assert canonical_path(CLI.cwd_startup_project_root(nested)) == canonical_path(root)
+
+      unmarked = tmp_dir("cli-cwd-unmarked")
+      assert CLI.cwd_startup_project_root(unmarked) == nil
+    end
+
+    test "argv inference logs unexpected failures instead of silently swallowing them" do
+      log =
+        capture_log(fn -> assert CLI.argv_startup_project_root(fn -> raise "boom" end) == nil end)
+
+      assert log =~ "Could not infer startup project root from argv"
+      assert log =~ "boom"
+    end
+  end
+
   describe "startup_flags/0" do
     test "returns default flags when no CLI flags were set" do
       Application.delete_env(:minga, :cli_startup_flags)
@@ -278,20 +331,27 @@ defmodule Minga.CLITest do
       assert :ok = CLI.main([])
     after
       Application.delete_env(:minga, :cli_startup_flags)
+      Application.delete_env(:minga, :cli_startup_project_root)
     end
 
     test "file argument returns :ok even when editor isn't running" do
       assert :ok = CLI.main(["nonexistent_file.txt"])
     after
       Application.delete_env(:minga, :cli_startup_flags)
+      Application.delete_env(:minga, :cli_startup_project_root)
     end
 
-    test "directory argument stores agentic startup mode" do
+    test "directory argument stores agentic startup mode and startup project root" do
       Application.delete_env(:minga, :cli_startup_flags)
-      assert :ok = CLI.main([System.tmp_dir!()])
+      Application.delete_env(:minga, :cli_startup_project_root)
+      root = System.tmp_dir!()
+
+      assert :ok = CLI.main([root])
       assert %{view_mode: :agentic, no_context: false, config_file: nil} = CLI.startup_flags()
+      assert CLI.startup_project_root() == Path.expand(root)
     after
       Application.delete_env(:minga, :cli_startup_flags)
+      Application.delete_env(:minga, :cli_startup_project_root)
     end
 
     test "main stores startup flags in application env" do
@@ -300,6 +360,7 @@ defmodule Minga.CLITest do
       assert %{view_mode: :editor, no_context: false, config_file: nil} = CLI.startup_flags()
     after
       Application.delete_env(:minga, :cli_startup_flags)
+      Application.delete_env(:minga, :cli_startup_project_root)
     end
 
     test "main stores config_file flag from --config" do
@@ -308,6 +369,7 @@ defmodule Minga.CLITest do
       assert %{view_mode: :auto, config_file: "/tmp/test_config.exs"} = CLI.startup_flags()
     after
       Application.delete_env(:minga, :cli_startup_flags)
+      Application.delete_env(:minga, :cli_startup_project_root)
     end
 
     test "main stores debug_log path in application env" do
@@ -400,5 +462,19 @@ defmodule Minga.CLITest do
       result = CLI.apply_flag_implications(flags, path)
       assert result.view_mode == :editor
     end
+  end
+
+  defp canonical_path(path) do
+    path
+    |> Path.expand()
+    |> String.replace_prefix("/private/var/", "/var/")
+  end
+
+  defp tmp_dir(name) do
+    path = Path.join(System.tmp_dir!(), "minga-#{name}-#{System.unique_integer([:positive])}")
+    File.rm_rf!(path)
+    File.mkdir_p!(path)
+    on_exit(fn -> File.rm_rf!(path) end)
+    path
   end
 end

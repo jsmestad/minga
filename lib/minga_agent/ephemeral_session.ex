@@ -2,7 +2,7 @@ defmodule MingaAgent.EphemeralSession do
   @moduledoc """
   Short-lived constrained agent sessions for inline overlays.
 
-  These sessions are not persisted and are stopped after the editor has captured the answer or rewrite. Their tool lists are intentionally restricted.
+  These sessions are not persisted and are stopped after the editor has captured the answer or rewrite. Inline ask uses prompt-provided context only and exposes no tools. Inline edit exposes only file-read tools plus the structured rewrite result tool.
   """
 
   alias MingaAgent.Session
@@ -48,10 +48,11 @@ defmodule MingaAgent.EphemeralSession do
     :exit, _ -> ""
   end
 
-  @doc "Builds the read-only tool list for inline ask sessions."
+  @doc "Builds the final inline ask tool list. Inline asks use prompt-provided context only."
   @spec read_only_tools(String.t()) :: [Tool.t()]
   def read_only_tools(project_root) when is_binary(project_root) do
-    Tools.read_only(project_root: project_root)
+    _project_root = project_root
+    []
   end
 
   @doc "Builds the constrained tool list for inline edit rewrite sessions."
@@ -71,7 +72,13 @@ defmodule MingaAgent.EphemeralSession do
       session_store_dir: nil,
       startup_notice: nil,
       persist?: false,
-      provider_opts: [project_root: project_root, read_only?: true, tools: tools]
+      hooks_enabled?: false,
+      provider_opts: [
+        project_root: project_root,
+        read_only?: true,
+        tool_allowlist: Enum.map(tools, & &1.name),
+        tools: tools
+      ]
     ]
 
     case SessionManager.start_session(manager, session_opts) do

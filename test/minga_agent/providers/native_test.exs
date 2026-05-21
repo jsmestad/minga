@@ -1,8 +1,11 @@
 defmodule MingaAgent.Providers.NativeTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaAgent.Config, as: AgentConfig
+  alias MingaAgent.ProjectView
   alias MingaAgent.Event
+  alias MingaAgent.ProjectView.RecordingBackend
   alias MingaAgent.Providers.Native
   alias MingaAgent.Tools
   alias ReqLLM.StreamResponse.MetadataHandle
@@ -164,6 +167,81 @@ defmodule MingaAgent.Providers.NativeTest do
       assert {:ok, %{"level" => "medium"}} = Native.cycle_thinking_level(pid)
       assert {:ok, %{"level" => "high"}} = Native.cycle_thinking_level(pid)
       assert {:ok, %{"level" => "off"}} = Native.cycle_thinking_level(pid)
+    end
+
+    test "rebuilds built-in tool closures after fork store down so stale pids stop leaking", %{
+      tmp_dir: dir
+    } do
+      path = Path.join(dir, "lib/tool_rebuild.ex")
+      File.mkdir_p!(Path.dirname(path))
+      File.write!(path, "original\n")
+
+      {:ok, buffer} = start_supervised({BufferProcess, content: "original\n", file_path: path})
+      {:ok, pid} = start_provider(tmp_dir: dir, tools: nil)
+
+      state = :sys.get_state(pid)
+      fork_store = state.fork_store
+      assert is_pid(fork_store)
+      write_tool = Enum.find(state.tools, &(&1.name == "write_file"))
+
+      assert {:ok, result} =
+               write_tool.callback.(%{"path" => "lib/tool_rebuild.ex", "content" => "forked\n"})
+
+      assert result =~ "via fork"
+      assert File.read!(path) == "original\n"
+      assert Minga.Buffer.content(buffer) == "original\n"
+
+      ref = Process.monitor(fork_store)
+      Process.exit(fork_store, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^fork_store, _reason}
+
+      rebuilt_state = :sys.get_state(pid)
+      assert rebuilt_state.fork_store == nil
+      rebuilt_write_tool = Enum.find(rebuilt_state.tools, &(&1.name == "write_file"))
+
+      assert {:ok, result} =
+               rebuilt_write_tool.callback.(%{
+                 "path" => "lib/tool_rebuild.ex",
+                 "content" => "direct\n"
+               })
+
+      assert result =~ "wrote"
+      assert File.read!(path) == "original\n"
+      assert Minga.Buffer.content(buffer) == "direct\n"
+    end
+
+    test "project_view-backed tools reuse the workspace-owned draft machinery and survive provider exit",
+         %{tmp_dir: dir} do
+      path = Path.join(dir, "lib/view_draft.ex")
+      File.mkdir_p!(Path.dirname(path))
+      File.write!(path, "original\n")
+
+      {:ok, buffer} = start_supervised({BufferProcess, content: "original\n", file_path: path})
+      {:ok, view} = ProjectView.overlay(dir)
+      {:ok, pid} = start_provider(tmp_dir: dir, project_view: view, tools: nil)
+
+      state = :sys.get_state(pid)
+      assert state.project_view == view
+      assert state.fork_store == nil
+      assert state.changeset == nil
+
+      write_tool = Enum.find(state.tools, &(&1.name == "write_file"))
+
+      assert {:ok, result} =
+               write_tool.callback.(%{"path" => "lib/view_draft.ex", "content" => "draft\n"})
+
+      assert result =~ "via ProjectView"
+      assert File.read!(path) == "original\n"
+      assert {:ok, "draft\n"} = ProjectView.read_file(view, "lib/view_draft.ex")
+
+      assert {:ok, diff} = ProjectView.diff(view)
+      assert %{path: "lib/view_draft.ex", kind: :modified} in diff
+
+      GenServer.stop(pid, :normal)
+      assert {:ok, "draft\n"} = ProjectView.read_file(view, "lib/view_draft.ex")
+      assert {:ok, diff_after} = ProjectView.diff(view)
+      assert %{path: "lib/view_draft.ex", kind: :modified} in diff_after
+      assert Minga.Buffer.content(buffer) == "original\n"
     end
 
     test "send_prompt passes semantic reasoning_effort for each provider", %{tmp_dir: dir} do
@@ -342,6 +420,114 @@ defmodule MingaAgent.Providers.NativeTest do
       # Should eventually get a text response and AgentEnd
       assert Enum.any?(events, &match?(%Event.TextDelta{}, &1))
       assert Enum.any?(events, &match?(%Event.AgentEnd{}, &1))
+    end
+
+    test "uses ProjectView-backed tools when project_view is passed to Native.start_link", %{
+      tmp_dir: dir
+    } do
+      root = Path.join(dir, "root")
+      working_dir = Path.join(dir, "working")
+      File.mkdir_p!(Path.join(root, "lib"))
+      File.mkdir_p!(Path.join(working_dir, "lib"))
+      File.write!(Path.join(root, "lib/file.txt"), "root text")
+      File.write!(Path.join(working_dir, "lib/file.txt"), "view text")
+
+      {:ok, project_view} =
+        RecordingBackend.create(root,
+          parent: self(),
+          working_dir: working_dir,
+          workspace_id: 7,
+          env: [{"PROJECT_VIEW_SENTINEL", "present"}]
+        )
+
+      call_count = :counters.new(1, [:atomics])
+
+      client = fn _model, _messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          if count == 0 do
+            [
+              ReqLLM.StreamChunk.tool_call("read_file", %{"path" => "lib/file.txt"}, %{
+                id: "tc_project_view",
+                index: 0
+              }),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+            ]
+          else
+            [
+              ReqLLM.StreamChunk.text("done"),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+            ]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      {:ok, pid} =
+        start_provider(tmp_dir: root, llm_client: client, project_view: project_view, tools: nil)
+
+      assert :ok = Native.send_prompt(pid, "Read the file through ProjectView")
+      assert_receive {:project_view_call, {:read_file, "lib/file.txt"}}
+
+      events = collect_events(1_000)
+      tool_end = Enum.find(events, &match?(%Event.ToolEnd{name: "read_file"}, &1))
+      assert tool_end != nil
+      assert tool_end.result =~ "view text"
+      assert tool_end.result =~ "ProjectView workspace 7"
+    end
+
+    test "tracks delete_file as a file change and marks the file deleted", %{tmp_dir: dir} do
+      path = "delete-me.txt"
+      absolute_path = Path.join(dir, path)
+      File.write!(absolute_path, "delete me")
+
+      call_count = :counters.new(1, [:atomics])
+
+      client = fn _model, _messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          if count == 0 do
+            [
+              ReqLLM.StreamChunk.tool_call("delete_file", %{"path" => path}, %{
+                id: "tc_delete_file",
+                index: 0
+              }),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+            ]
+          else
+            [
+              ReqLLM.StreamChunk.text("deleted"),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+            ]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: client,
+          tools: nil,
+          config: agent_config(tool_approval: :none)
+        )
+
+      assert :ok = Native.send_prompt(pid, "Delete the file")
+      events = collect_events(1_000)
+
+      assert Enum.any?(events, &match?(%Event.ToolStart{name: "delete_file"}, &1))
+      assert Enum.any?(events, &match?(%Event.ToolEnd{name: "delete_file", is_error: false}, &1))
+
+      file_changed = Enum.find(events, &match?(%Event.ToolFileChanged{}, &1))
+      assert file_changed != nil
+      assert file_changed.path == absolute_path
+      assert file_changed.before_content == "delete me"
+      assert file_changed.after_content == ""
+      refute File.exists?(absolute_path)
     end
 
     test "passes is_error metadata on tool result message when tool fails", %{tmp_dir: dir} do
