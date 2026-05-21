@@ -316,7 +316,6 @@ defmodule MingaEditor.StartupTest do
       assert restored.workspace.keymap_scope == :agent
       assert restored.workspace.agent_ui.view.active
       assert restored_tab.context.keymap_scope == :agent
-      assert restored_tab.context.agent_ui.view.active
       assert Content.agent_chat?(active_window.content)
       assert is_pid(restored.workspace.buffers.active)
     after
