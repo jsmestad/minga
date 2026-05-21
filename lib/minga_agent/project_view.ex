@@ -77,11 +77,11 @@ defmodule MingaAgent.ProjectView do
   end
 
   @doc "Returns the directory shell commands should run in for this view."
-  @spec working_dir(t()) :: String.t()
+  @spec working_dir(t()) :: String.t() | {:error, term()}
   def working_dir(%__MODULE__{} = view), do: view.backend.working_dir(view)
 
   @doc "Returns environment variables shell commands should use for this view."
-  @spec command_env(t()) :: [{String.t(), String.t()}]
+  @spec command_env(t()) :: [{String.t(), String.t()}] | {:error, term()}
   def command_env(%__MODULE__{} = view), do: view.backend.command_env(view)
 
   @doc "Returns backend-specific diff data for the view."
@@ -92,9 +92,21 @@ defmodule MingaAgent.ProjectView do
   @spec promote(t(), term()) :: :ok | {:conflict, map()} | {:error, term()}
   def promote(%__MODULE__{} = view, target), do: view.backend.promote(view, target)
 
+  @doc "Discards one file from view-local state."
+  @spec discard_file(t(), String.t()) :: :ok | {:error, term()}
+  def discard_file(%__MODULE__{} = view, relative_path) when is_binary(relative_path) do
+    with {:ok, path} <- normalize_relative_path(relative_path) do
+      view.backend.discard_file(view, path)
+    end
+  end
+
   @doc "Discards view-local state."
   @spec discard(t()) :: :ok | {:error, term()}
   def discard(%__MODULE__{} = view), do: view.backend.discard(view)
+
+  @doc "Releases backend-owned resources for the view."
+  @spec close(t()) :: :ok | {:error, term()}
+  def close(%__MODULE__{} = view), do: view.backend.close(view)
 
   @doc "Returns capability flags for this view."
   @spec capabilities(t()) :: ProjectView.Backend.capabilities()

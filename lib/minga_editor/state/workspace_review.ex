@@ -30,10 +30,10 @@ defmodule MingaEditor.State.WorkspaceReview do
   @spec new() :: t()
   def new, do: %__MODULE__{state: :clean}
 
-  @doc "Returns true when the review has unapplied drafts or conflicts."
+  @doc "Returns true when the review has unapplied drafts, conflicts, or a recorded error."
   @spec pending?(t()) :: boolean()
-  def pending?(%__MODULE__{changed_files: changed, conflict_files: conflicts}) do
-    changed != [] or conflicts != []
+  def pending?(%__MODULE__{changed_files: changed, conflict_files: conflicts, last_error: error}) do
+    changed != [] or conflicts != [] or not is_nil(error)
   end
 
   @doc "Returns the number of changed draft files."
@@ -59,6 +59,19 @@ defmodule MingaEditor.State.WorkspaceReview do
         changed_files: [],
         conflict_files: [],
         last_error: nil,
+        in_progress?: false
+    }
+  end
+
+  @doc "Marks the workspace as needing review, optionally recording an error."
+  @spec mark_needs_review(t(), [FileRef.t()], error() | nil) :: t()
+  def mark_needs_review(%__MODULE__{} = review, files, error \\ nil) when is_list(files) do
+    %{
+      review
+      | state: :needs_review,
+        changed_files: files,
+        conflict_files: [],
+        last_error: error,
         in_progress?: false
     }
   end
@@ -121,6 +134,17 @@ defmodule MingaEditor.State.WorkspaceReview do
   def promote_found_overlaps(%__MODULE__{state: from}, _files, _error),
     do: invalid(from, :conflict)
 
+  @doc "Discards one file from draft and conflict metadata."
+  @spec discard_file(t(), FileRef.t()) :: t()
+  def discard_file(%__MODULE__{} = review, %FileRef{} = file_ref) do
+    changed_files = Enum.reject(review.changed_files, &FileRef.equal?(&1, file_ref))
+    conflict_files = Enum.reject(review.conflict_files, &FileRef.equal?(&1, file_ref))
+
+    review
+    |> Map.merge(%{changed_files: changed_files, conflict_files: conflict_files})
+    |> normalize_state_after_file_discard()
+  end
+
   @doc "Clears drafts or conflicts without applying them."
   @spec discard(t()) :: {:ok, t()} | {:error, term()}
   def discard(%__MODULE__{state: state} = review)
@@ -134,6 +158,23 @@ defmodule MingaEditor.State.WorkspaceReview do
   @spec resolved_and_promoted(t()) :: {:ok, t()} | {:error, term()}
   def resolved_and_promoted(%__MODULE__{state: :conflict} = review), do: {:ok, clean(review)}
   def resolved_and_promoted(%__MODULE__{state: from}), do: invalid(from, :clean)
+
+  @spec normalize_state_after_file_discard(t()) :: t()
+  defp normalize_state_after_file_discard(%__MODULE__{conflict_files: [_ | _]} = review) do
+    %{review | state: :conflict, last_error: nil, in_progress?: false}
+  end
+
+  defp normalize_state_after_file_discard(
+         %__MODULE__{state: :draft, changed_files: [_ | _]} = review
+       ) do
+    %{review | last_error: nil, in_progress?: false}
+  end
+
+  defp normalize_state_after_file_discard(%__MODULE__{changed_files: [_ | _]} = review) do
+    %{review | state: :needs_review, last_error: nil, in_progress?: false}
+  end
+
+  defp normalize_state_after_file_discard(%__MODULE__{} = review), do: clean(review)
 
   @spec invalid(state(), state()) :: {:error, {:invalid_transition, state(), state()}}
   defp invalid(from, to), do: {:error, {:invalid_transition, from, to}}

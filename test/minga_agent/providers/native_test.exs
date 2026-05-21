@@ -1,7 +1,9 @@
 defmodule MingaAgent.Providers.NativeTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer.Process, as: BufferProcess
   alias MingaAgent.Config, as: AgentConfig
+  alias MingaAgent.ProjectView
   alias MingaAgent.Event
   alias MingaAgent.ProjectView.RecordingBackend
   alias MingaAgent.Providers.Native
@@ -165,6 +167,81 @@ defmodule MingaAgent.Providers.NativeTest do
       assert {:ok, %{"level" => "medium"}} = Native.cycle_thinking_level(pid)
       assert {:ok, %{"level" => "high"}} = Native.cycle_thinking_level(pid)
       assert {:ok, %{"level" => "off"}} = Native.cycle_thinking_level(pid)
+    end
+
+    test "rebuilds built-in tool closures after fork store down so stale pids stop leaking", %{
+      tmp_dir: dir
+    } do
+      path = Path.join(dir, "lib/tool_rebuild.ex")
+      File.mkdir_p!(Path.dirname(path))
+      File.write!(path, "original\n")
+
+      {:ok, buffer} = start_supervised({BufferProcess, content: "original\n", file_path: path})
+      {:ok, pid} = start_provider(tmp_dir: dir, tools: nil)
+
+      state = :sys.get_state(pid)
+      fork_store = state.fork_store
+      assert is_pid(fork_store)
+      write_tool = Enum.find(state.tools, &(&1.name == "write_file"))
+
+      assert {:ok, result} =
+               write_tool.callback.(%{"path" => "lib/tool_rebuild.ex", "content" => "forked\n"})
+
+      assert result =~ "via fork"
+      assert File.read!(path) == "original\n"
+      assert Minga.Buffer.content(buffer) == "original\n"
+
+      ref = Process.monitor(fork_store)
+      Process.exit(fork_store, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^fork_store, _reason}
+
+      rebuilt_state = :sys.get_state(pid)
+      assert rebuilt_state.fork_store == nil
+      rebuilt_write_tool = Enum.find(rebuilt_state.tools, &(&1.name == "write_file"))
+
+      assert {:ok, result} =
+               rebuilt_write_tool.callback.(%{
+                 "path" => "lib/tool_rebuild.ex",
+                 "content" => "direct\n"
+               })
+
+      assert result =~ "wrote"
+      assert File.read!(path) == "original\n"
+      assert Minga.Buffer.content(buffer) == "direct\n"
+    end
+
+    test "project_view-backed tools reuse the workspace-owned draft machinery and survive provider exit",
+         %{tmp_dir: dir} do
+      path = Path.join(dir, "lib/view_draft.ex")
+      File.mkdir_p!(Path.dirname(path))
+      File.write!(path, "original\n")
+
+      {:ok, buffer} = start_supervised({BufferProcess, content: "original\n", file_path: path})
+      {:ok, view} = ProjectView.overlay(dir)
+      {:ok, pid} = start_provider(tmp_dir: dir, project_view: view, tools: nil)
+
+      state = :sys.get_state(pid)
+      assert state.project_view == view
+      assert state.fork_store == nil
+      assert state.changeset == nil
+
+      write_tool = Enum.find(state.tools, &(&1.name == "write_file"))
+
+      assert {:ok, result} =
+               write_tool.callback.(%{"path" => "lib/view_draft.ex", "content" => "draft\n"})
+
+      assert result =~ "via ProjectView"
+      assert File.read!(path) == "original\n"
+      assert {:ok, "draft\n"} = ProjectView.read_file(view, "lib/view_draft.ex")
+
+      assert {:ok, diff} = ProjectView.diff(view)
+      assert %{path: "lib/view_draft.ex", kind: :modified} in diff
+
+      GenServer.stop(pid, :normal)
+      assert {:ok, "draft\n"} = ProjectView.read_file(view, "lib/view_draft.ex")
+      assert {:ok, diff_after} = ProjectView.diff(view)
+      assert %{path: "lib/view_draft.ex", kind: :modified} in diff_after
+      assert Minga.Buffer.content(buffer) == "original\n"
     end
 
     test "send_prompt passes semantic reasoning_effort for each provider", %{tmp_dir: dir} do

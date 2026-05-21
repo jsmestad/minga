@@ -1,3 +1,5 @@
+# credo:disable-for-this-file Credo.Check.Readability.PreferImplicitTry
+
 defmodule MingaAgent.BufferForkStore do
   @moduledoc """
   Holds the mapping of file paths to Buffer.Fork pids for an agent session.
@@ -60,7 +62,7 @@ defmodule MingaAgent.BufferForkStore do
     GenServer.call(store, :all)
   end
 
-  @doc "Merges all dirty forks back to their parent buffers. Returns results per path."
+  @doc "Merges all dirty forks back to their parent buffers. Failed and conflicting forks stay in the store for follow-up."
   @spec merge_all(GenServer.server()) :: [
           {String.t(), :ok | {:conflict, term()} | {:error, term()}}
         ]
@@ -76,24 +78,16 @@ defmodule MingaAgent.BufferForkStore do
     GenServer.call(store, :merge_all_keep_failed, 30_000)
   end
 
-  @doc "Merges only the forks whose paths are listed, keeping failed forks alive."
-  @spec merge_paths_keep_failed(GenServer.server(), [String.t()]) :: [
-          {String.t(), :ok | {:conflict, term()} | {:error, term()}}
-        ]
-  def merge_paths_keep_failed(store, paths) when is_list(paths) do
-    GenServer.call(store, {:merge_paths_keep_failed, paths}, 30_000)
+  @doc "Discards one fork without merging."
+  @spec discard(GenServer.server(), String.t()) :: :ok
+  def discard(store, path) when is_binary(path) do
+    GenServer.call(store, {:discard, path})
   end
 
   @doc "Discards all forks without merging."
   @spec discard_all(GenServer.server()) :: :ok
   def discard_all(store) do
     GenServer.call(store, :discard_all)
-  end
-
-  @doc "Discards only the forks whose paths are listed."
-  @spec discard_paths(GenServer.server(), [String.t()]) :: :ok
-  def discard_paths(store, paths) when is_list(paths) do
-    GenServer.call(store, {:discard_paths, paths})
   end
 
   @doc "Stops the store, cleaning up all forks."
@@ -143,30 +137,21 @@ defmodule MingaAgent.BufferForkStore do
   end
 
   def handle_call(:merge_all, _from, state) do
-    results = Enum.map(state.forks, fn {path, fork_pid} -> merge_fork(path, fork_pid) end)
-
-    stop_all_forks(state)
-    {:reply, results, %{state | forks: %{}, monitors: %{}}}
+    merge_results(state)
   end
 
   def handle_call(:merge_all_keep_failed, _from, state) do
-    {results, state} = merge_paths_keep_failed_state(state, Map.keys(state.forks))
-    {:reply, results, state}
+    merge_results(state)
   end
 
-  def handle_call({:merge_paths_keep_failed, paths}, _from, state) do
-    {results, state} = merge_paths_keep_failed_state(state, paths)
-    {:reply, results, state}
+  def handle_call({:discard, path}, _from, state) do
+    state = stop_forks_for_paths(state, MapSet.new([path]))
+    {:reply, :ok, state}
   end
 
   def handle_call(:discard_all, _from, state) do
-    state = discard_paths_state(state, Map.keys(state.forks))
-    {:reply, :ok, state}
-  end
-
-  def handle_call({:discard_paths, paths}, _from, state) do
-    state = discard_paths_state(state, paths)
-    {:reply, :ok, state}
+    stop_all_forks(state)
+    {:reply, :ok, %{state | forks: %{}, monitors: %{}}}
   end
 
   @impl true
@@ -195,13 +180,26 @@ defmodule MingaAgent.BufferForkStore do
   @spec merge_fork(String.t(), pid()) ::
           {String.t(), :ok | {:conflict, term()} | {:error, term()}}
   defp merge_fork(path, fork_pid) do
-    if Fork.dirty?(fork_pid), do: do_merge_fork(path, fork_pid), else: {path, :ok}
+    case safe_fork_dirty(fork_pid) do
+      {:ok, true} -> do_merge_fork(path, fork_pid)
+      {:ok, false} -> {path, :ok}
+      {:error, reason} -> {path, {:error, reason}}
+    end
+  end
+
+  @spec safe_fork_dirty(pid()) :: {:ok, boolean()} | {:error, term()}
+  defp safe_fork_dirty(fork_pid) do
+    try do
+      {:ok, Fork.dirty?(fork_pid)}
+    catch
+      :exit, reason -> {:error, {:fork_dirty_failed, reason}}
+    end
   end
 
   @spec do_merge_fork(String.t(), pid()) ::
           {String.t(), :ok | {:conflict, term()} | {:error, term()}}
   defp do_merge_fork(path, fork_pid) do
-    case Fork.merge(fork_pid) do
+    case safe_fork_merge(fork_pid) do
       {:ok, merged_text} ->
         case apply_merge_to_parent(path, merged_text) do
           :ok -> {path, :ok}
@@ -216,6 +214,23 @@ defmodule MingaAgent.BufferForkStore do
     end
   end
 
+  @spec safe_fork_merge(pid()) :: {:ok, String.t()} | {:conflict, term()} | {:error, term()}
+  defp safe_fork_merge(fork_pid) do
+    try do
+      Fork.merge(fork_pid)
+    catch
+      :exit, reason -> {:error, {:fork_merge_failed, reason}}
+    end
+  end
+
+  @spec merge_results(state()) :: {:reply, [tuple()], state()}
+  defp merge_results(state) do
+    results = Enum.map(state.forks, fn {path, fork_pid} -> merge_fork(path, fork_pid) end)
+    successful_paths = successful_merge_paths(results)
+    state = stop_forks_for_paths(state, successful_paths)
+    {:reply, results, state}
+  end
+
   @spec successful_merge_paths([{String.t(), :ok | {:conflict, term()} | {:error, term()}}]) ::
           MapSet.t(String.t())
   defp successful_merge_paths(results) do
@@ -225,31 +240,6 @@ defmodule MingaAgent.BufferForkStore do
       {_path, _result} -> []
     end)
     |> MapSet.new()
-  end
-
-  @spec merge_paths_keep_failed_state(state(), [String.t()]) ::
-          {[{String.t(), :ok | {:conflict, term()} | {:error, term()}}], state()}
-  defp merge_paths_keep_failed_state(state, paths) do
-    paths_to_merge =
-      paths
-      |> Enum.uniq()
-      |> Enum.sort()
-      |> Enum.flat_map(fn path ->
-        case Map.fetch(state.forks, path) do
-          {:ok, fork_pid} -> [{path, fork_pid}]
-          :error -> []
-        end
-      end)
-
-    results = Enum.map(paths_to_merge, fn {path, fork_pid} -> merge_fork(path, fork_pid) end)
-    successful_paths = successful_merge_paths(results)
-    state = stop_forks_for_paths(state, successful_paths)
-    {results, state}
-  end
-
-  @spec discard_paths_state(state(), [String.t()]) :: state()
-  defp discard_paths_state(state, paths) do
-    stop_forks_for_paths(state, MapSet.new(paths))
   end
 
   @spec stop_forks_for_paths(state(), MapSet.t(String.t())) :: state()
@@ -289,20 +279,27 @@ defmodule MingaAgent.BufferForkStore do
 
   @spec apply_merge_to_parent(String.t(), String.t()) :: :ok | {:error, term()}
   defp apply_merge_to_parent(path, merged_text) do
-    case Minga.Buffer.pid_for_path(path) do
-      {:ok, buf_pid} ->
-        try do
-          case Minga.Buffer.replace_content(buf_pid, merged_text, :agent) do
+    try do
+      case Minga.Buffer.pid_for_path(path) do
+        {:ok, buf_pid} ->
+          try do
+            case Minga.Buffer.replace_content(buf_pid, merged_text, :agent) do
+              :ok -> :ok
+              {:error, reason} -> {:error, reason}
+            end
+          catch
+            :exit, reason -> {:error, {:parent_apply_failed, reason}}
+          end
+
+        :not_found ->
+          # Buffer was closed while fork was active; write to disk
+          case File.write(path, merged_text) do
             :ok -> :ok
             {:error, reason} -> {:error, reason}
           end
-        catch
-          :exit, _ -> {:error, :parent_unreachable}
-        end
-
-      :not_found ->
-        # Buffer was closed while fork was active; write to disk
-        File.write(path, merged_text)
+      end
+    catch
+      :exit, reason -> {:error, {:parent_lookup_failed, reason}}
     end
   end
 end

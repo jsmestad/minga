@@ -1,3 +1,5 @@
+# credo:disable-for-this-file Credo.Check.Refactor.RedundantWithClauseResult
+
 defmodule MingaAgent.ProjectView.Direct do
   @moduledoc """
   Direct project view backend.
@@ -7,9 +9,9 @@ defmodule MingaAgent.ProjectView.Direct do
 
   @behaviour MingaAgent.ProjectView.Backend
 
-  alias Minga.Events
+  alias Minga.Buffer.Document
+  alias Minga.Buffer.Replace
   alias MingaAgent.ProjectView
-  alias MingaAgent.ProjectView.PathResolver
 
   @type direct_state :: %{modified: MapSet.t(String.t()), deleted: MapSet.t(String.t())}
 
@@ -29,18 +31,19 @@ defmodule MingaAgent.ProjectView.Direct do
   @impl true
   @spec read_file(ProjectView.t(), String.t()) :: {:ok, binary()} | {:error, term()}
   def read_file(%ProjectView{} = view, relative_path) do
-    with {:ok, target} <- safe_target(view, relative_path) do
-      File.read(target)
-    end
+    view |> target_path(relative_path) |> File.read()
   end
 
   @impl true
   @spec write_file(ProjectView.t(), String.t(), binary()) :: :ok | {:error, term()}
   def write_file(%ProjectView{} = view, relative_path, content) do
-    with {:ok, target} <- safe_target(view, relative_path),
+    target = target_path(view, relative_path)
+
+    with :ok <- ensure_tracking_agent_available(view),
          :ok <- File.mkdir_p(Path.dirname(target)),
-         :ok <- File.write(target, content) do
-      track_modified(view, relative_path)
+         :ok <- File.write(target, content),
+         :ok <- track_modified(view, relative_path) do
+      :ok
     end
   end
 
@@ -48,18 +51,21 @@ defmodule MingaAgent.ProjectView.Direct do
   @spec edit_file(ProjectView.t(), String.t(), String.t(), String.t()) :: :ok | {:error, term()}
   def edit_file(%ProjectView{} = view, relative_path, old_text, new_text) do
     with {:ok, content} <- read_file(view, relative_path),
-         {:ok, edited} <- replace_exact(content, old_text, new_text) do
-      write_file(view, relative_path, edited)
+         {:ok, edited_doc, _msg} <- Replace.apply(Document.new(content), old_text, new_text, nil),
+         :ok <- write_file(view, relative_path, Document.content(edited_doc)) do
+      :ok
     end
   end
 
   @impl true
   @spec delete_file(ProjectView.t(), String.t()) :: :ok | {:error, term()}
   def delete_file(%ProjectView{} = view, relative_path) do
-    with {:ok, target} <- safe_target(view, relative_path),
-         :ok <- File.rm(target) do
-      track_deleted(view, relative_path)
-      broadcast_file_written(target)
+    target = target_path(view, relative_path)
+
+    with :ok <- ensure_tracking_agent_available(view),
+         :ok <- File.rm(target),
+         :ok <- track_deleted(view, relative_path) do
+      :ok
     end
   end
 
@@ -67,11 +73,11 @@ defmodule MingaAgent.ProjectView.Direct do
   @spec list_directory(ProjectView.t(), String.t()) ::
           {:ok, [ProjectView.Backend.directory_entry()]} | {:error, term()}
   def list_directory(%ProjectView{} = view, relative_path) do
-    with {:ok, dir} <- safe_target(view, relative_path, allow_root: true) do
-      case File.ls(dir) do
-        {:ok, entries} -> {:ok, Enum.map(Enum.sort(entries), &directory_entry(dir, &1))}
-        {:error, reason} -> {:error, reason}
-      end
+    dir = target_path(view, relative_path)
+
+    case File.ls(dir) do
+      {:ok, entries} -> {:ok, Enum.map(Enum.sort(entries), &directory_entry(dir, &1))}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -114,9 +120,21 @@ defmodule MingaAgent.ProjectView.Direct do
   def promote(%ProjectView{}, target), do: {:error, {:unsupported_target, target}}
 
   @impl true
+  @spec discard_file(ProjectView.t(), String.t()) :: :ok | {:error, term()}
+  def discard_file(%ProjectView{} = _view, _relative_path) do
+    {:error, :discard_not_supported}
+  end
+
+  @impl true
   @spec discard(ProjectView.t()) :: :ok | {:error, term()}
-  def discard(%ProjectView{} = view) do
-    Agent.update(view.ref, fn _ -> %{modified: MapSet.new(), deleted: MapSet.new()} end)
+  def discard(%ProjectView{} = _view) do
+    {:error, :discard_not_supported}
+  end
+
+  @impl true
+  @spec close(ProjectView.t()) :: :ok | {:error, term()}
+  def close(%ProjectView{} = view) do
+    Agent.stop(view.ref)
   catch
     :exit, _ -> :ok
   end
@@ -133,20 +151,9 @@ defmodule MingaAgent.ProjectView.Direct do
     }
   end
 
-  @spec safe_target(ProjectView.t(), String.t(), keyword()) ::
-          {:ok, String.t()} | {:error, :invalid_path | :path_traversal | :symlink_traversal}
-  defp safe_target(%ProjectView{project_root: project_root}, relative_path, opts \\ []) do
-    PathResolver.resolve(project_root, relative_path, opts)
-  end
-
-  @spec replace_exact(binary(), String.t(), String.t()) ::
-          {:ok, binary()} | {:error, :old_text_not_found}
-  defp replace_exact(content, old_text, new_text) do
-    if String.contains?(content, old_text) do
-      {:ok, String.replace(content, old_text, new_text, global: false)}
-    else
-      {:error, :old_text_not_found}
-    end
+  @spec target_path(ProjectView.t(), String.t()) :: String.t()
+  defp target_path(%ProjectView{project_root: project_root}, relative_path) do
+    Path.join(project_root, relative_path)
   end
 
   @spec directory_entry(String.t(), String.t()) :: ProjectView.Backend.directory_entry()
@@ -155,26 +162,38 @@ defmodule MingaAgent.ProjectView.Direct do
     %{name: name, type: type}
   end
 
-  @spec track_modified(ProjectView.t(), String.t()) :: :ok
+  @spec ensure_tracking_agent_available(ProjectView.t()) :: :ok | {:error, term()}
+  defp ensure_tracking_agent_available(%ProjectView{} = view) do
+    if Process.alive?(view.ref) do
+      :ok
+    else
+      {:error, {:direct_view_unavailable, :agent_dead}}
+    end
+  end
+
+  @spec track_modified(ProjectView.t(), String.t()) :: :ok | {:error, term()}
   defp track_modified(%ProjectView{} = view, relative_path) do
     Agent.update(view.ref, fn state ->
       state
       |> Map.update!(:modified, &MapSet.put(&1, relative_path))
       |> Map.update!(:deleted, &MapSet.delete(&1, relative_path))
     end)
+
+    :ok
+  catch
+    :exit, reason -> {:error, {:direct_view_unavailable, reason}}
   end
 
-  @spec track_deleted(ProjectView.t(), String.t()) :: :ok
+  @spec track_deleted(ProjectView.t(), String.t()) :: :ok | {:error, term()}
   defp track_deleted(%ProjectView{} = view, relative_path) do
     Agent.update(view.ref, fn state ->
       state
       |> Map.update!(:modified, &MapSet.delete(&1, relative_path))
       |> Map.update!(:deleted, &MapSet.put(&1, relative_path))
     end)
-  end
 
-  @spec broadcast_file_written(String.t()) :: :ok
-  defp broadcast_file_written(path) do
-    Events.broadcast(:file_written, %Events.FileWrittenEvent{path: path, change_type: :deleted})
+    :ok
+  catch
+    :exit, reason -> {:error, {:direct_view_unavailable, reason}}
   end
 end

@@ -82,13 +82,13 @@ defmodule MingaAgent.Changeset do
   end
 
   @doc "Undoes the last edit to a specific file."
-  @spec undo(changeset(), String.t()) :: :ok | {:error, :nothing_to_undo}
+  @spec undo(changeset(), String.t()) :: :ok | {:error, :nothing_to_undo | term()}
   def undo(cs, relative_path) when is_binary(relative_path) do
     GenServer.call(cs, {:undo, relative_path})
   end
 
   @doc "Resets the entire changeset, restoring all files to their original state."
-  @spec reset(changeset()) :: :ok
+  @spec reset(changeset()) :: :ok | {:error, term()}
   def reset(cs) do
     GenServer.call(cs, :reset)
   end
@@ -116,6 +116,12 @@ defmodule MingaAgent.Changeset do
   @spec merge(changeset()) :: :ok | {:conflict, map()} | {:error, term()}
   def merge(cs) do
     GenServer.call(cs, :merge)
+  end
+
+  @doc "Discards one changed file from the changeset view."
+  @spec discard_file(changeset(), String.t()) :: :ok | {:error, term()}
+  def discard_file(cs, relative_path) when is_binary(relative_path) do
+    GenServer.call(cs, {:discard_file, relative_path})
   end
 
   @doc "Discards all changes, cleans up the overlay, and stops the GenServer."
@@ -164,6 +170,12 @@ defmodule MingaAgent.Changeset do
   @spec project_root(changeset()) :: String.t()
   def project_root(cs) do
     GenServer.call(cs, :project_root)
+  end
+
+  @doc "Returns environment variables shell commands should use for this changeset."
+  @spec command_env(changeset()) :: [{String.t(), String.t()}]
+  def command_env(cs) do
+    GenServer.call(cs, :command_env)
   end
 
   @doc "Returns modified and deleted file lists."
