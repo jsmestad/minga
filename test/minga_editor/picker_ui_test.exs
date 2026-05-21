@@ -143,6 +143,149 @@ defmodule MingaEditor.PickerUITest do
         assert %Minga.Core.Face{} = style
       end)
     end
+
+    test "two-line items render description on an indented dim second row" do
+      picker =
+        Picker.new([
+          %Item{id: "1", label: "file.ex", description: "lib/minga/file.ex", two_line: true}
+        ])
+
+      input = %RenderInput{
+        picker_state: %PickerState{picker: picker, source: nil},
+        theme_picker: theme_picker(),
+        viewport: Viewport.new(10, 80)
+      }
+
+      {draws, _cursor} = PickerUI.render(input)
+      theme = theme_picker()
+
+      assert Enum.any?(draws, fn {row, col, text, _face} ->
+               row == 7 and col == 0 and String.contains?(text, "file.ex") and
+                 not String.contains?(text, "lib/minga/file.ex")
+             end)
+
+      assert Enum.any?(draws, fn {row, col, text, face} ->
+               row == 8 and col == 0 and String.starts_with?(text, "  lib/minga/file.ex") and
+                 face.fg == theme.dim_fg and face.bg == theme.sel_bg
+             end)
+    end
+
+    test "selected two-line items draw the left-edge block on both rows" do
+      picker =
+        Picker.new([
+          %Item{id: "1", label: "file.ex", description: "lib/minga/file.ex", two_line: true}
+        ])
+
+      input = %RenderInput{
+        picker_state: %PickerState{picker: picker, source: nil},
+        theme_picker: theme_picker(),
+        viewport: Viewport.new(10, 80)
+      }
+
+      {draws, _cursor} = PickerUI.render(input)
+      theme = theme_picker()
+
+      assert Enum.any?(draws, fn
+               {7, 0, "▌", face} -> face.fg == theme.highlight_fg and face.bg == theme.sel_bg
+               _ -> false
+             end)
+
+      assert Enum.any?(draws, fn
+               {8, 0, "▌", face} -> face.fg == theme.highlight_fg and face.bg == theme.sel_bg
+               _ -> false
+             end)
+    end
+
+    test "single-line items keep inline descriptions" do
+      picker =
+        Picker.new([
+          %Item{id: "1", label: "file.ex", description: "lib/minga/file.ex", two_line: false}
+        ])
+
+      input = %RenderInput{
+        picker_state: %PickerState{picker: picker, source: nil},
+        theme_picker: theme_picker(),
+        viewport: Viewport.new(10, 80)
+      }
+
+      {draws, _cursor} = PickerUI.render(input)
+
+      assert Enum.any?(draws, fn {_row, _col, text, _face} ->
+               String.contains?(text, "file.ex") and String.contains?(text, "lib/minga/file.ex")
+             end)
+    end
+
+    test "two-line viewport accounting limits visible items by consumed rows" do
+      items =
+        Enum.map(1..5, fn idx ->
+          %Item{id: idx, label: "file#{idx}.ex", description: "lib/file#{idx}.ex", two_line: true}
+        end)
+
+      picker = Picker.new(items, title: "Files", max_visible: 10)
+
+      input = %RenderInput{
+        picker_state: %PickerState{picker: picker, source: nil},
+        theme_picker: theme_picker(),
+        viewport: Viewport.new(8, 80)
+      }
+
+      {draws, _cursor} = PickerUI.render(input)
+      texts = Enum.map(draws, fn {_row, _col, text, _face} -> text end)
+
+      assert Enum.any?(texts, &String.contains?(&1, "file1.ex"))
+      assert Enum.any?(texts, &String.contains?(&1, "file2.ex"))
+      refute Enum.any?(texts, &String.contains?(&1, "file3.ex"))
+    end
+
+    test "tiny viewport shows the label for a two-line item instead of clipping to the description" do
+      picker =
+        Picker.new([
+          %Item{id: "1", label: "file.ex", description: "lib/minga/file.ex", two_line: true}
+        ])
+
+      input = %RenderInput{
+        picker_state: %PickerState{picker: picker, source: nil},
+        theme_picker: theme_picker(),
+        viewport: Viewport.new(2, 80)
+      }
+
+      {draws, _cursor} = PickerUI.render(input)
+
+      row_zero_text =
+        draws
+        |> Enum.filter(fn {row, _col, _text, _face} -> row == 0 end)
+        |> Enum.map_join("", fn {_row, _col, text, _face} -> text end)
+
+      assert String.contains?(row_zero_text, "file.ex")
+      refute String.contains?(row_zero_text, "lib/minga/file.ex")
+    end
+
+    test "action menu positions by selected item row offset for two-line items" do
+      picker =
+        [
+          %Item{id: "1", label: "one.ex", description: "lib/one.ex", two_line: true},
+          %Item{id: "2", label: "two.ex", description: "lib/two.ex", two_line: true}
+        ]
+        |> Picker.new(title: "Files", max_visible: 10)
+        |> Picker.move_down()
+
+      input = %RenderInput{
+        picker_state: %PickerState{
+          picker: picker,
+          source: nil,
+          action_menu: {[{"Open", :open}], 0}
+        },
+        theme_picker: theme_picker(),
+        viewport: Viewport.new(12, 90)
+      }
+
+      {draws, _cursor} = PickerUI.render(input)
+      menu_col = div(90, 3)
+
+      assert Enum.any?(draws, fn {row, col, text, _face} ->
+               row == 9 and col == menu_col and String.starts_with?(text, " Actions")
+             end)
+    end
   end
 
   describe "preview promotion" do
