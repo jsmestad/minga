@@ -37,13 +37,14 @@ defmodule MingaAgent.ToolsTest do
   describe "all/1" do
     test "returns the expected number of tools", %{tmp_dir: dir} do
       tools = Tools.all(project_root: dir)
-      assert length(tools) == 25
+      assert length(tools) == 26
 
       names = Enum.map(tools, & &1.name)
       assert "read_file" in names
       assert "write_file" in names
       assert "edit_file" in names
       assert "multi_edit_file" in names
+      assert "delete_file" in names
       assert "list_directory" in names
       assert "find" in names
       assert "grep" in names
@@ -103,6 +104,10 @@ defmodule MingaAgent.ToolsTest do
 
     test "shell is destructive by default" do
       assert Tools.destructive?("shell")
+    end
+
+    test "delete_file is destructive by default" do
+      assert Tools.destructive?("delete_file")
     end
 
     test "read_file is not destructive by default" do

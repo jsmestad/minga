@@ -7,6 +7,7 @@ defmodule MingaAgent.ProjectView.Direct do
 
   @behaviour MingaAgent.ProjectView.Backend
 
+  alias Minga.Events
   alias MingaAgent.ProjectView
   alias MingaAgent.ProjectView.PathResolver
 
@@ -58,6 +59,7 @@ defmodule MingaAgent.ProjectView.Direct do
     with {:ok, target} <- safe_target(view, relative_path),
          :ok <- File.rm(target) do
       track_deleted(view, relative_path)
+      broadcast_file_written(target)
     end
   end
 
@@ -169,5 +171,10 @@ defmodule MingaAgent.ProjectView.Direct do
       |> Map.update!(:modified, &MapSet.delete(&1, relative_path))
       |> Map.update!(:deleted, &MapSet.put(&1, relative_path))
     end)
+  end
+
+  @spec broadcast_file_written(String.t()) :: :ok
+  defp broadcast_file_written(path) do
+    Events.broadcast(:file_written, %Events.FileWrittenEvent{path: path, change_type: :deleted})
   end
 end

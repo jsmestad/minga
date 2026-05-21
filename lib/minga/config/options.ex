@@ -262,8 +262,16 @@ defmodule Minga.Config.Options do
     {:agent_tool_approval, {:enum, [:destructive, :all, :none]}, :destructive,
      "When agent tool calls require user approval."},
     {:agent_destructive_tools, :string_list,
-     ["write_file", "edit_file", "multi_edit_file", "shell", "git_stage", "git_commit", "rename"],
-     "Tool names treated as destructive for approval prompts."},
+     [
+       "write_file",
+       "edit_file",
+       "multi_edit_file",
+       "delete_file",
+       "shell",
+       "git_stage",
+       "git_commit",
+       "rename"
+     ], "Tool names treated as destructive for approval prompts."},
     {:agent_tool_permissions, :map_or_nil, nil, "Per-tool permission overrides for agent tools."},
     {:agent_hooks, :any, [], "Agent lifecycle hook declarations loaded from config."},
     {:agent_session_retention_days, :pos_integer, 30,

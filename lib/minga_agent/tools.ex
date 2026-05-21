@@ -15,6 +15,7 @@ defmodule MingaAgent.Tools do
   | `write_file`      | Write content to a file (creates or overwrites)      |
   | `edit_file`       | Replace exact text in a file                         |
   | `multi_edit_file` | Apply multiple edits to one file in a single call    |
+  | `delete_file`     | Delete a file                                        |
   | `list_directory`  | List files and directories at a path                 |
   | `find`            | Find files by name/glob pattern                      |
   | `grep`            | Search file contents for a pattern                   |
@@ -37,6 +38,9 @@ defmodule MingaAgent.Tools do
   | `describe_tools`  | List all available tools with descriptions            |
   """
 
+  alias MingaAgent.ProjectView
+  alias MingaAgent.ToolRouter
+  alias MingaAgent.Tools.DeleteFile
   alias MingaAgent.Tools.DiagnosticFeedback
   alias MingaAgent.Tools.EditFile
   alias MingaAgent.Tools.Find
@@ -63,12 +67,13 @@ defmodule MingaAgent.Tools do
   @typedoc "Options passed to `all/1`."
   @type tools_opts :: [
           project_root: String.t(),
+          project_view: ProjectView.t() | nil,
           changeset: pid() | nil,
           fork_store: pid() | nil,
           parent_session: GenServer.server() | nil
         ]
 
-  @default_destructive_tools ~w(write_file edit_file multi_edit_file shell git_stage git_commit rename)
+  @default_destructive_tools ~w(write_file edit_file multi_edit_file delete_file shell git_stage git_commit rename)
 
   @doc """
   Returns true if the named tool is classified as destructive.
@@ -117,19 +122,21 @@ defmodule MingaAgent.Tools do
   @spec all(tools_opts()) :: [Tool.t()]
   def all(opts \\ []) do
     root = Keyword.get(opts, :project_root, File.cwd!())
+    project_view = Keyword.get(opts, :project_view)
     cs = Keyword.get(opts, :changeset)
     fs = Keyword.get(opts, :fork_store)
     parent_session = Keyword.get(opts, :parent_session)
-    router_ctx = MingaAgent.ToolRouter.context(fs, cs)
+    router_ctx = ToolRouter.context(project_view, fs, cs)
 
     [
       read_file(root, router_ctx),
       write_file(root, router_ctx),
       edit_file(root, router_ctx),
       multi_edit_file(root, router_ctx),
-      list_directory(root),
-      find(root),
-      grep(root),
+      delete_file(root, router_ctx),
+      list_directory(root, router_ctx),
+      find(root, router_ctx),
+      grep(root, router_ctx),
       shell(root, router_ctx),
       subagent(root, parent_session),
       git_status(root),
@@ -184,14 +191,13 @@ defmodule MingaAgent.Tools do
       callback: fn args ->
         path = resolve_and_validate_path!(root, args["path"])
 
-        case MingaAgent.ToolRouter.read_file(router_ctx, path) do
+        case ToolRouter.read_file(router_ctx, path) do
           {:ok, content} ->
             opts = build_read_opts(args)
-            apply_read_slice(content, path, opts)
+            routed_result(router_ctx, apply_read_slice(content, path, opts))
 
-          {:error, _} ->
-            opts = build_read_opts(args)
-            ReadFile.execute(path, opts)
+          {:error, reason} ->
+            read_file_fallback(router_ctx, path, reason, args)
         end
       end
     )
@@ -230,7 +236,7 @@ defmodule MingaAgent.Tools do
       callback: fn args ->
         path = resolve_and_validate_path!(root, args["path"])
 
-        case MingaAgent.ToolRouter.write_file(router_ctx, path, args["content"]) do
+        case ToolRouter.write_file(router_ctx, path, args["content"]) do
           :passthrough ->
             case WriteFile.execute(path, args["content"]) do
               {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
@@ -238,12 +244,13 @@ defmodule MingaAgent.Tools do
             end
 
           :ok ->
-            via = if router_ctx.fork_store, do: "fork", else: "changeset"
-
             {:ok,
              maybe_append_diagnostics(
                path,
-               "wrote #{byte_size(args["content"])} bytes to #{path} (via #{via})"
+               append_workspace_context(
+                 router_ctx,
+                 "wrote #{byte_size(args["content"])} bytes to #{path} (via #{route_name(router_ctx)})"
+               )
              )}
 
           {:error, reason} ->
@@ -283,7 +290,7 @@ defmodule MingaAgent.Tools do
       callback: fn args ->
         path = resolve_and_validate_path!(root, args["path"])
 
-        case MingaAgent.ToolRouter.edit_file(
+        case ToolRouter.edit_file(
                router_ctx,
                path,
                args["old_text"],
@@ -296,8 +303,14 @@ defmodule MingaAgent.Tools do
             end
 
           :ok ->
-            via = if router_ctx.fork_store, do: "fork", else: "changeset"
-            {:ok, maybe_append_diagnostics(path, "edited #{path} (via #{via})")}
+            {:ok,
+             maybe_append_diagnostics(
+               path,
+               append_workspace_context(
+                 router_ctx,
+                 "edited #{path} (via #{route_name(router_ctx)})"
+               )
+             )}
 
           {:error, reason} ->
             {:error, inspect(reason)}
@@ -348,7 +361,7 @@ defmodule MingaAgent.Tools do
         path = resolve_and_validate_path!(root, args["path"])
         edits = args["edits"] || []
 
-        if MingaAgent.ToolRouter.active?(router_ctx) do
+        if ToolRouter.active?(router_ctx) do
           apply_multi_edit_via_router(router_ctx, path, edits)
         else
           case MultiEditFile.execute(path, edits) do
@@ -360,8 +373,49 @@ defmodule MingaAgent.Tools do
     )
   end
 
-  @spec list_directory(String.t()) :: Tool.t()
-  defp list_directory(root) do
+  @spec delete_file(String.t(), ToolRouter.context()) :: Tool.t()
+  defp delete_file(root, router_ctx) do
+    Tool.new!(
+      name: "delete_file",
+      description: """
+      Delete a file from the project. Destructive: requires approval.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "path" => %{
+            "type" => "string",
+            "description" => "Path to the file, relative to the project root"
+          }
+        },
+        "required" => ["path"]
+      },
+      callback: fn args ->
+        path = resolve_and_validate_path!(root, args["path"])
+
+        case ToolRouter.delete_file(router_ctx, path) do
+          :passthrough ->
+            DeleteFile.execute(path)
+
+          :ok ->
+            {:ok,
+             append_workspace_context(
+               router_ctx,
+               "deleted #{path} (via #{route_name(router_ctx)})"
+             )}
+
+          {:error, reason} when is_binary(reason) ->
+            {:error, reason}
+
+          {:error, reason} ->
+            {:error, inspect(reason)}
+        end
+      end
+    )
+  end
+
+  @spec list_directory(String.t(), ToolRouter.context()) :: Tool.t()
+  defp list_directory(root, router_ctx) do
     Tool.new!(
       name: "list_directory",
       description: """
@@ -382,13 +436,23 @@ defmodule MingaAgent.Tools do
       },
       callback: fn args ->
         path = resolve_and_validate_path!(root, args["path"])
-        ListDirectory.execute(path)
+
+        case ToolRouter.list_directory(router_ctx, path) do
+          :passthrough ->
+            ListDirectory.execute(path)
+
+          {:ok, entries} ->
+            {:ok, append_workspace_context(router_ctx, format_project_view_entries(entries))}
+
+          {:error, reason} ->
+            {:error, inspect(reason)}
+        end
       end
     )
   end
 
-  @spec find(String.t()) :: Tool.t()
-  defp find(root) do
+  @spec find(String.t(), ToolRouter.context()) :: Tool.t()
+  defp find(root, router_ctx) do
     Tool.new!(
       name: "find",
       description: """
@@ -421,14 +485,15 @@ defmodule MingaAgent.Tools do
         "required" => ["pattern"]
       },
       callback: fn args ->
-        search_path = resolve_and_validate_path!(root, args["path"] || ".")
-        Find.execute(args["pattern"], search_path, args)
+        path = resolve_and_validate_path!(root, args["path"] || ".")
+        search_path = ToolRouter.filesystem_path(router_ctx, path)
+        routed_result(router_ctx, Find.execute(args["pattern"], search_path, args))
       end
     )
   end
 
-  @spec grep(String.t()) :: Tool.t()
-  defp grep(root) do
+  @spec grep(String.t(), ToolRouter.context()) :: Tool.t()
+  defp grep(root, router_ctx) do
     Tool.new!(
       name: "grep",
       description: """
@@ -465,8 +530,9 @@ defmodule MingaAgent.Tools do
         "required" => ["pattern"]
       },
       callback: fn args ->
-        search_path = resolve_and_validate_path!(root, args["path"] || ".")
-        Grep.execute(args["pattern"], search_path, args)
+        path = resolve_and_validate_path!(root, args["path"] || ".")
+        search_path = ToolRouter.filesystem_path(router_ctx, path)
+        routed_result(router_ctx, Grep.execute(args["pattern"], search_path, args))
       end
     )
   end
@@ -498,8 +564,10 @@ defmodule MingaAgent.Tools do
       callback: fn args ->
         flush_before_shell()
         timeout_secs = min(args["timeout"] || 30, 300)
-        cwd = MingaAgent.ToolRouter.working_dir(router_ctx) || root
-        Shell.execute(args["command"], cwd, timeout_secs)
+        cwd = ToolRouter.working_dir(router_ctx) || root
+
+        env = ToolRouter.command_env(router_ctx)
+        routed_result(router_ctx, Shell.execute(args["command"], cwd, timeout_secs, env: env))
       end
     )
   end
@@ -1054,6 +1122,57 @@ defmodule MingaAgent.Tools do
     _ -> true
   end
 
+  # ── ProjectView routing helpers ────────────────────────────────────────────
+
+  @spec read_file_fallback(ToolRouter.context(), String.t(), term(), map()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp read_file_fallback(router_ctx, path, reason, args) do
+    if ToolRouter.project_view?(router_ctx) do
+      {:error,
+       "failed to read #{path} from #{ToolRouter.workspace_label(router_ctx)}: #{inspect(reason)}"}
+    else
+      routed_result(router_ctx, ReadFile.execute(path, build_read_opts(args)))
+    end
+  end
+
+  @spec routed_result(ToolRouter.context(), {:ok, String.t()} | {:error, String.t()}) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp routed_result(router_ctx, {:ok, message}) do
+    {:ok, append_workspace_context(router_ctx, message)}
+  end
+
+  defp routed_result(_router_ctx, {:error, _message} = error), do: error
+
+  @spec append_workspace_context(ToolRouter.context(), String.t()) :: String.t()
+  defp append_workspace_context(router_ctx, message) do
+    case ToolRouter.workspace_label(router_ctx) do
+      nil -> message
+      label -> "[#{label}]\n" <> message
+    end
+  end
+
+  @spec route_name(ToolRouter.context()) :: String.t()
+  defp route_name(router_ctx) do
+    route_name(ToolRouter.project_view?(router_ctx), router_ctx.fork_store)
+  end
+
+  @spec route_name(boolean(), pid() | nil) :: String.t()
+  defp route_name(true, _fork_store), do: "ProjectView"
+  defp route_name(false, fork_store) when fork_store != nil, do: "fork"
+  defp route_name(false, nil), do: "changeset"
+
+  @spec format_project_view_entries([ProjectView.Backend.directory_entry()]) :: String.t()
+  defp format_project_view_entries(entries) do
+    entries
+    |> Enum.sort_by(fn %{name: name, type: type} ->
+      {if(type == :directory, do: 0, else: 1), name}
+    end)
+    |> Enum.map_join("\n", fn
+      %{name: name, type: :directory} -> name <> "/"
+      %{name: name} -> name
+    end)
+  end
+
   # ── Path safety ─────────────────────────────────────────────────────────────
 
   @doc """
@@ -1100,10 +1219,10 @@ defmodule MingaAgent.Tools do
   @spec apply_multi_edit_via_router(MingaAgent.ToolRouter.context(), String.t(), [map()]) ::
           {:ok, String.t()} | {:error, String.t()}
   defp apply_multi_edit_via_router(router_ctx, path, edits) do
-    case MingaAgent.ToolRouter.read_file(router_ctx, path) do
+    case ToolRouter.read_file(router_ctx, path) do
       {:ok, content} ->
         {final_content, results} = reduce_edits(content, edits)
-        commit_multi_edits(router_ctx, path, final_content, results)
+        commit_multi_edits(router_ctx, path, edits, final_content, results)
 
       {:error, reason} ->
         {:error, "failed to read #{path}: #{inspect(reason)}"}
@@ -1129,27 +1248,61 @@ defmodule MingaAgent.Tools do
   end
 
   @spec commit_multi_edits(
-          MingaAgent.ToolRouter.context(),
+          ToolRouter.context(),
           String.t(),
+          [map()],
           String.t(),
           [{:ok | :error, String.t()}]
         ) :: {:ok, String.t()} | {:error, String.t()}
-  defp commit_multi_edits(router_ctx, path, final_content, results) do
+  defp commit_multi_edits(router_ctx, path, edits, final_content, results) do
     ok_count = Enum.count(results, &match?({:ok, _}, &1))
 
     if ok_count == 0 do
       {:error, "no edits matched in #{path}"}
     else
-      MingaAgent.ToolRouter.write_file(router_ctx, path, final_content)
-      msg = format_multi_edit_result(path, results, ok_count)
-      {:ok, maybe_append_diagnostics(path, msg)}
+      commit_multi_edit_write(router_ctx, path, edits, final_content, results, ok_count)
     end
   end
 
-  @spec format_multi_edit_result(String.t(), [{:ok | :error, String.t()}], non_neg_integer()) ::
-          String.t()
-  defp format_multi_edit_result(path, results, ok_count) do
-    base = "applied #{ok_count}/#{length(results)} edits to #{path} (via router)"
+  @spec commit_multi_edit_write(
+          ToolRouter.context(),
+          String.t(),
+          [map()],
+          String.t(),
+          [{:ok | :error, String.t()}],
+          non_neg_integer()
+        ) :: {:ok, String.t()} | {:error, String.t()}
+  defp commit_multi_edit_write(router_ctx, path, edits, final_content, results, ok_count) do
+    case ToolRouter.write_file(router_ctx, path, final_content) do
+      :ok ->
+        msg =
+          append_workspace_context(
+            router_ctx,
+            format_multi_edit_result(router_ctx, path, results, ok_count)
+          )
+
+        {:ok, maybe_append_diagnostics(path, msg)}
+
+      :passthrough ->
+        case MultiEditFile.execute(path, edits) do
+          {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
+          {:error, _message} = error -> error
+        end
+
+      {:error, reason} ->
+        {:error, "failed to write #{path}: #{inspect(reason)}"}
+    end
+  end
+
+  @spec format_multi_edit_result(
+          ToolRouter.context(),
+          String.t(),
+          [{:ok | :error, String.t()}],
+          non_neg_integer()
+        ) :: String.t()
+  defp format_multi_edit_result(router_ctx, path, results, ok_count) do
+    base =
+      "applied #{ok_count}/#{length(results)} edits to #{path} (via #{route_name(router_ctx)})"
 
     failed =
       results

@@ -122,6 +122,14 @@ defmodule MingaAgent.ToolRouterTest do
       ctx = ToolRouter.context(nil, nil)
       assert :passthrough = ToolRouter.delete_file(ctx, "/any/path.ex")
     end
+
+    test "refuses to delete an open buffered file", %{path: path} do
+      ctx = ToolRouter.context(nil, nil)
+
+      assert {:error, msg} = ToolRouter.delete_file(ctx, path)
+      assert msg =~ "open buffer"
+      assert File.exists?(path)
+    end
   end
 
   describe "working_dir/1" do
