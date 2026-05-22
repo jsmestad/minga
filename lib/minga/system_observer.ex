@@ -66,6 +66,10 @@ defmodule Minga.SystemObserver do
           processes: %{pid() => ProcessSnapshot.t()}
         }
 
+  @type child_type :: ProcessSnapshot.child_type()
+  @type child_modules :: [module()] | :dynamic
+  @type process_class :: ProcessSnapshot.process_class()
+
   @typedoc "Internal state for the SystemObserver GenServer."
   @type t :: %{
           monitors: %{reference() => atom()},
@@ -150,6 +154,34 @@ defmodule Minga.SystemObserver do
   @spec restart_history(GenServer.server()) :: [RestartRecord.t()]
   def restart_history(server \\ __MODULE__) do
     GenServer.call(server, :restart_history)
+  end
+
+  @doc """
+  Classifies a process for Observatory rendering.
+  """
+  @spec classify_process(pid(), atom() | nil, child_type()) :: process_class()
+  def classify_process(pid, registered_name, child_type) when is_pid(pid) do
+    classify_process(pid, registered_name, child_type, [])
+  end
+
+  @doc """
+  Classifies a process for Observatory rendering using supervisor child modules when available.
+  """
+  @spec classify_process(pid(), atom() | nil, child_type(), child_modules()) :: process_class()
+  def classify_process(pid, registered_name, child_type, child_modules) when is_pid(pid) do
+    classify_by_child_type(child_type) ||
+      classify_buffer_process(pid) ||
+      classify_by_modules(child_modules) ||
+      classify_by_registered_name(registered_name) ||
+      :worker
+  end
+
+  @doc """
+  Classifies a process by registered name and child type.
+  """
+  @spec classify_process(atom() | nil, child_type()) :: process_class()
+  def classify_process(registered_name, child_type) do
+    classify_by_child_type(child_type) || classify_by_registered_name(registered_name) || :worker
   end
 
   # ── GenServer callbacks ───────────────────────────────────────────────────
@@ -374,7 +406,7 @@ defmodule Minga.SystemObserver do
   defp walk_supervision_tree(supervisor_name) when is_atom(supervisor_name) do
     case Process.whereis(supervisor_name) do
       nil -> %{}
-      pid -> walk_supervisor(pid, %{})
+      pid -> walk_supervisor(pid, nil, %{})
     end
   end
 
@@ -382,15 +414,20 @@ defmodule Minga.SystemObserver do
   # Uses the `type` field from `which_children` to distinguish :supervisor
   # children (recurse) from :worker children (collect info only, don't call
   # which_children on them since that would crash them or deadlock).
-  @spec walk_supervisor(pid(), %{pid() => ProcessSnapshot.t()}) ::
+  @spec walk_supervisor(pid(), pid() | nil, %{pid() => ProcessSnapshot.t()}) ::
           %{pid() => ProcessSnapshot.t()}
-  defp walk_supervisor(sup_pid, acc) do
-    acc = Map.put(acc, sup_pid, collect_process_info(sup_pid))
+  defp walk_supervisor(sup_pid, parent_pid, acc) do
+    acc =
+      Map.put(
+        acc,
+        sup_pid,
+        collect_process_info(sup_pid, parent_pid, :supervisor, [Minga.Supervisor])
+      )
 
     children = Supervisor.which_children(sup_pid)
 
     Enum.reduce(children, acc, fn child, inner_acc ->
-      collect_child(child, inner_acc)
+      collect_child(child, sup_pid, inner_acc)
     end)
   catch
     :exit, _ ->
@@ -399,24 +436,28 @@ defmodule Minga.SystemObserver do
   end
 
   @spec collect_child(
-          {term(), pid() | :restarting | :undefined, :worker | :supervisor, [module()]},
+          {term(), pid() | :restarting | :undefined, :worker | :supervisor, child_modules()},
+          pid(),
           %{pid() => ProcessSnapshot.t()}
         ) :: %{pid() => ProcessSnapshot.t()}
-  defp collect_child({_id, child_pid, :supervisor, _modules}, acc) when is_pid(child_pid) do
-    walk_supervisor(child_pid, acc)
+  defp collect_child({_id, child_pid, :supervisor, _modules}, parent_pid, acc)
+       when is_pid(child_pid) do
+    walk_supervisor(child_pid, parent_pid, acc)
   end
 
-  defp collect_child({_id, child_pid, :worker, _modules}, acc) when is_pid(child_pid) do
-    Map.put(acc, child_pid, collect_process_info(child_pid))
+  defp collect_child({_id, child_pid, :worker, modules}, parent_pid, acc)
+       when is_pid(child_pid) do
+    Map.put(acc, child_pid, collect_process_info(child_pid, parent_pid, :worker, modules))
   end
 
-  defp collect_child({_id, _not_running, _type, _modules}, acc) do
+  defp collect_child({_id, _not_running, _type, _modules}, _parent_pid, acc) do
     # Child is :restarting or :undefined
     acc
   end
 
-  @spec collect_process_info(pid()) :: ProcessSnapshot.t()
-  defp collect_process_info(pid) do
+  @spec collect_process_info(pid(), pid() | nil, child_type(), child_modules()) ::
+          ProcessSnapshot.t()
+  defp collect_process_info(pid, parent_pid, child_type, child_modules) do
     info =
       Process.info(pid, [
         :memory,
@@ -428,24 +469,92 @@ defmodule Minga.SystemObserver do
 
     case info do
       nil ->
-        %ProcessSnapshot{
-          memory: 0,
-          message_queue_len: 0,
-          reductions: 0,
-          current_function: nil,
-          registered_name: nil
-        }
+        build_snapshot(pid, [], parent_pid, child_type, child_modules)
 
       info_list ->
-        %ProcessSnapshot{
-          memory: Keyword.get(info_list, :memory, 0),
-          message_queue_len: Keyword.get(info_list, :message_queue_len, 0),
-          reductions: Keyword.get(info_list, :reductions, 0),
-          current_function: Keyword.get(info_list, :current_function),
-          registered_name: Keyword.get(info_list, :registered_name)
-        }
+        build_snapshot(pid, info_list, parent_pid, child_type, child_modules)
     end
   end
+
+  @spec build_snapshot(pid(), keyword(), pid() | nil, child_type(), child_modules()) ::
+          ProcessSnapshot.t()
+  defp build_snapshot(pid, info_list, parent_pid, child_type, child_modules) do
+    registered_name = normalize_registered_name(Keyword.get(info_list, :registered_name))
+
+    %ProcessSnapshot{
+      memory: Keyword.get(info_list, :memory, 0),
+      message_queue_len: Keyword.get(info_list, :message_queue_len, 0),
+      reductions: Keyword.get(info_list, :reductions, 0),
+      current_function: Keyword.get(info_list, :current_function),
+      registered_name: registered_name,
+      parent_pid: parent_pid,
+      child_type: child_type,
+      process_class: classify_process(pid, registered_name, child_type, child_modules)
+    }
+  end
+
+  @spec normalize_registered_name(term()) :: atom() | nil
+  defp normalize_registered_name(name) when is_atom(name), do: name
+  defp normalize_registered_name(_name), do: nil
+
+  @spec classify_by_child_type(child_type()) :: process_class() | nil
+  defp classify_by_child_type(:supervisor), do: :supervisor
+  defp classify_by_child_type(_child_type), do: nil
+
+  @spec classify_buffer_process(pid()) :: :buffer | nil
+  defp classify_buffer_process(pid) do
+    case buffer_registry_keys(pid) do
+      [] -> nil
+      _keys -> :buffer
+    end
+  end
+
+  @spec buffer_registry_keys(pid()) :: [term()]
+  defp buffer_registry_keys(pid) do
+    Registry.keys(Minga.Buffer.Registry, pid)
+  rescue
+    ArgumentError -> []
+  end
+
+  @spec classify_by_modules(child_modules()) :: process_class() | nil
+  defp classify_by_modules(:dynamic), do: nil
+  defp classify_by_modules([]), do: nil
+
+  defp classify_by_modules([module | rest]) when is_atom(module) do
+    classify_by_module(module) || classify_by_modules(rest)
+  end
+
+  @spec classify_by_module(module()) :: process_class() | nil
+  defp classify_by_module(module) do
+    module
+    |> Atom.to_string()
+    |> classify_by_name_string()
+  end
+
+  @spec classify_by_registered_name(atom() | nil) :: process_class() | nil
+  defp classify_by_registered_name(nil), do: nil
+
+  defp classify_by_registered_name(registered_name) when is_atom(registered_name) do
+    registered_name
+    |> Atom.to_string()
+    |> classify_by_name_string()
+  end
+
+  @spec classify_by_name_string(String.t()) :: process_class() | nil
+  defp classify_by_name_string("Elixir.Minga.Buffer"), do: :buffer
+  defp classify_by_name_string("Elixir.Minga.Buffer." <> _suffix), do: :buffer
+  defp classify_by_name_string("Elixir.MingaAgent." <> _suffix), do: :agent_session
+  defp classify_by_name_string("Elixir.Minga.LSP." <> _suffix), do: :lsp
+  defp classify_by_name_string("Elixir.Minga.Config." <> _suffix), do: :service
+  defp classify_by_name_string("Elixir.Minga.Events"), do: :service
+  defp classify_by_name_string("Elixir.Minga.Foundation." <> _suffix), do: :service
+  defp classify_by_name_string("Elixir.Minga.Language." <> _suffix), do: :service
+  defp classify_by_name_string("Elixir.Minga.Command." <> _suffix), do: :service
+  defp classify_by_name_string("Elixir.Minga.Extension." <> _suffix), do: :service
+  defp classify_by_name_string("Elixir.Minga.Git." <> _suffix), do: :service
+  defp classify_by_name_string("Elixir.Minga.Project." <> _suffix), do: :service
+  defp classify_by_name_string("Elixir.Minga.Services." <> _suffix), do: :service
+  defp classify_by_name_string(_registered_name), do: nil
 
   @spec enqueue_bounded(:queue.queue(a), non_neg_integer(), a, pos_integer()) ::
           {:queue.queue(a), non_neg_integer()}
