@@ -607,8 +607,10 @@ Mode values:
 | 5 | substitute_confirm | `"replace with foo?"` | no | `"y/n/a/q (2 of 15)"` |
 | 6 | extension_confirm | (plugin prompt) | no | (empty) |
 | 7 | describe_key | `"Press key: "` | no | (accumulated keys) |
+| 8 | delete_confirm | `"Delete 'file.txt'? (y/n)"` | no | (empty) |
+| 9 | branch_delete_confirm | `"Delete branch feature? (y/n)"` | no | (empty) |
 
-`cursor_pos` is the 0-indexed character position within `input` for the beam cursor. `0xFFFF` means no cursor (prompt-only modes 5-7). `context` is right-aligned supplementary text. `match_score` is 0-255 fuzzy match quality. `candidate_count == 0` naturally represents "input visible, no completions."
+`cursor_pos` is the 0-indexed character position within `input` for the beam cursor. `0xFFFF` means no cursor (prompt-only modes 5-9). `context` is right-aligned supplementary text. `match_score` is 0-255 fuzzy match quality. `candidate_count == 0` naturally represents "input visible, no completions."
 
 ### 0x80 — gui_window_content (sectioned format)
 

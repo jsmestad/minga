@@ -44,6 +44,7 @@ defmodule Minga.Mode do
           | :extension_confirm
           | :tool_confirm
           | :delete_confirm
+          | :branch_delete_confirm
 
   @typedoc """
   A command to execute. Either a bare atom (e.g. `:move_left`) or a
@@ -70,6 +71,7 @@ defmodule Minga.Mode do
           | Minga.Mode.ExtensionConfirmState.t()
           | Minga.Mode.ToolConfirmState.t()
           | Minga.Mode.DeleteConfirmState.t()
+          | Minga.Mode.BranchDeleteConfirmState.t()
 
   @typedoc """
   Result returned by a mode's `handle_key/2`.
@@ -136,6 +138,7 @@ defmodule Minga.Mode do
   def display(:extension_confirm), do: "-- UPDATE --"
   def display(:tool_confirm), do: "-- INSTALL? --"
   def display(:delete_confirm), do: "-- DELETE? --"
+  def display(:branch_delete_confirm), do: "-- DELETE BRANCH? --"
 
   @doc """
   Returns the status-line label for a mode, using the FSM state for
@@ -188,6 +191,14 @@ defmodule Minga.Mode do
     "Cannot trash. Permanently delete '#{s.name}'? (y/n)"
   end
 
+  def display(:branch_delete_confirm, %Minga.Mode.BranchDeleteConfirmState{phase: :delete} = s) do
+    "Delete branch #{s.name}? (y/n)"
+  end
+
+  def display(:branch_delete_confirm, %Minga.Mode.BranchDeleteConfirmState{phase: :force} = s) do
+    "Force delete branch #{s.name}? (y/n)"
+  end
+
   def display(mode, _state), do: display(mode)
 
   # ── Private ──────────────────────────────────────────────────────────────────
@@ -206,6 +217,7 @@ defmodule Minga.Mode do
   defp mode_module(:extension_confirm), do: Minga.Mode.ExtensionConfirm
   defp mode_module(:tool_confirm), do: Minga.Mode.ToolConfirm
   defp mode_module(:delete_confirm), do: Minga.Mode.DeleteConfirm
+  defp mode_module(:branch_delete_confirm), do: Minga.Mode.BranchDeleteConfirm
 
   @spec apply_result(mode(), result()) :: {mode(), [command()], state()}
   defp apply_result(mode, {:continue, state}) do

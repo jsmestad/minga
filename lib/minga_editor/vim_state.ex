@@ -104,6 +104,7 @@ defmodule MingaEditor.VimState do
   defp expected_struct(:extension_confirm), do: Minga.Mode.ExtensionConfirmState
   defp expected_struct(:tool_confirm), do: Minga.Mode.ToolConfirmState
   defp expected_struct(:delete_confirm), do: Minga.Mode.DeleteConfirmState
+  defp expected_struct(:branch_delete_confirm), do: Minga.Mode.BranchDeleteConfirmState
 
   @doc """
   Transitions to a new mode, returning an updated VimState.
