@@ -3,8 +3,15 @@ defmodule MingaEditor.Frontend.ProtocolTest do
 
   alias MingaEditor.Frontend.Protocol
 
-  defp gui_agent_chat_section!(sections, target_id),
-    do: do_gui_agent_chat_section!(sections, target_id)
+  defp gui_agent_chat_section!(sections, target_id) do
+    payload = do_gui_agent_chat_section!(sections, target_id)
+
+    if target_id == 0x06 do
+      normalize_messages_payload(payload)
+    else
+      payload
+    end
+  end
 
   defp do_gui_agent_chat_section!(
          <<target_id::8, len::16, payload::binary-size(len), _rest::binary>>,
@@ -17,6 +24,24 @@ defmodule MingaEditor.Frontend.ProtocolTest do
          target_id
        ),
        do: do_gui_agent_chat_section!(rest, target_id)
+
+  defp normalize_messages_payload(<<0xFF::8, 1::8, count::16, frames::binary>>) do
+    messages = unwrap_message_frames(frames, count, [])
+    IO.iodata_to_binary([<<count::16>> | messages])
+  end
+
+  defp normalize_messages_payload(payload), do: payload
+
+  defp unwrap_message_frames(<<>>, 0, acc), do: Enum.reverse(acc)
+
+  defp unwrap_message_frames(
+         <<message_len::32, message::binary-size(message_len), rest::binary>>,
+         remaining,
+         acc
+       )
+       when remaining > 0 do
+    unwrap_message_frames(rest, remaining - 1, [message | acc])
+  end
 
   defp take_string16(<<len::16, value::binary-size(len), rest::binary>>), do: {value, rest}
   defp take_string8(<<len::8, value::binary-size(len), rest::binary>>), do: {value, rest}

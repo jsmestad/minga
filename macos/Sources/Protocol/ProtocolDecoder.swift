@@ -1247,218 +1247,33 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                     }
                 }
 
-            case 0x06: // Messages: msg_count(2) + messages... (same internal format as before)
+            case 0x06: // Messages: framed v1 payload, with legacy unframed fallback
                 guard csLen >= 2 else { break }
-                let msgCount = Int(readU16(data, csStart))
-                messages.reserveCapacity(msgCount)
                 let messagesEnd = csStart + csLen
-                var pos = csStart + 2
-        for _ in 0..<msgCount {
-            // Each message is prefixed with a stable uint32 ID from the BEAM
-            guard messagesEnd >= pos + 5 else { throw ProtocolDecodeError.malformed }
-            let beamId = readU32(data, pos)
-            pos += 4
-            let msgType = data[pos]
-            switch msgType {
-            case 0x01: // user
-                guard messagesEnd >= pos + 5 else { throw ProtocolDecodeError.malformed }
-                let tLen = Int(readU32(data, pos + 1))
-                guard messagesEnd >= pos + 5 + tLen else { throw ProtocolDecodeError.malformed }
-                let t = String(data: data[(pos + 5)..<(pos + 5 + tLen)], encoding: .utf8) ?? ""
-                messages.append(Wire.ChatMessage(beamId: beamId, content: .user(text: t)))
-                pos += 5 + tLen
-            case 0x02: // assistant
-                guard messagesEnd >= pos + 5 else { throw ProtocolDecodeError.malformed }
-                let tLen = Int(readU32(data, pos + 1))
-                guard messagesEnd >= pos + 5 + tLen else { throw ProtocolDecodeError.malformed }
-                let t = String(data: data[(pos + 5)..<(pos + 5 + tLen)], encoding: .utf8) ?? ""
-                messages.append(Wire.ChatMessage(beamId: beamId, content: .assistant(text: t)))
-                pos += 5 + tLen
-            case 0x03: // thinking
-                guard messagesEnd >= pos + 6 else { throw ProtocolDecodeError.malformed }
-                let collapsed = data[pos + 1] != 0
-                let tLen = Int(readU32(data, pos + 2))
-                guard messagesEnd >= pos + 6 + tLen else { throw ProtocolDecodeError.malformed }
-                let t = String(data: data[(pos + 6)..<(pos + 6 + tLen)], encoding: .utf8) ?? ""
-                messages.append(Wire.ChatMessage(beamId: beamId, content: .thinking(text: t, collapsed: collapsed)))
-                pos += 6 + tLen
-            case 0x04: // tool_call
-                guard messagesEnd >= pos + 10 else { throw ProtocolDecodeError.malformed }
-                let tcStatus = data[pos + 1]
-                let isError = data[pos + 2] != 0
-                let tcCollapsed = data[pos + 3] != 0
-                let duration = readU32(data, pos + 4)
-                let nameLen = Int(readU16(data, pos + 8))
-                guard messagesEnd >= pos + 10 + nameLen + 2 else { throw ProtocolDecodeError.malformed }
-                let name = String(data: data[(pos + 10)..<(pos + 10 + nameLen)], encoding: .utf8) ?? ""
-                let summaryLen = Int(readU16(data, pos + 10 + nameLen))
-                guard messagesEnd >= pos + 12 + nameLen + summaryLen + 4 else { throw ProtocolDecodeError.malformed }
-                let summary = String(data: data[(pos + 12 + nameLen)..<(pos + 12 + nameLen + summaryLen)], encoding: .utf8) ?? ""
-                let resultLen = Int(readU32(data, pos + 12 + nameLen + summaryLen))
-                guard messagesEnd >= pos + 16 + nameLen + summaryLen + resultLen else { throw ProtocolDecodeError.malformed }
-                let result = String(data: data[(pos + 16 + nameLen + summaryLen)..<(pos + 16 + nameLen + summaryLen + resultLen)], encoding: .utf8) ?? ""
-                messages.append(Wire.ChatMessage(beamId: beamId, content: .toolCall(name: name, summary: summary, status: tcStatus, isError: isError, collapsed: tcCollapsed, durationMs: duration, result: result)))
-                pos += 16 + nameLen + summaryLen + resultLen
-            case 0x05: // system
-                guard messagesEnd >= pos + 6 else { throw ProtocolDecodeError.malformed }
-                let isError = data[pos + 1] != 0
-                let tLen = Int(readU32(data, pos + 2))
-                guard messagesEnd >= pos + 6 + tLen else { throw ProtocolDecodeError.malformed }
-                let t = String(data: data[(pos + 6)..<(pos + 6 + tLen)], encoding: .utf8) ?? ""
-                messages.append(Wire.ChatMessage(beamId: beamId, content: .system(text: t, isError: isError)))
-                pos += 6 + tLen
-            case 0x06: // usage
-                guard messagesEnd >= pos + 21 else { throw ProtocolDecodeError.malformed }
-                let inp = readU32(data, pos + 1)
-                let outp = readU32(data, pos + 5)
-                let cacheR = readU32(data, pos + 9)
-                let cacheW = readU32(data, pos + 13)
-                let costM = readU32(data, pos + 17)
-                messages.append(Wire.ChatMessage(beamId: beamId, content: .usage(input: inp, output: outp, cacheRead: cacheR, cacheWrite: cacheW, costMicros: costM)))
-                pos += 21
-            case 0x07: // styled_assistant
-                // Format: 0x07, line_count::16, then per line:
-                //   run_count::16, then per run: text_len::16, text, fg::24, bg::24, flags::8,
-                //   and when flags bit 0x08 is set: url_len::16, url.
-                guard messagesEnd >= pos + 3 else { throw ProtocolDecodeError.malformed }
-                let lineCount = Int(readU16(data, pos + 1))
-                var lines: [[Wire.StyledTextRun]] = []
-                lines.reserveCapacity(lineCount)
-                var rPos = pos + 3
-                for _ in 0..<lineCount {
-                    guard messagesEnd >= rPos + 2 else { throw ProtocolDecodeError.malformed }
-                    let runCount = Int(readU16(data, rPos))
-                    var runs: [Wire.StyledTextRun] = []
-                    runs.reserveCapacity(runCount)
-                    rPos += 2
-                    for _ in 0..<runCount {
-                        guard messagesEnd >= rPos + 9 else { throw ProtocolDecodeError.malformed }
-                        let textLen = Int(readU16(data, rPos))
-                        guard messagesEnd >= rPos + 2 + textLen + 7 else { throw ProtocolDecodeError.malformed }
-                        let runText = String(data: data[(rPos + 2)..<(rPos + 2 + textLen)], encoding: .utf8) ?? ""
-                        let fgOff = rPos + 2 + textLen
-                        let fgR = data[fgOff]
-                        let fgG = data[fgOff + 1]
-                        let fgB = data[fgOff + 2]
-                        let bgR = data[fgOff + 3]
-                        let bgG = data[fgOff + 4]
-                        let bgB = data[fgOff + 5]
-                        let flags = data[fgOff + 6]
-                        var nextRunPos = fgOff + 7
-                        var linkURL: String? = nil
-                        if (flags & 0x08) != 0 {
-                            guard messagesEnd >= nextRunPos + 2 else { throw ProtocolDecodeError.malformed }
-                            let urlLen = Int(readU16(data, nextRunPos))
-                            guard messagesEnd >= nextRunPos + 2 + urlLen else { throw ProtocolDecodeError.malformed }
-                            guard let decodedLinkURL = String(data: data[(nextRunPos + 2)..<(nextRunPos + 2 + urlLen)], encoding: .utf8) else { throw ProtocolDecodeError.malformed }
-                            linkURL = decodedLinkURL
-                            nextRunPos += 2 + urlLen
-                        }
-                        runs.append(Wire.StyledTextRun(
-                            text: runText,
-                            fgR: fgR, fgG: fgG, fgB: fgB,
-                            bgR: bgR, bgG: bgG, bgB: bgB,
-                            bold: (flags & 0x01) != 0,
-                            italic: (flags & 0x02) != 0,
-                            underline: (flags & 0x04) != 0,
-                            linkURL: linkURL
-                        ))
-                        rPos = nextRunPos
-                    }
-                    lines.append(runs)
+                if data[csStart] == 0xFF {
+                    guard csLen >= 4 else { throw ProtocolDecodeError.malformed }
+                    let version = data[csStart + 1]
+                    guard version == 1 else { throw ProtocolDecodeError.malformed }
+                    let msgCount = Int(readU16(data, csStart + 2))
+                    let decodedMessages = try decodeFramedChatMessages(
+                        data: data,
+                        start: csStart + 4,
+                        end: messagesEnd,
+                        count: msgCount
+                    )
+                    messages.append(contentsOf: decodedMessages)
+                } else {
+                    let msgCount = Int(readU16(data, csStart))
+                    let messagesStart = csStart + 2
+                    let (decodedMessages, decodedEnd) = try decodeLegacyChatMessages(
+                        data: data,
+                        start: messagesStart,
+                        end: messagesEnd,
+                        remaining: msgCount
+                    )
+                    messages.append(contentsOf: decodedMessages)
+                    guard decodedEnd == messagesEnd else { throw ProtocolDecodeError.malformed }
                 }
-                messages.append(Wire.ChatMessage(beamId: beamId, content: .styledAssistant(lines: lines)))
-                pos = rPos
-            case 0x08: // styled_tool_call
-                // Same header as tool_call (0x04) but result is styled runs instead of plain text.
-                // Format: 0x08, status::8, error::8, collapsed::8, duration::32,
-                //   name_len::16, name, summary_len::16, summary, line_count::16, then per line:
-                //   run_count::16, then per run: text_len::16, text, fg::24, bg::24, flags::8,
-                //   and when flags bit 0x08 is set: url_len::16, url.
-                guard messagesEnd >= pos + 10 else { throw ProtocolDecodeError.malformed }
-                let stcStatus = data[pos + 1]
-                let stcIsError = data[pos + 2] != 0
-                let stcCollapsed = data[pos + 3] != 0
-                let stcDuration = readU32(data, pos + 4)
-                let stcNameLen = Int(readU16(data, pos + 8))
-                guard messagesEnd >= pos + 10 + stcNameLen + 2 else { throw ProtocolDecodeError.malformed }
-                let stcName = String(data: data[(pos + 10)..<(pos + 10 + stcNameLen)], encoding: .utf8) ?? ""
-                let stcSummaryLen = Int(readU16(data, pos + 10 + stcNameLen))
-                guard messagesEnd >= pos + 12 + stcNameLen + stcSummaryLen + 2 else { throw ProtocolDecodeError.malformed }
-                let stcSummary = String(data: data[(pos + 12 + stcNameLen)..<(pos + 12 + stcNameLen + stcSummaryLen)], encoding: .utf8) ?? ""
-                let stcLineCount = Int(readU16(data, pos + 12 + stcNameLen + stcSummaryLen))
-                var stcLines: [[Wire.StyledTextRun]] = []
-                stcLines.reserveCapacity(stcLineCount)
-                var stcPos = pos + 14 + stcNameLen + stcSummaryLen
-                for _ in 0..<stcLineCount {
-                    guard messagesEnd >= stcPos + 2 else { throw ProtocolDecodeError.malformed }
-                    let runCount = Int(readU16(data, stcPos))
-                    var runs: [Wire.StyledTextRun] = []
-                    runs.reserveCapacity(runCount)
-                    stcPos += 2
-                    for _ in 0..<runCount {
-                        guard messagesEnd >= stcPos + 9 else { throw ProtocolDecodeError.malformed }
-                        let textLen = Int(readU16(data, stcPos))
-                        guard messagesEnd >= stcPos + 2 + textLen + 7 else { throw ProtocolDecodeError.malformed }
-                        let runText = String(data: data[(stcPos + 2)..<(stcPos + 2 + textLen)], encoding: .utf8) ?? ""
-                        let fgOff = stcPos + 2 + textLen
-                        let flags = data[fgOff + 6]
-                        var nextRunPos = fgOff + 7
-                        var linkURL: String? = nil
-                        if (flags & 0x08) != 0 {
-                            guard messagesEnd >= nextRunPos + 2 else { throw ProtocolDecodeError.malformed }
-                            let urlLen = Int(readU16(data, nextRunPos))
-                            guard messagesEnd >= nextRunPos + 2 + urlLen else { throw ProtocolDecodeError.malformed }
-                            guard let decodedLinkURL = String(data: data[(nextRunPos + 2)..<(nextRunPos + 2 + urlLen)], encoding: .utf8) else { throw ProtocolDecodeError.malformed }
-                            linkURL = decodedLinkURL
-                            nextRunPos += 2 + urlLen
-                        }
-                        runs.append(Wire.StyledTextRun(
-                            text: runText,
-                            fgR: data[fgOff], fgG: data[fgOff + 1], fgB: data[fgOff + 2],
-                            bgR: data[fgOff + 3], bgG: data[fgOff + 4], bgB: data[fgOff + 5],
-                            bold: (flags & 0x01) != 0,
-                            italic: (flags & 0x02) != 0,
-                            underline: (flags & 0x04) != 0,
-                            linkURL: linkURL
-                        ))
-                        stcPos = nextRunPos
-                    }
-                    stcLines.append(runs)
-                }
-                messages.append(Wire.ChatMessage(beamId: beamId, content: .styledToolCall(name: stcName, summary: stcSummary, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, durationMs: stcDuration, resultLines: stcLines)))
-                pos = stcPos
-            case 0x09: // approval_tool_call
-                guard messagesEnd >= pos + 8 else { throw ProtocolDecodeError.malformed }
-                let nameLen = Int(readU16(data, pos + 2))
-                guard messagesEnd >= pos + 4 + nameLen + 2 else { throw ProtocolDecodeError.malformed }
-                let name = String(data: data[(pos + 4)..<(pos + 4 + nameLen)], encoding: .utf8) ?? ""
-                let summaryLen = Int(readU16(data, pos + 4 + nameLen))
-                guard messagesEnd >= pos + 6 + nameLen + summaryLen + 2 else { throw ProtocolDecodeError.malformed }
-                let summary = String(data: data[(pos + 6 + nameLen)..<(pos + 6 + nameLen + summaryLen)], encoding: .utf8) ?? ""
-                let idLen = Int(readU16(data, pos + 6 + nameLen + summaryLen))
-                guard messagesEnd >= pos + 8 + nameLen + summaryLen + idLen + 3 else { throw ProtocolDecodeError.malformed }
-                let toolCallId = String(data: data[(pos + 8 + nameLen + summaryLen)..<(pos + 8 + nameLen + summaryLen + idLen)], encoding: .utf8) ?? ""
-                let previewKind = data[pos + 8 + nameLen + summaryLen + idLen]
-                let lineCount = Int(readU16(data, pos + 9 + nameLen + summaryLen + idLen))
-                var approvalPos = pos + 11 + nameLen + summaryLen + idLen
-                var previewLines: [String] = []
-                previewLines.reserveCapacity(lineCount)
-                for _ in 0..<lineCount {
-                    guard messagesEnd >= approvalPos + 2 else { throw ProtocolDecodeError.malformed }
-                    let lineLen = Int(readU16(data, approvalPos))
-                    guard messagesEnd >= approvalPos + 2 + lineLen else { throw ProtocolDecodeError.malformed }
-                    let line = String(data: data[(approvalPos + 2)..<(approvalPos + 2 + lineLen)], encoding: .utf8) ?? ""
-                    previewLines.append(line)
-                    approvalPos += 2 + lineLen
-                }
-                messages.append(Wire.ChatMessage(beamId: beamId, content: .approvalToolCall(name: name, summary: summary, toolCallId: toolCallId, previewKind: previewKind, previewLines: previewLines)))
-                pos = approvalPos
-            default:
-                throw ProtocolDecodeError.malformed
-            }
-        }
-                guard pos == messagesEnd else { throw ProtocolDecodeError.malformed }
 
             default: break
             }
@@ -2755,6 +2570,280 @@ private func decodeStatusBarSegments(data: Data, pos: inout Int, count: Int, end
     }
 
     return segments
+}
+
+private struct DecodedChatMessageCandidate {
+    let message: Wire.ChatMessage
+    let nextOffset: Int
+}
+
+private func decodeFramedChatMessages(data: Data, start: Int, end: Int, count: Int) throws -> [Wire.ChatMessage] {
+    var messages: [Wire.ChatMessage] = []
+    messages.reserveCapacity(count)
+    var pos = start
+
+    for _ in 0..<count {
+        guard pos + 4 <= end else { throw ProtocolDecodeError.malformed }
+        let messageLen = Int(readU32(data, pos))
+        let messageStart = pos + 4
+        let messageEnd = messageStart + messageLen
+        guard messageEnd <= end else { throw ProtocolDecodeError.malformed }
+
+        let candidates = try decodeChatMessageCandidates(data: data, start: messageStart, end: messageEnd)
+        guard let candidate = candidates.first(where: { $0.nextOffset == messageEnd }) else {
+            throw ProtocolDecodeError.malformed
+        }
+
+        messages.append(candidate.message)
+        pos = messageEnd
+    }
+
+    guard pos == end else { throw ProtocolDecodeError.malformed }
+    return messages
+}
+
+private func decodeLegacyChatMessages(data: Data, start: Int, end: Int, remaining: Int) throws -> ([Wire.ChatMessage], Int) {
+    if remaining == 0 {
+        guard start == end else { throw ProtocolDecodeError.malformed }
+        return ([], start)
+    }
+
+    let candidates = try decodeChatMessageCandidates(data: data, start: start, end: end)
+
+    for candidate in candidates {
+        if let (rest, decodedEnd) = try? decodeLegacyChatMessages(
+            data: data,
+            start: candidate.nextOffset,
+            end: end,
+            remaining: remaining - 1
+        ) {
+            return ([candidate.message] + rest, decodedEnd)
+        }
+    }
+
+    throw ProtocolDecodeError.malformed
+}
+
+private func decodeChatMessageCandidates(data: Data, start: Int, end: Int) throws -> [DecodedChatMessageCandidate] {
+    guard start + 5 <= end else { throw ProtocolDecodeError.malformed }
+
+    let beamId = readU32(data, start)
+    let msgType = data[start + 4]
+    let pos = start + 4
+
+    switch msgType {
+    case 0x01: // user
+        guard end >= pos + 5 else { throw ProtocolDecodeError.malformed }
+        let tLen = Int(readU32(data, pos + 1))
+        guard end >= pos + 5 + tLen else { throw ProtocolDecodeError.malformed }
+        let t = String(data: data[(pos + 5)..<(pos + 5 + tLen)], encoding: .utf8) ?? ""
+        return [DecodedChatMessageCandidate(message: Wire.ChatMessage(beamId: beamId, content: .user(text: t)), nextOffset: pos + 5 + tLen)]
+
+    case 0x02: // assistant
+        guard end >= pos + 5 else { throw ProtocolDecodeError.malformed }
+        let tLen = Int(readU32(data, pos + 1))
+        guard end >= pos + 5 + tLen else { throw ProtocolDecodeError.malformed }
+        let t = String(data: data[(pos + 5)..<(pos + 5 + tLen)], encoding: .utf8) ?? ""
+        return [DecodedChatMessageCandidate(message: Wire.ChatMessage(beamId: beamId, content: .assistant(text: t)), nextOffset: pos + 5 + tLen)]
+
+    case 0x03: // thinking
+        guard end >= pos + 6 else { throw ProtocolDecodeError.malformed }
+        let collapsed = data[pos + 1] != 0
+        let tLen = Int(readU32(data, pos + 2))
+        guard end >= pos + 6 + tLen else { throw ProtocolDecodeError.malformed }
+        let t = String(data: data[(pos + 6)..<(pos + 6 + tLen)], encoding: .utf8) ?? ""
+        return [DecodedChatMessageCandidate(message: Wire.ChatMessage(beamId: beamId, content: .thinking(text: t, collapsed: collapsed)), nextOffset: pos + 6 + tLen)]
+
+    case 0x04: // tool_call
+        guard end >= pos + 10 else { throw ProtocolDecodeError.malformed }
+        let tcStatus = data[pos + 1]
+        let isError = data[pos + 2] != 0
+        let tcCollapsed = data[pos + 3] != 0
+        let duration = readU32(data, pos + 4)
+        let nameLen = Int(readU16(data, pos + 8))
+        guard end >= pos + 10 + nameLen + 2 else { throw ProtocolDecodeError.malformed }
+        let name = String(data: data[(pos + 10)..<(pos + 10 + nameLen)], encoding: .utf8) ?? ""
+        let summaryLen = Int(readU16(data, pos + 10 + nameLen))
+        guard end >= pos + 12 + nameLen + summaryLen + 4 else { throw ProtocolDecodeError.malformed }
+        let summary = String(data: data[(pos + 12 + nameLen)..<(pos + 12 + nameLen + summaryLen)], encoding: .utf8) ?? ""
+        let resultLen = Int(readU32(data, pos + 12 + nameLen + summaryLen))
+        let baseOffset = pos + 16 + nameLen + summaryLen + resultLen
+        guard end >= baseOffset else { throw ProtocolDecodeError.malformed }
+        let result = String(data: data[(pos + 16 + nameLen + summaryLen)..<(pos + 16 + nameLen + summaryLen + resultLen)], encoding: .utf8) ?? ""
+        var candidates: [DecodedChatMessageCandidate] = []
+        if end > baseOffset {
+            let autoApprovedScope = data[baseOffset]
+            if autoApprovedScope <= 2 {
+                let messageWithAuto = Wire.ChatMessage(beamId: beamId, content: .toolCall(name: name, summary: summary, status: tcStatus, isError: isError, collapsed: tcCollapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result))
+                candidates.append(DecodedChatMessageCandidate(message: messageWithAuto, nextOffset: baseOffset + 1))
+            }
+        }
+        let messageWithoutAuto = Wire.ChatMessage(beamId: beamId, content: .toolCall(name: name, summary: summary, status: tcStatus, isError: isError, collapsed: tcCollapsed, autoApprovedScope: 0, durationMs: duration, result: result))
+        candidates.append(DecodedChatMessageCandidate(message: messageWithoutAuto, nextOffset: baseOffset))
+        return candidates
+
+    case 0x05: // system
+        guard end >= pos + 6 else { throw ProtocolDecodeError.malformed }
+        let isError = data[pos + 1] != 0
+        let tLen = Int(readU32(data, pos + 2))
+        guard end >= pos + 6 + tLen else { throw ProtocolDecodeError.malformed }
+        let t = String(data: data[(pos + 6)..<(pos + 6 + tLen)], encoding: .utf8) ?? ""
+        return [DecodedChatMessageCandidate(message: Wire.ChatMessage(beamId: beamId, content: .system(text: t, isError: isError)), nextOffset: pos + 6 + tLen)]
+
+    case 0x06: // usage
+        guard end >= pos + 21 else { throw ProtocolDecodeError.malformed }
+        let inp = readU32(data, pos + 1)
+        let outp = readU32(data, pos + 5)
+        let cacheR = readU32(data, pos + 9)
+        let cacheW = readU32(data, pos + 13)
+        let costM = readU32(data, pos + 17)
+        return [DecodedChatMessageCandidate(message: Wire.ChatMessage(beamId: beamId, content: .usage(input: inp, output: outp, cacheRead: cacheR, cacheWrite: cacheW, costMicros: costM)), nextOffset: pos + 21)]
+
+    case 0x07: // styled_assistant
+        guard end >= pos + 3 else { throw ProtocolDecodeError.malformed }
+        let lineCount = Int(readU16(data, pos + 1))
+        var lines: [[Wire.StyledTextRun]] = []
+        lines.reserveCapacity(lineCount)
+        var rPos = pos + 3
+        for _ in 0..<lineCount {
+            guard end >= rPos + 2 else { throw ProtocolDecodeError.malformed }
+            let runCount = Int(readU16(data, rPos))
+            var runs: [Wire.StyledTextRun] = []
+            runs.reserveCapacity(runCount)
+            rPos += 2
+            for _ in 0..<runCount {
+                guard end >= rPos + 9 else { throw ProtocolDecodeError.malformed }
+                let textLen = Int(readU16(data, rPos))
+                guard end >= rPos + 2 + textLen + 7 else { throw ProtocolDecodeError.malformed }
+                let runText = String(data: data[(rPos + 2)..<(rPos + 2 + textLen)], encoding: .utf8) ?? ""
+                let fgOff = rPos + 2 + textLen
+                let fgR = data[fgOff]
+                let fgG = data[fgOff + 1]
+                let fgB = data[fgOff + 2]
+                let bgR = data[fgOff + 3]
+                let bgG = data[fgOff + 4]
+                let bgB = data[fgOff + 5]
+                let flags = data[fgOff + 6]
+                var nextRunPos = fgOff + 7
+                var linkURL: String? = nil
+                if (flags & 0x08) != 0 {
+                    guard end >= nextRunPos + 2 else { throw ProtocolDecodeError.malformed }
+                    let urlLen = Int(readU16(data, nextRunPos))
+                    guard end >= nextRunPos + 2 + urlLen else { throw ProtocolDecodeError.malformed }
+                    guard let decodedLinkURL = String(data: data[(nextRunPos + 2)..<(nextRunPos + 2 + urlLen)], encoding: .utf8) else { throw ProtocolDecodeError.malformed }
+                    linkURL = decodedLinkURL
+                    nextRunPos += 2 + urlLen
+                }
+                runs.append(Wire.StyledTextRun(
+                    text: runText,
+                    fgR: fgR, fgG: fgG, fgB: fgB,
+                    bgR: bgR, bgG: bgG, bgB: bgB,
+                    bold: (flags & 0x01) != 0,
+                    italic: (flags & 0x02) != 0,
+                    underline: (flags & 0x04) != 0,
+                    linkURL: linkURL
+                ))
+                rPos = nextRunPos
+            }
+            lines.append(runs)
+        }
+        return [DecodedChatMessageCandidate(message: Wire.ChatMessage(beamId: beamId, content: .styledAssistant(lines: lines)), nextOffset: rPos)]
+
+    case 0x08: // styled_tool_call
+        guard end >= pos + 10 else { throw ProtocolDecodeError.malformed }
+        let stcStatus = data[pos + 1]
+        let stcIsError = data[pos + 2] != 0
+        let stcCollapsed = data[pos + 3] != 0
+        let stcDuration = readU32(data, pos + 4)
+        let stcNameLen = Int(readU16(data, pos + 8))
+        guard end >= pos + 10 + stcNameLen + 2 else { throw ProtocolDecodeError.malformed }
+        let stcName = String(data: data[(pos + 10)..<(pos + 10 + stcNameLen)], encoding: .utf8) ?? ""
+        let stcSummaryLen = Int(readU16(data, pos + 10 + stcNameLen))
+        guard end >= pos + 12 + stcNameLen + stcSummaryLen + 2 else { throw ProtocolDecodeError.malformed }
+        let stcSummary = String(data: data[(pos + 12 + stcNameLen)..<(pos + 12 + stcNameLen + stcSummaryLen)], encoding: .utf8) ?? ""
+        let stcLineCount = Int(readU16(data, pos + 12 + stcNameLen + stcSummaryLen))
+        var stcLines: [[Wire.StyledTextRun]] = []
+        stcLines.reserveCapacity(stcLineCount)
+        var stcPos = pos + 14 + stcNameLen + stcSummaryLen
+        for _ in 0..<stcLineCount {
+            guard end >= stcPos + 2 else { throw ProtocolDecodeError.malformed }
+            let runCount = Int(readU16(data, stcPos))
+            var runs: [Wire.StyledTextRun] = []
+            runs.reserveCapacity(runCount)
+            stcPos += 2
+            for _ in 0..<runCount {
+                guard end >= stcPos + 9 else { throw ProtocolDecodeError.malformed }
+                let textLen = Int(readU16(data, stcPos))
+                guard end >= stcPos + 2 + textLen + 7 else { throw ProtocolDecodeError.malformed }
+                let runText = String(data: data[(stcPos + 2)..<(stcPos + 2 + textLen)], encoding: .utf8) ?? ""
+                let fgOff = stcPos + 2 + textLen
+                let flags = data[fgOff + 6]
+                var nextRunPos = fgOff + 7
+                var linkURL: String? = nil
+                if (flags & 0x08) != 0 {
+                    guard end >= nextRunPos + 2 else { throw ProtocolDecodeError.malformed }
+                    let urlLen = Int(readU16(data, nextRunPos))
+                    guard end >= nextRunPos + 2 + urlLen else { throw ProtocolDecodeError.malformed }
+                    guard let decodedLinkURL = String(data: data[(nextRunPos + 2)..<(nextRunPos + 2 + urlLen)], encoding: .utf8) else { throw ProtocolDecodeError.malformed }
+                    linkURL = decodedLinkURL
+                    nextRunPos += 2 + urlLen
+                }
+                runs.append(Wire.StyledTextRun(
+                    text: runText,
+                    fgR: data[fgOff], fgG: data[fgOff + 1], fgB: data[fgOff + 2],
+                    bgR: data[fgOff + 3], bgG: data[fgOff + 4], bgB: data[fgOff + 5],
+                    bold: (flags & 0x01) != 0,
+                    italic: (flags & 0x02) != 0,
+                    underline: (flags & 0x04) != 0,
+                    linkURL: linkURL
+                ))
+                stcPos = nextRunPos
+            }
+            stcLines.append(runs)
+        }
+        let stcBaseOffset = stcPos
+        guard end >= stcBaseOffset else { throw ProtocolDecodeError.malformed }
+        var stcCandidates: [DecodedChatMessageCandidate] = []
+        if end > stcBaseOffset {
+            let stcAutoApprovedScope = data[stcBaseOffset]
+            if stcAutoApprovedScope <= 2 {
+                let stcMessageWithAuto = Wire.ChatMessage(beamId: beamId, content: .styledToolCall(name: stcName, summary: stcSummary, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, autoApprovedScope: stcAutoApprovedScope, durationMs: stcDuration, resultLines: stcLines))
+                stcCandidates.append(DecodedChatMessageCandidate(message: stcMessageWithAuto, nextOffset: stcBaseOffset + 1))
+            }
+        }
+        let stcMessageWithoutAuto = Wire.ChatMessage(beamId: beamId, content: .styledToolCall(name: stcName, summary: stcSummary, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, autoApprovedScope: 0, durationMs: stcDuration, resultLines: stcLines))
+        stcCandidates.append(DecodedChatMessageCandidate(message: stcMessageWithoutAuto, nextOffset: stcBaseOffset))
+        return stcCandidates
+
+    case 0x09: // approval_tool_call
+        guard end >= pos + 8 else { throw ProtocolDecodeError.malformed }
+        let nameLen = Int(readU16(data, pos + 2))
+        guard end >= pos + 4 + nameLen + 2 else { throw ProtocolDecodeError.malformed }
+        let name = String(data: data[(pos + 4)..<(pos + 4 + nameLen)], encoding: .utf8) ?? ""
+        let summaryLen = Int(readU16(data, pos + 4 + nameLen))
+        guard end >= pos + 6 + nameLen + summaryLen + 2 else { throw ProtocolDecodeError.malformed }
+        let summary = String(data: data[(pos + 6 + nameLen)..<(pos + 6 + nameLen + summaryLen)], encoding: .utf8) ?? ""
+        let idLen = Int(readU16(data, pos + 6 + nameLen + summaryLen))
+        guard end >= pos + 8 + nameLen + summaryLen + idLen + 3 else { throw ProtocolDecodeError.malformed }
+        let toolCallId = String(data: data[(pos + 8 + nameLen + summaryLen)..<(pos + 8 + nameLen + summaryLen + idLen)], encoding: .utf8) ?? ""
+        let previewKind = data[pos + 8 + nameLen + summaryLen + idLen]
+        let lineCount = Int(readU16(data, pos + 9 + nameLen + summaryLen + idLen))
+        var approvalPos = pos + 11 + nameLen + summaryLen + idLen
+        var previewLines: [String] = []
+        previewLines.reserveCapacity(lineCount)
+        for _ in 0..<lineCount {
+            guard end >= approvalPos + 2 else { throw ProtocolDecodeError.malformed }
+            let lineLen = Int(readU16(data, approvalPos))
+            guard end >= approvalPos + 2 + lineLen else { throw ProtocolDecodeError.malformed }
+            let line = String(data: data[(approvalPos + 2)..<(approvalPos + 2 + lineLen)], encoding: .utf8) ?? ""
+            previewLines.append(line)
+            approvalPos += 2 + lineLen
+        }
+        return [DecodedChatMessageCandidate(message: Wire.ChatMessage(beamId: beamId, content: .approvalToolCall(name: name, summary: summary, toolCallId: toolCallId, previewKind: previewKind, previewLines: previewLines)), nextOffset: approvalPos)]
+
+    default:
+        throw ProtocolDecodeError.malformed
+    }
 }
 
 private func readU16(_ data: Data, _ offset: Int) -> UInt16 {

@@ -349,7 +349,8 @@ defmodule MingaEditor.Agent.ChatDecorations do
     # Build header text with timing and command info
     duration_text = format_tool_duration(tc)
     command_text = format_tool_command(tc)
-    header_text = "┌─ #{status_icon} #{tc.name}#{duration_text}#{command_text}"
+    trust_text = format_auto_approved_scope(tc)
+    header_text = "┌─ #{status_icon} #{tc.name}#{duration_text}#{trust_text}#{command_text}"
 
     # Block decoration: tool header (with approval prompt when awaiting)
     {_id, decs} =
@@ -419,6 +420,13 @@ defmodule MingaEditor.Agent.ChatDecorations do
     end
   end
 
+  @spec format_auto_approved_scope(MingaAgent.ToolCall.t()) :: String.t()
+  defp format_auto_approved_scope(%{auto_approved_scope: :session}),
+    do: " · auto-approved session"
+
+  defp format_auto_approved_scope(%{auto_approved_scope: :turn}), do: " · auto-approved turn"
+  defp format_auto_approved_scope(_tc), do: ""
+
   @spec add_approval_card(
           Decorations.t(),
           non_neg_integer(),
@@ -470,10 +478,12 @@ defmodule MingaEditor.Agent.ChatDecorations do
       {"\n│ ", Face.new(fg: status_fg)},
       {"[y]", Face.new(fg: theme.tool_header, bold: true)},
       {" approve  ", Face.new(fg: status_fg)},
+      {"[a]", Face.new(fg: theme.tool_header, bold: true)},
+      {" trust session  ", Face.new(fg: status_fg)},
+      {"[t]", Face.new(fg: theme.tool_header, bold: true)},
+      {" trust turn  ", Face.new(fg: status_fg)},
       {"[n]", Face.new(fg: theme.status_error, bold: true)},
-      {" deny  ", Face.new(fg: status_fg)},
-      {"[Y]", Face.new(fg: theme.tool_header, bold: true)},
-      {" approve all", Face.new(fg: status_fg)},
+      {" deny", Face.new(fg: status_fg)},
       {"\n└─", Face.new(fg: status_fg)}
     ]
 
@@ -501,10 +511,12 @@ defmodule MingaEditor.Agent.ChatDecorations do
         {"Approve? ", Face.new(fg: status_fg, bold: true)},
         {"[y]", Face.new(fg: theme.tool_header, bold: true)},
         {"es ", Face.new(fg: status_fg)},
+        {"[a]", Face.new(fg: theme.tool_header, bold: true)},
+        {"llow-session ", Face.new(fg: status_fg)},
+        {"[t]", Face.new(fg: theme.tool_header, bold: true)},
+        {"urn ", Face.new(fg: status_fg)},
         {"[n]", Face.new(fg: theme.status_error, bold: true)},
-        {"o ", Face.new(fg: status_fg)},
-        {"[Y]", Face.new(fg: theme.tool_header, bold: true)},
-        {"es-all", Face.new(fg: status_fg)}
+        {"o", Face.new(fg: status_fg)}
       ]
     end
   end

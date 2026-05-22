@@ -49,6 +49,9 @@ defmodule MingaAgent.Session do
   @typedoc "Pending tool approval data."
   @type pending_approval :: MingaAgent.ToolApproval.t()
 
+  @typedoc "Tool trust lifetime."
+  @type trust_scope :: :session | :turn
+
   @typedoc "File touch record."
   @type file_touch :: %{
           path: String.t(),
@@ -79,6 +82,8 @@ defmodule MingaAgent.Session do
           pending_approval: pending_approval() | nil,
           active_tool_calls: [active_tool_call()],
           active_tool_name: String.t() | nil,
+          trust_levels: %{String.t() => trust_scope()},
+          pending_auto_approvals: %{String.t() => trust_scope()},
           model_name: String.t(),
           provider_name: String.t(),
           notifier: module() | {module(), term()},
@@ -201,10 +206,33 @@ defmodule MingaAgent.Session do
   on `receive`, then clears the pending approval and broadcasts
   the resolution to subscribers.
   """
-  @spec respond_to_approval(GenServer.server(), :approve | :reject | :approve_all) ::
+  @type approval_decision :: :approve | :approve_session | :approve_turn | :reject
+
+  @spec respond_to_approval(GenServer.server(), approval_decision()) ::
           :ok | {:error, :no_pending_approval}
-  def respond_to_approval(session, decision) when decision in [:approve, :reject, :approve_all] do
+  def respond_to_approval(session, decision)
+      when decision in [:approve, :approve_session, :approve_turn, :reject] do
     GenServer.call(session, {:respond_to_approval, decision})
+  end
+
+  @doc "Trusts a tool for the session or current turn."
+  @spec set_tool_trust(GenServer.server(), String.t(), trust_scope()) :: :ok
+  def set_tool_trust(session, name, scope)
+      when is_binary(name) and scope in [:session, :turn] do
+    GenServer.call(session, {:set_tool_trust, name, scope})
+  end
+
+  @doc "Revokes trust for one tool, or all tools with `:all`."
+  @spec revoke_tool_trust(GenServer.server(), String.t() | :all) :: :ok
+  def revoke_tool_trust(session, name_or_all)
+      when is_binary(name_or_all) or name_or_all == :all do
+    GenServer.call(session, {:revoke_tool_trust, name_or_all})
+  end
+
+  @doc "Lists trusted tools and their trust scope."
+  @spec list_tool_trust(GenServer.server()) :: %{String.t() => trust_scope()}
+  def list_tool_trust(session) do
+    GenServer.call(session, :list_tool_trust)
   end
 
   @doc "Returns the session ID."
@@ -532,6 +560,8 @@ defmodule MingaAgent.Session do
       pending_approval: nil,
       active_tool_calls: [],
       active_tool_name: nil,
+      trust_levels: %{},
+      pending_auto_approvals: %{},
       model_name: model_name,
       provider_name: provider_name,
       notifier: Keyword.get(opts, :notifier, Notifier),
@@ -750,7 +780,9 @@ defmodule MingaAgent.Session do
         steering_queue: [],
         follow_up_queue: [],
         touched_files: %{},
-        boundaries: %{}
+        boundaries: %{},
+        trust_levels: %{},
+        pending_auto_approvals: %{}
     }
 
     state = reset_messages(state, [Message.system("Session cleared · #{timestamp}")])
@@ -860,15 +892,32 @@ defmodule MingaAgent.Session do
 
   def handle_call({:respond_to_approval, decision}, _from, state) do
     %{tool_call_id: tool_call_id, reply_to: reply_to} = approval = state.pending_approval
+    state = maybe_set_trust_for_decision(state, approval.name, decision)
 
-    # Send the decision directly to the blocked Task process
-    send(reply_to, {:tool_approval_response, tool_call_id, decision})
+    # Send the execution decision directly to the blocked Task process.
+    send(reply_to, {:tool_approval_response, tool_call_id, execution_decision(decision)})
 
     state = maybe_record_rejection(state, approval, decision)
     state = %{state | pending_approval: nil}
     state = notify_messages_changed(state)
     broadcast(state, {:approval_resolved, decision})
     {:reply, :ok, state}
+  end
+
+  def handle_call({:set_tool_trust, name, scope}, _from, state) do
+    {:reply, :ok, put_tool_trust(state, name, scope)}
+  end
+
+  def handle_call({:revoke_tool_trust, :all}, _from, state) do
+    {:reply, :ok, %{state | trust_levels: %{}}}
+  end
+
+  def handle_call({:revoke_tool_trust, name}, _from, state) do
+    {:reply, :ok, %{state | trust_levels: Map.delete(state.trust_levels, name)}}
+  end
+
+  def handle_call(:list_tool_trust, _from, state) do
+    {:reply, state.trust_levels, state}
   end
 
   def handle_call({:subscribe, pid}, _from, state) do
@@ -1153,6 +1202,7 @@ defmodule MingaAgent.Session do
       end
 
     dispatch_stop(state)
+    state = clear_turn_trust(state)
 
     # Collect pending messages from both queues. Steering messages that arrived
     # after the last tool call (or just before AgentEnd) would otherwise be
@@ -1217,7 +1267,15 @@ defmodule MingaAgent.Session do
   end
 
   defp handle_provider_event(%Event.ToolStart{} = event, state) do
-    msg = Message.tool_call(event.tool_call_id, event.name, event.args)
+    {scope, pending_auto_approvals} = Map.pop(state.pending_auto_approvals, event.tool_call_id)
+
+    msg =
+      event.tool_call_id
+      |> ToolCall.new(event.name, event.args)
+      |> ToolCall.set_auto_approved_scope(scope)
+      |> then(&{:tool_call, &1})
+
+    state = %{state | pending_auto_approvals: pending_auto_approvals}
     state = append_msg(state, msg)
     state = track_active_tool_start(state, event.tool_call_id, event.name)
     state = set_working_status(state, :tool_executing)
@@ -1237,19 +1295,13 @@ defmodule MingaAgent.Session do
   end
 
   defp handle_provider_event(%Event.ToolApproval{} = event, state) do
-    notify(state, :approval, "Approval needed: #{event.name}")
+    case Map.get(state.trust_levels, event.name) do
+      nil ->
+        request_tool_approval(event, state)
 
-    approval =
-      MingaAgent.ToolApproval.new(
-        tool_call_id: event.tool_call_id,
-        name: event.name,
-        args: event.args,
-        reply_to: event.reply_to
-      )
-
-    state = %{state | pending_approval: approval}
-    broadcast(state, {:approval_pending, MingaAgent.ToolApproval.public(approval)})
-    state
+      scope ->
+        auto_approve_tool(event, state, scope)
+    end
   end
 
   defp handle_provider_event(%Event.ToolUpdate{} = event, state) do
@@ -1273,7 +1325,12 @@ defmodule MingaAgent.Session do
         end
       end)
 
-    state = %{state | messages: messages}
+    state = %{
+      state
+      | messages: messages,
+        pending_auto_approvals: Map.delete(state.pending_auto_approvals, event.tool_call_id)
+    }
+
     state = track_active_tool_end(state, event.tool_call_id)
     status = if event.is_error, do: :error, else: :done
     broadcast(state, {:tool_ended, event.name, event.result, status})
@@ -1297,6 +1354,39 @@ defmodule MingaAgent.Session do
     state = append_system_message(state, "Error: #{message}", :error)
     broadcast(state, {:error, message})
     state
+  end
+
+  @spec request_tool_approval(Event.ToolApproval.t(), state()) :: state()
+  defp request_tool_approval(event, state) do
+    notify(state, :approval, "Approval needed: #{event.name}")
+
+    approval =
+      MingaAgent.ToolApproval.new(
+        tool_call_id: event.tool_call_id,
+        name: event.name,
+        args: event.args,
+        reply_to: event.reply_to
+      )
+
+    state = %{state | pending_approval: approval}
+    broadcast(state, {:approval_pending, MingaAgent.ToolApproval.public(approval)})
+    state
+  end
+
+  @spec auto_approve_tool(Event.ToolApproval.t(), state(), trust_scope()) :: state()
+  defp auto_approve_tool(event, state, scope) do
+    send(event.reply_to, {:tool_approval_response, event.tool_call_id, :approve})
+
+    pending_auto_approvals = Map.put(state.pending_auto_approvals, event.tool_call_id, scope)
+
+    messages =
+      update_tool_call(state.messages, event.tool_call_id, fn tc ->
+        ToolCall.set_auto_approved_scope(tc, scope)
+      end)
+
+    state = %{state | messages: messages, pending_auto_approvals: pending_auto_approvals}
+    broadcast(state, {:tool_auto_approved, event.tool_call_id, event.name, scope})
+    notify_messages_changed(state)
   end
 
   @spec completion_notification(state()) :: String.t()
@@ -1368,6 +1458,24 @@ defmodule MingaAgent.Session do
     msg = Message.system(text, level)
     append_msg(state, msg)
   end
+
+  @spec maybe_set_trust_for_decision(state(), String.t(), approval_decision()) :: state()
+  defp maybe_set_trust_for_decision(state, name, :approve_session),
+    do: put_tool_trust(state, name, :session)
+
+  defp maybe_set_trust_for_decision(state, name, :approve_turn),
+    do: put_tool_trust(state, name, :turn)
+
+  defp maybe_set_trust_for_decision(state, _name, _decision), do: state
+
+  @spec put_tool_trust(state(), String.t(), trust_scope()) :: state()
+  defp put_tool_trust(state, name, scope) when is_binary(name) and scope in [:session, :turn] do
+    %{state | trust_levels: Map.put(state.trust_levels, name, scope)}
+  end
+
+  @spec execution_decision(approval_decision()) :: :approve | :reject
+  defp execution_decision(:reject), do: :reject
+  defp execution_decision(_decision), do: :approve
 
   @spec maybe_record_rejection(state(), MingaAgent.ToolApproval.t(), atom()) :: state()
   defp maybe_record_rejection(state, approval, :reject) do
@@ -1449,8 +1557,26 @@ defmodule MingaAgent.Session do
         clear_active_tool_tracking(state)
       end
 
+    state = clear_turn_trust_for_status(state, new_status)
     broadcast(state, {:status_changed, new_status})
     state
+  end
+
+  @spec clear_turn_trust_for_status(state(), status()) :: state()
+  defp clear_turn_trust_for_status(state, status) when status in [:idle, :error] do
+    clear_turn_trust(state)
+  end
+
+  defp clear_turn_trust_for_status(state, _status), do: state
+
+  @spec clear_turn_trust(state()) :: state()
+  defp clear_turn_trust(state) do
+    %{state | trust_levels: drop_turn_trust(state.trust_levels), pending_auto_approvals: %{}}
+  end
+
+  @spec drop_turn_trust(%{String.t() => trust_scope()}) :: %{String.t() => trust_scope()}
+  defp drop_turn_trust(trust_levels) do
+    Map.reject(trust_levels, fn {_name, scope} -> scope == :turn end)
   end
 
   @spec set_working_status(state(), :thinking | :tool_executing) :: state()
@@ -1790,7 +1916,9 @@ defmodule MingaAgent.Session do
             steering_queue: [],
             follow_up_queue: [],
             touched_files: %{},
-            boundaries: %{}
+            boundaries: %{},
+            trust_levels: %{},
+            pending_auto_approvals: %{}
         }
 
         apply_loaded_model_to_provider(state)

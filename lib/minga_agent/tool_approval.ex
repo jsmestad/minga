@@ -72,7 +72,7 @@ defmodule MingaAgent.ToolApproval do
     cwd =
       stringify_value(Map.get(args, "cwd") || Map.get(args, "working_directory") || File.cwd!())
 
-    Preview.new(:command, truncate(command, 120), preview_lines(["$ #{command}", "cwd: #{cwd}"]))
+    Preview.new(:command, command, preview_lines(["$ #{command}", "cwd: #{cwd}"]))
   end
 
   defp do_build_preview("write_file", %{"path" => path} = args) when is_binary(path) do

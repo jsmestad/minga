@@ -1830,11 +1830,24 @@ struct GUIAgentChatDecoderTests {
         return data
     }
 
-    /// Builds a messages section payload with the given raw message data.
+    /// Builds a legacy unframed messages section payload with the given raw message data.
     private func buildMessagesPayload(count: Int, _ rawMessages: Data) -> Data {
         var payload = Data()
         appendU16(&payload, UInt16(count))
         payload.append(rawMessages)
+        return payload
+    }
+
+    /// Builds the current framed v1 messages section payload.
+    private func buildFramedMessagesPayload(_ messages: [Data]) -> Data {
+        var payload = Data()
+        payload.append(0xFF)
+        payload.append(1)
+        appendU16(&payload, UInt16(messages.count))
+        for message in messages {
+            appendU32(&payload, UInt32(message.count))
+            payload.append(message)
+        }
         return payload
     }
 
@@ -1936,18 +1949,90 @@ struct GUIAgentChatDecoderTests {
         let result = "file contents here"
         appendU32(&msgs, UInt32(result.utf8.count))
         msgs.append(contentsOf: result.utf8)
+        msgs.append(2) // autoApprovedScope at end
 
         let data = buildChatData(status: 2, model: "claude", messages: buildMessagesPayload(count: 1, msgs))
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
         guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
         guard messages.count == 1 else { Issue.record("Expected 1 message"); return }
-        guard case .toolCall(let name, _, let tcStatus, let isError, let collapsed, let duration, let tcResult) = messages[0].content else { Issue.record("Expected .toolCall"); return }
+        guard case .toolCall(let name, _, let tcStatus, let isError, let collapsed, let autoApprovedScope, let duration, let tcResult) = messages[0].content else { Issue.record("Expected .toolCall"); return }
         #expect(name == "read_file")
         #expect(tcStatus == 1)
         #expect(isError == false)
         #expect(collapsed == true)
+        #expect(autoApprovedScope == 2)
         #expect(duration == 1234)
         #expect(tcResult == "file contents here")
+    }
+
+    @Test("Decode gui_agent_chat framed tool_call with auto_approved followed by another message")
+    func decodeFramedToolCallWithAutoApprovedAndTrailingMessage() throws {
+        var toolMessage = Data()
+        appendU32(&toolMessage, 5)
+        toolMessage.append(0x04)
+        toolMessage.append(1); toolMessage.append(0); toolMessage.append(1)
+        appendU32(&toolMessage, 1234)
+        appendString16(&toolMessage, "read_file")
+        appendString16(&toolMessage, "lib/minga.ex")
+        let result = "file contents here"
+        appendU32(&toolMessage, UInt32(result.utf8.count))
+        toolMessage.append(contentsOf: result.utf8)
+        toolMessage.append(2)
+
+        var trailingMessage = Data()
+        appendU32(&trailingMessage, 6)
+        trailingMessage.append(0x01)
+        appendU32(&trailingMessage, 5)
+        trailingMessage.append(contentsOf: "later".utf8)
+
+        let data = buildChatData(status: 2, model: "claude", messages: buildFramedMessagesPayload([toolMessage, trailingMessage]))
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard messages.count == 2 else { Issue.record("Expected 2 messages"); return }
+        guard case .toolCall(let name, _, _, _, _, let autoApprovedScope, _, let tcResult) = messages[0].content else { Issue.record("Expected .toolCall"); return }
+        guard case .user(let laterText) = messages[1].content else { Issue.record("Expected trailing user message"); return }
+
+        #expect(name == "read_file")
+        #expect(autoApprovedScope == 2)
+        #expect(tcResult == "file contents here")
+        #expect(laterText == "later")
+    }
+
+    @Test("Decode gui_agent_chat legacy tool_call without auto_approved byte")
+    func decodeLegacyToolCallWithoutAutoApproved() throws {
+        var msgs = Data()
+        appendU32(&msgs, 5)
+        msgs.append(0x04)
+        msgs.append(1)
+        msgs.append(0)
+        msgs.append(1)
+        appendU32(&msgs, 1234)
+        appendString16(&msgs, "read_file")
+        appendString16(&msgs, "lib/minga.ex")
+        let result = "file contents here"
+        appendU32(&msgs, UInt32(result.utf8.count))
+        msgs.append(contentsOf: result.utf8)
+
+        appendU32(&msgs, 6)
+        msgs.append(0x01)
+        appendU32(&msgs, 5)
+        msgs.append(contentsOf: "later".utf8)
+
+        let data = buildChatData(status: 2, model: "claude", messages: buildMessagesPayload(count: 2, msgs))
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard messages.count == 2 else { Issue.record("Expected 2 messages"); return }
+        guard case .toolCall(let name, _, _, _, _, let autoApprovedScope, _, let tcResult) = messages[0].content else { Issue.record("Expected .toolCall"); return }
+        guard case .user(let laterText) = messages[1].content else { Issue.record("Expected trailing user message"); return }
+
+        #expect(name == "read_file")
+        #expect(autoApprovedScope == 0)
+        #expect(tcResult == "file contents here")
+        #expect(laterText == "later")
     }
 
     @Test("Decode gui_agent_chat with inline approval tool call (sectioned)")
@@ -1975,6 +2060,7 @@ struct GUIAgentChatDecoderTests {
         #expect(previewKind == 3)
         #expect(previewLines == ["file: config.toml", "1 edit(s)"])
     }
+
 
     @Test("Decode gui_agent_chat with system message (sectioned)")
     func decodeSystem() throws {
@@ -2060,6 +2146,86 @@ struct GUIAgentChatDecoderTests {
         #expect(lines[0][1].italic == true)
         #expect(lines[1][0].text == "  :ok")
         #expect(lines[1][0].underline == true)
+    }
+
+    @Test("Decode gui_agent_chat framed styled_tool_call with auto_approved followed by another message")
+    func decodeFramedStyledToolCallWithAutoApprovedAndTrailingMessage() throws {
+        var toolMessage = Data()
+        appendU32(&toolMessage, 42)
+        toolMessage.append(0x08)
+        toolMessage.append(1)
+        toolMessage.append(0)
+        toolMessage.append(1)
+        appendU32(&toolMessage, 99)
+        appendString16(&toolMessage, "shell")
+        appendString16(&toolMessage, "🚀🚀🚀")
+        appendU16(&toolMessage, 1)
+        appendU16(&toolMessage, 1)
+        appendString16(&toolMessage, "result")
+        appendRGB(&toolMessage, 0x61, 0xAF, 0xEF)
+        appendRGB(&toolMessage, 0x00, 0x00, 0x00)
+        toolMessage.append(0x01)
+        toolMessage.append(1)
+
+        var trailingMessage = Data()
+        appendU32(&trailingMessage, 43)
+        trailingMessage.append(0x02)
+        appendU32(&trailingMessage, 5)
+        trailingMessage.append(contentsOf: "later".utf8)
+
+        let data = buildChatData(model: "claude", messages: buildFramedMessagesPayload([toolMessage, trailingMessage]))
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard messages.count == 2 else { Issue.record("Expected 2 messages"); return }
+        guard case .styledToolCall(let name, _, _, _, _, let autoApprovedScope, _, let resultLines) = messages[0].content else { Issue.record("Expected .styledToolCall"); return }
+        guard case .assistant(let laterText) = messages[1].content else { Issue.record("Expected trailing assistant message"); return }
+
+        #expect(name == "shell")
+        #expect(autoApprovedScope == 1)
+        #expect(resultLines.count == 1)
+        #expect(resultLines[0][0].text == "result")
+        #expect(laterText == "later")
+    }
+
+    @Test("Decode gui_agent_chat legacy styled_tool_call without auto_approved byte")
+    func decodeLegacyStyledToolCallWithoutAutoApproved() throws {
+        var msgs = Data()
+        appendU32(&msgs, 42)
+        msgs.append(0x08)
+        msgs.append(1)
+        msgs.append(0)
+        msgs.append(1)
+        appendU32(&msgs, 99)
+        appendString16(&msgs, "shell")
+        appendString16(&msgs, "🚀🚀🚀")
+        appendU16(&msgs, 1)
+        appendU16(&msgs, 1)
+        appendString16(&msgs, "result")
+        appendRGB(&msgs, 0x61, 0xAF, 0xEF)
+        appendRGB(&msgs, 0x00, 0x00, 0x00)
+        msgs.append(0x01)
+
+        appendU32(&msgs, 43)
+        msgs.append(0x02)
+        appendU32(&msgs, 5)
+        msgs.append(contentsOf: "later".utf8)
+
+        let data = buildChatData(model: "claude", messages: buildMessagesPayload(count: 2, msgs))
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard messages.count == 2 else { Issue.record("Expected 2 messages"); return }
+        guard case .styledToolCall(let name, _, _, _, _, let autoApprovedScope, _, let resultLines) = messages[0].content else { Issue.record("Expected .styledToolCall"); return }
+        guard case .assistant(let laterText) = messages[1].content else { Issue.record("Expected trailing assistant message"); return }
+
+        #expect(name == "shell")
+        #expect(autoApprovedScope == 0)
+        #expect(resultLines.count == 1)
+        #expect(resultLines[0][0].text == "result")
+        #expect(laterText == "later")
     }
 
     @Test("Decode gui_agent_chat styled_assistant link run")

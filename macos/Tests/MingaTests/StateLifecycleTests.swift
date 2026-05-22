@@ -359,7 +359,7 @@ struct AgentChatStateLifecycleTests {
             Wire.ChatMessage(beamId: 2, content: .assistant(text: "hi")),
             Wire.ChatMessage(beamId: 3, content: .thinking(text: "analyzing...", collapsed: false)),
             Wire.ChatMessage(beamId: 4, content: .toolCall(name: "read_file", summary: "lib/minga.ex", status: 1, isError: false,
-                     collapsed: true, durationMs: 500, result: "contents")),
+                     collapsed: true, autoApprovedScope: 0, durationMs: 500, result: "contents")),
             Wire.ChatMessage(beamId: 5, content: .system(text: "session started", isError: false)),
             Wire.ChatMessage(beamId: 6, content: .usage(input: 100, output: 50, cacheRead: 80, cacheWrite: 20, costMicros: 5000))
         ]

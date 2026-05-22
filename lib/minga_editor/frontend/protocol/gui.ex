@@ -2521,9 +2521,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp encode_pending_approval(nil), do: <<0::8>>
 
   defp encode_pending_approval(%{name: name, args: args}) do
-    name_b = :erlang.iolist_to_binary([name])
-    summary = summarize_tool_args(name, args)
-    summary_b = :erlang.iolist_to_binary([summary])
+    name_b = utf8_prefix_bytes(name, 120)
+    summary_b = utf8_prefix_bytes(summarize_tool_args(name, args), @max_chat_text_bytes)
     <<1::8, byte_size(name_b)::16, name_b::binary, byte_size(summary_b)::16, summary_b::binary>>
   end
 
@@ -2556,17 +2555,16 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   defp encode_help_overlay(_, _), do: <<0::8>>
 
-  # Computes a short summary for a tool call from its name and args.
+  # Computes a display summary for a tool call from its name and args.
   # Reuses summarize_tool_args/2 (shared with the approval banner).
-  # Truncates to 100 chars max to keep the wire payload small.
   @spec tool_call_summary(MingaAgent.ToolCall.t()) :: String.t()
   defp tool_call_summary(%MingaAgent.ToolCall{name: name, args: args}) when is_map(args) do
-    summarize_tool_args(name, args) |> String.slice(0, 100)
+    summarize_tool_args(name, args)
   end
 
   defp tool_call_summary(%MingaAgent.ToolCall{name: name} = tc) do
     args = Map.get(tc, :args) || %{}
-    summarize_tool_args(name, args) |> String.slice(0, 100)
+    summarize_tool_args(name, args)
   end
 
   @spec preview_kind_byte(atom()) :: non_neg_integer()
@@ -2620,15 +2618,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @type gui_chat_message ::
           MingaAgent.Message.t()
           | {:styled_assistant, [[styled_run()]]}
-          | {:styled_tool_call,
-             %{
-               name: String.t(),
-               status: :running | :complete | :error,
-               is_error: boolean(),
-               collapsed: boolean(),
-               duration_ms: non_neg_integer() | nil,
-               result: String.t() | nil
-             }, [[styled_run()]]}
+          | {:styled_tool_call, MingaAgent.ToolCall.t(), [[styled_run()]]}
           | {:approval_tool_call, MingaAgent.ToolCall.t(), map()}
 
   @spec encode_chat_messages([gui_chat_message() | {pos_integer(), gui_chat_message()}]) ::
@@ -2719,7 +2709,13 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           binary()
   defp encode_chat_messages_payload(messages) do
     msg_binaries = Enum.map(messages, &encode_chat_message/1)
-    IO.iodata_to_binary([<<length(msg_binaries)::16>> | msg_binaries])
+
+    framed_messages =
+      Enum.map(msg_binaries, fn msg ->
+        <<byte_size(msg)::32, msg::binary>>
+      end)
+
+    IO.iodata_to_binary([<<0xFF::8, 1::8, length(msg_binaries)::16>> | framed_messages])
   end
 
   @spec strip_chat_message_links(gui_chat_message() | {pos_integer(), gui_chat_message()}) ::
@@ -2796,7 +2792,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   defp encode_chat_message_body({:tool_call, tc}) do
     name_bytes = :erlang.iolist_to_binary([tc.name])
-    summary_bytes = :erlang.iolist_to_binary([tool_call_summary(tc)])
+    summary_bytes = utf8_prefix_bytes(tool_call_summary(tc), @max_chat_text_bytes)
     result_bytes = :erlang.iolist_to_binary([tc.result])
 
     status_byte =
@@ -2809,10 +2805,12 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     duration = tc.duration_ms || 0
     error_byte = if tc.is_error, do: 1, else: 0
     collapsed_byte = if tc.collapsed, do: 1, else: 0
+    auto_approved_byte = auto_approved_scope_byte(tc.auto_approved_scope)
 
     <<0x04::8, status_byte::8, error_byte::8, collapsed_byte::8, duration::32,
       byte_size(name_bytes)::16, name_bytes::binary, byte_size(summary_bytes)::16,
-      summary_bytes::binary, byte_size(result_bytes)::32, result_bytes::binary>>
+      summary_bytes::binary, byte_size(result_bytes)::32, result_bytes::binary,
+      auto_approved_byte::8>>
   end
 
   # Approval tool call: inline approval card attached to the tool message.
@@ -2823,7 +2821,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp encode_chat_message_body({:approval_tool_call, tc, approval}) do
     preview = Map.get(approval, :preview, MingaAgent.ToolApproval.build_preview(tc.name, tc.args))
     name_bytes = preview_text_bytes(tc.name, 120)
-    summary_bytes = preview_text_bytes(Map.get(preview, :summary, tool_call_summary(tc)), 300)
+    summary_bytes = approval_summary_bytes(preview, tool_call_summary(tc))
     id_bytes = preview_text_bytes(Map.get(approval, :tool_call_id, tc.id), 120)
 
     line_binaries =
@@ -2845,13 +2843,13 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   # Styled tool call: same header fields as tool_call (0x04), but result is styled runs.
   # Sub-opcode 0x08. Layout:
-  #   0x08, status::8, error::8, collapsed::8, duration::32,
-  #   name_len::16, name, summary_len::16, summary, line_count::16, then per line:
-  #   run_count::16, then per run: text_len::16, text, fg::24, bg::24, flags::8,
-  #   and when flags bit 0x08 is set: url_len::16, url.
+  #   0x08, status::8, error::8, collapsed::8, duration::32, name_len::16, name,
+  #   summary_len::16, summary, line_count::16, then per line: run_count::16,
+  #   then per run: text_len::16, text, fg::24, bg::24, flags::8,
+  #   and when flags bit 0x08 is set: url_len::16, url. auto_approved::8 is appended after the styled line payload.
   defp encode_chat_message_body({:styled_tool_call, tc, styled_lines}) do
     name_bytes = :erlang.iolist_to_binary([tc.name])
-    summary_bytes = :erlang.iolist_to_binary([tool_call_summary(tc)])
+    summary_bytes = utf8_prefix_bytes(tool_call_summary(tc), @max_chat_text_bytes)
 
     status_byte =
       case tc.status do
@@ -2863,6 +2861,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     duration = tc.duration_ms || 0
     error_byte = if tc.is_error, do: 1, else: 0
     collapsed_byte = if tc.collapsed, do: 1, else: 0
+    auto_approved_byte = auto_approved_scope_byte(tc.auto_approved_scope)
 
     line_binaries =
       Enum.map(styled_lines, fn runs ->
@@ -2875,8 +2874,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     IO.iodata_to_binary([
       <<0x08::8, status_byte::8, error_byte::8, collapsed_byte::8, duration::32,
         byte_size(name_bytes)::16, name_bytes::binary, byte_size(summary_bytes)::16,
-        summary_bytes::binary, length(styled_lines)::16>>
-      | line_binaries
+        summary_bytes::binary, length(styled_lines)::16>>,
+      line_binaries,
+      <<auto_approved_byte::8>>
     ])
   end
 
@@ -2890,6 +2890,24 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     cost_int = round((u.cost || 0.0) * 1_000_000)
     <<0x06::8, u.input::32, u.output::32, u.cache_read::32, u.cache_write::32, cost_int::32>>
   end
+
+  @spec approval_summary_bytes(map(), String.t()) :: binary()
+  defp approval_summary_bytes(%{kind: :command} = preview, fallback) do
+    preview
+    |> Map.get(:summary, fallback)
+    |> utf8_prefix_bytes(@max_chat_text_bytes)
+  end
+
+  defp approval_summary_bytes(preview, fallback) do
+    preview
+    |> Map.get(:summary, fallback)
+    |> utf8_prefix_bytes(300)
+  end
+
+  @spec auto_approved_scope_byte(MingaAgent.ToolCall.auto_approved_scope() | nil) :: 0 | 1 | 2
+  defp auto_approved_scope_byte(:session), do: 1
+  defp auto_approved_scope_byte(:turn), do: 2
+  defp auto_approved_scope_byte(nil), do: 0
 
   @spec encode_styled_run(styled_run()) :: binary()
   defp encode_styled_run({text, fg, bg, flags, url}) do

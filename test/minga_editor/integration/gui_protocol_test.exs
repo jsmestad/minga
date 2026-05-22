@@ -273,6 +273,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         status: :complete,
         is_error: false,
         collapsed: false,
+        auto_approved_scope: :turn,
         duration_ms: 1500,
         result: "output text"
       }
@@ -306,6 +307,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert msg["status"] == 1
       assert msg["is_error"] == false
       assert msg["collapsed"] == false
+      assert msg["auto_approved_scope"] == 2
       assert msg["duration_ms"] == 1500
       assert length(msg["result_lines"]) == 2
 
@@ -324,6 +326,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         status: :running,
         is_error: false,
         collapsed: true,
+        auto_approved_scope: :session,
         duration_ms: 0,
         result: "file content here"
       }
@@ -349,6 +352,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert msg["kind"] == "tool_call"
       assert msg["name"] == "read_file"
       assert msg["collapsed"] == true
+      assert msg["auto_approved_scope"] == 1
       assert msg["result"] == "file content here"
     end
 

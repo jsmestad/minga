@@ -260,15 +260,19 @@ defmodule MingaEditor.Commands.AgentSubStates do
   @spec approve_tool(state()) :: state()
   def approve_tool(state), do: respond_to_tool_approval(state, :approve)
 
-  @doc "Approves the current and all subsequent tool executions in this turn."
-  @spec approve_all_tools(state()) :: state()
-  def approve_all_tools(state), do: respond_to_tool_approval(state, :approve_all)
+  @doc "Approves this tool for the rest of the session."
+  @spec trust_tool_session(state()) :: state()
+  def trust_tool_session(state), do: respond_to_tool_approval(state, :approve_session)
+
+  @doc "Approves this tool for the current turn."
+  @spec trust_tool_turn(state()) :: state()
+  def trust_tool_turn(state), do: respond_to_tool_approval(state, :approve_turn)
 
   @doc "Denies the pending tool execution."
   @spec deny_tool(state()) :: state()
   def deny_tool(state), do: respond_to_tool_approval(state, :reject)
 
-  @spec respond_to_tool_approval(state(), :approve | :approve_all | :reject) :: state()
+  @spec respond_to_tool_approval(state(), Session.approval_decision()) :: state()
   defp respond_to_tool_approval(state, decision) do
     agent = AgentAccess.agent(state)
     session = AgentAccess.session(state)

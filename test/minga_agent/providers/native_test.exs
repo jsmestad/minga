@@ -422,6 +422,90 @@ defmodule MingaAgent.Providers.NativeTest do
       assert Enum.any?(events, &match?(%Event.AgentEnd{}, &1))
     end
 
+    test "tool approval mode :all preserves the batch prompt after per-tool ask overrides", %{
+      tmp_dir: dir
+    } do
+      File.write!(Path.join(dir, "test.txt"), "file contents")
+      File.mkdir_p!(Path.join(dir, "subdir"))
+      call_count = :counters.new(1, [:atomics])
+
+      client = fn _model, _messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          case count do
+            0 ->
+              [
+                ReqLLM.StreamChunk.tool_call("read_file", %{"path" => "test.txt"}, %{
+                  id: "tc_1",
+                  index: 0
+                }),
+                ReqLLM.StreamChunk.tool_call("list_directory", %{"path" => "."}, %{
+                  id: "tc_2",
+                  index: 1
+                }),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+              ]
+
+            _ ->
+              [
+                ReqLLM.StreamChunk.text("done"),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+              ]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      tools = Tools.all(project_root: dir)
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: client,
+          tools: tools,
+          config: agent_config(tool_approval: :all, tool_permissions: %{"read_file" => :ask})
+        )
+
+      assert :ok = Native.send_prompt(pid, "Read the file and then list the directory")
+      assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
+
+      assert_receive {:agent_provider_event,
+                      %Event.ToolApproval{tool_call_id: "tc_1", reply_to: reply_to_1}},
+                     1_000
+
+      send(reply_to_1, {:tool_approval_response, "tc_1", :approve})
+
+      assert_receive {:agent_provider_event,
+                      %Event.ToolStart{tool_call_id: "tc_1", name: "read_file"}},
+                     1_000
+
+      assert_receive {:agent_provider_event,
+                      %Event.ToolEnd{tool_call_id: "tc_1", name: "read_file", is_error: false}},
+                     1_000
+
+      assert_receive {:agent_provider_event,
+                      %Event.ToolApproval{tool_call_id: "tc_2", reply_to: reply_to_2}},
+                     1_000
+
+      send(reply_to_2, {:tool_approval_response, "tc_2", :approve})
+
+      assert_receive {:agent_provider_event,
+                      %Event.ToolStart{tool_call_id: "tc_2", name: "list_directory"}},
+                     1_000
+
+      assert_receive {:agent_provider_event,
+                      %Event.ToolEnd{
+                        tool_call_id: "tc_2",
+                        name: "list_directory",
+                        is_error: false
+                      }},
+                     1_000
+
+      assert_receive {:agent_provider_event, %Event.AgentEnd{}}, 1_000
+    end
+
     test "uses ProjectView-backed tools when project_view is passed to Native.start_link", %{
       tmp_dir: dir
     } do

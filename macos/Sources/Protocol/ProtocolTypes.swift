@@ -538,9 +538,9 @@ enum Wire {
         /// Assistant message with pre-styled text runs from tree-sitter.
         case styledAssistant(lines: [[StyledTextRun]])
         case thinking(text: String, collapsed: Bool)
-        case toolCall(name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, result: String)
+        case toolCall(name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, result: String)
         /// Tool call with pre-styled result runs from tree-sitter.
-        case styledToolCall(name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, resultLines: [[StyledTextRun]])
+        case styledToolCall(name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, resultLines: [[StyledTextRun]])
         case approvalToolCall(name: String, summary: String, toolCallId: String, previewKind: UInt8, previewLines: [String])
         case system(text: String, isError: Bool)
         case usage(input: UInt32, output: UInt32, cacheRead: UInt32, cacheWrite: UInt32, costMicros: UInt32)

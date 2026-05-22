@@ -14,6 +14,9 @@ defmodule MingaAgent.ToolCall do
   @typedoc "Tool call execution status."
   @type status :: :running | :complete | :error
 
+  @typedoc "Scope that auto-approved this tool call."
+  @type auto_approved_scope :: :session | :turn
+
   @typedoc "A tool call."
   @type t :: %__MODULE__{
           id: String.t(),
@@ -23,6 +26,7 @@ defmodule MingaAgent.ToolCall do
           result: String.t(),
           is_error: boolean(),
           collapsed: boolean(),
+          auto_approved_scope: auto_approved_scope() | nil,
           started_at: integer() | nil,
           duration_ms: non_neg_integer() | nil
         }
@@ -35,6 +39,7 @@ defmodule MingaAgent.ToolCall do
             result: "",
             is_error: false,
             collapsed: true,
+            auto_approved_scope: nil,
             started_at: nil,
             duration_ms: nil
 
@@ -92,6 +97,12 @@ defmodule MingaAgent.ToolCall do
   @spec set_collapsed(t(), boolean()) :: t()
   def set_collapsed(%__MODULE__{} = tc, collapsed) when is_boolean(collapsed) do
     %{tc | collapsed: collapsed}
+  end
+
+  @doc "Records the trust scope that auto-approved this tool call."
+  @spec set_auto_approved_scope(t(), auto_approved_scope() | nil) :: t()
+  def set_auto_approved_scope(%__MODULE__{} = tc, scope) when scope in [:session, :turn, nil] do
+    %{tc | auto_approved_scope: scope}
   end
 
   @doc "Returns true if the tool call has finished (complete or error)."
