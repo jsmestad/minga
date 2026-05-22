@@ -482,17 +482,14 @@ defmodule MingaEditor.PickerUI do
         theme_picker: pc,
         viewport: viewport
       }) do
-    {visible, selected_offset} = Picker.visible_items(picker)
+    # Clamp so item rows + separator + prompt never exceed viewport height.
+    row_budget = max(viewport.rows - 3, 1)
+    {visible, selected_offset, item_rows} = bottom_visible_items(picker, row_budget)
+    selected_row_offset = row_offset_for_visible_index(visible, selected_offset)
 
-    # Clamp so items + separator + prompt never exceed viewport height.
-    max_items_for_viewport = max(viewport.rows - 3, 1)
-    visible = Enum.take(visible, max_items_for_viewport)
-    item_count = length(visible)
-    selected_offset = if item_count > 0, do: min(selected_offset, item_count - 1), else: 0
-
-    # Layout: items grow upward from row N-2, prompt on row N-1
+    # Layout: item rows grow upward from row N-2, prompt on row N-1
     prompt_row = viewport.rows - 1
-    separator_row = prompt_row - item_count - 1
+    separator_row = prompt_row - item_rows - 1
     first_item_row = separator_row + 1
 
     # Theme colors
@@ -542,27 +539,27 @@ defmodule MingaEditor.PickerUI do
       match_fg: match_fg
     }
 
-    item_commands =
+    {item_commands, _row_offset} =
       visible
       |> Enum.with_index()
-      |> Enum.flat_map(fn {item, idx} ->
-        row = first_item_row + idx
+      |> Enum.map_reduce(0, fn {{item, rows_used}, idx}, row_offset ->
+        row = first_item_row + row_offset
 
-        if row < 0 or row >= viewport.rows do
-          []
-        else
-          render_item(
+        commands =
+          render_visible_item(
             row,
-            item.label,
-            item.description,
+            rows_used,
+            item,
             idx == selected_offset,
             picker.query,
-            viewport.cols,
-            picker_colors,
-            item.icon_color
+            viewport,
+            picker_colors
           )
-        end
+
+        {commands, row_offset + rows_used}
       end)
+
+    item_commands = List.flatten(item_commands)
 
     # Prompt line (replaces minibuffer)
     prompt_text = "> " <> picker.query
@@ -586,7 +583,7 @@ defmodule MingaEditor.PickerUI do
       render_action_menu(
         %{picker_state: %{action_menu: action_menu}, theme_picker: pc, viewport: viewport},
         first_item_row,
-        selected_offset
+        selected_row_offset
       )
 
     {all_cmds ++ action_cmds, cursor_pos}
@@ -974,6 +971,238 @@ defmodule MingaEditor.PickerUI do
     else
       state
     end
+  end
+
+  @type visible_item :: {Picker.item(), pos_integer()}
+
+  @spec bottom_visible_items(Picker.t(), pos_integer()) ::
+          {[visible_item()], non_neg_integer(), non_neg_integer()}
+  defp bottom_visible_items(%Picker{filtered: []}, _row_budget), do: {[], 0, 0}
+
+  defp bottom_visible_items(%Picker{} = picker, row_budget) do
+    {visible, selected_offset} = Picker.visible_items(picker)
+    fit_visible_items(visible, selected_offset, row_budget)
+  end
+
+  @spec fit_visible_items([Picker.item()], non_neg_integer(), pos_integer()) ::
+          {[visible_item()], non_neg_integer(), non_neg_integer()}
+  defp fit_visible_items(visible, selected_offset, row_budget) do
+    selected_item = Enum.at(visible, selected_offset)
+    selected_rows = min(item_row_count(selected_item), row_budget)
+    remaining_rows = row_budget - selected_rows
+    before_items = Enum.take(visible, selected_offset)
+    after_items = Enum.drop(visible, selected_offset + 1)
+
+    {before_entries, before_remaining, before_rows} =
+      take_before_visible_items(before_items, div(remaining_rows, 2))
+
+    {after_entries, after_rows} =
+      take_after_visible_items(after_items, remaining_rows - before_rows)
+
+    {more_before_entries, _before_remaining, more_before_rows} =
+      take_before_visible_items(before_remaining, remaining_rows - before_rows - after_rows)
+
+    visible_entries =
+      more_before_entries ++ before_entries ++ [{selected_item, selected_rows}] ++ after_entries
+
+    rows_used = more_before_rows + before_rows + selected_rows + after_rows
+    selected_entry_offset = length(more_before_entries) + length(before_entries)
+
+    {visible_entries, selected_entry_offset, rows_used}
+  end
+
+  @spec take_before_visible_items([Picker.item()], non_neg_integer()) ::
+          {[visible_item()], [Picker.item()], non_neg_integer()}
+  defp take_before_visible_items(items, row_budget) do
+    {entries_nearest_first, remaining_nearest_first, rows_used} =
+      items
+      |> Enum.reverse()
+      |> take_visible_items_by_rows(row_budget)
+
+    {Enum.reverse(entries_nearest_first), Enum.reverse(remaining_nearest_first), rows_used}
+  end
+
+  @spec take_after_visible_items([Picker.item()], non_neg_integer()) ::
+          {[visible_item()], non_neg_integer()}
+  defp take_after_visible_items(items, row_budget) do
+    {entries, _remaining, rows_used} = take_visible_items_by_rows(items, row_budget)
+    {entries, rows_used}
+  end
+
+  @spec take_visible_items_by_rows([Picker.item()], non_neg_integer()) ::
+          {[visible_item()], [Picker.item()], non_neg_integer()}
+  defp take_visible_items_by_rows(items, row_budget) do
+    take_visible_items_by_rows(items, row_budget, [], 0)
+  end
+
+  @spec take_visible_items_by_rows(
+          [Picker.item()],
+          non_neg_integer(),
+          [visible_item()],
+          non_neg_integer()
+        ) ::
+          {[visible_item()], [Picker.item()], non_neg_integer()}
+  defp take_visible_items_by_rows([], _row_budget, acc, rows_used) do
+    {Enum.reverse(acc), [], rows_used}
+  end
+
+  defp take_visible_items_by_rows([item | rest] = remaining, row_budget, acc, rows_used) do
+    item_rows = item_row_count(item)
+
+    if rows_used + item_rows <= row_budget do
+      take_visible_items_by_rows(
+        rest,
+        row_budget,
+        [{item, item_rows} | acc],
+        rows_used + item_rows
+      )
+    else
+      {Enum.reverse(acc), remaining, rows_used}
+    end
+  end
+
+  @spec row_offset_for_visible_index([visible_item()], non_neg_integer()) :: non_neg_integer()
+  defp row_offset_for_visible_index(visible, index) do
+    visible
+    |> Enum.take(index)
+    |> Enum.reduce(0, fn {_item, rows_used}, acc -> acc + rows_used end)
+  end
+
+  @spec item_row_count(Picker.item()) :: pos_integer()
+  defp item_row_count(%{two_line: true}), do: 2
+  defp item_row_count(_item), do: 1
+
+  @spec render_visible_item(
+          integer(),
+          pos_integer(),
+          Picker.item(),
+          boolean(),
+          String.t(),
+          MingaEditor.Viewport.t(),
+          map()
+        ) :: [DisplayList.draw()]
+  defp render_visible_item(row, 1, %{two_line: true} = item, is_selected, query, viewport, colors) do
+    render_one_line_item(row, item, is_selected, query, viewport, colors)
+  end
+
+  defp render_visible_item(
+         row,
+         _rows_used,
+         %{two_line: true} = item,
+         is_selected,
+         query,
+         viewport,
+         colors
+       ) do
+    render_two_line_item(row, item, is_selected, query, viewport, colors)
+  end
+
+  defp render_visible_item(row, _rows_used, item, is_selected, query, viewport, colors) do
+    if row < 0 or row >= viewport.rows do
+      []
+    else
+      render_item(
+        row,
+        item.label,
+        item.description,
+        is_selected,
+        query,
+        viewport.cols,
+        colors,
+        item.icon_color
+      )
+    end
+  end
+
+  @spec render_one_line_item(
+          integer(),
+          Picker.item(),
+          boolean(),
+          String.t(),
+          MingaEditor.Viewport.t(),
+          map()
+        ) :: [DisplayList.draw()]
+  defp render_one_line_item(row, item, is_selected, query, viewport, colors) do
+    if row < 0 or row >= viewport.rows do
+      []
+    else
+      render_item(row, item.label, "", is_selected, query, viewport.cols, colors, item.icon_color)
+    end
+  end
+
+  @spec render_two_line_item(
+          integer(),
+          Picker.item(),
+          boolean(),
+          String.t(),
+          MingaEditor.Viewport.t(),
+          map()
+        ) :: [DisplayList.draw()]
+  defp render_two_line_item(row, item, is_selected, query, viewport, colors) do
+    row_bg = if is_selected, do: colors.sel_bg, else: colors.bg
+
+    label_cmds =
+      if row < 0 or row >= viewport.rows do
+        []
+      else
+        render_item(
+          row,
+          item.label,
+          "",
+          is_selected,
+          query,
+          viewport.cols,
+          colors,
+          item.icon_color
+        )
+      end
+
+    description_cmds =
+      render_two_line_description(row + 1, item.description, row_bg, viewport, colors)
+
+    indicator_cmds =
+      render_two_line_selection_indicator(row, is_selected, row_bg, viewport, colors)
+
+    label_cmds ++ description_cmds ++ indicator_cmds
+  end
+
+  @spec render_two_line_description(
+          integer(),
+          String.t(),
+          non_neg_integer(),
+          MingaEditor.Viewport.t(),
+          map()
+        ) ::
+          [DisplayList.draw()]
+  defp render_two_line_description(row, description, row_bg, viewport, colors) do
+    if row < 0 or row >= viewport.rows do
+      []
+    else
+      text =
+        ("  " <> description)
+        |> Unicode.truncate_display_width(viewport.cols)
+        |> Unicode.pad_display_trailing(viewport.cols)
+
+      [DisplayList.draw(row, 0, text, Face.new(fg: colors.dim_fg, bg: row_bg))]
+    end
+  end
+
+  @spec render_two_line_selection_indicator(
+          integer(),
+          boolean(),
+          non_neg_integer(),
+          MingaEditor.Viewport.t(),
+          map()
+        ) ::
+          [DisplayList.draw()]
+  defp render_two_line_selection_indicator(_row, false, _row_bg, _viewport, _colors), do: []
+
+  defp render_two_line_selection_indicator(row, true, row_bg, viewport, colors) do
+    [row, row + 1]
+    |> Enum.filter(&(&1 >= 0 and &1 < viewport.rows))
+    |> Enum.map(fn indicator_row ->
+      DisplayList.draw(indicator_row, 0, "▌", Face.new(fg: colors.highlight_fg, bg: row_bg))
+    end)
   end
 
   # Renders a single picker item row with background, match highlights, and description.
