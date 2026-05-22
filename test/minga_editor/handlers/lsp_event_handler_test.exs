@@ -9,7 +9,6 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
   alias Minga.Editing.Completion
   alias MingaEditor.CompletionTrigger
   alias MingaEditor.Handlers.LspEventHandler
-  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.SignatureHelp
@@ -151,10 +150,8 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       register_lsp_client(buffer, client)
 
       state =
-        EditorState.update_workspace(state, fn workspace ->
-          SessionState.update_highlight(workspace, fn highlighting ->
-            Highlighting.put_highlight(highlighting, buffer, Highlight.new())
-          end)
+        EditorState.update_highlight(state, fn highlighting ->
+          Highlighting.put_highlight(highlighting, buffer, Highlight.new())
         end)
 
       ref = make_ref()
@@ -206,7 +203,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
   end
 
   defp put_lsp_pending(state, ref, kind) do
-    EditorState.update_workspace(state, &SessionState.set_lsp_pending(&1, %{ref => kind}))
+    EditorState.put_lsp_pending(state, ref, kind)
   end
 
   defp base_state do

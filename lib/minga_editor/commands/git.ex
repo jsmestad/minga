@@ -15,7 +15,6 @@ defmodule MingaEditor.Commands.Git do
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
   alias Minga.Git
-  alias MingaEditor.Session.State, as: SessionState
   alias Minga.Language
   alias MingaEditor.UI.Picker.GitChangedSource
 
@@ -59,7 +58,7 @@ defmodule MingaEditor.Commands.Git do
   def execute(state, :git_status_toggle) do
     if state.workspace.keymap_scope == :git_status do
       state
-      |> EditorState.update_workspace(&SessionState.set_keymap_scope(&1, :editor))
+      |> EditorState.set_keymap_scope(:editor)
       |> EditorState.close_git_status_panel()
       |> Layout.invalidate()
       |> EditorState.invalidate_all_windows()
@@ -843,7 +842,7 @@ defmodule MingaEditor.Commands.Git do
         state = close_file_tree_if_open(state)
 
         state =
-          EditorState.update_workspace(state, &SessionState.set_keymap_scope(&1, :git_status))
+          EditorState.set_keymap_scope(state, :git_status)
 
         state
         |> EditorState.set_git_status_panel(panel_data)
@@ -867,7 +866,7 @@ defmodule MingaEditor.Commands.Git do
     state = close_file_tree_if_open(state)
 
     state =
-      EditorState.update_workspace(state, &SessionState.set_keymap_scope(&1, :git_status))
+      EditorState.set_keymap_scope(state, :git_status)
 
     state
     |> EditorState.set_git_status_panel(panel_data)

@@ -11,7 +11,6 @@ defmodule MingaEditor.Commands.Tutor do
   alias MingaEditor.Commands
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
-  alias MingaEditor.Session.State, as: SessionState
 
   @type state :: EditorState.t()
 
@@ -84,9 +83,7 @@ defmodule MingaEditor.Commands.Tutor do
 
     state =
       if idx do
-        EditorState.update_workspace(state, fn ws ->
-          SessionState.set_buffers(ws, Buffers.switch_to(ws.buffers, idx))
-        end)
+        EditorState.update_buffers(state, &Buffers.switch_to(&1, idx))
       else
         Commands.add_buffer(state, buffer)
       end

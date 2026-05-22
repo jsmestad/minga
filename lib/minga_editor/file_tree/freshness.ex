@@ -12,7 +12,6 @@ defmodule MingaEditor.FileTree.Freshness do
   alias Minga.Project.FileTree.GitStatus
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
-  alias MingaEditor.Session.State, as: SessionState
 
   @type state :: EditorState.t()
 
@@ -194,7 +193,7 @@ defmodule MingaEditor.FileTree.Freshness do
 
   @spec set_file_tree(state(), FileTreeState.t()) :: state()
   defp set_file_tree(%EditorState{} = state, %FileTreeState{} = file_tree) do
-    EditorState.update_workspace(state, &SessionState.set_file_tree(&1, file_tree))
+    EditorState.set_file_tree(state, file_tree)
   end
 
   @spec safe_watch_directory(String.t()) :: :ok

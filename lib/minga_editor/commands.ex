@@ -670,10 +670,7 @@ defmodule MingaEditor.Commands do
   @spec restore_file_tree_scope(EditorState.t()) :: EditorState.t()
   defp restore_file_tree_scope(state) do
     if state.workspace.file_tree.tree != nil do
-      EditorState.update_workspace(
-        state,
-        &MingaEditor.Session.State.set_keymap_scope(&1, :file_tree)
-      )
+      EditorState.set_keymap_scope(state, :file_tree)
     else
       state
     end

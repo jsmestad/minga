@@ -29,7 +29,6 @@ defmodule MingaEditor.LayoutPreset do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Windows
   alias MingaEditor.Window
-  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Window.Content
   alias MingaEditor.WindowTree
 
@@ -72,12 +71,12 @@ defmodule MingaEditor.LayoutPreset do
 
     case Windows.remove_window(state.workspace.windows, agent_win_id) do
       {:ok, windows} ->
-        state = EditorState.update_workspace(state, &SessionState.set_windows(&1, windows))
+        state = EditorState.set_windows(state, windows)
 
         # If we were in agent scope, return to editor scope since the
         # agent pane is gone.
         if state.workspace.keymap_scope == :agent do
-          EditorState.update_workspace(state, &SessionState.set_keymap_scope(&1, :editor))
+          EditorState.set_keymap_scope(state, :editor)
         else
           state
         end
@@ -134,7 +133,7 @@ defmodule MingaEditor.LayoutPreset do
             |> Windows.set_tree(new_tree)
             |> Windows.add_window(agent_window)
 
-          EditorState.update_workspace(state, &SessionState.set_windows(&1, windows))
+          EditorState.set_windows(state, windows)
 
         :error ->
           state

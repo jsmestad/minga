@@ -201,8 +201,8 @@ defmodule MingaEditor.State.AgentAccess do
 
   @spec set_workspace(EditorState.t() | map(), WorkspaceState.t() | map()) ::
           EditorState.t() | map()
-  defp set_workspace(%EditorState{} = state, workspace) do
-    EditorState.update_workspace(state, fn _workspace -> workspace end)
+  defp set_workspace(%EditorState{} = state, %WorkspaceState{} = workspace) do
+    EditorState.set_workspace(state, workspace)
   end
 
   defp set_workspace(%{workspace: _workspace} = state, workspace) do

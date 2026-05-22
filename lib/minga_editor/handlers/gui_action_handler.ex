@@ -40,8 +40,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
 
-  alias MingaEditor.Session.State, as: SessionState
-
   alias MingaAgent.Session, as: AgentSession
 
   alias MingaEditor.Frontend.Protocol
@@ -223,7 +221,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
         ft = FileTreeState.update_editing_text(state.workspace.file_tree, text)
 
         state =
-          EditorState.update_workspace(state, &SessionState.set_file_tree(&1, ft))
+          EditorState.set_file_tree(state, ft)
 
         Commands.FileTree.confirm_editing(state)
     end
@@ -479,7 +477,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
     state
     |> EditorState.update_shell_state(fn _shell_state -> shell_state end)
-    |> EditorState.update_workspace(fn _workspace -> workspace end)
+    |> EditorState.set_workspace(workspace)
     |> EditorState.sync_agent_ui_from_active_workspace()
   end
 
@@ -512,9 +510,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
        when is_pid(buf) do
     # Set the search pattern and execute search_next/search_prev
     state =
-      EditorState.update_workspace(state, fn ws ->
-        SessionState.set_search(ws, SearchData.record(ws.search, text, :forward))
-      end)
+      EditorState.update_search(state, &SearchData.record(&1, text, :forward))
 
     cmd = if direction == 1, do: :search_prev, else: :search_next
     MingaEditor.Commands.execute(state, cmd)
@@ -536,9 +532,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
         new_map = Map.put(win_map, active_win_id, new_win)
 
         new_state =
-          EditorState.update_workspace(state, fn ws ->
-            SessionState.set_windows(ws, Windows.set_map(ws.windows, new_map))
-          end)
+          EditorState.update_windows(state, &Windows.set_map(&1, new_map))
 
         Renderer.render_or_async(new_state)
     end
@@ -778,9 +772,8 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp move_tree_cursor(%{workspace: %{file_tree: %{tree: nil}}} = state, _index), do: state
 
   defp move_tree_cursor(state, index) do
-    EditorState.update_workspace(state, fn ws ->
-      tree = FileTree.select(ws.file_tree.tree, index)
-      SessionState.set_file_tree(ws, FileTreeState.set_tree(ws.file_tree, tree))
+    EditorState.update_file_tree(state, fn file_tree ->
+      FileTreeState.set_tree(file_tree, FileTree.select(file_tree.tree, index))
     end)
   end
 
@@ -826,11 +819,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec unfocus_file_tree_for_split(state()) :: state()
   defp unfocus_file_tree_for_split(state) do
-    EditorState.update_workspace(state, fn workspace ->
-      workspace
-      |> SessionState.set_file_tree(MingaEditor.State.FileTree.unfocus(workspace.file_tree))
-      |> SessionState.set_keymap_scope(:editor)
-    end)
+    state
+    |> EditorState.update_file_tree(&MingaEditor.State.FileTree.unfocus/1)
+    |> EditorState.set_keymap_scope(:editor)
   end
 
   # ── Hover open action ──────────────────────────────────────────────
@@ -978,17 +969,14 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec show_buffer_in_active_window(state(), pid()) :: state()
   defp show_buffer_in_active_window(state, pid) when is_pid(pid) do
-    EditorState.update_workspace(state, fn workspace ->
-      buffers =
-        case Enum.find_index(workspace.buffers.list, &(&1 == pid)) do
-          nil -> Buffers.add(workspace.buffers, pid)
-          idx -> Buffers.switch_to(workspace.buffers, idx)
-        end
-
-      workspace
-      |> SessionState.set_buffers(buffers)
-      |> SessionState.sync_active_window_buffer()
+    state
+    |> EditorState.update_buffers(fn buffers ->
+      case Enum.find_index(buffers.list, &(&1 == pid)) do
+        nil -> Buffers.add(buffers, pid)
+        idx -> Buffers.switch_to(buffers, idx)
+      end
     end)
+    |> EditorState.sync_active_window_buffer()
   end
 
   @spec tab_active_buffer(Tab.t()) :: pid() | nil
@@ -1003,11 +991,8 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp register_buffer_in_active_window(state, buffer_pid, file_path) do
     state =
       state
-      |> EditorState.update_workspace(fn workspace ->
-        workspace
-        |> SessionState.set_buffers(Buffers.add(workspace.buffers, buffer_pid))
-        |> SessionState.sync_active_window_buffer()
-      end)
+      |> EditorState.update_buffers(&Buffers.add(&1, buffer_pid))
+      |> EditorState.sync_active_window_buffer()
       |> EditorState.monitor_buffer(buffer_pid)
 
     state = MingaEditor.log_message(state, "Opened: #{file_path}")
@@ -1031,9 +1016,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec set_vim_mode_state(state(), term()) :: state()
   defp set_vim_mode_state(state, new_ms) do
-    EditorState.update_workspace(state, fn ws ->
-      SessionState.update_editing(ws, &VimState.set_mode_state(&1, new_ms))
-    end)
+    EditorState.update_editing(state, &VimState.set_mode_state(&1, new_ms))
   end
 
   @spec normalize_command_result(state() | {state(), term()}) :: state()
