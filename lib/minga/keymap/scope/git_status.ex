@@ -23,7 +23,7 @@ defmodule Minga.Keymap.Scope.GitStatus do
   @cmd 0x08
 
   # Groups included by this scope.
-  @cua_groups [:cua_navigation, :cua_cmd_chords]
+  @cua_groups [:cua_navigation, {:cua_cmd_chords, exclude: [:save]}]
 
   @impl true
   @spec included_groups() :: [atom() | {atom(), keyword()}]

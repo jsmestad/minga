@@ -23,7 +23,20 @@ defmodule MingaEditor.Commands.Visual do
     {:select_all, "Select all", true}
   ]
 
+  command(:copy_or_interrupt, "Copy selection or interrupt", requires_buffer: false)
+
   @spec execute(state(), Mode.command()) :: state()
+
+  def execute(
+        %{workspace: %{editing: %{mode_state: %VisualState{}}}} = state,
+        :copy_or_interrupt
+      ) do
+    execute(state, :yank_visual_selection)
+  end
+
+  def execute(state, :copy_or_interrupt) do
+    MingaEditor.Input.Interrupt.interrupt(state)
+  end
 
   def execute(
         %{workspace: %{buffers: %{active: buf}, editing: %{mode_state: %VisualState{} = ms}}} =
