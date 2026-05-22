@@ -158,7 +158,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         return ["type": "gui_picker_preview", "visible": visible, "lines": lineArray]
 
-    case .guiAgentChat(let visible, let status, let model, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptVimMode, let promptVisibleRows, let promptCompletion, let pendingToolName, let pendingToolSummary, let helpVisible, let helpGroups, let messages):
+    case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptVimMode, let promptVisibleRows, let promptCompletion, let pendingToolName, let pendingToolSummary, let helpVisible, let helpGroups, let messages):
         let msgArray = messages.map { chatMessageToJSON($0) }
         let helpGroupArray = helpGroups.map { group -> [String: Any] in
             let bindings = group.bindings.map { ["key": $0.key, "description": $0.description] }
@@ -169,6 +169,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
             "visible": visible,
             "status": Int(status),
             "model": model,
+            "thinking_level": thinkingLevel,
             "prompt": prompt,
             "prompt_line_count": Int(promptLineCount),
             "prompt_cursor_line": Int(promptCursorLine),

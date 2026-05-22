@@ -460,7 +460,7 @@ struct CommandDispatcherRoutingTests {
         let (dispatcher, gui) = makeDispatcher()
         let messages: [Wire.ChatMessage] = [Wire.ChatMessage(beamId: 1, content: .user(text: "hello"))]
         dispatcher.dispatch(.guiAgentChat(visible: true, status: 1, model: "claude",
-                                           prompt: "Fix this", promptLineCount: 1,
+                                           thinkingLevel: "medium", prompt: "Fix this", promptLineCount: 1,
                                            promptCursorLine: 0, promptCursorCol: 0,
                                            promptVimMode: 1, promptVisibleRows: 1,
                                            promptCompletion: nil, pendingToolName: nil,
@@ -468,6 +468,7 @@ struct CommandDispatcherRoutingTests {
 
         #expect(gui.agentChatState.visible == true)
         #expect(gui.agentChatState.model == "claude")
+        #expect(gui.agentChatState.thinkingLevel == "medium")
         #expect(gui.agentChatState.messages.count == 1)
     }
 
@@ -475,7 +476,7 @@ struct CommandDispatcherRoutingTests {
     @MainActor func guiAgentChatHidden() {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.dispatch(.guiAgentChat(visible: false, status: 0, model: "",
-                                           prompt: "", promptLineCount: 1,
+                                           thinkingLevel: "", prompt: "", promptLineCount: 1,
                                            promptCursorLine: 0, promptCursorCol: 0,
                                            promptVimMode: 0, promptVisibleRows: 1,
                                            promptCompletion: nil, pendingToolName: nil,

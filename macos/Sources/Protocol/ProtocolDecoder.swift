@@ -182,7 +182,7 @@ enum RenderCommand: Sendable {
     case guiStatusBar(StatusBarUpdate)
     case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, title: String, query: String, hasPreview: Bool, items: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String)
     case guiPickerPreview(visible: Bool, lines: [Wire.PickerPreviewLine])
-    case guiAgentChat(visible: Bool, status: UInt8, model: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [Wire.HelpGroup], messages: [Wire.ChatMessage])
+    case guiAgentChat(visible: Bool, status: UInt8, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [Wire.HelpGroup], messages: [Wire.ChatMessage])
     case guiGutterSeparator(col: UInt16, r: UInt8, g: UInt8, b: UInt8)
     case guiCursorline(row: UInt16, r: UInt8, g: UInt8, b: UInt8)
     case guiGutter(data: Wire.WindowGutter)
@@ -1086,12 +1086,13 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
         let chatSectionCount = Int(data[rest])
         if chatSectionCount == 0 {
-            return (.guiAgentChat(visible: false, status: 0, model: "", prompt: "", promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0, promptVimMode: 0, promptVisibleRows: 1, promptCompletion: nil, pendingToolName: nil, pendingToolSummary: "", helpVisible: false, helpGroups: [], messages: []), 2)
+            return (.guiAgentChat(visible: false, status: 0, model: "", thinkingLevel: "", prompt: "", promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0, promptVimMode: 0, promptVisibleRows: 1, promptCompletion: nil, pendingToolName: nil, pendingToolSummary: "", helpVisible: false, helpGroups: [], messages: []), 2)
         }
         var chatPos = rest + 1
         var chatVisible = false
         var chatStatus: UInt8 = 0
         var chatModel = ""
+        var chatThinkingLevel = ""
         var chatPrompt = ""
         var promptLineCount: UInt8 = 1
         var promptCursorLine: UInt16 = 0
@@ -1135,6 +1136,11 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                     promptVimMode = data[metaStart + 5]
                     promptVisibleRows = data[metaStart + 6]
                 }
+
+            case 0x08: // Thinking level: level_len(2) + level
+                guard csLen >= 2 else { break }
+                let tLen = Int(readU16(data, csStart))
+                if csLen >= 2 + tLen { chatThinkingLevel = String(data: data[(csStart + 2)..<(csStart + 2 + tLen)], encoding: .utf8) ?? "" }
 
             case 0x07: // Completion: visible(1) [type(1) selected(1) anchor_line(2) anchor_col(2) count(1) candidates...]
                 guard csLen >= 1 else { break }
@@ -1423,7 +1429,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             chatPos = csStart + csLen
         }
 
-        return (.guiAgentChat(visible: chatVisible, status: chatStatus, model: chatModel, prompt: chatPrompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptVimMode: promptVimMode, promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, helpVisible: helpVisible, helpGroups: helpGroups, messages: messages), chatPos - offset)
+        return (.guiAgentChat(visible: chatVisible, status: chatStatus, model: chatModel, thinkingLevel: chatThinkingLevel, prompt: chatPrompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptVimMode: promptVimMode, promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, helpVisible: helpVisible, helpGroups: helpGroups, messages: messages), chatPos - offset)
 
     case OP_GUI_GUTTER_SEP:
         // col:2, r:1, g:1, b:1 = 5 bytes after opcode

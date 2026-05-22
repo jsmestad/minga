@@ -272,13 +272,13 @@ final class CommandDispatcher {
                 guiState.pickerState.clearPreview()
             }
 
-        case .guiAgentChat(let visible, let status, let model, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptVimMode, let promptVisibleRows, let promptCompletion, _, _, let helpVisible, let helpGroups, let messages):
+        case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptVimMode, let promptVisibleRows, let promptCompletion, _, _, let helpVisible, let helpGroups, let messages):
             let wasVisible = guiState.agentChatState.visible
             if visible {
                 let groups = helpGroups.map { g in
                     HelpGroup(title: g.title, bindings: g.bindings.map { ($0.key, $0.description) })
                 }
-                guiState.agentChatState.update(visible: true, status: status, model: model, prompt: prompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptVimMode: promptVimMode, promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, helpVisible: helpVisible, helpGroups: groups, rawMessages: messages)
+                guiState.agentChatState.update(visible: true, status: status, model: model, thinkingLevel: thinkingLevel, prompt: prompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptVimMode: promptVimMode, promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, helpVisible: helpVisible, helpGroups: groups, rawMessages: messages)
             } else {
                 guiState.agentChatState.hide()
             }

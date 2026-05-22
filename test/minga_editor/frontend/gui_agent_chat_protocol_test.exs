@@ -76,13 +76,8 @@ defmodule MingaEditor.Frontend.GUIAgentChatProtocolTest do
 
       binary = ProtocolGUI.encode_gui_agent_chat(data)
 
-      # Skip the outer envelope (opcode + visible + status + model + prompt + pending + msg_count)
-      # and find the message payload starting with sub-opcode 0x08
-      assert :binary.match(binary, <<0x08>>) != :nomatch
-
-      # Find the 0x08 byte and verify the structure after it
-      {start, _} = :binary.match(binary, <<0x08>>)
-      msg_payload = binary_part(binary, start, byte_size(binary) - start)
+      messages_payload = extract_section(binary, 0x06)
+      assert <<1::16, 0::32, msg_payload::binary>> = messages_payload
 
       <<0x08::8, status_byte::8, error_byte::8, collapsed_byte::8, duration::32, name_len::16,
         name::binary-size(name_len), summary_len::16, summary::binary-size(summary_len),

@@ -864,9 +864,10 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
         {:erlang.phash2(
            {:visible, ctx.shell_state.agent.runtime.status,
-            ctx.shell_state.agent.pending_approval, styled_len, panel.model_name, text,
-            panel.message_version, view.help_visible, view.focus, ctx.editing.mode, prompt_cursor,
-            prompt_line_count, visible_rows, panel.mention_completion}
+            ctx.shell_state.agent.pending_approval, styled_len, panel.model_name,
+            panel.thinking_level, text, panel.message_version, view.help_visible, view.focus,
+            ctx.editing.mode, prompt_cursor, prompt_line_count, visible_rows,
+            panel.mention_completion}
          ), text}
       else
         {:not_visible, ""}
@@ -982,6 +983,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
         messages: gui_messages,
         status: ctx.shell_state.agent.runtime.status || :idle,
         model: ctx.agent_ui.panel.model_name,
+        thinking_level: panel.thinking_level,
         prompt: prompt_text,
         pending_approval: nil,
         help_visible: help_visible,

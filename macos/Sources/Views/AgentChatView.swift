@@ -28,6 +28,9 @@ struct AgentChatView: View {
     /// Tracks whether the user has scrolled away from the bottom.
     /// When true, auto-scroll is paused to let the user read earlier content.
     @State private var userHasScrolledUp: Bool = false
+    @State private var isModelHovered: Bool = false
+    @State private var isThinkingHovered: Bool = false
+    @State private var isHelpHovered: Bool = false
     /// Whether auto-scroll should follow streaming output.
     private var shouldAutoScroll: Bool { !userHasScrolledUp }
 
@@ -132,10 +135,15 @@ struct AgentChatView: View {
             Circle()
                 .fill(statusColor)
                 .frame(width: 7, height: 7)
+                .accessibilityLabel("Agent status: \(state.statusLabel)")
 
-            Text(state.model.isEmpty ? "Agent" : state.model)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(theme.agentHeaderFg)
+            modelPickerButton
+
+            Text("·")
+                .font(.system(size: 11))
+                .foregroundStyle(theme.agentTextFg.opacity(0.35))
+
+            thinkingLevelMenu
 
             if state.isThinking {
                 ProgressView()
@@ -156,11 +164,19 @@ struct AgentChatView: View {
                 Image(systemName: "questionmark.circle")
                     .font(.system(size: 13))
                     .foregroundStyle(state.helpVisible ? theme.agentHeaderFg : theme.agentTextFg.opacity(0.4))
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 3)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(isHelpHovered ? theme.agentTextFg.opacity(0.06) : Color.clear))
             }
             .buttonStyle(.plain)
             .help("Keyboard shortcuts (?)")
-            .accessibilityLabel("Help")
+            .accessibilityLabel("Agent help")
             .accessibilityHint("Shows keybinding cheatsheet")
+            .accessibilityAddTraits(.isButton)
+            .onHover { hovering in
+                isHelpHovered = hovering
+                if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -169,6 +185,122 @@ struct AgentChatView: View {
         Rectangle()
             .fill(theme.agentCodeBorder.opacity(0.3))
             .frame(height: 1)
+    }
+
+    private var modelPickerButton: some View {
+        Button {
+            encoder?.sendExecuteCommand(name: "agent_pick_model")
+        } label: {
+            HStack(spacing: 4) {
+                Text(state.displayModel.isEmpty ? "Agent" : state.displayModel)
+                    .font(.system(size: 12, weight: .medium))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+            }
+            .foregroundStyle(theme.agentHeaderFg.opacity(state.isThinking ? 0.45 : 1.0))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 4).fill(isModelHovered && !state.isThinking ? theme.agentTextFg.opacity(0.06) : Color.clear))
+        }
+        .buttonStyle(.plain)
+        .disabled(state.isThinking)
+        .help("Pick model (SPC a m)")
+        .accessibilityLabel("Agent model")
+        .accessibilityValue(state.displayModel.isEmpty ? "Agent" : state.displayModel)
+        .accessibilityHint(state.isThinking ? "Disabled while the agent is streaming" : "Opens the model picker")
+        .accessibilityAddTraits(.isButton)
+        .onHover { isModelHovered = $0 }
+        .modifier(HeaderControlPointingHandModifier(isEnabled: !state.isThinking))
+    }
+
+    private var thinkingLevelMenu: some View {
+        Menu {
+            ForEach(["off", "low", "medium", "high"], id: \.self) { level in
+                Button {
+                    encoder?.sendExecuteCommand(name: "agent_thinking_\(level)")
+                } label: {
+                    HStack {
+                        Text(thinkingDisplayName(level))
+                        if state.thinkingLevel == level {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+                .accessibilityLabel("Set thinking level to \(thinkingDisplayName(level))")
+                .accessibilityHint("Changes the agent thinking level to \(thinkingDisplayName(level))")
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: state.thinkingIconName)
+                    .font(.system(size: 12))
+                Text(state.thinkingLabel)
+                    .font(.system(size: 12, weight: .medium))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+            }
+            .foregroundStyle(theme.agentHeaderFg.opacity(state.isThinking ? 0.45 : 0.9))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 4).fill(isThinkingHovered && !state.isThinking ? theme.agentTextFg.opacity(0.06) : Color.clear))
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .disabled(state.isThinking)
+        .help("Pick thinking level (SPC a T)")
+        .accessibilityLabel("Agent thinking level")
+        .accessibilityValue(state.thinkingLabel)
+        .accessibilityHint(state.isThinking ? "Disabled while the agent is streaming" : "Opens a menu of thinking levels")
+        .accessibilityAddTraits(.isButton)
+        .onHover { isThinkingHovered = $0 }
+        .modifier(HeaderControlPointingHandModifier(isEnabled: !state.isThinking))
+    }
+
+    private func thinkingDisplayName(_ level: String) -> String {
+        switch level {
+        case "off": return "Off"
+        case "low": return "Low"
+        case "medium": return "Medium"
+        case "high": return "High"
+        default: return level.capitalized
+        }
+    }
+
+    private struct HeaderControlPointingHandModifier: ViewModifier {
+        let isEnabled: Bool
+        @State private var isHovered = false
+        @State private var didPushCursor = false
+
+        func body(content: Content) -> some View {
+            content
+                .onHover { hovering in
+                    isHovered = hovering
+                    syncCursor()
+                }
+                .onChange(of: isEnabled) { _, _ in
+                    syncCursor()
+                }
+                .onDisappear {
+                    popCursorIfNeeded()
+                }
+        }
+
+        private func syncCursor() {
+            let shouldPush = isHovered && isEnabled
+
+            if shouldPush && !didPushCursor {
+                NSCursor.pointingHand.push()
+                didPushCursor = true
+            } else if !shouldPush && didPushCursor {
+                popCursorIfNeeded()
+            }
+        }
+
+        private func popCursorIfNeeded() {
+            if didPushCursor {
+                NSCursor.pop()
+                didPushCursor = false
+            }
+        }
     }
 
     // MARK: - Messages

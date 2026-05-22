@@ -273,6 +273,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @section_chat_help 0x05
   @section_chat_messages 0x06
   @section_chat_completion 0x07
+  @section_chat_thinking 0x08
 
   @value_boolean 0x01
   @value_integer 0x02
@@ -2433,6 +2434,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     completion_bytes = encode_prompt_completion(data[:prompt_completion])
     pending_bytes = encode_pending_approval(data[:pending_approval])
     help_bytes = encode_help_overlay(data[:help_visible], data[:help_groups])
+    thinking_bytes = utf8_prefix_bytes(data[:thinking_level] || "", @max_u16 - 2)
 
     messages_payload = encode_chat_messages(messages)
 
@@ -2448,6 +2450,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       encode_section(@section_chat_completion, completion_bytes),
       encode_section(@section_chat_pending, pending_bytes),
       encode_section(@section_chat_help, help_bytes),
+      encode_section(
+        @section_chat_thinking,
+        <<byte_size(thinking_bytes)::16, thinking_bytes::binary>>
+      ),
       encode_section(@section_chat_messages, messages_payload)
     ]
 
