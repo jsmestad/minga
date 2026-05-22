@@ -33,7 +33,6 @@ defmodule MingaEditor do
 
   alias MingaEditor.Commands
   alias MingaEditor.CompletionHandling
-  alias MingaEditor.CompletionTrigger
   alias MingaEditor.FileWatcherHelpers
   alias MingaEditor.HighlightEvents
   alias MingaEditor.HighlightSync
@@ -58,6 +57,7 @@ defmodule MingaEditor do
 
   alias MingaEditor.Handlers.FileEventHandler
   alias MingaEditor.Handlers.HighlightHandler
+  alias MingaEditor.Handlers.LspEventHandler
   alias MingaEditor.Handlers.SessionHandler
   alias MingaEditor.Handlers.ToolHandler
   # WarningLog removed in #825; warnings route through MessageLog with level override
@@ -624,72 +624,32 @@ defmodule MingaEditor do
     {:noreply, apply_effects(state, effects)}
   end
 
-  # Completion debounce timer fired — send the actual completion request
-  def handle_info({:completion_debounce, clients, buffer_pid}, state) do
-    new_bridge =
-      CompletionTrigger.flush_debounce(
-        MingaEditor.State.ModalOverlay.completion_trigger(state),
-        clients,
-        buffer_pid
-      )
-
-    {:noreply, MingaEditor.State.ModalOverlay.put_completion_trigger(state, new_bridge)}
+  # LSP/completion timer events routed through a focused handler.
+  def handle_info({:completion_debounce, _clients, _buffer_pid} = msg, state) do
+    {state, effects} = LspEventHandler.handle(state, msg)
+    {:noreply, apply_effects(state, effects)}
   end
 
-  # LSP async response — route to the appropriate handler based on lsp.pending
-  def handle_info({:lsp_response, ref, result}, state) do
-    case Map.fetch(state.workspace.lsp_pending, ref) do
-      {:ok, :completion_resolve} ->
-        new_state = delete_lsp_pending(state, ref)
-        new_state = CompletionHandling.handle_resolve_response(new_state, result)
-        {:noreply, Renderer.render_or_async(new_state)}
-
-      {:ok, :signature_help} ->
-        new_state = delete_lsp_pending(state, ref)
-        new_state = CompletionHandling.handle_signature_help_response(new_state, result)
-        {:noreply, Renderer.render_or_async(new_state)}
-
-      {:ok, {:semantic_tokens, buf_pid}} ->
-        new_state = delete_lsp_pending(state, ref)
-        new_state = SemanticTokenSync.handle_response(new_state, buf_pid, result)
-        {:noreply, Renderer.render_or_async(new_state)}
-
-      {:ok, kind} when is_atom(kind) ->
-        new_state = delete_lsp_pending(state, ref)
-        new_state = dispatch_lsp_response(kind, new_state, result)
-        {:noreply, Renderer.render_or_async(new_state)}
-
-      {:ok, kind} when is_tuple(kind) ->
-        new_state = delete_lsp_pending(state, ref)
-        new_state = dispatch_lsp_response(kind, new_state, result)
-        {:noreply, Renderer.render_or_async(new_state)}
-
-      :error ->
-        # Not a tracked request — try completion handler
-        handle_lsp_completion_response(ref, result, state)
-    end
+  def handle_info({:lsp_response, _ref, _result} = msg, state) do
+    {state, effects} = LspEventHandler.handle(state, msg)
+    {:noreply, apply_effects(state, effects)}
   end
 
-  # LSP debounce timers (inlay hints and document highlight)
   @lsp_debounce_atoms [:inlay_hint_scroll_debounce, :document_highlight_debounce]
 
   def handle_info(msg, state) when msg in @lsp_debounce_atoms do
-    {:noreply, handle_lsp_debounce(state, msg)}
+    {state, effects} = LspEventHandler.handle(state, msg)
+    {:noreply, apply_effects(state, effects)}
   end
 
-  # Completion resolve debounce timer fired — send the actual resolve request
-  def handle_info({:completion_resolve, index}, state) do
-    state = CompletionHandling.flush_resolve(state, index)
-    {:noreply, state}
+  def handle_info({:completion_resolve, _index} = msg, state) do
+    {state, effects} = LspEventHandler.handle(state, msg)
+    {:noreply, apply_effects(state, effects)}
   end
 
-  # Refresh the cached LSP status for the modeline indicator.
-  # Fired after buffer open (with delay for async LSP initialization)
-  # and periodically while LSP clients are connecting.
-  def handle_info(:request_code_lens_and_inlay_hints, state) do
-    state = LspActions.code_lens(state)
-    state = LspActions.inlay_hints(state)
-    {:noreply, state}
+  def handle_info(:request_code_lens_and_inlay_hints = msg, state) do
+    {state, effects} = LspEventHandler.handle(state, msg)
+    {:noreply, apply_effects(state, effects)}
   end
 
   # ── Event bus messages ────────────────────────────────────────────────────────
@@ -1495,86 +1455,6 @@ defmodule MingaEditor do
 
   # ── LSP response dispatch ──────────────────────────────────────────────────
 
-  @spec set_lsp_pending(state(), %{reference() => atom() | tuple()}) :: state()
-  defp set_lsp_pending(state, pending) do
-    EditorState.update_workspace(state, &SessionState.set_lsp_pending(&1, pending))
-  end
-
-  @spec delete_lsp_pending(state(), reference()) :: state()
-  defp delete_lsp_pending(state, ref) do
-    set_lsp_pending(state, Map.delete(state.workspace.lsp_pending, ref))
-  end
-
-  # Dispatches an LSP response to the appropriate handler based on the kind atom.
-  @spec dispatch_lsp_response(term(), EditorState.t(), term()) :: EditorState.t()
-  defp dispatch_lsp_response(:definition, state, result),
-    do: LspActions.handle_definition_response(state, result)
-
-  defp dispatch_lsp_response(:peek_definition, state, result),
-    do: LspActions.handle_peek_definition_response(state, result)
-
-  defp dispatch_lsp_response(:hover, state, result),
-    do: LspActions.handle_hover_response(state, result)
-
-  defp dispatch_lsp_response({:hover_mouse, row, col}, state, result),
-    do: LspActions.handle_hover_mouse_response(state, result, row, col)
-
-  defp dispatch_lsp_response(:references, state, result),
-    do: LspActions.handle_references_response(state, result)
-
-  defp dispatch_lsp_response(:document_highlight, state, result),
-    do: LspActions.handle_document_highlight_response(state, result)
-
-  defp dispatch_lsp_response(:code_action, state, result),
-    do: LspActions.handle_code_action_response(state, result)
-
-  defp dispatch_lsp_response(:prepare_rename, state, result),
-    do: LspActions.handle_prepare_rename_response(state, result)
-
-  defp dispatch_lsp_response(:rename, state, result),
-    do: LspActions.handle_rename_response(state, result)
-
-  defp dispatch_lsp_response(:type_definition, state, result),
-    do: LspActions.handle_type_definition_response(state, result)
-
-  defp dispatch_lsp_response(:implementation, state, result),
-    do: LspActions.handle_implementation_response(state, result)
-
-  defp dispatch_lsp_response(:document_symbol, state, result),
-    do: LspActions.handle_document_symbol_response(state, result)
-
-  defp dispatch_lsp_response(:workspace_symbol, state, result),
-    do: LspActions.handle_workspace_symbol_response(state, result)
-
-  defp dispatch_lsp_response(:selection_range, state, result),
-    do: LspActions.handle_selection_range_response(state, result)
-
-  defp dispatch_lsp_response(:prepare_call_hierarchy, state, result),
-    do: LspActions.handle_prepare_call_hierarchy_response(state, result)
-
-  defp dispatch_lsp_response(:incoming_calls, state, result),
-    do: LspActions.handle_incoming_calls_response(state, result)
-
-  defp dispatch_lsp_response(:outgoing_calls, state, result),
-    do: LspActions.handle_outgoing_calls_response(state, result)
-
-  defp dispatch_lsp_response(:prepare_outgoing_hierarchy, state, result),
-    do: LspActions.handle_prepare_outgoing_hierarchy_response(state, result)
-
-  defp dispatch_lsp_response(:code_lens, state, result),
-    do: LspActions.handle_code_lens_response(state, result)
-
-  defp dispatch_lsp_response(:code_lens_resolve, state, result),
-    do: LspActions.handle_code_lens_resolve_response(state, result)
-
-  defp dispatch_lsp_response(:inlay_hint, state, result),
-    do: LspActions.handle_inlay_hint_response(state, result)
-
-  defp dispatch_lsp_response(kind, state, _result) do
-    Minga.Log.debug(:lsp, "Unhandled LSP response kind: #{inspect(kind)}")
-    state
-  end
-
   # ── Agent event dispatch ──────────────────────────────────────────────────
 
   @spec route_agent_event(EditorState.t(), pid(), term()) :: {:noreply, EditorState.t()}
@@ -1674,12 +1554,14 @@ defmodule MingaEditor do
   * `{:restore_session, opts}` — restore session from disk
   * `{:request_code_lens}` — request fresh code lenses from LSP
   * `{:request_inlay_hints}` — request fresh inlay hints from LSP
+  * `:render_now` — render immediately after a handler updates state
   * `{:save_session_deferred}` — send :save_session to self
   * `{:schedule_file_tree_refresh, delay}` — debounce one filesystem tree refresh
   * `{:handle_git_remote_result, ref, result}` — process git remote result
   """
   @type effect ::
           :render
+          | :render_now
           | {:render, delay_ms :: pos_integer()}
           | {:open_file, String.t()}
           | {:switch_buffer, pid()}
@@ -1731,6 +1613,8 @@ defmodule MingaEditor do
 
   @spec apply_effect(EditorState.t(), effect()) :: EditorState.t()
   defp apply_effect(state, :render), do: schedule_render(state, 16)
+
+  defp apply_effect(state, :render_now), do: Renderer.render_or_async(state)
 
   defp apply_effect(state, {:set_status, msg}) when is_binary(msg),
     do: EditorState.set_status(state, msg)
@@ -1921,24 +1805,6 @@ defmodule MingaEditor do
   # Tab bar, view state, capabilities, parser subscription helpers
 
   # Agent lifecycle helpers (session startup, auto-context, buffer sync,
-
-  @spec handle_lsp_debounce(state(), atom()) :: state()
-  defp handle_lsp_debounce(state, :inlay_hint_scroll_debounce) do
-    state = %{state | lsp: LSPState.clear_inlay_hint_timer(state.lsp)}
-    LspActions.inlay_hints(state)
-  end
-
-  defp handle_lsp_debounce(state, :document_highlight_debounce) do
-    state = %{state | lsp: LSPState.clear_highlight_timer(state.lsp)}
-    LspActions.document_highlight(state)
-  end
-
-  @spec handle_lsp_completion_response(reference(), term(), state()) :: {:noreply, state()}
-  defp handle_lsp_completion_response(ref, result, state) do
-    new_state = CompletionHandling.handle_response(state, ref, result)
-    new_state = Renderer.render_or_async(new_state)
-    {:noreply, new_state}
-  end
 
   # ── Render scheduling ────────────────────────────────────────────────────────
 
