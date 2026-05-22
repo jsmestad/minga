@@ -166,7 +166,9 @@ struct StatusBarViewViewTests {
         message: String = "",
         diagnosticHint: String = "",
         leftSegments: [Wire.StatusBarSegment] = [],
-        rightSegments: [Wire.StatusBarSegment] = []
+        rightSegments: [Wire.StatusBarSegment] = [],
+        agentStatus: UInt8 = 0,
+        activeToolName: String = ""
     ) -> StatusBarState {
         let state = StatusBarState()
         state.update(from: StatusBarUpdate(
@@ -174,7 +176,8 @@ struct StatusBarViewViewTests {
             lineCount: 500, flags: 0, lspStatus: 0, gitBranch: "",
             message: message, filetype: "elixir", errorCount: 0, warningCount: 0,
             modelName: "", messageCount: 0, sessionStatus: 0,
-            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
+            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: agentStatus,
+            activeToolName: activeToolName,
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: diagnosticHint,
             backgroundSubagentCount: 0, backgroundSubagentLabel: "",
@@ -487,6 +490,7 @@ struct StatusBarViewViewTests {
             message: "", filetype: "", errorCount: 0, warningCount: 0,
             modelName: "claude-3-5-sonnet", messageCount: 7, sessionStatus: 0,
             infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
+            activeToolName: "",
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
             backgroundSubagentCount: 0, backgroundSubagentLabel: "",
@@ -503,6 +507,36 @@ struct StatusBarViewViewTests {
         #expect(!strings.contains("claude-3-5-sonnet"))
         #expect(strings.contains("7 msgs"))
         #expect(strings.contains("NORMAL"))
+    }
+
+    @Test("Agent status shows readable labels and active tool names")
+    @MainActor func agentStatusLabels() throws {
+        let running = statusBarState(agentStatus: 2, activeToolName: "read_file")
+        let runningTexts = try StatusBarView(state: running, theme: ThemeColors(), encoder: nil)
+            .inspect()
+            .findAll(ViewInspectorQuery.text)
+            .compactMap { try? $0.string() }
+
+        #expect(runningTexts.contains("Running read_file"))
+
+        let fallback = statusBarState(agentStatus: 2)
+        let fallbackTexts = try StatusBarView(state: fallback, theme: ThemeColors(), encoder: nil)
+            .inspect()
+            .findAll(ViewInspectorQuery.text)
+            .compactMap { try? $0.string() }
+
+        #expect(fallbackTexts.contains("Running"))
+        #expect(!fallbackTexts.contains("Running read_file"))
+
+        let plan = statusBarState(agentStatus: 4)
+        let planBody = try StatusBarView(state: plan, theme: ThemeColors(), encoder: nil).inspect()
+        let planTexts = planBody.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        let planAccessibilityLabels = try planBody.findAll(ViewType.HStack.self).compactMap {
+            try? $0.accessibilityLabel().string()
+        }
+
+        #expect(planTexts.contains("PLAN"))
+        #expect(planAccessibilityLabels.contains("Agent plan mode"))
     }
 
     @Test("Git branch shown when flag is set")

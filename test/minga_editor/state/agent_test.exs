@@ -15,6 +15,34 @@ defmodule MingaEditor.State.AgentTest do
       assert agent.runtime.status == :thinking
     end
 
+    test "set_status clears active_tool_name when leaving tool execution" do
+      agent =
+        new_agent()
+        |> AgentState.set_active_tool_name("read_file")
+        |> AgentState.set_status(:idle)
+
+      assert agent.runtime.status == :idle
+      assert agent.runtime.active_tool_name == nil
+
+      agent =
+        new_agent()
+        |> AgentState.set_active_tool_name("read_file")
+        |> AgentState.set_status(:error)
+
+      assert agent.runtime.status == :error
+      assert agent.runtime.active_tool_name == nil
+    end
+
+    test "set_status preserves active_tool_name while still tool executing" do
+      agent =
+        new_agent()
+        |> AgentState.set_active_tool_name("read_file")
+        |> AgentState.set_status(:tool_executing)
+
+      assert agent.runtime.status == :tool_executing
+      assert agent.runtime.active_tool_name == "read_file"
+    end
+
     test "set_error sets status to :error and stores the message" do
       agent = new_agent() |> AgentState.set_error("something broke")
       assert agent.runtime.status == :error

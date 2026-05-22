@@ -595,6 +595,40 @@ defmodule MingaAgent.SessionTest do
 
       assert snapshot.active_tool_name == nil
     end
+
+    test "keeps the next tool name active until every tool ends", %{session: session} do
+      send(
+        session,
+        {:agent_provider_event,
+         %Event.ToolStart{tool_call_id: "tc1", name: "read_file", args: %{}}}
+      )
+
+      send(
+        session,
+        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc2", name: "shell", args: %{}}}
+      )
+
+      snapshot = Session.editor_snapshot(session)
+      assert snapshot.active_tool_name == "shell"
+
+      send(
+        session,
+        {:agent_provider_event,
+         %Event.ToolEnd{tool_call_id: "tc1", name: "read_file", result: "contents"}}
+      )
+
+      snapshot = Session.editor_snapshot(session)
+      assert snapshot.active_tool_name == "shell"
+
+      send(
+        session,
+        {:agent_provider_event,
+         %Event.ToolEnd{tool_call_id: "tc2", name: "shell", result: "output"}}
+      )
+
+      snapshot = Session.editor_snapshot(session)
+      assert snapshot.active_tool_name == nil
+    end
   end
 
   describe "toggle_tool_collapse/2" do

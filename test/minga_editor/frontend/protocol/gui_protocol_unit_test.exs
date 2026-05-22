@@ -521,12 +521,28 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       binary = ProtocolGUI.encode_gui_status_bar({:buffer, status_data()})
       sections = status_sections(binary)
 
-      <<agent_status::8, count::16, label_len::16, label::binary-size(label_len)>> =
-        Map.fetch!(sections, 0x09)
+      <<agent_status::8, count::16, label_len::16, label::binary-size(label_len), tool_len::8,
+        tool::binary-size(tool_len)>> = Map.fetch!(sections, 0x09)
 
       assert agent_status == 1
       assert count == 2
       assert label == "session-3: tests"
+      assert tool == "read_file"
+    end
+
+    test "encodes an empty active tool name when the field is nil" do
+      data = Map.put(status_data(), :active_tool_name, nil)
+      binary = ProtocolGUI.encode_gui_status_bar({:buffer, data})
+      sections = status_sections(binary)
+
+      <<agent_status::8, count::16, label_len::16, label::binary-size(label_len), tool_len::8,
+        tool::binary-size(tool_len)>> = Map.fetch!(sections, 0x09)
+
+      assert agent_status == 1
+      assert count == 2
+      assert label == "session-3: tests"
+      assert tool == ""
+      assert tool_len == 0
     end
 
     test "omits modeline segment section when no GUI modeline data is attached" do
@@ -703,19 +719,46 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
         Map.merge(status_data(), %{
           model_name: "Agent",
           session_status: :thinking,
-          message_count: 4
+          message_count: 4,
+          active_tool_name: "shell"
         })
 
       binary = ProtocolGUI.encode_gui_status_bar({:agent, data})
       sections = status_sections(binary)
 
       <<model_len::8, _model::binary-size(model_len), 4::32, session_status::8, agent_status::8,
-        count::16, label_len::16, label::binary-size(label_len)>> = Map.fetch!(sections, 0x09)
+        count::16, label_len::16, label::binary-size(label_len), tool_len::8,
+        tool::binary-size(tool_len)>> = Map.fetch!(sections, 0x09)
 
       assert session_status == 1
       assert agent_status == 1
       assert count == 2
       assert label == "session-3: tests"
+      assert tool == "shell"
+    end
+
+    test "encodes an empty active tool name in the agent variant when nil" do
+      data =
+        Map.merge(status_data(), %{
+          model_name: "Agent",
+          session_status: :thinking,
+          message_count: 4,
+          active_tool_name: nil
+        })
+
+      binary = ProtocolGUI.encode_gui_status_bar({:agent, data})
+      sections = status_sections(binary)
+
+      <<model_len::8, _model::binary-size(model_len), 4::32, session_status::8, agent_status::8,
+        count::16, label_len::16, label::binary-size(label_len), tool_len::8,
+        tool::binary-size(tool_len)>> = Map.fetch!(sections, 0x09)
+
+      assert session_status == 1
+      assert agent_status == 1
+      assert count == 2
+      assert label == "session-3: tests"
+      assert tool == ""
+      assert tool_len == 0
     end
   end
 
@@ -742,6 +785,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       agent_theme_colors: nil,
       background_subagent_count: 2,
       active_background_subagent_label: "session-3: tests",
+      active_tool_name: "read_file",
       status_msg: nil
     }
   end

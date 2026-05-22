@@ -59,6 +59,9 @@ defmodule MingaAgent.Session do
   @typedoc "Context inherited by child subagent sessions."
   @type subagent_context :: SubagentContext.t()
 
+  @typedoc "Active tool call tracked while the provider is executing tools."
+  @type active_tool_call :: {tool_call_id :: String.t(), name :: String.t()}
+
   @typedoc "Internal session state."
   @type state :: %{
           session_id: String.t(),
@@ -74,6 +77,7 @@ defmodule MingaAgent.Session do
           error_message: String.t() | nil,
           pending_thinking_level: String.t() | nil,
           pending_approval: pending_approval() | nil,
+          active_tool_calls: [active_tool_call()],
           active_tool_name: String.t() | nil,
           model_name: String.t(),
           provider_name: String.t(),
@@ -526,6 +530,7 @@ defmodule MingaAgent.Session do
       error_message: nil,
       pending_thinking_level: initial_thinking_level,
       pending_approval: nil,
+      active_tool_calls: [],
       active_tool_name: nil,
       model_name: model_name,
       provider_name: provider_name,
@@ -738,6 +743,7 @@ defmodule MingaAgent.Session do
         total_usage: TurnUsage.new(),
         error_message: nil,
         pending_approval: nil,
+        active_tool_calls: [],
         active_tool_name: nil,
         created_at: now,
         last_message_at: now,
@@ -1213,7 +1219,7 @@ defmodule MingaAgent.Session do
   defp handle_provider_event(%Event.ToolStart{} = event, state) do
     msg = Message.tool_call(event.tool_call_id, event.name, event.args)
     state = append_msg(state, msg)
-    state = %{state | active_tool_name: event.name}
+    state = track_active_tool_start(state, event.tool_call_id, event.name)
     state = set_working_status(state, :tool_executing)
     broadcast(state, {:tool_started, event.name, event.args})
     notify_messages_changed(state)
@@ -1267,7 +1273,8 @@ defmodule MingaAgent.Session do
         end
       end)
 
-    state = %{state | messages: messages, active_tool_name: nil}
+    state = %{state | messages: messages}
+    state = track_active_tool_end(state, event.tool_call_id)
     status = if event.is_error, do: :error, else: :done
     broadcast(state, {:tool_ended, event.name, event.result, status})
     notify_messages_changed(state)
@@ -1439,7 +1446,7 @@ defmodule MingaAgent.Session do
       if new_status == :tool_executing do
         state
       else
-        %{state | active_tool_name: nil}
+        clear_active_tool_tracking(state)
       end
 
     broadcast(state, {:status_changed, new_status})
@@ -1457,6 +1464,42 @@ defmodule MingaAgent.Session do
   @spec set_error_status(state()) :: state()
   defp set_error_status(%{status: :plan} = state), do: state
   defp set_error_status(state), do: set_status(state, :error)
+
+  @spec track_active_tool_start(state(), String.t(), String.t()) :: state()
+  defp track_active_tool_start(state, tool_call_id, name) do
+    active_tool_calls = state.active_tool_calls ++ [{tool_call_id, name}]
+
+    %{
+      state
+      | active_tool_calls: active_tool_calls,
+        active_tool_name: current_active_tool_name(active_tool_calls)
+    }
+  end
+
+  @spec track_active_tool_end(state(), String.t()) :: state()
+  defp track_active_tool_end(state, tool_call_id) do
+    active_tool_calls =
+      Enum.reject(state.active_tool_calls, fn {id, _name} -> id == tool_call_id end)
+
+    %{
+      state
+      | active_tool_calls: active_tool_calls,
+        active_tool_name: current_active_tool_name(active_tool_calls)
+    }
+  end
+
+  @spec clear_active_tool_tracking(state()) :: state()
+  defp clear_active_tool_tracking(state) do
+    %{state | active_tool_calls: [], active_tool_name: nil}
+  end
+
+  @spec current_active_tool_name([active_tool_call()]) :: String.t() | nil
+  defp current_active_tool_name([]), do: nil
+
+  defp current_active_tool_name(active_tool_calls) do
+    {_tool_call_id, name} = List.last(active_tool_calls)
+    name
+  end
 
   @spec plan_mode_message() :: String.t()
   defp plan_mode_message do
@@ -1739,6 +1782,7 @@ defmodule MingaAgent.Session do
             status: :idle,
             error_message: nil,
             pending_approval: nil,
+            active_tool_calls: [],
             active_tool_name: nil,
             created_at: loaded_at,
             last_message_at: loaded_at,

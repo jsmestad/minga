@@ -18,6 +18,8 @@ defmodule MingaEditor.Agent.EventRoutingTest do
   alias Minga.Project.FileRef
   alias MingaEditor.Agent.Events
   alias MingaEditor.Agent.UIState
+  alias MingaAgent.Event
+  alias MingaAgent.Session
   alias MingaEditor.Shell.Board
   alias MingaEditor.Shell.Board.Card
   alias MingaEditor.Shell.Board.State, as: BoardState
@@ -163,7 +165,65 @@ defmodule MingaEditor.Agent.EventRoutingTest do
   end
 
   describe "Agent.Events.handle/2 tool status" do
-    test "tool_started and tool_ended update active_tool_name" do
+    test "tool_started and tool_ended keep active_tool_name synced with the session snapshot" do
+      {:ok, session} = start_supervised({Session, provider_opts: []})
+      :sys.get_state(session)
+
+      {tab_bar, workspace} =
+        TabBar.add_workspace(TabBar.new(Tab.new_agent(1, "Agent")), "Agent", session)
+
+      tab_bar = TabBar.move_tab_to_workspace(tab_bar, 1, workspace.id)
+
+      state = %{
+        agent: %AgentState{},
+        shell: Traditional,
+        shell_state: %{tab_bar: tab_bar}
+      }
+
+      send(
+        session,
+        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc1", name: "alpha", args: %{}}}
+      )
+
+      :sys.get_state(session)
+      {state, effects} = Events.handle(state, {:tool_started, "alpha", %{}})
+      assert AgentState.active_tool_name(state.agent) == "alpha"
+      assert effects == [{:render, 16}]
+
+      send(
+        session,
+        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc2", name: "beta", args: %{}}}
+      )
+
+      :sys.get_state(session)
+      {state, effects} = Events.handle(state, {:tool_started, "beta", %{}})
+      assert AgentState.active_tool_name(state.agent) == "beta"
+      assert effects == [{:render, 16}]
+
+      send(
+        session,
+        {:agent_provider_event,
+         %Event.ToolEnd{tool_call_id: "tc1", name: "alpha", result: "contents"}}
+      )
+
+      :sys.get_state(session)
+      {state, effects} = Events.handle(state, {:tool_ended, "alpha", "contents", :done})
+      assert AgentState.active_tool_name(state.agent) == "beta"
+      assert effects == [{:render, 16}]
+
+      send(
+        session,
+        {:agent_provider_event,
+         %Event.ToolEnd{tool_call_id: "tc2", name: "beta", result: "output"}}
+      )
+
+      :sys.get_state(session)
+      {state, effects} = Events.handle(state, {:tool_ended, "beta", "output", :done})
+      assert AgentState.active_tool_name(state.agent) == nil
+      assert effects == [{:render, 16}]
+    end
+
+    test "tool_started and tool_ended fall back for map states without a session" do
       state = %{agent: %AgentState{}, agent_ui: UIState.new()}
 
       {state, effects} = Events.handle(state, {:tool_started, "read_file", %{}})

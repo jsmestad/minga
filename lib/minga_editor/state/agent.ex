@@ -59,7 +59,12 @@ defmodule MingaEditor.State.Agent do
   @doc "Sets the agent status (delegates to RuntimeState)."
   @spec set_status(t(), status()) :: t()
   def set_status(%__MODULE__{} = agent, status) do
-    %{agent | runtime: RuntimeState.set_status(agent.runtime, status)}
+    runtime =
+      agent.runtime
+      |> RuntimeState.set_status(status)
+      |> maybe_clear_active_tool_name(status)
+
+    %{agent | runtime: runtime}
   end
 
   @doc "Returns the active tool name from RuntimeState."
@@ -88,6 +93,12 @@ defmodule MingaEditor.State.Agent do
 
     %{agent | runtime: runtime, error: message}
   end
+
+  @spec maybe_clear_active_tool_name(RuntimeState.t(), status()) :: RuntimeState.t()
+  defp maybe_clear_active_tool_name(runtime, :tool_executing), do: runtime
+
+  defp maybe_clear_active_tool_name(runtime, _status),
+    do: RuntimeState.clear_active_tool_name(runtime)
 
   # ── Cache reset ─────────────────────────────────────────────────────────────
 

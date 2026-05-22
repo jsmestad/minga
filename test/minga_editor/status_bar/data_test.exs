@@ -8,6 +8,8 @@ defmodule MingaEditor.StatusBar.DataTest do
   alias MingaAgent.Subagent.Handle
   alias MingaEditor.StatusBar.Data
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Agent, as: AgentState
+  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -79,6 +81,26 @@ defmodule MingaEditor.StatusBar.DataTest do
 
     assert data.background_subagent_count == 1
     assert data.active_background_subagent_label == "session-2: tests"
+  end
+
+  test "threads active_tool_name from state into modeline data and clears it on status changes" do
+    {state, _buf} = state_with_buffer("hello", nil, :elixir)
+
+    state =
+      state
+      |> AgentAccess.update_agent(&AgentState.set_status(&1, :tool_executing))
+      |> AgentAccess.update_agent(&AgentState.set_active_tool_name(&1, "read_file"))
+
+    data = Data.from_state(state) |> Data.to_modeline_data()
+
+    assert data.agent_status == :tool_executing
+    assert data.active_tool_name == "read_file"
+
+    state = AgentAccess.update_agent(state, &AgentState.set_status(&1, :idle))
+    idle_data = Data.from_state(state) |> Data.to_modeline_data()
+
+    assert idle_data.agent_status == :idle
+    assert idle_data.active_tool_name == nil
   end
 
   test "uses options server values when no active buffer is available" do

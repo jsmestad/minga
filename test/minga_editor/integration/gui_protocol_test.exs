@@ -122,6 +122,7 @@ defmodule Minga.Integration.GUIProtocolTest do
            buf_count: 3,
            macro_recording: {true, "q"},
            agent_status: :thinking,
+           active_tool_name: "read_file",
            agent_theme_colors: nil,
            status_msg: "Wrote foo.ex",
            modeline_segments: %{
@@ -152,6 +153,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["macro_recording"] == 17
       assert decoded["parser_status"] == 0
       assert decoded["agent_status"] == 1
+      assert decoded["active_tool_name"] == "read_file"
       assert decoded["git_added"] == 5
       assert decoded["git_modified"] == 3
       assert decoded["git_deleted"] == 1
@@ -181,6 +183,7 @@ defmodule Minga.Integration.GUIProtocolTest do
            message_count: 7,
            macro_recording: false,
            agent_status: :thinking,
+           active_tool_name: "shell",
            agent_theme_colors: nil,
            # Background buffer context
            cursor_line: 10,
@@ -223,6 +226,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["error_count"] == 1
       assert decoded["warning_count"] == 2
       assert decoded["hint_count"] == 1
+      assert decoded["active_tool_name"] == "shell"
       assert decoded["git_added"] == 3
       assert decoded["git_modified"] == 2
       assert decoded["git_deleted"] == 0

@@ -366,6 +366,7 @@ struct CommandDispatcherRoutingTests {
                                            modelName: "", messageCount: 0, sessionStatus: 0,
                                            infoCount: 1, hintCount: 2,
                                            macroRecording: 0, parserStatus: 0, agentStatus: 0,
+                                           activeToolName: "",
                                            gitAdded: 5, gitModified: 3, gitDeleted: 1,
                                            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0,
                                            filename: "editor.ex", diagnosticHint: "",
@@ -386,6 +387,7 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.statusBarState.modelineLeftSegments[0].text == " NORMAL ")
         #expect(gui.statusBarState.selection.mode == 2)
         #expect(gui.statusBarState.selection.size == 3)
+        #expect(gui.statusBarState.activeToolName.isEmpty)
     }
 
     @Test("guiStatusBar agent variant populates background buffer fields")
@@ -399,6 +401,7 @@ struct CommandDispatcherRoutingTests {
                                            modelName: "claude-3-5-sonnet", messageCount: 7, sessionStatus: 1,
                                            infoCount: 0, hintCount: 1,
                                            macroRecording: 0, parserStatus: 0, agentStatus: 1,
+                                           activeToolName: "read_file",
                                            gitAdded: 3, gitModified: 2, gitDeleted: 0,
                                            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0,
                                            filename: "editor.ex", diagnosticHint: "",
@@ -415,6 +418,7 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.statusBarState.filetype == "elixir")
         #expect(gui.statusBarState.errorCount == 1)
         #expect(gui.statusBarState.gitAdded == 3)
+        #expect(gui.statusBarState.activeToolName == "read_file")
         #expect(gui.statusBarState.backgroundSubagentCount == 2)
         #expect(gui.statusBarState.backgroundSubagentLabel == "session-2: tests")
     }

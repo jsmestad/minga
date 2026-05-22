@@ -121,6 +121,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         result["macro_recording"] = Int(update.macroRecording)
         result["parser_status"] = Int(update.parserStatus)
         result["agent_status"] = Int(update.agentStatus)
+        result["active_tool_name"] = update.activeToolName
         result["git_added"] = Int(update.gitAdded)
         result["git_modified"] = Int(update.gitModified)
         result["git_deleted"] = Int(update.gitDeleted)
