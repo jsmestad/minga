@@ -10,11 +10,14 @@ defmodule MingaEditor.Commands.Git do
   alias Minga.Core.Diff
   alias Minga.Core.DiffView
   alias Minga.Core.Face
+  alias MingaEditor.BufferLifecycle
   alias MingaEditor.Commands
   alias MingaEditor.Layout
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
   alias Minga.Git
+  alias Minga.Git.MergeConflict
+  alias Minga.Git.MergeConflict.Region
   alias Minga.Language
   alias MingaEditor.UI.Picker.GitChangedSource
 
@@ -40,6 +43,11 @@ defmodule MingaEditor.Commands.Git do
     {:git_diff_toggle_layout, "Toggle side-by-side diff", true},
     {:next_git_hunk, "Next git hunk", true},
     {:prev_git_hunk, "Previous git hunk", true},
+    {:next_merge_conflict, "Next merge conflict", true},
+    {:prev_merge_conflict, "Previous merge conflict", true},
+    {:git_accept_current_conflict, "Accept current conflict side", true},
+    {:git_accept_incoming_conflict, "Accept incoming conflict side", true},
+    {:git_accept_both_conflict, "Accept both conflict sides", true},
     {:git_stage_hunk, "Stage hunk", true},
     {:git_stage_file, "Stage current file", true},
     {:git_unstage_file, "Unstage current file", true},
@@ -52,7 +60,10 @@ defmodule MingaEditor.Commands.Git do
     {:git_generate_commit_message, "Generate AI commit message", false}
   ]
 
-  @spec execute(state(), atom()) :: state()
+  @spec execute(
+          state(),
+          atom() | {:git_accept_conflict, MergeConflict.choice(), non_neg_integer()}
+        ) :: state()
 
   # ── Status panel toggle ────────────────────────────────────────────────────
 
@@ -153,6 +164,18 @@ defmodule MingaEditor.Commands.Git do
       end
     end)
   end
+
+  def execute(state, :next_merge_conflict), do: navigate_merge_conflict(state, :next)
+  def execute(state, :prev_merge_conflict), do: navigate_merge_conflict(state, :prev)
+  def execute(state, :git_accept_current_conflict), do: accept_conflict_at_cursor(state, :current)
+
+  def execute(state, :git_accept_incoming_conflict),
+    do: accept_conflict_at_cursor(state, :incoming)
+
+  def execute(state, :git_accept_both_conflict), do: accept_conflict_at_cursor(state, :both)
+
+  def execute(state, {:git_accept_conflict, choice, start_line}),
+    do: accept_conflict_at_start_line(state, choice, start_line)
 
   # ── Stage hunk ─────────────────────────────────────────────────────────────
 
@@ -262,6 +285,144 @@ defmodule MingaEditor.Commands.Git do
         :error -> EditorState.set_status(state, "Blame unavailable")
       end
     end)
+  end
+
+  @spec navigate_merge_conflict(state(), :next | :prev) :: state()
+  defp navigate_merge_conflict(%{workspace: %{buffers: %{active: buf}}} = state, direction)
+       when is_pid(buf) do
+    {cursor_line, _col} = Buffer.cursor(buf)
+    regions = current_conflicts(buf)
+
+    case target_conflict(regions, cursor_line, direction) do
+      nil -> EditorState.set_status(state, "No merge conflicts")
+      %Region{} = region -> jump_to_line(state, buf, region.start_line)
+    end
+  end
+
+  defp navigate_merge_conflict(state, _direction), do: state
+
+  @spec target_conflict([Region.t()], non_neg_integer(), :next | :prev) :: Region.t() | nil
+  defp target_conflict(regions, cursor_line, :next),
+    do: MergeConflict.next_after(regions, cursor_line)
+
+  defp target_conflict(regions, cursor_line, :prev),
+    do: MergeConflict.prev_before(regions, cursor_line)
+
+  @spec accept_conflict_at_cursor(state(), MergeConflict.choice()) :: state()
+  defp accept_conflict_at_cursor(%{workspace: %{buffers: %{active: buf}}} = state, choice)
+       when is_pid(buf) do
+    {cursor_line, _col} = Buffer.cursor(buf)
+    content = Buffer.content(buf)
+
+    case MergeConflict.replace_at_line(content, cursor_line, choice) do
+      {:ok, new_content} -> apply_conflict_resolution(state, buf, new_content, cursor_line)
+      :not_found -> EditorState.set_status(state, "No merge conflict at cursor")
+    end
+  end
+
+  defp accept_conflict_at_cursor(state, _choice), do: state
+
+  @spec accept_conflict_at_start_line(state(), MergeConflict.choice(), non_neg_integer()) ::
+          state()
+  defp accept_conflict_at_start_line(
+         %{workspace: %{buffers: %{active: buf}}} = state,
+         choice,
+         start_line
+       )
+       when is_pid(buf) do
+    content = Buffer.content(buf)
+    regions = MergeConflict.parse(content)
+
+    case Enum.find(regions, fn region -> region.start_line == start_line end) do
+      nil ->
+        EditorState.set_status(state, "Merge conflict action is stale")
+
+      %Region{} = region ->
+        apply_conflict_resolution(
+          state,
+          buf,
+          MergeConflict.replace_region(content, region, choice),
+          start_line
+        )
+    end
+  end
+
+  defp accept_conflict_at_start_line(state, _choice, _start_line), do: state
+
+  @spec apply_conflict_resolution(state(), pid(), String.t(), non_neg_integer()) :: state()
+  defp apply_conflict_resolution(state, buf, new_content, cursor_line) do
+    case Buffer.replace_content(buf, new_content, :user) do
+      :ok ->
+        Git.sync_tracked_buffer(buf, new_content)
+        after_conflict_replacement(state, buf, new_content, cursor_line)
+
+      {:error, reason} ->
+        EditorState.set_status(state, "Resolve conflict failed: #{inspect(reason)}")
+    end
+  end
+
+  @spec after_conflict_replacement(state(), pid(), String.t(), non_neg_integer()) :: state()
+  defp after_conflict_replacement(state, buf, new_content, cursor_line) do
+    Buffer.move_to(buf, {min(cursor_line, max(Buffer.line_count(buf) - 1, 0)), 0})
+
+    if MergeConflict.parse(new_content) == [] do
+      save_and_stage_resolved_file(state, buf)
+    else
+      EditorState.set_status(state, "Resolved merge conflict")
+    end
+  end
+
+  @spec save_and_stage_resolved_file(state(), pid()) :: state()
+  defp save_and_stage_resolved_file(state, buf) do
+    case Buffer.file_path(buf) do
+      nil -> EditorState.set_status(state, "Resolved all merge conflicts")
+      file_path -> save_and_stage_resolved_file(state, buf, file_path)
+    end
+  end
+
+  @spec save_and_stage_resolved_file(state(), pid(), String.t()) :: state()
+  defp save_and_stage_resolved_file(state, buf, file_path) do
+    with :ok <- Buffer.save(buf),
+         :ok <- broadcast_save_lifecycle(state, buf),
+         {:ok, git_root} <- git_root_for_file(file_path),
+         rel_path = Git.relative_path(git_root, file_path),
+         :ok <- Git.stage(git_root, rel_path) do
+      refresh_repo(git_root)
+      EditorState.set_status(state, "Resolved all merge conflicts and staged #{rel_path}")
+    else
+      :not_git ->
+        EditorState.set_status(state, "Resolved all merge conflicts; not in a git repository")
+
+      {:error, reason} ->
+        EditorState.set_status(
+          state,
+          "Resolved conflicts, but save/stage failed: #{inspect(reason)}"
+        )
+    end
+  end
+
+  @spec broadcast_save_lifecycle(state(), pid()) :: :ok
+  defp broadcast_save_lifecycle(state, buf) do
+    BufferLifecycle.lsp_after_save(state, :save, buf)
+    :ok
+  end
+
+  @spec git_root_for_file(String.t()) :: {:ok, String.t()} | :not_git | {:error, String.t()}
+  defp git_root_for_file(file_path) do
+    case Git.root_for(file_path) do
+      {:ok, git_root} -> {:ok, git_root}
+      :not_git -> :not_git
+    end
+  end
+
+  @spec current_conflicts(pid()) :: [Region.t()]
+  defp current_conflicts(buf) do
+    case Git.tracking_pid(buf) do
+      nil -> buf |> Buffer.content() |> MergeConflict.parse()
+      git_pid -> Git.conflicts(git_pid)
+    end
+  catch
+    :exit, _ -> []
   end
 
   # ── Private ────────────────────────────────────────────────────────────────

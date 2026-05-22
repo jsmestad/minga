@@ -498,7 +498,7 @@ defmodule Minga.Core.Decorations do
   - `:placement` (required) - `:above` or `:below` the anchor line
   - `:render` (required) - callback `(width -> [{text, style}] | [[{text, style}]])`
   - `:height` (optional, default 1) - number of display lines, or `:dynamic`
-  - `:on_click` (optional) - callback `(row, col) -> :ok` for interactive blocks
+  - `:on_click` (optional) - callback `(row, col) -> :ok | {:command, term()}` for interactive blocks
   - `:priority` (optional, default 0) - ordering when multiple blocks share an anchor
   """
   @spec add_block_decoration(t(), non_neg_integer(), keyword()) :: {reference(), t()}

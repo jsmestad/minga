@@ -4,6 +4,7 @@ defmodule MingaEditor.Mouse.HitTest do
   alias Minga.Buffer
   alias Minga.Core.Decorations
   alias Minga.Core.Unicode
+  alias MingaEditor.BufferDecorations
   alias MingaEditor.DisplayMap
   alias MingaEditor.FoldMap
   alias MingaEditor.Layout
@@ -15,8 +16,9 @@ defmodule MingaEditor.Mouse.HitTest do
   alias MingaEditor.WindowTree
 
   @type state :: EditorState.t()
-  @type target :: {:buffer, BufferTarget.t()} | :miss
-  @type position_result :: {:position, BufferTarget.position()} | :miss
+  @type target :: {:buffer, BufferTarget.t()} | {:command, term()} | :block_noop | :miss
+  @type position_result ::
+          {:position, BufferTarget.position()} | {:command, term()} | :block_noop | :miss
 
   @spec resolve_buffer(state(), integer(), integer()) :: target()
   def resolve_buffer(_state, row, _col) when row < 0, do: :miss
@@ -32,28 +34,17 @@ defmodule MingaEditor.Mouse.HitTest do
          top = scroll_top(window, content_height, content_width, cursor_line, buffer),
          local_row = row - content_row,
          local_col = max(col - content_col - gutter_width, 0),
-         display_col = local_col + window.viewport.left,
-         {:position, {line, target_col}} <-
+         position_result <-
            position(
+             state,
              buffer,
              window,
              local_row,
-             display_col,
+             local_col,
              top,
-             content_height,
-             content_width,
-             total_lines
+             {content_height, content_width, total_lines}
            ) do
-      {:buffer,
-       BufferTarget.new(%{
-         window_id: id,
-         buffer: buffer,
-         line: line,
-         col: target_col,
-         local_row: local_row,
-         local_col: local_col,
-         viewport: window.viewport
-       })}
+      target_from_position_result(position_result, id, buffer, local_row, local_col, window)
     else
       _ -> :miss
     end
@@ -61,23 +52,83 @@ defmodule MingaEditor.Mouse.HitTest do
     :exit, _ -> :miss
   end
 
+  @spec target_from_position_result(
+          position_result(),
+          term(),
+          pid(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Window.t()
+        ) :: target()
+  defp target_from_position_result(
+         {:position, {line, target_col}},
+         id,
+         buffer,
+         local_row,
+         local_col,
+         window
+       ) do
+    {:buffer,
+     BufferTarget.new(%{
+       window_id: id,
+       buffer: buffer,
+       line: line,
+       col: target_col,
+       local_row: local_row,
+       local_col: local_col,
+       viewport: window.viewport
+     })}
+  end
+
+  defp target_from_position_result(
+         {:command, command},
+         _id,
+         _buffer,
+         _local_row,
+         _local_col,
+         _window
+       ),
+       do: {:command, command}
+
+  defp target_from_position_result(:block_noop, _id, _buffer, _local_row, _local_col, _window),
+    do: :block_noop
+
+  defp target_from_position_result(:miss, _id, _buffer, _local_row, _local_col, _window),
+    do: :miss
+
   @spec position(
+          state() | nil,
           pid(),
           Window.t() | nil,
           integer(),
           non_neg_integer(),
           non_neg_integer(),
-          pos_integer(),
-          pos_integer(),
-          non_neg_integer()
+          {pos_integer(), pos_integer(), non_neg_integer()}
         ) :: position_result()
-  def position(_buf, _window, local_row, _local_col, _scroll_top, win_h, _content_w, _total_lines)
+  def position(
+        _state,
+        _buf,
+        _window,
+        local_row,
+        _visible_col,
+        _scroll_top,
+        {win_h, _content_w, _total_lines}
+      )
       when local_row < 0 or local_row >= win_h,
       do: :miss
 
-  def position(buf, window, local_row, local_col, scroll_top, win_h, content_w, total_lines) do
-    decs = Buffer.decorations(buf)
+  def position(
+        state,
+        buf,
+        window,
+        local_row,
+        visible_col,
+        scroll_top,
+        {win_h, content_w, total_lines}
+      ) do
+    decs = decorations_for_position(state, buf)
     fold_map = if window, do: window.fold_map, else: FoldMap.new()
+    display_col = visible_col + viewport_left(window)
 
     first_line = display_map_scroll_top(fold_map, scroll_top)
 
@@ -90,15 +141,38 @@ defmodule MingaEditor.Mouse.HitTest do
            content_text_width(buf, total_lines, content_w)
          ) do
       nil ->
-        direct_position(buf, local_row, win_h, local_row + scroll_top, local_col, total_lines)
+        direct_position(buf, local_row, win_h, local_row + scroll_top, display_col, total_lines)
 
       %DisplayMap{} = display_map ->
-        display_map_position(display_map, buf, local_row, local_col, win_h, total_lines)
+        display_map_position(
+          display_map,
+          buf,
+          local_row,
+          visible_col,
+          display_col,
+          win_h,
+          total_lines
+        )
     end
   catch
     :exit, _ ->
-      direct_position(buf, local_row, win_h, local_row + scroll_top, local_col, total_lines)
+      direct_position(
+        buf,
+        local_row,
+        win_h,
+        local_row + scroll_top,
+        visible_col + viewport_left(window),
+        total_lines
+      )
   end
+
+  @spec viewport_left(Window.t() | nil) :: non_neg_integer()
+  defp viewport_left(%Window{viewport: viewport}), do: viewport.left
+  defp viewport_left(nil), do: 0
+
+  @spec decorations_for_position(state() | nil, pid()) :: Decorations.t()
+  defp decorations_for_position(nil, buf), do: Buffer.decorations(buf)
+  defp decorations_for_position(state, buf), do: BufferDecorations.compose(state, buf)
 
   @spec scroll_top(Window.t() | nil, pos_integer(), pos_integer(), non_neg_integer(), pid()) ::
           non_neg_integer()
@@ -169,7 +243,8 @@ defmodule MingaEditor.Mouse.HitTest do
          %DisplayMap{entries: entries},
          buffer,
          local_row,
-         local_col,
+         visible_col,
+         display_col,
          win_h,
          total_lines
        ) do
@@ -178,10 +253,10 @@ defmodule MingaEditor.Mouse.HitTest do
         :miss
 
       {_line, {:block, block, line_index}} ->
-        click_block(block, line_index, local_col)
+        click_block(block, line_index, visible_col)
 
       {target_line, _entry_type} ->
-        direct_position(buffer, local_row, win_h, target_line, local_col, total_lines)
+        direct_position(buffer, local_row, win_h, target_line, display_col, total_lines)
 
       nil ->
         :miss
@@ -189,8 +264,11 @@ defmodule MingaEditor.Mouse.HitTest do
   end
 
   defp click_block(block, line_index, col) do
-    if block.on_click, do: block.on_click.(line_index, col)
-    :miss
+    case block.on_click && block.on_click.(line_index, col) do
+      {:command, command} -> {:command, command}
+      :ok -> :block_noop
+      _other -> :miss
+    end
   end
 
   defp direct_position(_buffer, row, visible_rows, _line, _col, _total_lines)

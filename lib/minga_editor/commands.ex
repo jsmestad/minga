@@ -32,6 +32,7 @@ defmodule MingaEditor.Commands do
   alias MingaEditor.Commands.Editing, as: EditingCommands
   alias MingaEditor.Commands.Eval
   alias MingaEditor.Commands.Extensions, as: ExtCommands
+  alias MingaEditor.Commands.Git, as: GitCommands
   alias MingaEditor.Commands.Help
   alias MingaEditor.Commands.Lsp, as: LspCommands
   alias MingaEditor.Commands.Tutor
@@ -312,6 +313,12 @@ defmodule MingaEditor.Commands do
     else
       state
     end
+  end
+
+  # ── Parameterized git commands ────────────────────────────────────────────
+
+  def execute(state, {:git_accept_conflict, _choice, _start_line} = cmd) do
+    guard_buffer(state, fn -> GitCommands.execute(state, cmd) end)
   end
 
   # ── Parameterized movement ────────────────────────────────────────────────

@@ -6,6 +6,8 @@ defmodule MingaEditor.State.BufferLifecycleTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Events
+  alias MingaEditor.BufferLifecycle
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
@@ -314,6 +316,31 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       only_tab_after = TabBar.get(EditorState.tab_bar(closed_only), only_tab.id)
       assert only_tab_after.context.buffers.list == []
       assert only_tab_after.context.buffers.active == nil
+    end
+
+    @tag :tmp_dir
+    test "save lifecycle broadcasts the buffer that was saved, not the active buffer", %{
+      tmp_dir: tmp_dir
+    } do
+      active_path = Path.join(tmp_dir, "active.ex")
+      saved_path = Path.join(tmp_dir, "saved.ex")
+      File.write!(active_path, "active")
+      File.write!(saved_path, "saved")
+
+      active_buf = start_file_buffer(active_path, "active")
+      saved_buf = start_file_buffer(saved_path, "saved")
+      state = state_for_buffer(active_buf)
+
+      Events.subscribe(:buffer_saved)
+      on_exit(fn -> Events.unsubscribe(:buffer_saved) end)
+
+      assert %EditorState{} = BufferLifecycle.lsp_after_save(state, :save, saved_buf)
+
+      assert_receive {:minga_event, :buffer_saved,
+                      %Minga.Events.BufferEvent{buffer: ^saved_buf, path: ^saved_path}}
+
+      refute_receive {:minga_event, :buffer_saved,
+                      %Minga.Events.BufferEvent{buffer: ^active_buf, path: ^active_path}}
     end
   end
 

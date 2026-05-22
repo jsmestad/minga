@@ -49,6 +49,7 @@ defmodule Minga.Keymap.NormalPrefixes do
     # ] prefix (next)
     {~k(] d), :next_diagnostic, "Next diagnostic"},
     {~k(] c), :next_git_hunk, "Next git hunk"},
+    {~k(] x), :next_merge_conflict, "Next merge conflict"},
     {~k(] f), {:goto_next_textobject, :function}, "Next function"},
     {~k(] t), {:goto_next_textobject, :class}, "Next class/module"},
     {~k(] a), {:goto_next_textobject, :parameter}, "Next parameter"},
@@ -56,6 +57,7 @@ defmodule Minga.Keymap.NormalPrefixes do
     # [ prefix (previous)
     {~k([ d), :prev_diagnostic, "Previous diagnostic"},
     {~k([ c), :prev_git_hunk, "Previous git hunk"},
+    {~k([ x), :prev_merge_conflict, "Previous merge conflict"},
     {~k([ f), {:goto_prev_textobject, :function}, "Previous function"},
     {~k([ t), {:goto_prev_textobject, :class}, "Previous class/module"},
     {~k([ a), {:goto_prev_textobject, :parameter}, "Previous parameter"}

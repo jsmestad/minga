@@ -854,22 +854,34 @@ defmodule MingaEditor.Mouse do
 
   @spec handle_content_click(state(), non_neg_integer(), non_neg_integer()) :: state()
   defp handle_content_click(state, row, col) do
-    # Check modeline click first
     case modeline_click(state, row, col) do
-      {:command, cmd} ->
-        MingaEditor.dispatch_command(state, cmd)
+      {:command, cmd} -> MingaEditor.dispatch_command(state, cmd)
+      :not_modeline -> handle_non_modeline_content_click(state, row, col)
+    end
+  end
 
-      :not_modeline ->
-        state = maybe_unfocus_file_tree_for_content_click(state)
-        state = maybe_focus_window_at(state, row, col)
+  @spec handle_non_modeline_content_click(state(), non_neg_integer(), non_neg_integer()) ::
+          state()
+  defp handle_non_modeline_content_click(state, row, col) do
+    state
+    |> maybe_unfocus_file_tree_for_content_click()
+    |> maybe_focus_window_at(row, col)
+    |> handle_buffer_target_click(row, col)
+  end
 
-        case handle_fold_gutter_click(state, row, col) do
-          {:handled, state} ->
-            state
+  @spec handle_buffer_target_click(state(), non_neg_integer(), non_neg_integer()) :: state()
+  defp handle_buffer_target_click(state, row, col) do
+    case handle_block_command_click(state, row, col) do
+      {:handled, state} -> state
+      :miss -> handle_non_block_content_click(state, row, col)
+    end
+  end
 
-          :miss ->
-            handle_buffer_content_click(state, row, col)
-        end
+  @spec handle_non_block_content_click(state(), non_neg_integer(), non_neg_integer()) :: state()
+  defp handle_non_block_content_click(state, row, col) do
+    case handle_fold_gutter_click(state, row, col) do
+      {:handled, state} -> state
+      :miss -> handle_buffer_content_click(state, row, col)
     end
   end
 
@@ -993,6 +1005,16 @@ defmodule MingaEditor.Mouse do
         ) :: {{non_neg_integer(), non_neg_integer()}, {non_neg_integer(), non_neg_integer()}}
   defp normalize_position_range(first, second) when first <= second, do: {first, second}
   defp normalize_position_range(first, second), do: {second, first}
+
+  @spec handle_block_command_click(state(), non_neg_integer(), non_neg_integer()) ::
+          {:handled, state()} | :miss
+  defp handle_block_command_click(state, row, col) do
+    case HitTest.resolve_buffer(state, row, col) do
+      {:command, command} -> {:handled, MingaEditor.dispatch_command(state, command)}
+      :block_noop -> {:handled, state}
+      _target_or_miss -> :miss
+    end
+  end
 
   @spec handle_buffer_content_click(state(), non_neg_integer(), non_neg_integer()) :: state()
   defp handle_buffer_content_click(state, row, col) do
@@ -1210,7 +1232,7 @@ defmodule MingaEditor.Mouse do
       {:buffer, target} ->
         BufferTarget.position(target)
 
-      :miss ->
+      _command_or_miss ->
         nil
     end
   end
@@ -1276,7 +1298,7 @@ defmodule MingaEditor.Mouse do
   @spec drag_mouse_to_buffer_pos(state(), drag_window_context(), integer(), integer()) ::
           {non_neg_integer(), non_neg_integer()} | nil
   defp drag_mouse_to_buffer_pos(
-         _state,
+         state,
          {_id, window, buf, content_row, content_col, content_w, content_h},
          row,
          col
@@ -1286,26 +1308,26 @@ defmodule MingaEditor.Mouse do
     {cursor_line, _} = window.cursor
     scroll_top = HitTest.scroll_top(window, content_h, content_w, cursor_line, buf)
     local_row = row - content_row
-    local_col = max(col - content_col - gutter_w, 0) + window.viewport.left
+    visible_col = max(col - content_col - gutter_w, 0)
+    display_col = visible_col + window.viewport.left
 
     if local_row < 0 or local_row >= content_h do
-      resolve_drag_buffer_pos(buf, local_row, local_col, scroll_top, content_h, total_lines)
+      resolve_drag_buffer_pos(buf, local_row, display_col, scroll_top, content_h, total_lines)
     else
       case HitTest.position(
+             state,
              buf,
              window,
              local_row,
-             local_col,
+             visible_col,
              scroll_top,
-             content_h,
-             content_w,
-             total_lines
+             {content_h, content_w, total_lines}
            ) do
         {:position, pos} ->
           pos
 
         _target_or_miss ->
-          resolve_drag_buffer_pos(buf, local_row, local_col, scroll_top, content_h, total_lines)
+          resolve_drag_buffer_pos(buf, local_row, display_col, scroll_top, content_h, total_lines)
       end
     end
   catch

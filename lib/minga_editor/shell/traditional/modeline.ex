@@ -37,6 +37,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
           :workspace_label => String.t(),
           :workspace_draft_count => non_neg_integer(),
           :workspace_conflict_count => non_neg_integer(),
+          :merge_conflict_count => non_neg_integer(),
           :filetype => atom(),
           :dirty_marker => String.t(),
           :cursor_line => non_neg_integer(),
@@ -95,6 +96,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     percent: 40,
     draft: 42,
     conflict: 43,
+    merge_conflict: 44,
     indent: 35,
     selection: 75
   }
@@ -696,6 +698,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   defp render_builtin(:percent, ctx), do: render_percent(ctx)
   defp render_builtin(:draft, ctx), do: render_draft(ctx)
   defp render_builtin(:conflict, ctx), do: render_conflict(ctx)
+  defp render_builtin(:merge_conflict, ctx), do: render_merge_conflict(ctx)
   defp render_builtin(:indent, ctx), do: render_indent(ctx)
   defp render_builtin(:selection, _ctx), do: []
   defp render_builtin(_name, _ctx), do: []
@@ -761,6 +764,11 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   @spec render_conflict(context()) :: [render_segment()]
   defp render_conflict(ctx) do
     render_count_segment(ctx, :workspace_conflict_count, "C", :workspace_list)
+  end
+
+  @spec render_merge_conflict(context()) :: [render_segment()]
+  defp render_merge_conflict(ctx) do
+    render_count_segment(ctx, :merge_conflict_count, "X", :next_merge_conflict)
   end
 
   @spec render_count_segment(context(), atom(), String.t(), atom()) :: [render_segment()]
