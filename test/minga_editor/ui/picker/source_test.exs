@@ -3,6 +3,7 @@ defmodule MingaEditor.UI.Picker.SourceTest do
 
   use ExUnit.Case, async: true
 
+  alias MingaEditor.UI.Picker.ProjectSource
   alias MingaEditor.UI.Picker.Source
 
   defmodule NoActionsSource do
@@ -69,6 +70,12 @@ defmodule MingaEditor.UI.Picker.SourceTest do
   describe "preview?/1" do
     test "returns false for source without preview? callback" do
       refute Source.preview?(NoActionsSource)
+    end
+  end
+
+  describe "layout/1" do
+    test "returns centered layout for project switcher" do
+      assert Source.layout(ProjectSource) == :centered
     end
   end
 end

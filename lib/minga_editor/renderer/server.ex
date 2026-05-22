@@ -51,6 +51,9 @@ defmodule MingaEditor.Renderer.Server do
   @typedoc "Render pipeline output after a frame has run."
   @type render_output :: Input.t()
 
+  @typedoc "Injected render pipeline function."
+  @type pipeline :: (Input.t() -> render_output())
+
   @typedoc "Click-region writeback payload sent to the Editor after each frame."
   @type writeback :: %{
           required(:caches) => MingaEditor.Renderer.Caches.t(),
@@ -70,14 +73,16 @@ defmodule MingaEditor.Renderer.Server do
           rendering?: boolean(),
           pending: {Input.t(), non_neg_integer(), integer()} | nil,
           in_flight: {Input.t(), non_neg_integer(), integer()} | nil,
-          font_registry: FontRegistry.t()
+          font_registry: FontRegistry.t(),
+          pipeline: pipeline()
         }
 
   defstruct editor_pid: nil,
             rendering?: false,
             pending: nil,
             in_flight: nil,
-            font_registry: FontRegistry.new()
+            font_registry: FontRegistry.new(),
+            pipeline: &RenderPipeline.run/1
 
   # ── API ────────────────────────────────────────────────────────────────────
 
@@ -108,7 +113,8 @@ defmodule MingaEditor.Renderer.Server do
   @spec init(keyword()) :: {:ok, t()}
   def init(opts) do
     editor_pid = Keyword.get(opts, :editor_pid, MingaEditor)
-    {:ok, %__MODULE__{editor_pid: editor_pid}}
+    pipeline = Keyword.get(opts, :pipeline, &RenderPipeline.run/1)
+    {:ok, %__MODULE__{editor_pid: editor_pid, pipeline: pipeline}}
   end
 
   @impl true
@@ -138,7 +144,7 @@ defmodule MingaEditor.Renderer.Server do
       Telemetry.span(
         [:minga, :render, :pipeline],
         %{frame_seq: seq},
-        fn -> snap |> Input.with_font_registry(state.font_registry) |> RenderPipeline.run() end
+        fn -> snap |> Input.with_font_registry(state.font_registry) |> state.pipeline.() end
       )
 
     emit_complete_at = monotonic_now()
