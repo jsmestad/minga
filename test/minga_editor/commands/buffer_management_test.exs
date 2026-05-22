@@ -163,6 +163,24 @@ defmodule MingaEditor.Commands.BufferManagementTest do
       assert visible_tab_ids(moved_right) == [1, 2, 3]
       assert EditorState.status_msg(moved_right) == nil
     end
+
+    test ":tab_goto_N follows visible order after pinning" do
+      {state, _buffer} = start_command_state("first file")
+      {state, _buffer2} = add_file_tab_with_buffer(state)
+      {state, _buffer3} = add_file_tab_with_buffer(state)
+
+      pinned_tab_id = EditorState.tab_bar(state).active_id
+      tab_bar = TabBar.pin_tab(EditorState.tab_bar(state), pinned_tab_id)
+      state = EditorState.set_tab_bar(state, tab_bar)
+
+      assert visible_tab_ids(state) == [pinned_tab_id, 1, 2]
+
+      assert EditorState.tab_bar(BufferManagement.tab_goto(state, :tab_goto_1)).active_id ==
+               pinned_tab_id
+
+      assert EditorState.tab_bar(BufferManagement.tab_goto(state, :tab_goto_2)).active_id == 1
+      assert EditorState.tab_bar(BufferManagement.tab_goto(state, :tab_goto_3)).active_id == 2
+    end
   end
 
   describe "tab-aware quit command state" do

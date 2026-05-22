@@ -650,7 +650,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   @spec tab_goto(state(), atom()) :: state()
   def tab_goto(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, cmd) do
     case parse_tab_goto(cmd) do
-      {:ok, n} -> switch_tab_by_id_or_index(state, tb, n)
+      {:ok, n} -> switch_tab_by_visible_index(state, tb, n)
       :error -> state
     end
   end
@@ -660,9 +660,9 @@ defmodule MingaEditor.Commands.BufferManagement do
   @spec parse_tab_goto(atom()) :: {:ok, pos_integer()} | :error
   defp parse_tab_goto(cmd) do
     case Atom.to_string(cmd) do
-      "tab_goto_" <> id_str ->
-        case Integer.parse(id_str) do
-          {n, ""} -> {:ok, n}
+      "tab_goto_" <> index_str ->
+        case Integer.parse(index_str) do
+          {n, ""} when n > 0 -> {:ok, n}
           _ -> :error
         end
 
@@ -671,15 +671,11 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
   end
 
-  @spec switch_tab_by_id_or_index(EditorState.t(), TabBar.t(), pos_integer()) :: EditorState.t()
-  defp switch_tab_by_id_or_index(state, tb, n) do
-    if TabBar.has_tab?(tb, n) do
-      EditorState.switch_tab(state, n)
-    else
-      case TabBar.tab_at(tb, n) do
-        %{id: id} -> EditorState.switch_tab(state, id)
-        nil -> state
-      end
+  @spec switch_tab_by_visible_index(EditorState.t(), TabBar.t(), pos_integer()) :: EditorState.t()
+  defp switch_tab_by_visible_index(state, tb, n) do
+    case Enum.at(TabBar.visible_file_tabs(tb), n - 1) do
+      %Tab{id: id} -> EditorState.switch_tab(state, id)
+      nil -> state
     end
   end
 

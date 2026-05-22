@@ -2154,6 +2154,38 @@ struct GUIWorkspacesDecoderTests {
         #expect(visibleTabs[0].path == "/tmp/agent.ex")
     }
 
+    @Test("Decode legacy version 1 workspaces without tint color")
+    func decodeLegacyVersion1() throws {
+        var payload = Data()
+        payload.append(1) // version
+        appendU16(&payload, 1) // active_workspace_id
+        payload.append(0) // mode = editor
+        payload.append(0) // flags
+        payload.append(1) // workspace_count
+
+        appendWorkspace(&payload, id: 1, kind: 0, status: 0, flags: 0, r: 0x51, g: 0xAF, b: 0xEF, tabCount: 1, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "minga", icon: "folder")
+
+        appendU16(&payload, 1) // visible_tab_count
+        appendVisibleTab(&payload, id: 42, workspaceId: 1, kind: 0, flags: 0x0013, pathHash: 0x12345678, icon: "", label: "agent.ex", path: "/tmp/agent.ex", tintColorRGB: nil)
+
+        var data = Data([OP_GUI_WORKSPACES])
+        appendU16(&data, UInt16(payload.count))
+        data.append(payload)
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiWorkspaces(let version, _, _, _, _, let visibleTabs) = cmd else {
+            Issue.record("Expected .guiWorkspaces, got \(String(describing: cmd))")
+            return
+        }
+
+        #expect(version == 1)
+        #expect(visibleTabs.count == 1)
+        #expect(visibleTabs[0].id == 42)
+        #expect(visibleTabs[0].tintColorRGB == 0)
+    }
+
     @Test("Decode canonical workspaces with zero workspaces and tabs")
     func decodeEmpty() throws {
         var payload = Data()
@@ -2233,7 +2265,7 @@ struct GUIWorkspacesDecoderTests {
         appendString8(&data, icon)
     }
 
-    private func appendVisibleTab(_ data: inout Data, id: UInt32, workspaceId: UInt16, kind: UInt8, flags: UInt16, pathHash: UInt32, icon: String, label: String, path: String, tintColorRGB: UInt32 = 0x7AA2F7) {
+    private func appendVisibleTab(_ data: inout Data, id: UInt32, workspaceId: UInt16, kind: UInt8, flags: UInt16, pathHash: UInt32, icon: String, label: String, path: String, tintColorRGB: UInt32? = 0x7AA2F7) {
         appendU32(&data, id)
         appendU16(&data, workspaceId)
         data.append(kind)
@@ -2242,7 +2274,9 @@ struct GUIWorkspacesDecoderTests {
         appendString8(&data, icon)
         appendString16(&data, label)
         appendString16(&data, path)
-        appendU32(&data, tintColorRGB)
+        if let tintColorRGB {
+            appendU32(&data, tintColorRGB)
+        }
     }
 }
 

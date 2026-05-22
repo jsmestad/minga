@@ -202,6 +202,37 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       assert tint == 0
     end
 
+    test "encodes pinned visible tabs with tint color metadata" do
+      tab =
+        TabSummary.new(
+          id: 7,
+          workspace_id: 1,
+          kind: :file,
+          label: "pinned.ex",
+          path: "/tmp/pinned.ex",
+          icon: "",
+          pinned?: true,
+          tint_color: 0x123456
+        )
+
+      chrome_state = chrome_state(active_workspace_id: 1, workspaces: [], visible_tabs: [tab])
+
+      <<0x98, payload_len::16, payload::binary-size(payload_len)>> =
+        ProtocolGUI.encode_gui_workspaces(chrome_state)
+
+      <<_version::8, _active::16, _mode::8, _flags::8, 0::8, 1::16, 7::32, 1::16, 0::8,
+        tab_flags::16, _path_hash::32, icon_len::8, icon::binary-size(icon_len), label_len::16,
+        label::binary-size(label_len), path_len::16, path::binary-size(path_len), tint::32>> =
+        payload
+
+      assert Bitwise.band(tab_flags, 0x20) == 0x20
+      assert icon == ""
+      assert label == "pinned.ex"
+      assert path == "/tmp/pinned.ex"
+      assert tint == 0x123456
+      assert payload_len > 0
+    end
+
     test "caps visible tabs to the 16-bit payload budget" do
       large_label = String.duplicate("l", 30_000)
       large_path = "/tmp/" <> String.duplicate("p", 30_000)

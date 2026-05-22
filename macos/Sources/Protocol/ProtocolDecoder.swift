@@ -2275,9 +2275,10 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             let label = try readRequiredUTF8(data[(labelLenPos + 2)..<(labelLenPos + 2 + labelLen)])
             let pathLenPos = labelLenPos + 2 + labelLen
             let pathLen = Int(readU16(data, pathLenPos))
-            guard pathLenPos + 2 + pathLen + 4 <= payloadEnd else { throw ProtocolDecodeError.malformed }
+            let tintBytes = version >= 2 ? 4 : 0
+            guard pathLenPos + 2 + pathLen + tintBytes <= payloadEnd else { throw ProtocolDecodeError.malformed }
             let path = try readRequiredUTF8(data[(pathLenPos + 2)..<(pathLenPos + 2 + pathLen)])
-            let tintColorRGB = readU32(data, pathLenPos + 2 + pathLen)
+            let tintColorRGB = version >= 2 ? readU32(data, pathLenPos + 2 + pathLen) : 0
 
             visibleTabs.append(Wire.WorkspaceTabEntry(
                 id: id,
@@ -2290,7 +2291,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 label: label,
                 path: path
             ))
-            pos = pathLenPos + 6 + pathLen
+            pos = pathLenPos + 2 + pathLen + tintBytes
         }
 
         guard pos == payloadEnd else { throw ProtocolDecodeError.malformed }

@@ -117,6 +117,12 @@ defmodule MingaEditor.Commands do
     Editing.set_active_register(state, name)
   end
 
+  # Tab bar mouse selection uses id-scoped tuple commands so click targets stay
+  # stable even when visible positions are reordered by pinning.
+  def execute(state, {:tab_goto_id, tab_id}) when is_integer(tab_id) and tab_id > 0 do
+    EditorState.switch_tab(state, tab_id)
+  end
+
   # ── Leader / which-key (return action tuples) ─────────────────────────────
 
   def execute(state, {:leader_start, node}) do
