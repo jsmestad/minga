@@ -25,8 +25,6 @@ defmodule MingaEditor do
   alias Minga.Session
 
   alias MingaEditor.AgentLifecycle
-  alias MingaEditor.BottomPanel
-
   alias MingaEditor.Commands
   alias MingaEditor.CompletionHandling
   alias MingaEditor.FileWatcherHelpers
@@ -53,6 +51,7 @@ defmodule MingaEditor do
   alias MingaEditor.Handlers.GuiActionHandler
   alias MingaEditor.Handlers.HighlightHandler
   alias MingaEditor.Handlers.LspEventHandler
+  alias MingaEditor.Handlers.RenderHandler
   alias MingaEditor.Handlers.SessionHandler
   alias MingaEditor.Handlers.ToolHandler
   # WarningLog removed in #825; warnings route through MessageLog with level override
@@ -650,9 +649,7 @@ defmodule MingaEditor do
 
   # Debounced render timer fired — perform the actual render.
   def handle_info(:debounced_render, state) do
-    state = maybe_trigger_nav_flash(state)
-    state = Renderer.render_or_async(state)
-    {:noreply, %{state | render_timer: nil}}
+    {:noreply, RenderHandler.handle_debounced_render(state)}
   end
 
   # Debounced file-tree refresh timer fired — rescan the cached tree once for a burst of filesystem events.
@@ -664,53 +661,23 @@ defmodule MingaEditor do
   # Renderer.Server writeback after each async frame completes.
   # EditorState narrows the merge to renderer-owned fields only.
   def handle_info({:render_done, %{caches: _caches, layout: _layout} = wb}, state) do
-    {:noreply, EditorState.apply_renderer_writeback(state, wb)}
+    {:noreply, RenderHandler.handle_render_done(state, wb)}
   end
 
   # Nav-flash timer step — advance the fade or clear the flash.
   def handle_info(:nav_flash_step, state) do
-    case state.shell_state.nav_flash do
-      nil ->
-        {:noreply, state}
-
-      flash ->
-        case NavFlash.advance(flash) do
-          {:continue, updated, effects} ->
-            state = EditorState.set_nav_flash(state, apply_flash_effects(state, updated, effects))
-            {:noreply, Renderer.render_or_async(state)}
-
-          :done ->
-            {:noreply, Renderer.render_or_async(EditorState.cancel_nav_flash(state))}
-        end
-    end
+    {:noreply, RenderHandler.handle_nav_flash_step(state)}
   end
 
   # Yank-flash timer step — advance the fade or clear the flash.
   def handle_info(:yank_flash_step, state) do
-    case state.shell_state.yank_flash do
-      nil ->
-        {:noreply, state}
-
-      %YankFlash{buf: buf} = flash ->
-        case YankFlash.advance(flash) do
-          {:continue, updated, effects} ->
-            update_yank_flash_decoration(buf, updated, state)
-            updated = apply_flash_effects(state, updated, effects)
-            state = EditorState.set_yank_flash(state, updated)
-            {:noreply, Renderer.render_or_async(state)}
-
-          :done ->
-            clear_yank_highlight(buf)
-            {:noreply, Renderer.render_or_async(EditorState.cancel_yank_flash(state))}
-        end
-    end
+    {:noreply, RenderHandler.handle_yank_flash_step(state)}
   end
 
   # Warning popup debounce timer fired — open the *Warnings* popup if not
   # already visible.
   def handle_info(:warning_popup_timeout, state) do
-    state = EditorState.update_shell_state(state, &%{&1 | warning_popup_timer: nil})
-    {:noreply, open_warnings_popup_if_needed(state)}
+    {:noreply, RenderHandler.handle_warning_popup_timeout(state)}
   end
 
   # ── Agent events ──────────────────────────────────────────────────────────
@@ -1062,7 +1029,7 @@ defmodule MingaEditor do
   # races that cause CI flakiness. No debounce needed when there's no real
   # display to coalesce frames for.
   def schedule_render(%{backend: :headless} = state, _delay_ms) do
-    state = maybe_trigger_nav_flash(state)
+    state = RenderHandler.maybe_trigger_nav_flash(state)
     state = Renderer.render_or_async(state)
     %{state | render_timer: nil}
   end
@@ -1100,43 +1067,7 @@ defmodule MingaEditor do
     :ok
   end
 
-  # ── Nav-flash detection ───────────────────────────────────────────────────────
-
-  # Checks if the cursor jumped far enough to trigger a nav-flash.
-  # Updates `last_cursor_line` and, when the threshold is exceeded,
-  # starts (or restarts) the flash animation.
-  @spec maybe_trigger_nav_flash(state()) :: state()
-  defp maybe_trigger_nav_flash(%{workspace: %{buffers: %{active: nil}}} = state), do: state
-
-  defp maybe_trigger_nav_flash(state) do
-    buf = state.workspace.buffers.active
-    {current_line, _col} = Buffer.cursor(buf)
-
-    state = detect_jump(state, current_line)
-    %{state | last_cursor_line: current_line}
-  end
-
-  @spec detect_jump(state(), non_neg_integer()) :: state()
-  defp detect_jump(%{last_cursor_line: nil} = state, _current_line), do: state
-
-  defp detect_jump(state, current_line) do
-    delta = abs(current_line - state.last_cursor_line)
-    threshold = Config.get(:nav_flash_threshold)
-
-    if delta >= threshold and Config.get(:nav_flash) do
-      start_flash(state, current_line)
-    else
-      cancel_nav_flash(state)
-    end
-  end
-
-  @spec start_flash(state(), non_neg_integer()) :: state()
-  defp start_flash(state, line) do
-    flash = EditorState.nav_flash(state)
-    old_timer = if flash, do: flash.timer, else: nil
-    {new_flash, effects} = NavFlash.start(line, old_timer)
-    EditorState.set_nav_flash(state, apply_flash_effects(state, new_flash, effects))
-  end
+  # ── Nav/yank flash cancellation ────────────────────────────────────────────
 
   # Resets nav-flash tracking after a buffer switch so the cursor
   # position of the new buffer doesn't trigger a false-positive flash
@@ -1166,47 +1097,14 @@ defmodule MingaEditor do
   def cancel_yank_flash(%{shell_state: %{yank_flash: flash}} = state) do
     effects = YankFlash.cancel_effects(flash)
     MingaEditor.FlashEffects.execute(state, effects)
-    clear_yank_highlight(flash.buf)
+
+    try do
+      Buffer.remove_highlight_group(flash.buf, YankFlash.flash_group())
+    catch
+      :exit, _ -> :ok
+    end
+
     EditorState.cancel_yank_flash(state)
-  end
-
-  @spec update_yank_flash_decoration(pid(), YankFlash.t(), state()) :: :ok
-  defp update_yank_flash_decoration(buf, flash, state) do
-    flash_bg = state.theme.editor.yank_flash_bg || YankFlash.default_flash_bg()
-    target_bg = state.theme.editor.bg
-    color = YankFlash.color_for_step(flash, flash_bg, target_bg)
-
-    {hl_start, hl_end} =
-      YankFlash.highlight_bounds(buf, flash.start_pos, flash.end_pos, flash.range_type)
-
-    try do
-      Buffer.remove_highlight_group(buf, YankFlash.flash_group())
-
-      Buffer.add_highlight(buf, hl_start, hl_end,
-        style: Minga.Core.Face.new(bg: color),
-        group: YankFlash.flash_group(),
-        priority: 50
-      )
-    catch
-      :exit, _ -> :ok
-    end
-
-    :ok
-  end
-
-  @spec clear_yank_highlight(pid()) :: :ok
-  defp clear_yank_highlight(buf) do
-    try do
-      Buffer.remove_highlight_group(buf, YankFlash.flash_group())
-    catch
-      :exit, _ -> :ok
-    end
-
-    :ok
-  end
-
-  defp apply_flash_effects(state, flash, effects) do
-    MingaEditor.FlashEffects.apply(state, flash, effects)
   end
 
   # ── Key dispatch ─────────────────────────────────────────────────────────────
@@ -1617,23 +1515,6 @@ defmodule MingaEditor do
   def maybe_schedule_warning_popup(state) do
     ref = Process.send_after(self(), :warning_popup_timeout, @warning_popup_debounce_ms)
     EditorState.update_shell_state(state, &%{&1 | warning_popup_timer: ref})
-  end
-
-  @spec open_warnings_popup_if_needed(state()) :: state()
-  defp open_warnings_popup_if_needed(%{shell_state: %{bottom_panel: %{dismissed: true}}} = state),
-    do: state
-
-  defp open_warnings_popup_if_needed(
-         %{shell_state: %{bottom_panel: %{visible: true, active_tab: :messages}}} = state
-       ) do
-    # Panel already visible on Messages tab; don't change the user's filter.
-    schedule_render(state, 16)
-  end
-
-  defp open_warnings_popup_if_needed(state) do
-    # Auto-open the bottom panel with warnings filter preset
-    new_panel = BottomPanel.show(EditorState.bottom_panel(state), :messages, :warnings)
-    schedule_render(EditorState.set_bottom_panel(state, new_panel), 16)
   end
 
   # buffer_visible_in_window? moved to HighlightHandler
