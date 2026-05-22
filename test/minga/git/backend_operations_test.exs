@@ -182,6 +182,71 @@ defmodule Minga.Git.BackendOperationsTest do
     end
   end
 
+  describe "diff/2" do
+    @tag :tmp_dir
+    test "returns a commit diff for commit: hash", %{tmp_dir: dir} do
+      init_git_repo(dir)
+      file = Path.join(dir, "file.txt")
+      File.write!(file, "original\n")
+      git_cmd(dir, ["add", "file.txt"])
+      git_cmd(dir, ["commit", "-m", "init"])
+
+      File.write!(file, "changed\n")
+      git_cmd(dir, ["add", "file.txt"])
+      git_cmd(dir, ["commit", "-m", "update"])
+
+      {hash, 0} = git_cmd(dir, ["rev-parse", "HEAD"])
+      assert {:ok, diff} = Minga.Git.System.diff(dir, commit: String.trim(hash))
+
+      assert diff =~ "diff --git a/file.txt b/file.txt"
+      assert diff =~ "+changed"
+    end
+
+    @tag :tmp_dir
+    test "returns a commit diff when staged is explicitly false", %{tmp_dir: dir} do
+      init_git_repo(dir)
+      file = Path.join(dir, "file.txt")
+      File.write!(file, "original\n")
+      git_cmd(dir, ["add", "file.txt"])
+      git_cmd(dir, ["commit", "-m", "init"])
+
+      File.write!(file, "changed\n")
+      git_cmd(dir, ["add", "file.txt"])
+      git_cmd(dir, ["commit", "-m", "update"])
+
+      {hash, 0} = git_cmd(dir, ["rev-parse", "HEAD"])
+      commit = String.trim(hash)
+
+      assert {:ok, diff} = Minga.Git.System.diff(dir, commit: commit, staged: false)
+
+      assert diff =~ "diff --git a/file.txt b/file.txt"
+      assert diff =~ "+changed"
+    end
+
+    @tag :tmp_dir
+    test "returns a path-specific commit diff when commit and path are given", %{tmp_dir: dir} do
+      init_git_repo(dir)
+      file_a = Path.join(dir, "a.txt")
+      file_b = Path.join(dir, "b.txt")
+      File.write!(file_a, "a1\n")
+      File.write!(file_b, "b1\n")
+      git_cmd(dir, ["add", "."])
+      git_cmd(dir, ["commit", "-m", "init"])
+
+      File.write!(file_a, "a2\n")
+      File.write!(file_b, "b2\n")
+      git_cmd(dir, ["add", "."])
+      git_cmd(dir, ["commit", "-m", "update"])
+
+      {hash, 0} = git_cmd(dir, ["rev-parse", "HEAD"])
+      assert {:ok, diff} = Minga.Git.System.diff(dir, commit: String.trim(hash), path: "a.txt")
+
+      assert diff =~ "diff --git a/a.txt b/a.txt"
+      assert diff =~ "+a2"
+      refute diff =~ "b.txt"
+    end
+  end
+
   # ── Helpers ──────────────────────────────────────────────────────────────
 
   defp init_git_repo(dir) do

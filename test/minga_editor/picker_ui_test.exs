@@ -514,6 +514,20 @@ defmodule MingaEditor.PickerUITest do
                  false
              end)
     end
+
+    test "typing fix in git log stays in the fuzzy query" do
+      {state, _original_buf, _preview_buf} = preview_promotion_state()
+
+      picker = Picker.new([%Item{id: "abc123", label: "abc123"}], title: "Git Log")
+      picker_state = %PickerState{picker: picker, source: MingaEditor.UI.Picker.GitLogSource}
+      state = put_in(state.shell_state.modal, {:picker, PickerPayload.new(picker_state)})
+
+      state = Enum.reduce(~c"fix", state, fn cp, acc -> PickerUI.handle_key(acc, cp, 0) end)
+      {:picker, %{picker_ui: pui}} = state.shell_state.modal
+
+      assert pui.source == MingaEditor.UI.Picker.GitLogSource
+      assert pui.picker.query == "fix"
+    end
   end
 
   describe "render/1 centered layout" do

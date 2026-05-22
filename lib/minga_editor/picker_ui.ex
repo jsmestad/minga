@@ -47,17 +47,18 @@ defmodule MingaEditor.PickerUI do
   # When a prefix character is typed as the first query char in a switchable
   # source (file picker, recent files), the picker swaps to the mapped source
   # and strips the prefix from the fuzzy query.
-  @mode_prefixes %{
+  # Git log no longer uses a single-letter switch, so fuzzy search input like
+  # "fix" stays in the query instead of changing picker modes.
+  @file_mode_prefixes %{
     ">" => MingaEditor.UI.Picker.CommandSource,
     "#" => MingaEditor.UI.Picker.ProjectSearchSource,
     "@" => MingaEditor.UI.Picker.BufferSource
   }
 
-  # Sources that support mode switching via prefix.
-  @switchable_sources [
-    MingaEditor.UI.Picker.FileSource,
-    MingaEditor.UI.Picker.RecentFileSource
-  ]
+  @mode_prefixes %{
+    MingaEditor.UI.Picker.FileSource => @file_mode_prefixes,
+    MingaEditor.UI.Picker.RecentFileSource => @file_mode_prefixes
+  }
 
   defmodule RenderInput do
     @moduledoc """
@@ -441,7 +442,7 @@ defmodule MingaEditor.PickerUI do
   @spec select_item_and_close(EditorState.t(), Picker.item(), module()) ::
           EditorState.t() | {EditorState.t(), {:execute_command, atom()}}
   defp select_item_and_close(state, item, source) do
-    if Picker.Source.preview?(source) and previewed?(state) do
+    if Picker.Source.live_preview?(source) and previewed?(state) do
       promote_previewed_buffer(state)
     else
       run_select_and_close(state, item, source)
@@ -956,8 +957,10 @@ defmodule MingaEditor.PickerUI do
          char,
          query
        ) do
-    if query == "" and source in @switchable_sources and Map.has_key?(@mode_prefixes, char) do
-      target_source = Map.fetch!(@mode_prefixes, char)
+    source_prefixes = Map.get(@mode_prefixes, source, %{})
+
+    if query == "" and Map.has_key?(source_prefixes, char) do
+      target_source = Map.fetch!(source_prefixes, char)
       {:switched, switch_to_source(state, target_source, char)}
     else
       :no_switch
@@ -1047,7 +1050,7 @@ defmodule MingaEditor.PickerUI do
 
   defp previewed?(_state), do: false
 
-  # Preview: temporarily apply the source's on_select for the highlighted item.
+  # Live preview: temporarily apply the source's on_select for the highlighted item.
   # Sets buffer_add_context to :preview so add_buffer calls inside on_select update
   # the current tab in-place instead of creating a new tab.
   @spec maybe_preview_selection(state()) :: state()
@@ -1055,7 +1058,7 @@ defmodule MingaEditor.PickerUI do
          %{shell_state: %{modal: {:picker, %{picker_ui: %{picker: picker, source: source}}}}} =
            state
        ) do
-    if Picker.Source.preview?(source) do
+    if Picker.Source.live_preview?(source) do
       case Picker.selected_item(picker) do
         nil ->
           state

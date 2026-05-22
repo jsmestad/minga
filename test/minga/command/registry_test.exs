@@ -99,6 +99,8 @@ defmodule Minga.Command.RegistryTest do
           :git_revert_hunk,
           :git_preview_hunk,
           :git_blame_line,
+          :git_log,
+          :git_log_file,
 
           # Folding
           :fold_toggle,

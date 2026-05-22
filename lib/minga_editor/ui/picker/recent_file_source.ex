@@ -26,6 +26,10 @@ defmodule MingaEditor.UI.Picker.RecentFileSource do
   def preview?, do: true
 
   @impl true
+  @spec gui_preview?() :: boolean()
+  def gui_preview?, do: true
+
+  @impl true
   @spec candidates(Context.t()) :: [Item.t()]
   def candidates(_ctx) do
     files = Project.recent_files()

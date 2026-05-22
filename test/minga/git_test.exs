@@ -51,6 +51,47 @@ defmodule Minga.GitTest do
       assert {:ok, "+new line"} = Git.diff(dir)
     end
 
+    test "diff returns commit-specific text", %{root: dir} do
+      GitStub.set_diff(dir, [commit: "abc123"], "+commit line")
+      assert {:ok, "+commit line"} = Git.diff(dir, commit: "abc123")
+    end
+
+    test "diff returns commit-specific text when staged is explicitly false", %{root: dir} do
+      GitStub.set_diff(dir, [commit: "abc123", staged: false], "+commit line")
+      assert {:ok, "+commit line"} = Git.diff(dir, commit: "abc123", staged: false)
+    end
+
+    test "diff returns path-specific commit text", %{root: dir} do
+      GitStub.set_diff(dir, [commit: "abc123", path: "lib/app.ex"], "+file line")
+      assert {:ok, "+file line"} = Git.diff(dir, commit: "abc123", path: "lib/app.ex")
+    end
+
+    test "diff rejects commit and staged together", %{root: dir} do
+      assert {:error, reason} = Git.diff(dir, commit: "abc123", staged: true)
+      assert reason =~ "cannot be combined"
+    end
+
+    test "diff rejects unknown option keys", %{root: dir} do
+      assert {:error, reason} = Git.diff(dir, foo: "bar")
+      assert reason =~ "not supported"
+    end
+
+    test "diff rejects duplicate option keys", %{root: dir} do
+      assert {:error, reason} = Git.diff(dir, commit: "abc123", commit: "def456")
+      assert reason =~ "duplicate keys"
+    end
+
+    test "diff rejects non-binary path, commit, and non-boolean staged values", %{root: dir} do
+      assert {:error, path_reason} = Git.diff(dir, path: :path)
+      assert path_reason =~ ":path"
+
+      assert {:error, commit_reason} = Git.diff(dir, commit: :commit)
+      assert commit_reason =~ ":commit"
+
+      assert {:error, staged_reason} = Git.diff(dir, staged: :staged)
+      assert staged_reason =~ ":staged"
+    end
+
     test "log returns configured entries", %{root: dir} do
       entry = %Git.LogEntry{
         hash: "abc",

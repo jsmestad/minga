@@ -68,6 +68,11 @@ defmodule Minga.Git do
   @typedoc "A structured stash entry."
   @type stash_entry :: StashEntry.t()
 
+  @typedoc "Accepted diff options. Unknown keys, duplicate keys, and invalid values are rejected. `:commit` may be combined with `:staged`, but only when `:staged` is `false`."
+  @type diff_opt :: {:path, String.t()} | {:staged, boolean()} | {:commit, String.t()}
+
+  @type diff_opts :: [diff_opt()]
+
   # ── Delegated operations (go through the backend) ──────────────────────
 
   @doc """
@@ -123,10 +128,16 @@ defmodule Minga.Git do
   @doc """
   Returns the diff for a specific file or all changes.
 
-  Options: `:path` (file path), `:staged` (boolean, default false).
+  Options: `:path` (file path), `:staged` (boolean, default false), `:commit` (commit hash).
+  `:commit` may be combined with `:staged, false`; commit diffs can still be narrowed with `:path`.
   """
-  @spec diff(String.t(), keyword()) :: {:ok, String.t()} | {:error, String.t()}
-  def diff(git_root, opts \\ []), do: impl().diff(git_root, opts)
+  @spec diff(String.t(), diff_opts()) :: {:ok, String.t()} | {:error, String.t()}
+  def diff(git_root, opts \\ []) do
+    case Minga.Git.DiffOptions.validate(opts) do
+      :ok -> impl().diff(git_root, opts)
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
   @doc """
   Returns recent commits as structured entries.

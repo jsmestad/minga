@@ -22,6 +22,8 @@ defmodule MingaEditor.Commands.GitRemoteTest do
       assert :git_stash_pop in names
       assert :git_stash_list in names
       assert :git_stash_drop in names
+      assert :git_log in names
+      assert :git_log_file in names
     end
   end
 

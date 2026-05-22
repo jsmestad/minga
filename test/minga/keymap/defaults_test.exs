@@ -96,6 +96,18 @@ defmodule Minga.Keymap.DefaultsTest do
 
     # ── Git bindings ──────────────────────────────────────────────────────────
 
+    test "SPC g l → :git_log" do
+      trie = Defaults.leader_trie()
+      {:prefix, g_node} = Bindings.lookup(trie, {?g, 0})
+      assert {:command, :git_log} = Bindings.lookup(g_node, {?l, 0})
+    end
+
+    test "SPC g f → :git_changed_files" do
+      trie = Defaults.leader_trie()
+      {:prefix, g_node} = Bindings.lookup(trie, {?g, 0})
+      assert {:command, :git_changed_files} = Bindings.lookup(g_node, {?f, 0})
+    end
+
     test "SPC g x c/i/b → merge conflict accept commands" do
       trie = Defaults.leader_trie()
       {:prefix, g_node} = Bindings.lookup(trie, {?g, 0})

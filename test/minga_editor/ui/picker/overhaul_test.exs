@@ -103,6 +103,16 @@ defmodule MingaEditor.UI.Picker.OverhaulTest do
       assert item.match_positions != []
     end
 
+    test "filtering matches hidden search text" do
+      items = [
+        %Item{id: :a, label: "visible", description: "", search_text: "hidden hash abc123"}
+      ]
+
+      picker = Picker.new(items, title: "Test") |> Picker.filter("abc123")
+
+      assert Picker.count(picker) == 1
+    end
+
     test "empty query clears match_positions" do
       picker =
         Picker.new(@items, title: "Test")
@@ -143,6 +153,11 @@ defmodule MingaEditor.UI.Picker.OverhaulTest do
     test "match_positions defaults to empty list" do
       item = %Item{id: :test, label: "test"}
       assert item.match_positions == []
+    end
+
+    test "search_text defaults to an empty string" do
+      item = %Item{id: :test, label: "test"}
+      assert item.search_text == ""
     end
   end
 end

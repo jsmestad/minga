@@ -11,7 +11,10 @@ defmodule MingaEditor.UI.Picker.Source do
   - `candidates/1` — returns the list of picker items given some context
   - `on_select/2` — called when the user selects an item; returns new editor state
   - `on_cancel/1` — called when the user cancels; returns new editor state
-  - `preview?/0` — whether navigating the picker should preview the selection (default: false)
+  - `preview?/0` — legacy live-navigation preview flag (default: false)
+  - `live_preview?/0` — whether navigating the picker should temporarily run `on_select/2` for the highlighted item (default: `preview?/0` for backwards compatibility)
+  - `gui_preview?/0` — whether the GUI preview pane should be shown for this source (default: false)
+  - `preview/2` — optional source-provided GUI preview content for the selected item, called with the render context
   - `title/0` — the picker title shown in the separator bar
 
   ## Example
@@ -33,6 +36,7 @@ defmodule MingaEditor.UI.Picker.Source do
       end
   """
 
+  alias MingaEditor.Frontend.Emit.Context, as: EmitContext
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.Picker
   alias MingaEditor.UI.Picker.Context
@@ -56,8 +60,23 @@ defmodule MingaEditor.UI.Picker.Source do
   @doc "Called when the user cancels the picker. Returns the new editor state."
   @callback on_cancel(state :: term()) :: term()
 
-  @doc "Whether navigating the picker should live-preview the selection."
+  @doc "Legacy live-navigation preview flag."
   @callback preview?() :: boolean()
+
+  @doc "Whether navigating the picker should live-preview the selection."
+  @callback live_preview?() :: boolean()
+
+  @doc "Whether the GUI preview pane should be shown for this source."
+  @callback gui_preview?() :: boolean()
+
+  @typedoc "A styled preview segment: display text, 24-bit foreground color, bold flag."
+  @type preview_segment :: {String.t(), non_neg_integer(), boolean()}
+
+  @typedoc "Render context passed to `preview/2` from the GUI emit pipeline."
+  @type preview_context :: EmitContext.t()
+
+  @doc "Returns source-provided GUI preview content for an item."
+  @callback preview(Picker.item(), context :: preview_context()) :: [[preview_segment()]] | nil
 
   @typedoc "An alternative action: display name and action identifier."
   @type action_entry :: {name :: String.t(), action_id :: atom()}
@@ -96,7 +115,16 @@ defmodule MingaEditor.UI.Picker.Source do
   """
   @callback keep_open_on_select?() :: boolean()
 
-  @optional_callbacks [preview?: 0, actions: 1, on_action: 3, layout: 0, keep_open_on_select?: 0]
+  @optional_callbacks [
+    preview?: 0,
+    live_preview?: 0,
+    gui_preview?: 0,
+    preview: 2,
+    actions: 1,
+    on_action: 3,
+    layout: 0,
+    keep_open_on_select?: 0
+  ]
 
   @doc """
   Default `on_cancel` implementation: restores the buffer that was active
@@ -115,13 +143,45 @@ defmodule MingaEditor.UI.Picker.Source do
   end
 
   @doc """
-  Returns whether a source module supports preview.
+  Returns whether a source module should live-preview the highlighted item.
   Falls back to `false` if the callback is not implemented.
   """
   @spec preview?(module()) :: boolean()
   def preview?(module) do
     if exported?(module, :preview?, 0) do
       module.preview?()
+    else
+      false
+    end
+  end
+
+  @doc """
+  Returns source-provided preview content, or nil when no preview callback exists.
+  """
+  @spec preview(module(), Picker.item(), preview_context()) :: [[preview_segment()]] | nil
+  def preview(module, item, context) do
+    if exported?(module, :preview, 2) do
+      module.preview(item, context)
+    else
+      nil
+    end
+  end
+
+  @doc "Returns whether navigating the picker should live-preview the selection."
+  @spec live_preview?(module()) :: boolean()
+  def live_preview?(module) do
+    if exported?(module, :live_preview?, 0) do
+      module.live_preview?()
+    else
+      preview?(module)
+    end
+  end
+
+  @doc "Whether the GUI preview pane should be shown for the source."
+  @spec gui_preview?(module()) :: boolean()
+  def gui_preview?(module) do
+    if exported?(module, :gui_preview?, 0) do
+      module.gui_preview?()
     else
       false
     end

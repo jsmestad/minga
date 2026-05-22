@@ -127,22 +127,42 @@ defmodule Minga.Git.System do
   end
 
   @impl true
-  @spec diff(String.t(), keyword()) :: {:ok, String.t()} | {:error, String.t()}
+  @spec diff(String.t(), Minga.Git.diff_opts()) :: {:ok, String.t()} | {:error, String.t()}
   def diff(git_root, opts \\ []) when is_binary(git_root) do
+    with :ok <- Minga.Git.DiffOptions.validate(opts) do
+      args = diff_args(opts)
+
+      case System.cmd("git", args, cd: git_root, stderr_to_stdout: true) do
+        {output, 0} -> {:ok, output}
+        {output, _} -> {:error, "git diff failed: #{String.trim(output)}"}
+      end
+    end
+  rescue
+    e in [ErlangError, ArgumentError] -> {:error, "git diff error: #{Exception.message(e)}"}
+  end
+
+  @spec diff_args(keyword()) :: [String.t()]
+  defp diff_args(opts) do
+    case Keyword.get(opts, :commit) do
+      nil -> working_tree_diff_args(opts)
+      commit -> commit_diff_args(commit, Keyword.get(opts, :path))
+    end
+  end
+
+  @spec working_tree_diff_args(keyword()) :: [String.t()]
+  defp working_tree_diff_args(opts) do
     path = Keyword.get(opts, :path)
     staged = Keyword.get(opts, :staged, false)
 
     args = ["diff"]
     args = if staged, do: args ++ ["--cached"], else: args
-    args = if path, do: args ++ ["--", path], else: args
-
-    case System.cmd("git", args, cd: git_root, stderr_to_stdout: true) do
-      {output, 0} -> {:ok, output}
-      {output, _} -> {:error, "git diff failed: #{String.trim(output)}"}
-    end
-  rescue
-    e in [ErlangError, ArgumentError] -> {:error, "git diff error: #{Exception.message(e)}"}
+    if path, do: args ++ ["--", path], else: args
   end
+
+  @spec commit_diff_args(String.t(), String.t() | nil) :: [String.t()]
+  defp commit_diff_args(commit, nil), do: ["show", commit, "--format=", "--patch"]
+
+  defp commit_diff_args(commit, path), do: ["show", commit, "--format=", "--patch", "--", path]
 
   @impl true
   @spec log(String.t(), keyword()) :: {:ok, [Minga.Git.log_entry()]} | {:error, String.t()}
@@ -150,7 +170,7 @@ defmodule Minga.Git.System do
     count = Keyword.get(opts, :count, 10)
     path = Keyword.get(opts, :path)
 
-    format = "%H%x1f%h%x1f%an%x1f%ai%x1f%s"
+    format = "%H%x1f%h%x1f%an%x1f%cr%x1f%s"
     args = ["log", "--format=#{format}", "-n", "#{count}"]
     args = if path, do: args ++ ["--", path], else: args
 

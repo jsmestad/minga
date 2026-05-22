@@ -312,8 +312,8 @@ defmodule MingaEditor.UI.Picker do
 
   @spec score_item_with_positions(Item.t(), [String.t()], String.t()) ::
           {Item.t(), non_neg_integer()}
-  defp score_item_with_positions(%Item{label: label, description: desc} = item, segments, query) do
-    score = score_item(label, desc, segments)
+  defp score_item_with_positions(%Item{label: label} = item, segments, query) do
+    score = score_item(item, segments)
     positions = if score > 0, do: match_positions(label, query), else: []
     {%{item | match_positions: positions}, score}
   end
@@ -326,20 +326,20 @@ defmodule MingaEditor.UI.Picker do
     |> String.split(~r/\s+/, trim: true)
   end
 
-  @spec score_item(String.t(), String.t(), [String.t()]) :: non_neg_integer()
-  defp score_item(label, desc, segments) do
+  @spec score_item(Item.t(), [String.t()]) :: non_neg_integer()
+  defp score_item(%Item{label: label} = item, segments) do
     scoring_label = label |> String.downcase() |> strip_icon_prefix()
-    down_desc = String.downcase(desc)
+    searchable = searchable_text(item)
 
     segment_scores =
       Enum.map(segments, fn seg ->
         label_score = score_segment(scoring_label, seg)
-        desc_score = score_segment(down_desc, seg)
+        search_score = score_segment(searchable, seg)
 
         if label_score > 0 do
           label_score + 200
         else
-          desc_score
+          search_score
         end
       end)
 
@@ -350,6 +350,14 @@ defmodule MingaEditor.UI.Picker do
       length_bonus = max(0, 50 - String.length(scoring_label))
       base + length_bonus
     end
+  end
+
+  @spec searchable_text(Item.t()) :: String.t()
+  defp searchable_text(%Item{} = item) do
+    [item.description, item.annotation, item.search_text]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join(" ")
+    |> String.downcase()
   end
 
   @spec strip_icon_prefix(String.t()) :: String.t()
