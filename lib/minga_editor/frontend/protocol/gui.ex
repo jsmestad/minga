@@ -110,6 +110,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   alias MingaEditor.State.TabBar
   alias Minga.Language
   alias MingaEditor.UI.Devicon
+  alias MingaEditor.UI.Notification
+  alias MingaEditor.UI.NotificationCenter
   alias MingaEditor.UI.Theme.Slots
   alias MingaEditor.Session.ChromeState
   alias MingaEditor.Session.ChromeState.TabSummary
@@ -149,6 +151,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @op_gui_change_summary Opcodes.gui_change_summary()
   @op_gui_hover_action Opcodes.gui_hover_action()
   @op_gui_config_state Opcodes.gui_config_state()
+  @op_gui_notifications Opcodes.gui_notifications()
 
   @gui_action_select_tab Opcodes.gui_action_select_tab()
   @gui_action_close_tab Opcodes.gui_action_close_tab()
@@ -218,6 +221,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_git_open_diff Opcodes.gui_action_git_open_diff()
   @gui_action_config_update Opcodes.gui_action_config_update()
   @gui_action_config_query Opcodes.gui_action_config_query()
+  @gui_action_notification_dismiss Opcodes.gui_action_notification_dismiss()
+  @gui_action_notification_action Opcodes.gui_action_notification_action()
 
   @max_u8 255
   @max_u16 65_535
@@ -364,6 +369,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | :git_pull_and_retry
           | {:config_update, Options.option_name(), term()}
           | :config_query
+          | {:notification_dismiss, notification_id :: String.t()}
+          | {:notification_action, notification_id :: String.t(), action_id :: String.t()}
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -3152,6 +3159,20 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     end
   end
 
+  def decode_gui_action(
+        @gui_action_notification_dismiss,
+        <<id_len::16, id::binary-size(id_len)>>
+      ) do
+    {:ok, {:notification_dismiss, id}}
+  end
+
+  def decode_gui_action(
+        @gui_action_notification_action,
+        <<id_len::16, id::binary-size(id_len), action_len::16, action::binary-size(action_len)>>
+      ) do
+    {:ok, {:notification_action, id, action}}
+  end
+
   def decode_gui_action(_, _), do: :error
 
   @spec decode_existing_option_name(String.t()) :: {:ok, Options.option_name()} | :error
@@ -3629,6 +3650,88 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       | line_data
     ])
   end
+
+  # ── Notifications ──
+
+  @doc """
+  Encodes the full GUI notification center snapshot.
+
+  Wire format (opcode 0x99):
+    opcode(1) + payload_len(2) + version(1) + count(2) + notifications...
+
+  Each notification:
+    id + level(1) + flags(1) + created_at(8) + updated_at(8) + auto_dismiss_ms(4) + title + body + source + action_count(1) + actions...
+
+  Strings are u16 length-prefixed. `auto_dismiss_ms` uses 0xFFFFFFFF for nil.
+  """
+  @max_notification_title_bytes 512
+  @max_notification_body_bytes 8_192
+  @max_notification_source_bytes 512
+  @max_notification_action_label_bytes 512
+
+  @spec encode_gui_notifications(NotificationCenter.t()) :: binary()
+  def encode_gui_notifications(%NotificationCenter{} = center) do
+    {notification_bins, count} = bounded_notification_bins(center.items)
+    payload = IO.iodata_to_binary([<<1::8, count::16>>, notification_bins])
+    <<@op_gui_notifications, byte_size(payload)::16, payload::binary>>
+  end
+
+  @spec bounded_notification_bins([Notification.t()]) :: {[binary()], non_neg_integer()}
+  defp bounded_notification_bins(notifications) do
+    notifications
+    |> Enum.take(@max_u16)
+    |> Enum.reduce_while({[], 0, 3}, fn notification, {bins, count, size} ->
+      bin = encode_notification(notification)
+      next_size = size + byte_size(bin)
+
+      if next_size <= @max_u16 do
+        {:cont, {[bin | bins], count + 1, next_size}}
+      else
+        {:halt, {bins, count, size}}
+      end
+    end)
+    |> then(fn {bins, count, _size} -> {Enum.reverse(bins), count} end)
+  end
+
+  @spec encode_notification(Notification.t()) :: binary()
+  defp encode_notification(%Notification{} = notification) do
+    flags = if notification.dismissable, do: 0x01, else: 0x00
+    auto_dismiss_ms = notification.auto_dismiss_ms || @max_u32
+    updated_at = notification.updated_at || notification.created_at
+    actions = Enum.take(notification.actions, @max_u8)
+
+    IO.iodata_to_binary([
+      encode_notification_string16(notification.id, @max_notification_title_bytes),
+      <<notification_level_byte(notification.level)::8, flags::8, notification.created_at::64,
+        updated_at::64, auto_dismiss_ms::32>>,
+      encode_notification_string16(notification.title, @max_notification_title_bytes),
+      encode_notification_string16(notification.body || "", @max_notification_body_bytes),
+      encode_notification_string16(notification.source || "", @max_notification_source_bytes),
+      <<length(actions)::8>>,
+      Enum.map(actions, &encode_notification_action/1)
+    ])
+  end
+
+  @spec encode_notification_action(Notification.Action.t()) :: binary()
+  defp encode_notification_action(%Notification.Action{} = action) do
+    IO.iodata_to_binary([
+      encode_notification_string16(action.id, @max_notification_title_bytes),
+      encode_notification_string16(action.label, @max_notification_action_label_bytes)
+    ])
+  end
+
+  @spec encode_notification_string16(String.t(), non_neg_integer()) :: binary()
+  defp encode_notification_string16(text, max_bytes) when is_binary(text) do
+    bytes = utf8_prefix_bytes(text, min(max_bytes, @max_u16))
+    <<byte_size(bytes)::16, bytes::binary>>
+  end
+
+  @spec notification_level_byte(Notification.level()) :: non_neg_integer()
+  defp notification_level_byte(:info), do: 0
+  defp notification_level_byte(:warning), do: 1
+  defp notification_level_byte(:error), do: 2
+  defp notification_level_byte(:success), do: 3
+  defp notification_level_byte(:progress), do: 4
 
   # ── Split Separators ──
 

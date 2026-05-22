@@ -116,6 +116,27 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     end
   end
 
+  defp dispatch_action(state, {:notification_dismiss, id}) do
+    EditorState.dismiss_notification(state, id)
+  end
+
+  defp dispatch_action(state, {:notification_action, notification_id, action_id}) do
+    case EditorState.notification_action(state, notification_id, action_id) do
+      %{dispatch: {:command, command}} ->
+        state
+        |> EditorState.dismiss_notification(notification_id)
+        |> Commands.execute(command)
+        |> normalize_command_result()
+
+      %{dispatch: {:event, event, payload}} ->
+        Minga.Events.broadcast(event, payload, EditorState.events_registry(state))
+        state
+
+      _ ->
+        state
+    end
+  end
+
   defp dispatch_action(%{shell: MingaEditor.Shell.Board} = state, action) do
     {shell_state, workspace} =
       MingaEditor.Shell.Board.handle_gui_action(state.shell_state, state.workspace, action)
@@ -387,10 +408,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     # Discard any follow-up action (dot_repeat, replay_macro): GUI chrome
     # buttons are not vim editing operations and don't participate in the
     # action pipeline.
-    case Commands.execute(state, command) do
-      {new_state, _action} -> new_state
-      new_state -> new_state
-    end
+    state
+    |> Commands.execute(command)
+    |> normalize_command_result()
   rescue
     ArgumentError ->
       Minga.Log.warning(:editor, "[execute_command] unrecognized command: #{name_str}")
@@ -1015,4 +1035,8 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       SessionState.update_editing(ws, &VimState.set_mode_state(&1, new_ms))
     end)
   end
+
+  @spec normalize_command_result(state() | {state(), term()}) :: state()
+  defp normalize_command_result({new_state, _action}), do: new_state
+  defp normalize_command_result(new_state), do: new_state
 end

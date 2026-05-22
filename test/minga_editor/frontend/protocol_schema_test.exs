@@ -143,7 +143,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       gui_change_summary: 0x89,
       gui_hover_action: 0x96,
       gui_config_state: 0x97,
-      gui_workspaces: 0x98
+      gui_workspaces: 0x98,
+      gui_notifications: 0x99
     )
   end
 
@@ -216,7 +217,9 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       fold_toggle_at_line: 0x41,
       git_open_diff: 0x42,
       config_update: 0x43,
-      config_query: 0x44
+      config_query: 0x44,
+      notification_dismiss: 0x45,
+      notification_action: 0x46
     )
   end
 

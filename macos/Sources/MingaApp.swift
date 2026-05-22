@@ -284,6 +284,20 @@ struct ContentView: View {
         appState.gui.statusBarState.gitBranch
     }
 
+    private var notificationCenterBottomInset: CGFloat {
+        let statusBarHeight: CGFloat = 24
+        let panelHeight: CGFloat
+
+        if appState.gui.bottomPanelState.visible {
+            let maxPanelHeight = rightPaneHeight * 0.6
+            panelHeight = min(max(appState.gui.bottomPanelState.userHeight, 100), maxPanelHeight)
+        } else {
+            panelHeight = 0
+        }
+
+        return statusBarHeight + panelHeight + 18
+    }
+
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
@@ -750,6 +764,14 @@ struct ContentView: View {
                 cellHeight: ch
             )
         }
+
+        // Notification stack (bottom-right, above regular workspace content).
+        NotificationCenterView(
+            state: appState.gui.notificationCenterState,
+            theme: appState.gui.themeColors,
+            encoder: appState.encoder,
+            bottomInset: notificationCenterBottomInset
+        )
 
         // Startup overlay: covers the empty Metal framebuffer with a
         // spinner while the BEAM boots. Fades out on first batch_end.

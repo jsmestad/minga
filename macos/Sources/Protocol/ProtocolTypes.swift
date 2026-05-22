@@ -19,8 +19,64 @@ enum SettingValue: Sendable, Equatable {
     case float(Double)
 }
 
+/// Semantic severity for one editor notification.
+enum NotificationLevel: Sendable, Equatable {
+    case info
+    case warning
+    case error
+    case success
+    case progress
+    case unknown(UInt8)
+
+    init(rawValue: UInt8) {
+        switch rawValue {
+        case 0: self = .info
+        case 1: self = .warning
+        case 2: self = .error
+        case 3: self = .success
+        case 4: self = .progress
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    var name: String {
+        switch self {
+        case .info: return "info"
+        case .warning: return "warning"
+        case .error: return "error"
+        case .success: return "success"
+        case .progress: return "progress"
+        case .unknown(let rawValue): return "unknown \(rawValue)"
+        }
+    }
+}
+
 /// Namespace for all binary protocol data types decoded from the BEAM.
 enum Wire {
+
+    // MARK: - Notifications
+
+    /// A BEAM-owned editor notification decoded from gui_notifications.
+    struct EditorNotification: Sendable {
+        let id: String
+        let level: NotificationLevel
+        let flags: UInt8
+        let createdAt: UInt64
+        let updatedAt: UInt64
+        let autoDismissMs: UInt32?
+        let title: String
+        let body: String
+        let source: String
+        let actions: [NotificationAction]
+
+        var dismissable: Bool { flags & 0x01 != 0 }
+    }
+
+    /// An inline action decoded from a notification card.
+    struct NotificationAction: Sendable {
+        let id: String
+        let label: String
+    }
 
     // MARK: - Settings
 

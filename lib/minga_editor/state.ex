@@ -60,6 +60,8 @@ defmodule MingaEditor.State do
   alias Minga.Project.FileRef
   alias Minga.Project.FileTree
 
+  alias MingaEditor.UI.Notification
+  alias MingaEditor.UI.NotificationCenter
   alias MingaEditor.UI.Panel.MessageStore
   alias MingaEditor.UI.Theme
   alias MingaEditor.Session.State, as: SessionState
@@ -102,6 +104,7 @@ defmodule MingaEditor.State do
             theme: MingaEditor.UI.Theme.get!(:doom_one),
             render_timer: nil,
             message_store: %MessageStore{},
+            notifications: NotificationCenter.new(),
             git_remote_op: nil,
             lsp: %LSPState{},
             parser_status: :available,
@@ -142,6 +145,7 @@ defmodule MingaEditor.State do
           theme: Theme.t(),
           render_timer: reference() | nil,
           message_store: MessageStore.t(),
+          notifications: NotificationCenter.t(),
           git_remote_op: git_remote_op(),
           lsp: LSPState.t(),
           parser_status: MingaEditor.Shell.Traditional.Modeline.parser_status(),
@@ -167,6 +171,30 @@ defmodule MingaEditor.State do
   @spec set_renderer(t(), pid() | nil) :: t()
   def set_renderer(%__MODULE__{} = state, pid) when is_pid(pid) or is_nil(pid),
     do: %{state | renderer: pid}
+
+  @doc "Adds or updates a GUI notification."
+  @spec upsert_notification(t(), Notification.t()) :: t()
+  def upsert_notification(%__MODULE__{} = state, %Notification{} = notification) do
+    %{state | notifications: NotificationCenter.upsert(state.notifications, notification)}
+  end
+
+  @doc "Dismisses a GUI notification by id."
+  @spec dismiss_notification(t(), String.t()) :: t()
+  def dismiss_notification(%__MODULE__{} = state, id) when is_binary(id) do
+    %{state | notifications: NotificationCenter.dismiss(state.notifications, id)}
+  end
+
+  @doc "Dismisses a GUI notification only when the auto-dismiss ref still matches."
+  @spec dismiss_notification(t(), String.t(), reference()) :: t()
+  def dismiss_notification(%__MODULE__{} = state, id, dismiss_ref) when is_binary(id) do
+    %{state | notifications: NotificationCenter.dismiss(state.notifications, id, dismiss_ref)}
+  end
+
+  @doc "Looks up an inline notification action."
+  @spec notification_action(t(), String.t(), String.t()) :: Notification.Action.t() | nil
+  def notification_action(%__MODULE__{} = state, notification_id, action_id) do
+    NotificationCenter.action(state.notifications, notification_id, action_id)
+  end
 
   @doc "Returns the keymap server used for scope and binding lookups."
   @spec keymap_server(t()) :: keymap_server()

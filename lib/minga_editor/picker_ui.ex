@@ -669,11 +669,13 @@ defmodule MingaEditor.PickerUI do
          theme_picker: pc,
          viewport: viewport
        }) do
-    {visible, selected_offset} = Picker.visible_items(picker)
+    item_capacity = centered_item_capacity(viewport.rows)
+    {visible, selected_offset} = Picker.visible_items(picker, item_capacity)
 
     # Compute float window dimensions
     float_width = {:percent, 60}
-    float_height = {:percent, 70}
+    float_height_rows = centered_float_height(visible, viewport)
+    float_height = {:rows, float_height_rows}
 
     popup_theme = %{
       fg: pc.text_fg,
@@ -736,7 +738,7 @@ defmodule MingaEditor.PickerUI do
     # Compute absolute cursor position inside the floating window
     {vp_rows, vp_cols} = {viewport.rows, viewport.cols}
     box_w = resolve_percent(60, vp_cols)
-    box_h = resolve_percent(70, vp_rows)
+    box_h = min(float_height_rows, vp_rows)
     box_row = max(div(vp_rows - box_h, 2), 0)
     box_col = max(div(vp_cols - box_w, 2), 0)
     # Interior starts at box + 1 (border inset)
@@ -844,6 +846,17 @@ defmodule MingaEditor.PickerUI do
     else
       do_highlight_matches(row, lt, llt, query, col + Unicode.display_width(lc), fg, bg, acc)
     end
+  end
+
+  @spec centered_item_capacity(pos_integer()) :: pos_integer()
+  defp centered_item_capacity(viewport_rows) do
+    max(div(viewport_rows * 7, 10), 5) - 3
+  end
+
+  @spec centered_float_height([Picker.item()], MingaEditor.Viewport.t()) :: pos_integer()
+  defp centered_float_height(visible, viewport) do
+    max_height = max(div(viewport.rows * 7, 10), 5)
+    min(length(visible) + 3, max_height)
   end
 
   @spec resolve_percent(pos_integer(), pos_integer()) :: pos_integer()

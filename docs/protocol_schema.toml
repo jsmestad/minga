@@ -551,6 +551,12 @@ name = "gui_workspaces"
 value = 0x98
 direction = "beam_to_frontend"
 
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_notifications"
+value = 0x99
+direction = "beam_to_frontend"
+
 # Sub-opcodes inside gui_action (0x07).
 [[gui_actions]]
 name = "select_tab"
@@ -825,3 +831,11 @@ value = 0x43
 [[gui_actions]]
 name = "config_query"
 value = 0x44
+
+[[gui_actions]]
+name = "notification_dismiss"
+value = 0x45
+
+[[gui_actions]]
+name = "notification_action"
+value = 0x46

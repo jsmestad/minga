@@ -167,11 +167,17 @@ defmodule MingaEditor.UI.Picker do
   Returns `{visible_items, selected_offset}`.
   """
   @spec visible_items(t()) :: {[item()], non_neg_integer()}
-  def visible_items(%__MODULE__{filtered: [], max_visible: _max}) do
+  def visible_items(%__MODULE__{max_visible: max} = picker), do: visible_items(picker, max)
+
+  @doc "Returns the visible slice using an explicit maximum item count."
+  @spec visible_items(t(), non_neg_integer()) :: {[item()], non_neg_integer()}
+  def visible_items(%__MODULE__{}, 0), do: {[], 0}
+
+  def visible_items(%__MODULE__{filtered: []}, _max) do
     {[], 0}
   end
 
-  def visible_items(%__MODULE__{filtered: filtered, selected: sel, max_visible: max}) do
+  def visible_items(%__MODULE__{filtered: filtered, selected: sel}, max) do
     total = length(filtered)
 
     if total <= max do

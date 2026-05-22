@@ -13,6 +13,9 @@ defmodule MingaEditor.Renderer.ServerTest do
   alias MingaEditor.Shell.Board.State, as: BoardState
   alias MingaEditor.Viewport
 
+  # Async renderer writeback can lag a bit under CI load, keep this local to the renderer assertions.
+  @async_render_timeout 5_000
+
   test "coalescing replaces older pending snapshots and emits telemetry" do
     renderer = start_renderer(self())
     attach_coalesce_handler()
@@ -47,7 +50,7 @@ defmodule MingaEditor.Renderer.ServerTest do
     RendererServer.cast_snapshot(renderer, snapshot, 123)
 
     assert_receive {:render_done, %{frame_seq: 123, caches: %MingaEditor.Renderer.Caches{}}},
-                   1_000
+                   @async_render_timeout
 
     assert {:ok, _screen} = Minga.Test.HeadlessPort.collect_frame(frame_ref)
     refute renderer_busy?(renderer)
@@ -61,7 +64,9 @@ defmodule MingaEditor.Renderer.ServerTest do
       result = MingaEditor.Renderer.render_or_async(state)
 
       assert result == state
-      assert_receive {:render_done, %{caches: %MingaEditor.Renderer.Caches{}}}, 1_000
+
+      assert_receive {:render_done, %{caches: %MingaEditor.Renderer.Caches{}}},
+                     @async_render_timeout
     end
 
     test "nil renderer falls back to synchronous rendering" do

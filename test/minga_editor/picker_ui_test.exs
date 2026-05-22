@@ -118,6 +118,32 @@ defmodule MingaEditor.PickerUITest do
       assert cursor_row == 23
     end
 
+    test "bottom picker keeps the selected item visible when viewport-capped" do
+      items =
+        for n <- 1..40 do
+          %Item{id: Integer.to_string(n), label: "file-#{n}"}
+        end
+
+      picker =
+        items
+        |> Picker.new(title: "Files", max_visible: 40)
+        |> then(fn picker ->
+          Enum.reduce(1..39, picker, fn _n, acc -> Picker.move_down(acc) end)
+        end)
+
+      input = %RenderInput{
+        picker_state: %PickerState{picker: picker, source: nil},
+        theme_picker: theme_picker(),
+        viewport: Viewport.new(24, 80)
+      }
+
+      {draws, _cursor} = PickerUI.render(input)
+      texts = Enum.map(draws, fn {_row, _col, text, _style} -> text end)
+
+      assert Enum.any?(texts, &String.contains?(&1, "file-40"))
+      refute Enum.any?(texts, &String.contains?(&1, "file-1 "))
+    end
+
     test "draw tuples have valid 4-element structure" do
       items = [
         %Item{id: "1", label: "alpha.ex", description: "lib/"},
@@ -325,7 +351,7 @@ defmodule MingaEditor.PickerUITest do
       assert is_integer(cursor_col)
     end
 
-    test "all draws are within the floating window rect" do
+    test "all draws are within the auto-sized floating window rect" do
       items = [
         %Item{id: "1", label: "model-a", description: "desc"},
         %Item{id: "2", label: "model-b", description: "desc"}
@@ -343,9 +369,9 @@ defmodule MingaEditor.PickerUITest do
 
       {draws, _cursor} = PickerUI.render(input)
 
-      # FloatingWindow at 60% x 70% centered in 80x24
+      # FloatingWindow stays at 60% width and sizes height to visible items + prompt + border.
       box_w = div(80 * 60, 100)
-      box_h = div(24 * 70, 100)
+      box_h = length(items) + 3
       box_row = div(24 - box_h, 2)
       box_col = div(80 - box_w, 2)
 
@@ -356,6 +382,65 @@ defmodule MingaEditor.PickerUITest do
         assert col >= box_col and col < box_col + box_w,
                "draw col #{col} outside box (#{box_col}..#{box_col + box_w - 1})"
       end)
+    end
+
+    test "centered picker with five items renders as a compact popup" do
+      items =
+        for n <- 1..5 do
+          %Item{id: Integer.to_string(n), label: "model-#{n}"}
+        end
+
+      picker = Picker.new(items, title: "Models", max_visible: 10)
+
+      input = %RenderInput{
+        picker_state: %PickerState{picker: picker, source: nil, layout: :centered},
+        theme_picker: theme_picker(),
+        viewport: Viewport.new(24, 80)
+      }
+
+      {draws, {cursor_row, _cursor_col}} = PickerUI.render(input)
+      rows = Enum.map(draws, fn {row, _col, _text, _style} -> row end)
+
+      box_h = length(items) + 3
+      box_row = div(24 - box_h, 2)
+
+      assert Enum.min(rows) == box_row
+      assert Enum.max(rows) == box_row + box_h - 1
+      assert cursor_row == box_row + box_h - 2
+    end
+
+    test "large centered picker caps height and keeps the cursor inside" do
+      items =
+        for n <- 1..20 do
+          %Item{id: Integer.to_string(n), label: "model-#{n}"}
+        end
+
+      picker =
+        items
+        |> Picker.new(title: "Models", max_visible: 20)
+        |> then(fn picker ->
+          Enum.reduce(1..19, picker, fn _n, acc -> Picker.move_down(acc) end)
+        end)
+
+      input = %RenderInput{
+        picker_state: %PickerState{picker: picker, source: nil, layout: :centered},
+        theme_picker: theme_picker(),
+        viewport: Viewport.new(24, 80)
+      }
+
+      {draws, {cursor_row, _cursor_col}} = PickerUI.render(input)
+      rows = Enum.map(draws, fn {row, _col, _text, _style} -> row end)
+      texts = Enum.map(draws, fn {_row, _col, text, _style} -> text end)
+
+      max_height = max(div(24 * 7, 10), 5)
+      box_h = min(length(items) + 3, max_height)
+      box_row = div(24 - box_h, 2)
+
+      assert Enum.min(rows) == box_row
+      assert Enum.max(rows) == box_row + box_h - 1
+      assert cursor_row == box_row + box_h - 2
+      assert Enum.any?(texts, &String.contains?(&1, "model-20"))
+      refute Enum.any?(texts, &String.contains?(&1, "model-1 "))
     end
 
     test "cursor is inside the floating window (not at viewport bottom)" do
@@ -371,12 +456,12 @@ defmodule MingaEditor.PickerUITest do
       {_draws, {cursor_row, _col}} = PickerUI.render(input)
 
       # In centered mode, cursor should NOT be at the viewport bottom (row 23)
-      # It should be inside the float box
-      box_h = div(24 * 70, 100)
+      # It should be inside the auto-sized float box, on the prompt row.
+      box_h = 1 + 3
       box_row = div(24 - box_h, 2)
 
-      assert cursor_row >= box_row and cursor_row < box_row + box_h,
-             "cursor row #{cursor_row} should be inside the float box"
+      assert cursor_row == box_row + box_h - 2,
+             "cursor row #{cursor_row} should be on the prompt row inside the float box"
     end
 
     test "contains border characters from rounded style" do
