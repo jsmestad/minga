@@ -81,7 +81,10 @@ defmodule MingaEditor.Renderer.Caches do
             | {:file_tree_state, String.t(), non_neg_integer(), term()}
             | {:no_tree, String.t()}
             | nil,
-          last_gui_git_status_fp: integer() | {:no_git, boolean(), MingaEditor.Frontend.Protocol.GUI.git_toast() | nil} | nil,
+          last_gui_git_status_fp:
+            integer()
+            | {:no_git, boolean(), MingaEditor.Frontend.Protocol.GUI.git_toast() | nil}
+            | nil,
           last_gui_which_key_fp: integer() | nil,
           last_gui_completion_fp: integer() | nil,
           last_gui_breadcrumb_fp: integer() | nil,

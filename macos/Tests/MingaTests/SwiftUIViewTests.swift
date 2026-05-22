@@ -748,8 +748,8 @@ struct TabBarViewViewTests {
         #expect(!sut.canMoveTabRight(tab(id: 5, groupId: 1)))
     }
 
-    @Test("Tab context menu items disable move actions at bucket edges")
-    @MainActor func tabContextMenuItemsDisableMoveActionsAtBucketEdges() throws {
+    @Test("Tab context menu move actions use bucket edge rules")
+    @MainActor func tabContextMenuMoveActionsUseBucketEdgeRules() throws {
         let state = TabBarState()
         state.update(activeIndex: 0, entries: [
             wireTab(id: 1, isActive: true, isPinned: true, label: "pinned-1.ex"),

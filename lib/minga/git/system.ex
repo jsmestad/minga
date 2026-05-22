@@ -388,7 +388,8 @@ defmodule Minga.Git.System do
           _ -> :ok
         end
 
-      {output, _} -> {:error, "git stash failed: #{String.trim(output)}"}
+      {output, _} ->
+        {:error, "git stash failed: #{String.trim(output)}"}
     end
   rescue
     e in [ErlangError, ArgumentError] -> {:error, "git stash error: #{Exception.message(e)}"}

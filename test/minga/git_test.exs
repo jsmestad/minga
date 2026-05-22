@@ -95,13 +95,18 @@ defmodule Minga.GitTest do
 
     test "stashing on top of an existing stash keeps the newest entry at stash@{0}", %{root: dir} do
       GitStub.set_status(dir, [%Git.StatusEntry{path: "a.ex", status: :modified, staged: false}])
+
       GitStub.set_stashes(dir, [
         %Git.StashEntry{index: 0, ref: "stash@{0}", message: "older", date: "2 hours ago"}
       ])
 
       assert :ok = Git.stash(dir, include_untracked: true)
-      assert {:ok, [%Git.StashEntry{index: 0, ref: "stash@{0}", message: "WIP on main"},
-                    %Git.StashEntry{index: 1, ref: "stash@{1}", message: "older"}]} =
+
+      assert {:ok,
+              [
+                %Git.StashEntry{index: 0, ref: "stash@{0}", message: "WIP on main"},
+                %Git.StashEntry{index: 1, ref: "stash@{1}", message: "older"}
+              ]} =
                Git.stash_list(dir)
 
       assert :ok = Git.stash_drop(dir, 0)

@@ -300,7 +300,9 @@ defmodule Minga.Git.Stub do
     git_root = Path.expand(git_root)
 
     case status(git_root) do
-      {:ok, []} -> {:error, "No changes to stash"}
+      {:ok, []} ->
+        {:error, "No changes to stash"}
+
       {:ok, entries} ->
         stash_state = load_stash_state(git_root)
         branch = branch_name(git_root)
@@ -318,7 +320,9 @@ defmodule Minga.Git.Stub do
     git_root = Path.expand(git_root)
 
     case load_stash_state(git_root) do
-      [] -> {:error, "No stash entries to pop"}
+      [] ->
+        {:error, "No stash entries to pop"}
+
       [{_latest_entry, snapshot} | rest] ->
         maybe_restore_status(git_root, snapshot)
         put_stash_state(git_root, reindex_stash_state(rest))
@@ -342,11 +346,14 @@ defmodule Minga.Git.Stub do
         put_stash_state(git_root, reindex_stash_state(prefix ++ suffix))
         :ok
 
-      _ -> {:error, "No stash entry at stash@{#{index}}"}
+      _ ->
+        {:error, "No stash entry at stash@{#{index}}"}
     end
   end
 
-  @spec load_stash_state(String.t()) :: [{Minga.Git.stash_entry(), [Minga.Git.status_entry()] | nil}]
+  @spec load_stash_state(String.t()) :: [
+          {Minga.Git.stash_entry(), [Minga.Git.status_entry()] | nil}
+        ]
   defp load_stash_state(git_root) do
     case :ets.lookup(@table, {:stash_state, git_root}) do
       [{_, entries}] -> entries
@@ -362,10 +369,15 @@ defmodule Minga.Git.Stub do
     end
   end
 
-  @spec put_stash_state(String.t(), [{Minga.Git.stash_entry(), [Minga.Git.status_entry()] | nil}]) :: true
+  @spec put_stash_state(String.t(), [{Minga.Git.stash_entry(), [Minga.Git.status_entry()] | nil}]) ::
+          true
   defp put_stash_state(git_root, entries) do
     :ets.insert(@table, {{:stash_state, git_root}, entries})
-    :ets.insert(@table, {{:stashes, git_root}, Enum.map(entries, fn {entry, _snapshot} -> entry end)})
+
+    :ets.insert(
+      @table,
+      {{:stashes, git_root}, Enum.map(entries, fn {entry, _snapshot} -> entry end)}
+    )
   end
 
   @spec reindex_stash_state([{Minga.Git.stash_entry(), [Minga.Git.status_entry()] | nil}]) :: [

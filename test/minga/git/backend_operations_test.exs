@@ -159,7 +159,9 @@ defmodule Minga.Git.BackendOperationsTest do
       git_cmd(dir, ["add", "."])
       git_cmd(dir, ["commit", "-m", "init"])
 
-      assert {:error, "No changes to stash"} = Minga.Git.System.stash(dir, include_untracked: true)
+      assert {:error, "No changes to stash"} =
+               Minga.Git.System.stash(dir, include_untracked: true)
+
       assert {:ok, []} = Minga.Git.System.stash_list(dir)
     end
 
