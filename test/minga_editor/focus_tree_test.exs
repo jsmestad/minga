@@ -12,6 +12,17 @@ defmodule MingaEditor.FocusTreeTest do
   alias MingaEditor.FocusTree
   alias MingaEditor.FocusTree.Node, as: TreeNode
   alias MingaEditor.Layout
+  alias MingaEditor.PickerUI
+  alias MingaEditor.PickerUI.RenderInput
+  alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Traditional.State, as: ShellState
+  alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
+  alias MingaEditor.State.Picker, as: PickerState
+  alias MingaEditor.UI.Picker
+  alias MingaEditor.UI.Picker.Item
+  alias MingaEditor.UI.Theme
+  alias MingaEditor.Viewport
+  alias MingaEditor.VimState
 
   defp single_window_layout do
     %Layout{
@@ -47,6 +58,25 @@ defmodule MingaEditor.FocusTreeTest do
       agent_panel: nil,
       status_bar: {22, 0, 80, 1},
       minibuffer: {23, 0, 80, 1}
+    }
+  end
+
+  defp centered_picker_state(items, max_visible) do
+    picker = Picker.new(items, title: "Models", max_visible: max_visible)
+
+    %MingaEditor.State{
+      port_manager: self(),
+      workspace: %SessionState{viewport: Viewport.new(24, 80), editing: VimState.new()},
+      layout: single_window_layout(),
+      shell_state: %ShellState{
+        modal:
+          {:picker,
+           PickerPayload.new(%PickerState{
+             picker: picker,
+             source: nil,
+             layout: :centered
+           })}
+      }
     }
   end
 
@@ -167,6 +197,30 @@ defmodule MingaEditor.FocusTreeTest do
       tree = FocusTree.from_layout(single_window_layout())
       # Terminal is {0, 0, 80, 24} → rows 0..23, cols 0..79.
       assert FocusTree.hit_test(tree, 24, 80) == nil
+    end
+  end
+
+  describe "centered picker overlay height" do
+    test "hit-test height matches the compact rendered popup height for tall lists" do
+      items = for n <- 1..20, do: %Item{id: Integer.to_string(n), label: "model-#{n}"}
+      picker = Picker.new(items, title: "Models", max_visible: 20)
+      state = centered_picker_state(items, 20)
+
+      {draws, _cursor} =
+        PickerUI.render(%RenderInput{
+          picker_state: %PickerState{picker: picker, source: nil, layout: :centered},
+          theme_picker: Theme.get!(:doom_one).picker,
+          viewport: Viewport.new(24, 80)
+        })
+
+      rendered_rows = Enum.map(draws, fn {row, _col, _text, _style} -> row end)
+      rendered_height = Enum.max(rendered_rows) - Enum.min(rendered_rows) + 1
+
+      tree = FocusTree.from_state(state)
+      picker_backdrop = Enum.find(tree.children, &(&1.content_type == :picker_backdrop))
+      picker_node = hd(picker_backdrop.children)
+
+      assert elem(picker_node.rect, 3) == rendered_height
     end
   end
 

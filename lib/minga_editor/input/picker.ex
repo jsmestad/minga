@@ -153,30 +153,52 @@ defmodule MingaEditor.Input.Picker do
   defp handle_picker_click(state, node, picker, source, row) do
     {:picker, %{picker_ui: %{layout: layout}}} = state.shell_state.modal
 
-    clicked_idx =
-      case layout do
-        :centered -> centered_click_index(node, row)
-        _bottom -> bottom_click_index(state, picker, row)
-      end
+    case clicked_item(layout, state, node, picker, row) do
+      nil -> state
+      item -> confirm_clicked_item(state, source, item)
+    end
+  end
 
-    {visible, _selected_offset} = PickerData.visible_items(picker)
-
-    case Enum.at(visible, clicked_idx) do
+  @spec clicked_item(
+          MingaEditor.UI.Picker.Source.layout(),
+          EditorState.t(),
+          FocusNode.t(),
+          PickerData.t(),
+          integer()
+        ) :: PickerData.item() | nil
+  defp clicked_item(layout, state, node, picker, row) do
+    case click_index(layout, state, node, picker, row) do
       nil ->
-        state
+        nil
 
-      item ->
-        new_state = PickerUI.close(state)
-        new_state = source.on_select(item, new_state)
+      idx ->
+        {visible, _selected_offset} = visible_items_for_click(layout, state, node, picker)
+        Enum.at(visible, idx)
+    end
+  end
 
-        case Map.get(new_state, :pending_command) do
-          nil ->
-            new_state
+  @spec click_index(
+          MingaEditor.UI.Picker.Source.layout(),
+          EditorState.t(),
+          FocusNode.t(),
+          PickerData.t(),
+          integer()
+        ) :: non_neg_integer() | nil
+  defp click_index(:centered, _state, node, _picker, row), do: centered_click_index(node, row)
+  defp click_index(_bottom, state, _node, picker, row), do: bottom_click_index(state, picker, row)
 
-          cmd ->
-            record_command_execution(source, cmd)
-            MingaEditor.dispatch_command(Map.delete(new_state, :pending_command), cmd)
-        end
+  @spec confirm_clicked_item(EditorState.t(), module(), PickerData.item()) :: EditorState.t()
+  defp confirm_clicked_item(state, source, item) do
+    new_state = PickerUI.close(state)
+    new_state = source.on_select(item, new_state)
+
+    case Map.get(new_state, :pending_command) do
+      nil ->
+        new_state
+
+      cmd ->
+        record_command_execution(source, cmd)
+        MingaEditor.dispatch_command(Map.delete(new_state, :pending_command), cmd)
     end
   end
 
@@ -191,19 +213,54 @@ defmodule MingaEditor.Input.Picker do
   defp record_command_execution(_source, _command_name), do: :ok
 
   # Bottom-anchored: items grow upward from the prompt at viewport bottom.
-  @spec bottom_click_index(EditorState.t(), PickerData.t(), integer()) :: integer()
+  @spec bottom_click_index(EditorState.t(), PickerData.t(), integer()) :: non_neg_integer() | nil
   defp bottom_click_index(state, picker, row) do
-    {visible, _} = PickerData.visible_items(picker)
+    {visible, _} = PickerData.visible_items(picker, bottom_item_capacity(state))
     item_count = length(visible)
     prompt_row = state.terminal_viewport.rows - 1
     first_item_row = prompt_row - item_count
-    row - first_item_row
+    clicked_idx = row - first_item_row
+
+    if clicked_idx >= 0 and clicked_idx < item_count do
+      clicked_idx
+    else
+      nil
+    end
   end
 
+  @spec visible_items_for_click(
+          MingaEditor.UI.Picker.Source.layout(),
+          EditorState.t(),
+          FocusNode.t(),
+          PickerData.t()
+        ) :: {[PickerData.item()], non_neg_integer()}
+  defp visible_items_for_click(:centered, _state, node, picker) do
+    PickerData.visible_items(picker, centered_item_capacity(node))
+  end
+
+  defp visible_items_for_click(_bottom, state, _node, picker) do
+    PickerData.visible_items(picker, bottom_item_capacity(state))
+  end
+
+  @spec bottom_item_capacity(EditorState.t()) :: pos_integer()
+  defp bottom_item_capacity(state), do: max(state.terminal_viewport.rows - 3, 1)
+
   # Centered: items start at the top of the FloatingWindow interior.
-  @spec centered_click_index(FocusNode.t(), integer()) :: integer()
-  defp centered_click_index(%FocusNode{rect: {box_row, _box_col, _box_w, _box_h}}, row) do
+  @spec centered_click_index(FocusNode.t(), integer()) :: non_neg_integer() | nil
+  defp centered_click_index(%FocusNode{rect: {box_row, _box_col, _box_w, _box_h}} = node, row) do
     interior_row = box_row + 1
-    row - interior_row
+    item_rows = centered_item_capacity(node)
+    clicked_idx = row - interior_row
+
+    if clicked_idx >= 0 and clicked_idx < item_rows do
+      clicked_idx
+    else
+      nil
+    end
+  end
+
+  @spec centered_item_capacity(FocusNode.t()) :: non_neg_integer()
+  defp centered_item_capacity(%FocusNode{rect: {_box_row, _box_col, _box_w, box_h}}) do
+    max(box_h - 3, 0)
   end
 end
