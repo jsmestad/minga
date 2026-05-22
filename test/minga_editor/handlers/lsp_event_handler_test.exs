@@ -148,10 +148,10 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       buffer = state.workspace.buffers.active
       client = start_fake_lsp_client()
 
+      register_lsp_client(buffer, client)
+
       state =
-        state
-        |> Map.put(:lsp_clients, %{Minga.Buffer.filetype(buffer) => client})
-        |> EditorState.update_workspace(fn workspace ->
+        EditorState.update_workspace(state, fn workspace ->
           SessionState.update_highlight(workspace, fn highlighting ->
             Highlighting.put_highlight(highlighting, buffer, Highlight.new())
           end)

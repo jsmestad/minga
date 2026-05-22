@@ -28,7 +28,7 @@ defmodule Minga.Session.EventRecorder.EventRecordTest do
     property "encode_source always returns a non-empty string" do
       check all(source <- source_generator()) do
         encoded = EventRecord.encode_source(source)
-        assert is_binary(encoded) and byte_size(encoded) > 0
+        assert byte_size(encoded) > 0
       end
     end
 

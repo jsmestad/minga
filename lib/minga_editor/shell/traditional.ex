@@ -496,13 +496,8 @@ defmodule MingaEditor.Shell.Traditional do
 
   @spec find_tab_for_buffer(TabBar.t(), SessionState.t(), pid()) :: Tab.t() | nil
   defp find_tab_for_buffer(%TabBar{} = tb, %SessionState{} = workspace, pid) when is_pid(pid) do
-    case file_ref_for_buffer(pid, workspace) do
-      %FileRef{} = file_ref ->
-        find_visible_tab_for_file_ref(tb, file_ref) || find_visible_tab_for_buffer(tb, pid)
-
-      nil ->
-        find_visible_tab_for_buffer(tb, pid)
-    end
+    file_ref = file_ref_for_buffer(pid, workspace)
+    find_visible_tab_for_file_ref(tb, file_ref) || find_visible_tab_for_buffer(tb, pid)
   end
 
   @spec find_visible_tab_for_file_ref(TabBar.t(), FileRef.t()) :: Tab.t() | nil

@@ -14,8 +14,6 @@
 defmodule MockServer do
   @moduledoc false
 
-  require Logger
-
   def run do
     # Set stdout to binary mode and suppress Logger output so teardown
     # of the parent port doesn't produce noisy :epipe errors.
@@ -51,7 +49,7 @@ defmodule MockServer do
             {[], buffer}
 
           length when byte_size(rest) >= length ->
-            <<json::binary-size(length), remaining::binary>> = rest
+            <<json::binary-size(^length), remaining::binary>> = rest
             msg = JSON.decode!(json)
             {more_msgs, final_rest} = decode_messages(remaining)
             {[msg | more_msgs], final_rest}

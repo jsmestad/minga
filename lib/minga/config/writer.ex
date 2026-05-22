@@ -242,9 +242,9 @@ defmodule Minga.Config.Writer do
   end
 
   @spec format_value(term()) :: String.t()
+  defp format_value(value) when is_boolean(value), do: inspect(value)
   defp format_value(value) when is_atom(value), do: inspect(value)
   defp format_value(value) when is_binary(value), do: inspect(value)
-  defp format_value(value) when is_boolean(value), do: inspect(value)
   defp format_value(value) when is_integer(value), do: Integer.to_string(value)
   defp format_value(value) when is_float(value), do: Float.to_string(value)
   defp format_value(value), do: inspect(value, limit: :infinity)

@@ -378,7 +378,7 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
     root_len = byte_size(root)
 
     match?(
-      <<2::8, tree_flags::8, 0::8, 0::16, ^root_len::16, ^root::binary-size(root_len), 0::16,
+      <<2::8, tree_flags::8, 0::8, 0::16, ^root_len::16, ^root::binary-size(^root_len), 0::16,
         0::16, 0::16>>
       when Bitwise.band(tree_flags, 0x01) == 0,
       payload
