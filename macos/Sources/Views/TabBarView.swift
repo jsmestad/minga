@@ -12,11 +12,18 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// Context-menu actions that target a specific tab without selecting it first.
-enum TabContextMenuAction: Equatable {
+enum TabContextMenuAction: Equatable, Hashable {
     case pin
     case unpin
     case moveLeft
     case moveRight
+}
+
+/// Presentation state for a tab context-menu move item.
+struct TabContextMenuMoveItem: Identifiable, Equatable {
+    let id: TabContextMenuAction
+    let title: String
+    let isDisabled: Bool
 }
 
 /// The tab bar strip rendered above the editor area.
@@ -191,6 +198,13 @@ struct TabBarView: View {
     func canMoveTabRight(_ tab: TabEntry) -> Bool {
         guard let index = movableTabIndex(tab) else { return false }
         return index < movableTabs(for: tab).count - 1
+    }
+
+    func tabContextMenuMoveItems(for tab: TabEntry) -> [TabContextMenuMoveItem] {
+        [
+            TabContextMenuMoveItem(id: .moveLeft, title: "Move Tab Left", isDisabled: !canMoveTabLeft(tab)),
+            TabContextMenuMoveItem(id: .moveRight, title: "Move Tab Right", isDisabled: !canMoveTabRight(tab))
+        ]
     }
 
     func handleTabDrop(droppedTabs: [TabDragPayload], target tab: TabEntry, visibleIndex: Int) -> Bool {
@@ -588,14 +602,12 @@ struct TabBarView: View {
                 performTabContextMenuAction(tab.isPinned ? .unpin : .pin, for: tab)
             }
             Divider()
-            Button("Move Tab Left") {
-                performTabContextMenuAction(.moveLeft, for: tab)
+            ForEach(tabContextMenuMoveItems(for: tab)) { item in
+                Button(item.title) {
+                    performTabContextMenuAction(item.id, for: tab)
+                }
+                .disabled(item.isDisabled)
             }
-            .disabled(!canMoveTabLeft(tab))
-            Button("Move Tab Right") {
-                performTabContextMenuAction(.moveRight, for: tab)
-            }
-            .disabled(!canMoveTabRight(tab))
             Divider()
             Button("Close") {
                 encoder?.sendCloseTab(id: tab.id)
