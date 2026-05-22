@@ -22,6 +22,11 @@ defmodule Minga.Keymap.SigilTest do
       assert ~k(SPC TAB RET ESC DEL) == [{32, 0}, {9, 0}, {13, 0}, {27, 0}, {127, 0}]
     end
 
+    test "parses punctuation literals used by converted keymaps" do
+      assert ~k(: ? " ' ` [ ] { } ~) ==
+               Enum.map([58, 63, 34, 39, 96, 91, 93, 123, 125, 126], &{&1, 0})
+    end
+
     test "parses uppercase letters" do
       assert ~k(A Z) == [{?A, 0}, {?Z, 0}]
     end
