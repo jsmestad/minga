@@ -45,7 +45,10 @@ defmodule MingaEditor.Handlers.BufferLifecycle do
     count = length(entries)
 
     state =
-      MingaEditor.log_message(state, "Found #{count} file(s) with unsaved changes from a previous session")
+      MingaEditor.log_message(
+        state,
+        "Found #{count} file(s) with unsaved changes from a previous session"
+      )
 
     Enum.reduce(entries, state, &recover_swap_entry/2)
   end
@@ -203,7 +206,10 @@ defmodule MingaEditor.Handlers.BufferLifecycle do
         recover_buffer(state, file_path, content)
 
       {:error, reason} ->
-        MingaEditor.log_message(state, "Failed to recover #{Path.basename(entry.path)}: #{inspect(reason)}")
+        MingaEditor.log_message(
+          state,
+          "Failed to recover #{Path.basename(entry.path)}: #{inspect(reason)}"
+        )
     end
   end
 
@@ -236,7 +242,10 @@ defmodule MingaEditor.Handlers.BufferLifecycle do
             register_buffer(state, pid, file_path)
 
           {:error, :read_only} ->
-            MingaEditor.log_message(state, "Cannot recover #{Path.basename(file_path)}: read-only")
+            MingaEditor.log_message(
+              state,
+              "Cannot recover #{Path.basename(file_path)}: read-only"
+            )
         end
 
       {:error, reason} ->
