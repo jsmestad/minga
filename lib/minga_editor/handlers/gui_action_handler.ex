@@ -21,6 +21,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   alias MingaEditor.BottomPanel
   alias MingaEditor.Commands
+  alias MingaEditor.Handlers.BufferRegistry
   alias MingaEditor.HighlightSync
   alias MingaEditor.Layout
   alias MingaEditor.LspActions
@@ -343,7 +344,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     if File.dir?(path) do
       open_dropped_directory(state, path)
     else
-      MingaEditor.open_file_by_path(state, path)
+      BufferRegistry.open_file_by_path(state, path)
     end
   end
 
@@ -577,7 +578,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
       git_root ->
         abs_path = Path.join(git_root, path)
-        MingaEditor.open_file_by_path(state, abs_path)
+        BufferRegistry.open_file_by_path(state, abs_path)
     end
   end
 
@@ -967,7 +968,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec open_file_by_path_in_active_window(state(), String.t()) :: state()
   defp open_file_by_path_in_active_window(state, abs_path) do
-    case MingaEditor.file_tab_for_path_in_active_workspace(state, abs_path) do
+    case BufferRegistry.file_tab_for_path_in_active_workspace(state, abs_path) do
       %Tab{} = tab ->
         open_tab_buffer_in_active_window(state, tab, abs_path)
 
