@@ -31,6 +31,7 @@
           {Minga.Credo.NoDirectStateMachineWriteCheck, []},
           {Minga.Credo.NoDirectModalOverlayWriteCheck, []},
           {Minga.Credo.NoRawWorkspaceSnapshotCheck, []},
+          {Minga.Credo.CommandRegistrationCheck, []},
 
           # ── Readability ────────────────────────────────────────────────────
           {Credo.Check.Readability.AliasOrder, false},
