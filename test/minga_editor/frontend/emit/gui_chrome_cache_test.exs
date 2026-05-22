@@ -249,7 +249,15 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       refute chat_caches2.last_gui_agent_chat_fp == chat_caches.last_gui_agent_chat_fp
 
       thinking_state = put_in(chat_state.workspace.agent_ui.panel.thinking_level, "high")
-      {_ctx, chat_caches3, _cmds} = sync_chrome(thinking_state, chat_caches2)
+      {_ctx, chat_caches3, cmds} = sync_chrome(thinking_state, chat_caches2)
+
+      assert [chat_cmd] = opcode_cmds(cmds, 0x78)
+      assert <<0x78, _section_count::8, sections::binary>> = chat_cmd
+
+      assert <<level_len::16, level::binary-size(level_len)>> =
+               gui_agent_chat_section!(sections, 0x08)
+
+      assert level == "high"
       refute chat_caches3.last_gui_agent_chat_fp == chat_caches2.last_gui_agent_chat_fp
 
       board = BoardState.new()
@@ -336,6 +344,21 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
   defp opcode!(<<opcode, _::binary>>), do: opcode
   defp opcode?(<<opcode, _::binary>>, opcode), do: true
   defp opcode?(_, _opcode), do: false
+
+  defp gui_agent_chat_section!(sections, target_id),
+    do: do_gui_agent_chat_section!(sections, target_id)
+
+  defp do_gui_agent_chat_section!(
+         <<target_id::8, len::16, payload::binary-size(len), _rest::binary>>,
+         target_id
+       ),
+       do: payload
+
+  defp do_gui_agent_chat_section!(
+         <<_id::8, len::16, _payload::binary-size(len), rest::binary>>,
+         target_id
+       ),
+       do: do_gui_agent_chat_section!(rest, target_id)
 
   defp hidden_tree_cmd_for_root?(
          <<0x93, payload_len::32, payload::binary-size(payload_len)>>,

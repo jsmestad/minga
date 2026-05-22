@@ -209,10 +209,8 @@ struct AgentChatView: View {
         .accessibilityValue(state.displayModel.isEmpty ? "Agent" : state.displayModel)
         .accessibilityHint(state.isThinking ? "Disabled while the agent is streaming" : "Opens the model picker")
         .accessibilityAddTraits(.isButton)
-        .onHover { hovering in
-            isModelHovered = hovering
-            if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-        }
+        .onHover { isModelHovered = $0 }
+        .modifier(HeaderControlPointingHandModifier(isEnabled: !state.isThinking))
     }
 
     private var thinkingLevelMenu: some View {
@@ -228,6 +226,8 @@ struct AgentChatView: View {
                         }
                     }
                 }
+                .accessibilityLabel("Set thinking level to \(thinkingDisplayName(level))")
+                .accessibilityHint("Changes the agent thinking level to \(thinkingDisplayName(level))")
             }
         } label: {
             HStack(spacing: 4) {
@@ -251,10 +251,8 @@ struct AgentChatView: View {
         .accessibilityValue(state.thinkingLabel)
         .accessibilityHint(state.isThinking ? "Disabled while the agent is streaming" : "Opens a menu of thinking levels")
         .accessibilityAddTraits(.isButton)
-        .onHover { hovering in
-            isThinkingHovered = hovering
-            if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-        }
+        .onHover { isThinkingHovered = $0 }
+        .modifier(HeaderControlPointingHandModifier(isEnabled: !state.isThinking))
     }
 
     private func thinkingDisplayName(_ level: String) -> String {
@@ -264,6 +262,44 @@ struct AgentChatView: View {
         case "medium": return "Medium"
         case "high": return "High"
         default: return level.capitalized
+        }
+    }
+
+    private struct HeaderControlPointingHandModifier: ViewModifier {
+        let isEnabled: Bool
+        @State private var isHovered = false
+        @State private var didPushCursor = false
+
+        func body(content: Content) -> some View {
+            content
+                .onHover { hovering in
+                    isHovered = hovering
+                    syncCursor()
+                }
+                .onChange(of: isEnabled) { _, _ in
+                    syncCursor()
+                }
+                .onDisappear {
+                    popCursorIfNeeded()
+                }
+        }
+
+        private func syncCursor() {
+            let shouldPush = isHovered && isEnabled
+
+            if shouldPush && !didPushCursor {
+                NSCursor.pointingHand.push()
+                didPushCursor = true
+            } else if !shouldPush && didPushCursor {
+                popCursorIfNeeded()
+            }
+        }
+
+        private func popCursorIfNeeded() {
+            if didPushCursor {
+                NSCursor.pop()
+                didPushCursor = false
+            }
         }
     }
 
