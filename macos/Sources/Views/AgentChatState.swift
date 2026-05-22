@@ -43,6 +43,7 @@ final class AgentChatState {
     var visible: Bool = false
     var status: UInt8 = 0
     var model: String = ""
+    var thinkingLevel: String = "medium"
     var prompt: String = ""
     var messages: [ChatMessageEntry] = []
     var helpVisible: Bool = false
@@ -85,10 +86,34 @@ final class AgentChatState {
 
     var isThinking: Bool { status == 1 || status == 2 }
 
-    func update(visible: Bool, status: UInt8, model: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, helpVisible: Bool, helpGroups: [HelpGroup], rawMessages: [Wire.ChatMessage]) {
+    var displayModel: String {
+        guard let separator = model.firstIndex(of: ":") else { return model }
+        return String(model[model.index(after: separator)...])
+    }
+
+    var thinkingLabel: String {
+        switch thinkingLevel {
+        case "off": return "Off"
+        case "low": return "Low"
+        case "medium": return "Medium"
+        case "high": return "High"
+        default: return thinkingLevel.isEmpty ? "Off" : thinkingLevel.capitalized
+        }
+    }
+
+    var thinkingIconName: String {
+        switch thinkingLevel {
+        case "medium": return "brain.head.profile"
+        case "high": return "brain.head.profile.fill"
+        default: return "brain"
+        }
+    }
+
+    func update(visible: Bool, status: UInt8, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, helpVisible: Bool, helpGroups: [HelpGroup], rawMessages: [Wire.ChatMessage]) {
         self.visible = visible
         self.status = status
         self.model = model
+        self.thinkingLevel = thinkingLevel
         self.prompt = prompt
         self.promptLineCount = promptLineCount
         self.promptCursorLine = promptCursorLine

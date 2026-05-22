@@ -743,6 +743,24 @@ struct AgentChatViewTests {
         #expect(strings.contains("NORMAL"))
     }
 
+    @Test("Header strips provider prefix and shows thinking level")
+    @MainActor func headerModelAndThinkingControls() throws {
+        let state = AgentChatState()
+        state.visible = true
+        state.model = "anthropic:claude-sonnet-4"
+        state.thinkingLevel = "high"
+        state.status = 0
+
+        let sut = AgentChatView(state: state, theme: ThemeColors(), isInsertMode: false, encoder: nil)
+        let body = try sut.inspect()
+        let texts = body.findAll(ViewInspectorQuery.text)
+        let strings = texts.compactMap { try? $0.string() }
+
+        #expect(strings.contains("claude-sonnet-4"))
+        #expect(!strings.contains("anthropic:claude-sonnet-4"))
+        #expect(strings.contains("High"))
+    }
+
     @Test("User message renders as bubble")
     @MainActor func userMessage() throws {
         let state = AgentChatState()

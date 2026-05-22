@@ -354,6 +354,7 @@ Each section uses `section_id(1) + section_len(2) + payload(section_len)`. Secti
 | 0x05 | Help | `visible(1) + optional groups` |
 | 0x06 | Messages | `message_count(2) + messages...` |
 | 0x07 | Completion | prompt completion popup state |
+| 0x08 | Thinking | `level_len(2) + level`, where level is `off`, `low`, `medium`, or `high` |
 
 Status values: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error
 

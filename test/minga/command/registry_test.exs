@@ -115,9 +115,14 @@ defmodule Minga.Command.RegistryTest do
           :agent_abort,
           :agent_new_session,
           :agent_pick_model,
+          :agent_pick_thinking,
           :agent_cycle_model,
           :agent_summarize,
           :agent_cycle_thinking,
+          :agent_thinking_off,
+          :agent_thinking_low,
+          :agent_thinking_medium,
+          :agent_thinking_high,
 
           # Line display
           :cycle_line_numbers,

@@ -248,6 +248,10 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       {_ctx, chat_caches2, _cmds} = sync_chrome(chat_state, chat_caches)
       refute chat_caches2.last_gui_agent_chat_fp == chat_caches.last_gui_agent_chat_fp
 
+      thinking_state = put_in(chat_state.workspace.agent_ui.panel.thinking_level, "high")
+      {_ctx, chat_caches3, _cmds} = sync_chrome(thinking_state, chat_caches2)
+      refute chat_caches3.last_gui_agent_chat_fp == chat_caches2.last_gui_agent_chat_fp
+
       board = BoardState.new()
       {board_a, card} = BoardState.create_card(board, task: "Original task", status: :idle)
       board_state = %{gui_state() | shell: MingaEditor.Shell.Board, shell_state: board_a}

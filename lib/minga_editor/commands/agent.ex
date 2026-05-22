@@ -785,22 +785,70 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Cycles the thinking level (off → low → medium → high)."
   @spec cycle_thinking_level(state()) :: state()
   def cycle_thinking_level(state) do
-    if AgentAccess.session(state) == nil do
-      EditorState.set_status(state, "No agent session")
-    else
-      case Session.cycle_thinking_level(AgentAccess.session(state)) do
-        {:ok, %{"level" => level}} when is_binary(level) ->
-          state = update_agent_ui(state, &UIState.set_thinking_level(&1, level))
-          Session.add_system_message(AgentAccess.session(state), "Thinking: #{level}")
-          EditorState.set_status(state, "Thinking: #{level}")
+    case AgentAccess.session(state) do
+      nil ->
+        EditorState.set_status(state, "No agent session")
 
-        {:ok, nil} ->
-          EditorState.set_status(state, "Model does not support thinking levels")
+      session ->
+        case Session.cycle_thinking_level(session) do
+          {:ok, %{"level" => level}} when is_binary(level) ->
+            apply_thinking_level(state, session, level)
 
-        {:error, reason} ->
-          EditorState.set_status(state, "Error: #{inspect(reason)}")
-      end
+          {:ok, nil} ->
+            EditorState.set_status(state, "Model does not support thinking levels")
+
+          {:error, reason} ->
+            EditorState.set_status(state, "Error: #{inspect(reason)}")
+        end
     end
+  end
+
+  @doc "Sets the thinking level to off."
+  @spec set_thinking_off(state()) :: state()
+  def set_thinking_off(state), do: set_thinking_level(state, "off")
+
+  @doc "Sets the thinking level to low."
+  @spec set_thinking_low(state()) :: state()
+  def set_thinking_low(state), do: set_thinking_level(state, "low")
+
+  @doc "Sets the thinking level to medium."
+  @spec set_thinking_medium(state()) :: state()
+  def set_thinking_medium(state), do: set_thinking_level(state, "medium")
+
+  @doc "Sets the thinking level to high."
+  @spec set_thinking_high(state()) :: state()
+  def set_thinking_high(state), do: set_thinking_level(state, "high")
+
+  @doc "Sets the thinking level to the given provider-supported value."
+  @spec set_thinking_level(state(), String.t()) :: state()
+  def set_thinking_level(state, level) when is_binary(level) do
+    case AgentAccess.session(state) do
+      nil ->
+        EditorState.set_status(state, "No agent session")
+
+      session ->
+        case Session.set_thinking_level(session, level) do
+          :ok -> apply_thinking_level(state, session, level)
+          {:error, reason} -> EditorState.set_status(state, "Error: #{inspect(reason)}")
+        end
+    end
+  end
+
+  @doc "Opens a picker for selecting the agent thinking level."
+  @spec pick_thinking_level(state()) :: state()
+  def pick_thinking_level(state) do
+    current_level = AgentAccess.panel(state).thinking_level
+
+    PickerUI.open(state, MingaEditor.UI.Picker.ThinkingLevelSource, %{
+      current_level: current_level
+    })
+  end
+
+  @spec apply_thinking_level(state(), pid(), String.t()) :: state()
+  defp apply_thinking_level(state, session, level) do
+    state = update_agent_ui(state, &UIState.set_thinking_level(&1, level))
+    Session.add_system_message(session, "Thinking: #{level}")
+    EditorState.set_status(state, "Thinking: #{level}")
   end
 
   @doc "Generates a context artifact from the current session."
@@ -1523,6 +1571,10 @@ defmodule MingaEditor.Commands.Agent do
     {:agent_cycle_model, "Cycle AI agent model", :cycle_model},
     {:agent_summarize, "Summarize session to context artifact", :summarize},
     {:agent_cycle_thinking, "Cycle AI thinking level", :cycle_thinking_level},
+    {:agent_thinking_off, "Set AI thinking level to off", :set_thinking_off},
+    {:agent_thinking_low, "Set AI thinking level to low", :set_thinking_low},
+    {:agent_thinking_medium, "Set AI thinking level to medium", :set_thinking_medium},
+    {:agent_thinking_high, "Set AI thinking level to high", :set_thinking_high},
     {:agent_clear_history, "Clear all saved agent sessions", :clear_session_history},
     # Input commands shared between editor scope (side panel) and agent scope
     {:agent_scroll_half_down, "Scroll agent chat down", :scroll_chat_down},
@@ -1616,6 +1668,12 @@ defmodule MingaEditor.Commands.Agent do
         description: "Pick AI agent model",
         requires_buffer: false,
         execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.AgentModelSource) end
+      },
+      %Minga.Command{
+        name: :agent_pick_thinking,
+        description: "Pick AI thinking level",
+        requires_buffer: false,
+        execute: &pick_thinking_level/1
       },
       %Minga.Command{
         name: :agent_session_history,
