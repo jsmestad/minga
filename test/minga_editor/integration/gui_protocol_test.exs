@@ -684,7 +684,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       item = hd(decoded["items"])
       assert item["label"] == "editor.ex"
       assert item["description"] == "lib"
-      assert item["match_positions"] == [0, 3]
+      assert item["match_positions"] == [0, 1, 2]
     end
   end
 
