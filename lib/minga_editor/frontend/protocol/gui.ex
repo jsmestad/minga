@@ -83,14 +83,15 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x3D       | file_tree_open_in_split |
   | 0x3E       | tab_copy_path           |
   | 0x3F       | hover_open_action       |
-  | 0x47       | tab_reorder             |
-  | 0x42       | git_open_diff           |
   | 0x40       | file_tree_drop          |
   | 0x41       | fold_toggle_at_line     |
+  | 0x42       | git_open_diff           |
   | 0x43       | config_update           |
   | 0x44       | config_query            |
-  | 0x34       | system_will_sleep      |
-  | 0x35       | system_did_wake        |
+  | 0x47       | power_thermal_state     |
+  | 0x48       | tab_reorder             |
+  | 0x34       | system_will_sleep       |
+  | 0x35       | system_did_wake         |
 
   """
 
@@ -207,6 +208,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_file_tree_move Opcodes.gui_action_file_tree_move()
   @gui_action_system_will_sleep Opcodes.gui_action_system_will_sleep()
   @gui_action_system_did_wake Opcodes.gui_action_system_did_wake()
+  @gui_action_power_thermal_state Opcodes.gui_action_power_thermal_state()
   @gui_action_cmd_copy Opcodes.gui_action_cmd_copy()
   @gui_action_cmd_cut Opcodes.gui_action_cmd_cut()
   @gui_action_git_push Opcodes.gui_action_git_push()
@@ -230,6 +232,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @max_u16 65_535
   @max_u32 4_294_967_295
   @max_modeline_segments 128
+
+  @typedoc "macOS thermal pressure level reported by the native GUI frontend."
+  @type thermal_state :: :nominal | :fair | :serious | :critical | {:unknown, non_neg_integer()}
+
   @chat_message_limit 100
   @max_chat_text_bytes 60_000
   @truncation_suffix "\n… [truncated]"
@@ -365,6 +371,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | :hover_open_action
           | :system_will_sleep
           | :system_did_wake
+          | {:power_thermal_state, low_power? :: boolean(), thermal_state()}
           | :cmd_copy
           | :cmd_cut
           | :git_push
@@ -3197,6 +3204,12 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   def decode_gui_action(@gui_action_system_did_wake, <<>>),
     do: {:ok, :system_did_wake}
 
+  def decode_gui_action(@gui_action_power_thermal_state, <<low_power::8, thermal_state::8>>) do
+    with {:ok, low_power?} <- decode_bool_byte(low_power) do
+      {:ok, {:power_thermal_state, low_power?, decode_thermal_state(thermal_state)}}
+    end
+  end
+
   def decode_gui_action(@gui_action_cmd_copy, <<>>),
     do: {:ok, :cmd_copy}
 
@@ -3236,6 +3249,18 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   end
 
   def decode_gui_action(_, _), do: :error
+
+  @spec decode_bool_byte(non_neg_integer()) :: {:ok, boolean()} | :error
+  defp decode_bool_byte(0), do: {:ok, false}
+  defp decode_bool_byte(1), do: {:ok, true}
+  defp decode_bool_byte(_), do: :error
+
+  @spec decode_thermal_state(non_neg_integer()) :: thermal_state()
+  defp decode_thermal_state(0), do: :nominal
+  defp decode_thermal_state(1), do: :fair
+  defp decode_thermal_state(2), do: :serious
+  defp decode_thermal_state(3), do: :critical
+  defp decode_thermal_state(value), do: {:unknown, value}
 
   @spec decode_existing_option_name(String.t()) :: {:ok, Options.option_name()} | :error
   defp decode_existing_option_name(key) do

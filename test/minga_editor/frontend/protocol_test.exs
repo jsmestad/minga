@@ -945,7 +945,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
     end
 
     test "tab_reorder with tab id and visible index" do
-      payload = <<0x07, 0x47, 42::32, 3::16>>
+      payload = <<0x07, 0x48, 42::32, 3::16>>
       assert {:ok, {:gui_action, {:tab_reorder, 42, 3}}} = Protocol.decode_event(payload)
     end
 

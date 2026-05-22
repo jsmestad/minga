@@ -84,6 +84,26 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     |> Renderer.render_or_async()
   end
 
+  defp dispatch_action(state, {:power_thermal_state, low_power?, thermal_state}) do
+    Minga.Log.info(
+      :editor,
+      "Power/thermal state: low_power=#{low_power?}, thermal=#{inspect(thermal_state)}"
+    )
+
+    state = EditorState.set_resource_pressure(state, low_power?, thermal_state)
+
+    Minga.Events.broadcast(
+      :power_thermal_state_changed,
+      %Minga.Events.PowerThermalStateEvent{
+        low_power?: low_power?,
+        thermal_state: thermal_state
+      },
+      EditorState.events_registry(state)
+    )
+
+    state
+  end
+
   defp dispatch_action(state, :config_query) do
     MingaEditor.push_full_config_state(state)
     state

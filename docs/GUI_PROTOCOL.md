@@ -901,7 +901,8 @@ opcode(1) + action_type(1) + payload...
 | 0x44 | config_query | (empty) | Request the current native Settings state |
 | 0x45 | notification_dismiss | id_len(2) + id | Dismiss one notification |
 | 0x46 | notification_action | id_len(2) + id + action_id_len(2) + action_id | Invoke one inline notification action |
-| 0x47 | tab_reorder | tab_id(4) + new_index(2) | Move a visible tab to a zero-based visible index |
+| 0x47 | power_thermal_state | low_power(1) + thermal_state(1) | Report low power mode and thermal pressure changes. `thermal_state` is 0 nominal, 1 fair, 2 serious, 3 critical, 255 unknown. |
+| 0x48 | tab_reorder | tab_id(4) + new_index(2) | Move a visible tab to a zero-based visible index |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |
