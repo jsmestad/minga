@@ -258,8 +258,11 @@ struct ContentView: View {
     @State private var rightPaneHeight: CGFloat = 600
     @State private var sidebarWidth: CGFloat = 240
     @State private var changeSummaryWidth: CGFloat = 280
+    @State private var activeSidebarPanel: ActivityBarPanel = .fileTree
 
-    private var showSidebar: Bool {
+    private let activityBarWidth: CGFloat = 32
+
+    private var showSidebarContent: Bool {
         appState.gui.fileTreeState.visible || appState.gui.gitStatusState.visible
     }
 
@@ -315,6 +318,13 @@ struct ContentView: View {
         .preferredColorScheme(appState.windowBgIsDark ? .dark : .light)
         .onAppear {
             sidebarWidth = CGFloat(appState.gui.fileTreeState.treeWidth) * 7.5
+            syncActiveSidebarPanel()
+        }
+        .onChange(of: appState.gui.fileTreeState.visible) { _, _ in
+            syncActiveSidebarPanel()
+        }
+        .onChange(of: appState.gui.gitStatusState.visible) { _, _ in
+            syncActiveSidebarPanel()
         }
     }
 
@@ -337,9 +347,14 @@ struct ContentView: View {
     private var unifiedToolbar: some View {
         ZStack(alignment: .bottom) {
             HStack(spacing: 0) {
-                if showSidebar {
-                    sidebarHeaderContent
-                        .frame(width: sidebarWidth + 8) // +8 aligns with resize handle
+                if showSidebarContent {
+                    HStack(spacing: 0) {
+                        Color.clear
+                            .frame(width: activityBarWidth)
+
+                        sidebarHeaderContent
+                            .frame(width: sidebarWidth + 8) // +8 aligns with resize handle
+                    }
 
                     // Thin vertical separator between sidebar header and tab bar
                     Rectangle()
@@ -441,14 +456,31 @@ struct ContentView: View {
 
     @ViewBuilder
     private var sidebarBody: some View {
-        if showSidebar {
-            SidebarContainer(
-                fileTreeState: appState.gui.fileTreeState,
-                gitStatusState: appState.gui.gitStatusState,
+        HStack(spacing: 0) {
+            ActivityBar(
+                activePanel: activeSidebarPanel,
+                gitStatusCount: appState.gui.gitStatusState.totalCount,
                 theme: theme,
-                encoder: appState.encoder,
-                sidebarWidth: $sidebarWidth
+                encoder: appState.encoder
             )
+
+            if showSidebarContent {
+                SidebarContainer(
+                    fileTreeState: appState.gui.fileTreeState,
+                    gitStatusState: appState.gui.gitStatusState,
+                    theme: theme,
+                    encoder: appState.encoder,
+                    sidebarWidth: $sidebarWidth
+                )
+            }
+        }
+    }
+
+    private func syncActiveSidebarPanel() {
+        if appState.gui.gitStatusState.visible {
+            activeSidebarPanel = .gitStatus
+        } else if appState.gui.fileTreeState.visible {
+            activeSidebarPanel = .fileTree
         }
     }
 
