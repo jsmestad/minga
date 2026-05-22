@@ -81,17 +81,31 @@ defmodule Minga.Git.Stub do
     :ok
   end
 
-  @doc "Sets the log entries returned for `git_root`."
+  @doc "Sets the default log entries returned for `git_root`."
   @spec set_log(String.t(), [Minga.Git.log_entry()]) :: :ok
   def set_log(git_root, entries) when is_list(entries) do
     :ets.insert(@table, {{:log, Path.expand(git_root)}, entries})
     :ok
   end
 
-  @doc "Sets the diff output returned for `git_root`."
+  @doc "Sets the log entries returned for `git_root` and a specific options keyword list."
+  @spec set_log(String.t(), keyword(), [Minga.Git.log_entry()]) :: :ok
+  def set_log(git_root, opts, entries) when is_list(opts) and is_list(entries) do
+    :ets.insert(@table, {{:log, Path.expand(git_root), normalize_opts(opts)}, entries})
+    :ok
+  end
+
+  @doc "Sets the default diff output returned for `git_root`."
   @spec set_diff(String.t(), String.t()) :: :ok
   def set_diff(git_root, diff_text) when is_binary(diff_text) do
     :ets.insert(@table, {{:diff, Path.expand(git_root)}, diff_text})
+    :ok
+  end
+
+  @doc "Sets the diff output returned for `git_root` and a specific options keyword list."
+  @spec set_diff(String.t(), keyword(), String.t()) :: :ok
+  def set_diff(git_root, opts, diff_text) when is_list(opts) and is_binary(diff_text) do
+    :ets.insert(@table, {{:diff, Path.expand(git_root), normalize_opts(opts)}, diff_text})
     :ok
   end
 
@@ -131,7 +145,9 @@ defmodule Minga.Git.Stub do
     :ets.match_delete(@table, {{:staged, expanded, :_}, :_})
     :ets.match_delete(@table, {{:staged_paths, expanded}, :_})
     :ets.match_delete(@table, {{:log, expanded}, :_})
+    :ets.match_delete(@table, {{:log, expanded, :_}, :_})
     :ets.match_delete(@table, {{:diff, expanded}, :_})
+    :ets.match_delete(@table, {{:diff, expanded, :_}, :_})
     :ets.match_delete(@table, {{:branch, expanded}, :_})
     :ets.match_delete(@table, {{:branches, expanded}, :_})
     :ets.match_delete(@table, {{:branch_delete, expanded, :_, :_}, :_})
@@ -183,19 +199,35 @@ defmodule Minga.Git.Stub do
 
   @impl true
   @spec diff(String.t(), keyword()) :: {:ok, String.t()}
-  def diff(git_root, _opts \\ []) do
-    case :ets.lookup(@table, {:diff, Path.expand(git_root)}) do
-      [{_, text}] -> {:ok, text}
-      [] -> {:ok, ""}
+  def diff(git_root, opts \\ []) do
+    expanded = Path.expand(git_root)
+
+    case :ets.lookup(@table, {:diff, expanded, normalize_opts(opts)}) do
+      [{_, text}] ->
+        {:ok, text}
+
+      [] ->
+        case :ets.lookup(@table, {:diff, expanded}) do
+          [{_, text}] -> {:ok, text}
+          [] -> {:ok, ""}
+        end
     end
   end
 
   @impl true
   @spec log(String.t(), keyword()) :: {:ok, [Minga.Git.log_entry()]}
-  def log(git_root, _opts \\ []) do
-    case :ets.lookup(@table, {:log, Path.expand(git_root)}) do
-      [{_, entries}] -> {:ok, entries}
-      [] -> {:ok, []}
+  def log(git_root, opts \\ []) do
+    expanded = Path.expand(git_root)
+
+    case :ets.lookup(@table, {:log, expanded, normalize_opts(opts)}) do
+      [{_, entries}] ->
+        {:ok, entries}
+
+      [] ->
+        case :ets.lookup(@table, {:log, expanded}) do
+          [{_, entries}] -> {:ok, entries}
+          [] -> {:ok, []}
+        end
     end
   end
 
@@ -459,6 +491,11 @@ defmodule Minga.Git.Stub do
       [] ->
         :ok
     end
+  end
+
+  @spec normalize_opts(keyword()) :: keyword()
+  defp normalize_opts(opts) do
+    Enum.sort_by(opts, fn {key, _value} -> key end)
   end
 
   # Walks up the directory tree looking for a registered root, just like

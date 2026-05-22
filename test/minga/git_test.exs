@@ -51,6 +51,11 @@ defmodule Minga.GitTest do
       assert {:ok, "+new line"} = Git.diff(dir)
     end
 
+    test "diff returns commit-specific text", %{root: dir} do
+      GitStub.set_diff(dir, [commit: "abc123"], "+commit line")
+      assert {:ok, "+commit line"} = Git.diff(dir, commit: "abc123")
+    end
+
     test "log returns configured entries", %{root: dir} do
       entry = %Git.LogEntry{
         hash: "abc",

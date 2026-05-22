@@ -679,8 +679,8 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       picker.filtered
       |> Enum.take(limit)
       |> Enum.map(fn item ->
-        {item.id, item.label, item.description, item.annotation, item.icon_color, item.two_line,
-         item.match_positions, Picker.marked?(picker, item)}
+        {item.id, item.label, item.description, item.annotation, item.search_text,
+         item.icon_color, item.two_line, item.match_positions, Picker.marked?(picker, item)}
       end)
 
     :erlang.phash2({
@@ -700,14 +700,18 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   # Returns a list of lines, where each line is a list of {text, fg_color, bold} segments.
   @spec build_picker_preview(ctx()) :: [[ProtocolGUI.preview_segment()]] | nil
   defp build_picker_preview(
-         %{shell_state: %{modal: {:picker, %{picker_ui: %{picker: picker}}}}} = ctx
+         %{shell_state: %{modal: {:picker, %{picker_ui: %{picker: picker, source: source}}}}} =
+           ctx
        ) do
     case Picker.selected_item(picker) do
       nil ->
         nil
 
-      %Picker.Item{id: id} ->
-        build_preview_for_item(ctx, id)
+      %Picker.Item{id: id} = item ->
+        case Picker.Source.preview(source, item, ctx) do
+          nil -> build_preview_for_item(ctx, id)
+          lines -> lines
+        end
     end
   end
 

@@ -118,6 +118,7 @@ defmodule Minga.Keymap.Defaults do
     # ── Git ──────────────────────────────────────────────────────────────────────
     {~k(g g), :git_status_toggle, "Git status"},
     {~k(g f), :git_changed_files, "Changed files"},
+    {~k(g l), :git_log, "Git log"},
     {~k(g B), :git_branch_picker, "Switch branch"},
     {~k(g P), :git_push, "Push"},
     {~k(g p), :git_pull, "Pull"},

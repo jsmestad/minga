@@ -106,6 +106,12 @@ defmodule MingaEditor.UI.Picker.Context do
     }
   end
 
+  @doc "Returns a copy of the picker context with source-specific context data."
+  @spec with_picker_context(t(), map() | nil) :: t()
+  def with_picker_context(%__MODULE__{picker_ui: picker_ui} = ctx, context) do
+    %{ctx | picker_ui: PickerState.put_context(picker_ui, context)}
+  end
+
   @spec active_document_symbols(State.t()) :: [Minga.Language.Symbol.t()]
   defp active_document_symbols(%State{} = state) do
     case State.active_window_struct(state) do

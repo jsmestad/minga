@@ -47,17 +47,17 @@ defmodule MingaEditor.PickerUI do
   # When a prefix character is typed as the first query char in a switchable
   # source (file picker, recent files), the picker swaps to the mapped source
   # and strips the prefix from the fuzzy query.
-  @mode_prefixes %{
+  @file_mode_prefixes %{
     ">" => MingaEditor.UI.Picker.CommandSource,
     "#" => MingaEditor.UI.Picker.ProjectSearchSource,
     "@" => MingaEditor.UI.Picker.BufferSource
   }
 
-  # Sources that support mode switching via prefix.
-  @switchable_sources [
-    MingaEditor.UI.Picker.FileSource,
-    MingaEditor.UI.Picker.RecentFileSource
-  ]
+  @mode_prefixes %{
+    MingaEditor.UI.Picker.FileSource => @file_mode_prefixes,
+    MingaEditor.UI.Picker.RecentFileSource => @file_mode_prefixes,
+    MingaEditor.UI.Picker.GitLogSource => %{"f" => MingaEditor.UI.Picker.GitLogFileSource}
+  }
 
   defmodule RenderInput do
     @moduledoc """
@@ -956,8 +956,10 @@ defmodule MingaEditor.PickerUI do
          char,
          query
        ) do
-    if query == "" and source in @switchable_sources and Map.has_key?(@mode_prefixes, char) do
-      target_source = Map.fetch!(@mode_prefixes, char)
+    source_prefixes = Map.get(@mode_prefixes, source, %{})
+
+    if query == "" and Map.has_key?(source_prefixes, char) do
+      target_source = Map.fetch!(source_prefixes, char)
       {:switched, switch_to_source(state, target_source, char)}
     else
       :no_switch

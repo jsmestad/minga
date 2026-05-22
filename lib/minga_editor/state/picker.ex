@@ -37,6 +37,12 @@ defmodule MingaEditor.State.Picker do
   def open?(%__MODULE__{picker: nil}), do: false
   def open?(%__MODULE__{}), do: true
 
+  @doc "Returns a picker state with updated source context."
+  @spec put_context(t(), map() | nil) :: t()
+  def put_context(%__MODULE__{} = ps, context) do
+    %{ps | context: context}
+  end
+
   @doc "Updates the inner `MingaEditor.UI.Picker` instance."
   @spec update_picker(t(), MingaEditor.UI.Picker.t()) :: t()
   def update_picker(%__MODULE__{} = ps, picker) do

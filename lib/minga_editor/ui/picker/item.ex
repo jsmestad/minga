@@ -18,6 +18,7 @@ defmodule MingaEditor.UI.Picker.Item do
   - `:icon_color` — 24-bit RGB color for the first grapheme (the icon) of the label
   - `:annotation` — right-aligned metadata (keybinding, status indicator),
     styled distinctly from the description (e.g., "SPC f s" for commands)
+  - `:search_text` — hidden text included in fuzzy matching but not rendered
   - `:match_positions` — 0-based character indices of matched characters in the
     label, computed during fuzzy filtering for rendering highlights
   - `:two_line` — when true, renders description on a second line below the label
@@ -31,6 +32,7 @@ defmodule MingaEditor.UI.Picker.Item do
     description: "",
     icon_color: nil,
     annotation: nil,
+    search_text: "",
     match_positions: [],
     two_line: false
   ]
@@ -41,6 +43,7 @@ defmodule MingaEditor.UI.Picker.Item do
           description: String.t(),
           icon_color: non_neg_integer() | nil,
           annotation: String.t() | nil,
+          search_text: String.t(),
           match_positions: [non_neg_integer()],
           two_line: boolean()
         }

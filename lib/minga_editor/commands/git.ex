@@ -20,6 +20,8 @@ defmodule MingaEditor.Commands.Git do
   alias Minga.Git.MergeConflict.Region
   alias Minga.Language
   alias MingaEditor.UI.Picker.GitChangedSource
+  alias MingaEditor.UI.Picker.GitLogFileSource
+  alias MingaEditor.UI.Picker.GitLogSource
   alias MingaEditor.UI.Picker.GitStashSource
 
   @type state :: EditorState.t()
@@ -35,6 +37,8 @@ defmodule MingaEditor.Commands.Git do
   @command_specs [
     {:git_status_toggle, "Git status", false},
     {:git_changed_files, "Changed files", false},
+    {:git_log, "Git log", false},
+    {:git_log_file, "Git log for current file", true},
     {:git_branch_picker, "Switch branch", false},
     {:git_stash_save, "Stash changes", false},
     {:git_stash_pop, "Pop stash", false},
@@ -88,6 +92,16 @@ defmodule MingaEditor.Commands.Git do
 
   def execute(state, :git_changed_files) do
     PickerUI.open(state, GitChangedSource)
+  end
+
+  def execute(state, :git_log) do
+    PickerUI.open(state, GitLogSource)
+  end
+
+  def execute(state, :git_log_file) do
+    with_git_buffer(state, fn _git_pid, _buf ->
+      PickerUI.open(state, GitLogFileSource)
+    end)
   end
 
   def execute(state, :git_branch_picker) do

@@ -123,7 +123,7 @@ defmodule Minga.Git do
   @doc """
   Returns the diff for a specific file or all changes.
 
-  Options: `:path` (file path), `:staged` (boolean, default false).
+  Options: `:path` (file path), `:staged` (boolean, default false), `:commit` (commit hash).
   """
   @spec diff(String.t(), keyword()) :: {:ok, String.t()} | {:error, String.t()}
   def diff(git_root, opts \\ []), do: impl().diff(git_root, opts)

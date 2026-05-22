@@ -22,6 +22,25 @@ defmodule MingaEditor.UI.Picker.SourceTest do
     def on_cancel(state), do: state
   end
 
+  defmodule WithPreviewSource do
+    @behaviour MingaEditor.UI.Picker.Source
+
+    @impl true
+    def title, do: "With preview"
+
+    @impl true
+    def candidates(_ctx), do: [{:a, "item", "desc"}]
+
+    @impl true
+    def on_select(_item, state), do: state
+
+    @impl true
+    def on_cancel(state), do: state
+
+    @impl true
+    def preview(_item, _context), do: [[{"preview", 0xFFFFFF, false}]]
+  end
+
   defmodule WithActionsSource do
     @behaviour MingaEditor.UI.Picker.Source
 
@@ -70,6 +89,18 @@ defmodule MingaEditor.UI.Picker.SourceTest do
   describe "preview?/1" do
     test "returns false for source without preview? callback" do
       refute Source.preview?(NoActionsSource)
+    end
+  end
+
+  describe "preview/3" do
+    test "returns nil for source without preview callback" do
+      assert Source.preview(NoActionsSource, {:a, "item", "desc"}, %{}) == nil
+    end
+
+    test "returns preview lines for source with preview callback" do
+      assert Source.preview(WithPreviewSource, {:a, "item", "desc"}, %{}) == [
+               [{"preview", 0xFFFFFF, false}]
+             ]
     end
   end
 

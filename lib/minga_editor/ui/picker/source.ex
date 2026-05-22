@@ -12,6 +12,7 @@ defmodule MingaEditor.UI.Picker.Source do
   - `on_select/2` — called when the user selects an item; returns new editor state
   - `on_cancel/1` — called when the user cancels; returns new editor state
   - `preview?/0` — whether navigating the picker should preview the selection (default: false)
+  - `preview/2` — optional source-provided GUI preview content for the selected item
   - `title/0` — the picker title shown in the separator bar
 
   ## Example
@@ -59,6 +60,12 @@ defmodule MingaEditor.UI.Picker.Source do
   @doc "Whether navigating the picker should live-preview the selection."
   @callback preview?() :: boolean()
 
+  @typedoc "A styled preview segment: display text, 24-bit foreground color, bold flag."
+  @type preview_segment :: {String.t(), non_neg_integer(), boolean()}
+
+  @doc "Returns source-provided GUI preview content for an item."
+  @callback preview(Picker.item(), context :: term()) :: [[preview_segment()]] | nil
+
   @typedoc "An alternative action: display name and action identifier."
   @type action_entry :: {name :: String.t(), action_id :: atom()}
 
@@ -96,7 +103,14 @@ defmodule MingaEditor.UI.Picker.Source do
   """
   @callback keep_open_on_select?() :: boolean()
 
-  @optional_callbacks [preview?: 0, actions: 1, on_action: 3, layout: 0, keep_open_on_select?: 0]
+  @optional_callbacks [
+    preview?: 0,
+    preview: 2,
+    actions: 1,
+    on_action: 3,
+    layout: 0,
+    keep_open_on_select?: 0
+  ]
 
   @doc """
   Default `on_cancel` implementation: restores the buffer that was active
@@ -124,6 +138,18 @@ defmodule MingaEditor.UI.Picker.Source do
       module.preview?()
     else
       false
+    end
+  end
+
+  @doc """
+  Returns source-provided preview content, or nil when no preview callback exists.
+  """
+  @spec preview(module(), Picker.item(), term()) :: [[preview_segment()]] | nil
+  def preview(module, item, context) do
+    if exported?(module, :preview, 2) do
+      module.preview(item, context)
+    else
+      nil
     end
   end
 
