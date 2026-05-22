@@ -65,6 +65,9 @@ defmodule Minga.Keymap.Defaults do
     {[{?b, @none}, {?W, @none}], :view_warnings, "View warnings"},
     {[{?b, @none}, {?N, @none}], :new_buffer, "New buffer"},
     {[{?b, @none}, {?l, @none}], :set_language, "Set language"},
+    {[{?b, @none}, {?P, @none}], :pin_tab, "Pin/unpin tab"},
+    {[{?b, @none}, {?<, @none}], :move_tab_left, "Move tab left"},
+    {[{?b, @none}, {?>, @none}], :move_tab_right, "Move tab right"},
 
     # ── Window ────────────────────────────────────────────────────────────────
     {[{?w, @none}, {?h, @none}], :window_left, "Window left"},

@@ -219,7 +219,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       config_update: 0x43,
       config_query: 0x44,
       notification_dismiss: 0x45,
-      notification_action: 0x46
+      notification_action: 0x46,
+      tab_reorder: 0x47
     )
   end
 

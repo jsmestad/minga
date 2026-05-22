@@ -297,9 +297,9 @@ struct TabBarStateLifecycleTests {
         let state = TabBarState()
         let raw = [
             Wire.TabEntry(id: 42, groupId: 0, isActive: true, isDirty: true, isAgent: false,
-                       hasAttention: false, agentStatus: 0, icon: "", label: "editor.ex"),
+                       hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "editor.ex"),
             Wire.TabEntry(id: 99, groupId: 0, isActive: false, isDirty: false, isAgent: true,
-                       hasAttention: true, agentStatus: 1, icon: "", label: "Agent")
+                       hasAttention: true, agentStatus: 1, isPinned: false, tintColorRGB: 0, icon: "", label: "Agent")
         ]
         state.update(activeIndex: 0, entries: raw)
 
@@ -318,7 +318,7 @@ struct TabBarStateLifecycleTests {
         let state = TabBarState()
         state.update(activeIndex: 1, entries: [
             Wire.TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false,
-                       hasAttention: false, agentStatus: 0, icon: "", label: "a")
+                       hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "a")
         ])
         state.hide()
 

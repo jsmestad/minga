@@ -14,6 +14,8 @@ struct TabEntry: Identifiable {
     let isAgent: Bool
     let hasAttention: Bool
     let agentStatus: UInt8
+    let isPinned: Bool
+    let tintColor: Color?
     let icon: String
     let label: String
 }
@@ -40,12 +42,14 @@ struct WorkspaceTabEntry: Identifiable {
     let kind: UInt8
     let flags: UInt16
     let pathHash: UInt32
+    let tintColor: Color?
     let icon: String
     let label: String
     let path: String
 
     var isDirty: Bool { flags & 0x0001 != 0 }
     var hasAttention: Bool { flags & 0x0002 != 0 }
+    var isPinned: Bool { flags & 0x0020 != 0 }
 }
 
 /// Observable state for the tab bar, driven by BEAM protocol messages.
@@ -85,6 +89,8 @@ final class TabBarState {
                 isAgent: entry.isAgent,
                 hasAttention: entry.hasAttention,
                 agentStatus: entry.agentStatus,
+                isPinned: entry.isPinned,
+                tintColor: Self.color(from: entry.tintColorRGB),
                 icon: entry.icon,
                 label: entry.label
             )
@@ -124,11 +130,22 @@ final class TabBarState {
                 kind: entry.kind,
                 flags: entry.flags,
                 pathHash: entry.pathHash,
+                tintColor: Self.color(from: entry.tintColorRGB),
                 icon: entry.icon,
                 label: entry.label,
                 path: entry.path
             )
         }
+    }
+
+    private static func color(from rgb: UInt32) -> Color? {
+        guard rgb != 0 else { return nil }
+        return Color(
+            .sRGB,
+            red: Double((rgb >> 16) & 0xFF) / 255.0,
+            green: Double((rgb >> 8) & 0xFF) / 255.0,
+            blue: Double(rgb & 0xFF) / 255.0
+        )
     }
 
     /// Clear all tab state.

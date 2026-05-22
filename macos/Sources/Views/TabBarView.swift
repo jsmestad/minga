@@ -17,6 +17,8 @@ struct TabBarView: View {
     let encoder: InputEncoder?
 
     @State private var hoverTabId: UInt32?
+    @State private var dropTargetTabId: UInt32?
+    @State private var tabDragInProgress: Bool = false
     /// Accumulated horizontal swipe delta for agent workspace switching.
     @State private var swipeDelta: CGFloat = 0
     /// Whether a swipe gesture is in progress.
@@ -111,7 +113,7 @@ struct TabBarView: View {
             DragGesture(minimumDistance: 20)
                 .onChanged { value in
                     // Only act on primarily horizontal drags (trackpad swipe)
-                    guard tabBarState.hasWorkspaces else { return }
+                    guard tabBarState.hasWorkspaces && !tabDragInProgress else { return }
                     let horizontal = abs(value.translation.width)
                     let vertical = abs(value.translation.height)
                     guard horizontal > vertical * 1.5 else { return }
@@ -148,6 +150,8 @@ struct TabBarView: View {
                     isAgent: false,
                     hasAttention: tab.hasAttention,
                     agentStatus: 0,
+                    isPinned: tab.isPinned,
+                    tintColor: tab.tintColor,
                     icon: tab.icon,
                     label: tab.label
                 )
@@ -162,10 +166,17 @@ struct TabBarView: View {
     /// Flat tab strip (no workspaces active, Tier 0).
     @ViewBuilder
     private var flatTabStrip: some View {
-        ForEach(displayTabs) { tab in
-            tabItem(tab)
+        let tabs = displayTabs
+        let pinnedCount = tabs.filter(\.isPinned).count
 
-            if tab.id != displayTabs.last?.id {
+        ForEach(Array(tabs.enumerated()), id: \.element.id) { index, tab in
+            if index == pinnedCount && pinnedCount > 0 && pinnedCount < tabs.count {
+                pinnedSeparator
+            }
+
+            tabItem(tab, visibleIndex: index)
+
+            if index < tabs.count - 1 && index + 1 != pinnedCount {
                 verticalSeparator
             }
         }
@@ -196,7 +207,7 @@ struct TabBarView: View {
     @ViewBuilder
     private func visibleGroupTabs(_ group: TabGroup) -> some View {
         ForEach(Array(group.tabs.enumerated()), id: \.element.id) { tabIndex, tab in
-            tabItem(tab)
+            tabItem(tab, visibleIndex: tabIndex)
 
             if tabIndex < group.tabs.count - 1 {
                 verticalSeparator
@@ -412,10 +423,10 @@ struct TabBarView: View {
     // MARK: - Tab item
 
     @ViewBuilder
-    private func tabItem(_ tab: TabEntry) -> some View {
-        let isHovering = hoverTabId == tab.id
+    private func tabItem(_ tab: TabEntry, visibleIndex: Int) -> some View {
+        let isHovering = hoverTabId == tab.id || dropTargetTabId == tab.id
 
-        HStack(spacing: 5) {
+        HStack(spacing: tab.isPinned ? 0 : 5) {
             // File type icon (Nerd Font for files, SF Symbol for agents)
             if tab.isAgent {
                 Image(systemName: "cpu")
@@ -427,8 +438,8 @@ struct TabBarView: View {
                     .foregroundStyle(tab.isActive ? theme.tabActiveFg : theme.tabInactiveFg)
             }
 
-            // Label: agent tabs show no label (workspace indicator carries the name)
-            if !tab.isAgent {
+            // Label: pinned and agent tabs stay compact; the tooltip carries the full name.
+            if !tab.isPinned && !tab.isAgent {
                 Text(tab.label)
                     .font(.system(size: 11.5))
                     .lineLimit(1)
@@ -436,29 +447,47 @@ struct TabBarView: View {
                     .foregroundStyle(tab.isActive ? theme.tabActiveFg : theme.tabInactiveFg)
             }
 
-            // Close button / dirty indicator zone.
-            // The close button is always in the view hierarchy so it can
-            // receive clicks without the parent onTapGesture intercepting.
-            // It's visually hidden (opacity 0) when not hovered or active.
-            ZStack {
-                if tab.isDirty && !isHovering {
-                    Circle()
-                        .fill(theme.tabModifiedFg)
-                        .frame(width: 5, height: 5)
-                } else if tab.hasAttention && !isHovering {
-                    Circle()
-                        .fill(theme.tabAttentionFg)
-                        .frame(width: 5, height: 5)
-                }
+            if !tab.isPinned {
+                // Close button / dirty indicator zone.
+                // The close button is always in the view hierarchy so it can
+                // receive clicks without the parent onTapGesture intercepting.
+                // It's visually hidden (opacity 0) when not hovered or active.
+                ZStack {
+                    if tab.isDirty && !isHovering {
+                        Circle()
+                            .fill(theme.tabModifiedFg)
+                            .frame(width: 5, height: 5)
+                    } else if tab.hasAttention && !isHovering {
+                        Circle()
+                            .fill(theme.tabAttentionFg)
+                            .frame(width: 5, height: 5)
+                    }
 
-                closeButton(tab)
-                    .opacity(isHovering || tab.isActive ? 1 : 0)
+                    closeButton(tab)
+                        .opacity(isHovering || tab.isActive ? 1 : 0)
+                }
+                .frame(width: 12, height: 12)
             }
-            .frame(width: 12, height: 12)
         }
-        .padding(.horizontal, 12)
-        .frame(height: barHeight)
+        .padding(.horizontal, tab.isPinned ? 8 : 12)
+        .frame(width: tab.isPinned ? 28 : nil, height: barHeight)
         .background(tab.isActive ? theme.tabActiveBg : Color.clear)
+        .overlay(alignment: .bottom) {
+            if let tint = tabTint(tab) {
+                Rectangle()
+                    .fill(tint)
+                    .frame(height: 2)
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if tab.isPinned, let badgeColor = pinnedBadgeColor(tab) {
+                Circle()
+                    .fill(badgeColor)
+                    .frame(width: 5, height: 5)
+                    .padding(.top, 6)
+                    .padding(.trailing, 5)
+            }
+        }
         .contentShape(Rectangle())
         .onTapGesture {
             encoder?.sendSelectTab(id: tab.id)
@@ -468,10 +497,50 @@ struct TabBarView: View {
                 hoverTabId = hovering ? tab.id : nil
             }
         }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 3)
+                .onChanged { _ in
+                    tabDragInProgress = true
+                }
+                .onEnded { _ in
+                    tabDragInProgress = false
+                }
+        )
+        .draggable(String(tab.id)) {
+            tabDragPreview(tab)
+        }
+        .dropDestination(for: String.self) { droppedIds, _location in
+            guard let first = droppedIds.first, let draggedId = UInt32(first), draggedId != tab.id else {
+                return false
+            }
+            guard let draggedTab = displayTabs.first(where: { $0.id == draggedId }), draggedTab.groupId == tab.groupId, draggedTab.isPinned == tab.isPinned else {
+                return false
+            }
+            encoder?.sendTabReorder(id: draggedId, newIndex: UInt16(visibleIndex))
+            return true
+        } isTargeted: { targeted in
+            withAnimation(.easeOut(duration: 0.12)) {
+                dropTargetTabId = targeted ? tab.id : nil
+            }
+        }
         .accessibilityIdentifier("workspace-file-tab-\(tab.id)")
         .accessibilityLabel("File tab \(tab.label)")
         .accessibilityValue(tab.isDirty ? "modified" : "clean")
         .contextMenu {
+            Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") {
+                encoder?.sendSelectTab(id: tab.id)
+                encoder?.sendExecuteCommand(name: tab.isPinned ? "unpin_tab" : "pin_tab")
+            }
+            Divider()
+            Button("Move Tab Left") {
+                encoder?.sendSelectTab(id: tab.id)
+                encoder?.sendExecuteCommand(name: "move_tab_left")
+            }
+            Button("Move Tab Right") {
+                encoder?.sendSelectTab(id: tab.id)
+                encoder?.sendExecuteCommand(name: "move_tab_right")
+            }
+            Divider()
             Button("Close") {
                 encoder?.sendCloseTab(id: tab.id)
             }
@@ -488,6 +557,30 @@ struct TabBarView: View {
             }
             .disabled(tab.isAgent)
         }
+    }
+
+    @ViewBuilder
+    private func tabDragPreview(_ tab: TabEntry) -> some View {
+        HStack(spacing: 5) {
+            if tab.isAgent {
+                Image(systemName: "cpu")
+                    .font(.system(size: 11))
+            } else {
+                Text(tab.icon)
+                    .font(.custom("Symbols Nerd Font Mono", size: 12))
+            }
+
+            if !tab.isPinned && !tab.isAgent {
+                Text(tab.label)
+                    .font(.system(size: 11.5))
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, tab.isPinned ? 8 : 12)
+        .frame(width: tab.isPinned ? 28 : nil, height: barHeight)
+        .background(theme.tabActiveBg)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .shadow(radius: 6, y: 3)
     }
 
     // MARK: - Helpers
@@ -545,6 +638,30 @@ struct TabBarView: View {
         Rectangle()
             .fill(theme.tabSeparatorFg.opacity(0.4))
             .frame(width: 1, height: 16)
+    }
+
+    private var pinnedSeparator: some View {
+        Rectangle()
+            .fill(theme.tabSeparatorFg.opacity(0.75))
+            .frame(width: 1, height: 22)
+            .padding(.horizontal, 3)
+    }
+
+    private func tabTint(_ tab: TabEntry) -> Color? {
+        if let tint = tab.tintColor {
+            return tint
+        }
+        return tab.isAgent ? Color.accentColor : nil
+    }
+
+    private func pinnedBadgeColor(_ tab: TabEntry) -> Color? {
+        if tab.isDirty {
+            return theme.tabModifiedFg
+        }
+        if tab.hasAttention {
+            return theme.tabAttentionFg
+        }
+        return nil
     }
 }
 

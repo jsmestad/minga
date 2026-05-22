@@ -232,8 +232,7 @@ defmodule MingaEditor.Session.ChromeState do
 
   defp visible_tabs(state, %TabBar{} = tb, active_workspace_id) do
     tb
-    |> workspace_tabs(active_workspace_id)
-    |> Enum.filter(&(&1.kind == :file))
+    |> TabBar.visible_file_tabs(active_workspace_id)
     |> Enum.map(&tab_summary(state, &1, active_workspace_id))
   end
 
@@ -257,7 +256,9 @@ defmodule MingaEditor.Session.ChromeState do
       icon: tab_icon(tab, path),
       dirty?: buffer_dirty?(buffer),
       draft_state: :none,
-      attention?: tab.attention
+      attention?: tab.attention,
+      pinned?: tab.pinned?,
+      tint_color: tab_tint_color(tab)
     )
   end
 
@@ -306,6 +307,10 @@ defmodule MingaEditor.Session.ChromeState do
   end
 
   defp buffer_dirty?(_pid), do: false
+
+  @spec tab_tint_color(Tab.t()) :: non_neg_integer()
+  defp tab_tint_color(%Tab{kind: :agent}), do: 0x7AA2F7
+  defp tab_tint_color(%Tab{}), do: 0
 
   @spec tab_icon(Tab.t(), String.t() | nil) :: String.t()
   defp tab_icon(%Tab{kind: :agent}, _path), do: Devicon.icon(:agent)

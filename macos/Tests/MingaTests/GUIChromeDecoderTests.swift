@@ -133,14 +133,16 @@ struct GUITabBarDecoderTests {
         appendU16(&data, 0) // group_id (manual workspace)
         appendString8(&data, "") // icon (Nerd Font, can be multi-byte)
         appendString16(&data, "editor.ex")
+        appendU32(&data, 0) // tint_color_rgb
 
-        // Tab 2: agent tab, has attention, workspace 1
-        let flags2: UInt8 = 0x04 | 0x08 | (1 << 4) // agent + attention + agentStatus=1
+        // Tab 2: pinned agent tab, has attention, workspace 1
+        let flags2: UInt8 = 0x04 | 0x08 | (1 << 4) | 0x80 // agent + attention + agentStatus=1 + pinned
         data.append(flags2)
         appendU32(&data, 99) // id
         appendU16(&data, 1) // group_id (agent workspace)
         appendString8(&data, "")
         appendString16(&data, "Agent")
+        appendU32(&data, 0x7AA2F7) // tint_color_rgb
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
@@ -163,6 +165,8 @@ struct GUITabBarDecoderTests {
         #expect(tabs[1].isAgent == true)
         #expect(tabs[1].hasAttention == true)
         #expect(tabs[1].agentStatus == 1)
+        #expect(tabs[1].isPinned == true)
+        #expect(tabs[1].tintColorRGB == 0x7AA2F7)
         #expect(tabs[1].label == "Agent")
     }
 
@@ -178,6 +182,7 @@ struct GUITabBarDecoderTests {
         appendU16(&data, 1)
         appendString8(&data, "")
         appendString16(&data, "hidden.ex")
+        appendU32(&data, 0) // tint_color_rgb
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
@@ -2100,7 +2105,7 @@ struct GUIWorkspacesDecoderTests {
     @Test("Decode canonical workspaces with visible tabs")
     func decodeCanonicalWorkspaces() throws {
         var payload = Data()
-        payload.append(1) // version
+        payload.append(2) // version
         appendU16(&payload, 1) // active_workspace_id
         payload.append(1) // mode = agent
         payload.append(1) // flags = has attention
@@ -2124,7 +2129,7 @@ struct GUIWorkspacesDecoderTests {
             return
         }
 
-        #expect(version == 1)
+        #expect(version == 2)
         #expect(activeId == 1)
         #expect(mode == 1)
         #expect(flags == 1)
@@ -2144,6 +2149,7 @@ struct GUIWorkspacesDecoderTests {
         #expect(visibleTabs[0].workspaceId == 1)
         #expect(visibleTabs[0].flags == 0x0013)
         #expect(visibleTabs[0].pathHash == 0x12345678)
+        #expect(visibleTabs[0].tintColorRGB == 0x7AA2F7)
         #expect(visibleTabs[0].label == "agent.ex")
         #expect(visibleTabs[0].path == "/tmp/agent.ex")
     }
@@ -2151,7 +2157,7 @@ struct GUIWorkspacesDecoderTests {
     @Test("Decode canonical workspaces with zero workspaces and tabs")
     func decodeEmpty() throws {
         var payload = Data()
-        payload.append(1) // version
+        payload.append(2) // version
         appendU16(&payload, 0) // active_workspace_id
         payload.append(0) // mode = editor
         payload.append(0) // flags
@@ -2185,7 +2191,7 @@ struct GUIWorkspacesDecoderTests {
     @Test("Invalid UTF-8 in canonical workspace payload throws malformed")
     func invalidUTF8Throws() {
         var payload = Data()
-        payload.append(1) // version
+        payload.append(2) // version
         appendU16(&payload, 1) // active_workspace_id
         payload.append(1) // mode = agent
         payload.append(0) // flags
@@ -2227,7 +2233,7 @@ struct GUIWorkspacesDecoderTests {
         appendString8(&data, icon)
     }
 
-    private func appendVisibleTab(_ data: inout Data, id: UInt32, workspaceId: UInt16, kind: UInt8, flags: UInt16, pathHash: UInt32, icon: String, label: String, path: String) {
+    private func appendVisibleTab(_ data: inout Data, id: UInt32, workspaceId: UInt16, kind: UInt8, flags: UInt16, pathHash: UInt32, icon: String, label: String, path: String, tintColorRGB: UInt32 = 0x7AA2F7) {
         appendU32(&data, id)
         appendU16(&data, workspaceId)
         data.append(kind)
@@ -2236,6 +2242,7 @@ struct GUIWorkspacesDecoderTests {
         appendString8(&data, icon)
         appendString16(&data, label)
         appendString16(&data, path)
+        appendU32(&data, tintColorRGB)
     }
 }
 

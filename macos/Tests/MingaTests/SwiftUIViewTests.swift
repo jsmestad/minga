@@ -610,9 +610,9 @@ struct TabBarViewViewTests {
         let state = TabBarState()
         state.update(activeIndex: 0, entries: [
             Wire.TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false,
-                       hasAttention: false, agentStatus: 0, icon: "", label: "editor.ex"),
+                       hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "editor.ex"),
             Wire.TabEntry(id: 2, groupId: 0, isActive: false, isDirty: false, isAgent: false,
-                       hasAttention: false, agentStatus: 0, icon: "", label: "test.ex"),
+                       hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "test.ex"),
         ])
 
         let sut = TabBarView(tabBarState: state, theme: ThemeColors(), encoder: nil)
@@ -629,9 +629,9 @@ struct TabBarViewViewTests {
         let state = TabBarState()
         state.update(activeIndex: 0, entries: [
             Wire.TabEntry(id: 1, groupId: 1, isActive: true, isDirty: false, isAgent: false,
-                       hasAttention: false, agentStatus: 0, icon: "", label: "legacy-agent-chat"),
+                       hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "legacy-agent-chat"),
             Wire.TabEntry(id: 2, groupId: 2, isActive: false, isDirty: false, isAgent: false,
-                       hasAttention: false, agentStatus: 0, icon: "", label: "background.ex")
+                       hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "background.ex")
         ])
         state.updateWorkspaces(activeWorkspaceId: 1, mode: 1, flags: 0, entries: [
             Wire.WorkspaceEntry(id: 1, kind: 1, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
@@ -639,7 +639,7 @@ struct TabBarViewViewTests {
             Wire.WorkspaceEntry(id: 2, kind: 1, status: 1, flags: 0, colorR: 0x44, colorG: 0x55, colorB: 0x66,
                                 tabCount: 3, draftCount: 0, conflictCount: 0, runningBackgroundCount: 1, label: "Research", icon: "cpu")
         ], visibleTabs: [
-            Wire.WorkspaceTabEntry(id: 42, workspaceId: 1, kind: 0, flags: 0, pathHash: 0, icon: "", label: "active.ex", path: "/tmp/active.ex")
+            Wire.WorkspaceTabEntry(id: 42, workspaceId: 1, kind: 0, flags: 0, pathHash: 0, tintColorRGB: 0, icon: "", label: "active.ex", path: "/tmp/active.ex")
         ])
 
         let sut = TabBarView(tabBarState: state, theme: ThemeColors(), encoder: nil)
@@ -667,7 +667,7 @@ struct WorkspaceHeaderViewTests {
             Wire.WorkspaceEntry(id: 2, kind: 1, status: 2, flags: 0x0003, colorR: 0x44, colorG: 0x55, colorB: 0x66,
                                 tabCount: 2, draftCount: 1, conflictCount: 1, runningBackgroundCount: 1, label: "Review", icon: "cpu")
         ], visibleTabs: [
-            Wire.WorkspaceTabEntry(id: 42, workspaceId: 2, kind: 0, flags: 0, pathHash: 0, icon: "", label: "active.ex", path: "/tmp/active.ex")
+            Wire.WorkspaceTabEntry(id: 42, workspaceId: 2, kind: 0, flags: 0, pathHash: 0, tintColorRGB: 0, icon: "", label: "active.ex", path: "/tmp/active.ex")
         ])
         return state
     }

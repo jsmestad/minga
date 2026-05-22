@@ -42,7 +42,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       <<0x71, _::8, 2::8, rest::binary>> = binary
 
       <<_flags1::8, _id1::32, gid1::16, icon1_len::8, _icon1::binary-size(icon1_len),
-        label1_len::16, _label1::binary-size(label1_len), rest2::binary>> = rest
+        label1_len::16, _label1::binary-size(label1_len), _tint1::32, rest2::binary>> = rest
 
       <<_flags2::8, _id2::32, gid2::16, _rest3::binary>> = rest2
 
@@ -79,7 +79,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       }
 
       <<0x71, active_index::8, tab_count::8, flags::8, _id::32, _workspace::16, icon_len::8,
-        _icon::binary-size(icon_len), label_len::16, _label::binary-size(label_len)>> =
+        _icon::binary-size(icon_len), label_len::16, _label::binary-size(label_len), _tint::32>> =
         ProtocolGUI.encode_gui_tab_bar(chrome_state)
 
       assert active_index == 255
@@ -117,7 +117,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       <<0x98, payload_len::16, payload::binary-size(payload_len)>> =
         ProtocolGUI.encode_gui_workspaces(chrome_state)
 
-      <<1::8, 0::16, 0::8, _flags::8, 2::8, rest::binary>> = payload
+      <<2::8, 0::16, 0::8, _flags::8, 2::8, rest::binary>> = payload
 
       <<0::16, 0::8, _manual_status::8, _manual_flags::16, _manual_r::8, _manual_g::8,
         _manual_b::8, _manual_tab_count::16, _manual_drafts::16, _manual_conflicts::16,
@@ -157,7 +157,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       <<0x98, payload_len::16, payload::binary-size(payload_len)>> =
         ProtocolGUI.encode_gui_workspaces(chrome_state)
 
-      <<1::8, 1::16, 1::8, 1::8, 1::8, rest::binary>> = payload
+      <<2::8, 1::16, 1::8, 1::8, 1::8, rest::binary>> = payload
 
       <<1::16, 1::8, 2::8, flags::16, 0xC6::8, 0x78::8, 0xDD::8, 3::16, 4::16, 2::16, 1::16,
         label_len::8, label::binary-size(label_len), icon_len::8, icon::binary-size(icon_len),
@@ -189,7 +189,8 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
 
       <<_version::8, _active::16, _mode::8, _flags::8, 0::8, 1::16, 42::32, 1::16, 0::8,
         tab_flags::16, path_hash::32, icon_len::8, icon::binary-size(icon_len), label_len::16,
-        label::binary-size(label_len), path_len::16, path::binary-size(path_len)>> = payload
+        label::binary-size(label_len), path_len::16, path::binary-size(path_len), tint::32>> =
+        payload
 
       assert Bitwise.band(tab_flags, 0x01) == 0x01
       assert Bitwise.band(tab_flags, 0x02) == 0x02
@@ -198,6 +199,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       assert icon == ""
       assert label == "agent.ex"
       assert path == "/tmp/agent.ex"
+      assert tint == 0
     end
 
     test "caps visible tabs to the 16-bit payload budget" do
@@ -282,6 +284,11 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
 
     test "decodes tab copy path" do
       assert {:ok, {:tab_copy_path, 42}} == ProtocolGUI.decode_gui_action(0x3E, <<42::32>>)
+    end
+
+    test "decodes tab reorder" do
+      assert {:ok, {:tab_reorder, 42, 3}} ==
+               ProtocolGUI.decode_gui_action(0x47, <<42::32, 3::16>>)
     end
 
     test "decodes hover open action" do
