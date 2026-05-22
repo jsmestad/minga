@@ -13,7 +13,6 @@ defmodule MingaEditor.Commands.Visual do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.VimState
   alias Minga.Mode
-  alias MingaEditor.Session.State, as: SessionState
   alias Minga.Mode.VisualState
 
   @type state :: EditorState.t()
@@ -139,10 +138,7 @@ defmodule MingaEditor.Commands.Visual do
         new_ms = %{ms | visual_anchor: start_pos, visual_type: visual_type_for_text_object(spec)}
         Buffer.move_to(buf, end_pos)
 
-        EditorState.update_workspace(
-          state,
-          &SessionState.set_editing(&1, VimState.set_mode_state(vim, new_ms))
-        )
+        EditorState.set_editing(state, VimState.set_mode_state(vim, new_ms))
     end
   end
 

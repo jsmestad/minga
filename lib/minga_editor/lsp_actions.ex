@@ -33,7 +33,6 @@ defmodule MingaEditor.LspActions do
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.VimState
   alias Minga.Log
-  alias MingaEditor.Session.State, as: SessionState
   alias Minga.LSP.Client
   alias Minga.LSP.DocumentHighlight
   alias Minga.LSP.SyncServer
@@ -484,7 +483,7 @@ defmodule MingaEditor.LspActions do
     vim = VimState.transition(state.workspace.editing, :normal)
 
     %{
-      EditorState.update_workspace(state, &SessionState.set_editing(&1, vim))
+      EditorState.set_editing(state, vim)
       | lsp: LSPState.clear_selection_ranges(state.lsp)
     }
   end
@@ -858,20 +857,20 @@ defmodule MingaEditor.LspActions do
   """
   @spec handle_document_highlight_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_document_highlight_response(state, {:error, _error}) do
-    EditorState.update_workspace(state, &SessionState.set_document_highlights(&1, nil))
+    EditorState.set_document_highlights(state, nil)
   end
 
   def handle_document_highlight_response(state, {:ok, nil}) do
-    EditorState.update_workspace(state, &SessionState.set_document_highlights(&1, nil))
+    EditorState.set_document_highlights(state, nil)
   end
 
   def handle_document_highlight_response(state, {:ok, []}) do
-    EditorState.update_workspace(state, &SessionState.set_document_highlights(&1, nil))
+    EditorState.set_document_highlights(state, nil)
   end
 
   def handle_document_highlight_response(state, {:ok, highlights}) when is_list(highlights) do
     parsed = Enum.map(highlights, &DocumentHighlight.from_lsp/1)
-    EditorState.update_workspace(state, &SessionState.set_document_highlights(&1, parsed))
+    EditorState.set_document_highlights(state, parsed)
   end
 
   # ── Code action response ──────────────────────────────────────────────────
@@ -925,7 +924,7 @@ defmodule MingaEditor.LspActions do
     # The ex-command parser handles "rename <new_name>" → {:rename, new_name}
     command_state = %CommandState{input: "rename #{placeholder}"}
     vim = VimState.transition(state.workspace.editing, :command, command_state)
-    EditorState.update_workspace(state, &SessionState.set_editing(&1, vim))
+    EditorState.set_editing(state, vim)
   end
 
   @doc """
@@ -1420,22 +1419,18 @@ defmodule MingaEditor.LspActions do
 
         ref = Client.request(client, method, params)
 
-        EditorState.update_workspace(state, fn ws ->
-          SessionState.set_lsp_pending(ws, Map.put(ws.lsp_pending, ref, kind))
-        end)
+        EditorState.put_lsp_pending(state, ref, kind)
     end
   end
 
   @spec put_lsp_pending(state(), reference(), atom() | tuple()) :: state()
   defp put_lsp_pending(state, ref, kind) do
-    EditorState.update_workspace(state, fn ws ->
-      SessionState.set_lsp_pending(ws, Map.put(ws.lsp_pending, ref, kind))
-    end)
+    EditorState.put_lsp_pending(state, ref, kind)
   end
 
   @spec set_document_highlights(state(), [DocumentHighlight.t()] | nil) :: state()
   defp set_document_highlights(state, highlights) do
-    EditorState.update_workspace(state, &SessionState.set_document_highlights(&1, highlights))
+    EditorState.set_document_highlights(state, highlights)
   end
 
   @spec parse_single_location(map()) ::
@@ -1556,9 +1551,7 @@ defmodule MingaEditor.LspActions do
   defp set_jump_mark(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
     pos = Buffer.cursor(buf)
 
-    EditorState.update_workspace(state, fn ws ->
-      SessionState.update_editing(ws, &VimState.set_last_jump_pos(&1, pos))
-    end)
+    EditorState.set_last_jump_pos(state, pos)
   end
 
   defp set_jump_mark(state), do: state
@@ -1944,7 +1937,7 @@ defmodule MingaEditor.LspActions do
       }
 
       vim = VimState.transition(state.workspace.editing, :visual, visual_state)
-      EditorState.update_workspace(state, &SessionState.set_editing(&1, vim))
+      EditorState.set_editing(state, vim)
     else
       state
     end

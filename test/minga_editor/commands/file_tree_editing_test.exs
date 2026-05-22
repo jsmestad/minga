@@ -291,13 +291,11 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       state =
         dir
         |> make_state(events_registry)
-        |> EditorState.update_workspace(
-          &SessionState.set_buffers(&1, %Buffers{
-            active: buffer,
-            list: [buffer],
-            active_index: 0
-          })
-        )
+        |> EditorState.set_buffers(%Buffers{
+          active: buffer,
+          list: [buffer],
+          active_index: 0
+        })
         |> select_entry("target.txt")
         |> Commands.FileTree.rename()
         |> replace_editing_text("renamed.txt")
@@ -471,7 +469,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
   defp replace_editing_text(%EditorState{} = state, text) when is_binary(text) do
     ft = FileTreeState.update_editing_text(state.workspace.file_tree, text)
-    EditorState.update_workspace(state, &SessionState.set_file_tree(&1, ft))
+    EditorState.set_file_tree(state, ft)
   end
 
   defp select_entry(%EditorState{} = state, name) when is_binary(name) do
@@ -485,6 +483,6 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
   defp replace_tree(%EditorState{} = state, %FileTree{} = tree) do
     ft = FileTreeState.replace_tree(state.workspace.file_tree, tree)
-    EditorState.update_workspace(state, &SessionState.set_file_tree(&1, ft))
+    EditorState.set_file_tree(state, ft)
   end
 end

@@ -86,7 +86,6 @@ defmodule MingaEditor do
           | {:suppress_tool_prompts, boolean()}
 
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.Session, as: EditorSessionState
 
@@ -436,7 +435,7 @@ defmodule MingaEditor do
     new_state = %{
       (state
        |> EditorState.set_terminal_viewport(vp)
-       |> EditorState.update_workspace(&SessionState.set_viewport(&1, vp)))
+       |> EditorState.set_viewport(vp))
       | capabilities: caps,
         layout: nil
     }
@@ -485,7 +484,7 @@ defmodule MingaEditor do
     new_state =
       state
       |> EditorState.set_terminal_viewport(vp)
-      |> EditorState.update_workspace(&SessionState.set_viewport(&1, vp))
+      |> EditorState.set_viewport(vp)
 
     # Invalidate the cached layout so resize_all_windows computes fresh
     # rectangles from the new viewport dimensions.
@@ -2053,11 +2052,8 @@ defmodule MingaEditor do
   def do_file_tree_open(state, pid, path, tree) do
     new_state = register_buffer(state, pid, path)
 
-    EditorState.update_workspace(new_state, fn ws ->
-      SessionState.set_file_tree(
-        ws,
-        FileTreeState.set_tree(ws.file_tree, FileTree.reveal(tree, path))
-      )
+    EditorState.update_file_tree(new_state, fn file_tree ->
+      FileTreeState.set_tree(file_tree, FileTree.reveal(tree, path))
     end)
   end
 
@@ -2207,9 +2203,7 @@ defmodule MingaEditor do
   @spec register_buffer_background(state(), pid(), String.t()) :: state()
   defp register_buffer_background(state, buffer_pid, file_path) do
     state =
-      EditorState.update_workspace(state, fn ws ->
-        SessionState.set_buffers(ws, Buffers.add_background(ws.buffers, buffer_pid))
-      end)
+      EditorState.update_buffers(state, &Buffers.add_background(&1, buffer_pid))
 
     state = EditorState.monitor_buffer(state, buffer_pid)
     log_message(state, "Opened (agent): #{file_path}")

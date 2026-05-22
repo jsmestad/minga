@@ -68,7 +68,7 @@ defmodule MingaEditor.Input.GitStatusInputTest do
 
   test "passthrough for non-git-status scope" do
     state = make_state_with_git_panel()
-    state = EditorState.update_workspace(state, fn ws -> %{ws | keymap_scope: :editor} end)
+    state = EditorState.set_keymap_scope(state, :editor)
 
     {:passthrough, _state} = GitStatus.handle_key(state, @j, @none)
   end

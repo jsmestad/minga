@@ -9,7 +9,6 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   alias MingaEditor.CompletionTrigger
   alias MingaEditor.LspActions
   alias MingaEditor.SemanticTokenSync
-  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.ModalOverlay
@@ -91,14 +90,9 @@ defmodule MingaEditor.Handlers.LspEventHandler do
     {CompletionHandling.handle_response(state, ref, result), [:render_now]}
   end
 
-  @spec set_lsp_pending(EditorState.t(), %{reference() => atom() | tuple()}) :: EditorState.t()
-  defp set_lsp_pending(state, pending) do
-    EditorState.update_workspace(state, &SessionState.set_lsp_pending(&1, pending))
-  end
-
   @spec delete_lsp_pending(EditorState.t(), reference()) :: EditorState.t()
   defp delete_lsp_pending(state, ref) do
-    set_lsp_pending(state, Map.delete(state.workspace.lsp_pending, ref))
+    EditorState.delete_lsp_pending(state, ref)
   end
 
   @spec dispatch_lsp_response(term(), EditorState.t(), term()) :: EditorState.t()

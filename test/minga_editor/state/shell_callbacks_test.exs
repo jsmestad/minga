@@ -125,8 +125,8 @@ defmodule MingaEditor.State.ShellCallbacksTest do
       # Manually add buf2 to the buffer list without triggering tab creation
       # (EditorState.add_buffer from an agent tab would create a new file tab)
       state =
-        EditorState.update_workspace(state, fn workspace ->
-          %{workspace | buffers: %{workspace.buffers | list: [agent_buf, buf2]}}
+        EditorState.update_buffers(state, fn buffers ->
+          %{buffers | list: [agent_buf, buf2]}
         end)
 
       new_state = EditorState.switch_buffer(state, 1)

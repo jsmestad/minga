@@ -129,16 +129,14 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     state = base_state(agent_buffer: agent_buf)
     windows = agent_windows(agent_buf)
 
-    EditorState.update_workspace(state, fn workspace ->
-      workspace
-      |> WorkspaceState.set_buffers(%Buffers{
-        active: agent_buf,
-        list: [agent_buf],
-        active_index: 0
-      })
-      |> WorkspaceState.set_windows(windows)
-      |> WorkspaceState.set_agent_ui(UIState.new())
-    end)
+    state
+    |> EditorState.set_buffers(%Buffers{
+      active: agent_buf,
+      list: [agent_buf],
+      active_index: 0
+    })
+    |> EditorState.set_windows(windows)
+    |> EditorState.set_agent_ui(UIState.new())
   end
 
   defp agent_windows(agent_buf) when is_pid(agent_buf) do

@@ -544,11 +544,11 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
     tree = FileTree.new(root)
     file_tree = FileTreeState.open(%FileTreeState{}, tree, nil)
 
-    EditorState.update_workspace(base_state(), &SessionState.set_file_tree(&1, file_tree))
+    EditorState.set_file_tree(base_state(), file_tree)
   end
 
   defp put_active_buffer(state, buffer) do
     buffers = %Buffers{active: buffer, list: [buffer], active_index: 0}
-    EditorState.update_workspace(state, &%{&1 | buffers: buffers})
+    EditorState.set_buffers(state, buffers)
   end
 end

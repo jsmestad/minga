@@ -342,9 +342,8 @@ defmodule MingaEditor.State.BufferLifecycleTest do
   end
 
   defp with_buffer_pool(state, buffers) do
-    EditorState.update_workspace(state, fn workspace ->
-      %Buffers{} = current = workspace.buffers
-      %{workspace | buffers: %{current | list: buffers}}
+    EditorState.update_buffers(state, fn %Buffers{} = current ->
+      %{current | list: buffers}
     end)
   end
 

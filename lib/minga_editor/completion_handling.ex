@@ -14,7 +14,6 @@ defmodule MingaEditor.CompletionHandling do
   alias MingaEditor.CompletionTrigger
   alias MingaEditor.SignatureHelp
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State.ModalOverlay
   alias Minga.LSP.Client
   alias Minga.LSP.SyncServer
@@ -191,9 +190,7 @@ defmodule MingaEditor.CompletionHandling do
 
   @spec put_lsp_pending(EditorState.t(), reference(), atom() | tuple()) :: EditorState.t()
   defp put_lsp_pending(state, ref, kind) do
-    EditorState.update_workspace(state, fn ws ->
-      SessionState.set_lsp_pending(ws, Map.put(ws.lsp_pending, ref, kind))
-    end)
+    EditorState.put_lsp_pending(state, ref, kind)
   end
 
   @spec accept_text(EditorState.t(), Completion.t(), String.t()) :: EditorState.t()

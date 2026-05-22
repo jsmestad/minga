@@ -43,7 +43,6 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
   alias MingaEditor.UI.Popup.Active, as: PopupActive
   alias Minga.Popup.Registry, as: PopupRegistry
   alias Minga.Popup.Rule
-  alias MingaEditor.Session.State, as: SessionState
 
   @type state :: EditorState.t()
 
@@ -334,12 +333,12 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
   @spec update_popup_windows(state(), Windows.t(), Window.id(), boolean()) :: state()
   defp update_popup_windows(state, windows, next_id, true) do
     state
-    |> EditorState.update_workspace(&SessionState.set_windows(&1, windows))
+    |> EditorState.set_windows(windows)
     |> EditorState.focus_window(next_id)
   end
 
   defp update_popup_windows(state, windows, _next_id, false) do
-    EditorState.update_workspace(state, &SessionState.set_windows(&1, windows))
+    EditorState.set_windows(state, windows)
   end
 
   @spec do_close(state(), Window.id(), PopupActive.t()) :: state()
@@ -367,7 +366,7 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
     # delete-window in Emacs). We used to restore a full tree snapshot,
     # but that clobbers any other popups that were opened after this one.
     new_windows = remove_popup_window(ws, window_id, meta)
-    state = EditorState.update_workspace(state, &SessionState.set_windows(&1, new_windows))
+    state = EditorState.set_windows(state, new_windows)
 
     Layout.invalidate(state)
   end
