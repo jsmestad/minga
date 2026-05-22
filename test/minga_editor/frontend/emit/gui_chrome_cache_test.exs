@@ -198,6 +198,17 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       refute caches2.last_gui_picker_fp == caches.last_gui_picker_fp
     end
 
+    test "picker cache fingerprints mode prefix changes" do
+      state = gui_state()
+      state_a = open_test_picker(state, "same.txt")
+      state_b = open_test_picker(state, "same.txt", ">")
+
+      {_ctx, caches, _cmds} = sync_chrome(state_a)
+      {_ctx, caches2, _cmds} = sync_chrome(state_b, caches)
+
+      refute caches2.last_gui_picker_fp == caches.last_gui_picker_fp
+    end
+
     test "minibuffer cache changes when encoded candidate metadata changes" do
       state = gui_state()
 
@@ -365,10 +376,17 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
     {state, file_tree, file_path}
   end
 
-  defp open_test_picker(state, label) do
+  defp open_test_picker(state, label, mode_prefix \\ "") do
     item = %MingaEditor.UI.Picker.Item{id: "same-id", label: label}
     picker = MingaEditor.UI.Picker.new([item], title: "Test")
-    picker_state = %MingaEditor.State.Picker{picker: picker, source: nil, action_menu: nil}
+
+    picker_state = %MingaEditor.State.Picker{
+      picker: picker,
+      source: nil,
+      action_menu: nil,
+      mode_prefix: mode_prefix
+    }
+
     ModalOverlay.open(state, :picker, PickerPayload.new(picker_state))
   end
 

@@ -80,13 +80,25 @@ struct PickerOverlay: View {
                 .foregroundStyle(theme.popupFg.opacity(0.4))
 
             if state.query.isEmpty {
-                Text(state.title.isEmpty ? "Search..." : state.title)
-                    .font(.system(size: 13))
-                    .foregroundStyle(theme.popupFg.opacity(0.35))
+                HStack(spacing: 6) {
+                    if !state.modePrefix.isEmpty {
+                        modePrefixBadge
+                    }
+
+                    Text(state.title.isEmpty ? "Search..." : state.title)
+                        .font(.system(size: 13))
+                        .foregroundStyle(theme.popupFg.opacity(0.35))
+                }
             } else {
-                Text(state.query)
-                    .font(.system(size: 13, design: .monospaced))
-                    .foregroundStyle(theme.popupFg)
+                HStack(spacing: 6) {
+                    if !state.modePrefix.isEmpty {
+                        modePrefixBadge
+                    }
+
+                    Text(state.query)
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundStyle(theme.popupFg)
+                }
             }
 
             Spacer()
@@ -99,6 +111,20 @@ struct PickerOverlay: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    @ViewBuilder
+    private var modePrefixBadge: some View {
+        Text("[\(state.modePrefix)]")
+            .font(.system(size: 12, design: .monospaced))
+            .foregroundStyle(theme.accent)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                Capsule()
+                    .fill(theme.accent.opacity(0.14))
+            )
+            .accessibilityLabel(Text("Picker mode \(state.modePrefix)"))
     }
 
     // MARK: - Results list

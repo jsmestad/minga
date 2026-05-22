@@ -651,7 +651,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         marked: MapSet.new()
       }
 
-      cmd = ProtocolGUI.encode_gui_picker(picker)
+      cmd = ProtocolGUI.encode_gui_picker(picker, false, nil, 0, ">")
       Port.command(port, cmd)
 
       assert_receive {^port, {:data, json}}, 5_000
@@ -661,6 +661,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["visible"] == true
       assert decoded["title"] == "Find File"
       assert decoded["query"] == "edi"
+      assert decoded["mode_prefix"] == ">"
       assert decoded["filtered_count"] == 1
       assert decoded["total_count"] == 1
       assert length(decoded["items"]) == 1

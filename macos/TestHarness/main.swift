@@ -140,11 +140,11 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         result["selection_size"] = Int(update.selection.size)
         return result
 
-    case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let title, let query, let hasPreview, let items, let actionMenu):
+    case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let title, let query, let hasPreview, let items, let actionMenu, let modePrefix):
         let itemArray = items.map { i -> [String: Any] in
             ["label": i.label, "description": i.description, "icon_color": Int(i.iconColor), "annotation": i.annotation, "flags": Int(i.flags), "match_positions": i.matchPositions.map { Int($0) }]
         }
-        var result: [String: Any] = ["type": "gui_picker", "visible": visible, "selected_index": Int(selectedIndex), "filtered_count": Int(filteredCount), "total_count": Int(totalCount), "title": title, "query": query, "has_preview": hasPreview, "items": itemArray]
+        var result: [String: Any] = ["type": "gui_picker", "visible": visible, "selected_index": Int(selectedIndex), "filtered_count": Int(filteredCount), "total_count": Int(totalCount), "title": title, "query": query, "mode_prefix": modePrefix, "has_preview": hasPreview, "items": itemArray]
         if let am = actionMenu {
             result["action_menu"] = ["selected_index": Int(am.selectedIndex), "actions": am.actions]
         }

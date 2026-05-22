@@ -103,11 +103,13 @@ struct PickerStateLifecycleTests {
 
         state.update(visible: true, selectedIndex: 0, filteredCount: 2,
                      totalCount: 50, title: "Find File", query: "edi",
-                     hasPreview: true, rawItems: raw, actionMenu: actionMenu)
+                     hasPreview: true, rawItems: raw, actionMenu: actionMenu,
+                     modePrefix: ">")
 
         #expect(state.visible == true)
         #expect(state.title == "Find File")
         #expect(state.query == "edi")
+        #expect(state.modePrefix == ">")
         #expect(state.hasPreview == true)
         #expect(state.filteredCount == 2)
         #expect(state.totalCount == 50)
@@ -143,7 +145,8 @@ struct PickerStateLifecycleTests {
                      rawItems: [Wire.PickerItem(iconColor: 0, flags: 0, label: "x",
                                              description: "", annotation: "",
                                              matchPositions: [])],
-                     actionMenu: Wire.PickerActionMenu(selectedIndex: 0, actions: ["A"]))
+                     actionMenu: Wire.PickerActionMenu(selectedIndex: 0, actions: ["A"]),
+                     modePrefix: "#")
         state.updatePreview(lines: [[Wire.PickerPreviewSegment(fgColor: 0, bold: false, text: "x")]])
 
         state.hide()
@@ -151,6 +154,7 @@ struct PickerStateLifecycleTests {
         #expect(state.visible == false)
         #expect(state.items.isEmpty)
         #expect(state.previewLines.isEmpty)
+        #expect(state.modePrefix == "")
         #expect(state.hasPreview == false)
         #expect(state.actionMenu == nil)
     }
