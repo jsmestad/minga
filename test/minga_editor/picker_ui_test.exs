@@ -144,6 +144,62 @@ defmodule MingaEditor.PickerUITest do
       refute Enum.any?(texts, &String.contains?(&1, "file-1 "))
     end
 
+    test "default mode prompt keeps the plain greater-than prefix" do
+      picker =
+        [%Item{id: "1", label: "main.ex"}]
+        |> Picker.new(title: "Files", max_visible: 5)
+        |> Picker.filter("main")
+
+      input = %RenderInput{
+        picker_state: %PickerState{picker: picker, source: nil},
+        theme_picker: theme_picker(),
+        viewport: Viewport.new(24, 80)
+      }
+
+      {draws, {_cursor_row, cursor_col}} = PickerUI.render(input)
+
+      assert cursor_col == String.length("> main")
+
+      assert Enum.any?(draws, fn
+               {23, 0, "> main" <> _padding, _face} -> true
+               _ -> false
+             end)
+
+      refute Enum.any?(draws, fn
+               {23, 0, "[" <> _indicator, _face} -> true
+               _ -> false
+             end)
+    end
+
+    test "switched mode prompt renders a styled mode badge" do
+      picker =
+        [%Item{id: "1", label: "main.ex"}]
+        |> Picker.new(title: "Files", max_visible: 5)
+        |> Picker.filter("main")
+
+      theme = theme_picker()
+
+      input = %RenderInput{
+        picker_state: %PickerState{picker: picker, source: nil, mode_prefix: ">"},
+        theme_picker: theme,
+        viewport: Viewport.new(24, 80)
+      }
+
+      {draws, {_cursor_row, cursor_col}} = PickerUI.render(input)
+
+      assert cursor_col == String.length("[>] main")
+
+      assert Enum.any?(draws, fn
+               {23, 0, "[>] main" <> _padding, face} -> face.fg == theme.highlight_fg
+               _ -> false
+             end)
+
+      assert Enum.any?(draws, fn
+               {23, 0, "[>]", face} -> face.fg == theme.match_fg and face.bg == theme.prompt_bg
+               _ -> false
+             end)
+    end
+
     test "draw tuples have valid 4-element structure" do
       items = [
         %Item{id: "1", label: "alpha.ex", description: "lib/"},
@@ -479,6 +535,43 @@ defmodule MingaEditor.PickerUITest do
 
       assert Enum.any?(texts, &String.contains?(&1, "╭")), "expected rounded top-left border"
       assert Enum.any?(texts, &String.contains?(&1, "╰")), "expected rounded bottom-left border"
+    end
+
+    test "centered switched mode prompt renders a styled mode badge" do
+      picker =
+        [%Item{id: "1", label: "item"}]
+        |> Picker.new(title: "Test", max_visible: 5)
+        |> Picker.filter("item")
+
+      theme = theme_picker()
+
+      input = %RenderInput{
+        picker_state: %PickerState{
+          picker: picker,
+          source: nil,
+          layout: :centered,
+          mode_prefix: "@"
+        },
+        theme_picker: theme,
+        viewport: Viewport.new(24, 80)
+      }
+
+      {draws, {_cursor_row, cursor_col}} = PickerUI.render(input)
+
+      assert cursor_col > String.length("[@] item")
+
+      assert Enum.any?(draws, fn
+               {_row, _col, "[@] item" <> _padding, face} -> face.fg == theme.highlight_fg
+               _ -> false
+             end)
+
+      assert Enum.any?(draws, fn
+               {_row, _col, "[@]", face} ->
+                 face.fg == theme.match_fg and face.bg == theme.prompt_bg
+
+               _ ->
+                 false
+             end)
     end
 
     test "title appears in the draws" do
