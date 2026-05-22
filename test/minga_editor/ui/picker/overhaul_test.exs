@@ -67,6 +67,25 @@ defmodule MingaEditor.UI.Picker.OverhaulTest do
       assert :c in ids
     end
 
+    test "marked_items keeps marked items that are hidden by the current filter" do
+      picker =
+        Picker.new(@items, title: "Test")
+        |> Picker.toggle_mark()
+        |> Picker.filter("mix")
+
+      assert Enum.map(Picker.marked_items(picker), & &1.id) == [:a]
+    end
+
+    test "has_marks? and marked_count track explicit marks" do
+      picker = Picker.new(@items, title: "Test")
+      refute Picker.has_marks?(picker)
+      assert Picker.marked_count(picker) == 0
+
+      marked = Picker.toggle_mark(picker)
+      assert Picker.has_marks?(marked)
+      assert Picker.marked_count(marked) == 1
+    end
+
     test "marked_items returns selected item when nothing is marked" do
       picker = Picker.new(@items, title: "Test")
       items = Picker.marked_items(picker)

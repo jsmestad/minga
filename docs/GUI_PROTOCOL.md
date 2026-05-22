@@ -307,7 +307,7 @@ Fuzzy finder / command palette state. Uses sectioned envelope: `opcode(1) + sect
 
 | Section ID | Name | Content |
 |-----------|------|--------|
-| 0x01 | Header | visible, selected_index, filtered_count, total_count, has_preview, title |
+| 0x01 | Header | visible, selected_index, filtered_count, total_count, has_preview, title, marked_count |
 | 0x02 | Query | query string |
 | 0x03 | Items | item_count + items (positional per item) |
 | 0x04 | ActionMenu | visible flag + selected + actions |
@@ -322,7 +322,7 @@ Each section:
 
 Header section 0x01 payload:
   visible(1) + selected_index(2) + filtered_count(2) + total_count(2)
-  + has_preview(1) + title_len(2) + title(title_len)
+  + has_preview(1) + title_len(2) + title(title_len) + marked_count(2)
 
 Query section 0x02 payload:
   query_len(2) + query(query_len)
@@ -352,6 +352,7 @@ annotation is a right-aligned string (e.g., keybinding "SPC f s").
 match_positions is a list of uint16 character indices for highlighting matched characters.
 has_preview indicates whether the picker source supports preview (triggers split layout).
 filtered_count and total_count enable "X/Y" display in the search field.
+marked_count is authoritative across the full picker item set, including marked items hidden by the current filter or item limit.
 action menu shows source-specific actions (e.g., "Open", "Delete", "Open in split").
 mode prefix badges show switched picker sources like command, buffer, or project search.
 

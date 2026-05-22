@@ -1707,6 +1707,7 @@ struct GUIPickerDecoderTests {
         appendU16(&header, 100) // totalCount
         header.append(1) // hasPreview
         appendString16(&header, "Find File") // title
+        appendU16(&header, 3) // markedCount
 
         // Section 0x02: Query
         var query = Data()
@@ -1754,7 +1755,7 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let title, let q, let hasPreview, let decodedItems, let decodedMenu, let modePrefix) = cmd else {
+        guard case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let q, let hasPreview, let decodedItems, let decodedMenu, let modePrefix) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
 
@@ -1762,6 +1763,7 @@ struct GUIPickerDecoderTests {
         #expect(selectedIndex == 0)
         #expect(filteredCount == 5)
         #expect(totalCount == 100)
+        #expect(markedCount == 3)
         #expect(title == "Find File")
         #expect(q == "edi")
         #expect(modePrefix == ">")
@@ -1784,11 +1786,12 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == 2)
 
-        guard case .guiPicker(let visible, _, _, _, _, _, _, let items, let actionMenu, let modePrefix) = cmd else {
+        guard case .guiPicker(let visible, _, _, _, let markedCount, _, _, _, let items, let actionMenu, let modePrefix) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
         #expect(visible == false)
         #expect(modePrefix.isEmpty)
+        #expect(markedCount == 0)
         #expect(items.isEmpty)
         #expect(actionMenu == nil)
     }
@@ -1800,6 +1803,7 @@ struct GUIPickerDecoderTests {
         appendU16(&header, 0); appendU16(&header, 0); appendU16(&header, 0)
         header.append(0) // hasPreview
         appendString16(&header, "")
+        appendU16(&header, 0) // markedCount
 
         var query = Data()
         appendString16(&query, "")
@@ -1825,7 +1829,7 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(let visible, _, _, _, _, _, _, _, let am, let modePrefix) = cmd else {
+        guard case .guiPicker(let visible, _, _, _, _, _, _, _, _, let am, let modePrefix) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
         #expect(visible == true)

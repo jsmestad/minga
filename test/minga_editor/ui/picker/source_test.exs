@@ -103,6 +103,32 @@ defmodule MingaEditor.UI.Picker.SourceTest do
     def on_action(_action, _item, state), do: state
   end
 
+  defmodule WithBulkSource do
+    @behaviour MingaEditor.UI.Picker.Source
+
+    @impl true
+    def title, do: "With bulk"
+
+    @impl true
+    def candidates(_ctx), do: [{:a, "item", "desc"}]
+
+    @impl true
+    def on_select(_item, state), do: state
+
+    @impl true
+    def on_cancel(state), do: state
+
+    @impl true
+    def on_bulk_select(items, state), do: Map.put(state, :bulk_selected, items)
+
+    @impl true
+    def bulk_actions(_items), do: [{"Apply all", :apply_all}]
+
+    @impl true
+    def on_bulk_action(:apply_all, items, state), do: Map.put(state, :bulk_action_items, items)
+    def on_bulk_action(_action, _items, state), do: state
+  end
+
   describe "has_actions?/1" do
     test "returns false for source without actions callback" do
       refute Source.has_actions?(NoActionsSource)
@@ -121,6 +147,38 @@ defmodule MingaEditor.UI.Picker.SourceTest do
     test "returns actions list for source with actions callback" do
       actions = Source.actions(WithActionsSource, {:a, "item", "desc"})
       assert actions == [{"Open", :open}, {"Delete", :delete}]
+    end
+  end
+
+  describe "bulk select helpers" do
+    test "bulk_select returns unchanged state for source without bulk callback" do
+      assert Source.bulk_select(NoActionsSource, [:a], %{untouched: true}) == %{untouched: true}
+    end
+
+    test "bulk_select delegates to source with bulk callback" do
+      assert Source.bulk_select(WithBulkSource, [:a, :b], %{}) == %{bulk_selected: [:a, :b]}
+    end
+  end
+
+  describe "bulk action helpers" do
+    test "bulk_actions returns empty list for source without bulk callbacks" do
+      assert Source.bulk_actions(NoActionsSource, [:a]) == []
+    end
+
+    test "bulk_actions delegates to source with bulk callbacks" do
+      assert Source.bulk_actions(WithBulkSource, [:a]) == [{"Apply all", :apply_all}]
+    end
+
+    test "on_bulk_action returns unchanged state for source without bulk callbacks" do
+      assert Source.on_bulk_action(NoActionsSource, :apply_all, [:a], %{untouched: true}) == %{
+               untouched: true
+             }
+    end
+
+    test "on_bulk_action delegates to source with bulk callbacks" do
+      assert Source.on_bulk_action(WithBulkSource, :apply_all, [:a, :b], %{}) == %{
+               bulk_action_items: [:a, :b]
+             }
     end
   end
 

@@ -102,7 +102,7 @@ struct PickerStateLifecycleTests {
         let actionMenu = Wire.PickerActionMenu(selectedIndex: 0, actions: ["Open", "Split"])
 
         state.update(visible: true, selectedIndex: 0, filteredCount: 2,
-                     totalCount: 50, title: "Find File", query: "edi",
+                     totalCount: 50, markedCount: 7, title: "Find File", query: "edi",
                      hasPreview: true, rawItems: raw, actionMenu: actionMenu,
                      modePrefix: ">")
 
@@ -113,6 +113,7 @@ struct PickerStateLifecycleTests {
         #expect(state.hasPreview == true)
         #expect(state.filteredCount == 2)
         #expect(state.totalCount == 50)
+        #expect(state.markedCount == 7)
         #expect(state.items.count == 2)
         #expect(state.items[0].isTwoLine == true)
         #expect(state.items[0].isMarked == false)
@@ -140,7 +141,7 @@ struct PickerStateLifecycleTests {
     @MainActor func hideClearsAll() {
         let state = PickerState()
         state.update(visible: true, selectedIndex: 0, filteredCount: 1,
-                     totalCount: 1, title: "Test", query: "q",
+                     totalCount: 1, markedCount: 1, title: "Test", query: "q",
                      hasPreview: true,
                      rawItems: [Wire.PickerItem(iconColor: 0, flags: 0, label: "x",
                                              description: "", annotation: "",
@@ -155,6 +156,7 @@ struct PickerStateLifecycleTests {
         #expect(state.items.isEmpty)
         #expect(state.previewLines.isEmpty)
         #expect(state.modePrefix == "")
+        #expect(state.markedCount == 0)
         #expect(state.hasPreview == false)
         #expect(state.actionMenu == nil)
     }

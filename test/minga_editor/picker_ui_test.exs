@@ -6,8 +6,10 @@ defmodule MingaEditor.PickerUITest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.PickerUI
   alias MingaEditor.PickerUI.RenderInput
+  alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.Picker, as: PickerState
   alias MingaEditor.State.Tab
@@ -25,6 +27,39 @@ defmodule MingaEditor.PickerUITest do
 
   defp theme_picker do
     Theme.get!(:doom_one).picker
+  end
+
+  defp marked_buffer_picker do
+    [
+      %Item{id: 0, label: "alpha"},
+      %Item{id: 1, label: "beta"},
+      %Item{id: 2, label: "gamma"}
+    ]
+    |> Picker.new(title: "Switch buffer", max_visible: 10)
+    |> Picker.move_down()
+    |> Picker.toggle_mark()
+    |> Picker.move_down()
+    |> Picker.toggle_mark()
+  end
+
+  defp picker_state_with_buffers([first_content | rest]) do
+    state = TestHelpers.base_state(content: first_content)
+
+    buffers =
+      Enum.reduce(rest, state.workspace.buffers, fn content, acc ->
+        {:ok, pid} = BufferProcess.start_link(content: content)
+        Buffers.add_background(acc, pid)
+      end)
+
+    picker_state = %PickerState{
+      picker: marked_buffer_picker(),
+      source: MingaEditor.UI.Picker.BufferSource,
+      restore: 0
+    }
+
+    state
+    |> EditorState.set_buffers(buffers)
+    |> ModalOverlay.open(:picker, PickerPayload.new(picker_state))
   end
 
   defp preview_promotion_state do
@@ -396,6 +431,55 @@ defmodule MingaEditor.PickerUITest do
       assert Enum.any?(draws, fn {row, col, text, _face} ->
                row == 9 and col == menu_col and String.starts_with?(text, " Actions")
              end)
+    end
+
+    test "bottom separator shows marked count" do
+      picker =
+        [
+          %Item{id: :one, label: "one.ex"},
+          %Item{id: :two, label: "two.ex"},
+          %Item{id: :three, label: "three.ex"}
+        ]
+        |> Picker.new(title: "Files", max_visible: 10)
+        |> Picker.toggle_mark()
+        |> Picker.move_down()
+        |> Picker.toggle_mark()
+
+      input = %RenderInput{
+        picker_state: %PickerState{picker: picker, source: nil},
+        theme_picker: theme_picker(),
+        viewport: Viewport.new(12, 90)
+      }
+
+      {draws, _cursor} = PickerUI.render(input)
+
+      assert Enum.any?(draws, fn {_row, _col, text, _face} ->
+               String.contains?(text, "3/3 (2 marked)")
+             end)
+    end
+  end
+
+  describe "bulk picker actions" do
+    test "C-o shows source bulk actions when items are marked" do
+      state = picker_state_with_buffers(["alpha", "beta", "gamma"])
+
+      new_state = PickerUI.handle_key(state, ?o, MingaEditor.Input.mod_ctrl())
+      {:picker, %{picker_ui: %{action_menu: {actions, 0}}}} = new_state.shell_state.modal
+
+      assert actions == [
+               {"Kill all marked",
+                {:bulk, :kill_marked, Picker.marked_items(marked_buffer_picker())}}
+             ]
+    end
+
+    test "Enter applies source bulk select when items are marked" do
+      state = picker_state_with_buffers(["alpha", "beta", "gamma"])
+
+      new_state = PickerUI.handle_key(state, 13, 0)
+
+      assert new_state.shell_state.modal == :none
+      assert length(new_state.workspace.buffers.list) == 1
+      assert Minga.Buffer.content(new_state.workspace.buffers.active) == "alpha"
     end
   end
 

@@ -135,6 +135,22 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
 
       assert Buffer.content(selected.workspace.buffers.active) == "beta"
     end
+
+    test "bulk select kills all marked buffers" do
+      state = state_with_buffers(["alpha", "beta", "gamma"])
+      items = [%Item{id: 1, label: "beta"}, %Item{id: 2, label: "gamma"}]
+
+      selected = BufferSource.on_bulk_select(items, state)
+
+      assert length(selected.workspace.buffers.list) == 1
+      assert Buffer.content(selected.workspace.buffers.active) == "alpha"
+    end
+
+    test "bulk actions expose kill all marked" do
+      assert BufferSource.bulk_actions([%Item{id: 1, label: "beta"}]) == [
+               {"Kill all marked", :kill_marked}
+             ]
+    end
   end
 
   describe "build_candidates/2 with include_special: true (SPC b B)" do

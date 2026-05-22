@@ -42,6 +42,41 @@ defmodule MingaEditor.UI.Picker.FileSourceTest do
     assert Minga.Project.frecency_scores()["lib/hot.ex"] > 0
   end
 
+  test "on_bulk_select opens all marked project-relative files", %{tmp_dir: tmp_dir} do
+    project = Path.join(tmp_dir, "frecency_bulk_project_#{:erlang.unique_integer([:positive])}")
+    lib = Path.join(project, "lib")
+    File.mkdir_p!(lib)
+    File.write!(Path.join(project, "mix.exs"), "")
+    File.write!(Path.join(project, "initial.ex"), "initial")
+    File.write!(Path.join(lib, "one.ex"), "one")
+    File.write!(Path.join(lib, "two.ex"), "two")
+
+    Minga.Events.subscribe(:project_rebuilt)
+    Minga.Project.switch(project)
+    await_project_rebuild(project)
+
+    ctx =
+      start_editor("initial", file_path: Path.join(project, "initial.ex"), project_root: project)
+
+    state =
+      FileSource.on_bulk_select(
+        [%Item{id: "lib/one.ex", label: "one.ex"}, %Item{id: "lib/two.ex", label: "two.ex"}],
+        editor_state(ctx)
+      )
+
+    paths = Enum.map(state.workspace.buffers.list, &Minga.Buffer.file_path/1)
+
+    assert Path.join(lib, "one.ex") in paths
+    assert Path.join(lib, "two.ex") in paths
+    assert Minga.Buffer.file_path(state.workspace.buffers.active) == Path.join(lib, "two.ex")
+  end
+
+  test "bulk actions expose open all marked" do
+    assert FileSource.bulk_actions([%Item{id: "lib/one.ex", label: "one.ex"}]) == [
+             {"Open all marked", :open_marked}
+           ]
+  end
+
   test "preview selections do not record frecency until confirmed", %{tmp_dir: tmp_dir} do
     project =
       Path.join(tmp_dir, "frecency_preview_project_#{:erlang.unique_integer([:positive])}")

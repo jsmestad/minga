@@ -43,6 +43,18 @@ defmodule MingaEditor.UI.Picker.BufferAllSource do
   def actions(item), do: BufferSource.actions(item)
 
   @impl true
-  @spec on_action(atom(), Item.t(), term()) :: term()
+  @spec on_action(term(), Item.t(), term()) :: term()
   def on_action(action, item, state), do: BufferSource.on_action(action, item, state)
+
+  @impl true
+  @spec on_bulk_select([Item.t()], term()) :: term()
+  def on_bulk_select(items, state), do: BufferSource.on_bulk_select(items, state)
+
+  @impl true
+  @spec bulk_actions([Item.t()]) :: [MingaEditor.UI.Picker.Source.action_entry()]
+  def bulk_actions(items), do: BufferSource.bulk_actions(items)
+
+  @impl true
+  @spec on_bulk_action(term(), [Item.t()], term()) :: term()
+  def on_bulk_action(action, items, state), do: BufferSource.on_bulk_action(action, items, state)
 end

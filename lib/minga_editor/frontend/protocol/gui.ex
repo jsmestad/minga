@@ -2434,7 +2434,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   """
   @typedoc "Action menu state: `{actions, selected_index}` or nil."
   @type action_menu_state ::
-          {[{String.t(), atom()}], non_neg_integer()} | nil
+          {[{String.t(), term()}], non_neg_integer()} | nil
 
   @spec encode_gui_picker(
           MingaEditor.UI.Picker.t() | nil,
@@ -2469,6 +2469,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     mode_prefix_bytes = :erlang.iolist_to_binary([mode_prefix])
     filtered_count = length(picker.filtered)
     total_count = length(picker.items)
+    marked_count = MingaEditor.UI.Picker.marked_count(picker)
     has_preview_byte = if has_preview, do: 1, else: 0
 
     entries =
@@ -2498,7 +2499,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       encode_section(
         @section_picker_header,
         <<1::8, picker.selected::16, filtered_count::16, total_count::16, has_preview_byte::8,
-          byte_size(title_bytes)::16, title_bytes::binary>>
+          byte_size(title_bytes)::16, title_bytes::binary, marked_count::16>>
       ),
       encode_section(@section_picker_query, <<byte_size(query_bytes)::16, query_bytes::binary>>),
       encode_section(@section_picker_items, items_payload),
