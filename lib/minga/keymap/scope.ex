@@ -195,7 +195,7 @@ defmodule Minga.Keymap.Scope do
     :ok
   end
 
-  @doc "Removes every scope contributed by a source and its source-owned keybindings."
+  @doc "Removes every scope contributed by a source."
   @spec unregister_source(contribution_source()) :: :ok
   def unregister_source(source) do
     ensure_registry!()
@@ -208,7 +208,6 @@ defmodule Minga.Keymap.Scope do
     modules = Map.drop(registry_modules(), names)
     sources = Map.drop(registry_sources(), names)
     persist_registry(modules, sources)
-    Minga.Keymap.Active.unregister_source(source)
     :ok
   end
 
