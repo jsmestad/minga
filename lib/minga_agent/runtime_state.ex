@@ -19,13 +19,15 @@ defmodule MingaAgent.RuntimeState do
           active_session_id: String.t() | nil,
           status: status(),
           model_name: String.t() | nil,
-          provider_name: String.t() | nil
+          provider_name: String.t() | nil,
+          active_tool_name: String.t() | nil
         }
 
   defstruct active_session_id: nil,
             status: nil,
             model_name: nil,
-            provider_name: nil
+            provider_name: nil,
+            active_tool_name: nil
 
   # ── Status ──────────────────────────────────────────────────────────────────
 
@@ -37,6 +39,18 @@ defmodule MingaAgent.RuntimeState do
   @spec busy?(t()) :: boolean()
   def busy?(%__MODULE__{status: s}) when s in [:thinking, :tool_executing], do: true
   def busy?(%__MODULE__{}), do: false
+
+  # ── Active tool ─────────────────────────────────────────────────────────────
+
+  @doc "Records the active tool name while a tool is executing."
+  @spec set_active_tool_name(t(), String.t() | nil) :: t()
+  def set_active_tool_name(%__MODULE__{} = rt, name) do
+    %{rt | active_tool_name: name}
+  end
+
+  @doc "Clears the active tool name."
+  @spec clear_active_tool_name(t()) :: t()
+  def clear_active_tool_name(%__MODULE__{} = rt), do: %{rt | active_tool_name: nil}
 
   # ── Identity ────────────────────────────────────────────────────────────────
 

@@ -62,10 +62,31 @@ defmodule MingaEditor.State.Agent do
     %{agent | runtime: RuntimeState.set_status(agent.runtime, status)}
   end
 
+  @doc "Returns the active tool name from RuntimeState."
+  @spec active_tool_name(t()) :: String.t() | nil
+  def active_tool_name(%__MODULE__{runtime: rt}), do: rt.active_tool_name
+
+  @doc "Sets the active tool name (delegates to RuntimeState)."
+  @spec set_active_tool_name(t(), String.t() | nil) :: t()
+  def set_active_tool_name(%__MODULE__{} = agent, name) do
+    %{agent | runtime: RuntimeState.set_active_tool_name(agent.runtime, name)}
+  end
+
+  @doc "Clears the active tool name (delegates to RuntimeState)."
+  @spec clear_active_tool_name(t()) :: t()
+  def clear_active_tool_name(%__MODULE__{} = agent) do
+    %{agent | runtime: RuntimeState.clear_active_tool_name(agent.runtime)}
+  end
+
   @doc "Sets the agent into an error state with a message."
   @spec set_error(t(), String.t()) :: t()
   def set_error(%__MODULE__{} = agent, message) do
-    %{agent | runtime: RuntimeState.set_status(agent.runtime, :error), error: message}
+    runtime =
+      agent.runtime
+      |> RuntimeState.set_status(:error)
+      |> RuntimeState.clear_active_tool_name()
+
+    %{agent | runtime: runtime, error: message}
   end
 
   # ── Cache reset ─────────────────────────────────────────────────────────────
@@ -81,9 +102,14 @@ defmodule MingaEditor.State.Agent do
   """
   @spec reset_cache(t()) :: t()
   def reset_cache(%__MODULE__{} = agent) do
+    runtime =
+      agent.runtime
+      |> RuntimeState.set_status(:idle)
+      |> RuntimeState.clear_active_tool_name()
+
     %{
       agent
-      | runtime: RuntimeState.set_status(agent.runtime, :idle),
+      | runtime: runtime,
         error: nil,
         pending_approval: nil
     }
@@ -112,9 +138,35 @@ defmodule MingaEditor.State.Agent do
   end
 
   @doc "Applies the render-cache fields returned by an agent session snapshot."
-  @spec apply_session_snapshot(t(), status(), approval() | nil, String.t() | nil) :: t()
-  def apply_session_snapshot(%__MODULE__{} = agent, status, pending_approval, error) do
-    %{set_status(agent, status) | pending_approval: pending_approval, error: error}
+  @spec apply_session_snapshot(
+          t(),
+          status(),
+          approval() | nil,
+          String.t() | nil,
+          String.t() | nil
+        ) :: t()
+  def apply_session_snapshot(
+        %__MODULE__{} = agent,
+        status,
+        pending_approval,
+        error,
+        active_tool_name
+      ) do
+    runtime =
+      agent.runtime
+      |> RuntimeState.set_status(status)
+      |> apply_active_tool_name(status, active_tool_name)
+
+    %{agent | runtime: runtime, pending_approval: pending_approval, error: error}
+  end
+
+  @spec apply_active_tool_name(RuntimeState.t(), status(), String.t() | nil) :: RuntimeState.t()
+  defp apply_active_tool_name(runtime, :tool_executing, active_tool_name) do
+    RuntimeState.set_active_tool_name(runtime, active_tool_name)
+  end
+
+  defp apply_active_tool_name(runtime, _status, _active_tool_name) do
+    RuntimeState.clear_active_tool_name(runtime)
   end
 
   # ── Spinner timer ───────────────────────────────────────────────────────────

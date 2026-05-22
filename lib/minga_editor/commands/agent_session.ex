@@ -453,13 +453,22 @@ defmodule MingaEditor.Commands.AgentSession do
   defp rebuild_agent_from_tab(state, _tab_id), do: state
 
   @spec apply_remote_snapshot(state(), Session.editor_snapshot()) :: state()
-  defp apply_remote_snapshot(state, %{
-         status: status,
-         pending_approval: pending_approval,
-         error: error
-       }) do
+  defp apply_remote_snapshot(
+         state,
+         %{
+           status: status,
+           pending_approval: pending_approval,
+           error: error
+         } = snapshot
+       ) do
     AgentAccess.update_agent(state, fn agent ->
-      AgentState.apply_session_snapshot(agent, status, pending_approval, error)
+      AgentState.apply_session_snapshot(
+        agent,
+        status,
+        pending_approval,
+        error,
+        Map.get(snapshot, :active_tool_name)
+      )
     end)
   end
 

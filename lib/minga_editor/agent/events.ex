@@ -40,6 +40,13 @@ defmodule MingaEditor.Agent.Events do
   def handle(state, {:status_changed, status}) do
     state = AgentAccess.update_agent(state, &AgentState.set_status(&1, status))
 
+    state =
+      if status == :tool_executing do
+        state
+      else
+        AgentAccess.update_agent(state, &AgentState.clear_active_tool_name/1)
+      end
+
     {state, effects} =
       case status do
         :error ->
@@ -93,6 +100,7 @@ defmodule MingaEditor.Agent.Events do
 
   def handle(state, {:tool_started, "shell", args}) do
     command = Map.get(args, "command", "")
+    state = AgentAccess.update_agent(state, &AgentState.set_active_tool_name(&1, "shell"))
     state = update_preview(state, &Preview.set_shell(&1, command))
     {state, [{:render, 16}]}
   end
@@ -110,17 +118,21 @@ defmodule MingaEditor.Agent.Events do
 
   def handle(state, {:tool_ended, "shell", result, status}) do
     shell_status = if status == :error, do: :error, else: :done
+    state = AgentAccess.update_agent(state, &AgentState.clear_active_tool_name/1)
     state = update_preview(state, &Preview.finish_shell(&1, result, shell_status))
     {state, [{:render, 16}]}
   end
 
   def handle(state, {:tool_started, "read_file", args}) do
     path = Map.get(args, "path", "")
+    state = AgentAccess.update_agent(state, &AgentState.set_active_tool_name(&1, "read_file"))
     state = update_preview(state, &Preview.set_file(&1, path, ""))
     {state, [{:render, 16}]}
   end
 
   def handle(state, {:tool_ended, "read_file", result, _status}) do
+    state = AgentAccess.update_agent(state, &AgentState.clear_active_tool_name/1)
+
     case AgentAccess.view(state).preview.content do
       {:file, path, _} ->
         state = update_preview(state, &Preview.set_file(&1, path, result))
@@ -133,12 +145,17 @@ defmodule MingaEditor.Agent.Events do
 
   def handle(state, {:tool_started, "list_directory", args}) do
     path = Map.get(args, "path", ".")
+
+    state =
+      AgentAccess.update_agent(state, &AgentState.set_active_tool_name(&1, "list_directory"))
+
     state = update_preview(state, &Preview.set_directory(&1, path, []))
     {state, [{:render, 16}]}
   end
 
   def handle(state, {:tool_ended, "list_directory", result, _status}) do
     entries = result |> String.split("\n") |> Enum.reject(&(&1 == ""))
+    state = AgentAccess.update_agent(state, &AgentState.clear_active_tool_name/1)
 
     case AgentAccess.view(state).preview.content do
       {:directory, path, _} ->
@@ -150,12 +167,14 @@ defmodule MingaEditor.Agent.Events do
     end
   end
 
-  def handle(state, {:tool_started, _name, _args}) do
-    {state, []}
+  def handle(state, {:tool_started, name, _args}) do
+    state = AgentAccess.update_agent(state, &AgentState.set_active_tool_name(&1, name))
+    {state, [{:render, 16}]}
   end
 
   def handle(state, {:tool_ended, _name, _result, _status}) do
-    {state, []}
+    state = AgentAccess.update_agent(state, &AgentState.clear_active_tool_name/1)
+    {state, [{:render, 16}]}
   end
 
   def handle(state, {:file_changed, path, before_content, after_content}) do

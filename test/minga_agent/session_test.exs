@@ -572,6 +572,31 @@ defmodule MingaAgent.SessionTest do
     end
   end
 
+  describe "editor_snapshot/1" do
+    test "includes active tool name while a tool is running", %{session: session} do
+      send(
+        session,
+        {:agent_provider_event,
+         %Event.ToolStart{tool_call_id: "tc1", name: "read_file", args: %{}}}
+      )
+
+      snapshot = Session.editor_snapshot(session)
+
+      assert snapshot.status == :tool_executing
+      assert snapshot.active_tool_name == "read_file"
+
+      send(
+        session,
+        {:agent_provider_event,
+         %Event.ToolEnd{tool_call_id: "tc1", name: "read_file", result: "contents"}}
+      )
+
+      snapshot = Session.editor_snapshot(session)
+
+      assert snapshot.active_tool_name == nil
+    end
+  end
+
   describe "toggle_tool_collapse/2" do
     test "toggles collapsed state of tool call messages", %{session: session} do
       send(

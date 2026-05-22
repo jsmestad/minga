@@ -17,6 +17,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Project.FileRef
   alias MingaEditor.Agent.Events
+  alias MingaEditor.Agent.UIState
   alias MingaEditor.Shell.Board
   alias MingaEditor.Shell.Board.Card
   alias MingaEditor.Shell.Board.State, as: BoardState
@@ -158,6 +159,31 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         Traditional.on_agent_event(ss, workspace(), ghost, {:status_changed, :error})
 
       assert ss2.tab_bar == ss.tab_bar
+    end
+  end
+
+  describe "Agent.Events.handle/2 tool status" do
+    test "tool_started and tool_ended update active_tool_name" do
+      state = %{agent: %AgentState{}, agent_ui: UIState.new()}
+
+      {state, effects} = Events.handle(state, {:tool_started, "read_file", %{}})
+      assert AgentState.active_tool_name(state.agent) == "read_file"
+      assert effects == [{:render, 16}]
+
+      {state, effects} = Events.handle(state, {:tool_ended, "read_file", "contents", :done})
+      assert AgentState.active_tool_name(state.agent) == nil
+      assert effects == [{:render, 16}]
+    end
+
+    test "status_changed clears active_tool_name outside tool execution" do
+      state = %{agent: %AgentState{} |> AgentState.set_active_tool_name("read_file")}
+
+      {state, _effects} = Events.handle(state, {:status_changed, :tool_executing})
+      assert AgentState.active_tool_name(state.agent) == "read_file"
+
+      {state, effects} = Events.handle(state, {:status_changed, :idle})
+      assert AgentState.active_tool_name(state.agent) == nil
+      assert effects == [:render]
     end
   end
 

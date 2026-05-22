@@ -74,6 +74,7 @@ defmodule MingaAgent.Session do
           error_message: String.t() | nil,
           pending_thinking_level: String.t() | nil,
           pending_approval: pending_approval() | nil,
+          active_tool_name: String.t() | nil,
           model_name: String.t(),
           provider_name: String.t(),
           notifier: module() | {module(), term()},
@@ -179,7 +180,8 @@ defmodule MingaAgent.Session do
   @type editor_snapshot :: %{
           status: status(),
           pending_approval: map() | nil,
-          error: String.t() | nil
+          error: String.t() | nil,
+          active_tool_name: String.t() | nil
         }
 
   @doc "Returns a snapshot of session state for the editor to rebuild AgentState."
@@ -524,6 +526,7 @@ defmodule MingaAgent.Session do
       error_message: nil,
       pending_thinking_level: initial_thinking_level,
       pending_approval: nil,
+      active_tool_name: nil,
       model_name: model_name,
       provider_name: provider_name,
       notifier: Keyword.get(opts, :notifier, Notifier),
@@ -735,6 +738,7 @@ defmodule MingaAgent.Session do
         total_usage: TurnUsage.new(),
         error_message: nil,
         pending_approval: nil,
+        active_tool_name: nil,
         created_at: now,
         last_message_at: now,
         steering_queue: [],
@@ -816,7 +820,8 @@ defmodule MingaAgent.Session do
     snapshot = %{
       status: state.status,
       pending_approval: public_pending_approval(state.pending_approval),
-      error: state.error_message
+      error: state.error_message,
+      active_tool_name: state.active_tool_name
     }
 
     {:reply, snapshot, state}
@@ -1208,6 +1213,7 @@ defmodule MingaAgent.Session do
   defp handle_provider_event(%Event.ToolStart{} = event, state) do
     msg = Message.tool_call(event.tool_call_id, event.name, event.args)
     state = append_msg(state, msg)
+    state = %{state | active_tool_name: event.name}
     state = set_working_status(state, :tool_executing)
     broadcast(state, {:tool_started, event.name, event.args})
     notify_messages_changed(state)
@@ -1261,7 +1267,7 @@ defmodule MingaAgent.Session do
         end
       end)
 
-    state = %{state | messages: messages}
+    state = %{state | messages: messages, active_tool_name: nil}
     status = if event.is_error, do: :error, else: :done
     broadcast(state, {:tool_ended, event.name, event.result, status})
     notify_messages_changed(state)
@@ -1428,6 +1434,14 @@ defmodule MingaAgent.Session do
   @spec set_status(state(), status()) :: state()
   defp set_status(state, new_status) do
     state = %{state | status: new_status}
+
+    state =
+      if new_status == :tool_executing do
+        state
+      else
+        %{state | active_tool_name: nil}
+      end
+
     broadcast(state, {:status_changed, new_status})
     state
   end
@@ -1725,6 +1739,7 @@ defmodule MingaAgent.Session do
             status: :idle,
             error_message: nil,
             pending_approval: nil,
+            active_tool_name: nil,
             created_at: loaded_at,
             last_message_at: loaded_at,
             branches: Map.get(data, :branches, []),

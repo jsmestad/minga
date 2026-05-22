@@ -22,6 +22,22 @@ defmodule MingaEditor.State.AgentTest do
     end
   end
 
+  describe "session snapshots" do
+    test "apply_session_snapshot sets active_tool_name only while tool executing" do
+      agent =
+        new_agent()
+        |> AgentState.apply_session_snapshot(:tool_executing, nil, nil, "read_file")
+
+      assert agent.runtime.status == :tool_executing
+      assert agent.runtime.active_tool_name == "read_file"
+
+      agent = AgentState.apply_session_snapshot(agent, :idle, nil, nil, "stale_tool")
+
+      assert agent.runtime.status == :idle
+      assert agent.runtime.active_tool_name == nil
+    end
+  end
+
   describe "reset_cache" do
     test "reset_cache clears error, pending_approval, and resets status to :idle" do
       agent =
