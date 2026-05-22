@@ -123,6 +123,10 @@ defmodule Minga.Keymap.Scope.CUAScopeTest do
       assert {:command, :git_status_start_commit} =
                Scope.resolve_key(:git_status, :cua, {?c, @ctrl})
     end
+
+    test "Ctrl+S falls through to global save handler" do
+      assert :not_found = Scope.resolve_key(:git_status, :cua, {?s, @ctrl})
+    end
   end
 
   # ── Editor scope ───────────────────────────────────────────────────────────
@@ -137,6 +141,10 @@ defmodule Minga.Keymap.Scope.CUAScopeTest do
       assert {:command, :redo} = Scope.resolve_key(:editor, :cua, {?y, @ctrl})
     end
 
+    test "Ctrl+C copies selection or interrupts (TUI fallback)" do
+      assert {:command, :copy_or_interrupt} = Scope.resolve_key(:editor, :cua, {?c, @ctrl})
+    end
+
     test "Ctrl+V triggers paste (TUI fallback)" do
       # Bug 10 regression: paste must be reachable on TUI
       assert {:command, :paste_after} = Scope.resolve_key(:editor, :cua, {?v, @ctrl})
@@ -146,9 +154,21 @@ defmodule Minga.Keymap.Scope.CUAScopeTest do
       assert {:command, :select_all} = Scope.resolve_key(:editor, :cua, {?a, @ctrl})
     end
 
+    test "Cmd+S saves (GUI)" do
+      assert {:command, :save} = Scope.resolve_key(:editor, :cua, {?s, @cmd})
+    end
+
+    test "Ctrl+S falls through to the global save handler" do
+      assert :not_found = Scope.resolve_key(:editor, :cua, {?s, @ctrl})
+    end
+
     test "Ctrl+P opens command palette (TUI)" do
       # Bug 8 regression: command palette accessible on TUI
       assert {:command, :command_palette} = Scope.resolve_key(:editor, :cua, {?p, @ctrl})
+    end
+
+    test "Ctrl+Shift+P opens command palette (TUI)" do
+      assert {:command, :command_palette} = Scope.resolve_key(:editor, :cua, {?P, @ctrl + 0x01})
     end
 
     test "Cmd+Z triggers undo (GUI)" do

@@ -43,12 +43,17 @@ defmodule MingaEditor.Input.Interrupt do
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
   def handle_key(state, @ctrl_g, 0) do
-    {new_state, resets} = reset_to_known_good(state)
-    new_state = log_resets(new_state, resets)
-    {:handled, new_state}
+    {:handled, interrupt(state)}
   end
 
   def handle_key(state, _codepoint, _modifiers), do: {:passthrough, state}
+
+  @doc "Resets transient editor state to a known-good baseline."
+  @spec interrupt(EditorState.t()) :: EditorState.t()
+  def interrupt(state) do
+    {new_state, resets} = reset_to_known_good(state)
+    log_resets(new_state, resets)
+  end
 
   # ── Reset logic ──────────────────────────────────────────────────────────
 

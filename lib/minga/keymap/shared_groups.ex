@@ -124,10 +124,11 @@ defmodule Minga.Keymap.SharedGroups do
   end
 
   @doc """
-  CUA Cmd/Ctrl command chords (undo, redo, paste, select-all).
+  CUA Cmd/Ctrl command chords (copy, undo, redo, paste, select-all, save).
 
-  Both Cmd (GUI) and Ctrl (TUI) variants are included. Used by editor
-  CUA mode and agent CUA mode.
+  Cmd variants are included for GUI surfaces. Ctrl fallbacks cover the TUI,
+  except Ctrl+S, which stays on the global save handler so saves keep the
+  normal command lifecycle.
   """
   @spec cua_cmd_chords() :: [binding()]
   def cua_cmd_chords do
@@ -143,6 +144,7 @@ defmodule Minga.Keymap.SharedGroups do
       {[{?a, cmd}], :select_all, "Select all"},
       {[{?s, cmd}], :save, "Save"},
       # TUI (Ctrl) fallbacks
+      {~k(C-c), :copy_or_interrupt, "Copy selection / interrupt"},
       {~k(C-z), :undo, "Undo"},
       {~k(C-y), :redo, "Redo"},
       {~k(C-v), :paste_after, "Paste"},

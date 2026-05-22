@@ -66,6 +66,18 @@ defmodule Minga.Keymap.SharedGroupsTest do
       # Ctrl variants (0x02)
       assert Map.has_key?(commands_by_mod, 0x02)
     end
+
+    test "includes TUI Ctrl fallbacks but leaves Ctrl+S to the global save handler" do
+      trie = Bindings.merge_bindings(Bindings.new(), SharedGroups.cua_cmd_chords())
+
+      assert {:command, :copy_or_interrupt} = Bindings.lookup(trie, {?c, 0x02})
+      assert {:command, :undo} = Bindings.lookup(trie, {?z, 0x02})
+      assert {:command, :redo} = Bindings.lookup(trie, {?y, 0x02})
+      assert {:command, :paste_after} = Bindings.lookup(trie, {?v, 0x02})
+      assert {:command, :select_all} = Bindings.lookup(trie, {?a, 0x02})
+      assert {:command, :save} = Bindings.lookup(trie, {?s, 0x08})
+      assert :not_found = Bindings.lookup(trie, {?s, 0x02})
+    end
   end
 
   describe "merge_bindings/2" do

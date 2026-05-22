@@ -55,6 +55,8 @@ defmodule Minga.Keymap.Scope.Editor do
       then: fn trie ->
         trie
         |> Bindings.bind(~k(C-p), :command_palette, "Command palette")
+        |> Bindings.bind(~k(C-S-p), :command_palette, "Command palette")
+        |> Bindings.bind([{?P, 0x03}], :command_palette, "Command palette")
       end
     )
   end

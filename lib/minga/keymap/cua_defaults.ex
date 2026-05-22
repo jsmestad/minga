@@ -40,12 +40,10 @@ defmodule Minga.Keymap.CUADefaults do
   Cmd+Shift+Z = redo, Cmd+A = select all, Cmd+S = save.
 
   Also includes Ctrl fallbacks for TUI where terminals intercept
-  Cmd+key at the OS level. Ctrl+Z = undo, Ctrl+Y = redo,
-  Ctrl+V = paste, Ctrl+A = select all.
-
-  Note: Ctrl+C is NOT bound to copy here. It stays as interrupt
-  (see `interrupt_trie/0`). Selection-aware copy via Ctrl+C is
-  handled by the Interrupt handler which checks for active selection.
+  Cmd+key at the OS level. Ctrl+C = copy selection or interrupt,
+  Ctrl+Z = undo, Ctrl+Y = redo, Ctrl+V = paste, Ctrl+A = select all.
+  Ctrl+S stays on the global save handler so save events keep the
+  standard lifecycle.
   """
   @spec cmd_chords_trie() :: Bindings.node_t()
   def cmd_chords_trie do
@@ -79,14 +77,5 @@ defmodule Minga.Keymap.CUADefaults do
     |> Bindings.bind([{@arrow_right, 0}], :move_right, "Move right")
     |> Bindings.bind([{@ns_left, 0}], :move_left, "Move left")
     |> Bindings.bind([{@ns_right, 0}], :move_right, "Move right")
-  end
-
-  @doc """
-  Ctrl+C interrupt binding. Shared across all CUA surfaces.
-  """
-  @spec interrupt_trie() :: Bindings.node_t()
-  def interrupt_trie do
-    Bindings.new()
-    |> Bindings.bind(~k(C-c), :interrupt, "Interrupt / cancel")
   end
 end
