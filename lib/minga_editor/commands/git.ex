@@ -37,6 +37,7 @@ defmodule MingaEditor.Commands.Git do
     {:git_fetch, "Fetch", false},
     {:git_pull_and_retry, "Pull and retry push", false},
     {:git_diff_file, "View diff", true},
+    {:git_diff_toggle_layout, "Toggle side-by-side diff", true},
     {:next_git_hunk, "Next git hunk", true},
     {:prev_git_hunk, "Previous git hunk", true},
     {:git_stage_hunk, "Stage hunk", true},
@@ -110,6 +111,15 @@ defmodule MingaEditor.Commands.Git do
   def execute(state, :git_diff_toggle_staged) do
     active_buf = state.workspace.buffers.active
     toggle_diff_staged(state, active_buf)
+  end
+
+  def execute(state, :git_diff_toggle_layout) do
+    if MingaEditor.Frontend.gui?(state.capabilities) do
+      active_buf = state.workspace.buffers.active
+      toggle_diff_layout(state, active_buf)
+    else
+      EditorState.set_status(state, "Side-by-side diff is only available in GUI")
+    end
   end
 
   # ── AI commit message ──────────────────────────────────────────────────────
@@ -275,7 +285,7 @@ defmodule MingaEditor.Commands.Git do
     staged = Keyword.get(opts, :staged, false)
     label = if staged, do: "staged", else: "unstaged"
 
-    diff_result = DiffView.build(base_content, current_content)
+    diff_result = build_diff_result(base_content, current_content, state, :unified)
     filename = Path.basename(rel_path)
     filetype = Language.detect_filetype(filename)
 
@@ -296,7 +306,9 @@ defmodule MingaEditor.Commands.Git do
           rel_path: rel_path,
           staged: staged,
           line_metadata: diff_result.line_metadata,
-          hunk_lines: diff_result.hunk_lines
+          hunk_lines: diff_result.hunk_lines,
+          view_mode: :unified,
+          pane_width: diff_pane_width(state)
         }
 
         state
@@ -318,12 +330,17 @@ defmodule MingaEditor.Commands.Git do
 
   @spec open_diff_view(state(), pid(), pid(), boolean()) :: state()
   defp open_diff_view(state, git_pid, buf, staged) do
+    open_diff_view(state, git_pid, buf, staged, :unified)
+  end
+
+  @spec open_diff_view(state(), pid(), pid(), boolean(), :unified | :side_by_side) :: state()
+  defp open_diff_view(state, git_pid, buf, staged, view_mode) do
     git_root = Git.Buffer.git_root(git_pid)
     rel_path = Git.Buffer.relative_path(git_pid)
 
     {base_content, current_content} = diff_contents(git_root, rel_path, buf, staged)
 
-    diff_result = DiffView.build(base_content, current_content)
+    diff_result = build_diff_result(base_content, current_content, state, view_mode)
     filename = Path.basename(rel_path)
     filetype = Language.detect_filetype(filename)
     label = if staged, do: "staged", else: "unstaged"
@@ -345,7 +362,9 @@ defmodule MingaEditor.Commands.Git do
           rel_path: rel_path,
           staged: staged,
           line_metadata: diff_result.line_metadata,
-          hunk_lines: diff_result.hunk_lines
+          hunk_lines: diff_result.hunk_lines,
+          view_mode: view_mode,
+          pane_width: diff_pane_width(state)
         }
 
         state
@@ -410,6 +429,24 @@ defmodule MingaEditor.Commands.Git do
 
   defp staged_deleted_entry?(%Git.StatusEntry{}, _rel_path), do: false
 
+  @spec build_diff_result(String.t(), String.t(), state(), :unified | :side_by_side) ::
+          DiffView.diff_view_result()
+  defp build_diff_result(base_content, current_content, _state, :unified) do
+    DiffView.build(base_content, current_content)
+  end
+
+  defp build_diff_result(base_content, current_content, state, :side_by_side) do
+    DiffView.build_side_by_side(base_content, current_content, diff_pane_width(state))
+  end
+
+  @spec diff_pane_width(state()) :: pos_integer()
+  defp diff_pane_width(%{workspace: %{viewport: %{cols: cols}}})
+       when is_integer(cols) and cols > 20 do
+    max(div(cols - 5, 2), 20)
+  end
+
+  defp diff_pane_width(_state), do: 80
+
   @spec apply_diff_decorations(pid(), [DiffView.line_meta()], MingaEditor.UI.Theme.t()) :: :ok
   defp apply_diff_decorations(diff_buf, line_metadata, theme) do
     Buffer.batch_decorations(diff_buf, fn decs ->
@@ -427,6 +464,42 @@ defmodule MingaEditor.Commands.Git do
           non_neg_integer(),
           non_neg_integer()
         ) :: Minga.Core.Decorations.t()
+  defp apply_line_decoration(
+         decs,
+         %{left_type: _left_type, right_type: _right_type} = meta,
+         line_idx,
+         added_bg,
+         removed_bg,
+         added_word_bg,
+         removed_word_bg,
+         fold_fg
+       ) do
+    decs
+    |> apply_side_pane_decoration(
+      meta.left_type,
+      line_idx,
+      0,
+      meta.left_width,
+      removed_bg,
+      fold_fg
+    )
+    |> apply_side_pane_decoration(
+      meta.right_type,
+      line_idx,
+      meta.left_width + 3,
+      9999,
+      added_bg,
+      fold_fg
+    )
+    |> apply_word_highlights_at(line_idx, meta[:left_word_changes], removed_word_bg, 0)
+    |> apply_word_highlights_at(
+      line_idx,
+      meta[:right_word_changes],
+      added_word_bg,
+      meta.left_width + 3
+    )
+  end
+
   defp apply_line_decoration(
          decs,
          %{type: :added} = meta,
@@ -516,19 +589,83 @@ defmodule MingaEditor.Commands.Git do
     Bitwise.bsl(r, 16) + Bitwise.bsl(g, 8) + b
   end
 
+  @spec apply_side_pane_decoration(
+          Minga.Core.Decorations.t(),
+          DiffView.pane_line_type(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: Minga.Core.Decorations.t()
+  defp apply_side_pane_decoration(decs, :added, line_idx, start_col, end_col, bg, _fold_fg) do
+    add_pane_highlight(decs, line_idx, start_col, end_col, bg, :diff)
+  end
+
+  defp apply_side_pane_decoration(decs, :removed, line_idx, start_col, end_col, bg, _fold_fg) do
+    add_pane_highlight(decs, line_idx, start_col, end_col, bg, :diff)
+  end
+
+  defp apply_side_pane_decoration(decs, :fold, line_idx, start_col, end_col, _bg, fold_fg) do
+    {_id, decs} =
+      Minga.Core.Decorations.add_highlight(decs, {line_idx, start_col}, {line_idx, end_col},
+        style: Face.new(fg: fold_fg, italic: true),
+        priority: 1,
+        group: :diff
+      )
+
+    decs
+  end
+
+  defp apply_side_pane_decoration(decs, _type, _line_idx, _start_col, _end_col, _bg, _fold_fg),
+    do: decs
+
+  @spec add_pane_highlight(
+          Minga.Core.Decorations.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          atom()
+        ) :: Minga.Core.Decorations.t()
+  defp add_pane_highlight(decs, line_idx, start_col, end_col, bg, group) do
+    {_id, decs} =
+      Minga.Core.Decorations.add_highlight(decs, {line_idx, start_col}, {line_idx, end_col},
+        style: Face.new(bg: bg),
+        priority: 1,
+        group: group
+      )
+
+    decs
+  end
+
   @spec apply_word_highlights(
           Minga.Core.Decorations.t(),
           non_neg_integer(),
           [Diff.char_range()] | nil,
           non_neg_integer()
         ) :: Minga.Core.Decorations.t()
-  defp apply_word_highlights(decs, _line_idx, nil, _word_bg), do: decs
-  defp apply_word_highlights(decs, _line_idx, [], _word_bg), do: decs
-
   defp apply_word_highlights(decs, line_idx, word_changes, word_bg) do
+    apply_word_highlights_at(decs, line_idx, word_changes, word_bg, 0)
+  end
+
+  @spec apply_word_highlights_at(
+          Minga.Core.Decorations.t(),
+          non_neg_integer(),
+          [Diff.char_range()] | nil,
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: Minga.Core.Decorations.t()
+  defp apply_word_highlights_at(decs, _line_idx, nil, _word_bg, _offset), do: decs
+  defp apply_word_highlights_at(decs, _line_idx, [], _word_bg, _offset), do: decs
+
+  defp apply_word_highlights_at(decs, line_idx, word_changes, word_bg, offset) do
     Enum.reduce(word_changes, decs, fn {start_col, end_col}, acc ->
       {_id, acc} =
-        Minga.Core.Decorations.add_highlight(acc, {line_idx, start_col}, {line_idx, end_col},
+        Minga.Core.Decorations.add_highlight(
+          acc,
+          {line_idx, offset + start_col},
+          {line_idx, offset + end_col},
           style: Face.new(bg: word_bg),
           priority: 2,
           group: :diff_word
@@ -565,17 +702,38 @@ defmodule MingaEditor.Commands.Git do
       %{source_buf: nil} ->
         EditorState.set_status(state, "Cannot toggle staged: diff opened from status panel")
 
-      %{source_buf: source_buf, staged: staged} ->
+      %{source_buf: source_buf, staged: staged} = diff_info ->
         new_staged = not staged
+        view_mode = Map.get(diff_info, :view_mode, :unified)
         git_pid = Git.tracking_pid(source_buf)
 
         if git_pid do
           GenServer.stop(active_buf, :normal)
           state = EditorState.unregister_diff_view(state, active_buf)
-          open_diff_view(state, git_pid, source_buf, new_staged)
+          open_diff_view(state, git_pid, source_buf, new_staged, view_mode)
         else
           EditorState.set_status(state, "Source buffer no longer tracked by git")
         end
+    end
+  end
+
+  @spec toggle_diff_layout(state(), pid()) :: state()
+  defp toggle_diff_layout(state, active_buf) do
+    case EditorState.diff_view_info(state, active_buf) do
+      nil ->
+        EditorState.set_status(state, "Not a diff view")
+
+      %{view_mode: :side_by_side} = diff_info ->
+        refresh_diff_view_content(state, active_buf, Map.put(diff_info, :view_mode, :unified))
+        |> EditorState.set_status("Diff layout: unified")
+
+      diff_info ->
+        refresh_diff_view_content(
+          state,
+          active_buf,
+          Map.put(diff_info, :view_mode, :side_by_side)
+        )
+        |> EditorState.set_status("Diff layout: side-by-side")
     end
   end
 
@@ -588,17 +746,17 @@ defmodule MingaEditor.Commands.Git do
   def refresh_diff_views_for_buffer(state, saved_buf) do
     diff_views = EditorState.diff_views_for_source(state, saved_buf)
 
-    Enum.reduce(diff_views, state, fn {diff_buf,
-                                       %{git_root: git_root, rel_path: rel_path, staged: staged}},
-                                      acc ->
-      refresh_diff_buffer(acc, diff_buf, saved_buf, git_root, rel_path, staged)
+    Enum.reduce(diff_views, state, fn {diff_buf, diff_info}, acc ->
+      refresh_diff_buffer(acc, diff_buf, saved_buf, diff_info)
     end)
   end
 
-  @spec refresh_diff_buffer(state(), pid(), pid(), String.t(), String.t(), boolean()) :: state()
-  defp refresh_diff_buffer(state, diff_buf, source_buf, git_root, rel_path, staged) do
+  @spec refresh_diff_buffer(state(), pid(), pid(), EditorState.diff_view_info()) :: state()
+  defp refresh_diff_buffer(state, diff_buf, source_buf, diff_info) do
+    %{git_root: git_root, rel_path: rel_path, staged: staged} = diff_info
+    view_mode = Map.get(diff_info, :view_mode, :unified)
     {base_content, current_content} = diff_contents(git_root, rel_path, source_buf, staged)
-    diff_result = DiffView.build(base_content, current_content)
+    diff_result = build_diff_result(base_content, current_content, state, view_mode)
 
     Buffer.replace_content_with_decorations(
       diff_buf,
@@ -615,7 +773,9 @@ defmodule MingaEditor.Commands.Git do
       rel_path: rel_path,
       staged: staged,
       line_metadata: diff_result.line_metadata,
-      hunk_lines: diff_result.hunk_lines
+      hunk_lines: diff_result.hunk_lines,
+      view_mode: view_mode,
+      pane_width: diff_pane_width(state)
     }
 
     EditorState.register_diff_view(state, diff_buf, diff_info)
@@ -1125,11 +1285,32 @@ defmodule MingaEditor.Commands.Git do
           [Diff.hunk()]
         ) :: boolean()
   defp stale_diff_view?(diff_buf, diff_info, base_lines, current_lines, hunks) do
-    fresh = DiffView.build_from_hunks(base_lines, current_lines, hunks)
+    fresh = diff_result_from_hunks(diff_info, base_lines, current_lines, hunks)
     {displayed_text, _cursor} = Buffer.content_and_cursor(diff_buf)
 
     displayed_text != fresh.text or diff_info.line_metadata != fresh.line_metadata or
       diff_info.hunk_lines != fresh.hunk_lines
+  end
+
+  @spec diff_result_from_hunks(EditorState.diff_view_info(), [String.t()], [String.t()], [
+          Diff.hunk()
+        ]) :: DiffView.diff_view_result()
+  defp diff_result_from_hunks(
+         %{view_mode: :side_by_side} = diff_info,
+         base_lines,
+         current_lines,
+         hunks
+       ) do
+    DiffView.build_side_by_side_from_hunks(
+      base_lines,
+      current_lines,
+      hunks,
+      Map.get(diff_info, :pane_width, 80)
+    )
+  end
+
+  defp diff_result_from_hunks(_diff_info, base_lines, current_lines, hunks) do
+    DiffView.build_from_hunks(base_lines, current_lines, hunks)
   end
 
   @spec diff_view_lines(EditorState.diff_view_info(), String.t()) ::
@@ -1201,12 +1382,12 @@ defmodule MingaEditor.Commands.Git do
   end
 
   @spec refresh_diff_view_content(state(), pid(), EditorState.diff_view_info()) :: state()
-  defp refresh_diff_view_content(state, diff_buf, %{staged: false} = diff_info) do
-    %{git_root: git_root, rel_path: rel_path} = diff_info
-    current_content = current_content_for_diff(diff_info)
+  defp refresh_diff_view_content(state, diff_buf, diff_info) do
+    %{git_root: git_root, rel_path: rel_path, staged: staged} = diff_info
+    view_mode = Map.get(diff_info, :view_mode, :unified)
     base_content = head_content(git_root, rel_path)
-
-    diff_result = DiffView.build(base_content, current_content)
+    current_content = diff_view_current_content(diff_info, git_root, rel_path, staged)
+    diff_result = build_diff_result(base_content, current_content, state, view_mode)
 
     Buffer.replace_content_with_decorations(
       diff_buf,
@@ -1217,13 +1398,25 @@ defmodule MingaEditor.Commands.Git do
       end
     )
 
-    updated_info = %{
-      diff_info
-      | line_metadata: diff_result.line_metadata,
-        hunk_lines: diff_result.hunk_lines
-    }
+    updated_info =
+      Map.merge(diff_info, %{
+        line_metadata: diff_result.line_metadata,
+        hunk_lines: diff_result.hunk_lines,
+        view_mode: view_mode,
+        pane_width: diff_pane_width(state)
+      })
 
     EditorState.register_diff_view(state, diff_buf, updated_info)
+  end
+
+  @spec diff_view_current_content(EditorState.diff_view_info(), String.t(), String.t(), boolean()) ::
+          String.t()
+  defp diff_view_current_content(_diff_info, git_root, rel_path, true) do
+    staged_content(git_root, rel_path)
+  end
+
+  defp diff_view_current_content(diff_info, _git_root, _rel_path, false) do
+    current_content_for_diff(diff_info)
   end
 
   @spec split_lines(String.t()) :: [String.t()]
