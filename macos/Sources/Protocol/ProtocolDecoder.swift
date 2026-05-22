@@ -207,6 +207,7 @@ enum RenderCommand: Sendable {
     case guiAgentContext(visible: Bool, task: String, dispatchTimestamp: Date, status: CardStatus, canApprove: Bool)
     case guiChangeSummary(visible: Bool, entries: [ChangeSummaryEntry], selectedIndex: Int)
     case guiConfigState(Wire.ConfigState)
+    case guiNotifications([Wire.EditorNotification])
 }
 
 // MARK: - Decoder
@@ -378,6 +379,14 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         guard data.count >= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
         let state = try decodeConfigState(data: data, start: payloadStart, end: payloadStart + payloadLen)
         return (.guiConfigState(state), 1 + 2 + payloadLen)
+
+    case OP_GUI_NOTIFICATIONS:
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let payloadLen = Int(readU16(data, rest))
+        let payloadStart = rest + 2
+        guard data.count >= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+        let notifications = try decodeNotifications(data: data, start: payloadStart, end: payloadStart + payloadLen)
+        return (.guiNotifications(notifications), 1 + 2 + payloadLen)
 
     // Highlight and parser opcodes: skip them (variable length).
     case OP_SET_LANGUAGE:
@@ -2480,6 +2489,70 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         }
         throw ProtocolDecodeError.unknownOpcode(opcode)
     }
+}
+
+// MARK: - Notification decoder
+
+private func decodeNotifications(data: Data, start: Int, end: Int) throws -> [Wire.EditorNotification] {
+    var pos = start
+    guard pos + 3 <= end else { throw ProtocolDecodeError.malformed }
+    let version = data[pos]
+    pos += 1
+    guard version == 1 else { throw ProtocolDecodeError.malformed }
+
+    let count = Int(readU16(data, pos))
+    pos += 2
+
+    var notifications: [Wire.EditorNotification] = []
+    notifications.reserveCapacity(count)
+
+    for _ in 0..<count {
+        let id = try readString16(data: data, pos: &pos, end: end)
+        guard pos + 22 <= end else { throw ProtocolDecodeError.malformed }
+        let level = data[pos]
+        pos += 1
+        let flags = data[pos]
+        pos += 1
+        let createdAt = readU64(data, pos)
+        pos += 8
+        let updatedAt = readU64(data, pos)
+        pos += 8
+        let rawAutoDismiss = readU32(data, pos)
+        pos += 4
+        let title = try readString16(data: data, pos: &pos, end: end)
+        let body = try readString16(data: data, pos: &pos, end: end)
+        let source = try readString16(data: data, pos: &pos, end: end)
+
+        guard pos + 1 <= end else { throw ProtocolDecodeError.malformed }
+        let actionCount = Int(data[pos])
+        pos += 1
+
+        var actions: [Wire.NotificationAction] = []
+        actions.reserveCapacity(actionCount)
+        for _ in 0..<actionCount {
+            let actionId = try readString16(data: data, pos: &pos, end: end)
+            let label = try readString16(data: data, pos: &pos, end: end)
+            actions.append(Wire.NotificationAction(id: actionId, label: label))
+        }
+
+        notifications.append(
+            Wire.EditorNotification(
+                id: id,
+                level: NotificationLevel(rawValue: level),
+                flags: flags,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                autoDismissMs: rawAutoDismiss == UInt32.max ? nil : rawAutoDismiss,
+                title: title,
+                body: body,
+                source: source,
+                actions: actions
+            )
+        )
+    }
+
+    guard pos == end else { throw ProtocolDecodeError.malformed }
+    return notifications
 }
 
 // MARK: - Config state decoder

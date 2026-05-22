@@ -18,7 +18,6 @@ defmodule MingaEditor.Renderer.Caches do
   - **GUI chrome** (`last_gui_*`): fingerprint caches inside `Emit.GUI`.
   """
 
-  @enforce_keys []
   defstruct [
     # ── Chrome stage ──────────────────────────────────────────────────────────
     chrome_prev_fingerprint: nil,
@@ -54,6 +53,7 @@ defmodule MingaEditor.Renderer.Caches do
     last_gui_hover_popup_fp: nil,
     last_gui_signature_help_fp: nil,
     last_gui_float_popup_fp: nil,
+    last_gui_notifications_fp: nil,
     last_gui_bottom_panel_fp: nil,
     last_gui_board_fp: nil,
     last_gui_agent_context_fp: nil,
@@ -91,6 +91,7 @@ defmodule MingaEditor.Renderer.Caches do
           last_gui_hover_popup_fp: integer() | nil,
           last_gui_signature_help_fp: integer() | nil,
           last_gui_float_popup_fp: integer() | nil,
+          last_gui_notifications_fp: integer() | nil,
           last_gui_bottom_panel_fp: integer() | nil,
           last_gui_board_fp: integer() | :dismissed | nil,
           last_gui_agent_context_fp: term(),

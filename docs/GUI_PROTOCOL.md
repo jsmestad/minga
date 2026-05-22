@@ -793,6 +793,29 @@ Per visible tab:
 
 The workspace list includes the manual project workspace and all agent workspaces. The visible tab list includes only file tabs for the active workspace. Agent view remains a workspace zoom surface, so it is not encoded as a normal file tab.
 
+### 0x99 — gui_notifications
+
+Structured notification center state for native frontends. The BEAM owns the model and sends full snapshots. Native frontends render the stack as bottom-right chrome and send dismiss or action clicks back through `gui_action`.
+
+```
+opcode(1) + payload_len(2) + payload(payload_len)
+
+Payload:
+  version(1) + notification_count(2) + notifications...
+
+Per notification:
+  id_len(2) + id + level(1) + flags(1) + created_at(8) + updated_at(8)
+  + auto_dismiss_ms(4) + title_len(2) + title + body_len(2) + body
+  + source_len(2) + source + action_count(1) + actions...
+
+Per action:
+  id_len(2) + id + label_len(2) + label
+```
+
+`version` is currently 1. `level`: 0 = info, 1 = warning, 2 = error, 3 = success, 4 = progress. Flags: bit 0 = dismissable. `created_at` and `updated_at` are Unix seconds. `auto_dismiss_ms` uses `0xFFFFFFFF` for no auto-dismiss. Errors and progress notifications should normally use no auto-dismiss. Informational and success notifications may auto-dismiss after a short delay.
+
+TUI frontends do not render this opcode. The BEAM should also log important notifications to `*Messages*` so terminal users get the same information.
+
 ## GUI Action Input Opcode (Frontend → BEAM)
 
 The frontend sends user interactions with native chrome back to the BEAM using the `gui_action` opcode (0x07). This opcode lives in the input event range, not the GUI chrome range.
@@ -858,6 +881,8 @@ opcode(1) + action_type(1) + payload...
 | 0x41 | fold_toggle_at_line | window_id(2) + buffer_line(4) | Toggle the fold at a gutter-targeted buffer line without moving the cursor |
 | 0x43 | config_update | key_len(1) + key + type_tag(1) + value_payload | Update a typed config option from the native Settings UI |
 | 0x44 | config_query | (empty) | Request the current native Settings state |
+| 0x45 | notification_dismiss | id_len(2) + id | Dismiss one notification |
+| 0x46 | notification_action | id_len(2) + id + action_id_len(2) + action_id | Invoke one inline notification action |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |

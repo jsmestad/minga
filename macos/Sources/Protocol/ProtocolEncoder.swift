@@ -113,6 +113,10 @@ protocol InputEncoder: AnyObject, Sendable {
     // Native settings actions
     func sendConfigQuery()
     func sendConfigUpdate(key: String, value: SettingValue)
+
+    // Notification center actions
+    func sendNotificationDismiss(id: String)
+    func sendNotificationAction(id: String, actionId: String)
 }
 
 extension InputEncoder {
@@ -126,6 +130,12 @@ extension InputEncoder {
 
     /// Default no-op so existing test spies do not need to implement settings actions.
     func sendConfigUpdate(key: String, value: SettingValue) {}
+
+    /// Default no-op so existing test spies do not need to implement notification actions.
+    func sendNotificationDismiss(id: String) {}
+
+    /// Default no-op so existing test spies do not need to implement notification actions.
+    func sendNotificationAction(id: String, actionId: String) {}
 }
 
 /// Thread-safe encoder that writes `{:packet, 4}` framed events to stdout.
@@ -971,6 +981,25 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf.append(UInt8(keyBytes.count))
         buf.append(contentsOf: keyBytes)
         appendSettingValue(value, to: &buf)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: notification_dismiss. Layout: opcode(1) + action_type(1) + id_len(2) + id.
+    func sendNotificationDismiss(id: String) {
+        var buf = Data()
+        buf.append(OP_GUI_ACTION)
+        buf.append(GUI_ACTION_NOTIFICATION_DISMISS)
+        appendString16(&buf, id)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: notification_action. Layout: opcode(1) + action_type(1) + id_len(2) + id + action_len(2) + action_id.
+    func sendNotificationAction(id: String, actionId: String) {
+        var buf = Data()
+        buf.append(OP_GUI_ACTION)
+        buf.append(GUI_ACTION_NOTIFICATION_ACTION)
+        appendString16(&buf, id)
+        appendString16(&buf, actionId)
         writeFrame(buf)
     }
 

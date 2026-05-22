@@ -107,6 +107,7 @@ defmodule MingaEditor do
   alias MingaEditor.MinibufferData
   alias MingaEditor.MouseHoverTooltip
   alias MingaEditor.PickerUI
+  alias MingaEditor.UI.Notification
 
   @typedoc "Internal state."
   @type state :: EditorState.t()
@@ -249,6 +250,7 @@ defmodule MingaEditor do
     Minga.Events.subscribe(:file_written, events_registry)
     Minga.Events.subscribe(:project_rebuilt, events_registry)
     Minga.Events.subscribe(:git_status_changed, events_registry)
+    Minga.Events.subscribe(:command_done, events_registry)
 
     # Tool manager progress: show install/update status in the status line.
     Minga.Events.subscribe(:tool_install_started, events_registry)
@@ -831,6 +833,11 @@ defmodule MingaEditor do
     {:noreply, Renderer.render_or_async(state)}
   end
 
+  def handle_info({:dismiss_notification, id, dismiss_ref}, state) do
+    state = EditorState.dismiss_notification(state, id, dismiss_ref)
+    {:noreply, Renderer.render_or_async(state)}
+  end
+
   # ── AI commit message generation ───────────────────────────────────────────
 
   def handle_info({:git_commit_message_generated, {:ok, message}}, state) do
@@ -972,6 +979,19 @@ defmodule MingaEditor do
        ) do
     MessageLog.append_to_store(state, text, level)
   end
+
+  defp dispatch_minga_event(
+         state,
+         :command_done,
+         %Minga.Events.CommandDoneEvent{name: "*test*", exit_code: exit_code},
+         _msg
+       ) do
+    state
+    |> update_test_notification(exit_code)
+    |> Renderer.render_or_async()
+  end
+
+  defp dispatch_minga_event(state, :command_done, _payload, _msg), do: state
 
   defp dispatch_minga_event(
          state,
@@ -2328,6 +2348,69 @@ defmodule MingaEditor do
   @spec log_message(state(), String.t()) :: state()
   defp log_message(state, text), do: MessageLog.log(state, text)
 
+  @spec put_notification(state(), Notification.t()) :: state()
+  defp put_notification(state, %Notification{} = notification) do
+    notification = maybe_schedule_notification_dismiss(notification, state.backend)
+
+    state
+    |> log_notification(notification)
+    |> EditorState.upsert_notification(notification)
+  end
+
+  @spec maybe_schedule_notification_dismiss(Notification.t(), EditorState.backend()) ::
+          Notification.t()
+  defp maybe_schedule_notification_dismiss(
+         %Notification{auto_dismiss_ms: ms, id: id} = notification,
+         backend
+       )
+       when is_integer(ms) and ms > 0 and backend != :headless do
+    dismiss_ref = make_ref()
+    Process.send_after(self(), {:dismiss_notification, id, dismiss_ref}, ms)
+    Notification.with_dismiss_ref(notification, dismiss_ref)
+  end
+
+  defp maybe_schedule_notification_dismiss(%Notification{} = notification, _backend),
+    do: notification
+
+  @spec log_notification(state(), Notification.t()) :: state()
+  defp log_notification(state, %Notification{} = notification) do
+    source = if notification.source, do: "[#{notification.source}] ", else: ""
+    body = if notification.body in [nil, ""], do: "", else: ": #{notification.body}"
+    log_message(state, "#{source}#{notification.title}#{body}")
+  end
+
+  @spec update_test_notification(state(), non_neg_integer()) :: state()
+  defp update_test_notification(state, 0) do
+    put_notification(
+      state,
+      Notification.new(
+        id: "build:test",
+        level: :success,
+        title: "Build finished",
+        body: "Tests passed",
+        source: "Build",
+        auto_dismiss_ms: 4_000
+      )
+    )
+  end
+
+  defp update_test_notification(state, exit_code) do
+    put_notification(
+      state,
+      Notification.new(
+        id: "build:test",
+        level: :error,
+        title: "Build failed",
+        body: "Test command exited with code #{exit_code}",
+        source: "Build",
+        actions: [
+          %{id: "show_logs", label: "Show logs", dispatch: {:command, :test_output}},
+          %{id: "retry", label: "Retry", dispatch: {:command, :test_rerun}}
+        ]
+      )
+    )
+  end
+
   # ── GUI action dispatch ────────────────────────────────────────────────
   # Semantic commands from SwiftUI chrome. Each action maps to existing
   # editor operations. These are wired up as SwiftUI views are built;
@@ -2383,6 +2466,27 @@ defmodule MingaEditor do
       )
 
       state
+    end
+  end
+
+  defp handle_gui_action(state, {:notification_dismiss, id}) do
+    EditorState.dismiss_notification(state, id)
+  end
+
+  defp handle_gui_action(state, {:notification_action, notification_id, action_id}) do
+    case EditorState.notification_action(state, notification_id, action_id) do
+      %{dispatch: {:command, command}} ->
+        state
+        |> EditorState.dismiss_notification(notification_id)
+        |> Commands.execute(command)
+        |> normalize_command_result()
+
+      %{dispatch: {:event, event, payload}} ->
+        Minga.Events.broadcast(event, payload, EditorState.events_registry(state))
+        state
+
+      _ ->
+        state
     end
   end
 
@@ -2657,10 +2761,9 @@ defmodule MingaEditor do
     # Discard any follow-up action (dot_repeat, replay_macro): GUI chrome
     # buttons are not vim editing operations and don't participate in the
     # action pipeline.
-    case Commands.execute(state, command) do
-      {new_state, _action} -> new_state
-      new_state -> new_state
-    end
+    state
+    |> Commands.execute(command)
+    |> normalize_command_result()
   rescue
     ArgumentError ->
       Minga.Log.warning(:editor, "[execute_command] unrecognized command: #{name_str}")
@@ -2832,6 +2935,10 @@ defmodule MingaEditor do
     |> EditorState.clear_git_toast()
     |> Commands.Git.execute(:git_pull_and_retry)
   end
+
+  @spec normalize_command_result(state() | {state(), term()}) :: state()
+  defp normalize_command_result({new_state, _action}), do: new_state
+  defp normalize_command_result(new_state), do: new_state
 
   @spec commit_from_gui(state(), String.t(), boolean()) :: state()
   defp commit_from_gui(state, message, amend?) do

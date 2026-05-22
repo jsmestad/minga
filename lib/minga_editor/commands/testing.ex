@@ -8,7 +8,9 @@ defmodule MingaEditor.Commands.Testing do
 
   alias Minga.Buffer
   alias MingaEditor.Commands.BufferManagement
+  alias MingaEditor.MessageLog
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.UI.Notification
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
@@ -32,8 +34,14 @@ defmodule MingaEditor.Commands.Testing do
 
   @spec test_rerun(state()) :: state()
   def test_rerun(%{last_test_command: {command, project_root}} = state) do
-    Minga.CommandOutput.run("*test*", command, cwd: project_root)
-    show_output(state)
+    Minga.CommandOutput.run("*test*", command,
+      cwd: project_root,
+      events_registry: EditorState.events_registry(state)
+    )
+
+    state
+    |> show_build_progress(command)
+    |> show_output()
   end
 
   def test_rerun(state), do: EditorState.set_status(state, "No previous test command")
@@ -95,8 +103,32 @@ defmodule MingaEditor.Commands.Testing do
 
   defp execute_test(state, command, project_root) do
     state = EditorState.set_last_test_command(state, {command, project_root})
-    Minga.CommandOutput.run("*test*", command, cwd: project_root)
-    show_output(state)
+
+    Minga.CommandOutput.run("*test*", command,
+      cwd: project_root,
+      events_registry: EditorState.events_registry(state)
+    )
+
+    state
+    |> show_build_progress(command)
+    |> show_output()
+  end
+
+  @spec show_build_progress(state(), String.t()) :: state()
+  defp show_build_progress(state, command) do
+    notification =
+      Notification.new(
+        id: "build:test",
+        level: :progress,
+        title: "Building Minga",
+        body: command,
+        source: "Build",
+        dismissable: false
+      )
+
+    state
+    |> MessageLog.log("[Build] Building Minga: #{command}")
+    |> EditorState.upsert_notification(notification)
   end
 
   @spec show_output(state()) :: state()

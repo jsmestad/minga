@@ -15,6 +15,9 @@ final class GUIState {
     /// Native settings panel state.
     let settingsState = SettingsState()
 
+    /// Bottom-right editor notification center state.
+    let notificationCenterState = NotificationCenterState()
+
     /// Tab bar state.
     let tabBarState = TabBarState()
 

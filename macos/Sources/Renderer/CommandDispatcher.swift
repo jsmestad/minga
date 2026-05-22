@@ -167,6 +167,9 @@ final class CommandDispatcher {
         case .guiConfigState(let configState):
             guiState.settingsState.apply(configState: configState)
 
+        case .guiNotifications(let notifications):
+            guiState.notificationCenterState.update(rawNotifications: notifications)
+
         case .guiTheme(let slots):
             guiState.themeColors.applySlots(slots)
             let tc = guiState.themeColors

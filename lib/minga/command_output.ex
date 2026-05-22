@@ -59,6 +59,7 @@ defmodule Minga.CommandOutput do
 
   Options:
     - `:cwd` - working directory for the command (default: project root)
+    - `:events_registry` - event registry for completion broadcasts
   """
   @spec run(String.t(), String.t(), keyword()) :: :ok
   def run(name, command, opts \\ []) do
@@ -67,10 +68,15 @@ defmodule Minga.CommandOutput do
         GenServer.call(pid, {:run, command, opts})
 
       :error ->
+        start_opts = [
+          name: name,
+          events_registry: Keyword.get(opts, :events_registry, Minga.Events.default_registry())
+        ]
+
         {:ok, pid} =
           DynamicSupervisor.start_child(
             Minga.Buffer.Supervisor,
-            {__MODULE__, name: name}
+            {__MODULE__, start_opts}
           )
 
         GenServer.call(pid, {:run, command, opts})
@@ -133,8 +139,18 @@ defmodule Minga.CommandOutput do
         {:env, []}
       ])
 
+    events_registry = Keyword.get(opts, :events_registry, state.events_registry)
+
     {:reply, :ok,
-     %{state | port: port, command: command, cwd: cwd, exit_code: nil, running?: true}}
+     %{
+       state
+       | port: port,
+         command: command,
+         cwd: cwd,
+         exit_code: nil,
+         running?: true,
+         events_registry: events_registry
+     }}
   end
 
   def handle_call(:buffer, _from, state) do

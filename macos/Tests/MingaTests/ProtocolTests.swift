@@ -11,6 +11,24 @@ private func appendConfigStateU16(_ data: inout Data, _ value: UInt16) {
     data.append(UInt8(value & 0xFF))
 }
 
+private func appendConfigStateU32(_ data: inout Data, _ value: UInt32) {
+    data.append(UInt8((value >> 24) & 0xFF))
+    data.append(UInt8((value >> 16) & 0xFF))
+    data.append(UInt8((value >> 8) & 0xFF))
+    data.append(UInt8(value & 0xFF))
+}
+
+private func appendConfigStateU64(_ data: inout Data, _ value: UInt64) {
+    data.append(UInt8((value >> 56) & 0xFF))
+    data.append(UInt8((value >> 48) & 0xFF))
+    data.append(UInt8((value >> 40) & 0xFF))
+    data.append(UInt8((value >> 32) & 0xFF))
+    data.append(UInt8((value >> 24) & 0xFF))
+    data.append(UInt8((value >> 16) & 0xFF))
+    data.append(UInt8((value >> 8) & 0xFF))
+    data.append(UInt8(value & 0xFF))
+}
+
 private func appendConfigStateString8(_ data: inout Data, _ text: String) {
     let bytes = Array(text.utf8.prefix(Int(UInt8.max)))
     data.append(UInt8(bytes.count))
@@ -150,6 +168,44 @@ struct ProtocolDecoderTests {
         #expect(state.keybindings.count == 1)
         #expect(state.themePreviews[0].name == "Doom One")
         #expect(state.keybindings[0].key == "SPC f f")
+    }
+
+    @Test("Decode gui_notifications command")
+    func decodeGuiNotifications() throws {
+        var payload = Data()
+        payload.append(1)
+        appendConfigStateU16(&payload, 1)
+        appendConfigStateString16(&payload, "build:test")
+        payload.append(2)
+        payload.append(1)
+        appendConfigStateU64(&payload, 1_715_000_000)
+        appendConfigStateU64(&payload, 1_715_000_030)
+        appendConfigStateU32(&payload, UInt32.max)
+        appendConfigStateString16(&payload, "Build failed")
+        appendConfigStateString16(&payload, "mix test exited with code 1")
+        appendConfigStateString16(&payload, "Build")
+        payload.append(1)
+        appendConfigStateString16(&payload, "show_logs")
+        appendConfigStateString16(&payload, "Show logs")
+
+        var encoded = Data([OP_GUI_NOTIFICATIONS])
+        appendConfigStateU16(&encoded, UInt16(payload.count))
+        encoded.append(payload)
+
+        let (cmd, size) = try decodeCommand(data: encoded, offset: 0)
+        #expect(size == encoded.count)
+        guard case .guiNotifications(let notifications) = cmd else {
+            Issue.record("Expected .guiNotifications, got \(String(describing: cmd))")
+            return
+        }
+
+        #expect(notifications.count == 1)
+        #expect(notifications[0].id == "build:test")
+        #expect(notifications[0].createdAt == 1_715_000_000)
+        #expect(notifications[0].updatedAt == 1_715_000_030)
+        #expect(notifications[0].title == "Build failed")
+        #expect(notifications[0].dismissable)
+        #expect(notifications[0].actions[0].label == "Show logs")
     }
 
     @Test("Decode draw_text command")
