@@ -270,13 +270,17 @@ defmodule MingaEditor.FocusTree do
   end
 
   @spec add_picker_overlay(t(), map(), Layout.t()) :: t()
-  defp add_picker_overlay(%TreeNode{} = root, %{picker: %PickerData{}, layout: :centered}, layout) do
+  defp add_picker_overlay(
+         %TreeNode{} = root,
+         %{picker: %PickerData{} = picker, layout: :centered},
+         layout
+       ) do
     backdrop =
       TreeNode.new(:picker_backdrop, layout.terminal,
         handler: Input.Picker,
         scrollable?: true,
         children: [
-          TreeNode.new(:picker, centered_picker_rect(layout),
+          TreeNode.new(:picker, centered_picker_rect(layout, picker),
             handler: Input.Picker,
             scrollable?: true,
             focusable?: true
@@ -335,10 +339,13 @@ defmodule MingaEditor.FocusTree do
     %{root | children: children ++ [child]}
   end
 
-  @spec centered_picker_rect(Layout.t()) :: Layout.rect()
-  defp centered_picker_rect(%Layout{terminal: {_row, _col, cols, rows}}) do
+  @spec centered_picker_rect(Layout.t(), PickerData.t()) :: Layout.rect()
+  defp centered_picker_rect(%Layout{terminal: {_row, _col, cols, rows}}, picker) do
+    max_height = max(div(rows * 70, 100), 5)
+    item_capacity = max_height - 3
+    {visible, _selected_offset} = PickerData.visible_items(picker, item_capacity)
     width = max(div(cols * 60, 100), 1)
-    height = max(div(rows * 70, 100), 1)
+    height = min(length(visible) + 3, max_height) |> min(rows) |> max(1)
     row = max(div(rows - height, 2), 0)
     col = max(div(cols - width, 2), 0)
     {row, col, width, height}
@@ -346,7 +353,7 @@ defmodule MingaEditor.FocusTree do
 
   @spec bottom_picker_rect(Layout.t(), PickerData.t()) :: Layout.rect()
   defp bottom_picker_rect(%Layout{terminal: {_row, _col, cols, rows}}, picker) do
-    {visible, _selected_offset} = PickerData.visible_items(picker)
+    {visible, _selected_offset} = PickerData.visible_items(picker, max(rows - 3, 1))
     item_count = length(visible)
     prompt_row = rows - 1
     separator_row = prompt_row - item_count - 1

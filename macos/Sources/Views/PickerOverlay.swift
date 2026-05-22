@@ -39,7 +39,8 @@ struct PickerOverlay: View {
                         Divider()
                             .overlay(theme.popupBorder.opacity(0.3))
 
-                        resultsList(maxListHeight: max(geo.size.height * 0.5, 200))
+                        let listHeight = min(CGFloat(state.items.count) * itemHeight, max(geo.size.height * 0.5, 200))
+                        resultsList(maxListHeight: listHeight)
 
                         if !state.items.isEmpty {
                             Divider()
@@ -112,7 +113,7 @@ struct PickerOverlay: View {
                     }
                 }
             }
-            .frame(maxHeight: min(CGFloat(state.items.count) * itemHeight, maxListHeight))
+            .frame(maxHeight: maxListHeight)
             .onChange(of: state.selectedIndex) { _, newIndex in
                 withAnimation(nil) {
                     proxy.scrollTo(newIndex, anchor: .center)
