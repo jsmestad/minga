@@ -18,7 +18,11 @@ defmodule Minga.Editing.Motion.Helpers do
 
   # ── Character classification ─────────────────────────────────────────────
 
-  @doc "Classifies a grapheme as `:word`, `:whitespace`, or `:punctuation`."
+  @doc """
+  Classifies a grapheme as `:word`, `:whitespace`, or `:punctuation`.
+
+  Minga's default Vim-style word definition treats Unicode letters, Unicode digits, and underscore as word characters. There is not currently a filetype-specific `iskeyword` option, so punctuation such as `.`, `-`, and `:` remains a separate symbol run for every filetype.
+  """
   @spec classify_char(String.t()) :: :word | :whitespace | :punctuation
   def classify_char(<<c, _::binary>>) when c >= ?a and c <= ?z, do: :word
   def classify_char(<<c, _::binary>>) when c >= ?A and c <= ?Z, do: :word
@@ -27,12 +31,17 @@ defmodule Minga.Editing.Motion.Helpers do
   def classify_char(<<?\s, _::binary>>), do: :whitespace
   def classify_char(<<?\t, _::binary>>), do: :whitespace
   def classify_char(<<?\n, _::binary>>), do: :whitespace
-  def classify_char(_), do: :punctuation
+  def classify_char(g) when is_binary(g), do: classify_unicode_grapheme(g)
 
-  @doc "Returns `true` when the grapheme is a word character (`[a-zA-Z0-9_]`)."
+  @doc "Returns `true` when the grapheme is a word character."
   @spec word_char?(String.t() | nil) :: boolean()
   def word_char?(nil), do: false
   def word_char?(g), do: classify_char(g) == :word
+
+  @spec classify_unicode_grapheme(String.t()) :: :word | :punctuation
+  defp classify_unicode_grapheme(g) do
+    if String.match?(g, ~r/[\p{L}\p{N}_]/u), do: :word, else: :punctuation
+  end
 
   @doc "Returns `true` when the grapheme is whitespace (space, tab, or newline)."
   @spec whitespace?(String.t() | nil) :: boolean()

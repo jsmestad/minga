@@ -111,10 +111,8 @@ defmodule Minga.Editing.TextObject do
       start_g = scan_left_tuple(graphemes, clamped, classifier)
       end_g = scan_right_tuple(graphemes, clamped, classifier)
 
-      after_end = end_g + 1
-
       {final_start_g, final_end_g} =
-        around_word_grapheme_bounds(graphemes, len, start_g, end_g, after_end)
+        around_word_indexes(graphemes, start_g, end_g)
 
       start_byte = elem(byte_offsets, final_start_g)
       end_byte = elem(byte_offsets, final_end_g)
@@ -896,80 +894,47 @@ defmodule Minga.Editing.TextObject do
 
   # ── Private — word helpers ────────────────────────────────────────────────────
 
+  @spec around_word_indexes(tuple(), non_neg_integer(), non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp around_word_indexes(graphemes, start_g, end_g) do
+    len = tuple_size(graphemes)
+    after_end = end_g + 1
+
+    if after_end < len and whitespace?(elem(graphemes, after_end)) do
+      trail_end = scan_right_tuple(graphemes, after_end, &whitespace?/1)
+      {start_g, trail_end}
+    else
+      around_word_indexes_before_start(graphemes, start_g, end_g)
+    end
+  end
+
+  @spec around_word_indexes_before_start(tuple(), non_neg_integer(), non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp around_word_indexes_before_start(graphemes, start_g, end_g) when start_g > 0 do
+    if whitespace?(elem(graphemes, start_g - 1)) do
+      lead_start = scan_left_tuple(graphemes, start_g - 1, &whitespace?/1)
+      {lead_start, end_g}
+    else
+      {start_g, end_g}
+    end
+  end
+
+  defp around_word_indexes_before_start(_graphemes, start_g, end_g), do: {start_g, end_g}
+
   @spec classifier_for(String.t()) :: (String.t() -> boolean())
   defp classifier_for(char) do
-    classifier_for(char, word_char?(char), whitespace?(char))
-  end
-
-  @spec classifier_for(String.t(), boolean(), boolean()) :: (String.t() -> boolean())
-  defp classifier_for(_char, true, _whitespace?), do: &word_char?/1
-  defp classifier_for(_char, false, true), do: &whitespace?/1
-
-  defp classifier_for(_char, false, false),
-    do: fn c -> not word_char?(c) and not whitespace?(c) end
-
-  @spec around_word_grapheme_bounds(
-          tuple(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) ::
-          {non_neg_integer(), non_neg_integer()}
-  defp around_word_grapheme_bounds(graphemes, len, start_g, end_g, after_end) do
-    trailing_whitespace? = after_end < len and whitespace?(elem(graphemes, after_end))
-    leading_whitespace? = start_g > 0 and whitespace?(elem(graphemes, start_g - 1))
-
-    around_word_grapheme_bounds(
-      graphemes,
-      start_g,
-      end_g,
-      after_end,
-      trailing_whitespace?,
-      leading_whitespace?
-    )
-  end
-
-  @spec around_word_grapheme_bounds(
-          tuple(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          boolean(),
-          boolean()
-        ) :: {non_neg_integer(), non_neg_integer()}
-  defp around_word_grapheme_bounds(
-         graphemes,
-         start_g,
-         _end_g,
-         after_end,
-         true,
-         _leading_whitespace?
-       ) do
-    trail_end = scan_right_tuple(graphemes, after_end, &whitespace?/1)
-    {start_g, trail_end}
-  end
-
-  defp around_word_grapheme_bounds(graphemes, start_g, end_g, _after_end, false, true) do
-    lead_start = scan_left_tuple(graphemes, start_g - 1, &whitespace?/1)
-    {lead_start, end_g}
-  end
-
-  defp around_word_grapheme_bounds(_graphemes, start_g, end_g, _after_end, false, false) do
-    {start_g, end_g}
+    case Helpers.classify_char(char) do
+      :word -> &word_char?/1
+      :whitespace -> &whitespace?/1
+      :punctuation -> fn c -> not word_char?(c) and not whitespace?(c) end
+    end
   end
 
   @spec word_char?(String.t()) :: boolean()
-  defp word_char?(<<c::utf8>>)
-       when (c >= ?a and c <= ?z) or (c >= ?A and c <= ?Z) or (c >= ?0 and c <= ?9) or c == ?_,
-       do: true
-
-  defp word_char?(_), do: false
+  defp word_char?(char), do: Helpers.word_char?(char)
 
   @spec whitespace?(String.t()) :: boolean()
-  defp whitespace?(" "), do: true
-  defp whitespace?("\t"), do: true
-  defp whitespace?(_), do: false
+  defp whitespace?(char), do: Helpers.whitespace?(char)
 
   # Scans left in a grapheme tuple while `pred` holds.
   @spec scan_left_tuple(tuple(), non_neg_integer(), (String.t() -> boolean())) ::

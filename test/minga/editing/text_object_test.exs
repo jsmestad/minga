@@ -55,6 +55,22 @@ defmodule Minga.Editing.TextObjectTest do
       b = buf("foo_bar baz")
       assert {{0, 0}, {0, 6}} = TextObject.inner_word(b, {0, 3})
     end
+
+    test "selects punctuation runs separately from words" do
+      b = buf("foo...bar")
+      assert {{0, 3}, {0, 5}} = TextObject.inner_word(b, {0, 4})
+    end
+
+    test "treats hyphenated identifiers as word punctuation word" do
+      b = buf("foo-bar")
+      assert {{0, 4}, {0, 6}} = TextObject.inner_word(b, {0, 5})
+    end
+
+    test "selects complete Unicode word ranges by byte offsets" do
+      b = buf("éclair café")
+      assert {{0, 0}, {0, 6}} = TextObject.inner_word(b, {0, 1})
+      assert {{0, 8}, {0, 11}} = TextObject.inner_word(b, {0, 11})
+    end
   end
 
   # ── a_word/2 ──────────────────────────────────────────────────────────────────
