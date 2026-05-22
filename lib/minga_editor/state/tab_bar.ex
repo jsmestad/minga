@@ -302,11 +302,19 @@ defmodule MingaEditor.State.TabBar do
 
   @doc "Moves the active tab one visible slot left within its workspace."
   @spec move_active_tab_left(t()) :: t()
-  def move_active_tab_left(%__MODULE__{} = tb), do: move_active_tab(tb, -1)
+  def move_active_tab_left(%__MODULE__{} = tb), do: move_tab(tb, tb.active_id, -1)
 
   @doc "Moves the active tab one visible slot right within its workspace."
   @spec move_active_tab_right(t()) :: t()
-  def move_active_tab_right(%__MODULE__{} = tb), do: move_active_tab(tb, 1)
+  def move_active_tab_right(%__MODULE__{} = tb), do: move_tab(tb, tb.active_id, 1)
+
+  @doc "Moves the tab with the given id one visible slot left within its workspace."
+  @spec move_tab_left(t(), Tab.id()) :: t()
+  def move_tab_left(%__MODULE__{} = tb, id), do: move_tab(tb, id, -1)
+
+  @doc "Moves the tab with the given id one visible slot right within its workspace."
+  @spec move_tab_right(t(), Tab.id()) :: t()
+  def move_tab_right(%__MODULE__{} = tb, id), do: move_tab(tb, id, 1)
 
   @doc "Reorders a visible file tab within its workspace by zero-based visible index."
   @spec reorder_tab(t(), Tab.id(), non_neg_integer()) :: t()
@@ -562,11 +570,22 @@ defmodule MingaEditor.State.TabBar do
     Enum.filter(tabs, & &1.pinned?) ++ Enum.reject(tabs, & &1.pinned?)
   end
 
-  @spec move_active_tab(t(), 1 | -1) :: t()
-  defp move_active_tab(%__MODULE__{active_id: active_id} = tb, step) do
-    tabs = visible_file_tabs(tb)
+  @spec move_tab(t(), Tab.id(), 1 | -1) :: t()
+  defp move_tab(%__MODULE__{} = tb, id, step) do
+    case get(tb, id) do
+      %Tab{kind: :file, group_id: workspace_id} ->
+        move_file_tab(tb, id, workspace_id, step)
 
-    case Enum.find_index(tabs, &(&1.id == active_id)) do
+      _ ->
+        tb
+    end
+  end
+
+  @spec move_file_tab(t(), Tab.id(), non_neg_integer(), 1 | -1) :: t()
+  defp move_file_tab(%__MODULE__{} = tb, id, workspace_id, step) do
+    tabs = visible_file_tabs(tb, workspace_id)
+
+    case Enum.find_index(tabs, &(&1.id == id)) do
       nil ->
         tb
 
@@ -574,7 +593,7 @@ defmodule MingaEditor.State.TabBar do
         target_index = current_index + step
 
         if visible_tab_reorder_allowed?(tabs, current_index, target_index) do
-          reorder_tab(tb, active_id, target_index)
+          reorder_tab(tb, id, target_index)
         else
           tb
         end

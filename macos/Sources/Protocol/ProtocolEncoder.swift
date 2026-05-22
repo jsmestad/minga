@@ -23,6 +23,10 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendCloseTab(id: UInt32)
     func sendTabCopyPath(id: UInt32)
     func sendTabReorder(id: UInt32, newIndex: UInt16)
+    func sendTabPin(id: UInt32)
+    func sendTabUnpin(id: UInt32)
+    func sendTabMoveLeft(id: UInt32)
+    func sendTabMoveRight(id: UInt32)
     func sendHoverOpenAction()
     func sendFileTreeClick(index: UInt16)
     func sendFileTreeToggle(index: UInt16)
@@ -342,6 +346,34 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf[1] = GUI_ACTION_TAB_REORDER
         writeU32(&buf, 2, id)
         writeU16(&buf, 6, newIndex)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: tab_pin. Layout: opcode(1) + action_type(1) + tab_id(4).
+    func sendTabPin(id: UInt32) {
+        sendTabIdAction(actionType: GUI_ACTION_TAB_PIN, id: id)
+    }
+
+    /// Send a gui_action: tab_unpin. Layout: opcode(1) + action_type(1) + tab_id(4).
+    func sendTabUnpin(id: UInt32) {
+        sendTabIdAction(actionType: GUI_ACTION_TAB_UNPIN, id: id)
+    }
+
+    /// Send a gui_action: tab_move_left. Layout: opcode(1) + action_type(1) + tab_id(4).
+    func sendTabMoveLeft(id: UInt32) {
+        sendTabIdAction(actionType: GUI_ACTION_TAB_MOVE_LEFT, id: id)
+    }
+
+    /// Send a gui_action: tab_move_right. Layout: opcode(1) + action_type(1) + tab_id(4).
+    func sendTabMoveRight(id: UInt32) {
+        sendTabIdAction(actionType: GUI_ACTION_TAB_MOVE_RIGHT, id: id)
+    }
+
+    private func sendTabIdAction(actionType: UInt8, id: UInt32) {
+        var buf = Data(count: 6)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = actionType
+        writeU32(&buf, 2, id)
         writeFrame(buf)
     }
 

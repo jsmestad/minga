@@ -50,6 +50,43 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       assert gid2 == 5
     end
 
+    test "tab entry includes pinned flag and tint color bytes" do
+      tab =
+        TabSummary.new(
+          id: 1,
+          workspace_id: 3,
+          kind: :file,
+          label: "pinned.ex",
+          path: "/tmp/pinned.ex",
+          icon: "",
+          pinned?: true,
+          tint_color: 0x12_34_56
+        )
+
+      chrome_state = chrome_state(active_workspace_id: 3, active_tab_id: 1, visible_tabs: [tab])
+
+      <<0x71, 0::8, 1::8, flags::8, 1::32, 3::16, icon_len::8, _icon::binary-size(icon_len),
+        label_len::16, label::binary-size(label_len), tint::32>> =
+        ProtocolGUI.encode_gui_tab_bar(chrome_state)
+
+      assert Bitwise.band(flags, 0x80) == 0x80
+      assert label == "pinned.ex"
+      assert tint == 0x12_34_56
+    end
+
+    test "raw tab bar entry includes pinned flag and zero tint color" do
+      tab = %Tab{id: 1, kind: :file, label: "pinned.ex", pinned?: true}
+      tb = %TabBar{tabs: [tab], active_id: 1, next_id: 2}
+
+      <<0x71, 0::8, 1::8, flags::8, 1::32, 0::16, icon_len::8, _icon::binary-size(icon_len),
+        label_len::16, label::binary-size(label_len), tint::32>> =
+        ProtocolGUI.encode_gui_tab_bar(tb)
+
+      assert Bitwise.band(flags, 0x80) == 0x80
+      assert label == "pinned.ex"
+      assert tint == 0
+    end
+
     test "uses 255 active index when the active tab is hidden from visible tabs" do
       chrome_state = %ChromeState{
         workspaces: [
@@ -348,6 +385,13 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
     test "decodes tab reorder" do
       assert {:ok, {:tab_reorder, 42, 3}} ==
                ProtocolGUI.decode_gui_action(0x48, <<42::32, 3::16>>)
+    end
+
+    test "decodes id-scoped tab context actions" do
+      assert {:ok, {:tab_pin, 42}} == ProtocolGUI.decode_gui_action(0x49, <<42::32>>)
+      assert {:ok, {:tab_unpin, 42}} == ProtocolGUI.decode_gui_action(0x4A, <<42::32>>)
+      assert {:ok, {:tab_move_left, 42}} == ProtocolGUI.decode_gui_action(0x4B, <<42::32>>)
+      assert {:ok, {:tab_move_right, 42}} == ProtocolGUI.decode_gui_action(0x4C, <<42::32>>)
     end
 
     test "decodes hover open action" do

@@ -194,6 +194,22 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     reorder_tab(state, id, new_index)
   end
 
+  defp dispatch_action(state, {:tab_pin, id}) do
+    update_tab_bar(state, &TabBar.pin_tab(&1, id))
+  end
+
+  defp dispatch_action(state, {:tab_unpin, id}) do
+    update_tab_bar(state, &TabBar.unpin_tab(&1, id))
+  end
+
+  defp dispatch_action(state, {:tab_move_left, id}) do
+    update_tab_bar(state, &TabBar.move_tab_left(&1, id))
+  end
+
+  defp dispatch_action(state, {:tab_move_right, id}) do
+    update_tab_bar(state, &TabBar.move_tab_right(&1, id))
+  end
+
   defp dispatch_action(state, :hover_open_action) do
     accept_hover_open_action(state)
   end
@@ -879,8 +895,13 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec reorder_tab(state(), Tab.id(), non_neg_integer()) :: state()
   defp reorder_tab(state, id, new_index) do
+    update_tab_bar(state, &TabBar.reorder_tab(&1, id, new_index))
+  end
+
+  @spec update_tab_bar(state(), (TabBar.t() -> TabBar.t())) :: state()
+  defp update_tab_bar(state, fun) when is_function(fun, 1) do
     case EditorState.tab_bar(state) do
-      %TabBar{} = tb -> EditorState.set_tab_bar(state, TabBar.reorder_tab(tb, id, new_index))
+      %TabBar{} = tb -> EditorState.set_tab_bar(state, fun.(tb))
       nil -> state
     end
   end

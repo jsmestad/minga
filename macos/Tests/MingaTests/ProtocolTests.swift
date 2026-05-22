@@ -438,6 +438,10 @@ final class SpyEncoder: InputEncoder, Sendable {
         case closeTab(id: UInt32)
         case tabCopyPath(id: UInt32)
         case tabReorder(id: UInt32, newIndex: UInt16)
+        case tabPin(id: UInt32)
+        case tabUnpin(id: UInt32)
+        case tabMoveLeft(id: UInt32)
+        case tabMoveRight(id: UInt32)
         case hoverOpenAction
         case fileTreeClick(index: UInt16)
         case fileTreeToggle(index: UInt16)
@@ -538,6 +542,10 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendCloseTab(id: UInt32) { state.withLock { $0.guiActions.append(.closeTab(id: id)) } }
     func sendTabCopyPath(id: UInt32) { state.withLock { $0.guiActions.append(.tabCopyPath(id: id)) } }
     func sendTabReorder(id: UInt32, newIndex: UInt16) { state.withLock { $0.guiActions.append(.tabReorder(id: id, newIndex: newIndex)) } }
+    func sendTabPin(id: UInt32) { state.withLock { $0.guiActions.append(.tabPin(id: id)) } }
+    func sendTabUnpin(id: UInt32) { state.withLock { $0.guiActions.append(.tabUnpin(id: id)) } }
+    func sendTabMoveLeft(id: UInt32) { state.withLock { $0.guiActions.append(.tabMoveLeft(id: id)) } }
+    func sendTabMoveRight(id: UInt32) { state.withLock { $0.guiActions.append(.tabMoveRight(id: id)) } }
     func sendHoverOpenAction() { state.withLock { $0.guiActions.append(.hoverOpenAction) } }
     func sendFileTreeClick(index: UInt16) { state.withLock { $0.guiActions.append(.fileTreeClick(index: index)) } }
     func sendFileTreeToggle(index: UInt16) { state.withLock { $0.guiActions.append(.fileTreeToggle(index: index)) } }

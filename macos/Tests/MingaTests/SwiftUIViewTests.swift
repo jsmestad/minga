@@ -11,6 +11,7 @@
 
 import Testing
 import SwiftUI
+import UniformTypeIdentifiers
 import ViewInspector
 
 // MARK: - CompletionOverlay
@@ -665,6 +666,14 @@ struct StatusBarViewViewTests {
 @Suite("TabBarView View Structure")
 struct TabBarViewViewTests {
 
+    private func wireTab(id: UInt32, groupId: UInt16 = 0, isActive: Bool = false, isPinned: Bool = false, label: String? = nil) -> Wire.TabEntry {
+        Wire.TabEntry(id: id, groupId: groupId, isActive: isActive, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: isPinned, tintColorRGB: 0, icon: "", label: label ?? "tab-\(id).ex")
+    }
+
+    private func tab(id: UInt32, groupId: UInt16 = 0, isActive: Bool = false, isPinned: Bool = false, label: String? = nil) -> TabEntry {
+        TabEntry(id: id, groupId: groupId, isActive: isActive, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: isPinned, tintColor: nil, icon: "", label: label ?? "tab-\(id).ex")
+    }
+
     @Test("Tab bar shows all tab labels")
     @MainActor func showsAllTabs() throws {
         let state = TabBarState()
@@ -682,6 +691,123 @@ struct TabBarViewViewTests {
 
         #expect(strings.contains("editor.ex"))
         #expect(strings.contains("test.ex"))
+    }
+
+    @Test("Inactive tab context menu actions use id-scoped events")
+    @MainActor func inactiveTabContextMenuActionsUseIdScopedEvents() throws {
+        let spy = SpyEncoder()
+        let state = TabBarState()
+        state.update(activeIndex: 0, entries: [
+            wireTab(id: 1, isActive: true),
+            wireTab(id: 2),
+            wireTab(id: 3, isPinned: true),
+        ])
+        let sut = TabBarView(tabBarState: state, theme: ThemeColors(), encoder: spy)
+        let inactive = tab(id: 2)
+        let pinnedInactive = tab(id: 3, isPinned: true)
+
+        sut.performTabContextMenuAction(.pin, for: inactive)
+        sut.performTabContextMenuAction(.unpin, for: pinnedInactive)
+        sut.performTabContextMenuAction(.moveLeft, for: inactive)
+        sut.performTabContextMenuAction(.moveRight, for: inactive)
+
+        #expect(spy.guiActions == [
+            .tabPin(id: 2),
+            .tabUnpin(id: 3),
+            .tabMoveLeft(id: 2),
+            .tabMoveRight(id: 2)
+        ])
+        #expect(!spy.guiActions.contains(.selectTab(id: 2)))
+        #expect(!spy.guiActions.contains { action in
+            if case .executeCommand = action { return true }
+            return false
+        })
+    }
+
+    @Test("Tab context menu disables impossible pinned-bucket moves")
+    @MainActor func tabContextMenuMoveEnablementHonorsPinnedBuckets() throws {
+        let state = TabBarState()
+        state.update(activeIndex: 0, entries: [
+            wireTab(id: 1, isActive: true, isPinned: true),
+            wireTab(id: 2, isPinned: true),
+            wireTab(id: 3),
+            wireTab(id: 4),
+            wireTab(id: 5, groupId: 1),
+        ])
+        let sut = TabBarView(tabBarState: state, theme: ThemeColors(), encoder: nil)
+
+        #expect(!sut.canMoveTabLeft(tab(id: 1, isActive: true, isPinned: true)))
+        #expect(sut.canMoveTabRight(tab(id: 1, isActive: true, isPinned: true)))
+        #expect(sut.canMoveTabLeft(tab(id: 2, isPinned: true)))
+        #expect(!sut.canMoveTabRight(tab(id: 2, isPinned: true)))
+        #expect(!sut.canMoveTabLeft(tab(id: 3)))
+        #expect(sut.canMoveTabRight(tab(id: 3)))
+        #expect(sut.canMoveTabLeft(tab(id: 4)))
+        #expect(!sut.canMoveTabRight(tab(id: 4)))
+        #expect(!sut.canMoveTabLeft(tab(id: 5, groupId: 1)))
+        #expect(!sut.canMoveTabRight(tab(id: 5, groupId: 1)))
+    }
+
+    @Test("Tab context menu items disable move actions at bucket edges")
+    @MainActor func tabContextMenuItemsDisableMoveActionsAtBucketEdges() throws {
+        let state = TabBarState()
+        state.update(activeIndex: 0, entries: [
+            wireTab(id: 1, isActive: true, isPinned: true, label: "pinned-1.ex"),
+            wireTab(id: 2, isPinned: true, label: "pinned-2.ex"),
+            wireTab(id: 3, label: "plain-1.ex"),
+            wireTab(id: 4, label: "plain-2.ex"),
+        ])
+        let sut = TabBarView(tabBarState: state, theme: ThemeColors(), encoder: nil)
+        let body = try sut.inspect()
+        let buttons = body.findAll(ViewType.Button.self)
+
+        let moveLeftButtons = buttons.filter {
+            ((try? $0.labelView().text().string()) ?? "") == "Move Tab Left"
+        }
+        let moveRightButtons = buttons.filter {
+            ((try? $0.labelView().text().string()) ?? "") == "Move Tab Right"
+        }
+
+        #expect(moveLeftButtons.count == 4)
+        #expect(moveRightButtons.count == 4)
+
+        let moveLeftDisabledStates = moveLeftButtons.map { $0.isDisabled() }
+        let moveRightDisabledStates = moveRightButtons.map { $0.isDisabled() }
+
+        #expect(moveLeftDisabledStates == [true, false, true, false])
+        #expect(moveRightDisabledStates == [false, true, false, true])
+    }
+
+    @Test("Tab drag payload stays private and drops only accept tab payloads in the same bucket")
+    @MainActor func tabDragPayloadAndDropGuard() throws {
+        let spy = SpyEncoder()
+        let state = TabBarState()
+        state.update(activeIndex: 0, entries: [
+            wireTab(id: 1),
+            wireTab(id: 2),
+            wireTab(id: 3, groupId: 1),
+            wireTab(id: 4, isPinned: true),
+        ])
+        let sut = TabBarView(tabBarState: state, theme: ThemeColors(), encoder: spy)
+        let target = tab(id: 2)
+
+        #expect(TabDragPayload.contentType.identifier == "com.minga.tab-id")
+        #expect(TabDragPayload.contentType != UTType.plainText)
+
+        if let reorder = sut.tabDropReorder(droppedTabs: [], target: target, visibleIndex: 1) {
+            Issue.record("Expected empty payload to be rejected, got \(reorder)")
+        }
+        if let reorder = sut.tabDropReorder(droppedTabs: [TabDragPayload(id: 3)], target: target, visibleIndex: 1) {
+            Issue.record("Expected cross-workspace payload to be rejected, got \(reorder)")
+        }
+        if let reorder = sut.tabDropReorder(droppedTabs: [TabDragPayload(id: 4)], target: target, visibleIndex: 1) {
+            Issue.record("Expected pinned-bucket mismatch to be rejected, got \(reorder)")
+        }
+
+        let accepted = sut.handleTabDrop(droppedTabs: [TabDragPayload(id: 1)], target: target, visibleIndex: 1)
+
+        #expect(accepted)
+        #expect(spy.guiActions == [.tabReorder(id: 1, newIndex: 1)])
     }
 
     @Test("Tab bar uses canonical active-workspace visible tabs")

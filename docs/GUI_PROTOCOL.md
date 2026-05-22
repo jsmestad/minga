@@ -910,6 +910,10 @@ opcode(1) + action_type(1) + payload...
 | 0x46 | notification_action | id_len(2) + id + action_id_len(2) + action_id | Invoke one inline notification action |
 | 0x47 | power_thermal_state | low_power(1) + thermal_state(1) | Report low power mode and thermal pressure changes. `thermal_state` is 0 nominal, 1 fair, 2 serious, 3 critical, 255 unknown. |
 | 0x48 | tab_reorder | tab_id(4) + new_index(2) | Move a visible tab to a zero-based visible index |
+| 0x49 | tab_pin | tab_id(4) | Pin a tab by id without selecting it first |
+| 0x4A | tab_unpin | tab_id(4) | Unpin a tab by id without selecting it first |
+| 0x4B | tab_move_left | tab_id(4) | Move a tab one visible slot left without selecting it first |
+| 0x4C | tab_move_right | tab_id(4) | Move a tab one visible slot right without selecting it first |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |
