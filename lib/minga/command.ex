@@ -89,8 +89,9 @@ defmodule Minga.Command do
     Minga.Command.Registry.all(Minga.Command.Registry)
   end
 
-  @doc "Registers a command with name, description, and execute function."
-  @spec register(atom(), String.t(), (term() -> term())) :: :ok
+  @doc "Registers a config-owned command with name, description, and execute function."
+  @spec register(atom(), String.t(), (term() -> term())) ::
+          :ok | {:error, Minga.Command.Registry.register_error()}
   def register(name, description, execute) do
     Minga.Command.Registry.register(Minga.Command.Registry, name, description, execute)
   end

@@ -5,6 +5,7 @@ defmodule Minga.Extension.SupervisorTest do
   # Excluded from test.llm; runs in test.heavy and full suite.
   @moduletag :heavy
 
+  alias Minga.Extension.ContributionCleanup
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Extension.Supervisor, as: ExtSupervisor
 
@@ -126,6 +127,21 @@ defmodule Minga.Extension.SupervisorTest do
 
       {:ok, updated} = ExtRegistry.get(ctx.registry, :fail_init)
       assert updated.status == :load_error
+    end
+
+    test "records load_error when a hex application cannot start", ctx do
+      package = "missing_hex_app_#{System.unique_integer([:positive])}"
+      package_atom = String.to_atom(package)
+
+      :ok = ExtRegistry.register_hex(ctx.registry, :hex_start_fail, package, [])
+      {:ok, entry} = ExtRegistry.get(ctx.registry, :hex_start_fail)
+
+      assert {:error, {:hex_application_start_failed, ^package_atom, _reason}} =
+               ExtSupervisor.start_extension(ctx.supervisor, ctx.registry, :hex_start_fail, entry)
+
+      {:ok, updated} = ExtRegistry.get(ctx.registry, :hex_start_fail)
+      assert updated.status == :load_error
+      assert updated.pid == nil
     end
 
     test "passes config to init/1", ctx do
@@ -283,6 +299,150 @@ defmodule Minga.Extension.SupervisorTest do
       {:ok, b_stopped} = ExtRegistry.get(ctx.registry, :ext_b)
       assert a_stopped.status == :stopped
       assert b_stopped.status == :stopped
+    end
+
+    test "start_all surfaces git clone failures with the clone reason and keeps starting later extensions",
+         ctx do
+      failing_git_dir =
+        Path.join(
+          System.tmp_dir!(),
+          "minga_git_source_#{System.unique_integer([:positive])}"
+        )
+
+      File.mkdir_p!(failing_git_dir)
+
+      on_exit(fn ->
+        File.rm_rf!(failing_git_dir)
+        File.rm_rf!(Minga.Extension.Git.extension_path(:git_start_fail))
+      end)
+
+      {success_path, success_cleanup} =
+        make_extension("GitStartSuccess", """
+        defmodule Minga.TestExtensions.GitStartSuccess do
+          use Minga.Extension
+
+          @impl true
+          def name, do: :git_start_ok
+
+          @impl true
+          def description, do: "Git start success"
+
+          @impl true
+          def version, do: "1.0.0"
+
+          @impl true
+          def init(_config), do: {:ok, %{}}
+        end
+        """)
+
+      on_exit(fn ->
+        success_cleanup.()
+        :code.purge(Minga.TestExtensions.GitStartSuccess)
+        :code.delete(Minga.TestExtensions.GitStartSuccess)
+      end)
+
+      :ok = ExtRegistry.register_git(ctx.registry, :git_start_fail, failing_git_dir, [])
+      :ok = ExtRegistry.register(ctx.registry, :git_start_ok, success_path, [])
+
+      assert {:error, failures} = ExtSupervisor.start_all(ctx.supervisor, ctx.registry)
+
+      assert Enum.any?(failures, fn
+               %{extension: :git_start_fail, reason: reason} ->
+                 is_binary(reason) and reason =~ "git clone failed"
+
+               _ ->
+                 false
+             end)
+
+      {:ok, success_entry} = ExtRegistry.get(ctx.registry, :git_start_ok)
+      assert success_entry.status == :running
+      assert Process.alive?(success_entry.pid)
+    end
+
+    test "start_all aggregates startup cleanup failures and keeps starting later extensions",
+         ctx do
+      cleanup_family =
+        String.to_atom("start_all_cleanup_failure_#{System.unique_integer([:positive])}")
+
+      assert :ok =
+               ContributionCleanup.register(cleanup_family, fn _source ->
+                 raise "cleanup failure"
+               end)
+
+      on_exit(fn -> ContributionCleanup.unregister(cleanup_family) end)
+
+      {failing_path, failing_cleanup} =
+        make_extension("StartAllFailing", """
+        defmodule Minga.TestExtensions.StartAllFailing do
+          use Minga.Extension
+
+          @impl true
+          def name, do: :start_all_fail
+
+          @impl true
+          def description, do: "Fails during startup cleanup"
+
+          @impl true
+          def version, do: "1.0.0"
+
+          @impl true
+          def init(_config), do: {:error, :intentional_failure}
+        end
+        """)
+
+      {success_path, success_cleanup} =
+        make_extension("StartAllSuccess", """
+        defmodule Minga.TestExtensions.StartAllSuccess do
+          use Minga.Extension
+
+          @impl true
+          def name, do: :start_all_ok
+
+          @impl true
+          def description, do: "Starts successfully"
+
+          @impl true
+          def version, do: "1.0.0"
+
+          @impl true
+          def init(_config), do: {:ok, %{}}
+        end
+        """)
+
+      on_exit(fn ->
+        failing_cleanup.()
+        success_cleanup.()
+        :code.purge(Minga.TestExtensions.StartAllFailing)
+        :code.delete(Minga.TestExtensions.StartAllFailing)
+        :code.purge(Minga.TestExtensions.StartAllSuccess)
+        :code.delete(Minga.TestExtensions.StartAllSuccess)
+      end)
+
+      :ok = ExtRegistry.register(ctx.registry, :start_all_fail, failing_path, [])
+      :ok = ExtRegistry.register(ctx.registry, :start_all_ok, success_path, [])
+
+      assert {:error, failures} = ExtSupervisor.start_all(ctx.supervisor, ctx.registry)
+
+      assert Enum.any?(failures, fn
+               %{extension: :start_all_fail, reason: {:cleanup_failed, reason, cleanup_failures}} ->
+                 assert reason =~ "intentional_failure"
+
+                 Enum.any?(cleanup_failures, fn
+                   %{family: ^cleanup_family, source: {:extension, :start_all_fail}} -> true
+                   _ -> false
+                 end)
+
+               _ ->
+                 false
+             end)
+
+      {:ok, failed_entry} = ExtRegistry.get(ctx.registry, :start_all_fail)
+      assert failed_entry.status == :load_error
+      assert failed_entry.pid == nil
+
+      {:ok, success_entry} = ExtRegistry.get(ctx.registry, :start_all_ok)
+      assert success_entry.status == :running
+      assert Process.alive?(success_entry.pid)
     end
   end
 

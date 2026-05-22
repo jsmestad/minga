@@ -136,9 +136,81 @@ defmodule Minga.Language.RegistryTest do
       assert Registry.for_extension("xyz_test_ext").name == :test_lang_xyz
     end
 
-    test "runtime registration overrides existing definition" do
-      original = Registry.get(:elixir)
-      assert original.label == "Elixir"
+    test "same-source re-registration replaces stale language indexes" do
+      source = {:extension, :language_registry_replace_test}
+
+      old_lang = %Language{
+        name: :replace_lang_xyz,
+        label: "Replace Lang",
+        comment_token: "// ",
+        extensions: ["replace_old_ext"],
+        filenames: ["ReplaceOld"],
+        shebangs: ["replace_old_shebang"]
+      }
+
+      new_lang = %Language{
+        name: :replace_lang_xyz,
+        label: "Replace Lang New",
+        comment_token: "# ",
+        extensions: ["replace_new_ext"],
+        filenames: ["ReplaceNew"],
+        shebangs: ["replace_new_shebang"]
+      }
+
+      on_exit(fn -> Registry.unregister_source(source) end)
+
+      assert :ok = Registry.register(old_lang, source)
+      assert :ok = Registry.register(new_lang, source)
+
+      assert Registry.for_extension("replace_old_ext") == nil
+      assert Registry.for_filename("ReplaceOld") == nil
+      assert Registry.for_shebang("replace_old_shebang") == nil
+
+      assert %Language{name: :replace_lang_xyz, label: "Replace Lang New"} =
+               Registry.get(:replace_lang_xyz)
+
+      assert %Language{name: :replace_lang_xyz, label: "Replace Lang New"} =
+               Registry.for_extension("replace_new_ext")
+
+      assert %Language{name: :replace_lang_xyz, label: "Replace Lang New"} =
+               Registry.for_shebang("replace_new_shebang")
+    end
+
+    test "unregister_source removes language names and indexes for only that source" do
+      source = {:extension, :language_registry_test}
+      other_source = {:extension, :language_registry_other}
+
+      lang = %Language{
+        name: :source_lang_xyz,
+        label: "Source Lang",
+        comment_token: "// ",
+        extensions: ["source_xyz"],
+        filenames: ["Sourcefile"],
+        shebangs: ["sourcebang"]
+      }
+
+      other = %Language{
+        name: :other_source_lang_xyz,
+        label: "Other Source Lang",
+        comment_token: "# ",
+        extensions: ["other_source_xyz"]
+      }
+
+      assert :ok = Registry.register(lang, source)
+      assert :ok = Registry.register(other, other_source)
+      assert :ok = Registry.unregister_source(source)
+
+      assert Registry.get(:source_lang_xyz) == nil
+      assert Registry.for_extension("source_xyz") == nil
+      assert Registry.for_filename("Sourcefile") == nil
+      assert Registry.for_shebang("sourcebang") == nil
+      assert %Language{name: :other_source_lang_xyz} = Registry.get(:other_source_lang_xyz)
+
+      Registry.unregister_source(other_source)
+    end
+
+    test "runtime registration rejects duplicate built-in definitions from another source" do
+      assert Registry.get(:elixir).label == "Elixir"
 
       override = %Language{
         name: :elixir,
@@ -147,11 +219,9 @@ defmodule Minga.Language.RegistryTest do
         extensions: ["ex", "exs"]
       }
 
-      Registry.register(override)
-      assert Registry.get(:elixir).label == "Elixir Override"
+      assert {:error, {:duplicate_key, {:name, :elixir}, :builtin, :config}} =
+               Registry.register(override)
 
-      # Restore original
-      Registry.register(original)
       assert Registry.get(:elixir).label == "Elixir"
     end
   end

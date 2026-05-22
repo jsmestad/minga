@@ -24,6 +24,12 @@ defmodule Minga.Language.Registry do
   alias Minga.Language
 
   @table :minga_language_registry
+  @source_table :minga_language_registry_sources
+
+  @typedoc "Source that contributed registry entries."
+  @type contribution_source :: :builtin | :config | {:extension, atom()}
+
+  @type register_error :: {:duplicate_key, term(), contribution_source(), contribution_source()}
 
   # All built-in language definition modules. Add new languages here.
   @language_modules [
@@ -202,20 +208,43 @@ defmodule Minga.Language.Registry do
   end
 
   @doc """
-  Registers a language at runtime (for extensions).
+  Registers a config-owned language at runtime.
 
-  Overwrites any existing definition for the same name. Rebuilds
-  the extension, filename, and shebang index entries.
+  Rebuilds the extension, filename, and shebang index entries and records source ownership so reloads and extension unloads can remove contributed data as a group.
   """
-  @spec register(Language.t()) :: :ok
-  def register(%Language{} = lang) do
-    # Remove stale index entries from the old definition before inserting
-    case get(lang.name) do
-      %Language{} = old -> remove_index_entries(old)
-      nil -> :ok
-    end
+  @spec register(Language.t()) :: :ok | {:error, register_error()}
+  def register(%Language{} = lang), do: register(lang, :config)
 
-    insert_language(lang)
+  @doc "Registers a language with an explicit source."
+  @spec register(Language.t(), contribution_source()) :: :ok | {:error, register_error()}
+  def register(%Language{} = lang, source) do
+    with :ok <- validate_source_keys(lang, source) do
+      case get(lang.name) do
+        %Language{} = old -> remove_index_entries(old)
+        nil -> :ok
+      end
+
+      insert_language(lang, source)
+      :ok
+    end
+  end
+
+  @doc "Removes every language and lookup index contributed by a source."
+  @spec unregister_source(contribution_source()) :: :ok
+  def unregister_source(source) do
+    ensure_source_table!()
+
+    @source_table
+    |> :ets.tab2list()
+    |> Enum.each(fn
+      {key, ^source} ->
+        :ets.delete(@table, key)
+        :ets.delete(@source_table, key)
+
+      _entry ->
+        :ok
+    end)
+
     :ok
   end
 
@@ -231,9 +260,16 @@ defmodule Minga.Language.Registry do
       read_concurrency: true
     ])
 
+    :ets.new(@source_table, [
+      :named_table,
+      :set,
+      :public,
+      read_concurrency: true
+    ])
+
     for mod <- @language_modules do
       lang = mod.definition()
-      insert_language(lang)
+      insert_language(lang, :builtin)
     end
 
     {:ok, :no_state}
@@ -241,34 +277,90 @@ defmodule Minga.Language.Registry do
 
   # ── Private ────────────────────────────────────────────────────────────────
 
+  @spec validate_source_keys(Language.t(), contribution_source()) ::
+          :ok | {:error, register_error()}
+  defp validate_source_keys(%Language{} = lang, source) do
+    ensure_source_table!()
+
+    lang
+    |> language_keys()
+    |> Enum.reduce_while(:ok, fn key, :ok -> validate_source_key(key, source) end)
+  end
+
+  @spec validate_source_key(term(), contribution_source()) ::
+          {:cont, :ok} | {:halt, {:error, register_error()}}
+  defp validate_source_key(key, source) do
+    case :ets.lookup(@source_table, key) do
+      [{^key, ^source}] ->
+        {:cont, :ok}
+
+      [{^key, existing_source}] ->
+        {:halt, {:error, {:duplicate_key, key, existing_source, source}}}
+
+      [] ->
+        {:cont, :ok}
+    end
+  end
+
+  @spec language_keys(Language.t()) :: [term()]
+  defp language_keys(%Language{} = lang) do
+    name_key = {:name, lang.name}
+    ext_keys = Enum.map(lang.extensions, &{:ext, String.downcase(&1)})
+    filename_keys = Enum.map(lang.filenames, &{:filename, &1})
+    shebang_keys = Enum.map(lang.shebangs, &{:shebang, &1})
+    [name_key | ext_keys ++ filename_keys ++ shebang_keys]
+  end
+
   @spec remove_index_entries(Language.t()) :: :ok
   defp remove_index_entries(%Language{} = lang) do
-    for ext <- lang.extensions, do: :ets.delete(@table, {:ext, String.downcase(ext)})
-    for filename <- lang.filenames, do: :ets.delete(@table, {:filename, filename})
-    for interpreter <- lang.shebangs, do: :ets.delete(@table, {:shebang, interpreter})
+    for ext <- lang.extensions, do: delete_key({:ext, String.downcase(ext)})
+    for filename <- lang.filenames, do: delete_key({:filename, filename})
+    for interpreter <- lang.shebangs, do: delete_key({:shebang, interpreter})
     :ok
   end
 
-  @spec insert_language(Language.t()) :: :ok
-  defp insert_language(%Language{} = lang) do
-    # Primary lookup by name
-    :ets.insert(@table, {{:name, lang.name}, lang})
+  @spec insert_language(Language.t(), contribution_source()) :: :ok
+  defp insert_language(%Language{} = lang, source) do
+    insert_key({:name, lang.name}, lang, source)
 
-    # Index by extension
     for ext <- lang.extensions do
-      :ets.insert(@table, {{:ext, String.downcase(ext)}, lang})
+      insert_key({:ext, String.downcase(ext)}, lang, source)
     end
 
-    # Index by filename
     for filename <- lang.filenames do
-      :ets.insert(@table, {{:filename, filename}, lang})
+      insert_key({:filename, filename}, lang, source)
     end
 
-    # Index by shebang interpreter
     for interpreter <- lang.shebangs do
-      :ets.insert(@table, {{:shebang, interpreter}, lang})
+      insert_key({:shebang, interpreter}, lang, source)
     end
 
     :ok
+  end
+
+  @spec insert_key(term(), Language.t(), contribution_source()) :: true
+  defp insert_key(key, lang, source) do
+    ensure_source_table!()
+    :ets.insert(@table, {key, lang})
+    :ets.insert(@source_table, {key, source})
+  end
+
+  @spec delete_key(term()) :: true
+  defp delete_key(key) do
+    ensure_source_table!()
+    :ets.delete(@table, key)
+    :ets.delete(@source_table, key)
+  end
+
+  @spec ensure_source_table!() :: :ok
+  defp ensure_source_table! do
+    case :ets.info(@source_table) do
+      :undefined ->
+        :ets.new(@source_table, [:named_table, :set, :public, read_concurrency: true])
+        :ok
+
+      _info ->
+        :ok
+    end
   end
 end

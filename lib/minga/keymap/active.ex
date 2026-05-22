@@ -65,6 +65,21 @@ defmodule Minga.Keymap.Active do
   @filetype_tries_key :filetype_tries
   @filetype_mode_tries_key :filetype_mode_tries
   @mode_tries_key :mode_tries
+  @source_bindings_key :source_bindings
+
+  @typedoc "Source that contributed registry entries."
+  @type contribution_source :: :builtin | :config | {:extension, atom()}
+
+  @typedoc "Source-owned binding identity targeting the actual trie entry."
+  @type binding_identity ::
+          {:normal_leader, [Bindings.key()]}
+          | {:normal_single, Bindings.key()}
+          | {:filetype_normal, atom(), [Bindings.key()]}
+          | {:filetype_mode, atom(), atom(), [Bindings.key()]}
+          | {:mode, atom(), [Bindings.key()]}
+          | {:scope, atom(), atom(), [Bindings.key()]}
+
+  @type source_binding :: {contribution_source(), binding_identity()}
 
   # ── GenServer (table lifecycle only) ────────────────────────────────────────
 
@@ -276,14 +291,7 @@ defmodule Minga.Keymap.Active do
 
   def bind(server, mode, key_str, command, description)
       when is_binary(key_str) and is_atom(command) and is_binary(description) do
-    case KeyParser.parse(key_str) do
-      {:ok, keys} ->
-        do_bind(server, mode, keys, command, description)
-
-      {:error, reason} ->
-        Minga.Log.warning(:config, "Invalid key binding #{inspect(key_str)}: #{reason}")
-        {:error, reason}
-    end
+    bind_and_track(server, mode, key_str, command, description, [], :config)
   end
 
   @doc """
@@ -312,16 +320,9 @@ defmodule Minga.Keymap.Active do
   def bind(server, mode, key_str, command, description, opts)
       when (is_atom(mode) or is_tuple(mode)) and is_binary(key_str) and is_atom(command) and
              is_binary(description) and is_list(opts) do
-    # `:filetype` only applies to atom modes (`:normal` SPC m bindings, etc.).
-    # Scope bindings (tuple modes like `{:agent, :normal}`) ignore opts and
-    # fall through to the no-options path.
-    filetype = Keyword.get(opts, :filetype)
-
-    if filetype && is_atom(mode) do
-      bind_filetype(server, mode, filetype, key_str, command, description)
-    else
-      bind(server, mode, key_str, command, description)
-    end
+    source = Keyword.get(opts, :source, :config)
+    clean_opts = Keyword.delete(opts, :source)
+    bind_and_track(server, mode, key_str, command, description, clean_opts, source)
   end
 
   @doc """
@@ -339,18 +340,14 @@ defmodule Minga.Keymap.Active do
       unbind(:normal, "SPC g s")
       unbind(:insert, "C-j")
   """
-  @spec unbind(atom(), String.t()) :: :ok | {:error, String.t()}
-  @spec unbind(GenServer.server(), atom(), String.t()) :: :ok | {:error, String.t()}
-  def unbind(mode, key_str), do: unbind(__MODULE__, mode, key_str)
+  @spec unbind(atom() | {atom(), atom()}, String.t()) :: :ok | {:error, String.t()}
+  @spec unbind(GenServer.server(), atom() | {atom(), atom()}, String.t()) ::
+          :ok | {:error, String.t()}
+  def unbind(mode, key_str), do: unbind_binding(__MODULE__, mode, key_str, [])
 
-  def unbind(server, mode, key_str) when is_atom(mode) and is_binary(key_str) do
-    case KeyParser.parse(key_str) do
-      {:ok, keys} ->
-        do_unbind(server, mode, keys)
-
-      {:error, reason} ->
-        {:error, reason}
-    end
+  def unbind(server, mode, key_str)
+      when (is_atom(mode) or is_tuple(mode)) and is_binary(key_str) do
+    unbind_binding(server, mode, key_str, [])
   end
 
   @doc """
@@ -360,19 +357,35 @@ defmodule Minga.Keymap.Active do
 
       unbind(:normal, "SPC m t", filetype: :org)
   """
-  @spec unbind(atom(), String.t(), keyword()) :: :ok | {:error, String.t()}
-  @spec unbind(GenServer.server(), atom(), String.t(), keyword()) :: :ok | {:error, String.t()}
+  @spec unbind(atom() | {atom(), atom()}, String.t(), keyword()) :: :ok | {:error, String.t()}
+  @spec unbind(GenServer.server(), atom() | {atom(), atom()}, String.t(), keyword()) ::
+          :ok | {:error, String.t()}
   def unbind(mode, key_str, opts), do: unbind(__MODULE__, mode, key_str, opts)
 
   def unbind(server, mode, key_str, opts)
-      when is_atom(mode) and is_binary(key_str) and is_list(opts) do
-    filetype = Keyword.get(opts, :filetype)
+      when (is_atom(mode) or is_tuple(mode)) and is_binary(key_str) and is_list(opts) do
+    clean_opts = Keyword.delete(opts, :source)
+    unbind_binding(server, mode, key_str, clean_opts)
+  end
 
-    if filetype do
-      unbind_filetype(server, mode, filetype, key_str)
-    else
-      unbind(server, mode, key_str)
-    end
+  @doc "Removes every keybinding contributed by a source."
+  @spec unregister_source(contribution_source()) :: :ok
+  @spec unregister_source(GenServer.server(), contribution_source()) :: :ok
+  def unregister_source(source), do: unregister_source(__MODULE__, source)
+
+  def unregister_source(server, source) do
+    bindings = ets_get(server, @source_bindings_key, [])
+
+    Enum.each(bindings, fn
+      {^source, binding_identity} -> do_unbind_identity(server, binding_identity)
+      _entry -> :ok
+    end)
+
+    ets_update(server, @source_bindings_key, [], fn entries ->
+      Enum.reject(entries, fn {entry_source, _binding_identity} -> entry_source == source end)
+    end)
+
+    :ok
   end
 
   @doc """
@@ -421,7 +434,8 @@ defmodule Minga.Keymap.Active do
       {@scope_overrides_key, %{}},
       {@filetype_tries_key, build_default_filetype_tries()},
       {@filetype_mode_tries_key, %{}},
-      {@mode_tries_key, %{}}
+      {@mode_tries_key, %{}},
+      {@source_bindings_key, []}
     ])
   end
 
@@ -444,6 +458,293 @@ defmodule Minga.Keymap.Active do
         end)
 
       {ft, trie}
+    end)
+  end
+
+  @spec bind_and_track(
+          GenServer.server(),
+          atom() | {atom(), atom()},
+          String.t(),
+          atom(),
+          String.t(),
+          keyword(),
+          contribution_source()
+        ) :: :ok | {:error, String.t()}
+  defp bind_and_track(server, mode, key_str, command, description, opts, source) do
+    with {:ok, identity} <- binding_identity(mode, key_str, opts),
+         :ok <- validate_binding_source(server, source, identity, mode, key_str, opts) do
+      result = do_bind_with_opts(server, mode, key_str, command, description, opts)
+
+      if result == :ok do
+        remember_source_binding(server, source, identity)
+      end
+
+      result
+    end
+  end
+
+  @spec validate_binding_source(
+          GenServer.server(),
+          contribution_source(),
+          binding_identity(),
+          atom() | {atom(), atom()},
+          String.t(),
+          keyword()
+        ) :: :ok | {:error, String.t()}
+  defp validate_binding_source(server, source, identity, mode, key_str, opts) do
+    case source_binding_source(server, identity) do
+      ^source ->
+        :ok
+
+      nil ->
+        validate_untracked_binding_source(server, source, mode, key_str, opts)
+
+      existing_source ->
+        {:error,
+         "key binding #{inspect(key_str)} for #{inspect(mode)} is already registered by #{inspect(existing_source)}"}
+    end
+  end
+
+  @spec validate_untracked_binding_source(
+          GenServer.server(),
+          contribution_source(),
+          atom() | {atom(), atom()},
+          String.t(),
+          keyword()
+        ) :: :ok | {:error, String.t()}
+  defp validate_untracked_binding_source(_server, :config, _mode, _key_str, _opts), do: :ok
+
+  defp validate_untracked_binding_source(server, source, mode, key_str, opts) do
+    case binding_resolves?(server, mode, key_str, opts) do
+      true ->
+        {:error,
+         "key binding #{inspect(key_str)} for #{inspect(mode)} already exists and cannot be replaced by #{inspect(source)}"}
+
+      false ->
+        :ok
+    end
+  end
+
+  @spec do_bind_with_opts(
+          GenServer.server(),
+          atom() | {atom(), atom()},
+          String.t(),
+          atom(),
+          String.t(),
+          keyword()
+        ) :: :ok | {:error, String.t()}
+  defp do_bind_with_opts(server, mode, key_str, command, description, opts) do
+    filetype = Keyword.get(opts, :filetype)
+
+    if filetype && is_atom(mode) do
+      bind_filetype(server, mode, filetype, key_str, command, description)
+    else
+      case KeyParser.parse(key_str) do
+        {:ok, keys} ->
+          do_bind(server, mode, keys, command, description)
+
+        {:error, reason} ->
+          Minga.Log.warning(:config, "Invalid key binding #{inspect(key_str)}: #{reason}")
+          {:error, reason}
+      end
+    end
+  end
+
+  @spec remember_source_binding(
+          GenServer.server(),
+          contribution_source(),
+          binding_identity()
+        ) :: :ok
+  defp remember_source_binding(server, source, identity) do
+    entry = {source, identity}
+
+    ets_update(server, @source_bindings_key, [], fn entries ->
+      [
+        entry
+        | Enum.reject(entries, fn {_entry_source, entry_identity} ->
+            entry_identity == identity
+          end)
+      ]
+    end)
+  end
+
+  @spec source_binding_source(GenServer.server(), binding_identity()) ::
+          contribution_source() | nil
+  defp source_binding_source(server, identity) do
+    server
+    |> ets_get(@source_bindings_key, [])
+    |> Enum.find_value(fn
+      {source, ^identity} -> source
+      _entry -> nil
+    end)
+  end
+
+  @spec binding_identity(atom() | {atom(), atom()}, String.t(), keyword()) ::
+          {:ok, binding_identity()} | {:error, String.t()}
+  defp binding_identity(mode, key_str, opts) do
+    case KeyParser.parse(key_str) do
+      {:ok, keys} -> binding_identity_from_keys(mode, keys, opts)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec binding_identity_from_keys(atom() | {atom(), atom()}, [Bindings.key()], keyword()) ::
+          {:ok, binding_identity()} | {:error, String.t()}
+  defp binding_identity_from_keys(:normal, [{32, 0} | rest], opts) when rest != [] do
+    case Keyword.get(opts, :filetype) do
+      nil -> {:ok, {:normal_leader, rest}}
+      filetype -> {:ok, {:filetype_normal, filetype, strip_spc_m_prefix([{32, 0} | rest])}}
+    end
+  end
+
+  defp binding_identity_from_keys(:normal, [single_key], opts) do
+    case Keyword.get(opts, :filetype) do
+      nil -> {:ok, {:normal_single, single_key}}
+      filetype -> {:ok, {:filetype_normal, filetype, [single_key]}}
+    end
+  end
+
+  defp binding_identity_from_keys(:normal, keys, opts) do
+    case Keyword.get(opts, :filetype) do
+      nil -> {:error, "unsupported key sequence for normal mode"}
+      filetype -> {:ok, {:filetype_normal, filetype, keys}}
+    end
+  end
+
+  defp binding_identity_from_keys(mode, keys, opts) when mode in [:insert, :visual] do
+    case Keyword.get(opts, :filetype) do
+      nil -> {:ok, {:mode, mode, keys}}
+      filetype -> {:ok, {:filetype_mode, filetype, mode, keys}}
+    end
+  end
+
+  defp binding_identity_from_keys(mode, keys, opts) when mode in [:operator_pending, :command] do
+    case Keyword.get(opts, :filetype) do
+      nil -> {:ok, {:mode, mode, keys}}
+      _filetype -> {:error, "filetype-scoped bindings not supported for #{mode} mode"}
+    end
+  end
+
+  defp binding_identity_from_keys({scope, vim_state}, keys, _opts)
+       when is_atom(scope) and is_atom(vim_state) do
+    {:ok, {:scope, scope, vim_state, keys}}
+  end
+
+  defp binding_identity_from_keys(mode, _keys, _opts) do
+    {:error, "keybinding for mode #{inspect(mode)} not yet supported"}
+  end
+
+  @spec unbind_binding(GenServer.server(), atom() | {atom(), atom()}, String.t(), keyword()) ::
+          :ok | {:error, String.t()}
+  defp unbind_binding(server, mode, key_str, opts) do
+    with {:ok, identity} <- binding_identity(mode, key_str, opts),
+         :ok <- do_unbind_identity(server, identity) do
+      forget_source_binding(server, identity)
+    end
+  end
+
+  @spec do_unbind_identity(GenServer.server(), binding_identity()) :: :ok | {:error, String.t()}
+  defp do_unbind_identity(server, {:normal_leader, keys}) do
+    do_unbind(server, :normal, [{32, 0} | keys])
+  end
+
+  defp do_unbind_identity(server, {:normal_single, single_key}) do
+    do_unbind(server, :normal, [single_key])
+  end
+
+  defp do_unbind_identity(server, {:filetype_normal, filetype, keys}) do
+    ets_update(server, @filetype_tries_key, %{}, fn tries ->
+      trie = Map.get(tries, filetype, Bindings.new())
+      updated = Bindings.unbind(trie, keys)
+      Map.put(tries, filetype, updated)
+    end)
+  end
+
+  defp do_unbind_identity(server, {:filetype_mode, filetype, mode, keys}) do
+    ets_update(server, @filetype_mode_tries_key, %{}, fn tries ->
+      trie = Map.get(tries, {filetype, mode}, Bindings.new())
+      updated = Bindings.unbind(trie, keys)
+      Map.put(tries, {filetype, mode}, updated)
+    end)
+  end
+
+  defp do_unbind_identity(server, {:mode, mode, keys})
+       when mode in [:insert, :visual, :operator_pending, :command] do
+    do_unbind(server, mode, keys)
+  end
+
+  defp do_unbind_identity(server, {:scope, scope, vim_state, keys}) do
+    do_unbind(server, {scope, vim_state}, keys)
+  end
+
+  defp do_unbind_identity(_server, _identity) do
+    {:error, "unsupported binding identity"}
+  end
+
+  @spec binding_resolves?(GenServer.server(), atom() | {atom(), atom()}, String.t(), keyword()) ::
+          boolean()
+  defp binding_resolves?(server, mode, key_str, opts) do
+    case KeyParser.parse(key_str) do
+      {:ok, keys} -> binding_resolves_keys?(server, mode, keys, opts)
+      {:error, _reason} -> false
+    end
+  end
+
+  @spec binding_resolves_keys?(
+          GenServer.server(),
+          atom() | {atom(), atom()},
+          [Bindings.key()],
+          keyword()
+        ) ::
+          boolean()
+  defp binding_resolves_keys?(server, :normal, [{32, 0} | rest], opts) when rest != [] do
+    case Keyword.get(opts, :filetype) do
+      nil ->
+        sequence_bound?(leader_trie(server), rest)
+
+      filetype ->
+        sequence_bound?(filetype_trie(server, filetype), strip_spc_m_prefix([{32, 0} | rest]))
+    end
+  end
+
+  defp binding_resolves_keys?(server, :normal, [single_key], opts) do
+    case Keyword.get(opts, :filetype) do
+      nil -> Map.has_key?(normal_bindings(server), single_key)
+      filetype -> sequence_bound?(filetype_trie(server, filetype), [single_key])
+    end
+  end
+
+  defp binding_resolves_keys?(server, mode, keys, opts) when mode in [:insert, :visual] do
+    case Keyword.get(opts, :filetype) do
+      nil -> sequence_bound?(mode_trie(server, mode), keys)
+      filetype -> sequence_bound?(filetype_mode_trie(server, filetype, mode), keys)
+    end
+  end
+
+  defp binding_resolves_keys?(server, mode, keys, _opts)
+       when mode in [:operator_pending, :command] do
+    sequence_bound?(mode_trie(server, mode), keys)
+  end
+
+  defp binding_resolves_keys?(server, {scope, vim_state}, keys, _opts)
+       when is_atom(scope) and is_atom(vim_state) do
+    sequence_bound?(scope_trie(server, scope, vim_state), keys)
+  end
+
+  defp binding_resolves_keys?(_server, _mode, _keys, _opts), do: false
+
+  @spec sequence_bound?(Bindings.node_t(), [Bindings.key()]) :: boolean()
+  defp sequence_bound?(trie, keys) do
+    case Bindings.lookup_sequence(trie, keys) do
+      :not_found -> false
+      _result -> true
+    end
+  end
+
+  @spec forget_source_binding(GenServer.server(), binding_identity()) :: :ok
+  defp forget_source_binding(server, identity) do
+    ets_update(server, @source_bindings_key, [], fn entries ->
+      Enum.reject(entries, fn {_source, entry_identity} -> entry_identity == identity end)
     end)
   end
 
@@ -563,7 +864,8 @@ defmodule Minga.Keymap.Active do
 
   # ── Private: unbind dispatch ────────────────────────────────────────────────
 
-  @spec do_unbind(GenServer.server(), atom(), [Bindings.key()]) :: :ok | {:error, String.t()}
+  @spec do_unbind(GenServer.server(), atom() | {atom(), atom()}, [Bindings.key()]) ::
+          :ok | {:error, String.t()}
 
   # Normal mode: leader sequences (SPC + more keys)
   defp do_unbind(server, :normal, [{32, 0} | rest]) when rest != [] do
@@ -594,46 +896,17 @@ defmodule Minga.Keymap.Active do
     end)
   end
 
+  defp do_unbind(server, {scope, vim_state}, keys) when is_atom(scope) and is_atom(vim_state) do
+    ets_update(server, @scope_overrides_key, %{}, fn overrides ->
+      scope_map = Map.get(overrides, scope, %{})
+      trie = Map.get(scope_map, vim_state, Bindings.new())
+      updated = Bindings.unbind(trie, keys)
+      new_scope_map = Map.put(scope_map, vim_state, updated)
+      Map.put(overrides, scope, new_scope_map)
+    end)
+  end
+
   defp do_unbind(_server, mode, _keys) do
     {:error, "unbind not supported for mode #{inspect(mode)}"}
-  end
-
-  # ── Private: filetype unbind ────────────────────────────────────────────────
-
-  @spec unbind_filetype(GenServer.server(), atom(), atom(), String.t()) ::
-          :ok | {:error, String.t()}
-  defp unbind_filetype(server, :normal, filetype, key_str) do
-    case KeyParser.parse(key_str) do
-      {:ok, keys} ->
-        sub_keys = strip_spc_m_prefix(keys)
-
-        ets_update(server, @filetype_tries_key, %{}, fn tries ->
-          trie = Map.get(tries, filetype, Bindings.new())
-          updated = Bindings.unbind(trie, sub_keys)
-          Map.put(tries, filetype, updated)
-        end)
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  defp unbind_filetype(server, mode, filetype, key_str)
-       when mode in [:insert, :visual] do
-    case KeyParser.parse(key_str) do
-      {:ok, keys} ->
-        ets_update(server, @filetype_mode_tries_key, %{}, fn tries ->
-          trie = Map.get(tries, {filetype, mode}, Bindings.new())
-          updated = Bindings.unbind(trie, keys)
-          Map.put(tries, {filetype, mode}, updated)
-        end)
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  defp unbind_filetype(_server, mode, _filetype, _key_str) do
-    {:error, "filetype-scoped unbind not supported for #{mode} mode"}
   end
 end

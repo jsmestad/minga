@@ -19,7 +19,9 @@ defmodule Minga.MixProject do
       aliases: aliases(),
       compilers: [:protocol_gen] ++ Mix.compilers() ++ [:minga_zig],
       dialyzer: [
-        plt_add_apps: [:mix, :credo],
+        plt_add_deps: :apps_direct,
+        # Keep the PLT lean for dev/agent loops: include only direct runtime deps by default, then add transitive apps that Minga source references directly.
+        plt_add_apps: [:mix, :jason, :plug, :plug_crypto, :thousand_island, :websock],
         ignore_warnings: ".dialyzer_ignore.exs"
       ],
       consolidate_protocols: Mix.env() != :prod,

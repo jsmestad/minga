@@ -26,6 +26,7 @@ defmodule MingaEditor.UI.Theme do
 
   alias Minga.Core.Face
   alias MingaEditor.UI.Theme.{DoomOne, OneDark, OneLight}
+  alias MingaEditor.UI.Theme.Loader.LoadedTheme
 
   @enforce_keys [
     :name,
@@ -57,6 +58,13 @@ defmodule MingaEditor.UI.Theme do
     :tab_bar,
     :dashboard
   ]
+
+  @typedoc "Source that contributed registry entries."
+  @type contribution_source :: :builtin | :config | {:extension, atom()}
+
+  @type register_error ::
+          {:duplicate_name, atom(), existing_source :: contribution_source(),
+           attempted_source :: contribution_source()}
 
   @typedoc "RGB color as a non-negative integer (e.g., `0xFF6C6B`)."
   @type color :: non_neg_integer()
@@ -522,6 +530,8 @@ defmodule MingaEditor.UI.Theme do
 
   # ── Theme registry ──────────────────────────────────────────────────────────
 
+  @user_theme_sources_key {__MODULE__, :user_theme_sources}
+
   @themes %{
     doom_one: DoomOne,
     catppuccin_frappe: CatppuccinFrappe,
@@ -580,12 +590,84 @@ defmodule MingaEditor.UI.Theme do
   Called by the theme loader at startup and on reload. Stores themes
   in `:persistent_term` for fast reads on the render path.
   """
-  @spec register_user_themes(%{atom() => MingaEditor.UI.Theme.Loader.loaded_theme()}) :: :ok
+  @spec register_user_themes(%{atom() => MingaEditor.UI.Theme.Loader.loaded_theme()}) ::
+          :ok | {:error, register_error()}
   def register_user_themes(themes) when is_map(themes) do
-    :persistent_term.put({__MODULE__, :user_themes}, themes)
-    # Sync the Layer 0 registry so Config.Options can validate theme names
+    register_themes(themes, :config)
+  end
+
+  @doc "Registers themes with explicit source ownership."
+  @spec register_themes(
+          %{atom() => t() | MingaEditor.UI.Theme.Loader.loaded_theme()},
+          contribution_source()
+        ) :: :ok | {:error, register_error()}
+  def register_themes(themes, source) when is_map(themes) do
+    Minga.Extension.ContributionCleanup.register(:themes, &__MODULE__.unregister_source/1)
+    current = user_themes()
+    current_sources = user_theme_sources()
+
+    with :ok <- validate_theme_sources(themes, current_sources, source) do
+      owned_names = owned_theme_names(current_sources, source)
+      remaining_themes = Map.drop(current, owned_names)
+      remaining_sources = Map.drop(current_sources, owned_names)
+
+      {new_themes, new_sources} =
+        Enum.reduce(themes, {remaining_themes, remaining_sources}, fn {name, loaded},
+                                                                      {theme_acc, source_acc} ->
+          {Map.put(theme_acc, name, normalize_loaded_theme(name, loaded)),
+           Map.put(source_acc, name, source)}
+        end)
+
+      :persistent_term.put({__MODULE__, :user_themes}, new_themes)
+      :persistent_term.put(@user_theme_sources_key, new_sources)
+      _ = available()
+      :ok
+    end
+  end
+
+  @doc "Removes every non-built-in theme contributed by a source while keeping built-in fallbacks available."
+  @spec unregister_source(contribution_source()) :: :ok
+  def unregister_source(:builtin), do: :ok
+
+  def unregister_source(source) do
+    sources = user_theme_sources()
+
+    names =
+      sources
+      |> Enum.filter(fn {_name, entry_source} -> entry_source == source end)
+      |> Enum.map(fn {name, _entry_source} -> name end)
+
+    :persistent_term.put({__MODULE__, :user_themes}, Map.drop(user_themes(), names))
+    :persistent_term.put(@user_theme_sources_key, Map.drop(sources, names))
     _ = available()
     :ok
+  end
+
+  @spec owned_theme_names(%{atom() => contribution_source()}, contribution_source()) :: [atom()]
+  defp owned_theme_names(current_sources, source) do
+    current_sources
+    |> Enum.filter(fn {_name, entry_source} -> entry_source == source end)
+    |> Enum.map(fn {name, _entry_source} -> name end)
+  end
+
+  @spec validate_theme_sources(
+          %{atom() => t() | MingaEditor.UI.Theme.Loader.loaded_theme()},
+          %{atom() => contribution_source()},
+          contribution_source()
+        ) :: :ok | {:error, register_error()}
+  defp validate_theme_sources(themes, current_sources, source) do
+    Enum.reduce_while(themes, :ok, fn {name, _loaded}, :ok ->
+      case Map.get(current_sources, name) do
+        nil ->
+          {:cont, :ok}
+
+        ^source ->
+          {:cont, :ok}
+
+        existing_source ->
+          {:halt, {:error, {:duplicate_name, name, existing_source, source}}}
+      end
+    end)
   end
 
   @doc "Returns the map of registered user themes."
@@ -594,7 +676,21 @@ defmodule MingaEditor.UI.Theme do
     :persistent_term.get({__MODULE__, :user_themes}, %{})
   end
 
+  @doc "Returns user theme source ownership metadata."
+  @spec user_theme_sources() :: %{atom() => contribution_source()}
+  def user_theme_sources do
+    :persistent_term.get(@user_theme_sources_key, %{})
+  end
+
   # ── Private: theme lookup helpers ──
+
+  @spec normalize_loaded_theme(atom(), t() | MingaEditor.UI.Theme.Loader.loaded_theme()) ::
+          MingaEditor.UI.Theme.Loader.loaded_theme()
+  defp normalize_loaded_theme(_name, %LoadedTheme{} = loaded), do: loaded
+
+  defp normalize_loaded_theme(name, %__MODULE__{} = theme) do
+    %LoadedTheme{name: name, theme: theme, face_registry: %{}, source_path: "<runtime>"}
+  end
 
   @spec get_builtin(atom()) :: {:ok, t()} | :error
   defp get_builtin(name) do

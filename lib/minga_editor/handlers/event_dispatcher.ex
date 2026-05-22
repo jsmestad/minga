@@ -232,7 +232,14 @@ defmodule MingaEditor.Handlers.EventDispatcher do
 
   def dispatch(state, :load_user_themes, _payload, _msg) do
     {themes, errors} = ThemeLoader.load_all()
-    MingaEditor.UI.Theme.register_user_themes(themes)
+
+    case MingaEditor.UI.Theme.register_user_themes(themes) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Minga.Log.warning(:editor, "Theme registration failed: #{inspect(reason)}")
+    end
 
     for %{path: path, error: error} <- errors do
       Minga.Log.warning(:editor, "Theme load error: #{path}: #{error}")

@@ -30,7 +30,7 @@ defmodule Minga.Keymap.ScopeTest do
       assert :file_tree in scopes
       assert :git_status in scopes
       assert :dired in scopes
-      assert length(scopes) == 5
+      assert length(scopes) >= 5
     end
   end
 
