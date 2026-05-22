@@ -5,6 +5,12 @@ defmodule MingaEditor.Commands.BufferManagementShutdownTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Config.Options
   alias MingaEditor
+  alias MingaEditor.Commands
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Buffers
+  alias MingaEditor.Viewport
+  alias MingaEditor.VimState
+  alias MingaEditor.Session.State, as: SessionState
 
   setup do
     previous_shutdown_fn = Application.fetch_env(:minga, :shutdown_fn)
@@ -75,6 +81,27 @@ defmodule MingaEditor.Commands.BufferManagementShutdownTest do
       type_string(editor, ":cq!\r")
       assert_receive {:shutdown_called, 1}
     end
+
+    test "quit-all ex command exits when no buffer is active" do
+      {:ok, options} = Options.start_link(name: nil)
+      state = no_buffer_state(options)
+
+      Commands.execute(state, {:execute_ex_command, {:quit_all, []}})
+
+      assert_receive {:shutdown_called, 0}
+    end
+  end
+
+  defp no_buffer_state(options) do
+    %EditorState{
+      options_server: options,
+      port_manager: nil,
+      workspace: %SessionState{
+        viewport: Viewport.new(24, 80),
+        buffers: %Buffers{active: nil, list: []},
+        editing: VimState.new()
+      }
+    }
   end
 
   defp start_editor(content) do
