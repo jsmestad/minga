@@ -21,7 +21,12 @@ defmodule Minga.Extension.SourceCleanupTest do
     {:ok, _} = KeymapActive.start_link(name: keymap_name)
 
     on_exit(fn ->
-      for source <- [{:extension, :source_cleanup}, {:extension, :source_cleanup_fails}] do
+      for source <- [
+            {:extension, :source_cleanup},
+            {:extension, :source_cleanup_fails},
+            {:extension, :command_collision},
+            {:extension, :keybind_collision}
+          ] do
         Minga.Keymap.Scope.unregister_source(source)
         MingaEditor.Input.unregister_source(source)
         Minga.Language.Registry.unregister_source(source)
@@ -88,6 +93,136 @@ defmodule Minga.Extension.SourceCleanupTest do
 
     assert :error = CommandRegistry.lookup(ctx.command_registry, :source_cleanup_failed_cmd)
     assert Minga.Language.Registry.get(:source_cleanup_failed_lang) == nil
+  end
+
+  test "command registration failure stops keybind registration and marks the extension failed",
+       ctx do
+    :ok =
+      CommandRegistry.register(
+        ctx.command_registry,
+        :config,
+        :shared_cmd,
+        "Foreign shared command",
+        fn state -> state end
+      )
+
+    {path, cleanup} =
+      make_extension("CommandCollision", """
+      defmodule Minga.TestExtensions.CommandCollision do
+        use Minga.Extension
+
+        @impl true
+        def name, do: :command_collision
+
+        @impl true
+        def description, do: "Command collision test"
+
+        @impl true
+        def version, do: "1.0.0"
+
+        command :shared_cmd, "Rejected shared command", execute: {__MODULE__, :noop}
+        keybind :insert, "C-j", :shared_cmd, "Rejected shared keybind"
+
+        @impl true
+        def init(_config), do: {:ok, %{}}
+
+        @spec noop(map()) :: map()
+        def noop(state), do: state
+      end
+      """)
+
+    on_exit(fn ->
+      cleanup.()
+      :code.purge(Minga.TestExtensions.CommandCollision)
+      :code.delete(Minga.TestExtensions.CommandCollision)
+    end)
+
+    config = [command_registry: ctx.command_registry, keymap: ctx.keymap]
+    :ok = ExtRegistry.register(ctx.registry, :command_collision, path, config)
+    {:ok, entry} = ExtRegistry.get(ctx.registry, :command_collision)
+
+    assert {:error, {:duplicate_name, :shared_cmd, :config, {:extension, :command_collision}}} =
+             ExtSupervisor.start_extension(
+               ctx.supervisor,
+               ctx.registry,
+               :command_collision,
+               entry,
+               command_registry: ctx.command_registry,
+               keymap: ctx.keymap
+             )
+
+    assert {:ok, %{status: :load_error, pid: nil}} =
+             ExtRegistry.get(ctx.registry, :command_collision)
+
+    assert {:ok, _} = CommandRegistry.lookup(ctx.command_registry, :shared_cmd)
+
+    {:ok, keys} = KeyParser.parse("C-j")
+
+    assert :not_found =
+             ctx.keymap |> KeymapActive.mode_trie(:insert) |> Bindings.lookup_sequence(keys)
+  end
+
+  test "keybind registration failure cleans up commands and preserves the existing binding",
+       ctx do
+    assert :ok =
+             Minga.Keymap.Active.bind(ctx.keymap, :insert, "C-j", :config_cmd, "Config binding")
+
+    {path, cleanup} =
+      make_extension("KeybindCollision", """
+      defmodule Minga.TestExtensions.KeybindCollision do
+        use Minga.Extension
+
+        @impl true
+        def name, do: :keybind_collision
+
+        @impl true
+        def description, do: "Keybind collision test"
+
+        @impl true
+        def version, do: "1.0.0"
+
+        command :keybind_collision_cmd, "Extension command", execute: {__MODULE__, :noop}
+        keybind :insert, "C-j", :keybind_collision_cmd, "Rejected shared keybind"
+
+        @impl true
+        def init(_config), do: {:ok, %{}}
+
+        @spec noop(map()) :: map()
+        def noop(state), do: state
+      end
+      """)
+
+    on_exit(fn ->
+      cleanup.()
+      :code.purge(Minga.TestExtensions.KeybindCollision)
+      :code.delete(Minga.TestExtensions.KeybindCollision)
+    end)
+
+    config = [command_registry: ctx.command_registry, keymap: ctx.keymap]
+    :ok = ExtRegistry.register(ctx.registry, :keybind_collision, path, config)
+    {:ok, entry} = ExtRegistry.get(ctx.registry, :keybind_collision)
+
+    assert {:error, {:keybind_registration_failed, "C-j", reason}} =
+             ExtSupervisor.start_extension(
+               ctx.supervisor,
+               ctx.registry,
+               :keybind_collision,
+               entry,
+               command_registry: ctx.command_registry,
+               keymap: ctx.keymap
+             )
+
+    assert reason =~ "already"
+
+    assert {:ok, %{status: :load_error, pid: nil}} =
+             ExtRegistry.get(ctx.registry, :keybind_collision)
+
+    assert :error = CommandRegistry.lookup(ctx.command_registry, :keybind_collision_cmd)
+
+    {:ok, keys} = KeyParser.parse("C-j")
+
+    assert {:command, :config_cmd, _desc} =
+             ctx.keymap |> KeymapActive.mode_trie(:insert) |> Bindings.lookup_sequence(keys)
   end
 
   test "stopping an extension removes every source-owned contribution type", ctx do

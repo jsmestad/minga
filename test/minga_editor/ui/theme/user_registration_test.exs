@@ -47,6 +47,37 @@ defmodule MingaEditor.UI.Theme.UserRegistrationTest do
     assert theme.editor.fg == 0x123456
   end
 
+  test "same-source theme replacement keeps the latest value" do
+    source = {:extension, :theme_registration_test}
+    doom = Theme.get!(:doom_one)
+
+    first = %{doom | name: :shared_extension_theme, editor: %{doom.editor | fg: 0x111111}}
+    second = %{doom | name: :shared_extension_theme, editor: %{doom.editor | fg: 0x222222}}
+
+    assert :ok = Theme.register_themes(%{shared_extension_theme: first}, source)
+    assert :ok = Theme.register_themes(%{shared_extension_theme: second}, source)
+
+    assert {:ok, %Theme{name: :shared_extension_theme, editor: %{fg: 0x222222}}} =
+             Theme.get(:shared_extension_theme)
+  end
+
+  test "rejects duplicate theme names from different sources" do
+    source_a = {:extension, :theme_registration_test}
+    source_b = {:extension, :theme_registration_other}
+    doom = Theme.get!(:doom_one)
+
+    first = %{doom | name: :duplicate_extension_theme, editor: %{doom.editor | fg: 0x333333}}
+    second = %{doom | name: :duplicate_extension_theme, editor: %{doom.editor | fg: 0x444444}}
+
+    assert :ok = Theme.register_themes(%{duplicate_extension_theme: first}, source_a)
+
+    assert {:error, {:duplicate_name, :duplicate_extension_theme, ^source_a, ^source_b}} =
+             Theme.register_themes(%{duplicate_extension_theme: second}, source_b)
+
+    assert {:ok, %Theme{name: :duplicate_extension_theme, editor: %{fg: 0x333333}}} =
+             Theme.get(:duplicate_extension_theme)
+  end
+
   test "unregister_source removes only themes owned by that source and keeps built-in fallback" do
     doom = Theme.get!(:doom_one)
     source = {:extension, :theme_registration_test}

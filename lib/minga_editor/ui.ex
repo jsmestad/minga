@@ -25,7 +25,7 @@ defmodule MingaEditor.UI do
   defdelegate default_theme, to: MingaEditor.UI.Theme, as: :default
 
   @doc "Registers user-defined themes from a map of `%{name => theme_struct}`."
-  @spec register_user_themes(map()) :: :ok
+  @spec register_user_themes(map()) :: :ok | {:error, MingaEditor.UI.Theme.register_error()}
   defdelegate register_user_themes(themes), to: MingaEditor.UI.Theme
 
   # ── Devicon ───────────────────────────────────────────────────────────────
