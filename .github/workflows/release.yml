@@ -15,7 +15,7 @@ env:
   BURRITO_ZIG_VERSION: "0.15.2"
 
 jobs:
-  # ── Gate: validate tag matches mix.exs version ─────────────────────────
+  # ── Gate: validate tag matches mix.exs release version ────────────────
   validate:
     name: Validate Version
     runs-on: ubuntu-latest
@@ -24,18 +24,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check tag matches mix.exs version
+      - name: Check tag matches mix.exs release version
         id: check
         run: |
           # Extract version from mix.exs @version attribute
           mix_version=$(grep -oP '@version\s+"\K[^"]+' mix.exs)
           tag_version="${GITHUB_REF_NAME#v}"
+          release_version="${tag_version%%-*}"
 
-          echo "mix.exs version: $mix_version"
-          echo "Tag version:     $tag_version"
+          echo "mix.exs version:    $mix_version"
+          echo "Tag version:        $tag_version"
+          echo "Release version:    $release_version"
 
-          if [ "$mix_version" != "$tag_version" ]; then
-            echo "::error::Version mismatch! mix.exs has '$mix_version' but tag is 'v$tag_version'"
+          if [ "$mix_version" != "$release_version" ]; then
+            echo "::error::Version mismatch! mix.exs has '$mix_version' but tag '$GITHUB_REF_NAME' targets release '$release_version'"
             exit 1
           fi
 
