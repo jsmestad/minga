@@ -16,6 +16,7 @@ defmodule Minga.Keymap.KeyParser do
   | `DEL`   | Delete (codepoint 127)     |
   | `C-x`   | Ctrl + x                   |
   | `M-x`   | Alt/Meta + x               |
+  | `C-S-x` | Ctrl + Shift + x           |
   | `a`     | Single character           |
 
   ## Examples

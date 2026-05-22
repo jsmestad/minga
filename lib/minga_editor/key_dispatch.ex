@@ -25,6 +25,7 @@ defmodule MingaEditor.KeyDispatch do
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.CommandCompletion, as: CommandCompletionPayload
   alias Minga.Keymap
+  alias Minga.Keymap.Bindings
   alias Minga.Mode
 
   @doc """
@@ -283,11 +284,55 @@ defmodule MingaEditor.KeyDispatch do
 
   @spec fetch_leader_trie(EditorState.t()) :: Minga.Keymap.Bindings.node_t()
   defp fetch_leader_trie(state) do
-    Keymap.leader_trie(EditorState.keymap_server(state))
+    state
+    |> EditorState.keymap_server()
+    |> Keymap.leader_trie()
+    |> add_gui_only_leader_bindings(state)
   catch
     :exit, _ ->
       Minga.Log.warning(:config, "leader_trie unavailable; falling back to defaults")
-      Keymap.default_leader_trie()
+      Keymap.default_leader_trie() |> add_gui_only_leader_bindings(state)
+  end
+
+  @spec add_gui_only_leader_bindings(Bindings.node_t(), EditorState.t()) :: Bindings.node_t()
+  defp add_gui_only_leader_bindings(trie, state) do
+    if MingaEditor.Frontend.gui?(state.capabilities) do
+      trie
+      |> promote_default_diff_binding_for_gui()
+      |> bind_gui_side_by_side_if_missing()
+    else
+      trie
+    end
+  end
+
+  @spec promote_default_diff_binding_for_gui(Bindings.node_t()) :: Bindings.node_t()
+  defp promote_default_diff_binding_for_gui(%Bindings.Node{} = trie) do
+    case Bindings.lookup_sequence(trie, [{?g, 0}, {?d, 0}]) do
+      {:command, :git_diff_file, _description} ->
+        trie
+        |> Bindings.unbind([{?g, 0}, {?d, 0}])
+        |> Bindings.bind_prefix([{?g, 0}, {?d, 0}], "+diff")
+        |> Bindings.bind([{?g, 0}, {?d, 0}, {?f, 0}], :git_diff_file, "View diff")
+
+      _ ->
+        trie
+    end
+  end
+
+  @spec bind_gui_side_by_side_if_missing(Bindings.node_t()) :: Bindings.node_t()
+  defp bind_gui_side_by_side_if_missing(%Bindings.Node{} = trie) do
+    case Bindings.lookup_sequence(trie, [{?g, 0}, {?d, 0}, {?s, 0}]) do
+      :not_found ->
+        Bindings.bind(
+          trie,
+          [{?g, 0}, {?d, 0}, {?s, 0}],
+          :git_diff_toggle_layout,
+          "Toggle side-by-side diff"
+        )
+
+      _ ->
+        trie
+    end
   end
 
   @spec fetch_normal_bindings(EditorState.t()) :: %{

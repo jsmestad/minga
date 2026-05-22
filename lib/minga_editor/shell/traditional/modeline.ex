@@ -936,6 +936,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   defp mode_badge(:extension_confirm, _state), do: "UPDATE"
   defp mode_badge(:tool_confirm, _state), do: "INSTALL"
   defp mode_badge(:delete_confirm, _state), do: "DELETE"
+  defp mode_badge(:branch_delete_confirm, _state), do: "BRANCH DEL"
 
   @spec filetype_label(atom()) :: String.t()
   defp filetype_label(filetype) do

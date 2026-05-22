@@ -505,6 +505,32 @@ struct StatusBarViewViewTests {
         #expect(strings.contains("NORMAL"))
     }
 
+    @Test("Git branch click opens branch picker")
+    @MainActor func gitBranchClickOpensBranchPicker() throws {
+        let spy = SpyEncoder()
+        let state = StatusBarState()
+        state.update(from: StatusBarUpdate(
+            contentKind: 0, mode: 0, cursorLine: 1, cursorCol: 1,
+            lineCount: 1, flags: 0x02, lspStatus: 0, gitBranch: "main",
+            message: "", filetype: "", errorCount: 0, warningCount: 0,
+            modelName: "", messageCount: 0, sessionStatus: 0,
+            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
+            gitAdded: 0, gitModified: 0, gitDeleted: 0,
+            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
+            backgroundSubagentCount: 0, backgroundSubagentLabel: "",
+            modelineLeftSegments: [segment(0, " main ", kind: "git")], modelineRightSegments: []
+        ))
+
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: spy)
+        let buttons = try sut.inspect().findAll(ViewType.Button.self)
+
+        for button in buttons {
+            try button.tap()
+        }
+
+        #expect(spy.guiActions.contains(.executeCommand(name: "git_branch_picker")))
+    }
+
     @Test("Git branch shown when flag is set")
     @MainActor func gitBranch() throws {
         let state = StatusBarState()

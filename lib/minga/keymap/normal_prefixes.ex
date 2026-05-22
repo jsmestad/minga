@@ -13,50 +13,52 @@ defmodule Minga.Keymap.NormalPrefixes do
 
   alias Minga.Keymap.Bindings
 
+  import Minga.Keymap.Sigil
+
   @typedoc "A prefix sequence definition: {key_sequence, command, description}."
   @type prefix_def :: {[Bindings.key()], atom() | tuple(), String.t()}
 
   @prefix_sequences [
     # g prefix
-    {[{?g, 0}, {?g, 0}], :move_to_document_start, "Go to first line"},
-    {[{?g, 0}, {?c, 0}], :enter_comment_operator, "Comment operator"},
-    {[{?g, 0}, {?d, 0}], :goto_definition, "Go to definition"},
-    {[{?g, 0}, {?r, 0}], :find_references, "Find references"},
-    {[{?g, 0}, {?., 0}], :code_action, "Code actions"},
-    {[{?g, 0}, {?y, 0}], :goto_type_definition, "Go to type definition"},
-    {[{?g, 0}, {?i, 0}], :goto_implementation, "Go to implementation"},
-    {[{?g, 0}, {?j, 0}], :move_logical_down, "Logical line down"},
-    {[{?g, 0}, {?k, 0}], :move_logical_up, "Logical line up"},
-    {[{?g, 0}, {?0, 0}], :move_to_logical_line_start, "Logical line start"},
-    {[{?g, 0}, {?$, 0}], :move_to_logical_line_end, "Logical line end"},
-    {[{?g, 0}, {?t, 0}], :tab_next, "Next tab"},
-    {[{?g, 0}, {?T, 0}], :tab_prev, "Previous tab"},
+    {~k(g g), :move_to_document_start, "Go to first line"},
+    {~k(g c), :enter_comment_operator, "Comment operator"},
+    {~k(g d), :goto_definition, "Go to definition"},
+    {~k(g r), :find_references, "Find references"},
+    {~k(g .), :code_action, "Code actions"},
+    {~k(g y), :goto_type_definition, "Go to type definition"},
+    {~k(g i), :goto_implementation, "Go to implementation"},
+    {~k(g j), :move_logical_down, "Logical line down"},
+    {~k(g k), :move_logical_up, "Logical line up"},
+    {~k(g 0), :move_to_logical_line_start, "Logical line start"},
+    {~k(g $), :move_to_logical_line_end, "Logical line end"},
+    {~k(g t), :tab_next, "Next tab"},
+    {~k(g T), :tab_prev, "Previous tab"},
 
     # z prefix (folds)
-    {[{?z, 0}, {?a, 0}], :fold_toggle, "Toggle fold"},
-    {[{?z, 0}, {?c, 0}], :fold_close, "Close fold"},
-    {[{?z, 0}, {?o, 0}], :fold_open, "Open fold"},
-    {[{?z, 0}, {?C, 0}], :fold_close_recursive, "Close folds recursively"},
-    {[{?z, 0}, {?O, 0}], :fold_open_recursive, "Open folds recursively"},
-    {[{?z, 0}, {?M, 0}], :fold_close_all, "Close all folds"},
-    {[{?z, 0}, {?R, 0}], :fold_open_all, "Open all folds"},
-    {[{?z, 0}, {?z, 0}], :scroll_center, "Center viewport on cursor"},
-    {[{?z, 0}, {?t, 0}], :scroll_cursor_top, "Scroll cursor to top"},
-    {[{?z, 0}, {?b, 0}], :scroll_cursor_bottom, "Scroll cursor to bottom"},
+    {~k(z a), :fold_toggle, "Toggle fold"},
+    {~k(z c), :fold_close, "Close fold"},
+    {~k(z o), :fold_open, "Open fold"},
+    {~k(z C), :fold_close_recursive, "Close folds recursively"},
+    {~k(z O), :fold_open_recursive, "Open folds recursively"},
+    {~k(z M), :fold_close_all, "Close all folds"},
+    {~k(z R), :fold_open_all, "Open all folds"},
+    {~k(z z), :scroll_center, "Center viewport on cursor"},
+    {~k(z t), :scroll_cursor_top, "Scroll cursor to top"},
+    {~k(z b), :scroll_cursor_bottom, "Scroll cursor to bottom"},
 
     # ] prefix (next)
-    {[{?], 0}, {?d, 0}], :next_diagnostic, "Next diagnostic"},
-    {[{?], 0}, {?c, 0}], :next_git_hunk, "Next git hunk"},
-    {[{?], 0}, {?f, 0}], {:goto_next_textobject, :function}, "Next function"},
-    {[{?], 0}, {?t, 0}], {:goto_next_textobject, :class}, "Next class/module"},
-    {[{?], 0}, {?a, 0}], {:goto_next_textobject, :parameter}, "Next parameter"},
+    {~k(] d), :next_diagnostic, "Next diagnostic"},
+    {~k(] c), :next_git_hunk, "Next git hunk"},
+    {~k(] f), {:goto_next_textobject, :function}, "Next function"},
+    {~k(] t), {:goto_next_textobject, :class}, "Next class/module"},
+    {~k(] a), {:goto_next_textobject, :parameter}, "Next parameter"},
 
     # [ prefix (previous)
-    {[{?[, 0}, {?d, 0}], :prev_diagnostic, "Previous diagnostic"},
-    {[{?[, 0}, {?c, 0}], :prev_git_hunk, "Previous git hunk"},
-    {[{?[, 0}, {?f, 0}], {:goto_prev_textobject, :function}, "Previous function"},
-    {[{?[, 0}, {?t, 0}], {:goto_prev_textobject, :class}, "Previous class/module"},
-    {[{?[, 0}, {?a, 0}], {:goto_prev_textobject, :parameter}, "Previous parameter"}
+    {~k([ d), :prev_diagnostic, "Previous diagnostic"},
+    {~k([ c), :prev_git_hunk, "Previous git hunk"},
+    {~k([ f), {:goto_prev_textobject, :function}, "Previous function"},
+    {~k([ t), {:goto_prev_textobject, :class}, "Previous class/module"},
+    {~k([ a), {:goto_prev_textobject, :parameter}, "Previous parameter"}
   ]
 
   @doc "Returns the compiled prefix trie for normal mode."

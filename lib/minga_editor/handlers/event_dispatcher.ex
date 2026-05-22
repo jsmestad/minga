@@ -15,6 +15,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   alias MingaEditor.Commands
   alias MingaEditor.Frontend.Protocol
   alias MingaEditor.Handlers.FileEventHandler
+  alias MingaEditor.Handlers.Notifications
   alias MingaEditor.Handlers.ToolHandler
   alias MingaEditor.MessageLog
   alias MingaEditor.Renderer
@@ -106,7 +107,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
         _msg
       ) do
     state
-    |> MingaEditor.update_test_notification(exit_code)
+    |> Notifications.update_test_notification(exit_code)
     |> Renderer.render_or_async()
   end
 

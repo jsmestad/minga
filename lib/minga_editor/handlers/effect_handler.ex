@@ -11,6 +11,7 @@ defmodule MingaEditor.Handlers.EffectHandler do
 
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Commands
+  alias MingaEditor.Handlers.SessionRestore
   alias MingaEditor.HighlightEvents
   alias MingaEditor.HighlightSync
   alias MingaEditor.LspActions
@@ -254,10 +255,10 @@ defmodule MingaEditor.Handlers.EffectHandler do
     do: %{state | session: EditorSessionState.cancel_timer(state.session)}
 
   defp apply_effect(state, {:recover_swap_entries, entries}),
-    do: MingaEditor.recover_swap_entries(state, entries)
+    do: SessionRestore.recover_swap_entries(state, entries)
 
   defp apply_effect(state, {:restore_session, _opts}),
-    do: MingaEditor.restore_session(state)
+    do: SessionRestore.restore_session(state)
 
   defp apply_effect(state, {:request_code_lens}),
     do: LspActions.code_lens(state)
