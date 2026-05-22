@@ -327,6 +327,26 @@ struct EncoderGUIActionTests {
         #expect(payload[1] == GUI_ACTION_SYSTEM_DID_WAKE)
     }
 
+    @Test("power_thermal_state encodes low power and thermal bytes")
+    func powerThermalStateLayout() {
+        let payload = captureFrame { $0.sendPowerThermalState(lowPowerMode: true, thermalState: 2) }
+
+        #expect(payload.count == 4)
+        #expect(payload[1] == GUI_ACTION_POWER_THERMAL_STATE)
+        #expect(payload[2] == 1)
+        #expect(payload[3] == 2)
+    }
+
+    @Test("power_thermal_state encodes false low power as zero")
+    func powerThermalStateFalseLowPowerLayout() {
+        let payload = captureFrame { $0.sendPowerThermalState(lowPowerMode: false, thermalState: 0) }
+
+        #expect(payload.count == 4)
+        #expect(payload[1] == GUI_ACTION_POWER_THERMAL_STATE)
+        #expect(payload[2] == 0)
+        #expect(payload[3] == 0)
+    }
+
     @Test("panel_switch_tab encodes tab index")
     func panelSwitchTabLayout() {
         let payload = captureFrame { $0.sendPanelSwitchTab(index: 2) }

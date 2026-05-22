@@ -44,6 +44,7 @@ defmodule MingaEditor do
   alias MingaEditor.SemanticTokenSync
   alias MingaEditor.Startup
   alias MingaEditor.State.Agent, as: AgentState
+  alias MingaEditor.State.ResourcePressure
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.Viewport
@@ -1334,7 +1335,8 @@ defmodule MingaEditor do
   end
 
   def schedule_render(state, delay_ms) do
-    ref = Process.send_after(self(), :debounced_render, delay_ms)
+    effective_delay_ms = max(delay_ms, ResourcePressure.render_delay_ms(state.resource_pressure))
+    ref = Process.send_after(self(), :debounced_render, effective_delay_ms)
     %{state | render_timer: ref}
   end
 

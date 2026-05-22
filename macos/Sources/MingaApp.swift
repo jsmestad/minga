@@ -1160,8 +1160,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     PortLogger.info("Display configuration changed; current scale: \(scale)x")
                     self.editorNSView?.displayConfigurationChanged(newScale: scale, forceResizeEvent: true)
                 }
+            },
+            Task { @MainActor [weak self] in
+                for await _ in NotificationCenter.default.notifications(named: Notification.Name.NSProcessInfoPowerStateDidChange) {
+                    guard let self else { return }
+                    self.sendCurrentPowerThermalState(reason: "Power state changed")
+                }
+            },
+            Task { @MainActor [weak self] in
+                for await _ in NotificationCenter.default.notifications(named: ProcessInfo.thermalStateDidChangeNotification) {
+                    guard let self else { return }
+                    self.sendCurrentPowerThermalState(reason: "Thermal state changed")
+                }
             }
         ]
+
+        sendCurrentPowerThermalState(reason: "Initial power state")
+    }
+
+    /// Applies the current power/thermal policy locally and notifies the BEAM.
+    private func sendCurrentPowerThermalState(reason: String) {
+        let processInfo = ProcessInfo.processInfo
+        let lowPowerMode = processInfo.isLowPowerModeEnabled
+        let thermalState = processInfo.thermalState
+        let encodedThermalState = PowerThermalPolicy.encodeThermalState(thermalState)
+        let policy = PowerThermalPolicy.policy(lowPowerMode: lowPowerMode, thermalState: thermalState)
+        let thermalName = PowerThermalPolicy.thermalStateName(thermalState)
+
+        editorNSView?.applyPowerThermalPolicy(lowPowerMode: lowPowerMode, thermalState: thermalState)
+        encoder?.sendPowerThermalState(lowPowerMode: lowPowerMode, thermalState: encodedThermalState)
+        PortLogger.info("\(reason): low_power=\(lowPowerMode), thermal=\(thermalName), policy=\(policy.levelName)")
     }
 
     /// Cancels macOS sleep and screen sleep observers.
@@ -1222,6 +1250,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let rows = UInt16(nsView.bounds.height / CGFloat(nsView.cellHeight))
             enc.sendReady(cols: cols, rows: rows)
         }
+
+        sendCurrentPowerThermalState(reason: "Power state after BEAM reconnect")
 
         PortLogger.info("Protocol reconnected after BEAM restart")
     }
