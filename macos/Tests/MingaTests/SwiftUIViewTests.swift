@@ -782,6 +782,15 @@ struct WorkspaceHeaderViewTests {
 @Suite("AgentChatView View Structure")
 struct AgentChatViewTests {
 
+    @MainActor private func chatState(messages: [ChatMessageEntry] = []) -> AgentChatState {
+        let state = AgentChatState()
+        state.visible = true
+        state.model = "claude-sonnet-4"
+        state.status = 0
+        state.messages = messages
+        return state
+    }
+
     @Test("Empty messages shows header and prompt area")
     @MainActor func emptyMessages() throws {
         let state = AgentChatState()
@@ -847,6 +856,48 @@ struct AgentChatViewTests {
         }))
         try highButton.tap()
         #expect(spy.guiActions.contains(.executeCommand(name: "agent_thinking_high")))
+    }
+
+    @Test("Approval buttons dispatch the matching trust keypresses")
+    @MainActor func approvalButtonsDispatchKeys() throws {
+        let spy = SpyEncoder()
+        let state = chatState(messages: [
+            .approvalToolCall(id: 1, name: "shell", summary: "git diff --cached", toolCallId: "call-1", previewKind: 2, previewLines: ["git diff --cached"])
+        ])
+
+        let sut = AgentChatView(state: state, theme: ThemeColors(), isInsertMode: false, encoder: spy)
+        let body = try sut.inspect()
+        let buttons = try body.findAll(ViewType.Button.self)
+
+        func tap(_ title: String) throws {
+            let button = try #require(buttons.first(where: {
+                ((try? $0.labelView().text().string()) ?? "") == title
+            }))
+            try button.tap()
+        }
+
+        try tap("Approve (y)")
+        try tap("Trust this tool (a)")
+        try tap("For this turn (t)")
+        try tap("Deny (n)")
+
+        #expect(spy.keyPressCalls.map(\.codepoint) == [0x79, 0x61, 0x74, 0x6E])
+        #expect(spy.keyPressCalls.allSatisfy { $0.modifiers == 0 })
+    }
+
+    @Test("Auto-approved tool calls show the subtle scope pill")
+    @MainActor func autoApprovedIndicatorRenders() throws {
+        let state = chatState(messages: [
+            .toolCall(id: 1, name: "shell", summary: "git diff --cached", status: 1, isError: false, collapsed: true, autoApprovedScope: 1, durationMs: 500, result: ""),
+            .toolCall(id: 2, name: "shell", summary: "git status --short", status: 1, isError: false, collapsed: true, autoApprovedScope: 2, durationMs: 250, result: "")
+        ])
+
+        let sut = AgentChatView(state: state, theme: ThemeColors(), isInsertMode: false, encoder: nil)
+        let body = try sut.inspect()
+        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(strings.contains("auto-approved · session"))
+        #expect(strings.contains("auto-approved · turn"))
     }
 
     @Test("User message renders as bubble")
