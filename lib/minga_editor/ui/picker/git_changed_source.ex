@@ -26,6 +26,10 @@ defmodule MingaEditor.UI.Picker.GitChangedSource do
   def preview?, do: true
 
   @impl true
+  @spec gui_preview?() :: boolean()
+  def gui_preview?, do: true
+
+  @impl true
   @spec candidates(Context.t()) :: [Item.t()]
   def candidates(_ctx) do
     root = Minga.Project.resolve_root()

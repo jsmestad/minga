@@ -25,6 +25,36 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
 
   import MingaEditor.RenderPipeline.TestHelpers
 
+  defmodule PreviewSource do
+    @behaviour MingaEditor.UI.Picker.Source
+
+    alias MingaEditor.UI.Picker.Item
+
+    @impl true
+    def title, do: "Preview source"
+
+    @impl true
+    def preview?, do: true
+
+    @impl true
+    def live_preview?, do: false
+
+    @impl true
+    def gui_preview?, do: true
+
+    @impl true
+    def candidates(_ctx), do: [%Item{id: :preview, label: "preview"}]
+
+    @impl true
+    def on_select(_item, state), do: state
+
+    @impl true
+    def on_cancel(state), do: state
+
+    @impl true
+    def preview(_item, _ctx), do: [[{"source preview", 0xFFFFFF, false}]]
+  end
+
   @moduletag :tmp_dir
 
   describe "sync_swiftui_chrome/4 fingerprint caching" do
@@ -207,6 +237,14 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       {_ctx, caches2, _cmds} = sync_chrome(state_b, caches)
 
       refute caches2.last_gui_picker_fp == caches.last_gui_picker_fp
+    end
+
+    test "picker sync emits source-provided GUI preview content" do
+      state = open_test_picker_with_source(gui_state(), "preview", PreviewSource)
+
+      {_ctx, _caches, cmds} = sync_chrome(state)
+
+      assert Enum.any?(cmds, &String.contains?(&1, "source preview"))
     end
 
     test "minibuffer cache changes when encoded candidate metadata changes" do
@@ -404,12 +442,16 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
   end
 
   defp open_test_picker(state, label, mode_prefix \\ "") do
+    open_test_picker_with_source(state, label, nil, mode_prefix)
+  end
+
+  defp open_test_picker_with_source(state, label, source, mode_prefix \\ "") do
     item = %MingaEditor.UI.Picker.Item{id: "same-id", label: label}
     picker = MingaEditor.UI.Picker.new([item], title: "Test")
 
     picker_state = %MingaEditor.State.Picker{
       picker: picker,
-      source: nil,
+      source: source,
       action_menu: nil,
       mode_prefix: mode_prefix
     }

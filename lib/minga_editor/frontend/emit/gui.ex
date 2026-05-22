@@ -653,7 +653,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     # Preview content is NOT in the fingerprint: a file changing on disk while
     # the picker is open won't refresh the preview. Acceptable trade-off for
     # scroll perf since the picker isn't open during normal editing.
-    has_preview = source != nil and Picker.Source.preview?(source)
+    has_preview = source != nil and Picker.Source.gui_preview?(source)
     fp = picker_fingerprint(picker, has_preview, action_menu, mode_prefix, 100)
 
     if fp != caches.last_gui_picker_fp do

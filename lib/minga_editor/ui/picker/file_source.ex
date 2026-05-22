@@ -26,6 +26,10 @@ defmodule MingaEditor.UI.Picker.FileSource do
   def preview?, do: true
 
   @impl true
+  @spec gui_preview?() :: boolean()
+  def gui_preview?, do: true
+
+  @impl true
   @spec candidates(Context.t() | nil) :: [Item.t()]
   def candidates(ctx) do
     root = project_root(ctx)

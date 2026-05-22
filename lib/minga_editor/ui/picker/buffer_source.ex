@@ -27,6 +27,10 @@ defmodule MingaEditor.UI.Picker.BufferSource do
   def preview?, do: true
 
   @impl true
+  @spec gui_preview?() :: boolean()
+  def gui_preview?, do: true
+
+  @impl true
   @spec candidates(Context.t()) :: [Item.t()]
   def candidates(ctx), do: build_candidates(ctx, include_special: false)
 

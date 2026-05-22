@@ -127,13 +127,15 @@ defmodule Minga.Git.System do
   end
 
   @impl true
-  @spec diff(String.t(), keyword()) :: {:ok, String.t()} | {:error, String.t()}
+  @spec diff(String.t(), Minga.Git.diff_opts()) :: {:ok, String.t()} | {:error, String.t()}
   def diff(git_root, opts \\ []) when is_binary(git_root) do
-    args = diff_args(opts)
+    with :ok <- Minga.Git.DiffOptions.validate(opts) do
+      args = diff_args(opts)
 
-    case System.cmd("git", args, cd: git_root, stderr_to_stdout: true) do
-      {output, 0} -> {:ok, output}
-      {output, _} -> {:error, "git diff failed: #{String.trim(output)}"}
+      case System.cmd("git", args, cd: git_root, stderr_to_stdout: true) do
+        {output, 0} -> {:ok, output}
+        {output, _} -> {:error, "git diff failed: #{String.trim(output)}"}
+      end
     end
   rescue
     e in [ErlangError, ArgumentError] -> {:error, "git diff error: #{Exception.message(e)}"}

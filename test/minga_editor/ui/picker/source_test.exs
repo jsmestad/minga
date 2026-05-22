@@ -38,7 +38,45 @@ defmodule MingaEditor.UI.Picker.SourceTest do
     def on_cancel(state), do: state
 
     @impl true
-    def preview(_item, _context), do: [[{"preview", 0xFFFFFF, false}]]
+    def preview(_item, %{theme: %{fg: fg}}), do: [[{"preview", fg, false}]]
+  end
+
+  defmodule LivePreviewOnlySource do
+    @behaviour MingaEditor.UI.Picker.Source
+
+    @impl true
+    def title, do: "Live preview only"
+
+    @impl true
+    def candidates(_ctx), do: [{:a, "item", "desc"}]
+
+    @impl true
+    def on_select(_item, state), do: state
+
+    @impl true
+    def on_cancel(state), do: state
+
+    @impl true
+    def preview?, do: true
+  end
+
+  defmodule WithGuiPreviewSource do
+    @behaviour MingaEditor.UI.Picker.Source
+
+    @impl true
+    def title, do: "With GUI preview"
+
+    @impl true
+    def candidates(_ctx), do: [{:a, "item", "desc"}]
+
+    @impl true
+    def on_select(_item, state), do: state
+
+    @impl true
+    def on_cancel(state), do: state
+
+    @impl true
+    def gui_preview?, do: true
   end
 
   defmodule WithActionsSource do
@@ -86,9 +124,27 @@ defmodule MingaEditor.UI.Picker.SourceTest do
     end
   end
 
-  describe "preview?/1" do
-    test "returns false for source without preview? callback" do
+  describe "preview/live_preview/gui_preview helpers" do
+    test "returns false for source without preview callbacks" do
       refute Source.preview?(NoActionsSource)
+      refute Source.live_preview?(NoActionsSource)
+      refute Source.gui_preview?(NoActionsSource)
+    end
+
+    test "live preview falls back to preview?/0 for navigation-only sources" do
+      assert Source.preview?(LivePreviewOnlySource)
+      assert Source.live_preview?(LivePreviewOnlySource)
+      refute Source.gui_preview?(LivePreviewOnlySource)
+    end
+
+    test "preview/2 provides content but does not enable the GUI pane by itself" do
+      refute Source.gui_preview?(WithPreviewSource)
+    end
+
+    test "GUI preview can be enabled explicitly without preview/2" do
+      assert Source.gui_preview?(WithGuiPreviewSource)
+      refute Source.preview?(WithGuiPreviewSource)
+      refute Source.live_preview?(WithGuiPreviewSource)
     end
   end
 
@@ -98,7 +154,7 @@ defmodule MingaEditor.UI.Picker.SourceTest do
     end
 
     test "returns preview lines for source with preview callback" do
-      assert Source.preview(WithPreviewSource, {:a, "item", "desc"}, %{}) == [
+      assert Source.preview(WithPreviewSource, {:a, "item", "desc"}, %{theme: %{fg: 0xFFFFFF}}) == [
                [{"preview", 0xFFFFFF, false}]
              ]
     end

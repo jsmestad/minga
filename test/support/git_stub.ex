@@ -198,7 +198,7 @@ defmodule Minga.Git.Stub do
   end
 
   @impl true
-  @spec diff(String.t(), keyword()) :: {:ok, String.t()}
+  @spec diff(String.t(), Minga.Git.diff_opts()) :: {:ok, String.t()}
   def diff(git_root, opts \\ []) do
     expanded = Path.expand(git_root)
 

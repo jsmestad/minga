@@ -9,6 +9,7 @@ defmodule MingaEditor.UI.Picker.GitLogSource do
 
   alias Minga.Git
   alias Minga.Log
+  alias MingaEditor.Frontend.Emit.Context, as: EmitContext
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.Picker.Context
@@ -34,10 +35,18 @@ defmodule MingaEditor.UI.Picker.GitLogSource do
   def preview?, do: true
 
   @impl true
+  @spec live_preview?() :: boolean()
+  def live_preview?, do: false
+
+  @impl true
+  @spec gui_preview?() :: boolean()
+  def gui_preview?, do: true
+
+  @impl true
   @spec candidates(Context.t()) :: [Item.t()]
   def candidates(%Context{} = ctx) do
     case git_root(ctx) do
-      {:ok, git_root} -> build_candidates(git_root, picker_path(ctx), picker_count(ctx))
+      {:ok, git_root} -> build_candidates(git_root, picker_path(ctx), picker_count(ctx), picker_source(ctx))
       :not_git -> []
     end
   catch
@@ -46,8 +55,13 @@ defmodule MingaEditor.UI.Picker.GitLogSource do
 
   @impl true
   @spec on_select(Item.t(), EditorState.t()) :: EditorState.t()
+  def on_select(%Item{id: {:git_log_load_more, source_module, git_root, path, count}}, state)
+      when is_atom(source_module) do
+    PickerUI.open(state, source_module, load_more_context(git_root, path, count, source_module))
+  end
+
   def on_select(%Item{id: {:git_log_load_more, git_root, path, count}}, state) do
-    PickerUI.open(state, __MODULE__, load_more_context(git_root, path, count))
+    PickerUI.open(state, __MODULE__, load_more_context(git_root, path, count, __MODULE__))
   end
 
   def on_select(%Item{id: {:git_log_commit, _git_root, hash, _path}}, state) do
@@ -61,7 +75,7 @@ defmodule MingaEditor.UI.Picker.GitLogSource do
   def on_cancel(state), do: state
 
   @impl true
-  @spec preview(Item.t(), term()) :: [[preview_segment()]] | nil
+  @spec preview(Item.t(), EmitContext.t()) :: [[preview_segment()]] | nil
   def preview(%Item{id: {:git_log_commit, git_root, hash, path}}, ctx) do
     case Git.diff(git_root, diff_opts(hash, path)) do
       {:ok, ""} -> [[{"No diff for this commit", preview_fg(ctx), false}]]
@@ -72,23 +86,23 @@ defmodule MingaEditor.UI.Picker.GitLogSource do
 
   def preview(_item, _ctx), do: nil
 
-  @spec build_candidates(String.t(), String.t() | nil, pos_integer()) :: [Item.t()]
-  defp build_candidates(git_root, path, count) do
+  @spec build_candidates(String.t(), String.t() | nil, pos_integer(), module()) :: [Item.t()]
+  defp build_candidates(git_root, path, count, source_module) do
     case Git.log(git_root, count: count + 1, path: path) do
-      {:ok, entries} -> format_entries(entries, git_root, path, count)
+      {:ok, entries} -> format_entries(entries, git_root, path, count, source_module)
       {:error, reason} -> log_failure(reason)
     end
   end
 
-  @spec format_entries([Git.log_entry()], String.t(), String.t() | nil, pos_integer()) :: [
+  @spec format_entries([Git.log_entry()], String.t(), String.t() | nil, pos_integer(), module()) :: [
           Item.t()
         ]
-  defp format_entries(entries, git_root, path, count) do
+  defp format_entries(entries, git_root, path, count, source_module) do
     visible_entries = Enum.take(entries, count)
     items = Enum.map(visible_entries, &format_entry(&1, git_root, path))
 
     if length(entries) > count do
-      items ++ [load_more_item(git_root, path, count + @load_more_step)]
+      items ++ [load_more_item(git_root, path, count + @load_more_step, source_module)]
     else
       items
     end
@@ -105,10 +119,10 @@ defmodule MingaEditor.UI.Picker.GitLogSource do
     }
   end
 
-  @spec load_more_item(String.t(), String.t() | nil, pos_integer()) :: Item.t()
-  defp load_more_item(git_root, path, count) do
+  @spec load_more_item(String.t(), String.t() | nil, pos_integer(), module()) :: Item.t()
+  defp load_more_item(git_root, path, count, source_module) do
     %Item{
-      id: {:git_log_load_more, git_root, path, count},
+      id: {:git_log_load_more, source_module, git_root, path, count},
       label: "Load more...",
       description: "Show #{count} commits",
       annotation: "+#{@load_more_step}"
@@ -143,17 +157,18 @@ defmodule MingaEditor.UI.Picker.GitLogSource do
 
   defp picker_count(_ctx), do: @default_count
 
-  @spec load_more_context(String.t(), String.t() | nil, pos_integer()) :: map()
-  defp load_more_context(git_root, nil, count), do: %{git_root: git_root, count: count}
+  @spec load_more_context(String.t(), String.t() | nil, pos_integer(), module()) :: map()
+  defp load_more_context(git_root, nil, count, source_module),
+    do: %{git_root: git_root, count: count, source: source_module}
 
-  defp load_more_context(git_root, path, count),
-    do: %{git_root: git_root, path: path, count: count}
+  defp load_more_context(git_root, path, count, source_module),
+    do: %{git_root: git_root, path: path, count: count, source: source_module}
 
   @spec diff_opts(String.t(), String.t() | nil) :: keyword()
   defp diff_opts(hash, nil), do: [commit: hash]
   defp diff_opts(hash, path), do: [commit: hash, path: path]
 
-  @spec diff_preview_lines(String.t(), term()) :: [[preview_segment()]]
+  @spec diff_preview_lines(String.t(), EmitContext.t()) :: [[preview_segment()]]
   defp diff_preview_lines(diff, ctx) do
     diff
     |> String.split("\n")
@@ -161,7 +176,7 @@ defmodule MingaEditor.UI.Picker.GitLogSource do
     |> Enum.map(&style_diff_line(&1, ctx))
   end
 
-  @spec style_diff_line(String.t(), term()) :: [preview_segment()]
+  @spec style_diff_line(String.t(), EmitContext.t()) :: [preview_segment()]
   defp style_diff_line("diff --git" <> _ = line, _ctx), do: [{line, @header_fg, true}]
   defp style_diff_line("@@" <> _ = line, _ctx), do: [{line, @hunk_fg, true}]
   defp style_diff_line("+++" <> _ = line, _ctx), do: [{line, @hash_fg, true}]
@@ -170,7 +185,11 @@ defmodule MingaEditor.UI.Picker.GitLogSource do
   defp style_diff_line("-" <> _ = line, _ctx), do: [{line, @deleted_fg, false}]
   defp style_diff_line(line, ctx), do: [{line, preview_fg(ctx), false}]
 
-  @spec preview_fg(term()) :: non_neg_integer()
+  @spec preview_fg(EmitContext.t()) :: non_neg_integer()
   defp preview_fg(%{theme: theme}) when is_map(theme), do: Map.get(theme, :fg, @default_fg)
   defp preview_fg(_ctx), do: @default_fg
+
+  @spec picker_source(Context.t()) :: module()
+  defp picker_source(%Context{picker_ui: %{context: %{source: source}}}) when is_atom(source), do: source
+  defp picker_source(_ctx), do: __MODULE__
 end
