@@ -758,24 +758,16 @@ struct TabBarViewViewTests {
             wireTab(id: 4, label: "plain-2.ex"),
         ])
         let sut = TabBarView(tabBarState: state, theme: ThemeColors(), encoder: nil)
-        let body = try sut.inspect()
-        let buttons = body.findAll(ViewType.Button.self)
+        let tabs = [
+            tab(id: 1, isActive: true, isPinned: true, label: "pinned-1.ex"),
+            tab(id: 2, isPinned: true, label: "pinned-2.ex"),
+            tab(id: 3, label: "plain-1.ex"),
+            tab(id: 4, label: "plain-2.ex")
+        ]
+        let moveItems = tabs.map { sut.tabContextMenuMoveItems(for: $0) }
 
-        let moveLeftButtons = buttons.filter {
-            ((try? $0.labelView().text().string()) ?? "") == "Move Tab Left"
-        }
-        let moveRightButtons = buttons.filter {
-            ((try? $0.labelView().text().string()) ?? "") == "Move Tab Right"
-        }
-
-        #expect(moveLeftButtons.count == 4)
-        #expect(moveRightButtons.count == 4)
-
-        let moveLeftDisabledStates = moveLeftButtons.map { $0.isDisabled() }
-        let moveRightDisabledStates = moveRightButtons.map { $0.isDisabled() }
-
-        #expect(moveLeftDisabledStates == [true, false, true, false])
-        #expect(moveRightDisabledStates == [false, true, false, true])
+        #expect(moveItems.map { $0.map(\.title) } == Array(repeating: ["Move Tab Left", "Move Tab Right"], count: 4))
+        #expect(moveItems.map { $0.map(\.isDisabled) } == [[true, false], [false, true], [true, false], [false, true]])
     }
 
     @Test("Tab drag payload stays private and drops only accept tab payloads in the same bucket")
