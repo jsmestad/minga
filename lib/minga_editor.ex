@@ -510,7 +510,7 @@ defmodule MingaEditor do
     new_state = FileWatcherHelpers.handle_file_change(state, path)
     new_state = log_message(new_state, "External change detected: #{path}")
     {new_state, effects} = FileEventHandler.handle(new_state, msg)
-    {:noreply, apply_effects(new_state, effects)}
+    {:noreply, EffectHandler.apply_effects(new_state, effects)}
   end
 
   def handle_info(
@@ -600,7 +600,7 @@ defmodule MingaEditor do
   def handle_info(msg, state) when is_map_key(@handler_atom_dispatch, msg) do
     handler = @handler_atom_dispatch[msg]
     {state, effects} = handler.handle(state, msg)
-    {:noreply, apply_effects(state, effects)}
+    {:noreply, EffectHandler.apply_effects(state, effects)}
   end
 
   # ── Highlight events from Parser.Manager ──────────────────────────────────────
@@ -612,7 +612,7 @@ defmodule MingaEditor do
 
   def handle_info({:minga_highlight, _} = msg, state) do
     {state, effects} = HighlightHandler.handle(state, msg)
-    {:noreply, apply_effects(state, effects)}
+    {:noreply, EffectHandler.apply_effects(state, effects)}
   end
 
   # Remaining {:minga_input, _} messages are highlight/parser events forwarded
@@ -621,35 +621,35 @@ defmodule MingaEditor do
   # capabilities_updated) are matched above, so this catch-all is safe.
   def handle_info({:minga_input, _} = msg, state) do
     {state, effects} = HighlightHandler.handle(state, msg)
-    {:noreply, apply_effects(state, effects)}
+    {:noreply, EffectHandler.apply_effects(state, effects)}
   end
 
   # LSP/completion timer events routed through a focused handler.
   def handle_info({:completion_debounce, _clients, _buffer_pid} = msg, state) do
     {state, effects} = LspEventHandler.handle(state, msg)
-    {:noreply, apply_effects(state, effects)}
+    {:noreply, EffectHandler.apply_effects(state, effects)}
   end
 
   def handle_info({:lsp_response, _ref, _result} = msg, state) do
     {state, effects} = LspEventHandler.handle(state, msg)
-    {:noreply, apply_effects(state, effects)}
+    {:noreply, EffectHandler.apply_effects(state, effects)}
   end
 
   @lsp_debounce_atoms [:inlay_hint_scroll_debounce, :document_highlight_debounce]
 
   def handle_info(msg, state) when msg in @lsp_debounce_atoms do
     {state, effects} = LspEventHandler.handle(state, msg)
-    {:noreply, apply_effects(state, effects)}
+    {:noreply, EffectHandler.apply_effects(state, effects)}
   end
 
   def handle_info({:completion_resolve, _index} = msg, state) do
     {state, effects} = LspEventHandler.handle(state, msg)
-    {:noreply, apply_effects(state, effects)}
+    {:noreply, EffectHandler.apply_effects(state, effects)}
   end
 
   def handle_info(:request_code_lens_and_inlay_hints = msg, state) do
     {state, effects} = LspEventHandler.handle(state, msg)
-    {:noreply, apply_effects(state, effects)}
+    {:noreply, EffectHandler.apply_effects(state, effects)}
   end
 
   # ── Event bus messages ────────────────────────────────────────────────────────
@@ -668,7 +668,7 @@ defmodule MingaEditor do
   # Debounced file-tree refresh timer fired — rescan the cached tree once for a burst of filesystem events.
   def handle_info(:file_tree_refresh_timer, state) do
     {state, effects} = FileEventHandler.handle(state, :file_tree_refresh_timer)
-    {:noreply, apply_effects(state, effects)}
+    {:noreply, EffectHandler.apply_effects(state, effects)}
   end
 
   # Renderer.Server writeback after each async frame completes.
@@ -802,7 +802,7 @@ defmodule MingaEditor do
 
   def handle_info({:git_remote_result, ref, _result} = msg, state) when is_reference(ref) do
     {state, effects} = FileEventHandler.handle(state, msg)
-    {:noreply, apply_effects(state, effects)}
+    {:noreply, EffectHandler.apply_effects(state, effects)}
   end
 
   def handle_info(_msg, state) do
@@ -982,7 +982,7 @@ defmodule MingaEditor do
       state.shell.on_agent_event(state.shell_state, state.workspace, session_pid, event)
 
     state = %{state | shell_state: shell_state, workspace: workspace}
-    state = apply_effects(state, shell_effects)
+    state = EffectHandler.apply_effects(state, shell_effects)
     {:noreply, schedule_render(state, 16)}
   end
 
@@ -1014,20 +1014,12 @@ defmodule MingaEditor do
   @spec dispatch_agent_event(EditorState.t(), term()) :: EditorState.t()
   defp dispatch_agent_event(state, event) do
     {state, effects} = Events.handle(state, event)
-    apply_effects(state, effects)
+    EffectHandler.apply_effects(state, effects)
   end
 
   # ── Agent lifecycle ──────────────────────────────────────────────────────
 
   @type effect :: EffectHandler.effect()
-
-  @doc """
-  Applies a list of effects to the editor state.
-
-  Delegates to `MingaEditor.Handlers.EffectHandler.apply_effects/2`.
-  """
-  @spec apply_effects(EditorState.t(), [effect()]) :: EditorState.t()
-  defdelegate apply_effects(state, effects), to: EffectHandler
 
   # Tab bar, view state, capabilities, parser subscription helpers
 

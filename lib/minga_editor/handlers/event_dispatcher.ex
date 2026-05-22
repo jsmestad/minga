@@ -14,6 +14,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Commands
   alias MingaEditor.Frontend.Protocol
+  alias MingaEditor.Handlers.EffectHandler
   alias MingaEditor.Handlers.FileEventHandler
   alias MingaEditor.Handlers.Notifications
   alias MingaEditor.Handlers.ToolHandler
@@ -55,12 +56,12 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   @spec dispatch(EditorState.t(), atom(), term(), term()) :: EditorState.t()
   def dispatch(state, event, _payload, msg) when event in @tool_events do
     {state, effects} = ToolHandler.handle(state, msg)
-    MingaEditor.apply_effects(state, effects)
+    EffectHandler.apply_effects(state, effects)
   end
 
   def dispatch(state, event, _payload, msg) when event in @file_events do
     {state, effects} = FileEventHandler.handle(state, msg)
-    MingaEditor.apply_effects(state, effects)
+    EffectHandler.apply_effects(state, effects)
   end
 
   def dispatch(
@@ -87,7 +88,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
     if effects == [] do
       MingaEditor.schedule_render(state, 16)
     else
-      MingaEditor.apply_effects(state, effects)
+      EffectHandler.apply_effects(state, effects)
     end
   end
 

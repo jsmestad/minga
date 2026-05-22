@@ -219,11 +219,17 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
     test "applying repeated refresh effects keeps one pending timer", %{tmp_dir: tmp_dir} do
       state = state_with_tree(tmp_dir)
 
-      first_state = MingaEditor.apply_effects(state, [{:schedule_file_tree_refresh, 1_000}])
+      first_state =
+        MingaEditor.Handlers.EffectHandler.apply_effects(state, [
+          {:schedule_file_tree_refresh, 1_000}
+        ])
+
       first_ref = first_state.workspace.file_tree.refresh_timer
 
       second_state =
-        MingaEditor.apply_effects(first_state, [{:schedule_file_tree_refresh, 1_000}])
+        MingaEditor.Handlers.EffectHandler.apply_effects(first_state, [
+          {:schedule_file_tree_refresh, 1_000}
+        ])
 
       assert is_reference(first_ref)
       assert second_state.workspace.file_tree.refresh_timer == first_ref
