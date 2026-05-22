@@ -88,6 +88,7 @@ defmodule MingaEditor.State do
   @default_options_server Minga.Config.Options.default_server()
   @default_events_registry Minga.Events.default_registry()
 
+  alias MingaEditor.Observatory
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.Shell.Board.State, as: BoardState
 
@@ -662,6 +663,28 @@ defmodule MingaEditor.State do
 
   @spec close_git_status_panel(t()) :: t()
   def close_git_status_panel(s), do: update_shell_state(s, &ShellState.close_git_status_panel/1)
+
+  @spec observatory_visible?(t()) :: boolean()
+  def observatory_visible?(%{shell_state: ss}), do: ShellState.observatory_visible?(ss)
+
+  @spec open_observatory(t(), {reference(), reference()} | nil) :: t()
+  def open_observatory(s, timer),
+    do: update_shell_state(s, &ShellState.open_observatory(&1, timer))
+
+  @spec close_observatory(t()) :: t()
+  def close_observatory(s), do: update_shell_state(s, &ShellState.close_observatory/1)
+
+  @spec set_observatory_data(t(), Observatory.Data.t() | nil) :: t()
+  def set_observatory_data(s, data),
+    do: update_shell_state(s, &ShellState.set_observatory_data(&1, data))
+
+  @spec set_observatory_timer(t(), {reference(), reference()} | nil) :: t()
+  def set_observatory_timer(s, timer),
+    do: update_shell_state(s, &ShellState.set_observatory_timer(&1, timer))
+
+  @spec set_observatory_inspection(t(), Observatory.Inspection.t() | nil) :: t()
+  def set_observatory_inspection(s, inspection),
+    do: update_shell_state(s, &ShellState.set_observatory_inspection(&1, inspection))
 
   @spec set_git_toast(t(), ShellState.git_toast()) :: t()
   def set_git_toast(s, toast), do: update_shell_state(s, &ShellState.set_git_toast(&1, toast))

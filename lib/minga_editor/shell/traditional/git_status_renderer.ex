@@ -74,7 +74,8 @@ defmodule MingaEditor.Shell.Traditional.GitStatusRenderer do
     ahead = Map.get(panel, :ahead) || 0
     behind = Map.get(panel, :behind) || 0
 
-    header_text = header_text(branch, ahead, behind)
+    stash_count = Map.get(panel, :stash_count) || 0
+    header_text = header_text(branch, ahead, behind, stash_count)
     header_display = String.slice(header_text, 0, width) |> String.pad_trailing(width)
 
     header = [
@@ -157,8 +158,9 @@ defmodule MingaEditor.Shell.Traditional.GitStatusRenderer do
     ]
   end
 
-  @spec header_text(String.t(), non_neg_integer(), non_neg_integer()) :: String.t()
-  defp header_text(branch, ahead, behind) do
+  @spec header_text(String.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          String.t()
+  defp header_text(branch, ahead, behind, stash_count) do
     badge =
       case {ahead, behind} do
         {0, 0} -> ""
@@ -167,7 +169,9 @@ defmodule MingaEditor.Shell.Traditional.GitStatusRenderer do
         {a, b} -> " ↑#{a}↓#{b}"
       end
 
-    "  #{branch}#{badge}"
+    stash_badge = if stash_count > 0, do: " Stashes: #{stash_count}", else: ""
+
+    "  #{branch}#{badge}#{stash_badge}"
   end
 
   @spec status_character(atom()) :: String.t()

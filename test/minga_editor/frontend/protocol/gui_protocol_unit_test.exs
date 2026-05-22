@@ -5,6 +5,8 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
   """
   use ExUnit.Case, async: true
 
+  alias Minga.SystemObserver.ProcessSnapshot
+  alias Minga.SystemObserver.TreeNode
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
@@ -369,6 +371,19 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
     test "rejects malformed payloads" do
       assert :error == ProtocolGUI.decode_gui_action(0x47, <<0>>)
       assert :error == ProtocolGUI.decode_gui_action(0x47, <<0, 1, 2>>)
+    end
+  end
+
+  describe "decode_gui_action for observatory inspection" do
+    test "decodes selected process PID" do
+      pid = "#PID<0.123.0>"
+
+      assert {:ok, {:observatory_inspect, pid}} ==
+               ProtocolGUI.decode_gui_action(0x4D, <<byte_size(pid)::16, pid::binary>>)
+    end
+
+    test "rejects malformed selected process PID payload" do
+      assert :error == ProtocolGUI.decode_gui_action(0x4D, <<0, 20, "short">>)
     end
   end
 
@@ -898,6 +913,211 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       active_tool_name: "read_file",
       status_msg: nil
     }
+  end
+
+  describe "encode_gui_observatory/1" do
+    test "encodes length-prefixed sectioned process nodes" do
+      root = self()
+
+      tree = %TreeNode{
+        pid: root,
+        depth: 0,
+        children: [],
+        snapshot: %ProcessSnapshot{
+          memory: 1234,
+          message_queue_len: 2,
+          reductions: 99,
+          registered_name: Minga.Supervisor,
+          parent_pid: nil,
+          child_type: :supervisor,
+          process_class: :supervisor
+        }
+      }
+
+      <<0x9A, payload_len::32, payload::binary-size(payload_len)>> =
+        ProtocolGUI.encode_gui_observatory(%{visible: true, tree: tree, samples: []})
+
+      assert payload_len == byte_size(payload)
+      assert <<0x01, 3::16, 1::8, 1::16, rest::binary>> = payload
+
+      assert <<0x02, node_section_len::16, node_section::binary-size(node_section_len),
+               _::binary>> = rest
+
+      <<pid_len::8, _pid::binary-size(pid_len), 0::8, name_len::16, name::binary-size(name_len),
+        0::8, 0::8, 1234::32, 2::16, 99::32>> = node_section
+
+      assert name == "Minga.Supervisor"
+    end
+
+    test "falls back to current function when registered name is nil" do
+      tree = %TreeNode{
+        pid: self(),
+        depth: 0,
+        children: [],
+        snapshot: %ProcessSnapshot{
+          memory: 1,
+          message_queue_len: 0,
+          reductions: 2,
+          registered_name: nil,
+          current_function: {Minga.Buffer, :content, 1},
+          parent_pid: nil,
+          child_type: :worker,
+          process_class: :worker
+        }
+      }
+
+      <<0x9A, payload_len::32, payload::binary-size(payload_len)>> =
+        ProtocolGUI.encode_gui_observatory(%{visible: true, tree: tree, samples: []})
+
+      assert payload_len == byte_size(payload)
+      <<0x01, 3::16, 1::8, 1::16, rest::binary>> = payload
+
+      <<0x02, node_section_len::16, node_section::binary-size(node_section_len), _::binary>> =
+        rest
+
+      <<pid_len::8, _pid::binary-size(pid_len), 0::8, name_len::16, name::binary-size(name_len),
+        _::binary>> = node_section
+
+      assert name == "Minga.Buffer.content/1"
+    end
+
+    test "falls back to unnamed when registered name and current function are nil" do
+      tree = %TreeNode{
+        pid: self(),
+        depth: 0,
+        children: [],
+        snapshot: %ProcessSnapshot{
+          memory: 1,
+          message_queue_len: 0,
+          reductions: 2,
+          registered_name: nil,
+          current_function: nil,
+          parent_pid: nil,
+          child_type: :worker,
+          process_class: :worker
+        }
+      }
+
+      <<0x9A, payload_len::32, payload::binary-size(payload_len)>> =
+        ProtocolGUI.encode_gui_observatory(%{visible: true, tree: tree, samples: []})
+
+      assert payload_len == byte_size(payload)
+      <<0x01, 3::16, 1::8, 1::16, rest::binary>> = payload
+
+      <<0x02, node_section_len::16, node_section::binary-size(node_section_len), _::binary>> =
+        rest
+
+      <<pid_len::8, _pid::binary-size(pid_len), 0::8, name_len::16, name::binary-size(name_len),
+        _::binary>> = node_section
+
+      assert name == "unnamed"
+      refute name == "nil"
+    end
+
+    test "chunks large node and sparkline streams into repeated sections below the 16-bit section limit" do
+      root_pid = :erlang.list_to_pid(~c"<0.100.0>")
+      child_count = 1_800
+
+      children =
+        Enum.map(1..child_count, fn index ->
+          child_pid = :erlang.list_to_pid(~c"<0.#{index + 100}.0>")
+
+          %TreeNode{
+            pid: child_pid,
+            depth: 1,
+            children: [],
+            snapshot: %ProcessSnapshot{
+              memory: index,
+              message_queue_len: rem(index, 20),
+              reductions: index * 2,
+              registered_name: nil,
+              current_function: {Minga.Buffer, :content, 1},
+              parent_pid: root_pid,
+              child_type: :worker,
+              process_class: :worker
+            }
+          }
+        end)
+
+      tree = %TreeNode{
+        pid: root_pid,
+        depth: 0,
+        children: children,
+        snapshot: %ProcessSnapshot{
+          memory: 1,
+          message_queue_len: 0,
+          reductions: 2,
+          registered_name: Minga.Supervisor,
+          current_function: nil,
+          parent_pid: nil,
+          child_type: :supervisor,
+          process_class: :supervisor
+        }
+      }
+
+      samples = List.duplicate(%{processes: %{}}, 30)
+
+      <<0x9A, payload_len::32, payload::binary-size(payload_len)>> =
+        ProtocolGUI.encode_gui_observatory(%{visible: true, tree: tree, samples: samples})
+
+      assert payload_len == byte_size(payload)
+      assert payload_len > 65_535
+
+      sections = observatory_sections(payload)
+      node_sections = sections_by_id(sections, 0x02)
+      sparkline_sections = sections_by_id(sections, 0x03)
+
+      assert length(node_sections) > 1
+      assert length(sparkline_sections) > 1
+      assert Enum.all?(node_sections, &(byte_size(&1) < 65_535))
+      assert Enum.all?(sparkline_sections, &(byte_size(&1) < 65_535))
+
+      node_stream = IO.iodata_to_binary(node_sections)
+      sparkline_stream = IO.iodata_to_binary(sparkline_sections)
+
+      assert byte_size(node_stream) > 65_535
+      assert byte_size(sparkline_stream) > 65_535
+      assert count_observatory_nodes(node_stream, 0) == child_count + 1
+      assert count_observatory_sparklines(sparkline_stream, 0) == child_count + 1
+    end
+  end
+
+  defp observatory_sections(payload), do: parse_observatory_sections(payload, [])
+
+  defp parse_observatory_sections("", acc), do: Enum.reverse(acc)
+
+  defp parse_observatory_sections(
+         <<id::8, len::16, section::binary-size(len), rest::binary>>,
+         acc
+       ) do
+    parse_observatory_sections(rest, [{id, section} | acc])
+  end
+
+  defp sections_by_id(sections, id) do
+    sections
+    |> Enum.filter(fn {section_id, _section} -> section_id == id end)
+    |> Enum.map(fn {_section_id, section} -> section end)
+  end
+
+  defp count_observatory_nodes("", count), do: count
+
+  defp count_observatory_nodes(
+         <<pid_len::8, _pid::binary-size(pid_len), parent_len::8,
+           _parent::binary-size(parent_len), name_len::16, _name::binary-size(name_len),
+           _class::8, _depth::8, _memory::32, _queue::16, _reductions::32, rest::binary>>,
+         count
+       ) do
+    count_observatory_nodes(rest, count + 1)
+  end
+
+  defp count_observatory_sparklines("", count), do: count
+
+  defp count_observatory_sparklines(
+         <<pid_len::8, _pid::binary-size(pid_len), sample_count::8,
+           _samples::binary-size(sample_count * 2), rest::binary>>,
+         count
+       ) do
+    count_observatory_sparklines(rest, count + 1)
   end
 
   defp status_sections(<<0x76, count::8, rest::binary>>) do

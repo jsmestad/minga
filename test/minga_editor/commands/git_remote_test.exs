@@ -18,6 +18,10 @@ defmodule MingaEditor.Commands.GitRemoteTest do
       assert :git_push in names
       assert :git_fetch in names
       assert :git_pull_and_retry in names
+      assert :git_stash_save in names
+      assert :git_stash_pop in names
+      assert :git_stash_list in names
+      assert :git_stash_drop in names
     end
   end
 

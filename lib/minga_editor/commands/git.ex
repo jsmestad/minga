@@ -20,6 +20,7 @@ defmodule MingaEditor.Commands.Git do
   alias Minga.Git.MergeConflict.Region
   alias Minga.Language
   alias MingaEditor.UI.Picker.GitChangedSource
+  alias MingaEditor.UI.Picker.GitStashSource
 
   @type state :: EditorState.t()
 
@@ -35,6 +36,10 @@ defmodule MingaEditor.Commands.Git do
     {:git_status_toggle, "Git status", false},
     {:git_changed_files, "Changed files", false},
     {:git_branch_picker, "Switch branch", false},
+    {:git_stash_save, "Stash changes", false},
+    {:git_stash_pop, "Pop stash", false},
+    {:git_stash_list, "List stashes", false},
+    {:git_stash_drop, "Drop stash", false},
     {:git_push, "Push", false},
     {:git_pull, "Pull", false},
     {:git_fetch, "Fetch", false},
@@ -87,6 +92,42 @@ defmodule MingaEditor.Commands.Git do
 
   def execute(state, :git_branch_picker) do
     PickerUI.open(state, MingaEditor.UI.Picker.GitBranchSource)
+  end
+
+  def execute(state, :git_stash_save) do
+    with_git_root(state, fn git_root ->
+      case Git.stash(git_root, include_untracked: true) do
+        :ok ->
+          refresh_repo(git_root)
+          EditorState.set_status(state, "Stashed changes")
+
+        {:error, reason} ->
+          stash_save_status(state, reason)
+      end
+    end)
+  end
+
+  def execute(state, :git_stash_pop) do
+    with_git_root(state, fn git_root ->
+      case Git.stash_pop(git_root) do
+        :ok ->
+          refresh_repo(git_root)
+          EditorState.set_status(state, "Popped stash")
+
+        {:error, reason} ->
+          EditorState.set_status(state, "Stash pop failed: #{reason}")
+      end
+    end)
+  end
+
+  def execute(state, :git_stash_list) do
+    PickerUI.open(state, GitStashSource)
+  end
+
+  def execute(state, :git_stash_drop) do
+    with_git_root(state, fn git_root ->
+      PickerUI.open(state, GitStashSource, %{git_root: git_root, action: :drop})
+    end)
   end
 
   def execute(state, :git_push) do
@@ -1121,11 +1162,31 @@ defmodule MingaEditor.Commands.Git do
     end
   end
 
+  @spec stash_save_status(state(), String.t()) :: state()
+  defp stash_save_status(state, "No changes to stash"),
+    do: EditorState.set_status(state, "No changes to stash")
+
+  defp stash_save_status(state, "No local changes to save"),
+    do: EditorState.set_status(state, "No changes to stash")
+
+  defp stash_save_status(state, reason),
+    do: EditorState.set_status(state, "Stash failed: #{reason}")
+
   @spec refresh_repo(String.t()) :: :ok
   defp refresh_repo(git_root) do
     case Git.lookup_repo(git_root) do
       nil -> :ok
       pid -> Git.refresh_repo(pid)
+    end
+  end
+
+  @spec with_git_root(state(), (String.t() -> state())) :: state()
+  defp with_git_root(state, fun) do
+    project_root = Minga.Project.resolve_root()
+
+    case Git.root_for(project_root) do
+      {:ok, git_root} -> fun.(git_root)
+      :not_git -> EditorState.set_status(state, "Not in a git repository")
     end
   end
 
@@ -1156,7 +1217,8 @@ defmodule MingaEditor.Commands.Git do
           behind: summary.behind,
           entries: entries,
           entry_base_path: Minga.Project.resolve_root(),
-          last_commit_message: summary.last_commit_message
+          last_commit_message: summary.last_commit_message,
+          stash_count: summary.stash_count
         }
 
         # Mutual exclusivity: close file tree when opening git status
@@ -1181,7 +1243,8 @@ defmodule MingaEditor.Commands.Git do
       behind: 0,
       entries: [],
       entry_base_path: project_root,
-      last_commit_message: ""
+      last_commit_message: "",
+      stash_count: 0
     }
 
     state = close_file_tree_if_open(state)

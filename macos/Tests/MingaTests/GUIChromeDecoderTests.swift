@@ -1097,6 +1097,109 @@ struct GUICursorlineDecoderTests {
     }
 }
 
+// MARK: - gui_observatory (semantic, length-prefixed)
+
+@Suite("GUI Observatory Decoder")
+struct GUIObservatoryDecoderTests {
+    @Test("Decode hidden gui_observatory payload")
+    func decodeHiddenPayload() throws {
+        var header = Data()
+        header.append(0)
+        appendU16(&header, 0)
+
+        let payload = buildSectionData(0x01, header)
+        var data = Data()
+        data.append(OP_GUI_OBSERVATORY)
+        appendU32(&data, UInt32(payload.count))
+        data.append(payload)
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiObservatory(let visible, let nodeCount, let decodedNodes) = cmd else {
+            Issue.record("Expected .guiObservatory"); return
+        }
+        #expect(visible == false)
+        #expect(nodeCount == 0)
+        #expect(decodedNodes.isEmpty)
+    }
+
+    @Test("Reject truncated gui_observatory 32-bit payload")
+    func rejectTruncatedPayload() throws {
+        var data = Data()
+        data.append(OP_GUI_OBSERVATORY)
+        appendU32(&data, 4)
+        data.append(0x01)
+        data.append(0x00)
+
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Decode semantic gui_observatory with tree order and sparklines")
+    func decodeWithNodesAndSparklines() throws {
+        var payload = Data()
+
+        var header = Data()
+        header.append(1)
+        appendU16(&header, 2)
+        payload.append(buildSectionData(0x01, header))
+        payload.append(buildSectionData(0x7F, Data([0xAA, 0xBB])))
+
+        var rootNode = Data()
+        appendNode(&rootNode, pid: "<0.1.0>", parentPid: "", name: "Elixir.Minga.Supervisor", processClass: 0, depth: 0, memory: 1024, messageQueueLen: 0, reductions: 10)
+        payload.append(buildSectionData(0x02, rootNode))
+
+        var childNode = Data()
+        appendNode(&childNode, pid: "<0.2.0>", parentPid: "<0.1.0>", name: "Elixir.Minga.Buffer.Process", processClass: 1, depth: 1, memory: 2048, messageQueueLen: 2, reductions: 20)
+        payload.append(buildSectionData(0x02, childNode))
+
+        var emptyRootSparkline = Data()
+        appendString8(&emptyRootSparkline, "<0.1.0>")
+        emptyRootSparkline.append(0)
+        payload.append(buildSectionData(0x03, emptyRootSparkline))
+
+        var childSparkline = Data()
+        appendString8(&childSparkline, "<0.2.0>")
+        childSparkline.append(2)
+        appendU16(&childSparkline, 0)
+        appendU16(&childSparkline, 32768)
+        payload.append(buildSectionData(0x03, childSparkline))
+
+        var data = Data()
+        data.append(OP_GUI_OBSERVATORY)
+        appendU32(&data, UInt32(payload.count))
+        data.append(payload)
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiObservatory(let visible, let nodeCount, let decodedNodes) = cmd else {
+            Issue.record("Expected .guiObservatory"); return
+        }
+        #expect(visible == true)
+        #expect(nodeCount == 2)
+        #expect(decodedNodes.map(\.pid) == ["<0.1.0>", "<0.2.0>"])
+        #expect(decodedNodes[1].parentPid == "<0.1.0>")
+        #expect(decodedNodes[1].processClass == 1)
+        #expect(decodedNodes[1].sparkline.count == 2)
+        #expect(decodedNodes[1].sparkline[0] == 0)
+        #expect(decodedNodes[1].sparkline[1] > 0.49)
+    }
+
+    private func appendNode(_ data: inout Data, pid: String, parentPid: String, name: String, processClass: UInt8, depth: UInt8, memory: UInt32, messageQueueLen: UInt16, reductions: UInt32) {
+        appendString8(&data, pid)
+        appendString8(&data, parentPid)
+        appendString16(&data, name)
+        data.append(processClass)
+        data.append(depth)
+        appendU32(&data, memory)
+        appendU16(&data, messageQueueLen)
+        appendU32(&data, reductions)
+    }
+}
+
 // MARK: - gui_file_tree (semantic, length-prefixed)
 
 @Suite("GUI File Tree Decoder")
@@ -2704,11 +2807,12 @@ struct GUIGitStatusDecoderTests {
         appendString16(&data, "Push failed: fetch first")
         appendString16(&data, "/repo")
         appendString16(&data, "feat: previous commit")
+        appendU16(&data, 3) // stash_count
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let entries, let toast, let entryBasePath, let lastCommitMessage) = cmd else {
+        guard case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let entries, let toast, let entryBasePath, let lastCommitMessage, let stashCount) = cmd else {
             Issue.record("Expected .guiGitStatus"); return
         }
 
@@ -2727,6 +2831,7 @@ struct GUIGitStatusDecoderTests {
         #expect(toast?.action == 1)
         #expect(entryBasePath == "/repo")
         #expect(lastCommitMessage == "feat: previous commit")
+        #expect(stashCount == 3)
     }
 
     @Test("Invalid repo state in gui_git_status throws malformed")

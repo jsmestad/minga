@@ -67,6 +67,20 @@ defmodule Minga.Git.Stub do
     :ok
   end
 
+  @doc "Sets the ahead/behind counts returned for `git_root`."
+  @spec set_ahead_behind(String.t(), non_neg_integer(), non_neg_integer()) :: :ok
+  def set_ahead_behind(git_root, ahead, behind) do
+    :ets.insert(@table, {{:ahead_behind, Path.expand(git_root)}, {ahead, behind}})
+    :ok
+  end
+
+  @doc "Sets the last commit message returned for `git_root`."
+  @spec set_last_commit_message(String.t(), String.t()) :: :ok
+  def set_last_commit_message(git_root, message) when is_binary(message) do
+    :ets.insert(@table, {{:last_commit_message, Path.expand(git_root)}, message})
+    :ok
+  end
+
   @doc "Sets the log entries returned for `git_root`."
   @spec set_log(String.t(), [Minga.Git.log_entry()]) :: :ok
   def set_log(git_root, entries) when is_list(entries) do
@@ -85,6 +99,16 @@ defmodule Minga.Git.Stub do
   @spec set_branch(String.t(), String.t()) :: :ok
   def set_branch(git_root, branch) when is_binary(branch) do
     :ets.insert(@table, {{:branch, Path.expand(git_root)}, branch})
+    :ok
+  end
+
+  @doc "Sets stash entries returned for `git_root`."
+  @spec set_stashes(String.t(), [Minga.Git.stash_entry()]) :: :ok
+  def set_stashes(git_root, entries) when is_list(entries) do
+    git_root = Path.expand(git_root)
+    stash_state = Enum.map(entries, &{&1, nil})
+    :ets.insert(@table, {{:stash_state, git_root}, stash_state})
+    :ets.insert(@table, {{:stashes, git_root}, entries})
     :ok
   end
 
@@ -111,6 +135,8 @@ defmodule Minga.Git.Stub do
     :ets.match_delete(@table, {{:branch, expanded}, :_})
     :ets.match_delete(@table, {{:branches, expanded}, :_})
     :ets.match_delete(@table, {{:branch_delete, expanded, :_, :_}, :_})
+    :ets.match_delete(@table, {{:stashes, expanded}, :_})
+    :ets.match_delete(@table, {{:stash_state, expanded}, :_})
     :ets.match_delete(@table, {{:ahead_behind, expanded}, :_})
     :ets.match_delete(@table, {{:last_commit_message, expanded}, :_})
     :ok
@@ -269,6 +295,128 @@ defmodule Minga.Git.Stub do
   end
 
   @impl true
+  @spec stash(String.t(), keyword()) :: :ok | {:error, String.t()}
+  def stash(git_root, _opts \\ []) do
+    git_root = Path.expand(git_root)
+
+    case status(git_root) do
+      {:ok, []} ->
+        {:error, "No changes to stash"}
+
+      {:ok, entries} ->
+        stash_state = load_stash_state(git_root)
+        branch = branch_name(git_root)
+        entry = new_stash_entry(branch)
+
+        put_stash_state(git_root, reindex_stash_state([{entry, entries} | stash_state]))
+        set_status(git_root, [])
+        :ok
+    end
+  end
+
+  @impl true
+  @spec stash_pop(String.t()) :: :ok | {:error, String.t()}
+  def stash_pop(git_root) do
+    git_root = Path.expand(git_root)
+
+    case load_stash_state(git_root) do
+      [] ->
+        {:error, "No stash entries to pop"}
+
+      [{_latest_entry, snapshot} | rest] ->
+        maybe_restore_status(git_root, snapshot)
+        put_stash_state(git_root, reindex_stash_state(rest))
+        :ok
+    end
+  end
+
+  @impl true
+  @spec stash_list(String.t()) :: {:ok, [Minga.Git.stash_entry()]}
+  def stash_list(git_root) do
+    {:ok, Enum.map(load_stash_state(Path.expand(git_root)), fn {entry, _snapshot} -> entry end)}
+  end
+
+  @impl true
+  @spec stash_drop(String.t(), non_neg_integer()) :: :ok | {:error, String.t()}
+  def stash_drop(git_root, index) when is_integer(index) and index >= 0 do
+    git_root = Path.expand(git_root)
+
+    case Enum.split(load_stash_state(git_root), index) do
+      {prefix, [{_dropped_entry, _snapshot} | suffix]} ->
+        put_stash_state(git_root, reindex_stash_state(prefix ++ suffix))
+        :ok
+
+      _ ->
+        {:error, "No stash entry at stash@{#{index}}"}
+    end
+  end
+
+  @spec load_stash_state(String.t()) :: [
+          {Minga.Git.stash_entry(), [Minga.Git.status_entry()] | nil}
+        ]
+  defp load_stash_state(git_root) do
+    case :ets.lookup(@table, {:stash_state, git_root}) do
+      [{_, entries}] -> entries
+      [] -> load_legacy_stashes(git_root)
+    end
+  end
+
+  @spec load_legacy_stashes(String.t()) :: [{Minga.Git.stash_entry(), nil}]
+  defp load_legacy_stashes(git_root) do
+    case :ets.lookup(@table, {:stashes, git_root}) do
+      [{_, entries}] -> Enum.map(entries, &{&1, nil})
+      [] -> []
+    end
+  end
+
+  @spec put_stash_state(String.t(), [{Minga.Git.stash_entry(), [Minga.Git.status_entry()] | nil}]) ::
+          true
+  defp put_stash_state(git_root, entries) do
+    :ets.insert(@table, {{:stash_state, git_root}, entries})
+
+    :ets.insert(
+      @table,
+      {{:stashes, git_root}, Enum.map(entries, fn {entry, _snapshot} -> entry end)}
+    )
+  end
+
+  @spec reindex_stash_state([{Minga.Git.stash_entry(), [Minga.Git.status_entry()] | nil}]) :: [
+          {Minga.Git.stash_entry(), [Minga.Git.status_entry()] | nil}
+        ]
+  defp reindex_stash_state(entries) do
+    entries
+    |> Enum.with_index()
+    |> Enum.map(fn {{entry, snapshot}, index} ->
+      {%{entry | index: index, ref: "stash@{#{index}}"}, snapshot}
+    end)
+  end
+
+  @spec maybe_restore_status(String.t(), [Minga.Git.status_entry()] | nil) :: :ok
+  defp maybe_restore_status(_git_root, nil), do: :ok
+
+  defp maybe_restore_status(git_root, snapshot) do
+    set_status(git_root, snapshot)
+  end
+
+  @spec new_stash_entry(String.t()) :: Minga.Git.stash_entry()
+  defp new_stash_entry(branch) do
+    %Minga.Git.StashEntry{
+      index: 0,
+      ref: "stash@{0}",
+      date: "now",
+      message: "WIP on #{branch}"
+    }
+  end
+
+  @spec branch_name(String.t()) :: String.t()
+  defp branch_name(git_root) do
+    case current_branch(git_root) do
+      {:ok, branch} when is_binary(branch) -> branch
+      _ -> "main"
+    end
+  end
+
+  @impl true
   @spec push(String.t(), keyword()) :: :ok
   def push(_git_root, _opts \\ []), do: :ok
 
@@ -295,20 +443,6 @@ defmodule Minga.Git.Stub do
   def set_branch_delete_result(git_root, name, force, result)
       when is_binary(name) and is_boolean(force) do
     :ets.insert(@table, {{:branch_delete, Path.expand(git_root), name, force}, result})
-    :ok
-  end
-
-  @doc "Sets the ahead/behind counts for a git root."
-  @spec set_ahead_behind(String.t(), non_neg_integer(), non_neg_integer()) :: :ok
-  def set_ahead_behind(git_root, ahead, behind) do
-    :ets.insert(@table, {{:ahead_behind, Path.expand(git_root)}, {ahead, behind}})
-    :ok
-  end
-
-  @doc "Sets the last commit message returned for `git_root`."
-  @spec set_last_commit_message(String.t(), String.t()) :: :ok
-  def set_last_commit_message(git_root, message) when is_binary(message) do
-    :ets.insert(@table, {{:last_commit_message, Path.expand(git_root)}, message})
     :ok
   end
 

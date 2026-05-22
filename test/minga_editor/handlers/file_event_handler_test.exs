@@ -50,7 +50,8 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
            branch: "develop",
            ahead: 1,
            behind: 0,
-           last_commit_message: "feat: previous subject"
+           last_commit_message: "feat: previous subject",
+           stash_count: 2
          }}
 
       {new_state, effects} = FileEventHandler.handle(state, event)
@@ -59,6 +60,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       assert panel.branch == "develop"
       assert panel.ahead == 1
       assert panel.last_commit_message == "feat: previous subject"
+      assert panel.stash_count == 2
       assert {:render, 16} in effects
     end
 

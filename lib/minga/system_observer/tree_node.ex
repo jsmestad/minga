@@ -32,6 +32,14 @@ defmodule Minga.SystemObserver.TreeNode do
     end
   end
 
+  @doc "Returns the tree as a pre-order list of nodes."
+  @spec flatten(t() | nil) :: [t()]
+  def flatten(nil), do: []
+
+  def flatten(%__MODULE__{children: children} = node) do
+    [node | Enum.flat_map(children, &flatten/1)]
+  end
+
   @spec find_root(%{pid() => ProcessSnapshot.t()}) :: {pid(), ProcessSnapshot.t()} | nil
   defp find_root(snapshots) do
     Enum.find(snapshots, fn {_pid, snapshot} -> snapshot.parent_pid == nil end)

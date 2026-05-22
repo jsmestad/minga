@@ -54,6 +54,7 @@ defmodule MingaEditor.Renderer.Caches do
     last_gui_signature_help_fp: nil,
     last_gui_float_popup_fp: nil,
     last_gui_notifications_fp: nil,
+    last_gui_observatory_fp: nil,
     last_gui_bottom_panel_fp: nil,
     last_gui_board_fp: nil,
     last_gui_agent_context_fp: nil,
@@ -81,7 +82,10 @@ defmodule MingaEditor.Renderer.Caches do
             | {:file_tree_state, String.t(), non_neg_integer(), term()}
             | {:no_tree, String.t()}
             | nil,
-          last_gui_git_status_fp: integer() | {:no_git, boolean()} | nil,
+          last_gui_git_status_fp:
+            integer()
+            | {:no_git, boolean(), MingaEditor.Frontend.Protocol.GUI.git_toast() | nil}
+            | nil,
           last_gui_which_key_fp: integer() | nil,
           last_gui_completion_fp: integer() | nil,
           last_gui_breadcrumb_fp: integer() | nil,
@@ -92,6 +96,7 @@ defmodule MingaEditor.Renderer.Caches do
           last_gui_signature_help_fp: integer() | nil,
           last_gui_float_popup_fp: integer() | nil,
           last_gui_notifications_fp: integer() | nil,
+          last_gui_observatory_fp: integer() | :hidden | nil,
           last_gui_bottom_panel_fp: integer() | nil,
           last_gui_board_fp: integer() | :dismissed | nil,
           last_gui_agent_context_fp: term(),

@@ -105,7 +105,9 @@ defmodule Minga.SystemObserverTest do
       %{name: name}
     end
 
-    test "collected snapshots include registered process names", %{name: name} do
+    test "collected snapshots include registered process names and hierarchy metadata", %{
+      name: name
+    } do
       :ok = SystemObserver.subscribe(name)
       poll_once(name)
 
@@ -114,7 +116,34 @@ defmodule Minga.SystemObserverTest do
       named_processes =
         Enum.filter(snapshot.processes, fn {_pid, info} -> info.registered_name != nil end)
 
+      child_processes =
+        Enum.filter(snapshot.processes, fn {_pid, info} -> info.parent_pid != nil end)
+
       assert named_processes != []
+      assert child_processes != []
+      assert Enum.any?(snapshot.processes, fn {_pid, info} -> info.child_type == :supervisor end)
+      assert Enum.all?(snapshot.processes, fn {_pid, info} -> info.process_class != nil end)
+    end
+  end
+
+  describe "classify_process/2" do
+    setup do
+      name = unique_name()
+      start_supervised!({SystemObserver, name: name})
+      %{name: name}
+    end
+
+    test "classifies supervisors from child type" do
+      assert SystemObserver.classify_process(Minga.Buffer.Process, :supervisor) == :supervisor
+    end
+
+    test "classifies known process families by registered name" do
+      assert SystemObserver.classify_process(Minga.Buffer.Process, :worker) == :buffer
+      assert SystemObserver.classify_process(MingaAgent.Session, :worker) == :agent_session
+      assert SystemObserver.classify_process(Minga.LSP.Supervisor, :worker) == :lsp
+      assert SystemObserver.classify_process(Minga.Config.Options, :worker) == :service
+      assert SystemObserver.classify_process(Some.Other.Worker, :worker) == :worker
+      assert SystemObserver.classify_process(nil, :worker) == :worker
     end
 
     test "collected snapshots include hierarchy fields for child processes", %{name: name} do

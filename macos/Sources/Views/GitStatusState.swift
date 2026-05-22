@@ -85,6 +85,7 @@ final class GitStatusState {
     var ahead: UInt16 = 0
     var behind: UInt16 = 0
     var entryBasePath: String = ""
+    var stashCount: UInt16 = 0
 
     // Toast notification (shown after remote operations)
     var toastMessage: String? = nil
@@ -138,7 +139,7 @@ final class GitStatusState {
     }
 
     /// Update from a decoded gui_git_status protocol message.
-    func update(repoState: GitRepoState, branchName: String, ahead: UInt16, behind: UInt16, syncing: Bool, entries: [GitStatusEntry], toast: (String, ToastLevel, ToastAction)?, entryBasePath: String, lastCommitMessage: String) {
+    func update(repoState: GitRepoState, branchName: String, ahead: UInt16, behind: UInt16, syncing: Bool, entries: [GitStatusEntry], toast: (String, ToastLevel, ToastAction)?, entryBasePath: String, lastCommitMessage: String, stashCount: UInt16) {
         self.visible = true
         self.repoState = repoState
         self.branchName = branchName
@@ -147,6 +148,7 @@ final class GitStatusState {
         self.syncing = syncing
         self.entryBasePath = entryBasePath
         self.previousCommitMessage = lastCommitMessage
+        self.stashCount = stashCount
 
         // Partition entries by section in a single pass.
         var staged: [GitStatusEntry] = []
@@ -182,6 +184,7 @@ final class GitStatusState {
         visible = false
         self.syncing = syncing
         entryBasePath = ""
+        stashCount = 0
         applyToast(toast)
     }
 
