@@ -382,7 +382,12 @@ defmodule Minga.Git.System do
         else: args
 
     case System.cmd("git", args, cd: git_root, stderr_to_stdout: true) do
-      {_, 0} -> :ok
+      {output, 0} ->
+        case String.trim(output) do
+          "No local changes to save" -> {:error, "No changes to stash"}
+          _ -> :ok
+        end
+
       {output, _} -> {:error, "git stash failed: #{String.trim(output)}"}
     end
   rescue

@@ -71,10 +71,44 @@ defmodule Minga.GitTest do
       assert {:ok, [^entry]} = Git.stash_list(dir)
     end
 
-    test "stash operations return :ok", %{root: dir} do
+    test "stash returns :ok when there are changes to save", %{root: dir} do
+      GitStub.set_status(dir, [%Git.StatusEntry{path: "a.ex", status: :modified, staged: false}])
+
       assert :ok = Git.stash(dir, include_untracked: true)
+    end
+
+    test "stash_pop returns :ok when stashes exist", %{root: dir} do
+      GitStub.set_stashes(dir, [
+        %Git.StashEntry{index: 0, ref: "stash@{0}", message: "WIP", date: "2 hours ago"}
+      ])
+
       assert :ok = Git.stash_pop(dir)
+    end
+
+    test "stash_drop returns :ok when the requested index exists", %{root: dir} do
+      GitStub.set_stashes(dir, [
+        %Git.StashEntry{index: 0, ref: "stash@{0}", message: "WIP", date: "2 hours ago"}
+      ])
+
       assert :ok = Git.stash_drop(dir, 0)
+    end
+
+    test "stashing on top of an existing stash keeps the newest entry at stash@{0}", %{root: dir} do
+      GitStub.set_status(dir, [%Git.StatusEntry{path: "a.ex", status: :modified, staged: false}])
+      GitStub.set_stashes(dir, [
+        %Git.StashEntry{index: 0, ref: "stash@{0}", message: "older", date: "2 hours ago"}
+      ])
+
+      assert :ok = Git.stash(dir, include_untracked: true)
+      assert {:ok, [%Git.StashEntry{index: 0, ref: "stash@{0}", message: "WIP on main"},
+                    %Git.StashEntry{index: 1, ref: "stash@{1}", message: "older"}]} =
+               Git.stash_list(dir)
+
+      assert :ok = Git.stash_drop(dir, 0)
+      assert {:ok, [remaining]} = Git.stash_list(dir)
+      assert remaining.index == 0
+      assert remaining.ref == "stash@{0}"
+      assert remaining.message == "older"
     end
 
     test "stage returns :ok", %{root: dir} do

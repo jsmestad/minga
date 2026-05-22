@@ -47,6 +47,13 @@ defmodule MingaEditor.UI.Picker.GitStashSourceTest do
     end
 
     test "drop mode drops the selected stash", %{tmp_dir: dir} do
+      GitStub.set_stashes(dir, [
+        %StashEntry{index: 0, ref: "stash@{0}", date: "2 minutes ago", message: "WIP on main"},
+        %StashEntry{index: 1, ref: "stash@{1}", date: "1 hour ago", message: "WIP on feature"}
+      ])
+
+      on_exit(fn -> GitStub.clear(dir) end)
+
       state = test_state()
       item = %Item{id: {:stash, dir, 1, :drop}, label: "WIP on feature"}
 
@@ -55,6 +62,12 @@ defmodule MingaEditor.UI.Picker.GitStashSourceTest do
     end
 
     test "drop action is available from list mode", %{tmp_dir: dir} do
+      GitStub.set_stashes(dir, [
+        %StashEntry{index: 0, ref: "stash@{0}", date: "2 minutes ago", message: "WIP on main"}
+      ])
+
+      on_exit(fn -> GitStub.clear(dir) end)
+
       item = %Item{id: {:stash, dir, 0, :list}, label: "WIP on main"}
 
       assert GitStashSource.actions(item) == [{"Drop", :drop}]

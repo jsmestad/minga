@@ -102,7 +102,7 @@ defmodule MingaEditor.Commands.Git do
           EditorState.set_status(state, "Stashed changes")
 
         {:error, reason} ->
-          EditorState.set_status(state, "Stash failed: #{reason}")
+          stash_save_status(state, reason)
       end
     end)
   end
@@ -1161,6 +1161,11 @@ defmodule MingaEditor.Commands.Git do
         EditorState.set_status(state, "Not in a git repository")
     end
   end
+
+  @spec stash_save_status(state(), String.t()) :: state()
+  defp stash_save_status(state, "No changes to stash"), do: EditorState.set_status(state, "No changes to stash")
+  defp stash_save_status(state, "No local changes to save"), do: EditorState.set_status(state, "No changes to stash")
+  defp stash_save_status(state, reason), do: EditorState.set_status(state, "Stash failed: #{reason}")
 
   @spec refresh_repo(String.t()) :: :ok
   defp refresh_repo(git_root) do

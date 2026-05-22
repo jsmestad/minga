@@ -152,6 +152,18 @@ defmodule Minga.Git.BackendOperationsTest do
     end
 
     @tag :tmp_dir
+    test "returns a no-op error when there are no changes to stash", %{tmp_dir: dir} do
+      init_git_repo(dir)
+      file = Path.join(dir, "file.txt")
+      File.write!(file, "original")
+      git_cmd(dir, ["add", "."])
+      git_cmd(dir, ["commit", "-m", "init"])
+
+      assert {:error, "No changes to stash"} = Minga.Git.System.stash(dir, include_untracked: true)
+      assert {:ok, []} = Minga.Git.System.stash_list(dir)
+    end
+
+    @tag :tmp_dir
     test "drops a stash by index", %{tmp_dir: dir} do
       init_git_repo(dir)
       file = Path.join(dir, "file.txt")
