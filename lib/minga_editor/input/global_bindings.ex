@@ -13,24 +13,16 @@ defmodule MingaEditor.Input.GlobalBindings do
 
   import Bitwise
 
-  alias Minga.Buffer
-
   @ctrl MingaEditor.Input.mod_ctrl()
 
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
 
-  # Ctrl+S: save current buffer
+  # Ctrl+S: save current buffer through the command system.
   def handle_key(state, ?s, mods) when band(mods, @ctrl) != 0 do
-    if state.workspace.buffers.active do
-      case Buffer.save(state.workspace.buffers.active) do
-        :ok -> :ok
-        {:error, reason} -> Minga.Log.error(:editor, "Save failed: #{inspect(reason)}")
-      end
-    end
-
-    {:handled, state}
+    new_state = MingaEditor.dispatch_command(state, :save)
+    {:handled, new_state}
   end
 
   # Ctrl+Q: quit behavior depends on editing model.

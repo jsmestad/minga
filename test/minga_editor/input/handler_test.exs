@@ -76,10 +76,12 @@ defmodule MingaEditor.Input.HandlerTest do
   end
 
   describe "GlobalBindings" do
-    test "handles Ctrl+S" do
+    test "handles Ctrl+S through save command status" do
       state = base_state()
       ctrl = Protocol.mod_ctrl()
-      assert {:handled, _} = GlobalBindings.handle_key(state, ?s, ctrl)
+
+      assert {:handled, new_state} = GlobalBindings.handle_key(state, ?s, ctrl)
+      assert EditorState.status_msg(new_state) == "No file name — use :w <filename>"
     end
 
     test "passes through non-global keys" do
