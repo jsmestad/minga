@@ -27,15 +27,19 @@ defmodule Minga.Buffer.EditSourceTest do
     end
 
     test "agent/2 rejects non-pid session_id" do
-      assert_raise FunctionClauseError, fn -> EditSource.agent("not-a-pid", "call") end
+      assert_raise FunctionClauseError, fn ->
+        EditSource.agent(dynamic_term("not-a-pid"), "call")
+      end
     end
 
     test "agent/2 rejects non-binary tool_call_id" do
-      assert_raise FunctionClauseError, fn -> EditSource.agent(self(), :not_binary) end
+      assert_raise FunctionClauseError, fn ->
+        EditSource.agent(self(), dynamic_term(:not_binary))
+      end
     end
 
     test "lsp/1 rejects non-atom server_name" do
-      assert_raise FunctionClauseError, fn -> EditSource.lsp("elixir_ls") end
+      assert_raise FunctionClauseError, fn -> EditSource.lsp(dynamic_term("elixir_ls")) end
     end
   end
 
@@ -80,4 +84,7 @@ defmodule Minga.Buffer.EditSourceTest do
       assert EditSource.from_undo_source(:recovery) == EditSource.unknown()
     end
   end
+
+  @spec dynamic_term(term()) :: term()
+  defp dynamic_term(value), do: value
 end

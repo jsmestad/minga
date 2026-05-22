@@ -53,6 +53,7 @@ defmodule Minga.Distribution.ConnectionManagerTest do
     {:ok, pid} = start_connection_manager(servers, registry)
 
     send(pid, :connect_all)
+    :sys.get_state(pid)
 
     assert_receive {:minga_event, :node_connected,
                     %NodeConnectedEvent{server_name: "local", node: connected_node}}
@@ -71,9 +72,11 @@ defmodule Minga.Distribution.ConnectionManagerTest do
     {:ok, pid} = start_connection_manager(servers, registry)
 
     send(pid, :connect_all)
+    :sys.get_state(pid)
     assert_receive {:minga_event, :node_connected, %NodeConnectedEvent{}}
 
     send(pid, {:nodedown, node, :test_down})
+    :sys.get_state(pid)
 
     assert_receive {:minga_event, :node_disconnected,
                     %NodeDisconnectedEvent{

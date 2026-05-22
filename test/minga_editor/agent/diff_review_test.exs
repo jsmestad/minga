@@ -17,7 +17,7 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       review = DiffReview.new("test.ex", before, after_)
       assert %DiffReview{} = review
       assert review.path == "test.ex"
-      assert review.hunks != []
+      assert [_ | _] = review.hunks
       assert review.current_hunk_index == 0
       assert review.resolutions == %{}
     end
@@ -28,7 +28,7 @@ defmodule MingaEditor.Agent.DiffReviewTest do
 
       review = DiffReview.new("test.ex", before, after_)
       assert %DiffReview{} = review
-      assert review.hunks != []
+      assert [_ | _] = review.hunks
     end
 
     test "builds a review with hunks for modified lines" do
@@ -37,7 +37,7 @@ defmodule MingaEditor.Agent.DiffReviewTest do
 
       review = DiffReview.new("test.ex", before, after_)
       assert %DiffReview{} = review
-      assert review.hunks != []
+      assert [_ | _] = review.hunks
     end
 
     test "stores before_lines and after_lines" do
@@ -219,21 +219,21 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       review = simple_review()
       lines = DiffReview.to_display_lines(review)
       headers = Enum.filter(lines, fn {_, type, _} -> type == :hunk_header end)
-      assert headers != []
+      assert [_ | _] = headers
     end
 
     test "includes added lines for additions" do
       review = DiffReview.new("f.ex", "a\n", "a\nb\n")
       lines = DiffReview.to_display_lines(review)
       added = Enum.filter(lines, fn {_, type, _} -> type == :added end)
-      assert added != []
+      assert [_ | _] = added
     end
 
     test "includes removed lines for deletions" do
       review = DiffReview.new("f.ex", "a\nb\n", "a\n")
       lines = DiffReview.to_display_lines(review)
       removed = Enum.filter(lines, fn {_, type, _} -> type == :removed end)
-      assert removed != []
+      assert [_ | _] = removed
     end
 
     test "includes both removed and added for modifications" do
@@ -241,8 +241,8 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       lines = DiffReview.to_display_lines(review)
       added = Enum.filter(lines, fn {_, type, _} -> type == :added end)
       removed = Enum.filter(lines, fn {_, type, _} -> type == :removed end)
-      assert added != []
-      assert removed != []
+      assert [_ | _] = added
+      assert [_ | _] = removed
     end
 
     test "hunk headers carry hunk index" do

@@ -1433,14 +1433,14 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       messages_payload = gui_agent_chat_section!(sections, 0x06)
 
       assert <<1::16, 0::32, 0x09::8, 0::8, name_len::16, rest::binary>> = messages_payload
-      assert <<name::binary-size(name_len), summary_len::16, rest::binary>> = rest
-      assert <<summary::binary-size(summary_len), id_len::16, rest::binary>> = rest
+      assert <<name::binary-size(^name_len), summary_len::16, rest::binary>> = rest
+      assert <<summary::binary-size(^summary_len), id_len::16, rest::binary>> = rest
 
-      assert <<tool_call_id::binary-size(id_len), 3::8, 2::16, line1_len::16, rest::binary>> =
+      assert <<tool_call_id::binary-size(^id_len), 3::8, 2::16, line1_len::16, rest::binary>> =
                rest
 
-      assert <<line1::binary-size(line1_len), line2_len::16, rest::binary>> = rest
-      assert <<line2::binary-size(line2_len)>> = rest
+      assert <<line1::binary-size(^line1_len), line2_len::16, rest::binary>> = rest
+      assert <<line2::binary-size(^line2_len)>> = rest
       assert name == "write_file"
       assert summary == "demo.ex"
       assert tool_call_id == "tc_1"

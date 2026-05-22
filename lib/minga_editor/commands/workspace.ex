@@ -428,12 +428,10 @@ defmodule MingaEditor.Commands.Workspace do
 
   defp workspace_closure_requires_review?(nil), do: false
 
-  @spec workspace_close_confirmation_copy(WorkspaceModel.t() | nil) :: String.t()
+  @spec workspace_close_confirmation_copy(WorkspaceModel.t()) :: String.t()
   defp workspace_close_confirmation_copy(%WorkspaceModel{review: review}) do
     "Workspace has #{WorkspaceReview.draft_count(review)} draft file(s) and #{WorkspaceReview.conflict_count(review)} conflict file(s). Actions: Keep workspace, Review drafts, Discard drafts and close. Dirty buffers are separate and are not discarded here."
   end
-
-  defp workspace_close_confirmation_copy(nil), do: "Workspace has drafts."
 
   @spec update_active_workspace_review(
           state(),
