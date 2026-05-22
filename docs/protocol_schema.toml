@@ -847,3 +847,19 @@ value = 0x47
 [[gui_actions]]
 name = "tab_reorder"
 value = 0x48
+
+[[gui_actions]]
+name = "tab_pin"
+value = 0x49
+
+[[gui_actions]]
+name = "tab_unpin"
+value = 0x4A
+
+[[gui_actions]]
+name = "tab_move_left"
+value = 0x4B
+
+[[gui_actions]]
+name = "tab_move_right"
+value = 0x4C

@@ -108,6 +108,29 @@ defmodule MingaEditor.State.TabBarTest do
       assert Enum.map(TabBar.visible_file_tabs(moved_right), & &1.label) == ["a", "b", "c"]
     end
 
+    test "moves a tab by id without changing the active tab" do
+      tb = tab_bar(file: "a", file: "b", file: "c") |> TabBar.switch_to(1)
+
+      moved_left = TabBar.move_tab_left(tb, 3)
+
+      assert moved_left.active_id == 1
+      assert Enum.map(TabBar.visible_file_tabs(moved_left), & &1.label) == ["a", "c", "b"]
+
+      moved_right = TabBar.move_tab_right(moved_left, 3)
+
+      assert moved_right.active_id == 1
+      assert Enum.map(TabBar.visible_file_tabs(moved_right), & &1.label) == ["a", "b", "c"]
+    end
+
+    test "moving a tab by id stays inside its workspace and pinned bucket" do
+      {tb, group1, group2} = two_workspaces()
+      tb = TabBar.pin_tab(tb, 3)
+
+      assert TabBar.move_tab_left(tb, 3) == tb
+      assert Enum.map(TabBar.visible_file_tabs(tb, group1.id), & &1.label) == ["b.ex"]
+      assert Enum.map(TabBar.visible_file_tabs(tb, group2.id), & &1.label) == ["c.ex"]
+    end
+
     test "reorders a dragged tab by visible index" do
       tb = tab_bar(file: "a", file: "b", file: "c")
 

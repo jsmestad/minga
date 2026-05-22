@@ -974,6 +974,19 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       assert {:ok, {:gui_action, {:tab_reorder, 42, 3}}} = Protocol.decode_event(payload)
     end
 
+    test "tab id-scoped context actions" do
+      assert {:ok, {:gui_action, {:tab_pin, 42}}} = Protocol.decode_event(<<0x07, 0x49, 42::32>>)
+
+      assert {:ok, {:gui_action, {:tab_unpin, 42}}} =
+               Protocol.decode_event(<<0x07, 0x4A, 42::32>>)
+
+      assert {:ok, {:gui_action, {:tab_move_left, 42}}} =
+               Protocol.decode_event(<<0x07, 0x4B, 42::32>>)
+
+      assert {:ok, {:gui_action, {:tab_move_right, 42}}} =
+               Protocol.decode_event(<<0x07, 0x4C, 42::32>>)
+    end
+
     test "system_will_sleep with no payload" do
       payload = <<0x07, 0x34>>
       assert {:ok, {:gui_action, :system_will_sleep}} = Protocol.decode_event(payload)

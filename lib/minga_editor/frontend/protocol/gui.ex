@@ -90,6 +90,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x44       | config_query            |
   | 0x47       | power_thermal_state     |
   | 0x48       | tab_reorder             |
+  | 0x49       | tab_pin                 |
+  | 0x4A       | tab_unpin               |
+  | 0x4B       | tab_move_left           |
+  | 0x4C       | tab_move_right          |
   | 0x34       | system_will_sleep       |
   | 0x35       | system_did_wake         |
 
@@ -220,6 +224,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_tab_copy_path Opcodes.gui_action_tab_copy_path()
   @gui_action_hover_open_action Opcodes.gui_action_hover_open_action()
   @gui_action_tab_reorder Opcodes.gui_action_tab_reorder()
+  @gui_action_tab_pin Opcodes.gui_action_tab_pin()
+  @gui_action_tab_unpin Opcodes.gui_action_tab_unpin()
+  @gui_action_tab_move_left Opcodes.gui_action_tab_move_left()
+  @gui_action_tab_move_right Opcodes.gui_action_tab_move_right()
   @gui_action_file_tree_drop Opcodes.gui_action_file_tree_drop()
   @gui_action_fold_toggle_at_line Opcodes.gui_action_fold_toggle_at_line()
   @gui_action_git_open_diff Opcodes.gui_action_git_open_diff()
@@ -368,6 +376,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:file_tree_open_in_split, index :: non_neg_integer()}
           | {:tab_copy_path, id :: pos_integer()}
           | {:tab_reorder, id :: pos_integer(), new_index :: non_neg_integer()}
+          | {:tab_pin, id :: pos_integer()}
+          | {:tab_unpin, id :: pos_integer()}
+          | {:tab_move_left, id :: pos_integer()}
+          | {:tab_move_right, id :: pos_integer()}
           | :hover_open_action
           | :system_will_sleep
           | :system_did_wake
@@ -3003,6 +3015,11 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_tab_reorder, <<id::32, new_index::16>>),
     do: {:ok, {:tab_reorder, id, new_index}}
+
+  def decode_gui_action(@gui_action_tab_pin, <<id::32>>), do: {:ok, {:tab_pin, id}}
+  def decode_gui_action(@gui_action_tab_unpin, <<id::32>>), do: {:ok, {:tab_unpin, id}}
+  def decode_gui_action(@gui_action_tab_move_left, <<id::32>>), do: {:ok, {:tab_move_left, id}}
+  def decode_gui_action(@gui_action_tab_move_right, <<id::32>>), do: {:ok, {:tab_move_right, id}}
 
   def decode_gui_action(@gui_action_hover_open_action, <<>>), do: {:ok, :hover_open_action}
 

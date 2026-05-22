@@ -9,6 +9,15 @@
 /// back to a compact capsule showing the tab count.
 
 import SwiftUI
+import UniformTypeIdentifiers
+
+/// Context-menu actions that target a specific tab without selecting it first.
+enum TabContextMenuAction: Equatable {
+    case pin
+    case unpin
+    case moveLeft
+    case moveRight
+}
 
 /// The tab bar strip rendered above the editor area.
 struct TabBarView: View {
@@ -159,6 +168,60 @@ struct TabBarView: View {
         }
 
         return tabBarState.tabs
+    }
+
+    func performTabContextMenuAction(_ action: TabContextMenuAction, for tab: TabEntry) {
+        switch action {
+        case .pin:
+            encoder?.sendTabPin(id: tab.id)
+        case .unpin:
+            encoder?.sendTabUnpin(id: tab.id)
+        case .moveLeft:
+            encoder?.sendTabMoveLeft(id: tab.id)
+        case .moveRight:
+            encoder?.sendTabMoveRight(id: tab.id)
+        }
+    }
+
+    func canMoveTabLeft(_ tab: TabEntry) -> Bool {
+        guard let index = movableTabIndex(tab) else { return false }
+        return index > 0
+    }
+
+    func canMoveTabRight(_ tab: TabEntry) -> Bool {
+        guard let index = movableTabIndex(tab) else { return false }
+        return index < movableTabs(for: tab).count - 1
+    }
+
+    func handleTabDrop(droppedTabs: [TabDragPayload], target tab: TabEntry, visibleIndex: Int) -> Bool {
+        guard let reorder = tabDropReorder(droppedTabs: droppedTabs, target: tab, visibleIndex: visibleIndex) else {
+            return false
+        }
+        encoder?.sendTabReorder(id: reorder.id, newIndex: reorder.newIndex)
+        return true
+    }
+
+    func tabDropReorder(droppedTabs: [TabDragPayload], target tab: TabEntry, visibleIndex: Int) -> (id: UInt32, newIndex: UInt16)? {
+        guard let draggedId = droppedTabs.first?.id,
+              draggedId != tab.id else {
+            return nil
+        }
+        guard let draggedTab = displayTabs.first(where: { $0.id == draggedId }),
+              draggedTab.groupId == tab.groupId,
+              draggedTab.isPinned == tab.isPinned else {
+            return nil
+        }
+        return (draggedId, UInt16(visibleIndex))
+    }
+
+    private func movableTabIndex(_ tab: TabEntry) -> Int? {
+        movableTabs(for: tab).firstIndex { $0.id == tab.id }
+    }
+
+    private func movableTabs(for tab: TabEntry) -> [TabEntry] {
+        displayTabs.filter { candidate in
+            candidate.groupId == tab.groupId && candidate.isPinned == tab.isPinned
+        }
     }
 
     // MARK: - Tab strip layouts
@@ -506,22 +569,11 @@ struct TabBarView: View {
                     tabDragInProgress = false
                 }
         )
-        .draggable(tabDragPayload(tab)) {
+        .draggable(TabDragPayload(id: tab.id)) {
             tabDragPreview(tab)
         }
-        .dropDestination(for: String.self) { droppedIds, _location in
-            guard let first = droppedIds.first,
-                  let draggedId = tabDragId(from: first),
-                  draggedId != tab.id else {
-                return false
-            }
-            guard let draggedTab = displayTabs.first(where: { $0.id == draggedId }),
-                  draggedTab.groupId == tab.groupId,
-                  draggedTab.isPinned == tab.isPinned else {
-                return false
-            }
-            encoder?.sendTabReorder(id: draggedId, newIndex: UInt16(visibleIndex))
-            return true
+        .dropDestination(for: TabDragPayload.self) { droppedTabs, _location in
+            handleTabDrop(droppedTabs: droppedTabs, target: tab, visibleIndex: visibleIndex)
         } isTargeted: { targeted in
             withAnimation(.easeOut(duration: 0.12)) {
                 dropTargetTabId = targeted ? tab.id : nil
@@ -533,18 +585,17 @@ struct TabBarView: View {
         .help(tab.label)
         .contextMenu {
             Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") {
-                encoder?.sendSelectTab(id: tab.id)
-                encoder?.sendExecuteCommand(name: tab.isPinned ? "unpin_tab" : "pin_tab")
+                performTabContextMenuAction(tab.isPinned ? .unpin : .pin, for: tab)
             }
             Divider()
             Button("Move Tab Left") {
-                encoder?.sendSelectTab(id: tab.id)
-                encoder?.sendExecuteCommand(name: "move_tab_left")
+                performTabContextMenuAction(.moveLeft, for: tab)
             }
+            .disabled(!canMoveTabLeft(tab))
             Button("Move Tab Right") {
-                encoder?.sendSelectTab(id: tab.id)
-                encoder?.sendExecuteCommand(name: "move_tab_right")
+                performTabContextMenuAction(.moveRight, for: tab)
             }
+            .disabled(!canMoveTabRight(tab))
             Divider()
             Button("Close") {
                 encoder?.sendCloseTab(id: tab.id)
@@ -669,18 +720,6 @@ struct TabBarView: View {
         return nil
     }
 
-    private func tabDragPayload(_ tab: TabEntry) -> String {
-        "tab:\(tab.id)"
-    }
-
-    private func tabDragId(from payload: String) -> UInt32? {
-        guard payload.hasPrefix("tab:") else {
-            return nil
-        }
-
-        return UInt32(payload.dropFirst(4))
-    }
-
     private func tabAccessibilityValue(_ tab: TabEntry) -> String {
         var values: [String] = []
 
@@ -695,6 +734,19 @@ struct TabBarView: View {
         }
 
         return values.isEmpty ? "clean" : values.joined(separator: ", ")
+    }
+}
+
+// MARK: - Drag payload
+
+/// App-private tab drag payload used for in-window tab reordering.
+struct TabDragPayload: Codable, Hashable, Sendable, Transferable {
+    static let contentType = UTType(exportedAs: "com.minga.tab-id")
+
+    let id: UInt32
+
+    static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(contentType: contentType)
     }
 }
 
