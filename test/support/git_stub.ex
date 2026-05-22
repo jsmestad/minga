@@ -88,6 +88,15 @@ defmodule Minga.Git.Stub do
     :ok
   end
 
+  @doc "Returns paths staged through the stub for `git_root`."
+  @spec staged_paths(String.t()) :: [String.t()]
+  def staged_paths(git_root) do
+    case :ets.lookup(@table, {:staged_paths, Path.expand(git_root)}) do
+      [{_, paths}] -> Enum.reverse(paths)
+      [] -> []
+    end
+  end
+
   @doc "Removes all stub entries for a given root path."
   @spec clear(String.t()) :: :ok
   def clear(git_root) do
@@ -96,6 +105,7 @@ defmodule Minga.Git.Stub do
     :ets.match_delete(@table, {{:status, expanded}, :_})
     :ets.match_delete(@table, {{:head, expanded, :_}, :_})
     :ets.match_delete(@table, {{:staged, expanded, :_}, :_})
+    :ets.match_delete(@table, {{:staged_paths, expanded}, :_})
     :ets.match_delete(@table, {{:log, expanded}, :_})
     :ets.match_delete(@table, {{:diff, expanded}, :_})
     :ets.match_delete(@table, {{:branch, expanded}, :_})
@@ -165,7 +175,19 @@ defmodule Minga.Git.Stub do
 
   @impl true
   @spec stage(String.t(), String.t() | [String.t()]) :: :ok
-  def stage(_git_root, _paths), do: :ok
+  def stage(git_root, paths) do
+    expanded = Path.expand(git_root)
+    new_paths = List.wrap(paths)
+
+    existing =
+      case :ets.lookup(@table, {:staged_paths, expanded}) do
+        [{_, staged}] -> staged
+        [] -> []
+      end
+
+    :ets.insert(@table, {{:staged_paths, expanded}, Enum.reverse(new_paths) ++ existing})
+    :ok
+  end
 
   @impl true
   @spec commit(String.t(), String.t(), keyword()) :: {:ok, String.t()}

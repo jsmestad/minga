@@ -97,6 +97,19 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
       refute String.contains?(text, "unique-bg-label")
     end
 
+    test "renders active file merge conflict count when configured" do
+      with_options(fn options ->
+        Options.set(options, :modeline_right_segments, [:merge_conflict])
+
+        data = Map.put(@base_data, :merge_conflict_count, 2)
+        {commands, regions} = Modeline.render(0, 120, data)
+        text = Enum.map_join(commands, fn {_row, _col, segment, _opts} -> segment end)
+
+        assert String.contains?(text, "X2")
+        assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :next_merge_conflict end)
+      end)
+    end
+
     test "always renders workspace identity and review counters when configured" do
       with_options(fn options ->
         Options.set(options, :modeline_left_segments, [:mode, :workspace, :filename])

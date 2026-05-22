@@ -26,6 +26,7 @@ defmodule Minga.Config.ModelineSegments do
     :percent,
     :draft,
     :conflict,
+    :merge_conflict,
     :selection
   ]
 

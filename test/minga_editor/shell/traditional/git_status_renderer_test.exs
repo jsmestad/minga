@@ -95,6 +95,21 @@ defmodule MingaEditor.Shell.Traditional.GitStatusRendererTest do
       assert Enum.any?(texts, &String.contains?(&1, "Untracked"))
     end
 
+    test "renders conflicted files in the Conflicts section" do
+      entries = [
+        %StatusEntry{path: "conflict.ex", status: :conflict, staged: false},
+        %StatusEntry{path: "changed.ex", status: :modified, staged: false}
+      ]
+
+      panel = make_panel(entries)
+      state = base_state(panel)
+      draws = GitStatusRenderer.render(state, @rect)
+
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      assert Enum.any?(texts, &String.contains?(&1, "Conflicts (1)"))
+      assert Enum.any?(texts, &String.contains?(&1, "conflict"))
+    end
+
     test "renders file rows with status characters" do
       entries = [
         %StatusEntry{path: "added.ex", status: :added, staged: true},

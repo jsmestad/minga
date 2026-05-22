@@ -22,6 +22,7 @@ defmodule MingaEditor.StatusBar.Data do
   alias MingaEditor.Window.Content
   alias Minga.Config.Options
   alias Minga.Git
+  alias Minga.Git.MergeConflict
   alias Minga.LSP.SyncServer
   alias MingaEditor.Shell.Traditional.Modeline
   alias MingaEditor.UI.Theme
@@ -76,7 +77,8 @@ defmodule MingaEditor.StatusBar.Data do
           status_msg: String.t() | nil,
           workspace_label: String.t(),
           workspace_draft_count: non_neg_integer(),
-          workspace_conflict_count: non_neg_integer()
+          workspace_conflict_count: non_neg_integer(),
+          merge_conflict_count: non_neg_integer()
         }
 
   @typedoc "Data for a focused agent chat window. Includes background buffer context so the status bar layout stays stable across mode switches."
@@ -115,7 +117,8 @@ defmodule MingaEditor.StatusBar.Data do
           status_msg: String.t() | nil,
           workspace_label: String.t(),
           workspace_draft_count: non_neg_integer(),
-          workspace_conflict_count: non_neg_integer()
+          workspace_conflict_count: non_neg_integer(),
+          merge_conflict_count: non_neg_integer()
         }
 
   @typedoc "Tagged union: buffer or agent variant."
@@ -208,7 +211,8 @@ defmodule MingaEditor.StatusBar.Data do
       status_msg: state.shell_state.status_msg,
       workspace_label: workspace.label,
       workspace_draft_count: workspace.draft_count,
-      workspace_conflict_count: workspace.conflict_count
+      workspace_conflict_count: workspace.conflict_count,
+      merge_conflict_count: merge_conflict_count(buf)
     }
   end
 
@@ -367,7 +371,8 @@ defmodule MingaEditor.StatusBar.Data do
       status_msg: state.shell_state.status_msg,
       workspace_label: workspace.label,
       workspace_draft_count: workspace.draft_count,
-      workspace_conflict_count: workspace.conflict_count
+      workspace_conflict_count: workspace.conflict_count,
+      merge_conflict_count: merge_conflict_count(buf)
     }
   end
 
@@ -399,6 +404,18 @@ defmodule MingaEditor.StatusBar.Data do
           :exit, _ -> {nil, nil}
         end
     end
+  end
+
+  @spec merge_conflict_count(pid() | nil) :: non_neg_integer()
+  defp merge_conflict_count(nil), do: 0
+
+  defp merge_conflict_count(buf) when is_pid(buf) do
+    case Git.tracking_pid(buf) do
+      nil -> buf |> Buffer.content() |> MergeConflict.parse() |> length()
+      git_pid -> Git.conflict_count(git_pid)
+    end
+  catch
+    :exit, _ -> 0
   end
 
   @doc "Returns the diagnostic count 4-tuple for the active buffer, or nil."
@@ -515,7 +532,8 @@ defmodule MingaEditor.StatusBar.Data do
       active_background_subagent_label: d.active_background_subagent_label,
       workspace_label: d.workspace_label,
       workspace_draft_count: d.workspace_draft_count,
-      workspace_conflict_count: d.workspace_conflict_count
+      workspace_conflict_count: d.workspace_conflict_count,
+      merge_conflict_count: d.merge_conflict_count
     }
   end
 

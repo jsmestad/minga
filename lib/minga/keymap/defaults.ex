@@ -131,6 +131,9 @@ defmodule Minga.Keymap.Defaults do
     {~k(g c c), :git_commit_open, "Commit"},
     {~k(g c a), :git_amend_open, "Amend commit"},
     {~k(g D), :git_diff_toggle_staged, "Toggle staged/unstaged diff"},
+    {~k(g x c), :git_accept_current_conflict, "Accept current conflict"},
+    {~k(g x i), :git_accept_incoming_conflict, "Accept incoming conflict"},
+    {~k(g x b), :git_accept_both_conflict, "Accept both conflict sides"},
     {~k(g c g), :git_generate_commit_message, "Generate AI commit message"},
 
     # ── Project ────────────────────────────────────────────────────────────────
@@ -212,6 +215,7 @@ defmodule Minga.Keymap.Defaults do
     {~k(c l), "+LSP"},
     {~k(g), "+git"},
     {~k(g c), "+commit"},
+    {~k(g x), "+conflict"},
     {~k(w), "+window"},
     {~k(q), "+quit"},
     {~k(h), "+help"},
