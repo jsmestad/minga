@@ -84,7 +84,7 @@ defmodule MingaEditor do
 
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Session.State, as: SessionState
-  alias MingaEditor.State.LSP, as: LSPState
+
   alias MingaEditor.State.Session, as: EditorSessionState
 
   alias MingaEditor.State.Agent, as: AgentState
@@ -1421,12 +1421,12 @@ defmodule MingaEditor do
 
   @spec handle_lsp_debounce(state(), atom()) :: state()
   defp handle_lsp_debounce(state, :inlay_hint_scroll_debounce) do
-    state = %{state | lsp: LSPState.clear_inlay_hint_timer(state.lsp)}
+    state = %{state | lsp: MingaEditor.State.LSP.clear_inlay_hint_timer(state.lsp)}
     LspActions.inlay_hints(state)
   end
 
   defp handle_lsp_debounce(state, :document_highlight_debounce) do
-    state = %{state | lsp: LSPState.clear_highlight_timer(state.lsp)}
+    state = %{state | lsp: MingaEditor.State.LSP.clear_highlight_timer(state.lsp)}
     LspActions.document_highlight(state)
   end
 
