@@ -22,6 +22,7 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendSelectTab(id: UInt32)
     func sendCloseTab(id: UInt32)
     func sendTabCopyPath(id: UInt32)
+    func sendTabReorder(id: UInt32, newIndex: UInt16)
     func sendHoverOpenAction()
     func sendFileTreeClick(index: UInt16)
     func sendFileTreeToggle(index: UInt16)
@@ -331,6 +332,16 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_TAB_COPY_PATH
         writeU32(&buf, 2, id)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: tab_reorder. Layout: opcode(1) + action_type(1) + tab_id(4) + new_index(2).
+    func sendTabReorder(id: UInt32, newIndex: UInt16) {
+        var buf = Data(count: 8)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_TAB_REORDER
+        writeU32(&buf, 2, id)
+        writeU16(&buf, 6, newIndex)
         writeFrame(buf)
     }
 

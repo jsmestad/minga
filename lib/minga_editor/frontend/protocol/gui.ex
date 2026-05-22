@@ -83,14 +83,15 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x3D       | file_tree_open_in_split |
   | 0x3E       | tab_copy_path           |
   | 0x3F       | hover_open_action       |
-  | 0x42       | git_open_diff           |
   | 0x40       | file_tree_drop          |
   | 0x41       | fold_toggle_at_line     |
+  | 0x42       | git_open_diff           |
   | 0x43       | config_update           |
   | 0x44       | config_query            |
-  | 0x34       | system_will_sleep      |
-  | 0x35       | system_did_wake        |
-  | 0x47       | power_thermal_state    |
+  | 0x47       | power_thermal_state     |
+  | 0x48       | tab_reorder             |
+  | 0x34       | system_will_sleep       |
+  | 0x35       | system_did_wake         |
 
   """
 
@@ -218,6 +219,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_file_tree_open_in_split Opcodes.gui_action_file_tree_open_in_split()
   @gui_action_tab_copy_path Opcodes.gui_action_tab_copy_path()
   @gui_action_hover_open_action Opcodes.gui_action_hover_open_action()
+  @gui_action_tab_reorder Opcodes.gui_action_tab_reorder()
   @gui_action_file_tree_drop Opcodes.gui_action_file_tree_drop()
   @gui_action_fold_toggle_at_line Opcodes.gui_action_fold_toggle_at_line()
   @gui_action_git_open_diff Opcodes.gui_action_git_open_diff()
@@ -365,6 +367,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
              buffer_line :: non_neg_integer()}
           | {:file_tree_open_in_split, index :: non_neg_integer()}
           | {:tab_copy_path, id :: pos_integer()}
+          | {:tab_reorder, id :: pos_integer(), new_index :: non_neg_integer()}
           | :hover_open_action
           | :system_will_sleep
           | :system_did_wake
@@ -759,7 +762,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     label_bytes = :erlang.iolist_to_binary([MingaEditor.State.Tab.display_label(tab)])
 
     <<flags::8, tab.id::32, group_id::16, byte_size(icon_bytes)::8, icon_bytes::binary,
-      byte_size(label_bytes)::16, label_bytes::binary>>
+      byte_size(label_bytes)::16, label_bytes::binary, tab_tint_color(tab)::32>>
   end
 
   @spec encode_gui_tab_entry(TabSummary.t(), Tab.id() | nil) :: binary()
@@ -770,7 +773,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     label_bytes = :erlang.iolist_to_binary([tab.label])
 
     <<flags::8, tab.id::32, tab.workspace_id::16, byte_size(icon_bytes)::8, icon_bytes::binary,
-      byte_size(label_bytes)::16, label_bytes::binary>>
+      byte_size(label_bytes)::16, label_bytes::binary, tab.tint_color::32>>
   end
 
   @spec build_tab_flags(Tab.t(), 0 | 1, pid() | nil) :: non_neg_integer()
@@ -778,9 +781,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     is_dirty = tab_dirty_bit(tab, is_active, active_win_buffer)
     is_agent = if tab.kind == :agent, do: 1, else: 0
     has_attention = if tab.attention, do: 1, else: 0
+    is_pinned = if tab.pinned?, do: 1, else: 0
     agent_status = encode_agent_status(tab.agent_status)
 
-    tab_flags(is_active, is_dirty, is_agent, has_attention, agent_status)
+    tab_flags(is_active, is_dirty, is_agent, has_attention, agent_status, is_pinned)
   end
 
   @spec build_tab_summary_flags(TabSummary.t(), 0 | 1) :: non_neg_integer()
@@ -788,19 +792,24 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     is_dirty = if tab.dirty?, do: 1, else: 0
     is_agent = if tab.kind == :agent, do: 1, else: 0
     has_attention = if tab.attention?, do: 1, else: 0
-    tab_flags(is_active, is_dirty, is_agent, has_attention, 0)
+    is_pinned = if tab.pinned?, do: 1, else: 0
+    tab_flags(is_active, is_dirty, is_agent, has_attention, 0, is_pinned)
   end
 
-  @spec tab_flags(0 | 1, 0 | 1, 0 | 1, 0 | 1, non_neg_integer()) :: non_neg_integer()
-  defp tab_flags(is_active, is_dirty, is_agent, has_attention, agent_status) do
+  @spec tab_flags(0 | 1, 0 | 1, 0 | 1, 0 | 1, non_neg_integer(), 0 | 1) :: non_neg_integer()
+  defp tab_flags(is_active, is_dirty, is_agent, has_attention, agent_status, is_pinned) do
     bor(
       bor(is_active, bsl(is_dirty, 1)),
       bor(
         bor(bsl(is_agent, 2), bsl(has_attention, 3)),
-        bsl(agent_status, 4)
+        bor(bsl(band(agent_status, 0x07), 4), bsl(is_pinned, 7))
       )
     )
   end
+
+  @spec tab_tint_color(Tab.t()) :: non_neg_integer()
+  defp tab_tint_color(%Tab{kind: :agent}), do: 0x7AA2F7
+  defp tab_tint_color(%Tab{}), do: 0
 
   @spec tab_dirty_bit(Tab.t(), 0 | 1, pid() | nil) :: 0 | 1
   defp tab_dirty_bit(%{kind: :agent}, _is_active, _buf), do: 0
@@ -875,7 +884,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       )
 
     IO.iodata_to_binary([
-      <<1::8, chrome_state.active_workspace_id::16, encode_workspace_mode(chrome_state.mode)::8,
+      <<2::8, chrome_state.active_workspace_id::16, encode_workspace_mode(chrome_state.mode)::8,
         encode_workspace_flags(chrome_state)::8, length(workspace_entries)::8>>,
       workspace_entries,
       <<length(visible_tab_entries)::16>>,
@@ -936,7 +945,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     <<tab.id::32, tab.workspace_id::16, encode_tab_kind(tab.kind)::8,
       encode_visible_tab_flags(tab)::16, path_hash(tab.path)::32, byte_size(icon_bytes)::8,
       icon_bytes::binary, byte_size(label_bytes)::16, label_bytes::binary,
-      byte_size(path_bytes)::16, path_bytes::binary>>
+      byte_size(path_bytes)::16, path_bytes::binary, tab.tint_color::32>>
   end
 
   @spec encode_workspace_mode(ChromeState.mode()) :: non_neg_integer()
@@ -973,6 +982,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     |> maybe_workspace_flag(tab.draft_state == :draft, 0x04)
     |> maybe_workspace_flag(tab.draft_state == :draft_elsewhere, 0x08)
     |> maybe_workspace_flag(tab.draft_state == :conflict, 0x10)
+    |> maybe_workspace_flag(tab.pinned?, 0x20)
   end
 
   @spec maybe_workspace_flag(non_neg_integer(), boolean(), non_neg_integer()) :: non_neg_integer()
@@ -2972,6 +2982,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     do: {:ok, {:file_tree_open_in_split, index}}
 
   def decode_gui_action(@gui_action_tab_copy_path, <<id::32>>), do: {:ok, {:tab_copy_path, id}}
+
+  def decode_gui_action(@gui_action_tab_reorder, <<id::32, new_index::16>>),
+    do: {:ok, {:tab_reorder, id, new_index}}
+
   def decode_gui_action(@gui_action_hover_open_action, <<>>), do: {:ok, :hover_open_action}
 
   def decode_gui_action(@gui_action_completion_select, <<index::16>>),

@@ -85,6 +85,15 @@ defmodule Minga.Keymap.DefaultsTest do
       assert {:command, :kill_buffer} = Bindings.lookup(b_node, {?d, 0})
     end
 
+    test "SPC b tab management bindings route to tab commands" do
+      trie = Defaults.leader_trie()
+      {:prefix, b_node} = Bindings.lookup(trie, {?b, 0})
+
+      assert {:command, :pin_tab} = Bindings.lookup(b_node, {?P, 0})
+      assert {:command, :move_tab_left} = Bindings.lookup(b_node, {?<, 0})
+      assert {:command, :move_tab_right} = Bindings.lookup(b_node, {?>, 0})
+    end
+
     # ── Tab / workspace bindings ───────────────────────────────────────────────
 
     test "SPC t routes workspace bindings to workspace commands" do

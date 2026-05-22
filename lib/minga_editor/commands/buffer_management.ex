@@ -141,6 +141,10 @@ defmodule MingaEditor.Commands.BufferManagement do
   def execute(state, :buffer_prev), do: prev_buffer(state)
   def execute(state, :tab_next), do: next_tab(state)
   def execute(state, :tab_prev), do: prev_tab(state)
+  def execute(state, :pin_tab), do: toggle_tab_pin(state)
+  def execute(state, :unpin_tab), do: unpin_active_tab(state)
+  def execute(state, :move_tab_left), do: move_active_tab(state, :left)
+  def execute(state, :move_tab_right), do: move_active_tab(state, :right)
 
   def execute(state, :kill_buffer) do
     case EditorState.active_tab_kind(state) do
@@ -447,6 +451,22 @@ defmodule MingaEditor.Commands.BufferManagement do
     execute(state, :buffer_prev)
   end
 
+  def execute(state, {:execute_ex_command, {:pin_tab, []}}) do
+    execute(state, :pin_tab)
+  end
+
+  def execute(state, {:execute_ex_command, {:unpin_tab, []}}) do
+    execute(state, :unpin_tab)
+  end
+
+  def execute(state, {:execute_ex_command, {:move_tab_left, []}}) do
+    execute(state, :move_tab_left)
+  end
+
+  def execute(state, {:execute_ex_command, {:move_tab_right, []}}) do
+    execute(state, :move_tab_right)
+  end
+
   def execute(
         %{workspace: %{buffers: %{active: buf}}} = state,
         {:execute_ex_command, {:sort, range, flags}}
@@ -630,7 +650,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   @spec tab_goto(state(), atom()) :: state()
   def tab_goto(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, cmd) do
     case parse_tab_goto(cmd) do
-      {:ok, n} -> switch_tab_by_id_or_index(state, tb, n)
+      {:ok, n} -> switch_tab_by_visible_index(state, tb, n)
       :error -> state
     end
   end
@@ -640,9 +660,9 @@ defmodule MingaEditor.Commands.BufferManagement do
   @spec parse_tab_goto(atom()) :: {:ok, pos_integer()} | :error
   defp parse_tab_goto(cmd) do
     case Atom.to_string(cmd) do
-      "tab_goto_" <> id_str ->
-        case Integer.parse(id_str) do
-          {n, ""} -> {:ok, n}
+      "tab_goto_" <> index_str ->
+        case Integer.parse(index_str) do
+          {n, ""} when n > 0 -> {:ok, n}
           _ -> :error
         end
 
@@ -651,15 +671,11 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
   end
 
-  @spec switch_tab_by_id_or_index(EditorState.t(), TabBar.t(), pos_integer()) :: EditorState.t()
-  defp switch_tab_by_id_or_index(state, tb, n) do
-    if TabBar.has_tab?(tb, n) do
-      EditorState.switch_tab(state, n)
-    else
-      case TabBar.tab_at(tb, n) do
-        %{id: id} -> EditorState.switch_tab(state, id)
-        nil -> state
-      end
+  @spec switch_tab_by_visible_index(EditorState.t(), TabBar.t(), pos_integer()) :: EditorState.t()
+  defp switch_tab_by_visible_index(state, tb, n) do
+    case Enum.at(TabBar.visible_file_tabs(tb), n - 1) do
+      %Tab{id: id} -> EditorState.switch_tab(state, id)
+      nil -> state
     end
   end
 
@@ -869,6 +885,44 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   defp prev_tab(state), do: state
+
+  @spec toggle_tab_pin(state()) :: state()
+  defp toggle_tab_pin(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+    state
+    |> EditorState.set_tab_bar(TabBar.toggle_active_pin(tb))
+    |> EditorState.set_status(tab_pin_status(tb))
+  end
+
+  defp toggle_tab_pin(state), do: state
+
+  @spec unpin_active_tab(state()) :: state()
+  defp unpin_active_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+    state
+    |> EditorState.set_tab_bar(TabBar.unpin_tab(tb, tb.active_id))
+    |> EditorState.set_status("Tab unpinned")
+  end
+
+  defp unpin_active_tab(state), do: state
+
+  @spec move_active_tab(state(), :left | :right) :: state()
+  defp move_active_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, direction) do
+    EditorState.set_tab_bar(state, move_tab_bar(tb, direction))
+  end
+
+  defp move_active_tab(state, _direction), do: state
+
+  @spec move_tab_bar(TabBar.t(), :left | :right) :: TabBar.t()
+  defp move_tab_bar(%TabBar{} = tb, :left), do: TabBar.move_active_tab_left(tb)
+  defp move_tab_bar(%TabBar{} = tb, :right), do: TabBar.move_active_tab_right(tb)
+
+  @spec tab_pin_status(TabBar.t()) :: String.t()
+  defp tab_pin_status(%TabBar{} = tb) do
+    case TabBar.active(tb) do
+      %Tab{pinned?: true} -> "Tab unpinned"
+      %Tab{} -> "Tab pinned"
+      nil -> "No active tab"
+    end
+  end
 
   @spec remove_current_buffer(state()) :: state()
 
@@ -2156,6 +2210,10 @@ defmodule MingaEditor.Commands.BufferManagement do
   command(:open_config, "Open config file", requires_buffer: true)
   command(:tab_next, "Next tab", requires_buffer: true)
   command(:tab_prev, "Previous tab", requires_buffer: true)
+  command(:pin_tab, "Toggle pin for the active tab", requires_buffer: true)
+  command(:unpin_tab, "Unpin the active tab", requires_buffer: true)
+  command(:move_tab_left, "Move active tab left", requires_buffer: true)
+  command(:move_tab_right, "Move active tab right", requires_buffer: true)
   command(:new_buffer, "Create new empty buffer", requires_buffer: false)
   command(:reload_config, "Reload config", requires_buffer: true, execute: &reload_config/1)
 

@@ -585,7 +585,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         return (.guiFileTreeSelection(selectedId: selectedId, focused: flags & 0x01 != 0), 3 + payloadLen)
 
     case OP_GUI_TAB_BAR:
-        // active_index:1 (255 means the active tab is hidden from the visible tab list), tab_count:1, then per tab: flags:1, id:4, group_id:2, icon_len:1, icon, label_len:2, label
+        // active_index:1 (255 means the active tab is hidden from the visible tab list), tab_count:1, then per tab: flags:1, id:4, group_id:2, icon_len:1, icon, label_len:2, label, tint_color_rgb:4
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
         let activeIndex = data[rest]
         let tabCount = Int(data[rest + 1])
@@ -602,9 +602,10 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             let iconData = data[(pos + 8)..<(pos + 8 + iconLen)]
             let icon = String(data: iconData, encoding: .utf8) ?? ""
             let labelLen = Int(readU16(data, pos + 8 + iconLen))
-            guard data.count >= pos + 8 + iconLen + 2 + labelLen else { throw ProtocolDecodeError.malformed }
+            guard data.count >= pos + 8 + iconLen + 2 + labelLen + 4 else { throw ProtocolDecodeError.malformed }
             let labelData = data[(pos + 10 + iconLen)..<(pos + 10 + iconLen + labelLen)]
             let label = String(data: labelData, encoding: .utf8) ?? ""
+            let tintColorRGB = readU32(data, pos + 10 + iconLen + labelLen)
             tabs.append(Wire.TabEntry(
                 id: tabId,
                 groupId: groupId,
@@ -612,11 +613,13 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 isDirty: flags & 0x02 != 0,
                 isAgent: flags & 0x04 != 0,
                 hasAttention: flags & 0x08 != 0,
-                agentStatus: (flags >> 4) & 0x0F,
+                agentStatus: (flags >> 4) & 0x07,
+                isPinned: flags & 0x80 != 0,
+                tintColorRGB: tintColorRGB,
                 icon: icon,
                 label: label
             ))
-            pos += 10 + iconLen + labelLen
+            pos += 14 + iconLen + labelLen
         }
         return (.guiTabBar(activeIndex: activeIndex, tabs: tabs), pos - offset)
 
@@ -2306,8 +2309,10 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             let label = try readRequiredUTF8(data[(labelLenPos + 2)..<(labelLenPos + 2 + labelLen)])
             let pathLenPos = labelLenPos + 2 + labelLen
             let pathLen = Int(readU16(data, pathLenPos))
-            guard pathLenPos + 2 + pathLen <= payloadEnd else { throw ProtocolDecodeError.malformed }
+            let tintBytes = version >= 2 ? 4 : 0
+            guard pathLenPos + 2 + pathLen + tintBytes <= payloadEnd else { throw ProtocolDecodeError.malformed }
             let path = try readRequiredUTF8(data[(pathLenPos + 2)..<(pathLenPos + 2 + pathLen)])
+            let tintColorRGB = version >= 2 ? readU32(data, pathLenPos + 2 + pathLen) : 0
 
             visibleTabs.append(Wire.WorkspaceTabEntry(
                 id: id,
@@ -2315,11 +2320,12 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 kind: kind,
                 flags: flags,
                 pathHash: pathHash,
+                tintColorRGB: tintColorRGB,
                 icon: icon,
                 label: label,
                 path: path
             ))
-            pos = pathLenPos + 2 + pathLen
+            pos = pathLenPos + 2 + pathLen + tintBytes
         }
 
         guard pos == payloadEnd else { throw ProtocolDecodeError.malformed }

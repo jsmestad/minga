@@ -115,6 +115,28 @@ defmodule MingaEditor.Session.ChromeStateTest do
       assert Enum.map(chrome.visible_tabs, & &1.label) == ["agent.ex"]
     end
 
+    test "keeps pinned agent workspace tabs first and tints them", %{tmp_dir: tmp_dir} do
+      {tb, group} = tab_bar_with_agent_workspace(tmp_dir)
+      {tb, pinned_tab} = TabBar.add(tb, :file, "pinned.ex")
+      tb = TabBar.move_tab_to_workspace(tb, pinned_tab.id, group.id)
+      tb = TabBar.pin_tab(tb, pinned_tab.id)
+      tb = TabBar.switch_to(tb, pinned_tab.id)
+
+      chrome = ChromeState.from_editor_state(state(tab_bar: tb, project_root: tmp_dir))
+
+      assert Enum.map(chrome.visible_tabs, & &1.label) == ["pinned.ex", "agent.ex"]
+      assert Enum.map(chrome.visible_tabs, & &1.pinned?) == [true, false]
+      assert Enum.all?(chrome.visible_tabs, &(&1.tint_color > 0))
+
+      manual_chrome =
+        ChromeState.from_editor_state(
+          state(tab_bar: TabBar.switch_to(tb, 1), project_root: tmp_dir)
+        )
+
+      assert Enum.map(manual_chrome.visible_tabs, & &1.label) == ["manual.ex"]
+      assert Enum.all?(manual_chrome.visible_tabs, &(&1.tint_color == 0))
+    end
+
     test "falls back to the tab context when the active buffer is dead", %{tmp_dir: tmp_dir} do
       stale_path = Path.join(tmp_dir, "stale.ex")
       stale_buffer = start_file_buffer(stale_path)

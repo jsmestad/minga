@@ -190,6 +190,10 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     copy_tab_path(state, id)
   end
 
+  defp dispatch_action(state, {:tab_reorder, id, new_index}) do
+    reorder_tab(state, id, new_index)
+  end
+
   defp dispatch_action(state, :hover_open_action) do
     accept_hover_open_action(state)
   end
@@ -868,6 +872,16 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     case Commands.execute(state, action) do
       {new_state, _action} -> new_state
       new_state -> new_state
+    end
+  end
+
+  # ── Tab helpers ───────────────────────────────────────────────────
+
+  @spec reorder_tab(state(), Tab.id(), non_neg_integer()) :: state()
+  defp reorder_tab(state, id, new_index) do
+    case EditorState.tab_bar(state) do
+      %TabBar{} = tb -> EditorState.set_tab_bar(state, TabBar.reorder_tab(tb, id, new_index))
+      nil -> state
     end
   end
 

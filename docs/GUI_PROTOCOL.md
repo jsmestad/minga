@@ -139,7 +139,7 @@ Only file tabs from the active workspace are sent here. Agent tabs and tabs from
 opcode(1) + active_index(1) + tab_count(1) + entries...
 
 Per entry:
-  flags(1) + id(4) + group_id(2) + icon_len(1) + icon(icon_len) + label_len(2) + label(label_len)
+  flags(1) + id(4) + group_id(2) + icon_len(1) + icon(icon_len) + label_len(2) + label(label_len) + tint_color_rgb(4)
 
 Flags bits:
   bit 0: is_active
@@ -147,8 +147,9 @@ Flags bits:
   bit 2: is_agent (always 0 in the active-workspace projection)
   bit 3: has_attention
   bits 4-6: agent_status (0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan)
+  bit 7: is_pinned
 
-group_id: workspace id this tab belongs to. 0 = manual workspace. Non-zero values match workspace IDs from gui_workspaces (0x98). Frontends use this to keep file open/close/navigation scoped to the active workspace while rendering inactive workspace capsules from gui_workspaces.
+group_id: workspace id this tab belongs to. 0 = manual workspace. Non-zero values match workspace IDs from gui_workspaces (0x98). Frontends use this to keep file open/close/navigation scoped to the active workspace while rendering inactive workspace capsules from gui_workspaces. `tint_color_rgb` is `0` for no tint, otherwise `0xRRGGBB`.
 
 active_index: zero-based index into the visible tab entries, or 255 when the current active tab is not present in the visible list (for example, an active agent chat tab with only its workspace's file tabs shown).
 ```
@@ -805,10 +806,10 @@ Per workspace:
 Per visible tab:
   id(4) + workspace_id(2) + kind(1) + flags(2) + path_hash(4)
   + icon_len(1) + icon(icon_len) + label_len(2) + label(label_len)
-  + path_len(2) + path(path_len)
+  + path_len(2) + path(path_len) + tint_color_rgb(4)
 ```
 
-`version` is currently 1. `mode`: 0 = editor, 1 = agent, 2 = file_tree, 3 = other. Workspace `kind`: 0 = manual, 1 = agent. Visible tab `kind`: 0 = file. `status`: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan. Workspace flags: bit 0 = attention, bit 1 = closeable. Visible tab flags: bit 0 = dirty, bit 1 = attention, bit 2 = draft, bit 3 = draft_elsewhere, bit 4 = conflict.
+`version` is currently 2. Version 2 adds `tint_color_rgb` to each visible tab entry and bit 5 for pinned tabs. `mode`: 0 = editor, 1 = agent, 2 = file_tree, 3 = other. Workspace `kind`: 0 = manual, 1 = agent. Visible tab `kind`: 0 = file. `status`: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan. Workspace flags: bit 0 = attention, bit 1 = closeable. Visible tab flags: bit 0 = dirty, bit 1 = attention, bit 2 = draft, bit 3 = draft_elsewhere, bit 4 = conflict, bit 5 = pinned. `tint_color_rgb` is `0` for no tint, otherwise `0xRRGGBB`.
 
 The workspace list includes the manual project workspace and all agent workspaces. The visible tab list includes only file tabs for the active workspace. Agent view remains a workspace zoom surface, so it is not encoded as a normal file tab.
 
@@ -903,6 +904,7 @@ opcode(1) + action_type(1) + payload...
 | 0x45 | notification_dismiss | id_len(2) + id | Dismiss one notification |
 | 0x46 | notification_action | id_len(2) + id + action_id_len(2) + action_id | Invoke one inline notification action |
 | 0x47 | power_thermal_state | low_power(1) + thermal_state(1) | Report low power mode and thermal pressure changes. `thermal_state` is 0 nominal, 1 fair, 2 serious, 3 critical, 255 unknown. |
+| 0x48 | tab_reorder | tab_id(4) + new_index(2) | Move a visible tab to a zero-based visible index |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |

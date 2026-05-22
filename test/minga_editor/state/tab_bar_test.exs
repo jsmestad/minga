@@ -89,6 +89,82 @@ defmodule MingaEditor.State.TabBarTest do
     end
   end
 
+  describe "pinning and reordering" do
+    test "visible file tabs put pinned tabs first without changing unrelated tabs" do
+      tb = tab_bar(file: "a", file: "b", file: "c")
+      tb = TabBar.pin_tab(tb, 3)
+
+      assert Enum.map(TabBar.visible_file_tabs(tb), & &1.label) == ["c", "a", "b"]
+      assert labels(tb) == ["a", "b", "c"]
+    end
+
+    test "moves the active tab left and right in visible order" do
+      tb = tab_bar(file: "a", file: "b", file: "c") |> TabBar.switch_to(2)
+
+      moved_left = TabBar.move_active_tab_left(tb)
+      assert Enum.map(TabBar.visible_file_tabs(moved_left), & &1.label) == ["b", "a", "c"]
+
+      moved_right = TabBar.move_active_tab_right(moved_left)
+      assert Enum.map(TabBar.visible_file_tabs(moved_right), & &1.label) == ["a", "b", "c"]
+    end
+
+    test "reorders a dragged tab by visible index" do
+      tb = tab_bar(file: "a", file: "b", file: "c")
+
+      tb = TabBar.reorder_tab(tb, 3, 0)
+
+      assert Enum.map(TabBar.visible_file_tabs(tb), & &1.label) == ["c", "a", "b"]
+    end
+
+    test "does not move the last pinned tab right across the pinned boundary" do
+      tb = tab_bar(file: "a", file: "b", file: "c")
+      tb = TabBar.pin_tab(tb, 3) |> TabBar.switch_to(3)
+
+      assert TabBar.move_active_tab_right(tb) == tb
+      assert Enum.map(TabBar.visible_file_tabs(tb), & &1.label) == ["c", "a", "b"]
+
+      assert Enum.map(TabBar.visible_file_tabs(TabBar.unpin_tab(tb, 3)), & &1.label) == [
+               "a",
+               "b",
+               "c"
+             ]
+    end
+
+    test "does not move the first unpinned tab left across the pinned boundary" do
+      tb = tab_bar(file: "a", file: "b", file: "c")
+      tb = TabBar.pin_tab(tb, 1) |> TabBar.switch_to(2)
+
+      assert TabBar.move_active_tab_left(tb) == tb
+      assert Enum.map(TabBar.visible_file_tabs(tb), & &1.label) == ["a", "b", "c"]
+
+      assert Enum.map(TabBar.visible_file_tabs(TabBar.unpin_tab(tb, 1)), & &1.label) == [
+               "a",
+               "b",
+               "c"
+             ]
+    end
+
+    test "reorder_tab keeps tabs in their pinned bucket" do
+      pinned = tab_bar(file: "a", file: "b", file: "c") |> TabBar.pin_tab(3)
+      assert TabBar.reorder_tab(pinned, 3, 1) == pinned
+
+      assert Enum.map(TabBar.visible_file_tabs(TabBar.unpin_tab(pinned, 3)), & &1.label) == [
+               "a",
+               "b",
+               "c"
+             ]
+
+      unpinned = tab_bar(file: "a", file: "b", file: "c") |> TabBar.pin_tab(1)
+      assert TabBar.reorder_tab(unpinned, 2, 0) == unpinned
+
+      assert Enum.map(TabBar.visible_file_tabs(TabBar.unpin_tab(unpinned, 1)), & &1.label) == [
+               "a",
+               "b",
+               "c"
+             ]
+    end
+  end
+
   describe "keep_only/2" do
     test "keeps the selected tab, manual workspace, and prunes orphaned agent workspaces" do
       tb = TabBar.new(file_tab(1, "a"))

@@ -119,6 +119,8 @@ enum Wire {
         let isAgent: Bool
         let hasAttention: Bool
         let agentStatus: UInt8
+        let isPinned: Bool
+        let tintColorRGB: UInt32
         let icon: String
         let label: String
     }
@@ -149,6 +151,7 @@ enum Wire {
         let kind: UInt8
         let flags: UInt16
         let pathHash: UInt32
+        let tintColorRGB: UInt32
         let icon: String
         let label: String
         let path: String

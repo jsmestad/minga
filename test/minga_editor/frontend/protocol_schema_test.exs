@@ -220,7 +220,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       config_query: 0x44,
       notification_dismiss: 0x45,
       notification_action: 0x46,
-      power_thermal_state: 0x47
+      power_thermal_state: 0x47,
+      tab_reorder: 0x48
     )
   end
 

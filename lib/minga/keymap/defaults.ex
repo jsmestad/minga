@@ -64,6 +64,9 @@ defmodule Minga.Keymap.Defaults do
     {~k(b W), :view_warnings, "View warnings"},
     {~k(b N), :new_buffer, "New buffer"},
     {~k(b l), :set_language, "Set language"},
+    {~k(b P), :pin_tab, "Pin/unpin tab"},
+    {~k(b <), :move_tab_left, "Move tab left"},
+    {~k(b >), :move_tab_right, "Move tab right"},
 
     # ── Window ────────────────────────────────────────────────────────────────
     {~k(w h), :window_left, "Window left"},
