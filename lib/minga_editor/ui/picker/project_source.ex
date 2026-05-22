@@ -18,6 +18,10 @@ defmodule MingaEditor.UI.Picker.ProjectSource do
   def title, do: "Switch project"
 
   @impl true
+  @spec layout() :: MingaEditor.UI.Picker.Source.layout()
+  def layout, do: :centered
+
+  @impl true
   @spec candidates(Context.t()) :: [Item.t()]
   def candidates(_ctx) do
     Project.known_projects()

@@ -33,7 +33,7 @@ defmodule MingaEditor.Renderer.ServerTest do
   end
 
   test "pipeline crashes drop frames without killing the server" do
-    renderer = start_renderer(self())
+    renderer = start_renderer(self(), pipeline: fn _input -> raise "boom" end)
 
     RendererServer.cast_snapshot(renderer, stub_snapshot(), 42)
 
@@ -42,23 +42,25 @@ defmodule MingaEditor.Renderer.ServerTest do
   end
 
   test "successful async render sends writeback and emits a frame" do
-    renderer = start_renderer(self())
+    renderer = start_renderer(self(), pipeline: &emit_batch_end/1)
     state = build_editor_state(:tui, nil)
     snapshot = Input.from_editor_state(state)
     frame_ref = Minga.Test.HeadlessPort.prepare_await(state.port_manager)
 
     RendererServer.cast_snapshot(renderer, snapshot, 123)
 
+    assert {:ok, _screen} =
+             Minga.Test.HeadlessPort.collect_frame(frame_ref, @async_render_timeout)
+
     assert_receive {:render_done, %{frame_seq: 123, caches: %MingaEditor.Renderer.Caches{}}},
                    @async_render_timeout
 
-    assert {:ok, _screen} = Minga.Test.HeadlessPort.collect_frame(frame_ref)
     refute renderer_busy?(renderer)
   end
 
   describe "render_or_async dispatch" do
     test "non-headless backend with renderer dispatches asynchronously" do
-      renderer = start_renderer(self())
+      renderer = start_renderer(self(), pipeline: & &1)
       state = build_editor_state(:tui, renderer)
 
       result = MingaEditor.Renderer.render_or_async(state)
@@ -95,8 +97,17 @@ defmodule MingaEditor.Renderer.ServerTest do
     end
   end
 
-  defp start_renderer(editor_pid) do
-    start_supervised!({RendererServer, name: nil, editor_pid: editor_pid})
+  defp start_renderer(editor_pid, opts \\ []) do
+    opts = Keyword.merge([name: nil, editor_pid: editor_pid], opts)
+    start_supervised!({RendererServer, opts})
+  end
+
+  defp emit_batch_end(input) do
+    MingaEditor.Frontend.send_commands(input.port_manager, [
+      MingaEditor.Frontend.Protocol.encode_batch_end()
+    ])
+
+    input
   end
 
   defp attach_coalesce_handler do
