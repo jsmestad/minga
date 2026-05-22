@@ -274,6 +274,34 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
     end
   end
 
+  describe "decode_gui_action for power and thermal state" do
+    test "decodes low power and thermal tiers" do
+      assert {:ok, {:power_thermal_state, false, :nominal}} ==
+               ProtocolGUI.decode_gui_action(0x47, <<0, 0>>)
+
+      assert {:ok, {:power_thermal_state, true, :fair}} ==
+               ProtocolGUI.decode_gui_action(0x47, <<1, 1>>)
+
+      assert {:ok, {:power_thermal_state, true, :serious}} ==
+               ProtocolGUI.decode_gui_action(0x47, <<1, 2>>)
+
+      assert {:ok, {:power_thermal_state, true, :critical}} ==
+               ProtocolGUI.decode_gui_action(0x47, <<1, 3>>)
+    end
+
+    test "rejects invalid low power byte and preserves unknown thermal byte" do
+      assert :error == ProtocolGUI.decode_gui_action(0x47, <<2, 0>>)
+
+      assert {:ok, {:power_thermal_state, false, {:unknown, 255}}} ==
+               ProtocolGUI.decode_gui_action(0x47, <<0, 255>>)
+    end
+
+    test "rejects malformed payloads" do
+      assert :error == ProtocolGUI.decode_gui_action(0x47, <<0>>)
+      assert :error == ProtocolGUI.decode_gui_action(0x47, <<0, 1, 2>>)
+    end
+  end
+
   describe "decode_gui_action for context menu actions" do
     test "decodes file tree open in split" do
       assert {:ok, {:file_tree_open_in_split, 9}} ==

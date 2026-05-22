@@ -23,6 +23,8 @@ defmodule Minga.Keymap.Scope.Agent do
   alias Minga.Keymap.Bindings
   alias Minga.Keymap.CUADefaults
 
+  import Minga.Keymap.Sigil
+
   # Modifier bitmasks
   @ctrl 0x02
   @shift 0x01
@@ -30,10 +32,7 @@ defmodule Minga.Keymap.Scope.Agent do
   @cmd 0x08
 
   # Special codepoints
-  @tab 9
   @enter 13
-  @escape 27
-  @backspace 127
 
   # Group specs for each vim state.
   @insert_groups [:ctrl_agent_common, :newline_variants]
@@ -91,50 +90,50 @@ defmodule Minga.Keymap.Scope.Agent do
     # key was consumed by the trie and the Mode FSM never saw it.
     #
     # g-prefix: domain + vim standard commands
-    |> Bindings.bind([{?g, 0}, {?g, 0}], :move_to_document_start, "Go to top")
-    |> Bindings.bind([{?g, 0}, {?f, 0}], :agent_open_code_block, "Open code block in editor")
-    |> Bindings.bind([{?g, 0}, {?d, 0}], :goto_definition, "Go to definition")
+    |> Bindings.bind(~k(g g), :move_to_document_start, "Go to top")
+    |> Bindings.bind(~k(g f), :agent_open_code_block, "Open code block in editor")
+    |> Bindings.bind(~k(g d), :goto_definition, "Go to definition")
     # z-prefix: domain fold/collapse commands
-    |> Bindings.bind([{?z, 0}, {?a, 0}], :agent_toggle_collapse, "Toggle collapse at cursor")
-    |> Bindings.bind([{?z, 0}, {?A, 0}], :agent_toggle_all_collapse, "Toggle all collapses")
-    |> Bindings.bind([{?z, 0}, {?o, 0}], :agent_expand_at_cursor, "Expand at cursor")
-    |> Bindings.bind([{?z, 0}, {?c, 0}], :agent_collapse_at_cursor, "Collapse at cursor")
-    |> Bindings.bind([{?z, 0}, {?M, 0}], :agent_collapse_all, "Collapse all")
-    |> Bindings.bind([{?z, 0}, {?R, 0}], :agent_expand_all, "Expand all")
+    |> Bindings.bind(~k(z a), :agent_toggle_collapse, "Toggle collapse at cursor")
+    |> Bindings.bind(~k(z A), :agent_toggle_all_collapse, "Toggle all collapses")
+    |> Bindings.bind(~k(z o), :agent_expand_at_cursor, "Expand at cursor")
+    |> Bindings.bind(~k(z c), :agent_collapse_at_cursor, "Collapse at cursor")
+    |> Bindings.bind(~k(z M), :agent_collapse_all, "Collapse all")
+    |> Bindings.bind(~k(z R), :agent_expand_all, "Expand all")
     # ]-prefix: semantic navigation (domain-specific)
-    |> Bindings.bind([{?], 0}, {?m, 0}], :agent_next_message, "Next message")
-    |> Bindings.bind([{?], 0}, {?c, 0}], :agent_next_code_block, "Next code block/hunk")
-    |> Bindings.bind([{?], 0}, {?t, 0}], :agent_next_tool_call, "Next tool call")
+    |> Bindings.bind(~k(] m), :agent_next_message, "Next message")
+    |> Bindings.bind(~k(] c), :agent_next_code_block, "Next code block/hunk")
+    |> Bindings.bind(~k(] t), :agent_next_tool_call, "Next tool call")
     # [-prefix: semantic navigation (domain-specific)
-    |> Bindings.bind([{?[, 0}, {?m, 0}], :agent_prev_message, "Previous message")
-    |> Bindings.bind([{?[, 0}, {?c, 0}], :agent_prev_code_block, "Previous code block/hunk")
-    |> Bindings.bind([{?[, 0}, {?t, 0}], :agent_prev_tool_call, "Previous tool call")
+    |> Bindings.bind(~k([ m), :agent_prev_message, "Previous message")
+    |> Bindings.bind(~k([ c), :agent_prev_code_block, "Previous code block/hunk")
+    |> Bindings.bind(~k([ t), :agent_prev_tool_call, "Previous tool call")
     # Copy (domain: structured copy, not raw yank)
-    |> Bindings.bind([{?y, 0}], :agent_copy_code_block, "Copy code block")
-    |> Bindings.bind([{?Y, 0}], :agent_copy_message, "Copy full message")
+    |> Bindings.bind(~k(y), :agent_copy_code_block, "Copy code block")
+    |> Bindings.bind(~k(Y), :agent_copy_message, "Copy full message")
     # Input focus
-    |> Bindings.bind([{?i, 0}], :agent_focus_input, "Focus input")
-    |> Bindings.bind([{?a, 0}], :agent_focus_input, "Focus input")
-    |> Bindings.bind([{?A, 0}], :agent_focus_input, "Focus input (append)")
-    |> Bindings.bind([{@enter, 0}], :agent_focus_input, "Focus input")
+    |> Bindings.bind(~k(i), :agent_focus_input, "Focus input")
+    |> Bindings.bind(~k(a), :agent_focus_input, "Focus input")
+    |> Bindings.bind(~k(A), :agent_focus_input, "Focus input (append)")
+    |> Bindings.bind(~k(RET), :agent_focus_input, "Focus input")
     # Collapse toggle (magit-style o)
-    |> Bindings.bind([{?o, 0}], :agent_toggle_collapse, "Toggle collapse")
+    |> Bindings.bind(~k(o), :agent_toggle_collapse, "Toggle collapse")
     # Panel
-    |> Bindings.bind([{?}, 0}], :agent_grow_panel, "Grow chat panel")
-    |> Bindings.bind([{?{, 0}], :agent_shrink_panel, "Shrink chat panel")
-    |> Bindings.bind([{?=, 0}], :agent_reset_panel, "Reset panel split")
-    |> Bindings.bind([{@tab, 0}], :agent_switch_focus, "Switch panel focus")
+    |> Bindings.bind(~k(}), :agent_grow_panel, "Grow chat panel")
+    |> Bindings.bind(~k({), :agent_shrink_panel, "Shrink chat panel")
+    |> Bindings.bind(~k(=), :agent_reset_panel, "Reset panel split")
+    |> Bindings.bind(~k(TAB), :agent_switch_focus, "Switch panel focus")
     # Search: standard vim `/` search works on the *Agent* buffer.
     # Keys `/`, `n`, `N` pass through to the Mode FSM.
     # Session
-    |> Bindings.bind([{?s, 0}], :agent_session_switcher, "Session switcher")
+    |> Bindings.bind(~k(s), :agent_session_switcher, "Session switcher")
     # Help
-    |> Bindings.bind([{??, 0}], :agent_toggle_help, "Toggle help overlay")
+    |> Bindings.bind(~k(?), :agent_toggle_help, "Toggle help overlay")
     # Return to editor
-    |> Bindings.bind([{?q, 0}], :agent_close, "Return to editor")
-    |> Bindings.bind([{@escape, 0}], :agent_dismiss_or_noop, "Dismiss/cancel")
+    |> Bindings.bind(~k(q), :agent_close, "Return to editor")
+    |> Bindings.bind(~k(ESC), :agent_dismiss_or_noop, "Dismiss/cancel")
     # Clear
-    |> Bindings.bind([{?l, @ctrl}], :agent_clear_chat, "Clear chat display")
+    |> Bindings.bind(~k(C-l), :agent_clear_chat, "Clear chat display")
   end
 
   # ── Insert mode bindings ───────────────────────────────────────────────────
@@ -146,11 +145,11 @@ defmodule Minga.Keymap.Scope.Agent do
       then: fn trie ->
         trie
         # ESC switches to input normal mode (vim-style)
-        |> Bindings.bind([{@escape, 0}], :agent_input_to_normal, "Normal mode")
+        |> Bindings.bind(~k(ESC), :agent_input_to_normal, "Normal mode")
         # Enter submits
-        |> Bindings.bind([{@enter, 0}], :agent_submit_or_newline, "Submit prompt")
+        |> Bindings.bind(~k(RET), :agent_submit_or_newline, "Submit prompt")
         # Backspace
-        |> Bindings.bind([{@backspace, 0}], :agent_input_backspace, "Delete character")
+        |> Bindings.bind(~k(DEL), :agent_input_backspace, "Delete character")
         # Left/right arrows handled by Vim.handle_key (shared primitive).
         # Up/down arrows handled here: moves cursor OR recalls prompt history.
         |> Bindings.bind([{0xF700, 0}], :agent_input_up, "Move up / history prev")
@@ -164,8 +163,8 @@ defmodule Minga.Keymap.Scope.Agent do
         |> Bindings.bind([{57_352, @alt}], :agent_dequeue, "Dequeue to editor")
         # Scope-specific overrides on top of group bindings:
         # Ctrl+D/U get more specific descriptions in insert context
-        |> Bindings.bind([{?d, @ctrl}], :agent_scroll_half_down, "Scroll down (while typing)")
-        |> Bindings.bind([{?u, @ctrl}], :agent_scroll_half_up, "Scroll up (while typing)")
+        |> Bindings.bind(~k(C-d), :agent_scroll_half_down, "Scroll down (while typing)")
+        |> Bindings.bind(~k(C-u), :agent_scroll_half_up, "Scroll up (while typing)")
       end
     )
   end
@@ -184,7 +183,7 @@ defmodule Minga.Keymap.Scope.Agent do
         trie
         # No Escape binding: in normal mode, Escape is a no-op (vim semantics).
         # Use `q` or Ctrl+Q to leave the input field.
-        |> Bindings.bind([{?q, 0}], :agent_unfocus_input, "Back to chat nav")
+        |> Bindings.bind(~k(q), :agent_unfocus_input, "Back to chat nav")
       end
     )
   end
@@ -297,18 +296,18 @@ defmodule Minga.Keymap.Scope.Agent do
         CUADefaults.navigation_trie()
         |> merge_trie(trie)
         # Enter: focus input if not focused, submit if focused
-        |> Bindings.bind([{@enter, 0}], :agent_focus_or_submit, "Focus input / submit")
-        |> Bindings.bind([{@escape, 0}], :agent_dismiss_or_noop, "Dismiss/cancel")
-        |> Bindings.bind([{@tab, 0}], :agent_switch_focus, "Switch panel focus")
+        |> Bindings.bind(~k(RET), :agent_focus_or_submit, "Focus input / submit")
+        |> Bindings.bind(~k(ESC), :agent_dismiss_or_noop, "Dismiss/cancel")
+        |> Bindings.bind(~k(TAB), :agent_switch_focus, "Switch panel focus")
         # Cmd chords (GUI) + Ctrl fallbacks (TUI)
         |> Bindings.bind([{?c, @cmd}], :agent_copy_code_block, "Copy code block")
         |> Bindings.bind([{?a, @cmd}], :select_all, "Select all")
-        |> Bindings.bind([{?c, @ctrl}], :agent_copy_code_block, "Copy code block")
-        |> Bindings.bind([{?a, @ctrl}], :select_all, "Select all")
+        |> Bindings.bind(~k(C-c), :agent_copy_code_block, "Copy code block")
+        |> Bindings.bind(~k(C-a), :select_all, "Select all")
         # Input field bindings (used when input focused)
-        |> Bindings.bind([{@backspace, 0}], :agent_input_backspace, "Delete character")
+        |> Bindings.bind(~k(DEL), :agent_input_backspace, "Delete character")
         |> Bindings.bind([{@enter, @shift}], :agent_insert_newline, "Insert newline")
-        |> Bindings.bind([{?j, @ctrl}], :agent_insert_newline, "Insert newline")
+        |> Bindings.bind(~k(C-j), :agent_insert_newline, "Insert newline")
         |> Bindings.bind([{0x0A, 0}], :agent_insert_newline, "Insert newline")
         |> Bindings.bind([{@enter, @alt}], :agent_insert_newline, "Insert newline")
         # Arrow up/down in input: history navigation

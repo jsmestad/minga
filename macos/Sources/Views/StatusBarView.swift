@@ -196,9 +196,6 @@ struct StatusBarView: View {
     private let rightFixedControlsWidth: CGFloat = 34
     private let maxCenterStatusWidth: CGFloat = 320
 
-    @State private var gitCopied = false
-    @State private var gitCopyResetTask: Task<Void, Never>?
-
     var body: some View {
         GeometryReader { proxy in
             let layout = modelineLayout(totalWidth: proxy.size.width)
@@ -349,7 +346,7 @@ struct StatusBarView: View {
         case "filename":
             filenameSegment(group: group, command: command(in: group))
         case "git":
-            if state.hasGit && !state.gitBranch.isEmpty { gitSegment }
+            if state.hasGit && !state.gitBranch.isEmpty { gitSegment(command: command(in: group)) }
         case "agent":
             agentStatusIcon
         case "background_agent":
@@ -476,34 +473,25 @@ struct StatusBarView: View {
     }
 
     @ViewBuilder
-    private var gitSegment: some View {
+    private func gitSegment(command: String?) -> some View {
         Button(action: {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(state.gitBranch, forType: .string)
-            gitCopied = true
-            gitCopyResetTask?.cancel()
-            gitCopyResetTask = Task { @MainActor in
-                try? await Task.sleep(for: .seconds(2))
-                guard !Task.isCancelled else { return }
-                gitCopied = false
-                gitCopyResetTask = nil
-            }
+            encoder?.sendExecuteCommand(name: command ?? "git_branch_picker")
         }) {
             HStack(spacing: 3) {
-                Image(systemName: gitCopied ? "checkmark" : "arrow.triangle.branch")
+                Image(systemName: "arrow.triangle.branch")
                     .font(.system(size: 9, weight: .medium))
-                Text(gitCopied ? "Copied!" : state.gitBranch)
+                Text(state.gitBranch)
                     .font(.system(size: 11))
                     .lineLimit(1)
 
-                if !gitCopied && gitSyncing {
+                if gitSyncing {
                     ProgressView()
                         .controlSize(.mini)
                         .scaleEffect(0.45)
                         .frame(width: 12, height: barHeight)
                 }
 
-                if !gitCopied, state.hasGitDiffStats {
+                if state.hasGitDiffStats {
                     HStack(spacing: 4) {
                         if state.gitAdded > 0 {
                             Text("+\(state.gitAdded)")
@@ -526,15 +514,11 @@ struct StatusBarView: View {
             .foregroundStyle(theme.modelineBarFg.opacity(0.6))
         }
         .buttonStyle(.plain)
-        .help("Click to copy branch name")
-        .accessibilityLabel(gitCopied ? "Git branch copied" : "Git branch \(state.gitBranch)")
-        .accessibilityHint("Copies the branch name")
+        .help("Open branch picker")
+        .accessibilityLabel("Git branch \(state.gitBranch)")
+        .accessibilityHint("Opens the branch picker")
         .padding(.horizontal, 6)
         .statusBarPointingHand()
-        .onDisappear {
-            gitCopyResetTask?.cancel()
-            gitCopyResetTask = nil
-        }
     }
 
     @ViewBuilder

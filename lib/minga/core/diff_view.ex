@@ -8,12 +8,21 @@ defmodule Minga.Core.DiffView do
 
   alias Minga.Core.Diff
 
+  @type line_type :: :context | :added | :removed | :header | :fold
+  @type pane_line_type :: :context | :added | :removed | :blank | :fold
+
   @typedoc "Metadata for a single display line in the diff view."
   @type line_meta :: %{
-          type: :context | :added | :removed | :header | :fold,
-          original_line: non_neg_integer() | nil,
-          fold_count: non_neg_integer() | nil,
-          word_changes: [Diff.char_range()] | nil
+          required(:type) => line_type(),
+          required(:original_line) => non_neg_integer() | nil,
+          required(:fold_count) => non_neg_integer() | nil,
+          required(:word_changes) => [Diff.char_range()] | nil,
+          optional(:left_type) => pane_line_type(),
+          optional(:right_type) => pane_line_type(),
+          optional(:left_width) => pos_integer(),
+          optional(:separator_col) => non_neg_integer(),
+          optional(:left_word_changes) => [Diff.char_range()] | nil,
+          optional(:right_word_changes) => [Diff.char_range()] | nil
         }
 
   @typedoc "Result of building a diff view: the text content and per-line metadata."
@@ -29,12 +38,22 @@ defmodule Minga.Core.DiffView do
            | {:unpaired_new, String.t(), non_neg_integer()}
 
   @typep indexed_line :: {String.t(), non_neg_integer()}
+  @typep side_by_side_line :: %{
+           left: String.t(),
+           right: String.t(),
+           left_type: pane_line_type(),
+           right_type: pane_line_type(),
+           original_line: non_neg_integer() | nil,
+           fold_count: non_neg_integer() | nil,
+           left_word_changes: [Diff.char_range()] | nil,
+           right_word_changes: [Diff.char_range()] | nil
+         }
 
   @context_lines 3
   @fold_threshold 6
   @line_pair_similarity_threshold 0.35
   @max_line_pair_similarity_attempts 400
-
+  @default_side_by_side_pane_width 80
   @doc """
   Builds a unified diff view from base and current content.
 
@@ -87,7 +106,343 @@ defmodule Minga.Core.DiffView do
     }
   end
 
+  @doc """
+  Builds a GUI side-by-side diff view from base and current content.
+
+  The result uses one rendered buffer line per aligned row. The left pane carries the old version, the right pane carries the new version, and blank filler rows preserve vertical alignment across additions and deletions. Metadata includes pane-local change ranges so GUI decorations can highlight each pane independently.
+  """
+  @spec build_side_by_side(String.t(), String.t(), pos_integer()) :: diff_view_result()
+  def build_side_by_side(
+        base_content,
+        current_content,
+        pane_width \\ @default_side_by_side_pane_width
+      ) do
+    base_lines = split_lines(base_content)
+    current_lines = split_lines(current_content)
+    hunks = Diff.diff_lines(base_lines, current_lines)
+
+    build_side_by_side_from_hunks(base_lines, current_lines, hunks, pane_width)
+  end
+
+  @doc """
+  Builds a GUI side-by-side diff view from pre-computed hunks.
+  """
+  @spec build_side_by_side_from_hunks([String.t()], [String.t()], [Diff.hunk()], pos_integer()) ::
+          diff_view_result()
+  def build_side_by_side_from_hunks(_base_lines, _current_lines, [], pane_width) do
+    {line, meta} = format_side_by_side_line(no_changes_side_by_side_line(), pane_width)
+
+    %{
+      text: line,
+      line_metadata: [meta],
+      hunk_lines: []
+    }
+  end
+
+  def build_side_by_side_from_hunks(base_lines, current_lines, hunks, pane_width) do
+    regions = build_side_by_side_regions(base_lines, current_lines, hunks)
+
+    {display_lines, metadata, hunk_indices} =
+      Enum.reduce(regions, {[], [], []}, fn
+        {:context, ctx_lines, start_orig}, {lines_acc, meta_acc, hunk_acc} ->
+          add_context_side_by_side(
+            lines_acc,
+            meta_acc,
+            hunk_acc,
+            ctx_lines,
+            start_orig,
+            pane_width
+          )
+
+        {:hunk, hunk}, {lines_acc, meta_acc, hunk_acc} ->
+          display_line_idx = length(lines_acc)
+
+          add_hunk_side_by_side(
+            lines_acc,
+            meta_acc,
+            hunk_acc,
+            hunk,
+            current_lines,
+            display_line_idx,
+            pane_width
+          )
+      end)
+
+    %{
+      text: Enum.join(display_lines, "\n"),
+      line_metadata: metadata,
+      hunk_lines: Enum.reverse(hunk_indices)
+    }
+  end
+
   # ── Private ────────────────────────────────────────────────────────────
+
+  @spec add_hunk_side_by_side(
+          [String.t()],
+          [line_meta()],
+          [non_neg_integer()],
+          Diff.hunk(),
+          [String.t()],
+          non_neg_integer(),
+          pos_integer()
+        ) :: {[String.t()], [line_meta()], [non_neg_integer()]}
+  defp add_hunk_side_by_side(
+         lines_acc,
+         meta_acc,
+         hunk_acc,
+         hunk,
+         current_lines,
+         display_line_idx,
+         pane_width
+       ) do
+    side_lines = build_hunk_side_by_side(hunk, current_lines)
+    hunk_acc = [display_line_idx + length(side_lines) - 1 | hunk_acc]
+    {hunk_text, hunk_meta} = encode_side_by_side_lines(side_lines, pane_width)
+    {lines_acc ++ hunk_text, meta_acc ++ hunk_meta, hunk_acc}
+  end
+
+  @spec add_context_side_by_side(
+          [String.t()],
+          [line_meta()],
+          [non_neg_integer()],
+          [String.t()],
+          non_neg_integer(),
+          pos_integer()
+        ) :: {[String.t()], [line_meta()], [non_neg_integer()]}
+  defp add_context_side_by_side(lines, meta, hunks, ctx_lines, start_orig, pane_width) do
+    count = length(ctx_lines)
+
+    if count > @fold_threshold do
+      add_folded_context_side_by_side(lines, meta, hunks, ctx_lines, start_orig, pane_width)
+    else
+      side_lines = context_side_by_side_lines(ctx_lines, start_orig)
+      {text, text_meta} = encode_side_by_side_lines(side_lines, pane_width)
+      {lines ++ text, meta ++ text_meta, hunks}
+    end
+  end
+
+  @spec add_folded_context_side_by_side(
+          [String.t()],
+          [line_meta()],
+          [non_neg_integer()],
+          [String.t()],
+          non_neg_integer(),
+          pos_integer()
+        ) :: {[String.t()], [line_meta()], [non_neg_integer()]}
+  defp add_folded_context_side_by_side(lines, meta, hunks, ctx_lines, start_orig, pane_width) do
+    count = length(ctx_lines)
+    head = Enum.take(ctx_lines, @context_lines)
+    tail = Enum.take(ctx_lines, -@context_lines)
+    fold_count = count - @context_lines * 2
+    tail_start = start_orig + count - @context_lines
+
+    side_lines =
+      context_side_by_side_lines(head, start_orig) ++
+        [fold_side_by_side_line(fold_count)] ++ context_side_by_side_lines(tail, tail_start)
+
+    {text, text_meta} = encode_side_by_side_lines(side_lines, pane_width)
+    {lines ++ text, meta ++ text_meta, hunks}
+  end
+
+  @spec context_side_by_side_lines([String.t()], non_neg_integer()) :: [side_by_side_line()]
+  defp context_side_by_side_lines(ctx_lines, start_orig) do
+    ctx_lines
+    |> Enum.with_index(start_orig)
+    |> Enum.map(fn {line, idx} ->
+      %{
+        left: line,
+        right: line,
+        left_type: :context,
+        right_type: :context,
+        original_line: idx,
+        fold_count: nil,
+        left_word_changes: nil,
+        right_word_changes: nil
+      }
+    end)
+  end
+
+  @spec fold_side_by_side_line(non_neg_integer()) :: side_by_side_line()
+  defp fold_side_by_side_line(fold_count) do
+    text = "  #{fold_count} unchanged lines"
+
+    %{
+      left: text,
+      right: "",
+      left_type: :fold,
+      right_type: :blank,
+      original_line: nil,
+      fold_count: fold_count,
+      left_word_changes: nil,
+      right_word_changes: nil
+    }
+  end
+
+  @spec no_changes_side_by_side_line() :: side_by_side_line()
+  defp no_changes_side_by_side_line do
+    %{
+      left: "No changes",
+      right: "No changes",
+      left_type: :context,
+      right_type: :context,
+      original_line: nil,
+      fold_count: nil,
+      left_word_changes: nil,
+      right_word_changes: nil
+    }
+  end
+
+  @spec build_hunk_side_by_side(Diff.hunk(), [String.t()]) :: [side_by_side_line()]
+  defp build_hunk_side_by_side(%{type: :added} = hunk, current_lines) do
+    current_lines
+    |> Enum.slice(hunk.start_line..(hunk.start_line + hunk.count - 1))
+    |> Enum.with_index(hunk.start_line)
+    |> Enum.map(fn {line, idx} ->
+      %{
+        left: "",
+        right: line,
+        left_type: :blank,
+        right_type: :added,
+        original_line: idx,
+        fold_count: nil,
+        left_word_changes: nil,
+        right_word_changes: nil
+      }
+    end)
+  end
+
+  defp build_hunk_side_by_side(%{type: :deleted} = hunk, _current_lines) do
+    Enum.map(hunk.old_lines, fn line ->
+      %{
+        left: line,
+        right: "",
+        left_type: :removed,
+        right_type: :blank,
+        original_line: nil,
+        fold_count: nil,
+        left_word_changes: nil,
+        right_word_changes: nil
+      }
+    end)
+  end
+
+  defp build_hunk_side_by_side(%{type: :modified} = hunk, current_lines) do
+    new_lines = Enum.slice(current_lines, hunk.start_line..(hunk.start_line + hunk.count - 1))
+
+    hunk.old_lines
+    |> pair_modified_lines(new_lines)
+    |> Enum.map(&modified_pair_side_by_side_line(&1, hunk.start_line))
+  end
+
+  @spec modified_pair_side_by_side_line(modified_line_pair(), non_neg_integer()) ::
+          side_by_side_line()
+  defp modified_pair_side_by_side_line(
+         {:paired, old_line, new_line, _old_idx, new_idx},
+         start_line
+       ) do
+    {del_ranges, ins_ranges} = Diff.word_diff_ranges(old_line, new_line)
+
+    %{
+      left: old_line,
+      right: new_line,
+      left_type: :removed,
+      right_type: :added,
+      original_line: start_line + new_idx,
+      fold_count: nil,
+      left_word_changes: del_ranges,
+      right_word_changes: ins_ranges
+    }
+  end
+
+  defp modified_pair_side_by_side_line({:unpaired_old, old_line}, _start_line) do
+    %{
+      left: old_line,
+      right: "",
+      left_type: :removed,
+      right_type: :blank,
+      original_line: nil,
+      fold_count: nil,
+      left_word_changes: nil,
+      right_word_changes: nil
+    }
+  end
+
+  defp modified_pair_side_by_side_line({:unpaired_new, new_line, new_idx}, start_line) do
+    %{
+      left: "",
+      right: new_line,
+      left_type: :blank,
+      right_type: :added,
+      original_line: start_line + new_idx,
+      fold_count: nil,
+      left_word_changes: nil,
+      right_word_changes: nil
+    }
+  end
+
+  @spec encode_side_by_side_lines([side_by_side_line()], pos_integer()) ::
+          {[String.t()], [line_meta()]}
+  defp encode_side_by_side_lines(side_lines, pane_width) do
+    side_lines
+    |> Enum.map(&format_side_by_side_line(&1, pane_width))
+    |> Enum.unzip()
+  end
+
+  @spec format_side_by_side_line(side_by_side_line(), pos_integer()) :: {String.t(), line_meta()}
+  defp format_side_by_side_line(line, pane_width) do
+    left = truncate_for_pane(line.left, pane_width)
+    right = truncate_for_pane(line.right, pane_width)
+    separator = " │ "
+    text = String.pad_trailing(left, pane_width) <> separator <> right
+    separator_col = pane_width + 1
+
+    meta = %{
+      type: combined_side_by_side_type(line.left_type, line.right_type),
+      original_line: line.original_line,
+      fold_count: line.fold_count,
+      word_changes: nil,
+      left_type: line.left_type,
+      right_type: line.right_type,
+      left_width: pane_width,
+      separator_col: separator_col,
+      left_word_changes: clamp_word_changes(line.left_word_changes, pane_width),
+      right_word_changes: clamp_word_changes(line.right_word_changes, pane_width)
+    }
+
+    {text, meta}
+  end
+
+  @spec truncate_for_pane(String.t(), pos_integer()) :: String.t()
+  defp truncate_for_pane(text, pane_width) do
+    if String.length(text) > pane_width do
+      String.slice(text, 0, pane_width)
+    else
+      text
+    end
+  end
+
+  @spec clamp_word_changes([Diff.char_range()] | nil, pos_integer()) :: [Diff.char_range()] | nil
+  defp clamp_word_changes(nil, _pane_width), do: nil
+
+  defp clamp_word_changes(word_changes, pane_width) do
+    word_changes
+    |> Enum.map(&clamp_word_change(&1, pane_width))
+    |> Enum.reject(&is_nil/1)
+  end
+
+  @spec clamp_word_change(Diff.char_range(), pos_integer()) :: Diff.char_range() | nil
+  defp clamp_word_change({start_col, _end_col}, pane_width) when start_col >= pane_width, do: nil
+
+  defp clamp_word_change({start_col, end_col}, pane_width) do
+    {start_col, min(end_col, pane_width)}
+  end
+
+  @spec combined_side_by_side_type(pane_line_type(), pane_line_type()) :: line_type()
+  defp combined_side_by_side_type(:fold, _right_type), do: :fold
+  defp combined_side_by_side_type(_left_type, :fold), do: :fold
+  defp combined_side_by_side_type(:removed, _right_type), do: :removed
+  defp combined_side_by_side_type(_left_type, :added), do: :added
+  defp combined_side_by_side_type(_left_type, _right_type), do: :context
 
   @spec add_hunk_lines(
           [String.t()],
@@ -117,12 +472,25 @@ defmodule Minga.Core.DiffView do
 
   @spec build_regions([String.t()], [String.t()], [Diff.hunk()]) :: [term()]
   defp build_regions(base_lines, current_lines, hunks) do
-    # Sort hunks by start_line
+    build_regions(base_lines, current_lines, hunks, &build_hunk_display/3)
+  end
+
+  @spec build_side_by_side_regions([String.t()], [String.t()], [Diff.hunk()]) :: [term()]
+  defp build_side_by_side_regions(base_lines, current_lines, hunks) do
+    build_regions(base_lines, current_lines, hunks, fn hunk, _base_lines, _current_lines ->
+      hunk
+    end)
+  end
+
+  @spec build_regions([String.t()], [String.t()], [Diff.hunk()], (Diff.hunk(),
+                                                                  [String.t()],
+                                                                  [String.t()] ->
+                                                                    term())) :: [term()]
+  defp build_regions(base_lines, current_lines, hunks, build_hunk) do
     sorted_hunks = Enum.sort_by(hunks, & &1.start_line)
 
     {regions_reversed, last_end} =
       Enum.reduce(sorted_hunks, {[], 0}, fn hunk, {regions_acc, prev_end} ->
-        # Context before this hunk
         ctx_start = prev_end
         ctx_end = hunk.start_line
 
@@ -134,10 +502,8 @@ defmodule Minga.Core.DiffView do
             regions_acc
           end
 
-        # The hunk itself
-        hunk_display = build_hunk_display(hunk, base_lines, current_lines)
+        hunk_display = build_hunk.(hunk, base_lines, current_lines)
 
-        # Calculate where the hunk ends in current lines
         hunk_end =
           case hunk.type do
             :deleted -> hunk.start_line
@@ -149,7 +515,6 @@ defmodule Minga.Core.DiffView do
 
     regions = Enum.reverse(regions_reversed)
 
-    # Trailing context after last hunk
     if last_end < length(current_lines) do
       ctx = Enum.slice(current_lines, last_end..(length(current_lines) - 1))
       regions ++ [{:context, ctx, last_end}]

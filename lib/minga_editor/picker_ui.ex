@@ -25,6 +25,7 @@ defmodule MingaEditor.PickerUI do
   alias MingaEditor.State.WhichKey, as: WhichKeyState
   alias MingaEditor.UI.Picker
   alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.Item
 
   import Bitwise
 
@@ -172,8 +173,9 @@ defmodule MingaEditor.PickerUI do
         update_picker(state, &%{&1 | action_menu: nil})
 
       {{_name, action_id}, item} ->
-        new_state = close(update_picker(state, &%{&1 | action_menu: nil}))
-        source.on_action(action_id, item, new_state)
+        state
+        |> update_picker(&%{&1 | action_menu: nil})
+        |> run_source_action_and_close(source, action_id, item)
     end
   end
 
@@ -330,6 +332,31 @@ defmodule MingaEditor.PickerUI do
     end
   end
 
+  # C-d → branch picker delete flow only. Keeps printable `d` available for
+  # normal picker filtering, including sources that define alternative delete
+  # actions for other purposes.
+  def handle_key(
+        %{shell_state: %{modal: {:picker, %{picker_ui: %{picker: picker, source: source}}}}} =
+          state,
+        ?d,
+        mods
+      )
+      when band(mods, @ctrl) != 0 and source == MingaEditor.UI.Picker.GitBranchSource do
+    case Picker.selected_item(picker) do
+      %Item{id: {:branch, _name, _current?, true}} ->
+        state
+
+      %Item{id: {:branch, _name, true, false}} = item ->
+        run_source_action_and_close(state, source, :delete, item)
+
+      %Item{id: {:branch, _name, false, false}} = item ->
+        run_source_action_and_close(state, source, :delete, item)
+
+      _other ->
+        state
+    end
+  end
+
   # Backspace (with mode-switch detection: if query becomes empty and we're in a switched mode, switch back)
   def handle_key(
         %{
@@ -373,21 +400,32 @@ defmodule MingaEditor.PickerUI do
         state
 
       c ->
-        # Check if this is a mode-switching prefix (first char, empty query, switchable source)
-        case maybe_switch_mode(state, c, picker.query) do
-          {:switched, new_state} ->
-            new_state
-
-          :no_switch ->
-            new_picker = Picker.type_char(picker, c)
-            state = update_picker(state, &%{&1 | picker: new_picker})
-            maybe_preview_selection(state)
-        end
+        type_printable_char(state, picker, c)
     end
   end
 
   # Ignore all other keys
   def handle_key(state, _cp, _mods), do: state
+
+  @spec run_source_action_and_close(EditorState.t(), module(), atom(), Picker.item()) ::
+          EditorState.t()
+  defp run_source_action_and_close(state, source, action_id, item) do
+    new_state = close(state)
+    source.on_action(action_id, item, new_state)
+  end
+
+  @spec type_printable_char(EditorState.t(), Picker.t(), String.t()) :: EditorState.t()
+  defp type_printable_char(state, picker, char) do
+    case maybe_switch_mode(state, char, picker.query) do
+      {:switched, new_state} ->
+        new_state
+
+      :no_switch ->
+        new_picker = Picker.type_char(picker, char)
+        state = update_picker(state, &%{&1 | picker: new_picker})
+        maybe_preview_selection(state)
+    end
+  end
 
   @spec select_item(EditorState.t(), Picker.item(), module()) ::
           EditorState.t() | {EditorState.t(), {:execute_command, atom()}}

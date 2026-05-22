@@ -21,6 +21,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   alias MingaEditor.BottomPanel
   alias MingaEditor.Commands
+  alias MingaEditor.Handlers.BufferRegistry
   alias MingaEditor.HighlightSync
   alias MingaEditor.Layout
   alias MingaEditor.LspActions
@@ -82,6 +83,26 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     |> EditorState.invalidate_all_windows()
     |> Layout.invalidate()
     |> Renderer.render_or_async()
+  end
+
+  defp dispatch_action(state, {:power_thermal_state, low_power?, thermal_state}) do
+    Minga.Log.info(
+      :editor,
+      "Power/thermal state: low_power=#{low_power?}, thermal=#{inspect(thermal_state)}"
+    )
+
+    state = EditorState.set_resource_pressure(state, low_power?, thermal_state)
+
+    Minga.Events.broadcast(
+      :power_thermal_state_changed,
+      %Minga.Events.PowerThermalStateEvent{
+        low_power?: low_power?,
+        thermal_state: thermal_state
+      },
+      EditorState.events_registry(state)
+    )
+
+    state
   end
 
   defp dispatch_action(state, :config_query) do
@@ -323,7 +344,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     if File.dir?(path) do
       open_dropped_directory(state, path)
     else
-      MingaEditor.open_file_by_path(state, path)
+      BufferRegistry.open_file_by_path(state, path)
     end
   end
 
@@ -557,7 +578,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
       git_root ->
         abs_path = Path.join(git_root, path)
-        MingaEditor.open_file_by_path(state, abs_path)
+        BufferRegistry.open_file_by_path(state, abs_path)
     end
   end
 
@@ -947,7 +968,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec open_file_by_path_in_active_window(state(), String.t()) :: state()
   defp open_file_by_path_in_active_window(state, abs_path) do
-    case MingaEditor.file_tab_for_path_in_active_workspace(state, abs_path) do
+    case BufferRegistry.file_tab_for_path_in_active_workspace(state, abs_path) do
       %Tab{} = tab ->
         open_tab_buffer_in_active_window(state, tab, abs_path)
 

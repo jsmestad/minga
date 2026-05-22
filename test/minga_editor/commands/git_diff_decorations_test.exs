@@ -8,6 +8,7 @@ defmodule MingaEditor.Commands.GitDiffDecorationsTest do
   alias Minga.Git
   alias Minga.Git.Stub, as: GitStub
   alias MingaEditor.Commands.Git, as: GitCommands
+  alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Viewport
 
@@ -210,6 +211,174 @@ defmodule MingaEditor.Commands.GitDiffDecorationsTest do
       assert buffer_content(source_buf) == current
     end
 
+    test "non-GUI diff layout toggle leaves unified diff unchanged" do
+      git_root = unique_git_root()
+      rel_path = "file.txt"
+      base = "old\n"
+      current = "new\n"
+
+      GitStub.set_head(git_root, rel_path, base)
+      on_exit(fn -> GitStub.clear(git_root) end)
+
+      diff_result = DiffView.build(base, current)
+      {:ok, source_buf} = Buffer.start_link(content: current)
+      {:ok, diff_buf} = Buffer.start_link(content: diff_result.text)
+
+      state =
+        build_state()
+        |> EditorState.add_buffer(source_buf)
+        |> EditorState.add_buffer(diff_buf)
+        |> EditorState.register_diff_view(diff_buf, %{
+          source_buf: source_buf,
+          git_root: git_root,
+          rel_path: rel_path,
+          staged: false,
+          line_metadata: diff_result.line_metadata,
+          hunk_lines: diff_result.hunk_lines,
+          view_mode: :unified,
+          pane_width: 20
+        })
+
+      state = GitCommands.execute(state, :git_diff_toggle_layout)
+
+      assert EditorState.status_msg(state) == "Side-by-side diff is only available in GUI"
+      assert state.diff_views[diff_buf].view_mode == :unified
+      refute buffer_content(diff_buf) =~ " │ "
+    end
+
+    test "stage hunk from side-by-side diff preserves the side-by-side layout" do
+      git_root = unique_git_root()
+      rel_path = "file.txt"
+      base = "old\n"
+      current = "new\n"
+
+      GitStub.set_head(git_root, rel_path, base)
+      on_exit(fn -> GitStub.clear(git_root) end)
+
+      diff_result = DiffView.build_side_by_side(base, current, 20)
+
+      changed_line =
+        Enum.find_index(diff_result.line_metadata, fn meta ->
+          meta.left_type == :removed and meta.right_type == :added
+        end)
+
+      {:ok, source_buf} = Buffer.start_link(content: current)
+      {:ok, diff_buf} = Buffer.start_link(content: diff_result.text)
+      Buffer.move_to(diff_buf, {changed_line, 0})
+
+      state =
+        build_state()
+        |> EditorState.set_viewport(Viewport.new(24, 40))
+        |> Map.put(:capabilities, %Capabilities{frontend_type: :native_gui})
+        |> EditorState.add_buffer(source_buf)
+        |> EditorState.add_buffer(diff_buf)
+        |> EditorState.register_diff_view(diff_buf, %{
+          source_buf: source_buf,
+          git_root: git_root,
+          rel_path: rel_path,
+          staged: false,
+          line_metadata: diff_result.line_metadata,
+          hunk_lines: diff_result.hunk_lines,
+          view_mode: :side_by_side,
+          pane_width: 20
+        })
+
+      state = GitCommands.execute(state, :git_stage_hunk)
+
+      assert EditorState.status_msg(state) == "Hunk 1/1 staged"
+      assert state.diff_views[diff_buf].view_mode == :side_by_side
+    end
+
+    test "revert hunk from side-by-side diff preserves the side-by-side layout" do
+      git_root = unique_git_root()
+      rel_path = "file.txt"
+      base = "old\n"
+      current = "new\n"
+
+      GitStub.set_head(git_root, rel_path, base)
+      on_exit(fn -> GitStub.clear(git_root) end)
+
+      diff_result = DiffView.build_side_by_side(base, current, 20)
+
+      changed_line =
+        Enum.find_index(diff_result.line_metadata, fn meta ->
+          meta.left_type == :removed and meta.right_type == :added
+        end)
+
+      {:ok, source_buf} = Buffer.start_link(content: current)
+      {:ok, diff_buf} = Buffer.start_link(content: diff_result.text)
+      Buffer.move_to(diff_buf, {changed_line, 0})
+
+      state =
+        build_state()
+        |> EditorState.set_viewport(Viewport.new(24, 40))
+        |> Map.put(:capabilities, %Capabilities{frontend_type: :native_gui})
+        |> EditorState.add_buffer(source_buf)
+        |> EditorState.add_buffer(diff_buf)
+        |> EditorState.register_diff_view(diff_buf, %{
+          source_buf: source_buf,
+          git_root: git_root,
+          rel_path: rel_path,
+          staged: false,
+          line_metadata: diff_result.line_metadata,
+          hunk_lines: diff_result.hunk_lines,
+          view_mode: :side_by_side,
+          pane_width: 20
+        })
+
+      state = GitCommands.execute(state, :git_revert_hunk)
+
+      assert EditorState.status_msg(state) == "Hunk 1/1 reverted"
+      assert state.diff_views[diff_buf].view_mode == :side_by_side
+      assert buffer_content(source_buf) == base
+    end
+
+    test "side-by-side diff decorations include word highlights on both panes" do
+      git_root = unique_git_root()
+      rel_path = "file.txt"
+      base = "alpha old\n"
+      current = "alpha new\n"
+
+      GitStub.set_head(git_root, rel_path, base)
+      on_exit(fn -> GitStub.clear(git_root) end)
+
+      diff_result = DiffView.build(base, current)
+      {:ok, source_buf} = Buffer.start_link(content: current)
+      {:ok, diff_buf} = Buffer.start_link(content: diff_result.text)
+
+      state =
+        build_state()
+        |> EditorState.set_viewport(Viewport.new(24, 40))
+        |> Map.put(:capabilities, %Capabilities{frontend_type: :native_gui})
+        |> EditorState.add_buffer(source_buf)
+        |> EditorState.add_buffer(diff_buf)
+        |> EditorState.register_diff_view(diff_buf, %{
+          source_buf: source_buf,
+          git_root: git_root,
+          rel_path: rel_path,
+          staged: false,
+          line_metadata: diff_result.line_metadata,
+          hunk_lines: diff_result.hunk_lines,
+          view_mode: :unified,
+          pane_width: 20
+        })
+
+      state = GitCommands.execute(state, :git_diff_toggle_layout)
+
+      highlights =
+        Buffer.decorations(diff_buf)
+        |> Decorations.highlights_for_line(0)
+        |> Enum.filter(&(&1.group == :diff_word))
+        |> Enum.sort_by(& &1.start)
+
+      assert Enum.map(highlights, &{&1.start, &1.end_}) == [
+               {{0, 6}, {0, 9}},
+               {{0, 29}, {0, 32}}
+             ]
+
+      assert state.diff_views[diff_buf].view_mode == :side_by_side
+    end
+
     test "stage hunk from diff view refreshes stale views instead of staging by index" do
       git_root = unique_git_root()
       rel_path = "file.txt"
@@ -289,6 +458,42 @@ defmodule MingaEditor.Commands.GitDiffDecorationsTest do
 
       assert buffer_content(source_buf) == working
       assert EditorState.status_msg(state) == "Cannot revert from a staged diff view"
+    end
+
+    test "GUI diff layout toggle rebuilds active diff as side-by-side" do
+      git_root = unique_git_root()
+      rel_path = "file.txt"
+      base = "old\n"
+      current = "new\n"
+
+      GitStub.set_head(git_root, rel_path, base)
+      on_exit(fn -> GitStub.clear(git_root) end)
+
+      diff_result = DiffView.build(base, current)
+      {:ok, source_buf} = Buffer.start_link(content: current)
+      {:ok, diff_buf} = Buffer.start_link(content: diff_result.text)
+
+      state =
+        build_state()
+        |> Map.put(:capabilities, %MingaEditor.Frontend.Capabilities{frontend_type: :native_gui})
+        |> EditorState.add_buffer(source_buf)
+        |> EditorState.add_buffer(diff_buf)
+        |> EditorState.register_diff_view(diff_buf, %{
+          source_buf: source_buf,
+          git_root: git_root,
+          rel_path: rel_path,
+          staged: false,
+          line_metadata: diff_result.line_metadata,
+          hunk_lines: diff_result.hunk_lines,
+          view_mode: :unified,
+          pane_width: 20
+        })
+
+      state = GitCommands.execute(state, :git_diff_toggle_layout)
+
+      assert buffer_content(diff_buf) =~ " │ "
+      assert state.diff_views[diff_buf].view_mode == :side_by_side
+      assert EditorState.status_msg(state) == "Diff layout: side-by-side"
     end
 
     test "staged diff toggle treats staged deletions as empty index content" do

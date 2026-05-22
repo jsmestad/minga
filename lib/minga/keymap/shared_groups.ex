@@ -13,9 +13,7 @@ defmodule Minga.Keymap.SharedGroups do
   include it. This keeps the dependency direction clean: scopes depend on groups,
   never the reverse.
 
-  Groups use raw `{codepoint, modifiers}` key tuples (not `KeyParser` strings)
-  because scope tries are built at module load time and string parsing adds
-  unnecessary overhead. Use the constants defined in this module for readability.
+  Groups use `~k` for readable key tuples when the key is part of the standard parser token set. Raw tuples remain only for frontend-specific keys that do not have human-readable parser tokens.
 
   ## Adding a new group
 
@@ -27,9 +25,9 @@ defmodule Minga.Keymap.SharedGroups do
   alias Minga.Keymap.Bindings
 
   import Bitwise
+  import Minga.Keymap.Sigil
 
   # Modifier bitmasks (same as used in scope modules)
-  @ctrl 0x02
   @shift 0x01
   @alt 0x04
 
@@ -93,12 +91,12 @@ defmodule Minga.Keymap.SharedGroups do
   @spec ctrl_agent_common() :: [binding()]
   def ctrl_agent_common do
     [
-      {[{?c, @ctrl}], :agent_ctrl_c, "Abort (streaming) or normal mode (idle)"},
-      {[{?d, @ctrl}], :agent_scroll_half_down, "Scroll down"},
-      {[{?u, @ctrl}], :agent_scroll_half_up, "Scroll up"},
-      {[{?l, @ctrl}], :agent_clear_chat, "Clear chat display"},
-      {[{?s, @ctrl}], :agent_save_buffer, "Save buffer"},
-      {[{?q, @ctrl}], :agent_unfocus_and_quit, "Unfocus and quit"}
+      {~k(C-c), :agent_ctrl_c, "Abort (streaming) or normal mode (idle)"},
+      {~k(C-d), :agent_scroll_half_down, "Scroll down"},
+      {~k(C-u), :agent_scroll_half_up, "Scroll up"},
+      {~k(C-l), :agent_clear_chat, "Clear chat display"},
+      {~k(C-s), :agent_save_buffer, "Save buffer"},
+      {~k(C-q), :agent_unfocus_and_quit, "Unfocus and quit"}
     ]
   end
 
@@ -145,10 +143,10 @@ defmodule Minga.Keymap.SharedGroups do
       {[{?a, cmd}], :select_all, "Select all"},
       {[{?s, cmd}], :save, "Save"},
       # TUI (Ctrl) fallbacks
-      {[{?z, @ctrl}], :undo, "Undo"},
-      {[{?y, @ctrl}], :redo, "Redo"},
-      {[{?v, @ctrl}], :paste_after, "Paste"},
-      {[{?a, @ctrl}], :select_all, "Select all"}
+      {~k(C-z), :undo, "Undo"},
+      {~k(C-y), :redo, "Redo"},
+      {~k(C-v), :paste_after, "Paste"},
+      {~k(C-a), :select_all, "Select all"}
     ]
   end
 
@@ -167,7 +165,7 @@ defmodule Minga.Keymap.SharedGroups do
   def newline_variants do
     [
       {[{@enter, @shift}], :agent_insert_newline, "Insert newline"},
-      {[{?j, @ctrl}], :agent_insert_newline, "Insert newline"},
+      {~k(C-j), :agent_insert_newline, "Insert newline"},
       {[{0x0A, 0}], :agent_insert_newline, "Insert newline"},
       {[{@enter, @alt}], :agent_insert_newline, "Insert newline"}
     ]

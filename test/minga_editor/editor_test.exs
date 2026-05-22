@@ -6,8 +6,12 @@ defmodule MingaEditor.EditorTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Config.Options
+  alias Minga.Events
   alias MingaEditor
+  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
+  alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.Startup
+  alias MingaEditor.State.ResourcePressure
 
   describe "build_initial_state/1" do
     test "returns normal-mode state with the provided buffer active" do
@@ -72,6 +76,41 @@ defmodule MingaEditor.EditorTest do
       editor_state(ctx)
 
       refute_received {:DOWN, ^ref, :process, _, _}
+    end
+  end
+
+  describe "power thermal gui actions" do
+    test "update resource pressure and broadcast the event" do
+      ctx = start_editor("hello")
+      Events.subscribe(:power_thermal_state_changed, registry: ctx.events_registry)
+
+      assert {:ok, action} = ProtocolGUI.decode_gui_action(0x47, <<1, 255>>)
+      send(ctx.editor, {:minga_input, {:gui_action, action}})
+
+      state = editor_state(ctx)
+
+      assert state.resource_pressure ==
+               ResourcePressure.update(ResourcePressure.new(), true, {:unknown, 255})
+
+      assert_receive {:minga_event, :power_thermal_state_changed,
+                      %Events.PowerThermalStateEvent{
+                        low_power?: true,
+                        thermal_state: {:unknown, 255}
+                      }}
+    end
+  end
+
+  describe "schedule_render_delay_ms/2" do
+    test "resource pressure floor wins over a smaller requested delay" do
+      state =
+        %{
+          TestHelpers.base_state()
+          | resource_pressure:
+              ResourcePressure.update(ResourcePressure.new(), true, {:unknown, 255})
+        }
+
+      assert MingaEditor.schedule_render_delay_ms(state, 1) == 33
+      assert MingaEditor.schedule_render_delay_ms(state, 44) == 44
     end
   end
 

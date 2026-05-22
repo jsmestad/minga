@@ -27,6 +27,8 @@ enum MinibufferMode: UInt8 {
     case substituteConfirm = 5
     case extensionConfirm = 6
     case describeKey = 7
+    case deleteConfirm = 8
+    case branchDeleteConfirm = 9
 }
 
 @MainActor

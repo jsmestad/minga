@@ -50,7 +50,47 @@ defmodule MingaEditor.UI.Picker.GitBranchSource do
     end
   end
 
+  def on_select(%Item{id: {:branch, name, _current?, _remote?}}, state) do
+    switch_branch(name, state)
+  end
+
   def on_select(%Item{id: {:branch, name}}, state) do
+    switch_branch(name, state)
+  end
+
+  def on_select(_, state), do: state
+
+  @impl true
+  @spec actions(Item.t()) :: [MingaEditor.UI.Picker.Source.action_entry()]
+  def actions(%Item{id: {:branch, _name, false, false}}), do: [{"Delete", :delete}]
+  def actions(_item), do: []
+
+  @impl true
+  @spec on_action(atom(), Item.t(), term()) :: term()
+  def on_action(:delete, %Item{id: {:branch, _name, true, false}}, state) do
+    MingaEditor.State.set_status(state, "Cannot delete current branch")
+  end
+
+  def on_action(:delete, %Item{id: {:branch, name, false, false}}, state) do
+    case resolve_git_root() do
+      nil ->
+        MingaEditor.State.set_status(state, "Not in a git repository")
+
+      git_root ->
+        mode_state = Minga.Mode.BranchDeleteConfirmState.new(git_root, name)
+        MingaEditor.State.transition_mode(state, :branch_delete_confirm, mode_state)
+    end
+  end
+
+  def on_action(_action, _item, state), do: state
+
+  @impl true
+  def on_cancel(state), do: state
+
+  # ── Private ────────────────────────────────────────────────────────────
+
+  @spec switch_branch(String.t(), term()) :: term()
+  defp switch_branch(name, state) do
     case resolve_git_root() do
       nil ->
         MingaEditor.State.set_status(state, "Not in a git repository")
@@ -66,13 +106,6 @@ defmodule MingaEditor.UI.Picker.GitBranchSource do
         end
     end
   end
-
-  def on_select(_, state), do: state
-
-  @impl true
-  def on_cancel(state), do: state
-
-  # ── Private ────────────────────────────────────────────────────────────
 
   @spec build_candidates(String.t()) :: [Item.t()]
   defp build_candidates(git_root) do
@@ -93,20 +126,20 @@ defmodule MingaEditor.UI.Picker.GitBranchSource do
 
   @spec format_branch(Git.BranchInfo.t()) :: Item.t()
   defp format_branch(branch) do
-    annotation =
-      cond do
-        branch.current -> "✓"
-        branch.remote -> "remote"
-        true -> nil
-      end
+    annotation = branch_annotation(branch)
 
     %Item{
-      id: {:branch, branch.name},
+      id: {:branch, branch.name, branch.current, branch.remote},
       label: branch.name,
       description: branch_description(branch),
       annotation: annotation
     }
   end
+
+  @spec branch_annotation(Git.BranchInfo.t()) :: String.t() | nil
+  defp branch_annotation(%Git.BranchInfo{current: true}), do: "✓"
+  defp branch_annotation(%Git.BranchInfo{remote: true}), do: "remote"
+  defp branch_annotation(%Git.BranchInfo{}), do: nil
 
   @spec branch_description(Git.BranchInfo.t()) :: String.t()
   defp branch_description(branch) do

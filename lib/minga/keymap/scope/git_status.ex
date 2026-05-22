@@ -16,10 +16,8 @@ defmodule Minga.Keymap.Scope.GitStatus do
 
   alias Minga.Keymap.Bindings
 
-  @enter 13
-  @escape 27
-  @tab 9
-  @ctrl 0x02
+  import Minga.Keymap.Sigil
+
   @cmd 0x08
 
   # Groups included by this scope.
@@ -87,38 +85,34 @@ defmodule Minga.Keymap.Scope.GitStatus do
   defp normal_trie do
     Bindings.new()
     # Navigation
-    |> Bindings.bind([{?j, 0}], :git_status_next, "Next file")
-    |> Bindings.bind([{?k, 0}], :git_status_prev, "Previous file")
-    |> Bindings.bind([{?J, 0}], :git_status_next_section, "Next section")
-    |> Bindings.bind([{?K, 0}], :git_status_prev_section, "Previous section")
-    |> Bindings.bind([{@tab, 0}], :git_status_toggle_section, "Toggle section collapse")
+    |> Bindings.bind(~k(j), :git_status_next, "Next file")
+    |> Bindings.bind(~k(k), :git_status_prev, "Previous file")
+    |> Bindings.bind(~k(J), :git_status_next_section, "Next section")
+    |> Bindings.bind(~k(K), :git_status_prev_section, "Previous section")
+    |> Bindings.bind(~k(TAB), :git_status_toggle_section, "Toggle section collapse")
     # Git operations
-    |> Bindings.bind([{?s, 0}], :git_status_stage, "Stage file")
-    |> Bindings.bind([{?u, 0}], :git_status_unstage, "Unstage file")
-    |> Bindings.bind([{?d, 0}], :git_status_discard, "Discard changes")
-    |> Bindings.bind([{?S, 0}], :git_status_stage_all, "Stage all")
-    |> Bindings.bind([{?U, 0}], :git_status_unstage_all, "Unstage all")
+    |> Bindings.bind(~k(s), :git_status_stage, "Stage file")
+    |> Bindings.bind(~k(u), :git_status_unstage, "Unstage file")
+    |> Bindings.bind(~k(d), :git_status_discard, "Discard changes")
+    |> Bindings.bind(~k(S), :git_status_stage_all, "Stage all")
+    |> Bindings.bind(~k(U), :git_status_unstage_all, "Unstage all")
     # Diff and remote operations
-    |> Bindings.bind([{?p, 0}], :git_status_open_diff, "Preview diff")
-    |> Bindings.bind([{?P, 0}], :git_status_push, "Push to remote")
-    |> Bindings.bind([{?l, 0}], :git_status_pull, "Pull from remote")
-    |> Bindings.bind([{?f, 0}], :git_status_fetch, "Fetch from remote")
+    |> Bindings.bind(~k(p), :git_status_open_diff, "Preview diff")
+    |> Bindings.bind(~k(P), :git_status_push, "Push to remote")
+    |> Bindings.bind(~k(l), :git_status_pull, "Pull from remote")
+    |> Bindings.bind(~k(f), :git_status_fetch, "Fetch from remote")
     # Open/commit
-    |> Bindings.bind([{?o, 0}], :git_status_open_file, "Open file")
-    |> Bindings.bind([{@enter, 0}], :git_status_open_file, "Open file")
-    |> Bindings.bind([{?c, 0}, {?c, 0}], :git_status_start_commit, "Start commit")
-    |> Bindings.bind([{?c, 0}, {?a, 0}], :git_status_amend, "Amend last commit")
-    |> Bindings.bind(
-      [{?c, 0}, {?g, 0}],
-      :git_generate_commit_message,
-      "Generate AI commit message"
-    )
+    |> Bindings.bind(~k(o), :git_status_open_file, "Open file")
+    |> Bindings.bind(~k(RET), :git_status_open_file, "Open file")
+    |> Bindings.bind(~k(c c), :git_status_start_commit, "Start commit")
+    |> Bindings.bind(~k(c a), :git_status_amend, "Amend last commit")
+    |> Bindings.bind(~k(c g), :git_generate_commit_message, "Generate AI commit message")
     # Discard confirmation
-    |> Bindings.bind([{?y, 0}], :git_status_confirm_discard, "Confirm discard")
-    |> Bindings.bind([{?n, 0}], :git_status_cancel_discard, "Cancel discard")
+    |> Bindings.bind(~k(y), :git_status_confirm_discard, "Confirm discard")
+    |> Bindings.bind(~k(n), :git_status_cancel_discard, "Cancel discard")
     # Close
-    |> Bindings.bind([{?q, 0}], :git_status_close, "Close git status")
-    |> Bindings.bind([{@escape, 0}], :git_status_close, "Close git status")
+    |> Bindings.bind(~k(q), :git_status_close, "Close git status")
+    |> Bindings.bind(~k(ESC), :git_status_close, "Close git status")
   end
 
   # ── CUA mode bindings ─────────────────────────────────────────────────
@@ -130,16 +124,16 @@ defmodule Minga.Keymap.Scope.GitStatus do
       then: fn trie ->
         trie
         # Git operations (same keys as normal, domain-specific not vim-specific)
-        |> Bindings.bind([{?s, 0}], :git_status_stage, "Stage file")
-        |> Bindings.bind([{?u, 0}], :git_status_unstage, "Unstage file")
-        |> Bindings.bind([{?d, 0}], :git_status_discard, "Discard changes")
-        |> Bindings.bind([{@tab, 0}], :git_status_toggle_section, "Toggle section collapse")
+        |> Bindings.bind(~k(s), :git_status_stage, "Stage file")
+        |> Bindings.bind(~k(u), :git_status_unstage, "Unstage file")
+        |> Bindings.bind(~k(d), :git_status_discard, "Discard changes")
+        |> Bindings.bind(~k(TAB), :git_status_toggle_section, "Toggle section collapse")
         # Open/commit
-        |> Bindings.bind([{@enter, 0}], :git_status_open_file, "Open file")
+        |> Bindings.bind(~k(RET), :git_status_open_file, "Open file")
         |> Bindings.bind([{?c, @cmd}], :git_status_start_commit, "Start commit")
-        |> Bindings.bind([{?c, @ctrl}], :git_status_start_commit, "Start commit")
+        |> Bindings.bind(~k(C-c), :git_status_start_commit, "Start commit")
         # Close
-        |> Bindings.bind([{@escape, 0}], :git_status_close, "Close git status")
+        |> Bindings.bind(~k(ESC), :git_status_close, "Close git status")
       end
     )
   end
