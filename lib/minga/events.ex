@@ -149,7 +149,15 @@ defmodule Minga.Events do
   defmodule GitStatusEvent do
     @moduledoc "Payload for `:git_status_changed` events. Published by `Git.Repo` when repo status changes."
     @enforce_keys [:git_root, :entries, :branch, :ahead, :behind]
-    defstruct [:git_root, :entries, :branch, :ahead, :behind, last_commit_message: ""]
+    defstruct [
+      :git_root,
+      :entries,
+      :branch,
+      :ahead,
+      :behind,
+      last_commit_message: "",
+      stash_count: 0
+    ]
 
     @type t :: %__MODULE__{
             git_root: String.t(),
@@ -157,7 +165,8 @@ defmodule Minga.Events do
             branch: String.t() | nil,
             ahead: non_neg_integer(),
             behind: non_neg_integer(),
-            last_commit_message: String.t()
+            last_commit_message: String.t(),
+            stash_count: non_neg_integer()
           }
   end
 

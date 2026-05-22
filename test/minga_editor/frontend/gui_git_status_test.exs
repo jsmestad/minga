@@ -19,12 +19,12 @@ defmodule MingaEditor.Frontend.GUIGitStatusTest do
 
       binary = ProtocolGUI.encode_gui_git_status(data)
 
-      # Header, empty entries, no toast, empty entry_base_path, and empty last_commit_message.
-      assert byte_size(binary) == 1 + 1 + 1 + 2 + 2 + 2 + 4 + 2 + 1 + 2 + 2
+      # Header, empty entries, no toast, empty entry_base_path, empty last_commit_message, and stash_count.
+      assert byte_size(binary) == 1 + 1 + 1 + 2 + 2 + 2 + 4 + 2 + 1 + 2 + 2 + 2
 
       <<0x85, repo_state::8, syncing::8, ahead::16, behind::16, branch_len::16,
         branch::binary-size(branch_len), entry_count::16, toast_present::8,
-        entry_base_path_len::16, last_commit_len::16>> = binary
+        entry_base_path_len::16, last_commit_len::16, stash_count::16>> = binary
 
       assert repo_state == 0
       assert syncing == 0
@@ -35,6 +35,7 @@ defmodule MingaEditor.Frontend.GUIGitStatusTest do
       assert toast_present == 0
       assert entry_base_path_len == 0
       assert last_commit_len == 0
+      assert stash_count == 0
     end
 
     test "truncates entry_base_path and last commit message without breaking UTF-8" do
@@ -56,7 +57,8 @@ defmodule MingaEditor.Frontend.GUIGitStatusTest do
       <<0x85, _repo::8, _syncing::8, _ahead::16, _behind::16, branch_len::16,
         _branch::binary-size(branch_len), _entry_count::16, _toast_present::8,
         entry_base_path_len::16, entry_base_path::binary-size(entry_base_path_len),
-        last_commit_len::16, last_commit_message::binary-size(last_commit_len)>> = binary
+        last_commit_len::16, last_commit_message::binary-size(last_commit_len), stash_count::16>> =
+        binary
 
       assert entry_base_path_len <= 65_535
       assert last_commit_len <= 65_535
@@ -64,6 +66,7 @@ defmodule MingaEditor.Frontend.GUIGitStatusTest do
       assert String.valid?(last_commit_message)
       assert String.length(entry_base_path) > 0
       assert String.length(last_commit_message) > 0
+      assert stash_count == 0
     end
 
     test "encodes syncing flag when true" do
@@ -134,6 +137,26 @@ defmodule MingaEditor.Frontend.GUIGitStatusTest do
       assert behind == 1
     end
 
+    test "encodes stash count" do
+      binary =
+        ProtocolGUI.encode_gui_git_status(%{
+          repo_state: :normal,
+          syncing: false,
+          branch: "main",
+          ahead: 0,
+          behind: 0,
+          entries: [],
+          git_toast: nil,
+          stash_count: 7
+        })
+
+      <<0x85, _repo::8, _syncing::8, _ahead::16, _behind::16, branch_len::16,
+        _branch::binary-size(branch_len), _entry_count::16, _toast_present::8,
+        _entry_base_path_len::16, _last_commit_len::16, stash_count::16>> = binary
+
+      assert stash_count == 7
+    end
+
     test "encodes staged and unstaged entries" do
       entries = [
         %StatusEntry{path: "lib/foo.ex", status: :modified, staged: true},
@@ -177,7 +200,7 @@ defmodule MingaEditor.Frontend.GUIGitStatusTest do
 
       # Parse third entry (untracked) -- toast_present byte follows
       <<_hash3::32, section3::8, status3::8, path3_len::16, path3::binary-size(path3_len),
-        toast_present::8, entry_base_path_len::16, last_commit_len::16>> = rest3
+        toast_present::8, entry_base_path_len::16, last_commit_len::16, stash_count::16>> = rest3
 
       assert section3 == 2
       assert status3 == 6
@@ -185,6 +208,7 @@ defmodule MingaEditor.Frontend.GUIGitStatusTest do
       assert toast_present == 0
       assert entry_base_path_len == 0
       assert last_commit_len == 0
+      assert stash_count == 0
     end
 
     test "encodes conflict entries in section 3" do
@@ -264,7 +288,7 @@ defmodule MingaEditor.Frontend.GUIGitStatusTest do
       <<0x85, _repo::8, _syncing::8, _ahead::16, _behind::16, branch_len::16,
         _branch::binary-size(branch_len), _count::16, toast_present::8, toast_level::8,
         toast_action::8, msg_len::16, msg::binary-size(msg_len), entry_base_path_len::16,
-        last_commit_len::16>> = binary
+        last_commit_len::16, stash_count::16>> = binary
 
       assert toast_present == 1
       assert toast_level == 0
@@ -272,6 +296,7 @@ defmodule MingaEditor.Frontend.GUIGitStatusTest do
       assert msg == "Pushed"
       assert entry_base_path_len == 0
       assert last_commit_len == 0
+      assert stash_count == 0
     end
 
     test "encodes error toast with pull_and_retry action" do
@@ -290,7 +315,7 @@ defmodule MingaEditor.Frontend.GUIGitStatusTest do
       <<0x85, _repo::8, _syncing::8, _ahead::16, _behind::16, branch_len::16,
         _branch::binary-size(branch_len), _count::16, toast_present::8, toast_level::8,
         toast_action::8, msg_len::16, msg::binary-size(msg_len), entry_base_path_len::16,
-        last_commit_len::16>> = binary
+        last_commit_len::16, stash_count::16>> = binary
 
       assert toast_present == 1
       assert toast_level == 1
@@ -298,6 +323,7 @@ defmodule MingaEditor.Frontend.GUIGitStatusTest do
       assert msg == "Push failed: rejected"
       assert entry_base_path_len == 0
       assert last_commit_len == 0
+      assert stash_count == 0
     end
   end
 

@@ -425,7 +425,7 @@ final class CommandDispatcher {
                 guiState.floatPopupState.hide()
             }
 
-        case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let rawEntries, let rawToast, let entryBasePath, let lastCommitMessage):
+        case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let rawEntries, let rawToast, let entryBasePath, let lastCommitMessage, let stashCount):
             // When git_status_panel is nil, the BEAM sends notARepo + empty
             // entries as the "panel closed" signal (same pattern as file tree
             // sending empty entries to trigger hide). Can't gate on
@@ -471,7 +471,8 @@ final class CommandDispatcher {
                     entries: entries,
                     toast: toast,
                     entryBasePath: entryBasePath,
-                    lastCommitMessage: lastCommitMessage
+                    lastCommitMessage: lastCommitMessage,
+                    stashCount: stashCount
                 )
             }
         }

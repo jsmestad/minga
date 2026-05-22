@@ -372,6 +372,74 @@ defmodule Minga.Git.System do
   end
 
   @impl true
+  @spec stash(String.t(), keyword()) :: :ok | {:error, String.t()}
+  def stash(git_root, opts \\ []) when is_binary(git_root) do
+    args = ["stash", "push"]
+
+    args =
+      if Keyword.get(opts, :include_untracked, false),
+        do: args ++ ["--include-untracked"],
+        else: args
+
+    case System.cmd("git", args, cd: git_root, stderr_to_stdout: true) do
+      {_, 0} -> :ok
+      {output, _} -> {:error, "git stash failed: #{String.trim(output)}"}
+    end
+  rescue
+    e in [ErlangError, ArgumentError] -> {:error, "git stash error: #{Exception.message(e)}"}
+  end
+
+  @impl true
+  @spec stash_pop(String.t()) :: :ok | {:error, String.t()}
+  def stash_pop(git_root) when is_binary(git_root) do
+    case System.cmd("git", ["stash", "pop"], cd: git_root, stderr_to_stdout: true) do
+      {_, 0} -> :ok
+      {output, _} -> {:error, "git stash pop failed: #{String.trim(output)}"}
+    end
+  rescue
+    e in [ErlangError, ArgumentError] -> {:error, "git stash pop error: #{Exception.message(e)}"}
+  end
+
+  @impl true
+  @spec stash_list(String.t()) :: {:ok, [Minga.Git.stash_entry()]} | {:error, String.t()}
+  def stash_list(git_root) when is_binary(git_root) do
+    format = "%gd%x1f%cr%x1f%gs"
+
+    case System.cmd("git", ["stash", "list", "--format=#{format}"],
+           cd: git_root,
+           stderr_to_stdout: true
+         ) do
+      {output, 0} ->
+        entries =
+          output
+          |> String.split("\n", trim: true)
+          |> Enum.map(&parse_stash_line/1)
+          |> Enum.reject(&is_nil/1)
+
+        {:ok, entries}
+
+      {output, _} ->
+        {:error, "git stash list failed: #{String.trim(output)}"}
+    end
+  rescue
+    e in [ErlangError, ArgumentError] -> {:error, "git stash list error: #{Exception.message(e)}"}
+  end
+
+  @impl true
+  @spec stash_drop(String.t(), non_neg_integer()) :: :ok | {:error, String.t()}
+  def stash_drop(git_root, index) when is_binary(git_root) and is_integer(index) and index >= 0 do
+    case System.cmd("git", ["stash", "drop", "stash@{#{index}}"],
+           cd: git_root,
+           stderr_to_stdout: true
+         ) do
+      {_, 0} -> :ok
+      {output, _} -> {:error, "git stash drop failed: #{String.trim(output)}"}
+    end
+  rescue
+    e in [ErlangError, ArgumentError] -> {:error, "git stash drop error: #{Exception.message(e)}"}
+  end
+
+  @impl true
   @spec push(String.t(), keyword()) :: :ok | {:error, String.t()}
   def push(git_root, opts \\ []) when is_binary(git_root) do
     args = ["push"]
@@ -553,6 +621,30 @@ defmodule Minga.Git.System do
 
       _ ->
         nil
+    end
+  end
+
+  @spec parse_stash_line(String.t()) :: Minga.Git.stash_entry() | nil
+  defp parse_stash_line(line) do
+    case String.split(line, <<0x1F>>) do
+      [ref, date, message] -> build_stash_entry(stash_index(ref), ref, date, message)
+      _ -> nil
+    end
+  end
+
+  @spec build_stash_entry({:ok, non_neg_integer()} | :error, String.t(), String.t(), String.t()) ::
+          Minga.Git.stash_entry() | nil
+  defp build_stash_entry({:ok, index}, ref, date, message) do
+    %Minga.Git.StashEntry{index: index, ref: ref, date: date, message: message}
+  end
+
+  defp build_stash_entry(:error, _ref, _date, _message), do: nil
+
+  @spec stash_index(String.t()) :: {:ok, non_neg_integer()} | :error
+  defp stash_index(ref) do
+    case Regex.run(~r/stash@\{(\d+)\}/, ref) do
+      [_, index] -> {:ok, String.to_integer(index)}
+      _ -> :error
     end
   end
 

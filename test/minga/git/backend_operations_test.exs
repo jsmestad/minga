@@ -1,6 +1,6 @@
 defmodule Minga.Git.BackendOperationsTest do
   @moduledoc """
-  Tests for the unstage, unstage_all, and discard backend callbacks.
+  Tests for the unstage, unstage_all, discard, and stash backend callbacks.
 
   Uses a real temporary git repository (async: false) since these
   operations require actual git state. Each test creates a clean repo
@@ -121,6 +121,50 @@ defmodule Minga.Git.BackendOperationsTest do
 
       result = Minga.Git.System.discard(dir, "nonexistent.txt")
       assert {:error, _} = result
+    end
+  end
+
+  describe "stash operations" do
+    @tag :tmp_dir
+    test "saves tracked and untracked changes and pops them back", %{tmp_dir: dir} do
+      init_git_repo(dir)
+      file = Path.join(dir, "file.txt")
+      untracked = Path.join(dir, "new.txt")
+      File.write!(file, "original")
+      git_cmd(dir, ["add", "."])
+      git_cmd(dir, ["commit", "-m", "init"])
+
+      File.write!(file, "modified")
+      File.write!(untracked, "new")
+
+      assert :ok = Minga.Git.System.stash(dir, include_untracked: true)
+      assert File.read!(file) == "original"
+      refute File.exists?(untracked)
+
+      assert {:ok, [entry]} = Minga.Git.System.stash_list(dir)
+      assert entry.index == 0
+      assert entry.ref == "stash@{0}"
+      assert entry.message =~ "WIP on main"
+
+      assert :ok = Minga.Git.System.stash_pop(dir)
+      assert File.read!(file) == "modified"
+      assert File.read!(untracked) == "new"
+    end
+
+    @tag :tmp_dir
+    test "drops a stash by index", %{tmp_dir: dir} do
+      init_git_repo(dir)
+      file = Path.join(dir, "file.txt")
+      File.write!(file, "original")
+      git_cmd(dir, ["add", "."])
+      git_cmd(dir, ["commit", "-m", "init"])
+      File.write!(file, "modified")
+
+      assert :ok = Minga.Git.System.stash(dir)
+      assert {:ok, [_entry]} = Minga.Git.System.stash_list(dir)
+
+      assert :ok = Minga.Git.System.stash_drop(dir, 0)
+      assert {:ok, []} = Minga.Git.System.stash_list(dir)
     end
   end
 

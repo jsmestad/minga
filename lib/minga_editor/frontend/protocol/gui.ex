@@ -3931,7 +3931,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           behind: non_neg_integer(),
           entries: [Minga.Git.StatusEntry.t()],
           entry_base_path: String.t(),
-          last_commit_message: String.t()
+          last_commit_message: String.t(),
+          stash_count: non_neg_integer()
         }
 
   @typedoc "Git status data enriched with syncing/toast for protocol encoding."
@@ -3944,6 +3945,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           entries: [Minga.Git.StatusEntry.t()],
           entry_base_path: String.t(),
           last_commit_message: String.t(),
+          stash_count: non_neg_integer(),
           git_toast: git_toast() | nil
         }
 
@@ -3957,7 +3959,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     then toast section:
       toast_present:1, [toast_level:1, action:1, msg_len:2, msg]
     then repo metadata:
-      entry_base_path_len:2, entry_base_path, last_commit_message_len:2, last_commit_message
+      entry_base_path_len:2, entry_base_path, last_commit_message_len:2, last_commit_message,
+      stash_count:2
   """
   @spec encode_gui_git_status(git_status_data()) :: binary()
   def encode_gui_git_status(
@@ -3996,13 +3999,16 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     last_commit_message_bytes =
       utf8_prefix_bytes(Map.get(data, :last_commit_message) || "", @max_u16)
 
+    stash_count = min(Map.get(data, :stash_count, 0), @max_u16)
+
     IO.iodata_to_binary([
       <<@op_gui_git_status, repo_state_byte::8, syncing_byte::8, ahead::16, behind::16,
         byte_size(branch_bytes)::16, branch_bytes::binary, entry_count::16>>,
       entry_binaries,
       toast_binary,
       <<byte_size(entry_base_path_bytes)::16, entry_base_path_bytes::binary,
-        byte_size(last_commit_message_bytes)::16, last_commit_message_bytes::binary>>
+        byte_size(last_commit_message_bytes)::16, last_commit_message_bytes::binary,
+        stash_count::16>>
     ])
   end
 

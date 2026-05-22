@@ -88,6 +88,13 @@ defmodule Minga.Git.Stub do
     :ok
   end
 
+  @doc "Sets stash entries returned for `git_root`."
+  @spec set_stashes(String.t(), [Minga.Git.stash_entry()]) :: :ok
+  def set_stashes(git_root, entries) when is_list(entries) do
+    :ets.insert(@table, {{:stashes, Path.expand(git_root)}, entries})
+    :ok
+  end
+
   @doc "Returns paths staged through the stub for `git_root`."
   @spec staged_paths(String.t()) :: [String.t()]
   def staged_paths(git_root) do
@@ -111,6 +118,7 @@ defmodule Minga.Git.Stub do
     :ets.match_delete(@table, {{:branch, expanded}, :_})
     :ets.match_delete(@table, {{:branches, expanded}, :_})
     :ets.match_delete(@table, {{:branch_delete, expanded, :_, :_}, :_})
+    :ets.match_delete(@table, {{:stashes, expanded}, :_})
     :ets.match_delete(@table, {{:ahead_behind, expanded}, :_})
     :ets.match_delete(@table, {{:last_commit_message, expanded}, :_})
     :ok
@@ -267,6 +275,27 @@ defmodule Minga.Git.Stub do
         :ok
     end
   end
+
+  @impl true
+  @spec stash(String.t(), keyword()) :: :ok
+  def stash(_git_root, _opts \\ []), do: :ok
+
+  @impl true
+  @spec stash_pop(String.t()) :: :ok
+  def stash_pop(_git_root), do: :ok
+
+  @impl true
+  @spec stash_list(String.t()) :: {:ok, [Minga.Git.stash_entry()]}
+  def stash_list(git_root) do
+    case :ets.lookup(@table, {:stashes, Path.expand(git_root)}) do
+      [{_, entries}] -> {:ok, entries}
+      [] -> {:ok, []}
+    end
+  end
+
+  @impl true
+  @spec stash_drop(String.t(), non_neg_integer()) :: :ok
+  def stash_drop(_git_root, _index), do: :ok
 
   @impl true
   @spec push(String.t(), keyword()) :: :ok

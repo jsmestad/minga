@@ -64,6 +64,19 @@ defmodule Minga.GitTest do
       assert {:ok, [^entry]} = Git.log(dir)
     end
 
+    test "stash_list returns configured entries", %{root: dir} do
+      entry = %Git.StashEntry{index: 0, ref: "stash@{0}", message: "WIP", date: "2 hours ago"}
+
+      GitStub.set_stashes(dir, [entry])
+      assert {:ok, [^entry]} = Git.stash_list(dir)
+    end
+
+    test "stash operations return :ok", %{root: dir} do
+      assert :ok = Git.stash(dir, include_untracked: true)
+      assert :ok = Git.stash_pop(dir)
+      assert :ok = Git.stash_drop(dir, 0)
+    end
+
     test "stage returns :ok", %{root: dir} do
       assert :ok = Git.stage(dir, ["file.txt"])
     end

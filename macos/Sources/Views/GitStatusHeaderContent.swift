@@ -44,12 +44,22 @@ struct GitStatusHeaderContent: View {
 
             Spacer(minLength: 4)
 
+            if state.stashCount > 0 {
+                stashBadge
+            }
+
             if state.ahead > 0 || state.behind > 0 {
                 aheadBehindBadge
             }
         }
         .padding(.leading, leadingPadding)
         .padding(.trailing, 10)
+    }
+
+    private var stashBadge: some View {
+        Text("Stashes: \(state.stashCount)")
+            .font(.system(size: 10, weight: .medium).monospacedDigit())
+            .foregroundStyle(theme.tabActiveFg.opacity(0.7))
     }
 
     @ViewBuilder

@@ -39,6 +39,7 @@ defmodule Minga.Git.Repo do
     ahead: 0,
     behind: 0,
     last_commit_message: "",
+    stash_count: 0,
     watcher_pid: nil,
     debounce_ref: nil,
     events_registry: Minga.Events.default_registry()
@@ -53,6 +54,7 @@ defmodule Minga.Git.Repo do
           ahead: non_neg_integer(),
           behind: non_neg_integer(),
           last_commit_message: String.t(),
+          stash_count: non_neg_integer(),
           watcher_pid: pid() | nil,
           debounce_ref: reference() | nil,
           events_registry: Minga.Events.registry()
@@ -73,7 +75,8 @@ defmodule Minga.Git.Repo do
           unstaged_count: non_neg_integer(),
           untracked_count: non_neg_integer(),
           conflict_count: non_neg_integer(),
-          last_commit_message: String.t()
+          last_commit_message: String.t(),
+          stash_count: non_neg_integer()
         }
 
   # ── Client API ─────────────────────────────────────────────────────────
@@ -216,9 +219,8 @@ defmodule Minga.Git.Repo do
   @spec handle_info(term(), t()) :: {:noreply, t()}
   def handle_info({:file_event, _watcher_pid, {path, _events}}, state) do
     path_str = to_string(path)
-    basename = Path.basename(path_str)
 
-    if basename in ["index", "HEAD", "MERGE_HEAD", "REBASE_HEAD"] do
+    if refresh_path?(path_str) do
       {:noreply, schedule_debounce(state)}
     else
       {:noreply, state}
@@ -267,11 +269,13 @@ defmodule Minga.Git.Repo do
     old_ahead = state.ahead
     old_behind = state.behind
     old_last_commit_message = state.last_commit_message
+    old_stash_count = state.stash_count
 
     entries = fetch_status(state.git_root, state.project_root)
     branch = fetch_branch(state.git_root)
     {ahead, behind} = fetch_ahead_behind(state.git_root)
     last_commit_message = fetch_last_commit_message(state.git_root)
+    stash_count = fetch_stash_count(state.git_root)
 
     state = %{
       state
@@ -279,14 +283,15 @@ defmodule Minga.Git.Repo do
         branch: branch,
         ahead: ahead,
         behind: behind,
-        last_commit_message: last_commit_message
+        last_commit_message: last_commit_message,
+        stash_count: stash_count
     }
 
     # Broadcast only if something changed
     changed =
       entries != old_entries or branch != old_branch or
         ahead != old_ahead or behind != old_behind or
-        last_commit_message != old_last_commit_message
+        last_commit_message != old_last_commit_message or stash_count != old_stash_count
 
     if changed do
       Minga.Events.broadcast(
@@ -297,13 +302,30 @@ defmodule Minga.Git.Repo do
           branch: branch,
           ahead: ahead,
           behind: behind,
-          last_commit_message: last_commit_message
+          last_commit_message: last_commit_message,
+          stash_count: stash_count
         },
         state.events_registry
       )
     end
 
     state
+  end
+
+  @spec refresh_path?(String.t()) :: boolean()
+  defp refresh_path?(path_str) do
+    basename = Path.basename(path_str)
+    git_status_file?(basename) or stash_ref_path?(path_str)
+  end
+
+  @spec git_status_file?(String.t()) :: boolean()
+  defp git_status_file?(basename) do
+    basename in ["index", "HEAD", "MERGE_HEAD", "REBASE_HEAD"]
+  end
+
+  @spec stash_ref_path?(String.t()) :: boolean()
+  defp stash_ref_path?(path_str) do
+    String.ends_with?(path_str, "/refs/stash") or String.ends_with?(path_str, "/logs/refs/stash")
   end
 
   @spec fetch_status(String.t(), String.t() | nil) :: [StatusEntry.t()]
@@ -340,6 +362,20 @@ defmodule Minga.Git.Repo do
       {:ok, message} -> message
       :error -> ""
     end
+  end
+
+  @spec fetch_stash_count(String.t()) :: non_neg_integer()
+  defp fetch_stash_count(git_root) do
+    case Git.stash_list(git_root) do
+      {:ok, entries} -> length(entries)
+      {:error, reason} -> log_stash_count_failure(reason)
+    end
+  end
+
+  @spec log_stash_count_failure(String.t()) :: 0
+  defp log_stash_count_failure(reason) do
+    Minga.Log.warning(:editor, "[Git.Repo] stash list failed: #{reason}")
+    0
   end
 
   @spec maybe_relativize_paths([StatusEntry.t()], String.t(), String.t() | nil) :: [
@@ -381,7 +417,8 @@ defmodule Minga.Git.Repo do
       unstaged_count: counts.unstaged,
       untracked_count: counts.untracked,
       conflict_count: counts.conflict,
-      last_commit_message: state.last_commit_message
+      last_commit_message: state.last_commit_message,
+      stash_count: state.stash_count
     }
   end
 

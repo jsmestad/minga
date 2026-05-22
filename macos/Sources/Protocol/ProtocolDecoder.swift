@@ -204,7 +204,7 @@ enum RenderCommand: Sendable {
     case guiLineSpacing(spacing: Float)
     case guiCursorAnimation(enabled: Bool)
     case guiSplitSeparators(borderColor: UInt32, verticals: [Wire.VerticalSeparator], horizontals: [Wire.HorizontalSeparator])
-    case guiGitStatus(repoState: UInt8, syncing: Bool, ahead: UInt16, behind: UInt16, branchName: String, entries: [Wire.GitStatusEntry], toast: (message: String, level: UInt8, action: UInt8)?, entryBasePath: String, lastCommitMessage: String)
+    case guiGitStatus(repoState: UInt8, syncing: Bool, ahead: UInt16, behind: UInt16, branchName: String, entries: [Wire.GitStatusEntry], toast: (message: String, level: UInt8, action: UInt8)?, entryBasePath: String, lastCommitMessage: String, stashCount: UInt16)
     case guiWorkspaces(version: UInt8, activeWorkspaceId: UInt16, mode: UInt8, flags: UInt8, workspaces: [Wire.WorkspaceEntry], visibleTabs: [Wire.WorkspaceTabEntry])
     case guiBoard(visible: Bool, focusedCardId: UInt32, cards: [BoardCard], filterMode: Bool, filterText: String)
     case guiAgentContext(visible: Bool, task: String, dispatchTimestamp: Date, status: CardStatus, canApprove: Bool)
@@ -2040,7 +2040,10 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let gsLastCommitMessageData = data[gsPos..<(gsPos + gsLastCommitMessageLen)]
         let gsLastCommitMessage = try readRequiredUTF8(gsLastCommitMessageData)
         gsPos += gsLastCommitMessageLen
-        return (.guiGitStatus(repoState: gsRepoState, syncing: gsSyncing, ahead: gsAhead, behind: gsBehind, branchName: gsBranchName, entries: gsEntries, toast: gsToast, entryBasePath: gsEntryBasePath, lastCommitMessage: gsLastCommitMessage),
+        guard data.count >= gsPos + 2 else { throw ProtocolDecodeError.malformed }
+        let gsStashCount = readU16(data, gsPos)
+        gsPos += 2
+        return (.guiGitStatus(repoState: gsRepoState, syncing: gsSyncing, ahead: gsAhead, behind: gsBehind, branchName: gsBranchName, entries: gsEntries, toast: gsToast, entryBasePath: gsEntryBasePath, lastCommitMessage: gsLastCommitMessage, stashCount: gsStashCount),
                 gsPos - offset)
 
     case OP_GUI_WORKSPACES:

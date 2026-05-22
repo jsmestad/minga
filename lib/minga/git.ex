@@ -8,6 +8,8 @@ defmodule Minga.Git do
       config :minga, git_module: Minga.Git.Stub
   """
 
+  alias Minga.Git.StashEntry
+
   defmodule StatusEntry do
     @moduledoc false
     @enforce_keys [:path, :status, :staged]
@@ -62,6 +64,9 @@ defmodule Minga.Git do
 
   @typedoc "A structured log entry."
   @type log_entry :: LogEntry.t()
+
+  @typedoc "A structured stash entry."
+  @type stash_entry :: StashEntry.t()
 
   # ── Delegated operations (go through the backend) ──────────────────────
 
@@ -203,6 +208,22 @@ defmodule Minga.Git do
   @spec branch_delete(String.t(), String.t(), boolean()) :: :ok | {:error, String.t()}
   def branch_delete(git_root, name, force \\ false),
     do: impl().branch_delete(git_root, name, force)
+
+  @doc "Saves current worktree changes to a stash."
+  @spec stash(String.t(), keyword()) :: :ok | {:error, String.t()}
+  def stash(git_root, opts \\ []), do: impl().stash(git_root, opts)
+
+  @doc "Pops the most recent stash."
+  @spec stash_pop(String.t()) :: :ok | {:error, String.t()}
+  def stash_pop(git_root), do: impl().stash_pop(git_root)
+
+  @doc "Lists stashes for a repository."
+  @spec stash_list(String.t()) :: {:ok, [stash_entry()]} | {:error, String.t()}
+  def stash_list(git_root), do: impl().stash_list(git_root)
+
+  @doc "Drops a stash by index."
+  @spec stash_drop(String.t(), non_neg_integer()) :: :ok | {:error, String.t()}
+  def stash_drop(git_root, index), do: impl().stash_drop(git_root, index)
 
   @doc "Pushes the current branch to its upstream remote."
   @spec push(String.t(), keyword()) :: :ok | {:error, String.t()}
