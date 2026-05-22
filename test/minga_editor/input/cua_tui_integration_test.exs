@@ -9,10 +9,13 @@ defmodule MingaEditor.Input.CUATUIIntegrationTest do
   import ExUnit.CaptureLog
 
   alias Minga.Config.Options
+  alias Minga.Keymap.Bindings
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Registers
+  alias MingaEditor.State.WhichKey
 
   @ctrl 0x02
   @enter 13
@@ -60,6 +63,54 @@ defmodule MingaEditor.Input.CUATUIIntegrationTest do
       state = editor_state(ctx)
 
       assert {"alpha\n", :linewise} = Registers.get(MingaEditor.Editing.registers(state), "")
+      assert buffer_content(ctx) == "alpha"
+    end
+
+    test "Ctrl+S routes through the global save lifecycle" do
+      uniq = System.unique_integer([:positive])
+      path = Path.join(System.tmp_dir!(), "minga-cua-save-#{uniq}.txt")
+      File.write!(path, "alpha\n")
+      on_exit(fn -> File.rm(path) end)
+
+      ctx = start_editor("alpha\n", file_path: path, editing_model: :cua, backend: :tui)
+      Minga.Events.subscribe(:buffer_saved, ctx.events_registry)
+      buffer = ctx.buffer
+
+      send_key_sync(ctx, ?!)
+      send_key_sync(ctx, ?s, @ctrl)
+
+      assert_receive {:minga_event, :buffer_saved,
+                      %Minga.Events.BufferEvent{buffer: ^buffer, path: ^path}}
+
+      assert File.read!(path) == "!alpha\n"
+      assert buffer_content(ctx) == "!alpha\n"
+      assert BufferProcess.dirty?(buffer) == false
+    end
+
+    test "Ctrl+C with no visual selection interrupts and clears editor status" do
+      ctx = start_editor("alpha", editing_model: :cua, backend: :tui)
+
+      :sys.replace_state(ctx.editor, fn state ->
+        state
+        |> EditorState.set_status("dirty")
+        |> EditorState.update_shell_state(&ShellState.set_space_leader_pending(&1, true))
+        |> EditorState.set_whichkey(%WhichKey{
+          node: Bindings.new(),
+          show: true,
+          prefix_keys: ["SPC"]
+        })
+        |> EditorState.set_registers(
+          Registers.put(MingaEditor.Editing.registers(state), "", "existing")
+        )
+      end)
+
+      send_key_sync(ctx, ?c, @ctrl)
+      state = editor_state(ctx)
+
+      assert EditorState.status_msg(state) == nil
+      assert state.shell_state.space_leader_pending == false
+      assert EditorState.whichkey(state) == %WhichKey{}
+      assert Registers.get(MingaEditor.Editing.registers(state), "") == {"existing", :charwise}
       assert buffer_content(ctx) == "alpha"
     end
   end

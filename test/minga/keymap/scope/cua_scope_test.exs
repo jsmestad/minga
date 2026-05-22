@@ -145,8 +145,12 @@ defmodule Minga.Keymap.Scope.CUAScopeTest do
       assert {:command, :select_all} = Scope.resolve_key(:editor, :cua, {?a, @ctrl})
     end
 
-    test "Ctrl+S saves (TUI fallback)" do
-      assert {:command, :save} = Scope.resolve_key(:editor, :cua, {?s, @ctrl})
+    test "Cmd+S saves (GUI)" do
+      assert {:command, :save} = Scope.resolve_key(:editor, :cua, {?s, @cmd})
+    end
+
+    test "Ctrl+S falls through to the global save handler" do
+      assert :not_found = Scope.resolve_key(:editor, :cua, {?s, @ctrl})
     end
 
     test "Ctrl+P opens command palette (TUI)" do

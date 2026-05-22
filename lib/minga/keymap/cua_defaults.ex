@@ -14,9 +14,6 @@ defmodule Minga.Keymap.CUADefaults do
 
   alias Minga.Keymap.Bindings
 
-  # Modifier bitmask (used by copy/interrupt fallback)
-  @ctrl 0x02
-
   # Common keys (still used by editing_trie and horizontal_nav_trie)
   @arrow_left 57_350
   @arrow_right 57_351
@@ -45,8 +42,9 @@ defmodule Minga.Keymap.CUADefaults do
 
   Also includes Ctrl fallbacks for TUI where terminals intercept
   Cmd+key at the OS level. Ctrl+C = copy selection or interrupt,
-  Ctrl+Z = undo, Ctrl+Y = redo, Ctrl+V = paste, Ctrl+A = select all,
-  Ctrl+S = save.
+  Ctrl+Z = undo, Ctrl+Y = redo, Ctrl+V = paste, Ctrl+A = select all.
+  Ctrl+S stays on the global save handler so save events keep the
+  standard lifecycle.
   """
   @spec cmd_chords_trie() :: Bindings.node_t()
   def cmd_chords_trie do
@@ -80,14 +78,5 @@ defmodule Minga.Keymap.CUADefaults do
     |> Bindings.bind([{@arrow_right, 0}], :move_right, "Move right")
     |> Bindings.bind([{@ns_left, 0}], :move_left, "Move left")
     |> Bindings.bind([{@ns_right, 0}], :move_right, "Move right")
-  end
-
-  @doc """
-  Ctrl+C copy-or-interrupt binding. Shared across CUA surfaces that opt into this trie.
-  """
-  @spec interrupt_trie() :: Bindings.node_t()
-  def interrupt_trie do
-    Bindings.new()
-    |> Bindings.bind([{?c, @ctrl}], :copy_or_interrupt, "Copy selection / interrupt")
   end
 end
