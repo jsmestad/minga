@@ -40,7 +40,7 @@ defmodule MingaEditor do
   alias MingaEditor.State.ResourcePressure
   alias MingaEditor.Viewport
 
-  alias MingaEditor.Handlers.BufferLifecycle
+  alias MingaEditor.Handlers.BufferRegistry
   alias MingaEditor.Handlers.EffectHandler
   alias MingaEditor.Handlers.EventDispatcher
   alias MingaEditor.Handlers.FileEventHandler
@@ -49,6 +49,7 @@ defmodule MingaEditor do
   alias MingaEditor.Handlers.LspEventHandler
   alias MingaEditor.Handlers.RenderHandler
   alias MingaEditor.Handlers.SessionHandler
+  alias MingaEditor.Handlers.SessionRestore
   alias MingaEditor.Handlers.ToolHandler
   # WarningLog removed in #825; warnings route through MessageLog with level override
   alias MingaEditor.Window
@@ -289,7 +290,7 @@ defmodule MingaEditor do
   @impl true
   @spec handle_call(term(), GenServer.from(), state()) :: {:reply, term(), state()}
   def handle_call({:open_file, file_path}, _from, state) do
-    case open_file_by_path_result(state, file_path) do
+    case BufferRegistry.open_file_by_path_result(state, file_path) do
       {:ok, new_state} ->
         new_state = Renderer.render_or_async(new_state)
         {:reply, :ok, new_state}
@@ -305,10 +306,10 @@ defmodule MingaEditor do
          ) do
       {:ok, pid} ->
         new_state =
-          if BufferLifecycle.buffer_tracked?(state, pid) do
+          if BufferRegistry.buffer_tracked?(state, pid) do
             state
           else
-            BufferLifecycle.register_buffer_background(state, pid, Path.expand(path))
+            BufferRegistry.register_buffer_background(state, pid, Path.expand(path))
           end
 
         {:reply, {:ok, pid}, new_state}
@@ -381,12 +382,12 @@ defmodule MingaEditor do
     # Register a buffer that was started by Buffer.ensure_for_path (called
     # from agent tools or Editor.ensure_buffer_for_path). Only register if
     # the buffer isn't already tracked in the workspace.
-    already_tracked? = BufferLifecycle.buffer_tracked?(state, pid)
+    already_tracked? = BufferRegistry.buffer_tracked?(state, pid)
 
     if already_tracked? do
       {:noreply, state}
     else
-      state = BufferLifecycle.register_buffer_background(state, pid, abs_path)
+      state = BufferRegistry.register_buffer_background(state, pid, abs_path)
       {:noreply, state}
     end
   end
@@ -431,7 +432,7 @@ defmodule MingaEditor do
     # Setup highlighting after first paint with correct viewport
     new_state = setup_highlight_or_defer(new_state)
 
-    BufferLifecycle.maybe_check_swap_recovery(new_state)
+    SessionRestore.maybe_check_swap_recovery(new_state)
 
     # If the agentic view was activated at init, start the session now
     # that the port is connected and the viewport is known.
@@ -1143,26 +1144,24 @@ defmodule MingaEditor do
     log_message(state, "Paste ignored (no active buffer)")
   end
 
-  # ── Buffer lifecycle (delegated to BufferLifecycle) ──────────────────
+  # ── Tool picker refresh ─────────────────────────────────────────────
 
+  # Refreshes the tool manager picker items if it's currently open.
+  # Called when tool install events change tool status so the user
+  # sees live updates (spinner -> checkmark, etc.).
   @doc false
-  defdelegate do_file_tree_open(state, pid, path, tree), to: BufferLifecycle
-  @doc false
-  defdelegate recover_swap_entries(state, entries), to: BufferLifecycle
-  @doc false
-  defdelegate restore_session(state), to: BufferLifecycle
-  @doc false
-  defdelegate update_test_notification(state, exit_code), to: BufferLifecycle
-  @doc false
-  defdelegate open_file_by_path(state, abs_path), to: BufferLifecycle
-  @doc false
-  defdelegate open_file_by_path_result(state, abs_path), to: BufferLifecycle
-  @doc false
-  defdelegate start_and_register_file(state, abs_path), to: BufferLifecycle
-  @doc false
-  defdelegate file_tab_for_path_in_active_workspace(state, path), to: BufferLifecycle
-  @doc false
-  defdelegate maybe_refresh_tool_picker(state), to: BufferLifecycle
+  @spec maybe_refresh_tool_picker(state()) :: state()
+  def maybe_refresh_tool_picker(
+        %{
+          shell_state: %{
+            modal: {:picker, %{picker_ui: %{source: MingaEditor.UI.Picker.Sources.Tool}}}
+          }
+        } = state
+      ) do
+    MingaEditor.PickerUI.refresh_items(state)
+  end
+
+  def maybe_refresh_tool_picker(state), do: state
 
   @doc false
   @spec log_message(state(), String.t()) :: state()
