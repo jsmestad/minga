@@ -1,22 +1,21 @@
 /// Resource-pressure policy for macOS low power mode and thermal state.
 ///
-/// The GUI remains event-driven and lets the BEAM own frame pacing. Under resource pressure,
+/// The GUI remains event-driven and lets the BEAM own frame pacing. Under stronger resource pressure,
 /// this policy slows or disables cursor blinking so the native surface does less avoidable work while the system is constrained.
 import Foundation
 
 struct PowerThermalPolicy: Equatable {
     let cursorBlinkMultiplier: UInt64
-    let pauseBackgroundWork: Bool
     let levelName: String
 
     static func policy(lowPowerMode: Bool, thermalState: ProcessInfo.ThermalState) -> PowerThermalPolicy {
         switch thermalState {
         case .critical:
-            return PowerThermalPolicy(cursorBlinkMultiplier: 0, pauseBackgroundWork: true, levelName: "critical")
+            return PowerThermalPolicy(cursorBlinkMultiplier: 0, levelName: "critical")
         case .serious:
-            return PowerThermalPolicy(cursorBlinkMultiplier: 3, pauseBackgroundWork: true, levelName: "serious")
+            return PowerThermalPolicy(cursorBlinkMultiplier: 3, levelName: "serious")
         case .fair:
-            return PowerThermalPolicy(cursorBlinkMultiplier: 2, pauseBackgroundWork: false, levelName: "fair")
+            return PowerThermalPolicy(cursorBlinkMultiplier: 1, levelName: "fair")
         case .nominal:
             return nominalPolicy(lowPowerMode: lowPowerMode)
         @unknown default:
@@ -56,10 +55,10 @@ struct PowerThermalPolicy: Equatable {
 
     private static func nominalPolicy(lowPowerMode: Bool) -> PowerThermalPolicy {
         if lowPowerMode {
-            return PowerThermalPolicy(cursorBlinkMultiplier: 2, pauseBackgroundWork: false, levelName: "low_power")
+            return PowerThermalPolicy(cursorBlinkMultiplier: 1, levelName: "low_power")
         }
 
-        return PowerThermalPolicy(cursorBlinkMultiplier: 1, pauseBackgroundWork: false, levelName: "nominal")
+        return PowerThermalPolicy(cursorBlinkMultiplier: 1, levelName: "nominal")
     }
 }
 

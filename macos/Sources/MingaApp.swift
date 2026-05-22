@@ -1189,7 +1189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         editorNSView?.applyPowerThermalPolicy(lowPowerMode: lowPowerMode, thermalState: thermalState)
         encoder?.sendPowerThermalState(lowPowerMode: lowPowerMode, thermalState: encodedThermalState)
-        PortLogger.info("\(reason): low_power=\(lowPowerMode), thermal=\(thermalName), policy=\(policy.levelName)")
+        PortLogger.info("\(reason): low_power=\(lowPowerMode), thermal=\(thermalName), cursor_blink_multiplier=\(policy.cursorBlinkMultiplier)")
     }
 
     /// Cancels macOS sleep and screen sleep observers.

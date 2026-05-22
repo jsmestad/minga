@@ -7,31 +7,26 @@ struct PowerThermalPolicyTests {
         let policy = PowerThermalPolicy.policy(lowPowerMode: false, thermalState: .nominal)
 
         #expect(policy.cursorBlinkMultiplier == 1)
-        #expect(policy.pauseBackgroundWork == false)
         #expect(policy.levelName == "nominal")
     }
 
-    @Test("low power mode caps frames and slows blink")
-    func lowPowerModePolicyThrottles() {
+    @Test("low power mode preserves the user's normal blink cadence")
+    func lowPowerModePolicyPreservesBlinkCadence() {
         let policy = PowerThermalPolicy.policy(lowPowerMode: true, thermalState: .nominal)
 
-        #expect(policy.cursorBlinkMultiplier == 2)
-        #expect(policy.pauseBackgroundWork == false)
+        #expect(policy.cursorBlinkMultiplier == 1)
         #expect(policy.levelName == "low_power")
     }
 
-    @Test("thermal pressure tiers get progressively stricter")
+    @Test("mild thermal pressure preserves blink cadence while stronger pressure slows it")
     func thermalPressureTiersAreProgressive() {
         let fair = PowerThermalPolicy.policy(lowPowerMode: false, thermalState: .fair)
         let serious = PowerThermalPolicy.policy(lowPowerMode: false, thermalState: .serious)
         let critical = PowerThermalPolicy.policy(lowPowerMode: false, thermalState: .critical)
 
-        #expect(fair.cursorBlinkMultiplier == 2)
+        #expect(fair.cursorBlinkMultiplier == 1)
         #expect(serious.cursorBlinkMultiplier == 3)
         #expect(critical.cursorBlinkMultiplier == 0)
-        #expect(fair.pauseBackgroundWork == false)
-        #expect(serious.pauseBackgroundWork == true)
-        #expect(critical.pauseBackgroundWork == true)
     }
 
     @Test("thermal state encoding matches BEAM protocol")

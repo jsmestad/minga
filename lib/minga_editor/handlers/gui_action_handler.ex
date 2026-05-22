@@ -34,7 +34,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
-  alias MingaEditor.State.ResourcePressure
   alias MingaEditor.State.Search, as: SearchData
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
@@ -91,6 +90,8 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       "Power/thermal state: low_power=#{low_power?}, thermal=#{inspect(thermal_state)}"
     )
 
+    state = EditorState.set_resource_pressure(state, low_power?, thermal_state)
+
     Minga.Events.broadcast(
       :power_thermal_state_changed,
       %Minga.Events.PowerThermalStateEvent{
@@ -99,12 +100,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       },
       EditorState.events_registry(state)
     )
-
-    state = EditorState.set_resource_pressure(state, low_power?, thermal_state)
-
-    if ResourcePressure.defer_background_work?(state.resource_pressure) do
-      Minga.Log.info(:editor, "Deferring non-critical background work under thermal pressure")
-    end
 
     state
   end

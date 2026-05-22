@@ -27,16 +27,7 @@ defmodule MingaEditor.State.ResourcePressure do
   @spec render_delay_ms(t()) :: non_neg_integer()
   def render_delay_ms(%__MODULE__{thermal_state: :critical}), do: 100
   def render_delay_ms(%__MODULE__{thermal_state: :serious}), do: 33
-  def render_delay_ms(%__MODULE__{thermal_state: :fair, low_power?: true}), do: 33
   def render_delay_ms(%__MODULE__{thermal_state: :fair}), do: 22
-  def render_delay_ms(%__MODULE__{thermal_state: :nominal, low_power?: true}), do: 33
+  def render_delay_ms(%__MODULE__{low_power?: true}), do: 33
   def render_delay_ms(%__MODULE__{}), do: 0
-
-  @doc "Returns true when the BEAM should defer non-critical background work."
-  @spec defer_background_work?(t()) :: boolean()
-  def defer_background_work?(%__MODULE__{thermal_state: thermal_state})
-      when thermal_state in [:serious, :critical],
-      do: true
-
-  def defer_background_work?(_state), do: false
 end

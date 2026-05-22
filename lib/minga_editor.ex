@@ -1322,6 +1322,13 @@ defmodule MingaEditor do
   # apply_textobject_positions moved to HighlightHandler
 
   @doc false
+  @spec schedule_render_delay_ms(state(), non_neg_integer()) :: non_neg_integer()
+  def schedule_render_delay_ms(%EditorState{} = state, delay_ms)
+      when is_integer(delay_ms) and delay_ms >= 0 do
+    max(delay_ms, ResourcePressure.render_delay_ms(state.resource_pressure))
+  end
+
+  @doc false
   @spec schedule_render(state(), non_neg_integer()) :: state()
   def schedule_render(%{render_timer: ref} = state, _delay_ms) when is_reference(ref), do: state
 
@@ -1335,7 +1342,7 @@ defmodule MingaEditor do
   end
 
   def schedule_render(state, delay_ms) do
-    effective_delay_ms = max(delay_ms, ResourcePressure.render_delay_ms(state.resource_pressure))
+    effective_delay_ms = schedule_render_delay_ms(state, delay_ms)
     ref = Process.send_after(self(), :debounced_render, effective_delay_ms)
     %{state | render_timer: ref}
   end

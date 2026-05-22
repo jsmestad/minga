@@ -300,7 +300,7 @@ final class EditorNSView: MTKView {
         renderFrame()
     }
 
-    /// Applies the current macOS low power and thermal policy to rendering and cursor blinking.
+    /// Applies the current macOS low power and thermal policy to cursor blinking.
     func applyPowerThermalPolicy(lowPowerMode: Bool, thermalState: ProcessInfo.ThermalState) {
         let policy = PowerThermalPolicy.policy(lowPowerMode: lowPowerMode, thermalState: thermalState)
         cursorBlinkMultiplier = policy.cursorBlinkMultiplier
