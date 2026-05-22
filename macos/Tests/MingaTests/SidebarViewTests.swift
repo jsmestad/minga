@@ -1,5 +1,5 @@
-/// View structure tests for sidebar components (FileTreeView, GitStatusView,
-/// SidebarContainer, SidebarHeaderButton).
+/// View structure tests for sidebar components (ActivityBar, FileTreeView,
+/// GitStatusView, SidebarContainer, SidebarHeaderButton).
 ///
 /// Verifies that structural refactors (header backgrounds, button extraction,
 /// shared resize handle) didn't break text rendering or button counts.
@@ -8,6 +8,47 @@
 import Testing
 import SwiftUI
 import ViewInspector
+
+// MARK: - ActivityBar
+
+@Suite("ActivityBar View Structure")
+struct ActivityBarViewTests {
+
+    @Test("Renders one icon per sidebar panel")
+    @MainActor func rendersPanelIcons() throws {
+        let sut = ActivityBar(activePanel: .fileTree, gitStatusCount: 0, theme: ThemeColors(), encoder: nil)
+        let body = try sut.inspect()
+        let buttons = body.findAll(ViewType.Button.self)
+
+        #expect(buttons.count == ActivityBarPanel.allCases.count)
+    }
+
+    @Test("Tap sends the matching panel toggle")
+    @MainActor func tapSendsPanelToggle() throws {
+        let spy = SpyEncoder()
+        let sut = ActivityBar(activePanel: .fileTree, gitStatusCount: 0, theme: ThemeColors(), encoder: spy)
+        let body = try sut.inspect()
+        let buttons = body.findAll(ViewType.Button.self)
+
+        try buttons[0].tap()
+        try buttons[1].tap()
+
+        #expect(spy.guiActions == [.togglePanel(panel: 0), .togglePanel(panel: 2)])
+    }
+
+    @Test("Git badge shows changed file count and buttons keep accessibility labels")
+    @MainActor func gitBadgeAndLabels() throws {
+        let sut = ActivityBar(activePanel: .gitStatus, gitStatusCount: 7, theme: ThemeColors(), encoder: nil)
+        let body = try sut.inspect()
+        let buttons = body.findAll(ViewType.Button.self)
+        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(buttons.count == ActivityBarPanel.allCases.count)
+        #expect(try buttons[1].accessibilityLabel().string() == "Git status")
+        #expect(try buttons[0].accessibilityLabel().string() == "File tree")
+        #expect(strings.contains("7"))
+    }
+}
 
 // MARK: - SidebarHeaderButton
 
