@@ -54,6 +54,7 @@ struct StatusBarUpdate: Sendable {
     let macroRecording: UInt8
     let parserStatus: UInt8
     let agentStatus: UInt8
+    let activeToolName: String
     let gitAdded: UInt16
     let gitModified: UInt16
     let gitDeleted: UInt16
@@ -93,6 +94,7 @@ struct StatusBarUpdate: Sendable {
         macroRecording: UInt8,
         parserStatus: UInt8,
         agentStatus: UInt8,
+        activeToolName: String = "",
         gitAdded: UInt16,
         gitModified: UInt16,
         gitDeleted: UInt16,
@@ -131,6 +133,7 @@ struct StatusBarUpdate: Sendable {
         self.macroRecording = macroRecording
         self.parserStatus = parserStatus
         self.agentStatus = agentStatus
+        self.activeToolName = activeToolName
         self.gitAdded = gitAdded
         self.gitModified = gitModified
         self.gitDeleted = gitDeleted
@@ -747,6 +750,8 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         var messageCount: UInt32 = 0
         var sessionStatus: UInt8 = 0
         var agentStatus: UInt8 = 0
+        var activeToolName = ""
+        var agentSectionRange: Range<Int>? = nil
         var indent = StatusBarUpdate.IndentInfo(kind: 0, size: 2)
         var modelineSegmentsPresent = false
         var modelineLeftSegments: [Wire.StatusBarSegment] = []
@@ -828,33 +833,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 macroRecording = data[sStart]
 
             case 0x09: // Agent: varies by content_kind
-                if sectionLen >= 1 {
-                    if contentKind == 0 {
-                        agentStatus = data[sStart]
-                        if sectionLen >= 5 {
-                            backgroundSubagentCount = readU16(data, sStart + 1)
-                            let labelLen = Int(readU16(data, sStart + 3))
-                            if sectionLen >= 5 + labelLen {
-                                backgroundSubagentLabel = String(data: data[(sStart + 5)..<(sStart + 5 + labelLen)], encoding: .utf8) ?? ""
-                            }
-                        }
-                    } else {
-                        let mnLen = Int(data[sStart])
-                        guard sectionLen >= 1 + mnLen + 6 else { break }
-                        modelName = String(data: data[(sStart + 1)..<(sStart + 1 + mnLen)], encoding: .utf8) ?? ""
-                        messageCount = readU32(data, sStart + 1 + mnLen)
-                        sessionStatus = data[sStart + 5 + mnLen]
-                        agentStatus = data[sStart + 6 + mnLen]
-                        let backgroundOffset = sStart + 7 + mnLen
-                        if sectionLen >= 11 + mnLen {
-                            backgroundSubagentCount = readU16(data, backgroundOffset)
-                            let labelLen = Int(readU16(data, backgroundOffset + 2))
-                            if sectionLen >= 11 + mnLen + labelLen {
-                                backgroundSubagentLabel = String(data: data[(backgroundOffset + 4)..<(backgroundOffset + 4 + labelLen)], encoding: .utf8) ?? ""
-                            }
-                        }
-                    }
-                }
+                agentSectionRange = sStart..<(sStart + sectionLen)
 
             case 0x0A: // Indent: indent_type(1) + indent_size(1)
                 guard sectionLen >= 2 else { break }
@@ -914,6 +893,60 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             pos = sStart + sectionLen
         }
 
+        if let agentSectionRange {
+            let sStart = agentSectionRange.lowerBound
+            let sectionLen = agentSectionRange.count
+            let sectionEnd = sStart + sectionLen
+
+            if contentKind == 0 {
+                guard sectionLen >= 1 else { throw ProtocolDecodeError.malformed }
+                guard sectionLen >= 5 else { throw ProtocolDecodeError.malformed }
+                var pos = sStart
+                agentStatus = data[pos]
+                pos += 1
+                backgroundSubagentCount = readU16(data, pos)
+                pos += 2
+                let labelLen = Int(readU16(data, pos))
+                pos += 2
+                guard sectionLen >= (pos - sStart) + labelLen else { throw ProtocolDecodeError.malformed }
+                backgroundSubagentLabel = String(data: data[pos..<(pos + labelLen)], encoding: .utf8) ?? ""
+                pos += labelLen
+                if pos < sectionEnd {
+                    let toolLen = Int(data[pos])
+                    pos += 1
+                    guard sectionLen >= (pos - sStart) + toolLen else { throw ProtocolDecodeError.malformed }
+                    activeToolName = String(data: data[pos..<(pos + toolLen)], encoding: .utf8) ?? ""
+                }
+            } else {
+                guard sectionLen >= 1 else { throw ProtocolDecodeError.malformed }
+                var pos = sStart
+                let mnLen = Int(data[pos])
+                guard sectionLen >= 11 + mnLen else { throw ProtocolDecodeError.malformed }
+                pos += 1
+                modelName = String(data: data[pos..<(pos + mnLen)], encoding: .utf8) ?? ""
+                pos += mnLen
+                messageCount = readU32(data, pos)
+                pos += 4
+                sessionStatus = data[pos]
+                pos += 1
+                agentStatus = data[pos]
+                pos += 1
+                backgroundSubagentCount = readU16(data, pos)
+                pos += 2
+                let labelLen = Int(readU16(data, pos))
+                pos += 2
+                guard sectionLen >= (pos - sStart) + labelLen else { throw ProtocolDecodeError.malformed }
+                backgroundSubagentLabel = String(data: data[pos..<(pos + labelLen)], encoding: .utf8) ?? ""
+                pos += labelLen
+                if pos < sectionEnd {
+                    let toolLen = Int(data[pos])
+                    pos += 1
+                    guard sectionLen >= (pos - sStart) + toolLen else { throw ProtocolDecodeError.malformed }
+                    activeToolName = String(data: data[pos..<(pos + toolLen)], encoding: .utf8) ?? ""
+                }
+            }
+        }
+
         let update = StatusBarUpdate(
             contentKind: contentKind, mode: mode,
             cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount,
@@ -923,6 +956,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             modelName: modelName, messageCount: messageCount, sessionStatus: sessionStatus,
             infoCount: infoCount, hintCount: hintCount, macroRecording: macroRecording,
             parserStatus: parserStatus, agentStatus: agentStatus,
+            activeToolName: activeToolName,
             gitAdded: gitAdded, gitModified: gitModified, gitDeleted: gitDeleted,
             icon: icon, iconColorR: iconColorR, iconColorG: iconColorG, iconColorB: iconColorB,
             filename: filename, diagnosticHint: diagnosticHint,

@@ -443,6 +443,7 @@ struct GUIStatusBarDecoderTests {
         agent.append(0) // agentStatus
         appendU16(&agent, 2) // backgroundSubagentCount
         appendString16(&agent, "session-2: tests") // backgroundSubagentLabel
+        appendString8(&agent, "read_file") // activeToolName
 
         let sections = [
             buildSection(SECTION_IDENTITY, identity),
@@ -487,6 +488,7 @@ struct GUIStatusBarDecoderTests {
         #expect(update.macroRecording == 0)
         #expect(update.parserStatus == 1)
         #expect(update.agentStatus == 0)
+        #expect(update.activeToolName == "read_file")
         #expect(update.gitAdded == 5)
         #expect(update.gitModified == 3)
         #expect(update.gitDeleted == 1)
@@ -498,6 +500,72 @@ struct GUIStatusBarDecoderTests {
         #expect(update.backgroundSubagentCount == 2)
         #expect(update.backgroundSubagentLabel == "session-2: tests")
 
+    }
+
+    @Test("Decode gui_status_bar empty agent section throws malformed")
+    func decodeEmptyAgentSectionThrows() throws {
+        var identity = Data()
+        identity.append(1) // contentKind = agent
+        identity.append(0) // mode = normal
+        identity.append(0x03) // flags
+
+        let sections = [
+            buildSection(SECTION_IDENTITY, identity),
+            buildSection(SECTION_AGENT, Data()),
+        ]
+
+        var data = Data()
+        data.append(OP_GUI_STATUS_BAR)
+        data.append(UInt8(sections.count))
+        for section in sections { data.append(section) }
+
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Decode gui_status_bar agent section before identity")
+    func decodeAgentSectionBeforeIdentity() throws {
+        var identity = Data()
+        identity.append(1) // contentKind = agent
+        identity.append(0) // mode = normal
+        identity.append(0x03) // flags
+
+        var agent = Data()
+        appendString8(&agent, "claude-3-5-sonnet")
+        appendU32(&agent, 12) // messageCount
+        agent.append(1) // sessionStatus
+        agent.append(1) // agentStatus
+        appendU16(&agent, 3) // backgroundSubagentCount
+        appendString16(&agent, "session-3: agent tests") // backgroundSubagentLabel
+        appendString8(&agent, "shell") // activeToolName
+
+        let sections = [
+            buildSection(SECTION_AGENT, agent),
+            buildSection(SECTION_IDENTITY, identity),
+        ]
+
+        var data = Data()
+        data.append(OP_GUI_STATUS_BAR)
+        data.append(UInt8(sections.count))
+        for section in sections { data.append(section) }
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiStatusBar(let update) = cmd else {
+            Issue.record("Expected .guiStatusBar")
+            return
+        }
+
+        #expect(update.contentKind == 1)
+        #expect(update.modelName == "claude-3-5-sonnet")
+        #expect(update.messageCount == 12)
+        #expect(update.sessionStatus == 1)
+        #expect(update.agentStatus == 1)
+        #expect(update.activeToolName == "shell")
+        #expect(update.backgroundSubagentCount == 3)
+        #expect(update.backgroundSubagentLabel == "session-3: agent tests")
     }
 
     @Test("Decode gui_status_bar workspace section")
@@ -590,7 +658,7 @@ struct GUIStatusBarDecoderTests {
         var recording = Data()
         recording.append(0)
 
-        // Agent section: model_name_len(1) + model_name + message_count(4) + session_status(1) + agent_status(1) + background count/label
+        // Agent section: model_name_len(1) + model_name + message_count(4) + session_status(1) + agent_status(1) + background count/label + active_tool_name
         var agent = Data()
         appendString8(&agent, "claude-3-5-sonnet")
         appendU32(&agent, 12) // messageCount
@@ -598,6 +666,7 @@ struct GUIStatusBarDecoderTests {
         agent.append(1) // agentStatus
         appendU16(&agent, 3) // backgroundSubagentCount
         appendString16(&agent, "session-3: agent tests") // backgroundSubagentLabel
+        appendString8(&agent, "shell") // activeToolName
 
         let sections = [
             buildSection(SECTION_IDENTITY, identity),
@@ -635,9 +704,48 @@ struct GUIStatusBarDecoderTests {
         #expect(update.errorCount == 1)
         #expect(update.hintCount == 1)
         #expect(update.agentStatus == 1)
+        #expect(update.activeToolName == "shell")
         #expect(update.gitAdded == 3)
         #expect(update.gitModified == 2)
         #expect(update.filename == "editor.ex")
+        #expect(update.backgroundSubagentCount == 3)
+        #expect(update.backgroundSubagentLabel == "session-3: agent tests")
+    }
+
+    @Test("Decode gui_status_bar agent variant without appended active tool name")
+    func decodeAgentVariantWithoutActiveToolName() throws {
+        var identity = Data()
+        identity.append(1) // contentKind = agent
+        identity.append(0) // mode = normal
+        identity.append(0x03) // flags
+
+        var agent = Data()
+        appendString8(&agent, "claude-3-5-sonnet")
+        appendU32(&agent, 12) // messageCount
+        agent.append(1) // sessionStatus
+        agent.append(1) // agentStatus
+        appendU16(&agent, 3) // backgroundSubagentCount
+        appendString16(&agent, "session-3: agent tests") // backgroundSubagentLabel
+
+        let sections = [
+            buildSection(SECTION_IDENTITY, identity),
+            buildSection(SECTION_AGENT, agent),
+        ]
+
+        var data = Data()
+        data.append(OP_GUI_STATUS_BAR)
+        data.append(UInt8(sections.count))
+        for section in sections { data.append(section) }
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiStatusBar(let update) = cmd else {
+            Issue.record("Expected .guiStatusBar")
+            return
+        }
+
+        #expect(update.activeToolName.isEmpty)
         #expect(update.backgroundSubagentCount == 3)
         #expect(update.backgroundSubagentLabel == "session-3: agent tests")
     }

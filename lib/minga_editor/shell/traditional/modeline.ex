@@ -46,6 +46,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
           :buf_count => non_neg_integer(),
           :macro_recording => {true, String.t()} | false,
           optional(:agent_status) => MingaEditor.State.Agent.status(),
+          optional(:active_tool_name) => String.t() | nil,
           optional(:agent_theme_colors) => MingaEditor.UI.Theme.Agent.t() | nil,
           optional(:mode_override) => String.t() | nil,
           optional(:lsp_status) => lsp_status(),
@@ -833,17 +834,35 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   defp build_agent_segments(data, bar_bg) do
     status = Map.get(data, :agent_status)
     colors = Map.get(data, :agent_theme_colors)
+    active_tool_name = Map.get(data, :active_tool_name)
 
     case {status, colors} do
-      {nil, _colors} -> []
-      {:idle, c} -> [{" ◯ ", c.status_idle, bar_bg, [], nil}]
-      {:plan, c} -> [{" PLAN ", c.status_thinking, bar_bg, [bold: true], nil}]
-      {:thinking, c} -> [{" ⟳ ", c.status_thinking, bar_bg, [bold: true], nil}]
-      {:tool_executing, c} -> [{" ⚡ ", c.status_tool, bar_bg, [bold: true], nil}]
-      {:error, c} -> [{" ✗ ", c.status_error, bar_bg, [bold: true], nil}]
-      _other -> []
+      {nil, _colors} ->
+        []
+
+      {:idle, c} ->
+        [{" ◯ Idle ", c.status_idle, bar_bg, [], nil}]
+
+      {:plan, c} ->
+        [{" PLAN ", c.status_thinking, bar_bg, [bold: true], nil}]
+
+      {:thinking, c} ->
+        [{" ⟳ Thinking ", c.status_thinking, bar_bg, [bold: true], nil}]
+
+      {:tool_executing, c} ->
+        [{agent_tool_label(active_tool_name), c.status_tool, bar_bg, [bold: true], nil}]
+
+      {:error, c} ->
+        [{" ✗ Error ", c.status_error, bar_bg, [bold: true], nil}]
+
+      _other ->
+        []
     end
   end
+
+  @spec agent_tool_label(String.t() | nil) :: String.t()
+  defp agent_tool_label(name) when is_binary(name) and name != "", do: " ⚡ Running #{name} "
+  defp agent_tool_label(_name), do: " ⚡ Running "
 
   @spec build_background_agent_segments(modeline_data(), non_neg_integer(), Theme.Modeline.t()) ::
           [render_segment()]

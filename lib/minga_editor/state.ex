@@ -1870,16 +1870,17 @@ defmodule MingaEditor.State do
 
     case agent_snapshot(session_pid) do
       nil ->
-        state
+        AgentAccess.update_agent(state, &AgentState.clear_active_tool_name/1)
 
       snapshot ->
         AgentAccess.update_agent(state, fn agent ->
-          %{
-            agent
-            | runtime: MingaAgent.RuntimeState.set_status(agent.runtime, snapshot.status),
-              pending_approval: snapshot.pending_approval,
-              error: snapshot.error
-          }
+          AgentState.apply_session_snapshot(
+            agent,
+            snapshot.status,
+            snapshot.pending_approval,
+            snapshot.error,
+            Map.get(snapshot, :active_tool_name)
+          )
         end)
     end
   end

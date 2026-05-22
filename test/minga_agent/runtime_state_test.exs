@@ -27,6 +27,30 @@ defmodule MingaAgent.RuntimeStateTest do
     end
   end
 
+  describe "active tool name" do
+    test "set_active_tool_name/2 and clear_active_tool_name/1 update only the tool name" do
+      rt =
+        %RuntimeState{status: :tool_executing}
+        |> RuntimeState.set_active_tool_name("read_file")
+
+      assert rt.active_tool_name == "read_file"
+      assert rt.status == :tool_executing
+
+      rt = RuntimeState.clear_active_tool_name(rt)
+
+      assert rt.active_tool_name == nil
+      assert rt.status == :tool_executing
+    end
+
+    test "busy?/1 remains tied to status, not active_tool_name" do
+      idle = %RuntimeState{status: :idle} |> RuntimeState.set_active_tool_name("read_file")
+      running = %RuntimeState{status: :tool_executing} |> RuntimeState.clear_active_tool_name()
+
+      refute RuntimeState.busy?(idle)
+      assert RuntimeState.busy?(running)
+    end
+  end
+
   describe "busy?/1" do
     test "true for :thinking" do
       assert RuntimeState.busy?(%RuntimeState{status: :thinking})

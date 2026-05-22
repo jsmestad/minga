@@ -52,6 +52,7 @@ final class StatusBarState {
     var macroRecording: UInt8 = 0
     var parserStatus: UInt8 = 0
     var agentStatus: UInt8 = 0
+    var activeToolName: String = ""
     var gitAdded: UInt16 = 0
     var gitModified: UInt16 = 0
     var gitDeleted: UInt16 = 0
@@ -95,6 +96,7 @@ final class StatusBarState {
         if self.macroRecording != data.macroRecording { self.macroRecording = data.macroRecording }
         if self.parserStatus != data.parserStatus { self.parserStatus = data.parserStatus }
         if self.agentStatus != data.agentStatus { self.agentStatus = data.agentStatus }
+        if self.activeToolName != data.activeToolName { self.activeToolName = data.activeToolName }
         if self.gitAdded != data.gitAdded { self.gitAdded = data.gitAdded }
         if self.gitModified != data.gitModified { self.gitModified = data.gitModified }
         if self.gitDeleted != data.gitDeleted { self.gitDeleted = data.gitDeleted }
@@ -368,36 +370,73 @@ struct StatusBarView: View {
         }
     }
 
+    private var agentStatusText: String? {
+        switch state.agentStatus {
+        case 0: return "Idle"
+        case 1: return "Thinking"
+        case 2: return state.activeToolName.isEmpty ? "Running" : "Running \(state.activeToolName)"
+        case 3: return "Error"
+        case 4: return "PLAN"
+        default: return nil
+        }
+    }
+
+    private var agentStatusHelpText: String {
+        switch state.agentStatus {
+        case 0: return "Agent idle"
+        case 1: return "Agent thinking"
+        case 2: return state.activeToolName.isEmpty ? "Agent executing tools" : "Agent running \(state.activeToolName)"
+        case 3: return "Agent error"
+        case 4: return "Agent plan mode"
+        default: return "Agent status"
+        }
+    }
+
     @ViewBuilder
     private var agentStatusIcon: some View {
+        if let label = agentStatusText {
+            HStack(spacing: 4) {
+                agentStatusGlyph
+                Text(label)
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.modelineBarFg.opacity(0.7))
+                    .lineLimit(1)
+            }
+            .frame(height: barHeight)
+            .help(agentStatusHelpText)
+            .accessibilityLabel(agentStatusHelpText)
+        } else {
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private var agentStatusGlyph: some View {
         switch state.agentStatus {
+        case 0:
+            Text("◯")
+                .font(.system(size: 11))
+                .foregroundStyle(theme.modelineBarFg.opacity(0.55))
         case 1:
             ProgressView()
                 .scaleEffect(0.45)
                 .frame(width: 14, height: barHeight)
-                .help("Agent thinking")
-                .accessibilityLabel("Agent thinking")
+                .tint(theme.statusbarAccentFg)
         case 2:
             Image(systemName: "bolt.fill")
                 .font(.system(size: 9))
                 .foregroundStyle(theme.statusbarAccentFg)
                 .frame(width: 14, height: barHeight)
-                .help("Agent executing tools")
-                .accessibilityLabel("Agent executing tools")
         case 3:
             Image(systemName: "exclamationmark.circle.fill")
                 .font(.system(size: 9))
                 .foregroundStyle(theme.gutterErrorFg)
                 .frame(width: 14, height: barHeight)
-                .help("Agent error")
-                .accessibilityLabel("Agent error")
         case 4:
             Image(systemName: "pencil.and.outline")
                 .font(.system(size: 9))
                 .foregroundStyle(theme.agentStatusNeedsYou)
                 .frame(width: 14, height: barHeight)
-                .help("Agent needs input")
-                .accessibilityLabel("Agent needs input")
         default:
             EmptyView()
         }

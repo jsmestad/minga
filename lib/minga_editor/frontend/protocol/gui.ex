@@ -1883,7 +1883,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     0x06 - File: icon, icon_color, filename, filetype
     0x07 - Message: status message
     0x08 - Recording: macro_recording
-    0x09 - Agent: model_name, message_count, session_status, agent_status
+    0x09 - Agent: model_name, message_count, session_status, agent_status, background_count, background_label, active_tool_name
     0x0A - Indent: indent_type, indent_size
     0x0B - ModelineSegments: named configured left/right styled modeline segments
     0x0C - Selection: selection_mode, selection_size
@@ -1931,6 +1931,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
     background_label =
       :erlang.iolist_to_binary([Map.get(d, :active_background_subagent_label) || ""])
+
+    active_tool_name =
+      :erlang.iolist_to_binary([Map.get(d, :active_tool_name) || ""])
 
     background_count = Map.get(d, :background_subagent_count, 0)
 
@@ -1980,7 +1983,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
             @section_agent,
             <<byte_size(model_name)::8, model_name::binary, d.message_count::32,
               session_status_byte::8, agent_byte::8, background_count::16,
-              byte_size(background_label)::16, background_label::binary>>
+              byte_size(background_label)::16, background_label::binary,
+              byte_size(active_tool_name)::8, active_tool_name::binary>>
           )
         ]
     else
@@ -1989,7 +1993,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           encode_section(
             @section_agent,
             <<agent_byte::8, background_count::16, byte_size(background_label)::16,
-              background_label::binary>>
+              background_label::binary, byte_size(active_tool_name)::8, active_tool_name::binary>>
           )
         ]
     end
