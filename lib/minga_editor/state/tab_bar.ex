@@ -565,41 +565,67 @@ defmodule MingaEditor.State.TabBar do
   @spec move_active_tab(t(), 1 | -1) :: t()
   defp move_active_tab(%__MODULE__{active_id: active_id} = tb, step) do
     tabs = visible_file_tabs(tb)
-    current_index = Enum.find_index(tabs, &(&1.id == active_id))
-    move_visible_tab(tb, active_id, current_index, step, length(tabs))
-  end
 
-  @spec move_visible_tab(t(), Tab.id(), non_neg_integer() | nil, 1 | -1, non_neg_integer()) :: t()
-  defp move_visible_tab(tb, _active_id, nil, _step, _count), do: tb
-  defp move_visible_tab(tb, _active_id, _index, -1, 0), do: tb
-  defp move_visible_tab(tb, _active_id, 0, -1, _count), do: tb
-  defp move_visible_tab(tb, _active_id, index, 1, count) when index >= count - 1, do: tb
+    case Enum.find_index(tabs, &(&1.id == active_id)) do
+      nil ->
+        tb
 
-  defp move_visible_tab(tb, active_id, index, step, _count) do
-    reorder_tab(tb, active_id, index + step)
+      current_index ->
+        target_index = current_index + step
+
+        if visible_tab_reorder_allowed?(tabs, current_index, target_index) do
+          reorder_tab(tb, active_id, target_index)
+        else
+          tb
+        end
+    end
   end
 
   @spec reorder_file_tab(t(), Tab.id(), non_neg_integer(), non_neg_integer()) :: t()
   defp reorder_file_tab(%__MODULE__{} = tb, id, workspace_id, new_index) do
     tabs = visible_file_tabs(tb, workspace_id)
     current_index = Enum.find_index(tabs, &(&1.id == id))
-    reorder_visible_file_tab(tb, workspace_id, tabs, current_index, new_index)
+
+    if visible_tab_reorder_allowed?(tabs, current_index, new_index) do
+      reorder_visible_file_tab(tb, workspace_id, tabs, current_index, new_index)
+    else
+      tb
+    end
   end
+
+  @spec visible_tab_reorder_allowed?([Tab.t()], non_neg_integer() | nil, non_neg_integer()) ::
+          boolean()
+  defp visible_tab_reorder_allowed?(_tabs, nil, _target_index), do: false
+
+  defp visible_tab_reorder_allowed?(tabs, current_index, target_index) do
+    target_index >= 0 and target_index < length(tabs) and
+      same_visible_bucket?(tabs, current_index, target_index)
+  end
+
+  @spec same_visible_bucket?([Tab.t()], non_neg_integer(), non_neg_integer()) :: boolean()
+  defp same_visible_bucket?(tabs, current_index, target_index) do
+    pinned_count = Enum.count(tabs, & &1.pinned?)
+
+    visible_bucket(current_index, pinned_count) ==
+      visible_bucket(target_index, pinned_count)
+  end
+
+  @spec visible_bucket(non_neg_integer(), non_neg_integer()) :: :pinned | :unpinned
+  defp visible_bucket(index, pinned_count) when index < pinned_count, do: :pinned
+  defp visible_bucket(_index, _pinned_count), do: :unpinned
 
   @spec reorder_visible_file_tab(
           t(),
           non_neg_integer(),
           [Tab.t()],
-          non_neg_integer() | nil,
+          non_neg_integer(),
           non_neg_integer()
         ) :: t()
-  defp reorder_visible_file_tab(tb, _workspace_id, _tabs, nil, _new_index), do: tb
   defp reorder_visible_file_tab(tb, _workspace_id, [_single], _current_index, _new_index), do: tb
 
   defp reorder_visible_file_tab(tb, workspace_id, tabs, current_index, new_index) do
-    clamped_index = min(new_index, length(tabs) - 1)
     {tab, remaining} = List.pop_at(tabs, current_index)
-    reordered = List.insert_at(remaining, clamped_index, tab)
+    reordered = List.insert_at(remaining, new_index, tab)
     replace_visible_file_tabs(tb, workspace_id, reordered)
   end
 

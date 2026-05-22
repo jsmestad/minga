@@ -944,6 +944,11 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       assert {:ok, {:gui_action, :new_tab}} = Protocol.decode_event(payload)
     end
 
+    test "tab_reorder with tab id and visible index" do
+      payload = <<0x07, 0x47, 42::32, 3::16>>
+      assert {:ok, {:gui_action, {:tab_reorder, 42, 3}}} = Protocol.decode_event(payload)
+    end
+
     test "system_will_sleep with no payload" do
       payload = <<0x07, 0x34>>
       assert {:ok, {:gui_action, :system_will_sleep}} = Protocol.decode_event(payload)

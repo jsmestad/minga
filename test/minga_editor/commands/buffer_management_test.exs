@@ -129,6 +129,42 @@ defmodule MingaEditor.Commands.BufferManagementTest do
     end
   end
 
+  describe "tab pin and reorder command state" do
+    test ":pin_tab and :unpin_tab update pin state and status" do
+      {state, _buffer} = start_command_state("first file")
+      {state, _buffer2} = add_file_tab_with_buffer(state)
+      {state, _buffer3} = add_file_tab_with_buffer(state)
+
+      pinned = BufferManagement.execute(state, :pin_tab)
+
+      assert visible_tab_ids(pinned) == [3, 1, 2]
+      assert TabBar.active(EditorState.tab_bar(pinned)).pinned?
+      assert EditorState.status_msg(pinned) == "Tab pinned"
+
+      unpinned = BufferManagement.execute(pinned, :unpin_tab)
+
+      assert visible_tab_ids(unpinned) == [1, 2, 3]
+      refute TabBar.active(EditorState.tab_bar(unpinned)).pinned?
+      assert EditorState.status_msg(unpinned) == "Tab unpinned"
+    end
+
+    test ":move_tab_left and :move_tab_right reorder the active tab without status text" do
+      {state, _buffer} = start_command_state("first file")
+      {state, _buffer2} = add_file_tab_with_buffer(state)
+      {state, _buffer3} = add_file_tab_with_buffer(state)
+
+      moved_left = BufferManagement.execute(state, :move_tab_left)
+
+      assert visible_tab_ids(moved_left) == [1, 3, 2]
+      assert EditorState.status_msg(moved_left) == nil
+
+      moved_right = BufferManagement.execute(moved_left, :move_tab_right)
+
+      assert visible_tab_ids(moved_right) == [1, 2, 3]
+      assert EditorState.status_msg(moved_right) == nil
+    end
+  end
+
   describe "tab-aware quit command state" do
     test ":q with multiple tabs closes the active tab" do
       {state, _buffer} = start_command_state("first file")
@@ -512,6 +548,13 @@ defmodule MingaEditor.Commands.BufferManagementTest do
     |> EditorState.tab_bar()
     |> Map.fetch!(:tabs)
     |> Enum.map(& &1.label)
+  end
+
+  defp visible_tab_ids(state) do
+    state
+    |> EditorState.tab_bar()
+    |> TabBar.visible_file_tabs()
+    |> Enum.map(& &1.id)
   end
 
   defp tab_count(state), do: state |> EditorState.tab_bar() |> TabBar.count()

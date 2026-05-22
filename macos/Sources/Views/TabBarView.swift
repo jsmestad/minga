@@ -506,14 +506,18 @@ struct TabBarView: View {
                     tabDragInProgress = false
                 }
         )
-        .draggable(String(tab.id)) {
+        .draggable(tabDragPayload(tab)) {
             tabDragPreview(tab)
         }
         .dropDestination(for: String.self) { droppedIds, _location in
-            guard let first = droppedIds.first, let draggedId = UInt32(first), draggedId != tab.id else {
+            guard let first = droppedIds.first,
+                  let draggedId = tabDragId(from: first),
+                  draggedId != tab.id else {
                 return false
             }
-            guard let draggedTab = displayTabs.first(where: { $0.id == draggedId }), draggedTab.groupId == tab.groupId, draggedTab.isPinned == tab.isPinned else {
+            guard let draggedTab = displayTabs.first(where: { $0.id == draggedId }),
+                  draggedTab.groupId == tab.groupId,
+                  draggedTab.isPinned == tab.isPinned else {
                 return false
             }
             encoder?.sendTabReorder(id: draggedId, newIndex: UInt16(visibleIndex))
@@ -525,7 +529,8 @@ struct TabBarView: View {
         }
         .accessibilityIdentifier("workspace-file-tab-\(tab.id)")
         .accessibilityLabel("File tab \(tab.label)")
-        .accessibilityValue(tab.isDirty ? "modified" : "clean")
+        .accessibilityValue(tabAccessibilityValue(tab))
+        .help(tab.label)
         .contextMenu {
             Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") {
                 encoder?.sendSelectTab(id: tab.id)
@@ -662,6 +667,34 @@ struct TabBarView: View {
             return theme.tabAttentionFg
         }
         return nil
+    }
+
+    private func tabDragPayload(_ tab: TabEntry) -> String {
+        "tab:\(tab.id)"
+    }
+
+    private func tabDragId(from payload: String) -> UInt32? {
+        guard payload.hasPrefix("tab:") else {
+            return nil
+        }
+
+        return UInt32(payload.dropFirst(4))
+    }
+
+    private func tabAccessibilityValue(_ tab: TabEntry) -> String {
+        var values: [String] = []
+
+        if tab.isPinned {
+            values.append("pinned")
+        }
+        if tab.isDirty {
+            values.append("modified")
+        }
+        if tab.hasAttention {
+            values.append("attention")
+        }
+
+        return values.isEmpty ? "clean" : values.joined(separator: ", ")
     }
 }
 
