@@ -51,6 +51,28 @@ defmodule Minga.SystemObserver.TreeNodeTest do
 
       assert %TreeNode{pid: ^root_pid, children: []} = tree
     end
+
+    test "flattens a tree in pre-order for protocol encoding and hit lookup" do
+      root_pid = self()
+      child_pid = spawn_idle_process()
+      grandchild_pid = spawn_idle_process()
+
+      snapshots = %{
+        root_pid =>
+          snapshot(parent_pid: nil, child_type: :supervisor, process_class: :supervisor),
+        child_pid =>
+          snapshot(parent_pid: root_pid, child_type: :supervisor, process_class: :supervisor),
+        grandchild_pid =>
+          snapshot(parent_pid: child_pid, child_type: :worker, process_class: :worker)
+      }
+
+      assert [
+               %TreeNode{pid: ^root_pid},
+               %TreeNode{pid: ^child_pid},
+               %TreeNode{pid: ^grandchild_pid}
+             ] =
+               snapshots |> TreeNode.build_tree() |> TreeNode.flatten()
+    end
   end
 
   defp spawn_idle_process do

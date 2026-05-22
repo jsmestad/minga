@@ -30,10 +30,11 @@ struct ActivityBarViewTests {
         let body = try sut.inspect()
         let buttons = body.findAll(ViewType.Button.self)
 
-        try buttons[0].tap()
-        try buttons[1].tap()
+        for button in buttons {
+            try button.tap()
+        }
 
-        #expect(spy.guiActions == [.togglePanel(panel: 0), .togglePanel(panel: 2)])
+        #expect(spy.guiActions == [.togglePanel(panel: 0), .togglePanel(panel: 2), .togglePanel(panel: 4)])
     }
 
     @Test("Git badge shows changed file count and buttons keep accessibility labels")

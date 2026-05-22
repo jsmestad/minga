@@ -36,6 +36,7 @@ defmodule MingaEditor do
   alias MingaEditor.InlineEdit.Events, as: InlineEditEvents
   alias MingaEditor.MessageLog
   alias MingaEditor.NavFlash
+  alias MingaEditor.Observatory
   alias MingaEditor.YankFlash
   alias MingaEditor.Renderer
   alias MingaEditor.SemanticTokenSync
@@ -572,6 +573,27 @@ defmodule MingaEditor do
     {:noreply, new_state}
   end
 
+  def handle_info({:observatory_tick, token}, state) do
+    if current_observatory_token?(state, token) do
+      data = build_observatory_data()
+      next_token = make_ref()
+      timer = Process.send_after(self(), {:observatory_tick, next_token}, 1_000)
+
+      new_state =
+        state
+        |> EditorState.set_observatory_data(data)
+        |> EditorState.set_observatory_timer({timer, next_token})
+
+      {:noreply, Renderer.render_or_async(new_state)}
+    else
+      {:noreply, state}
+    end
+  end
+
+  def handle_info(:observatory_tick, state) do
+    {:noreply, state}
+  end
+
   # ── Handler-delegated bare atom events ─────────────────────────────────────
   # Bare atom messages routed to HighlightHandler, SessionHandler, or
   # ToolHandler via a module attribute map (guard-safe via is_map_key/2).
@@ -808,6 +830,30 @@ defmodule MingaEditor do
   defp setup_highlight_or_defer(state) do
     send(self(), :setup_highlight)
     state
+  end
+
+  @spec current_observatory_token?(state(), reference()) :: boolean()
+  defp current_observatory_token?(
+         %{shell_state: %{observatory_visible: true, observatory_timer: {_timer, token}}},
+         token
+       ),
+       do: true
+
+  defp current_observatory_token?(_state, _token), do: false
+
+  @spec build_observatory_data() :: Observatory.Data.t()
+  defp build_observatory_data do
+    case Minga.SystemObserver.snapshot() do
+      %{processes: processes} ->
+        processes
+        |> Minga.SystemObserver.TreeNode.build_tree()
+        |> Observatory.Data.visible(Minga.SystemObserver.samples())
+
+      nil ->
+        Observatory.Data.visible(nil, [])
+    end
+  catch
+    :exit, _ -> Observatory.Data.visible(nil, [])
   end
 
   # ── :DOWN classifier ────────────────────────────────────────────────────────

@@ -144,7 +144,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       gui_hover_action: 0x96,
       gui_config_state: 0x97,
       gui_workspaces: 0x98,
-      gui_notifications: 0x99
+      gui_notifications: 0x99,
+      gui_observatory: 0x9A
     )
   end
 
@@ -220,7 +221,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       config_query: 0x44,
       notification_dismiss: 0x45,
       notification_action: 0x46,
-      power_thermal_state: 0x47
+      power_thermal_state: 0x47,
+      observatory_inspect: 0x48
     )
   end
 

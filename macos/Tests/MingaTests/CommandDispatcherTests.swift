@@ -92,6 +92,31 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.tabBarState.activeIndex == 0)
     }
 
+    @Test("guiObservatory updates observatoryState")
+    @MainActor func guiObservatoryRouting() {
+        let (dispatcher, gui) = makeDispatcher()
+        let nodes = [Wire.ObservatoryNode(pid: "<0.1.0>", parentPid: "", name: "Minga.Supervisor", processClass: 0, depth: 0, memory: 1024, messageQueueLen: 0, reductions: 10, sparkline: [0, 0.5])]
+
+        dispatcher.dispatch(.guiObservatory(visible: true, nodeCount: 1, nodes: nodes))
+
+        #expect(gui.observatoryState.visible == true)
+        #expect(gui.observatoryState.nodes.count == 1)
+        #expect(gui.observatoryState.nodes[0].pid == "<0.1.0>")
+        #expect(gui.observatoryState.nodes[0].sparkline == [0, 0.5])
+    }
+
+    @Test("guiObservatory hidden payload hides observatoryState")
+    @MainActor func guiObservatoryHiddenRouting() {
+        let (dispatcher, gui) = makeDispatcher()
+        let nodes = [Wire.ObservatoryNode(pid: "<0.1.0>", parentPid: "", name: "Minga.Supervisor", processClass: 0, depth: 0, memory: 1024, messageQueueLen: 0, reductions: 10, sparkline: [])]
+        dispatcher.dispatch(.guiObservatory(visible: true, nodeCount: 1, nodes: nodes))
+
+        dispatcher.dispatch(.guiObservatory(visible: false, nodeCount: 0, nodes: []))
+
+        #expect(gui.observatoryState.visible == false)
+        #expect(gui.observatoryState.nodes.isEmpty)
+    }
+
     @Test("guiFileTree updates fileTreeState when entries present")
     @MainActor func guiFileTreeRouting() {
         let (dispatcher, gui) = makeDispatcher()

@@ -176,6 +176,7 @@ enum RenderCommand: Sendable {
     case guiTabBar(activeIndex: UInt8, tabs: [Wire.TabEntry])
     case guiFileTree(version: UInt8, treeFlags: UInt8, treeState: UInt8, selectedId: String, treeWidth: UInt16, rootPath: String, errorReason: String, entries: [Wire.FileTreeEntry])
     case guiFileTreeSelection(selectedId: String, focused: Bool)
+    case guiObservatory(visible: Bool, nodeCount: UInt16, nodes: [Wire.ObservatoryNode])
     case guiCompletion(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, items: [Wire.CompletionItem])
     case guiWhichKey(visible: Bool, prefix: String, page: UInt8, pageCount: UInt8, bindings: [Wire.WhichKeyBinding])
     case guiBreadcrumb(segments: [String])
@@ -567,6 +568,90 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
 
         guard pos == payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
         return (.guiFileTree(version: version, treeFlags: treeFlags, treeState: treeState, selectedId: selectedId, treeWidth: treeWidth, rootPath: rootPath, errorReason: errorReason, entries: entries), 5 + payloadLen)
+
+    case OP_GUI_OBSERVATORY:
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let payloadLen = Int(readU16(data, rest))
+        let payloadStart = rest + 2
+        guard data.count >= payloadStart + payloadLen else { throw ProtocolDecodeError.malformed }
+        let payloadEnd = payloadStart + payloadLen
+        var pos = payloadStart
+        var visible = false
+        var nodeCount: UInt16 = 0
+        var nodeEntries: [Wire.ObservatoryNode] = []
+        var sparklinesByPid: [String: [Float]] = [:]
+
+        while pos < payloadEnd {
+            guard pos + 3 <= payloadEnd else { throw ProtocolDecodeError.malformed }
+            let sectionId = data[pos]
+            let sectionLen = Int(readU16(data, pos + 1))
+            let sectionStart = pos + 3
+            let sectionEnd = sectionStart + sectionLen
+            guard sectionEnd <= payloadEnd else { throw ProtocolDecodeError.malformed }
+
+            switch sectionId {
+            case 0x01:
+                guard sectionLen >= 3 else { break }
+                visible = data[sectionStart] != 0
+                nodeCount = readU16(data, sectionStart + 1)
+
+            case 0x02:
+                var nodePos = sectionStart
+                while nodePos < sectionEnd {
+                    guard nodePos + 1 <= sectionEnd else { throw ProtocolDecodeError.malformed }
+                    let pidLen = Int(data[nodePos]); nodePos += 1
+                    guard nodePos + pidLen + 1 <= sectionEnd else { throw ProtocolDecodeError.malformed }
+                    let pid = String(data: data[nodePos..<(nodePos + pidLen)], encoding: .utf8) ?? ""
+                    nodePos += pidLen
+                    let parentLen = Int(data[nodePos]); nodePos += 1
+                    guard nodePos + parentLen + 2 <= sectionEnd else { throw ProtocolDecodeError.malformed }
+                    let parentPid = String(data: data[nodePos..<(nodePos + parentLen)], encoding: .utf8) ?? ""
+                    nodePos += parentLen
+                    let nameLen = Int(readU16(data, nodePos)); nodePos += 2
+                    guard nodePos + nameLen + 12 <= sectionEnd else { throw ProtocolDecodeError.malformed }
+                    let name = String(data: data[nodePos..<(nodePos + nameLen)], encoding: .utf8) ?? ""
+                    nodePos += nameLen
+                    let processClass = data[nodePos]; nodePos += 1
+                    let depth = data[nodePos]; nodePos += 1
+                    let memory = readU32(data, nodePos); nodePos += 4
+                    let messageQueueLen = readU16(data, nodePos); nodePos += 2
+                    let reductions = readU32(data, nodePos); nodePos += 4
+                    nodeEntries.append(Wire.ObservatoryNode(pid: pid, parentPid: parentPid, name: name, processClass: processClass, depth: depth, memory: memory, messageQueueLen: messageQueueLen, reductions: reductions, sparkline: []))
+                }
+
+            case 0x03:
+                var sparkPos = sectionStart
+                while sparkPos < sectionEnd {
+                    guard sparkPos + 2 <= sectionEnd else { throw ProtocolDecodeError.malformed }
+                    let pidLen = Int(data[sparkPos]); sparkPos += 1
+                    guard sparkPos + pidLen + 1 <= sectionEnd else { throw ProtocolDecodeError.malformed }
+                    let pid = String(data: data[sparkPos..<(sparkPos + pidLen)], encoding: .utf8) ?? ""
+                    sparkPos += pidLen
+                    let sampleCount = Int(data[sparkPos]); sparkPos += 1
+                    guard sparkPos + sampleCount * 2 <= sectionEnd else { throw ProtocolDecodeError.malformed }
+                    var samples: [Float] = []
+                    samples.reserveCapacity(sampleCount)
+                    for _ in 0..<sampleCount {
+                        let raw = readU16(data, sparkPos)
+                        samples.append(Float(raw) / 65535.0)
+                        sparkPos += 2
+                    }
+                    sparklinesByPid[pid] = samples
+                }
+
+            default:
+                break
+            }
+
+            pos = sectionEnd
+        }
+
+        let nodes = nodeEntries.map { node in
+            Wire.ObservatoryNode(pid: node.pid, parentPid: node.parentPid, name: node.name, processClass: node.processClass, depth: node.depth, memory: node.memory, messageQueueLen: node.messageQueueLen, reductions: node.reductions, sparkline: sparklinesByPid[node.pid] ?? [])
+        }
+        guard nodeCount == nodes.count else { throw ProtocolDecodeError.malformed }
+
+        return (.guiObservatory(visible: visible, nodeCount: nodeCount, nodes: nodes), 3 + payloadLen)
 
     case OP_GUI_FILE_TREE_SELECTION:
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }

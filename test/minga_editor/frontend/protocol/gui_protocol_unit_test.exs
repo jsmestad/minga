@@ -5,6 +5,8 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
   """
   use ExUnit.Case, async: true
 
+  alias Minga.SystemObserver.ProcessSnapshot
+  alias Minga.SystemObserver.TreeNode
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
@@ -299,6 +301,19 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
     test "rejects malformed payloads" do
       assert :error == ProtocolGUI.decode_gui_action(0x47, <<0>>)
       assert :error == ProtocolGUI.decode_gui_action(0x47, <<0, 1, 2>>)
+    end
+  end
+
+  describe "decode_gui_action for observatory inspection" do
+    test "decodes selected process PID" do
+      pid = "#PID<0.123.0>"
+
+      assert {:ok, {:observatory_inspect, pid}} ==
+               ProtocolGUI.decode_gui_action(0x48, <<byte_size(pid)::16, pid::binary>>)
+    end
+
+    test "rejects malformed selected process PID payload" do
+      assert :error == ProtocolGUI.decode_gui_action(0x48, <<0, 20, "short">>)
     end
   end
 
@@ -772,6 +787,41 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       active_background_subagent_label: "session-3: tests",
       status_msg: nil
     }
+  end
+
+  describe "encode_gui_observatory/1" do
+    test "encodes length-prefixed sectioned process nodes" do
+      root = self()
+
+      tree = %TreeNode{
+        pid: root,
+        depth: 0,
+        children: [],
+        snapshot: %ProcessSnapshot{
+          memory: 1234,
+          message_queue_len: 2,
+          reductions: 99,
+          registered_name: Minga.Supervisor,
+          parent_pid: nil,
+          child_type: :supervisor,
+          process_class: :supervisor
+        }
+      }
+
+      <<0x9A, payload_len::16, payload::binary-size(payload_len)>> =
+        ProtocolGUI.encode_gui_observatory(%{visible: true, tree: tree, samples: []})
+
+      assert payload_len == byte_size(payload)
+      assert <<0x01, 3::16, 1::8, 1::16, rest::binary>> = payload
+
+      assert <<0x02, node_section_len::16, node_section::binary-size(node_section_len),
+               _::binary>> = rest
+
+      <<pid_len::8, _pid::binary-size(pid_len), 0::8, name_len::16, name::binary-size(name_len),
+        0::8, 0::8, 1234::32, 2::16, 99::32>> = node_section
+
+      assert name == "Minga.Supervisor"
+    end
   end
 
   defp status_sections(<<0x76, count::8, rest::binary>>) do

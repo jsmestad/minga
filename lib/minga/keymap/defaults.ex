@@ -141,6 +141,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?p, @none}, {?R, @none}], :project_recent_files, "Recent files in project"},
 
     # ── Open ──────────────────────────────────────────────────────────────────
+    {[{?o, @none}, {?b, @none}], :toggle_beam_observatory, "BEAM observatory"},
     {[{?o, @none}, {?p, @none}], :toggle_file_tree, "Toggle file tree"},
     {[{?o, @none}, {?r, @none}], :tree_reveal_active, "Reveal file in tree"},
 

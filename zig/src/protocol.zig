@@ -109,6 +109,7 @@ pub const OP_GUI_LINE_SPACING = opcodes.OP_GUI_LINE_SPACING;
 pub const OP_GUI_FILE_TREE = opcodes.OP_GUI_FILE_TREE;
 pub const OP_GUI_FILE_TREE_SELECTION = opcodes.OP_GUI_FILE_TREE_SELECTION;
 pub const OP_GUI_CURSOR_ANIMATION = opcodes.OP_GUI_CURSOR_ANIMATION;
+pub const OP_GUI_OBSERVATORY = opcodes.OP_GUI_OBSERVATORY;
 pub const OP_GUI_HOVER_ACTION = opcodes.OP_GUI_HOVER_ACTION;
 pub const OP_GUI_CONFIG_STATE = opcodes.OP_GUI_CONFIG_STATE;
 pub const OP_GUI_NOTIFICATIONS = opcodes.OP_GUI_NOTIFICATIONS;
@@ -183,6 +184,7 @@ pub const GUI_ACTION_CONFIG_QUERY = opcodes.GUI_ACTION_CONFIG_QUERY;
 pub const GUI_ACTION_NOTIFICATION_DISMISS = opcodes.GUI_ACTION_NOTIFICATION_DISMISS;
 pub const GUI_ACTION_NOTIFICATION_ACTION = opcodes.GUI_ACTION_NOTIFICATION_ACTION;
 pub const GUI_ACTION_POWER_THERMAL_STATE = opcodes.GUI_ACTION_POWER_THERMAL_STATE;
+pub const GUI_ACTION_OBSERVATORY_INSPECT = opcodes.GUI_ACTION_OBSERVATORY_INSPECT;
 
 // Log levels// Log levels
 pub const LOG_LEVEL_ERR: u8 = 0;
@@ -1132,7 +1134,21 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
             // TUI ignores font fallback.
             return .noop;
         },
-        else => return error.UnknownOpcode,
+        else => {
+            if (data[0] == OP_GUI_FILE_TREE) {
+                if (rest.len < 4) return error.Malformed;
+                const payload_len: usize = std.mem.readInt(u32, rest[0..4], .big);
+                if (rest.len < 4 + payload_len) return error.Malformed;
+                return .noop;
+            }
+            if (data[0] >= 0x90 and data[0] <= 0x9F) {
+                if (rest.len < 2) return error.Malformed;
+                const payload_len: usize = std.mem.readInt(u16, rest[0..2], .big);
+                if (rest.len < 2 + payload_len) return error.Malformed;
+                return .noop;
+            }
+            return error.UnknownOpcode;
+        },
     }
 }
 
@@ -1262,8 +1278,21 @@ pub fn commandSize(payload: []const u8) usize {
             }
             break :blk offset;
         },
-        // Unknown opcode: skip 1 byte so the loop always makes progress.
-        else => 1,
+        OP_GUI_FILE_TREE => blk: {
+            if (payload.len < 5) break :blk payload.len;
+            const payload_len: usize = std.mem.readInt(u32, payload[1..5], .big);
+            break :blk 5 + payload_len;
+        },
+        // Forward-compatible GUI opcodes use opcode(1) + payload_len(2) + payload.
+        else => blk: {
+            if (payload[0] >= 0x90 and payload[0] <= 0x9F) {
+                if (payload.len < 3) break :blk payload.len;
+                const payload_len: usize = std.mem.readInt(u16, payload[1..3], .big);
+                break :blk 3 + payload_len;
+            }
+            // Unknown legacy opcode: skip 1 byte so the loop always makes progress.
+            break :blk 1;
+        },
     };
     return @min(decoded_size, payload.len);
 }
@@ -1642,6 +1671,17 @@ test "decode set_cursor_shape truncated returns malformed" {
 
 test "decode set_cursor_shape invalid value returns malformed" {
     const data = [_]u8{ OP_SET_CURSOR_SHAPE, 0xFF }; // invalid shape
+    const result = decodeCommand(&data);
+    try std.testing.expectError(error.Malformed, result);
+}
+
+test "decode gui_observatory as noop in TUI" {
+    const data = [_]u8{ OP_GUI_OBSERVATORY, 0x00, 0x03, 0x01, 0x02, 0x03 };
+    try std.testing.expect((try decodeCommand(&data)) == .noop);
+}
+
+test "decode truncated gui_observatory returns malformed" {
+    const data = [_]u8{ OP_GUI_OBSERVATORY, 0x00, 0x03, 0x01 };
     const result = decodeCommand(&data);
     try std.testing.expectError(error.Malformed, result);
 }
@@ -2117,6 +2157,16 @@ test "commandSize: truncated draw_text returns remaining length" {
 
 test "commandSize: truncated variable-size commands clamp to available payload" {
     const data = [_]u8{ OP_SET_FONT_FALLBACK, 0x01, 0xFF, 0xFF };
+    try std.testing.expectEqual(@as(usize, data.len), commandSize(&data));
+}
+
+test "commandSize: gui_observatory uses forward-compatible envelope" {
+    const data = [_]u8{ OP_GUI_OBSERVATORY, 0x00, 0x03, 0x01, 0x02, 0x03 };
+    try std.testing.expectEqual(@as(usize, data.len), commandSize(&data));
+}
+
+test "commandSize: truncated gui_observatory clamps to available payload" {
+    const data = [_]u8{ OP_GUI_OBSERVATORY, 0x00 };
     try std.testing.expectEqual(@as(usize, data.len), commandSize(&data));
 }
 

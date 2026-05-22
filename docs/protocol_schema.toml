@@ -557,6 +557,12 @@ name = "gui_notifications"
 value = 0x99
 direction = "beam_to_frontend"
 
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_observatory"
+value = 0x9A
+direction = "beam_to_frontend"
+
 # Sub-opcodes inside gui_action (0x07).
 [[gui_actions]]
 name = "select_tab"
@@ -843,3 +849,7 @@ value = 0x46
 [[gui_actions]]
 name = "power_thermal_state"
 value = 0x47
+
+[[gui_actions]]
+name = "observatory_inspect"
+value = 0x48

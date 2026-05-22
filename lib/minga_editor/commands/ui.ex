@@ -7,6 +7,8 @@ defmodule MingaEditor.Commands.UI do
 
   use MingaEditor.Commands.Provider
 
+  alias MingaEditor.Frontend
+  alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
   alias Minga.Parser.Manager, as: ParserManager
@@ -75,6 +77,11 @@ defmodule MingaEditor.Commands.UI do
     execute: &toggle_board/1
   )
 
+  command(:toggle_beam_observatory, "BEAM observatory",
+    requires_buffer: false,
+    execute: &toggle_beam_observatory/1
+  )
+
   @spec toggle_bottom_panel(EditorState.t()) :: EditorState.t()
   defp toggle_bottom_panel(state), do: frontend(state).toggle_bottom_panel(state)
 
@@ -87,6 +94,61 @@ defmodule MingaEditor.Commands.UI do
   @spec frontend(EditorState.t()) :: module()
   defp frontend(%{capabilities: caps}) do
     if MingaEditor.Frontend.gui?(caps), do: __MODULE__.GUI, else: __MODULE__.TUI
+  end
+
+  @spec toggle_beam_observatory(EditorState.t()) :: EditorState.t()
+  defp toggle_beam_observatory(state) do
+    if EditorState.observatory_visible?(state),
+      do: close_beam_observatory(state),
+      else: open_beam_observatory(state)
+  end
+
+  @spec open_beam_observatory(EditorState.t()) :: EditorState.t()
+  defp open_beam_observatory(state) do
+    if observatory_supported?(state) do
+      subscribe_observatory()
+      token = make_ref()
+      timer = Process.send_after(self(), {:observatory_tick, token}, 0)
+      EditorState.open_observatory(state, {timer, token})
+    else
+      state
+    end
+  end
+
+  @spec close_beam_observatory(EditorState.t()) :: EditorState.t()
+  defp close_beam_observatory(state) do
+    unsubscribe_observatory()
+    cancel_timer(state.shell_state.observatory_timer)
+    EditorState.close_observatory(state)
+  end
+
+  @spec subscribe_observatory() :: :ok
+  defp subscribe_observatory do
+    Minga.SystemObserver.subscribe()
+  catch
+    :exit, _ -> :ok
+  end
+
+  @spec unsubscribe_observatory() :: :ok
+  defp unsubscribe_observatory do
+    Minga.SystemObserver.unsubscribe()
+  catch
+    :exit, _ -> :ok
+  end
+
+  @spec cancel_timer(reference() | nil) :: :ok
+  defp cancel_timer(nil), do: :ok
+
+  defp cancel_timer({timer, _token}) do
+    Process.cancel_timer(timer)
+    :ok
+  end
+
+  @spec observatory_supported?(EditorState.t()) :: boolean()
+  defp observatory_supported?(state) do
+    state
+    |> Map.get(:capabilities, %Capabilities{})
+    |> Frontend.gui?()
   end
 
   @spec toggle_board(EditorState.t()) :: EditorState.t()

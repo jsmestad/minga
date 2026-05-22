@@ -154,6 +154,21 @@ enum Wire {
         let path: String
     }
 
+    // MARK: - BEAM Observatory
+
+    /// A single process node decoded from the BEAM Observatory protocol message.
+    struct ObservatoryNode: Sendable {
+        let pid: String
+        let parentPid: String
+        let name: String
+        let processClass: UInt8
+        let depth: UInt8
+        let memory: UInt32
+        let messageQueueLen: UInt16
+        let reductions: UInt32
+        let sparkline: [Float]
+    }
+
     // MARK: - File tree
 
     /// A single file tree entry decoded from the semantic gui_file_tree protocol message.

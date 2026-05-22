@@ -10,6 +10,7 @@ import SwiftUI
 struct SidebarContainer: View {
     let fileTreeState: FileTreeState
     let gitStatusState: GitStatusState
+    let observatoryState: ObservatoryState
     let theme: ThemeColors
     let encoder: InputEncoder?
     @Binding var sidebarWidth: CGFloat
@@ -23,7 +24,13 @@ struct SidebarContainer: View {
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
-                if fileTreeState.visible {
+                if observatoryState.visible {
+                    ObservatoryView(
+                        state: observatoryState,
+                        theme: theme,
+                        encoder: encoder
+                    )
+                } else if fileTreeState.visible {
                     FileTreeView(
                         fileTreeState: fileTreeState,
                         theme: theme,

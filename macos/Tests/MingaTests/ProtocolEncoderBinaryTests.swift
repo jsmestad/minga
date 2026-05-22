@@ -347,6 +347,17 @@ struct EncoderGUIActionTests {
         #expect(payload[3] == 0)
     }
 
+    @Test("observatory_inspect encodes PID with length prefix")
+    func observatoryInspectLayout() {
+        let pid = "<0.123.0>"
+        let payload = captureFrame { $0.sendObservatoryInspect(pid: pid) }
+
+        #expect(payload.count == 2 + 2 + pid.utf8.count)
+        #expect(payload[1] == GUI_ACTION_OBSERVATORY_INSPECT)
+        #expect(readU16(payload, 2) == UInt16(pid.utf8.count))
+        #expect(String(data: payload[4..<payload.count], encoding: .utf8) == pid)
+    }
+
     @Test("panel_switch_tab encodes tab index")
     func panelSwitchTabLayout() {
         let payload = captureFrame { $0.sendPanelSwitchTab(index: 2) }

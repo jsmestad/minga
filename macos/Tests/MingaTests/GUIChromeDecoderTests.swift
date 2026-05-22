@@ -984,6 +984,65 @@ struct GUICursorlineDecoderTests {
     }
 }
 
+// MARK: - gui_observatory (semantic, length-prefixed)
+
+@Suite("GUI Observatory Decoder")
+struct GUIObservatoryDecoderTests {
+    @Test("Decode semantic gui_observatory with tree order and sparklines")
+    func decodeWithNodesAndSparklines() throws {
+        var payload = Data()
+
+        var header = Data()
+        header.append(1)
+        appendU16(&header, 2)
+        payload.append(buildSectionData(0x01, header))
+        payload.append(buildSectionData(0x7F, Data([0xAA, 0xBB])))
+
+        var nodes = Data()
+        appendNode(&nodes, pid: "<0.1.0>", parentPid: "", name: "Elixir.Minga.Supervisor", processClass: 0, depth: 0, memory: 1024, messageQueueLen: 0, reductions: 10)
+        appendNode(&nodes, pid: "<0.2.0>", parentPid: "<0.1.0>", name: "Elixir.Minga.Buffer.Process", processClass: 1, depth: 1, memory: 2048, messageQueueLen: 2, reductions: 20)
+        payload.append(buildSectionData(0x02, nodes))
+
+        var sparklines = Data()
+        appendString8(&sparklines, "<0.2.0>")
+        sparklines.append(2)
+        appendU16(&sparklines, 0)
+        appendU16(&sparklines, 32768)
+        payload.append(buildSectionData(0x03, sparklines))
+
+        var data = Data()
+        data.append(OP_GUI_OBSERVATORY)
+        appendU16(&data, UInt16(payload.count))
+        data.append(payload)
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiObservatory(let visible, let nodeCount, let decodedNodes) = cmd else {
+            Issue.record("Expected .guiObservatory"); return
+        }
+        #expect(visible == true)
+        #expect(nodeCount == 2)
+        #expect(decodedNodes.map(\.pid) == ["<0.1.0>", "<0.2.0>"])
+        #expect(decodedNodes[1].parentPid == "<0.1.0>")
+        #expect(decodedNodes[1].processClass == 1)
+        #expect(decodedNodes[1].sparkline.count == 2)
+        #expect(decodedNodes[1].sparkline[0] == 0)
+        #expect(decodedNodes[1].sparkline[1] > 0.49)
+    }
+
+    private func appendNode(_ data: inout Data, pid: String, parentPid: String, name: String, processClass: UInt8, depth: UInt8, memory: UInt32, messageQueueLen: UInt16, reductions: UInt32) {
+        appendString8(&data, pid)
+        appendString8(&data, parentPid)
+        appendString16(&data, name)
+        data.append(processClass)
+        data.append(depth)
+        appendU32(&data, memory)
+        appendU16(&data, messageQueueLen)
+        appendU32(&data, reductions)
+    }
+}
+
 // MARK: - gui_file_tree (semantic, length-prefixed)
 
 @Suite("GUI File Tree Decoder")

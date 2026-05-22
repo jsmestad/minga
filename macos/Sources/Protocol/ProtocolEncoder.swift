@@ -118,6 +118,9 @@ protocol InputEncoder: AnyObject, Sendable {
     // Notification center actions
     func sendNotificationDismiss(id: String)
     func sendNotificationAction(id: String, actionId: String)
+
+    // BEAM Observatory actions
+    func sendObservatoryInspect(pid: String)
 }
 
 extension InputEncoder {
@@ -1014,6 +1017,15 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf.append(GUI_ACTION_NOTIFICATION_ACTION)
         appendString16(&buf, id)
         appendString16(&buf, actionId)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: observatory_inspect. Layout: opcode(1) + action_type(1) + pid_len(2) + pid.
+    func sendObservatoryInspect(pid: String) {
+        var buf = Data()
+        buf.append(OP_GUI_ACTION)
+        buf.append(GUI_ACTION_OBSERVATORY_INSPECT)
+        appendString16(&buf, pid)
         writeFrame(buf)
     }
 
