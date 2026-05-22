@@ -432,11 +432,12 @@ struct CommandDispatcherRoutingTests {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.dispatch(.guiPicker(visible: true, selectedIndex: 0, filteredCount: 5,
                                         totalCount: 100, title: "Find File", query: "edi",
-                                        hasPreview: false, items: [], actionMenu: nil))
+                                        hasPreview: false, items: [], actionMenu: nil, modePrefix: ">"))
 
         #expect(gui.pickerState.visible == true)
         #expect(gui.pickerState.title == "Find File")
         #expect(gui.pickerState.query == "edi")
+        #expect(gui.pickerState.modePrefix == ">")
     }
 
     @Test("guiPicker hidden clears pickerState")
@@ -444,13 +445,14 @@ struct CommandDispatcherRoutingTests {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.dispatch(.guiPicker(visible: true, selectedIndex: 0, filteredCount: 5,
                                         totalCount: 100, title: "Find File", query: "edi",
-                                        hasPreview: false, items: [], actionMenu: nil))
+                                        hasPreview: false, items: [], actionMenu: nil, modePrefix: ">"))
         dispatcher.dispatch(.guiPicker(visible: false, selectedIndex: 0, filteredCount: 0,
                                         totalCount: 0, title: "", query: "",
-                                        hasPreview: false, items: [], actionMenu: nil))
+                                        hasPreview: false, items: [], actionMenu: nil, modePrefix: ""))
 
         #expect(gui.pickerState.visible == false)
         #expect(gui.pickerState.items.isEmpty)
+        #expect(gui.pickerState.modePrefix.isEmpty)
     }
 
     @Test("guiAgentChat visible updates agentChatState")

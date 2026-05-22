@@ -42,7 +42,7 @@ defmodule MingaEditor.Frontend.GUIPickerProtocolTest do
 
       # Sectioned: opcode(1) + section_count(1) + sections...
       assert <<0x77, section_count, _rest::binary>> = binary
-      assert section_count == 4
+      assert section_count == 5
     end
 
     test "encodes has_preview flag" do
@@ -53,10 +53,22 @@ defmodule MingaEditor.Frontend.GUIPickerProtocolTest do
       with_preview = ProtocolGUI.encode_gui_picker(picker, true)
 
       # Both should be valid sectioned format
-      assert <<0x77, 4, _::binary>> = without_preview
-      assert <<0x77, 4, _::binary>> = with_preview
+      assert <<0x77, 5, _::binary>> = without_preview
+      assert <<0x77, 5, _::binary>> = with_preview
       # They should differ (the has_preview byte in the header section)
       assert without_preview != with_preview
+    end
+
+    test "encodes mode prefix as the trailing section" do
+      items = [%Item{id: :a, label: "test.ex", description: ""}]
+      picker = Picker.new(items, title: "Test")
+
+      bare = ProtocolGUI.encode_gui_picker(picker)
+      prefixed = ProtocolGUI.encode_gui_picker(picker, false, nil, 0, ">")
+
+      assert <<0x77, 5, _::binary>> = prefixed
+      assert bare != prefixed
+      assert section_ids(prefixed) == [0x01, 0x02, 0x03, 0x04, 0x05]
     end
 
     test "encodes filtered and total counts in header" do
@@ -74,12 +86,22 @@ defmodule MingaEditor.Frontend.GUIPickerProtocolTest do
       # Sectioned: opcode(1) + section_count(1) + section_0x01 header
       # Section header: id(1) + len(2) + payload
       # Payload: visible(1) + selected(2) + filtered(2) + total(2) + has_preview(1) + title_len(2) + title
-      <<0x77, 4, 0x01, _slen::16, 1, _selected::16, filtered::16, total::16, _rest::binary>> =
+      <<0x77, 5, 0x01, _slen::16, 1, _selected::16, filtered::16, total::16, _rest::binary>> =
         binary
 
       assert filtered == 1
       assert total == 3
     end
+  end
+
+  defp section_ids(<<0x77, section_count, rest::binary>>) do
+    {ids, _rest} =
+      Enum.reduce(1..section_count, {[], rest}, fn _, {acc, bin} ->
+        <<id, len::16, _payload::binary-size(len), remaining::binary>> = bin
+        {[id | acc], remaining}
+      end)
+
+    Enum.reverse(ids)
   end
 
   describe "encode_gui_picker_preview/1" do

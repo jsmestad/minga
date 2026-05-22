@@ -180,7 +180,7 @@ enum RenderCommand: Sendable {
     case guiWhichKey(visible: Bool, prefix: String, page: UInt8, pageCount: UInt8, bindings: [Wire.WhichKeyBinding])
     case guiBreadcrumb(segments: [String])
     case guiStatusBar(StatusBarUpdate)
-    case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, title: String, query: String, hasPreview: Bool, items: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?)
+    case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, title: String, query: String, hasPreview: Bool, items: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String)
     case guiPickerPreview(visible: Bool, lines: [Wire.PickerPreviewLine])
     case guiAgentChat(visible: Bool, status: UInt8, model: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [Wire.HelpGroup], messages: [Wire.ChatMessage])
     case guiGutterSeparator(col: UInt16, r: UInt8, g: UInt8, b: UInt8)
@@ -943,7 +943,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
         let pickerSectionCount = Int(data[rest])
         if pickerSectionCount == 0 {
-            return (.guiPicker(visible: false, selectedIndex: 0, filteredCount: 0, totalCount: 0, title: "", query: "", hasPreview: false, items: [], actionMenu: nil), 2)
+            return (.guiPicker(visible: false, selectedIndex: 0, filteredCount: 0, totalCount: 0, title: "", query: "", hasPreview: false, items: [], actionMenu: nil, modePrefix: ""), 2)
         }
         var pickerPos = rest + 1
         var pkVisible = false
@@ -955,6 +955,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         var pkQuery = ""
         var pkItems: [Wire.PickerItem] = []
         var pkActionMenu: Wire.PickerActionMenu? = nil
+        var pkModePrefix = ""
 
         for _ in 0..<pickerSectionCount {
             guard data.count >= pickerPos + 3 else { throw ProtocolDecodeError.malformed }
@@ -983,6 +984,13 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 let qLen = Int(readU16(data, psStart))
                 if psLen >= 2 + qLen {
                     pkQuery = String(data: data[(psStart + 2)..<(psStart + 2 + qLen)], encoding: .utf8) ?? ""
+                }
+
+            case 0x05: // Mode prefix: mode_prefix_len(2) + mode_prefix
+                guard psLen >= 2 else { break }
+                let pLen = Int(readU16(data, psStart))
+                if psLen >= 2 + pLen {
+                    pkModePrefix = String(data: data[(psStart + 2)..<(psStart + 2 + pLen)], encoding: .utf8) ?? ""
                 }
 
             case 0x03: // Items: item_count(2) + items...
@@ -1039,7 +1047,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             pickerPos = psStart + psLen
         }
 
-        return (.guiPicker(visible: pkVisible, selectedIndex: pkSelectedIndex, filteredCount: pkFilteredCount, totalCount: pkTotalCount, title: pkTitle, query: pkQuery, hasPreview: pkHasPreview, items: pkItems, actionMenu: pkActionMenu), pickerPos - offset)
+        return (.guiPicker(visible: pkVisible, selectedIndex: pkSelectedIndex, filteredCount: pkFilteredCount, totalCount: pkTotalCount, title: pkTitle, query: pkQuery, hasPreview: pkHasPreview, items: pkItems, actionMenu: pkActionMenu, modePrefix: pkModePrefix), pickerPos - offset)
 
     case OP_GUI_PICKER_PREVIEW:
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
