@@ -72,6 +72,32 @@ defmodule MingaEditor.Agent.ChatDecorationsTest do
       assert Decorations.has_fold_regions?(result)
     end
 
+    test "auto-approved tool call shows a subtle header indicator" do
+      tc = %MingaAgent.ToolCall{
+        id: "tc-auto",
+        name: "shell",
+        status: :complete,
+        result: "ok",
+        collapsed: true,
+        auto_approved_scope: :session
+      }
+
+      decs = Decorations.new()
+      messages = [{:tool_call, tc}]
+      offsets = [{0, 0, 1}]
+
+      result = ChatDecorations.build_decorations(decs, messages, offsets, test_theme())
+      {above, _below} = Decorations.blocks_for_line(result, 0)
+
+      rendered_text =
+        above
+        |> List.first()
+        |> then(fn block -> block.render.(80) end)
+        |> Enum.map_join("", fn {text, _style} -> text end)
+
+      assert rendered_text =~ "auto-approved session"
+    end
+
     test "running tool call has no fold (still streaming)" do
       tc = %MingaAgent.ToolCall{
         id: "tc-2",
@@ -119,8 +145,10 @@ defmodule MingaEditor.Agent.ChatDecorationsTest do
       rendered_text = Enum.map_join(rendered, "", fn {text, _style} -> text end)
       assert rendered_text =~ "Approval required"
       assert rendered_text =~ "[y]"
+      assert rendered_text =~ "[a]"
+      assert rendered_text =~ "[t]"
       assert rendered_text =~ "[n]"
-      assert rendered_text =~ "[Y]"
+      refute rendered_text =~ "[Y]"
     end
 
     test "tool call awaiting approval renders preview content" do

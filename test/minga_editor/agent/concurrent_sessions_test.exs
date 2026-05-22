@@ -178,7 +178,9 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       # not the source of truth. After switch_tab/2, status/error/
       # pending_approval should reflect the *incoming* tab's session.
       {:ok, session_a} = StubServer.start_link()
-      {:ok, session_b} = StubServer.start_link()
+
+      {:ok, session_b} =
+        StubServer.start_link(status: :tool_executing, active_tool_name: "read_file")
 
       tabs = [
         Tab.new_agent(1, "A") |> Tab.set_session(session_a),
@@ -200,8 +202,30 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       cache = AgentAccess.agent(switched)
 
       assert cache.error == nil
-      assert cache.runtime.status == :idle
+      assert cache.runtime.status == :tool_executing
+      assert cache.runtime.active_tool_name == "read_file"
       assert cache.pending_approval == nil
+    end
+
+    test "failed session snapshot clears stale active tool name" do
+      dead_session = spawn(fn -> :ok end)
+      ref = Process.monitor(dead_session)
+      assert_receive {:DOWN, ^ref, :process, ^dead_session, _reason}
+
+      tab = Tab.new_agent(1, "A") |> Tab.set_session(dead_session)
+
+      state =
+        [tab]
+        |> base_state(1)
+        |> AgentAccess.update_agent(fn agent ->
+          agent
+          |> AgentState.set_status(:tool_executing)
+          |> AgentState.set_active_tool_name("stale_tool")
+        end)
+
+      rebuilt = EditorState.rebuild_agent_from_session(state, tab)
+
+      assert AgentAccess.agent(rebuilt).runtime.active_tool_name == nil
     end
 
     test "switch_tab binds and syncs a background agent tab's chat buffer" do

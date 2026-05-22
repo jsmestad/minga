@@ -33,6 +33,16 @@ defmodule Minga.SystemObserverTest do
       assert first_process.memory >= 0
       assert is_integer(first_process.message_queue_len)
       assert is_integer(first_process.reductions)
+      assert first_process.child_type in [:supervisor, :worker]
+
+      assert first_process.process_class in [
+               :supervisor,
+               :buffer,
+               :agent_session,
+               :lsp,
+               :service,
+               :worker
+             ]
     end
   end
 
@@ -105,6 +115,58 @@ defmodule Minga.SystemObserverTest do
         Enum.filter(snapshot.processes, fn {_pid, info} -> info.registered_name != nil end)
 
       assert named_processes != []
+    end
+
+    test "collected snapshots include hierarchy fields for child processes", %{name: name} do
+      :ok = SystemObserver.subscribe(name)
+      poll_once(name)
+
+      snapshot = SystemObserver.snapshot(name)
+      root_pid = Process.whereis(Minga.Supervisor)
+      root_snapshot = Map.fetch!(snapshot.processes, root_pid)
+
+      assert root_snapshot.parent_pid == nil
+      assert root_snapshot.child_type == :supervisor
+      assert root_snapshot.process_class == :supervisor
+
+      child_snapshots =
+        Enum.reject(snapshot.processes, fn {_pid, info} -> info.parent_pid == nil end)
+
+      assert child_snapshots != []
+
+      assert Enum.all?(child_snapshots, fn {_pid, info} ->
+               Map.has_key?(snapshot.processes, info.parent_pid)
+             end)
+    end
+  end
+
+  describe "classify_process/3" do
+    test "classifies supervisors from child type" do
+      assert SystemObserver.classify_process(self(), nil, :supervisor) == :supervisor
+    end
+
+    test "classifies registered buffer processes" do
+      key = "buffer-#{System.unique_integer([:positive])}"
+      Registry.register(Minga.Buffer.Registry, key, nil)
+      on_exit(fn -> Registry.unregister(Minga.Buffer.Registry, key) end)
+
+      assert SystemObserver.classify_process(self(), nil, :worker) == :buffer
+    end
+
+    test "classifies agent, lsp, service, and fallback workers from registered names" do
+      assert SystemObserver.classify_process(MingaAgent.SessionManager, :worker) == :agent_session
+      assert SystemObserver.classify_process(Minga.LSP.Supervisor, :worker) == :lsp
+      assert SystemObserver.classify_process(Minga.Config.Options, :worker) == :service
+      assert SystemObserver.classify_process(:some_unrelated_process, :worker) == :worker
+    end
+
+    test "classifies unnamed dynamic workers from supervisor child modules" do
+      assert SystemObserver.classify_process(self(), nil, :worker, [Minga.Buffer]) == :buffer
+
+      assert SystemObserver.classify_process(self(), nil, :worker, [MingaAgent.Session]) ==
+               :agent_session
+
+      assert SystemObserver.classify_process(self(), nil, :worker, [Minga.LSP.Client]) == :lsp
     end
   end
 

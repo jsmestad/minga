@@ -195,6 +195,7 @@ defmodule MingaAgent.SessionStore do
       "result" => tc.result,
       "is_error" => tc.is_error,
       "collapsed" => tc.collapsed,
+      "auto_approved_scope" => serialize_auto_approved_scope(tc.auto_approved_scope),
       "duration_ms" => tc.duration_ms
     }
   end
@@ -264,6 +265,7 @@ defmodule MingaAgent.SessionStore do
        result: raw["result"] || "",
        is_error: raw["is_error"] || false,
        collapsed: raw["collapsed"] || true,
+       auto_approved_scope: deserialize_auto_approved_scope(raw["auto_approved_scope"]),
        started_at: nil,
        duration_ms: raw["duration_ms"]
      }}
@@ -289,6 +291,17 @@ defmodule MingaAgent.SessionStore do
       size_kb: attachment["size_kb"] || attachment[:size_kb] || 0
     }
   end
+
+  @spec serialize_auto_approved_scope(MingaAgent.ToolCall.auto_approved_scope() | nil) ::
+          String.t() | nil
+  defp serialize_auto_approved_scope(nil), do: nil
+  defp serialize_auto_approved_scope(scope), do: Atom.to_string(scope)
+
+  @spec deserialize_auto_approved_scope(String.t() | nil) ::
+          MingaAgent.ToolCall.auto_approved_scope() | nil
+  defp deserialize_auto_approved_scope("session"), do: :session
+  defp deserialize_auto_approved_scope("turn"), do: :turn
+  defp deserialize_auto_approved_scope(_scope), do: nil
 
   @spec deserialize_tool_status(String.t() | nil) :: MingaAgent.ToolCall.status()
   defp deserialize_tool_status("running"), do: :running

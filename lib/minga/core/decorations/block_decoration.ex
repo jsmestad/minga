@@ -53,8 +53,11 @@ defmodule Minga.Core.Decorations.BlockDecoration do
   @type render_result ::
           [{String.t(), Minga.Core.Face.t()}] | [[{String.t(), Minga.Core.Face.t()}]]
 
-  @typedoc "Click callback: receives row offset within block and column."
-  @type click_fn :: (row :: non_neg_integer(), col :: non_neg_integer() -> :ok) | nil
+  @typedoc "Click result: no-op or a command dispatch payload."
+  @type click_result :: :ok | {:command, term()}
+
+  @typedoc "Click callback: receives row offset within block and column, returns :ok or {:command, term()}."
+  @type click_fn :: (row :: non_neg_integer(), col :: non_neg_integer() -> click_result()) | nil
 
   @type t :: %__MODULE__{
           id: reference(),

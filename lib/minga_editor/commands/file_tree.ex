@@ -9,6 +9,7 @@ defmodule MingaEditor.Commands.FileTree do
   alias Minga.Buffer
   alias MingaEditor.Commands
   alias MingaEditor.Commands.Helpers
+  alias MingaEditor.Handlers.BufferRegistry
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -326,7 +327,7 @@ defmodule MingaEditor.Commands.FileTree do
 
     case Commands.start_buffer(full_path, EditorState.options_server(state)) do
       {:ok, pid} ->
-        MingaEditor.do_file_tree_open(state, pid, full_path, state.workspace.file_tree.tree)
+        BufferRegistry.do_file_tree_open(state, pid, full_path, state.workspace.file_tree.tree)
 
       {:error, reason} ->
         MingaEditor.log_to_messages("[file-tree] Failed to open #{full_path}: #{inspect(reason)}")
@@ -778,7 +779,7 @@ defmodule MingaEditor.Commands.FileTree do
     case EditorState.find_buffer_by_path(state, path) do
       nil ->
         case Commands.start_buffer(path, EditorState.options_server(state)) do
-          {:ok, pid} -> MingaEditor.do_file_tree_open(state, pid, path, tree)
+          {:ok, pid} -> BufferRegistry.do_file_tree_open(state, pid, path, tree)
           {:error, _} -> state
         end
 

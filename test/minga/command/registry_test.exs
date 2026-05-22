@@ -202,15 +202,20 @@ defmodule Minga.Command.RegistryTest do
                Registry.lookup(r, :my_cmd)
     end
 
-    test "overwriting an existing command replaces it", %{registry: r} do
+    test "overwriting a command from the same source replaces it", %{registry: r} do
       first = fn state -> Map.put(state, :first, true) end
       second = fn state -> Map.put(state, :second, true) end
 
-      :ok = Registry.register(r, :save, "First save", first)
-      :ok = Registry.register(r, :save, "Second save", second)
+      :ok = Registry.register(r, :same_source_cmd, "First", first)
+      :ok = Registry.register(r, :same_source_cmd, "Second", second)
 
-      assert {:ok, %Command{description: "Second save", execute: ^second}} =
-               Registry.lookup(r, :save)
+      assert {:ok, %Command{description: "Second", execute: ^second}} =
+               Registry.lookup(r, :same_source_cmd)
+    end
+
+    test "rejects duplicate command names from different sources", %{registry: r} do
+      assert {:error, {:duplicate_name, :save, :builtin, :config}} =
+               Registry.register(r, :save, "Custom save", fn s -> s end)
     end
 
     test "registered command appears in all/1", %{registry: r} do
@@ -252,9 +257,12 @@ defmodule Minga.Command.RegistryTest do
       assert length(Registry.all(r)) == before_count + 1
     end
 
-    test "count stays the same when an existing command is overwritten", %{registry: r} do
+    test "count stays the same when an existing same-source command is overwritten", %{
+      registry: r
+    } do
+      :ok = Registry.register(r, :extra, "Extra", fn s -> s end)
       before_count = length(Registry.all(r))
-      :ok = Registry.register(r, :save, "New save description", fn s -> s end)
+      :ok = Registry.register(r, :extra, "New extra description", fn s -> s end)
       assert length(Registry.all(r)) == before_count
     end
   end
@@ -270,8 +278,10 @@ defmodule Minga.Command.RegistryTest do
       assert {:ok, %Command{name: :save}} = Registry.lookup(r, :save)
     end
 
-    test "restores overwritten built-in descriptions", %{registry: r} do
-      :ok = Registry.register(r, :save, "Overridden save", fn s -> s end)
+    test "keeps built-in descriptions after rejected duplicate registration", %{registry: r} do
+      assert {:error, {:duplicate_name, :save, :builtin, :config}} =
+               Registry.register(r, :save, "Overridden save", fn s -> s end)
+
       :ok = Registry.reset(r)
 
       {:ok, cmd} = Registry.lookup(r, :save)
@@ -320,6 +330,24 @@ defmodule Minga.Command.RegistryTest do
       assert {:ok, registered} = Registry.lookup(r, :scoped_cmd)
       assert registered.requires_buffer == true
       assert registered.option_toggle == :wrap
+    end
+  end
+
+  describe "unregister_source/2" do
+    test "removes only commands owned by the source", %{registry: r} do
+      ext_source = {:extension, :demo}
+      other_source = {:extension, :other}
+
+      ext_cmd = %Command{name: :ext_cmd, description: "Extension", execute: fn s -> s end}
+      other_cmd = %Command{name: :other_cmd, description: "Other", execute: fn s -> s end}
+
+      :ok = Registry.register_command(r, ext_source, ext_cmd)
+      :ok = Registry.register_command(r, other_source, other_cmd)
+      :ok = Registry.unregister_source(r, ext_source)
+
+      assert :error = Registry.lookup(r, :ext_cmd)
+      assert {:ok, %Command{name: :other_cmd}} = Registry.lookup(r, :other_cmd)
+      assert {:ok, %Command{name: :save}} = Registry.lookup(r, :save)
     end
   end
 

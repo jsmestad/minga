@@ -42,11 +42,6 @@ struct PickerOverlay: View {
                         let listHeight = min(CGFloat(state.items.count) * itemHeight, max(geo.size.height * 0.5, 200))
                         resultsList(maxListHeight: listHeight)
 
-                        if !state.items.isEmpty {
-                            Divider()
-                                .overlay(theme.popupBorder.opacity(0.3))
-                            bottomBar
-                        }
                     }
                     .frame(width: panelWidth)
                     .background(
@@ -102,6 +97,19 @@ struct PickerOverlay: View {
             }
 
             Spacer()
+
+            let markedCount = state.items.filter { $0.isMarked }.count
+            if markedCount > 0 {
+                Text("\(markedCount) selected")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(theme.accent)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule()
+                            .fill(theme.accent.opacity(0.14))
+                    )
+            }
 
             if state.totalCount > 0 {
                 Text("\(state.filteredCount)/\(state.totalCount)")
@@ -223,49 +231,6 @@ struct PickerOverlay: View {
             )
             Text(attributed)
                 .lineLimit(1)
-        }
-    }
-
-    // MARK: - Bottom bar
-
-    @ViewBuilder
-    private var bottomBar: some View {
-        HStack(spacing: 12) {
-            let markedCount = state.items.filter { $0.isMarked }.count
-            if markedCount > 0 {
-                Text("\(markedCount) selected")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(theme.accent)
-            }
-
-            Spacer()
-
-            Group {
-                keyHint("↑↓", label: "navigate")
-                keyHint("⏎", label: "open")
-                keyHint("⇥", label: "mark")
-                keyHint("⎋", label: "close")
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 5)
-    }
-
-    @ViewBuilder
-    private func keyHint(_ key: String, label: String) -> some View {
-        HStack(spacing: 3) {
-            Text(key)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(theme.popupFg.opacity(0.45))
-                .padding(.horizontal, 4)
-                .padding(.vertical, 1)
-                .background(
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(theme.popupFg.opacity(0.08))
-                )
-            Text(label)
-                .font(.system(size: 10))
-                .foregroundStyle(theme.popupFg.opacity(0.3))
         }
     }
 

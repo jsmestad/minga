@@ -93,6 +93,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       assert "stop" in names
       assert "thinking" in names
       assert "model" in names
+      assert "trust" in names
       assert "plan" in names
       assert "exec" in names
       assert "resume" in names
@@ -296,6 +297,50 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       :ok = Session.enter_plan(session)
       {:ok, _state} = SlashCommand.execute(mock_state(session: session), "/skill:off:plan")
       assert Session.status(session) == :idle
+    end
+
+    test "/trust list summarizes trusted tools" do
+      session = start_session()
+      :ok = Session.set_tool_trust(session, "shell", :session)
+      :ok = Session.set_tool_trust(session, "write_file", :turn)
+
+      {:ok, state} = SlashCommand.execute(mock_state(session: session), "/trust list")
+
+      assert state.shell_state.status_msg =~ "Trusted tools:"
+      messages = Session.messages(session)
+      assert Enum.any?(messages, &match?({:system, "Trusted tools:" <> _, :info}, &1))
+    end
+
+    test "/trust revoke removes one trusted tool" do
+      session = start_session()
+      :ok = Session.set_tool_trust(session, "shell", :session)
+      :ok = Session.set_tool_trust(session, "write_file", :turn)
+
+      {:ok, state} = SlashCommand.execute(mock_state(session: session), "/trust revoke shell")
+
+      assert state.shell_state.status_msg == "Trust cleared for shell"
+      assert Session.list_tool_trust(session) == %{"write_file" => :turn}
+    end
+
+    test "/trust clear removes all trusted tools" do
+      session = start_session()
+      :ok = Session.set_tool_trust(session, "shell", :session)
+      :ok = Session.set_tool_trust(session, "write_file", :turn)
+
+      {:ok, state} = SlashCommand.execute(mock_state(session: session), "/trust clear")
+
+      assert state.shell_state.status_msg == "All tool trust cleared"
+      assert Session.list_tool_trust(session) == %{}
+    end
+
+    test "/trust without an active session returns a clear error" do
+      assert {:error, "No active agent session"} =
+               SlashCommand.execute(mock_state(), "/trust list")
+    end
+
+    test "/trust usage errors clearly" do
+      assert {:error, "Usage: /trust list|revoke <tool-name>|clear"} =
+               SlashCommand.execute(mock_state(session: start_session()), "/trust revoke")
     end
 
     test "/plan without an active session returns a clear error" do

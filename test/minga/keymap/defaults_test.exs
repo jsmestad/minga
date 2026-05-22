@@ -51,6 +51,12 @@ defmodule Minga.Keymap.DefaultsTest do
       assert h_node.description == "+help"
     end
 
+    test "SPC m is a prefix node labelled '+filetype'" do
+      trie = Defaults.leader_trie()
+      assert {:prefix, m_node} = Bindings.lookup(trie, {?m, 0})
+      assert m_node.description == "+filetype"
+    end
+
     # ── File bindings ──────────────────────────────────────────────────────────
 
     test "SPC f f → :find_file" do
@@ -77,6 +83,27 @@ defmodule Minga.Keymap.DefaultsTest do
       trie = Defaults.leader_trie()
       {:prefix, b_node} = Bindings.lookup(trie, {?b, 0})
       assert {:command, :kill_buffer} = Bindings.lookup(b_node, {?d, 0})
+    end
+
+    test "SPC b tab management bindings route to tab commands" do
+      trie = Defaults.leader_trie()
+      {:prefix, b_node} = Bindings.lookup(trie, {?b, 0})
+
+      assert {:command, :pin_tab} = Bindings.lookup(b_node, {?P, 0})
+      assert {:command, :move_tab_left} = Bindings.lookup(b_node, {?<, 0})
+      assert {:command, :move_tab_right} = Bindings.lookup(b_node, {?>, 0})
+    end
+
+    # ── Git bindings ──────────────────────────────────────────────────────────
+
+    test "SPC g x c/i/b → merge conflict accept commands" do
+      trie = Defaults.leader_trie()
+      {:prefix, g_node} = Bindings.lookup(trie, {?g, 0})
+      {:prefix, x_node} = Bindings.lookup(g_node, {?x, 0})
+
+      assert {:command, :git_accept_current_conflict} = Bindings.lookup(x_node, {?c, 0})
+      assert {:command, :git_accept_incoming_conflict} = Bindings.lookup(x_node, {?i, 0})
+      assert {:command, :git_accept_both_conflict} = Bindings.lookup(x_node, {?b, 0})
     end
 
     # ── Tab / workspace bindings ───────────────────────────────────────────────
@@ -257,6 +284,31 @@ defmodule Minga.Keymap.DefaultsTest do
     test "unknown leader prefix returns :not_found" do
       trie = Defaults.leader_trie()
       assert :not_found = Bindings.lookup(trie, {?x, 0})
+    end
+  end
+
+  describe "group_prefixes/0" do
+    test "includes SPC m as +filetype" do
+      assert Enum.any?(Defaults.group_prefixes(), fn {keys, label} ->
+               keys == [{?m, 0}] and label == "+filetype"
+             end)
+    end
+  end
+
+  describe "filetype_bindings/0" do
+    test "includes representative built-in SPC m leaf bindings" do
+      bindings = Defaults.filetype_bindings()
+
+      assert {:elixir, [{?a, 0}], :alternate_file, "Alternate file"} in bindings
+      assert {:elixir, [{?t, 0}, {?t, 0}], :test_file, "Test file"} in bindings
+      assert {:elixir, [{?t, 0}, {?a, 0}], :test_all, "Test all"} in bindings
+      assert {:swift, [{?t, 0}, {?o, 0}], :test_output, "Show test output"} in bindings
+    end
+  end
+
+  describe "filetype_group_prefixes/0" do
+    test "labels the test submenu as +test" do
+      assert Defaults.filetype_group_prefixes() == [{[{?t, 0}], "+test"}]
     end
   end
 

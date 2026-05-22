@@ -22,6 +22,13 @@ defmodule Minga.Keymap.ActiveTest do
       # SPC m should be a prefix node (registered by defaults)
       assert {:prefix, _m_node} = Bindings.lookup(trie, {?m, 0})
     end
+
+    test "keeps shared diff command on SPC g d", %{store: s} do
+      trie = Active.leader_trie(s)
+      assert {:prefix, g_node} = Bindings.lookup(trie, {?g, 0})
+      assert {:command, :git_diff_file} = Bindings.lookup(g_node, {?d, 0})
+      assert :not_found = Bindings.lookup_sequence(trie, [{?g, 0}, {?d, 0}, {?s, 0}])
+    end
   end
 
   describe "normal_bindings/1" do

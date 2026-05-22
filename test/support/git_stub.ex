@@ -88,6 +88,15 @@ defmodule Minga.Git.Stub do
     :ok
   end
 
+  @doc "Returns paths staged through the stub for `git_root`."
+  @spec staged_paths(String.t()) :: [String.t()]
+  def staged_paths(git_root) do
+    case :ets.lookup(@table, {:staged_paths, Path.expand(git_root)}) do
+      [{_, paths}] -> Enum.reverse(paths)
+      [] -> []
+    end
+  end
+
   @doc "Removes all stub entries for a given root path."
   @spec clear(String.t()) :: :ok
   def clear(git_root) do
@@ -96,9 +105,12 @@ defmodule Minga.Git.Stub do
     :ets.match_delete(@table, {{:status, expanded}, :_})
     :ets.match_delete(@table, {{:head, expanded, :_}, :_})
     :ets.match_delete(@table, {{:staged, expanded, :_}, :_})
+    :ets.match_delete(@table, {{:staged_paths, expanded}, :_})
     :ets.match_delete(@table, {{:log, expanded}, :_})
     :ets.match_delete(@table, {{:diff, expanded}, :_})
     :ets.match_delete(@table, {{:branch, expanded}, :_})
+    :ets.match_delete(@table, {{:branches, expanded}, :_})
+    :ets.match_delete(@table, {{:branch_delete, expanded, :_, :_}, :_})
     :ets.match_delete(@table, {{:ahead_behind, expanded}, :_})
     :ets.match_delete(@table, {{:last_commit_message, expanded}, :_})
     :ok
@@ -163,7 +175,19 @@ defmodule Minga.Git.Stub do
 
   @impl true
   @spec stage(String.t(), String.t() | [String.t()]) :: :ok
-  def stage(_git_root, _paths), do: :ok
+  def stage(git_root, paths) do
+    expanded = Path.expand(git_root)
+    new_paths = List.wrap(paths)
+
+    existing =
+      case :ets.lookup(@table, {:staged_paths, expanded}) do
+        [{_, staged}] -> staged
+        [] -> []
+      end
+
+    :ets.insert(@table, {{:staged_paths, expanded}, Enum.reverse(new_paths) ++ existing})
+    :ok
+  end
 
   @impl true
   @spec commit(String.t(), String.t(), keyword()) :: {:ok, String.t()}
@@ -230,8 +254,19 @@ defmodule Minga.Git.Stub do
   def branch_switch(_git_root, _name), do: :ok
 
   @impl true
-  @spec branch_delete(String.t(), String.t(), boolean()) :: :ok
-  def branch_delete(_git_root, _name, _force \\ false), do: :ok
+  @spec branch_delete(String.t(), String.t(), boolean()) :: :ok | {:error, String.t()}
+  def branch_delete(git_root, name, force \\ false) do
+    expanded = Path.expand(git_root)
+
+    case :ets.lookup(@table, {:branch_delete, expanded, name, force}) do
+      [{_, result}] ->
+        result
+
+      [] ->
+        delete_branch_from_list(expanded, name)
+        :ok
+    end
+  end
 
   @impl true
   @spec push(String.t(), keyword()) :: :ok
@@ -246,6 +281,22 @@ defmodule Minga.Git.Stub do
   def fetch_remotes(_git_root, _opts \\ []), do: :ok
 
   # ── Additional Stub Configuration ─────────────────────────────────────
+
+  @doc "Sets the branches returned for `git_root`."
+  @spec set_branches(String.t(), [Minga.Git.BranchInfo.t()]) :: :ok
+  def set_branches(git_root, branches) when is_list(branches) do
+    :ets.insert(@table, {{:branches, Path.expand(git_root)}, branches})
+    :ok
+  end
+
+  @doc "Sets the result returned by branch_delete/3 for a branch and force flag."
+  @spec set_branch_delete_result(String.t(), String.t(), boolean(), :ok | {:error, String.t()}) ::
+          :ok
+  def set_branch_delete_result(git_root, name, force, result)
+      when is_binary(name) and is_boolean(force) do
+    :ets.insert(@table, {{:branch_delete, Path.expand(git_root), name, force}, result})
+    :ok
+  end
 
   @doc "Sets the ahead/behind counts for a git root."
   @spec set_ahead_behind(String.t(), non_neg_integer(), non_neg_integer()) :: :ok
@@ -262,6 +313,19 @@ defmodule Minga.Git.Stub do
   end
 
   # ── Private ────────────────────────────────────────────────────────────
+
+  @spec delete_branch_from_list(String.t(), String.t()) :: :ok
+  defp delete_branch_from_list(git_root, name) do
+    case :ets.lookup(@table, {:branches, git_root}) do
+      [{_, branches}] ->
+        updated = Enum.reject(branches, fn branch -> branch.name == name end)
+        :ets.insert(@table, {{:branches, git_root}, updated})
+        :ok
+
+      [] ->
+        :ok
+    end
+  end
 
   # Walks up the directory tree looking for a registered root, just like
   # real git walks up looking for .git/.

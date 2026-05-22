@@ -216,6 +216,34 @@ struct EncoderGUIActionTests {
         #expect(readU32(payload, 2) == 99)
     }
 
+    @Test("tab_reorder encodes action type, tab ID, and visible index")
+    func tabReorderLayout() {
+        let payload = captureFrame { $0.sendTabReorder(id: 42, newIndex: 3) }
+
+        #expect(payload.count == 8)
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_TAB_REORDER)
+        #expect(readU32(payload, 2) == 42)
+        #expect(readU16(payload, 6) == 3)
+    }
+
+    @Test("tab id-scoped actions encode action type and tab ID")
+    func tabIdScopedActionLayouts() {
+        let cases: [(Data, UInt8, UInt32)] = [
+            (captureFrame { $0.sendTabPin(id: 7) }, GUI_ACTION_TAB_PIN, 7),
+            (captureFrame { $0.sendTabUnpin(id: 8) }, GUI_ACTION_TAB_UNPIN, 8),
+            (captureFrame { $0.sendTabMoveLeft(id: 9) }, GUI_ACTION_TAB_MOVE_LEFT, 9),
+            (captureFrame { $0.sendTabMoveRight(id: 10) }, GUI_ACTION_TAB_MOVE_RIGHT, 10)
+        ]
+
+        for (payload, action, id) in cases {
+            #expect(payload.count == 6)
+            #expect(payload[0] == OP_GUI_ACTION)
+            #expect(payload[1] == action)
+            #expect(readU32(payload, 2) == id)
+        }
+    }
+
     @Test("file_tree_click encodes index as UInt16")
     func fileTreeClickLayout() {
         let payload = captureFrame { $0.sendFileTreeClick(index: 15) }
@@ -325,6 +353,26 @@ struct EncoderGUIActionTests {
 
         #expect(payload.count == 2)
         #expect(payload[1] == GUI_ACTION_SYSTEM_DID_WAKE)
+    }
+
+    @Test("power_thermal_state encodes low power and thermal bytes")
+    func powerThermalStateLayout() {
+        let payload = captureFrame { $0.sendPowerThermalState(lowPowerMode: true, thermalState: 2) }
+
+        #expect(payload.count == 4)
+        #expect(payload[1] == GUI_ACTION_POWER_THERMAL_STATE)
+        #expect(payload[2] == 1)
+        #expect(payload[3] == 2)
+    }
+
+    @Test("power_thermal_state encodes false low power as zero")
+    func powerThermalStateFalseLowPowerLayout() {
+        let payload = captureFrame { $0.sendPowerThermalState(lowPowerMode: false, thermalState: 0) }
+
+        #expect(payload.count == 4)
+        #expect(payload[1] == GUI_ACTION_POWER_THERMAL_STATE)
+        #expect(payload[2] == 0)
+        #expect(payload[3] == 0)
     }
 
     @Test("panel_switch_tab encodes tab index")

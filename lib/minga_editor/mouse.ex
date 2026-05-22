@@ -71,6 +71,8 @@ defmodule MingaEditor.Mouse do
   @typep fold_row_target :: {:window_fold, non_neg_integer()} | {:decoration_fold, reference()}
   @typep drag_window_context ::
            {Window.id(), Window.t(), pid(), integer(), integer(), pos_integer(), pos_integer()}
+  @typep tab_command ::
+           atom() | {:workspace_goto, non_neg_integer()} | {:tab_goto_id, pos_integer()}
 
   @doc "Dispatches a mouse event routed to a focus-tree node."
   @spec handle_at_node(
@@ -784,9 +786,8 @@ defmodule MingaEditor.Mouse do
     end
   end
 
-  @spec dispatch_tab_bar_command(state(), atom() | {:workspace_goto, non_neg_integer()}) ::
-          state()
-  defp dispatch_tab_bar_command(state, {:workspace_goto, _} = cmd) do
+  @spec dispatch_tab_bar_command(state(), tab_command()) :: state()
+  defp dispatch_tab_bar_command(state, cmd) when is_tuple(cmd) do
     MingaEditor.dispatch_command(state, cmd)
   end
 
@@ -853,22 +854,34 @@ defmodule MingaEditor.Mouse do
 
   @spec handle_content_click(state(), non_neg_integer(), non_neg_integer()) :: state()
   defp handle_content_click(state, row, col) do
-    # Check modeline click first
     case modeline_click(state, row, col) do
-      {:command, cmd} ->
-        MingaEditor.dispatch_command(state, cmd)
+      {:command, cmd} -> MingaEditor.dispatch_command(state, cmd)
+      :not_modeline -> handle_non_modeline_content_click(state, row, col)
+    end
+  end
 
-      :not_modeline ->
-        state = maybe_unfocus_file_tree_for_content_click(state)
-        state = maybe_focus_window_at(state, row, col)
+  @spec handle_non_modeline_content_click(state(), non_neg_integer(), non_neg_integer()) ::
+          state()
+  defp handle_non_modeline_content_click(state, row, col) do
+    state
+    |> maybe_unfocus_file_tree_for_content_click()
+    |> maybe_focus_window_at(row, col)
+    |> handle_buffer_target_click(row, col)
+  end
 
-        case handle_fold_gutter_click(state, row, col) do
-          {:handled, state} ->
-            state
+  @spec handle_buffer_target_click(state(), non_neg_integer(), non_neg_integer()) :: state()
+  defp handle_buffer_target_click(state, row, col) do
+    case handle_block_command_click(state, row, col) do
+      {:handled, state} -> state
+      :miss -> handle_non_block_content_click(state, row, col)
+    end
+  end
 
-          :miss ->
-            handle_buffer_content_click(state, row, col)
-        end
+  @spec handle_non_block_content_click(state(), non_neg_integer(), non_neg_integer()) :: state()
+  defp handle_non_block_content_click(state, row, col) do
+    case handle_fold_gutter_click(state, row, col) do
+      {:handled, state} -> state
+      :miss -> handle_buffer_content_click(state, row, col)
     end
   end
 
@@ -992,6 +1005,16 @@ defmodule MingaEditor.Mouse do
         ) :: {{non_neg_integer(), non_neg_integer()}, {non_neg_integer(), non_neg_integer()}}
   defp normalize_position_range(first, second) when first <= second, do: {first, second}
   defp normalize_position_range(first, second), do: {second, first}
+
+  @spec handle_block_command_click(state(), non_neg_integer(), non_neg_integer()) ::
+          {:handled, state()} | :miss
+  defp handle_block_command_click(state, row, col) do
+    case HitTest.resolve_buffer(state, row, col) do
+      {:command, command} -> {:handled, MingaEditor.dispatch_command(state, command)}
+      :block_noop -> {:handled, state}
+      _target_or_miss -> :miss
+    end
+  end
 
   @spec handle_buffer_content_click(state(), non_neg_integer(), non_neg_integer()) :: state()
   defp handle_buffer_content_click(state, row, col) do
@@ -1209,7 +1232,7 @@ defmodule MingaEditor.Mouse do
       {:buffer, target} ->
         BufferTarget.position(target)
 
-      :miss ->
+      _command_or_miss ->
         nil
     end
   end
@@ -1275,7 +1298,7 @@ defmodule MingaEditor.Mouse do
   @spec drag_mouse_to_buffer_pos(state(), drag_window_context(), integer(), integer()) ::
           {non_neg_integer(), non_neg_integer()} | nil
   defp drag_mouse_to_buffer_pos(
-         _state,
+         state,
          {_id, window, buf, content_row, content_col, content_w, content_h},
          row,
          col
@@ -1285,26 +1308,26 @@ defmodule MingaEditor.Mouse do
     {cursor_line, _} = window.cursor
     scroll_top = HitTest.scroll_top(window, content_h, content_w, cursor_line, buf)
     local_row = row - content_row
-    local_col = max(col - content_col - gutter_w, 0) + window.viewport.left
+    visible_col = max(col - content_col - gutter_w, 0)
+    display_col = visible_col + window.viewport.left
 
     if local_row < 0 or local_row >= content_h do
-      resolve_drag_buffer_pos(buf, local_row, local_col, scroll_top, content_h, total_lines)
+      resolve_drag_buffer_pos(buf, local_row, display_col, scroll_top, content_h, total_lines)
     else
       case HitTest.position(
+             state,
              buf,
              window,
              local_row,
-             local_col,
+             visible_col,
              scroll_top,
-             content_h,
-             content_w,
-             total_lines
+             {content_h, content_w, total_lines}
            ) do
         {:position, pos} ->
           pos
 
         _target_or_miss ->
-          resolve_drag_buffer_pos(buf, local_row, local_col, scroll_top, content_h, total_lines)
+          resolve_drag_buffer_pos(buf, local_row, display_col, scroll_top, content_h, total_lines)
       end
     end
   catch
@@ -1602,7 +1625,7 @@ defmodule MingaEditor.Mouse do
     end
   end
 
-  @spec close_tab_by_command(state(), atom()) :: state()
+  @spec close_tab_by_command(state(), tab_command()) :: state()
   defp close_tab_by_command(state, cmd) do
     case parse_tab_id(cmd) do
       {:ok, tab_id} ->
@@ -1614,18 +1637,22 @@ defmodule MingaEditor.Mouse do
     end
   end
 
-  @spec parse_tab_id(atom()) :: {:ok, pos_integer()} | :error
+  @spec parse_tab_id(tab_command()) :: {:ok, pos_integer()} | :error
+  defp parse_tab_id({:tab_goto_id, tab_id}) when is_integer(tab_id) and tab_id > 0 do
+    {:ok, tab_id}
+  end
+
   defp parse_tab_id(cmd) when is_atom(cmd) do
     case Atom.to_string(cmd) do
       "tab_goto_" <> id_str ->
         case Integer.parse(id_str) do
-          {tab_id, ""} -> {:ok, tab_id}
+          {tab_id, ""} when tab_id > 0 -> {:ok, tab_id}
           _ -> :error
         end
 
       "tab_close_" <> id_str ->
         case Integer.parse(id_str) do
-          {tab_id, ""} -> {:ok, tab_id}
+          {tab_id, ""} when tab_id > 0 -> {:ok, tab_id}
           _ -> :error
         end
 
@@ -1639,7 +1666,7 @@ defmodule MingaEditor.Mouse do
   # ── Tab bar click detection ──────────────────────────────────────────────
 
   @spec tab_bar_click(state(), non_neg_integer(), non_neg_integer()) ::
-          {:command, atom() | {:workspace_goto, non_neg_integer()}} | :not_tab_bar
+          {:command, tab_command()} | :not_tab_bar
   defp tab_bar_click(state, row, col) do
     layout = Layout.get(state)
 
@@ -1661,7 +1688,7 @@ defmodule MingaEditor.Mouse do
           [MingaEditor.Shell.Traditional.TabBarRenderer.click_region()],
           non_neg_integer(),
           non_neg_integer()
-        ) :: {:command, atom() | {:workspace_goto, non_neg_integer()}} | :not_tab_bar
+        ) :: {:command, tab_command()} | :not_tab_bar
   defp find_tab_bar_region(regions, row, col) do
     case Enum.find(regions, &tab_bar_region_hit?(&1, row, col)) do
       {_, _, cmd} -> {:command, cmd}

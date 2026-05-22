@@ -261,6 +261,30 @@ defmodule Minga.Git do
   @spec hunk_at(GenServer.server(), non_neg_integer()) :: Minga.Core.Diff.hunk() | nil
   defdelegate hunk_at(git_buffer, line), to: Minga.Git.Buffer, as: :hunk_at
 
+  @doc "Returns parsed merge conflict regions for a tracked buffer."
+  @spec conflicts(GenServer.server()) :: [Minga.Git.MergeConflict.Region.t()]
+  defdelegate conflicts(git_buffer), to: Minga.Git.Buffer, as: :conflicts
+
+  @doc "Synchronizes a tracked buffer cache with the provided content."
+  @spec sync_tracked_buffer(pid(), String.t()) :: :ok
+  def sync_tracked_buffer(buffer_pid, content) when is_pid(buffer_pid) and is_binary(content) do
+    case tracking_pid(buffer_pid) do
+      nil ->
+        :ok
+
+      git_pid ->
+        Minga.Git.Buffer.update(git_pid, content)
+        _ = conflicts(git_pid)
+        :ok
+    end
+  catch
+    :exit, _ -> :ok
+  end
+
+  @doc "Returns the parsed merge conflict count for a tracked buffer."
+  @spec conflict_count(GenServer.server()) :: non_neg_integer()
+  defdelegate conflict_count(git_buffer), to: Minga.Git.Buffer, as: :conflict_count
+
   # ── Pure diff computation ──────────────────────────────────────────────
 
   @doc "Computes line-level diff hunks between two lists of lines."

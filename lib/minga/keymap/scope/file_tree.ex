@@ -17,9 +17,7 @@ defmodule Minga.Keymap.Scope.FileTree do
 
   alias Minga.Keymap.Bindings
 
-  @tab 9
-  @enter 13
-  @escape 27
+  import Minga.Keymap.Sigil
 
   # Groups included by this scope, per vim state.
   # CUA mode gets arrow-key navigation from the shared group.
@@ -85,27 +83,27 @@ defmodule Minga.Keymap.Scope.FileTree do
   @spec normal_trie() :: Bindings.node_t()
   defp normal_trie do
     Bindings.new()
-    |> Bindings.bind([{@enter, 0}], :tree_open_or_toggle, "Open file / toggle directory")
-    |> Bindings.bind([{@tab, 0}], :tree_toggle_directory, "Toggle directory")
-    |> Bindings.bind([{?l, 0}], :tree_expand, "Expand directory")
-    |> Bindings.bind([{?h, 0}], :tree_collapse, "Collapse directory")
-    |> Bindings.bind([{?H, 0}], :tree_toggle_hidden, "Toggle hidden files")
-    |> Bindings.bind([{?r, 0}], :tree_refresh, "Refresh file tree")
-    |> Bindings.bind([{?-, 0}], :tree_root_parent, "Root tree at parent")
-    |> Bindings.bind([{?., 0}], :tree_root_selected, "Root tree at selected directory")
-    |> Bindings.bind([{?~, 0}], :tree_root_original, "Root tree at project")
-    |> Bindings.bind([{?/, 0}], :tree_filter, "Filter file tree")
-    |> Bindings.bind([{??, 0}], :tree_toggle_help, "Toggle help overlay")
-    |> Bindings.bind([{?q, 0}], :tree_close, "Close file tree")
-    |> Bindings.bind([{@escape, 0}], :tree_close, "Close file tree")
-    |> Bindings.bind([{?a, 0}], :tree_new_file, "New file")
-    |> Bindings.bind([{?A, 0}], :tree_new_folder, "New folder")
-    |> Bindings.bind([{?R, 0}], :tree_rename, "Rename")
-    |> Bindings.bind([{?d, 0}], :tree_delete, "Delete")
-    |> Bindings.bind([{?y, 0}], :tree_copy_path, "Copy path")
-    |> Bindings.bind([{?c, 0}], :tree_mark_copy, "Mark for copy")
-    |> Bindings.bind([{?m, 0}], :tree_mark_move, "Mark for move")
-    |> Bindings.bind([{?p, 0}], :tree_paste, "Paste marked entry")
+    |> Bindings.bind(~k(RET), :tree_open_or_toggle, "Open file / toggle directory")
+    |> Bindings.bind(~k(TAB), :tree_toggle_directory, "Toggle directory")
+    |> Bindings.bind(~k(l), :tree_expand, "Expand directory")
+    |> Bindings.bind(~k(h), :tree_collapse, "Collapse directory")
+    |> Bindings.bind(~k(H), :tree_toggle_hidden, "Toggle hidden files")
+    |> Bindings.bind(~k(r), :tree_refresh, "Refresh file tree")
+    |> Bindings.bind(~k(-), :tree_root_parent, "Root tree at parent")
+    |> Bindings.bind(~k(.), :tree_root_selected, "Root tree at selected directory")
+    |> Bindings.bind(~k(~), :tree_root_original, "Root tree at project")
+    |> Bindings.bind(~k(/), :tree_filter, "Filter file tree")
+    |> Bindings.bind(~k(?), :tree_toggle_help, "Toggle help overlay")
+    |> Bindings.bind(~k(q), :tree_close, "Close file tree")
+    |> Bindings.bind(~k(ESC), :tree_close, "Close file tree")
+    |> Bindings.bind(~k(a), :tree_new_file, "New file")
+    |> Bindings.bind(~k(A), :tree_new_folder, "New folder")
+    |> Bindings.bind(~k(R), :tree_rename, "Rename")
+    |> Bindings.bind(~k(d), :tree_delete, "Delete")
+    |> Bindings.bind(~k(y), :tree_copy_path, "Copy path")
+    |> Bindings.bind(~k(c), :tree_mark_copy, "Mark for copy")
+    |> Bindings.bind(~k(m), :tree_mark_move, "Mark for move")
+    |> Bindings.bind(~k(p), :tree_paste, "Paste marked entry")
   end
 
   # ── CUA mode bindings ─────────────────────────────────────────────────────
@@ -118,8 +116,8 @@ defmodule Minga.Keymap.Scope.FileTree do
       groups: @cua_groups,
       then: fn trie ->
         trie
-        |> Bindings.bind([{@enter, 0}], :tree_open_or_toggle, "Open file / toggle directory")
-        |> Bindings.bind([{@escape, 0}], :tree_close, "Close file tree")
+        |> Bindings.bind(~k(RET), :tree_open_or_toggle, "Open file / toggle directory")
+        |> Bindings.bind(~k(ESC), :tree_close, "Close file tree")
         # Arrow left/right: collapse/expand (Finder-style)
         |> Bindings.bind([{57_351, 0}], :tree_expand, "Expand directory")
         |> Bindings.bind([{57_350, 0}], :tree_collapse, "Collapse directory")

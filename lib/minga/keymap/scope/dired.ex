@@ -14,8 +14,7 @@ defmodule Minga.Keymap.Scope.Dired do
 
   alias Minga.Keymap.Bindings
 
-  @enter 13
-  @escape 27
+  import Minga.Keymap.Sigil
 
   @cua_groups [:cua_navigation]
 
@@ -74,15 +73,15 @@ defmodule Minga.Keymap.Scope.Dired do
   @spec normal_trie() :: Bindings.node_t()
   defp normal_trie do
     Bindings.new()
-    |> Bindings.bind([{@enter, 0}], :dired_open_entry, "Open file / enter directory")
-    |> Bindings.bind([{?-, 0}], :dired_parent, "Parent directory")
-    |> Bindings.bind([{?q, 0}], :dired_close, "Close directory buffer")
-    |> Bindings.bind([{@escape, 0}], :dired_close, "Close directory buffer")
-    |> Bindings.bind([{?g, 0}, {?., 0}], :dired_toggle_hidden, "Toggle hidden files")
-    |> Bindings.bind([{?g, 0}, {?s, 0}], :dired_cycle_sort, "Cycle sort order")
-    |> Bindings.bind([{?g, 0}, {?d, 0}], :dired_toggle_details, "Toggle detail columns")
-    |> Bindings.bind([{?g, 0}, {?x, 0}], :dired_open_external, "Open with system application")
-    |> Bindings.bind([{?g, 0}, {?r, 0}], :dired_refresh, "Refresh listing")
+    |> Bindings.bind(~k(RET), :dired_open_entry, "Open file / enter directory")
+    |> Bindings.bind(~k(-), :dired_parent, "Parent directory")
+    |> Bindings.bind(~k(q), :dired_close, "Close directory buffer")
+    |> Bindings.bind(~k(ESC), :dired_close, "Close directory buffer")
+    |> Bindings.bind(~k(g .), :dired_toggle_hidden, "Toggle hidden files")
+    |> Bindings.bind(~k(g s), :dired_cycle_sort, "Cycle sort order")
+    |> Bindings.bind(~k(g d), :dired_toggle_details, "Toggle detail columns")
+    |> Bindings.bind(~k(g x), :dired_open_external, "Open with system application")
+    |> Bindings.bind(~k(g r), :dired_refresh, "Refresh listing")
   end
 
   # ── CUA mode bindings ─────────────────────────────────────────────────────
@@ -93,8 +92,8 @@ defmodule Minga.Keymap.Scope.Dired do
       groups: @cua_groups,
       then: fn trie ->
         trie
-        |> Bindings.bind([{@enter, 0}], :dired_open_entry, "Open file / enter directory")
-        |> Bindings.bind([{@escape, 0}], :dired_close, "Close directory buffer")
+        |> Bindings.bind(~k(RET), :dired_open_entry, "Open file / enter directory")
+        |> Bindings.bind(~k(ESC), :dired_close, "Close directory buffer")
       end
     )
   end

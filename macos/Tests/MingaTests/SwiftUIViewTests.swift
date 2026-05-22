@@ -11,6 +11,7 @@
 
 import Testing
 import SwiftUI
+import UniformTypeIdentifiers
 import ViewInspector
 
 // MARK: - CompletionOverlay
@@ -166,7 +167,9 @@ struct StatusBarViewViewTests {
         message: String = "",
         diagnosticHint: String = "",
         leftSegments: [Wire.StatusBarSegment] = [],
-        rightSegments: [Wire.StatusBarSegment] = []
+        rightSegments: [Wire.StatusBarSegment] = [],
+        agentStatus: UInt8 = 0,
+        activeToolName: String = ""
     ) -> StatusBarState {
         let state = StatusBarState()
         state.update(from: StatusBarUpdate(
@@ -174,7 +177,8 @@ struct StatusBarViewViewTests {
             lineCount: 500, flags: 0, lspStatus: 0, gitBranch: "",
             message: message, filetype: "elixir", errorCount: 0, warningCount: 0,
             modelName: "", messageCount: 0, sessionStatus: 0,
-            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
+            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: agentStatus,
+            activeToolName: activeToolName,
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: diagnosticHint,
             backgroundSubagentCount: 0, backgroundSubagentLabel: "",
@@ -487,6 +491,7 @@ struct StatusBarViewViewTests {
             message: "", filetype: "", errorCount: 0, warningCount: 0,
             modelName: "claude-3-5-sonnet", messageCount: 7, sessionStatus: 0,
             infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
+            activeToolName: "",
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
             backgroundSubagentCount: 0, backgroundSubagentLabel: "",
@@ -503,6 +508,62 @@ struct StatusBarViewViewTests {
         #expect(!strings.contains("claude-3-5-sonnet"))
         #expect(strings.contains("7 msgs"))
         #expect(strings.contains("NORMAL"))
+    }
+
+    @Test("Agent status shows readable labels and active tool names")
+    @MainActor func agentStatusLabels() throws {
+        let running = statusBarState(agentStatus: 2, activeToolName: "read_file")
+        let runningTexts = try StatusBarView(state: running, theme: ThemeColors(), encoder: nil)
+            .inspect()
+            .findAll(ViewInspectorQuery.text)
+            .compactMap { try? $0.string() }
+
+        #expect(runningTexts.contains("Running read_file"))
+
+        let fallback = statusBarState(agentStatus: 2)
+        let fallbackTexts = try StatusBarView(state: fallback, theme: ThemeColors(), encoder: nil)
+            .inspect()
+            .findAll(ViewInspectorQuery.text)
+            .compactMap { try? $0.string() }
+
+        #expect(fallbackTexts.contains("Running"))
+        #expect(!fallbackTexts.contains("Running read_file"))
+
+        let plan = statusBarState(agentStatus: 4)
+        let planBody = try StatusBarView(state: plan, theme: ThemeColors(), encoder: nil).inspect()
+        let planTexts = planBody.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        let planAccessibilityLabels = try planBody.findAll(ViewType.HStack.self).compactMap {
+            try? $0.accessibilityLabel().string()
+        }
+
+        #expect(planTexts.contains("PLAN"))
+        #expect(planAccessibilityLabels.contains("Agent plan mode"))
+    }
+
+    @Test("Git branch click opens branch picker")
+    @MainActor func gitBranchClickOpensBranchPicker() throws {
+        let spy = SpyEncoder()
+        let state = StatusBarState()
+        state.update(from: StatusBarUpdate(
+            contentKind: 0, mode: 0, cursorLine: 1, cursorCol: 1,
+            lineCount: 1, flags: 0x02, lspStatus: 0, gitBranch: "main",
+            message: "", filetype: "", errorCount: 0, warningCount: 0,
+            modelName: "", messageCount: 0, sessionStatus: 0,
+            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
+            gitAdded: 0, gitModified: 0, gitDeleted: 0,
+            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
+            backgroundSubagentCount: 0, backgroundSubagentLabel: "",
+            modelineLeftSegments: [segment(0, " main ", kind: "git")], modelineRightSegments: []
+        ))
+
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: spy)
+        let buttons = try sut.inspect().findAll(ViewType.Button.self)
+
+        for button in buttons {
+            try button.tap()
+        }
+
+        #expect(spy.guiActions.contains(.executeCommand(name: "git_branch_picker")))
     }
 
     @Test("Git branch shown when flag is set")
@@ -605,14 +666,22 @@ struct StatusBarViewViewTests {
 @Suite("TabBarView View Structure")
 struct TabBarViewViewTests {
 
+    private func wireTab(id: UInt32, groupId: UInt16 = 0, isActive: Bool = false, isPinned: Bool = false, label: String? = nil) -> Wire.TabEntry {
+        Wire.TabEntry(id: id, groupId: groupId, isActive: isActive, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: isPinned, tintColorRGB: 0, icon: "", label: label ?? "tab-\(id).ex")
+    }
+
+    private func tab(id: UInt32, groupId: UInt16 = 0, isActive: Bool = false, isPinned: Bool = false, label: String? = nil) -> TabEntry {
+        TabEntry(id: id, groupId: groupId, isActive: isActive, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: isPinned, tintColor: nil, icon: "", label: label ?? "tab-\(id).ex")
+    }
+
     @Test("Tab bar shows all tab labels")
     @MainActor func showsAllTabs() throws {
         let state = TabBarState()
         state.update(activeIndex: 0, entries: [
             Wire.TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false,
-                       hasAttention: false, agentStatus: 0, icon: "", label: "editor.ex"),
+                       hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "editor.ex"),
             Wire.TabEntry(id: 2, groupId: 0, isActive: false, isDirty: false, isAgent: false,
-                       hasAttention: false, agentStatus: 0, icon: "", label: "test.ex"),
+                       hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "test.ex"),
         ])
 
         let sut = TabBarView(tabBarState: state, theme: ThemeColors(), encoder: nil)
@@ -624,14 +693,131 @@ struct TabBarViewViewTests {
         #expect(strings.contains("test.ex"))
     }
 
+    @Test("Inactive tab context menu actions use id-scoped events")
+    @MainActor func inactiveTabContextMenuActionsUseIdScopedEvents() throws {
+        let spy = SpyEncoder()
+        let state = TabBarState()
+        state.update(activeIndex: 0, entries: [
+            wireTab(id: 1, isActive: true),
+            wireTab(id: 2),
+            wireTab(id: 3, isPinned: true),
+        ])
+        let sut = TabBarView(tabBarState: state, theme: ThemeColors(), encoder: spy)
+        let inactive = tab(id: 2)
+        let pinnedInactive = tab(id: 3, isPinned: true)
+
+        sut.performTabContextMenuAction(.pin, for: inactive)
+        sut.performTabContextMenuAction(.unpin, for: pinnedInactive)
+        sut.performTabContextMenuAction(.moveLeft, for: inactive)
+        sut.performTabContextMenuAction(.moveRight, for: inactive)
+
+        #expect(spy.guiActions == [
+            .tabPin(id: 2),
+            .tabUnpin(id: 3),
+            .tabMoveLeft(id: 2),
+            .tabMoveRight(id: 2)
+        ])
+        #expect(!spy.guiActions.contains(.selectTab(id: 2)))
+        #expect(!spy.guiActions.contains { action in
+            if case .executeCommand = action { return true }
+            return false
+        })
+    }
+
+    @Test("Tab context menu disables impossible pinned-bucket moves")
+    @MainActor func tabContextMenuMoveEnablementHonorsPinnedBuckets() throws {
+        let state = TabBarState()
+        state.update(activeIndex: 0, entries: [
+            wireTab(id: 1, isActive: true, isPinned: true),
+            wireTab(id: 2, isPinned: true),
+            wireTab(id: 3),
+            wireTab(id: 4),
+            wireTab(id: 5, groupId: 1),
+        ])
+        let sut = TabBarView(tabBarState: state, theme: ThemeColors(), encoder: nil)
+
+        #expect(!sut.canMoveTabLeft(tab(id: 1, isActive: true, isPinned: true)))
+        #expect(sut.canMoveTabRight(tab(id: 1, isActive: true, isPinned: true)))
+        #expect(sut.canMoveTabLeft(tab(id: 2, isPinned: true)))
+        #expect(!sut.canMoveTabRight(tab(id: 2, isPinned: true)))
+        #expect(!sut.canMoveTabLeft(tab(id: 3)))
+        #expect(sut.canMoveTabRight(tab(id: 3)))
+        #expect(sut.canMoveTabLeft(tab(id: 4)))
+        #expect(!sut.canMoveTabRight(tab(id: 4)))
+        #expect(!sut.canMoveTabLeft(tab(id: 5, groupId: 1)))
+        #expect(!sut.canMoveTabRight(tab(id: 5, groupId: 1)))
+    }
+
+    @Test("Tab context menu items disable move actions at bucket edges")
+    @MainActor func tabContextMenuItemsDisableMoveActionsAtBucketEdges() throws {
+        let state = TabBarState()
+        state.update(activeIndex: 0, entries: [
+            wireTab(id: 1, isActive: true, isPinned: true, label: "pinned-1.ex"),
+            wireTab(id: 2, isPinned: true, label: "pinned-2.ex"),
+            wireTab(id: 3, label: "plain-1.ex"),
+            wireTab(id: 4, label: "plain-2.ex"),
+        ])
+        let sut = TabBarView(tabBarState: state, theme: ThemeColors(), encoder: nil)
+        let body = try sut.inspect()
+        let buttons = body.findAll(ViewType.Button.self)
+
+        let moveLeftButtons = buttons.filter {
+            ((try? $0.labelView().text().string()) ?? "") == "Move Tab Left"
+        }
+        let moveRightButtons = buttons.filter {
+            ((try? $0.labelView().text().string()) ?? "") == "Move Tab Right"
+        }
+
+        #expect(moveLeftButtons.count == 4)
+        #expect(moveRightButtons.count == 4)
+
+        let moveLeftDisabledStates = moveLeftButtons.map { $0.isDisabled() }
+        let moveRightDisabledStates = moveRightButtons.map { $0.isDisabled() }
+
+        #expect(moveLeftDisabledStates == [true, false, true, false])
+        #expect(moveRightDisabledStates == [false, true, false, true])
+    }
+
+    @Test("Tab drag payload stays private and drops only accept tab payloads in the same bucket")
+    @MainActor func tabDragPayloadAndDropGuard() throws {
+        let spy = SpyEncoder()
+        let state = TabBarState()
+        state.update(activeIndex: 0, entries: [
+            wireTab(id: 1),
+            wireTab(id: 2),
+            wireTab(id: 3, groupId: 1),
+            wireTab(id: 4, isPinned: true),
+        ])
+        let sut = TabBarView(tabBarState: state, theme: ThemeColors(), encoder: spy)
+        let target = tab(id: 2)
+
+        #expect(TabDragPayload.contentType.identifier == "com.minga.tab-id")
+        #expect(TabDragPayload.contentType != UTType.plainText)
+
+        if let reorder = sut.tabDropReorder(droppedTabs: [], target: target, visibleIndex: 1) {
+            Issue.record("Expected empty payload to be rejected, got \(reorder)")
+        }
+        if let reorder = sut.tabDropReorder(droppedTabs: [TabDragPayload(id: 3)], target: target, visibleIndex: 1) {
+            Issue.record("Expected cross-workspace payload to be rejected, got \(reorder)")
+        }
+        if let reorder = sut.tabDropReorder(droppedTabs: [TabDragPayload(id: 4)], target: target, visibleIndex: 1) {
+            Issue.record("Expected pinned-bucket mismatch to be rejected, got \(reorder)")
+        }
+
+        let accepted = sut.handleTabDrop(droppedTabs: [TabDragPayload(id: 1)], target: target, visibleIndex: 1)
+
+        #expect(accepted)
+        #expect(spy.guiActions == [.tabReorder(id: 1, newIndex: 1)])
+    }
+
     @Test("Tab bar uses canonical active-workspace visible tabs")
     @MainActor func usesCanonicalVisibleTabs() throws {
         let state = TabBarState()
         state.update(activeIndex: 0, entries: [
             Wire.TabEntry(id: 1, groupId: 1, isActive: true, isDirty: false, isAgent: false,
-                       hasAttention: false, agentStatus: 0, icon: "", label: "legacy-agent-chat"),
+                       hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "legacy-agent-chat"),
             Wire.TabEntry(id: 2, groupId: 2, isActive: false, isDirty: false, isAgent: false,
-                       hasAttention: false, agentStatus: 0, icon: "", label: "background.ex")
+                       hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "background.ex")
         ])
         state.updateWorkspaces(activeWorkspaceId: 1, mode: 1, flags: 0, entries: [
             Wire.WorkspaceEntry(id: 1, kind: 1, status: 0, flags: 0, colorR: 0x11, colorG: 0x22, colorB: 0x33,
@@ -639,7 +825,7 @@ struct TabBarViewViewTests {
             Wire.WorkspaceEntry(id: 2, kind: 1, status: 1, flags: 0, colorR: 0x44, colorG: 0x55, colorB: 0x66,
                                 tabCount: 3, draftCount: 0, conflictCount: 0, runningBackgroundCount: 1, label: "Research", icon: "cpu")
         ], visibleTabs: [
-            Wire.WorkspaceTabEntry(id: 42, workspaceId: 1, kind: 0, flags: 0, pathHash: 0, icon: "", label: "active.ex", path: "/tmp/active.ex")
+            Wire.WorkspaceTabEntry(id: 42, workspaceId: 1, kind: 0, flags: 0, pathHash: 0, tintColorRGB: 0, icon: "", label: "active.ex", path: "/tmp/active.ex")
         ])
 
         let sut = TabBarView(tabBarState: state, theme: ThemeColors(), encoder: nil)
@@ -667,7 +853,7 @@ struct WorkspaceHeaderViewTests {
             Wire.WorkspaceEntry(id: 2, kind: 1, status: 2, flags: 0x0003, colorR: 0x44, colorG: 0x55, colorB: 0x66,
                                 tabCount: 2, draftCount: 1, conflictCount: 1, runningBackgroundCount: 1, label: "Review", icon: "cpu")
         ], visibleTabs: [
-            Wire.WorkspaceTabEntry(id: 42, workspaceId: 2, kind: 0, flags: 0, pathHash: 0, icon: "", label: "active.ex", path: "/tmp/active.ex")
+            Wire.WorkspaceTabEntry(id: 42, workspaceId: 2, kind: 0, flags: 0, pathHash: 0, tintColorRGB: 0, icon: "", label: "active.ex", path: "/tmp/active.ex")
         ])
         return state
     }
@@ -721,6 +907,15 @@ struct WorkspaceHeaderViewTests {
 
 @Suite("AgentChatView View Structure")
 struct AgentChatViewTests {
+
+    @MainActor private func chatState(messages: [ChatMessageEntry] = []) -> AgentChatState {
+        let state = AgentChatState()
+        state.visible = true
+        state.model = "claude-sonnet-4"
+        state.status = 0
+        state.messages = messages
+        return state
+    }
 
     @Test("Empty messages shows header and prompt area")
     @MainActor func emptyMessages() throws {
@@ -787,6 +982,48 @@ struct AgentChatViewTests {
         }))
         try highButton.tap()
         #expect(spy.guiActions.contains(.executeCommand(name: "agent_thinking_high")))
+    }
+
+    @Test("Approval buttons dispatch the matching trust keypresses")
+    @MainActor func approvalButtonsDispatchKeys() throws {
+        let spy = SpyEncoder()
+        let state = chatState(messages: [
+            .approvalToolCall(id: 1, name: "shell", summary: "git diff --cached", toolCallId: "call-1", previewKind: 2, previewLines: ["git diff --cached"])
+        ])
+
+        let sut = AgentChatView(state: state, theme: ThemeColors(), isInsertMode: false, encoder: spy)
+        let body = try sut.inspect()
+        let buttons = try body.findAll(ViewType.Button.self)
+
+        func tap(_ title: String) throws {
+            let button = try #require(buttons.first(where: {
+                ((try? $0.labelView().text().string()) ?? "") == title
+            }))
+            try button.tap()
+        }
+
+        try tap("Approve (y)")
+        try tap("Trust for session (a)")
+        try tap("Trust for this turn (t)")
+        try tap("Deny (n)")
+
+        #expect(spy.keyPressCalls.map(\.codepoint) == [0x79, 0x61, 0x74, 0x6E])
+        #expect(spy.keyPressCalls.allSatisfy { $0.modifiers == 0 })
+    }
+
+    @Test("Auto-approved tool calls show the subtle scope pill")
+    @MainActor func autoApprovedIndicatorRenders() throws {
+        let state = chatState(messages: [
+            .toolCall(id: 1, name: "shell", summary: "git diff --cached", status: 1, isError: false, collapsed: true, autoApprovedScope: 1, durationMs: 500, result: ""),
+            .toolCall(id: 2, name: "shell", summary: "git status --short", status: 1, isError: false, collapsed: true, autoApprovedScope: 2, durationMs: 250, result: "")
+        ])
+
+        let sut = AgentChatView(state: state, theme: ThemeColors(), isInsertMode: false, encoder: nil)
+        let body = try sut.inspect()
+        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(strings.contains("auto-approved · session"))
+        #expect(strings.contains("auto-approved · turn"))
     }
 
     @Test("User message renders as bubble")

@@ -15,10 +15,54 @@ defmodule MingaEditor.State.AgentTest do
       assert agent.runtime.status == :thinking
     end
 
+    test "set_status clears active_tool_name when leaving tool execution" do
+      agent =
+        new_agent()
+        |> AgentState.set_active_tool_name("read_file")
+        |> AgentState.set_status(:idle)
+
+      assert agent.runtime.status == :idle
+      assert agent.runtime.active_tool_name == nil
+
+      agent =
+        new_agent()
+        |> AgentState.set_active_tool_name("read_file")
+        |> AgentState.set_status(:error)
+
+      assert agent.runtime.status == :error
+      assert agent.runtime.active_tool_name == nil
+    end
+
+    test "set_status preserves active_tool_name while still tool executing" do
+      agent =
+        new_agent()
+        |> AgentState.set_active_tool_name("read_file")
+        |> AgentState.set_status(:tool_executing)
+
+      assert agent.runtime.status == :tool_executing
+      assert agent.runtime.active_tool_name == "read_file"
+    end
+
     test "set_error sets status to :error and stores the message" do
       agent = new_agent() |> AgentState.set_error("something broke")
       assert agent.runtime.status == :error
       assert agent.error == "something broke"
+    end
+  end
+
+  describe "session snapshots" do
+    test "apply_session_snapshot sets active_tool_name only while tool executing" do
+      agent =
+        new_agent()
+        |> AgentState.apply_session_snapshot(:tool_executing, nil, nil, "read_file")
+
+      assert agent.runtime.status == :tool_executing
+      assert agent.runtime.active_tool_name == "read_file"
+
+      agent = AgentState.apply_session_snapshot(agent, :idle, nil, nil, "stale_tool")
+
+      assert agent.runtime.status == :idle
+      assert agent.runtime.active_tool_name == nil
     end
   end
 

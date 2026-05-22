@@ -282,6 +282,53 @@ defmodule MingaEditor.State.TabBar do
     %{tb | tabs: new_tabs}
   end
 
+  @doc "Pins the tab with the given id. Returns unchanged when the tab is missing."
+  @spec pin_tab(t(), Tab.id()) :: t()
+  def pin_tab(%__MODULE__{} = tb, id) do
+    update_tab(tb, id, &Tab.set_pinned(&1, true))
+  end
+
+  @doc "Unpins the tab with the given id. Returns unchanged when the tab is missing."
+  @spec unpin_tab(t(), Tab.id()) :: t()
+  def unpin_tab(%__MODULE__{} = tb, id) do
+    update_tab(tb, id, &Tab.set_pinned(&1, false))
+  end
+
+  @doc "Toggles the pinned state of the active tab."
+  @spec toggle_active_pin(t()) :: t()
+  def toggle_active_pin(%__MODULE__{active_id: id} = tb) do
+    update_tab(tb, id, &Tab.toggle_pinned/1)
+  end
+
+  @doc "Moves the active tab one visible slot left within its workspace."
+  @spec move_active_tab_left(t()) :: t()
+  def move_active_tab_left(%__MODULE__{} = tb), do: move_tab(tb, tb.active_id, -1)
+
+  @doc "Moves the active tab one visible slot right within its workspace."
+  @spec move_active_tab_right(t()) :: t()
+  def move_active_tab_right(%__MODULE__{} = tb), do: move_tab(tb, tb.active_id, 1)
+
+  @doc "Moves the tab with the given id one visible slot left within its workspace."
+  @spec move_tab_left(t(), Tab.id()) :: t()
+  def move_tab_left(%__MODULE__{} = tb, id), do: move_tab(tb, id, -1)
+
+  @doc "Moves the tab with the given id one visible slot right within its workspace."
+  @spec move_tab_right(t(), Tab.id()) :: t()
+  def move_tab_right(%__MODULE__{} = tb, id), do: move_tab(tb, id, 1)
+
+  @doc "Reorders a visible file tab within its workspace by zero-based visible index."
+  @spec reorder_tab(t(), Tab.id(), non_neg_integer()) :: t()
+  def reorder_tab(%__MODULE__{} = tb, id, new_index)
+      when is_integer(new_index) and new_index >= 0 do
+    case get(tb, id) do
+      %Tab{kind: :file, group_id: workspace_id} ->
+        reorder_file_tab(tb, id, workspace_id, new_index)
+
+      _ ->
+        tb
+    end
+  end
+
   @doc "Removes a dead buffer pid from all tab context snapshots."
   @spec scrub_dead_buffer(t(), pid()) :: t()
   def scrub_dead_buffer(%__MODULE__{tabs: tabs} = tb, pid) do
@@ -500,7 +547,9 @@ defmodule MingaEditor.State.TabBar do
   @spec visible_file_tabs(t(), non_neg_integer()) :: [Tab.t()]
   def visible_file_tabs(%__MODULE__{tabs: tabs}, workspace_id)
       when is_integer(workspace_id) and workspace_id >= 0 do
-    Enum.filter(tabs, &visible_file_tab?(&1, workspace_id))
+    tabs
+    |> Enum.filter(&visible_file_tab?(&1, workspace_id))
+    |> pinned_first()
   end
 
   @doc "Finds the file tab in a workspace that represents the given file reference."
@@ -515,6 +564,107 @@ defmodule MingaEditor.State.TabBar do
   @spec visible_file_tab?(Tab.t(), non_neg_integer()) :: boolean()
   defp visible_file_tab?(%Tab{kind: :file, group_id: workspace_id}, workspace_id), do: true
   defp visible_file_tab?(%Tab{}, _workspace_id), do: false
+
+  @spec pinned_first([Tab.t()]) :: [Tab.t()]
+  defp pinned_first(tabs) do
+    Enum.filter(tabs, & &1.pinned?) ++ Enum.reject(tabs, & &1.pinned?)
+  end
+
+  @spec move_tab(t(), Tab.id(), 1 | -1) :: t()
+  defp move_tab(%__MODULE__{} = tb, id, step) do
+    case get(tb, id) do
+      %Tab{kind: :file, group_id: workspace_id} ->
+        move_file_tab(tb, id, workspace_id, step)
+
+      _ ->
+        tb
+    end
+  end
+
+  @spec move_file_tab(t(), Tab.id(), non_neg_integer(), 1 | -1) :: t()
+  defp move_file_tab(%__MODULE__{} = tb, id, workspace_id, step) do
+    tabs = visible_file_tabs(tb, workspace_id)
+
+    case Enum.find_index(tabs, &(&1.id == id)) do
+      nil ->
+        tb
+
+      current_index ->
+        target_index = current_index + step
+
+        if visible_tab_reorder_allowed?(tabs, current_index, target_index) do
+          reorder_tab(tb, id, target_index)
+        else
+          tb
+        end
+    end
+  end
+
+  @spec reorder_file_tab(t(), Tab.id(), non_neg_integer(), non_neg_integer()) :: t()
+  defp reorder_file_tab(%__MODULE__{} = tb, id, workspace_id, new_index) do
+    tabs = visible_file_tabs(tb, workspace_id)
+    current_index = Enum.find_index(tabs, &(&1.id == id))
+
+    if visible_tab_reorder_allowed?(tabs, current_index, new_index) do
+      reorder_visible_file_tab(tb, workspace_id, tabs, current_index, new_index)
+    else
+      tb
+    end
+  end
+
+  @spec visible_tab_reorder_allowed?([Tab.t()], non_neg_integer() | nil, non_neg_integer()) ::
+          boolean()
+  defp visible_tab_reorder_allowed?(_tabs, nil, _target_index), do: false
+
+  defp visible_tab_reorder_allowed?(tabs, current_index, target_index) do
+    target_index >= 0 and target_index < length(tabs) and
+      same_visible_bucket?(tabs, current_index, target_index)
+  end
+
+  @spec same_visible_bucket?([Tab.t()], non_neg_integer(), non_neg_integer()) :: boolean()
+  defp same_visible_bucket?(tabs, current_index, target_index) do
+    pinned_count = Enum.count(tabs, & &1.pinned?)
+
+    visible_bucket(current_index, pinned_count) ==
+      visible_bucket(target_index, pinned_count)
+  end
+
+  @spec visible_bucket(non_neg_integer(), non_neg_integer()) :: :pinned | :unpinned
+  defp visible_bucket(index, pinned_count) when index < pinned_count, do: :pinned
+  defp visible_bucket(_index, _pinned_count), do: :unpinned
+
+  @spec reorder_visible_file_tab(
+          t(),
+          non_neg_integer(),
+          [Tab.t()],
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: t()
+  defp reorder_visible_file_tab(tb, _workspace_id, [_single], _current_index, _new_index), do: tb
+
+  defp reorder_visible_file_tab(tb, workspace_id, tabs, current_index, new_index) do
+    {tab, remaining} = List.pop_at(tabs, current_index)
+    reordered = List.insert_at(remaining, new_index, tab)
+    replace_visible_file_tabs(tb, workspace_id, reordered)
+  end
+
+  @spec replace_visible_file_tabs(t(), non_neg_integer(), [Tab.t()]) :: t()
+  defp replace_visible_file_tabs(%__MODULE__{tabs: tabs} = tb, workspace_id, replacements) do
+    {new_tabs, _remaining} =
+      Enum.map_reduce(tabs, replacements, &replace_visible_file_tab(&1, &2, workspace_id))
+
+    %{tb | tabs: new_tabs}
+  end
+
+  @spec replace_visible_file_tab(Tab.t(), [Tab.t()], non_neg_integer()) :: {Tab.t(), [Tab.t()]}
+  defp replace_visible_file_tab(
+         %Tab{kind: :file, group_id: workspace_id},
+         [next | rest],
+         workspace_id
+       ),
+       do: {next, rest}
+
+  defp replace_visible_file_tab(tab, replacements, _workspace_id), do: {tab, replacements}
 
   @spec tab_matches_file_ref?(Tab.t(), FileRef.t()) :: boolean()
   defp tab_matches_file_ref?(%Tab{} = tab, %FileRef{} = file_ref) do

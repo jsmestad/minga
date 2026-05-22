@@ -37,7 +37,8 @@ defmodule Minga.Test.StubServer do
     snapshot = %{
       status: Map.get(state, :status, :idle),
       pending_approval: Map.get(state, :pending_approval),
-      error: Map.get(state, :error)
+      error: Map.get(state, :error),
+      active_tool_name: Map.get(state, :active_tool_name)
     }
 
     {:reply, snapshot, state}

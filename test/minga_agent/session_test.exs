@@ -266,6 +266,26 @@ defmodule MingaAgent.SessionTest do
     session
   end
 
+  defp agent_config(fields) do
+    struct!(MingaAgent.Config, fields)
+  end
+
+  defp build_stream_response(chunks, usage \\ %{}) do
+    {:ok, handle} =
+      ReqLLM.StreamResponse.MetadataHandle.start_link(fn ->
+        %{usage: usage, finish_reason: :stop}
+      end)
+
+    {:ok,
+     %ReqLLM.StreamResponse{
+       stream: chunks,
+       metadata_handle: handle,
+       cancel: fn -> :ok end,
+       model: elem(ReqLLM.model("anthropic:claude-sonnet-4-20250514"), 1),
+       context: ReqLLM.Context.new()
+     }}
+  end
+
   defp send_approval(session, reply_to \\ self()) do
     approval = %Event.ToolApproval{
       tool_call_id: "tc1",
@@ -572,6 +592,65 @@ defmodule MingaAgent.SessionTest do
     end
   end
 
+  describe "editor_snapshot/1" do
+    test "includes active tool name while a tool is running", %{session: session} do
+      send(
+        session,
+        {:agent_provider_event,
+         %Event.ToolStart{tool_call_id: "tc1", name: "read_file", args: %{}}}
+      )
+
+      snapshot = Session.editor_snapshot(session)
+
+      assert snapshot.status == :tool_executing
+      assert snapshot.active_tool_name == "read_file"
+
+      send(
+        session,
+        {:agent_provider_event,
+         %Event.ToolEnd{tool_call_id: "tc1", name: "read_file", result: "contents"}}
+      )
+
+      snapshot = Session.editor_snapshot(session)
+
+      assert snapshot.active_tool_name == nil
+    end
+
+    test "keeps the next tool name active until every tool ends", %{session: session} do
+      send(
+        session,
+        {:agent_provider_event,
+         %Event.ToolStart{tool_call_id: "tc1", name: "read_file", args: %{}}}
+      )
+
+      send(
+        session,
+        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc2", name: "shell", args: %{}}}
+      )
+
+      snapshot = Session.editor_snapshot(session)
+      assert snapshot.active_tool_name == "shell"
+
+      send(
+        session,
+        {:agent_provider_event,
+         %Event.ToolEnd{tool_call_id: "tc1", name: "read_file", result: "contents"}}
+      )
+
+      snapshot = Session.editor_snapshot(session)
+      assert snapshot.active_tool_name == "shell"
+
+      send(
+        session,
+        {:agent_provider_event,
+         %Event.ToolEnd{tool_call_id: "tc2", name: "shell", result: "output"}}
+      )
+
+      snapshot = Session.editor_snapshot(session)
+      assert snapshot.active_tool_name == nil
+    end
+  end
+
   describe "toggle_tool_collapse/2" do
     test "toggles collapsed state of tool call messages", %{session: session} do
       send(
@@ -861,12 +940,17 @@ defmodule MingaAgent.SessionTest do
     end
 
     test "respond_to_approval resolves each supported decision" do
-      for decision <- [:approve, :reject, :approve_all] do
+      for {decision, execution_decision} <- [
+            {:approve, :approve},
+            {:approve_session, :approve},
+            {:approve_turn, :approve},
+            {:reject, :reject}
+          ] do
         session = start_subscribed_session()
         send_approval(session)
 
         assert :ok = Session.respond_to_approval(session, decision)
-        assert_receive {:tool_approval_response, "tc1", ^decision}, @event_timeout
+        assert_receive {:tool_approval_response, "tc1", ^execution_decision}, @event_timeout
         assert_receive {:agent_event, _, {:approval_resolved, ^decision}}, @event_timeout
         assert {:error, :no_pending_approval} = Session.respond_to_approval(session, :approve)
 
@@ -875,6 +959,195 @@ defmodule MingaAgent.SessionTest do
           assert Enum.any?(messages, &match?({:system, "Denied shell" <> _, :info}, &1))
         end
       end
+    end
+
+    test "approve_session and approve_turn set the matching tool trust scope" do
+      session = start_subscribed_session()
+      send_approval(session)
+      assert :ok = Session.respond_to_approval(session, :approve_session)
+      assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
+      assert Session.list_tool_trust(session) == %{"shell" => :session}
+
+      session = start_subscribed_session()
+      send_approval(session)
+      assert :ok = Session.respond_to_approval(session, :approve_turn)
+      assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
+      assert Session.list_tool_trust(session) == %{"shell" => :turn}
+    end
+
+    test "bare approve sets no tool trust" do
+      session = start_subscribed_session()
+      send_approval(session)
+      assert :ok = Session.respond_to_approval(session, :approve)
+      assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
+      assert Session.list_tool_trust(session) == %{}
+    end
+
+    test "trusted tool approvals are auto-approved without pending approval" do
+      session = start_subscribed_session()
+      assert :ok = Session.set_tool_trust(session, "shell", :session)
+
+      approval = %Event.ToolApproval{
+        tool_call_id: "tc_auto",
+        name: "shell",
+        args: %{"command" => "pwd"},
+        reply_to: self()
+      }
+
+      send_provider_event(session, approval)
+
+      assert_receive {:tool_approval_response, "tc_auto", :approve}, @event_timeout
+
+      assert_receive {:agent_event, _, {:tool_auto_approved, "tc_auto", "shell", :session}},
+                     @event_timeout
+
+      refute_received {:agent_event, _, {:approval_pending, _}}
+      assert {:error, :no_pending_approval} = Session.respond_to_approval(session, :approve)
+    end
+
+    test "auto-approved scope is applied when the tool starts and survives updates" do
+      session = start_subscribed_session()
+      assert :ok = Session.set_tool_trust(session, "shell", :turn)
+
+      approval = %Event.ToolApproval{
+        tool_call_id: "tc_auto",
+        name: "shell",
+        args: %{"command" => "pwd"},
+        reply_to: self()
+      }
+
+      send_provider_event(session, approval)
+      assert_receive {:tool_approval_response, "tc_auto", :approve}, @event_timeout
+
+      send_provider_event(session, %Event.ToolStart{
+        tool_call_id: "tc_auto",
+        name: "shell",
+        args: %{"command" => "pwd"}
+      })
+
+      assert {:tool_call, %{auto_approved_scope: :turn}} =
+               Enum.find(Session.messages(session), &match?({:tool_call, _}, &1))
+
+      send_provider_event(session, %Event.ToolUpdate{
+        tool_call_id: "tc_auto",
+        name: "shell",
+        partial_result: "out"
+      })
+
+      assert {:tool_call, %{auto_approved_scope: :turn, result: "out"}} =
+               Enum.find(Session.messages(session), &match?({:tool_call, _}, &1))
+    end
+
+    test "turn trust clears when the session returns to idle while session trust persists" do
+      session = start_subscribed_session()
+      assert :ok = Session.set_tool_trust(session, "shell", :turn)
+      assert :ok = Session.set_tool_trust(session, "read_file", :session)
+
+      send_provider_event(session, %Event.AgentStart{})
+      send_provider_event(session, %Event.AgentEnd{})
+
+      assert Session.list_tool_trust(session) == %{"read_file" => :session}
+    end
+
+    test "turn trust clears before automatically queued follow-up turns", %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "test.txt"), "file contents")
+      call_count = :counters.new(1, [:atomics])
+
+      client = fn _model, _messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          case count do
+            0 ->
+              [
+                ReqLLM.StreamChunk.tool_call("read_file", %{"path" => "test.txt"}, %{
+                  id: "tc_1",
+                  index: 0
+                }),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+              ]
+
+            1 ->
+              [
+                ReqLLM.StreamChunk.text("first turn done"),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+              ]
+
+            2 ->
+              [
+                ReqLLM.StreamChunk.tool_call("read_file", %{"path" => "test.txt"}, %{
+                  id: "tc_2",
+                  index: 0
+                }),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+              ]
+
+            _ ->
+              [
+                ReqLLM.StreamChunk.text("follow-up done"),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+              ]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      tools = MingaAgent.Tools.all(project_root: dir)
+
+      session =
+        start_subscribed_session(Native,
+          project_root: dir,
+          llm_client: client,
+          tools: tools,
+          config: agent_config(tool_approval: :all),
+          skip_api_key_env: true
+        )
+
+      assert :ok = Session.set_tool_trust(session, "read_file", :turn)
+      assert :ok = Session.send_prompt(session, "Read test.txt")
+      assert {:queued, :follow_up} = Session.queue_follow_up(session, "next turn")
+
+      assert_receive {:agent_event, _, {:tool_auto_approved, _, "read_file", :turn}},
+                     @event_timeout
+
+      assert_receive {:agent_event, _, {:approval_pending, pending}}, @event_timeout
+      assert pending.name == "read_file"
+      assert Session.list_tool_trust(session) == %{}
+
+      assert :ok = Session.respond_to_approval(session, :approve)
+      assert_receive {:agent_event, _, {:tool_started, "read_file", _}}, @event_timeout
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
+    end
+
+    test "turn trust clears on errors" do
+      session = start_subscribed_session()
+      assert :ok = Session.set_tool_trust(session, "shell", :turn)
+
+      send_provider_event(session, %Event.Error{message: "boom"})
+
+      assert Session.list_tool_trust(session) == %{}
+    end
+
+    test "revoke_tool_trust removes one or all entries" do
+      session = start_subscribed_session()
+      assert :ok = Session.set_tool_trust(session, "shell", :session)
+      assert :ok = Session.set_tool_trust(session, "read_file", :turn)
+
+      assert :ok = Session.revoke_tool_trust(session, "shell")
+      assert Session.list_tool_trust(session) == %{"read_file" => :turn}
+
+      assert :ok = Session.revoke_tool_trust(session, :all)
+      assert Session.list_tool_trust(session) == %{}
+    end
+
+    test "new_session clears session trust" do
+      session = start_subscribed_session()
+      assert :ok = Session.set_tool_trust(session, "shell", :session)
+
+      assert :ok = Session.new_session(session)
+
+      assert Session.list_tool_trust(session) == %{}
     end
 
     test "respond_to_approval with no pending returns error", %{session: session} do

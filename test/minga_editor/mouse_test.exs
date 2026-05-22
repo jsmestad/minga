@@ -433,7 +433,7 @@ defmodule MingaEditor.MouseTest do
 
       state =
         set_tab_click_regions(state, [
-          {1, 0, 4, :"tab_goto_#{first_tab_id}"},
+          {1, 0, 4, {:tab_goto_id, first_tab_id}},
           {1, 5, 7, :"tab_close_#{close_tab_id}"},
           {0, 0, 4, {:workspace_goto, agent_workspace_id}}
         ])
@@ -452,7 +452,7 @@ defmodule MingaEditor.MouseTest do
 
       state =
         set_tab_click_regions(state, [
-          {1, 0, 4, :"tab_goto_#{first_tab_id}"},
+          {1, 0, 4, {:tab_goto_id, first_tab_id}},
           {1, 5, 7, :"tab_close_#{close_tab_id}"},
           {0, 0, 4, {:workspace_goto, 1}}
         ])
@@ -519,7 +519,7 @@ defmodule MingaEditor.MouseTest do
 
       state =
         set_tab_click_regions(state, [
-          {0, 0, 4, :"tab_goto_#{other_id}"},
+          {0, 0, 4, {:tab_goto_id, other_id}},
           {0, 5, 7, :"tab_close_#{other_id}"}
         ])
 
@@ -527,6 +527,25 @@ defmodule MingaEditor.MouseTest do
 
       assert length(state.shell_state.tab_bar.tabs) == initial_count
       assert state.shell_state.tab_bar.active_id == other_id
+    end
+
+    test "middle-clicking a tab body closes the clicked tab" do
+      {state, _buf1, _buf2} = start_two_tab_state()
+      initial_count = length(state.shell_state.tab_bar.tabs)
+      active_id = state.shell_state.tab_bar.active_id
+      other_id = Enum.find(state.shell_state.tab_bar.tabs, &(&1.id != active_id)).id
+
+      state =
+        set_tab_click_regions(state, [
+          {0, 0, 4, {:tab_goto_id, other_id}},
+          {0, 5, 7, :"tab_close_#{other_id}"}
+        ])
+
+      state = mouse(state, 0, 2, :middle, :press)
+
+      assert length(state.shell_state.tab_bar.tabs) == initial_count - 1
+      refute Enum.any?(state.shell_state.tab_bar.tabs, &(&1.id == other_id))
+      assert state.shell_state.tab_bar.active_id == active_id
     end
   end
 
