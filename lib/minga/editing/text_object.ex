@@ -114,18 +114,7 @@ defmodule Minga.Editing.TextObject do
       after_end = end_g + 1
 
       {final_start_g, final_end_g} =
-        cond do
-          after_end < len and whitespace?(elem(graphemes, after_end)) ->
-            trail_end = scan_right_tuple(graphemes, after_end, &whitespace?/1)
-            {start_g, trail_end}
-
-          start_g > 0 and whitespace?(elem(graphemes, start_g - 1)) ->
-            lead_start = scan_left_tuple(graphemes, start_g - 1, &whitespace?/1)
-            {lead_start, end_g}
-
-          true ->
-            {start_g, end_g}
-        end
+        around_word_grapheme_bounds(graphemes, len, start_g, end_g, after_end)
 
       start_byte = elem(byte_offsets, final_start_g)
       end_byte = elem(byte_offsets, final_end_g)
@@ -909,11 +898,65 @@ defmodule Minga.Editing.TextObject do
 
   @spec classifier_for(String.t()) :: (String.t() -> boolean())
   defp classifier_for(char) do
-    cond do
-      word_char?(char) -> &word_char?/1
-      whitespace?(char) -> &whitespace?/1
-      true -> fn c -> not word_char?(c) and not whitespace?(c) end
-    end
+    classifier_for(char, word_char?(char), whitespace?(char))
+  end
+
+  @spec classifier_for(String.t(), boolean(), boolean()) :: (String.t() -> boolean())
+  defp classifier_for(_char, true, _whitespace?), do: &word_char?/1
+  defp classifier_for(_char, false, true), do: &whitespace?/1
+
+  defp classifier_for(_char, false, false),
+    do: fn c -> not word_char?(c) and not whitespace?(c) end
+
+  @spec around_word_grapheme_bounds(
+          tuple(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp around_word_grapheme_bounds(graphemes, len, start_g, end_g, after_end) do
+    trailing_whitespace? = after_end < len and whitespace?(elem(graphemes, after_end))
+    leading_whitespace? = start_g > 0 and whitespace?(elem(graphemes, start_g - 1))
+
+    around_word_grapheme_bounds(
+      graphemes,
+      start_g,
+      end_g,
+      after_end,
+      trailing_whitespace?,
+      leading_whitespace?
+    )
+  end
+
+  @spec around_word_grapheme_bounds(
+          tuple(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          boolean(),
+          boolean()
+        ) :: {non_neg_integer(), non_neg_integer()}
+  defp around_word_grapheme_bounds(
+         graphemes,
+         start_g,
+         _end_g,
+         after_end,
+         true,
+         _leading_whitespace?
+       ) do
+    trail_end = scan_right_tuple(graphemes, after_end, &whitespace?/1)
+    {start_g, trail_end}
+  end
+
+  defp around_word_grapheme_bounds(graphemes, start_g, end_g, _after_end, false, true) do
+    lead_start = scan_left_tuple(graphemes, start_g - 1, &whitespace?/1)
+    {lead_start, end_g}
+  end
+
+  defp around_word_grapheme_bounds(_graphemes, start_g, end_g, _after_end, false, false) do
+    {start_g, end_g}
   end
 
   @spec word_char?(String.t()) :: boolean()
@@ -1092,19 +1135,33 @@ defmodule Minga.Editing.TextObject do
   defp find_open(flat, idx, open_char, close_char, depth) do
     {g, _pos} = Enum.at(flat, idx)
 
-    cond do
-      g == close_char ->
-        find_open(flat, idx - 1, open_char, close_char, depth + 1)
+    find_open_for_grapheme(flat, idx, open_char, close_char, depth, g)
+  end
 
-      g == open_char and depth > 0 ->
-        find_open(flat, idx - 1, open_char, close_char, depth - 1)
+  @spec find_open_for_grapheme(
+          [{String.t(), position()}],
+          non_neg_integer(),
+          String.t(),
+          String.t(),
+          non_neg_integer(),
+          String.t()
+        ) :: non_neg_integer() | nil
+  defp find_open_for_grapheme(flat, idx, open_char, close_char, depth, grapheme)
+       when grapheme == close_char do
+    find_open(flat, idx - 1, open_char, close_char, depth + 1)
+  end
 
-      g == open_char ->
-        idx
+  defp find_open_for_grapheme(flat, idx, open_char, close_char, depth, grapheme)
+       when grapheme == open_char and depth > 0 do
+    find_open(flat, idx - 1, open_char, close_char, depth - 1)
+  end
 
-      true ->
-        find_open(flat, idx - 1, open_char, close_char, depth)
-    end
+  defp find_open_for_grapheme(_flat, idx, open_char, _close_char, _depth, grapheme)
+       when grapheme == open_char,
+       do: idx
+
+  defp find_open_for_grapheme(flat, idx, open_char, close_char, depth, _grapheme) do
+    find_open(flat, idx - 1, open_char, close_char, depth)
   end
 
   @spec find_close(
@@ -1120,20 +1177,34 @@ defmodule Minga.Editing.TextObject do
         nil
 
       {g, _pos} ->
-        cond do
-          g == open_char ->
-            find_close(flat, idx + 1, open_char, close_char, depth + 1)
-
-          g == close_char and depth > 1 ->
-            find_close(flat, idx + 1, open_char, close_char, depth - 1)
-
-          g == close_char ->
-            idx
-
-          true ->
-            find_close(flat, idx + 1, open_char, close_char, depth)
-        end
+        find_close_for_grapheme(flat, idx, open_char, close_char, depth, g)
     end
+  end
+
+  @spec find_close_for_grapheme(
+          [{String.t(), position()}],
+          non_neg_integer(),
+          String.t(),
+          String.t(),
+          pos_integer(),
+          String.t()
+        ) :: non_neg_integer() | nil
+  defp find_close_for_grapheme(flat, idx, open_char, close_char, depth, grapheme)
+       when grapheme == open_char do
+    find_close(flat, idx + 1, open_char, close_char, depth + 1)
+  end
+
+  defp find_close_for_grapheme(flat, idx, open_char, close_char, depth, grapheme)
+       when grapheme == close_char and depth > 1 do
+    find_close(flat, idx + 1, open_char, close_char, depth - 1)
+  end
+
+  defp find_close_for_grapheme(_flat, idx, _open_char, close_char, _depth, grapheme)
+       when grapheme == close_char,
+       do: idx
+
+  defp find_close_for_grapheme(flat, idx, open_char, close_char, depth, _grapheme) do
+    find_close(flat, idx + 1, open_char, close_char, depth)
   end
 
   # Advances a position by one grapheme (byte-aware).
