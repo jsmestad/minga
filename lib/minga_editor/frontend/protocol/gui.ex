@@ -2610,15 +2610,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @type gui_chat_message ::
           MingaAgent.Message.t()
           | {:styled_assistant, [[styled_run()]]}
-          | {:styled_tool_call,
-             %{
-               name: String.t(),
-               status: :running | :complete | :error,
-               is_error: boolean(),
-               collapsed: boolean(),
-               duration_ms: non_neg_integer() | nil,
-               result: String.t() | nil
-             }, [[styled_run()]]}
+          | {:styled_tool_call, MingaAgent.ToolCall.t(), [[styled_run()]]}
           | {:approval_tool_call, MingaAgent.ToolCall.t(), map()}
 
   @spec encode_chat_messages([gui_chat_message() | {pos_integer(), gui_chat_message()}]) ::
@@ -2799,9 +2791,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     duration = tc.duration_ms || 0
     error_byte = if tc.is_error, do: 1, else: 0
     collapsed_byte = if tc.collapsed, do: 1, else: 0
+    auto_approved_byte = auto_approved_scope_byte(tc.auto_approved_scope)
 
-    <<0x04::8, status_byte::8, error_byte::8, collapsed_byte::8, duration::32,
-      byte_size(name_bytes)::16, name_bytes::binary, byte_size(summary_bytes)::16,
+    <<0x04::8, status_byte::8, error_byte::8, collapsed_byte::8, auto_approved_byte::8,
+      duration::32, byte_size(name_bytes)::16, name_bytes::binary, byte_size(summary_bytes)::16,
       summary_bytes::binary, byte_size(result_bytes)::32, result_bytes::binary>>
   end
 
@@ -2813,7 +2806,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp encode_chat_message_body({:approval_tool_call, tc, approval}) do
     preview = Map.get(approval, :preview, MingaAgent.ToolApproval.build_preview(tc.name, tc.args))
     name_bytes = preview_text_bytes(tc.name, 120)
-    summary_bytes = preview_text_bytes(Map.get(preview, :summary, tool_call_summary(tc)), 300)
+    summary_bytes = approval_summary_bytes(preview, tool_call_summary(tc))
     id_bytes = preview_text_bytes(Map.get(approval, :tool_call_id, tc.id), 120)
 
     line_binaries =
@@ -2835,7 +2828,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   # Styled tool call: same header fields as tool_call (0x04), but result is styled runs.
   # Sub-opcode 0x08. Layout:
-  #   0x08, status::8, error::8, collapsed::8, duration::32,
+  #   0x08, status::8, error::8, collapsed::8, auto_approved::8, duration::32,
   #   name_len::16, name, summary_len::16, summary, line_count::16, then per line:
   #   run_count::16, then per run: text_len::16, text, fg::24, bg::24, flags::8,
   #   and when flags bit 0x08 is set: url_len::16, url.
@@ -2853,6 +2846,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     duration = tc.duration_ms || 0
     error_byte = if tc.is_error, do: 1, else: 0
     collapsed_byte = if tc.collapsed, do: 1, else: 0
+    auto_approved_byte = auto_approved_scope_byte(tc.auto_approved_scope)
 
     line_binaries =
       Enum.map(styled_lines, fn runs ->
@@ -2863,8 +2857,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       end)
 
     IO.iodata_to_binary([
-      <<0x08::8, status_byte::8, error_byte::8, collapsed_byte::8, duration::32,
-        byte_size(name_bytes)::16, name_bytes::binary, byte_size(summary_bytes)::16,
+      <<0x08::8, status_byte::8, error_byte::8, collapsed_byte::8, auto_approved_byte::8,
+        duration::32, byte_size(name_bytes)::16, name_bytes::binary, byte_size(summary_bytes)::16,
         summary_bytes::binary, length(styled_lines)::16>>
       | line_binaries
     ])
@@ -2880,6 +2874,24 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     cost_int = round((u.cost || 0.0) * 1_000_000)
     <<0x06::8, u.input::32, u.output::32, u.cache_read::32, u.cache_write::32, cost_int::32>>
   end
+
+  @spec approval_summary_bytes(map(), String.t()) :: binary()
+  defp approval_summary_bytes(%{kind: :command} = preview, fallback) do
+    preview
+    |> Map.get(:summary, fallback)
+    |> preview_text_bytes(@max_u16)
+  end
+
+  defp approval_summary_bytes(preview, fallback) do
+    preview
+    |> Map.get(:summary, fallback)
+    |> preview_text_bytes(300)
+  end
+
+  @spec auto_approved_scope_byte(MingaAgent.ToolCall.auto_approved_scope() | nil) :: 0 | 1 | 2
+  defp auto_approved_scope_byte(:session), do: 1
+  defp auto_approved_scope_byte(:turn), do: 2
+  defp auto_approved_scope_byte(nil), do: 0
 
   @spec encode_styled_run(styled_run()) :: binary()
   defp encode_styled_run({text, fg, bg, flags, url}) do

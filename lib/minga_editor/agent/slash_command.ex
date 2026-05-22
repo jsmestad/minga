@@ -39,6 +39,7 @@ defmodule MingaEditor.Agent.SlashCommand do
       description: "Set thinking level: /thinking [off|low|medium|high]"
     },
     %Command{name: "model", description: "Set the model: /model <name>"},
+    %Command{name: "trust", description: "Manage tool trust: /trust list|revoke <tool>|clear"},
     %Command{name: "help", description: "Show available slash commands"},
     %Command{name: "plan", description: "Enter plan mode (destructive tools blocked)"},
     %Command{name: "exec", description: "Leave plan mode and allow execution"},
@@ -130,6 +131,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp dispatch(state, "abort", _args), do: {:ok, do_stop(state)}
   defp dispatch(state, "thinking", args), do: {:ok, do_thinking(state, args)}
   defp dispatch(state, "model", args), do: do_model(state, args)
+  defp dispatch(state, "trust", args), do: do_trust(state, args)
   defp dispatch(state, "help", _args), do: {:ok, do_help(state)}
   defp dispatch(state, "?", _args), do: {:ok, do_help(state)}
   defp dispatch(state, "plan", _args), do: do_plan(state)
@@ -206,6 +208,51 @@ defmodule MingaEditor.Agent.SlashCommand do
     model = String.trim(model)
     state = AgentCommands.set_model(state, model)
     {:ok, state}
+  end
+
+  @spec do_trust(state(), String.t()) :: {:ok, state()} | {:error, String.t()}
+  defp do_trust(state, args) do
+    args
+    |> String.trim()
+    |> String.split(" ", parts: 2, trim: true)
+    |> do_trust_parts(state)
+  end
+
+  @spec do_trust_parts([String.t()], state()) :: {:ok, state()} | {:error, String.t()}
+  defp do_trust_parts(["list"], state) do
+    with {:ok, session} <- require_session(state) do
+      trust = Session.list_tool_trust(session)
+      {:ok, emit_system_message(state, trust_list_message(trust))}
+    end
+  end
+
+  defp do_trust_parts(["revoke", name], state) do
+    with {:ok, session} <- require_session(state) do
+      tool_name = String.trim(name)
+      :ok = Session.revoke_tool_trust(session, tool_name)
+      {:ok, emit_system_message(state, "Trust cleared for #{tool_name}")}
+    end
+  end
+
+  defp do_trust_parts(["clear"], state) do
+    with {:ok, session} <- require_session(state) do
+      :ok = Session.revoke_tool_trust(session, :all)
+      {:ok, emit_system_message(state, "All tool trust cleared")}
+    end
+  end
+
+  defp do_trust_parts(_parts, _state), do: {:error, "Usage: /trust list|revoke <tool-name>|clear"}
+
+  @spec trust_list_message(%{String.t() => Session.trust_scope()}) :: String.t()
+  defp trust_list_message(trust) when map_size(trust) == 0, do: "No trusted tools"
+
+  defp trust_list_message(trust) do
+    entries =
+      trust
+      |> Enum.sort_by(fn {name, _scope} -> name end)
+      |> Enum.map_join(", ", fn {name, scope} -> "#{name} (#{scope})" end)
+
+    "Trusted tools: #{entries}\nTurn trust is cleared when the current response finishes or errors."
   end
 
   @spec do_help(state()) :: state()

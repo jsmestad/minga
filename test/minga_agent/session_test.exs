@@ -920,12 +920,17 @@ defmodule MingaAgent.SessionTest do
     end
 
     test "respond_to_approval resolves each supported decision" do
-      for decision <- [:approve, :reject, :approve_all] do
+      for {decision, execution_decision} <- [
+            {:approve, :approve},
+            {:approve_session, :approve},
+            {:approve_turn, :approve},
+            {:reject, :reject}
+          ] do
         session = start_subscribed_session()
         send_approval(session)
 
         assert :ok = Session.respond_to_approval(session, decision)
-        assert_receive {:tool_approval_response, "tc1", ^decision}, @event_timeout
+        assert_receive {:tool_approval_response, "tc1", ^execution_decision}, @event_timeout
         assert_receive {:agent_event, _, {:approval_resolved, ^decision}}, @event_timeout
         assert {:error, :no_pending_approval} = Session.respond_to_approval(session, :approve)
 
@@ -934,6 +939,138 @@ defmodule MingaAgent.SessionTest do
           assert Enum.any?(messages, &match?({:system, "Denied shell" <> _, :info}, &1))
         end
       end
+    end
+
+    test "approve_session and approve_turn set the matching tool trust scope" do
+      session = start_subscribed_session()
+      send_approval(session)
+      assert :ok = Session.respond_to_approval(session, :approve_session)
+      assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
+      assert Session.list_tool_trust(session) == %{"shell" => :session}
+
+      session = start_subscribed_session()
+      send_approval(session)
+      assert :ok = Session.respond_to_approval(session, :approve_turn)
+      assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
+      assert Session.list_tool_trust(session) == %{"shell" => :turn}
+    end
+
+    test "bare approve sets no tool trust" do
+      session = start_subscribed_session()
+      send_approval(session)
+      assert :ok = Session.respond_to_approval(session, :approve)
+      assert_receive {:tool_approval_response, "tc1", :approve}, @event_timeout
+      assert Session.list_tool_trust(session) == %{}
+    end
+
+    test "trusted tool approvals are auto-approved without pending approval" do
+      session = start_subscribed_session()
+      assert :ok = Session.set_tool_trust(session, "shell", :session)
+
+      approval = %Event.ToolApproval{
+        tool_call_id: "tc_auto",
+        name: "shell",
+        args: %{"command" => "pwd"},
+        reply_to: self()
+      }
+
+      send_provider_event(session, approval)
+
+      assert_receive {:tool_approval_response, "tc_auto", :approve}, @event_timeout
+
+      assert_receive {:agent_event, _, {:tool_auto_approved, "tc_auto", "shell", :session}},
+                     @event_timeout
+
+      refute_received {:agent_event, _, {:approval_pending, _}}
+      assert {:error, :no_pending_approval} = Session.respond_to_approval(session, :approve)
+    end
+
+    test "auto-approved scope is applied when the tool starts and survives updates" do
+      session = start_subscribed_session()
+      assert :ok = Session.set_tool_trust(session, "shell", :turn)
+
+      approval = %Event.ToolApproval{
+        tool_call_id: "tc_auto",
+        name: "shell",
+        args: %{"command" => "pwd"},
+        reply_to: self()
+      }
+
+      send_provider_event(session, approval)
+      assert_receive {:tool_approval_response, "tc_auto", :approve}, @event_timeout
+
+      send_provider_event(session, %Event.ToolStart{
+        tool_call_id: "tc_auto",
+        name: "shell",
+        args: %{"command" => "pwd"}
+      })
+
+      assert {:tool_call, %{auto_approved_scope: :turn}} =
+               Enum.find(Session.messages(session), &match?({:tool_call, _}, &1))
+
+      send_provider_event(session, %Event.ToolUpdate{
+        tool_call_id: "tc_auto",
+        name: "shell",
+        partial_result: "out"
+      })
+
+      assert {:tool_call, %{auto_approved_scope: :turn, result: "out"}} =
+               Enum.find(Session.messages(session), &match?({:tool_call, _}, &1))
+    end
+
+    test "turn trust clears when the session returns to idle while session trust persists" do
+      session = start_subscribed_session()
+      assert :ok = Session.set_tool_trust(session, "shell", :turn)
+      assert :ok = Session.set_tool_trust(session, "read_file", :session)
+
+      send_provider_event(session, %Event.AgentStart{})
+      send_provider_event(session, %Event.AgentEnd{})
+
+      assert Session.list_tool_trust(session) == %{"read_file" => :session}
+    end
+
+    test "turn trust clears before automatically queued follow-up turns" do
+      session = start_subscribed_session()
+
+      send_provider_event(session, %Event.AgentStart{})
+      assert :ok = Session.set_tool_trust(session, "shell", :turn)
+      assert {:queued, :follow_up} = Session.queue_follow_up(session, "next turn")
+
+      send(session, {:agent_provider_event, %Event.AgentEnd{}})
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
+      await_turn_complete()
+
+      assert Session.list_tool_trust(session) == %{}
+    end
+
+    test "turn trust clears on errors" do
+      session = start_subscribed_session()
+      assert :ok = Session.set_tool_trust(session, "shell", :turn)
+
+      send_provider_event(session, %Event.Error{message: "boom"})
+
+      assert Session.list_tool_trust(session) == %{}
+    end
+
+    test "revoke_tool_trust removes one or all entries" do
+      session = start_subscribed_session()
+      assert :ok = Session.set_tool_trust(session, "shell", :session)
+      assert :ok = Session.set_tool_trust(session, "read_file", :turn)
+
+      assert :ok = Session.revoke_tool_trust(session, "shell")
+      assert Session.list_tool_trust(session) == %{"read_file" => :turn}
+
+      assert :ok = Session.revoke_tool_trust(session, :all)
+      assert Session.list_tool_trust(session) == %{}
+    end
+
+    test "new_session clears session trust" do
+      session = start_subscribed_session()
+      assert :ok = Session.set_tool_trust(session, "shell", :session)
+
+      assert :ok = Session.new_session(session)
+
+      assert Session.list_tool_trust(session) == %{}
     end
 
     test "respond_to_approval with no pending returns error", %{session: session} do

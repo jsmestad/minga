@@ -1334,8 +1334,11 @@ defmodule MingaEditor.Commands.Agent do
   @spec scope_approve_tool(state()) :: state()
   defdelegate scope_approve_tool(state), to: AgentSubStates, as: :approve_tool
 
-  @spec scope_approve_all_tools(state()) :: state()
-  defdelegate scope_approve_all_tools(state), to: AgentSubStates, as: :approve_all_tools
+  @spec scope_trust_tool_session(state()) :: state()
+  defdelegate scope_trust_tool_session(state), to: AgentSubStates, as: :trust_tool_session
+
+  @spec scope_trust_tool_turn(state()) :: state()
+  defdelegate scope_trust_tool_turn(state), to: AgentSubStates, as: :trust_tool_turn
 
   @spec scope_deny_tool(state()) :: state()
   defdelegate scope_deny_tool(state), to: AgentSubStates, as: :deny_tool
@@ -1637,7 +1640,8 @@ defmodule MingaEditor.Commands.Agent do
     {:agent_accept_all_hunks, "Accept all agent hunks", :scope_accept_all_hunks},
     {:agent_reject_all_hunks, "Reject all agent hunks", :scope_reject_all_hunks},
     {:agent_approve_tool, "Approve agent tool", :scope_approve_tool},
-    {:agent_approve_all_tools, "Approve all agent tools", :scope_approve_all_tools},
+    {:agent_trust_tool_session, "Trust agent tool for session", :scope_trust_tool_session},
+    {:agent_trust_tool_turn, "Trust agent tool for turn", :scope_trust_tool_turn},
     {:agent_deny_tool, "Deny agent tool", :scope_deny_tool}
   ]
 

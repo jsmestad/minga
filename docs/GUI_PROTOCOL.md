@@ -391,13 +391,15 @@ Typed payloads:
   0x01 (user):      type(1) + text_len(4) + text
   0x02 (assistant): type(1) + text_len(4) + text
   0x03 (thinking):  type(1) + collapsed(1) + text_len(4) + text
-  0x04 (tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + result_len(4) + result
+  0x04 (tool_call): type(1) + status(1) + error(1) + collapsed(1) + auto_approved(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + result_len(4) + result
   0x05 (system):    type(1) + level(1) + text_len(4) + text
   0x06 (usage):     type(1) + input(4) + output(4) + cache_read(4) + cache_write(4) + cost_micros(4)
   0x07 (styled_assistant): type(1) + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1), and if flags bit 0x08 is set: url_len(2) + url. Link URLs are limited to http, https, and mailto.
-  0x08 (styled_tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1), and if flags bit 0x08 is set: url_len(2) + url. Link URLs are limited to http, https, and mailto.
+  0x08 (styled_tool_call): type(1) + status(1) + error(1) + collapsed(1) + auto_approved(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1), and if flags bit 0x08 is set: url_len(2) + url. Link URLs are limited to http, https, and mailto.
   0x09 (approval_tool_call): type(1) + status(1) + name_len(2) + name + summary_len(2) + summary + tool_call_id_len(2) + tool_call_id + preview_kind(1) + preview_line_count(2), per line: line_len(2) + line
 ```
+
+`auto_approved`: 0=not auto-approved, 1=session trust, 2=turn trust.
 
 Styled run flags: 0x01=bold, 0x02=italic, 0x04=underline, 0x08=link URL present.
 

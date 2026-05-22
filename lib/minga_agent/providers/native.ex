@@ -1318,7 +1318,7 @@ defmodule MingaAgent.Providers.Native do
     final_ctx
   end
 
-  @typep approval_mode :: :none | :ask | :ask_all | :approve_all
+  @typep approval_mode :: :none | :ask | :ask_all
 
   @spec execute_with_approval(
           pid(),
@@ -1419,21 +1419,6 @@ defmodule MingaAgent.Providers.Native do
          session_pid,
          tool_call,
          available_tools,
-         :approve_all,
-         config,
-         hook_runner
-       ) do
-    {result, is_error} =
-      run_single_tool(tool_call, available_tools, provider_pid, session_pid, config, hook_runner)
-
-    {result, is_error, :approve_all}
-  end
-
-  defp execute_with_global_mode(
-         provider_pid,
-         session_pid,
-         tool_call,
-         available_tools,
          :ask_all,
          config,
          hook_runner
@@ -1505,7 +1490,7 @@ defmodule MingaAgent.Providers.Native do
           AgentConfig.t(),
           hook_runner()
         ) ::
-          {String.t(), boolean(), :ask | :approve_all}
+          {String.t(), boolean(), :ask}
   defp request_approval(
          provider_pid,
          session_pid,
@@ -1540,19 +1525,6 @@ defmodule MingaAgent.Providers.Native do
           )
 
         {result, is_error, :ask}
-
-      {:tool_approval_response, _tool_call_id, :approve_all} ->
-        {result, is_error} =
-          run_single_tool(
-            tool_call,
-            available_tools,
-            provider_pid,
-            session_pid,
-            config,
-            hook_runner
-          )
-
-        {result, is_error, :approve_all}
 
       {:tool_approval_response, _tool_call_id, :reject} ->
         {"Tool rejected by user", true, :ask}

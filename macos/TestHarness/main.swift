@@ -339,11 +339,12 @@ func chatMessageToJSON(_ msg: Wire.ChatMessage) -> [String: Any] {
         result["kind"] = "styled_assistant"; result["lines"] = linesJSON
     case .thinking(let text, let collapsed):
         result["kind"] = "thinking"; result["text"] = text; result["collapsed"] = collapsed
-    case .toolCall(let name, let summary, let status, let isError, let collapsed, let durationMs, let resultStr):
+    case .toolCall(let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let durationMs, let resultStr):
         result["kind"] = "tool_call"; result["name"] = name; result["summary"] = summary
         result["status"] = Int(status); result["is_error"] = isError; result["collapsed"] = collapsed
+        result["auto_approved_scope"] = Int(autoApprovedScope)
         result["duration_ms"] = Int(durationMs); result["result"] = resultStr
-    case .styledToolCall(let name, let summary, let status, let isError, let collapsed, let durationMs, let resultLines):
+    case .styledToolCall(let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let durationMs, let resultLines):
         let linesJSON: [[Any]] = resultLines.map { runs in
             runs.map { run -> [String: Any] in
                 return [
@@ -358,6 +359,7 @@ func chatMessageToJSON(_ msg: Wire.ChatMessage) -> [String: Any] {
         }
         result["kind"] = "styled_tool_call"; result["name"] = name; result["summary"] = summary
         result["status"] = Int(status); result["is_error"] = isError; result["collapsed"] = collapsed
+        result["auto_approved_scope"] = Int(autoApprovedScope)
         result["duration_ms"] = Int(durationMs); result["result_lines"] = linesJSON
     case .approvalToolCall(let name, let summary, let toolCallId, let previewKind, let previewLines):
         result["kind"] = "approval_tool_call"

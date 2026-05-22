@@ -1924,7 +1924,7 @@ struct GUIAgentChatDecoderTests {
         var msgs = Data()
         appendU32(&msgs, 5) // beam_id
         msgs.append(0x04) // tool_call
-        msgs.append(1); msgs.append(0); msgs.append(1) // status, isError, collapsed
+        msgs.append(1); msgs.append(0); msgs.append(1); msgs.append(2) // status, isError, collapsed, autoApprovedScope
         appendU32(&msgs, 1234) // durationMs
         appendString16(&msgs, "read_file")
         appendString16(&msgs, "lib/minga.ex")
@@ -1936,11 +1936,12 @@ struct GUIAgentChatDecoderTests {
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
         guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
         guard messages.count == 1 else { Issue.record("Expected 1 message"); return }
-        guard case .toolCall(let name, _, let tcStatus, let isError, let collapsed, let duration, let tcResult) = messages[0].content else { Issue.record("Expected .toolCall"); return }
+        guard case .toolCall(let name, _, let tcStatus, let isError, let collapsed, let autoApprovedScope, let duration, let tcResult) = messages[0].content else { Issue.record("Expected .toolCall"); return }
         #expect(name == "read_file")
         #expect(tcStatus == 1)
         #expect(isError == false)
         #expect(collapsed == true)
+        #expect(autoApprovedScope == 2)
         #expect(duration == 1234)
         #expect(tcResult == "file contents here")
     }

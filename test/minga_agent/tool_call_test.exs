@@ -14,6 +14,7 @@ defmodule MingaAgent.ToolCallTest do
       assert tc.result == ""
       assert tc.is_error == false
       assert tc.collapsed == true
+      assert tc.auto_approved_scope == nil
       assert is_integer(tc.started_at)
       assert tc.duration_ms == nil
     end
@@ -99,6 +100,18 @@ defmodule MingaAgent.ToolCallTest do
       tc = ToolCall.new("tc1", "bash")
       expanded = ToolCall.set_collapsed(tc, false)
       assert expanded.collapsed == false
+    end
+  end
+
+  describe "set_auto_approved_scope/2" do
+    test "records the auto-approval scope" do
+      tc = ToolCall.new("tc1", "bash")
+
+      trusted = ToolCall.set_auto_approved_scope(tc, :session)
+      assert trusted.auto_approved_scope == :session
+
+      cleared = ToolCall.set_auto_approved_scope(trusted, nil)
+      assert cleared.auto_approved_scope == nil
     end
   end
 

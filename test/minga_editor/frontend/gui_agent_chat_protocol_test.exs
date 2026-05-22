@@ -79,13 +79,14 @@ defmodule MingaEditor.Frontend.GUIAgentChatProtocolTest do
       messages_payload = extract_section(binary, 0x06)
       assert <<1::16, 0::32, msg_payload::binary>> = messages_payload
 
-      <<0x08::8, status_byte::8, error_byte::8, collapsed_byte::8, duration::32, name_len::16,
-        name::binary-size(name_len), summary_len::16, summary::binary-size(summary_len),
-        line_count::16, rest::binary>> = msg_payload
+      <<0x08::8, status_byte::8, error_byte::8, collapsed_byte::8, auto_approved_byte::8,
+        duration::32, name_len::16, name::binary-size(name_len), summary_len::16,
+        summary::binary-size(summary_len), line_count::16, rest::binary>> = msg_payload
 
       assert status_byte == 1
       assert error_byte == 0
       assert collapsed_byte == 0
+      assert auto_approved_byte == 0
       assert duration == 1234
       assert name == "bash"
       # No args in test data, so summary is empty
@@ -234,6 +235,7 @@ defmodule MingaEditor.Frontend.GUIAgentChatProtocolTest do
         status: :running,
         is_error: false,
         collapsed: true,
+        auto_approved_scope: :session,
         duration_ms: 0,
         result: "file contents"
       }
@@ -248,7 +250,41 @@ defmodule MingaEditor.Frontend.GUIAgentChatProtocolTest do
       }
 
       binary = ProtocolGUI.encode_gui_agent_chat(data)
-      assert :binary.match(binary, <<0x04>>) != :nomatch
+      messages_payload = extract_section(binary, 0x06)
+
+      <<1::16, 0::32, 0x04::8, 0::8, 0::8, 1::8, 1::8, 0::32, _rest::binary>> =
+        messages_payload
+    end
+
+    test "encodes command approval summaries without the short preview cap" do
+      command = String.duplicate("echo long ", 40)
+      tc = MingaAgent.ToolCall.new("tc-approval", "shell", %{"command" => command})
+
+      approval =
+        MingaAgent.ToolApproval.public(
+          MingaAgent.ToolApproval.new(
+            tool_call_id: "tc-approval",
+            name: "shell",
+            args: %{"command" => command}
+          )
+        )
+
+      data = %{
+        visible: true,
+        messages: [{:approval_tool_call, tc, approval}],
+        status: :tool_executing,
+        model: "",
+        prompt: "",
+        pending_approval: nil
+      }
+
+      binary = ProtocolGUI.encode_gui_agent_chat(data)
+      messages_payload = extract_section(binary, 0x06)
+
+      <<1::16, 0::32, 0x09::8, 0::8, name_len::16, _name::binary-size(name_len), summary_len::16,
+        summary::binary-size(summary_len), _rest::binary>> = messages_payload
+
+      assert summary == command
     end
   end
 
