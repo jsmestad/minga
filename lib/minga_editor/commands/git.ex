@@ -10,11 +10,14 @@ defmodule MingaEditor.Commands.Git do
   alias Minga.Core.Diff
   alias Minga.Core.DiffView
   alias Minga.Core.Face
+  alias MingaEditor.BufferLifecycle
   alias MingaEditor.Commands
   alias MingaEditor.Layout
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
   alias Minga.Git
+  alias Minga.Git.MergeConflict
+  alias Minga.Git.MergeConflict.Region
   alias Minga.Language
   alias MingaEditor.UI.Picker.GitChangedSource
 
@@ -37,8 +40,14 @@ defmodule MingaEditor.Commands.Git do
     {:git_fetch, "Fetch", false},
     {:git_pull_and_retry, "Pull and retry push", false},
     {:git_diff_file, "View diff", true},
+    {:git_diff_toggle_layout, "Toggle side-by-side diff", true},
     {:next_git_hunk, "Next git hunk", true},
     {:prev_git_hunk, "Previous git hunk", true},
+    {:next_merge_conflict, "Next merge conflict", true},
+    {:prev_merge_conflict, "Previous merge conflict", true},
+    {:git_accept_current_conflict, "Accept current conflict side", true},
+    {:git_accept_incoming_conflict, "Accept incoming conflict side", true},
+    {:git_accept_both_conflict, "Accept both conflict sides", true},
     {:git_stage_hunk, "Stage hunk", true},
     {:git_stage_file, "Stage current file", true},
     {:git_unstage_file, "Unstage current file", true},
@@ -51,7 +60,10 @@ defmodule MingaEditor.Commands.Git do
     {:git_generate_commit_message, "Generate AI commit message", false}
   ]
 
-  @spec execute(state(), atom()) :: state()
+  @spec execute(
+          state(),
+          atom() | {:git_accept_conflict, MergeConflict.choice(), non_neg_integer()}
+        ) :: state()
 
   # ── Status panel toggle ────────────────────────────────────────────────────
 
@@ -112,6 +124,15 @@ defmodule MingaEditor.Commands.Git do
     toggle_diff_staged(state, active_buf)
   end
 
+  def execute(state, :git_diff_toggle_layout) do
+    if MingaEditor.Frontend.gui?(state.capabilities) do
+      active_buf = state.workspace.buffers.active
+      toggle_diff_layout(state, active_buf)
+    else
+      EditorState.set_status(state, "Side-by-side diff is only available in GUI")
+    end
+  end
+
   # ── AI commit message ──────────────────────────────────────────────────────
 
   def execute(state, :git_generate_commit_message) do
@@ -143,6 +164,18 @@ defmodule MingaEditor.Commands.Git do
       end
     end)
   end
+
+  def execute(state, :next_merge_conflict), do: navigate_merge_conflict(state, :next)
+  def execute(state, :prev_merge_conflict), do: navigate_merge_conflict(state, :prev)
+  def execute(state, :git_accept_current_conflict), do: accept_conflict_at_cursor(state, :current)
+
+  def execute(state, :git_accept_incoming_conflict),
+    do: accept_conflict_at_cursor(state, :incoming)
+
+  def execute(state, :git_accept_both_conflict), do: accept_conflict_at_cursor(state, :both)
+
+  def execute(state, {:git_accept_conflict, choice, start_line}),
+    do: accept_conflict_at_start_line(state, choice, start_line)
 
   # ── Stage hunk ─────────────────────────────────────────────────────────────
 
@@ -254,6 +287,144 @@ defmodule MingaEditor.Commands.Git do
     end)
   end
 
+  @spec navigate_merge_conflict(state(), :next | :prev) :: state()
+  defp navigate_merge_conflict(%{workspace: %{buffers: %{active: buf}}} = state, direction)
+       when is_pid(buf) do
+    {cursor_line, _col} = Buffer.cursor(buf)
+    regions = current_conflicts(buf)
+
+    case target_conflict(regions, cursor_line, direction) do
+      nil -> EditorState.set_status(state, "No merge conflicts")
+      %Region{} = region -> jump_to_line(state, buf, region.start_line)
+    end
+  end
+
+  defp navigate_merge_conflict(state, _direction), do: state
+
+  @spec target_conflict([Region.t()], non_neg_integer(), :next | :prev) :: Region.t() | nil
+  defp target_conflict(regions, cursor_line, :next),
+    do: MergeConflict.next_after(regions, cursor_line)
+
+  defp target_conflict(regions, cursor_line, :prev),
+    do: MergeConflict.prev_before(regions, cursor_line)
+
+  @spec accept_conflict_at_cursor(state(), MergeConflict.choice()) :: state()
+  defp accept_conflict_at_cursor(%{workspace: %{buffers: %{active: buf}}} = state, choice)
+       when is_pid(buf) do
+    {cursor_line, _col} = Buffer.cursor(buf)
+    content = Buffer.content(buf)
+
+    case MergeConflict.replace_at_line(content, cursor_line, choice) do
+      {:ok, new_content} -> apply_conflict_resolution(state, buf, new_content, cursor_line)
+      :not_found -> EditorState.set_status(state, "No merge conflict at cursor")
+    end
+  end
+
+  defp accept_conflict_at_cursor(state, _choice), do: state
+
+  @spec accept_conflict_at_start_line(state(), MergeConflict.choice(), non_neg_integer()) ::
+          state()
+  defp accept_conflict_at_start_line(
+         %{workspace: %{buffers: %{active: buf}}} = state,
+         choice,
+         start_line
+       )
+       when is_pid(buf) do
+    content = Buffer.content(buf)
+    regions = MergeConflict.parse(content)
+
+    case Enum.find(regions, fn region -> region.start_line == start_line end) do
+      nil ->
+        EditorState.set_status(state, "Merge conflict action is stale")
+
+      %Region{} = region ->
+        apply_conflict_resolution(
+          state,
+          buf,
+          MergeConflict.replace_region(content, region, choice),
+          start_line
+        )
+    end
+  end
+
+  defp accept_conflict_at_start_line(state, _choice, _start_line), do: state
+
+  @spec apply_conflict_resolution(state(), pid(), String.t(), non_neg_integer()) :: state()
+  defp apply_conflict_resolution(state, buf, new_content, cursor_line) do
+    case Buffer.replace_content(buf, new_content, :user) do
+      :ok ->
+        Git.sync_tracked_buffer(buf, new_content)
+        after_conflict_replacement(state, buf, new_content, cursor_line)
+
+      {:error, reason} ->
+        EditorState.set_status(state, "Resolve conflict failed: #{inspect(reason)}")
+    end
+  end
+
+  @spec after_conflict_replacement(state(), pid(), String.t(), non_neg_integer()) :: state()
+  defp after_conflict_replacement(state, buf, new_content, cursor_line) do
+    Buffer.move_to(buf, {min(cursor_line, max(Buffer.line_count(buf) - 1, 0)), 0})
+
+    if MergeConflict.parse(new_content) == [] do
+      save_and_stage_resolved_file(state, buf)
+    else
+      EditorState.set_status(state, "Resolved merge conflict")
+    end
+  end
+
+  @spec save_and_stage_resolved_file(state(), pid()) :: state()
+  defp save_and_stage_resolved_file(state, buf) do
+    case Buffer.file_path(buf) do
+      nil -> EditorState.set_status(state, "Resolved all merge conflicts")
+      file_path -> save_and_stage_resolved_file(state, buf, file_path)
+    end
+  end
+
+  @spec save_and_stage_resolved_file(state(), pid(), String.t()) :: state()
+  defp save_and_stage_resolved_file(state, buf, file_path) do
+    with :ok <- Buffer.save(buf),
+         :ok <- broadcast_save_lifecycle(state, buf),
+         {:ok, git_root} <- git_root_for_file(file_path),
+         rel_path = Git.relative_path(git_root, file_path),
+         :ok <- Git.stage(git_root, rel_path) do
+      refresh_repo(git_root)
+      EditorState.set_status(state, "Resolved all merge conflicts and staged #{rel_path}")
+    else
+      :not_git ->
+        EditorState.set_status(state, "Resolved all merge conflicts; not in a git repository")
+
+      {:error, reason} ->
+        EditorState.set_status(
+          state,
+          "Resolved conflicts, but save/stage failed: #{inspect(reason)}"
+        )
+    end
+  end
+
+  @spec broadcast_save_lifecycle(state(), pid()) :: :ok
+  defp broadcast_save_lifecycle(state, buf) do
+    BufferLifecycle.lsp_after_save(state, :save, buf)
+    :ok
+  end
+
+  @spec git_root_for_file(String.t()) :: {:ok, String.t()} | :not_git | {:error, String.t()}
+  defp git_root_for_file(file_path) do
+    case Git.root_for(file_path) do
+      {:ok, git_root} -> {:ok, git_root}
+      :not_git -> :not_git
+    end
+  end
+
+  @spec current_conflicts(pid()) :: [Region.t()]
+  defp current_conflicts(buf) do
+    case Git.tracking_pid(buf) do
+      nil -> buf |> Buffer.content() |> MergeConflict.parse()
+      git_pid -> Git.conflicts(git_pid)
+    end
+  catch
+    :exit, _ -> []
+  end
+
   # ── Private ────────────────────────────────────────────────────────────────
 
   # Mutual exclusivity: close file tree when opening git status.
@@ -275,7 +446,7 @@ defmodule MingaEditor.Commands.Git do
     staged = Keyword.get(opts, :staged, false)
     label = if staged, do: "staged", else: "unstaged"
 
-    diff_result = DiffView.build(base_content, current_content)
+    diff_result = build_diff_result(base_content, current_content, state, :unified)
     filename = Path.basename(rel_path)
     filetype = Language.detect_filetype(filename)
 
@@ -296,7 +467,9 @@ defmodule MingaEditor.Commands.Git do
           rel_path: rel_path,
           staged: staged,
           line_metadata: diff_result.line_metadata,
-          hunk_lines: diff_result.hunk_lines
+          hunk_lines: diff_result.hunk_lines,
+          view_mode: :unified,
+          pane_width: diff_pane_width(state)
         }
 
         state
@@ -318,12 +491,17 @@ defmodule MingaEditor.Commands.Git do
 
   @spec open_diff_view(state(), pid(), pid(), boolean()) :: state()
   defp open_diff_view(state, git_pid, buf, staged) do
+    open_diff_view(state, git_pid, buf, staged, :unified)
+  end
+
+  @spec open_diff_view(state(), pid(), pid(), boolean(), :unified | :side_by_side) :: state()
+  defp open_diff_view(state, git_pid, buf, staged, view_mode) do
     git_root = Git.Buffer.git_root(git_pid)
     rel_path = Git.Buffer.relative_path(git_pid)
 
     {base_content, current_content} = diff_contents(git_root, rel_path, buf, staged)
 
-    diff_result = DiffView.build(base_content, current_content)
+    diff_result = build_diff_result(base_content, current_content, state, view_mode)
     filename = Path.basename(rel_path)
     filetype = Language.detect_filetype(filename)
     label = if staged, do: "staged", else: "unstaged"
@@ -345,7 +523,9 @@ defmodule MingaEditor.Commands.Git do
           rel_path: rel_path,
           staged: staged,
           line_metadata: diff_result.line_metadata,
-          hunk_lines: diff_result.hunk_lines
+          hunk_lines: diff_result.hunk_lines,
+          view_mode: view_mode,
+          pane_width: diff_pane_width(state)
         }
 
         state
@@ -410,6 +590,24 @@ defmodule MingaEditor.Commands.Git do
 
   defp staged_deleted_entry?(%Git.StatusEntry{}, _rel_path), do: false
 
+  @spec build_diff_result(String.t(), String.t(), state(), :unified | :side_by_side) ::
+          DiffView.diff_view_result()
+  defp build_diff_result(base_content, current_content, _state, :unified) do
+    DiffView.build(base_content, current_content)
+  end
+
+  defp build_diff_result(base_content, current_content, state, :side_by_side) do
+    DiffView.build_side_by_side(base_content, current_content, diff_pane_width(state))
+  end
+
+  @spec diff_pane_width(state()) :: pos_integer()
+  defp diff_pane_width(%{workspace: %{viewport: %{cols: cols}}})
+       when is_integer(cols) and cols > 20 do
+    max(div(cols - 5, 2), 20)
+  end
+
+  defp diff_pane_width(_state), do: 80
+
   @spec apply_diff_decorations(pid(), [DiffView.line_meta()], MingaEditor.UI.Theme.t()) :: :ok
   defp apply_diff_decorations(diff_buf, line_metadata, theme) do
     Buffer.batch_decorations(diff_buf, fn decs ->
@@ -427,6 +625,42 @@ defmodule MingaEditor.Commands.Git do
           non_neg_integer(),
           non_neg_integer()
         ) :: Minga.Core.Decorations.t()
+  defp apply_line_decoration(
+         decs,
+         %{left_type: _left_type, right_type: _right_type} = meta,
+         line_idx,
+         added_bg,
+         removed_bg,
+         added_word_bg,
+         removed_word_bg,
+         fold_fg
+       ) do
+    decs
+    |> apply_side_pane_decoration(
+      meta.left_type,
+      line_idx,
+      0,
+      meta.left_width,
+      removed_bg,
+      fold_fg
+    )
+    |> apply_side_pane_decoration(
+      meta.right_type,
+      line_idx,
+      meta.left_width + 3,
+      9999,
+      added_bg,
+      fold_fg
+    )
+    |> apply_word_highlights_at(line_idx, meta[:left_word_changes], removed_word_bg, 0)
+    |> apply_word_highlights_at(
+      line_idx,
+      meta[:right_word_changes],
+      added_word_bg,
+      meta.left_width + 3
+    )
+  end
+
   defp apply_line_decoration(
          decs,
          %{type: :added} = meta,
@@ -516,19 +750,83 @@ defmodule MingaEditor.Commands.Git do
     Bitwise.bsl(r, 16) + Bitwise.bsl(g, 8) + b
   end
 
+  @spec apply_side_pane_decoration(
+          Minga.Core.Decorations.t(),
+          DiffView.pane_line_type(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: Minga.Core.Decorations.t()
+  defp apply_side_pane_decoration(decs, :added, line_idx, start_col, end_col, bg, _fold_fg) do
+    add_pane_highlight(decs, line_idx, start_col, end_col, bg, :diff)
+  end
+
+  defp apply_side_pane_decoration(decs, :removed, line_idx, start_col, end_col, bg, _fold_fg) do
+    add_pane_highlight(decs, line_idx, start_col, end_col, bg, :diff)
+  end
+
+  defp apply_side_pane_decoration(decs, :fold, line_idx, start_col, end_col, _bg, fold_fg) do
+    {_id, decs} =
+      Minga.Core.Decorations.add_highlight(decs, {line_idx, start_col}, {line_idx, end_col},
+        style: Face.new(fg: fold_fg, italic: true),
+        priority: 1,
+        group: :diff
+      )
+
+    decs
+  end
+
+  defp apply_side_pane_decoration(decs, _type, _line_idx, _start_col, _end_col, _bg, _fold_fg),
+    do: decs
+
+  @spec add_pane_highlight(
+          Minga.Core.Decorations.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          atom()
+        ) :: Minga.Core.Decorations.t()
+  defp add_pane_highlight(decs, line_idx, start_col, end_col, bg, group) do
+    {_id, decs} =
+      Minga.Core.Decorations.add_highlight(decs, {line_idx, start_col}, {line_idx, end_col},
+        style: Face.new(bg: bg),
+        priority: 1,
+        group: group
+      )
+
+    decs
+  end
+
   @spec apply_word_highlights(
           Minga.Core.Decorations.t(),
           non_neg_integer(),
           [Diff.char_range()] | nil,
           non_neg_integer()
         ) :: Minga.Core.Decorations.t()
-  defp apply_word_highlights(decs, _line_idx, nil, _word_bg), do: decs
-  defp apply_word_highlights(decs, _line_idx, [], _word_bg), do: decs
-
   defp apply_word_highlights(decs, line_idx, word_changes, word_bg) do
+    apply_word_highlights_at(decs, line_idx, word_changes, word_bg, 0)
+  end
+
+  @spec apply_word_highlights_at(
+          Minga.Core.Decorations.t(),
+          non_neg_integer(),
+          [Diff.char_range()] | nil,
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: Minga.Core.Decorations.t()
+  defp apply_word_highlights_at(decs, _line_idx, nil, _word_bg, _offset), do: decs
+  defp apply_word_highlights_at(decs, _line_idx, [], _word_bg, _offset), do: decs
+
+  defp apply_word_highlights_at(decs, line_idx, word_changes, word_bg, offset) do
     Enum.reduce(word_changes, decs, fn {start_col, end_col}, acc ->
       {_id, acc} =
-        Minga.Core.Decorations.add_highlight(acc, {line_idx, start_col}, {line_idx, end_col},
+        Minga.Core.Decorations.add_highlight(
+          acc,
+          {line_idx, offset + start_col},
+          {line_idx, offset + end_col},
           style: Face.new(bg: word_bg),
           priority: 2,
           group: :diff_word
@@ -565,17 +863,38 @@ defmodule MingaEditor.Commands.Git do
       %{source_buf: nil} ->
         EditorState.set_status(state, "Cannot toggle staged: diff opened from status panel")
 
-      %{source_buf: source_buf, staged: staged} ->
+      %{source_buf: source_buf, staged: staged} = diff_info ->
         new_staged = not staged
+        view_mode = Map.get(diff_info, :view_mode, :unified)
         git_pid = Git.tracking_pid(source_buf)
 
         if git_pid do
           GenServer.stop(active_buf, :normal)
           state = EditorState.unregister_diff_view(state, active_buf)
-          open_diff_view(state, git_pid, source_buf, new_staged)
+          open_diff_view(state, git_pid, source_buf, new_staged, view_mode)
         else
           EditorState.set_status(state, "Source buffer no longer tracked by git")
         end
+    end
+  end
+
+  @spec toggle_diff_layout(state(), pid()) :: state()
+  defp toggle_diff_layout(state, active_buf) do
+    case EditorState.diff_view_info(state, active_buf) do
+      nil ->
+        EditorState.set_status(state, "Not a diff view")
+
+      %{view_mode: :side_by_side} = diff_info ->
+        refresh_diff_view_content(state, active_buf, Map.put(diff_info, :view_mode, :unified))
+        |> EditorState.set_status("Diff layout: unified")
+
+      diff_info ->
+        refresh_diff_view_content(
+          state,
+          active_buf,
+          Map.put(diff_info, :view_mode, :side_by_side)
+        )
+        |> EditorState.set_status("Diff layout: side-by-side")
     end
   end
 
@@ -588,17 +907,17 @@ defmodule MingaEditor.Commands.Git do
   def refresh_diff_views_for_buffer(state, saved_buf) do
     diff_views = EditorState.diff_views_for_source(state, saved_buf)
 
-    Enum.reduce(diff_views, state, fn {diff_buf,
-                                       %{git_root: git_root, rel_path: rel_path, staged: staged}},
-                                      acc ->
-      refresh_diff_buffer(acc, diff_buf, saved_buf, git_root, rel_path, staged)
+    Enum.reduce(diff_views, state, fn {diff_buf, diff_info}, acc ->
+      refresh_diff_buffer(acc, diff_buf, saved_buf, diff_info)
     end)
   end
 
-  @spec refresh_diff_buffer(state(), pid(), pid(), String.t(), String.t(), boolean()) :: state()
-  defp refresh_diff_buffer(state, diff_buf, source_buf, git_root, rel_path, staged) do
+  @spec refresh_diff_buffer(state(), pid(), pid(), EditorState.diff_view_info()) :: state()
+  defp refresh_diff_buffer(state, diff_buf, source_buf, diff_info) do
+    %{git_root: git_root, rel_path: rel_path, staged: staged} = diff_info
+    view_mode = Map.get(diff_info, :view_mode, :unified)
     {base_content, current_content} = diff_contents(git_root, rel_path, source_buf, staged)
-    diff_result = DiffView.build(base_content, current_content)
+    diff_result = build_diff_result(base_content, current_content, state, view_mode)
 
     Buffer.replace_content_with_decorations(
       diff_buf,
@@ -615,7 +934,9 @@ defmodule MingaEditor.Commands.Git do
       rel_path: rel_path,
       staged: staged,
       line_metadata: diff_result.line_metadata,
-      hunk_lines: diff_result.hunk_lines
+      hunk_lines: diff_result.hunk_lines,
+      view_mode: view_mode,
+      pane_width: diff_pane_width(state)
     }
 
     EditorState.register_diff_view(state, diff_buf, diff_info)
@@ -1125,11 +1446,32 @@ defmodule MingaEditor.Commands.Git do
           [Diff.hunk()]
         ) :: boolean()
   defp stale_diff_view?(diff_buf, diff_info, base_lines, current_lines, hunks) do
-    fresh = DiffView.build_from_hunks(base_lines, current_lines, hunks)
+    fresh = diff_result_from_hunks(diff_info, base_lines, current_lines, hunks)
     {displayed_text, _cursor} = Buffer.content_and_cursor(diff_buf)
 
     displayed_text != fresh.text or diff_info.line_metadata != fresh.line_metadata or
       diff_info.hunk_lines != fresh.hunk_lines
+  end
+
+  @spec diff_result_from_hunks(EditorState.diff_view_info(), [String.t()], [String.t()], [
+          Diff.hunk()
+        ]) :: DiffView.diff_view_result()
+  defp diff_result_from_hunks(
+         %{view_mode: :side_by_side} = diff_info,
+         base_lines,
+         current_lines,
+         hunks
+       ) do
+    DiffView.build_side_by_side_from_hunks(
+      base_lines,
+      current_lines,
+      hunks,
+      Map.get(diff_info, :pane_width, 80)
+    )
+  end
+
+  defp diff_result_from_hunks(_diff_info, base_lines, current_lines, hunks) do
+    DiffView.build_from_hunks(base_lines, current_lines, hunks)
   end
 
   @spec diff_view_lines(EditorState.diff_view_info(), String.t()) ::
@@ -1201,12 +1543,12 @@ defmodule MingaEditor.Commands.Git do
   end
 
   @spec refresh_diff_view_content(state(), pid(), EditorState.diff_view_info()) :: state()
-  defp refresh_diff_view_content(state, diff_buf, %{staged: false} = diff_info) do
-    %{git_root: git_root, rel_path: rel_path} = diff_info
-    current_content = current_content_for_diff(diff_info)
+  defp refresh_diff_view_content(state, diff_buf, diff_info) do
+    %{git_root: git_root, rel_path: rel_path, staged: staged} = diff_info
+    view_mode = Map.get(diff_info, :view_mode, :unified)
     base_content = head_content(git_root, rel_path)
-
-    diff_result = DiffView.build(base_content, current_content)
+    current_content = diff_view_current_content(diff_info, git_root, rel_path, staged)
+    diff_result = build_diff_result(base_content, current_content, state, view_mode)
 
     Buffer.replace_content_with_decorations(
       diff_buf,
@@ -1217,13 +1559,25 @@ defmodule MingaEditor.Commands.Git do
       end
     )
 
-    updated_info = %{
-      diff_info
-      | line_metadata: diff_result.line_metadata,
-        hunk_lines: diff_result.hunk_lines
-    }
+    updated_info =
+      Map.merge(diff_info, %{
+        line_metadata: diff_result.line_metadata,
+        hunk_lines: diff_result.hunk_lines,
+        view_mode: view_mode,
+        pane_width: diff_pane_width(state)
+      })
 
     EditorState.register_diff_view(state, diff_buf, updated_info)
+  end
+
+  @spec diff_view_current_content(EditorState.diff_view_info(), String.t(), String.t(), boolean()) ::
+          String.t()
+  defp diff_view_current_content(_diff_info, git_root, rel_path, true) do
+    staged_content(git_root, rel_path)
+  end
+
+  defp diff_view_current_content(diff_info, _git_root, _rel_path, false) do
+    current_content_for_diff(diff_info)
   end
 
   @spec split_lines(String.t()) :: [String.t()]

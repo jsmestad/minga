@@ -353,8 +353,6 @@ defmodule Minga.Tool.Recipe.Registry do
   @spec unregister_source(contribution_source()) :: :ok
   def unregister_source(source) do
     GenServer.call(__MODULE__, {:unregister_source, source})
-  catch
-    :exit, _ -> :ok
   end
 
   # ── GenServer ───────────────────────────────────────────────────────────────

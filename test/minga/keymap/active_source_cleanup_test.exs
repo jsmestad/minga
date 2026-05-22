@@ -47,6 +47,36 @@ defmodule Minga.Keymap.ActiveSourceCleanupTest do
              keymap |> Active.scope_trie(:agent, :normal) |> Bindings.lookup_sequence(keys)
   end
 
+  test "unregister_source preserves bindings owned by another extension source", %{keymap: keymap} do
+    source = {:extension, :active_cleanup}
+    other_source = {:extension, :active_cleanup_other}
+
+    assert :ok =
+             Active.bind(keymap, :insert, "C-j", :source_cmd, "Source command", source: source)
+
+    assert :ok =
+             Active.bind(keymap, :insert, "C-k", :other_source_cmd, "Other source command",
+               source: other_source
+             )
+
+    {:ok, source_keys} = KeyParser.parse("C-j")
+    {:ok, other_keys} = KeyParser.parse("C-k")
+
+    assert {:command, :source_cmd, _desc} =
+             keymap |> Active.mode_trie(:insert) |> Bindings.lookup_sequence(source_keys)
+
+    assert {:command, :other_source_cmd, _desc} =
+             keymap |> Active.mode_trie(:insert) |> Bindings.lookup_sequence(other_keys)
+
+    assert :ok = Active.unregister_source(keymap, source)
+
+    assert :not_found =
+             keymap |> Active.mode_trie(:insert) |> Bindings.lookup_sequence(source_keys)
+
+    assert {:command, :other_source_cmd, _desc} =
+             keymap |> Active.mode_trie(:insert) |> Bindings.lookup_sequence(other_keys)
+  end
+
   test "unbind/2 clears source tracking for direct bindings", %{keymap: keymap} do
     source = {:extension, :active_cleanup}
     other_source = {:extension, :active_cleanup_other}

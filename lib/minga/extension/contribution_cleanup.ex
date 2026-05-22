@@ -9,7 +9,14 @@ defmodule Minga.Extension.ContributionCleanup do
   @type contribution_source :: :builtin | :config | {:extension, atom()}
 
   @typedoc "Cleanup callback invoked with a source identifier."
-  @type cleanup_fun :: (contribution_source() -> :ok)
+  @type cleanup_fun :: (contribution_source() -> :ok | {:error, term()})
+
+  @typedoc "Cleanup failure reported for one family."
+  @type cleanup_failure :: %{
+          family: atom(),
+          source: contribution_source(),
+          reason: term()
+        }
 
   @typedoc "Cleanup options with injectable test registries."
   @type cleanup_opts :: [command_registry: GenServer.server(), keymap: GenServer.server()]
@@ -33,38 +40,65 @@ defmodule Minga.Extension.ContributionCleanup do
   end
 
   @doc "Removes all contributions owned by a source."
-  @spec unregister_source(contribution_source(), cleanup_opts()) :: :ok
+  @spec unregister_source(contribution_source(), cleanup_opts()) ::
+          :ok | {:error, [cleanup_failure()]}
   def unregister_source(source, opts \\ []) do
     command_registry = Keyword.get(opts, :command_registry, Minga.Command.Registry)
     keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
 
-    Minga.Command.Registry.unregister_source(command_registry, source)
-    Minga.Keymap.Active.unregister_source(keymap, source)
-    Minga.Keymap.Scope.unregister_source(source)
-    Minga.Language.Registry.unregister_source(source)
-    Minga.Tool.Recipe.Registry.unregister_source(source)
-    Minga.Config.ModelineSegments.unregister_source(source)
+    cleanup_families(command_registry, keymap, source)
+    |> Enum.reduce({:ok, []}, fn {family, fun}, {status, failures} ->
+      case run_cleanup_family(family, source, fun) do
+        :ok -> {status, failures}
+        {:error, failure} -> {:error, [failure | failures]}
+      end
+    end)
+    |> case do
+      {:ok, _failures} -> :ok
+      {:error, failures} -> {:error, Enum.reverse(failures)}
+    end
+  end
 
-    callbacks()
-    |> Map.values()
-    |> Enum.each(&safe_cleanup(&1, source))
-
-    :ok
+  @spec cleanup_families(GenServer.server(), GenServer.server(), contribution_source()) ::
+          [{atom(), (-> term())}]
+  defp cleanup_families(command_registry, keymap, source) do
+    [
+      {:command_registry,
+       fn -> Minga.Command.Registry.unregister_source(command_registry, source) end},
+      {:keymap_active, fn -> Minga.Keymap.Active.unregister_source(keymap, source) end},
+      {:keymap_scope, fn -> Minga.Keymap.Scope.unregister_source(source) end},
+      {:language_registry, fn -> Minga.Language.Registry.unregister_source(source) end},
+      {:tool_recipe_registry, fn -> Minga.Tool.Recipe.Registry.unregister_source(source) end},
+      {:modeline_segments, fn -> Minga.Config.ModelineSegments.unregister_source(source) end}
+    ]
+    |> Kernel.++(
+      callbacks()
+      |> Enum.sort_by(fn {family, _fun} -> Atom.to_string(family) end)
+      |> Enum.map(fn {family, fun} -> {family, fn -> fun.(source) end} end)
+    )
   end
 
   @spec callbacks() :: %{atom() => cleanup_fun()}
   defp callbacks, do: :persistent_term.get(@callbacks_key, %{})
 
-  @spec safe_cleanup(cleanup_fun(), contribution_source()) :: :ok
-  defp safe_cleanup(fun, source) do
-    fun.(source)
+  @spec run_cleanup_family(atom(), contribution_source(), (-> term())) ::
+          :ok | {:error, cleanup_failure()}
+  defp run_cleanup_family(family, source, fun) do
+    case fun.() do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        {:error, %{family: family, source: source, reason: reason}}
+
+      other ->
+        {:error, %{family: family, source: source, reason: {:unexpected_return, other}}}
+    end
   rescue
     e ->
-      Minga.Log.warning(
-        :config,
-        "Contribution cleanup failed for #{inspect(source)}: #{Exception.message(e)}"
-      )
-
-      :ok
+      {:error, %{family: family, source: source, reason: {:exception, Exception.message(e)}}}
+  catch
+    kind, reason ->
+      {:error, %{family: family, source: source, reason: {kind, reason}}}
   end
 end

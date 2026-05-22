@@ -83,14 +83,15 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x3D       | file_tree_open_in_split |
   | 0x3E       | tab_copy_path           |
   | 0x3F       | hover_open_action       |
-  | 0x42       | git_open_diff           |
   | 0x40       | file_tree_drop          |
   | 0x41       | fold_toggle_at_line     |
+  | 0x42       | git_open_diff           |
   | 0x43       | config_update           |
   | 0x44       | config_query            |
-  | 0x34       | system_will_sleep      |
-  | 0x35       | system_did_wake        |
-  | 0x47       | power_thermal_state    |
+  | 0x47       | power_thermal_state     |
+  | 0x48       | tab_reorder             |
+  | 0x34       | system_will_sleep       |
+  | 0x35       | system_did_wake         |
 
   """
 
@@ -218,6 +219,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_file_tree_open_in_split Opcodes.gui_action_file_tree_open_in_split()
   @gui_action_tab_copy_path Opcodes.gui_action_tab_copy_path()
   @gui_action_hover_open_action Opcodes.gui_action_hover_open_action()
+  @gui_action_tab_reorder Opcodes.gui_action_tab_reorder()
   @gui_action_file_tree_drop Opcodes.gui_action_file_tree_drop()
   @gui_action_fold_toggle_at_line Opcodes.gui_action_fold_toggle_at_line()
   @gui_action_git_open_diff Opcodes.gui_action_git_open_diff()
@@ -365,6 +367,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
              buffer_line :: non_neg_integer()}
           | {:file_tree_open_in_split, index :: non_neg_integer()}
           | {:tab_copy_path, id :: pos_integer()}
+          | {:tab_reorder, id :: pos_integer(), new_index :: non_neg_integer()}
           | :hover_open_action
           | :system_will_sleep
           | :system_did_wake
@@ -759,7 +762,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     label_bytes = :erlang.iolist_to_binary([MingaEditor.State.Tab.display_label(tab)])
 
     <<flags::8, tab.id::32, group_id::16, byte_size(icon_bytes)::8, icon_bytes::binary,
-      byte_size(label_bytes)::16, label_bytes::binary>>
+      byte_size(label_bytes)::16, label_bytes::binary, tab_tint_color(tab)::32>>
   end
 
   @spec encode_gui_tab_entry(TabSummary.t(), Tab.id() | nil) :: binary()
@@ -770,7 +773,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     label_bytes = :erlang.iolist_to_binary([tab.label])
 
     <<flags::8, tab.id::32, tab.workspace_id::16, byte_size(icon_bytes)::8, icon_bytes::binary,
-      byte_size(label_bytes)::16, label_bytes::binary>>
+      byte_size(label_bytes)::16, label_bytes::binary, tab.tint_color::32>>
   end
 
   @spec build_tab_flags(Tab.t(), 0 | 1, pid() | nil) :: non_neg_integer()
@@ -778,9 +781,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     is_dirty = tab_dirty_bit(tab, is_active, active_win_buffer)
     is_agent = if tab.kind == :agent, do: 1, else: 0
     has_attention = if tab.attention, do: 1, else: 0
+    is_pinned = if tab.pinned?, do: 1, else: 0
     agent_status = encode_agent_status(tab.agent_status)
 
-    tab_flags(is_active, is_dirty, is_agent, has_attention, agent_status)
+    tab_flags(is_active, is_dirty, is_agent, has_attention, agent_status, is_pinned)
   end
 
   @spec build_tab_summary_flags(TabSummary.t(), 0 | 1) :: non_neg_integer()
@@ -788,19 +792,24 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     is_dirty = if tab.dirty?, do: 1, else: 0
     is_agent = if tab.kind == :agent, do: 1, else: 0
     has_attention = if tab.attention?, do: 1, else: 0
-    tab_flags(is_active, is_dirty, is_agent, has_attention, 0)
+    is_pinned = if tab.pinned?, do: 1, else: 0
+    tab_flags(is_active, is_dirty, is_agent, has_attention, 0, is_pinned)
   end
 
-  @spec tab_flags(0 | 1, 0 | 1, 0 | 1, 0 | 1, non_neg_integer()) :: non_neg_integer()
-  defp tab_flags(is_active, is_dirty, is_agent, has_attention, agent_status) do
+  @spec tab_flags(0 | 1, 0 | 1, 0 | 1, 0 | 1, non_neg_integer(), 0 | 1) :: non_neg_integer()
+  defp tab_flags(is_active, is_dirty, is_agent, has_attention, agent_status, is_pinned) do
     bor(
       bor(is_active, bsl(is_dirty, 1)),
       bor(
         bor(bsl(is_agent, 2), bsl(has_attention, 3)),
-        bsl(agent_status, 4)
+        bor(bsl(band(agent_status, 0x07), 4), bsl(is_pinned, 7))
       )
     )
   end
+
+  @spec tab_tint_color(Tab.t()) :: non_neg_integer()
+  defp tab_tint_color(%Tab{kind: :agent}), do: 0x7AA2F7
+  defp tab_tint_color(%Tab{}), do: 0
 
   @spec tab_dirty_bit(Tab.t(), 0 | 1, pid() | nil) :: 0 | 1
   defp tab_dirty_bit(%{kind: :agent}, _is_active, _buf), do: 0
@@ -875,7 +884,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       )
 
     IO.iodata_to_binary([
-      <<1::8, chrome_state.active_workspace_id::16, encode_workspace_mode(chrome_state.mode)::8,
+      <<2::8, chrome_state.active_workspace_id::16, encode_workspace_mode(chrome_state.mode)::8,
         encode_workspace_flags(chrome_state)::8, length(workspace_entries)::8>>,
       workspace_entries,
       <<length(visible_tab_entries)::16>>,
@@ -936,7 +945,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     <<tab.id::32, tab.workspace_id::16, encode_tab_kind(tab.kind)::8,
       encode_visible_tab_flags(tab)::16, path_hash(tab.path)::32, byte_size(icon_bytes)::8,
       icon_bytes::binary, byte_size(label_bytes)::16, label_bytes::binary,
-      byte_size(path_bytes)::16, path_bytes::binary>>
+      byte_size(path_bytes)::16, path_bytes::binary, tab.tint_color::32>>
   end
 
   @spec encode_workspace_mode(ChromeState.mode()) :: non_neg_integer()
@@ -973,6 +982,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     |> maybe_workspace_flag(tab.draft_state == :draft, 0x04)
     |> maybe_workspace_flag(tab.draft_state == :draft_elsewhere, 0x08)
     |> maybe_workspace_flag(tab.draft_state == :conflict, 0x10)
+    |> maybe_workspace_flag(tab.pinned?, 0x20)
   end
 
   @spec maybe_workspace_flag(non_neg_integer(), boolean(), non_neg_integer()) :: non_neg_integer()
@@ -1883,7 +1893,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     0x06 - File: icon, icon_color, filename, filetype
     0x07 - Message: status message
     0x08 - Recording: macro_recording
-    0x09 - Agent: model_name, message_count, session_status, agent_status
+    0x09 - Agent: model_name, message_count, session_status, agent_status, background_count, background_label, active_tool_name
     0x0A - Indent: indent_type, indent_size
     0x0B - ModelineSegments: named configured left/right styled modeline segments
     0x0C - Selection: selection_mode, selection_size
@@ -1931,6 +1941,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
     background_label =
       :erlang.iolist_to_binary([Map.get(d, :active_background_subagent_label) || ""])
+
+    active_tool_name =
+      :erlang.iolist_to_binary([Map.get(d, :active_tool_name) || ""])
 
     background_count = Map.get(d, :background_subagent_count, 0)
 
@@ -1980,7 +1993,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
             @section_agent,
             <<byte_size(model_name)::8, model_name::binary, d.message_count::32,
               session_status_byte::8, agent_byte::8, background_count::16,
-              byte_size(background_label)::16, background_label::binary>>
+              byte_size(background_label)::16, background_label::binary,
+              byte_size(active_tool_name)::8, active_tool_name::binary>>
           )
         ]
     else
@@ -1989,7 +2003,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           encode_section(
             @section_agent,
             <<agent_byte::8, background_count::16, byte_size(background_label)::16,
-              background_label::binary>>
+              background_label::binary, byte_size(active_tool_name)::8, active_tool_name::binary>>
           )
         ]
     end
@@ -2507,9 +2521,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp encode_pending_approval(nil), do: <<0::8>>
 
   defp encode_pending_approval(%{name: name, args: args}) do
-    name_b = :erlang.iolist_to_binary([name])
-    summary = summarize_tool_args(name, args)
-    summary_b = :erlang.iolist_to_binary([summary])
+    name_b = utf8_prefix_bytes(name, 120)
+    summary_b = utf8_prefix_bytes(summarize_tool_args(name, args), @max_chat_text_bytes)
     <<1::8, byte_size(name_b)::16, name_b::binary, byte_size(summary_b)::16, summary_b::binary>>
   end
 
@@ -2542,17 +2555,16 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   defp encode_help_overlay(_, _), do: <<0::8>>
 
-  # Computes a short summary for a tool call from its name and args.
+  # Computes a display summary for a tool call from its name and args.
   # Reuses summarize_tool_args/2 (shared with the approval banner).
-  # Truncates to 100 chars max to keep the wire payload small.
   @spec tool_call_summary(MingaAgent.ToolCall.t()) :: String.t()
   defp tool_call_summary(%MingaAgent.ToolCall{name: name, args: args}) when is_map(args) do
-    summarize_tool_args(name, args) |> String.slice(0, 100)
+    summarize_tool_args(name, args)
   end
 
   defp tool_call_summary(%MingaAgent.ToolCall{name: name} = tc) do
     args = Map.get(tc, :args) || %{}
-    summarize_tool_args(name, args) |> String.slice(0, 100)
+    summarize_tool_args(name, args)
   end
 
   @spec preview_kind_byte(atom()) :: non_neg_integer()
@@ -2606,15 +2618,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @type gui_chat_message ::
           MingaAgent.Message.t()
           | {:styled_assistant, [[styled_run()]]}
-          | {:styled_tool_call,
-             %{
-               name: String.t(),
-               status: :running | :complete | :error,
-               is_error: boolean(),
-               collapsed: boolean(),
-               duration_ms: non_neg_integer() | nil,
-               result: String.t() | nil
-             }, [[styled_run()]]}
+          | {:styled_tool_call, MingaAgent.ToolCall.t(), [[styled_run()]]}
           | {:approval_tool_call, MingaAgent.ToolCall.t(), map()}
 
   @spec encode_chat_messages([gui_chat_message() | {pos_integer(), gui_chat_message()}]) ::
@@ -2705,7 +2709,13 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           binary()
   defp encode_chat_messages_payload(messages) do
     msg_binaries = Enum.map(messages, &encode_chat_message/1)
-    IO.iodata_to_binary([<<length(msg_binaries)::16>> | msg_binaries])
+
+    framed_messages =
+      Enum.map(msg_binaries, fn msg ->
+        <<byte_size(msg)::32, msg::binary>>
+      end)
+
+    IO.iodata_to_binary([<<0xFF::8, 1::8, length(msg_binaries)::16>> | framed_messages])
   end
 
   @spec strip_chat_message_links(gui_chat_message() | {pos_integer(), gui_chat_message()}) ::
@@ -2782,7 +2792,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   defp encode_chat_message_body({:tool_call, tc}) do
     name_bytes = :erlang.iolist_to_binary([tc.name])
-    summary_bytes = :erlang.iolist_to_binary([tool_call_summary(tc)])
+    summary_bytes = utf8_prefix_bytes(tool_call_summary(tc), @max_chat_text_bytes)
     result_bytes = :erlang.iolist_to_binary([tc.result])
 
     status_byte =
@@ -2795,10 +2805,12 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     duration = tc.duration_ms || 0
     error_byte = if tc.is_error, do: 1, else: 0
     collapsed_byte = if tc.collapsed, do: 1, else: 0
+    auto_approved_byte = auto_approved_scope_byte(tc.auto_approved_scope)
 
     <<0x04::8, status_byte::8, error_byte::8, collapsed_byte::8, duration::32,
       byte_size(name_bytes)::16, name_bytes::binary, byte_size(summary_bytes)::16,
-      summary_bytes::binary, byte_size(result_bytes)::32, result_bytes::binary>>
+      summary_bytes::binary, byte_size(result_bytes)::32, result_bytes::binary,
+      auto_approved_byte::8>>
   end
 
   # Approval tool call: inline approval card attached to the tool message.
@@ -2809,7 +2821,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp encode_chat_message_body({:approval_tool_call, tc, approval}) do
     preview = Map.get(approval, :preview, MingaAgent.ToolApproval.build_preview(tc.name, tc.args))
     name_bytes = preview_text_bytes(tc.name, 120)
-    summary_bytes = preview_text_bytes(Map.get(preview, :summary, tool_call_summary(tc)), 300)
+    summary_bytes = approval_summary_bytes(preview, tool_call_summary(tc))
     id_bytes = preview_text_bytes(Map.get(approval, :tool_call_id, tc.id), 120)
 
     line_binaries =
@@ -2831,13 +2843,13 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   # Styled tool call: same header fields as tool_call (0x04), but result is styled runs.
   # Sub-opcode 0x08. Layout:
-  #   0x08, status::8, error::8, collapsed::8, duration::32,
-  #   name_len::16, name, summary_len::16, summary, line_count::16, then per line:
-  #   run_count::16, then per run: text_len::16, text, fg::24, bg::24, flags::8,
-  #   and when flags bit 0x08 is set: url_len::16, url.
+  #   0x08, status::8, error::8, collapsed::8, duration::32, name_len::16, name,
+  #   summary_len::16, summary, line_count::16, then per line: run_count::16,
+  #   then per run: text_len::16, text, fg::24, bg::24, flags::8,
+  #   and when flags bit 0x08 is set: url_len::16, url. auto_approved::8 is appended after the styled line payload.
   defp encode_chat_message_body({:styled_tool_call, tc, styled_lines}) do
     name_bytes = :erlang.iolist_to_binary([tc.name])
-    summary_bytes = :erlang.iolist_to_binary([tool_call_summary(tc)])
+    summary_bytes = utf8_prefix_bytes(tool_call_summary(tc), @max_chat_text_bytes)
 
     status_byte =
       case tc.status do
@@ -2849,6 +2861,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     duration = tc.duration_ms || 0
     error_byte = if tc.is_error, do: 1, else: 0
     collapsed_byte = if tc.collapsed, do: 1, else: 0
+    auto_approved_byte = auto_approved_scope_byte(tc.auto_approved_scope)
 
     line_binaries =
       Enum.map(styled_lines, fn runs ->
@@ -2861,8 +2874,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     IO.iodata_to_binary([
       <<0x08::8, status_byte::8, error_byte::8, collapsed_byte::8, duration::32,
         byte_size(name_bytes)::16, name_bytes::binary, byte_size(summary_bytes)::16,
-        summary_bytes::binary, length(styled_lines)::16>>
-      | line_binaries
+        summary_bytes::binary, length(styled_lines)::16>>,
+      line_binaries,
+      <<auto_approved_byte::8>>
     ])
   end
 
@@ -2876,6 +2890,24 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     cost_int = round((u.cost || 0.0) * 1_000_000)
     <<0x06::8, u.input::32, u.output::32, u.cache_read::32, u.cache_write::32, cost_int::32>>
   end
+
+  @spec approval_summary_bytes(map(), String.t()) :: binary()
+  defp approval_summary_bytes(%{kind: :command} = preview, fallback) do
+    preview
+    |> Map.get(:summary, fallback)
+    |> utf8_prefix_bytes(@max_chat_text_bytes)
+  end
+
+  defp approval_summary_bytes(preview, fallback) do
+    preview
+    |> Map.get(:summary, fallback)
+    |> utf8_prefix_bytes(300)
+  end
+
+  @spec auto_approved_scope_byte(MingaAgent.ToolCall.auto_approved_scope() | nil) :: 0 | 1 | 2
+  defp auto_approved_scope_byte(:session), do: 1
+  defp auto_approved_scope_byte(:turn), do: 2
+  defp auto_approved_scope_byte(nil), do: 0
 
   @spec encode_styled_run(styled_run()) :: binary()
   defp encode_styled_run({text, fg, bg, flags, url}) do
@@ -2968,6 +3000,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     do: {:ok, {:file_tree_open_in_split, index}}
 
   def decode_gui_action(@gui_action_tab_copy_path, <<id::32>>), do: {:ok, {:tab_copy_path, id}}
+
+  def decode_gui_action(@gui_action_tab_reorder, <<id::32, new_index::16>>),
+    do: {:ok, {:tab_reorder, id, new_index}}
+
   def decode_gui_action(@gui_action_hover_open_action, <<>>), do: {:ok, :hover_open_action}
 
   def decode_gui_action(@gui_action_completion_select, <<index::16>>),

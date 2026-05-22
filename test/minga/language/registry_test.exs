@@ -136,6 +136,46 @@ defmodule Minga.Language.RegistryTest do
       assert Registry.for_extension("xyz_test_ext").name == :test_lang_xyz
     end
 
+    test "same-source re-registration replaces stale language indexes" do
+      source = {:extension, :language_registry_replace_test}
+
+      old_lang = %Language{
+        name: :replace_lang_xyz,
+        label: "Replace Lang",
+        comment_token: "// ",
+        extensions: ["replace_old_ext"],
+        filenames: ["ReplaceOld"],
+        shebangs: ["replace_old_shebang"]
+      }
+
+      new_lang = %Language{
+        name: :replace_lang_xyz,
+        label: "Replace Lang New",
+        comment_token: "# ",
+        extensions: ["replace_new_ext"],
+        filenames: ["ReplaceNew"],
+        shebangs: ["replace_new_shebang"]
+      }
+
+      on_exit(fn -> Registry.unregister_source(source) end)
+
+      assert :ok = Registry.register(old_lang, source)
+      assert :ok = Registry.register(new_lang, source)
+
+      assert Registry.for_extension("replace_old_ext") == nil
+      assert Registry.for_filename("ReplaceOld") == nil
+      assert Registry.for_shebang("replace_old_shebang") == nil
+
+      assert %Language{name: :replace_lang_xyz, label: "Replace Lang New"} =
+               Registry.get(:replace_lang_xyz)
+
+      assert %Language{name: :replace_lang_xyz, label: "Replace Lang New"} =
+               Registry.for_extension("replace_new_ext")
+
+      assert %Language{name: :replace_lang_xyz, label: "Replace Lang New"} =
+               Registry.for_shebang("replace_new_shebang")
+    end
+
     test "unregister_source removes language names and indexes for only that source" do
       source = {:extension, :language_registry_test}
       other_source = {:extension, :language_registry_other}

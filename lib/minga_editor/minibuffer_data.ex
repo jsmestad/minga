@@ -60,6 +60,8 @@ defmodule MingaEditor.MinibufferData do
   @mode_substitute_confirm 5
   @mode_extension_confirm 6
   @mode_describe_key 7
+  @mode_delete_confirm 8
+  @mode_branch_delete_confirm 9
 
   # Maximum candidates to send (keep the list manageable)
   @max_candidates 15
@@ -172,6 +174,32 @@ defmodule MingaEditor.MinibufferData do
       mode: @mode_extension_confirm,
       cursor_pos: 0xFFFF,
       prompt: prompt,
+      input: "",
+      context: "",
+      selected_index: 0,
+      candidates: []
+    }
+  end
+
+  def from_state(%{workspace: %{editing: %{mode: :delete_confirm, mode_state: ms}}}) do
+    %__MODULE__{
+      visible: true,
+      mode: @mode_delete_confirm,
+      cursor_pos: 0xFFFF,
+      prompt: Minga.Mode.display(:delete_confirm, ms),
+      input: "",
+      context: "",
+      selected_index: 0,
+      candidates: []
+    }
+  end
+
+  def from_state(%{workspace: %{editing: %{mode: :branch_delete_confirm, mode_state: ms}}}) do
+    %__MODULE__{
+      visible: true,
+      mode: @mode_branch_delete_confirm,
+      cursor_pos: 0xFFFF,
+      prompt: Minga.Mode.display(:branch_delete_confirm, ms),
       input: "",
       context: "",
       selected_index: 0,

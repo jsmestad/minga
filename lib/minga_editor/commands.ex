@@ -26,11 +26,13 @@ defmodule MingaEditor.Commands do
 
   alias Minga.Buffer
   alias Minga.Command
+  alias Minga.Git
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.Commands.Editing, as: EditingCommands
   alias MingaEditor.Commands.Eval
   alias MingaEditor.Commands.Extensions, as: ExtCommands
+  alias MingaEditor.Commands.Git, as: GitCommands
   alias MingaEditor.Commands.Help
   alias MingaEditor.Commands.Lsp, as: LspCommands
   alias MingaEditor.Commands.Tutor
@@ -114,6 +116,12 @@ defmodule MingaEditor.Commands do
   def execute(state, {:select_register, char}) when is_binary(char) do
     name = if char == "\"", do: "", else: char
     Editing.set_active_register(state, name)
+  end
+
+  # Tab bar mouse selection uses id-scoped tuple commands so click targets stay
+  # stable even when visible positions are reordered by pinning.
+  def execute(state, {:tab_goto_id, tab_id}) when is_integer(tab_id) and tab_id > 0 do
+    EditorState.switch_tab(state, tab_id)
   end
 
   # ── Leader / which-key (return action tuples) ─────────────────────────────
@@ -272,6 +280,29 @@ defmodule MingaEditor.Commands do
     restore_file_tree_scope(state)
   end
 
+  # ── Branch delete confirmation commands ───────────────────────────────────
+
+  def execute(state, {:branch_delete_confirm, git_root, name, force}) do
+    case Git.branch_delete(git_root, name, force) do
+      :ok ->
+        refresh_branch_delete_repo(git_root)
+        MingaEditor.log_to_messages("[git] Deleted branch: #{name}")
+
+        state
+        |> EditorState.set_status("Deleted branch #{name}")
+        |> MingaEditor.PickerUI.open(MingaEditor.UI.Picker.GitBranchSource)
+
+      {:error, reason} ->
+        handle_branch_delete_error(state, git_root, name, force, reason)
+    end
+  end
+
+  def execute(state, :branch_delete_cancel) do
+    state
+    |> EditorState.set_status("Branch delete cancelled")
+    |> MingaEditor.PickerUI.open(MingaEditor.UI.Picker.GitBranchSource)
+  end
+
   # ── Agent tuple commands ──────────────────────────────────────────────────
 
   def execute(state, {:agent_set_model, [model]}), do: AgentCommands.set_model(state, model)
@@ -282,6 +313,12 @@ defmodule MingaEditor.Commands do
     else
       state
     end
+  end
+
+  # ── Parameterized git commands ────────────────────────────────────────────
+
+  def execute(state, {:git_accept_conflict, _choice, _start_line} = cmd) do
+    guard_buffer(state, fn -> GitCommands.execute(state, cmd) end)
   end
 
   # ── Parameterized movement ────────────────────────────────────────────────
@@ -662,6 +699,44 @@ defmodule MingaEditor.Commands do
   @spec normalize_options_server(term() | nil) :: Minga.Config.Options.server()
   defp normalize_options_server(nil), do: Minga.Config.Options.default_server()
   defp normalize_options_server(server), do: Minga.Config.Options.validate_server!(server)
+
+  @spec handle_branch_delete_error(state(), String.t(), String.t(), boolean(), String.t()) ::
+          state()
+  defp handle_branch_delete_error(state, git_root, name, false, reason) do
+    if forceable_branch_delete_error?(reason) do
+      mode_state =
+        git_root
+        |> Minga.Mode.BranchDeleteConfirmState.new(name)
+        |> Minga.Mode.BranchDeleteConfirmState.to_force(reason)
+
+      state
+      |> EditorState.set_status("Delete failed: #{reason}")
+      |> EditorState.transition_mode(:branch_delete_confirm, mode_state)
+    else
+      EditorState.set_status(state, "Delete failed: #{reason}")
+    end
+  end
+
+  defp handle_branch_delete_error(state, _git_root, _name, true, reason) do
+    EditorState.set_status(state, "Force delete failed: #{reason}")
+  end
+
+  @spec forceable_branch_delete_error?(String.t()) :: boolean()
+  defp forceable_branch_delete_error?(reason) do
+    normalized = String.downcase(reason)
+
+    String.contains?(normalized, "not fully merged") or
+      String.contains?(normalized, "unmerged") or
+      String.contains?(normalized, "not merged")
+  end
+
+  @spec refresh_branch_delete_repo(String.t()) :: :ok
+  defp refresh_branch_delete_repo(git_root) do
+    case Git.lookup_repo(git_root) do
+      nil -> :ok
+      pid -> Git.Repo.refresh(pid)
+    end
+  end
 
   # Remove the current tool from the prompt queue after accept/decline.
   @spec drain_tool_prompt_queue(state()) :: state()

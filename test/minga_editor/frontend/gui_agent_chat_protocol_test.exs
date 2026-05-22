@@ -3,8 +3,19 @@ defmodule MingaEditor.Frontend.GUIAgentChatProtocolTest do
 
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
-  # Extracts a section payload by ID from a sectioned binary (skips opcode + section_count header)
+  # Extracts a section payload by ID from a sectioned binary.
+  # Message sections are normalized to the legacy count + concatenated messages shape.
   defp extract_section(binary, target_id) do
+    payload = extract_raw_section(binary, target_id)
+
+    if target_id == 0x06 do
+      normalize_messages_payload(payload)
+    else
+      payload
+    end
+  end
+
+  defp extract_raw_section(binary, target_id) do
     <<_opcode::8, section_count::8, rest::binary>> = binary
     find_section(rest, section_count, target_id)
   end
@@ -21,6 +32,24 @@ defmodule MingaEditor.Frontend.GUIAgentChatProtocolTest do
     else
       find_section(rest, remaining - 1, target_id)
     end
+  end
+
+  defp normalize_messages_payload(<<0xFF::8, 1::8, count::16, frames::binary>>) do
+    messages = unwrap_message_frames(frames, count, [])
+    IO.iodata_to_binary([<<count::16>> | messages])
+  end
+
+  defp normalize_messages_payload(payload), do: payload
+
+  defp unwrap_message_frames(<<>>, 0, acc), do: Enum.reverse(acc)
+
+  defp unwrap_message_frames(
+         <<message_len::32, message::binary-size(message_len), rest::binary>>,
+         remaining,
+         acc
+       )
+       when remaining > 0 do
+    unwrap_message_frames(rest, remaining - 1, [message | acc])
   end
 
   describe "decode_gui_action for agent_tool_toggle" do
@@ -81,11 +110,13 @@ defmodule MingaEditor.Frontend.GUIAgentChatProtocolTest do
 
       <<0x08::8, status_byte::8, error_byte::8, collapsed_byte::8, duration::32, name_len::16,
         name::binary-size(name_len), summary_len::16, summary::binary-size(summary_len),
-        line_count::16, rest::binary>> = msg_payload
+        line_count::16, run_count::16, text_len::16, text::binary-size(text_len), fg::24, bg::24,
+        flags::8, auto_approved_byte::8>> = msg_payload
 
       assert status_byte == 1
       assert error_byte == 0
       assert collapsed_byte == 0
+      assert auto_approved_byte == 0
       assert duration == 1234
       assert name == "bash"
       # No args in test data, so summary is empty
@@ -93,14 +124,31 @@ defmodule MingaEditor.Frontend.GUIAgentChatProtocolTest do
       assert line_count == 1
 
       # Parse the single line's single run
-      <<run_count::16, text_len::16, text::binary-size(text_len), fg::24, bg::24, flags::8>> =
-        rest
-
       assert run_count == 1
       assert text == "hello"
       assert fg == 0xFF0000
       assert bg == 0x000000
       assert flags == 0x01
+    end
+
+    test "frames chat messages with deterministic v1 message lengths" do
+      data = %{
+        visible: true,
+        messages: [{1, {:user, "hello"}}, {2, {:assistant, "hi"}}],
+        status: :idle,
+        model: "test",
+        prompt: "",
+        pending_approval: nil
+      }
+
+      binary = ProtocolGUI.encode_gui_agent_chat(data)
+      messages_payload = extract_raw_section(binary, 0x06)
+
+      assert <<0xFF::8, 1::8, 2::16, first_len::32, first::binary-size(first_len), second_len::32,
+               second::binary-size(second_len)>> = messages_payload
+
+      assert <<1::32, 0x01::8, 5::32, "hello">> = first
+      assert <<2::32, 0x02::8, 2::32, "hi">> = second
     end
 
     test "encodes styled assistant link runs with url metadata" do
@@ -234,6 +282,7 @@ defmodule MingaEditor.Frontend.GUIAgentChatProtocolTest do
         status: :running,
         is_error: false,
         collapsed: true,
+        auto_approved_scope: :session,
         duration_ms: 0,
         result: "file contents"
       }
@@ -248,7 +297,143 @@ defmodule MingaEditor.Frontend.GUIAgentChatProtocolTest do
       }
 
       binary = ProtocolGUI.encode_gui_agent_chat(data)
-      assert :binary.match(binary, <<0x04>>) != :nomatch
+      messages_payload = extract_section(binary, 0x06)
+
+      <<1::16, 0::32, 0x04::8, 0::8, 0::8, 1::8, 0::32, name_len::16, name::binary-size(name_len),
+        summary_len::16, summary::binary-size(summary_len), result_len::32,
+        result::binary-size(result_len), auto_approved_byte::8>> = messages_payload
+
+      assert name == "read"
+      assert summary == ""
+      assert result == "file contents"
+      assert auto_approved_byte == 1
+    end
+
+    test "encodes command approval summaries without the short preview cap" do
+      command = String.duplicate("echo long ", 40)
+      tc = MingaAgent.ToolCall.new("tc-approval", "shell", %{"command" => command})
+
+      approval =
+        MingaAgent.ToolApproval.public(
+          MingaAgent.ToolApproval.new(
+            tool_call_id: "tc-approval",
+            name: "shell",
+            args: %{"command" => command}
+          )
+        )
+
+      data = %{
+        visible: true,
+        messages: [{:approval_tool_call, tc, approval}],
+        status: :tool_executing,
+        model: "",
+        prompt: "",
+        pending_approval: nil
+      }
+
+      binary = ProtocolGUI.encode_gui_agent_chat(data)
+      messages_payload = extract_section(binary, 0x06)
+
+      <<1::16, 0::32, 0x09::8, 0::8, name_len::16, _name::binary-size(name_len), summary_len::16,
+        summary::binary-size(summary_len), _rest::binary>> = messages_payload
+
+      assert summary == command
+    end
+
+    test "encodes long multibyte shell summaries within UTF-8 byte limits" do
+      command = String.duplicate("🚀", 20_000)
+      tc = MingaAgent.ToolCall.new("tc-multi", "shell", %{"command" => command})
+
+      approval =
+        MingaAgent.ToolApproval.public(
+          MingaAgent.ToolApproval.new(
+            tool_call_id: "tc-multi",
+            name: "shell",
+            args: %{"command" => command}
+          )
+        )
+
+      tool_binary =
+        ProtocolGUI.encode_gui_agent_chat(%{
+          visible: true,
+          messages: [{:tool_call, tc}],
+          status: :idle,
+          model: "",
+          prompt: "",
+          pending_approval: nil
+        })
+
+      approval_binary =
+        ProtocolGUI.encode_gui_agent_chat(%{
+          visible: true,
+          messages: [{:approval_tool_call, tc, approval}],
+          status: :tool_executing,
+          model: "",
+          prompt: "",
+          pending_approval: nil
+        })
+
+      tool_payload = extract_section(tool_binary, 0x06)
+      approval_payload = extract_section(approval_binary, 0x06)
+
+      <<1::16, 0::32, 0x04::8, _status::8, _error::8, _collapsed::8, _duration::32, name_len::16,
+        _name::binary-size(name_len), tool_summary_len::16,
+        tool_summary::binary-size(tool_summary_len), result_len::32,
+        _result::binary-size(result_len), _auto::8>> = tool_payload
+
+      assert tool_summary_len <= 65_535
+      assert String.valid?(tool_summary)
+      assert String.ends_with?(tool_summary, "… [truncated]")
+
+      <<1::16, 0::32, 0x09::8, 0::8, name_len::16, _name::binary-size(name_len),
+        approval_summary_len::16, approval_summary::binary-size(approval_summary_len),
+        _rest::binary>> = approval_payload
+
+      assert approval_summary_len <= 65_535
+      assert String.valid?(approval_summary)
+      assert String.ends_with?(approval_summary, "… [truncated]")
+    end
+
+    test "encodes long multibyte styled tool summaries within UTF-8 byte limits" do
+      command = String.duplicate("🚀", 20_000)
+
+      tc = %MingaAgent.ToolCall{
+        id: "tc-styled-multi",
+        name: "shell",
+        args: %{"command" => command},
+        status: :complete,
+        is_error: false,
+        collapsed: false,
+        duration_ms: 42,
+        result: "ok"
+      }
+
+      styled_lines = [
+        [{"result", 0x61AFEF, 0x000000, 0x01}]
+      ]
+
+      binary =
+        ProtocolGUI.encode_gui_agent_chat(%{
+          visible: true,
+          messages: [{:styled_tool_call, tc, styled_lines}],
+          status: :idle,
+          model: "",
+          prompt: "",
+          pending_approval: nil
+        })
+
+      messages_payload = extract_section(binary, 0x06)
+
+      <<1::16, 0::32, 0x08::8, _status::8, _error::8, _collapsed::8, _duration::32, name_len::16,
+        _name::binary-size(name_len), summary_len::16, summary::binary-size(summary_len),
+        line_count::16, run_count::16, text_len::16, _text::binary-size(text_len), _fg::24,
+        _bg::24, _flags::8, _auto_approved::8>> = messages_payload
+
+      assert line_count == 1
+      assert run_count == 1
+      assert summary_len <= 60_000
+      assert String.valid?(summary)
+      assert String.ends_with?(summary, "… [truncated]")
     end
   end
 

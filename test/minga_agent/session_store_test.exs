@@ -29,6 +29,7 @@ defmodule MingaAgent.SessionStoreTest do
            result: "defmodule Foo do\nend",
            is_error: false,
            collapsed: true,
+           auto_approved_scope: :session,
            started_at: nil,
            duration_ms: 42
          }},
@@ -92,6 +93,7 @@ defmodule MingaAgent.SessionStoreTest do
       assert tc.name == "read_file"
       assert tc.duration_ms == 42
       assert tc.status == :complete
+      assert tc.auto_approved_scope == :session
     end
 
     test "loads corrupted message atoms defensively", %{tmp_dir: dir} do

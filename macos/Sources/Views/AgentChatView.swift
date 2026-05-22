@@ -317,12 +317,12 @@ struct AgentChatView: View {
                     .frame(height: 1)
                     .padding(.horizontal, 4)
             }
-            messageView(msg)
+            messageView(msg, index: index)
         }
     }
 
     @ViewBuilder
-    private func messageView(_ msg: ChatMessageEntry) -> some View {
+    private func messageView(_ msg: ChatMessageEntry, index: Int) -> some View {
         switch msg {
         case .user(_, let text):
             userMessage(text)
@@ -332,12 +332,12 @@ struct AgentChatView: View {
             styledAssistantBlock(lines)
         case .thinking(_, let text, let collapsed):
             thinkingBlock(text, collapsed: collapsed)
-        case .toolCall(let id, let name, let summary, let status, let isError, let collapsed, let duration, let result):
-            toolCallCard(messageIndex: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, durationMs: duration, result: result, resultLines: nil)
-        case .styledToolCall(let id, let name, let summary, let status, let isError, let collapsed, let duration, let resultLines):
-            toolCallCard(messageIndex: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, durationMs: duration, result: nil, resultLines: resultLines)
-        case .approvalToolCall(_, let name, let summary, let previewKind, let previewLines):
-            approvalToolCallCard(name: name, summary: summary, previewKind: previewKind, previewLines: previewLines)
+        case .toolCall(_, let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let duration, let result):
+            toolCallCard(messageIndex: index, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: result, resultLines: nil)
+        case .styledToolCall(_, let name, let summary, let status, let isError, let collapsed, let autoApprovedScope, let duration, let resultLines):
+            toolCallCard(messageIndex: index, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, autoApprovedScope: autoApprovedScope, durationMs: duration, result: nil, resultLines: resultLines)
+        case .approvalToolCall(_, let name, let summary, let toolCallId, let previewKind, let previewLines):
+            approvalToolCallCard(name: name, summary: summary, toolCallId: toolCallId, previewKind: previewKind, previewLines: previewLines)
         case .system(_, let text, let isError):
             systemMessage(text, isError: isError)
         case .usage(_, let input, let output, _, _, let costMicros):
@@ -507,8 +507,8 @@ struct AgentChatView: View {
     }
 
     @ViewBuilder
-    private func toolCallCard(messageIndex: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, result: String?, resultLines: [[Wire.StyledTextRun]]?) -> some View {
-        let hasResult = (result != nil && !result!.isEmpty) || (resultLines != nil && !resultLines!.isEmpty)
+    private func toolCallCard(messageIndex: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, result: String?, resultLines: [[Wire.StyledTextRun]]?) -> some View {
+        let hasResult = result?.isEmpty == false || resultLines?.isEmpty == false
 
         VStack(alignment: .leading, spacing: 0) {
             // Header (clickable to toggle collapse)
@@ -538,11 +538,7 @@ struct AgentChatView: View {
 
                 // Tool summary (command, path, etc.)
                 if !summary.isEmpty {
-                    Text(summary)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(theme.agentTextFg.opacity(0.5))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    toolCallSummaryView(name: name, summary: summary)
                 }
 
                 Spacer(minLength: 8)
@@ -554,6 +550,10 @@ struct AgentChatView: View {
                 }
 
                 statusBadge(status, isError: isError)
+
+                if let autoApprovedLabel = autoApprovedScopeLabel(autoApprovedScope) {
+                    autoApprovedPill(label: autoApprovedLabel)
+                }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -629,21 +629,17 @@ struct AgentChatView: View {
     }
 
     @ViewBuilder
-    private func approvalToolCallCard(name: String, summary: String, previewKind: UInt8, previewLines: [String]) -> some View {
+    private func approvalToolCallCard(name: String, summary: String, toolCallId: String, previewKind: UInt8, previewLines: [String]) -> some View {
         let visiblePreviewLines = Array(previewLines.prefix(8))
 
         VStack(alignment: .leading, spacing: 10) {
-            approvalToolCallHeader(name: name)
-
-            if !summary.isEmpty {
-                approvalToolCallSummary(summary: summary, previewKind: previewKind)
-            }
+            approvalToolCallHeader(name: name, summary: summary, previewKind: previewKind)
 
             if !visiblePreviewLines.isEmpty {
                 approvalPreviewLines(visiblePreviewLines)
             }
 
-            approvalButtons
+            approvalButtons(toolCallId: toolCallId)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -651,8 +647,8 @@ struct AgentChatView: View {
         .overlay(approvalCardBorder)
     }
 
-    private func approvalToolCallHeader(name: String) -> some View {
-        HStack(spacing: 8) {
+    private func approvalToolCallHeader(name: String, summary: String, previewKind: UInt8) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: "exclamationmark.shield")
                 .font(.system(size: 13))
                 .foregroundStyle(Color.orange)
@@ -662,18 +658,51 @@ struct AgentChatView: View {
                 .foregroundStyle(theme.agentTextFg)
 
             Text(name)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
                 .foregroundStyle(theme.agentToolHeader)
 
-            Spacer()
+            if !summary.isEmpty {
+                approvalToolCallSummary(summary: summary, previewKind: previewKind)
+            }
         }
     }
 
+    @ViewBuilder
+    private func toolCallSummaryView(name: String, summary: String) -> some View {
+        if name == "shell" {
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(summary)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(theme.agentTextFg.opacity(0.5))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Text(summary)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(theme.agentTextFg.opacity(0.5))
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+    }
+
+    @ViewBuilder
     private func approvalToolCallSummary(summary: String, previewKind: UInt8) -> some View {
-        Text("\(approvalPreviewLabel(previewKind)): \(summary)")
-            .font(.system(size: 11, design: .monospaced))
-            .foregroundStyle(theme.agentTextFg.opacity(0.75))
-            .lineLimit(2)
+        if previewKind == 2 {
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(summary)
+                    .font(.system(size: 12, weight: .regular, design: .monospaced))
+                    .foregroundStyle(theme.agentTextFg)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+        } else {
+            Text(summary)
+                .font(.system(size: 12, weight: .regular, design: .monospaced))
+                .foregroundStyle(theme.agentTextFg)
+                .lineLimit(2)
+        }
     }
 
     private func approvalPreviewLines(_ lines: [String]) -> some View {
@@ -696,22 +725,30 @@ struct AgentChatView: View {
             .truncationMode(.tail)
     }
 
-    private var approvalButtons: some View {
-        HStack(spacing: 8) {
-            Button("Approve") {
+    private func approvalButtons(toolCallId _: String) -> some View {
+        HStack(spacing: 6) {
+            Button("Approve (y)") {
                 encoder?.sendKeyPress(codepoint: 0x79, modifiers: 0)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
 
-            Button("Deny") {
-                encoder?.sendKeyPress(codepoint: 0x6E, modifiers: 0)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+            HStack(spacing: 6) {
+                Button("Trust for session (a)") {
+                    encoder?.sendKeyPress(codepoint: 0x61, modifiers: 0)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
 
-            Button("Approve all") {
-                encoder?.sendKeyPress(codepoint: 0x59, modifiers: 0)
+                Button("Trust for this turn (t)") {
+                    encoder?.sendKeyPress(codepoint: 0x74, modifiers: 0)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
+            Button("Deny (n)") {
+                encoder?.sendKeyPress(codepoint: 0x6E, modifiers: 0)
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
@@ -1134,6 +1171,21 @@ struct AgentChatView: View {
                     RoundedRectangle(cornerRadius: 4)
                         .fill(color.opacity(0.1))
                 )
+        }
+    }
+
+    private func autoApprovedPill(label: String) -> some View {
+        Text("auto-approved · \(label)")
+            .font(.system(size: 10, design: .rounded))
+            .foregroundStyle(theme.agentTextFg.opacity(0.55))
+            .accessibilityLabel("Auto-approved for this \(label)")
+    }
+
+    private func autoApprovedScopeLabel(_ scope: UInt8) -> String? {
+        switch scope {
+        case 1: return "session"
+        case 2: return "turn"
+        default: return nil
         }
     }
 

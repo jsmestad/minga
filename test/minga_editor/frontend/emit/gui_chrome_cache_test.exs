@@ -302,7 +302,7 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
 
       workspaces_cmd = Enum.find(second_cmds, &opcode?(&1, 0x98))
       assert <<0x98, payload_len::16, payload::binary-size(payload_len)>> = workspaces_cmd
-      assert <<1::8, _active::16, _mode::8, _flags::8, 1::8, _rest::binary>> = payload
+      assert <<2::8, _active::16, _mode::8, _flags::8, 1::8, _rest::binary>> = payload
       assert caches2.last_gui_workspaces_fp != nil
 
       {_ctx, caches3, third_cmds} = sync_chrome(state_without_agents, caches2)

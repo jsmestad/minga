@@ -703,12 +703,14 @@ defmodule MingaEditor.State do
 
   @typedoc "Metadata for an open diff view buffer."
   @type diff_view_info :: %{
-          source_buf: pid() | nil,
-          git_root: String.t(),
-          rel_path: String.t(),
-          staged: boolean(),
-          line_metadata: [Minga.Core.DiffView.line_meta()],
-          hunk_lines: [non_neg_integer()]
+          required(:source_buf) => pid() | nil,
+          required(:git_root) => String.t(),
+          required(:rel_path) => String.t(),
+          required(:staged) => boolean(),
+          required(:line_metadata) => [Minga.Core.DiffView.line_meta()],
+          required(:hunk_lines) => [non_neg_integer()],
+          optional(:view_mode) => :unified | :side_by_side,
+          optional(:pane_width) => pos_integer()
         }
 
   @typedoc "The git_remote_op tracking tuple, or nil when no operation is in flight."
@@ -1868,16 +1870,17 @@ defmodule MingaEditor.State do
 
     case agent_snapshot(session_pid) do
       nil ->
-        state
+        AgentAccess.update_agent(state, &AgentState.clear_active_tool_name/1)
 
       snapshot ->
         AgentAccess.update_agent(state, fn agent ->
-          %{
-            agent
-            | runtime: MingaAgent.RuntimeState.set_status(agent.runtime, snapshot.status),
-              pending_approval: snapshot.pending_approval,
-              error: snapshot.error
-          }
+          AgentState.apply_session_snapshot(
+            agent,
+            snapshot.status,
+            snapshot.pending_approval,
+            snapshot.error,
+            Map.get(snapshot, :active_tool_name)
+          )
         end)
     end
   end

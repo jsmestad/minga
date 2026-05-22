@@ -122,6 +122,7 @@ defmodule Minga.Integration.GUIProtocolTest do
            buf_count: 3,
            macro_recording: {true, "q"},
            agent_status: :thinking,
+           active_tool_name: "read_file",
            agent_theme_colors: nil,
            status_msg: "Wrote foo.ex",
            modeline_segments: %{
@@ -152,6 +153,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["macro_recording"] == 17
       assert decoded["parser_status"] == 0
       assert decoded["agent_status"] == 1
+      assert decoded["active_tool_name"] == "read_file"
       assert decoded["git_added"] == 5
       assert decoded["git_modified"] == 3
       assert decoded["git_deleted"] == 1
@@ -181,6 +183,7 @@ defmodule Minga.Integration.GUIProtocolTest do
            message_count: 7,
            macro_recording: false,
            agent_status: :thinking,
+           active_tool_name: "shell",
            agent_theme_colors: nil,
            # Background buffer context
            cursor_line: 10,
@@ -223,6 +226,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["error_count"] == 1
       assert decoded["warning_count"] == 2
       assert decoded["hint_count"] == 1
+      assert decoded["active_tool_name"] == "shell"
       assert decoded["git_added"] == 3
       assert decoded["git_modified"] == 2
       assert decoded["git_deleted"] == 0
@@ -269,6 +273,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         status: :complete,
         is_error: false,
         collapsed: false,
+        auto_approved_scope: :turn,
         duration_ms: 1500,
         result: "output text"
       }
@@ -302,6 +307,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert msg["status"] == 1
       assert msg["is_error"] == false
       assert msg["collapsed"] == false
+      assert msg["auto_approved_scope"] == 2
       assert msg["duration_ms"] == 1500
       assert length(msg["result_lines"]) == 2
 
@@ -320,6 +326,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         status: :running,
         is_error: false,
         collapsed: true,
+        auto_approved_scope: :session,
         duration_ms: 0,
         result: "file content here"
       }
@@ -345,6 +352,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert msg["kind"] == "tool_call"
       assert msg["name"] == "read_file"
       assert msg["collapsed"] == true
+      assert msg["auto_approved_scope"] == 1
       assert msg["result"] == "file content here"
     end
 

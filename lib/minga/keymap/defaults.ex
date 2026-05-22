@@ -64,6 +64,9 @@ defmodule Minga.Keymap.Defaults do
     {~k(b W), :view_warnings, "View warnings"},
     {~k(b N), :new_buffer, "New buffer"},
     {~k(b l), :set_language, "Set language"},
+    {~k(b P), :pin_tab, "Pin/unpin tab"},
+    {~k(b <), :move_tab_left, "Move tab left"},
+    {~k(b >), :move_tab_right, "Move tab right"},
 
     # ── Window ────────────────────────────────────────────────────────────────
     {~k(w h), :window_left, "Window left"},
@@ -128,6 +131,9 @@ defmodule Minga.Keymap.Defaults do
     {~k(g c c), :git_commit_open, "Commit"},
     {~k(g c a), :git_amend_open, "Amend commit"},
     {~k(g D), :git_diff_toggle_staged, "Toggle staged/unstaged diff"},
+    {~k(g x c), :git_accept_current_conflict, "Accept current conflict"},
+    {~k(g x i), :git_accept_incoming_conflict, "Accept incoming conflict"},
+    {~k(g x b), :git_accept_both_conflict, "Accept both conflict sides"},
     {~k(g c g), :git_generate_commit_message, "Generate AI commit message"},
 
     # ── Project ────────────────────────────────────────────────────────────────
@@ -209,6 +215,7 @@ defmodule Minga.Keymap.Defaults do
     {~k(c l), "+LSP"},
     {~k(g), "+git"},
     {~k(g c), "+commit"},
+    {~k(g x), "+conflict"},
     {~k(w), "+window"},
     {~k(q), "+quit"},
     {~k(h), "+help"},

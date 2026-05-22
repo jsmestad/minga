@@ -63,4 +63,40 @@ defmodule MingaEditor.Input.RegistryTest do
     handlers_after_cleanup = Input.surface_handlers(%{editing_model: Minga.Editing.Model.Vim})
     assert Enum.count(handlers_after_cleanup, &(&1 == MingaEditor.Input.GlobalBindings)) == 1
   end
+
+  test "unregister_source preserves another extension source's handler and ordering" do
+    source = {:extension, :input_registry_test}
+    other_source = {:extension, :input_registry_other}
+
+    :ok =
+      Input.register_handler(source, MingaEditor.Input.ExtensionOne,
+        phase: :surface,
+        priority: -30
+      )
+
+    :ok =
+      Input.register_handler(other_source, MingaEditor.Input.ExtensionTwo,
+        phase: :surface,
+        priority: -20
+      )
+
+    handlers_with_extension = Input.surface_handlers(%{editing_model: Minga.Editing.Model.Vim})
+
+    assert Enum.find_index(handlers_with_extension, &(&1 == MingaEditor.Input.ExtensionOne)) <
+             Enum.find_index(handlers_with_extension, &(&1 == MingaEditor.Input.ExtensionTwo))
+
+    assert Enum.find_index(handlers_with_extension, &(&1 == MingaEditor.Input.ExtensionTwo)) <
+             Enum.find_index(handlers_with_extension, &(&1 == MingaEditor.Input.Dashboard))
+
+    :ok = Input.unregister_source(source)
+    handlers_after_cleanup = Input.surface_handlers(%{editing_model: Minga.Editing.Model.Vim})
+
+    assert Enum.find(handlers_after_cleanup, &(&1 == MingaEditor.Input.ExtensionOne)) == nil
+
+    assert Enum.find(handlers_after_cleanup, &(&1 == MingaEditor.Input.ExtensionTwo)) ==
+             MingaEditor.Input.ExtensionTwo
+
+    assert Enum.find_index(handlers_after_cleanup, &(&1 == MingaEditor.Input.ExtensionTwo)) <
+             Enum.find_index(handlers_after_cleanup, &(&1 == MingaEditor.Input.Dashboard))
+  end
 end

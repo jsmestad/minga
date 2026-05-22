@@ -83,7 +83,7 @@ defmodule Minga.Mode.NormalBracketNavTest do
     test "unknown second key cancels prefix" do
       state = press_bracket(:next)
 
-      {:continue, new_state} = Normal.handle_key({?x, 0}, state)
+      {:continue, new_state} = Normal.handle_key({?q, 0}, state)
       assert new_state.prefix_node == nil
     end
   end

@@ -437,6 +437,7 @@ final class SpyEncoder: InputEncoder, Sendable {
         case selectTab(id: UInt32)
         case closeTab(id: UInt32)
         case tabCopyPath(id: UInt32)
+        case tabReorder(id: UInt32, newIndex: UInt16)
         case hoverOpenAction
         case fileTreeClick(index: UInt16)
         case fileTreeToggle(index: UInt16)
@@ -536,6 +537,7 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendSelectTab(id: UInt32) { state.withLock { $0.guiActions.append(.selectTab(id: id)) } }
     func sendCloseTab(id: UInt32) { state.withLock { $0.guiActions.append(.closeTab(id: id)) } }
     func sendTabCopyPath(id: UInt32) { state.withLock { $0.guiActions.append(.tabCopyPath(id: id)) } }
+    func sendTabReorder(id: UInt32, newIndex: UInt16) { state.withLock { $0.guiActions.append(.tabReorder(id: id, newIndex: newIndex)) } }
     func sendHoverOpenAction() { state.withLock { $0.guiActions.append(.hoverOpenAction) } }
     func sendFileTreeClick(index: UInt16) { state.withLock { $0.guiActions.append(.fileTreeClick(index: index)) } }
     func sendFileTreeToggle(index: UInt16) { state.withLock { $0.guiActions.append(.fileTreeToggle(index: index)) } }

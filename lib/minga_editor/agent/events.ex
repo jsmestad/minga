@@ -19,6 +19,7 @@ defmodule MingaEditor.Agent.Events do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
+  alias MingaAgent.Session
   alias Minga.Buffer
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Workspace
@@ -93,6 +94,7 @@ defmodule MingaEditor.Agent.Events do
 
   def handle(state, {:tool_started, "shell", args}) do
     command = Map.get(args, "command", "")
+    state = sync_active_tool_name(state, "shell")
     state = update_preview(state, &Preview.set_shell(&1, command))
     {state, [{:render, 16}]}
   end
@@ -110,17 +112,21 @@ defmodule MingaEditor.Agent.Events do
 
   def handle(state, {:tool_ended, "shell", result, status}) do
     shell_status = if status == :error, do: :error, else: :done
+    state = sync_active_tool_name(state, nil)
     state = update_preview(state, &Preview.finish_shell(&1, result, shell_status))
     {state, [{:render, 16}]}
   end
 
   def handle(state, {:tool_started, "read_file", args}) do
     path = Map.get(args, "path", "")
+    state = sync_active_tool_name(state, "read_file")
     state = update_preview(state, &Preview.set_file(&1, path, ""))
     {state, [{:render, 16}]}
   end
 
   def handle(state, {:tool_ended, "read_file", result, _status}) do
+    state = sync_active_tool_name(state, nil)
+
     case AgentAccess.view(state).preview.content do
       {:file, path, _} ->
         state = update_preview(state, &Preview.set_file(&1, path, result))
@@ -133,12 +139,15 @@ defmodule MingaEditor.Agent.Events do
 
   def handle(state, {:tool_started, "list_directory", args}) do
     path = Map.get(args, "path", ".")
+
+    state = sync_active_tool_name(state, "list_directory")
     state = update_preview(state, &Preview.set_directory(&1, path, []))
     {state, [{:render, 16}]}
   end
 
   def handle(state, {:tool_ended, "list_directory", result, _status}) do
     entries = result |> String.split("\n") |> Enum.reject(&(&1 == ""))
+    state = sync_active_tool_name(state, nil)
 
     case AgentAccess.view(state).preview.content do
       {:directory, path, _} ->
@@ -150,12 +159,14 @@ defmodule MingaEditor.Agent.Events do
     end
   end
 
-  def handle(state, {:tool_started, _name, _args}) do
-    {state, []}
+  def handle(state, {:tool_started, name, _args}) do
+    state = sync_active_tool_name(state, name)
+    {state, [{:render, 16}]}
   end
 
   def handle(state, {:tool_ended, _name, _result, _status}) do
-    {state, []}
+    state = sync_active_tool_name(state, nil)
+    {state, [{:render, 16}]}
   end
 
   def handle(state, {:file_changed, path, before_content, after_content}) do
@@ -254,6 +265,42 @@ defmodule MingaEditor.Agent.Events do
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
+
+  @spec sync_active_tool_name(EditorState.t(), String.t() | nil) :: EditorState.t()
+  defp sync_active_tool_name(state, fallback_name) do
+    case AgentAccess.session(state) do
+      pid when is_pid(pid) ->
+        case session_active_tool_name(pid) do
+          {:ok, active_tool_name} ->
+            AgentAccess.update_agent(
+              state,
+              &AgentState.set_active_tool_name(&1, active_tool_name)
+            )
+
+          :error ->
+            apply_active_tool_name_fallback(state, fallback_name)
+        end
+
+      _ ->
+        apply_active_tool_name_fallback(state, fallback_name)
+    end
+  end
+
+  @spec apply_active_tool_name_fallback(EditorState.t(), String.t() | nil) :: EditorState.t()
+  defp apply_active_tool_name_fallback(state, name) when is_binary(name) do
+    AgentAccess.update_agent(state, &AgentState.set_active_tool_name(&1, name))
+  end
+
+  defp apply_active_tool_name_fallback(state, _name) do
+    AgentAccess.update_agent(state, &AgentState.clear_active_tool_name/1)
+  end
+
+  @spec session_active_tool_name(pid()) :: {:ok, String.t() | nil} | :error
+  defp session_active_tool_name(pid) do
+    {:ok, Session.editor_snapshot(pid).active_tool_name}
+  catch
+    :exit, _ -> :error
+  end
 
   @spec reload_remote_buffer_if_open(EditorState.t(), String.t(), String.t()) ::
           {EditorState.t(), [effect()]}

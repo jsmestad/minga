@@ -1318,7 +1318,7 @@ defmodule MingaAgent.Providers.Native do
     final_ctx
   end
 
-  @typep approval_mode :: :none | :ask | :ask_all | :approve_all
+  @typep approval_mode :: :none | :ask | :ask_all
 
   @spec execute_with_approval(
           pid(),
@@ -1370,6 +1370,7 @@ defmodule MingaAgent.Providers.Native do
             session_pid,
             tool_call,
             available_tools,
+            mode,
             config,
             hook_runner
           )
@@ -1419,26 +1420,19 @@ defmodule MingaAgent.Providers.Native do
          session_pid,
          tool_call,
          available_tools,
-         :approve_all,
-         config,
-         hook_runner
-       ) do
-    {result, is_error} =
-      run_single_tool(tool_call, available_tools, provider_pid, session_pid, config, hook_runner)
-
-    {result, is_error, :approve_all}
-  end
-
-  defp execute_with_global_mode(
-         provider_pid,
-         session_pid,
-         tool_call,
-         available_tools,
          :ask_all,
          config,
          hook_runner
        ) do
-    request_approval(provider_pid, session_pid, tool_call, available_tools, config, hook_runner)
+    request_approval(
+      provider_pid,
+      session_pid,
+      tool_call,
+      available_tools,
+      :ask_all,
+      config,
+      hook_runner
+    )
   end
 
   defp execute_with_global_mode(
@@ -1451,7 +1445,15 @@ defmodule MingaAgent.Providers.Native do
          hook_runner
        ) do
     if Tools.destructive?(tool_call.name, tool_call.arguments || %{}) do
-      request_approval(provider_pid, session_pid, tool_call, available_tools, config, hook_runner)
+      request_approval(
+        provider_pid,
+        session_pid,
+        tool_call,
+        available_tools,
+        :ask,
+        config,
+        hook_runner
+      )
     else
       {result, is_error} =
         run_single_tool(
@@ -1502,15 +1504,17 @@ defmodule MingaAgent.Providers.Native do
           pid() | nil,
           map(),
           [ReqLLM.Tool.t()],
+          approval_mode(),
           AgentConfig.t(),
           hook_runner()
         ) ::
-          {String.t(), boolean(), :ask | :approve_all}
+          {String.t(), boolean(), approval_mode()}
   defp request_approval(
          provider_pid,
          session_pid,
          tool_call,
          available_tools,
+         mode,
          config,
          hook_runner
        ) do
@@ -1539,26 +1543,13 @@ defmodule MingaAgent.Providers.Native do
             hook_runner
           )
 
-        {result, is_error, :ask}
-
-      {:tool_approval_response, _tool_call_id, :approve_all} ->
-        {result, is_error} =
-          run_single_tool(
-            tool_call,
-            available_tools,
-            provider_pid,
-            session_pid,
-            config,
-            hook_runner
-          )
-
-        {result, is_error, :approve_all}
+        {result, is_error, mode}
 
       {:tool_approval_response, _tool_call_id, :reject} ->
-        {"Tool rejected by user", true, :ask}
+        {"Tool rejected by user", true, mode}
     after
       config.approval_timeout_ms ->
-        {"Tool approval timed out", true, :ask}
+        {"Tool approval timed out", true, mode}
     end
   end
 

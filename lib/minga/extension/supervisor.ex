@@ -39,26 +39,103 @@ defmodule Minga.Extension.Supervisor do
   Errors at any stage are logged to *Messages* and stored in the
   registry as `:load_error` without affecting other extensions.
   """
-  @spec start_all() :: :ok
-  @spec start_all(GenServer.server(), GenServer.server()) :: :ok
+  @type start_failure :: %{extension: atom(), reason: term()}
+
+  @spec start_all() :: :ok | {:error, [start_failure()]}
+  @spec start_all(GenServer.server(), GenServer.server()) :: :ok | {:error, [start_failure()]}
   def start_all, do: start_all(__MODULE__, ExtRegistry)
 
   def start_all(supervisor, registry) do
-    # Step 1: Install hex extensions (single Mix.install call)
-    case ExtHex.install_all(registry) do
-      :ok -> :ok
-      {:error, msg} -> Minga.Log.warning(:config, msg)
+    hex_install_failure =
+      case ExtHex.install_all(registry) do
+        :ok ->
+          nil
+
+        {:error, reason} ->
+          Minga.Log.warning(:config, reason)
+          mark_hex_entries_load_error(registry)
+          %{extension: :hex_install, reason: reason}
+      end
+
+    git_failures = resolve_git_extensions(registry)
+    failed_git_names = MapSet.new(Enum.map(git_failures, & &1.extension))
+
+    failures =
+      ExtRegistry.all(registry)
+      |> Enum.reduce([], fn {name, entry}, failures ->
+        maybe_start_registered_extension(
+          supervisor,
+          registry,
+          name,
+          entry,
+          failed_git_names,
+          hex_install_failure,
+          failures
+        )
+      end)
+      |> prepend_failure(hex_install_failure)
+      |> Kernel.++(git_failures)
+
+    case failures do
+      [] -> :ok
+      failures -> {:error, failures}
     end
+  end
 
-    # Step 2: Resolve git extensions to local paths
-    resolve_git_extensions(registry)
-
-    # Step 3: Start all extensions
-    for {name, entry} <- ExtRegistry.all(registry) do
-      start_extension(supervisor, registry, name, entry)
+  @spec maybe_start_registered_extension(
+          GenServer.server(),
+          GenServer.server(),
+          atom(),
+          ExtRegistry.entry(),
+          MapSet.t(atom()),
+          start_failure() | nil,
+          [start_failure()]
+        ) :: [start_failure()]
+  defp maybe_start_registered_extension(
+         _supervisor,
+         _registry,
+         name,
+         %{source_type: :git, path: nil},
+         failed_git_names,
+         _hex_install_failure,
+         failures
+       ) do
+    if MapSet.member?(failed_git_names, name) do
+      failures
+    else
+      failures ++ [%{extension: name, reason: :clone_failed}]
     end
+  end
 
-    :ok
+  defp maybe_start_registered_extension(
+         _supervisor,
+         _registry,
+         _name,
+         %{source_type: :hex},
+         _failed_git_names,
+         hex_install_failure,
+         failures
+       )
+       when is_map(hex_install_failure) do
+    failures
+  end
+
+  defp maybe_start_registered_extension(
+         supervisor,
+         registry,
+         name,
+         entry,
+         _failed_git_names,
+         _hex_install_failure,
+         failures
+       ) do
+    case start_extension(supervisor, registry, name, entry) do
+      {:ok, _pid} ->
+        failures
+
+      {:error, reason} ->
+        failures ++ [%{extension: name, reason: reason}]
+    end
   end
 
   @doc """
@@ -66,16 +143,27 @@ defmodule Minga.Extension.Supervisor do
 
   Used by config reload to cleanly tear down before re-loading.
   """
-  @spec stop_all() :: :ok
-  @spec stop_all(GenServer.server(), GenServer.server()) :: :ok
+  @type stop_failure :: %{extension: atom(), reason: term()}
+
+  @spec stop_all() :: :ok | {:error, [stop_failure()]}
+  @spec stop_all(GenServer.server(), GenServer.server()) :: :ok | {:error, [stop_failure()]}
   def stop_all, do: stop_all(__MODULE__, ExtRegistry)
 
   def stop_all(supervisor, registry) do
-    for {name, entry} <- ExtRegistry.all(registry) do
-      stop_extension(supervisor, registry, name, entry)
-    end
+    failures =
+      ExtRegistry.all(registry)
+      |> Enum.reduce([], fn {name, entry}, failures ->
+        case stop_extension(supervisor, registry, name, entry) do
+          :ok -> failures
+          {:error, reason} -> [%{extension: name, reason: reason} | failures]
+        end
+      end)
+      |> Enum.reverse()
 
-    :ok
+    case failures do
+      [] -> :ok
+      failures -> {:error, failures}
+    end
   end
 
   @doc """
@@ -161,11 +249,10 @@ defmodule Minga.Extension.Supervisor do
       )
     else
       {:error, reason} ->
-        cleanup_extension_contributions(name, cmd_registry, keymap)
         msg = "Extension #{name} load error: #{inspect(reason)}"
         Minga.Log.warning(:config, msg)
         ExtRegistry.update(registry, name, status: :load_error, pid: nil)
-        {:error, reason}
+        wrap_start_failure(name, reason, cmd_registry, keymap)
     end
   end
 
@@ -216,30 +303,63 @@ defmodule Minga.Extension.Supervisor do
        ) do
     case start_child(supervisor, registry, name, module, config) do
       {:ok, pid} ->
-        with :ok <- register_extension_commands(module, name, cmd_registry),
-             :ok <- register_extension_keybinds(module, name, keymap) do
-          {:ok, pid}
-        else
-          {:error, reason} ->
-            terminate_extension_child(supervisor, pid)
-            {:error, reason}
-        end
+        register_dsl_for_started_child(supervisor, pid, module, name, cmd_registry, keymap)
 
       {:error, reason} ->
-        cleanup_extension_contributions(name, cmd_registry, keymap)
         {:error, reason}
     end
   end
 
-  @spec terminate_extension_child(GenServer.server(), pid()) :: :ok
-  defp terminate_extension_child(supervisor, pid) do
-    try do
-      DynamicSupervisor.terminate_child(supervisor, pid)
-    catch
-      :exit, _ -> :ok
+  @spec register_dsl_for_started_child(
+          GenServer.server(),
+          pid(),
+          module(),
+          atom(),
+          GenServer.server(),
+          GenServer.server()
+        ) :: {:ok, pid()} | {:error, term()}
+  defp register_dsl_for_started_child(supervisor, pid, module, name, cmd_registry, keymap) do
+    with :ok <- register_extension_commands(module, name, cmd_registry),
+         :ok <- register_extension_keybinds(module, name, keymap) do
+      {:ok, pid}
+    else
+      {:error, reason} -> handle_dsl_registration_failure(supervisor, pid, reason)
     end
+  end
 
-    :ok
+  @spec handle_dsl_registration_failure(GenServer.server(), pid(), term()) :: {:error, term()}
+  defp handle_dsl_registration_failure(supervisor, pid, reason) do
+    case terminate_extension_child(supervisor, pid) do
+      :ok ->
+        {:error, reason}
+
+      {:error, termination_reason} ->
+        {:error, {:registration_cleanup_failed, reason, termination_reason}}
+    end
+  end
+
+  @spec terminate_extension_child(GenServer.server(), pid()) :: :ok | {:error, term()}
+  defp terminate_extension_child(supervisor, pid) do
+    case DynamicSupervisor.terminate_child(supervisor, pid) do
+      :ok ->
+        :ok
+
+      {:error, reason} = error ->
+        Minga.Log.warning(
+          :config,
+          "Extension child #{inspect(pid)} termination failed: #{inspect(reason)}"
+        )
+
+        error
+    end
+  catch
+    :exit, reason ->
+      Minga.Log.warning(
+        :config,
+        "Extension child #{inspect(pid)} termination exited: #{inspect(reason)}"
+      )
+
+      {:error, {:exit, reason}}
   end
 
   @spec finalize_extension_start(
@@ -253,11 +373,15 @@ defmodule Minga.Extension.Supervisor do
     do: {:ok, pid}
 
   defp finalize_extension_start({:error, reason}, registry, name, cmd_registry, keymap) do
-    cleanup_extension_contributions(name, cmd_registry, keymap)
+    cleanup_result = cleanup_extension_contributions(name, cmd_registry, keymap)
     msg = "Extension #{name} load error: #{inspect(reason)}"
     Minga.Log.warning(:config, msg)
     ExtRegistry.update(registry, name, status: :load_error, pid: nil)
-    {:error, reason}
+
+    case cleanup_result do
+      :ok -> {:error, reason}
+      {:error, failures} -> {:error, {:cleanup_failed, reason, failures}}
+    end
   end
 
   @spec start_child(GenServer.server(), GenServer.server(), atom(), module(), keyword()) ::
@@ -282,36 +406,43 @@ defmodule Minga.Extension.Supervisor do
   @doc """
   Stops a single extension, terminates its process, and purges the module.
   """
-  @spec stop_extension(GenServer.server(), GenServer.server(), atom(), ExtRegistry.entry()) :: :ok
+  @spec stop_extension(GenServer.server(), GenServer.server(), atom(), ExtRegistry.entry()) ::
+          :ok | {:error, term()}
   @spec stop_extension(
           GenServer.server(),
           GenServer.server(),
           atom(),
           ExtRegistry.entry(),
           start_opts()
-        ) :: :ok
+        ) :: :ok | {:error, term()}
   def stop_extension(supervisor, registry, name, entry, opts \\ []) do
     cmd_registry = Keyword.get(opts, :command_registry, Minga.Command.Registry)
     keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
 
-    if is_pid(entry.pid) do
-      try do
-        DynamicSupervisor.terminate_child(supervisor, entry.pid)
-      catch
-        :exit, _ -> :ok
+    termination_result =
+      if is_pid(entry.pid) do
+        terminate_extension_child(supervisor, entry.pid)
+      else
+        :ok
       end
+
+    finalize_stopped_extension(registry, name, entry)
+
+    cleanup_result = cleanup_extension_contributions(name, cmd_registry, keymap)
+
+    case {termination_result, cleanup_result} do
+      {:ok, :ok} ->
+        :ok
+
+      {:ok, {:error, failures}} ->
+        {:error, {:cleanup_failed, failures}}
+
+      {{:error, reason}, :ok} ->
+        {:error, reason}
+
+      {{:error, reason}, {:error, failures}} ->
+        {:error, {:cleanup_failed, reason, failures}}
     end
-
-    # Deregister source-owned contributions before purging the module.
-    cleanup_extension_contributions(name, cmd_registry, keymap)
-
-    if entry.module do
-      :code.purge(entry.module)
-      :code.delete(entry.module)
-    end
-
-    ExtRegistry.update(registry, name, status: :stopped, pid: nil, module: nil)
-    :ok
   end
 
   @doc """
@@ -356,21 +487,31 @@ defmodule Minga.Extension.Supervisor do
 
   # ── Private ────────────────────────────────────────────────────────────────
 
-  @spec resolve_git_extensions(GenServer.server()) :: :ok
+  @spec resolve_git_extensions(GenServer.server()) :: [start_failure()]
   defp resolve_git_extensions(registry) do
-    for {name, entry} <- ExtRegistry.all(registry), entry.source_type == :git do
-      case ExtGit.ensure_cloned(name, entry.git) do
-        {:ok, local_path} ->
-          ExtRegistry.update(registry, name, path: local_path)
-
-        {:error, reason} ->
-          Minga.Log.warning(:config, "Extension #{name}: #{reason}")
-          ExtRegistry.update(registry, name, status: :load_error)
-      end
-    end
-
-    :ok
+    ExtRegistry.all(registry)
+    |> Enum.reduce([], fn {name, entry}, failures ->
+      resolve_git_extension(registry, name, entry, failures)
+    end)
+    |> Enum.reverse()
   end
+
+  @spec resolve_git_extension(GenServer.server(), atom(), ExtRegistry.entry(), [start_failure()]) ::
+          [start_failure()]
+  defp resolve_git_extension(registry, name, %{source_type: :git} = entry, failures) do
+    case ExtGit.ensure_cloned(name, entry.git) do
+      {:ok, local_path} ->
+        ExtRegistry.update(registry, name, path: local_path)
+        failures
+
+      {:error, reason} ->
+        Minga.Log.warning(:config, "Extension #{name}: #{reason}")
+        ExtRegistry.update(registry, name, status: :load_error, pid: nil)
+        [%{extension: name, reason: reason} | failures]
+    end
+  end
+
+  defp resolve_git_extension(_registry, _name, _entry, failures), do: failures
 
   @spec find_and_start_hex_extension(
           GenServer.server(),
@@ -384,14 +525,8 @@ defmodule Minga.Extension.Supervisor do
     keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
     package_atom = String.to_atom(entry.hex.package)
 
-    case Application.ensure_all_started(package_atom) do
-      {:ok, _} -> :ok
-      {:error, _} -> :ok
-    end
-
-    # Search loaded modules for one implementing the Extension behaviour.
-    # The convention is the package name maps to a module like MingaSnippets.
-    with {:ok, module} <- find_extension_module(package_atom),
+    with :ok <- ensure_hex_application_started(package_atom),
+         {:ok, module} <- find_extension_module(package_atom),
          :ok <- validate_behaviour(module, name),
          :ok <- register_and_validate_options(name, module, entry.config),
          {:ok, _state} <- call_init(module, entry.config) do
@@ -412,11 +547,10 @@ defmodule Minga.Extension.Supervisor do
       )
     else
       {:error, reason} ->
-        cleanup_extension_contributions(name, cmd_registry, keymap)
         msg = "Extension #{name} load error: #{inspect(reason)}"
         Minga.Log.warning(:config, msg)
         ExtRegistry.update(registry, name, status: :load_error, pid: nil)
-        {:error, reason}
+        wrap_start_failure(name, reason, cmd_registry, keymap)
     end
   end
 
@@ -563,22 +697,80 @@ defmodule Minga.Extension.Supervisor do
     end
   end
 
-  @spec cleanup_extension_contributions(atom(), GenServer.server(), GenServer.server()) :: :ok
+  @spec cleanup_extension_contributions(atom(), GenServer.server(), GenServer.server()) ::
+          :ok | {:error, [map()]}
   defp cleanup_extension_contributions(name, cmd_registry, keymap) do
     source = {:extension, name}
 
-    Minga.Extension.ContributionCleanup.unregister_source(source,
-      command_registry: cmd_registry,
-      keymap: keymap
-    )
-  rescue
-    e ->
-      Minga.Log.warning(
-        :config,
-        "Extension #{name} contribution cleanup failed: #{Exception.message(e)}"
-      )
+    case Minga.Extension.ContributionCleanup.unregister_source(source,
+           command_registry: cmd_registry,
+           keymap: keymap
+         ) do
+      :ok ->
+        :ok
 
-      :ok
+      {:error, failures} = error ->
+        Minga.Log.warning(
+          :config,
+          "Extension #{name} contribution cleanup failed: #{format_cleanup_failures(failures)}"
+        )
+
+        error
+    end
+  end
+
+  @spec wrap_start_failure(atom(), term(), GenServer.server(), GenServer.server()) ::
+          {:error, term()}
+  defp wrap_start_failure(name, reason, cmd_registry, keymap) do
+    case cleanup_extension_contributions(name, cmd_registry, keymap) do
+      :ok -> {:error, reason}
+      {:error, failures} -> {:error, {:cleanup_failed, reason, failures}}
+    end
+  end
+
+  @spec finalize_stopped_extension(GenServer.server(), atom(), ExtRegistry.entry()) :: :ok
+  defp finalize_stopped_extension(registry, name, entry) do
+    if entry.module do
+      :code.purge(entry.module)
+      :code.delete(entry.module)
+    end
+
+    ExtRegistry.update(registry, name, status: :stopped, pid: nil, module: nil)
+    :ok
+  end
+
+  @spec mark_hex_entries_load_error(GenServer.server()) :: :ok
+  defp mark_hex_entries_load_error(registry) do
+    for {name, entry} <- ExtRegistry.all(registry), entry.source_type == :hex do
+      ExtRegistry.update(registry, name, status: :load_error, pid: nil)
+    end
+
+    :ok
+  end
+
+  @spec ensure_hex_application_started(atom()) :: :ok | {:error, term()}
+  defp ensure_hex_application_started(package_atom) do
+    case Application.ensure_all_started(package_atom) do
+      {:ok, _} ->
+        :ok
+
+      {:error, reason} ->
+        {:error, {:hex_application_start_failed, package_atom, reason}}
+    end
+  end
+
+  @spec prepend_failure([start_failure()], start_failure() | nil) :: [start_failure()]
+  defp prepend_failure(failures, nil), do: failures
+  defp prepend_failure(failures, failure), do: [failure | failures]
+
+  @spec format_cleanup_failures([map()]) :: String.t()
+  defp format_cleanup_failures(failures) do
+    Enum.map_join(failures, "; ", &format_cleanup_failure/1)
+  end
+
+  @spec format_cleanup_failure(map()) :: String.t()
+  defp format_cleanup_failure(%{family: family, source: source, reason: reason}) do
+    "#{inspect(family)} source=#{inspect(source)} reason=#{inspect(reason)}"
   end
 
   @spec register_extension_commands(module(), atom(), GenServer.server()) ::
@@ -586,12 +778,7 @@ defmodule Minga.Extension.Supervisor do
   defp register_extension_commands(module, ext_name, cmd_registry) do
     schema = command_schema(module)
 
-    case Enum.reduce_while(schema, :ok, fn spec, :ok ->
-           case register_extension_command_spec(spec, ext_name, cmd_registry) do
-             :ok -> {:cont, :ok}
-             {:error, reason} -> {:halt, {:error, reason}}
-           end
-         end) do
+    case register_extension_command_schema(schema, ext_name, cmd_registry) do
       :ok ->
         log_registered_commands(ext_name, schema)
         :ok
@@ -607,6 +794,20 @@ defmodule Minga.Extension.Supervisor do
       )
 
       {:error, {:command_registration_failed, Exception.message(e)}}
+  end
+
+  @spec register_extension_command_schema(
+          [Minga.Extension.command_spec()],
+          atom(),
+          GenServer.server()
+        ) :: :ok | {:error, term()}
+  defp register_extension_command_schema(schema, ext_name, cmd_registry) do
+    Enum.reduce_while(schema, :ok, fn spec, :ok ->
+      case register_extension_command_spec(spec, ext_name, cmd_registry) do
+        :ok -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
   end
 
   @spec command_schema(module()) :: [Minga.Extension.command_spec()]
@@ -713,15 +914,9 @@ defmodule Minga.Extension.Supervisor do
   @spec register_extension_keybinds(module(), atom(), GenServer.server()) ::
           :ok | {:error, term()}
   defp register_extension_keybinds(module, ext_name, keymap) do
-    if function_exported?(module, :__keybind_schema__, 0) do
-      Enum.reduce_while(module.__keybind_schema__(), :ok, fn spec, :ok ->
-        case bind_keybind_spec(spec, ext_name, keymap) do
-          :ok -> {:cont, :ok}
-          {:error, _reason} = error -> {:halt, error}
-        end
-      end)
-    else
-      :ok
+    case function_exported?(module, :__keybind_schema__, 0) do
+      true -> register_extension_keybind_schema(module.__keybind_schema__(), ext_name, keymap)
+      false -> :ok
     end
   rescue
     e ->
@@ -731,6 +926,20 @@ defmodule Minga.Extension.Supervisor do
       )
 
       {:error, {:keybind_registration_failed, :schema, Exception.message(e)}}
+  end
+
+  @spec register_extension_keybind_schema(
+          [Minga.Extension.keybind_spec()],
+          atom(),
+          GenServer.server()
+        ) :: :ok | {:error, term()}
+  defp register_extension_keybind_schema(schema, ext_name, keymap) do
+    Enum.reduce_while(schema, :ok, fn spec, :ok ->
+      case bind_keybind_spec(spec, ext_name, keymap) do
+        :ok -> {:cont, :ok}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
   end
 
   @spec bind_keybind_spec(Minga.Extension.keybind_spec(), atom(), GenServer.server()) ::

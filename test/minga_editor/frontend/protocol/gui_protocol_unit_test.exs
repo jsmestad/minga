@@ -42,7 +42,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       <<0x71, _::8, 2::8, rest::binary>> = binary
 
       <<_flags1::8, _id1::32, gid1::16, icon1_len::8, _icon1::binary-size(icon1_len),
-        label1_len::16, _label1::binary-size(label1_len), rest2::binary>> = rest
+        label1_len::16, _label1::binary-size(label1_len), _tint1::32, rest2::binary>> = rest
 
       <<_flags2::8, _id2::32, gid2::16, _rest3::binary>> = rest2
 
@@ -79,7 +79,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       }
 
       <<0x71, active_index::8, tab_count::8, flags::8, _id::32, _workspace::16, icon_len::8,
-        _icon::binary-size(icon_len), label_len::16, _label::binary-size(label_len)>> =
+        _icon::binary-size(icon_len), label_len::16, _label::binary-size(label_len), _tint::32>> =
         ProtocolGUI.encode_gui_tab_bar(chrome_state)
 
       assert active_index == 255
@@ -117,7 +117,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       <<0x98, payload_len::16, payload::binary-size(payload_len)>> =
         ProtocolGUI.encode_gui_workspaces(chrome_state)
 
-      <<1::8, 0::16, 0::8, _flags::8, 2::8, rest::binary>> = payload
+      <<2::8, 0::16, 0::8, _flags::8, 2::8, rest::binary>> = payload
 
       <<0::16, 0::8, _manual_status::8, _manual_flags::16, _manual_r::8, _manual_g::8,
         _manual_b::8, _manual_tab_count::16, _manual_drafts::16, _manual_conflicts::16,
@@ -157,7 +157,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       <<0x98, payload_len::16, payload::binary-size(payload_len)>> =
         ProtocolGUI.encode_gui_workspaces(chrome_state)
 
-      <<1::8, 1::16, 1::8, 1::8, 1::8, rest::binary>> = payload
+      <<2::8, 1::16, 1::8, 1::8, 1::8, rest::binary>> = payload
 
       <<1::16, 1::8, 2::8, flags::16, 0xC6::8, 0x78::8, 0xDD::8, 3::16, 4::16, 2::16, 1::16,
         label_len::8, label::binary-size(label_len), icon_len::8, icon::binary-size(icon_len),
@@ -189,7 +189,8 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
 
       <<_version::8, _active::16, _mode::8, _flags::8, 0::8, 1::16, 42::32, 1::16, 0::8,
         tab_flags::16, path_hash::32, icon_len::8, icon::binary-size(icon_len), label_len::16,
-        label::binary-size(label_len), path_len::16, path::binary-size(path_len)>> = payload
+        label::binary-size(label_len), path_len::16, path::binary-size(path_len), tint::32>> =
+        payload
 
       assert Bitwise.band(tab_flags, 0x01) == 0x01
       assert Bitwise.band(tab_flags, 0x02) == 0x02
@@ -198,6 +199,38 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       assert icon == ""
       assert label == "agent.ex"
       assert path == "/tmp/agent.ex"
+      assert tint == 0
+    end
+
+    test "encodes pinned visible tabs with tint color metadata" do
+      tab =
+        TabSummary.new(
+          id: 7,
+          workspace_id: 1,
+          kind: :file,
+          label: "pinned.ex",
+          path: "/tmp/pinned.ex",
+          icon: "",
+          pinned?: true,
+          tint_color: 0x123456
+        )
+
+      chrome_state = chrome_state(active_workspace_id: 1, workspaces: [], visible_tabs: [tab])
+
+      <<0x98, payload_len::16, payload::binary-size(payload_len)>> =
+        ProtocolGUI.encode_gui_workspaces(chrome_state)
+
+      <<_version::8, _active::16, _mode::8, _flags::8, 0::8, 1::16, 7::32, 1::16, 0::8,
+        tab_flags::16, _path_hash::32, icon_len::8, icon::binary-size(icon_len), label_len::16,
+        label::binary-size(label_len), path_len::16, path::binary-size(path_len), tint::32>> =
+        payload
+
+      assert Bitwise.band(tab_flags, 0x20) == 0x20
+      assert icon == ""
+      assert label == "pinned.ex"
+      assert path == "/tmp/pinned.ex"
+      assert tint == 0x123456
+      assert payload_len > 0
     end
 
     test "caps visible tabs to the 16-bit payload budget" do
@@ -310,6 +343,11 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
 
     test "decodes tab copy path" do
       assert {:ok, {:tab_copy_path, 42}} == ProtocolGUI.decode_gui_action(0x3E, <<42::32>>)
+    end
+
+    test "decodes tab reorder" do
+      assert {:ok, {:tab_reorder, 42, 3}} ==
+               ProtocolGUI.decode_gui_action(0x48, <<42::32, 3::16>>)
     end
 
     test "decodes hover open action" do
@@ -549,12 +587,28 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       binary = ProtocolGUI.encode_gui_status_bar({:buffer, status_data()})
       sections = status_sections(binary)
 
-      <<agent_status::8, count::16, label_len::16, label::binary-size(label_len)>> =
-        Map.fetch!(sections, 0x09)
+      <<agent_status::8, count::16, label_len::16, label::binary-size(label_len), tool_len::8,
+        tool::binary-size(tool_len)>> = Map.fetch!(sections, 0x09)
 
       assert agent_status == 1
       assert count == 2
       assert label == "session-3: tests"
+      assert tool == "read_file"
+    end
+
+    test "encodes an empty active tool name when the field is nil" do
+      data = Map.put(status_data(), :active_tool_name, nil)
+      binary = ProtocolGUI.encode_gui_status_bar({:buffer, data})
+      sections = status_sections(binary)
+
+      <<agent_status::8, count::16, label_len::16, label::binary-size(label_len), tool_len::8,
+        tool::binary-size(tool_len)>> = Map.fetch!(sections, 0x09)
+
+      assert agent_status == 1
+      assert count == 2
+      assert label == "session-3: tests"
+      assert tool == ""
+      assert tool_len == 0
     end
 
     test "omits modeline segment section when no GUI modeline data is attached" do
@@ -731,19 +785,46 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
         Map.merge(status_data(), %{
           model_name: "Agent",
           session_status: :thinking,
-          message_count: 4
+          message_count: 4,
+          active_tool_name: "shell"
         })
 
       binary = ProtocolGUI.encode_gui_status_bar({:agent, data})
       sections = status_sections(binary)
 
       <<model_len::8, _model::binary-size(model_len), 4::32, session_status::8, agent_status::8,
-        count::16, label_len::16, label::binary-size(label_len)>> = Map.fetch!(sections, 0x09)
+        count::16, label_len::16, label::binary-size(label_len), tool_len::8,
+        tool::binary-size(tool_len)>> = Map.fetch!(sections, 0x09)
 
       assert session_status == 1
       assert agent_status == 1
       assert count == 2
       assert label == "session-3: tests"
+      assert tool == "shell"
+    end
+
+    test "encodes an empty active tool name in the agent variant when nil" do
+      data =
+        Map.merge(status_data(), %{
+          model_name: "Agent",
+          session_status: :thinking,
+          message_count: 4,
+          active_tool_name: nil
+        })
+
+      binary = ProtocolGUI.encode_gui_status_bar({:agent, data})
+      sections = status_sections(binary)
+
+      <<model_len::8, _model::binary-size(model_len), 4::32, session_status::8, agent_status::8,
+        count::16, label_len::16, label::binary-size(label_len), tool_len::8,
+        tool::binary-size(tool_len)>> = Map.fetch!(sections, 0x09)
+
+      assert session_status == 1
+      assert agent_status == 1
+      assert count == 2
+      assert label == "session-3: tests"
+      assert tool == ""
+      assert tool_len == 0
     end
   end
 
@@ -770,6 +851,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       agent_theme_colors: nil,
       background_subagent_count: 2,
       active_background_subagent_label: "session-3: tests",
+      active_tool_name: "read_file",
       status_msg: nil
     }
   end

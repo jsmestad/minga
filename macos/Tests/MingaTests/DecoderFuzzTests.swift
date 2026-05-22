@@ -125,6 +125,7 @@ private func randomGuiTabBar() -> Data {
         appendRandomU16(&data)  // group_id
         data.append(randomString8Field(maxLen: 4))  // icon
         data.append(randomString16Field(maxLen: 20))  // label
+        appendRandomU32(&data) // tint_color_rgb
     }
     return data
 }
@@ -133,7 +134,7 @@ private func randomGuiWorkspaces() -> Data {
     let wsCount = UInt8.random(in: 0...4)
     let tabCount = UInt16.random(in: 0...4)
     var payload = Data()
-    payload.append(1) // version
+    payload.append(2) // version
     appendRandomU16(&payload) // active_workspace_id
     payload.append(UInt8.random(in: 0...3)) // mode
     payload.append(UInt8.random(in: 0...0xFF)) // flags
@@ -163,6 +164,7 @@ private func randomGuiWorkspaces() -> Data {
         payload.append(randomString8Field(maxLen: 10)) // icon
         payload.append(randomString16Field(maxLen: 20)) // label
         payload.append(randomString16Field(maxLen: 30)) // path
+        appendRandomU32(&payload) // tint_color_rgb
     }
     var data = Data([OP_GUI_WORKSPACES])
     appendU16(&data, UInt16(payload.count))

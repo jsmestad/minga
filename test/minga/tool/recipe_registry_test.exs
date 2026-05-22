@@ -168,6 +168,47 @@ defmodule Minga.Tool.Recipe.RegistryTest do
                Registry.register(recipe, {:extension, :recipe_collision})
     end
 
+    test "same-source re-registration replaces stale recipe indexes" do
+      source = {:extension, :recipe_registry_replace_test}
+
+      old_recipe = %Recipe{
+        name: :replace_recipe_test,
+        label: "Replace Recipe",
+        description: "Old recipe",
+        provides: ["replace-recipe-old"],
+        method: :npm,
+        package: "replace-recipe-old",
+        homepage: "https://example.invalid/old",
+        category: :formatter,
+        languages: [:elixir]
+      }
+
+      new_recipe = %Recipe{
+        name: :replace_recipe_test,
+        label: "Replace Recipe New",
+        description: "New recipe",
+        provides: ["replace-recipe-new"],
+        method: :npm,
+        package: "replace-recipe-new",
+        homepage: "https://example.invalid/new",
+        category: :formatter,
+        languages: [:elixir]
+      }
+
+      on_exit(fn -> Registry.unregister_source(source) end)
+
+      assert :ok = Registry.register(old_recipe, source)
+      assert :ok = Registry.register(new_recipe, source)
+
+      assert Registry.for_command("replace-recipe-old") == nil
+
+      assert %Recipe{name: :replace_recipe_test, label: "Replace Recipe New"} =
+               Registry.get(:replace_recipe_test)
+
+      assert %Recipe{name: :replace_recipe_test, label: "Replace Recipe New"} =
+               Registry.for_command("replace-recipe-new")
+    end
+
     test "unregister_source removes recipes and command indexes for only that source" do
       source = {:extension, :recipe_registry_test}
       other_source = {:extension, :recipe_registry_other}
@@ -205,6 +246,19 @@ defmodule Minga.Tool.Recipe.RegistryTest do
       assert %Recipe{name: :other_source_recipe_test} = Registry.get(:other_source_recipe_test)
 
       Registry.unregister_source(other_source)
+    end
+
+    test "unregister_source exits when the registry name is unavailable" do
+      pid = Process.whereis(Registry)
+      assert true = Process.unregister(Registry)
+
+      try do
+        assert catch_exit(Registry.unregister_source(:config))
+      after
+        if Process.whereis(Registry) == nil do
+          assert true = Process.register(pid, Registry)
+        end
+      end
     end
   end
 

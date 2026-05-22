@@ -216,6 +216,17 @@ struct EncoderGUIActionTests {
         #expect(readU32(payload, 2) == 99)
     }
 
+    @Test("tab_reorder encodes action type, tab ID, and visible index")
+    func tabReorderLayout() {
+        let payload = captureFrame { $0.sendTabReorder(id: 42, newIndex: 3) }
+
+        #expect(payload.count == 8)
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_TAB_REORDER)
+        #expect(readU32(payload, 2) == 42)
+        #expect(readU16(payload, 6) == 3)
+    }
+
     @Test("file_tree_click encodes index as UInt16")
     func fileTreeClickLayout() {
         let payload = captureFrame { $0.sendFileTreeClick(index: 15) }

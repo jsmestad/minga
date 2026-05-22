@@ -55,7 +55,8 @@ defmodule MingaEditor.State.Tab do
           attention: boolean(),
           group_id: group_id(),
           file_ref: FileRef.t() | nil,
-          background_subagent: MingaAgent.Subagent.Handle.t() | nil
+          background_subagent: MingaAgent.Subagent.Handle.t() | nil,
+          pinned?: boolean()
         }
 
   @enforce_keys [:id, :kind]
@@ -71,7 +72,8 @@ defmodule MingaEditor.State.Tab do
             attention: false,
             group_id: 0,
             file_ref: nil,
-            background_subagent: nil
+            background_subagent: nil,
+            pinned?: false
 
   @doc "Creates a new file tab."
   @spec new_file(id(), String.t()) :: t()
@@ -205,6 +207,18 @@ defmodule MingaEditor.State.Tab do
   @spec set_attention(t(), boolean()) :: t()
   def set_attention(%__MODULE__{} = tab, value) when is_boolean(value) do
     %{tab | attention: value}
+  end
+
+  @doc "Sets whether this tab is pinned in the tab strip."
+  @spec set_pinned(t(), boolean()) :: t()
+  def set_pinned(%__MODULE__{} = tab, value) when is_boolean(value) do
+    %{tab | pinned?: value}
+  end
+
+  @doc "Toggles whether this tab is pinned in the tab strip."
+  @spec toggle_pinned(t()) :: t()
+  def toggle_pinned(%__MODULE__{} = tab) do
+    set_pinned(tab, not tab.pinned?)
   end
 
   @doc "Sets the workspace group id."
