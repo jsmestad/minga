@@ -551,17 +551,27 @@ defmodule Minga.Buffer.ProcessTest do
       assert BufferProcess.save(pid) == :ok
     end
 
-    test "render_snapshot exposes type and version metadata" do
+    test "render_snapshot exposes type, options, decorations, and version metadata" do
       {:ok, nofile} = BufferProcess.start_link(buffer_type: :nofile, content: "hello\nworld")
 
       assert %Minga.Buffer.RenderSnapshot{buffer_type: :nofile} =
                BufferProcess.render_snapshot(nofile, 0, 10)
 
       {:ok, editable} = BufferProcess.start_link(content: "hello")
+      assert {:ok, true} = BufferProcess.set_option(editable, :wrap, true)
+
+      _decoration_id =
+        BufferProcess.add_block_decoration(editable, 0,
+          placement: :below,
+          render: fn _width -> [{"note", []}] end
+        )
+
       snap1 = BufferProcess.render_snapshot(editable, 0, 10)
       BufferProcess.insert_char(editable, "x")
       snap2 = BufferProcess.render_snapshot(editable, 0, 10)
 
+      assert snap1.options.wrap
+      assert snap1.decorations.block_decorations != []
       assert snap2.version > snap1.version
     end
   end

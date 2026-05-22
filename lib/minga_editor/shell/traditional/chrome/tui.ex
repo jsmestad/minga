@@ -177,6 +177,13 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
   end
 
   @spec cached_or_fresh_status_bar_data(state(), map() | nil) :: StatusBarData.t()
+  defp cached_or_fresh_status_bar_data(
+         %MingaEditor.RenderPipeline.Input{status_bar_data: data},
+         _active_scroll
+       ) do
+    data
+  end
+
   defp cached_or_fresh_status_bar_data(state, _active_scroll) do
     StatusBarData.from_state(state)
   catch
