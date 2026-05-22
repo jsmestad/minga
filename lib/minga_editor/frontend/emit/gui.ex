@@ -625,9 +625,11 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   @spec build_gui_picker_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
   defp build_gui_picker_cmd(ctx, caches) do
     case ctx.shell_state.modal do
-      {:picker, %{picker_ui: %{picker: picker, source: source, action_menu: action_menu}}}
+      {:picker,
+       %{picker_ui: picker_ui = %{picker: picker, source: source, action_menu: action_menu}}}
       when picker != nil ->
-        do_build_gui_picker_cmd(ctx, picker, source, action_menu, caches)
+        mode_prefix = Map.get(picker_ui, :mode_prefix, "")
+        do_build_gui_picker_cmd(ctx, picker, source, action_menu, mode_prefix, caches)
 
       _ ->
         if caches.last_gui_picker_fp != :closed do
@@ -642,20 +644,22 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     end
   end
 
-  @spec do_build_gui_picker_cmd(ctx(), term(), module() | nil, term(), Caches.t()) ::
+  @spec do_build_gui_picker_cmd(ctx(), term(), module() | nil, term(), String.t(), Caches.t()) ::
           {binary() | nil, Caches.t()}
-  defp do_build_gui_picker_cmd(ctx, picker, source, action_menu, caches) do
+  defp do_build_gui_picker_cmd(ctx, picker, source, action_menu, mode_prefix, caches) do
     # Preview content is NOT in the fingerprint: a file changing on disk while
     # the picker is open won't refresh the preview. Acceptable trade-off for
     # scroll perf since the picker isn't open during normal editing.
     has_preview = source != nil and Picker.Source.preview?(source)
-    fp = picker_fingerprint(picker, has_preview, action_menu, 100)
+    fp = picker_fingerprint(picker, has_preview, action_menu, mode_prefix, 100)
 
     if fp != caches.last_gui_picker_fp do
       preview_lines = if has_preview, do: build_picker_preview(ctx)
       # Picker always pairs with its preview; concatenate so they arrive as
       # adjacent frames in the batched port write.
-      picker_cmd = ProtocolGUI.encode_gui_picker(picker, has_preview, action_menu, 100)
+      picker_cmd =
+        ProtocolGUI.encode_gui_picker(picker, has_preview, action_menu, 100, mode_prefix)
+
       preview_cmd = ProtocolGUI.encode_gui_picker_preview(preview_lines)
       {IO.iodata_to_binary([picker_cmd, preview_cmd]), %{caches | last_gui_picker_fp: fp}}
     else
@@ -663,8 +667,9 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     end
   end
 
-  @spec picker_fingerprint(Picker.t(), boolean(), term(), non_neg_integer()) :: integer()
-  defp picker_fingerprint(picker, has_preview, action_menu, max_items) do
+  @spec picker_fingerprint(Picker.t(), boolean(), term(), String.t(), non_neg_integer()) ::
+          integer()
+  defp picker_fingerprint(picker, has_preview, action_menu, mode_prefix, max_items) do
     limit = if max_items > 0, do: max_items, else: picker.max_visible
 
     visible_items =
@@ -678,6 +683,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     :erlang.phash2({
       picker.title,
       picker.query,
+      mode_prefix,
       picker.selected,
       length(picker.filtered),
       length(picker.items),
@@ -858,9 +864,10 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
         {:erlang.phash2(
            {:visible, ctx.shell_state.agent.runtime.status,
-            ctx.shell_state.agent.pending_approval, styled_len, panel.model_name, text,
-            panel.message_version, view.help_visible, view.focus, ctx.editing.mode, prompt_cursor,
-            prompt_line_count, visible_rows, panel.mention_completion}
+            ctx.shell_state.agent.pending_approval, styled_len, panel.model_name,
+            panel.thinking_level, text, panel.message_version, view.help_visible, view.focus,
+            ctx.editing.mode, prompt_cursor, prompt_line_count, visible_rows,
+            panel.mention_completion}
          ), text}
       else
         {:not_visible, ""}
@@ -976,6 +983,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
         messages: gui_messages,
         status: ctx.shell_state.agent.runtime.status || :idle,
         model: ctx.agent_ui.panel.model_name,
+        thinking_level: panel.thinking_level,
         prompt: prompt_text,
         pending_approval: nil,
         help_visible: help_visible,

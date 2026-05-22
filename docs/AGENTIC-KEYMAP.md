@@ -105,7 +105,7 @@ See [Agent tool approval](CONFIGURATION.md#agent-tool-approval) for how to confi
 | `SPC a ?` | Ask about the current line or visual selection inline |
 | `SPC a e` | Rewrite the visual selection inline |
 | `SPC a z` | Summarize the current agent session to an artifact |
-| `SPC a m` | Move file to workspace… |
+| `SPC a m` | Pick agent model |
 | `SPC a c` | Copy file to workspace… |
 
 ### Panel Management
@@ -141,11 +141,11 @@ See [Agent tool approval](CONFIGURATION.md#agent-tool-approval) for how to confi
 | `SPC a s` | Stop / abort agent |
 | `SPC a ?` | Ask about the current line or visual selection inline |
 | `SPC a e` | Rewrite the visual selection inline |
-| `SPC a m` | Move file to workspace… |
+| `SPC a m` | Pick agent model |
 | `SPC a c` | Copy file to workspace… |
 | `SPC a r` | Pending reviews |
 | `SPC a z` | Summarize the current agent session to an artifact |
-| `SPC a T` | Cycle thinking level |
+| `SPC a T` | Pick thinking level |
 | `SPC a t` | Toggle agentic view (return to editor context) |
 
 ## Chat Input Mode

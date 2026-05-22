@@ -1522,18 +1522,23 @@ struct GUIPickerDecoderTests {
         appendString16(&actionMenu, "Open")
         appendString16(&actionMenu, "Split Right")
 
+        // Section 0x05: Mode prefix
+        var modePrefix = Data()
+        appendString16(&modePrefix, ">")
+
         var data = Data()
         data.append(OP_GUI_PICKER)
-        data.append(4) // section_count
+        data.append(5) // section_count
         data.append(contentsOf: buildSectionData(0x01, header))
         data.append(contentsOf: buildSectionData(0x02, query))
         data.append(contentsOf: buildSectionData(0x03, items))
         data.append(contentsOf: buildSectionData(0x04, actionMenu))
+        data.append(contentsOf: buildSectionData(0x05, modePrefix))
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let title, let q, let hasPreview, let decodedItems, let decodedMenu) = cmd else {
+        guard case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let title, let q, let hasPreview, let decodedItems, let decodedMenu, let modePrefix) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
 
@@ -1543,6 +1548,7 @@ struct GUIPickerDecoderTests {
         #expect(totalCount == 100)
         #expect(title == "Find File")
         #expect(q == "edi")
+        #expect(modePrefix == ">")
         #expect(hasPreview == true)
         #expect(decodedItems.count == 2)
         #expect(decodedItems[0].label == "editor.ex")
@@ -1562,10 +1568,11 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == 2)
 
-        guard case .guiPicker(let visible, _, _, _, _, _, _, let items, let actionMenu) = cmd else {
+        guard case .guiPicker(let visible, _, _, _, _, _, _, let items, let actionMenu, let modePrefix) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
         #expect(visible == false)
+        #expect(modePrefix.isEmpty)
         #expect(items.isEmpty)
         #expect(actionMenu == nil)
     }
@@ -1581,6 +1588,9 @@ struct GUIPickerDecoderTests {
         var query = Data()
         appendString16(&query, "")
 
+        var modePrefix = Data()
+        appendString16(&modePrefix, "")
+
         var items = Data()
         appendU16(&items, 0)
 
@@ -1589,19 +1599,21 @@ struct GUIPickerDecoderTests {
 
         var data = Data()
         data.append(OP_GUI_PICKER)
-        data.append(4)
+        data.append(5)
         data.append(contentsOf: buildSectionData(0x01, header))
         data.append(contentsOf: buildSectionData(0x02, query))
+        data.append(contentsOf: buildSectionData(0x05, modePrefix))
         data.append(contentsOf: buildSectionData(0x03, items))
         data.append(contentsOf: buildSectionData(0x04, actionMenu))
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(let visible, _, _, _, _, _, _, _, let am) = cmd else {
+        guard case .guiPicker(let visible, _, _, _, _, _, _, _, let am, let modePrefix) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
         #expect(visible == true)
+        #expect(modePrefix == "")
         #expect(am == nil)
     }
 }
@@ -1672,8 +1684,8 @@ struct GUIPickerPreviewDecoderTests {
 struct GUIAgentChatDecoderTests {
 
     /// Builds a sectioned agent chat command from individual section payloads.
-    private func buildChatData(status: UInt8 = 0, model: String = "", prompt: String = "",
-                                pending: Data? = nil, help: Data? = nil, messages: Data? = nil) -> Data {
+    private func buildChatData(status: UInt8 = 0, model: String = "", thinkingLevel: String = "", prompt: String = "",
+                                pending: Data? = nil, help: Data? = nil, messages: Data? = nil, includeThinking: Bool = true) -> Data {
         var headerPayload = Data()
         headerPayload.append(1) // visible
         headerPayload.append(status)
@@ -1686,16 +1698,21 @@ struct GUIAgentChatDecoderTests {
 
         let pendingPayload = pending ?? Data([0]) // no pending
         let helpPayload = help ?? Data([0]) // no help
+        var thinkingPayload = Data()
+        appendString16(&thinkingPayload, thinkingLevel)
         let messagesPayload = messages ?? Data([0, 0]) // 0 messages
 
         var data = Data()
         data.append(OP_GUI_AGENT_CHAT)
-        data.append(6) // 6 sections
+        data.append(includeThinking ? 7 : 6)
         data.append(contentsOf: buildSectionData(0x01, headerPayload))
         data.append(contentsOf: buildSectionData(0x02, modelPayload))
         data.append(contentsOf: buildSectionData(0x03, promptPayload))
         data.append(contentsOf: buildSectionData(0x04, pendingPayload))
         data.append(contentsOf: buildSectionData(0x05, helpPayload))
+        if includeThinking {
+            data.append(contentsOf: buildSectionData(0x08, thinkingPayload))
+        }
         data.append(contentsOf: buildSectionData(0x06, messagesPayload))
         return data
     }
@@ -1715,7 +1732,7 @@ struct GUIAgentChatDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == 2)
 
-        guard case .guiAgentChat(let visible, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = cmd else {
+        guard case .guiAgentChat(let visible, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = cmd else {
             Issue.record("Expected .guiAgentChat"); return
         }
         #expect(visible == false)
@@ -1742,7 +1759,7 @@ struct GUIAgentChatDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiAgentChat(let visible, let status, let model, let prompt, _, _, _, _, _, _, let pendingToolName, _, _, _, let messages) = cmd else {
+        guard case .guiAgentChat(let visible, let status, let model, _, let prompt, _, _, _, _, _, _, let pendingToolName, _, _, _, let messages) = cmd else {
             Issue.record("Expected .guiAgentChat"); return
         }
 
@@ -1759,6 +1776,22 @@ struct GUIAgentChatDecoderTests {
         #expect(assistantText == "hi there")
     }
 
+    @Test("Decode gui_agent_chat thinking level section")
+    func decodeThinkingLevel() throws {
+        let data = buildChatData(status: 0, model: "claude", thinkingLevel: "high")
+        let (cmd, _) = try decodeCommand(data: data, offset: 0)
+        guard case .guiAgentChat(_, _, _, let thinkingLevel, _, _, _, _, _, _, _, _, _, _, _, _) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        #expect(thinkingLevel == "high")
+    }
+
+    @Test("Decode gui_agent_chat without thinking level section")
+    func decodeWithoutThinkingLevelSection() throws {
+        let data = buildChatData(status: 0, model: "claude", includeThinking: false)
+        let (cmd, _) = try decodeCommand(data: data, offset: 0)
+        guard case .guiAgentChat(_, _, _, let thinkingLevel, _, _, _, _, _, _, _, _, _, _, _, _) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        #expect(thinkingLevel == "")
+    }
+
     @Test("Decode gui_agent_chat with thinking message (sectioned)")
     func decodeThinking() throws {
         var msgs = Data()
@@ -1771,7 +1804,7 @@ struct GUIAgentChatDecoderTests {
 
         let data = buildChatData(status: 1, model: "claude", messages: buildMessagesPayload(count: 1, msgs))
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
-        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
         guard messages.count == 1 else { Issue.record("Expected 1 message"); return }
         guard case .thinking(let text, let collapsed) = messages[0].content else { Issue.record("Expected .thinking"); return }
         #expect(text == "Let me analyze...")
@@ -1793,7 +1826,7 @@ struct GUIAgentChatDecoderTests {
 
         let data = buildChatData(status: 2, model: "claude", messages: buildMessagesPayload(count: 1, msgs))
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
-        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
         guard messages.count == 1 else { Issue.record("Expected 1 message"); return }
         guard case .toolCall(let name, _, let tcStatus, let isError, let collapsed, let duration, let tcResult) = messages[0].content else { Issue.record("Expected .toolCall"); return }
         #expect(name == "read_file")
@@ -1820,7 +1853,7 @@ struct GUIAgentChatDecoderTests {
 
         let data = buildChatData(status: 2, model: "claude", messages: buildMessagesPayload(count: 1, msgs))
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
-        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
         guard messages.count == 1 else { Issue.record("Expected 1 message"); return }
         guard case .approvalToolCall(let name, let summary, let toolCallId, let previewKind, let previewLines) = messages[0].content else { Issue.record("Expected .approvalToolCall"); return }
         #expect(name == "write_file")
@@ -1842,7 +1875,7 @@ struct GUIAgentChatDecoderTests {
 
         let data = buildChatData(messages: buildMessagesPayload(count: 1, msgs))
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
-        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
         guard messages.count == 1 else { Issue.record("Expected 1 message"); return }
         guard case .system(let text, let isError) = messages[0].content else { Issue.record("Expected .system"); return }
         #expect(text == "Session terminated")
@@ -1859,7 +1892,7 @@ struct GUIAgentChatDecoderTests {
 
         let data = buildChatData(messages: buildMessagesPayload(count: 1, msgs))
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
-        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
         guard messages.count == 1 else { Issue.record("Expected 1 message"); return }
         guard case .usage(let input, let output, let cacheRead, let cacheWrite, let costMicros) = messages[0].content else { Issue.record("Expected .usage"); return }
         #expect(input == 1000)
@@ -1878,7 +1911,7 @@ struct GUIAgentChatDecoderTests {
 
         let data = buildChatData(status: 2, model: "claude", pending: pendingPayload)
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
-        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, let pendingToolName, let pendingToolSummary, _, _, _) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, let pendingToolName, let pendingToolSummary, _, _, _) = cmd else { Issue.record("Expected .guiAgentChat"); return }
         #expect(pendingToolName == "write_file")
         #expect(pendingToolSummary == "Writing to config.toml")
     }
@@ -1904,7 +1937,7 @@ struct GUIAgentChatDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
         guard messages.count == 1 else { Issue.record("Expected 1 message"); return }
         guard case .styledAssistant(let lines) = messages[0].content else { Issue.record("Expected .styledAssistant"); return }
         #expect(lines.count == 2)
@@ -1931,7 +1964,7 @@ struct GUIAgentChatDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
         guard case .styledAssistant(let lines) = messages[0].content else { Issue.record("Expected .styledAssistant"); return }
         #expect(lines[0][0].text == "docs")
         #expect(lines[0][0].underline == true)

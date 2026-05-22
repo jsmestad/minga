@@ -432,11 +432,12 @@ struct CommandDispatcherRoutingTests {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.dispatch(.guiPicker(visible: true, selectedIndex: 0, filteredCount: 5,
                                         totalCount: 100, title: "Find File", query: "edi",
-                                        hasPreview: false, items: [], actionMenu: nil))
+                                        hasPreview: false, items: [], actionMenu: nil, modePrefix: ">"))
 
         #expect(gui.pickerState.visible == true)
         #expect(gui.pickerState.title == "Find File")
         #expect(gui.pickerState.query == "edi")
+        #expect(gui.pickerState.modePrefix == ">")
     }
 
     @Test("guiPicker hidden clears pickerState")
@@ -444,13 +445,14 @@ struct CommandDispatcherRoutingTests {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.dispatch(.guiPicker(visible: true, selectedIndex: 0, filteredCount: 5,
                                         totalCount: 100, title: "Find File", query: "edi",
-                                        hasPreview: false, items: [], actionMenu: nil))
+                                        hasPreview: false, items: [], actionMenu: nil, modePrefix: ">"))
         dispatcher.dispatch(.guiPicker(visible: false, selectedIndex: 0, filteredCount: 0,
                                         totalCount: 0, title: "", query: "",
-                                        hasPreview: false, items: [], actionMenu: nil))
+                                        hasPreview: false, items: [], actionMenu: nil, modePrefix: ""))
 
         #expect(gui.pickerState.visible == false)
         #expect(gui.pickerState.items.isEmpty)
+        #expect(gui.pickerState.modePrefix.isEmpty)
     }
 
     @Test("guiAgentChat visible updates agentChatState")
@@ -458,7 +460,7 @@ struct CommandDispatcherRoutingTests {
         let (dispatcher, gui) = makeDispatcher()
         let messages: [Wire.ChatMessage] = [Wire.ChatMessage(beamId: 1, content: .user(text: "hello"))]
         dispatcher.dispatch(.guiAgentChat(visible: true, status: 1, model: "claude",
-                                           prompt: "Fix this", promptLineCount: 1,
+                                           thinkingLevel: "medium", prompt: "Fix this", promptLineCount: 1,
                                            promptCursorLine: 0, promptCursorCol: 0,
                                            promptVimMode: 1, promptVisibleRows: 1,
                                            promptCompletion: nil, pendingToolName: nil,
@@ -466,6 +468,7 @@ struct CommandDispatcherRoutingTests {
 
         #expect(gui.agentChatState.visible == true)
         #expect(gui.agentChatState.model == "claude")
+        #expect(gui.agentChatState.thinkingLevel == "medium")
         #expect(gui.agentChatState.messages.count == 1)
     }
 
@@ -473,7 +476,7 @@ struct CommandDispatcherRoutingTests {
     @MainActor func guiAgentChatHidden() {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.dispatch(.guiAgentChat(visible: false, status: 0, model: "",
-                                           prompt: "", promptLineCount: 1,
+                                           thinkingLevel: "", prompt: "", promptLineCount: 1,
                                            promptCursorLine: 0, promptCursorCol: 0,
                                            promptVimMode: 0, promptVisibleRows: 1,
                                            promptCompletion: nil, pendingToolName: nil,

@@ -60,6 +60,38 @@ defmodule MingaEditor.Commands do
           | {:replay_macro, String.t()}
           | {:whichkey_update, EditorState.WhichKey.t()}
 
+  # These ex commands stay on the direct BufferManagement path so shutdown, save, and tab behavior stay as-is.
+  @buffer_management_ex_commands [
+    :abort_quit,
+    :buffer_next,
+    :buffer_prev,
+    :buffers,
+    :checktime,
+    :force_edit,
+    :force_quit,
+    :force_quit_all,
+    :force_save,
+    :new_buffer,
+    :quit,
+    :quit_all,
+    :reload_highlights,
+    :save,
+    :save_quit,
+    :save_quit_all,
+    :split_horizontal,
+    :split_vertical,
+    :terminal,
+    :view_warnings,
+    :window_close
+  ]
+
+  @ex_tuple_dispatch_commands [
+    :agent_set_model,
+    :tool_install_named,
+    :tool_uninstall_named,
+    :tool_update_named
+  ]
+
   @doc """
   Executes a single command against the editor state.
 
@@ -534,6 +566,23 @@ defmodule MingaEditor.Commands do
 
   def execute(state, {:execute_ex_command, {:rename, new_name}}) do
     LspActions.rename(state, new_name)
+  end
+
+  def execute(state, {:execute_ex_command, {name, []} = parsed})
+      when is_atom(name) and name in @buffer_management_ex_commands do
+    BufferManagement.execute(state, {:execute_ex_command, parsed})
+  end
+
+  def execute(state, {:execute_ex_command, {name, []} = parsed}) when is_atom(name) do
+    case Command.lookup(name) do
+      {:ok, %Command{}} -> execute(state, name)
+      :error -> BufferManagement.execute(state, {:execute_ex_command, parsed})
+    end
+  end
+
+  def execute(state, {:execute_ex_command, {name, _args} = parsed})
+      when is_atom(name) and name in @ex_tuple_dispatch_commands do
+    execute(state, parsed)
   end
 
   def execute(state, {:execute_ex_command, _} = cmd), do: BufferManagement.execute(state, cmd)

@@ -210,9 +210,8 @@ defmodule Minga.Credo.NoDirectStateMachineWriteCheck do
   defp extract_dot_path({name, _, context}) when is_atom(name) and is_atom(context), do: [name]
   defp extract_dot_path(_ast), do: []
 
-  # Extracts line number from various AST shapes.
+  # Extracts line number from AST nodes with metadata.
   defp extract_line({_, meta, _}) when is_list(meta), do: meta[:line]
-  defp extract_line({:%{}, meta, _}) when is_list(meta), do: meta[:line]
   defp extract_line(_), do: nil
 
   defp skip_file?(%SourceFile{} = source_file, params) do

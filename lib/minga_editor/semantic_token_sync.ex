@@ -28,6 +28,7 @@ defmodule MingaEditor.SemanticTokenSync do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Highlighting
   alias Minga.LSP.Client
+  alias Minga.LSP.SyncServer
   alias MingaEditor.Session.State, as: SessionState
   alias Minga.LSP.SemanticTokens
   alias MingaEditor.UI.Highlight
@@ -181,14 +182,10 @@ defmodule MingaEditor.SemanticTokenSync do
   defp normalize_spans(spans) when is_list(spans), do: spans
 
   @spec find_lsp_client(EditorState.t(), pid()) :: pid() | nil
-  defp find_lsp_client(state, buf_pid) do
-    case Map.get(state, :lsp_clients, %{}) do
-      clients when is_map(clients) ->
-        filetype = Buffer.filetype(buf_pid)
-        Map.get(clients, filetype)
-
-      _ ->
-        nil
+  defp find_lsp_client(_state, buf_pid) do
+    case SyncServer.clients_for_buffer(buf_pid) do
+      [client | _] when is_pid(client) -> client
+      _ -> nil
     end
   end
 

@@ -450,7 +450,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       <<0x91, _len::16, _win::16, _tw::8, _active::16, count::8, rest::binary>> = binary
 
       col_bytes_len = count * 2
-      <<col_data::binary-size(col_bytes_len), line_count::16, levels::binary>> = rest
+      <<col_data::binary-size(^col_bytes_len), line_count::16, levels::binary>> = rest
 
       decoded_cols =
         for <<col::16 <- col_data>>, do: col

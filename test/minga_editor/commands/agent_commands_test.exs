@@ -36,6 +36,10 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
   # ── Helpers ──────────────────────────────────────────────────────────────
 
+  defp command!(name) do
+    Enum.find(AgentCommands.__commands__(), &(&1.name == name)) || raise "missing command #{name}"
+  end
+
   defp base_state(opts \\ []) do
     {:ok, buf} = BufferProcess.start_link(content: Keyword.get(opts, :content, "hello\nworld"))
 
@@ -257,6 +261,51 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       new_state = AgentCommands.cycle_thinking_level(state)
 
       assert new_state.shell_state.status_msg =~ "No agent session"
+    end
+  end
+
+  describe "set_thinking_level/2" do
+    test "updates the agent UI thinking level" do
+      state = base_state()
+      new_state = AgentCommands.set_thinking_level(state, "high")
+
+      assert AgentAccess.panel(new_state).thinking_level == "high"
+      assert new_state.shell_state.status_msg == "Thinking: high"
+    end
+
+    test "sets status message when no session exists" do
+      state = base_state(session: nil)
+      new_state = AgentCommands.set_thinking_level(state, "high")
+
+      assert new_state.shell_state.status_msg =~ "No agent session"
+    end
+  end
+
+  describe "thinking command surface" do
+    test "agent_pick_thinking opens the thinking picker with the current level" do
+      state = base_state()
+      state = AgentAccess.update_agent_ui(state, &UIState.set_thinking_level(&1, "low"))
+      command = command!(:agent_pick_thinking)
+
+      new_state = command.execute.(state)
+
+      assert {:picker, %{picker_ui: picker_ui}} = new_state.shell_state.modal
+      assert picker_ui.source == MingaEditor.UI.Picker.ThinkingLevelSource
+      assert picker_ui.context == %{current_level: "low"}
+    end
+
+    test "agent_thinking_* commands set fixed levels" do
+      for {command_name, expected_level} <- [
+            agent_thinking_off: "off",
+            agent_thinking_low: "low",
+            agent_thinking_medium: "medium",
+            agent_thinking_high: "high"
+          ] do
+        new_state = command!(command_name).execute.(base_state())
+
+        assert AgentAccess.panel(new_state).thinking_level == expected_level
+        assert new_state.shell_state.status_msg == "Thinking: #{expected_level}"
+      end
     end
   end
 

@@ -70,7 +70,6 @@ defmodule Minga.Credo.NoDirectModalOverlayWriteCheck do
   defp find_modal_writes(ast, issues, _issue_meta), do: {ast, issues}
 
   defp extract_line({_, meta, _}) when is_list(meta), do: meta[:line]
-  defp extract_line({:%{}, meta, _}) when is_list(meta), do: meta[:line]
   defp extract_line(_), do: nil
 
   defp allowed_file?(%SourceFile{} = source_file, params) do

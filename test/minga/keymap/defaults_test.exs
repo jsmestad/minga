@@ -197,16 +197,22 @@ defmodule Minga.Keymap.DefaultsTest do
       assert {:command, :workspace_pending_reviews} = Bindings.lookup(a_node, {?r, 0})
     end
 
-    test "SPC a m → :workspace_move_file" do
+    test "SPC a m → :agent_pick_model" do
       trie = Defaults.leader_trie()
       {:prefix, a_node} = Bindings.lookup(trie, {?a, 0})
-      assert {:command, :workspace_move_file} = Bindings.lookup(a_node, {?m, 0})
+      assert {:command, :agent_pick_model} = Bindings.lookup(a_node, {?m, 0})
     end
 
     test "SPC a c → :workspace_copy_file" do
       trie = Defaults.leader_trie()
       {:prefix, a_node} = Bindings.lookup(trie, {?a, 0})
       assert {:command, :workspace_copy_file} = Bindings.lookup(a_node, {?c, 0})
+    end
+
+    test "SPC a T → :agent_pick_thinking" do
+      trie = Defaults.leader_trie()
+      {:prefix, a_node} = Bindings.lookup(trie, {?a, 0})
+      assert {:command, :agent_pick_thinking} = Bindings.lookup(a_node, {?T, 0})
     end
 
     test "SPC a e → :inline_edit" do

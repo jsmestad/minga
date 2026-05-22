@@ -478,7 +478,7 @@ defmodule MingaEditor.PickerUI do
   end
 
   def render(%RenderInput{
-        picker_state: %{picker: picker, action_menu: action_menu},
+        picker_state: %{picker: picker, action_menu: action_menu} = picker_state,
         theme_picker: pc,
         viewport: viewport
       }) do
@@ -562,21 +562,24 @@ defmodule MingaEditor.PickerUI do
     item_commands = List.flatten(item_commands)
 
     # Prompt line (replaces minibuffer)
-    prompt_text = "> " <> picker.query
+    prompt_text = prompt_prefix(picker_state) <> picker.query
 
-    prompt_cmd =
-      DisplayList.draw(
+    prompt_cmds =
+      render_prompt_line(
         prompt_row,
         0,
-        String.pad_trailing(prompt_text, viewport.cols),
-        Face.new(fg: highlight_fg, bg: prompt_bg)
+        viewport.cols,
+        prompt_text,
+        picker_state,
+        prompt_bg,
+        highlight_fg,
+        match_fg
       )
 
     cursor_col = Unicode.display_width(prompt_text)
     cursor_pos = {prompt_row, cursor_col}
 
-    # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
-    all_cmds = separator_cmd ++ item_commands ++ [prompt_cmd]
+    all_cmds = separator_cmd ++ item_commands ++ prompt_cmds
 
     # Render action menu overlay if open
     action_cmds =
@@ -611,6 +614,44 @@ defmodule MingaEditor.PickerUI do
 
     render(input)
   end
+
+  @spec prompt_prefix(PickerState.t()) :: String.t()
+  defp prompt_prefix(%PickerState{mode_prefix: prefix}) when is_binary(prefix) and prefix != "" do
+    "[#{prefix}] "
+  end
+
+  defp prompt_prefix(%PickerState{}), do: "> "
+
+  @spec render_prompt_line(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t(),
+          PickerState.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: [DisplayList.draw()]
+  defp render_prompt_line(row, col, width, text, picker_state, bg, fg, indicator_fg) do
+    base_draw =
+      DisplayList.draw(row, col, String.pad_trailing(text, width), Face.new(fg: fg, bg: bg))
+
+    [base_draw | render_mode_indicator(row, col, picker_state, bg, indicator_fg)]
+  end
+
+  @spec render_mode_indicator(
+          non_neg_integer(),
+          non_neg_integer(),
+          PickerState.t(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: [DisplayList.draw()]
+  defp render_mode_indicator(row, col, %PickerState{mode_prefix: prefix}, bg, fg)
+       when is_binary(prefix) and prefix != "" do
+    [DisplayList.draw(row, col, "[#{prefix}]", Face.new(fg: fg, bg: bg, bold: true))]
+  end
+
+  defp render_mode_indicator(_row, _col, %PickerState{}, _bg, _fg), do: []
 
   @doc "Closes the picker and resets picker-related state."
   @spec close(state()) :: state()
@@ -665,7 +706,7 @@ defmodule MingaEditor.PickerUI do
   @spec render_centered(RenderInput.t()) ::
           {[DisplayList.draw()], {non_neg_integer(), non_neg_integer()} | nil}
   defp render_centered(%RenderInput{
-         picker_state: %{picker: picker},
+         picker_state: %{picker: picker} = picker_state,
          theme_picker: pc,
          viewport: viewport
        }) do
@@ -720,17 +761,21 @@ defmodule MingaEditor.PickerUI do
       end)
 
     # Prompt at the bottom of the interior
-    prompt_text = "> " <> picker.query
+    prompt_text = prompt_prefix(picker_state) <> picker.query
 
-    prompt_draw =
-      DisplayList.draw(
+    prompt_draws =
+      render_prompt_line(
         interior_h - 1,
         0,
-        String.pad_trailing(prompt_text, interior_w),
-        Face.new(fg: pc.highlight_fg, bg: pc.prompt_bg)
+        interior_w,
+        prompt_text,
+        picker_state,
+        pc.prompt_bg,
+        pc.highlight_fg,
+        pc.match_fg
       )
 
-    content = item_draws ++ [prompt_draw]
+    content = item_draws ++ prompt_draws
     spec = %{spec | content: content}
 
     draws = FloatingWindow.render(spec)

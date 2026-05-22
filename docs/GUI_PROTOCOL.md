@@ -286,23 +286,38 @@ Fuzzy finder / command palette state. Uses sectioned envelope: `opcode(1) + sect
 | 0x02 | Query | query string |
 | 0x03 | Items | item_count + items (positional per item) |
 | 0x04 | ActionMenu | visible flag + selected + actions |
+| 0x05 | ModePrefix | mode prefix string |
 
 ```
 When visible:
-  opcode(1) + 1(1) + selected_index(2) + filtered_count(2) + total_count(2)
-  + title_len(2) + title(title_len) + query_len(2) + query(query_len)
-  + has_preview(1) + item_count(2) + items...
+  opcode(1) + section_count(1) + sections...
+
+Each section:
+  section_id(1) + payload_len(2) + payload(payload_len)
+
+Header section 0x01 payload:
+  visible(1) + selected_index(2) + filtered_count(2) + total_count(2)
+  + has_preview(1) + title_len(2) + title(title_len)
+
+Query section 0x02 payload:
+  query_len(2) + query(query_len)
+
+Items section 0x03 payload:
+  item_count(2) + items...
 
 Per item:
   icon_color(3) + flags(1) + label_len(2) + label(label_len)
   + desc_len(2) + desc(desc_len) + annotation_len(2) + annotation(annotation_len)
   + match_pos_count(1) + match_positions(match_pos_count * 2)
 
-After all items, action menu:
+ActionMenu section 0x04 payload:
   action_visible(1)
   When action_visible == 1:
     selected_action(1) + action_count(1) + actions...
     Per action: name_len(2) + name(name_len)
+
+ModePrefix section 0x05 payload:
+  mode_prefix_len(2) + mode_prefix(mode_prefix_len)
 
 icon_color is a 24-bit RGB value for the item's icon.
 flags bits:
@@ -313,6 +328,7 @@ match_positions is a list of uint16 character indices for highlighting matched c
 has_preview indicates whether the picker source supports preview (triggers split layout).
 filtered_count and total_count enable "X/Y" display in the search field.
 action menu shows source-specific actions (e.g., "Open", "Delete", "Open in split").
+mode prefix badges show switched picker sources like command, buffer, or project search.
 
 When hidden:
   opcode(1) + 0(1)
@@ -354,6 +370,7 @@ Each section uses `section_id(1) + section_len(2) + payload(section_len)`. Secti
 | 0x05 | Help | `visible(1) + optional groups` |
 | 0x06 | Messages | `message_count(2) + messages...` |
 | 0x07 | Completion | prompt completion popup state |
+| 0x08 | Thinking | `level_len(2) + level`, where level is `off`, `low`, `medium`, or `high` |
 
 Status values: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error
 

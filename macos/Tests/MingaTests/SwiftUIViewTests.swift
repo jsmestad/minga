@@ -743,6 +743,52 @@ struct AgentChatViewTests {
         #expect(strings.contains("NORMAL"))
     }
 
+    @Test("Header strips provider prefix and shows thinking level")
+    @MainActor func headerModelAndThinkingControls() throws {
+        let state = AgentChatState()
+        state.visible = true
+        state.model = "anthropic:claude-sonnet-4"
+        state.thinkingLevel = "high"
+        state.status = 0
+
+        let sut = AgentChatView(state: state, theme: ThemeColors(), isInsertMode: false, encoder: nil)
+        let body = try sut.inspect()
+        let texts = body.findAll(ViewInspectorQuery.text)
+        let strings = texts.compactMap { try? $0.string() }
+
+        #expect(strings.contains("claude-sonnet-4"))
+        #expect(!strings.contains("anthropic:claude-sonnet-4"))
+        #expect(strings.contains("High"))
+    }
+
+    @Test("Header controls dispatch model and thinking commands")
+    @MainActor func headerControlsDispatchCommands() throws {
+        let spy = SpyEncoder()
+        let state = AgentChatState()
+        state.visible = true
+        state.model = "claude-sonnet-4"
+        state.thinkingLevel = "medium"
+        state.status = 0
+
+        let sut = AgentChatView(state: state, theme: ThemeColors(), isInsertMode: false, encoder: spy)
+        let body = try sut.inspect()
+
+        let headerButtons = try body.findAll(ViewType.Button.self)
+        let modelButton = try #require(headerButtons.first(where: {
+            (try? $0.accessibilityLabel().string()) == "Agent model"
+        }))
+        try modelButton.tap()
+        #expect(spy.guiActions.contains(.executeCommand(name: "agent_pick_model")))
+
+        let thinkingMenu = try body.find(ViewType.Menu.self)
+        let thinkingButtons = try thinkingMenu.findAll(ViewType.Button.self)
+        let highButton = try #require(thinkingButtons.first(where: {
+            ((try? $0.accessibilityLabel().string()) ?? "").contains("High")
+        }))
+        try highButton.tap()
+        #expect(spy.guiActions.contains(.executeCommand(name: "agent_thinking_high")))
+    }
+
     @Test("User message renders as bubble")
     @MainActor func userMessage() throws {
         let state = AgentChatState()

@@ -198,6 +198,17 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       refute caches2.last_gui_picker_fp == caches.last_gui_picker_fp
     end
 
+    test "picker cache fingerprints mode prefix changes" do
+      state = gui_state()
+      state_a = open_test_picker(state, "same.txt")
+      state_b = open_test_picker(state, "same.txt", ">")
+
+      {_ctx, caches, _cmds} = sync_chrome(state_a)
+      {_ctx, caches2, _cmds} = sync_chrome(state_b, caches)
+
+      refute caches2.last_gui_picker_fp == caches.last_gui_picker_fp
+    end
+
     test "minibuffer cache changes when encoded candidate metadata changes" do
       state = gui_state()
 
@@ -247,6 +258,18 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       Minga.Buffer.move_to(chat_state.workspace.agent_ui.panel.prompt_buffer, {0, 1})
       {_ctx, chat_caches2, _cmds} = sync_chrome(chat_state, chat_caches)
       refute chat_caches2.last_gui_agent_chat_fp == chat_caches.last_gui_agent_chat_fp
+
+      thinking_state = put_in(chat_state.workspace.agent_ui.panel.thinking_level, "high")
+      {_ctx, chat_caches3, cmds} = sync_chrome(thinking_state, chat_caches2)
+
+      assert [chat_cmd] = opcode_cmds(cmds, 0x78)
+      assert <<0x78, _section_count::8, sections::binary>> = chat_cmd
+
+      assert <<level_len::16, level::binary-size(level_len)>> =
+               gui_agent_chat_section!(sections, 0x08)
+
+      assert level == "high"
+      refute chat_caches3.last_gui_agent_chat_fp == chat_caches2.last_gui_agent_chat_fp
 
       board = BoardState.new()
       {board_a, card} = BoardState.create_card(board, task: "Original task", status: :idle)
@@ -333,6 +356,21 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
   defp opcode?(<<opcode, _::binary>>, opcode), do: true
   defp opcode?(_, _opcode), do: false
 
+  defp gui_agent_chat_section!(sections, target_id),
+    do: do_gui_agent_chat_section!(sections, target_id)
+
+  defp do_gui_agent_chat_section!(
+         <<target_id::8, len::16, payload::binary-size(len), _rest::binary>>,
+         target_id
+       ),
+       do: payload
+
+  defp do_gui_agent_chat_section!(
+         <<_id::8, len::16, _payload::binary-size(len), rest::binary>>,
+         target_id
+       ),
+       do: do_gui_agent_chat_section!(rest, target_id)
+
   defp hidden_tree_cmd_for_root?(
          <<0x93, payload_len::32, payload::binary-size(payload_len)>>,
          root
@@ -340,7 +378,7 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
     root_len = byte_size(root)
 
     match?(
-      <<2::8, tree_flags::8, 0::8, 0::16, ^root_len::16, ^root::binary-size(root_len), 0::16,
+      <<2::8, tree_flags::8, 0::8, 0::16, ^root_len::16, ^root::binary-size(^root_len), 0::16,
         0::16, 0::16>>
       when Bitwise.band(tree_flags, 0x01) == 0,
       payload
@@ -365,10 +403,17 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
     {state, file_tree, file_path}
   end
 
-  defp open_test_picker(state, label) do
+  defp open_test_picker(state, label, mode_prefix \\ "") do
     item = %MingaEditor.UI.Picker.Item{id: "same-id", label: label}
     picker = MingaEditor.UI.Picker.new([item], title: "Test")
-    picker_state = %MingaEditor.State.Picker{picker: picker, source: nil, action_menu: nil}
+
+    picker_state = %MingaEditor.State.Picker{
+      picker: picker,
+      source: nil,
+      action_menu: nil,
+      mode_prefix: mode_prefix
+    }
+
     ModalOverlay.open(state, :picker, PickerPayload.new(picker_state))
   end
 

@@ -1380,7 +1380,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
 
       encoded = ProtocolGUI.encode_gui_agent_chat(data)
       # Sectioned: opcode + section_count + sections
-      assert <<0x78, 7, _sections::binary>> = encoded
+      assert <<0x78, 8, _sections::binary>> = encoded
       # Verify the pending section (0x04) contains the tool name and summary
       assert :binary.match(encoded, "shell") != :nomatch
       assert :binary.match(encoded, "ls -la") != :nomatch
@@ -1398,9 +1398,25 @@ defmodule MingaEditor.Frontend.ProtocolTest do
 
       encoded = ProtocolGUI.encode_gui_agent_chat(data)
       # Sectioned: opcode + section_count + sections
-      assert <<0x78, 7, _sections::binary>> = encoded
+      assert <<0x78, 8, _sections::binary>> = encoded
       # Verify model is present
       assert :binary.match(encoded, "claude") != :nomatch
+    end
+
+    test "encodes gui_agent_chat thinking level section" do
+      data = %{
+        visible: true,
+        messages: [],
+        status: :idle,
+        model: "claude",
+        thinking_level: "high",
+        prompt: "",
+        pending_approval: nil
+      }
+
+      encoded = ProtocolGUI.encode_gui_agent_chat(data)
+      assert <<0x78, 8, sections::binary>> = encoded
+      assert <<4::16, "high">> = gui_agent_chat_section!(sections, 0x08)
     end
 
     test "encodes gui_agent_chat hidden" do
@@ -1429,18 +1445,18 @@ defmodule MingaEditor.Frontend.ProtocolTest do
 
       encoded = ProtocolGUI.encode_gui_agent_chat(data)
 
-      assert <<0x78, 7, sections::binary>> = encoded
+      assert <<0x78, 8, sections::binary>> = encoded
       messages_payload = gui_agent_chat_section!(sections, 0x06)
 
       assert <<1::16, 0::32, 0x09::8, 0::8, name_len::16, rest::binary>> = messages_payload
-      assert <<name::binary-size(name_len), summary_len::16, rest::binary>> = rest
-      assert <<summary::binary-size(summary_len), id_len::16, rest::binary>> = rest
+      assert <<name::binary-size(^name_len), summary_len::16, rest::binary>> = rest
+      assert <<summary::binary-size(^summary_len), id_len::16, rest::binary>> = rest
 
-      assert <<tool_call_id::binary-size(id_len), 3::8, 2::16, line1_len::16, rest::binary>> =
+      assert <<tool_call_id::binary-size(^id_len), 3::8, 2::16, line1_len::16, rest::binary>> =
                rest
 
-      assert <<line1::binary-size(line1_len), line2_len::16, rest::binary>> = rest
-      assert <<line2::binary-size(line2_len)>> = rest
+      assert <<line1::binary-size(^line1_len), line2_len::16, rest::binary>> = rest
+      assert <<line2::binary-size(^line2_len)>> = rest
       assert name == "write_file"
       assert summary == "demo.ex"
       assert tool_call_id == "tc_1"
@@ -1465,7 +1481,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
 
       encoded = ProtocolGUI.encode_gui_agent_chat(data)
       # Sectioned: opcode + section_count
-      assert <<0x78, 7, _sections::binary>> = encoded
+      assert <<0x78, 8, _sections::binary>> = encoded
 
       # Verify styled_assistant message type byte (0x07) appears in the binary
       assert :binary.match(encoded, <<0x07>>) != :nomatch

@@ -257,8 +257,8 @@ defmodule MingaEditor.Frontend.GUIHoverProtocolTest do
       doc = "Splits a string."
       doc_len = byte_size(doc)
 
-      assert <<^label_len::16, ^label::binary-size(label_len), ^doc_len::16,
-               ^doc::binary-size(doc_len), 2, params::binary>> = rest
+      assert <<^label_len::16, ^label::binary-size(^label_len), ^doc_len::16,
+               ^doc::binary-size(^doc_len), 2, params::binary>> = rest
 
       # param 1: label_len(2) + label + doc_len(2) + doc
       assert <<6::16, "string", 16::16, "The input string", remaining::binary>> = params

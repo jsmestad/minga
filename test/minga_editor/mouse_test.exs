@@ -307,6 +307,8 @@ defmodule MingaEditor.MouseTest do
 
       state = mouse(state, press_row, press_col, :left, :press)
       state = mouse(state, drag_row, drag_col, :left, :drag)
+      assert state.workspace.editing.mode == :visual
+
       state = mouse(state, drag_row, drag_col, :left, :release)
 
       assert state.workspace.editing.mode == :visual

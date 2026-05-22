@@ -87,6 +87,9 @@ defmodule Minga.Command.Parser do
           | {:buffer_next, []}
           | {:buffer_prev, []}
           | {:lsp_info, []}
+          | {:lsp_restart, []}
+          | {:lsp_stop, []}
+          | {:lsp_start, []}
           | {:extensions, []}
           | {:extension_update, []}
           | {:extension_update_all, []}
@@ -98,13 +101,27 @@ defmodule Minga.Command.Parser do
           | {:tutor, []}
           | {:agent_abort, []}
           | {:agent_new_session, []}
+          | {:agent_clear_history, []}
           | {:agent_set_model, [String.t()]}
           | {:agent_pick_model, []}
           | {:agent_cycle_model, []}
+          | {:agent_summarize, []}
           | {:agent_cycle_thinking, []}
           | {:tool_install_named, [String.t()]}
           | {:tool_uninstall_named, [String.t()]}
           | {:tool_update_named, [String.t()]}
+          | {:tool_install, []}
+          | {:tool_uninstall, []}
+          | {:tool_update, []}
+          | {:tool_list, []}
+          | {:tool_manage, []}
+          | {:view_warnings, []}
+          | {:reload_highlights, []}
+          | {:split_vertical, []}
+          | {:split_horizontal, []}
+          | {:window_close, []}
+          | {:set_filetype, [String.t()]}
+          | {:terminal, []}
           | {:goto_line, pos_integer()}
           | {:set, atom()}
           | {:setglobal, atom()}
@@ -277,6 +294,7 @@ defmodule Minga.Command.Parser do
   defp do_parse("ToolUpdate"), do: {:tool_update, []}
   defp do_parse("ToolList"), do: {:tool_list, []}
   defp do_parse("ToolManage"), do: {:tool_manage, []}
+  defp do_parse("terminal"), do: {:terminal, []}
   defp do_parse("warnings"), do: {:view_warnings, []}
   defp do_parse("describe-command"), do: {:describe_command, []}
   defp do_parse("describe-command " <> name), do: {:describe_command_named, [String.trim(name)]}

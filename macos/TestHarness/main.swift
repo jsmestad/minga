@@ -140,11 +140,11 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         result["selection_size"] = Int(update.selection.size)
         return result
 
-    case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let title, let query, let hasPreview, let items, let actionMenu):
+    case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let title, let query, let hasPreview, let items, let actionMenu, let modePrefix):
         let itemArray = items.map { i -> [String: Any] in
             ["label": i.label, "description": i.description, "icon_color": Int(i.iconColor), "annotation": i.annotation, "flags": Int(i.flags), "match_positions": i.matchPositions.map { Int($0) }]
         }
-        var result: [String: Any] = ["type": "gui_picker", "visible": visible, "selected_index": Int(selectedIndex), "filtered_count": Int(filteredCount), "total_count": Int(totalCount), "title": title, "query": query, "has_preview": hasPreview, "items": itemArray]
+        var result: [String: Any] = ["type": "gui_picker", "visible": visible, "selected_index": Int(selectedIndex), "filtered_count": Int(filteredCount), "total_count": Int(totalCount), "title": title, "query": query, "mode_prefix": modePrefix, "has_preview": hasPreview, "items": itemArray]
         if let am = actionMenu {
             result["action_menu"] = ["selected_index": Int(am.selectedIndex), "actions": am.actions]
         }
@@ -158,7 +158,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         return ["type": "gui_picker_preview", "visible": visible, "lines": lineArray]
 
-    case .guiAgentChat(let visible, let status, let model, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptVimMode, let promptVisibleRows, let promptCompletion, let pendingToolName, let pendingToolSummary, let helpVisible, let helpGroups, let messages):
+    case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptVimMode, let promptVisibleRows, let promptCompletion, let pendingToolName, let pendingToolSummary, let helpVisible, let helpGroups, let messages):
         let msgArray = messages.map { chatMessageToJSON($0) }
         let helpGroupArray = helpGroups.map { group -> [String: Any] in
             let bindings = group.bindings.map { ["key": $0.key, "description": $0.description] }
@@ -169,6 +169,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
             "visible": visible,
             "status": Int(status),
             "model": model,
+            "thinking_level": thinkingLevel,
             "prompt": prompt,
             "prompt_line_count": Int(promptLineCount),
             "prompt_cursor_line": Int(promptCursorLine),

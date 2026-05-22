@@ -21,7 +21,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x74   | gui_theme       | Theme color slots              |
   | 0x75   | gui_breadcrumb  | Path breadcrumb segments       |
   | 0x76   | gui_status_bar  | Status bar data                |
-  | 0x77   | gui_picker      | Fuzzy picker items             |
+  | 0x77   | gui_picker      | Fuzzy picker items + mode prefix |
   | 0x78   | gui_agent_chat  | Agent conversation view        |
   | 0x79   | gui_gutter_sep  | Gutter separator col + color   |
   | 0x7A   | gui_cursorline  | Cursorline row + bg color      |
@@ -263,6 +263,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @section_picker_query 0x02
   @section_picker_items 0x03
   @section_picker_action_menu 0x04
+  @section_picker_mode_prefix 0x05
 
   # gui_agent_chat sections
   @section_chat_header 0x01
@@ -272,6 +273,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @section_chat_help 0x05
   @section_chat_messages 0x06
   @section_chat_completion 0x07
+  @section_chat_thinking 0x08
 
   @value_boolean 0x01
   @value_integer 0x02
@@ -2203,14 +2205,35 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @doc """
   Encodes a gui_picker command.
 
-  Wire format (v2, extended):
+  Wire format (sectioned):
   ```
-  opcode(1) + visible(1) + selected_index(2) + filtered_count(2) + total_count(2)
-  + title_len(2) + title + query_len(2) + query + has_preview(1) + item_count(2) + items...
+  opcode(1) + section_count(1) + sections...
+
+  Each section:
+    section_id(1) + payload_len(2) + payload(payload_len)
+
+  Header section 0x01 payload:
+    visible(1) + selected_index(2) + filtered_count(2) + total_count(2)
+    + has_preview(1) + title_len(2) + title(title_len)
+
+  Query section 0x02 payload:
+    query_len(2) + query(query_len)
+
+  Items section 0x03 payload:
+    item_count(2) + items...
 
   Per item:
     icon_color(3) + flags(1) + label_len(2) + label + desc_len(2) + desc
     + annotation_len(2) + annotation + match_pos_count(1) + match_positions(each 2 bytes)
+
+  ActionMenu section 0x04 payload:
+    action_visible(1)
+    When action_visible == 1:
+      selected_action(1) + action_count(1) + actions...
+      Per action: name_len(2) + name(name_len)
+
+  ModePrefix section 0x05 payload:
+    mode_prefix_len(2) + mode_prefix(mode_prefix_len)
 
   Flags bits:
     bit 0: two_line (file-style two-line layout)
@@ -2225,17 +2248,33 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           MingaEditor.UI.Picker.t() | nil,
           boolean(),
           action_menu_state(),
-          non_neg_integer()
+          non_neg_integer(),
+          String.t()
         ) ::
           binary()
-  def encode_gui_picker(picker, has_preview \\ false, action_menu \\ nil, max_items \\ 0)
-  def encode_gui_picker(nil, _has_preview, _action_menu, _max_items), do: <<@op_gui_picker, 0::8>>
+  def encode_gui_picker(
+        picker,
+        has_preview \\ false,
+        action_menu \\ nil,
+        max_items \\ 0,
+        mode_prefix \\ ""
+      )
 
-  def encode_gui_picker(%MingaEditor.UI.Picker{} = picker, has_preview, action_menu, max_items) do
+  def encode_gui_picker(nil, _has_preview, _action_menu, _max_items, _mode_prefix),
+    do: <<@op_gui_picker, 0::8>>
+
+  def encode_gui_picker(
+        %MingaEditor.UI.Picker{} = picker,
+        has_preview,
+        action_menu,
+        max_items,
+        mode_prefix
+      ) do
     limit = if max_items > 0, do: max_items, else: picker.max_visible
     items = Enum.take(picker.filtered, limit)
     title_bytes = :erlang.iolist_to_binary([picker.title])
     query_bytes = :erlang.iolist_to_binary([picker.query])
+    mode_prefix_bytes = :erlang.iolist_to_binary([mode_prefix])
     filtered_count = length(picker.filtered)
     total_count = length(picker.items)
     has_preview_byte = if has_preview, do: 1, else: 0
@@ -2271,7 +2310,11 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       ),
       encode_section(@section_picker_query, <<byte_size(query_bytes)::16, query_bytes::binary>>),
       encode_section(@section_picker_items, items_payload),
-      encode_section(@section_picker_action_menu, action_menu_bytes)
+      encode_section(@section_picker_action_menu, action_menu_bytes),
+      encode_section(
+        @section_picker_mode_prefix,
+        <<byte_size(mode_prefix_bytes)::16, mode_prefix_bytes::binary>>
+      )
     ]
 
     IO.iodata_to_binary([<<@op_gui_picker, length(sections)::8>> | sections])
@@ -2391,6 +2434,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     completion_bytes = encode_prompt_completion(data[:prompt_completion])
     pending_bytes = encode_pending_approval(data[:pending_approval])
     help_bytes = encode_help_overlay(data[:help_visible], data[:help_groups])
+    thinking_bytes = utf8_prefix_bytes(data[:thinking_level] || "", @max_u16 - 2)
 
     messages_payload = encode_chat_messages(messages)
 
@@ -2406,6 +2450,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       encode_section(@section_chat_completion, completion_bytes),
       encode_section(@section_chat_pending, pending_bytes),
       encode_section(@section_chat_help, help_bytes),
+      encode_section(
+        @section_chat_thinking,
+        <<byte_size(thinking_bytes)::16, thinking_bytes::binary>>
+      ),
       encode_section(@section_chat_messages, messages_payload)
     ]
 
