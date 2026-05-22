@@ -60,6 +60,30 @@ The BEAM-side encoder must use a documented length-prefixed envelope for all new
 | 0x94 | gui_file_tree_selection | Lightweight file tree selection and focus update. |
 | 0x95 | gui_cursor_animation | Cursor movement animation preference for GUI renderers. |
 | 0x96 | gui_hover_action | Optional action metadata for the hover popup |
+| 0x9A | gui_observatory | BEAM Observatory process tree and metrics for native sidebars. Uses a 32-bit payload length because large supervision trees can exceed 64KB. |
+
+### 0x9A — gui_observatory
+
+The BEAM Observatory receives a length-prefixed, sectioned process tree snapshot. The BEAM remains the source of truth for process identity, hierarchy, class, metrics, and message-queue history. Frontends render the tree or graph directly and send process inspection requests back through `observatory_inspect`.
+
+```
+opcode(1) + payload_len(4) + payload(payload_len)
+
+Sections:
+  0x01 header: visible(1) + node_count(2)
+  0x02 nodes: node entries... (may repeat; concatenate entries in order)
+  0x03 sparklines: sparkline entries... (may repeat; later entries for the same pid replace earlier ones)
+
+Node entry:
+  pid_len(1) + pid + parent_pid_len(1) + parent_pid + name_len(2) + name + class(1) + depth(1) + memory(4) + message_queue_len(2) + reductions(4)
+
+Sparkline entry:
+  pid_len(1) + pid + sample_count(1) + samples(sample_count * 2)
+```
+
+Process class values: `0 = supervisor`, `1 = buffer`, `2 = agent_session`, `3 = lsp`, `4 = service`, `5 = worker`. Sparkline samples are unsigned 16-bit normalized values in `[0, 65535]`, representing message queue pressure over recent samples.
+
+When `visible == 0`, the frontend should hide the Observatory and clear selected process state.
 
 ### 0x93 — gui_file_tree
 
@@ -914,6 +938,7 @@ opcode(1) + action_type(1) + payload...
 | 0x4A | tab_unpin | tab_id(4) | Unpin a tab by id without selecting it first |
 | 0x4B | tab_move_left | tab_id(4) | Move a tab one visible slot left without selecting it first |
 | 0x4C | tab_move_right | tab_id(4) | Move a tab one visible slot right without selecting it first |
+| 0x4D | observatory_inspect | pid_len(2) + pid | Inspect a BEAM Observatory process PID |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |

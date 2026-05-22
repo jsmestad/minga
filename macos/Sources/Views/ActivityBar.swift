@@ -8,11 +8,13 @@ import SwiftUI
 enum ActivityBarPanel: CaseIterable, Hashable {
     case fileTree
     case gitStatus
+    case observatory
 
     var protocolPanel: UInt8 {
         switch self {
         case .fileTree: 0
         case .gitStatus: 2
+        case .observatory: 4
         }
     }
 
@@ -20,6 +22,7 @@ enum ActivityBarPanel: CaseIterable, Hashable {
         switch self {
         case .fileTree: "folder"
         case .gitStatus: "point.3.filled.connected.trianglepath.dotted"
+        case .observatory: "network"
         }
     }
 
@@ -27,6 +30,7 @@ enum ActivityBarPanel: CaseIterable, Hashable {
         switch self {
         case .fileTree: "File tree (SPC o p)"
         case .gitStatus: "Git status (SPC g g)"
+        case .observatory: "BEAM Observatory (SPC o b)"
         }
     }
 
@@ -34,6 +38,7 @@ enum ActivityBarPanel: CaseIterable, Hashable {
         switch self {
         case .fileTree: "File tree"
         case .gitStatus: "Git status"
+        case .observatory: "BEAM Observatory"
         }
     }
 }

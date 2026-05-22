@@ -41,6 +41,16 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     refute TabBar.get(unpinned_tab_bar, 3).pinned?
   end
 
+  test "observatory inspect is a no-op in the Board shell" do
+    state = %{
+      TestHelpers.base_state()
+      | shell: MingaEditor.Shell.Board,
+        shell_state: MingaEditor.Shell.Board.State.new()
+    }
+
+    assert GuiActionHandler.dispatch(state, {:observatory_inspect, "<0.1.0>"}) == state
+  end
+
   test "power thermal gui action updates resource pressure and broadcasts the event" do
     registry = power_thermal_events_registry()
     start_supervised!({Events, name: registry})

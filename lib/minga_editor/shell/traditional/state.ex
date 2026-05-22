@@ -15,6 +15,7 @@ defmodule MingaEditor.Shell.Traditional.State do
   alias MingaEditor.BottomPanel
   alias MingaEditor.HoverPopup
   alias MingaEditor.NavFlash
+  alias MingaEditor.Observatory
   alias MingaEditor.YankFlash
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.InlineAsk
@@ -38,6 +39,10 @@ defmodule MingaEditor.Shell.Traditional.State do
           bottom_panel: BottomPanel.t(),
           git_status_panel: MingaEditor.Frontend.Protocol.GUI.git_status_panel_data() | nil,
           git_status_tui_state: GitStatusTuiState.t() | nil,
+          observatory_visible: boolean(),
+          observatory_data: Observatory.Data.t() | nil,
+          observatory_timer: {reference(), reference()} | nil,
+          observatory_inspection: Observatory.Inspection.t() | nil,
           git_toast: git_toast(),
           tab_bar: TabBar.t() | nil,
           agent: AgentState.t(),
@@ -63,6 +68,10 @@ defmodule MingaEditor.Shell.Traditional.State do
             bottom_panel: %BottomPanel{},
             git_status_panel: nil,
             git_status_tui_state: nil,
+            observatory_visible: false,
+            observatory_data: nil,
+            observatory_timer: nil,
+            observatory_inspection: nil,
             git_toast: nil,
             tab_bar: nil,
             agent: %AgentState{},
@@ -214,6 +223,48 @@ defmodule MingaEditor.Shell.Traditional.State do
   @spec close_git_status_panel(t()) :: t()
   def close_git_status_panel(%{} = ss) do
     %{ss | git_status_panel: nil, git_status_tui_state: nil}
+  end
+
+  # ── BEAM Observatory ──────────────────────────────────────────────────────
+
+  @doc "Returns true when the BEAM Observatory sidebar is visible."
+  @spec observatory_visible?(t()) :: boolean()
+  def observatory_visible?(%{observatory_visible: visible}), do: visible
+
+  @doc "Opens the BEAM Observatory sidebar."
+  @spec open_observatory(t(), {reference(), reference()} | nil) :: t()
+  def open_observatory(%{} = ss, timer) do
+    %{ss | observatory_visible: true, observatory_timer: timer, observatory_inspection: nil}
+  end
+
+  @doc "Closes the BEAM Observatory sidebar."
+  @spec close_observatory(t()) :: t()
+  def close_observatory(%{} = ss) do
+    %{
+      ss
+      | observatory_visible: false,
+        observatory_data: nil,
+        observatory_timer: nil,
+        observatory_inspection: nil
+    }
+  end
+
+  @doc "Stores the latest BEAM Observatory tree data."
+  @spec set_observatory_data(t(), Observatory.Data.t() | nil) :: t()
+  def set_observatory_data(%{} = ss, data) do
+    %{ss | observatory_data: data}
+  end
+
+  @doc "Stores the timer reference for the next BEAM Observatory refresh."
+  @spec set_observatory_timer(t(), {reference(), reference()} | nil) :: t()
+  def set_observatory_timer(%{} = ss, timer) do
+    %{ss | observatory_timer: timer}
+  end
+
+  @doc "Stores process inspection data for the native float popup."
+  @spec set_observatory_inspection(t(), Observatory.Inspection.t() | nil) :: t()
+  def set_observatory_inspection(%{} = ss, inspection) do
+    %{ss | observatory_inspection: inspection}
   end
 
   # ── Git toast ─────────────────────────────────────────────────────────────

@@ -34,6 +34,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   alias MingaEditor.FoldMap
   alias MingaEditor.Layout
   alias MingaEditor.MinibufferData
+  alias MingaEditor.Observatory
   alias Minga.Project.FileTree
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.Renderer.Gutter
@@ -153,6 +154,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       &build_gui_signature_help_cmd/2,
       &build_gui_float_popup_cmd/2,
       &build_gui_notifications_cmd/2,
+      &build_gui_observatory_cmd/2,
       &build_gui_board_cmd/2,
       &build_gui_agent_context_cmd/2,
       &build_gui_change_summary_cmd/2
@@ -1448,9 +1450,50 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     end
   end
 
+  # ── BEAM Observatory ──
+
+  @spec build_gui_observatory_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
+  defp build_gui_observatory_cmd(
+         %{shell_state: %{observatory_visible: true, observatory_data: data}},
+         caches
+       ) do
+    payload = data || Observatory.Data.visible(nil, [])
+    fp = :erlang.phash2(payload)
+
+    if fp != caches.last_gui_observatory_fp do
+      {ProtocolGUI.encode_gui_observatory(payload), %{caches | last_gui_observatory_fp: fp}}
+    else
+      {nil, caches}
+    end
+  end
+
+  defp build_gui_observatory_cmd(_ctx, caches) do
+    fp = :hidden
+
+    if fp != caches.last_gui_observatory_fp do
+      {ProtocolGUI.encode_gui_observatory(Observatory.Data.hidden()),
+       %{caches | last_gui_observatory_fp: fp}}
+    else
+      {nil, caches}
+    end
+  end
+
   # ── Float popup ──
 
   @spec build_gui_float_popup_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
+  defp build_gui_float_popup_cmd(
+         %{shell_state: %{observatory_inspection: %{visible: true} = data}},
+         caches
+       ) do
+    fp = :erlang.phash2({:observatory_inspection, data})
+
+    if fp != caches.last_gui_float_popup_fp do
+      {ProtocolGUI.encode_gui_float_popup(data), %{caches | last_gui_float_popup_fp: fp}}
+    else
+      {nil, caches}
+    end
+  end
+
   defp build_gui_float_popup_cmd(ctx, caches) do
     float_window = find_float_popup_window(ctx)
 

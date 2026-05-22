@@ -496,6 +496,7 @@ final class SpyEncoder: InputEncoder, Sendable {
         case boardCloseCard(id: UInt32)
         case boardReorder(cardId: UInt32, newIndex: UInt16)
         case boardDispatchAgent(task: String, model: String)
+        case observatoryInspect(pid: String)
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
@@ -620,6 +621,9 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendScrollToLine(line: UInt32) { /* no-op for tests */ }
     func sendFoldToggleAtLine(windowId: UInt16, bufferLine: UInt32) {
         state.withLock { $0.guiActions.append(.foldToggleAtLine(windowId: windowId, bufferLine: bufferLine)) }
+    }
+    func sendObservatoryInspect(pid: String) {
+        state.withLock { $0.guiActions.append(.observatoryInspect(pid: pid)) }
     }
 }
 

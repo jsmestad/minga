@@ -25,6 +25,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.HighlightSync
   alias MingaEditor.Layout
   alias MingaEditor.LspActions
+  alias MingaEditor.Input.Observatory
   alias MingaEditor.MinibufferData
   alias MingaEditor.PickerUI
   alias MingaEditor.Renderer
@@ -153,6 +154,14 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
       _ ->
         state
+    end
+  end
+
+  defp dispatch_action(%{shell_state: shell_state} = state, {:observatory_inspect, pid_string}) do
+    if Map.has_key?(shell_state, :observatory_inspection) do
+      Observatory.inspect_process(state, pid_string)
+    else
+      state
     end
   end
 
@@ -332,6 +341,12 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   defp dispatch_action(state, {:toggle_panel, 3}) do
     Commands.Agent.toggle_agent_split(state)
+  end
+
+  defp dispatch_action(state, {:toggle_panel, 4}) do
+    state
+    |> Commands.execute(:toggle_beam_observatory)
+    |> normalize_command_result()
   end
 
   defp dispatch_action(state, {:toggle_panel, _panel}) do

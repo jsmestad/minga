@@ -2,11 +2,16 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.BottomPanel
+  alias MingaEditor.Commands
   alias MingaEditor.Commands.UI.GUI, as: UIGUI
+  alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Commands.UI.TUI, as: UITUI
 
   defp base_state do
-    %{shell_state: %MingaEditor.Shell.Traditional.State{bottom_panel: %BottomPanel{}}}
+    %{
+      capabilities: %Capabilities{frontend_type: :native_gui},
+      shell_state: %MingaEditor.Shell.Traditional.State{bottom_panel: %BottomPanel{}}
+    }
   end
 
   describe "GUI.toggle_bottom_panel/1" do
@@ -45,6 +50,63 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
 
       state = UIGUI.bottom_panel_prev_tab(state)
       assert state.shell_state.bottom_panel.active_tab == :messages
+    end
+  end
+
+  describe "toggle_beam_observatory command" do
+    test "opens the observatory and stores a refresh timer" do
+      state = Commands.execute(base_state(), :toggle_beam_observatory)
+
+      assert state.shell_state.observatory_visible == true
+      assert {timer, _token} = state.shell_state.observatory_timer
+
+      Process.cancel_timer(timer)
+    end
+
+    test "closes the observatory and clears transient state" do
+      token = make_ref()
+      timer = Process.send_after(self(), {:observatory_tick, token}, 60_000)
+
+      state = %{
+        base_state()
+        | shell_state:
+            MingaEditor.Shell.Traditional.State.open_observatory(
+              base_state().shell_state,
+              {timer, token}
+            )
+      }
+
+      state = MingaEditor.State.set_observatory_data(state, %{tree: :placeholder})
+      state = Commands.execute(state, :toggle_beam_observatory)
+
+      assert state.shell_state.observatory_visible == false
+      assert state.shell_state.observatory_timer == nil
+      assert state.shell_state.observatory_data == nil
+    end
+
+    test "is a no-op for non-GUI frontends" do
+      state = %{base_state() | capabilities: %Capabilities{frontend_type: :tui}}
+
+      assert Commands.execute(state, :toggle_beam_observatory) == state
+    end
+
+    test "is a no-op for the Board shell" do
+      state =
+        Map.merge(base_state(), %{
+          shell: MingaEditor.Shell.Board,
+          shell_state: MingaEditor.Shell.Board.State.new()
+        })
+
+      assert Commands.execute(state, :toggle_beam_observatory) == state
+    end
+
+    test "ignores stale refresh ticks" do
+      state = Commands.execute(base_state(), :toggle_beam_observatory)
+      assert {timer, _token} = state.shell_state.observatory_timer
+
+      assert {:noreply, ^state} = MingaEditor.handle_info({:observatory_tick, make_ref()}, state)
+
+      Process.cancel_timer(timer)
     end
   end
 

@@ -94,6 +94,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x4A       | tab_unpin               |
   | 0x4B       | tab_move_left           |
   | 0x4C       | tab_move_right          |
+  | 0x4D       | observatory_inspect     |
   | 0x34       | system_will_sleep       |
   | 0x35       | system_did_wake         |
 
@@ -105,10 +106,12 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   alias Minga.Config.Options
   alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.Keymap.Bindings
+  alias Minga.SystemObserver.TreeNode
   alias MingaEditor.FileTree.Diagnostics, as: FileTreeDiagnostics
   alias MingaEditor.FileTree.DropIntent
   alias MingaEditor.FileTree.Row
   alias MingaEditor.MinibufferData
+  alias MingaEditor.Observatory
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
@@ -158,6 +161,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @op_gui_hover_action Opcodes.gui_hover_action()
   @op_gui_config_state Opcodes.gui_config_state()
   @op_gui_notifications Opcodes.gui_notifications()
+  @op_gui_observatory Opcodes.gui_observatory()
 
   @gui_action_select_tab Opcodes.gui_action_select_tab()
   @gui_action_close_tab Opcodes.gui_action_close_tab()
@@ -235,11 +239,14 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_config_query Opcodes.gui_action_config_query()
   @gui_action_notification_dismiss Opcodes.gui_action_notification_dismiss()
   @gui_action_notification_action Opcodes.gui_action_notification_action()
+  @gui_action_observatory_inspect Opcodes.gui_action_observatory_inspect()
 
   @max_u8 255
   @max_u16 65_535
   @max_u32 4_294_967_295
   @max_modeline_segments 128
+  @max_observatory_section_payload_bytes 65_000
+  @max_observatory_name_bytes 64_000
 
   @typedoc "macOS thermal pressure level reported by the native GUI frontend."
   @type thermal_state :: :nominal | :fair | :serious | :critical | {:unknown, non_neg_integer()}
@@ -395,6 +402,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | :config_query
           | {:notification_dismiss, notification_id :: String.t()}
           | {:notification_action, notification_id :: String.t(), action_id :: String.t()}
+          | {:observatory_inspect, pid_string :: String.t()}
+
+  @typedoc "BEAM Observatory payload sent to native GUI frontends."
+  @type observatory_data :: Observatory.Data.t()
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -1286,6 +1297,154 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     enabled_byte = if enabled, do: 1, else: 0
     <<@op_gui_cursor_animation, 1::16, enabled_byte::8>>
   end
+
+  # ── BEAM Observatory (forward-compatible, 0x9A) ──
+
+  @doc "Encodes the BEAM Observatory sidebar state for native GUI frontends using a 32-bit payload length envelope."
+  @spec encode_gui_observatory(observatory_data()) :: binary()
+  def encode_gui_observatory(%{visible: false}) do
+    payload = encode_section(0x01, <<0::8, 0::16>>)
+    <<@op_gui_observatory, byte_size(payload)::32, payload::binary>>
+  end
+
+  def encode_gui_observatory(%{visible: true, tree: tree} = data) do
+    nodes = TreeNode.flatten(tree)
+    node_entries = Enum.map(nodes, &encode_observatory_node/1)
+
+    sparkline_entries =
+      Enum.map(nodes, &encode_observatory_sparkline(&1, Map.get(data, :samples, [])))
+
+    sections = [
+      encode_section(0x01, <<1::8, length(nodes)::16>>),
+      encode_chunked_sections(0x02, node_entries),
+      encode_chunked_sections(0x03, sparkline_entries)
+    ]
+
+    payload = IO.iodata_to_binary(sections)
+    <<@op_gui_observatory, byte_size(payload)::32, payload::binary>>
+  end
+
+  def encode_gui_observatory(%{visible: true}) do
+    payload = encode_section(0x01, <<1::8, 0::16>>)
+    <<@op_gui_observatory, byte_size(payload)::32, payload::binary>>
+  end
+
+  @spec encode_chunked_sections(non_neg_integer(), [binary()]) :: iodata()
+  defp encode_chunked_sections(section_id, entries) do
+    entries
+    |> chunk_observatory_entries()
+    |> Enum.map(&encode_section(section_id, &1))
+  end
+
+  @spec chunk_observatory_entries([binary()]) :: [binary()]
+  defp chunk_observatory_entries(entries) do
+    entries
+    |> Enum.reduce({[], [], 0}, &chunk_observatory_entry/2)
+    |> finish_observatory_entry_chunks()
+  end
+
+  @spec chunk_observatory_entry(binary(), {[binary()], [binary()], non_neg_integer()}) ::
+          {[binary()], [binary()], non_neg_integer()}
+  defp chunk_observatory_entry(entry, {chunks, current_entries, current_size}) do
+    entry_size = byte_size(entry)
+    append_observatory_entry(entry, entry_size, chunks, current_entries, current_size)
+  end
+
+  @spec append_observatory_entry(
+          binary(),
+          non_neg_integer(),
+          [binary()],
+          [binary()],
+          non_neg_integer()
+        ) :: {[binary()], [binary()], non_neg_integer()}
+  defp append_observatory_entry(entry, entry_size, chunks, [], _current_size)
+       when entry_size <= @max_observatory_section_payload_bytes do
+    {chunks, [entry], entry_size}
+  end
+
+  defp append_observatory_entry(entry, entry_size, chunks, current_entries, current_size)
+       when current_size + entry_size <= @max_observatory_section_payload_bytes do
+    {chunks, [entry | current_entries], current_size + entry_size}
+  end
+
+  defp append_observatory_entry(entry, entry_size, chunks, current_entries, _current_size)
+       when entry_size <= @max_observatory_section_payload_bytes do
+    chunk = current_entries |> Enum.reverse() |> IO.iodata_to_binary()
+    {[chunk | chunks], [entry], entry_size}
+  end
+
+  @spec finish_observatory_entry_chunks({[binary()], [binary()], non_neg_integer()}) :: [binary()]
+  defp finish_observatory_entry_chunks({chunks, [], 0}), do: Enum.reverse(chunks)
+
+  defp finish_observatory_entry_chunks({chunks, current_entries, _current_size}) do
+    chunk = current_entries |> Enum.reverse() |> IO.iodata_to_binary()
+    Enum.reverse([chunk | chunks])
+  end
+
+  @spec encode_observatory_node(TreeNode.t()) :: binary()
+  defp encode_observatory_node(%TreeNode{} = node) do
+    snapshot = node.snapshot
+    pid_bytes = node.pid |> :erlang.pid_to_list() |> List.to_string()
+    parent_bytes = pid_to_bytes(snapshot.parent_pid)
+    name_bytes = observatory_name(snapshot)
+
+    <<byte_size(pid_bytes)::8, pid_bytes::binary, byte_size(parent_bytes)::8,
+      parent_bytes::binary, byte_size(name_bytes)::16, name_bytes::binary,
+      observatory_class_byte(snapshot.process_class)::8, node.depth::8,
+      clamp_u32(snapshot.memory)::32, clamp_u16(snapshot.message_queue_len)::16,
+      clamp_u32(snapshot.reductions)::32>>
+  end
+
+  @spec encode_observatory_sparkline(TreeNode.t(), [Minga.SystemObserver.process_tree_snapshot()]) ::
+          binary()
+  defp encode_observatory_sparkline(%TreeNode{} = node, samples) do
+    pid_bytes = node.pid |> :erlang.pid_to_list() |> List.to_string()
+
+    values =
+      samples
+      |> Enum.take(-30)
+      |> Enum.map(&observatory_sample_value(&1, node.pid))
+
+    sample_bytes = Enum.map(values, &encode_float16/1)
+
+    <<byte_size(pid_bytes)::8, pid_bytes::binary, length(values)::8,
+      IO.iodata_to_binary(sample_bytes)::binary>>
+  end
+
+  @spec observatory_sample_value(Minga.SystemObserver.process_tree_snapshot(), pid()) :: float()
+  defp observatory_sample_value(%{processes: processes}, pid) do
+    case Map.get(processes, pid) do
+      %{message_queue_len: len} when len > 0 -> min(len / 10.0, 1.0)
+      _ -> 0.0
+    end
+  end
+
+  @spec pid_to_bytes(pid() | nil) :: binary()
+  defp pid_to_bytes(nil), do: ""
+  defp pid_to_bytes(pid) when is_pid(pid), do: pid |> :erlang.pid_to_list() |> List.to_string()
+
+  @spec observatory_name(Minga.SystemObserver.ProcessSnapshot.t()) :: binary()
+  defp observatory_name(%{registered_name: name}) when is_atom(name) and not is_nil(name) do
+    name |> inspect() |> utf8_prefix_bytes(@max_observatory_name_bytes)
+  end
+
+  defp observatory_name(%{current_function: {module, function, arity}}) do
+    "#{inspect(module)}.#{function}/#{arity}" |> utf8_prefix_bytes(@max_observatory_name_bytes)
+  end
+
+  defp observatory_name(_snapshot), do: "unnamed"
+
+  @spec observatory_class_byte(Minga.SystemObserver.ProcessSnapshot.process_class()) ::
+          non_neg_integer()
+  defp observatory_class_byte(:supervisor), do: 0
+  defp observatory_class_byte(:buffer), do: 1
+  defp observatory_class_byte(:agent_session), do: 2
+  defp observatory_class_byte(:lsp), do: 3
+  defp observatory_class_byte(:service), do: 4
+  defp observatory_class_byte(:worker), do: 5
+
+  @spec clamp_u32(non_neg_integer()) :: non_neg_integer()
+  defp clamp_u32(value), do: min(value, @max_u32)
 
   # ── Config state (forward-compatible, 0x97) ──
 
@@ -3285,6 +3444,13 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
         <<id_len::16, id::binary-size(id_len), action_len::16, action::binary-size(action_len)>>
       ) do
     {:ok, {:notification_action, id, action}}
+  end
+
+  def decode_gui_action(
+        @gui_action_observatory_inspect,
+        <<pid_len::16, pid_string::binary-size(pid_len)>>
+      ) do
+    {:ok, {:observatory_inspect, pid_string}}
   end
 
   def decode_gui_action(_, _), do: :error

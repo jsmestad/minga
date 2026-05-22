@@ -221,6 +221,13 @@ final class CommandDispatcher {
         case .clipboardWrite(let target, let text):
             handleClipboardWrite(target: target, text: text)
 
+        case .guiObservatory(let visible, _, let nodes):
+            if visible {
+                guiState.observatoryState.update(visible: true, rawNodes: nodes)
+            } else {
+                guiState.observatoryState.hide()
+            }
+
         case .guiFileTree(let version, let treeFlags, let treeState, let selectedId, let treeWidth, let rootPath, let errorReason, let entries):
             let visible = treeState != FileTreeVisibilityState.hidden.rawValue
             let focused = treeFlags & 0x02 != 0

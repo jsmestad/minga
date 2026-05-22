@@ -263,7 +263,7 @@ struct ContentView: View {
     private let activityBarWidth: CGFloat = 32
 
     private var showSidebarContent: Bool {
-        appState.gui.fileTreeState.visible || appState.gui.gitStatusState.visible
+        appState.gui.fileTreeState.visible || appState.gui.gitStatusState.visible || appState.gui.observatoryState.visible
     }
 
     private var showChangeSummary: Bool {
@@ -324,6 +324,9 @@ struct ContentView: View {
             syncActiveSidebarPanel()
         }
         .onChange(of: appState.gui.gitStatusState.visible) { _, _ in
+            syncActiveSidebarPanel()
+        }
+        .onChange(of: appState.gui.observatoryState.visible) { _, _ in
             syncActiveSidebarPanel()
         }
     }
@@ -406,7 +409,9 @@ struct ContentView: View {
     /// which sidebar panel the BEAM has active.
     @ViewBuilder
     private var sidebarHeaderContent: some View {
-        if appState.gui.fileTreeState.visible {
+        if appState.gui.observatoryState.visible {
+            observatoryHeaderContent
+        } else if appState.gui.fileTreeState.visible {
             FileTreeHeaderContent(
                 fileTreeState: appState.gui.fileTreeState,
                 theme: theme,
@@ -422,6 +427,27 @@ struct ContentView: View {
                 leadingPadding: titleBarLeadingPadding
             )
         }
+    }
+
+    private var observatoryHeaderContent: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "network")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(theme.treeDirFg.opacity(0.85))
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("BEAM Observatory")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(theme.tabActiveFg.opacity(0.85))
+                Text("\(appState.gui.observatoryState.processCount) processes")
+                    .font(.system(size: 10, weight: .regular))
+                    .foregroundStyle(theme.treeFg.opacity(0.55))
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, titleBarLeadingPadding)
+        .padding(.trailing, 12)
     }
 
     private var compactProjectBranchHeader: some View {
@@ -468,6 +494,7 @@ struct ContentView: View {
                 SidebarContainer(
                     fileTreeState: appState.gui.fileTreeState,
                     gitStatusState: appState.gui.gitStatusState,
+                    observatoryState: appState.gui.observatoryState,
                     theme: theme,
                     encoder: appState.encoder,
                     sidebarWidth: $sidebarWidth
@@ -477,7 +504,9 @@ struct ContentView: View {
     }
 
     private func syncActiveSidebarPanel() {
-        if appState.gui.gitStatusState.visible {
+        if appState.gui.observatoryState.visible {
+            activeSidebarPanel = .observatory
+        } else if appState.gui.gitStatusState.visible {
             activeSidebarPanel = .gitStatus
         } else if appState.gui.fileTreeState.visible {
             activeSidebarPanel = .fileTree
