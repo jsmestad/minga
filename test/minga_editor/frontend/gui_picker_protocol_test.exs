@@ -71,26 +71,31 @@ defmodule MingaEditor.Frontend.GUIPickerProtocolTest do
       assert section_ids(prefixed) == [0x01, 0x02, 0x03, 0x04, 0x05]
     end
 
-    test "encodes filtered and total counts in header" do
+    test "encodes filtered, total, and marked counts in header" do
       items = [
         %Item{id: :a, label: "README.md", description: ""},
         %Item{id: :b, label: "config.exs", description: ""},
         %Item{id: :c, label: "mix.exs", description: ""}
       ]
 
-      picker = Picker.new(items, title: "Test")
-      picker = Picker.filter(picker, "config")
+      picker =
+        items
+        |> Picker.new(title: "Test")
+        |> Picker.toggle_mark()
+        |> Picker.filter("config")
 
       binary = ProtocolGUI.encode_gui_picker(picker)
 
       # Sectioned: opcode(1) + section_count(1) + section_0x01 header
       # Section header: id(1) + len(2) + payload
-      # Payload: visible(1) + selected(2) + filtered(2) + total(2) + has_preview(1) + title_len(2) + title
-      <<0x77, 5, 0x01, _slen::16, 1, _selected::16, filtered::16, total::16, _rest::binary>> =
-        binary
+      # Payload: visible(1) + selected(2) + filtered(2) + total(2) + has_preview(1) + title_len(2) + title + marked(2)
+      <<0x77, 5, 0x01, _slen::16, 1, _selected::16, filtered::16, total::16, _has_preview::8,
+        title_len::16, title::binary-size(title_len), marked::16, _rest::binary>> = binary
 
+      assert title == "Test"
       assert filtered == 1
       assert total == 3
+      assert marked == 1
     end
   end
 

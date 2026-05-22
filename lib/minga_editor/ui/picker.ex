@@ -221,16 +221,24 @@ defmodule MingaEditor.UI.Picker do
 
   @doc "Returns all marked items. If none are marked, returns the selected item in a list."
   @spec marked_items(t()) :: [Item.t()]
-  def marked_items(%__MODULE__{marked: marked, filtered: filtered} = picker) do
+  def marked_items(%__MODULE__{marked: marked, items: items} = picker) do
     if map_size(marked) == 0 do
       case selected_item(picker) do
         nil -> []
         item -> [item]
       end
     else
-      Enum.filter(filtered, fn %Item{id: id} -> Map.has_key?(marked, id) end)
+      Enum.filter(items, fn %Item{id: id} -> Map.has_key?(marked, id) end)
     end
   end
+
+  @doc "Returns true when the picker has explicit multi-select marks."
+  @spec has_marks?(t()) :: boolean()
+  def has_marks?(%__MODULE__{marked: marked}), do: map_size(marked) > 0
+
+  @doc "Returns the number of explicitly marked items."
+  @spec marked_count(t()) :: non_neg_integer()
+  def marked_count(%__MODULE__{marked: marked}), do: map_size(marked)
 
   @doc "Returns whether an item is marked."
   @spec marked?(t(), Item.t()) :: boolean()

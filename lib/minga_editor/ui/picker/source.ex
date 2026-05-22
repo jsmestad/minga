@@ -10,6 +10,7 @@ defmodule MingaEditor.UI.Picker.Source do
 
   - `candidates/1` — returns the list of picker items given some context
   - `on_select/2` — called when the user selects an item; returns new editor state
+  - `on_bulk_select/2` — optionally called when the user confirms explicitly marked items
   - `on_cancel/1` — called when the user cancels; returns new editor state
   - `preview?/0` — legacy live-navigation preview flag (default: false)
   - `live_preview?/0` — whether navigating the picker should temporarily run `on_select/2` for the highlighted item (default: `preview?/0` for backwards compatibility)
@@ -57,6 +58,14 @@ defmodule MingaEditor.UI.Picker.Source do
   """
   @callback on_select(Picker.item(), state :: term()) :: term()
 
+  @doc """
+  Called when the user confirms explicitly marked items. Returns the new editor state.
+
+  Sources that do not implement this callback ignore picker marks and keep the
+  single-selection behavior from `on_select/2`.
+  """
+  @callback on_bulk_select([Picker.item()], state :: term()) :: term()
+
   @doc "Called when the user cancels the picker. Returns the new editor state."
   @callback on_cancel(state :: term()) :: term()
 
@@ -79,7 +88,7 @@ defmodule MingaEditor.UI.Picker.Source do
   @callback preview(Picker.item(), context :: preview_context()) :: [[preview_segment()]] | nil
 
   @typedoc "An alternative action: display name and action identifier."
-  @type action_entry :: {name :: String.t(), action_id :: atom()}
+  @type action_entry :: {name :: String.t(), action_id :: term()}
 
   @doc """
   Returns the list of alternative actions available for a picker item.
@@ -95,7 +104,13 @@ defmodule MingaEditor.UI.Picker.Source do
   context required must travel with the `Picker.item()`; do not read
   `state.shell_state.modal` here.
   """
-  @callback on_action(atom(), Picker.item(), state :: term()) :: term()
+  @callback on_action(term(), Picker.item(), state :: term()) :: term()
+
+  @doc "Returns the list of alternative actions available for a marked item batch."
+  @callback bulk_actions([Picker.item()]) :: [action_entry()]
+
+  @doc "Executes an alternative action on a marked item batch."
+  @callback on_bulk_action(term(), [Picker.item()], state :: term()) :: term()
 
   @typedoc "Picker layout: bottom-anchored (default) or centered floating window."
   @type layout :: :bottom | :centered
@@ -122,6 +137,9 @@ defmodule MingaEditor.UI.Picker.Source do
     preview: 2,
     actions: 1,
     on_action: 3,
+    on_bulk_select: 2,
+    bulk_actions: 1,
+    on_bulk_action: 3,
     layout: 0,
     keep_open_on_select?: 0
   ]
@@ -204,6 +222,46 @@ defmodule MingaEditor.UI.Picker.Source do
       module.actions(item)
     else
       []
+    end
+  end
+
+  @doc "Returns whether a source module supports bulk select."
+  @spec has_bulk_select?(module()) :: boolean()
+  def has_bulk_select?(module), do: exported?(module, :on_bulk_select, 2)
+
+  @doc "Runs bulk select for a source, returning state unchanged if unsupported."
+  @spec bulk_select(module(), [Picker.item()], term()) :: term()
+  def bulk_select(module, items, state) do
+    if has_bulk_select?(module) do
+      module.on_bulk_select(items, state)
+    else
+      state
+    end
+  end
+
+  @doc "Returns whether a source module supports bulk alternative actions."
+  @spec has_bulk_actions?(module()) :: boolean()
+  def has_bulk_actions?(module) do
+    exported?(module, :bulk_actions, 1) and exported?(module, :on_bulk_action, 3)
+  end
+
+  @doc "Returns bulk actions for marked items, or an empty list if unsupported."
+  @spec bulk_actions(module(), [Picker.item()]) :: [action_entry()]
+  def bulk_actions(module, items) do
+    if has_bulk_actions?(module) do
+      module.bulk_actions(items)
+    else
+      []
+    end
+  end
+
+  @doc "Runs a bulk action for a source, returning state unchanged if unsupported."
+  @spec on_bulk_action(module(), term(), [Picker.item()], term()) :: term()
+  def on_bulk_action(module, action, items, state) do
+    if has_bulk_actions?(module) do
+      module.on_bulk_action(action, items, state)
+    else
+      state
     end
   end
 

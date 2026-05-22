@@ -245,7 +245,7 @@ defmodule MingaEditor.PickerUI do
       ) do
     case Picker.selected_item(picker) do
       nil -> close(state)
-      item -> select_item(state, item, source)
+      item -> select_item(state, picker, item, source)
     end
   end
 
@@ -324,7 +324,7 @@ defmodule MingaEditor.PickerUI do
         state
 
       item ->
-        actions = Picker.Source.actions(source, item)
+        actions = action_menu_actions(source, picker, item)
 
         case actions do
           [] -> state
@@ -408,11 +408,11 @@ defmodule MingaEditor.PickerUI do
   # Ignore all other keys
   def handle_key(state, _cp, _mods), do: state
 
-  @spec run_source_action_and_close(EditorState.t(), module(), atom(), Picker.item()) ::
+  @spec run_source_action_and_close(EditorState.t(), module(), term(), Picker.item()) ::
           EditorState.t()
   defp run_source_action_and_close(state, source, action_id, item) do
     new_state = close(state)
-    source.on_action(action_id, item, new_state)
+    run_action(source, action_id, item, new_state)
   end
 
   @spec type_printable_char(EditorState.t(), Picker.t(), String.t()) :: EditorState.t()
@@ -428,9 +428,19 @@ defmodule MingaEditor.PickerUI do
     end
   end
 
-  @spec select_item(EditorState.t(), Picker.item(), module()) ::
+  @spec select_item(EditorState.t(), Picker.t(), Picker.item(), module()) ::
           EditorState.t() | {EditorState.t(), {:execute_command, atom()}}
-  defp select_item(state, item, source) do
+  defp select_item(state, picker, item, source) do
+    if bulk_select?(source, picker) do
+      run_bulk_select_and_close(state, picker, source)
+    else
+      select_single_item(state, item, source)
+    end
+  end
+
+  @spec select_single_item(EditorState.t(), Picker.item(), module()) ::
+          EditorState.t() | {EditorState.t(), {:execute_command, atom()}}
+  defp select_single_item(state, item, source) do
     if Picker.Source.keep_open_on_select?(source) do
       new_state = source.on_select(item, state)
       refresh_items(new_state)
@@ -493,6 +503,52 @@ defmodule MingaEditor.PickerUI do
     end
   end
 
+  @spec run_bulk_select_and_close(EditorState.t(), Picker.t(), module()) :: EditorState.t()
+  defp run_bulk_select_and_close(state, picker, source) do
+    items = Picker.marked_items(picker)
+
+    state
+    |> restore_picker_origin()
+    |> close()
+    |> then(&Picker.Source.bulk_select(source, items, &1))
+  end
+
+  @spec bulk_select?(module(), Picker.t()) :: boolean()
+  defp bulk_select?(source, picker) do
+    Picker.has_marks?(picker) and Picker.Source.has_bulk_select?(source)
+  end
+
+  @spec action_menu_actions(module(), Picker.t(), Picker.item()) :: [Picker.Source.action_entry()]
+  defp action_menu_actions(source, picker, item) do
+    if Picker.has_marks?(picker) do
+      bulk_action_menu_actions(source, Picker.marked_items(picker), item)
+    else
+      Picker.Source.actions(source, item)
+    end
+  end
+
+  @spec bulk_action_menu_actions(module(), [Picker.item()], Picker.item()) :: [
+          Picker.Source.action_entry()
+        ]
+  defp bulk_action_menu_actions(source, items, item) do
+    case Picker.Source.bulk_actions(source, items) do
+      [] ->
+        Picker.Source.actions(source, item)
+
+      actions ->
+        Enum.map(actions, fn {name, action_id} -> {name, {:bulk, action_id, items}} end)
+    end
+  end
+
+  @spec run_action(module(), term(), Picker.item(), EditorState.t()) :: EditorState.t()
+  defp run_action(source, {:bulk, action_id, items}, _item, state) do
+    Picker.Source.on_bulk_action(source, action_id, items, state)
+  end
+
+  defp run_action(source, action_id, item, state) do
+    source.on_action(action_id, item, state)
+  end
+
   @spec record_command_execution(module(), term()) :: :ok
   defp record_command_execution(MingaEditor.UI.Picker.CommandSource, command_name)
        when is_atom(command_name) do
@@ -541,7 +597,7 @@ defmodule MingaEditor.PickerUI do
 
     # Separator line
     title = picker.title
-    filter_info = "#{Picker.count(picker)}/#{Picker.total(picker)}"
+    filter_info = picker_filter_info(picker)
 
     sep_text =
       " #{title} " <>
@@ -629,6 +685,16 @@ defmodule MingaEditor.PickerUI do
       )
 
     {all_cmds ++ action_cmds, cursor_pos}
+  end
+
+  @spec picker_filter_info(Picker.t()) :: String.t()
+  defp picker_filter_info(picker) do
+    base = "#{Picker.count(picker)}/#{Picker.total(picker)}"
+
+    case Picker.marked_count(picker) do
+      0 -> base
+      count -> "#{base} (#{count} marked)"
+    end
   end
 
   @doc """

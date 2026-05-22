@@ -98,9 +98,8 @@ struct PickerOverlay: View {
 
             Spacer()
 
-            let markedCount = state.items.filter { $0.isMarked }.count
-            if markedCount > 0 {
-                Text("\(markedCount) selected")
+            if state.markedCount > 0 {
+                Text("\(state.markedCount) marked")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(theme.accent)
                     .padding(.horizontal, 6)
@@ -163,13 +162,13 @@ struct PickerOverlay: View {
         let isSelected = item.id == state.selectedIndex
 
         HStack(spacing: 6) {
-            // Multi-select checkmark
-            if item.isMarked {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.accent)
-                    .frame(width: 14)
-            }
+            // Multi-select checkmark column stays reserved so rows do not shift.
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(theme.accent)
+                .frame(width: 14)
+                .opacity(item.isMarked ? 1 : 0)
+                .accessibilityHidden(true)
 
             // File type icon
             Text(item.icon)

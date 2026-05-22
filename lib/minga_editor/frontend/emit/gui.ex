@@ -690,6 +690,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       picker.selected,
       length(picker.filtered),
       length(picker.items),
+      Picker.marked_count(picker),
       has_preview,
       visible_items,
       action_menu

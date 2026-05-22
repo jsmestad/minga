@@ -141,7 +141,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
   end
 
   @impl true
-  @spec on_action(atom(), Item.t(), term()) :: term()
+  @spec on_action(term(), Item.t(), term()) :: term()
   def on_action(:open, item, state), do: on_select(item, state)
 
   def on_action(:delete, %Item{id: rel_path}, state) do
@@ -160,7 +160,25 @@ defmodule MingaEditor.UI.Picker.FileSource do
 
   def on_action(_action, _item, state), do: state
 
+  @impl true
+  @spec on_bulk_select([Item.t()], term()) :: term()
+  def on_bulk_select(items, state), do: open_items(items, state)
+
+  @impl true
+  @spec bulk_actions([Item.t()]) :: [MingaEditor.UI.Picker.Source.action_entry()]
+  def bulk_actions(_items), do: [{"Open all marked", :open_marked}]
+
+  @impl true
+  @spec on_bulk_action(term(), [Item.t()], term()) :: term()
+  def on_bulk_action(:open_marked, items, state), do: open_items(items, state)
+  def on_bulk_action(_action, _items, state), do: state
+
   # ── Private ─────────────────────────────────────────────────────────────────
+
+  @spec open_items([Item.t()], term()) :: term()
+  defp open_items(items, state) do
+    Enum.reduce(items, state, fn item, acc -> on_select(item, acc) end)
+  end
 
   @spec absolute_path(String.t(), term()) :: String.t()
   defp absolute_path(rel_path, state), do: Path.expand(rel_path, project_root(state))

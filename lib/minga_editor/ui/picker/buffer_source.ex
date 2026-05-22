@@ -104,41 +104,23 @@ defmodule MingaEditor.UI.Picker.BufferSource do
   end
 
   @impl true
-  @spec on_action(atom(), Item.t(), term()) :: term()
+  @spec on_action(term(), Item.t(), term()) :: term()
   def on_action(:switch, item, state), do: on_select(item, state)
-
-  def on_action(
-        :kill,
-        %Item{id: idx},
-        %{workspace: %{buffers: %MingaEditor.State.Buffers{list: buffers} = bs}} = state
-      )
-      when is_integer(idx) and idx < length(buffers) do
-    alias MingaEditor.State.Buffers
-
-    pid = Enum.at(buffers, idx)
-
-    try do
-      DynamicSupervisor.terminate_child(Minga.Buffer.Supervisor, pid)
-    catch
-      :exit, _ -> :ok
-    end
-
-    new_buffers = List.delete_at(buffers, idx)
-
-    case new_buffers do
-      [] ->
-        state
-
-      _ ->
-        new_active = min(bs.active_index, length(new_buffers) - 1)
-        new_bs = %Buffers{bs | list: new_buffers}
-
-        EditorState.set_buffers(state, Buffers.switch_to(new_bs, new_active))
-        |> EditorState.sync_active_window_buffer()
-    end
-  end
-
+  def on_action(:kill, item, state), do: kill_items([item], state)
   def on_action(_action, _item, state), do: state
+
+  @impl true
+  @spec on_bulk_select([Item.t()], term()) :: term()
+  def on_bulk_select(items, state), do: kill_items(items, state)
+
+  @impl true
+  @spec bulk_actions([Item.t()]) :: [MingaEditor.UI.Picker.Source.action_entry()]
+  def bulk_actions(_items), do: [{"Kill all marked", :kill_marked}]
+
+  @impl true
+  @spec on_bulk_action(term(), [Item.t()], term()) :: term()
+  def on_bulk_action(:kill_marked, items, state), do: kill_items(items, state)
+  def on_bulk_action(_action, _items, state), do: state
 
   @doc """
   Returns `true` if the buffer is a special buffer (name matches `*...*` pattern).
@@ -170,6 +152,69 @@ defmodule MingaEditor.UI.Picker.BufferSource do
   defp do_reject?(buf, false = _include_special) do
     # Default: reject unlisted buffers and special buffers
     Buffer.unlisted?(buf) or special?(buf)
+  end
+
+  @spec kill_items([Item.t()], term()) :: term()
+  defp kill_items(items, %{workspace: %{buffers: %Buffers{} = bs}} = state) do
+    pids = items |> Enum.map(&item_pid(&1, bs.list)) |> Enum.reject(&is_nil/1) |> Enum.uniq()
+
+    kill_pids(pids, bs, state)
+  end
+
+  defp kill_items(_items, state), do: state
+
+  @spec kill_pids([pid()], Buffers.t(), term()) :: term()
+  defp kill_pids([], _bs, state), do: state
+
+  defp kill_pids(pids, bs, state) do
+    pids
+    |> Enum.reduce(bs, fn pid, acc -> Buffers.remove(acc, pid) end)
+    |> apply_kill_result(pids, bs, state)
+  end
+
+  @spec apply_kill_result(Buffers.t(), [pid()], Buffers.t(), term()) :: term()
+  defp apply_kill_result(%Buffers{list: []}, pids, bs, state) do
+    case start_fallback_buffer(state) do
+      {:ok, new_buf} ->
+        Enum.each(pids, &stop_buffer/1)
+
+        state
+        |> EditorState.set_buffers(Buffers.replace_list(bs, [new_buf], 0))
+        |> EditorState.sync_active_window_buffer()
+
+      {:error, _} ->
+        state
+    end
+  end
+
+  defp apply_kill_result(%Buffers{} = new_bs, pids, _bs, state) do
+    Enum.each(pids, &stop_buffer/1)
+
+    state
+    |> EditorState.set_buffers(new_bs)
+    |> EditorState.sync_active_window_buffer()
+  end
+
+  @spec start_fallback_buffer(term()) :: {:ok, pid()} | {:error, term()}
+  defp start_fallback_buffer(state) do
+    DynamicSupervisor.start_child(
+      Minga.Buffer.Supervisor,
+      {Buffer,
+       content: "", buffer_name: "[new 1]", options_server: EditorState.options_server(state)}
+    )
+  end
+
+  @spec item_pid(Item.t(), [pid()]) :: pid() | nil
+  defp item_pid(%Item{id: {:pid, pid}}, _buffers) when is_pid(pid), do: pid
+  defp item_pid(%Item{id: idx}, buffers) when is_integer(idx), do: Enum.at(buffers, idx)
+  defp item_pid(_item, _buffers), do: nil
+
+  @spec stop_buffer(pid()) :: :ok
+  defp stop_buffer(pid) when is_pid(pid) do
+    GenServer.stop(pid, :normal)
+    :ok
+  catch
+    :exit, _ -> :ok
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────

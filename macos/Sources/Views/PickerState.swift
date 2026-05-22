@@ -64,6 +64,7 @@ final class PickerState {
     var selectedIndex: Int = 0
     var filteredCount: Int = 0
     var totalCount: Int = 0
+    var markedCount: Int = 0
     var title: String = ""
     var query: String = ""
     var modePrefix: String = ""
@@ -72,11 +73,12 @@ final class PickerState {
     var previewLines: [PreviewLine] = []
     var actionMenu: PickerActionMenu? = nil
 
-    func update(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, title: String, query: String, hasPreview: Bool, rawItems: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String = "") {
+    func update(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, rawItems: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String = "") {
         self.visible = visible
         self.selectedIndex = Int(selectedIndex)
         self.filteredCount = Int(filteredCount)
         self.totalCount = Int(totalCount)
+        self.markedCount = Int(markedCount)
         self.title = title
         self.query = query
         self.modePrefix = modePrefix
@@ -125,6 +127,7 @@ final class PickerState {
 
     func hide() {
         visible = false
+        markedCount = 0
         items = []
         previewLines = []
         modePrefix = ""
