@@ -368,7 +368,7 @@ Each section uses `section_id(1) + section_len(2) + payload(section_len)`. Secti
 | 0x03 | Prompt | `prompt_len(2) + prompt + line_count(1) + cursor_line(2) + cursor_col(2) + vim_mode(1) + visible_rows(1)` |
 | 0x04 | Pending | legacy pending approval banner payload. Current BEAM frames send `0` and render approvals inline as message type `0x09`. |
 | 0x05 | Help | `visible(1) + optional groups` |
-| 0x06 | Messages | `message_count(2) + messages...` |
+| 0x06 | Messages | `0xFF + version(1) + message_count(2) + framed messages...` |
 | 0x07 | Completion | prompt completion popup state |
 | 0x08 | Thinking | `level_len(2) + level`, where level is `off`, `low`, `medium`, or `high` |
 
@@ -382,24 +382,27 @@ Pending approval payload:
 
 Messages payload:
 ```
-message_count(2) + messages...
+0xFF(1) + version(1) + message_count(2) + framed messages...
 
-Per message:
+version 1 framed message:
+  message_len(4) + message(message_len)
+
+message:
   message_id(4) + typed_payload
 
 Typed payloads:
   0x01 (user):      type(1) + text_len(4) + text
   0x02 (assistant): type(1) + text_len(4) + text
   0x03 (thinking):  type(1) + collapsed(1) + text_len(4) + text
-  0x04 (tool_call): type(1) + status(1) + error(1) + collapsed(1) + auto_approved(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + result_len(4) + result
+  0x04 (tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + result_len(4) + result + auto_approved(1)
   0x05 (system):    type(1) + level(1) + text_len(4) + text
   0x06 (usage):     type(1) + input(4) + output(4) + cache_read(4) + cache_write(4) + cost_micros(4)
   0x07 (styled_assistant): type(1) + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1), and if flags bit 0x08 is set: url_len(2) + url. Link URLs are limited to http, https, and mailto.
-  0x08 (styled_tool_call): type(1) + status(1) + error(1) + collapsed(1) + auto_approved(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1), and if flags bit 0x08 is set: url_len(2) + url. Link URLs are limited to http, https, and mailto.
+  0x08 (styled_tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1), and if flags bit 0x08 is set: url_len(2) + url, auto_approved(1). The summary uses a UTF-8-safe preview budget so the styled payload and trailing auto_approved byte still fit. Link URLs are limited to http, https, and mailto.
   0x09 (approval_tool_call): type(1) + status(1) + name_len(2) + name + summary_len(2) + summary + tool_call_id_len(2) + tool_call_id + preview_kind(1) + preview_line_count(2), per line: line_len(2) + line
 ```
 
-`auto_approved`: 0=not auto-approved, 1=session trust, 2=turn trust.
+`auto_approved`: 0=not auto-approved, 1=session trust, 2=turn trust. The frame length makes appended fields deterministic and lets decoders distinguish current payloads from legacy unframed messages.
 
 Styled run flags: 0x01=bold, 0x02=italic, 0x04=underline, 0x08=link URL present.
 

@@ -190,18 +190,21 @@ Each segment has a priority. When the window is too narrow, Minga drops the lowe
 When the AI agent wants to run a destructive tool (writing a file, editing a file, or running a shell command), Minga pauses and shows a confirmation prompt:
 
 ```
-⚠ Execute shell: mix test?  [y]es  [n]o  [a]ll
+⚠ Execute shell: mix test?  [y]es  [a]ll for session  [t]his turn  [n]o
 ```
 
-- **y** or **Enter** approves the tool and lets it run.
+- **y** or **Enter** approves the tool once.
+- **a** trusts this tool for the rest of the session.
+- **t** trusts this tool for the current turn.
 - **n** rejects the tool. The agent gets "Tool rejected by user" as the result and continues its turn.
-- **a** approves this tool and all remaining tools in the current turn without further prompts.
 
-The approval mode resets at the start of each new agent turn.
+The approval mode resets at the start of each new agent turn. Session trust stays active until you revoke it or end the session. Turn trust clears when the current turn finishes.
+
+Use `/trust list` to inspect trusted tools, `/trust revoke <tool>` to remove one, and `/trust clear` to remove all trusted tools.
 
 ### Controlling when approval is required
 
-The `:agent_tool_approval` option controls the gate:
+The `:agent_tool_approval` option controls the gate. Set it to `:destructive` to prompt only for destructive tools, `:all` to prompt for every tool call, or `:none` to auto-approve everything:
 
 ```elixir
 # Default: prompt only for destructive tools

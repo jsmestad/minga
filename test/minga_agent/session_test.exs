@@ -266,6 +266,26 @@ defmodule MingaAgent.SessionTest do
     session
   end
 
+  defp agent_config(fields) do
+    struct!(MingaAgent.Config, fields)
+  end
+
+  defp build_stream_response(chunks, usage \\ %{}) do
+    {:ok, handle} =
+      ReqLLM.StreamResponse.MetadataHandle.start_link(fn ->
+        %{usage: usage, finish_reason: :stop}
+      end)
+
+    {:ok,
+     %ReqLLM.StreamResponse{
+       stream: chunks,
+       metadata_handle: handle,
+       cancel: fn -> :ok end,
+       model: elem(ReqLLM.model("anthropic:claude-sonnet-4-20250514"), 1),
+       context: ReqLLM.Context.new()
+     }}
+  end
+
   defp send_approval(session, reply_to \\ self()) do
     approval = %Event.ToolApproval{
       tool_call_id: "tc1",
@@ -1029,18 +1049,75 @@ defmodule MingaAgent.SessionTest do
       assert Session.list_tool_trust(session) == %{"read_file" => :session}
     end
 
-    test "turn trust clears before automatically queued follow-up turns" do
-      session = start_subscribed_session()
+    test "turn trust clears before automatically queued follow-up turns", %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "test.txt"), "file contents")
+      call_count = :counters.new(1, [:atomics])
 
-      send_provider_event(session, %Event.AgentStart{})
-      assert :ok = Session.set_tool_trust(session, "shell", :turn)
+      client = fn _model, _messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          case count do
+            0 ->
+              [
+                ReqLLM.StreamChunk.tool_call("read_file", %{"path" => "test.txt"}, %{
+                  id: "tc_1",
+                  index: 0
+                }),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+              ]
+
+            1 ->
+              [
+                ReqLLM.StreamChunk.text("first turn done"),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+              ]
+
+            2 ->
+              [
+                ReqLLM.StreamChunk.tool_call("read_file", %{"path" => "test.txt"}, %{
+                  id: "tc_2",
+                  index: 0
+                }),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+              ]
+
+            _ ->
+              [
+                ReqLLM.StreamChunk.text("follow-up done"),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+              ]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      tools = MingaAgent.Tools.all(project_root: dir)
+
+      session =
+        start_subscribed_session(Native,
+          project_root: dir,
+          llm_client: client,
+          tools: tools,
+          config: agent_config(tool_approval: :all),
+          skip_api_key_env: true
+        )
+
+      assert :ok = Session.set_tool_trust(session, "read_file", :turn)
+      assert :ok = Session.send_prompt(session, "Read test.txt")
       assert {:queued, :follow_up} = Session.queue_follow_up(session, "next turn")
 
-      send(session, {:agent_provider_event, %Event.AgentEnd{}})
-      assert_receive {:agent_event, _, {:status_changed, :thinking}}, @event_timeout
-      await_turn_complete()
+      assert_receive {:agent_event, _, {:tool_auto_approved, _, "read_file", :turn}},
+                     @event_timeout
 
+      assert_receive {:agent_event, _, {:approval_pending, pending}}, @event_timeout
+      assert pending.name == "read_file"
       assert Session.list_tool_trust(session) == %{}
+
+      assert :ok = Session.respond_to_approval(session, :approve)
+      assert_receive {:agent_event, _, {:tool_started, "read_file", _}}, @event_timeout
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
     end
 
     test "turn trust clears on errors" do

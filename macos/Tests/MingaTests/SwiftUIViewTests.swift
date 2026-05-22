@@ -877,8 +877,8 @@ struct AgentChatViewTests {
         }
 
         try tap("Approve (y)")
-        try tap("Trust this tool (a)")
-        try tap("For this turn (t)")
+        try tap("Trust for session (a)")
+        try tap("Trust for this turn (t)")
         try tap("Deny (n)")
 
         #expect(spy.keyPressCalls.map(\.codepoint) == [0x79, 0x61, 0x74, 0x6E])

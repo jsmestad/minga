@@ -1325,7 +1325,12 @@ defmodule MingaAgent.Session do
         end
       end)
 
-    state = %{state | messages: messages}
+    state = %{
+      state
+      | messages: messages,
+        pending_auto_approvals: Map.delete(state.pending_auto_approvals, event.tool_call_id)
+    }
+
     state = track_active_tool_end(state, event.tool_call_id)
     status = if event.is_error, do: :error, else: :done
     broadcast(state, {:tool_ended, event.name, event.result, status})

@@ -141,6 +141,11 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
       {:handled, _} = ToolApproval.handle_key(state, ?y, 0)
     end
 
+    test "handles Enter when approval is pending", %{approval: approval} do
+      state = base_state(keymap_scope: :agent, agentic_active: true, pending_approval: approval)
+      {:handled, _} = ToolApproval.handle_key(state, 13, 0)
+    end
+
     test "handles n when approval is pending", %{approval: approval} do
       state = base_state(keymap_scope: :agent, agentic_active: true, pending_approval: approval)
       {:handled, _} = ToolApproval.handle_key(state, ?n, 0)

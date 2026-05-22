@@ -538,11 +538,7 @@ struct AgentChatView: View {
 
                 // Tool summary (command, path, etc.)
                 if !summary.isEmpty {
-                    Text(summary)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(theme.agentTextFg.opacity(0.5))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    toolCallSummaryView(name: name, summary: summary)
                 }
 
                 Spacer(minLength: 8)
@@ -672,6 +668,26 @@ struct AgentChatView: View {
     }
 
     @ViewBuilder
+    private func toolCallSummaryView(name: String, summary: String) -> some View {
+        if name == "shell" {
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(summary)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(theme.agentTextFg.opacity(0.5))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Text(summary)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(theme.agentTextFg.opacity(0.5))
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+    }
+
+    @ViewBuilder
     private func approvalToolCallSummary(summary: String, previewKind: UInt8) -> some View {
         if previewKind == 2 {
             ScrollView(.horizontal, showsIndicators: false) {
@@ -718,13 +734,13 @@ struct AgentChatView: View {
             .controlSize(.small)
 
             HStack(spacing: 6) {
-                Button("Trust this tool (a)") {
+                Button("Trust for session (a)") {
                     encoder?.sendKeyPress(codepoint: 0x61, modifiers: 0)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
 
-                Button("For this turn (t)") {
+                Button("Trust for this turn (t)") {
                     encoder?.sendKeyPress(codepoint: 0x74, modifiers: 0)
                 }
                 .buttonStyle(.bordered)
