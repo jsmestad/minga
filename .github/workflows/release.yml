@@ -12,6 +12,7 @@ env:
   ELIXIR_VERSION: "1.19.5"
   OTP_VERSION: "28.4.1"
   ZIG_VERSION: "0.16.0"
+  BURRITO_ZIG_VERSION: "0.15.2"
 
 jobs:
   # ── Gate: validate tag matches mix.exs version ─────────────────────────
@@ -147,7 +148,16 @@ jobs:
           restore-keys: release-deps-${{ runner.os }}-${{ runner.arch }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
 
       - run: mix deps.get --only prod
-      - run: mix release minga
+      - name: Compile with project Zig
+        run: mix compile
+
+      - name: Switch to Burrito Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.BURRITO_ZIG_VERSION }}
+
+      - name: Build Burrito release
+        run: mix release minga --no-compile
 
       - name: Check release contents
         run: scripts/check-release-contents _build/prod/rel/minga
@@ -493,7 +503,7 @@ jobs:
           import os, textwrap
           v = os.environ["VERSION"].lstrip("v")
           dmg_sha = os.environ["DMG_SHA"]
-          cask = f'''cask "minga" do
+          cask = f'''cask "minga-mac" do
             version "{v}"
             sha256 "{dmg_sha}"
 
@@ -508,13 +518,16 @@ jobs:
             zap trash: [
               "~/Library/Application Support/minga",
               "~/Library/Preferences/com.minga.editor.plist",
+              "~/Library/Preferences/com.minga.minga-mac.plist",
               "~/Library/Caches/com.minga.editor",
+              "~/Library/Caches/com.minga.minga-mac",
             ]
           end
           '''
-          with open("homebrew-tap/Casks/minga.rb", "w") as f:
+          with open("homebrew-tap/Casks/minga-mac.rb", "w") as f:
               f.write(textwrap.dedent(cask).lstrip())
           PYEOF
+            rm -f homebrew-tap/Casks/minga.rb
           else
             echo "No .dmg found in release, skipping cask update"
           fi

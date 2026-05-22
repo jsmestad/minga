@@ -6,11 +6,16 @@ This document covers how to cut a release and what infrastructure supports it.
 
 ### GitHub Secrets
 
-The release workflow requires one secret configured in the repo's Settings > Secrets and variables > Actions:
+The release workflow requires these secrets in the repo's Settings > Secrets and variables > Actions:
 
-- **`HOMEBREW_TAP_TOKEN`**: A GitHub Personal Access Token (classic) with `repo` scope, scoped to the `jsmestad/homebrew-minga` repository. The release workflow uses this to push formula updates to the Homebrew tap after a stable release is published.
+- **`HOMEBREW_TAP_TOKEN`**: A GitHub Personal Access Token (classic) with `repo` scope, scoped to the `jsmestad/homebrew-minga` repository. The release workflow uses this to push formula and cask updates to the Homebrew tap after a stable release is published.
+- **`APPLE_CERTIFICATE_P12`**: Base64-encoded Developer ID Application certificate used to sign `Minga.app`.
+- **`APPLE_CERTIFICATE_PASSWORD`**: Password for the Developer ID certificate.
+- **`APPLE_ID`**: Apple ID used for notarization.
+- **`APPLE_APP_PASSWORD`**: App-specific password for the Apple ID.
+- **`APPLE_TEAM_ID`**: Apple Developer Team ID used for notarization.
 
-The built-in `GITHUB_TOKEN` handles everything else (creating the GitHub Release, updating `CHANGELOG.md`).
+The built-in `GITHUB_TOKEN` handles creating the GitHub Release and updating `CHANGELOG.md`.
 
 ## Cutting a Release
 
@@ -27,7 +32,7 @@ The built-in `GITHUB_TOKEN` handles everything else (creating the GitHub Release
 
 Tags with a hyphen (e.g., `v0.1.0-rc.1`) are treated as pre-releases:
 - The GitHub Release is marked as a pre-release.
-- The Homebrew tap is **not** updated (only stable releases update the formula).
+- The Homebrew tap is **not** updated (only stable releases update the formula and cask).
 
 ### What Gets Built
 
@@ -40,7 +45,7 @@ Tags with a hyphen (e.g., `v0.1.0-rc.1`) are treated as pre-releases:
 
 ### Homebrew Cask (macOS GUI)
 
-The release workflow also generates a Homebrew cask for the macOS GUI app, but only if a `Minga.dmg` artifact exists in the release. Until the GUI ships `.dmg` builds, the cask step is skipped automatically.
+The release workflow also generates the `minga-mac` Homebrew cask for the macOS GUI app, but only if a `Minga.dmg` artifact exists in the release. Until the GUI ships `.dmg` builds, the cask step is skipped automatically.
 
 ## Verifying a Release
 
@@ -55,8 +60,11 @@ chmod +x minga_macos_aarch64
 # Or install via Homebrew (stable releases only)
 brew install jsmestad/minga/minga
 minga --version
+
+# Install the macOS app cask
+brew install --cask jsmestad/minga/minga-mac
 ```
 
 ## Burrito
 
-Minga uses [Burrito](https://github.com/burrito-elixir/burrito) to package the Elixir release as a self-extracting binary. The Burrito dependency is pinned to a specific commit SHA in `mix.exs` for reproducibility. When upgrading Burrito, update both the `ref:` in `mix.exs` and run `mix deps.get` to update `mix.lock`.
+Minga uses [Burrito](https://github.com/burrito-elixir/burrito) to package the Elixir release as a self-extracting binary. Burrito currently requires Zig 0.15.2 for the wrap step, while Minga's Zig renderer uses the project Zig version from `.tool-versions`. The release workflow compiles the project with `ZIG_VERSION`, switches to `BURRITO_ZIG_VERSION`, then runs `mix release minga --no-compile` so Burrito can wrap the already-compiled release. When upgrading Burrito, check `Burrito.get_versions/0`, update `BURRITO_ZIG_VERSION` if needed, and run `mix deps.get` to update `mix.lock`.
