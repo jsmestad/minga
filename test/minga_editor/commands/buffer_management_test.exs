@@ -19,7 +19,6 @@ defmodule MingaEditor.Commands.BufferManagementTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace, as: WorkspaceModel
-  alias MingaEditor.Session.State, as: SessionState
 
   @sync_timeout 30_000
   @ctrl 0x02
@@ -499,7 +498,7 @@ defmodule MingaEditor.Commands.BufferManagementTest do
 
     state
     |> EditorState.set_tab_bar(tb)
-    |> EditorState.update_workspace(&SessionState.set_keymap_scope(&1, :agent))
+    |> EditorState.set_keymap_scope(:agent)
   end
 
   defp refute_process_down(pid) do

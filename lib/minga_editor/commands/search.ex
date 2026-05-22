@@ -14,7 +14,6 @@ defmodule MingaEditor.Commands.Search do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Search, as: SearchData
   alias MingaEditor.Window
-  alias MingaEditor.Session.State, as: SessionState
   alias Minga.Mode
   alias Minga.Mode.CommandState
   alias Minga.Mode.SearchState
@@ -220,9 +219,7 @@ defmodule MingaEditor.Commands.Search do
         msg = if truncated?, do: "Results truncated to 10,000", else: nil
 
         state =
-          EditorState.update_workspace(state, fn ws ->
-            SessionState.update_search(ws, &SearchData.set_project_results(&1, matches))
-          end)
+          EditorState.update_search(state, &SearchData.set_project_results(&1, matches))
 
         state = PickerUI.open(state, MingaEditor.UI.Picker.ProjectSearchSource)
         if msg, do: EditorState.set_status(state, msg), else: state
@@ -319,9 +316,7 @@ defmodule MingaEditor.Commands.Search do
 
     if text != "" do
       state =
-        EditorState.update_workspace(state, fn ws ->
-          SessionState.set_search(ws, SearchData.record(ws.search, text, :forward))
-        end)
+        EditorState.update_search(state, &SearchData.record(&1, text, :forward))
 
       if state.backend in [:gui, :native_gui] and state.port_manager do
         MingaEditor.Frontend.clipboard_write(state.port_manager, text, :find)
@@ -410,15 +405,11 @@ defmodule MingaEditor.Commands.Search do
 
   @spec put_in_search(state(), atom(), term()) :: state()
   defp put_in_search(state, :last_pattern, value) do
-    EditorState.update_workspace(state, fn ws ->
-      SessionState.update_search(ws, &SearchData.record_pattern(&1, value))
-    end)
+    EditorState.update_search(state, &SearchData.record_pattern(&1, value))
   end
 
   defp put_in_search(state, :last_direction, value) do
-    EditorState.update_workspace(state, fn ws ->
-      SessionState.update_search(ws, &SearchData.set_last_direction(&1, value))
-    end)
+    EditorState.update_search(state, &SearchData.set_last_direction(&1, value))
   end
 
   # Replace a match at a specific line/col/length in content string.

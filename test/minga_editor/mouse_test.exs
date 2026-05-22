@@ -23,7 +23,6 @@ defmodule MingaEditor.MouseTest do
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
   alias MingaEditor.Session.ChromeState
-  alias MingaEditor.Session.State, as: SessionState
 
   @content_row 1
   @ctrl 0x02
@@ -342,10 +341,7 @@ defmodule MingaEditor.MouseTest do
         Enum.find(layout.window_layouts, fn {id, _layout} -> id != origin_id end)
 
       other_state =
-        EditorState.update_workspace(
-          state,
-          &SessionState.set_windows(&1, Windows.set_active(&1.windows, other_id))
-        )
+        EditorState.update_windows(state, &Windows.set_active(&1, other_id))
 
       {origin_press_row, origin_press_col} = buffer_screen_pos(state, 0, 0)
       {other_drag_row, other_drag_col} = buffer_screen_pos(other_state, 0, 0)
@@ -550,6 +546,7 @@ defmodule MingaEditor.MouseTest do
     id = :erlang.unique_integer([:positive])
     events_registry = :"#{__MODULE__}.Events.#{id}"
     project_root = Path.join(System.tmp_dir!(), "minga-mouse-#{id}")
+    File.rm_rf!(project_root)
     File.mkdir_p!(project_root)
     start_supervised!({Minga.Events, name: events_registry}, id: {:events, id})
 
@@ -652,7 +649,7 @@ defmodule MingaEditor.MouseTest do
 
   defp set_window_tree(state, tree) do
     windows = Windows.set_tree(state.workspace.windows, tree)
-    EditorState.update_workspace(state, &SessionState.set_windows(&1, windows))
+    EditorState.set_windows(state, windows)
   end
 
   defp set_active_fold_ranges(state, ranges) do

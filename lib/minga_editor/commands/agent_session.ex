@@ -20,7 +20,6 @@ defmodule MingaEditor.Commands.AgentSession do
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
-  alias MingaEditor.Session.State, as: WorkspaceState
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
 
@@ -656,7 +655,7 @@ defmodule MingaEditor.Commands.AgentSession do
 
     state
     |> EditorState.set_tab_bar(tb)
-    |> EditorState.update_workspace(&WorkspaceState.set_agent_ui(&1, agent_ui))
+    |> EditorState.set_agent_ui(agent_ui)
   end
 
   @spec maybe_update_bound_workspace_project_view(state(), pid(), ProjectView.t() | nil) ::

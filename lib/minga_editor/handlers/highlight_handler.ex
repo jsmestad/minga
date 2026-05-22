@@ -19,7 +19,6 @@ defmodule MingaEditor.Handlers.HighlightHandler do
   alias MingaEditor.State.Highlighting
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.Window
-  alias MingaEditor.Session.State, as: SessionState
   alias Minga.Editing.Fold.Range, as: FoldRange
 
   @typedoc "Effects that the highlight handler may return."
@@ -215,9 +214,7 @@ defmodule MingaEditor.Handlers.HighlightHandler do
 
   defp handle_injection_ranges(state, pid, _buffer_id, ranges) do
     new_state =
-      EditorState.update_workspace(state, fn ws ->
-        SessionState.set_injection_ranges(ws, Map.put(ws.injection_ranges, pid, ranges))
-      end)
+      EditorState.update_injection_ranges(state, &Map.put(&1, pid, ranges))
 
     {new_state, []}
   end
@@ -379,13 +376,7 @@ defmodule MingaEditor.Handlers.HighlightHandler do
 
   defp handle_document_symbols(state, pid, _buffer_id, symbols) do
     new_state =
-      EditorState.update_workspace(state, fn ws ->
-        SessionState.update_windows_for_buffer(
-          ws,
-          pid,
-          &Window.set_document_symbols(&1, symbols)
-        )
-      end)
+      EditorState.update_windows_for_buffer(state, pid, &Window.set_document_symbols(&1, symbols))
 
     {new_state, []}
   end
@@ -421,12 +412,10 @@ defmodule MingaEditor.Handlers.HighlightHandler do
 
     new_state =
       state
-      |> EditorState.update_workspace(fn ws ->
-        SessionState.update_highlight(ws, fn highlight ->
-          highlight
-          |> Highlighting.set_version(0)
-          |> Highlighting.set_highlights(reset_highlights)
-        end)
+      |> EditorState.update_highlight(fn highlight ->
+        highlight
+        |> Highlighting.set_version(0)
+        |> Highlighting.set_highlights(reset_highlights)
       end)
       |> Map.put(:parser_status, :available)
 

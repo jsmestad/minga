@@ -131,20 +131,17 @@ defmodule MingaEditor.AgentActivation do
 
   @spec set_agent_scope(EditorState.t()) :: EditorState.t()
   defp set_agent_scope(state) do
-    EditorState.update_workspace(state, &SessionState.set_keymap_scope(&1, :agent))
+    EditorState.set_keymap_scope(state, :agent)
   end
 
   @spec set_agent_chat_window_content(EditorState.t(), pid()) :: EditorState.t()
   defp set_agent_chat_window_content(state, session) do
     active_id = state.workspace.windows.active
 
-    EditorState.update_workspace(state, fn ws ->
-      windows =
-        Windows.update(ws.windows, active_id, fn active_win ->
-          %{active_win | content: Content.agent_chat(session)}
-        end)
-
-      SessionState.set_windows(ws, windows)
+    EditorState.update_windows(state, fn windows ->
+      Windows.update(windows, active_id, fn active_win ->
+        %{active_win | content: Content.agent_chat(session)}
+      end)
     end)
   end
 
@@ -170,7 +167,7 @@ defmodule MingaEditor.AgentActivation do
   defp restore_return_target(state, nil), do: state
 
   defp restore_return_target(state, return_target) do
-    EditorState.update_workspace(state, &restore_workspace(&1, return_target))
+    EditorState.set_workspace(state, restore_workspace(state.workspace, return_target))
   end
 
   @spec restore_workspace(SessionState.t(), UIState.View.return_target()) :: SessionState.t()
@@ -207,10 +204,10 @@ defmodule MingaEditor.AgentActivation do
   @spec restore_deactivated_scope(EditorState.t(), UIState.View.return_target() | nil) ::
           EditorState.t()
   defp restore_deactivated_scope(state, %{keymap_scope: keymap_scope}) do
-    EditorState.update_workspace(state, &SessionState.set_keymap_scope(&1, keymap_scope))
+    EditorState.set_keymap_scope(state, keymap_scope)
   end
 
   defp restore_deactivated_scope(state, _return_target) do
-    EditorState.update_workspace(state, &SessionState.set_keymap_scope(&1, :editor))
+    EditorState.set_keymap_scope(state, :editor)
   end
 end

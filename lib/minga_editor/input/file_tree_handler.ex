@@ -23,7 +23,6 @@ defmodule MingaEditor.Input.FileTreeHandler do
   alias Minga.Keymap
   alias Minga.Project.FileTree
   alias Minga.Project.FileTree.BufferSync
-  alias MingaEditor.Session.State, as: SessionState
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
@@ -140,11 +139,9 @@ defmodule MingaEditor.Input.FileTreeHandler do
 
   @spec focus_file_tree_for_mouse(EditorState.t(), atom()) :: EditorState.t()
   defp focus_file_tree_for_mouse(state, :left) do
-    EditorState.update_workspace(state, fn workspace ->
-      workspace
-      |> SessionState.set_file_tree(FileTreeState.focus(workspace.file_tree))
-      |> SessionState.set_keymap_scope(:file_tree)
-    end)
+    state
+    |> EditorState.update_file_tree(&FileTreeState.focus/1)
+    |> EditorState.set_keymap_scope(:file_tree)
   end
 
   defp focus_file_tree_for_mouse(state, _button), do: state
@@ -378,15 +375,13 @@ defmodule MingaEditor.Input.FileTreeHandler do
 
   @spec set_active_buffer_override(EditorState.t(), pid() | nil) :: EditorState.t()
   defp set_active_buffer_override(state, pid) do
-    EditorState.update_workspace(state, fn ws ->
-      SessionState.set_buffers(ws, Buffers.set_active_override(ws.buffers, pid))
-    end)
+    EditorState.update_buffers(state, &Buffers.set_active_override(&1, pid))
   end
 
   @spec set_file_tree(EditorState.t(), FileTreeState.t()) :: EditorState.t()
   defp set_file_tree(state, file_tree) do
     sync_buffer(file_tree)
-    EditorState.update_workspace(state, &SessionState.set_file_tree(&1, file_tree))
+    EditorState.set_file_tree(state, file_tree)
   end
 
   @spec sync_buffer(FileTreeState.t()) :: :ok
@@ -402,8 +397,6 @@ defmodule MingaEditor.Input.FileTreeHandler do
   @spec update_file_tree(EditorState.t(), (FileTreeState.t() -> FileTreeState.t())) ::
           EditorState.t()
   defp update_file_tree(state, fun) when is_function(fun, 1) do
-    EditorState.update_workspace(state, fn ws ->
-      SessionState.set_file_tree(ws, fun.(ws.file_tree))
-    end)
+    EditorState.update_file_tree(state, fun)
   end
 end

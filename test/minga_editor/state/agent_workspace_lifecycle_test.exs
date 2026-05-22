@@ -46,7 +46,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     state =
       state
       |> EditorState.set_tab_bar(tab_bar)
-      |> EditorState.update_workspace(&MingaEditor.Session.State.set_agent_ui(&1, ui_two))
+      |> EditorState.set_agent_ui(ui_two)
 
     state = EditorState.switch_tab(state, 1)
 
@@ -67,7 +67,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     state =
       state
       |> EditorState.set_tab_bar(tab_bar)
-      |> EditorState.update_workspace(&MingaEditor.Session.State.set_agent_ui(&1, ui_two))
+      |> EditorState.set_agent_ui(ui_two)
 
     state = MingaEditor.Commands.Workspace.workspace_close(state)
 
@@ -113,7 +113,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     state =
       state
       |> EditorState.set_tab_bar(tab_bar)
-      |> EditorState.update_workspace(&MingaEditor.Session.State.set_agent_ui(&1, ui_one))
+      |> EditorState.set_agent_ui(ui_one)
 
     state = EditorState.switch_tab(state, 2)
 
@@ -376,7 +376,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     state =
       state
       |> EditorState.set_tab_bar(tab_bar)
-      |> EditorState.update_workspace(&MingaEditor.Session.State.set_agent_ui(&1, ui))
+      |> EditorState.set_agent_ui(ui)
 
     {state, workspace.id, file_ref}
   end

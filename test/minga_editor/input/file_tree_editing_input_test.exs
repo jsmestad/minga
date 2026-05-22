@@ -151,10 +151,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       file_tree = FileTreeState.replace_tree(state.workspace.file_tree, tree)
 
       state =
-        EditorState.update_workspace(
-          state,
-          &MingaEditor.Session.State.set_file_tree(&1, file_tree)
-        )
+        EditorState.set_file_tree(state, file_tree)
 
       {:handled, state} = FileTreeHandler.handle_key(state, ?/, 0)
       assert state.workspace.file_tree.filtering == true
@@ -179,10 +176,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
       file_tree = FileTreeState.start_filtering(state.workspace.file_tree)
 
       state =
-        EditorState.update_workspace(
-          state,
-          &MingaEditor.Session.State.set_file_tree(&1, file_tree)
-        )
+        EditorState.set_file_tree(state, file_tree)
 
       {:handled, state} = FileTreeHandler.handle_key(state, @escape, 0)
       assert state.workspace.file_tree.filtering == false
@@ -234,10 +228,7 @@ defmodule MingaEditor.Input.FileTreeEditingInputTest do
     tree = FileTree.select(state.workspace.file_tree.tree, index)
     file_tree = FileTreeState.replace_tree(state.workspace.file_tree, tree)
 
-    EditorState.update_workspace(
-      state,
-      &MingaEditor.Session.State.set_file_tree(&1, file_tree)
-    )
+    EditorState.set_file_tree(state, file_tree)
   end
 
   describe "key swallowing (no leaking to mode FSM)" do

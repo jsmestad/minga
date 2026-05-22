@@ -72,10 +72,6 @@ defmodule MingaEditor.CommandStateHelpers do
 
   @spec update_registers(state(), (Registers.t() -> Registers.t())) :: state()
   def update_registers(%EditorState{} = state, fun) when is_function(fun, 1) do
-    EditorState.update_workspace(state, fn workspace ->
-      SessionState.update_editing(workspace, fn vim ->
-        VimState.set_registers(vim, fun.(vim.reg))
-      end)
-    end)
+    EditorState.set_registers(state, fun.(state.workspace.editing.reg))
   end
 end

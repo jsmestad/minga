@@ -13,7 +13,6 @@ defmodule MingaEditor.Commands.FileTree do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias Minga.Mode.DeleteConfirmState
-  alias MingaEditor.Session.State, as: SessionState
   alias Minga.Project.FileTree
   alias Minga.Project.FileTree.BufferSync
   alias MingaEditor.FileTree.DropIntent
@@ -31,11 +30,9 @@ defmodule MingaEditor.Commands.FileTree do
 
     scope = restore_scope(state)
 
-    EditorState.update_workspace(state, fn ws ->
-      ws
-      |> SessionState.set_file_tree(FileTreeState.close(ws.file_tree))
-      |> SessionState.set_keymap_scope(scope)
-    end)
+    state
+    |> EditorState.update_file_tree(&FileTreeState.close/1)
+    |> EditorState.set_keymap_scope(scope)
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()
   end
@@ -44,11 +41,9 @@ defmodule MingaEditor.Commands.FileTree do
     FileTreeFreshness.unwatch_expanded_dirs(tree)
     scope = restore_scope(state)
 
-    EditorState.update_workspace(state, fn ws ->
-      ws
-      |> SessionState.set_file_tree(FileTreeState.close(ws.file_tree))
-      |> SessionState.set_keymap_scope(scope)
-    end)
+    state
+    |> EditorState.update_file_tree(&FileTreeState.close/1)
+    |> EditorState.set_keymap_scope(scope)
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()
   end
@@ -56,11 +51,9 @@ defmodule MingaEditor.Commands.FileTree do
   def toggle(state) do
     scope = restore_scope(state)
 
-    EditorState.update_workspace(state, fn ws ->
-      ws
-      |> SessionState.set_file_tree(FileTreeState.close(ws.file_tree))
-      |> SessionState.set_keymap_scope(scope)
-    end)
+    state
+    |> EditorState.update_file_tree(&FileTreeState.close/1)
+    |> EditorState.set_keymap_scope(scope)
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()
   end
@@ -70,14 +63,12 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec set_file_tree(state(), FileTreeState.t()) :: state()
   defp set_file_tree(state, file_tree) do
-    EditorState.update_workspace(state, &SessionState.set_file_tree(&1, file_tree))
+    EditorState.set_file_tree(state, file_tree)
   end
 
   @spec update_file_tree(state(), (FileTreeState.t() -> FileTreeState.t())) :: state()
   defp update_file_tree(state, fun) when is_function(fun, 1) do
-    EditorState.update_workspace(state, fn ws ->
-      SessionState.set_file_tree(ws, fun.(ws.file_tree))
-    end)
+    EditorState.update_file_tree(state, fun)
   end
 
   @spec open_or_toggle(state()) :: state()
@@ -93,7 +84,7 @@ defmodule MingaEditor.Commands.FileTree do
         state = update_file_tree(state, &FileTreeState.unfocus/1)
         # Opening a file buffer always uses :editor scope (not restore_scope)
         # because the new buffer becomes the active window content.
-        state = EditorState.update_workspace(state, &SessionState.set_keymap_scope(&1, :editor))
+        state = EditorState.set_keymap_scope(state, :editor)
         open_file_from_tree(state, path, tree)
 
       nil ->
@@ -522,7 +513,7 @@ defmodule MingaEditor.Commands.FileTree do
         state = sync_and_update(state, tree)
         state = update_file_tree(state, &FileTreeState.focus/1)
 
-        EditorState.update_workspace(state, &SessionState.set_keymap_scope(&1, :file_tree))
+        EditorState.set_keymap_scope(state, :file_tree)
         |> Layout.invalidate()
         |> EditorState.invalidate_all_windows()
     end
@@ -542,21 +533,17 @@ defmodule MingaEditor.Commands.FileTree do
 
     scope = restore_scope(state)
 
-    EditorState.update_workspace(state, fn ws ->
-      ws
-      |> SessionState.set_file_tree(FileTreeState.close(ws.file_tree))
-      |> SessionState.set_keymap_scope(scope)
-    end)
+    state
+    |> EditorState.update_file_tree(&FileTreeState.close/1)
+    |> EditorState.set_keymap_scope(scope)
   end
 
   def close(state) do
     scope = restore_scope(state)
 
-    EditorState.update_workspace(state, fn ws ->
-      ws
-      |> SessionState.set_file_tree(FileTreeState.close(ws.file_tree))
-      |> SessionState.set_keymap_scope(scope)
-    end)
+    state
+    |> EditorState.update_file_tree(&FileTreeState.close/1)
+    |> EditorState.set_keymap_scope(scope)
   end
 
   # ── Private helpers ───────────────────────────────────────────────────────
@@ -778,7 +765,7 @@ defmodule MingaEditor.Commands.FileTree do
   defp close_git_status_if_open(state),
     do:
       state
-      |> EditorState.update_workspace(&SessionState.set_keymap_scope(&1, :editor))
+      |> EditorState.set_keymap_scope(:editor)
       |> EditorState.close_git_status_panel()
 
   # Opens a file from the tree, reusing an existing buffer when one exists
@@ -829,11 +816,9 @@ defmodule MingaEditor.Commands.FileTree do
     FileTreeFreshness.watch_expanded_dirs(tree)
     buf = BufferSync.start_buffer(tree, EditorState.options_server(state))
 
-    EditorState.update_workspace(state, fn ws ->
-      ws
-      |> SessionState.set_file_tree(FileTreeState.open(ws.file_tree, tree, buf))
-      |> SessionState.set_keymap_scope(:file_tree)
-    end)
+    state
+    |> EditorState.update_file_tree(&FileTreeState.open(&1, tree, buf))
+    |> EditorState.set_keymap_scope(:file_tree)
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()
   end

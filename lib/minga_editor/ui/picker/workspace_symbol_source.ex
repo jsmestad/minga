@@ -15,9 +15,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceSymbolSource do
   alias Minga.Buffer
   alias MingaEditor.Commands
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.VimState
   alias Minga.LSP.Client
-  alias MingaEditor.Session.State, as: SessionState
   alias Minga.LSP.SyncServer
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
@@ -120,9 +118,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceSymbolSource do
   defp set_jump_mark(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
     pos = Buffer.cursor(buf)
 
-    EditorState.update_workspace(state, fn ws ->
-      SessionState.update_editing(ws, &VimState.set_last_jump_pos(&1, pos))
-    end)
+    EditorState.set_last_jump_pos(state, pos)
   end
 
   defp set_jump_mark(state), do: state

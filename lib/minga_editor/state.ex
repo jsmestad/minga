@@ -36,6 +36,7 @@ defmodule MingaEditor.State do
   alias MingaEditor.KeystrokeHistory
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
+  alias MingaEditor.State.Dired, as: DiredState
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.Session, as: EditorSessionState
   alias MingaEditor.State.Buffers
@@ -219,6 +220,237 @@ defmodule MingaEditor.State do
   @spec update_workspace(t(), (SessionState.t() -> SessionState.t())) :: t()
   def update_workspace(%__MODULE__{workspace: ws} = state, fun) when is_function(fun, 1) do
     %{state | workspace: fun.(ws)}
+  end
+
+  @doc "Replaces the active workspace."
+  @spec set_workspace(t(), SessionState.t()) :: t()
+  def set_workspace(%__MODULE__{} = state, %SessionState{} = workspace) do
+    %{state | workspace: workspace}
+  end
+
+  @doc "Sets the active workspace viewport."
+  @spec set_viewport(t(), Viewport.t()) :: t()
+  def set_viewport(%__MODULE__{} = state, %Viewport{} = viewport) do
+    update_workspace(state, &SessionState.set_viewport(&1, viewport))
+  end
+
+  @doc "Sets the active workspace keymap scope."
+  @spec set_keymap_scope(t(), Minga.Keymap.Scope.scope_name()) :: t()
+  def set_keymap_scope(%__MODULE__{} = state, scope) do
+    update_workspace(state, &SessionState.set_keymap_scope(&1, scope))
+  end
+
+  @doc "Replaces the active workspace file-tree state."
+  @spec set_file_tree(t(), FileTreeState.t()) :: t()
+  def set_file_tree(%__MODULE__{} = state, %FileTreeState{} = file_tree) do
+    update_workspace(state, &SessionState.set_file_tree(&1, file_tree))
+  end
+
+  @doc "Updates the active workspace file-tree state."
+  @spec update_file_tree(t(), (FileTreeState.t() -> FileTreeState.t())) :: t()
+  def update_file_tree(%__MODULE__{} = state, fun) when is_function(fun, 1) do
+    update_workspace(state, fn workspace ->
+      SessionState.set_file_tree(workspace, fun.(workspace.file_tree))
+    end)
+  end
+
+  @doc "Replaces the active workspace buffer state."
+  @spec set_buffers(t(), Buffers.t()) :: t()
+  def set_buffers(%__MODULE__{} = state, %Buffers{} = buffers) do
+    update_workspace(state, &SessionState.set_buffers(&1, buffers))
+  end
+
+  @doc "Updates the active workspace buffer state."
+  @spec update_buffers(t(), (Buffers.t() -> Buffers.t())) :: t()
+  def update_buffers(%__MODULE__{} = state, fun) when is_function(fun, 1) do
+    update_workspace(state, fn workspace ->
+      SessionState.set_buffers(workspace, fun.(workspace.buffers))
+    end)
+  end
+
+  @doc "Replaces the active workspace window state."
+  @spec set_windows(t(), Windows.t()) :: t()
+  def set_windows(%__MODULE__{} = state, %Windows{} = windows) do
+    update_workspace(state, &SessionState.set_windows(&1, windows))
+  end
+
+  @doc "Updates the active workspace window state."
+  @spec update_windows(t(), (Windows.t() -> Windows.t())) :: t()
+  def update_windows(%__MODULE__{} = state, fun) when is_function(fun, 1) do
+    update_workspace(state, fn workspace ->
+      SessionState.set_windows(workspace, fun.(workspace.windows))
+    end)
+  end
+
+  @doc "Replaces the active workspace dired state."
+  @spec set_dired(t(), DiredState.t()) :: t()
+  def set_dired(%__MODULE__{} = state, %DiredState{} = dired) do
+    update_workspace(state, &SessionState.set_dired(&1, dired))
+  end
+
+  @doc "Updates the active workspace dired state."
+  @spec update_dired(t(), (DiredState.t() -> DiredState.t())) :: t()
+  def update_dired(%__MODULE__{} = state, fun) when is_function(fun, 1) do
+    update_workspace(state, fn workspace ->
+      SessionState.set_dired(workspace, fun.(workspace.dired))
+    end)
+  end
+
+  @doc "Replaces the active workspace mouse state."
+  @spec set_mouse(t(), Mouse.t()) :: t()
+  def set_mouse(%__MODULE__{} = state, %Mouse{} = mouse) do
+    update_workspace(state, &SessionState.set_mouse(&1, mouse))
+  end
+
+  @doc "Updates the active workspace mouse state."
+  @spec update_mouse(t(), (Mouse.t() -> Mouse.t())) :: t()
+  def update_mouse(%__MODULE__{} = state, fun) when is_function(fun, 1) do
+    update_workspace(state, fn workspace ->
+      SessionState.set_mouse(workspace, fun.(workspace.mouse))
+    end)
+  end
+
+  @doc "Replaces the active workspace search state."
+  @spec set_search(t(), Search.t()) :: t()
+  def set_search(%__MODULE__{} = state, %Search{} = search) do
+    update_workspace(state, &SessionState.set_search(&1, search))
+  end
+
+  @doc "Updates the active workspace search state."
+  @spec update_search(t(), (Search.t() -> Search.t())) :: t()
+  def update_search(%__MODULE__{} = state, fun) when is_function(fun, 1) do
+    update_workspace(state, fn workspace -> SessionState.update_search(workspace, fun) end)
+  end
+
+  @doc "Replaces the active workspace highlighting state."
+  @spec set_highlight(t(), Highlighting.t()) :: t()
+  def set_highlight(%__MODULE__{} = state, %Highlighting{} = highlight) do
+    update_workspace(state, &SessionState.set_highlight(&1, highlight))
+  end
+
+  @doc "Updates the active workspace highlighting state."
+  @spec update_highlight(t(), (Highlighting.t() -> Highlighting.t())) :: t()
+  def update_highlight(%__MODULE__{} = state, fun) when is_function(fun, 1) do
+    update_workspace(state, fn workspace -> SessionState.update_highlight(workspace, fun) end)
+  end
+
+  @doc "Replaces the active workspace editing state."
+  @spec set_editing(t(), VimState.t()) :: t()
+  def set_editing(%__MODULE__{} = state, %VimState{} = editing) do
+    update_workspace(state, &SessionState.set_editing(&1, editing))
+  end
+
+  @doc "Updates the active workspace editing state."
+  @spec update_editing(t(), (VimState.t() -> VimState.t())) :: t()
+  def update_editing(%__MODULE__{} = state, fun) when is_function(fun, 1) do
+    update_workspace(state, fn workspace -> SessionState.update_editing(workspace, fun) end)
+  end
+
+  @doc """
+  Replaces the current vim mode state without changing the mode.
+
+  Use this only for same-mode state updates where the replacement has the shape expected by the current mode. Use `transition_mode/3` when changing modes so `VimState` can keep `mode` and `mode_state` aligned.
+  """
+  @spec set_mode_state(t(), Mode.state()) :: t()
+  def set_mode_state(%__MODULE__{} = state, mode_state) do
+    update_editing(state, &VimState.set_mode_state(&1, mode_state))
+  end
+
+  @doc """
+  Updates the current vim mode state without changing the mode.
+
+  Use this only for same-mode state updates where the mapper preserves the state shape expected by the current mode. Use `transition_mode/3` when changing modes so `VimState` can keep `mode` and `mode_state` aligned.
+  """
+  @spec update_mode_state(t(), (Mode.state() -> Mode.state())) :: t()
+  def update_mode_state(%__MODULE__{} = state, fun) when is_function(fun, 1) do
+    update_editing(state, fn vim -> VimState.set_mode_state(vim, fun.(vim.mode_state)) end)
+  end
+
+  @doc "Replaces the vim register state."
+  @spec set_registers(t(), MingaEditor.State.Registers.t()) :: t()
+  def set_registers(%__MODULE__{} = state, %MingaEditor.State.Registers{} = registers) do
+    update_editing(state, &VimState.set_registers(&1, registers))
+  end
+
+  @doc "Replaces the vim marks map."
+  @spec set_marks(t(), VimState.marks()) :: t()
+  def set_marks(%__MODULE__{} = state, marks) when is_map(marks) do
+    update_editing(state, &VimState.set_marks(&1, marks))
+  end
+
+  @doc "Records the cursor position before a jump."
+  @spec set_last_jump_pos(t(), Buffer.position() | nil) :: t()
+  def set_last_jump_pos(%__MODULE__{} = state, pos) do
+    update_editing(state, &VimState.set_last_jump_pos(&1, pos))
+  end
+
+  @doc "Records the last find-char motion."
+  @spec set_last_find_char(t(), VimState.last_find_char()) :: t()
+  def set_last_find_char(%__MODULE__{} = state, find_char) do
+    update_editing(state, &VimState.set_last_find_char(&1, find_char))
+  end
+
+  @doc "Replaces the vim macro recorder."
+  @spec set_macro_recorder(t(), MingaEditor.MacroRecorder.t()) :: t()
+  def set_macro_recorder(%__MODULE__{} = state, recorder) do
+    update_editing(state, &VimState.set_macro_recorder(&1, recorder))
+  end
+
+  @doc "Replaces the vim change recorder."
+  @spec set_change_recorder(t(), MingaEditor.ChangeRecorder.t()) :: t()
+  def set_change_recorder(%__MODULE__{} = state, recorder) do
+    update_editing(state, &VimState.set_change_recorder(&1, recorder))
+  end
+
+  @doc "Replaces the active workspace document highlights."
+  @spec set_document_highlights(t(), [document_highlight()] | nil) :: t()
+  def set_document_highlights(%__MODULE__{} = state, highlights) do
+    update_workspace(state, &SessionState.set_document_highlights(&1, highlights))
+  end
+
+  @doc "Replaces the active workspace LSP pending request map."
+  @spec set_lsp_pending(t(), %{reference() => atom() | tuple()}) :: t()
+  def set_lsp_pending(%__MODULE__{} = state, pending) when is_map(pending) do
+    update_workspace(state, &SessionState.set_lsp_pending(&1, pending))
+  end
+
+  @doc "Adds or replaces an active workspace LSP pending request."
+  @spec put_lsp_pending(t(), reference(), atom() | tuple()) :: t()
+  def put_lsp_pending(%__MODULE__{} = state, ref, kind) when is_reference(ref) do
+    update_workspace(state, fn workspace ->
+      SessionState.set_lsp_pending(workspace, Map.put(workspace.lsp_pending, ref, kind))
+    end)
+  end
+
+  @doc "Deletes an active workspace LSP pending request."
+  @spec delete_lsp_pending(t(), reference()) :: t()
+  def delete_lsp_pending(%__MODULE__{} = state, ref) when is_reference(ref) do
+    update_workspace(state, fn workspace ->
+      SessionState.set_lsp_pending(workspace, Map.delete(workspace.lsp_pending, ref))
+    end)
+  end
+
+  @doc "Replaces the active workspace agent UI state."
+  @spec set_agent_ui(t(), UIState.t()) :: t()
+  def set_agent_ui(%__MODULE__{} = state, %UIState{} = agent_ui) do
+    update_workspace(state, &SessionState.set_agent_ui(&1, agent_ui))
+  end
+
+  @doc "Replaces the active workspace injection ranges map."
+  @spec set_injection_ranges(t(), %{pid() => [Minga.Language.Highlight.InjectionRange.t()]}) ::
+          t()
+  def set_injection_ranges(%__MODULE__{} = state, ranges) when is_map(ranges) do
+    update_workspace(state, &SessionState.set_injection_ranges(&1, ranges))
+  end
+
+  @doc "Updates the active workspace injection ranges map."
+  @spec update_injection_ranges(t(), (%{pid() => [Minga.Language.Highlight.InjectionRange.t()]} ->
+                                        %{pid() => [Minga.Language.Highlight.InjectionRange.t()]})) ::
+          t()
+  def update_injection_ranges(%__MODULE__{} = state, fun) when is_function(fun, 1) do
+    update_workspace(state, fn workspace ->
+      SessionState.set_injection_ranges(workspace, fun.(workspace.injection_ranges))
+    end)
   end
 
   # ── Render pipeline write-back ─────────────────────────────────────────────
@@ -764,6 +996,13 @@ defmodule MingaEditor.State do
   @spec update_window(t(), Window.id(), (Window.t() -> Window.t())) :: t()
   def update_window(%__MODULE__{} = state, id, fun) do
     update_workspace(state, &SessionState.update_window(&1, id, fun))
+  end
+
+  @doc "Updates every window showing a buffer via a mapper function."
+  @spec update_windows_for_buffer(t(), pid(), (Window.t() -> Window.t())) :: t()
+  def update_windows_for_buffer(%__MODULE__{} = state, buffer, fun)
+      when is_pid(buffer) and is_function(fun, 1) do
+    update_workspace(state, &SessionState.update_windows_for_buffer(&1, buffer, fun))
   end
 
   @doc """

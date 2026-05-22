@@ -11,7 +11,6 @@ defmodule MingaEditor.MouseHoverTooltip do
   alias Minga.Diagnostics
   alias MingaEditor.HoverPopup
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.Session.State, as: SessionState
   alias Minga.LSP.Client
   alias Minga.LSP.SyncServer
 
@@ -103,9 +102,7 @@ defmodule MingaEditor.MouseHoverTooltip do
 
   @spec put_lsp_pending(state(), reference(), atom() | tuple()) :: state()
   defp put_lsp_pending(state, ref, kind) do
-    EditorState.update_workspace(state, fn ws ->
-      SessionState.set_lsp_pending(ws, Map.put(ws.lsp_pending, ref, kind))
-    end)
+    EditorState.put_lsp_pending(state, ref, kind)
   end
 
   @spec gutter_width(term()) :: non_neg_integer()

@@ -35,7 +35,6 @@ defmodule MingaEditor.Input.AgentNav do
   alias Minga.Buffer
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
-  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.Window
 
@@ -155,9 +154,7 @@ defmodule MingaEditor.Input.AgentNav do
 
   @spec set_active_buffer_override(EditorState.t(), pid() | nil) :: EditorState.t()
   defp set_active_buffer_override(state, pid) do
-    EditorState.update_workspace(state, fn ws ->
-      SessionState.set_buffers(ws, Buffers.set_active_override(ws.buffers, pid))
-    end)
+    EditorState.update_buffers(state, &Buffers.set_active_override(&1, pid))
   end
 
   # ── Private helpers ─────────────────────────────────────────────────────

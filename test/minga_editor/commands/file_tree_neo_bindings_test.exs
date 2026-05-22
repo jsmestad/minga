@@ -471,7 +471,7 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
   defp expand_path(state, path) do
     tree = FileTree.expand_path(state.workspace.file_tree.tree, path)
     file_tree = FileTreeState.replace_tree(state.workspace.file_tree, tree)
-    EditorState.update_workspace(state, &SessionState.set_file_tree(&1, file_tree))
+    EditorState.set_file_tree(state, file_tree)
   end
 
   defp select_entry(state, name) do
@@ -481,6 +481,6 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
 
     tree = FileTree.select(state.workspace.file_tree.tree, index)
     file_tree = FileTreeState.replace_tree(state.workspace.file_tree, tree)
-    EditorState.update_workspace(state, &SessionState.set_file_tree(&1, file_tree))
+    EditorState.set_file_tree(state, file_tree)
   end
 end

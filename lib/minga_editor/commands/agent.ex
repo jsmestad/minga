@@ -268,37 +268,39 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec restore_return_keymap_scope(state(), UIState.View.return_target() | nil) :: state()
   defp restore_return_keymap_scope(state, %{keymap_scope: keymap_scope}) do
-    EditorState.update_workspace(state, &SessionState.set_keymap_scope(&1, keymap_scope))
+    EditorState.set_keymap_scope(state, keymap_scope)
   end
 
   defp restore_return_keymap_scope(state, _return_target) do
-    EditorState.update_workspace(state, &SessionState.set_keymap_scope(&1, :editor))
+    EditorState.set_keymap_scope(state, :editor)
   end
 
   @spec restore_return_target_without_tab(state(), UIState.View.return_target() | nil) :: state()
   defp restore_return_target_without_tab(state, nil) do
     state
     |> mark_agent_view_inactive()
-    |> EditorState.update_workspace(&SessionState.set_keymap_scope(&1, :editor))
+    |> EditorState.set_keymap_scope(:editor)
     |> EditorState.set_status("No file tabs in this workspace")
   end
 
   defp restore_return_target_without_tab(state, return_target) do
     state
     |> mark_agent_view_inactive()
-    |> EditorState.update_workspace(&restore_workspace_return_target(&1, return_target))
+    |> restore_workspace_return_target(return_target)
     |> restore_prompt_focus(return_target.prompt_focused)
     |> EditorState.set_status("No file tabs in this workspace")
   end
 
-  @spec restore_workspace_return_target(SessionState.t(), UIState.View.return_target()) ::
-          SessionState.t()
-  defp restore_workspace_return_target(workspace, return_target) do
-    workspace
-    |> SessionState.set_keymap_scope(return_target.keymap_scope)
-    |> SessionState.set_windows(return_target.windows)
-    |> SessionState.set_file_tree(return_target.file_tree)
-    |> restore_return_target_buffer(return_target.active_buffer)
+  @spec restore_workspace_return_target(state(), UIState.View.return_target()) :: state()
+  defp restore_workspace_return_target(state, return_target) do
+    workspace =
+      state.workspace
+      |> SessionState.set_keymap_scope(return_target.keymap_scope)
+      |> SessionState.set_windows(return_target.windows)
+      |> SessionState.set_file_tree(return_target.file_tree)
+      |> restore_return_target_buffer(return_target.active_buffer)
+
+    EditorState.set_workspace(state, workspace)
   end
 
   @spec restore_return_target_buffer(SessionState.t(), pid() | nil) :: SessionState.t()
