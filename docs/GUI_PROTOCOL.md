@@ -60,19 +60,19 @@ The BEAM-side encoder must use a documented length-prefixed envelope for all new
 | 0x94 | gui_file_tree_selection | Lightweight file tree selection and focus update. |
 | 0x95 | gui_cursor_animation | Cursor movement animation preference for GUI renderers. |
 | 0x96 | gui_hover_action | Optional action metadata for the hover popup |
-| 0x9A | gui_observatory | BEAM Observatory process tree and metrics for native sidebars |
+| 0x9A | gui_observatory | BEAM Observatory process tree and metrics for native sidebars. Uses a 32-bit payload length because large supervision trees can exceed 64KB. |
 
 ### 0x9A — gui_observatory
 
 The BEAM Observatory receives a length-prefixed, sectioned process tree snapshot. The BEAM remains the source of truth for process identity, hierarchy, class, metrics, and message-queue history. Frontends render the tree or graph directly and send process inspection requests back through `observatory_inspect`.
 
 ```
-opcode(1) + payload_len(2) + payload(payload_len)
+opcode(1) + payload_len(4) + payload(payload_len)
 
 Sections:
   0x01 header: visible(1) + node_count(2)
-  0x02 nodes: node entries...
-  0x03 sparklines: sparkline entries...
+  0x02 nodes: node entries... (may repeat; concatenate entries in order)
+  0x03 sparklines: sparkline entries... (may repeat; later entries for the same pid replace earlier ones)
 
 Node entry:
   pid_len(1) + pid + parent_pid_len(1) + parent_pid + name_len(2) + name + class(1) + depth(1) + memory(4) + message_queue_len(2) + reductions(4)
@@ -163,7 +163,7 @@ Only file tabs from the active workspace are sent here. Agent tabs and tabs from
 opcode(1) + active_index(1) + tab_count(1) + entries...
 
 Per entry:
-  flags(1) + id(4) + group_id(2) + icon_len(1) + icon(icon_len) + label_len(2) + label(label_len)
+  flags(1) + id(4) + group_id(2) + icon_len(1) + icon(icon_len) + label_len(2) + label(label_len) + tint_color_rgb(4)
 
 Flags bits:
   bit 0: is_active
@@ -171,8 +171,9 @@ Flags bits:
   bit 2: is_agent (always 0 in the active-workspace projection)
   bit 3: has_attention
   bits 4-6: agent_status (0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan)
+  bit 7: is_pinned
 
-group_id: workspace id this tab belongs to. 0 = manual workspace. Non-zero values match workspace IDs from gui_workspaces (0x98). Frontends use this to keep file open/close/navigation scoped to the active workspace while rendering inactive workspace capsules from gui_workspaces.
+group_id: workspace id this tab belongs to. 0 = manual workspace. Non-zero values match workspace IDs from gui_workspaces (0x98). Frontends use this to keep file open/close/navigation scoped to the active workspace while rendering inactive workspace capsules from gui_workspaces. `tint_color_rgb` is `0` for no tint, otherwise `0xRRGGBB`.
 
 active_index: zero-based index into the visible tab entries, or 255 when the current active tab is not present in the visible list (for example, an active agent chat tab with only its workspace's file tabs shown).
 ```
@@ -268,13 +269,13 @@ opcode(1) + section_count(1) + [section_id(1) + section_len(2) + payload(section
 | 0x06 | File | icon_len(1) + icon + icon_r(1) + icon_g(1) + icon_b(1) + filename_len(2) + filename + filetype_len(1) + filetype |
 | 0x07 | Message | msg_len(2) + msg |
 | 0x08 | Recording | macro_recording(1) |
-| 0x09 | Agent | buffer variant: agent_status(1) + background_count(2) + background_label_len(2) + background_label. Agent variant: model_name_len(1) + model_name + message_count(4) + session_status(1) + agent_status(1) + background_count(2) + background_label_len(2) + background_label |
+| 0x09 | Agent | buffer variant: agent_status(1) + background_count(2) + background_label_len(2) + background_label + active_tool_name_len(1) + active_tool_name. Agent variant: model_name_len(1) + model_name + message_count(4) + session_status(1) + agent_status(1) + background_count(2) + background_label_len(2) + background_label + active_tool_name_len(1) + active_tool_name |
 | 0x0A | Indent | indent_type(1: 0=spaces, 1=tabs) + indent_size(1) |
 | 0x0B | ModelineSegments | version(1, currently 2) + left_count(2) + right_count(2) + left segments + right segments. Each v2 segment is name_len(1) + name + fg(3) + bg(3) + attrs(1) + text_len(2) + text + command_len(2) + command. |
 | 0x0C | Selection | selection_mode(1: 0=none, 1=chars, 2=lines) + selection_size(4) |
 | 0x0D | Workspace | id(2) + kind(1) + status(1) + flags(2) + draft_count(2) + conflict_count(2) + background_count(2) + attention_count(2) + label_len(1) + label + icon_len(1) + icon |
 
-`content_kind`: 0 = buffer window, 1 = agent chat window. When `content_kind == 1`, the standard sections (cursor, git, diagnostics, etc.) contain background buffer data and section 0x09 includes agent-specific fields. `background_count` is the number of currently running background sub-agents. `background_label` is the active background child label when focused, otherwise the first running child label.
+`content_kind`: 0 = buffer window, 1 = agent chat window. When `content_kind == 1`, the standard sections (cursor, git, diagnostics, etc.) contain background buffer data and section 0x09 includes agent-specific fields. `background_count` is the number of currently running background sub-agents. `background_label` is the active background child label when focused, otherwise the first running child label. `active_tool_name` is the currently running tool label when the agent status is `tool_executing`; it is empty otherwise.
 
 `cursor_line` and `cursor_col` are 1-indexed on the wire.
 
@@ -392,7 +393,7 @@ Each section uses `section_id(1) + section_len(2) + payload(section_len)`. Secti
 | 0x03 | Prompt | `prompt_len(2) + prompt + line_count(1) + cursor_line(2) + cursor_col(2) + vim_mode(1) + visible_rows(1)` |
 | 0x04 | Pending | legacy pending approval banner payload. Current BEAM frames send `0` and render approvals inline as message type `0x09`. |
 | 0x05 | Help | `visible(1) + optional groups` |
-| 0x06 | Messages | `message_count(2) + messages...` |
+| 0x06 | Messages | `0xFF + version(1) + message_count(2) + framed messages...` |
 | 0x07 | Completion | prompt completion popup state |
 | 0x08 | Thinking | `level_len(2) + level`, where level is `off`, `low`, `medium`, or `high` |
 
@@ -406,22 +407,27 @@ Pending approval payload:
 
 Messages payload:
 ```
-message_count(2) + messages...
+0xFF(1) + version(1) + message_count(2) + framed messages...
 
-Per message:
+version 1 framed message:
+  message_len(4) + message(message_len)
+
+message:
   message_id(4) + typed_payload
 
 Typed payloads:
   0x01 (user):      type(1) + text_len(4) + text
   0x02 (assistant): type(1) + text_len(4) + text
   0x03 (thinking):  type(1) + collapsed(1) + text_len(4) + text
-  0x04 (tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + result_len(4) + result
+  0x04 (tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + result_len(4) + result + auto_approved(1)
   0x05 (system):    type(1) + level(1) + text_len(4) + text
   0x06 (usage):     type(1) + input(4) + output(4) + cache_read(4) + cache_write(4) + cost_micros(4)
   0x07 (styled_assistant): type(1) + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1), and if flags bit 0x08 is set: url_len(2) + url. Link URLs are limited to http, https, and mailto.
-  0x08 (styled_tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1), and if flags bit 0x08 is set: url_len(2) + url. Link URLs are limited to http, https, and mailto.
+  0x08 (styled_tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1), and if flags bit 0x08 is set: url_len(2) + url, auto_approved(1). The summary uses a UTF-8-safe preview budget so the styled payload and trailing auto_approved byte still fit. Link URLs are limited to http, https, and mailto.
   0x09 (approval_tool_call): type(1) + status(1) + name_len(2) + name + summary_len(2) + summary + tool_call_id_len(2) + tool_call_id + preview_kind(1) + preview_line_count(2), per line: line_len(2) + line
 ```
+
+`auto_approved`: 0=not auto-approved, 1=session trust, 2=turn trust. The frame length makes appended fields deterministic and lets decoders distinguish current payloads from legacy unframed messages.
 
 Styled run flags: 0x01=bold, 0x02=italic, 0x04=underline, 0x08=link URL present.
 
@@ -631,8 +637,10 @@ Mode values:
 | 5 | substitute_confirm | `"replace with foo?"` | no | `"y/n/a/q (2 of 15)"` |
 | 6 | extension_confirm | (plugin prompt) | no | (empty) |
 | 7 | describe_key | `"Press key: "` | no | (accumulated keys) |
+| 8 | delete_confirm | `"Delete 'file.txt'? (y/n)"` | no | (empty) |
+| 9 | branch_delete_confirm | `"Delete branch feature? (y/n)"` | no | (empty) |
 
-`cursor_pos` is the 0-indexed character position within `input` for the beam cursor. `0xFFFF` means no cursor (prompt-only modes 5-7). `context` is right-aligned supplementary text. `match_score` is 0-255 fuzzy match quality. `candidate_count == 0` naturally represents "input visible, no completions."
+`cursor_pos` is the 0-indexed character position within `input` for the beam cursor. `0xFFFF` means no cursor (prompt-only modes 5-9). `context` is right-aligned supplementary text. `match_score` is 0-255 fuzzy match quality. `candidate_count == 0` naturally represents "input visible, no completions."
 
 ### 0x80 — gui_window_content (sectioned format)
 
@@ -827,10 +835,10 @@ Per workspace:
 Per visible tab:
   id(4) + workspace_id(2) + kind(1) + flags(2) + path_hash(4)
   + icon_len(1) + icon(icon_len) + label_len(2) + label(label_len)
-  + path_len(2) + path(path_len)
+  + path_len(2) + path(path_len) + tint_color_rgb(4)
 ```
 
-`version` is currently 1. `mode`: 0 = editor, 1 = agent, 2 = file_tree, 3 = other. Workspace `kind`: 0 = manual, 1 = agent. Visible tab `kind`: 0 = file. `status`: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan. Workspace flags: bit 0 = attention, bit 1 = closeable. Visible tab flags: bit 0 = dirty, bit 1 = attention, bit 2 = draft, bit 3 = draft_elsewhere, bit 4 = conflict.
+`version` is currently 2. Version 2 adds `tint_color_rgb` to each visible tab entry and bit 5 for pinned tabs. `mode`: 0 = editor, 1 = agent, 2 = file_tree, 3 = other. Workspace `kind`: 0 = manual, 1 = agent. Visible tab `kind`: 0 = file. `status`: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan. Workspace flags: bit 0 = attention, bit 1 = closeable. Visible tab flags: bit 0 = dirty, bit 1 = attention, bit 2 = draft, bit 3 = draft_elsewhere, bit 4 = conflict, bit 5 = pinned. `tint_color_rgb` is `0` for no tint, otherwise `0xRRGGBB`.
 
 The workspace list includes the manual project workspace and all agent workspaces. The visible tab list includes only file tabs for the active workspace. Agent view remains a workspace zoom surface, so it is not encoded as a normal file tab.
 
@@ -925,7 +933,12 @@ opcode(1) + action_type(1) + payload...
 | 0x45 | notification_dismiss | id_len(2) + id | Dismiss one notification |
 | 0x46 | notification_action | id_len(2) + id + action_id_len(2) + action_id | Invoke one inline notification action |
 | 0x47 | power_thermal_state | low_power(1) + thermal_state(1) | Report low power mode and thermal pressure changes. `thermal_state` is 0 nominal, 1 fair, 2 serious, 3 critical, 255 unknown. |
-| 0x48 | observatory_inspect | pid_len(2) + pid | Inspect a BEAM Observatory process PID |
+| 0x48 | tab_reorder | tab_id(4) + new_index(2) | Move a visible tab to a zero-based visible index |
+| 0x49 | tab_pin | tab_id(4) | Pin a tab by id without selecting it first |
+| 0x4A | tab_unpin | tab_id(4) | Unpin a tab by id without selecting it first |
+| 0x4B | tab_move_left | tab_id(4) | Move a tab one visible slot left without selecting it first |
+| 0x4C | tab_move_right | tab_id(4) | Move a tab one visible slot right without selecting it first |
+| 0x4D | observatory_inspect | pid_len(2) + pid | Inspect a BEAM Observatory process PID |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |

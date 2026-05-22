@@ -652,7 +652,7 @@ defmodule MingaEditor.Input.ScopedTest do
     end
 
     test "approval decision keys are handled", %{state: state} do
-      for key <- [?y, ?n, ?Y] do
+      for key <- [?y, ?a, ?t, ?n] do
         assert {:handled, _new_state} = walk_surface_handlers(state, key, 0)
       end
     end

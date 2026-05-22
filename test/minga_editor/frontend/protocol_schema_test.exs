@@ -222,7 +222,12 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       notification_dismiss: 0x45,
       notification_action: 0x46,
       power_thermal_state: 0x47,
-      observatory_inspect: 0x48
+      tab_reorder: 0x48,
+      tab_pin: 0x49,
+      tab_unpin: 0x4A,
+      tab_move_left: 0x4B,
+      tab_move_right: 0x4C,
+      observatory_inspect: 0x4D
     )
   end
 

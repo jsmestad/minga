@@ -184,6 +184,11 @@ pub const GUI_ACTION_CONFIG_QUERY = opcodes.GUI_ACTION_CONFIG_QUERY;
 pub const GUI_ACTION_NOTIFICATION_DISMISS = opcodes.GUI_ACTION_NOTIFICATION_DISMISS;
 pub const GUI_ACTION_NOTIFICATION_ACTION = opcodes.GUI_ACTION_NOTIFICATION_ACTION;
 pub const GUI_ACTION_POWER_THERMAL_STATE = opcodes.GUI_ACTION_POWER_THERMAL_STATE;
+pub const GUI_ACTION_TAB_REORDER = opcodes.GUI_ACTION_TAB_REORDER;
+pub const GUI_ACTION_TAB_PIN = opcodes.GUI_ACTION_TAB_PIN;
+pub const GUI_ACTION_TAB_UNPIN = opcodes.GUI_ACTION_TAB_UNPIN;
+pub const GUI_ACTION_TAB_MOVE_LEFT = opcodes.GUI_ACTION_TAB_MOVE_LEFT;
+pub const GUI_ACTION_TAB_MOVE_RIGHT = opcodes.GUI_ACTION_TAB_MOVE_RIGHT;
 pub const GUI_ACTION_OBSERVATORY_INSPECT = opcodes.GUI_ACTION_OBSERVATORY_INSPECT;
 
 // Log levels// Log levels
@@ -1135,7 +1140,7 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
             return .noop;
         },
         else => {
-            if (data[0] == OP_GUI_FILE_TREE) {
+            if (data[0] == OP_GUI_FILE_TREE or data[0] == OP_GUI_OBSERVATORY) {
                 if (rest.len < 4) return error.Malformed;
                 const payload_len: usize = std.mem.readInt(u32, rest[0..4], .big);
                 if (rest.len < 4 + payload_len) return error.Malformed;
@@ -1278,12 +1283,12 @@ pub fn commandSize(payload: []const u8) usize {
             }
             break :blk offset;
         },
-        OP_GUI_FILE_TREE => blk: {
+        OP_GUI_FILE_TREE, OP_GUI_OBSERVATORY => blk: {
             if (payload.len < 5) break :blk payload.len;
             const payload_len: usize = std.mem.readInt(u32, payload[1..5], .big);
             break :blk 5 + payload_len;
         },
-        // Forward-compatible GUI opcodes use opcode(1) + payload_len(2) + payload.
+        // Forward-compatible GUI opcodes use opcode(1) + payload_len(2) + payload, except large-payload opcodes handled above.
         else => blk: {
             if (payload[0] >= 0x90 and payload[0] <= 0x9F) {
                 if (payload.len < 3) break :blk payload.len;
@@ -1676,12 +1681,12 @@ test "decode set_cursor_shape invalid value returns malformed" {
 }
 
 test "decode gui_observatory as noop in TUI" {
-    const data = [_]u8{ OP_GUI_OBSERVATORY, 0x00, 0x03, 0x01, 0x02, 0x03 };
+    const data = [_]u8{ OP_GUI_OBSERVATORY, 0x00, 0x00, 0x00, 0x03, 0x01, 0x02, 0x03 };
     try std.testing.expect((try decodeCommand(&data)) == .noop);
 }
 
 test "decode truncated gui_observatory returns malformed" {
-    const data = [_]u8{ OP_GUI_OBSERVATORY, 0x00, 0x03, 0x01 };
+    const data = [_]u8{ OP_GUI_OBSERVATORY, 0x00, 0x00, 0x00, 0x03, 0x01 };
     const result = decodeCommand(&data);
     try std.testing.expectError(error.Malformed, result);
 }
@@ -2161,7 +2166,7 @@ test "commandSize: truncated variable-size commands clamp to available payload" 
 }
 
 test "commandSize: gui_observatory uses forward-compatible envelope" {
-    const data = [_]u8{ OP_GUI_OBSERVATORY, 0x00, 0x03, 0x01, 0x02, 0x03 };
+    const data = [_]u8{ OP_GUI_OBSERVATORY, 0x00, 0x00, 0x00, 0x03, 0x01, 0x02, 0x03 };
     try std.testing.expectEqual(@as(usize, data.len), commandSize(&data));
 }
 
@@ -2793,6 +2798,14 @@ test "decode draw_styled_text with underline style curl" {
 test "decode draw_styled_text truncated returns malformed" {
     const data = [_]u8{ 0x1C, 0x00, 0x03 }; // too short
     try std.testing.expectError(error.Malformed, decodeCommand(&data));
+}
+
+test "tab GUI action re-exports stay wired to generated opcodes" {
+    try std.testing.expectEqual(opcodes.GUI_ACTION_TAB_REORDER, GUI_ACTION_TAB_REORDER);
+    try std.testing.expectEqual(opcodes.GUI_ACTION_TAB_PIN, GUI_ACTION_TAB_PIN);
+    try std.testing.expectEqual(opcodes.GUI_ACTION_TAB_UNPIN, GUI_ACTION_TAB_UNPIN);
+    try std.testing.expectEqual(opcodes.GUI_ACTION_TAB_MOVE_LEFT, GUI_ACTION_TAB_MOVE_LEFT);
+    try std.testing.expectEqual(opcodes.GUI_ACTION_TAB_MOVE_RIGHT, GUI_ACTION_TAB_MOVE_RIGHT);
 }
 
 test {

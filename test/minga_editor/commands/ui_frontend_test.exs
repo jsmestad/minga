@@ -90,6 +90,16 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
       assert Commands.execute(state, :toggle_beam_observatory) == state
     end
 
+    test "is a no-op for the Board shell" do
+      state =
+        Map.merge(base_state(), %{
+          shell: MingaEditor.Shell.Board,
+          shell_state: MingaEditor.Shell.Board.State.new()
+        })
+
+      assert Commands.execute(state, :toggle_beam_observatory) == state
+    end
+
     test "ignores stale refresh ticks" do
       state = Commands.execute(base_state(), :toggle_beam_observatory)
       assert {timer, _token} = state.shell_state.observatory_timer

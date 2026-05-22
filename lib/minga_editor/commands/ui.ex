@@ -98,9 +98,13 @@ defmodule MingaEditor.Commands.UI do
 
   @spec toggle_beam_observatory(EditorState.t()) :: EditorState.t()
   defp toggle_beam_observatory(state) do
-    if EditorState.observatory_visible?(state),
-      do: close_beam_observatory(state),
-      else: open_beam_observatory(state)
+    if observatory_supported?(state) do
+      if EditorState.observatory_visible?(state),
+        do: close_beam_observatory(state),
+        else: open_beam_observatory(state)
+    else
+      state
+    end
   end
 
   @spec open_beam_observatory(EditorState.t()) :: EditorState.t()
@@ -146,9 +150,18 @@ defmodule MingaEditor.Commands.UI do
 
   @spec observatory_supported?(EditorState.t()) :: boolean()
   defp observatory_supported?(state) do
-    state
-    |> Map.get(:capabilities, %Capabilities{})
-    |> Frontend.gui?()
+    observatory_shell_supported?(state) and
+      state
+      |> Map.get(:capabilities, %Capabilities{})
+      |> Frontend.gui?()
+  end
+
+  @spec observatory_shell_supported?(EditorState.t()) :: boolean()
+  defp observatory_shell_supported?(%{shell_state: shell_state}) do
+    Map.has_key?(shell_state, :observatory_visible) and
+      Map.has_key?(shell_state, :observatory_timer) and
+      Map.has_key?(shell_state, :observatory_data) and
+      Map.has_key?(shell_state, :observatory_inspection)
   end
 
   @spec toggle_board(EditorState.t()) :: EditorState.t()

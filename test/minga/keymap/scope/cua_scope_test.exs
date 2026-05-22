@@ -19,7 +19,9 @@ defmodule Minga.Keymap.Scope.CUAScopeTest do
 
   @enter 13
   @escape 27
+  @shift 0x01
   @ctrl 0x02
+  @alt 0x04
   @cmd 0x08
 
   # ── File tree scope ────────────────────────────────────────────────────────
@@ -59,6 +61,13 @@ defmodule Minga.Keymap.Scope.CUAScopeTest do
       # Bug 2 regression: Enter must submit when input is focused,
       # not just focus the input every time
       assert {:command, :agent_focus_or_submit} = Scope.resolve_key(:agent, :cua, {@enter, 0})
+    end
+
+    test "newline variants resolve through shared group" do
+      assert {:command, :agent_insert_newline} = Scope.resolve_key(:agent, :cua, {@enter, @shift})
+      assert {:command, :agent_insert_newline} = Scope.resolve_key(:agent, :cua, {?j, @ctrl})
+      assert {:command, :agent_insert_newline} = Scope.resolve_key(:agent, :cua, {0x0A, 0})
+      assert {:command, :agent_insert_newline} = Scope.resolve_key(:agent, :cua, {@enter, @alt})
     end
 
     test "arrow up/down resolve to agent-specific navigation" do

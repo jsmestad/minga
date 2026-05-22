@@ -86,6 +86,10 @@ defmodule Minga.Command.Parser do
           | {:buffers, []}
           | {:buffer_next, []}
           | {:buffer_prev, []}
+          | {:pin_tab, []}
+          | {:unpin_tab, []}
+          | {:move_tab_left, []}
+          | {:move_tab_right, []}
           | {:lsp_info, []}
           | {:lsp_restart, []}
           | {:lsp_stop, []}
@@ -314,6 +318,14 @@ defmodule Minga.Command.Parser do
   defp do_parse("bn"), do: {:buffer_next, []}
   defp do_parse("bprev"), do: {:buffer_prev, []}
   defp do_parse("bp"), do: {:buffer_prev, []}
+  defp do_parse("pin_tab"), do: {:pin_tab, []}
+  defp do_parse("pin-tab"), do: {:pin_tab, []}
+  defp do_parse("unpin_tab"), do: {:unpin_tab, []}
+  defp do_parse("unpin-tab"), do: {:unpin_tab, []}
+  defp do_parse("move_tab_left"), do: {:move_tab_left, []}
+  defp do_parse("move-tab-left"), do: {:move_tab_left, []}
+  defp do_parse("move_tab_right"), do: {:move_tab_right, []}
+  defp do_parse("move-tab-right"), do: {:move_tab_right, []}
 
   defp do_parse("sort"), do: {:sort, :whole_buffer, []}
 

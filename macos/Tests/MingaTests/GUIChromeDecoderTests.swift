@@ -133,14 +133,16 @@ struct GUITabBarDecoderTests {
         appendU16(&data, 0) // group_id (manual workspace)
         appendString8(&data, "") // icon (Nerd Font, can be multi-byte)
         appendString16(&data, "editor.ex")
+        appendU32(&data, 0) // tint_color_rgb
 
-        // Tab 2: agent tab, has attention, workspace 1
-        let flags2: UInt8 = 0x04 | 0x08 | (1 << 4) // agent + attention + agentStatus=1
+        // Tab 2: pinned agent tab, has attention, workspace 1
+        let flags2: UInt8 = 0x04 | 0x08 | (1 << 4) | 0x80 // agent + attention + agentStatus=1 + pinned
         data.append(flags2)
         appendU32(&data, 99) // id
         appendU16(&data, 1) // group_id (agent workspace)
         appendString8(&data, "")
         appendString16(&data, "Agent")
+        appendU32(&data, 0x7AA2F7) // tint_color_rgb
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
@@ -163,6 +165,8 @@ struct GUITabBarDecoderTests {
         #expect(tabs[1].isAgent == true)
         #expect(tabs[1].hasAttention == true)
         #expect(tabs[1].agentStatus == 1)
+        #expect(tabs[1].isPinned == true)
+        #expect(tabs[1].tintColorRGB == 0x7AA2F7)
         #expect(tabs[1].label == "Agent")
     }
 
@@ -178,6 +182,7 @@ struct GUITabBarDecoderTests {
         appendU16(&data, 1)
         appendString8(&data, "")
         appendString16(&data, "hidden.ex")
+        appendU32(&data, 0) // tint_color_rgb
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
@@ -443,6 +448,7 @@ struct GUIStatusBarDecoderTests {
         agent.append(0) // agentStatus
         appendU16(&agent, 2) // backgroundSubagentCount
         appendString16(&agent, "session-2: tests") // backgroundSubagentLabel
+        appendString8(&agent, "read_file") // activeToolName
 
         let sections = [
             buildSection(SECTION_IDENTITY, identity),
@@ -487,6 +493,7 @@ struct GUIStatusBarDecoderTests {
         #expect(update.macroRecording == 0)
         #expect(update.parserStatus == 1)
         #expect(update.agentStatus == 0)
+        #expect(update.activeToolName == "read_file")
         #expect(update.gitAdded == 5)
         #expect(update.gitModified == 3)
         #expect(update.gitDeleted == 1)
@@ -498,6 +505,72 @@ struct GUIStatusBarDecoderTests {
         #expect(update.backgroundSubagentCount == 2)
         #expect(update.backgroundSubagentLabel == "session-2: tests")
 
+    }
+
+    @Test("Decode gui_status_bar empty agent section throws malformed")
+    func decodeEmptyAgentSectionThrows() throws {
+        var identity = Data()
+        identity.append(1) // contentKind = agent
+        identity.append(0) // mode = normal
+        identity.append(0x03) // flags
+
+        let sections = [
+            buildSection(SECTION_IDENTITY, identity),
+            buildSection(SECTION_AGENT, Data()),
+        ]
+
+        var data = Data()
+        data.append(OP_GUI_STATUS_BAR)
+        data.append(UInt8(sections.count))
+        for section in sections { data.append(section) }
+
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Decode gui_status_bar agent section before identity")
+    func decodeAgentSectionBeforeIdentity() throws {
+        var identity = Data()
+        identity.append(1) // contentKind = agent
+        identity.append(0) // mode = normal
+        identity.append(0x03) // flags
+
+        var agent = Data()
+        appendString8(&agent, "claude-3-5-sonnet")
+        appendU32(&agent, 12) // messageCount
+        agent.append(1) // sessionStatus
+        agent.append(1) // agentStatus
+        appendU16(&agent, 3) // backgroundSubagentCount
+        appendString16(&agent, "session-3: agent tests") // backgroundSubagentLabel
+        appendString8(&agent, "shell") // activeToolName
+
+        let sections = [
+            buildSection(SECTION_AGENT, agent),
+            buildSection(SECTION_IDENTITY, identity),
+        ]
+
+        var data = Data()
+        data.append(OP_GUI_STATUS_BAR)
+        data.append(UInt8(sections.count))
+        for section in sections { data.append(section) }
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiStatusBar(let update) = cmd else {
+            Issue.record("Expected .guiStatusBar")
+            return
+        }
+
+        #expect(update.contentKind == 1)
+        #expect(update.modelName == "claude-3-5-sonnet")
+        #expect(update.messageCount == 12)
+        #expect(update.sessionStatus == 1)
+        #expect(update.agentStatus == 1)
+        #expect(update.activeToolName == "shell")
+        #expect(update.backgroundSubagentCount == 3)
+        #expect(update.backgroundSubagentLabel == "session-3: agent tests")
     }
 
     @Test("Decode gui_status_bar workspace section")
@@ -590,7 +663,7 @@ struct GUIStatusBarDecoderTests {
         var recording = Data()
         recording.append(0)
 
-        // Agent section: model_name_len(1) + model_name + message_count(4) + session_status(1) + agent_status(1) + background count/label
+        // Agent section: model_name_len(1) + model_name + message_count(4) + session_status(1) + agent_status(1) + background count/label + active_tool_name
         var agent = Data()
         appendString8(&agent, "claude-3-5-sonnet")
         appendU32(&agent, 12) // messageCount
@@ -598,6 +671,7 @@ struct GUIStatusBarDecoderTests {
         agent.append(1) // agentStatus
         appendU16(&agent, 3) // backgroundSubagentCount
         appendString16(&agent, "session-3: agent tests") // backgroundSubagentLabel
+        appendString8(&agent, "shell") // activeToolName
 
         let sections = [
             buildSection(SECTION_IDENTITY, identity),
@@ -635,9 +709,48 @@ struct GUIStatusBarDecoderTests {
         #expect(update.errorCount == 1)
         #expect(update.hintCount == 1)
         #expect(update.agentStatus == 1)
+        #expect(update.activeToolName == "shell")
         #expect(update.gitAdded == 3)
         #expect(update.gitModified == 2)
         #expect(update.filename == "editor.ex")
+        #expect(update.backgroundSubagentCount == 3)
+        #expect(update.backgroundSubagentLabel == "session-3: agent tests")
+    }
+
+    @Test("Decode gui_status_bar agent variant without appended active tool name")
+    func decodeAgentVariantWithoutActiveToolName() throws {
+        var identity = Data()
+        identity.append(1) // contentKind = agent
+        identity.append(0) // mode = normal
+        identity.append(0x03) // flags
+
+        var agent = Data()
+        appendString8(&agent, "claude-3-5-sonnet")
+        appendU32(&agent, 12) // messageCount
+        agent.append(1) // sessionStatus
+        agent.append(1) // agentStatus
+        appendU16(&agent, 3) // backgroundSubagentCount
+        appendString16(&agent, "session-3: agent tests") // backgroundSubagentLabel
+
+        let sections = [
+            buildSection(SECTION_IDENTITY, identity),
+            buildSection(SECTION_AGENT, agent),
+        ]
+
+        var data = Data()
+        data.append(OP_GUI_STATUS_BAR)
+        data.append(UInt8(sections.count))
+        for section in sections { data.append(section) }
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiStatusBar(let update) = cmd else {
+            Issue.record("Expected .guiStatusBar")
+            return
+        }
+
+        #expect(update.activeToolName.isEmpty)
         #expect(update.backgroundSubagentCount == 3)
         #expect(update.backgroundSubagentLabel == "session-3: agent tests")
     }
@@ -988,6 +1101,42 @@ struct GUICursorlineDecoderTests {
 
 @Suite("GUI Observatory Decoder")
 struct GUIObservatoryDecoderTests {
+    @Test("Decode hidden gui_observatory payload")
+    func decodeHiddenPayload() throws {
+        var header = Data()
+        header.append(0)
+        appendU16(&header, 0)
+
+        let payload = buildSectionData(0x01, header)
+        var data = Data()
+        data.append(OP_GUI_OBSERVATORY)
+        appendU32(&data, UInt32(payload.count))
+        data.append(payload)
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiObservatory(let visible, let nodeCount, let decodedNodes) = cmd else {
+            Issue.record("Expected .guiObservatory"); return
+        }
+        #expect(visible == false)
+        #expect(nodeCount == 0)
+        #expect(decodedNodes.isEmpty)
+    }
+
+    @Test("Reject truncated gui_observatory 32-bit payload")
+    func rejectTruncatedPayload() throws {
+        var data = Data()
+        data.append(OP_GUI_OBSERVATORY)
+        appendU32(&data, 4)
+        data.append(0x01)
+        data.append(0x00)
+
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: data, offset: 0)
+        }
+    }
+
     @Test("Decode semantic gui_observatory with tree order and sparklines")
     func decodeWithNodesAndSparklines() throws {
         var payload = Data()
@@ -998,21 +1147,29 @@ struct GUIObservatoryDecoderTests {
         payload.append(buildSectionData(0x01, header))
         payload.append(buildSectionData(0x7F, Data([0xAA, 0xBB])))
 
-        var nodes = Data()
-        appendNode(&nodes, pid: "<0.1.0>", parentPid: "", name: "Elixir.Minga.Supervisor", processClass: 0, depth: 0, memory: 1024, messageQueueLen: 0, reductions: 10)
-        appendNode(&nodes, pid: "<0.2.0>", parentPid: "<0.1.0>", name: "Elixir.Minga.Buffer.Process", processClass: 1, depth: 1, memory: 2048, messageQueueLen: 2, reductions: 20)
-        payload.append(buildSectionData(0x02, nodes))
+        var rootNode = Data()
+        appendNode(&rootNode, pid: "<0.1.0>", parentPid: "", name: "Elixir.Minga.Supervisor", processClass: 0, depth: 0, memory: 1024, messageQueueLen: 0, reductions: 10)
+        payload.append(buildSectionData(0x02, rootNode))
 
-        var sparklines = Data()
-        appendString8(&sparklines, "<0.2.0>")
-        sparklines.append(2)
-        appendU16(&sparklines, 0)
-        appendU16(&sparklines, 32768)
-        payload.append(buildSectionData(0x03, sparklines))
+        var childNode = Data()
+        appendNode(&childNode, pid: "<0.2.0>", parentPid: "<0.1.0>", name: "Elixir.Minga.Buffer.Process", processClass: 1, depth: 1, memory: 2048, messageQueueLen: 2, reductions: 20)
+        payload.append(buildSectionData(0x02, childNode))
+
+        var emptyRootSparkline = Data()
+        appendString8(&emptyRootSparkline, "<0.1.0>")
+        emptyRootSparkline.append(0)
+        payload.append(buildSectionData(0x03, emptyRootSparkline))
+
+        var childSparkline = Data()
+        appendString8(&childSparkline, "<0.2.0>")
+        childSparkline.append(2)
+        appendU16(&childSparkline, 0)
+        appendU16(&childSparkline, 32768)
+        payload.append(buildSectionData(0x03, childSparkline))
 
         var data = Data()
         data.append(OP_GUI_OBSERVATORY)
-        appendU16(&data, UInt16(payload.count))
+        appendU32(&data, UInt32(payload.count))
         data.append(payload)
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
@@ -1776,11 +1933,24 @@ struct GUIAgentChatDecoderTests {
         return data
     }
 
-    /// Builds a messages section payload with the given raw message data.
+    /// Builds a legacy unframed messages section payload with the given raw message data.
     private func buildMessagesPayload(count: Int, _ rawMessages: Data) -> Data {
         var payload = Data()
         appendU16(&payload, UInt16(count))
         payload.append(rawMessages)
+        return payload
+    }
+
+    /// Builds the current framed v1 messages section payload.
+    private func buildFramedMessagesPayload(_ messages: [Data]) -> Data {
+        var payload = Data()
+        payload.append(0xFF)
+        payload.append(1)
+        appendU16(&payload, UInt16(messages.count))
+        for message in messages {
+            appendU32(&payload, UInt32(message.count))
+            payload.append(message)
+        }
         return payload
     }
 
@@ -1882,18 +2052,90 @@ struct GUIAgentChatDecoderTests {
         let result = "file contents here"
         appendU32(&msgs, UInt32(result.utf8.count))
         msgs.append(contentsOf: result.utf8)
+        msgs.append(2) // autoApprovedScope at end
 
         let data = buildChatData(status: 2, model: "claude", messages: buildMessagesPayload(count: 1, msgs))
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
         guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
         guard messages.count == 1 else { Issue.record("Expected 1 message"); return }
-        guard case .toolCall(let name, _, let tcStatus, let isError, let collapsed, let duration, let tcResult) = messages[0].content else { Issue.record("Expected .toolCall"); return }
+        guard case .toolCall(let name, _, let tcStatus, let isError, let collapsed, let autoApprovedScope, let duration, let tcResult) = messages[0].content else { Issue.record("Expected .toolCall"); return }
         #expect(name == "read_file")
         #expect(tcStatus == 1)
         #expect(isError == false)
         #expect(collapsed == true)
+        #expect(autoApprovedScope == 2)
         #expect(duration == 1234)
         #expect(tcResult == "file contents here")
+    }
+
+    @Test("Decode gui_agent_chat framed tool_call with auto_approved followed by another message")
+    func decodeFramedToolCallWithAutoApprovedAndTrailingMessage() throws {
+        var toolMessage = Data()
+        appendU32(&toolMessage, 5)
+        toolMessage.append(0x04)
+        toolMessage.append(1); toolMessage.append(0); toolMessage.append(1)
+        appendU32(&toolMessage, 1234)
+        appendString16(&toolMessage, "read_file")
+        appendString16(&toolMessage, "lib/minga.ex")
+        let result = "file contents here"
+        appendU32(&toolMessage, UInt32(result.utf8.count))
+        toolMessage.append(contentsOf: result.utf8)
+        toolMessage.append(2)
+
+        var trailingMessage = Data()
+        appendU32(&trailingMessage, 6)
+        trailingMessage.append(0x01)
+        appendU32(&trailingMessage, 5)
+        trailingMessage.append(contentsOf: "later".utf8)
+
+        let data = buildChatData(status: 2, model: "claude", messages: buildFramedMessagesPayload([toolMessage, trailingMessage]))
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard messages.count == 2 else { Issue.record("Expected 2 messages"); return }
+        guard case .toolCall(let name, _, _, _, _, let autoApprovedScope, _, let tcResult) = messages[0].content else { Issue.record("Expected .toolCall"); return }
+        guard case .user(let laterText) = messages[1].content else { Issue.record("Expected trailing user message"); return }
+
+        #expect(name == "read_file")
+        #expect(autoApprovedScope == 2)
+        #expect(tcResult == "file contents here")
+        #expect(laterText == "later")
+    }
+
+    @Test("Decode gui_agent_chat legacy tool_call without auto_approved byte")
+    func decodeLegacyToolCallWithoutAutoApproved() throws {
+        var msgs = Data()
+        appendU32(&msgs, 5)
+        msgs.append(0x04)
+        msgs.append(1)
+        msgs.append(0)
+        msgs.append(1)
+        appendU32(&msgs, 1234)
+        appendString16(&msgs, "read_file")
+        appendString16(&msgs, "lib/minga.ex")
+        let result = "file contents here"
+        appendU32(&msgs, UInt32(result.utf8.count))
+        msgs.append(contentsOf: result.utf8)
+
+        appendU32(&msgs, 6)
+        msgs.append(0x01)
+        appendU32(&msgs, 5)
+        msgs.append(contentsOf: "later".utf8)
+
+        let data = buildChatData(status: 2, model: "claude", messages: buildMessagesPayload(count: 2, msgs))
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard messages.count == 2 else { Issue.record("Expected 2 messages"); return }
+        guard case .toolCall(let name, _, _, _, _, let autoApprovedScope, _, let tcResult) = messages[0].content else { Issue.record("Expected .toolCall"); return }
+        guard case .user(let laterText) = messages[1].content else { Issue.record("Expected trailing user message"); return }
+
+        #expect(name == "read_file")
+        #expect(autoApprovedScope == 0)
+        #expect(tcResult == "file contents here")
+        #expect(laterText == "later")
     }
 
     @Test("Decode gui_agent_chat with inline approval tool call (sectioned)")
@@ -1921,6 +2163,7 @@ struct GUIAgentChatDecoderTests {
         #expect(previewKind == 3)
         #expect(previewLines == ["file: config.toml", "1 edit(s)"])
     }
+
 
     @Test("Decode gui_agent_chat with system message (sectioned)")
     func decodeSystem() throws {
@@ -2006,6 +2249,86 @@ struct GUIAgentChatDecoderTests {
         #expect(lines[0][1].italic == true)
         #expect(lines[1][0].text == "  :ok")
         #expect(lines[1][0].underline == true)
+    }
+
+    @Test("Decode gui_agent_chat framed styled_tool_call with auto_approved followed by another message")
+    func decodeFramedStyledToolCallWithAutoApprovedAndTrailingMessage() throws {
+        var toolMessage = Data()
+        appendU32(&toolMessage, 42)
+        toolMessage.append(0x08)
+        toolMessage.append(1)
+        toolMessage.append(0)
+        toolMessage.append(1)
+        appendU32(&toolMessage, 99)
+        appendString16(&toolMessage, "shell")
+        appendString16(&toolMessage, "🚀🚀🚀")
+        appendU16(&toolMessage, 1)
+        appendU16(&toolMessage, 1)
+        appendString16(&toolMessage, "result")
+        appendRGB(&toolMessage, 0x61, 0xAF, 0xEF)
+        appendRGB(&toolMessage, 0x00, 0x00, 0x00)
+        toolMessage.append(0x01)
+        toolMessage.append(1)
+
+        var trailingMessage = Data()
+        appendU32(&trailingMessage, 43)
+        trailingMessage.append(0x02)
+        appendU32(&trailingMessage, 5)
+        trailingMessage.append(contentsOf: "later".utf8)
+
+        let data = buildChatData(model: "claude", messages: buildFramedMessagesPayload([toolMessage, trailingMessage]))
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard messages.count == 2 else { Issue.record("Expected 2 messages"); return }
+        guard case .styledToolCall(let name, _, _, _, _, let autoApprovedScope, _, let resultLines) = messages[0].content else { Issue.record("Expected .styledToolCall"); return }
+        guard case .assistant(let laterText) = messages[1].content else { Issue.record("Expected trailing assistant message"); return }
+
+        #expect(name == "shell")
+        #expect(autoApprovedScope == 1)
+        #expect(resultLines.count == 1)
+        #expect(resultLines[0][0].text == "result")
+        #expect(laterText == "later")
+    }
+
+    @Test("Decode gui_agent_chat legacy styled_tool_call without auto_approved byte")
+    func decodeLegacyStyledToolCallWithoutAutoApproved() throws {
+        var msgs = Data()
+        appendU32(&msgs, 42)
+        msgs.append(0x08)
+        msgs.append(1)
+        msgs.append(0)
+        msgs.append(1)
+        appendU32(&msgs, 99)
+        appendString16(&msgs, "shell")
+        appendString16(&msgs, "🚀🚀🚀")
+        appendU16(&msgs, 1)
+        appendU16(&msgs, 1)
+        appendString16(&msgs, "result")
+        appendRGB(&msgs, 0x61, 0xAF, 0xEF)
+        appendRGB(&msgs, 0x00, 0x00, 0x00)
+        msgs.append(0x01)
+
+        appendU32(&msgs, 43)
+        msgs.append(0x02)
+        appendU32(&msgs, 5)
+        msgs.append(contentsOf: "later".utf8)
+
+        let data = buildChatData(model: "claude", messages: buildMessagesPayload(count: 2, msgs))
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard messages.count == 2 else { Issue.record("Expected 2 messages"); return }
+        guard case .styledToolCall(let name, _, _, _, _, let autoApprovedScope, _, let resultLines) = messages[0].content else { Issue.record("Expected .styledToolCall"); return }
+        guard case .assistant(let laterText) = messages[1].content else { Issue.record("Expected trailing assistant message"); return }
+
+        #expect(name == "shell")
+        #expect(autoApprovedScope == 0)
+        #expect(resultLines.count == 1)
+        #expect(resultLines[0][0].text == "result")
+        #expect(laterText == "later")
     }
 
     @Test("Decode gui_agent_chat styled_assistant link run")
@@ -2159,7 +2482,7 @@ struct GUIWorkspacesDecoderTests {
     @Test("Decode canonical workspaces with visible tabs")
     func decodeCanonicalWorkspaces() throws {
         var payload = Data()
-        payload.append(1) // version
+        payload.append(2) // version
         appendU16(&payload, 1) // active_workspace_id
         payload.append(1) // mode = agent
         payload.append(1) // flags = has attention
@@ -2183,7 +2506,7 @@ struct GUIWorkspacesDecoderTests {
             return
         }
 
-        #expect(version == 1)
+        #expect(version == 2)
         #expect(activeId == 1)
         #expect(mode == 1)
         #expect(flags == 1)
@@ -2203,14 +2526,47 @@ struct GUIWorkspacesDecoderTests {
         #expect(visibleTabs[0].workspaceId == 1)
         #expect(visibleTabs[0].flags == 0x0013)
         #expect(visibleTabs[0].pathHash == 0x12345678)
+        #expect(visibleTabs[0].tintColorRGB == 0x7AA2F7)
         #expect(visibleTabs[0].label == "agent.ex")
         #expect(visibleTabs[0].path == "/tmp/agent.ex")
+    }
+
+    @Test("Decode legacy version 1 workspaces without tint color")
+    func decodeLegacyVersion1() throws {
+        var payload = Data()
+        payload.append(1) // version
+        appendU16(&payload, 1) // active_workspace_id
+        payload.append(0) // mode = editor
+        payload.append(0) // flags
+        payload.append(1) // workspace_count
+
+        appendWorkspace(&payload, id: 1, kind: 0, status: 0, flags: 0, r: 0x51, g: 0xAF, b: 0xEF, tabCount: 1, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "minga", icon: "folder")
+
+        appendU16(&payload, 1) // visible_tab_count
+        appendVisibleTab(&payload, id: 42, workspaceId: 1, kind: 0, flags: 0x0013, pathHash: 0x12345678, icon: "", label: "agent.ex", path: "/tmp/agent.ex", tintColorRGB: nil)
+
+        var data = Data([OP_GUI_WORKSPACES])
+        appendU16(&data, UInt16(payload.count))
+        data.append(payload)
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiWorkspaces(let version, _, _, _, _, let visibleTabs) = cmd else {
+            Issue.record("Expected .guiWorkspaces, got \(String(describing: cmd))")
+            return
+        }
+
+        #expect(version == 1)
+        #expect(visibleTabs.count == 1)
+        #expect(visibleTabs[0].id == 42)
+        #expect(visibleTabs[0].tintColorRGB == 0)
     }
 
     @Test("Decode canonical workspaces with zero workspaces and tabs")
     func decodeEmpty() throws {
         var payload = Data()
-        payload.append(1) // version
+        payload.append(2) // version
         appendU16(&payload, 0) // active_workspace_id
         payload.append(0) // mode = editor
         payload.append(0) // flags
@@ -2244,7 +2600,7 @@ struct GUIWorkspacesDecoderTests {
     @Test("Invalid UTF-8 in canonical workspace payload throws malformed")
     func invalidUTF8Throws() {
         var payload = Data()
-        payload.append(1) // version
+        payload.append(2) // version
         appendU16(&payload, 1) // active_workspace_id
         payload.append(1) // mode = agent
         payload.append(0) // flags
@@ -2286,7 +2642,7 @@ struct GUIWorkspacesDecoderTests {
         appendString8(&data, icon)
     }
 
-    private func appendVisibleTab(_ data: inout Data, id: UInt32, workspaceId: UInt16, kind: UInt8, flags: UInt16, pathHash: UInt32, icon: String, label: String, path: String) {
+    private func appendVisibleTab(_ data: inout Data, id: UInt32, workspaceId: UInt16, kind: UInt8, flags: UInt16, pathHash: UInt32, icon: String, label: String, path: String, tintColorRGB: UInt32? = 0x7AA2F7) {
         appendU32(&data, id)
         appendU16(&data, workspaceId)
         data.append(kind)
@@ -2295,6 +2651,9 @@ struct GUIWorkspacesDecoderTests {
         appendString8(&data, icon)
         appendString16(&data, label)
         appendString16(&data, path)
+        if let tintColorRGB {
+            appendU32(&data, tintColorRGB)
+        }
     }
 }
 

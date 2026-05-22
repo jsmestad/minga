@@ -441,7 +441,7 @@ struct ContentView: View {
                     .foregroundStyle(theme.tabActiveFg.opacity(0.85))
                 Text("\(appState.gui.observatoryState.processCount) processes")
                     .font(.system(size: 10, weight: .regular))
-                    .foregroundStyle(theme.treeInactiveFg)
+                    .foregroundStyle(theme.treeFg.opacity(0.55))
             }
 
             Spacer(minLength: 0)

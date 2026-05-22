@@ -31,6 +31,14 @@ defmodule MingaEditor.BufferLifecycle do
   @doc "Broadcasts :buffer_saved after save commands."
   @spec lsp_after_save(state(), Mode.command()) :: state()
   def lsp_after_save(%{workspace: %{buffers: %{active: buf}}} = state, cmd) when is_pid(buf) do
+    lsp_after_save(state, cmd, buf)
+  end
+
+  def lsp_after_save(state, _cmd), do: state
+
+  @doc "Broadcasts :buffer_saved after save commands for a known buffer."
+  @spec lsp_after_save(state(), Mode.command(), pid()) :: state()
+  def lsp_after_save(state, cmd, buf) when is_pid(buf) do
     if cmd in [
          :save,
          :force_save,
@@ -56,6 +64,4 @@ defmodule MingaEditor.BufferLifecycle do
   catch
     :exit, _ -> state
   end
-
-  def lsp_after_save(state, _cmd), do: state
 end

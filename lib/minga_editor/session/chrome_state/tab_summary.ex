@@ -20,7 +20,9 @@ defmodule MingaEditor.Session.ChromeState.TabSummary do
           icon: String.t(),
           dirty?: boolean(),
           draft_state: draft_state(),
-          attention?: boolean()
+          attention?: boolean(),
+          pinned?: boolean(),
+          tint_color: non_neg_integer()
         }
 
   @enforce_keys [
@@ -32,7 +34,9 @@ defmodule MingaEditor.Session.ChromeState.TabSummary do
     :icon,
     :dirty?,
     :draft_state,
-    :attention?
+    :attention?,
+    :pinned?,
+    :tint_color
   ]
   defstruct @enforce_keys
 
@@ -54,7 +58,9 @@ defmodule MingaEditor.Session.ChromeState.TabSummary do
       icon: Keyword.fetch!(attrs, :icon),
       dirty?: Keyword.get(attrs, :dirty?, false),
       draft_state: Keyword.get(attrs, :draft_state, :none),
-      attention?: Keyword.get(attrs, :attention?, false)
+      attention?: Keyword.get(attrs, :attention?, false),
+      pinned?: Keyword.get(attrs, :pinned?, false),
+      tint_color: Keyword.get(attrs, :tint_color, 0)
     }
   end
 end

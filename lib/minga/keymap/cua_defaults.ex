@@ -14,17 +14,13 @@ defmodule Minga.Keymap.CUADefaults do
 
   alias Minga.Keymap.Bindings
 
-  # Modifier bitmask (used by interrupt_trie)
-  @ctrl 0x02
+  import Minga.Keymap.Sigil
 
-  # Common keys (still used by editing_trie and horizontal_nav_trie)
+  # Common keys (still used by horizontal_nav_trie)
   @arrow_left 57_350
   @arrow_right 57_351
   @ns_left 0xF702
   @ns_right 0xF703
-  @escape 27
-  @backspace 127
-  @tab 9
 
   @doc """
   Arrow key navigation bindings.
@@ -65,9 +61,9 @@ defmodule Minga.Keymap.CUADefaults do
   @spec editing_trie() :: Bindings.node_t()
   def editing_trie do
     Bindings.new()
-    |> Bindings.bind([{@escape, 0}], :escape, "Cancel / dismiss")
-    |> Bindings.bind([{@backspace, 0}], :delete_before, "Delete before cursor")
-    |> Bindings.bind([{@tab, 0}], :indent, "Indent / next field")
+    |> Bindings.bind(~k(ESC), :escape, "Cancel / dismiss")
+    |> Bindings.bind(~k(DEL), :delete_before, "Delete before cursor")
+    |> Bindings.bind(~k(TAB), :indent, "Indent / next field")
   end
 
   @doc """
@@ -91,6 +87,6 @@ defmodule Minga.Keymap.CUADefaults do
   @spec interrupt_trie() :: Bindings.node_t()
   def interrupt_trie do
     Bindings.new()
-    |> Bindings.bind([{?c, @ctrl}], :interrupt, "Interrupt / cancel")
+    |> Bindings.bind(~k(C-c), :interrupt, "Interrupt / cancel")
   end
 end

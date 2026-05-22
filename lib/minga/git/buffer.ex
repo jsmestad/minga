@@ -15,6 +15,7 @@ defmodule Minga.Git.Buffer do
 
   alias Minga.Core.Diff
   alias Minga.Git
+  alias Minga.Git.MergeConflict
 
   @typedoc "Internal state."
   @type state :: %{
@@ -23,6 +24,7 @@ defmodule Minga.Git.Buffer do
           base_lines: [String.t()],
           hunks: [Diff.hunk()],
           signs: %{non_neg_integer() => Diff.hunk_type()},
+          conflicts: [MergeConflict.Region.t()],
           branch: String.t() | nil
         }
 
@@ -68,6 +70,18 @@ defmodule Minga.Git.Buffer do
   @spec hunk_at(GenServer.server(), non_neg_integer()) :: Diff.hunk() | nil
   def hunk_at(server, line) when is_integer(line) do
     GenServer.call(server, {:hunk_at, line})
+  end
+
+  @doc "Returns parsed merge conflict regions for the buffer."
+  @spec conflicts(GenServer.server()) :: [MergeConflict.Region.t()]
+  def conflicts(server) do
+    GenServer.call(server, :conflicts)
+  end
+
+  @doc "Returns the parsed merge conflict count for the buffer."
+  @spec conflict_count(GenServer.server()) :: non_neg_integer()
+  def conflict_count(server) do
+    GenServer.call(server, :conflict_count)
   end
 
   @doc "Returns the git root path."
@@ -125,6 +139,7 @@ defmodule Minga.Git.Buffer do
 
     hunks = Diff.diff_lines(base_lines, current_lines)
     signs = Diff.signs_for_hunks(hunks)
+    conflicts = MergeConflict.parse_lines(current_lines)
 
     branch = read_branch(git_root)
 
@@ -134,6 +149,7 @@ defmodule Minga.Git.Buffer do
       base_lines: base_lines,
       hunks: hunks,
       signs: signs,
+      conflicts: conflicts,
       branch: branch
     }
 
@@ -151,6 +167,14 @@ defmodule Minga.Git.Buffer do
 
   def handle_call({:hunk_at, line}, _from, state) do
     {:reply, Diff.hunk_at_line(state.hunks, line), state}
+  end
+
+  def handle_call(:conflicts, _from, state) do
+    {:reply, state.conflicts, state}
+  end
+
+  def handle_call(:conflict_count, _from, state) do
+    {:reply, length(state.conflicts), state}
   end
 
   def handle_call(:summary, _from, state) do
@@ -175,7 +199,8 @@ defmodule Minga.Git.Buffer do
     current_lines = split_lines(content)
     hunks = Diff.diff_lines(state.base_lines, current_lines)
     signs = Diff.signs_for_hunks(hunks)
-    {:noreply, %{state | hunks: hunks, signs: signs}}
+    conflicts = MergeConflict.parse_lines(current_lines)
+    {:noreply, %{state | hunks: hunks, signs: signs, conflicts: conflicts}}
   end
 
   def handle_cast({:invalidate_base, content}, state) do
@@ -183,8 +208,18 @@ defmodule Minga.Git.Buffer do
     current_lines = split_lines(content)
     hunks = Diff.diff_lines(base_lines, current_lines)
     signs = Diff.signs_for_hunks(hunks)
+    conflicts = MergeConflict.parse_lines(current_lines)
     branch = read_branch(state.git_root)
-    {:noreply, %{state | base_lines: base_lines, hunks: hunks, signs: signs, branch: branch}}
+
+    {:noreply,
+     %{
+       state
+       | base_lines: base_lines,
+         hunks: hunks,
+         signs: signs,
+         conflicts: conflicts,
+         branch: branch
+     }}
   end
 
   # ── Private ────────────────────────────────────────────────────────────────

@@ -105,6 +105,83 @@ defmodule Minga.Core.DiffViewTest do
     end
   end
 
+  describe "build_side_by_side/3" do
+    test "aligns added lines with a blank filler in the left pane" do
+      result = DiffView.build_side_by_side("line1\nline3\n", "line1\nline2\nline3\n", 8)
+      lines = String.split(result.text, "\n")
+
+      assert Enum.any?(lines, &String.ends_with?(&1, "line2"))
+
+      added_meta = Enum.find(result.line_metadata, fn m -> m.right_type == :added end)
+      assert added_meta.left_type == :blank
+      assert added_meta.left_width == 8
+    end
+
+    test "aligns deleted lines with a blank filler in the right pane" do
+      result = DiffView.build_side_by_side("line1\nline2\nline3\n", "line1\nline3\n", 8)
+
+      removed_meta = Enum.find(result.line_metadata, fn m -> m.left_type == :removed end)
+      assert removed_meta.right_type == :blank
+    end
+
+    test "keeps paired word-level changes on their own panes" do
+      result = DiffView.build_side_by_side("hello world\n", "hello earth\n", 16)
+
+      meta =
+        Enum.find(result.line_metadata, fn m ->
+          m.left_type == :removed and m.right_type == :added
+        end)
+
+      assert [_ | _] = meta.left_word_changes
+      assert [_ | _] = meta.right_word_changes
+    end
+
+    test "preserves inserted line alignment inside uneven modified hunks" do
+      result =
+        DiffView.build_side_by_side("foo one\nbar two\n", "foo uno\nINSERTED\nbar dos\n", 12)
+
+      lines_with_meta = Enum.zip(String.split(result.text, "\n"), result.line_metadata)
+
+      assert Enum.any?(lines_with_meta, fn
+               {line, %{left_type: :blank, right_type: :added}} ->
+                 String.contains?(line, "INSERTED")
+
+               _ ->
+                 false
+             end)
+
+      assert Enum.any?(lines_with_meta, fn
+               {line, %{left_type: :removed, right_type: :added}} ->
+                 String.contains?(line, "bar two") and String.contains?(line, "bar dos")
+
+               _ ->
+                 false
+             end)
+    end
+
+    test "clips pane-local word ranges to the visible pane width" do
+      result =
+        DiffView.build_side_by_side(
+          "prefix unchanged oldtail\n",
+          "prefix unchanged newtail\n",
+          10
+        )
+
+      meta =
+        Enum.find(result.line_metadata, fn m ->
+          m.left_type == :removed and m.right_type == :added
+        end)
+
+      assert Enum.all?(meta.left_word_changes, fn {_start_col, end_col} ->
+               end_col <= meta.left_width
+             end)
+
+      assert Enum.all?(meta.right_word_changes, fn {_start_col, end_col} ->
+               end_col <= meta.left_width
+             end)
+    end
+  end
+
   describe "word_changes in metadata" do
     test "modified lines carry word_changes in metadata" do
       base = "line1\nhello world\nline3\n"

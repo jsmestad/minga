@@ -21,7 +21,7 @@ defmodule Minga.Keymap.Scope.Editor do
 
   alias Minga.Keymap.Bindings
 
-  @ctrl 0x02
+  import Minga.Keymap.Sigil
 
   # Groups included by this scope.
   @cua_groups [:cua_cmd_chords]
@@ -54,7 +54,7 @@ defmodule Minga.Keymap.Scope.Editor do
       groups: @cua_groups,
       then: fn trie ->
         trie
-        |> Bindings.bind([{?p, @ctrl}], :command_palette, "Command palette")
+        |> Bindings.bind(~k(C-p), :command_palette, "Command palette")
       end
     )
   end

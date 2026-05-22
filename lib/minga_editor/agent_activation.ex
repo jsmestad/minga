@@ -12,7 +12,6 @@ defmodule MingaEditor.AgentActivation do
   EditorState fields across workspace, agent, and windows.
   """
 
-  alias MingaAgent.RuntimeState
   alias MingaAgent.Session, as: AgentSession
   alias MingaEditor.Agent.UIState
   alias MingaEditor.State, as: EditorState
@@ -108,16 +107,17 @@ defmodule MingaEditor.AgentActivation do
   defp refresh_agent_cache(state, session) do
     case agent_snapshot(session) do
       nil ->
-        state
+        AgentAccess.update_agent(state, &AgentState.clear_active_tool_name/1)
 
       snapshot ->
         AgentAccess.update_agent(state, fn agent ->
-          %{
-            agent
-            | runtime: RuntimeState.set_status(agent.runtime, snapshot.status),
-              pending_approval: snapshot.pending_approval,
-              error: snapshot.error
-          }
+          AgentState.apply_session_snapshot(
+            agent,
+            snapshot.status,
+            snapshot.pending_approval,
+            snapshot.error,
+            Map.get(snapshot, :active_tool_name)
+          )
         end)
     end
   end

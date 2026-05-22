@@ -114,6 +114,24 @@ defmodule MingaEditor.Frontend.GUIMinibufferProtocolTest do
                "y/n/a/q (2 of 15)", 0::16, 0::16, 0::16>> = result
     end
 
+    test "branch delete confirm mode 9 encodes with no cursor" do
+      data = %MinibufferData{
+        visible: true,
+        mode: 9,
+        cursor_pos: 0xFFFF,
+        prompt: "Force delete branch feature? (y/n)",
+        input: "",
+        context: "",
+        selected_index: 0,
+        candidates: []
+      }
+
+      result = ProtocolGUI.encode_gui_minibuffer(data)
+
+      assert <<@op_gui_minibuffer, 1, 9, 0xFFFF::16, 34, "Force delete branch feature? (y/n)",
+               0::16, "", 0::16, "", 0::16, 0::16, 0::16>> = result
+    end
+
     test "match_score is clamped to 255" do
       data = %MinibufferData{
         visible: true,

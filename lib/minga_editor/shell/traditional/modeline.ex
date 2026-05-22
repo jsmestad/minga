@@ -37,6 +37,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
           :workspace_label => String.t(),
           :workspace_draft_count => non_neg_integer(),
           :workspace_conflict_count => non_neg_integer(),
+          :merge_conflict_count => non_neg_integer(),
           :filetype => atom(),
           :dirty_marker => String.t(),
           :cursor_line => non_neg_integer(),
@@ -46,6 +47,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
           :buf_count => non_neg_integer(),
           :macro_recording => {true, String.t()} | false,
           optional(:agent_status) => MingaEditor.State.Agent.status(),
+          optional(:active_tool_name) => String.t() | nil,
           optional(:agent_theme_colors) => MingaEditor.UI.Theme.Agent.t() | nil,
           optional(:mode_override) => String.t() | nil,
           optional(:lsp_status) => lsp_status(),
@@ -94,6 +96,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     percent: 40,
     draft: 42,
     conflict: 43,
+    merge_conflict: 44,
     indent: 35,
     selection: 75
   }
@@ -695,6 +698,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   defp render_builtin(:percent, ctx), do: render_percent(ctx)
   defp render_builtin(:draft, ctx), do: render_draft(ctx)
   defp render_builtin(:conflict, ctx), do: render_conflict(ctx)
+  defp render_builtin(:merge_conflict, ctx), do: render_merge_conflict(ctx)
   defp render_builtin(:indent, ctx), do: render_indent(ctx)
   defp render_builtin(:selection, _ctx), do: []
   defp render_builtin(_name, _ctx), do: []
@@ -760,6 +764,11 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   @spec render_conflict(context()) :: [render_segment()]
   defp render_conflict(ctx) do
     render_count_segment(ctx, :workspace_conflict_count, "C", :workspace_list)
+  end
+
+  @spec render_merge_conflict(context()) :: [render_segment()]
+  defp render_merge_conflict(ctx) do
+    render_count_segment(ctx, :merge_conflict_count, "X", :next_merge_conflict)
   end
 
   @spec render_count_segment(context(), atom(), String.t(), atom()) :: [render_segment()]
@@ -833,17 +842,35 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   defp build_agent_segments(data, bar_bg) do
     status = Map.get(data, :agent_status)
     colors = Map.get(data, :agent_theme_colors)
+    active_tool_name = Map.get(data, :active_tool_name)
 
     case {status, colors} do
-      {nil, _colors} -> []
-      {:idle, c} -> [{" ◯ ", c.status_idle, bar_bg, [], nil}]
-      {:plan, c} -> [{" PLAN ", c.status_thinking, bar_bg, [bold: true], nil}]
-      {:thinking, c} -> [{" ⟳ ", c.status_thinking, bar_bg, [bold: true], nil}]
-      {:tool_executing, c} -> [{" ⚡ ", c.status_tool, bar_bg, [bold: true], nil}]
-      {:error, c} -> [{" ✗ ", c.status_error, bar_bg, [bold: true], nil}]
-      _other -> []
+      {nil, _colors} ->
+        []
+
+      {:idle, c} ->
+        [{" ◯ Idle ", c.status_idle, bar_bg, [], nil}]
+
+      {:plan, c} ->
+        [{" PLAN ", c.status_thinking, bar_bg, [bold: true], nil}]
+
+      {:thinking, c} ->
+        [{" ⟳ Thinking ", c.status_thinking, bar_bg, [bold: true], nil}]
+
+      {:tool_executing, c} ->
+        [{agent_tool_label(active_tool_name), c.status_tool, bar_bg, [bold: true], nil}]
+
+      {:error, c} ->
+        [{" ✗ Error ", c.status_error, bar_bg, [bold: true], nil}]
+
+      _other ->
+        []
     end
   end
+
+  @spec agent_tool_label(String.t() | nil) :: String.t()
+  defp agent_tool_label(name) when is_binary(name) and name != "", do: " ⚡ Running #{name} "
+  defp agent_tool_label(_name), do: " ⚡ Running "
 
   @spec build_background_agent_segments(modeline_data(), non_neg_integer(), Theme.Modeline.t()) ::
           [render_segment()]
@@ -936,6 +963,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   defp mode_badge(:extension_confirm, _state), do: "UPDATE"
   defp mode_badge(:tool_confirm, _state), do: "INSTALL"
   defp mode_badge(:delete_confirm, _state), do: "DELETE"
+  defp mode_badge(:branch_delete_confirm, _state), do: "BRANCH DEL"
 
   @spec filetype_label(atom()) :: String.t()
   defp filetype_label(filetype) do

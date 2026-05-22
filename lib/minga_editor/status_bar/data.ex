@@ -22,6 +22,7 @@ defmodule MingaEditor.StatusBar.Data do
   alias MingaEditor.Window.Content
   alias Minga.Config.Options
   alias Minga.Git
+  alias Minga.Git.MergeConflict
   alias Minga.LSP.SyncServer
   alias MingaEditor.Shell.Traditional.Modeline
   alias MingaEditor.UI.Theme
@@ -69,13 +70,15 @@ defmodule MingaEditor.StatusBar.Data do
           buf_count: non_neg_integer(),
           macro_recording: {true, String.t()} | false,
           agent_status: AgentState.status(),
+          active_tool_name: String.t() | nil,
           agent_theme_colors: Theme.Agent.t() | nil,
           background_subagent_count: non_neg_integer(),
           active_background_subagent_label: String.t() | nil,
           status_msg: String.t() | nil,
           workspace_label: String.t(),
           workspace_draft_count: non_neg_integer(),
-          workspace_conflict_count: non_neg_integer()
+          workspace_conflict_count: non_neg_integer(),
+          merge_conflict_count: non_neg_integer()
         }
 
   @typedoc "Data for a focused agent chat window. Includes background buffer context so the status bar layout stays stable across mode switches."
@@ -88,6 +91,7 @@ defmodule MingaEditor.StatusBar.Data do
           message_count: non_neg_integer(),
           macro_recording: {true, String.t()} | false,
           agent_status: AgentState.status(),
+          active_tool_name: String.t() | nil,
           agent_theme_colors: Theme.Agent.t() | nil,
           # Background buffer context (same fields as buffer_data)
           cursor_line: non_neg_integer(),
@@ -113,7 +117,8 @@ defmodule MingaEditor.StatusBar.Data do
           status_msg: String.t() | nil,
           workspace_label: String.t(),
           workspace_draft_count: non_neg_integer(),
-          workspace_conflict_count: non_neg_integer()
+          workspace_conflict_count: non_neg_integer(),
+          merge_conflict_count: non_neg_integer()
         }
 
   @typedoc "Tagged union: buffer or agent variant."
@@ -199,13 +204,15 @@ defmodule MingaEditor.StatusBar.Data do
       buf_count: length(state.workspace.buffers.list),
       macro_recording: Minga.Editing.macro_recording_status(state),
       agent_status: agent.runtime.status,
+      active_tool_name: agent.runtime.active_tool_name,
       agent_theme_colors: if(agent.runtime.status, do: Theme.agent_theme(state.theme), else: nil),
       background_subagent_count: background.count,
       active_background_subagent_label: background.label,
       status_msg: state.shell_state.status_msg,
       workspace_label: workspace.label,
       workspace_draft_count: workspace.draft_count,
-      workspace_conflict_count: workspace.conflict_count
+      workspace_conflict_count: workspace.conflict_count,
+      merge_conflict_count: merge_conflict_count(buf)
     }
   end
 
@@ -339,6 +346,7 @@ defmodule MingaEditor.StatusBar.Data do
       message_count: message_count,
       macro_recording: Minga.Editing.macro_recording_status(state),
       agent_status: agent.runtime.status,
+      active_tool_name: agent.runtime.active_tool_name,
       agent_theme_colors: Theme.agent_theme(state.theme),
       # Background buffer context
       cursor_line: line,
@@ -363,7 +371,8 @@ defmodule MingaEditor.StatusBar.Data do
       status_msg: state.shell_state.status_msg,
       workspace_label: workspace.label,
       workspace_draft_count: workspace.draft_count,
-      workspace_conflict_count: workspace.conflict_count
+      workspace_conflict_count: workspace.conflict_count,
+      merge_conflict_count: merge_conflict_count(buf)
     }
   end
 
@@ -395,6 +404,18 @@ defmodule MingaEditor.StatusBar.Data do
           :exit, _ -> {nil, nil}
         end
     end
+  end
+
+  @spec merge_conflict_count(pid() | nil) :: non_neg_integer()
+  defp merge_conflict_count(nil), do: 0
+
+  defp merge_conflict_count(buf) when is_pid(buf) do
+    case Git.tracking_pid(buf) do
+      nil -> buf |> Buffer.content() |> MergeConflict.parse() |> length()
+      git_pid -> Git.conflict_count(git_pid)
+    end
+  catch
+    :exit, _ -> 0
   end
 
   @doc "Returns the diagnostic count 4-tuple for the active buffer, or nil."
@@ -497,6 +518,7 @@ defmodule MingaEditor.StatusBar.Data do
       buf_count: d.buf_count,
       macro_recording: d.macro_recording,
       agent_status: d.agent_status,
+      active_tool_name: Map.get(d, :active_tool_name),
       agent_theme_colors: d.agent_theme_colors,
       lsp_status: d.lsp_status,
       parser_status: d.parser_status,
@@ -510,7 +532,8 @@ defmodule MingaEditor.StatusBar.Data do
       active_background_subagent_label: d.active_background_subagent_label,
       workspace_label: d.workspace_label,
       workspace_draft_count: d.workspace_draft_count,
-      workspace_conflict_count: d.workspace_conflict_count
+      workspace_conflict_count: d.workspace_conflict_count,
+      merge_conflict_count: d.merge_conflict_count
     }
   end
 

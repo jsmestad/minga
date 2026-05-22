@@ -14,6 +14,7 @@ defmodule Minga.Mode.PropertiesTest do
   alias Minga.Mode
 
   alias Minga.Mode.{
+    BranchDeleteConfirmState,
     CommandState,
     DeleteConfirmState,
     EvalState,
@@ -47,7 +48,8 @@ defmodule Minga.Mode.PropertiesTest do
     :substitute_confirm,
     :extension_confirm,
     :tool_confirm,
-    :delete_confirm
+    :delete_confirm,
+    :branch_delete_confirm
   ]
 
   # Modes Mode.process/3 actually dispatches. :visual_line and :visual_block
@@ -67,7 +69,8 @@ defmodule Minga.Mode.PropertiesTest do
     :substitute_confirm,
     :extension_confirm,
     :tool_confirm,
-    :delete_confirm
+    :delete_confirm,
+    :branch_delete_confirm
   ]
 
   defp base_state do
@@ -107,6 +110,10 @@ defmodule Minga.Mode.PropertiesTest do
 
   defp default_mode_state(:delete_confirm) do
     %DeleteConfirmState{path: "/tmp/x", name: "x", dir?: false}
+  end
+
+  defp default_mode_state(:branch_delete_confirm) do
+    %BranchDeleteConfirmState{git_root: "/tmp/repo", name: "feature"}
   end
 
   # Codepoints span ASCII (0..127) so the generator hits printable characters

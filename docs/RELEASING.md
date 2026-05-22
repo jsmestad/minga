@@ -26,11 +26,12 @@ The built-in `GITHUB_TOKEN` handles creating the GitHub Release and updating `CH
    git tag v0.1.0
    git push origin v0.1.0
    ```
-4. The release workflow validates the tag matches `mix.exs`, runs CI, builds binaries for all four platforms, smoke-tests each one, creates a GitHub Release with checksums, updates the Homebrew tap, and prepends the changelog.
+4. The release workflow validates the tag targets the version in `mix.exs`, runs CI, builds binaries for all four platforms, smoke-tests each one, creates a GitHub Release with checksums, updates the Homebrew tap, and prepends the changelog.
 
 ### Pre-releases
 
-Tags with a hyphen (e.g., `v0.1.0-rc.1`) are treated as pre-releases:
+Tags with a hyphen (e.g., `v0.1.0-alpha.1` or `v0.1.0-rc.1`) are treated as pre-releases:
+- The tag's base version must match `mix.exs`. For example, `mix.exs` can stay at `0.1.0` while you cut `v0.1.0-alpha.1` and `v0.1.0-rc.1`.
 - The GitHub Release is marked as a pre-release.
 - The Homebrew tap is **not** updated (only stable releases update the formula and cask).
 

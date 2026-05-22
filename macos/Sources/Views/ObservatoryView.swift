@@ -36,13 +36,13 @@ struct ObservatoryView: View {
                 Spacer()
                 Text("\(state.processCount)")
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(theme.treeInactiveFg)
+                    .foregroundStyle(theme.treeFg.opacity(0.55))
             }
 
             HStack(spacing: 8) {
                 Label(formatBytes(state.totalMemory), systemImage: "memorychip")
                     .font(.caption)
-                    .foregroundStyle(theme.treeInactiveFg)
+                    .foregroundStyle(theme.treeFg.opacity(0.55))
                 Spacer()
                 Picker("View", selection: $displayMode) {
                     ForEach(ObservatoryDisplayMode.allCases) { mode in
@@ -76,7 +76,7 @@ struct ObservatoryView: View {
                     Image(systemName: disclosureIcon(node))
                         .font(.caption)
                         .frame(width: 12)
-                        .foregroundStyle(theme.treeInactiveFg)
+                        .foregroundStyle(theme.treeFg.opacity(0.55))
                 }
                 .buttonStyle(.plain)
             } else {
@@ -101,14 +101,14 @@ struct ObservatoryView: View {
                 Text("\(node.processClass.label) · \(node.pid)")
                     .font(.caption2.monospaced())
                     .lineLimit(1)
-                    .foregroundStyle(theme.treeInactiveFg)
+                    .foregroundStyle(theme.treeFg.opacity(0.55))
             }
 
             Spacer(minLength: 4)
 
             Text(formatBytes(UInt64(node.memory)))
                 .font(.caption2.monospacedDigit())
-                .foregroundStyle(theme.treeInactiveFg)
+                .foregroundStyle(theme.treeFg.opacity(0.55))
                 .padding(.horizontal, 5)
                 .padding(.vertical, 2)
                 .background(theme.treeSelectionBg.opacity(0.35), in: Capsule())
@@ -144,7 +144,7 @@ struct ObservatoryView: View {
         case .agentSession: return .purple
         case .lsp: return .indigo
         case .service: return .secondary
-        case .worker: return theme.treeInactiveFg
+        case .worker: return theme.treeFg.opacity(0.55)
         }
     }
 

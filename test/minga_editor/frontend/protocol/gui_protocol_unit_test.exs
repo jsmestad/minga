@@ -44,12 +44,49 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       <<0x71, _::8, 2::8, rest::binary>> = binary
 
       <<_flags1::8, _id1::32, gid1::16, icon1_len::8, _icon1::binary-size(icon1_len),
-        label1_len::16, _label1::binary-size(label1_len), rest2::binary>> = rest
+        label1_len::16, _label1::binary-size(label1_len), _tint1::32, rest2::binary>> = rest
 
       <<_flags2::8, _id2::32, gid2::16, _rest3::binary>> = rest2
 
       assert gid1 == 5
       assert gid2 == 5
+    end
+
+    test "tab entry includes pinned flag and tint color bytes" do
+      tab =
+        TabSummary.new(
+          id: 1,
+          workspace_id: 3,
+          kind: :file,
+          label: "pinned.ex",
+          path: "/tmp/pinned.ex",
+          icon: "",
+          pinned?: true,
+          tint_color: 0x12_34_56
+        )
+
+      chrome_state = chrome_state(active_workspace_id: 3, active_tab_id: 1, visible_tabs: [tab])
+
+      <<0x71, 0::8, 1::8, flags::8, 1::32, 3::16, icon_len::8, _icon::binary-size(icon_len),
+        label_len::16, label::binary-size(label_len), tint::32>> =
+        ProtocolGUI.encode_gui_tab_bar(chrome_state)
+
+      assert Bitwise.band(flags, 0x80) == 0x80
+      assert label == "pinned.ex"
+      assert tint == 0x12_34_56
+    end
+
+    test "raw tab bar entry includes pinned flag and zero tint color" do
+      tab = %Tab{id: 1, kind: :file, label: "pinned.ex", pinned?: true}
+      tb = %TabBar{tabs: [tab], active_id: 1, next_id: 2}
+
+      <<0x71, 0::8, 1::8, flags::8, 1::32, 0::16, icon_len::8, _icon::binary-size(icon_len),
+        label_len::16, label::binary-size(label_len), tint::32>> =
+        ProtocolGUI.encode_gui_tab_bar(tb)
+
+      assert Bitwise.band(flags, 0x80) == 0x80
+      assert label == "pinned.ex"
+      assert tint == 0
     end
 
     test "uses 255 active index when the active tab is hidden from visible tabs" do
@@ -81,7 +118,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       }
 
       <<0x71, active_index::8, tab_count::8, flags::8, _id::32, _workspace::16, icon_len::8,
-        _icon::binary-size(icon_len), label_len::16, _label::binary-size(label_len)>> =
+        _icon::binary-size(icon_len), label_len::16, _label::binary-size(label_len), _tint::32>> =
         ProtocolGUI.encode_gui_tab_bar(chrome_state)
 
       assert active_index == 255
@@ -119,7 +156,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       <<0x98, payload_len::16, payload::binary-size(payload_len)>> =
         ProtocolGUI.encode_gui_workspaces(chrome_state)
 
-      <<1::8, 0::16, 0::8, _flags::8, 2::8, rest::binary>> = payload
+      <<2::8, 0::16, 0::8, _flags::8, 2::8, rest::binary>> = payload
 
       <<0::16, 0::8, _manual_status::8, _manual_flags::16, _manual_r::8, _manual_g::8,
         _manual_b::8, _manual_tab_count::16, _manual_drafts::16, _manual_conflicts::16,
@@ -159,7 +196,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       <<0x98, payload_len::16, payload::binary-size(payload_len)>> =
         ProtocolGUI.encode_gui_workspaces(chrome_state)
 
-      <<1::8, 1::16, 1::8, 1::8, 1::8, rest::binary>> = payload
+      <<2::8, 1::16, 1::8, 1::8, 1::8, rest::binary>> = payload
 
       <<1::16, 1::8, 2::8, flags::16, 0xC6::8, 0x78::8, 0xDD::8, 3::16, 4::16, 2::16, 1::16,
         label_len::8, label::binary-size(label_len), icon_len::8, icon::binary-size(icon_len),
@@ -191,7 +228,8 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
 
       <<_version::8, _active::16, _mode::8, _flags::8, 0::8, 1::16, 42::32, 1::16, 0::8,
         tab_flags::16, path_hash::32, icon_len::8, icon::binary-size(icon_len), label_len::16,
-        label::binary-size(label_len), path_len::16, path::binary-size(path_len)>> = payload
+        label::binary-size(label_len), path_len::16, path::binary-size(path_len), tint::32>> =
+        payload
 
       assert Bitwise.band(tab_flags, 0x01) == 0x01
       assert Bitwise.band(tab_flags, 0x02) == 0x02
@@ -200,6 +238,38 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       assert icon == ""
       assert label == "agent.ex"
       assert path == "/tmp/agent.ex"
+      assert tint == 0
+    end
+
+    test "encodes pinned visible tabs with tint color metadata" do
+      tab =
+        TabSummary.new(
+          id: 7,
+          workspace_id: 1,
+          kind: :file,
+          label: "pinned.ex",
+          path: "/tmp/pinned.ex",
+          icon: "",
+          pinned?: true,
+          tint_color: 0x123456
+        )
+
+      chrome_state = chrome_state(active_workspace_id: 1, workspaces: [], visible_tabs: [tab])
+
+      <<0x98, payload_len::16, payload::binary-size(payload_len)>> =
+        ProtocolGUI.encode_gui_workspaces(chrome_state)
+
+      <<_version::8, _active::16, _mode::8, _flags::8, 0::8, 1::16, 7::32, 1::16, 0::8,
+        tab_flags::16, _path_hash::32, icon_len::8, icon::binary-size(icon_len), label_len::16,
+        label::binary-size(label_len), path_len::16, path::binary-size(path_len), tint::32>> =
+        payload
+
+      assert Bitwise.band(tab_flags, 0x20) == 0x20
+      assert icon == ""
+      assert label == "pinned.ex"
+      assert path == "/tmp/pinned.ex"
+      assert tint == 0x123456
+      assert payload_len > 0
     end
 
     test "caps visible tabs to the 16-bit payload budget" do
@@ -309,11 +379,11 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       pid = "#PID<0.123.0>"
 
       assert {:ok, {:observatory_inspect, pid}} ==
-               ProtocolGUI.decode_gui_action(0x48, <<byte_size(pid)::16, pid::binary>>)
+               ProtocolGUI.decode_gui_action(0x4D, <<byte_size(pid)::16, pid::binary>>)
     end
 
     test "rejects malformed selected process PID payload" do
-      assert :error == ProtocolGUI.decode_gui_action(0x48, <<0, 20, "short">>)
+      assert :error == ProtocolGUI.decode_gui_action(0x4D, <<0, 20, "short">>)
     end
   end
 
@@ -325,6 +395,18 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
 
     test "decodes tab copy path" do
       assert {:ok, {:tab_copy_path, 42}} == ProtocolGUI.decode_gui_action(0x3E, <<42::32>>)
+    end
+
+    test "decodes tab reorder" do
+      assert {:ok, {:tab_reorder, 42, 3}} ==
+               ProtocolGUI.decode_gui_action(0x48, <<42::32, 3::16>>)
+    end
+
+    test "decodes id-scoped tab context actions" do
+      assert {:ok, {:tab_pin, 42}} == ProtocolGUI.decode_gui_action(0x49, <<42::32>>)
+      assert {:ok, {:tab_unpin, 42}} == ProtocolGUI.decode_gui_action(0x4A, <<42::32>>)
+      assert {:ok, {:tab_move_left, 42}} == ProtocolGUI.decode_gui_action(0x4B, <<42::32>>)
+      assert {:ok, {:tab_move_right, 42}} == ProtocolGUI.decode_gui_action(0x4C, <<42::32>>)
     end
 
     test "decodes hover open action" do
@@ -564,12 +646,28 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       binary = ProtocolGUI.encode_gui_status_bar({:buffer, status_data()})
       sections = status_sections(binary)
 
-      <<agent_status::8, count::16, label_len::16, label::binary-size(label_len)>> =
-        Map.fetch!(sections, 0x09)
+      <<agent_status::8, count::16, label_len::16, label::binary-size(label_len), tool_len::8,
+        tool::binary-size(tool_len)>> = Map.fetch!(sections, 0x09)
 
       assert agent_status == 1
       assert count == 2
       assert label == "session-3: tests"
+      assert tool == "read_file"
+    end
+
+    test "encodes an empty active tool name when the field is nil" do
+      data = Map.put(status_data(), :active_tool_name, nil)
+      binary = ProtocolGUI.encode_gui_status_bar({:buffer, data})
+      sections = status_sections(binary)
+
+      <<agent_status::8, count::16, label_len::16, label::binary-size(label_len), tool_len::8,
+        tool::binary-size(tool_len)>> = Map.fetch!(sections, 0x09)
+
+      assert agent_status == 1
+      assert count == 2
+      assert label == "session-3: tests"
+      assert tool == ""
+      assert tool_len == 0
     end
 
     test "omits modeline segment section when no GUI modeline data is attached" do
@@ -746,19 +844,46 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
         Map.merge(status_data(), %{
           model_name: "Agent",
           session_status: :thinking,
-          message_count: 4
+          message_count: 4,
+          active_tool_name: "shell"
         })
 
       binary = ProtocolGUI.encode_gui_status_bar({:agent, data})
       sections = status_sections(binary)
 
       <<model_len::8, _model::binary-size(model_len), 4::32, session_status::8, agent_status::8,
-        count::16, label_len::16, label::binary-size(label_len)>> = Map.fetch!(sections, 0x09)
+        count::16, label_len::16, label::binary-size(label_len), tool_len::8,
+        tool::binary-size(tool_len)>> = Map.fetch!(sections, 0x09)
 
       assert session_status == 1
       assert agent_status == 1
       assert count == 2
       assert label == "session-3: tests"
+      assert tool == "shell"
+    end
+
+    test "encodes an empty active tool name in the agent variant when nil" do
+      data =
+        Map.merge(status_data(), %{
+          model_name: "Agent",
+          session_status: :thinking,
+          message_count: 4,
+          active_tool_name: nil
+        })
+
+      binary = ProtocolGUI.encode_gui_status_bar({:agent, data})
+      sections = status_sections(binary)
+
+      <<model_len::8, _model::binary-size(model_len), 4::32, session_status::8, agent_status::8,
+        count::16, label_len::16, label::binary-size(label_len), tool_len::8,
+        tool::binary-size(tool_len)>> = Map.fetch!(sections, 0x09)
+
+      assert session_status == 1
+      assert agent_status == 1
+      assert count == 2
+      assert label == "session-3: tests"
+      assert tool == ""
+      assert tool_len == 0
     end
   end
 
@@ -785,6 +910,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       agent_theme_colors: nil,
       background_subagent_count: 2,
       active_background_subagent_label: "session-3: tests",
+      active_tool_name: "read_file",
       status_msg: nil
     }
   end
@@ -808,7 +934,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
         }
       }
 
-      <<0x9A, payload_len::16, payload::binary-size(payload_len)>> =
+      <<0x9A, payload_len::32, payload::binary-size(payload_len)>> =
         ProtocolGUI.encode_gui_observatory(%{visible: true, tree: tree, samples: []})
 
       assert payload_len == byte_size(payload)
@@ -822,6 +948,176 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
 
       assert name == "Minga.Supervisor"
     end
+
+    test "falls back to current function when registered name is nil" do
+      tree = %TreeNode{
+        pid: self(),
+        depth: 0,
+        children: [],
+        snapshot: %ProcessSnapshot{
+          memory: 1,
+          message_queue_len: 0,
+          reductions: 2,
+          registered_name: nil,
+          current_function: {Minga.Buffer, :content, 1},
+          parent_pid: nil,
+          child_type: :worker,
+          process_class: :worker
+        }
+      }
+
+      <<0x9A, payload_len::32, payload::binary-size(payload_len)>> =
+        ProtocolGUI.encode_gui_observatory(%{visible: true, tree: tree, samples: []})
+
+      assert payload_len == byte_size(payload)
+      <<0x01, 3::16, 1::8, 1::16, rest::binary>> = payload
+
+      <<0x02, node_section_len::16, node_section::binary-size(node_section_len), _::binary>> =
+        rest
+
+      <<pid_len::8, _pid::binary-size(pid_len), 0::8, name_len::16, name::binary-size(name_len),
+        _::binary>> = node_section
+
+      assert name == "Minga.Buffer.content/1"
+    end
+
+    test "falls back to unnamed when registered name and current function are nil" do
+      tree = %TreeNode{
+        pid: self(),
+        depth: 0,
+        children: [],
+        snapshot: %ProcessSnapshot{
+          memory: 1,
+          message_queue_len: 0,
+          reductions: 2,
+          registered_name: nil,
+          current_function: nil,
+          parent_pid: nil,
+          child_type: :worker,
+          process_class: :worker
+        }
+      }
+
+      <<0x9A, payload_len::32, payload::binary-size(payload_len)>> =
+        ProtocolGUI.encode_gui_observatory(%{visible: true, tree: tree, samples: []})
+
+      assert payload_len == byte_size(payload)
+      <<0x01, 3::16, 1::8, 1::16, rest::binary>> = payload
+
+      <<0x02, node_section_len::16, node_section::binary-size(node_section_len), _::binary>> =
+        rest
+
+      <<pid_len::8, _pid::binary-size(pid_len), 0::8, name_len::16, name::binary-size(name_len),
+        _::binary>> = node_section
+
+      assert name == "unnamed"
+      refute name == "nil"
+    end
+
+    test "chunks large node and sparkline streams into repeated sections below the 16-bit section limit" do
+      root_pid = :erlang.list_to_pid(~c"<0.100.0>")
+      child_count = 1_800
+
+      children =
+        Enum.map(1..child_count, fn index ->
+          child_pid = :erlang.list_to_pid(~c"<0.#{index + 100}.0>")
+
+          %TreeNode{
+            pid: child_pid,
+            depth: 1,
+            children: [],
+            snapshot: %ProcessSnapshot{
+              memory: index,
+              message_queue_len: rem(index, 20),
+              reductions: index * 2,
+              registered_name: nil,
+              current_function: {Minga.Buffer, :content, 1},
+              parent_pid: root_pid,
+              child_type: :worker,
+              process_class: :worker
+            }
+          }
+        end)
+
+      tree = %TreeNode{
+        pid: root_pid,
+        depth: 0,
+        children: children,
+        snapshot: %ProcessSnapshot{
+          memory: 1,
+          message_queue_len: 0,
+          reductions: 2,
+          registered_name: Minga.Supervisor,
+          current_function: nil,
+          parent_pid: nil,
+          child_type: :supervisor,
+          process_class: :supervisor
+        }
+      }
+
+      samples = List.duplicate(%{processes: %{}}, 30)
+
+      <<0x9A, payload_len::32, payload::binary-size(payload_len)>> =
+        ProtocolGUI.encode_gui_observatory(%{visible: true, tree: tree, samples: samples})
+
+      assert payload_len == byte_size(payload)
+      assert payload_len > 65_535
+
+      sections = observatory_sections(payload)
+      node_sections = sections_by_id(sections, 0x02)
+      sparkline_sections = sections_by_id(sections, 0x03)
+
+      assert length(node_sections) > 1
+      assert length(sparkline_sections) > 1
+      assert Enum.all?(node_sections, &(byte_size(&1) < 65_535))
+      assert Enum.all?(sparkline_sections, &(byte_size(&1) < 65_535))
+
+      node_stream = IO.iodata_to_binary(node_sections)
+      sparkline_stream = IO.iodata_to_binary(sparkline_sections)
+
+      assert byte_size(node_stream) > 65_535
+      assert byte_size(sparkline_stream) > 65_535
+      assert count_observatory_nodes(node_stream, 0) == child_count + 1
+      assert count_observatory_sparklines(sparkline_stream, 0) == child_count + 1
+    end
+  end
+
+  defp observatory_sections(payload), do: parse_observatory_sections(payload, [])
+
+  defp parse_observatory_sections("", acc), do: Enum.reverse(acc)
+
+  defp parse_observatory_sections(
+         <<id::8, len::16, section::binary-size(len), rest::binary>>,
+         acc
+       ) do
+    parse_observatory_sections(rest, [{id, section} | acc])
+  end
+
+  defp sections_by_id(sections, id) do
+    sections
+    |> Enum.filter(fn {section_id, _section} -> section_id == id end)
+    |> Enum.map(fn {_section_id, section} -> section end)
+  end
+
+  defp count_observatory_nodes("", count), do: count
+
+  defp count_observatory_nodes(
+         <<pid_len::8, _pid::binary-size(pid_len), parent_len::8,
+           _parent::binary-size(parent_len), name_len::16, _name::binary-size(name_len),
+           _class::8, _depth::8, _memory::32, _queue::16, _reductions::32, rest::binary>>,
+         count
+       ) do
+    count_observatory_nodes(rest, count + 1)
+  end
+
+  defp count_observatory_sparklines("", count), do: count
+
+  defp count_observatory_sparklines(
+         <<pid_len::8, _pid::binary-size(pid_len), sample_count::8,
+           _samples::binary-size(sample_count * 2), rest::binary>>,
+         count
+       ) do
+    count_observatory_sparklines(rest, count + 1)
   end
 
   defp status_sections(<<0x76, count::8, rest::binary>>) do

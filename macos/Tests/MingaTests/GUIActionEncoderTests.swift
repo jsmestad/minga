@@ -34,6 +34,23 @@ struct GUIActionEncoderTests {
         #expect(spy.guiActions == [.closeTab(id: 99)])
     }
 
+    @Test("tab context menu actions record tab IDs")
+    func tabContextMenuActions() {
+        let spy = SpyEncoder()
+        let encoder: InputEncoder = spy
+        encoder.sendTabPin(id: 7)
+        encoder.sendTabUnpin(id: 8)
+        encoder.sendTabMoveLeft(id: 9)
+        encoder.sendTabMoveRight(id: 10)
+
+        #expect(spy.guiActions == [
+            .tabPin(id: 7),
+            .tabUnpin(id: 8),
+            .tabMoveLeft(id: 9),
+            .tabMoveRight(id: 10)
+        ])
+    }
+
     @Test("sendNewTab records action")
     func newTab() {
         let spy = SpyEncoder()

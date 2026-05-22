@@ -97,6 +97,19 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
       refute String.contains?(text, "unique-bg-label")
     end
 
+    test "renders active file merge conflict count when configured" do
+      with_options(fn options ->
+        Options.set(options, :modeline_right_segments, [:merge_conflict])
+
+        data = Map.put(@base_data, :merge_conflict_count, 2)
+        {commands, regions} = Modeline.render(0, 120, data)
+        text = Enum.map_join(commands, fn {_row, _col, segment, _opts} -> segment end)
+
+        assert String.contains?(text, "X2")
+        assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :next_merge_conflict end)
+      end)
+    end
+
     test "always renders workspace identity and review counters when configured" do
       with_options(fn options ->
         Options.set(options, :modeline_left_segments, [:mode, :workspace, :filename])
@@ -135,15 +148,32 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
       assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :filetype_menu end)
     end
 
-    test "agent plan mode indicator shows explicit PLAN text" do
+    test "agent status indicators show text labels" do
       theme = MingaEditor.UI.Theme.get!(:doom_one)
       agent_colors = MingaEditor.UI.Theme.agent_theme(theme)
-      data = Map.merge(@base_data, %{agent_status: :plan, agent_theme_colors: agent_colors})
-      {commands, _regions} = Modeline.render(0, 120, data, theme)
 
-      combined = Enum.map_join(commands, fn {_row, _col, text, _opts} -> text end)
-      assert String.contains?(combined, "NORMAL")
-      assert String.contains?(combined, "PLAN")
+      cases = [
+        {%{agent_status: :idle}, "Idle", []},
+        {%{agent_status: :plan}, "PLAN", []},
+        {%{agent_status: :thinking}, "Thinking", []},
+        {%{agent_status: :tool_executing, active_tool_name: "read_file"}, "Running read_file",
+         []},
+        {%{agent_status: :tool_executing}, "Running", ["Running read_file"]},
+        {%{agent_status: :error}, "Error", []}
+      ]
+
+      for {overrides, expected, unexpected} <- cases do
+        data = Map.merge(@base_data, Map.put(overrides, :agent_theme_colors, agent_colors))
+        {commands, _regions} = Modeline.render(0, 120, data, theme)
+
+        combined = combined_text(commands)
+        assert String.contains?(combined, "NORMAL")
+        assert String.contains?(combined, expected)
+
+        for absent <- unexpected do
+          refute String.contains?(combined, absent)
+        end
+      end
     end
 
     test "LSP indicator reflects status and click target" do

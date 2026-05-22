@@ -21,8 +21,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   alias MingaEditor.Layout
   alias MingaEditor.Agent.View.PromptRenderer
   alias MingaEditor.Agent.ViewContext
-  alias MingaEditor.InlineAsk.Render, as: InlineAskRender
-  alias MingaEditor.InlineEdit.Render, as: InlineEditRender
+  alias MingaEditor.BufferDecorations
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.Renderer.SearchHighlight
   alias MingaEditor.RenderPipeline.AgentChatPrefetch
@@ -747,10 +746,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
 
   @spec fetch_decorations(term(), pid()) :: Decorations.t()
   defp fetch_decorations(state, buf) do
-    buf
-    |> Buffer.decorations()
-    |> InlineAskRender.merge_decorations(state, buf)
-    |> InlineEditRender.merge_decorations(state, buf)
+    BufferDecorations.compose(state, buf)
   catch
     :exit, _ -> Decorations.new()
   end

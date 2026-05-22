@@ -66,7 +66,9 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "Minga.Mode",
     "Minga.Command.Parser",
     "Minga.Keymap.Bindings",
+    "Minga.Keymap.KeyParser",
     "Minga.Keymap.NormalPrefixes",
+    "Minga.Keymap.Sigil",
     # Pure data struct under the UI.Picker blanket; must be accessible from Layer 1.
     "MingaEditor.UI.Picker.Item"
   ]
@@ -100,7 +102,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "MingaEditor.Agent.Events",
     "MingaEditor.Agent.SlashCommand",
     "MingaEditor.Agent.DiffReview",
-    "MingaEditor.Agent.DiffRenderer",
+    "MingaEditor.Agent.DiffRenderer"
   ]
 
   # Allowed cross-layer references for structural dispatch.
@@ -114,7 +116,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "MingaEditor.Frontend.Protocol" => ["MingaEditor.Frontend.Protocol.GUI"],
     # Frontend facade calls Protocol.GUI for GUI-specific config encoding
     # (line spacing, etc.). Same structural dispatch pattern.
-    "MingaEditor.Frontend" => ["MingaEditor.Frontend.Protocol.GUI"],
+    "MingaEditor.Frontend" => ["MingaEditor.Frontend.Protocol.GUI"]
     # All pre-existing cross-layer violations from #1368 have been resolved
     # in Wave 6 Track B. Modules were moved to their correct layers:
     # - Devicon → Minga.Language.Devicon
@@ -166,7 +168,14 @@ defmodule Minga.Credo.DependencyDirectionCheck do
         target_layer = layer_for_module(ref_name)
 
         check_violation(
-          ast, issues, source_layer, source_module, target_layer, ref_name, meta, issue_meta
+          ast,
+          issues,
+          source_layer,
+          source_module,
+          target_layer,
+          ref_name,
+          meta,
+          issue_meta
         )
       end
     else
@@ -177,7 +186,16 @@ defmodule Minga.Credo.DependencyDirectionCheck do
   defp find_violations(ast, issues, _source_layer, _source_module, _issue_meta),
     do: {ast, issues}
 
-  defp check_violation(ast, issues, source_layer, source_module, target_layer, ref_name, meta, issue_meta) do
+  defp check_violation(
+         ast,
+         issues,
+         source_layer,
+         source_module,
+         target_layer,
+         ref_name,
+         meta,
+         issue_meta
+       ) do
     cond do
       target_layer == nil ->
         # Unknown module, skip
@@ -288,10 +306,13 @@ defmodule Minga.Credo.DependencyDirectionCheck do
 
   defp allowed_reference?(source_module, ref_name) do
     case Map.get(@allowed_references, source_module) do
-      nil -> false
-      allowed -> Enum.any?(allowed, fn prefix ->
-        ref_name == prefix || String.starts_with?(ref_name, prefix <> ".")
-      end)
+      nil ->
+        false
+
+      allowed ->
+        Enum.any?(allowed, fn prefix ->
+          ref_name == prefix || String.starts_with?(ref_name, prefix <> ".")
+        end)
     end
   end
 

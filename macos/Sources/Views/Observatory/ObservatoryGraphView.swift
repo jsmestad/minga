@@ -54,7 +54,7 @@ struct ObservatoryGraphView: View {
                 .lineLimit(1)
             Text(formatBytes(UInt64(node.memory)))
                 .font(.caption2.monospacedDigit())
-                .foregroundStyle(theme.treeInactiveFg)
+                .foregroundStyle(theme.treeFg.opacity(0.55))
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
