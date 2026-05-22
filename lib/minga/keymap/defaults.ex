@@ -134,6 +134,10 @@ defmodule Minga.Keymap.Defaults do
     {~k(g x c), :git_accept_current_conflict, "Accept current conflict"},
     {~k(g x i), :git_accept_incoming_conflict, "Accept incoming conflict"},
     {~k(g x b), :git_accept_both_conflict, "Accept both conflict sides"},
+    {~k(g z z), :git_stash_save, "Stash changes"},
+    {~k(g z p), :git_stash_pop, "Pop stash"},
+    {~k(g z l), :git_stash_list, "List stashes"},
+    {~k(g z d), :git_stash_drop, "Drop stash"},
     {~k(g c g), :git_generate_commit_message, "Generate AI commit message"},
 
     # ── Project ────────────────────────────────────────────────────────────────
@@ -217,6 +221,7 @@ defmodule Minga.Keymap.Defaults do
     {~k(g), "+git"},
     {~k(g c), "+commit"},
     {~k(g x), "+conflict"},
+    {~k(g z), "+stash"},
     {~k(w), "+window"},
     {~k(q), "+quit"},
     {~k(h), "+help"},

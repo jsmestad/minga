@@ -108,7 +108,8 @@ defmodule MingaEditor.Handlers.FileEventHandler do
           behind: behind,
           entries: entries,
           entry_base_path: Minga.Project.resolve_root(),
-          last_commit_message: event.last_commit_message
+          last_commit_message: event.last_commit_message,
+          stash_count: event.stash_count
         }
 
         state = EditorState.set_git_status_panel(state, git_status_data)

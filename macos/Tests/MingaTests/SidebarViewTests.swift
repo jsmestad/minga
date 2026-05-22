@@ -173,6 +173,20 @@ struct GitStatusViewBranchHeaderTests {
 
         #expect(strings.contains("No branch"))
     }
+
+    @Test("Branch header shows stash count when present")
+    @MainActor func showsStashCount() throws {
+        let state = GitStatusState()
+        state.repoState = .normal
+        state.branchName = "main"
+        state.stashCount = 2
+
+        let sut = GitStatusHeaderContent(state: state, theme: ThemeColors(), projectName: "minga", leadingPadding: 10)
+        let body = try sut.inspect()
+        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(strings.contains("Stashes: 2"))
+    }
 }
 
 // MARK: - FileTreeView
@@ -549,7 +563,7 @@ struct GitStatusViewSectionTests {
     @Test("Amend mode pre-fills previous commit message without clobbering user text")
     @MainActor func amendModePrefillsPreviousCommitMessageWithoutClobberingUserText() {
         let state = GitStatusState()
-        state.update(repoState: .normal, branchName: "main", ahead: 0, behind: 0, syncing: false, entries: [], toast: nil, entryBasePath: "/repo", lastCommitMessage: "feat: previous subject")
+        state.update(repoState: .normal, branchName: "main", ahead: 0, behind: 0, syncing: false, entries: [], toast: nil, entryBasePath: "/repo", lastCommitMessage: "feat: previous subject", stashCount: 0)
 
         state.setAmendMode(true)
         #expect(state.commitMessage == "feat: previous subject")

@@ -31,7 +31,8 @@ defmodule MingaEditor.Shell.Traditional.GitStatusRendererTest do
       branch: "main",
       ahead: 0,
       behind: 0,
-      entries: entries
+      entries: entries,
+      stash_count: 0
     }
   end
 
@@ -167,6 +168,15 @@ defmodule MingaEditor.Shell.Traditional.GitStatusRendererTest do
       header_text = elem(hd(draws), 2)
       assert String.contains?(header_text, "↑3")
       assert String.contains?(header_text, "↓1")
+    end
+
+    test "renders stash count in header" do
+      panel = make_panel([]) |> Map.put(:stash_count, 2)
+      state = base_state(panel)
+      draws = GitStatusRenderer.render(state, @rect)
+
+      header_text = elem(hd(draws), 2)
+      assert String.contains?(header_text, "Stashes: 2")
     end
   end
 end

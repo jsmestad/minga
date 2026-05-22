@@ -4,6 +4,7 @@ defmodule Minga.Git.RepoTest do
 
   alias Minga.Events
   alias Minga.Git.Repo
+  alias Minga.Git.StashEntry
   alias Minga.Git.StatusEntry
   alias Minga.Git.Stub, as: GitStub
 
@@ -40,6 +41,21 @@ defmodule Minga.Git.RepoTest do
       summary = Repo.summary(repo)
       assert summary.ahead == 3
       assert summary.behind == 1
+    end
+
+    test "loads stash count on start", %{tmp_dir: dir} do
+      stash_dir = dir <> "/stashes"
+      GitStub.set_root(stash_dir, stash_dir)
+
+      GitStub.set_stashes(stash_dir, [
+        %StashEntry{index: 0, ref: "stash@{0}", date: "1 minute ago", message: "WIP"}
+      ])
+
+      on_exit(fn -> GitStub.clear(stash_dir) end)
+
+      repo = start_supervised!({Repo, git_root: stash_dir}, id: {Repo, stash_dir})
+
+      assert Repo.summary(repo).stash_count == 1
     end
   end
 
@@ -131,6 +147,52 @@ defmodule Minga.Git.RepoTest do
       assert Repo.summary(repo).last_commit_message == "feat: updated subject"
     end
 
+    test "refresh publishes and caches stash count changes", %{root: dir, repo: repo} do
+      Events.subscribe(:git_status_changed)
+
+      GitStub.set_stashes(dir, [
+        %StashEntry{index: 0, ref: "stash@{0}", date: "1 minute ago", message: "WIP"}
+      ])
+
+      Repo.refresh(repo)
+      :sys.get_state(repo)
+
+      assert_receive {:minga_event, :git_status_changed,
+                      %Events.GitStatusEvent{git_root: ^dir, stash_count: 1}}
+
+      assert Repo.summary(repo).stash_count == 1
+    end
+
+    test "stash ref file events refresh stash count", %{root: dir, repo: repo} do
+      Events.subscribe(:git_status_changed)
+
+      GitStub.set_stashes(dir, [
+        %StashEntry{index: 0, ref: "stash@{0}", date: "1 minute ago", message: "WIP"}
+      ])
+
+      send(repo, {:file_event, self(), {Path.join([dir, ".git", "refs", "stash"]), []}})
+      send(repo, :debounce_refresh)
+      :sys.get_state(repo)
+
+      assert_receive {:minga_event, :git_status_changed,
+                      %Events.GitStatusEvent{git_root: ^dir, stash_count: 1}}
+    end
+
+    test "stash log file events refresh stash count", %{root: dir, repo: repo} do
+      Events.subscribe(:git_status_changed)
+
+      GitStub.set_stashes(dir, [
+        %StashEntry{index: 0, ref: "stash@{0}", date: "1 minute ago", message: "WIP"}
+      ])
+
+      send(repo, {:file_event, self(), {Path.join([dir, ".git", "logs", "refs", "stash"]), []}})
+      send(repo, :debounce_refresh)
+      :sys.get_state(repo)
+
+      assert_receive {:minga_event, :git_status_changed,
+                      %Events.GitStatusEvent{git_root: ^dir, stash_count: 1}}
+    end
+
     test "refresh publishes git_status_changed when branch changes", %{root: dir, repo: repo} do
       Events.subscribe(:git_status_changed)
       GitStub.set_branch(dir, "feature/new")
@@ -167,6 +229,7 @@ defmodule Minga.Git.RepoTest do
       assert summary.unstaged_count == 1
       assert summary.untracked_count == 1
       assert summary.conflict_count == 1
+      assert summary.stash_count == 0
     end
 
     test "with zero entries returns all-zero counts", %{tmp_dir: dir} do

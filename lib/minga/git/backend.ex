@@ -75,6 +75,18 @@ defmodule Minga.Git.Backend do
   @callback branch_delete(git_root :: String.t(), name :: String.t(), force :: boolean()) ::
               :ok | {:error, String.t()}
 
+  @callback stash(git_root :: String.t(), opts :: keyword()) ::
+              :ok | {:error, String.t()}
+
+  @callback stash_pop(git_root :: String.t()) ::
+              :ok | {:error, String.t()}
+
+  @callback stash_list(git_root :: String.t()) ::
+              {:ok, [Minga.Git.stash_entry()]} | {:error, String.t()}
+
+  @callback stash_drop(git_root :: String.t(), index :: non_neg_integer()) ::
+              :ok | {:error, String.t()}
+
   @callback push(git_root :: String.t(), opts :: keyword()) ::
               :ok | {:error, String.t()}
 

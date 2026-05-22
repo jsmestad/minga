@@ -465,6 +465,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
           entries: [],
           entry_base_path: "",
           last_commit_message: "",
+          stash_count: 0,
           git_toast: toast
         })
 

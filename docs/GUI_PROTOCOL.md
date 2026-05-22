@@ -797,7 +797,7 @@ When no splits are active, the BEAM sends counts of 0 for both separator types.
 Git status panel data for the native sidebar, plus remote operation feedback used by the sidebar and status bar.
 
 ```
-opcode(1) + repo_state(1) + syncing(1) + ahead(2) + behind(2) + branch_len(2) + branch(branch_len) + entry_count(2) + entries... + toast_present(1) + toast? + entry_base_path_len(2) + entry_base_path(entry_base_path_len) + last_commit_message_len(2) + last_commit_message(last_commit_message_len)
+opcode(1) + repo_state(1) + syncing(1) + ahead(2) + behind(2) + branch_len(2) + branch(branch_len) + entry_count(2) + entries... + toast_present(1) + toast? + entry_base_path_len(2) + entry_base_path(entry_base_path_len) + last_commit_message_len(2) + last_commit_message(last_commit_message_len) + stash_count(2)
 
 Per entry:
   path_hash(4) + section(1) + status(1) + path_len(2) + path(path_len)
@@ -813,6 +813,7 @@ Toast when toast_present == 1:
 `status`: 0 = unknown, 1 = modified, 2 = added, 3 = deleted, 4 = renamed, 5 = copied, 6 = untracked, 7 = conflict.
 `level`: 0 = success, 1 = error.
 `action`: 0 = none, 1 = pull_and_retry.
+`stash_count`: number of stashes in the repository, clamped to 65,535. Frontends should show it only when greater than zero.
 
 When the git status panel is closed, the BEAM sends `repo_state = not_a_repo`, no entries, and an empty `entry_base_path` as the hide signal. A non-git project opened in the Source Control tab also uses `repo_state = not_a_repo`, but includes the project root so the frontend can show the native "Not a git repository" empty state instead of hiding the panel. The frontend should still copy `syncing` and `toast` so remote operation feedback remains accurate while the panel is hidden.
 
