@@ -14,8 +14,16 @@ defmodule Minga.Config.LoaderTest do
   alias Minga.Config.Loader
   alias Minga.Config.ModelineSegments
   alias Minga.Config.Options
+  alias Minga.Extension.ContributionCleanup
+  alias Minga.Extension.Registry, as: ExtRegistry
+  alias Minga.Extension.Supervisor, as: ExtSupervisor
   alias Minga.Keymap.Active, as: KeymapActive
+  alias Minga.Language
+  alias Minga.Language.Registry, as: LanguageRegistry
   alias Minga.LSP.ServerConfig
+  alias Minga.Tool.Recipe
+  alias Minga.Tool.Recipe.Registry, as: RecipeRegistry
+  alias MingaEditor.UI.Theme
 
   setup do
     options_server = start_supervised!({Options, name: nil})
@@ -97,6 +105,118 @@ defmodule Minga.Config.LoaderTest do
       assert Options.get(test_options_server(), :tab_width) == 4
       assert Options.get(test_options_server(), :line_numbers) == :relative
     end
+  end
+
+  test "starts extensions declared in project and after config after all config sources load" do
+    {minga_dir, cleanup} =
+      make_config_dir("""
+      use Minga.Config
+
+      set :tab_width, 2
+      """)
+
+    on_exit(cleanup)
+
+    previous_load_extensions = Application.get_env(:minga, :load_extensions)
+    Application.put_env(:minga, :load_extensions, true)
+
+    on_exit(fn ->
+      case previous_load_extensions do
+        nil -> Application.delete_env(:minga, :load_extensions)
+        value -> Application.put_env(:minga, :load_extensions, value)
+      end
+    end)
+
+    ensure_extension_runtime()
+
+    on_exit(fn ->
+      ExtSupervisor.stop_all()
+      ExtRegistry.reset()
+    end)
+
+    previous_cwd = File.cwd!()
+
+    project_dir =
+      Path.join(
+        System.tmp_dir!(),
+        "minga_project_extensions_#{System.unique_integer([:positive])}"
+      )
+
+    File.mkdir_p!(project_dir)
+    File.cd!(project_dir)
+
+    project_ext_dir = Path.join(project_dir, "project_ext")
+    after_ext_dir = Path.join(project_dir, "after_ext")
+    File.mkdir_p!(project_ext_dir)
+    File.mkdir_p!(after_ext_dir)
+
+    File.write!(Path.join(project_ext_dir, "project_config_ext.ex"), """
+    defmodule Minga.TestExtensions.ProjectConfigExt do
+      use Minga.Extension
+
+      @impl true
+      def name, do: :project_config_ext
+
+      @impl true
+      def description, do: "Project config extension"
+
+      @impl true
+      def version, do: "1.0.0"
+
+      @impl true
+      def init(_config), do: {:ok, %{}}
+    end
+    """)
+
+    File.write!(Path.join(after_ext_dir, "after_config_ext.ex"), """
+    defmodule Minga.TestExtensions.AfterConfigExt do
+      use Minga.Extension
+
+      @impl true
+      def name, do: :after_config_ext
+
+      @impl true
+      def description, do: "After config extension"
+
+      @impl true
+      def version, do: "1.0.0"
+
+      @impl true
+      def init(_config), do: {:ok, %{}}
+    end
+    """)
+
+    File.write!(Path.join(project_dir, ".minga.exs"), """
+    use Minga.Config
+
+    extension :project_config_ext, path: #{inspect(project_ext_dir)}
+    """)
+
+    File.write!(Path.join(minga_dir, "after.exs"), """
+    use Minga.Config
+
+    extension :after_config_ext, path: #{inspect(after_ext_dir)}
+    """)
+
+    on_exit(fn ->
+      File.cd!(previous_cwd)
+      File.rm_rf!(project_dir)
+      :code.purge(Minga.TestExtensions.ProjectConfigExt)
+      :code.delete(Minga.TestExtensions.ProjectConfigExt)
+      :code.purge(Minga.TestExtensions.AfterConfigExt)
+      :code.delete(Minga.TestExtensions.AfterConfigExt)
+    end)
+
+    name = :"loader_project_after_ext_#{System.unique_integer([:positive])}"
+    {:ok, pid} = Loader.start_link(name: name)
+
+    assert Loader.load_error(pid) == nil
+    assert {:ok, project_entry} = ExtRegistry.get(:project_config_ext)
+    assert project_entry.status == :running
+    assert Process.alive?(project_entry.pid)
+    assert {:ok, after_entry} = ExtRegistry.get(:after_config_ext)
+    assert after_entry.status == :running
+    assert Process.alive?(after_entry.pid)
   end
 
   describe "loading LSP settings" do
@@ -674,6 +794,343 @@ defmodule Minga.Config.LoaderTest do
       assert %{side: :left, source: :config} = ModelineSegments.lookup(:loader_fresh_segment)
     end
 
+    test "reload clears stale config-owned keybinds, themes, languages, recipes, and scopes",
+         ctx do
+      ContributionCleanup.unregister_source(:config, keymap: ctx.keymap_server)
+
+      {minga_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+
+        bind :insert, "C-j", :loader_reload_keybind, "Loader reload keybind"
+
+        doom = MingaEditor.UI.Theme.get!(:doom_one)
+
+        MingaEditor.UI.Theme.register_themes(%{
+          loader_reload_theme: %{doom | name: :loader_reload_theme, editor: %{doom.editor | fg: 0x111111}}
+        }, :config)
+
+        Minga.Language.Registry.register(%Minga.Language{
+          name: :loader_reload_language,
+          label: "Loader Reload Language",
+          comment_token: "// ",
+          extensions: ["loader_reload_language"]
+        })
+
+        Minga.Tool.Recipe.Registry.register(%Minga.Tool.Recipe{
+          name: :loader_reload_recipe,
+          label: "Loader Reload Recipe",
+          description: "Loader reload recipe",
+          provides: ["loader-reload-recipe"],
+          method: :npm,
+          package: "loader-reload-recipe",
+          homepage: "https://example.invalid/loader-reload-recipe",
+          category: :formatter,
+          languages: [:elixir]
+        })
+
+        Minga.Keymap.Scope.register(:config, :loader_reload_scope, Minga.Keymap.Scope.Editor)
+        """)
+
+      on_exit(cleanup)
+
+      on_exit(fn ->
+        ContributionCleanup.unregister_source(:config, keymap: ctx.keymap_server)
+        Theme.unregister_source(:config)
+      end)
+
+      name = :"loader_reload_registry_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+
+      {:ok, keys} = Minga.Keymap.KeyParser.parse("C-j")
+
+      assert {:command, :loader_reload_keybind, _desc} =
+               KeymapActive.mode_trie(ctx.keymap_server, :insert)
+               |> Minga.Keymap.Bindings.lookup_sequence(keys)
+
+      assert {:ok, %Theme{name: :loader_reload_theme, editor: %{fg: 0x111111}}} =
+               Theme.get(:loader_reload_theme)
+
+      assert %Language{name: :loader_reload_language} =
+               LanguageRegistry.get(:loader_reload_language)
+
+      assert %Recipe{name: :loader_reload_recipe} = RecipeRegistry.get(:loader_reload_recipe)
+      assert Minga.Keymap.Scope.module_for(:loader_reload_scope) == Minga.Keymap.Scope.Editor
+
+      File.write!(Path.join(minga_dir, "config.exs"), """
+      use Minga.Config
+
+      bind :insert, "C-k", :loader_reload_keybind, "Loader reload keybind"
+
+      doom = MingaEditor.UI.Theme.get!(:doom_one)
+
+      MingaEditor.UI.Theme.register_themes(%{
+        loader_reload_theme: %{doom | name: :loader_reload_theme, editor: %{doom.editor | fg: 0x222222}}
+      }, :config)
+
+      Minga.Language.Registry.register(%Minga.Language{
+        name: :loader_reload_language_fresh,
+        label: "Loader Reload Fresh Language",
+        comment_token: "// ",
+        extensions: ["loader_reload_language_fresh"]
+      })
+
+      Minga.Tool.Recipe.Registry.register(%Minga.Tool.Recipe{
+        name: :loader_reload_recipe_fresh,
+        label: "Loader Reload Fresh Recipe",
+        description: "Loader reload fresh recipe",
+        provides: ["loader-reload-recipe-fresh"],
+        method: :npm,
+        package: "loader-reload-recipe-fresh",
+        homepage: "https://example.invalid/loader-reload-recipe-fresh",
+        category: :formatter,
+        languages: [:elixir]
+      })
+
+      Minga.Keymap.Scope.register(:config, :loader_reload_scope_fresh, Minga.Keymap.Scope.Editor)
+      """)
+
+      assert :ok = Loader.reload(pid)
+
+      {:ok, keys} = Minga.Keymap.KeyParser.parse("C-j")
+
+      assert :not_found =
+               KeymapActive.mode_trie(ctx.keymap_server, :insert)
+               |> Minga.Keymap.Bindings.lookup_sequence(keys)
+
+      {:ok, keys} = Minga.Keymap.KeyParser.parse("C-k")
+
+      assert {:command, :loader_reload_keybind, _desc} =
+               KeymapActive.mode_trie(ctx.keymap_server, :insert)
+               |> Minga.Keymap.Bindings.lookup_sequence(keys)
+
+      assert {:ok, %Theme{name: :loader_reload_theme, editor: %{fg: 0x222222}}} =
+               Theme.get(:loader_reload_theme)
+
+      assert LanguageRegistry.get(:loader_reload_language) == nil
+
+      assert %Language{name: :loader_reload_language_fresh} =
+               LanguageRegistry.get(:loader_reload_language_fresh)
+
+      assert RecipeRegistry.get(:loader_reload_recipe) == nil
+
+      assert %Recipe{name: :loader_reload_recipe_fresh} =
+               RecipeRegistry.get(:loader_reload_recipe_fresh)
+
+      assert Minga.Keymap.Scope.module_for(:loader_reload_scope) == nil
+
+      assert Minga.Keymap.Scope.module_for(:loader_reload_scope_fresh) ==
+               Minga.Keymap.Scope.Editor
+    end
+
+    test "reload surfaces config cleanup failures in the loader error state" do
+      {_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+        set :tab_width, 2
+        """)
+
+      on_exit(cleanup)
+
+      name = :"loader_reload_cleanup_failure_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+      assert Loader.load_error(pid) == nil
+
+      assert :ok =
+               ContributionCleanup.register(:loader_reload_cleanup_failure, fn _source ->
+                 raise "cleanup failure"
+               end)
+
+      on_exit(fn -> ContributionCleanup.unregister(:loader_reload_cleanup_failure) end)
+
+      assert {:error, msg} = Loader.reload(pid)
+      assert msg =~ "Config reload cleanup for :config failed"
+      assert msg =~ "cleanup failure"
+      assert Loader.load_error(pid) =~ "Config reload cleanup for :config failed"
+    end
+
+    test "reload surfaces stop_all failures instead of silently proceeding" do
+      {_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+        set :tab_width, 2
+        """)
+
+      on_exit(cleanup)
+
+      ensure_extension_runtime()
+
+      on_exit(fn ->
+        ExtSupervisor.stop_all()
+        ExtRegistry.reset()
+      end)
+
+      name = :"loader_reload_stop_all_failure_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+      assert Loader.load_error(pid) == nil
+      assert Options.get(test_options_server(), :tab_width) == 2
+
+      bogus_pid =
+        spawn(fn ->
+          receive do
+            :never -> :ok
+          end
+        end)
+
+      on_exit(fn ->
+        if Process.alive?(bogus_pid) do
+          Process.exit(bogus_pid, :kill)
+        end
+      end)
+
+      ext_name = :loader_reload_stop_all_failure
+      :ok = ExtRegistry.register(ext_name, "/tmp/loader_reload_stop_all_failure", [])
+      :ok = ExtRegistry.update(ext_name, pid: bogus_pid, module: nil, status: :running)
+
+      on_exit(fn -> ExtRegistry.unregister(ext_name) end)
+
+      ext_dir =
+        Path.join(
+          System.tmp_dir!(),
+          "minga_loader_reload_blocked_#{System.unique_integer([:positive])}"
+        )
+
+      File.mkdir_p!(ext_dir)
+
+      File.write!(Path.join(ext_dir, "reload_blocked_ext.ex"), """
+      defmodule Minga.TestExtensions.LoaderReloadBlockedExt do
+        use Minga.Extension
+
+        @impl true
+        def name, do: :loader_reload_blocked_ext
+
+        @impl true
+        def description, do: "Reload blocked extension"
+
+        @impl true
+        def version, do: "1.0.0"
+
+        @impl true
+        def init(_config), do: {:ok, %{}}
+      end
+      """)
+
+      on_exit(fn ->
+        File.rm_rf!(ext_dir)
+        :code.purge(Minga.TestExtensions.LoaderReloadBlockedExt)
+        :code.delete(Minga.TestExtensions.LoaderReloadBlockedExt)
+      end)
+
+      File.write!(Path.join(Path.dirname(Loader.config_path(pid)), "config.exs"), """
+      use Minga.Config
+
+      set :tab_width, 7
+      extension :loader_reload_blocked_ext, path: #{inspect(ext_dir)}
+      """)
+
+      assert {:error, msg} = Loader.reload(pid)
+      assert msg =~ "Extension stop_all failed"
+      assert msg =~ "loader_reload_stop_all_failure"
+      assert Loader.load_error(pid) =~ "Extension stop_all failed"
+      assert Options.get(test_options_server(), :tab_width) == 2
+      assert ExtRegistry.get(:loader_reload_blocked_ext) == :error
+    end
+
+    test "reload surfaces start_all failures with cleanup details" do
+      {minga_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+        set :tab_width, 2
+        """)
+
+      on_exit(cleanup)
+
+      previous_load_extensions = Application.get_env(:minga, :load_extensions)
+      Application.put_env(:minga, :load_extensions, true)
+
+      on_exit(fn ->
+        case previous_load_extensions do
+          nil -> Application.delete_env(:minga, :load_extensions)
+          value -> Application.put_env(:minga, :load_extensions, value)
+        end
+      end)
+
+      if Process.whereis(Minga.Extension.Supervisor) == nil do
+        start_supervised!({Minga.Extension.Supervisor, name: Minga.Extension.Supervisor})
+      end
+
+      ext_dir =
+        Path.join(
+          System.tmp_dir!(),
+          "minga_loader_start_all_#{System.unique_integer([:positive])}"
+        )
+
+      File.mkdir_p!(ext_dir)
+      ext_path = Path.join(ext_dir, "start_all_failure.ex")
+      ext_module = Minga.TestExtensions.LoaderStartAllFailure
+
+      File.write!(
+        ext_path,
+        """
+        defmodule #{ext_module} do
+          use Minga.Extension
+
+          @impl true
+          def name, do: :loader_start_all_failure
+
+          @impl true
+          def description, do: "Loader start_all failure test"
+
+          @impl true
+          def version, do: "1.0.0"
+
+          @impl true
+          def init(_config), do: {:error, :intentional_failure}
+        end
+        """
+      )
+
+      on_exit(fn ->
+        File.rm_rf!(ext_dir)
+        :code.purge(ext_module)
+        :code.delete(ext_module)
+      end)
+
+      cleanup_family =
+        String.to_atom("loader_reload_start_all_cleanup_#{System.unique_integer([:positive])}")
+
+      name = :"loader_reload_start_all_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+      assert Loader.load_error(pid) == nil
+
+      File.write!(
+        Path.join(minga_dir, "config.exs"),
+        """
+        use Minga.Config
+        extension :loader_start_all_failure, path: #{inspect(ext_dir)}
+        """
+      )
+
+      assert :ok =
+               ContributionCleanup.register(cleanup_family, fn
+                 {:extension, :loader_start_all_failure} ->
+                   raise "cleanup failure"
+
+                 _source ->
+                   :ok
+               end)
+
+      on_exit(fn -> ContributionCleanup.unregister(cleanup_family) end)
+
+      assert {:error, msg} = Loader.reload(pid)
+      assert msg =~ "Extension start_all failed"
+      assert msg =~ "loader_start_all_failure"
+      assert msg =~ "cleanup_failed"
+      assert msg =~ "intentional_failure"
+      assert msg =~ "cleanup failure"
+      assert Loader.load_error(pid) =~ "Extension start_all failed"
+    end
+
     test "reload picks up changed config values" do
       {minga_dir, cleanup} =
         make_config_dir("""
@@ -1147,6 +1604,21 @@ defmodule Minga.Config.LoaderTest do
 
   defp restore_xdg_config_home(path) when is_binary(path) do
     System.put_env("XDG_CONFIG_HOME", path)
+    :ok
+  end
+
+  @spec ensure_extension_runtime() :: :ok
+  defp ensure_extension_runtime do
+    if Process.whereis(ExtRegistry) == nil do
+      start_supervised!({ExtRegistry, name: ExtRegistry})
+    end
+
+    if Process.whereis(Minga.Extension.Supervisor) == nil do
+      start_supervised!({Minga.Extension.Supervisor, name: Minga.Extension.Supervisor})
+    end
+
+    ExtSupervisor.stop_all()
+    ExtRegistry.reset()
     :ok
   end
 end

@@ -58,8 +58,16 @@ defmodule Minga.Keymap.Scope do
   @typedoc "Extra context for scope keymap resolution (e.g., filetype)."
   @type context :: keyword()
 
-  @typedoc "A scope name atom."
-  @type scope_name :: :editor | :agent | :file_tree | :git_status | :dired
+  @typedoc "A scope name atom. Built-ins use known atoms; extensions may contribute additional atoms."
+  @type scope_name :: atom()
+
+  @typedoc "Source that contributed registry entries."
+  @type contribution_source :: :builtin | :config | {:extension, atom()}
+
+  @typedoc "Scope registration failure reason."
+  @type register_error ::
+          {:duplicate_scope, scope_name(), existing_source :: contribution_source(),
+           attempted_source :: contribution_source()}
 
   @typedoc "Vim state relevant to scope resolution."
   @type vim_state :: :normal | :insert | :input_normal | :cua
@@ -140,21 +148,119 @@ defmodule Minga.Keymap.Scope do
 
   # ── Registry ───────────────────────────────────────────────────────────────
 
-  @scope_modules %{
-    editor: Minga.Keymap.Scope.Editor,
-    agent: Minga.Keymap.Scope.Agent,
-    file_tree: Minga.Keymap.Scope.FileTree,
-    git_status: Minga.Keymap.Scope.GitStatus,
-    dired: Minga.Keymap.Scope.Dired
-  }
+  @registry_key {__MODULE__, :scopes}
+  @sources_key {__MODULE__, :scope_sources}
+  @builtin_scopes [
+    Minga.Keymap.Scope.Editor,
+    Minga.Keymap.Scope.Agent,
+    Minga.Keymap.Scope.FileTree,
+    Minga.Keymap.Scope.GitStatus,
+    Minga.Keymap.Scope.Dired
+  ]
+
+  @doc "Registers a scope module for a source."
+  @spec register(contribution_source(), module()) :: :ok | {:error, register_error()}
+  def register(source, module) when is_atom(module) do
+    name = module.name()
+    register(source, name, module)
+  end
+
+  @doc "Registers a scope name/module pair for a source."
+  @spec register(contribution_source(), scope_name(), module()) ::
+          :ok | {:error, register_error()}
+  def register(source, name, module) when is_atom(name) and is_atom(module) do
+    ensure_registry!()
+    modules = registry_modules()
+    sources = registry_sources()
+
+    case Map.fetch(sources, name) do
+      {:ok, ^source} ->
+        persist_registry(Map.put(modules, name, module), Map.put(sources, name, source))
+        :ok
+
+      {:ok, existing_source} ->
+        {:error, {:duplicate_scope, name, existing_source, source}}
+
+      :error ->
+        persist_registry(Map.put(modules, name, module), Map.put(sources, name, source))
+        :ok
+    end
+  end
+
+  @doc "Removes one scope by name."
+  @spec unregister(scope_name()) :: :ok
+  def unregister(name) when is_atom(name) do
+    ensure_registry!()
+    persist_registry(Map.delete(registry_modules(), name), Map.delete(registry_sources(), name))
+    :ok
+  end
+
+  @doc "Removes every scope contributed by a source."
+  @spec unregister_source(contribution_source()) :: :ok
+  def unregister_source(source) do
+    ensure_registry!()
+
+    names =
+      registry_sources()
+      |> Enum.filter(fn {_name, entry_source} -> entry_source == source end)
+      |> Enum.map(fn {name, _entry_source} -> name end)
+
+    modules = Map.drop(registry_modules(), names)
+    sources = Map.drop(registry_sources(), names)
+    persist_registry(modules, sources)
+    :ok
+  end
+
+  @doc "Resets scopes to built-ins only."
+  @spec reset() :: :ok
+  def reset do
+    seed_builtins!()
+    :ok
+  end
 
   @doc "Returns the scope module for a given scope name."
   @spec module_for(scope_name()) :: module() | nil
-  def module_for(name) when is_atom(name), do: Map.get(@scope_modules, name)
+  def module_for(name) when is_atom(name) do
+    ensure_registry!()
+    Map.get(registry_modules(), name)
+  end
 
   @doc "Returns all registered scope names."
   @spec all_scopes() :: [scope_name()]
-  def all_scopes, do: Map.keys(@scope_modules)
+  def all_scopes do
+    ensure_registry!()
+    Map.keys(registry_modules())
+  end
+
+  @spec ensure_registry!() :: :ok
+  defp ensure_registry! do
+    case :persistent_term.get(@registry_key, :missing) do
+      :missing -> seed_builtins!()
+      _modules -> :ok
+    end
+  end
+
+  @spec seed_builtins!() :: :ok
+  defp seed_builtins! do
+    modules = Map.new(@builtin_scopes, fn module -> {module.name(), module} end)
+    sources = Map.new(Map.keys(modules), fn name -> {name, :builtin} end)
+    persist_registry(modules, sources)
+    :ok
+  end
+
+  @spec registry_modules() :: %{scope_name() => module()}
+  defp registry_modules, do: :persistent_term.get(@registry_key, %{})
+
+  @spec registry_sources() :: %{scope_name() => contribution_source()}
+  defp registry_sources, do: :persistent_term.get(@sources_key, %{})
+
+  @spec persist_registry(%{scope_name() => module()}, %{scope_name() => contribution_source()}) ::
+          :ok
+  defp persist_registry(modules, sources) do
+    :persistent_term.put(@registry_key, modules)
+    :persistent_term.put(@sources_key, sources)
+    :ok
+  end
 
   # ── Help ────────────────────────────────────────────────────────────────────
 

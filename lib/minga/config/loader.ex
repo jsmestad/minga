@@ -32,6 +32,7 @@ defmodule Minga.Config.Loader do
   alias Minga.Config.ModelineSegments
   alias Minga.Config.Options
   alias Minga.Config.Writer
+  alias Minga.Extension.ContributionCleanup
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Extension.Supervisor, as: ExtSupervisor
   alias Minga.Keymap
@@ -195,68 +196,74 @@ defmodule Minga.Config.Loader do
 
   @spec do_reload(GenServer.server()) :: :ok | {:error, String.t()}
   defp do_reload(server) do
-    # Stop all running extensions first
-    ExtSupervisor.stop_all()
+    # Stop all running extensions first. If that fails, do not tear down
+    # registries or start a new load, because the old extension tree is still
+    # partially live and a reset would orphan it.
+    stop_all_error = stop_all_extensions()
 
-    # Get the old modules so we can purge them
-    old_modules = Agent.get(server, & &1.loaded_modules)
+    if stop_all_error do
+      Agent.update(server, fn state -> %{state | load_error: stop_all_error} end)
+      {:error, stop_all_error}
+    else
+      # Get the old modules so we can purge them
+      old_modules = Agent.get(server, & &1.loaded_modules)
 
-    # Purge old user modules
-    for mod <- old_modules do
-      :code.purge(mod)
-      :code.delete(mod)
-    end
+      # Purge old user modules
+      for mod <- old_modules do
+        :code.purge(mod)
+        :code.delete(mod)
+      end
 
-    # Reset all registries to defaults
-    {keymap_server, options_server} =
-      Agent.get(server, fn
-        %{keymap_server: keymap_server, options_server: options_server} ->
-          {keymap_server, options_server}
+      # Reset all registries to defaults
+      {keymap_server, options_server} =
+        Agent.get(server, fn
+          %{keymap_server: keymap_server, options_server: options_server} ->
+            {keymap_server, options_server}
 
-        # Defensive fallback: state shape predates the *_server fields.
-        # Unreachable in single-version processes; logged so a real schema
-        # mismatch doesn't degrade silently.
-        _ ->
-          Minga.Log.warning(
-            :config,
-            "loader state missing :keymap_server/:options_server; using defaults"
-          )
+          # Defensive fallback: state shape predates the *_server fields.
+          # Unreachable in single-version processes; logged so a real schema
+          # mismatch doesn't degrade silently.
+          _ ->
+            Minga.Log.warning(
+              :config,
+              "loader state missing :keymap_server/:options_server; using defaults"
+            )
 
-          {
-            Process.get(:minga_config_keymap, Keymap.default_server()),
-            Process.get(:minga_config_options, Options.default_server())
-          }
-      end)
+            {
+              Process.get(:minga_config_keymap, Keymap.default_server()),
+              Process.get(:minga_config_options, Options.default_server())
+            }
+        end)
 
-    maybe_reset_options(options_server)
-    Hooks.reset()
-    Advice.reset()
-    Keymap.reset(keymap_server)
-    Command.reset_registry()
-    ExtRegistry.reset()
-    PopupRegistry.clear()
-    ModelineSegments.unregister_source(:config)
-    ModelineSegments.reset_warnings()
+      maybe_reset_options(options_server)
+      Hooks.reset()
+      Advice.reset()
+      Keymap.reset(keymap_server)
+      Command.reset_registry()
+      ExtRegistry.reset()
+      PopupRegistry.clear()
+      ModelineSegments.reset_warnings()
 
-    # Re-run the full load sequence (includes starting extensions)
-    new_state = load_all(keymap_server, options_server)
-    Agent.update(server, fn _ -> new_state end)
+      # Re-run the full load sequence (includes starting extensions)
+      new_state = load_all(keymap_server, options_server)
+      Agent.update(server, fn _ -> new_state end)
 
-    # Return error if any stage had problems
-    errors =
-      [
-        new_state.load_error,
-        new_state.project_config_error,
-        new_state.gui_settings_error,
-        new_state.after_error
-      ]
-      |> Enum.reject(&is_nil/1)
+      # Return error if any stage had problems
+      errors =
+        [
+          new_state.load_error,
+          new_state.project_config_error,
+          new_state.gui_settings_error,
+          new_state.after_error
+        ]
+        |> Enum.reject(&is_nil/1)
 
-    all_errors = new_state.modules_errors ++ errors
+      all_errors = new_state.modules_errors ++ errors
 
-    case all_errors do
-      [] -> :ok
-      msgs -> {:error, Enum.join(msgs, "; ")}
+      case all_errors do
+        [] -> :ok
+        msgs -> {:error, Enum.join(msgs, "; ")}
+      end
     end
   end
 
@@ -275,6 +282,7 @@ defmodule Minga.Config.Loader do
     previous_lsp_settings = Process.put(:minga_config_lsp_settings, %{})
 
     try do
+      config_cleanup_error = cleanup_source_owned_config_contributions(keymap_server)
       config_path = resolve_config_path()
       config_dir = Path.dirname(config_path)
 
@@ -323,13 +331,15 @@ defmodule Minga.Config.Loader do
       # 7. Apply log level from config
       apply_log_level(options_server)
 
-      # 8. Start declared extensions (if the supervisor is running).
-      # Skip in test mode so user-installed extensions don't affect test
-      # determinism (e.g., extra keybindings altering which-key snapshots).
-      if Process.whereis(Minga.Extension.Supervisor) != nil &&
-           Application.get_env(:minga, :load_extensions, true) do
-        ExtSupervisor.start_all()
-      end
+      # 8. Start extensions only after all config sources have had a chance
+      # to declare them.
+      start_all_error =
+        if Process.whereis(Minga.Extension.Supervisor) != nil &&
+             Application.get_env(:minga, :load_extensions, true) do
+          start_all_extensions()
+        end
+
+      load_error = merge_error_messages([config_cleanup_error, load_error, start_all_error])
 
       lsp_settings = Process.get(:minga_config_lsp_settings, %{})
 
@@ -389,6 +399,80 @@ defmodule Minga.Config.Loader do
     end
 
     :ok
+  end
+
+  @spec start_all_extensions() :: String.t() | nil
+  defp start_all_extensions do
+    case ExtSupervisor.start_all() do
+      :ok ->
+        nil
+
+      {:error, failures} ->
+        msg = "Extension start_all failed: #{format_start_failures(failures)}"
+        Minga.Log.warning(:config, msg)
+        msg
+    end
+  end
+
+  @spec stop_all_extensions() :: String.t() | nil
+  defp stop_all_extensions do
+    case ExtSupervisor.stop_all() do
+      :ok ->
+        nil
+
+      {:error, failures} ->
+        msg = "Extension stop_all failed: #{format_stop_failures(failures)}"
+        Minga.Log.warning(:config, msg)
+        msg
+    end
+  end
+
+  @spec cleanup_source_owned_config_contributions(keymap_server()) :: String.t() | nil
+  defp cleanup_source_owned_config_contributions(keymap_server) do
+    case ContributionCleanup.unregister_source(:config, keymap: keymap_server) do
+      :ok ->
+        nil
+
+      {:error, failures} ->
+        msg = "Config reload cleanup for :config failed: #{format_cleanup_failures(failures)}"
+        Minga.Log.warning(:config, msg)
+        msg
+    end
+  end
+
+  @spec merge_error_messages([String.t() | nil]) :: String.t() | nil
+  defp merge_error_messages(messages) do
+    messages
+    |> Enum.reject(&is_nil/1)
+    |> case do
+      [] -> nil
+      [msg] -> msg
+      msgs -> Enum.join(msgs, "; ")
+    end
+  end
+
+  @spec format_cleanup_failures([map()]) :: String.t()
+  defp format_cleanup_failures(failures) do
+    Enum.map_join(failures, "; ", &format_cleanup_failure/1)
+  end
+
+  @spec format_cleanup_failure(map()) :: String.t()
+  defp format_cleanup_failure(%{family: family, source: source, reason: reason}) do
+    "#{inspect(family)} source=#{inspect(source)} reason=#{inspect(reason)}"
+  end
+
+  @spec format_start_failures([map()]) :: String.t()
+  defp format_start_failures(failures) do
+    Enum.map_join(failures, "; ", fn %{extension: extension, reason: reason} ->
+      "#{inspect(extension)} reason=#{inspect(reason)}"
+    end)
+  end
+
+  @spec format_stop_failures([map()]) :: String.t()
+  defp format_stop_failures(failures) do
+    Enum.map_join(failures, "; ", fn %{extension: extension, reason: reason} ->
+      "#{inspect(extension)} reason=#{inspect(reason)}"
+    end)
   end
 
   @spec options_server_alive?(options_server()) :: boolean()

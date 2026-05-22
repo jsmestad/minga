@@ -513,7 +513,14 @@ defmodule Minga.Config do
       state
     end
 
-    Command.register(name, description, execute_fn)
+    case Command.register(name, description, execute_fn) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Minga.Log.warning(:config, "command registration failed: #{inspect(reason)}")
+    end
+
     :ok
   end
 

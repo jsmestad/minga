@@ -45,9 +45,9 @@ defmodule Minga.Extension do
 
   Commands and keybindings declared with `command/3` and `keybind/4` are
   auto-registered by the framework when the extension loads. Extensions
-  that need runtime-dynamic commands can still call
-  `Minga.Command.Registry.register/4` and `Minga.Keymap.Active.bind/5`
-  directly from `init/1`.
+  that need runtime-dynamic commands can still call the source-owned
+  `Minga.Command.Registry.register/5` and `Minga.Keymap.Active.bind/6`
+  APIs directly from `init/1`.
 
   ## Config declaration
 

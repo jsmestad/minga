@@ -385,34 +385,48 @@ end
 
 `keybind/4` and `keybind/5` take a mode (`:normal`, `:insert`, `:visual`, or `:operator_pending`), a key string, a command name, a description, and optional keyword opts (`:filetype` for scoping). The key string format is the same as `bind` in your user config: `"SPC m t"`, `"M-h"`, `"C-j"`, `"TAB"`, etc.
 
-Both macros accumulate metadata at compile time. When the extension loads, the framework reads `__command_schema__/0` and `__keybind_schema__/0` and registers everything automatically. On reload, old registrations are cleaned up first.
+Both macros accumulate metadata at compile time. When the extension loads, the framework reads `__command_schema__/0` and `__keybind_schema__/0` and registers everything with the source `{:extension, extension_name}`. On reload, old registrations are cleaned up first.
 
-### The imperative path (for runtime-dynamic commands)
+### Source-owned contributions
 
-The declarative macros handle the common case. For commands that can't be known at compile time (generated from user config, one per language server, etc.), the imperative APIs are equally supported:
+Minga's extension registries track who contributed each entry. The common source identifiers are `:builtin`, `:config`, and `{:extension, name}`. That source tag is what makes reload safe: stopping an extension removes only that extension's commands, keybindings, scopes, input handlers, language data, themes, tool recipes, and modeline segments.
+
+This ownership layer is the gate for large built-in feature extraction. Language packs, theme packs, tool recipe packs, Dired, FileTree, Git UI, Board, and Agent pieces should move out of core only after they can register through these source-owned paths. Without ownership, reloads leave stale commands or catalog entries behind.
+
+### The imperative path (for runtime-dynamic contributions)
+
+The declarative macros handle the common case. For contributions that can't be known at compile time (generated from user config, one per language server, etc.), use the same source-owned APIs directly:
 
 ```elixir
 @impl true
 def init(config) do
-  # Register commands dynamically
+  source = {:extension, :minga_org}
+
   for lang <- Keyword.get(config, :languages, []) do
     name = :"format_#{lang}"
+
     Minga.Command.Registry.register(
       Minga.Command.Registry,
+      source,
       name,
       "Format #{lang}",
       fn state -> format_buffer(state, lang) end
     )
   end
 
-  # Register keybindings dynamically
-  Minga.Keymap.Active.bind(:normal, "SPC m f", :format_current, "Format buffer")
+  Minga.Keymap.Active.bind(
+    :normal,
+    "SPC m f",
+    :format_current,
+    "Format buffer",
+    source: source
+  )
 
   {:ok, %{}}
 end
 ```
 
-These are the same APIs the framework uses internally. They write to the same ETS tables. Commands registered this way are immediately dispatchable and show up in the command palette.
+These APIs write to hot-path ETS or persistent registries, so command dispatch, key resolution, rendering, and input routing keep reading cached data. They do not call extension callbacks on every keystroke or frame.
 
 The DSL is syntactic sugar over these APIs, not a replacement. Use whichever fits your extension's needs.
 
