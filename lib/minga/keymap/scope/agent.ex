@@ -27,7 +27,6 @@ defmodule Minga.Keymap.Scope.Agent do
 
   # Modifier bitmasks
   @ctrl 0x02
-  @shift 0x01
   @alt 0x04
   @cmd 0x08
 
@@ -37,7 +36,7 @@ defmodule Minga.Keymap.Scope.Agent do
   # Group specs for each vim state.
   @insert_groups [:ctrl_agent_common, :newline_variants]
   @input_normal_groups [:ctrl_agent_common]
-  @cua_groups [{:cua_navigation, exclude: [:half_page_up, :half_page_down]}]
+  @cua_groups [:newline_variants, {:cua_navigation, exclude: [:half_page_up, :half_page_down]}]
 
   # ── Behaviour callbacks ────────────────────────────────────────────────────
 
@@ -306,10 +305,6 @@ defmodule Minga.Keymap.Scope.Agent do
         |> Bindings.bind(~k(C-a), :select_all, "Select all")
         # Input field bindings (used when input focused)
         |> Bindings.bind(~k(DEL), :agent_input_backspace, "Delete character")
-        |> Bindings.bind([{@enter, @shift}], :agent_insert_newline, "Insert newline")
-        |> Bindings.bind(~k(C-j), :agent_insert_newline, "Insert newline")
-        |> Bindings.bind([{0x0A, 0}], :agent_insert_newline, "Insert newline")
-        |> Bindings.bind([{@enter, @alt}], :agent_insert_newline, "Insert newline")
         # Arrow up/down in input: history navigation
         |> Bindings.bind([{57_352, 0}], :agent_input_up, "Move up / history prev")
         |> Bindings.bind([{57_353, 0}], :agent_input_down, "Move down / history next")
