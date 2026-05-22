@@ -399,6 +399,32 @@ defmodule MingaEditor.PickerUITest do
     end
   end
 
+  describe "branch delete shortcut" do
+    test "plain d remains query input for a generic picker that exposes delete actions" do
+      picker =
+        Picker.new([%Item{id: :delete_me, label: "Delete me"}], title: "Delete Action Test")
+
+      picker_state = %PickerState{
+        picker: picker,
+        source: Minga.Test.DeleteActionPickerSource,
+        restore: 0
+      }
+
+      state = %EditorState{
+        port_manager: nil,
+        workspace: %SessionState{viewport: Viewport.new(24, 80), editing: VimState.new()},
+        shell_state: %ShellState{modal: {:picker, PickerPayload.new(picker_state)}}
+      }
+
+      result = PickerUI.handle_key(state, ?d, 0)
+      {:picker, %{picker_ui: picker_ui}} = result.shell_state.modal
+
+      assert picker_ui.picker.query == "d"
+      assert result.shell_state.status_msg == nil
+      assert result.workspace.editing.mode == :normal
+    end
+  end
+
   describe "preview promotion" do
     test "restores the original tab before creating the promoted preview tab" do
       {state, original_buf, preview_buf} = preview_promotion_state()
