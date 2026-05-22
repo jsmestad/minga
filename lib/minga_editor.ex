@@ -36,18 +36,17 @@ defmodule MingaEditor do
   alias MingaEditor.Layout
   alias MingaEditor.InlineAsk.Events, as: InlineAskEvents
   alias MingaEditor.InlineEdit.Events, as: InlineEditEvents
-  alias MingaEditor.LspActions
   alias MingaEditor.MessageLog
   alias MingaEditor.NavFlash
   alias MingaEditor.YankFlash
   alias MingaEditor.Renderer
   alias MingaEditor.SemanticTokenSync
   alias MingaEditor.Startup
-  alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.Viewport
 
+  alias MingaEditor.Handlers.EffectHandler
   alias MingaEditor.Handlers.EventDispatcher
   alias MingaEditor.Handlers.FileEventHandler
   alias MingaEditor.Handlers.GuiActionHandler
@@ -86,7 +85,6 @@ defmodule MingaEditor do
 
   alias MingaEditor.State.Session, as: EditorSessionState
 
-  alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -1016,287 +1014,15 @@ defmodule MingaEditor do
 
   # ── Agent lifecycle ──────────────────────────────────────────────────────
 
-  @typedoc """
-  Side effects returned by event handlers and pure state functions.
-
-  * `:render` — schedule a debounced render
-  * `{:render, delay_ms}` — schedule render with custom delay
-  * `{:open_file, path}` — open a file in a new or existing buffer
-  * `{:switch_buffer, pid}` — make this buffer active
-  * `{:set_status, msg}` — show a status message in the minibuffer
-  * `:clear_status` — clear the status message
-  * `{:push_overlay, module}` — push an overlay handler onto the focus stack
-  * `{:pop_overlay, module}` — pop an overlay handler from the focus stack
-  * `{:log_message, msg}` — log to *Messages* buffer
-  * `{:log_warning, msg}` — log to both *Messages* and *Warnings* (warning level)
-  * `{:log, subsystem, level, msg}` — log via Minga.Log
-  * `:sync_agent_buffer` — sync agent buffer with session output
-  * `{:update_tab_label, label}` — update active tab label
-  * `{:monitor, pid}` — monitor a buffer process
-  * `{:stop_spinner}` — cancel outgoing agent spinner timer
-  * `{:start_spinner}` — start incoming agent spinner timer
-  * `{:rebuild_agent_session, tab}` — rebuild agent state from session process
-  * `{:request_semantic_tokens}` — request semantic tokens from LSP
-  * `{:send_after, msg, delay}` — schedule a self-send after delay
-  * `{:conceal_spans, pid, spans}` — apply conceal spans to a buffer
-  * `{:prettify_symbols, pid}` — run prettify symbols on a buffer
-  * `{:update_agent_styled_cache}` — re-cache GUI styled messages
-  * `{:evict_parser_trees_timer}` — schedule next eviction check
-  * `{:refresh_tool_picker}` — refresh tool picker if open
-  * `{:save_session_async, snapshot, opts}` — persist session in background
-  * `{:restart_session_timer}` — restart the periodic session timer
-  * `{:cancel_session_timer}` — cancel the periodic session timer
-  * `{:recover_swap_entries, entries}` — recover swap file entries
-  * `{:restore_session, opts}` — restore session from disk
-  * `{:request_code_lens}` — request fresh code lenses from LSP
-  * `{:request_inlay_hints}` — request fresh inlay hints from LSP
-  * `:render_now` — render immediately after a handler updates state
-  * `{:save_session_deferred}` — send :save_session to self
-  * `{:schedule_file_tree_refresh, delay}` — debounce one filesystem tree refresh
-  * `{:handle_git_remote_result, ref, result}` — process git remote result
-  """
-  @type effect ::
-          :render
-          | :render_now
-          | {:render, delay_ms :: pos_integer()}
-          | {:open_file, String.t()}
-          | {:switch_buffer, pid()}
-          | {:set_status, String.t()}
-          | :clear_status
-          | {:push_overlay, module()}
-          | {:pop_overlay, module()}
-          | {:log_message, String.t()}
-          | {:log_warning, String.t()}
-          | {:log, atom(), atom(), String.t()}
-          | :sync_agent_buffer
-          | {:update_tab_label, String.t()}
-          | {:monitor, pid()}
-          | :stop_spinner
-          | :start_spinner
-          | {:rebuild_agent_session, MingaEditor.State.Tab.t()}
-          | {:request_semantic_tokens}
-          | {:send_after, term(), non_neg_integer()}
-          | {:conceal_spans, pid(), [map()]}
-          | {:prettify_symbols, pid()}
-          | {:update_agent_styled_cache}
-          | {:evict_parser_trees_timer}
-          | {:refresh_tool_picker}
-          | {:save_session_async, term(), keyword()}
-          | {:restart_session_timer}
-          | {:cancel_session_timer}
-          | {:recover_swap_entries, [Session.swap_entry()]}
-          | {:restore_session, keyword()}
-          | {:request_code_lens}
-          | {:request_inlay_hints}
-          | {:save_session_deferred}
-          | {:schedule_file_tree_refresh, non_neg_integer()}
-          | {:handle_git_remote_result, reference(), term()}
+  @type effect :: EffectHandler.effect()
 
   @doc """
   Applies a list of effects to the editor state.
 
-  Agent event handlers return `{new_state, [effect()]}` from their callbacks.
-  The Editor interprets each effect. This keeps handlers testable as
-  pure `state -> {state, effects}` functions.
+  Delegates to `MingaEditor.Handlers.EffectHandler.apply_effects/2`.
   """
   @spec apply_effects(EditorState.t(), [effect()]) :: EditorState.t()
-  def apply_effects(state, []), do: state
-
-  def apply_effects(state, [effect | rest]) do
-    state = apply_effect(state, effect)
-    apply_effects(state, rest)
-  end
-
-  @spec apply_effect(EditorState.t(), effect()) :: EditorState.t()
-  defp apply_effect(state, :render), do: schedule_render(state, 16)
-
-  defp apply_effect(state, :render_now), do: Renderer.render_or_async(state)
-
-  defp apply_effect(state, {:set_status, msg}) when is_binary(msg),
-    do: EditorState.set_status(state, msg)
-
-  defp apply_effect(state, {:open_file, path}) when is_binary(path),
-    do: Commands.execute(state, {:edit_file, path})
-
-  defp apply_effect(state, {:switch_buffer, pid}) when is_pid(pid) do
-    case Enum.find_index(state.workspace.buffers.list, &(&1 == pid)) do
-      nil -> state
-      idx -> EditorState.switch_buffer(state, idx) |> reset_nav_flash_tracking()
-    end
-  end
-
-  defp apply_effect(state, {:push_overlay, mod}) when is_atom(mod),
-    do: %{state | focus_stack: [mod | state.focus_stack]}
-
-  defp apply_effect(state, {:pop_overlay, mod}) when is_atom(mod),
-    do: %{state | focus_stack: List.delete(state.focus_stack, mod)}
-
-  defp apply_effect(state, {:render, delay_ms}) when is_integer(delay_ms),
-    do: schedule_render(state, delay_ms)
-
-  defp apply_effect(state, {:log_message, msg}) when is_binary(msg), do: log_message(state, msg)
-
-  defp apply_effect(state, {:log_warning, msg}) when is_binary(msg) do
-    Minga.Log.warning(:editor, msg)
-    state = MessageLog.log(state, msg, :warning)
-    maybe_schedule_warning_popup(state)
-  end
-
-  defp apply_effect(state, :sync_agent_buffer), do: AgentLifecycle.sync_buffer(state)
-
-  defp apply_effect(state, {:update_tab_label, _label}),
-    do: AgentLifecycle.maybe_update_tab_label(state)
-
-  defp apply_effect(state, {:monitor, pid}) when is_pid(pid),
-    do: EditorState.monitor_buffer(state, pid)
-
-  defp apply_effect(state, :stop_spinner),
-    do: AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
-
-  defp apply_effect(state, :start_spinner) do
-    agent = AgentAccess.agent(state)
-
-    if AgentState.busy?(agent) and agent.spinner_timer == nil do
-      AgentAccess.update_agent(state, &AgentState.start_spinner_timer/1)
-    else
-      state
-    end
-  end
-
-  defp apply_effect(state, {:rebuild_agent_session, %MingaEditor.State.Tab{kind: :agent} = tab}) do
-    state
-    |> EditorState.rebuild_agent_from_session(tab)
-    |> AgentLifecycle.sync_buffer()
-  end
-
-  defp apply_effect(state, {:rebuild_agent_session, tab}),
-    do: EditorState.rebuild_agent_from_session(state, tab)
-
-  defp apply_effect(state, :clear_status), do: EditorState.clear_status(state)
-
-  defp apply_effect(state, {:log, subsystem, level, msg})
-       when is_atom(subsystem) and is_atom(level) and is_binary(msg) do
-    apply_log_effect(subsystem, level, msg)
-    state
-  end
-
-  defp apply_effect(state, {:request_semantic_tokens}),
-    do: SemanticTokenSync.request_tokens(state)
-
-  defp apply_effect(state, {:send_after, msg, delay}) when is_integer(delay) do
-    if state.backend != :headless do
-      Process.send_after(self(), msg, delay)
-    end
-
-    state
-  end
-
-  defp apply_effect(state, {:schedule_file_tree_refresh, delay}) when is_integer(delay) do
-    if MingaEditor.FileTree.Freshness.refresh_scheduled?(state) do
-      state
-    else
-      ref = Process.send_after(self(), :file_tree_refresh_timer, delay)
-      MingaEditor.FileTree.Freshness.schedule_refresh(state, ref)
-    end
-  end
-
-  defp apply_effect(state, {:conceal_spans, pid, spans}) when is_pid(pid) do
-    MingaEditor.HighlightEvents.handle_conceal_spans(state, pid, spans)
-    state
-  end
-
-  defp apply_effect(state, {:prettify_symbols, pid}) when is_pid(pid) do
-    maybe_spawn_prettify(state)
-    state
-  end
-
-  defp apply_effect(state, {:update_agent_styled_cache}),
-    do: AgentLifecycle.update_styled_cache(state)
-
-  defp apply_effect(state, {:evict_parser_trees_timer}) do
-    if state.backend != :headless do
-      Process.send_after(
-        self(),
-        :evict_parser_trees,
-        HighlightSync.eviction_check_interval_ms()
-      )
-    end
-
-    state
-  end
-
-  defp apply_effect(state, {:refresh_tool_picker}),
-    do: maybe_refresh_tool_picker(state)
-
-  defp apply_effect(state, {:save_session_async, snapshot, opts}) do
-    Task.start(fn ->
-      case Session.save(snapshot, opts) do
-        :ok -> :ok
-        {:error, reason} -> Minga.Log.warning(:editor, "Session save failed: #{inspect(reason)}")
-      end
-    end)
-
-    state
-  end
-
-  defp apply_effect(state, {:restart_session_timer}),
-    do: %{state | session: EditorSessionState.restart_timer(state.session)}
-
-  defp apply_effect(state, {:cancel_session_timer}),
-    do: %{state | session: EditorSessionState.cancel_timer(state.session)}
-
-  defp apply_effect(state, {:recover_swap_entries, entries}),
-    do: recover_swap_entries(state, entries)
-
-  defp apply_effect(state, {:restore_session, _opts}),
-    do: restore_session(state)
-
-  defp apply_effect(state, {:request_code_lens}),
-    do: LspActions.code_lens(state)
-
-  defp apply_effect(state, {:request_inlay_hints}),
-    do: LspActions.inlay_hints(state)
-
-  defp apply_effect(state, {:save_session_deferred}) do
-    if state.backend != :headless, do: send(self(), :save_session)
-    state
-  end
-
-  defp apply_effect(state, {:handle_git_remote_result, ref, result}),
-    do: Renderer.render_or_async(Commands.Git.handle_remote_result(state, ref, result))
-
-  # Dispatches a log effect to the appropriate Minga.Log function.
-  @spec apply_log_effect(atom(), atom(), String.t()) :: :ok
-  defp apply_log_effect(subsystem, :debug, msg), do: Minga.Log.debug(subsystem, msg)
-  defp apply_log_effect(subsystem, :info, msg), do: Minga.Log.info(subsystem, msg)
-  defp apply_log_effect(subsystem, :warning, msg), do: Minga.Log.warning(subsystem, msg)
-  defp apply_log_effect(subsystem, :error, msg), do: Minga.Log.error(subsystem, msg)
-
-  # Spawns a prettify-symbols Task if enabled and the active buffer has highlights.
-  @spec maybe_spawn_prettify(state()) :: :ok
-  defp maybe_spawn_prettify(%{workspace: %{buffers: %{active: nil}}}), do: :ok
-
-  defp maybe_spawn_prettify(state) do
-    if MingaEditor.UI.PrettifySymbols.enabled?() do
-      spawn_prettify_task(state)
-    end
-
-    :ok
-  end
-
-  @spec spawn_prettify_task(state()) :: :ok
-  defp spawn_prettify_task(state) do
-    hl = HighlightSync.get_active_highlight(state)
-
-    if hl.capture_names != {} and tuple_size(hl.spans) > 0 do
-      buf = state.workspace.buffers.active
-      file_path = Minga.Buffer.file_path(buf)
-      filetype = Minga.Language.detect_filetype(file_path)
-      Task.start(fn -> MingaEditor.UI.PrettifySymbols.apply(buf, hl, filetype) end)
-    end
-
-    :ok
-  end
+  defdelegate apply_effects(state, effects), to: EffectHandler
 
   # Tab bar, view state, capabilities, parser subscription helpers
 
@@ -1391,7 +1117,7 @@ defmodule MingaEditor do
     if delta >= threshold and Config.get(:nav_flash) do
       start_flash(state, current_line)
     else
-      cancel_flash_if_active(state)
+      cancel_nav_flash(state)
     end
   end
 
@@ -1403,40 +1129,34 @@ defmodule MingaEditor do
     EditorState.set_nav_flash(state, apply_flash_effects(state, new_flash, effects))
   end
 
-  @spec cancel_flash_if_active(state()) :: state()
-  defp cancel_flash_if_active(%{shell_state: %{nav_flash: nil}} = state), do: state
-
-  defp cancel_flash_if_active(state) do
-    effects = NavFlash.cancel_effects(EditorState.nav_flash(state))
-    execute_flash_effects(state, effects)
-    EditorState.cancel_nav_flash(state)
-  end
-
   # Resets nav-flash tracking after a buffer switch so the cursor
   # position of the new buffer doesn't trigger a false-positive flash
   # from the old buffer's cursor line.
+  @doc false
   @spec reset_nav_flash_tracking(state()) :: state()
-  defp reset_nav_flash_tracking(state) do
-    state = cancel_flash_if_active(state)
+  def reset_nav_flash_tracking(state) do
+    state = cancel_nav_flash(state)
     %{state | last_cursor_line: nil}
   end
 
   # Cancels any active nav-flash. Called on every keypress.
+  @doc false
   @spec cancel_nav_flash(state()) :: state()
-  defp cancel_nav_flash(%{shell_state: %{nav_flash: nil}} = state), do: state
+  def cancel_nav_flash(%{shell_state: %{nav_flash: nil}} = state), do: state
 
-  defp cancel_nav_flash(state) do
+  def cancel_nav_flash(state) do
     effects = NavFlash.cancel_effects(EditorState.nav_flash(state))
-    execute_flash_effects(state, effects)
+    MingaEditor.FlashEffects.execute(state, effects)
     EditorState.cancel_nav_flash(state)
   end
 
+  @doc false
   @spec cancel_yank_flash(state()) :: state()
-  defp cancel_yank_flash(%{shell_state: %{yank_flash: nil}} = state), do: state
+  def cancel_yank_flash(%{shell_state: %{yank_flash: nil}} = state), do: state
 
-  defp cancel_yank_flash(%{shell_state: %{yank_flash: flash}} = state) do
+  def cancel_yank_flash(%{shell_state: %{yank_flash: flash}} = state) do
     effects = YankFlash.cancel_effects(flash)
-    execute_flash_effects(state, effects)
+    MingaEditor.FlashEffects.execute(state, effects)
     clear_yank_highlight(flash.buf)
     EditorState.cancel_yank_flash(state)
   end
@@ -1478,10 +1198,6 @@ defmodule MingaEditor do
 
   defp apply_flash_effects(state, flash, effects) do
     MingaEditor.FlashEffects.apply(state, flash, effects)
-  end
-
-  defp execute_flash_effects(state, effects) do
-    MingaEditor.FlashEffects.execute(state, effects)
   end
 
   # ── Key dispatch ─────────────────────────────────────────────────────────────
@@ -1542,8 +1258,9 @@ defmodule MingaEditor do
     end)
   end
 
+  @doc false
   @spec recover_swap_entries(state(), [Minga.Session.swap_entry()]) :: state()
-  defp recover_swap_entries(state, entries) do
+  def recover_swap_entries(state, entries) do
     count = length(entries)
 
     state =
@@ -1574,8 +1291,9 @@ defmodule MingaEditor do
   end
 
   # Restores open files and cursor positions from the previous session.
+  @doc false
   @spec restore_session(state()) :: state()
-  defp restore_session(state) do
+  def restore_session(state) do
     case Session.load(EditorSessionState.session_opts(state.session)) do
       {:ok, session} ->
         state = log_message(state, "Restored from previous session")
@@ -1857,18 +1575,19 @@ defmodule MingaEditor do
   # Refreshes the tool manager picker items if it's currently open.
   # Called when tool install events change tool status so the user
   # sees live updates (spinner → checkmark, etc.).
+  @doc false
   @spec maybe_refresh_tool_picker(state()) :: state()
-  defp maybe_refresh_tool_picker(
-         %{
-           shell_state: %{
-             modal: {:picker, %{picker_ui: %{source: MingaEditor.UI.Picker.Sources.Tool}}}
-           }
-         } = state
-       ) do
+  def maybe_refresh_tool_picker(
+        %{
+          shell_state: %{
+            modal: {:picker, %{picker_ui: %{source: MingaEditor.UI.Picker.Sources.Tool}}}
+          }
+        } = state
+      ) do
     PickerUI.refresh_items(state)
   end
 
-  defp maybe_refresh_tool_picker(state), do: state
+  def maybe_refresh_tool_picker(state), do: state
 
   # maybe_show_tool_prompt moved to ToolHandler
 
@@ -1876,16 +1595,17 @@ defmodule MingaEditor do
 
   @warning_popup_debounce_ms 200
 
+  @doc false
   @spec maybe_schedule_warning_popup(state()) :: state()
-  defp maybe_schedule_warning_popup(%{shell_state: %{warning_popup_timer: ref}} = state)
-       when is_reference(ref) do
+  def maybe_schedule_warning_popup(%{shell_state: %{warning_popup_timer: ref}} = state)
+      when is_reference(ref) do
     # Timer already running; the pending timeout will open the popup.
     state
   end
 
-  defp maybe_schedule_warning_popup(%{backend: :headless} = state), do: state
+  def maybe_schedule_warning_popup(%{backend: :headless} = state), do: state
 
-  defp maybe_schedule_warning_popup(state) do
+  def maybe_schedule_warning_popup(state) do
     ref = Process.send_after(self(), :warning_popup_timeout, @warning_popup_debounce_ms)
     EditorState.update_shell_state(state, &%{&1 | warning_popup_timer: ref})
   end
