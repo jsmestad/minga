@@ -154,9 +154,10 @@ defmodule MingaEditor.UI.Picker.SourceTest do
     end
 
     test "returns preview lines for source with preview callback" do
-      assert Source.preview(WithPreviewSource, {:a, "item", "desc"}, %{theme: %{fg: 0xFFFFFF}}) == [
-               [{"preview", 0xFFFFFF, false}]
-             ]
+      assert Source.preview(WithPreviewSource, {:a, "item", "desc"}, %{theme: %{fg: 0xFFFFFF}}) ==
+               [
+                 [{"preview", 0xFFFFFF, false}]
+               ]
     end
   end
 

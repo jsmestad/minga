@@ -77,7 +77,7 @@ defmodule Minga.GitTest do
     end
 
     test "diff rejects duplicate option keys", %{root: dir} do
-      assert {:error, reason} = Git.diff(dir, [commit: "abc123", commit: "def456"])
+      assert {:error, reason} = Git.diff(dir, commit: "abc123", commit: "def456")
       assert reason =~ "duplicate keys"
     end
 

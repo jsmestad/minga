@@ -36,7 +36,9 @@ defmodule Minga.Git.DiffOptions do
   @spec validate_duplicate_keys(keyword()) :: :ok | {:error, String.t()}
   defp validate_duplicate_keys(opts) do
     case duplicate_keys(opts) do
-      [] -> :ok
+      [] ->
+        :ok
+
       keys ->
         key_list = Enum.map_join(keys, ", ", &inspect/1)
         {:error, "git diff options contain duplicate keys: #{key_list}"}
@@ -47,7 +49,9 @@ defmodule Minga.Git.DiffOptions do
   defp validate_types([]), do: :ok
 
   defp validate_types([{:path, path} | rest]) when is_binary(path), do: validate_types(rest)
-  defp validate_types([{:path, _path} | _rest]), do: {:error, "git diff option :path must be a binary"}
+
+  defp validate_types([{:path, _path} | _rest]),
+    do: {:error, "git diff option :path must be a binary"}
 
   defp validate_types([{:staged, staged} | rest]) when is_boolean(staged),
     do: validate_types(rest)

@@ -50,10 +50,11 @@ defmodule MingaEditor.UI.Picker.GitLogFileSource do
   defdelegate on_cancel(state), to: GitLogSource
 
   @impl true
-  @spec preview(Item.t(), MingaEditor.Frontend.Emit.Context.t()) :: [
-          [MingaEditor.UI.Picker.Source.preview_segment()]
-        ]
-        | nil
+  @spec preview(Item.t(), MingaEditor.Frontend.Emit.Context.t()) ::
+          [
+            [MingaEditor.UI.Picker.Source.preview_segment()]
+          ]
+          | nil
   defdelegate preview(item, ctx), to: GitLogSource
 
   @spec candidates_for_git_buffer(Context.t(), pid()) :: [Item.t()]

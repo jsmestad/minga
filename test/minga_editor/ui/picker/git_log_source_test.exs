@@ -27,8 +27,13 @@ defmodule MingaEditor.UI.Picker.GitLogSourceTest do
     %{root: dir, ctx: context(dir)}
   end
 
-  test "candidates show commit message, hash annotation, author, and date", %{root: root, ctx: ctx} do
-    GitStub.set_log(root, [commit("abc123456789", "abc1234", "Ada", "2 days ago", "Add picker preview")])
+  test "candidates show commit message, hash annotation, author, and date", %{
+    root: root,
+    ctx: ctx
+  } do
+    GitStub.set_log(root, [
+      commit("abc123456789", "abc1234", "Ada", "2 days ago", "Add picker preview")
+    ])
 
     assert [item] = GitLogSource.candidates(ctx)
     assert item.label == "Add picker preview"
@@ -37,7 +42,9 @@ defmodule MingaEditor.UI.Picker.GitLogSourceTest do
   end
 
   test "commits are searchable by message, author, and hash", %{root: root, ctx: ctx} do
-    GitStub.set_log(root, [commit("abc123456789", "abc1234", "Ada", "2 days ago", "Add picker preview")])
+    GitStub.set_log(root, [
+      commit("abc123456789", "abc1234", "Ada", "2 days ago", "Add picker preview")
+    ])
 
     items = GitLogSource.candidates(ctx)
 
@@ -47,7 +54,8 @@ defmodule MingaEditor.UI.Picker.GitLogSourceTest do
   end
 
   test "candidate list includes a load more item when more commits exist", %{root: root, ctx: ctx} do
-    entries = Enum.map(1..51, fn n -> commit("hash#{n}", "h#{n}", "Ada", "today", "Commit #{n}") end)
+    entries =
+      Enum.map(1..51, fn n -> commit("hash#{n}", "h#{n}", "Ada", "today", "Commit #{n}") end)
 
     GitStub.set_log(root, entries)
 
@@ -58,7 +66,9 @@ defmodule MingaEditor.UI.Picker.GitLogSourceTest do
   end
 
   test "highlighting load more does not load more commits until enter", %{root: root} do
-    entries = Enum.map(1..101, fn n -> commit("hash#{n}", "h#{n}", "Ada", "today", "Commit #{n}") end)
+    entries =
+      Enum.map(1..101, fn n -> commit("hash#{n}", "h#{n}", "Ada", "today", "Commit #{n}") end)
+
     GitStub.set_log(root, entries)
 
     {:ok, active_buf} = Buffer.start_link(content: "new\n")
@@ -157,7 +167,9 @@ defmodule MingaEditor.UI.Picker.GitLogSourceTest do
     File.mkdir_p!(Path.dirname(abs_path))
     File.write!(abs_path, "new\n")
 
-    entries = Enum.map(1..101, fn n -> commit("hash#{n}", "h#{n}", "Ada", "today", "Commit #{n}") end)
+    entries =
+      Enum.map(1..101, fn n -> commit("hash#{n}", "h#{n}", "Ada", "today", "Commit #{n}") end)
+
     GitStub.set_log(root, [count: 51, path: rel_path], Enum.take(entries, 51))
     GitStub.set_log(root, [count: 101, path: rel_path], Enum.take(entries, 101))
 

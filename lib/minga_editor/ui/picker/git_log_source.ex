@@ -46,8 +46,11 @@ defmodule MingaEditor.UI.Picker.GitLogSource do
   @spec candidates(Context.t()) :: [Item.t()]
   def candidates(%Context{} = ctx) do
     case git_root(ctx) do
-      {:ok, git_root} -> build_candidates(git_root, picker_path(ctx), picker_count(ctx), picker_source(ctx))
-      :not_git -> []
+      {:ok, git_root} ->
+        build_candidates(git_root, picker_path(ctx), picker_count(ctx), picker_source(ctx))
+
+      :not_git ->
+        []
     end
   catch
     :exit, _ -> []
@@ -94,9 +97,10 @@ defmodule MingaEditor.UI.Picker.GitLogSource do
     end
   end
 
-  @spec format_entries([Git.log_entry()], String.t(), String.t() | nil, pos_integer(), module()) :: [
-          Item.t()
-        ]
+  @spec format_entries([Git.log_entry()], String.t(), String.t() | nil, pos_integer(), module()) ::
+          [
+            Item.t()
+          ]
   defp format_entries(entries, git_root, path, count, source_module) do
     visible_entries = Enum.take(entries, count)
     items = Enum.map(visible_entries, &format_entry(&1, git_root, path))
@@ -190,6 +194,8 @@ defmodule MingaEditor.UI.Picker.GitLogSource do
   defp preview_fg(_ctx), do: @default_fg
 
   @spec picker_source(Context.t()) :: module()
-  defp picker_source(%Context{picker_ui: %{context: %{source: source}}}) when is_atom(source), do: source
+  defp picker_source(%Context{picker_ui: %{context: %{source: source}}}) when is_atom(source),
+    do: source
+
   defp picker_source(_ctx), do: __MODULE__
 end
