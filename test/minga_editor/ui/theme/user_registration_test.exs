@@ -5,7 +5,12 @@ defmodule MingaEditor.UI.Theme.UserRegistrationTest do
   alias MingaEditor.UI.Theme
 
   setup do
-    on_exit(fn -> Theme.register_user_themes(%{}) end)
+    on_exit(fn ->
+      Theme.unregister_source({:extension, :theme_registration_test})
+      Theme.unregister_source({:extension, :theme_registration_other})
+      Theme.register_user_themes(%{})
+    end)
+
     :ok
   end
 
@@ -40,6 +45,26 @@ defmodule MingaEditor.UI.Theme.UserRegistrationTest do
     Theme.register_user_themes(%{doom_one: loaded})
     {:ok, theme} = Theme.get(:doom_one)
     assert theme.editor.fg == 0x123456
+  end
+
+  test "unregister_source removes only themes owned by that source and keeps built-in fallback" do
+    doom = Theme.get!(:doom_one)
+    source = {:extension, :theme_registration_test}
+    other_source = {:extension, :theme_registration_other}
+
+    Theme.register_themes(%{extension_theme: %{doom | name: :extension_theme}}, source)
+
+    Theme.register_themes(
+      %{other_extension_theme: %{doom | name: :other_extension_theme}},
+      other_source
+    )
+
+    assert {:ok, %Theme{name: :extension_theme}} = Theme.get(:extension_theme)
+    assert :ok = Theme.unregister_source(source)
+
+    assert :error = Theme.get(:extension_theme)
+    assert {:ok, %Theme{name: :other_extension_theme}} = Theme.get(:other_extension_theme)
+    assert {:ok, %Theme{name: :doom_one}} = Theme.get(:doom_one)
   end
 
   test "registering empty map clears user themes" do

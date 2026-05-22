@@ -155,6 +155,7 @@ defmodule Minga.Extension.Supervisor do
       )
     else
       {:error, reason} ->
+        cleanup_extension_contributions(name, cmd_registry, keymap)
         msg = "Extension #{name} load error: #{inspect(reason)}"
         Minga.Log.warning(:config, msg)
         ExtRegistry.update(registry, name, status: :load_error, pid: nil)
@@ -185,7 +186,7 @@ defmodule Minga.Extension.Supervisor do
         )
 
       {:error, _reason} = error ->
-        Minga.Config.ModelineSegments.unregister_source({:extension, name})
+        cleanup_extension_contributions(name, cmd_registry, keymap)
         ExtRegistry.update(registry, name, status: :load_error, pid: nil)
         error
     end
@@ -216,7 +217,7 @@ defmodule Minga.Extension.Supervisor do
         {:ok, pid}
 
       {:error, reason} ->
-        Minga.Config.ModelineSegments.unregister_source({:extension, name})
+        cleanup_extension_contributions(name, cmd_registry, keymap)
         {:error, reason}
     end
   end
@@ -263,12 +264,10 @@ defmodule Minga.Extension.Supervisor do
       end
     end
 
-    # Deregister DSL-declared commands, keybindings, and modeline segments before purging the module.
-    # The module must still be loaded for schema functions to work.
+    # Deregister source-owned contributions before purging the module.
+    cleanup_extension_contributions(name, cmd_registry, keymap)
+
     if entry.module do
-      deregister_extension_commands(entry.module, cmd_registry)
-      deregister_extension_keybinds(entry.module, keymap)
-      Minga.Config.ModelineSegments.unregister_source({:extension, name})
       :code.purge(entry.module)
       :code.delete(entry.module)
     end
@@ -369,6 +368,7 @@ defmodule Minga.Extension.Supervisor do
       )
     else
       {:error, reason} ->
+        cleanup_extension_contributions(name, cmd_registry, keymap)
         msg = "Extension #{name} load error: #{inspect(reason)}"
         Minga.Log.warning(:config, msg)
         ExtRegistry.update(registry, name, status: :load_error, pid: nil)
@@ -519,39 +519,19 @@ defmodule Minga.Extension.Supervisor do
     end
   end
 
-  @spec deregister_extension_commands(module(), GenServer.server()) :: :ok
-  defp deregister_extension_commands(module, cmd_registry) do
-    if function_exported?(module, :__command_schema__, 0) do
-      for {name, _description, _opts} <- module.__command_schema__() do
-        Minga.Command.Registry.unregister(cmd_registry, name)
-      end
-    end
+  @spec cleanup_extension_contributions(atom(), GenServer.server(), GenServer.server()) :: :ok
+  defp cleanup_extension_contributions(name, cmd_registry, keymap) do
+    source = {:extension, name}
 
-    :ok
+    Minga.Extension.ContributionCleanup.unregister_source(source,
+      command_registry: cmd_registry,
+      keymap: keymap
+    )
   rescue
     e ->
       Minga.Log.warning(
         :config,
-        "Extension #{inspect(module)} command deregistration failed: #{Exception.message(e)}"
-      )
-
-      :ok
-  end
-
-  @spec deregister_extension_keybinds(module(), GenServer.server()) :: :ok
-  defp deregister_extension_keybinds(module, keymap) do
-    if function_exported?(module, :__keybind_schema__, 0) do
-      for {mode, key_str, _command, _description, opts} <- module.__keybind_schema__() do
-        Minga.Keymap.Active.unbind(keymap, mode, key_str, opts)
-      end
-    end
-
-    :ok
-  rescue
-    e ->
-      Minga.Log.warning(
-        :config,
-        "Extension #{inspect(module)} keybind deregistration failed: #{Exception.message(e)}"
+        "Extension #{name} contribution cleanup failed: #{Exception.message(e)}"
       )
 
       :ok
@@ -559,18 +539,9 @@ defmodule Minga.Extension.Supervisor do
 
   @spec register_extension_commands(module(), atom(), GenServer.server()) :: :ok
   defp register_extension_commands(module, ext_name, cmd_registry) do
-    if function_exported?(module, :__command_schema__, 0) do
-      schema = module.__command_schema__()
-
-      for spec <- schema do
-        Minga.Command.Registry.register_command(cmd_registry, build_command_from_spec(spec))
-      end
-
-      if schema != [] do
-        Minga.Log.debug(:config, "Extension #{ext_name}: registered #{length(schema)} commands")
-      end
-    end
-
+    schema = command_schema(module)
+    Enum.each(schema, &register_extension_command_spec(&1, ext_name, cmd_registry))
+    log_registered_commands(ext_name, schema)
     :ok
   rescue
     e ->
@@ -580,6 +551,40 @@ defmodule Minga.Extension.Supervisor do
       )
 
       :ok
+  end
+
+  @spec command_schema(module()) :: [Minga.Extension.command_spec()]
+  defp command_schema(module) do
+    case function_exported?(module, :__command_schema__, 0) do
+      true -> module.__command_schema__()
+      false -> []
+    end
+  end
+
+  @spec register_extension_command_spec(
+          Minga.Extension.command_spec(),
+          atom(),
+          GenServer.server()
+        ) :: :ok
+  defp register_extension_command_spec(spec, ext_name, cmd_registry) do
+    case Minga.Command.Registry.register_command(
+           cmd_registry,
+           {:extension, ext_name},
+           build_command_from_spec(spec)
+         ) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Minga.Log.warning(:config, "Extension #{ext_name} command rejected: #{inspect(reason)}")
+    end
+  end
+
+  @spec log_registered_commands(atom(), [Minga.Extension.command_spec()]) :: :ok
+  defp log_registered_commands(_ext_name, []), do: :ok
+
+  defp log_registered_commands(ext_name, schema) do
+    Minga.Log.debug(:config, "Extension #{ext_name}: registered #{length(schema)} commands")
   end
 
   @spec build_command_from_spec(Minga.Extension.command_spec()) :: Minga.Command.t()
@@ -669,7 +674,9 @@ defmodule Minga.Extension.Supervisor do
 
   @spec bind_keybind_spec(Minga.Extension.keybind_spec(), atom(), GenServer.server()) :: :ok
   defp bind_keybind_spec({mode, key_str, command, description, opts}, ext_name, keymap) do
-    case Minga.Keymap.Active.bind(keymap, mode, key_str, command, description, opts) do
+    source_opts = Keyword.put(opts, :source, {:extension, ext_name})
+
+    case Minga.Keymap.Active.bind(keymap, mode, key_str, command, description, source_opts) do
       :ok ->
         :ok
 

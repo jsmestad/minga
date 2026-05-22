@@ -136,9 +136,41 @@ defmodule Minga.Language.RegistryTest do
       assert Registry.for_extension("xyz_test_ext").name == :test_lang_xyz
     end
 
-    test "runtime registration overrides existing definition" do
-      original = Registry.get(:elixir)
-      assert original.label == "Elixir"
+    test "unregister_source removes language names and indexes for only that source" do
+      source = {:extension, :language_registry_test}
+      other_source = {:extension, :language_registry_other}
+
+      lang = %Language{
+        name: :source_lang_xyz,
+        label: "Source Lang",
+        comment_token: "// ",
+        extensions: ["source_xyz"],
+        filenames: ["Sourcefile"],
+        shebangs: ["sourcebang"]
+      }
+
+      other = %Language{
+        name: :other_source_lang_xyz,
+        label: "Other Source Lang",
+        comment_token: "# ",
+        extensions: ["other_source_xyz"]
+      }
+
+      assert :ok = Registry.register(lang, source)
+      assert :ok = Registry.register(other, other_source)
+      assert :ok = Registry.unregister_source(source)
+
+      assert Registry.get(:source_lang_xyz) == nil
+      assert Registry.for_extension("source_xyz") == nil
+      assert Registry.for_filename("Sourcefile") == nil
+      assert Registry.for_shebang("sourcebang") == nil
+      assert %Language{name: :other_source_lang_xyz} = Registry.get(:other_source_lang_xyz)
+
+      Registry.unregister_source(other_source)
+    end
+
+    test "runtime registration rejects duplicate built-in definitions from another source" do
+      assert Registry.get(:elixir).label == "Elixir"
 
       override = %Language{
         name: :elixir,
@@ -147,11 +179,9 @@ defmodule Minga.Language.RegistryTest do
         extensions: ["ex", "exs"]
       }
 
-      Registry.register(override)
-      assert Registry.get(:elixir).label == "Elixir Override"
+      assert {:error, {:duplicate_key, {:name, :elixir}, :builtin, :config}} =
+               Registry.register(override)
 
-      # Restore original
-      Registry.register(original)
       assert Registry.get(:elixir).label == "Elixir"
     end
   end

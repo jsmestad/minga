@@ -1,5 +1,6 @@
 defmodule Minga.Tool.Recipe.RegistryTest do
-  use ExUnit.Case, async: true
+  # Mutates the global recipe registry in source-cleanup tests.
+  use ExUnit.Case, async: false
 
   alias Minga.Tool.Recipe
   alias Minga.Tool.Recipe.Registry
@@ -146,6 +147,64 @@ defmodule Minga.Tool.Recipe.RegistryTest do
 
     test "rejects debug symbols asset" do
       refute Registry.clangd_asset?("clangd-debug-symbols-windows-21.1.8.7z", "darwin_arm64")
+    end
+  end
+
+  describe "source ownership" do
+    test "rejects duplicate built-in recipes from another source" do
+      recipe = %Recipe{
+        name: :pyright,
+        label: "Custom Pyright",
+        description: "Duplicate recipe",
+        provides: ["pyright-custom"],
+        method: :npm,
+        package: "pyright-custom",
+        homepage: "https://example.invalid/pyright",
+        category: :lsp_server,
+        languages: [:python]
+      }
+
+      assert {:error, {:duplicate_recipe, :pyright, :builtin, {:extension, :recipe_collision}}} =
+               Registry.register(recipe, {:extension, :recipe_collision})
+    end
+
+    test "unregister_source removes recipes and command indexes for only that source" do
+      source = {:extension, :recipe_registry_test}
+      other_source = {:extension, :recipe_registry_other}
+
+      recipe = %Recipe{
+        name: :source_recipe_test,
+        label: "Source Recipe",
+        description: "Test recipe",
+        provides: ["source-recipe-test"],
+        method: :npm,
+        package: "source-recipe-test",
+        homepage: "https://example.invalid/source",
+        category: :formatter,
+        languages: [:elixir]
+      }
+
+      other = %Recipe{
+        name: :other_source_recipe_test,
+        label: "Other Source Recipe",
+        description: "Other test recipe",
+        provides: ["other-source-recipe-test"],
+        method: :npm,
+        package: "other-source-recipe-test",
+        homepage: "https://example.invalid/other",
+        category: :formatter,
+        languages: [:elixir]
+      }
+
+      assert :ok = Registry.register(recipe, source)
+      assert :ok = Registry.register(other, other_source)
+      assert :ok = Registry.unregister_source(source)
+
+      assert Registry.get(:source_recipe_test) == nil
+      assert Registry.for_command("source-recipe-test") == nil
+      assert %Recipe{name: :other_source_recipe_test} = Registry.get(:other_source_recipe_test)
+
+      Registry.unregister_source(other_source)
     end
   end
 
