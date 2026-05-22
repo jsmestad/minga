@@ -8,9 +8,8 @@ defmodule Minga.Git.DiffOptions do
     with :ok <- validate_keyword(opts),
          :ok <- validate_allowed_keys(opts),
          :ok <- validate_duplicate_keys(opts),
-         :ok <- validate_types(opts),
-         :ok <- validate_commit_staged(opts) do
-      :ok
+         :ok <- validate_types(opts) do
+      validate_commit_staged(opts)
     end
   end
 
