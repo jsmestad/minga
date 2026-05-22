@@ -183,6 +183,9 @@ jobs:
       - name: Generate Xcode project
         run: cd macos && xcodegen generate
 
+      - name: Clear stale Swift module cache
+        run: rm -rf macos/DerivedData/ModuleCache.noindex macos/DerivedData/SDKStatCaches.noindex
+
       - name: Build
         run: |
           cd macos
