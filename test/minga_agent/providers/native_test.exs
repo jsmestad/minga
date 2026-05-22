@@ -469,9 +469,9 @@ defmodule MingaAgent.Providers.NativeTest do
         start_provider(tmp_dir: root, llm_client: client, project_view: project_view, tools: nil)
 
       assert :ok = Native.send_prompt(pid, "Read the file through ProjectView")
-      assert_receive {:project_view_call, {:read_file, "lib/file.txt"}}
 
-      events = collect_events(1_000)
+      events = collect_events(2_000)
+      assert_received {:project_view_call, {:read_file, "lib/file.txt"}}
       tool_end = Enum.find(events, &match?(%Event.ToolEnd{name: "read_file"}, &1))
       assert tool_end != nil
       assert tool_end.result =~ "view text"

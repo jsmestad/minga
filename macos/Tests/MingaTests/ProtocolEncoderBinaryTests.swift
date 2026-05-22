@@ -466,6 +466,33 @@ struct EncoderGUIActionTests {
         #expect(payload[1] == GUI_ACTION_WORKSPACE_CLOSE)
         #expect(readU16(payload, 2) == 7)
     }
+
+    @Test("notification dismiss encodes action type and notification id")
+    func notificationDismissLayout() {
+        let id = "build:test"
+        let payload = captureFrame { $0.sendNotificationDismiss(id: id) }
+
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_NOTIFICATION_DISMISS)
+        let (decodedId, endOffset) = readString16(payload, 2)
+        #expect(decodedId == id)
+        #expect(endOffset == payload.count)
+    }
+
+    @Test("notification action encodes action type, notification id, and action id")
+    func notificationActionLayout() {
+        let id = "build:test"
+        let action = "show_logs"
+        let payload = captureFrame { $0.sendNotificationAction(id: id, actionId: action) }
+
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_NOTIFICATION_ACTION)
+        let (decodedId, nextOffset) = readString16(payload, 2)
+        let (decodedAction, endOffset) = readString16(payload, nextOffset)
+        #expect(decodedId == id)
+        #expect(decodedAction == action)
+        #expect(endOffset == payload.count)
+    }
 }
 
 // MARK: - Settings

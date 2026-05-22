@@ -22,7 +22,7 @@ defmodule MingaEditor.RenderPipeline.Input do
 
   **From `state` (top-level):**
   `theme`, `capabilities`, `shell`, `shell_state`, `port_manager`,
-  `message_store`, `face_override_registries`,
+  `message_store`, `notifications`, `face_override_registries`,
   `editing_model`, `backend`, `layout`, `focus_tree`
 
   `font_registry` is renderer-owned state. Editor-created snapshots carry a
@@ -57,6 +57,7 @@ defmodule MingaEditor.RenderPipeline.Input do
   alias MingaEditor.StatusBar.Data, as: StatusBarData
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.UI.FontRegistry
+  alias MingaEditor.UI.NotificationCenter
   alias MingaEditor.UI.Panel.MessageStore
   alias MingaEditor.UI.Theme
 
@@ -69,6 +70,7 @@ defmodule MingaEditor.RenderPipeline.Input do
     :shell,
     :shell_state,
     :message_store,
+    :notifications,
     :face_override_registries,
     :editing_model,
     :backend,
@@ -117,6 +119,7 @@ defmodule MingaEditor.RenderPipeline.Input do
           shell_state: ShellState.t() | BoardState.t(),
           font_registry: FontRegistry.t(),
           message_store: MessageStore.t(),
+          notifications: NotificationCenter.t(),
           face_override_registries: %{pid() => MingaEditor.UI.Face.Registry.t()},
           editing_model: :vim | :cua,
           backend: EditorState.backend(),
@@ -147,6 +150,7 @@ defmodule MingaEditor.RenderPipeline.Input do
       shell: state.shell,
       shell_state: state.shell_state,
       message_store: state.message_store,
+      notifications: state.notifications,
       face_override_registries: state.face_override_registries,
       editing_model: state.editing_model,
       backend: state.backend,
@@ -261,6 +265,8 @@ defmodule MingaEditor.RenderPipeline.Input do
       input.workspace.windows.tree,
       # Bottom panel
       input.shell_state |> Map.get(:bottom_panel),
+      # GUI notification center
+      input.notifications,
       # Git status panel
       input.shell_state |> Map.get(:git_status_panel),
       # Shell-owned chrome state that does not belong in the generic pipeline contract

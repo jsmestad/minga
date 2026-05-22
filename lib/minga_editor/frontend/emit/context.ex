@@ -20,6 +20,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.UI.FontRegistry
+  alias MingaEditor.UI.NotificationCenter
   alias MingaEditor.UI.Theme
 
   @type t :: %__MODULE__{
@@ -41,6 +42,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
           keymap_scope: Minga.Keymap.Scope.scope_name(),
           editing: VimState.t(),
           message_store: MingaEditor.UI.Panel.MessageStore.t(),
+          notifications: NotificationCenter.t(),
           title: String.t(),
           status_bar_data: term(),
           git_syncing: boolean(),
@@ -66,6 +68,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
             keymap_scope: :editor,
             editing: nil,
             message_store: nil,
+            notifications: NotificationCenter.new(),
             title: "Minga",
             status_bar_data: nil,
             git_syncing: false,
@@ -95,6 +98,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
       keymap_scope: state.workspace.keymap_scope,
       editing: state.workspace.editing,
       message_store: state.message_store,
+      notifications: state.notifications,
       title: title,
       status_bar_data: MingaEditor.StatusBar.Data.from_state(state),
       git_syncing: Map.get(state, :git_remote_op) != nil,
