@@ -108,6 +108,55 @@ defmodule MingaEditor.PickerUITest do
     {state, original_buf, preview_buf}
   end
 
+  defmodule NoBulkActionsSource do
+    @behaviour MingaEditor.UI.Picker.Source
+
+    alias MingaEditor.UI.Picker.Item
+
+    @impl true
+    def title, do: "No bulk actions"
+
+    @impl true
+    def candidates(_ctx), do: []
+
+    @impl true
+    def on_select(%Item{id: id}, state), do: Map.put(state, :selected_item_id, id)
+
+    @impl true
+    def on_cancel(state), do: state
+
+    @impl true
+    def actions(_item), do: [{"Open", :open}, {"Delete", :delete}]
+
+    @impl true
+    def on_action(:open, %Item{id: id}, state), do: Map.put(state, :action_item_id, id)
+
+    def on_action(:delete, %Item{id: id}, state),
+      do: Map.put(state, :action_item_id, {:delete, id})
+
+    def on_action(_action, _item, state), do: state
+  end
+
+  defp picker_state_for_source(state, source, items) do
+    picker = items |> Picker.new(title: "Test", max_visible: 10) |> mark_all_picker()
+
+    picker_state = %PickerState{
+      picker: picker,
+      source: source,
+      restore: state.workspace.buffers.active_index
+    }
+
+    ModalOverlay.open(state, :picker, PickerPayload.new(picker_state))
+  end
+
+  defp mark_all_picker(%Picker{items: []} = picker), do: picker
+
+  defp mark_all_picker(%Picker{} = picker) do
+    Enum.reduce(1..length(picker.items), picker, fn _, acc ->
+      Picker.toggle_mark(acc) |> Picker.move_down()
+    end)
+  end
+
   describe "render/1 with RenderInput" do
     test "returns empty draws when picker is nil" do
       input = %RenderInput{
@@ -506,6 +555,45 @@ defmodule MingaEditor.PickerUITest do
       assert picker_ui.picker.query == "d"
       assert result.shell_state.status_msg == nil
       assert result.workspace.editing.mode == :normal
+    end
+  end
+
+  describe "bulk action fallback for sources without bulk support" do
+    test "Enter still performs normal single select when marks exist" do
+      state = TestHelpers.base_state(content: "initial")
+
+      picker_state =
+        picker_state_for_source(state, NoBulkActionsSource, [
+          %Item{id: :first, label: "first"},
+          %Item{id: :second, label: "second"}
+        ])
+
+      new_state = PickerUI.handle_key(picker_state, 13, 0)
+
+      assert new_state.shell_state.modal == :none
+      assert Map.get(new_state, :selected_item_id) == :first
+      refute Map.has_key?(new_state, :bulk_selected)
+    end
+
+    test "C-o falls back to normal per-item actions and Enter dispatches on_action" do
+      state = TestHelpers.base_state(content: "initial")
+
+      picker_state =
+        picker_state_for_source(state, NoBulkActionsSource, [
+          %Item{id: :first, label: "first"},
+          %Item{id: :second, label: "second"}
+        ])
+
+      menu_state = PickerUI.handle_key(picker_state, ?o, MingaEditor.Input.mod_ctrl())
+
+      assert {:picker, %{picker_ui: %{action_menu: {actions, 0}}}} = menu_state.shell_state.modal
+      assert Enum.map(actions, &elem(&1, 0)) == ["Open", "Delete"]
+
+      new_state = PickerUI.handle_key(menu_state, 13, 0)
+
+      assert new_state.shell_state.modal == :none
+      assert Map.get(new_state, :action_item_id) == :first
+      refute Map.has_key?(new_state, :bulk_selected)
     end
   end
 

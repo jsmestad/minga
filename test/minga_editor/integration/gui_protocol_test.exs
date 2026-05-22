@@ -11,6 +11,7 @@ defmodule Minga.Integration.GUIProtocolTest do
   use ExUnit.Case, async: false
 
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
+  alias MingaEditor.UI.Picker
 
   @harness_path Path.join(:code.priv_dir(:minga), "minga-test-harness")
 
@@ -639,7 +640,7 @@ defmodule Minga.Integration.GUIProtocolTest do
 
   describe "gui_picker visible" do
     test "round-trips visible picker with items", %{port: port} do
-      item = %MingaEditor.UI.Picker.Item{
+      marked_item = %MingaEditor.UI.Picker.Item{
         id: "editor.ex",
         label: "editor.ex",
         description: "lib",
@@ -649,15 +650,20 @@ defmodule Minga.Integration.GUIProtocolTest do
         match_positions: [0, 3]
       }
 
-      picker = %MingaEditor.UI.Picker{
-        title: "Find File",
-        query: "edi",
-        selected: 0,
-        max_visible: 50,
-        items: [item],
-        filtered: [item],
-        marked: MapSet.new()
+      other_item = %MingaEditor.UI.Picker.Item{
+        id: "mix.exs",
+        label: "mix.exs",
+        description: "",
+        annotation: "",
+        icon_color: 0x98BE65,
+        two_line: false,
+        match_positions: []
       }
+
+      picker =
+        Picker.new([marked_item, other_item], title: "Find File", max_visible: 50)
+        |> Picker.toggle_mark()
+        |> Picker.filter("edi")
 
       cmd = ProtocolGUI.encode_gui_picker(picker, false, nil, 0, ">")
       Port.command(port, cmd)
@@ -671,7 +677,8 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["query"] == "edi"
       assert decoded["mode_prefix"] == ">"
       assert decoded["filtered_count"] == 1
-      assert decoded["total_count"] == 1
+      assert decoded["total_count"] == 2
+      assert decoded["marked_count"] == 1
       assert length(decoded["items"]) == 1
 
       item = hd(decoded["items"])

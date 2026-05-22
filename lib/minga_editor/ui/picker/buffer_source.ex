@@ -158,21 +158,51 @@ defmodule MingaEditor.UI.Picker.BufferSource do
   defp kill_items(items, %{workspace: %{buffers: %Buffers{} = bs}} = state) do
     pids = items |> Enum.map(&item_pid(&1, bs.list)) |> Enum.reject(&is_nil/1) |> Enum.uniq()
 
-    case pids do
-      [] ->
-        state
-
-      _ ->
-        Enum.each(pids, &stop_buffer/1)
-        new_bs = Enum.reduce(pids, bs, fn pid, acc -> Buffers.remove(acc, pid) end)
-
-        state
-        |> EditorState.set_buffers(new_bs)
-        |> EditorState.sync_active_window_buffer()
-    end
+    kill_pids(pids, bs, state)
   end
 
   defp kill_items(_items, state), do: state
+
+  @spec kill_pids([pid()], Buffers.t(), term()) :: term()
+  defp kill_pids([], _bs, state), do: state
+
+  defp kill_pids(pids, bs, state) do
+    pids
+    |> Enum.reduce(bs, fn pid, acc -> Buffers.remove(acc, pid) end)
+    |> apply_kill_result(pids, bs, state)
+  end
+
+  @spec apply_kill_result(Buffers.t(), [pid()], Buffers.t(), term()) :: term()
+  defp apply_kill_result(%Buffers{list: []}, pids, bs, state) do
+    case start_fallback_buffer(state) do
+      {:ok, new_buf} ->
+        Enum.each(pids, &stop_buffer/1)
+
+        state
+        |> EditorState.set_buffers(Buffers.replace_list(bs, [new_buf], 0))
+        |> EditorState.sync_active_window_buffer()
+
+      {:error, _} ->
+        state
+    end
+  end
+
+  defp apply_kill_result(%Buffers{} = new_bs, pids, _bs, state) do
+    Enum.each(pids, &stop_buffer/1)
+
+    state
+    |> EditorState.set_buffers(new_bs)
+    |> EditorState.sync_active_window_buffer()
+  end
+
+  @spec start_fallback_buffer(term()) :: {:ok, pid()} | {:error, term()}
+  defp start_fallback_buffer(state) do
+    DynamicSupervisor.start_child(
+      Minga.Buffer.Supervisor,
+      {Buffer,
+       content: "", buffer_name: "[new 1]", options_server: EditorState.options_server(state)}
+    )
+  end
 
   @spec item_pid(Item.t(), [pid()]) :: pid() | nil
   defp item_pid(%Item{id: {:pid, pid}}, _buffers) when is_pid(pid), do: pid

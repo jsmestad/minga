@@ -2495,6 +2495,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     items_payload = IO.iodata_to_binary([<<length(items)::16>> | entries])
     action_menu_bytes = encode_picker_action_menu(action_menu)
 
+    # Header payload includes visibility, counts, preview flag, title, and marked_count.
     sections = [
       encode_section(
         @section_picker_header,
