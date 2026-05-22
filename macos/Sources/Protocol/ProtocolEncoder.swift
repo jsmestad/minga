@@ -43,6 +43,7 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendNewTab()
     func sendSystemWillSleep()
     func sendSystemDidWake()
+    func sendPowerThermalState(lowPowerMode: Bool, thermalState: UInt8)
 
     // Bottom panel actions
     func sendPanelSwitchTab(index: UInt8)
@@ -136,6 +137,9 @@ extension InputEncoder {
 
     /// Default no-op so existing test spies do not need to implement notification actions.
     func sendNotificationAction(id: String, actionId: String) {}
+
+    /// Default no-op so existing test spies do not need to implement power and thermal actions.
+    func sendPowerThermalState(lowPowerMode: Bool, thermalState: UInt8) {}
 }
 
 /// Thread-safe encoder that writes `{:packet, 4}` framed events to stdout.
@@ -536,6 +540,16 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_SYSTEM_DID_WAKE
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: power_thermal_state. Layout: opcode(1) + action_type(1) + low_power(1) + thermal_state(1).
+    func sendPowerThermalState(lowPowerMode: Bool, thermalState: UInt8) {
+        var buf = Data(count: 4)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_POWER_THERMAL_STATE
+        buf[2] = lowPowerMode ? 1 : 0
+        buf[3] = thermalState
         writeFrame(buf)
     }
 

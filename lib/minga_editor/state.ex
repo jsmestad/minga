@@ -44,6 +44,7 @@ defmodule MingaEditor.State do
   alias MingaEditor.State.Highlighting
   alias MingaEditor.State.Mouse
   alias MingaEditor.State.Remote
+  alias MingaEditor.State.ResourcePressure
   alias MingaEditor.State.Search
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
@@ -123,6 +124,7 @@ defmodule MingaEditor.State do
             session: %EditorSessionState{},
             buffer_add_context: :open,
             remote: %Remote{},
+            resource_pressure: ResourcePressure.new(),
             stashed_board_state: nil,
             keystroke_history: KeystrokeHistory.new(),
             git_commit_gen_ref: nil
@@ -163,6 +165,7 @@ defmodule MingaEditor.State do
           caches: MingaEditor.Renderer.Caches.t(),
           buffer_add_context: MingaEditor.Shell.buffer_add_context(),
           remote: Remote.t(),
+          resource_pressure: ResourcePressure.t(),
           session: EditorSessionState.t(),
           stashed_board_state: MingaEditor.Shell.Board.State.t() | nil,
           keystroke_history: KeystrokeHistory.t(),
@@ -172,6 +175,21 @@ defmodule MingaEditor.State do
   @spec set_renderer(t(), pid() | nil) :: t()
   def set_renderer(%__MODULE__{} = state, pid) when is_pid(pid) or is_nil(pid),
     do: %{state | renderer: pid}
+
+  @doc "Updates the current frontend-reported resource pressure."
+  @spec set_resource_pressure(
+          t(),
+          boolean(),
+          ResourcePressure.thermal_state()
+        ) :: t()
+  def set_resource_pressure(%__MODULE__{} = state, low_power?, thermal_state)
+      when is_boolean(low_power?) do
+    %{
+      state
+      | resource_pressure:
+          ResourcePressure.update(state.resource_pressure, low_power?, thermal_state)
+    }
+  end
 
   @doc "Adds or updates a GUI notification."
   @spec upsert_notification(t(), Notification.t()) :: t()

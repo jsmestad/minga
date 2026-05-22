@@ -44,6 +44,7 @@ defmodule Minga.Events do
   | `:background_subagent_started` | `MingaAgent.Subagent.Handle` | `session_id: String.t(), pid: pid(), task: String.t()` |
   | `:node_connected` | `Minga.Distribution.Events.NodeConnectedEvent` | `server_name, node, connected_at` |
   | `:node_disconnected` | `Minga.Distribution.Events.NodeDisconnectedEvent` | `server_name, node, reason, disconnected_at` |
+  | `:power_thermal_state_changed` | `PowerThermalStateEvent` | `low_power?, thermal_state` |
 
   ## Why Registry?
 
@@ -253,6 +254,15 @@ defmodule Minga.Events do
     @type t :: %__MODULE__{source: GenServer.server(), name: atom(), value: term()}
   end
 
+  defmodule PowerThermalStateEvent do
+    @moduledoc "Payload for `:power_thermal_state_changed` events. Published by the native GUI when macOS low power mode or thermal pressure changes."
+    @enforce_keys [:low_power?, :thermal_state]
+    defstruct [:low_power?, :thermal_state]
+
+    @type thermal_state :: :nominal | :fair | :serious | :critical | {:unknown, non_neg_integer()}
+    @type t :: %__MODULE__{low_power?: boolean(), thermal_state: thermal_state()}
+  end
+
   # ── Types ───────────────────────────────────────────────────────────────────
 
   @typedoc "Known event topics."
@@ -286,6 +296,7 @@ defmodule Minga.Events do
           | :changeset_budget_exhausted
           | :load_user_themes
           | :option_changed
+          | :power_thermal_state_changed
           | :buffer_fork_conflict
           | :file_written
           | :extension_updates_available
@@ -309,6 +320,7 @@ defmodule Minga.Events do
           | FaceOverridesChangedEvent.t()
           | LoadUserThemesEvent.t()
           | OptionChangedEvent.t()
+          | PowerThermalStateEvent.t()
           | MingaAgent.SessionManager.SessionStoppedEvent.t()
           | MingaAgent.Subagent.Handle.t()
           | Minga.Distribution.Events.NodeConnectedEvent.t()
@@ -427,6 +439,7 @@ defmodule Minga.Events do
   @spec broadcast(:supervisor_restarted, SupervisorRestartedEvent.t()) :: :ok
   @spec broadcast(:log_message, LogMessageEvent.t()) :: :ok
   @spec broadcast(:option_changed, OptionChangedEvent.t()) :: :ok
+  @spec broadcast(:power_thermal_state_changed, PowerThermalStateEvent.t()) :: :ok
   @spec broadcast(:face_overrides_changed, FaceOverridesChangedEvent.t()) :: :ok
   @spec broadcast(:agent_session_stopped, MingaAgent.SessionManager.SessionStoppedEvent.t()) ::
           :ok

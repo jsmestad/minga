@@ -96,6 +96,9 @@ final class EditorNSView: MTKView {
     /// but the Metal surface must not schedule GPU work until screens wake.
     private var isScreenAsleep = false
 
+    /// Multiplier applied to system cursor blink timing under thermal or low-power pressure. A value of 0 keeps the cursor solid.
+    private var cursorBlinkMultiplier: UInt64 = 1
+
     /// Last viewport top used for scroll indicator change detection.
     private var lastViewportTopForScroll: UInt32 = 0xFFFF_FFFF
 
@@ -242,7 +245,10 @@ final class EditorNSView: MTKView {
         // Don't blink when Accessibility > Reduce Motion is on.
         guard !SystemBlinkTiming.blinkingDisabled else { return }
 
-        let timing = SystemBlinkTiming.system
+        // A multiplier of 0 means resource pressure has disabled cursor blinking.
+        guard cursorBlinkMultiplier > 0 else { return }
+
+        let timing = SystemBlinkTiming.system.scaled(by: cursorBlinkMultiplier)
 
         // If on-period is 0, the user has disabled cursor blink system-wide.
         guard timing.onDuration > 0 else { return }
@@ -291,7 +297,15 @@ final class EditorNSView: MTKView {
     func resumeAfterScreenWake() {
         isScreenAsleep = false
         resetCursorBlink()
-        needsDisplay = true
+        renderFrame()
+    }
+
+    /// Applies the current macOS low power and thermal policy to cursor blinking.
+    func applyPowerThermalPolicy(lowPowerMode: Bool, thermalState: ProcessInfo.ThermalState) {
+        let policy = PowerThermalPolicy.policy(lowPowerMode: lowPowerMode, thermalState: thermalState)
+        cursorBlinkMultiplier = policy.cursorBlinkMultiplier
+        resetCursorBlink()
+        renderFrame()
     }
 
     /// Starts observing Accessibility display option changes so the blink
