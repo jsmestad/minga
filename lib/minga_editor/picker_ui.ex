@@ -88,7 +88,15 @@ defmodule MingaEditor.PickerUI do
   """
   @spec open(state(), module(), map() | nil) :: state()
   def open(state, source_module, context \\ nil) do
-    # Context flows into Context.from_editor_state so candidates/1 can read it.
+    if MingaEditor.UI.Picker.Source.async?(source_module) do
+      open_async(state, source_module, context)
+    else
+      open_sync(state, source_module, context)
+    end
+  end
+
+  @spec open_sync(state(), module(), map() | nil) :: state()
+  defp open_sync(state, source_module, context) do
     ctx = Context.from_editor_state(state, context)
     items = source_module.candidates(ctx)
 
@@ -97,29 +105,64 @@ defmodule MingaEditor.PickerUI do
         state
 
       _ ->
-        max_vis = max(state.terminal_viewport.rows - 3, 5)
-        picker = Picker.new(items, title: source_module.title(), max_visible: max_vis)
+        open_with_items(state, source_module, items, context)
+    end
+  end
 
-        # Clear whichkey state if active
-        new_state =
-          if EditorState.whichkey(state).timer do
-            EditorState.set_whichkey(state, WhichKeyState.clear(EditorState.whichkey(state)))
-          else
-            state
-          end
+  @spec open_async(state(), module(), map() | nil) :: state()
+  defp open_async(state, source_module, context) do
+    max_vis = max(state.terminal_viewport.rows - 3, 5)
+    picker = Picker.new([], title: source_module.title(), max_visible: max_vis)
 
-        layout = MingaEditor.UI.Picker.Source.layout(source_module)
+    new_state = clear_whichkey(state)
+    layout = MingaEditor.UI.Picker.Source.layout(source_module)
 
-        picker_state = %PickerState{
-          picker: picker,
-          source: source_module,
-          restore: state.workspace.buffers.active_index,
-          restore_theme: state.theme,
-          context: context,
-          layout: layout
-        }
+    picker_state = %PickerState{
+      picker: picker,
+      source: source_module,
+      restore: state.workspace.buffers.active_index,
+      restore_theme: state.theme,
+      context: context,
+      layout: layout,
+      load_status: :loading
+    }
 
-        ModalOverlay.open(new_state, :picker, PickerPayload.new(picker_state))
+    new_state = ModalOverlay.open(new_state, :picker, PickerPayload.new(picker_state))
+
+    send(
+      self(),
+      {:picker_fetch_candidates, source_module, Context.from_editor_state(state, context)}
+    )
+
+    new_state
+  end
+
+  @spec open_with_items(state(), module(), [Picker.item()], map() | nil) :: state()
+  defp open_with_items(state, source_module, items, context) do
+    max_vis = max(state.terminal_viewport.rows - 3, 5)
+    picker = Picker.new(items, title: source_module.title(), max_visible: max_vis)
+
+    new_state = clear_whichkey(state)
+    layout = MingaEditor.UI.Picker.Source.layout(source_module)
+
+    picker_state = %PickerState{
+      picker: picker,
+      source: source_module,
+      restore: state.workspace.buffers.active_index,
+      restore_theme: state.theme,
+      context: context,
+      layout: layout
+    }
+
+    ModalOverlay.open(new_state, :picker, PickerPayload.new(picker_state))
+  end
+
+  @spec clear_whichkey(state()) :: state()
+  defp clear_whichkey(state) do
+    if EditorState.whichkey(state).timer do
+      EditorState.set_whichkey(state, WhichKeyState.clear(EditorState.whichkey(state)))
+    else
+      state
     end
   end
 
@@ -582,8 +625,8 @@ defmodule MingaEditor.PickerUI do
     {visible, selected_offset, item_rows} = bottom_visible_items(picker, row_budget)
     selected_row_offset = row_offset_for_visible_index(visible, selected_offset)
 
-    no_matches? = visible == [] and picker.query != ""
-    item_rows = if no_matches?, do: 1, else: item_rows
+    status_message = load_status_message(picker_state, visible, picker.query)
+    item_rows = if status_message, do: 1, else: item_rows
 
     # Layout: item rows grow upward from row N-2, prompt on row N-1
     prompt_row = viewport.rows - 1
@@ -638,12 +681,12 @@ defmodule MingaEditor.PickerUI do
     }
 
     item_commands =
-      if no_matches? do
+      if status_message do
         [
           DisplayList.draw(
             first_item_row,
             0,
-            String.pad_trailing("  No matches", viewport.cols),
+            String.pad_trailing("  #{status_message}", viewport.cols),
             Face.new(fg: dim_fg, bg: bg)
           )
         ]
@@ -833,11 +876,11 @@ defmodule MingaEditor.PickerUI do
     item_capacity = centered_item_capacity(viewport.rows)
     {visible, selected_offset} = Picker.visible_items(picker, item_capacity)
 
-    no_matches? = visible == [] and picker.query != ""
+    status_message = load_status_message(picker_state, visible, picker.query)
 
     # Compute float window dimensions
     float_width = {:percent, 60}
-    float_height_rows = centered_float_height(visible, viewport, no_matches?)
+    float_height_rows = centered_float_height(visible, viewport, status_message != nil)
     float_height = {:rows, float_height_rows}
 
     popup_theme = %{
@@ -864,12 +907,12 @@ defmodule MingaEditor.PickerUI do
 
     # Build content draws (relative to interior origin)
     item_draws =
-      if no_matches? do
+      if status_message do
         [
           DisplayList.draw(
             0,
             0,
-            String.pad_trailing("  No matches", interior_w),
+            String.pad_trailing("  #{status_message}", interior_w),
             Face.new(fg: pc.dim_fg, bg: pc.bg)
           )
         ]
@@ -1039,15 +1082,21 @@ defmodule MingaEditor.PickerUI do
   end
 
   @spec centered_item_capacity(pos_integer()) :: pos_integer()
+  @spec load_status_message(PickerState.t(), list(), String.t()) :: String.t() | nil
+  defp load_status_message(%{load_status: :loading}, _visible, _query), do: "Searching..."
+  defp load_status_message(%{load_status: {:error, reason}}, _visible, _query), do: reason
+  defp load_status_message(_picker_state, [], query) when query != "", do: "No matches"
+  defp load_status_message(_picker_state, _visible, _query), do: nil
+
   defp centered_item_capacity(viewport_rows) do
     max(div(viewport_rows * 7, 10), 5) - 3
   end
 
   @spec centered_float_height([Picker.item()], MingaEditor.Viewport.t(), boolean()) ::
           pos_integer()
-  defp centered_float_height(visible, viewport, no_matches?) do
+  defp centered_float_height(visible, viewport, has_status_message) do
     max_height = max(div(viewport.rows * 7, 10), 5)
-    item_count = if no_matches?, do: 1, else: length(visible)
+    item_count = if has_status_message, do: 1, else: length(visible)
     min(item_count + 3, max_height)
   end
 

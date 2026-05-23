@@ -140,7 +140,23 @@ struct PickerOverlay: View {
 
     @ViewBuilder
     private func resultsList(maxListHeight: CGFloat) -> some View {
-        if state.items.isEmpty && !state.query.isEmpty {
+        if case .loading = state.loadStatus {
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Searching...")
+                    .font(.system(size: 13))
+                    .foregroundStyle(theme.popupFg.opacity(0.35))
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+            .frame(height: 48)
+        } else if case .error(let message) = state.loadStatus {
+            Text(message)
+                .font(.system(size: 13))
+                .foregroundStyle(theme.popupFg.opacity(0.35))
+                .frame(maxWidth: .infinity, alignment: .center)
+                .frame(height: 48)
+        } else if state.items.isEmpty && !state.query.isEmpty {
             Text("No matches")
                 .font(.system(size: 13))
                 .foregroundStyle(theme.popupFg.opacity(0.35))

@@ -83,6 +83,8 @@ defmodule MingaEditor do
   alias MingaEditor.State.Session, as: EditorSessionState
 
   alias MingaEditor.State.AgentAccess
+  alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
 
   alias MingaEditor.MouseHoverTooltip
 
@@ -770,7 +772,7 @@ defmodule MingaEditor do
     state = %{state | git_commit_gen_ref: nil}
 
     state =
-      if MingaEditor.State.ModalOverlay.active?(EditorState.modal(state)) do
+      if ModalOverlay.active?(EditorState.modal(state)) do
         EditorState.set_status(state, "Commit message ready (prompt already open)")
       else
         state
@@ -805,6 +807,41 @@ defmodule MingaEditor do
     {:noreply, EffectHandler.apply_effects(state, effects)}
   end
 
+  # ── Async picker candidate fetching ─────────────────────────────────────
+  # When a picker source is async, PickerUI.open/3 opens the picker immediately
+  # with a loading indicator, then sends this message to spawn the background fetch.
+
+  def handle_info({:picker_fetch_candidates, source_module, ctx}, state) do
+    editor = self()
+
+    Task.start(fn ->
+      result =
+        try do
+          {:ok, source_module.candidates(ctx)}
+        rescue
+          e -> {:error, Exception.message(e)}
+        catch
+          :exit, reason -> {:error, "Source timed out: #{inspect(reason)}"}
+          :throw, value -> {:error, "Source failed: #{inspect(value)}"}
+        end
+
+      send(editor, {:picker_candidates_result, source_module, result})
+    end)
+
+    {:noreply, state}
+  end
+
+  def handle_info({:picker_candidates_result, source_module, result}, state) do
+    case state.shell_state.modal do
+      {:picker, %{picker_ui: %{source: ^source_module}} = payload} ->
+        new_state = handle_picker_candidates(state, payload, result)
+        {:noreply, Renderer.render_or_async(new_state)}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
   def handle_info(_msg, state) do
     {:noreply, state}
   end
@@ -821,6 +858,35 @@ defmodule MingaEditor do
   defp setup_highlight_or_defer(state) do
     send(self(), :setup_highlight)
     state
+  end
+
+  @spec handle_picker_candidates(
+          state(),
+          PickerPayload.t(),
+          {:ok, [term()]} | {:error, String.t()}
+        ) :: state()
+  defp handle_picker_candidates(state, payload, {:ok, items}) do
+    picker_state = payload.picker_ui
+    picker = %{picker_state.picker | items: items}
+    picker = MingaEditor.UI.Picker.filter(picker, picker.query)
+    new_picker_state = %{picker_state | picker: picker, load_status: :ready}
+
+    ModalOverlay.transition(
+      state,
+      :picker,
+      PickerPayload.put_picker_ui(payload, new_picker_state)
+    )
+  end
+
+  defp handle_picker_candidates(state, payload, {:error, reason}) do
+    picker_state = payload.picker_ui
+    new_picker_state = %{picker_state | load_status: {:error, reason}}
+
+    ModalOverlay.transition(
+      state,
+      :picker,
+      PickerPayload.put_picker_ui(payload, new_picker_state)
+    )
   end
 
   @spec current_observatory_token?(state(), reference()) :: boolean()

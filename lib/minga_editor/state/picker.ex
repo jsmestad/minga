@@ -10,6 +10,9 @@ defmodule MingaEditor.State.Picker do
   @type action_menu ::
           {[MingaEditor.UI.Picker.Source.action_entry()], non_neg_integer()} | nil
 
+  @typedoc "Async loading status for sources that fetch candidates in the background."
+  @type load_status :: :ready | :loading | {:error, String.t()}
+
   @type t :: %__MODULE__{
           picker: MingaEditor.UI.Picker.t() | nil,
           source: module() | nil,
@@ -19,7 +22,8 @@ defmodule MingaEditor.State.Picker do
           context: map() | nil,
           layout: MingaEditor.UI.Picker.Source.layout(),
           original_source: module() | nil,
-          mode_prefix: String.t()
+          mode_prefix: String.t(),
+          load_status: load_status()
         }
 
   defstruct picker: nil,
@@ -30,7 +34,8 @@ defmodule MingaEditor.State.Picker do
             context: nil,
             layout: :bottom,
             original_source: nil,
-            mode_prefix: ""
+            mode_prefix: "",
+            load_status: :ready
 
   @doc "Returns true if a picker is currently open."
   @spec open?(t()) :: boolean()
