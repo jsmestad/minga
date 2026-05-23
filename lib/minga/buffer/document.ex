@@ -37,10 +37,16 @@ defmodule Minga.Buffer.Document do
 
   alias Minga.Buffer.{Cursor, Lines, Position, Selection}
 
-  @enforce_keys [:before, :after, :cursor_line, :cursor_col, :line_count]
+  @enforce_keys [:before, :after, :cursor_line, :cursor_col, :line_count, :line_offsets]
   defstruct [:before, :after, :cursor_line, :cursor_col, :line_count, :line_offsets]
 
-  @typedoc "Cached line offset tuple, or `nil` when stale."
+  @typedoc """
+  Cached line-start byte offsets.
+
+  Clean: a tuple of line-start positions `{0, 6, 12, ...}`.
+  Pending: `{:pending, starts_tuple, adjust_after_line, delta}` for
+  deferred shift. `nil` when the cache needs a full rebuild.
+  """
   @type line_offsets :: tuple() | nil
 
   @typedoc "A gap buffer instance."
@@ -73,13 +79,17 @@ defmodule Minga.Buffer.Document do
   """
   @spec new(String.t()) :: t()
   def new(text \\ "") do
-    lc =
-      case text do
-        "" -> 1
-        _ -> Lines.count(text)
-      end
+    line_starts = Lines.build_index(text)
+    lc = tuple_size(line_starts)
 
-    %__MODULE__{before: "", after: text, cursor_line: 0, cursor_col: 0, line_count: lc}
+    %__MODULE__{
+      before: "",
+      after: text,
+      cursor_line: 0,
+      cursor_col: 0,
+      line_count: lc,
+      line_offsets: line_starts
+    }
   end
 
   # ── Queries ──
@@ -152,21 +162,29 @@ defmodule Minga.Buffer.Document do
   def insert_text(
         %__MODULE__{
           before: before,
-          # after: after_,
           cursor_line: line,
           cursor_col: col,
-          line_count: lc
+          line_count: lc,
+          line_offsets: ls
         } = mod,
         text
       ) do
+    gap = byte_size(before)
     {new_line, new_col, new_lc} = compute_cursor_after_insert(line, col, lc, text)
+
+    new_ls =
+      case ls do
+        nil -> nil
+        _ -> Lines.update_after_insert(ls, line, gap, text)
+      end
 
     %{
       mod
       | before: before <> text,
         cursor_line: new_line,
         cursor_col: new_col,
-        line_count: new_lc
+        line_count: new_lc,
+        line_offsets: new_ls
     }
   end
 
@@ -186,17 +204,37 @@ defmodule Minga.Buffer.Document do
   def delete_before(%__MODULE__{before: ""} = buf), do: buf
 
   def delete_before(
-        %__MODULE__{before: before, cursor_line: line, cursor_col: _col, line_count: lc} = buf
+        %__MODULE__{
+          before: before,
+          cursor_line: line,
+          cursor_col: _col,
+          line_count: lc,
+          line_offsets: ls
+        } = buf
       ) do
     {new_before, removed} = Cursor.previous_character(before)
+    newline? = removed == "\n"
 
     {new_line, new_col, new_lc} =
-      case removed do
-        "\n" -> {line - 1, Lines.last_line_width(new_before), lc - 1}
-        _ -> {line, Lines.last_line_width(new_before), lc}
+      case newline? do
+        true -> {line - 1, Lines.last_line_width(new_before), lc - 1}
+        false -> {line, Lines.last_line_width(new_before), lc}
       end
 
-    %{buf | before: new_before, cursor_line: new_line, cursor_col: new_col, line_count: new_lc}
+    new_ls =
+      case ls do
+        nil -> nil
+        _ -> Lines.update_after_delete_before(ls, line, byte_size(removed), newline?)
+      end
+
+    %{
+      buf
+      | before: new_before,
+        cursor_line: new_line,
+        cursor_col: new_col,
+        line_count: new_lc,
+        line_offsets: new_ls
+    }
   end
 
   @doc """
@@ -206,11 +244,29 @@ defmodule Minga.Buffer.Document do
   @spec delete_at(t()) :: t()
   def delete_at(%__MODULE__{after: ""} = buf), do: buf
 
-  def delete_at(%__MODULE__{after: after_, line_count: lc} = buf) do
+  def delete_at(%__MODULE__{after: after_, cursor_line: line, line_count: lc, line_offsets: ls} =
+                  buf) do
     case Cursor.next_character(after_) do
-      {"\n", rest} -> %{buf | after: rest, line_count: lc - 1}
-      {_grapheme, rest} -> %{buf | after: rest}
-      nil -> buf
+      {"\n", rest} ->
+        new_ls =
+          case ls do
+            nil -> nil
+            _ -> Lines.update_after_delete_at(ls, line, 1, true)
+          end
+
+        %{buf | after: rest, line_count: lc - 1, line_offsets: new_ls}
+
+      {grapheme, rest} ->
+        new_ls =
+          case ls do
+            nil -> nil
+            _ -> Lines.update_after_delete_at(ls, line, byte_size(grapheme), false)
+          end
+
+        %{buf | after: rest, line_offsets: new_ls}
+
+      nil ->
+        buf
     end
   end
 
