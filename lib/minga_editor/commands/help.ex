@@ -424,8 +424,9 @@ defmodule MingaEditor.Commands.Help do
   defp normal_group(%{command: command})
        when command in [:half_page_down, :half_page_up, :page_down, :page_up], do: "Scrolling"
 
-  defp normal_group(%{command: command}) when command in [:undo, :redo, :dot_repeat],
-    do: "Undo / Redo"
+  defp normal_group(%{command: command})
+       when command in [:undo, :redo, :undo_agent_session, :dot_repeat],
+       do: "Undo / Redo"
 
   defp normal_group(%{command: command})
        when command in [

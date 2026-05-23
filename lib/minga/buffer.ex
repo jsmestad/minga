@@ -252,6 +252,10 @@ defmodule Minga.Buffer do
   @spec redo(t()) :: :ok | :empty
   defdelegate redo(server), to: BufferProcess
 
+  @doc "Undo all consecutive agent-sourced entries from the top of the undo stack."
+  @spec undo_agent_session(t()) :: {:ok, non_neg_integer()} | :empty
+  defdelegate undo_agent_session(server), to: BufferProcess
+
   @doc "Force the next edit to start a new undo group."
   @spec break_undo_coalescing(t()) :: :ok
   defdelegate break_undo_coalescing(server), to: BufferProcess

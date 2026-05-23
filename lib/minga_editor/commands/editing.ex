@@ -34,6 +34,7 @@ defmodule MingaEditor.Commands.Editing do
     {:replace_restore, "Restore replaced character", true},
     {:undo, "Undo the last change", true},
     {:redo, "Redo the last undone change", true},
+    {:undo_agent_session, "Undo all agent edits from last session", true},
     {:paste_before, "Paste before cursor", true},
     {:paste_after, "Paste after cursor", true},
     {:indent_line, "Indent line", true},
@@ -293,6 +294,18 @@ defmodule MingaEditor.Commands.Editing do
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :redo) do
     Buffer.redo(buf)
     state
+  end
+
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :undo_agent_session) do
+    case Buffer.undo_agent_session(buf) do
+      {:ok, count} ->
+        MingaEditor.log_to_messages("Reverted #{count} agent edit(s)")
+        state
+
+      :empty ->
+        MingaEditor.log_to_messages("No agent edits to undo")
+        state
+    end
   end
 
   # ── Paste ─────────────────────────────────────────────────────────────────

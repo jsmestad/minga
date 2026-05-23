@@ -173,6 +173,7 @@ defmodule Minga.Keymap.Defaults do
     {~k(a z), :agent_summarize, "Summarize session to artifact"},
     {~k(a q), :agent_dequeue, "Dequeue queued messages to editor"},
     {~k(a f), :agent_queue_follow_up, "Queue current input as follow-up"},
+    {~k(a u), :undo_agent_session, "Undo all agent edits"},
 
     # ── Tab ──────────────────────────────────────────────────────────────────
     {~k(TAB n), :tab_next, "Next tab"},

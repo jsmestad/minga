@@ -126,6 +126,74 @@ defmodule Minga.Buffer.UndoHistoryTest do
     end
   end
 
+  describe "undo_agent_session/3" do
+    test "undoes all consecutive agent entries from top of stack" do
+      history =
+        UndoHistory.new()
+        |> UndoHistory.record_edit_force(0, patch("", "user typed"), :user)
+        |> UndoHistory.record_edit_force(
+          1,
+          patch("user typed", "user typed\nagent line 1"),
+          :agent
+        )
+        |> UndoHistory.record_edit_force(
+          2,
+          patch("user typed\nagent line 1", "user typed\nagent line 1\nagent line 2"),
+          :agent
+        )
+
+      assert {:ok, restore, new_history, 2} =
+               UndoHistory.undo_agent_session(
+                 history,
+                 3,
+                 doc("user typed\nagent line 1\nagent line 2")
+               )
+
+      assert Document.content(restore.document) == "user typed"
+      assert restore.source == :agent
+      assert UndoHistory.undo_count(new_history) == 1
+      assert UndoHistory.redo_count(new_history) == 2
+      assert UndoHistory.last_undo_source(new_history) == :user
+    end
+
+    test "returns :empty when top entry is not agent-sourced" do
+      history =
+        UndoHistory.new()
+        |> UndoHistory.record_edit_force(0, patch("", "user typed"), :user)
+
+      assert :empty = UndoHistory.undo_agent_session(history, 1, doc("user typed"))
+    end
+
+    test "returns :empty on empty history" do
+      assert :empty = UndoHistory.undo_agent_session(UndoHistory.new(), 0, doc(""))
+    end
+
+    test "stops at first non-agent entry" do
+      history =
+        UndoHistory.new()
+        |> UndoHistory.record_edit_force(0, patch("", "lsp edit"), :lsp)
+        |> UndoHistory.record_edit_force(1, patch("lsp edit", "lsp edit\nagent edit"), :agent)
+
+      assert {:ok, restore, new_history, 1} =
+               UndoHistory.undo_agent_session(history, 2, doc("lsp edit\nagent edit"))
+
+      assert Document.content(restore.document) == "lsp edit"
+      assert UndoHistory.undo_count(new_history) == 1
+      assert UndoHistory.last_undo_source(new_history) == :lsp
+    end
+
+    test "undoes single agent entry" do
+      history =
+        UndoHistory.new()
+        |> UndoHistory.record_edit_force(0, patch("original", "agent modified"), :agent)
+
+      assert {:ok, restore, _new_history, 1} =
+               UndoHistory.undo_agent_session(history, 1, doc("agent modified"))
+
+      assert Document.content(restore.document) == "original"
+    end
+  end
+
   describe "clear/1" do
     test "removes undo and redo entries" do
       history =
