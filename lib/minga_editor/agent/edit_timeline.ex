@@ -42,7 +42,14 @@ defmodule MingaEditor.Agent.EditTimeline do
   def new, do: %__MODULE__{}
 
   @spec record_edit(t(), String.t(), String.t(), String.t(), String.t(), String.t()) :: t()
-  def record_edit(%__MODULE__{} = timeline, path, tool_call_id, tool_name, before_content, after_content) do
+  def record_edit(
+        %__MODULE__{} = timeline,
+        path,
+        tool_call_id,
+        tool_name,
+        before_content,
+        after_content
+      ) do
     timeline = maybe_record_baseline(timeline, path, before_content)
 
     existing = Map.get(timeline.entries, path, [])

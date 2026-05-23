@@ -25,7 +25,8 @@ defmodule MingaEditor.Agent.RemoteFileEventsTest do
       |> editor_state()
       |> EditorState.update_remote(&Remote.put_buffer(&1, "home", path, buffer))
 
-    {state, effects} = Events.handle(state, {:file_changed, path, "before", "after", "tc_test", "edit_file"})
+    {state, effects} =
+      Events.handle(state, {:file_changed, path, "before", "after", "tc_test", "edit_file"})
 
     assert Buffer.content(buffer) == "after"
     refute Buffer.dirty?(buffer)
@@ -49,7 +50,8 @@ defmodule MingaEditor.Agent.RemoteFileEventsTest do
       |> editor_state()
       |> EditorState.update_remote(&Remote.put_buffer(&1, "home", path, buffer))
 
-    {_state, effects} = Events.handle(state, {:file_changed, event_path, "before", "after", "tc_test", "edit_file"})
+    {_state, effects} =
+      Events.handle(state, {:file_changed, event_path, "before", "after", "tc_test", "edit_file"})
 
     assert Buffer.content(buffer) == "after"
     refute Buffer.dirty?(buffer)
@@ -70,7 +72,8 @@ defmodule MingaEditor.Agent.RemoteFileEventsTest do
       |> editor_state()
       |> EditorState.update_remote(&Remote.put_buffer(&1, "home", path, buffer))
 
-    {state, effects} = Events.handle(state, {:file_changed, path, "before", "after", "tc_test", "edit_file"})
+    {state, effects} =
+      Events.handle(state, {:file_changed, path, "before", "after", "tc_test", "edit_file"})
 
     assert Buffer.content(buffer) == "local before"
     assert Buffer.dirty?(buffer)

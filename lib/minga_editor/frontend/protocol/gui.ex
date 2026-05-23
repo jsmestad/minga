@@ -1327,11 +1327,12 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
         tool_name_len = min(byte_size(tool_name_bytes), @max_u8)
         truncated_name = binary_part(tool_name_bytes, 0, tool_name_len)
 
-        <<entry.index::8, tool_name_len::8, truncated_name::binary,
-          entry.timestamp_delta::32>>
+        <<entry.index::8, tool_name_len::8, truncated_name::binary, entry.timestamp_delta::32>>
       end)
 
-    payload = IO.iodata_to_binary([<<visible_byte::8, viewing_u16::16, count::8>> | entry_binaries])
+    payload =
+      IO.iodata_to_binary([<<visible_byte::8, viewing_u16::16, count::8>> | entry_binaries])
+
     <<@op_gui_edit_timeline, byte_size(payload)::16, payload::binary>>
   end
 

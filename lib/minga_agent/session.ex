@@ -1288,7 +1288,8 @@ defmodule MingaAgent.Session do
 
     broadcast(
       state,
-      {:file_changed, event.path, event.before_content, event.after_content, event.tool_call_id, tool_name}
+      {:file_changed, event.path, event.before_content, event.after_content, event.tool_call_id,
+       tool_name}
     )
 
     state = record_file_touch(state, event.path, event.before_content, event.after_content)
