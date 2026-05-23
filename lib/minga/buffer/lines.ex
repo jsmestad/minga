@@ -217,7 +217,12 @@ defmodule Minga.Buffer.Lines do
   end
 
   @doc "Updates line_offsets after inserting `text` at the cursor. O(1) when text has no newlines."
-  @spec update_after_insert(Document.line_offsets(), non_neg_integer(), non_neg_integer(), String.t()) ::
+  @spec update_after_insert(
+          Document.line_offsets(),
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t()
+        ) ::
           Document.line_offsets()
   def update_after_insert(nil, _cursor_line, _gap, _text), do: nil
 
@@ -233,7 +238,12 @@ defmodule Minga.Buffer.Lines do
   end
 
   @doc "Updates line_offsets after deleting one character before the cursor."
-  @spec update_after_delete_before(Document.line_offsets(), non_neg_integer(), non_neg_integer(), boolean()) ::
+  @spec update_after_delete_before(
+          Document.line_offsets(),
+          non_neg_integer(),
+          non_neg_integer(),
+          boolean()
+        ) ::
           Document.line_offsets()
   def update_after_delete_before(nil, _cursor_line, _char_size, _newline?), do: nil
 
@@ -249,7 +259,12 @@ defmodule Minga.Buffer.Lines do
   end
 
   @doc "Updates line_offsets after deleting one character at the cursor (forward delete)."
-  @spec update_after_delete_at(Document.line_offsets(), non_neg_integer(), non_neg_integer(), boolean()) ::
+  @spec update_after_delete_at(
+          Document.line_offsets(),
+          non_neg_integer(),
+          non_neg_integer(),
+          boolean()
+        ) ::
           Document.line_offsets()
   def update_after_delete_at(nil, _cursor_line, _char_size, _newline?), do: nil
 
@@ -285,7 +300,13 @@ defmodule Minga.Buffer.Lines do
     end
   end
 
-  @spec adjusted_span(line_starts(), line_index(), non_neg_integer(), non_neg_integer(), integer()) ::
+  @spec adjusted_span(
+          line_starts(),
+          line_index(),
+          non_neg_integer(),
+          non_neg_integer(),
+          integer()
+        ) ::
           line_span() | nil
   defp adjusted_span(starts, line, _text_size, _adjust_after, _delta)
        when line > tuple_size(starts) - 1,
