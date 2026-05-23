@@ -14,6 +14,7 @@ struct PickerOverlay: View {
 
     private let panelWidth: CGFloat = 600
     private let itemHeight: CGFloat = 24
+    private let twoLineItemHeight: CGFloat = 40
 
     /// Transition animation duration. Respects reduced motion.
     private var animDuration: Double {
@@ -39,7 +40,8 @@ struct PickerOverlay: View {
                         Divider()
                             .overlay(theme.popupBorder.opacity(0.3))
 
-                        let listHeight = min(CGFloat(state.items.count) * itemHeight, max(geo.size.height * 0.5, 200))
+                        let totalItemsHeight = state.items.reduce(CGFloat(0)) { $0 + ($1.isTwoLine ? twoLineItemHeight : itemHeight) }
+                        let listHeight = min(totalItemsHeight, max(geo.size.height * 0.5, 200))
                         resultsList(maxListHeight: listHeight)
 
                     }
@@ -155,58 +157,98 @@ struct PickerOverlay: View {
         }
     }
 
-    // MARK: - Single unified row (all items)
+    // MARK: - Item row
 
     @ViewBuilder
     private func itemRow(_ item: PickerItem) -> some View {
         let isSelected = item.id == state.selectedIndex
 
-        HStack(spacing: 6) {
-            // Multi-select checkmark column stays reserved so rows do not shift.
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 11))
-                .foregroundStyle(theme.accent)
-                .frame(width: 14)
-                .opacity(item.isMarked ? 1 : 0)
-                .accessibilityHidden(true)
+        Group {
+            if item.isTwoLine {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        itemCheckmark(item)
+                        itemIcon(item)
+                        highlightedLabel(item)
+                        Spacer(minLength: 4)
+                        itemAnnotation(item)
+                    }
 
-            // File type icon
-            Text(item.icon)
-                .font(.custom("Symbols Nerd Font Mono", size: 13))
-                .foregroundStyle(iconColor(item.iconColor))
-                .frame(width: 18, alignment: .center)
+                    if !item.description.isEmpty {
+                        Text(item.description)
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.popupFg.opacity(0.35))
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                            .padding(.leading, 44) // checkmark(14) + spacing(6) + icon(18) + spacing(6)
+                    }
+                }
+            } else {
+                HStack(spacing: 6) {
+                    itemCheckmark(item)
+                    itemIcon(item)
+                    highlightedLabel(item)
 
-            // Filename with match highlighting
-            highlightedLabel(item)
+                    if !item.description.isEmpty {
+                        Text(item.description)
+                            .font(.system(size: 12))
+                            .foregroundStyle(theme.popupFg.opacity(0.35))
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                    }
 
-            // Path (inline, dimmed) — Helm/Ivy style
-            if !item.description.isEmpty {
-                Text(item.description)
-                    .font(.system(size: 12))
-                    .foregroundStyle(theme.popupFg.opacity(0.35))
-                    .lineLimit(1)
-                    .truncationMode(.head)
-            }
-
-            Spacer(minLength: 4)
-
-            // Annotation (keybinding)
-            if !item.annotation.isEmpty {
-                Text(item.annotation)
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundStyle(theme.popupFg.opacity(0.3))
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(theme.popupFg.opacity(0.06))
-                    )
+                    Spacer(minLength: 4)
+                    itemAnnotation(item)
+                }
             }
         }
         .padding(.horizontal, 10)
-        .frame(height: itemHeight)
+        .frame(height: item.isTwoLine ? twoLineItemHeight : itemHeight)
         .background(selectionBackground(isSelected))
+        .overlay(alignment: .leading) {
+            if isSelected && item.isTwoLine {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(theme.accent)
+                    .frame(width: 3)
+                    .padding(.vertical, 2)
+            }
+        }
         .id(item.id)
+    }
+
+    // MARK: - Item row subviews
+
+    @ViewBuilder
+    private func itemCheckmark(_ item: PickerItem) -> some View {
+        Image(systemName: "checkmark.circle.fill")
+            .font(.system(size: 11))
+            .foregroundStyle(theme.accent)
+            .frame(width: 14)
+            .opacity(item.isMarked ? 1 : 0)
+            .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private func itemIcon(_ item: PickerItem) -> some View {
+        Text(item.icon)
+            .font(.custom("Symbols Nerd Font Mono", size: 13))
+            .foregroundStyle(iconColor(item.iconColor))
+            .frame(width: 18, alignment: .center)
+    }
+
+    @ViewBuilder
+    private func itemAnnotation(_ item: PickerItem) -> some View {
+        if !item.annotation.isEmpty {
+            Text(item.annotation)
+                .font(.system(size: 10.5, design: .monospaced))
+                .foregroundStyle(theme.popupFg.opacity(0.3))
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(theme.popupFg.opacity(0.06))
+                )
+        }
     }
 
     // MARK: - Match highlighting
