@@ -206,6 +206,9 @@ final class CommandDispatcher {
         case .guiChangeSummary(let visible, let entries, let selectedIndex):
             guiState.changeSummaryState.update(visible: visible, entries: entries, selectedIndex: selectedIndex)
 
+        case .guiExtensionOverlay(let entries):
+            guiState.extensionOverlayState.update(entries)
+
         case .guiIndentGuides(let data):
             frameState.windowIndentGuides[data.windowId] = data
             frameState.dirty = true

@@ -213,6 +213,7 @@ enum RenderCommand: Sendable {
     case guiConfigState(Wire.ConfigState)
     case guiNotifications([Wire.EditorNotification])
     case guiEditTimeline(visible: Bool, viewingIndex: UInt16, entries: [Wire.TimelineEntry])
+    case guiExtensionOverlay([Wire.ExtensionOverlayEntry])
 }
 
 // MARK: - Decoder
@@ -2447,6 +2448,50 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             entries.append(Wire.TimelineEntry(index: idx, toolName: toolName, timestampDelta: tsDelta))
         }
         return (.guiEditTimeline(visible: visible, viewingIndex: viewingIndex, entries: entries), 1 + 2 + payloadLen)
+
+    case OP_GUI_EXTENSION_OVERLAY:
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let eoPayloadLen = Int(readU16(data, rest))
+        guard data.count >= rest + 2 + eoPayloadLen, eoPayloadLen >= 1 else {
+            throw ProtocolDecodeError.malformed
+        }
+        let eoStart = rest + 2
+        let eoCount = Int(data[eoStart])
+        var eoEntries: [Wire.ExtensionOverlayEntry] = []
+        var eoPos = eoStart + 1
+        let eoEnd = eoStart + eoPayloadLen
+        for _ in 0..<eoCount {
+            guard eoPos + 1 <= eoEnd else { break }
+            let extNameLen = Int(data[eoPos]); eoPos += 1
+            guard eoPos + extNameLen + 1 <= eoEnd else { break }
+            let extName = String(data: data[eoPos..<(eoPos + extNameLen)], encoding: .utf8) ?? ""
+            eoPos += extNameLen
+            let oidLen = Int(data[eoPos]); eoPos += 1
+            guard eoPos + oidLen + 10 <= eoEnd else { break }
+            let oid = String(data: data[eoPos..<(eoPos + oidLen)], encoding: .utf8) ?? ""
+            eoPos += oidLen
+            let winId = readU16(data, eoPos)
+            let row = readU16(data, eoPos + 2)
+            let col = readU16(data, eoPos + 4)
+            let shape = data[eoPos + 6]
+            let cr = data[eoPos + 7]
+            let cg = data[eoPos + 8]
+            let cb = data[eoPos + 9]
+            let opacity = data[eoPos + 10]
+            eoPos += 11
+            guard eoPos + 2 <= eoEnd else { break }
+            let contentLen = Int(readU16(data, eoPos)); eoPos += 2
+            guard eoPos + contentLen <= eoEnd else { break }
+            let content = String(data: data[eoPos..<(eoPos + contentLen)], encoding: .utf8) ?? ""
+            eoPos += contentLen
+            eoEntries.append(Wire.ExtensionOverlayEntry(
+                extensionName: extName, overlayID: oid, windowID: winId,
+                row: row, col: col, shape: shape,
+                colorR: cr, colorG: cg, colorB: cb, opacity: opacity,
+                content: content
+            ))
+        }
+        return (.guiExtensionOverlay(eoEntries), 1 + 2 + eoPayloadLen)
 
     case OP_CLIPBOARD_WRITE:
         // Forward-compatible format: opcode(1) + payload_length(2) + target(1) + text_len(2) + text

@@ -86,6 +86,7 @@ defmodule Minga.Application do
     # tree starts so headless and pre-editor logs reach Minga.Log.MessagesBuffer
     # via the same path as logs from a running editor.
     Minga.LoggerHandler.install_messages_handler()
+    Minga.Extension.Overlay.init()
 
     minimal? = minimal_mode?()
 

@@ -60,7 +60,8 @@ defmodule MingaEditor.Renderer.Caches do
     last_gui_board_fp: nil,
     last_gui_agent_context_fp: nil,
     last_gui_change_summary_fp: nil,
-    last_gui_edit_timeline_fp: nil
+    last_gui_edit_timeline_fp: nil,
+    last_gui_extension_overlays_fp: nil
   ]
 
   @type t :: %__MODULE__{
@@ -104,7 +105,8 @@ defmodule MingaEditor.Renderer.Caches do
           last_gui_board_fp: integer() | :dismissed | nil,
           last_gui_agent_context_fp: term(),
           last_gui_change_summary_fp: integer() | :hidden | nil,
-          last_gui_edit_timeline_fp: integer() | :hidden | nil
+          last_gui_edit_timeline_fp: integer() | :hidden | nil,
+          last_gui_extension_overlays_fp: integer() | nil
         }
 
   @doc "Creates a fresh Caches struct with first-frame defaults."

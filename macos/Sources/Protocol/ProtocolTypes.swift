@@ -570,6 +570,25 @@ enum Wire {
 
         var id: Int { Int(index) }
     }
+
+    // MARK: - Extension overlays
+
+    /// An overlay entry from an extension, decoded from gui_extension_overlay (0x9C).
+    struct ExtensionOverlayEntry: Sendable, Identifiable, Equatable {
+        let extensionName: String
+        let overlayID: String
+        let windowID: UInt16
+        let row: UInt16
+        let col: UInt16
+        let shape: UInt8
+        let colorR: UInt8
+        let colorG: UInt8
+        let colorB: UInt8
+        let opacity: UInt8
+        let content: String
+
+        var id: String { "\(extensionName):\(overlayID)" }
+    }
 }
 
 /// Cursor shape matching the protocol constants.
