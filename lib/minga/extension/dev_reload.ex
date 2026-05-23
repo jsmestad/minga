@@ -67,12 +67,20 @@ defmodule Minga.Extension.DevReload do
   end
 
   def handle_cast({:unwatch, extension_name}, state) do
+    orphaned_paths =
+      state.extensions
+      |> Enum.filter(fn {_path, name} -> name == extension_name end)
+      |> Enum.map(fn {path, _name} -> path end)
+
     extensions =
       state.extensions
       |> Enum.reject(fn {_path, name} -> name == extension_name end)
       |> Map.new()
 
-    {:noreply, %{state | extensions: extensions}}
+    state = %{state | extensions: extensions}
+    state = cleanup_orphaned_watchers(state, orphaned_paths)
+
+    {:noreply, state}
   end
 
   @impl true
@@ -142,22 +150,40 @@ defmodule Minga.Extension.DevReload do
           :ok ->
             {:ok, fresh_entry} = Minga.Extension.Registry.get(Minga.Extension.Registry, ext_name)
 
-            Minga.Extension.Supervisor.stop_extension(
-              Minga.Extension.Supervisor,
-              Minga.Extension.Registry,
-              ext_name,
-              fresh_entry
-            )
+            case Minga.Extension.Supervisor.stop_extension(
+                   Minga.Extension.Supervisor,
+                   Minga.Extension.Registry,
+                   ext_name,
+                   fresh_entry
+                 ) do
+              :ok ->
+                :ok
+
+              {:error, reason} ->
+                Minga.Log.warning(
+                  :config,
+                  "Dev reload: stop failed for #{ext_name}: #{inspect(reason)}"
+                )
+            end
 
             {:ok, stopped_entry} =
               Minga.Extension.Registry.get(Minga.Extension.Registry, ext_name)
 
-            Minga.Extension.Supervisor.start_extension(
-              Minga.Extension.Supervisor,
-              Minga.Extension.Registry,
-              ext_name,
-              stopped_entry
-            )
+            case Minga.Extension.Supervisor.start_extension(
+                   Minga.Extension.Supervisor,
+                   Minga.Extension.Registry,
+                   ext_name,
+                   stopped_entry
+                 ) do
+              {:ok, _pid} ->
+                :ok
+
+              {:error, reason} ->
+                Minga.Log.warning(
+                  :config,
+                  "Dev reload: start failed for #{ext_name}: #{inspect(reason)}"
+                )
+            end
 
             Minga.Events.broadcast(
               :log_message,
@@ -222,5 +248,32 @@ defmodule Minga.Extension.DevReload do
           state
       end
     end
+  end
+
+  @spec cleanup_orphaned_watchers(state(), [String.t()]) :: state()
+  defp cleanup_orphaned_watchers(state, paths) do
+    Enum.reduce(paths, state, fn path, acc ->
+      if Map.has_key?(acc.extensions, path) do
+        acc
+      else
+        case Map.pop(acc.watchers, path) do
+          {pid, watchers} when is_pid(pid) ->
+            GenServer.stop(pid, :normal, 1_000)
+
+            {ref, monitors} =
+              Enum.find(acc.watcher_monitors, fn {_ref, p} -> p == path end)
+              |> case do
+                {ref, _} -> {ref, Map.delete(acc.watcher_monitors, ref)}
+                nil -> {nil, acc.watcher_monitors}
+              end
+
+            if ref, do: Process.demonitor(ref, [:flush])
+            %{acc | watchers: watchers, watcher_monitors: monitors}
+
+          {nil, _watchers} ->
+            acc
+        end
+      end
+    end)
   end
 end
