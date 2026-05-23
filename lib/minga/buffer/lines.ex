@@ -317,6 +317,10 @@ defmodule Minga.Buffer.Lines do
     {:pending, starts, adjust_after, delta + new_delta}
   end
 
+  # Edits on a different line than the pending delta require a flush because
+  # a single {adjust_after, delta} pair can't represent two independent shifts.
+  # This is O(line_count) but only triggers when the cursor crosses lines
+  # during editing, not on cursor movement alone.
   defp accumulate_delta({:pending, starts, adjust_after, delta}, line, new_delta) do
     clean = flush_to_tuple(starts, adjust_after, delta)
     {:pending, clean, line, new_delta}
@@ -355,7 +359,18 @@ defmodule Minga.Buffer.Lines do
   end
 
   @spec remove_and_shift(line_starts(), non_neg_integer(), non_neg_integer()) :: line_starts()
-  defp remove_and_shift(starts, remove_line, char_size) when remove_line > 0 do
+  defp remove_and_shift(starts, 0, char_size) do
+    total = tuple_size(starts)
+
+    if total <= 1 do
+      starts
+    else
+      for i <- 1..(total - 1), do: elem(starts, i) - char_size
+    end
+    |> List.to_tuple()
+  end
+
+  defp remove_and_shift(starts, remove_line, char_size) do
     total = tuple_size(starts)
     kept = for i <- 0..(remove_line - 1)//1, do: elem(starts, i)
 

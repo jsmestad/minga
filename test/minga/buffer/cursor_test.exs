@@ -180,7 +180,8 @@ defmodule Minga.Buffer.CursorTest do
          after: after_,
          cursor_line: cursor_line,
          cursor_col: cursor_col,
-         line_count: line_count
+         line_count: line_count,
+         line_offsets: ls
        }) do
     lines_before = :binary.split(before, "\n", [:global])
     expected_line = length(lines_before) - 1
@@ -197,6 +198,21 @@ defmodule Minga.Buffer.CursorTest do
     assert cursor_col == expected_column
     assert line_count == expected_line_count
 
+    resolved_ls = resolve_offsets(ls)
+    assert is_tuple(resolved_ls), "line_offsets must resolve to a tuple, got: #{inspect(ls)}"
+    expected_ls = Minga.Buffer.Lines.build_index(text)
+
+    assert resolved_ls == expected_ls,
+           "line_offsets mismatch: resolved=#{inspect(resolved_ls)}, expected #{inspect(expected_ls)}"
+
     :ok
   end
+
+  @spec resolve_offsets(Document.line_offsets()) :: tuple() | nil
+  defp resolve_offsets({:pending, starts, adjust_after, delta}) do
+    Minga.Buffer.Lines.flush_to_tuple(starts, adjust_after, delta)
+  end
+
+  defp resolve_offsets(ls) when is_tuple(ls), do: ls
+  defp resolve_offsets(nil), do: nil
 end

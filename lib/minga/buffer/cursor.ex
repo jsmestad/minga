@@ -80,7 +80,8 @@ defmodule Minga.Buffer.Cursor do
       | before: before,
         after: after_,
         cursor_line: line,
-        cursor_col: column
+        cursor_col: column,
+        line_offsets: line_starts
     }
   end
 
