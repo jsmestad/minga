@@ -496,7 +496,7 @@ for_filetype :elixir, tab_width: 2, autopair: true
 
 When you open a Go file, `tab_width` is 8. When you open an Elixir file, it's 2. Buffers with no filetype (or filetypes without overrides) use the global value.
 
-You can set any option that `set/2` accepts. The filetype atom matches what [`Minga.Filetype`](https://jsmestad.github.io/minga/Minga.Filetype.html) detects (`:elixir`, `:go`, `:python`, `:rust`, `:javascript`, etc.).
+You can set any option that `set/2` accepts. The filetype atom matches what `Minga.Language.detect_filetype/1` detects (`:elixir`, `:go`, `:python`, `:rust`, `:javascript`, etc.).
 
 ## Formatters
 
@@ -673,12 +673,14 @@ bold = true
 
 ### Registering custom filetypes
 
-If Minga doesn't recognize a file extension, you can register it in your config so the right grammar is used:
+If Minga doesn't recognize a file extension, the preferred fix is a language pack: define a `%Minga.Language{}` in a pack and register it with `Minga.Language.Registry.register/2`. That one registration owns file extensions, exact filenames, shebangs, devicons, grammar metadata, formatter defaults, and LSP defaults together.
+
+For temporary local overrides, you can still register a filetype mapping in config:
 
 ```elixir
 # In config.exs
-Minga.Filetype.Registry.register(".astro", :astro)
-Minga.Filetype.Registry.register("Justfile", :just)
+Minga.Language.Filetype.Registry.register(".astro", :astro)
+Minga.Language.Filetype.Registry.register("Justfile", :just)
 ```
 
 This tells Minga the filetype, but highlighting only works if a grammar for that language is compiled into the editor. See below for adding new grammars.
@@ -691,9 +693,9 @@ Adding a grammar for a language Minga doesn't ship requires building from source
 2. **Add a highlight query**: place a `highlights.scm` at `zig/src/queries/{lang}/highlights.scm`. The grammar's upstream repo usually has one you can start from.
 3. **Register in the Zig build**: add an entry to the `grammars` array in `zig/build.zig` with `has_scanner` set appropriately.
 4. **Register in the highlighter**: in `zig/src/highlighter.zig`, add an `extern fn tree_sitter_{lang}()` declaration and an entry in the `languages` array.
-5. **Register the filetype**: add extension/filename mappings in `lib/minga/filetype.ex` so files are detected correctly.
+5. **Register the language in a pack**: create a language module that returns `%Minga.Language{}` with its extensions, filenames, shebangs, grammar name, icon, formatter, and LSP defaults, then add that module to the bundled language pack's `language_modules/0` list.
 
-After rebuilding (`mix compile`), the grammar is compiled into the binary and available immediately.
+After rebuilding (`mix compile`), the grammar is compiled into the binary and the language pack makes it available immediately.
 
 If you add a grammar for a popular language, consider opening a PR so everyone gets it.
 

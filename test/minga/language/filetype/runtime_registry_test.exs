@@ -6,12 +6,14 @@ defmodule Minga.Language.Filetype.RuntimeRegistryTest do
 
   setup do
     on_exit(fn ->
-      # Restore .json to its compile-time default in case a test overrode it.
-      # .org and Justfile are test-only registrations that don't exist in the
-      # compile-time map, so re-registering them to nil cleans them up.
-      Minga.Language.Filetype.Registry.register(".json", :json)
+      # Runtime overrides are global, so remove test registrations after each case.
+      Minga.Language.Filetype.Registry.register(".json", nil)
       Minga.Language.Filetype.Registry.register(".org", nil)
+      Minga.Language.Filetype.Registry.register(".lock", nil)
       Minga.Language.Filetype.Registry.register("Justfile", nil)
+      Minga.Language.Filetype.Registry.register("config.json", nil)
+      Minga.Language.Filetype.Registry.register("Makefile", nil)
+      Minga.Language.Filetype.Registry.register_shebang("python3", nil)
     end)
 
     :ok
@@ -28,13 +30,35 @@ defmodule Minga.Language.Filetype.RuntimeRegistryTest do
       assert Filetype.detect("Justfile") == :just
     end
 
-    test "runtime registry takes precedence over compile-time map" do
-      # .json is normally :json in the compile-time map
+    test "bundled exact filename beats runtime extension overrides" do
+      Minga.Language.Filetype.Registry.register(".lock", :lock_custom)
+
+      assert Filetype.detect("mix.lock") == :elixir
+    end
+
+    test "runtime registry takes precedence over bundled language pack defaults" do
       assert Filetype.detect("data.json") == :json
 
-      # Override it at runtime
       Minga.Language.Filetype.Registry.register(".json", :json_custom)
       assert Filetype.detect("data.json") == :json_custom
+    end
+
+    test "removing runtime overrides restores bundled filename, extension, and shebang fallbacks" do
+      Minga.Language.Filetype.Registry.register(".json", :json_custom)
+      Minga.Language.Filetype.Registry.register("Makefile", :make_custom)
+      Minga.Language.Filetype.Registry.register_shebang("python3", :python_custom)
+
+      assert Filetype.detect("data.json") == :json_custom
+      assert Filetype.detect("Makefile") == :make_custom
+      assert Filetype.detect_from_content("script", "#!/usr/bin/env python3") == :python_custom
+
+      Minga.Language.Filetype.Registry.register(".json", nil)
+      Minga.Language.Filetype.Registry.register("Makefile", nil)
+      Minga.Language.Filetype.Registry.register_shebang("python3", nil)
+
+      assert Filetype.detect("data.json") == :json
+      assert Filetype.detect("Makefile") == :make
+      assert Filetype.detect_from_content("script", "#!/usr/bin/env python3") == :python
     end
   end
 end

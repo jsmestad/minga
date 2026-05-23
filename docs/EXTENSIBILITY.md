@@ -436,10 +436,10 @@ The DSL is syntactic sugar over these APIs, not a replacement. Use whichever fit
 
 Extensions can ship tree-sitter grammar source files and have Minga compile and load them at runtime, enabling syntax highlighting for new languages without rebuilding the binary.
 
-The entry point is `Minga.TreeSitter.register_grammar/3`:
+The entry point is `Minga.Language.register/3`:
 
 ```elixir
-Minga.TreeSitter.register_grammar(
+Minga.Language.register(
   "org",
   "/path/to/tree-sitter-org/src",
   highlights: "/path/to/queries/org/highlights.scm",
@@ -455,12 +455,12 @@ This single call handles the full pipeline:
 2. **Caches** the compiled library at `~/.local/share/minga/grammars/` (respects `$XDG_DATA_HOME`). Subsequent startups skip recompilation when the cache is newer than sources.
 3. **Loads** the shared library into the parser Port via the `load_grammar` protocol message.
 4. **Sends** highlight and injection queries to the parser.
-5. **Registers** filetype mappings so `Minga.Filetype.detect/1` recognizes the new file extensions.
-6. **Registers** the language in `Minga.Highlight.Grammar` so buffers with the new filetype get syntax highlighting.
+5. **Registers** filetype mappings so `Minga.Language.detect_filetype/1` recognizes the new file extensions.
+6. **Registers** the filetype-to-grammar mapping in `Minga.Language.Grammar` so buffers with the new filetype get syntax highlighting.
 
-Extensions that add new languages should call `register_grammar/3` from their `init/1` callback. If no C compiler is available, a warning is logged and the extension loads without highlighting.
+`Minga.Language.register/3` reports compile/setup failures synchronously. The parser-side load response is asynchronous, so a successful return means the grammar was accepted for loading, not that every parser process has finished applying it yet. Extensions that add new languages should call `Minga.Language.register/3` from their `init/1` callback and decide whether to fail the extension or continue without highlighting when it returns `{:error, reason}`.
 
-The dynamic grammar registry is an ETS table (`read_concurrency: true`) initialized at application startup. Dynamic mappings take precedence over the compiled-in defaults, so extensions can override built-in grammars if needed.
+The dynamic grammar registry is an ETS table (`read_concurrency: true`) initialized at application startup. Dynamic mappings take precedence over the registered language definitions, so extensions can override bundled grammars if needed.
 
 ---
 

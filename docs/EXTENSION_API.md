@@ -434,12 +434,61 @@ Annotations are line-anchored: they automatically shift when lines are inserted 
 
 ---
 
+## Language Packs
+
+Language support is owned by language packs. A pack is a normal extension module that lists language definition modules and registers their `%Minga.Language{}` structs with a source tag. That source tag is what makes reload safe: unloading the pack removes the whole language record, so the language name, file extensions, exact filenames, shebang mappings, devicon, grammar metadata, formatter, and LSP defaults disappear together.
+
+```elixir
+defmodule MyLanguages do
+  use Minga.Extension
+
+  @languages [MyLanguages.Astro]
+
+  @impl true
+  def name, do: :my_languages
+
+  @impl true
+  def description, do: "Project language definitions"
+
+  @impl true
+  def version, do: "0.1.0"
+
+  @impl true
+  def init(_config) do
+    case Minga.Extensions.LanguagePacks.register_pack(__MODULE__) do
+      :ok -> {:ok, %{languages: length(@languages)}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def language_modules, do: @languages
+end
+
+defmodule MyLanguages.Astro do
+  def definition do
+    %Minga.Language{
+      name: :astro,
+      label: "Astro",
+      comment_token: "// ",
+      extensions: ["astro"],
+      icon: "\u{E6B3}",
+      icon_color: 0xFF5D01,
+      grammar: "astro"
+    }
+  end
+end
+```
+
+If you add a language to Minga itself, create a language module inside the bundled pack and add that module to the pack's `language_modules/0` list. Do not edit a central registry list or add hardcoded filetype maps in core.
+
+---
+
 ## Tree-Sitter Grammars
 
 Extensions can ship tree-sitter grammar source files and have Minga compile and load them at runtime. One call does everything: compile, cache, load, register filetype, send highlight query.
 
 ```elixir
-Minga.TreeSitter.register_grammar(
+Minga.Language.register(
   "org",
   "/path/to/tree-sitter-org/src",
   highlights: "/path/to/queries/org/highlights.scm",
@@ -449,9 +498,9 @@ Minga.TreeSitter.register_grammar(
 )
 ```
 
-The grammar's `parser.c` (and optional `scanner.c`) is compiled into a shared library using the system C compiler, then cached at `~/.local/share/minga/grammars/`. Subsequent startups skip compilation. If no C compiler is available, a warning is logged and the extension loads without highlighting.
+The grammar's `parser.c` (and optional `scanner.c`) is compiled into a shared library using the system C compiler, then cached at `~/.local/share/minga/grammars/`. Subsequent startups skip compilation. `Minga.Language.register/3` returns `{:error, reason}` for compilation or other synchronous setup failures. A successful `:ok` means the parser load request was accepted, not that every parser process has already applied it. Your `init/1` decides whether that should fail the extension or continue without highlighting.
 
-For more detail on what `register_grammar/3` does under the hood, see the [Extensibility](EXTENSIBILITY.md#runtime-grammar-loading-for-extensions) page.
+For more detail on what `Minga.Language.register/3` does under the hood, see the [Extensibility](EXTENSIBILITY.md#runtime-grammar-loading-for-extensions) page.
 
 ---
 

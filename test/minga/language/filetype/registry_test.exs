@@ -38,20 +38,10 @@ defmodule Minga.Language.Filetype.RegistryTest do
   end
 
   describe "defaults" do
-    test "includes hardcoded extensions", %{name: name} do
-      assert lookup_ext(name, "ex") == :elixir
-      assert lookup_ext(name, "go") == :go
-      assert lookup_ext(name, "rs") == :rust
-    end
-
-    test "includes hardcoded filenames", %{name: name} do
-      assert lookup_fname(name, "Makefile") == :make
-      assert lookup_fname(name, "Dockerfile") == :dockerfile
-    end
-
-    test "includes hardcoded shebang interpreters", %{name: name} do
-      assert lookup_shebang(name, "ruby") == :ruby
-      assert lookup_shebang(name, "python3") == :python
+    test "starts empty because bundled defaults come from language packs", %{name: name} do
+      assert lookup_ext(name, "ex") == nil
+      assert lookup_fname(name, "Makefile") == nil
+      assert lookup_shebang(name, "python3") == nil
     end
   end
 
@@ -68,7 +58,8 @@ defmodule Minga.Language.Filetype.RegistryTest do
       assert lookup_fname(name, "Justfile") == :just
     end
 
-    test "overrides an existing extension", %{name: name} do
+    test "updates an existing runtime extension", %{name: name} do
+      register_ext(name, ".h", :c)
       assert lookup_ext(name, "h") == :c
       register_ext(name, ".h", :cpp)
       assert lookup_ext(name, "h") == :cpp

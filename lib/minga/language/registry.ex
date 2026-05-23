@@ -1,10 +1,8 @@
 defmodule Minga.Language.Registry do
   @moduledoc """
-  Collects all language definitions at startup and provides O(1) lookups.
+  Provides O(1) language catalog lookups for `%Minga.Language{}` definitions registered by config and extension-owned language packs.
 
-  Backed by ETS with `read_concurrency: true` for lock-free reads on
-  every keystroke, render frame, and comment toggle. The GenServer exists
-  only to own the ETS table lifecycle. All reads go directly to ETS.
+  Backed by ETS with `read_concurrency: true` for lock-free reads on every keystroke, render frame, and comment toggle. The GenServer exists only to own the ETS table lifecycle. All reads go directly to ETS.
 
   ## Lookup functions
 
@@ -15,8 +13,7 @@ defmodule Minga.Language.Registry do
 
   ## Runtime registration
 
-  Extensions register new languages via `register/1`. Runtime
-  registrations override built-in definitions for the same name.
+  Extensions register languages via `register/2` with `{:extension, name}` as the source. Reload and unload paths remove the whole `%Minga.Language{}` record, so its names, extensions, filenames, shebangs, devicons, grammar metadata, formatter, and LSP defaults disappear together.
   """
 
   use GenServer
@@ -30,67 +27,6 @@ defmodule Minga.Language.Registry do
   @type contribution_source :: :builtin | :config | {:extension, atom()}
 
   @type register_error :: {:duplicate_key, term(), contribution_source(), contribution_source()}
-
-  # All built-in language definition modules. Add new languages here.
-  @language_modules [
-    Minga.Language.Bash,
-    Minga.Language.C,
-    Minga.Language.Clojure,
-    Minga.Language.Conf,
-    Minga.Language.Cpp,
-    Minga.Language.CSharp,
-    Minga.Language.Css,
-    Minga.Language.Csv,
-    Minga.Language.Dart,
-    Minga.Language.Diff,
-    Minga.Language.Dockerfile,
-    Minga.Language.EditorConfig,
-    Minga.Language.Elixir,
-    Minga.Language.EmacsLisp,
-    Minga.Language.Erlang,
-    Minga.Language.Fish,
-    Minga.Language.GitConfig,
-    Minga.Language.GitIgnore,
-    Minga.Language.Gleam,
-    Minga.Language.Go,
-    Minga.Language.GraphQL,
-    Minga.Language.Haskell,
-    Minga.Language.Hcl,
-    Minga.Language.Heex,
-    Minga.Language.Html,
-    Minga.Language.Ini,
-    Minga.Language.Java,
-    Minga.Language.JavaScript,
-    Minga.Language.JavaScriptReact,
-    Minga.Language.Json,
-    Minga.Language.Kotlin,
-    Minga.Language.Lfe,
-    Minga.Language.Lua,
-    Minga.Language.Make,
-    Minga.Language.Markdown,
-    Minga.Language.Nix,
-    Minga.Language.ObjectiveC,
-    Minga.Language.OCaml,
-    Minga.Language.Perl,
-    Minga.Language.Php,
-    Minga.Language.Protobuf,
-    Minga.Language.Python,
-    Minga.Language.R,
-    Minga.Language.Ruby,
-    Minga.Language.Rust,
-    Minga.Language.Scala,
-    Minga.Language.Scss,
-    Minga.Language.Sql,
-    Minga.Language.Swift,
-    Minga.Language.Text,
-    Minga.Language.Toml,
-    Minga.Language.TypeScript,
-    Minga.Language.TypeScriptReact,
-    Minga.Language.Vim,
-    Minga.Language.Xml,
-    Minga.Language.Yaml,
-    Minga.Language.Zig
-  ]
 
   # ── Client API ─────────────────────────────────────────────────────────────
 
@@ -229,6 +165,19 @@ defmodule Minga.Language.Registry do
     end
   end
 
+  @doc "Returns the contribution source for a registry key, or `nil` if the key is unknown."
+  @spec source_for(term()) :: contribution_source() | nil
+  def source_for(key) do
+    ensure_source_table!()
+
+    case :ets.lookup(@source_table, key) do
+      [{^key, source}] -> source
+      [] -> nil
+    end
+  rescue
+    ArgumentError -> nil
+  end
+
   @doc "Removes every language and lookup index contributed by a source."
   @spec unregister_source(contribution_source()) :: :ok
   def unregister_source(source) do
@@ -266,11 +215,6 @@ defmodule Minga.Language.Registry do
       :public,
       read_concurrency: true
     ])
-
-    for mod <- @language_modules do
-      lang = mod.definition()
-      insert_language(lang, :builtin)
-    end
 
     {:ok, :no_state}
   end

@@ -2,15 +2,14 @@ defmodule Minga.Language.Filetype.Registry do
   @moduledoc """
   Runtime-extensible filetype registry backed by an Agent.
 
-  Starts with the hardcoded defaults from `Minga.Language.Filetype` and allows
-  new patterns to be registered at runtime via `register/2`. This
-  enables future config/plugin systems to add custom filetype mappings.
+  Starts empty and allows config or extensions to register overrides at runtime via `register/2`. Built-in language filetypes come from `Minga.Language.Registry`, where they are owned by their language pack source.
 
   ## Examples
 
       Minga.Language.Filetype.Registry.register(".astro", :astro)
       Minga.Language.Filetype.Registry.register("Justfile", :just)
-      :astro = Minga.Language.Filetype.Registry.lookup("component.astro")
+      :astro = Minga.Language.Filetype.Registry.lookup_extension("astro")
+      :just = Minga.Language.Filetype.Registry.lookup_filename("Justfile")
   """
 
   use Agent
@@ -26,21 +25,12 @@ defmodule Minga.Language.Filetype.Registry do
 
   # ── Client API ─────────────────────────────────────────────────────────────
 
-  @doc "Starts the registry with defaults from `Minga.Language.Filetype`."
+  @doc "Starts the registry for runtime filetype overrides."
   @spec start_link(keyword()) :: Agent.on_start()
   def start_link(opts \\ []) do
     name = Keyword.get(opts, :name, __MODULE__)
 
-    Agent.start_link(
-      fn ->
-        %{
-          extensions: Filetype.extensions(),
-          filenames: Filetype.filenames(),
-          shebang_interpreters: Filetype.shebang_interpreters()
-        }
-      end,
-      name: name
-    )
+    Agent.start_link(fn -> empty_state() end, name: name)
   end
 
   @doc """
@@ -50,10 +40,22 @@ defmodule Minga.Language.Filetype.Registry do
   - An extension string starting with `.` (e.g., `".astro"`) — case-insensitive
   - An exact filename string (e.g., `"Justfile"`) — case-sensitive
   """
-  @spec register(String.t(), Filetype.filetype()) :: :ok
+  @spec register(String.t(), Filetype.filetype() | nil) :: :ok
+  def register("." <> ext, nil) do
+    Agent.update(__MODULE__, fn state ->
+      %{state | extensions: Map.delete(state.extensions, String.downcase(ext))}
+    end)
+  end
+
   def register("." <> ext, filetype) when is_atom(filetype) do
     Agent.update(__MODULE__, fn state ->
       %{state | extensions: Map.put(state.extensions, String.downcase(ext), filetype)}
+    end)
+  end
+
+  def register(filename, nil) when is_binary(filename) do
+    Agent.update(__MODULE__, fn state ->
+      %{state | filenames: Map.delete(state.filenames, filename)}
     end)
   end
 
@@ -68,7 +70,13 @@ defmodule Minga.Language.Filetype.Registry do
 
   `interpreter` is the basename of the interpreter (e.g., `"deno"`).
   """
-  @spec register_shebang(String.t(), Filetype.filetype()) :: :ok
+  @spec register_shebang(String.t(), Filetype.filetype() | nil) :: :ok
+  def register_shebang(interpreter, nil) when is_binary(interpreter) do
+    Agent.update(__MODULE__, fn state ->
+      %{state | shebang_interpreters: Map.delete(state.shebang_interpreters, interpreter)}
+    end)
+  end
+
   def register_shebang(interpreter, filetype)
       when is_binary(interpreter) and is_atom(filetype) do
     Agent.update(__MODULE__, fn state ->
@@ -104,5 +112,10 @@ defmodule Minga.Language.Filetype.Registry do
   @spec all_filenames() :: %{String.t() => Filetype.filetype()}
   def all_filenames do
     Agent.get(__MODULE__, fn state -> state.filenames end)
+  end
+
+  @spec empty_state() :: state()
+  defp empty_state do
+    %{extensions: %{}, filenames: %{}, shebang_interpreters: %{}}
   end
 end

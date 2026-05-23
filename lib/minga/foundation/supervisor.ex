@@ -12,6 +12,7 @@ defmodule Minga.Foundation.Supervisor do
 
       Foundation.Supervisor (rest_for_one)
       ├── Minga.Language.Registry      ETS, language definitions
+      ├── Minga.Extensions.LanguagePacks Bundled language catalog loader
       ├── Minga.Events                 Registry(:duplicate), pub/sub bus
       ├── Minga.Config.Options         GenServer, typed options
       ├── Minga.Keymap.Active          Active keymap state
@@ -21,9 +22,7 @@ defmodule Minga.Foundation.Supervisor do
       ├── MingaAgent.Tool.Registry     Agent tool specs (ETS)
       └── Minga.Language.Filetype.Registry      Filetype detection
 
-  Language.Registry is first because it has no dependencies and nothing
-  depends on it within this group. Events is second so that everything
-  after it re-subscribes on Events restart.
+  Language.Registry is first because it owns the ETS table. Bundled language packs start next so consumers see the default language catalog before services, LSP, syntax highlighting, or filetype detection query it. Events follows so everything after it re-subscribes on Events restart.
   """
 
   use Supervisor
@@ -39,6 +38,7 @@ defmodule Minga.Foundation.Supervisor do
   def init(_opts) do
     children = [
       Minga.Language.Registry,
+      Minga.Extensions.LanguagePacks,
       Minga.Events,
       Minga.Config.Options,
       Minga.Keymap.Active,
