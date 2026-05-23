@@ -64,7 +64,12 @@ defmodule Minga.Extension.ContributionCleanup do
     end
   end
 
-  @spec cleanup_families(GenServer.server(), GenServer.server(), %{atom() => cleanup_fun()}, contribution_source()) ::
+  @spec cleanup_families(
+          GenServer.server(),
+          GenServer.server(),
+          %{atom() => cleanup_fun()},
+          contribution_source()
+        ) ::
           [{atom(), (-> term())}]
   defp cleanup_families(command_registry, keymap, cbs, source) do
     [

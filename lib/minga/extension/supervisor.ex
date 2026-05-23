@@ -715,7 +715,12 @@ defmodule Minga.Extension.Supervisor do
     end
   end
 
-  @spec cleanup_extension_contributions(atom(), GenServer.server(), GenServer.server(), start_opts()) ::
+  @spec cleanup_extension_contributions(
+          atom(),
+          GenServer.server(),
+          GenServer.server(),
+          start_opts()
+        ) ::
           :ok | {:error, [map()]}
   defp cleanup_extension_contributions(name, cmd_registry, keymap, opts) do
     source = {:extension, name}

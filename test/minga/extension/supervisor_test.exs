@@ -5,7 +5,6 @@ defmodule Minga.Extension.SupervisorTest do
   # Excluded from test.llm; runs in test.heavy and full suite.
   @moduletag :heavy
 
-
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Extension.Supervisor, as: ExtSupervisor
 
