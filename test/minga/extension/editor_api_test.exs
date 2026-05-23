@@ -74,11 +74,16 @@ defmodule MingaEditor.Extension.EditorAPITest do
       new_window_id = state.workspace.windows.next_id
       state = MingaEditor.Commands.Movement.execute(state, :split_vertical)
 
-      second_buffer = start_supervised!({Minga.Buffer.Process, content: "second file", file_path: path}, id: {:buffer, make_ref()})
+      second_buffer =
+        start_supervised!({Minga.Buffer.Process, content: "second file", file_path: path},
+          id: {:buffer, make_ref()}
+        )
 
-      windows = MingaEditor.State.Windows.update(state.workspace.windows, new_window_id, fn w ->
-        %{w | buffer: second_buffer, content: {:buffer, second_buffer}}
-      end)
+      windows =
+        MingaEditor.State.Windows.update(state.workspace.windows, new_window_id, fn w ->
+          %{w | buffer: second_buffer, content: {:buffer, second_buffer}}
+        end)
+
       state = put_in(state.workspace.windows, windows)
       state = EditorState.focus_window(state, new_window_id)
       assert state.workspace.windows.active == new_window_id
