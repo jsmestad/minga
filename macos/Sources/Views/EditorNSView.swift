@@ -814,15 +814,19 @@ final class EditorNSView: MTKView {
                 return true
             case "b", ",":
                 return true
+            case "=", "+", "-", "0":
+                return true
             default:
                 return false
             }
         }
 
-        // Cmd+Shift variants: Redo (Cmd+Shift+Z)
+        // Cmd+Shift variants: Redo (Cmd+Shift+Z), font size (Cmd+Shift+=)
         if mods == [.command, .shift] {
             switch event.charactersIgnoringModifiers {
             case "z", "Z":
+                return true
+            case "=", "+":
                 return true
             default:
                 return false
@@ -1402,6 +1406,44 @@ final class EditorNSView: MTKView {
         }
         encoder.sendMouseEvent(row: row, col: col, button: button,
                                modifiers: mods, eventType: MOUSE_PRESS)
+    }
+
+    // MARK: - Pinch-to-zoom (magnification gesture)
+
+    /// Accumulated magnification delta since the gesture began.
+    private var magnifyAccumulator: CGFloat = 0
+
+    /// Threshold for one font size step. ~0.1 matches a natural pinch increment.
+    private let magnifyStepThreshold: CGFloat = 0.1
+
+    /// Font size adjust direction constants matching the protocol.
+    private let fontSizeDecrease: UInt8 = 0x00
+    private let fontSizeIncrease: UInt8 = 0x01
+    private let fontSizeReset: UInt8 = 0x02
+
+    override func magnify(with event: NSEvent) {
+        switch event.phase {
+        case .began:
+            magnifyAccumulator = 0
+        default:
+            break
+        }
+
+        magnifyAccumulator += event.magnification
+
+        while magnifyAccumulator >= magnifyStepThreshold {
+            magnifyAccumulator -= magnifyStepThreshold
+            encoder.sendFontSizeAdjust(direction: fontSizeIncrease)
+        }
+
+        while magnifyAccumulator <= -magnifyStepThreshold {
+            magnifyAccumulator += magnifyStepThreshold
+            encoder.sendFontSizeAdjust(direction: fontSizeDecrease)
+        }
+
+        if event.phase == .ended || event.phase == .cancelled {
+            magnifyAccumulator = 0
+        }
     }
 
     /// Send committed text from IME to the BEAM as individual key presses.

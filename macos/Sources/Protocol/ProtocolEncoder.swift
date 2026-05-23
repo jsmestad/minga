@@ -126,6 +126,9 @@ protocol InputEncoder: AnyObject, Sendable {
 
     // BEAM Observatory actions
     func sendObservatoryInspect(pid: String)
+
+    // Font size adjustment
+    func sendFontSizeAdjust(direction: UInt8)
 }
 
 extension InputEncoder {
@@ -148,6 +151,9 @@ extension InputEncoder {
 
     /// Default no-op so existing test spies do not need to implement power and thermal actions.
     func sendPowerThermalState(lowPowerMode: Bool, thermalState: UInt8) {}
+
+    /// Default no-op so existing test spies do not need to implement font size actions.
+    func sendFontSizeAdjust(direction: UInt8) {}
 }
 
 /// Thread-safe encoder that writes `{:packet, 4}` framed events to stdout.
@@ -1069,6 +1075,16 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf.append(OP_GUI_ACTION)
         buf.append(GUI_ACTION_OBSERVATORY_INSPECT)
         appendString16(&buf, pid)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: font_size_adjust. Layout: opcode(1) + action_type(1) + direction(1).
+    /// Direction: 0x00 = decrease, 0x01 = increase, 0x02 = reset.
+    func sendFontSizeAdjust(direction: UInt8) {
+        var buf = Data(count: 3)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_FONT_SIZE_ADJUST
+        buf[2] = direction
         writeFrame(buf)
     }
 

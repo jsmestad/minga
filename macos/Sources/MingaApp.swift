@@ -122,6 +122,18 @@ struct MingaMenuCommands: Commands {
             Button("Toggle File Tree") { encoder?.sendTogglePanel(panel: 0) }
                 .keyboardShortcut("b", modifiers: .command)
                 .disabled(!connected)
+
+            Divider()
+
+            Button("Increase Font Size") { encoder?.sendFontSizeAdjust(direction: 0x01) }
+                .keyboardShortcut("+", modifiers: .command)
+                .disabled(!connected)
+            Button("Decrease Font Size") { encoder?.sendFontSizeAdjust(direction: 0x00) }
+                .keyboardShortcut("-", modifiers: .command)
+                .disabled(!connected)
+            Button("Reset Font Size") { encoder?.sendFontSizeAdjust(direction: 0x02) }
+                .keyboardShortcut("0", modifiers: .command)
+                .disabled(!connected)
         }
     }
 

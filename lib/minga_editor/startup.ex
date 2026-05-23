@@ -439,7 +439,8 @@ defmodule MingaEditor.Startup do
   def send_font_config(%{port_manager: port} = state) do
     options_server = EditorState.options_server(state)
     family = Minga.Config.Options.get(options_server, :font_family)
-    size = Minga.Config.Options.get(options_server, :font_size)
+    config_size = Minga.Config.Options.get(options_server, :font_size)
+    size = state.font_size_override || config_size
     ligatures = Minga.Config.Options.get(options_server, :font_ligatures)
     weight = Minga.Config.Options.get(options_server, :font_weight)
     fallback = Minga.Config.Options.get(options_server, :font_fallback)
