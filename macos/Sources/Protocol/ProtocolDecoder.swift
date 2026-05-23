@@ -2627,10 +2627,12 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                     epPos += labelLen
                     let pctInt = readU16(data, epPos); epPos += 2
                     blocks.append(.progress(label: label, percent: Float(pctInt) / 100.0))
-                case 6: // tree
-                    // Tree decoding is complex (recursive); skip for now by breaking
+                case 6: // tree (length-prefixed, skip payload)
+                    guard epPos + 2 <= epEnd else { break }
+                    let treeLen = Int(readU16(data, epPos)); epPos += 2
+                    guard epPos + treeLen <= epEnd else { break }
+                    epPos += treeLen
                     blocks.append(.unknown)
-                    break
                 default:
                     blocks.append(.unknown)
                     break

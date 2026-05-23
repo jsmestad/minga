@@ -1,3 +1,5 @@
+import Observation
+
 /// State for extension-registered panels.
 ///
 /// Updated by `CommandDispatcher` from `gui_extension_panel` (0x9D) opcode.

@@ -1,3 +1,5 @@
+import Observation
+
 /// State for extension-registered overlays on the editor surface.
 ///
 /// Updated by `CommandDispatcher` from `gui_extension_overlay` (0x9C) opcode.

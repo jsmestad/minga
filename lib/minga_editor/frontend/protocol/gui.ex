@@ -1372,7 +1372,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   defp encode_content_block({:tree, %{nodes: nodes}}) do
     node_data = encode_tree_nodes(nodes)
-    <<6::8, node_data::binary>>
+    <<6::8, byte_size(node_data)::16, node_data::binary>>
   end
 
   defp encode_content_block(_unknown), do: <<255::8>>

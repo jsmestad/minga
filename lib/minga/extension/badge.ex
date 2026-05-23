@@ -49,7 +49,11 @@ defmodule Minga.Extension.Badge do
   end
 
   @spec set_file(atom(), String.t(), keyword()) :: :ok
-  def set_file(extension_name, path, opts \\ [])
+  @spec set_file(table(), atom(), String.t(), keyword()) :: :ok
+  def set_file(extension_name, path, opts \\ []),
+    do: set_file(@file_table, extension_name, path, opts)
+
+  def set_file(file_table, extension_name, path, opts)
       when is_atom(extension_name) and is_binary(path) do
     abs_path = Path.expand(path)
 
@@ -61,12 +65,16 @@ defmodule Minga.Extension.Badge do
       animation: Keyword.get(opts, :animation, :static)
     }
 
-    :ets.insert(@file_table, {{extension_name, abs_path}, entry})
+    :ets.insert(file_table, {{extension_name, abs_path}, entry})
     :ok
   end
 
   @spec set_tab(atom(), pid(), keyword()) :: :ok
-  def set_tab(extension_name, buffer_pid, opts \\ [])
+  @spec set_tab(table(), atom(), pid(), keyword()) :: :ok
+  def set_tab(extension_name, buffer_pid, opts \\ []),
+    do: set_tab(@tab_table, extension_name, buffer_pid, opts)
+
+  def set_tab(tab_table, extension_name, buffer_pid, opts)
       when is_atom(extension_name) and is_pid(buffer_pid) do
     entry = %{
       extension: extension_name,
@@ -74,28 +82,38 @@ defmodule Minga.Extension.Badge do
       color: Keyword.get(opts, :color, 0x51AFEF)
     }
 
-    :ets.insert(@tab_table, {{extension_name, buffer_pid}, entry})
+    :ets.insert(tab_table, {{extension_name, buffer_pid}, entry})
     :ok
   end
 
   @spec remove_file(atom(), String.t()) :: :ok
-  def remove_file(extension_name, path) when is_atom(extension_name) do
-    :ets.delete(@file_table, {extension_name, Path.expand(path)})
+  @spec remove_file(table(), atom(), String.t()) :: :ok
+  def remove_file(extension_name, path), do: remove_file(@file_table, extension_name, path)
+
+  def remove_file(file_table, extension_name, path) when is_atom(extension_name) do
+    :ets.delete(file_table, {extension_name, Path.expand(path)})
     :ok
   end
 
   @spec remove_tab(atom(), pid()) :: :ok
-  def remove_tab(extension_name, buffer_pid) when is_atom(extension_name) do
-    :ets.delete(@tab_table, {extension_name, buffer_pid})
+  @spec remove_tab(table(), atom(), pid()) :: :ok
+  def remove_tab(extension_name, buffer_pid),
+    do: remove_tab(@tab_table, extension_name, buffer_pid)
+
+  def remove_tab(tab_table, extension_name, buffer_pid) when is_atom(extension_name) do
+    :ets.delete(tab_table, {extension_name, buffer_pid})
     :ok
   end
 
   @spec badges_for_path(String.t()) :: [file_badge()]
-  def badges_for_path(path) when is_binary(path) do
-    if table_ready?(@file_table) do
+  @spec badges_for_path(table(), String.t()) :: [file_badge()]
+  def badges_for_path(path), do: badges_for_path(@file_table, path)
+
+  def badges_for_path(file_table, path) when is_binary(path) do
+    if table_ready?(file_table) do
       abs_path = Path.expand(path)
 
-      :ets.tab2list(@file_table)
+      :ets.tab2list(file_table)
       |> Enum.filter(fn {_key, entry} -> entry.path == abs_path end)
       |> Enum.map(fn {_key, entry} -> entry end)
     else
@@ -104,9 +122,12 @@ defmodule Minga.Extension.Badge do
   end
 
   @spec badges_for_buffer(pid()) :: [tab_badge()]
-  def badges_for_buffer(buffer_pid) when is_pid(buffer_pid) do
-    if table_ready?(@tab_table) do
-      :ets.tab2list(@tab_table)
+  @spec badges_for_buffer(table(), pid()) :: [tab_badge()]
+  def badges_for_buffer(buffer_pid), do: badges_for_buffer(@tab_table, buffer_pid)
+
+  def badges_for_buffer(tab_table, buffer_pid) when is_pid(buffer_pid) do
+    if table_ready?(tab_table) do
+      :ets.tab2list(tab_table)
       |> Enum.filter(fn {_key, entry} -> entry.buffer == buffer_pid end)
       |> Enum.map(fn {_key, entry} -> entry end)
     else
@@ -115,30 +136,39 @@ defmodule Minga.Extension.Badge do
   end
 
   @spec all_file_badges() :: [file_badge()]
-  def all_file_badges do
-    if table_ready?(@file_table) do
-      :ets.tab2list(@file_table) |> Enum.map(fn {_key, entry} -> entry end)
+  @spec all_file_badges(table()) :: [file_badge()]
+  def all_file_badges, do: all_file_badges(@file_table)
+
+  def all_file_badges(file_table) do
+    if table_ready?(file_table) do
+      :ets.tab2list(file_table) |> Enum.map(fn {_key, entry} -> entry end)
     else
       []
     end
   end
 
   @spec all_tab_badges() :: [tab_badge()]
-  def all_tab_badges do
-    if table_ready?(@tab_table) do
-      :ets.tab2list(@tab_table) |> Enum.map(fn {_key, entry} -> entry end)
+  @spec all_tab_badges(table()) :: [tab_badge()]
+  def all_tab_badges, do: all_tab_badges(@tab_table)
+
+  def all_tab_badges(tab_table) do
+    if table_ready?(tab_table) do
+      :ets.tab2list(tab_table) |> Enum.map(fn {_key, entry} -> entry end)
     else
       []
     end
   end
 
   @spec remove_all(atom()) :: :ok
-  def remove_all(extension_name) when is_atom(extension_name) do
-    if table_ready?(@file_table),
-      do: :ets.match_delete(@file_table, {{extension_name, :_}, :_})
+  @spec remove_all(table(), table(), atom()) :: :ok
+  def remove_all(extension_name), do: remove_all(@file_table, @tab_table, extension_name)
 
-    if table_ready?(@tab_table),
-      do: :ets.match_delete(@tab_table, {{extension_name, :_}, :_})
+  def remove_all(file_table, tab_table, extension_name) when is_atom(extension_name) do
+    if table_ready?(file_table),
+      do: :ets.match_delete(file_table, {{extension_name, :_}, :_})
+
+    if table_ready?(tab_table),
+      do: :ets.match_delete(tab_table, {{extension_name, :_}, :_})
 
     :ok
   end
