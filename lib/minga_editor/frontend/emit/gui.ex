@@ -158,7 +158,8 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       &build_gui_board_cmd/2,
       &build_gui_agent_context_cmd/2,
       &build_gui_change_summary_cmd/2,
-      &build_gui_edit_timeline_cmd/2
+      &build_gui_edit_timeline_cmd/2,
+      &build_gui_extension_panel_cmd/2
     ]
 
     {cmds, caches} =
@@ -1872,6 +1873,21 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       else
         {nil, caches}
       end
+    end
+  end
+
+  # ── Extension Panels ──
+
+  @spec build_gui_extension_panel_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
+  defp build_gui_extension_panel_cmd(_ctx, caches) do
+    panels = Minga.Extension.Panel.visible()
+    fp = :erlang.phash2(panels)
+
+    if fp != caches.last_gui_extension_panels_fp do
+      cmd = ProtocolGUI.encode_gui_extension_panels(panels)
+      {cmd, %{caches | last_gui_extension_panels_fp: fp}}
+    else
+      {nil, caches}
     end
   end
 

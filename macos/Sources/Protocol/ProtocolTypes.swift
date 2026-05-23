@@ -577,6 +577,41 @@ enum Wire {
 
         var id: Int { Int(index) }
     }
+
+    // MARK: - Extension panels
+
+    /// A content block in an extension panel.
+    enum PanelContentBlock: Sendable {
+        case text(String)
+        case styledText(runs: [(text: String, r: UInt8, g: UInt8, b: UInt8, bold: Bool, italic: Bool)])
+        case table(columns: [String], rows: [[String]], selected: UInt16)
+        case keyValue(pairs: [(key: String, value: String)])
+        case separator
+        case progress(label: String, percent: Float)
+        case tree(nodes: [PanelTreeNode])
+        case unknown
+    }
+
+    /// A tree node in an extension panel.
+    struct PanelTreeNode: Sendable {
+        let label: String
+        let expanded: Bool
+        let children: [PanelTreeNode]
+    }
+
+    /// A panel registered by an extension.
+    struct ExtensionPanelEntry: Sendable, Identifiable {
+        let extensionName: String
+        let panelID: String
+        let title: String
+        let position: UInt8
+        let sizeType: UInt8
+        let sizeValue: UInt8
+        let visible: Bool
+        let blocks: [PanelContentBlock]
+
+        var id: String { "\(extensionName):\(panelID)" }
+    }
 }
 
 /// Cursor shape matching the protocol constants.

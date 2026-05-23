@@ -213,6 +213,7 @@ enum RenderCommand: Sendable {
     case guiConfigState(Wire.ConfigState)
     case guiNotifications([Wire.EditorNotification])
     case guiEditTimeline(visible: Bool, viewingIndex: UInt16, entries: [Wire.TimelineEntry])
+    case guiExtensionPanel([Wire.ExtensionPanelEntry])
 }
 
 // MARK: - Decoder
@@ -2464,6 +2465,66 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             entries.append(Wire.TimelineEntry(index: idx, toolName: toolName, timestampDelta: tsDelta))
         }
         return (.guiEditTimeline(visible: visible, viewingIndex: viewingIndex, entries: entries), 1 + 2 + payloadLen)
+
+    case OP_GUI_EXTENSION_PANEL:
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let epPayloadLen = Int(readU16(data, rest))
+        guard data.count >= rest + 2 + epPayloadLen, epPayloadLen >= 1 else {
+            throw ProtocolDecodeError.malformed
+        }
+        let epStart = rest + 2
+        let epEnd = epStart + epPayloadLen
+        let panelCount = Int(data[epStart])
+        var epPanels: [Wire.ExtensionPanelEntry] = []
+        var epPos = epStart + 1
+        for _ in 0..<panelCount {
+            guard epPos + 1 <= epEnd else { break }
+            let extLen = Int(data[epPos]); epPos += 1
+            guard epPos + extLen <= epEnd else { break }
+            let extName = String(data: data[epPos..<(epPos + extLen)], encoding: .utf8) ?? ""
+            epPos += extLen
+            guard epPos + 1 <= epEnd else { break }
+            let pidLen = Int(data[epPos]); epPos += 1
+            guard epPos + pidLen <= epEnd else { break }
+            let panelId = String(data: data[epPos..<(epPos + pidLen)], encoding: .utf8) ?? ""
+            epPos += pidLen
+            guard epPos + 1 <= epEnd else { break }
+            let titleLen = Int(data[epPos]); epPos += 1
+            guard epPos + titleLen + 4 <= epEnd else { break }
+            let title = String(data: data[epPos..<(epPos + titleLen)], encoding: .utf8) ?? ""
+            epPos += titleLen
+            let pos = data[epPos]
+            let sizeType = data[epPos + 1]
+            let sizeVal = data[epPos + 2]
+            let vis = data[epPos + 3] != 0
+            epPos += 4
+            guard epPos + 1 <= epEnd else { break }
+            let blockCount = Int(data[epPos]); epPos += 1
+            var blocks: [Wire.PanelContentBlock] = []
+            for _ in 0..<blockCount {
+                guard epPos + 1 <= epEnd else { break }
+                let blockType = data[epPos]; epPos += 1
+                switch blockType {
+                case 0: // text
+                    guard epPos + 2 <= epEnd else { break }
+                    let tLen = Int(readU16(data, epPos)); epPos += 2
+                    guard epPos + tLen <= epEnd else { break }
+                    let t = String(data: data[epPos..<(epPos + tLen)], encoding: .utf8) ?? ""
+                    epPos += tLen
+                    blocks.append(.text(t))
+                case 4: // separator
+                    blocks.append(.separator)
+                default:
+                    blocks.append(.unknown)
+                }
+            }
+            epPanels.append(Wire.ExtensionPanelEntry(
+                extensionName: extName, panelID: panelId, title: title,
+                position: pos, sizeType: sizeType, sizeValue: sizeVal,
+                visible: vis, blocks: blocks
+            ))
+        }
+        return (.guiExtensionPanel(epPanels), 1 + 2 + epPayloadLen)
 
     case OP_CLIPBOARD_WRITE:
         // Forward-compatible format: opcode(1) + payload_length(2) + target(1) + text_len(2) + text
