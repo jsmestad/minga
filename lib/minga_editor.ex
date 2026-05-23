@@ -867,8 +867,7 @@ defmodule MingaEditor do
         ) :: state()
   defp handle_picker_candidates(state, payload, {:ok, items}) do
     picker_state = payload.picker_ui
-    picker = %{picker_state.picker | items: items}
-    picker = MingaEditor.UI.Picker.filter(picker, picker.query)
+    picker = MingaEditor.UI.Picker.replace_items(picker_state.picker, items)
     new_picker_state = %{picker_state | picker: picker, load_status: :ready}
 
     ModalOverlay.transition(

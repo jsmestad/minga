@@ -2556,8 +2556,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp encode_load_status(:loading), do: <<1::8>>
 
   defp encode_load_status({:error, reason}) do
-    reason_bytes = :erlang.iolist_to_binary([reason])
-    <<2::8, byte_size(reason_bytes)::16, reason_bytes::binary>>
+    <<2::8, byte_size(reason)::16, reason::binary>>
   end
 
   # ── Picker preview ──
