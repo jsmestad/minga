@@ -821,10 +821,12 @@ final class EditorNSView: MTKView {
             }
         }
 
-        // Cmd+Shift variants: Redo (Cmd+Shift+Z)
+        // Cmd+Shift variants: Redo (Cmd+Shift+Z), font size (Cmd+Shift+=)
         if mods == [.command, .shift] {
             switch event.charactersIgnoringModifiers {
             case "z", "Z":
+                return true
+            case "=", "+":
                 return true
             default:
                 return false
