@@ -506,6 +506,83 @@ defmodule MingaEditor.PickerUITest do
                String.contains?(text, "3/3 (2 marked)")
              end)
     end
+
+    test "bottom picker shows 'No matches' when query filters all items" do
+      items = [%Item{id: "1", label: "alpha.ex"}, %Item{id: "2", label: "beta.ex"}]
+      picker = items |> Picker.new(title: "Files", max_visible: 10) |> Picker.filter("zzzzz")
+
+      input = %RenderInput{
+        picker_state: %PickerState{picker: picker, source: nil},
+        theme_picker: theme_picker(),
+        viewport: Viewport.new(24, 80)
+      }
+
+      {draws, _cursor} = PickerUI.render(input)
+
+      assert Enum.any?(draws, fn {_row, _col, text, _face} ->
+               String.contains?(text, "No matches")
+             end)
+    end
+
+    test "bottom picker does not show 'No matches' with an empty query" do
+      items = [%Item{id: "1", label: "alpha.ex"}]
+      picker = Picker.new(items, title: "Files", max_visible: 10)
+
+      input = %RenderInput{
+        picker_state: %PickerState{picker: picker, source: nil},
+        theme_picker: theme_picker(),
+        viewport: Viewport.new(24, 80)
+      }
+
+      {draws, _cursor} = PickerUI.render(input)
+
+      refute Enum.any?(draws, fn {_row, _col, text, _face} ->
+               String.contains?(text, "No matches")
+             end)
+    end
+
+    test "centered picker shows 'No matches' when query filters all items" do
+      items = [%Item{id: "1", label: "alpha.ex"}, %Item{id: "2", label: "beta.ex"}]
+      picker = items |> Picker.new(title: "Files", max_visible: 10) |> Picker.filter("zzzzz")
+
+      input = %RenderInput{
+        picker_state: %PickerState{picker: picker, source: nil, layout: :centered},
+        theme_picker: theme_picker(),
+        viewport: Viewport.new(24, 80)
+      }
+
+      {draws, _cursor} = PickerUI.render(input)
+
+      assert Enum.any?(draws, fn {_row, _col, text, _face} ->
+               String.contains?(text, "No matches")
+             end)
+    end
+
+    test "'No matches' disappears when query is backspaced to a matching state" do
+      items = [%Item{id: "1", label: "alpha.ex"}, %Item{id: "2", label: "beta.ex"}]
+
+      picker =
+        items
+        |> Picker.new(title: "Files", max_visible: 10)
+        |> Picker.filter("zzzzz")
+        |> Picker.backspace()
+        |> Picker.backspace()
+        |> Picker.backspace()
+        |> Picker.backspace()
+        |> Picker.backspace()
+
+      input = %RenderInput{
+        picker_state: %PickerState{picker: picker, source: nil},
+        theme_picker: theme_picker(),
+        viewport: Viewport.new(24, 80)
+      }
+
+      {draws, _cursor} = PickerUI.render(input)
+
+      refute Enum.any?(draws, fn {_row, _col, text, _face} ->
+               String.contains?(text, "No matches")
+             end)
+    end
   end
 
   describe "bulk picker actions" do

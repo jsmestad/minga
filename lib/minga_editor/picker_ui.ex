@@ -582,6 +582,9 @@ defmodule MingaEditor.PickerUI do
     {visible, selected_offset, item_rows} = bottom_visible_items(picker, row_budget)
     selected_row_offset = row_offset_for_visible_index(visible, selected_offset)
 
+    no_matches? = visible == [] and picker.query != ""
+    item_rows = if no_matches?, do: 1, else: item_rows
+
     # Layout: item rows grow upward from row N-2, prompt on row N-1
     prompt_row = viewport.rows - 1
     separator_row = prompt_row - item_rows - 1
@@ -634,27 +637,39 @@ defmodule MingaEditor.PickerUI do
       match_fg: match_fg
     }
 
-    {item_commands, _row_offset} =
-      visible
-      |> Enum.with_index()
-      |> Enum.map_reduce(0, fn {{item, rows_used}, idx}, row_offset ->
-        row = first_item_row + row_offset
-
-        commands =
-          render_visible_item(
-            row,
-            rows_used,
-            item,
-            idx == selected_offset,
-            picker.query,
-            viewport,
-            picker_colors
+    item_commands =
+      if no_matches? do
+        [
+          DisplayList.draw(
+            first_item_row,
+            0,
+            String.pad_trailing("  No matches", viewport.cols),
+            Face.new(fg: dim_fg, bg: bg)
           )
+        ]
+      else
+        {cmds, _row_offset} =
+          visible
+          |> Enum.with_index()
+          |> Enum.map_reduce(0, fn {{item, rows_used}, idx}, row_offset ->
+            row = first_item_row + row_offset
 
-        {commands, row_offset + rows_used}
-      end)
+            commands =
+              render_visible_item(
+                row,
+                rows_used,
+                item,
+                idx == selected_offset,
+                picker.query,
+                viewport,
+                picker_colors
+              )
 
-    item_commands = List.flatten(item_commands)
+            {commands, row_offset + rows_used}
+          end)
+
+        List.flatten(cmds)
+      end
 
     # Prompt line (replaces minibuffer)
     prompt_text = prompt_prefix(picker_state) <> picker.query
@@ -818,9 +833,11 @@ defmodule MingaEditor.PickerUI do
     item_capacity = centered_item_capacity(viewport.rows)
     {visible, selected_offset} = Picker.visible_items(picker, item_capacity)
 
+    no_matches? = visible == [] and picker.query != ""
+
     # Compute float window dimensions
     float_width = {:percent, 60}
-    float_height_rows = centered_float_height(visible, viewport)
+    float_height_rows = centered_float_height(visible, viewport, no_matches?)
     float_height = {:rows, float_height_rows}
 
     popup_theme = %{
@@ -847,23 +864,18 @@ defmodule MingaEditor.PickerUI do
 
     # Build content draws (relative to interior origin)
     item_draws =
-      visible
-      |> Enum.with_index()
-      |> Enum.flat_map(fn {item, idx} ->
-        if idx >= items_h,
-          do: [],
-          else:
-            render_centered_item(
-              idx,
-              item.label,
-              item.description,
-              idx == selected_offset,
-              picker.query,
-              interior_w,
-              pc,
-              item.icon_color
-            )
-      end)
+      if no_matches? do
+        [
+          DisplayList.draw(
+            0,
+            0,
+            String.pad_trailing("  No matches", interior_w),
+            Face.new(fg: pc.dim_fg, bg: pc.bg)
+          )
+        ]
+      else
+        render_centered_items(visible, items_h, selected_offset, picker.query, interior_w, pc)
+      end
 
     # Prompt at the bottom of the interior
     prompt_text = prompt_prefix(picker_state) <> picker.query
@@ -897,6 +909,34 @@ defmodule MingaEditor.PickerUI do
     cursor_pos = {cursor_row, cursor_col}
 
     {draws, cursor_pos}
+  end
+
+  @spec render_centered_items(
+          [Picker.item()],
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t(),
+          pos_integer(),
+          map()
+        ) :: [DisplayList.draw()]
+  defp render_centered_items(visible, items_h, selected_offset, query, interior_w, pc) do
+    visible
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {item, idx} ->
+      if idx >= items_h,
+        do: [],
+        else:
+          render_centered_item(
+            idx,
+            item.label,
+            item.description,
+            idx == selected_offset,
+            query,
+            interior_w,
+            pc,
+            item.icon_color
+          )
+    end)
   end
 
   @spec render_centered_item(
@@ -1003,10 +1043,12 @@ defmodule MingaEditor.PickerUI do
     max(div(viewport_rows * 7, 10), 5) - 3
   end
 
-  @spec centered_float_height([Picker.item()], MingaEditor.Viewport.t()) :: pos_integer()
-  defp centered_float_height(visible, viewport) do
+  @spec centered_float_height([Picker.item()], MingaEditor.Viewport.t(), boolean()) ::
+          pos_integer()
+  defp centered_float_height(visible, viewport, no_matches?) do
     max_height = max(div(viewport.rows * 7, 10), 5)
-    min(length(visible) + 3, max_height)
+    item_count = if no_matches?, do: 1, else: length(visible)
+    min(item_count + 3, max_height)
   end
 
   @spec resolve_percent(pos_integer(), pos_integer()) :: pos_integer()
