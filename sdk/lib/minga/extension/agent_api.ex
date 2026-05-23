@@ -27,7 +27,8 @@ defmodule Minga.Extension.AgentAPI do
           cost: float(),
           input_tokens: non_neg_integer(),
           output_tokens: non_neg_integer(),
-          turn_count: non_neg_integer()
+          turn_count: non_neg_integer(),
+          files_touched: [String.t()]
         }
 
   @spec list_sessions() :: [session_summary()]

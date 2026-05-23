@@ -32,7 +32,7 @@ defmodule MingaSdk.MixProject do
     [
       licenses: ["MIT"],
       links: %{"GitHub" => @source_url},
-      files: ["lib", "mix.exs", "README.md", "LICENSE"]
+      files: ["lib", "mix.exs", "README.md"]
     ]
   end
 

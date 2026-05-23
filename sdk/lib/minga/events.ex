@@ -29,6 +29,7 @@ defmodule Minga.Events do
 
   defmodule BufferChangedEvent do
     @moduledoc "Payload for `:buffer_changed` events."
+    @enforce_keys [:buffer, :source]
     defstruct [:buffer, :source, :delta, :version]
 
     @type t :: %__MODULE__{
@@ -41,6 +42,7 @@ defmodule Minga.Events do
 
   defmodule BufferEvent do
     @moduledoc "Payload for `:buffer_saved` and `:buffer_opened` events."
+    @enforce_keys [:buffer, :path]
     defstruct [:buffer, :path]
 
     @type t :: %__MODULE__{buffer: pid(), path: String.t()}

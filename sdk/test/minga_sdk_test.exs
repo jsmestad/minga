@@ -50,7 +50,7 @@ defmodule MingaSdkTest do
 
     test "Events types are accessible" do
       assert is_atom(Minga.Events)
-      assert %Minga.Events.BufferChangedEvent{buffer: nil, source: nil, delta: nil, version: nil}
+      assert %Minga.Events.BufferChangedEvent{buffer: self(), source: :user, delta: nil, version: nil}
     end
 
     test "Buffer types are accessible" do

@@ -51,4 +51,4 @@ end
 - `MingaEditor.Extension.EditorAPI` for triggering editor actions from commands
 - `Minga.Events` for subscribing to editor events
 - `Minga.Buffer` public API types
-- `Minga.Core.Decorations` types for buffer-level visual decorations
+- `Minga.Buffer.EditSource` and `Minga.Buffer.EditDelta` types for tracking edit origins and positions
