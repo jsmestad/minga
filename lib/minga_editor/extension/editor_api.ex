@@ -14,7 +14,7 @@ defmodule MingaEditor.Extension.EditorAPI do
 
       # In MyExtension.Commands:
       def open_target(state) do
-        Minga.Extension.EditorAPI.open_file(state, "/path/to/file.ex")
+        MingaEditor.Extension.EditorAPI.open_file(state, "/path/to/file.ex")
       end
   """
 
