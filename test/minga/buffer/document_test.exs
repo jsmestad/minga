@@ -380,6 +380,28 @@ defmodule Minga.Buffer.DocumentTest do
       assert Document.cursor(buf) == {0, 0}
       assert Document.line_count(buf) == 1
     end
+
+    test "line_offsets survives cursor movement without rebuild" do
+      buf = Document.new("hello\nworld\nfoo")
+      original_offsets = buf.line_offsets
+
+      moved = buf |> Document.move(:right) |> Document.move(:down) |> Document.move_to({2, 1})
+      assert moved.line_offsets == original_offsets
+      assert_cache_valid(moved)
+    end
+
+    test "line_offsets updated incrementally on insert with newlines" do
+      buf =
+        Document.new("ab\ncd\nef")
+        |> Document.move_to({1, 1})
+        |> Document.insert_text("X\nY")
+
+      assert_cache_valid(buf)
+      assert Document.line_at(buf, 0) == "ab"
+      assert Document.line_at(buf, 1) == "cX"
+      assert Document.line_at(buf, 2) == "Yd"
+      assert Document.line_at(buf, 3) == "ef"
+    end
   end
 
   describe "content_range_length/3" do
@@ -441,23 +463,21 @@ defmodule Minga.Buffer.DocumentTest do
 
   # ── Test helpers ──
 
-  # Verifies that the cached cursor_line, cursor_col, and line_count fields
-  # match values recomputed from the raw buffer content.
-  # cursor_col is now a byte offset within the current line.
+  # Verifies that the cached cursor_line, cursor_col, line_count, and
+  # line_offsets fields match values recomputed from the raw buffer content.
   @spec assert_cache_valid(Document.t()) :: :ok
   defp assert_cache_valid(%Document{
          before: before,
          after: after_,
          cursor_line: cl,
          cursor_col: cc,
-         line_count: lc
+         line_count: lc,
+         line_offsets: ls
        }) do
-    # Recompute cursor from `before`
     lines_before = :binary.split(before, "\n", [:global])
     expected_line = length(lines_before) - 1
     expected_col = lines_before |> List.last() |> byte_size()
 
-    # Recompute line_count from full content
     text = before <> after_
 
     expected_lc =
@@ -475,10 +495,26 @@ defmodule Minga.Buffer.DocumentTest do
     assert lc == expected_lc,
            "line_count: got #{lc}, expected #{expected_lc} (content=#{inspect(text)})"
 
+    resolved_ls = resolve_offsets(ls)
+    assert is_tuple(resolved_ls), "line_offsets must resolve to a tuple, got: #{inspect(ls)}"
+
+    expected_ls = Minga.Buffer.Lines.build_index(text)
+
+    assert resolved_ls == expected_ls,
+           "line_offsets mismatch: resolved=#{inspect(resolved_ls)}, expected #{inspect(expected_ls)} (raw=#{inspect(ls)}, content=#{inspect(text)})"
+
     :ok
   end
 
   # Convert a byte offset in text to a {line, byte_col} position.
+  @spec resolve_offsets(Document.line_offsets()) :: tuple() | nil
+  defp resolve_offsets({:pending, starts, adjust_after, delta}) do
+    Minga.Buffer.Lines.flush_to_tuple(starts, adjust_after, delta)
+  end
+
+  defp resolve_offsets(ls) when is_tuple(ls), do: ls
+  defp resolve_offsets(nil), do: nil
+
   @spec byte_offset_to_position(String.t(), non_neg_integer()) :: Document.position()
   defp byte_offset_to_position(text, byte_offset) do
     before_cursor = binary_part(text, 0, min(byte_offset, byte_size(text)))
