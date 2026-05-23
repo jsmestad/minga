@@ -75,11 +75,7 @@ jobs:
         run: git diff --exit-code -- zig/src/protocol.zig
       - name: Check generated protocol artifacts stay out of source
         if: github.event_name == 'pull_request'
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          git fetch --no-tags origin "$BASE_REF"
-          scripts/check_protocol_generated_edits "origin/$BASE_REF"
+        run: scripts/check_protocol_generated_edits "${{ github.event.pull_request.base.sha }}"
       - run: mix protocol.gen --check
       - run: mix test --warnings-as-errors --exclude system_clipboard --exclude conformance
 
