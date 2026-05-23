@@ -15,7 +15,8 @@ defmodule Minga.Extension.DevReload do
   @debounce_ms 200
 
   @type state :: %{
-          watcher: pid() | nil,
+          watchers: %{String.t() => pid()},
+          watcher_monitors: %{reference() => String.t()},
           extensions: %{String.t() => atom()},
           pending_timer: reference() | nil,
           pending_paths: MapSet.t()
@@ -42,16 +43,23 @@ defmodule Minga.Extension.DevReload do
   @impl true
   @spec init(keyword()) :: {:ok, state()}
   def init(_opts) do
-    {:ok, %{watcher: nil, extensions: %{}, pending_timer: nil, pending_paths: MapSet.new()}}
+    {:ok,
+     %{
+       watchers: %{},
+       watcher_monitors: %{},
+       extensions: %{},
+       pending_timer: nil,
+       pending_paths: MapSet.new()
+     }}
   end
 
   @impl true
   def handle_cast({:watch, extension_name, source_path}, state) do
-    lib_path = Path.join(source_path, "lib")
+    lib_path = Path.expand(Path.join(source_path, "lib"))
 
     if File.dir?(lib_path) do
-      state = ensure_watcher(state, lib_path)
-      extensions = Map.put(state.extensions, Path.expand(lib_path), extension_name)
+      state = start_watcher_for_path(state, lib_path)
+      extensions = Map.put(state.extensions, lib_path, extension_name)
       {:noreply, %{state | extensions: extensions}}
     else
       {:noreply, state}
@@ -75,19 +83,34 @@ defmodule Minga.Extension.DevReload do
       timer =
         if state.pending_timer do
           Process.cancel_timer(state.pending_timer)
-          Process.send_after(self(), :debounced_reload, @debounce_ms)
-        else
-          Process.send_after(self(), :debounced_reload, @debounce_ms)
         end
 
-      {:noreply, %{state | pending_paths: pending, pending_timer: timer}}
+      _ = timer
+      new_timer = Process.send_after(self(), :debounced_reload, @debounce_ms)
+
+      {:noreply, %{state | pending_paths: pending, pending_timer: new_timer}}
     else
       {:noreply, state}
     end
   end
 
   def handle_info({:file_event, _watcher_pid, :stop}, state) do
-    {:noreply, %{state | watcher: nil}}
+    Minga.Log.warning(:config, "Dev reload: file watcher stopped")
+    {:noreply, state}
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
+    case Map.pop(state.watcher_monitors, ref) do
+      {lib_path, monitors} when is_binary(lib_path) ->
+        Minga.Log.warning(:config, "Dev reload: watcher for #{lib_path} crashed, restarting")
+        watchers = Map.delete(state.watchers, lib_path)
+        state = %{state | watchers: watchers, watcher_monitors: monitors}
+        state = start_watcher_for_path(state, lib_path)
+        {:noreply, state}
+
+      {nil, _monitors} ->
+        {:noreply, state}
+    end
   end
 
   def handle_info(:debounced_reload, state) do
@@ -112,23 +135,28 @@ defmodule Minga.Extension.DevReload do
   @spec reload_extension(atom()) :: :ok
   defp reload_extension(ext_name) do
     case Minga.Extension.Registry.get(Minga.Extension.Registry, ext_name) do
-      {:ok, %{path: path, status: :running} = entry} when is_binary(path) ->
+      {:ok, %{path: path, status: :running}} when is_binary(path) ->
         Minga.Log.info(:config, "Dev reload: recompiling #{ext_name}")
 
         case recompile_extension(path) do
           :ok ->
+            {:ok, fresh_entry} = Minga.Extension.Registry.get(Minga.Extension.Registry, ext_name)
+
             Minga.Extension.Supervisor.stop_extension(
               Minga.Extension.Supervisor,
               Minga.Extension.Registry,
               ext_name,
-              entry
+              fresh_entry
             )
+
+            {:ok, stopped_entry} =
+              Minga.Extension.Registry.get(Minga.Extension.Registry, ext_name)
 
             Minga.Extension.Supervisor.start_extension(
               Minga.Extension.Supervisor,
               Minga.Extension.Registry,
               ext_name,
-              entry
+              stopped_entry
             )
 
             Minga.Events.broadcast(
@@ -160,34 +188,39 @@ defmodule Minga.Extension.DevReload do
   @spec recompile_extension(String.t()) :: :ok | {:error, term()}
   defp recompile_extension(path) do
     lib_path = Path.join(path, "lib")
-
-    ex_files =
-      Path.wildcard(Path.join(lib_path, "**/*.ex"))
+    ex_files = Path.wildcard(Path.join(lib_path, "**/*.ex"))
 
     if ex_files == [] do
       {:error, :no_source_files}
     else
-      Enum.each(ex_files, fn file ->
-        Code.compile_file(file)
-      end)
-
-      :ok
+      case Kernel.ParallelCompiler.compile(ex_files) do
+        {:ok, _modules, _warnings} -> :ok
+        {:error, errors, _warnings} -> {:error, errors}
+      end
     end
   rescue
     e -> {:error, Exception.message(e)}
   end
 
-  @spec ensure_watcher(state(), String.t()) :: state()
-  defp ensure_watcher(%{watcher: nil} = state, path) do
-    case FileSystem.start_link(dirs: [path]) do
-      {:ok, pid} ->
-        FileSystem.subscribe(pid)
-        %{state | watcher: pid}
+  @spec start_watcher_for_path(state(), String.t()) :: state()
+  defp start_watcher_for_path(state, lib_path) do
+    if Map.has_key?(state.watchers, lib_path) do
+      state
+    else
+      case FileSystem.start_link(dirs: [lib_path]) do
+        {:ok, pid} ->
+          FileSystem.subscribe(pid)
+          ref = Process.monitor(pid)
 
-      _ ->
-        state
+          %{
+            state
+            | watchers: Map.put(state.watchers, lib_path, pid),
+              watcher_monitors: Map.put(state.watcher_monitors, ref, lib_path)
+          }
+
+        _ ->
+          state
+      end
     end
   end
-
-  defp ensure_watcher(state, _path), do: state
 end
