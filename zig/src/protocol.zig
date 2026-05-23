@@ -22,6 +22,8 @@ const std = @import("std");
 
 const opcodes = @import("generated/protocol_opcodes.zig");
 
+// BEGIN GENERATED OPCODE EXPORTS. Regenerate with `mix protocol.gen`. Do not edit by hand.
+// Input
 pub const OP_KEY_PRESS = opcodes.OP_KEY_PRESS;
 pub const OP_RESIZE = opcodes.OP_RESIZE;
 pub const OP_READY = opcodes.OP_READY;
@@ -30,6 +32,8 @@ pub const OP_CAPABILITIES_UPDATED = opcodes.OP_CAPABILITIES_UPDATED;
 pub const OP_PASTE_EVENT = opcodes.OP_PASTE_EVENT;
 pub const OP_GUI_ACTION = opcodes.OP_GUI_ACTION;
 pub const OP_LOG_MESSAGE = opcodes.OP_LOG_MESSAGE;
+
+// Render
 pub const OP_DRAW_TEXT = opcodes.OP_DRAW_TEXT;
 pub const OP_SET_CURSOR = opcodes.OP_SET_CURSOR;
 pub const OP_CLEAR = opcodes.OP_CLEAR;
@@ -43,9 +47,13 @@ pub const OP_DESTROY_REGION = opcodes.OP_DESTROY_REGION;
 pub const OP_SET_ACTIVE_REGION = opcodes.OP_SET_ACTIVE_REGION;
 pub const OP_SCROLL_REGION = opcodes.OP_SCROLL_REGION;
 pub const OP_DRAW_STYLED_TEXT = opcodes.OP_DRAW_STYLED_TEXT;
+
+// Config
 pub const OP_SET_FONT = opcodes.OP_SET_FONT;
 pub const OP_SET_FONT_FALLBACK = opcodes.OP_SET_FONT_FALLBACK;
 pub const OP_REGISTER_FONT = opcodes.OP_REGISTER_FONT;
+
+// Parser Commands
 pub const OP_SET_LANGUAGE = opcodes.OP_SET_LANGUAGE;
 pub const OP_PARSE_BUFFER = opcodes.OP_PARSE_BUFFER;
 pub const OP_SET_HIGHLIGHT_QUERY = opcodes.OP_SET_HIGHLIGHT_QUERY;
@@ -63,6 +71,8 @@ pub const OP_CLOSE_BUFFER = opcodes.OP_CLOSE_BUFFER;
 pub const OP_REQUEST_MATCH_ITEM = opcodes.OP_REQUEST_MATCH_ITEM;
 pub const OP_REQUEST_STRUCTURAL_NAV = opcodes.OP_REQUEST_STRUCTURAL_NAV;
 pub const OP_SET_TAGS_QUERY = opcodes.OP_SET_TAGS_QUERY;
+
+// Parser Responses
 pub const OP_HIGHLIGHT_SPANS = opcodes.OP_HIGHLIGHT_SPANS;
 pub const OP_HIGHLIGHT_NAMES = opcodes.OP_HIGHLIGHT_NAMES;
 pub const OP_GRAMMAR_LOADED = opcodes.OP_GRAMMAR_LOADED;
@@ -78,6 +88,8 @@ pub const OP_REQUEST_REPARSE = opcodes.OP_REQUEST_REPARSE;
 pub const OP_MATCH_ITEM_RESULT = opcodes.OP_MATCH_ITEM_RESULT;
 pub const OP_NODE_INFO = opcodes.OP_NODE_INFO;
 pub const OP_DOCUMENT_SYMBOLS = opcodes.OP_DOCUMENT_SYMBOLS;
+
+// Gui Chrome
 pub const OP_GUI_TAB_BAR = opcodes.OP_GUI_TAB_BAR;
 pub const OP_GUI_WHICH_KEY = opcodes.OP_GUI_WHICH_KEY;
 pub const OP_GUI_COMPLETION = opcodes.OP_GUI_COMPLETION;
@@ -93,26 +105,29 @@ pub const OP_GUI_BOTTOM_PANEL = opcodes.OP_GUI_BOTTOM_PANEL;
 pub const OP_GUI_PICKER_PREVIEW = opcodes.OP_GUI_PICKER_PREVIEW;
 pub const OP_GUI_TOOL_MANAGER = opcodes.OP_GUI_TOOL_MANAGER;
 pub const OP_GUI_MINIBUFFER = opcodes.OP_GUI_MINIBUFFER;
-pub const OP_GUI_WINDOW_CONTENT = opcodes.OP_GUI_WINDOW_CONTENT;
-pub const OP_GUI_HOVER_POPUP = opcodes.OP_GUI_HOVER_POPUP;
-pub const OP_GUI_SIGNATURE_HELP = opcodes.OP_GUI_SIGNATURE_HELP;
-pub const OP_GUI_FLOAT_POPUP = opcodes.OP_GUI_FLOAT_POPUP;
-pub const OP_GUI_SPLIT_SEPARATORS = opcodes.OP_GUI_SPLIT_SEPARATORS;
-pub const OP_GUI_GIT_STATUS = opcodes.OP_GUI_GIT_STATUS;
-pub const OP_GUI_WORKSPACES = opcodes.OP_GUI_WORKSPACES;
-pub const OP_GUI_BOARD = opcodes.OP_GUI_BOARD;
-pub const OP_GUI_AGENT_CONTEXT = opcodes.OP_GUI_AGENT_CONTEXT;
-pub const OP_GUI_CHANGE_SUMMARY = opcodes.OP_GUI_CHANGE_SUMMARY;
 pub const OP_CLIPBOARD_WRITE = opcodes.OP_CLIPBOARD_WRITE;
 pub const OP_GUI_INDENT_GUIDES = opcodes.OP_GUI_INDENT_GUIDES;
 pub const OP_GUI_LINE_SPACING = opcodes.OP_GUI_LINE_SPACING;
 pub const OP_GUI_FILE_TREE = opcodes.OP_GUI_FILE_TREE;
 pub const OP_GUI_FILE_TREE_SELECTION = opcodes.OP_GUI_FILE_TREE_SELECTION;
 pub const OP_GUI_CURSOR_ANIMATION = opcodes.OP_GUI_CURSOR_ANIMATION;
-pub const OP_GUI_OBSERVATORY = opcodes.OP_GUI_OBSERVATORY;
+
+// Gui Semantic
+pub const OP_GUI_WINDOW_CONTENT = opcodes.OP_GUI_WINDOW_CONTENT;
+pub const OP_GUI_HOVER_POPUP = opcodes.OP_GUI_HOVER_POPUP;
+pub const OP_GUI_SIGNATURE_HELP = opcodes.OP_GUI_SIGNATURE_HELP;
+pub const OP_GUI_FLOAT_POPUP = opcodes.OP_GUI_FLOAT_POPUP;
+pub const OP_GUI_SPLIT_SEPARATORS = opcodes.OP_GUI_SPLIT_SEPARATORS;
+pub const OP_GUI_GIT_STATUS = opcodes.OP_GUI_GIT_STATUS;
+pub const OP_GUI_BOARD = opcodes.OP_GUI_BOARD;
+pub const OP_GUI_AGENT_CONTEXT = opcodes.OP_GUI_AGENT_CONTEXT;
+pub const OP_GUI_CHANGE_SUMMARY = opcodes.OP_GUI_CHANGE_SUMMARY;
 pub const OP_GUI_HOVER_ACTION = opcodes.OP_GUI_HOVER_ACTION;
 pub const OP_GUI_CONFIG_STATE = opcodes.OP_GUI_CONFIG_STATE;
+pub const OP_GUI_WORKSPACES = opcodes.OP_GUI_WORKSPACES;
 pub const OP_GUI_NOTIFICATIONS = opcodes.OP_GUI_NOTIFICATIONS;
+pub const OP_GUI_OBSERVATORY = opcodes.OP_GUI_OBSERVATORY;
+
 pub const GUI_ACTION_SELECT_TAB = opcodes.GUI_ACTION_SELECT_TAB;
 pub const GUI_ACTION_CLOSE_TAB = opcodes.GUI_ACTION_CLOSE_TAB;
 pub const GUI_ACTION_FILE_TREE_CLICK = opcodes.GUI_ACTION_FILE_TREE_CLICK;
@@ -190,8 +205,9 @@ pub const GUI_ACTION_TAB_UNPIN = opcodes.GUI_ACTION_TAB_UNPIN;
 pub const GUI_ACTION_TAB_MOVE_LEFT = opcodes.GUI_ACTION_TAB_MOVE_LEFT;
 pub const GUI_ACTION_TAB_MOVE_RIGHT = opcodes.GUI_ACTION_TAB_MOVE_RIGHT;
 pub const GUI_ACTION_OBSERVATORY_INSPECT = opcodes.GUI_ACTION_OBSERVATORY_INSPECT;
+// END GENERATED OPCODE EXPORTS.
 
-// Log levels// Log levels
+// Log levels
 pub const LOG_LEVEL_ERR: u8 = 0;
 pub const LOG_LEVEL_WARN: u8 = 1;
 pub const LOG_LEVEL_INFO: u8 = 2;
