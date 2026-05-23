@@ -20,8 +20,10 @@ defmodule MingaEditor.Frontend.Emit.TUI do
   sending the ANSI scroll region sequences (`VaxisSurface.scrollRegion`),
   so the subsequent `render()` diff only repaints the newly revealed rows.
 
-  Bails out to a full redraw when visual selection is active, since the
-  selection highlight on shifted rows would be stale.
+  Bails out to a full redraw when the editing mode changed since the last
+  frame (e.g., exiting visual mode would leave stale selection highlights
+  on shifted rows) or when the current mode has per-frame visual state
+  changes that affect content styling (visual selection, search highlights).
   """
 
   alias MingaEditor.DisplayList
@@ -89,7 +91,7 @@ defmodule MingaEditor.Frontend.Emit.TUI do
 
   @spec detect_scroll_regions(ctx(), Caches.t()) :: [scroll_delta()] | nil
   defp detect_scroll_regions(ctx, caches) do
-    if scroll_optimization_enabled?() and not visual_mode?(ctx) do
+    if scroll_optimization_enabled?() and scroll_compatible_mode?(ctx, caches) do
       detect_scroll_regions_impl(ctx, caches)
     else
       nil
@@ -101,12 +103,20 @@ defmodule MingaEditor.Frontend.Emit.TUI do
     Application.get_env(:minga, :tui_scroll_optimization, true) == true
   end
 
-  # Visual mode has selection highlight on content rows that changes every
-  # frame as the cursor moves. Shifted rows would show stale selection
-  # styling, so we bail out to a full redraw.
-  @spec visual_mode?(ctx()) :: boolean()
-  defp visual_mode?(ctx) do
-    ctx.editing != nil and ctx.editing.mode in [:visual, :visual_line, :visual_block]
+  # Modes where content styling changes every frame (selection highlight,
+  # search match highlight). Shifted rows would show stale styling.
+  @volatile_modes [:visual, :visual_line, :visual_block, :search, :search_prompt]
+
+  # Returns true when the scroll optimization is safe to attempt.
+  # Bails out when the editing mode changed since the last frame (stale
+  # highlights from the previous mode would persist on shifted rows) or
+  # when the current mode has per-frame visual state changes.
+  @spec scroll_compatible_mode?(ctx(), Caches.t()) :: boolean()
+  defp scroll_compatible_mode?(ctx, caches) do
+    current_mode = if ctx.editing, do: ctx.editing.mode, else: nil
+    prev_mode = caches.emit_prev_editing_mode
+
+    current_mode not in @volatile_modes and current_mode == prev_mode
   end
 
   @spec detect_scroll_regions_impl(ctx(), Caches.t()) :: [scroll_delta()] | nil
