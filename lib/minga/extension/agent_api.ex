@@ -23,6 +23,8 @@ defmodule Minga.Extension.AgentAPI do
 
   require Logger
 
+  @default_manager MingaAgent.SessionManager
+
   @typedoc "Agent session status."
   @type session_status :: :idle | :plan | :thinking | :tool_executing | :error
 
@@ -59,9 +61,11 @@ defmodule Minga.Extension.AgentAPI do
   Returns an empty list if no sessions are running or the session
   manager is unavailable.
   """
-  @spec list_sessions() :: [session_summary()]
-  def list_sessions do
-    MingaAgent.SessionManager.list_sessions()
+  @spec list_sessions(keyword()) :: [session_summary()]
+  def list_sessions(opts \\ []) do
+    manager = Keyword.get(opts, :session_manager, @default_manager)
+
+    MingaAgent.SessionManager.list_sessions(manager)
     |> Enum.map(&session_entry_to_summary/1)
   catch
     :exit, {:noproc, _} ->
@@ -71,7 +75,7 @@ defmodule Minga.Extension.AgentAPI do
       []
 
     :exit, reason ->
-      Logger.warning("AgentAPI.list_sessions/0 caught unexpected exit: #{inspect(reason)}")
+      Logger.warning("AgentAPI.list_sessions/1 caught unexpected exit: #{inspect(reason)}")
       []
   end
 
@@ -82,9 +86,11 @@ defmodule Minga.Extension.AgentAPI do
   summary fields. Returns `{:error, :not_found}` if the PID is dead
   or not a known session.
   """
-  @spec session_info(pid()) :: {:ok, session_info()} | {:error, :not_found}
-  def session_info(pid) when is_pid(pid) do
-    case MingaAgent.SessionManager.session_id_for_pid(pid) do
+  @spec session_info(pid(), keyword()) :: {:ok, session_info()} | {:error, :not_found}
+  def session_info(pid, opts \\ []) when is_pid(pid) do
+    manager = Keyword.get(opts, :session_manager, @default_manager)
+
+    case MingaAgent.SessionManager.session_id_for_pid(manager, pid) do
       {:ok, id} ->
         snapshot = MingaAgent.Session.editor_snapshot(pid)
         usage = MingaAgent.Session.usage(pid)
@@ -122,7 +128,7 @@ defmodule Minga.Extension.AgentAPI do
       {:error, :not_found}
 
     :exit, reason ->
-      Logger.warning("AgentAPI.session_info/1 caught unexpected exit: #{inspect(reason)}")
+      Logger.warning("AgentAPI.session_info/2 caught unexpected exit: #{inspect(reason)}")
       {:error, :not_found}
   end
 

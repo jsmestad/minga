@@ -118,7 +118,13 @@ defmodule MingaAgent.SessionManager do
   @doc "Lists all active sessions as `{id, pid, metadata}` tuples."
   @spec list_sessions() :: [{String.t(), pid(), SessionMetadata.t()}]
   def list_sessions do
-    GenServer.call(__MODULE__, :list_sessions)
+    list_sessions(__MODULE__)
+  end
+
+  @doc "Lists all active sessions through the given manager."
+  @spec list_sessions(GenServer.server()) :: [{String.t(), pid(), SessionMetadata.t()}]
+  def list_sessions(manager) do
+    GenServer.call(manager, :list_sessions)
   end
 
   @doc "Looks up the PID for a session ID."
@@ -130,7 +136,13 @@ defmodule MingaAgent.SessionManager do
   @doc "Looks up the session ID for a PID."
   @spec session_id_for_pid(pid()) :: {:ok, String.t()} | {:error, :not_found}
   def session_id_for_pid(pid) when is_pid(pid) do
-    GenServer.call(__MODULE__, {:session_id_for_pid, pid})
+    session_id_for_pid(__MODULE__, pid)
+  end
+
+  @doc "Looks up the session ID for a PID through the given manager."
+  @spec session_id_for_pid(GenServer.server(), pid()) :: {:ok, String.t()} | {:error, :not_found}
+  def session_id_for_pid(manager, pid) when is_pid(pid) do
+    GenServer.call(manager, {:session_id_for_pid, pid})
   end
 
   @doc "Stops a session by its PID (looks up the ID internally)."
