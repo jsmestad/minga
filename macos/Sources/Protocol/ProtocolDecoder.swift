@@ -212,6 +212,7 @@ enum RenderCommand: Sendable {
     case guiChangeSummary(visible: Bool, entries: [ChangeSummaryEntry], selectedIndex: Int)
     case guiConfigState(Wire.ConfigState)
     case guiNotifications([Wire.EditorNotification])
+    case guiEditTimeline(visible: Bool, viewingIndex: UInt16, entries: [Wire.TimelineEntry])
 }
 
 // MARK: - Decoder
@@ -2420,6 +2421,32 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             throw ProtocolDecodeError.malformed
         }
         return (.guiCursorAnimation(enabled: data[rest + 2] != 0), 1 + 2 + caPayloadLen)
+
+    case OP_GUI_EDIT_TIMELINE:
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let payloadLen = Int(readU16(data, rest))
+        guard data.count >= rest + 2 + payloadLen, payloadLen >= 4 else {
+            throw ProtocolDecodeError.malformed
+        }
+        let pStart = rest + 2
+        let visible = data[pStart] != 0
+        let viewingIndex = readU16(data, pStart + 1)
+        let entryCount = Int(data[pStart + 3])
+        var entries: [Wire.TimelineEntry] = []
+        var ePos = pStart + 4
+        for _ in 0..<entryCount {
+            guard ePos + 2 <= pStart + payloadLen else { break }
+            let idx = data[ePos]
+            let nameLen = Int(data[ePos + 1])
+            ePos += 2
+            guard ePos + nameLen + 4 <= pStart + payloadLen else { break }
+            let toolName = String(data: data[ePos..<(ePos + nameLen)], encoding: .utf8) ?? ""
+            ePos += nameLen
+            let tsDelta = readU32(data, ePos)
+            ePos += 4
+            entries.append(Wire.TimelineEntry(index: idx, toolName: toolName, timestampDelta: tsDelta))
+        }
+        return (.guiEditTimeline(visible: visible, viewingIndex: viewingIndex, entries: entries), 1 + 2 + payloadLen)
 
     case OP_CLIPBOARD_WRITE:
         // Forward-compatible format: opcode(1) + payload_length(2) + target(1) + text_len(2) + text

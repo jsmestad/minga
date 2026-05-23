@@ -1284,7 +1284,13 @@ defmodule MingaAgent.Session do
   end
 
   defp handle_provider_event(%Event.ToolFileChanged{} = event, state) do
-    broadcast(state, {:file_changed, event.path, event.before_content, event.after_content})
+    tool_name = tool_name_for_call(state.active_tool_calls, event.tool_call_id)
+
+    broadcast(
+      state,
+      {:file_changed, event.path, event.before_content, event.after_content, event.tool_call_id, tool_name}
+    )
+
     state = record_file_touch(state, event.path, event.before_content, event.after_content)
     state
   end
@@ -1625,6 +1631,14 @@ defmodule MingaAgent.Session do
   defp current_active_tool_name(active_tool_calls) do
     {_tool_call_id, name} = List.last(active_tool_calls)
     name
+  end
+
+  @spec tool_name_for_call([active_tool_call()], String.t()) :: String.t()
+  defp tool_name_for_call(active_tool_calls, tool_call_id) do
+    case Enum.find(active_tool_calls, fn {id, _name} -> id == tool_call_id end) do
+      {_id, name} -> name
+      nil -> "unknown"
+    end
   end
 
   @spec plan_mode_message() :: String.t()

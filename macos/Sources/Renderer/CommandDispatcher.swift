@@ -170,6 +170,9 @@ final class CommandDispatcher {
         case .guiNotifications(let notifications):
             guiState.notificationCenterState.update(rawNotifications: notifications)
 
+        case .guiEditTimeline(let visible, let viewingIndex, let entries):
+            guiState.editTimelineState.update(visible: visible, viewingIndex: viewingIndex, wireEntries: entries)
+
         case .guiTheme(let slots):
             guiState.themeColors.applySlots(slots)
             let tc = guiState.themeColors

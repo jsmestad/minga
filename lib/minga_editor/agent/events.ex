@@ -12,6 +12,7 @@ defmodule MingaEditor.Agent.Events do
   alias Minga.Distribution.ConnectionManager
   alias Minga.Project.FileRef
   alias MingaEditor.Agent.DiffReview
+  alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.View.Preview
@@ -169,11 +170,27 @@ defmodule MingaEditor.Agent.Events do
     {state, [{:render, 16}]}
   end
 
-  def handle(state, {:file_changed, path, before_content, after_content}) do
+  def handle(state, {:file_changed, path, before_content, after_content, tool_call_id, tool_name}) do
     {state, remote_effects} = reload_remote_buffer_if_open(state, path, after_content)
 
     state =
       AgentAccess.update_agent_ui(state, &UIState.record_baseline(&1, path, before_content))
+
+    state =
+      AgentAccess.update_view(state, fn view ->
+        %{
+          view
+          | edit_timeline:
+              EditTimeline.record_edit(
+                view.edit_timeline,
+                path,
+                tool_call_id,
+                tool_name,
+                before_content,
+                after_content
+              )
+        }
+      end)
 
     # Track the file on the Board card for recent_files display
     state = track_board_card_file(state, path)

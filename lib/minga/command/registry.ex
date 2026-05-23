@@ -37,6 +37,7 @@ defmodule Minga.Command.Registry do
     MingaEditor.Commands.BufferManagement,
     MingaEditor.Commands.Folding,
     MingaEditor.Commands.Diagnostics,
+    MingaEditor.Commands.EditTimeline,
     MingaEditor.Commands.Lsp,
     MingaEditor.Commands.Git,
     MingaEditor.Commands.Project,

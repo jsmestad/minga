@@ -563,6 +563,12 @@ name = "gui_observatory"
 value = 0x9A
 direction = "beam_to_frontend"
 
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_edit_timeline"
+value = 0x9B
+direction = "beam_to_frontend"
+
 # Sub-opcodes inside gui_action (0x07).
 [[gui_actions]]
 name = "select_tab"
@@ -877,3 +883,7 @@ value = 0x4D
 [[gui_actions]]
 name = "font_size_adjust"
 value = 0x4E
+
+[[gui_actions]]
+name = "timeline_navigate"
+value = 0x4F

@@ -53,6 +53,7 @@ defmodule Minga.Keymap.NormalPrefixes do
     {~k(] f), {:goto_next_textobject, :function}, "Next function"},
     {~k(] t), {:goto_next_textobject, :class}, "Next class/module"},
     {~k(] a), {:goto_next_textobject, :parameter}, "Next parameter"},
+    {~k(] e), :timeline_next_edit, "Next agent edit"},
 
     # [ prefix (previous)
     {~k([ d), :prev_diagnostic, "Previous diagnostic"},
@@ -60,7 +61,8 @@ defmodule Minga.Keymap.NormalPrefixes do
     {~k([ x), :prev_merge_conflict, "Previous merge conflict"},
     {~k([ f), {:goto_prev_textobject, :function}, "Previous function"},
     {~k([ t), {:goto_prev_textobject, :class}, "Previous class/module"},
-    {~k([ a), {:goto_prev_textobject, :parameter}, "Previous parameter"}
+    {~k([ a), {:goto_prev_textobject, :parameter}, "Previous parameter"},
+    {~k([ e), :timeline_prev_edit, "Previous agent edit"}
   ]
 
   @doc "Returns the compiled prefix trie for normal mode."

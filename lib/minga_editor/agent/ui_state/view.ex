@@ -11,6 +11,7 @@ defmodule MingaEditor.Agent.UIState.View do
   this struct directly.
   """
 
+  alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.UIState.ReturnTarget
   alias MingaEditor.Agent.View.Preview
   alias Minga.Config
@@ -58,6 +59,7 @@ defmodule MingaEditor.Agent.UIState.View do
           toast: toast() | nil,
           toast_queue: term(),
           diff_baselines: %{String.t() => String.t()},
+          edit_timeline: EditTimeline.t(),
           context_estimate: non_neg_integer()
         }
 
@@ -78,7 +80,8 @@ defmodule MingaEditor.Agent.UIState.View do
             toast: nil,
             toast_queue: :queue.new(),
             context_estimate: 0,
-            diff_baselines: %{}
+            diff_baselines: %{},
+            edit_timeline: EditTimeline.new()
 
   @doc "Creates a new view state with defaults."
   @spec new() :: t()
@@ -394,6 +397,7 @@ defmodule MingaEditor.Agent.UIState.View do
   @doc "Clears all diff baselines (called at the start of a new turn)."
   @spec clear_baselines(t()) :: t()
   def clear_baselines(%__MODULE__{} = view) do
-    %{view | diff_baselines: %{}}
+    EditTimeline.cleanup(view.edit_timeline)
+    %{view | diff_baselines: %{}, edit_timeline: EditTimeline.new()}
   end
 end

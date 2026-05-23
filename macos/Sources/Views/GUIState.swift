@@ -76,6 +76,9 @@ final class GUIState {
     /// Change summary sidebar for agent card zoomed-in view.
     let changeSummaryState = ChangeSummaryState()
 
+    /// Edit timeline scrubber state.
+    let editTimelineState = EditTimelineState()
+
     /// Semantic window content from gui_window_content (0x80).
     /// Keyed by windowId. NOT cleared between frames; the guiWindowContent
     /// dispatch overwrites per-window data each frame. Stale entries serve
