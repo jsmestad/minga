@@ -9,13 +9,19 @@ defmodule MingaEditor.Frontend.Emit.TUI do
   ## Scroll region optimization
 
   When the viewport shifts by 1-3 lines between frames and no structural
-  changes occurred (layout, gutter width, window set), we send a
-  `scroll_region` command instead of a full `clear + redraw`. The terminal
-  emulator shifts its internal buffer, then only the newly revealed lines
-  are drawn. This eliminates the majority of cell writes for the most
-  common scroll case (Ctrl-e/y, mouse wheel, cursor near edges).
+  changes occurred (layout, gutter width, window set, buffer content), we
+  send a `scroll_region` command instead of a full `clear + redraw`. The
+  terminal emulator shifts its internal buffer, then only the newly
+  revealed lines are drawn. This eliminates the majority of cell writes
+  for the most common scroll case (Ctrl-e/y, mouse wheel, cursor near
+  edges).
 
-  Currently disabled pending a libvaxis buffer sync fix.
+  The Zig renderer syncs its internal libvaxis screen buffers after
+  sending the ANSI scroll region sequences (`VaxisSurface.scrollRegion`),
+  so the subsequent `render()` diff only repaints the newly revealed rows.
+
+  Bails out to a full redraw when visual selection is active, since the
+  selection highlight on shifted rows would be stale.
   """
 
   alias MingaEditor.DisplayList
@@ -83,19 +89,24 @@ defmodule MingaEditor.Frontend.Emit.TUI do
 
   @spec detect_scroll_regions(ctx(), Caches.t()) :: [scroll_delta()] | nil
   defp detect_scroll_regions(ctx, caches) do
-    if scroll_optimization_enabled?() do
+    if scroll_optimization_enabled?() and not visual_mode?(ctx) do
       detect_scroll_regions_impl(ctx, caches)
     else
       nil
     end
   end
 
-  # Kill switch for the scroll region optimization. Set
-  # `config :minga, :tui_scroll_optimization, true` to re-enable once the
-  # libvaxis buffer sync issue is resolved.
   @spec scroll_optimization_enabled?() :: boolean()
   defp scroll_optimization_enabled? do
-    Application.get_env(:minga, :tui_scroll_optimization, false) == true
+    Application.get_env(:minga, :tui_scroll_optimization, true) == true
+  end
+
+  # Visual mode has selection highlight on content rows that changes every
+  # frame as the cursor moves. Shifted rows would show stale selection
+  # styling, so we bail out to a full redraw.
+  @spec visual_mode?(ctx()) :: boolean()
+  defp visual_mode?(ctx) do
+    ctx.editing != nil and ctx.editing.mode in [:visual, :visual_line, :visual_block]
   end
 
   @spec detect_scroll_regions_impl(ctx(), Caches.t()) :: [scroll_delta()] | nil
