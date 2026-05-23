@@ -45,6 +45,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaAgent.Session, as: AgentSession
 
   alias MingaEditor.Frontend.Protocol
+  alias MingaEditor.Startup
 
   alias Minga.Project.FileTree
 
@@ -155,6 +156,25 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       _ ->
         state
     end
+  end
+
+  @min_font_size 8
+  @max_font_size 72
+
+  defp dispatch_action(state, {:font_size_adjust, direction}) do
+    options_server = EditorState.options_server(state)
+    config_size = Minga.Config.Options.get(options_server, :font_size)
+
+    new_size =
+      case direction do
+        :increase -> min((state.font_size_override || config_size) + 1, @max_font_size)
+        :decrease -> max((state.font_size_override || config_size) - 1, @min_font_size)
+        :reset -> nil
+      end
+
+    state = %{state | font_size_override: new_size}
+    Startup.send_font_config(state)
+    state
   end
 
   defp dispatch_action(%{shell_state: shell_state} = state, {:observatory_inspect, pid_string}) do

@@ -128,7 +128,8 @@ defmodule MingaEditor.State do
             resource_pressure: ResourcePressure.new(),
             stashed_board_state: nil,
             keystroke_history: KeystrokeHistory.new(),
-            git_commit_gen_ref: nil
+            git_commit_gen_ref: nil,
+            font_size_override: nil
 
   @type backend :: :tui | :gui | :native_gui | :headless
 
@@ -170,7 +171,8 @@ defmodule MingaEditor.State do
           session: EditorSessionState.t(),
           stashed_board_state: MingaEditor.Shell.Board.State.t() | nil,
           keystroke_history: KeystrokeHistory.t(),
-          git_commit_gen_ref: reference() | nil
+          git_commit_gen_ref: reference() | nil,
+          font_size_override: pos_integer() | nil
         }
 
   @spec set_renderer(t(), pid() | nil) :: t()

@@ -95,6 +95,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x4B       | tab_move_left           |
   | 0x4C       | tab_move_right          |
   | 0x4D       | observatory_inspect     |
+  | 0x4E       | font_size_adjust        |
   | 0x34       | system_will_sleep       |
   | 0x35       | system_did_wake         |
 
@@ -240,6 +241,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_notification_dismiss Opcodes.gui_action_notification_dismiss()
   @gui_action_notification_action Opcodes.gui_action_notification_action()
   @gui_action_observatory_inspect Opcodes.gui_action_observatory_inspect()
+  @gui_action_font_size_adjust Opcodes.gui_action_font_size_adjust()
 
   @max_u8 255
   @max_u16 65_535
@@ -403,6 +405,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:notification_dismiss, notification_id :: String.t()}
           | {:notification_action, notification_id :: String.t(), action_id :: String.t()}
           | {:observatory_inspect, pid_string :: String.t()}
+          | {:font_size_adjust, direction :: :decrease | :increase | :reset}
 
   @typedoc "BEAM Observatory payload sent to native GUI frontends."
   @type observatory_data :: Observatory.Data.t()
@@ -3454,6 +3457,15 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       ) do
     {:ok, {:observatory_inspect, pid_string}}
   end
+
+  def decode_gui_action(@gui_action_font_size_adjust, <<0x00>>),
+    do: {:ok, {:font_size_adjust, :decrease}}
+
+  def decode_gui_action(@gui_action_font_size_adjust, <<0x01>>),
+    do: {:ok, {:font_size_adjust, :increase}}
+
+  def decode_gui_action(@gui_action_font_size_adjust, <<0x02>>),
+    do: {:ok, {:font_size_adjust, :reset}}
 
   def decode_gui_action(_, _), do: :error
 

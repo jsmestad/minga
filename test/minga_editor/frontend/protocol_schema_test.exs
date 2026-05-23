@@ -227,7 +227,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       tab_unpin: 0x4A,
       tab_move_left: 0x4B,
       tab_move_right: 0x4C,
-      observatory_inspect: 0x4D
+      observatory_inspect: 0x4D,
+      font_size_adjust: 0x4E
     )
   end
 
