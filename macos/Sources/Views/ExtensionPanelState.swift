@@ -1,6 +1,6 @@
 /// State for extension-registered panels.
 ///
-/// Updated by `CommandDispatcher` from `gui_extension_panel` (0x9C) opcode.
+/// Updated by `CommandDispatcher` from `gui_extension_panel` (0x9D) opcode.
 /// Read by `ExtensionPanelView` to render structured content with native widgets.
 @MainActor @Observable
 final class ExtensionPanelState {

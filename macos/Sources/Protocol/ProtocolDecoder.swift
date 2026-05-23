@@ -2485,7 +2485,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             let extName = String(data: data[eoPos..<(eoPos + extNameLen)], encoding: .utf8) ?? ""
             eoPos += extNameLen
             let oidLen = Int(data[eoPos]); eoPos += 1
-            guard eoPos + oidLen + 10 <= eoEnd else { break }
+            guard eoPos + oidLen + 11 <= eoEnd else { break }
             let oid = String(data: data[eoPos..<(eoPos + oidLen)], encoding: .utf8) ?? ""
             eoPos += oidLen
             let winId = readU16(data, eoPos)
@@ -2557,10 +2557,83 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                     let t = String(data: data[epPos..<(epPos + tLen)], encoding: .utf8) ?? ""
                     epPos += tLen
                     blocks.append(.text(t))
+                case 1: // styled_text
+                    guard epPos + 1 <= epEnd else { break }
+                    let runCount = Int(data[epPos]); epPos += 1
+                    var runs: [(text: String, r: UInt8, g: UInt8, b: UInt8, bold: Bool, italic: Bool)] = []
+                    for _ in 0..<runCount {
+                        guard epPos + 2 <= epEnd else { break }
+                        let stLen = Int(readU16(data, epPos)); epPos += 2
+                        guard epPos + stLen + 5 <= epEnd else { break }
+                        let stText = String(data: data[epPos..<(epPos + stLen)], encoding: .utf8) ?? ""
+                        epPos += stLen
+                        let stR = data[epPos]; let stG = data[epPos + 1]; let stB = data[epPos + 2]
+                        let stBold = data[epPos + 3] != 0; let stItalic = data[epPos + 4] != 0
+                        epPos += 5
+                        runs.append((text: stText, r: stR, g: stG, b: stB, bold: stBold, italic: stItalic))
+                    }
+                    blocks.append(.styledText(runs: runs))
+                case 2: // table
+                    guard epPos + 5 <= epEnd else { break }
+                    let colCount = Int(data[epPos])
+                    let rowCount = Int(readU16(data, epPos + 1))
+                    let selected = readU16(data, epPos + 3)
+                    epPos += 5
+                    var columns: [String] = []
+                    for _ in 0..<colCount {
+                        guard epPos + 2 <= epEnd else { break }
+                        let cLen = Int(readU16(data, epPos)); epPos += 2
+                        guard epPos + cLen <= epEnd else { break }
+                        columns.append(String(data: data[epPos..<(epPos + cLen)], encoding: .utf8) ?? "")
+                        epPos += cLen
+                    }
+                    var rows: [[String]] = []
+                    for _ in 0..<rowCount {
+                        var row: [String] = []
+                        for _ in 0..<colCount {
+                            guard epPos + 2 <= epEnd else { break }
+                            let cellLen = Int(readU16(data, epPos)); epPos += 2
+                            guard epPos + cellLen <= epEnd else { break }
+                            row.append(String(data: data[epPos..<(epPos + cellLen)], encoding: .utf8) ?? "")
+                            epPos += cellLen
+                        }
+                        rows.append(row)
+                    }
+                    blocks.append(.table(columns: columns, rows: rows, selected: selected))
+                case 3: // key_value
+                    guard epPos + 1 <= epEnd else { break }
+                    let pairCount = Int(data[epPos]); epPos += 1
+                    var pairs: [(key: String, value: String)] = []
+                    for _ in 0..<pairCount {
+                        guard epPos + 2 <= epEnd else { break }
+                        let kLen = Int(readU16(data, epPos)); epPos += 2
+                        guard epPos + kLen + 2 <= epEnd else { break }
+                        let k = String(data: data[epPos..<(epPos + kLen)], encoding: .utf8) ?? ""
+                        epPos += kLen
+                        let vLen = Int(readU16(data, epPos)); epPos += 2
+                        guard epPos + vLen <= epEnd else { break }
+                        let v = String(data: data[epPos..<(epPos + vLen)], encoding: .utf8) ?? ""
+                        epPos += vLen
+                        pairs.append((key: k, value: v))
+                    }
+                    blocks.append(.keyValue(pairs: pairs))
                 case 4: // separator
                     blocks.append(.separator)
+                case 5: // progress
+                    guard epPos + 4 <= epEnd else { break }
+                    let labelLen = Int(readU16(data, epPos)); epPos += 2
+                    guard epPos + labelLen + 2 <= epEnd else { break }
+                    let label = String(data: data[epPos..<(epPos + labelLen)], encoding: .utf8) ?? ""
+                    epPos += labelLen
+                    let pctInt = readU16(data, epPos); epPos += 2
+                    blocks.append(.progress(label: label, percent: Float(pctInt) / 100.0))
+                case 6: // tree
+                    // Tree decoding is complex (recursive); skip for now by breaking
+                    blocks.append(.unknown)
+                    break
                 default:
                     blocks.append(.unknown)
+                    break
                 }
             }
             epPanels.append(Wire.ExtensionPanelEntry(

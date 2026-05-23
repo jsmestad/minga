@@ -51,15 +51,17 @@ defmodule Minga.Extension.Badge do
   @spec set_file(atom(), String.t(), keyword()) :: :ok
   def set_file(extension_name, path, opts \\ [])
       when is_atom(extension_name) and is_binary(path) do
+    abs_path = Path.expand(path)
+
     entry = %{
       extension: extension_name,
-      path: Path.expand(path),
+      path: abs_path,
       color: Keyword.get(opts, :color, 0x51AFEF),
       text: Keyword.get(opts, :text, ""),
       animation: Keyword.get(opts, :animation, :static)
     }
 
-    :ets.insert(@file_table, {{extension_name, path}, entry})
+    :ets.insert(@file_table, {{extension_name, abs_path}, entry})
     :ok
   end
 
@@ -78,7 +80,7 @@ defmodule Minga.Extension.Badge do
 
   @spec remove_file(atom(), String.t()) :: :ok
   def remove_file(extension_name, path) when is_atom(extension_name) do
-    :ets.delete(@file_table, {extension_name, path})
+    :ets.delete(@file_table, {extension_name, Path.expand(path)})
     :ok
   end
 

@@ -1,5 +1,6 @@
 defmodule Minga.Extension.BadgeTest do
-  use ExUnit.Case, async: true
+  # Badge registry uses global ETS tables without table-parameter support.
+  use ExUnit.Case, async: false
 
   alias Minga.Extension.Badge
 
