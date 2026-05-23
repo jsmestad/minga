@@ -2,6 +2,7 @@ defmodule Minga.Editing.TextObjectTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Document
+  alias Minga.Editing.NavigableContent.BufferSnapshot
   alias Minga.Editing.TextObject
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -141,6 +142,11 @@ defmodule Minga.Editing.TextObjectTest do
       # so inner content is positions 13..17
       assert {{0, 13}, {0, 17}} = TextObject.inner_quotes(b, {0, 13}, "\"")
     end
+
+    test "ignores escaped quotes" do
+      b = buf(~s("hello \\"world\\" again"))
+      assert {{0, 1}, {0, 21}} = TextObject.inner_quotes(b, {0, 12}, "\"")
+    end
   end
 
   # ── a_quotes/3 ────────────────────────────────────────────────────────────────
@@ -219,6 +225,23 @@ defmodule Minga.Editing.TextObjectTest do
       # inner end: retreat from {2,0} → {1,4} (last char of "  bar")
       result = TextObject.inner_parens(b, {1, 2}, "(", ")")
       assert {{1, 0}, {1, 4}} = result
+    end
+
+    test "ignores escaped delimiters" do
+      assert nil == TextObject.inner_parens(buf("foo \\(bar) baz"), {0, 6}, "(", ")")
+
+      b = buf("foo(a \\) b)")
+      assert {{0, 4}, {0, 9}} = TextObject.inner_parens(b, {0, 9}, "(", ")")
+    end
+
+    test "tracks byte columns through multi-byte graphemes" do
+      b = buf("fn(é (x) 😄)")
+      assert {{0, 3}, {0, 10}} = TextObject.inner_parens(b, {0, 10}, "(", ")")
+    end
+
+    test "preserves nesting depth across lines for generic readable content" do
+      snapshot = BufferSnapshot.new(buf("(a (b\nc) d)"))
+      assert {{0, 1}, {1, 3}} = TextObject.inner_parens(snapshot, {1, 3}, "(", ")")
     end
   end
 

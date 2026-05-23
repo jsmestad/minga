@@ -937,8 +937,9 @@ defmodule Minga.Config.LoaderTest do
       assert Loader.load_error(pid) == nil
 
       assert :ok =
-               ContributionCleanup.register(:loader_reload_cleanup_failure, fn _source ->
-                 raise "cleanup failure"
+               ContributionCleanup.register(:loader_reload_cleanup_failure, fn
+                 :config -> raise "cleanup failure"
+                 _source -> :ok
                end)
 
       on_exit(fn -> ContributionCleanup.unregister(:loader_reload_cleanup_failure) end)
