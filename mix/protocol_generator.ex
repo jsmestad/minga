@@ -2,7 +2,7 @@ defmodule Minga.Mix.ProtocolGenerator do
   @moduledoc """
   Generates protocol opcode artifacts from `docs/protocol_schema.toml`.
 
-  The schema is the source of truth. Generated protocol artifacts are written under `.generated/protocol/` for Elixir, `macos/.generated/protocol/` for Swift, and `zig/src/generated/` for Zig.
+  The schema is the source of truth. Generated protocol artifacts are written under `.generated/protocol/` for Elixir, `macos/.generated/protocol/` for Swift, and `zig/src/generated/` for Zig. The generated Zig public export block in `zig/src/protocol.zig` is also refreshed from the schema.
   """
 
   @schema_path "docs/protocol_schema.toml"
@@ -11,6 +11,7 @@ defmodule Minga.Mix.ProtocolGenerator do
   @generated_swift_path "macos/.generated/protocol/ProtocolOpcodes.generated.swift"
   @generated_zig_opcodes_path "zig/src/generated/protocol_opcodes.zig"
   @generated_zig_schema_test_path "zig/src/generated/protocol_schema_test.zig"
+  @protocol_zig_path "zig/src/protocol.zig"
   @allowed_opcode_categories [
     "input",
     "render",
@@ -41,8 +42,13 @@ defmodule Minga.Mix.ProtocolGenerator do
     files = generated_files(schema)
 
     case Keyword.get(opts, :check, false) do
-      true -> check_files!(files)
-      false -> write_files!(files)
+      true ->
+        check_files!(files)
+        check_zig_protocol_exports!(schema)
+
+      false ->
+        write_files!(files)
+        sync_zig_protocol_exports!(schema)
     end
   end
 
@@ -112,6 +118,52 @@ defmodule Minga.Mix.ProtocolGenerator do
       [] -> :ok
       _ -> Mix.raise(outdated_message(stale))
     end
+  end
+
+  @spec sync_zig_protocol_exports!(schema()) :: :ok
+  defp sync_zig_protocol_exports!(schema) do
+    expected = zig_protocol_export_block(schema)
+    current = read_protocol_zig!()
+    updated = replace_zig_protocol_export_block!(current, expected)
+    write_if_changed!(@protocol_zig_path, updated)
+  end
+
+  @spec check_zig_protocol_exports!(schema()) :: :ok
+  defp check_zig_protocol_exports!(schema) do
+    expected = zig_protocol_export_block(schema)
+    current = read_protocol_zig!()
+
+    case current == replace_zig_protocol_export_block!(current, expected) do
+      true -> :ok
+      false -> Mix.raise(outdated_zig_protocol_exports_message())
+    end
+  end
+
+  @spec read_protocol_zig!() :: String.t()
+  defp read_protocol_zig! do
+    case File.read(@protocol_zig_path) do
+      {:ok, content} -> content
+      {:error, reason} -> Mix.raise("Failed to read #{@protocol_zig_path}: #{inspect(reason)}")
+    end
+  end
+
+  @spec replace_zig_protocol_export_block!(String.t(), String.t()) :: String.t()
+  defp replace_zig_protocol_export_block!(content, replacement) do
+    start_marker =
+      "// BEGIN GENERATED OPCODE EXPORTS. Regenerate with `mix protocol.gen`. Do not edit by hand."
+
+    end_marker = "// END GENERATED OPCODE EXPORTS."
+    pattern = ~r/#{Regex.escape(start_marker)}.*?#{Regex.escape(end_marker)}\n?/s
+
+    case Regex.run(pattern, content) do
+      nil -> Mix.raise("Missing generated opcode export markers in #{@protocol_zig_path}")
+      _match -> Regex.replace(pattern, content, replacement, global: false)
+    end
+  end
+
+  @spec outdated_zig_protocol_exports_message() :: String.t()
+  defp outdated_zig_protocol_exports_message do
+    "Generated Zig protocol opcode exports are out of date. Run `mix protocol.gen` to regenerate the public protocol boundary.\n  - #{@protocol_zig_path}"
   end
 
   @spec outdated_message([generated_file()]) :: String.t()
@@ -220,6 +272,47 @@ defmodule Minga.Mix.ProtocolGenerator do
       Enum.map(actions, &zig_gui_action_line/1)
     ]
     |> IO.iodata_to_binary()
+  end
+
+  @spec zig_protocol_export_block(schema()) :: String.t()
+  defp zig_protocol_export_block(schema) do
+    opcodes = Map.fetch!(schema, "opcodes")
+    actions = Map.fetch!(schema, "gui_actions")
+
+    [
+      "// BEGIN GENERATED OPCODE EXPORTS. Regenerate with `mix protocol.gen`. Do not edit by hand.\n",
+      zig_protocol_exports(opcodes),
+      Enum.map(actions, &zig_protocol_gui_action_export_line/1),
+      "// END GENERATED OPCODE EXPORTS.\n"
+    ]
+    |> IO.iodata_to_binary()
+  end
+
+  @spec zig_protocol_exports([opcode()]) :: iodata()
+  defp zig_protocol_exports(opcodes) do
+    opcodes
+    |> group_by_category()
+    |> Enum.map(fn {category, entries} ->
+      [
+        "// ",
+        category_title(category),
+        "\n",
+        Enum.map(entries, &zig_protocol_opcode_export_line/1),
+        "\n"
+      ]
+    end)
+  end
+
+  @spec zig_protocol_opcode_export_line(opcode()) :: String.t()
+  defp zig_protocol_opcode_export_line(%{"name" => name}) do
+    constant = "OP_#{constant_name(name)}"
+    "pub const #{constant} = opcodes.#{constant};\n"
+  end
+
+  @spec zig_protocol_gui_action_export_line(gui_action()) :: String.t()
+  defp zig_protocol_gui_action_export_line(%{"name" => name}) do
+    constant = "GUI_ACTION_#{constant_name(name)}"
+    "pub const #{constant} = opcodes.#{constant};\n"
   end
 
   @spec zig_opcodes([opcode()]) :: iodata()

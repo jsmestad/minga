@@ -5,7 +5,8 @@ defmodule Mix.Tasks.Protocol.GenTest do
 
   @repo_root File.cwd!()
   @fixture_paths [
-    "docs/protocol_schema.toml"
+    "docs/protocol_schema.toml",
+    "zig/src/protocol.zig"
   ]
   @generated_paths [
     ".generated/protocol/elixir/lib/minga/protocol/opcodes.ex",
@@ -58,6 +59,52 @@ defmodule Mix.Tasks.Protocol.GenTest do
     with_fixture_dir(fn dir ->
       File.cd!(dir, fn ->
         assert_raise Mix.Error, ~r/Run `mix protocol.gen`/, fn ->
+          Mix.Tasks.Protocol.Gen.run(["--check"])
+        end
+      end)
+    end)
+  end
+
+  test "generates Zig protocol public exports from the schema" do
+    with_fixture_dir(fn dir ->
+      mutate_schema(dir, fn schema ->
+        String.replace(
+          schema,
+          "[[opcodes]]\ncategory = \"input\"\nname = \"log_message\"\nvalue = 0x60\ndirection = \"frontend_to_beam\"",
+          "[[opcodes]]\ncategory = \"input\"\nname = \"log_message\"\nvalue = 0x60\ndirection = \"frontend_to_beam\"\n\n[[opcodes]]\ncategory = \"input\"\nname = \"test_sync\"\nvalue = 0x08\ndirection = \"frontend_to_beam\"",
+          global: false
+        )
+      end)
+
+      File.cd!(dir, fn ->
+        assert :ok = Mix.Tasks.Protocol.Gen.run([])
+
+        assert File.read!("zig/src/protocol.zig") =~
+                 "pub const OP_TEST_SYNC = opcodes.OP_TEST_SYNC;"
+
+        assert File.read!("zig/src/generated/protocol_schema_test.zig") =~ "protocol.OP_TEST_SYNC"
+        assert :ok = Mix.Tasks.Protocol.Gen.run(["--check"])
+      end)
+    end)
+  end
+
+  test "--check fails when Zig protocol public exports drift" do
+    with_fixture_dir(fn dir ->
+      File.cd!(dir, fn ->
+        assert :ok = Mix.Tasks.Protocol.Gen.run([])
+      end)
+
+      path = Path.join(dir, "zig/src/protocol.zig")
+
+      stale =
+        String.replace(File.read!(path), "pub const OP_READY = opcodes.OP_READY;", "",
+          global: false
+        )
+
+      File.write!(path, stale)
+
+      File.cd!(dir, fn ->
+        assert_raise Mix.Error, ~r/Generated Zig protocol opcode exports are out of date/, fn ->
           Mix.Tasks.Protocol.Gen.run(["--check"])
         end
       end)

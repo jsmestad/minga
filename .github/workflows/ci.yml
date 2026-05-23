@@ -71,6 +71,8 @@ jobs:
       - run: mix deps.get
       - run: mix deps.compile
       - run: mix protocol.gen
+      - name: Check generated Zig protocol exports are committed
+        run: git diff --exit-code -- zig/src/protocol.zig
       - name: Check generated protocol artifacts stay out of source
         if: github.event_name == 'pull_request'
         env:
