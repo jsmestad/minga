@@ -132,7 +132,13 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   """
   @spec render(non_neg_integer(), pos_integer(), modeline_data(), Theme.t(), non_neg_integer()) ::
           {[DisplayList.draw()], [click_region()]}
-  def render(row, cols, data, theme \\ MingaEditor.UI.Theme.get!(MingaEditor.UI.Theme.default()), col_off \\ 0) do
+  def render(
+        row,
+        cols,
+        data,
+        theme \\ MingaEditor.UI.Theme.get!(MingaEditor.UI.Theme.default()),
+        col_off \\ 0
+      ) do
     ctx = context(data, theme)
     separator_style = Minga.Config.get(:modeline_separator)
     {left_names, right_names} = configured_segment_names()
