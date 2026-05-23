@@ -44,7 +44,8 @@ defmodule Minga.Extension.AgentAPI do
           cost: float(),
           input_tokens: non_neg_integer(),
           output_tokens: non_neg_integer(),
-          turn_count: non_neg_integer()
+          turn_count: non_neg_integer(),
+          files_touched: [String.t()]
         }
 
   @doc """
@@ -75,6 +76,7 @@ defmodule Minga.Extension.AgentAPI do
         snapshot = MingaAgent.Session.editor_snapshot(pid)
         usage = MingaAgent.Session.usage(pid)
         metadata = session_metadata(pid, id)
+        touched = safe_touched_files(pid)
 
         {:ok,
          %{
@@ -88,7 +90,8 @@ defmodule Minga.Extension.AgentAPI do
            cost: usage.cost,
            input_tokens: usage.input,
            output_tokens: usage.output,
-           turn_count: metadata.turn_count
+           turn_count: metadata.turn_count,
+           files_touched: touched
          }}
 
       {:error, :not_found} ->
@@ -106,10 +109,14 @@ defmodule Minga.Extension.AgentAPI do
 
   - `{:minga_event, :agent_session_stopped, %SessionStoppedEvent{session_id, pid, reason}}`
   - `{:minga_event, :agent_hook, %AgentHookEvent{event, phase, tool_name, ...}}`
-  - `{:minga_event, :buffer_changed, %BufferChangedEvent{source: {:agent, pid, tool_call_id}, ...}}`
 
-  Subscribe to `:buffer_changed` separately if you need edit-level
-  granularity (e.g., for ghost cursors tracking edit positions).
+  Subscribe to `:buffer_changed` separately via `subscribe_edits/0` if you
+  need edit-level granularity (e.g., for ghost cursors tracking edit positions).
+
+  Note: `:agent_session_started` and `:agent_status_changed` events will be
+  added incrementally as the internal event infrastructure expands. For now,
+  extensions can poll `list_sessions/0` or use `:agent_hook` phase transitions
+  to infer session activity.
   """
   @spec subscribe() :: :ok
   def subscribe do
@@ -154,6 +161,15 @@ defmodule Minga.Extension.AgentAPI do
     MingaAgent.Session.editor_snapshot(pid)
   catch
     :exit, _ -> %{status: :idle, pending_approval: nil, error: nil, active_tool_name: nil}
+  end
+
+  @spec safe_touched_files(pid()) :: [String.t()]
+  defp safe_touched_files(pid) do
+    pid
+    |> MingaAgent.Session.touched_files()
+    |> Enum.map(& &1.path)
+  catch
+    :exit, _ -> []
   end
 
   @spec session_metadata(pid(), String.t()) :: MingaAgent.SessionMetadata.t()
