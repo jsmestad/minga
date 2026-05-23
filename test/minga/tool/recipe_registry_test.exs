@@ -17,7 +17,7 @@ defmodule Minga.Tool.Recipe.RegistryTest do
       assert Registry.get(:nonexistent_tool) == nil
     end
 
-    test "returns recipe for all built-in tools" do
+    test "returns recipe for all bundled tools" do
       for name <- [
             :expert,
             :pyright,
@@ -68,7 +68,7 @@ defmodule Minga.Tool.Recipe.RegistryTest do
   end
 
   describe "all/0" do
-    test "returns all built-in recipes" do
+    test "returns all bundled recipes" do
       recipes = Registry.all()
       assert length(recipes) >= 13
       names = Enum.map(recipes, & &1.name)
@@ -94,64 +94,8 @@ defmodule Minga.Tool.Recipe.RegistryTest do
     end
   end
 
-  describe "expert_asset?/2" do
-    test "matches macOS arm64 bare binary" do
-      assert Registry.expert_asset?("expert_darwin_arm64", "darwin_arm64")
-    end
-
-    test "matches macOS amd64 bare binary" do
-      assert Registry.expert_asset?("expert_darwin_amd64", "darwin_amd64")
-    end
-
-    test "matches Linux amd64 bare binary" do
-      assert Registry.expert_asset?("expert_linux_amd64", "linux_amd64")
-    end
-
-    test "rejects macOS asset when platform is linux" do
-      refute Registry.expert_asset?("expert_darwin_arm64", "linux_amd64")
-    end
-
-    test "rejects checksums file" do
-      refute Registry.expert_asset?("expert_checksums.txt", "darwin_arm64")
-    end
-
-    test "rejects unrelated assets" do
-      refute Registry.expert_asset?("some-other-tool", "darwin_arm64")
-    end
-  end
-
-  describe "clangd_asset?/2" do
-    test "matches the macOS asset with darwin suffix" do
-      assert Registry.clangd_asset?("clangd-mac-21.1.8.zip", "darwin_arm64")
-    end
-
-    test "matches the macOS asset with darwin amd64 suffix" do
-      assert Registry.clangd_asset?("clangd-mac-21.1.8.zip", "darwin_amd64")
-    end
-
-    test "matches the Linux asset with linux suffix" do
-      assert Registry.clangd_asset?("clangd-linux-21.1.8.zip", "linux_amd64")
-    end
-
-    test "rejects macOS asset when platform is linux" do
-      refute Registry.clangd_asset?("clangd-mac-21.1.8.zip", "linux_amd64")
-    end
-
-    test "rejects indexing tools asset" do
-      refute Registry.clangd_asset?("clangd_indexing_tools-mac-21.1.8.zip", "darwin_arm64")
-    end
-
-    test "matches the Windows asset with windows suffix" do
-      assert Registry.clangd_asset?("clangd-windows-21.1.8.zip", "windows_amd64")
-    end
-
-    test "rejects debug symbols asset" do
-      refute Registry.clangd_asset?("clangd-debug-symbols-windows-21.1.8.7z", "darwin_arm64")
-    end
-  end
-
   describe "source ownership" do
-    test "rejects duplicate built-in recipes from another source" do
+    test "rejects duplicate pack-provided recipes from another source" do
       recipe = %Recipe{
         name: :pyright,
         label: "Custom Pyright",
@@ -164,7 +108,9 @@ defmodule Minga.Tool.Recipe.RegistryTest do
         languages: [:python]
       }
 
-      assert {:error, {:duplicate_recipe, :pyright, :builtin, {:extension, :recipe_collision}}} =
+      assert {:error,
+              {:duplicate_recipe, :pyright, {:extension, :python_recipe_pack},
+               {:extension, :recipe_collision}}} =
                Registry.register(recipe, {:extension, :recipe_collision})
     end
 
