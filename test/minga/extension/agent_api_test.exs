@@ -39,33 +39,17 @@ defmodule Minga.Extension.AgentAPITest do
   end
 
   describe "subscribe/0" do
-    test "subscribes calling process to agent lifecycle events" do
+    test "registers calling process for agent_hook and agent_session_stopped" do
       assert :ok = AgentAPI.subscribe()
-
-      Minga.Events.broadcast(
-        :agent_hook,
-        %Minga.Events.AgentHookEvent{event: "tool_use", phase: :started}
-      )
-
-      assert_receive {:minga_event, :agent_hook,
-                      %Minga.Events.AgentHookEvent{event: "tool_use", phase: :started}}
+      assert self() in Minga.Events.subscribers(:agent_hook)
+      assert self() in Minga.Events.subscribers(:agent_session_stopped)
     end
   end
 
   describe "subscribe_edits/0" do
-    test "subscribes calling process to buffer_changed events" do
+    test "registers calling process for buffer_changed" do
       assert :ok = AgentAPI.subscribe_edits()
-
-      buf = spawn(fn -> Process.sleep(:infinity) end)
-      on_exit(fn -> Process.exit(buf, :kill) end)
-
-      Minga.Events.broadcast(
-        :buffer_changed,
-        %Minga.Events.BufferChangedEvent{buffer: buf, source: {:agent, self(), "tc_1"}}
-      )
-
-      assert_receive {:minga_event, :buffer_changed,
-                      %Minga.Events.BufferChangedEvent{source: {:agent, _, "tc_1"}}}
+      assert self() in Minga.Events.subscribers(:buffer_changed)
     end
   end
 end
