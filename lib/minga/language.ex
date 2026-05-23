@@ -7,22 +7,15 @@ defmodule Minga.Language do
   `Formatter`, `LSP.ServerRegistry`, `Highlight.Grammar`, `Devicon`,
   `Modeline`, and `Project.Detector`.
 
-  Language definitions live in `lib/minga/language/*.ex`, one module per
-  language. Each module exports a `definition/0` function returning a
-  `%Language{}` struct. The `Language.Registry` collects them at startup
-  and provides O(1) lookups by name, extension, and filename.
+  Language definitions live in modules that export a `definition/0` function returning a `%Language{}` struct. Bundled definitions are grouped into language pack extensions under `Minga.Extensions.LanguagePacks`, and third-party packs register the same struct shape through `Minga.Language.Registry.register/2`.
 
   ## Adding a new language
 
-  Create a new module under `Minga.Language.*` (e.g., `Minga.Language.Dart`)
-  and return a `%Language{}` from `definition/0`. Register the module in
-  `Minga.Language.Registry.@language_modules`. That's it: one file, one place.
+  Create a language module inside a pack, return a `%Language{}` from `definition/0`, and add that module to the pack's `language_modules/0` list. Removing the pack's registry source removes the whole language record, so the language name, filetypes, shebangs, devicon, grammar metadata, formatter, and LSP defaults go away together.
 
   ## Extension languages
 
-  Extensions register languages at runtime via
-  `Minga.Language.Registry.register/1`, passing a `%Language{}` struct.
-  Runtime registrations override built-in definitions for the same name.
+  Extensions register languages at runtime via `Minga.Language.Registry.register/2`, passing a `%Language{}` struct and a `{:extension, name}` source.
   """
 
   alias Minga.Language.BlockPair
@@ -73,7 +66,9 @@ defmodule Minga.Language do
 
   Compiles the tree-sitter grammar sources, loads them into the parser,
   sends highlight/injection queries, and registers filetype mappings.
-  Extensions call this to add language support at runtime.
+  Compilation and setup failures are reported synchronously; the parser-side
+  load response is asynchronous, so callers decide whether to fail the
+  extension or continue without highlighting.
 
   `name` is the language identifier (e.g., `"org"`).
   `source_dir` is the path containing the grammar's `parser.c` and

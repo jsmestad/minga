@@ -209,7 +209,7 @@ defmodule Minga.Language.RegistryTest do
       Registry.unregister_source(other_source)
     end
 
-    test "runtime registration rejects duplicate built-in definitions from another source" do
+    test "runtime registration rejects duplicate bundled pack definitions from another source" do
       assert Registry.get(:elixir).label == "Elixir"
 
       override = %Language{
@@ -219,10 +219,22 @@ defmodule Minga.Language.RegistryTest do
         extensions: ["ex", "exs"]
       }
 
-      assert {:error, {:duplicate_key, {:name, :elixir}, :builtin, :config}} =
+      assert {:error,
+              {:duplicate_key, {:name, :elixir}, {:extension, :minga_language_pack}, :config}} =
                Registry.register(override)
 
       assert Registry.get(:elixir).label == "Elixir"
+    end
+  end
+
+  describe "source ownership" do
+    test "bundled languages and filetype indexes are owned by the language pack extension" do
+      source = {:extension, :minga_language_pack}
+
+      assert Registry.source_for({:name, :elixir}) == source
+      assert Registry.source_for({:ext, "ex"}) == source
+      assert Registry.source_for({:filename, "Makefile"}) == source
+      assert Registry.source_for({:shebang, "python3"}) == source
     end
   end
 

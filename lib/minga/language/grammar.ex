@@ -1,11 +1,8 @@
 defmodule Minga.Language.Grammar do
   @moduledoc """
-  Maps filetypes to tree-sitter language names and locates highlight queries.
+  Maps filetypes to tree-sitter grammar names and locates highlight queries.
 
-  Filetypes (atoms from `Minga.Language.Filetype`) map to tree-sitter grammar names
-  (strings matching Zig's compiled-in registry). Highlight queries are loaded
-  from `priv/queries/{language}/highlights.scm` with an optional user override
-  in `~/.config/minga/queries/{language}/highlights.scm`.
+  Filetypes (atoms from `Minga.Language.Filetype`) resolve to tree-sitter grammar names from the registered `%Minga.Language{}` definitions. The fallback grammar name comes from the language record itself, not a static in-module table. Highlight queries are loaded from `priv/queries/{language}/highlights.scm` with an optional user override in `~/.config/minga/queries/{language}/highlights.scm`.
   """
 
   alias Minga.Language
@@ -16,9 +13,7 @@ defmodule Minga.Language.Grammar do
   @doc """
   Initializes the dynamic language registry ETS table.
 
-  Called once at application startup. The table stores runtime-registered
-  filetype-to-language mappings from extensions. Lookups check this table
-  first, then fall back to the compile-time map.
+  Called once at application startup. The table stores runtime-registered filetype-to-grammar mappings from extensions. Lookups check this table first, then fall back to the grammar name on the registered `%Minga.Language{}` definition.
   """
   @spec init_registry() :: :ok
   def init_registry do
@@ -31,11 +26,9 @@ defmodule Minga.Language.Grammar do
   end
 
   @doc """
-  Registers a dynamic filetype-to-language mapping.
+  Registers a dynamic filetype-to-grammar mapping.
 
-  Extensions call this to make their grammar available for syntax
-  highlighting. The mapping is checked before the compile-time defaults,
-  so extensions can override built-in grammars.
+  Extensions call this to make their grammar available for syntax highlighting. The mapping is checked before the registered-language fallback, so extensions can override bundled grammars.
 
   ## Examples
 
@@ -51,8 +44,7 @@ defmodule Minga.Language.Grammar do
   @doc """
   Returns the tree-sitter language name for a filetype atom.
 
-  Checks the dynamic registry (populated by extensions) first, then
-  falls back to the compile-time mapping.
+  Checks the dynamic registry (populated by extensions) first, then falls back to the grammar name on the registered `%Minga.Language{}` definition.
 
   ## Examples
 
@@ -152,7 +144,7 @@ defmodule Minga.Language.Grammar do
   end
 
   @doc """
-  Returns the full filetype-to-language mapping, including dynamic registrations.
+  Returns the full filetype-to-grammar mapping, including dynamic registrations.
   """
   @spec supported_languages() :: %{atom() => language()}
   def supported_languages do

@@ -2,152 +2,20 @@ defmodule Minga.Language.Filetype do
   @moduledoc """
   Detects a file's language from its path and content.
 
-  Detection priority (matching Neovim):
-  1. Exact filename match (case-sensitive)
-  2. File extension (case-insensitive)
-  3. `.env*` / `.envrc*` pattern → `:bash`
-  4. Shebang line from first line of content
-  5. Fall back to `:text`
+  Detection priority follows Neovim-style behavior:
 
-  This module is pure — no GenServer, no side effects. For runtime
-  extensibility (adding new patterns), see `Minga.Language.Filetype.Registry`.
+  1. Runtime exact filename overrides from `Minga.Language.Filetype.Registry`
+  2. Source-owned exact filename entries from `Minga.Language.Registry`
+  3. Runtime extension overrides from `Minga.Language.Filetype.Registry`
+  4. Source-owned extension entries from `Minga.Language.Registry`
+  5. `.env*` / `.envrc*` pattern when `:bash` is still registered
+  6. Shebang line from the first line of content
+  7. Fall back to `:text`
+
+  Built-in language mappings come from registered language definitions in `Minga.Language.Registry`. Runtime overrides stay separate so config and extensions can temporarily redirect a pattern without owning a full language definition.
   """
 
-  # ── Exact filename → filetype (case-sensitive) ─────────────────────────────
-
-  @filenames %{
-    "Makefile" => :make,
-    "GNUmakefile" => :make,
-    "Dockerfile" => :dockerfile,
-    "Gemfile" => :ruby,
-    "Rakefile" => :ruby,
-    "Brewfile" => :ruby,
-    ".gitconfig" => :gitconfig,
-    ".gitignore" => :gitignore,
-    ".gitattributes" => :gitignore,
-    ".gitmodules" => :gitconfig,
-    ".editorconfig" => :editorconfig,
-    ".vimrc" => :vim,
-    "_vimrc" => :vim,
-    ".gvimrc" => :vim,
-    "mix.lock" => :elixir,
-    "rebar.config" => :erlang,
-    "rebar.lock" => :erlang
-  }
-
-  # ── Extension → filetype (looked up after downcasing) ──────────────────────
-
-  @extensions %{
-    "ex" => :elixir,
-    "exs" => :elixir,
-    "erl" => :erlang,
-    "hrl" => :erlang,
-    "heex" => :heex,
-    "leex" => :heex,
-    "rb" => :ruby,
-    "rake" => :ruby,
-    "gemspec" => :ruby,
-    "js" => :javascript,
-    "mjs" => :javascript,
-    "cjs" => :javascript,
-    "ts" => :typescript,
-    "mts" => :typescript,
-    "cts" => :typescript,
-    "jsx" => :javascript_react,
-    "tsx" => :typescript_react,
-    "go" => :go,
-    "rs" => :rust,
-    "zig" => :zig,
-    "zon" => :zig,
-    "c" => :c,
-    "h" => :c,
-    "cpp" => :cpp,
-    "cc" => :cpp,
-    "cxx" => :cpp,
-    "hpp" => :cpp,
-    "lua" => :lua,
-    "py" => :python,
-    "pyi" => :python,
-    "sh" => :bash,
-    "bash" => :bash,
-    "zsh" => :bash,
-    "fish" => :fish,
-    "pl" => :perl,
-    "pm" => :perl,
-    "t" => :perl,
-    "html" => :html,
-    "htm" => :html,
-    "css" => :css,
-    "scss" => :scss,
-    "sass" => :scss,
-    "json" => :json,
-    "jsonc" => :json,
-    "yaml" => :yaml,
-    "yml" => :yaml,
-    "toml" => :toml,
-    "md" => :markdown,
-    "markdown" => :markdown,
-    "sql" => :sql,
-    "graphql" => :graphql,
-    "gql" => :graphql,
-    "kt" => :kotlin,
-    "kts" => :kotlin,
-    "gleam" => :gleam,
-    "dockerfile" => :dockerfile,
-    "el" => :emacs_lisp,
-    "lfe" => :lfe,
-    "xml" => :xml,
-    "svg" => :xml,
-    "txt" => :text,
-    "csv" => :csv,
-    "tsv" => :csv,
-    "vim" => :vim,
-    "diff" => :diff,
-    "patch" => :diff,
-    "ini" => :ini,
-    "conf" => :conf,
-    "cfg" => :conf,
-    "nix" => :nix,
-    "proto" => :protobuf,
-    "java" => :java,
-    "swift" => :swift,
-    "r" => :r,
-    "rmd" => :r,
-    "cs" => :c_sharp,
-    "csx" => :c_sharp,
-    "php" => :php,
-    "phtml" => :php,
-    "tf" => :hcl,
-    "tfvars" => :hcl,
-    "hcl" => :hcl,
-    "ml" => :ocaml,
-    "mli" => :ocaml,
-    "hs" => :haskell,
-    "lhs" => :haskell,
-    "scala" => :scala,
-    "sbt" => :scala,
-    "sc" => :scala,
-    "dart" => :dart,
-    "mk" => :make,
-    "mak" => :make
-  }
-
-  # ── Shebang interpreter → filetype ────────────────────────────────────────
-
-  @shebang_interpreters %{
-    "ruby" => :ruby,
-    "python" => :python,
-    "python3" => :python,
-    "node" => :javascript,
-    "bash" => :bash,
-    "sh" => :bash,
-    "zsh" => :bash,
-    "fish" => :fish,
-    "perl" => :perl,
-    "elixir" => :elixir,
-    "escript" => :erlang,
-    "lua" => :lua
-  }
+  alias Minga.Language.Registry, as: LangRegistry
 
   @typedoc "A language identifier atom."
   @type filetype :: atom()
@@ -157,11 +25,8 @@ defmodule Minga.Language.Filetype do
   @doc """
   Detects the language of a file from its path alone.
 
-  Checks exact filename (case-sensitive), then extension (case-insensitive),
-  then `.env*`/`.envrc*` patterns. Returns `:text` if nothing matches.
+  Checks runtime filename overrides, bundled exact filenames, runtime extension overrides, bundled extensions, and `.env*`/`.envrc*` patterns in that order. Returns `:text` if nothing matches.
   """
-  alias Minga.Language.Registry, as: LangRegistry
-
   @spec detect(String.t() | nil) :: filetype()
   def detect(nil), do: :text
 
@@ -169,8 +34,8 @@ defmodule Minga.Language.Filetype do
     basename = Path.basename(file_path)
 
     with :miss <- lookup_registry_filename(basename),
-         :miss <- lookup_registry_extension(basename),
          :miss <- lookup_lang_registry_filename(basename),
+         :miss <- lookup_registry_extension(basename),
          :miss <- lookup_lang_registry_extension(basename),
          :miss <- detect_env_pattern(basename) do
       :text
@@ -180,8 +45,7 @@ defmodule Minga.Language.Filetype do
   @doc """
   Detects the language from a file path and the first line of content.
 
-  Tries `detect/1` first. If that returns `:text`, attempts shebang
-  detection from `first_line`. Returns `:text` if nothing matches.
+  Tries `detect/1` first. If that returns `:text`, attempts shebang detection from `first_line`. Returns `:text` if nothing matches.
   """
   @spec detect_from_content(String.t() | nil, String.t() | nil) :: filetype()
   def detect_from_content(file_path, first_line) do
@@ -191,17 +55,17 @@ defmodule Minga.Language.Filetype do
     end
   end
 
-  @doc "Returns the hardcoded filename → filetype map."
+  @doc "Returns runtime filename overrides. Registered language definitions live in `Minga.Language.Registry`, so this map is empty in normal builds."
   @spec filenames() :: %{String.t() => filetype()}
-  def filenames, do: @filenames
+  def filenames, do: %{}
 
-  @doc "Returns the hardcoded extension → filetype map."
+  @doc "Returns runtime extension overrides. Registered language definitions live in `Minga.Language.Registry`, so this map is empty in normal builds."
   @spec extensions() :: %{String.t() => filetype()}
-  def extensions, do: @extensions
+  def extensions, do: %{}
 
-  @doc "Returns the hardcoded shebang interpreter → filetype map."
+  @doc "Returns runtime shebang overrides. Registered language definitions live in `Minga.Language.Registry`, so this map is empty in normal builds."
   @spec shebang_interpreters() :: %{String.t() => filetype()}
-  def shebang_interpreters, do: @shebang_interpreters
+  def shebang_interpreters, do: %{}
 
   # ── Private ────────────────────────────────────────────────────────────────
 
@@ -258,11 +122,14 @@ defmodule Minga.Language.Filetype do
   end
 
   @spec detect_env_pattern(String.t()) :: filetype() | :miss
-  defp detect_env_pattern(basename) do
-    cond do
-      String.starts_with?(basename, ".env") -> :bash
-      String.starts_with?(basename, ".envrc") -> :bash
-      true -> :miss
+  defp detect_env_pattern(".env" <> _rest), do: lookup_lang_registry_bash()
+  defp detect_env_pattern(_basename), do: :miss
+
+  @spec lookup_lang_registry_bash() :: filetype() | :miss
+  defp lookup_lang_registry_bash do
+    case LangRegistry.get(:bash) do
+      %{name: :bash} -> :bash
+      nil -> :miss
     end
   end
 
@@ -276,37 +143,28 @@ defmodule Minga.Language.Filetype do
       |> String.trim()
       |> extract_interpreter()
 
-    # Check Filetype.Registry first (runtime overrides), then Language registry,
-    # then fall back to the compile-time map for any stragglers
     case Minga.Language.Filetype.Registry.lookup_shebang(interpreter) do
-      nil ->
-        case LangRegistry.for_shebang(interpreter) do
-          %{name: name} -> name
-          nil -> Map.get(@shebang_interpreters, interpreter, :text)
-        end
-
-      filetype ->
-        filetype
+      nil -> lookup_lang_registry_shebang(interpreter)
+      filetype -> filetype
     end
   end
 
   defp parse_shebang(_), do: :text
 
+  @spec lookup_lang_registry_shebang(String.t()) :: filetype()
+  defp lookup_lang_registry_shebang(interpreter) do
+    case LangRegistry.for_shebang(interpreter) do
+      %{name: name} -> name
+      nil -> :text
+    end
+  end
+
   @spec extract_interpreter(String.t()) :: String.t()
   defp extract_interpreter(shebang_path) do
-    parts = String.split(shebang_path)
-
-    case parts do
-      # #!/usr/bin/env ruby
-      [_env_path, interpreter | _] ->
-        Path.basename(interpreter)
-
-      # #!/usr/bin/ruby
-      [path | _] ->
-        Path.basename(path)
-
-      [] ->
-        ""
+    case String.split(shebang_path) do
+      [_env_path, interpreter | _] -> Path.basename(interpreter)
+      [path | _] -> Path.basename(path)
+      [] -> ""
     end
   end
 end
