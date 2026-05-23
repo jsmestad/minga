@@ -11,19 +11,21 @@ defmodule Minga.Foundation.Supervisor do
   ## Children
 
       Foundation.Supervisor (rest_for_one)
-      ├── Minga.Language.Registry      ETS, language definitions
+      ├── Minga.Language.Registry        ETS, language definitions
       ├── Minga.Extensions.LanguagePacks Bundled language catalog loader
-      ├── Minga.Extensions.ThemePacks  Bundled theme pack loader
-      ├── Minga.Events                 Registry(:duplicate), pub/sub bus
-      ├── Minga.Config.Options         GenServer, typed options
-      ├── Minga.Keymap.Active          Active keymap state
-      ├── Minga.Config.Hooks           Lifecycle hooks
-      ├── Minga.Config.Advice          Before/after command advice (ETS)
-      ├── Minga.Config.ModelineSegments Custom modeline segments (ETS)
-      ├── MingaAgent.Tool.Registry     Agent tool specs (ETS)
-      └── Minga.Language.Filetype.Registry      Filetype detection
+      ├── Minga.Extensions.ThemePacks    Bundled theme pack loader
+      ├── Minga.Tool.Recipe.Registry     ETS, tool install recipes
+      ├── Minga.Extensions.RecipePacks   Bundled recipe pack loader
+      ├── Minga.Events                   Registry(:duplicate), pub/sub bus
+      ├── Minga.Config.Options           GenServer, typed options
+      ├── Minga.Keymap.Active            Active keymap state
+      ├── Minga.Config.Hooks             Lifecycle hooks
+      ├── Minga.Config.Advice            Before/after command advice (ETS)
+      ├── Minga.Config.ModelineSegments  Custom modeline segments (ETS)
+      ├── MingaAgent.Tool.Registry       Agent tool specs (ETS)
+      └── Minga.Language.Filetype.Registry Filetype detection
 
-  Language.Registry is first because it owns the ETS table. Bundled language packs and theme packs start next so consumers see the default catalogs before services, LSP, syntax highlighting, or filetype detection query them. Events follows so everything after it re-subscribes on Events restart.
+  Language.Registry is first because it owns the ETS table. Bundled packs (language, theme, recipe) start next so consumers see the default catalogs before services, LSP, syntax highlighting, or filetype detection query them. Recipe.Registry precedes RecipePacks so the ETS tables exist before packs register into them. Events follows so everything after it re-subscribes on Events restart.
   """
 
   use Supervisor
@@ -41,6 +43,8 @@ defmodule Minga.Foundation.Supervisor do
       Minga.Language.Registry,
       Minga.Extensions.LanguagePacks,
       Minga.Extensions.ThemePacks,
+      Minga.Tool.Recipe.Registry,
+      Minga.Extensions.RecipePacks,
       Minga.Events,
       Minga.Config.Options,
       Minga.Keymap.Active,
