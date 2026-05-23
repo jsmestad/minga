@@ -35,7 +35,7 @@ defmodule MingaEditor.UI.Highlight do
   @doc "Creates an empty highlight state with the default theme."
   @spec new() :: t()
   def new do
-    theme = Theme.get!(:doom_one)
+    theme = Theme.get!(Theme.default())
     from_theme(theme)
   end
 
