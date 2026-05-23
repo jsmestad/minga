@@ -35,13 +35,13 @@ defmodule Minga.Buffer.Document do
       "Hhello\\nworld"
   """
 
-  alias Minga.Buffer.{Cursor, Lines, Position, Selection}
+  alias Minga.Buffer.{Cursor, LineIndex, Lines, Position, Selection}
 
-  @enforce_keys [:before, :after, :cursor_line, :cursor_col, :line_count]
-  defstruct [:before, :after, :cursor_line, :cursor_col, :line_count, :line_offsets]
+  @enforce_keys [:before, :after, :cursor_line, :cursor_col, :line_count, :line_index]
+  defstruct [:before, :after, :cursor_line, :cursor_col, :line_count, :line_index]
 
-  @typedoc "Cached line offset tuple, or `nil` when stale."
-  @type line_offsets :: tuple() | nil
+  @typedoc "Cached line index for resolving line spans without materializing full content."
+  @type line_index :: LineIndex.t()
 
   @typedoc "A gap buffer instance."
   @type t :: %__MODULE__{
@@ -50,7 +50,7 @@ defmodule Minga.Buffer.Document do
           cursor_line: non_neg_integer(),
           cursor_col: non_neg_integer(),
           line_count: pos_integer(),
-          line_offsets: line_offsets()
+          line_index: line_index()
         }
 
   @type position :: Position.t()
@@ -73,13 +73,16 @@ defmodule Minga.Buffer.Document do
   """
   @spec new(String.t()) :: t()
   def new(text \\ "") do
-    lc =
-      case text do
-        "" -> 1
-        _ -> Lines.count(text)
-      end
+    line_index = LineIndex.new(text)
 
-    %__MODULE__{before: "", after: text, cursor_line: 0, cursor_col: 0, line_count: lc}
+    %__MODULE__{
+      before: "",
+      after: text,
+      cursor_line: 0,
+      cursor_col: 0,
+      line_count: LineIndex.count(line_index),
+      line_index: line_index
+    }
   end
 
   # ── Queries ──
@@ -155,18 +158,21 @@ defmodule Minga.Buffer.Document do
           # after: after_,
           cursor_line: line,
           cursor_col: col,
-          line_count: lc
+          line_count: lc,
+          line_index: line_index
         } = mod,
         text
       ) do
     {new_line, new_col, new_lc} = compute_cursor_after_insert(line, col, lc, text)
+    new_line_index = LineIndex.insert_text(line_index, line, col, text)
 
     %{
       mod
       | before: before <> text,
         cursor_line: new_line,
         cursor_col: new_col,
-        line_count: new_lc
+        line_count: new_lc,
+        line_index: new_line_index
     }
   end
 
@@ -189,6 +195,7 @@ defmodule Minga.Buffer.Document do
         %__MODULE__{before: before, cursor_line: line, cursor_col: _col, line_count: lc} = buf
       ) do
     {new_before, removed} = Cursor.previous_character(before)
+    new_line_index = LineIndex.delete_before(buf.line_index, line, removed)
 
     {new_line, new_col, new_lc} =
       case removed do
@@ -196,7 +203,14 @@ defmodule Minga.Buffer.Document do
         _ -> {line, Lines.last_line_width(new_before), lc}
       end
 
-    %{buf | before: new_before, cursor_line: new_line, cursor_col: new_col, line_count: new_lc}
+    %{
+      buf
+      | before: new_before,
+        cursor_line: new_line,
+        cursor_col: new_col,
+        line_count: new_lc,
+        line_index: new_line_index
+    }
   end
 
   @doc """
@@ -208,9 +222,16 @@ defmodule Minga.Buffer.Document do
 
   def delete_at(%__MODULE__{after: after_, line_count: lc} = buf) do
     case Cursor.next_character(after_) do
-      {"\n", rest} -> %{buf | after: rest, line_count: lc - 1}
-      {_grapheme, rest} -> %{buf | after: rest}
-      nil -> buf
+      {"\n", rest} ->
+        new_line_index = LineIndex.delete_at(buf.line_index, buf.cursor_line, "\n")
+        %{buf | after: rest, line_count: lc - 1, line_index: new_line_index}
+
+      {grapheme, rest} ->
+        new_line_index = LineIndex.delete_at(buf.line_index, buf.cursor_line, grapheme)
+        %{buf | after: rest, line_index: new_line_index}
+
+      nil ->
+        buf
     end
   end
 

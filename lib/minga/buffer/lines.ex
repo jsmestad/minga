@@ -5,52 +5,45 @@ defmodule Minga.Buffer.Lines do
   This module owns line-oriented questions: fetching visible line text, taking line ranges, and measuring how inserted text changes the current line.
   """
 
-  alias Minga.Buffer.Document
+  alias Minga.Buffer.{Document, LineIndex}
 
   @type line_index :: non_neg_integer()
   @type line_count :: pos_integer()
-  @type line_starts :: tuple()
-  @type line_span :: {start :: non_neg_integer(), length :: non_neg_integer()}
+  @type line_starts :: LineIndex.t()
+  @type line_span :: LineIndex.span()
   @type snapshot :: {line_starts(), String.t()}
 
   @doc "Returns the content of one editor line without its trailing newline."
   @spec fetch(Document.t(), line_index()) :: String.t() | nil
   def fetch(%Document{} = doc, line) when line >= 0 do
-    {line_starts, text} = snapshot(doc)
-
-    case span(line_starts, line, byte_size(text)) do
+    case span(doc.line_index, line, LineIndex.byte_size(doc.line_index)) do
       nil -> nil
-      {start, length} -> binary_part(text, start, length)
+      {start, length} -> extract(doc, start, length)
     end
   end
 
   @doc "Returns up to `count` editor lines starting at `first_line`."
   @spec slice(Document.t(), line_index(), non_neg_integer()) :: [String.t()]
+  def slice(%Document{} = _doc, _first_line, 0), do: []
+
   def slice(%Document{} = doc, first_line, count) when first_line >= 0 and count >= 0 do
-    {line_starts, text} = snapshot(doc)
-    text_size = byte_size(text)
-    last_line = tuple_size(line_starts) - 1
+    last_line = LineIndex.count(doc.line_index) - 1
     final_line = min(first_line + count - 1, last_line)
 
     if first_line > last_line do
       []
     else
       for line <- first_line..final_line do
-        {start, length} = span(line_starts, line, text_size)
-        binary_part(text, start, length)
+        {start, length} = span(doc.line_index, line, LineIndex.byte_size(doc.line_index))
+        extract(doc, start, length)
       end
     end
   end
 
   @doc "Returns indexed document text so callers can answer multiple line questions without rebuilding the line index."
   @spec snapshot(Document.t()) :: snapshot()
-  def snapshot(%Document{line_offsets: line_starts} = doc) when is_tuple(line_starts) do
-    {line_starts, Document.content(doc)}
-  end
-
-  def snapshot(%Document{} = doc) do
-    text = Document.content(doc)
-    {build_index(text), text}
+  def snapshot(%Document{line_index: line_index} = doc) do
+    {line_index, Document.content(doc)}
   end
 
   @doc "Returns how many editor lines `text` occupies."
@@ -72,31 +65,37 @@ defmodule Minga.Buffer.Lines do
 
   @doc "Returns the content span for one editor line."
   @spec span(line_starts(), line_index(), non_neg_integer()) :: line_span() | nil
-  def span(line_starts, line, _text_size) when line > tuple_size(line_starts) - 1, do: nil
-
-  def span(line_starts, line, text_size) when line == tuple_size(line_starts) - 1 do
-    start = elem(line_starts, line)
-    {start, text_size - start}
-  end
-
-  def span(line_starts, line, _text_size) do
-    start = elem(line_starts, line)
-    next_start = elem(line_starts, line + 1)
-    {start, next_start - start - 1}
+  def span(%LineIndex{} = line_starts, line, _text_size) do
+    LineIndex.span(line_starts, line)
   end
 
   @doc "Returns where one editor line starts in the document text."
   @spec start(line_starts(), line_index()) :: non_neg_integer()
-  def start(line_starts, line) when is_tuple(line_starts) and line >= 0 do
-    elem(line_starts, line)
+  def start(%LineIndex{} = line_starts, line) when line >= 0 do
+    LineIndex.start(line_starts, line)
   end
 
-  @spec build_index(String.t()) :: line_starts()
-  defp build_index(text) do
-    newline_positions = :binary.matches(text, "\n")
+  @doc "Extracts a document byte span without joining both sides of the gap."
+  @spec extract(Document.t(), non_neg_integer(), non_neg_integer()) :: String.t()
+  def extract(%Document{} = doc, start, length) when start >= 0 and length >= 0 do
+    do_extract(doc, start, length, byte_size(doc.before))
+  end
 
-    [0 | Enum.map(newline_positions, fn {pos, _len} -> pos + 1 end)]
-    |> List.to_tuple()
+  @spec do_extract(Document.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          String.t()
+  defp do_extract(%Document{before: before}, start, length, gap_start)
+       when start + length <= gap_start do
+    binary_part(before, start, length)
+  end
+
+  defp do_extract(%Document{after: after_}, start, length, gap_start) when start >= gap_start do
+    binary_part(after_, start - gap_start, length)
+  end
+
+  defp do_extract(%Document{before: before, after: after_}, start, length, gap_start) do
+    before_length = gap_start - start
+    after_length = length - before_length
+    binary_part(before, start, before_length) <> binary_part(after_, 0, after_length)
   end
 
   @spec last_line_start(String.t()) :: non_neg_integer()

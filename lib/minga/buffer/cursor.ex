@@ -3,7 +3,7 @@ defmodule Minga.Buffer.Cursor do
   Moves the document cursor while preserving valid editor caret positions.
   """
 
-  alias Minga.Buffer.{Document, Lines}
+  alias Minga.Buffer.{Document, LineIndex, Lines}
 
   @type direction :: :left | :right | :up | :down
 
@@ -65,23 +65,22 @@ defmodule Minga.Buffer.Cursor do
   @spec place(Document.t(), Document.position()) :: Document.t()
   def place(%Document{} = doc, {target_line, target_column})
       when target_line >= 0 and target_column >= 0 do
-    {line_starts, text} = Lines.snapshot(doc)
-    text_size = byte_size(text)
-    line = min(target_line, tuple_size(line_starts) - 1)
-    {line_start, line_length} = Lines.span(line_starts, line, text_size)
-    line_text = binary_part(text, line_start, line_length)
+    line = min(target_line, LineIndex.count(doc.line_index) - 1)
+
+    {line_start, line_length} =
+      Lines.span(doc.line_index, line, LineIndex.byte_size(doc.line_index))
+
+    line_text = Lines.extract(doc, line_start, line_length)
     column = target_column |> min(line_length) |> caret_column(line_text)
     point = line_start + column
-    before = binary_part(text, 0, point)
-    after_ = binary_part(text, point, text_size - point)
+    {before, after_} = split_at(doc, point)
 
     %{
       doc
       | before: before,
         after: after_,
         cursor_line: line,
-        cursor_col: column,
-        line_offsets: nil
+        cursor_col: column
     }
   end
 
@@ -98,6 +97,29 @@ defmodule Minga.Buffer.Cursor do
   @doc "Returns the character immediately after a caret."
   @spec next_character(String.t()) :: {String.t(), String.t()} | nil
   def next_character(text), do: String.next_grapheme(text)
+
+  @spec split_at(Document.t(), non_neg_integer()) :: {String.t(), String.t()}
+  defp split_at(%Document{} = doc, point) do
+    do_split_at(doc, point, byte_size(doc.before))
+  end
+
+  @spec do_split_at(Document.t(), non_neg_integer(), non_neg_integer()) ::
+          {String.t(), String.t()}
+  defp do_split_at(%Document{before: before, after: after_}, point, gap_start)
+       when point == gap_start do
+    {before, after_}
+  end
+
+  defp do_split_at(%Document{before: before, after: after_}, point, gap_start)
+       when point < gap_start do
+    {binary_part(before, 0, point), binary_part(before, point, gap_start - point) <> after_}
+  end
+
+  defp do_split_at(%Document{before: before, after: after_}, point, gap_start) do
+    after_size = byte_size(after_)
+    take = point - gap_start
+    {before <> binary_part(after_, 0, take), binary_part(after_, take, after_size - take)}
+  end
 
   @spec caret_column(non_neg_integer(), String.t()) :: non_neg_integer()
   defp caret_column(0, _line_text), do: 0

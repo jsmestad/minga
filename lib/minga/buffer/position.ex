@@ -5,7 +5,7 @@ defmodule Minga.Buffer.Position do
   A position is still stored as `{line, column}` for the rest of the editor, but this module owns the translation between that editor-facing coordinate and the document's internal text point.
   """
 
-  alias Minga.Buffer.{Document, Lines}
+  alias Minga.Buffer.{Document, LineIndex, Lines}
 
   @typedoc "A zero-indexed editor position."
   @type t :: {line :: non_neg_integer(), column :: non_neg_integer()}
@@ -17,25 +17,21 @@ defmodule Minga.Buffer.Position do
   @spec point_for(Document.t(), t()) :: point()
   def point_for(%Document{} = doc, {line, column})
       when line >= 0 and column >= 0 do
-    {line_starts, text} = Lines.snapshot(doc)
-    point_in(line_starts, line, column, byte_size(text))
+    point_in(doc.line_index, line, column, LineIndex.byte_size(doc.line_index))
   end
 
   @doc "Returns the editor position at a document point."
   @spec from_point(Document.t(), point()) :: t()
   def from_point(%Document{} = doc, point) when point >= 0 do
-    doc |> Document.content() |> walk_to_position(point, 0, 0)
+    LineIndex.position_at(doc.line_index, point)
   end
 
   @doc "Returns the document point for an editor position against an existing line index."
   @spec point_in(Lines.line_starts(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
           point()
-  def point_in(line_starts, line, column, text_size)
-      when is_tuple(line_starts) and line >= 0 and column >= 0 do
-    max_line = tuple_size(line_starts) - 1
-    clamped_line = min(line, max_line)
-    point = Lines.start(line_starts, clamped_line) + column
-    min(point, text_size)
+  def point_in(%LineIndex{} = line_starts, line, column, text_size)
+      when line >= 0 and column >= 0 do
+    line_starts |> LineIndex.point_in(line, column) |> min(text_size)
   end
 
   @doc "Returns the on-screen column for an editor position."
@@ -66,20 +62,6 @@ defmodule Minga.Buffer.Position do
     case String.next_grapheme_size(remaining) do
       {size, _rest} -> min(clamped_point + size, text_size)
       nil -> clamped_point
-    end
-  end
-
-  @spec walk_to_position(String.t(), point(), non_neg_integer(), non_neg_integer()) :: t()
-  defp walk_to_position(_text, 0, line, column), do: {line, column}
-  defp walk_to_position("", _point, line, column), do: {line, column}
-
-  defp walk_to_position(text, point, line, column) when point > 0 do
-    case text do
-      <<"\n", rest::binary>> ->
-        walk_to_position(rest, point - 1, line + 1, 0)
-
-      <<_byte, rest::binary>> ->
-        walk_to_position(rest, point - 1, line, column + 1)
     end
   end
 

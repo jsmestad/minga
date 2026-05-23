@@ -5,7 +5,7 @@ defmodule Minga.Buffer.Selection do
   `Document` stores and mutates the gap buffer. This module decides what a characterwise or linewise selection means, then returns content or a new document from that selection.
   """
 
-  alias Minga.Buffer.{Document, Lines, Position, Span}
+  alias Minga.Buffer.{Document, LineIndex, Lines, Position, Span}
 
   @enforce_keys [:kind, :span, :cursor]
   defstruct [:kind, :span, :cursor]
@@ -17,7 +17,7 @@ defmodule Minga.Buffer.Selection do
   @spec characterwise(Document.t(), Document.position(), Document.position()) :: t()
   def characterwise(%Document{} = doc, from_pos, to_pos) do
     {line_starts, text} = Lines.snapshot(doc)
-    text_size = byte_size(text)
+    text_size = LineIndex.byte_size(line_starts)
     from_point = Position.point_in(line_starts, elem(from_pos, 0), elem(from_pos, 1), text_size)
     to_point = Position.point_in(line_starts, elem(to_pos, 0), elem(to_pos, 1), text_size)
     cursor = if from_point <= to_point, do: from_pos, else: to_pos
@@ -32,9 +32,9 @@ defmodule Minga.Buffer.Selection do
   @doc "Builds a linewise selection between two line numbers."
   @spec linewise(Document.t(), non_neg_integer(), non_neg_integer()) :: t()
   def linewise(%Document{} = doc, start_line, end_line) when start_line >= 0 and end_line >= 0 do
-    {line_starts, text} = Lines.snapshot(doc)
-    text_size = byte_size(text)
-    total_lines = tuple_size(line_starts)
+    {line_starts, _text} = Lines.snapshot(doc)
+    text_size = LineIndex.byte_size(line_starts)
+    total_lines = LineIndex.count(line_starts)
     {first_line, last_line} = ordered_lines(start_line, end_line)
     first_line = min(first_line, total_lines - 1)
     last_line = min(last_line, total_lines - 1)

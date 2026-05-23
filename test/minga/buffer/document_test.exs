@@ -2,7 +2,7 @@ defmodule Minga.Buffer.DocumentTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias Minga.Buffer.Document
+  alias Minga.Buffer.{Document, LineIndex}
 
   describe "new/1" do
     test "creates an empty buffer" do
@@ -311,6 +311,52 @@ defmodule Minga.Buffer.DocumentTest do
 
   # ── Cache validity tests ──
 
+  describe "line index cache" do
+    test "survives cursor movement without rebuild" do
+      buf = Document.new("alpha\nbeta\ngamma")
+      line_index = buf.line_index
+
+      moved = buf |> Document.move_to({1, 2}) |> Document.move(:right) |> Document.move(:left)
+
+      assert moved.line_index == line_index
+      assert Document.line_at(moved, 0) == "alpha"
+      assert Document.line_at(moved, 1) == "beta"
+      assert Document.line_at(moved, 2) == "gamma"
+    end
+
+    test "line_at extracts a line spanning the gap without full-content reconstruction" do
+      buf = Document.new("alpha beta\ngamma") |> Document.move_to({0, 6})
+
+      assert buf.before == "alpha "
+      assert buf.after == "beta\ngamma"
+      assert Document.line_at(buf, 0) == "alpha beta"
+      assert Document.lines(buf, 0, 2) == ["alpha beta", "gamma"]
+    end
+
+    test "updates after insert and delete operations" do
+      buf = Document.new("ab\ncd") |> Document.move_to({0, 1}) |> Document.insert_text("X\nY")
+
+      assert Document.lines(buf, 0, 3) == ["aX", "Yb", "cd"]
+
+      buf = buf |> Document.delete_before() |> Document.delete_before()
+
+      assert Document.lines(buf, 0, 2) == ["aXb", "cd"]
+      assert_cache_valid(buf)
+    end
+
+    test "updates across line index chunk boundaries" do
+      text = Enum.map_join(0..299, "\n", &"line#{&1}")
+
+      split = Document.new(text) |> Document.move_to({255, 4}) |> Document.insert_text("X\nY")
+      assert Document.lines(split, 254, 5) == ["line254", "lineX", "Y255", "line256", "line257"]
+      assert_cache_valid(split)
+
+      merged = split |> Document.move_to({255, byte_size("lineX")}) |> Document.delete_at()
+      assert Document.lines(merged, 254, 4) == ["line254", "lineXY255", "line256", "line257"]
+      assert_cache_valid(merged)
+    end
+  end
+
   describe "cache: cursor and line_count accuracy" do
     test "insert at start of line updates col" do
       buf = Document.new("hello") |> Document.insert_text("X")
@@ -445,13 +491,15 @@ defmodule Minga.Buffer.DocumentTest do
   # match values recomputed from the raw buffer content.
   # cursor_col is now a byte offset within the current line.
   @spec assert_cache_valid(Document.t()) :: :ok
-  defp assert_cache_valid(%Document{
-         before: before,
-         after: after_,
-         cursor_line: cl,
-         cursor_col: cc,
-         line_count: lc
-       }) do
+  defp assert_cache_valid(
+         %Document{
+           before: before,
+           after: after_,
+           cursor_line: cl,
+           cursor_col: cc,
+           line_count: lc
+         } = buf
+       ) do
     # Recompute cursor from `before`
     lines_before = :binary.split(before, "\n", [:global])
     expected_line = length(lines_before) - 1
@@ -474,6 +522,15 @@ defmodule Minga.Buffer.DocumentTest do
 
     assert lc == expected_lc,
            "line_count: got #{lc}, expected #{expected_lc} (content=#{inspect(text)})"
+
+    assert LineIndex.count(buf.line_index) == expected_lc
+    assert LineIndex.byte_size(buf.line_index) == byte_size(text)
+
+    expected_lines = :binary.split(text, "\n", [:global])
+
+    for line <- 0..(expected_lc - 1) do
+      assert Document.line_at(buf, line) == Enum.at(expected_lines, line)
+    end
 
     :ok
   end
