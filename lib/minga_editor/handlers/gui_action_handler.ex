@@ -185,6 +185,10 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     end
   end
 
+  defp dispatch_action(state, {:timeline_navigate, index}) do
+    MingaEditor.Commands.EditTimeline.navigate_to_index(state, index)
+  end
+
   defp dispatch_action(%{shell: MingaEditor.Shell.Board} = state, action) do
     {shell_state, workspace} =
       MingaEditor.Shell.Board.handle_gui_action(state.shell_state, state.workspace, action)

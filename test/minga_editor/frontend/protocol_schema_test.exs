@@ -145,7 +145,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       gui_config_state: 0x97,
       gui_workspaces: 0x98,
       gui_notifications: 0x99,
-      gui_observatory: 0x9A
+      gui_observatory: 0x9A,
+      gui_edit_timeline: 0x9B
     )
   end
 
@@ -228,7 +229,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       tab_move_left: 0x4B,
       tab_move_right: 0x4C,
       observatory_inspect: 0x4D,
-      font_size_adjust: 0x4E
+      font_size_adjust: 0x4E,
+      timeline_navigate: 0x4F
     )
   end
 

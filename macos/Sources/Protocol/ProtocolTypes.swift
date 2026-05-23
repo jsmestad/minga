@@ -560,6 +560,16 @@ enum Wire {
         case system(text: String, isError: Bool)
         case usage(input: UInt32, output: UInt32, cacheRead: UInt32, cacheWrite: UInt32, costMicros: UInt32)
     }
+
+    // MARK: - Edit timeline
+
+    struct TimelineEntry: Sendable, Identifiable {
+        let index: UInt8
+        let toolName: String
+        let timestampDelta: UInt32
+
+        var id: Int { Int(index) }
+    }
 }
 
 /// Cursor shape matching the protocol constants.

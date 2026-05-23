@@ -914,7 +914,8 @@ defmodule MingaAgent.SessionTest do
       send(session, {:agent_provider_event, event})
 
       assert_receive {:agent_event, _,
-                      {:file_changed, "lib/foo.ex", "old content", "new content"}},
+                      {:file_changed, "lib/foo.ex", "old content", "new content", "tc1",
+                       _tool_name}},
                      200
     end
   end

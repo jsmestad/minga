@@ -644,6 +644,13 @@ struct ContentView: View {
                 appState.editorNSView?.setAgentChatVisible(visible)
             }
 
+            // Edit timeline scrubber (between editor and bottom panel)
+            EditTimelineView(
+                state: appState.gui.editTimelineState,
+                themeColors: appState.gui.themeColors,
+                encoder: appState.encoder
+            )
+
             // Bottom panel (between editor and status bar)
             if appState.gui.bottomPanelState.visible {
                 BottomPanelView(

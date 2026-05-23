@@ -157,7 +157,8 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       &build_gui_observatory_cmd/2,
       &build_gui_board_cmd/2,
       &build_gui_agent_context_cmd/2,
-      &build_gui_change_summary_cmd/2
+      &build_gui_change_summary_cmd/2,
+      &build_gui_edit_timeline_cmd/2
     ]
 
     {cmds, caches} =
@@ -1796,6 +1797,52 @@ defmodule MingaEditor.Frontend.Emit.GUI do
        %{caches | last_gui_change_summary_fp: :hidden}}
     else
       {nil, caches}
+    end
+  end
+
+  # ── Edit timeline ──
+
+  alias MingaEditor.Agent.EditTimeline
+
+  @spec build_gui_edit_timeline_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
+  defp build_gui_edit_timeline_cmd(ctx, caches) do
+    timeline = ctx.agent_ui.view.edit_timeline
+    path = active_buffer_path(ctx)
+
+    if path != nil and EditTimeline.has_entries?(timeline, path) do
+      entries = EditTimeline.entries_for(timeline, path)
+      viewing = EditTimeline.viewing_index(timeline, path)
+
+      first_ts =
+        case entries do
+          [%{timestamp: ts} | _] -> ts
+          _ -> 0
+        end
+
+      wire_entries =
+        Enum.map(entries, fn entry ->
+          %{
+            index: entry.index,
+            tool_name: entry.tool_name,
+            timestamp_delta: abs(entry.timestamp - first_ts)
+          }
+        end)
+
+      fp = :erlang.phash2({path, length(entries), viewing, Enum.map(entries, & &1.tool_name)})
+
+      if fp != caches.last_gui_edit_timeline_fp do
+        {ProtocolGUI.encode_gui_edit_timeline(true, viewing, wire_entries),
+         %{caches | last_gui_edit_timeline_fp: fp}}
+      else
+        {nil, caches}
+      end
+    else
+      if caches.last_gui_edit_timeline_fp != :hidden do
+        {ProtocolGUI.encode_gui_edit_timeline(false, nil, []),
+         %{caches | last_gui_edit_timeline_fp: :hidden}}
+      else
+        {nil, caches}
+      end
     end
   end
 

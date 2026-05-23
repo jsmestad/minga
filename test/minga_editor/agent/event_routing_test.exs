@@ -275,7 +275,11 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         shell_state: %TraditionalState{agent: %AgentState{}, tab_bar: tb}
       }
 
-      {state, _effects} = Events.handle(state, {:file_changed, test_path, "before", "after"})
+      {state, _effects} =
+        Events.handle(
+          state,
+          {:file_changed, test_path, "before", "after", "tc_test", "edit_file"}
+        )
 
       tb = state.shell_state.tab_bar
       assert TabBar.get(tb, tab1.id).group_id == 0
@@ -320,7 +324,11 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         shell_state: %TraditionalState{agent: %AgentState{}, tab_bar: tb}
       }
 
-      {state, _effects} = Events.handle(state, {:file_changed, test_path, "before", "after"})
+      {state, _effects} =
+        Events.handle(
+          state,
+          {:file_changed, test_path, "before", "after", "tc_test", "edit_file"}
+        )
 
       tb = state.shell_state.tab_bar
       agent_workspace = TabBar.get_workspace(tb, workspace.id)
@@ -361,7 +369,8 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         shell_state: %TraditionalState{agent: %AgentState{}, tab_bar: tb}
       }
 
-      {state, _effects} = Events.handle(state, {:file_changed, path, "before", "after"})
+      {state, _effects} =
+        Events.handle(state, {:file_changed, path, "before", "after", "tc_test", "edit_file"})
 
       tb = state.shell_state.tab_bar
       assert TabBar.get(tb, file_tab.id).group_id == workspace.id
@@ -391,7 +400,8 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         shell_state: %TraditionalState{agent: %AgentState{}, tab_bar: tb}
       }
 
-      {state, _effects} = Events.handle(state, {:file_changed, path, "before", "after"})
+      {state, _effects} =
+        Events.handle(state, {:file_changed, path, "before", "after", "tc_test", "edit_file"})
 
       tb = state.shell_state.tab_bar
       assert TabBar.get(tb, file_tab.id).group_id == 0

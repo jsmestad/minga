@@ -129,6 +129,9 @@ protocol InputEncoder: AnyObject, Sendable {
 
     // Font size adjustment
     func sendFontSizeAdjust(direction: UInt8)
+
+    // Edit timeline actions
+    func sendTimelineNavigate(index: UInt16)
 }
 
 extension InputEncoder {
@@ -154,6 +157,9 @@ extension InputEncoder {
 
     /// Default no-op so existing test spies do not need to implement font size actions.
     func sendFontSizeAdjust(direction: UInt8) {}
+
+    /// Default no-op so existing test spies do not need to implement timeline actions.
+    func sendTimelineNavigate(index: UInt16) {}
 }
 
 /// Thread-safe encoder that writes `{:packet, 4}` framed events to stdout.
@@ -1085,6 +1091,15 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FONT_SIZE_ADJUST
         buf[2] = direction
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: timeline_navigate. Layout: opcode(1) + action_type(1) + index(2).
+    func sendTimelineNavigate(index: UInt16) {
+        var buf = Data(count: 4)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_TIMELINE_NAVIGATE
+        writeU16(&buf, 2, index)
         writeFrame(buf)
     }
 
