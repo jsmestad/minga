@@ -268,9 +268,9 @@ final class CommandDispatcher {
                 onModeChanged?(guiState.statusBarState.modeName)
             }
 
-        case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let query, let hasPreview, let items, let actionMenu, let modePrefix):
+        case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let query, let hasPreview, let items, let actionMenu, let modePrefix, let loadStatus):
             if visible {
-                guiState.pickerState.update(visible: true, selectedIndex: selectedIndex, filteredCount: filteredCount, totalCount: totalCount, markedCount: markedCount, title: title, query: query, hasPreview: hasPreview, rawItems: items, actionMenu: actionMenu, modePrefix: modePrefix)
+                guiState.pickerState.update(visible: true, selectedIndex: selectedIndex, filteredCount: filteredCount, totalCount: totalCount, markedCount: markedCount, title: title, query: query, hasPreview: hasPreview, rawItems: items, actionMenu: actionMenu, modePrefix: modePrefix, loadStatus: loadStatus)
             } else {
                 guiState.pickerState.hide()
             }

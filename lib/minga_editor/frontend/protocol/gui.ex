@@ -292,6 +292,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @section_picker_items 0x03
   @section_picker_action_menu 0x04
   @section_picker_mode_prefix 0x05
+  @section_picker_load_status 0x06
 
   # gui_agent_chat sections
   @section_chat_header 0x01
@@ -2465,6 +2466,11 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   ModePrefix section 0x05 payload:
     mode_prefix_len(2) + mode_prefix(mode_prefix_len)
 
+  LoadStatus section 0x06 payload:
+    status(1): 0=ready, 1=loading, 2=error
+    When status == 2:
+      error_len(2) + error_message(error_len)
+
   Flags bits:
     bit 0: two_line (file-style two-line layout)
     bit 1: marked (multi-select checkmark)
@@ -2479,7 +2485,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           boolean(),
           action_menu_state(),
           non_neg_integer(),
-          String.t()
+          String.t(),
+          MingaEditor.State.Picker.load_status()
         ) ::
           binary()
   def encode_gui_picker(
@@ -2487,10 +2494,11 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
         has_preview \\ false,
         action_menu \\ nil,
         max_items \\ 0,
-        mode_prefix \\ ""
+        mode_prefix \\ "",
+        load_status \\ :ready
       )
 
-  def encode_gui_picker(nil, _has_preview, _action_menu, _max_items, _mode_prefix),
+  def encode_gui_picker(nil, _has_preview, _action_menu, _max_items, _mode_prefix, _load_status),
     do: <<@op_gui_picker, 0::8>>
 
   def encode_gui_picker(
@@ -2498,7 +2506,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
         has_preview,
         action_menu,
         max_items,
-        mode_prefix
+        mode_prefix,
+        load_status
       ) do
     limit = if max_items > 0, do: max_items, else: picker.max_visible
     items = Enum.take(picker.filtered, limit)
@@ -2546,7 +2555,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       encode_section(
         @section_picker_mode_prefix,
         <<byte_size(mode_prefix_bytes)::16, mode_prefix_bytes::binary>>
-      )
+      ),
+      encode_section(@section_picker_load_status, encode_load_status(load_status))
     ]
 
     IO.iodata_to_binary([<<@op_gui_picker, length(sections)::8>> | sections])
@@ -2574,6 +2584,14 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     two_line = if item.two_line, do: 1, else: 0
     marked = if MingaEditor.UI.Picker.marked?(picker, item), do: 1, else: 0
     bor(two_line, marked <<< 1)
+  end
+
+  @spec encode_load_status(MingaEditor.State.Picker.load_status()) :: binary()
+  defp encode_load_status(:ready), do: <<0::8>>
+  defp encode_load_status(:loading), do: <<1::8>>
+
+  defp encode_load_status({:error, reason}) do
+    <<2::8, byte_size(reason)::16, reason::binary>>
   end
 
   # ── Picker preview ──

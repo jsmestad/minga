@@ -42,7 +42,7 @@ defmodule MingaEditor.Frontend.GUIPickerProtocolTest do
 
       # Sectioned: opcode(1) + section_count(1) + sections...
       assert <<0x77, section_count, _rest::binary>> = binary
-      assert section_count == 5
+      assert section_count == 6
     end
 
     test "encodes has_preview flag" do
@@ -53,8 +53,8 @@ defmodule MingaEditor.Frontend.GUIPickerProtocolTest do
       with_preview = ProtocolGUI.encode_gui_picker(picker, true)
 
       # Both should be valid sectioned format
-      assert <<0x77, 5, _::binary>> = without_preview
-      assert <<0x77, 5, _::binary>> = with_preview
+      assert <<0x77, 6, _::binary>> = without_preview
+      assert <<0x77, 6, _::binary>> = with_preview
       # They should differ (the has_preview byte in the header section)
       assert without_preview != with_preview
     end
@@ -66,9 +66,9 @@ defmodule MingaEditor.Frontend.GUIPickerProtocolTest do
       bare = ProtocolGUI.encode_gui_picker(picker)
       prefixed = ProtocolGUI.encode_gui_picker(picker, false, nil, 0, ">")
 
-      assert <<0x77, 5, _::binary>> = prefixed
+      assert <<0x77, 6, _::binary>> = prefixed
       assert bare != prefixed
-      assert section_ids(prefixed) == [0x01, 0x02, 0x03, 0x04, 0x05]
+      assert section_ids(prefixed) == [0x01, 0x02, 0x03, 0x04, 0x05, 0x06]
     end
 
     test "encodes filtered, total, and marked counts in header" do
@@ -89,7 +89,7 @@ defmodule MingaEditor.Frontend.GUIPickerProtocolTest do
       # Sectioned: opcode(1) + section_count(1) + section_0x01 header
       # Section header: id(1) + len(2) + payload
       # Payload: visible(1) + selected(2) + filtered(2) + total(2) + has_preview(1) + title_len(2) + title + marked(2)
-      <<0x77, 5, 0x01, _slen::16, 1, _selected::16, filtered::16, total::16, _has_preview::8,
+      <<0x77, 6, 0x01, _slen::16, 1, _selected::16, filtered::16, total::16, _has_preview::8,
         title_len::16, title::binary-size(title_len), marked::16, _rest::binary>> = binary
 
       assert title == "Test"
@@ -107,6 +107,43 @@ defmodule MingaEditor.Frontend.GUIPickerProtocolTest do
       end)
 
     Enum.reverse(ids)
+  end
+
+  defp section_payloads(<<0x77, section_count, rest::binary>>) do
+    {map, _rest} =
+      Enum.reduce(1..section_count, {%{}, rest}, fn _, {acc, bin} ->
+        <<id, len::16, payload::binary-size(len), remaining::binary>> = bin
+        {Map.put(acc, id, payload), remaining}
+      end)
+
+    map
+  end
+
+  describe "encode_gui_picker load_status section" do
+    test "encodes :ready as status byte 0" do
+      items = [%Item{id: :a, label: "test.ex", description: ""}]
+      picker = Picker.new(items, title: "Test")
+      binary = ProtocolGUI.encode_gui_picker(picker, false, nil, 0, "", :ready)
+      sections = section_payloads(binary)
+      assert %{0x06 => <<0>>} = sections
+    end
+
+    test "encodes :loading as status byte 1" do
+      items = [%Item{id: :a, label: "test.ex", description: ""}]
+      picker = Picker.new(items, title: "Test")
+      binary = ProtocolGUI.encode_gui_picker(picker, false, nil, 0, "", :loading)
+      sections = section_payloads(binary)
+      assert %{0x06 => <<1>>} = sections
+    end
+
+    test "encodes {:error, reason} as status byte 2 with message" do
+      items = [%Item{id: :a, label: "test.ex", description: ""}]
+      picker = Picker.new(items, title: "Test")
+      binary = ProtocolGUI.encode_gui_picker(picker, false, nil, 0, "", {:error, "Timed out"})
+      sections = section_payloads(binary)
+      assert %{0x06 => <<2, err_len::16, err::binary-size(err_len)>>} = sections
+      assert err == "Timed out"
+    end
   end
 
   describe "encode_gui_picker_preview/1" do

@@ -79,6 +79,12 @@ defmodule MingaEditor.UI.Picker do
     }
   end
 
+  @doc "Replaces the item list and refilters against the current query."
+  @spec replace_items(t(), [item()]) :: t()
+  def replace_items(%__MODULE__{} = picker, items) when is_list(items) do
+    refilter(%{picker | items: items})
+  end
+
   # ── Query manipulation ──────────────────────────────────────────────────────
 
   @doc "Appends a character to the query and refilters."

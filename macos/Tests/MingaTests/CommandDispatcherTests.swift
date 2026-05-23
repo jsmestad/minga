@@ -462,7 +462,7 @@ struct CommandDispatcherRoutingTests {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.dispatch(.guiPicker(visible: true, selectedIndex: 0, filteredCount: 5,
                                         totalCount: 100, markedCount: 2, title: "Find File", query: "edi",
-                                        hasPreview: false, items: [], actionMenu: nil, modePrefix: ">"))
+                                        hasPreview: false, items: [], actionMenu: nil, modePrefix: ">", loadStatus: .ready))
 
         #expect(gui.pickerState.visible == true)
         #expect(gui.pickerState.title == "Find File")
@@ -476,10 +476,10 @@ struct CommandDispatcherRoutingTests {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.dispatch(.guiPicker(visible: true, selectedIndex: 0, filteredCount: 5,
                                         totalCount: 100, markedCount: 2, title: "Find File", query: "edi",
-                                        hasPreview: false, items: [], actionMenu: nil, modePrefix: ">"))
+                                        hasPreview: false, items: [], actionMenu: nil, modePrefix: ">", loadStatus: .ready))
         dispatcher.dispatch(.guiPicker(visible: false, selectedIndex: 0, filteredCount: 0,
                                         totalCount: 0, markedCount: 0, title: "", query: "",
-                                        hasPreview: false, items: [], actionMenu: nil, modePrefix: ""))
+                                        hasPreview: false, items: [], actionMenu: nil, modePrefix: "", loadStatus: .ready))
 
         #expect(gui.pickerState.visible == false)
         #expect(gui.pickerState.items.isEmpty)

@@ -30,6 +30,10 @@ defmodule MingaEditor.UI.Picker.WorkspaceSymbolSource do
   def preview?, do: true
 
   @impl true
+  @spec async?() :: boolean()
+  def async?, do: true
+
+  @impl true
   @spec candidates(Context.t()) :: [Item.t()]
   def candidates(%Context{buffers: %{active: buf}}) when is_pid(buf) do
     # Send a synchronous workspace/symbol request with empty query.

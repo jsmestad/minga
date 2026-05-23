@@ -130,6 +130,14 @@ defmodule MingaEditor.UI.Picker.Source do
   """
   @callback keep_open_on_select?() :: boolean()
 
+  @doc """
+  Whether this source fetches candidates asynchronously.
+  When `true`, `PickerUI.open/3` opens the picker immediately with a
+  "Searching..." indicator and fetches candidates in a background task.
+  Defaults to `false` (synchronous).
+  """
+  @callback async?() :: boolean()
+
   @optional_callbacks [
     preview?: 0,
     live_preview?: 0,
@@ -141,7 +149,8 @@ defmodule MingaEditor.UI.Picker.Source do
     bulk_actions: 1,
     on_bulk_action: 3,
     layout: 0,
-    keep_open_on_select?: 0
+    keep_open_on_select?: 0,
+    async?: 0
   ]
 
   @doc """
@@ -284,6 +293,18 @@ defmodule MingaEditor.UI.Picker.Source do
   def keep_open_on_select?(module) do
     if exported?(module, :keep_open_on_select?, 0) do
       module.keep_open_on_select?()
+    else
+      false
+    end
+  end
+
+  @doc """
+  Returns whether a source fetches candidates asynchronously.
+  """
+  @spec async?(module()) :: boolean()
+  def async?(module) do
+    if exported?(module, :async?, 0) do
+      module.async?()
     else
       false
     end

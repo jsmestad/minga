@@ -1755,7 +1755,7 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let q, let hasPreview, let decodedItems, let decodedMenu, let modePrefix) = cmd else {
+        guard case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let q, let hasPreview, let decodedItems, let decodedMenu, let modePrefix, _) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
 
@@ -1786,7 +1786,7 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == 2)
 
-        guard case .guiPicker(let visible, _, _, _, let markedCount, _, _, _, let items, let actionMenu, let modePrefix) = cmd else {
+        guard case .guiPicker(let visible, _, _, _, let markedCount, _, _, _, let items, let actionMenu, let modePrefix, _) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
         #expect(visible == false)
@@ -1829,7 +1829,7 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(let visible, _, _, _, _, _, _, _, _, let am, let modePrefix) = cmd else {
+        guard case .guiPicker(let visible, _, _, _, _, _, _, _, _, let am, let modePrefix, _) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
         #expect(visible == true)

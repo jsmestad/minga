@@ -270,6 +270,13 @@ enum Wire {
         let actions: [String]
     }
 
+    /// Async loading status for picker sources.
+    enum PickerLoadStatus: Sendable, Equatable {
+        case ready
+        case loading
+        case error(String)
+    }
+
     /// A styled text segment for picker preview content.
     struct PickerPreviewSegment: Sendable {
         let fgColor: UInt32   // 24-bit RGB
