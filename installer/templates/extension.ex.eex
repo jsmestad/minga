@@ -7,7 +7,7 @@ defmodule <%= module %> do
 
   # ── Config options ──────────────────────────────────────────────────
   # Declare typed options users can set in their Minga config.
-  # Read at runtime with: Minga.Config.Options.get_extension_option(:<%= name %>, :enabled)
+  # Read at runtime with: Minga.Config.get_extension_option(:<%= name %>, :enabled)
 
   option :enabled, :boolean, default: true, description: "Enable <%= module %>"
 

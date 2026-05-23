@@ -36,6 +36,12 @@ defmodule Mix.Tasks.Minga.New do
   end
 
   defp generate(name, opts) do
+    unless name =~ ~r/^[a-z][a-z0-9_]*$/ do
+      Mix.raise(
+        "Extension name must start with a lowercase letter and contain only lowercase letters, digits, and underscores. Got: #{name}"
+      )
+    end
+
     module = Macro.camelize(name)
     path = Keyword.get(opts, :path, name)
     binding = [name: name, module: module, version: @version]
