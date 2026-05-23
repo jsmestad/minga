@@ -106,6 +106,39 @@ defmodule Minga.Buffer.UndoHistory do
     {:ok, Restore.new(next_version, next_document, source), new_history}
   end
 
+  @doc """
+  Undoes all consecutive `:agent`-sourced entries from the top of the undo stack.
+
+  Walks backward through the undo stack, popping every entry whose source is `:agent`, applying its patches to roll back the document, and pushing corresponding redo entries. Stops at the first non-agent entry or when the stack is empty.
+
+  Returns `{:ok, restore, updated_history, undone_count}` with the final document state after all agent entries are reversed, or `:empty` when no agent entries are on top.
+  """
+  @spec undo_agent_session(t(), version(), Document.t()) ::
+          {:ok, Restore.t(), t(), pos_integer()} | :empty
+  def undo_agent_session(%__MODULE__{} = history, current_version, %Document{} = current_document) do
+    case history.undo_entries do
+      [{_version, _patches, :agent} | _rest] ->
+        do_undo_agent_session(history, current_version, current_document, 0)
+
+      _ ->
+        :empty
+    end
+  end
+
+  @spec do_undo_agent_session(t(), version(), Document.t(), non_neg_integer()) ::
+          {:ok, Restore.t(), t(), pos_integer()}
+  defp do_undo_agent_session(%__MODULE__{} = history, current_version, current_document, count) do
+    case history.undo_entries do
+      [{_version, _patches, :agent} | _rest] ->
+        {:ok, restore, new_history} = undo(history, current_version, current_document)
+        do_undo_agent_session(new_history, restore.version, restore.document, count + 1)
+
+      _ ->
+        restore = Restore.new(current_version, current_document, :agent)
+        {:ok, restore, history, count}
+    end
+  end
+
   @doc "Clears undo and redo entries and resets coalescing state."
   @spec clear(t()) :: t()
   def clear(%__MODULE__{} = history) do

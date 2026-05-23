@@ -631,6 +631,12 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, :redo)
   end
 
+  @doc "Undoes all consecutive agent-sourced entries from the top of the undo stack."
+  @spec undo_agent_session(GenServer.server()) :: {:ok, non_neg_integer()} | :empty
+  def undo_agent_session(server) do
+    GenServer.call(server, :undo_agent_session)
+  end
+
   @doc "Returns the edit source of the most recent undo entry, or `nil` if the undo stack is empty."
   @spec last_undo_source(GenServer.server()) :: Minga.Buffer.State.edit_source() | nil
   def last_undo_source(server) do
@@ -1543,6 +1549,32 @@ defmodule Minga.Buffer.Process do
 
         log_undo_source(:redo, restore.source)
         {:reply, :ok, new_state}
+    end
+  end
+
+  def handle_call(:undo_agent_session, _from, state) do
+    case UndoHistory.undo_agent_session(
+           state.undo_history,
+           BufState.version(state),
+           state.document
+         ) do
+      :empty ->
+        {:reply, :empty, state}
+
+      {:ok, restore, undo_history, count} ->
+        event_source = EditSource.from_undo_source(:agent)
+
+        new_state =
+          %{
+            BufState.restore_version(state, restore.version)
+            | document: restore.document,
+              undo_history: undo_history
+          }
+          |> sync_dirty()
+          |> clear_edits(event_source)
+
+        Minga.Log.debug(:editor, "Undo agent session: reverted #{count} agent edits")
+        {:reply, {:ok, count}, new_state}
     end
   end
 
