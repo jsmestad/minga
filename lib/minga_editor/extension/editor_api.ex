@@ -61,10 +61,11 @@ defmodule MingaEditor.Extension.EditorAPI do
   """
   @spec navigate_to(state(), String.t(), non_neg_integer(), non_neg_integer()) :: state()
   def navigate_to(state, path, line, col \\ 0) when is_binary(path) do
+    prev_active = state.workspace.buffers.active
     state = open_file(state, path)
 
     case state.workspace.buffers.active do
-      pid when is_pid(pid) ->
+      pid when is_pid(pid) and pid != prev_active ->
         Buffer.move_to(pid, {line, col})
         state
 

@@ -670,19 +670,12 @@ defmodule MingaEditor.Commands do
   @spec start_buffer(String.t()) :: {:ok, pid()} | {:error, term()}
   @spec start_buffer(String.t(), Minga.Config.Options.server() | nil) ::
           {:ok, pid()} | {:error, term()}
-  def start_buffer(file_path, options_server \\ Minga.Config.Options.default_server()) do
+  def start_buffer(file_path, options_server \\ nil) do
     options_server = normalize_options_server(options_server)
 
-    case Buffer.pid_for_path(file_path) do
-      {:ok, pid} ->
-        {:ok, pid}
-
-      :not_found ->
-        DynamicSupervisor.start_child(
-          Minga.Buffer.Supervisor,
-          {Minga.Buffer, file_path: file_path, options_server: options_server}
-        )
-    end
+    Buffer.ensure_for_path(file_path, Minga.Events.default_registry(),
+      options_server: options_server
+    )
   end
 
   @doc "Adds a new buffer to the list and makes it active."
