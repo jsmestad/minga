@@ -19,7 +19,11 @@ defmodule Minga.Extension.ContributionCleanup do
         }
 
   @typedoc "Cleanup options with injectable test registries."
-  @type cleanup_opts :: [command_registry: GenServer.server(), keymap: GenServer.server()]
+  @type cleanup_opts :: [
+          command_registry: GenServer.server(),
+          keymap: GenServer.server(),
+          callbacks: %{atom() => cleanup_fun()}
+        ]
 
   @callbacks_key {__MODULE__, :callbacks}
 
@@ -45,8 +49,9 @@ defmodule Minga.Extension.ContributionCleanup do
   def unregister_source(source, opts \\ []) do
     command_registry = Keyword.get(opts, :command_registry, Minga.Command.Registry)
     keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
+    cbs = Keyword.get(opts, :callbacks, callbacks())
 
-    cleanup_families(command_registry, keymap, source)
+    cleanup_families(command_registry, keymap, cbs, source)
     |> Enum.reduce({:ok, []}, fn {family, fun}, {status, failures} ->
       case run_cleanup_family(family, source, fun) do
         :ok -> {status, failures}
@@ -59,9 +64,9 @@ defmodule Minga.Extension.ContributionCleanup do
     end
   end
 
-  @spec cleanup_families(GenServer.server(), GenServer.server(), contribution_source()) ::
+  @spec cleanup_families(GenServer.server(), GenServer.server(), %{atom() => cleanup_fun()}, contribution_source()) ::
           [{atom(), (-> term())}]
-  defp cleanup_families(command_registry, keymap, source) do
+  defp cleanup_families(command_registry, keymap, cbs, source) do
     [
       {:command_registry,
        fn -> Minga.Command.Registry.unregister_source(command_registry, source) end},
@@ -72,7 +77,7 @@ defmodule Minga.Extension.ContributionCleanup do
       {:modeline_segments, fn -> Minga.Config.ModelineSegments.unregister_source(source) end}
     ]
     |> Kernel.++(
-      callbacks()
+      cbs
       |> Enum.sort_by(fn {family, _fun} -> Atom.to_string(family) end)
       |> Enum.map(fn {family, fun} -> {family, fn -> fun.(source) end} end)
     )
