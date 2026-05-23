@@ -1,0 +1,16 @@
+defmodule <%= module %>Test do
+  use ExUnit.Case, async: true
+
+  test "extension module compiles and exports schemas" do
+    assert <%= module %>.name() == :<%= name %>
+    assert is_binary(<%= module %>.description())
+    assert is_binary(<%= module %>.version())
+    assert is_list(<%= module %>.__option_schema__())
+    assert is_list(<%= module %>.__command_schema__())
+    assert is_list(<%= module %>.__keybind_schema__())
+  end
+
+  test "init returns {:ok, state}" do
+    assert {:ok, _state} = <%= module %>.init([])
+  end
+end

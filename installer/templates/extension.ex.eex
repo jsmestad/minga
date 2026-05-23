@@ -1,0 +1,64 @@
+defmodule <%= module %> do
+  @moduledoc """
+  <%= module %> extension for the Minga editor.
+  """
+
+  use Minga.Extension
+
+  # ── Config options ──────────────────────────────────────────────────
+  # Declare typed options users can set in their Minga config.
+  # Read at runtime with: Minga.Config.Options.get_extension_option(:<%= name %>, :enabled)
+
+  option :enabled, :boolean, default: true, description: "Enable <%= module %>"
+
+  # ── Commands ────────────────────────────────────────────────────────
+  # Commands appear in the command palette and can be bound to keys.
+
+  command :hello, "Say hello from <%= module %>",
+    execute: {<%= module %>.Commands, :hello}
+
+  # ── Keybindings ─────────────────────────────────────────────────────
+  # Bind commands to key sequences. Supports :normal, :insert, :visual modes.
+  # Use filetype: :elixir (etc.) to scope bindings to specific filetypes.
+
+  keybind :normal, "SPC m h", :hello, "Hello from <%= module %>"
+
+  # ── Extension callbacks ─────────────────────────────────────────────
+
+  @impl true
+  def name, do: :<%= name %>
+
+  @impl true
+  def description, do: "<%= module %> extension"
+
+  @impl true
+  def version, do: "0.1.0"
+
+  @impl true
+  def init(_config), do: {:ok, %{}}
+
+  # ── Rendering APIs (uncomment to use) ───────────────────────────────
+  #
+  # Overlays (positioned content on the editor surface):
+  #   Minga.Extension.Overlay.set(:<%= name %>, "cursor_1", buffer_pid,
+  #     position: {10, 5}, content: "label", shape: :cursor_with_label,
+  #     style: %{fg: 0x7C3AED, opacity: 102})
+  #
+  # Panels (structured content in a panel region):
+  #   Minga.Extension.Panel.set(:<%= name %>, "main", %{
+  #     title: "My Panel", position: :bottom, visible: true,
+  #     content: [{:text, "Hello"}, {:separator}, {:key_value, [{"Key", "Value"}]}]
+  #   })
+  #
+  # Badges (file tree and tab indicators):
+  #   Minga.Extension.Badge.set_file(:<%= name %>, "/path/to/file.ex",
+  #     color: 0x51AFEF, animation: :pulse)
+  #
+  # Agent session queries:
+  #   sessions = Minga.Extension.AgentAPI.list_sessions()
+  #   {:ok, info} = Minga.Extension.AgentAPI.session_info(pid)
+  #
+  # Editor actions (from command callbacks):
+  #   MingaEditor.Extension.EditorAPI.open_file(state, "/path/to/file.ex")
+  #   MingaEditor.Extension.EditorAPI.set_status(state, "Done!")
+end
