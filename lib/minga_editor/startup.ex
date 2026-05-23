@@ -374,7 +374,20 @@ defmodule MingaEditor.Startup do
     state =
       try do
         theme_name = Config.get(:theme)
-        theme = MingaEditor.UI.Theme.get!(theme_name)
+
+        theme =
+          case MingaEditor.UI.Theme.get(theme_name) do
+            {:ok, t} ->
+              t
+
+            :error ->
+              Minga.Log.warning(
+                :config,
+                "Theme #{inspect(theme_name)} not available (pack disabled?), falling back to #{inspect(MingaEditor.UI.Theme.default())}"
+              )
+
+              MingaEditor.UI.Theme.get!(MingaEditor.UI.Theme.default())
+          end
 
         %{state | theme: theme}
       catch

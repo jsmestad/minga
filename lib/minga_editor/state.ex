@@ -104,7 +104,7 @@ defmodule MingaEditor.State do
             editing_model: :vim,
             shell: MingaEditor.Shell.Traditional,
             shell_state: %ShellState{},
-            theme: MingaEditor.UI.Theme.get!(:doom_one),
+            theme: MingaEditor.UI.Theme.Fallback.theme(),
             render_timer: nil,
             message_store: %MessageStore{},
             notifications: NotificationCenter.new(),
