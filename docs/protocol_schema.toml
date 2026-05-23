@@ -887,3 +887,7 @@ value = 0x4E
 [[gui_actions]]
 name = "timeline_navigate"
 value = 0x4F
+
+[[gui_actions]]
+name = "extension_panel_action"
+value = 0x50

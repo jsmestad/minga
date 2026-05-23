@@ -243,6 +243,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_observatory_inspect Opcodes.gui_action_observatory_inspect()
   @gui_action_font_size_adjust Opcodes.gui_action_font_size_adjust()
   @gui_action_timeline_navigate Opcodes.gui_action_timeline_navigate()
+  @gui_action_extension_panel_action Opcodes.gui_action_extension_panel_action()
 
   @op_gui_edit_timeline Opcodes.gui_edit_timeline()
 
@@ -3523,7 +3524,26 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   def decode_gui_action(@gui_action_timeline_navigate, <<index::16>>),
     do: {:ok, {:timeline_navigate, index}}
 
+  def decode_gui_action(
+        @gui_action_extension_panel_action,
+        <<ext_len::8, ext_name::binary-size(ext_len), action_len::8,
+          action_name::binary-size(action_len), context_rest::binary>>
+      ) do
+    context = decode_panel_action_context(context_rest)
+    {:ok, {:extension_panel_action, ext_name, String.to_existing_atom(action_name), context}}
+  rescue
+    ArgumentError -> :error
+  end
+
   def decode_gui_action(_, _), do: :error
+
+  @spec decode_panel_action_context(binary()) :: map()
+  defp decode_panel_action_context(<<0x01, index::16, _rest::binary>>), do: %{index: index}
+
+  defp decode_panel_action_context(<<0x02, id_len::8, id::binary-size(id_len), _rest::binary>>),
+    do: %{node_id: id}
+
+  defp decode_panel_action_context(_), do: %{}
 
   @spec decode_bool_byte(non_neg_integer()) :: {:ok, boolean()} | :error
   defp decode_bool_byte(0), do: {:ok, false}
