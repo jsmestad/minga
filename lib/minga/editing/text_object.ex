@@ -43,6 +43,7 @@ defmodule Minga.Editing.TextObject do
   Delimiter search spans multiple lines.
   """
 
+  alias Minga.Buffer.Document
   alias Minga.Core.Unicode
   alias Minga.Editing.Motion.Helpers
   alias Minga.Editing.Text.Readable
@@ -55,6 +56,12 @@ defmodule Minga.Editing.TextObject do
 
   @typep sentence_tokens :: tuple()
   @typep sentence_span :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
+  @typep delimiter_open :: {position(), non_neg_integer()}
+  @typep delimiter_open_scan ::
+           {:found, position(), non_neg_integer()} | {:miss, non_neg_integer()}
+  @typep delimiter_scan_result ::
+           {:found, position()}
+           | {:cont, non_neg_integer(), non_neg_integer(), pos_integer(), non_neg_integer()}
 
   # ── Word text objects ────────────────────────────────────────────────────────
 
@@ -616,6 +623,28 @@ defmodule Minga.Editing.TextObject do
     end
   end
 
+  @spec graphemes_with_byte_cols(String.t(), non_neg_integer()) :: [{String.t(), position()}]
+  defp graphemes_with_byte_cols(text, line_idx) do
+    do_graphemes_with_byte_cols(text, line_idx, 0, [])
+  end
+
+  @spec do_graphemes_with_byte_cols(String.t(), non_neg_integer(), non_neg_integer(), [
+          {String.t(), position()}
+        ]) :: [{String.t(), position()}]
+  defp do_graphemes_with_byte_cols(text, line_idx, byte_pos, acc) do
+    case String.next_grapheme(text) do
+      {g, rest} ->
+        g_size = byte_size(text) - byte_size(rest)
+
+        do_graphemes_with_byte_cols(rest, line_idx, byte_pos + g_size, [
+          {g, {line_idx, byte_pos}} | acc
+        ])
+
+      nil ->
+        Enum.reverse(acc)
+    end
+  end
+
   @spec sentence_cursor_index(sentence_tokens(), position()) :: non_neg_integer() | nil
   defp sentence_cursor_index(tokens, position) do
     list = Tuple.to_list(tokens)
@@ -970,7 +999,7 @@ defmodule Minga.Editing.TextObject do
           {non_neg_integer(), non_neg_integer()} | nil
   defp find_quote_pair(graphemes, col, quote_char) do
     size = tuple_size(graphemes)
-    quote_positions = collect_quote_positions(graphemes, quote_char, 0, size, [])
+    quote_positions = collect_quote_positions(graphemes, quote_char, 0, size, [], 0)
     pairs = build_pairs(quote_positions)
 
     pairs
@@ -980,20 +1009,39 @@ defmodule Minga.Editing.TextObject do
     |> Enum.min_by(fn {open, close} -> close - open end, fn -> nil end)
   end
 
-  @spec collect_quote_positions(tuple(), String.t(), non_neg_integer(), non_neg_integer(), [
+  @spec collect_quote_positions(
+          tuple(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          [
+            non_neg_integer()
+          ],
           non_neg_integer()
-        ]) :: [non_neg_integer()]
-  defp collect_quote_positions(_graphemes, _char, idx, size, acc) when idx >= size do
+        ) :: [non_neg_integer()]
+  defp collect_quote_positions(_graphemes, _char, idx, size, acc, _slash_run) when idx >= size do
     Enum.reverse(acc)
   end
 
-  defp collect_quote_positions(graphemes, char, idx, size, acc) do
-    if elem(graphemes, idx) == char do
-      collect_quote_positions(graphemes, char, idx + 1, size, [idx | acc])
-    else
-      collect_quote_positions(graphemes, char, idx + 1, size, acc)
-    end
+  defp collect_quote_positions(graphemes, char, idx, size, acc, slash_run) do
+    grapheme = elem(graphemes, idx)
+    escaped? = rem(slash_run, 2) == 1
+    next_acc = collect_quote_position_acc(grapheme, char, escaped?, idx, acc)
+    next_slash_run = next_slash_run(grapheme, slash_run)
+    collect_quote_positions(graphemes, char, idx + 1, size, next_acc, next_slash_run)
   end
+
+  @spec collect_quote_position_acc(String.t(), String.t(), boolean(), non_neg_integer(), [
+          non_neg_integer()
+        ]) :: [non_neg_integer()]
+  defp collect_quote_position_acc(grapheme, char, false, idx, acc) when grapheme == char,
+    do: [idx | acc]
+
+  defp collect_quote_position_acc(_grapheme, _char, _escaped?, _idx, acc), do: acc
+
+  @spec next_slash_run(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp next_slash_run("\\", slash_run), do: slash_run + 1
+  defp next_slash_run(_grapheme, _slash_run), do: 0
 
   @spec build_pairs([non_neg_integer()]) :: [{non_neg_integer(), non_neg_integer()}]
   defp build_pairs([]), do: []
@@ -1004,173 +1052,459 @@ defmodule Minga.Editing.TextObject do
 
   @spec find_delimited_pair(Readable.t(), position(), String.t(), String.t()) ::
           {position(), position()} | nil
-  defp find_delimited_pair(buffer, {line, col}, open_char, close_char) do
-    content = Readable.content(buffer)
-    all_lines = :binary.split(content, "\n", [:global])
-    flat = flatten_with_byte_positions(all_lines)
+  defp find_delimited_pair(%Document{} = buffer, position, open_char, close_char)
+       when byte_size(open_char) == 1 and byte_size(close_char) == 1 do
+    doc = align_document_cursor(buffer, position)
 
-    cursor_abs = find_abs_index(flat, line, col)
-
-    case cursor_abs do
-      nil -> nil
-      abs_idx -> find_pair_from_index(flat, abs_idx, open_char, close_char)
-    end
-  end
-
-  @spec find_pair_from_index(list(), non_neg_integer(), String.t(), String.t()) ::
-          {position(), position()} | nil
-  defp find_pair_from_index(flat, abs_idx, open_char, close_char) do
-    case find_open(flat, abs_idx - 1, open_char, close_char, 0) do
+    case find_open_in_before(doc.before, doc.cursor_line, doc.cursor_col, open_char, close_char) do
       nil ->
         nil
 
-      open_abs ->
-        {open_line, open_col} = elem(Enum.at(flat, open_abs), 1)
-        find_matching_close(flat, open_abs, open_line, open_col, open_char, close_char)
+      {open_pos, open_byte_offset} ->
+        case find_close_from_open(doc, open_pos, open_byte_offset, open_char, close_char) do
+          nil -> nil
+          close_pos -> {open_pos, close_pos}
+        end
     end
   end
 
-  @spec find_matching_close(
-          list(),
-          non_neg_integer(),
+  defp find_delimited_pair(buffer, position, open_char, close_char)
+       when byte_size(open_char) == 1 and byte_size(close_char) == 1 do
+    case find_open_by_lines(buffer, position, open_char, close_char) do
+      nil ->
+        nil
+
+      {open_line, open_col} = open_pos ->
+        case find_close_by_lines(
+               buffer,
+               open_line,
+               open_col + byte_size(open_char),
+               open_char,
+               close_char
+             ) do
+          nil -> nil
+          close_pos -> {open_pos, close_pos}
+        end
+    end
+  end
+
+  defp find_delimited_pair(_buffer, _position, _open_char, _close_char), do: nil
+
+  @spec align_document_cursor(Document.t(), position()) :: Document.t()
+  defp align_document_cursor(%Document{} = doc, position) do
+    if Document.cursor(doc) == position do
+      doc
+    else
+      Document.move_to(doc, position)
+    end
+  end
+
+  @spec find_open_in_before(
+          String.t(),
           non_neg_integer(),
           non_neg_integer(),
           String.t(),
           String.t()
-        ) :: {position(), position()} | nil
-  defp find_matching_close(flat, open_abs, open_line, open_col, open_char, close_char) do
-    case find_close(flat, open_abs + 1, open_char, close_char, 1) do
+        ) ::
+          delimiter_open() | nil
+  defp find_open_in_before(before, line, col, open_char, close_char) do
+    case find_open_byte_before(
+           before,
+           byte_size(before) - 1,
+           line,
+           col,
+           :binary.first(open_char),
+           :binary.first(close_char),
+           0
+         ) do
+      {:found, open_pos, open_byte_offset} -> {open_pos, open_byte_offset}
+      {:miss, _depth} -> nil
+    end
+  end
+
+  @spec find_open_byte_before(
+          String.t(),
+          integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          byte(),
+          byte(),
+          non_neg_integer()
+        ) :: delimiter_open_scan()
+  defp find_open_byte_before(_binary, idx, _line, _col, _open_byte, _close_byte, depth)
+       when idx < 0,
+       do: {:miss, depth}
+
+  defp find_open_byte_before(binary, idx, line, col, open_byte, close_byte, depth) do
+    byte = :binary.at(binary, idx)
+    find_open_for_byte(binary, idx, line, col, open_byte, close_byte, depth, byte)
+  end
+
+  @spec find_open_for_byte(
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          byte(),
+          byte(),
+          non_neg_integer(),
+          byte()
+        ) :: delimiter_open_scan()
+  defp find_open_for_byte(binary, idx, line, _col, open_byte, close_byte, depth, ?\n) do
+    previous_col = byte_col_before_newline(binary, idx)
+    find_open_byte_before(binary, idx - 1, line - 1, previous_col, open_byte, close_byte, depth)
+  end
+
+  defp find_open_for_byte(binary, idx, line, col, open_byte, close_byte, depth, byte) do
+    pos_col = col - 1
+    escaped? = escaped_byte?(binary, idx)
+
+    case {byte, escaped?, depth} do
+      {^close_byte, false, current_depth} ->
+        find_open_byte_before(
+          binary,
+          idx - 1,
+          line,
+          pos_col,
+          open_byte,
+          close_byte,
+          current_depth + 1
+        )
+
+      {^open_byte, false, 0} ->
+        {:found, {line, pos_col}, idx}
+
+      {^open_byte, false, current_depth} ->
+        find_open_byte_before(
+          binary,
+          idx - 1,
+          line,
+          pos_col,
+          open_byte,
+          close_byte,
+          current_depth - 1
+        )
+
+      _ ->
+        find_open_byte_before(binary, idx - 1, line, pos_col, open_byte, close_byte, depth)
+    end
+  end
+
+  @spec find_close_from_open(Document.t(), position(), non_neg_integer(), String.t(), String.t()) ::
+          position() | nil
+  defp find_close_from_open(
+         %Document{} = doc,
+         {open_line, open_col},
+         open_byte_offset,
+         open_char,
+         close_char
+       ) do
+    start_offset = open_byte_offset + byte_size(open_char)
+    before_tail = binary_part(doc.before, start_offset, byte_size(doc.before) - start_offset)
+    open_byte = :binary.first(open_char)
+    close_byte = :binary.first(close_char)
+
+    case scan_forward_delimiter_bytes(
+           before_tail,
+           0,
+           open_line,
+           open_col + byte_size(open_char),
+           open_byte,
+           close_byte,
+           1,
+           0
+         ) do
+      {:found, close_pos} ->
+        close_pos
+
+      {:cont, line, col, depth, slash_run} ->
+        case scan_forward_delimiter_bytes(
+               doc.after,
+               0,
+               line,
+               col,
+               open_byte,
+               close_byte,
+               depth,
+               slash_run
+             ) do
+          {:found, close_pos} -> close_pos
+          {:cont, _line, _col, _depth, _slash_run} -> nil
+        end
+    end
+  end
+
+  @spec scan_forward_delimiter_bytes(
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          byte(),
+          byte(),
+          pos_integer(),
+          non_neg_integer()
+        ) :: delimiter_scan_result()
+  defp scan_forward_delimiter_bytes(
+         binary,
+         idx,
+         line,
+         col,
+         _open_byte,
+         _close_byte,
+         depth,
+         slash_run
+       )
+       when idx >= byte_size(binary),
+       do: {:cont, line, col, depth, slash_run}
+
+  defp scan_forward_delimiter_bytes(
+         binary,
+         idx,
+         line,
+         col,
+         open_byte,
+         close_byte,
+         depth,
+         slash_run
+       ) do
+    case :binary.at(binary, idx) do
+      ?\n ->
+        scan_forward_delimiter_bytes(
+          binary,
+          idx + 1,
+          line + 1,
+          0,
+          open_byte,
+          close_byte,
+          depth,
+          0
+        )
+
+      byte ->
+        scan_forward_delimiter_byte(
+          binary,
+          idx,
+          {line, col},
+          {open_byte, close_byte},
+          depth,
+          slash_run,
+          byte
+        )
+    end
+  end
+
+  @spec scan_forward_delimiter_byte(
+          String.t(),
+          non_neg_integer(),
+          position(),
+          {byte(), byte()},
+          pos_integer(),
+          non_neg_integer(),
+          byte()
+        ) :: delimiter_scan_result()
+  defp scan_forward_delimiter_byte(
+         binary,
+         idx,
+         {line, col},
+         {open_byte, close_byte},
+         depth,
+         slash_run,
+         byte
+       ) do
+    escaped? = rem(slash_run, 2) == 1
+    next_slash_run = next_byte_slash_run(byte, slash_run)
+
+    case {byte, escaped?, depth} do
+      {^open_byte, false, current_depth} ->
+        scan_forward_delimiter_bytes(
+          binary,
+          idx + 1,
+          line,
+          col + 1,
+          open_byte,
+          close_byte,
+          current_depth + 1,
+          next_slash_run
+        )
+
+      {^close_byte, false, 1} ->
+        {:found, {line, col}}
+
+      {^close_byte, false, current_depth} ->
+        scan_forward_delimiter_bytes(
+          binary,
+          idx + 1,
+          line,
+          col + 1,
+          open_byte,
+          close_byte,
+          current_depth - 1,
+          next_slash_run
+        )
+
+      _ ->
+        scan_forward_delimiter_bytes(
+          binary,
+          idx + 1,
+          line,
+          col + 1,
+          open_byte,
+          close_byte,
+          depth,
+          next_slash_run
+        )
+    end
+  end
+
+  @spec find_open_by_lines(Readable.t(), position(), String.t(), String.t()) :: position() | nil
+  defp find_open_by_lines(buffer, {line, col}, open_char, close_char) do
+    find_open_by_lines(buffer, line, col, open_char, close_char, 0)
+  end
+
+  @spec find_open_by_lines(
+          Readable.t(),
+          integer(),
+          non_neg_integer(),
+          String.t(),
+          String.t(),
+          non_neg_integer()
+        ) ::
+          position() | nil
+  defp find_open_by_lines(_buffer, line, _col, _open_char, _close_char, _depth) when line < 0,
+    do: nil
+
+  defp find_open_by_lines(buffer, line, col, open_char, close_char, depth) do
+    case Readable.line_at(buffer, line) do
       nil ->
         nil
 
-      close_abs ->
-        {close_line, close_col} = elem(Enum.at(flat, close_abs), 1)
-        {{open_line, open_col}, {close_line, close_col}}
+      line_text ->
+        clamped_col = min(col, byte_size(line_text))
+        prefix = binary_part(line_text, 0, clamped_col)
+        open_byte = :binary.first(open_char)
+        close_byte = :binary.first(close_char)
+
+        case find_open_byte_before(
+               prefix,
+               byte_size(prefix) - 1,
+               line,
+               clamped_col,
+               open_byte,
+               close_byte,
+               depth
+             ) do
+          {:miss, next_depth} ->
+            find_open_by_previous_line(buffer, line - 1, open_char, close_char, next_depth)
+
+          {:found, open_pos, _byte_offset} ->
+            open_pos
+        end
     end
   end
 
-  # Flattens lines into a list of `{grapheme, {line, byte_col}}` tuples.
-  @spec flatten_with_byte_positions([String.t()]) :: [{String.t(), position()}]
-  defp flatten_with_byte_positions(lines) do
-    lines
-    |> Enum.with_index()
-    |> Enum.flat_map(fn {line_text, line_idx} ->
-      graphemes_with_byte_cols(line_text, line_idx)
-    end)
-  end
-
-  @spec graphemes_with_byte_cols(String.t(), non_neg_integer()) :: [{String.t(), position()}]
-  defp graphemes_with_byte_cols(text, line_idx) do
-    do_graphemes_with_byte_cols(text, line_idx, 0, [])
-  end
-
-  @spec do_graphemes_with_byte_cols(String.t(), non_neg_integer(), non_neg_integer(), [
-          {String.t(), position()}
-        ]) :: [{String.t(), position()}]
-  defp do_graphemes_with_byte_cols(text, line_idx, byte_pos, acc) do
-    case String.next_grapheme(text) do
-      {g, rest} ->
-        g_size = byte_size(text) - byte_size(rest)
-
-        do_graphemes_with_byte_cols(rest, line_idx, byte_pos + g_size, [
-          {g, {line_idx, byte_pos}} | acc
-        ])
-
-      nil ->
-        Enum.reverse(acc)
-    end
-  end
-
-  @spec find_abs_index([{String.t(), position()}], non_neg_integer(), non_neg_integer()) ::
-          non_neg_integer() | nil
-  defp find_abs_index(flat, target_line, target_col) do
-    flat
-    |> Enum.find_index(fn {_g, {l, c}} -> l == target_line and c == target_col end)
-  end
-
-  @spec find_open(
-          [{String.t(), position()}],
+  @spec find_open_by_previous_line(
+          Readable.t(),
           integer(),
           String.t(),
           String.t(),
           non_neg_integer()
-        ) :: non_neg_integer() | nil
-  defp find_open(_flat, idx, _open, _close, _depth) when idx < 0, do: nil
+        ) ::
+          position() | nil
+  defp find_open_by_previous_line(_buffer, line, _open_char, _close_char, _depth) when line < 0,
+    do: nil
 
-  defp find_open(flat, idx, open_char, close_char, depth) do
-    {g, _pos} = Enum.at(flat, idx)
-
-    find_open_for_grapheme(flat, idx, open_char, close_char, depth, g)
-  end
-
-  @spec find_open_for_grapheme(
-          [{String.t(), position()}],
-          non_neg_integer(),
-          String.t(),
-          String.t(),
-          non_neg_integer(),
-          String.t()
-        ) :: non_neg_integer() | nil
-  defp find_open_for_grapheme(flat, idx, open_char, close_char, depth, grapheme)
-       when grapheme == close_char do
-    find_open(flat, idx - 1, open_char, close_char, depth + 1)
-  end
-
-  defp find_open_for_grapheme(flat, idx, open_char, close_char, depth, grapheme)
-       when grapheme == open_char and depth > 0 do
-    find_open(flat, idx - 1, open_char, close_char, depth - 1)
-  end
-
-  defp find_open_for_grapheme(_flat, idx, open_char, _close_char, _depth, grapheme)
-       when grapheme == open_char,
-       do: idx
-
-  defp find_open_for_grapheme(flat, idx, open_char, close_char, depth, _grapheme) do
-    find_open(flat, idx - 1, open_char, close_char, depth)
-  end
-
-  @spec find_close(
-          [{String.t(), position()}],
-          non_neg_integer(),
-          String.t(),
-          String.t(),
-          pos_integer()
-        ) :: non_neg_integer() | nil
-  defp find_close(flat, idx, open_char, close_char, depth) do
-    case Enum.at(flat, idx) do
+  defp find_open_by_previous_line(buffer, line, open_char, close_char, depth) do
+    case Readable.line_at(buffer, line) do
       nil ->
         nil
 
-      {g, _pos} ->
-        find_close_for_grapheme(flat, idx, open_char, close_char, depth, g)
+      line_text ->
+        find_open_by_lines(buffer, line, byte_size(line_text), open_char, close_char, depth)
     end
   end
 
-  @spec find_close_for_grapheme(
-          [{String.t(), position()}],
+  @spec find_close_by_lines(
+          Readable.t(),
+          non_neg_integer(),
           non_neg_integer(),
           String.t(),
-          String.t(),
-          pos_integer(),
           String.t()
-        ) :: non_neg_integer() | nil
-  defp find_close_for_grapheme(flat, idx, open_char, close_char, depth, grapheme)
-       when grapheme == open_char do
-    find_close(flat, idx + 1, open_char, close_char, depth + 1)
+        ) ::
+          position() | nil
+  defp find_close_by_lines(buffer, line, col, open_char, close_char) do
+    open_byte = :binary.first(open_char)
+    close_byte = :binary.first(close_char)
+    find_close_by_lines(buffer, line, col, open_byte, close_byte, 1)
   end
 
-  defp find_close_for_grapheme(flat, idx, open_char, close_char, depth, grapheme)
-       when grapheme == close_char and depth > 1 do
-    find_close(flat, idx + 1, open_char, close_char, depth - 1)
+  @spec find_close_by_lines(
+          Readable.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          byte(),
+          byte(),
+          pos_integer()
+        ) ::
+          position() | nil
+  defp find_close_by_lines(buffer, line, col, open_byte, close_byte, depth) do
+    case Readable.line_at(buffer, line) do
+      nil ->
+        nil
+
+      line_text ->
+        start_col = min(col, byte_size(line_text))
+        tail = binary_part(line_text, start_col, byte_size(line_text) - start_col)
+
+        case scan_forward_delimiter_bytes(
+               tail,
+               0,
+               line,
+               start_col,
+               open_byte,
+               close_byte,
+               depth,
+               0
+             ) do
+          {:found, close_pos} ->
+            close_pos
+
+          {:cont, _line, _col, next_depth, _slash_run} ->
+            find_close_by_lines(buffer, line + 1, 0, open_byte, close_byte, next_depth)
+        end
+    end
   end
 
-  defp find_close_for_grapheme(_flat, idx, _open_char, close_char, _depth, grapheme)
-       when grapheme == close_char,
-       do: idx
-
-  defp find_close_for_grapheme(flat, idx, open_char, close_char, depth, _grapheme) do
-    find_close(flat, idx + 1, open_char, close_char, depth)
+  @spec byte_col_before_newline(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp byte_col_before_newline(binary, newline_idx) do
+    newline_idx - previous_newline_index(binary, newline_idx - 1) - 1
   end
+
+  @spec previous_newline_index(String.t(), integer()) :: integer()
+  defp previous_newline_index(_binary, idx) when idx < 0, do: -1
+
+  defp previous_newline_index(binary, idx) do
+    case :binary.at(binary, idx) do
+      ?\n -> idx
+      _ -> previous_newline_index(binary, idx - 1)
+    end
+  end
+
+  @spec escaped_byte?(String.t(), non_neg_integer()) :: boolean()
+  defp escaped_byte?(binary, idx), do: rem(preceding_slash_count(binary, idx - 1, 0), 2) == 1
+
+  @spec preceding_slash_count(String.t(), integer(), non_neg_integer()) :: non_neg_integer()
+  defp preceding_slash_count(_binary, idx, acc) when idx < 0, do: acc
+
+  defp preceding_slash_count(binary, idx, acc) do
+    case :binary.at(binary, idx) do
+      ?\\ -> preceding_slash_count(binary, idx - 1, acc + 1)
+      _ -> acc
+    end
+  end
+
+  @spec next_byte_slash_run(byte(), non_neg_integer()) :: non_neg_integer()
+  defp next_byte_slash_run(?\\, slash_run), do: slash_run + 1
+  defp next_byte_slash_run(_byte, _slash_run), do: 0
 
   # Advances a position by one grapheme (byte-aware).
   @spec advance_position(Readable.t(), position()) :: position() | nil
