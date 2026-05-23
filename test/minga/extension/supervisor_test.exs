@@ -5,7 +5,6 @@ defmodule Minga.Extension.SupervisorTest do
   # Excluded from test.llm; runs in test.heavy and full suite.
   @moduletag :heavy
 
-  alias Minga.Extension.ContributionCleanup
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Extension.Supervisor, as: ExtSupervisor
 
@@ -361,15 +360,7 @@ defmodule Minga.Extension.SupervisorTest do
 
     test "start_all aggregates startup cleanup failures and keeps starting later extensions",
          ctx do
-      cleanup_family =
-        String.to_atom("start_all_cleanup_failure_#{System.unique_integer([:positive])}")
-
-      assert :ok =
-               ContributionCleanup.register(cleanup_family, fn _source ->
-                 raise "cleanup failure"
-               end)
-
-      on_exit(fn -> ContributionCleanup.unregister(cleanup_family) end)
+      cleanup_family = :test_cleanup_failure
 
       {failing_path, failing_cleanup} =
         make_extension("StartAllFailing", """
@@ -421,7 +412,10 @@ defmodule Minga.Extension.SupervisorTest do
       :ok = ExtRegistry.register(ctx.registry, :start_all_fail, failing_path, [])
       :ok = ExtRegistry.register(ctx.registry, :start_all_ok, success_path, [])
 
-      assert {:error, failures} = ExtSupervisor.start_all(ctx.supervisor, ctx.registry)
+      test_callbacks = %{cleanup_family => fn _source -> raise "cleanup failure" end}
+
+      assert {:error, failures} =
+               ExtSupervisor.start_all(ctx.supervisor, ctx.registry, callbacks: test_callbacks)
 
       assert Enum.any?(failures, fn
                %{extension: :start_all_fail, reason: {:cleanup_failed, reason, cleanup_failures}} ->
