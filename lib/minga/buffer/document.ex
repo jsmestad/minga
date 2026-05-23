@@ -244,8 +244,10 @@ defmodule Minga.Buffer.Document do
   @spec delete_at(t()) :: t()
   def delete_at(%__MODULE__{after: ""} = buf), do: buf
 
-  def delete_at(%__MODULE__{after: after_, cursor_line: line, line_count: lc, line_offsets: ls} =
-                  buf) do
+  def delete_at(
+        %__MODULE__{after: after_, cursor_line: line, line_count: lc, line_offsets: ls} =
+          buf
+      ) do
     case Cursor.next_character(after_) do
       {"\n", rest} ->
         new_ls =
