@@ -485,6 +485,12 @@ final class CommandDispatcher {
                     stashCount: stashCount
                 )
             }
+
+        case .guiExtensionOverlay(let entries):
+            guiState.extensionOverlayState.update(entries)
+
+        case .guiExtensionPanel(let panels):
+            guiState.extensionPanelState.update(panels)
         }
     }
 

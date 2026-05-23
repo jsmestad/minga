@@ -79,6 +79,12 @@ final class GUIState {
     /// Edit timeline scrubber state.
     let editTimelineState = EditTimelineState()
 
+    /// Extension overlay state (0x9C).
+    let extensionOverlayState = ExtensionOverlayState()
+
+    /// Extension panel state (0x9D).
+    let extensionPanelState = ExtensionPanelState()
+
     /// Semantic window content from gui_window_content (0x80).
     /// Keyed by windowId. NOT cleared between frames; the guiWindowContent
     /// dispatch overwrites per-window data each frame. Stale entries serve

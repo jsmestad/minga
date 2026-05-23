@@ -22,6 +22,9 @@ defmodule Minga.Foundation.Supervisor do
       ├── Minga.Config.Hooks             Lifecycle hooks
       ├── Minga.Config.Advice            Before/after command advice (ETS)
       ├── Minga.Config.ModelineSegments  Custom modeline segments (ETS)
+      ├── Minga.Extension.Overlay        Extension overlay registry (ETS)
+      ├── Minga.Extension.Panel          Extension panel registry (ETS)
+      ├── Minga.Extension.Badge          Extension badge registry (ETS)
       ├── MingaAgent.Tool.Registry       Agent tool specs (ETS)
       └── Minga.Language.Filetype.Registry Filetype detection
 
@@ -51,6 +54,9 @@ defmodule Minga.Foundation.Supervisor do
       Minga.Config.Hooks,
       Minga.Config.Advice,
       Minga.Config.ModelineSegments,
+      Minga.Extension.Overlay,
+      Minga.Extension.Panel,
+      Minga.Extension.Badge,
       MingaAgent.Tool.Registry,
       Minga.Language.Filetype.Registry
     ]
