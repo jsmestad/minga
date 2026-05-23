@@ -35,6 +35,7 @@ defmodule MingaEditor.Renderer.Caches do
     emit_prev_content_rects: %{},
     emit_prev_gutter_ws: %{},
     emit_prev_buf_versions: %{},
+    emit_prev_editing_mode: nil,
     last_title: nil,
     last_window_bg: nil,
 
@@ -71,6 +72,7 @@ defmodule MingaEditor.Renderer.Caches do
           emit_prev_content_rects: %{term() => term()},
           emit_prev_gutter_ws: %{term() => non_neg_integer()},
           emit_prev_buf_versions: %{term() => non_neg_integer()},
+          emit_prev_editing_mode: atom() | nil,
           last_title: String.t() | nil,
           last_window_bg: non_neg_integer() | nil,
           last_gui_theme: integer() | nil,

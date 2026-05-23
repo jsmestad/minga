@@ -175,12 +175,15 @@ defmodule MingaEditor.Frontend.Emit do
         end
       end)
 
+    editing_mode = if ctx.editing, do: ctx.editing.mode, else: nil
+
     %{
       caches
       | emit_prev_viewport_tops: tops,
         emit_prev_content_rects: rects,
         emit_prev_gutter_ws: gutter_ws,
-        emit_prev_buf_versions: buf_versions
+        emit_prev_buf_versions: buf_versions,
+        emit_prev_editing_mode: editing_mode
     }
   end
 

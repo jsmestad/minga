@@ -9,13 +9,21 @@ defmodule MingaEditor.Frontend.Emit.TUI do
   ## Scroll region optimization
 
   When the viewport shifts by 1-3 lines between frames and no structural
-  changes occurred (layout, gutter width, window set), we send a
-  `scroll_region` command instead of a full `clear + redraw`. The terminal
-  emulator shifts its internal buffer, then only the newly revealed lines
-  are drawn. This eliminates the majority of cell writes for the most
-  common scroll case (Ctrl-e/y, mouse wheel, cursor near edges).
+  changes occurred (layout, gutter width, window set, buffer content), we
+  send a `scroll_region` command instead of a full `clear + redraw`. The
+  terminal emulator shifts its internal buffer, then only the newly
+  revealed lines are drawn. This eliminates the majority of cell writes
+  for the most common scroll case (Ctrl-e/y, mouse wheel, cursor near
+  edges).
 
-  Currently disabled pending a libvaxis buffer sync fix.
+  The Zig renderer syncs its internal libvaxis screen buffers after
+  sending the ANSI scroll region sequences (`VaxisSurface.scrollRegion`),
+  so the subsequent `render()` diff only repaints the newly revealed rows.
+
+  Bails out to a full redraw when the editing mode changed since the last
+  frame (e.g., exiting visual mode would leave stale selection highlights
+  on shifted rows) or when the current mode has per-frame visual state
+  changes that affect content styling (visual selection, search highlights).
   """
 
   alias MingaEditor.DisplayList
@@ -83,19 +91,32 @@ defmodule MingaEditor.Frontend.Emit.TUI do
 
   @spec detect_scroll_regions(ctx(), Caches.t()) :: [scroll_delta()] | nil
   defp detect_scroll_regions(ctx, caches) do
-    if scroll_optimization_enabled?() do
+    if scroll_optimization_enabled?() and scroll_compatible_mode?(ctx, caches) do
       detect_scroll_regions_impl(ctx, caches)
     else
       nil
     end
   end
 
-  # Kill switch for the scroll region optimization. Set
-  # `config :minga, :tui_scroll_optimization, true` to re-enable once the
-  # libvaxis buffer sync issue is resolved.
   @spec scroll_optimization_enabled?() :: boolean()
   defp scroll_optimization_enabled? do
-    Application.get_env(:minga, :tui_scroll_optimization, false) == true
+    Application.get_env(:minga, :tui_scroll_optimization, true) == true
+  end
+
+  # Modes where content styling changes every frame (selection highlight,
+  # search match highlight). Shifted rows would show stale styling.
+  @volatile_modes [:visual, :visual_line, :visual_block, :search, :search_prompt]
+
+  # Returns true when the scroll optimization is safe to attempt.
+  # Bails out when the editing mode changed since the last frame (stale
+  # highlights from the previous mode would persist on shifted rows) or
+  # when the current mode has per-frame visual state changes.
+  @spec scroll_compatible_mode?(ctx(), Caches.t()) :: boolean()
+  defp scroll_compatible_mode?(ctx, caches) do
+    current_mode = if ctx.editing, do: ctx.editing.mode, else: nil
+    prev_mode = caches.emit_prev_editing_mode
+
+    current_mode not in @volatile_modes and current_mode == prev_mode
   end
 
   @spec detect_scroll_regions_impl(ctx(), Caches.t()) :: [scroll_delta()] | nil

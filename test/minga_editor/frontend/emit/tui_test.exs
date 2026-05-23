@@ -58,18 +58,17 @@ defmodule MingaEditor.Frontend.Emit.TUITest do
       :ok
     end
 
-    @tag skip: "scroll optimization disabled pending libvaxis buffer sync fix"
     test "uses scroll_region when viewport shifts by 1 line" do
       state = base_state(rows: 24, cols: 80, content: long_content(100))
 
       state1 = seed_state(state, 0)
       frame1 = build_frame_with_window(state1, viewport_top: 0)
-      Emit.emit(frame1, Context.from_editor_state(state1))
+      {caches, _} = Emit.emit(frame1, Context.from_editor_state(state1), nil)
       assert_receive {:"$gen_cast", {:send_commands, _first_commands}}
 
       state2 = simulate_scroll(state, 1)
       frame2 = build_frame_with_window(state2, viewport_top: 1)
-      Emit.emit(frame2, Context.from_editor_state(state2))
+      Emit.emit(frame2, Context.from_editor_state(state2), nil, caches)
 
       assert_receive {:"$gen_cast", {:send_commands, scroll_commands}}
       refute match?([<<0x12>> | _], scroll_commands)
@@ -79,18 +78,17 @@ defmodule MingaEditor.Frontend.Emit.TUITest do
              end)
     end
 
-    @tag skip: "scroll optimization disabled pending libvaxis buffer sync fix"
     test "uses scroll_region when viewport shifts by 3 lines" do
       state = base_state(rows: 24, cols: 80, content: long_content(100))
 
       state1 = seed_state(state, 0)
       frame1 = build_frame_with_window(state1, viewport_top: 0)
-      Emit.emit(frame1, Context.from_editor_state(state1))
+      {caches, _} = Emit.emit(frame1, Context.from_editor_state(state1), nil)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       state2 = simulate_scroll(state, 3)
       frame2 = build_frame_with_window(state2, viewport_top: 3)
-      Emit.emit(frame2, Context.from_editor_state(state2))
+      Emit.emit(frame2, Context.from_editor_state(state2), nil, caches)
 
       assert_receive {:"$gen_cast", {:send_commands, scroll_commands}}
       refute match?([<<0x12>> | _], scroll_commands)
@@ -106,12 +104,12 @@ defmodule MingaEditor.Frontend.Emit.TUITest do
 
       state1 = seed_state(state, 0)
       frame1 = build_frame_with_window(state1, viewport_top: 0)
-      Emit.emit(frame1, Context.from_editor_state(state1))
+      {caches, _} = Emit.emit(frame1, Context.from_editor_state(state1), nil)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       state2 = simulate_scroll(state, 4)
       frame2 = build_frame_with_window(state2, viewport_top: 4)
-      Emit.emit(frame2, Context.from_editor_state(state2))
+      Emit.emit(frame2, Context.from_editor_state(state2), nil, caches)
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
       assert [<<0x12>> | _] = commands
@@ -122,28 +120,27 @@ defmodule MingaEditor.Frontend.Emit.TUITest do
 
       state1 = seed_state(state, 5)
       frame1 = build_frame_with_window(state1, viewport_top: 5)
-      Emit.emit(frame1, Context.from_editor_state(state1))
+      {caches, _} = Emit.emit(frame1, Context.from_editor_state(state1), nil)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       frame2 = build_frame_with_window(state1, viewport_top: 5)
-      Emit.emit(frame2, Context.from_editor_state(state1))
+      Emit.emit(frame2, Context.from_editor_state(state1), nil, caches)
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
       assert [<<0x12>> | _] = commands
     end
 
-    @tag skip: "scroll optimization disabled pending libvaxis buffer sync fix"
     test "scroll_region uses negative delta for scrolling up" do
       state = base_state(rows: 24, cols: 80, content: long_content(100))
 
       state1 = seed_state(state, 10)
       frame1 = build_frame_with_window(state1, viewport_top: 10)
-      Emit.emit(frame1, Context.from_editor_state(state1))
+      {caches, _} = Emit.emit(frame1, Context.from_editor_state(state1), nil)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       state2 = simulate_scroll(state, 8)
       frame2 = build_frame_with_window(state2, viewport_top: 8)
-      Emit.emit(frame2, Context.from_editor_state(state2))
+      Emit.emit(frame2, Context.from_editor_state(state2), nil, caches)
 
       assert_receive {:"$gen_cast", {:send_commands, scroll_commands}}
       refute match?([<<0x12>> | _], scroll_commands)
@@ -155,39 +152,105 @@ defmodule MingaEditor.Frontend.Emit.TUITest do
       assert delta == -2
     end
 
-    @tag skip: "scroll optimization disabled pending libvaxis buffer sync fix"
     test "always includes batch_end in scroll region commands" do
       state = base_state(rows: 24, cols: 80, content: long_content(100))
 
       state1 = seed_state(state, 0)
       frame1 = build_frame_with_window(state1, viewport_top: 0)
-      Emit.emit(frame1, Context.from_editor_state(state1))
+      {caches, _} = Emit.emit(frame1, Context.from_editor_state(state1), nil)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       state2 = simulate_scroll(state, 1)
       frame2 = build_frame_with_window(state2, viewport_top: 1)
-      Emit.emit(frame2, Context.from_editor_state(state2))
+      Emit.emit(frame2, Context.from_editor_state(state2), nil, caches)
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
       assert <<0x13>> = List.last(commands)
     end
 
-    @tag skip: "scroll optimization disabled pending libvaxis buffer sync fix"
     test "always includes cursor commands in scroll region output" do
       state = base_state(rows: 24, cols: 80, content: long_content(100))
 
       state1 = seed_state(state, 0)
       frame1 = build_frame_with_window(state1, viewport_top: 0)
-      Emit.emit(frame1, Context.from_editor_state(state1))
+      {caches, _} = Emit.emit(frame1, Context.from_editor_state(state1), nil)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       state2 = simulate_scroll(state, 1)
       frame2 = build_frame_with_window(state2, viewport_top: 1)
-      Emit.emit(frame2, Context.from_editor_state(state2))
+      Emit.emit(frame2, Context.from_editor_state(state2), nil, caches)
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
       assert Enum.any?(commands, fn cmd -> match?(<<0x11, _::binary>>, cmd) end)
       assert Enum.any?(commands, fn cmd -> match?(<<0x15, _::binary>>, cmd) end)
+    end
+
+    test "falls back to full redraw in visual mode" do
+      state = base_state(rows: 24, cols: 80, content: long_content(100))
+
+      state1 = seed_state(state, 0)
+      frame1 = build_frame_with_window(state1, viewport_top: 0)
+      {caches, _} = Emit.emit(frame1, Context.from_editor_state(state1), nil)
+      assert_receive {:"$gen_cast", {:send_commands, _}}
+
+      state2 = simulate_scroll(state, 1)
+      visual_state2 = put_in(state2.workspace.editing.mode, :visual)
+      frame2 = build_frame_with_window(visual_state2, viewport_top: 1)
+      Emit.emit(frame2, Context.from_editor_state(visual_state2), nil, caches)
+
+      assert_receive {:"$gen_cast", {:send_commands, commands}}
+      assert [<<0x12>> | _] = commands
+    end
+
+    test "falls back to full redraw in visual line mode" do
+      state = base_state(rows: 24, cols: 80, content: long_content(100))
+
+      state1 = seed_state(state, 0)
+      frame1 = build_frame_with_window(state1, viewport_top: 0)
+      {caches, _} = Emit.emit(frame1, Context.from_editor_state(state1), nil)
+      assert_receive {:"$gen_cast", {:send_commands, _}}
+
+      state2 = simulate_scroll(state, 1)
+      visual_state2 = put_in(state2.workspace.editing.mode, :visual_line)
+      frame2 = build_frame_with_window(visual_state2, viewport_top: 1)
+      Emit.emit(frame2, Context.from_editor_state(visual_state2), nil, caches)
+
+      assert_receive {:"$gen_cast", {:send_commands, commands}}
+      assert [<<0x12>> | _] = commands
+    end
+
+    test "falls back to full redraw in search mode" do
+      state = base_state(rows: 24, cols: 80, content: long_content(100))
+
+      state1 = seed_state(state, 0)
+      frame1 = build_frame_with_window(state1, viewport_top: 0)
+      {caches, _} = Emit.emit(frame1, Context.from_editor_state(state1), nil)
+      assert_receive {:"$gen_cast", {:send_commands, _}}
+
+      state2 = simulate_scroll(state, 1)
+      search_state2 = put_in(state2.workspace.editing.mode, :search)
+      frame2 = build_frame_with_window(search_state2, viewport_top: 1)
+      Emit.emit(frame2, Context.from_editor_state(search_state2), nil, caches)
+
+      assert_receive {:"$gen_cast", {:send_commands, commands}}
+      assert [<<0x12>> | _] = commands
+    end
+
+    test "falls back to full redraw on mode transition (visual to normal)" do
+      state = base_state(rows: 24, cols: 80, content: long_content(100))
+
+      visual_state1 = put_in(state.workspace.editing.mode, :visual)
+      state1 = seed_state(visual_state1, 0)
+      frame1 = build_frame_with_window(state1, viewport_top: 0)
+      {caches, _} = Emit.emit(frame1, Context.from_editor_state(state1), nil)
+      assert_receive {:"$gen_cast", {:send_commands, _}}
+
+      normal_state2 = simulate_scroll(put_in(state.workspace.editing.mode, :normal), 1)
+      frame2 = build_frame_with_window(normal_state2, viewport_top: 1)
+      Emit.emit(frame2, Context.from_editor_state(normal_state2), nil, caches)
+
+      assert_receive {:"$gen_cast", {:send_commands, commands}}
+      assert [<<0x12>> | _] = commands
     end
   end
 
