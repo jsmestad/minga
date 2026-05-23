@@ -220,7 +220,7 @@ defmodule MingaEditor.UI.Theme.Loader do
     raise ArgumentError, "theme :inherits must be an atom, got: #{inspect(base_name)}"
   end
 
-  defp resolve_base_theme(_data), do: Theme.get!(:doom_one)
+  defp resolve_base_theme(_data), do: Theme.get!(Theme.default())
 
   @spec apply_theme_overrides(Theme.t(), map()) :: Theme.t()
   defp apply_theme_overrides(theme, %{palette: _palette}), do: theme

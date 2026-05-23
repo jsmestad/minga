@@ -18,9 +18,9 @@ defmodule MingaEditor.UI.Picker.ThemeSourceTest do
   end
 
   describe "candidates/1" do
-    test "returns all 7 built-in themes" do
+    test "returns all bundled themes including fallback" do
       items = ThemeSource.candidates(%{})
-      assert length(items) == 7
+      assert length(items) >= 8
     end
 
     test "items are sorted alphabetically by name" do

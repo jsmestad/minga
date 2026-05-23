@@ -13,6 +13,7 @@ defmodule Minga.Application do
       ├── Minga.Foundation.Supervisor (rest_for_one)
       │   ├── Minga.Language.Registry
       │   ├── Minga.Extensions.LanguagePacks
+      │   ├── Minga.Extensions.ThemePacks
       │   ├── Minga.Events (Registry, :duplicate)
       │   ├── Minga.Config.Options
       │   ├── Minga.Keymap.Active

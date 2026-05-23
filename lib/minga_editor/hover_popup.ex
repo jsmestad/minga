@@ -55,7 +55,7 @@ defmodule MingaEditor.HoverPopup do
   """
   @spec new(String.t(), non_neg_integer(), non_neg_integer(), keyword()) :: t()
   def new(markdown_text, cursor_row, cursor_col, opts \\ []) do
-    theme = Keyword.get(opts, :theme, Theme.get!(:doom_one))
+    theme = Keyword.get(opts, :theme, Theme.get!(Theme.default()))
 
     content_lines =
       markdown_text

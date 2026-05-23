@@ -8,7 +8,11 @@ defmodule MingaEditor.UI.Theme.UserRegistrationTest do
     on_exit(fn ->
       Theme.unregister_source({:extension, :theme_registration_test})
       Theme.unregister_source({:extension, :theme_registration_other})
-      Theme.register_user_themes(%{})
+      Theme.unregister_source(:config)
+
+      for pack <- Minga.Extensions.ThemePacks.packs() do
+        Minga.Extensions.ThemePacks.register_pack(pack)
+      end
     end)
 
     :ok

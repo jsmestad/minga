@@ -4,28 +4,18 @@ defmodule MingaEditor.UI.Theme do
 
   A theme holds every color the UI needs, organized into semantic groups:
   syntax highlighting, editor chrome, modeline, gutter, picker, minibuffer,
-  search highlights, and popups. Built-in themes are functions that return
-  a populated `%Theme{}` struct.
+  search highlights, and popups.
+
+  Built-in themes are shipped as bundled theme pack extensions under `Minga.Extensions.ThemePacks`. The core retains a single minimal fallback theme (`:minga_default`) that always loads regardless of which extensions are enabled.
 
   ## Usage in config
 
       use Minga.Config
       set :theme, :catppuccin_mocha
-
-  ## Built-in themes
-
-  #{Enum.map_join([:doom_one, :catppuccin_frappe, :catppuccin_latte, :catppuccin_macchiato, :catppuccin_mocha, :one_dark, :one_light], "\n", &"  - `:#{&1}`")}
   """
 
-  alias MingaEditor.UI.Theme.{
-    CatppuccinFrappe,
-    CatppuccinLatte,
-    CatppuccinMacchiato,
-    CatppuccinMocha
-  }
-
   alias Minga.Core.Face
-  alias MingaEditor.UI.Theme.{DoomOne, OneDark, OneLight}
+  alias MingaEditor.UI.Theme.Fallback
   alias MingaEditor.UI.Theme.Loader.LoadedTheme
 
   @enforce_keys [
@@ -530,28 +520,16 @@ defmodule MingaEditor.UI.Theme do
 
   # ── Theme registry ──────────────────────────────────────────────────────────
 
-  @user_theme_sources_key {__MODULE__, :user_theme_sources}
-
-  @themes %{
-    doom_one: DoomOne,
-    catppuccin_frappe: CatppuccinFrappe,
-    catppuccin_latte: CatppuccinLatte,
-    catppuccin_macchiato: CatppuccinMacchiato,
-    catppuccin_mocha: CatppuccinMocha,
-    one_dark: OneDark,
-    one_light: OneLight
-  }
-
   @doc """
   Returns the theme struct for the given name atom.
 
-  Checks user-defined themes first, then built-in themes.
+  Checks registered themes (extension packs + user themes) first, then the core fallback.
   """
   @spec get(atom()) :: {:ok, t()} | :error
   def get(name) when is_atom(name) do
-    case get_user_theme(name) do
+    case get_registered_theme(name) do
       {:ok, _} = result -> result
-      :error -> get_builtin(name)
+      :error -> get_fallback(name)
     end
   end
 
@@ -569,20 +547,21 @@ defmodule MingaEditor.UI.Theme do
   end
 
   @doc """
-  Returns all available theme name atoms (built-in + user-defined).
+  Returns all available theme name atoms (fallback + packs + user-defined).
   """
   @spec available() :: [atom()]
   def available do
-    builtin = Map.keys(@themes)
-    user = Map.keys(user_themes())
-    themes = Enum.uniq(builtin ++ user) |> Enum.sort()
-    Minga.Config.ThemeRegistry.register(themes)
-    themes
+    Minga.Config.ThemeRegistry.available()
   end
 
-  @doc "Returns the default theme name atom."
+  @doc "Returns the default theme name atom. Falls back to `:minga_default` if `:doom_one` is not available."
   @spec default() :: atom()
-  def default, do: :doom_one
+  def default do
+    case Minga.Config.ThemeRegistry.get_theme(:doom_one) do
+      {:ok, _} -> :doom_one
+      :error -> :minga_default
+    end
+  end
 
   @doc """
   Registers user-defined themes loaded from disk.
@@ -596,90 +575,32 @@ defmodule MingaEditor.UI.Theme do
     register_themes(themes, :config)
   end
 
-  @doc "Registers themes with explicit source ownership."
+  @doc "Registers themes with explicit source ownership. Wraps raw theme structs in LoadedTheme."
   @spec register_themes(
           %{atom() => t() | MingaEditor.UI.Theme.Loader.loaded_theme()},
           contribution_source()
         ) :: :ok | {:error, register_error()}
   def register_themes(themes, source) when is_map(themes) do
-    Minga.Extension.ContributionCleanup.register(:themes, &__MODULE__.unregister_source/1)
-    current = user_themes()
-    current_sources = user_theme_sources()
+    normalized =
+      Map.new(themes, fn {name, data} -> {name, normalize_loaded_theme(name, data)} end)
 
-    with :ok <- validate_theme_sources(themes, current_sources, source) do
-      owned_names = owned_theme_names(current_sources, source)
-      remaining_themes = Map.drop(current, owned_names)
-      remaining_sources = Map.drop(current_sources, owned_names)
-
-      {new_themes, new_sources} =
-        Enum.reduce(themes, {remaining_themes, remaining_sources}, fn {name, loaded},
-                                                                      {theme_acc, source_acc} ->
-          {Map.put(theme_acc, name, normalize_loaded_theme(name, loaded)),
-           Map.put(source_acc, name, source)}
-        end)
-
-      :persistent_term.put({__MODULE__, :user_themes}, new_themes)
-      :persistent_term.put(@user_theme_sources_key, new_sources)
-      _ = available()
-      :ok
-    end
+    Minga.Config.ThemeRegistry.register_themes(normalized, source)
   end
 
-  @doc "Removes every non-built-in theme contributed by a source while keeping built-in fallbacks available."
+  @doc "Removes every theme contributed by a source while keeping the core fallback available."
   @spec unregister_source(contribution_source()) :: :ok
-  def unregister_source(:builtin), do: :ok
+  defdelegate unregister_source(source), to: Minga.Config.ThemeRegistry
 
-  def unregister_source(source) do
-    sources = user_theme_sources()
-
-    names =
-      sources
-      |> Enum.filter(fn {_name, entry_source} -> entry_source == source end)
-      |> Enum.map(fn {name, _entry_source} -> name end)
-
-    :persistent_term.put({__MODULE__, :user_themes}, Map.drop(user_themes(), names))
-    :persistent_term.put(@user_theme_sources_key, Map.drop(sources, names))
-    _ = available()
-    :ok
-  end
-
-  @spec owned_theme_names(%{atom() => contribution_source()}, contribution_source()) :: [atom()]
-  defp owned_theme_names(current_sources, source) do
-    current_sources
-    |> Enum.filter(fn {_name, entry_source} -> entry_source == source end)
-    |> Enum.map(fn {name, _entry_source} -> name end)
-  end
-
-  @spec validate_theme_sources(
-          %{atom() => t() | MingaEditor.UI.Theme.Loader.loaded_theme()},
-          %{atom() => contribution_source()},
-          contribution_source()
-        ) :: :ok | {:error, register_error()}
-  defp validate_theme_sources(themes, current_sources, source) do
-    Enum.reduce_while(themes, :ok, fn {name, _loaded}, :ok ->
-      case Map.get(current_sources, name) do
-        nil ->
-          {:cont, :ok}
-
-        ^source ->
-          {:cont, :ok}
-
-        existing_source ->
-          {:halt, {:error, {:duplicate_name, name, existing_source, source}}}
-      end
-    end)
-  end
-
-  @doc "Returns the map of registered user themes."
+  @doc "Returns the map of registered themes."
   @spec user_themes() :: %{atom() => MingaEditor.UI.Theme.Loader.loaded_theme()}
   def user_themes do
-    :persistent_term.get({__MODULE__, :user_themes}, %{})
+    Minga.Config.ThemeRegistry.stored_themes()
   end
 
-  @doc "Returns user theme source ownership metadata."
+  @doc "Returns theme source ownership metadata."
   @spec user_theme_sources() :: %{atom() => contribution_source()}
   def user_theme_sources do
-    :persistent_term.get(@user_theme_sources_key, %{})
+    Minga.Config.ThemeRegistry.stored_sources()
   end
 
   # ── Private: theme lookup helpers ──
@@ -692,19 +613,16 @@ defmodule MingaEditor.UI.Theme do
     %LoadedTheme{name: name, theme: theme, face_registry: %{}, source_path: "<runtime>"}
   end
 
-  @spec get_builtin(atom()) :: {:ok, t()} | :error
-  defp get_builtin(name) do
-    case Map.get(@themes, name) do
-      nil -> :error
-      module -> {:ok, module.theme()}
-    end
-  end
+  @spec get_fallback(atom()) :: {:ok, t()} | :error
+  defp get_fallback(:minga_default), do: {:ok, Fallback.theme()}
+  defp get_fallback(_name), do: :error
 
-  @spec get_user_theme(atom()) :: {:ok, t()} | :error
-  defp get_user_theme(name) do
-    case Map.get(user_themes(), name) do
-      nil -> :error
-      loaded -> {:ok, loaded.theme}
+  @spec get_registered_theme(atom()) :: {:ok, t()} | :error
+  defp get_registered_theme(name) do
+    case Minga.Config.ThemeRegistry.get_theme(name) do
+      {:ok, %LoadedTheme{theme: theme}} -> {:ok, theme}
+      {:ok, %__MODULE__{} = theme} -> {:ok, theme}
+      :error -> :error
     end
   end
 

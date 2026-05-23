@@ -4,9 +4,9 @@ defmodule Minga.ThemeTest do
   alias MingaEditor.UI.Theme
 
   describe "available/0" do
-    test "returns 7 built-in themes" do
+    test "includes fallback and all bundled pack themes" do
       themes = Theme.available()
-      assert length(themes) == 7
+      assert :minga_default in themes
       assert :doom_one in themes
       assert :catppuccin_frappe in themes
       assert :catppuccin_latte in themes
@@ -14,6 +14,7 @@ defmodule Minga.ThemeTest do
       assert :catppuccin_mocha in themes
       assert :one_dark in themes
       assert :one_light in themes
+      assert length(themes) >= 8
     end
   end
 
@@ -94,6 +95,7 @@ defmodule Minga.ThemeTest do
 
   describe "all themes are valid" do
     for theme_name <- [
+          :minga_default,
           :doom_one,
           :catppuccin_frappe,
           :catppuccin_latte,
