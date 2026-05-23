@@ -21,11 +21,16 @@ defmodule Minga.Extension.AgentAPI do
       # subscribes calling process to agent lifecycle events
   """
 
+  require Logger
+
+  @typedoc "Agent session status."
+  @type session_status :: :idle | :plan | :thinking | :tool_executing | :error
+
   @typedoc "Summary of an active agent session."
   @type session_summary :: %{
           id: String.t(),
           pid: pid(),
-          status: :idle | :plan | :thinking | :tool_executing | :error,
+          status: session_status(),
           label: String.t(),
           model: String.t(),
           active_tool: String.t() | nil,
@@ -36,7 +41,7 @@ defmodule Minga.Extension.AgentAPI do
   @type session_info :: %{
           id: String.t(),
           pid: pid(),
-          status: :idle | :plan | :thinking | :tool_executing | :error,
+          status: session_status(),
           label: String.t(),
           model: String.t(),
           active_tool: String.t() | nil,
@@ -59,7 +64,15 @@ defmodule Minga.Extension.AgentAPI do
     MingaAgent.SessionManager.list_sessions()
     |> Enum.map(&session_entry_to_summary/1)
   catch
-    :exit, _ -> []
+    :exit, {:noproc, _} ->
+      []
+
+    :exit, {:normal, _} ->
+      []
+
+    :exit, reason ->
+      Logger.warning("AgentAPI.list_sessions/0 caught unexpected exit: #{inspect(reason)}")
+      []
   end
 
   @doc """
@@ -75,8 +88,12 @@ defmodule Minga.Extension.AgentAPI do
       {:ok, id} ->
         snapshot = MingaAgent.Session.editor_snapshot(pid)
         usage = MingaAgent.Session.usage(pid)
-        metadata = session_metadata(pid, id)
-        touched = safe_touched_files(pid)
+        metadata = MingaAgent.Session.metadata(pid)
+
+        touched =
+          pid
+          |> MingaAgent.Session.touched_files()
+          |> Enum.map(& &1.path)
 
         {:ok,
          %{
@@ -98,7 +115,15 @@ defmodule Minga.Extension.AgentAPI do
         {:error, :not_found}
     end
   catch
-    :exit, _ -> {:error, :not_found}
+    :exit, {:noproc, _} ->
+      {:error, :not_found}
+
+    :exit, {:normal, _} ->
+      {:error, :not_found}
+
+    :exit, reason ->
+      Logger.warning("AgentAPI.session_info/1 caught unexpected exit: #{inspect(reason)}")
+      {:error, :not_found}
   end
 
   @doc """
@@ -107,8 +132,8 @@ defmodule Minga.Extension.AgentAPI do
   After calling this, the process receives messages in the standard
   event bus format:
 
-  - `{:minga_event, :agent_session_stopped, %SessionStoppedEvent{session_id, pid, reason}}`
-  - `{:minga_event, :agent_hook, %AgentHookEvent{event, phase, tool_name, ...}}`
+  - `{:minga_event, :agent_session_stopped, %MingaAgent.SessionManager.SessionStoppedEvent{session_id: id, pid: pid, reason: reason}}`
+  - `{:minga_event, :agent_hook, %Minga.Events.AgentHookEvent{event: event, phase: phase, tool_name: name, ...}}`
 
   Subscribe to `:buffer_changed` separately via `subscribe_edits/0` if you
   need edit-level granularity (e.g., for ghost cursors tracking edit positions).
@@ -129,8 +154,13 @@ defmodule Minga.Extension.AgentAPI do
   Subscribes the calling process to agent edit events.
 
   After calling this, the process receives `:buffer_changed` events
-  for all buffer edits, including agent-sourced ones. Filter on
-  `source: {:agent, session_pid, tool_call_id}` to isolate agent edits.
+  for all buffer edits, including agent-sourced ones. To isolate
+  agent edits, pattern-match on the `source` field inside the struct:
+
+      receive do
+        {:minga_event, :buffer_changed, %Minga.Events.BufferChangedEvent{source: {:agent, session_pid, tool_call_id}} = event} ->
+          # this edit came from an agent session
+      end
   """
   @spec subscribe_edits() :: :ok
   def subscribe_edits do
@@ -160,28 +190,14 @@ defmodule Minga.Extension.AgentAPI do
   defp safe_editor_snapshot(pid) do
     MingaAgent.Session.editor_snapshot(pid)
   catch
-    :exit, _ -> %{status: :idle, pending_approval: nil, error: nil, active_tool_name: nil}
-  end
+    :exit, {:noproc, _} ->
+      %{status: :error, pending_approval: nil, error: nil, active_tool_name: nil}
 
-  @spec safe_touched_files(pid()) :: [String.t()]
-  defp safe_touched_files(pid) do
-    pid
-    |> MingaAgent.Session.touched_files()
-    |> Enum.map(& &1.path)
-  catch
-    :exit, _ -> []
-  end
+    :exit, {:normal, _} ->
+      %{status: :error, pending_approval: nil, error: nil, active_tool_name: nil}
 
-  @spec session_metadata(pid(), String.t()) :: MingaAgent.SessionMetadata.t()
-  defp session_metadata(pid, id) do
-    MingaAgent.Session.metadata(pid)
-  catch
-    :exit, _ ->
-      %MingaAgent.SessionMetadata{
-        id: id,
-        model_name: "unknown",
-        created_at: DateTime.utc_now(),
-        last_message_at: DateTime.utc_now()
-      }
+    :exit, reason ->
+      Logger.warning("AgentAPI.safe_editor_snapshot/1 caught unexpected exit: #{inspect(reason)}")
+      %{status: :error, pending_approval: nil, error: nil, active_tool_name: nil}
   end
 end

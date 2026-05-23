@@ -40,8 +40,8 @@ end
 ```elixir
 Minga.Extension.AgentAPI.subscribe()
 # The calling process now receives:
-# {:minga_event, :agent_session_stopped, %SessionStoppedEvent{session_id, pid, reason}}
-# {:minga_event, :agent_hook, %AgentHookEvent{event, phase, tool_name, ...}}
+# {:minga_event, :agent_session_stopped, %MingaAgent.SessionManager.SessionStoppedEvent{session_id: id, pid: pid, reason: reason}}
+# {:minga_event, :agent_hook, %Minga.Events.AgentHookEvent{event: event, phase: phase, tool_name: name, ...}}
 ```
 
 ## Subscribing to edit events
@@ -50,11 +50,12 @@ Minga.Extension.AgentAPI.subscribe()
 
 ```elixir
 Minga.Extension.AgentAPI.subscribe_edits()
-# The calling process now receives:
-# {:minga_event, :buffer_changed, %BufferChangedEvent{buffer: pid, source: source, ...}}
-#
-# To isolate agent edits, pattern-match on the source:
-# {:agent, session_pid, tool_call_id} -> this edit came from an agent
+
+# To isolate agent edits, pattern-match on the source field inside the struct:
+receive do
+  {:minga_event, :buffer_changed, %Minga.Events.BufferChangedEvent{source: {:agent, session_pid, tool_call_id}} = event} ->
+    # this edit came from an agent session
+end
 ```
 
 ## Event message format
