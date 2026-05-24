@@ -1,4 +1,4 @@
-defmodule MingaEditor.Commands.DiredTest do
+defmodule Minga.Extensions.Dired.CommandsTest do
   @moduledoc """
   Integration tests for the dired (Oil.nvim-style) directory buffer.
 
@@ -13,8 +13,25 @@ defmodule MingaEditor.Commands.DiredTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Config.Options
+  alias Minga.Extensions.Dired.Commands
+  alias Minga.Extensions.Dired.Input
+  alias Minga.Extensions.Dired.KeymapScope
 
   @moduletag :tmp_dir
+
+  setup do
+    source = {:extension, :dired}
+    Minga.Command.Registry.register_provider(Minga.Command.Registry, source, Commands)
+    Minga.Keymap.Scope.register(source, KeymapScope)
+    MingaEditor.Input.register_handler(source, Input, priority: 70)
+
+    on_exit(fn ->
+      Minga.Extension.ContributionCleanup.unregister_source(source)
+      MingaEditor.Input.unregister_source(source)
+    end)
+
+    :ok
+  end
 
   describe "[EditorCase integration] :dired — open directory buffer" do
     test "opens directory by path", %{tmp_dir: dir} do
@@ -79,8 +96,9 @@ defmodule MingaEditor.Commands.DiredTest do
 
       state = send_keys_sync(ctx, ":w<CR>")
 
-      assert state.workspace.dired.confirming?
-      assert state.workspace.dired.pending_ops != []
+      dired_state = state.workspace.feature_state[:dired]
+      assert dired_state.confirming?
+      assert dired_state.pending_ops != []
       assert state.shell_state.status_msg =~ "apply? (y/n)"
     end
   end
@@ -98,7 +116,8 @@ defmodule MingaEditor.Commands.DiredTest do
 
       state = send_keys_sync(ctx, "y")
 
-      refute state.workspace.dired.confirming?
+      dired_state = state.workspace.feature_state[:dired]
+      refute dired_state.confirming?
       assert File.exists?(Path.join(dir, "new.txt"))
       refute File.exists?(Path.join(dir, "old.txt"))
       assert state.shell_state.status_msg =~ "Applied"
@@ -115,7 +134,8 @@ defmodule MingaEditor.Commands.DiredTest do
 
       state = send_keys_sync(ctx, "n")
 
-      refute state.workspace.dired.confirming?
+      dired_state = state.workspace.feature_state[:dired]
+      refute dired_state.confirming?
       assert File.exists?(Path.join(dir, "keep.txt"))
       refute File.exists?(Path.join(dir, "gone.txt"))
       assert state.shell_state.status_msg =~ "Cancelled"
@@ -133,7 +153,8 @@ defmodule MingaEditor.Commands.DiredTest do
 
       state = send_keys_sync(ctx, "y")
 
-      refute state.workspace.dired.confirming?
+      dired_state = state.workspace.feature_state[:dired]
+      refute dired_state.confirming?
       files = File.ls!(dir)
       assert length(files) < 2
       assert state.shell_state.status_msg =~ "Applied"
@@ -150,7 +171,8 @@ defmodule MingaEditor.Commands.DiredTest do
 
       state = send_keys_sync(ctx, "y")
 
-      refute state.workspace.dired.confirming?
+      dired_state = state.workspace.feature_state[:dired]
+      refute dired_state.confirming?
       assert File.exists?(Path.join(dir, "newfile.txt"))
       assert File.dir?(Path.join(dir, "newdir"))
     end

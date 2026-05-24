@@ -14,7 +14,6 @@ defmodule MingaEditor.Session.State do
 
   alias MingaEditor.Agent.UIState
   alias MingaEditor.State.Buffers
-  alias MingaEditor.State.Dired, as: DiredState
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Highlighting
   alias MingaEditor.State.Mouse
@@ -33,7 +32,7 @@ defmodule MingaEditor.Session.State do
           buffers: Buffers.t(),
           windows: Windows.t(),
           file_tree: FileTreeState.t(),
-          dired: DiredState.t(),
+          feature_state: %{atom() => term()},
           viewport: Viewport.t(),
           mouse: Mouse.t(),
           highlight: Highlighting.t(),
@@ -50,7 +49,7 @@ defmodule MingaEditor.Session.State do
             buffers: %Buffers{},
             windows: %Windows{},
             file_tree: %FileTreeState{},
-            dired: %DiredState{},
+            feature_state: %{},
             viewport: nil,
             mouse: %Mouse{},
             highlight: %Highlighting{},
@@ -231,10 +230,24 @@ defmodule MingaEditor.Session.State do
     %{wspace | file_tree: file_tree}
   end
 
-  @doc "Replaces the dired sub-struct."
-  @spec set_dired(t(), DiredState.t()) :: t()
-  def set_dired(%__MODULE__{} = wspace, %DiredState{} = dired) do
-    %{wspace | dired: dired}
+  @doc "Returns the feature state for the given key."
+  @spec get_feature_state(t(), atom()) :: term()
+  def get_feature_state(%__MODULE__{feature_state: fs}, key) when is_atom(key) do
+    Map.get(fs, key)
+  end
+
+  @doc "Sets a feature-state entry for the given key."
+  @spec set_feature_state(t(), atom(), term()) :: t()
+  def set_feature_state(%__MODULE__{feature_state: fs} = wspace, key, value) when is_atom(key) do
+    %{wspace | feature_state: Map.put(fs, key, value)}
+  end
+
+  @doc "Updates a feature-state entry via a mapper function."
+  @spec update_feature_state(t(), atom(), term(), (term() -> term())) :: t()
+  def update_feature_state(%__MODULE__{feature_state: fs} = wspace, key, default, fun)
+      when is_atom(key) and is_function(fun, 1) do
+    current = Map.get(fs, key, default)
+    %{wspace | feature_state: Map.put(fs, key, fun.(current))}
   end
 
   @doc "Updates the highlighting sub-struct."

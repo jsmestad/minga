@@ -79,6 +79,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
   # sub-namespaces listed here are presentation modules that legitimately
   # depend on Editor/Shell state. The rest of those namespaces stays Layer 1.
   @layer_2_prefixes [
+    "Minga.Extensions",
     "MingaEditor",
     "MingaEditor.Shell",
     "MingaEditor.Input",

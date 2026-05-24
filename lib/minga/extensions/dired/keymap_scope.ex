@@ -1,4 +1,4 @@
-defmodule Minga.Keymap.Scope.Dired do
+defmodule Minga.Extensions.Dired.KeymapScope do
   @moduledoc """
   Keymap scope for Oil.nvim-style directory buffers.
 

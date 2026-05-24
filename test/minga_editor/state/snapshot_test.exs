@@ -372,7 +372,7 @@ defmodule MingaEditor.State.SnapshotTest do
       assert new_ctx.buffers == old_ctx.buffers
       assert new_ctx.windows == old_ctx.windows
       assert new_ctx.file_tree == old_ctx.file_tree
-      assert new_ctx.dired == old_ctx.dired
+      assert new_ctx.feature_state == old_ctx.feature_state
       assert new_ctx.viewport == old_ctx.viewport
       assert new_ctx.mouse == old_ctx.mouse
       assert new_ctx.search == old_ctx.search

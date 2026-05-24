@@ -1,8 +1,8 @@
-defmodule Minga.DiredTest do
+defmodule Minga.Extensions.Dired.CoreTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Dired
-  alias Minga.Dired.Entry
+  alias Minga.Extensions.Dired.Core, as: Dired
+  alias Minga.Extensions.Dired.Entry
 
   @moduletag :tmp_dir
 

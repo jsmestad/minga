@@ -1,4 +1,4 @@
-defmodule MingaEditor.Commands.Dired do
+defmodule Minga.Extensions.Dired.Commands do
   @moduledoc """
   Commands for Oil.nvim-style directory buffers.
 
@@ -11,10 +11,10 @@ defmodule MingaEditor.Commands.Dired do
   use MingaEditor.Commands.Provider
 
   alias Minga.Buffer
-  alias Minga.Dired
+  alias Minga.Extensions.Dired.Core, as: Dired
   alias MingaEditor.Commands
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.Dired, as: DiredState
+  alias Minga.Extensions.Dired.State, as: DiredState
 
   @type state :: EditorState.t()
 
@@ -36,12 +36,15 @@ defmodule MingaEditor.Commands.Dired do
   @spec execute(state(), atom()) :: state()
 
   def execute(state, :dired_open) do
-    dir = current_directory(state)
+    {path, state} = pop_requested_path(state)
+    dir = path || current_directory(state)
     open_directory(state, dir)
   end
 
   def execute(state, :dired_open_entry) do
-    with %{dired: %{active?: true, dired: dired, buffer: buf}} <- state.workspace,
+    dired_state = EditorState.get_feature_state(state, :dired)
+
+    with %DiredState{active?: true, dired: dired, buffer: buf} <- dired_state,
          {cursor_line, _col} <- Buffer.cursor(buf),
          %{} = entry <- Dired.entry_at_line(dired, cursor_line) do
       if entry.dir? do
@@ -55,8 +58,10 @@ defmodule MingaEditor.Commands.Dired do
   end
 
   def execute(state, :dired_parent) do
-    case state.workspace.dired do
-      %{active?: true, dired: %Dired{directory: dir}} ->
+    dired_state = EditorState.get_feature_state(state, :dired)
+
+    case dired_state do
+      %DiredState{active?: true, dired: %Dired{directory: dir}} ->
         parent = Dired.parent_directory(dir)
 
         if parent != dir do
@@ -93,7 +98,9 @@ defmodule MingaEditor.Commands.Dired do
   end
 
   def execute(state, :dired_open_external) do
-    with %{dired: %{active?: true, dired: dired, buffer: buf}} <- state.workspace,
+    dired_state = EditorState.get_feature_state(state, :dired)
+
+    with %DiredState{active?: true, dired: dired, buffer: buf} <- dired_state,
          {cursor_line, _col} <- Buffer.cursor(buf),
          %{} = entry <- Dired.entry_at_line(dired, cursor_line) do
       spawn_external_open(entry.path)
@@ -110,8 +117,15 @@ defmodule MingaEditor.Commands.Dired do
   end
 
   def execute(state, :dired_apply_changes) do
-    case state.workspace.dired do
-      %{active?: true, dired: %Dired{directory: dir}, buffer: buf, original_entries: original} ->
+    dired_state = EditorState.get_feature_state(state, :dired)
+
+    case dired_state do
+      %DiredState{
+        active?: true,
+        dired: %Dired{directory: dir},
+        buffer: buf,
+        original_entries: original
+      } ->
         ops = compute_pending_ops(buf, original, dir)
         maybe_enter_confirmation(state, ops)
 
@@ -121,8 +135,10 @@ defmodule MingaEditor.Commands.Dired do
   end
 
   def execute(state, :dired_confirm_apply) do
-    case state.workspace.dired do
-      %{active?: true, dired: %Dired{}, pending_ops: ops} when ops != [] ->
+    dired_state = EditorState.get_feature_state(state, :dired)
+
+    case dired_state do
+      %DiredState{active?: true, dired: %Dired{}, pending_ops: ops} when ops != [] ->
         state = clear_confirming(state)
         {successes, errors} = apply_operations(ops)
         state = refresh_dired_buffer(state)
@@ -140,6 +156,7 @@ defmodule MingaEditor.Commands.Dired do
 
   # ── Opening ──────────────────────────────────────────────────────────────
 
+  @doc "Opens a directory at the given path in a Dired buffer."
   @spec open_directory(state(), String.t()) :: state()
   def open_directory(state, dir) do
     with {:ok, dired} <- Dired.read_directory(dir),
@@ -148,7 +165,7 @@ defmodule MingaEditor.Commands.Dired do
 
       state
       |> Commands.add_buffer(pid)
-      |> EditorState.set_dired(dired_state)
+      |> EditorState.set_feature_state(:dired, dired_state)
       |> EditorState.set_keymap_scope(:dired)
       |> EditorState.set_status("Dired: #{dired.directory}")
     else
@@ -174,12 +191,24 @@ defmodule MingaEditor.Commands.Dired do
     )
   end
 
+  # ── Requested path ──────────────────────────────────────────────────────
+
+  @spec pop_requested_path(state()) :: {String.t() | nil, state()}
+  defp pop_requested_path(state) do
+    case EditorState.get_feature_state(state, :dired_requested_path) do
+      nil -> {nil, state}
+      path -> {path, EditorState.set_feature_state(state, :dired_requested_path, nil)}
+    end
+  end
+
   # ── Navigation ───────────────────────────────────────────────────────────
 
   @spec navigate_to_directory(state(), String.t()) :: state()
   defp navigate_to_directory(state, dir) do
-    case state.workspace.dired do
-      %{active?: true, dired: old_dired, buffer: buf} ->
+    dired_state = EditorState.get_feature_state(state, :dired)
+
+    case dired_state do
+      %DiredState{active?: true, dired: old_dired, buffer: buf} ->
         case Dired.read_directory(dir,
                show_hidden: old_dired.show_hidden,
                sort_by: old_dired.sort_by,
@@ -189,10 +218,10 @@ defmodule MingaEditor.Commands.Dired do
             listing = Dired.format_listing(new_dired)
             Buffer.replace_generated_content(buf, listing)
             Buffer.move_to(buf, {0, 0})
-            dired_state = DiredState.update_dired(state.workspace.dired, new_dired)
+            updated_dired_state = DiredState.update_dired(dired_state, new_dired)
 
             state
-            |> EditorState.set_dired(dired_state)
+            |> EditorState.set_feature_state(:dired, updated_dired_state)
             |> EditorState.set_status("Dired: #{new_dired.directory}")
 
           {:error, reason} ->
@@ -218,11 +247,13 @@ defmodule MingaEditor.Commands.Dired do
 
   @spec close_dired(state()) :: state()
   defp close_dired(state) do
-    case state.workspace.dired do
-      %{active?: true, buffer: buf} when is_pid(buf) ->
+    dired_state = EditorState.get_feature_state(state, :dired)
+
+    case dired_state do
+      %DiredState{active?: true, buffer: buf} when is_pid(buf) ->
         state =
           state
-          |> EditorState.update_dired(&DiredState.deactivate/1)
+          |> EditorState.update_feature_state(:dired, %DiredState{}, &DiredState.deactivate/1)
           |> EditorState.set_keymap_scope(:editor)
 
         Commands.execute(state, :kill_buffer)
@@ -236,17 +267,19 @@ defmodule MingaEditor.Commands.Dired do
 
   @spec with_dired_update(state(), (Dired.t() -> {:ok, Dired.t()} | {:error, term()})) :: state()
   defp with_dired_update(state, update_fn) do
-    case state.workspace.dired do
-      %{active?: true, dired: %Dired{} = dired, buffer: buf} ->
+    dired_state = EditorState.get_feature_state(state, :dired)
+
+    case dired_state do
+      %DiredState{active?: true, dired: %Dired{} = dired, buffer: buf} ->
         case update_fn.(dired) do
           {:ok, new_dired} ->
             listing = Dired.format_listing(new_dired)
             Buffer.replace_generated_content(buf, listing)
             Buffer.move_to(buf, {0, 0})
-            dired_state = DiredState.update_dired(state.workspace.dired, new_dired)
+            updated_dired_state = DiredState.update_dired(dired_state, new_dired)
 
             state
-            |> EditorState.set_dired(dired_state)
+            |> EditorState.set_feature_state(:dired, updated_dired_state)
             |> EditorState.set_status(status_for_dired(new_dired))
 
           {:error, reason} ->
@@ -265,8 +298,16 @@ defmodule MingaEditor.Commands.Dired do
 
   @spec clear_confirming(state()) :: state()
   defp clear_confirming(state) do
-    new_dired = DiredState.exit_confirmation(state.workspace.dired)
-    EditorState.set_dired(state, new_dired)
+    dired_state = EditorState.get_feature_state(state, :dired)
+
+    case dired_state do
+      %DiredState{} ->
+        new_dired = DiredState.exit_confirmation(dired_state)
+        EditorState.set_feature_state(state, :dired, new_dired)
+
+      _ ->
+        state
+    end
   end
 
   @spec compute_pending_ops(pid(), [Dired.entry()], String.t()) :: [Dired.operation()]
@@ -284,7 +325,11 @@ defmodule MingaEditor.Commands.Dired do
     summary = format_operations_summary(ops)
 
     state
-    |> EditorState.update_dired(&DiredState.enter_confirmation(&1, ops))
+    |> EditorState.update_feature_state(
+      :dired,
+      %DiredState{},
+      &DiredState.enter_confirmation(&1, ops)
+    )
     |> EditorState.set_status("#{summary} — apply? (y/n)")
   end
 

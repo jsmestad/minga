@@ -46,45 +46,19 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   # ── Save / quit ───────────────────────────────────────────────────────────
 
-  def execute(%{workspace: %{dired: %{active?: true}}} = state, :save) do
-    MingaEditor.Commands.Dired.execute(state, :dired_apply_changes)
-  end
-
-  def execute(%{workspace: %{dired: %{active?: true}}} = state, :force_save) do
-    MingaEditor.Commands.Dired.execute(state, :dired_apply_changes)
-  end
-
-  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :save) do
-    state = apply_pre_save_transforms(state, buf)
-
-    case Buffer.save(buf) do
-      :ok ->
-        name = Helpers.buffer_display_name(buf)
-
-        EditorState.set_status(state, "Wrote #{name}")
-
-      {:error, :file_changed} ->
-        handle_file_changed_on_save(state, buf)
-
-      {:error, :no_file_path} ->
-        EditorState.set_status(state, "No file name — use :w <filename>")
-
-      {:error, reason} ->
-        EditorState.set_status(state, "Save failed: #{inspect(reason)}")
+  def execute(state, :save) do
+    if dired_active?(state) do
+      Commands.execute(state, :dired_apply_changes)
+    else
+      do_save(state)
     end
   end
 
-  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :force_save) do
-    case Buffer.force_save(buf) do
-      :ok ->
-        name = Helpers.buffer_display_name(buf)
-        EditorState.set_status(state, "Wrote #{name} (force)")
-
-      {:error, :no_file_path} ->
-        EditorState.set_status(state, "No file name — use :w <filename>")
-
-      {:error, reason} ->
-        EditorState.set_status(state, "Force save failed: #{inspect(reason)}")
+  def execute(state, :force_save) do
+    if dired_active?(state) do
+      Commands.execute(state, :dired_apply_changes)
+    else
+      do_force_save(state)
     end
   end
 
@@ -256,11 +230,13 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   def execute(state, {:execute_ex_command, {:dired, nil}}) do
-    MingaEditor.Commands.Dired.execute(state, :dired_open)
+    Commands.execute(state, :dired_open)
   end
 
   def execute(state, {:execute_ex_command, {:dired, path}}) when is_binary(path) do
-    MingaEditor.Commands.Dired.open_directory(state, path)
+    state
+    |> EditorState.set_feature_state(:dired_requested_path, path)
+    |> then(&Commands.execute(&1, :dired_open))
   end
 
   def execute(state, {:execute_ex_command, {:edit, file_path}}) do
@@ -2561,5 +2537,51 @@ defmodule MingaEditor.Commands.BufferManagement do
     start_line = max(0, start - 1)
     end_line = max(0, finish - 1)
     {start_line, end_line}
+  end
+
+  # ── Dired save interception ─────────────────────────────────────────────────
+
+  @spec do_save(state()) :: state()
+  defp do_save(%{workspace: %{buffers: %{active: buf}}} = state) do
+    state = apply_pre_save_transforms(state, buf)
+
+    case Buffer.save(buf) do
+      :ok ->
+        name = Helpers.buffer_display_name(buf)
+
+        EditorState.set_status(state, "Wrote #{name}")
+
+      {:error, :file_changed} ->
+        handle_file_changed_on_save(state, buf)
+
+      {:error, :no_file_path} ->
+        EditorState.set_status(state, "No file name — use :w <filename>")
+
+      {:error, reason} ->
+        EditorState.set_status(state, "Save failed: #{inspect(reason)}")
+    end
+  end
+
+  @spec do_force_save(state()) :: state()
+  defp do_force_save(%{workspace: %{buffers: %{active: buf}}} = state) do
+    case Buffer.force_save(buf) do
+      :ok ->
+        name = Helpers.buffer_display_name(buf)
+        EditorState.set_status(state, "Wrote #{name} (force)")
+
+      {:error, :no_file_path} ->
+        EditorState.set_status(state, "No file name — use :w <filename>")
+
+      {:error, reason} ->
+        EditorState.set_status(state, "Force save failed: #{inspect(reason)}")
+    end
+  end
+
+  @spec dired_active?(state()) :: boolean()
+  defp dired_active?(state) do
+    case state.workspace.feature_state do
+      %{dired: %{active?: true}} -> true
+      _ -> false
+    end
   end
 end
