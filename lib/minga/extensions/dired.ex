@@ -29,10 +29,12 @@ defmodule Minga.Extensions.Dired do
     source = {:extension, name()}
     registry = Minga.Command.Registry
 
-    Minga.Command.Registry.register_provider(registry, source, Commands)
-    Minga.Keymap.Scope.register(source, KeymapScope)
-    MingaEditor.Input.register_handler(source, Input, priority: 70)
-
-    {:ok, %{}}
+    with :ok <- Minga.Command.Registry.register_provider(registry, source, Commands),
+         :ok <- Minga.Keymap.Scope.register(source, KeymapScope),
+         :ok <- MingaEditor.Input.register_handler(source, Input, priority: 70) do
+      {:ok, %{}}
+    else
+      {:error, reason} -> {:error, reason}
+    end
   end
 end
