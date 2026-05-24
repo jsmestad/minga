@@ -7,9 +7,8 @@ defmodule MingaEditor.State.Search do
   toolbar state (active, flags, replace mode).
   """
 
-  @typedoc "GUI search toolbar state."
+  @typedoc "GUI search toolbar state. Non-nil means the toolbar is active."
   @type gui_search :: %{
-          active: boolean(),
           replace_mode: boolean(),
           case_sensitive: boolean(),
           whole_word: boolean(),
@@ -58,7 +57,6 @@ defmodule MingaEditor.State.Search do
     %{
       s
       | gui_search: %{
-          active: true,
           replace_mode: false,
           case_sensitive: case_sensitive,
           whole_word: whole_word,
@@ -101,6 +99,6 @@ defmodule MingaEditor.State.Search do
 
   @doc "Returns whether the GUI search toolbar is active."
   @spec gui_search_active?(t()) :: boolean()
-  def gui_search_active?(%__MODULE__{gui_search: %{active: true}}), do: true
+  def gui_search_active?(%__MODULE__{gui_search: %{}}), do: true
   def gui_search_active?(%__MODULE__{}), do: false
 end

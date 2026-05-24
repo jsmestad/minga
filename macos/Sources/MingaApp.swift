@@ -85,8 +85,12 @@ struct MingaMenuCommands: Commands {
 
             Divider()
 
-            Button("Find…") { encoder?.sendKeyPress(codepoint: 0x2F, modifiers: 0) }
+            Button("Find…") { encoder?.sendSearchQuery(query: "", flags: 0) }
                 .keyboardShortcut("f", modifiers: .command)
+                .disabled(!connected)
+
+            Button("Find and Replace…") { encoder?.sendSearchQuery(query: "", flags: 0x01) }
+                .keyboardShortcut("h", modifiers: .command)
                 .disabled(!connected)
         }
 

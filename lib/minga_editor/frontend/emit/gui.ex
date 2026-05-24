@@ -1975,7 +1975,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     search = ctx.search
 
     case search.gui_search do
-      %{active: true} = gs ->
+      %{} = gs ->
         {match_count, current_index} = compute_search_stats(ctx, search.last_pattern)
 
         fp = :erlang.phash2({true, match_count, current_index, gs})
