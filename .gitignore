@@ -51,6 +51,7 @@ tmp/
 test/tmp/
 macos/build/
 macos/DerivedData/
+macos/Tests/Snapshots/
 
 # Minga project-local state
 .minga/workspaces/
