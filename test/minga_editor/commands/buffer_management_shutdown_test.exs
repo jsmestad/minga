@@ -41,10 +41,9 @@ defmodule MingaEditor.Commands.BufferManagementShutdownTest do
       {editor, _buffer, _options} = start_editor("hello")
 
       type_string(editor, ":q\r")
-      state = :sys.get_state(editor)
-      assert state.pending_quit == :quit
-      assert state.shell_state.status_msg == "Quit Minga? (y/n)"
-      refute Enum.any?(state.shell_state.tab_bar.tabs, &String.starts_with?(&1.label, "[new"))
+      assert pending_quit(editor) == :quit
+      assert status_msg(editor) == "Quit Minga? (y/n)"
+      refute Enum.any?(tab_labels(editor), &String.starts_with?(&1, "[new"))
 
       send_key(editor, ?y)
 
@@ -132,4 +131,11 @@ defmodule MingaEditor.Commands.BufferManagementShutdownTest do
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
     GenServer.call(editor, :api_mode)
   end
+
+  defp get_editor_state(editor), do: :sys.get_state(editor)
+  defp pending_quit(editor), do: get_editor_state(editor).pending_quit
+  defp status_msg(editor), do: EditorState.status_msg(get_editor_state(editor))
+
+  defp tab_labels(editor),
+    do: Enum.map(get_editor_state(editor).shell_state.tab_bar.tabs, & &1.label)
 end

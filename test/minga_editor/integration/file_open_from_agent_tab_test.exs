@@ -142,27 +142,24 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
 
       open_file_and_wait(ctx, file_path)
 
-      agent_state = :sys.get_state(ctx.editor)
-      agent_workspace_id = TabBar.active_workspace_id(agent_state.shell_state.tab_bar)
-      agent_file_tabs = TabBar.visible_file_tabs(agent_state.shell_state.tab_bar)
-      assert Enum.map(agent_file_tabs, & &1.group_id) == [agent_workspace_id]
+      agent_ws = active_workspace_id(ctx)
+      agent_file_tabs = visible_file_tabs(ctx, agent_ws)
+      assert Enum.map(agent_file_tabs, & &1.group_id) == [agent_ws]
 
       :sys.replace_state(ctx.editor, &EditorState.switch_tab(&1, 1))
       open_file_and_wait(ctx, file_path)
 
-      state = :sys.get_state(ctx.editor)
-      manual_tabs = TabBar.visible_file_tabs(state.shell_state.tab_bar, 0)
-      agent_tabs = TabBar.visible_file_tabs(state.shell_state.tab_bar, agent_workspace_id)
+      manual_tabs = visible_file_tabs(ctx, 0)
+      agent_tabs = visible_file_tabs(ctx, agent_ws)
 
       assert length(manual_tabs) == 2
       assert length(agent_tabs) == 1
       assert Enum.map(manual_tabs ++ agent_tabs, & &1.id) |> Enum.uniq() |> length() == 3
 
       :ok = MingaEditor.open_file(ctx.editor, file_path)
-      reopened_state = :sys.get_state(ctx.editor)
 
-      assert length(TabBar.visible_file_tabs(reopened_state.shell_state.tab_bar, 0)) == 2
-      assert TabBar.active_workspace_id(reopened_state.shell_state.tab_bar) == 0
+      assert length(visible_file_tabs(ctx, 0)) == 2
+      assert active_workspace_id(ctx) == 0
     end
   end
 end

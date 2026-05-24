@@ -107,6 +107,12 @@ defmodule MingaEditor.Renderer.Server do
     GenServer.cast(server, {:render, snapshot, frame_seq, monotonic_now()})
   end
 
+  @doc "Returns true while a render pass is in progress."
+  @spec rendering?(GenServer.server()) :: boolean()
+  def rendering?(server \\ __MODULE__) do
+    GenServer.call(server, :rendering?)
+  end
+
   # ── GenServer callbacks ───────────────────────────────────────────────────
 
   @impl true
@@ -115,6 +121,11 @@ defmodule MingaEditor.Renderer.Server do
     editor_pid = Keyword.get(opts, :editor_pid, MingaEditor)
     pipeline = Keyword.get(opts, :pipeline, &RenderPipeline.run/1)
     {:ok, %__MODULE__{editor_pid: editor_pid, pipeline: pipeline}}
+  end
+
+  @impl true
+  def handle_call(:rendering?, _from, state) do
+    {:reply, state.rendering?, state}
   end
 
   @impl true

@@ -262,6 +262,36 @@ defmodule MingaAgent.Providers.Native do
     GenServer.call(pid, {:refresh_project_view, project_view})
   end
 
+  @doc "Returns the current tool list registered with this provider."
+  @spec tools(GenServer.server()) :: [ReqLLM.Tool.t()]
+  def tools(pid) do
+    GenServer.call(pid, :tools)
+  end
+
+  @doc "Returns the PID of the fork store, or nil if not active."
+  @spec fork_store(GenServer.server()) :: pid() | nil
+  def fork_store(pid) do
+    GenServer.call(pid, :fork_store)
+  end
+
+  @doc "Returns the agent hooks from the provider's config."
+  @spec agent_hooks(GenServer.server()) :: [MingaAgent.Hooks.Hook.t()]
+  def agent_hooks(pid) do
+    GenServer.call(pid, :agent_hooks)
+  end
+
+  @doc "Returns the project view associated with this provider, or nil."
+  @spec project_view(GenServer.server()) :: ProjectView.t() | nil
+  def project_view(pid) do
+    GenServer.call(pid, :project_view)
+  end
+
+  @doc "Returns the changeset PID, or nil."
+  @spec changeset(GenServer.server()) :: pid() | nil
+  def changeset(pid) do
+    GenServer.call(pid, :changeset)
+  end
+
   # ── GenServer callbacks ─────────────────────────────────────────────────────
 
   @impl GenServer
@@ -582,6 +612,26 @@ defmodule MingaAgent.Providers.Native do
     Minga.Log.info(:agent, "[Agent.Native] new session started")
 
     {:reply, :ok, state}
+  end
+
+  def handle_call(:tools, _from, state) do
+    {:reply, state.tools, state}
+  end
+
+  def handle_call(:fork_store, _from, state) do
+    {:reply, state.fork_store, state}
+  end
+
+  def handle_call(:agent_hooks, _from, state) do
+    {:reply, state.config.agent_hooks, state}
+  end
+
+  def handle_call(:project_view, _from, state) do
+    {:reply, state.project_view, state}
+  end
+
+  def handle_call(:changeset, _from, state) do
+    {:reply, state.changeset, state}
   end
 
   def handle_call(:get_state, _from, state) do

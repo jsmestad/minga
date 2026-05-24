@@ -179,10 +179,9 @@ defmodule MingaAgent.Providers.NativeTest do
       {:ok, buffer} = start_supervised({BufferProcess, content: "original\n", file_path: path})
       {:ok, pid} = start_provider(tmp_dir: dir, tools: nil)
 
-      state = :sys.get_state(pid)
-      fork_store = state.fork_store
+      fork_store = Native.fork_store(pid)
       assert is_pid(fork_store)
-      write_tool = Enum.find(state.tools, &(&1.name == "write_file"))
+      write_tool = pid |> Native.tools() |> Enum.find(&(&1.name == "write_file"))
 
       assert {:ok, result} =
                write_tool.callback.(%{"path" => "lib/tool_rebuild.ex", "content" => "forked\n"})
@@ -195,9 +194,8 @@ defmodule MingaAgent.Providers.NativeTest do
       Process.exit(fork_store, :kill)
       assert_receive {:DOWN, ^ref, :process, ^fork_store, _reason}
 
-      rebuilt_state = :sys.get_state(pid)
-      assert rebuilt_state.fork_store == nil
-      rebuilt_write_tool = Enum.find(rebuilt_state.tools, &(&1.name == "write_file"))
+      assert Native.fork_store(pid) == nil
+      rebuilt_write_tool = pid |> Native.tools() |> Enum.find(&(&1.name == "write_file"))
 
       assert {:ok, result} =
                rebuilt_write_tool.callback.(%{
@@ -220,12 +218,11 @@ defmodule MingaAgent.Providers.NativeTest do
       {:ok, view} = ProjectView.overlay(dir)
       {:ok, pid} = start_provider(tmp_dir: dir, project_view: view, tools: nil)
 
-      state = :sys.get_state(pid)
-      assert state.project_view == view
-      assert state.fork_store == nil
-      assert state.changeset == nil
+      assert Native.project_view(pid) == view
+      assert Native.fork_store(pid) == nil
+      assert Native.changeset(pid) == nil
 
-      write_tool = Enum.find(state.tools, &(&1.name == "write_file"))
+      write_tool = pid |> Native.tools() |> Enum.find(&(&1.name == "write_file"))
 
       assert {:ok, result} =
                write_tool.callback.(%{"path" => "lib/view_draft.ex", "content" => "draft\n"})

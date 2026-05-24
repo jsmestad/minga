@@ -207,6 +207,18 @@ defmodule Minga.Project do
     GenServer.call(server, :command_frecency_scores)
   end
 
+  @doc "Returns true while a background file-cache rebuild is in progress."
+  @spec rebuilding?(GenServer.server()) :: boolean()
+  def rebuilding?(server \\ __MODULE__) do
+    GenServer.call(server, :rebuilding?)
+  end
+
+  @doc "Returns the raw command frecency map (command name => timestamp list)."
+  @spec command_frecency(GenServer.server()) :: command_frecency_map()
+  def command_frecency(server \\ __MODULE__) do
+    GenServer.call(server, :command_frecency)
+  end
+
   @doc "Scores a file's access timestamps using frecency decay buckets."
   @spec score_accesses([non_neg_integer()], non_neg_integer()) :: non_neg_integer()
   def score_accesses(timestamps, now_unix) when is_list(timestamps) and is_integer(now_unix) do
@@ -281,6 +293,14 @@ defmodule Minga.Project do
       end)
 
     {:reply, scores, state}
+  end
+
+  def handle_call(:rebuilding?, _from, state) do
+    {:reply, state.rebuilding?, state}
+  end
+
+  def handle_call(:command_frecency, _from, state) do
+    {:reply, state.command_frecency, state}
   end
 
   def handle_call(:command_frecency_scores, _from, state) do
