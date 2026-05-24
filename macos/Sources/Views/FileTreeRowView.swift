@@ -361,8 +361,8 @@ struct FileTreeRowView: View {
 
     var accessibilityTraits: AccessibilityTraits {
         var traits: AccessibilityTraits = []
-        if !entry.isEditing { traits.insert(.isButton) }
-        if entry.isSelected { traits.insert(.isSelected) }
+        if !entry.isEditing { _ = traits.insert(.isButton) }
+        if entry.isSelected { _ = traits.insert(.isSelected) }
         return traits
     }
 
