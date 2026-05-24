@@ -6,8 +6,9 @@ defmodule Minga.Test.NeovimOracle do
   """
 
   @type cursor :: %{required(:line) => non_neg_integer(), required(:col) => non_neg_integer()}
-  @type scenario_type :: :motion | :operator | :text_object | :search | :window | :mark
-  @type compare_field :: :content | :cursor | :mode | :register | :register_type
+  @type scenario_type ::
+          :motion | :operator | :text_object | :search | :window | :mark | :register | :macro
+  @type compare_field :: :content | :cursor | :mode | :register | :register_type | :registers
   @type window_compare_field :: :window_count | :active_window | :cursors | :buffers | :layout
   @type compare_target ::
           compare_field() | :both | :window_state | [compare_field() | window_compare_field()]
@@ -25,6 +26,8 @@ defmodule Minga.Test.NeovimOracle do
           optional(:commands) => [String.t()],
           optional(:minga_keys) => [String.t()],
           required(:compare) => compare_target(),
+          optional(:register_setup) => %{String.t() => String.t()},
+          optional(:capture_registers) => [String.t()],
           optional(:tags) => [atom()],
           optional(:known_divergence) => divergence()
         }
@@ -49,6 +52,7 @@ defmodule Minga.Test.NeovimOracle do
           optional(:register_type) => String.t(),
           optional(:window_count) => non_neg_integer(),
           optional(:windows) => [window_info()],
+          optional(:registers) => %{String.t() => %{content: String.t(), type: String.t()}},
           optional(:error) => String.t()
         }
   @type error ::
@@ -136,6 +140,16 @@ defmodule Minga.Test.NeovimOracle do
     |> then(fn m ->
       if scenario[:commands], do: Map.put(m, :commands, scenario.commands), else: m
     end)
+    |> then(fn m ->
+      if scenario[:register_setup],
+        do: Map.put(m, :register_setup, scenario.register_setup),
+        else: m
+    end)
+    |> then(fn m ->
+      if scenario[:capture_registers],
+        do: Map.put(m, :capture_registers, scenario.capture_registers),
+        else: m
+    end)
   end
 
   @spec invoke_nvim(String.t(), String.t(), pos_integer()) ::
@@ -207,7 +221,7 @@ defmodule Minga.Test.NeovimOracle do
 
   defp normalize_result(result) do
     result
-    |> Enum.map(fn {key, value} -> {result_key(key), value} end)
+    |> Enum.map(fn {key, value} -> {result_key(key), normalize_value(key, value)} end)
     |> Map.new()
   end
 
@@ -225,6 +239,15 @@ defmodule Minga.Test.NeovimOracle do
     }
   end
 
+  @spec normalize_value(String.t(), term()) :: term()
+  defp normalize_value("registers", regs) when is_map(regs) do
+    Map.new(regs, fn {name, %{"content" => content, "type" => type}} ->
+      {name, %{content: content, type: type}}
+    end)
+  end
+
+  defp normalize_value(_key, value), do: value
+
   @spec result_key(String.t()) :: atom()
   defp result_key("name"), do: :name
   defp result_key("ok"), do: :ok
@@ -235,5 +258,6 @@ defmodule Minga.Test.NeovimOracle do
   defp result_key("register"), do: :register
   defp result_key("register_type"), do: :register_type
   defp result_key("window_count"), do: :window_count
+  defp result_key("registers"), do: :registers
   defp result_key("error"), do: :error
 end

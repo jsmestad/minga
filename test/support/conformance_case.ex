@@ -21,7 +21,8 @@ defmodule Minga.Test.ConformanceCase do
           required(:content) => String.t(),
           required(:mode) => String.t(),
           required(:register) => String.t(),
-          required(:register_type) => String.t()
+          required(:register_type) => String.t(),
+          optional(:registers) => %{String.t() => %{content: String.t(), type: String.t()}}
         }
 
   using do
@@ -74,19 +75,51 @@ defmodule Minga.Test.ConformanceCase do
   @spec run_minga(scenario()) :: minga_result()
   defp run_minga(scenario) do
     ctx = EditorCase.start_editor(scenario.content, width: 120, height: 40)
+
+    case {scenario.type, Map.get(scenario, :register_setup)} do
+      {:macro, setup} when is_map(setup) ->
+        :sys.replace_state(ctx.editor, fn st ->
+          macro_rec = st.workspace.editing.macro_recorder
+
+          populated =
+            Enum.reduce(setup, macro_rec, fn {name, content}, acc ->
+              keys = for <<cp::utf8 <- content>>, do: {cp, 0}
+              %{acc | registers: Map.put(acc.registers, name, keys)}
+            end)
+
+          put_in(st.workspace.editing.macro_recorder, populated)
+        end)
+
+      {_, setup} when is_map(setup) ->
+        state = EditorCase.editor_state(ctx)
+        reg_state = MingaEditor.Editing.registers(state)
+
+        populated =
+          Enum.reduce(setup, reg_state, fn {name, content}, acc ->
+            Registers.put(acc, name, content)
+          end)
+
+        :sys.replace_state(ctx.editor, fn st ->
+          put_in(st.workspace.editing.reg, populated)
+        end)
+
+      _ ->
+        :ok
+    end
+
     :ok = BufferProcess.move_to(ctx.buffer, {scenario.cursor.line, scenario.cursor.col})
     run_minga_keys(ctx, scenario)
     state = EditorCase.editor_state(ctx)
     {line, col} = EditorCase.buffer_cursor(ctx)
-    register = MingaEditor.Editing.registers(state)
+    reg_state = MingaEditor.Editing.registers(state)
 
     {register_text, register_type} =
-      case Registers.get(register, "") do
+      case Registers.get(reg_state, "") do
         {text, type} -> {text, register_type_label(type)}
         nil -> {"", "v"}
       end
 
-    %{
+    base = %{
       line: line,
       col: col,
       content: EditorCase.buffer_content(ctx),
@@ -94,6 +127,21 @@ defmodule Minga.Test.ConformanceCase do
       register: register_text,
       register_type: register_type
     }
+
+    case Map.get(scenario, :capture_registers) do
+      nil ->
+        base
+
+      names ->
+        named = Map.new(names, fn name ->
+          case Registers.get(reg_state, name) do
+            {text, type} -> {name, %{content: text, type: register_type_label(type)}}
+            nil -> {name, %{content: "", type: "v"}}
+          end
+        end)
+
+        Map.put(base, :registers, named)
+    end
   end
 
   @spec run_minga_keys(map(), scenario()) :: :ok
@@ -123,6 +171,7 @@ defmodule Minga.Test.ConformanceCase do
   defp compare_fields(:mode), do: [:mode]
   defp compare_fields(:register), do: [:register]
   defp compare_fields(:register_type), do: [:register_type]
+  defp compare_fields(:registers), do: [:registers]
   defp compare_fields(:both), do: [:content, :cursor]
   defp compare_fields(fields) when is_list(fields), do: fields
 
@@ -153,6 +202,10 @@ defmodule Minga.Test.ConformanceCase do
 
   defp field_failure(:register_type, expected, actual) do
     if expected.register_type == actual.register_type, do: [], else: [:register_type]
+  end
+
+  defp field_failure(:registers, expected, actual) do
+    if Map.get(expected, :registers) == Map.get(actual, :registers), do: [], else: [:registers]
   end
 
   @spec assert_no_failures(scenario(), [atom()], NeovimOracle.result(), minga_result()) :: :ok
@@ -220,6 +273,7 @@ defmodule Minga.Test.ConformanceCase do
   defp actual_keys_for_failure(:mode), do: [:mode]
   defp actual_keys_for_failure(:register), do: [:register]
   defp actual_keys_for_failure(:register_type), do: [:register_type]
+  defp actual_keys_for_failure(:registers), do: [:registers]
 
   @spec actual_matches?(minga_result(), map()) :: boolean()
   defp actual_matches?(actual, expected_actual) when is_map(expected_actual) do
@@ -260,17 +314,32 @@ defmodule Minga.Test.ConformanceCase do
     Neovim expected:
       cursor: {#{expected.line}, #{expected.col}}
       mode: #{expected.mode}
-      register: #{inspect(expected.register)} (#{expected.register_type})
+      register: #{inspect(expected.register)} (#{expected.register_type})#{format_registers(Map.get(expected, :registers))}
       content:
     #{indent(expected.content)}
 
     Minga actual:
       cursor: {#{actual.line}, #{actual.col}}
       mode: #{actual.mode}
-      register: #{inspect(actual.register)} (#{actual.register_type})
+      register: #{inspect(actual.register)} (#{actual.register_type})#{format_registers(Map.get(actual, :registers))}
       content:
     #{indent(actual.content)}#{expected_actual_block}
     """
+  end
+
+  @spec format_registers(%{String.t() => %{content: String.t(), type: String.t()}} | nil) ::
+          String.t()
+  defp format_registers(nil), do: ""
+
+  defp format_registers(regs) when is_map(regs) do
+    entries =
+      regs
+      |> Enum.sort_by(fn {name, _} -> name end)
+      |> Enum.map_join(", ", fn {name, %{content: content, type: type}} ->
+        "\"#{name}\"=#{inspect(content)} (#{type})"
+      end)
+
+    "\n    registers: #{entries}"
   end
 
   @spec format_actual(map()) :: String.t()
