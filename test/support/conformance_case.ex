@@ -75,7 +75,7 @@ defmodule Minga.Test.ConformanceCase do
   defp run_minga(scenario) do
     ctx = EditorCase.start_editor(scenario.content, width: 120, height: 40)
     :ok = BufferProcess.move_to(ctx.buffer, {scenario.cursor.line, scenario.cursor.col})
-    EditorCase.send_keys_sync(ctx, scenario.keys)
+    run_minga_keys(ctx, scenario)
     state = EditorCase.editor_state(ctx)
     {line, col} = EditorCase.buffer_cursor(ctx)
     register = MingaEditor.Editing.registers(state)
@@ -94,6 +94,15 @@ defmodule Minga.Test.ConformanceCase do
       register: register_text,
       register_type: register_type
     }
+  end
+
+  @spec run_minga_keys(map(), scenario()) :: :ok
+  defp run_minga_keys(ctx, %{commands: commands}) when is_list(commands) do
+    Enum.each(commands, &EditorCase.send_keys_sync(ctx, &1))
+  end
+
+  defp run_minga_keys(ctx, %{keys: keys}) do
+    EditorCase.send_keys_sync(ctx, keys)
   end
 
   @spec compare_or_record_divergence(scenario(), NeovimOracle.result(), minga_result()) :: :ok
@@ -243,7 +252,7 @@ defmodule Minga.Test.ConformanceCase do
 
     """
     Vim conformance divergence: #{scenario.name}
-    Keys: #{inspect(scenario.keys)}
+    Keys: #{inspect(scenario[:keys] || scenario[:commands])}
     Compare: #{inspect(scenario.compare)}
     Failed: #{Enum.join(Enum.map(failures, &Atom.to_string/1), ", ")}
     Reason: #{reason || Map.get(scenario, :reason, "")}
