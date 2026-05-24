@@ -170,8 +170,10 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(parser_exe);
 
     // ── Snapshot executable (cell-grid rasterizer for Claude Code) ───────
-    // macOS-only: depends on CoreText for font rasterization.
-    if (target.result.os.tag == .macos) {
+    // Native macOS only: CoreText @cImport needs the system SDK, which
+    // Zig does not provide when cross-compiling (explicit -Dtarget).
+    const native_macos = target.result.os.tag == .macos and target.query.os_tag == null;
+    if (native_macos) {
         const snapshot_exe = b.addExecutable(.{
             .name = "minga-snapshot",
             .root_module = b.createModule(.{
@@ -252,8 +254,8 @@ pub fn build(b: *std.Build) void {
     const run_hook_runner_tests = b.addRunArtifact(hook_runner_tests);
     test_step.dependOn(&run_hook_runner_tests.step);
 
-    // Snapshot tests (png_writer, snapshot_surface) — macOS-only.
-    if (target.result.os.tag == .macos) {
+    // Snapshot tests — native macOS only (same SDK constraint as the exe).
+    if (native_macos) {
         const snapshot_tests = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/snapshot_main.zig"),
