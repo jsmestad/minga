@@ -23,8 +23,7 @@ defmodule MingaAgent.Providers.NativeReadOnlyTest do
         id: {:native_read_only, make_ref()}
       )
 
-    %{tools: tools} = :sys.get_state(provider)
-    names = Enum.map(tools, & &1.name)
+    names = provider |> Native.tools() |> Enum.map(& &1.name)
 
     assert names == ["read_file"]
     refute "write_file" in names
@@ -47,7 +46,7 @@ defmodule MingaAgent.Providers.NativeReadOnlyTest do
         id: {:native_read_only_allowlist, make_ref()}
       )
 
-    assert %{tools: []} = :sys.get_state(provider)
+    assert Native.tools(provider) == []
   end
 
   test "read_only provider clears configured hooks" do
@@ -68,7 +67,7 @@ defmodule MingaAgent.Providers.NativeReadOnlyTest do
         id: {:native_read_only_hooks, make_ref()}
       )
 
-    assert %{config: %{agent_hooks: []}} = :sys.get_state(provider)
+    assert Native.agent_hooks(provider) == []
   end
 
   defp tool(name) do

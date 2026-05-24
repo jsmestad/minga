@@ -179,8 +179,7 @@ defmodule Minga.DebugLogTest do
     Events.broadcast(:log_message, %LogMessageEvent{text: first, level: :info})
     Events.broadcast(:log_message, %LogMessageEvent{text: second, level: :info})
 
-    %{buffer: buffer} = :sys.get_state(pid)
-    buffered = IO.iodata_to_binary(buffer)
+    buffered = DebugLog.buffered_content(pid)
 
     assert buffered =~ first
     assert buffered =~ second

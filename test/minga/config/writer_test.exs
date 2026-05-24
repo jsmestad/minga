@@ -84,8 +84,7 @@ defmodule Minga.Config.WriterTest do
       refute File.exists?(path)
 
       assert :ok = Writer.set_reloading(writer, false)
-      state = :sys.get_state(writer)
-      assert state.timer != nil
+      assert Writer.pending?(writer)
 
       send(writer, :flush)
       :sys.get_state(writer)
