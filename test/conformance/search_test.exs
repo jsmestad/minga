@@ -98,7 +98,6 @@ defmodule Minga.Conformance.SearchTest do
       keys: "*",
       compare: :cursor
     },
-
     %{
       name: "* sets search register so n advances to next match",
       type: :search,
@@ -174,7 +173,8 @@ defmodule Minga.Conformance.SearchTest do
       compare: :cursor,
       tags: [:known_divergence],
       known_divergence: %{
-        reason: "Neovim interprets /-search patterns as vim magic-mode regex where \\. matches a literal dot. Minga performs plain substring search for slash-search input, so the literal two characters \\. do not match the dot in foo.bar.",
+        reason:
+          "Neovim interprets /-search patterns as vim magic-mode regex where \\. matches a literal dot. Minga performs plain substring search for slash-search input, so the literal two characters \\. do not match the dot in foo.bar.",
         failures: [:cursor],
         actual: %{line: 0, col: 0}
       }
