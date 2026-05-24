@@ -106,24 +106,25 @@ struct ExtensionPanelView: View {
         }
     }
 
-    @ViewBuilder
-    private func treeNodeView(_ node: Wire.PanelTreeNode, depth: Int) -> some View {
-        HStack(spacing: 4) {
-            if !node.children.isEmpty {
-                Image(systemName: node.expanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-            }
+    private func treeNodeView(_ node: Wire.PanelTreeNode, depth: Int) -> AnyView {
+        AnyView(VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 4) {
+                if !node.children.isEmpty {
+                    Image(systemName: node.expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                }
 
-            Text(node.label)
-                .font(.system(.body, design: .monospaced))
-        }
-        .padding(.leading, CGFloat(depth) * 16)
-
-        if node.expanded {
-            ForEach(Array(node.children.enumerated()), id: \.offset) { _, child in
-                treeNodeView(child, depth: depth + 1)
+                Text(node.label)
+                    .font(.system(.body, design: .monospaced))
             }
-        }
+            .padding(.leading, CGFloat(depth) * 16)
+
+            if node.expanded {
+                ForEach(Array(node.children.enumerated()), id: \.offset) { _, child in
+                    treeNodeView(child, depth: depth + 1)
+                }
+            }
+        })
     }
 }
