@@ -36,7 +36,8 @@ defmodule Minga.Conformance.DotRepeatTest do
       compare: @compare,
       tags: [:known_divergence],
       known_divergence: %{
-        reason: "Minga still changes the wrong trailing span for `cw`, compounding on dot repeat.",
+        reason:
+          "Minga still changes the wrong trailing span for `cw`, compounding on dot repeat.",
         failures: [:content, :cursor],
         actual: %{content: "hellowo hello", line: 0, col: 12}
       }
@@ -58,7 +59,8 @@ defmodule Minga.Conformance.DotRepeatTest do
       compare: @compare,
       tags: [:known_divergence],
       known_divergence: %{
-        reason: "Minga still deletes the wrong trailing span for `dw`, count override compounds the error.",
+        reason:
+          "Minga still deletes the wrong trailing span for `dw`, count override compounds the error.",
         failures: [:content],
         actual: %{content: "ive"}
       }
@@ -72,7 +74,8 @@ defmodule Minga.Conformance.DotRepeatTest do
       compare: @compare,
       tags: [:known_divergence],
       known_divergence: %{
-        reason: "Minga indents with 2 spaces instead of Neovim's default tab, and leaves the cursor shifted right.",
+        reason:
+          "Minga indents with 2 spaces instead of Neovim's default tab, and leaves the cursor shifted right.",
         failures: [:content, :cursor],
         actual: %{content: "  one\n  two\nthree", line: 1, col: 4}
       }
@@ -86,7 +89,8 @@ defmodule Minga.Conformance.DotRepeatTest do
       compare: @compare,
       tags: [:known_divergence],
       known_divergence: %{
-        reason: "Neovim inserts a tab on `.` with no prior change in a fresh buffer; Minga treats it as a no-op.",
+        reason:
+          "Neovim inserts a tab on `.` with no prior change in a fresh buffer; Minga treats it as a no-op.",
         failures: [:content],
         actual: %{content: "one two"}
       }

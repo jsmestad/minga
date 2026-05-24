@@ -133,12 +133,13 @@ defmodule Minga.Test.ConformanceCase do
         base
 
       names ->
-        named = Map.new(names, fn name ->
-          case Registers.get(reg_state, name) do
-            {text, type} -> {name, %{content: text, type: register_type_label(type)}}
-            nil -> {name, %{content: "", type: "v"}}
-          end
-        end)
+        named =
+          Map.new(names, fn name ->
+            case Registers.get(reg_state, name) do
+              {text, type} -> {name, %{content: text, type: register_type_label(type)}}
+              nil -> {name, %{content: "", type: "v"}}
+            end
+          end)
 
         Map.put(base, :registers, named)
     end
