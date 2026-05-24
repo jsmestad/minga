@@ -74,6 +74,7 @@ pub fn deinit(self: *SnapshotSurface) void {
 pub fn clear(self: *SnapshotSurface) void {
     @memset(self.pixels, 0);
     self.cursor_visible = false;
+    self.rendered = false;
 }
 
 pub fn fillBg(self: *SnapshotSurface, bg: u24) void {
@@ -194,7 +195,7 @@ pub fn writeCell(self: *SnapshotSurface, col: u16, row: u16, cell: Cell) void {
 
     // Underline decoration
     if (cell.attrs & protocol.ATTR_UNDERLINE != 0) {
-        const ul_y = px_y + self.cell_height - 2;
+        const ul_y = px_y + self.cell_height -| 2;
         const ul_r: u8 = if (cell.ul_color != 0) @intCast((cell.ul_color >> 16) & 0xFF) else fg_r;
         const ul_g: u8 = if (cell.ul_color != 0) @intCast((cell.ul_color >> 8) & 0xFF) else fg_g;
         const ul_b: u8 = if (cell.ul_color != 0) @intCast(cell.ul_color & 0xFF) else fg_b;

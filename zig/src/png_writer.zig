@@ -65,7 +65,7 @@ fn writeChunk(writer: *std.Io.Writer, chunk_type: *const [4]u8, data: []const u8
     try writer.writeAll(chunk_type);
     if (data.len > 0) try writer.writeAll(data);
 
-    var hasher = std.hash.crc.Crc32SmallWithPoly(.IEEE);
+    var hasher = std.hash.crc.Crc32IsoHdlc.init();
     hasher.update(chunk_type);
     if (data.len > 0) hasher.update(data);
     var crc_buf: [4]u8 = undefined;
