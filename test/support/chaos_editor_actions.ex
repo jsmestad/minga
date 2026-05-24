@@ -3,8 +3,8 @@ defmodule Minga.Chaos.EditorActions do
   Functions that execute editor actions against the real headless editor.
 
   Each function sends input to the editor, waits for the GenServer to
-  process it via `:sys.get_state` barrier, and returns a result map
-  for postcondition checking.
+  process it via a synchronous `GenServer.call` barrier, and returns a
+  result map for postcondition checking.
 
   These are the "real system" calls that `proper_statem` invokes during
   property evaluation.
@@ -267,13 +267,9 @@ defmodule Minga.Chaos.EditorActions do
     sync_barrier(editor)
   end
 
-  # Synchronization barrier that returns instantly if the process is dead.
-  # :sys.get_state uses gen:call internally, which monitors the target.
-  # A dead process triggers the monitor immediately (:noproc), so the
-  # catch fires in microseconds instead of blocking until a timeout.
   @spec sync_barrier(pid()) :: :ok | :dead
   defp sync_barrier(pid) do
-    :sys.get_state(pid)
+    GenServer.call(pid, :api_mode, 500)
     :ok
   catch
     :exit, _ -> :dead

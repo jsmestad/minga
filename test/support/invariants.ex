@@ -25,52 +25,38 @@ defmodule Minga.Test.Invariants do
 
   @doc "Collects editor state into a result map for postcondition checking."
   @spec collect_result(map()) :: map()
-  def collect_result(%{editor: editor}) do
-    state =
+  def collect_result(%{editor: editor, buffer: buffer}) do
+    mode =
       try do
-        :sys.get_state(editor)
+        GenServer.call(editor, :api_mode, 500)
       catch
         :exit, _ -> nil
       end
 
-    if is_nil(state) do
+    if is_nil(mode) do
       %{alive?: false, mode: nil, cursor: nil, line_count: 0, content: nil, lines: []}
     else
-      collect_from_state(state)
+      collect_from_buffer(mode, buffer)
     end
   end
 
-  defp collect_from_state(state) do
-    mode = Minga.Editing.mode(state)
-    buf = state.workspace.buffers.active
+  @spec collect_from_buffer(atom(), pid()) :: map()
+  defp collect_from_buffer(mode, buffer) do
+    {cursor_line, cursor_col} = BufferProcess.cursor(buffer)
+    content = BufferProcess.content(buffer)
+    lines = String.split(content, "\n")
 
-    if is_pid(buf) do
-      {cursor_line, cursor_col} = BufferProcess.cursor(buf)
-      content = BufferProcess.content(buf)
-      lines = String.split(content, "\n")
-
-      %{
-        alive?: true,
-        mode: mode,
-        cursor: {cursor_line, cursor_col},
-        line_count: length(lines),
-        content: content,
-        lines: lines
-      }
-    else
-      # No active buffer (e.g., all buffers closed).
-      %{alive?: true, mode: mode, cursor: {0, 0}, line_count: 1, content: "", lines: [""]}
-    end
+    %{
+      alive?: true,
+      mode: mode,
+      cursor: {cursor_line, cursor_col},
+      line_count: length(lines),
+      content: content,
+      lines: lines
+    }
   catch
     :exit, _ ->
-      %{
-        alive?: true,
-        mode: Minga.Editing.mode(state),
-        cursor: {0, 0},
-        line_count: 1,
-        content: "",
-        lines: [""]
-      }
+      %{alive?: true, mode: mode, cursor: {0, 0}, line_count: 1, content: "", lines: [""]}
   end
 
   @doc "Asserts all invariants hold. Returns `:ok` or raises."
