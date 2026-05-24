@@ -100,7 +100,7 @@ defmodule Minga.Conformance.WindowsTest do
       cursor: %{line: 0, col: 0},
       commands: ["vsplit", "close"],
       minga_keys: ["<Space>wv", "<Space>wd"],
-      compare: [:window_count]
+      compare: [:window_count, :active_window]
     },
 
     # ── Last window protection ──────────────────────────────────────────────
@@ -111,7 +111,7 @@ defmodule Minga.Conformance.WindowsTest do
       cursor: %{line: 0, col: 0},
       commands: ["close"],
       minga_keys: ["<Space>wd"],
-      compare: [:window_count]
+      compare: [:window_count, :active_window]
     },
 
     # ── Cursor position independent per window ──────────────────────────────
@@ -167,6 +167,17 @@ defmodule Minga.Conformance.WindowsTest do
       commands: ["vsplit", "normal! j$", "wincmd l"],
       minga_keys: ["<Space>wv", "j$", "<Space>wl"],
       compare: [:window_count, :cursors]
+    },
+
+    # ── Different buffers in different windows ──────────────────────────────
+    %{
+      name: "different buffers in split windows are independent",
+      type: :window,
+      content: "original content",
+      cursor: %{line: 0, col: 0},
+      commands: ["vsplit", "enew"],
+      minga_keys: ["<Space>wv", ":enew<CR>"],
+      compare: [:window_count, :buffers]
     }
   ]
 

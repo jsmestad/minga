@@ -343,6 +343,7 @@ defmodule Minga.Test.ConformanceCase do
     tree = windows.tree
     active_id = windows.active
 
+    # Subtract 2 rows for modeline and minibuffer, matching Editor.Layout
     screen_rect = {0, 0, ctx.width, ctx.height - 2}
 
     window_list =
@@ -380,11 +381,9 @@ defmodule Minga.Test.ConformanceCase do
       |> String.split("\n", parts: 2)
       |> hd()
 
-    {line, col} = BufferProcess.cursor(win.buffer)
-
     cursor =
       if win.id == active_id do
-        {line, col}
+        BufferProcess.cursor(win.buffer)
       else
         win.cursor
       end
@@ -444,7 +443,7 @@ defmodule Minga.Test.ConformanceCase do
 
   @spec window_compare_fields(NeovimOracle.compare_target()) :: [atom()]
   defp window_compare_fields(:window_state),
-    do: [:window_count, :active_window, :cursors, :layout]
+    do: [:window_count, :active_window, :cursors, :buffers, :layout]
 
   defp window_compare_fields(fields) when is_list(fields), do: fields
 
@@ -470,8 +469,9 @@ defmodule Minga.Test.ConformanceCase do
       [:active_window]
     else
       nvim_sorted = Enum.sort_by(expected.windows, &{&1.row_pos, &1.col_pos})
+      minga_sorted = Enum.sort_by(actual.windows, &{&1.row_pos, &1.col_pos})
       nvim_active_index = Enum.find_index(nvim_sorted, & &1.active)
-      minga_active_index = Enum.find_index(actual.windows, & &1.active)
+      minga_active_index = Enum.find_index(minga_sorted, & &1.active)
 
       if nvim_active_index == minga_active_index, do: [], else: [:active_window]
     end
@@ -486,9 +486,30 @@ defmodule Minga.Test.ConformanceCase do
         |> Enum.sort_by(&{&1.row_pos, &1.col_pos})
         |> Enum.map(&{&1.line, &1.col})
 
-      minga_cursors = Enum.map(actual.windows, &{&1.line, &1.col})
+      minga_cursors =
+        actual.windows
+        |> Enum.sort_by(&{&1.row_pos, &1.col_pos})
+        |> Enum.map(&{&1.line, &1.col})
 
       if nvim_cursors == minga_cursors, do: [], else: [:cursors]
+    end
+  end
+
+  defp window_field_failure(:buffers, expected, actual) do
+    if expected.window_count != actual.window_count do
+      [:buffers]
+    else
+      nvim_buffers =
+        expected.windows
+        |> Enum.sort_by(&{&1.row_pos, &1.col_pos})
+        |> Enum.map(& &1.buffer_first_line)
+
+      minga_buffers =
+        actual.windows
+        |> Enum.sort_by(&{&1.row_pos, &1.col_pos})
+        |> Enum.map(& &1.buffer_first_line)
+
+      if nvim_buffers == minga_buffers, do: [], else: [:buffers]
     end
   end
 
@@ -501,7 +522,10 @@ defmodule Minga.Test.ConformanceCase do
         |> Enum.sort_by(&{&1.row_pos, &1.col_pos})
         |> Enum.map(&relative_position/1)
 
-      minga_layout = Enum.map(actual.windows, &relative_position/1)
+      minga_layout =
+        actual.windows
+        |> Enum.sort_by(&{&1.row_pos, &1.col_pos})
+        |> Enum.map(&relative_position/1)
 
       if nvim_layout == minga_layout, do: [], else: [:layout]
     end
