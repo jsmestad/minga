@@ -143,9 +143,23 @@ struct SearchToolbar: View {
                 encoder?.sendSearchNext()
             }
 
-            // Search flag toggles (case, whole word, regex) are hidden until the
-            // search engine supports flag-aware matching. The protocol and state
-            // plumbing is in place; only the UI buttons are gated.
+            // Case sensitive toggle
+            toggleButton(label: "Aa", accessibilityLabel: "Match Case", isActive: searchState.caseSensitive) {
+                searchState.caseSensitive.toggle()
+                sendQuery()
+            }
+
+            // Whole word toggle
+            toggleButton(label: "ab", accessibilityLabel: "Match Whole Word", isActive: searchState.wholeWord, bordered: true) {
+                searchState.wholeWord.toggle()
+                sendQuery()
+            }
+
+            // Regex toggle
+            toggleButton(label: ".*", accessibilityLabel: "Use Regular Expression", isActive: searchState.regex) {
+                searchState.regex.toggle()
+                sendQuery()
+            }
 
             Spacer(minLength: 0)
 

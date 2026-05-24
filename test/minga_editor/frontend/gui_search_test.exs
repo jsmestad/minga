@@ -285,4 +285,82 @@ defmodule MingaEditor.Frontend.GUISearchTest do
       assert result.gui_search == nil
     end
   end
+
+  # ── Search engine flag support ──
+
+  describe "Search.find_next with opts" do
+    alias Minga.Editing.Search
+
+    test "case-insensitive search finds uppercase match" do
+      assert {0, 0} ==
+               Search.find_next("Hello world", "hello", {0, 0}, :forward, case_sensitive: false)
+    end
+
+    test "case-sensitive search does not find mismatched case" do
+      assert nil ==
+               Search.find_next("Hello world", "hello", {0, 0}, :forward, case_sensitive: true)
+    end
+
+    test "whole-word search skips partial matches" do
+      assert {0, 7} == Search.find_next("foobar foo", "foo", {0, 0}, :forward, whole_word: true)
+    end
+
+    test "whole-word search finds standalone word" do
+      assert {0, 0} == Search.find_next("foo bar", "foo", {0, 0}, :forward, whole_word: true)
+    end
+
+    test "regex search finds pattern" do
+      assert {0, 3} == Search.find_next("abc123 def", "\\d+", {0, 0}, :forward, regex: true)
+    end
+
+    test "regex search wraps regex metacharacters when not in regex mode" do
+      assert {0, 0} == Search.find_next("a.b other", "a.b", {0, 0}, :forward, regex: false)
+    end
+
+    test "regex mode treats dot as wildcard" do
+      assert {0, 0} == Search.find_next("axb other", "a.b", {0, 0}, :forward, regex: true)
+    end
+  end
+
+  describe "Search.find_all_in_range with opts" do
+    alias Minga.Editing.Search
+
+    test "case-insensitive finds all case variants" do
+      lines = ["Hello hello HELLO"]
+      matches = Search.find_all_in_range(lines, "hello", 0, case_sensitive: false)
+      assert length(matches) == 3
+    end
+
+    test "whole-word skips partial matches" do
+      lines = ["foobar foo barfoo"]
+      matches = Search.find_all_in_range(lines, "foo", 0, whole_word: true)
+      assert [%{col: 7}] = matches
+    end
+
+    test "regex finds pattern matches" do
+      lines = ["abc 1 def 2"]
+      matches = Search.find_all_in_range(lines, "\\d+", 0, regex: true)
+      assert length(matches) == 2
+    end
+  end
+
+  describe "Search.substitute with opts" do
+    alias Minga.Editing.Search
+
+    test "case-insensitive substitute replaces all case variants" do
+      {result, count} =
+        Search.substitute("Hello hello HELLO", "hello", "world", true, case_sensitive: false)
+
+      assert result == "world world world"
+      assert count == 3
+    end
+
+    test "whole-word substitute skips partial matches" do
+      {result, count} =
+        Search.substitute("foobar foo barfoo", "foo", "baz", true, whole_word: true)
+
+      assert result == "foobar baz barfoo"
+      assert count == 1
+    end
+  end
 end

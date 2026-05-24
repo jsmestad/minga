@@ -50,7 +50,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   alias Minga.Project.FileTree
 
-
   @typedoc "Editor state (re-exported for brevity)."
   @type state :: EditorState.t()
 
@@ -687,8 +686,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
     if query != "" do
       content = Buffer.content(buf)
+      search_opts = gui_search_opts(state)
 
-      case Minga.Editing.search_next(content, query, Buffer.cursor(buf), :forward) do
+      case Minga.Editing.search_next(content, query, Buffer.cursor(buf), :forward, search_opts) do
         nil ->
           state
 
@@ -724,14 +724,16 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
        when is_pid(buf) and is_binary(pattern) and pattern != "" do
     content = Buffer.content(buf)
     cursor = Buffer.cursor(buf)
+    search_opts = gui_search_opts(state)
 
-    case Minga.Editing.search_next(content, pattern, cursor, :forward) do
+    case Minga.Editing.search_next(content, pattern, cursor, :forward, search_opts) do
       nil ->
         EditorState.set_status(state, "No more matches")
 
       {line, col} ->
         Buffer.move_to(buf, {line, col})
-        new_content = replace_single_match(content, line, col, byte_size(pattern), replacement)
+        match_len = compute_match_len(content, pattern, line, col, search_opts)
+        new_content = replace_single_match(content, line, col, match_len, replacement)
         Buffer.replace_content(buf, new_content)
         MingaEditor.Commands.execute(state, :search_next)
     end
@@ -745,7 +747,10 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
        )
        when is_pid(buf) and is_binary(pattern) and pattern != "" do
     content = Buffer.content(buf)
-    {new_content, count} = Minga.Editing.substitute(content, pattern, replacement, true)
+    search_opts = gui_search_opts(state)
+
+    {new_content, count} =
+      Minga.Editing.substitute(content, pattern, replacement, true, search_opts)
 
     if count > 0 do
       Buffer.replace_content(buf, new_content)
@@ -1261,5 +1266,52 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       end
     end)
     |> Enum.join("\n")
+  end
+
+  @spec gui_search_opts(state()) :: Minga.Editing.Search.search_opts()
+  defp gui_search_opts(%{workspace: %{search: %{gui_search: %{} = gs}}}) do
+    [
+      case_sensitive: Map.get(gs, :case_sensitive, true),
+      whole_word: Map.get(gs, :whole_word, false),
+      regex: Map.get(gs, :regex, false)
+    ]
+  end
+
+  defp gui_search_opts(_state), do: []
+
+  @spec compute_match_len(
+          String.t(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Minga.Editing.Search.search_opts()
+        ) :: non_neg_integer()
+  defp compute_match_len(_content, pattern, _match_line, _match_col, []),
+    do: byte_size(pattern)
+
+  defp compute_match_len(content, pattern, match_line, match_col, opts) do
+    use_regex = Keyword.get(opts, :regex, false)
+    case_insensitive = not Keyword.get(opts, :case_sensitive, true)
+
+    if use_regex or case_insensitive do
+      line = content |> :binary.split("\n", [:global]) |> Enum.at(match_line)
+      searchable = binary_part(line, match_col, byte_size(line) - match_col)
+      regex_match_len(pattern, searchable, use_regex, case_insensitive)
+    else
+      byte_size(pattern)
+    end
+  end
+
+  @spec regex_match_len(String.t(), String.t(), boolean(), boolean()) :: non_neg_integer()
+  defp regex_match_len(pattern, searchable, use_regex, case_insensitive) do
+    regex_source = if use_regex, do: pattern, else: Regex.escape(pattern)
+    regex_opts = if case_insensitive, do: "i", else: ""
+
+    with {:ok, regex} <- Regex.compile(regex_source, regex_opts),
+         [{0, len}] <- Regex.run(regex, searchable, return: :index, capture: :first) do
+      len
+    else
+      _ -> byte_size(pattern)
+    end
   end
 end

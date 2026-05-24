@@ -1976,7 +1976,13 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
     case search.gui_search do
       %{} = gs ->
-        {match_count, current_index} = compute_search_stats(ctx, search.last_pattern)
+        search_opts = [
+          case_sensitive: Map.get(gs, :case_sensitive, true),
+          whole_word: Map.get(gs, :whole_word, false),
+          regex: Map.get(gs, :regex, false)
+        ]
+
+        {match_count, current_index} = compute_search_stats(ctx, search.last_pattern, search_opts)
 
         fp = :erlang.phash2({true, match_count, current_index, gs})
 
@@ -1997,17 +2003,18 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     end
   end
 
-  @spec compute_search_stats(ctx(), String.t() | nil) :: {non_neg_integer(), non_neg_integer()}
-  defp compute_search_stats(_ctx, nil), do: {0, 0}
-  defp compute_search_stats(_ctx, ""), do: {0, 0}
+  @spec compute_search_stats(ctx(), String.t() | nil, Minga.Editing.Search.search_opts()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp compute_search_stats(_ctx, nil, _opts), do: {0, 0}
+  defp compute_search_stats(_ctx, "", _opts), do: {0, 0}
 
-  defp compute_search_stats(ctx, pattern) do
+  defp compute_search_stats(ctx, pattern, opts) do
     buf = ctx.buffers.active
 
     if is_pid(buf) do
       content = Minga.Buffer.content(buf)
       lines = :binary.split(content, "\n", [:global])
-      all_matches = Minga.Editing.Search.find_all_in_range(lines, pattern, 0)
+      all_matches = Minga.Editing.Search.find_all_in_range(lines, pattern, 0, opts)
       match_count = length(all_matches)
 
       if match_count > 0 do
