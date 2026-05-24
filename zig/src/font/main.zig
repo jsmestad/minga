@@ -1,14 +1,18 @@
 /// Font — top-level font module providing glyph caching and atlas management.
 ///
-/// Wraps the platform-specific font loader (CoreText on macOS) and the
-/// texture atlas, adding a glyph cache that maps codepoints → GlyphInfo.
+/// Wraps the platform-specific font loader (CoreText on macOS, FreeType on Linux)
+/// and the texture atlas, adding a glyph cache that maps codepoints → GlyphInfo.
 /// New glyphs are rasterized on demand when first requested.
 const std = @import("std");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 
 pub const Atlas = @import("atlas.zig");
-pub const CoreTextFont = if (builtin.os.tag == .macos) @import("coretext.zig") else struct {};
+const PlatformFont = switch (builtin.os.tag) {
+    .macos => @import("coretext.zig"),
+    .linux => @import("freetype.zig"),
+    else => struct {},
+};
 
 /// Glyph cache entry with atlas coordinates and metrics.
 pub const Glyph = struct {
@@ -30,7 +34,7 @@ pub const Glyph = struct {
 /// Font face with glyph cache. Thread-safe for concurrent lookups
 /// (cache is populated lazily with a mutex).
 pub const Face = struct {
-    loader: CoreTextFont,
+    loader: PlatformFont,
     atlas: Atlas,
     cache: std.AutoHashMapUnmanaged(u32, Glyph),
     alloc: Allocator,
@@ -44,7 +48,7 @@ pub const Face = struct {
     /// `scale` is the backing scale factor (2.0 for Retina) — glyph bitmaps
     /// are rasterized at this multiple for crisp rendering on HiDPI displays.
     pub fn init(alloc: Allocator, name: []const u8, size: f64, scale: f64) !Face {
-        var loader = try CoreTextFont.init(alloc, name, size, scale);
+        var loader = try PlatformFont.init(alloc, name, size, scale);
         errdefer loader.deinit();
 
         // Start with a 512×512 BGRA atlas — supports both text (white+alpha)
@@ -93,7 +97,7 @@ pub const Face = struct {
         return glyph;
     }
 
-    fn glyphFromInfo(info: CoreTextFont.GlyphInfo) Glyph {
+    fn glyphFromInfo(info: PlatformFont.GlyphInfo) Glyph {
         return .{
             .atlas_x = info.atlas_x,
             .atlas_y = info.atlas_y,
@@ -149,7 +153,7 @@ test "Face preloadAscii succeeds" {
 
 test {
     _ = Atlas;
-    if (builtin.os.tag == .macos) {
-        _ = CoreTextFont;
+    if (builtin.os.tag == .macos or builtin.os.tag == .linux) {
+        _ = PlatformFont;
     }
 }
