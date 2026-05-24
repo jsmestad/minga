@@ -39,6 +39,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x87   | gui_board           | Board card grid state      |
   | 0x97   | gui_config_state    | Settings panel state       |
   | 0x9E   | gui_search_state    | Search toolbar state       |
+  | 0x9F   | gui_sidebars        | Semantic sidebar metadata  |
 
   ## GUI Actions (Frontend → BEAM)
 
@@ -105,6 +106,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x54       | search_replace          |
   | 0x55       | search_replace_all      |
   | 0x56       | search_dismiss          |
+  | 0x57       | sidebar_action          |
   | 0x34       | system_will_sleep       |
   | 0x35       | system_did_wake         |
 
@@ -261,9 +263,11 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_search_replace Opcodes.gui_action_search_replace()
   @gui_action_search_replace_all Opcodes.gui_action_search_replace_all()
   @gui_action_search_dismiss Opcodes.gui_action_search_dismiss()
+  @gui_action_sidebar_action Opcodes.gui_action_sidebar_action()
 
   @op_gui_edit_timeline Opcodes.gui_edit_timeline()
   @op_gui_search_state Opcodes.gui_search_state()
+  @op_gui_sidebars Opcodes.gui_sidebars()
 
   @search_flag_replace_mode 0x01
   @search_flag_case_sensitive 0x02
@@ -440,6 +444,20 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:search_replace, replacement :: String.t()}
           | {:search_replace_all, replacement :: String.t()}
           | :search_dismiss
+          | {:sidebar_action, sidebar_id :: String.t(), kind :: String.t(), action :: String.t()}
+
+  @typedoc "Semantic sidebar metadata sent to native GUI frontends."
+  @type sidebar_metadata :: %{
+          required(:id) => String.t(),
+          required(:display_name) => String.t(),
+          required(:semantic_kind) => String.t(),
+          required(:icon) => String.t(),
+          required(:order) => non_neg_integer(),
+          required(:visible?) => boolean(),
+          required(:focused?) => boolean(),
+          required(:preferred_width) => non_neg_integer(),
+          optional(:badge_count) => non_neg_integer() | nil
+        }
 
   @typedoc "BEAM Observatory payload sent to native GUI frontends."
   @type observatory_data :: Observatory.Data.t()
@@ -1589,6 +1607,43 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     payload = <<active_byte::8, count::16, idx::16, flag_byte::8>>
 
     <<@op_gui_search_state, byte_size(payload)::16, payload::binary>>
+  end
+
+  @doc "Encodes semantic sidebar metadata for native GUI frontend hosts."
+  @spec encode_gui_sidebars([sidebar_metadata()], String.t() | nil) :: binary()
+  def encode_gui_sidebars(sidebars, active_id) when is_list(sidebars) do
+    entries =
+      sidebars
+      |> Enum.sort_by(&Map.fetch!(&1, :order))
+      |> Enum.take(@max_u16)
+      |> Enum.map(&encode_sidebar_metadata/1)
+
+    active = active_id || ""
+
+    payload =
+      IO.iodata_to_binary([<<1::8, length(entries)::16>>, encode_string16(active), entries])
+
+    <<@op_gui_sidebars, byte_size(payload)::32, payload::binary>>
+  end
+
+  @spec encode_sidebar_metadata(sidebar_metadata()) :: binary()
+  defp encode_sidebar_metadata(sidebar) do
+    flags =
+      0
+      |> maybe_flag(Map.get(sidebar, :visible?, false), 0)
+      |> maybe_flag(Map.get(sidebar, :focused?, false), 1)
+
+    badge = Map.get(sidebar, :badge_count)
+    badge_count = if is_integer(badge), do: clamp_u16(badge), else: @max_u16
+
+    IO.iodata_to_binary([
+      encode_string16(Map.fetch!(sidebar, :id)),
+      encode_string16(Map.fetch!(sidebar, :display_name)),
+      encode_string16(Map.fetch!(sidebar, :semantic_kind)),
+      encode_string16(Map.get(sidebar, :icon, "")),
+      <<clamp_u16(Map.fetch!(sidebar, :order))::16, flags::8,
+        clamp_u16(Map.get(sidebar, :preferred_width, 0))::16, badge_count::16>>
+    ])
   end
 
   # ── BEAM Observatory (forward-compatible, 0x9A) ──
@@ -3831,7 +3886,19 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_search_dismiss, <<>>), do: {:ok, :search_dismiss}
 
+  def decode_gui_action(@gui_action_sidebar_action, payload), do: decode_sidebar_action(payload)
+
   def decode_gui_action(_, _), do: :error
+
+  @spec decode_sidebar_action(binary()) :: {:ok, gui_action()} | :error
+  defp decode_sidebar_action(
+         <<id_len::16, sidebar_id::binary-size(id_len), kind_len::16, kind::binary-size(kind_len),
+           action_len::16, action::binary-size(action_len)>>
+       ) do
+    {:ok, {:sidebar_action, sidebar_id, kind, action}}
+  end
+
+  defp decode_sidebar_action(_payload), do: :error
 
   @spec decode_panel_action_context(binary()) :: map()
   defp decode_panel_action_context(<<0x01, index::16, _rest::binary>>), do: %{index: index}

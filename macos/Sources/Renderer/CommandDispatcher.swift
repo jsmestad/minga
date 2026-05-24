@@ -498,6 +498,9 @@ final class CommandDispatcher {
             } else {
                 guiState.searchState.hide()
             }
+
+        case .guiSidebars(_, let activeId, let sidebars):
+            guiState.sidebarHostState.update(activeId: activeId, sidebars: sidebars)
         }
     }
 

@@ -131,6 +131,7 @@ pub const OP_GUI_EDIT_TIMELINE = opcodes.OP_GUI_EDIT_TIMELINE;
 pub const OP_GUI_EXTENSION_OVERLAY = opcodes.OP_GUI_EXTENSION_OVERLAY;
 pub const OP_GUI_EXTENSION_PANEL = opcodes.OP_GUI_EXTENSION_PANEL;
 pub const OP_GUI_SEARCH_STATE = opcodes.OP_GUI_SEARCH_STATE;
+pub const OP_GUI_SIDEBARS = opcodes.OP_GUI_SIDEBARS;
 
 pub const GUI_ACTION_SELECT_TAB = opcodes.GUI_ACTION_SELECT_TAB;
 pub const GUI_ACTION_CLOSE_TAB = opcodes.GUI_ACTION_CLOSE_TAB;
@@ -218,6 +219,7 @@ pub const GUI_ACTION_SEARCH_PREV = opcodes.GUI_ACTION_SEARCH_PREV;
 pub const GUI_ACTION_SEARCH_REPLACE = opcodes.GUI_ACTION_SEARCH_REPLACE;
 pub const GUI_ACTION_SEARCH_REPLACE_ALL = opcodes.GUI_ACTION_SEARCH_REPLACE_ALL;
 pub const GUI_ACTION_SEARCH_DISMISS = opcodes.GUI_ACTION_SEARCH_DISMISS;
+pub const GUI_ACTION_SIDEBAR_ACTION = opcodes.GUI_ACTION_SIDEBAR_ACTION;
 // END GENERATED OPCODE EXPORTS.
 
 // Log levels
@@ -1169,7 +1171,7 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
             return .noop;
         },
         else => {
-            if (data[0] == OP_GUI_FILE_TREE or data[0] == OP_GUI_OBSERVATORY) {
+            if (data[0] == OP_GUI_FILE_TREE or data[0] == OP_GUI_OBSERVATORY or data[0] == OP_GUI_SIDEBARS) {
                 if (rest.len < 4) return error.Malformed;
                 const payload_len: usize = std.mem.readInt(u32, rest[0..4], .big);
                 if (rest.len < 4 + payload_len) return error.Malformed;
@@ -1312,7 +1314,7 @@ pub fn commandSize(payload: []const u8) usize {
             }
             break :blk offset;
         },
-        OP_GUI_FILE_TREE, OP_GUI_OBSERVATORY => blk: {
+        OP_GUI_FILE_TREE, OP_GUI_OBSERVATORY, OP_GUI_SIDEBARS => blk: {
             if (payload.len < 5) break :blk payload.len;
             const payload_len: usize = std.mem.readInt(u32, payload[1..5], .big);
             break :blk 5 + payload_len;

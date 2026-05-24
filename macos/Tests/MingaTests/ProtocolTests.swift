@@ -128,6 +128,52 @@ struct ProtocolDecoderTests {
         #expect(enabled == false)
     }
 
+    @Test("Decode gui_sidebars command")
+    func decodeGuiSidebars() throws {
+        var payload = Data()
+        payload.append(1)
+        appendConfigStateU16(&payload, 2)
+        appendConfigStateString16(&payload, "file_tree")
+
+        appendConfigStateString16(&payload, "file_tree")
+        appendConfigStateString16(&payload, "File Tree")
+        appendConfigStateString16(&payload, "file_tree")
+        appendConfigStateString16(&payload, "folder")
+        appendConfigStateU16(&payload, 10)
+        payload.append(0x03)
+        appendConfigStateU16(&payload, 32)
+        appendConfigStateU16(&payload, UInt16.max)
+
+        appendConfigStateString16(&payload, "git_status")
+        appendConfigStateString16(&payload, "Git Status")
+        appendConfigStateString16(&payload, "git_status")
+        appendConfigStateString16(&payload, "point.3.filled.connected.trianglepath.dotted")
+        appendConfigStateU16(&payload, 20)
+        payload.append(0x00)
+        appendConfigStateU16(&payload, 30)
+        appendConfigStateU16(&payload, 7)
+
+        var encoded = Data([OP_GUI_SIDEBARS])
+        appendConfigStateU32(&encoded, UInt32(payload.count))
+        encoded.append(payload)
+
+        let (cmd, size) = try decodeCommand(data: encoded, offset: 0)
+        #expect(size == encoded.count)
+        guard case .guiSidebars(let version, let activeId, let sidebars) = cmd else {
+            Issue.record("Expected .guiSidebars, got \(String(describing: cmd))")
+            return
+        }
+        #expect(version == 1)
+        #expect(activeId == "file_tree")
+        #expect(sidebars.count == 2)
+        #expect(sidebars[0].id == "file_tree")
+        #expect(sidebars[0].visible)
+        #expect(sidebars[0].focused)
+        #expect(sidebars[0].badgeCount == nil)
+        #expect(sidebars[1].id == "git_status")
+        #expect(sidebars[1].badgeCount == 7)
+    }
+
     @Test("Decode gui_config_state command")
     func decodeGuiConfigState() throws {
         var payload = Data()
@@ -460,6 +506,7 @@ final class SpyEncoder: InputEncoder, Sendable {
         case completionSelect(index: UInt16)
         case breadcrumbClick(index: UInt8)
         case togglePanel(panel: UInt8)
+        case sidebarAction(sidebarId: String, kind: String, action: String)
         case newTab
         case systemWillSleep
         case systemDidWake
@@ -565,6 +612,7 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendCompletionSelect(index: UInt16) { state.withLock { $0.guiActions.append(.completionSelect(index: index)) } }
     func sendBreadcrumbClick(index: UInt8) { state.withLock { $0.guiActions.append(.breadcrumbClick(index: index)) } }
     func sendTogglePanel(panel: UInt8) { state.withLock { $0.guiActions.append(.togglePanel(panel: panel)) } }
+    func sendSidebarAction(sidebarId: String, kind: String, action: String) { state.withLock { $0.guiActions.append(.sidebarAction(sidebarId: sidebarId, kind: kind, action: action)) } }
     func sendNewTab() { state.withLock { $0.guiActions.append(.newTab) } }
     func sendSystemWillSleep() { state.withLock { $0.guiActions.append(.systemWillSleep) } }
     func sendSystemDidWake() { state.withLock { $0.guiActions.append(.systemDidWake) } }

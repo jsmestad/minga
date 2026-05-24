@@ -374,6 +374,25 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
     end
   end
 
+  describe "decode_gui_action for sidebar actions" do
+    test "decodes semantic sidebar action payload" do
+      id = "git_status"
+      kind = "git_status"
+      action = "toggle"
+
+      payload =
+        <<byte_size(id)::16, id::binary, byte_size(kind)::16, kind::binary, byte_size(action)::16,
+          action::binary>>
+
+      assert {:ok, {:sidebar_action, id, kind, action}} ==
+               ProtocolGUI.decode_gui_action(0x57, payload)
+    end
+
+    test "rejects malformed semantic sidebar action payload" do
+      assert :error == ProtocolGUI.decode_gui_action(0x57, <<0, 20, "short">>)
+    end
+  end
+
   describe "decode_gui_action for observatory inspection" do
     test "decodes selected process PID" do
       pid = "#PID<0.123.0>"

@@ -383,6 +383,14 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     state
   end
 
+  defp dispatch_action(state, {:sidebar_action, _sidebar_id, kind, "toggle"}) do
+    dispatch_sidebar_toggle(state, kind)
+  end
+
+  defp dispatch_action(state, {:sidebar_action, _sidebar_id, _kind, _action}) do
+    state
+  end
+
   defp dispatch_action(state, :new_tab) do
     Commands.BufferManagement.execute(state, :new_buffer)
   end
@@ -811,6 +819,20 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     Minga.Log.warning(:editor, "[gui_action] unrecognized action: #{inspect(action)}")
     state
   end
+
+  @spec dispatch_sidebar_toggle(EditorState.t(), String.t()) :: EditorState.t()
+  defp dispatch_sidebar_toggle(state, "file_tree"), do: Commands.FileTree.toggle(state)
+
+  defp dispatch_sidebar_toggle(state, "git_status"),
+    do: Commands.Git.execute(state, :git_status_toggle)
+
+  defp dispatch_sidebar_toggle(state, "observatory") do
+    state
+    |> Commands.execute(:toggle_beam_observatory)
+    |> normalize_command_result()
+  end
+
+  defp dispatch_sidebar_toggle(state, _kind), do: state
 
   # ── Git commit helpers ──────────────────────────────────────────────
 

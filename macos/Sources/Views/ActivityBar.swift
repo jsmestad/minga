@@ -4,49 +4,10 @@
 
 import SwiftUI
 
-/// Sidebar panels exposed by the activity bar.
-enum ActivityBarPanel: CaseIterable, Hashable {
-    case fileTree
-    case gitStatus
-    case observatory
-
-    var protocolPanel: UInt8 {
-        switch self {
-        case .fileTree: 0
-        case .gitStatus: 2
-        case .observatory: 4
-        }
-    }
-
-    var systemImageName: String {
-        switch self {
-        case .fileTree: "folder"
-        case .gitStatus: "point.3.filled.connected.trianglepath.dotted"
-        case .observatory: "network"
-        }
-    }
-
-    var tooltip: String {
-        switch self {
-        case .fileTree: "File tree (SPC o p)"
-        case .gitStatus: "Git status (SPC g g)"
-        case .observatory: "BEAM Observatory (SPC o b)"
-        }
-    }
-
-    var accessibilityLabel: String {
-        switch self {
-        case .fileTree: "File tree"
-        case .gitStatus: "Git status"
-        case .observatory: "BEAM Observatory"
-        }
-    }
-}
-
 /// Thin VS Code-style icon strip for sidebar panel discovery and switching.
 struct ActivityBar: View {
-    let activePanel: ActivityBarPanel
-    let gitStatusCount: Int
+    let guiState: GUIState
+    let sidebarHostState: SidebarHostState
     let theme: ThemeColors
     let encoder: InputEncoder?
 
@@ -55,8 +16,8 @@ struct ActivityBar: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            ForEach(ActivityBarPanel.allCases, id: \.self) { panel in
-                activityButton(for: panel)
+            ForEach(sidebarHostState.visibleSidebars) { item in
+                activityButton(for: item)
             }
 
             Spacer(minLength: 0)
@@ -74,10 +35,10 @@ struct ActivityBar: View {
     }
 
     @ViewBuilder
-    private func activityButton(for panel: ActivityBarPanel) -> some View {
-        let isActive = panel == activePanel
-        let button = activityButtonBase(for: panel, isActive: isActive)
-        let spokenValue = accessibilityValue(for: panel)
+    private func activityButton(for item: SidebarItem) -> some View {
+        let isActive = item.id == sidebarHostState.activeSidebar?.id
+        let button = activityButtonBase(for: item, isActive: isActive)
+        let spokenValue = accessibilityValue(for: item)
 
         if let spokenValue {
             if isActive {
@@ -94,17 +55,19 @@ struct ActivityBar: View {
         }
     }
 
-    private func activityButtonBase(for panel: ActivityBarPanel, isActive: Bool) -> some View {
-        Button {
-            encoder?.sendTogglePanel(panel: panel.protocolPanel)
+    private func activityButtonBase(for item: SidebarItem, isActive: Bool) -> some View {
+        let adapter = NativeSidebarRegistry.adapterOrFallback(for: item.semanticKind)
+
+        return Button {
+            adapter.sendPrimaryAction(encoder, item)
         } label: {
             ZStack(alignment: .topTrailing) {
-                Image(systemName: panel.systemImageName)
+                Image(systemName: item.icon.isEmpty ? adapter.fallbackIcon : item.icon)
                     .font(.system(size: 15, weight: isActive ? .semibold : .regular))
                     .foregroundStyle(isActive ? theme.accent : theme.treeFg.opacity(0.45))
                     .frame(width: buttonSize, height: buttonSize)
 
-                if let badgeText = badgeText(for: panel) {
+                if let badgeText = badgeText(for: item) {
                     Text(badgeText)
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(theme.modeNormalFg)
@@ -132,18 +95,25 @@ struct ActivityBar: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(panel.tooltip)
-        .accessibilityLabel(panel.accessibilityLabel)
+        .help(item.displayName)
+        .accessibilityLabel(item.displayName)
     }
 
-    private func badgeText(for panel: ActivityBarPanel) -> String? {
-        guard panel == .gitStatus, gitStatusCount > 0 else { return nil }
-        return gitStatusCount > 99 ? "99+" : String(gitStatusCount)
+    private func badgeText(for item: SidebarItem) -> String? {
+        let context = NativeSidebarContext(
+            guiState: guiState,
+            theme: theme,
+            encoder: encoder,
+            projectName: "",
+            gitBranch: "",
+            leadingPadding: 0
+        )
+        return NativeSidebarRegistry.adapterOrFallback(for: item.semanticKind).badgeText(context, item)
     }
 
-    private func accessibilityValue(for panel: ActivityBarPanel) -> String? {
-        guard panel == .gitStatus, gitStatusCount > 0 else { return nil }
-        let countText = gitStatusCount > 99 ? "99+" : String(gitStatusCount)
-        return gitStatusCount == 1 ? "1 changed file" : "\(countText) changed files"
+    private func accessibilityValue(for item: SidebarItem) -> String? {
+        guard item.semanticKind == "git_status", let count = item.badgeCount, count > 0 else { return nil }
+        let countText = count > 99 ? "99+" : String(count)
+        return count == 1 ? "1 changed file" : "\(countText) changed files"
     }
 }

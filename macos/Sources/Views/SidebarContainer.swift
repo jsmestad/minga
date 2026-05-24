@@ -1,18 +1,17 @@
-/// Sidebar body container that renders the BEAM-active panel (file tree or git status).
+/// Sidebar body container that renders the BEAM-active semantic sidebar.
 ///
-/// The header is rendered separately in the unified toolbar row (see ContentView).
-/// This container owns only the body content and the resize handle so both
-/// panels share a single width. Dragging the resize handle persists across
-/// panel switches, matching Zed/VS Code behavior.
+/// The header is rendered separately in the unified toolbar row (see ContentView). This container owns only the body content and the resize handle so all panels share a single width. Dragging the resize handle persists across panel switches, matching Zed/VS Code behavior.
 
 import SwiftUI
 
 struct SidebarContainer: View {
-    let fileTreeState: FileTreeState
-    let gitStatusState: GitStatusState
-    let observatoryState: ObservatoryState
+    let guiState: GUIState
+    let activeSidebar: SidebarItem
     let theme: ThemeColors
     let encoder: InputEncoder?
+    let projectName: String
+    let gitBranch: String
+    let leadingPadding: CGFloat
     @Binding var sidebarWidth: CGFloat
 
     private let sidebarMinWidth: CGFloat = 180
@@ -24,31 +23,26 @@ struct SidebarContainer: View {
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
-                if observatoryState.visible {
-                    ObservatoryView(
-                        state: observatoryState,
-                        theme: theme,
-                        encoder: encoder
-                    )
-                } else if fileTreeState.visible {
-                    FileTreeView(
-                        fileTreeState: fileTreeState,
-                        theme: theme,
-                        encoder: encoder
-                    )
-                } else if gitStatusState.visible {
-                    GitStatusView(
-                        state: gitStatusState,
-                        theme: theme,
-                        encoder: encoder
-                    )
-                }
+                NativeSidebarRegistry
+                    .adapterOrFallback(for: activeSidebar.semanticKind)
+                    .makeBody(context, activeSidebar)
             }
             .frame(width: sidebarWidth)
             .background(theme.treeBg)
 
             resizeHandle
         }
+    }
+
+    private var context: NativeSidebarContext {
+        NativeSidebarContext(
+            guiState: guiState,
+            theme: theme,
+            encoder: encoder,
+            projectName: projectName,
+            gitBranch: gitBranch,
+            leadingPadding: leadingPadding
+        )
     }
 
     // MARK: - Resize handle

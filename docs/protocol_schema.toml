@@ -587,6 +587,12 @@ name = "gui_search_state"
 value = 0x9E
 direction = "beam_to_frontend"
 
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_sidebars"
+value = 0x9F
+direction = "beam_to_frontend"
+
 # Sub-opcodes inside gui_action (0x07).
 [[gui_actions]]
 name = "select_tab"
@@ -933,3 +939,7 @@ value = 0x55
 [[gui_actions]]
 name = "search_dismiss"
 value = 0x56
+
+[[gui_actions]]
+name = "sidebar_action"
+value = 0x57

@@ -149,7 +149,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       gui_edit_timeline: 0x9B,
       gui_extension_overlay: 0x9C,
       gui_extension_panel: 0x9D,
-      gui_search_state: 0x9E
+      gui_search_state: 0x9E,
+      gui_sidebars: 0x9F
     )
   end
 
@@ -240,7 +241,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       search_prev: 0x53,
       search_replace: 0x54,
       search_replace_all: 0x55,
-      search_dismiss: 0x56
+      search_dismiss: 0x56,
+      sidebar_action: 0x57
     )
   end
 

@@ -1219,6 +1219,59 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       assert icon != ""
     end
 
+    test "encodes semantic gui sidebar metadata" do
+      sidebars = [
+        %{
+          id: "file_tree",
+          display_name: "File Tree",
+          semantic_kind: "file_tree",
+          icon: "folder",
+          order: 10,
+          visible?: true,
+          focused?: true,
+          preferred_width: 32,
+          badge_count: nil
+        },
+        %{
+          id: "git_status",
+          display_name: "Git Status",
+          semantic_kind: "git_status",
+          icon: "point.3.filled.connected.trianglepath.dotted",
+          order: 20,
+          visible?: false,
+          focused?: false,
+          preferred_width: 30,
+          badge_count: 7
+        }
+      ]
+
+      encoded = ProtocolGUI.encode_gui_sidebars(sidebars, "file_tree")
+
+      assert <<0x9F, payload_len::32, payload::binary-size(payload_len)>> = encoded
+      assert <<1::8, 2::16, rest::binary>> = payload
+      {active_id, rest} = take_string16(rest)
+      assert active_id == "file_tree"
+
+      {id, rest} = take_string16(rest)
+      {display_name, rest} = take_string16(rest)
+      {kind, rest} = take_string16(rest)
+      {icon, rest} = take_string16(rest)
+      assert <<10::16, flags::8, 32::16, 0xFFFF::16, rest::binary>> = rest
+      assert id == "file_tree"
+      assert display_name == "File Tree"
+      assert kind == "file_tree"
+      assert icon == "folder"
+      assert Bitwise.band(flags, 0x01) != 0
+      assert Bitwise.band(flags, 0x02) != 0
+
+      {id, rest} = take_string16(rest)
+      {_display_name, rest} = take_string16(rest)
+      {_kind, rest} = take_string16(rest)
+      {_icon, rest} = take_string16(rest)
+      assert <<20::16, 0::8, 30::16, 7::16>> = rest
+      assert id == "git_status"
+    end
+
     test "clamps semantic gui_file_tree diagnostic counts to uint16 wire fields" do
       row =
         MingaEditor.FileTree.Row.new(
