@@ -1279,8 +1279,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
         {size_type, size_val} =
           case panel.size do
-            {:percent, n} -> {0, n}
-            {:lines, n} -> {1, n}
+            {:percent, n} -> {0, min(n, 255)}
+            {:lines, n} -> {1, min(n, 255)}
           end
 
         pos =
