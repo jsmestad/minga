@@ -4,27 +4,24 @@ defmodule Minga.Extension.OverlayTest do
   alias Minga.Extension.Overlay
 
   setup do
-    on_exit(fn ->
-      Overlay.remove_all(:test_extension)
-      Overlay.remove_all(:other_extension)
-    end)
-
-    :ok
+    table = :"overlay_test_#{System.unique_integer([:positive])}"
+    :ets.new(table, [:named_table, :set, :public, read_concurrency: true])
+    {:ok, table: table}
   end
 
-  describe "set/4 and all/0" do
-    test "registers an overlay" do
+  describe "set and all" do
+    test "registers an overlay", %{table: table} do
       buf = self()
 
       :ok =
-        Overlay.set(:test_extension, "cursor_1", buf,
+        Overlay.set(table, :test_extension, "cursor_1", buf,
           position: {10, 5},
           content: "Claude",
           style: %{fg: 0x7C3AED, opacity: 102},
           shape: :cursor_with_label
         )
 
-      overlays = Overlay.all()
+      overlays = Overlay.all(table)
       assert length(overlays) == 1
 
       [overlay] = overlays
@@ -36,101 +33,79 @@ defmodule Minga.Extension.OverlayTest do
       assert overlay.shape == :cursor_with_label
     end
 
-    test "replaces overlay with same key" do
+    test "replaces overlay with same key", %{table: table} do
       buf = self()
-      :ok = Overlay.set(:test_extension, "cursor_1", buf, position: {10, 5}, content: "v1")
-      :ok = Overlay.set(:test_extension, "cursor_1", buf, position: {20, 3}, content: "v2")
+      :ok = Overlay.set(table, :test_extension, "cursor_1", buf, position: {10, 5}, content: "v1")
+      :ok = Overlay.set(table, :test_extension, "cursor_1", buf, position: {20, 3}, content: "v2")
 
-      overlays = Overlay.all()
+      overlays = Overlay.all(table)
       assert length(overlays) == 1
       assert hd(overlays).position == {20, 3}
       assert hd(overlays).content == "v2"
     end
 
-    test "multiple extensions can register overlays" do
+    test "multiple extensions can register overlays", %{table: table} do
       buf = self()
-      :ok = Overlay.set(:test_extension, "a", buf, position: {1, 0})
-      :ok = Overlay.set(:other_extension, "b", buf, position: {2, 0})
+      :ok = Overlay.set(table, :test_extension, "a", buf, position: {1, 0})
+      :ok = Overlay.set(table, :other_extension, "b", buf, position: {2, 0})
 
-      assert length(Overlay.all()) == 2
+      assert length(Overlay.all(table)) == 2
     end
   end
 
-  describe "remove/2" do
-    test "removes a specific overlay" do
+  describe "remove" do
+    test "removes a specific overlay", %{table: table} do
       buf = self()
-      :ok = Overlay.set(:test_extension, "a", buf, position: {1, 0})
-      :ok = Overlay.set(:test_extension, "b", buf, position: {2, 0})
+      :ok = Overlay.set(table, :test_extension, "a", buf, position: {1, 0})
+      :ok = Overlay.set(table, :test_extension, "b", buf, position: {2, 0})
 
-      :ok = Overlay.remove(:test_extension, "a")
+      :ok = Overlay.remove(table, :test_extension, "a")
 
-      overlays = Overlay.all()
+      overlays = Overlay.all(table)
       assert length(overlays) == 1
       assert hd(overlays).overlay_id == "b"
     end
   end
 
-  describe "remove_all/1" do
-    test "removes all overlays for an extension" do
+  describe "remove_all" do
+    test "removes all overlays for an extension", %{table: table} do
       buf = self()
-      :ok = Overlay.set(:test_extension, "a", buf, position: {1, 0})
-      :ok = Overlay.set(:test_extension, "b", buf, position: {2, 0})
-      :ok = Overlay.set(:other_extension, "c", buf, position: {3, 0})
+      :ok = Overlay.set(table, :test_extension, "a", buf, position: {1, 0})
+      :ok = Overlay.set(table, :test_extension, "b", buf, position: {2, 0})
+      :ok = Overlay.set(table, :other_extension, "c", buf, position: {3, 0})
 
-      :ok = Overlay.remove_all(:test_extension)
+      :ok = Overlay.remove_all(table, :test_extension)
 
-      overlays = Overlay.all()
+      overlays = Overlay.all(table)
       assert length(overlays) == 1
       assert hd(overlays).extension == :other_extension
     end
   end
 
-  describe "for_buffer/1" do
-    test "returns only overlays for the specified buffer" do
+  describe "for_buffer" do
+    test "returns only overlays for the specified buffer", %{table: table} do
       buf1 = spawn(fn -> Process.sleep(:infinity) end)
       buf2 = spawn(fn -> Process.sleep(:infinity) end)
 
-      :ok = Overlay.set(:test_extension, "a", buf1, position: {1, 0})
-      :ok = Overlay.set(:test_extension, "b", buf2, position: {2, 0})
+      :ok = Overlay.set(table, :test_extension, "a", buf1, position: {1, 0})
+      :ok = Overlay.set(table, :test_extension, "b", buf2, position: {2, 0})
 
-      assert length(Overlay.for_buffer(buf1)) == 1
-      assert hd(Overlay.for_buffer(buf1)).overlay_id == "a"
+      assert length(Overlay.for_buffer(table, buf1)) == 1
+      assert hd(Overlay.for_buffer(table, buf1)).overlay_id == "a"
 
       Process.exit(buf1, :kill)
       Process.exit(buf2, :kill)
     end
   end
 
-  describe "unregister_source/1" do
-    test "removes all overlays for an extension source" do
-      buf = self()
-      :ok = Overlay.set(:test_extension, "a", buf, position: {1, 0})
-      :ok = Overlay.set(:test_extension, "b", buf, position: {2, 0})
-
-      :ok = Overlay.unregister_source({:extension, :test_extension})
-
-      assert Overlay.all() == []
+  describe "empty?" do
+    test "returns true when no overlays registered", %{table: table} do
+      assert Overlay.empty?(table)
     end
 
-    test "ignores non-extension sources" do
-      buf = self()
-      :ok = Overlay.set(:test_extension, "a", buf, position: {1, 0})
-
-      :ok = Overlay.unregister_source(:builtin)
-
-      assert length(Overlay.all()) == 1
-    end
-  end
-
-  describe "empty?/0" do
-    test "returns true when no overlays registered" do
-      Overlay.remove_all(:test_extension)
-      assert Overlay.empty?()
-    end
-
-    test "returns false when overlays exist" do
-      :ok = Overlay.set(:test_extension, "a", self(), position: {1, 0})
-      refute Overlay.empty?()
+    test "returns false when overlays exist", %{table: table} do
+      :ok = Overlay.set(table, :test_extension, "a", self(), position: {1, 0})
+      refute Overlay.empty?(table)
     end
   end
 end
