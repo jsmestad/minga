@@ -393,7 +393,9 @@ Minga's extension registries track who contributed each entry. The common source
 
 Feature-owned UI state is the place for per-workspace presentation state that should survive tab switches but disappear when its owner reloads. A sidebar can keep its selected row there. A Dired-like feature can keep its local filter there. A daemon, cache, or external connection still belongs in the extension's own process tree.
 
-Cleanup is best-effort across every family. If command cleanup fails, keymaps, scopes, input handlers, language data, themes, tool recipes, modeline segments, and feature-owned UI state still get their cleanup pass. Minga reports the cleanup failures instead of hiding them, because stale extension state is worse than a noisy reload.
+Interactive sidebars use the same ownership rule. An extension registers stable sidebar metadata with `MingaEditor.Extension.Sidebar.register/2`, then publishes cached semantic snapshots with `publish_snapshot/3` whenever its state changes. Layout, input, TUI rendering, and GUI emit paths read that cached snapshot. They do not call extension render callbacks per frame, and extensions never emit raw GUI opcodes or raw TUI cells.
+
+Cleanup is best-effort across every family. If command cleanup fails, keymaps, scopes, input handlers, language data, themes, tool recipes, modeline segments, sidebars, and feature-owned UI state still get their cleanup pass. Minga reports the cleanup failures instead of hiding them, because stale extension state is worse than a noisy reload.
 
 Cleanup is best-effort across every family. If command cleanup fails, keymaps, scopes, input handlers, language data, themes, tool recipes, and modeline segments still get their cleanup pass. Minga reports the cleanup failures instead of hiding them, because stale extension state is worse than a noisy reload.
 

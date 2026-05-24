@@ -31,6 +31,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   alias MingaEditor.DisplayMap
   alias MingaEditor.FileTree.Diagnostics, as: FileTreeDiagnostics
   alias MingaEditor.FileTree.Rows
+  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.FoldMap
   alias MingaEditor.Layout
   alias MingaEditor.MinibufferData
@@ -354,11 +355,53 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   @spec sidebar_metadata(ctx()) :: [ProtocolGUI.sidebar_metadata()]
   defp sidebar_metadata(ctx) do
-    [
-      file_tree_sidebar_metadata(ctx),
-      git_status_sidebar_metadata(ctx),
-      observatory_sidebar_metadata(ctx)
-    ]
+    registered_active = Sidebar.active_left()
+
+    built_in =
+      [
+        file_tree_sidebar_metadata(ctx),
+        git_status_sidebar_metadata(ctx),
+        observatory_sidebar_metadata(ctx)
+      ]
+      |> maybe_suppress_builtin_sidebar_visibility(registered_active)
+
+    (built_in ++ registered_sidebar_metadata())
+    |> Enum.sort_by(&{&1.order, &1.id})
+  end
+
+  @spec maybe_suppress_builtin_sidebar_visibility(
+          [ProtocolGUI.sidebar_metadata()],
+          Sidebar.entry() | nil
+        ) ::
+          [ProtocolGUI.sidebar_metadata()]
+  defp maybe_suppress_builtin_sidebar_visibility(sidebars, nil), do: sidebars
+
+  defp maybe_suppress_builtin_sidebar_visibility(sidebars, _registered_active) do
+    Enum.map(sidebars, &%{&1 | visible?: false, focused?: false})
+  end
+
+  @spec registered_sidebar_metadata() :: [ProtocolGUI.sidebar_metadata()]
+  defp registered_sidebar_metadata do
+    Sidebar.all()
+    |> Enum.map(fn sidebar ->
+      %{
+        id: sidebar.id,
+        display_name: sidebar.display_name,
+        semantic_kind: sidebar.semantic_kind,
+        icon: sidebar.icon,
+        order: sidebar.priority,
+        visible?: sidebar.visible?,
+        focused?: sidebar.focused?,
+        preferred_width: sidebar.preferred_width,
+        badge_count: sidebar_badge_count(sidebar.snapshot.rows)
+      }
+    end)
+  end
+
+  @spec sidebar_badge_count([map()]) :: non_neg_integer() | nil
+  defp sidebar_badge_count(rows) do
+    count = Enum.count(rows, &Map.get(&1, :badge))
+    if count == 0, do: nil, else: count
   end
 
   @spec file_tree_sidebar_metadata(ctx()) :: ProtocolGUI.sidebar_metadata()
@@ -450,19 +493,30 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   @spec active_sidebar_id(ctx(), [ProtocolGUI.sidebar_metadata()]) :: String.t()
   defp active_sidebar_id(ctx, sidebars) do
+    registered_id = active_registered_sidebar_id(sidebars)
     preferred_id = ctx |> Map.get(:shell_state, %{}) |> Map.get(:sidebar_active_id)
 
-    case sidebar_visible?(sidebars, preferred_id) do
-      true -> preferred_id
-      false -> fallback_active_sidebar_id(sidebars)
+    case registered_id || sidebar_visible_id(sidebars, preferred_id) do
+      id when is_binary(id) -> id
+      nil -> fallback_active_sidebar_id(sidebars)
     end
   end
 
-  @spec sidebar_visible?([ProtocolGUI.sidebar_metadata()], String.t() | nil) :: boolean()
-  defp sidebar_visible?(_sidebars, nil), do: false
+  @spec active_registered_sidebar_id([ProtocolGUI.sidebar_metadata()]) :: String.t() | nil
+  defp active_registered_sidebar_id(sidebars) do
+    case Sidebar.active_left() do
+      %{id: id} -> sidebar_visible_id(sidebars, id)
+      nil -> nil
+    end
+  end
 
-  defp sidebar_visible?(sidebars, id) do
-    Enum.any?(sidebars, fn sidebar -> sidebar.id == id and sidebar.visible? end)
+  @spec sidebar_visible_id([ProtocolGUI.sidebar_metadata()], String.t() | nil) :: String.t() | nil
+  defp sidebar_visible_id(_sidebars, nil), do: nil
+
+  defp sidebar_visible_id(sidebars, id) do
+    if Enum.any?(sidebars, fn sidebar -> sidebar.id == id and sidebar.visible? end),
+      do: id,
+      else: nil
   end
 
   @spec fallback_active_sidebar_id([ProtocolGUI.sidebar_metadata()]) :: String.t()

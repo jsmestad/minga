@@ -21,6 +21,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   alias MingaEditor.BottomPanel
   alias MingaEditor.Commands
+  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Handlers.BufferRegistry
   alias MingaEditor.HighlightSync
   alias MingaEditor.Layout
@@ -384,7 +385,10 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:sidebar_action, sidebar_id, kind, action}) do
-    dispatch_sidebar_action(state, sidebar_id, kind, action)
+    case Sidebar.get(sidebar_id) do
+      nil -> dispatch_sidebar_action(state, sidebar_id, kind, action)
+      _sidebar -> Sidebar.dispatch_action(state, sidebar_id, action, %{kind: kind})
+    end
   end
 
   defp dispatch_action(state, :new_tab) do

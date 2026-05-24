@@ -8,6 +8,7 @@ defmodule MingaEditor.Shell.Traditional.Layout.TUI do
   """
 
   alias Minga.Project.FileTree
+  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
@@ -187,7 +188,19 @@ defmodule MingaEditor.Shell.Traditional.Layout.TUI do
 
   @spec file_tree_layout(EditorState.t(), pos_integer(), non_neg_integer()) ::
           {Layout.rect() | nil, non_neg_integer(), pos_integer()}
-  defp file_tree_layout(
+  defp file_tree_layout(state, total_cols, content_start) do
+    case Sidebar.active_left() do
+      %{preferred_width: width} ->
+        sidebar_layout(state, total_cols, width, content_start)
+
+      nil ->
+        legacy_sidebar_layout(state, total_cols, content_start)
+    end
+  end
+
+  @spec legacy_sidebar_layout(EditorState.t(), pos_integer(), non_neg_integer()) ::
+          {Layout.rect() | nil, non_neg_integer(), pos_integer()}
+  defp legacy_sidebar_layout(
          %{workspace: %{file_tree: %{tree: %FileTree{width: tw}}}} = state,
          total_cols,
          content_start
@@ -195,7 +208,7 @@ defmodule MingaEditor.Shell.Traditional.Layout.TUI do
     sidebar_layout(state, total_cols, tw, content_start)
   end
 
-  defp file_tree_layout(
+  defp legacy_sidebar_layout(
          %{shell_state: %{git_status_panel: %{} = _panel}} = state,
          total_cols,
          content_start
@@ -203,7 +216,7 @@ defmodule MingaEditor.Shell.Traditional.Layout.TUI do
     sidebar_layout(state, total_cols, git_status_width(total_cols), content_start)
   end
 
-  defp file_tree_layout(_state, total_cols, _content_start) do
+  defp legacy_sidebar_layout(_state, total_cols, _content_start) do
     {nil, 0, total_cols}
   end
 
