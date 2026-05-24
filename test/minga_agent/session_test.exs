@@ -462,7 +462,8 @@ defmodule MingaAgent.SessionTest do
           id: {:inline_hooks_disabled, make_ref()}
         )
 
-      assert %{persist?: false, hooks_enabled?: false} = :sys.get_state(session)
+      refute Session.persist?(session)
+      refute Session.hooks_enabled?(session)
     end
   end
 

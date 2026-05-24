@@ -148,6 +148,12 @@ defmodule Minga.DebugLog do
   @spec path(GenServer.server()) :: path()
   def path(server), do: GenServer.call(server, :path)
 
+  @doc "Returns the current unflushed buffer contents as a binary."
+  @spec buffered_content(GenServer.server()) :: binary()
+  def buffered_content(server) do
+    GenServer.call(server, :buffered_content)
+  end
+
   @impl true
   @spec init({path(), keyword()}) :: {:ok, t()} | {:stop, term()}
   def init({path, opts}) do
@@ -169,8 +175,9 @@ defmodule Minga.DebugLog do
   end
 
   @impl true
-  @spec handle_call(:flush | :path, GenServer.from(), t()) ::
-          {:reply, :ok | {:error, term()} | path(), t()} | {:stop, term(), {:error, term()}, t()}
+  @spec handle_call(:flush | :path | :buffered_content, GenServer.from(), t()) ::
+          {:reply, :ok | {:error, term()} | path() | binary(), t()}
+          | {:stop, term(), {:error, term()}, t()}
   def handle_call(:flush, _from, state) do
     case flush_buffer(state) do
       {:ok, state} ->
@@ -182,6 +189,10 @@ defmodule Minga.DebugLog do
   end
 
   def handle_call(:path, _from, state), do: {:reply, state.path, state}
+
+  def handle_call(:buffered_content, _from, state) do
+    {:reply, IO.iodata_to_binary(state.buffer), state}
+  end
 
   @impl true
   @spec handle_info(term(), t()) :: {:noreply, t()} | {:stop, term(), t()}

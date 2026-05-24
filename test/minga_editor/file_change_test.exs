@@ -89,6 +89,4 @@ defmodule MingaEditor.FileChangeTest do
     sync_screen(ctx)
     :ok
   end
-
-  defp status_msg(ctx), do: MingaEditor.State.status_msg(editor_state(ctx))
 end

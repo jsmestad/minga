@@ -118,12 +118,7 @@ defmodule Minga.Distribution.ConnectionManagerTest do
     name
   end
 
-  @spec retry_timer(pid(), String.t()) :: reference() | nil
   defp retry_timer(pid, server_name) do
-    pid
-    |> :sys.get_state()
-    |> Map.fetch!(:servers)
-    |> Map.fetch!(server_name)
-    |> Map.fetch!(:retry_timer)
+    ConnectionManager.retry_timer(pid, server_name)
   end
 end

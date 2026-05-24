@@ -515,6 +515,18 @@ defmodule MingaAgent.Session do
     GenServer.call(session, :get_provider)
   end
 
+  @doc "Returns whether this session persists its conversation to disk."
+  @spec persist?(GenServer.server()) :: boolean()
+  def persist?(session) do
+    GenServer.call(session, :persist?)
+  end
+
+  @doc "Returns whether hooks are enabled for this session."
+  @spec hooks_enabled?(GenServer.server()) :: boolean()
+  def hooks_enabled?(session) do
+    GenServer.call(session, :hooks_enabled?)
+  end
+
   # ── GenServer callbacks ─────────────────────────────────────────────────────
 
   @impl GenServer
@@ -852,6 +864,14 @@ defmodule MingaAgent.Session do
 
   def handle_call(:get_provider, _from, state) do
     {:reply, state.provider, state}
+  end
+
+  def handle_call(:persist?, _from, state) do
+    {:reply, state.persist?, state}
+  end
+
+  def handle_call(:hooks_enabled?, _from, state) do
+    {:reply, state.hooks_enabled?, state}
   end
 
   def handle_call(:editor_snapshot, _from, state) do

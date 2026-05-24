@@ -564,6 +564,39 @@ defmodule Minga.Test.EditorCase do
     MingaEditor.State.ModalOverlay.match(get_editor_state(editor).shell_state.modal, :conflict)
   end
 
+  @doc "Returns the pending quit mode (:quit | :quit_all | nil)."
+  @spec pending_quit(editor_ctx()) :: :quit | :quit_all | nil
+  def pending_quit(%{editor: editor}) do
+    get_editor_state(editor).pending_quit
+  end
+
+  @doc "Returns the current status/command message."
+  @spec status_msg(editor_ctx()) :: String.t() | nil
+  def status_msg(%{editor: editor}) do
+    MingaEditor.State.status_msg(get_editor_state(editor))
+  end
+
+  @doc "Returns the tab bar labels."
+  @spec tab_labels(editor_ctx()) :: [String.t()]
+  def tab_labels(%{editor: editor}) do
+    Enum.map(get_editor_state(editor).shell_state.tab_bar.tabs, & &1.label)
+  end
+
+  @doc "Returns the active workspace ID."
+  @spec active_workspace_id(editor_ctx()) :: non_neg_integer()
+  def active_workspace_id(%{editor: editor}) do
+    MingaEditor.State.TabBar.active_workspace_id(get_editor_state(editor).shell_state.tab_bar)
+  end
+
+  @doc "Returns visible file tabs for the given workspace ID."
+  @spec visible_file_tabs(editor_ctx(), non_neg_integer()) :: [map()]
+  def visible_file_tabs(%{editor: editor}, workspace_id) do
+    MingaEditor.State.TabBar.visible_file_tabs(
+      get_editor_state(editor).shell_state.tab_bar,
+      workspace_id
+    )
+  end
+
   @doc "Returns the picker payload (ModalOverlay.Picker) when a picker is open, or nil."
   @spec modal_picker(editor_ctx()) :: MingaEditor.State.ModalOverlay.Picker.t() | nil
   def modal_picker(%{editor: editor}) do

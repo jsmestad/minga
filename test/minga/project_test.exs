@@ -32,19 +32,16 @@ defmodule Minga.ProjectTest do
   # events from concurrent tests (async: true).
   defp await_rebuild(name) do
     Minga.Events.subscribe(:project_rebuilt)
-    state = :sys.get_state(name)
 
-    if state.rebuilding? do
-      root = state.current_root
+    if Project.rebuilding?(name) do
+      root = Project.root(name)
 
       assert_receive {:minga_event, :project_rebuilt,
                       %Minga.Events.ProjectRebuiltEvent{root: ^root}},
                      5_000
-
-      :sys.get_state(name)
-    else
-      state
     end
+
+    _ = :sys.get_state(name)
   end
 
   describe "resolve_root/0" do

@@ -55,6 +55,12 @@ defmodule Minga.Config.Writer do
     :exit, _ -> :ok
   end
 
+  @doc "Returns true when a debounce timer is scheduled for a pending flush."
+  @spec pending?(GenServer.server()) :: boolean()
+  def pending?(server \\ __MODULE__) do
+    GenServer.call(server, :pending?)
+  end
+
   @doc "Flushes pending writes immediately. Intended for tests and clean shutdown paths."
   @spec flush() :: :ok
   @spec flush(GenServer.server()) :: :ok
@@ -93,6 +99,10 @@ defmodule Minga.Config.Writer do
 
   def handle_call({:set_reloading, reloading?}, _from, state) do
     {:reply, :ok, set_reloading_state(state, reloading?)}
+  end
+
+  def handle_call(:pending?, _from, state) do
+    {:reply, state.timer != nil, state}
   end
 
   def handle_call(:flush, _from, state) do

@@ -29,12 +29,12 @@ defmodule MingaEditor.UI.Picker.CommandSourceFrecencyTest do
     File.mkdir_p!(Path.join(config_home, "minga"))
     System.put_env("XDG_CONFIG_HOME", config_home)
 
-    previous_project = :sys.get_state(Project)
+    previous_command_frecency = Project.command_frecency()
     reset_global_command_frecency()
 
     on_exit(fn ->
       restore_xdg_config_home(previous_config_home)
-      restore_global_command_frecency(previous_project.command_frecency)
+      restore_global_command_frecency(previous_command_frecency)
     end)
 
     :ok

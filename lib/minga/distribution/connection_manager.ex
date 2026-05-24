@@ -68,6 +68,12 @@ defmodule Minga.Distribution.ConnectionManager do
     call_or_default({:connected?, server_name}, false)
   end
 
+  @doc "Returns the retry timer reference for a server, or nil if no retry is scheduled."
+  @spec retry_timer(GenServer.server(), String.t()) :: reference() | nil
+  def retry_timer(server, server_name) when is_binary(server_name) do
+    GenServer.call(server, {:retry_timer, server_name})
+  end
+
   @doc "Returns the retry delay for `retry_count`, starting at 1s and doubling until the 30s cap. Clamps once the doubled value would exceed 30s."
   @spec backoff_ms(non_neg_integer()) :: pos_integer()
   def backoff_ms(retry_count) when is_integer(retry_count) and retry_count >= 5, do: 30_000
@@ -113,6 +119,16 @@ defmodule Minga.Distribution.ConnectionManager do
 
   def handle_call({:server_name_for_node, node}, _from, state) do
     {:reply, server_name_for_node_result(state, node), state}
+  end
+
+  def handle_call({:retry_timer, server_name}, _from, state) do
+    timer =
+      case Map.fetch(state.servers, server_name) do
+        {:ok, server} -> server.retry_timer
+        :error -> nil
+      end
+
+    {:reply, timer, state}
   end
 
   def handle_call({:connected?, server_name}, _from, state) do

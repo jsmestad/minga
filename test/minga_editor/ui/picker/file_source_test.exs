@@ -279,16 +279,14 @@ defmodule MingaEditor.UI.Picker.FileSourceTest do
   end
 
   defp await_project_rebuild(root) do
-    state = :sys.get_state(Minga.Project)
-
-    if state.rebuilding? do
+    if Minga.Project.rebuilding?() do
       assert_receive {:minga_event, :project_rebuilt,
                       %Minga.Events.ProjectRebuiltEvent{root: ^root}},
                      5_000
     end
 
-    :sys.get_state(Minga.Project)
+    _ = :sys.get_state(Minga.Project)
   end
 
-  defp flush_project, do: :sys.get_state(Minga.Project)
+  defp flush_project, do: _ = :sys.get_state(Minga.Project)
 end

@@ -128,12 +128,10 @@ defmodule MingaEditor.Renderer.ServerTest do
   end
 
   defp renderer_busy?(renderer, attempts \\ 8)
-  defp renderer_busy?(renderer, 0), do: :sys.get_state(renderer).rendering?
+  defp renderer_busy?(renderer, 0), do: RendererServer.rendering?(renderer)
 
   defp renderer_busy?(renderer, attempts) do
-    state = :sys.get_state(renderer)
-
-    if state.rendering? do
+    if RendererServer.rendering?(renderer) do
       renderer_busy?(renderer, attempts - 1)
     else
       false
