@@ -21,8 +21,8 @@ defmodule Minga.Tool.InstallationTest do
       assert receipt["method"] == "npm"
 
       # Verify JSON serialization round-trip
-      json = Jason.encode!(receipt)
-      {:ok, decoded} = Jason.decode(json)
+      json = JSON.encode!(receipt)
+      {:ok, decoded} = JSON.decode(json)
       assert {:ok, restored} = Installation.from_receipt(decoded)
 
       assert restored.name == :pyright

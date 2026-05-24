@@ -29,10 +29,10 @@ defmodule MingaAgent.Hooks.PreCompactPayloadTest do
            }
   end
 
-  test "payload is Jason-encodable" do
+  test "payload is JSON-encodable" do
     payload = PreCompactPayload.new(3)
-    assert {:ok, json} = Jason.encode(payload)
-    assert {:ok, decoded} = Jason.decode(json)
+    json = JSON.encode!(payload)
+    assert {:ok, decoded} = JSON.decode(json)
     assert decoded["event"] == "PreCompact"
     assert decoded["message_count"] == 3
   end

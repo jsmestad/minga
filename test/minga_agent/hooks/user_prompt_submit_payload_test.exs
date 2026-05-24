@@ -39,10 +39,10 @@ defmodule MingaAgent.Hooks.UserPromptSubmitPayloadTest do
            }
   end
 
-  test "payload is Jason-encodable" do
+  test "payload is JSON-encodable" do
     payload = UserPromptSubmitPayload.new("sess_5", "encode me")
-    assert {:ok, json} = Jason.encode(payload)
-    assert {:ok, decoded} = Jason.decode(json)
+    json = JSON.encode!(payload)
+    assert {:ok, decoded} = JSON.decode(json)
     assert decoded["event"] == "UserPromptSubmit"
     assert decoded["prompt"] == "encode me"
   end

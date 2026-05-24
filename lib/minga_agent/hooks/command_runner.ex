@@ -15,7 +15,7 @@ defmodule MingaAgent.Hooks.CommandRunner do
   @typedoc "Options used by tests to inject helper behavior."
   @type run_opts :: [helper_path: String.t()]
 
-  @doc "Runs a shell hook with any Jason-encodable payload map."
+  @doc "Runs a shell hook with any JSON-encodable payload map."
   @spec run(Hook.t(), map()) :: Result.t()
   def run(%Hook{} = hook, payload_map) when is_map(payload_map) do
     run(hook, payload_map, [])
@@ -46,10 +46,7 @@ defmodule MingaAgent.Hooks.CommandRunner do
 
   @spec encode_map(map()) :: {:ok, String.t()} | {:error, term()}
   defp encode_map(payload_map) do
-    case Jason.encode(payload_map) do
-      {:ok, json} -> {:ok, json}
-      {:error, reason} -> {:error, safe_encode_reason(reason)}
-    end
+    {:ok, JSON.encode!(payload_map)}
   rescue
     e -> {:error, safe_encode_reason(e)}
   catch
@@ -208,7 +205,7 @@ defmodule MingaAgent.Hooks.CommandRunner do
 
   @spec decode_helper_result(Hook.t(), String.t()) :: Result.t()
   defp decode_helper_result(hook, stdout) do
-    case Jason.decode(stdout) do
+    case JSON.decode(stdout) do
       {:ok, %{"status" => "allow"}} ->
         Result.allow(hook)
 

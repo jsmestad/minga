@@ -6,7 +6,7 @@ defmodule MingaAgent.Hooks.SessionStartPayload do
   becomes ready.
   """
 
-  @derive {Jason.Encoder, only: [:event, :session_id, :model, :provider, :project_root]}
+  @derive {JSON.Encoder, only: [:event, :session_id, :model, :provider, :project_root]}
   @enforce_keys [:session_id, :model, :provider]
   defstruct [:session_id, :model, :provider, :project_root, event: "SessionStart"]
 

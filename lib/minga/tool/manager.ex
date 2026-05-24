@@ -418,7 +418,7 @@ defmodule Minga.Tool.Manager do
     # Write receipt.json
     receipt_path = Path.join(dest_dir, "receipt.json")
     File.mkdir_p!(dest_dir)
-    receipt_json = Jason.encode!(Installation.to_receipt(installation), pretty: true)
+    receipt_json = Installation.to_receipt(installation) |> :json.format()
     File.write!(receipt_path, receipt_json)
 
     # Update ETS cache
@@ -500,7 +500,7 @@ defmodule Minga.Tool.Manager do
     receipt_path = Path.join([tools_dir, entry, "receipt.json"])
 
     with {:ok, content} <- File.read(receipt_path),
-         {:ok, receipt} <- Jason.decode(content),
+         {:ok, receipt} <- JSON.decode(content),
          {:ok, installation} <- Installation.from_receipt(receipt) do
       :ets.insert(table, {installation.name, installation})
     else

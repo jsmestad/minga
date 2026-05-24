@@ -39,10 +39,10 @@ defmodule MingaAgent.Hooks.SessionEndPayloadTest do
            }
   end
 
-  test "payload is Jason-encodable" do
+  test "payload is JSON-encodable" do
     payload = SessionEndPayload.new("sess_6", :shutdown, :idle)
-    assert {:ok, json} = Jason.encode(payload)
-    assert {:ok, decoded} = Jason.decode(json)
+    json = JSON.encode!(payload)
+    assert {:ok, decoded} = JSON.decode(json)
     assert decoded["event"] == "SessionEnd"
     assert decoded["reason"] == "shutdown"
   end

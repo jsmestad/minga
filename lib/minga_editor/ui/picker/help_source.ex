@@ -90,7 +90,6 @@ defmodule MingaEditor.UI.Picker.HelpSource do
   defp generated_or_internal_module?(name) do
     String.contains?(name, [".$", ".-", ".__", ".Protocol."]) or
       String.starts_with?(name, "Elixir.JSON.Encoder.") or
-      String.starts_with?(name, "Elixir.Jason.Encoder.") or
       String.starts_with?(name, "Elixir.Inspect.") or
       String.starts_with?(name, "Elixir.Collectable.") or
       String.starts_with?(name, "Elixir.Enumerable.") or

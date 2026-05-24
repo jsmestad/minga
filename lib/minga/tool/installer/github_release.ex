@@ -128,7 +128,7 @@ defmodule Minga.Tool.Installer.GitHubRelease do
 
     case http_get(url, headers) do
       {:ok, body} ->
-        case Jason.decode(body) do
+        case JSON.decode(body) do
           {:ok, release} -> {:ok, release}
           {:error, _} -> {:error, "Failed to parse GitHub API response"}
         end

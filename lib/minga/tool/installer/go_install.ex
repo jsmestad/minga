@@ -58,7 +58,7 @@ defmodule Minga.Tool.Installer.GoInstall do
 
     case System.cmd("curl", ["-fsSL", url], stderr_to_stdout: true) do
       {body, 0} ->
-        case Jason.decode(body) do
+        case JSON.decode(body) do
           {:ok, %{"Version" => version}} ->
             {:ok, String.trim_leading(version, "v")}
 

@@ -7,7 +7,7 @@ defmodule MingaAgent.Hooks.PreToolUsePayload do
   depend on them.
   """
 
-  @derive {Jason.Encoder, only: [:event, :tool_call_id, :tool_name, :arguments]}
+  @derive {JSON.Encoder, only: [:event, :tool_call_id, :tool_name, :arguments]}
   @enforce_keys [:tool_call_id, :tool_name, :arguments]
   defstruct [:tool_call_id, :tool_name, :arguments, event: "PreToolUse"]
 

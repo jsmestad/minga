@@ -147,7 +147,9 @@ defmodule MingaAgent.SessionExport do
     tool_sections =
       Enum.map(tool_calls, fn tc ->
         name = tc.name || "unknown"
-        args = if tc.arguments, do: Jason.encode!(tc.arguments, pretty: true), else: "{}"
+
+        args =
+          if tc.arguments, do: tc.arguments |> :json.format() |> IO.iodata_to_binary(), else: "{}"
 
         """
         <details>

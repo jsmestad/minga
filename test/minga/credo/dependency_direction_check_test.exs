@@ -190,7 +190,7 @@ defmodule Minga.Credo.DependencyDirectionCheckTest do
       """
       defmodule Minga.Core.SomeHelper do
         alias Phoenix.Socket
-        alias Jason.Encoder
+        alias JSON.Encoder
       end
       """
       |> check("lib/minga/core/some_helper.ex")

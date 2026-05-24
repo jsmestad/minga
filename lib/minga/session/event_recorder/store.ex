@@ -440,9 +440,9 @@ defmodule Minga.Session.EventRecorder.Store do
 
   @spec encode_json(map()) :: String.t()
   defp encode_json(map) when map_size(map) == 0, do: "{}"
-  defp encode_json(map), do: Jason.encode!(map)
+  defp encode_json(map), do: JSON.encode!(map)
 
   @spec decode_json(String.t()) :: map()
   defp decode_json("{}"), do: %{}
-  defp decode_json(json), do: Jason.decode!(json)
+  defp decode_json(json), do: JSON.decode!(json)
 end

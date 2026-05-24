@@ -24,10 +24,10 @@ defmodule MingaAgent.Hooks.NotificationPayloadTest do
            }
   end
 
-  test "payload is Jason-encodable" do
+  test "payload is JSON-encodable" do
     payload = NotificationPayload.new("sess_3", :error, "Something failed")
-    assert {:ok, json} = Jason.encode(payload)
-    assert {:ok, decoded} = Jason.decode(json)
+    json = JSON.encode!(payload)
+    assert {:ok, decoded} = JSON.decode(json)
     assert decoded["event"] == "Notification"
     assert decoded["kind"] == "error"
   end

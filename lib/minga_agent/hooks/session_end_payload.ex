@@ -5,7 +5,7 @@ defmodule MingaAgent.Hooks.SessionEndPayload do
   Sent to the hook command's stdin as JSON when an agent session terminates.
   """
 
-  @derive {Jason.Encoder, only: [:event, :session_id, :reason, :status]}
+  @derive {JSON.Encoder, only: [:event, :session_id, :reason, :status]}
   @enforce_keys [:session_id, :reason, :status]
   defstruct [:session_id, :reason, :status, event: "SessionEnd"]
 

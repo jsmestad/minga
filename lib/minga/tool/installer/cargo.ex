@@ -56,7 +56,7 @@ defmodule Minga.Tool.Installer.Cargo do
            stderr_to_stdout: true
          ) do
       {body, 0} ->
-        case Jason.decode(body) do
+        case JSON.decode(body) do
           {:ok, %{"crate" => %{"max_version" => version}}} -> {:ok, version}
           _ -> {:error, "Failed to parse crates.io response"}
         end

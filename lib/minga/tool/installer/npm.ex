@@ -79,7 +79,7 @@ defmodule Minga.Tool.Installer.Npm do
     pkg_json = Path.join([dest_dir, "node_modules", package, "package.json"])
 
     with {:ok, content} <- File.read(pkg_json),
-         {:ok, %{"version" => version}} <- Jason.decode(content) do
+         {:ok, %{"version" => version}} <- JSON.decode(content) do
       {:ok, version}
     else
       _ -> nil
