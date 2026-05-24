@@ -14,67 +14,67 @@ defmodule MingaAgent.SessionManagerTest do
     %{manager: manager}
   end
 
-  describe "start_session/1" do
+  describe "start_session/2" do
     test "starts a session and returns a human-readable ID", %{manager: manager} do
-      assert {:ok, session_id, pid} = GenServer.call(manager, {:start_session, []})
+      assert {:ok, session_id, pid} = SessionManager.start_session(manager, [])
       assert session_id == "session-1"
       assert is_pid(pid)
       assert Process.alive?(pid)
     end
 
     test "increments session IDs", %{manager: manager} do
-      {:ok, "session-1", _pid1} = GenServer.call(manager, {:start_session, []})
-      {:ok, "session-2", _pid2} = GenServer.call(manager, {:start_session, []})
-      {:ok, "session-3", _pid3} = GenServer.call(manager, {:start_session, []})
+      {:ok, "session-1", _pid1} = SessionManager.start_session(manager, [])
+      {:ok, "session-2", _pid2} = SessionManager.start_session(manager, [])
+      {:ok, "session-3", _pid3} = SessionManager.start_session(manager, [])
     end
   end
 
-  describe "stop_session/1" do
+  describe "stop_session/2" do
     test "stops an existing session", %{manager: manager} do
-      {:ok, session_id, pid} = GenServer.call(manager, {:start_session, []})
+      {:ok, session_id, pid} = SessionManager.start_session(manager, [])
       assert Process.alive?(pid)
 
-      assert :ok = GenServer.call(manager, {:stop_session, session_id})
+      assert :ok = SessionManager.stop_session(manager, session_id)
       refute Process.alive?(pid)
     end
 
     test "returns error for unknown session ID", %{manager: manager} do
-      assert {:error, :not_found} = GenServer.call(manager, {:stop_session, "nonexistent"})
+      assert {:error, :not_found} = SessionManager.stop_session(manager, "nonexistent")
     end
   end
 
-  describe "get_session/1" do
+  describe "get_session/2" do
     test "returns pid for known session", %{manager: manager} do
-      {:ok, session_id, pid} = GenServer.call(manager, {:start_session, []})
-      assert {:ok, ^pid} = GenServer.call(manager, {:get_session, session_id})
+      {:ok, session_id, pid} = SessionManager.start_session(manager, [])
+      assert {:ok, ^pid} = SessionManager.get_session(manager, session_id)
     end
 
     test "returns error for unknown session", %{manager: manager} do
-      assert {:error, :not_found} = GenServer.call(manager, {:get_session, "nope"})
+      assert {:error, :not_found} = SessionManager.get_session(manager, "nope")
     end
   end
 
-  describe "session_id_for_pid/1" do
+  describe "session_id_for_pid/2" do
     test "returns session ID for known pid", %{manager: manager} do
-      {:ok, session_id, pid} = GenServer.call(manager, {:start_session, []})
-      assert {:ok, ^session_id} = GenServer.call(manager, {:session_id_for_pid, pid})
+      {:ok, session_id, pid} = SessionManager.start_session(manager, [])
+      assert {:ok, ^session_id} = SessionManager.session_id_for_pid(manager, pid)
     end
 
     test "returns error for unknown pid", %{manager: manager} do
-      assert {:error, :not_found} = GenServer.call(manager, {:session_id_for_pid, self()})
+      assert {:error, :not_found} = SessionManager.session_id_for_pid(manager, self())
     end
   end
 
-  describe "list_sessions/0" do
+  describe "list_sessions/1" do
     test "returns empty list when no sessions", %{manager: manager} do
-      assert [] = GenServer.call(manager, :list_sessions)
+      assert [] = SessionManager.list_sessions(manager)
     end
 
     test "returns all active sessions", %{manager: manager} do
-      {:ok, id1, pid1} = GenServer.call(manager, {:start_session, []})
-      {:ok, id2, pid2} = GenServer.call(manager, {:start_session, []})
+      {:ok, id1, pid1} = SessionManager.start_session(manager, [])
+      {:ok, id2, pid2} = SessionManager.start_session(manager, [])
 
-      sessions = GenServer.call(manager, :list_sessions)
+      sessions = SessionManager.list_sessions(manager)
       assert length(sessions) == 2
 
       ids = Enum.map(sessions, &elem(&1, 0))
@@ -87,32 +87,45 @@ defmodule MingaAgent.SessionManagerTest do
     end
   end
 
-  describe "abort/1" do
+  describe "abort/2" do
     test "returns error for unknown session", %{manager: manager} do
-      assert {:error, :not_found} = GenServer.call(manager, {:abort, "unknown"})
+      assert {:error, :not_found} = SessionManager.abort(manager, "unknown")
+    end
+  end
+
+  describe "stop_session_by_pid/2" do
+    test "stops a session by its PID", %{manager: manager} do
+      {:ok, session_id, pid} = SessionManager.start_session(manager, [])
+      assert Process.alive?(pid)
+
+      assert :ok = SessionManager.stop_session_by_pid(manager, pid)
+      refute Process.alive?(pid)
+
+      assert {:error, :not_found} = SessionManager.get_session(manager, session_id)
+    end
+
+    test "returns error for unknown pid", %{manager: manager} do
+      assert {:error, :not_found} = SessionManager.stop_session_by_pid(manager, self())
     end
   end
 
   describe "session DOWN monitoring" do
     test "removes session from registry when it dies", %{manager: manager} do
-      {:ok, session_id, pid} = GenServer.call(manager, {:start_session, []})
+      {:ok, session_id, pid} = SessionManager.start_session(manager, [])
 
-      # Kill the session process
       Process.exit(pid, :kill)
 
-      # Give the manager time to process the DOWN message
       :timer.sleep(50)
 
-      assert {:error, :not_found} = GenServer.call(manager, {:get_session, session_id})
-      assert [] = GenServer.call(manager, :list_sessions)
+      assert {:error, :not_found} = SessionManager.get_session(manager, session_id)
+      assert [] = SessionManager.list_sessions(manager)
     end
 
     test "broadcasts :agent_session_stopped event when session dies", %{manager: manager} do
       Minga.Events.subscribe(:agent_session_stopped)
 
-      {:ok, session_id, pid} = GenServer.call(manager, {:start_session, []})
+      {:ok, session_id, pid} = SessionManager.start_session(manager, [])
 
-      # Kill the session
       Process.exit(pid, :kill)
 
       assert_receive {:minga_event, :agent_session_stopped,
