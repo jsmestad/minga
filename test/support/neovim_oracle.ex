@@ -6,7 +6,7 @@ defmodule Minga.Test.NeovimOracle do
   """
 
   @type cursor :: %{required(:line) => non_neg_integer(), required(:col) => non_neg_integer()}
-  @type scenario_type :: :motion | :operator | :text_object
+  @type scenario_type :: :motion | :operator | :text_object | :search
   @type compare_field :: :content | :cursor | :mode | :register | :register_type
   @type compare_target :: compare_field() | :both | [compare_field()]
   @type divergence :: %{
