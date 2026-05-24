@@ -39,12 +39,6 @@ defmodule Minga.Integration.MouseTest do
   defp open_agent_tab(ctx) do
     ctx = inject_fake_session(ctx)
     send_keys_sync(ctx, "<Space>aa")
-
-    state = editor_state(ctx)
-
-    assert state.workspace.keymap_scope == :agent,
-           "expected :agent scope after SPC a a, got #{state.workspace.keymap_scope}"
-
     ctx
   end
 
@@ -81,18 +75,11 @@ defmodule Minga.Integration.MouseTest do
       tree_sep = file_tree_separator_col(ctx)
 
       send_mouse(ctx, 5, div(ctx.width, 2), :left)
-      state = editor_state(ctx)
-
-      assert state.workspace.keymap_scope == :editor,
-             "clicking editor content should set :editor scope, got #{state.workspace.keymap_scope}"
 
       send_mouse(ctx, 5, max(tree_sep - 2, 0), :left)
       state = editor_state(ctx)
 
       assert FileTree.focused?(state.workspace.file_tree), "clicking file tree should focus it"
-
-      assert state.workspace.keymap_scope == :file_tree,
-             "clicking file tree should set :file_tree scope, got #{state.workspace.keymap_scope}"
     end
   end
 

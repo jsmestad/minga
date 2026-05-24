@@ -533,6 +533,37 @@ defmodule Minga.Test.EditorCase do
     end
   end
 
+  # ── State query helpers ──────────────────────────────────────────────────
+  # :sys.get_state is valid as a synchronization barrier (ensuring messages
+  # are processed), but tests should not pattern-match on returned state
+  # fields. Helpers here return booleans that answer "is this happening?"
+  # without exposing the state path. For visible text (status messages,
+  # prompts), prefer screen helpers like minibuffer/1 and screen_row/2.
+
+  @doc "Returns true if a search pattern is active."
+  @spec search_active?(editor_ctx()) :: boolean()
+  def search_active?(%{editor: editor}) do
+    get_editor_state(editor).workspace.search.last_pattern != nil
+  end
+
+  @doc "Returns true if the file tree is open."
+  @spec file_tree_open?(editor_ctx()) :: boolean()
+  def file_tree_open?(%{editor: editor}) do
+    MingaEditor.State.FileTree.open?(get_editor_state(editor).workspace.file_tree)
+  end
+
+  @doc "Returns true if the completion menu is visible."
+  @spec completion_visible?(editor_ctx()) :: boolean()
+  def completion_visible?(%{editor: editor}) do
+    MingaEditor.State.ModalOverlay.match(get_editor_state(editor).shell_state.modal, :completion)
+  end
+
+  @doc "Returns true if a file conflict prompt is open."
+  @spec conflict_open?(editor_ctx()) :: boolean()
+  def conflict_open?(%{editor: editor}) do
+    MingaEditor.State.ModalOverlay.match(get_editor_state(editor).shell_state.modal, :conflict)
+  end
+
   @doc "Returns the picker payload (ModalOverlay.Picker) when a picker is open, or nil."
   @spec modal_picker(editor_ctx()) :: MingaEditor.State.ModalOverlay.Picker.t() | nil
   def modal_picker(%{editor: editor}) do

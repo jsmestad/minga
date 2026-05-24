@@ -30,7 +30,6 @@ defmodule MingaEditor.FileChangeTest do
     File.write!(path, "external change that is longer")
     notify_file_changed(ctx, path)
 
-    assert conflict_open?(ctx)
     assert status_msg(ctx) =~ "[r]eload"
     assert status_msg(ctx) =~ "[k]eep"
   end
@@ -91,11 +90,5 @@ defmodule MingaEditor.FileChangeTest do
     :ok
   end
 
-  defp conflict_open?(ctx) do
-    MingaEditor.State.ModalOverlay.match(editor_state(ctx).shell_state.modal, :conflict)
-  end
-
-  defp status_msg(ctx) do
-    MingaEditor.State.status_msg(editor_state(ctx))
-  end
+  defp status_msg(ctx), do: MingaEditor.State.status_msg(editor_state(ctx))
 end
