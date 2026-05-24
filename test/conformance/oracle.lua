@@ -85,10 +85,18 @@ local function run_keys(keys)
   return vim.api.nvim_get_mode().mode
 end
 
+local function run_search(keys)
+  vim.o.wrapscan = true
+  local termcoded = vim.api.nvim_replace_termcodes(keys, true, false, true)
+  pcall(vim.cmd, "silent! normal! " .. termcoded)
+  return vim.api.nvim_get_mode().mode
+end
+
 local runners = {
   motion = run_keys,
   operator = run_keys,
   text_object = run_keys,
+  search = run_search,
 }
 
 local function run_scenario(scenario)
