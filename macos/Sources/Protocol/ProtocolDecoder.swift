@@ -213,6 +213,8 @@ enum RenderCommand: Sendable {
     case guiConfigState(Wire.ConfigState)
     case guiNotifications([Wire.EditorNotification])
     case guiEditTimeline(visible: Bool, viewingIndex: UInt16, entries: [Wire.TimelineEntry])
+    case guiExtensionOverlay([Wire.ExtensionOverlayEntry])
+    case guiExtensionPanel([Wire.ExtensionPanelEntry])
 }
 
 // MARK: - Decoder
@@ -2464,6 +2466,185 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             entries.append(Wire.TimelineEntry(index: idx, toolName: toolName, timestampDelta: tsDelta))
         }
         return (.guiEditTimeline(visible: visible, viewingIndex: viewingIndex, entries: entries), 1 + 2 + payloadLen)
+
+    case OP_GUI_EXTENSION_OVERLAY:
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let eoPayloadLen = Int(readU16(data, rest))
+        guard data.count >= rest + 2 + eoPayloadLen, eoPayloadLen >= 1 else {
+            throw ProtocolDecodeError.malformed
+        }
+        let eoStart = rest + 2
+        let eoCount = Int(data[eoStart])
+        var eoEntries: [Wire.ExtensionOverlayEntry] = []
+        var eoPos = eoStart + 1
+        let eoEnd = eoStart + eoPayloadLen
+        for _ in 0..<eoCount {
+            guard eoPos + 1 <= eoEnd else { break }
+            let extNameLen = Int(data[eoPos]); eoPos += 1
+            guard eoPos + extNameLen + 1 <= eoEnd else { break }
+            let extName = String(data: data[eoPos..<(eoPos + extNameLen)], encoding: .utf8) ?? ""
+            eoPos += extNameLen
+            let oidLen = Int(data[eoPos]); eoPos += 1
+            guard eoPos + oidLen + 11 <= eoEnd else { break }
+            let oid = String(data: data[eoPos..<(eoPos + oidLen)], encoding: .utf8) ?? ""
+            eoPos += oidLen
+            let winId = readU16(data, eoPos)
+            let row = readU16(data, eoPos + 2)
+            let col = readU16(data, eoPos + 4)
+            let shape = data[eoPos + 6]
+            let cr = data[eoPos + 7]
+            let cg = data[eoPos + 8]
+            let cb = data[eoPos + 9]
+            let opacity = data[eoPos + 10]
+            eoPos += 11
+            guard eoPos + 2 <= eoEnd else { break }
+            let contentLen = Int(readU16(data, eoPos)); eoPos += 2
+            guard eoPos + contentLen <= eoEnd else { break }
+            let content = String(data: data[eoPos..<(eoPos + contentLen)], encoding: .utf8) ?? ""
+            eoPos += contentLen
+            eoEntries.append(Wire.ExtensionOverlayEntry(
+                extensionName: extName, overlayID: oid, windowID: winId,
+                row: row, col: col, shape: shape,
+                colorR: cr, colorG: cg, colorB: cb, opacity: opacity,
+                content: content
+            ))
+        }
+        return (.guiExtensionOverlay(eoEntries), 1 + 2 + eoPayloadLen)
+
+    case OP_GUI_EXTENSION_PANEL:
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let epPayloadLen = Int(readU16(data, rest))
+        guard data.count >= rest + 2 + epPayloadLen, epPayloadLen >= 1 else {
+            throw ProtocolDecodeError.malformed
+        }
+        let epStart = rest + 2
+        let epEnd = epStart + epPayloadLen
+        let panelCount = Int(data[epStart])
+        var epPanels: [Wire.ExtensionPanelEntry] = []
+        var epPos = epStart + 1
+        for _ in 0..<panelCount {
+            guard epPos + 1 <= epEnd else { break }
+            let extLen = Int(data[epPos]); epPos += 1
+            guard epPos + extLen <= epEnd else { break }
+            let extName = String(data: data[epPos..<(epPos + extLen)], encoding: .utf8) ?? ""
+            epPos += extLen
+            guard epPos + 1 <= epEnd else { break }
+            let pidLen = Int(data[epPos]); epPos += 1
+            guard epPos + pidLen <= epEnd else { break }
+            let panelId = String(data: data[epPos..<(epPos + pidLen)], encoding: .utf8) ?? ""
+            epPos += pidLen
+            guard epPos + 1 <= epEnd else { break }
+            let titleLen = Int(data[epPos]); epPos += 1
+            guard epPos + titleLen + 4 <= epEnd else { break }
+            let title = String(data: data[epPos..<(epPos + titleLen)], encoding: .utf8) ?? ""
+            epPos += titleLen
+            let pos = data[epPos]
+            let sizeType = data[epPos + 1]
+            let sizeVal = data[epPos + 2]
+            let vis = data[epPos + 3] != 0
+            epPos += 4
+            guard epPos + 1 <= epEnd else { break }
+            let blockCount = Int(data[epPos]); epPos += 1
+            var blocks: [Wire.PanelContentBlock] = []
+            for _ in 0..<blockCount {
+                guard epPos + 1 <= epEnd else { break }
+                let blockType = data[epPos]; epPos += 1
+                switch blockType {
+                case 0: // text
+                    guard epPos + 2 <= epEnd else { break }
+                    let tLen = Int(readU16(data, epPos)); epPos += 2
+                    guard epPos + tLen <= epEnd else { break }
+                    let t = String(data: data[epPos..<(epPos + tLen)], encoding: .utf8) ?? ""
+                    epPos += tLen
+                    blocks.append(.text(t))
+                case 1: // styled_text
+                    guard epPos + 1 <= epEnd else { break }
+                    let runCount = Int(data[epPos]); epPos += 1
+                    var runs: [(text: String, r: UInt8, g: UInt8, b: UInt8, bold: Bool, italic: Bool)] = []
+                    for _ in 0..<runCount {
+                        guard epPos + 2 <= epEnd else { break }
+                        let stLen = Int(readU16(data, epPos)); epPos += 2
+                        guard epPos + stLen + 5 <= epEnd else { break }
+                        let stText = String(data: data[epPos..<(epPos + stLen)], encoding: .utf8) ?? ""
+                        epPos += stLen
+                        let stR = data[epPos]; let stG = data[epPos + 1]; let stB = data[epPos + 2]
+                        let stBold = data[epPos + 3] != 0; let stItalic = data[epPos + 4] != 0
+                        epPos += 5
+                        runs.append((text: stText, r: stR, g: stG, b: stB, bold: stBold, italic: stItalic))
+                    }
+                    blocks.append(.styledText(runs: runs))
+                case 2: // table
+                    guard epPos + 5 <= epEnd else { break }
+                    let colCount = Int(data[epPos])
+                    let rowCount = Int(readU16(data, epPos + 1))
+                    let selected = readU16(data, epPos + 3)
+                    epPos += 5
+                    var columns: [String] = []
+                    for _ in 0..<colCount {
+                        guard epPos + 2 <= epEnd else { break }
+                        let cLen = Int(readU16(data, epPos)); epPos += 2
+                        guard epPos + cLen <= epEnd else { break }
+                        columns.append(String(data: data[epPos..<(epPos + cLen)], encoding: .utf8) ?? "")
+                        epPos += cLen
+                    }
+                    var rows: [[String]] = []
+                    for _ in 0..<rowCount {
+                        var row: [String] = []
+                        for _ in 0..<colCount {
+                            guard epPos + 2 <= epEnd else { break }
+                            let cellLen = Int(readU16(data, epPos)); epPos += 2
+                            guard epPos + cellLen <= epEnd else { break }
+                            row.append(String(data: data[epPos..<(epPos + cellLen)], encoding: .utf8) ?? "")
+                            epPos += cellLen
+                        }
+                        rows.append(row)
+                    }
+                    blocks.append(.table(columns: columns, rows: rows, selected: selected))
+                case 3: // key_value
+                    guard epPos + 1 <= epEnd else { break }
+                    let pairCount = Int(data[epPos]); epPos += 1
+                    var pairs: [(key: String, value: String)] = []
+                    for _ in 0..<pairCount {
+                        guard epPos + 2 <= epEnd else { break }
+                        let kLen = Int(readU16(data, epPos)); epPos += 2
+                        guard epPos + kLen + 2 <= epEnd else { break }
+                        let k = String(data: data[epPos..<(epPos + kLen)], encoding: .utf8) ?? ""
+                        epPos += kLen
+                        let vLen = Int(readU16(data, epPos)); epPos += 2
+                        guard epPos + vLen <= epEnd else { break }
+                        let v = String(data: data[epPos..<(epPos + vLen)], encoding: .utf8) ?? ""
+                        epPos += vLen
+                        pairs.append((key: k, value: v))
+                    }
+                    blocks.append(.keyValue(pairs: pairs))
+                case 4: // separator
+                    blocks.append(.separator)
+                case 5: // progress
+                    guard epPos + 4 <= epEnd else { break }
+                    let labelLen = Int(readU16(data, epPos)); epPos += 2
+                    guard epPos + labelLen + 2 <= epEnd else { break }
+                    let label = String(data: data[epPos..<(epPos + labelLen)], encoding: .utf8) ?? ""
+                    epPos += labelLen
+                    let pctInt = readU16(data, epPos); epPos += 2
+                    blocks.append(.progress(label: label, percent: Float(pctInt) / 100.0))
+                case 6: // tree (length-prefixed, skip payload)
+                    guard epPos + 2 <= epEnd else { break }
+                    let treeLen = Int(readU16(data, epPos)); epPos += 2
+                    guard epPos + treeLen <= epEnd else { break }
+                    epPos += treeLen
+                    blocks.append(.unknown)
+                default:
+                    blocks.append(.unknown)
+                    break
+                }
+            }
+            epPanels.append(Wire.ExtensionPanelEntry(
+                extensionName: extName, panelID: panelId, title: title,
+                position: pos, sizeType: sizeType, sizeValue: sizeVal,
+                visible: vis, blocks: blocks
+            ))
+        }
+        return (.guiExtensionPanel(epPanels), 1 + 2 + epPayloadLen)
 
     case OP_CLIPBOARD_WRITE:
         // Forward-compatible format: opcode(1) + payload_length(2) + target(1) + text_len(2) + text

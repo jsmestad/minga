@@ -577,6 +577,60 @@ enum Wire {
 
         var id: Int { Int(index) }
     }
+
+    // MARK: - Extension overlays
+
+    /// An overlay entry from an extension, decoded from gui_extension_overlay (0x9C).
+    struct ExtensionOverlayEntry: Sendable, Identifiable, Equatable {
+        let extensionName: String
+        let overlayID: String
+        let windowID: UInt16
+        let row: UInt16
+        let col: UInt16
+        let shape: UInt8
+        let colorR: UInt8
+        let colorG: UInt8
+        let colorB: UInt8
+        let opacity: UInt8
+        let content: String
+
+        var id: String { "\(extensionName):\(overlayID)" }
+    }
+
+    // MARK: - Extension panels
+
+    /// A content block in an extension panel.
+    enum PanelContentBlock: Sendable {
+        case text(String)
+        case styledText(runs: [(text: String, r: UInt8, g: UInt8, b: UInt8, bold: Bool, italic: Bool)])
+        case table(columns: [String], rows: [[String]], selected: UInt16)
+        case keyValue(pairs: [(key: String, value: String)])
+        case separator
+        case progress(label: String, percent: Float)
+        case tree(nodes: [PanelTreeNode])
+        case unknown
+    }
+
+    /// A tree node in an extension panel.
+    struct PanelTreeNode: Sendable {
+        let label: String
+        let expanded: Bool
+        let children: [PanelTreeNode]
+    }
+
+    /// A panel registered by an extension.
+    struct ExtensionPanelEntry: Sendable, Identifiable {
+        let extensionName: String
+        let panelID: String
+        let title: String
+        let position: UInt8
+        let sizeType: UInt8
+        let sizeValue: UInt8
+        let visible: Bool
+        let blocks: [PanelContentBlock]
+
+        var id: String { "\(extensionName):\(panelID)" }
+    }
 }
 
 /// Cursor shape matching the protocol constants.

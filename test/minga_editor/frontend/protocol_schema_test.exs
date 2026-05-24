@@ -146,7 +146,9 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       gui_workspaces: 0x98,
       gui_notifications: 0x99,
       gui_observatory: 0x9A,
-      gui_edit_timeline: 0x9B
+      gui_edit_timeline: 0x9B,
+      gui_extension_overlay: 0x9C,
+      gui_extension_panel: 0x9D
     )
   end
 
