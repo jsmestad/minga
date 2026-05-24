@@ -78,13 +78,13 @@ defmodule Minga.Test.ConformanceCase do
 
     case {scenario.type, Map.get(scenario, :register_setup)} do
       {:macro, setup} when is_map(setup) ->
-        :sys.replace_state(ctx.editor, fn st ->
-          macro_rec = st.workspace.editing.macro_recorder
+        alias MingaEditor.MacroRecorder
 
+        :sys.replace_state(ctx.editor, fn st ->
           populated =
-            Enum.reduce(setup, macro_rec, fn {name, content}, acc ->
+            Enum.reduce(setup, st.workspace.editing.macro_recorder, fn {name, content}, acc ->
               keys = for <<cp::utf8 <- content>>, do: {cp, 0}
-              %{acc | registers: Map.put(acc.registers, name, keys)}
+              MacroRecorder.put_macro(acc, name, keys)
             end)
 
           put_in(st.workspace.editing.macro_recorder, populated)
@@ -205,7 +205,11 @@ defmodule Minga.Test.ConformanceCase do
   end
 
   defp field_failure(:registers, expected, actual) do
-    if Map.get(expected, :registers) == Map.get(actual, :registers), do: [], else: [:registers]
+    case {Map.get(expected, :registers), Map.get(actual, :registers)} do
+      {nil, nil} -> raise "compare: [:registers] requires capture_registers in the scenario"
+      {e, a} when e == a -> []
+      _ -> [:registers]
+    end
   end
 
   @spec assert_no_failures(scenario(), [atom()], NeovimOracle.result(), minga_result()) :: :ok

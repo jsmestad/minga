@@ -2,9 +2,8 @@ defmodule Minga.Conformance.MacrosTest do
   # Conformance tests invoke nvim as an OS process, so they run serially to avoid erl_child_setup EPIPE races.
   use Minga.Test.ConformanceCase, async: false
 
-  # Neovim's headless APIs (feedkeys, :normal!, :source!) cannot record macros
-  # to registers. All macro scenarios pre-populate the register and test replay
-  # conformance. Minga's macro recording is tested separately in unit tests.
+  # nvim_feedkeys with the "n" flag does not record to macro registers, so all
+  # scenarios pre-populate the register and test replay only.
 
   @compare [:content, :cursor, :mode]
 

@@ -214,6 +214,9 @@ local function run_scenario(scenario)
     for i = string.byte("a"), string.byte("z") do
       vim.fn.setreg(string.char(i), "")
     end
+    for i = 1, 9 do
+      vim.fn.setreg(tostring(i), "")
+    end
     if scenario.register_setup then
       for name, content in pairs(scenario.register_setup) do
         vim.fn.setreg(name, content)
