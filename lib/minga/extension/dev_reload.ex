@@ -172,43 +172,38 @@ defmodule Minga.Extension.DevReload do
 
   @spec restart_extension(atom()) :: :ok | {:error, term()}
   defp restart_extension(ext_name) do
-    case Minga.Extension.Registry.get(Minga.Extension.Registry, ext_name) do
-      {:ok, fresh_entry} ->
-        case Minga.Extension.Supervisor.stop_extension(
-               Minga.Extension.Supervisor,
-               Minga.Extension.Registry,
-               ext_name,
-               fresh_entry
-             ) do
-          :ok ->
-            :ok
-
-          {:error, reason} ->
-            Minga.Log.warning(
-              :config,
-              "Dev reload: stop failed for #{ext_name}: #{inspect(reason)}"
-            )
-        end
-
-        case Minga.Extension.Registry.get(Minga.Extension.Registry, ext_name) do
-          {:ok, stopped_entry} ->
-            case Minga.Extension.Supervisor.start_extension(
-                   Minga.Extension.Supervisor,
-                   Minga.Extension.Registry,
-                   ext_name,
-                   stopped_entry
-                 ) do
-              {:ok, _pid} -> :ok
-              {:error, reason} -> {:error, reason}
-            end
-
-          :error ->
-            {:error, :not_found_after_stop}
-        end
-
-      :error ->
-        {:error, :not_found}
+    with {:ok, entry} <- Minga.Extension.Registry.get(Minga.Extension.Registry, ext_name),
+         :ok <- stop_ext(ext_name, entry),
+         {:ok, stopped} <- Minga.Extension.Registry.get(Minga.Extension.Registry, ext_name),
+         {:ok, _pid} <- start_ext(ext_name, stopped) do
+      :ok
+    else
+      {:error, reason} -> {:error, reason}
+      :error -> {:error, :not_found}
     end
+  end
+
+  @spec stop_ext(atom(), term()) :: :ok | {:error, term()}
+  defp stop_ext(ext_name, entry) do
+    case Minga.Extension.Supervisor.stop_extension(
+           Minga.Extension.Supervisor,
+           Minga.Extension.Registry,
+           ext_name,
+           entry
+         ) do
+      :ok -> :ok
+      {:error, reason} -> {:error, {:stop_failed, reason}}
+    end
+  end
+
+  @spec start_ext(atom(), term()) :: {:ok, pid()} | {:error, term()}
+  defp start_ext(ext_name, entry) do
+    Minga.Extension.Supervisor.start_extension(
+      Minga.Extension.Supervisor,
+      Minga.Extension.Registry,
+      ext_name,
+      entry
+    )
   end
 
   @spec broadcast_reload_result(atom(), :ok | {:error, term()}) :: :ok
@@ -270,28 +265,31 @@ defmodule Minga.Extension.DevReload do
 
   @spec cleanup_orphaned_watchers(state(), [String.t()]) :: state()
   defp cleanup_orphaned_watchers(state, paths) do
-    Enum.reduce(paths, state, fn path, acc ->
-      if Map.has_key?(acc.extensions, path) do
-        acc
-      else
-        case Map.pop(acc.watchers, path) do
-          {pid, watchers} when is_pid(pid) ->
-            GenServer.stop(pid, :normal, 1_000)
+    paths
+    |> Enum.reject(&Map.has_key?(state.extensions, &1))
+    |> Enum.reduce(state, &stop_watcher_for_path(&2, &1))
+  end
 
-            {ref, monitors} =
-              Enum.find(acc.watcher_monitors, fn {_ref, p} -> p == path end)
-              |> case do
-                {ref, _} -> {ref, Map.delete(acc.watcher_monitors, ref)}
-                nil -> {nil, acc.watcher_monitors}
-              end
+  @spec stop_watcher_for_path(state(), String.t()) :: state()
+  defp stop_watcher_for_path(state, path) do
+    case Map.pop(state.watchers, path) do
+      {pid, watchers} when is_pid(pid) ->
+        GenServer.stop(pid, :normal, 1_000)
+        {ref, monitors} = pop_monitor_for_path(state.watcher_monitors, path)
+        if ref, do: Process.demonitor(ref, [:flush])
+        %{state | watchers: watchers, watcher_monitors: monitors}
 
-            if ref, do: Process.demonitor(ref, [:flush])
-            %{acc | watchers: watchers, watcher_monitors: monitors}
+      {nil, _watchers} ->
+        state
+    end
+  end
 
-          {nil, _watchers} ->
-            acc
-        end
-      end
-    end)
+  @spec pop_monitor_for_path(%{reference() => String.t()}, String.t()) ::
+          {reference() | nil, %{reference() => String.t()}}
+  defp pop_monitor_for_path(monitors, path) do
+    case Enum.find(monitors, fn {_ref, p} -> p == path end) do
+      {ref, _} -> {ref, Map.delete(monitors, ref)}
+      nil -> {nil, monitors}
+    end
   end
 end
