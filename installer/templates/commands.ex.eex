@@ -1,0 +1,13 @@
+defmodule <%= module %>.Commands do
+  @moduledoc """
+  Command implementations for <%= module %>.
+
+  Each function receives the editor state and returns the modified state.
+  Register commands in the main extension module with the `command` macro.
+  """
+
+  @spec hello(term()) :: term()
+  def hello(state) do
+    MingaEditor.Extension.EditorAPI.set_status(state, "Hello from <%= module %>!")
+  end
+end
