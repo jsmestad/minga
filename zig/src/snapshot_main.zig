@@ -66,7 +66,9 @@ pub fn main(init: std.process.Init) !void {
     }
 
     // Flush the final frame if the stream ended without a batch_end.
-    try surface.render();
+    if (!surface.rendered) {
+        try surface.render();
+    }
     std.debug.print("Snapshot written to: {s}\n", .{args.output});
 }
 

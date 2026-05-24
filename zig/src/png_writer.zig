@@ -12,7 +12,7 @@ pub fn writePng(alloc: Allocator, io: std.Io, path: []const u8, pixels: []const 
     defer file.close(io);
     var file_buf: [8192]u8 = undefined;
     var writer = file.writer(io, &file_buf);
-    try writePngToWriter(alloc, &writer, pixels, width, height);
+    try writePngToWriter(alloc, &writer.interface, pixels, width, height);
     try writer.flush();
 }
 
