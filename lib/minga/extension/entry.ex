@@ -32,6 +32,7 @@ defmodule Minga.Extension.Entry do
     :hex,
     :module,
     :pid,
+    :manifest,
     config: [],
     status: :stopped
   ]
@@ -43,6 +44,7 @@ defmodule Minga.Extension.Entry do
           hex: hex_opts() | nil,
           module: module() | nil,
           pid: pid() | nil,
+          manifest: Extension.Manifest.t() | nil,
           config: keyword(),
           status: Extension.extension_status()
         }

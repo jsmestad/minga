@@ -1,5 +1,7 @@
 defmodule Minga.Extension.SupervisorDslTest do
-  use ExUnit.Case, async: true
+  # Uses the global modeline segment registry.
+  # Keep serialized so snapshot tests do not see temporary DSL segments.
+  use ExUnit.Case, async: false
 
   alias Minga.Command.Registry, as: CommandRegistry
   alias Minga.Extension.Registry, as: ExtRegistry

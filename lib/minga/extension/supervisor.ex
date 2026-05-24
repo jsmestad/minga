@@ -17,6 +17,7 @@ defmodule Minga.Extension.Supervisor do
 
   alias Minga.Extension.Git, as: ExtGit
   alias Minga.Extension.Hex, as: ExtHex
+  alias Minga.Extension.Manifest
   alias Minga.Extension.Registry, as: ExtRegistry
 
   # ── Client API ──────────────────────────────────────────────────────────────
@@ -195,7 +196,8 @@ defmodule Minga.Extension.Supervisor do
   @type start_opts :: [
           command_registry: GenServer.server(),
           keymap: GenServer.server(),
-          callbacks: %{atom() => Minga.Extension.ContributionCleanup.cleanup_fun()}
+          callbacks: %{atom() => Minga.Extension.ContributionCleanup.cleanup_fun()},
+          slow_lifecycle_threshold_ms: non_neg_integer()
         ]
 
   @spec start_extension(GenServer.server(), GenServer.server(), atom(), ExtRegistry.entry()) ::
@@ -243,10 +245,13 @@ defmodule Minga.Extension.Supervisor do
     cmd_registry = Keyword.get(opts, :command_registry, Minga.Command.Registry)
     keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
 
-    with {:ok, module} <- compile_extension(entry.path),
+    with {:ok, module} <-
+           run_lifecycle_phase(name, :load, opts, fn -> compile_extension(entry.path) end),
          :ok <- validate_behaviour(module, name),
+         :ok <- record_extension_manifest(registry, name, module, entry.source_type),
          :ok <- register_and_validate_options(name, module, entry.config),
-         {:ok, _state} <- call_init(module, entry.config) do
+         {:ok, _state} <-
+           run_lifecycle_phase(name, :init, opts, fn -> call_init(module, entry.config) end) do
       finalize_extension_start(
         start_loaded_extension(
           supervisor,
@@ -255,7 +260,8 @@ defmodule Minga.Extension.Supervisor do
           module,
           entry.config,
           cmd_registry,
-          keymap
+          keymap,
+          opts
         ),
         registry,
         name,
@@ -279,9 +285,19 @@ defmodule Minga.Extension.Supervisor do
           module(),
           keyword(),
           GenServer.server(),
-          GenServer.server()
+          GenServer.server(),
+          start_opts()
         ) :: {:ok, pid()} | {:error, term()}
-  defp start_loaded_extension(supervisor, registry, name, module, config, cmd_registry, keymap) do
+  defp start_loaded_extension(
+         supervisor,
+         registry,
+         name,
+         module,
+         config,
+         cmd_registry,
+         keymap,
+         opts
+       ) do
     case register_extension_modeline_segments(module, name) do
       :ok ->
         start_child_then_register_dsl(
@@ -291,7 +307,8 @@ defmodule Minga.Extension.Supervisor do
           module,
           config,
           cmd_registry,
-          keymap
+          keymap,
+          opts
         )
 
       {:error, _reason} = error ->
@@ -306,7 +323,8 @@ defmodule Minga.Extension.Supervisor do
           module(),
           keyword(),
           GenServer.server(),
-          GenServer.server()
+          GenServer.server(),
+          start_opts()
         ) :: {:ok, pid()} | {:error, term()}
   defp start_child_then_register_dsl(
          supervisor,
@@ -315,9 +333,10 @@ defmodule Minga.Extension.Supervisor do
          module,
          config,
          cmd_registry,
-         keymap
+         keymap,
+         opts
        ) do
-    case start_child(supervisor, registry, name, module, config) do
+    case start_child(supervisor, registry, name, module, config, opts) do
       {:ok, pid} ->
         register_dsl_for_started_child(supervisor, pid, module, name, cmd_registry, keymap)
 
@@ -401,14 +420,23 @@ defmodule Minga.Extension.Supervisor do
     end
   end
 
-  @spec start_child(GenServer.server(), GenServer.server(), atom(), module(), keyword()) ::
+  @spec start_child(
+          GenServer.server(),
+          GenServer.server(),
+          atom(),
+          module(),
+          keyword(),
+          start_opts()
+        ) ::
           {:ok, pid()} | {:error, term()}
-  defp start_child(supervisor, registry, name, module, config) do
-    child_spec = module.child_spec(config)
-
-    case DynamicSupervisor.start_child(supervisor, child_spec) do
+  defp start_child(supervisor, registry, name, module, config, opts) do
+    case run_lifecycle_phase(name, :child_start, opts, fn ->
+           start_extension_child(supervisor, module, config)
+         end) do
       {:ok, pid} ->
         ExtRegistry.update(registry, name, module: module, status: :running, pid: pid)
+        emit_restart_count(name, 0)
+        start_child_restart_monitor(supervisor, registry, name, module, pid)
         Minga.Log.info(:config, "Extension #{name} started (#{module})")
         {:ok, pid}
 
@@ -437,11 +465,9 @@ defmodule Minga.Extension.Supervisor do
     keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
 
     termination_result =
-      if is_pid(entry.pid) do
-        terminate_extension_child(supervisor, entry.pid)
-      else
-        :ok
-      end
+      run_lifecycle_phase(name, :stop, opts, fn ->
+        terminate_extension_process(supervisor, entry)
+      end)
 
     finalize_stopped_extension(registry, name, entry)
 
@@ -504,6 +530,208 @@ defmodule Minga.Extension.Supervisor do
 
   # ── Private ────────────────────────────────────────────────────────────────
 
+  @spec record_extension_manifest(GenServer.server(), atom(), module(), Manifest.source_type()) ::
+          :ok | {:error, term()}
+  defp record_extension_manifest(registry, name, module, source) do
+    manifest = Manifest.from_module(module, source)
+    ExtRegistry.update(registry, name, manifest: manifest)
+    :ok
+  rescue
+    e -> {:error, "manifest introspection failed: #{Exception.message(e)}"}
+  end
+
+  @spec run_lifecycle_phase(atom(), atom(), start_opts(), (-> result)) :: result when result: var
+  defp run_lifecycle_phase(name, phase, opts, fun)
+       when is_atom(name) and is_atom(phase) and is_function(fun, 0) do
+    start_time = System.monotonic_time()
+
+    result =
+      Minga.Telemetry.span(
+        [:minga, :extension, :lifecycle],
+        %{extension: name, phase: phase},
+        fun
+      )
+
+    duration = System.monotonic_time() - start_time
+    maybe_log_slow_lifecycle_phase(name, phase, duration, opts)
+    result
+  end
+
+  @spec maybe_log_slow_lifecycle_phase(atom(), atom(), integer(), start_opts()) :: :ok
+  defp maybe_log_slow_lifecycle_phase(name, phase, duration, opts) do
+    threshold_ms = Keyword.get(opts, :slow_lifecycle_threshold_ms, 50)
+    duration_ms = System.convert_time_unit(duration, :native, :millisecond)
+
+    case duration_ms >= threshold_ms do
+      true ->
+        Minga.Log.warning(
+          :config,
+          "Extension #{name} lifecycle phase #{phase} took #{duration_ms}ms"
+        )
+
+      false ->
+        :ok
+    end
+  end
+
+  @spec emit_restart_count(atom(), non_neg_integer()) :: :ok
+  defp emit_restart_count(name, count) do
+    Minga.Telemetry.execute(
+      [:minga, :extension, :lifecycle, :crash_restart_count],
+      %{count: count},
+      %{extension: name, phase: :crash_restart_count}
+    )
+  end
+
+  @spec start_extension_child(GenServer.server(), module(), keyword()) ::
+          {:ok, pid()} | {:error, term()}
+  defp start_extension_child(supervisor, module, config) do
+    child_spec = normalize_child_spec(module, config)
+    DynamicSupervisor.start_child(supervisor, child_spec)
+  rescue
+    e -> {:error, {:child_spec_failed, Exception.message(e)}}
+  catch
+    kind, reason -> {:error, {:child_spec_failed, {kind, reason}}}
+  end
+
+  @spec normalize_child_spec(module(), keyword()) :: Supervisor.child_spec()
+  defp normalize_child_spec(module, config) do
+    module.child_spec(config)
+    |> Supervisor.child_spec([])
+    |> Map.put(:modules, [module])
+  end
+
+  @spec terminate_extension_process(GenServer.server(), ExtRegistry.entry()) ::
+          :ok | {:error, term()}
+  defp terminate_extension_process(supervisor, %{pid: pid} = entry) when is_pid(pid) do
+    case terminate_extension_child(supervisor, pid) do
+      {:error, :not_found} -> terminate_extension_process_by_module(supervisor, entry.module)
+      result -> result
+    end
+  end
+
+  defp terminate_extension_process(supervisor, %{module: module, status: :running})
+       when is_atom(module) and not is_nil(module) do
+    terminate_extension_process_by_module(supervisor, module)
+  end
+
+  defp terminate_extension_process(_supervisor, _entry), do: :ok
+
+  @spec terminate_extension_process_by_module(GenServer.server(), module() | nil) ::
+          :ok | {:error, term()}
+  defp terminate_extension_process_by_module(_supervisor, nil), do: {:error, :not_found}
+
+  defp terminate_extension_process_by_module(supervisor, module) do
+    case extension_child_pid(supervisor, module) do
+      pid when is_pid(pid) -> terminate_extension_child(supervisor, pid)
+      nil -> {:error, :not_found}
+    end
+  end
+
+  @spec start_child_restart_monitor(
+          GenServer.server(),
+          GenServer.server(),
+          atom(),
+          module(),
+          pid()
+        ) :: :ok
+  defp start_child_restart_monitor(supervisor, registry, name, module, pid) do
+    spawn(fn -> monitor_child_restarts(supervisor, registry, name, module, pid, 0) end)
+    :ok
+  end
+
+  @spec monitor_child_restarts(
+          GenServer.server(),
+          GenServer.server(),
+          atom(),
+          module(),
+          pid(),
+          non_neg_integer()
+        ) :: :ok
+  defp monitor_child_restarts(supervisor, registry, name, module, pid, count) do
+    ref = Process.monitor(pid)
+
+    receive do
+      {:DOWN, ^ref, :process, ^pid, reason} ->
+        handle_child_down(supervisor, registry, name, module, reason, count)
+    end
+  end
+
+  @spec handle_child_down(
+          GenServer.server(),
+          GenServer.server(),
+          atom(),
+          module(),
+          term(),
+          non_neg_integer()
+        ) :: :ok
+  defp handle_child_down(supervisor, registry, name, module, reason, count) do
+    wait_for_restarted_child(supervisor, registry, name, module, reason, count + 1, 0)
+  end
+
+  @spec crash_reason?(term()) :: boolean()
+  defp crash_reason?(:normal), do: false
+  defp crash_reason?(:shutdown), do: false
+  defp crash_reason?({:shutdown, _reason}), do: false
+  defp crash_reason?(_reason), do: true
+
+  @spec wait_for_restarted_child(
+          GenServer.server(),
+          GenServer.server(),
+          atom(),
+          module(),
+          term(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: :ok
+  defp wait_for_restarted_child(_supervisor, registry, name, _module, reason, _count, 5) do
+    mark_crashed_without_replacement(registry, name, reason)
+  end
+
+  defp wait_for_restarted_child(supervisor, registry, name, module, reason, count, attempts) do
+    case extension_child_pid(supervisor, module) do
+      pid when is_pid(pid) ->
+        ExtRegistry.update(registry, name, pid: pid)
+        emit_restart_count(name, count)
+        monitor_child_restarts(supervisor, registry, name, module, pid, count)
+
+      nil ->
+        receive do
+        after
+          10 ->
+            wait_for_restarted_child(
+              supervisor,
+              registry,
+              name,
+              module,
+              reason,
+              count,
+              attempts + 1
+            )
+        end
+    end
+  end
+
+  @spec mark_crashed_without_replacement(GenServer.server(), atom(), term()) :: :ok
+  defp mark_crashed_without_replacement(registry, name, reason) do
+    case crash_reason?(reason) do
+      true -> ExtRegistry.update(registry, name, status: :crashed, pid: nil)
+      false -> :ok
+    end
+  end
+
+  @spec extension_child_pid(GenServer.server(), module()) :: pid() | nil
+  defp extension_child_pid(supervisor, module) do
+    supervisor
+    |> DynamicSupervisor.which_children()
+    |> Enum.find_value(fn
+      {:undefined, pid, _type, [^module]} when is_pid(pid) -> pid
+      _child -> nil
+    end)
+  catch
+    :exit, _reason -> nil
+  end
+
   @spec resolve_git_extensions(GenServer.server()) :: [start_failure()]
   defp resolve_git_extensions(registry) do
     ExtRegistry.all(registry)
@@ -542,11 +770,16 @@ defmodule Minga.Extension.Supervisor do
     keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
     package_atom = String.to_atom(entry.hex.package)
 
-    with :ok <- ensure_hex_application_started(package_atom),
+    with :ok <-
+           run_lifecycle_phase(name, :load, opts, fn ->
+             ensure_hex_application_started(package_atom)
+           end),
          {:ok, module} <- find_extension_module(package_atom),
          :ok <- validate_behaviour(module, name),
+         :ok <- record_extension_manifest(registry, name, module, entry.source_type),
          :ok <- register_and_validate_options(name, module, entry.config),
-         {:ok, _state} <- call_init(module, entry.config) do
+         {:ok, _state} <-
+           run_lifecycle_phase(name, :init, opts, fn -> call_init(module, entry.config) end) do
       finalize_extension_start(
         start_loaded_extension(
           supervisor,
@@ -555,7 +788,8 @@ defmodule Minga.Extension.Supervisor do
           module,
           entry.config,
           cmd_registry,
-          keymap
+          keymap,
+          opts
         ),
         registry,
         name,
@@ -729,7 +963,9 @@ defmodule Minga.Extension.Supervisor do
       [command_registry: cmd_registry, keymap: keymap]
       |> Keyword.merge(Keyword.take(opts, [:callbacks]))
 
-    case Minga.Extension.ContributionCleanup.unregister_source(source, cleanup_opts) do
+    case run_lifecycle_phase(name, :cleanup, opts, fn ->
+           Minga.Extension.ContributionCleanup.unregister_source(source, cleanup_opts)
+         end) do
       :ok ->
         :ok
 

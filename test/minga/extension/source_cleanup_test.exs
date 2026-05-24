@@ -299,10 +299,10 @@ defmodule Minga.Extension.SourceCleanupTest do
         end
       end)
 
+    ref = Process.monitor(pid)
     on_exit(fn -> Process.exit(bogus_pid, :kill) end)
-    on_exit(fn -> if Process.alive?(pid), do: Process.exit(pid, :kill) end)
 
-    assert {:error, :not_found} =
+    assert :ok =
              ExtSupervisor.stop_extension(
                ctx.supervisor,
                ctx.registry,
@@ -318,7 +318,7 @@ defmodule Minga.Extension.SourceCleanupTest do
     assert stopped_entry.module == nil
     assert :error = CommandRegistry.lookup(ctx.command_registry, :stop_aggregate_failure_cmd)
     assert Minga.Language.Registry.get(:stop_aggregate_failure_lang) == nil
-    assert Process.alive?(pid)
+    assert_receive {:DOWN, ^ref, :process, ^pid, _reason}
   end
 
   test "command registration failure stops keybind registration and marks the extension failed",

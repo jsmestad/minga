@@ -146,21 +146,7 @@ defmodule Minga.Extension.DevReload do
       {:ok, %{path: path, status: :running}} when is_binary(path) ->
         Minga.Log.info(:config, "Dev reload: recompiling #{ext_name}")
 
-        case recompile_extension(path) do
-          :ok ->
-            restart_result = restart_extension(ext_name)
-
-            broadcast_reload_result(ext_name, restart_result)
-
-          {:error, reason} ->
-            Minga.Events.broadcast(
-              :log_message,
-              %Minga.Events.LogMessageEvent{
-                text: "Extension #{ext_name} reload failed: #{inspect(reason)}",
-                level: :error
-              }
-            )
-        end
+        reload_recompiled_extension(ext_name, recompile_extension(path))
 
       _ ->
         :ok
@@ -168,6 +154,32 @@ defmodule Minga.Extension.DevReload do
   rescue
     e ->
       Minga.Log.error(:config, "Dev reload error for #{ext_name}: #{Exception.message(e)}")
+  end
+
+  @spec reload_recompiled_extension(atom(), :ok | {:error, term()}) :: :ok
+  defp reload_recompiled_extension(ext_name, :ok) do
+    ext_name
+    |> restart_extension_with_telemetry()
+    |> then(&broadcast_reload_result(ext_name, &1))
+  end
+
+  defp reload_recompiled_extension(ext_name, {:error, reason}) do
+    Minga.Events.broadcast(
+      :log_message,
+      %Minga.Events.LogMessageEvent{
+        text: "Extension #{ext_name} reload failed: #{inspect(reason)}",
+        level: :error
+      }
+    )
+  end
+
+  @spec restart_extension_with_telemetry(atom()) :: :ok | {:error, term()}
+  defp restart_extension_with_telemetry(ext_name) do
+    Minga.Telemetry.span(
+      [:minga, :extension, :lifecycle],
+      %{extension: ext_name, phase: :reload},
+      fn -> restart_extension(ext_name) end
+    )
   end
 
   @spec restart_extension(atom()) :: :ok | {:error, term()}
