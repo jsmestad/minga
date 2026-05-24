@@ -148,50 +148,9 @@ defmodule Minga.Extension.DevReload do
 
         case recompile_extension(path) do
           :ok ->
-            {:ok, fresh_entry} = Minga.Extension.Registry.get(Minga.Extension.Registry, ext_name)
+            restart_result = restart_extension(ext_name)
 
-            case Minga.Extension.Supervisor.stop_extension(
-                   Minga.Extension.Supervisor,
-                   Minga.Extension.Registry,
-                   ext_name,
-                   fresh_entry
-                 ) do
-              :ok ->
-                :ok
-
-              {:error, reason} ->
-                Minga.Log.warning(
-                  :config,
-                  "Dev reload: stop failed for #{ext_name}: #{inspect(reason)}"
-                )
-            end
-
-            {:ok, stopped_entry} =
-              Minga.Extension.Registry.get(Minga.Extension.Registry, ext_name)
-
-            case Minga.Extension.Supervisor.start_extension(
-                   Minga.Extension.Supervisor,
-                   Minga.Extension.Registry,
-                   ext_name,
-                   stopped_entry
-                 ) do
-              {:ok, _pid} ->
-                :ok
-
-              {:error, reason} ->
-                Minga.Log.warning(
-                  :config,
-                  "Dev reload: start failed for #{ext_name}: #{inspect(reason)}"
-                )
-            end
-
-            Minga.Events.broadcast(
-              :log_message,
-              %Minga.Events.LogMessageEvent{
-                text: "Extension #{ext_name} reloaded",
-                level: :info
-              }
-            )
+            broadcast_reload_result(ext_name, restart_result)
 
           {:error, reason} ->
             Minga.Events.broadcast(
@@ -209,6 +168,65 @@ defmodule Minga.Extension.DevReload do
   rescue
     e ->
       Minga.Log.error(:config, "Dev reload error for #{ext_name}: #{Exception.message(e)}")
+  end
+
+  @spec restart_extension(atom()) :: :ok | {:error, term()}
+  defp restart_extension(ext_name) do
+    case Minga.Extension.Registry.get(Minga.Extension.Registry, ext_name) do
+      {:ok, fresh_entry} ->
+        case Minga.Extension.Supervisor.stop_extension(
+               Minga.Extension.Supervisor,
+               Minga.Extension.Registry,
+               ext_name,
+               fresh_entry
+             ) do
+          :ok ->
+            :ok
+
+          {:error, reason} ->
+            Minga.Log.warning(
+              :config,
+              "Dev reload: stop failed for #{ext_name}: #{inspect(reason)}"
+            )
+        end
+
+        case Minga.Extension.Registry.get(Minga.Extension.Registry, ext_name) do
+          {:ok, stopped_entry} ->
+            case Minga.Extension.Supervisor.start_extension(
+                   Minga.Extension.Supervisor,
+                   Minga.Extension.Registry,
+                   ext_name,
+                   stopped_entry
+                 ) do
+              {:ok, _pid} -> :ok
+              {:error, reason} -> {:error, reason}
+            end
+
+          :error ->
+            {:error, :not_found_after_stop}
+        end
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
+  @spec broadcast_reload_result(atom(), :ok | {:error, term()}) :: :ok
+  defp broadcast_reload_result(ext_name, :ok) do
+    Minga.Events.broadcast(
+      :log_message,
+      %Minga.Events.LogMessageEvent{text: "Extension #{ext_name} reloaded", level: :info}
+    )
+  end
+
+  defp broadcast_reload_result(ext_name, {:error, reason}) do
+    Minga.Events.broadcast(
+      :log_message,
+      %Minga.Events.LogMessageEvent{
+        text: "Extension #{ext_name} restart failed: #{inspect(reason)}",
+        level: :error
+      }
+    )
   end
 
   @spec recompile_extension(String.t()) :: :ok | {:error, term()}
