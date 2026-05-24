@@ -38,6 +38,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x98   | gui_workspaces    | Canonical workspace state |
   | 0x87   | gui_board           | Board card grid state      |
   | 0x97   | gui_config_state    | Settings panel state       |
+  | 0x9E   | gui_search_state    | Search toolbar state       |
 
   ## GUI Actions (Frontend → BEAM)
 
@@ -96,6 +97,14 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x4C       | tab_move_right          |
   | 0x4D       | observatory_inspect     |
   | 0x4E       | font_size_adjust        |
+  | 0x4F       | timeline_navigate       |
+  | 0x50       | extension_panel_action  |
+  | 0x51       | search_query            |
+  | 0x52       | search_next             |
+  | 0x53       | search_prev             |
+  | 0x54       | search_replace          |
+  | 0x55       | search_replace_all      |
+  | 0x56       | search_dismiss          |
   | 0x34       | system_will_sleep       |
   | 0x35       | system_did_wake         |
 
@@ -255,6 +264,11 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   @op_gui_edit_timeline Opcodes.gui_edit_timeline()
   @op_gui_search_state Opcodes.gui_search_state()
+
+  @search_flag_replace_mode 0x01
+  @search_flag_case_sensitive 0x02
+  @search_flag_whole_word 0x04
+  @search_flag_regex 0x08
 
   @max_u8 255
   @max_u16 65_535
@@ -1555,18 +1569,22 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   Flags bits: bit 0 = replace_mode, bit 1 = case_sensitive, bit 2 = whole_word, bit 3 = regex.
   """
-  @spec encode_gui_search_state(boolean(), non_neg_integer(), non_neg_integer(), map()) ::
-          binary()
+  @spec encode_gui_search_state(
+          boolean(),
+          non_neg_integer(),
+          non_neg_integer(),
+          MingaEditor.State.Search.gui_search() | %{}
+        ) :: binary()
   def encode_gui_search_state(active, match_count, current_index, flags) do
     active_byte = if active, do: 1, else: 0
     count = min(match_count, @max_u16)
     idx = min(current_index, @max_u16)
 
     flag_byte =
-      if(flags[:replace_mode], do: 1, else: 0) |||
-        if(flags[:case_sensitive], do: 2, else: 0) |||
-        if(flags[:whole_word], do: 4, else: 0) |||
-        if flags[:regex], do: 8, else: 0
+      if(flags[:replace_mode], do: @search_flag_replace_mode, else: 0) |||
+        if(flags[:case_sensitive], do: @search_flag_case_sensitive, else: 0) |||
+        if(flags[:whole_word], do: @search_flag_whole_word, else: 0) |||
+        if flags[:regex], do: @search_flag_regex, else: 0
 
     payload = <<active_byte::8, count::16, idx::16, flag_byte::8>>
 
@@ -3445,6 +3463,22 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   # ═══════════════════════════════════════════════════════════════════════════
   # Decoding (Frontend → BEAM)
   # ═══════════════════════════════════════════════════════════════════════════
+
+  @doc "Unpacks a search flags byte into a keyword list of booleans."
+  @spec decode_search_flags(non_neg_integer()) :: [
+          replace_mode: boolean(),
+          case_sensitive: boolean(),
+          whole_word: boolean(),
+          regex: boolean()
+        ]
+  def decode_search_flags(flags) when is_integer(flags) do
+    [
+      replace_mode: (flags &&& @search_flag_replace_mode) != 0,
+      case_sensitive: (flags &&& @search_flag_case_sensitive) != 0,
+      whole_word: (flags &&& @search_flag_whole_word) != 0,
+      regex: (flags &&& @search_flag_regex) != 0
+    ]
+  end
 
   @doc """
   Decodes a GUI action sub-opcode and its payload into a `gui_action()` tuple.

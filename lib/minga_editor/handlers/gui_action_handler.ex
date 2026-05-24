@@ -45,11 +45,11 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaAgent.Session, as: AgentSession
 
   alias MingaEditor.Frontend.Protocol
+  alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.Startup
 
   alias Minga.Project.FileTree
 
-  import Bitwise, only: [&&&: 2]
 
   @typedoc "Editor state (re-exported for brevity)."
   @type state :: EditorState.t()
@@ -671,10 +671,11 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
          {:search_query, query, flags}
        )
        when is_pid(buf) do
-    replace_mode = (flags &&& 0x01) != 0
-    case_sensitive = (flags &&& 0x02) != 0
-    whole_word = (flags &&& 0x04) != 0
-    regex = (flags &&& 0x08) != 0
+    decoded = ProtocolGUI.decode_search_flags(flags)
+    replace_mode = decoded[:replace_mode]
+    case_sensitive = decoded[:case_sensitive]
+    whole_word = decoded[:whole_word]
+    regex = decoded[:regex]
 
     state =
       EditorState.update_search(state, fn search ->
@@ -1249,12 +1250,15 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     lines = :binary.split(content, "\n", [:global])
 
     List.update_at(lines, match_line, fn line ->
-      before = binary_part(line, 0, match_col)
+      line_len = byte_size(line)
 
-      after_match =
-        binary_part(line, match_col + match_len, byte_size(line) - match_col - match_len)
-
-      before <> replacement <> after_match
+      if match_col + match_len <= line_len do
+        before = binary_part(line, 0, match_col)
+        after_match = binary_part(line, match_col + match_len, line_len - match_col - match_len)
+        before <> replacement <> after_match
+      else
+        line
+      end
     end)
     |> Enum.join("\n")
   end

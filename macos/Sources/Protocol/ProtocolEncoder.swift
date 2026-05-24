@@ -171,20 +171,10 @@ extension InputEncoder {
 
     /// Default no-op so existing test spies do not need to implement search actions.
     func sendSearchQuery(query: String, flags: UInt8) {}
-
-    /// Default no-op so existing test spies do not need to implement search actions.
     func sendSearchNext() {}
-
-    /// Default no-op so existing test spies do not need to implement search actions.
     func sendSearchPrev() {}
-
-    /// Default no-op so existing test spies do not need to implement search actions.
     func sendSearchReplace(replacement: String) {}
-
-    /// Default no-op so existing test spies do not need to implement search actions.
     func sendSearchReplaceAll(replacement: String) {}
-
-    /// Default no-op so existing test spies do not need to implement search actions.
     func sendSearchDismiss() {}
 }
 

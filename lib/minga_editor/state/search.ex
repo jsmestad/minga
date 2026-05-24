@@ -65,7 +65,7 @@ defmodule MingaEditor.State.Search do
     }
   end
 
-  @doc "Updates the GUI search toolbar flags."
+  @doc "Updates the GUI search toolbar flags. Activates the toolbar with `replace_mode: false` if not already active."
   @spec update_gui_search_flags(t(), boolean(), boolean(), boolean()) :: t()
   def update_gui_search_flags(
         %__MODULE__{gui_search: %{} = gs} = s,

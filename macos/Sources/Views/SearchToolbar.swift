@@ -24,10 +24,10 @@ struct SearchToolbar: View {
     /// Packs the current search option toggles into a flags byte.
     private var flagsByte: UInt8 {
         var flags: UInt8 = 0
-        if searchState.replaceMode { flags |= 0x01 }
-        if searchState.caseSensitive { flags |= 0x02 }
-        if searchState.wholeWord { flags |= 0x04 }
-        if searchState.regex { flags |= 0x08 }
+        if searchState.replaceMode { flags |= SearchFlags.replaceMode }
+        if searchState.caseSensitive { flags |= SearchFlags.caseSensitive }
+        if searchState.wholeWord { flags |= SearchFlags.wholeWord }
+        if searchState.regex { flags |= SearchFlags.regex }
         return flags
     }
 
@@ -143,23 +143,9 @@ struct SearchToolbar: View {
                 encoder?.sendSearchNext()
             }
 
-            // Case sensitive toggle
-            toggleButton(label: "Aa", accessibilityLabel: "Match Case", isActive: searchState.caseSensitive) {
-                searchState.caseSensitive.toggle()
-                sendQuery()
-            }
-
-            // Whole word toggle
-            toggleButton(label: "ab", accessibilityLabel: "Match Whole Word", isActive: searchState.wholeWord, bordered: true) {
-                searchState.wholeWord.toggle()
-                sendQuery()
-            }
-
-            // Regex toggle
-            toggleButton(label: ".*", accessibilityLabel: "Use Regular Expression", isActive: searchState.regex) {
-                searchState.regex.toggle()
-                sendQuery()
-            }
+            // Search flag toggles (case, whole word, regex) are hidden until the
+            // search engine supports flag-aware matching. The protocol and state
+            // plumbing is in place; only the UI buttons are gated.
 
             Spacer(minLength: 0)
 

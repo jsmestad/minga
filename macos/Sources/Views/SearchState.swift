@@ -6,6 +6,13 @@
 
 import SwiftUI
 
+enum SearchFlags {
+    static let replaceMode: UInt8 = 0x01
+    static let caseSensitive: UInt8 = 0x02
+    static let wholeWord: UInt8 = 0x04
+    static let regex: UInt8 = 0x08
+}
+
 @MainActor
 @Observable
 final class SearchState {
@@ -41,14 +48,16 @@ final class SearchState {
         self.visible = active
         self.matchCount = matchCount
         self.currentIndex = currentIndex
-        self.replaceMode = flags & 0x01 != 0
-        self.caseSensitive = flags & 0x02 != 0
-        self.wholeWord = flags & 0x04 != 0
-        self.regex = flags & 0x08 != 0
+        self.replaceMode = flags & SearchFlags.replaceMode != 0
+        self.caseSensitive = flags & SearchFlags.caseSensitive != 0
+        self.wholeWord = flags & SearchFlags.wholeWord != 0
+        self.regex = flags & SearchFlags.regex != 0
     }
 
-    /// Hides the search toolbar.
+    /// Hides the search toolbar and resets match counters to avoid stale display on re-open.
     func hide() {
         visible = false
+        matchCount = 0
+        currentIndex = 0
     }
 }
