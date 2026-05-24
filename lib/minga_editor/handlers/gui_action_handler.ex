@@ -189,6 +189,11 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     MingaEditor.Commands.EditTimeline.navigate_to_index(state, index)
   end
 
+  defp dispatch_action(state, {:extension_panel_action, ext_name, action_name, context}) do
+    route_panel_action_to_extension(ext_name, action_name, context)
+    state
+  end
+
   defp dispatch_action(%{shell: MingaEditor.Shell.Board} = state, action) do
     {shell_state, workspace} =
       MingaEditor.Shell.Board.handle_gui_action(state.shell_state, state.workspace, action)
@@ -1117,4 +1122,20 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   @spec normalize_command_result(state() | {state(), term()}) :: state()
   defp normalize_command_result({new_state, _action}), do: new_state
   defp normalize_command_result(new_state), do: new_state
+
+  @spec route_panel_action_to_extension(String.t(), atom(), map()) :: :ok
+  defp route_panel_action_to_extension(ext_name, action_name, context) do
+    ext_atom = String.to_existing_atom(ext_name)
+
+    case Minga.Extension.Registry.get(Minga.Extension.Registry, ext_atom) do
+      {:ok, %{pid: pid}} when is_pid(pid) ->
+        send(pid, {:panel_action, action_name, context})
+        :ok
+
+      _ ->
+        :ok
+    end
+  rescue
+    ArgumentError -> :ok
+  end
 end

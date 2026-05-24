@@ -232,7 +232,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       tab_move_right: 0x4C,
       observatory_inspect: 0x4D,
       font_size_adjust: 0x4E,
-      timeline_navigate: 0x4F
+      timeline_navigate: 0x4F,
+      extension_panel_action: 0x50
     )
   end
 
