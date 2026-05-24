@@ -19,11 +19,13 @@ defmodule MingaGhostCursors.Tracker do
   @cursor_opacity 102
 
   @type overlay_key :: {buffer :: pid(), session :: pid()}
+  @type position :: {line :: non_neg_integer(), col :: non_neg_integer()}
+  @type last_edit :: {overlay_key(), position()} | nil
 
   @type state :: %{
           monitored: %{optional(pid()) => reference()},
           labels: %{optional(pid()) => String.t()},
-          last_updated: overlay_key() | nil,
+          last_updated: last_edit(),
           overlay_table: atom()
         }
 
@@ -33,7 +35,7 @@ defmodule MingaGhostCursors.Tracker do
     GenServer.start_link(__MODULE__, opts, name: name)
   end
 
-  @spec last_updated(GenServer.server()) :: overlay_key() | nil
+  @spec last_updated(GenServer.server()) :: last_edit()
   def last_updated(server \\ __MODULE__) do
     GenServer.call(server, :last_updated)
   end
@@ -73,7 +75,7 @@ defmodule MingaGhostCursors.Tracker do
     )
 
     state = maybe_monitor(state, session_pid)
-    {:noreply, %{state | last_updated: overlay_key}}
+    {:noreply, %{state | last_updated: {overlay_key, delta.new_end_position}}}
   end
 
   def handle_info(
@@ -170,7 +172,7 @@ defmodule MingaGhostCursors.Tracker do
   end
 
   @spec clear_last_updated(state(), pid()) :: state()
-  defp clear_last_updated(%{last_updated: {_buf, session_pid}} = state, session_pid) do
+  defp clear_last_updated(%{last_updated: {{_buf, session_pid}, _pos}} = state, session_pid) do
     %{state | last_updated: nil}
   end
 

@@ -143,7 +143,7 @@ defmodule Minga.Extensions.GhostCursorsTrackerTest do
       send(tracker, agent_edit_event(buf, session, {5, 10}))
       wait_for_processing(tracker)
 
-      assert Tracker.last_updated(tracker) == {buf, session}
+      assert Tracker.last_updated(tracker) == {{buf, session}, {5, 10}}
 
       Process.exit(buf, :kill)
       Process.exit(session, :kill)
@@ -245,7 +245,7 @@ defmodule Minga.Extensions.GhostCursorsTrackerTest do
       send(tracker, agent_edit_event(buf, session, {5, 10}))
       wait_for_processing(tracker)
 
-      assert Tracker.last_updated(tracker) == {buf, session}
+      assert Tracker.last_updated(tracker) == {{buf, session}, {5, 10}}
 
       send(tracker, {:minga_event, :agent_session_stopped, %{pid: session}})
       assert_receive {:minga_event, :ghost_cursor_removed, %{session_pid: ^session}}
