@@ -6,7 +6,7 @@ defmodule Minga.Test.NeovimOracle do
   """
 
   @type cursor :: %{required(:line) => non_neg_integer(), required(:col) => non_neg_integer()}
-  @type scenario_type :: :motion | :operator | :text_object | :search | :window
+  @type scenario_type :: :motion | :operator | :text_object | :search | :window | :mark
   @type compare_field :: :content | :cursor | :mode | :register | :register_type
   @type window_compare_field :: :window_count | :active_window | :cursors | :buffers | :layout
   @type compare_target ::
@@ -124,13 +124,18 @@ defmodule Minga.Test.NeovimOracle do
   end
 
   defp stringify_scenario(scenario) do
-    %{
+    base = %{
       name: scenario.name,
       type: Atom.to_string(scenario.type),
       content: scenario.content,
-      cursor: scenario.cursor,
-      keys: scenario.keys
+      cursor: scenario.cursor
     }
+
+    base
+    |> then(fn m -> if scenario[:keys], do: Map.put(m, :keys, scenario.keys), else: m end)
+    |> then(fn m ->
+      if scenario[:commands], do: Map.put(m, :commands, scenario.commands), else: m
+    end)
   end
 
   @spec invoke_nvim(String.t(), String.t(), pos_integer()) ::

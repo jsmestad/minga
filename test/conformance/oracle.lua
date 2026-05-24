@@ -152,11 +152,21 @@ local function run_search(keys)
   return vim.api.nvim_get_mode().mode
 end
 
+local function run_commands(scenario)
+  local commands = scenario.commands or {}
+  for _, cmd in ipairs(commands) do
+    local termcoded = vim.api.nvim_replace_termcodes(cmd, true, false, true)
+    vim.cmd("silent! normal! " .. termcoded)
+  end
+  return vim.api.nvim_get_mode().mode
+end
+
 local runners = {
-  motion = run_keys,
-  operator = run_keys,
-  text_object = run_keys,
-  search = run_search,
+  motion = function(s) return run_keys(s.keys or "") end,
+  operator = function(s) return run_keys(s.keys or "") end,
+  text_object = function(s) return run_keys(s.keys or "") end,
+  search = function(s) return run_search(s.keys or "") end,
+  mark = run_commands,
 }
 
 local function run_scenario(scenario)
@@ -171,8 +181,11 @@ local function run_scenario(scenario)
     vim.fn.setreg('"', "")
     set_buffer_content(scenario.content or "")
     set_cursor(scenario.cursor or { line = 0, col = 0 })
-    local runner = runners[scenario.type or "motion"] or run_keys
-    local reported_mode = runner(scenario.keys or "")
+    local runner = runners[scenario.type or "motion"]
+    if not runner then
+      runner = function(s) return run_keys(s.keys or "") end
+    end
+    local reported_mode = runner(scenario)
     return capture_state(scenario, reported_mode)
   end)
 
