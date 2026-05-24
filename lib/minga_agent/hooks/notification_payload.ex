@@ -6,7 +6,7 @@ defmodule MingaAgent.Hooks.NotificationPayload do
   notification. Notification-only (never blocks).
   """
 
-  @derive {Jason.Encoder, only: [:event, :session_id, :kind, :message]}
+  @derive {JSON.Encoder, only: [:event, :session_id, :kind, :message]}
   @enforce_keys [:session_id, :kind, :message]
   defstruct [:session_id, :kind, :message, event: "Notification"]
 

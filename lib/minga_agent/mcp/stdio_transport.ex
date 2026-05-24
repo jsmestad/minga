@@ -86,7 +86,7 @@ defmodule MingaAgent.MCP.StdioTransport do
 
   @spec write_message(port(), map()) :: :ok | {:error, term()}
   defp write_message(port, message) do
-    Port.command(port, [Jason.encode!(message), "\n"])
+    Port.command(port, [JSON.encode_to_iodata!(message), "\n"])
     :ok
   catch
     :error, reason -> {:error, reason}
@@ -125,7 +125,7 @@ defmodule MingaAgent.MCP.StdioTransport do
 
   @spec handle_line(port(), term(), binary(), deadline()) :: {:ok, map()} | {:error, term()}
   defp handle_line(port, id, line, deadline) do
-    case Jason.decode(line) do
+    case JSON.decode(line) do
       {:ok, %{"id" => ^id, "result" => result}} -> {:ok, result}
       {:ok, %{"id" => ^id, "error" => error}} -> {:error, error}
       {:ok, _notification_or_other_response} -> await_response_until(port, id, deadline, "")

@@ -1212,7 +1212,7 @@ defmodule MingaAgent.Providers.Native do
     # Has tool calls: execute tools and continue the loop
     reqllm_tool_calls =
       Enum.map(tool_calls, fn tc ->
-        ToolCall.new(tc.id, tc.name, Jason.encode!(tc.arguments))
+        ToolCall.new(tc.id, tc.name, JSON.encode!(tc.arguments))
       end)
 
     assistant_msg = Context.assistant(text, tool_calls: reqllm_tool_calls)
@@ -2439,7 +2439,7 @@ defmodule MingaAgent.Providers.Native do
   defp format_tool_result(result) when is_binary(result), do: result
 
   defp format_tool_result(result) when is_map(result) or is_list(result),
-    do: Jason.encode!(result)
+    do: JSON.encode!(result)
 
   defp format_tool_result(result), do: inspect(result)
 

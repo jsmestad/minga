@@ -26,7 +26,7 @@ defmodule Minga.Integration.GUIProtocolTest do
 
     # Wait for the ready signal from the harness.
     assert_receive {^port, {:data, ready_json}}, 5_000
-    assert %{"type" => "ready"} = Jason.decode!(ready_json)
+    assert %{"type" => "ready"} = JSON.decode!(ready_json)
 
     on_exit(fn ->
       if Port.info(port) != nil do
@@ -40,7 +40,7 @@ defmodule Minga.Integration.GUIProtocolTest do
   defp round_trip(port, command) do
     Port.command(port, command)
     assert_receive {^port, {:data, json}}, 5_000
-    Jason.decode!(json)
+    JSON.decode!(json)
   end
 
   describe "GUI chrome opcode round-trip" do
@@ -50,7 +50,7 @@ defmodule Minga.Integration.GUIProtocolTest do
 
       Port.command(port, cmd)
       assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+      decoded = JSON.decode!(json)
 
       assert decoded["type"] == "gui_theme"
       assert is_list(decoded["slots"])
@@ -73,7 +73,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       Port.command(port, cmd)
 
       assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+      decoded = JSON.decode!(json)
 
       assert decoded["type"] == "gui_tab_bar"
       assert decoded["active_index"] == 0
@@ -92,7 +92,7 @@ defmodule Minga.Integration.GUIProtocolTest do
 
       Port.command(port, cmd)
       assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+      decoded = JSON.decode!(json)
 
       assert decoded["type"] == "gui_breadcrumb"
       assert decoded["segments"] == ["lib", "foo.ex"]
@@ -135,7 +135,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       cmd = ProtocolGUI.encode_gui_status_bar(data)
       Port.command(port, cmd)
       assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+      decoded = JSON.decode!(json)
 
       assert decoded["type"] == "gui_status_bar"
       # content_kind 0 = buffer
@@ -210,7 +210,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       cmd = ProtocolGUI.encode_gui_status_bar(data)
       Port.command(port, cmd)
       assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+      decoded = JSON.decode!(json)
 
       assert decoded["type"] == "gui_status_bar"
       # content_kind 1 = agent
@@ -252,7 +252,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       cmd = ProtocolGUI.encode_gui_agent_chat(data)
       Port.command(port, cmd)
       assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+      decoded = JSON.decode!(json)
 
       assert decoded["type"] == "gui_agent_chat"
       assert decoded["visible"] == true
@@ -296,7 +296,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       cmd = ProtocolGUI.encode_gui_agent_chat(data)
       Port.command(port, cmd)
       assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+      decoded = JSON.decode!(json)
 
       assert decoded["type"] == "gui_agent_chat"
       assert decoded["visible"] == true
@@ -344,7 +344,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       cmd = ProtocolGUI.encode_gui_agent_chat(data)
       Port.command(port, cmd)
       assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+      decoded = JSON.decode!(json)
 
       assert decoded["type"] == "gui_agent_chat"
       assert length(decoded["messages"]) == 1
@@ -375,7 +375,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       cmd = ProtocolGUI.encode_gui_agent_chat(data)
       Port.command(port, cmd)
       assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+      decoded = JSON.decode!(json)
 
       assert decoded["type"] == "gui_agent_chat"
       assert decoded["help_visible"] == true
@@ -409,7 +409,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       cmd = ProtocolGUI.encode_gui_agent_chat(data)
       Port.command(port, cmd)
       assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+      decoded = JSON.decode!(json)
 
       assert decoded["type"] == "gui_agent_chat"
       assert decoded["help_visible"] == false
@@ -443,7 +443,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       # Find the JSON report.
       json_msg = Enum.find(messages, fn d -> String.starts_with?(d, "{") end)
       assert json_msg != nil
-      tab_decoded = Jason.decode!(json_msg)
+      tab_decoded = JSON.decode!(json_msg)
       assert tab_decoded["type"] == "gui_tab_bar"
       assert length(tab_decoded["tabs"]) == 2
 
@@ -460,7 +460,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       Port.command(port, cmd)
 
       assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+      decoded = JSON.decode!(json)
 
       assert decoded["type"] == "gui_gutter_separator"
       assert decoded["col"] == 4
@@ -519,7 +519,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       Port.command(port, cmd)
 
       assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+      decoded = JSON.decode!(json)
 
       assert decoded["type"] == "gui_gutter"
       assert decoded["window_id"] == 1
@@ -589,7 +589,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       Port.command(port, cmd)
 
       assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+      decoded = JSON.decode!(json)
 
       assert decoded["type"] == "gui_completion"
       assert decoded["visible"] == true
@@ -619,7 +619,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       Port.command(port, cmd)
 
       assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+      decoded = JSON.decode!(json)
 
       assert decoded["type"] == "gui_which_key"
       assert decoded["visible"] == true
@@ -669,7 +669,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       Port.command(port, cmd)
 
       assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+      decoded = JSON.decode!(json)
 
       assert decoded["type"] == "gui_picker"
       assert decoded["visible"] == true
@@ -702,7 +702,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       Port.command(port, cmd)
 
       assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+      decoded = JSON.decode!(json)
 
       assert decoded["type"] == "gui_picker_preview"
       assert decoded["visible"] == true
@@ -737,7 +737,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       Port.command(port, cmd)
 
       assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+      decoded = JSON.decode!(json)
 
       assert decoded["type"] == "gui_bottom_panel"
       assert decoded["visible"] == true
@@ -780,7 +780,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       Port.command(port, cmd)
 
       assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+      decoded = JSON.decode!(json)
 
       assert decoded["type"] == "gui_tool_manager"
       assert decoded["visible"] == true
@@ -811,7 +811,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       Port.command(port, cmd)
 
       assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+      decoded = JSON.decode!(json)
 
       t = hd(decoded["tools"])
       assert t["status"] == 4
@@ -844,7 +844,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       Port.command(port, cmd)
 
       assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+      decoded = JSON.decode!(json)
 
       t = hd(decoded["tools"])
       assert t["status"] == 4
@@ -896,7 +896,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       Port.command(port, ProtocolGUI.encode_gui_file_tree(root, 30, :ready, true, rows))
 
       assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+      decoded = JSON.decode!(json)
 
       assert decoded["type"] == "gui_file_tree"
       assert decoded["version"] == 2
@@ -999,7 +999,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       Port.command(port, cmd)
 
       assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+      decoded = JSON.decode!(json)
 
       assert decoded["type"] == "gui_window_content"
       assert decoded["window_id"] == 7
@@ -1039,7 +1039,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       Port.command(port, cmd)
 
       assert_receive {^port, {:data, json}}, 5_000
-      decoded = Jason.decode!(json)
+      decoded = JSON.decode!(json)
 
       assert decoded["type"] == "draw_styled_text"
       assert decoded["row"] == 5

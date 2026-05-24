@@ -6,7 +6,7 @@ defmodule MingaAgent.Hooks.UserPromptSubmitPayload do
   to the LLM provider. A non-zero exit from the hook vetoes the prompt.
   """
 
-  @derive {Jason.Encoder, only: [:event, :session_id, :prompt]}
+  @derive {JSON.Encoder, only: [:event, :session_id, :prompt]}
   @enforce_keys [:session_id, :prompt]
   defstruct [:session_id, :prompt, event: "UserPromptSubmit"]
 

@@ -9,7 +9,7 @@ defmodule MingaAgent.Hooks.PreCompactPayload do
   process (`native.ex`), which does not have direct access to the session ID.
   """
 
-  @derive {Jason.Encoder, only: [:event, :session_id, :message_count]}
+  @derive {JSON.Encoder, only: [:event, :session_id, :message_count]}
   @enforce_keys [:message_count]
   defstruct [:session_id, :message_count, event: "PreCompact"]
 

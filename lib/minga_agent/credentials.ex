@@ -101,7 +101,7 @@ defmodule MingaAgent.Credentials do
     with :ok <- ensure_directory(dir),
          {:ok, existing} <- read_credentials_file(path),
          updated = Map.put(existing, provider, key),
-         json = Jason.encode!(updated, pretty: true),
+         json = :json.format(updated),
          :ok <- File.write(path, json) do
       File.chmod(path, 0o600)
     end
@@ -120,7 +120,7 @@ defmodule MingaAgent.Credentials do
     case read_credentials_file(path) do
       {:ok, existing} ->
         updated = Map.delete(existing, provider)
-        json = Jason.encode!(updated, pretty: true)
+        json = :json.format(updated)
 
         with :ok <- File.write(path, json) do
           File.chmod(path, 0o600)
@@ -272,7 +272,7 @@ defmodule MingaAgent.Credentials do
   defp read_credentials_file(path) do
     case File.read(path) do
       {:ok, ""} -> {:ok, %{}}
-      {:ok, content} -> Jason.decode(content)
+      {:ok, content} -> JSON.decode(content)
       {:error, :enoent} -> {:ok, %{}}
       {:error, reason} -> {:error, reason}
     end

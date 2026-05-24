@@ -8,7 +8,7 @@ defmodule MingaAgent.Hooks.PostToolUsePayload do
 
   @max_result_bytes 10_240
 
-  @derive {Jason.Encoder,
+  @derive {JSON.Encoder,
            only: [:event, :tool_call_id, :tool_name, :arguments, :result, :is_error]}
   @enforce_keys [:tool_call_id, :tool_name, :arguments, :result, :is_error]
   defstruct [:tool_call_id, :tool_name, :arguments, :result, :is_error, event: "PostToolUse"]

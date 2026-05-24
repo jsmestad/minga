@@ -24,10 +24,10 @@ defmodule MingaAgent.Hooks.SessionStartPayloadTest do
     assert is_binary(map["project_root"])
   end
 
-  test "payload is Jason-encodable" do
+  test "payload is JSON-encodable" do
     payload = SessionStartPayload.new("sess_3", "claude-opus", "anthropic")
-    assert {:ok, json} = Jason.encode(payload)
-    assert {:ok, decoded} = Jason.decode(json)
+    json = JSON.encode!(payload)
+    assert {:ok, decoded} = JSON.decode(json)
     assert decoded["event"] == "SessionStart"
     assert decoded["session_id"] == "sess_3"
   end

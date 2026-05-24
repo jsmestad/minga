@@ -8,7 +8,7 @@ defmodule MingaAgent.Hooks.StopPayload do
 
   @max_message_bytes 1_024
 
-  @derive {Jason.Encoder, only: [:event, :session_id, :reason, :last_message]}
+  @derive {JSON.Encoder, only: [:event, :session_id, :reason, :last_message]}
   @enforce_keys [:session_id, :reason]
   defstruct [:session_id, :reason, :last_message, event: "Stop"]
 

@@ -62,7 +62,7 @@ defmodule Minga.Tool.Installer.Pip do
 
     case System.cmd("curl", ["-fsSL", url], stderr_to_stdout: true) do
       {body, 0} ->
-        case Jason.decode(body) do
+        case JSON.decode(body) do
           {:ok, %{"info" => %{"version" => version}}} -> {:ok, version}
           _ -> {:error, "Failed to parse PyPI response"}
         end

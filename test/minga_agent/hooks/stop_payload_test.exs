@@ -38,10 +38,10 @@ defmodule MingaAgent.Hooks.StopPayloadTest do
            }
   end
 
-  test "payload is Jason-encodable" do
+  test "payload is JSON-encodable" do
     payload = StopPayload.new("sess_5", :end_turn, "result text")
-    assert {:ok, json} = Jason.encode(payload)
-    assert {:ok, decoded} = Jason.decode(json)
+    json = JSON.encode!(payload)
+    assert {:ok, decoded} = JSON.decode(json)
     assert decoded["event"] == "Stop"
     assert decoded["reason"] == "end_turn"
   end
