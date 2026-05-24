@@ -26,6 +26,9 @@ targets:
     sources:
       - path: Sources
         type: group
+        excludes:
+          - "PreviewHostApp.swift"
+          - "PreviewRegistry.swift"
       - path: .generated/protocol/ProtocolOpcodes.generated.swift
         name: ProtocolOpcodes.generated.swift
         type: file
@@ -82,6 +85,8 @@ targets:
         type: group
         excludes:
           - "MingaApp.swift"
+          - "PreviewHostApp.swift"
+          - "PreviewRegistry.swift"
       - path: .generated/protocol/ProtocolOpcodes.generated.swift
         name: ProtocolOpcodes.generated.swift
         type: file
@@ -102,6 +107,48 @@ targets:
           mix protocol.gen
         basedOnDependencyAnalysis: false
 
+  PreviewHost:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/Views
+        type: group
+        excludes:
+          - "EditorNSView.swift"
+          - "EditorView.swift"
+          - "MingaWindow.swift"
+          - "Settings/SettingsView.swift"
+      - path: Sources/Protocol
+        type: group
+      - path: Sources/PreviewHostApp.swift
+        type: file
+      - path: Sources/PreviewRegistry.swift
+        type: file
+      - path: Sources/Renderer/WindowContent.swift
+        type: file
+      - path: .generated/protocol/ProtocolOpcodes.generated.swift
+        name: ProtocolOpcodes.generated.swift
+        type: file
+    settings:
+      base:
+        PRODUCT_NAME: PreviewHost
+        PRODUCT_BUNDLE_IDENTIFIER: com.minga.preview-host
+        GENERATE_INFOPLIST_FILE: "YES"
+        SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+    dependencies: []
+    preBuildScripts:
+      - name: Generate protocol opcodes
+        script: |
+          cd "${SRCROOT}/.."
+          if ! command -v mix >/dev/null 2>&1; then
+            echo "error: mix is required to generate protocol artifacts. Install Elixir, then run: mix protocol.gen"
+            exit 1
+          fi
+          mix protocol.gen
+        basedOnDependencyAnalysis: false
+        outputFiles:
+          - $(SRCROOT)/.generated/protocol/ProtocolOpcodes.generated.swift
+
 schemes:
   Minga:
     build:
@@ -111,3 +158,7 @@ schemes:
     test:
       targets:
         - MingaTests
+  PreviewHost:
+    build:
+      targets:
+        PreviewHost: all
