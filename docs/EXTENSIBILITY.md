@@ -389,9 +389,11 @@ Both macros accumulate metadata at compile time. When the extension loads, the f
 
 ### Source-owned contributions
 
-Minga's extension registries track who contributed each entry. The common source identifiers are `:builtin`, `:config`, and `{:extension, name}`. That source tag is what makes reload safe: stopping an extension removes only that extension's commands, keybindings, scopes, input handlers, language data, themes, tool recipes, and modeline segments.
+Minga's extension registries track who contributed each entry. The common source identifiers are `:builtin`, `:config`, and `{:extension, name}`. That source tag is what makes reload safe: stopping an extension removes only that extension's commands, keybindings, scopes, input handlers, language data, themes, tool recipes, modeline segments, and feature-owned UI state.
 
-Cleanup is best-effort across every family. If command cleanup fails, keymaps, scopes, input handlers, language data, themes, tool recipes, and modeline segments still get their cleanup pass. Minga reports the cleanup failures instead of hiding them, because stale extension state is worse than a noisy reload.
+Feature-owned UI state is the place for per-workspace presentation state that should survive tab switches but disappear when its owner reloads. A sidebar can keep its selected row there. A Dired-like feature can keep its local filter there. A daemon, cache, or external connection still belongs in the extension's own process tree.
+
+Cleanup is best-effort across every family. If command cleanup fails, keymaps, scopes, input handlers, language data, themes, tool recipes, modeline segments, and feature-owned UI state still get their cleanup pass. Minga reports the cleanup failures instead of hiding them, because stale extension state is worse than a noisy reload.
 
 This ownership layer is the gate for large built-in feature extraction. Language packs, theme packs, tool recipe packs, Dired, FileTree, Git UI, Board, and Agent pieces should move out of core only after they can register through these source-owned paths. Without ownership, reloads leave stale commands or catalog entries behind.
 

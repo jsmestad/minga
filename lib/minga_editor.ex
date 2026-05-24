@@ -379,6 +379,11 @@ defmodule MingaEditor do
     {:reply, :ok, new_state}
   end
 
+  def handle_call({:cleanup_feature_state, source}, _from, state) do
+    state = EditorState.drop_feature_state_source(state, source)
+    {:reply, :ok, Renderer.render_or_async(state)}
+  end
+
   @impl true
   @spec handle_cast(term(), state()) :: {:noreply, state()}
   def handle_cast({:register_background_buffer, pid, abs_path}, state) do

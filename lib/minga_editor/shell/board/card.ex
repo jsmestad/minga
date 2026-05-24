@@ -20,6 +20,9 @@ defmodule MingaEditor.Shell.Board.Card do
   hit a wall and needs human input (approval, clarifying question).
   """
 
+  alias MingaEditor.FeatureState
+  alias MingaEditor.State.Tab.Context, as: TabContext
+
   @type status :: :idle | :working | :iterating | :needs_you | :done | :errored
 
   @type id :: pos_integer()
@@ -147,6 +150,18 @@ defmodule MingaEditor.Shell.Board.Card do
     %{card | workspace: nil}
   end
 
+  @doc "Drops source-owned feature state from the stored workspace snapshot."
+  @spec drop_feature_state_source(t(), FeatureState.source()) :: t()
+  def drop_feature_state_source(%__MODULE__{} = card, source) do
+    update_workspace_feature_state(card, &FeatureState.drop_source(&1, source))
+  end
+
+  @doc "Drops extension-owned feature state from the stored workspace snapshot."
+  @spec drop_extension_feature_state_sources(t()) :: t()
+  def drop_extension_feature_state_sources(%__MODULE__{} = card) do
+    update_workspace_feature_state(card, &FeatureState.drop_extension_sources/1)
+  end
+
   @doc "Updates the list of recently touched files."
   @spec set_recent_files(t(), [String.t()]) :: t()
   def set_recent_files(%__MODULE__{} = card, files) when is_list(files) do
@@ -173,4 +188,20 @@ defmodule MingaEditor.Shell.Board.Card do
   def from_agent_status(:error), do: :errored
   def from_agent_status(:idle), do: :done
   def from_agent_status(_), do: :idle
+
+  @spec update_workspace_feature_state(t(), (FeatureState.t() -> FeatureState.t())) :: t()
+  defp update_workspace_feature_state(%__MODULE__{workspace: workspace} = card, fun)
+       when is_map(workspace) do
+    context = TabContext.from_map(workspace)
+
+    if :feature_state in context.present_fields do
+      feature_state = context.feature_state || FeatureState.new()
+      context = TabContext.put_fields(context, feature_state: fun.(feature_state))
+      store_workspace(card, context)
+    else
+      card
+    end
+  end
+
+  defp update_workspace_feature_state(%__MODULE__{} = card, _fun), do: card
 end

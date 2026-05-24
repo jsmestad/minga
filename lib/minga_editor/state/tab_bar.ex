@@ -15,6 +15,7 @@ defmodule MingaEditor.State.TabBar do
 
   alias Minga.Buffer
   alias Minga.FileRef
+  alias MingaEditor.FeatureState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Workspace.Persistence, as: WorkspacePersistence
@@ -333,6 +334,18 @@ defmodule MingaEditor.State.TabBar do
   @spec scrub_dead_buffer(t(), pid()) :: t()
   def scrub_dead_buffer(%__MODULE__{tabs: tabs} = tb, pid) do
     %{tb | tabs: Enum.map(tabs, &Tab.scrub_buffer(&1, pid))}
+  end
+
+  @doc "Drops snapshotted feature state owned by a source from every tab context."
+  @spec drop_feature_state_source(t(), FeatureState.source()) :: t()
+  def drop_feature_state_source(%__MODULE__{tabs: tabs} = tb, source) do
+    %{tb | tabs: Enum.map(tabs, &Tab.drop_feature_state_source(&1, source))}
+  end
+
+  @doc "Drops snapshotted extension-owned feature state from every tab context."
+  @spec drop_extension_feature_state_sources(t()) :: t()
+  def drop_extension_feature_state_sources(%__MODULE__{tabs: tabs} = tb) do
+    %{tb | tabs: Enum.map(tabs, &Tab.drop_extension_feature_state_sources/1)}
   end
 
   @doc "Returns all tabs matching the given kind."

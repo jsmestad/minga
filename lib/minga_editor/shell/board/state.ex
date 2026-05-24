@@ -132,6 +132,24 @@ defmodule MingaEditor.Shell.Board.State do
     {state, card}
   end
 
+  @doc "Drops source-owned feature state from every stored card workspace."
+  @spec drop_feature_state_source(t(), MingaEditor.FeatureState.source()) :: t()
+  def drop_feature_state_source(%__MODULE__{cards: cards} = state, source) do
+    cards =
+      Map.new(cards, fn {id, card} -> {id, Card.drop_feature_state_source(card, source)} end)
+
+    %{state | cards: cards}
+  end
+
+  @doc "Drops extension-owned feature state from every stored card workspace."
+  @spec drop_extension_feature_state_sources(t()) :: t()
+  def drop_extension_feature_state_sources(%__MODULE__{cards: cards} = state) do
+    cards =
+      Map.new(cards, fn {id, card} -> {id, Card.drop_extension_feature_state_sources(card)} end)
+
+    %{state | cards: cards}
+  end
+
   @doc """
   Removes a card from the board.
 

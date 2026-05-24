@@ -13,6 +13,7 @@ defmodule MingaEditor.State.Tab do
   """
 
   alias Minga.Project.FileRef
+  alias MingaEditor.FeatureState
   alias MingaEditor.State.Tab.Context
   alias MingaEditor.State.Workspace.RemoteSession
 
@@ -101,6 +102,18 @@ defmodule MingaEditor.State.Tab do
 
   def set_context(%__MODULE__{} = tab, context) when is_map(context) do
     %{tab | context: Context.from_map(context)}
+  end
+
+  @doc "Drops all snapshotted feature state owned by a source."
+  @spec drop_feature_state_source(t(), FeatureState.source()) :: t()
+  def drop_feature_state_source(%__MODULE__{} = tab, source) do
+    update_context_feature_state(tab, &FeatureState.drop_source(&1, source))
+  end
+
+  @doc "Drops all snapshotted extension-owned feature state."
+  @spec drop_extension_feature_state_sources(t()) :: t()
+  def drop_extension_feature_state_sources(%__MODULE__{} = tab) do
+    update_context_feature_state(tab, &FeatureState.drop_extension_sources/1)
   end
 
   @doc "Returns true if this is a file tab."
@@ -249,5 +262,16 @@ defmodule MingaEditor.State.Tab do
   @spec scrub_buffer(t(), pid()) :: t()
   def scrub_buffer(%__MODULE__{context: context} = tab, pid) do
     %{tab | context: Context.scrub_buffer(context, pid)}
+  end
+
+  @spec update_context_feature_state(t(), (FeatureState.t() -> FeatureState.t())) :: t()
+  defp update_context_feature_state(%__MODULE__{context: %Context{} = context} = tab, fun) do
+    if :feature_state in context.present_fields do
+      feature_state = context.feature_state || FeatureState.new()
+      context = Context.put_fields(context, feature_state: fun.(feature_state))
+      set_context(tab, context)
+    else
+      tab
+    end
   end
 end

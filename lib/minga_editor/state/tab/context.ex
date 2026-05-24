@@ -6,6 +6,7 @@ defmodule MingaEditor.State.Tab.Context do
   """
 
   alias Minga.Keymap.Scope
+  alias MingaEditor.FeatureState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Dired, as: DiredState
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -29,6 +30,7 @@ defmodule MingaEditor.State.Tab.Context do
     :lsp_pending,
     :search,
     :editing,
+    :feature_state,
     :document_highlights
   ]
 
@@ -44,6 +46,7 @@ defmodule MingaEditor.State.Tab.Context do
           | :lsp_pending
           | :search
           | :editing
+          | :feature_state
           | :document_highlights
 
   @typedoc "Legacy map persisted or built before tab contexts became typed structs."
@@ -65,6 +68,7 @@ defmodule MingaEditor.State.Tab.Context do
           lsp_pending: %{reference() => atom() | tuple()} | nil,
           search: Search.t() | nil,
           editing: VimState.t() | nil,
+          feature_state: FeatureState.t() | nil,
           document_highlights: [document_highlight()] | nil
         }
 
@@ -80,6 +84,7 @@ defmodule MingaEditor.State.Tab.Context do
             lsp_pending: nil,
             search: nil,
             editing: nil,
+            feature_state: nil,
             document_highlights: nil
 
   @doc "Returns the workspace field names represented by this context."
@@ -118,6 +123,7 @@ defmodule MingaEditor.State.Tab.Context do
       lsp_pending: ws.lsp_pending,
       search: ws.search,
       editing: editing,
+      feature_state: ws.feature_state,
       document_highlights: ws.document_highlights,
       present_fields: @workspace_fields
     }
@@ -223,6 +229,7 @@ defmodule MingaEditor.State.Tab.Context do
   defp valid_field?(:lsp_pending, value) when is_map(value), do: true
   defp valid_field?(:search, %Search{}), do: true
   defp valid_field?(:editing, %VimState{}), do: true
+  defp valid_field?(:feature_state, %FeatureState{}), do: true
   defp valid_field?(:document_highlights, nil), do: true
   defp valid_field?(:document_highlights, value) when is_list(value), do: true
   defp valid_field?(_field, _value), do: false
