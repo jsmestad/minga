@@ -92,13 +92,21 @@ pub fn writeCell(self: *SnapshotSurface, col: u16, row: u16, cell: Cell) void {
     const px_x = @as(u32, col) * self.cell_width;
     const px_y = @as(u32, row) * self.cell_height;
 
-    // Fill cell rectangle with background color.
-    const bg_r: u8 = @intCast((cell.bg >> 16) & 0xFF);
-    const bg_g: u8 = @intCast((cell.bg >> 8) & 0xFF);
-    const bg_b: u8 = @intCast(cell.bg & 0xFF);
-    const bg_a: u8 = if (cell.bg == 0) 0 else 255;
+    // Handle ATTR_REVERSE: swap fg and bg.
+    const is_reverse = (cell.attrs & protocol.ATTR_REVERSE) != 0;
+    const eff_fg: u24 = if (is_reverse) cell.bg else cell.fg;
+    const eff_bg: u24 = if (is_reverse) cell.fg else cell.bg;
 
-    self.fillRect(px_x, px_y, self.cell_width, self.cell_height, bg_r, bg_g, bg_b, bg_a);
+    // Fill cell rectangle with background color.
+    // bg is always opaque: the renderer already resolved bg=0 to default_bg,
+    // so any value here (including 0x000000 = black) is a real color.
+    const bg_r: u8 = @intCast((eff_bg >> 16) & 0xFF);
+    const bg_g: u8 = @intCast((eff_bg >> 8) & 0xFF);
+    const bg_b: u8 = @intCast(eff_bg & 0xFF);
+
+    // Wide characters need a wider background fill.
+    const cell_pixel_w = self.cell_width * @as(u32, if (cell.width > 1) cell.width else 1);
+    self.fillRect(px_x, px_y, cell_pixel_w, self.cell_height, bg_r, bg_g, bg_b, 255);
 
     // Render the glyph if present.
     if (cell.grapheme.len == 0 or std.mem.eql(u8, cell.grapheme, " ")) return;
@@ -110,9 +118,17 @@ pub fn writeCell(self: *SnapshotSurface, col: u16, row: u16, cell: Cell) void {
     const glyph = self.face.getGlyph(codepoint) catch return;
     if (glyph.width == 0 or glyph.height == 0) return;
 
-    const fg_r: u8 = @intCast((cell.fg >> 16) & 0xFF);
-    const fg_g: u8 = @intCast((cell.fg >> 8) & 0xFF);
-    const fg_b: u8 = @intCast(cell.fg & 0xFF);
+    var fg_r: u8 = @intCast((eff_fg >> 16) & 0xFF);
+    var fg_g: u8 = @intCast((eff_fg >> 8) & 0xFF);
+    var fg_b: u8 = @intCast(eff_fg & 0xFF);
+
+    // Apply blend/opacity: dim the foreground color when blend < 100.
+    if (cell.blend < 100) {
+        const factor: f32 = @as(f32, @floatFromInt(cell.blend)) / 100.0;
+        fg_r = @intFromFloat(@as(f32, @floatFromInt(fg_r)) * factor);
+        fg_g = @intFromFloat(@as(f32, @floatFromInt(fg_g)) * factor);
+        fg_b = @intFromFloat(@as(f32, @floatFromInt(fg_b)) * factor);
+    }
 
     // Position glyph within the cell using bearing offsets.
     const glyph_x: i32 = @as(i32, @intCast(px_x)) + @as(i32, @intFromFloat(glyph.offset_x));
@@ -137,16 +153,23 @@ pub fn writeCell(self: *SnapshotSurface, col: u16, row: u16, cell: Cell) void {
             const dst_offset = (@as(usize, dst_y_u) * self.pixel_width + dst_x_u) * 4;
 
             if (glyph.is_color and depth == 4) {
-                // Color glyph (emoji): BGRA atlas data, copy as RGBA.
-                const b = atlas_data[atlas_offset];
-                const g = atlas_data[atlas_offset + 1];
-                const r = atlas_data[atlas_offset + 2];
-                const a = atlas_data[atlas_offset + 3];
-                if (a > 0) {
-                    self.pixels[dst_offset] = r;
-                    self.pixels[dst_offset + 1] = g;
-                    self.pixels[dst_offset + 2] = b;
-                    self.pixels[dst_offset + 3] = a;
+                // Color glyph (emoji): BGRA atlas data, alpha-blend as RGBA.
+                const src_b = atlas_data[atlas_offset];
+                const src_g = atlas_data[atlas_offset + 1];
+                const src_r = atlas_data[atlas_offset + 2];
+                const src_a = atlas_data[atlas_offset + 3];
+                if (src_a == 255) {
+                    self.pixels[dst_offset] = src_r;
+                    self.pixels[dst_offset + 1] = src_g;
+                    self.pixels[dst_offset + 2] = src_b;
+                    self.pixels[dst_offset + 3] = 255;
+                } else if (src_a > 0) {
+                    const a_f: f32 = @as(f32, @floatFromInt(src_a)) / 255.0;
+                    const inv_a: f32 = 1.0 - a_f;
+                    self.pixels[dst_offset] = @intFromFloat(@as(f32, @floatFromInt(src_r)) * a_f + @as(f32, @floatFromInt(self.pixels[dst_offset])) * inv_a);
+                    self.pixels[dst_offset + 1] = @intFromFloat(@as(f32, @floatFromInt(src_g)) * a_f + @as(f32, @floatFromInt(self.pixels[dst_offset + 1])) * inv_a);
+                    self.pixels[dst_offset + 2] = @intFromFloat(@as(f32, @floatFromInt(src_b)) * a_f + @as(f32, @floatFromInt(self.pixels[dst_offset + 2])) * inv_a);
+                    self.pixels[dst_offset + 3] = @max(self.pixels[dst_offset + 3], src_a);
                 }
             } else {
                 // Grayscale glyph: atlas value is alpha, use fg color.

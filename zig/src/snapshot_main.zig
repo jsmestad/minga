@@ -65,6 +65,8 @@ pub fn main(init: std.process.Init) !void {
         rend.handleCommand(cmd) catch continue;
     }
 
+    // Flush the final frame if the stream ended without a batch_end.
+    try surface.render();
     std.debug.print("Snapshot written to: {s}\n", .{args.output});
 }
 
