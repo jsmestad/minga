@@ -100,19 +100,37 @@ defmodule MingaAgent.SessionManager do
   @doc "Stops a session by its human-readable ID."
   @spec stop_session(String.t()) :: :ok | {:error, :not_found}
   def stop_session(session_id) when is_binary(session_id) do
-    GenServer.call(__MODULE__, {:stop_session, session_id})
+    stop_session(__MODULE__, session_id)
+  end
+
+  @doc "Stops a session by its human-readable ID through the given manager."
+  @spec stop_session(GenServer.server(), String.t()) :: :ok | {:error, :not_found}
+  def stop_session(manager, session_id) when is_binary(session_id) do
+    GenServer.call(manager, {:stop_session, session_id})
   end
 
   @doc "Sends a user prompt to a session by ID."
   @spec send_prompt(String.t(), String.t()) :: :ok | {:error, term()}
   def send_prompt(session_id, prompt) when is_binary(session_id) and is_binary(prompt) do
-    GenServer.call(__MODULE__, {:send_prompt, session_id, prompt})
+    send_prompt(__MODULE__, session_id, prompt)
+  end
+
+  @doc "Sends a user prompt to a session by ID through the given manager."
+  @spec send_prompt(GenServer.server(), String.t(), String.t()) :: :ok | {:error, term()}
+  def send_prompt(manager, session_id, prompt) when is_binary(session_id) and is_binary(prompt) do
+    GenServer.call(manager, {:send_prompt, session_id, prompt})
   end
 
   @doc "Aborts the current operation on a session by ID."
   @spec abort(String.t()) :: :ok | {:error, :not_found}
   def abort(session_id) when is_binary(session_id) do
-    GenServer.call(__MODULE__, {:abort, session_id})
+    abort(__MODULE__, session_id)
+  end
+
+  @doc "Aborts the current operation on a session by ID through the given manager."
+  @spec abort(GenServer.server(), String.t()) :: :ok | {:error, :not_found}
+  def abort(manager, session_id) when is_binary(session_id) do
+    GenServer.call(manager, {:abort, session_id})
   end
 
   @doc "Lists all active sessions as `{id, pid, metadata}` tuples."
@@ -130,7 +148,13 @@ defmodule MingaAgent.SessionManager do
   @doc "Looks up the PID for a session ID."
   @spec get_session(String.t()) :: {:ok, pid()} | {:error, :not_found}
   def get_session(session_id) when is_binary(session_id) do
-    GenServer.call(__MODULE__, {:get_session, session_id})
+    get_session(__MODULE__, session_id)
+  end
+
+  @doc "Looks up the PID for a session ID through the given manager."
+  @spec get_session(GenServer.server(), String.t()) :: {:ok, pid()} | {:error, :not_found}
+  def get_session(manager, session_id) when is_binary(session_id) do
+    GenServer.call(manager, {:get_session, session_id})
   end
 
   @doc "Looks up the session ID for a PID."
@@ -148,7 +172,13 @@ defmodule MingaAgent.SessionManager do
   @doc "Stops a session by its PID (looks up the ID internally)."
   @spec stop_session_by_pid(pid()) :: :ok | {:error, :not_found}
   def stop_session_by_pid(pid) when is_pid(pid) do
-    GenServer.call(__MODULE__, {:stop_session_by_pid, pid})
+    stop_session_by_pid(__MODULE__, pid)
+  end
+
+  @doc "Stops a session by its PID through the given manager."
+  @spec stop_session_by_pid(GenServer.server(), pid()) :: :ok | {:error, :not_found}
+  def stop_session_by_pid(manager, pid) when is_pid(pid) do
+    GenServer.call(manager, {:stop_session_by_pid, pid})
   end
 
   # ── GenServer callbacks ────────────────────────────────────────────────────
