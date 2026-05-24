@@ -29,6 +29,8 @@ face: *font_mod.Face,
 alloc: std.mem.Allocator,
 /// Output file path for the PNG.
 output_path: []const u8,
+/// IO interface for file operations.
+io: std.Io,
 /// No-op writer that discards set_title output.
 tty_writer: NullWriter = .{},
 /// Cursor state.
@@ -36,12 +38,14 @@ cursor_col: u16 = 0,
 cursor_row: u16 = 0,
 cursor_visible: bool = false,
 cursor_shape: surface_mod.CursorShape = .block,
+/// Tracks whether render() has been called (avoids double-write).
+rendered: bool = false,
 
 const NullWriter = struct {
     pub fn print(_: *NullWriter, comptime _: []const u8, _: anytype) !void {}
 };
 
-pub fn init(alloc: std.mem.Allocator, cols: u16, rows: u16, face: *font_mod.Face, output_path: []const u8) !SnapshotSurface {
+pub fn init(alloc: std.mem.Allocator, cols: u16, rows: u16, face: *font_mod.Face, output_path: []const u8, io: std.Io) !SnapshotSurface {
     const pixel_width = @as(u32, cols) * face.cell_width;
     const pixel_height = @as(u32, rows) * face.cell_height;
     const buf_size = @as(usize, pixel_width) * pixel_height * 4;
@@ -59,6 +63,7 @@ pub fn init(alloc: std.mem.Allocator, cols: u16, rows: u16, face: *font_mod.Face
         .face = face,
         .alloc = alloc,
         .output_path = output_path,
+        .io = io,
     };
 }
 
@@ -220,18 +225,21 @@ pub fn scrollRegion(_: *SnapshotSurface, _: u16, _: u16, _: i16) void {
 }
 
 pub fn render(self: *SnapshotSurface) !void {
-    // Render cursor if visible.
-    if (self.cursor_visible and self.cursor_col < self.cols and self.cursor_row < self.rows) {
-        const cx = @as(u32, self.cursor_col) * self.cell_width;
-        const cy = @as(u32, self.cursor_row) * self.cell_height;
-        switch (self.cursor_shape) {
-            .block => self.fillRect(cx, cy, self.cell_width, self.cell_height, 200, 200, 200, 180),
-            .beam => self.fillRect(cx, cy, 2, self.cell_height, 200, 200, 200, 220),
-            .underline => self.fillRect(cx, cy + self.cell_height -| 2, self.cell_width, 2, 200, 200, 200, 220),
+    // Composite cursor only on the first render to avoid double-blending.
+    if (!self.rendered) {
+        if (self.cursor_visible and self.cursor_col < self.cols and self.cursor_row < self.rows) {
+            const cx = @as(u32, self.cursor_col) * self.cell_width;
+            const cy = @as(u32, self.cursor_row) * self.cell_height;
+            switch (self.cursor_shape) {
+                .block => self.fillRect(cx, cy, self.cell_width, self.cell_height, 200, 200, 200, 180),
+                .beam => self.fillRect(cx, cy, 2, self.cell_height, 200, 200, 200, 220),
+                .underline => self.fillRect(cx, cy + self.cell_height -| 2, self.cell_width, 2, 200, 200, 200, 220),
+            }
         }
     }
+    self.rendered = true;
 
-    try png_writer.writePng(self.alloc, self.output_path, self.pixels, self.pixel_width, self.pixel_height);
+    try png_writer.writePng(self.alloc, self.io, self.output_path, self.pixels, self.pixel_width, self.pixel_height);
 }
 
 pub fn width(self: *SnapshotSurface) u16 {

@@ -1,19 +1,23 @@
-/// Minimal PNG encoder using Zig's stdlib zlib compression.
+/// Minimal PNG encoder using Zig's stdlib deflate compression.
 ///
 /// Writes an unfiltered RGBA PNG from a raw pixel buffer. Sufficient for
 /// snapshot-sized images where encoding speed is irrelevant.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const flate = std.compress.flate;
 
 /// Writes a PNG file for an RGBA pixel buffer to the given path.
-pub fn writePng(alloc: Allocator, path: []const u8, pixels: []const u8, width: u32, height: u32) !void {
-    const file = try std.fs.cwd().createFile(path, .{});
-    defer file.close();
-    try writePngToWriter(alloc, file.writer().any(), pixels, width, height);
+pub fn writePng(alloc: Allocator, io: std.Io, path: []const u8, pixels: []const u8, width: u32, height: u32) !void {
+    const file = try std.Io.Dir.createFile(.cwd(), io, path, .{});
+    defer file.close(io);
+    var file_buf: [8192]u8 = undefined;
+    var writer = file.writer(io, &file_buf);
+    try writePngToWriter(alloc, &writer, pixels, width, height);
+    try writer.flush();
 }
 
-/// Writes a PNG to any writer (used by both file output and tests).
-pub fn writePngToWriter(alloc: Allocator, writer: std.io.AnyWriter, pixels: []const u8, width: u32, height: u32) !void {
+/// Writes a PNG to any std.Io.Writer (used by both file output and tests).
+pub fn writePngToWriter(alloc: Allocator, writer: *std.Io.Writer, pixels: []const u8, width: u32, height: u32) !void {
     const row_bytes: usize = @as(usize, width) * 4;
     std.debug.assert(pixels.len == row_bytes * height);
 
@@ -43,7 +47,7 @@ pub fn writePngToWriter(alloc: Allocator, writer: std.io.AnyWriter, pixels: []co
         @memcpy(raw[dst_offset + 1 ..][0..row_bytes], pixels[src_start..][0..row_bytes]);
     }
 
-    // Compress with zlib (deflate)
+    // Compress with deflate (zlib container)
     const compressed = try compress(alloc, raw);
     defer alloc.free(compressed);
 
@@ -54,7 +58,7 @@ pub fn writePngToWriter(alloc: Allocator, writer: std.io.AnyWriter, pixels: []co
     try writeChunk(writer, "IEND", &.{});
 }
 
-fn writeChunk(writer: std.io.AnyWriter, chunk_type: *const [4]u8, data: []const u8) !void {
+fn writeChunk(writer: *std.Io.Writer, chunk_type: *const [4]u8, data: []const u8) !void {
     var len_buf: [4]u8 = undefined;
     std.mem.writeInt(u32, &len_buf, @intCast(data.len), .big);
     try writer.writeAll(&len_buf);
@@ -70,28 +74,29 @@ fn writeChunk(writer: std.io.AnyWriter, chunk_type: *const [4]u8, data: []const 
 }
 
 fn compress(alloc: Allocator, input: []const u8) ![]u8 {
-    var result = std.ArrayList(u8).init(alloc);
-    errdefer result.deinit();
+    var output: std.Io.Writer.Allocating = try .initCapacity(alloc, @max(input.len / 2, 64));
+    errdefer output.deinit();
 
-    var comp = try std.compress.zlib.compressor(result.writer().any(), .{});
-    try comp.writer().writeAll(input);
+    var window_buf: [flate.max_window_len]u8 = undefined;
+    var comp = try flate.Compress.init(&output.writer, &window_buf, .zlib, flate.Compress.Options.level_6);
+    try comp.writer.writeAll(input);
     try comp.finish();
 
-    return result.toOwnedSlice();
+    return output.toOwnedSlice();
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 test "writePng produces valid PNG signature" {
     const alloc = std.testing.allocator;
-    var output = std.ArrayList(u8).init(alloc);
+    var output: std.Io.Writer.Allocating = .init(alloc);
     defer output.deinit();
 
     // 1x1 red pixel (RGBA)
     const pixels = [_]u8{ 255, 0, 0, 255 };
-    try writePngToWriter(alloc, output.writer().any(), &pixels, 1, 1);
+    try writePngToWriter(alloc, &output.writer, &pixels, 1, 1);
 
-    const data = output.items;
+    const data = output.written();
     // PNG signature
     try std.testing.expectEqualSlices(u8, &.{ 137, 80, 78, 71, 13, 10, 26, 10 }, data[0..8]);
     // IHDR chunk type
@@ -100,15 +105,15 @@ test "writePng produces valid PNG signature" {
 
 test "writePng 2x2 image has correct IHDR dimensions" {
     const alloc = std.testing.allocator;
-    var output = std.ArrayList(u8).init(alloc);
+    var output: std.Io.Writer.Allocating = .init(alloc);
     defer output.deinit();
 
     // 2x2 RGBA pixels
     var pixels: [2 * 2 * 4]u8 = undefined;
     @memset(&pixels, 128);
-    try writePngToWriter(alloc, output.writer().any(), &pixels, 2, 2);
+    try writePngToWriter(alloc, &output.writer, &pixels, 2, 2);
 
-    const data = output.items;
+    const data = output.written();
     // IHDR data starts at byte 16 (8 sig + 4 len + 4 type)
     const w = std.mem.readInt(u32, data[16..20], .big);
     const h = std.mem.readInt(u32, data[20..24], .big);

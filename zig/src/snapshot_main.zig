@@ -31,7 +31,7 @@ pub fn main(init: std.process.Init) !void {
     try face.preloadAscii();
 
     // Initialize snapshot surface.
-    var surface = try SnapshotSurface.init(alloc, args.cols, args.rows, &face, args.output);
+    var surface = try SnapshotSurface.init(alloc, args.cols, args.rows, &face, args.output, init.io);
     defer surface.deinit();
 
     // Initialize renderer.
@@ -52,7 +52,7 @@ pub fn main(init: std.process.Init) !void {
             var skip_remaining = msg_len;
             while (skip_remaining > 0) {
                 const chunk = @min(skip_remaining, msg_buf.len);
-                if (!try readExact(stdin_fd, msg_buf[0..chunk])) return error.Malformed;
+                if (!try readExact(stdin_fd, msg_buf[0..chunk])) break;
                 skip_remaining -= chunk;
             }
             continue;
