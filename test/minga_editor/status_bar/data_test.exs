@@ -260,7 +260,16 @@ defmodule MingaEditor.StatusBar.DataTest do
   end
 
   defp start_buffer(content, filetype) do
-    buf = start_supervised!({BufferProcess, [content: "", filetype: filetype]})
+    # Use an isolated events registry so edits don't broadcast to the global
+    # Git.Tracker, which would race with register_tracked_buffer and overwrite
+    # the GitBuffer's conflict state with the buffer's (conflict-free) content.
+    registry = :"data_test_events_#{System.unique_integer([:positive])}"
+
+    buf =
+      start_supervised!(
+        {BufferProcess, [content: "", filetype: filetype, events_registry: registry]}
+      )
+
     :ok = BufferProcess.insert_text(buf, content)
     buf
   end
