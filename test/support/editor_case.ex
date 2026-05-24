@@ -534,11 +534,18 @@ defmodule Minga.Test.EditorCase do
   end
 
   # ── State query helpers ──────────────────────────────────────────────────
+  # Use these helpers instead of :sys.get_state + field assertions.
   # :sys.get_state is valid as a synchronization barrier (ensuring messages
-  # are processed), but tests should not pattern-match on returned state
-  # fields. Helpers here return booleans that answer "is this happening?"
-  # without exposing the state path. For visible text (status messages,
-  # prompts), prefer screen helpers like minibuffer/1 and screen_row/2.
+  # are processed before asserting), but tests should not pattern-match on
+  # the returned state fields. When you need to assert on editor state,
+  # add a helper here that encapsulates the access path, so tests survive
+  # struct refactors.
+
+  @doc "Returns the active keymap scope."
+  @spec keymap_scope(editor_ctx()) :: atom()
+  def keymap_scope(%{editor: editor}) do
+    get_editor_state(editor).workspace.keymap_scope
+  end
 
   @doc "Returns true if a search pattern is active."
   @spec search_active?(editor_ctx()) :: boolean()
@@ -562,6 +569,18 @@ defmodule Minga.Test.EditorCase do
   @spec conflict_open?(editor_ctx()) :: boolean()
   def conflict_open?(%{editor: editor}) do
     MingaEditor.State.ModalOverlay.match(get_editor_state(editor).shell_state.modal, :conflict)
+  end
+
+  @doc "Returns the current status message."
+  @spec status_msg(editor_ctx()) :: String.t() | nil
+  def status_msg(%{editor: editor}) do
+    MingaEditor.State.status_msg(get_editor_state(editor))
+  end
+
+  @doc "Returns the bottom panel state."
+  @spec bottom_panel(editor_ctx()) :: MingaEditor.BottomPanel.t()
+  def bottom_panel(%{editor: editor}) do
+    get_editor_state(editor).shell_state.bottom_panel
   end
 
   @doc "Returns the picker payload (ModalOverlay.Picker) when a picker is open, or nil."
