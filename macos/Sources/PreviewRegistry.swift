@@ -1,7 +1,4 @@
 /// Maps view names to constructed SwiftUI chrome views with mock state.
-///
-/// Each preview builds its state using the same patterns proven in
-/// SwiftUIViewTests.swift and SidebarViewTests.swift.
 
 import SwiftUI
 
@@ -201,13 +198,14 @@ enum PreviewRegistry {
     private static func notificationPreview() -> some View {
         let state = NotificationCenterState()
         let theme = populatedTheme()
+        let now = UInt64(Date().timeIntervalSince1970)
         state.update(rawNotifications: [
             Wire.EditorNotification(
                 id: "notif-1",
                 level: .info,
                 flags: 0x01,
-                createdAt: UInt64(Date().timeIntervalSince1970),
-                updatedAt: UInt64(Date().timeIntervalSince1970),
+                createdAt: now,
+                updatedAt: now,
                 autoDismissMs: nil,
                 title: "Extension loaded",
                 body: "org-mode v0.3.0 activated for .org files",

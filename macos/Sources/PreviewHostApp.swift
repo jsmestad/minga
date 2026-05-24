@@ -15,7 +15,9 @@ struct PreviewHostApp: App {
             previewContent()
                 .frame(width: 800, height: 600)
                 .onAppear {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    // Wait for SwiftUI to finish layout before capturing the window bitmap.
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(500))
                         delegate.captureAndExit()
                     }
                 }
@@ -33,12 +35,15 @@ struct PreviewHostApp: App {
 
 @MainActor
 final class PreviewHostDelegate: NSObject, NSApplicationDelegate {
+    private func fail(_ message: String) -> Never {
+        fputs("error: \(message)\n", stderr)
+        exit(1)
+    }
+
     func captureAndExit() {
         guard let window = NSApplication.shared.windows.first,
               let contentView = window.contentView else {
-            fputs("error: no window or content view found\n", stderr)
-            NSApplication.shared.terminate(nil)
-            return
+            fail("no window or content view found")
         }
 
         window.orderFrontRegardless()
@@ -51,20 +56,20 @@ final class PreviewHostDelegate: NSObject, NSApplicationDelegate {
         let outputPath = "\(outputDir)/\(viewName).png"
 
         let dirURL = URL(fileURLWithPath: outputDir, isDirectory: true)
-        try? FileManager.default.createDirectory(at: dirURL, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(at: dirURL, withIntermediateDirectories: true)
+        } catch {
+            fail("cannot create output directory: \(error)")
+        }
 
         let bounds = contentView.bounds
         guard let bitmap = contentView.bitmapImageRepForCachingDisplay(in: bounds) else {
-            fputs("error: bitmapImageRepForCachingDisplay returned nil\n", stderr)
-            NSApplication.shared.terminate(nil)
-            return
+            fail("bitmapImageRepForCachingDisplay returned nil")
         }
         contentView.cacheDisplay(in: bounds, to: bitmap)
 
         guard let pngData = bitmap.representation(using: .png, properties: [:]) else {
-            fputs("error: PNG encoding failed\n", stderr)
-            NSApplication.shared.terminate(nil)
-            return
+            fail("PNG encoding failed")
         }
 
         let outputURL = URL(fileURLWithPath: outputPath)
@@ -72,7 +77,7 @@ final class PreviewHostDelegate: NSObject, NSApplicationDelegate {
             try pngData.write(to: outputURL)
             print(outputPath)
         } catch {
-            fputs("error: failed to write PNG: \(error)\n", stderr)
+            fail("failed to write PNG: \(error)")
         }
 
         NSApplication.shared.terminate(nil)
