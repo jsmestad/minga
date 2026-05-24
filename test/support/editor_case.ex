@@ -549,7 +549,10 @@ defmodule Minga.Test.EditorCase do
   @doc "Returns true if the file tree is open."
   @spec file_tree_open?(editor_ctx()) :: boolean()
   def file_tree_open?(%{editor: editor}) do
-    MingaEditor.State.FileTree.open?(get_editor_state(editor).workspace.file_tree)
+    editor
+    |> get_editor_state()
+    |> MingaEditor.State.file_tree_state()
+    |> MingaEditor.State.FileTree.open?()
   end
 
   @doc "Returns true if the completion menu is visible."

@@ -19,6 +19,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
   alias MingaEditor.RenderPipeline.Chrome
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.StatusBar.Data, as: StatusBarData
   alias MingaEditor.Shell.Traditional.Chrome.Helpers, as: ChromeHelpers
@@ -136,9 +137,15 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
 
   @spec sidebar_draws(state(), Layout.t()) :: [DisplayList.draw()]
   defp sidebar_draws(state, layout) do
-    case SidebarRenderer.active_sidebar() do
-      nil -> legacy_sidebar_draws(state, layout)
-      sidebar -> SidebarRenderer.render(state, layout.file_tree, sidebar)
+    file_tree = EditorState.file_tree_state(state)
+
+    if FileTreeState.visible_status?(FileTreeState.status(file_tree)) do
+      TreeRenderer.render(state)
+    else
+      case SidebarRenderer.active_sidebar(state) do
+        nil -> legacy_sidebar_draws(state, layout)
+        sidebar -> SidebarRenderer.render(state, layout.file_tree, sidebar)
+      end
     end
   end
 
@@ -157,7 +164,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
       layout.minibuffer,
       layout.status_bar,
       state.workspace.windows.tree,
-      state.workspace.file_tree,
+      EditorState.file_tree_state(state),
       state.workspace.keymap_scope,
       ChromeState.from_editor_state(state),
       state.shell_state |> Map.get(:git_status_panel),

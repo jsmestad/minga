@@ -28,7 +28,7 @@ defmodule MingaEditor.Commands.FileTreeRevealTest do
   # can point to a different entry if concurrent tests create/delete
   # files that shift the sort order before this assertion runs.
   defp assert_file_visible(state, file_path) do
-    tree = state.workspace.file_tree.tree
+    tree = MingaEditor.State.file_tree_state(state).tree
     expanded_path = Path.expand(file_path)
     entries = FileTree.visible_entries(tree)
 
@@ -81,7 +81,9 @@ defmodule MingaEditor.Commands.FileTreeRevealTest do
       # Check cursor integer directly (no filesystem rescan) to verify
       # gg worked before testing reveal.
       state = send_keys_sync(ctx, "gg")
-      assert state.workspace.file_tree.tree.cursor == 0, "gg should move cursor to top"
+
+      assert MingaEditor.State.file_tree_state(state).tree.cursor == 0,
+             "gg should move cursor to top"
 
       # Reveal without closing: this exercises the ensure_tree_open pass-through
       state = send_keys_sync(ctx, "<SPC>or")

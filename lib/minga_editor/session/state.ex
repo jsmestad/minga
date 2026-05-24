@@ -16,6 +16,7 @@ defmodule MingaEditor.Session.State do
   alias MingaEditor.FeatureState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Dired, as: DiredState
+  alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Highlighting
   alias MingaEditor.State.Mouse
@@ -33,7 +34,6 @@ defmodule MingaEditor.Session.State do
           keymap_scope: Scope.scope_name(),
           buffers: Buffers.t(),
           windows: Windows.t(),
-          file_tree: FileTreeState.t(),
           dired: DiredState.t(),
           viewport: Viewport.t(),
           mouse: Mouse.t(),
@@ -51,7 +51,6 @@ defmodule MingaEditor.Session.State do
   defstruct keymap_scope: :editor,
             buffers: %Buffers{},
             windows: %Windows{},
-            file_tree: %FileTreeState{},
             dired: %DiredState{},
             viewport: nil,
             mouse: %Mouse{},
@@ -228,10 +227,31 @@ defmodule MingaEditor.Session.State do
     %{wspace | keymap_scope: scope}
   end
 
-  @doc "Replaces the file-tree sub-struct."
+  @doc "Returns FileTree UI state from source-owned feature state, falling back to the legacy field during migration."
+  @spec file_tree_state(t()) :: FileTreeState.t()
+  def file_tree_state(%__MODULE__{} = wspace) do
+    case get_feature_state(wspace, FileTreeFeature.source(), FileTreeFeature.feature_id()) do
+      %FileTreeState{} = file_tree -> file_tree
+      _missing -> %FileTreeState{}
+    end
+  end
+
+  @doc "Replaces the FileTree feature-owned UI state."
   @spec set_file_tree(t(), FileTreeState.t()) :: t()
   def set_file_tree(%__MODULE__{} = wspace, %FileTreeState{} = file_tree) do
-    %{wspace | file_tree: file_tree}
+    put_feature_state(wspace, FileTreeFeature.source(), FileTreeFeature.feature_id(), file_tree)
+  end
+
+  @doc "Updates the FileTree feature-owned UI state."
+  @spec update_file_tree(t(), (FileTreeState.t() -> FileTreeState.t())) :: t()
+  def update_file_tree(%__MODULE__{} = wspace, fun) when is_function(fun, 1) do
+    set_file_tree(wspace, fun.(file_tree_state(wspace)))
+  end
+
+  @doc "Drops FileTree feature-owned UI state and clears the legacy compatibility field."
+  @spec drop_file_tree(t()) :: t()
+  def drop_file_tree(%__MODULE__{} = wspace) do
+    drop_feature_state(wspace, FileTreeFeature.source(), FileTreeFeature.feature_id())
   end
 
   @doc "Replaces the dired sub-struct."

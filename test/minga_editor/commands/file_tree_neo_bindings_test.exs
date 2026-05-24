@@ -63,7 +63,7 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
       state = state |> select_entry("dest") |> FileTreeCommands.paste()
 
       assert File.read!(Path.join(target_dir, "alpha.txt")) == "alpha"
-      assert state.workspace.file_tree.clipboard_mark.operation == :copy
+      assert ft(state).clipboard_mark.operation == :copy
     end
 
     @tag :tmp_dir
@@ -80,7 +80,7 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
 
       refute File.exists?(source)
       assert File.read!(Path.join(target_dir, "alpha.txt")) == "alpha"
-      assert state.workspace.file_tree.clipboard_mark == nil
+      assert ft(state).clipboard_mark == nil
     end
 
     @tag :tmp_dir
@@ -112,7 +112,7 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
 
       assert :ok = BufferProcess.save(buffer)
       assert File.read!(target) == "dirty"
-      assert state.workspace.file_tree.clipboard_mark == nil
+      assert ft(state).clipboard_mark == nil
     end
 
     @tag :tmp_dir
@@ -203,7 +203,7 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
 
       assert File.read!(source) == "source"
       assert File.read!(target) == "existing"
-      assert state.workspace.file_tree.clipboard_mark.operation == :move
+      assert ft(state).clipboard_mark.operation == :move
     end
 
     @tag :tmp_dir
@@ -224,7 +224,7 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
 
       refute File.exists?(Path.join(child_dir, "src"))
       assert File.exists?(source_dir)
-      assert state.workspace.file_tree.clipboard_mark.operation == :move
+      assert ft(state).clipboard_mark.operation == :move
     end
 
     @tag :tmp_dir
@@ -277,7 +277,7 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
 
       state = state |> select_entry("dest") |> FileTreeCommands.paste()
 
-      assert state.workspace.file_tree.clipboard_mark.operation == :move
+      assert ft(state).clipboard_mark.operation == :move
     end
 
     @tag :tmp_dir
@@ -297,7 +297,7 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
       state = state |> select_entry("child") |> FileTreeCommands.paste()
 
       refute File.exists?(Path.join(child_dir, "src"))
-      assert state.workspace.file_tree.clipboard_mark.operation == :copy
+      assert ft(state).clipboard_mark.operation == :copy
     end
 
     @tag :tmp_dir
@@ -353,7 +353,7 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
 
       assert :ok = BufferProcess.save(buffer)
       assert File.read!(target_file) == "dirty"
-      assert state.workspace.file_tree.clipboard_mark == nil
+      assert ft(state).clipboard_mark == nil
     end
 
     @tag :tmp_dir
@@ -395,8 +395,8 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
 
       state = FileTreeCommands.root_parent(state)
 
-      assert state.workspace.file_tree.tree.root == Path.expand(tmp_dir)
-      assert state.workspace.file_tree.original_root == Path.expand(child)
+      assert ft(state).tree.root == Path.expand(tmp_dir)
+      assert ft(state).original_root == Path.expand(child)
     end
 
     @tag :tmp_dir
@@ -410,10 +410,10 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
       state =
         tmp_dir |> build_state() |> select_entry("child") |> FileTreeCommands.root_selected()
 
-      assert state.workspace.file_tree.tree.root == Path.expand(child)
+      assert ft(state).tree.root == Path.expand(child)
 
       state = FileTreeCommands.root_original(state)
-      assert state.workspace.file_tree.tree.root == Path.expand(tmp_dir)
+      assert ft(state).tree.root == Path.expand(tmp_dir)
     end
   end
 
@@ -424,7 +424,7 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
       File.write!(Path.join(tmp_dir, "beta.txt"), "beta")
 
       state = tmp_dir |> build_state() |> FileTreeCommands.filter()
-      file_tree = FileTreeState.update_filter(state.workspace.file_tree, "alpha")
+      file_tree = FileTreeState.update_filter(ft(state), "alpha")
 
       assert file_tree.filtering == true
       assert Enum.map(FileTree.visible_entries(file_tree.tree), & &1.name) == ["alpha.txt"]
@@ -435,10 +435,10 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
       state = build_state(tmp_dir)
 
       state = FileTreeCommands.toggle_help(state)
-      assert state.workspace.file_tree.help_visible == true
+      assert ft(state).help_visible == true
 
       state = FileTreeCommands.toggle_help(state)
-      assert state.workspace.file_tree.help_visible == false
+      assert ft(state).help_visible == false
     end
   end
 
@@ -460,27 +460,27 @@ defmodule MingaEditor.Commands.FileTreeNeoBindingsTest do
 
     %EditorState{
       port_manager: nil,
-      workspace: %SessionState{
-        buffers: buffers,
-        viewport: Viewport.new(24, 80),
-        file_tree: FileTreeState.open(%FileTreeState{}, tree, nil)
-      }
+      workspace:
+        %SessionState{buffers: buffers, viewport: Viewport.new(24, 80)}
+        |> SessionState.set_file_tree(FileTreeState.open(%FileTreeState{}, tree, nil))
     }
   end
 
+  defp ft(state), do: EditorState.file_tree_state(state)
+
   defp expand_path(state, path) do
-    tree = FileTree.expand_path(state.workspace.file_tree.tree, path)
-    file_tree = FileTreeState.replace_tree(state.workspace.file_tree, tree)
+    tree = FileTree.expand_path(ft(state).tree, path)
+    file_tree = FileTreeState.replace_tree(ft(state), tree)
     EditorState.set_file_tree(state, file_tree)
   end
 
   defp select_entry(state, name) do
-    entries = FileTree.visible_entries(state.workspace.file_tree.tree)
+    entries = FileTree.visible_entries(ft(state).tree)
     index = Enum.find_index(entries, &(&1.name == name))
     refute index == nil
 
-    tree = FileTree.select(state.workspace.file_tree.tree, index)
-    file_tree = FileTreeState.replace_tree(state.workspace.file_tree, tree)
+    tree = FileTree.select(ft(state).tree, index)
+    file_tree = FileTreeState.replace_tree(ft(state), tree)
     EditorState.set_file_tree(state, file_tree)
   end
 end

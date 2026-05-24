@@ -737,7 +737,7 @@ defmodule MingaEditor.Commands do
   # is back in the file tree, not stuck in editor scope.
   @spec restore_file_tree_scope(EditorState.t()) :: EditorState.t()
   defp restore_file_tree_scope(state) do
-    if state.workspace.file_tree.tree != nil do
+    if EditorState.file_tree_state(state).tree != nil do
       EditorState.set_keymap_scope(state, :file_tree)
     else
       state

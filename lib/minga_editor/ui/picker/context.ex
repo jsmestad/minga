@@ -92,7 +92,7 @@ defmodule MingaEditor.UI.Picker.Context do
     %__MODULE__{
       buffers: state.workspace.buffers,
       editing: state.workspace.editing,
-      file_tree: Map.get(state.workspace, :file_tree),
+      file_tree: State.file_tree_state(state),
       search: state.workspace.search,
       viewport: state.terminal_viewport,
       tab_bar: state.shell_state.tab_bar,

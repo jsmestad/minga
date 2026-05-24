@@ -4,9 +4,11 @@ defmodule MingaEditor.Extension.SidebarGUIEmitTest do
 
   alias Minga.Project.FileTree
   alias MingaEditor.Extension.Sidebar
+  alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Frontend.Emit.GUI, as: EmitGUI
   alias MingaEditor.Renderer.Caches
+  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.StatusBar.Data, as: StatusBarData
 
@@ -24,7 +26,8 @@ defmodule MingaEditor.Extension.SidebarGUIEmitTest do
     File.write!(Path.join(root, "a.ex"), "")
 
     file_tree = FileTreeState.open(%FileTreeState{}, FileTree.new(root, width: 32), nil)
-    state = gui_state() |> put_in([Access.key(:workspace), Access.key(:file_tree)], file_tree)
+    state = gui_state() |> EditorState.set_file_tree(file_tree)
+    FileTreeFeature.sync_sidebar(%FileTreeState{})
 
     assert :ok =
              Sidebar.register({:extension, :outline}, %{
@@ -115,5 +118,6 @@ defmodule MingaEditor.Extension.SidebarGUIEmitTest do
 
   defp reset_default_sidebar_table do
     Sidebar.unregister_source({:extension, :outline})
+    Sidebar.unregister_source(:builtin)
   end
 end

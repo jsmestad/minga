@@ -219,7 +219,7 @@ defmodule MingaEditor.StartupTest do
 
       tab_bar = EditorState.tab_bar(state)
 
-      assert state.workspace.file_tree.project_root == dir
+      assert EditorState.file_tree_state(state).project_root == dir
       assert %Workspace{label: "Persisted Agent"} = TabBar.get_workspace(tab_bar, 2)
       assert tab_bar |> TabBar.switch_to_workspace(2) |> TabBar.active_workspace_id() == 2
     after
@@ -252,7 +252,7 @@ defmodule MingaEditor.StartupTest do
 
       tab_bar = EditorState.tab_bar(state)
 
-      assert state.workspace.file_tree.project_root == dir
+      assert EditorState.file_tree_state(state).project_root == dir
       assert %Workspace{label: "Argv Agent"} = TabBar.get_workspace(tab_bar, 2)
     after
       Application.delete_env(:minga, :cli_startup_project_root)
@@ -281,7 +281,7 @@ defmodule MingaEditor.StartupTest do
 
       tab_bar = EditorState.tab_bar(state)
 
-      assert state.workspace.file_tree.project_root == invalid_root
+      assert EditorState.file_tree_state(state).project_root == invalid_root
       refute TabBar.get_workspace(tab_bar, 2)
     after
       Application.delete_env(:minga, :cli_startup_project_root)

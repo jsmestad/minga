@@ -15,7 +15,7 @@ defmodule MingaEditor.Input.Sidebar do
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
   def handle_key(state, codepoint, modifiers) do
-    case active_sidebar_id() do
+    case active_sidebar_id(state) do
       nil ->
         {:passthrough, state}
 
@@ -66,11 +66,17 @@ defmodule MingaEditor.Input.Sidebar do
     {:passthrough, state}
   end
 
-  @spec active_sidebar_id() :: String.t() | nil
-  defp active_sidebar_id do
-    case Sidebar.active_left() do
-      %{id: id, focused?: true} -> id
-      _ -> nil
-    end
+  @spec active_sidebar_id(EditorState.t()) :: String.t() | nil
+  defp active_sidebar_id(_state) do
+    Sidebar.visible()
+    |> Enum.reject(&(&1.id == "file_tree"))
+    |> Enum.filter(&(&1.placement == :left))
+    |> Enum.sort_by(&{not &1.focused?, &1.priority, &1.id})
+    |> List.first()
+    |> focused_sidebar_id()
   end
+
+  @spec focused_sidebar_id(Sidebar.entry() | nil) :: String.t() | nil
+  defp focused_sidebar_id(%{id: id, focused?: true}), do: id
+  defp focused_sidebar_id(_sidebar), do: nil
 end

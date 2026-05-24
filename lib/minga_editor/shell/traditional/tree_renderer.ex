@@ -92,26 +92,16 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
   end
 
   @spec render(EditorState.t() | map()) :: [DisplayList.draw()]
-  def render(%EditorState{workspace: %{file_tree: %{tree: nil}}}), do: []
-  def render(%{workspace: %{file_tree: %{tree: nil}}}), do: []
-
-  def render(%EditorState{} = state) do
-    render_from_workspace(state.workspace, state.theme, state)
+  def render(state) do
+    case EditorState.file_tree_state(state) do
+      %FileTreeState{tree: nil} -> []
+      %FileTreeState{tree: _tree} = file_tree -> render_from_file_tree(file_tree, state)
+    end
   end
 
-  def render(%{workspace: %{file_tree: %{tree: _tree}}} = state) do
-    render_from_workspace(state.workspace, state.theme, state)
-  end
-
-  def render(_state), do: []
-
-  @spec render_from_workspace(map(), MingaEditor.UI.Theme.t(), map()) :: [DisplayList.draw()]
-  defp render_from_workspace(
-         %{file_tree: %{tree: tree, focused: focused} = file_tree} = _ws,
-         _theme,
-         state
-       ) do
-    rect = tree_rect_from_workspace(state.workspace)
+  @spec render_from_file_tree(FileTreeState.t(), map()) :: [DisplayList.draw()]
+  defp render_from_file_tree(%FileTreeState{tree: tree, focused: focused} = file_tree, state) do
+    rect = tree_rect_from_workspace(state.workspace, file_tree)
 
     input = %RenderInput{
       tree: tree,
@@ -120,11 +110,11 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
       theme: state.theme,
       active_path: active_buffer_path(state),
       dirty_paths: dirty_paths(state),
-      editing: Map.get(file_tree, :editing),
+      editing: file_tree.editing,
       filter_text: Map.get(tree, :filter),
-      filtering?: Map.get(file_tree, :filtering, false),
+      filtering?: file_tree.filtering,
       git_status: tree.git_status,
-      help_visible?: Map.get(file_tree, :help_visible, false),
+      help_visible?: file_tree.help_visible,
       status: status_from_file_tree(file_tree)
     }
 
@@ -349,9 +339,8 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     " #{@folder_open} #{project_name}/"
   end
 
-  @spec status_from_file_tree(FileTreeState.t() | map()) :: FileTreeState.tree_status()
+  @spec status_from_file_tree(FileTreeState.t()) :: FileTreeState.tree_status()
   defp status_from_file_tree(%FileTreeState{} = file_tree), do: FileTreeState.status(file_tree)
-  defp status_from_file_tree(_file_tree), do: :ready
 
   @spec active_buffer_path(EditorState.t() | map()) :: String.t() | nil
   defp active_buffer_path(%{workspace: %{buffers: %{active: nil}}}), do: nil
@@ -1109,13 +1098,12 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
   end
 
   # Computes the tree rect from workspace data without requiring EditorState.
-  @spec tree_rect_from_workspace(map()) :: MingaEditor.WindowTree.rect() | nil
-  defp tree_rect_from_workspace(%{file_tree: %{tree: nil}}), do: nil
-
-  defp tree_rect_from_workspace(%{
-         viewport: %{rows: rows},
-         file_tree: %{tree: %Minga.Project.FileTree{width: tw}}
+  @spec tree_rect_from_workspace(map(), FileTreeState.t()) :: MingaEditor.WindowTree.rect() | nil
+  defp tree_rect_from_workspace(%{viewport: %{rows: rows}}, %FileTreeState{
+         tree: %Minga.Project.FileTree{width: tw}
        }) do
     {1, 0, tw, rows - 2}
   end
+
+  defp tree_rect_from_workspace(_workspace, %FileTreeState{}), do: nil
 end

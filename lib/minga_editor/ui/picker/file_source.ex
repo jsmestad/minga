@@ -258,9 +258,12 @@ defmodule MingaEditor.UI.Picker.FileSource do
   defp project_root(%Context{picker_ui: %{context: %{project_root: root}}}) when is_binary(root),
     do: root
 
-  defp project_root(%EditorState{workspace: %{file_tree: %{project_root: root}}})
-       when is_binary(root),
-       do: root
+  defp project_root(%EditorState{} = state) do
+    case EditorState.file_tree_state(state).project_root do
+      root when is_binary(root) -> root
+      _ -> Minga.Project.resolve_root()
+    end
+  end
 
   defp project_root(_ctx), do: Minga.Project.resolve_root()
 end
