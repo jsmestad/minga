@@ -2,19 +2,30 @@ defmodule MingaEditor.State.Search do
   @moduledoc """
   Groups search-related fields from EditorState.
 
-  Tracks the last search pattern and direction (for `n`/`N` repeat), and
-  cached project-wide search results for the picker.
+  Tracks the last search pattern and direction (for `n`/`N` repeat),
+  cached project-wide search results for the picker, and the GUI search
+  toolbar state (active, flags, replace mode).
   """
+
+  @typedoc "GUI search toolbar state. Non-nil means the toolbar is active."
+  @type gui_search :: %{
+          replace_mode: boolean(),
+          case_sensitive: boolean(),
+          whole_word: boolean(),
+          regex: boolean()
+        }
 
   @type t :: %__MODULE__{
           last_pattern: String.t() | nil,
           last_direction: Minga.Editing.Search.direction(),
-          project_results: [Minga.Project.ProjectSearch.match()]
+          project_results: [Minga.Project.ProjectSearch.match()],
+          gui_search: gui_search() | nil
         }
 
   defstruct last_pattern: nil,
             last_direction: :forward,
-            project_results: []
+            project_results: [],
+            gui_search: nil
 
   @doc "Records the last search pattern and direction."
   @spec record(t(), String.t(), Minga.Editing.Search.direction()) :: t()
@@ -39,4 +50,55 @@ defmodule MingaEditor.State.Search do
   def set_project_results(%__MODULE__{} = s, results) when is_list(results) do
     %{s | project_results: results}
   end
+
+  @doc "Activates the GUI search toolbar with the given flags."
+  @spec activate_gui_search(t(), boolean(), boolean(), boolean()) :: t()
+  def activate_gui_search(%__MODULE__{} = s, case_sensitive, whole_word, regex) do
+    %{
+      s
+      | gui_search: %{
+          replace_mode: false,
+          case_sensitive: case_sensitive,
+          whole_word: whole_word,
+          regex: regex
+        }
+    }
+  end
+
+  @doc "Updates the GUI search toolbar flags. Activates the toolbar with `replace_mode: false` if not already active."
+  @spec update_gui_search_flags(t(), boolean(), boolean(), boolean()) :: t()
+  def update_gui_search_flags(
+        %__MODULE__{gui_search: %{} = gs} = s,
+        case_sensitive,
+        whole_word,
+        regex
+      ) do
+    %{
+      s
+      | gui_search: %{gs | case_sensitive: case_sensitive, whole_word: whole_word, regex: regex}
+    }
+  end
+
+  def update_gui_search_flags(%__MODULE__{} = s, case_sensitive, whole_word, regex) do
+    activate_gui_search(s, case_sensitive, whole_word, regex)
+  end
+
+  @doc "Sets replace mode on the GUI search toolbar."
+  @spec set_gui_replace_mode(t(), boolean()) :: t()
+  def set_gui_replace_mode(%__MODULE__{gui_search: %{} = gs} = s, replace_mode) do
+    %{s | gui_search: %{gs | replace_mode: replace_mode}}
+  end
+
+  def set_gui_replace_mode(%__MODULE__{} = s, _replace_mode), do: s
+
+  @doc "Dismisses the GUI search toolbar."
+  @spec dismiss_gui_search(t()) :: t()
+  def dismiss_gui_search(%__MODULE__{} = s) do
+    %{s | gui_search: nil}
+  end
+
+  @doc "Returns whether the GUI search toolbar is active."
+  @spec gui_search_active?(t()) :: boolean()
+  def gui_search_active?(%__MODULE__{gui_search: %{}}), do: true
+  def gui_search_active?(%__MODULE__{}), do: false
 end

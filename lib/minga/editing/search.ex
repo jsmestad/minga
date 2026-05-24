@@ -26,6 +26,65 @@ defmodule Minga.Editing.Search do
   @typedoc "A zero-indexed cursor position."
   @type position :: {non_neg_integer(), non_neg_integer()}
 
+  @typedoc "Search options. Defaults: `case_sensitive: true`, `whole_word: false`, `regex: false`."
+  @type search_opts :: [
+          case_sensitive: boolean(),
+          whole_word: boolean(),
+          regex: boolean()
+        ]
+
+  @typedoc "A compiled matcher: either a binary for `:binary.match` or a `Regex` for `Regex.run`."
+  @type matcher :: binary() | Regex.t()
+
+  # ── Matcher compilation ──────────────────────────────────────────────────
+
+  @spec compile_matcher(String.t(), search_opts()) :: matcher()
+  defp compile_matcher(pattern, []), do: pattern
+
+  defp compile_matcher(pattern, opts) do
+    use_regex = Keyword.get(opts, :regex, false)
+    case_sensitive = Keyword.get(opts, :case_sensitive, true)
+    whole_word = Keyword.get(opts, :whole_word, false)
+
+    if use_regex or not case_sensitive or whole_word do
+      regex_source = if use_regex, do: pattern, else: Regex.escape(pattern)
+      regex_source = if whole_word, do: "\\b#{regex_source}\\b", else: regex_source
+      regex_opts = if case_sensitive, do: "", else: "i"
+
+      case Regex.compile(regex_source, regex_opts) do
+        {:ok, regex} -> regex
+        {:error, _} -> Regex.compile!(Regex.escape(pattern), regex_opts)
+      end
+    else
+      pattern
+    end
+  end
+
+  @spec match_in(String.t(), matcher()) :: {non_neg_integer(), non_neg_integer()} | nil
+  defp match_in(haystack, matcher) when is_binary(matcher) do
+    case :binary.match(haystack, matcher) do
+      {pos, len} -> {pos, len}
+      :nomatch -> nil
+    end
+  end
+
+  defp match_in(haystack, %Regex{} = matcher) do
+    case Regex.run(matcher, haystack, return: :index, capture: :first) do
+      [{pos, len}] -> {pos, len}
+      nil -> nil
+    end
+  end
+
+  @spec matches_in(String.t(), matcher()) :: [{non_neg_integer(), non_neg_integer()}]
+  defp matches_in(haystack, matcher) when is_binary(matcher) do
+    :binary.matches(haystack, matcher)
+  end
+
+  defp matches_in(haystack, %Regex{} = matcher) do
+    Regex.scan(matcher, haystack, return: :index, capture: :first)
+    |> Enum.map(fn [{pos, len}] -> {pos, len} end)
+  end
+
   # ── Find next match ──────────────────────────────────────────────────────
 
   @doc """
@@ -46,17 +105,21 @@ defmodule Minga.Editing.Search do
       iex> Minga.Editing.Search.find_next("no match here", "xyz", {0, 0}, :forward)
       nil
   """
-  @spec find_next(String.t(), String.t(), position(), direction()) :: position() | nil
-  def find_next(_content, "", _cursor, _direction), do: nil
+  @spec find_next(String.t(), String.t(), position(), direction(), search_opts()) ::
+          position() | nil
+  def find_next(content, pattern, cursor, direction, opts \\ [])
+  def find_next(_content, "", _cursor, _direction, _opts), do: nil
 
-  def find_next(content, pattern, cursor, :forward) do
+  def find_next(content, pattern, cursor, :forward, opts) do
     lines = :binary.split(content, "\n", [:global])
-    find_forward(lines, pattern, cursor, length(lines))
+    matcher = compile_matcher(pattern, opts)
+    find_forward(lines, matcher, cursor, length(lines))
   end
 
-  def find_next(content, pattern, cursor, :backward) do
+  def find_next(content, pattern, cursor, :backward, opts) do
     lines = :binary.split(content, "\n", [:global])
-    find_backward(lines, pattern, cursor, length(lines))
+    matcher = compile_matcher(pattern, opts)
+    find_backward(lines, matcher, cursor, length(lines))
   end
 
   # ── Find all matches in visible range ────────────────────────────────────
@@ -74,42 +137,38 @@ defmodule Minga.Editing.Search do
       iex> Minga.Editing.Search.find_all_in_range(["foo bar foo", "baz foo"], "foo", 0)
       [%Minga.Editing.Search.Match{line: 0, col: 0, length: 3}, %Minga.Editing.Search.Match{line: 0, col: 8, length: 3}, %Minga.Editing.Search.Match{line: 1, col: 4, length: 3}]
   """
-  @spec find_all_in_range([String.t()], String.t(), non_neg_integer()) :: [match()]
-  def find_all_in_range(_lines, "", _first_line), do: []
+  @spec find_all_in_range([String.t()], String.t(), non_neg_integer(), search_opts()) :: [match()]
+  def find_all_in_range(lines, pattern, first_line, opts \\ [])
+  def find_all_in_range(_lines, "", _first_line, _opts), do: []
 
-  def find_all_in_range(lines, pattern, first_line) do
-    pattern_byte_len = byte_size(pattern)
+  def find_all_in_range(lines, pattern, first_line, opts) do
+    matcher = compile_matcher(pattern, opts)
 
     lines
     |> Enum.with_index(first_line)
     |> Enum.flat_map(fn {line_text, line_num} ->
-      find_all_overlapping(line_text, pattern, pattern_byte_len, line_num, 0, [])
+      find_all_overlapping(line_text, matcher, line_num, 0, [])
     end)
   end
 
-  @spec find_all_overlapping(
-          String.t(),
-          String.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          [match()]
-        ) :: [match()]
-  defp find_all_overlapping(line, pattern, pat_len, line_num, start, acc) do
-    if start + pat_len > byte_size(line) do
+  @spec find_all_overlapping(String.t(), matcher(), non_neg_integer(), non_neg_integer(), [
+          match()
+        ]) :: [match()]
+  defp find_all_overlapping(line, matcher, line_num, start, acc) do
+    if start >= byte_size(line) do
       Enum.reverse(acc)
     else
       searchable = binary_part(line, start, byte_size(line) - start)
 
-      case :binary.match(searchable, pattern) do
-        :nomatch ->
+      case match_in(searchable, matcher) do
+        nil ->
           Enum.reverse(acc)
 
-        {pos, _len} ->
+        {pos, match_len} ->
           abs_pos = start + pos
 
-          find_all_overlapping(line, pattern, pat_len, line_num, abs_pos + 1, [
-            Match.new(line_num, abs_pos, pat_len) | acc
+          find_all_overlapping(line, matcher, line_num, abs_pos + 1, [
+            Match.new(line_num, abs_pos, match_len) | acc
           ])
       end
     end
@@ -176,13 +235,15 @@ defmodule Minga.Editing.Search do
       iex> Minga.Editing.Search.substitute("hello world", "xyz", "abc", true)
       {"hello world", 0}
   """
-  @spec substitute(String.t(), String.t(), String.t(), boolean()) :: substitute_result()
-  def substitute(content, pattern, replacement, global?) do
+  @spec substitute(String.t(), String.t(), String.t(), boolean(), search_opts()) ::
+          substitute_result()
+  def substitute(content, pattern, replacement, global?, opts \\ []) do
+    matcher = compile_matcher(pattern, opts)
     lines = :binary.split(content, "\n", [:global])
 
     {new_lines, total_count} =
       Enum.map_reduce(lines, 0, fn line, count ->
-        {new_line, line_count} = substitute_line(line, pattern, replacement, global?)
+        {new_line, line_count} = substitute_line(line, matcher, replacement, global?)
         {new_line, count + line_count}
       end)
 
@@ -197,17 +258,17 @@ defmodule Minga.Editing.Search do
 
   Returns `{new_line, replacement_count}`.
   """
-  @spec substitute_line(String.t(), String.t(), String.t(), boolean()) ::
+  @spec substitute_line(String.t(), matcher(), String.t(), boolean()) ::
           {String.t(), non_neg_integer()}
-  def substitute_line(line, pattern, replacement, global?) do
+  def substitute_line(line, matcher, replacement, global?) do
     case global? do
       true ->
-        matches = :binary.matches(line, pattern)
-        do_substitute_all(line, matches, byte_size(pattern), replacement, 0, 0, [])
+        matches = matches_in(line, matcher)
+        do_substitute_all(line, matches, replacement, 0, 0, [])
 
       false ->
-        case :binary.match(line, pattern) do
-          :nomatch ->
+        case match_in(line, matcher) do
+          nil ->
             {line, 0}
 
           {pos, len} ->
@@ -221,20 +282,19 @@ defmodule Minga.Editing.Search do
   @spec do_substitute_all(
           String.t(),
           [{non_neg_integer(), non_neg_integer()}],
-          non_neg_integer(),
           String.t(),
           non_neg_integer(),
           non_neg_integer(),
           iolist()
         ) :: {String.t(), non_neg_integer()}
-  defp do_substitute_all(line, [], _pat_len, _rep, prev_end, count, acc) do
+  defp do_substitute_all(line, [], _rep, prev_end, count, acc) do
     final = [binary_part(line, prev_end, byte_size(line) - prev_end) | acc]
     {final |> Enum.reverse() |> IO.iodata_to_binary(), count}
   end
 
-  defp do_substitute_all(line, [{pos, len} | rest], pat_len, rep, prev_end, count, acc) do
+  defp do_substitute_all(line, [{pos, len} | rest], rep, prev_end, count, acc) do
     before = binary_part(line, prev_end, pos - prev_end)
-    do_substitute_all(line, rest, pat_len, rep, pos + len, count + 1, [rep, before | acc])
+    do_substitute_all(line, rest, rep, pos + len, count + 1, [rep, before | acc])
   end
 
   @typedoc "A replacement span: `{byte_col, byte_length}` in the substituted line."
@@ -251,14 +311,15 @@ defmodule Minga.Editing.Search do
       iex> Minga.Editing.Search.substitute_line_with_spans("foo bar foo", "foo", "hello", true)
       {"hello bar hello", 2, [{0, 5}, {10, 5}]}
   """
-  @spec substitute_line_with_spans(String.t(), String.t(), String.t(), boolean()) ::
+  @spec substitute_line_with_spans(String.t(), String.t(), String.t(), boolean(), search_opts()) ::
           {String.t(), non_neg_integer(), [replacement_span()]}
-  def substitute_line_with_spans(line, pattern, replacement, global?) do
+  def substitute_line_with_spans(line, pattern, replacement, global?, opts \\ []) do
+    matcher = compile_matcher(pattern, opts)
     rep_len = byte_size(replacement)
 
     case global? do
       true ->
-        matches = :binary.matches(line, pattern)
+        matches = matches_in(line, matcher)
 
         sub_acc = %{
           rep: replacement,
@@ -272,8 +333,8 @@ defmodule Minga.Editing.Search do
         do_sub_spans_all(line, matches, sub_acc)
 
       false ->
-        case :binary.match(line, pattern) do
-          :nomatch ->
+        case match_in(line, matcher) do
+          nil ->
             {line, 0, []}
 
           {pos, len} ->
@@ -321,80 +382,77 @@ defmodule Minga.Editing.Search do
 
   # ── Private helpers ────────────────────────────────────────────────────────
 
-  @spec find_forward([String.t()], String.t(), position(), non_neg_integer()) ::
+  @spec find_forward([String.t()], matcher(), position(), non_neg_integer()) ::
           position() | nil
-  defp find_forward(lines, pattern, {cur_line, cur_col}, total) do
-    # Search from cursor position to end, then wrap from start to cursor
-    case search_from(lines, pattern, cur_line, cur_col + 1, total) do
-      nil -> search_from(lines, pattern, 0, 0, min(cur_line + 1, total))
+  defp find_forward(lines, matcher, {cur_line, cur_col}, total) do
+    case search_from(lines, matcher, cur_line, cur_col + 1, total) do
+      nil -> search_from(lines, matcher, 0, 0, min(cur_line + 1, total))
       pos -> pos
     end
   end
 
-  @spec find_backward([String.t()], String.t(), position(), non_neg_integer()) ::
+  @spec find_backward([String.t()], matcher(), position(), non_neg_integer()) ::
           position() | nil
-  defp find_backward(lines, pattern, {cur_line, cur_col}, total) do
-    case search_backward_from(lines, pattern, cur_line, cur_col - 1) do
-      nil -> search_backward_from(lines, pattern, total - 1, :end)
+  defp find_backward(lines, matcher, {cur_line, cur_col}, total) do
+    case search_backward_from(lines, matcher, cur_line, cur_col - 1) do
+      nil -> search_backward_from(lines, matcher, total - 1, :end)
       pos -> pos
     end
   end
 
   @spec search_from(
           [String.t()],
-          String.t(),
+          matcher(),
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer()
         ) :: position() | nil
-  defp search_from(_lines, _pattern, line, _col, total) when line >= total, do: nil
+  defp search_from(_lines, _matcher, line, _col, total) when line >= total, do: nil
 
-  defp search_from(lines, pattern, line, col, total) do
+  defp search_from(lines, matcher, line, col, total) do
     line_text = Enum.at(lines, line)
     start_byte = max(col, 0)
 
     if start_byte >= byte_size(line_text) do
-      search_from(lines, pattern, line + 1, 0, total)
+      search_from(lines, matcher, line + 1, 0, total)
     else
       searchable = binary_part(line_text, start_byte, byte_size(line_text) - start_byte)
 
-      case :binary.match(searchable, pattern) do
+      case match_in(searchable, matcher) do
         {pos, _len} -> {line, start_byte + pos}
-        :nomatch -> search_from(lines, pattern, line + 1, 0, total)
+        nil -> search_from(lines, matcher, line + 1, 0, total)
       end
     end
   end
 
   @spec search_backward_from(
           [String.t()],
-          String.t(),
+          matcher(),
           non_neg_integer(),
           non_neg_integer() | :end
         ) :: position() | nil
-  defp search_backward_from(_lines, _pattern, line, _col) when line < 0, do: nil
+  defp search_backward_from(_lines, _matcher, line, _col) when line < 0, do: nil
 
-  defp search_backward_from(lines, pattern, line, max_col) do
+  defp search_backward_from(lines, matcher, line, max_col) do
     line_text = Enum.at(lines, line)
+
+    all_matches = matches_in(line_text, matcher)
 
     upper =
       case max_col do
         :end -> byte_size(line_text)
-        n -> min(n + byte_size(pattern), byte_size(line_text))
+        n -> n
       end
 
-    if upper <= 0 do
-      search_backward_from(lines, pattern, line - 1, :end)
-    else
-      searchable = binary_part(line_text, 0, upper)
+    valid = Enum.filter(all_matches, fn {pos, _len} -> pos < upper end)
 
-      case :binary.matches(searchable, pattern) do
-        [] ->
-          search_backward_from(lines, pattern, line - 1, :end)
+    case valid do
+      [] ->
+        search_backward_from(lines, matcher, line - 1, :end)
 
-        matches ->
-          {last_pos, _len} = List.last(matches)
-          {line, last_pos}
-      end
+      matches ->
+        {last_pos, _len} = List.last(matches)
+        {line, last_pos}
     end
   end
 

@@ -160,7 +160,8 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       &build_gui_change_summary_cmd/2,
       &build_gui_edit_timeline_cmd/2,
       &build_gui_extension_overlay_cmd/2,
-      &build_gui_extension_panel_cmd/2
+      &build_gui_extension_panel_cmd/2,
+      &build_gui_search_state_cmd/2
     ]
 
     {cmds, caches} =
@@ -1965,6 +1966,84 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     else
       {nil, caches}
     end
+  end
+
+  # ── Search state ──
+
+  @spec build_gui_search_state_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
+  defp build_gui_search_state_cmd(ctx, caches) do
+    search = ctx.search
+
+    case search.gui_search do
+      %{} = gs ->
+        search_opts = [
+          case_sensitive: Map.get(gs, :case_sensitive, true),
+          whole_word: Map.get(gs, :whole_word, false),
+          regex: Map.get(gs, :regex, false)
+        ]
+
+        {match_count, current_index} = compute_search_stats(ctx, search.last_pattern, search_opts)
+
+        fp = :erlang.phash2({true, match_count, current_index, gs})
+
+        if fp != caches.last_gui_search_state_fp do
+          cmd = ProtocolGUI.encode_gui_search_state(true, match_count, current_index, gs)
+          {cmd, %{caches | last_gui_search_state_fp: fp}}
+        else
+          {nil, caches}
+        end
+
+      _ ->
+        if caches.last_gui_search_state_fp != nil do
+          cmd = ProtocolGUI.encode_gui_search_state(false, 0, 0, %{})
+          {cmd, %{caches | last_gui_search_state_fp: nil}}
+        else
+          {nil, caches}
+        end
+    end
+  end
+
+  @spec compute_search_stats(ctx(), String.t() | nil, Minga.Editing.Search.search_opts()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp compute_search_stats(_ctx, nil, _opts), do: {0, 0}
+  defp compute_search_stats(_ctx, "", _opts), do: {0, 0}
+
+  defp compute_search_stats(ctx, pattern, opts) do
+    buf = ctx.buffers.active
+
+    if is_pid(buf) do
+      content = Minga.Buffer.content(buf)
+      lines = :binary.split(content, "\n", [:global])
+      all_matches = Minga.Editing.Search.find_all_in_range(lines, pattern, 0, opts)
+      match_count = length(all_matches)
+
+      if match_count > 0 do
+        cursor = Minga.Buffer.cursor(buf)
+        current_index = find_current_match_index(all_matches, cursor)
+        {match_count, current_index}
+      else
+        {0, 0}
+      end
+    else
+      {0, 0}
+    end
+  rescue
+    _ -> {0, 0}
+  catch
+    :exit, _ -> {0, 0}
+  end
+
+  @spec find_current_match_index(
+          [Minga.Editing.Search.Match.t()],
+          {non_neg_integer(), non_neg_integer()}
+        ) :: non_neg_integer()
+  defp find_current_match_index(matches, {cursor_line, cursor_col}) do
+    idx =
+      Enum.find_index(matches, fn %{line: line, col: col} ->
+        line > cursor_line or (line == cursor_line and col >= cursor_col)
+      end)
+
+    (idx || 0) + 1
   end
 
   # ── Indent guides ──

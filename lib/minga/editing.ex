@@ -201,14 +201,25 @@ defmodule Minga.Editing do
   # ── Search ─────────────────────────────────────────────────────────────
 
   @doc "Find the next match for a pattern starting from a position."
-  defdelegate search_next(readable, pattern, pos, direction),
-    to: Minga.Editing.Search,
-    as: :find_next
+  @spec search_next(
+          String.t(),
+          String.t(),
+          Minga.Editing.Search.position(),
+          Minga.Editing.Search.direction(),
+          Minga.Editing.Search.search_opts()
+        ) :: Minga.Editing.Search.position() | nil
+  def search_next(readable, pattern, pos, direction, opts \\ []),
+    do: Minga.Editing.Search.find_next(readable, pattern, pos, direction, opts)
 
   @doc "Find all matches for a pattern within a line range."
-  defdelegate search_all_in_range(readable, pattern, range),
-    to: Minga.Editing.Search,
-    as: :find_all_in_range
+  @spec search_all_in_range(
+          [String.t()],
+          String.t(),
+          non_neg_integer(),
+          Minga.Editing.Search.search_opts()
+        ) :: [Minga.Editing.Search.match()]
+  def search_all_in_range(readable, pattern, range, opts \\ []),
+    do: Minga.Editing.Search.find_all_in_range(readable, pattern, range, opts)
 
   @doc "Returns the word under the cursor, or nil."
   defdelegate word_under_cursor(readable, pos),
@@ -216,13 +227,27 @@ defmodule Minga.Editing do
     as: :word_at_cursor
 
   @doc "Substitute matches in a single line, returning styled spans for preview."
-  defdelegate substitute_line_preview(readable, pattern, replacement, line),
-    to: Minga.Editing.Search,
-    as: :substitute_line_with_spans
+  @spec substitute_line_preview(
+          String.t(),
+          String.t(),
+          String.t(),
+          boolean(),
+          Minga.Editing.Search.search_opts()
+        ) :: {String.t(), non_neg_integer(), [Minga.Editing.Search.replacement_span()]}
+  def substitute_line_preview(readable, pattern, replacement, line, opts \\ []),
+    do:
+      Minga.Editing.Search.substitute_line_with_spans(readable, pattern, replacement, line, opts)
 
   @doc "Substitute all matches in buffer content."
-  defdelegate substitute(content, pattern, replacement, global?),
-    to: Minga.Editing.Search
+  @spec substitute(
+          String.t(),
+          String.t(),
+          String.t(),
+          boolean(),
+          Minga.Editing.Search.search_opts()
+        ) :: Minga.Editing.Search.substitute_result()
+  def substitute(content, pattern, replacement, global?, opts \\ []),
+    do: Minga.Editing.Search.substitute(content, pattern, replacement, global?, opts)
 
   # ── Scroll state ───────────────────────────────────────────────────────
 

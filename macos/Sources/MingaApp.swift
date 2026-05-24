@@ -85,8 +85,12 @@ struct MingaMenuCommands: Commands {
 
             Divider()
 
-            Button("Find…") { encoder?.sendKeyPress(codepoint: 0x2F, modifiers: 0) }
+            Button("Find…") { encoder?.sendSearchQuery(query: "", flags: 0) }
                 .keyboardShortcut("f", modifiers: .command)
+                .disabled(!connected)
+
+            Button("Find and Replace…") { encoder?.sendSearchQuery(query: "", flags: 0x01) }
+                .keyboardShortcut("h", modifiers: .command)
                 .disabled(!connected)
         }
 
@@ -594,6 +598,22 @@ struct ContentView: View {
                     state: appState.gui.breadcrumbState,
                     theme: appState.gui.themeColors,
                     encoder: appState.encoder
+                )
+            }
+
+            // Search toolbar (appears below breadcrumb bar when active)
+            if appState.gui.searchState.visible {
+                SearchToolbar(
+                    searchState: appState.gui.searchState,
+                    theme: appState.gui.themeColors,
+                    encoder: appState.encoder
+                )
+                .transition(
+                    NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                        ? .opacity.animation(.easeInOut(duration: 0.1))
+                        : .move(edge: .top)
+                            .combined(with: .opacity)
+                            .animation(.easeInOut(duration: 0.15))
                 )
             }
 

@@ -132,6 +132,14 @@ protocol InputEncoder: AnyObject, Sendable {
 
     // Edit timeline actions
     func sendTimelineNavigate(index: UInt16)
+
+    // Search toolbar actions
+    func sendSearchQuery(query: String, flags: UInt8)
+    func sendSearchNext()
+    func sendSearchPrev()
+    func sendSearchReplace(replacement: String)
+    func sendSearchReplaceAll(replacement: String)
+    func sendSearchDismiss()
 }
 
 extension InputEncoder {
@@ -160,6 +168,14 @@ extension InputEncoder {
 
     /// Default no-op so existing test spies do not need to implement timeline actions.
     func sendTimelineNavigate(index: UInt16) {}
+
+    /// Default no-op so existing test spies do not need to implement search actions.
+    func sendSearchQuery(query: String, flags: UInt8) {}
+    func sendSearchNext() {}
+    func sendSearchPrev() {}
+    func sendSearchReplace(replacement: String) {}
+    func sendSearchReplaceAll(replacement: String) {}
+    func sendSearchDismiss() {}
 }
 
 /// Thread-safe encoder that writes `{:packet, 4}` framed events to stdout.
@@ -1100,6 +1116,75 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_TIMELINE_NAVIGATE
         writeU16(&buf, 2, index)
+        writeFrame(buf)
+    }
+
+    // MARK: - Search Toolbar Actions
+
+    /// Send a gui_action: search_query. Layout: opcode(1) + action_type(1) + query_len(2) + query + flags(1).
+    func sendSearchQuery(query: String, flags: UInt8) {
+        let utf8 = Array(query.utf8)
+        let queryLen = min(utf8.count, Int(UInt16.max))
+        var buf = Data(count: 4 + queryLen + 1)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_SEARCH_QUERY
+        writeU16(&buf, 2, UInt16(queryLen))
+        if queryLen > 0 {
+            buf.replaceSubrange(4..<(4 + queryLen), with: utf8[0..<queryLen])
+        }
+        buf[4 + queryLen] = flags
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: search_next. Layout: opcode(1) + action_type(1).
+    func sendSearchNext() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_SEARCH_NEXT
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: search_prev. Layout: opcode(1) + action_type(1).
+    func sendSearchPrev() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_SEARCH_PREV
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: search_replace. Layout: opcode(1) + action_type(1) + replacement_len(2) + replacement.
+    func sendSearchReplace(replacement: String) {
+        let utf8 = Array(replacement.utf8)
+        let repLen = min(utf8.count, Int(UInt16.max))
+        var buf = Data(count: 4 + repLen)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_SEARCH_REPLACE
+        writeU16(&buf, 2, UInt16(repLen))
+        if repLen > 0 {
+            buf.replaceSubrange(4..<(4 + repLen), with: utf8[0..<repLen])
+        }
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: search_replace_all. Layout: opcode(1) + action_type(1) + replacement_len(2) + replacement.
+    func sendSearchReplaceAll(replacement: String) {
+        let utf8 = Array(replacement.utf8)
+        let repLen = min(utf8.count, Int(UInt16.max))
+        var buf = Data(count: 4 + repLen)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_SEARCH_REPLACE_ALL
+        writeU16(&buf, 2, UInt16(repLen))
+        if repLen > 0 {
+            buf.replaceSubrange(4..<(4 + repLen), with: utf8[0..<repLen])
+        }
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: search_dismiss. Layout: opcode(1) + action_type(1).
+    func sendSearchDismiss() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_SEARCH_DISMISS
         writeFrame(buf)
     }
 
