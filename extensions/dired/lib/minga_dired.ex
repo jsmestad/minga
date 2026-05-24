@@ -1,4 +1,4 @@
-defmodule Minga.Extensions.Dired do
+defmodule MingaDired do
   @moduledoc """
   Bundled UI extension for Oil.nvim-style directory editing.
 
@@ -9,9 +9,9 @@ defmodule Minga.Extensions.Dired do
 
   use Minga.Extension
 
-  alias Minga.Extensions.Dired.Commands
-  alias Minga.Extensions.Dired.Input
-  alias Minga.Extensions.Dired.KeymapScope
+  alias MingaDired.Commands
+  alias MingaDired.Input
+  alias MingaDired.KeymapScope
 
   keybind(:normal, "SPC f d", :dired_open, "Open directory (Dired)")
 

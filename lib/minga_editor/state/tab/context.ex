@@ -216,7 +216,7 @@ defmodule MingaEditor.State.Tab.Context do
   defp valid_field?(:buffers, %Buffers{}), do: true
   defp valid_field?(:windows, %Windows{}), do: true
   defp valid_field?(:file_tree, %FileTreeState{}), do: true
-  defp valid_field?(:feature_state, value) when is_map(value), do: true
+  defp valid_field?(:feature_state, value) when is_map(value) and not is_struct(value), do: true
   defp valid_field?(:viewport, %Viewport{}), do: true
   defp valid_field?(:mouse, %Mouse{}), do: true
   defp valid_field?(:lsp_pending, value) when is_map(value), do: true

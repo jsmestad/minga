@@ -1,4 +1,4 @@
-defmodule Minga.Extensions.Dired.Commands do
+defmodule MingaDired.Commands do
   @moduledoc """
   Commands for Oil.nvim-style directory buffers.
 
@@ -11,10 +11,10 @@ defmodule Minga.Extensions.Dired.Commands do
   use MingaEditor.Commands.Provider
 
   alias Minga.Buffer
-  alias Minga.Extensions.Dired.Core, as: Dired
+  alias MingaDired.Core, as: Dired
   alias MingaEditor.Commands
   alias MingaEditor.State, as: EditorState
-  alias Minga.Extensions.Dired.State, as: DiredState
+  alias MingaDired.State, as: DiredState
 
   @type state :: EditorState.t()
 
@@ -71,7 +71,7 @@ defmodule Minga.Extensions.Dired.Commands do
         end
 
       _ ->
-        state
+        EditorState.set_status(state, "No active Dired buffer")
     end
   end
 
@@ -130,7 +130,7 @@ defmodule Minga.Extensions.Dired.Commands do
         maybe_enter_confirmation(state, ops)
 
       _ ->
-        state
+        EditorState.set_status(state, "No active Dired buffer")
     end
   end
 
@@ -145,7 +145,7 @@ defmodule Minga.Extensions.Dired.Commands do
         report_apply_result(state, successes, errors)
 
       _ ->
-        state
+        EditorState.set_status(state, "No active Dired buffer")
     end
   end
 
@@ -287,7 +287,7 @@ defmodule Minga.Extensions.Dired.Commands do
         end
 
       _ ->
-        state
+        EditorState.set_status(state, "No active Dired buffer")
     end
   end
 

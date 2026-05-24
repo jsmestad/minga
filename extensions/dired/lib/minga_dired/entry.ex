@@ -1,8 +1,8 @@
-defmodule Minga.Extensions.Dired.Entry do
+defmodule MingaDired.Entry do
   @moduledoc """
   A single directory entry with filesystem metadata.
 
-  Used by `Minga.Extensions.Dired.Core` to represent files, directories, and symlinks.
+  Used by `MingaDired.Core` to represent files, directories, and symlinks.
   """
 
   @enforce_keys [:path, :name]

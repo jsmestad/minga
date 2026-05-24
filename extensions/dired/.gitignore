@@ -1,0 +1,6 @@
+/_build/
+/deps/
+/mix.lock
+/tmp/
+*.beam
+*.ez

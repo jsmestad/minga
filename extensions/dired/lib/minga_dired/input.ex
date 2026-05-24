@@ -1,4 +1,4 @@
-defmodule Minga.Extensions.Dired.Input do
+defmodule MingaDired.Input do
   @moduledoc """
   Input handler for Oil.nvim-style directory buffers.
 
@@ -17,7 +17,7 @@ defmodule Minga.Extensions.Dired.Input do
 
   alias MingaEditor.Commands
   alias MingaEditor.State, as: EditorState
-  alias Minga.Extensions.Dired.State, as: DiredState
+  alias MingaDired.State, as: DiredState
   alias Minga.Keymap
   alias Minga.Keymap.Scope
 
@@ -26,7 +26,7 @@ defmodule Minga.Extensions.Dired.Input do
           MingaEditor.Input.Handler.result()
 
   def handle_key(%{workspace: %{keymap_scope: :dired}} = state, cp, mods) do
-    dired_state = Map.get(state.workspace.feature_state, :dired)
+    dired_state = EditorState.get_feature_state(state, :dired)
 
     case dired_confirming?(dired_state) do
       true ->
@@ -129,7 +129,7 @@ defmodule Minga.Extensions.Dired.Input do
 
   @spec pending_prefix(state()) :: Minga.Keymap.Bindings.node_t() | nil
   defp pending_prefix(state) do
-    case Map.get(state.workspace.feature_state, :dired) do
+    case EditorState.get_feature_state(state, :dired) do
       %DiredState{pending_prefix: prefix} -> prefix
       _ -> nil
     end

@@ -316,7 +316,7 @@ defmodule MingaEditor.State do
 
   @doc "Updates a feature-state entry in the active workspace."
   @spec update_feature_state(t(), atom(), term(), (term() -> term())) :: t()
-  def update_feature_state(%__MODULE__{} = state, key, default, fun) when is_atom(key) do
+  def update_feature_state(%__MODULE__{} = state, key, default, fun) when is_atom(key) and is_function(fun, 1) do
     update_workspace(state, &SessionState.update_feature_state(&1, key, default, fun))
   end
 

@@ -1,8 +1,8 @@
-defmodule Minga.Extensions.Dired.KeymapScopeTest do
+defmodule MingaDired.KeymapScopeTest do
   use ExUnit.Case, async: true
 
   alias Minga.Keymap.Scope
-  alias Minga.Extensions.Dired.KeymapScope
+  alias MingaDired.KeymapScope
 
   @enter 13
   @escape 27
@@ -98,7 +98,7 @@ defmodule Minga.Extensions.Dired.KeymapScopeTest do
     end
 
     test "module_for returns Dired module" do
-      assert Scope.module_for(:dired) == Minga.Extensions.Dired.KeymapScope
+      assert Scope.module_for(:dired) == MingaDired.KeymapScope
     end
   end
 end

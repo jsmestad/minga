@@ -1,4 +1,4 @@
-defmodule Minga.Extensions.Dired.State do
+defmodule MingaDired.State do
   @moduledoc """
   Dired sub-state: directory listing data, backing buffer, and original entries snapshot.
 
@@ -7,7 +7,7 @@ defmodule Minga.Extensions.Dired.State do
   was last populated, used as the baseline for diffing on save.
   """
 
-  alias Minga.Extensions.Dired.Core, as: Dired
+  alias MingaDired.Core, as: Dired
 
   @type t :: %__MODULE__{
           active?: boolean(),

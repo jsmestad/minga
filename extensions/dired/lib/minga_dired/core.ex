@@ -1,4 +1,4 @@
-defmodule Minga.Extensions.Dired.Core do
+defmodule MingaDired.Core do
   @moduledoc """
   Pure data structure and functions for Oil.nvim-style directory buffers.
 
@@ -9,8 +9,8 @@ defmodule Minga.Extensions.Dired.Core do
   Layer 0: pure functions, no process dependencies.
   """
 
-  alias Minga.Extensions.Dired.Core
-  alias Minga.Extensions.Dired.Entry
+  alias MingaDired.Core
+  alias MingaDired.Entry
 
   @type sort_key :: :name | :size | :date | :extension
 

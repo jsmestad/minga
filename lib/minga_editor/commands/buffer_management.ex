@@ -234,9 +234,10 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   def execute(state, {:execute_ex_command, {:dired, path}}) when is_binary(path) do
-    state = EditorState.set_feature_state(state, :dired_requested_path, path)
-    state = Commands.execute(state, :dired_open)
-    EditorState.set_feature_state(state, :dired_requested_path, nil)
+    state
+    |> EditorState.set_feature_state(:dired_requested_path, path)
+    |> Commands.execute(:dired_open)
+    |> EditorState.set_feature_state(:dired_requested_path, nil)
   end
 
   def execute(state, {:execute_ex_command, {:edit, file_path}}) do
