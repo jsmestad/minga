@@ -24,7 +24,10 @@ final class GUIState {
     /// Workspace header and active-workspace file tab state.
     let workspaceState = WorkspaceState()
 
-    /// File tree sidebar state.
+    /// Native sidebar host state.
+    let sidebarHostState = SidebarHostState()
+
+    /// Rich sidebar payload state.
     let fileTreeState = FileTreeState()
     let gitStatusState = GitStatusState()
     let observatoryState = ObservatoryState()

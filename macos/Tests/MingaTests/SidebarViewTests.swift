@@ -16,17 +16,21 @@ struct ActivityBarViewTests {
 
     @Test("Renders one icon per sidebar panel")
     @MainActor func rendersPanelIcons() throws {
-        let sut = ActivityBar(activePanel: .fileTree, gitStatusCount: 0, theme: ThemeColors(), encoder: nil)
+        let guiState = GUIState()
+        guiState.sidebarHostState.update(activeId: "file_tree", sidebars: sidebarMetadata())
+        let sut = ActivityBar(guiState: guiState, sidebarHostState: guiState.sidebarHostState, theme: ThemeColors(), encoder: nil)
         let body = try sut.inspect()
         let buttons = body.findAll(ViewType.Button.self)
 
-        #expect(buttons.count == ActivityBarPanel.allCases.count)
+        #expect(buttons.count == 3)
     }
 
-    @Test("Tap sends the matching panel toggle")
+    @Test("Tap sends semantic sidebar toggle actions")
     @MainActor func tapSendsPanelToggle() throws {
+        let guiState = GUIState()
+        guiState.sidebarHostState.update(activeId: "file_tree", sidebars: sidebarMetadata())
         let spy = SpyEncoder()
-        let sut = ActivityBar(activePanel: .fileTree, gitStatusCount: 0, theme: ThemeColors(), encoder: spy)
+        let sut = ActivityBar(guiState: guiState, sidebarHostState: guiState.sidebarHostState, theme: ThemeColors(), encoder: spy)
         let body = try sut.inspect()
         let buttons = body.findAll(ViewType.Button.self)
 
@@ -34,20 +38,34 @@ struct ActivityBarViewTests {
             try button.tap()
         }
 
-        #expect(spy.guiActions == [.togglePanel(panel: 0), .togglePanel(panel: 2), .togglePanel(panel: 4)])
+        #expect(spy.guiActions == [
+            .sidebarAction(sidebarId: "file_tree", kind: "file_tree", action: "toggle"),
+            .sidebarAction(sidebarId: "git_status", kind: "git_status", action: "toggle"),
+            .sidebarAction(sidebarId: "observatory", kind: "observatory", action: "toggle")
+        ])
     }
 
     @Test("Git badge shows changed file count and buttons keep accessibility labels")
     @MainActor func gitBadgeAndLabels() throws {
-        let sut = ActivityBar(activePanel: .gitStatus, gitStatusCount: 7, theme: ThemeColors(), encoder: nil)
+        let guiState = GUIState()
+        guiState.sidebarHostState.update(activeId: "git_status", sidebars: sidebarMetadata(gitBadgeCount: 7))
+        let sut = ActivityBar(guiState: guiState, sidebarHostState: guiState.sidebarHostState, theme: ThemeColors(), encoder: nil)
         let body = try sut.inspect()
         let buttons = body.findAll(ViewType.Button.self)
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
-        #expect(buttons.count == ActivityBarPanel.allCases.count)
-        #expect(try buttons[1].accessibilityLabel().string() == "Git status")
-        #expect(try buttons[0].accessibilityLabel().string() == "File tree")
+        #expect(buttons.count == 3)
+        #expect(try buttons[1].accessibilityLabel().string() == "Git Status")
+        #expect(try buttons[0].accessibilityLabel().string() == "File Tree")
         #expect(strings.contains("7"))
+    }
+
+    private func sidebarMetadata(gitBadgeCount: UInt16? = nil) -> [Wire.SidebarMetadata] {
+        [
+            Wire.SidebarMetadata(id: "file_tree", displayName: "File Tree", semanticKind: "file_tree", icon: "folder", order: 10, visible: false, focused: false, preferredWidth: 30, badgeCount: nil),
+            Wire.SidebarMetadata(id: "git_status", displayName: "Git Status", semanticKind: "git_status", icon: "point.3.filled.connected.trianglepath.dotted", order: 20, visible: false, focused: false, preferredWidth: 30, badgeCount: gitBadgeCount),
+            Wire.SidebarMetadata(id: "observatory", displayName: "BEAM Observatory", semanticKind: "observatory", icon: "network", order: 30, visible: false, focused: false, preferredWidth: 30, badgeCount: nil)
+        ]
     }
 }
 

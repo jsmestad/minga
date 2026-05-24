@@ -45,6 +45,7 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendCompletionSelect(index: UInt16)
     func sendBreadcrumbClick(index: UInt8)
     func sendTogglePanel(panel: UInt8)
+    func sendSidebarAction(sidebarId: String, kind: String, action: String)
     func sendNewTab()
     func sendSystemWillSleep()
     func sendSystemDidWake()
@@ -159,6 +160,9 @@ extension InputEncoder {
 
     /// Default no-op so existing test spies do not need to implement notification actions.
     func sendNotificationAction(id: String, actionId: String) {}
+
+    /// Default no-op so existing test spies do not need to implement sidebar host actions.
+    func sendSidebarAction(sidebarId: String, kind: String, action: String) {}
 
     /// Default no-op so existing test spies do not need to implement power and thermal actions.
     func sendPowerThermalState(lowPowerMode: Bool, thermalState: UInt8) {}
@@ -590,6 +594,15 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_TOGGLE_PANEL
         buf[2] = panel
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: sidebar_action. Layout: opcode(1) + action_type(1) + id + kind + action.
+    func sendSidebarAction(sidebarId: String, kind: String, action: String) {
+        var buf = Data([OP_GUI_ACTION, GUI_ACTION_SIDEBAR_ACTION])
+        appendString16(&buf, sidebarId)
+        appendString16(&buf, kind)
+        appendString16(&buf, action)
         writeFrame(buf)
     }
 

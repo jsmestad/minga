@@ -216,6 +216,7 @@ enum RenderCommand: Sendable {
     case guiExtensionOverlay([Wire.ExtensionOverlayEntry])
     case guiExtensionPanel([Wire.ExtensionPanelEntry])
     case guiSearchState(active: Bool, matchCount: UInt16, currentIndex: UInt16, flags: UInt8)
+    case guiSidebars(version: UInt8, activeId: String, sidebars: [Wire.SidebarMetadata])
 }
 
 // MARK: - Decoder
@@ -2660,6 +2661,48 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let ssCurrentIndex = readU16(data, ssStart + 3)
         let ssFlags = data[ssStart + 5]
         return (.guiSearchState(active: ssActive, matchCount: ssMatchCount, currentIndex: ssCurrentIndex, flags: ssFlags), 1 + 2 + ssPayloadLen)
+
+    case OP_GUI_SIDEBARS:
+        guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
+        let payloadLen = Int(readU32(data, rest))
+        let payloadStart = rest + 4
+        let payloadEnd = payloadStart + payloadLen
+        guard data.count >= payloadEnd, payloadLen >= 5 else { throw ProtocolDecodeError.malformed }
+
+        var pos = payloadStart
+        let version = data[pos]; pos += 1
+        let count = Int(readU16(data, pos)); pos += 2
+        let activeId = try readString16(data: data, pos: &pos, end: payloadEnd)
+        var sidebars: [Wire.SidebarMetadata] = []
+        sidebars.reserveCapacity(count)
+
+        for _ in 0..<count {
+            let id = try readString16(data: data, pos: &pos, end: payloadEnd)
+            let displayName = try readString16(data: data, pos: &pos, end: payloadEnd)
+            let semanticKind = try readString16(data: data, pos: &pos, end: payloadEnd)
+            let icon = try readString16(data: data, pos: &pos, end: payloadEnd)
+            guard pos + 7 <= payloadEnd else { throw ProtocolDecodeError.malformed }
+            let order = readU16(data, pos); pos += 2
+            let flags = data[pos]; pos += 1
+            let preferredWidth = readU16(data, pos); pos += 2
+            let rawBadgeCount = readU16(data, pos); pos += 2
+            let badgeCount: UInt16? = rawBadgeCount == UInt16.max ? nil : rawBadgeCount
+
+            sidebars.append(Wire.SidebarMetadata(
+                id: id,
+                displayName: displayName,
+                semanticKind: semanticKind,
+                icon: icon,
+                order: order,
+                visible: flags & 0x01 != 0,
+                focused: flags & 0x02 != 0,
+                preferredWidth: preferredWidth,
+                badgeCount: badgeCount
+            ))
+        }
+
+        guard pos == payloadEnd else { throw ProtocolDecodeError.malformed }
+        return (.guiSidebars(version: version, activeId: activeId, sidebars: sidebars), 5 + payloadLen)
 
     case OP_CLIPBOARD_WRITE:
         // Forward-compatible format: opcode(1) + payload_length(2) + target(1) + text_len(2) + text
