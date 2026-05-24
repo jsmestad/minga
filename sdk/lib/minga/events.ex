@@ -20,6 +20,7 @@ defmodule Minga.Events do
           | :agent_session_stopped
           | :agent_hook
           | :file_written
+          | :ghost_cursor_removed
 
   @spec subscribe(topic()) :: :ok
   def subscribe(_topic), do: raise("minga_sdk is compile-time only")

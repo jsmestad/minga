@@ -11,7 +11,7 @@ defmodule MingaGhostCursors.Commands do
 
   @spec follow(MingaEditor.Extension.EditorAPI.state()) :: MingaEditor.Extension.EditorAPI.state()
   def follow(state) do
-    case find_most_recent_agent_overlay() do
+    case find_active_agent_overlay() do
       {:ok, path, {line, col}} ->
         EditorAPI.navigate_to(state, path, line, col)
 
@@ -20,24 +20,33 @@ defmodule MingaGhostCursors.Commands do
     end
   end
 
-  @spec find_most_recent_agent_overlay() :: {:ok, String.t(), {non_neg_integer(), non_neg_integer()}} | :none
-  defp find_most_recent_agent_overlay do
-    overlays =
-      Overlay.all()
-      |> Enum.filter(fn overlay -> overlay.extension == @extension_name end)
-
-    case overlays do
-      [] ->
+  @spec find_active_agent_overlay() :: {:ok, String.t(), {non_neg_integer(), non_neg_integer()}} | :none
+  defp find_active_agent_overlay do
+    case MingaGhostCursors.Tracker.last_updated() do
+      nil ->
         :none
 
-      entries ->
-        overlay = List.last(entries)
-        {buffer_pid, _session_pid} = overlay.overlay_id
-
-        case safe_file_path(buffer_pid) do
-          path when is_binary(path) -> {:ok, path, overlay.position}
+      {buffer_pid, _session_pid} = overlay_key ->
+        case find_overlay(overlay_key) do
           nil -> :none
+          overlay -> resolve_path(buffer_pid, overlay)
         end
+    end
+  end
+
+  @spec find_overlay(MingaGhostCursors.Tracker.overlay_key()) :: Minga.Extension.Overlay.entry() | nil
+  defp find_overlay(overlay_key) do
+    Overlay.all()
+    |> Enum.find(fn overlay ->
+      overlay.extension == @extension_name and overlay.overlay_id == overlay_key
+    end)
+  end
+
+  @spec resolve_path(pid(), Minga.Extension.Overlay.entry()) :: {:ok, String.t(), {non_neg_integer(), non_neg_integer()}} | :none
+  defp resolve_path(buffer_pid, overlay) do
+    case safe_file_path(buffer_pid) do
+      path when is_binary(path) -> {:ok, path, overlay.position}
+      nil -> :none
     end
   end
 

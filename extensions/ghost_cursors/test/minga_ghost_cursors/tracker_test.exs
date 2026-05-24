@@ -7,12 +7,18 @@ defmodule Minga.Extensions.GhostCursorsTrackerTest do
   alias MingaGhostCursors.Tracker
 
   setup do
+    table_name = :"overlay_#{System.unique_integer([:positive])}"
+    overlay = start_supervised!({Overlay, name: table_name}, id: table_name)
+
     tracker_name = :"tracker_#{System.unique_integer([:positive])}"
-    tracker = start_supervised!({Tracker, name: tracker_name}, id: tracker_name)
 
-    on_exit(fn -> Overlay.remove_all(:minga_ghost_cursors) end)
+    tracker =
+      start_supervised!(
+        {Tracker, name: tracker_name, overlay_table: table_name},
+        id: tracker_name
+      )
 
-    %{tracker: tracker}
+    %{tracker: tracker, overlay: overlay, table: table_name}
   end
 
   defp agent_edit_event(buffer_pid, session_pid, position) do
@@ -38,14 +44,14 @@ defmodule Minga.Extensions.GhostCursorsTrackerTest do
   end
 
   describe "buffer_changed events" do
-    test "registers overlay for agent-sourced edits", %{tracker: tracker} do
+    test "registers overlay for agent-sourced edits", %{tracker: tracker, table: table} do
       buffer_pid = spawn_waiting()
       session_pid = spawn_waiting()
 
       send(tracker, agent_edit_event(buffer_pid, session_pid, {5, 10}))
       wait_for_processing(tracker)
 
-      overlays = Overlay.all()
+      overlays = Overlay.all(table)
       assert length(overlays) == 1
 
       [overlay] = overlays
@@ -60,7 +66,7 @@ defmodule Minga.Extensions.GhostCursorsTrackerTest do
       Process.exit(session_pid, :kill)
     end
 
-    test "updates overlay position on subsequent edits", %{tracker: tracker} do
+    test "updates overlay position on subsequent edits", %{tracker: tracker, table: table} do
       buffer_pid = spawn_waiting()
       session_pid = spawn_waiting()
 
@@ -70,7 +76,7 @@ defmodule Minga.Extensions.GhostCursorsTrackerTest do
       send(tracker, agent_edit_event(buffer_pid, session_pid, {12, 3}))
       wait_for_processing(tracker)
 
-      overlays = Overlay.all()
+      overlays = Overlay.all(table)
       assert length(overlays) == 1
       assert hd(overlays).position == {12, 3}
 
@@ -78,7 +84,7 @@ defmodule Minga.Extensions.GhostCursorsTrackerTest do
       Process.exit(session_pid, :kill)
     end
 
-    test "ignores non-agent edits", %{tracker: tracker} do
+    test "ignores non-agent edits", %{tracker: tracker, table: table} do
       event =
         {:minga_event, :buffer_changed,
          %BufferChangedEvent{
@@ -91,10 +97,10 @@ defmodule Minga.Extensions.GhostCursorsTrackerTest do
       send(tracker, event)
       wait_for_processing(tracker)
 
-      assert Overlay.all() == []
+      assert Overlay.all(table) == []
     end
 
-    test "ignores agent edits without a delta", %{tracker: tracker} do
+    test "ignores agent edits without a delta", %{tracker: tracker, table: table} do
       session_pid = spawn_waiting()
 
       event =
@@ -109,12 +115,12 @@ defmodule Minga.Extensions.GhostCursorsTrackerTest do
       send(tracker, event)
       wait_for_processing(tracker)
 
-      assert Overlay.all() == []
+      assert Overlay.all(table) == []
 
       Process.exit(session_pid, :kill)
     end
 
-    test "tracks overlays per buffer per session", %{tracker: tracker} do
+    test "tracks overlays per buffer per session", %{tracker: tracker, table: table} do
       buf1 = spawn_waiting()
       buf2 = spawn_waiting()
       session = spawn_waiting()
@@ -123,16 +129,29 @@ defmodule Minga.Extensions.GhostCursorsTrackerTest do
       send(tracker, agent_edit_event(buf2, session, {2, 0}))
       wait_for_processing(tracker)
 
-      assert length(Overlay.all()) == 2
+      assert length(Overlay.all(table)) == 2
 
       Process.exit(buf1, :kill)
       Process.exit(buf2, :kill)
       Process.exit(session, :kill)
     end
+
+    test "tracks last_updated overlay key", %{tracker: tracker} do
+      buf = spawn_waiting()
+      session = spawn_waiting()
+
+      send(tracker, agent_edit_event(buf, session, {5, 10}))
+      wait_for_processing(tracker)
+
+      assert Tracker.last_updated(tracker) == {buf, session}
+
+      Process.exit(buf, :kill)
+      Process.exit(session, :kill)
+    end
   end
 
   describe "session cleanup" do
-    test "removes overlays when session PID exits", %{tracker: tracker} do
+    test "removes overlays when session PID exits", %{tracker: tracker, table: table} do
       buffer_pid = spawn_waiting()
       session_pid = spawn_waiting()
 
@@ -141,17 +160,17 @@ defmodule Minga.Extensions.GhostCursorsTrackerTest do
       send(tracker, agent_edit_event(buffer_pid, session_pid, {5, 10}))
       wait_for_processing(tracker)
 
-      assert length(Overlay.all()) == 1
+      assert length(Overlay.all(table)) == 1
 
       Process.exit(session_pid, :kill)
       assert_receive {:minga_event, :ghost_cursor_removed, %{session_pid: ^session_pid}}
 
-      assert Overlay.all() == []
+      assert Overlay.all(table) == []
 
       Process.exit(buffer_pid, :kill)
     end
 
-    test "removes overlays on agent_session_stopped event", %{tracker: tracker} do
+    test "removes overlays on agent_session_stopped event", %{tracker: tracker, table: table} do
       buffer_pid = spawn_waiting()
       session_pid = spawn_waiting()
 
@@ -163,13 +182,13 @@ defmodule Minga.Extensions.GhostCursorsTrackerTest do
       send(tracker, {:minga_event, :agent_session_stopped, %{pid: session_pid}})
       assert_receive {:minga_event, :ghost_cursor_removed, %{session_pid: ^session_pid}}
 
-      assert Overlay.all() == []
+      assert Overlay.all(table) == []
 
       Process.exit(buffer_pid, :kill)
       Process.exit(session_pid, :kill)
     end
 
-    test "only removes overlays for the stopped session", %{tracker: tracker} do
+    test "only removes overlays for the stopped session", %{tracker: tracker, table: table} do
       buf = spawn_waiting()
       session1 = spawn_waiting()
       session2 = spawn_waiting()
@@ -180,18 +199,61 @@ defmodule Minga.Extensions.GhostCursorsTrackerTest do
       send(tracker, agent_edit_event(buf, session2, {2, 0}))
       wait_for_processing(tracker)
 
-      assert length(Overlay.all()) == 2
+      assert length(Overlay.all(table)) == 2
 
       send(tracker, {:minga_event, :agent_session_stopped, %{pid: session1}})
       assert_receive {:minga_event, :ghost_cursor_removed, %{session_pid: ^session1}}
 
-      overlays = Overlay.all()
+      overlays = Overlay.all(table)
       assert length(overlays) == 1
       assert hd(overlays).overlay_id == {buf, session2}
 
       Process.exit(buf, :kill)
       Process.exit(session1, :kill)
       Process.exit(session2, :kill)
+    end
+
+    test "does not broadcast duplicate removal for same session", %{tracker: tracker, table: table} do
+      buffer_pid = spawn_waiting()
+      session_pid = spawn_waiting()
+
+      Minga.Events.subscribe(:ghost_cursor_removed)
+
+      send(tracker, agent_edit_event(buffer_pid, session_pid, {5, 10}))
+      wait_for_processing(tracker)
+
+      send(tracker, {:minga_event, :agent_session_stopped, %{pid: session_pid}})
+      assert_receive {:minga_event, :ghost_cursor_removed, %{session_pid: ^session_pid}}
+
+      send(tracker, {:minga_event, :agent_session_stopped, %{pid: session_pid}})
+      wait_for_processing(tracker)
+
+      refute_receive {:minga_event, :ghost_cursor_removed, _}
+
+      assert Overlay.all(table) == []
+
+      Process.exit(buffer_pid, :kill)
+      Process.exit(session_pid, :kill)
+    end
+
+    test "clears last_updated when session is cleaned up", %{tracker: tracker} do
+      buf = spawn_waiting()
+      session = spawn_waiting()
+
+      Minga.Events.subscribe(:ghost_cursor_removed)
+
+      send(tracker, agent_edit_event(buf, session, {5, 10}))
+      wait_for_processing(tracker)
+
+      assert Tracker.last_updated(tracker) == {buf, session}
+
+      send(tracker, {:minga_event, :agent_session_stopped, %{pid: session}})
+      assert_receive {:minga_event, :ghost_cursor_removed, %{session_pid: ^session}}
+
+      assert Tracker.last_updated(tracker) == nil
+
+      Process.exit(buf, :kill)
+      Process.exit(session, :kill)
     end
   end
 

@@ -309,6 +309,7 @@ defmodule Minga.Events do
           | :buffer_fork_conflict
           | :file_written
           | :extension_updates_available
+          | :ghost_cursor_removed
 
   @typedoc "Typed event payloads. Each topic has a specific struct."
   @type payload ::

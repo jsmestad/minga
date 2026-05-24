@@ -18,8 +18,13 @@ defmodule MingaGhostCursors.Tracker do
   @accent_color 0x7C3AED
   @cursor_opacity 102
 
+  @type overlay_key :: {buffer :: pid(), session :: pid()}
+
   @type state :: %{
-          monitored: %{optional(pid()) => reference()}
+          monitored: %{optional(pid()) => reference()},
+          labels: %{optional(pid()) => String.t()},
+          last_updated: overlay_key() | nil,
+          overlay_table: atom()
         }
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -28,12 +33,23 @@ defmodule MingaGhostCursors.Tracker do
     GenServer.start_link(__MODULE__, opts, name: name)
   end
 
+  @spec last_updated(GenServer.server()) :: overlay_key() | nil
+  def last_updated(server \\ __MODULE__) do
+    GenServer.call(server, :last_updated)
+  end
+
   @impl true
   @spec init(keyword()) :: {:ok, state()}
-  def init(_opts) do
+  def init(opts) do
     AgentAPI.subscribe_edits()
     AgentAPI.subscribe()
-    {:ok, %{monitored: %{}}}
+    table = Keyword.get(opts, :overlay_table, Overlay)
+    {:ok, %{monitored: %{}, labels: %{}, last_updated: nil, overlay_table: table}}
+  end
+
+  @impl true
+  def handle_call(:last_updated, _from, state) do
+    {:reply, state.last_updated, state}
   end
 
   @impl true
@@ -46,9 +62,10 @@ defmodule MingaGhostCursors.Tracker do
          }},
         state
       ) do
-    label = session_label(session_pid)
+    {label, state} = cached_label(state, session_pid)
+    overlay_key = {buffer_pid, session_pid}
 
-    Overlay.set(@extension_name, {buffer_pid, session_pid}, buffer_pid,
+    Overlay.set(state.overlay_table, @extension_name, overlay_key, buffer_pid,
       position: delta.new_end_position,
       content: label,
       style: %{fg: @accent_color, opacity: @cursor_opacity},
@@ -56,7 +73,7 @@ defmodule MingaGhostCursors.Tracker do
     )
 
     state = maybe_monitor(state, session_pid)
-    {:noreply, state}
+    {:noreply, %{state | last_updated: overlay_key}}
   end
 
   def handle_info(
@@ -70,8 +87,12 @@ defmodule MingaGhostCursors.Tracker do
         {:minga_event, :agent_session_stopped, %{pid: session_pid}},
         state
       ) do
-    state = remove_session_overlays(state, session_pid)
-    Minga.Events.broadcast(:ghost_cursor_removed, %{session_pid: session_pid})
+    {removed?, state} = remove_session_overlays(state, session_pid)
+
+    if removed? do
+      Minga.Events.broadcast(:ghost_cursor_removed, %{session_pid: session_pid})
+    end
+
     {:noreply, state}
   end
 
@@ -80,8 +101,12 @@ defmodule MingaGhostCursors.Tracker do
   end
 
   def handle_info({:DOWN, _ref, :process, session_pid, _reason}, state) do
-    state = remove_session_overlays(state, session_pid)
-    Minga.Events.broadcast(:ghost_cursor_removed, %{session_pid: session_pid})
+    {removed?, state} = remove_session_overlays(state, session_pid)
+
+    if removed? do
+      Minga.Events.broadcast(:ghost_cursor_removed, %{session_pid: session_pid})
+    end
+
     {:noreply, state}
   end
 
@@ -89,8 +114,20 @@ defmodule MingaGhostCursors.Tracker do
     {:noreply, state}
   end
 
-  @spec session_label(pid()) :: String.t()
-  defp session_label(session_pid) do
+  @spec cached_label(state(), pid()) :: {String.t(), state()}
+  defp cached_label(state, session_pid) do
+    case Map.fetch(state.labels, session_pid) do
+      {:ok, label} ->
+        {label, state}
+
+      :error ->
+        label = fetch_label(session_pid)
+        {label, put_in(state.labels[session_pid], label)}
+    end
+  end
+
+  @spec fetch_label(pid()) :: String.t()
+  defp fetch_label(session_pid) do
     case AgentAPI.session_info(session_pid) do
       {:ok, info} -> info.label
       {:error, :not_found} -> "agent"
@@ -109,21 +146,33 @@ defmodule MingaGhostCursors.Tracker do
     end
   end
 
-  @spec remove_session_overlays(state(), pid()) :: state()
+  @spec remove_session_overlays(state(), pid()) :: {boolean(), state()}
   defp remove_session_overlays(state, session_pid) do
-    Overlay.all()
+    Overlay.all(state.overlay_table)
     |> Enum.filter(fn overlay ->
       overlay.extension == @extension_name and match?({_buf, ^session_pid}, overlay.overlay_id)
     end)
     |> Enum.each(fn overlay ->
-      Overlay.remove(@extension_name, overlay.overlay_id)
+      Overlay.remove(state.overlay_table, @extension_name, overlay.overlay_id)
     end)
 
+    state = clear_last_updated(state, session_pid)
+    state = %{state | labels: Map.delete(state.labels, session_pid)}
+
     case Map.pop(state.monitored, session_pid) do
-      {nil, state} -> state
+      {nil, state} ->
+        {false, state}
+
       {ref, new_monitored} ->
         Process.demonitor(ref, [:flush])
-        %{state | monitored: new_monitored}
+        {true, %{state | monitored: new_monitored}}
     end
   end
+
+  @spec clear_last_updated(state(), pid()) :: state()
+  defp clear_last_updated(%{last_updated: {_buf, session_pid}} = state, session_pid) do
+    %{state | last_updated: nil}
+  end
+
+  defp clear_last_updated(state, _session_pid), do: state
 end
