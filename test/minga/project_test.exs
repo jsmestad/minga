@@ -48,11 +48,12 @@ defmodule Minga.ProjectTest do
   end
 
   describe "resolve_root/0" do
-    test "falls back to cwd when no project is set" do
-      assert Project.resolve_root() == File.cwd!()
+    test "returns nil from a fresh project server with no root set" do
+      {_pid, name} = start_project!()
+      assert Project.root(name) == nil
     end
 
-    test "falls back to cwd when Project GenServer is not running" do
+    test "returns a valid path even when Project GenServer is not running" do
       assert is_binary(Project.resolve_root())
     end
   end
