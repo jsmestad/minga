@@ -106,9 +106,23 @@ local function keys_exit_insert(keys)
   return keys:find("<Esc>", 1, true) ~= nil or keys:find("<C%-c>") ~= nil or keys:find("<C%-[>") ~= nil
 end
 
+local function capture_named_registers(scenario)
+  if not scenario.capture_registers then
+    return nil
+  end
+  local regs = {}
+  for _, name in ipairs(scenario.capture_registers) do
+    regs[name] = {
+      content = vim.fn.getreg(name),
+      type = vim.fn.getregtype(name),
+    }
+  end
+  return regs
+end
+
 local function capture_state(scenario, reported_mode)
   local cursor = vim.api.nvim_win_get_cursor(0)
-  return {
+  local state = {
     name = scenario.name,
     ok = true,
     line = cursor[1] - 1,
@@ -118,6 +132,11 @@ local function capture_state(scenario, reported_mode)
     register = vim.fn.getreg('"'),
     register_type = vim.fn.getregtype('"'),
   }
+  local regs = capture_named_registers(scenario)
+  if regs then
+    state.registers = regs
+  end
+  return state
 end
 
 local function run_keys(keys)
@@ -161,12 +180,24 @@ local function run_commands(scenario)
   return vim.api.nvim_get_mode().mode
 end
 
+local function run_macro_keys(keys)
+  -- Macro replay injects keys that may enter/exit insert mode.
+  -- The ModeChanged heuristic in run_keys misreports the final mode
+  -- because it checks the explicit keys for <Esc>, not the replayed
+  -- macro content. Use the actual mode after execution instead.
+  local termcoded = vim.api.nvim_replace_termcodes(keys, true, false, true)
+  vim.api.nvim_feedkeys(termcoded, "nx", false)
+  return vim.api.nvim_get_mode().mode
+end
+
 local runners = {
   motion = function(s) return run_keys(s.keys or "") end,
   operator = function(s) return run_keys(s.keys or "") end,
   text_object = function(s) return run_keys(s.keys or "") end,
   search = function(s) return run_search(s.keys or "") end,
   mark = run_commands,
+  register = function(s) return run_keys(s.keys or "") end,
+  macro = function(s) return run_macro_keys(s.keys or "") end,
 }
 
 local function run_scenario(scenario)
@@ -179,6 +210,18 @@ local function run_scenario(scenario)
     vim.cmd("setlocal buftype=")
     vim.cmd("setlocal modifiable")
     vim.fn.setreg('"', "")
+    vim.fn.setreg('0', "")
+    for i = string.byte("a"), string.byte("z") do
+      vim.fn.setreg(string.char(i), "")
+    end
+    for i = 1, 9 do
+      vim.fn.setreg(tostring(i), "")
+    end
+    if scenario.register_setup then
+      for name, content in pairs(scenario.register_setup) do
+        vim.fn.setreg(name, content)
+      end
+    end
     set_buffer_content(scenario.content or "")
     set_cursor(scenario.cursor or { line = 0, col = 0 })
     local runner = runners[scenario.type or "motion"]

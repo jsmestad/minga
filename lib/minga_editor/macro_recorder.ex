@@ -54,6 +54,12 @@ defmodule MingaEditor.MacroRecorder do
 
   def stop_recording(%__MODULE__{} = rec), do: rec
 
+  @doc "Stores a pre-built key sequence in a register."
+  @spec put_macro(t(), String.t(), [key()]) :: t()
+  def put_macro(%__MODULE__{} = rec, register, keys) when is_binary(register) and is_list(keys) do
+    %{rec | registers: Map.put(rec.registers, register, keys)}
+  end
+
   @doc "Returns the stored key sequence for a register, or nil."
   @spec get_macro(t(), String.t()) :: [key()] | nil
   def get_macro(%__MODULE__{registers: regs}, register) do
