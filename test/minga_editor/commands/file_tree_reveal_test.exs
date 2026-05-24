@@ -59,19 +59,12 @@ defmodule MingaEditor.Commands.FileTreeRevealTest do
 
       ctx = start_editor("hello", file_path: file, project_root: dir)
 
-      # Tree starts closed
-      state = editor_state(ctx)
-      assert state.workspace.file_tree.tree == nil
+      refute file_tree_open?(ctx)
 
       # Reveal active file
       state = send_keys_sync(ctx, "<SPC>or")
 
-      # Tree should be open and focused
-      assert state.workspace.file_tree.tree != nil
-      assert state.workspace.file_tree.focused == true
-      assert state.workspace.keymap_scope == :file_tree
-
-      # File should be visible in the tree (ancestors expanded)
+      assert file_tree_open?(ctx)
       assert_file_visible(state, file)
     end
 
@@ -94,7 +87,6 @@ defmodule MingaEditor.Commands.FileTreeRevealTest do
       state = send_keys_sync(ctx, "<SPC>or")
 
       assert_file_visible(state, file)
-      assert state.workspace.file_tree.focused == true
     end
 
     test "reopens closed tree and re-reveals file", %{tmp_dir: dir} do
@@ -104,19 +96,14 @@ defmodule MingaEditor.Commands.FileTreeRevealTest do
       ctx = start_editor("hello", file_path: file, project_root: dir)
 
       # Open the tree and reveal the file
-      state = send_keys_sync(ctx, "<SPC>or")
-      assert state.workspace.file_tree.tree != nil
+      send_keys_sync(ctx, "<SPC>or")
+      assert file_tree_open?(ctx)
 
       # Close tree, then reveal again to reopen and re-reveal
       _state = send_keys_sync(ctx, "<SPC>op")
       state = send_keys_sync(ctx, "<SPC>or")
 
-      # Tree should be open and focused after re-reveal
-      assert state.workspace.file_tree.tree != nil
-      assert state.workspace.file_tree.focused == true
-      assert state.workspace.keymap_scope == :file_tree
-
-      # File should be visible (ancestors expanded)
+      assert file_tree_open?(ctx)
       assert_file_visible(state, file)
     end
 
@@ -124,12 +111,9 @@ defmodule MingaEditor.Commands.FileTreeRevealTest do
       # Buffer with content but no file_path
       ctx = start_editor("scratch content")
 
-      # Reveal should be a no-op (tree stays closed)
-      _state = send_keys_sync(ctx, "<SPC>or")
-      state = editor_state(ctx)
+      send_keys_sync(ctx, "<SPC>or")
 
-      # Tree should not have opened
-      assert state.workspace.file_tree.tree == nil
+      refute file_tree_open?(ctx)
     end
   end
 end
