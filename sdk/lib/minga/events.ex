@@ -20,12 +20,16 @@ defmodule Minga.Events do
           | :agent_session_stopped
           | :agent_hook
           | :file_written
+          | :ghost_cursor_removed
 
   @spec subscribe(topic()) :: :ok
   def subscribe(_topic), do: raise("minga_sdk is compile-time only")
 
   @spec unsubscribe(topic()) :: :ok
   def unsubscribe(_topic), do: raise("minga_sdk is compile-time only")
+
+  @spec broadcast(atom(), map()) :: :ok
+  def broadcast(_topic, _payload), do: raise("minga_sdk is compile-time only")
 
   defmodule BufferChangedEvent do
     @moduledoc "Payload for `:buffer_changed` events."
