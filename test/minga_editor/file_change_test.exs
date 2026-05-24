@@ -90,12 +90,4 @@ defmodule MingaEditor.FileChangeTest do
     sync_screen(ctx)
     :ok
   end
-
-  defp conflict_open?(ctx) do
-    MingaEditor.State.ModalOverlay.match(editor_state(ctx).shell_state.modal, :conflict)
-  end
-
-  defp status_msg(ctx) do
-    MingaEditor.State.status_msg(editor_state(ctx))
-  end
 end

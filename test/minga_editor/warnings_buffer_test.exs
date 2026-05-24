@@ -60,8 +60,6 @@ defmodule MingaEditor.WarningsBufferTest do
     editor_state(ctx)
   end
 
-  defp bottom_panel(ctx), do: editor_state(ctx).shell_state.bottom_panel
-
   defp dismiss_bottom_panel(ctx) do
     :sys.replace_state(ctx.editor, fn state ->
       MingaEditor.State.set_bottom_panel(
