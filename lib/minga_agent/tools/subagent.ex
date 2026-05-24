@@ -112,14 +112,16 @@ defmodule MingaAgent.Tools.Subagent do
     end
   end
 
+  @doc false
   @spec collect_response(pid()) :: {:ok, String.t()} | {:error, String.t()}
-  defp collect_response(session_pid) do
+  def collect_response(session_pid) do
     collect_response_loop(session_pid, "", @subagent_timeout_ms)
   end
 
+  @doc false
   @spec collect_response_loop(pid(), String.t(), non_neg_integer()) ::
           {:ok, String.t()} | {:error, String.t()}
-  defp collect_response_loop(session_pid, text_acc, timeout) do
+  def collect_response_loop(session_pid, text_acc, timeout) do
     receive do
       {:agent_event, ^session_pid, {:text_delta, delta}} ->
         collect_response_loop(session_pid, text_acc <> delta, timeout)
