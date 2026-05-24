@@ -13,6 +13,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree
   alias MingaEditor.State.Highlighting
+  alias MingaEditor.State.Search
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
   alias MingaEditor.VimState
@@ -46,7 +47,8 @@ defmodule MingaEditor.Frontend.Emit.Context do
           title: String.t(),
           status_bar_data: term(),
           git_syncing: boolean(),
-          git_toast: ProtocolGUI.git_toast() | nil
+          git_toast: ProtocolGUI.git_toast() | nil,
+          search: Search.t()
         }
 
   @enforce_keys [:port_manager, :capabilities, :theme, :font_registry, :windows, :layout, :shell]
@@ -72,7 +74,8 @@ defmodule MingaEditor.Frontend.Emit.Context do
             title: "Minga",
             status_bar_data: nil,
             git_syncing: false,
-            git_toast: nil
+            git_toast: nil,
+            search: %Search{}
 
   @doc "Builds an emit context from render pipeline input."
   @spec from_editor_state(map()) :: t()
@@ -102,7 +105,8 @@ defmodule MingaEditor.Frontend.Emit.Context do
       title: title,
       status_bar_data: MingaEditor.StatusBar.Data.from_state(state),
       git_syncing: Map.get(state, :git_remote_op) != nil,
-      git_toast: Map.get(state.shell_state, :git_toast)
+      git_toast: Map.get(state.shell_state, :git_toast),
+      search: state.workspace.search
     }
   end
 

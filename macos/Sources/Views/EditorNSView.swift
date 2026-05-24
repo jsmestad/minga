@@ -862,6 +862,11 @@ final class EditorNSView: MTKView {
         }
 
         if Self.shouldYieldSystemCommandShortcut(event) {
+            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if mods == .command, event.charactersIgnoringModifiers == "h" {
+                encoder.sendSearchQuery(query: "", flags: 0x01)
+                return true
+            }
             return false
         }
 
@@ -928,6 +933,15 @@ final class EditorNSView: MTKView {
                 sendSpaceLeaderRetract(codepoint: codepoint(from: event, mods: mods), modifiers: mods)
                 return
             }
+        }
+
+        // ── Cmd+F: Open native search toolbar ──
+        if event.modifierFlags.contains(.command),
+           let chars = event.charactersIgnoringModifiers,
+           chars == "f"
+        {
+            encoder.sendSearchQuery(query: "", flags: 0)
+            return
         }
 
         // ── Cmd+V paste interception ──

@@ -491,6 +491,13 @@ final class CommandDispatcher {
 
         case .guiExtensionPanel(let panels):
             guiState.extensionPanelState.update(panels)
+
+        case .guiSearchState(let active, let matchCount, let currentIndex, let flags):
+            if active {
+                guiState.searchState.update(active: true, matchCount: matchCount, currentIndex: currentIndex, flags: flags)
+            } else {
+                guiState.searchState.hide()
+            }
         }
     }
 

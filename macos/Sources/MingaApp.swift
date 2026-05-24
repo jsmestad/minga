@@ -597,6 +597,22 @@ struct ContentView: View {
                 )
             }
 
+            // Search toolbar (appears below breadcrumb bar when active)
+            if appState.gui.searchState.visible {
+                SearchToolbar(
+                    searchState: appState.gui.searchState,
+                    theme: appState.gui.themeColors,
+                    encoder: appState.encoder
+                )
+                .transition(
+                    NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                        ? .opacity.animation(.easeInOut(duration: 0.1))
+                        : .move(edge: .top)
+                            .combined(with: .opacity)
+                            .animation(.easeInOut(duration: 0.15))
+                )
+            }
+
             // HStack: change summary sidebar (when zoomed into agent card) + editor
             HStack(spacing: 0) {
                 if showChangeSummary {

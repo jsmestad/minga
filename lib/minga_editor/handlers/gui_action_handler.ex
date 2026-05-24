@@ -49,6 +49,8 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   alias Minga.Project.FileTree
 
+  import Bitwise, only: [&&&: 2]
+
   @typedoc "Editor state (re-exported for brevity)."
   @type state :: EditorState.t()
 
@@ -662,6 +664,103 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     |> Commands.Git.execute(:git_pull_and_retry)
   end
 
+  # ── GUI search toolbar actions ──────────────────────────────────────
+
+  defp dispatch_action(
+         %{workspace: %{buffers: %{active: buf}}} = state,
+         {:search_query, query, flags}
+       )
+       when is_pid(buf) do
+    replace_mode = (flags &&& 0x01) != 0
+    case_sensitive = (flags &&& 0x02) != 0
+    whole_word = (flags &&& 0x04) != 0
+    regex = (flags &&& 0x08) != 0
+
+    state =
+      EditorState.update_search(state, fn search ->
+        search
+        |> SearchData.update_gui_search_flags(case_sensitive, whole_word, regex)
+        |> SearchData.set_gui_replace_mode(replace_mode)
+        |> SearchData.record(query, :forward)
+      end)
+
+    if query != "" do
+      content = Buffer.content(buf)
+
+      case Minga.Editing.search_next(content, query, Buffer.cursor(buf), :forward) do
+        nil ->
+          state
+
+        {line, col} ->
+          Buffer.move_to(buf, {line, col})
+          state
+      end
+    else
+      state
+    end
+  end
+
+  defp dispatch_action(state, {:search_query, _query, _flags}), do: state
+
+  defp dispatch_action(%{workspace: %{search: search}} = state, :search_next)
+       when search.last_pattern != nil do
+    MingaEditor.Commands.execute(state, :search_next)
+  end
+
+  defp dispatch_action(state, :search_next), do: state
+
+  defp dispatch_action(%{workspace: %{search: search}} = state, :search_prev)
+       when search.last_pattern != nil do
+    MingaEditor.Commands.execute(state, :search_prev)
+  end
+
+  defp dispatch_action(state, :search_prev), do: state
+
+  defp dispatch_action(
+         %{workspace: %{buffers: %{active: buf}, search: %{last_pattern: pattern}}} = state,
+         {:search_replace, replacement}
+       )
+       when is_pid(buf) and is_binary(pattern) and pattern != "" do
+    content = Buffer.content(buf)
+    cursor = Buffer.cursor(buf)
+
+    case Minga.Editing.search_next(content, pattern, cursor, :forward) do
+      nil ->
+        EditorState.set_status(state, "No more matches")
+
+      {line, col} ->
+        Buffer.move_to(buf, {line, col})
+        new_content = replace_single_match(content, line, col, byte_size(pattern), replacement)
+        Buffer.replace_content(buf, new_content)
+        MingaEditor.Commands.execute(state, :search_next)
+    end
+  end
+
+  defp dispatch_action(state, {:search_replace, _}), do: state
+
+  defp dispatch_action(
+         %{workspace: %{buffers: %{active: buf}, search: %{last_pattern: pattern}}} = state,
+         {:search_replace_all, replacement}
+       )
+       when is_pid(buf) and is_binary(pattern) and pattern != "" do
+    content = Buffer.content(buf)
+    {new_content, count} = Minga.Editing.substitute(content, pattern, replacement, true)
+
+    if count > 0 do
+      Buffer.replace_content(buf, new_content)
+      msg = if count == 1, do: "1 replacement", else: "#{count} replacements"
+      EditorState.set_status(state, msg)
+    else
+      EditorState.set_status(state, "No matches to replace")
+    end
+  end
+
+  defp dispatch_action(state, {:search_replace_all, _}), do: state
+
+  defp dispatch_action(state, :search_dismiss) do
+    EditorState.update_search(state, &SearchData.dismiss_gui_search/1)
+  end
+
   # Catch-all for unrecognized actions: log and return state unchanged.
   defp dispatch_action(state, action) do
     Minga.Log.warning(:editor, "[gui_action] unrecognized action: #{inspect(action)}")
@@ -1137,5 +1236,26 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     end
   rescue
     ArgumentError -> :ok
+  end
+
+  @spec replace_single_match(
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t()
+        ) :: String.t()
+  defp replace_single_match(content, match_line, match_col, match_len, replacement) do
+    lines = :binary.split(content, "\n", [:global])
+
+    List.update_at(lines, match_line, fn line ->
+      before = binary_part(line, 0, match_col)
+
+      after_match =
+        binary_part(line, match_col + match_len, byte_size(line) - match_col - match_len)
+
+      before <> replacement <> after_match
+    end)
+    |> Enum.join("\n")
   end
 end

@@ -215,6 +215,7 @@ enum RenderCommand: Sendable {
     case guiEditTimeline(visible: Bool, viewingIndex: UInt16, entries: [Wire.TimelineEntry])
     case guiExtensionOverlay([Wire.ExtensionOverlayEntry])
     case guiExtensionPanel([Wire.ExtensionPanelEntry])
+    case guiSearchState(active: Bool, matchCount: UInt16, currentIndex: UInt16, flags: UInt8)
 }
 
 // MARK: - Decoder
@@ -2645,6 +2646,20 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             ))
         }
         return (.guiExtensionPanel(epPanels), 1 + 2 + epPayloadLen)
+
+    case OP_GUI_SEARCH_STATE:
+        // Forward-compatible format: opcode(1) + payload_len(2) + active(1) + match_count(2) + current_index(2) + flags(1)
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let ssPayloadLen = Int(readU16(data, rest))
+        guard data.count >= rest + 2 + ssPayloadLen, ssPayloadLen >= 6 else {
+            throw ProtocolDecodeError.malformed
+        }
+        let ssStart = rest + 2
+        let ssActive = data[ssStart] != 0
+        let ssMatchCount = readU16(data, ssStart + 1)
+        let ssCurrentIndex = readU16(data, ssStart + 3)
+        let ssFlags = data[ssStart + 5]
+        return (.guiSearchState(active: ssActive, matchCount: ssMatchCount, currentIndex: ssCurrentIndex, flags: ssFlags), 1 + 2 + ssPayloadLen)
 
     case OP_CLIPBOARD_WRITE:
         // Forward-compatible format: opcode(1) + payload_length(2) + target(1) + text_len(2) + text

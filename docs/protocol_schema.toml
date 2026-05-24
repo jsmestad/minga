@@ -581,6 +581,12 @@ name = "gui_extension_panel"
 value = 0x9D
 direction = "beam_to_frontend"
 
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_search_state"
+value = 0x9E
+direction = "beam_to_frontend"
+
 # Sub-opcodes inside gui_action (0x07).
 [[gui_actions]]
 name = "select_tab"
@@ -903,3 +909,27 @@ value = 0x4F
 [[gui_actions]]
 name = "extension_panel_action"
 value = 0x50
+
+[[gui_actions]]
+name = "search_query"
+value = 0x51
+
+[[gui_actions]]
+name = "search_next"
+value = 0x52
+
+[[gui_actions]]
+name = "search_prev"
+value = 0x53
+
+[[gui_actions]]
+name = "search_replace"
+value = 0x54
+
+[[gui_actions]]
+name = "search_replace_all"
+value = 0x55
+
+[[gui_actions]]
+name = "search_dismiss"
+value = 0x56
