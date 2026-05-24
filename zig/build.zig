@@ -169,6 +169,24 @@ pub fn build(b: *std.Build) void {
     for (grammar_libs) |gl| parser_exe.root_module.linkLibrary(gl);
     b.installArtifact(parser_exe);
 
+    // ── Snapshot executable (cell-grid rasterizer for Claude Code) ───────
+    // Native macOS only: CoreText @cImport needs the system SDK, which
+    // Zig does not provide when cross-compiling (explicit -Dtarget).
+    const native_macos = target.result.os.tag == .macos and target.query.os_tag == null;
+    if (native_macos) {
+        const snapshot_exe = b.addExecutable(.{
+            .name = "minga-snapshot",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/snapshot_main.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
+        });
+        snapshot_exe.root_module.addImport("vaxis", vaxis.module("vaxis"));
+        snapshot_exe.root_module.link_libc = true;
+        b.installArtifact(snapshot_exe);
+    }
+
     // ── Hook runner executable (one-shot POSIX process-group helper) ─────
     const hook_runner_exe = b.addExecutable(.{
         .name = "minga-hook-runner",
@@ -235,6 +253,22 @@ pub fn build(b: *std.Build) void {
 
     const run_hook_runner_tests = b.addRunArtifact(hook_runner_tests);
     test_step.dependOn(&run_hook_runner_tests.step);
+
+    // Snapshot tests — native macOS only (same SDK constraint as the exe).
+    if (native_macos) {
+        const snapshot_tests = b.addTest(.{
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/snapshot_main.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
+        });
+        snapshot_tests.root_module.addImport("vaxis", vaxis.module("vaxis"));
+        snapshot_tests.root_module.link_libc = true;
+
+        const run_snapshot_tests = b.addRunArtifact(snapshot_tests);
+        test_step.dependOn(&run_snapshot_tests.step);
+    }
 
     // Tree-sitter highlight benchmark used by autoresearch.
     const highlight_bench = b.addExecutable(.{
