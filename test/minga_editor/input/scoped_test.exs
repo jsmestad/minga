@@ -9,6 +9,7 @@ defmodule MingaEditor.Input.ScopedTest do
   alias Minga.Buffer.Process, as: BufferProcess
 
   alias MingaEditor.Commands.Agent, as: AgentCommands
+  alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
@@ -25,6 +26,11 @@ defmodule MingaEditor.Input.ScopedTest do
   alias Minga.Mode
   alias Minga.Project.FileTree
   alias Minga.Project.FileTree.BufferSync
+
+  setup do
+    FileTreeFeature.register_contributions()
+    :ok
+  end
 
   defp base_state(opts) do
     {:ok, buf} = BufferProcess.start_link(content: "hello world")
@@ -540,14 +546,14 @@ defmodule MingaEditor.Input.ScopedTest do
       state = make_tree_state(tmp_dir)
       {:handled, new_state} = walk_surface_handlers(state, ?q, 0)
       assert new_state.workspace.keymap_scope == :editor
-      assert new_state.workspace.file_tree.tree == nil
+      assert ft(new_state).tree == nil
     end
 
     test "unbound key delegates to mode FSM for vim nav", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
       # j is not bound in file_tree scope (handled by mode FSM delegation)
       {:handled, new_state} = walk_surface_handlers(state, ?j, 0)
-      assert new_state.workspace.file_tree.tree.cursor == 1
+      assert ft(new_state).tree.cursor == 1
     end
 
     test "leader sequence in progress delegates to mode FSM", %{tmp_dir: tmp_dir} do
@@ -574,9 +580,9 @@ defmodule MingaEditor.Input.ScopedTest do
       File.write!(Path.join(tmp_dir, ".hidden"), "")
       state = make_tree_state(tmp_dir, 0)
 
-      entries_before = length(FileTree.visible_entries(state.workspace.file_tree.tree))
+      entries_before = length(FileTree.visible_entries(ft(state).tree))
       {:handled, new_state} = walk_surface_handlers(state, ?H, 0)
-      entries_after = length(FileTree.visible_entries(new_state.workspace.file_tree.tree))
+      entries_after = length(FileTree.visible_entries(ft(new_state).tree))
 
       assert entries_after != entries_before
     end
@@ -594,7 +600,7 @@ defmodule MingaEditor.Input.ScopedTest do
 
     test "file_tree scope with tree not focused passes through", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
-      state = put_in(state.workspace.file_tree.focused, false)
+      state = EditorState.set_file_tree(state, %{ft(state) | focused: false})
       assert {:passthrough, _} = FileTreeHandler.handle_key(state, ?q, 0)
     end
   end
@@ -838,6 +844,8 @@ defmodule MingaEditor.Input.ScopedTest do
     end)
   end
 
+  defp ft(state), do: EditorState.file_tree_state(state)
+
   defp walk_surface_mouse(state, row, col, button, mods, event_type, cc) do
     handlers =
       MingaEditor.Input.surface_handlers()
@@ -865,6 +873,6 @@ defmodule MingaEditor.Input.ScopedTest do
     buf = BufferSync.start_buffer(tree)
 
     state = base_state(keymap_scope: :file_tree)
-    put_in(state.workspace.file_tree, %FileTreeState{tree: tree, focused: true, buffer: buf})
+    EditorState.set_file_tree(state, %FileTreeState{tree: tree, focused: true, buffer: buf})
   end
 end

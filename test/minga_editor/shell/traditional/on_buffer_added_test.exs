@@ -30,6 +30,27 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
     %SessionState{viewport: Viewport.new(24, 80)}
   end
 
+  defp elem_insert(%TabBar{} = tab_bar, kind, label) do
+    {tab_bar, _tab} = TabBar.insert(tab_bar, kind, label)
+    tab_bar
+  end
+
+  describe "GUI tab actions" do
+    test "closing an inactive tab returns the two-tuple shell action contract" do
+      workspace = blank_workspace()
+
+      tab_bar =
+        TabBar.new(Tab.new_file(1, "one"), nil)
+        |> elem_insert(:file, "two")
+        |> TabBar.update_context(2, SessionState.to_tab_context(workspace))
+
+      shell_state = %ShellState{tab_bar: tab_bar}
+
+      assert {%ShellState{}, %SessionState{}} =
+               Traditional.handle_gui_action(shell_state, workspace, {:close_tab, 2})
+    end
+  end
+
   describe "file refs" do
     test "populates file refs when opening file tabs" do
       root = Path.join(System.tmp_dir!(), "minga-on-buffer-added")
@@ -38,11 +59,9 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
       File.write!(path, "hello")
       buf = start_supervised!({BufferProcess, file_path: path})
 
-      workspace = %SessionState{
-        viewport: Viewport.new(24, 80),
-        buffers: %Buffers{active: buf, list: [buf]},
-        file_tree: %FileTreeState{project_root: root}
-      }
+      workspace =
+        %SessionState{viewport: Viewport.new(24, 80), buffers: %Buffers{active: buf, list: [buf]}}
+        |> SessionState.set_file_tree(%FileTreeState{project_root: root})
 
       shell_state = %ShellState{tab_bar: TabBar.new(Tab.new_file(1, "initial.ex"), root)}
 
@@ -60,11 +79,9 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
       buf = start_supervised!({BufferProcess, content: "scratch", buffer_name: "*scratch*"})
       expected_ref = FileRef.from_buffer(buf)
 
-      workspace = %SessionState{
-        viewport: Viewport.new(24, 80),
-        buffers: %Buffers{active: buf, list: [buf]},
-        file_tree: %FileTreeState{project_root: root}
-      }
+      workspace =
+        %SessionState{viewport: Viewport.new(24, 80), buffers: %Buffers{active: buf, list: [buf]}}
+        |> SessionState.set_file_tree(%FileTreeState{project_root: root})
 
       shell_state = %ShellState{tab_bar: TabBar.new(Tab.new_file(1, "initial.ex"), root)}
 
@@ -87,11 +104,9 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
       buf = start_supervised!({BufferProcess, file_path: path})
       expected_ref = FileRef.from_buffer(buf)
 
-      workspace = %SessionState{
-        viewport: Viewport.new(24, 80),
-        buffers: %Buffers{active: buf, list: [buf]},
-        file_tree: %FileTreeState{project_root: root}
-      }
+      workspace =
+        %SessionState{viewport: Viewport.new(24, 80), buffers: %Buffers{active: buf, list: [buf]}}
+        |> SessionState.set_file_tree(%FileTreeState{project_root: root})
 
       shell_state = %ShellState{tab_bar: TabBar.new(Tab.new_file(1, "initial.ex"), root)}
 

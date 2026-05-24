@@ -15,7 +15,9 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
   @moduletag :tmp_dir
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.Viewport
   alias Minga.Project.FileTree
@@ -24,6 +26,8 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
   setup :verify_on_exit!
 
   setup do
+    FileTreeFeature.register_contributions()
+
     test_pid = self()
 
     stub(Minga.Clipboard.Mock, :write, fn text ->
@@ -46,6 +50,8 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
     end)
   end
 
+  defp ft(state), do: EditorState.file_tree_state(state)
+
   defp make_tree_state(tmp_dir, file_count \\ 10) do
     if file_count > 0 do
       for i <- 1..file_count do
@@ -61,11 +67,9 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
 
     %EditorState{
       port_manager: self(),
-      workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
-        file_tree: %FileTreeState{tree: tree, focused: true, buffer: buf},
-        keymap_scope: :file_tree
-      },
+      workspace:
+        %SessionState{viewport: Viewport.new(24, 80), keymap_scope: :file_tree}
+        |> SessionState.set_file_tree(%FileTreeState{tree: tree, focused: true, buffer: buf}),
       focus_stack: [Scoped, MingaEditor.Input.ModeFSM]
     }
   end
@@ -73,11 +77,11 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
   describe "file tree: gg and G motions" do
     test "G moves cursor to the last entry", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
-      entries = FileTree.visible_entries(state.workspace.file_tree.tree)
+      entries = FileTree.visible_entries(ft(state).tree)
       max_idx = length(entries) - 1
 
       {:handled, state} = walk_surface_handlers(state, ?G, 0)
-      assert state.workspace.file_tree.tree.cursor == max_idx
+      assert ft(state).tree.cursor == max_idx
     end
 
     test "gg moves cursor to the first entry", %{tmp_dir: tmp_dir} do
@@ -85,24 +89,24 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
 
       # First move to bottom
       {:handled, state} = walk_surface_handlers(state, ?G, 0)
-      assert state.workspace.file_tree.tree.cursor > 0
+      assert ft(state).tree.cursor > 0
 
       # Then gg to top (g enters prefix trie, second g triggers)
       {:handled, state} = walk_surface_handlers(state, ?g, 0)
       {:handled, state} = walk_surface_handlers(state, ?g, 0)
-      assert state.workspace.file_tree.tree.cursor == 0
+      assert ft(state).tree.cursor == 0
     end
   end
 
   describe "file tree: count prefix" do
     test "3j moves cursor down 3 entries", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
-      assert state.workspace.file_tree.tree.cursor == 0
+      assert ft(state).tree.cursor == 0
 
       # Type 3j
       {:handled, state} = walk_surface_handlers(state, ?3, 0)
       {:handled, state} = walk_surface_handlers(state, ?j, 0)
-      assert state.workspace.file_tree.tree.cursor == 3
+      assert ft(state).tree.cursor == 3
     end
   end
 
@@ -111,9 +115,9 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
       tmp_dir: tmp_dir
     } do
       state = make_tree_state(tmp_dir)
-      buf = state.workspace.file_tree.buffer
+      buf = ft(state).buffer
       content_before = BufferProcess.content(buf)
-      selected_path = FileTree.selected_entry(state.workspace.file_tree.tree).path
+      selected_path = FileTree.selected_entry(ft(state).tree).path
 
       {:handled, _state} = walk_surface_handlers(state, ?y, 0)
 
@@ -153,7 +157,7 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
       File.write!(Path.join(tmp_dir, "subdir/inner.txt"), "")
 
       state = make_tree_state(tmp_dir, 0)
-      tree = state.workspace.file_tree.tree
+      tree = ft(state).tree
       entries = FileTree.visible_entries(tree)
 
       # Find subdir entry
@@ -172,9 +176,9 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
           end
 
         # Press Tab to expand
-        entries_before = length(FileTree.visible_entries(state.workspace.file_tree.tree))
+        entries_before = length(FileTree.visible_entries(ft(state).tree))
         {:handled, state} = walk_surface_handlers(state, 9, 0)
-        entries_after = length(FileTree.visible_entries(state.workspace.file_tree.tree))
+        entries_after = length(FileTree.visible_entries(ft(state).tree))
 
         # Should have more entries after expanding
         assert entries_after > entries_before
@@ -186,10 +190,10 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
       File.write!(Path.join(tmp_dir, "visible.txt"), "")
 
       state = make_tree_state(tmp_dir, 0)
-      entries_default = FileTree.visible_entries(state.workspace.file_tree.tree)
+      entries_default = FileTree.visible_entries(ft(state).tree)
 
       {:handled, state} = walk_surface_handlers(state, ?H, 0)
-      entries_with_hidden = FileTree.visible_entries(state.workspace.file_tree.tree)
+      entries_with_hidden = FileTree.visible_entries(ft(state).tree)
 
       # Toggling hidden should change the entry count
       assert length(entries_with_hidden) != length(entries_default)
@@ -199,8 +203,8 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
       state = make_tree_state(tmp_dir)
 
       {:handled, state} = walk_surface_handlers(state, ?q, 0)
-      assert state.workspace.file_tree.tree == nil
-      assert state.workspace.file_tree.focused == false
+      assert ft(state).tree == nil
+      assert ft(state).focused == false
     end
   end
 
@@ -211,7 +215,7 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
       # Move down first so we can verify gg works
       {:handled, state} = walk_surface_handlers(state, ?j, 0)
       {:handled, state} = walk_surface_handlers(state, ?j, 0)
-      assert state.workspace.file_tree.tree.cursor == 2
+      assert ft(state).tree.cursor == 2
 
       # g should delegate to mode FSM (prefix trie)
       {:handled, state} = walk_surface_handlers(state, ?g, 0)
@@ -219,7 +223,7 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
 
       # second g should trigger gg (go to top)
       {:handled, state} = walk_surface_handlers(state, ?g, 0)
-      assert state.workspace.file_tree.tree.cursor == 0
+      assert ft(state).tree.cursor == 0
     end
   end
 end

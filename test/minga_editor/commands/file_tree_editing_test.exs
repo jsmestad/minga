@@ -39,9 +39,9 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
       state = Commands.FileTree.new_file(state)
 
-      assert state.workspace.file_tree.editing != nil
-      assert state.workspace.file_tree.editing.type == :new_file
-      assert state.workspace.file_tree.editing.text == ""
+      assert ft(state).editing != nil
+      assert ft(state).editing.type == :new_file
+      assert ft(state).editing.text == ""
     end
 
     test "creates file on disk after confirming a typed name", %{
@@ -59,7 +59,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
       state = Commands.FileTree.confirm_editing(state)
 
-      assert state.workspace.file_tree.editing == nil
+      assert ft(state).editing == nil
 
       assert File.exists?(expected), "Expected newfile.txt to exist at #{expected}"
     end
@@ -71,8 +71,8 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
       state = Commands.FileTree.new_folder(state)
 
-      assert state.workspace.file_tree.editing != nil
-      assert state.workspace.file_tree.editing.type == :new_folder
+      assert ft(state).editing != nil
+      assert ft(state).editing.type == :new_folder
     end
 
     test "creates directory on disk after confirming a typed name", %{
@@ -87,7 +87,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
       state = Commands.FileTree.confirm_editing(state)
 
-      assert state.workspace.file_tree.editing == nil
+      assert ft(state).editing == nil
 
       expected = Path.join(dir, "newfolder")
       assert File.dir?(expected), "Expected newfolder to exist at #{expected}"
@@ -106,10 +106,10 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
       state = Commands.FileTree.rename(state)
 
-      assert state.workspace.file_tree.editing != nil
-      assert state.workspace.file_tree.editing.type == :rename
-      assert state.workspace.file_tree.editing.text == "target.txt"
-      assert state.workspace.file_tree.editing.original_name == "target.txt"
+      assert ft(state).editing != nil
+      assert ft(state).editing.type == :rename
+      assert ft(state).editing.text == "target.txt"
+      assert ft(state).editing.original_name == "target.txt"
     end
 
     test "renames file on disk after changing name", %{
@@ -128,7 +128,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
       state = Commands.FileTree.confirm_editing(state)
 
-      assert state.workspace.file_tree.editing == nil
+      assert ft(state).editing == nil
 
       new_path = Path.join(dir, "renamed.txt")
       assert File.exists?(new_path), "Expected renamed.txt to exist"
@@ -153,7 +153,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
       state = Commands.FileTree.confirm_editing(state)
 
-      assert state.workspace.file_tree.editing == nil
+      assert ft(state).editing == nil
       assert File.read!(file) == "content"
       assert File.read!(existing) == "existing"
     end
@@ -183,7 +183,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
       state = Commands.FileTree.confirm_editing(state)
 
-      assert state.workspace.file_tree.editing == nil
+      assert ft(state).editing == nil
       assert Buffer.file_path(buffer) == renamed
       assert Buffer.dirty?(buffer)
       assert File.read!(renamed) == "content"
@@ -252,12 +252,14 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       state = %EditorState{
         port_manager: self(),
         events_registry: events_registry,
-        workspace: %SessionState{
-          viewport: Viewport.new(24, 80),
-          buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0},
-          file_tree:
+        workspace:
+          %SessionState{
+            viewport: Viewport.new(24, 80),
+            buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0}
+          }
+          |> SessionState.set_file_tree(
             FileTreeState.open(%FileTreeState{}, FileTree.new(dir) |> FileTree.refresh(), nil)
-        },
+          ),
         shell_state: %ShellState{tab_bar: tab_bar},
         focus_stack: [MingaEditor.Input.Scoped, MingaEditor.Input.ModeFSM]
       }
@@ -270,7 +272,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
       state = Commands.FileTree.confirm_editing(state)
 
-      assert state.workspace.file_tree.editing == nil
+      assert ft(state).editing == nil
       assert Buffer.file_path(target_buffer) == renamed
       assert TabBar.active(state.shell_state.tab_bar).id == active_tab.id
       assert TabBar.get(state.shell_state.tab_bar, inactive_tab.id).file_ref == new_ref
@@ -302,7 +304,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
       state = Commands.FileTree.confirm_editing(state)
 
-      assert state.workspace.file_tree.editing == nil
+      assert ft(state).editing == nil
       assert File.exists?(renamed)
       refute File.exists?(file)
     end
@@ -329,7 +331,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
       state = Commands.FileTree.confirm_editing(state)
 
-      assert state.workspace.file_tree.editing == nil
+      assert ft(state).editing == nil
       assert Buffer.file_path(buffer) == file
       assert Buffer.dirty?(buffer)
       assert File.read!(file) == "content"
@@ -350,7 +352,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
       state = Commands.FileTree.cancel_editing(state)
 
-      assert state.workspace.file_tree.editing == nil
+      assert ft(state).editing == nil
 
       refute File.exists?(Path.join(dir, "partial")),
              "No file should be created when editing is cancelled"
@@ -361,7 +363,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
       state = Commands.FileTree.confirm_editing(state)
 
-      assert state.workspace.file_tree.editing == nil
+      assert ft(state).editing == nil
     end
 
     test "Backspace on empty text cancels editing through the file-tree input handler", %{
@@ -372,7 +374,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
       {:handled, state} = FileTreeHandler.handle_key(state, @backspace, 0)
 
-      assert state.workspace.file_tree.editing == nil
+      assert ft(state).editing == nil
     end
   end
 
@@ -392,7 +394,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
 
       state = Commands.FileTree.confirm_editing(state)
 
-      assert state.workspace.file_tree.editing == nil
+      assert ft(state).editing == nil
       assert File.exists?(file), "File should still exist unchanged"
     end
   end
@@ -400,12 +402,13 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
   defp make_state(dir, events_registry, active_buffer \\ nil) do
     tree = FileTree.new(dir)
 
-    workspace = %SessionState{
-      viewport: Viewport.new(24, 80),
-      buffers: buffers_for_active_buffer(active_buffer),
-      file_tree: FileTreeState.open(%FileTreeState{}, tree, nil),
-      keymap_scope: :file_tree
-    }
+    workspace =
+      %SessionState{
+        viewport: Viewport.new(24, 80),
+        buffers: buffers_for_active_buffer(active_buffer),
+        keymap_scope: :file_tree
+      }
+      |> SessionState.set_file_tree(FileTreeState.open(%FileTreeState{}, tree, nil))
 
     {workspace, shell_state} =
       case active_buffer do
@@ -467,13 +470,15 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
   defp buffers_for_active_buffer(nil), do: %Buffers{}
   defp buffers_for_active_buffer(buffer) when is_pid(buffer), do: Buffers.add(%Buffers{}, buffer)
 
+  defp ft(state), do: EditorState.file_tree_state(state)
+
   defp replace_editing_text(%EditorState{} = state, text) when is_binary(text) do
-    ft = FileTreeState.update_editing_text(state.workspace.file_tree, text)
+    ft = FileTreeState.update_editing_text(ft(state), text)
     EditorState.set_file_tree(state, ft)
   end
 
   defp select_entry(%EditorState{} = state, name) when is_binary(name) do
-    tree = state.workspace.file_tree.tree
+    tree = ft(state).tree
     entries = FileTree.visible_entries(tree)
     index = Enum.find_index(entries, &(&1.name == name))
     assert index != nil, "Expected #{name} to be visible in the file tree"
@@ -482,7 +487,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
   end
 
   defp replace_tree(%EditorState{} = state, %FileTree{} = tree) do
-    ft = FileTreeState.replace_tree(state.workspace.file_tree, tree)
+    ft = FileTreeState.replace_tree(ft(state), tree)
     EditorState.set_file_tree(state, ft)
   end
 end

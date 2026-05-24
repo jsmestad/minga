@@ -166,7 +166,7 @@ defmodule MingaEditor.RenderPipeline.Input do
         windows: ws.windows,
         buffers: ws.buffers,
         viewport: ws.viewport,
-        file_tree: ws.file_tree,
+        file_tree: MingaEditor.Session.State.file_tree_state(ws),
         highlight: ws.highlight,
         agent_ui: ws.agent_ui,
         editing: ws.editing,
@@ -178,6 +178,13 @@ defmodule MingaEditor.RenderPipeline.Input do
     }
     |> sync_active_window_cursor()
   end
+
+  @doc "Returns the FileTree snapshot carried by this render input."
+  @spec file_tree_state(t()) :: FileTree.t()
+  def file_tree_state(%__MODULE__{workspace: %{file_tree: %FileTree{} = file_tree}}),
+    do: file_tree
+
+  def file_tree_state(%__MODULE__{}), do: %FileTree{}
 
   @doc "Returns a copy of the render input with the renderer-owned font registry attached."
   @spec with_font_registry(t(), FontRegistry.t()) :: t()

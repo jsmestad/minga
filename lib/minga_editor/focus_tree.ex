@@ -15,6 +15,7 @@ defmodule MingaEditor.FocusTree do
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
   alias MingaEditor.Renderer.Gutter
+  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.UI.Picker, as: PickerData
   alias MingaEditor.Viewport
@@ -37,7 +38,7 @@ defmodule MingaEditor.FocusTree do
     layout = Layout.get(state)
 
     layout
-    |> build_base(window_map(state), Input.editing_dispatch_handler(state))
+    |> build_base(window_map(state), Input.editing_dispatch_handler(state), state)
     |> add_modal_overlays(state, layout)
     |> link_tree()
   end
@@ -46,7 +47,7 @@ defmodule MingaEditor.FocusTree do
   @spec from_layout(Layout.t()) :: t()
   def from_layout(%Layout{} = layout) do
     layout
-    |> build_base(%{}, Input.ModeFSM)
+    |> build_base(%{}, Input.ModeFSM, nil)
     |> link_tree()
   end
 
@@ -152,15 +153,15 @@ defmodule MingaEditor.FocusTree do
   defp window_map(%{workspace: %{windows: %{map: map}}}) when is_map(map), do: map
   defp window_map(_state), do: %{}
 
-  @spec build_base(Layout.t(), map(), module()) :: t()
-  defp build_base(%Layout{} = layout, window_map, bottom_handler) do
+  @spec build_base(Layout.t(), map(), module(), map() | nil) :: t()
+  defp build_base(%Layout{} = layout, window_map, bottom_handler, state) do
     {tr, tc, tw, th} = layout.terminal
 
     children =
       []
       |> maybe_add(layout.tab_bar, &TreeNode.new(:tab_bar, &1, handler: bottom_handler))
       |> Kernel.++([editor_area_node(layout, window_map, bottom_handler)])
-      |> maybe_add(layout.file_tree, &file_tree_node/1)
+      |> maybe_add(layout.file_tree, &file_tree_node(&1, state))
       |> maybe_add(layout.agent_panel, &agent_panel_node/1)
       |> maybe_add(layout.status_bar, &TreeNode.new(:status_bar, &1, handler: bottom_handler))
       |> Kernel.++([TreeNode.new(:minibuffer, layout.minibuffer, handler: bottom_handler)])
@@ -176,9 +177,18 @@ defmodule MingaEditor.FocusTree do
     }
   end
 
-  @spec file_tree_node(Layout.rect()) :: TreeNode.t()
-  defp file_tree_node(rect) do
-    case Sidebar.active_left() do
+  @spec file_tree_node(Layout.rect(), map() | nil) :: TreeNode.t()
+  defp file_tree_node(rect, state) do
+    case active_left_sidebar(state) do
+      %{id: "file_tree", input_handler: handler} ->
+        TreeNode.new(:file_tree, rect,
+          id: {:sidebar, "file_tree"},
+          ref: "file_tree",
+          handler: handler || Input.FileTreeHandler,
+          scrollable?: true,
+          focusable?: true
+        )
+
       %{id: id, input_handler: handler} ->
         TreeNode.new({:custom, :sidebar}, rect,
           id: {:sidebar, id},
@@ -196,6 +206,30 @@ defmodule MingaEditor.FocusTree do
         )
     end
   end
+
+  @spec active_left_sidebar(map() | nil) :: Sidebar.entry() | nil
+  defp active_left_sidebar(nil) do
+    Sidebar.visible()
+    |> Enum.reject(&(&1.id == "file_tree"))
+    |> Enum.filter(&(&1.placement == :left))
+    |> Enum.sort_by(&{not &1.focused?, &1.priority, &1.id})
+    |> List.first()
+  end
+
+  defp active_left_sidebar(state) do
+    Sidebar.visible()
+    |> Enum.filter(&(&1.placement == :left))
+    |> Enum.reject(&stale_file_tree_sidebar?(state, &1))
+    |> Enum.sort_by(&{not &1.focused?, &1.priority, &1.id})
+    |> List.first()
+  end
+
+  @spec stale_file_tree_sidebar?(map(), Sidebar.entry()) :: boolean()
+  defp stale_file_tree_sidebar?(state, %{id: "file_tree"}) do
+    EditorState.file_tree_state(state).tree == nil
+  end
+
+  defp stale_file_tree_sidebar?(_state, _sidebar), do: false
 
   @spec agent_panel_node(Layout.rect()) :: TreeNode.t()
   defp agent_panel_node(rect) do

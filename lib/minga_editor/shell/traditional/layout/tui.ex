@@ -7,7 +7,6 @@ defmodule MingaEditor.Shell.Traditional.Layout.TUI do
   agent panel, modeline, and minibuffer.
   """
 
-  alias Minga.Project.FileTree
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
@@ -189,25 +188,30 @@ defmodule MingaEditor.Shell.Traditional.Layout.TUI do
   @spec file_tree_layout(EditorState.t(), pos_integer(), non_neg_integer()) ::
           {Layout.rect() | nil, non_neg_integer(), pos_integer()}
   defp file_tree_layout(state, total_cols, content_start) do
-    case Sidebar.active_left() do
-      %{preferred_width: width} ->
-        sidebar_layout(state, total_cols, width, content_start)
-
-      nil ->
-        legacy_sidebar_layout(state, total_cols, content_start)
+    case active_left_sidebar(state) do
+      %{preferred_width: width} -> sidebar_layout(state, total_cols, width, content_start)
+      nil -> legacy_sidebar_layout(state, total_cols, content_start)
     end
   end
 
-  @spec legacy_sidebar_layout(EditorState.t(), pos_integer(), non_neg_integer()) ::
-          {Layout.rect() | nil, non_neg_integer(), pos_integer()}
-  defp legacy_sidebar_layout(
-         %{workspace: %{file_tree: %{tree: %FileTree{width: tw}}}} = state,
-         total_cols,
-         content_start
-       ) do
-    sidebar_layout(state, total_cols, tw, content_start)
+  @spec active_left_sidebar(EditorState.t()) :: Sidebar.entry() | nil
+  defp active_left_sidebar(state) do
+    Sidebar.visible()
+    |> Enum.filter(&(&1.placement == :left))
+    |> Enum.reject(&stale_file_tree_sidebar?(state, &1))
+    |> Enum.sort_by(&{not &1.focused?, &1.priority, &1.id})
+    |> List.first()
   end
 
+  @spec stale_file_tree_sidebar?(EditorState.t(), Sidebar.entry()) :: boolean()
+  defp stale_file_tree_sidebar?(state, %{id: "file_tree"}) do
+    EditorState.file_tree_state(state).tree == nil
+  end
+
+  defp stale_file_tree_sidebar?(_state, _sidebar), do: false
+
+  @spec legacy_sidebar_layout(EditorState.t(), pos_integer(), non_neg_integer()) ::
+          {Layout.rect() | nil, non_neg_integer(), pos_integer()}
   defp legacy_sidebar_layout(
          %{shell_state: %{git_status_panel: %{} = _panel}} = state,
          total_cols,

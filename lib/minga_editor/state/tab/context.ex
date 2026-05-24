@@ -7,6 +7,7 @@ defmodule MingaEditor.State.Tab.Context do
 
   alias Minga.Keymap.Scope
   alias MingaEditor.FeatureState
+  alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Dired, as: DiredState
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -23,7 +24,6 @@ defmodule MingaEditor.State.Tab.Context do
     :keymap_scope,
     :buffers,
     :windows,
-    :file_tree,
     :dired,
     :viewport,
     :mouse,
@@ -39,7 +39,6 @@ defmodule MingaEditor.State.Tab.Context do
           :keymap_scope
           | :buffers
           | :windows
-          | :file_tree
           | :dired
           | :viewport
           | :mouse
@@ -61,7 +60,6 @@ defmodule MingaEditor.State.Tab.Context do
           keymap_scope: Scope.scope_name() | nil,
           buffers: Buffers.t() | nil,
           windows: Windows.t() | nil,
-          file_tree: FileTreeState.t() | nil,
           dired: DiredState.t() | nil,
           viewport: Viewport.t() | nil,
           mouse: Mouse.t() | nil,
@@ -77,7 +75,6 @@ defmodule MingaEditor.State.Tab.Context do
             keymap_scope: nil,
             buffers: nil,
             windows: nil,
-            file_tree: nil,
             dired: nil,
             viewport: nil,
             mouse: nil,
@@ -116,7 +113,6 @@ defmodule MingaEditor.State.Tab.Context do
       keymap_scope: ws.keymap_scope,
       buffers: ws.buffers,
       windows: ws.windows,
-      file_tree: ws.file_tree,
       dired: ws.dired,
       viewport: ws.viewport,
       mouse: ws.mouse,
@@ -142,12 +138,14 @@ defmodule MingaEditor.State.Tab.Context do
     context = %__MODULE__{version: fetch_version(map)}
     fields = fetch_present_fields(map) || @workspace_fields
 
-    Enum.reduce(fields, context, fn field, acc ->
+    fields
+    |> Enum.reduce(context, fn field, acc ->
       case fetch_field(map, field) do
         {:ok, value} -> put_valid_field(acc, field, value)
         :error -> acc
       end
     end)
+    |> migrate_legacy_file_tree(map)
   end
 
   @doc "Returns a context with valid workspace field overrides applied."
@@ -194,6 +192,22 @@ defmodule MingaEditor.State.Tab.Context do
 
   defp scrub_context_buffer(%__MODULE__{} = context, _pid), do: context
 
+  @spec migrate_legacy_file_tree(t(), map()) :: t()
+  defp migrate_legacy_file_tree(%__MODULE__{} = context, map) do
+    case fetch_legacy_file_tree(map) do
+      {:ok, %FileTreeState{} = file_tree} ->
+        feature_state =
+          context.feature_state
+          |> Kernel.||(%FeatureState{})
+          |> FeatureState.put(FileTreeFeature.source(), FileTreeFeature.feature_id(), file_tree)
+
+        put_valid_field(context, :feature_state, feature_state)
+
+      _ ->
+        context
+    end
+  end
+
   @spec put_valid_field(t(), field_name(), term()) :: t()
   defp put_valid_field(%__MODULE__{} = context, field, value) do
     if valid_field?(field, value), do: put_field(context, field, value), else: context
@@ -222,7 +236,6 @@ defmodule MingaEditor.State.Tab.Context do
   defp valid_field?(:keymap_scope, _value), do: false
   defp valid_field?(:buffers, %Buffers{}), do: true
   defp valid_field?(:windows, %Windows{}), do: true
-  defp valid_field?(:file_tree, %FileTreeState{}), do: true
   defp valid_field?(:dired, %DiredState{}), do: true
   defp valid_field?(:viewport, %Viewport{}), do: true
   defp valid_field?(:mouse, %Mouse{}), do: true
@@ -272,6 +285,9 @@ defmodule MingaEditor.State.Tab.Context do
   @spec fetch_field(map(), field_name()) :: {:ok, term()} | :error
   defp fetch_field(map, :editing), do: fetch_any(map, [:editing, "editing", :vim, "vim"])
   defp fetch_field(map, field), do: fetch_any(map, [field, Atom.to_string(field)])
+
+  @spec fetch_legacy_file_tree(map()) :: {:ok, term()} | :error
+  defp fetch_legacy_file_tree(map), do: fetch_any(map, [:file_tree, "file_tree"])
 
   @spec fetch_any(map(), [atom() | String.t()]) :: {:ok, term()} | :error
   defp fetch_any(map, [key | rest]) do

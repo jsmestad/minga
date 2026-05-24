@@ -703,15 +703,18 @@ defmodule MingaEditor.Commands.AgentSession do
   defp session_project_view(state), do: project_view_from_root(state)
 
   @spec project_view_from_root(state()) :: {ProjectView.t() | nil, boolean()}
-  defp project_view_from_root(%{workspace: %{file_tree: %{project_root: root}}})
-       when is_binary(root) do
-    case ProjectView.overlay(root) do
-      {:ok, project_view} -> {project_view, true}
-      {:error, _reason} -> {nil, false}
+  defp project_view_from_root(state) do
+    case EditorState.file_tree_state(state).project_root do
+      root when is_binary(root) ->
+        case ProjectView.overlay(root) do
+          {:ok, project_view} -> {project_view, true}
+          {:error, _reason} -> {nil, false}
+        end
+
+      _ ->
+        {nil, false}
     end
   end
-
-  defp project_view_from_root(_state), do: {nil, false}
 
   @spec maybe_discard_project_view(ProjectView.t() | nil, boolean()) :: :ok
   defp maybe_discard_project_view(%ProjectView{} = project_view, true) do

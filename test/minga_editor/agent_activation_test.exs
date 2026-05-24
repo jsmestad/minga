@@ -150,7 +150,7 @@ defmodule MingaEditor.AgentActivationTest do
       result = AgentActivation.deactivate(state)
 
       assert result.workspace.windows == windows
-      assert result.workspace.file_tree == file_tree
+      assert EditorState.file_tree_state(result) == file_tree
       assert result.workspace.keymap_scope == :file_tree
       assert AgentAccess.input_focused?(result) == true
     end

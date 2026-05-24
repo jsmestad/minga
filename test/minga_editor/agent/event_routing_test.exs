@@ -268,10 +268,9 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       state = %EditorState{
         port_manager: self(),
         shell: Traditional,
-        workspace: %SessionState{
-          viewport: Viewport.new(24, 80),
-          file_tree: %FileTreeState{project_root: root}
-        },
+        workspace:
+          %SessionState{viewport: Viewport.new(24, 80)}
+          |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
         shell_state: %TraditionalState{agent: %AgentState{}, tab_bar: tb}
       }
 
@@ -317,10 +316,9 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       state = %EditorState{
         port_manager: self(),
         shell: Traditional,
-        workspace: %SessionState{
-          viewport: Viewport.new(24, 80),
-          file_tree: %FileTreeState{project_root: root}
-        },
+        workspace:
+          %SessionState{viewport: Viewport.new(24, 80)}
+          |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
         shell_state: %TraditionalState{agent: %AgentState{}, tab_bar: tb}
       }
 
@@ -362,10 +360,9 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       state = %EditorState{
         port_manager: self(),
         shell: Traditional,
-        workspace: %SessionState{
-          viewport: Viewport.new(24, 80),
-          file_tree: %FileTreeState{project_root: root}
-        },
+        workspace:
+          %SessionState{viewport: Viewport.new(24, 80)}
+          |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
         shell_state: %TraditionalState{agent: %AgentState{}, tab_bar: tb}
       }
 
@@ -393,10 +390,9 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       state = %EditorState{
         port_manager: self(),
         shell: Traditional,
-        workspace: %SessionState{
-          viewport: Viewport.new(24, 80),
-          file_tree: %FileTreeState{project_root: root}
-        },
+        workspace:
+          %SessionState{viewport: Viewport.new(24, 80)}
+          |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
         shell_state: %TraditionalState{agent: %AgentState{}, tab_bar: tb}
       }
 

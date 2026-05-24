@@ -354,6 +354,8 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   @spec sidebar_metadata(ctx()) :: [ProtocolGUI.sidebar_metadata()]
   defp sidebar_metadata(ctx) do
+    registered = registered_sidebar_metadata()
+    registered_ids = MapSet.new(registered, & &1.id)
     registered_active = Sidebar.active_left()
 
     built_in =
@@ -362,9 +364,10 @@ defmodule MingaEditor.Frontend.Emit.GUI do
         git_status_sidebar_metadata(ctx),
         observatory_sidebar_metadata(ctx)
       ]
+      |> Enum.reject(&MapSet.member?(registered_ids, &1.id))
       |> maybe_suppress_builtin_sidebar_visibility(registered_active)
 
-    (built_in ++ registered_sidebar_metadata())
+    (built_in ++ registered)
     |> Enum.sort_by(&{&1.order, &1.id})
   end
 
@@ -382,6 +385,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   @spec registered_sidebar_metadata() :: [ProtocolGUI.sidebar_metadata()]
   defp registered_sidebar_metadata do
     Sidebar.all()
+    |> Enum.reject(&(&1.id == "file_tree"))
     |> Enum.map(fn sidebar ->
       %{
         id: sidebar.id,

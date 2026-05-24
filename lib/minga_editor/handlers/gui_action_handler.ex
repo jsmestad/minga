@@ -200,7 +200,10 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     {shell_state, workspace} =
       MingaEditor.Shell.Board.handle_gui_action(state.shell_state, state.workspace, action)
 
-    state = %{state | shell_state: shell_state, workspace: workspace}
+    state =
+      state
+      |> EditorState.update_shell_state(fn _ -> shell_state end)
+      |> EditorState.set_workspace(workspace)
 
     # After Board zoom into an agent card, atomically activate the
     # agent view (session, scope, window content, prompt focus).
@@ -260,7 +263,10 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     {shell_state, workspace} =
       state.shell.handle_gui_action(state.shell_state, state.workspace, {:close_tab, id})
 
-    state = %{state | shell_state: shell_state, workspace: workspace}
+    state =
+      state
+      |> EditorState.update_shell_state(fn _ -> shell_state end)
+      |> EditorState.set_workspace(workspace)
 
     # Only close the buffer when the shell has a tab bar.
     # EditorState.active_tab/1 returns nil when there are no tabs.
@@ -294,16 +300,13 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:file_tree_edit_confirm, text}) do
-    case state.workspace.file_tree.editing do
+    case EditorState.file_tree_state(state).editing do
       nil ->
         state
 
       %{} ->
-        ft = FileTreeState.update_editing_text(state.workspace.file_tree, text)
-
-        state =
-          EditorState.set_file_tree(state, ft)
-
+        ft = FileTreeState.update_editing_text(EditorState.file_tree_state(state), text)
+        state = EditorState.set_file_tree(state, ft)
         Commands.FileTree.confirm_editing(state)
     end
   end
@@ -583,14 +586,18 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     {shell_state, workspace} =
       state.shell.handle_gui_action(state.shell_state, state.workspace, action)
 
-    %{state | shell_state: shell_state, workspace: workspace}
+    state
+    |> EditorState.update_shell_state(fn _shell_state -> shell_state end)
+    |> EditorState.set_workspace(workspace)
   end
 
   defp dispatch_action(state, {:workspace_set_icon, _ws_id, _icon} = action) do
     {shell_state, workspace} =
       state.shell.handle_gui_action(state.shell_state, state.workspace, action)
 
-    %{state | shell_state: shell_state, workspace: workspace}
+    state
+    |> EditorState.update_shell_state(fn _shell_state -> shell_state end)
+    |> EditorState.set_workspace(workspace)
   end
 
   defp dispatch_action(state, {:space_leader_chord, codepoint, modifiers}) do
@@ -1024,20 +1031,30 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   # Moves the tree cursor to a specific index (used by GUI context menu / header actions).
   @spec move_tree_cursor(state(), non_neg_integer()) :: state()
-  defp move_tree_cursor(%{workspace: %{file_tree: %{tree: nil}}} = state, _index), do: state
-
   defp move_tree_cursor(state, index) do
-    EditorState.update_file_tree(state, fn file_tree ->
-      FileTreeState.set_tree(file_tree, FileTree.select(file_tree.tree, index))
-    end)
+    case EditorState.file_tree_state(state).tree do
+      nil ->
+        state
+
+      tree ->
+        EditorState.update_file_tree(state, fn file_tree ->
+          FileTreeState.set_tree(file_tree, FileTree.select(tree, index))
+        end)
+    end
   end
 
   # Moves the file tree cursor to the given index and performs the action.
   @spec gui_tree_action(state(), non_neg_integer(), :click | :toggle) :: state()
-  defp gui_tree_action(%{workspace: %{file_tree: %{tree: nil}}} = state, _index, _action),
-    do: state
-
   defp gui_tree_action(state, index, action) do
+    if EditorState.file_tree_state(state).tree == nil do
+      state
+    else
+      do_gui_tree_action(state, index, action)
+    end
+  end
+
+  @spec do_gui_tree_action(state(), non_neg_integer(), :click | :toggle) :: state()
+  defp do_gui_tree_action(state, index, action) do
     state = move_tree_cursor(state, index)
 
     case action do
@@ -1047,17 +1064,22 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   @spec open_file_tree_entry_in_split(state(), non_neg_integer()) :: state()
-  defp open_file_tree_entry_in_split(%{workspace: %{file_tree: %{tree: nil}}} = state, _index) do
-    state
+  defp open_file_tree_entry_in_split(state, index) do
+    if EditorState.file_tree_state(state).tree == nil do
+      state
+    else
+      do_open_file_tree_entry_in_split(state, index)
+    end
   end
 
-  defp open_file_tree_entry_in_split(state, index) do
+  @spec do_open_file_tree_entry_in_split(state(), non_neg_integer()) :: state()
+  defp do_open_file_tree_entry_in_split(state, index) do
     state =
       state
       |> move_tree_cursor(index)
       |> unfocus_file_tree_for_split()
 
-    case FileTree.selected_entry(state.workspace.file_tree.tree) do
+    case FileTree.selected_entry(EditorState.file_tree_state(state).tree) do
       %{dir?: false, path: path} ->
         state
         |> Commands.Movement.execute(:split_vertical)

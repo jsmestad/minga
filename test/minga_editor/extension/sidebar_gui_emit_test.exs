@@ -4,6 +4,7 @@ defmodule MingaEditor.Extension.SidebarGUIEmitTest do
 
   alias Minga.Project.FileTree
   alias MingaEditor.Extension.Sidebar
+  alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Frontend.Emit.GUI, as: EmitGUI
   alias MingaEditor.Renderer.Caches
@@ -13,11 +14,10 @@ defmodule MingaEditor.Extension.SidebarGUIEmitTest do
   import MingaEditor.RenderPipeline.TestHelpers
 
   setup do
-    reset_default_sidebar_table()
-    start_supervised!({Sidebar, name: Sidebar})
+    Sidebar.unregister_source({:extension, :outline})
 
     on_exit(fn ->
-      if :ets.whereis(Sidebar) != :undefined, do: :ets.delete(Sidebar)
+      Sidebar.unregister_source({:extension, :outline})
     end)
 
     :ok
@@ -30,6 +30,7 @@ defmodule MingaEditor.Extension.SidebarGUIEmitTest do
 
     file_tree = FileTreeState.open(%FileTreeState{}, FileTree.new(root, width: 32), nil)
     state = gui_state() |> put_in([Access.key(:workspace), Access.key(:file_tree)], file_tree)
+    FileTreeFeature.sync_sidebar(%FileTreeState{})
 
     assert :ok =
              Sidebar.register({:extension, :outline}, %{
@@ -116,9 +117,5 @@ defmodule MingaEditor.Extension.SidebarGUIEmitTest do
     after
       0 -> Enum.reverse(acc)
     end
-  end
-
-  defp reset_default_sidebar_table do
-    if :ets.whereis(Sidebar) != :undefined, do: :ets.delete(Sidebar)
   end
 end

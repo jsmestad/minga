@@ -98,11 +98,8 @@ defmodule MingaEditor.Input.InlineEdit do
   end
 
   @spec project_root(state()) :: String.t()
-  defp project_root(%{workspace: %{file_tree: %{project_root: root}}}) when is_binary(root),
-    do: root
-
-  defp project_root(%{workspace: %{file_tree: %{original_root: root}}}) when is_binary(root),
-    do: root
-
-  defp project_root(_state), do: File.cwd!()
+  defp project_root(state) do
+    file_tree = EditorState.file_tree_state(state)
+    file_tree.project_root || file_tree.original_root || File.cwd!()
+  end
 end

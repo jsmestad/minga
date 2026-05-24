@@ -484,8 +484,13 @@ defmodule MingaEditor.Commands.Git do
 
   # Mutual exclusivity: close file tree when opening git status.
   @spec close_file_tree_if_open(state()) :: state()
-  defp close_file_tree_if_open(%{workspace: %{file_tree: %{tree: nil}}} = state), do: state
-  defp close_file_tree_if_open(state), do: Commands.FileTree.close(state)
+  defp close_file_tree_if_open(state) do
+    if EditorState.file_tree_state(state).tree == nil do
+      state
+    else
+      Commands.FileTree.close(state)
+    end
+  end
 
   @doc """
   Opens a diff view for a file specified by path.

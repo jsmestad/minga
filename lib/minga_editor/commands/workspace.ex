@@ -238,10 +238,9 @@ defmodule MingaEditor.Commands.Workspace do
     do: EditorState.set_status(state, "No workspace tab bar")
 
   @spec active_file_ref(state(), TabBar.t()) :: {:ok, FileRef.t()} | {:error, String.t()}
-  defp active_file_ref(
-         %{workspace: %{buffers: %{active: active}, file_tree: file_tree}},
-         %TabBar{} = tb
-       ) do
+  defp active_file_ref(%{workspace: %{buffers: %{active: active}}} = state, %TabBar{} = tb) do
+    file_tree = EditorState.file_tree_state(state)
+
     case TabBar.active(tb) do
       %{kind: :file, file_ref: %FileRef{} = file_ref} -> {:ok, file_ref}
       %{kind: :file} -> active_buffer_file_ref(active, file_tree.project_root)

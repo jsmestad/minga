@@ -19,10 +19,12 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
   alias MingaEditor.RenderPipeline.Chrome
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.StatusBar.Data, as: StatusBarData
   alias MingaEditor.Shell.Traditional.Chrome.Helpers, as: ChromeHelpers
   alias MingaEditor.Shell.Traditional.Modeline
+  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Shell.Traditional.GitStatusRenderer
   alias MingaEditor.Shell.Traditional.SidebarRenderer
   alias MingaEditor.Shell.Traditional.TreeRenderer
@@ -136,11 +138,31 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
 
   @spec sidebar_draws(state(), Layout.t()) :: [DisplayList.draw()]
   defp sidebar_draws(state, layout) do
-    if SidebarRenderer.visible?() do
-      SidebarRenderer.render(state, layout.file_tree)
+    file_tree = EditorState.file_tree_state(state)
+
+    if FileTreeState.visible_status?(FileTreeState.status(file_tree)) do
+      TreeRenderer.render(state)
     else
-      legacy_sidebar_draws(state, layout)
+      extension_sidebar_draws(state, layout, active_extension_left_sidebar())
     end
+  end
+
+  @spec extension_sidebar_draws(state(), Layout.t(), Sidebar.entry() | nil) :: [
+          DisplayList.draw()
+        ]
+  defp extension_sidebar_draws(state, layout, nil), do: legacy_sidebar_draws(state, layout)
+
+  defp extension_sidebar_draws(state, layout, %{id: _id}) do
+    SidebarRenderer.render(state, layout.file_tree)
+  end
+
+  @spec active_extension_left_sidebar() :: Sidebar.entry() | nil
+  defp active_extension_left_sidebar do
+    Sidebar.visible()
+    |> Enum.reject(&(&1.id == "file_tree"))
+    |> Enum.filter(&(&1.placement == :left))
+    |> Enum.sort_by(&{not &1.focused?, &1.priority, &1.id})
+    |> List.first()
   end
 
   @spec legacy_sidebar_draws(state(), Layout.t()) :: [DisplayList.draw()]
@@ -158,7 +180,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
       layout.minibuffer,
       layout.status_bar,
       state.workspace.windows.tree,
-      state.workspace.file_tree,
+      EditorState.file_tree_state(state),
       state.workspace.keymap_scope,
       ChromeState.from_editor_state(state),
       state.shell_state |> Map.get(:git_status_panel),

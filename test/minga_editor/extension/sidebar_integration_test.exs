@@ -12,11 +12,10 @@ defmodule MingaEditor.Extension.SidebarIntegrationTest do
   import MingaEditor.RenderPipeline.TestHelpers
 
   setup do
-    reset_default_sidebar_table()
-    start_supervised!({Sidebar, name: Sidebar})
+    Sidebar.unregister_source({:extension, :outline})
 
     on_exit(fn ->
-      if :ets.whereis(Sidebar) != :undefined, do: :ets.delete(Sidebar)
+      Sidebar.unregister_source({:extension, :outline})
     end)
 
     :ok
@@ -151,9 +150,5 @@ defmodule MingaEditor.Extension.SidebarIntegrationTest do
     after
       0 -> :ok
     end
-  end
-
-  defp reset_default_sidebar_table do
-    if :ets.whereis(Sidebar) != :undefined, do: :ets.delete(Sidebar)
   end
 end

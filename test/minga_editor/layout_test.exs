@@ -1,5 +1,6 @@
 defmodule MingaEditor.LayoutTest do
-  use ExUnit.Case, async: true
+  # Mutates the global built-in FileTree sidebar registration while computing layout.
+  use ExUnit.Case, async: false
   use ExUnitProperties
 
   alias MingaEditor.Agent.UIState
@@ -45,8 +46,14 @@ defmodule MingaEditor.LayoutTest do
   end
 
   defp with_file_tree(state, width) do
-    tree = %FileTree{root: "/tmp", width: width}
-    put_in(state.workspace.file_tree.tree, tree)
+    file_tree =
+      MingaEditor.State.FileTree.open(
+        %MingaEditor.State.FileTree{},
+        %FileTree{root: "/tmp", width: width},
+        nil
+      )
+
+    EditorState.set_file_tree(state, file_tree)
   end
 
   defp with_agent_workspace(state) do
