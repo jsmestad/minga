@@ -1,14 +1,16 @@
 defmodule Minga.Test.NeovimOracle do
   @moduledoc """
-  Runs vim-grammar conformance scenarios against Neovim and returns the captured editor state.
+  Runs vim conformance scenarios against Neovim and returns the captured editor state.
 
-  The oracle receives plain scenario data from Elixir, writes it to a temporary JSON file, runs `nvim --headless --clean -l test/conformance/oracle.lua`, and parses one JSON result per line. Scenario authors should not need to edit Lua when adding coverage. Add a scenario map in `test/conformance/*_test.exs` with `:name`, `:type`, `:content`, `:cursor`, `:keys`, and `:compare`. The `:compare` field can be a single target (`:content`, `:cursor`, `:mode`, `:register`, or `:register_type`), `:both`, or a list of targets. Tagged known divergences carry a `:known_divergence` map with the exact failing fields, current Minga actual values for those fields, and a scenario-specific reason.
+  The oracle receives plain scenario data from Elixir, writes it to a temporary JSON file, runs `nvim --headless --clean -l test/conformance/oracle.lua`, and parses one JSON result per line. Scenario authors should not need to edit Lua when adding coverage. Add a scenario map in `test/conformance/*_test.exs` with `:name`, `:type`, `:content`, `:cursor`, and `:compare`. Motion, operator, and text_object scenarios also include `:keys`. Window scenarios use `:commands` (Neovim ex-commands) and `:minga_keys` (Minga key sequences) instead. The `:compare` field accepts a single target (`:content`, `:cursor`, `:mode`, `:register`, `:register_type`), `:both`, `:window_state`, or a list of any combination. Tagged known divergences carry a `:known_divergence` map with the exact failing fields, current Minga actual values for those fields, and a scenario-specific reason.
   """
 
   @type cursor :: %{required(:line) => non_neg_integer(), required(:col) => non_neg_integer()}
-  @type scenario_type :: :motion | :operator | :text_object | :search
+  @type scenario_type :: :motion | :operator | :text_object | :search | :window
   @type compare_field :: :content | :cursor | :mode | :register | :register_type
-  @type compare_target :: compare_field() | :both | [compare_field()]
+  @type window_compare_field :: :window_count | :active_window | :cursors | :buffers | :layout
+  @type compare_target ::
+          compare_field() | :both | :window_state | [compare_field() | window_compare_field()]
   @type divergence :: %{
           required(:reason) => String.t(),
           required(:failures) => [compare_field()],
@@ -19,10 +21,22 @@ defmodule Minga.Test.NeovimOracle do
           required(:type) => scenario_type(),
           required(:content) => String.t(),
           required(:cursor) => cursor(),
-          required(:keys) => String.t(),
+          optional(:keys) => String.t(),
+          optional(:commands) => [String.t()],
+          optional(:minga_keys) => [String.t()],
           required(:compare) => compare_target(),
           optional(:tags) => [atom()],
           optional(:known_divergence) => divergence()
+        }
+  @type window_info :: %{
+          required(:buffer_first_line) => String.t(),
+          required(:line) => non_neg_integer(),
+          required(:col) => non_neg_integer(),
+          required(:active) => boolean(),
+          required(:row_pos) => non_neg_integer(),
+          required(:col_pos) => non_neg_integer(),
+          required(:width) => pos_integer(),
+          required(:height) => pos_integer()
         }
   @type result :: %{
           required(:name) => String.t(),
@@ -33,6 +47,8 @@ defmodule Minga.Test.NeovimOracle do
           optional(:mode) => String.t(),
           optional(:register) => String.t(),
           optional(:register_type) => String.t(),
+          optional(:window_count) => non_neg_integer(),
+          optional(:windows) => [window_info()],
           optional(:error) => String.t()
         }
   @type error ::
@@ -97,6 +113,16 @@ defmodule Minga.Test.NeovimOracle do
   end
 
   @spec stringify_scenario(scenario()) :: map()
+  defp stringify_scenario(%{type: :window} = scenario) do
+    %{
+      name: scenario.name,
+      type: "window",
+      content: scenario.content,
+      cursor: scenario.cursor,
+      commands: scenario.commands
+    }
+  end
+
   defp stringify_scenario(scenario) do
     %{
       name: scenario.name,
@@ -166,10 +192,32 @@ defmodule Minga.Test.NeovimOracle do
   end
 
   @spec normalize_result(map()) :: result()
+  defp normalize_result(%{"windows" => windows} = result) do
+    result
+    |> Map.delete("windows")
+    |> Enum.map(fn {key, value} -> {result_key(key), value} end)
+    |> Map.new()
+    |> Map.put(:windows, Enum.map(windows, &normalize_window_info/1))
+  end
+
   defp normalize_result(result) do
     result
     |> Enum.map(fn {key, value} -> {result_key(key), value} end)
     |> Map.new()
+  end
+
+  @spec normalize_window_info(map()) :: window_info()
+  defp normalize_window_info(win) do
+    %{
+      buffer_first_line: Map.fetch!(win, "buffer_first_line"),
+      line: Map.fetch!(win, "line"),
+      col: Map.fetch!(win, "col"),
+      active: Map.fetch!(win, "active"),
+      row_pos: Map.fetch!(win, "row_pos"),
+      col_pos: Map.fetch!(win, "col_pos"),
+      width: Map.fetch!(win, "width"),
+      height: Map.fetch!(win, "height")
+    }
   end
 
   @spec result_key(String.t()) :: atom()
@@ -181,5 +229,6 @@ defmodule Minga.Test.NeovimOracle do
   defp result_key("mode"), do: :mode
   defp result_key("register"), do: :register
   defp result_key("register_type"), do: :register_type
+  defp result_key("window_count"), do: :window_count
   defp result_key("error"), do: :error
 end
