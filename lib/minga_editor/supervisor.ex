@@ -6,6 +6,7 @@ defmodule MingaEditor.Supervisor do
 
       MingaEditor.Supervisor (rest_for_one)
       ├── Minga.Parser.Manager            Tree-sitter parser Port
+      ├── MingaEditor.Extension.Sidebar   Source-owned sidebar registry
       ├── MingaEditor.Frontend.Manager    Zig/Metal frontend Port
       ├── MingaEditor.Renderer.Server     Async render pipeline
       └── MingaEditor                     Editor orchestration GenServer
@@ -40,6 +41,7 @@ defmodule MingaEditor.Supervisor do
     children =
       [
         Minga.Parser.Manager,
+        MingaEditor.Extension.Sidebar,
         {MingaEditor.Frontend.Manager, [backend: backend]}
       ] ++
         renderer_children() ++

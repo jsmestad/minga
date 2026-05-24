@@ -24,6 +24,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
   alias MingaEditor.Shell.Traditional.Chrome.Helpers, as: ChromeHelpers
   alias MingaEditor.Shell.Traditional.Modeline
   alias MingaEditor.Shell.Traditional.GitStatusRenderer
+  alias MingaEditor.Shell.Traditional.SidebarRenderer
   alias MingaEditor.Shell.Traditional.TreeRenderer
   alias MingaEditor.Session.ChromeState
   alias MingaEditor.UI.Popup.Lifecycle, as: PopupLifecycle
@@ -134,11 +135,20 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
   end
 
   @spec sidebar_draws(state(), Layout.t()) :: [DisplayList.draw()]
-  defp sidebar_draws(%{workspace: %{keymap_scope: :git_status}} = state, layout) do
+  defp sidebar_draws(state, layout) do
+    if SidebarRenderer.visible?() do
+      SidebarRenderer.render(state, layout.file_tree)
+    else
+      legacy_sidebar_draws(state, layout)
+    end
+  end
+
+  @spec legacy_sidebar_draws(state(), Layout.t()) :: [DisplayList.draw()]
+  defp legacy_sidebar_draws(%{workspace: %{keymap_scope: :git_status}} = state, layout) do
     GitStatusRenderer.render(state, layout.file_tree)
   end
 
-  defp sidebar_draws(state, _layout), do: TreeRenderer.render(state)
+  defp legacy_sidebar_draws(state, _layout), do: TreeRenderer.render(state)
 
   @spec stable_chrome_fingerprint(state(), Layout.t(), StatusBarData.t()) :: integer()
   defp stable_chrome_fingerprint(state, layout, status_bar_data) do
@@ -153,6 +163,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
       ChromeState.from_editor_state(state),
       state.shell_state |> Map.get(:git_status_panel),
       state.shell_state |> Map.get(:git_status_tui_state),
+      MingaEditor.Extension.Sidebar.all(),
       state.workspace.editing.mode,
       state.workspace.editing.mode_state,
       status_bar_dirty?(status_bar_data),

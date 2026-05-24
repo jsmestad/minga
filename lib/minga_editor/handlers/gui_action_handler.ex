@@ -21,6 +21,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   alias MingaEditor.BottomPanel
   alias MingaEditor.Commands
+  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Handlers.BufferRegistry
   alias MingaEditor.HighlightSync
   alias MingaEditor.Layout
@@ -383,12 +384,15 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     state
   end
 
-  defp dispatch_action(state, {:sidebar_action, _sidebar_id, kind, "toggle"}) do
-    dispatch_sidebar_toggle(state, kind)
+  defp dispatch_action(state, {:sidebar_action, sidebar_id, kind, "toggle"}) do
+    case Sidebar.get(sidebar_id) do
+      nil -> dispatch_sidebar_toggle(state, kind)
+      _sidebar -> Sidebar.dispatch_action(state, sidebar_id, "toggle", %{kind: kind})
+    end
   end
 
-  defp dispatch_action(state, {:sidebar_action, _sidebar_id, _kind, _action}) do
-    state
+  defp dispatch_action(state, {:sidebar_action, sidebar_id, kind, action}) do
+    Sidebar.dispatch_action(state, sidebar_id, action, %{kind: kind})
   end
 
   defp dispatch_action(state, :new_tab) do

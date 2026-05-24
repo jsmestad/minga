@@ -39,6 +39,7 @@ defmodule MingaEditor.Input do
   alias MingaEditor.Input.Popup
   alias MingaEditor.Input.Prompt
   alias MingaEditor.Input.Scoped
+  alias MingaEditor.Input.Sidebar
   alias MingaEditor.Input.SignatureHelp
   alias MingaEditor.Input.ToolApproval
 
@@ -62,6 +63,7 @@ defmodule MingaEditor.Input do
     {Dired, 70},
     {Popup, 80},
     {MingaEditor.Input.CUA.TUISpaceLeader, 90},
+    {Sidebar, 95},
     {Scoped, 100},
     {AgentNav, 110},
     {GlobalBindings, 120},
