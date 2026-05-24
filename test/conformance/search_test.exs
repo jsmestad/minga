@@ -50,8 +50,8 @@ defmodule Minga.Conformance.SearchTest do
       name: "N after /word goes to previous match",
       type: :search,
       content: "foo bar foo baz foo",
-      cursor: %{line: 0, col: 0},
-      keys: "/foo<CR>nN",
+      cursor: %{line: 0, col: 4},
+      keys: "/foo<CR>N",
       compare: :cursor
     },
 
@@ -99,6 +99,15 @@ defmodule Minga.Conformance.SearchTest do
       compare: :cursor
     },
 
+    %{
+      name: "* sets search register so n advances to next match",
+      type: :search,
+      content: "one two one three one",
+      cursor: %{line: 0, col: 0},
+      keys: "*n",
+      compare: :cursor
+    },
+
     # ── # word under cursor backward ──────────────────────────────────────────
 
     %{
@@ -118,7 +127,7 @@ defmodule Minga.Conformance.SearchTest do
       content: "hello world",
       cursor: %{line: 0, col: 3},
       keys: "/zzzzz<CR>",
-      compare: :cursor
+      compare: [:cursor, :mode]
     },
 
     # ── multiple matches on same line ─────────────────────────────────────────
@@ -165,7 +174,7 @@ defmodule Minga.Conformance.SearchTest do
       compare: :cursor,
       tags: [:known_divergence],
       known_divergence: %{
-        reason: "Neovim uses vim regex (magic mode) where \\. matches a literal dot. Minga uses PCRE regex where the backslash escape behaves differently in the search prompt.",
+        reason: "Neovim interprets /-search patterns as vim magic-mode regex where \\. matches a literal dot. Minga performs plain substring search for slash-search input, so the literal two characters \\. do not match the dot in foo.bar.",
         failures: [:cursor],
         actual: %{line: 0, col: 0}
       }

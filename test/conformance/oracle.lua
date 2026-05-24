@@ -85,6 +85,7 @@ local function run_keys(keys)
   return vim.api.nvim_get_mode().mode
 end
 
+-- feedkeys with "nx" does not open the search command-line; normal! drives the full /{pattern}<CR> flow.
 local function run_search(keys)
   vim.o.wrapscan = true
   local termcoded = vim.api.nvim_replace_termcodes(keys, true, false, true)
