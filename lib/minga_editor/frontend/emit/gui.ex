@@ -2027,6 +2027,8 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     else
       {0, 0}
     end
+  rescue
+    _ -> {0, 0}
   catch
     :exit, _ -> {0, 0}
   end

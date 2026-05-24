@@ -320,6 +320,14 @@ defmodule MingaEditor.Frontend.GUISearchTest do
     test "regex mode treats dot as wildcard" do
       assert {0, 0} == Search.find_next("axb other", "a.b", {0, 0}, :forward, regex: true)
     end
+
+    test "invalid regex falls back to literal match" do
+      assert {0, 4} == Search.find_next("foo [bar baz", "[bar", {0, 0}, :forward, regex: true)
+    end
+
+    test "invalid regex returns nil when literal not found" do
+      assert nil == Search.find_next("foo bar", "[missing", {0, 0}, :forward, regex: true)
+    end
   end
 
   describe "Search.find_all_in_range with opts" do

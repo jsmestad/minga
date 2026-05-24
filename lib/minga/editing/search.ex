@@ -26,7 +26,7 @@ defmodule Minga.Editing.Search do
   @typedoc "A zero-indexed cursor position."
   @type position :: {non_neg_integer(), non_neg_integer()}
 
-  @typedoc "Search options. All default to false (plain case-sensitive substring)."
+  @typedoc "Search options. Defaults: `case_sensitive: true`, `whole_word: false`, `regex: false`."
   @type search_opts :: [
           case_sensitive: boolean(),
           whole_word: boolean(),
@@ -50,8 +50,11 @@ defmodule Minga.Editing.Search do
       regex_source = if use_regex, do: pattern, else: Regex.escape(pattern)
       regex_source = if whole_word, do: "\\b#{regex_source}\\b", else: regex_source
       regex_opts = if case_sensitive, do: "", else: "i"
-      {:ok, regex} = Regex.compile(regex_source, regex_opts)
-      regex
+
+      case Regex.compile(regex_source, regex_opts) do
+        {:ok, regex} -> regex
+        {:error, _} -> Regex.compile!(Regex.escape(pattern), regex_opts)
+      end
     else
       pattern
     end
