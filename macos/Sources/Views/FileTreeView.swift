@@ -22,6 +22,11 @@ struct FileTreeView: View {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.15
     }
 
+    /// PreviewHost can force eager layout for isolated component snapshots, but full-shell previews keep the production LazyVStack path.
+    private var usesPreviewEagerLayout: Bool {
+        PreviewSnapshotPolicy.shouldUseEagerLayout(for: "FileTreeView")
+    }
+
     @State private var scrollOffset: CGFloat = 0
     @State private var dropTargetEntryId: String? = nil
     @State private var lastClickEntryId: String? = nil
@@ -41,6 +46,15 @@ struct FileTreeView: View {
     private var entryList: some View {
         if fileTreeState.entries.isEmpty && fileTreeState.treeState != .ready {
             stateContent
+        } else if usesPreviewEagerLayout {
+            ScrollView(.vertical) {
+                VStack(spacing: 0) {
+                    ForEach(fileTreeState.entries) { entry in
+                        entryRow(entry)
+                    }
+                }
+                .padding(.top, 2)
+            }
         } else {
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {

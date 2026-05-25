@@ -111,21 +111,10 @@ targets:
     type: application
     platform: macOS
     sources:
-      - path: Sources/Views
+      - path: Sources
         type: group
         excludes:
-          - "EditorNSView.swift"
-          - "EditorView.swift"
-          - "MingaWindow.swift"
-          - "Settings/SettingsView.swift"
-      - path: Sources/Protocol
-        type: group
-      - path: Sources/PreviewHostApp.swift
-        type: file
-      - path: Sources/PreviewRegistry.swift
-        type: file
-      - path: Sources/Renderer/WindowContent.swift
-        type: file
+          - "MingaApp.swift"
       - path: .generated/protocol/ProtocolOpcodes.generated.swift
         name: ProtocolOpcodes.generated.swift
         type: file

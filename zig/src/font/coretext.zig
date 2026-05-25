@@ -114,10 +114,8 @@ pub const GlyphInfo = struct {
     width: u32,
     height: u32,
 
-    /// Bearing offsets for positioning (in point space, fractional).
-    /// Stored as floats to preserve sub-pixel precision — truncating to
-    /// integers causes per-glyph rounding errors that create visible
-    /// vertical wobble when scaled for Retina rendering.
+    /// Glyph bitmap offsets from the cell origin in point space.
+    /// Stored as floats to preserve sub-pixel precision; truncating early causes visible wobble when scaled for Retina rendering.
     offset_x: f64,
     offset_y: f64,
 
@@ -372,7 +370,7 @@ pub fn rasterizeGlyph(self: *CoreTextFont, atlas: *Atlas, alloc: Allocator, code
         .width = render_width,
         .height = render_height,
         .offset_x = bounding_rect.origin.x,
-        .offset_y = bounding_rect.origin.y + bounding_rect.size.height,
+        .offset_y = self.ascent - (bounding_rect.origin.y + bounding_rect.size.height),
         .is_color = is_color,
     };
 }

@@ -12,6 +12,8 @@ const png_writer = @import("png_writer.zig");
 
 const SnapshotSurface = @This();
 
+const snapshot_padding_px: u32 = 10;
+
 /// RGBA pixel buffer (row-major, 4 bytes per pixel).
 pixels: []u8,
 /// Grid dimensions in cells.
@@ -46,8 +48,8 @@ const NullWriter = struct {
 };
 
 pub fn init(alloc: std.mem.Allocator, cols: u16, rows: u16, face: *font_mod.Face, output_path: []const u8, io: std.Io) !SnapshotSurface {
-    const pixel_width = @as(u32, cols) * face.cell_width;
-    const pixel_height = @as(u32, rows) * face.cell_height;
+    const pixel_width = @as(u32, cols) * face.cell_width + snapshot_padding_px * 2;
+    const pixel_height = @as(u32, rows) * face.cell_height + snapshot_padding_px * 2;
     const buf_size = @as(usize, pixel_width) * pixel_height * 4;
     const pixels = try alloc.alloc(u8, buf_size);
     @memset(pixels, 0);
@@ -95,8 +97,8 @@ pub fn fillBg(self: *SnapshotSurface, bg: u24) void {
 pub fn writeCell(self: *SnapshotSurface, col: u16, row: u16, cell: Cell) void {
     if (col >= self.cols or row >= self.rows) return;
 
-    const px_x = @as(u32, col) * self.cell_width;
-    const px_y = @as(u32, row) * self.cell_height;
+    const px_x = snapshot_padding_px + @as(u32, col) * self.cell_width;
+    const px_y = snapshot_padding_px + @as(u32, row) * self.cell_height;
 
     // Handle ATTR_REVERSE: swap fg and bg.
     const is_reverse = (cell.attrs & protocol.ATTR_REVERSE) != 0;
@@ -229,8 +231,8 @@ pub fn render(self: *SnapshotSurface) !void {
     // Composite cursor only on the first render to avoid double-blending.
     if (!self.rendered) {
         if (self.cursor_visible and self.cursor_col < self.cols and self.cursor_row < self.rows) {
-            const cx = @as(u32, self.cursor_col) * self.cell_width;
-            const cy = @as(u32, self.cursor_row) * self.cell_height;
+            const cx = snapshot_padding_px + @as(u32, self.cursor_col) * self.cell_width;
+            const cy = snapshot_padding_px + @as(u32, self.cursor_row) * self.cell_height;
             switch (self.cursor_shape) {
                 .block => self.fillRect(cx, cy, self.cell_width, self.cell_height, 200, 200, 200, 180),
                 .beam => self.fillRect(cx, cy, 2, self.cell_height, 200, 200, 200, 220),
