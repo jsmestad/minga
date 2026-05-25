@@ -19,6 +19,11 @@ struct GitStatusView: View {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.15
     }
 
+    /// PreviewHost can force eager layout for isolated component snapshots, but full-shell previews keep the production LazyVStack path.
+    private var usesPreviewEagerLayout: Bool {
+        PreviewSnapshotPolicy.shouldUseEagerLayout(for: "GitStatusView")
+    }
+
     @State private var hoveredEntryId: UInt32? = nil
     @State private var hoveredSection: GitStatusSection? = nil
     @State private var fileToDiscard: GitStatusEntry? = nil
@@ -125,14 +130,25 @@ struct GitStatusView: View {
     @ViewBuilder
     private var fileList: some View {
         ScrollView(.vertical) {
-            LazyVStack(spacing: 0) {
-                sectionBlock(.conflicted)
-                sectionBlock(.staged)
-                sectionBlock(.changed)
-                sectionBlock(.untracked)
+            if usesPreviewEagerLayout {
+                VStack(spacing: 0) {
+                    sectionBlock(.conflicted)
+                    sectionBlock(.staged)
+                    sectionBlock(.changed)
+                    sectionBlock(.untracked)
+                }
+                .padding(.top, 2)
+                .animation(.easeInOut(duration: animDuration), value: state.entriesRevision)
+            } else {
+                LazyVStack(spacing: 0) {
+                    sectionBlock(.conflicted)
+                    sectionBlock(.staged)
+                    sectionBlock(.changed)
+                    sectionBlock(.untracked)
+                }
+                .padding(.top, 2)
+                .animation(.easeInOut(duration: animDuration), value: state.entriesRevision)
             }
-            .padding(.top, 2)
-            .animation(.easeInOut(duration: animDuration), value: state.entriesRevision)
         }
     }
 
@@ -398,7 +414,7 @@ struct GitStatusView: View {
                     )) {
                         Text("Amend")
                             .font(.system(size: 11))
-                            .foregroundStyle(theme.treeFg.opacity(0.6))
+                            .foregroundStyle(theme.treeMutedFg)
                     }
                     .toggleStyle(.checkbox)
                     .controlSize(.small)
@@ -410,7 +426,7 @@ struct GitStatusView: View {
                     if state.commitMessage.isEmpty {
                         Text("Commit message\u{2026}")
                             .font(.system(size: 12))
-                            .foregroundStyle(theme.treeFg.opacity(0.3))
+                            .foregroundStyle(theme.treeDisabledFg)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 6)
                     }
@@ -471,10 +487,10 @@ struct GitStatusView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .frame(height: 26)
-                    .foregroundStyle(commitButtonEnabled ? theme.treeBg : theme.treeFg.opacity(0.3))
+                    .foregroundStyle(commitButtonEnabled ? theme.treeBg : theme.treeDisabledFg)
                     .background(
                         RoundedRectangle(cornerRadius: 4)
-                            .fill(commitButtonEnabled ? theme.accent : theme.treeFg.opacity(0.08))
+                            .fill(commitButtonEnabled ? theme.accent : theme.treeFg.opacity(0.10))
                     )
                 }
                 .buttonStyle(.plain)
@@ -509,7 +525,7 @@ struct GitStatusView: View {
         if count >= 50 {
             return theme.gutterWarningFg
         }
-        return theme.treeFg.opacity(0.3)
+        return theme.treeDisabledFg
     }
 
     private var commitBorderColor: Color {
@@ -553,7 +569,7 @@ struct GitStatusView: View {
                 Text(label)
                     .font(.system(size: 11))
             }
-            .foregroundStyle(theme.treeFg.opacity(0.6))
+            .foregroundStyle(theme.treeMutedFg)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .background(
@@ -620,13 +636,13 @@ struct GitStatusView: View {
 
     private func statusColor(_ status: GitFileStatus) -> Color {
         switch status {
-        case .unknown: theme.treeFg.opacity(0.45)
+        case .unknown: theme.treeDisabledFg
         case .modified: theme.gitModifiedFg
         case .added: theme.gitAddedFg
         case .deleted: theme.gitDeletedFg
         case .renamed: theme.gitModifiedFg
         case .copied: theme.gitAddedFg
-        case .untracked: theme.treeFg.opacity(0.5)
+        case .untracked: theme.treeMutedFg
         case .conflicted: theme.gutterErrorFg
         }
     }

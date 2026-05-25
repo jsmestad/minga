@@ -26,13 +26,13 @@ defmodule Minga.Buffer.UndoPatch do
   def from_delta(%EditDelta{} = delta, %Document{} = old_document) do
     old_text =
       old_document
-      |> Document.content()
-      |> binary_part(delta.start_byte, delta.old_end_byte - delta.start_byte)
+      |> Document.slice_byte_range(delta.start_byte, delta.old_end_byte - delta.start_byte)
+      |> own_binary()
 
     %__MODULE__{
       start_byte: delta.start_byte,
       old_text: old_text,
-      new_text: delta.inserted_text,
+      new_text: own_binary(delta.inserted_text),
       cursor: Document.cursor(old_document)
     }
   end
@@ -40,17 +40,25 @@ defmodule Minga.Buffer.UndoPatch do
   @doc "Builds a minimal byte-range patch from two document versions."
   @spec from_documents(Document.t(), Document.t()) :: t()
   def from_documents(%Document{} = old_document, %Document{} = new_document) do
-    old_text = Document.content(old_document)
-    new_text = Document.content(new_document)
-    start_byte = common_prefix_size(old_text, new_text)
-    old_tail = byte_size(old_text) - start_byte
-    new_tail = byte_size(new_text) - start_byte
-    suffix_size = common_suffix_size(old_text, new_text, old_tail, new_tail)
+    old_size = Document.content_byte_size(old_document)
+    new_size = Document.content_byte_size(new_document)
+    start_byte = common_prefix_size(old_document, new_document, min(old_size, new_size), 0)
+    old_tail = old_size - start_byte
+    new_tail = new_size - start_byte
+
+    suffix_size =
+      common_suffix_size(old_document, new_document, old_size, new_size, start_byte, 0)
 
     %__MODULE__{
       start_byte: start_byte,
-      old_text: binary_part(old_text, start_byte, old_tail - suffix_size),
-      new_text: binary_part(new_text, start_byte, new_tail - suffix_size),
+      old_text:
+        old_document
+        |> Document.slice_byte_range(start_byte, old_tail - suffix_size)
+        |> own_binary(),
+      new_text:
+        new_document
+        |> Document.slice_byte_range(start_byte, new_tail - suffix_size)
+        |> own_binary(),
       cursor: Document.cursor(old_document)
     }
   end
@@ -78,55 +86,89 @@ defmodule Minga.Buffer.UndoPatch do
     )
   end
 
-  @spec common_prefix_size(binary(), binary()) :: non_neg_integer()
-  defp common_prefix_size(left, right) do
-    :binary.longest_common_prefix([left, right])
-  end
+  @spec own_binary(binary()) :: binary()
+  defp own_binary(binary), do: :binary.copy(binary)
 
-  @spec common_suffix_size(binary(), binary(), non_neg_integer(), non_neg_integer()) ::
+  @spec common_prefix_size(Document.t(), Document.t(), non_neg_integer(), non_neg_integer()) ::
           non_neg_integer()
-  defp common_suffix_size(left, right, left_tail, right_tail) do
-    left_suffix = binary_part(left, byte_size(left) - left_tail, left_tail)
-    right_suffix = binary_part(right, byte_size(right) - right_tail, right_tail)
-    do_common_suffix_size(left_suffix, right_suffix, left_tail, right_tail, 0)
+  defp common_prefix_size(_left, _right, limit, count) when count == limit, do: count
+
+  defp common_prefix_size(left, right, limit, count) do
+    continue_common_prefix_size(
+      left,
+      right,
+      limit,
+      count,
+      Document.byte_at(left, count) == Document.byte_at(right, count)
+    )
   end
 
-  @spec do_common_suffix_size(
-          binary(),
-          binary(),
+  @spec continue_common_prefix_size(
+          Document.t(),
+          Document.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          boolean()
+        ) ::
+          non_neg_integer()
+  defp continue_common_prefix_size(left, right, limit, count, true) do
+    common_prefix_size(left, right, limit, count + 1)
+  end
+
+  defp continue_common_prefix_size(_left, _right, _limit, count, false), do: count
+
+  @spec common_suffix_size(
+          Document.t(),
+          Document.t(),
+          non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer()
         ) :: non_neg_integer()
-  defp do_common_suffix_size(_left, _right, 0, _right_tail, count), do: count
-  defp do_common_suffix_size(_left, _right, _left_tail, 0, count), do: count
+  defp common_suffix_size(_left, _right, old_size, _new_size, start_byte, count)
+       when count == old_size - start_byte,
+       do: count
 
-  defp do_common_suffix_size(left, right, left_tail, right_tail, count) do
-    left_byte = :binary.at(left, left_tail - 1)
-    right_byte = :binary.at(right, right_tail - 1)
+  defp common_suffix_size(_left, _right, _old_size, new_size, start_byte, count)
+       when count == new_size - start_byte,
+       do: count
+
+  defp common_suffix_size(left, right, old_size, new_size, start_byte, count) do
+    old_byte = Document.byte_at(left, old_size - count - 1)
+    new_byte = Document.byte_at(right, new_size - count - 1)
 
     continue_common_suffix_size(
       left,
       right,
-      left_tail,
-      right_tail,
+      old_size,
+      new_size,
+      start_byte,
       count,
-      left_byte == right_byte
+      old_byte == new_byte
     )
   end
 
   @spec continue_common_suffix_size(
-          binary(),
-          binary(),
+          Document.t(),
+          Document.t(),
+          non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
           boolean()
         ) :: non_neg_integer()
-  defp continue_common_suffix_size(left, right, left_tail, right_tail, count, true) do
-    do_common_suffix_size(left, right, left_tail - 1, right_tail - 1, count + 1)
+  defp continue_common_suffix_size(left, right, old_size, new_size, start_byte, count, true) do
+    common_suffix_size(left, right, old_size, new_size, start_byte, count + 1)
   end
 
-  defp continue_common_suffix_size(_left, _right, _left_tail, _right_tail, count, false),
-    do: count
+  defp continue_common_suffix_size(
+         _left,
+         _right,
+         _old_size,
+         _new_size,
+         _start_byte,
+         count,
+         false
+       ),
+       do: count
 end

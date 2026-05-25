@@ -69,4 +69,21 @@ defmodule Minga.Buffer.OperationTest do
       assert delta.inserted_text == ""
     end
   end
+
+  describe "clear_line/2" do
+    test "returns yanked text and a deletion delta for a non-empty line" do
+      doc = Document.new("one\ntwø\nthree")
+
+      assert {:edited, yanked, new_doc, delta} = Operation.clear_line(doc, 1)
+      assert yanked == "twø"
+      assert Document.content(new_doc) == "one\n\nthree"
+      assert delta.start_byte == 4
+      assert delta.old_end_byte == 8
+      assert delta.new_end_byte == 4
+      assert delta.start_position == {1, 0}
+      assert delta.old_end_position == {1, 4}
+      assert delta.new_end_position == {1, 0}
+      assert delta.inserted_text == ""
+    end
+  end
 end

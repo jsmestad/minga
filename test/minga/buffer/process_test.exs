@@ -721,6 +721,33 @@ defmodule Minga.Buffer.ProcessTest do
       assert BufferProcess.last_undo_source(pid) == :agent
     end
 
+    test "find_and_replace redo reapplies multiline replacements" do
+      pid = start_supervised!({BufferProcess, content: "alpha\nbeta\ngamma"})
+
+      assert {:ok, _} = BufferProcess.find_and_replace(pid, "beta", "one\ntwo")
+      assert BufferProcess.content(pid) == "alpha\none\ntwo\ngamma"
+
+      BufferProcess.undo(pid)
+      assert BufferProcess.content(pid) == "alpha\nbeta\ngamma"
+
+      BufferProcess.redo(pid)
+      assert BufferProcess.content(pid) == "alpha\none\ntwo\ngamma"
+    end
+
+    test "find_and_replace_batch redo reapplies unicode replacements" do
+      pid = start_supervised!({BufferProcess, content: "hello café world"})
+
+      assert {:ok, results} = BufferProcess.find_and_replace_batch(pid, [{"café", "茶"}])
+      assert Enum.all?(results, &match?({:ok, _}, &1))
+      assert BufferProcess.content(pid) == "hello 茶 world"
+
+      BufferProcess.undo(pid)
+      assert BufferProcess.content(pid) == "hello café world"
+
+      BufferProcess.redo(pid)
+      assert BufferProcess.content(pid) == "hello 茶 world"
+    end
+
     test "replace_content records explicit and default sources" do
       pid = start_supervised!({BufferProcess, content: "hello"})
       BufferProcess.replace_content(pid, "goodbye", :agent)
@@ -773,6 +800,37 @@ defmodule Minga.Buffer.ProcessTest do
       # Undo the agent edit; the user entry below should now be at the head.
       BufferProcess.undo(pid)
       assert BufferProcess.last_undo_source(pid) == :user
+    end
+  end
+
+  describe "clear_line/2" do
+    test "returns yanked text, changes content, and supports undo/redo" do
+      pid = start_supervised!({BufferProcess, content: "one\ntwo\nthree"})
+
+      assert {:ok, "two"} = BufferProcess.clear_line(pid, 1)
+      assert BufferProcess.content(pid) == "one\n\nthree"
+
+      BufferProcess.undo(pid)
+      assert BufferProcess.content(pid) == "one\ntwo\nthree"
+
+      BufferProcess.redo(pid)
+      assert BufferProcess.content(pid) == "one\n\nthree"
+    end
+  end
+
+  describe "undo patch memory" do
+    test "1000 small undo entries on a 1 MB file stay under 10 MB" do
+      content = String.duplicate("a", 1_000_000)
+      {:ok, pid} = BufferProcess.start_link(content: content)
+      BufferProcess.move_to(pid, {0, byte_size(content)})
+
+      for _ <- 1..1000 do
+        BufferProcess.break_undo_coalescing(pid)
+        BufferProcess.insert_char(pid, "x")
+      end
+
+      undo_bytes = :erlang.external_size(:sys.get_state(pid).undo_history)
+      assert undo_bytes < 10 * 1024 * 1024
     end
   end
 

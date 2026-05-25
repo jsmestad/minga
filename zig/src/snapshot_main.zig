@@ -2,8 +2,8 @@
 ///
 /// Reads {:packet, 4} framed binary render commands from stdin (same
 /// protocol as minga-renderer), renders them to an in-memory pixel
-/// buffer using CoreText font rasterization, and writes the result
-/// as a PNG file.
+/// buffer using platform font rasterization (CoreText on macOS, FreeType on Linux),
+/// and writes the result as a PNG file.
 ///
 /// Usage:
 ///   cat fixture.bin | minga-snapshot --output snapshot.png [--cols 80] [--rows 24] [--font Menlo] [--size 14]

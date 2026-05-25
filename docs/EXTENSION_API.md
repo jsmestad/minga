@@ -93,7 +93,11 @@ end
 capability :ui, [:modeline]
 ```
 
-`Minga.Extension.manifest(MyExtension, :path)` returns a `%Minga.Extension.Manifest{}` with `:name`, `:description`, `:version`, `:source`, `:commands`, `:keybindings`, `:modeline_segments`, and `:capabilities`. The shape is append-only. Future Minga releases may add fields, but existing fields keep their meaning.
+Capabilities stay in declaration order. If you declare the same capability more than once, the manifest keeps every entry.
+
+`Minga.Extension.manifest(MyExtension, :path)` returns a `%Minga.Extension.Manifest{}` with `:name`, `:description`, `:version`, `:source`, `:commands`, `:keybindings`, `:modeline_segments`, and `:capabilities`. Capabilities are stored as an ordered list of `{family, value}` tuples, so duplicate declarations stay visible. The shape is append-only. Future Minga releases may add fields, but existing fields keep their meaning.
+
+`Minga.Extension.manifest/2` and `Minga.Extension.Manifest.from_module/2` call declaration callbacks directly, so callback failures can raise or exit. The extension supervisor catches those failures during startup and turns them into load errors instead.
 
 ### Lifecycle telemetry
 

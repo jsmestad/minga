@@ -3,12 +3,13 @@
 #
 # Usage: scripts/preview.sh <ViewName>
 #
-# Available views: GitStatusView, FileTreeView, CompletionOverlay,
-#                  StatusBarView, TabBarView, NotificationCenterView
+# Available views: EditorChromeView, AgentChromeView, GitStatusView,
+#                  FileTreeView, CompletionOverlay, StatusBarView, TabBarView,
+#                  NotificationCenterView, ObservatoryView, AgentChatView
 #
-# The script builds the PreviewHost target (fast: no GPU rendering, no BEAM),
-# launches it with the view name, and the app self-captures its window
-# to a PNG before exiting.
+# The script builds the PreviewHost target, launches it with the view name,
+# and the app self-captures its window to a PNG before exiting. Full-shell
+# previews exercise the real editor renderer path without starting the BEAM.
 #
 # Output: macos/Tests/Snapshots/<ViewName>.png
 
@@ -33,7 +34,7 @@ cd macos
 xcodegen generate --quiet 2>/dev/null || xcodegen generate
 cd "$PROJECT_ROOT"
 
-# Build PreviewHost (no GPU rendering, no BEAM, fast)
+# Build PreviewHost.
 xcodebuild build \
     -project macos/Minga.xcodeproj \
     -scheme PreviewHost \
@@ -53,8 +54,8 @@ fi
 mkdir -p "$OUTPUT_DIR"
 
 # Launch directly (not via `open`) so environment variables reach the process.
-# The app self-captures its window and exits.
-PREVIEW_VIEW="$VIEW_NAME" PREVIEW_OUTPUT_DIR="$OUTPUT_DIR" "$APP_PATH/Contents/MacOS/PreviewHost"
+# PreviewSnapshotPolicy is the source of truth for which view names may use eager layout.
+PREVIEW_EAGER_LAYOUT=1 PREVIEW_VIEW="$VIEW_NAME" PREVIEW_OUTPUT_DIR="$OUTPUT_DIR" "$APP_PATH/Contents/MacOS/PreviewHost"
 
 OUTPUT_PATH="$OUTPUT_DIR/${VIEW_NAME}.png"
 

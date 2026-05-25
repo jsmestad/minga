@@ -71,7 +71,8 @@ zig/
     font/
       main.zig                     # Font face abstraction
       atlas.zig                    # Glyph atlas (for future GPU backend)
-      coretext.zig                 # CoreText font loader (macOS only)
+      coretext.zig                 # CoreText font loader (macOS snapshots)
+      freetype.zig                 # FreeType font loader (Linux snapshots)
 
   vendor/grammars/                 # Vendored tree-sitter grammar sources
     {lang}/src/parser.c            # Each grammar has parser.c + optional scanner.c

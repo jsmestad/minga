@@ -141,7 +141,7 @@ struct AgentChatView: View {
 
             Text("·")
                 .font(.system(size: 11))
-                .foregroundStyle(theme.agentTextFg.opacity(0.35))
+                .foregroundStyle(theme.agentDisabledFg)
 
             thinkingLevelMenu
 
@@ -155,7 +155,7 @@ struct AgentChatView: View {
 
             Text(state.statusLabel)
                 .font(.system(size: 11))
-                .foregroundStyle(theme.agentTextFg.opacity(0.4))
+                .foregroundStyle(theme.agentMutedFg)
 
             Button {
                 // Send '?' to toggle help overlay
@@ -163,7 +163,7 @@ struct AgentChatView: View {
             } label: {
                 Image(systemName: "questionmark.circle")
                     .font(.system(size: 13))
-                    .foregroundStyle(state.helpVisible ? theme.agentHeaderFg : theme.agentTextFg.opacity(0.4))
+                    .foregroundStyle(state.helpVisible ? theme.agentHeaderFg : theme.agentMutedFg)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 3)
                     .background(RoundedRectangle(cornerRadius: 4).fill(isHelpHovered ? theme.agentTextFg.opacity(0.06) : Color.clear))
@@ -189,7 +189,9 @@ struct AgentChatView: View {
 
     private var modelPickerButton: some View {
         Button {
-            encoder?.sendExecuteCommand(name: "agent_pick_model")
+            if !state.isThinking {
+                encoder?.sendExecuteCommand(name: "agent_pick_model")
+            }
         } label: {
             HStack(spacing: 4) {
                 Text(state.displayModel.isEmpty ? "Agent" : state.displayModel)
@@ -197,13 +199,13 @@ struct AgentChatView: View {
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 9, weight: .semibold))
             }
-            .foregroundStyle(theme.agentHeaderFg.opacity(state.isThinking ? 0.45 : 1.0))
+            .foregroundStyle(state.isThinking ? theme.agentSecondaryFg : theme.agentHeaderFg)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .background(RoundedRectangle(cornerRadius: 4).fill(isModelHovered && !state.isThinking ? theme.agentTextFg.opacity(0.06) : Color.clear))
         }
         .buttonStyle(.plain)
-        .disabled(state.isThinking)
+        .allowsHitTesting(!state.isThinking)
         .help("Pick model (SPC a m)")
         .accessibilityLabel("Agent model")
         .accessibilityValue(state.displayModel.isEmpty ? "Agent" : state.displayModel)
@@ -213,46 +215,59 @@ struct AgentChatView: View {
         .modifier(HeaderControlPointingHandModifier(isEnabled: !state.isThinking))
     }
 
+    @ViewBuilder
     private var thinkingLevelMenu: some View {
-        Menu {
-            ForEach(["off", "low", "medium", "high"], id: \.self) { level in
-                Button {
-                    encoder?.sendExecuteCommand(name: "agent_thinking_\(level)")
-                } label: {
-                    HStack {
-                        Text(thinkingDisplayName(level))
-                        if state.thinkingLevel == level {
-                            Image(systemName: "checkmark")
+        if state.isThinking {
+            thinkingLevelLabel
+                .help("Pick thinking level (SPC a T)")
+                .accessibilityLabel("Agent thinking level")
+                .accessibilityValue(state.thinkingLabel)
+                .accessibilityHint("Disabled while the agent is streaming")
+                .accessibilityAddTraits(.isButton)
+        } else {
+            Menu {
+                ForEach(["off", "low", "medium", "high"], id: \.self) { level in
+                    Button {
+                        encoder?.sendExecuteCommand(name: "agent_thinking_\(level)")
+                    } label: {
+                        HStack {
+                            Text(thinkingDisplayName(level))
+                            if state.thinkingLevel == level {
+                                Image(systemName: "checkmark")
+                            }
                         }
                     }
+                    .accessibilityLabel("Set thinking level to \(thinkingDisplayName(level))")
+                    .accessibilityHint("Changes the agent thinking level to \(thinkingDisplayName(level))")
                 }
-                .accessibilityLabel("Set thinking level to \(thinkingDisplayName(level))")
-                .accessibilityHint("Changes the agent thinking level to \(thinkingDisplayName(level))")
+            } label: {
+                thinkingLevelLabel
             }
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: state.thinkingIconName)
-                    .font(.system(size: 12))
-                Text(state.thinkingLabel)
-                    .font(.system(size: 12, weight: .medium))
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .semibold))
-            }
-            .foregroundStyle(theme.agentHeaderFg.opacity(state.isThinking ? 0.45 : 0.9))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(RoundedRectangle(cornerRadius: 4).fill(isThinkingHovered && !state.isThinking ? theme.agentTextFg.opacity(0.06) : Color.clear))
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Pick thinking level (SPC a T)")
+            .accessibilityLabel("Agent thinking level")
+            .accessibilityValue(state.thinkingLabel)
+            .accessibilityHint("Opens a menu of thinking levels")
+            .accessibilityAddTraits(.isButton)
+            .onHover { isThinkingHovered = $0 }
+            .modifier(HeaderControlPointingHandModifier(isEnabled: true))
         }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .disabled(state.isThinking)
-        .help("Pick thinking level (SPC a T)")
-        .accessibilityLabel("Agent thinking level")
-        .accessibilityValue(state.thinkingLabel)
-        .accessibilityHint(state.isThinking ? "Disabled while the agent is streaming" : "Opens a menu of thinking levels")
-        .accessibilityAddTraits(.isButton)
-        .onHover { isThinkingHovered = $0 }
-        .modifier(HeaderControlPointingHandModifier(isEnabled: !state.isThinking))
+    }
+
+    private var thinkingLevelLabel: some View {
+        HStack(spacing: 4) {
+            Image(systemName: state.thinkingIconName)
+                .font(.system(size: 12))
+            Text(state.thinkingLabel)
+                .font(.system(size: 12, weight: .medium))
+            Image(systemName: "chevron.down")
+                .font(.system(size: 8, weight: .semibold))
+        }
+        .foregroundStyle(state.isThinking ? theme.agentSecondaryFg : theme.agentHeaderFg.opacity(0.9))
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(RoundedRectangle(cornerRadius: 4).fill(isThinkingHovered && !state.isThinking ? theme.agentTextFg.opacity(0.06) : Color.clear))
     }
 
     private func thinkingDisplayName(_ level: String) -> String {

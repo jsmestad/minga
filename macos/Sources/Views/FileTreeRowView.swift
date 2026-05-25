@@ -1,7 +1,7 @@
 /// Visual row component for the semantic file tree.
 ///
 /// FileTreeView owns list behavior and action wiring. This view owns the row anatomy and visual layers:
-/// disclosure, icon, name, spacer, diagnostic marker, dirty marker, git marker, then background/accent layers.
+/// disclosure, icon, name, reserved status column, then background/accent layers.
 
 import SwiftUI
 
@@ -20,6 +20,8 @@ struct FileTreeRowView: View {
 
     @Environment(\.displayScale) private var displayScale
     @State private var isLocallyHovered = false
+
+    private let statusColumnWidth: CGFloat = 30
 
     private var effectiveHovered: Bool {
         isHovered || isLocallyHovered
@@ -84,12 +86,11 @@ struct FileTreeRowView: View {
                     .foregroundStyle(nameColor)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .layoutPriority(0)
-
-                Spacer(minLength: 0)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
 
                 statusCluster
-                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(width: statusColumnWidth, alignment: .trailing)
                     .layoutPriority(2)
             }
         }
@@ -111,7 +112,7 @@ struct FileTreeRowView: View {
 
     @ViewBuilder
     private var statusCluster: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 4) {
             diagnosticMarker
             dirtyMarker
             gitStatusDot
@@ -124,7 +125,6 @@ struct FileTreeRowView: View {
             Text(text)
                 .font(.system(size: 9, weight: entry.highestDiagnosticSeverity == .hint ? .medium : .bold))
                 .foregroundStyle(color)
-                .padding(.trailing, 4)
         }
     }
 
@@ -166,7 +166,6 @@ struct FileTreeRowView: View {
             Text("●")
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(theme.treeGitModified)
-                .padding(.trailing, entry.showsGitMarker ? 4 : 2)
         }
     }
 
@@ -176,7 +175,6 @@ struct FileTreeRowView: View {
             Circle()
                 .fill(color)
                 .frame(width: entry.hasConflictStatus ? 7 : 6, height: entry.hasConflictStatus ? 7 : 6)
-                .padding(.trailing, 2)
         }
     }
 

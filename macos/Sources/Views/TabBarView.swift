@@ -98,7 +98,7 @@ struct TabBarView: View {
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(theme.tabInactiveFg)
+                    .foregroundStyle(theme.chromeMutedFg)
                     .frame(width: 28, height: barHeight)
             }
             .menuStyle(.borderlessButton)
@@ -548,11 +548,22 @@ struct TabBarView: View {
         }
         .padding(.horizontal, tab.isPinned ? 8 : 12)
         .frame(width: tab.isPinned ? 28 : nil, height: barHeight)
-        .background(tab.isActive ? theme.tabActiveBg : Color.clear)
-        .overlay(alignment: .bottom) {
-            if let tint = tabTint(tab) {
+        .background {
+            RoundedRectangle(cornerRadius: 5)
+                .fill(tabBackgroundColor(tab, isHovering: isHovering))
+                .padding(.vertical, 4)
+        }
+        .overlay(alignment: .top) {
+            if tab.isActive {
                 Rectangle()
-                    .fill(tint)
+                    .fill(tabTint(tab) ?? theme.accent)
+                    .frame(height: 2)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if let tint = tabTint(tab), !tab.isActive {
+                Rectangle()
+                    .fill(tint.opacity(0.75))
                     .frame(height: 2)
             }
         }
@@ -692,7 +703,7 @@ struct TabBarView: View {
         Button(action: action) {
             Image(systemName: systemIcon)
                 .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(theme.tabInactiveFg)
+                .foregroundStyle(theme.chromeMutedFg)
                 .frame(width: 28, height: barHeight)
         }
         .buttonStyle(.plain)
@@ -715,11 +726,21 @@ struct TabBarView: View {
             .padding(.horizontal, 3)
     }
 
+    private func tabBackgroundColor(_ tab: TabEntry, isHovering: Bool) -> Color {
+        if tab.isActive {
+            return theme.tabActiveBg
+        }
+        if isHovering {
+            return theme.tabInactiveFg.opacity(0.08)
+        }
+        return Color.clear
+    }
+
     private func tabTint(_ tab: TabEntry) -> Color? {
         if let tint = tab.tintColor {
             return tint
         }
-        return tab.isAgent ? Color.accentColor : nil
+        return tab.isAgent ? theme.accent : nil
     }
 
     private func pinnedBadgeColor(_ tab: TabEntry) -> Color? {

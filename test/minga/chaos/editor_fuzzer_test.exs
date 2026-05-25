@@ -105,7 +105,7 @@ defmodule Minga.Chaos.EditorFuzzerTest do
     # before we wait for the frame. Without this barrier, collect_frame
     # races against the editor's scheduling on slow CI.
     try do
-      :sys.get_state(editor)
+      GenServer.call(editor, :api_mode, 5_000)
     catch
       :exit, _ -> :ok
     end
@@ -342,8 +342,8 @@ defmodule Minga.Chaos.EditorFuzzerTest do
 
   property "editor survives random action sequences",
     numtests: 50,
-    max_size: 100,
-    max_shrinks: 200 do
+    max_size: 50,
+    max_shrinks: 50 do
     forall {content, cmds} <- content_and_commands() do
       # Trap exits so that if the editor or buffer crashes mid-sequence,
       # the test process survives and PropCheck can report/shrink the

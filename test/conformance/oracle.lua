@@ -43,13 +43,86 @@ local function capture_content()
   return table.concat(lines, "\n")
 end
 
+local function capture_window_state(scenario)
+  local wins = vim.api.nvim_list_wins()
+  local current = vim.api.nvim_get_current_win()
+  local window_list = {}
+
+  for _, win in ipairs(wins) do
+    local buf = vim.api.nvim_win_get_buf(win)
+    local cursor = vim.api.nvim_win_get_cursor(win)
+    local lines = vim.api.nvim_buf_get_lines(buf, 0, 1, false)
+    local first_line = (lines[1] or "")
+    local pos = vim.api.nvim_win_get_position(win)
+
+    table.insert(window_list, {
+      buffer_first_line = first_line,
+      line = cursor[1] - 1,
+      col = cursor[2],
+      active = (win == current),
+      row_pos = pos[1],
+      col_pos = pos[2],
+      width = vim.api.nvim_win_get_width(win),
+      height = vim.api.nvim_win_get_height(win),
+    })
+  end
+
+  table.sort(window_list, function(a, b)
+    if a.row_pos ~= b.row_pos then return a.row_pos < b.row_pos end
+    return a.col_pos < b.col_pos
+  end)
+
+  return {
+    name = scenario.name,
+    ok = true,
+    window_count = #wins,
+    windows = window_list,
+  }
+end
+
+local function run_window_commands(scenario)
+  vim.cmd("silent! only!")
+  vim.cmd("enew!")
+  vim.cmd("setlocal buftype=")
+  vim.cmd("setlocal modifiable")
+  set_buffer_content(scenario.content or "")
+  set_cursor(scenario.cursor or { line = 0, col = 0 })
+
+  for _, cmd in ipairs(scenario.commands or {}) do
+    local cmd_ok, cmd_err = pcall(vim.cmd, cmd)
+    if not cmd_ok then
+      if tostring(cmd_err):find("E444") then
+        -- last-window-close rejection is expected behavior, not an error
+      else
+        error(cmd_err)
+      end
+    end
+  end
+
+  return capture_window_state(scenario)
+end
+
 local function keys_exit_insert(keys)
   return keys:find("<Esc>", 1, true) ~= nil or keys:find("<C%-c>") ~= nil or keys:find("<C%-[>") ~= nil
 end
 
+local function capture_named_registers(scenario)
+  if not scenario.capture_registers then
+    return nil
+  end
+  local regs = {}
+  for _, name in ipairs(scenario.capture_registers) do
+    regs[name] = {
+      content = vim.fn.getreg(name),
+      type = vim.fn.getregtype(name),
+    }
+  end
+  return regs
+end
+
 local function capture_state(scenario, reported_mode)
   local cursor = vim.api.nvim_win_get_cursor(0)
-  return {
+  local state = {
     name = scenario.name,
     ok = true,
     line = cursor[1] - 1,
@@ -59,6 +132,11 @@ local function capture_state(scenario, reported_mode)
     register = vim.fn.getreg('"'),
     register_type = vim.fn.getregtype('"'),
   }
+  local regs = capture_named_registers(scenario)
+  if regs then
+    state.registers = regs
+  end
+  return state
 end
 
 local function run_keys(keys)
@@ -85,22 +163,72 @@ local function run_keys(keys)
   return vim.api.nvim_get_mode().mode
 end
 
+-- feedkeys with "nx" does not open the search command-line; normal! drives the full /{pattern}<CR> flow.
+local function run_search(keys)
+  vim.o.wrapscan = true
+  local termcoded = vim.api.nvim_replace_termcodes(keys, true, false, true)
+  pcall(vim.cmd, "silent! normal! " .. termcoded)
+  return vim.api.nvim_get_mode().mode
+end
+
+local function run_commands(scenario)
+  local commands = scenario.commands or {}
+  for _, cmd in ipairs(commands) do
+    local termcoded = vim.api.nvim_replace_termcodes(cmd, true, false, true)
+    vim.cmd("silent! normal! " .. termcoded)
+  end
+  return vim.api.nvim_get_mode().mode
+end
+
+local function run_macro_keys(keys)
+  -- Macro replay injects keys that may enter/exit insert mode.
+  -- The ModeChanged heuristic in run_keys misreports the final mode
+  -- because it checks the explicit keys for <Esc>, not the replayed
+  -- macro content. Use the actual mode after execution instead.
+  local termcoded = vim.api.nvim_replace_termcodes(keys, true, false, true)
+  vim.api.nvim_feedkeys(termcoded, "nx", false)
+  return vim.api.nvim_get_mode().mode
+end
+
 local runners = {
-  motion = run_keys,
-  operator = run_keys,
-  text_object = run_keys,
+  motion = function(s) return run_keys(s.keys or "") end,
+  operator = function(s) return run_keys(s.keys or "") end,
+  text_object = function(s) return run_keys(s.keys or "") end,
+  search = function(s) return run_search(s.keys or "") end,
+  mark = run_commands,
+  register = function(s) return run_keys(s.keys or "") end,
+  macro = function(s) return run_macro_keys(s.keys or "") end,
 }
 
 local function run_scenario(scenario)
   local ok, result = pcall(function()
+    if scenario.type == "window" then
+      return run_window_commands(scenario)
+    end
+
     vim.cmd("enew!")
     vim.cmd("setlocal buftype=")
     vim.cmd("setlocal modifiable")
     vim.fn.setreg('"', "")
+    vim.fn.setreg('0', "")
+    for i = string.byte("a"), string.byte("z") do
+      vim.fn.setreg(string.char(i), "")
+    end
+    for i = 1, 9 do
+      vim.fn.setreg(tostring(i), "")
+    end
+    if scenario.register_setup then
+      for name, content in pairs(scenario.register_setup) do
+        vim.fn.setreg(name, content)
+      end
+    end
     set_buffer_content(scenario.content or "")
     set_cursor(scenario.cursor or { line = 0, col = 0 })
-    local runner = runners[scenario.type or "motion"] or run_keys
-    local reported_mode = runner(scenario.keys or "")
+    local runner = runners[scenario.type or "motion"]
+    if not runner then
+      runner = function(s) return run_keys(s.keys or "") end
+    end
+    local reported_mode = runner(scenario)
     return capture_state(scenario, reported_mode)
   end)
 
