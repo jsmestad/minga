@@ -7,8 +7,8 @@ defmodule Minga.Extension.Manifest do
 
   alias Minga.Extension
 
-  @typedoc "Declared runtime/UI capability map. Keys are capability families and values are capability-specific terms."
-  @type capabilities :: %{optional(atom()) => term()}
+  @typedoc "Declared runtime/UI capabilities in declaration order. Duplicate entries are preserved."
+  @type capabilities :: [Extension.capability_spec()]
 
   @typedoc "How the extension source code is obtained."
   @type source_type :: :path | :git | :hex
@@ -22,7 +22,7 @@ defmodule Minga.Extension.Manifest do
     commands: [],
     keybindings: [],
     modeline_segments: [],
-    capabilities: %{}
+    capabilities: []
   ]
 
   @type t :: %__MODULE__{
@@ -36,7 +36,13 @@ defmodule Minga.Extension.Manifest do
           capabilities: capabilities()
         }
 
-  @doc "Builds a manifest from an extension module and source type."
+  @doc """
+  Builds a manifest from an extension module and source type.
+
+  This calls the extension's declaration callbacks directly, so callback
+  failures can raise or exit. The extension supervisor rescues those failures
+  and turns them into load errors during startup.
+  """
   @spec from_module(module(), source_type()) :: t()
   def from_module(module, source) when is_atom(module) and source in [:path, :git, :hex] do
     %__MODULE__{
@@ -64,7 +70,7 @@ defmodule Minga.Extension.Manifest do
   @spec safe_capabilities(module()) :: capabilities()
   defp safe_capabilities(module) do
     if function_exported?(module, :__capability_schema__, 0),
-      do: Map.new(module.__capability_schema__()),
-      else: %{}
+      do: module.__capability_schema__(),
+      else: []
   end
 end

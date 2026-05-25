@@ -159,7 +159,13 @@ defmodule Minga.Extension do
   @typedoc "A declared runtime or UI capability: `{family, value}`."
   @type capability_spec :: {atom(), term()}
 
-  @doc "Builds a public manifest for a loaded extension module."
+  @doc """
+  Builds a public manifest for a loaded extension module.
+
+  This calls the extension's declaration callbacks directly, so callback
+  failures can raise or exit. Use `Minga.Extension.Supervisor.start_extension/5`
+  if you want those failures converted into load errors instead of propagating.
+  """
   @spec manifest(module(), Minga.Extension.Manifest.source_type()) :: Minga.Extension.Manifest.t()
   def manifest(module, source) when is_atom(module) and source in [:path, :git, :hex] do
     Minga.Extension.Manifest.from_module(module, source)

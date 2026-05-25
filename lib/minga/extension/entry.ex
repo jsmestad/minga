@@ -33,6 +33,7 @@ defmodule Minga.Extension.Entry do
     :module,
     :pid,
     :manifest,
+    lifecycle_ref: nil,
     config: [],
     status: :stopped
   ]
@@ -45,6 +46,7 @@ defmodule Minga.Extension.Entry do
           module: module() | nil,
           pid: pid() | nil,
           manifest: Extension.Manifest.t() | nil,
+          lifecycle_ref: reference() | nil,
           config: keyword(),
           status: Extension.extension_status()
         }
