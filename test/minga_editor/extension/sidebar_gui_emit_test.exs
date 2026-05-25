@@ -14,12 +14,7 @@ defmodule MingaEditor.Extension.SidebarGUIEmitTest do
 
   setup do
     reset_default_sidebar_table()
-    start_supervised!({Sidebar, name: Sidebar})
-
-    on_exit(fn ->
-      if :ets.whereis(Sidebar) != :undefined, do: :ets.delete(Sidebar)
-    end)
-
+    on_exit(&reset_default_sidebar_table/0)
     :ok
   end
 
@@ -119,6 +114,6 @@ defmodule MingaEditor.Extension.SidebarGUIEmitTest do
   end
 
   defp reset_default_sidebar_table do
-    if :ets.whereis(Sidebar) != :undefined, do: :ets.delete(Sidebar)
+    Sidebar.unregister_source({:extension, :outline})
   end
 end

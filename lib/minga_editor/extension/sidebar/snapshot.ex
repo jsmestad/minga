@@ -15,8 +15,7 @@ defmodule MingaEditor.Extension.Sidebar.Snapshot do
           optional(:active?) => boolean(),
           optional(:badge) => String.t() | nil,
           optional(:git_status) => atom() | String.t() | nil,
-          optional(:diagnostic_count) => non_neg_integer(),
-          optional(:action_id) => String.t() | nil
+          optional(:diagnostic_count) => non_neg_integer()
         }
 
   @typedoc "Sidebar loading/error state."
@@ -105,8 +104,7 @@ defmodule MingaEditor.Extension.Sidebar.Snapshot do
       Map.get(row, :indent, 0),
       Map.get(row, :badge),
       Map.get(row, :git_status),
-      Map.get(row, :diagnostic_count, 0),
-      Map.get(row, :action_id)
+      Map.get(row, :diagnostic_count, 0)
     }
   end
 

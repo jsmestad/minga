@@ -180,9 +180,9 @@ source = {:extension, :my_outline}
 })
 ```
 
-Snapshots include rows plus structural and selection fingerprints. If you do not provide fingerprints, Minga derives them from the row data. Selection-only changes keep the structural fingerprint stable so GUI emit paths can avoid treating cursor movement as a full sidebar rebuild.
+Snapshots include rows plus structural and selection fingerprints. If you do not provide fingerprints, Minga derives them from the row data. Selection-only changes keep the structural fingerprint stable so renderers can avoid treating cursor movement as a full sidebar rebuild.
 
-The render path reads the latest snapshot from the registry. Do not provide `render_tui/2`, GUI binary builders, or per-frame callbacks. Extensions publish semantic rows with ids, text, icons, indentation, selection/active flags, badges, git status, diagnostics, loading/error state, and action ids. The TUI renders those rows inside the assigned sidebar rect. GUI frontends receive sidebar metadata through central protocol encoders and use compiled-in native adapters for known `semantic_kind` values; unknown kinds use the native generic fallback.
+The render path reads the latest snapshot from the registry. Do not provide `render_tui/2`, GUI binary builders, or per-frame callbacks. Extensions publish semantic rows with ids, text, icons, indentation, selection/active flags, badges, git status, diagnostics, and loading/error state. The TUI renders those rows inside the assigned sidebar rect. Native GUI frontends currently receive sidebar metadata through central protocol encoders and use compiled-in native adapters for known `semantic_kind` values; unknown kinds use the native generic fallback and do not render generic snapshot rows yet.
 
 Actions route back through the editor action pipeline. A sidebar action handler receives `(state, action, context)` and returns the new editor state. This is the path for keyboard, mouse, and native GUI sidebar intents, so interactive sidebars can update editor state synchronously through public APIs instead of relying only on fire-and-forget messages to extension processes.
 

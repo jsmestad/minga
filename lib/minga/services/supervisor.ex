@@ -25,6 +25,7 @@ defmodule Minga.Services.Supervisor do
       │   ├── Minga.Editing.Fold.Registry            Fold state
       │   └── Minga.Diagnostics              ETS-backed diagnostics store
       ├── Minga.Extension.Registry           Extension metadata (Agent)
+      ├── MingaEditor.Extension.Sidebar      Source-owned editor sidebar registry
       ├── Minga.Extension.Supervisor         DynamicSupervisor for extension processes
       ├── Minga.Config.Loader                Evaluates user config on init
       ├── Minga.Config.Writer                Debounced GUI settings overlay writer
@@ -57,8 +58,9 @@ defmodule Minga.Services.Supervisor do
       # restarts only that service, not its siblings or the chains below.
       Minga.Services.Independent,
 
-      # Extension chain: Registry → Supervisor → Loader
+      # Extension chain: Registry → editor contribution registries → Supervisor → Loader
       Minga.Extension.Registry,
+      MingaEditor.Extension.Sidebar,
       Minga.Extension.Supervisor,
       Minga.Config.Loader,
       Minga.Config.Writer,

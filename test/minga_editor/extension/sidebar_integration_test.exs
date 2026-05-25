@@ -13,12 +13,7 @@ defmodule MingaEditor.Extension.SidebarIntegrationTest do
 
   setup do
     reset_default_sidebar_table()
-    start_supervised!({Sidebar, name: Sidebar})
-
-    on_exit(fn ->
-      if :ets.whereis(Sidebar) != :undefined, do: :ets.delete(Sidebar)
-    end)
-
+    on_exit(&reset_default_sidebar_table/0)
     :ok
   end
 
@@ -77,6 +72,32 @@ defmodule MingaEditor.Extension.SidebarIntegrationTest do
     assert node.content_type == {:custom, :sidebar}
     assert node.ref == "outline"
     assert node.handler == MingaEditor.Input.Sidebar
+  end
+
+  test "mouse input routes local coordinates through the generic sidebar handler" do
+    state = base_state(cols: 80, rows: 24)
+
+    assert :ok =
+             Sidebar.register({:extension, :outline}, %{
+               id: "outline",
+               display_name: "Outline",
+               preferred_width: 25,
+               visible?: true,
+               focused?: true,
+               action_handler: fn state, "mouse", context ->
+                 EditorState.set_status(
+                   state,
+                   "mouse #{context.row}:#{context.col}:#{context.button}:#{context.modifiers}:#{context.event_type}:#{context.click_count}"
+                 )
+               end
+             })
+
+    focus_tree = state |> LayoutTUI.compute() |> FocusTree.from_layout()
+
+    new_state =
+      Router.dispatch_mouse(%{state | focus_tree: focus_tree}, 2, 3, :left, 4, :press, 2)
+
+    assert EditorState.status_msg(new_state) == "mouse 1:3:left:4:press:2"
   end
 
   test "keyboard input routes through the generic sidebar handler when focused" do
@@ -154,6 +175,6 @@ defmodule MingaEditor.Extension.SidebarIntegrationTest do
   end
 
   defp reset_default_sidebar_table do
-    if :ets.whereis(Sidebar) != :undefined, do: :ets.delete(Sidebar)
+    Sidebar.unregister_source({:extension, :outline})
   end
 end
