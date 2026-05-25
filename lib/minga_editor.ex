@@ -1092,7 +1092,12 @@ defmodule MingaEditor do
 
   defp route_agent_event(state, session_pid, event, :background) do
     {shell_state, workspace, shell_effects} =
-      state.shell.on_agent_event(state.shell_state, state.workspace, session_pid, event)
+      EditorState.active_shell_module(state).on_agent_event(
+        state.shell_state,
+        state.workspace,
+        session_pid,
+        event
+      )
 
     state = %{state | shell_state: shell_state, workspace: workspace}
     state = EffectHandler.apply_effects(state, shell_effects)

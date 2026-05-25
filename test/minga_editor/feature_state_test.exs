@@ -139,14 +139,16 @@ defmodule MingaEditor.FeatureStateTest do
     state = %EditorState{
       port_manager: self(),
       workspace: workspace(),
+      shell_id: :board,
+      shell: MingaEditor.Shell.Board,
       shell_state: board,
-      stashed_board_state: stashed_board
+      shell_state_stash: %{board: stashed_board}
     }
 
     cleaned = EditorState.drop_feature_state_source(state, @source)
 
     cleaned_context = cleaned.shell_state.cards[1].workspace
-    cleaned_stashed_context = cleaned.stashed_board_state.cards[2].workspace
+    cleaned_stashed_context = cleaned.shell_state_stash.board.cards[2].workspace
     restored = SessionState.restore_tab_context(workspace(), cleaned_context)
     restored_stashed = SessionState.restore_tab_context(workspace(), cleaned_stashed_context)
 

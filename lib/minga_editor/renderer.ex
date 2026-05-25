@@ -49,8 +49,9 @@ defmodule MingaEditor.Renderer do
   initialized (if needed). No windows to cache.
   """
   @spec render(state()) :: state()
-  def render(%{shell: shell} = state) do
-    shell.render(state)
+  def render(state) do
+    state = EditorState.ensure_shell_available(state)
+    EditorState.active_shell_module(state).render(state)
   end
 
   @doc """
@@ -66,6 +67,8 @@ defmodule MingaEditor.Renderer do
   def render_or_async(%{backend: :headless} = state), do: render(state)
 
   def render_or_async(%{renderer: pid} = state) when is_pid(pid) do
+    state = EditorState.ensure_shell_available(state)
+
     if async_render?(state) do
       snapshot = Input.from_editor_state(state)
       seq = System.unique_integer([:positive, :monotonic])
@@ -79,7 +82,7 @@ defmodule MingaEditor.Renderer do
   def render_or_async(state), do: render(state)
 
   @spec async_render?(state()) :: boolean()
-  defp async_render?(%{shell: shell} = state), do: shell.async_render?(state)
+  defp async_render?(state), do: EditorState.active_shell_module(state).async_render?(state)
 
   @doc """
   Renders the dashboard home screen (no active buffer).

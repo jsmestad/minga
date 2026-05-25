@@ -32,6 +32,7 @@ defmodule MingaEditor.RenderPipeline do
   alias MingaEditor.Layout
 
   alias MingaEditor.RenderPipeline.BufferPrefetch
+  alias MingaEditor.RenderPipeline.Chrome
   alias MingaEditor.RenderPipeline.Compose
   alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.Input
@@ -149,17 +150,8 @@ defmodule MingaEditor.RenderPipeline do
       | caches: %{input.caches | chrome_prev_fingerprint: chrome_fp, chrome_prev_result: chrome}
     }
 
-    # Cache click regions on input for mouse hit-testing write-back
-    ss = input.shell_state
-
-    input = %{
-      input
-      | shell_state: %{
-          ss
-          | modeline_click_regions: chrome.modeline_click_regions,
-            tab_bar_click_regions: chrome.tab_bar_click_regions
-        }
-    }
+    # Cache click regions on input for mouse hit-testing write-back when the active shell state owns those fields.
+    input = %{input | shell_state: update_shell_click_regions(input.shell_state, chrome)}
 
     # Stage 6: Compose
     frame =
@@ -174,6 +166,22 @@ defmodule MingaEditor.RenderPipeline do
       {updated_caches, updated_font_registry} = Emit.emit(frame, ctx, chrome, input.caches)
       %{input | caches: updated_caches, font_registry: updated_font_registry}
     end)
+  end
+
+  @spec update_shell_click_regions(map(), Chrome.t()) :: map()
+  defp update_shell_click_regions(shell_state, %Chrome{} = chrome) do
+    shell_state
+    |> maybe_put_shell_field(:modeline_click_regions, chrome.modeline_click_regions)
+    |> maybe_put_shell_field(:tab_bar_click_regions, chrome.tab_bar_click_regions)
+  end
+
+  @spec maybe_put_shell_field(map(), atom(), term()) :: map()
+  defp maybe_put_shell_field(shell_state, field, value) do
+    if Map.has_key?(shell_state, field) do
+      Map.put(shell_state, field, value)
+    else
+      shell_state
+    end
   end
 
   # ── Stage 1: Invalidation ─────────────────────────────────────────────────

@@ -10,10 +10,7 @@ defmodule MingaEditor.State do
   and are saved/restored when switching tabs. Each tab carries a snapshot
   of the workspace so switching tabs restores the full editing context.
 
-  **Shell fields** live in `state.shell_state` (`MingaEditor.Shell.Traditional.State`)
-  and hold presentation concerns: chrome, overlays, transient UI state.
-  The active shell module is `state.shell`. See `MingaEditor.Shell` for the
-  behaviour definition.
+  **Shell fields** live in `state.shell_state` and hold presentation concerns: chrome, overlays, transient UI state. The active shell id is `state.shell_id`; `state.shell` is the registered module cached for hot-path compatibility. See `MingaEditor.Shell` for the behaviour definition.
 
   **Global fields** are shared across all tabs and never snapshotted:
   `port_manager`, `theme`, `render_timer`, `focus_stack`,
@@ -22,7 +19,7 @@ defmodule MingaEditor.State do
   ## Composed sub-structs
 
   * `MingaEditor.Session.State`           — per-tab editing context (buffers, windows, vim, etc.)
-  * `MingaEditor.Shell.Traditional.State`   — presentation state (nav_flash, hover, dashboard, etc.)
+  * `MingaEditor.Shell.Traditional.State`   — default presentation state (nav_flash, hover, dashboard, etc.)
   * `MingaEditor.State.WhichKey`     — which-key popup node, timer, visibility
   * `MingaEditor.State.Registers`    — named registers and active register selection
   """
@@ -104,6 +101,7 @@ defmodule MingaEditor.State do
             workspace: nil,
             terminal_viewport: Viewport.new(24, 80),
             editing_model: :vim,
+            shell_id: :traditional,
             shell: MingaEditor.Shell.Traditional,
             shell_state: %ShellState{},
             theme: MingaEditor.UI.Theme.Fallback.theme(),
@@ -128,14 +126,16 @@ defmodule MingaEditor.State do
             buffer_add_context: :open,
             remote: %Remote{},
             resource_pressure: ResourcePressure.new(),
-            stashed_board_state: nil,
+            shell_state_stash: %{},
             keystroke_history: KeystrokeHistory.new(),
             git_commit_gen_ref: nil,
             font_size_override: nil
 
   @type backend :: :tui | :gui | :native_gui | :headless
 
-  @type shell_state :: ShellState.t() | BoardState.t()
+  @type shell_id :: atom()
+  @type shell_state :: term()
+  @type shell_state_stash :: %{shell_id() => shell_state()}
 
   @type t :: %__MODULE__{
           backend: backend(),
@@ -147,6 +147,7 @@ defmodule MingaEditor.State do
           workspace: SessionState.t(),
           terminal_viewport: Viewport.t(),
           editing_model: :vim | :cua,
+          shell_id: shell_id(),
           shell: module(),
           shell_state: shell_state(),
           theme: Theme.t(),
@@ -171,7 +172,7 @@ defmodule MingaEditor.State do
           remote: Remote.t(),
           resource_pressure: ResourcePressure.t(),
           session: EditorSessionState.t(),
-          stashed_board_state: MingaEditor.Shell.Board.State.t() | nil,
+          shell_state_stash: shell_state_stash(),
           keystroke_history: KeystrokeHistory.t(),
           git_commit_gen_ref: reference() | nil,
           font_size_override: pos_integer() | nil
@@ -631,28 +632,26 @@ defmodule MingaEditor.State do
 
   @spec merge_renderer_shell_from_writeback(t(), map()) :: t()
   defp merge_renderer_shell_from_writeback(%__MODULE__{} = state, wb) do
-    case Map.fetch(wb, :shell_state) do
-      {:ok, rendered_shell_state} ->
-        %{
-          state
-          | shell_state: merge_renderer_shell_state(state.shell_state, rendered_shell_state)
-        }
-
-      :error ->
+    with {:ok, shell_id} <- Map.fetch(wb, :shell_id),
+         ^shell_id <- active_shell_id(state),
+         {:ok, rendered_shell_state} <- Map.fetch(wb, :shell_state) do
+      %{
         state
+        | shell_state: merge_renderer_shell_state(state.shell_state, rendered_shell_state)
+      }
+    else
+      _other -> state
     end
   end
 
-  @spec merge_renderer_shell_state(ShellState.t() | BoardState.t(), term()) ::
-          ShellState.t() | BoardState.t()
+  @spec merge_renderer_shell_state(shell_state(), term()) :: shell_state()
   defp merge_renderer_shell_state(live_shell_state, rendered_shell_state) do
     live_shell_state
     |> merge_renderer_shell_field(rendered_shell_state, :modeline_click_regions)
     |> merge_renderer_shell_field(rendered_shell_state, :tab_bar_click_regions)
   end
 
-  @spec merge_renderer_shell_field(ShellState.t() | BoardState.t(), term(), atom()) ::
-          ShellState.t() | BoardState.t()
+  @spec merge_renderer_shell_field(shell_state(), term(), atom()) :: shell_state()
   defp merge_renderer_shell_field(live_shell_state, rendered_shell_state, field) do
     if Map.has_key?(live_shell_state, field) and Map.has_key?(rendered_shell_state, field) do
       Map.put(live_shell_state, field, Map.fetch!(rendered_shell_state, field))
@@ -668,33 +667,136 @@ defmodule MingaEditor.State do
     %{state | shell_state: fun.(ss)}
   end
 
-  @doc "Switches from the Board shell back to the Traditional shell and stashes the Board state."
-  @spec switch_from_board_to_traditional(t(), BoardState.t(), boolean()) :: t()
-  def switch_from_board_to_traditional(
-        %__MODULE__{} = state,
-        %BoardState{} = board_state,
-        suppress_tool_prompts
-      )
-      when is_boolean(suppress_tool_prompts) do
+  @doc "Returns the active shell id, preserving compatibility with tests that still set only `:shell`."
+  @spec active_shell_id(t() | map()) :: shell_id()
+  def active_shell_id(%{shell_id: id, shell: shell}) do
+    case MingaEditor.Shell.Registry.id_for_module(shell) do
+      nil -> id
+      ^id -> id
+      module_id -> module_id
+    end
+  end
+
+  def active_shell_id(%{shell: shell}) when is_atom(shell) do
+    MingaEditor.Shell.Registry.id_for_module(shell) || MingaEditor.Shell.Registry.default().id
+  end
+
+  def active_shell_id(_state), do: MingaEditor.Shell.Registry.default().id
+
+  @doc "Returns the active shell module, refreshing from the registry when possible."
+  @spec active_shell_module(t() | map()) :: module()
+  def active_shell_module(%{shell_id: id, shell: fallback}) do
+    entry = MingaEditor.Shell.Registry.get(id)
+    fallback_id = MingaEditor.Shell.Registry.id_for_module(fallback)
+    resolve_active_shell_module(entry, id, fallback, fallback_id)
+  end
+
+  def active_shell_module(%{shell: shell}) when is_atom(shell), do: shell
+  def active_shell_module(_state), do: MingaEditor.Shell.Registry.default().module
+
+  @spec resolve_active_shell_module(
+          MingaEditor.Shell.Entry.t() | nil,
+          shell_id(),
+          module(),
+          shell_id() | nil
+        ) :: module()
+  defp resolve_active_shell_module(%{module: module}, id, _fallback, id), do: module
+  defp resolve_active_shell_module(%{module: module}, _id, _fallback, nil), do: module
+  defp resolve_active_shell_module(%{}, _id, fallback, _fallback_id), do: fallback
+
+  defp resolve_active_shell_module(nil, _id, _fallback, nil),
+    do: MingaEditor.Shell.Registry.default().module
+
+  defp resolve_active_shell_module(nil, _id, fallback, _fallback_id), do: fallback
+
+  @doc "Ensures the active shell still exists, falling back to the registry default if it was unregistered."
+  @spec ensure_shell_available(t()) :: t()
+  def ensure_shell_available(%__MODULE__{} = state) do
+    shell_id = active_shell_id(state)
+
+    case MingaEditor.Shell.Registry.get(shell_id) do
+      %{module: module} -> %{state | shell_id: shell_id, shell: module}
+      nil -> switch_to_default_shell(%{state | shell_id: shell_id})
+    end
+  end
+
+  @doc "Switches to a registered shell by id, stashing the current shell state by shell id."
+  @spec switch_shell(t(), shell_id()) :: t()
+  def switch_shell(%__MODULE__{} = state, shell_id) when is_atom(shell_id) do
+    MingaEditor.Shell.Registry.seed_builtin()
+    do_switch_shell(state, shell_id, MingaEditor.Shell.Registry.list())
+  end
+
+  @spec do_switch_shell(t(), shell_id(), [MingaEditor.Shell.Entry.t()]) :: t()
+  defp do_switch_shell(%__MODULE__{} = state, shell_id, entries) do
+    current_id = active_shell_id(state)
+    route_shell_switch(state, current_id, shell_id, entries)
+  end
+
+  @spec route_shell_switch(t(), shell_id(), shell_id(), [MingaEditor.Shell.Entry.t()]) :: t()
+  defp route_shell_switch(%__MODULE__{} = state, current_id, shell_id, [_only])
+       when shell_id != current_id do
+    set_status(state, "Only one shell is available")
+  end
+
+  defp route_shell_switch(%__MODULE__{} = state, shell_id, shell_id, _entries) do
+    set_status(state, "Already using #{shell_display_name(shell_id)}")
+  end
+
+  defp route_shell_switch(%__MODULE__{} = state, _current_id, shell_id, _entries) do
+    case MingaEditor.Shell.Registry.get(shell_id) do
+      %{module: module} -> switch_to_registered_shell(state, shell_id, module)
+      nil -> set_status(state, "Shell #{shell_id} is unavailable")
+    end
+  end
+
+  @spec switch_to_default_shell(t()) :: t()
+  defp switch_to_default_shell(%__MODULE__{} = state) do
+    default = MingaEditor.Shell.Registry.default()
+
+    state
+    |> switch_to_registered_shell(default.id, default.module)
+    |> set_status("Shell unavailable, switched to #{default.display_name}")
+  end
+
+  @spec switch_to_registered_shell(t(), shell_id(), module()) :: t()
+  defp switch_to_registered_shell(%__MODULE__{} = state, target_id, module) do
+    current_id = active_shell_id(state)
+
+    stash =
+      state.shell_state_stash
+      |> Map.put(current_id, state.shell_state)
+      |> Map.delete(target_id)
+
+    shell_state =
+      Map.get(state.shell_state_stash, target_id) || init_shell_state(module, state.shell_state)
+
     %{
       state
-      | shell: MingaEditor.Shell.Traditional,
-        shell_state: %ShellState{suppress_tool_prompts: suppress_tool_prompts},
+      | shell_id: target_id,
+        shell: module,
+        shell_state: shell_state,
+        shell_state_stash: stash,
         layout: nil,
-        stashed_board_state: board_state
+        focus_tree: nil
     }
   end
 
-  @doc "Switches to the Board shell and clears any stashed Board state."
-  @spec switch_to_board(t(), BoardState.t()) :: t()
-  def switch_to_board(%__MODULE__{} = state, %BoardState{} = board_state) do
-    %{
-      state
-      | shell: MingaEditor.Shell.Board,
-        shell_state: board_state,
-        layout: nil,
-        stashed_board_state: nil
+  @spec init_shell_state(module(), shell_state()) :: shell_state()
+  defp init_shell_state(MingaEditor.Shell.Traditional, previous_shell_state) do
+    %ShellState{
+      suppress_tool_prompts: Map.get(previous_shell_state, :suppress_tool_prompts, false)
     }
+  end
+
+  defp init_shell_state(module, _previous_shell_state), do: module.init([])
+
+  @spec shell_display_name(shell_id()) :: String.t()
+  defp shell_display_name(shell_id) do
+    case MingaEditor.Shell.Registry.get(shell_id) do
+      %{display_name: name} -> name
+      nil -> Atom.to_string(shell_id)
+    end
   end
 
   # ── Shell field delegates ────────────────────────────────────────────────
@@ -842,14 +944,9 @@ defmodule MingaEditor.State do
   defp drop_active_board_feature_state_source(%__MODULE__{} = state, _source), do: state
 
   @spec drop_stashed_board_feature_state_source(t(), FeatureState.source()) :: t()
-  defp drop_stashed_board_feature_state_source(
-         %__MODULE__{stashed_board_state: %BoardState{} = board} = state,
-         source
-       ) do
-    %{state | stashed_board_state: BoardState.drop_feature_state_source(board, source)}
+  defp drop_stashed_board_feature_state_source(%__MODULE__{} = state, source) do
+    update_board_stash(state, &BoardState.drop_feature_state_source(&1, source))
   end
-
-  defp drop_stashed_board_feature_state_source(%__MODULE__{} = state, _source), do: state
 
   @spec drop_active_board_extension_feature_state_sources(t()) :: t()
   defp drop_active_board_extension_feature_state_sources(
@@ -861,13 +958,17 @@ defmodule MingaEditor.State do
   defp drop_active_board_extension_feature_state_sources(%__MODULE__{} = state), do: state
 
   @spec drop_stashed_board_extension_feature_state_sources(t()) :: t()
-  defp drop_stashed_board_extension_feature_state_sources(
-         %__MODULE__{stashed_board_state: %BoardState{} = board} = state
-       ) do
-    %{state | stashed_board_state: BoardState.drop_extension_feature_state_sources(board)}
+  defp drop_stashed_board_extension_feature_state_sources(%__MODULE__{} = state) do
+    update_board_stash(state, &BoardState.drop_extension_feature_state_sources/1)
   end
 
-  defp drop_stashed_board_extension_feature_state_sources(%__MODULE__{} = state), do: state
+  @spec update_board_stash(t(), (BoardState.t() -> BoardState.t())) :: t()
+  defp update_board_stash(%__MODULE__{shell_state_stash: stash} = state, fun) do
+    case Map.get(stash, :board) do
+      %BoardState{} = board -> %{state | shell_state_stash: Map.put(stash, :board, fun.(board))}
+      _other -> state
+    end
+  end
 
   @spec agent(t()) :: AgentState.t()
   def agent(%{shell_state: ss}), do: ShellState.agent(ss)
@@ -1052,7 +1153,7 @@ defmodule MingaEditor.State do
 
     # Dispatch to the shell for presentation cleanup (tab removal, card updates, etc.)
     {shell_state, workspace, shell_effects} =
-      state.shell.on_buffer_died(state.shell_state, state.workspace, pid)
+      active_shell_module(state).on_buffer_died(state.shell_state, state.workspace, pid)
 
     {%{state | shell_state: shell_state, workspace: workspace}, shell_effects}
   end
@@ -1531,7 +1632,7 @@ defmodule MingaEditor.State do
 
     # Dispatch to the active shell for presentation logic
     {shell_state, workspace, shell_effects} =
-      state.shell.on_buffer_added(
+      active_shell_module(state).on_buffer_added(
         state.shell_state,
         prev_workspace,
         state.workspace,
@@ -1578,7 +1679,7 @@ defmodule MingaEditor.State do
 
       :open ->
         {shell_state, workspace, shell_effects} =
-          state.shell.on_buffer_switched(state.shell_state, state.workspace)
+          active_shell_module(state).on_buffer_switched(state.shell_state, state.workspace)
 
         state =
           state
@@ -2027,15 +2128,17 @@ defmodule MingaEditor.State do
   end
 
   @spec active_tab(t()) :: Tab.t() | nil
-  def active_tab(%__MODULE__{} = state), do: state.shell.active_tab(state.shell_state)
+  def active_tab(%__MODULE__{} = state),
+    do: active_shell_module(state).active_tab(state.shell_state)
 
   @spec find_tab_by_buffer(t(), pid()) :: Tab.t() | nil
   def find_tab_by_buffer(%__MODULE__{} = state, pid) do
-    state.shell.find_tab_by_buffer(state.shell_state, pid)
+    active_shell_module(state).find_tab_by_buffer(state.shell_state, pid)
   end
 
   @spec active_tab_kind(t()) :: Tab.kind()
-  def active_tab_kind(%__MODULE__{} = state), do: state.shell.active_tab_kind(state.shell_state)
+  def active_tab_kind(%__MODULE__{} = state),
+    do: active_shell_module(state).active_tab_kind(state.shell_state)
 
   # ── Spinner lifecycle for tab switching ──────────────────────────────────────
 
@@ -2057,7 +2160,9 @@ defmodule MingaEditor.State do
 
   @spec set_tab_session(t(), Tab.id(), pid() | nil) :: t()
   def set_tab_session(%__MODULE__{} = state, tab_id, session_pid) do
-    shell_state = state.shell.set_tab_session(state.shell_state, tab_id, session_pid)
+    shell_state =
+      active_shell_module(state).set_tab_session(state.shell_state, tab_id, session_pid)
+
     %{state | shell_state: shell_state}
   end
 

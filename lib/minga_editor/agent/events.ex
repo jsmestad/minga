@@ -479,7 +479,7 @@ defmodule MingaEditor.Agent.Events do
   # Syncs Board card status when an agent status changes. Finds the card
   # by matching the agent session PID and updates the card's status badge.
   @spec sync_board_card_status(EditorState.t(), Tab.agent_status()) :: EditorState.t()
-  defp sync_board_card_status(%{shell: MingaEditor.Shell.Board} = state, status) do
+  defp sync_board_card_status(%{shell_id: :board} = state, status) do
     session = AgentAccess.session(state)
 
     if session do
@@ -499,7 +499,7 @@ defmodule MingaEditor.Agent.Events do
   # Tracks a file path on the Board card associated with the current agent session.
   # Keeps the 5 most recently touched files for the card footer display.
   @spec track_board_card_file(EditorState.t(), String.t()) :: EditorState.t()
-  defp track_board_card_file(%{shell: MingaEditor.Shell.Board} = state, path) do
+  defp track_board_card_file(%{shell_id: :board} = state, path) do
     session = AgentAccess.session(state)
 
     if session do

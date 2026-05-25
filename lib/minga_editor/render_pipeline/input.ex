@@ -21,7 +21,7 @@ defmodule MingaEditor.RenderPipeline.Input do
   ## Field sources
 
   **From `state` (top-level):**
-  `theme`, `capabilities`, `shell`, `shell_state`, `port_manager`,
+  `theme`, `capabilities`, `shell_id`, `shell`, `shell_state`, `port_manager`,
   `message_store`, `notifications`, `face_override_registries`,
   `editing_model`, `backend`, `layout`, `focus_tree`
 
@@ -50,8 +50,6 @@ defmodule MingaEditor.RenderPipeline.Input do
   alias MingaEditor.VimState
   alias MingaEditor.Viewport
   alias MingaEditor.Frontend.Capabilities
-  alias MingaEditor.Shell.Traditional.State, as: ShellState
-  alias MingaEditor.Shell.Board.State, as: BoardState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.StatusBar.Data, as: StatusBarData
@@ -61,12 +59,13 @@ defmodule MingaEditor.RenderPipeline.Input do
   alias MingaEditor.UI.Panel.MessageStore
   alias MingaEditor.UI.Theme
 
-  @enforce_keys [:port_manager, :theme, :capabilities, :shell, :workspace]
+  @enforce_keys [:port_manager, :theme, :capabilities, :shell_id, :shell, :workspace]
   defstruct [
     # Top-level state fields
     :port_manager,
     :theme,
     :capabilities,
+    :shell_id,
     :shell,
     :shell_state,
     :message_store,
@@ -115,8 +114,9 @@ defmodule MingaEditor.RenderPipeline.Input do
           port_manager: GenServer.server() | nil,
           theme: Theme.t(),
           capabilities: Capabilities.t(),
+          shell_id: EditorState.shell_id(),
           shell: module(),
-          shell_state: ShellState.t() | BoardState.t(),
+          shell_state: term(),
           font_registry: FontRegistry.t(),
           message_store: MessageStore.t(),
           notifications: NotificationCenter.t(),
@@ -147,7 +147,8 @@ defmodule MingaEditor.RenderPipeline.Input do
       port_manager: state.port_manager,
       theme: state.theme,
       capabilities: state.capabilities,
-      shell: state.shell,
+      shell_id: state.shell_id,
+      shell: EditorState.active_shell_module(state),
       shell_state: state.shell_state,
       message_store: state.message_store,
       notifications: state.notifications,
