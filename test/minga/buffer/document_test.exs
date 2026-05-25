@@ -40,6 +40,39 @@ defmodule Minga.Buffer.DocumentTest do
     end
   end
 
+  describe "byte range queries" do
+    test "byte_size counts both gap halves" do
+      doc = Document.new("hello") |> Document.move_to({0, 2})
+      assert Document.content_byte_size(doc) == 5
+    end
+
+    test "byte_at reads before and after the cursor gap" do
+      doc = Document.new("hello") |> Document.move_to({0, 2})
+      assert Document.byte_at(doc, 1) == ?e
+      assert Document.byte_at(doc, 2) == ?l
+    end
+
+    test "slice_byte_range reads before the gap" do
+      doc = Document.new("hello world") |> Document.move_to({0, 5})
+      assert Document.slice_byte_range(doc, 1, 3) == "ell"
+    end
+
+    test "slice_byte_range reads after the gap" do
+      doc = Document.new("hello world") |> Document.move_to({0, 5})
+      assert Document.slice_byte_range(doc, 6, 5) == "world"
+    end
+
+    test "slice_byte_range reads across the gap" do
+      doc = Document.new("hello world") |> Document.move_to({0, 5})
+      assert Document.slice_byte_range(doc, 3, 5) == "lo wo"
+    end
+
+    test "slice_byte_range preserves byte-level unicode fragments" do
+      doc = Document.new("aé日z") |> Document.move_to({0, 3})
+      assert Document.slice_byte_range(doc, 1, 5) == "é日"
+    end
+  end
+
   # ── Insertion ──
 
   describe "insert_text/2" do
