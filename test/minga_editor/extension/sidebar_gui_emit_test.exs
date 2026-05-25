@@ -2,13 +2,10 @@ defmodule MingaEditor.Extension.SidebarGUIEmitTest do
   # Uses the default named sidebar registry read by GUI emit.
   use ExUnit.Case, async: false
 
-  alias Minga.Project.FileTree
   alias MingaEditor.Extension.Sidebar
-  alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Frontend.Emit.GUI, as: EmitGUI
   alias MingaEditor.Renderer.Caches
-  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.StatusBar.Data, as: StatusBarData
 
   import MingaEditor.RenderPipeline.TestHelpers
@@ -24,13 +21,19 @@ defmodule MingaEditor.Extension.SidebarGUIEmitTest do
   end
 
   test "registered active sidebars own the GUI active id over legacy file tree metadata" do
-    root = Path.join(System.tmp_dir!(), "sidebar-gui-emit-#{System.unique_integer([:positive])}")
-    File.mkdir_p!(root)
-    File.write!(Path.join(root, "a.ex"), "")
+    state = gui_state()
 
-    file_tree = FileTreeState.open(%FileTreeState{}, FileTree.new(root, width: 32), nil)
-    state = gui_state() |> put_in([Access.key(:workspace), Access.key(:file_tree)], file_tree)
-    FileTreeFeature.sync_sidebar(%FileTreeState{})
+    assert :ok =
+             Sidebar.register({:extension, :minga_file_tree}, %{
+               id: "file_tree",
+               display_name: "File Tree",
+               priority: 10,
+               preferred_width: 32,
+               visible?: false,
+               focused?: false,
+               semantic_kind: "file_tree",
+               icon: "folder"
+             })
 
     assert :ok =
              Sidebar.register({:extension, :outline}, %{

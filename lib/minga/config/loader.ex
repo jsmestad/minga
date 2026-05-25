@@ -286,7 +286,8 @@ defmodule Minga.Config.Loader do
       config_path = resolve_config_path()
       config_dir = Path.dirname(config_path)
 
-      # 0. Register default popup rules (before user config so overrides work)
+      # 0. Register bundled extension defaults and popup rules before user config.
+      register_bundled_extensions()
       register_default_popup_rules()
 
       # 1. Compile user modules
@@ -362,6 +363,16 @@ defmodule Minga.Config.Loader do
       restore_pdict(:minga_config_options, previous_options_server)
       restore_pdict(:minga_config_lsp_settings, previous_lsp_settings)
     end
+  end
+
+  @spec register_bundled_extensions() :: :ok
+  defp register_bundled_extensions do
+    if Application.get_env(:minga, :load_file_tree_extension, true) do
+      path = Path.expand("../../../extensions/file_tree/lib", __DIR__)
+      ExtRegistry.register(:minga_file_tree, path, [])
+    end
+
+    :ok
   end
 
   @spec with_config_source(atom(), (-> term())) :: term()

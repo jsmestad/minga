@@ -212,7 +212,7 @@ defmodule MingaEditor.Input do
 
   For vim: leader key sequences, pending `g` prefix, operator-pending
   mode, and command-line mode. For CUA: always false (no multi-key
-  sequences). Used by AgentPanel and FileTreeHandler to decide whether
+  sequences). Used by surface handlers to decide whether
   to delegate directly to the bottom-of-stack dispatch handler.
   """
   @spec key_sequence_pending?(MingaEditor.State.t()) :: boolean()

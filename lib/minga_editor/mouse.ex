@@ -40,7 +40,6 @@ defmodule MingaEditor.Mouse do
   alias MingaEditor.Mouse.Target.Buffer, as: BufferTarget
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Mouse, as: MouseState
   alias MingaEditor.State.Windows
   alias MingaEditor.State.WhichKey, as: WhichKeyState
@@ -1191,7 +1190,7 @@ defmodule MingaEditor.Mouse do
          %{workspace: %{keymap_scope: :file_tree}} = state
        ) do
     state
-    |> EditorState.update_file_tree(&FileTreeState.unfocus/1)
+    |> EditorState.update_file_tree(&Map.put(&1, :focused, false))
     |> EditorState.set_keymap_scope(:editor)
   end
 

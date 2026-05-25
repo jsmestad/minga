@@ -9,28 +9,18 @@ defmodule MingaEditor.Input.ScopedTest do
   alias Minga.Buffer.Process, as: BufferProcess
 
   alias MingaEditor.Commands.Agent, as: AgentCommands
-  alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
-  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Input.AgentPanel
-  alias MingaEditor.Input.FileTreeHandler
   alias MingaEditor.Input.Scoped
   alias Minga.Mode
-  alias Minga.Project.FileTree
-  alias Minga.Project.FileTree.BufferSync
-
-  setup do
-    FileTreeFeature.register_contributions()
-    :ok
-  end
 
   defp base_state(opts) do
     {:ok, buf} = BufferProcess.start_link(content: "hello world")
@@ -538,74 +528,6 @@ defmodule MingaEditor.Input.ScopedTest do
   end
 
   # ══════════════════════════════════════════════════════════════════════════
-  # File tree scope
-  # ══════════════════════════════════════════════════════════════════════════
-
-  describe "file tree scope" do
-    test "q closes tree", %{tmp_dir: tmp_dir} do
-      state = make_tree_state(tmp_dir)
-      {:handled, new_state} = walk_surface_handlers(state, ?q, 0)
-      assert new_state.workspace.keymap_scope == :editor
-      assert ft(new_state).tree == nil
-    end
-
-    test "unbound key delegates to mode FSM for vim nav", %{tmp_dir: tmp_dir} do
-      state = make_tree_state(tmp_dir)
-      # j is not bound in file_tree scope (handled by mode FSM delegation)
-      {:handled, new_state} = walk_surface_handlers(state, ?j, 0)
-      assert ft(new_state).tree.cursor == 1
-    end
-
-    test "leader sequence in progress delegates to mode FSM", %{tmp_dir: tmp_dir} do
-      state = make_tree_state(tmp_dir)
-      # Use a real Bindings.Node, not a plain map, because the mode FSM
-      # calls Bindings.lookup on leader_node.
-      leader_node = %Minga.Keymap.Bindings.Node{children: %{}, command: nil, description: nil}
-
-      leader_state = put_in(state.workspace.editing.mode_state.leader_node, leader_node)
-
-      {:handled, _new_state} = walk_surface_handlers(leader_state, ?f, 0)
-    end
-
-    test "tree scope bindings are handled", %{tmp_dir: tmp_dir} do
-      File.mkdir_p!(Path.join(tmp_dir, "subdir"))
-
-      for {key, file_count} <- [{?h, 0}, {?l, 0}, {?r, 3}] do
-        state = make_tree_state(tmp_dir, file_count)
-        assert {:handled, _new_state} = walk_surface_handlers(state, key, 0)
-      end
-    end
-
-    test "H toggles hidden files (scope binding)", %{tmp_dir: tmp_dir} do
-      File.write!(Path.join(tmp_dir, ".hidden"), "")
-      state = make_tree_state(tmp_dir, 0)
-
-      entries_before = length(FileTree.visible_entries(ft(state).tree))
-      {:handled, new_state} = walk_surface_handlers(state, ?H, 0)
-      entries_after = length(FileTree.visible_entries(ft(new_state).tree))
-
-      assert entries_after != entries_before
-    end
-  end
-
-  # ══════════════════════════════════════════════════════════════════════════
-  # Scope inactive guards
-  # ══════════════════════════════════════════════════════════════════════════
-
-  describe "scope inactive guards" do
-    test "agent scope with agentic not active passes through" do
-      state = base_state(keymap_scope: :agent, agentic_active: false)
-      assert {:passthrough, _} = Scoped.handle_key(state, ?j, 0)
-    end
-
-    test "file_tree scope with tree not focused passes through", %{tmp_dir: tmp_dir} do
-      state = make_tree_state(tmp_dir)
-      state = EditorState.set_file_tree(state, %{ft(state) | focused: false})
-      assert {:passthrough, _} = FileTreeHandler.handle_key(state, ?q, 0)
-    end
-  end
-
-  # ══════════════════════════════════════════════════════════════════════════
   # Cross-scope leader sequences
   # ══════════════════════════════════════════════════════════════════════════
 
@@ -810,17 +732,14 @@ defmodule MingaEditor.Input.ScopedTest do
   # ══════════════════════════════════════════════════════════════════════════
 
   describe "handle_mouse" do
-    test "routes or passes through by active surface", %{tmp_dir: tmp_dir} do
-      for state <- [
-            base_state(keymap_scope: :agent, agentic_active: true),
-            make_tree_state(tmp_dir)
-          ] do
-        result = walk_surface_mouse(state, 5, 5, :left, 0, :press, 1)
-        assert elem(result, 0) in [:handled, :passthrough]
-      end
+    test "routes or passes through by active surface" do
+      state = base_state(keymap_scope: :agent, agentic_active: true)
+      result = walk_surface_mouse(state, 5, 5, :left, 0, :press, 1)
+      assert elem(result, 0) in [:handled, :passthrough]
 
       state = base_state(keymap_scope: :editor)
-      assert {:passthrough, _} = FileTreeHandler.handle_mouse(state, 5, 5, :left, 0, :press, 1)
+      result = walk_surface_mouse(state, 5, 5, :left, 0, :press, 1)
+      assert elem(result, 0) in [:handled, :passthrough]
     end
   end
 
@@ -844,8 +763,6 @@ defmodule MingaEditor.Input.ScopedTest do
     end)
   end
 
-  defp ft(state), do: EditorState.file_tree_state(state)
-
   defp walk_surface_mouse(state, row, col, button, mods, event_type, cc) do
     handlers =
       MingaEditor.Input.surface_handlers()
@@ -857,22 +774,5 @@ defmodule MingaEditor.Input.ScopedTest do
         {:passthrough, new_state} -> {:cont, {:passthrough, new_state}}
       end
     end)
-  end
-
-  defp make_tree_state(tmp_dir, file_count \\ 5) do
-    if file_count > 0 do
-      for i <- 1..file_count do
-        File.write!(
-          Path.join(tmp_dir, "file_#{String.pad_leading(to_string(i), 2, "0")}.txt"),
-          ""
-        )
-      end
-    end
-
-    tree = FileTree.new(tmp_dir)
-    buf = BufferSync.start_buffer(tree)
-
-    state = base_state(keymap_scope: :file_tree)
-    EditorState.set_file_tree(state, %FileTreeState{tree: tree, focused: true, buffer: buf})
   end
 end

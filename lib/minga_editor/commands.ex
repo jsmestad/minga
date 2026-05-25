@@ -243,9 +243,7 @@ defmodule MingaEditor.Commands do
         name = Path.basename(path)
         MingaEditor.log_to_messages("[file-tree] Moved to trash: #{name}")
 
-        state
-        |> restore_file_tree_scope()
-        |> MingaEditor.Commands.FileTree.refresh()
+        restore_file_tree_scope(state)
 
       {:error, reason} ->
         # Trash failed, offer permanent delete as fallback
@@ -266,9 +264,7 @@ defmodule MingaEditor.Commands do
         name = Path.basename(path)
         MingaEditor.log_to_messages("[file-tree] Permanently deleted: #{name}")
 
-        state
-        |> restore_file_tree_scope()
-        |> MingaEditor.Commands.FileTree.refresh()
+        restore_file_tree_scope(state)
 
       {:error, reason} ->
         MingaEditor.log_to_messages("[file-tree] Delete failed: #{reason}")

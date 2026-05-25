@@ -12,7 +12,6 @@ defmodule MingaEditor.Commands.InlineAskTest do
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
-  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.InlineAsk
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -195,7 +194,12 @@ defmodule MingaEditor.Commands.InlineAskTest do
             next_id: 2
           }
         }
-        |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
+        |> SessionState.set_file_tree(%{
+          project_root: root,
+          tree: nil,
+          buffer: nil,
+          focused: false
+        }),
       shell_state: %TraditionalState{
         tab_bar: TabBar.new(Tab.new_file(1, Path.basename(rel_path)), root)
       }

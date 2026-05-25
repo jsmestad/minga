@@ -4,19 +4,10 @@ defmodule Minga.Integration.MouseTest do
 
   Gesture details live in `MingaEditor.MouseTest` and `MingaEditor.MouseMultiClickTest`. This file keeps only the cases that need the full input router, shell state, renderer, or GUI action path.
   """
-  # Mutates the global built-in FileTree sidebar registry while rendering through live editors.
-  use Minga.Test.EditorCase, async: false
+  use Minga.Test.EditorCase, async: true
 
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.FileTree
   alias Minga.Test.StubServer
-
-  defp start_editor_with_project(content) do
-    id = :erlang.unique_integer([:positive])
-    root = Path.join(System.tmp_dir!(), "minga-integration-mouse-#{id}")
-    File.mkdir_p!(root)
-    start_editor(content, project_root: root)
-  end
 
   defp inject_fake_session(%{editor: editor} = ctx) do
     {:ok, fake} = StubServer.start_link()
@@ -43,22 +34,6 @@ defmodule Minga.Integration.MouseTest do
     ctx
   end
 
-  defp file_tree_separator_col(ctx) do
-    wait_until_screen(
-      ctx,
-      fn ->
-        screen_row(ctx, 1)
-        |> String.graphemes()
-        |> Enum.any?(&(&1 == "│"))
-      end,
-      message: "expected file tree separator"
-    )
-
-    screen_row(ctx, 1)
-    |> String.graphemes()
-    |> Enum.find_index(&(&1 == "│"))
-  end
-
   describe "live editor mouse routing" do
     test "left click moves the buffer cursor through the input router" do
       ctx = start_editor("hello world\nsecond line\nthird line")
@@ -67,21 +42,6 @@ defmodule Minga.Integration.MouseTest do
 
       assert {1, _col} = buffer_cursor(ctx)
       assert screen_contains?(ctx, "second line")
-    end
-
-    test "file tree and editor clicks route to the matching focus scope" do
-      ctx = start_editor_with_project("hello world")
-
-      send_keys_sync(ctx, "<Space>op")
-      tree_sep = file_tree_separator_col(ctx)
-
-      send_mouse(ctx, 5, div(ctx.width, 2), :left)
-
-      send_mouse(ctx, 5, max(tree_sep - 2, 0), :left)
-      state = editor_state(ctx)
-
-      assert FileTree.focused?(EditorState.file_tree_state(state)),
-             "clicking file tree should focus it"
     end
   end
 

@@ -14,8 +14,6 @@ defmodule Minga.Keymap.Scope.CUAScopeTest do
   # Arrow keys (Kitty protocol)
   @arrow_up 57_352
   @arrow_down 57_353
-  @arrow_left 57_350
-  @arrow_right 57_351
 
   @enter 13
   @escape 27
@@ -23,36 +21,6 @@ defmodule Minga.Keymap.Scope.CUAScopeTest do
   @ctrl 0x02
   @alt 0x04
   @cmd 0x08
-
-  # ── File tree scope ────────────────────────────────────────────────────────
-
-  describe "file_tree scope with :cua" do
-    test "arrow up/down resolve to movement commands" do
-      assert {:command, :move_up} = Scope.resolve_key(:file_tree, :cua, {@arrow_up, 0})
-      assert {:command, :move_down} = Scope.resolve_key(:file_tree, :cua, {@arrow_down, 0})
-    end
-
-    test "arrow right expands directory" do
-      assert {:command, :tree_expand} = Scope.resolve_key(:file_tree, :cua, {@arrow_right, 0})
-    end
-
-    test "arrow left collapses directory" do
-      assert {:command, :tree_collapse} = Scope.resolve_key(:file_tree, :cua, {@arrow_left, 0})
-    end
-
-    test "Enter opens file" do
-      assert {:command, :tree_open_or_toggle} = Scope.resolve_key(:file_tree, :cua, {@enter, 0})
-    end
-
-    test "Escape closes tree" do
-      assert {:command, :tree_close} = Scope.resolve_key(:file_tree, :cua, {@escape, 0})
-    end
-
-    test "vim j/k are not bound in CUA mode" do
-      assert :not_found = Scope.resolve_key(:file_tree, :cua, {?j, 0})
-      assert :not_found = Scope.resolve_key(:file_tree, :cua, {?k, 0})
-    end
-  end
 
   # ── Agent scope ────────────────────────────────────────────────────────────
 
