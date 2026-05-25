@@ -43,6 +43,16 @@ enum PreviewRegistry {
             tabBarPreview()
         case "NotificationCenterView":
             notificationPreview()
+        case "NotificationStack":
+            notificationStackPreview()
+        case "BottomPanelView":
+            bottomPanelPreview()
+        case "BottomPanelEmpty":
+            bottomPanelEmptyPreview()
+        case "SettingsView":
+            settingsPreview()
+        case "ToolManagerView":
+            toolManagerPreview()
         case "ObservatoryView":
             observatoryPreview()
         case "AgentChatView":
@@ -753,6 +763,190 @@ enum PreviewRegistry {
         ])
 
         return NotificationCenterView(state: state, theme: theme, encoder: nil, bottomInset: 40)
+            .frame(width: 800, height: 600)
+            .background(theme.editorBg)
+    }
+
+    // MARK: - NotificationStack
+
+    private static func notificationStackPreview() -> some View {
+        let state = NotificationCenterState()
+        let theme = populatedTheme()
+        let now = UInt64(Date().timeIntervalSince1970)
+        state.update(rawNotifications: [
+            Wire.EditorNotification(
+                id: "notif-info",
+                level: .info,
+                flags: 0x01,
+                createdAt: now - 120,
+                updatedAt: now - 120,
+                autoDismissMs: nil,
+                title: "Extension loaded",
+                body: "org-mode v0.3.0 activated for .org files",
+                source: "Extensions",
+                actions: [
+                    Wire.NotificationAction(id: "configure", label: "Configure"),
+                ]
+            ),
+            Wire.EditorNotification(
+                id: "notif-warning",
+                level: .warning,
+                flags: 0x01,
+                createdAt: now - 60,
+                updatedAt: now - 60,
+                autoDismissMs: nil,
+                title: "Formatter unavailable",
+                body: "mix format could not be found in PATH. Code formatting is disabled.",
+                source: "LSP",
+                actions: [
+                    Wire.NotificationAction(id: "install", label: "Install"),
+                    Wire.NotificationAction(id: "dismiss", label: "Ignore"),
+                ]
+            ),
+            Wire.EditorNotification(
+                id: "notif-error",
+                level: .error,
+                flags: 0x01,
+                createdAt: now - 30,
+                updatedAt: now - 30,
+                autoDismissMs: nil,
+                title: "LSP crashed",
+                body: "ElixirLS exited unexpectedly (exit code 1). Restart manually or wait for auto-recovery.",
+                source: "Language Server",
+                actions: [
+                    Wire.NotificationAction(id: "restart", label: "Restart"),
+                    Wire.NotificationAction(id: "logs", label: "View Logs"),
+                ]
+            ),
+            Wire.EditorNotification(
+                id: "notif-progress",
+                level: .progress,
+                flags: 0x00,
+                createdAt: now,
+                updatedAt: now,
+                autoDismissMs: 5000,
+                title: "Indexing workspace",
+                body: "Scanning 1,284 files for symbols and references...",
+                source: "Parser",
+                actions: []
+            ),
+        ])
+
+        return NotificationCenterView(state: state, theme: theme, encoder: nil, bottomInset: 40)
+            .frame(width: 800, height: 600)
+            .background(theme.editorBg)
+    }
+
+    // MARK: - BottomPanelView
+
+    private static func bottomPanelPreview() -> some View {
+        let state = BottomPanelState()
+        let theme = populatedTheme()
+        state.update(
+            visible: true,
+            activeTabIndex: 0,
+            heightPercent: 30,
+            filterPreset: 0,
+            tabs: [
+                BottomPanelTab(id: 0, tabType: 0x01, name: "Messages"),
+                BottomPanelTab(id: 1, tabType: 0x02, name: "Diagnostics"),
+                BottomPanelTab(id: 2, tabType: 0x03, name: "Terminal"),
+            ]
+        )
+        populateMessages(state.messagesState)
+
+        return BottomPanelView(state: state, theme: theme, encoder: nil, availableHeight: 600)
+            .frame(width: 800, height: 250)
+            .background(theme.editorBg)
+    }
+
+    private static func bottomPanelEmptyPreview() -> some View {
+        let state = BottomPanelState()
+        let theme = populatedTheme()
+        state.update(
+            visible: true,
+            activeTabIndex: 0,
+            heightPercent: 30,
+            filterPreset: 0,
+            tabs: [
+                BottomPanelTab(id: 0, tabType: 0x01, name: "Messages"),
+                BottomPanelTab(id: 1, tabType: 0x02, name: "Diagnostics"),
+            ]
+        )
+
+        return BottomPanelView(state: state, theme: theme, encoder: nil, availableHeight: 600)
+            .frame(width: 800, height: 250)
+            .background(theme.editorBg)
+    }
+
+    private static func populateMessages(_ state: MessagesContentState) {
+        let baseTime: UInt32 = 43200  // 12:00:00
+        state.appendEntries([
+            Wire.MessageEntry(id: 1, level: 1, subsystem: 0, timestampSecs: baseTime, filePath: "lib/minga/editor.ex", text: "Buffer opened: editor.ex (1250 lines)"),
+            Wire.MessageEntry(id: 2, level: 0, subsystem: 1, timestampSecs: baseTime + 1, filePath: "", text: "ElixirLS initialized in 340ms"),
+            Wire.MessageEntry(id: 3, level: 2, subsystem: 2, timestampSecs: baseTime + 3, filePath: "lib/minga/buffer/document.ex", text: "Tree-sitter parse timeout (>50ms) on large file"),
+            Wire.MessageEntry(id: 4, level: 1, subsystem: 3, timestampSecs: baseTime + 5, filePath: "", text: "Branch switched: feat/preview-host (2 ahead)"),
+            Wire.MessageEntry(id: 5, level: 3, subsystem: 4, timestampSecs: baseTime + 8, filePath: "", text: "Metal shader compilation failed: fragment_main"),
+            Wire.MessageEntry(id: 6, level: 1, subsystem: 5, timestampSecs: baseTime + 12, filePath: "", text: "Agent session started (claude-sonnet-4, medium thinking)"),
+            Wire.MessageEntry(id: 7, level: 0, subsystem: 6, timestampSecs: baseTime + 14, filePath: "", text: "TUI grid resized to 112x36"),
+            Wire.MessageEntry(id: 8, level: 2, subsystem: 7, timestampSecs: baseTime + 18, filePath: "", text: "SwiftUI layout cycle detected in NotificationCard"),
+        ])
+    }
+
+    // MARK: - SettingsView
+
+    private static func settingsPreview() -> some View {
+        let appState = AppState()
+        let encoder = previewEncoder()
+        appState.encoder = encoder
+        appState.gui.settingsState.encoder = encoder
+
+        // Populate settings state to skip the loading spinner
+        let settings = appState.gui.settingsState
+        settings.isLoading = false
+        settings.currentThemeName = "doom_one"
+        settings.fontFamily = "Menlo"
+        settings.fontSize = 13
+        settings.fontWeight = "regular"
+        settings.fontLigatures = true
+        settings.tabWidth = 2
+        settings.lineNumbers = .absolute
+        settings.wordWrap = false
+        settings.cursorBlink = true
+        settings.cursorline = true
+        settings.themePreviews = [
+            Wire.ThemePreview(name: "Doom One", atom: "doom_one", editorBg: 0x282C34, editorFg: 0xBBC2CF, accent: 0x51AFEF),
+            Wire.ThemePreview(name: "Tokyo Night", atom: "tokyo_night", editorBg: 0x1A1B26, editorFg: 0xC0CAF5, accent: 0x7AA2F7),
+            Wire.ThemePreview(name: "Catppuccin Mocha", atom: "catppuccin_mocha", editorBg: 0x1E1E2E, editorFg: 0xCDD6F4, accent: 0x89B4FA),
+            Wire.ThemePreview(name: "Solarized Dark", atom: "solarized_dark", editorBg: 0x002B36, editorFg: 0x839496, accent: 0x268BD2),
+            Wire.ThemePreview(name: "Gruvbox Dark", atom: "gruvbox_dark", editorBg: 0x282828, editorFg: 0xEBDBB2, accent: 0xFE8019),
+            Wire.ThemePreview(name: "Nord", atom: "nord", editorBg: 0x2E3440, editorFg: 0xD8DEE9, accent: 0x88C0D0),
+        ]
+
+        return SettingsView(appState: appState)
+            .frame(width: 600, height: 480)
+    }
+
+    // MARK: - ToolManagerView
+
+    private static func toolManagerPreview() -> some View {
+        let state = ToolManagerState()
+        let theme = populatedTheme()
+        state.update(
+            visible: true,
+            filter: .all,
+            selectedIndex: 1,
+            tools: [
+                ToolEntry(id: "elixir_ls", name: "elixir_ls", label: "ElixirLS", description: "Elixir language server with debugger support", category: .lspServer, status: .installed, method: .githubRelease, languages: ["Elixir", "HEEx"], version: "0.22.1", homepage: "", provides: ["elixir-ls"], errorReason: ""),
+                ToolEntry(id: "lua_ls", name: "lua_ls", label: "Lua Language Server", description: "Lua language server for Neovim configs and scripts", category: .lspServer, status: .notInstalled, method: .githubRelease, languages: ["Lua"], version: "", homepage: "", provides: ["lua-language-server"], errorReason: ""),
+                ToolEntry(id: "prettier", name: "prettier", label: "Prettier", description: "Opinionated code formatter for web languages", category: .formatter, status: .installed, method: .npm, languages: ["TypeScript", "JavaScript", "CSS", "HTML"], version: "3.2.5", homepage: "", provides: ["prettier"], errorReason: ""),
+                ToolEntry(id: "ruff", name: "ruff", label: "Ruff", description: "Extremely fast Python linter and formatter", category: .linter, status: .installing, method: .pip, languages: ["Python"], version: "", homepage: "", provides: ["ruff"], errorReason: ""),
+                ToolEntry(id: "rust_analyzer", name: "rust_analyzer", label: "rust-analyzer", description: "Rust language server with full IDE features", category: .lspServer, status: .updateAvailable, method: .githubRelease, languages: ["Rust"], version: "2024.03.04", homepage: "", provides: ["rust-analyzer"], errorReason: ""),
+                ToolEntry(id: "codelldb", name: "codelldb", label: "CodeLLDB", description: "LLDB-based debugger for C, C++, and Rust", category: .debugger, status: .failed, method: .githubRelease, languages: ["C", "C++", "Rust"], version: "", homepage: "", provides: ["codelldb"], errorReason: "Error: GitHub API rate limit exceeded. Try again in 42 minutes."),
+            ]
+        )
+
+        return ToolManagerView(state: state, theme: theme, encoder: nil)
             .frame(width: 800, height: 600)
             .background(theme.editorBg)
     }
