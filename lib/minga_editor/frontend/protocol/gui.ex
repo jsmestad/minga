@@ -119,13 +119,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.Keymap.Bindings
   alias Minga.SystemObserver.TreeNode
-  alias MingaEditor.FileTree.Diagnostics, as: FileTreeDiagnostics
-  alias MingaEditor.FileTree.DropIntent
-  alias MingaEditor.FileTree.Row
   alias MingaEditor.MinibufferData
   alias MingaEditor.Observatory
   alias MingaEditor.State.Buffers
-  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
@@ -411,7 +407,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:file_tree_duplicate, index :: non_neg_integer()}
           | {:file_tree_move, source_index :: non_neg_integer(),
              target_dir_index :: non_neg_integer()}
-          | {:file_tree_drop, DropIntent.t()}
+          | {:file_tree_drop, map()}
           | {:fold_toggle_at_line, window_id :: non_neg_integer(),
              buffer_line :: non_neg_integer()}
           | {:file_tree_open_in_split, index :: non_neg_integer()}
@@ -2127,10 +2123,11 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   String fields use uint16 byte lengths except icon, which uses a uint8 byte length.
   """
-  @type file_tree_status :: FileTreeState.tree_status()
+  @type file_tree_status :: :hidden | :loading | :empty | :ready | {:error, String.t()}
+  @type file_tree_row :: map()
 
   @spec encode_gui_file_tree(String.t() | nil, non_neg_integer(), file_tree_status(), boolean(), [
-          Row.t()
+          file_tree_row()
         ]) :: binary()
   def encode_gui_file_tree(root_path, tree_width, status, focused?, rows) when is_list(rows) do
     root = root_path || ""
@@ -2170,34 +2167,73 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @spec file_tree_selection_flags(boolean()) :: non_neg_integer()
   defp file_tree_selection_flags(focused?), do: maybe_flag(0, focused?, 0)
 
-  @spec encode_file_tree_row(Row.t(), String.t()) :: iodata()
-  defp encode_file_tree_row(%Row{} = row, root) do
+  @spec encode_file_tree_row(file_tree_row(), String.t()) :: iodata()
+  defp encode_file_tree_row(row, root) when is_map(row) do
     icon = file_tree_row_icon(row)
-    editing_type = if row.editing, do: encode_editing_type(row.editing.type), else: 0xFF
-    editing_text = if row.editing, do: row.editing.text, else: ""
-    guides = Enum.map(row.guides, fn guide? -> if guide?, do: <<1>>, else: <<0>> end)
+    editing = Map.get(row, :editing)
+    editing_type = if editing, do: encode_editing_type(Map.get(editing, :type)), else: 0xFF
+    editing_text = if editing, do: Map.get(editing, :text, ""), else: ""
+    guide_values = Map.get(row, :guides, [])
+    guides = Enum.map(guide_values, fn guide? -> if guide?, do: <<1>>, else: <<0>> end)
 
     {diagnostic_errors, diagnostic_warnings, diagnostic_info, diagnostic_hints} =
-      row.diagnostics
-      |> FileTreeDiagnostics.to_tuple()
+      row
+      |> Map.get(:diagnostics, %{})
+      |> file_tree_diagnostics_tuple()
       |> clamp_file_tree_diagnostics()
 
+    id = Map.get(row, :id, "")
+    path = Map.get(row, :path, "")
+    name = Map.get(row, :name, "")
+    depth = Map.get(row, :depth, 0)
+    git_status = Map.get(row, :git_status)
+
     [
-      <<:erlang.phash2(row.id, 0xFFFFFFFF)::32, file_tree_row_flags(row)::16, row.depth::8,
-        encode_git_status(row.git_status)::8, diagnostic_errors::16, diagnostic_warnings::16,
-        diagnostic_info::16, diagnostic_hints::16, length(row.guides)::8>>,
+      <<:erlang.phash2(id, 0xFFFFFFFF)::32, file_tree_row_flags(row)::16, depth::8,
+        encode_git_status(git_status)::8, diagnostic_errors::16, diagnostic_warnings::16,
+        diagnostic_info::16, diagnostic_hints::16, length(guide_values)::8>>,
       guides,
-      encode_string16(row.id),
-      encode_string16(row.path),
-      encode_string16(Path.relative_to(row.path, root)),
-      encode_string16(row.name),
+      encode_string16(id),
+      encode_string16(path),
+      encode_string16(Path.relative_to(path, root)),
+      encode_string16(name),
       encode_string8(icon),
       <<editing_type::8>>,
       encode_string16(editing_text)
     ]
   end
 
-  @spec clamp_file_tree_diagnostics(FileTreeDiagnostics.counts()) :: FileTreeDiagnostics.counts()
+  @spec file_tree_diagnostics_tuple(map() | tuple() | nil) ::
+          {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
+  defp file_tree_diagnostics_tuple({errors, warnings, info, hints}),
+    do: {errors, warnings, info, hints}
+
+  defp file_tree_diagnostics_tuple(diagnostics) when is_map(diagnostics) do
+    {
+      Map.get(
+        diagnostics,
+        :error_count,
+        Map.get(diagnostics, :errors, Map.get(diagnostics, :error, 0))
+      ),
+      Map.get(
+        diagnostics,
+        :warning_count,
+        Map.get(diagnostics, :warnings, Map.get(diagnostics, :warning, 0))
+      ),
+      Map.get(diagnostics, :info_count, Map.get(diagnostics, :info, 0)),
+      Map.get(
+        diagnostics,
+        :hint_count,
+        Map.get(diagnostics, :hints, Map.get(diagnostics, :hint, 0))
+      )
+    }
+  end
+
+  defp file_tree_diagnostics_tuple(_diagnostics), do: {0, 0, 0, 0}
+
+  @spec clamp_file_tree_diagnostics(
+          {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
+        ) :: {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
   defp clamp_file_tree_diagnostics({errors, warnings, info, hints}) do
     {clamp_u16(errors), clamp_u16(warnings), clamp_u16(info), clamp_u16(hints)}
   end
@@ -2205,44 +2241,51 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @spec clamp_u16(non_neg_integer()) :: non_neg_integer()
   defp clamp_u16(value), do: min(value, @max_u16)
 
-  @spec selected_row_id([Row.t()]) :: String.t()
+  @spec selected_row_id([file_tree_row()]) :: String.t()
   defp selected_row_id(rows) do
-    case Enum.find(rows, & &1.selected?) do
-      %Row{id: id} -> id
-      nil -> ""
+    case Enum.find(rows, &Map.get(&1, :selected?, false)) do
+      %{id: id} when is_binary(id) -> id
+      _missing -> ""
     end
   end
 
-  @spec file_tree_flags(FileTreeState.tree_status(), boolean()) :: non_neg_integer()
+  @spec file_tree_flags(file_tree_status(), boolean()) :: non_neg_integer()
   defp file_tree_flags(status, focused?) do
     0
-    |> maybe_flag(FileTreeState.visible_status?(status), 0)
+    |> maybe_flag(file_tree_visible_status?(status), 0)
     |> maybe_flag(focused?, 1)
     |> maybe_flag(status == :empty, 4)
   end
 
-  @spec encode_file_tree_status(FileTreeState.tree_status()) :: non_neg_integer()
+  @spec file_tree_visible_status?(file_tree_status()) :: boolean()
+  defp file_tree_visible_status?(:ready), do: true
+  defp file_tree_visible_status?(:loading), do: true
+  defp file_tree_visible_status?(:empty), do: true
+  defp file_tree_visible_status?({:error, _reason}), do: true
+  defp file_tree_visible_status?(_status), do: false
+
+  @spec encode_file_tree_status(file_tree_status()) :: non_neg_integer()
   defp encode_file_tree_status(:hidden), do: 0
   defp encode_file_tree_status(:loading), do: 1
   defp encode_file_tree_status(:empty), do: 2
   defp encode_file_tree_status(:ready), do: 3
   defp encode_file_tree_status({:error, _reason}), do: 4
 
-  @spec file_tree_error_reason(FileTreeState.tree_status()) :: String.t()
+  @spec file_tree_error_reason(file_tree_status()) :: String.t()
   defp file_tree_error_reason({:error, reason}), do: reason
   defp file_tree_error_reason(_status), do: ""
 
-  @spec file_tree_row_flags(Row.t()) :: non_neg_integer()
-  defp file_tree_row_flags(%Row{} = row) do
+  @spec file_tree_row_flags(file_tree_row()) :: non_neg_integer()
+  defp file_tree_row_flags(row) when is_map(row) do
     0
-    |> maybe_flag(row.directory?, 0)
-    |> maybe_flag(row.expanded?, 1)
-    |> maybe_flag(row.selected?, 2)
-    |> maybe_flag(row.focused?, 3)
-    |> maybe_flag(row.active?, 4)
-    |> maybe_flag(row.dirty?, 5)
-    |> maybe_flag(row.editing != nil, 6)
-    |> maybe_flag(row.last_child?, 7)
+    |> maybe_flag(Map.get(row, :directory?, false), 0)
+    |> maybe_flag(Map.get(row, :expanded?, false), 1)
+    |> maybe_flag(Map.get(row, :selected?, false), 2)
+    |> maybe_flag(Map.get(row, :focused?, false), 3)
+    |> maybe_flag(Map.get(row, :active?, false), 4)
+    |> maybe_flag(Map.get(row, :dirty?, false), 5)
+    |> maybe_flag(Map.get(row, :editing) != nil, 6)
+    |> maybe_flag(Map.get(row, :last_child?, false), 7)
   end
 
   @spec maybe_flag(non_neg_integer(), boolean(), non_neg_integer()) :: non_neg_integer()
@@ -2269,9 +2312,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   # Nerd Font folder icon (nf-md-folder)
   @folder_icon "\u{F024B}"
 
-  @spec file_tree_row_icon(Row.t()) :: String.t()
-  defp file_tree_row_icon(%Row{directory?: true}), do: @folder_icon
-  defp file_tree_row_icon(%Row{name: name}), do: Devicon.icon(Language.detect_filetype(name))
+  @spec file_tree_row_icon(file_tree_row()) :: String.t()
+  defp file_tree_row_icon(%{directory?: true}), do: @folder_icon
+  defp file_tree_row_icon(%{name: name}), do: Devicon.icon(Language.detect_filetype(name))
+  defp file_tree_row_icon(_row), do: ""
 
   @spec encode_git_status(atom() | nil) :: non_neg_integer()
   defp encode_git_status(nil), do: 0
@@ -3955,7 +3999,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   defp decode_config_value(_payload), do: :error
 
-  @spec decode_file_tree_drop(binary()) :: {:ok, {:file_tree_drop, DropIntent.t()}} | :error
+  @spec decode_file_tree_drop(binary()) :: {:ok, {:file_tree_drop, map()}} | :error
   defp decode_file_tree_drop(
          <<target_index::16, target_path_hash::32, target_kind::8, modifiers::8, rest::binary>>
        ) do
@@ -3966,7 +4010,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
          {:ok, source_paths, <<>>} <- decode_string16_list(sources_binary, source_count) do
       {:ok,
        {:file_tree_drop,
-        DropIntent.new(
+        %{
           source_paths: source_paths,
           target_index: target_index,
           target_id: target_id,
@@ -3974,7 +4018,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           target_path: target_path,
           target_dir?: target_dir?,
           modifiers: modifiers
-        )}}
+        }}}
     else
       _ -> :error
     end

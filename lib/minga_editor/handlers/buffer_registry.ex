@@ -14,7 +14,6 @@ defmodule MingaEditor.Handlers.BufferRegistry do
   alias MingaEditor.HighlightSync
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
-  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
@@ -31,7 +30,7 @@ defmodule MingaEditor.Handlers.BufferRegistry do
     new_state = register_buffer(state, pid, path)
 
     EditorState.update_file_tree(new_state, fn file_tree ->
-      FileTreeState.set_tree(file_tree, FileTree.reveal(tree, path))
+      Map.put(file_tree, :tree, FileTree.reveal(tree, path))
     end)
   end
 

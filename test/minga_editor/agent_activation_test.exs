@@ -12,7 +12,6 @@ defmodule MingaEditor.AgentActivationTest do
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
-  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
@@ -129,7 +128,7 @@ defmodule MingaEditor.AgentActivationTest do
     test "restores the recorded workspace return target" do
       {state, _pid} = activated_state()
       windows = %Windows{tree: nil, map: %{}, active: 7, next_id: 8}
-      file_tree = %FileTreeState{focused: true}
+      file_tree = %{focused: true, tree: nil, buffer: nil}
 
       return_target =
         UIState.return_target(
@@ -160,7 +159,7 @@ defmodule MingaEditor.AgentActivationTest do
       {tb, fallback_tab} = TabBar.insert(state.shell_state.tab_bar, :file, "fallback.ex")
       state = EditorState.set_tab_bar(state, tb)
       state = EditorState.switch_tab(state, fallback_tab.id)
-      state = put_in(state.workspace.keymap_scope, :file_tree)
+      state = put_in(state.workspace.keymap_scope, :dired)
       state = EditorState.switch_tab(state, file_tab_id)
       state = AgentCommands.toggle_agentic_view(state)
       {:ok, tb} = TabBar.remove(state.shell_state.tab_bar, file_tab_id)
@@ -169,7 +168,7 @@ defmodule MingaEditor.AgentActivationTest do
       result = AgentCommands.return_to_editor(state)
 
       assert result.shell_state.tab_bar.active_id == fallback_tab.id
-      assert result.workspace.keymap_scope == :file_tree
+      assert result.workspace.keymap_scope == :dired
     end
 
     test "activate_for_card records the current editor return target" do

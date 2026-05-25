@@ -13,10 +13,6 @@ defmodule Minga.Keymap.ScopeTest do
       assert Scope.module_for(:agent) == Minga.Keymap.Scope.Agent
     end
 
-    test "returns FileTree module for :file_tree" do
-      assert Scope.module_for(:file_tree) == Minga.Keymap.Scope.FileTree
-    end
-
     test "returns nil for unknown scope" do
       assert Scope.module_for(:bogus) == nil
     end
@@ -27,10 +23,9 @@ defmodule Minga.Keymap.ScopeTest do
       scopes = Scope.all_scopes()
       assert :editor in scopes
       assert :agent in scopes
-      assert :file_tree in scopes
       assert :git_status in scopes
       assert :dired in scopes
-      assert length(scopes) >= 5
+      assert length(scopes) >= 4
     end
   end
 
@@ -144,32 +139,6 @@ defmodule Minga.Keymap.ScopeTest do
     end
   end
 
-  describe "resolve_key/4 with :file_tree scope" do
-    test "Enter resolves to tree_open_or_toggle" do
-      assert {:command, :tree_open_or_toggle} = Scope.resolve_key(:file_tree, :normal, {13, 0})
-    end
-
-    test "l resolves to tree_expand" do
-      assert {:command, :tree_expand} = Scope.resolve_key(:file_tree, :normal, {?l, 0})
-    end
-
-    test "h resolves to tree_collapse" do
-      assert {:command, :tree_collapse} = Scope.resolve_key(:file_tree, :normal, {?h, 0})
-    end
-
-    test "H resolves to tree_toggle_hidden" do
-      assert {:command, :tree_toggle_hidden} = Scope.resolve_key(:file_tree, :normal, {?H, 0})
-    end
-
-    test "q resolves to tree_close" do
-      assert {:command, :tree_close} = Scope.resolve_key(:file_tree, :normal, {?q, 0})
-    end
-
-    test "unknown key returns :not_found" do
-      assert :not_found = Scope.resolve_key(:file_tree, :normal, {?x, 0})
-    end
-  end
-
   describe "resolve_key/4 with unknown scope" do
     test "returns :not_found" do
       assert :not_found = Scope.resolve_key(:nonexistent, :normal, {?j, 0})
@@ -179,8 +148,7 @@ defmodule Minga.Keymap.ScopeTest do
   describe "behaviour contract" do
     for {scope_name, mod} <- [
           editor: Minga.Keymap.Scope.Editor,
-          agent: Minga.Keymap.Scope.Agent,
-          file_tree: Minga.Keymap.Scope.FileTree
+          agent: Minga.Keymap.Scope.Agent
         ] do
       test "#{mod} implements name/0 returning #{scope_name}" do
         assert unquote(mod).name() == unquote(scope_name)
@@ -220,13 +188,6 @@ defmodule Minga.Keymap.ScopeTest do
 
     test "editor scope returns empty help" do
       assert [] = Scope.help_groups(:editor, :default)
-    end
-
-    test "file_tree scope returns help with tree bindings" do
-      groups = Scope.help_groups(:file_tree, :default)
-      assert [_ | _] = groups
-      all_bindings = Enum.flat_map(groups, fn {_cat, bindings} -> bindings end)
-      assert Enum.any?(all_bindings, fn {key, _desc} -> key == "Enter" end)
     end
 
     test "unknown scope returns empty help" do

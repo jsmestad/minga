@@ -23,7 +23,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.Commands
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Handlers.BufferRegistry
-  alias MingaEditor.HighlightSync
   alias MingaEditor.Layout
   alias MingaEditor.LspActions
   alias MingaEditor.Input.Observatory
@@ -36,7 +35,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
-  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Search, as: SearchData
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
@@ -48,8 +46,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.Frontend.Protocol
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.Startup
-
-  alias Minga.Project.FileTree
 
   @typedoc "Editor state (re-exported for brevity)."
   @type state :: EditorState.t()
@@ -278,72 +274,62 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:file_tree_click, index}) do
-    gui_tree_action(state, index, :click)
+    Sidebar.dispatch_action(state, "file_tree", "click", %{index: index})
   end
 
   defp dispatch_action(state, {:file_tree_toggle, index}) do
-    gui_tree_action(state, index, :toggle)
+    Sidebar.dispatch_action(state, "file_tree", "toggle_entry", %{index: index})
   end
 
   defp dispatch_action(state, {:file_tree_open_in_split, index}) do
-    open_file_tree_entry_in_split(state, index)
+    Sidebar.dispatch_action(state, "file_tree", "open_in_split", %{index: index})
   end
 
   defp dispatch_action(state, {:file_tree_new_file, index}) do
-    state = move_tree_cursor(state, index)
-    Commands.FileTree.new_file(state)
+    Sidebar.dispatch_action(state, "file_tree", "new_file", %{index: index})
   end
 
   defp dispatch_action(state, {:file_tree_new_folder, index}) do
-    state = move_tree_cursor(state, index)
-    Commands.FileTree.new_folder(state)
+    Sidebar.dispatch_action(state, "file_tree", "new_folder", %{index: index})
   end
 
   defp dispatch_action(state, {:file_tree_edit_confirm, text}) do
-    case EditorState.file_tree_state(state).editing do
-      nil ->
-        state
-
-      %{} ->
-        ft = FileTreeState.update_editing_text(EditorState.file_tree_state(state), text)
-        state = EditorState.set_file_tree(state, ft)
-        Commands.FileTree.confirm_editing(state)
-    end
+    Sidebar.dispatch_action(state, "file_tree", "edit_confirm", %{text: text})
   end
 
   defp dispatch_action(state, :file_tree_edit_cancel) do
-    Commands.FileTree.cancel_editing(state)
+    Sidebar.dispatch_action(state, "file_tree", "edit_cancel", %{})
   end
 
   defp dispatch_action(state, {:file_tree_delete, index}) do
-    state = move_tree_cursor(state, index)
-    Commands.FileTree.delete(state)
+    Sidebar.dispatch_action(state, "file_tree", "delete", %{index: index})
   end
 
   defp dispatch_action(state, {:file_tree_rename, index}) do
-    state = move_tree_cursor(state, index)
-    Commands.FileTree.rename(state)
+    Sidebar.dispatch_action(state, "file_tree", "rename", %{index: index})
   end
 
   defp dispatch_action(state, {:file_tree_duplicate, index}) do
-    state = move_tree_cursor(state, index)
-    Commands.FileTree.duplicate(state)
+    Sidebar.dispatch_action(state, "file_tree", "duplicate", %{index: index})
   end
 
   defp dispatch_action(state, {:file_tree_move, source_index, target_dir_index}) do
-    Commands.FileTree.move(state, source_index, target_dir_index)
+    Sidebar.dispatch_action(state, "file_tree", "move", %{
+      source_index: source_index,
+      target_dir_index: target_dir_index
+    })
   end
 
   defp dispatch_action(state, {:file_tree_drop, intent}) do
-    Commands.FileTree.drop(state, intent)
+    Sidebar.dispatch_action(state, "file_tree", "drop", %{intent: intent})
   end
 
   defp dispatch_action(state, :file_tree_collapse_all) do
-    Commands.FileTree.collapse_all(state)
+    Sidebar.dispatch_action(state, "file_tree", "collapse_all", %{})
   end
 
   defp dispatch_action(state, :file_tree_refresh) do
-    Commands.FileTree.refresh(state)
+    Sidebar.dispatch_action(state, "file_tree", "refresh", %{})
   end
 
   defp dispatch_action(state, {:completion_select, index}) do
@@ -362,7 +348,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:toggle_panel, 0}) do
-    Commands.FileTree.toggle(state)
+    Sidebar.dispatch_action(state, "file_tree", "toggle", %{})
   end
 
   defp dispatch_action(state, {:toggle_panel, 1}) do
@@ -832,7 +818,8 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   @spec dispatch_sidebar_toggle(EditorState.t(), String.t()) :: EditorState.t()
-  defp dispatch_sidebar_toggle(state, "file_tree"), do: Commands.FileTree.toggle(state)
+  defp dispatch_sidebar_toggle(state, "file_tree"),
+    do: Sidebar.dispatch_action(state, "file_tree", "toggle", %{})
 
   defp dispatch_sidebar_toggle(state, "git_status"),
     do: Commands.Git.execute(state, :git_status_toggle)
@@ -1029,78 +1016,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     PickerUI.open(state, MingaEditor.UI.Picker.FileSource)
   end
 
-  # Moves the tree cursor to a specific index (used by GUI context menu / header actions).
-  @spec move_tree_cursor(state(), non_neg_integer()) :: state()
-  defp move_tree_cursor(state, index) do
-    case EditorState.file_tree_state(state).tree do
-      nil ->
-        state
-
-      tree ->
-        EditorState.update_file_tree(state, fn file_tree ->
-          FileTreeState.set_tree(file_tree, FileTree.select(tree, index))
-        end)
-    end
-  end
-
-  # Moves the file tree cursor to the given index and performs the action.
-  @spec gui_tree_action(state(), non_neg_integer(), :click | :toggle) :: state()
-  defp gui_tree_action(state, index, action) do
-    if EditorState.file_tree_state(state).tree == nil do
-      state
-    else
-      do_gui_tree_action(state, index, action)
-    end
-  end
-
-  @spec do_gui_tree_action(state(), non_neg_integer(), :click | :toggle) :: state()
-  defp do_gui_tree_action(state, index, action) do
-    state = move_tree_cursor(state, index)
-
-    case action do
-      :click -> Commands.FileTree.open_or_toggle(state)
-      :toggle -> Commands.FileTree.open_or_toggle(state)
-    end
-  end
-
-  @spec open_file_tree_entry_in_split(state(), non_neg_integer()) :: state()
-  defp open_file_tree_entry_in_split(state, index) do
-    if EditorState.file_tree_state(state).tree == nil do
-      state
-    else
-      do_open_file_tree_entry_in_split(state, index)
-    end
-  end
-
-  @spec do_open_file_tree_entry_in_split(state(), non_neg_integer()) :: state()
-  defp do_open_file_tree_entry_in_split(state, index) do
-    state =
-      state
-      |> move_tree_cursor(index)
-      |> unfocus_file_tree_for_split()
-
-    case FileTree.selected_entry(EditorState.file_tree_state(state).tree) do
-      %{dir?: false, path: path} ->
-        state
-        |> Commands.Movement.execute(:split_vertical)
-        |> Commands.Movement.execute(:window_right)
-        |> open_file_by_path_in_active_window(path)
-
-      %{dir?: true} ->
-        state
-
-      nil ->
-        state
-    end
-  end
-
-  @spec unfocus_file_tree_for_split(state()) :: state()
-  defp unfocus_file_tree_for_split(state) do
-    state
-    |> EditorState.update_file_tree(&MingaEditor.State.FileTree.unfocus/1)
-    |> EditorState.set_keymap_scope(:editor)
-  end
-
   # ── Hover open action ──────────────────────────────────────────────
 
   @spec accept_hover_open_action(state()) :: state()
@@ -1233,75 +1148,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       nil -> :ok
       git_root -> MingaEditor.refresh_git_repo(git_root)
     end
-  end
-
-  # ── Window helpers ─────────────────────────────────────────────────
-
-  @spec open_file_by_path_in_active_window(state(), String.t()) :: state()
-  defp open_file_by_path_in_active_window(state, abs_path) do
-    case BufferRegistry.file_tab_for_path_in_active_workspace(state, abs_path) do
-      %Tab{} = tab ->
-        open_tab_buffer_in_active_window(state, tab, abs_path)
-
-      nil ->
-        case Commands.start_buffer(abs_path, EditorState.options_server(state)) do
-          {:ok, pid} -> register_buffer_in_active_window(state, pid, abs_path)
-          {:error, _reason} -> EditorState.set_status(state, "Could not open #{abs_path}")
-        end
-    end
-  end
-
-  @spec open_tab_buffer_in_active_window(state(), Tab.t(), String.t()) :: state()
-  defp open_tab_buffer_in_active_window(state, tab, abs_path) do
-    case tab_active_buffer(tab) do
-      pid when is_pid(pid) -> show_buffer_in_active_window(state, pid)
-      nil -> EditorState.set_status(state, "Could not open #{abs_path}")
-    end
-  end
-
-  @spec show_buffer_in_active_window(state(), pid()) :: state()
-  defp show_buffer_in_active_window(state, pid) when is_pid(pid) do
-    state
-    |> EditorState.update_buffers(fn buffers ->
-      case Enum.find_index(buffers.list, &(&1 == pid)) do
-        nil -> Buffers.add(buffers, pid)
-        idx -> Buffers.switch_to(buffers, idx)
-      end
-    end)
-    |> EditorState.sync_active_window_buffer()
-  end
-
-  @spec tab_active_buffer(Tab.t()) :: pid() | nil
-  defp tab_active_buffer(%Tab{context: context}) when is_map(context) do
-    case TabContext.to_workspace_map(context) do
-      %{buffers: %Buffers{active: pid}} when is_pid(pid) -> pid
-      _ -> nil
-    end
-  end
-
-  @spec register_buffer_in_active_window(state(), pid(), String.t()) :: state()
-  defp register_buffer_in_active_window(state, buffer_pid, file_path) do
-    state =
-      state
-      |> EditorState.update_buffers(&Buffers.add(&1, buffer_pid))
-      |> EditorState.sync_active_window_buffer()
-      |> EditorState.monitor_buffer(buffer_pid)
-
-    state = MingaEditor.log_message(state, "Opened: #{file_path}")
-
-    Minga.Events.broadcast(
-      :buffer_opened,
-      %Minga.Events.BufferEvent{buffer: buffer_pid, path: file_path},
-      EditorState.events_registry(state)
-    )
-
-    state = HighlightSync.setup_for_buffer_pid(state, buffer_pid)
-
-    if state.backend != :headless do
-      Process.send_after(self(), :request_code_lens_and_inlay_hints, 800)
-    end
-
-    state
   end
 
   # ── Vim mode state helper ──────────────────────────────────────────

@@ -18,7 +18,6 @@ defmodule MingaEditor.Agent.UIState do
   alias MingaEditor.Agent.UIState.View
   alias MingaEditor.Agent.View.Preview
   alias Minga.Buffer
-  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Windows
 
   # Re-export sub-struct types for backward compat. New code should
@@ -499,7 +498,7 @@ defmodule MingaEditor.Agent.UIState do
           pos_integer() | nil,
           pid() | nil,
           Windows.t(),
-          FileTreeState.t(),
+          map(),
           Minga.Keymap.Scope.scope_name(),
           boolean()
         ) :: View.return_target()
@@ -522,13 +521,13 @@ defmodule MingaEditor.Agent.UIState do
   end
 
   @doc "Activates the view, saving the current window layout."
-  @spec activate(t(), Windows.t(), FileTreeState.t()) :: t()
+  @spec activate(t(), Windows.t(), map()) :: t()
   def activate(%__MODULE__{view: view} = state, windows, file_tree) do
     %{state | view: View.activate(view, windows, file_tree)}
   end
 
   @doc "Activates the view with a recorded editor return target."
-  @spec activate(t(), Windows.t(), FileTreeState.t(), View.return_target() | nil) :: t()
+  @spec activate(t(), Windows.t(), map(), View.return_target() | nil) :: t()
   def activate(%__MODULE__{view: view} = state, windows, file_tree, return_target) do
     %{state | view: View.activate(view, windows, file_tree, return_target)}
   end
@@ -546,7 +545,7 @@ defmodule MingaEditor.Agent.UIState do
   end
 
   @doc "Deactivates the view and returns the restored window layout."
-  @spec deactivate(t()) :: {t(), Windows.t() | nil, FileTreeState.t() | nil}
+  @spec deactivate(t()) :: {t(), Windows.t() | nil, map() | nil}
   def deactivate(%__MODULE__{view: view} = state) do
     {new_view, saved_windows, saved_file_tree} = View.deactivate(view)
     {%{state | view: new_view}, saved_windows, saved_file_tree}

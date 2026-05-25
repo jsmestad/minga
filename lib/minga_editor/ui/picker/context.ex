@@ -32,7 +32,6 @@ defmodule MingaEditor.UI.Picker.Context do
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.UI.Theme
-  alias MingaEditor.State.FileTree
 
   @enforce_keys [
     :buffers,
@@ -64,7 +63,7 @@ defmodule MingaEditor.UI.Picker.Context do
   @type t :: %__MODULE__{
           buffers: Buffers.t(),
           editing: VimState.t(),
-          file_tree: FileTree.t() | nil,
+          file_tree: map() | nil,
           search: Search.t(),
           viewport: Viewport.t(),
           tab_bar: TabBar.t(),

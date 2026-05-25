@@ -6,20 +6,30 @@ defmodule MingaEditor.LayoutInvalidationTest do
   screen coordinates. When a side panel opens or closes, the editor's
   column offset changes, so all cached draws become stale.
 
-  Regression: the file tree and editor content overlapped on the first
-  render after toggling the tree because the window's cached draws still
+  Regression: the left sidebar and editor content overlapped on the first
+  render after toggling the sidebar because the window's cached draws still
   had the old col_off=0 coordinates.
   """
-  # Mutates the global built-in FileTree sidebar registration while computing layout.
+  # Mutates the global sidebar registry while computing layout.
   use ExUnit.Case, async: false
 
+  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
-  alias Minga.Project.FileTree
+
+  setup do
+    Sidebar.unregister_source({:extension, :layout_invalidation_test})
+
+    on_exit(fn ->
+      Sidebar.unregister_source({:extension, :layout_invalidation_test})
+    end)
+
+    :ok
+  end
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -56,14 +66,20 @@ defmodule MingaEditor.LayoutInvalidationTest do
   end
 
   defp with_file_tree(state, width \\ 30) do
-    file_tree =
-      MingaEditor.State.FileTree.open(
-        %MingaEditor.State.FileTree{},
-        %FileTree{root: "/tmp", width: width},
-        nil
-      )
+    :ok =
+      Sidebar.register({:extension, :layout_invalidation_test}, %{
+        id: "layout_invalidation_left_sidebar",
+        display_name: "Layout Sidebar",
+        placement: :left,
+        priority: 10,
+        preferred_width: width,
+        visible?: true,
+        focused?: true,
+        semantic_kind: "generic_tree",
+        icon: "list.bullet"
+      })
 
-    EditorState.set_file_tree(state, file_tree)
+    state
   end
 
   # ── Unit tests: invalidate_all_windows ─────────────────────────────────────
@@ -177,9 +193,9 @@ defmodule MingaEditor.LayoutInvalidationTest do
       {_r, col, _w, _h} = state.layout.editor_area
       assert col == 21
 
-      # Close file tree and invalidate
-      state =
-        EditorState.set_file_tree(state, %MingaEditor.State.FileTree{}) |> Layout.invalidate()
+      # Close sidebar and invalidate
+      Sidebar.unregister_source({:extension, :layout_invalidation_test})
+      state = Layout.invalidate(state)
 
       layout = Layout.compute(state)
       assert layout.file_tree == nil

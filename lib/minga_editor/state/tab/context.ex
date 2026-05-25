@@ -7,10 +7,8 @@ defmodule MingaEditor.State.Tab.Context do
 
   alias Minga.Keymap.Scope
   alias MingaEditor.FeatureState
-  alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Dired, as: DiredState
-  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Mouse
   alias MingaEditor.State.Search
   alias MingaEditor.State.Windows
@@ -19,6 +17,8 @@ defmodule MingaEditor.State.Tab.Context do
   alias MingaEditor.Session.State, as: SessionState
 
   @version 1
+  @file_tree_source {:extension, :minga_file_tree}
+  @file_tree_feature :file_tree
 
   @workspace_fields [
     :keymap_scope,
@@ -195,11 +195,11 @@ defmodule MingaEditor.State.Tab.Context do
   @spec migrate_legacy_file_tree(t(), map()) :: t()
   defp migrate_legacy_file_tree(%__MODULE__{} = context, map) do
     case fetch_legacy_file_tree(map) do
-      {:ok, %FileTreeState{} = file_tree} ->
+      {:ok, file_tree} when is_map(file_tree) ->
         feature_state =
           context.feature_state
           |> Kernel.||(%FeatureState{})
-          |> FeatureState.put(FileTreeFeature.source(), FileTreeFeature.feature_id(), file_tree)
+          |> FeatureState.put(@file_tree_source, @file_tree_feature, file_tree)
 
         put_valid_field(context, :feature_state, feature_state)
 

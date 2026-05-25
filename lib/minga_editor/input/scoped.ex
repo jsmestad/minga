@@ -82,7 +82,7 @@ defmodule MingaEditor.Input.Scoped do
     handle_agent_key(state, cp, mods)
   end
 
-  # File tree scope: handled by Input.FileTreeHandler.
+  # Sidebar scopes are handled by registered sidebar input handlers.
 
   # Unknown scope: passthrough
   def handle_key(state, _cp, _mods), do: {:passthrough, state}
@@ -281,17 +281,17 @@ defmodule MingaEditor.Input.Scoped do
 
   # Agent side panel (editor scope) extracted to MingaEditor.Input.AgentPanel.
 
-  # File tree scope dispatch extracted to MingaEditor.Input.FileTreeHandler.
+  # File tree scope dispatch is owned by the bundled FileTree extension.
 
   # ══════════════════════════════════════════════════════════════════════════
   # Shared helpers
   # ══════════════════════════════════════════════════════════════════════════
 
   # key_sequence_pending? and update_agent extracted to their respective
-  # handler modules (AgentPanel, FileTreeHandler).
+  # handler modules (AgentPanel, sidebar handlers).
 
   # Mouse handling and file tree mouse helpers extracted to
-  # MingaEditor.Input.FileTreeHandler.
+  # the bundled FileTree extension handler.
 
   # Checks if the cursor is within the lines of an expanded paste block.
   # Used by handle_agent_key for Tab handling on paste placeholder lines.

@@ -857,7 +857,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       root = "/project"
 
       rows = [
-        MingaEditor.FileTree.Row.new(
+        Map.new(
           id: "/project/lib",
           path: "/project/lib",
           relative_path: "lib",
@@ -871,7 +871,7 @@ defmodule Minga.Integration.GUIProtocolTest do
           last_child?: false,
           editing: nil
         ),
-        MingaEditor.FileTree.Row.new(
+        Map.new(
           id: "/project/lib/editor.ex",
           path: "/project/lib/editor.ex",
           relative_path: "lib/editor.ex",

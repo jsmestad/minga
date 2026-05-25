@@ -19,7 +19,6 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
   alias MingaEditor.RenderPipeline.Chrome
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.StatusBar.Data, as: StatusBarData
   alias MingaEditor.Shell.Traditional.Chrome.Helpers, as: ChromeHelpers
@@ -27,7 +26,6 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Shell.Traditional.GitStatusRenderer
   alias MingaEditor.Shell.Traditional.SidebarRenderer
-  alias MingaEditor.Shell.Traditional.TreeRenderer
   alias MingaEditor.Session.ChromeState
   alias MingaEditor.UI.Popup.Lifecycle, as: PopupLifecycle
 
@@ -137,40 +135,14 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
   end
 
   @spec sidebar_draws(state(), Layout.t()) :: [DisplayList.draw()]
-  defp sidebar_draws(state, layout) do
-    file_tree = EditorState.file_tree_state(state)
-
-    if FileTreeState.visible_status?(FileTreeState.status(file_tree)) do
-      TreeRenderer.render(state)
-    else
-      extension_sidebar_draws(state, layout, active_extension_left_sidebar())
+  defp sidebar_draws(%{workspace: %{keymap_scope: :git_status}} = state, layout) do
+    case Sidebar.active_left() do
+      nil -> GitStatusRenderer.render(state, layout.file_tree)
+      _sidebar -> SidebarRenderer.render(state, layout.file_tree)
     end
   end
 
-  @spec extension_sidebar_draws(state(), Layout.t(), Sidebar.entry() | nil) :: [
-          DisplayList.draw()
-        ]
-  defp extension_sidebar_draws(state, layout, nil), do: legacy_sidebar_draws(state, layout)
-
-  defp extension_sidebar_draws(state, layout, %{id: _id}) do
-    SidebarRenderer.render(state, layout.file_tree)
-  end
-
-  @spec active_extension_left_sidebar() :: Sidebar.entry() | nil
-  defp active_extension_left_sidebar do
-    Sidebar.visible()
-    |> Enum.reject(&(&1.id == "file_tree"))
-    |> Enum.filter(&(&1.placement == :left))
-    |> Enum.sort_by(&{not &1.focused?, &1.priority, &1.id})
-    |> List.first()
-  end
-
-  @spec legacy_sidebar_draws(state(), Layout.t()) :: [DisplayList.draw()]
-  defp legacy_sidebar_draws(%{workspace: %{keymap_scope: :git_status}} = state, layout) do
-    GitStatusRenderer.render(state, layout.file_tree)
-  end
-
-  defp legacy_sidebar_draws(state, _layout), do: TreeRenderer.render(state)
+  defp sidebar_draws(state, layout), do: SidebarRenderer.render(state, layout.file_tree)
 
   @spec stable_chrome_fingerprint(state(), Layout.t(), StatusBarData.t()) :: integer()
   defp stable_chrome_fingerprint(state, layout, status_bar_data) do

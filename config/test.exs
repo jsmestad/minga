@@ -39,6 +39,7 @@ config :minga, test_provider_module: Minga.Test.StubProvider
 # Disable user extension loading so tests are deterministic regardless
 # of which extensions the developer has installed locally.
 config :minga, load_extensions: false
+config :minga, load_file_tree_extension: false
 
 # Use stub installers in tests to avoid spawning npm/pip/cargo/go/curl
 # subprocesses during concurrent test runs (same EPIPE concern as git).

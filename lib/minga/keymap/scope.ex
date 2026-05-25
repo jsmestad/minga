@@ -153,7 +153,6 @@ defmodule Minga.Keymap.Scope do
   @builtin_scopes [
     Minga.Keymap.Scope.Editor,
     Minga.Keymap.Scope.Agent,
-    Minga.Keymap.Scope.FileTree,
     Minga.Keymap.Scope.GitStatus,
     Minga.Keymap.Scope.Dired
   ]
