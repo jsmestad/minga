@@ -222,5 +222,6 @@ defmodule MingaEditor.FileTree.Freshness do
   end
 
   @spec path_under_root?(String.t(), String.t()) :: boolean()
+  defp path_under_root?(path, "/"), do: String.starts_with?(path, "/")
   defp path_under_root?(path, root), do: path == root or String.starts_with?(path, root <> "/")
 end
