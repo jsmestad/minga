@@ -13,6 +13,7 @@ defmodule MingaEditor.Session.State do
   """
 
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.FeatureState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Dired, as: DiredState
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -41,6 +42,7 @@ defmodule MingaEditor.Session.State do
           injection_ranges: %{pid() => [Minga.Language.Highlight.InjectionRange.t()]},
           search: Search.t(),
           editing: VimState.t(),
+          feature_state: FeatureState.t(),
           document_highlights: [document_highlight()] | nil,
           agent_ui: UIState.t()
         }
@@ -58,6 +60,7 @@ defmodule MingaEditor.Session.State do
             injection_ranges: %{},
             search: %Search{},
             editing: VimState.new(),
+            feature_state: FeatureState.new(),
             document_highlights: nil,
             agent_ui: UIState.new()
 
@@ -295,6 +298,77 @@ defmodule MingaEditor.Session.State do
   @spec set_buffers(t(), Buffers.t()) :: t()
   def set_buffers(%__MODULE__{} = wspace, buffers) do
     %{wspace | buffers: buffers}
+  end
+
+  @doc "Returns source-owned feature state, or nil when inactive."
+  @spec get_feature_state(t(), FeatureState.source(), FeatureState.feature_id()) :: term() | nil
+  def get_feature_state(%__MODULE__{feature_state: feature_state}, source, feature_id) do
+    FeatureState.get(feature_state, source, feature_id)
+  end
+
+  @doc "Returns source-owned feature state, or a caller-provided default when inactive."
+  @spec get_feature_state(t(), FeatureState.source(), FeatureState.feature_id(), default) ::
+          term() | default
+        when default: var
+  def get_feature_state(%__MODULE__{feature_state: feature_state}, source, feature_id, default) do
+    FeatureState.get(feature_state, source, feature_id, default)
+  end
+
+  @doc "Stores source-owned feature state."
+  @spec put_feature_state(t(), FeatureState.source(), FeatureState.feature_id(), term()) :: t()
+  def put_feature_state(
+        %__MODULE__{feature_state: feature_state} = wspace,
+        source,
+        feature_id,
+        value
+      ) do
+    %{wspace | feature_state: FeatureState.put(feature_state, source, feature_id, value)}
+  end
+
+  @doc "Updates source-owned feature state. Missing values are initialized with `default`."
+  @spec update_feature_state(
+          t(),
+          FeatureState.source(),
+          FeatureState.feature_id(),
+          term(),
+          (term() -> term())
+        ) :: t()
+  def update_feature_state(
+        %__MODULE__{feature_state: feature_state} = wspace,
+        source,
+        feature_id,
+        default,
+        fun
+      )
+      when is_function(fun, 1) do
+    %{
+      wspace
+      | feature_state: FeatureState.update(feature_state, source, feature_id, default, fun)
+    }
+  end
+
+  @doc "Drops one source-owned feature state entry. Missing state is treated as inactive."
+  @spec drop_feature_state(t(), FeatureState.source(), FeatureState.feature_id()) :: t()
+  def drop_feature_state(%__MODULE__{feature_state: feature_state} = wspace, source, feature_id) do
+    %{wspace | feature_state: FeatureState.drop(feature_state, source, feature_id)}
+  end
+
+  @doc "Drops all feature state owned by a source."
+  @spec drop_feature_state_source(t(), FeatureState.source()) :: t()
+  def drop_feature_state_source(%__MODULE__{feature_state: feature_state} = wspace, source) do
+    %{wspace | feature_state: FeatureState.drop_source(feature_state, source)}
+  end
+
+  @doc "Drops every extension-owned feature state entry."
+  @spec drop_extension_feature_state_sources(t()) :: t()
+  def drop_extension_feature_state_sources(%__MODULE__{feature_state: feature_state} = wspace) do
+    %{wspace | feature_state: FeatureState.drop_extension_sources(feature_state)}
+  end
+
+  @doc "Replaces the feature-state registry."
+  @spec set_feature_state(t(), FeatureState.t()) :: t()
+  def set_feature_state(%__MODULE__{} = wspace, %FeatureState{} = feature_state) do
+    %{wspace | feature_state: feature_state}
   end
 
   @doc "Updates the agent UI state."

@@ -64,8 +64,10 @@ defmodule MingaEditor.State.SnapshotTest do
       assert ctx.search == state.workspace.search
 
       # PID/process-keyed highlight and injection cache state stays out of the snapshot.
-      refute Map.has_key?(Map.from_struct(ctx), :highlight)
-      refute Map.has_key?(Map.from_struct(ctx), :injection_ranges)
+      assert ctx.highlight == nil
+      refute :highlight in ctx.present_fields
+      assert ctx.injection_ranges == nil
+      refute :injection_ranges in ctx.present_fields
     end
 
     test "normalises transient editing state before snapshotting" do
@@ -379,11 +381,16 @@ defmodule MingaEditor.State.SnapshotTest do
       assert new_ctx.editing == old_ctx.editing
       assert new_ctx.document_highlights == old_ctx.document_highlights
 
-      # present_fields contain the same fields (order is not semantically significant)
-      assert Enum.sort(new_ctx.present_fields) == Enum.sort(old_ctx.present_fields)
+      # The new path intentionally excludes PID-keyed shared state from the snapshot.
+      excluded = [:agent_ui, :highlight, :injection_ranges]
 
-      # Both produce the same workspace map on round-trip
-      assert Context.to_workspace_map(new_ctx) == Context.to_workspace_map(old_ctx)
+      assert Enum.sort(new_ctx.present_fields) ==
+               Enum.sort(old_ctx.present_fields -- excluded)
+
+      # Snapshot-appropriate fields produce the same workspace map on round-trip.
+      new_map = Context.to_workspace_map(new_ctx)
+      old_map = Context.to_workspace_map(old_ctx) |> Map.drop(excluded)
+      assert new_map == old_map
     end
 
     test "round-trips through to_workspace_map preserving all fields" do

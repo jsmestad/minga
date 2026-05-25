@@ -606,7 +606,20 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec reload_config(state()) :: state()
   def reload_config(state) do
-    case Config.reload() do
+    reload_config(state, fn cleaned_state -> {Config.reload(), cleaned_state} end)
+  end
+
+  @doc false
+  @spec reload_config(state(), (state() -> {:ok | {:error, String.t()}, state()})) :: state()
+  def reload_config(state, reload_fun) when is_function(reload_fun, 1) do
+    state =
+      state
+      |> EditorState.drop_feature_state_source(:config)
+      |> EditorState.drop_extension_feature_state_sources()
+
+    {result, state} = reload_fun.(state)
+
+    case result do
       :ok ->
         MingaEditor.log_to_messages("Config reloaded")
         EditorState.set_status(state, "Config reloaded")

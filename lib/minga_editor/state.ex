@@ -30,6 +30,7 @@ defmodule MingaEditor.State do
   alias MingaAgent.Session, as: AgentSession
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.FeatureState
   alias Minga.Buffer
 
   alias MingaEditor.BottomPanel
@@ -247,6 +248,58 @@ defmodule MingaEditor.State do
   @spec set_workspace(t(), SessionState.t()) :: t()
   def set_workspace(%__MODULE__{} = state, %SessionState{} = workspace) do
     %{state | workspace: workspace}
+  end
+
+  @doc "Returns source-owned feature state from the active workspace, or nil when inactive."
+  @spec get_feature_state(t(), FeatureState.source(), FeatureState.feature_id()) :: term() | nil
+  def get_feature_state(%__MODULE__{workspace: workspace}, source, feature_id) do
+    SessionState.get_feature_state(workspace, source, feature_id)
+  end
+
+  @doc "Stores source-owned feature state on the active workspace."
+  @spec put_feature_state(t(), FeatureState.source(), FeatureState.feature_id(), term()) :: t()
+  def put_feature_state(%__MODULE__{} = state, source, feature_id, value) do
+    update_workspace(state, &SessionState.put_feature_state(&1, source, feature_id, value))
+  end
+
+  @doc "Updates source-owned feature state on the active workspace."
+  @spec update_feature_state(
+          t(),
+          FeatureState.source(),
+          FeatureState.feature_id(),
+          term(),
+          (term() -> term())
+        ) :: t()
+  def update_feature_state(%__MODULE__{} = state, source, feature_id, default, fun)
+      when is_function(fun, 1) do
+    update_workspace(
+      state,
+      &SessionState.update_feature_state(&1, source, feature_id, default, fun)
+    )
+  end
+
+  @doc "Drops one source-owned feature state entry from the active workspace."
+  @spec drop_feature_state(t(), FeatureState.source(), FeatureState.feature_id()) :: t()
+  def drop_feature_state(%__MODULE__{} = state, source, feature_id) do
+    update_workspace(state, &SessionState.drop_feature_state(&1, source, feature_id))
+  end
+
+  @doc "Drops all feature state owned by a source from live and snapshotted workspaces."
+  @spec drop_feature_state_source(t(), FeatureState.source()) :: t()
+  def drop_feature_state_source(%__MODULE__{} = state, source) do
+    state
+    |> update_workspace(&SessionState.drop_feature_state_source(&1, source))
+    |> drop_tab_context_feature_state_source(source)
+    |> drop_board_feature_state_source(source)
+  end
+
+  @doc "Drops extension-owned feature state from live and snapshotted workspaces."
+  @spec drop_extension_feature_state_sources(t()) :: t()
+  def drop_extension_feature_state_sources(%__MODULE__{} = state) do
+    state
+    |> update_workspace(&SessionState.drop_extension_feature_state_sources/1)
+    |> drop_tab_context_extension_feature_state_sources()
+    |> drop_board_extension_feature_state_sources()
   end
 
   @doc "Sets the active workspace viewport."
@@ -702,6 +755,74 @@ defmodule MingaEditor.State do
   def tab_bar(%{shell_state: ss}), do: ShellState.tab_bar(ss)
   @spec set_tab_bar(t(), TabBar.t() | nil) :: t()
   def set_tab_bar(s, tb), do: update_shell_state(s, &ShellState.set_tab_bar(&1, tb))
+
+  @spec drop_tab_context_feature_state_source(t(), FeatureState.source()) :: t()
+  defp drop_tab_context_feature_state_source(%__MODULE__{} = state, source) do
+    case tab_bar(state) do
+      %TabBar{} = tb -> set_tab_bar(state, TabBar.drop_feature_state_source(tb, source))
+      _other -> state
+    end
+  end
+
+  @spec drop_tab_context_extension_feature_state_sources(t()) :: t()
+  defp drop_tab_context_extension_feature_state_sources(%__MODULE__{} = state) do
+    case tab_bar(state) do
+      %TabBar{} = tb -> set_tab_bar(state, TabBar.drop_extension_feature_state_sources(tb))
+      _other -> state
+    end
+  end
+
+  @spec drop_board_feature_state_source(t(), FeatureState.source()) :: t()
+  defp drop_board_feature_state_source(%__MODULE__{} = state, source) do
+    state
+    |> drop_active_board_feature_state_source(source)
+    |> drop_stashed_board_feature_state_source(source)
+  end
+
+  @spec drop_board_extension_feature_state_sources(t()) :: t()
+  defp drop_board_extension_feature_state_sources(%__MODULE__{} = state) do
+    state
+    |> drop_active_board_extension_feature_state_sources()
+    |> drop_stashed_board_extension_feature_state_sources()
+  end
+
+  @spec drop_active_board_feature_state_source(t(), FeatureState.source()) :: t()
+  defp drop_active_board_feature_state_source(
+         %__MODULE__{shell_state: %BoardState{} = board} = state,
+         source
+       ) do
+    %{state | shell_state: BoardState.drop_feature_state_source(board, source)}
+  end
+
+  defp drop_active_board_feature_state_source(%__MODULE__{} = state, _source), do: state
+
+  @spec drop_stashed_board_feature_state_source(t(), FeatureState.source()) :: t()
+  defp drop_stashed_board_feature_state_source(
+         %__MODULE__{stashed_board_state: %BoardState{} = board} = state,
+         source
+       ) do
+    %{state | stashed_board_state: BoardState.drop_feature_state_source(board, source)}
+  end
+
+  defp drop_stashed_board_feature_state_source(%__MODULE__{} = state, _source), do: state
+
+  @spec drop_active_board_extension_feature_state_sources(t()) :: t()
+  defp drop_active_board_extension_feature_state_sources(
+         %__MODULE__{shell_state: %BoardState{} = board} = state
+       ) do
+    %{state | shell_state: BoardState.drop_extension_feature_state_sources(board)}
+  end
+
+  defp drop_active_board_extension_feature_state_sources(%__MODULE__{} = state), do: state
+
+  @spec drop_stashed_board_extension_feature_state_sources(t()) :: t()
+  defp drop_stashed_board_extension_feature_state_sources(
+         %__MODULE__{stashed_board_state: %BoardState{} = board} = state
+       ) do
+    %{state | stashed_board_state: BoardState.drop_extension_feature_state_sources(board)}
+  end
+
+  defp drop_stashed_board_extension_feature_state_sources(%__MODULE__{} = state), do: state
 
   @spec agent(t()) :: AgentState.t()
   def agent(%{shell_state: ss}), do: ShellState.agent(ss)
@@ -1637,13 +1758,13 @@ defmodule MingaEditor.State do
       },
       windows: windows,
       file_tree: %FileTreeState{project_root: state.workspace.file_tree.project_root},
+      dired: %DiredState{},
       viewport: state.terminal_viewport,
       mouse: %Mouse{},
-      highlight: %Highlighting{},
       lsp_pending: %{},
-      injection_ranges: %{},
       search: %Search{},
       editing: VimState.new(),
+      feature_state: FeatureState.new(),
       document_highlights: nil
     })
   end
@@ -1666,13 +1787,13 @@ defmodule MingaEditor.State do
       },
       windows: windows,
       file_tree: %FileTreeState{project_root: state.workspace.file_tree.project_root},
+      dired: %DiredState{},
       viewport: state.terminal_viewport,
       mouse: %Mouse{},
-      highlight: %Highlighting{},
       lsp_pending: %{},
-      injection_ranges: %{},
       search: %Search{},
       editing: VimState.new(),
+      feature_state: FeatureState.new(),
       document_highlights: nil
     })
   end

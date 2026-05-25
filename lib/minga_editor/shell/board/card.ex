@@ -20,11 +20,16 @@ defmodule MingaEditor.Shell.Board.Card do
   hit a wall and needs human input (approval, clarifying question).
   """
 
+  alias MingaEditor.FeatureState
+  alias MingaEditor.State.Tab.Context, as: TabContext
+
   @type status :: :idle | :working | :iterating | :needs_you | :done | :errored
 
   @type id :: pos_integer()
 
   @type connection_status :: :connected | :disconnected | :ended | :unavailable | nil
+
+  @type workspace_snapshot :: TabContext.t()
 
   @type t :: %__MODULE__{
           id: id(),
@@ -32,7 +37,7 @@ defmodule MingaEditor.Shell.Board.Card do
           server_name: String.t() | nil,
           remote_session_id: String.t() | nil,
           connection_status: connection_status(),
-          workspace: map() | nil,
+          workspace: workspace_snapshot() | nil,
           task: String.t(),
           status: status(),
           model: String.t() | nil,
@@ -68,7 +73,7 @@ defmodule MingaEditor.Shell.Board.Card do
       remote_session_id: Keyword.get(attrs, :remote_session_id),
       connection_status: Keyword.get(attrs, :connection_status),
       model: Keyword.get(attrs, :model),
-      workspace: Keyword.get(attrs, :workspace),
+      workspace: normalize_workspace(Keyword.get(attrs, :workspace)),
       status: Keyword.get(attrs, :status, :idle),
       kind: Keyword.get(attrs, :kind, :agent),
       created_at: DateTime.utc_now(),
@@ -136,15 +141,27 @@ defmodule MingaEditor.Shell.Board.Card do
   end
 
   @doc "Stores a workspace snapshot on the card."
-  @spec store_workspace(t(), map()) :: t()
+  @spec store_workspace(t(), workspace_snapshot() | TabContext.legacy()) :: t()
   def store_workspace(%__MODULE__{} = card, workspace) when is_map(workspace) do
-    %{card | workspace: workspace}
+    %{card | workspace: TabContext.from_map(workspace)}
   end
 
   @doc "Clears the stored workspace snapshot."
   @spec clear_workspace(t()) :: t()
   def clear_workspace(%__MODULE__{} = card) do
     %{card | workspace: nil}
+  end
+
+  @doc "Drops source-owned feature state from the stored workspace snapshot."
+  @spec drop_feature_state_source(t(), FeatureState.source()) :: t()
+  def drop_feature_state_source(%__MODULE__{} = card, source) do
+    update_workspace_feature_state(card, &FeatureState.drop_source(&1, source))
+  end
+
+  @doc "Drops extension-owned feature state from the stored workspace snapshot."
+  @spec drop_extension_feature_state_sources(t()) :: t()
+  def drop_extension_feature_state_sources(%__MODULE__{} = card) do
+    update_workspace_feature_state(card, &FeatureState.drop_extension_sources/1)
   end
 
   @doc "Updates the list of recently touched files."
@@ -173,4 +190,25 @@ defmodule MingaEditor.Shell.Board.Card do
   def from_agent_status(:error), do: :errored
   def from_agent_status(:idle), do: :done
   def from_agent_status(_), do: :idle
+
+  @spec normalize_workspace(workspace_snapshot() | TabContext.legacy() | nil) ::
+          workspace_snapshot() | nil
+  defp normalize_workspace(nil), do: nil
+  defp normalize_workspace(workspace) when is_map(workspace), do: TabContext.from_map(workspace)
+
+  @spec update_workspace_feature_state(t(), (FeatureState.t() -> FeatureState.t())) :: t()
+  defp update_workspace_feature_state(%__MODULE__{workspace: workspace} = card, fun)
+       when is_map(workspace) do
+    context = TabContext.from_map(workspace)
+
+    if :feature_state in context.present_fields do
+      feature_state = context.feature_state || FeatureState.new()
+      context = TabContext.put_fields(context, feature_state: fun.(feature_state))
+      store_workspace(card, context)
+    else
+      card
+    end
+  end
+
+  defp update_workspace_feature_state(%__MODULE__{} = card, _fun), do: card
 end

@@ -113,6 +113,44 @@ The current `modeline_segment/3` callback is the narrow compatibility exception:
 
 Rich GUI features should publish semantic payloads that Minga's central protocol encoders and native frontend adapters understand, not raw GUI opcodes or raw terminal cells.
 
+### Feature-owned UI state
+
+Use feature-owned state when a UI feature needs per-workspace state but should not add a permanent field to `MingaEditor.Session.State`. Good examples are sidebar visibility, selected tree rows, drag state, panel filters, or cached UI projections. This state lives with the current workspace or tab snapshot, so switching tabs restores it with the rest of the editing context.
+
+Feature state is keyed by source and feature id. Built-in code uses `:builtin` or `:config`. Extensions use `{:extension, extension_name}`. The feature id is an atom owned by that source.
+
+```elixir
+@source {:extension, :my_sidebar}
+@feature :sidebar
+
+def toggle_sidebar(state) do
+  MingaEditor.State.update_feature_state(
+    state,
+    @source,
+    @feature,
+    %{visible?: false, selected: nil},
+    fn sidebar -> %{sidebar | visible?: not sidebar.visible?} end
+  )
+end
+
+def selected_path(state) do
+  case MingaEditor.State.get_feature_state(state, @source, @feature) do
+    nil -> nil
+    sidebar -> sidebar.selected
+  end
+end
+
+def close_sidebar(state) do
+  MingaEditor.State.drop_feature_state(state, @source, @feature)
+end
+```
+
+Missing state means inactive. Layout, input routing, render, GUI emit, and command code should treat `nil` as "this feature is not present" and fall back to normal buffer space. Do not pattern match on raw feature-state maps in random modules. Use the helpers on `MingaEditor.State` when you are transforming editor state, or `MingaEditor.Session.State` when you are already working with a workspace snapshot.
+
+Feature state is not daemon-global runtime state. If your extension needs a long-lived process, cache, worker queue, connection, or subscription, keep that in your extension's own GenServer or supervision tree via `child_spec/1`. Use feature state only for UI state that belongs to a workspace or tab.
+
+Reload and cleanup are source-owned. When an extension stops, fails, or reloads, Minga removes only feature state owned by `{:extension, extension_name}` from the live workspace and saved workspace snapshots. State owned by other extensions, config, or built-in features remains intact. Config reload runs inside the editor command path, so it first cleans `:config` and all extension-owned feature state before loading replacement config and extensions.
+
 ---
 
 ## Commands

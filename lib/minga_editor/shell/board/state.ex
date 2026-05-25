@@ -132,6 +132,24 @@ defmodule MingaEditor.Shell.Board.State do
     {state, card}
   end
 
+  @doc "Drops source-owned feature state from every stored card workspace."
+  @spec drop_feature_state_source(t(), MingaEditor.FeatureState.source()) :: t()
+  def drop_feature_state_source(%__MODULE__{cards: cards} = state, source) do
+    cards =
+      Map.new(cards, fn {id, card} -> {id, Card.drop_feature_state_source(card, source)} end)
+
+    %{state | cards: cards}
+  end
+
+  @doc "Drops extension-owned feature state from every stored card workspace."
+  @spec drop_extension_feature_state_sources(t()) :: t()
+  def drop_extension_feature_state_sources(%__MODULE__{cards: cards} = state) do
+    cards =
+      Map.new(cards, fn {id, card} -> {id, Card.drop_extension_feature_state_sources(card)} end)
+
+    %{state | cards: cards}
+  end
+
   @doc """
   Removes a card from the board.
 
@@ -202,7 +220,7 @@ defmodule MingaEditor.Shell.Board.State do
   The caller is responsible for restoring the card's workspace as the
   live `state.workspace` on EditorState.
   """
-  @spec zoom_into(t(), Card.id(), map()) :: t()
+  @spec zoom_into(t(), Card.id(), Card.workspace_snapshot()) :: t()
   def zoom_into(%__MODULE__{} = state, card_id, workspace_snapshot) do
     if Map.has_key?(state.cards, card_id) do
       state = update_card(state, card_id, &Card.store_workspace(&1, workspace_snapshot))
@@ -218,7 +236,7 @@ defmodule MingaEditor.Shell.Board.State do
   The returned snapshot is the workspace that was stored on the card
   when it was zoomed into. Returns `{state, nil}` if not zoomed.
   """
-  @spec zoom_out(t()) :: {t(), map() | nil}
+  @spec zoom_out(t()) :: {t(), Card.workspace_snapshot() | nil}
   def zoom_out(%__MODULE__{zoomed_into: nil} = state), do: {state, nil}
 
   def zoom_out(%__MODULE__{zoomed_into: card_id} = state) do
