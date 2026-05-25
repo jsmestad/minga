@@ -3,8 +3,8 @@ import Foundation
 
 /// Shared policy for preview screenshots and snapshot-fixture layout.
 enum PreviewSnapshotPolicy {
-    private static let fullShellViews: Set<String> = ["EditorChromeView", "AgentChromeView"]
-    private static let renderedWindowViews: Set<String> = ["EditorChromeView", "AgentChromeView", "GitStatusView", "FileTreeView"]
+    private static let fullShellViews: Set<String> = ["EditorChromeView", "AgentChromeView", "DiagnosticsEditorView"]
+    private static let renderedWindowViews: Set<String> = ["EditorChromeView", "AgentChromeView", "DiagnosticsEditorView", "GitStatusView", "FileTreeView"]
     private static let eagerLayoutViews: Set<String> = ["GitStatusView", "FileTreeView"]
 
     static func size(named name: String) -> CGSize {
@@ -21,6 +21,10 @@ enum PreviewSnapshotPolicy {
         case "MinibufferView": CGSize(width: 600, height: 140)
         case "WhichKeyOverlay": CGSize(width: 520, height: 300)
         case "SearchToolbar": CGSize(width: 800, height: 40)
+        case "HoverPopupOverlay": CGSize(width: 500, height: 300)
+        case "SignatureHelpOverlay": CGSize(width: 500, height: 200)
+        case "DiagnosticsEditorView": CGSize(width: 1200, height: 704)
+        case "TabBarOverflow": CGSize(width: 1200, height: 36)
         default: CGSize(width: 400, height: 200)
         }
     }
