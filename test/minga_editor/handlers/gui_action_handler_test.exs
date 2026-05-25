@@ -203,12 +203,8 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert new_state.workspace.keymap_scope == :editor
   end
 
-  test "observatory inspect is a no-op in the Board shell" do
-    state = %{
-      TestHelpers.base_state()
-      | shell: MingaEditor.Shell.Board,
-        shell_state: MingaEditor.Shell.Board.State.new()
-    }
+  test "observatory inspect is a no-op when the active shell has no observatory state" do
+    state = %{TestHelpers.base_state() | shell_state: %{}}
 
     assert GuiActionHandler.dispatch(state, {:observatory_inspect, "<0.1.0>"}) == state
   end

@@ -1,4 +1,4 @@
-defmodule MingaEditor.Shell.Board.State do
+defmodule MingaBoard.Shell.State do
   @moduledoc """
   Presentation state for The Board shell.
 
@@ -19,7 +19,7 @@ defmodule MingaEditor.Shell.Board.State do
   then either clears the live workspace or restores a minimal Board workspace.
   """
 
-  alias MingaEditor.Shell.Board.Card
+  alias MingaBoard.Shell.Card
   alias MingaEditor.State.ModalOverlay
 
   @type t :: %__MODULE__{

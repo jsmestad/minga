@@ -1,4 +1,4 @@
-defmodule MingaEditor.Shell.Board do
+defmodule MingaBoard.Shell do
   @moduledoc """
   The Board shell: agent supervisor card view.
 
@@ -33,9 +33,12 @@ defmodule MingaEditor.Shell.Board do
   alias MingaEditor.RenderPipeline.Chrome
   alias MingaEditor.Renderer.Regions
   alias MingaEditor.Frontend.Emit.Context, as: EmitContext
-  alias MingaEditor.Shell.Board.Card
-  alias MingaEditor.Shell.Board.SessionLifecycle
-  alias MingaEditor.Shell.Board.State, as: BoardState
+  alias MingaEditor.Frontend.Protocol.GUI.BoardCardPayload
+  alias MingaEditor.Frontend.Protocol.GUI.BoardPayload
+  alias MingaBoard.AgentActivation
+  alias MingaBoard.Shell.Card
+  alias MingaBoard.Shell.SessionLifecycle
+  alias MingaBoard.Shell.State, as: BoardState
   alias MingaEditor.Session.State, as: SessionState
 
   @impl true
@@ -44,7 +47,7 @@ defmodule MingaEditor.Shell.Board do
     # Try to restore persisted board state from disk (skip in test env)
     skip_persistence = Keyword.get(opts, :skip_persistence, false)
 
-    case if(skip_persistence, do: nil, else: MingaEditor.Shell.Board.Persistence.load()) do
+    case if(skip_persistence, do: nil, else: MingaBoard.Shell.Persistence.load()) do
       %BoardState{} = restored ->
         ensure_you_card(restored)
 
@@ -82,7 +85,7 @@ defmodule MingaEditor.Shell.Board do
         "Board: added background sub-agent card ##{card.id}: #{Handle.label(handle)}"
       )
 
-      MingaEditor.Shell.Board.Persistence.save(shell_state)
+      MingaBoard.Shell.Persistence.save(shell_state)
       {shell_state, workspace}
     end
   end
@@ -103,10 +106,7 @@ defmodule MingaEditor.Shell.Board do
     shell_state = BoardState.zoom_into(shell_state, card_id, workspace_snapshot)
     workspace = restore_workspace(card && card.workspace, workspace)
 
-    # Agent activation (session, scope, window content, prompt focus) is
-    # handled by Editor.AgentActivation.activate_for_card/2 after this
-    # function returns. The Shell behaviour only has (shell_state, workspace)
-    # access; full EditorState is needed for session attachment.
+    # Agent activation (session, scope, window content, prompt focus) is handled by `after_gui_action/2` after this function returns. The Shell behaviour only has (shell_state, workspace) access here; full EditorState is needed for session attachment.
 
     {shell_state, workspace}
   end
@@ -116,13 +116,13 @@ defmodule MingaEditor.Shell.Board do
     if card, do: SessionLifecycle.stop(card.session)
 
     shell_state = BoardState.remove_card(shell_state, card_id)
-    MingaEditor.Shell.Board.Persistence.save(shell_state)
+    MingaBoard.Shell.Persistence.save(shell_state)
     {shell_state, workspace}
   end
 
   def handle_gui_action(shell_state, workspace, {:board_reorder, card_id, new_index}) do
     shell_state = BoardState.reorder_card(shell_state, card_id, new_index)
-    MingaEditor.Shell.Board.Persistence.save(shell_state)
+    MingaBoard.Shell.Persistence.save(shell_state)
     {shell_state, workspace}
   end
 
@@ -137,12 +137,12 @@ defmodule MingaEditor.Shell.Board do
 
     Minga.Log.info(:agent, "Board: dispatched agent card ##{card.id} (#{model}): #{task}")
 
-    opts = [provider_opts: [model: model], thinking_level: :normal]
+    opts = [provider_opts: [model: model], thinking_level: "medium"]
 
     case SessionLifecycle.start(opts) do
       {:ok, pid} ->
         shell_state = BoardState.update_card(shell_state, card.id, &Card.attach_session(&1, pid))
-        MingaEditor.Shell.Board.Persistence.save(shell_state)
+        MingaBoard.Shell.Persistence.save(shell_state)
         {shell_state, workspace}
 
       {:error, reason} ->
@@ -152,7 +152,7 @@ defmodule MingaEditor.Shell.Board do
         )
 
         shell_state = BoardState.update_card(shell_state, card.id, &Card.set_status(&1, :errored))
-        MingaEditor.Shell.Board.Persistence.save(shell_state)
+        MingaBoard.Shell.Persistence.save(shell_state)
         {shell_state, workspace}
     end
   end
@@ -169,7 +169,7 @@ defmodule MingaEditor.Shell.Board do
         if card && !Card.you_card?(card) do
           updated_card = Card.set_status(card, :done)
           shell_state = %{shell_state | cards: Map.put(shell_state.cards, card_id, updated_card)}
-          MingaEditor.Shell.Board.Persistence.save(shell_state)
+          MingaBoard.Shell.Persistence.save(shell_state)
           {shell_state, workspace}
         else
           {shell_state, workspace}
@@ -189,7 +189,7 @@ defmodule MingaEditor.Shell.Board do
         if card && !Card.you_card?(card) do
           updated_card = Card.set_status(card, :needs_you)
           shell_state = %{shell_state | cards: Map.put(shell_state.cards, card_id, updated_card)}
-          MingaEditor.Shell.Board.Persistence.save(shell_state)
+          MingaBoard.Shell.Persistence.save(shell_state)
           {shell_state, workspace}
         else
           {shell_state, workspace}
@@ -211,6 +211,18 @@ defmodule MingaEditor.Shell.Board do
   def handle_gui_action(shell_state, workspace, _action) do
     {shell_state, workspace}
   end
+
+  @impl true
+  @spec after_gui_action(MingaEditor.State.t(), term()) :: MingaEditor.State.t()
+  def after_gui_action(state, {:board_select_card, card_id}) do
+    card = Map.get(state.shell_state.cards, card_id)
+    {new_board, state} = SessionLifecycle.ensure_session(state.shell_state, card, state)
+    state = MingaEditor.State.update_shell_state(state, fn _ -> new_board end)
+    card = new_board.cards[card_id]
+    AgentActivation.activate_for_card(state, card)
+  end
+
+  def after_gui_action(state, _action), do: state
 
   @impl true
   @spec compute_layout(term()) :: MingaEditor.Layout.t()
@@ -289,7 +301,7 @@ defmodule MingaEditor.Shell.Board do
 
     if card do
       icon = zoom_status_icon(card.status)
-      task = MingaEditor.Shell.Board.Card.display_task(card)
+      task = MingaBoard.Shell.Card.display_task(card)
       model = if card.model, do: " · #{card.model}", else: ""
       hint = "ESC back to Board"
 
@@ -312,7 +324,7 @@ defmodule MingaEditor.Shell.Board do
     end
   end
 
-  @spec zoom_status_icon(MingaEditor.Shell.Board.Card.status()) :: String.t()
+  @spec zoom_status_icon(MingaBoard.Shell.Card.status()) :: String.t()
   defp zoom_status_icon(:idle), do: "○"
   defp zoom_status_icon(:working), do: "●"
   defp zoom_status_icon(:iterating), do: "◉"
@@ -320,7 +332,7 @@ defmodule MingaEditor.Shell.Board do
   defp zoom_status_icon(:done), do: "✓"
   defp zoom_status_icon(:errored), do: "✗"
 
-  @spec zoom_status_face(MingaEditor.Shell.Board.Card.status(), MingaEditor.UI.Theme.t()) ::
+  @spec zoom_status_face(MingaBoard.Shell.Card.status(), MingaEditor.UI.Theme.t()) ::
           Minga.Core.Face.t()
   defp zoom_status_face(:working, theme),
     do: Minga.Core.Face.new(fg: 0x98C379, bg: theme.editor.bg)
@@ -349,8 +361,35 @@ defmodule MingaEditor.Shell.Board do
   end
 
   @impl true
-  @spec gui_payload(term()) :: {:board, BoardState.t()}
-  def gui_payload(%{shell_state: %BoardState{} = board}), do: {:board, board}
+  @spec gui_payload(term()) :: {:board, BoardPayload.t()}
+  def gui_payload(%{shell_state: %BoardState{} = board}), do: {:board, board_payload(board)}
+
+  @spec board_payload(BoardState.t()) :: BoardPayload.t()
+  defp board_payload(%BoardState{} = board) do
+    %BoardPayload{
+      visible?: BoardState.grid_view?(board),
+      focused_card_id: board.focused_card,
+      zoomed_card_id: board.zoomed_into,
+      filter_mode?: board.filter_mode,
+      filter_text: board.filter_text,
+      cards: Enum.map(BoardState.sorted_cards(board), &card_payload/1)
+    }
+  end
+
+  @spec card_payload(Card.t()) :: BoardCardPayload.t()
+  defp card_payload(%Card{} = card) do
+    %BoardCardPayload{
+      id: card.id,
+      status: card.status,
+      kind: card.kind,
+      task: card.task,
+      display_task: Card.display_task(card),
+      model: card.model,
+      created_at: card.created_at,
+      recent_files: card.recent_files,
+      sparkline: card.sparkline
+    }
+  end
 
   @impl true
   @spec render(term()) :: term()
@@ -388,7 +427,7 @@ defmodule MingaEditor.Shell.Board do
       board = editor_state.shell_state
 
       splash_draws =
-        MingaEditor.Shell.Board.Renderer.render(board, vp.cols, vp.rows, editor_state.theme)
+        MingaBoard.Shell.Renderer.render(board, vp.cols, vp.rows, editor_state.theme)
 
       cursor = Cursor.new(0, 0, :block)
 
@@ -413,7 +452,7 @@ defmodule MingaEditor.Shell.Board do
       %{
         overlay: MingaEditor.Input.overlay_handlers(),
         surface: [
-          MingaEditor.Shell.Board.Input,
+          MingaBoard.Shell.Input,
           MingaEditor.Input.GlobalBindings
         ]
       }
@@ -424,7 +463,7 @@ defmodule MingaEditor.Shell.Board do
 
       %{
         overlay: MingaEditor.Input.overlay_handlers(),
-        surface: [MingaEditor.Shell.Board.ZoomOut | traditional_surface]
+        surface: [MingaBoard.Shell.ZoomOut | traditional_surface]
       }
     end
   end
@@ -490,6 +529,77 @@ defmodule MingaEditor.Shell.Board do
   @impl true
   @spec set_tab_session(BoardState.t(), term(), pid() | nil) :: BoardState.t()
   def set_tab_session(shell_state, _tab_id, _session_pid), do: shell_state
+
+  @doc "Updates a card after its agent session exits."
+  @spec handle_agent_session_down(BoardState.t(), pid(), term()) :: {BoardState.t(), boolean()}
+  def handle_agent_session_down(%BoardState{} = shell_state, session_pid, reason) do
+    card_status = if reason in [:normal, :shutdown], do: :done, else: :errored
+
+    case Enum.find(shell_state.cards, fn {_id, card} -> card.session == session_pid end) do
+      {card_id, _card} ->
+        board =
+          BoardState.update_card(shell_state, card_id, fn card ->
+            card
+            |> Card.set_status(card_status)
+            |> Card.detach_session()
+          end)
+
+        {board, true}
+
+      nil ->
+        {shell_state, false}
+    end
+  end
+
+  @doc "Marks a card's remote agent connection as disconnected."
+  @spec handle_remote_session_disconnected(BoardState.t(), pid()) :: {BoardState.t(), boolean()}
+  def handle_remote_session_disconnected(%BoardState{} = shell_state, session_pid) do
+    case Enum.find(shell_state.cards, fn {_id, card} -> card.session == session_pid end) do
+      {card_id, _card} ->
+        board =
+          BoardState.update_card(
+            shell_state,
+            card_id,
+            &Card.set_connection_status(&1, :disconnected)
+          )
+
+        {board, true}
+
+      nil ->
+        {shell_state, false}
+    end
+  end
+
+  @doc "Syncs a card status from the associated agent session."
+  @spec sync_agent_status(BoardState.t(), pid(), atom()) :: BoardState.t()
+  def sync_agent_status(%BoardState{} = shell_state, session_pid, status) do
+    card_status = Card.from_agent_status(status)
+    update_card_by_session(shell_state, session_pid, &Card.set_status(&1, card_status))
+  end
+
+  @doc "Tracks a recently touched file on the card associated with an agent session."
+  @spec track_agent_file(BoardState.t(), pid(), String.t()) :: BoardState.t()
+  def track_agent_file(%BoardState{} = shell_state, session_pid, path) do
+    short_path = Path.basename(path)
+
+    update_card_by_session(shell_state, session_pid, fn card ->
+      files = [short_path | Enum.reject(card.recent_files, &(&1 == short_path))]
+      Card.set_recent_files(card, Enum.take(files, 5))
+    end)
+  end
+
+  @doc "Drops feature state owned by a source from all Board card workspace snapshots."
+  @spec drop_feature_state_source(BoardState.t(), MingaEditor.FeatureState.source()) ::
+          BoardState.t()
+  def drop_feature_state_source(%BoardState{} = shell_state, source) do
+    BoardState.drop_feature_state_source(shell_state, source)
+  end
+
+  @doc "Drops extension-owned feature state from all Board card workspace snapshots."
+  @spec drop_extension_feature_state_sources(BoardState.t()) :: BoardState.t()
+  def drop_extension_feature_state_sources(%BoardState{} = shell_state) do
+    BoardState.drop_extension_feature_state_sources(shell_state)
+  end
 
   @impl true
   @spec active_session(BoardState.t()) :: pid() | nil
@@ -566,7 +676,7 @@ defmodule MingaEditor.Shell.Board do
 
       workspace = restore_workspace(grid_workspace, workspace)
 
-      MingaEditor.Shell.Board.Persistence.save(shell_state)
+      MingaBoard.Shell.Persistence.save(shell_state)
       {shell_state, workspace}
     else
       {shell_state, workspace}

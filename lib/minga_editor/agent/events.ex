@@ -66,8 +66,8 @@ defmodule MingaEditor.Agent.Events do
     # Sync the tab's agent_status for tab bar rendering
     state = sync_tab_agent_status(state, status)
 
-    # Sync Board card status if Board shell is active
-    state = sync_board_card_status(state, status)
+    # Let the active shell mirror foreground agent status if it owns an agent surface.
+    state = sync_active_shell_agent_status(state, status)
 
     {state, [:render | effects]}
   end
@@ -192,8 +192,8 @@ defmodule MingaEditor.Agent.Events do
         }
       end)
 
-    # Track the file on the Board card for recent_files display
-    state = track_board_card_file(state, path)
+    # Let the active shell track touched files for any shell-owned agent surface.
+    state = track_active_shell_agent_file(state, path)
 
     # Associate the file's tab with the agent's workspace
     state = associate_file_with_agent_workspace(state, path)
@@ -476,60 +476,29 @@ defmodule MingaEditor.Agent.Events do
     end
   end
 
-  # Syncs Board card status when an agent status changes. Finds the card
-  # by matching the agent session PID and updates the card's status badge.
-  @spec sync_board_card_status(EditorState.t(), Tab.agent_status()) :: EditorState.t()
-  defp sync_board_card_status(%{shell_id: :board} = state, status) do
+  @spec sync_active_shell_agent_status(EditorState.t(), Tab.agent_status()) :: EditorState.t()
+  defp sync_active_shell_agent_status(state, status) do
     session = AgentAccess.session(state)
-
-    if session do
-      update_board_card_by_session(state, session, fn card ->
-        MingaEditor.Shell.Board.Card.set_status(
-          card,
-          MingaEditor.Shell.Board.Card.from_agent_status(status)
-        )
-      end)
-    else
-      state
-    end
+    update_shell_for_session(state, :sync_agent_status, [session, status])
   end
 
-  defp sync_board_card_status(state, _status), do: state
-
-  # Tracks a file path on the Board card associated with the current agent session.
-  # Keeps the 5 most recently touched files for the card footer display.
-  @spec track_board_card_file(EditorState.t(), String.t()) :: EditorState.t()
-  defp track_board_card_file(%{shell_id: :board} = state, path) do
+  @spec track_active_shell_agent_file(EditorState.t(), String.t()) :: EditorState.t()
+  defp track_active_shell_agent_file(state, path) do
     session = AgentAccess.session(state)
-
-    if session do
-      short_path = Path.basename(path)
-
-      update_board_card_by_session(state, session, fn card ->
-        files = [short_path | Enum.reject(card.recent_files, &(&1 == short_path))]
-        MingaEditor.Shell.Board.Card.set_recent_files(card, Enum.take(files, 5))
-      end)
-    else
-      state
-    end
+    update_shell_for_session(state, :track_agent_file, [session, path])
   end
 
-  defp track_board_card_file(state, _path), do: state
+  @spec update_shell_for_session(EditorState.t(), atom(), [term()]) :: EditorState.t()
+  defp update_shell_for_session(state, _callback, [session | _args]) when not is_pid(session),
+    do: state
 
-  # Finds a Board card by agent session PID and applies an update function.
-  @spec update_board_card_by_session(EditorState.t(), pid(), (MingaEditor.Shell.Board.Card.t() ->
-                                                                MingaEditor.Shell.Board.Card.t())) ::
-          EditorState.t()
-  defp update_board_card_by_session(state, session, update_fn) do
-    board = state.shell_state
+  defp update_shell_for_session(state, callback, args) do
+    shell = EditorState.active_shell_module(state)
 
-    case Enum.find(board.cards, fn {_id, card} -> card.session == session end) do
-      {card_id, _card} ->
-        new_board = MingaEditor.Shell.Board.State.update_card(board, card_id, update_fn)
-        %{state | shell_state: new_board}
-
-      nil ->
-        state
+    if function_exported?(shell, callback, length(args) + 1) do
+      %{state | shell_state: apply(shell, callback, [state.shell_state | args])}
+    else
+      state
     end
   end
 

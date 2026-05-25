@@ -196,28 +196,24 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     state
   end
 
-  defp dispatch_action(%{shell_id: :board} = state, action) do
-    state = handle_shell_gui_action(state, action)
+  defp dispatch_action(state, {:board_select_card, _card_id} = action),
+    do: dispatch_to_active_shell(state, action)
 
-    # After Board zoom into an agent card, atomically activate the
-    # agent view (session, scope, window content, prompt focus).
-    # The Board handler can't do this because it only has
-    # (shell_state, workspace), not the full EditorState.
-    case action do
-      {:board_select_card, card_id} ->
-        card = Map.get(state.shell_state.cards, card_id)
+  defp dispatch_action(state, {:board_close_card, _card_id} = action),
+    do: dispatch_to_active_shell(state, action)
 
-        {new_board, state} =
-          MingaEditor.Shell.Board.SessionLifecycle.ensure_session(state.shell_state, card, state)
+  defp dispatch_action(state, {:board_reorder, _card_id, _index} = action),
+    do: dispatch_to_active_shell(state, action)
 
-        state = EditorState.update_shell_state(state, fn _ -> new_board end)
-        card = new_board.cards[card_id]
-        MingaEditor.AgentActivation.activate_for_card(state, card)
+  defp dispatch_action(state, {:board_dispatch_agent, _task, _model} = action),
+    do: dispatch_to_active_shell(state, action)
 
-      _ ->
-        state
-    end
-  end
+  defp dispatch_action(state, :agent_approve), do: dispatch_to_active_shell(state, :agent_approve)
+
+  defp dispatch_action(state, :agent_request_changes),
+    do: dispatch_to_active_shell(state, :agent_request_changes)
+
+  defp dispatch_action(state, :agent_dismiss), do: dispatch_to_active_shell(state, :agent_dismiss)
 
   defp dispatch_action(state, {:select_tab, id}) do
     EditorState.switch_tab(state, id)
@@ -799,6 +795,23 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, action) do
     Minga.Log.warning(:editor, "[gui_action] unrecognized action: #{inspect(action)}")
     state
+  end
+
+  @spec dispatch_to_active_shell(EditorState.t(), term()) :: EditorState.t()
+  defp dispatch_to_active_shell(state, action) do
+    shell = EditorState.active_shell_module(state)
+
+    {shell_state, workspace} =
+      shell.handle_gui_action(
+        state.shell_state,
+        state.workspace,
+        action
+      )
+
+    state
+    |> EditorState.update_shell_state(fn _ -> shell_state end)
+    |> EditorState.set_workspace(workspace)
+    |> shell.after_gui_action(action)
   end
 
   @spec dispatch_missing_registered_sidebar_action(

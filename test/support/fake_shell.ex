@@ -64,6 +64,10 @@ defmodule MingaEditor.Test.FakeShell do
   end
 
   @impl true
+  @spec after_gui_action(term(), term()) :: term()
+  def after_gui_action(state, _action), do: state
+
+  @impl true
   @spec on_buffer_added(
           map(),
           MingaEditor.Session.State.t(),
@@ -110,4 +114,40 @@ defmodule MingaEditor.Test.FakeShell do
   @impl true
   @spec active_session(map()) :: nil
   def active_session(_shell_state), do: nil
+
+  @spec drop_feature_state_source(map(), MingaEditor.FeatureState.source()) :: map()
+  def drop_feature_state_source(%{contexts: contexts} = shell_state, source)
+      when is_list(contexts) do
+    %{shell_state | contexts: Enum.map(contexts, &drop_context_feature_source(&1, source))}
+  end
+
+  def drop_feature_state_source(shell_state, _source), do: shell_state
+
+  @spec drop_extension_feature_state_sources(map()) :: map()
+  def drop_extension_feature_state_sources(%{contexts: contexts} = shell_state)
+      when is_list(contexts) do
+    %{shell_state | contexts: Enum.map(contexts, &drop_context_extension_feature_sources/1)}
+  end
+
+  def drop_extension_feature_state_sources(shell_state), do: shell_state
+
+  @spec drop_context_feature_source(
+          MingaEditor.State.Tab.Context.t(),
+          MingaEditor.FeatureState.source()
+        ) :: MingaEditor.State.Tab.Context.t()
+  defp drop_context_feature_source(context, source) do
+    %MingaEditor.Session.State{viewport: MingaEditor.Viewport.new(1, 1)}
+    |> MingaEditor.Session.State.restore_tab_context(context)
+    |> MingaEditor.Session.State.drop_feature_state_source(source)
+    |> MingaEditor.Session.State.to_tab_context()
+  end
+
+  @spec drop_context_extension_feature_sources(MingaEditor.State.Tab.Context.t()) ::
+          MingaEditor.State.Tab.Context.t()
+  defp drop_context_extension_feature_sources(context) do
+    %MingaEditor.Session.State{viewport: MingaEditor.Viewport.new(1, 1)}
+    |> MingaEditor.Session.State.restore_tab_context(context)
+    |> MingaEditor.Session.State.drop_extension_feature_state_sources()
+    |> MingaEditor.Session.State.to_tab_context()
+  end
 end

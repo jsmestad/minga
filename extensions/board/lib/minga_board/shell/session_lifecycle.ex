@@ -1,4 +1,4 @@
-defmodule MingaEditor.Shell.Board.SessionLifecycle do
+defmodule MingaBoard.Shell.SessionLifecycle do
   @moduledoc """
   Session lifecycle helpers for Board cards.
 
@@ -8,8 +8,8 @@ defmodule MingaEditor.Shell.Board.SessionLifecycle do
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Session, as: AgentSession
   alias MingaAgent.SessionManager
-  alias MingaEditor.Shell.Board.Card
-  alias MingaEditor.Shell.Board.State, as: BoardState
+  alias MingaBoard.Shell.Card
+  alias MingaBoard.Shell.State, as: BoardState
 
   @doc "Starts a managed agent session and subscribes the caller to its events."
   @spec start(keyword()) :: {:ok, pid()} | {:error, term()}

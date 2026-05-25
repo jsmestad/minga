@@ -146,6 +146,7 @@ defmodule MingaEditor.Shell.Entry do
       input_handlers: 1,
       handle_event: 3,
       handle_gui_action: 3,
+      after_gui_action: 2,
       on_buffer_added: 5,
       on_buffer_switched: 2,
       on_buffer_died: 3,

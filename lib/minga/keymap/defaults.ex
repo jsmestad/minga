@@ -181,8 +181,7 @@ defmodule Minga.Keymap.Defaults do
     {~k(t l), :cycle_line_numbers, "Toggle line numbers"},
     {~k(t p), :toggle_bottom_panel, "Toggle bottom panel"},
     {~k(t i), :toggle_invisible, "Toggle invisible chars"},
-    {~k(t w), :toggle_wrap, "Toggle word wrap"},
-    {~k(t b), :toggle_board, "Toggle The Board"}
+    {~k(t w), :toggle_wrap, "Toggle word wrap"}
   ]
 
   # Group prefix descriptions shown in which-key at the SPC level.

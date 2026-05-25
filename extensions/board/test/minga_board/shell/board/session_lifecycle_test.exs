@@ -1,14 +1,14 @@
-defmodule MingaEditor.Shell.Board.SessionLifecycleTest do
+defmodule MingaBoard.Shell.SessionLifecycleTest do
   # Serial because one test temporarily unregisters the global MingaAgent.SessionManager.
   use ExUnit.Case, async: false
 
   alias MingaAgent.SessionManager
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Viewport
-  alias MingaEditor.Shell.Board
-  alias MingaEditor.Shell.Board.Input, as: BoardInput
-  alias MingaEditor.Shell.Board.SessionLifecycle
-  alias MingaEditor.Shell.Board.State, as: BoardState
+  alias MingaBoard.Shell
+  alias MingaBoard.Shell.Input, as: BoardInput
+  alias MingaBoard.Shell.SessionLifecycle
+  alias MingaBoard.Shell.State, as: BoardState
 
   defp stop_session(pid) when is_pid(pid) do
     SessionManager.stop_session_by_pid(pid)
@@ -21,7 +21,8 @@ defmodule MingaEditor.Shell.Board.SessionLifecycleTest do
   defp make_state(board) do
     %EditorState{
       port_manager: self(),
-      shell: Board,
+      shell: Shell,
+      shell_id: :board,
       shell_state: board,
       workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
       focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]

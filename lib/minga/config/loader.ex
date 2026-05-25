@@ -372,6 +372,11 @@ defmodule Minga.Config.Loader do
       ExtRegistry.register(:minga_git_porcelain, bundled_extension_path("git_porcelain"), [])
     end
 
+    if Application.get_env(:minga, :load_board_extension, true) do
+      path = Path.expand("../../../extensions/board/lib", __DIR__)
+      ExtRegistry.register(:minga_board, path, [])
+    end
+
     :ok
   end
 

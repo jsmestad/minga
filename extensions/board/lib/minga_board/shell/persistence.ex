@@ -1,4 +1,4 @@
-defmodule MingaEditor.Shell.Board.Persistence do
+defmodule MingaBoard.Shell.Persistence do
   @moduledoc """
   Persists Board card layout to disk so cards survive app restarts.
 
@@ -10,8 +10,8 @@ defmodule MingaEditor.Shell.Board.Persistence do
   shutdown. It's read once during Board.init.
   """
 
-  alias MingaEditor.Shell.Board.Card
-  alias MingaEditor.Shell.Board.State
+  alias MingaBoard.Shell.Card
+  alias MingaBoard.Shell.State
 
   @board_file "board.json"
 

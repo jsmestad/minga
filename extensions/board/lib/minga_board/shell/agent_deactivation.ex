@@ -1,4 +1,4 @@
-defmodule MingaEditor.Shell.Board.AgentDeactivation do
+defmodule MingaBoard.Shell.AgentDeactivation do
   @moduledoc """
   Clears the shell-level agent rendering cache when leaving a Board card.
 
@@ -7,7 +7,7 @@ defmodule MingaEditor.Shell.Board.AgentDeactivation do
   and `error` fields on `state.shell_state.agent` belong to the card the
   user just left. The grid view must not show those.
 
-  This is narrower than `MingaEditor.AgentActivation.deactivate/1`, which
+  This is narrower than `MingaBoard.AgentActivation.deactivate/1`, which
   also resets workspace-level fields (keymap scope, prompt focus). On
   zoom-out the workspace is replaced by the grid snapshot via
   `restore_tab_context/2`, so workspace-level cleanup is unnecessary.

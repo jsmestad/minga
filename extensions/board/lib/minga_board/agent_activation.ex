@@ -1,4 +1,4 @@
-defmodule MingaEditor.AgentActivation do
+defmodule MingaBoard.AgentActivation do
   @moduledoc """
   Atomically activates the agent view for a Board card.
 
@@ -22,7 +22,7 @@ defmodule MingaEditor.AgentActivation do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.Window.Content
-  alias MingaEditor.Shell.Board.Card
+  alias MingaBoard.Shell.Card
 
   @doc """
   Activates the agent view for a Board card on full EditorState.

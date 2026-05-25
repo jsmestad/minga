@@ -1,4 +1,4 @@
-defmodule MingaEditor.Shell.Board.Card do
+defmodule MingaBoard.Shell.Card do
   @moduledoc """
   A card on The Board representing an agent session or manual workspace.
 

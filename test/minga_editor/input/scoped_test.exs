@@ -78,48 +78,6 @@ defmodule MingaEditor.Input.ScopedTest do
     }
   end
 
-  defp board_state(opts) do
-    {:ok, buf} = BufferProcess.start_link(content: "hello world")
-    {:ok, prompt_buf} = BufferProcess.start_link(content: "")
-
-    agent = %AgentState{
-      runtime: %RuntimeState{status: :idle},
-      buffer: Keyword.get(opts, :agent_buffer, nil)
-    }
-
-    agentic = %UIState{
-      panel: %UIState.Panel{
-        visible: Keyword.get(opts, :panel_visible, false),
-        input_focused: Keyword.get(opts, :input_focused, false),
-        prompt_buffer: prompt_buf
-      },
-      view: %UIState.View{
-        active: Keyword.get(opts, :agentic_active, false),
-        focus: Keyword.get(opts, :focus, :chat)
-      }
-    }
-
-    mode =
-      Keyword.get(
-        opts,
-        :mode,
-        if(Keyword.get(opts, :input_focused, false), do: :insert, else: :normal)
-      )
-
-    %EditorState{
-      port_manager: self(),
-      shell: MingaEditor.Shell.Board,
-      workspace: %MingaEditor.Session.State{
-        viewport: Viewport.new(24, 80),
-        editing: %VimState{mode: mode, mode_state: Mode.initial_state()},
-        buffers: %Buffers{active: buf, list: [buf]},
-        keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
-        agent_ui: agentic
-      },
-      shell_state: %MingaEditor.Shell.Board.State{agent: agent}
-    }
-  end
-
   defp activated_agent_state do
     state = base_state(keymap_scope: :editor, agentic_active: false)
     file_buffer = state.workspace.buffers.active
@@ -240,50 +198,6 @@ defmodule MingaEditor.Input.ScopedTest do
       for mods <- [0x01, 0x04] do
         {:handled, new_state} = walk_surface_handlers(state, 13, mods)
         assert length(UIState.input_lines(AgentAccess.panel(new_state))) > 1
-      end
-    end
-  end
-
-  # ══════════════════════════════════════════════════════════════════════════
-  # Board shell agent prompt input
-  # ══════════════════════════════════════════════════════════════════════════
-
-  describe "board shell — focused prompt" do
-    setup do
-      {:ok,
-       state:
-         board_state(
-           shell: MingaEditor.Shell.Board,
-           keymap_scope: :agent,
-           input_focused: true,
-           panel_visible: true,
-           mode: :normal
-         )}
-    end
-
-    test "ESC unfocuses a normal prompt without clearing the draft", %{state: state} do
-      state = focus_prompt(state, "board draft")
-
-      {:handled, new_state} = walk_surface_handlers(state, 27, 0)
-      refute AgentAccess.input_focused?(new_state)
-      assert UIState.input_text(AgentAccess.panel(new_state)) == "board draft"
-      assert new_state.workspace.editing.mode == :normal
-    end
-
-    test "ESC keeps focus while cancelling visual and operator-pending prompt modes", %{
-      state: state
-    } do
-      for {enter_key, mode} <- [{?v, :visual}, {?d, :operator_pending}] do
-        state = focus_prompt(state, "#{mode} draft")
-
-        {:handled, mode_state} = walk_surface_handlers(state, enter_key, 0)
-        assert AgentAccess.input_focused?(mode_state)
-        assert Minga.Editing.mode(mode_state) == mode
-
-        {:handled, new_state} = walk_surface_handlers(mode_state, 27, 0)
-        assert AgentAccess.input_focused?(new_state)
-        assert new_state.workspace.editing.mode == :normal
-        assert UIState.input_text(AgentAccess.panel(new_state)) == "#{mode} draft"
       end
     end
   end

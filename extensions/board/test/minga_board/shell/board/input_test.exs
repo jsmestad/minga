@@ -1,4 +1,4 @@
-defmodule MingaEditor.Shell.Board.InputTest do
+defmodule MingaBoard.Shell.InputTest do
   @moduledoc """
   Tests for Board input handlers: grid navigation, zoom in/out, dispatch.
 
@@ -15,10 +15,10 @@ defmodule MingaEditor.Shell.Board.InputTest do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Viewport
   alias MingaEditor.Window.Content
-  alias MingaEditor.Shell.Board
-  alias MingaEditor.Shell.Board.Input, as: BoardInput
-  alias MingaEditor.Shell.Board.State, as: BoardState
-  alias MingaEditor.Shell.Board.ZoomOut
+  alias MingaBoard.Shell
+  alias MingaBoard.Shell.Input, as: BoardInput
+  alias MingaBoard.Shell.State, as: BoardState
+  alias MingaBoard.Shell.ZoomOut
 
   # ── Key constants ──────────────────────────────────────────────────────
 
@@ -43,7 +43,8 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
     %EditorState{
       port_manager: self(),
-      shell: Board,
+      shell: Shell,
+      shell_id: :board,
       shell_state: board,
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80)
@@ -72,7 +73,8 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
     state = %EditorState{
       port_manager: self(),
-      shell: Board,
+      shell: Shell,
+      shell_id: :board,
       shell_state: board,
       workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
       focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
@@ -217,7 +219,8 @@ defmodule MingaEditor.Shell.Board.InputTest do
       # replaces them with a fresh agent-chat window.
       state = %EditorState{
         port_manager: self(),
-        shell: Board,
+        shell: Shell,
+        shell_id: :board,
         shell_state: board,
         workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
         focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
@@ -253,7 +256,8 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
       state = %EditorState{
         port_manager: self(),
-        shell: Board,
+        shell: Shell,
+        shell_id: :board,
         shell_state: board,
         workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
         focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
@@ -308,7 +312,8 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
       state = %EditorState{
         port_manager: self(),
-        shell: Board,
+        shell: Shell,
+        shell_id: :board,
         shell_state: board,
         workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
         focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
@@ -337,7 +342,8 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
       state = %EditorState{
         port_manager: self(),
-        shell: Board,
+        shell: Shell,
+        shell_id: :board,
         shell_state: board,
         workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
         focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
@@ -374,7 +380,8 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
       state = %EditorState{
         port_manager: self(),
-        shell: Board,
+        shell: Shell,
+        shell_id: :board,
         shell_state: board,
         workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
         focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
@@ -490,7 +497,7 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
       board =
         BoardState.update_card(state.shell_state, 1, fn card ->
-          MingaEditor.Shell.Board.Card.attach_session(card, fake_pid)
+          MingaBoard.Shell.Card.attach_session(card, fake_pid)
         end)
 
       state = %{state | shell_state: board}
@@ -523,7 +530,8 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
       state = %EditorState{
         port_manager: self(),
-        shell: Board,
+        shell: Shell,
+        shell_id: :board,
         shell_state: board,
         workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
         focus_stack: [ZoomOut, MingaEditor.Input.GlobalBindings]
@@ -558,7 +566,8 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
       state = %EditorState{
         port_manager: self(),
-        shell: Board,
+        shell: Shell,
+        shell_id: :board,
         shell_state: board,
         workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
         focus_stack: [BoardInput, ZoomOut, MingaEditor.Input.GlobalBindings]
@@ -648,7 +657,7 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
       board =
         BoardState.update_card(state.shell_state, 1, fn card ->
-          MingaEditor.Shell.Board.Card.attach_session(card, session_pid)
+          MingaBoard.Shell.Card.attach_session(card, session_pid)
         end)
 
       state = %{state | shell_state: board}
@@ -727,7 +736,7 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
   defp walk_board_surface_handlers(state, cp, mods) do
     Enum.reduce_while(
-      MingaEditor.Shell.Board.input_handlers(state).surface,
+      MingaBoard.Shell.input_handlers(state).surface,
       {:passthrough, state},
       fn handler, {_, acc} ->
         case handler.handle_key(acc, cp, mods) do

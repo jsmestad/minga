@@ -95,12 +95,8 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
       assert Commands.execute(state, :toggle_beam_observatory) == state
     end
 
-    test "is a no-op for the Board shell" do
-      state =
-        Map.merge(base_state(), %{
-          shell: MingaEditor.Shell.Board,
-          shell_state: MingaEditor.Shell.Board.State.new()
-        })
+    test "is a no-op when the active shell has no observatory fields" do
+      state = %{base_state() | shell_state: %{}}
 
       assert Commands.execute(state, :toggle_beam_observatory) == state
     end

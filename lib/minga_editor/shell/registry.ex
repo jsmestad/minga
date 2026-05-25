@@ -37,15 +37,6 @@ defmodule MingaEditor.Shell.Registry do
         true
       )
 
-    :ok =
-      register_builtin(
-        :board,
-        MingaEditor.Shell.Board,
-        "Board",
-        "Agent supervisor card view.",
-        false
-      )
-
     :ok
   end
 

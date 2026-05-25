@@ -31,8 +31,7 @@ defmodule MingaEditor.Shell.RegistryTest do
     assert %Entry{id: :traditional, source: :builtin, module: MingaEditor.Shell.Traditional} =
              Registry.default()
 
-    assert Enum.map(Registry.list(), & &1.id) == [:traditional, :board]
-    assert Registry.module_for(:board) == MingaEditor.Shell.Board
+    assert Enum.map(Registry.list(), & &1.id) == [:traditional]
     assert Registry.id_for_module(MingaEditor.Shell.Traditional) == :traditional
   end
 

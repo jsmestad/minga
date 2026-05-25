@@ -91,7 +91,6 @@ defmodule MingaEditor.State do
 
   alias MingaEditor.Observatory
   alias MingaEditor.Shell.Traditional.State, as: ShellState
-  alias MingaEditor.Shell.Board.State, as: BoardState
 
   @enforce_keys [:port_manager, :workspace]
   defstruct backend: :headless,
@@ -1109,86 +1108,91 @@ defmodule MingaEditor.State do
   def set_tab_bar(s, tb), do: update_shell_state(s, &ShellState.set_tab_bar(&1, tb))
 
   @spec drop_tab_context_feature_state_source(t(), FeatureState.source()) :: t()
-  defp drop_tab_context_feature_state_source(%__MODULE__{} = state, source) do
+  defp drop_tab_context_feature_state_source(
+         %__MODULE__{shell_state: %ShellState{}} = state,
+         source
+       ) do
     case tab_bar(state) do
       %TabBar{} = tb -> set_tab_bar(state, TabBar.drop_feature_state_source(tb, source))
       _other -> state
     end
   end
 
+  defp drop_tab_context_feature_state_source(%__MODULE__{} = state, _source), do: state
+
   @spec drop_tab_context_extension_feature_state_sources(t()) :: t()
-  defp drop_tab_context_extension_feature_state_sources(%__MODULE__{} = state) do
+  defp drop_tab_context_extension_feature_state_sources(
+         %__MODULE__{shell_state: %ShellState{}} = state
+       ) do
     case tab_bar(state) do
       %TabBar{} = tb -> set_tab_bar(state, TabBar.drop_extension_feature_state_sources(tb))
       _other -> state
     end
   end
 
+  defp drop_tab_context_extension_feature_state_sources(%__MODULE__{} = state), do: state
+
   @spec drop_board_feature_state_source(t(), FeatureState.source()) :: t()
   defp drop_board_feature_state_source(%__MODULE__{} = state, source) do
     state
-    |> drop_active_board_feature_state_source(source)
-    |> drop_stashed_board_feature_state_source(source)
+    |> update_active_shell_feature_state(:drop_feature_state_source, [source])
+    |> update_stashed_shell_feature_state(:drop_feature_state_source, [source])
   end
 
   @spec drop_board_extension_feature_state_sources(t()) :: t()
   defp drop_board_extension_feature_state_sources(%__MODULE__{} = state) do
     state
-    |> drop_active_board_extension_feature_state_sources()
-    |> drop_stashed_board_extension_feature_state_sources()
+    |> update_active_shell_feature_state(:drop_extension_feature_state_sources, [])
+    |> update_stashed_shell_feature_state(:drop_extension_feature_state_sources, [])
   end
 
-  @spec drop_active_board_feature_state_source(t(), FeatureState.source()) :: t()
-  defp drop_active_board_feature_state_source(
-         %__MODULE__{shell_state: %BoardState{} = board} = state,
-         source
-       ) do
-    %{state | shell_state: BoardState.drop_feature_state_source(board, source)}
-  end
+  @spec update_active_shell_feature_state(t(), atom(), [term()]) :: t()
+  defp update_active_shell_feature_state(%__MODULE__{} = state, callback, args) do
+    module = active_shell_module(state)
 
-  defp drop_active_board_feature_state_source(%__MODULE__{} = state, _source), do: state
-
-  @spec drop_stashed_board_feature_state_source(t(), FeatureState.source()) :: t()
-  defp drop_stashed_board_feature_state_source(%__MODULE__{} = state, source) do
-    update_board_stash(state, &BoardState.drop_feature_state_source(&1, source))
-  end
-
-  @spec drop_active_board_extension_feature_state_sources(t()) :: t()
-  defp drop_active_board_extension_feature_state_sources(
-         %__MODULE__{shell_state: %BoardState{} = board} = state
-       ) do
-    %{state | shell_state: BoardState.drop_extension_feature_state_sources(board)}
-  end
-
-  defp drop_active_board_extension_feature_state_sources(%__MODULE__{} = state), do: state
-
-  @spec drop_stashed_board_extension_feature_state_sources(t()) :: t()
-  defp drop_stashed_board_extension_feature_state_sources(%__MODULE__{} = state) do
-    update_board_stash(state, &BoardState.drop_extension_feature_state_sources/1)
-  end
-
-  @spec update_board_stash(t(), (BoardState.t() -> BoardState.t())) :: t()
-  defp update_board_stash(%__MODULE__{shell_state_stash: stash} = state, fun) do
-    case Map.get(stash, :board) do
-      %StateStash{state: %BoardState{} = board} = stashed ->
-        updated = %StateStash{stashed | state: fun.(board)}
-        %{state | shell_state_stash: Map.put(stash, :board, updated)}
-
-      %BoardState{} = board ->
-        case MingaEditor.Shell.Registry.get(:board) do
-          nil ->
-            state
-
-          entry ->
-            %{
-              state
-              | shell_state_stash: Map.put(stash, :board, StateStash.new(entry, fun.(board)))
-            }
-        end
-
-      _other ->
-        state
+    case apply_optional_shell_callback(module, state.shell_state, callback, args) do
+      {:ok, shell_state} -> %{state | shell_state: shell_state}
+      :missing -> state
     end
+  end
+
+  @spec update_stashed_shell_feature_state(t(), atom(), [term()]) :: t()
+  defp update_stashed_shell_feature_state(
+         %__MODULE__{shell_state_stash: stash} = state,
+         callback,
+         args
+       ) do
+    stash =
+      Map.new(stash, fn {shell_id, shell_state} ->
+        module = MingaEditor.Shell.Registry.module_for(shell_id)
+
+        case apply_optional_shell_callback(module, shell_state, callback, args) do
+          {:ok, cleaned_shell_state} -> {shell_id, cleaned_shell_state}
+          :missing -> {shell_id, shell_state}
+        end
+      end)
+
+    %{state | shell_state_stash: stash}
+  end
+
+  @spec apply_optional_shell_callback(module() | nil, term(), atom(), [term()]) ::
+          {:ok, term()} | :missing
+  defp apply_optional_shell_callback(module, shell_state, callback, args)
+       when is_atom(module) and not is_nil(module) do
+    arity = length(args) + 1
+
+    if shell_callback_exported?(module, callback, arity) do
+      {:ok, apply(module, callback, [shell_state | args])}
+    else
+      :missing
+    end
+  end
+
+  defp apply_optional_shell_callback(_module, _shell_state, _callback, _args), do: :missing
+
+  @spec shell_callback_exported?(module(), atom(), arity()) :: boolean()
+  defp shell_callback_exported?(module, callback, arity) do
+    Code.ensure_loaded?(module) and Enum.member?(module.__info__(:functions), {callback, arity})
   end
 
   @spec agent(t()) :: AgentState.t()
@@ -2103,7 +2107,7 @@ defmodule MingaEditor.State do
     agent_buf = AgentBufferSync.start_buffer(normalize_options_server(state.options_server))
     rows = max(state.terminal_viewport.rows, 1)
     cols = max(state.terminal_viewport.cols, 1)
-    windows = build_agent_card_windows(agent_buf, rows, cols)
+    windows = build_agent_chat_windows(agent_buf, rows, cols)
     build_agent_tab_defaults(state, windows, agent_buf)
   end
 
@@ -2180,27 +2184,23 @@ defmodule MingaEditor.State do
   end
 
   @doc """
-  Builds a fresh agent-shaped workspace context for a Board card on first zoom.
+  Builds a fresh agent-shaped workspace context for shell-owned agent surfaces.
 
-  Returns a `Tab.context()` carrying a single agent-chat window sized to the
-  current viewport, with the agent keymap scope. The caller restores it via `restore_tab_context/2` and then runs
-  `AgentActivation.activate_for_card/2` to attach the card's session pid to
-  the window content.
+  Returns a `Tab.context()` carrying a single agent-chat window sized to the current viewport, with the agent keymap scope. The caller restores it via `restore_tab_context/2` and then activates the relevant shell-owned session pid against the window content.
 
-  Falls back to an empty `Windows` map when no agent buffer is available;
-  the caller's activation step then becomes a no-op.
+  Falls back to an empty `Windows` map when no agent buffer is available; the caller's activation step then becomes a no-op.
   """
-  @spec build_agent_card_workspace(t(), pid() | nil) :: Tab.context()
-  def build_agent_card_workspace(%__MODULE__{} = state, agent_buf) do
+  @spec build_agent_workspace_context(t(), pid() | nil) :: Tab.context()
+  def build_agent_workspace_context(%__MODULE__{} = state, agent_buf) do
     rows = max(state.workspace.viewport.rows, 1)
     cols = max(state.workspace.viewport.cols, 1)
 
-    windows = build_agent_card_windows(agent_buf, rows, cols)
+    windows = build_agent_chat_windows(agent_buf, rows, cols)
     build_agent_tab_defaults(state, windows, agent_buf)
   end
 
-  @spec build_agent_card_windows(pid() | nil, pos_integer(), pos_integer()) :: Windows.t()
-  defp build_agent_card_windows(agent_buf, rows, cols) when is_pid(agent_buf) do
+  @spec build_agent_chat_windows(pid() | nil, pos_integer(), pos_integer()) :: Windows.t()
+  defp build_agent_chat_windows(agent_buf, rows, cols) when is_pid(agent_buf) do
     win_id = 1
     agent_window = Window.new_agent_chat(win_id, agent_buf, rows, cols)
 
@@ -2212,7 +2212,7 @@ defmodule MingaEditor.State do
     }
   end
 
-  defp build_agent_card_windows(_agent_buf, _rows, _cols), do: %Windows{}
+  defp build_agent_chat_windows(_agent_buf, _rows, _cols), do: %Windows{}
 
   @spec feature_state_with_file_tree_root(t()) :: FeatureState.t()
   defp feature_state_with_file_tree_root(%__MODULE__{} = state) do

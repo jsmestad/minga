@@ -20,9 +20,6 @@ defmodule MingaEditor.Agent.EventRoutingTest do
   alias MingaEditor.Agent.UIState
   alias MingaAgent.Event
   alias MingaAgent.Session
-  alias MingaEditor.Shell.Board
-  alias MingaEditor.Shell.Board.Card
-  alias MingaEditor.Shell.Board.State, as: BoardState
   alias MingaEditor.Shell.Traditional
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
@@ -403,85 +400,6 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       assert TabBar.get(tb, file_tab.id).group_id == 0
       assert TabBar.get(tb, agent_tab.id).group_id == workspace.id
       assert TabBar.get_workspace(tb, workspace.id).files == []
-    end
-  end
-
-  # ── Board shell ─────────────────────────────────────────────────────────
-
-  describe "Board.on_agent_event/4" do
-    setup do
-      session_a = fake_session_pid()
-      session_b = fake_session_pid()
-
-      board = BoardState.new()
-      {board, _card_a} = BoardState.create_card(board, task: "A", session: session_a)
-      {board, _card_b} = BoardState.create_card(board, task: "B", session: session_b)
-
-      %{board: board, session_a: session_a, session_b: session_b}
-    end
-
-    test "background :status_changed maps the agent status onto the card vocabulary", %{
-      board: board,
-      session_b: session_b
-    } do
-      # Tab.agent_status uses :thinking; Card.status uses :working — the
-      # Board callback applies the mapping rather than stamping the raw atom.
-      {board2, _ws, _effects} =
-        Board.on_agent_event(board, workspace(), session_b, {:status_changed, :thinking})
-
-      [card_b] = Enum.filter(Map.values(board2.cards), &(&1.session == session_b))
-      assert card_b.status == :working
-
-      # Other card untouched.
-      [card_a] = Enum.filter(Map.values(board2.cards), &(&1.task == "A"))
-      assert card_a.status == :idle
-    end
-
-    test "background :approval_pending transitions the owning card to :needs_you", %{
-      board: board,
-      session_b: session_b
-    } do
-      {board2, _ws, _effects} =
-        Board.on_agent_event(board, workspace(), session_b, {:approval_pending, %{name: "shell"}})
-
-      [card_b] = Enum.filter(Map.values(board2.cards), &(&1.session == session_b))
-      assert card_b.status == :needs_you
-    end
-
-    test "background :error transitions the owning card to :errored", %{
-      board: board,
-      session_b: session_b
-    } do
-      {board2, _ws, _effects} =
-        Board.on_agent_event(board, workspace(), session_b, {:error, "boom"})
-
-      [card_b] = Enum.filter(Map.values(board2.cards), &(&1.session == session_b))
-      assert card_b.status == :errored
-    end
-
-    test "events for a session not attached to any card are silently dropped", %{board: board} do
-      ghost = spawn(fn -> :ok end)
-
-      {board2, _ws, _effects} =
-        Board.on_agent_event(board, workspace(), ghost, {:approval_pending, %{}})
-
-      assert board2 == board
-    end
-  end
-
-  # ── Card.from_agent_status pure function ───────────────────────────────
-
-  describe "Card.from_agent_status/1" do
-    test "maps every documented agent status" do
-      assert Card.from_agent_status(:thinking) == :working
-      assert Card.from_agent_status(:tool_executing) == :iterating
-      assert Card.from_agent_status(:error) == :errored
-      assert Card.from_agent_status(:idle) == :done
-    end
-
-    test "unknown atoms fall back to :idle" do
-      assert Card.from_agent_status(nil) == :idle
-      assert Card.from_agent_status(:something_else) == :idle
     end
   end
 end

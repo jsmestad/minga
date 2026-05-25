@@ -1,4 +1,4 @@
-defmodule MingaEditor.Shell.Board.Input do
+defmodule MingaBoard.Shell.Input do
   @moduledoc """
   Input handler for The Board grid view.
 
@@ -21,10 +21,9 @@ defmodule MingaEditor.Shell.Board.Input do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.Session.State, as: SessionState
-  alias MingaEditor.Shell.Board
-  alias MingaEditor.Shell.Board.Card
-  alias MingaEditor.Shell.Board.SessionLifecycle
-  alias MingaEditor.Shell.Board.State, as: BoardState
+  alias MingaBoard.Shell.Card
+  alias MingaBoard.Shell.SessionLifecycle
+  alias MingaBoard.Shell.State, as: BoardState
 
   # ── Key constants ──────────────────────────────────────────────────────
 
@@ -60,7 +59,7 @@ defmodule MingaEditor.Shell.Board.Input do
 
   # Filter mode: route keys to filter input
   def handle_key(
-        %{shell: Board, shell_state: %BoardState{zoomed_into: nil, filter_mode: true}} = state,
+        %{shell_id: :board, shell_state: %BoardState{zoomed_into: nil, filter_mode: true}} = state,
         cp,
         mods
       ) do
@@ -68,7 +67,11 @@ defmodule MingaEditor.Shell.Board.Input do
   end
 
   # Only active when Board shell is showing the grid
-  def handle_key(%{shell: Board, shell_state: %BoardState{zoomed_into: nil}} = state, cp, mods) do
+  def handle_key(
+        %{shell_id: :board, shell_state: %BoardState{zoomed_into: nil}} = state,
+        cp,
+        mods
+      ) do
     dispatch_grid_key(state, cp, mods)
   end
 
@@ -263,7 +266,7 @@ defmodule MingaEditor.Shell.Board.Input do
 
           _ ->
             agent_buf = AgentAccess.agent(state).buffer
-            fresh_context = EditorState.build_agent_card_workspace(state, agent_buf)
+            fresh_context = EditorState.build_agent_workspace_context(state, agent_buf)
             EditorState.restore_tab_context(state, fresh_context)
         end
 
@@ -272,7 +275,7 @@ defmodule MingaEditor.Shell.Board.Input do
       state = EditorState.update_shell_state(state, fn _ -> new_board end)
       card = new_board.cards[card.id]
 
-      MingaEditor.AgentActivation.activate_for_card(state, card)
+      MingaBoard.AgentActivation.activate_for_card(state, card)
     else
       state
     end
@@ -299,7 +302,7 @@ defmodule MingaEditor.Shell.Board.Input do
 
     # Activate the agentic view for the new card
     card = board.cards[card.id]
-    MingaEditor.AgentActivation.activate_for_card(state, card)
+    MingaBoard.AgentActivation.activate_for_card(state, card)
   end
 
   @spec start_and_attach_session(BoardState.t(), pos_integer(), String.t(), EditorState.t()) ::
@@ -353,7 +356,7 @@ defmodule MingaEditor.Shell.Board.Input do
   @spec persist_board(EditorState.t()) :: :ok
   defp persist_board(%{shell_state: %BoardState{} = board}) do
     # Fire and forget: persistence errors are logged but don't affect UX
-    Task.start(fn -> MingaEditor.Shell.Board.Persistence.save(board) end)
+    Task.start(fn -> MingaBoard.Shell.Persistence.save(board) end)
     :ok
   end
 

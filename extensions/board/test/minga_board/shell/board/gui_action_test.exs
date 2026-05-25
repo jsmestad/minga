@@ -1,4 +1,4 @@
-defmodule MingaEditor.Shell.Board.GUIActionTest do
+defmodule MingaBoard.Shell.GUIActionTest do
   @moduledoc "Tests for Board GUI action handling without booting the full Editor GenServer."
 
   # Board GUI actions persist to the user-level board.json path, so this file serializes and redirects HOME per test.
@@ -7,8 +7,8 @@ defmodule MingaEditor.Shell.Board.GUIActionTest do
   alias MingaAgent.Session
   alias MingaAgent.SessionManager
   alias MingaAgent.Subagent.Handle
-  alias MingaEditor.Shell.Board
-  alias MingaEditor.Shell.Board.State, as: BoardState
+  alias MingaBoard.Shell
+  alias MingaBoard.Shell.State, as: BoardState
   alias MingaEditor.State.Tab.Context
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
@@ -38,7 +38,7 @@ defmodule MingaEditor.Shell.Board.GUIActionTest do
         )
 
       {board, _workspace} =
-        Board.handle_event(BoardState.new(), workspace, {:background_subagent_started, handle})
+        Shell.handle_event(BoardState.new(), workspace, {:background_subagent_started, handle})
 
       [card] = BoardState.sorted_cards(board)
       assert card.session == self()
@@ -56,7 +56,7 @@ defmodule MingaEditor.Shell.Board.GUIActionTest do
       workspace: workspace
     } do
       {board, _workspace} =
-        Board.handle_gui_action(
+        Shell.handle_gui_action(
           BoardState.new(),
           workspace,
           {:board_dispatch_agent, "Fix bug", "test-model"}
@@ -88,7 +88,7 @@ defmodule MingaEditor.Shell.Board.GUIActionTest do
       {board, card} = BoardState.create_card(board, task: "Agent", session: session_pid)
 
       {board, _workspace} =
-        Board.handle_gui_action(board, workspace, {:board_close_card, card.id})
+        Shell.handle_gui_action(board, workspace, {:board_close_card, card.id})
 
       refute Map.has_key?(board.cards, card.id)
       assert_receive {:DOWN, ^ref, :process, ^session_pid, _reason}
@@ -111,7 +111,7 @@ defmodule MingaEditor.Shell.Board.GUIActionTest do
         )
 
       {board, restored_workspace} =
-        Board.handle_gui_action(board, workspace, {:board_select_card, card.id})
+        Shell.handle_gui_action(board, workspace, {:board_select_card, card.id})
 
       zoomed = board.cards[card.id]
       assert board.focused_card == card.id

@@ -35,7 +35,7 @@ defmodule MingaEditor.Shell do
 
   - `MingaEditor.Shell.Traditional` — tab-based editor with file tree,
     modeline, picker, and agent panel. The default shell.
-  - `MingaEditor.Shell.Board` — agent supervisor card view.
+  - Bundled or third-party extension shells registered through `MingaEditor.Shell.Registry`.
   """
 
   @typedoc "Shell-specific state. Each shell defines its own struct."
@@ -45,7 +45,7 @@ defmodule MingaEditor.Shell do
   @type workspace :: MingaEditor.Session.State.t()
 
   @typedoc "Structured GUI payload returned by a shell and encoded centrally by frontend protocol modules."
-  @type gui_payload :: {atom(), term()}
+  @type gui_payload :: {atom(), term()} | nil
 
   @typedoc """
   Why a buffer was added — re-exported here from `Shell.BufferLifecycle`
