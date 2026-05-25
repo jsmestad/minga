@@ -158,7 +158,7 @@ defmodule MingaEditor.Extension.SidebarIntegrationTest do
                ]
              })
 
-    sidebar = SidebarRenderer.active_sidebar()
+    sidebar = SidebarRenderer.active_sidebar(state)
     draws = SidebarRenderer.render(state, {1, 0, 25, 10}, sidebar)
     texts = Enum.map(draws, fn {_row, _col, text, _face} -> String.trim(text) end)
 
