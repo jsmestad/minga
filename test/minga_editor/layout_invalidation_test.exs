@@ -10,7 +10,8 @@ defmodule MingaEditor.LayoutInvalidationTest do
   render after toggling the tree because the window's cached draws still
   had the old col_off=0 coordinates.
   """
-  use ExUnit.Case, async: true
+  # Mutates the global built-in FileTree sidebar registration while computing layout.
+  use ExUnit.Case, async: false
 
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
@@ -55,8 +56,14 @@ defmodule MingaEditor.LayoutInvalidationTest do
   end
 
   defp with_file_tree(state, width \\ 30) do
-    tree = %FileTree{root: "/tmp", width: width}
-    put_in(state.workspace.file_tree.tree, tree)
+    file_tree =
+      MingaEditor.State.FileTree.open(
+        %MingaEditor.State.FileTree{},
+        %FileTree{root: "/tmp", width: width},
+        nil
+      )
+
+    EditorState.set_file_tree(state, file_tree)
   end
 
   # ── Unit tests: invalidate_all_windows ─────────────────────────────────────
@@ -171,7 +178,8 @@ defmodule MingaEditor.LayoutInvalidationTest do
       assert col == 21
 
       # Close file tree and invalidate
-      state = put_in(state.workspace.file_tree.tree, nil) |> Layout.invalidate()
+      state =
+        EditorState.set_file_tree(state, %MingaEditor.State.FileTree{}) |> Layout.invalidate()
 
       layout = Layout.compute(state)
       assert layout.file_tree == nil

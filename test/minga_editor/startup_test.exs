@@ -7,8 +7,10 @@ defmodule MingaEditor.StartupTest do
   alias Minga.Project.FileRef
   alias Minga.Test.RecordingFrontend
   alias MingaEditor.Commands.AgentSession
+  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Input
+  alias MingaEditor.Input.FileTreeHandler
   alias MingaEditor.LayoutPreset
   alias MingaEditor.Startup
   alias MingaEditor.State, as: EditorState
@@ -166,6 +168,30 @@ defmodule MingaEditor.StartupTest do
   end
 
   describe "build_initial_state/1" do
+    test "registers FileTree dynamic sidebar and input contributions" do
+      Input.reset_handlers()
+      Sidebar.unregister_source(:builtin)
+
+      state =
+        Startup.build_initial_state(
+          backend: :headless,
+          port_manager: nil,
+          parser_manager: nil,
+          options_server: nil,
+          width: 80,
+          height: 24
+        )
+
+      assert %{id: "file_tree", input_handler: FileTreeHandler, visible?: false} =
+               Sidebar.get("file_tree")
+
+      handlers = Input.surface_handlers(state)
+      assert Enum.count(handlers, &(&1 == FileTreeHandler)) == 1
+    after
+      Input.reset_handlers()
+      Sidebar.unregister_source(:builtin)
+    end
+
     test "normalizes nil and supplied options servers" do
       default_state =
         Startup.build_initial_state(
@@ -219,7 +245,7 @@ defmodule MingaEditor.StartupTest do
 
       tab_bar = EditorState.tab_bar(state)
 
-      assert state.workspace.file_tree.project_root == dir
+      assert EditorState.file_tree_state(state).project_root == dir
       assert %Workspace{label: "Persisted Agent"} = TabBar.get_workspace(tab_bar, 2)
       assert tab_bar |> TabBar.switch_to_workspace(2) |> TabBar.active_workspace_id() == 2
     after
@@ -252,7 +278,7 @@ defmodule MingaEditor.StartupTest do
 
       tab_bar = EditorState.tab_bar(state)
 
-      assert state.workspace.file_tree.project_root == dir
+      assert EditorState.file_tree_state(state).project_root == dir
       assert %Workspace{label: "Argv Agent"} = TabBar.get_workspace(tab_bar, 2)
     after
       Application.delete_env(:minga, :cli_startup_project_root)
@@ -281,7 +307,7 @@ defmodule MingaEditor.StartupTest do
 
       tab_bar = EditorState.tab_bar(state)
 
-      assert state.workspace.file_tree.project_root == invalid_root
+      assert EditorState.file_tree_state(state).project_root == invalid_root
       refute TabBar.get_workspace(tab_bar, 2)
     after
       Application.delete_env(:minga, :cli_startup_project_root)

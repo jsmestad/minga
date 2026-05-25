@@ -17,24 +17,23 @@ defmodule MingaEditor.FileTree.Freshness do
 
   @doc "Returns true when the file tree is open."
   @spec open?(state()) :: boolean()
-  def open?(%{workspace: %{file_tree: %FileTreeState{tree: %FileTree{}}}}), do: true
-  def open?(_state), do: false
+  def open?(state), do: match?(%FileTreeState{tree: %FileTree{}}, file_tree_state(state))
 
   @doc "Returns true when the path is under the current tree root."
   @spec path_under_tree?(state(), String.t() | nil) :: boolean()
   def path_under_tree?(_state, nil), do: false
 
-  def path_under_tree?(
-        %{workspace: %{file_tree: %FileTreeState{tree: %FileTree{root: root}}}},
-        path
-      )
-      when is_binary(path) do
-    path_under_root?(Path.expand(path), Path.expand(root))
-  end
+  def path_under_tree?(state, path) when is_binary(path) do
+    case file_tree_state(state) do
+      %FileTreeState{tree: %FileTree{root: root}} ->
+        path_under_root?(Path.expand(path), Path.expand(root))
 
-  def path_under_tree?(%{workspace: %{file_tree: %FileTreeState{project_root: root}}}, path)
-      when is_binary(root) and is_binary(path) do
-    path_under_root?(Path.expand(path), Path.expand(root))
+      %FileTreeState{project_root: root} when is_binary(root) ->
+        path_under_root?(Path.expand(path), Path.expand(root))
+
+      %FileTreeState{} ->
+        false
+    end
   end
 
   def path_under_tree?(_state, _path), do: false
@@ -57,82 +56,80 @@ defmodule MingaEditor.FileTree.Freshness do
 
   @doc "Marks a debounced filesystem refresh as scheduled."
   @spec schedule_refresh(state(), reference()) :: state()
-  def schedule_refresh(%{workspace: %{file_tree: %FileTreeState{} = file_tree}} = state, ref)
-      when is_reference(ref) do
-    set_file_tree(state, FileTreeState.schedule_refresh(file_tree, ref))
+  def schedule_refresh(state, ref) when is_reference(ref) do
+    set_file_tree(state, FileTreeState.schedule_refresh(file_tree_state(state), ref))
   end
 
   @doc "Returns true when a filesystem refresh timer is already pending."
   @spec refresh_scheduled?(state()) :: boolean()
-  def refresh_scheduled?(%{workspace: %{file_tree: %FileTreeState{} = file_tree}}) do
-    FileTreeState.refresh_scheduled?(file_tree)
+  def refresh_scheduled?(state) do
+    state
+    |> file_tree_state()
+    |> FileTreeState.refresh_scheduled?()
   end
-
-  def refresh_scheduled?(_state), do: false
 
   @doc "Refreshes cached filesystem entries after the debounce timer fires."
   @spec flush_refresh(state()) :: state()
-  def flush_refresh(%{workspace: %{file_tree: %FileTreeState{tree: nil} = file_tree}} = state) do
-    set_file_tree(state, FileTreeState.clear_refresh(file_tree))
+  def flush_refresh(state) do
+    case file_tree_state(state) do
+      %FileTreeState{tree: nil} = file_tree ->
+        set_file_tree(state, FileTreeState.clear_refresh(file_tree))
+
+      %FileTreeState{tree: %FileTree{} = tree} = file_tree ->
+        refreshed_tree = tree |> FileTree.refresh() |> FileTree.refresh_git_status()
+        watch_expanded_dirs(refreshed_tree)
+
+        file_tree =
+          file_tree
+          |> FileTreeState.clear_refresh()
+          |> FileTreeState.replace_tree(refreshed_tree)
+
+        state
+        |> set_file_tree(file_tree)
+        |> sync_buffer(refreshed_tree)
+    end
   end
-
-  def flush_refresh(
-        %{workspace: %{file_tree: %FileTreeState{tree: %FileTree{} = tree} = file_tree}} = state
-      ) do
-    refreshed_tree = tree |> FileTree.refresh() |> FileTree.refresh_git_status()
-    watch_expanded_dirs(refreshed_tree)
-
-    file_tree =
-      file_tree
-      |> FileTreeState.clear_refresh()
-      |> FileTreeState.replace_tree(refreshed_tree)
-
-    state
-    |> set_file_tree(file_tree)
-    |> sync_buffer(refreshed_tree)
-  end
-
-  def flush_refresh(state), do: state
 
   @doc "Updates tree git badges from an already-fetched git status event."
   @spec refresh_git_status(state(), Minga.Events.GitStatusEvent.t()) :: state()
-  def refresh_git_status(%{workspace: %{file_tree: %FileTreeState{tree: nil}}} = state, _event),
-    do: state
+  def refresh_git_status(state, %Minga.Events.GitStatusEvent{git_root: git_root, entries: entries}) do
+    case file_tree_state(state) do
+      %FileTreeState{tree: nil} ->
+        state
 
-  def refresh_git_status(
-        %{workspace: %{file_tree: %FileTreeState{tree: %FileTree{} = tree} = file_tree}} = state,
-        %Minga.Events.GitStatusEvent{git_root: git_root, entries: entries}
-      ) do
-    status = GitStatus.from_entries(entries, git_root, tree.root)
-    updated_tree = FileTree.replace_git_status(tree, status)
-    file_tree = FileTreeState.replace_tree(file_tree, updated_tree)
+      %FileTreeState{tree: %FileTree{} = tree} = file_tree ->
+        status = GitStatus.from_entries(entries, git_root, tree.root)
+        updated_tree = FileTree.replace_git_status(tree, status)
+        file_tree = FileTreeState.replace_tree(file_tree, updated_tree)
 
-    state
-    |> set_file_tree(file_tree)
-    |> sync_buffer(updated_tree)
+        state
+        |> set_file_tree(file_tree)
+        |> sync_buffer(updated_tree)
+    end
   end
 
   @doc "Refreshes tree git badges by querying the current git backend."
   @spec refresh_git_status_from_disk(state()) :: state()
-  def refresh_git_status_from_disk(%{workspace: %{file_tree: %FileTreeState{tree: nil}}} = state),
-    do: state
+  def refresh_git_status_from_disk(state) do
+    case file_tree_state(state) do
+      %FileTreeState{tree: nil} ->
+        state
 
-  def refresh_git_status_from_disk(
-        %{workspace: %{file_tree: %FileTreeState{tree: %FileTree{} = tree} = file_tree}} = state
-      ) do
-    updated_tree = FileTree.refresh_git_status(tree)
-    file_tree = FileTreeState.replace_tree(file_tree, updated_tree)
+      %FileTreeState{tree: %FileTree{} = tree} = file_tree ->
+        updated_tree = FileTree.refresh_git_status(tree)
+        file_tree = FileTreeState.replace_tree(file_tree, updated_tree)
 
-    state
-    |> set_file_tree(file_tree)
-    |> sync_buffer(updated_tree)
+        state
+        |> set_file_tree(file_tree)
+        |> sync_buffer(updated_tree)
+    end
   end
 
   @doc "Updates the remembered project root and replaces visible stale tree entries when the project changes."
   @spec update_project_root(state(), String.t()) :: state()
-  def update_project_root(%{workspace: %{file_tree: %FileTreeState{} = file_tree}} = state, root)
-      when is_binary(root) do
+  def update_project_root(state, root) when is_binary(root) do
     expanded_root = Path.expand(root)
+    file_tree = file_tree_state(state)
 
     case file_tree.tree do
       %FileTree{root: ^expanded_root} ->
@@ -175,10 +172,15 @@ defmodule MingaEditor.FileTree.Freshness do
   end
 
   @spec sync_buffer(state(), FileTree.t()) :: state()
-  defp sync_buffer(%{workspace: %{file_tree: %FileTreeState{buffer: buffer}}} = state, tree)
-       when is_pid(buffer) do
-    BufferSync.sync(buffer, tree)
-    state
+  defp sync_buffer(state, tree) do
+    case file_tree_state(state).buffer do
+      buffer when is_pid(buffer) ->
+        BufferSync.sync(buffer, tree)
+        state
+
+      _ ->
+        state
+    end
   catch
     :exit, reason ->
       Minga.Log.warning(
@@ -189,7 +191,8 @@ defmodule MingaEditor.FileTree.Freshness do
       state
   end
 
-  defp sync_buffer(state, _tree), do: state
+  @spec file_tree_state(state()) :: FileTreeState.t()
+  defp file_tree_state(state), do: EditorState.file_tree_state(state)
 
   @spec set_file_tree(state(), FileTreeState.t()) :: state()
   defp set_file_tree(%EditorState{} = state, %FileTreeState{} = file_tree) do
@@ -219,11 +222,6 @@ defmodule MingaEditor.FileTree.Freshness do
   end
 
   @spec path_under_root?(String.t(), String.t()) :: boolean()
-  defp path_under_root?(path, root) do
-    path == root or String.starts_with?(path, path_prefix(root))
-  end
-
-  @spec path_prefix(String.t()) :: String.t()
-  defp path_prefix("/"), do: "/"
-  defp path_prefix(root), do: root <> "/"
+  defp path_under_root?(path, "/"), do: String.starts_with?(path, "/")
+  defp path_under_root?(path, root), do: path == root or String.starts_with?(path, root <> "/")
 end

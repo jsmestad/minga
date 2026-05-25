@@ -183,12 +183,13 @@ defmodule MingaEditor.Session.ChromeStateTest do
     active_buffer = Keyword.get(opts, :active_buffer) || buffer_for_tab(TabBar.active(tb))
 
     %{
-      workspace: %SessionState{
-        viewport: Viewport.new(24, 80),
-        keymap_scope: :editor,
-        file_tree: %FileTreeState{project_root: project_root},
-        buffers: %Buffers{active: active_buffer, list: List.wrap(active_buffer)}
-      },
+      workspace:
+        %SessionState{
+          viewport: Viewport.new(24, 80),
+          keymap_scope: :editor,
+          buffers: %Buffers{active: active_buffer, list: List.wrap(active_buffer)}
+        }
+        |> SessionState.set_file_tree(%FileTreeState{project_root: project_root}),
       shell_state: %{tab_bar: tb}
     }
   end

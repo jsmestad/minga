@@ -7,10 +7,11 @@ defmodule MingaEditor.Session.ChromeState do
 
   alias Minga.Buffer
   alias Minga.Language
+  alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.WorkspaceReview
   alias MingaEditor.State.Buffers
-  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
@@ -136,14 +137,22 @@ defmodule MingaEditor.Session.ChromeState do
   end
 
   defp manual_workspace_label(
-         %{workspace: %{file_tree: %FileTreeState{project_root: root}}},
+         %{workspace: %{file_tree: %FileTreeState{} = file_tree}},
          _workspace
        ) do
-    project_label(root)
+    file_tree |> Map.get(:project_root) |> project_label()
   end
 
-  defp manual_workspace_label(%{file_tree: %FileTreeState{project_root: root}}, _workspace) do
-    project_label(root)
+  defp manual_workspace_label(%{file_tree: %FileTreeState{} = file_tree}, _workspace) do
+    file_tree |> Map.get(:project_root) |> project_label()
+  end
+
+  defp manual_workspace_label(%{workspace: %SessionState{} = session}, _workspace) do
+    session |> SessionState.file_tree_state() |> Map.get(:project_root) |> project_label()
+  end
+
+  defp manual_workspace_label(%SessionState{} = session, _workspace) do
+    session |> SessionState.file_tree_state() |> Map.get(:project_root) |> project_label()
   end
 
   defp manual_workspace_label(_state, %Workspace{label: label})

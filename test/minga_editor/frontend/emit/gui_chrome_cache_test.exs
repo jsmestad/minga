@@ -13,6 +13,7 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
   alias MingaEditor.MinibufferData
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.Shell.Board.State, as: BoardState
+  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
@@ -116,10 +117,7 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
 
       first_state =
         gui_state()
-        |> put_in(
-          [Access.key(:workspace), Access.key(:file_tree), Access.key(:project_root)],
-          first_root
-        )
+        |> EditorState.update_file_tree(&%{&1 | project_root: first_root})
 
       {_ctx, caches, first_cmds} = sync_chrome(first_state)
       assert Enum.any?(first_cmds, &hidden_tree_cmd_for_root?(&1, first_root))
@@ -127,10 +125,7 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
 
       second_state =
         gui_state()
-        |> put_in(
-          [Access.key(:workspace), Access.key(:file_tree), Access.key(:project_root)],
-          second_root
-        )
+        |> EditorState.update_file_tree(&%{&1 | project_root: second_root})
 
       {_ctx, caches2, second_cmds} = sync_chrome(second_state, caches)
 
@@ -150,8 +145,8 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       refute has_opcode?(cached_cmds, 0x93)
 
       moved_state =
-        put_in(
-          state.workspace.file_tree,
+        EditorState.set_file_tree(
+          state,
           FileTreeState.replace_tree(file_tree, FileTree.select(file_tree.tree, 42))
         )
 
@@ -437,7 +432,7 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
 
     file_path = Path.join(root, "file_001.ex")
     file_tree = FileTreeState.open(%FileTreeState{}, FileTree.new(root, width: 32), nil)
-    state = gui_state() |> put_in([Access.key(:workspace), Access.key(:file_tree)], file_tree)
+    state = gui_state() |> EditorState.set_file_tree(file_tree)
     {state, file_tree, file_path}
   end
 

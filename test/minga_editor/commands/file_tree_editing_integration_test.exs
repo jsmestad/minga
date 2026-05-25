@@ -20,7 +20,7 @@ defmodule MingaEditor.Commands.FileTreeEditingIntegrationTest do
       _state = send_keys_sync(ctx, "a")
       state = send_keys_sync(ctx, "newfile.txt<Enter>")
 
-      assert state.workspace.file_tree.editing == nil
+      assert MingaEditor.State.file_tree_state(state).editing == nil
 
       expected = Path.join(dir, "newfile.txt")
       assert File.exists?(expected), "Expected newfile.txt to exist at #{expected}"
@@ -35,11 +35,11 @@ defmodule MingaEditor.Commands.FileTreeEditingIntegrationTest do
       _state = send_keys_sync(ctx, "<SPC>op")
       state = send_keys_sync(ctx, "A")
 
-      assert state.workspace.file_tree.editing.type == :new_folder
+      assert MingaEditor.State.file_tree_state(state).editing.type == :new_folder
 
       state = send_keys_sync(ctx, "newfolder<Enter>")
 
-      assert state.workspace.file_tree.editing == nil
+      assert MingaEditor.State.file_tree_state(state).editing == nil
 
       expected = Path.join(dir, "newfolder")
       assert File.dir?(expected), "Expected newfolder to exist at #{expected}"
@@ -53,10 +53,16 @@ defmodule MingaEditor.Commands.FileTreeEditingIntegrationTest do
 
       _state = send_keys_sync(ctx, "<SPC>op")
       state = send_keys_sync(ctx, "R")
-      backspaces = String.duplicate("<BS>", String.length(state.workspace.file_tree.editing.text))
+
+      backspaces =
+        String.duplicate(
+          "<BS>",
+          String.length(MingaEditor.State.file_tree_state(state).editing.text)
+        )
+
       state = send_keys_sync(ctx, "#{backspaces}renamed.txt<Enter>")
 
-      assert state.workspace.file_tree.editing == nil
+      assert MingaEditor.State.file_tree_state(state).editing == nil
 
       new_path = Path.join(dir, "renamed.txt")
       assert File.exists?(new_path), "Expected renamed.txt to exist"

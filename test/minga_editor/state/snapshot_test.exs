@@ -373,7 +373,7 @@ defmodule MingaEditor.State.SnapshotTest do
       assert new_ctx.keymap_scope == old_ctx.keymap_scope
       assert new_ctx.buffers == old_ctx.buffers
       assert new_ctx.windows == old_ctx.windows
-      assert new_ctx.file_tree == old_ctx.file_tree
+      assert new_ctx.feature_state == old_ctx.feature_state
       assert new_ctx.dired == old_ctx.dired
       assert new_ctx.viewport == old_ctx.viewport
       assert new_ctx.mouse == old_ctx.mouse
@@ -393,7 +393,7 @@ defmodule MingaEditor.State.SnapshotTest do
       assert new_map == old_map
     end
 
-    test "round-trips through to_workspace_map preserving all fields" do
+    test "round-trips through to_workspace_map preserving snapshot fields" do
       {:ok, buf} = BufferProcess.start_link(content: "round-trip")
       pending = %{make_ref() => {:semantic_tokens, buf}}
 
@@ -417,7 +417,6 @@ defmodule MingaEditor.State.SnapshotTest do
       assert restored_map.search == ws.search
       assert restored_map.lsp_pending == pending
 
-      # PID/process-keyed highlight and injection cache state stays out of the round-trip.
       refute Map.has_key?(restored_map, :highlight)
       refute Map.has_key?(restored_map, :injection_ranges)
     end

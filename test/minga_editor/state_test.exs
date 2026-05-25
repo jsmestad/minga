@@ -240,10 +240,9 @@ defmodule MingaEditor.StateTest do
 
       state = %EditorState{
         port_manager: self(),
-        workspace: %SessionState{
-          viewport: Viewport.new(24, 80),
-          file_tree: %FileTreeState{project_root: root}
-        },
+        workspace:
+          %SessionState{viewport: Viewport.new(24, 80)}
+          |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
         shell_state: %ShellState{tab_bar: tab_bar}
       }
 
@@ -327,11 +326,12 @@ defmodule MingaEditor.StateTest do
 
       state = %EditorState{
         port_manager: self(),
-        workspace: %SessionState{
-          viewport: Viewport.new(24, 80),
-          file_tree: %FileTreeState{project_root: root},
-          buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0}
-        },
+        workspace:
+          %SessionState{
+            viewport: Viewport.new(24, 80),
+            buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0}
+          }
+          |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
         shell_state: %ShellState{tab_bar: tab_bar}
       }
 

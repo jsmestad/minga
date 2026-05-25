@@ -8,6 +8,8 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
   alias Minga.Project.FileTree
   alias MingaEditor.FileTree.Diagnostics, as: RowDiagnostics
   alias MingaEditor.FileTree.Row
+  alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.Shell.Traditional.TreeRenderer
@@ -145,8 +147,7 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
 
       state =
         gui_state(rows: 10, cols: 80)
-        |> put_in(
-          [Access.key(:workspace), Access.key(:file_tree)],
+        |> EditorState.set_file_tree(
           FileTreeState.open(%FileTreeState{}, FileTree.new(tmp_dir, width: 32), nil)
         )
         |> put_in([Access.key(:workspace), Access.key(:buffers)], %Buffers{
@@ -463,11 +464,12 @@ defmodule MingaEditor.Shell.Traditional.TreeRendererTest do
     cols = Keyword.fetch!(opts, :cols)
 
     %{
-      workspace: %{
-        file_tree: file_tree,
-        viewport: %{rows: rows, cols: cols},
-        buffers: %{active: nil, list: [], active_index: 0}
-      },
+      workspace:
+        %SessionState{
+          viewport: %{rows: rows, cols: cols},
+          buffers: %{active: nil, list: [], active_index: 0}
+        }
+        |> SessionState.set_file_tree(file_tree),
       theme: Theme.get!(:doom_one)
     }
   end

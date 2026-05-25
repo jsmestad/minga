@@ -11,18 +11,35 @@ defmodule MingaEditor.Shell.Traditional.SidebarRenderer do
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Extension.Sidebar.Snapshot
   alias MingaEditor.Layout
+  alias MingaEditor.State, as: EditorState
 
   @typedoc "Editor or render-pipeline state with theme data."
   @type state :: map()
 
-  @doc "Returns the first visible registered left sidebar, if any."
-  @spec active_sidebar() :: Sidebar.entry() | nil
-  def active_sidebar, do: Sidebar.active_left()
+  @doc "Returns the first visible registered left sidebar for the given state, if any."
+  @spec active_sidebar(state()) :: Sidebar.entry() | nil
+  def active_sidebar(state), do: active_left_sidebar(state)
 
   @doc "Renders a registered sidebar entry into the given rect."
   @spec render(state(), Layout.rect() | nil, Sidebar.entry()) :: [DisplayList.draw()]
   def render(_state, nil, _sidebar), do: []
   def render(state, rect, sidebar), do: render_sidebar(state, rect, sidebar)
+
+  @spec active_left_sidebar(state()) :: Sidebar.entry() | nil
+  defp active_left_sidebar(state) do
+    Sidebar.visible()
+    |> Enum.filter(&(&1.placement == :left))
+    |> Enum.reject(&stale_file_tree_sidebar?(state, &1))
+    |> Enum.sort_by(&{not &1.focused?, &1.priority, &1.id})
+    |> List.first()
+  end
+
+  @spec stale_file_tree_sidebar?(state(), Sidebar.entry()) :: boolean()
+  defp stale_file_tree_sidebar?(state, %{id: "file_tree"}) do
+    EditorState.file_tree_state(state).tree == nil
+  end
+
+  defp stale_file_tree_sidebar?(_state, _sidebar), do: false
 
   @spec render_sidebar(state(), Layout.rect(), Sidebar.entry()) :: [DisplayList.draw()]
   defp render_sidebar(state, {row, col, width, height}, %{

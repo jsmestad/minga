@@ -13,8 +13,10 @@ defmodule MingaEditor.Startup do
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer
+  alias Minga.Log
   alias Minga.Config
   alias MingaEditor.Commands
+  alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.FileWatcherHelpers
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
@@ -105,24 +107,35 @@ defmodule MingaEditor.Startup do
 
     project_root = project_root_from_opts(opts)
 
-    workspace = %MingaEditor.Session.State{
-      buffers: %Buffers{
-        active: active_buf,
-        list: buffers,
-        active_index: 0,
-        messages: messages_buf
-      },
-      viewport: Viewport.new(height, width),
-      editing: VimState.new(),
-      windows: %Windows{
-        tree: WindowTree.new(initial_window_id),
-        map: windows,
-        active: initial_window_id,
-        next_id: initial_window_id + 1
-      },
-      keymap_scope: keymap_scope,
-      file_tree: %MingaEditor.State.FileTree{project_root: project_root}
-    }
+    file_tree = %MingaEditor.State.FileTree{project_root: project_root}
+
+    case FileTreeFeature.register_contributions(file_tree) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Log.warning(:editor, "FileTree contribution registration failed: #{inspect(reason)}")
+    end
+
+    workspace =
+      %MingaEditor.Session.State{
+        buffers: %Buffers{
+          active: active_buf,
+          list: buffers,
+          active_index: 0,
+          messages: messages_buf
+        },
+        viewport: Viewport.new(height, width),
+        editing: VimState.new(),
+        windows: %Windows{
+          tree: WindowTree.new(initial_window_id),
+          map: windows,
+          active: initial_window_id,
+          next_id: initial_window_id + 1
+        },
+        keymap_scope: keymap_scope
+      }
+      |> MingaEditor.Session.State.set_file_tree(file_tree)
 
     editing_model =
       Keyword.get_lazy(opts, :editing_model, fn ->

@@ -4,7 +4,8 @@ defmodule Minga.Integration.MouseTest do
 
   Gesture details live in `MingaEditor.MouseTest` and `MingaEditor.MouseMultiClickTest`. This file keeps only the cases that need the full input router, shell state, renderer, or GUI action path.
   """
-  use Minga.Test.EditorCase, async: true
+  # Mutates the global built-in FileTree sidebar registry while rendering through live editors.
+  use Minga.Test.EditorCase, async: false
 
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree
@@ -79,7 +80,8 @@ defmodule Minga.Integration.MouseTest do
       send_mouse(ctx, 5, max(tree_sep - 2, 0), :left)
       state = editor_state(ctx)
 
-      assert FileTree.focused?(state.workspace.file_tree), "clicking file tree should focus it"
+      assert FileTree.focused?(EditorState.file_tree_state(state)),
+             "clicking file tree should focus it"
     end
   end
 

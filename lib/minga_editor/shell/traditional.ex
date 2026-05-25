@@ -119,7 +119,8 @@ defmodule MingaEditor.Shell.Traditional do
         {:close_tab, id}
       ) do
     if tb.active_id != id do
-      switch_to_buffer_tab(shell_state, workspace, id)
+      {shell_state, workspace, _effects} = switch_to_buffer_tab(shell_state, workspace, id)
+      {shell_state, workspace}
     else
       {shell_state, workspace}
     end
@@ -703,7 +704,8 @@ defmodule MingaEditor.Shell.Traditional do
   end
 
   @spec project_root(SessionState.t()) :: String.t() | nil
-  defp project_root(%SessionState{file_tree: %{project_root: root}}), do: root
+  defp project_root(%SessionState{} = workspace),
+    do: SessionState.file_tree_state(workspace).project_root
 
   @spec buffer_path(pid()) :: String.t() | nil
   defp buffer_path(pid) when is_pid(pid) do

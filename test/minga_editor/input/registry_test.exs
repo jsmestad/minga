@@ -47,6 +47,14 @@ defmodule MingaEditor.Input.RegistryTest do
              Enum.find_index(handlers, &(&1 == MingaEditor.Input.Dashboard))
   end
 
+  test "unregister_source(:builtin) preserves seeded built-in handlers" do
+    before = Input.surface_handlers(%{editing_model: Minga.Editing.Model.Vim})
+    assert :ok = Input.unregister_source(:builtin)
+    after_handlers = Input.surface_handlers(%{editing_model: Minga.Editing.Model.Vim})
+
+    assert after_handlers == before
+  end
+
   test "unregister_source removes extension-owned handlers without removing built-ins" do
     source = {:extension, :input_registry_test}
 

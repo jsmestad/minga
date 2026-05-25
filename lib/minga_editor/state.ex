@@ -35,6 +35,7 @@ defmodule MingaEditor.State do
 
   alias MingaEditor.BottomPanel
   alias MingaEditor.KeystrokeHistory
+  alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Dired, as: DiredState
@@ -247,7 +248,16 @@ defmodule MingaEditor.State do
   @doc "Replaces the active workspace."
   @spec set_workspace(t(), SessionState.t()) :: t()
   def set_workspace(%__MODULE__{} = state, %SessionState{} = workspace) do
+    workspace |> SessionState.file_tree_state() |> sync_file_tree_sidebar()
     %{state | workspace: workspace}
+  end
+
+  @spec sync_file_tree_sidebar(FileTreeState.t()) :: :ok
+  defp sync_file_tree_sidebar(%FileTreeState{} = file_tree) do
+    case FileTreeFeature.sync_sidebar(file_tree) do
+      :ok -> :ok
+      {:error, reason} -> Log.warning(:editor, "FileTree sidebar sync failed: #{inspect(reason)}")
+    end
   end
 
   @doc "Returns source-owned feature state from the active workspace, or nil when inactive."
@@ -314,18 +324,40 @@ defmodule MingaEditor.State do
     update_workspace(state, &SessionState.set_keymap_scope(&1, scope))
   end
 
-  @doc "Replaces the active workspace file-tree state."
+  @doc "Returns the active workspace FileTree feature state."
+  @spec file_tree_state(t() | map()) :: FileTreeState.t()
+  def file_tree_state(%__MODULE__{workspace: workspace}) do
+    SessionState.file_tree_state(workspace)
+  end
+
+  def file_tree_state(%{workspace: %SessionState{} = workspace}) do
+    SessionState.file_tree_state(workspace)
+  end
+
+  def file_tree_state(%{__struct__: MingaEditor.RenderPipeline.Input} = input) do
+    MingaEditor.RenderPipeline.Input.file_tree_state(input)
+  end
+
+  def file_tree_state(_state), do: %FileTreeState{}
+
+  @doc "Replaces the active workspace FileTree feature state."
   @spec set_file_tree(t(), FileTreeState.t()) :: t()
   def set_file_tree(%__MODULE__{} = state, %FileTreeState{} = file_tree) do
+    sync_file_tree_sidebar(file_tree)
     update_workspace(state, &SessionState.set_file_tree(&1, file_tree))
   end
 
-  @doc "Updates the active workspace file-tree state."
+  @doc "Updates the active workspace FileTree feature state."
   @spec update_file_tree(t(), (FileTreeState.t() -> FileTreeState.t())) :: t()
   def update_file_tree(%__MODULE__{} = state, fun) when is_function(fun, 1) do
-    update_workspace(state, fn workspace ->
-      SessionState.set_file_tree(workspace, fun.(workspace.file_tree))
-    end)
+    set_file_tree(state, fun.(file_tree_state(state)))
+  end
+
+  @doc "Drops the active workspace FileTree feature state."
+  @spec drop_file_tree(t()) :: t()
+  def drop_file_tree(%__MODULE__{} = state) do
+    sync_file_tree_sidebar(%FileTreeState{})
+    update_workspace(state, &SessionState.drop_file_tree/1)
   end
 
   @doc "Replaces the active workspace buffer state."
@@ -1287,31 +1319,31 @@ defmodule MingaEditor.State do
   minibuffer row and reserving space for the file tree panel when open.
   """
   @spec screen_rect(t()) :: WindowTree.rect()
-  def screen_rect(%__MODULE__{terminal_viewport: vp, workspace: %{file_tree: %{tree: nil}}}) do
-    {0, 0, vp.cols, vp.rows - 1}
-  end
+  def screen_rect(%__MODULE__{terminal_viewport: vp} = state) do
+    case file_tree_state(state).tree do
+      %FileTree{width: tw} ->
+        # Tree occupies columns 0..tw-1, separator at column tw,
+        # editor content starts at column tw+1.
+        editor_col = tw + 1
+        editor_width = max(vp.cols - editor_col, 1)
+        {0, editor_col, editor_width, vp.rows - 1}
 
-  def screen_rect(%__MODULE__{
-        terminal_viewport: vp,
-        workspace: %{file_tree: %{tree: %FileTree{width: tw}}}
-      }) do
-    # Tree occupies columns 0..tw-1, separator at column tw,
-    # editor content starts at column tw+1.
-    editor_col = tw + 1
-    editor_width = max(vp.cols - editor_col, 1)
-    {0, editor_col, editor_width, vp.rows - 1}
+      nil ->
+        {0, 0, vp.cols, vp.rows - 1}
+    end
   end
 
   @doc "Returns the screen rect for the file tree panel, or nil if closed."
   @spec tree_rect(t()) :: WindowTree.rect() | nil
-  def tree_rect(%__MODULE__{workspace: %{file_tree: %{tree: nil}}}), do: nil
+  def tree_rect(%__MODULE__{terminal_viewport: vp} = state) do
+    case file_tree_state(state).tree do
+      %FileTree{width: tw} ->
+        # Row 0 is the tab bar; file tree starts at row 1.
+        {1, 0, tw, vp.rows - 2}
 
-  def tree_rect(%__MODULE__{
-        terminal_viewport: vp,
-        workspace: %{file_tree: %{tree: %FileTree{width: tw}}}
-      }) do
-    # Row 0 is the tab bar; file tree starts at row 1.
-    {1, 0, tw, vp.rows - 2}
+      nil ->
+        nil
+    end
   end
 
   # ── Cross-cutting window + buffer helpers ─────────────────────────────────
@@ -1432,7 +1464,7 @@ defmodule MingaEditor.State do
 
   @spec buffer_file_ref(pid(), SessionState.t()) :: FileRef.t() | nil
   defp buffer_file_ref(buffer_pid, %SessionState{} = workspace) do
-    case {buffer_path(buffer_pid), workspace.file_tree.project_root} do
+    case {buffer_path(buffer_pid), SessionState.file_tree_state(workspace).project_root} do
       {path, root} when is_binary(path) and is_binary(root) ->
         case FileRef.from_path(root, path) do
           {:ok, file_ref} -> file_ref
@@ -1507,7 +1539,11 @@ defmodule MingaEditor.State do
         context
       )
 
-    state = %{state | shell_state: shell_state, workspace: workspace, buffer_add_context: :open}
+    state =
+      state
+      |> update_shell_state(fn _ -> shell_state end)
+      |> set_workspace(workspace)
+      |> Map.put(:buffer_add_context, :open)
 
     effects = if already_pooled, do: [], else: [{:monitor, pid}]
     {state, effects ++ shell_effects}
@@ -1544,7 +1580,11 @@ defmodule MingaEditor.State do
         {shell_state, workspace, shell_effects} =
           state.shell.on_buffer_switched(state.shell_state, state.workspace)
 
-        state = %{state | shell_state: shell_state, workspace: workspace}
+        state =
+          state
+          |> update_shell_state(fn _ -> shell_state end)
+          |> set_workspace(workspace)
+
         apply_buffer_effects(state, shell_effects)
     end
   end
@@ -1707,7 +1747,7 @@ defmodule MingaEditor.State do
       end
 
     state
-    |> Map.put(:workspace, SessionState.restore_tab_context(state.workspace, context))
+    |> set_workspace(SessionState.restore_tab_context(state.workspace, context))
     |> sync_agent_ui_from_active_workspace()
   end
 
@@ -1770,14 +1810,13 @@ defmodule MingaEditor.State do
         active_index: state.workspace.buffers.active_index
       },
       windows: windows,
-      file_tree: %FileTreeState{project_root: state.workspace.file_tree.project_root},
       dired: %DiredState{},
       viewport: state.terminal_viewport,
       mouse: %Mouse{},
       lsp_pending: %{},
       search: %Search{},
       editing: VimState.new(),
-      feature_state: FeatureState.new(),
+      feature_state: feature_state_with_file_tree_root(state),
       document_highlights: nil
     })
   end
@@ -1799,14 +1838,13 @@ defmodule MingaEditor.State do
         active_index: 0
       },
       windows: windows,
-      file_tree: %FileTreeState{project_root: state.workspace.file_tree.project_root},
       dired: %DiredState{},
       viewport: state.terminal_viewport,
       mouse: %Mouse{},
       lsp_pending: %{},
       search: %Search{},
       editing: VimState.new(),
-      feature_state: FeatureState.new(),
+      feature_state: feature_state_with_file_tree_root(state),
       document_highlights: nil
     })
   end
@@ -1845,6 +1883,18 @@ defmodule MingaEditor.State do
   end
 
   defp build_agent_card_windows(_agent_buf, _rows, _cols), do: %Windows{}
+
+  @spec feature_state_with_file_tree_root(t()) :: FeatureState.t()
+  defp feature_state_with_file_tree_root(%__MODULE__{} = state) do
+    project_root = file_tree_state(state).project_root
+
+    FeatureState.put(
+      FeatureState.new(),
+      FileTreeFeature.source(),
+      FileTreeFeature.feature_id(),
+      %FileTreeState{project_root: project_root}
+    )
+  end
 
   @spec log_switch_tab(TabBar.t(), Tab.id(), Tab.id()) :: :ok
   defp log_switch_tab(tb, current_id, target_id) do
@@ -1969,7 +2019,7 @@ defmodule MingaEditor.State do
          %__MODULE__{workspace: %{keymap_scope: :agent} = workspace},
          agent_ui
        ) do
-    UIState.activate(agent_ui, workspace.windows, workspace.file_tree)
+    UIState.activate(agent_ui, workspace.windows, SessionState.file_tree_state(workspace))
   end
 
   defp maybe_activate_synced_agent_ui(%__MODULE__{}, agent_ui) do

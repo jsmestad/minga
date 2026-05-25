@@ -11,6 +11,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   alias Minga.Events
   alias MingaEditor.Commands
   alias MingaEditor.Extension.Sidebar
+  alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Handlers.GuiActionHandler
   alias MingaEditor.RenderPipeline.TestHelpers
@@ -23,7 +24,13 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
   setup do
     Sidebar.unregister_source({:extension, :gui_action_test})
-    on_exit(fn -> Sidebar.unregister_source({:extension, :gui_action_test}) end)
+    Sidebar.unregister_source(:builtin)
+
+    on_exit(fn ->
+      Sidebar.unregister_source({:extension, :gui_action_test})
+      Sidebar.unregister_source(:builtin)
+    end)
+
     :ok
   end
 
@@ -64,7 +71,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     file_tree_active =
       GuiActionHandler.dispatch(state, {:sidebar_action, "file_tree", "renamed_kind", "activate"})
 
-    assert file_tree_active.workspace.file_tree.focused
+    assert EditorState.file_tree_state(file_tree_active).focused
     assert file_tree_active.workspace.keymap_scope == :file_tree
     assert EditorState.sidebar_active_id(file_tree_active) == "file_tree"
 
@@ -90,9 +97,37 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
         {:sidebar_action, "observatory", "observatory", "activate"}
       )
 
-    refute observatory_active.workspace.file_tree.focused
+    refute EditorState.file_tree_state(observatory_active).focused
     assert observatory_active.workspace.keymap_scope == :editor
     assert EditorState.sidebar_active_id(observatory_active) == "observatory"
+  end
+
+  test "native GUI file tree sidebar actions use the registered FileTree action handler" do
+    assert :ok = FileTreeFeature.register_contributions(%FileTreeState{})
+    state = TestHelpers.base_state()
+
+    opened =
+      GuiActionHandler.dispatch(state, {:sidebar_action, "file_tree", "file_tree", "toggle"})
+
+    assert EditorState.file_tree_state(opened).tree != nil
+    assert EditorState.file_tree_state(opened).focused
+    assert EditorState.sidebar_active_id(opened) == "file_tree"
+
+    focused =
+      GuiActionHandler.dispatch(
+        %{opened | workspace: %{opened.workspace | keymap_scope: :editor}},
+        {:sidebar_action, "file_tree", "file_tree", "activate"}
+      )
+
+    assert EditorState.file_tree_state(focused).focused
+    assert focused.workspace.keymap_scope == :file_tree
+    assert EditorState.sidebar_active_id(focused) == "file_tree"
+
+    closed =
+      GuiActionHandler.dispatch(focused, {:sidebar_action, "file_tree", "file_tree", "toggle"})
+
+    assert EditorState.file_tree_state(closed).tree == nil
+    assert EditorState.sidebar_active_id(closed) == nil
   end
 
   test "native GUI sidebar actions route to extension-owned sidebars" do
@@ -143,7 +178,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
     assert EditorState.sidebar_active_id(new_state) == "observatory"
     assert EditorState.observatory_visible?(new_state)
-    refute new_state.workspace.file_tree.focused
+    refute EditorState.file_tree_state(new_state).focused
     assert new_state.workspace.keymap_scope == :editor
   end
 

@@ -50,20 +50,22 @@ defmodule MingaEditor.FileTree.Rows do
 
   @doc "Builds semantic rows from editor state when the file tree is open."
   @spec from_state(EditorState.t() | map()) :: [Row.t()]
-  def from_state(%{workspace: %{file_tree: %{tree: nil}}}), do: []
+  def from_state(state) do
+    case EditorState.file_tree_state(state) do
+      %FileTreeState{tree: %FileTree{} = tree} = file_tree ->
+        from_tree(tree,
+          active_path: active_buffer_path(state),
+          dirty_paths: dirty_paths(state),
+          editing: file_tree.editing,
+          focused: file_tree.focused,
+          git_status: tree.git_status,
+          selected_index: tree.cursor
+        )
 
-  def from_state(%{workspace: %{file_tree: %{tree: %FileTree{} = tree} = file_tree}} = state) do
-    from_tree(tree,
-      active_path: active_buffer_path(state),
-      dirty_paths: dirty_paths(state),
-      editing: Map.get(file_tree, :editing),
-      focused: Map.get(file_tree, :focused, false),
-      git_status: tree.git_status,
-      selected_index: tree.cursor
-    )
+      %FileTreeState{} ->
+        []
+    end
   end
-
-  def from_state(_state), do: []
 
   @spec row_context(FileTree.t(), options()) :: map()
   defp row_context(%FileTree{} = tree, opts) do

@@ -94,7 +94,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
       tab_bar: Map.get(state.shell_state, :tab_bar),
       buffers: state.workspace.buffers,
       viewport: state.terminal_viewport,
-      file_tree: state.workspace.file_tree,
+      file_tree: MingaEditor.State.file_tree_state(state),
       highlight: state.workspace.highlight,
       agent_ui: state.workspace.agent_ui,
       completion: MingaEditor.State.ModalOverlay.completion(state),

@@ -630,7 +630,7 @@ defmodule MingaEditor.Agent.Events do
   end
 
   @spec project_root(EditorState.t()) :: String.t() | nil
-  defp project_root(%{workspace: %{file_tree: %{project_root: root}}}), do: root
+  defp project_root(state), do: EditorState.file_tree_state(state).project_root
 
   @spec find_unassociated_file_tab(TabBar.t(), FileRef.t(), non_neg_integer(), EditorState.t()) ::
           Tab.t() | nil

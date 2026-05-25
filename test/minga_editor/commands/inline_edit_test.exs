@@ -181,17 +181,18 @@ defmodule MingaEditor.Commands.InlineEditTest do
 
     state = %EditorState{
       port_manager: self(),
-      workspace: %SessionState{
-        viewport: Viewport.new(24, 80),
-        file_tree: %FileTreeState{project_root: root},
-        buffers: %Buffers{active: buffer, list: [buffer], active_index: 0},
-        windows: %Windows{
-          tree: WindowTree.new(1),
-          map: %{1 => Window.new(1, buffer, 24, 80)},
-          active: 1,
-          next_id: 2
+      workspace:
+        %SessionState{
+          viewport: Viewport.new(24, 80),
+          buffers: %Buffers{active: buffer, list: [buffer], active_index: 0},
+          windows: %Windows{
+            tree: WindowTree.new(1),
+            map: %{1 => Window.new(1, buffer, 24, 80)},
+            active: 1,
+            next_id: 2
+          }
         }
-      },
+        |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
       shell_state: %TraditionalState{
         tab_bar: TabBar.new(Tab.new_file(1, Path.basename(rel_path)), root)
       }

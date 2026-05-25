@@ -78,7 +78,7 @@ defmodule MingaEditor.AgentActivation do
       active_tab_id(state),
       state.workspace.buffers.active,
       state.workspace.windows,
-      state.workspace.file_tree,
+      EditorState.file_tree_state(state),
       state.workspace.keymap_scope,
       AgentAccess.input_focused?(state)
     )

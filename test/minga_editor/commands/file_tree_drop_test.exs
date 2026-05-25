@@ -37,12 +37,12 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       on_exit(fn -> File.rm_rf(external_root) end)
 
       state = open_file_tree(dir, events_registry)
-      intent = drop_intent(state.workspace.file_tree.tree, target_dir, [external_file])
+      intent = drop_intent(ft(state).tree, target_dir, [external_file])
 
       state = Commands.FileTree.drop(state, intent)
 
       assert File.read!(Path.join(target_dir, "external.txt")) == "external"
-      assert state.workspace.file_tree.tree != nil
+      assert ft(state).tree != nil
     end
 
     test "copies an external file to the parent directory when dropped onto a file", %{
@@ -55,7 +55,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       on_exit(fn -> File.rm_rf(external_root) end)
 
       state = open_file_tree(dir, events_registry)
-      intent = drop_intent(state.workspace.file_tree.tree, target_file, [external_file])
+      intent = drop_intent(ft(state).tree, target_file, [external_file])
 
       _state = Commands.FileTree.drop(state, intent)
 
@@ -72,7 +72,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       File.mkdir_p!(target_dir)
 
       state = open_file_tree(dir, events_registry)
-      intent = drop_intent(state.workspace.file_tree.tree, target_dir, [source_file])
+      intent = drop_intent(ft(state).tree, target_dir, [source_file])
 
       _state = Commands.FileTree.drop(state, intent)
 
@@ -92,7 +92,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       File.ln_s!(external_file, symlink_path)
 
       state = open_file_tree(dir, events_registry)
-      intent = drop_intent(state.workspace.file_tree.tree, target_dir, [symlink_path])
+      intent = drop_intent(ft(state).tree, target_dir, [symlink_path])
 
       _state = Commands.FileTree.drop(state, intent)
 
@@ -113,7 +113,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       File.write!(target_file, "main")
 
       state = open_file_tree(dir, events_registry, target_file)
-      intent = drop_intent(state.workspace.file_tree.tree, target_file, [source_file])
+      intent = drop_intent(ft(state).tree, target_file, [source_file])
 
       _state = Commands.FileTree.drop(state, intent)
 
@@ -135,7 +135,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       state = open_file_tree(dir, events_registry)
 
       intent =
-        state.workspace.file_tree.tree
+        ft(state).tree
         |> drop_intent(target_dir, [external_file])
         |> Map.put(:target_id, "/project/stale-target")
 
@@ -156,7 +156,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       File.write!(existing_dest, "existing")
 
       state = open_file_tree(dir, events_registry)
-      intent = drop_intent(state.workspace.file_tree.tree, target_dir, [source_file])
+      intent = drop_intent(ft(state).tree, target_dir, [source_file])
 
       _state = Commands.FileTree.drop(state, intent)
 
@@ -176,7 +176,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       File.ln_s!("missing.txt", dangling_dest)
 
       state = open_file_tree(dir, events_registry)
-      intent = drop_intent(state.workspace.file_tree.tree, target_dir, [source_file])
+      intent = drop_intent(ft(state).tree, target_dir, [source_file])
 
       _state = Commands.FileTree.drop(state, intent)
 
@@ -197,7 +197,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       on_exit(fn -> File.rm_rf(external_root) end)
 
       state = open_file_tree(dir, events_registry)
-      intent = drop_intent(state.workspace.file_tree.tree, target_dir, [external_file])
+      intent = drop_intent(ft(state).tree, target_dir, [external_file])
 
       _state = Commands.FileTree.drop(state, intent)
 
@@ -218,7 +218,7 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
       File.write!(active_file, "main")
 
       state = open_file_tree(dir, events_registry, active_file)
-      intent = drop_intent(state.workspace.file_tree.tree, target_dir, [source_dir])
+      intent = drop_intent(ft(state).tree, target_dir, [source_dir])
 
       _state = Commands.FileTree.drop(state, intent)
 
@@ -228,6 +228,8 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
     end
   end
 
+  defp ft(state), do: EditorState.file_tree_state(state)
+
   defp open_file_tree(dir, events_registry, active_file \\ nil) do
     tree = reveal_active_file(FileTree.new(dir), active_file)
     buffers = buffers_for_active_file(active_file, events_registry)
@@ -235,12 +237,9 @@ defmodule MingaEditor.Commands.FileTreeDropTest do
     %EditorState{
       port_manager: self(),
       events_registry: events_registry,
-      workspace: %SessionState{
-        viewport: Viewport.new(24, 80),
-        buffers: buffers,
-        file_tree: FileTreeState.open(%FileTreeState{}, tree, nil),
-        keymap_scope: :file_tree
-      }
+      workspace:
+        %SessionState{viewport: Viewport.new(24, 80), buffers: buffers, keymap_scope: :file_tree}
+        |> SessionState.set_file_tree(FileTreeState.open(%FileTreeState{}, tree, nil))
     }
   end
 

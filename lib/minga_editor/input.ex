@@ -26,7 +26,6 @@ defmodule MingaEditor.Input do
   alias MingaEditor.Input.Dashboard
   alias MingaEditor.Input.DiffReview
   alias MingaEditor.Input.Dired
-  alias MingaEditor.Input.FileTreeHandler
   alias MingaEditor.Input.GitStatus
   alias MingaEditor.Input.GlobalBindings
   alias MingaEditor.Input.Hover
@@ -59,7 +58,6 @@ defmodule MingaEditor.Input do
     {DiffReview, 30},
     {AgentPanel, 40},
     {Sidebar, 45},
-    {FileTreeHandler, 50},
     {GitStatus, 60},
     {Dired, 70},
     {Popup, 80},
@@ -147,6 +145,11 @@ defmodule MingaEditor.Input do
 
   @doc "Removes every input handler contributed by a source."
   @spec unregister_source(contribution_source()) :: :ok
+  def unregister_source(:builtin) do
+    ensure_handler_registry!()
+    :ok
+  end
+
   def unregister_source(source) do
     ensure_handler_registry!()
 

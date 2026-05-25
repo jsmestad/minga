@@ -162,7 +162,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
 
       {new_state, effects} = FileEventHandler.handle(state, event)
 
-      assert new_state.workspace.file_tree.tree.git_status[file_path] == :modified
+      assert ft(new_state).tree.git_status[file_path] == :modified
       assert {:render, 16} in effects
     end
   end
@@ -224,7 +224,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
           {:schedule_file_tree_refresh, 1_000}
         ])
 
-      first_ref = first_state.workspace.file_tree.refresh_timer
+      first_ref = ft(first_state).refresh_timer
 
       second_state =
         MingaEditor.Handlers.EffectHandler.apply_effects(first_state, [
@@ -232,7 +232,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
         ])
 
       assert is_reference(first_ref)
-      assert second_state.workspace.file_tree.refresh_timer == first_ref
+      assert ft(second_state).refresh_timer == first_ref
       Process.cancel_timer(first_ref)
     end
 
@@ -249,7 +249,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       {new_state, effects} = FileEventHandler.handle(state, :file_tree_refresh_timer)
 
       names =
-        new_state.workspace.file_tree.tree |> FileTree.visible_entries() |> Enum.map(& &1.name)
+        ft(new_state).tree |> FileTree.visible_entries() |> Enum.map(& &1.name)
 
       assert "beta.ex" in names
       refute FileTreeFreshness.refresh_scheduled?(new_state)
@@ -341,9 +341,9 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
         })
 
       names =
-        new_state.workspace.file_tree.tree |> FileTree.visible_entries() |> Enum.map(& &1.name)
+        ft(new_state).tree |> FileTree.visible_entries() |> Enum.map(& &1.name)
 
-      assert new_state.workspace.file_tree.project_root == Path.expand(new_root)
+      assert ft(new_state).project_root == Path.expand(new_root)
       assert "new.ex" in names
       refute "old.ex" in names
       assert {:render, 16} in effects
@@ -368,11 +368,12 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       old_ref = FileRef.from_buffer(buffer)
       {:ok, new_ref} = FileRef.from_path(root, path)
 
-      workspace = %SessionState{
-        viewport: Viewport.new(24, 80),
-        buffers: %Buffers{active: buffer, list: [buffer], active_index: 0},
-        file_tree: %FileTreeState{project_root: root}
-      }
+      workspace =
+        %SessionState{
+          viewport: Viewport.new(24, 80),
+          buffers: %Buffers{active: buffer, list: [buffer], active_index: 0}
+        }
+        |> SessionState.set_file_tree(%FileTreeState{project_root: root})
 
       tab =
         Tab.new_file(1, "scratch")
@@ -463,11 +464,12 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
 
       state = %EditorState{
         port_manager: self(),
-        workspace: %SessionState{
-          viewport: Viewport.new(24, 80),
-          file_tree: %FileTreeState{project_root: root},
-          buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0}
-        }
+        workspace:
+          %SessionState{
+            viewport: Viewport.new(24, 80),
+            buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0}
+          }
+          |> SessionState.set_file_tree(%FileTreeState{project_root: root})
       }
 
       state = EditorState.update_shell_state(state, fn _ -> %ShellState{tab_bar: tab_bar} end)
@@ -547,6 +549,8 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       assert effects == []
     end
   end
+
+  defp ft(state), do: EditorState.file_tree_state(state)
 
   defp state_with_tree(root) do
     tree = FileTree.new(root)

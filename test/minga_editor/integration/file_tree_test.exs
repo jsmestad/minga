@@ -4,7 +4,8 @@ defmodule Minga.Integration.FileTreeTest do
 
   File tree data structure behavior belongs in lower-level project tests. This file keeps only the behavior that needs a live Editor, key routing, GUI actions, and a rendered screen.
   """
-  use Minga.Test.EditorCase, async: true
+  # Mutates the global built-in FileTree sidebar registry while rendering through live editors.
+  use Minga.Test.EditorCase, async: false
 
   alias Minga.Test.HeadlessPort
 
