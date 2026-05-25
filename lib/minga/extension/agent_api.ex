@@ -21,8 +21,6 @@ defmodule Minga.Extension.AgentAPI do
       # subscribes calling process to agent lifecycle events
   """
 
-  require Logger
-
   @default_manager MingaAgent.SessionManager
 
   @typedoc "Agent session status."
@@ -75,7 +73,11 @@ defmodule Minga.Extension.AgentAPI do
       []
 
     :exit, reason ->
-      Logger.warning("AgentAPI.list_sessions/1 caught unexpected exit: #{inspect(reason)}")
+      Minga.Log.warning(
+        :agent,
+        "AgentAPI.list_sessions/1 caught unexpected exit: #{inspect(reason)}"
+      )
+
       []
   end
 
@@ -128,7 +130,11 @@ defmodule Minga.Extension.AgentAPI do
       {:error, :not_found}
 
     :exit, reason ->
-      Logger.warning("AgentAPI.session_info/2 caught unexpected exit: #{inspect(reason)}")
+      Minga.Log.warning(
+        :agent,
+        "AgentAPI.session_info/2 caught unexpected exit: #{inspect(reason)}"
+      )
+
       {:error, :not_found}
   end
 
@@ -203,7 +209,11 @@ defmodule Minga.Extension.AgentAPI do
       %{status: :error, pending_approval: nil, error: nil, active_tool_name: nil}
 
     :exit, reason ->
-      Logger.warning("AgentAPI.safe_editor_snapshot/1 caught unexpected exit: #{inspect(reason)}")
+      Minga.Log.warning(
+        :agent,
+        "AgentAPI.safe_editor_snapshot/1 caught unexpected exit: #{inspect(reason)}"
+      )
+
       %{status: :error, pending_approval: nil, error: nil, active_tool_name: nil}
   end
 end

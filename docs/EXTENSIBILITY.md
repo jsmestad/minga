@@ -391,6 +391,8 @@ Both macros accumulate metadata at compile time. When the extension loads, the f
 
 Minga's extension registries track who contributed each entry. The common source identifiers are `:builtin`, `:config`, and `{:extension, name}`. That source tag is what makes reload safe: stopping an extension removes only that extension's commands, keybindings, scopes, input handlers, language data, themes, tool recipes, and modeline segments.
 
+Cleanup is best-effort across every family. If command cleanup fails, keymaps, scopes, input handlers, language data, themes, tool recipes, and modeline segments still get their cleanup pass. Minga reports the cleanup failures instead of hiding them, because stale extension state is worse than a noisy reload.
+
 This ownership layer is the gate for large built-in feature extraction. Language packs, theme packs, tool recipe packs, Dired, FileTree, Git UI, Board, and Agent pieces should move out of core only after they can register through these source-owned paths. Without ownership, reloads leave stale commands or catalog entries behind.
 
 ### The imperative path (for runtime-dynamic contributions)
@@ -427,6 +429,8 @@ end
 ```
 
 These APIs write to hot-path ETS or persistent registries, so command dispatch, key resolution, rendering, and input routing keep reading cached data. They do not call extension callbacks on every keystroke or frame.
+
+That rule matters for GUI-first features. A rich sidebar or status surface should publish a semantic snapshot that Minga's render pipeline and native frontend adapters can encode centrally. Extensions should not emit raw GUI protocol bytes or raw terminal cells from input/render hot paths.
 
 The DSL is syntactic sugar over these APIs, not a replacement. Use whichever fits your extension's needs.
 

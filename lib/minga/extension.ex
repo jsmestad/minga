@@ -102,10 +102,7 @@ defmodule Minga.Extension do
   @doc """
   Optional. Returns a child spec for the extension's supervision subtree.
 
-  The default implementation (provided by `use Minga.Extension`) starts
-  a simple Agent that holds the state returned by `init/1`. Override this
-  if your extension needs a custom GenServer, multiple processes, or a
-  full supervision tree.
+  The default implementation (provided by `use Minga.Extension`) starts a simple Agent that holds the validated config keyword list. The value returned by `init/1` is setup-only and is not handed to the default child process. Override this if your extension needs a custom GenServer, persisted runtime state, multiple processes, or a full supervision tree.
   """
   @callback child_spec(config :: keyword()) :: Supervisor.child_spec()
 
@@ -159,6 +156,21 @@ defmodule Minga.Extension do
   @typedoc "A modeline segment declaration: `{name, opts, {module, function}}`."
   @type modeline_segment_spec :: {atom(), keyword(), {module(), atom()}}
 
+  @typedoc "A declared runtime or UI capability: `{family, value}`."
+  @type capability_spec :: {atom(), term()}
+
+  @doc """
+  Builds a public manifest for a loaded extension module.
+
+  This calls the extension's declaration callbacks directly, so callback
+  failures can raise or exit. Use `Minga.Extension.Supervisor.start_extension/5`
+  if you want those failures converted into load errors instead of propagating.
+  """
+  @spec manifest(module(), Minga.Extension.Manifest.source_type()) :: Minga.Extension.Manifest.t()
+  def manifest(module, source) when is_atom(module) and source in [:path, :git, :hex] do
+    Minga.Extension.Manifest.from_module(module, source)
+  end
+
   @doc """
   Injects the `Minga.Extension` behaviour, DSL macros (`option/3`,
   `command/3`, `keybind/4`, `keybind/5`), and a default `child_spec/1`.
@@ -209,6 +221,7 @@ defmodule Minga.Extension do
       Module.register_attribute(__MODULE__, :__extension_commands__, accumulate: true)
       Module.register_attribute(__MODULE__, :__extension_keybinds__, accumulate: true)
       Module.register_attribute(__MODULE__, :__extension_modeline_segments__, accumulate: true)
+      Module.register_attribute(__MODULE__, :__extension_capabilities__, accumulate: true)
       @before_compile Minga.Extension
 
       @doc false
@@ -231,7 +244,8 @@ defmodule Minga.Extension do
           keybind: 4,
           keybind: 5,
           modeline_segment: 2,
-          modeline_segment: 3
+          modeline_segment: 3,
+          capability: 2
         ]
     end
   end
@@ -329,6 +343,17 @@ defmodule Minga.Extension do
   end
 
   @doc """
+  Declares a runtime or UI capability this extension uses.
+
+  Capabilities are declarative and are available through `Minga.Extension.Manifest` before `init/1` runs. They should describe contribution surfaces or runtime needs, not perform side effects.
+  """
+  defmacro capability(family, value) do
+    quote do
+      @__extension_capabilities__ {unquote(family), unquote(value)}
+    end
+  end
+
+  @doc """
   Declares a keybinding this extension provides.
 
   Accumulated at compile time and exposed via `__keybind_schema__/0`.
@@ -360,11 +385,13 @@ defmodule Minga.Extension do
     commands = Module.get_attribute(env.module, :__extension_commands__) || []
     keybinds = Module.get_attribute(env.module, :__extension_keybinds__) || []
     modeline_segments = Module.get_attribute(env.module, :__extension_modeline_segments__) || []
+    capabilities = Module.get_attribute(env.module, :__extension_capabilities__) || []
     # Accumulated attributes are in reverse order; restore declaration order
     options = Enum.reverse(options)
     commands = Enum.reverse(commands)
     keybinds = Enum.reverse(keybinds)
     modeline_segments = Enum.reverse(modeline_segments)
+    capabilities = Enum.reverse(capabilities)
 
     quote do
       @doc false
@@ -382,6 +409,10 @@ defmodule Minga.Extension do
       @doc false
       @spec __modeline_segment_schema__() :: [Minga.Extension.modeline_segment_spec()]
       def __modeline_segment_schema__, do: unquote(Macro.escape(modeline_segments))
+
+      @doc false
+      @spec __capability_schema__() :: [Minga.Extension.capability_spec()]
+      def __capability_schema__, do: unquote(Macro.escape(capabilities))
     end
   end
 end

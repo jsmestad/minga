@@ -19,7 +19,8 @@ defmodule Minga.Extension.DevReload do
           watcher_monitors: %{reference() => String.t()},
           extensions: %{String.t() => atom()},
           pending_timer: reference() | nil,
-          pending_paths: MapSet.t()
+          pending_paths: MapSet.t(),
+          recompiler: (String.t() -> :ok | {:error, term()})
         }
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -42,14 +43,15 @@ defmodule Minga.Extension.DevReload do
 
   @impl true
   @spec init(keyword()) :: {:ok, state()}
-  def init(_opts) do
+  def init(opts) do
     {:ok,
      %{
        watchers: %{},
        watcher_monitors: %{},
        extensions: %{},
        pending_timer: nil,
-       pending_paths: MapSet.new()
+       pending_paths: MapSet.new(),
+       recompiler: Keyword.get(opts, :recompiler, &recompile_extension/1)
      }}
   end
 
@@ -132,7 +134,7 @@ defmodule Minga.Extension.DevReload do
       |> Enum.uniq()
 
     for ext_name <- extensions_to_reload do
-      reload_extension(ext_name)
+      reload_extension(ext_name, state.recompiler)
     end
 
     {:noreply, %{state | pending_paths: MapSet.new(), pending_timer: nil}}
@@ -140,27 +142,13 @@ defmodule Minga.Extension.DevReload do
 
   def handle_info(_msg, state), do: {:noreply, state}
 
-  @spec reload_extension(atom()) :: :ok
-  defp reload_extension(ext_name) do
+  @spec reload_extension(atom(), (String.t() -> :ok | {:error, term()})) :: :ok
+  defp reload_extension(ext_name, recompiler) do
     case Minga.Extension.Registry.get(Minga.Extension.Registry, ext_name) do
       {:ok, %{path: path, status: :running}} when is_binary(path) ->
         Minga.Log.info(:config, "Dev reload: recompiling #{ext_name}")
 
-        case recompile_extension(path) do
-          :ok ->
-            restart_result = restart_extension(ext_name)
-
-            broadcast_reload_result(ext_name, restart_result)
-
-          {:error, reason} ->
-            Minga.Events.broadcast(
-              :log_message,
-              %Minga.Events.LogMessageEvent{
-                text: "Extension #{ext_name} reload failed: #{inspect(reason)}",
-                level: :error
-              }
-            )
-        end
+        reload_recompiled_extension(ext_name, recompiler.(path))
 
       _ ->
         :ok
@@ -168,6 +156,32 @@ defmodule Minga.Extension.DevReload do
   rescue
     e ->
       Minga.Log.error(:config, "Dev reload error for #{ext_name}: #{Exception.message(e)}")
+  end
+
+  @spec reload_recompiled_extension(atom(), :ok | {:error, term()}) :: :ok
+  defp reload_recompiled_extension(ext_name, :ok) do
+    ext_name
+    |> restart_extension_with_telemetry()
+    |> then(&broadcast_reload_result(ext_name, &1))
+  end
+
+  defp reload_recompiled_extension(ext_name, {:error, reason}) do
+    Minga.Events.broadcast(
+      :log_message,
+      %Minga.Events.LogMessageEvent{
+        text: "Extension #{ext_name} reload failed: #{inspect(reason)}",
+        level: :error
+      }
+    )
+  end
+
+  @spec restart_extension_with_telemetry(atom()) :: :ok | {:error, term()}
+  defp restart_extension_with_telemetry(ext_name) do
+    Minga.Telemetry.span(
+      [:minga, :extension, :lifecycle],
+      %{extension: ext_name, phase: :reload},
+      fn -> restart_extension(ext_name) end
+    )
   end
 
   @spec restart_extension(atom()) :: :ok | {:error, term()}
@@ -232,9 +246,9 @@ defmodule Minga.Extension.DevReload do
     if ex_files == [] do
       {:error, :no_source_files}
     else
-      case Kernel.ParallelCompiler.compile(ex_files) do
-        {:ok, _modules, _warnings} -> :ok
-        {:error, errors, _warnings} -> {:error, errors}
+      case Kernel.ParallelCompiler.compile(ex_files, return_diagnostics: true) do
+        {:ok, _modules, _diag_map} -> :ok
+        {:error, errors, _diag_map} -> {:error, errors}
       end
     end
   rescue

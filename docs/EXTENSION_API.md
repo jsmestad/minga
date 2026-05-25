@@ -2,7 +2,7 @@
 
 > **First time?** This is the API reference. For a guided walkthrough of building your first extension from scratch, see the [Extension Authoring Guide](https://github.com/jsmestad/minga/issues/212). For the conceptual foundation (why Elixir is Minga's Elisp, how the BEAM makes extensions safe), read [Extensibility](EXTENSIBILITY.md).
 
-Extensions are Elixir packages that run inside the editor. They have full access to the BEAM VM, the same way Emacs Lisp packages have full access to the Emacs runtime. Your extension's `init/1` callback is where everything happens: register commands, bind keys, hook into the advice system, declare config options.
+Extensions are Elixir packages that run inside the editor. They have full access to the BEAM VM, the same way Emacs Lisp packages have full access to the Emacs runtime. Declarative contributions are described at compile time, and runtime setup happens in `init/1`.
 
 This page covers every public API an extension can use, with copy-pasteable examples.
 
@@ -18,7 +18,7 @@ When a user writes `extension :my_ext, git: "..."` in their config, they're choo
 
 ## The Extension Behaviour
 
-Every extension implements four callbacks. `use Minga.Extension` gives you a default `child_spec/1` (an Agent holding your config), the `option/3` macro for declaring typed config options, and a generated `__option_schema__/0` function the framework reads at load time. Override `child_spec/1` if you need a custom GenServer or supervision tree.
+Every extension implements four callbacks. `use Minga.Extension` gives you a default `child_spec/1` (an Agent holding your validated config), declarative macros for contributions, and generated schema functions the framework reads at load time. Override `child_spec/1` if you need a custom GenServer, persistent runtime state, or a supervision tree.
 
 ```elixir
 defmodule MingaOrg do
@@ -59,9 +59,59 @@ end
 
 The `option` macro follows the same pattern as Ecto's `field`: you declare it at the module level, and `use Minga.Extension` generates a `__option_schema__/0` function from the accumulated declarations. You never write the introspection function yourself.
 
-**Lifecycle:** The user declares the extension in `config.exs`. Minga compiles it, validates config options against the schema, calls `init/1`, then starts `child_spec/1` under `Extension.Supervisor`. On config reload (`SPC h r`), all extensions stop and re-load from scratch.
+**Lifecycle:** The user declares the extension in `config.exs`. Minga compiles it, introspects its manifest, validates config options against the schema, calls `init/1`, then starts `child_spec/1` under `Extension.Supervisor`. On config reload (`SPC h r`), all extensions stop and re-load from scratch.
+
+`init/1` is setup-only. It may register runtime-dynamic source-owned contributions and return `{:ok, state}` to report success, but the default child process does not receive that returned state. The default child stores the validated config keyword list so existing extensions keep working. If your extension has runtime state, put that state in your own GenServer or supervision tree and return it from your custom `child_spec/1`.
 
 Each extension runs under a `DynamicSupervisor` with `:one_for_one` strategy. If your extension crashes, only your extension restarts. The editor and other extensions keep running.
+
+### Lifecycle ordering and cleanup
+
+The lifecycle contract is intentionally boring:
+
+1. **Load:** path and git extensions compile from their local source, hex extensions load from the installed application.
+2. **Manifest:** Minga records the extension name, version, source type, commands, keybindings, modeline segments, and declared capabilities before `init/1` runs.
+3. **Options:** declared options are validated and registered.
+4. **Init:** `init/1` runs. If it returns `{:error, reason}` or raises, startup fails.
+5. **Child start:** `child_spec/1` starts under the extension supervisor.
+6. **DSL registration:** declarative commands, keybindings, and modeline segments are registered with source `{:extension, name}`.
+
+Stop, failed start, and reload all run source-owned cleanup. Cleanup families are aggregated: a failure in one family is logged and returned, but later cleanup families still run. This prevents a bad command cleanup from leaving stale keymaps, themes, languages, tool recipes, or modeline segments behind.
+
+Reload is `stop -> cleanup -> load -> manifest -> options -> init -> child start -> DSL registration`. If stop cleanup reports an error, reload reports the error instead of pretending the extension restarted cleanly.
+
+### Manifest and capabilities
+
+Use the normal contribution macros to make declarations visible before runtime side effects run:
+
+```elixir
+command :org_cycle_todo, "Cycle TODO keyword", execute: {MingaOrg.Todo, :cycle}
+keybind :normal, "SPC m t", :org_cycle_todo, "Cycle TODO", filetype: :org
+modeline_segment :org_status, side: :right do
+  nil
+end
+capability :ui, [:modeline]
+```
+
+Capabilities stay in declaration order. If you declare the same capability more than once, the manifest keeps every entry.
+
+`Minga.Extension.manifest(MyExtension, :path)` returns a `%Minga.Extension.Manifest{}` with `:name`, `:description`, `:version`, `:source`, `:commands`, `:keybindings`, `:modeline_segments`, and `:capabilities`. Capabilities are stored as an ordered list of `{family, value}` tuples, so duplicate declarations stay visible. The shape is append-only. Future Minga releases may add fields, but existing fields keep their meaning.
+
+`Minga.Extension.manifest/2` and `Minga.Extension.Manifest.from_module/2` call declaration callbacks directly, so callback failures can raise or exit. The extension supervisor catches those failures during startup and turns them into load errors instead.
+
+### Lifecycle telemetry
+
+Minga emits lifecycle telemetry for extension load, init, child start, stop, reload, cleanup, and crash/restart count. Handlers should listen for `[:minga, :extension, :lifecycle, :stop]` span events and read `metadata.extension` and `metadata.phase`. Crash/restart count uses `[:minga, :extension, :lifecycle, :crash_restart_count]` with `%{count: count}`.
+
+Slow lifecycle phases are logged through `Minga.Log` with the extension name and phase. This gives users a path to answer "which extension slowed startup or reload?" without putting arbitrary extension callbacks in render or input hot paths.
+
+### Hot-path rule
+
+Extensions must publish cached data, snapshots, or declarative registrations. Input and render paths read registries and snapshots; they do not call arbitrary extension code per keystroke or frame.
+
+The current `modeline_segment/3` callback is the narrow compatibility exception: it runs from a render path, so it must be cheap and read cached state only. Stateful or slow modeline data should be computed by the extension process ahead of time and exposed as a cached value. Future richer status/sidebar APIs should publish semantic snapshots instead of render callbacks.
+
+Rich GUI features should publish semantic payloads that Minga's central protocol encoders and native frontend adapters understand, not raw GUI opcodes or raw terminal cells.
 
 ---
 

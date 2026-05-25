@@ -21,7 +21,8 @@ defmodule Minga.Extension.Entry do
   @typedoc "Hex-specific source options."
   @type hex_opts :: %{
           package: String.t(),
-          version: String.t() | nil
+          version: String.t() | nil,
+          app: atom() | nil
         }
 
   @enforce_keys [:source_type]
@@ -32,6 +33,8 @@ defmodule Minga.Extension.Entry do
     :hex,
     :module,
     :pid,
+    :manifest,
+    lifecycle_ref: nil,
     config: [],
     status: :stopped
   ]
@@ -43,6 +46,8 @@ defmodule Minga.Extension.Entry do
           hex: hex_opts() | nil,
           module: module() | nil,
           pid: pid() | nil,
+          manifest: Extension.Manifest.t() | nil,
+          lifecycle_ref: reference() | nil,
           config: keyword(),
           status: Extension.extension_status()
         }
@@ -69,11 +74,19 @@ defmodule Minga.Extension.Entry do
   @doc "Creates a hex-sourced entry."
   @spec from_hex(String.t(), keyword()) :: t()
   def from_hex(package, opts) when is_binary(package) and is_list(opts) do
-    {version, config} = Keyword.pop(opts, :version)
+    {version, opts} = Keyword.pop(opts, :version)
+    {app, config} = Keyword.pop(opts, :app)
+
+    app =
+      case app do
+        nil -> nil
+        app when is_atom(app) -> app
+        _ -> raise ArgumentError, "hex app must be an atom when provided"
+      end
 
     %__MODULE__{
       source_type: :hex,
-      hex: %{package: package, version: version},
+      hex: %{package: package, version: version, app: app},
       config: config
     }
   end
