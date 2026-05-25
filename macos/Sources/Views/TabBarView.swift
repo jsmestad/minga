@@ -98,7 +98,7 @@ struct TabBarView: View {
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(theme.tabInactiveFg)
+                    .foregroundStyle(theme.chromeMutedFg)
                     .frame(width: 28, height: barHeight)
             }
             .menuStyle(.borderlessButton)
@@ -703,7 +703,7 @@ struct TabBarView: View {
         Button(action: action) {
             Image(systemName: systemIcon)
                 .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(theme.tabInactiveFg)
+                .foregroundStyle(theme.chromeMutedFg)
                 .frame(width: 28, height: barHeight)
         }
         .buttonStyle(.plain)

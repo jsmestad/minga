@@ -121,4 +121,49 @@ overlay_commands = [
 
 FixtureWriter.write_fixture("file_tree", overlay_commands)
 
+# Fixture 4: Integrated full editor scene with sidebar, editor body, completion popup, and status bar.
+full_editor_commands =
+  [
+    Protocol.encode_set_window_bg(0x282C34),
+    Protocol.encode_clear()
+  ] ++
+    Enum.map(0..22, fn row ->
+      Protocol.encode_draw(row, 0, String.duplicate(" ", 24), fg: 0xABB2BF, bg: 0x21252B)
+    end) ++
+    Enum.map(0..22, fn row ->
+      Protocol.encode_draw(row, 24, "│", fg: 0x3E4452, bg: 0x282C34)
+    end) ++
+    [
+      Protocol.encode_draw(0, 2, "FILE TREE", fg: 0x5C6370, bg: 0x21252B, bold: true),
+      Protocol.encode_draw(1, 2, "▾ lib", fg: 0x61AFEF, bg: 0x21252B),
+      Protocol.encode_draw(2, 4, "▾ minga", fg: 0x61AFEF, bg: 0x21252B),
+      Protocol.encode_draw(3, 6, "editor.ex", fg: 0x61AFEF, bg: 0x2B4A73, bold: true),
+      Protocol.encode_draw(4, 6, "buffer.ex", fg: 0xABB2BF, bg: 0x21252B),
+      Protocol.encode_draw(5, 6, "▸ mode", fg: 0x61AFEF, bg: 0x21252B),
+      Protocol.encode_draw(6, 2, "▸ test", fg: 0x61AFEF, bg: 0x21252B),
+      Protocol.encode_draw(7, 2, "▸ zig", fg: 0x61AFEF, bg: 0x21252B),
+      Protocol.encode_draw(1, 28, "defmodule Minga.Editor do", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(2, 30, "alias Minga.Buffer", fg: 0xABB2BF, bg: 0x282C34),
+      Protocol.encode_draw(4, 30, "def open(path) do", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(5, 32, "{:ok, buffer} = Buffer.open(path)", fg: 0xABB2BF, bg: 0x282C34),
+      Protocol.encode_draw(6, 32, "render(buffer)", fg: 0x61AFEF, bg: 0x282C34),
+      Protocol.encode_draw(7, 30, "end", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(8, 28, "end", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(10, 32, " defmodule                         keyword ", fg: 0xABB2BF, bg: 0x21252B),
+      Protocol.encode_draw(11, 32, " defstruct                         keyword ", fg: 0xDFDFDF, bg: 0x2257A0, bold: true),
+      Protocol.encode_draw(12, 32, " defdelegate                       keyword ", fg: 0xABB2BF, bg: 0x21252B),
+      Protocol.encode_draw(13, 32, " def                               keyword ", fg: 0xABB2BF, bg: 0x21252B),
+      Protocol.encode_draw(14, 32, " Document             Minga.Buffer.Document ", fg: 0xABB2BF, bg: 0x21252B),
+      Protocol.encode_draw(23, 0, " NORMAL ", fg: 0x282C34, bg: 0x98C379, bold: true),
+      Protocol.encode_draw(23, 9, " main ", fg: 0xABB2BF, bg: 0x3E4452),
+      Protocol.encode_draw(23, 16, " editor.ex [+] ", fg: 0xABB2BF, bg: 0x3E4452),
+      Protocol.encode_draw(23, 62, " ⚠ 2  Elixir ", fg: 0xE5C07B, bg: 0x282C34),
+      Protocol.encode_draw(23, 74, "42:9", fg: 0xABB2BF, bg: 0x3E4452),
+      Protocol.encode_cursor(4, 34),
+      Protocol.encode_cursor_shape(:beam),
+      Protocol.encode_batch_end()
+    ]
+
+FixtureWriter.write_fixture("full_editor", full_editor_commands)
+
 IO.puts("\nAll fixtures generated successfully.")

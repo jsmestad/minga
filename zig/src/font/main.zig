@@ -22,8 +22,8 @@ pub const Glyph = struct {
     /// Glyph bitmap dimensions in pixels.
     width: u32,
     height: u32,
-    /// Bearing offsets for positioning relative to the baseline.
-    /// Bearing offsets in point space (fractional precision preserved).
+    /// Glyph bitmap offsets from the cell origin in point space.
+    /// Fractional precision is preserved so snapshot and GPU renderers can avoid per-glyph rounding wobble.
     offset_x: f64,
     offset_y: f64,
     /// True if this is a color glyph (emoji) — the shader should sample

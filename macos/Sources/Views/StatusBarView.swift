@@ -1151,7 +1151,7 @@ private struct StatusBarIconButton: View {
         if isActive {
             return accentFg
         }
-        return barFg.opacity(isHovered ? 0.7 : 0.45)
+        return barFg.opacity(isHovered ? 0.78 : 0.58)
     }
 
     var body: some View {

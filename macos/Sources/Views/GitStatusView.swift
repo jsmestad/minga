@@ -19,6 +19,11 @@ struct GitStatusView: View {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.15
     }
 
+    /// PreviewHost can force eager layout for isolated component snapshots, but full-shell previews keep the production LazyVStack path.
+    private var usesPreviewEagerLayout: Bool {
+        PreviewSnapshotPolicy.shouldUseEagerLayout(for: "GitStatusView")
+    }
+
     @State private var hoveredEntryId: UInt32? = nil
     @State private var hoveredSection: GitStatusSection? = nil
     @State private var fileToDiscard: GitStatusEntry? = nil
@@ -125,14 +130,25 @@ struct GitStatusView: View {
     @ViewBuilder
     private var fileList: some View {
         ScrollView(.vertical) {
-            LazyVStack(spacing: 0) {
-                sectionBlock(.conflicted)
-                sectionBlock(.staged)
-                sectionBlock(.changed)
-                sectionBlock(.untracked)
+            if usesPreviewEagerLayout {
+                VStack(spacing: 0) {
+                    sectionBlock(.conflicted)
+                    sectionBlock(.staged)
+                    sectionBlock(.changed)
+                    sectionBlock(.untracked)
+                }
+                .padding(.top, 2)
+                .animation(.easeInOut(duration: animDuration), value: state.entriesRevision)
+            } else {
+                LazyVStack(spacing: 0) {
+                    sectionBlock(.conflicted)
+                    sectionBlock(.staged)
+                    sectionBlock(.changed)
+                    sectionBlock(.untracked)
+                }
+                .padding(.top, 2)
+                .animation(.easeInOut(duration: animDuration), value: state.entriesRevision)
             }
-            .padding(.top, 2)
-            .animation(.easeInOut(duration: animDuration), value: state.entriesRevision)
         }
     }
 
