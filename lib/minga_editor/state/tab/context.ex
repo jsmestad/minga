@@ -21,7 +21,7 @@ defmodule MingaEditor.State.Tab.Context do
 
   @version 1
 
-  @workspace_fields [
+  @snapshot_fields [
     :keymap_scope,
     :buffers,
     :windows,
@@ -29,15 +29,16 @@ defmodule MingaEditor.State.Tab.Context do
     :dired,
     :viewport,
     :mouse,
-    :highlight,
     :lsp_pending,
-    :injection_ranges,
     :search,
     :editing,
     :feature_state,
-    :document_highlights,
-    :agent_ui
+    :document_highlights
   ]
+
+  @shared_fields [:highlight, :injection_ranges, :agent_ui]
+
+  @workspace_fields @snapshot_fields ++ @shared_fields
 
   @typedoc "Workspace fields carried by a tab context."
   @type field_name ::
@@ -120,9 +121,6 @@ defmodule MingaEditor.State.Tab.Context do
     end
   end
 
-  @snapshot_excluded_fields [:highlight, :injection_ranges, :agent_ui]
-  @snapshot_fields @workspace_fields -- @snapshot_excluded_fields
-
   @doc "Creates a tab context directly from a workspace struct, without intermediate map conversion."
   @spec from_workspace(SessionState.t()) :: t()
   def from_workspace(%SessionState{} = ws) do
@@ -157,7 +155,7 @@ defmodule MingaEditor.State.Tab.Context do
 
   def from_map(map) when is_map(map) do
     context = %__MODULE__{version: fetch_version(map)}
-    fields = (fetch_present_fields(map) || @workspace_fields) -- @snapshot_excluded_fields
+    fields = filter_snapshot_fields(fetch_present_fields(map) || @snapshot_fields)
 
     Enum.reduce(fields, context, fn field, acc ->
       case fetch_field(map, field) do
@@ -268,6 +266,11 @@ defmodule MingaEditor.State.Tab.Context do
       {:ok, fields} when is_list(fields) -> normalize_present_fields(fields)
       _ -> nil
     end
+  end
+
+  @spec filter_snapshot_fields([field_name()]) :: [field_name()]
+  defp filter_snapshot_fields(fields) do
+    Enum.filter(fields, &(&1 in @snapshot_fields))
   end
 
   @spec normalize_present_fields([term()]) :: [field_name()]
