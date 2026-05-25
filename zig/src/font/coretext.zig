@@ -1,6 +1,6 @@
 /// CoreText font loader — loads fonts and rasterizes glyphs on macOS.
 ///
-/// Uses Apple's CoreText framework via @cImport to:
+/// Uses a narrow manual CoreText/CoreGraphics binding to:
 ///   1. Load a named font (e.g. "Menlo") at a given size
 ///   2. Extract cell metrics (width, height, ascent, descent)
 ///   3. Rasterize individual glyphs into alpha bitmaps
@@ -10,11 +10,82 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Atlas = @import("atlas.zig");
 
-const c = @cImport({
-    @cInclude("CoreFoundation/CoreFoundation.h");
-    @cInclude("CoreGraphics/CoreGraphics.h");
-    @cInclude("CoreText/CoreText.h");
-});
+const c = struct {
+    pub const Boolean = u8;
+    pub const CFIndex = c_long;
+    pub const CFStringEncoding = u32;
+    pub const CFTypeRef = *const anyopaque;
+    pub const CFAllocatorRef = ?*const anyopaque;
+    pub const CFStringRef = *const anyopaque;
+    pub const CFDataRef = *const anyopaque;
+    pub const CTFontRef = *const anyopaque;
+    pub const CTFontUIFontType = u32;
+    pub const CTFontOrientation = u32;
+    pub const CTFontTableTag = u32;
+    pub const CTFontTableOptions = u32;
+    pub const CGGlyph = u16;
+    pub const CGFloat = f64;
+    pub const CGBitmapInfo = u32;
+    pub const CGColorSpaceRef = *anyopaque;
+    pub const CGContextRef = *anyopaque;
+
+    pub const CGPoint = extern struct {
+        x: CGFloat,
+        y: CGFloat,
+    };
+
+    pub const CGSize = extern struct {
+        width: CGFloat,
+        height: CGFloat,
+    };
+
+    pub const CGRect = extern struct {
+        origin: CGPoint,
+        size: CGSize,
+    };
+
+    pub const CFRange = extern struct {
+        location: CFIndex,
+        length: CFIndex,
+    };
+
+    pub const kCFStringEncodingUTF8: CFStringEncoding = 0x08000100;
+    pub const kCTFontUIFontUserFixedPitch: CTFontUIFontType = 1;
+    pub const kCTFontOrientationDefault: CTFontOrientation = 0;
+    pub const kCTFontTableOptionNoOptions: CTFontTableOptions = 0;
+    pub const kCGImageAlphaPremultipliedLast: CGBitmapInfo = 1;
+
+    pub extern "c" fn CFRelease(cf: CFTypeRef) void;
+    pub extern "c" fn CFStringCreateWithBytes(alloc: CFAllocatorRef, bytes: [*c]const u8, numBytes: CFIndex, encoding: CFStringEncoding, isExternalRepresentation: Boolean) ?CFStringRef;
+    pub extern "c" fn CFStringCreateWithCharacters(alloc: CFAllocatorRef, chars: [*c]const u16, numChars: CFIndex) ?CFStringRef;
+
+    pub extern "c" fn CTFontCreateWithName(name: CFStringRef, size: CGFloat, matrix: ?*const anyopaque) ?CTFontRef;
+    pub extern "c" fn CTFontCreateUIFontForLanguage(uiType: CTFontUIFontType, size: CGFloat, language: ?CFStringRef) ?CTFontRef;
+    pub extern "c" fn CTFontCreateForString(currentFont: CTFontRef, string: CFStringRef, range: CFRange) ?CTFontRef;
+    pub extern "c" fn CTFontGetAscent(font: CTFontRef) CGFloat;
+    pub extern "c" fn CTFontGetDescent(font: CTFontRef) CGFloat;
+    pub extern "c" fn CTFontGetLeading(font: CTFontRef) CGFloat;
+    pub extern "c" fn CTFontGetGlyphsForCharacters(font: CTFontRef, characters: [*c]const u16, glyphs: [*c]CGGlyph, count: CFIndex) bool;
+    pub extern "c" fn CTFontGetBoundingRectsForGlyphs(font: CTFontRef, orientation: CTFontOrientation, glyphs: [*c]const CGGlyph, boundingRects: [*c]CGRect, count: CFIndex) CGRect;
+    pub extern "c" fn CTFontGetAdvancesForGlyphs(font: CTFontRef, orientation: CTFontOrientation, glyphs: [*c]const CGGlyph, advances: [*c]CGSize, count: CFIndex) f64;
+    pub extern "c" fn CTFontCopyTable(font: CTFontRef, table: CTFontTableTag, options: CTFontTableOptions) ?CFDataRef;
+    pub extern "c" fn CTFontDrawGlyphs(font: CTFontRef, glyphs: [*c]const CGGlyph, positions: [*c]const CGPoint, count: usize, context: CGContextRef) void;
+
+    pub extern "c" fn CGColorSpaceCreateDeviceRGB() ?CGColorSpaceRef;
+    pub extern "c" fn CGColorSpaceRelease(space: ?CGColorSpaceRef) void;
+    pub extern "c" fn CGBitmapContextCreate(data: ?*anyopaque, width: usize, height: usize, bitsPerComponent: usize, bytesPerRow: usize, space: ?CGColorSpaceRef, bitmapInfo: CGBitmapInfo) ?CGContextRef;
+    pub extern "c" fn CGContextRelease(ctx: ?CGContextRef) void;
+    pub extern "c" fn CGContextScaleCTM(ctx: ?CGContextRef, sx: CGFloat, sy: CGFloat) void;
+    pub extern "c" fn CGContextSetAllowsFontSmoothing(ctx: ?CGContextRef, allowsFontSmoothing: bool) void;
+    pub extern "c" fn CGContextSetShouldSmoothFonts(ctx: ?CGContextRef, shouldSmoothFonts: bool) void;
+    pub extern "c" fn CGContextSetAllowsAntialiasing(ctx: ?CGContextRef, allowsAntialiasing: bool) void;
+    pub extern "c" fn CGContextSetShouldAntialias(ctx: ?CGContextRef, shouldAntialias: bool) void;
+    pub extern "c" fn CGContextSetAllowsFontSubpixelPositioning(ctx: ?CGContextRef, allowsFontSubpixelPositioning: bool) void;
+    pub extern "c" fn CGContextSetShouldSubpixelPositionFonts(ctx: ?CGContextRef, shouldSubpixelPositionFonts: bool) void;
+    pub extern "c" fn CGContextSetAllowsFontSubpixelQuantization(ctx: ?CGContextRef, allowsFontSubpixelQuantization: bool) void;
+    pub extern "c" fn CGContextSetShouldSubpixelQuantizeFonts(ctx: ?CGContextRef, shouldSubpixelQuantizeFonts: bool) void;
+    pub extern "c" fn CGContextSetRGBFillColor(ctx: ?CGContextRef, red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat) void;
+};
 
 const CoreTextFont = @This();
 
@@ -207,7 +278,7 @@ pub fn rasterizeGlyph(self: *CoreTextFont, atlas: *Atlas, alloc: Allocator, code
     defer alloc.free(rgba_buf);
     @memset(rgba_buf, 0);
 
-    const color_space = c.CGColorSpaceCreateDeviceRGB();
+    const color_space = c.CGColorSpaceCreateDeviceRGB() orelse return error.ColorSpaceCreationFailed;
     defer c.CGColorSpaceRelease(color_space);
 
     const ctx = c.CGBitmapContextCreate(

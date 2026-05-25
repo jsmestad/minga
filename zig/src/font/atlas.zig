@@ -70,7 +70,7 @@ pub fn init(alloc: Allocator, size: u32, format: Format) !Atlas {
         .data = try alloc.alloc(u8, @as(usize, size) * size * format.depth()),
         .size = size,
         .format = format,
-        .nodes = .{},
+        .nodes = .empty,
     };
     errdefer result.deinit(alloc);
 

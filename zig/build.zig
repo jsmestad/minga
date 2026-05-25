@@ -14,8 +14,7 @@ fn ensureGeneratedProtocolArtifacts(b: *std.Build) void {
     var missing_count: usize = 0;
 
     for (generated_protocol_files) |path| {
-        if (b.build_root.handle.access(b.graph.io, path, .{})) |_| {
-        } else |err| switch (err) {
+        if (b.build_root.handle.access(b.graph.io, path, .{})) |_| {} else |err| switch (err) {
             error.FileNotFound => {
                 missing[missing_count] = path;
                 missing_count += 1;
@@ -40,6 +39,7 @@ pub fn build(b: *std.Build) void {
     ensureGeneratedProtocolArtifacts(b);
 
     const backend = b.option(BackendOption, "backend", "Rendering backend (default: tui)") orelse .tui;
+    const snapshot = b.option(bool, "snapshot", "Build minga-snapshot and snapshot tests (requires host font libraries)") orelse false;
 
     const vaxis = b.dependency("vaxis", .{
         .target = target,
@@ -170,10 +170,9 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(parser_exe);
 
     // ── Snapshot executable (cell-grid rasterizer for Claude Code) ───────
-    // Native macOS only: CoreText @cImport needs the system SDK, which
-    // Zig does not provide when cross-compiling (explicit -Dtarget).
-    const native_macos = target.result.os.tag == .macos and target.query.os_tag == null;
-    if (native_macos) {
+    // Native only: the font rasterizers link against host system font libraries.
+    const native_snapshot = snapshot and target.query.os_tag == null and (target.result.os.tag == .macos or target.result.os.tag == .linux);
+    if (native_snapshot) {
         const snapshot_exe = b.addExecutable(.{
             .name = "minga-snapshot",
             .root_module = b.createModule(.{
@@ -184,6 +183,7 @@ pub fn build(b: *std.Build) void {
         });
         snapshot_exe.root_module.addImport("vaxis", vaxis.module("vaxis"));
         snapshot_exe.root_module.link_libc = true;
+        configureSnapshotFonts(snapshot_exe.root_module, target.result.os.tag);
         b.installArtifact(snapshot_exe);
     }
 
@@ -254,8 +254,8 @@ pub fn build(b: *std.Build) void {
     const run_hook_runner_tests = b.addRunArtifact(hook_runner_tests);
     test_step.dependOn(&run_hook_runner_tests.step);
 
-    // Snapshot tests — native macOS only (same SDK constraint as the exe).
-    if (native_macos) {
+    // Snapshot tests — native only (same system font library constraint as the exe).
+    if (native_snapshot) {
         const snapshot_tests = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/snapshot_main.zig"),
@@ -265,6 +265,7 @@ pub fn build(b: *std.Build) void {
         });
         snapshot_tests.root_module.addImport("vaxis", vaxis.module("vaxis"));
         snapshot_tests.root_module.link_libc = true;
+        configureSnapshotFonts(snapshot_tests.root_module, target.result.os.tag);
 
         const run_snapshot_tests = b.addRunArtifact(snapshot_tests);
         test_step.dependOn(&run_snapshot_tests.step);
@@ -289,6 +290,20 @@ pub fn build(b: *std.Build) void {
     const run_highlight_bench = b.addRunArtifact(highlight_bench);
     const highlight_bench_step = b.step("highlight-bench", "Run tree-sitter highlight benchmark");
     highlight_bench_step.dependOn(&run_highlight_bench.step);
+}
+
+fn configureSnapshotFonts(module: *std.Build.Module, os_tag: std.Target.Os.Tag) void {
+    switch (os_tag) {
+        .macos => {
+            module.linkFramework("CoreFoundation", .{});
+            module.linkFramework("CoreGraphics", .{});
+            module.linkFramework("CoreText", .{});
+        },
+        .linux => {
+            module.linkSystemLibrary("freetype2", .{ .use_pkg_config = .force });
+        },
+        else => {},
+    }
 }
 
 /// Build a static library for a tree-sitter grammar.
