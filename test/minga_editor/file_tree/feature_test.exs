@@ -23,16 +23,15 @@ defmodule MingaEditor.FileTree.FeatureTest do
     :ok
   end
 
-  test "FileTree state is stored through feature-state accessors" do
+  test "FileTree state is stored as a direct workspace field" do
     workspace = %MingaEditor.Session.State{viewport: MingaEditor.Viewport.new(24, 80)}
     file_tree = %FileTreeState{project_root: "/tmp/project"}
 
     workspace = MingaEditor.Session.State.set_file_tree(workspace, file_tree)
 
+    assert workspace.file_tree == file_tree
     assert MingaEditor.Session.State.file_tree_state(workspace) == file_tree
-
-    assert MingaEditor.Session.State.get_feature_state(workspace, :builtin, :file_tree) ==
-             file_tree
+    assert MingaEditor.Session.State.get_feature_state(workspace, :builtin, :file_tree) == nil
   end
 
   test "FileTree dynamic handler uses a built-in source that extension cleanup cannot remove" do

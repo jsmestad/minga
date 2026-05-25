@@ -2,8 +2,10 @@ defmodule MingaEditor.State.SnapshotTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias MingaEditor.FeatureState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context
   alias MingaEditor.State.TabBar
@@ -172,6 +174,34 @@ defmodule MingaEditor.State.SnapshotTest do
       restored = EditorState.restore_tab_context(state, %{})
       assert restored.workspace.editing.mode == :normal
       assert restored.workspace.keymap_scope == :editor
+    end
+
+    test "synthesized file and agent tab defaults keep direct file_tree state" do
+      file_tree = %FileTreeState{project_root: "/tmp/project"}
+
+      file_state =
+        make_state(tab_bar: TabBar.new(Tab.new_file(1, "new.ex")))
+        |> EditorState.update_workspace(&MingaEditor.Session.State.set_file_tree(&1, file_tree))
+
+      file_restored = EditorState.restore_tab_context(file_state, %{})
+      file_ctx = TabBar.active(file_restored.shell_state.tab_bar).context
+
+      assert file_ctx.file_tree.project_root == file_tree.project_root
+      assert file_ctx.file_tree.tree == nil
+      refute file_ctx.file_tree.focused
+      assert FeatureState.empty?(file_ctx.feature_state)
+
+      agent_state =
+        make_state(tab_bar: TabBar.new(Tab.new_agent(1, "Agent")))
+        |> EditorState.update_workspace(&MingaEditor.Session.State.set_file_tree(&1, file_tree))
+
+      agent_restored = EditorState.restore_tab_context(agent_state, %{})
+      agent_ctx = TabBar.active(agent_restored.shell_state.tab_bar).context
+
+      assert agent_ctx.file_tree.project_root == file_tree.project_root
+      assert agent_ctx.file_tree.tree == nil
+      refute agent_ctx.file_tree.focused
+      assert FeatureState.empty?(agent_ctx.feature_state)
     end
 
     test "writes synthesized defaults back into the active tab on empty context" do
@@ -373,6 +403,7 @@ defmodule MingaEditor.State.SnapshotTest do
       assert new_ctx.keymap_scope == old_ctx.keymap_scope
       assert new_ctx.buffers == old_ctx.buffers
       assert new_ctx.windows == old_ctx.windows
+      assert new_ctx.file_tree == old_ctx.file_tree
       assert new_ctx.feature_state == old_ctx.feature_state
       assert new_ctx.dired == old_ctx.dired
       assert new_ctx.viewport == old_ctx.viewport
@@ -413,12 +444,44 @@ defmodule MingaEditor.State.SnapshotTest do
       assert restored_map.buffers.active == buf
       assert restored_map.viewport == ws.viewport
       assert restored_map.windows == ws.windows
+      assert restored_map.file_tree == ws.file_tree
       assert restored_map.mouse == ws.mouse
       assert restored_map.search == ws.search
       assert restored_map.lsp_pending == pending
 
       refute Map.has_key?(restored_map, :highlight)
       refute Map.has_key?(restored_map, :injection_ranges)
+    end
+
+    test "migrates legacy file tree from feature state into direct field" do
+      file_tree = %FileTreeState{project_root: "/tmp/project"}
+
+      legacy_ctx =
+        Context.from_workspace_map(%{
+          viewport: Viewport.new(24, 80),
+          feature_state: FeatureState.put(FeatureState.new(), :builtin, :file_tree, file_tree)
+        })
+
+      assert legacy_ctx.file_tree == file_tree
+      assert FeatureState.get(legacy_ctx.feature_state, :builtin, :file_tree) == nil
+      assert Context.to_workspace_map(legacy_ctx).file_tree == file_tree
+    end
+
+    test "direct file tree wins when legacy feature state also exists" do
+      direct_file_tree = %FileTreeState{project_root: "/tmp/direct"}
+      legacy_file_tree = %FileTreeState{project_root: "/tmp/legacy"}
+
+      legacy_ctx =
+        Context.from_workspace_map(%{
+          viewport: Viewport.new(24, 80),
+          file_tree: direct_file_tree,
+          feature_state:
+            FeatureState.put(FeatureState.new(), :builtin, :file_tree, legacy_file_tree)
+        })
+
+      assert legacy_ctx.file_tree == direct_file_tree
+      assert FeatureState.get(legacy_ctx.feature_state, :builtin, :file_tree) == nil
+      assert Context.to_workspace_map(legacy_ctx).file_tree == direct_file_tree
     end
 
     test "normalises transient vim state" do
