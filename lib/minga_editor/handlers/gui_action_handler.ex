@@ -1048,7 +1048,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     if git_porcelain_running?() and Code.ensure_loaded?(module) do
       :erlang.apply(module, :execute, [state, command])
     else
-      state
+      git_porcelain_unavailable(state)
     end
   end
 
@@ -1068,8 +1068,15 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
         opts
       ])
     else
-      state
+      git_porcelain_unavailable(state)
     end
+  end
+
+  @spec git_porcelain_unavailable(state()) :: state()
+  defp git_porcelain_unavailable(state) do
+    message = "Git porcelain extension is disabled or failed to load"
+    Minga.Log.warning(:editor, message)
+    EditorState.set_status(state, message)
   end
 
   @spec git_porcelain_running?() :: boolean()

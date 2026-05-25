@@ -435,7 +435,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   @spec git_status_sidebar_metadata(ctx()) :: ProtocolGUI.sidebar_metadata()
   defp git_status_sidebar_metadata(%{shell_state: %{git_status_panel: %{} = data}}) do
-    entries = Map.get(data, :entries, [])
+    entries = data |> git_status_panel_map() |> Map.get(:entries, [])
 
     %{
       id: "git_status",
@@ -656,6 +656,10 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   defp present_path(nil), do: []
   defp present_path(path), do: [path]
 
+  @spec git_status_panel_map(map()) :: map()
+  defp git_status_panel_map(%{__struct__: _module} = panel), do: Map.from_struct(panel)
+  defp git_status_panel_map(panel), do: panel
+
   # ── Git status panel ──
 
   @spec build_gui_git_status_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
@@ -663,7 +667,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
          %{shell_state: %{git_status_panel: %{} = data}, git_syncing: syncing, git_toast: toast},
          caches
        ) do
-    enriched = Map.merge(data, %{syncing: syncing, git_toast: toast})
+    enriched = data |> git_status_panel_map() |> Map.merge(%{syncing: syncing, git_toast: toast})
     fp = :erlang.phash2(enriched)
 
     if fp != caches.last_gui_git_status_fp do

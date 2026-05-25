@@ -25,9 +25,14 @@ defmodule MingaEditor.Shell.Traditional.State do
   alias MingaEditor.State.WhichKey
   alias Minga.Tool.Manager, as: ToolManager
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
+  alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
 
   @typedoc "Git toast shown after a remote operation completes."
   @type git_toast :: ProtocolGUI.git_toast() | nil
+  @type git_status_panel :: GitStatusPanel.t()
+  @type git_status_tui_state :: struct()
+
+  @git_status_tui_state_module :"Elixir.MingaGitPorcelain.Shell.Traditional.GitStatus.TuiState"
 
   @type t :: %__MODULE__{
           nav_flash: NavFlash.t() | nil,
@@ -36,8 +41,8 @@ defmodule MingaEditor.Shell.Traditional.State do
           status_msg: String.t() | nil,
           whichkey: WhichKey.t(),
           bottom_panel: BottomPanel.t(),
-          git_status_panel: MingaEditor.Frontend.Protocol.GUI.git_status_panel_data() | nil,
-          git_status_tui_state: map() | nil,
+          git_status_panel: git_status_panel() | nil,
+          git_status_tui_state: git_status_tui_state() | nil,
           sidebar_active_id: String.t() | nil,
           observatory_visible: boolean(),
           observatory_data: Observatory.Data.t() | nil,
@@ -190,23 +195,27 @@ defmodule MingaEditor.Shell.Traditional.State do
   # ── Git status panel ───────────────────────────────────────────────────────
 
   @doc "Returns the git status panel data, or nil."
-  @spec git_status_panel(t()) :: MingaEditor.Frontend.Protocol.GUI.git_status_panel_data() | nil
+  @spec git_status_panel(t()) :: git_status_panel() | nil
   def git_status_panel(%{git_status_panel: data}), do: data
 
   @doc "Sets the git status panel data."
-  @spec set_git_status_panel(t(), map() | nil) :: t()
+  @spec set_git_status_panel(t(), git_status_panel() | nil) :: t()
+  def set_git_status_panel(%{} = ss, nil), do: %{ss | git_status_panel: nil}
+
   def set_git_status_panel(%{} = ss, data) do
-    %{ss | git_status_panel: data}
+    %{ss | git_status_panel: GitStatusPanel.new(data)}
   end
 
   @doc "Returns the TUI-only git status view state, or nil."
-  @spec git_status_tui_state(t()) :: map() | nil
+  @spec git_status_tui_state(t()) :: git_status_tui_state() | nil
   def git_status_tui_state(%{git_status_tui_state: tui}), do: tui
 
   @doc "Sets the TUI-only git status view state."
-  @spec set_git_status_tui_state(t(), map() | nil) :: t()
+  @spec set_git_status_tui_state(t(), git_status_tui_state() | nil) :: t()
+  def set_git_status_tui_state(%{} = ss, nil), do: %{ss | git_status_tui_state: nil}
+
   def set_git_status_tui_state(%{} = ss, tui) do
-    %{ss | git_status_tui_state: tui}
+    if git_status_tui_state?(tui), do: %{ss | git_status_tui_state: tui}, else: ss
   end
 
   @doc "Refreshes existing TUI-only git status view state after shared entries change."
@@ -218,10 +227,18 @@ defmodule MingaEditor.Shell.Traditional.State do
 
     if git_porcelain_running?() and Code.ensure_loaded?(module) and
          function_exported?(module, :refresh, 2) do
-      %{ss | git_status_tui_state: :erlang.apply(module, :refresh, [tui, entries])}
+      refreshed = :erlang.apply(module, :refresh, [tui, entries])
+
+      if git_status_tui_state?(refreshed), do: %{ss | git_status_tui_state: refreshed}, else: ss
     else
       ss
     end
+  end
+
+  @spec git_status_tui_state?(term()) :: boolean()
+  defp git_status_tui_state?(value) do
+    Code.ensure_loaded?(@git_status_tui_state_module) and
+      is_struct(value, @git_status_tui_state_module)
   end
 
   @spec git_porcelain_running?() :: boolean()

@@ -369,11 +369,21 @@ defmodule Minga.Config.Loader do
   @spec register_bundled_extensions() :: :ok
   defp register_bundled_extensions do
     if Application.get_env(:minga, :load_git_porcelain_extension, true) do
-      path = Path.expand("../../../extensions/git_porcelain/lib", __DIR__)
-      ExtRegistry.register(:minga_git_porcelain, path, [])
+      ExtRegistry.register(:minga_git_porcelain, bundled_extension_path("git_porcelain"), [])
     end
 
     :ok
+  end
+
+  @spec bundled_extension_path(String.t()) :: String.t()
+  defp bundled_extension_path(name) do
+    priv_path = Application.app_dir(:minga, Path.join(["priv", "extensions", name, "lib"]))
+
+    if File.dir?(priv_path) do
+      priv_path
+    else
+      Path.expand("../../../extensions/#{name}/lib", __DIR__)
+    end
   end
 
   @spec with_config_source(atom(), (-> term())) :: term()

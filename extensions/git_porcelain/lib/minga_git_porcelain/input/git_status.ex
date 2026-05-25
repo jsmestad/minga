@@ -15,6 +15,7 @@ defmodule MingaGitPorcelain.Input.GitStatus do
   alias MingaEditor.Commands
   alias MingaEditor.State, as: EditorState
   alias Minga.Git
+  alias Minga.Log
   alias MingaEditor.Input
   alias MingaEditor.Layout
   alias MingaGitPorcelain.Shell.Traditional.GitStatus.TuiState
@@ -86,23 +87,26 @@ defmodule MingaGitPorcelain.Input.GitStatus do
 
   defp execute_command(state, :git_status_stage) do
     with_selected_file(state, fn entry, git_root ->
-      if entry.staged do
-        Git.unstage(git_root, entry.path)
-      else
-        Git.stage(git_root, entry.path)
-      end
+      result =
+        if entry.staged,
+          do: Git.unstage(git_root, entry.path),
+          else: Git.stage(git_root, entry.path)
 
-      refresh_repo(git_root)
-      msg = if entry.staged, do: "Unstaged #{entry.path}", else: "Staged #{entry.path}"
-      EditorState.set_status(state, msg)
+      success = if entry.staged, do: "Unstaged #{entry.path}", else: "Staged #{entry.path}"
+      failure = if entry.staged, do: "Unstage failed", else: "Stage failed"
+      handle_git_write_result(state, git_root, result, success, failure)
     end)
   end
 
   defp execute_command(state, :git_status_unstage) do
     with_selected_file(state, fn entry, git_root ->
-      Git.unstage(git_root, entry.path)
-      refresh_repo(git_root)
-      EditorState.set_status(state, "Unstaged #{entry.path}")
+      handle_git_write_result(
+        state,
+        git_root,
+        Git.unstage(git_root, entry.path),
+        "Unstaged #{entry.path}",
+        "Unstage failed"
+      )
     end)
   end
 
@@ -112,9 +116,13 @@ defmodule MingaGitPorcelain.Input.GitStatus do
         EditorState.set_status(state, "Not in a git repository")
 
       git_root ->
-        Git.stage(git_root, ".")
-        refresh_repo(git_root)
-        EditorState.set_status(state, "Staged all changes")
+        handle_git_write_result(
+          state,
+          git_root,
+          Git.stage(git_root, "."),
+          "Staged all changes",
+          "Stage all failed"
+        )
     end
   end
 
@@ -124,9 +132,13 @@ defmodule MingaGitPorcelain.Input.GitStatus do
         EditorState.set_status(state, "Not in a git repository")
 
       git_root ->
-        Git.unstage_all(git_root)
-        refresh_repo(git_root)
-        EditorState.set_status(state, "Unstaged all")
+        handle_git_write_result(
+          state,
+          git_root,
+          Git.unstage_all(git_root),
+          "Unstaged all",
+          "Unstage all failed"
+        )
     end
   end
 
@@ -269,7 +281,12 @@ defmodule MingaGitPorcelain.Input.GitStatus do
 
     case content_for_entry(git_root, abs_path, entry) do
       {:ok, current_content} ->
-        MingaGitPorcelain.Commands.open_diff_for_path(state, git_root, entry.path, abs_path, current_content,
+        MingaGitPorcelain.Commands.open_diff_for_path(
+          state,
+          git_root,
+          entry.path,
+          abs_path,
+          current_content,
           staged: entry.staged
         )
 
@@ -384,6 +401,30 @@ defmodule MingaGitPorcelain.Input.GitStatus do
           nil -> state
         end
     end
+  end
+
+  @spec handle_git_write_result(
+          EditorState.t(),
+          String.t(),
+          :ok | {:error, term()},
+          String.t(),
+          String.t()
+        ) :: EditorState.t()
+  defp handle_git_write_result(state, git_root, :ok, success_message, _failure_prefix) do
+    refresh_repo(git_root)
+    EditorState.set_status(state, success_message)
+  end
+
+  defp handle_git_write_result(
+         state,
+         _git_root,
+         {:error, reason},
+         _success_message,
+         failure_prefix
+       ) do
+    message = "#{failure_prefix}: #{inspect(reason)}"
+    Log.warning(:editor, message)
+    EditorState.set_status(state, message)
   end
 
   @spec refresh_repo(String.t()) :: :ok

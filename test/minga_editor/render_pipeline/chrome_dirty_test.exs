@@ -101,7 +101,14 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
       input = Input.from_editor_state(state)
       fp1 = Input.chrome_fingerprint(input)
 
-      shell_state = ShellState.set_git_status_tui_state(state.shell_state, %{cursor_index: 1})
+      shell_state =
+        ShellState.set_git_status_panel(state.shell_state, %{
+          repo_state: :normal,
+          branch: "main",
+          ahead: 0,
+          behind: 0,
+          entries: []
+        })
 
       input2 = Input.from_editor_state(%{state | shell_state: shell_state})
       fp2 = Input.chrome_fingerprint(input2)
