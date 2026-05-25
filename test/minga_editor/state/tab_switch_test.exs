@@ -333,7 +333,7 @@ defmodule MingaEditor.State.TabSwitchTest do
                pending_target
     end
 
-    test "tab switch restores target highlight and snapshots outgoing highlight" do
+    test "tab switch restores explicit target highlight without snapshotting outgoing highlight" do
       {state, buf1, buf2} = state_with_two_file_tabs()
       tb = state.shell_state.tab_bar
       current_id = tb.active_id
@@ -368,18 +368,15 @@ defmodule MingaEditor.State.TabSwitchTest do
 
       assert switched.workspace.highlight == target_highlight
 
-      assert TabBar.get(switched.shell_state.tab_bar, current_id).context.highlight ==
-               current_highlight
+      assert TabBar.get(switched.shell_state.tab_bar, current_id).context.highlight == nil
 
       {switched_back, _effects} = EditorState.switch_tab_pure(switched, current_id)
 
-      assert switched_back.workspace.highlight == current_highlight
-
-      assert TabBar.get(switched_back.shell_state.tab_bar, target_id).context.highlight ==
-               target_highlight
+      assert switched_back.workspace.highlight == target_highlight
+      assert TabBar.get(switched_back.shell_state.tab_bar, target_id).context.highlight == nil
     end
 
-    test "tab switch restores target injection_ranges and snapshots outgoing ranges" do
+    test "tab switch restores explicit target injection_ranges without snapshotting outgoing ranges" do
       {state, buf1, buf2} = state_with_two_file_tabs()
       tb = state.shell_state.tab_bar
       current_id = tb.active_id
@@ -397,15 +394,14 @@ defmodule MingaEditor.State.TabSwitchTest do
 
       assert switched.workspace.injection_ranges == target_ranges
 
-      assert TabBar.get(switched.shell_state.tab_bar, current_id).context.injection_ranges ==
-               current_ranges
+      assert TabBar.get(switched.shell_state.tab_bar, current_id).context.injection_ranges == nil
 
       {switched_back, _effects} = EditorState.switch_tab_pure(switched, current_id)
 
-      assert switched_back.workspace.injection_ranges == current_ranges
+      assert switched_back.workspace.injection_ranges == target_ranges
 
       assert TabBar.get(switched_back.shell_state.tab_bar, target_id).context.injection_ranges ==
-               target_ranges
+               nil
     end
   end
 end
