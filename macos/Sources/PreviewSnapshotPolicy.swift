@@ -3,13 +3,13 @@ import Foundation
 
 /// Shared policy for preview screenshots and snapshot-fixture layout.
 enum PreviewSnapshotPolicy {
-    private static let fullShellViews: Set<String> = ["EditorChromeView", "AgentChromeView", "DiagnosticsEditorView"]
-    private static let renderedWindowViews: Set<String> = ["EditorChromeView", "AgentChromeView", "DiagnosticsEditorView", "GitStatusView", "FileTreeView", "FileTreeEmpty", "FileTreeError", "FileTreeDeep", "GitStatusClean", "GitStatusConflict", "GitStatusDense"]
+    private static let fullShellViews: Set<String> = ["EditorChromeView", "AgentChromeView", "DiagnosticsEditorView", "InsertModeEditorView", "HoverEditorView", "SignatureHelpEditorView"]
+    private static let renderedWindowViews: Set<String> = ["EditorChromeView", "AgentChromeView", "DiagnosticsEditorView", "InsertModeEditorView", "HoverEditorView", "SignatureHelpEditorView", "GitStatusView", "FileTreeView", "FileTreeEmpty", "FileTreeError", "FileTreeDeep", "GitStatusClean", "GitStatusConflict", "GitStatusDense"]
     private static let eagerLayoutViews: Set<String> = ["GitStatusView", "FileTreeView", "FileTreeEmpty", "FileTreeError", "FileTreeDeep", "GitStatusClean", "GitStatusConflict", "GitStatusDense"]
 
     static func size(named name: String) -> CGSize {
         switch name {
-        case "EditorChromeView", "AgentChromeView": CGSize(width: 1200, height: 704)
+        case "EditorChromeView", "AgentChromeView", "InsertModeEditorView", "HoverEditorView", "SignatureHelpEditorView": CGSize(width: 1200, height: 704)
         case "GitStatusView", "FileTreeView",
              "FileTreeEmpty", "FileTreeError", "FileTreeDeep",
              "GitStatusClean", "GitStatusConflict", "GitStatusDense": CGSize(width: 280, height: 600)

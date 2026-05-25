@@ -89,6 +89,12 @@ enum PreviewRegistry {
             diagnosticsEditorPreview()
         case "TabBarOverflow":
             tabBarOverflowPreview()
+        case "InsertModeEditorView":
+            insertModeEditorPreview()
+        case "HoverEditorView":
+            hoverEditorPreview()
+        case "SignatureHelpEditorView":
+            signatureHelpEditorPreview()
         default:
             Text("Unknown view: \(name)")
                 .font(.title)
@@ -105,6 +111,70 @@ enum PreviewRegistry {
 
     private static func agentChromePreview() -> some View {
         previewChromeView(agentVisible: true, failureMessage: "AgentChromeView could not initialize the production editor renderer.")
+    }
+
+    // MARK: - InsertModeEditorView
+
+    @ViewBuilder
+    private static func insertModeEditorPreview() -> some View {
+        let size = PreviewSnapshotPolicy.size(named: "InsertModeEditorView")
+        if let appState = productionPreviewAppState(agentVisible: false, mode: .insert) {
+            ContentView(appState: appState)
+                .frame(width: size.width, height: size.height)
+        } else {
+            previewFailureView(message: "InsertModeEditorView could not initialize the production editor renderer.")
+                .frame(width: size.width, height: size.height)
+        }
+    }
+
+    // MARK: - HoverEditorView
+
+    @ViewBuilder
+    private static func hoverEditorPreview() -> some View {
+        let size = PreviewSnapshotPolicy.size(named: "HoverEditorView")
+        if let appState = hoverEditorAppState() {
+            ContentView(appState: appState)
+                .frame(width: size.width, height: size.height)
+        } else {
+            previewFailureView(message: "HoverEditorView could not initialize the production editor renderer.")
+                .frame(width: size.width, height: size.height)
+        }
+    }
+
+    private static func hoverEditorAppState() -> AppState? {
+        guard let appState = productionPreviewAppState(agentVisible: false) else { return nil }
+        appState.gui.completionState.hide()
+        appState.gui.hoverPopupState.update(
+            visible: true, anchorRow: 4, anchorCol: 10,
+            focused: false, scrollOffset: 0,
+            rawLines: previewHoverLines()
+        )
+        return appState
+    }
+
+    // MARK: - SignatureHelpEditorView
+
+    @ViewBuilder
+    private static func signatureHelpEditorPreview() -> some View {
+        let size = PreviewSnapshotPolicy.size(named: "SignatureHelpEditorView")
+        if let appState = signatureHelpEditorAppState() {
+            ContentView(appState: appState)
+                .frame(width: size.width, height: size.height)
+        } else {
+            previewFailureView(message: "SignatureHelpEditorView could not initialize the production editor renderer.")
+                .frame(width: size.width, height: size.height)
+        }
+    }
+
+    private static func signatureHelpEditorAppState() -> AppState? {
+        guard let appState = productionPreviewAppState(agentVisible: false) else { return nil }
+        appState.gui.completionState.hide()
+        appState.gui.signatureHelpState.update(
+            visible: true, anchorRow: 5, anchorCol: 10,
+            activeSignature: 0, activeParameter: 1,
+            rawSignatures: previewSignatures()
+        )
+        return appState
     }
 
     @ViewBuilder
@@ -140,7 +210,13 @@ enum PreviewRegistry {
         }
     }
 
-    private static func productionPreviewAppState(agentVisible: Bool) -> AppState? {
+    /// Vim mode used for preview fixture state.
+    private enum PreviewMode {
+        case normal
+        case insert
+    }
+
+    private static func productionPreviewAppState(agentVisible: Bool, mode: PreviewMode = .normal) -> AppState? {
         let appState = AppState()
         appState.windowTitle = "Minga"
         appState.windowBgIsDark = true
@@ -156,7 +232,7 @@ enum PreviewRegistry {
         appState.gui.gitStatusState.hide()
         populateTabBar(appState.gui.tabBarState)
         appState.gui.breadcrumbState.update(segments: ["lib", "minga", "editor.ex"])
-        appState.gui.statusBarState.update(from: previewStatusBarUpdate(agentVisible: agentVisible))
+        appState.gui.statusBarState.update(from: previewStatusBarUpdate(agentVisible: agentVisible, mode: mode))
 
         if agentVisible {
             populateAgentChat(appState.gui.agentChatState)
@@ -336,9 +412,10 @@ enum PreviewRegistry {
         )
     }
 
-    private static func previewStatusBarUpdate(agentVisible: Bool) -> StatusBarUpdate {
-        StatusBarUpdate(
-            contentKind: 0, mode: 0, cursorLine: 42, cursorCol: 9,
+    private static func previewStatusBarUpdate(agentVisible: Bool, mode: PreviewMode = .normal) -> StatusBarUpdate {
+        let modeValue: UInt8 = mode == .insert ? 1 : 0
+        return StatusBarUpdate(
+            contentKind: 0, mode: modeValue, cursorLine: 42, cursorCol: 9,
             lineCount: 1250, flags: 0x02, lspStatus: 1, gitBranch: "main",
             message: "", filetype: "elixir", errorCount: 0, warningCount: 2,
             modelName: agentVisible ? "claude-sonnet-4" : "", messageCount: agentVisible ? 6 : 0, sessionStatus: agentVisible ? 2 : 0,
@@ -347,14 +424,21 @@ enum PreviewRegistry {
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0x88, iconColorG: 0x57, iconColorB: 0xA6, filename: "editor.ex", diagnosticHint: "",
             backgroundSubagentCount: 0, backgroundSubagentLabel: "",
-            modelineLeftSegments: previewStatusLeftSegments(),
+            modelineLeftSegments: previewStatusLeftSegments(mode: mode),
             modelineRightSegments: previewStatusRightSegments()
         )
     }
 
-    private static func previewStatusLeftSegments() -> [Wire.StatusBarSegment] {
-        [
-            Wire.StatusBarSegment(id: 0, kind: "mode", text: " NORMAL ", fgColor: 0x000000, bgColor: 0x7AA2F7, attrs: 1, command: ""),
+    private static func previewStatusLeftSegments(mode: PreviewMode = .normal) -> [Wire.StatusBarSegment] {
+        let modeSegment: Wire.StatusBarSegment
+        switch mode {
+        case .normal:
+            modeSegment = Wire.StatusBarSegment(id: 0, kind: "mode", text: " NORMAL ", fgColor: 0x000000, bgColor: 0x7AA2F7, attrs: 1, command: "")
+        case .insert:
+            modeSegment = Wire.StatusBarSegment(id: 0, kind: "mode", text: " INSERT ", fgColor: 0x000000, bgColor: 0x9ECE6A, attrs: 1, command: "")
+        }
+        return [
+            modeSegment,
             Wire.StatusBarSegment(id: 1, kind: "git", text: " main ", fgColor: 0xBB9AF7, bgColor: 0x000000, attrs: 0, command: "git_branch_picker"),
             Wire.StatusBarSegment(id: 2, kind: "filename", text: " editor.ex [+] ", fgColor: 0xC0CAF5, bgColor: 0x000000, attrs: 0, command: "buffer_list"),
         ]
@@ -1559,6 +1643,46 @@ enum PreviewRegistry {
         return DispatchSheetView(state: state, theme: theme, encoder: nil)
             .frame(width: 600, height: 500)
             .background(theme.editorBg.opacity(0.5))
+    }
+
+    // MARK: - Hover / Signature Help data
+
+    private static func previewHoverLines() -> [Wire.HoverLine] {
+        [
+            Wire.HoverLine(lineType: .codeHeader, segments: [
+                Wire.HoverSegment(style: .code, fgColor: 0x5C6370, flags: 0, text: "elixir"),
+            ]),
+            Wire.HoverLine(lineType: .code, segments: [
+                Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0xC678DD, flags: 0, text: "@spec "),
+                Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0x98BE65, flags: 0, text: "open"),
+                Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0xBBC2CF, flags: 0, text: "("),
+                Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0xECBE7B, flags: 0, text: "String.t()"),
+                Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0xBBC2CF, flags: 0, text: ") :: "),
+                Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0xECBE7B, flags: 0, text: "{:ok, Buffer.t()}"),
+            ]),
+            Wire.HoverLine(lineType: .empty, segments: []),
+            Wire.HoverLine(lineType: .text, segments: [
+                Wire.HoverSegment(style: .plain, fgColor: nil, flags: 0, text: "Opens a file at the given path and returns the buffer."),
+            ]),
+            Wire.HoverLine(lineType: .text, segments: [
+                Wire.HoverSegment(style: .plain, fgColor: nil, flags: 0, text: "Returns "),
+                Wire.HoverSegment(style: .code, fgColor: nil, flags: 0, text: "{:ok, buffer}"),
+                Wire.HoverSegment(style: .plain, fgColor: nil, flags: 0, text: " on success."),
+            ]),
+        ]
+    }
+
+    private static func previewSignatures() -> [Wire.Signature] {
+        [
+            Wire.Signature(
+                label: "Buffer.open(path, opts \\\\ [])",
+                documentation: "Opens a file buffer at the given path with optional configuration.",
+                parameters: [
+                    Wire.SignatureParameter(label: "path", documentation: "Absolute or relative file path to open."),
+                    Wire.SignatureParameter(label: "opts", documentation: "Keyword list of options: :encoding, :line_ending."),
+                ]
+            ),
+        ]
     }
 
     // MARK: - Helpers
