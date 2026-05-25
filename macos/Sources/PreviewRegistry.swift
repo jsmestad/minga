@@ -47,6 +47,22 @@ enum PreviewRegistry {
             observatoryPreview()
         case "AgentChatView":
             agentChatPreview()
+        case "AgentChatStreaming":
+            agentChatStreamingPreview()
+        case "AgentChatApproval":
+            agentChatApprovalPreview()
+        case "AgentChatError":
+            agentChatErrorPreview()
+        case "AgentChatCompletion":
+            agentChatCompletionPreview()
+        case "AgentChatSummary":
+            agentChatSummaryPreview()
+        case "BoardView":
+            boardPreview()
+        case "ChangeSummaryView":
+            changeSummaryPreview()
+        case "DispatchSheetView":
+            dispatchSheetPreview()
         case "PickerOverlay":
             pickerPreview()
         case "MinibufferView":
@@ -1128,6 +1144,229 @@ enum PreviewRegistry {
             .background(theme.editorBg)
     }
 
+    // MARK: - AgentChatStreaming
+
+    private static func agentChatStreamingPreview() -> some View {
+        let state = AgentChatState()
+        let theme = populatedTheme()
+        state.update(
+            visible: true,
+            status: 1,
+            model: "anthropic:claude-sonnet-4",
+            thinkingLevel: "medium",
+            prompt: "",
+            promptLineCount: 1,
+            promptCursorLine: 0,
+            promptCursorCol: 0,
+            promptVimMode: 0,
+            promptVisibleRows: 1,
+            promptCompletion: nil,
+            helpVisible: false,
+            helpGroups: [],
+            rawMessages: [
+                Wire.ChatMessage(beamId: 1, content: .user(text: "Refactor the buffer module to separate read and write concerns into distinct GenServer processes.")),
+                Wire.ChatMessage(beamId: 2, content: .thinking(text: "The buffer module currently mixes read-only queries (content, line count, syntax tree) with mutation operations (insert, delete, undo/redo). Splitting these would let readers proceed without blocking on writes, improving latency for completions and diagnostics that only need a snapshot.", collapsed: false)),
+                Wire.ChatMessage(beamId: 3, content: .toolCall(name: "read", summary: "lib/minga/buffer/process.ex", status: 0, isError: false, collapsed: true, autoApprovedScope: 1, durationMs: 0, result: "")),
+            ]
+        )
+
+        return AgentChatView(state: state, theme: theme, isInsertMode: false, encoder: nil, cellHeight: 18)
+            .frame(width: 760, height: 600)
+            .background(theme.agentPanelBg)
+    }
+
+    // MARK: - AgentChatApproval
+
+    private static func agentChatApprovalPreview() -> some View {
+        let state = AgentChatState()
+        let theme = populatedTheme()
+        state.update(
+            visible: true,
+            status: 2,
+            model: "anthropic:claude-sonnet-4",
+            thinkingLevel: "medium",
+            prompt: "",
+            promptLineCount: 1,
+            promptCursorLine: 0,
+            promptCursorCol: 0,
+            promptVimMode: 0,
+            promptVisibleRows: 1,
+            promptCompletion: nil,
+            helpVisible: false,
+            helpGroups: [],
+            rawMessages: [
+                Wire.ChatMessage(beamId: 1, content: .user(text: "Run the full test suite and fix any failures.")),
+                Wire.ChatMessage(beamId: 2, content: .thinking(text: "I'll run the tests first to identify failures before making changes.", collapsed: true)),
+                Wire.ChatMessage(beamId: 3, content: .toolCall(name: "read", summary: "mix.exs", status: 1, isError: false, collapsed: true, autoApprovedScope: 1, durationMs: 62, result: "Read 48 lines")),
+                Wire.ChatMessage(beamId: 4, content: .approvalToolCall(name: "shell", summary: "mix test --trace", toolCallId: "tc-approve-1", previewKind: 2, previewLines: ["mix test --trace", "", "Runs the full test suite with verbose output.", "This command may take several minutes."])),
+            ]
+        )
+
+        return AgentChatView(state: state, theme: theme, isInsertMode: false, encoder: nil, cellHeight: 18)
+            .frame(width: 760, height: 600)
+            .background(theme.agentPanelBg)
+    }
+
+    // MARK: - AgentChatError
+
+    private static func agentChatErrorPreview() -> some View {
+        let state = AgentChatState()
+        let theme = populatedTheme()
+        state.update(
+            visible: true,
+            status: 3,
+            model: "anthropic:claude-sonnet-4",
+            thinkingLevel: "medium",
+            prompt: "",
+            promptLineCount: 1,
+            promptCursorLine: 0,
+            promptCursorCol: 0,
+            promptVimMode: 0,
+            promptVisibleRows: 1,
+            promptCompletion: nil,
+            helpVisible: false,
+            helpGroups: [],
+            rawMessages: [
+                Wire.ChatMessage(beamId: 1, content: .user(text: "Deploy the staging environment.")),
+                Wire.ChatMessage(beamId: 2, content: .thinking(text: "I'll check the deployment configuration and run the staging deploy script.", collapsed: true)),
+                Wire.ChatMessage(beamId: 3, content: .toolCall(name: "shell", summary: "mix release --env=staging", status: 1, isError: false, collapsed: true, autoApprovedScope: 2, durationMs: 4200, result: "Release built successfully")),
+                Wire.ChatMessage(beamId: 4, content: .toolCall(name: "shell", summary: "scripts/deploy.sh staging", status: 2, isError: true, collapsed: false, autoApprovedScope: 2, durationMs: 12400, result: "Error: SSH connection to staging-01.internal timed out after 30s\nexit code: 1")),
+                Wire.ChatMessage(beamId: 5, content: .system(text: "Tool execution failed. The deploy script could not reach the staging host.", isError: true)),
+                Wire.ChatMessage(beamId: 6, content: .assistant(text: "The deploy failed because the staging host is unreachable. Check that the VPN is connected and that staging-01.internal is responding to SSH on port 22.")),
+            ]
+        )
+
+        return AgentChatView(state: state, theme: theme, isInsertMode: false, encoder: nil, cellHeight: 18)
+            .frame(width: 760, height: 600)
+            .background(theme.agentPanelBg)
+    }
+
+    // MARK: - AgentChatCompletion
+
+    private static func agentChatCompletionPreview() -> some View {
+        let state = AgentChatState()
+        let theme = populatedTheme()
+        state.update(
+            visible: true,
+            status: 0,
+            model: "anthropic:claude-sonnet-4",
+            thinkingLevel: "medium",
+            prompt: "/",
+            promptLineCount: 1,
+            promptCursorLine: 0,
+            promptCursorCol: 1,
+            promptVimMode: 1,
+            promptVisibleRows: 1,
+            promptCompletion: Wire.PromptCompletion(
+                type: 1,
+                selected: 1,
+                anchorLine: 0,
+                anchorCol: 0,
+                candidates: [
+                    (name: "/clear", description: "Clear conversation history"),
+                    (name: "/compact", description: "Summarize and compact context"),
+                    (name: "/cost", description: "Show session cost breakdown"),
+                    (name: "/help", description: "Show available commands"),
+                    (name: "/model", description: "Switch the active model"),
+                    (name: "/thinking", description: "Set thinking level"),
+                ]
+            ),
+            helpVisible: false,
+            helpGroups: [],
+            rawMessages: [
+                Wire.ChatMessage(beamId: 1, content: .system(text: "Agent session started.", isError: false)),
+            ]
+        )
+
+        return AgentChatView(state: state, theme: theme, isInsertMode: true, encoder: nil, cellHeight: 18)
+            .frame(width: 760, height: 600)
+            .background(theme.agentPanelBg)
+    }
+
+    // MARK: - AgentChatSummary
+
+    private static func agentChatSummaryPreview() -> some View {
+        let state = AgentChatState()
+        let theme = populatedTheme()
+        state.update(
+            visible: true,
+            status: 0,
+            model: "anthropic:claude-sonnet-4",
+            thinkingLevel: "medium",
+            prompt: "",
+            promptLineCount: 1,
+            promptCursorLine: 0,
+            promptCursorCol: 0,
+            promptVimMode: 0,
+            promptVisibleRows: 1,
+            promptCompletion: nil,
+            helpVisible: false,
+            helpGroups: [],
+            rawMessages: [
+                Wire.ChatMessage(beamId: 1, content: .user(text: "Add input validation to the user registration form.")),
+                Wire.ChatMessage(beamId: 2, content: .thinking(text: "I need to add validation for email format, password strength, and required fields.", collapsed: true)),
+                Wire.ChatMessage(beamId: 3, content: .toolCall(name: "read", summary: "lib/minga/accounts/registration.ex", status: 1, isError: false, collapsed: true, autoApprovedScope: 1, durationMs: 95, result: "Read 82 lines")),
+                Wire.ChatMessage(beamId: 4, content: .toolCall(name: "edit", summary: "Add changeset validations", status: 1, isError: false, collapsed: true, autoApprovedScope: 1, durationMs: 210, result: "Applied 3 edits")),
+                Wire.ChatMessage(beamId: 5, content: .toolCall(name: "edit", summary: "Add error message helpers", status: 1, isError: false, collapsed: true, autoApprovedScope: 1, durationMs: 145, result: "Applied 1 edit")),
+                Wire.ChatMessage(beamId: 6, content: .toolCall(name: "shell", summary: "mix test test/minga/accounts/registration_test.exs", status: 1, isError: false, collapsed: true, autoApprovedScope: 2, durationMs: 3400, result: "8 tests, 0 failures")),
+                Wire.ChatMessage(beamId: 7, content: .assistant(text: "I added input validation to the registration changeset: email format check via a regex, password minimum length of 8 characters with at least one digit, and validate_required on name, email, and password. All 8 tests pass.")),
+                Wire.ChatMessage(beamId: 8, content: .usage(input: 96_000, output: 2_150, cacheRead: 48_000, cacheWrite: 960, costMicros: 287_000)),
+            ]
+        )
+
+        return AgentChatView(state: state, theme: theme, isInsertMode: false, encoder: nil, cellHeight: 18)
+            .frame(width: 760, height: 600)
+            .background(theme.agentPanelBg)
+    }
+
+    // MARK: - BoardView
+
+    private static func boardPreview() -> some View {
+        BoardPreviewWrapper()
+    }
+
+    // MARK: - ChangeSummaryView
+
+    private static func changeSummaryPreview() -> some View {
+        let state = ChangeSummaryState()
+        let theme = populatedTheme()
+        state.update(
+            visible: true,
+            entries: [
+                ChangeSummaryEntry(id: 1, path: "lib/minga/accounts/registration.ex", action: .modified, linesAdded: 24, linesRemoved: 3),
+                ChangeSummaryEntry(id: 2, path: "lib/minga/accounts/validation.ex", action: .added, linesAdded: 48, linesRemoved: 0),
+                ChangeSummaryEntry(id: 3, path: "test/minga/accounts/registration_test.exs", action: .modified, linesAdded: 36, linesRemoved: 2),
+                ChangeSummaryEntry(id: 4, path: "lib/minga/accounts/old_validator.ex", action: .deleted, linesAdded: 0, linesRemoved: 31),
+                ChangeSummaryEntry(id: 5, path: "lib/minga/accounts/user.ex", action: .modified, linesAdded: 5, linesRemoved: 1),
+            ],
+            selectedIndex: 0
+        )
+
+        return ChangeSummaryView(state: state, theme: theme, encoder: nil)
+            .frame(width: 280, height: 400)
+            .background(theme.treeBg)
+    }
+
+    // MARK: - DispatchSheetView
+
+    private static func dispatchSheetPreview() -> some View {
+        let state = DispatchSheetState()
+        let theme = populatedTheme()
+        state.update(
+            visible: true,
+            models: [
+                (name: "claude-sonnet-4", hint: "Fast, balanced"),
+                (name: "claude-opus-4", hint: "Deep reasoning"),
+                (name: "gpt-4o", hint: "OpenAI flagship"),
+            ]
+        )
+        state.taskText = "Refactor the buffer module to separate read and write concerns"
+
+        return DispatchSheetView(state: state, theme: theme, encoder: nil)
+            .frame(width: 600, height: 500)
+            .background(theme.editorBg.opacity(0.5))
+    }
+
     // MARK: - Helpers
 
     /// ThemeColors() already initializes with Doom One defaults, which look representative for preview screenshots without any BEAM theme push.
@@ -1174,5 +1413,42 @@ enum PreviewRegistry {
             editingType: 255,
             editingText: ""
         )
+    }
+}
+
+// MARK: - Board preview wrapper (requires @Namespace for matchedGeometryEffect)
+
+/// Wraps BoardView in a struct that owns a @Namespace for the zoom animation.
+/// BoardView requires a Namespace.ID for matchedGeometryEffect, which can only
+/// be created via the @Namespace property wrapper on a View struct.
+private struct BoardPreviewWrapper: View {
+    @Namespace private var ns
+
+    private static func boardState() -> BoardState {
+        let state = BoardState()
+        let now = UInt32(Date().timeIntervalSince1970)
+        state.update(
+            visible: true,
+            focusedCardId: 2,
+            cards: [
+                BoardCard(id: 1, status: .working, isYouCard: true, isFocused: false, task: "Refactor buffer read/write separation", model: "claude-sonnet-4", dispatchTimestamp: now - 180, recentFiles: ["lib/minga/buffer/process.ex", "lib/minga/buffer/reader.ex"], sparkline: [0.2, 0.4, 0.6, 0.5, 0.7, 0.8]),
+                BoardCard(id: 2, status: .needsYou, isYouCard: false, isFocused: true, task: "Add validation to registration form", model: "claude-sonnet-4", dispatchTimestamp: now - 420, recentFiles: ["lib/minga/accounts/registration.ex"], sparkline: [0.3, 0.5, 0.4, 0.6, 0.3, 0.2]),
+                BoardCard(id: 3, status: .done, isYouCard: false, isFocused: false, task: "Fix notification theme colors", model: "claude-sonnet-4", dispatchTimestamp: now - 900, recentFiles: ["macos/Sources/Views/NotificationCenterView.swift"], sparkline: [0.5, 0.7, 0.6, 0.4, 0.2, 0.1]),
+                BoardCard(id: 4, status: .errored, isYouCard: false, isFocused: false, task: "Deploy staging environment", model: "claude-opus-4", dispatchTimestamp: now - 600, recentFiles: ["scripts/deploy.sh"], sparkline: [0.1, 0.3, 0.8, 0.9, 1.0, 0.0]),
+            ],
+            filterMode: false,
+            filterText: ""
+        )
+        return state
+    }
+
+    var body: some View {
+        let state = Self.boardState()
+        let dispatchSheet = DispatchSheetState()
+        let theme = ThemeColors()
+
+        BoardView(state: state, dispatchSheet: dispatchSheet, theme: theme, encoder: nil, namespace: ns)
+            .frame(width: 900, height: 600)
+            .background(theme.editorBg)
     }
 }
