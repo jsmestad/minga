@@ -16,7 +16,6 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
   alias Minga.Project.FileTree
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.Handlers.FileEventHandler
-  alias MingaEditor.Shell.Traditional.GitStatus.TuiState
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
@@ -90,41 +89,6 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       panel = EditorState.git_status_panel(new_state)
       refute Map.has_key?(panel, :tui_state)
       assert ShellState.git_status_tui_state(new_state.shell_state) == nil
-    end
-
-    test "refreshes existing tui state through the shell state boundary" do
-      entries = [%StatusEntry{path: "old.ex", status: :modified, staged: false}]
-
-      state =
-        base_state()
-        |> EditorState.set_git_status_panel(%{
-          repo_state: :normal,
-          branch: "main",
-          ahead: 0,
-          behind: 0,
-          entries: entries
-        })
-        |> EditorState.update_shell_state(
-          &ShellState.set_git_status_tui_state(&1, %{TuiState.new() | cursor_index: 99})
-        )
-
-      refreshed_entries = [%StatusEntry{path: "new.ex", status: :modified, staged: false}]
-
-      event =
-        {:minga_event, :git_status_changed,
-         %Minga.Events.GitStatusEvent{
-           git_root: "/tmp/repo",
-           entries: refreshed_entries,
-           branch: "develop",
-           ahead: 1,
-           behind: 0
-         }}
-
-      {new_state, _effects} = FileEventHandler.handle(state, event)
-
-      assert EditorState.git_status_panel(new_state).entries == refreshed_entries
-      assert %TuiState{cursor_index: 1} = ShellState.git_status_tui_state(new_state.shell_state)
-      refute Map.has_key?(EditorState.git_status_panel(new_state), :tui_state)
     end
 
     test "without git panel or file tree open is a no-op" do

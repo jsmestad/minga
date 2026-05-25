@@ -27,6 +27,7 @@ erl_crash.dump
 /priv/minga-parser
 /priv/minga-hook-runner
 /priv/minga-test-harness
+/priv/extensions
 /burrito_out/
 
 # Editor / OS

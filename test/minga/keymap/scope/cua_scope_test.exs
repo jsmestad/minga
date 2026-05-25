@@ -93,42 +93,6 @@ defmodule Minga.Keymap.Scope.CUAScopeTest do
     end
   end
 
-  # ── Git status scope ───────────────────────────────────────────────────────
-
-  describe "git_status scope with :cua" do
-    test "arrow up/down navigate entries" do
-      assert {:command, :move_up} = Scope.resolve_key(:git_status, :cua, {@arrow_up, 0})
-      assert {:command, :move_down} = Scope.resolve_key(:git_status, :cua, {@arrow_down, 0})
-    end
-
-    test "Enter opens file" do
-      assert {:command, :git_status_open_file} = Scope.resolve_key(:git_status, :cua, {@enter, 0})
-    end
-
-    test "Escape closes panel" do
-      assert {:command, :git_status_close} = Scope.resolve_key(:git_status, :cua, {@escape, 0})
-    end
-
-    test "s stages file (domain key shared with vim)" do
-      assert {:command, :git_status_stage} = Scope.resolve_key(:git_status, :cua, {?s, 0})
-    end
-
-    test "Cmd+C starts commit (GUI)" do
-      assert {:command, :git_status_start_commit} =
-               Scope.resolve_key(:git_status, :cua, {?c, @cmd})
-    end
-
-    test "Ctrl+C starts commit (TUI fallback)" do
-      # Bug 4 regression: Ctrl fallback for git commit
-      assert {:command, :git_status_start_commit} =
-               Scope.resolve_key(:git_status, :cua, {?c, @ctrl})
-    end
-
-    test "Ctrl+S falls through to global save handler" do
-      assert :not_found = Scope.resolve_key(:git_status, :cua, {?s, @ctrl})
-    end
-  end
-
   # ── Editor scope ───────────────────────────────────────────────────────────
 
   describe "editor scope with :cua" do

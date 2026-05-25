@@ -130,6 +130,27 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert EditorState.sidebar_active_id(closed) == nil
   end
 
+  test "git porcelain GUI actions report disabled extension instead of no-op" do
+    state = TestHelpers.base_state()
+
+    toggled = GuiActionHandler.dispatch(state, {:toggle_panel, 2})
+
+    assert EditorState.status_msg(toggled) ==
+             "Git porcelain extension is disabled or failed to load"
+
+    assert toggled.workspace.keymap_scope == state.workspace.keymap_scope
+    assert EditorState.sidebar_active_id(toggled) == EditorState.sidebar_active_id(state)
+
+    activated =
+      GuiActionHandler.dispatch(state, {:sidebar_action, "git_status", "git_status", "activate"})
+
+    assert EditorState.status_msg(activated) ==
+             "Git porcelain extension is disabled or failed to load"
+
+    assert activated.workspace.keymap_scope == state.workspace.keymap_scope
+    assert EditorState.sidebar_active_id(activated) == nil
+  end
+
   test "native GUI sidebar actions route to extension-owned sidebars" do
     assert :ok =
              Sidebar.register({:extension, :gui_action_test}, %{

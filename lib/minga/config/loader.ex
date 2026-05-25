@@ -331,8 +331,10 @@ defmodule Minga.Config.Loader do
       # 7. Apply log level from config
       apply_log_level(options_server)
 
-      # 8. Start extensions only after all config sources have had a chance
+      # 8. Register bundled extensions, then start extensions only after all config sources have had a chance
       # to declare them.
+      register_bundled_extensions()
+
       start_all_error =
         if Process.whereis(Minga.Extension.Supervisor) != nil &&
              Application.get_env(:minga, :load_extensions, true) do
@@ -361,6 +363,26 @@ defmodule Minga.Config.Loader do
       restore_pdict(:minga_config_keymap, previous_keymap_server)
       restore_pdict(:minga_config_options, previous_options_server)
       restore_pdict(:minga_config_lsp_settings, previous_lsp_settings)
+    end
+  end
+
+  @spec register_bundled_extensions() :: :ok
+  defp register_bundled_extensions do
+    if Application.get_env(:minga, :load_git_porcelain_extension, true) do
+      ExtRegistry.register(:minga_git_porcelain, bundled_extension_path("git_porcelain"), [])
+    end
+
+    :ok
+  end
+
+  @spec bundled_extension_path(String.t()) :: String.t()
+  defp bundled_extension_path(name) do
+    priv_path = Application.app_dir(:minga, Path.join(["priv", "extensions", name, "lib"]))
+
+    if File.dir?(priv_path) do
+      priv_path
+    else
+      Path.expand("../../../extensions/#{name}/lib", __DIR__)
     end
   end
 

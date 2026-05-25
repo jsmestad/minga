@@ -24,7 +24,6 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
   alias MingaEditor.StatusBar.Data, as: StatusBarData
   alias MingaEditor.Shell.Traditional.Chrome.Helpers, as: ChromeHelpers
   alias MingaEditor.Shell.Traditional.Modeline
-  alias MingaEditor.Shell.Traditional.GitStatusRenderer
   alias MingaEditor.Shell.Traditional.SidebarRenderer
   alias MingaEditor.Shell.Traditional.TreeRenderer
   alias MingaEditor.Session.ChromeState
@@ -151,10 +150,40 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
 
   @spec legacy_sidebar_draws(state(), Layout.t()) :: [DisplayList.draw()]
   defp legacy_sidebar_draws(%{workspace: %{keymap_scope: :git_status}} = state, layout) do
-    GitStatusRenderer.render(state, layout.file_tree)
+    render_git_status_sidebar(state, layout.file_tree)
   end
 
   defp legacy_sidebar_draws(state, _layout), do: TreeRenderer.render(state)
+
+  @spec render_git_status_sidebar(state(), Layout.rect() | nil) :: [DisplayList.draw()]
+  defp render_git_status_sidebar(state, rect) do
+    module = :"Elixir.MingaGitPorcelain.Shell.Traditional.GitStatusRenderer"
+
+    if git_porcelain_running?() and Code.ensure_loaded?(module) and
+         function_exported?(module, :render, 2) do
+      :erlang.apply(module, :render, [state, rect])
+    else
+      []
+    end
+  end
+
+  @spec git_porcelain_running?() :: boolean()
+  defp git_porcelain_running? do
+    case Process.whereis(Minga.Extension.Registry) do
+      nil -> false
+      _pid -> git_porcelain_running_in_registry?()
+    end
+  catch
+    :exit, _reason -> false
+  end
+
+  @spec git_porcelain_running_in_registry?() :: boolean()
+  defp git_porcelain_running_in_registry? do
+    case Minga.Extension.Registry.get(:minga_git_porcelain) do
+      {:ok, %{status: :running}} -> true
+      _ -> false
+    end
+  end
 
   @spec stable_chrome_fingerprint(state(), Layout.t(), StatusBarData.t()) :: integer()
   defp stable_chrome_fingerprint(state, layout, status_bar_data) do

@@ -39,7 +39,6 @@ defmodule Minga.Command.Registry do
     MingaEditor.Commands.Diagnostics,
     MingaEditor.Commands.EditTimeline,
     MingaEditor.Commands.Lsp,
-    MingaEditor.Commands.Git,
     MingaEditor.Commands.Project,
     MingaEditor.Commands.Agent,
     MingaEditor.Commands.InlineAsk,

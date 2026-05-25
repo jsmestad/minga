@@ -385,7 +385,8 @@ defmodule MingaEditor.PickerUI do
         ?d,
         mods
       )
-      when band(mods, @ctrl) != 0 and source == MingaEditor.UI.Picker.GitBranchSource do
+      when band(mods, @ctrl) != 0 and
+             source == :"Elixir.MingaGitPorcelain.UI.Picker.GitBranchSource" do
     case Picker.selected_item(picker) do
       %Item{id: {:branch, _name, _current?, true}} ->
         state

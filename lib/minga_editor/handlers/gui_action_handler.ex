@@ -370,7 +370,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:toggle_panel, 2}) do
-    Commands.Git.execute(state, :git_status_toggle)
+    execute_git_porcelain_command(state, :git_status_toggle)
   end
 
   defp dispatch_action(state, {:toggle_panel, 3}) do
@@ -553,15 +553,15 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, :git_push) do
-    Commands.Git.execute(state, :git_push)
+    execute_git_porcelain_command(state, :git_push)
   end
 
   defp dispatch_action(state, :git_pull) do
-    Commands.Git.execute(state, :git_pull)
+    execute_git_porcelain_command(state, :git_pull)
   end
 
   defp dispatch_action(state, :git_fetch) do
-    Commands.Git.execute(state, :git_fetch)
+    execute_git_porcelain_command(state, :git_fetch)
   end
 
   defp dispatch_action(state, {:git_commit_amend, message}) do
@@ -675,7 +675,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, :git_pull_and_retry) do
     state
     |> EditorState.clear_git_toast()
-    |> Commands.Git.execute(:git_pull_and_retry)
+    |> execute_git_porcelain_command(:git_pull_and_retry)
   end
 
   # ── GUI search toolbar actions ──────────────────────────────────────
@@ -874,7 +874,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     do: Commands.FileTree.toggle(state)
 
   defp dispatch_sidebar_toggle(state, "git_status", _kind),
-    do: Commands.Git.execute(state, :git_status_toggle)
+    do: execute_git_porcelain_command(state, :git_status_toggle)
 
   defp dispatch_sidebar_toggle(state, "observatory", _kind) do
     state
@@ -1041,6 +1041,62 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     end
   end
 
+  @spec execute_git_porcelain_command(state(), atom()) :: state()
+  defp execute_git_porcelain_command(state, command) do
+    module = :"Elixir.MingaGitPorcelain.Commands"
+
+    if git_porcelain_running?() and Code.ensure_loaded?(module) do
+      :erlang.apply(module, :execute, [state, command])
+    else
+      git_porcelain_unavailable(state)
+    end
+  end
+
+  @spec open_git_diff_for_path(state(), String.t(), String.t(), String.t(), String.t(), keyword()) ::
+          state()
+  defp open_git_diff_for_path(state, git_root, git_path, abs_path, current_content, opts) do
+    module = :"Elixir.MingaGitPorcelain.Commands"
+
+    if git_porcelain_running?() and Code.ensure_loaded?(module) and
+         function_exported?(module, :open_diff_for_path, 6) do
+      :erlang.apply(module, :open_diff_for_path, [
+        state,
+        git_root,
+        git_path,
+        abs_path,
+        current_content,
+        opts
+      ])
+    else
+      git_porcelain_unavailable(state)
+    end
+  end
+
+  @spec git_porcelain_unavailable(state()) :: state()
+  defp git_porcelain_unavailable(state) do
+    message = "Git porcelain extension is disabled or failed to load"
+    Minga.Log.warning(:editor, message)
+    EditorState.set_status(state, message)
+  end
+
+  @spec git_porcelain_running?() :: boolean()
+  defp git_porcelain_running? do
+    case Process.whereis(Minga.Extension.Registry) do
+      nil -> false
+      _pid -> git_porcelain_running_in_registry?()
+    end
+  catch
+    :exit, _reason -> false
+  end
+
+  @spec git_porcelain_running_in_registry?() :: boolean()
+  defp git_porcelain_running_in_registry? do
+    case Minga.Extension.Registry.get(:minga_git_porcelain) do
+      {:ok, %{status: :running}} -> true
+      _ -> false
+    end
+  end
+
   @spec open_git_diff_for_entry(state(), String.t(), Git.StatusEntry.t()) :: state()
   defp open_git_diff_for_entry(state, git_root, %Git.StatusEntry{} = entry) do
     abs_path = git_status_abs_path(git_root, entry.path)
@@ -1049,7 +1105,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
     case git_diff_content(git_root, abs_path, git_entry) do
       {:ok, current_content} ->
-        Commands.Git.open_diff_for_path(state, git_root, git_path, abs_path, current_content,
+        open_git_diff_for_path(state, git_root, git_path, abs_path, current_content,
           staged: entry.staged
         )
 

@@ -69,7 +69,7 @@ defmodule MingaEditor.MergeConflict.RenderTest do
              HitTest.resolve_buffer(state, row, col + gutter_width + 1)
   end
 
-  test "mouse click on action block dispatches the accept command" do
+  test "mouse click on action block is a no-op when Git porcelain is disabled" do
     buffer = start_supervised!({BufferProcess, [content: conflict_content()]})
     state = state_with_buffer(buffer)
 
@@ -78,10 +78,11 @@ defmodule MingaEditor.MergeConflict.RenderTest do
 
     gutter_width = HitTest.buffer_gutter_width(buffer, BufferProcess.line_count(buffer))
 
+    before_content = BufferProcess.content(buffer)
     state = Mouse.handle(state, row, col + gutter_width + 1, :left, 0, :press, 1)
 
-    assert BufferProcess.content(buffer) == "ours"
-    assert state.shell_state.status_msg == "Resolved all merge conflicts"
+    assert BufferProcess.content(buffer) == before_content
+    assert state.shell_state.status_msg == nil
   end
 
   test "mouse click on action block separators is a no-op" do

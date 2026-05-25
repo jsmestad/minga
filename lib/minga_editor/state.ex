@@ -742,9 +742,9 @@ defmodule MingaEditor.State do
   def set_bottom_panel(s, panel),
     do: update_shell_state(s, &ShellState.set_bottom_panel(&1, panel))
 
-  @spec git_status_panel(t()) :: MingaEditor.Frontend.Protocol.GUI.git_status_panel_data() | nil
+  @spec git_status_panel(t()) :: ShellState.git_status_panel() | nil
   def git_status_panel(%{shell_state: ss}), do: ShellState.git_status_panel(ss)
-  @spec set_git_status_panel(t(), map() | nil) :: t()
+  @spec set_git_status_panel(t(), ShellState.git_status_panel() | nil) :: t()
   def set_git_status_panel(s, data),
     do: update_shell_state(s, &ShellState.set_git_status_panel(&1, data))
 

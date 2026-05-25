@@ -32,7 +32,6 @@ defmodule MingaEditor.Commands do
   alias MingaEditor.Commands.Editing, as: EditingCommands
   alias MingaEditor.Commands.Eval
   alias MingaEditor.Commands.Extensions, as: ExtCommands
-  alias MingaEditor.Commands.Git, as: GitCommands
   alias MingaEditor.Commands.Help
   alias MingaEditor.Commands.Lsp, as: LspCommands
   alias MingaEditor.Commands.Tutor
@@ -290,7 +289,7 @@ defmodule MingaEditor.Commands do
 
         state
         |> EditorState.set_status("Deleted branch #{name}")
-        |> MingaEditor.PickerUI.open(MingaEditor.UI.Picker.GitBranchSource)
+        |> reopen_git_branch_picker()
 
       {:error, reason} ->
         handle_branch_delete_error(state, git_root, name, force, reason)
@@ -300,7 +299,7 @@ defmodule MingaEditor.Commands do
   def execute(state, :branch_delete_cancel) do
     state
     |> EditorState.set_status("Branch delete cancelled")
-    |> MingaEditor.PickerUI.open(MingaEditor.UI.Picker.GitBranchSource)
+    |> reopen_git_branch_picker()
   end
 
   # ── Agent tuple commands ──────────────────────────────────────────────────
@@ -318,7 +317,7 @@ defmodule MingaEditor.Commands do
   # ── Parameterized git commands ────────────────────────────────────────────
 
   def execute(state, {:git_accept_conflict, _choice, _start_line} = cmd) do
-    guard_buffer(state, fn -> GitCommands.execute(state, cmd) end)
+    guard_buffer(state, fn -> execute_git_porcelain_command(state, cmd) end)
   end
 
   # ── Parameterized movement ────────────────────────────────────────────────
@@ -692,6 +691,46 @@ defmodule MingaEditor.Commands do
   @spec normalize_options_server(term() | nil) :: Minga.Config.Options.server()
   defp normalize_options_server(nil), do: Minga.Config.Options.default_server()
   defp normalize_options_server(server), do: Minga.Config.Options.validate_server!(server)
+
+  @spec reopen_git_branch_picker(state()) :: state()
+  defp reopen_git_branch_picker(state) do
+    source = :"Elixir.MingaGitPorcelain.UI.Picker.GitBranchSource"
+
+    if git_porcelain_running?() and Code.ensure_loaded?(source) do
+      MingaEditor.PickerUI.open(state, source)
+    else
+      state
+    end
+  end
+
+  @spec execute_git_porcelain_command(state(), atom() | tuple()) :: state()
+  defp execute_git_porcelain_command(state, command) do
+    module = :"Elixir.MingaGitPorcelain.Commands"
+
+    if git_porcelain_running?() and Code.ensure_loaded?(module) do
+      :erlang.apply(module, :execute, [state, command])
+    else
+      state
+    end
+  end
+
+  @spec git_porcelain_running?() :: boolean()
+  defp git_porcelain_running? do
+    case Process.whereis(Minga.Extension.Registry) do
+      nil -> false
+      _pid -> git_porcelain_running_in_registry?()
+    end
+  catch
+    :exit, _reason -> false
+  end
+
+  @spec git_porcelain_running_in_registry?() :: boolean()
+  defp git_porcelain_running_in_registry? do
+    case Minga.Extension.Registry.get(:minga_git_porcelain) do
+      {:ok, %{status: :running}} -> true
+      _ -> false
+    end
+  end
 
   @spec handle_branch_delete_error(state(), String.t(), String.t(), boolean(), String.t()) ::
           state()
