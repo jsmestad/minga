@@ -6,7 +6,9 @@
 # Available views: EditorChromeView, AgentChromeView, GitStatusView,
 #                  FileTreeView, CompletionOverlay, StatusBarView, TabBarView,
 #                  NotificationCenterView, ObservatoryView, AgentChatView,
-#                  PickerOverlay, MinibufferView, WhichKeyOverlay, SearchToolbar
+#                  PickerOverlay, MinibufferView, WhichKeyOverlay, SearchToolbar,
+#                  HoverPopupOverlay, SignatureHelpOverlay, DiagnosticsEditorView,
+#                  TabBarOverflow
 #
 # The script builds the PreviewHost target, launches it with the view name,
 # and the app self-captures its window to a PNG before exiting. Full-shell

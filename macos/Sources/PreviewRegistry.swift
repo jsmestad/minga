@@ -43,6 +43,14 @@ enum PreviewRegistry {
             whichKeyPreview()
         case "SearchToolbar":
             searchToolbarPreview()
+        case "HoverPopupOverlay":
+            hoverPopupPreview()
+        case "SignatureHelpOverlay":
+            signatureHelpPreview()
+        case "DiagnosticsEditorView":
+            diagnosticsEditorPreview()
+        case "TabBarOverflow":
+            tabBarOverflowPreview()
         default:
             Text("Unknown view: \(name)")
                 .font(.title)
@@ -699,6 +707,224 @@ enum PreviewRegistry {
 
         return SearchToolbar(searchState: state, theme: theme, encoder: nil)
             .frame(width: 800, height: 40)
+            .background(theme.editorBg)
+    }
+
+    // MARK: - HoverPopupOverlay
+
+    private static func hoverPopupPreview() -> some View {
+        let theme = populatedTheme()
+        let state = HoverPopupState()
+        state.update(
+            visible: true, anchorRow: 8, anchorCol: 4,
+            focused: false, scrollOffset: 0,
+            rawLines: [
+                Wire.HoverLine(lineType: .header, segments: [
+                    Wire.HoverSegment(style: .header2, fgColor: nil, flags: 0, text: "Buffer.open/1"),
+                ]),
+                Wire.HoverLine(lineType: .empty, segments: []),
+                Wire.HoverLine(lineType: .text, segments: [
+                    Wire.HoverSegment(style: .plain, fgColor: nil, flags: 0, text: "Opens a file from disk and returns a managed buffer process."),
+                ]),
+                Wire.HoverLine(lineType: .text, segments: [
+                    Wire.HoverSegment(style: .plain, fgColor: nil, flags: 0, text: "The buffer is registered under the given path and will be reused"),
+                ]),
+                Wire.HoverLine(lineType: .text, segments: [
+                    Wire.HoverSegment(style: .plain, fgColor: nil, flags: 0, text: "on subsequent calls with the same path."),
+                ]),
+                Wire.HoverLine(lineType: .empty, segments: []),
+                Wire.HoverLine(lineType: .codeHeader, segments: [
+                    Wire.HoverSegment(style: .codeBlock, fgColor: nil, flags: 0, text: "elixir"),
+                ]),
+                Wire.HoverLine(lineType: .code, segments: [
+                    Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0xC678DD, flags: 1, text: "@spec "),
+                    Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0x61AFEF, flags: 0, text: "open"),
+                    Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0xBBC2CF, flags: 0, text: "("),
+                    Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0xE5C07B, flags: 0, text: "String.t()"),
+                    Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0xBBC2CF, flags: 0, text: ") :: "),
+                    Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0xE5C07B, flags: 0, text: "{:ok, pid()}"),
+                ]),
+                Wire.HoverLine(lineType: .empty, segments: []),
+                Wire.HoverLine(lineType: .blockquote, segments: [
+                    Wire.HoverSegment(style: .blockquote, fgColor: nil, flags: 0, text: "Since: v0.4.0"),
+                ]),
+            ]
+        )
+
+        return HoverPopupOverlay(state: state, theme: theme, cellWidth: 8, cellHeight: 18, viewportHeight: 300, viewportWidth: 500, encoder: nil)
+            .frame(width: 500, height: 300)
+            .background(theme.editorBg)
+    }
+
+    // MARK: - SignatureHelpOverlay
+
+    private static func signatureHelpPreview() -> some View {
+        let theme = populatedTheme()
+        let state = SignatureHelpState()
+        state.update(
+            visible: true, anchorRow: 8, anchorCol: 6,
+            activeSignature: 0, activeParameter: 1,
+            rawSignatures: [
+                Wire.Signature(
+                    label: "GenServer.start_link(module, init_arg, options)",
+                    documentation: "Starts a GenServer process linked to the current process.",
+                    parameters: [
+                        Wire.SignatureParameter(label: "module", documentation: "The module implementing the GenServer callbacks."),
+                        Wire.SignatureParameter(label: "init_arg", documentation: "The argument passed to init/1."),
+                        Wire.SignatureParameter(label: "options", documentation: "Options such as :name, :timeout, and :hibernate_after."),
+                    ]
+                ),
+            ]
+        )
+
+        return SignatureHelpOverlay(state: state, theme: theme, cellWidth: 8, cellHeight: 18, viewportHeight: 200, viewportWidth: 500)
+            .frame(width: 500, height: 200)
+            .background(theme.editorBg)
+    }
+
+    // MARK: - DiagnosticsEditorView
+
+    private static func diagnosticsEditorPreview() -> some View {
+        previewDiagnosticsChromeView(failureMessage: "DiagnosticsEditorView could not initialize the production editor renderer.")
+    }
+
+    @ViewBuilder
+    private static func previewDiagnosticsChromeView(failureMessage: String) -> some View {
+        let size = PreviewSnapshotPolicy.size(named: "DiagnosticsEditorView")
+
+        if let appState = diagnosticsPreviewAppState() {
+            ContentView(appState: appState)
+                .frame(width: size.width, height: size.height)
+        } else {
+            previewFailureView(message: failureMessage)
+                .frame(width: size.width, height: size.height)
+        }
+    }
+
+    private static func diagnosticsPreviewAppState() -> AppState? {
+        let appState = AppState()
+        appState.windowTitle = "Minga"
+        appState.windowBgIsDark = true
+        appState.hasReceivedFirstFrame = true
+        appState.trafficLightMidY = 14
+
+        let encoder = previewEncoder()
+        appState.encoder = encoder
+        appState.gui.settingsState.encoder = encoder
+
+        populateFileTree(appState.gui.fileTreeState)
+        populateGitStatus(appState.gui.gitStatusState)
+        appState.gui.gitStatusState.hide()
+        populateTabBar(appState.gui.tabBarState)
+        appState.gui.breadcrumbState.update(segments: ["lib", "minga", "editor.ex"])
+        appState.gui.statusBarState.update(from: previewStatusBarUpdate(agentVisible: false))
+
+        guard let editorNSView = previewDiagnosticsEditorNSView(appState: appState, encoder: encoder) else { return nil }
+        appState.editorNSView = editorNSView
+        return appState
+    }
+
+    private static func previewDiagnosticsEditorNSView(appState: AppState, encoder: ProtocolEncoder) -> EditorNSView? {
+        let scale = NSScreen.main?.backingScaleFactor ?? 2.0
+        let fontFace = FontFace(name: "Menlo", size: 13, scale: scale)
+        let fontManager = FontManager(name: "Menlo", size: 13, scale: scale)
+        guard let renderer = CoreTextMetalRenderer() else { return nil }
+        renderer.setupRenderers(fontManager: fontManager)
+
+        let dispatcher = CommandDispatcher(cols: 112, rows: 36, guiState: appState.gui)
+        dispatcher.fontManager = fontManager
+        populateDiagnosticsEditorFrame(dispatcher: dispatcher, guiState: appState.gui)
+
+        let nsView = EditorNSView(encoder: encoder, fontFace: fontFace, dispatcher: dispatcher, coreTextRenderer: renderer, fontManager: fontManager)
+        nsView.guiState = appState.gui
+        nsView.statusBarState = appState.gui.statusBarState
+        nsView.renderFrame()
+        return nsView
+    }
+
+    private static func populateDiagnosticsEditorFrame(dispatcher: CommandDispatcher, guiState: GUIState) {
+        dispatcher.frameState.defaultBg = 0x282C34
+        dispatcher.frameState.gutterCol = 4
+        dispatcher.frameState.gutterSeparatorColor = 0x3E4452
+        dispatcher.frameState.cursorRow = 5
+        dispatcher.frameState.cursorCol = 12
+        dispatcher.frameState.cursorShape = .beam
+        dispatcher.frameState.cursorlineRow = 5
+        dispatcher.frameState.cursorlineBg = 0x2C323C
+        dispatcher.frameState.totalLineCount = 1250
+        dispatcher.frameState.viewportTopLine = 38
+        dispatcher.frameState.scrollIndicatorColor = 0x5C6370
+        dispatcher.frameState.windowGutters[1] = Wire.WindowGutter(
+            windowId: 1,
+            contentRow: 1,
+            contentCol: 0,
+            contentHeight: 22,
+            isActive: true,
+            contentWidth: 108,
+            cursorLine: 42,
+            lineNumberStyle: .absolute,
+            lineNumberWidth: 3,
+            signColWidth: 1,
+            entries: previewDiagnosticsGutterEntries()
+        )
+        guiState.windowContents[1] = GUIWindowContent(
+            windowId: 1,
+            fullRefresh: true,
+            cursorVisible: true,
+            cursorRow: 5,
+            cursorCol: 12,
+            cursorShape: .beam,
+            rows: previewEditorRows(),
+            selection: nil,
+            searchMatches: [],
+            diagnosticUnderlines: [
+                GUIDiagnosticUnderline(startRow: 4, startCol: 20, endRow: 4, endCol: 31, severity: .error),
+                GUIDiagnosticUnderline(startRow: 5, startCol: 4, endRow: 5, endCol: 10, severity: .warning),
+                GUIDiagnosticUnderline(startRow: 1, startCol: 8, endRow: 1, endCol: 20, severity: .info),
+            ],
+            documentHighlights: [],
+            lineAnnotations: []
+        )
+    }
+
+    private static func previewDiagnosticsGutterEntries() -> [Wire.GutterEntry] {
+        (38...59).map { line in
+            let sign: Wire.GutterSignType
+            switch line {
+            case 42: sign = .diagError
+            case 43: sign = .diagWarning
+            case 39: sign = .diagInfo
+            case 47: sign = .gitModified
+            default: sign = .none
+            }
+            return Wire.GutterEntry(bufLine: UInt32(line), displayType: .normal, signType: sign)
+        }
+    }
+
+    // MARK: - TabBarOverflow
+
+    private static func tabBarOverflowPreview() -> some View {
+        tabBarOverflowView(width: 1200)
+    }
+
+    private static func tabBarOverflowView(width: CGFloat) -> some View {
+        let state = TabBarState()
+        let theme = populatedTheme()
+        state.update(activeIndex: 3, entries: [
+            Wire.TabEntry(id: 1, groupId: 0, isActive: false, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: true, tintColorRGB: 0, icon: "", label: "editor.ex"),
+            Wire.TabEntry(id: 2, groupId: 0, isActive: false, isDirty: true, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "buffer.ex"),
+            Wire.TabEntry(id: 3, groupId: 0, isActive: false, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "document.ex"),
+            Wire.TabEntry(id: 4, groupId: 0, isActive: true, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "render_pipeline_integration_test.exs"),
+            Wire.TabEntry(id: 5, groupId: 0, isActive: false, isDirty: true, isAgent: false, hasAttention: true, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "protocol_decoder_compatibility_test.exs"),
+            Wire.TabEntry(id: 6, groupId: 0, isActive: false, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "mode.ex"),
+            Wire.TabEntry(id: 7, groupId: 0, isActive: false, isDirty: false, isAgent: true, hasAttention: false, agentStatus: 2, isPinned: false, tintColorRGB: 0, icon: "", label: "Agent"),
+            Wire.TabEntry(id: 8, groupId: 0, isActive: false, isDirty: true, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "core_text_metal_renderer.swift"),
+            Wire.TabEntry(id: 9, groupId: 0, isActive: false, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "preview_snapshot_policy.swift"),
+            Wire.TabEntry(id: 10, groupId: 0, isActive: false, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "application_supervisor_configuration.ex"),
+        ])
+
+        return TabBarView(tabBarState: state, theme: theme, encoder: nil)
+            .frame(width: width, height: 36)
             .background(theme.editorBg)
     }
 
