@@ -13,9 +13,12 @@ defmodule MingaEditor.Shell.Registry do
   @type register_attrs :: keyword() | map()
   @type register_error ::
           {:duplicate_id, shell_id()}
+          | {:duplicate_module, module(), shell_id()}
           | {:duplicate_default, shell_id()}
           | {:missing_default, term()}
           | {:invalid_entry, term()}
+          | :source_required
+          | :not_owner
 
   @state_key {__MODULE__, :state}
   @cleanup_key {__MODULE__, :cleanup_registered?}
@@ -58,12 +61,24 @@ defmodule MingaEditor.Shell.Registry do
     end
   end
 
-  @doc "Unregisters a shell by id. Built-in shells are intentionally preserved."
-  @spec unregister(shell_id()) :: :ok | {:error, :builtin_shell}
+  @doc "Unregisters a shell by id. Built-in shells are intentionally preserved. Extension shells must use unregister/2."
+  @spec unregister(shell_id()) :: :ok | {:error, :builtin_shell | :source_required}
   def unregister(id) when is_atom(id) do
     case get(id) do
       %Entry{source: :builtin} -> {:error, :builtin_shell}
-      %Entry{} -> put_state(remove_entry(state(), id))
+      %Entry{} -> {:error, :source_required}
+      nil -> :ok
+    end
+  end
+
+  @doc "Unregisters a shell owned by the given source."
+  @spec unregister(source(), shell_id()) :: :ok | {:error, :builtin_shell | :not_owner}
+  def unregister(:builtin, _id), do: {:error, :builtin_shell}
+
+  def unregister(source, id) when is_atom(id) do
+    case get(id) do
+      %Entry{source: ^source} -> put_state(remove_entry(state(), id))
+      %Entry{} -> {:error, :not_owner}
       nil -> :ok
     end
   end
@@ -140,15 +155,7 @@ defmodule MingaEditor.Shell.Registry do
 
   @spec register_builtin(shell_id(), module(), String.t(), String.t(), boolean()) :: :ok
   defp register_builtin(id, module, display_name, description, default?) do
-    entry = %Entry{
-      id: id,
-      source: :builtin,
-      module: module,
-      display_name: display_name,
-      description: description,
-      capabilities: [:gui, :tui],
-      default?: default?
-    }
+    entry = Entry.builtin!(id, module, display_name, description, default?)
 
     :ok = put_entry(entry, replace?: true)
   end
@@ -159,7 +166,10 @@ defmodule MingaEditor.Shell.Registry do
     replace? = Keyword.fetch!(opts, :replace?)
 
     with :ok <- check_duplicate_id(current, entry, replace?),
+         :ok <- check_duplicate_module(current, entry, replace?),
          :ok <- check_duplicate_default(current, entry, replace?) do
+      {current, entry} = assign_generation(current, entry, replace?)
+
       current
       |> remove_entry(entry.id)
       |> add_entry(entry)
@@ -172,6 +182,18 @@ defmodule MingaEditor.Shell.Registry do
 
   defp check_duplicate_id(current, %Entry{id: id}, false) do
     if Map.has_key?(current.entries, id), do: {:error, {:duplicate_id, id}}, else: :ok
+  end
+
+  @spec check_duplicate_module(map(), Entry.t(), boolean()) :: :ok | {:error, register_error()}
+  defp check_duplicate_module(current, %Entry{id: id, module: module}, replace?) do
+    current.entries
+    |> Enum.find(fn {entry_id, %Entry{module: entry_module}} ->
+      entry_module == module and (not replace? or entry_id != id)
+    end)
+    |> case do
+      {existing_id, _entry} -> {:error, {:duplicate_module, module, existing_id}}
+      nil -> :ok
+    end
   end
 
   @spec check_duplicate_default(map(), Entry.t(), boolean()) :: :ok | {:error, register_error()}
@@ -187,18 +209,39 @@ defmodule MingaEditor.Shell.Registry do
     end
   end
 
+  @spec assign_generation(map(), Entry.t(), boolean()) :: {map(), Entry.t()}
+  defp assign_generation(current, %Entry{id: id} = entry, true) do
+    case Map.get(current.entries, id) do
+      %Entry{source: source, module: module, generation: generation}
+      when source == entry.source and module == entry.module ->
+        {current, Entry.with_generation(entry, generation)}
+
+      _other ->
+        assign_next_generation(current, entry)
+    end
+  end
+
+  defp assign_generation(current, %Entry{} = entry, _replace?),
+    do: assign_next_generation(current, entry)
+
+  @spec assign_next_generation(map(), Entry.t()) :: {map(), Entry.t()}
+  defp assign_next_generation(current, %Entry{} = entry) do
+    generation = Map.get(current, :next_generation, 1)
+    {%{current | next_generation: generation + 1}, Entry.with_generation(entry, generation)}
+  end
+
   @spec add_entry(map(), Entry.t()) :: map()
   defp add_entry(current, %Entry{} = entry) do
     entries = Map.put(current.entries, entry.id, entry)
     default_id = if entry.default?, do: entry.id, else: current.default_id
-    %{entries: entries, ordered: sort_entries(entries), default_id: default_id}
+    %{current | entries: entries, ordered: sort_entries(entries), default_id: default_id}
   end
 
   @spec remove_entry(map(), shell_id()) :: map()
   defp remove_entry(current, id) do
     entries = Map.delete(current.entries, id)
     default_id = next_default_id(entries, current.default_id, id)
-    %{entries: entries, ordered: sort_entries(entries), default_id: default_id}
+    %{current | entries: entries, ordered: sort_entries(entries), default_id: default_id}
   end
 
   @spec next_default_id(%{shell_id() => Entry.t()}, shell_id() | nil, shell_id()) ::
@@ -237,19 +280,17 @@ defmodule MingaEditor.Shell.Registry do
   end
 
   @spec empty_state() :: map()
-  defp empty_state, do: %{entries: %{}, ordered: [], default_id: nil}
+  defp empty_state, do: %{entries: %{}, ordered: [], default_id: nil, next_generation: 1}
 
   @spec builtin_traditional_entry() :: Entry.t()
   defp builtin_traditional_entry do
-    %Entry{
-      id: :traditional,
-      source: :builtin,
-      module: MingaEditor.Shell.Traditional,
-      display_name: "Traditional",
-      description: "Tab-based editor with file tree, modeline, picker, and agent panel.",
-      capabilities: [:gui, :tui],
-      default?: true
-    }
+    Entry.builtin!(
+      :traditional,
+      MingaEditor.Shell.Traditional,
+      "Traditional",
+      "Tab-based editor with file tree, modeline, picker, and agent panel.",
+      true
+    )
   end
 
   @spec ensure_cleanup_registered() :: :ok

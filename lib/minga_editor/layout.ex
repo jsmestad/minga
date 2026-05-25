@@ -94,6 +94,15 @@ defmodule MingaEditor.Layout do
   toggle, and agent panel toggle.
   """
   @spec get(EditorState.t() | map()) :: t()
+  def get(%EditorState{} = state) do
+    state = EditorState.ensure_shell_available(state)
+
+    case state.layout do
+      %__MODULE__{} = cached -> cached
+      _other -> EditorState.active_shell_module(state).compute_layout(state)
+    end
+  end
+
   def get(%{layout: %__MODULE__{} = cached}), do: cached
   def get(state), do: EditorState.active_shell_module(state).compute_layout(state)
 
@@ -104,6 +113,13 @@ defmodule MingaEditor.Layout do
   read `state.layout` downstream.
   """
   @spec put(EditorState.t() | map()) :: map()
+  def put(%EditorState{} = state) do
+    state = EditorState.ensure_shell_available(state)
+    layout = EditorState.active_shell_module(state).compute_layout(state)
+    state = %{state | layout: layout}
+    %{state | focus_tree: FocusTree.from_state(state)}
+  end
+
   def put(state) do
     layout = EditorState.active_shell_module(state).compute_layout(state)
     state = %{state | layout: layout}
@@ -124,6 +140,11 @@ defmodule MingaEditor.Layout do
   to the appropriate TUI or GUI layout module.
   """
   @spec compute(EditorState.t() | map()) :: t()
+  def compute(%EditorState{} = state) do
+    state = EditorState.ensure_shell_available(state)
+    EditorState.active_shell_module(state).compute_layout(state)
+  end
+
   def compute(state) do
     EditorState.active_shell_module(state).compute_layout(state)
   end

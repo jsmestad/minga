@@ -745,7 +745,18 @@ defmodule Minga.Config do
       raise ArgumentError, "extension #{name}: :hex value must be a non-empty package name"
     end
 
-    ExtRegistry.register_hex(name, package, rest)
+    case ExtRegistry.register_hex(name, package, rest) do
+      :ok ->
+        :ok
+
+      {:error, {:hex_app_required, ^name, ^package}} ->
+        raise ArgumentError,
+              "extension #{name}: :app is required when the extension name differs from Hex package #{inspect(package)}"
+
+      {:error, {:invalid_hex_app, app}} ->
+        raise ArgumentError,
+              "extension #{name}: :app must be a non-nil atom, got: #{inspect(app)}"
+    end
   end
 
   @spec put_lsp_settings(atom(), lsp_settings()) :: :ok

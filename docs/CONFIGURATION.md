@@ -1131,7 +1131,7 @@ extension :minga_snippets, git: "https://github.com/user/minga-snippets"
 extension :minga_tools, hex: "minga_tools", version: "~> 0.3"
 ```
 
-Exactly one of `path:`, `git:`, or `hex:` is required. Extra keyword options (everything except the source and its sub-options like `branch:`, `version:`, or `app:`) are passed to the extension as config. If the extension declares typed options with `option/3`, these values are validated at load time:
+Exactly one of `path:`, `git:`, or `hex:` is required. Extra keyword options (everything except the source and its sub-options like `branch:`, `app:`, or `version:`) are passed to the extension as config. If the extension declares typed options with `option/3`, these values are validated at load time:
 
 ```elixir
 # Config options are grouped right in the extension declaration
@@ -1177,19 +1177,19 @@ Omitting both `branch:` and `ref:` defaults to whatever the remote's default bra
 Hex extensions are fetched and compiled via `Mix.install/2`, the same mechanism Livebook uses for notebook dependencies. This handles dependency resolution (including transitive deps), downloading, compilation, and code path setup.
 
 ```elixir
-# Latest stable release. The extension name is also the OTP app by default.
+# Latest stable release, when the config name matches the package and OTP app
 extension :minga_tools, hex: "minga_tools"
 
-# Version constraint (standard Elixir/Hex semver syntax)
-extension :minga_tools, hex: "minga_tools", version: "~> 0.3"
-extension :minga_tools, hex: "minga_tools", version: ">= 1.0.0 and < 2.0.0"
-extension :minga_tools, hex: "minga_tools", version: "== 0.3.1"
-
-# Use app: when you want a shorter local name than the package's OTP app.
+# Use app: when the config name is an alias for a differently named Hex/OTP app
 extension :tools, hex: "minga_tools", app: :minga_tools
+
+# Version constraint (standard Elixir/Hex semver syntax)
+extension :tools, hex: "minga_tools", app: :minga_tools, version: "~> 0.3"
+extension :tools, hex: "minga_tools", app: :minga_tools, version: ">= 1.0.0 and < 2.0.0"
+extension :tools, hex: "minga_tools", app: :minga_tools, version: "== 0.3.1"
 ```
 
-Omitting `version:` fetches the latest stable release. The extension name defaults to the OTP application name. If you choose a local alias, pass `app:` so Minga can start the correct application without creating atoms from package strings.
+Omitting `version:` fetches the latest stable release. If the extension config name differs from the Hex package and OTP app name, pass `app:` explicitly so Minga can build the Mix dependency and start the correct application without atomizing package strings at runtime.
 
 All hex extensions are installed in a single `Mix.install/2` call at startup. The results are cached (keyed on the dep list hash), so the second boot with the same extensions skips all network and compilation work. The cache lives at `~/.cache/mix/installs/`.
 
@@ -1314,7 +1314,7 @@ end
 # ── Extensions ───────────────────────────────────────────────────────
 extension :minga_todo, path: "~/code/minga_todo"
 extension :snippets, git: "https://github.com/user/minga-snippets", branch: "main"
-extension :minga_tools, hex: "minga_tools", version: "~> 0.3"
+extension :tools, hex: "minga_tools", app: :minga_tools, version: "~> 0.3"
 ```
 
 ## Further reading

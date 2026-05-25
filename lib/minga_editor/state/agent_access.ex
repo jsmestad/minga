@@ -53,6 +53,8 @@ defmodule MingaEditor.State.AgentAccess do
   """
   @spec session(EditorState.t() | map()) :: pid() | nil
   def session(%EditorState{} = state) do
+    state = EditorState.ensure_shell_available(state)
+
     if EditorState.active_shell_id(state) == :traditional do
       active_workspace_session(state)
     else

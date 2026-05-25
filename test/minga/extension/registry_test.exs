@@ -81,31 +81,59 @@ defmodule Minga.Extension.RegistryTest do
 
   describe "register_hex/4" do
     test "registers a hex extension with version constraint", %{registry: r} do
-      :ok = Registry.register_hex(r, :my_ext, "minga_snippets", version: "~> 0.3")
+      :ok = Registry.register_hex(r, :minga_snippets, "minga_snippets", version: "~> 0.3")
 
-      assert {:ok, %Entry{} = entry} = Registry.get(r, :my_ext)
+      assert {:ok, %Entry{} = entry} = Registry.get(r, :minga_snippets)
       assert entry.source_type == :hex
-      assert entry.hex == %{package: "minga_snippets", version: "~> 0.3", app: nil}
+      assert entry.hex == %{package: "minga_snippets", version: "~> 0.3", app: :minga_snippets}
       assert entry.path == nil
       assert entry.git == nil
       assert entry.config == []
     end
 
     test "registers a hex extension without version (defaults to nil)", %{registry: r} do
-      :ok = Registry.register_hex(r, :my_ext, "minga_snippets", [])
+      :ok = Registry.register_hex(r, :minga_snippets, "minga_snippets", [])
 
-      assert {:ok, entry} = Registry.get(r, :my_ext)
+      assert {:ok, entry} = Registry.get(r, :minga_snippets)
       assert entry.hex.version == nil
     end
 
     test "passes extra options as config", %{registry: r} do
       :ok =
-        Registry.register_hex(r, :my_ext, "minga_snippets",
+        Registry.register_hex(r, :minga_snippets, "minga_snippets",
           version: "~> 1.0",
           greeting: "hello"
         )
 
+      assert {:ok, entry} = Registry.get(r, :minga_snippets)
+      assert entry.config == [greeting: "hello"]
+    end
+
+    test "requires explicit OTP app when registry name differs from package", %{registry: r} do
+      assert {:error, {:hex_app_required, :my_ext, "minga_snippets"}} =
+               Registry.register_hex(r, :my_ext, "minga_snippets", [])
+    end
+
+    test "rejects non-atom explicit OTP app", %{registry: r} do
+      assert {:error, {:invalid_hex_app, "minga_snippets"}} =
+               Registry.register_hex(r, :my_ext, "minga_snippets", app: "minga_snippets")
+    end
+
+    test "rejects nil explicit OTP app", %{registry: r} do
+      assert {:error, {:invalid_hex_app, nil}} =
+               Registry.register_hex(r, :my_ext, "minga_snippets", app: nil)
+    end
+
+    test "stores explicit OTP app separately from package and config", %{registry: r} do
+      :ok =
+        Registry.register_hex(r, :my_ext, "minga_snippets",
+          app: :minga_snippets,
+          greeting: "hello"
+        )
+
       assert {:ok, entry} = Registry.get(r, :my_ext)
+      assert entry.hex.app == :minga_snippets
+      assert entry.hex.package == "minga_snippets"
       assert entry.config == [greeting: "hello"]
     end
   end
@@ -114,7 +142,7 @@ defmodule Minga.Extension.RegistryTest do
     test "all three source types can coexist", %{registry: r} do
       :ok = Registry.register(r, :local_ext, "/tmp/local", [])
       :ok = Registry.register_git(r, :git_ext, "https://github.com/user/repo", [])
-      :ok = Registry.register_hex(r, :hex_ext, "minga_tools", version: "~> 1.0")
+      :ok = Registry.register_hex(r, :minga_tools, "minga_tools", version: "~> 1.0")
 
       entries = Registry.all(r)
       types = entries |> Enum.map(fn {_name, entry} -> entry.source_type end) |> Enum.sort()

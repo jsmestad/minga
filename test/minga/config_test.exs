@@ -395,23 +395,33 @@ defmodule Minga.ConfigTest do
     end
 
     test "registers a hex-sourced extension" do
-      Minga.Config.extension(:snippets, hex: "minga_snippets", version: "~> 0.3")
+      Minga.Config.extension(:snippets,
+        hex: "minga_snippets",
+        app: :minga_snippets,
+        version: "~> 0.3"
+      )
 
       assert {:ok, %Entry{} = entry} = ExtRegistry.get(:snippets)
       assert entry.source_type == :hex
       assert entry.hex.package == "minga_snippets"
       assert entry.hex.version == "~> 0.3"
+      assert entry.hex.app == :minga_snippets
     end
 
     test "registers a hex extension without version" do
-      Minga.Config.extension(:snippets, hex: "minga_snippets")
+      Minga.Config.extension(:minga_snippets, hex: "minga_snippets")
 
-      assert {:ok, entry} = ExtRegistry.get(:snippets)
+      assert {:ok, entry} = ExtRegistry.get(:minga_snippets)
       assert entry.hex.version == nil
     end
 
     test "passes extra options as config for hex source" do
-      Minga.Config.extension(:snippets, hex: "minga_snippets", version: "~> 1.0", debug: true)
+      Minga.Config.extension(:snippets,
+        hex: "minga_snippets",
+        app: :minga_snippets,
+        version: "~> 1.0",
+        debug: true
+      )
 
       assert {:ok, entry} = ExtRegistry.get(:snippets)
       assert entry.config == [debug: true]
@@ -438,6 +448,18 @@ defmodule Minga.ConfigTest do
     test "raises for empty hex package name" do
       assert_raise ArgumentError, ~r/non-empty package name/, fn ->
         Minga.Config.extension(:bad, hex: "")
+      end
+    end
+
+    test "raises when hex extension name differs from package without app" do
+      assert_raise ArgumentError, ~r/:app is required/, fn ->
+        Minga.Config.extension(:tools, hex: "minga_tools")
+      end
+    end
+
+    test "raises when hex app is not an atom" do
+      assert_raise ArgumentError, ~r/:app must be a non-nil atom/, fn ->
+        Minga.Config.extension(:tools, hex: "minga_tools", app: "minga_tools")
       end
     end
   end

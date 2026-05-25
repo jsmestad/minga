@@ -175,6 +175,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
         layout: :rendered_layout,
         windows: rendered_windows,
         shell_id: :traditional,
+        shell_identity: input.shell_identity,
         shell_state: rendered_shell_state
       }
 
@@ -191,21 +192,43 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       assert result.shell_state.tab_bar_click_regions == [{:tab, 2}]
     end
 
-    test "does not merge stale shell click regions after shell changes", %{state: state} do
+    test "drops renderer writeback without shell identity", %{state: state} do
       input = Input.from_editor_state(state)
 
       writeback = %{
         caches: input.caches,
         layout: :rendered_layout,
+        focus_tree: :rendered_focus_tree,
         windows: state.workspace.windows,
         shell_id: :traditional,
+        shell_state: %{state.shell_state | modeline_click_regions: [{:old, 1}]}
+      }
+
+      result = EditorState.apply_renderer_writeback(state, writeback)
+
+      assert result.layout == nil
+      assert result.focus_tree == nil
+      assert result.shell_state.modeline_click_regions == []
+    end
+
+    test "drops stale renderer writeback after shell changes", %{state: state} do
+      input = Input.from_editor_state(state)
+
+      writeback = %{
+        caches: input.caches,
+        layout: :rendered_layout,
+        focus_tree: :rendered_focus_tree,
+        windows: state.workspace.windows,
+        shell_id: :traditional,
+        shell_identity: input.shell_identity,
         shell_state: %{state.shell_state | modeline_click_regions: [{:old, 1}]}
       }
 
       state = EditorState.switch_shell(state, :board)
       result = EditorState.apply_renderer_writeback(state, writeback)
 
-      assert result.layout == :rendered_layout
+      assert result.layout == nil
+      assert result.focus_tree == nil
       assert result.shell_id == :board
       assert result.shell_state.modeline_click_regions == []
     end

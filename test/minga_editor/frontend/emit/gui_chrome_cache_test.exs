@@ -23,7 +23,9 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
   alias MingaEditor.StatusBar.Data, as: StatusBarData
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
+  alias MingaEditor.Test.UnknownGuiPayloadShell
 
+  import ExUnit.CaptureLog
   import MingaEditor.RenderPipeline.TestHelpers
 
   defmodule PreviewSource do
@@ -314,6 +316,48 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
         sync_chrome(%{board_state | shell_state: board_b}, board_caches)
 
       refute board_caches2.last_gui_board_fp == board_caches.last_gui_board_fp
+    end
+
+    test "switching from Board to Traditional emits one Board dismiss payload" do
+      board = BoardState.new()
+      {board, _card} = BoardState.create_card(board, task: "Board task", status: :idle)
+
+      board_state = %{
+        gui_state()
+        | shell_id: :board,
+          shell: MingaEditor.Shell.Board,
+          shell_state: board
+      }
+
+      {_ctx, caches, board_cmds} = sync_chrome(board_state)
+      assert [<<0x87, 1::8, _::binary>>] = opcode_cmds(board_cmds, 0x87)
+
+      {_ctx, caches, dismiss_cmds} = sync_chrome(gui_state(), caches)
+      assert [<<0x87, 0::8, _::binary>>] = opcode_cmds(dismiss_cmds, 0x87)
+
+      {_ctx, _caches, repeated_cmds} = sync_chrome(gui_state(), caches)
+      assert [] = opcode_cmds(repeated_cmds, 0x87)
+    end
+
+    test "unsupported shell GUI payload dismisses Board without crashing" do
+      board = BoardState.new()
+      {board, _card} = BoardState.create_card(board, task: "Board task", status: :idle)
+
+      board_state = %{
+        gui_state()
+        | shell_id: :board,
+          shell: MingaEditor.Shell.Board,
+          shell_state: board
+      }
+
+      {_ctx, caches, _board_cmds} = sync_chrome(board_state)
+      unsupported_state = %{gui_state() | shell: UnknownGuiPayloadShell}
+
+      {{_ctx, _caches, cmds}, log} =
+        with_log(fn -> sync_chrome(unsupported_state, caches) end)
+
+      assert log =~ "Unsupported GUI shell payload"
+      assert [<<0x87, 0::8, _::binary>>] = opcode_cmds(cmds, 0x87)
     end
 
     test "workspace fingerprint updates when the last agent workspace disappears" do

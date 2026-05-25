@@ -45,7 +45,7 @@ defmodule MingaEditor.Shell do
   @type workspace :: MingaEditor.Session.State.t()
 
   @typedoc "Structured GUI payload returned by a shell and encoded centrally by frontend protocol modules."
-  @type gui_payload :: {:board, MingaEditor.Shell.Board.State.t()}
+  @type gui_payload :: {atom(), term()}
 
   @typedoc """
   Why a buffer was added — re-exported here from `Shell.BufferLifecycle`

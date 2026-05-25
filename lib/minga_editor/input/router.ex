@@ -333,6 +333,7 @@ defmodule MingaEditor.Input.Router do
         click_count
       )
       when event_type in [:drag, :release] do
+    state = EditorState.ensure_shell_available(state)
     MingaEditor.Mouse.handle(state, row, col, :left, mods, event_type, click_count)
   end
 
@@ -342,6 +343,8 @@ defmodule MingaEditor.Input.Router do
   end
 
   def dispatch_mouse(state, row, col, button, mods, event_type, click_count) do
+    state = EditorState.ensure_shell_available(state)
+
     event = %{
       row: row,
       col: col,

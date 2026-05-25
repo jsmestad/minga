@@ -18,6 +18,7 @@ defmodule MingaEditor.Startup do
   alias MingaEditor.Commands
   alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.FileWatcherHelpers
+  alias MingaEditor.Shell.Identity, as: ShellIdentity
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Session, as: EditorSessionState
@@ -163,6 +164,7 @@ defmodule MingaEditor.Startup do
       focus_stack: MingaEditor.Input.default_stack(),
       shell_id: shell_entry.id,
       shell: shell_entry.module,
+      shell_identity: ShellIdentity.new(shell_entry),
       shell_state: init_shell_state(shell_entry.module, dashboard, opts),
       session: EditorSessionState.new(Keyword.take(opts, [:swap_dir, :session_dir]))
     }
@@ -513,7 +515,7 @@ defmodule MingaEditor.Startup do
 
     case Keyword.get(opts, :shell) do
       nil -> resolve_shell_from_config()
-      id_or_module when is_atom(id_or_module) -> resolve_shell_id_or_module(id_or_module)
+      id_or_module when is_atom(id_or_module) -> resolve_explicit_shell(id_or_module)
     end
   end
 
@@ -522,14 +524,51 @@ defmodule MingaEditor.Startup do
     Minga.Config.get(:default_shell)
     |> resolve_shell_id_or_module()
   catch
-    :exit, _ -> MingaEditor.Shell.Registry.default()
+    :exit, reason ->
+      default = MingaEditor.Shell.Registry.default()
+      Log.warning(:editor, "Default shell lookup failed: #{inspect(reason)}; using #{default.id}")
+      default
+  end
+
+  @spec resolve_explicit_shell(atom()) :: MingaEditor.Shell.Entry.t()
+  defp resolve_explicit_shell(id_or_module) do
+    case resolve_shell_entry(id_or_module) do
+      nil ->
+        default = MingaEditor.Shell.Registry.default()
+
+        Log.warning(
+          :editor,
+          "Requested shell #{inspect(id_or_module)} is not registered, using #{default.id}"
+        )
+
+        default
+
+      entry ->
+        entry
+    end
   end
 
   @spec resolve_shell_id_or_module(atom()) :: MingaEditor.Shell.Entry.t()
   defp resolve_shell_id_or_module(id_or_module) do
-    MingaEditor.Shell.Registry.get(id_or_module) ||
-      resolve_shell_module(id_or_module) ||
-      MingaEditor.Shell.Registry.default()
+    case resolve_shell_entry(id_or_module) do
+      nil ->
+        default = MingaEditor.Shell.Registry.default()
+
+        Log.warning(
+          :editor,
+          "Configured default shell #{inspect(id_or_module)} is not registered, using #{default.id}"
+        )
+
+        default
+
+      entry ->
+        entry
+    end
+  end
+
+  @spec resolve_shell_entry(atom()) :: MingaEditor.Shell.Entry.t() | nil
+  defp resolve_shell_entry(id_or_module) do
+    MingaEditor.Shell.Registry.get(id_or_module) || resolve_shell_module(id_or_module)
   end
 
   @spec resolve_shell_module(module()) :: MingaEditor.Shell.Entry.t() | nil

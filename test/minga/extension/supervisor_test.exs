@@ -63,6 +63,169 @@ defmodule Minga.Extension.SupervisorTest do
       assert updated.module == Minga.TestExtensions.ValidExt
     end
 
+    test "returns the running pid instead of starting a duplicate child", ctx do
+      {path, cleanup} =
+        make_extension("AlreadyRunningExt", """
+        defmodule Minga.TestExtensions.AlreadyRunningExt do
+          use Minga.Extension
+
+          @impl true
+          def name, do: :already_running_ext
+
+          @impl true
+          def description, do: "Already running test extension"
+
+          @impl true
+          def version, do: "1.0.0"
+
+          @impl true
+          def init(_config), do: {:ok, %{}}
+        end
+        """)
+
+      on_exit(fn ->
+        cleanup.()
+        :code.purge(Minga.TestExtensions.AlreadyRunningExt)
+        :code.delete(Minga.TestExtensions.AlreadyRunningExt)
+      end)
+
+      :ok = ExtRegistry.register(ctx.registry, :already_running_ext, path, [])
+      {:ok, entry} = ExtRegistry.get(ctx.registry, :already_running_ext)
+
+      assert {:ok, pid} =
+               ExtSupervisor.start_extension(
+                 ctx.supervisor,
+                 ctx.registry,
+                 :already_running_ext,
+                 entry
+               )
+
+      assert {:ok, ^pid} =
+               ExtSupervisor.start_extension(
+                 ctx.supervisor,
+                 ctx.registry,
+                 :already_running_ext,
+                 entry
+               )
+
+      children = DynamicSupervisor.which_children(ctx.supervisor)
+
+      assert Enum.count(children, fn {_id, child_pid, _type, _modules} -> child_pid == pid end) ==
+               1
+    end
+
+    test "reuses supervised child when registry running pid is stale", ctx do
+      {path, cleanup} =
+        make_extension("StaleRegistryPidExt", """
+        defmodule Minga.TestExtensions.StaleRegistryPidExt do
+          use Minga.Extension
+
+          @impl true
+          def name, do: :stale_registry_pid_ext
+
+          @impl true
+          def description, do: "Stale registry pid test extension"
+
+          @impl true
+          def version, do: "1.0.0"
+
+          @impl true
+          def init(_config), do: {:ok, %{}}
+        end
+        """)
+
+      on_exit(fn ->
+        cleanup.()
+        :code.purge(Minga.TestExtensions.StaleRegistryPidExt)
+        :code.delete(Minga.TestExtensions.StaleRegistryPidExt)
+      end)
+
+      :ok = ExtRegistry.register(ctx.registry, :stale_registry_pid_ext, path, [])
+      {:ok, entry} = ExtRegistry.get(ctx.registry, :stale_registry_pid_ext)
+
+      assert {:ok, pid} =
+               ExtSupervisor.start_extension(
+                 ctx.supervisor,
+                 ctx.registry,
+                 :stale_registry_pid_ext,
+                 entry
+               )
+
+      stale_pid = self()
+
+      ExtRegistry.update(ctx.registry, :stale_registry_pid_ext,
+        status: :running,
+        pid: stale_pid,
+        module: Minga.TestExtensions.StaleRegistryPidExt
+      )
+
+      assert {:ok, ^pid} =
+               ExtSupervisor.start_extension(
+                 ctx.supervisor,
+                 ctx.registry,
+                 :stale_registry_pid_ext,
+                 entry
+               )
+
+      {:ok, updated} = ExtRegistry.get(ctx.registry, :stale_registry_pid_ext)
+      assert updated.pid == pid
+
+      children = DynamicSupervisor.which_children(ctx.supervisor)
+
+      assert Enum.count(children, fn {_id, child_pid, _type, _modules} -> child_pid == pid end) ==
+               1
+    end
+
+    test "restarts when registry has stale running pid outside supervisor", ctx do
+      {path, cleanup} =
+        make_extension("StaleRunningExt", """
+        defmodule Minga.TestExtensions.StaleRunningExt do
+          use Minga.Extension
+
+          @impl true
+          def name, do: :stale_running_ext
+
+          @impl true
+          def description, do: "Stale running test extension"
+
+          @impl true
+          def version, do: "1.0.0"
+
+          @impl true
+          def init(_config), do: {:ok, %{}}
+        end
+        """)
+
+      on_exit(fn ->
+        cleanup.()
+        :code.purge(Minga.TestExtensions.StaleRunningExt)
+        :code.delete(Minga.TestExtensions.StaleRunningExt)
+      end)
+
+      :ok = ExtRegistry.register(ctx.registry, :stale_running_ext, path, [])
+      {:ok, entry} = ExtRegistry.get(ctx.registry, :stale_running_ext)
+      stale_pid = self()
+
+      ExtRegistry.update(ctx.registry, :stale_running_ext,
+        status: :running,
+        pid: stale_pid,
+        module: Minga.TestExtensions.StaleRunningExt
+      )
+
+      assert {:ok, pid} =
+               ExtSupervisor.start_extension(
+                 ctx.supervisor,
+                 ctx.registry,
+                 :stale_running_ext,
+                 entry
+               )
+
+      assert pid != stale_pid
+      {:ok, updated} = ExtRegistry.get(ctx.registry, :stale_running_ext)
+      assert updated.status == :running
+      assert updated.pid == pid
+    end
+
     test "records load_error for nonexistent path", ctx do
       :ok =
         ExtRegistry.register(
@@ -132,13 +295,10 @@ defmodule Minga.Extension.SupervisorTest do
       assert updated.status == :load_error
     end
 
-    test "records load_error for an unknown hex application without interning it", ctx do
-      package = "missing-hex-app-#{System.unique_integer([:positive])}"
-      normalized = String.replace(package, "-", "_")
+    test "records load_error when a hex application cannot start", ctx do
+      package = "missing_hex_app_#{System.unique_integer([:positive])}"
 
-      assert_raise ArgumentError, fn -> String.to_existing_atom(normalized) end
-
-      :ok = ExtRegistry.register_hex(ctx.registry, :hex_start_fail, package, [])
+      :ok = ExtRegistry.register_hex(ctx.registry, :hex_start_fail, package, app: :hex_start_fail)
       {:ok, entry} = ExtRegistry.get(ctx.registry, :hex_start_fail)
 
       assert {:error, {:hex_application_start_failed, :hex_start_fail, _reason}} =
@@ -147,85 +307,6 @@ defmodule Minga.Extension.SupervisorTest do
       {:ok, updated} = ExtRegistry.get(ctx.registry, :hex_start_fail)
       assert updated.status == :load_error
       assert updated.pid == nil
-      assert updated.manifest == nil
-      assert_raise ArgumentError, fn -> String.to_existing_atom(normalized) end
-    end
-
-    test "starts a hex extension when package alias and explicit app atom differ", ctx do
-      app_atom = :minga_hex_runtime_explicit_app
-      app_module = Minga.Extension.SupervisorTest.HexRuntimeApp
-      extension_module = Minga.TestExtensions.HexRuntimeExplicitApp
-
-      Code.compile_quoted(
-        quote do
-          defmodule unquote(app_module) do
-            @moduledoc false
-            use Application
-
-            @impl true
-            def start(_type, _args), do: Supervisor.start_link([], strategy: :one_for_one)
-          end
-
-          defmodule unquote(extension_module) do
-            use Minga.Extension
-
-            @impl true
-            def name, do: :hex_runtime_alias
-
-            @impl true
-            def description, do: "Hex runtime explicit app"
-
-            @impl true
-            def version, do: "1.0.0"
-
-            @impl true
-            def init(_config), do: {:ok, %{}}
-          end
-        end,
-        __ENV__.file
-      )
-
-      on_exit(fn ->
-        :application.stop(app_atom)
-        :application.unload(app_atom)
-        :code.purge(extension_module)
-        :code.delete(extension_module)
-        :code.purge(app_module)
-        :code.delete(app_module)
-      end)
-
-      :ok =
-        :application.load(
-          {:application, app_atom,
-           [
-             description: ~c"Hex runtime explicit app",
-             vsn: ~c"1.0.0",
-             applications: [:kernel, :stdlib],
-             modules: [app_module, extension_module],
-             registered: [],
-             mod: {app_module, []}
-           ]}
-        )
-
-      :ok =
-        ExtRegistry.register_hex(ctx.registry, :hex_runtime_alias, "minga-hex-runtime-package",
-          app: app_atom
-        )
-
-      {:ok, entry} = ExtRegistry.get(ctx.registry, :hex_runtime_alias)
-
-      assert {:ok, pid} =
-               ExtSupervisor.start_extension(
-                 ctx.supervisor,
-                 ctx.registry,
-                 :hex_runtime_alias,
-                 entry
-               )
-
-      {:ok, updated} = ExtRegistry.get(ctx.registry, :hex_runtime_alias)
-      assert updated.status == :running
-      assert updated.pid == pid
-      assert updated.module == extension_module
     end
 
     test "passes config to init/1", ctx do
@@ -275,19 +356,16 @@ defmodule Minga.Extension.SupervisorTest do
     test "preserves supervisor lookup failures instead of reporting not found", ctx do
       :ok = ExtRegistry.register(ctx.registry, :lookup_failure, System.tmp_dir!(), [])
 
-      lifecycle_ref = make_ref()
-
       :ok =
         ExtRegistry.update(ctx.registry, :lookup_failure,
           module: Minga.TestExtensions.LookupFailure,
           status: :running,
-          pid: nil,
-          lifecycle_ref: lifecycle_ref
+          pid: nil
         )
 
       {:ok, entry} = ExtRegistry.get(ctx.registry, :lookup_failure)
 
-      assert {:error, {:restart_lookup_failed, {:which_children_failed, _reason}}} =
+      assert {:error, {:which_children_failed, _reason}} =
                ExtSupervisor.stop_extension(
                  :missing_extension_supervisor,
                  ctx.registry,

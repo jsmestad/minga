@@ -2,6 +2,8 @@ defmodule MingaEditor.StartupTest do
   # async: false because startup_view_state/1 reads global CLI startup flags from Application env.
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureLog
+
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Config.Options
   alias Minga.Project.FileRef
@@ -12,6 +14,7 @@ defmodule MingaEditor.StartupTest do
   alias MingaEditor.Input
   alias MingaEditor.Input.FileTreeHandler
   alias MingaEditor.LayoutPreset
+  alias MingaEditor.Shell.Registry, as: ShellRegistry
   alias MingaEditor.Startup
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.TabBar
@@ -190,6 +193,62 @@ defmodule MingaEditor.StartupTest do
     after
       Input.reset_handlers()
       Sidebar.unregister_source(:builtin)
+    end
+
+    test "falls back to default shell when explicit startup shell is unavailable" do
+      ShellRegistry.reset_for_test()
+      ShellRegistry.seed_builtin()
+
+      {state, log} =
+        with_log(fn ->
+          Startup.build_initial_state(
+            backend: :headless,
+            port_manager: nil,
+            parser_manager: nil,
+            options_server: nil,
+            width: 80,
+            height: 24,
+            shell: :missing_shell
+          )
+        end)
+
+      assert log =~ "Requested shell :missing_shell is not registered"
+      assert state.shell_id == :traditional
+      assert state.shell == MingaEditor.Shell.Traditional
+      assert state.shell_identity.module == MingaEditor.Shell.Traditional
+      assert state.shell_identity.source == :builtin
+    after
+      ShellRegistry.reset_for_test()
+      ShellRegistry.seed_builtin()
+    end
+
+    test "falls back with a warning when configured default shell is unavailable" do
+      ShellRegistry.reset_for_test()
+      ShellRegistry.seed_builtin()
+      options_server = start_supervised!({Options, name: nil})
+      %{table: table} = :sys.get_state(options_server)
+      :ets.insert(table, {:default_shell, :missing_shell})
+      Process.put(:minga_config_options, options_server)
+
+      {state, log} =
+        with_log(fn ->
+          Startup.build_initial_state(
+            backend: :headless,
+            port_manager: nil,
+            parser_manager: nil,
+            options_server: options_server,
+            width: 80,
+            height: 24
+          )
+        end)
+
+      assert log =~ "Configured default shell :missing_shell is not registered"
+      assert state.shell_id == :traditional
+      assert state.shell == MingaEditor.Shell.Traditional
+    after
+      Process.delete(:minga_config_options)
+      ShellRegistry.reset_for_test()
+      ShellRegistry.seed_builtin()
     end
 
     test "normalizes nil and supplied options servers" do

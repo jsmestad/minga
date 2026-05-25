@@ -51,8 +51,8 @@ defmodule Minga.Extension.UpdaterTest do
     end
 
     test "hex extensions track package and version", %{registry: r} do
-      ExtRegistry.register_hex(r, :hex_ext, "minga_tools", version: "~> 1.0")
-      {:ok, entry} = ExtRegistry.get(r, :hex_ext)
+      ExtRegistry.register_hex(r, :minga_tools, "minga_tools", version: "~> 1.0")
+      {:ok, entry} = ExtRegistry.get(r, :minga_tools)
       assert entry.source_type == :hex
       assert entry.hex.package == "minga_tools"
     end
