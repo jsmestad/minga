@@ -4,7 +4,9 @@
 # Usage: scripts/preview.sh <ViewName>
 #
 # Available views: EditorChromeView, AgentChromeView, GitStatusView,
-#                  FileTreeView, CompletionOverlay, StatusBarView, TabBarView,
+#                  GitStatusClean, GitStatusConflict, GitStatusDense,
+#                  FileTreeView, FileTreeEmpty, FileTreeError, FileTreeDeep,
+#                  CompletionOverlay, StatusBarView, TabBarView,
 #                  NotificationCenterView, ObservatoryView, AgentChatView,
 #                  PickerOverlay, MinibufferView, WhichKeyOverlay, SearchToolbar,
 #                  HoverPopupOverlay, SignatureHelpOverlay, DiagnosticsEditorView,
