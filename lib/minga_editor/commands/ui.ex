@@ -125,7 +125,7 @@ defmodule MingaEditor.Commands.UI do
   end
 
   @spec focus_observatory_sidebar(EditorState.t()) :: EditorState.t()
-  defp focus_observatory_sidebar(state) do
+  defp focus_observatory_sidebar(%EditorState{} = state) do
     state
     |> EditorState.update_file_tree(&FileTreeState.unfocus/1)
     |> EditorState.set_keymap_scope(:editor)

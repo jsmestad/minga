@@ -9,7 +9,16 @@ defmodule MingaEditor.Shell.Entry do
   @type capability :: atom()
 
   @enforce_keys [:id, :source, :module, :display_name, :description, :capabilities]
-  defstruct [:id, :source, :module, :display_name, :description, :capabilities, default?: false]
+  defstruct [
+    :id,
+    :source,
+    :module,
+    :display_name,
+    :description,
+    :capabilities,
+    default?: false,
+    generation: 0
+  ]
 
   @type t :: %__MODULE__{
           id: atom(),
@@ -18,8 +27,35 @@ defmodule MingaEditor.Shell.Entry do
           display_name: String.t(),
           description: String.t(),
           capabilities: [capability()],
-          default?: boolean()
+          default?: boolean(),
+          generation: non_neg_integer()
         }
+
+  @doc "Builds a validated built-in shell entry or raises if the shell module is invalid."
+  @spec builtin!(atom(), module(), String.t(), String.t(), boolean()) :: t()
+  def builtin!(id, module, display_name, description, default?)
+      when is_atom(id) and is_atom(module) and is_binary(display_name) and is_binary(description) and
+             is_boolean(default?) do
+    case new(%{
+           id: id,
+           source: :builtin,
+           module: module,
+           display_name: display_name,
+           description: description,
+           capabilities: [:gui, :tui],
+           default?: default?
+         }) do
+      {:ok, entry} -> entry
+      {:error, reason} -> raise ArgumentError, "invalid built-in shell entry: #{inspect(reason)}"
+    end
+  end
+
+  @doc "Returns an entry with a registry-assigned generation."
+  @spec with_generation(t(), non_neg_integer()) :: t()
+  def with_generation(%__MODULE__{} = entry, generation)
+      when is_integer(generation) and generation >= 0 do
+    %{entry | generation: generation}
+  end
 
   @doc "Builds a validated shell entry."
   @spec new(keyword() | map()) :: {:ok, t()} | {:error, term()}

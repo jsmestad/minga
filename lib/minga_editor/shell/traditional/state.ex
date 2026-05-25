@@ -103,7 +103,7 @@ defmodule MingaEditor.Shell.Traditional.State do
   @doc "Sets the transient status message shown in the modeline."
   @spec set_status(t(), String.t()) :: t()
   def set_status(%{} = ss, msg) when is_binary(msg) do
-    %{ss | status_msg: msg}
+    Map.put(ss, :status_msg, msg)
   end
 
   @doc "Clears the transient status message."
@@ -111,7 +111,7 @@ defmodule MingaEditor.Shell.Traditional.State do
   def clear_status(%{status_msg: nil} = ss), do: ss
 
   def clear_status(%{} = ss) do
-    %{ss | status_msg: nil}
+    Map.put(ss, :status_msg, nil)
   end
 
   # ── Nav flash ──────────────────────────────────────────────────────────────

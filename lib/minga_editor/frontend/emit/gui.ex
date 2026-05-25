@@ -24,6 +24,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   alias MingaEditor.Agent.View.PromptSemanticWindow
   alias Minga.Buffer
   alias Minga.Config
+  alias Minga.Log
   alias Minga.Diagnostics, as: DiagnosticStore
   alias Minga.LSP.SyncServer
 
@@ -1901,7 +1902,18 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     case shell.gui_payload(ctx) do
       {:board, board} -> build_gui_board_payload_cmd(board, caches)
       nil -> dismiss_gui_board_cmd(caches)
+      other -> unsupported_gui_payload_cmd(other, caches)
     end
+  end
+
+  @spec unsupported_gui_payload_cmd(term(), Caches.t()) :: {binary() | nil, Caches.t()}
+  defp unsupported_gui_payload_cmd(payload, caches) do
+    Log.warning(
+      :render,
+      "Unsupported GUI shell payload #{inspect(payload)}; dismissing Board surface"
+    )
+
+    dismiss_gui_board_cmd(caches)
   end
 
   @spec build_gui_board_payload_cmd(MingaEditor.Shell.Board.State.t(), Caches.t()) ::

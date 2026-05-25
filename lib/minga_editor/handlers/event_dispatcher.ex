@@ -202,6 +202,8 @@ defmodule MingaEditor.Handlers.EventDispatcher do
       ) do
     AgentSession.subscribe(handle.pid, self())
 
+    state = EditorState.ensure_shell_available(state)
+
     {shell_state, workspace} =
       EditorState.active_shell_module(state).handle_event(
         state.shell_state,
@@ -547,7 +549,9 @@ defmodule MingaEditor.Handlers.EventDispatcher do
     end
   end
 
-  defp active_remote_server?(state, server_name) do
+  defp active_remote_server?(%EditorState{} = state, server_name) do
+    state = EditorState.ensure_shell_available(state)
+
     case EditorState.active_shell_module(state).active_tab(state.shell_state) do
       %Tab{server_name: ^server_name} -> true
       _ -> false

@@ -11,6 +11,8 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
   alias MingaEditor.DisplayList.{Cursor, Frame, WindowFrame}
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline.Input, as: PipelineInput
+  alias MingaEditor.Shell.Identity, as: ShellIdentity
+  alias MingaEditor.Shell.Registry, as: ShellRegistry
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.{Buffers, Highlighting, Windows}
   alias MingaEditor.Viewport
@@ -42,6 +44,8 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
     window = Window.new(win_id, buf, rows, cols)
 
     vp = Viewport.new(rows, cols)
+    ShellRegistry.seed_builtin()
+    shell_entry = ShellRegistry.get(:traditional)
 
     %EditorState{
       port_manager: self(),
@@ -59,6 +63,7 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
         highlight: %Highlighting{}
       },
       focus_stack: Input.default_stack(),
+      shell_identity: ShellIdentity.new(shell_entry),
       theme: Theme.get!(:doom_one)
     }
   end

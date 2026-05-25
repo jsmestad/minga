@@ -17,38 +17,32 @@ defmodule Minga.Extension.HexTest do
     end
 
     test "collects hex deps with version constraints", %{registry: r} do
-      ExtRegistry.register_hex(r, :snippets, "minga_snippets", version: "~> 0.3")
-      ExtRegistry.register_hex(r, :tools, "minga_tools", version: ">= 1.0.0")
+      ExtRegistry.register_hex(r, :minga_snippets, "minga_snippets", version: "~> 0.3")
+
+      ExtRegistry.register_hex(r, :tools, "minga_tools", app: :minga_tools, version: ">= 1.0.0")
 
       deps = ExtHex.collect_hex_deps(r) |> Enum.sort()
 
       assert deps == [
-               {:snippets, "~> 0.3", hex: "minga_snippets"},
-               {:tools, ">= 1.0.0", hex: "minga_tools"}
+               {:minga_snippets, "~> 0.3", [hex: "minga_snippets"]},
+               {:minga_tools, ">= 1.0.0", [hex: "minga_tools"]}
              ]
     end
 
     test "uses >= 0.0.0 for extensions without version constraint", %{registry: r} do
-      ExtRegistry.register_hex(r, :snippets, "minga_snippets", [])
+      ExtRegistry.register_hex(r, :minga_snippets, "minga_snippets", [])
 
       deps = ExtHex.collect_hex_deps(r)
-      assert deps == [{:snippets, ">= 0.0.0", hex: "minga_snippets"}]
-    end
-
-    test "uses an explicit app atom when provided", %{registry: r} do
-      ExtRegistry.register_hex(r, :snippets, "minga_snippets", app: :minga_snippets)
-
-      deps = ExtHex.collect_hex_deps(r)
-      assert deps == [{:minga_snippets, ">= 0.0.0", hex: "minga_snippets"}]
+      assert deps == [{:minga_snippets, ">= 0.0.0", [hex: "minga_snippets"]}]
     end
 
     test "ignores path and git extensions", %{registry: r} do
       ExtRegistry.register(r, :local, "/tmp/ext", [])
       ExtRegistry.register_git(r, :git_ext, "https://github.com/user/repo", [])
-      ExtRegistry.register_hex(r, :hex_ext, "minga_snippets", version: "~> 0.3")
+      ExtRegistry.register_hex(r, :minga_snippets, "minga_snippets", version: "~> 0.3")
 
       deps = ExtHex.collect_hex_deps(r)
-      assert deps == [{:hex_ext, "~> 0.3", hex: "minga_snippets"}]
+      assert deps == [{:minga_snippets, "~> 0.3", [hex: "minga_snippets"]}]
     end
   end
 

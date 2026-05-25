@@ -6,6 +6,7 @@ defmodule MingaEditor.FeatureStateTest do
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Board.Card
   alias MingaEditor.Shell.Board.State, as: BoardState
+  alias MingaEditor.Shell.StateStash
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
@@ -142,13 +143,13 @@ defmodule MingaEditor.FeatureStateTest do
       shell_id: :board,
       shell: MingaEditor.Shell.Board,
       shell_state: board,
-      shell_state_stash: %{board: stashed_board}
+      shell_state_stash: %{board: board_stash(stashed_board)}
     }
 
     cleaned = EditorState.drop_feature_state_source(state, @source)
 
     cleaned_context = cleaned.shell_state.cards[1].workspace
-    cleaned_stashed_context = cleaned.shell_state_stash.board.cards[2].workspace
+    cleaned_stashed_context = cleaned.shell_state_stash.board.state.cards[2].workspace
     restored = SessionState.restore_tab_context(workspace(), cleaned_context)
     restored_stashed = SessionState.restore_tab_context(workspace(), cleaned_stashed_context)
 
@@ -188,7 +189,7 @@ defmodule MingaEditor.FeatureStateTest do
       port_manager: self(),
       workspace: live_workspace,
       shell_state: %ShellState{tab_bar: TabBar.new(tab)},
-      stashed_board_state: board_with_workspace(2, board_context)
+      shell_state_stash: %{board: board_stash(board_with_workspace(2, board_context))}
     }
 
     reloaded =
@@ -206,7 +207,8 @@ defmodule MingaEditor.FeatureStateTest do
           builtin: :tab_builtin
         )
 
-        assert_snapshot_feature_state(cleaned_state.stashed_board_state.cards[2].workspace,
+        assert_snapshot_feature_state(
+          cleaned_state.shell_state_stash.board.state.cards[2].workspace,
           config: nil,
           extension: nil,
           builtin: :board_builtin
@@ -231,7 +233,7 @@ defmodule MingaEditor.FeatureStateTest do
       builtin: :tab_builtin
     )
 
-    assert_snapshot_feature_state(reloaded.stashed_board_state.cards[2].workspace,
+    assert_snapshot_feature_state(reloaded.shell_state_stash.board.state.cards[2].workspace,
       config: nil,
       extension: nil,
       builtin: :board_builtin
@@ -344,6 +346,11 @@ defmodule MingaEditor.FeatureStateTest do
   @spec workspace() :: SessionState.t()
   defp workspace do
     %SessionState{viewport: Viewport.new(24, 80)}
+  end
+
+  @spec board_stash(BoardState.t()) :: StateStash.t()
+  defp board_stash(%BoardState{} = board) do
+    %StateStash{module: MingaEditor.Shell.Board, source: :builtin, generation: 0, state: board}
   end
 
   @spec board_with_workspace(Card.id(), Card.workspace_snapshot()) :: BoardState.t()

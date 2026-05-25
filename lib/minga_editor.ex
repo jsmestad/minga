@@ -1091,6 +1091,8 @@ defmodule MingaEditor do
   end
 
   defp route_agent_event(state, session_pid, event, :background) do
+    state = EditorState.ensure_shell_available(state)
+
     {shell_state, workspace, shell_effects} =
       EditorState.active_shell_module(state).on_agent_event(
         state.shell_state,

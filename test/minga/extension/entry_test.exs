@@ -63,30 +63,31 @@ defmodule Minga.Extension.EntryTest do
     end
   end
 
-  describe "from_hex/2" do
+  describe "from_hex/3" do
     test "creates a hex-sourced entry with version constraint" do
-      entry = Entry.from_hex("minga_snippets", version: "~> 0.3")
+      entry = Entry.from_hex("minga_snippets", :minga_snippets, version: "~> 0.3")
 
       assert %Entry{} = entry
       assert entry.source_type == :hex
-      assert entry.hex == %{package: "minga_snippets", version: "~> 0.3", app: nil}
+      assert entry.hex == %{package: "minga_snippets", version: "~> 0.3", app: :minga_snippets}
       assert entry.path == nil
       assert entry.git == nil
       assert entry.config == []
     end
 
     test "creates a hex-sourced entry without version" do
-      entry = Entry.from_hex("minga_snippets", [])
+      entry = Entry.from_hex("minga_snippets", :minga_snippets, [])
 
       assert entry.hex.package == "minga_snippets"
       assert entry.hex.version == nil
-      assert entry.hex.app == nil
     end
 
     test "separates version from extension config" do
-      entry = Entry.from_hex("minga_snippets", version: "~> 1.0", greeting: "hello")
+      entry =
+        Entry.from_hex("minga_snippets", :minga_snippets, version: "~> 1.0", greeting: "hello")
 
       assert entry.hex.version == "~> 1.0"
+      assert entry.hex.app == :minga_snippets
       assert entry.config == [greeting: "hello"]
     end
   end

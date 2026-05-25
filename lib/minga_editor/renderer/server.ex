@@ -60,6 +60,7 @@ defmodule MingaEditor.Renderer.Server do
           required(:layout) => MingaEditor.Layout.t() | nil,
           required(:focus_tree) => MingaEditor.FocusTree.t() | nil,
           required(:shell_id) => atom(),
+          required(:shell_identity) => MingaEditor.Shell.Identity.t() | nil,
           required(:shell_state) => term(),
           required(:windows) => term(),
           required(:frame_seq) => non_neg_integer()
@@ -219,6 +220,7 @@ defmodule MingaEditor.Renderer.Server do
       layout: output.layout,
       focus_tree: output.focus_tree,
       shell_id: output.shell_id,
+      shell_identity: output.shell_identity,
       shell_state: output.shell_state,
       windows: output.workspace.windows,
       frame_seq: seq
