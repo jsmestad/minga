@@ -48,7 +48,7 @@ struct ActivityBarViewTests {
     @Test("Git badge falls back to full total count without narrowing")
     @MainActor func gitBadgeUsesLargeTotalCount() throws {
         let guiState = GUIState()
-        guiState.gitStatusState.entries = (0..<70_000).map { index in
+        guiState.gitStatusState.changedEntries = (0..<70_000).map { index in
             GitStatusEntry(pathHash: UInt32(index), section: .changed, status: .modified, path: "file_\(index).ex")
         }
         guiState.sidebarHostState.update(activeId: "git_status", sidebars: sidebarMetadata())
@@ -76,9 +76,9 @@ struct ActivityBarViewTests {
 
     private func sidebarMetadata(gitBadgeCount: UInt16? = nil) -> [Wire.SidebarMetadata] {
         [
-            Wire.SidebarMetadata(id: "file_tree", displayName: "File Tree", semanticKind: "file_tree", icon: "folder", order: 10, visible: false, focused: false, preferredWidth: 30, badgeCount: nil),
-            Wire.SidebarMetadata(id: "git_status", displayName: "Git Status", semanticKind: "git_status", icon: "point.3.filled.connected.trianglepath.dotted", order: 20, visible: false, focused: false, preferredWidth: 30, badgeCount: gitBadgeCount),
-            Wire.SidebarMetadata(id: "observatory", displayName: "BEAM Observatory", semanticKind: "observatory", icon: "network", order: 30, visible: false, focused: false, preferredWidth: 30, badgeCount: nil)
+            Wire.SidebarMetadata(id: "file_tree", displayName: "File Tree", semanticKind: "file_tree", icon: "folder", order: 10, visible: true, focused: false, preferredWidth: 30, badgeCount: nil),
+            Wire.SidebarMetadata(id: "git_status", displayName: "Git Status", semanticKind: "git_status", icon: "point.3.filled.connected.trianglepath.dotted", order: 20, visible: true, focused: false, preferredWidth: 30, badgeCount: gitBadgeCount),
+            Wire.SidebarMetadata(id: "observatory", displayName: "BEAM Observatory", semanticKind: "observatory", icon: "network", order: 30, visible: true, focused: false, preferredWidth: 30, badgeCount: nil)
         ]
     }
 }

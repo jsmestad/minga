@@ -53,6 +53,7 @@
 		20DE27562883B504C119A22F /* FileTreeRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D767F7A50F82AD806EA1B86E /* FileTreeRowView.swift */; };
 		22315F71081A55C37A2DDC60 /* NotificationCenterState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FC35125B6A0561FE9B5B231 /* NotificationCenterState.swift */; };
 		22A66EB080AFFEDCE9AC329D /* ActivityBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80457F318D9322F416DA291 /* ActivityBar.swift */; };
+		236A0542773564BED642D5AD /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A84218125A9F97DBE87F349 /* ContentView.swift */; };
 		23C300C87E722F7CCA072DFF /* ExtensionPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A9BB136A9D180CCAD371E51 /* ExtensionPanelView.swift */; };
 		23DA463A92D1EC2F7BFA5B5A /* CoreTextMetalRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DDE4A535E0895090BF02EE8 /* CoreTextMetalRenderer.swift */; };
 		25B21FDC79D3F65CAA270C99 /* Instrumentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53CEDDFB3856C44BA51C8A7B /* Instrumentation.swift */; };
@@ -67,6 +68,7 @@
 		2DF34C5298A3A265364EDC7C /* MingaWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D02E1034A8BFBDB7E15FCE9 /* MingaWindow.swift */; };
 		2F5F89DAEB979F0B5ACB9E7F /* AgentContextBarState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65D15FC229A7AAA6AD493D1F /* AgentContextBarState.swift */; };
 		2FD4D85B9612CA458246F06E /* SignatureHelpOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0070B497768FE68A63F5F114 /* SignatureHelpOverlay.swift */; };
+		2FF702C4573CDB88FD43AF15 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A84218125A9F97DBE87F349 /* ContentView.swift */; };
 		30AF3AD9C1C7F46956940CEC /* FontManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79F5D551302873BE8F7240ED /* FontManager.swift */; };
 		30E31170A79F30413D15D858 /* GUIChromeDecoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 754C68BAFE0C4DB553BFD06A /* GUIChromeDecoderTests.swift */; };
 		31B993BFA99DD58462B8924B /* SparklineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9958CDCF40B9580E12AD1A81 /* SparklineView.swift */; };
@@ -221,6 +223,7 @@
 		95414E780DC432E84A1E6C22 /* NativeSidebarRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6E97CAAF19098EC60D6557B /* NativeSidebarRegistry.swift */; };
 		95F6DCD24E2D261CF64EC8EB /* FontFace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BC98120D82BD7548347875E /* FontFace.swift */; };
 		9758BF46BB0EC7FEEB14FBA3 /* SwiftUIViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86478D5660213F165B7E1E35 /* SwiftUIViewTests.swift */; };
+		9BA59A1D924999EEC65EEBCC /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A84218125A9F97DBE87F349 /* ContentView.swift */; };
 		9C0676A96179F6068B85CCA1 /* RecoveryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A6769D066EC44A58791CFC /* RecoveryManager.swift */; };
 		9C65FF0EFDEE1274B7335032 /* ObservatoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB89E1589D78EC2BACA5D892 /* ObservatoryView.swift */; };
 		9CC563AE009A1EA1A0BE0D9F /* SettingsStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26C02007D4036FC9C7D0FB71 /* SettingsStateTests.swift */; };
@@ -457,6 +460,7 @@
 		836BA390DF0C2A711D270D2C /* ExtensionOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionOverlayView.swift; sourceTree = "<group>"; };
 		84C47F406747CA6DD924A1AB /* FloatPopupOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatPopupOverlay.swift; sourceTree = "<group>"; };
 		86478D5660213F165B7E1E35 /* SwiftUIViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftUIViewTests.swift; sourceTree = "<group>"; };
+		8A84218125A9F97DBE87F349 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		8F9DA04BBCBA8D286E62C0EA /* EditTimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditTimelineView.swift; sourceTree = "<group>"; };
 		912C5F808709BABFF3126DEE /* AppearanceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceSettingsView.swift; sourceTree = "<group>"; };
 		92C0836F0D4150126F181C05 /* PickerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PickerState.swift; sourceTree = "<group>"; };
@@ -734,6 +738,7 @@
 			children = (
 				B9FC2118EA77254CBCAE7B0B /* AppState.swift */,
 				F0EFEC421284D11AD2177113 /* BEAMProcessManager.swift */,
+				8A84218125A9F97DBE87F349 /* ContentView.swift */,
 				53CEDDFB3856C44BA51C8A7B /* Instrumentation.swift */,
 				4A647814918768E62822D4A1 /* MingaApp.swift */,
 				B4D576456737CFE8706B66F5 /* PowerThermalPolicy.swift */,
@@ -1099,6 +1104,7 @@
 				C44D9CF03C49E7BCA39A76A9 /* CommandDispatcher.swift in Sources */,
 				6F7F50CEC5067770E4865C2A /* CompletionOverlay.swift in Sources */,
 				B2063C405BABC6C1D394C3AF /* CompletionState.swift in Sources */,
+				236A0542773564BED642D5AD /* ContentView.swift in Sources */,
 				23DA463A92D1EC2F7BFA5B5A /* CoreTextMetalRenderer.swift in Sources */,
 				16116567DD7218A82575360A /* CoreTextShaders.metal in Sources */,
 				5E6F3B6E3BDA7B6CC3965F96 /* DispatchSheetState.swift in Sources */,
@@ -1213,6 +1219,7 @@
 				45A352459C76907D8E4CB596 /* CommandDispatcher.swift in Sources */,
 				E875D0158B461B4B2FA4BEF7 /* CompletionOverlay.swift in Sources */,
 				E93CE7A76DFFE33E52603B3A /* CompletionState.swift in Sources */,
+				2FF702C4573CDB88FD43AF15 /* ContentView.swift in Sources */,
 				8FB0DF76DEB5112AD590BB11 /* CoreTextMetalRenderer.swift in Sources */,
 				1A7BC027E152504B67F6F418 /* CoreTextShaders.metal in Sources */,
 				A084A045EA71D390C188EB23 /* DispatchSheetState.swift in Sources */,
@@ -1329,6 +1336,7 @@
 				28F3D7BFADCE4A2509D66C2B /* CommandDispatcherTests.swift in Sources */,
 				C00E62ED31BA198B0EC92EAF /* CompletionOverlay.swift in Sources */,
 				C607CC562920162A87010EA9 /* CompletionState.swift in Sources */,
+				9BA59A1D924999EEC65EEBCC /* ContentView.swift in Sources */,
 				527C7DB557EFD09B3161BC20 /* CoreTextMetalRenderer.swift in Sources */,
 				BF89605C029E1F2F4EE328EA /* CoreTextMetalRendererCursorTests.swift in Sources */,
 				F3BB64E36F257BD7FACEA5D6 /* CoreTextShaders.metal in Sources */,
