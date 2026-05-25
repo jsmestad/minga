@@ -25,7 +25,6 @@ defmodule MingaEditor.Input do
   alias MingaEditor.Input.ConflictPrompt
   alias MingaEditor.Input.Dashboard
   alias MingaEditor.Input.DiffReview
-  alias MingaEditor.Input.Dired
   alias MingaEditor.Input.FileTreeHandler
   alias MingaEditor.Input.GitStatus
   alias MingaEditor.Input.GlobalBindings
@@ -59,7 +58,6 @@ defmodule MingaEditor.Input do
     {AgentPanel, 40},
     {FileTreeHandler, 50},
     {GitStatus, 60},
-    {Dired, 70},
     {Popup, 80},
     {MingaEditor.Input.CUA.TUISpaceLeader, 90},
     {Scoped, 100},

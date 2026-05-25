@@ -7,7 +7,6 @@ defmodule MingaEditor.State.Tab.Context do
 
   alias Minga.Keymap.Scope
   alias MingaEditor.State.Buffers
-  alias MingaEditor.State.Dired, as: DiredState
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Mouse
   alias MingaEditor.State.Search
@@ -23,7 +22,7 @@ defmodule MingaEditor.State.Tab.Context do
     :buffers,
     :windows,
     :file_tree,
-    :dired,
+    :feature_state,
     :viewport,
     :mouse,
     :lsp_pending,
@@ -38,7 +37,7 @@ defmodule MingaEditor.State.Tab.Context do
           | :buffers
           | :windows
           | :file_tree
-          | :dired
+          | :feature_state
           | :viewport
           | :mouse
           | :lsp_pending
@@ -59,7 +58,7 @@ defmodule MingaEditor.State.Tab.Context do
           buffers: Buffers.t() | nil,
           windows: Windows.t() | nil,
           file_tree: FileTreeState.t() | nil,
-          dired: DiredState.t() | nil,
+          feature_state: %{atom() => term()} | nil,
           viewport: Viewport.t() | nil,
           mouse: Mouse.t() | nil,
           lsp_pending: %{reference() => atom() | tuple()} | nil,
@@ -74,7 +73,7 @@ defmodule MingaEditor.State.Tab.Context do
             buffers: nil,
             windows: nil,
             file_tree: nil,
-            dired: nil,
+            feature_state: nil,
             viewport: nil,
             mouse: nil,
             lsp_pending: nil,
@@ -112,7 +111,7 @@ defmodule MingaEditor.State.Tab.Context do
       buffers: ws.buffers,
       windows: ws.windows,
       file_tree: ws.file_tree,
-      dired: ws.dired,
+      feature_state: ws.feature_state,
       viewport: ws.viewport,
       mouse: ws.mouse,
       lsp_pending: ws.lsp_pending,
@@ -217,7 +216,7 @@ defmodule MingaEditor.State.Tab.Context do
   defp valid_field?(:buffers, %Buffers{}), do: true
   defp valid_field?(:windows, %Windows{}), do: true
   defp valid_field?(:file_tree, %FileTreeState{}), do: true
-  defp valid_field?(:dired, %DiredState{}), do: true
+  defp valid_field?(:feature_state, value) when is_map(value) and not is_struct(value), do: true
   defp valid_field?(:viewport, %Viewport{}), do: true
   defp valid_field?(:mouse, %Mouse{}), do: true
   defp valid_field?(:lsp_pending, value) when is_map(value), do: true

@@ -1,37 +1,4 @@
-defmodule Minga.Dired.Entry do
-  @moduledoc """
-  A single directory entry with filesystem metadata.
-
-  Used by `Minga.Dired` to represent files, directories, and symlinks.
-  """
-
-  @enforce_keys [:path, :name]
-  defstruct [
-    :path,
-    :name,
-    dir?: false,
-    symlink?: false,
-    target: nil,
-    executable?: false,
-    size: 0,
-    mtime: nil,
-    mode: 0
-  ]
-
-  @type t :: %__MODULE__{
-          path: String.t(),
-          name: String.t(),
-          dir?: boolean(),
-          symlink?: boolean(),
-          target: String.t() | nil,
-          executable?: boolean(),
-          size: non_neg_integer(),
-          mtime: NaiveDateTime.t() | nil,
-          mode: non_neg_integer()
-        }
-end
-
-defmodule Minga.Dired do
+defmodule MingaDired.Core do
   @moduledoc """
   Pure data structure and functions for Oil.nvim-style directory buffers.
 
@@ -42,8 +9,8 @@ defmodule Minga.Dired do
   Layer 0: pure functions, no process dependencies.
   """
 
-  alias __MODULE__
-  alias Minga.Dired.Entry
+  alias MingaDired.Core
+  alias MingaDired.Entry
 
   @type sort_key :: :name | :size | :date | :extension
 
@@ -55,7 +22,7 @@ defmodule Minga.Dired do
           | {:create, String.t()}
           | {:mkdir, String.t()}
 
-  @type t :: %Dired{
+  @type t :: %Core{
           directory: String.t(),
           entries: [entry()],
           show_hidden: boolean(),
@@ -86,7 +53,7 @@ defmodule Minga.Dired do
           |> sort_entries(sort_by)
 
         {:ok,
-         %Dired{
+         %Core{
            directory: Path.expand(path),
            entries: entries,
            show_hidden: show_hidden,
@@ -199,7 +166,7 @@ defmodule Minga.Dired do
   defp format_name(%Entry{name: name}), do: name
 
   @spec format_listing(t()) :: String.t()
-  def format_listing(%Dired{entries: entries, show_details: show_details}) do
+  def format_listing(%Core{entries: entries, show_details: show_details}) do
     Enum.map_join(entries, "\n", &format_entry(&1, show_details))
   end
 
@@ -434,12 +401,12 @@ defmodule Minga.Dired do
   def parent_directory(path), do: Path.dirname(path)
 
   @spec entry_at_line(t(), non_neg_integer()) :: entry() | nil
-  def entry_at_line(%Dired{entries: entries}, line) do
+  def entry_at_line(%Core{entries: entries}, line) do
     Enum.at(entries, line)
   end
 
   @spec refresh(t()) :: {:ok, t()} | {:error, term()}
-  def refresh(%Dired{} = dired) do
+  def refresh(%Core{} = dired) do
     read_directory(dired.directory,
       show_hidden: dired.show_hidden,
       sort_by: dired.sort_by,
@@ -448,7 +415,7 @@ defmodule Minga.Dired do
   end
 
   @spec with_show_hidden(t(), boolean()) :: {:ok, t()} | {:error, term()}
-  def with_show_hidden(%Dired{} = dired, show_hidden) do
+  def with_show_hidden(%Core{} = dired, show_hidden) do
     read_directory(dired.directory,
       show_hidden: show_hidden,
       sort_by: dired.sort_by,
@@ -457,7 +424,7 @@ defmodule Minga.Dired do
   end
 
   @spec with_sort_by(t(), sort_key()) :: {:ok, t()} | {:error, term()}
-  def with_sort_by(%Dired{} = dired, sort_by) do
+  def with_sort_by(%Core{} = dired, sort_by) do
     read_directory(dired.directory,
       show_hidden: dired.show_hidden,
       sort_by: sort_by,
@@ -466,7 +433,7 @@ defmodule Minga.Dired do
   end
 
   @spec with_show_details(t(), boolean()) :: {:ok, t()} | {:error, term()}
-  def with_show_details(%Dired{} = dired, show_details) do
+  def with_show_details(%Core{} = dired, show_details) do
     read_directory(dired.directory,
       show_hidden: dired.show_hidden,
       sort_by: dired.sort_by,

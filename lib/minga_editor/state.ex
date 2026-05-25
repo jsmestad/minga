@@ -36,7 +36,6 @@ defmodule MingaEditor.State do
   alias MingaEditor.KeystrokeHistory
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
-  alias MingaEditor.State.Dired, as: DiredState
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.Session, as: EditorSessionState
   alias MingaEditor.State.Buffers
@@ -303,18 +302,22 @@ defmodule MingaEditor.State do
     end)
   end
 
-  @doc "Replaces the active workspace dired state."
-  @spec set_dired(t(), DiredState.t()) :: t()
-  def set_dired(%__MODULE__{} = state, %DiredState{} = dired) do
-    update_workspace(state, &SessionState.set_dired(&1, dired))
+  @doc "Returns the feature state for a key from the active workspace."
+  @spec get_feature_state(t(), atom()) :: term()
+  def get_feature_state(%__MODULE__{} = state, key) when is_atom(key) do
+    SessionState.get_feature_state(state.workspace, key)
   end
 
-  @doc "Updates the active workspace dired state."
-  @spec update_dired(t(), (DiredState.t() -> DiredState.t())) :: t()
-  def update_dired(%__MODULE__{} = state, fun) when is_function(fun, 1) do
-    update_workspace(state, fn workspace ->
-      SessionState.set_dired(workspace, fun.(workspace.dired))
-    end)
+  @doc "Sets a feature-state entry in the active workspace."
+  @spec set_feature_state(t(), atom(), term()) :: t()
+  def set_feature_state(%__MODULE__{} = state, key, value) when is_atom(key) do
+    update_workspace(state, &SessionState.set_feature_state(&1, key, value))
+  end
+
+  @doc "Updates a feature-state entry in the active workspace."
+  @spec update_feature_state(t(), atom(), term(), (term() -> term())) :: t()
+  def update_feature_state(%__MODULE__{} = state, key, default, fun) when is_atom(key) and is_function(fun, 1) do
+    update_workspace(state, &SessionState.update_feature_state(&1, key, default, fun))
   end
 
   @doc "Replaces the active workspace mouse state."

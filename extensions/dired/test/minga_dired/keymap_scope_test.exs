@@ -1,10 +1,17 @@
-defmodule Minga.Keymap.Scope.DiredScopeTest do
+defmodule MingaDired.KeymapScopeTest do
   use ExUnit.Case, async: true
 
   alias Minga.Keymap.Scope
+  alias MingaDired.KeymapScope
 
   @enter 13
   @escape 27
+
+  setup do
+    Scope.register({:extension, :dired}, KeymapScope)
+    on_exit(fn -> Scope.unregister(:dired) end)
+    :ok
+  end
 
   describe "normal mode bindings" do
     test "Enter resolves to dired_open_entry" do
@@ -91,7 +98,7 @@ defmodule Minga.Keymap.Scope.DiredScopeTest do
     end
 
     test "module_for returns Dired module" do
-      assert Scope.module_for(:dired) == Minga.Keymap.Scope.Dired
+      assert Scope.module_for(:dired) == MingaDired.KeymapScope
     end
   end
 end

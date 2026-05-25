@@ -160,4 +160,37 @@ defmodule MingaEditor.Session.StateTest do
       assert ctx.editing.mode_state == visual_state
     end
   end
+
+  describe "feature_state accessors" do
+    test "get_feature_state returns nil for absent key" do
+      ws = base_state().workspace
+      assert SessionState.get_feature_state(ws, :nonexistent) == nil
+    end
+
+    test "set_feature_state stores and get_feature_state retrieves" do
+      ws = base_state().workspace
+      ws = SessionState.set_feature_state(ws, :foo, 42)
+      assert SessionState.get_feature_state(ws, :foo) == 42
+    end
+
+    test "update_feature_state uses default when key is absent" do
+      ws = base_state().workspace
+      ws = SessionState.update_feature_state(ws, :counter, 0, &(&1 + 1))
+      assert SessionState.get_feature_state(ws, :counter) == 1
+    end
+
+    test "update_feature_state applies function to existing value" do
+      ws = base_state().workspace
+      ws = SessionState.set_feature_state(ws, :counter, 5)
+      ws = SessionState.update_feature_state(ws, :counter, 0, &(&1 + 1))
+      assert SessionState.get_feature_state(ws, :counter) == 6
+    end
+
+    test "set_feature_state overwrites existing value" do
+      ws = base_state().workspace
+      ws = SessionState.set_feature_state(ws, :key, :first)
+      ws = SessionState.set_feature_state(ws, :key, :second)
+      assert SessionState.get_feature_state(ws, :key) == :second
+    end
+  end
 end

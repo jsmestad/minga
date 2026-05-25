@@ -1,4 +1,4 @@
-defmodule MingaEditor.Input.Dired do
+defmodule MingaDired.Input do
   @moduledoc """
   Input handler for Oil.nvim-style directory buffers.
 
@@ -17,7 +17,7 @@ defmodule MingaEditor.Input.Dired do
 
   alias MingaEditor.Commands
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.Dired, as: DiredState
+  alias MingaDired.State, as: DiredState
   alias Minga.Keymap
   alias Minga.Keymap.Scope
 
@@ -25,22 +25,26 @@ defmodule MingaEditor.Input.Dired do
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
 
-  def handle_key(
-        %{workspace: %{keymap_scope: :dired, dired: %{confirming?: true}}} = state,
-        cp,
-        mods
-      ) do
-    handle_confirmation_key(state, cp, mods)
-  end
-
   def handle_key(%{workspace: %{keymap_scope: :dired}} = state, cp, mods) do
-    case pending_prefix(state) do
-      nil -> handle_fresh_key(state, cp, mods)
-      node -> handle_prefix_continuation(state, node, cp, mods)
+    dired_state = EditorState.get_feature_state(state, :dired)
+
+    case dired_confirming?(dired_state) do
+      true ->
+        handle_confirmation_key(state, cp, mods)
+
+      false ->
+        case pending_prefix(state) do
+          nil -> handle_fresh_key(state, cp, mods)
+          node -> handle_prefix_continuation(state, node, cp, mods)
+        end
     end
   end
 
   def handle_key(state, _cp, _mods), do: {:passthrough, state}
+
+  @spec dired_confirming?(term()) :: boolean()
+  defp dired_confirming?(%DiredState{confirming?: true}), do: true
+  defp dired_confirming?(_), do: false
 
   @spec handle_fresh_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
@@ -124,7 +128,12 @@ defmodule MingaEditor.Input.Dired do
   # ── Prefix tracking ───────────────────────────────────────────────────
 
   @spec pending_prefix(state()) :: Minga.Keymap.Bindings.node_t() | nil
-  defp pending_prefix(state), do: state.workspace.dired.pending_prefix
+  defp pending_prefix(state) do
+    case EditorState.get_feature_state(state, :dired) do
+      %DiredState{pending_prefix: prefix} -> prefix
+      _ -> nil
+    end
+  end
 
   @spec put_pending_prefix(state(), Minga.Keymap.Bindings.node_t()) :: state()
   defp put_pending_prefix(state, node) do
@@ -138,6 +147,11 @@ defmodule MingaEditor.Input.Dired do
 
   @spec update_pending_prefix(state(), Minga.Keymap.Bindings.node_t() | nil) :: state()
   defp update_pending_prefix(state, prefix) do
-    EditorState.update_dired(state, &DiredState.set_pending_prefix(&1, prefix))
+    EditorState.update_feature_state(
+      state,
+      :dired,
+      %DiredState{},
+      &DiredState.set_pending_prefix(&1, prefix)
+    )
   end
 end
