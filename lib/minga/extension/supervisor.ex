@@ -366,7 +366,7 @@ defmodule Minga.Extension.Supervisor do
       {:error, reason} ->
         msg = "Extension #{name} load error: #{inspect(reason)}"
         Minga.Log.warning(:config, msg)
-        ExtRegistry.update(registry, name, status: :load_error, pid: nil)
+        ExtRegistry.update(registry, name, status: :load_error, pid: nil, manifest: nil)
         wrap_start_failure(name, reason, cmd_registry, keymap, opts)
     end
   end
@@ -505,7 +505,7 @@ defmodule Minga.Extension.Supervisor do
     cleanup_result = cleanup_extension_contributions(name, cmd_registry, keymap, opts)
     msg = "Extension #{name} load error: #{inspect(reason)}"
     Minga.Log.warning(:config, msg)
-    ExtRegistry.update(registry, name, status: :load_error, pid: nil)
+    ExtRegistry.update(registry, name, status: :load_error, pid: nil, manifest: nil)
 
     case cleanup_result do
       :ok -> {:error, reason}
@@ -549,7 +549,7 @@ defmodule Minga.Extension.Supervisor do
       {:error, reason} ->
         msg = "Extension #{name} failed to start: #{inspect(reason)}"
         Minga.Log.warning(:config, msg)
-        ExtRegistry.update(registry, name, module: module, status: :load_error, pid: nil)
+        ExtRegistry.update(registry, name, module: module, status: :load_error, pid: nil, manifest: nil)
         {:error, reason}
     end
   end
@@ -976,7 +976,7 @@ defmodule Minga.Extension.Supervisor do
 
       {:error, reason} ->
         Minga.Log.warning(:config, "Extension #{name}: #{reason}")
-        ExtRegistry.update(registry, name, status: :load_error, pid: nil)
+        ExtRegistry.update(registry, name, status: :load_error, pid: nil, manifest: nil)
         [%{extension: name, reason: reason} | failures]
     end
   end
@@ -1027,7 +1027,7 @@ defmodule Minga.Extension.Supervisor do
       {:error, reason} ->
         msg = "Extension #{name} load error: #{inspect(reason)}"
         Minga.Log.warning(:config, msg)
-        ExtRegistry.update(registry, name, status: :load_error, pid: nil)
+        ExtRegistry.update(registry, name, status: :load_error, pid: nil, manifest: nil)
         wrap_start_failure(name, reason, cmd_registry, keymap, opts)
     end
   end
@@ -1234,7 +1234,7 @@ defmodule Minga.Extension.Supervisor do
   @spec mark_hex_entries_load_error(GenServer.server()) :: :ok
   defp mark_hex_entries_load_error(registry) do
     for {name, entry} <- ExtRegistry.all(registry), entry.source_type == :hex do
-      ExtRegistry.update(registry, name, status: :load_error, pid: nil)
+      ExtRegistry.update(registry, name, status: :load_error, pid: nil, manifest: nil)
     end
 
     :ok
