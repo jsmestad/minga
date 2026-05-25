@@ -21,8 +21,20 @@ enum PreviewRegistry {
             agentChromePreview()
         case "GitStatusView":
             gitStatusPreview()
+        case "GitStatusClean":
+            gitStatusCleanPreview()
+        case "GitStatusConflict":
+            gitStatusConflictPreview()
+        case "GitStatusDense":
+            gitStatusDensePreview()
         case "FileTreeView":
             fileTreePreview()
+        case "FileTreeEmpty":
+            fileTreeEmptyPreview()
+        case "FileTreeError":
+            fileTreeErrorPreview()
+        case "FileTreeDeep":
+            fileTreeDeepPreview()
         case "CompletionOverlay":
             completionPreview()
         case "StatusBarView":
@@ -376,6 +388,112 @@ enum PreviewRegistry {
         ]
     }
 
+    // MARK: - GitStatusClean
+
+    private static func gitStatusCleanPreview() -> some View {
+        let theme = populatedTheme()
+        let state = GitStatusState()
+        state.update(
+            repoState: .normal,
+            branchName: "main",
+            ahead: 0,
+            behind: 0,
+            syncing: false,
+            entries: [],
+            toast: nil,
+            entryBasePath: "/Users/dev/code/minga",
+            lastCommitMessage: "chore: bump dependency versions",
+            stashCount: 0
+        )
+
+        return GitStatusView(state: state, theme: theme, encoder: nil)
+            .frame(width: 280, height: 600)
+            .background(theme.treeBg)
+    }
+
+    // MARK: - GitStatusConflict
+
+    private static func gitStatusConflictPreview() -> some View {
+        let theme = populatedTheme()
+        let state = GitStatusState()
+        state.update(
+            repoState: .normal,
+            branchName: "feat/agent-refactor",
+            ahead: 3,
+            behind: 5,
+            syncing: false,
+            entries: gitStatusConflictEntries(),
+            toast: nil,
+            entryBasePath: "/Users/dev/code/minga",
+            lastCommitMessage: "feat(agent): restructure session manager",
+            stashCount: 0
+        )
+        state.commitMessage = ""
+
+        return GitStatusView(state: state, theme: theme, encoder: nil)
+            .frame(width: 280, height: 600)
+            .background(theme.treeBg)
+    }
+
+    private static func gitStatusConflictEntries() -> [GitStatusEntry] {
+        [
+            GitStatusEntry(pathHash: 1, section: .conflicted, status: .conflicted, path: "lib/minga/editor.ex"),
+            GitStatusEntry(pathHash: 2, section: .conflicted, status: .conflicted, path: "lib/minga/buffer/document.ex"),
+            GitStatusEntry(pathHash: 3, section: .conflicted, status: .conflicted, path: "lib/minga/agent/session_manager.ex"),
+            GitStatusEntry(pathHash: 4, section: .staged, status: .modified, path: "mix.exs"),
+            GitStatusEntry(pathHash: 5, section: .staged, status: .modified, path: "mix.lock"),
+            GitStatusEntry(pathHash: 6, section: .changed, status: .modified, path: "lib/minga/buffer/process.ex"),
+            GitStatusEntry(pathHash: 7, section: .changed, status: .modified, path: "test/minga/editor_test.exs"),
+        ]
+    }
+
+    // MARK: - GitStatusDense
+
+    private static func gitStatusDensePreview() -> some View {
+        let theme = populatedTheme()
+        let state = GitStatusState()
+        state.update(
+            repoState: .normal,
+            branchName: "feat/full-stack-overhaul",
+            ahead: 12,
+            behind: 0,
+            syncing: false,
+            entries: gitStatusDenseEntries(),
+            toast: nil,
+            entryBasePath: "/Users/dev/code/minga",
+            lastCommitMessage: "wip: large refactor across multiple subsystems",
+            stashCount: 3
+        )
+        state.commitMessage = "feat(editor): comprehensive render pipeline overhaul"
+
+        return GitStatusView(state: state, theme: theme, encoder: nil)
+            .frame(width: 280, height: 600)
+            .background(theme.treeBg)
+    }
+
+    private static func gitStatusDenseEntries() -> [GitStatusEntry] {
+        [
+            GitStatusEntry(pathHash: 1, section: .staged, status: .modified, path: "lib/minga/editor/render_pipeline/stages/syntax_highlight_pass.ex"),
+            GitStatusEntry(pathHash: 2, section: .staged, status: .modified, path: "lib/minga/editor/render_pipeline/stages/diagnostic_underline_pass.ex"),
+            GitStatusEntry(pathHash: 3, section: .staged, status: .added, path: "lib/minga/editor/render_pipeline/stages/selection_overlay_compositor.ex"),
+            GitStatusEntry(pathHash: 4, section: .staged, status: .added, path: "lib/minga/editor/render_pipeline/pipeline_coordinator.ex"),
+            GitStatusEntry(pathHash: 5, section: .staged, status: .deleted, path: "lib/minga/editor/old_render_pipeline.ex"),
+            GitStatusEntry(pathHash: 6, section: .staged, status: .renamed, path: "lib/minga/editor/viewport_calculation_service.ex"),
+            GitStatusEntry(pathHash: 7, section: .changed, status: .modified, path: "lib/minga/buffer/document.ex"),
+            GitStatusEntry(pathHash: 8, section: .changed, status: .modified, path: "lib/minga/buffer/process.ex"),
+            GitStatusEntry(pathHash: 9, section: .changed, status: .modified, path: "lib/minga/agent/session_manager.ex"),
+            GitStatusEntry(pathHash: 10, section: .changed, status: .modified, path: "macos/Sources/Views/PreviewRegistry.swift"),
+            GitStatusEntry(pathHash: 11, section: .changed, status: .modified, path: "macos/Sources/Views/PreviewSnapshotPolicy.swift"),
+            GitStatusEntry(pathHash: 12, section: .changed, status: .modified, path: "test/minga/editor/render_pipeline_test.exs"),
+            GitStatusEntry(pathHash: 13, section: .changed, status: .modified, path: "test/minga/buffer/document_test.exs"),
+            GitStatusEntry(pathHash: 14, section: .untracked, status: .untracked, path: "lib/minga/editor/render_pipeline/frame_scheduler.ex"),
+            GitStatusEntry(pathHash: 15, section: .untracked, status: .untracked, path: "lib/minga/editor/render_pipeline/stages/line_number_gutter_renderer.ex"),
+            GitStatusEntry(pathHash: 16, section: .untracked, status: .untracked, path: "docs/architecture/render_pipeline_design.md"),
+            GitStatusEntry(pathHash: 17, section: .untracked, status: .untracked, path: "test/minga/editor/render_pipeline/stages/syntax_highlight_pass_test.exs"),
+            GitStatusEntry(pathHash: 18, section: .untracked, status: .untracked, path: "zig/tests/fixtures/render_pipeline_integration_snapshot.bin"),
+        ]
+    }
+
     // MARK: - FileTreeView
 
     private static func fileTreePreview() -> some View {
@@ -403,6 +521,88 @@ enum PreviewRegistry {
             treeState: FileTreeVisibilityState.ready.rawValue
         )
         return state
+    }
+
+    // MARK: - FileTreeEmpty
+
+    private static func fileTreeEmptyPreview() -> some View {
+        let theme = populatedTheme()
+        let state = FileTreeState()
+        state.update(
+            version: 1,
+            selectedId: "",
+            focused: false,
+            treeWidth: 30,
+            rootPath: "/Users/dev/code/minga",
+            rawEntries: [],
+            treeState: FileTreeVisibilityState.empty.rawValue
+        )
+
+        return FileTreeView(fileTreeState: state, theme: theme, encoder: nil)
+            .frame(width: 280, height: 600)
+            .background(theme.treeBg)
+    }
+
+    // MARK: - FileTreeError
+
+    private static func fileTreeErrorPreview() -> some View {
+        let theme = populatedTheme()
+        let state = FileTreeState()
+        state.update(
+            version: 1,
+            selectedId: "",
+            focused: false,
+            treeWidth: 30,
+            rootPath: "/Users/dev/code/minga",
+            rawEntries: [],
+            treeState: FileTreeVisibilityState.error.rawValue,
+            errorReason: "Permission denied: /Users/dev/code/minga/.git/objects"
+        )
+
+        return FileTreeView(fileTreeState: state, theme: theme, encoder: nil)
+            .frame(width: 280, height: 600)
+            .background(theme.treeBg)
+    }
+
+    // MARK: - FileTreeDeep
+
+    private static func fileTreeDeepPreview() -> some View {
+        let theme = populatedTheme()
+        let state = FileTreeState()
+        state.update(
+            version: 1,
+            selectedId: "lib/minga/editor/render_pipeline/stages/syntax_highlight_pass.ex",
+            focused: true,
+            treeWidth: 30,
+            rootPath: "/Users/dev/code/minga",
+            rawEntries: fileTreeDeepRawEntries(),
+            treeState: FileTreeVisibilityState.ready.rawValue
+        )
+
+        return FileTreeView(fileTreeState: state, theme: theme, encoder: nil)
+            .frame(width: 280, height: 600)
+            .background(theme.treeBg)
+    }
+
+    private static func fileTreeDeepRawEntries() -> [Wire.FileTreeEntry] {
+        [
+            wireFileEntry(id: "lib", name: "lib", path: "/Users/dev/code/minga/lib", relPath: "lib", isDir: true, isExpanded: true, depth: 0, icon: ""),
+            wireFileEntry(id: "lib/minga", name: "minga", path: "/Users/dev/code/minga/lib/minga", relPath: "lib/minga", isDir: true, isExpanded: true, depth: 1, icon: ""),
+            wireFileEntry(id: "lib/minga/editor", name: "editor", path: "/Users/dev/code/minga/lib/minga/editor", relPath: "lib/minga/editor", isDir: true, isExpanded: true, depth: 2, icon: ""),
+            wireFileEntry(id: "lib/minga/editor/render_pipeline", name: "render_pipeline", path: "/Users/dev/code/minga/lib/minga/editor/render_pipeline", relPath: "lib/minga/editor/render_pipeline", isDir: true, isExpanded: true, depth: 3, icon: ""),
+            wireFileEntry(id: "lib/minga/editor/render_pipeline/stages", name: "stages", path: "/Users/dev/code/minga/lib/minga/editor/render_pipeline/stages", relPath: "lib/minga/editor/render_pipeline/stages", isDir: true, isExpanded: true, depth: 4, icon: ""),
+            wireFileEntry(id: "lib/minga/editor/render_pipeline/stages/syntax_highlight_pass.ex", name: "syntax_highlight_pass.ex", path: "/Users/dev/code/minga/lib/minga/editor/render_pipeline/stages/syntax_highlight_pass.ex", relPath: "lib/minga/editor/render_pipeline/stages/syntax_highlight_pass.ex", isDir: false, depth: 5, icon: "", isActive: true, gitStatus: 1),
+            wireFileEntry(id: "lib/minga/editor/render_pipeline/stages/diagnostic_underline_pass.ex", name: "diagnostic_underline_pass.ex", path: "/Users/dev/code/minga/lib/minga/editor/render_pipeline/stages/diagnostic_underline_pass.ex", relPath: "lib/minga/editor/render_pipeline/stages/diagnostic_underline_pass.ex", isDir: false, depth: 5, icon: "", gitStatus: 1),
+            wireFileEntry(id: "lib/minga/editor/render_pipeline/stages/line_number_gutter_renderer.ex", name: "line_number_gutter_renderer.ex", path: "/Users/dev/code/minga/lib/minga/editor/render_pipeline/stages/line_number_gutter_renderer.ex", relPath: "lib/minga/editor/render_pipeline/stages/line_number_gutter_renderer.ex", isDir: false, depth: 5, icon: ""),
+            wireFileEntry(id: "lib/minga/editor/render_pipeline/stages/selection_overlay_compositor.ex", name: "selection_overlay_compositor.ex", path: "/Users/dev/code/minga/lib/minga/editor/render_pipeline/stages/selection_overlay_compositor.ex", relPath: "lib/minga/editor/render_pipeline/stages/selection_overlay_compositor.ex", isDir: false, depth: 5, icon: "", isDirty: true),
+            wireFileEntry(id: "lib/minga/editor/render_pipeline/pipeline_coordinator.ex", name: "pipeline_coordinator.ex", path: "/Users/dev/code/minga/lib/minga/editor/render_pipeline/pipeline_coordinator.ex", relPath: "lib/minga/editor/render_pipeline/pipeline_coordinator.ex", isDir: false, depth: 4, icon: ""),
+            wireFileEntry(id: "lib/minga/editor/render_pipeline/frame_scheduler.ex", name: "frame_scheduler.ex", path: "/Users/dev/code/minga/lib/minga/editor/render_pipeline/frame_scheduler.ex", relPath: "lib/minga/editor/render_pipeline/frame_scheduler.ex", isDir: false, depth: 4, icon: ""),
+            wireFileEntry(id: "lib/minga/editor/viewport_calculation_service.ex", name: "viewport_calculation_service.ex", path: "/Users/dev/code/minga/lib/minga/editor/viewport_calculation_service.ex", relPath: "lib/minga/editor/viewport_calculation_service.ex", isDir: false, depth: 3, icon: ""),
+            wireFileEntry(id: "lib/minga/buffer", name: "buffer", path: "/Users/dev/code/minga/lib/minga/buffer", relPath: "lib/minga/buffer", isDir: true, isExpanded: true, depth: 2, icon: ""),
+            wireFileEntry(id: "lib/minga/buffer/document.ex", name: "document.ex", path: "/Users/dev/code/minga/lib/minga/buffer/document.ex", relPath: "lib/minga/buffer/document.ex", isDir: false, depth: 3, icon: ""),
+            wireFileEntry(id: "lib/minga/buffer/process.ex", name: "process.ex", path: "/Users/dev/code/minga/lib/minga/buffer/process.ex", relPath: "lib/minga/buffer/process.ex", isDir: false, depth: 3, icon: "", gitStatus: 1),
+            wireFileEntry(id: "test", name: "test", path: "/Users/dev/code/minga/test", relPath: "test", isDir: true, isExpanded: false, depth: 0, icon: "", isLastChild: true),
+        ]
     }
 
     private static func fileTreeRawEntries() -> [Wire.FileTreeEntry] {
