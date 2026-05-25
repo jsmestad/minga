@@ -2,7 +2,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI.BoardCardPayload do
   @moduledoc "Typed semantic payload for one GUI Board card."
 
   @type status :: :idle | :working | :iterating | :needs_you | :done | :errored
-  @type kind :: :you | :agent | atom()
+  @type kind :: :you | :agent
 
   @enforce_keys [:id, :status, :kind, :task, :display_task, :created_at]
   defstruct [
@@ -19,7 +19,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI.BoardCardPayload do
 
   @type t :: %__MODULE__{
           id: pos_integer(),
-          status: status() | atom(),
+          status: status(),
           kind: kind(),
           task: String.t(),
           display_task: String.t(),

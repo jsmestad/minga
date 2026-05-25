@@ -75,6 +75,17 @@ defmodule MingaEditor.Shell.RegistryTest do
              })
   end
 
+  test "register rejects unknown shell capabilities" do
+    assert {:error, {:invalid_entry, {:invalid_capabilities, [:giy]}}} =
+             Registry.register({:extension, :bad_capability}, %{
+               id: :bad_capability,
+               module: FakeShell,
+               display_name: "Bad Capability",
+               description: "Bad capability shell",
+               capabilities: [:giy]
+             })
+  end
+
   test "register rejects modules that do not implement the shell callbacks" do
     assert {:error, {:invalid_entry, {:missing_callbacks, String, _callbacks}}} =
              Registry.register({:extension, :bad}, %{
@@ -92,7 +103,7 @@ defmodule MingaEditor.Shell.RegistryTest do
     assert {:error, :builtin_shell} = Registry.unregister(:traditional)
     assert :ok = Registry.unregister_source(:builtin)
 
-    assert Enum.map(Registry.list(), & &1.id) == [:traditional, :board]
+    assert Enum.map(Registry.list(), & &1.id) == [:traditional]
     assert Registry.default().id == :traditional
   end
 

@@ -70,6 +70,22 @@ defmodule MingaBoard.Shell.AgentEventTest do
       assert card_b.status == :errored
     end
 
+    test "background :file_changed tracks recent files on the owning card", %{
+      board: board,
+      session_b: session_b
+    } do
+      {board2, _ws, _effects} =
+        Shell.on_agent_event(
+          board,
+          workspace(),
+          session_b,
+          {:file_changed, "/tmp/project/lib/example.ex", "before", "after", "tool-1", "edit"}
+        )
+
+      [card_b] = Enum.filter(Map.values(board2.cards), &(&1.session == session_b))
+      assert card_b.recent_files == ["example.ex"]
+    end
+
     test "events for a session not attached to any card are silently dropped", %{board: board} do
       ghost = spawn(fn -> :ok end)
 

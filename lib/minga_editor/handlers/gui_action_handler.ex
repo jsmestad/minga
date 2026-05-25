@@ -192,8 +192,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:extension_panel_action, ext_name, action_name, context}) do
-    route_panel_action_to_extension(ext_name, action_name, context)
-    state
+    route_panel_action_to_extension(state, ext_name, action_name, context)
   end
 
   defp dispatch_action(state, {:board_select_card, _card_id} = action),
@@ -799,19 +798,46 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec dispatch_to_active_shell(EditorState.t(), term()) :: EditorState.t()
   defp dispatch_to_active_shell(state, action) do
+    state = EditorState.ensure_shell_available(state)
     shell = EditorState.active_shell_module(state)
 
-    {shell_state, workspace} =
-      shell.handle_gui_action(
-        state.shell_state,
-        state.workspace,
-        action
-      )
+    case board_shell_active?(shell, state) do
+      true ->
+        {shell_state, workspace} =
+          shell.handle_gui_action(
+            state.shell_state,
+            state.workspace,
+            action
+          )
 
-    state
-    |> EditorState.update_shell_state(fn _ -> shell_state end)
-    |> EditorState.set_workspace(workspace)
-    |> shell.after_gui_action(action)
+        state
+        |> EditorState.update_shell_state(fn _ -> shell_state end)
+        |> EditorState.set_workspace(workspace)
+        |> after_shell_gui_action(shell, action)
+
+      false ->
+        Minga.Log.warning(
+          :editor,
+          "Board GUI action ignored because Board shell is unavailable: #{inspect(action)}"
+        )
+
+        EditorState.set_status(state, "Board shell is unavailable")
+    end
+  end
+
+  @spec board_shell_active?(module(), EditorState.t()) :: boolean()
+  defp board_shell_active?(shell, state) do
+    function_exported?(shell, :gui_payload, 1) and
+      match?({:board, _payload}, shell.gui_payload(state))
+  end
+
+  @spec after_shell_gui_action(EditorState.t(), module(), term()) :: EditorState.t()
+  defp after_shell_gui_action(state, shell, action) do
+    if function_exported?(shell, :after_gui_action, 2) do
+      shell.after_gui_action(state, action)
+    else
+      state
+    end
   end
 
   @spec dispatch_missing_registered_sidebar_action(
@@ -1498,20 +1524,30 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp normalize_command_result({new_state, _action}), do: new_state
   defp normalize_command_result(new_state), do: new_state
 
-  @spec route_panel_action_to_extension(String.t(), atom(), map()) :: :ok
-  defp route_panel_action_to_extension(ext_name, action_name, context) do
+  @spec route_panel_action_to_extension(state(), String.t(), atom(), map()) :: state()
+  defp route_panel_action_to_extension(state, ext_name, action_name, context) do
     ext_atom = String.to_existing_atom(ext_name)
 
     case Minga.Extension.Registry.get(Minga.Extension.Registry, ext_atom) do
       {:ok, %{pid: pid}} when is_pid(pid) ->
         send(pid, {:panel_action, action_name, context})
-        :ok
+        state
 
       _ ->
-        :ok
+        extension_panel_action_unavailable(state, ext_name, action_name)
     end
   rescue
-    ArgumentError -> :ok
+    ArgumentError -> extension_panel_action_unavailable(state, ext_name, action_name)
+  end
+
+  @spec extension_panel_action_unavailable(state(), String.t(), atom()) :: state()
+  defp extension_panel_action_unavailable(state, ext_name, action_name) do
+    Minga.Log.warning(
+      :editor,
+      "Extension panel action ignored: #{ext_name}/#{action_name} unavailable"
+    )
+
+    EditorState.set_status(state, "Extension panel action unavailable")
   end
 
   @spec replace_single_match(

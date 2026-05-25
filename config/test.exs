@@ -12,6 +12,9 @@ System.put_env("XDG_CONFIG_HOME", test_config_home)
 # otherwise pollute test output before ExUnit's capture_log kicks in.
 config :logger, level: :warning
 
+# Tests run from source worktrees and may not have release-style priv extension copies.
+config :minga, allow_source_extension_fallback: true
+
 # Use the inert git stub so tests don't spawn git subprocesses. This
 # prevents erl_child_setup EPIPE errors from concurrent async tests.
 # Tests that need real git (git integration tests) override this in setup.

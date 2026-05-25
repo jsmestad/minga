@@ -22,7 +22,25 @@ defmodule MingaBoard.Shell.ChromeTest do
 
   defp grid_board_state do
     state = base_state()
-    %{state | shell: Shell, shell_id: :board, shell_state: BoardState.new()}
+
+    %{
+      state
+      | shell: Shell,
+        shell_id: :board,
+        shell_identity: board_identity(),
+        shell_state: BoardState.new()
+    }
+  end
+
+  defp board_identity do
+    case MingaEditor.Shell.Registry.get(:board) do
+      nil ->
+        MingaBoard.Feature.register_contributions()
+        MingaEditor.Shell.Identity.new(MingaEditor.Shell.Registry.get(:board))
+
+      entry ->
+        MingaEditor.Shell.Identity.new(entry)
+    end
   end
 
   defp zoomed_board_state(card_attrs \\ []) do
@@ -32,7 +50,14 @@ defmodule MingaBoard.Shell.ChromeTest do
     board = BoardState.zoom_into(board, card.id, %{})
 
     state = base_state()
-    %{state | shell: Shell, shell_id: :board, shell_state: board}
+
+    %{
+      state
+      | shell: Shell,
+        shell_id: :board,
+        shell_identity: board_identity(),
+        shell_state: board
+    }
   end
 
   defp run_through_content(state) do
@@ -204,7 +229,14 @@ defmodule MingaBoard.Shell.ChromeTest do
       for cols <- [40, 80, 120, 200] do
         board = BoardState.new()
         state = base_state(cols: cols)
-        state = %{state | shell: Shell, shell_id: :board, shell_state: board}
+
+        state = %{
+          state
+          | shell: Shell,
+            shell_id: :board,
+            shell_identity: board_identity(),
+            shell_state: board
+        }
 
         {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
         chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)

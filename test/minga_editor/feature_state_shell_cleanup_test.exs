@@ -5,6 +5,7 @@ defmodule MingaEditor.FeatureStateShellCleanupTest do
   alias MingaEditor.FeatureState
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Registry
+  alias MingaEditor.Shell.StateStash
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Viewport
 
@@ -38,19 +39,25 @@ defmodule MingaEditor.FeatureStateShellCleanupTest do
     active_context = context_with_feature_state(:active_owned, :active_other)
     stashed_context = context_with_feature_state(:stashed_owned, :stashed_other)
 
+    entry = Registry.get(:fake_shell)
+
     state = %EditorState{
       port_manager: self(),
       workspace: workspace(),
       shell_id: :fake_shell,
       shell: MingaEditor.Test.FakeShell,
       shell_state: %{contexts: [active_context]},
-      shell_state_stash: %{fake_shell: %{contexts: [stashed_context]}}
+      shell_state_stash: %{fake_shell: StateStash.new(entry, %{contexts: [stashed_context]})}
     }
 
     cleaned = EditorState.drop_feature_state_source(state, @source)
 
     [cleaned_context] = cleaned.shell_state.contexts
-    [cleaned_stashed_context] = cleaned.shell_state_stash.fake_shell.contexts
+
+    assert %StateStash{module: MingaEditor.Test.FakeShell, state: stashed_shell_state} =
+             cleaned.shell_state_stash.fake_shell
+
+    [cleaned_stashed_context] = stashed_shell_state.contexts
     restored = SessionState.restore_tab_context(workspace(), cleaned_context)
     restored_stashed = SessionState.restore_tab_context(workspace(), cleaned_stashed_context)
 

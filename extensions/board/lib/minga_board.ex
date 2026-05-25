@@ -15,15 +15,19 @@ defmodule MingaBoard do
   keybind(:normal, "SPC t b", :toggle_board, "Toggle The Board")
 
   @impl true
+  @spec name() :: atom()
   def name, do: :minga_board
 
   @impl true
+  @spec description() :: String.t()
   def description, do: "Board shell"
 
   @impl true
+  @spec version() :: String.t()
   def version, do: "0.1.0"
 
   @impl true
+  @spec init(keyword()) :: {:ok, map()} | {:error, term()}
   def init(_config) do
     :ok = MingaBoard.Feature.register_contributions()
     {:ok, %{}}

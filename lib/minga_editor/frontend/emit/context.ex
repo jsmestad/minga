@@ -116,8 +116,19 @@ defmodule MingaEditor.Frontend.Emit.Context do
   @spec compute_title(map()) :: String.t()
   defp compute_title(%{shell: shell} = state) do
     case shell.gui_payload(state) do
-      {:board, board} -> compute_board_title(board)
-      nil -> compute_standard_title(state)
+      {:board, %MingaEditor.Frontend.Protocol.GUI.BoardPayload{} = board} ->
+        compute_board_title(board)
+
+      nil ->
+        compute_standard_title(state)
+
+      other ->
+        Minga.Log.warning(
+          :render,
+          "Unsupported GUI shell payload #{inspect(other)}; using standard title"
+        )
+
+        compute_standard_title(state)
     end
   end
 

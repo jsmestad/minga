@@ -212,8 +212,19 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   defp build_gui_tab_bar_cmd(%{shell: shell} = ctx, caches) do
     case shell.gui_payload(ctx) do
-      {:board, _board} -> {nil, caches}
-      nil -> build_standard_gui_tab_bar_cmd(ctx, caches)
+      {:board, %MingaEditor.Frontend.Protocol.GUI.BoardPayload{}} ->
+        {nil, caches}
+
+      nil ->
+        build_standard_gui_tab_bar_cmd(ctx, caches)
+
+      other ->
+        Log.warning(
+          :render,
+          "Unsupported GUI shell payload #{inspect(other)}; using standard tabs"
+        )
+
+        build_standard_gui_tab_bar_cmd(ctx, caches)
     end
   end
 
@@ -1905,9 +1916,14 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   @spec build_gui_board_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
   defp build_gui_board_cmd(%{shell: shell} = ctx, caches) do
     case shell.gui_payload(ctx) do
-      {:board, board} -> build_gui_board_payload_cmd(board, caches)
-      nil -> dismiss_gui_board_cmd(caches)
-      other -> unsupported_gui_payload_cmd(other, caches)
+      {:board, %MingaEditor.Frontend.Protocol.GUI.BoardPayload{} = board} ->
+        build_gui_board_payload_cmd(board, caches)
+
+      nil ->
+        dismiss_gui_board_cmd(caches)
+
+      other ->
+        unsupported_gui_payload_cmd(other, caches)
     end
   end
 
@@ -1955,8 +1971,8 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   defp board_fingerprint(board) do
     cards =
       Enum.map(board.cards, fn card ->
-        {card.id, card.status, card.kind, card.task, card.model, card.created_at,
-         card.recent_files, card.sparkline}
+        {card.id, card.status, card.kind, card.task, card.display_task, card.model,
+         card.created_at, card.recent_files, card.sparkline}
       end)
 
     :erlang.phash2({
@@ -1973,12 +1989,20 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   @spec build_gui_agent_context_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
   defp build_gui_agent_context_cmd(%{shell: shell} = ctx, caches) do
     case shell.gui_payload(ctx) do
-      {:board, board} ->
+      {:board, %MingaEditor.Frontend.Protocol.GUI.BoardPayload{} = board} ->
         card = MingaEditor.Frontend.Protocol.GUI.BoardPayload.zoomed_card(board)
         send_agent_context_if_applicable(board.zoomed_card_id, card, caches)
 
       nil ->
         send_hide_if_needed(:not_board, caches)
+
+      other ->
+        Log.warning(
+          :render,
+          "Unsupported GUI shell payload #{inspect(other)}; hiding agent context"
+        )
+
+        send_hide_if_needed(:unsupported_payload, caches)
     end
   end
 

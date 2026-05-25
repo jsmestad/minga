@@ -8,6 +8,7 @@ defmodule Mix.Tasks.Compile.MingaBundledExtensions do
   def run(_args) do
     Mix.Project.ensure_structure()
     copy_extension("git_porcelain")
+    copy_extension("board")
     {:ok, []}
   end
 
@@ -16,10 +17,12 @@ defmodule Mix.Tasks.Compile.MingaBundledExtensions do
 
     target = Path.join([Mix.Project.app_path(), "priv", "extensions", name, "lib"])
 
-    if File.dir?(source) do
-      File.rm_rf!(target)
-      File.mkdir_p!(Path.dirname(target))
-      File.cp_r!(source, target)
+    unless File.dir?(source) do
+      Mix.raise("Bundled extension #{name} source is missing: #{source}")
     end
+
+    File.rm_rf!(target)
+    File.mkdir_p!(Path.dirname(target))
+    File.cp_r!(source, target)
   end
 end

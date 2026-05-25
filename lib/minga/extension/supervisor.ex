@@ -822,6 +822,11 @@ defmodule Minga.Extension.Supervisor do
     case extension_child_pid(monitor.supervisor, monitor.module) do
       {:ok, pid} when is_pid(pid) ->
         if registry_observes_child?(monitor.registry, monitor.name, observed_pid) do
+          Minga.Log.warning(
+            :config,
+            "Extension #{monitor.name} restarted after #{inspect(reason)} (observed_pid=#{inspect(observed_pid)} new_pid=#{inspect(pid)} count=#{count})"
+          )
+
           ExtRegistry.update(monitor.registry, monitor.name, pid: pid)
           emit_restart_count(monitor.name, count)
           monitor_child_restarts(monitor, pid, count)
@@ -850,7 +855,7 @@ defmodule Minga.Extension.Supervisor do
   defp reconcile_missing_restarted_child(monitor, observed_pid, reason) do
     case crash_reason?(reason) do
       true ->
-        mark_observed_child_crashed(monitor.registry, monitor.name, observed_pid)
+        mark_observed_child_crashed(monitor.registry, monitor.name, observed_pid, reason)
 
       false ->
         Minga.Log.info(
@@ -876,9 +881,14 @@ defmodule Minga.Extension.Supervisor do
     end
   end
 
-  @spec mark_observed_child_crashed(GenServer.server(), atom(), pid()) :: :ok
-  defp mark_observed_child_crashed(registry, name, observed_pid) do
+  @spec mark_observed_child_crashed(GenServer.server(), atom(), pid(), term()) :: :ok
+  defp mark_observed_child_crashed(registry, name, observed_pid, reason) do
     if registry_observes_child?(registry, name, observed_pid) do
+      Minga.Log.warning(
+        :config,
+        "Extension #{name} crashed without restart (observed_pid=#{inspect(observed_pid)} reason=#{inspect(reason)})"
+      )
+
       ExtRegistry.update(registry, name, status: :crashed, pid: nil)
     else
       :ok

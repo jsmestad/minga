@@ -47,7 +47,7 @@ defmodule MingaBoard.Shell.Card do
           sparkline: [float()]
         }
 
-  @enforce_keys [:id, :task]
+  @enforce_keys [:id, :task, :created_at]
   defstruct id: nil,
             session: nil,
             server_name: nil,

@@ -15,14 +15,7 @@ defmodule MingaEditor.Shell do
     `find_tab_by_buffer/2`, `active_tab_kind/1`, `set_tab_session/3`,
     `active_session/1`
 
-  This umbrella declares only `init/1` (the constructor every shell
-  needs); all other callbacks live on their respective sub-behaviours.
-  Existing shells (`Traditional`, `Board`) implement the umbrella plus
-  every sub-behaviour. A future tab-less shell can implement just the
-  sub-behaviours it cares about (e.g., skip `TabQueries` entirely if
-  no tab UI is rendered) and `EditorState`/`AgentAccess` callers that
-  go through `Shell.active_session/1` will continue to work because
-  they read through the field, not the type.
+  This umbrella declares only `init/1` (the constructor every shell needs); all other callbacks live on their respective sub-behaviours. Registry-loaded shells currently must implement the full presentation contract above because the editor still dispatches through each surface. Tab-less shells should return safe defaults from the tab query callbacks until the registry grows capability-aware validation.
 
   ## Implementation
 
@@ -44,8 +37,9 @@ defmodule MingaEditor.Shell do
   @typedoc "Workspace state (the editing context shared by all shells)."
   @type workspace :: MingaEditor.Session.State.t()
 
-  @typedoc "Structured GUI payload returned by a shell and encoded centrally by frontend protocol modules."
-  @type gui_payload :: {atom(), term()} | nil
+  @typedoc "Structured GUI payload returned by a shell and encoded centrally by frontend protocol modules. Unknown tags are treated as unsupported extension payloads and logged by the GUI emitter."
+  @type gui_payload ::
+          {:board, MingaEditor.Frontend.Protocol.GUI.BoardPayload.t()} | {atom(), term()} | nil
 
   @typedoc """
   Why a buffer was added — re-exported here from `Shell.BufferLifecycle`

@@ -842,9 +842,9 @@ defmodule MingaEditor.State do
 
   defp active_shell_entry_matches?(
          %__MODULE__{shell: shell, shell_identity: nil},
-         %MingaEditor.Shell.Entry{source: :builtin} = entry
+         %MingaEditor.Shell.Entry{source: :builtin, module: shell}
        ) do
-    shell == entry.module
+    true
   end
 
   defp active_shell_entry_matches?(%__MODULE__{shell_identity: nil}, %MingaEditor.Shell.Entry{}),
@@ -1164,15 +1164,28 @@ defmodule MingaEditor.State do
        ) do
     stash =
       Map.new(stash, fn {shell_id, shell_state} ->
-        module = MingaEditor.Shell.Registry.module_for(shell_id)
-
-        case apply_optional_shell_callback(module, shell_state, callback, args) do
-          {:ok, cleaned_shell_state} -> {shell_id, cleaned_shell_state}
-          :missing -> {shell_id, shell_state}
-        end
+        {shell_id, clean_stashed_shell_state(shell_id, shell_state, callback, args)}
       end)
 
     %{state | shell_state_stash: stash}
+  end
+
+  @spec clean_stashed_shell_state(shell_id(), StateStash.t() | term(), atom(), [term()]) ::
+          StateStash.t() | term()
+  defp clean_stashed_shell_state(_shell_id, %StateStash{} = stashed, callback, args) do
+    case apply_optional_shell_callback(stashed.module, stashed.state, callback, args) do
+      {:ok, cleaned_shell_state} -> %StateStash{stashed | state: cleaned_shell_state}
+      :missing -> stashed
+    end
+  end
+
+  defp clean_stashed_shell_state(shell_id, shell_state, callback, args) do
+    module = MingaEditor.Shell.Registry.module_for(shell_id)
+
+    case apply_optional_shell_callback(module, shell_state, callback, args) do
+      {:ok, cleaned_shell_state} -> cleaned_shell_state
+      :missing -> shell_state
+    end
   end
 
   @spec apply_optional_shell_callback(module() | nil, term(), atom(), [term()]) ::

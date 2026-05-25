@@ -175,6 +175,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       state
       | shell_id: :fake,
         shell: MingaEditor.Test.FakeShell,
+        shell_identity: MingaEditor.Shell.Identity.new(MingaEditor.Shell.Registry.get(:fake)),
         shell_state: MingaEditor.Test.FakeShell.init([])
     }
   end

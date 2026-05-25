@@ -106,10 +106,10 @@ defmodule MingaBoard.AgentActivation do
   @spec refresh_agent_cache(EditorState.t(), pid()) :: EditorState.t()
   defp refresh_agent_cache(state, session) do
     case agent_snapshot(session) do
-      nil ->
+      {:ok, nil} ->
         AgentAccess.update_agent(state, &AgentState.clear_active_tool_name/1)
 
-      snapshot ->
+      {:ok, snapshot} ->
         AgentAccess.update_agent(state, fn agent ->
           AgentState.apply_session_snapshot(
             agent,
@@ -119,14 +119,24 @@ defmodule MingaBoard.AgentActivation do
             Map.get(snapshot, :active_tool_name)
           )
         end)
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :agent,
+          "Board: failed to read agent session snapshot for #{inspect(session)}: #{inspect(reason)}"
+        )
+
+        state
+        |> AgentAccess.update_agent(&AgentState.set_error(&1, "Agent session unavailable"))
+        |> EditorState.set_status("Agent session unavailable")
     end
   end
 
-  @spec agent_snapshot(pid()) :: map() | nil
+  @spec agent_snapshot(pid()) :: {:ok, map() | nil} | {:error, term()}
   defp agent_snapshot(session_pid) do
-    AgentSession.editor_snapshot(session_pid)
+    {:ok, AgentSession.editor_snapshot(session_pid)}
   catch
-    :exit, _ -> nil
+    :exit, reason -> {:error, {:exit, reason}}
   end
 
   @spec set_agent_scope(EditorState.t()) :: EditorState.t()

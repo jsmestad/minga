@@ -145,13 +145,7 @@ defmodule MingaBoard.Shell.Input do
     card = BoardState.focused(board)
 
     if card && !Card.you_card?(card) do
-      # Stop the agent session if running. SessionManager owns lifecycle events.
-      SessionLifecycle.stop(card.session)
-
-      new_board = BoardState.remove_card(board, card.id)
-      state = EditorState.update_shell_state(state, fn _ -> new_board end)
-      persist_board(state)
-      {:handled, state}
+      {:handled, delete_focused_card(state, board, card)}
     else
       {:handled, state}
     end
@@ -275,10 +269,51 @@ defmodule MingaBoard.Shell.Input do
       state = EditorState.update_shell_state(state, fn _ -> new_board end)
       card = new_board.cards[card.id]
 
-      MingaBoard.AgentActivation.activate_for_card(state, card)
+      activate_zoomed_card(state, card, current_workspace)
     else
       state
     end
+  end
+
+  @spec delete_focused_card(EditorState.t(), BoardState.t(), Card.t()) :: EditorState.t()
+  defp delete_focused_card(state, board, card) do
+    case SessionLifecycle.stop(card.session) do
+      :ok ->
+        new_board = BoardState.remove_card(board, card.id)
+        state = EditorState.update_shell_state(state, fn _ -> new_board end)
+        persist_board(state)
+        state
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :agent,
+          "Board: failed to stop session for card #{inspect(card.id)}: #{inspect(reason)}"
+        )
+
+        new_board = BoardState.set_card_status(board, card.id, :errored)
+
+        state
+        |> EditorState.update_shell_state(fn _ -> new_board end)
+        |> EditorState.set_status("Could not stop Board session")
+    end
+  end
+
+  @spec activate_zoomed_card(EditorState.t(), Card.t() | nil, Card.workspace_snapshot()) ::
+          EditorState.t()
+  defp activate_zoomed_card(state, %Card{kind: :agent, session: nil} = card, grid_workspace) do
+    live_workspace = SessionState.to_tab_context(state.workspace)
+
+    {board, restored_grid_workspace} =
+      BoardState.store_live_workspace_and_zoom_out(state.shell_state, card.id, live_workspace)
+
+    state
+    |> EditorState.update_shell_state(fn _ -> board end)
+    |> EditorState.restore_tab_context(restored_grid_workspace || grid_workspace)
+    |> EditorState.set_status("Could not start Board agent session")
+  end
+
+  defp activate_zoomed_card(state, card, _grid_workspace) do
+    MingaBoard.AgentActivation.activate_for_card(state, card)
   end
 
   @spec create_new_card(EditorState.t()) :: EditorState.t()
@@ -293,20 +328,26 @@ defmodule MingaBoard.Shell.Input do
     board = BoardState.focus_card(board, card.id)
 
     # Start an agent session and attach it to the card
-    {board, state} = start_and_attach_session(board, card.id, model, state)
+    case start_and_attach_session(board, card.id, model, state) do
+      {:ok, board, state} ->
+        # Snapshot current workspace and zoom into the card
+        workspace_snapshot = SessionState.to_tab_context(state.workspace)
+        board = BoardState.zoom_into(board, card.id, workspace_snapshot)
+        state = EditorState.update_shell_state(state, fn _ -> board end)
 
-    # Snapshot current workspace and zoom into the card
-    workspace_snapshot = SessionState.to_tab_context(state.workspace)
-    board = BoardState.zoom_into(board, card.id, workspace_snapshot)
-    state = EditorState.update_shell_state(state, fn _ -> board end)
+        # Activate the agentic view for the new card
+        card = board.cards[card.id]
+        MingaBoard.AgentActivation.activate_for_card(state, card)
 
-    # Activate the agentic view for the new card
-    card = board.cards[card.id]
-    MingaBoard.AgentActivation.activate_for_card(state, card)
+      {:error, board, state} ->
+        state
+        |> EditorState.update_shell_state(fn _ -> board end)
+        |> EditorState.set_status("Could not start Board agent session")
+    end
   end
 
   @spec start_and_attach_session(BoardState.t(), pos_integer(), String.t(), EditorState.t()) ::
-          {BoardState.t(), EditorState.t()}
+          {:ok | :error, BoardState.t(), EditorState.t()}
   defp start_and_attach_session(board, card_id, model, state) do
     opts = [
       provider_opts: [
@@ -324,12 +365,12 @@ defmodule MingaBoard.Shell.Input do
         # the user zooms into this card via AgentActivation.activate_for_card/2.
 
         Minga.Log.info(:agent, "Board: started agent session for card #{card_id} (#{model})")
-        {board, state}
+        {:ok, board, state}
 
       {:error, reason} ->
         Minga.Log.error(:agent, "Board: failed to start agent: #{inspect(reason)}")
-        board = BoardState.update_card(board, card_id, &Card.set_status(&1, :errored))
-        {board, state}
+        board = BoardState.set_card_status(board, card_id, :errored)
+        {:error, board, state}
     end
   end
 

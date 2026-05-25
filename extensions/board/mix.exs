@@ -27,7 +27,7 @@ defmodule MingaBoard.MixProject do
   defp deps do
     [
       {:minga_sdk, path: "../../sdk", runtime: false},
-      {:minga, path: "../../", only: :test},
+      {:minga, path: "../../"},
       {:hammox, "~> 0.7", only: :test},
       {:stream_data, "~> 1.1", only: :test}
     ]

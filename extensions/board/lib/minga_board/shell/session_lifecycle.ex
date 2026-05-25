@@ -28,9 +28,13 @@ defmodule MingaBoard.Shell.SessionLifecycle do
   @doc "Stops a managed agent session by PID. Unknown or already-dead PIDs are treated as no-ops."
   @spec stop(pid() | nil) :: :ok | {:error, :not_found}
   def stop(pid) when is_pid(pid) do
-    SessionManager.stop_session_by_pid(pid)
+    case SessionManager.stop_session_by_pid(pid) do
+      :ok -> :ok
+      {:error, :not_found} -> :ok
+      {:error, reason} = error -> log_stop_failure(pid, reason, error)
+    end
   catch
-    :exit, _ -> :ok
+    :exit, reason -> log_stop_failure(pid, reason, {:error, {:exit, reason}})
   end
 
   def stop(nil), do: :ok
@@ -44,8 +48,18 @@ defmodule MingaBoard.Shell.SessionLifecycle do
           {BoardState.t(), MingaEditor.State.t()}
   def ensure_session(board, nil, state), do: {board, state}
 
-  def ensure_session(board, %Card{session: pid} = _card, state) when is_pid(pid) do
-    {board, state}
+  def ensure_session(board, %Card{session: pid} = card, state) when is_pid(pid) do
+    if Process.alive?(pid) do
+      {board, state}
+    else
+      Minga.Log.warning(
+        :agent,
+        "Board: card #{card.id} had stale session #{inspect(pid)}; starting a replacement"
+      )
+
+      board = BoardState.update_card(board, card.id, &Card.detach_session/1)
+      ensure_session(board, Card.detach_session(card), state)
+    end
   end
 
   def ensure_session(board, %Card{kind: :you}, state) do
@@ -82,6 +96,12 @@ defmodule MingaBoard.Shell.SessionLifecycle do
         board = BoardState.update_card(board, card_id, &Card.set_status(&1, :errored))
         {board, state}
     end
+  end
+
+  @spec log_stop_failure(pid(), term(), {:error, term()}) :: {:error, term()}
+  defp log_stop_failure(pid, reason, error) do
+    Minga.Log.warning(:agent, "Board: failed to stop session #{inspect(pid)}: #{inspect(reason)}")
+    error
   end
 
   @spec subscribe(pid()) :: {:ok, pid()} | {:error, term()}

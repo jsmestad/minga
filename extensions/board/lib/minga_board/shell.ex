@@ -36,6 +36,9 @@ defmodule MingaBoard.Shell do
   alias MingaEditor.Frontend.Protocol.GUI.BoardCardPayload
   alias MingaEditor.Frontend.Protocol.GUI.BoardPayload
   alias MingaBoard.AgentActivation
+  alias MingaBoard.Shell.AgentDeactivation
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.AgentAccess
   alias MingaBoard.Shell.Card
   alias MingaBoard.Shell.SessionLifecycle
   alias MingaBoard.Shell.State, as: BoardState
@@ -98,32 +101,47 @@ defmodule MingaBoard.Shell do
   @spec handle_gui_action(BoardState.t(), MingaEditor.Session.State.t(), term()) ::
           {BoardState.t(), MingaEditor.Session.State.t()}
   def handle_gui_action(shell_state, workspace, {:board_select_card, card_id}) do
-    # GUI card click: focus, zoom in, activate agent view.
-    # Same logic as Board.Input's Enter key handler.
-    shell_state = BoardState.focus_card(shell_state, card_id)
-    card = BoardState.focused(shell_state)
-    workspace_snapshot = SessionState.to_tab_context(workspace)
-    shell_state = BoardState.zoom_into(shell_state, card_id, workspace_snapshot)
-    workspace = restore_workspace(card && card.workspace, workspace)
+    case Map.fetch(shell_state.cards, card_id) do
+      {:ok, card} ->
+        # GUI card click: focus, zoom in, activate agent view.
+        # Same logic as Board.Input's Enter key handler.
+        shell_state = BoardState.focus_card(shell_state, card_id)
+        workspace_snapshot = SessionState.to_tab_context(workspace)
+        shell_state = BoardState.zoom_into(shell_state, card_id, workspace_snapshot)
+        workspace = restore_workspace(card.workspace, workspace)
 
-    # Agent activation (session, scope, window content, prompt focus) is handled by `after_gui_action/2` after this function returns. The Shell behaviour only has (shell_state, workspace) access here; full EditorState is needed for session attachment.
+        # Agent activation (session, scope, window content, prompt focus) is handled by `after_gui_action/2` after this function returns. The Shell behaviour only has (shell_state, workspace) access here; full EditorState is needed for session attachment.
 
-    {shell_state, workspace}
+        {shell_state, workspace}
+
+      :error ->
+        Minga.Log.warning(:agent, "Board: ignored stale GUI card selection #{inspect(card_id)}")
+        {shell_state, workspace}
+    end
   end
 
   def handle_gui_action(shell_state, workspace, {:board_close_card, card_id}) do
-    card = Map.get(shell_state.cards, card_id)
-    if card, do: SessionLifecycle.stop(card.session)
+    case Map.fetch(shell_state.cards, card_id) do
+      {:ok, card} ->
+        handle_close_card(shell_state, workspace, card_id, card)
 
-    shell_state = BoardState.remove_card(shell_state, card_id)
-    MingaBoard.Shell.Persistence.save(shell_state)
-    {shell_state, workspace}
+      :error ->
+        Minga.Log.warning(:agent, "Board: ignored stale GUI card close #{inspect(card_id)}")
+        {BoardState.set_status(shell_state, "Board card is unavailable"), workspace}
+    end
   end
 
   def handle_gui_action(shell_state, workspace, {:board_reorder, card_id, new_index}) do
-    shell_state = BoardState.reorder_card(shell_state, card_id, new_index)
-    MingaBoard.Shell.Persistence.save(shell_state)
-    {shell_state, workspace}
+    case Map.fetch(shell_state.cards, card_id) do
+      {:ok, _card} ->
+        shell_state = BoardState.reorder_card(shell_state, card_id, new_index)
+        MingaBoard.Shell.Persistence.save(shell_state)
+        {shell_state, workspace}
+
+      :error ->
+        Minga.Log.warning(:agent, "Board: ignored stale GUI card reorder #{inspect(card_id)}")
+        {BoardState.set_status(shell_state, "Board card is unavailable"), workspace}
+    end
   end
 
   def handle_gui_action(shell_state, workspace, {:board_dispatch_agent, task, model}) do
@@ -167,8 +185,7 @@ defmodule MingaBoard.Shell do
         card = Map.get(shell_state.cards, card_id)
 
         if card && !Card.you_card?(card) do
-          updated_card = Card.set_status(card, :done)
-          shell_state = %{shell_state | cards: Map.put(shell_state.cards, card_id, updated_card)}
+          shell_state = BoardState.set_card_status(shell_state, card_id, :done)
           MingaBoard.Shell.Persistence.save(shell_state)
           {shell_state, workspace}
         else
@@ -187,8 +204,7 @@ defmodule MingaBoard.Shell do
         card = Map.get(shell_state.cards, card_id)
 
         if card && !Card.you_card?(card) do
-          updated_card = Card.set_status(card, :needs_you)
-          shell_state = %{shell_state | cards: Map.put(shell_state.cards, card_id, updated_card)}
+          shell_state = BoardState.set_card_status(shell_state, card_id, :needs_you)
           MingaBoard.Shell.Persistence.save(shell_state)
           {shell_state, workspace}
         else
@@ -212,14 +228,62 @@ defmodule MingaBoard.Shell do
     {shell_state, workspace}
   end
 
+  @spec handle_close_card(BoardState.t(), SessionState.t(), Card.id(), Card.t()) ::
+          {BoardState.t(), SessionState.t()}
+  defp handle_close_card(shell_state, workspace, card_id, card) do
+    case close_card(shell_state, card) do
+      {:ok, shell_state} ->
+        MingaBoard.Shell.Persistence.save(shell_state)
+        {shell_state, workspace}
+
+      {:error, :you_card} ->
+        Minga.Log.warning(:agent, "Board: ignored request to close required You card")
+        {shell_state, workspace}
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :agent,
+          "Board: failed to stop session for card #{inspect(card_id)}: #{inspect(reason)}"
+        )
+
+        shell_state = BoardState.set_card_status(shell_state, card_id, :errored)
+        {shell_state, workspace}
+    end
+  end
+
   @impl true
   @spec after_gui_action(MingaEditor.State.t(), term()) :: MingaEditor.State.t()
+  def after_gui_action(state, :agent_dismiss) do
+    AgentDeactivation.deactivate_agent_for_card(state)
+  end
+
+  def after_gui_action(state, {:board_dispatch_agent, _task, _model}) do
+    case BoardState.focused(state.shell_state) do
+      %Card{status: :errored} ->
+        EditorState.set_status(state, "Could not start Board agent session")
+
+      _card ->
+        state
+    end
+  end
+
   def after_gui_action(state, {:board_select_card, card_id}) do
-    card = Map.get(state.shell_state.cards, card_id)
-    {new_board, state} = SessionLifecycle.ensure_session(state.shell_state, card, state)
-    state = MingaEditor.State.update_shell_state(state, fn _ -> new_board end)
-    card = new_board.cards[card_id]
-    AgentActivation.activate_for_card(state, card)
+    case Map.fetch(state.shell_state.cards, card_id) do
+      {:ok, card} ->
+        state = restore_first_zoom_agent_workspace(state, card)
+        {new_board, state} = SessionLifecycle.ensure_session(state.shell_state, card, state)
+        state = EditorState.update_shell_state(state, fn _ -> new_board end)
+        card = new_board.cards[card_id]
+        activate_selected_card(state, card)
+
+      :error ->
+        Minga.Log.warning(
+          :agent,
+          "Board: selected card #{inspect(card_id)} is no longer available"
+        )
+
+        EditorState.set_status(state, "Board card is unavailable")
+    end
   end
 
   def after_gui_action(state, _action), do: state
@@ -530,6 +594,13 @@ defmodule MingaBoard.Shell do
   @spec set_tab_session(BoardState.t(), term(), pid() | nil) :: BoardState.t()
   def set_tab_session(shell_state, _tab_id, _session_pid), do: shell_state
 
+  @doc "Persists Board shell state when host-level lifecycle callbacks mutate it."
+  @spec persist_shell_state(BoardState.t()) :: BoardState.t()
+  def persist_shell_state(%BoardState{} = shell_state) do
+    MingaBoard.Shell.Persistence.save(shell_state)
+    shell_state
+  end
+
   @doc "Updates a card after its agent session exits."
   @spec handle_agent_session_down(BoardState.t(), pid(), term()) :: {BoardState.t(), boolean()}
   def handle_agent_session_down(%BoardState{} = shell_state, session_pid, reason) do
@@ -641,8 +712,34 @@ defmodule MingaBoard.Shell do
     {shell_state, workspace, []}
   end
 
+  def on_agent_event(
+        shell_state,
+        workspace,
+        session_pid,
+        {:file_changed, path, _before_content, _after_content, _tool_call_id, _tool_name}
+      ) do
+    shell_state = track_agent_file(shell_state, session_pid, path)
+    {shell_state, workspace, []}
+  end
+
   def on_agent_event(shell_state, workspace, _session_pid, _event) do
     {shell_state, workspace, []}
+  end
+
+  @spec close_card(BoardState.t(), Card.t() | nil) :: {:ok, BoardState.t()} | {:error, term()}
+  defp close_card(%BoardState{} = shell_state, nil), do: {:ok, shell_state}
+
+  defp close_card(%BoardState{} = shell_state, %Card{} = card) do
+    case Card.you_card?(card) do
+      true ->
+        {:error, :you_card}
+
+      false ->
+        case SessionLifecycle.stop(card.session) do
+          :ok -> {:ok, BoardState.remove_card(shell_state, card.id)}
+          {:error, _reason} = error -> error
+        end
+    end
   end
 
   @spec card_for_session?(BoardState.t(), pid()) :: boolean()
@@ -668,11 +765,10 @@ defmodule MingaBoard.Shell do
     card = Map.get(shell_state.cards, card_id)
 
     if card do
-      grid_workspace = card.workspace
       live_workspace = SessionState.to_tab_context(workspace)
-      updated_card = Card.store_workspace(card, live_workspace)
-      shell_state = %{shell_state | cards: Map.put(shell_state.cards, card_id, updated_card)}
-      shell_state = %{shell_state | zoomed_into: nil}
+
+      {shell_state, grid_workspace} =
+        BoardState.store_live_workspace_and_zoom_out(shell_state, card_id, live_workspace)
 
       workspace = restore_workspace(grid_workspace, workspace)
 
@@ -680,6 +776,59 @@ defmodule MingaBoard.Shell do
       {shell_state, workspace}
     else
       {shell_state, workspace}
+    end
+  end
+
+  @spec activate_selected_card(EditorState.t(), Card.t() | nil) :: EditorState.t()
+  defp activate_selected_card(%EditorState{} = state, %Card{kind: :agent, session: nil} = card) do
+    live_workspace = SessionState.to_tab_context(state.workspace)
+
+    {board, grid_workspace} =
+      BoardState.store_live_workspace_and_zoom_out(state.shell_state, card.id, live_workspace)
+
+    state
+    |> EditorState.update_shell_state(fn _ -> board end)
+    |> restore_grid_workspace(grid_workspace)
+    |> EditorState.set_status("Could not start Board agent session")
+  end
+
+  defp activate_selected_card(%EditorState{} = state, card) do
+    AgentActivation.activate_for_card(state, card)
+  end
+
+  @spec restore_grid_workspace(EditorState.t(), Card.workspace_snapshot() | nil) ::
+          EditorState.t()
+  defp restore_grid_workspace(%EditorState{} = state, nil), do: state
+
+  defp restore_grid_workspace(%EditorState{} = state, workspace),
+    do: EditorState.restore_tab_context(state, workspace)
+
+  @spec restore_first_zoom_agent_workspace(EditorState.t(), Card.t()) :: EditorState.t()
+  defp restore_first_zoom_agent_workspace(%EditorState{} = state, %Card{kind: :agent} = card) do
+    if agent_workspace_active?(state) or restored_card_workspace?(state.workspace, card.workspace) do
+      state
+    else
+      agent_buf = AgentAccess.agent(state).buffer
+      fresh_context = EditorState.build_agent_workspace_context(state, agent_buf)
+      EditorState.restore_tab_context(state, fresh_context)
+    end
+  end
+
+  defp restore_first_zoom_agent_workspace(%EditorState{} = state, %Card{}), do: state
+
+  @spec restored_card_workspace?(SessionState.t(), Card.workspace_snapshot() | nil) :: boolean()
+  defp restored_card_workspace?(%SessionState{} = workspace, card_workspace)
+       when not is_nil(card_workspace) do
+    SessionState.to_tab_context(workspace) != card_workspace
+  end
+
+  defp restored_card_workspace?(%SessionState{}, nil), do: false
+
+  @spec agent_workspace_active?(EditorState.t()) :: boolean()
+  defp agent_workspace_active?(%EditorState{} = state) do
+    case EditorState.active_window_struct(state) do
+      %{content: {:agent_chat, _session}} -> state.workspace.keymap_scope == :agent
+      _ -> false
     end
   end
 

@@ -118,6 +118,38 @@ defmodule MingaEditor.Frontend.Protocol.GUIBoardTest do
       assert (flags &&& 0x01) == 0
     end
 
+    test "rejects unknown status values" do
+      payload = board(cards: [card(status: :mystery)])
+
+      assert_raise ArgumentError, ~r/invalid Board card payload/, fn ->
+        GUI.encode_gui_board(payload)
+      end
+    end
+
+    test "rejects unknown card kinds" do
+      payload = board(cards: [card(kind: :robot)])
+
+      assert_raise ArgumentError, ~r/invalid Board card payload/, fn ->
+        GUI.encode_gui_board(payload)
+      end
+    end
+
+    test "rejects malformed card payload fields" do
+      invalid_cards = [
+        card(id: 0),
+        card(display_task: nil),
+        card(created_at: :not_a_datetime),
+        card(recent_files: [:not_a_path]),
+        card(sparkline: [:not_a_number])
+      ]
+
+      Enum.each(invalid_cards, fn invalid_card ->
+        assert_raise ArgumentError, ~r/invalid Board card payload/, fn ->
+          GUI.encode_gui_board(board(cards: [invalid_card]))
+        end
+      end)
+    end
+
     test "encodes focused card flag" do
       payload = board(focused_card_id: 1, cards: [card(id: 1), card(id: 2)])
       %{card_data: data} = GUI.encode_gui_board(payload) |> parse_board_header()

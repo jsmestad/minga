@@ -107,6 +107,38 @@ defmodule Minga.Config.LoaderTest do
     end
   end
 
+  test "registers bundled Board extension from packaged priv path" do
+    {_minga_dir, cleanup} =
+      make_config_dir("""
+      use Minga.Config
+      """)
+
+    on_exit(cleanup)
+
+    previous_load_extensions = Application.get_env(:minga, :load_extensions)
+    previous_load_board = Application.get_env(:minga, :load_board_extension)
+
+    Application.put_env(:minga, :load_extensions, false)
+    Application.put_env(:minga, :load_board_extension, true)
+
+    on_exit(fn ->
+      restore_application_env(:load_extensions, previous_load_extensions)
+      restore_application_env(:load_board_extension, previous_load_board)
+    end)
+
+    ensure_extension_runtime()
+    assert {:ok, []} = Mix.Tasks.Compile.MingaBundledExtensions.run([])
+
+    expected_path = Application.app_dir(:minga, Path.join(["priv", "extensions", "board", "lib"]))
+    assert File.dir?(expected_path)
+
+    name = :"loader_bundled_board_#{System.unique_integer([:positive])}"
+    {:ok, _pid} = Loader.start_link(name: name)
+
+    assert {:ok, entry} = ExtRegistry.get(:minga_board)
+    assert entry.path == expected_path
+  end
+
   test "starts extensions declared in project and after config after all config sources load" do
     {minga_dir, cleanup} =
       make_config_dir("""
@@ -1607,6 +1639,10 @@ defmodule Minga.Config.LoaderTest do
     System.put_env("XDG_CONFIG_HOME", path)
     :ok
   end
+
+  @spec restore_application_env(atom(), term()) :: :ok
+  defp restore_application_env(key, nil), do: Application.delete_env(:minga, key)
+  defp restore_application_env(key, value), do: Application.put_env(:minga, key, value)
 
   @spec ensure_extension_runtime() :: :ok
   defp ensure_extension_runtime do

@@ -28,6 +28,7 @@ defmodule MingaEditor.Agent.Events do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
+  alias MingaEditor.Shell.StateStash
 
   @type effect ::
           :render
@@ -493,12 +494,42 @@ defmodule MingaEditor.Agent.Events do
     do: state
 
   defp update_shell_for_session(state, callback, args) do
+    state
+    |> update_active_shell_for_session(callback, args)
+    |> update_stashed_shells_for_session(callback, args)
+  end
+
+  @spec update_active_shell_for_session(EditorState.t(), atom(), [term()]) :: EditorState.t()
+  defp update_active_shell_for_session(state, callback, args) do
     shell = EditorState.active_shell_module(state)
 
     if function_exported?(shell, callback, length(args) + 1) do
       %{state | shell_state: apply(shell, callback, [state.shell_state | args])}
     else
       state
+    end
+  end
+
+  @spec update_stashed_shells_for_session(EditorState.t(), atom(), [term()]) :: EditorState.t()
+  defp update_stashed_shells_for_session(state, callback, args) do
+    stash =
+      Map.new(state.shell_state_stash, fn
+        {shell_id, %StateStash{} = stashed} ->
+          {shell_id, update_stashed_shell_for_session(stashed, callback, args)}
+
+        entry ->
+          entry
+      end)
+
+    %{state | shell_state_stash: stash}
+  end
+
+  @spec update_stashed_shell_for_session(StateStash.t(), atom(), [term()]) :: StateStash.t()
+  defp update_stashed_shell_for_session(%StateStash{} = stashed, callback, args) do
+    if function_exported?(stashed.module, callback, length(args) + 1) do
+      %StateStash{stashed | state: apply(stashed.module, callback, [stashed.state | args])}
+    else
+      stashed
     end
   end
 

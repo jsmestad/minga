@@ -32,8 +32,14 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
   defmodule BoardPayloadShell do
     @moduledoc false
 
+    alias MingaEditor.Frontend.Protocol.GUI.BoardCardPayload
+    alias MingaEditor.Frontend.Protocol.GUI.BoardPayload
+
     @spec compute_layout(map()) :: MingaEditor.Layout.t()
     def compute_layout(state), do: MingaEditor.Shell.Traditional.compute_layout(state)
+
+    @spec active_session(term()) :: nil
+    def active_session(_shell_state), do: nil
 
     @spec gui_payload(term()) :: {:board, BoardPayload.t()}
     def gui_payload(_state) do
@@ -41,6 +47,7 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
        %BoardPayload{
          visible?: true,
          focused_card_id: 1,
+         zoomed_card_id: 1,
          cards: [
            %BoardCardPayload{
              id: 1,
@@ -332,6 +339,24 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
 
       assert level == "high"
       refute chat_caches3.last_gui_agent_chat_fp == chat_caches2.last_gui_agent_chat_fp
+    end
+
+    test "switching from Board to Traditional hides Board companion chrome once" do
+      board_state = %{gui_state() | shell: BoardPayloadShell}
+
+      {_ctx, caches, board_cmds} = sync_chrome(board_state)
+      assert [<<0x87, 1::8, _::binary>>] = opcode_cmds(board_cmds, 0x87)
+      assert [<<0x88, 1::8, _::binary>>] = opcode_cmds(board_cmds, 0x88)
+
+      {_ctx, caches, dismiss_cmds} = sync_chrome(gui_state(), caches)
+      assert [<<0x87, 0::8, _::binary>>] = opcode_cmds(dismiss_cmds, 0x87)
+      assert [<<0x88, 0::8, _::binary>>] = opcode_cmds(dismiss_cmds, 0x88)
+      assert [<<0x89, 0::8, _::binary>>] = opcode_cmds(dismiss_cmds, 0x89)
+
+      {_ctx, _caches, repeated_cmds} = sync_chrome(gui_state(), caches)
+      assert [] = opcode_cmds(repeated_cmds, 0x87)
+      assert [] = opcode_cmds(repeated_cmds, 0x88)
+      assert [] = opcode_cmds(repeated_cmds, 0x89)
     end
 
     test "switching from Board to Traditional emits one Board dismiss payload" do

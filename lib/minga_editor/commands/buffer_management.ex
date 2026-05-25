@@ -32,6 +32,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
+  alias MingaEditor.Shell.StateStash
   alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.State.WorkspaceReview
   alias MingaEditor.Window
@@ -1064,29 +1065,53 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   def handle_agent_session_down(state, session_pid, reason) do
+    {state, owned?} = update_active_shell_session_down(state, session_pid, reason)
+
+    case owned? do
+      true -> finish_owned_session_down(state, reason)
+      false -> handle_unowned_session_down(state, session_pid, reason)
+    end
+  end
+
+  @spec update_active_shell_session_down(state(), pid(), term()) :: {state(), boolean()}
+  defp update_active_shell_session_down(state, session_pid, reason) do
     shell = EditorState.active_shell_module(state)
 
     if function_exported?(shell, :handle_agent_session_down, 3) do
       {shell_state, owned?} =
         shell.handle_agent_session_down(state.shell_state, session_pid, reason)
 
-      state = EditorState.update_shell_state(state, fn _ -> shell_state end)
-      state = AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
-      state = AgentAccess.update_agent(state, &AgentState.reset_cache/1)
-
-      if owned? do
-        msg =
-          if reason in [:normal, :shutdown],
-            do: "Agent session ended",
-            else: "Agent session crashed"
-
-        EditorState.set_status(state, msg)
-      else
-        handle_agent_session_down_for_tabs(state, session_pid, reason)
-      end
+      shell_state = maybe_persist_owned_shell_state(shell, shell_state, owned?)
+      {EditorState.update_shell_state(state, fn _ -> shell_state end), owned?}
     else
-      handle_agent_session_down_for_tabs(state, session_pid, reason)
+      {state, false}
     end
+  end
+
+  @spec handle_unowned_session_down(state(), pid(), term()) :: state()
+  defp handle_unowned_session_down(state, session_pid, reason) do
+    {state, owned?} = update_stashed_shell_session_down(state, session_pid, reason)
+
+    case owned? do
+      true -> finish_owned_session_down(state, reason)
+      false -> handle_agent_session_down_for_tabs(state, session_pid, reason)
+    end
+  end
+
+  @spec finish_owned_session_down(state(), term()) :: state()
+  defp finish_owned_session_down(state, reason) do
+    msg =
+      if reason in [:normal, :shutdown], do: "Agent session ended", else: "Agent session crashed"
+
+    state
+    |> AgentAccess.update_agent(&AgentState.stop_spinner_timer/1)
+    |> AgentAccess.update_agent(&AgentState.reset_cache/1)
+    |> EditorState.set_status(msg)
+  end
+
+  @spec update_stashed_shell_session_down(state(), pid(), term()) :: {state(), boolean()}
+  defp update_stashed_shell_session_down(state, session_pid, reason) do
+    update_stashed_shell_for_session(state, :handle_agent_session_down, [session_pid, reason])
   end
 
   @spec handle_agent_session_down_for_tabs(state(), pid(), term()) :: state()
@@ -1376,27 +1401,111 @@ defmodule MingaEditor.Commands.BufferManagement do
         |> EditorState.set_status("[#{server_name}] disconnected, reconnecting...")
 
       _ ->
-        state
+        handle_stashed_remote_session_disconnected(state, session_pid)
     end
   end
 
   defp handle_remote_session_disconnected(state, session_pid) do
+    {state, handled?} = update_active_shell_remote_disconnected(state, session_pid)
+
+    case handled? do
+      true -> finish_remote_session_disconnected(state)
+      false -> handle_stashed_remote_session_disconnected(state, session_pid)
+    end
+  end
+
+  @spec update_active_shell_remote_disconnected(state(), pid()) :: {state(), boolean()}
+  defp update_active_shell_remote_disconnected(state, session_pid) do
     shell = EditorState.active_shell_module(state)
 
     if function_exported?(shell, :handle_remote_session_disconnected, 2) do
       {shell_state, handled?} =
         shell.handle_remote_session_disconnected(state.shell_state, session_pid)
 
-      if handled? do
-        state
-        |> EditorState.update_shell_state(fn _ -> shell_state end)
-        |> AgentAccess.update_agent(&AgentState.stop_spinner_timer/1)
-        |> EditorState.set_status("Remote agent disconnected, reconnecting...")
-      else
-        state
-      end
+      shell_state = maybe_persist_owned_shell_state(shell, shell_state, handled?)
+      {EditorState.update_shell_state(state, fn _ -> shell_state end), handled?}
     else
-      state
+      {state, false}
+    end
+  end
+
+  @spec handle_stashed_remote_session_disconnected(state(), pid()) :: state()
+  defp handle_stashed_remote_session_disconnected(state, session_pid) do
+    {state, handled?} =
+      update_stashed_shell_for_session(state, :handle_remote_session_disconnected, [session_pid])
+
+    if handled?, do: finish_remote_session_disconnected(state), else: state
+  end
+
+  @spec finish_remote_session_disconnected(state()) :: state()
+  defp finish_remote_session_disconnected(state) do
+    state
+    |> AgentAccess.update_agent(&AgentState.stop_spinner_timer/1)
+    |> EditorState.set_status("Remote agent disconnected, reconnecting...")
+  end
+
+  @spec maybe_persist_owned_shell_state(module(), term(), boolean()) :: term()
+  defp maybe_persist_owned_shell_state(module, shell_state, true) do
+    if function_exported?(module, :persist_shell_state, 1) do
+      module.persist_shell_state(shell_state)
+    else
+      shell_state
+    end
+  end
+
+  defp maybe_persist_owned_shell_state(_module, shell_state, false), do: shell_state
+
+  @spec update_stashed_shell_for_session(state(), atom(), [term()]) :: {state(), boolean()}
+  defp update_stashed_shell_for_session(state, callback, args) do
+    {stash, handled?} =
+      Enum.reduce(state.shell_state_stash, {state.shell_state_stash, false}, fn
+        {shell_id, %StateStash{} = stashed}, {stash_acc, false} ->
+          update_matching_stashed_shell(stash_acc, shell_id, stashed, callback, args)
+
+        _entry, acc ->
+          acc
+      end)
+
+    {%{state | shell_state_stash: stash}, handled?}
+  end
+
+  @spec update_matching_stashed_shell(
+          EditorState.shell_state_stash(),
+          EditorState.shell_id(),
+          StateStash.t(),
+          atom(),
+          [term()]
+        ) :: {EditorState.shell_state_stash(), boolean()}
+  defp update_matching_stashed_shell(stash, shell_id, %StateStash{} = stashed, callback, args) do
+    arity = length(args) + 1
+
+    if function_exported?(stashed.module, callback, arity) do
+      apply_stashed_shell_callback(stash, shell_id, stashed, callback, args)
+    else
+      {stash, false}
+    end
+  end
+
+  @spec apply_stashed_shell_callback(
+          EditorState.shell_state_stash(),
+          EditorState.shell_id(),
+          StateStash.t(),
+          atom(),
+          [term()]
+        ) :: {EditorState.shell_state_stash(), boolean()}
+  defp apply_stashed_shell_callback(stash, shell_id, %StateStash{} = stashed, callback, args) do
+    case apply(stashed.module, callback, [stashed.state | args]) do
+      {shell_state, true} ->
+        Minga.Log.info(
+          :agent,
+          "Agent session update applied to stashed #{inspect(shell_id)} shell"
+        )
+
+        shell_state = maybe_persist_owned_shell_state(stashed.module, shell_state, true)
+        {Map.put(stash, shell_id, %StateStash{stashed | state: shell_state}), true}
+
+      {_shell_state, false} ->
+        {stash, false}
     end
   end
 
