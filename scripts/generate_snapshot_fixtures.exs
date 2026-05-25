@@ -698,4 +698,201 @@ agent_panel_commands =
 
 FixtureWriter.write_fixture("agent_panel", agent_panel_commands)
 
+# Fixture 5: INSERT mode with beam cursor and completion popup
+insert_mode_commands =
+  [
+    Protocol.encode_set_window_bg(0x282C34),
+    Protocol.encode_clear()
+  ] ++
+    [
+      Protocol.encode_draw(0, 0, "  1 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(1, 0, "  2 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(2, 0, "  3 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(3, 0, "  4 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(4, 0, "  5 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(5, 0, "  6 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(6, 0, "  7 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(7, 0, "  8 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(8, 0, "  9 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(9, 0, " 10 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(0, 4, "defmodule", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(0, 14, "Router", fg: 0xE5C07B, bg: 0x282C34, bold: true),
+      Protocol.encode_draw(0, 21, "do", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(1, 4, "  use", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(1, 10, "Plug.Router", fg: 0xE5C07B, bg: 0x282C34),
+      Protocol.encode_draw(3, 4, "  plug", fg: 0x61AFEF, bg: 0x282C34),
+      Protocol.encode_draw(3, 11, ":match", fg: 0xDA8548, bg: 0x282C34),
+      Protocol.encode_draw(4, 4, "  plug", fg: 0x61AFEF, bg: 0x282C34),
+      Protocol.encode_draw(4, 11, ":dis", fg: 0xDA8548, bg: 0x282C34),
+      Protocol.encode_draw(6, 4, "  get", fg: 0x61AFEF, bg: 0x282C34),
+      Protocol.encode_draw(6, 10, " \"/hello\"", fg: 0x98C379, bg: 0x282C34),
+      Protocol.encode_draw(6, 20, " do", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(7, 4, "    send_resp", fg: 0x61AFEF, bg: 0x282C34),
+      Protocol.encode_draw(7, 17, "(conn, ", fg: 0xABB2BF, bg: 0x282C34),
+      Protocol.encode_draw(7, 24, "200", fg: 0xDA8548, bg: 0x282C34),
+      Protocol.encode_draw(7, 27, ", ", fg: 0xABB2BF, bg: 0x282C34),
+      Protocol.encode_draw(7, 29, "\"world\"", fg: 0x98C379, bg: 0x282C34),
+      Protocol.encode_draw(7, 36, ")", fg: 0xABB2BF, bg: 0x282C34),
+      Protocol.encode_draw(8, 4, "  end", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(9, 4, "end", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(5, 11, " :dispatch              Plug ", fg: 0xABB2BF, bg: 0x21252B),
+      Protocol.encode_draw(6, 11, " :discard               Plug ", fg: 0xDFDFDF, bg: 0x2257A0, bold: true),
+      Protocol.encode_draw(7, 11, " :disconnect            Plug ", fg: 0xABB2BF, bg: 0x21252B),
+      Protocol.encode_draw(22, 0, String.duplicate(" ", 80), fg: 0xABB2BF, bg: 0x3E4452),
+      Protocol.encode_draw(22, 0, " INSERT ", fg: 0x282C34, bg: 0x7DCFFF, bold: true),
+      Protocol.encode_draw(22, 9, " main ", fg: 0xABB2BF, bg: 0x3E4452),
+      Protocol.encode_draw(22, 16, " router.ex [+] ", fg: 0xABB2BF, bg: 0x3E4452),
+      Protocol.encode_draw(22, 70, " 5:15 ", fg: 0xABB2BF, bg: 0x3E4452),
+      Protocol.encode_draw(23, 0, String.duplicate(" ", 80), fg: 0x5C6370, bg: 0x282C34),
+      Protocol.encode_cursor(4, 15),
+      Protocol.encode_cursor_shape(:beam),
+      Protocol.encode_batch_end()
+    ]
+
+FixtureWriter.write_fixture("insert_mode", insert_mode_commands)
+
+# Fixture 6: VISUAL mode selection spanning multiple lines
+visual_selection_commands =
+  [
+    Protocol.encode_set_window_bg(0x282C34),
+    Protocol.encode_clear()
+  ] ++
+    [
+      Protocol.encode_draw(0, 0, "  1 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(1, 0, "  2 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(2, 0, "  3 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(3, 0, "  4 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(4, 0, "  5 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(5, 0, "  6 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(6, 0, "  7 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(7, 0, "  8 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(0, 4, "defmodule", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(0, 14, "Counter", fg: 0xE5C07B, bg: 0x282C34, bold: true),
+      Protocol.encode_draw(0, 22, "do", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(1, 4, "  use", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(1, 10, "GenServer", fg: 0xE5C07B, bg: 0x282C34),
+      Protocol.encode_draw(3, 4, "  def", fg: 0xC678DD, bg: 0x2B4A73),
+      Protocol.encode_draw(3, 10, "start_link", fg: 0x61AFEF, bg: 0x2B4A73),
+      Protocol.encode_draw(3, 20, "(", fg: 0xABB2BF, bg: 0x2B4A73),
+      Protocol.encode_draw(3, 21, "init", fg: 0xE06C75, bg: 0x2B4A73),
+      Protocol.encode_draw(3, 25, ")", fg: 0xABB2BF, bg: 0x2B4A73),
+      Protocol.encode_draw(3, 27, " do", fg: 0xC678DD, bg: 0x2B4A73),
+      Protocol.encode_draw(3, 30, String.duplicate(" ", 50), fg: 0xABB2BF, bg: 0x2B4A73),
+      Protocol.encode_draw(4, 4, "    GenServer", fg: 0xE5C07B, bg: 0x2B4A73),
+      Protocol.encode_draw(4, 17, ".", fg: 0xABB2BF, bg: 0x2B4A73),
+      Protocol.encode_draw(4, 18, "start_link", fg: 0x61AFEF, bg: 0x2B4A73),
+      Protocol.encode_draw(4, 28, "(", fg: 0xABB2BF, bg: 0x2B4A73),
+      Protocol.encode_draw(4, 29, "__MODULE__", fg: 0xDA8548, bg: 0x2B4A73),
+      Protocol.encode_draw(4, 39, ", init)", fg: 0xABB2BF, bg: 0x2B4A73),
+      Protocol.encode_draw(4, 46, String.duplicate(" ", 34), fg: 0xABB2BF, bg: 0x2B4A73),
+      Protocol.encode_draw(5, 4, "  end", fg: 0xC678DD, bg: 0x2B4A73),
+      Protocol.encode_draw(5, 9, String.duplicate(" ", 71), fg: 0xABB2BF, bg: 0x2B4A73),
+      Protocol.encode_draw(7, 4, "  def", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(7, 10, "init", fg: 0x61AFEF, bg: 0x282C34),
+      Protocol.encode_draw(7, 14, "(", fg: 0xABB2BF, bg: 0x282C34),
+      Protocol.encode_draw(7, 15, "state", fg: 0xE06C75, bg: 0x282C34),
+      Protocol.encode_draw(7, 20, ")", fg: 0xABB2BF, bg: 0x282C34),
+      Protocol.encode_draw(7, 22, " do", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(22, 0, String.duplicate(" ", 80), fg: 0xABB2BF, bg: 0x3E4452),
+      Protocol.encode_draw(22, 0, " VISUAL ", fg: 0x282C34, bg: 0xBB9AF7, bold: true),
+      Protocol.encode_draw(22, 9, " main ", fg: 0xABB2BF, bg: 0x3E4452),
+      Protocol.encode_draw(22, 16, " counter.ex ", fg: 0xABB2BF, bg: 0x3E4452),
+      Protocol.encode_draw(22, 70, " 4:3 ", fg: 0xABB2BF, bg: 0x3E4452),
+      Protocol.encode_draw(23, 0, "-- VISUAL -- 3 lines selected", fg: 0xABB2BF, bg: 0x282C34),
+      Protocol.encode_draw(23, 29, String.duplicate(" ", 51), fg: 0x5C6370, bg: 0x282C34),
+      Protocol.encode_cursor(3, 4),
+      Protocol.encode_cursor_shape(:block),
+      Protocol.encode_batch_end()
+    ]
+
+FixtureWriter.write_fixture("visual_selection", visual_selection_commands)
+
+# Fixture 7: Message bar with error feedback
+message_bar_commands =
+  [
+    Protocol.encode_set_window_bg(0x282C34),
+    Protocol.encode_clear()
+  ] ++
+    [
+      Protocol.encode_draw(0, 0, "  1 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(1, 0, "  2 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(2, 0, "  3 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(3, 0, "  4 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(4, 0, "  5 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(5, 0, "  6 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(6, 0, "  7 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(0, 4, "defmodule", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(0, 14, "App", fg: 0xE5C07B, bg: 0x282C34, bold: true),
+      Protocol.encode_draw(0, 18, "do", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(1, 4, "  def", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(1, 10, "run", fg: 0x61AFEF, bg: 0x282C34),
+      Protocol.encode_draw(1, 14, "do", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(2, 4, "    IO", fg: 0xE5C07B, bg: 0x282C34),
+      Protocol.encode_draw(2, 10, ".", fg: 0xABB2BF, bg: 0x282C34),
+      Protocol.encode_draw(2, 11, "puts", fg: 0x61AFEF, bg: 0x282C34),
+      Protocol.encode_draw(2, 15, "(", fg: 0xABB2BF, bg: 0x282C34),
+      Protocol.encode_draw(2, 16, "\"hello\"", fg: 0x98C379, bg: 0x282C34),
+      Protocol.encode_draw(2, 23, ")", fg: 0xABB2BF, bg: 0x282C34),
+      Protocol.encode_draw(3, 4, "  end", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(4, 4, "end", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(5, 4, "~", fg: 0x5C6370, bg: 0x282C34),
+      Protocol.encode_draw(6, 4, "~", fg: 0x5C6370, bg: 0x282C34),
+      Protocol.encode_draw(22, 0, String.duplicate(" ", 80), fg: 0xABB2BF, bg: 0x3E4452),
+      Protocol.encode_draw(22, 0, " NORMAL ", fg: 0x282C34, bg: 0x98C379, bold: true),
+      Protocol.encode_draw(22, 9, " main ", fg: 0xABB2BF, bg: 0x3E4452),
+      Protocol.encode_draw(22, 16, " app.ex ", fg: 0xABB2BF, bg: 0x3E4452),
+      Protocol.encode_draw(22, 70, " 1:1 ", fg: 0xABB2BF, bg: 0x3E4452),
+      Protocol.encode_draw(23, 0, "E42: No buffers were deleted", fg: 0xE06C75, bg: 0x282C34),
+      Protocol.encode_draw(23, 28, String.duplicate(" ", 52), fg: 0x5C6370, bg: 0x282C34),
+      Protocol.encode_cursor(0, 4),
+      Protocol.encode_cursor_shape(:block),
+      Protocol.encode_batch_end()
+    ]
+
+FixtureWriter.write_fixture("message_bar", message_bar_commands)
+
+# Fixture 8: Message bar with info/yank feedback
+message_bar_info_commands =
+  [
+    Protocol.encode_set_window_bg(0x282C34),
+    Protocol.encode_clear()
+  ] ++
+    [
+      Protocol.encode_draw(0, 0, "  1 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(1, 0, "  2 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(2, 0, "  3 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(3, 0, "  4 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(4, 0, "  5 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(5, 0, "  6 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(6, 0, "  7 ", fg: 0x5C6370, bg: 0x21252B),
+      Protocol.encode_draw(0, 4, "defmodule", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(0, 14, "App", fg: 0xE5C07B, bg: 0x282C34, bold: true),
+      Protocol.encode_draw(0, 18, "do", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(1, 4, "  def", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(1, 10, "run", fg: 0x61AFEF, bg: 0x282C34),
+      Protocol.encode_draw(1, 14, "do", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(2, 4, "    IO", fg: 0xE5C07B, bg: 0x282C34),
+      Protocol.encode_draw(2, 10, ".", fg: 0xABB2BF, bg: 0x282C34),
+      Protocol.encode_draw(2, 11, "puts", fg: 0x61AFEF, bg: 0x282C34),
+      Protocol.encode_draw(2, 15, "(", fg: 0xABB2BF, bg: 0x282C34),
+      Protocol.encode_draw(2, 16, "\"hello\"", fg: 0x98C379, bg: 0x282C34),
+      Protocol.encode_draw(2, 23, ")", fg: 0xABB2BF, bg: 0x282C34),
+      Protocol.encode_draw(3, 4, "  end", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(4, 4, "end", fg: 0xC678DD, bg: 0x282C34),
+      Protocol.encode_draw(5, 4, "~", fg: 0x5C6370, bg: 0x282C34),
+      Protocol.encode_draw(6, 4, "~", fg: 0x5C6370, bg: 0x282C34),
+      Protocol.encode_draw(22, 0, String.duplicate(" ", 80), fg: 0xABB2BF, bg: 0x3E4452),
+      Protocol.encode_draw(22, 0, " NORMAL ", fg: 0x282C34, bg: 0x98C379, bold: true),
+      Protocol.encode_draw(22, 9, " main ", fg: 0xABB2BF, bg: 0x3E4452),
+      Protocol.encode_draw(22, 16, " app.ex ", fg: 0xABB2BF, bg: 0x3E4452),
+      Protocol.encode_draw(22, 70, " 1:1 ", fg: 0xABB2BF, bg: 0x3E4452),
+      Protocol.encode_draw(23, 0, "3 lines yanked", fg: 0xABB2BF, bg: 0x282C34),
+      Protocol.encode_draw(23, 14, String.duplicate(" ", 66), fg: 0x5C6370, bg: 0x282C34),
+      Protocol.encode_cursor(0, 4),
+      Protocol.encode_cursor_shape(:block),
+      Protocol.encode_batch_end()
+    ]
+
+FixtureWriter.write_fixture("message_bar_info", message_bar_info_commands)
+
 IO.puts("\nAll fixtures generated successfully.")
