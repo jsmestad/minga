@@ -17,6 +17,10 @@ enum PreviewSnapshotPolicy {
         case "NotificationCenterView": CGSize(width: 800, height: 600)
         case "ObservatoryView": CGSize(width: 320, height: 640)
         case "AgentChatView": CGSize(width: 760, height: 600)
+        case "PickerOverlay": CGSize(width: 600, height: 400)
+        case "MinibufferView": CGSize(width: 600, height: 140)
+        case "WhichKeyOverlay": CGSize(width: 520, height: 300)
+        case "SearchToolbar": CGSize(width: 800, height: 40)
         default: CGSize(width: 400, height: 200)
         }
     }

@@ -35,6 +35,14 @@ enum PreviewRegistry {
             observatoryPreview()
         case "AgentChatView":
             agentChatPreview()
+        case "PickerOverlay":
+            pickerPreview()
+        case "MinibufferView":
+            minibufferPreview()
+        case "WhichKeyOverlay":
+            whichKeyPreview()
+        case "SearchToolbar":
+            searchToolbarPreview()
         default:
             Text("Unknown view: \(name)")
                 .font(.title)
@@ -590,6 +598,108 @@ enum PreviewRegistry {
 
     private static func styledRun(_ text: String, _ r: UInt8, _ g: UInt8, _ b: UInt8, bold: Bool = false) -> Wire.StyledTextRun {
         Wire.StyledTextRun(text: text, fgR: r, fgG: g, fgB: b, bgR: 0, bgG: 0, bgB: 0, bold: bold, italic: false, underline: false)
+    }
+
+    // MARK: - PickerOverlay
+
+    private static func pickerPreview() -> some View {
+        let theme = populatedTheme()
+        let state = PickerState()
+        state.update(
+            visible: true,
+            selectedIndex: 1,
+            filteredCount: 5,
+            totalCount: 42,
+            markedCount: 0,
+            title: "Find File",
+            query: "edit",
+            hasPreview: false,
+            rawItems: [
+                Wire.PickerItem(iconColor: 0x98BE65, flags: 0, label: "\u{f0e7}editor.ex", description: "lib/minga/editor.ex", annotation: "", matchPositions: [1, 2, 3, 4]),
+                Wire.PickerItem(iconColor: 0x98BE65, flags: 0x01, label: "\u{f0e7}editor_test.exs", description: "test/minga/editor_test.exs", annotation: "test", matchPositions: [1, 2, 3, 4]),
+                Wire.PickerItem(iconColor: 0x51AFEF, flags: 0, label: "\u{f0e7}EditorNSView.swift", description: "macos/Sources/EditorNSView.swift", annotation: "swift", matchPositions: [1, 2, 3, 4]),
+                Wire.PickerItem(iconColor: 0xECBE7B, flags: 0, label: "\u{f085}edit_mode.ex", description: "lib/minga/mode/edit_mode.ex", annotation: "", matchPositions: [1, 2, 3, 4]),
+                Wire.PickerItem(iconColor: 0xC678DD, flags: 0, label: "\u{f0e7}editor_config.ex", description: "lib/minga/editor/config.ex", annotation: "", matchPositions: [1, 2, 3, 4]),
+            ],
+            actionMenu: nil,
+            modePrefix: ""
+        )
+
+        return ZStack {
+            theme.editorBg
+            PickerOverlay(state: state, theme: theme, encoder: nil)
+        }
+        .frame(width: 600, height: 400)
+        .clipped()
+    }
+
+    // MARK: - MinibufferView
+
+    private static func minibufferPreview() -> some View {
+        let theme = populatedTheme()
+        let state = MinibufferState()
+        state.update(
+            visible: true,
+            mode: MinibufferMode.command.rawValue,
+            cursorPos: 7,
+            prompt: "M-x ",
+            input: "org-mod",
+            context: "",
+            selectedIndex: 0,
+            totalCandidates: 23,
+            rawCandidates: [
+                Wire.MinibufferCandidate(matchScore: 95, label: "org-mode", description: "Toggle Org major mode", annotation: "SPC m o", matchPositions: [0, 1, 2, 3, 4, 5, 6]),
+                Wire.MinibufferCandidate(matchScore: 80, label: "org-mode-restart", description: "Restart Org mode parser", annotation: "", matchPositions: [0, 1, 2, 3, 4, 5, 6]),
+                Wire.MinibufferCandidate(matchScore: 72, label: "org-modernize", description: "Modernize Org buffer syntax", annotation: "", matchPositions: [0, 1, 2, 3, 4, 5, 6, 8]),
+            ]
+        )
+
+        return MinibufferView(state: state, theme: theme, encoder: nil)
+            .frame(width: 600, height: 140)
+            .background(theme.editorBg)
+    }
+
+    // MARK: - WhichKeyOverlay
+
+    private static func whichKeyPreview() -> some View {
+        let theme = populatedTheme()
+        let state = WhichKeyState()
+        state.update(
+            visible: true,
+            prefix: "SPC",
+            page: 0,
+            pageCount: 1,
+            rawBindings: [
+                Wire.WhichKeyBinding(kind: 1, key: "f", description: "+file", icon: ""),
+                Wire.WhichKeyBinding(kind: 1, key: "b", description: "+buffer", icon: ""),
+                Wire.WhichKeyBinding(kind: 1, key: "w", description: "+window", icon: ""),
+                Wire.WhichKeyBinding(kind: 1, key: "g", description: "+git", icon: ""),
+                Wire.WhichKeyBinding(kind: 1, key: "s", description: "+search", icon: ""),
+                Wire.WhichKeyBinding(kind: 0, key: ":", description: "M-x command", icon: ""),
+                Wire.WhichKeyBinding(kind: 0, key: ".", description: "repeat", icon: ""),
+                Wire.WhichKeyBinding(kind: 0, key: "/", description: "search project", icon: ""),
+                Wire.WhichKeyBinding(kind: 1, key: "p", description: "+project", icon: ""),
+                Wire.WhichKeyBinding(kind: 1, key: "t", description: "+toggle", icon: ""),
+                Wire.WhichKeyBinding(kind: 1, key: "c", description: "+code", icon: ""),
+                Wire.WhichKeyBinding(kind: 0, key: "e", description: "file tree", icon: ""),
+            ]
+        )
+
+        return WhichKeyOverlay(state: state, theme: theme)
+            .frame(width: 520, height: 300)
+            .background(theme.editorBg)
+    }
+
+    // MARK: - SearchToolbar
+
+    private static func searchToolbarPreview() -> some View {
+        let theme = populatedTheme()
+        let state = SearchState()
+        state.update(active: true, matchCount: 12, currentIndex: 3, flags: 0)
+
+        return SearchToolbar(searchState: state, theme: theme, encoder: nil)
+            .frame(width: 800, height: 40)
+            .background(theme.editorBg)
     }
 
     // MARK: - Helpers
