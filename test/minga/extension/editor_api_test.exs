@@ -52,6 +52,17 @@ defmodule MingaEditor.Extension.EditorAPITest do
       assert Minga.Buffer.cursor(active_buf) == {2, 0}
     end
 
+    test "moves cursor when target file is already active" do
+      content = "line one\nline two\nline three\nline four\n"
+      path = write_temp_file("editor_api_nav_active_test", content)
+      ctx = start_editor("original")
+      state = ctx |> editor_state() |> EditorAPI.open_file(path)
+
+      new_state = EditorAPI.navigate_to(state, path, 3, 0)
+
+      assert Minga.Buffer.cursor(new_state.workspace.buffers.active) == {3, 0}
+    end
+
     test "leaves cursor unchanged when file does not exist" do
       ctx = start_editor("original")
       state = editor_state(ctx)

@@ -3,12 +3,14 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   Pure-function tests for `MingaEditor.Handlers.GuiActionHandler`.
   """
 
-  use ExUnit.Case, async: true
+  # Uses the default extension sidebar registry for GUI action routing tests.
+  use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
 
   alias Minga.Events
   alias MingaEditor.Commands
+  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Handlers.GuiActionHandler
   alias MingaEditor.RenderPipeline.TestHelpers
@@ -18,6 +20,12 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
+
+  setup do
+    Sidebar.unregister_source({:extension, :gui_action_test})
+    on_exit(fn -> Sidebar.unregister_source({:extension, :gui_action_test}) end)
+    :ok
+  end
 
   test "tab context actions target the requested tab without selecting it" do
     tab1 = Tab.new_file(1, "a.ex")
@@ -85,6 +93,24 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     refute observatory_active.workspace.file_tree.focused
     assert observatory_active.workspace.keymap_scope == :editor
     assert EditorState.sidebar_active_id(observatory_active) == "observatory"
+  end
+
+  test "native GUI sidebar actions route to extension-owned sidebars" do
+    assert :ok =
+             Sidebar.register({:extension, :gui_action_test}, %{
+               id: "outline",
+               display_name: "Outline",
+               action_handler: fn state, action, context ->
+                 EditorState.set_status(state, "#{action}:#{context.kind}")
+               end
+             })
+
+    state = TestHelpers.base_state()
+
+    new_state =
+      GuiActionHandler.dispatch(state, {:sidebar_action, "outline", "generic_tree", "activate"})
+
+    assert EditorState.status_msg(new_state) == "activate:generic_tree"
   end
 
   test "unknown sidebar action is reported instead of silently ignored" do

@@ -39,6 +39,7 @@ defmodule MingaEditor.Input do
   alias MingaEditor.Input.Popup
   alias MingaEditor.Input.Prompt
   alias MingaEditor.Input.Scoped
+  alias MingaEditor.Input.Sidebar
   alias MingaEditor.Input.SignatureHelp
   alias MingaEditor.Input.ToolApproval
 
@@ -57,6 +58,7 @@ defmodule MingaEditor.Input do
     {ToolApproval, 20},
     {DiffReview, 30},
     {AgentPanel, 40},
+    {Sidebar, 45},
     {FileTreeHandler, 50},
     {GitStatus, 60},
     {Dired, 70},

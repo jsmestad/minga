@@ -12,6 +12,7 @@ defmodule MingaEditor.FocusTree do
   alias MingaEditor.CompletionUI
   alias MingaEditor.FocusTree.Node, as: TreeNode
   alias MingaEditor.Input
+  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.State.ModalOverlay
@@ -177,11 +178,23 @@ defmodule MingaEditor.FocusTree do
 
   @spec file_tree_node(Layout.rect()) :: TreeNode.t()
   defp file_tree_node(rect) do
-    TreeNode.new(:file_tree, rect,
-      handler: Input.FileTreeHandler,
-      scrollable?: true,
-      focusable?: true
-    )
+    case Sidebar.active_left() do
+      %{id: id, input_handler: handler} ->
+        TreeNode.new({:custom, :sidebar}, rect,
+          id: {:sidebar, id},
+          ref: id,
+          handler: handler || Input.Sidebar,
+          scrollable?: true,
+          focusable?: true
+        )
+
+      nil ->
+        TreeNode.new(:file_tree, rect,
+          handler: Input.FileTreeHandler,
+          scrollable?: true,
+          focusable?: true
+        )
+    end
   end
 
   @spec agent_panel_node(Layout.rect()) :: TreeNode.t()
