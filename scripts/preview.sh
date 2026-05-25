@@ -8,6 +8,9 @@
 #                  FileTreeView, FileTreeEmpty, FileTreeError, FileTreeDeep,
 #                  CompletionOverlay, StatusBarView, TabBarView,
 #                  NotificationCenterView, ObservatoryView, AgentChatView,
+#                  AgentChatStreaming, AgentChatApproval, AgentChatError,
+#                  AgentChatCompletion, AgentChatSummary, BoardView,
+#                  ChangeSummaryView, DispatchSheetView,
 #                  PickerOverlay, MinibufferView, WhichKeyOverlay, SearchToolbar,
 #                  HoverPopupOverlay, SignatureHelpOverlay, DiagnosticsEditorView,
 #                  TabBarOverflow
