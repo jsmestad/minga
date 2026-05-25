@@ -9,6 +9,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   """
 
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
+  alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
   alias MingaEditor.State, as: EditorState
 
   @typedoc "Effects that the file event handler may return."
@@ -112,7 +113,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
           stash_count: event.stash_count
         }
 
-        state = EditorState.set_git_status_panel(state, git_status_data)
+        state = EditorState.set_git_status_panel(state, GitStatusPanel.new(git_status_data))
 
         {shell_state, workspace} =
           state.shell.handle_event(
