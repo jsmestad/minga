@@ -75,7 +75,7 @@ defmodule Minga.Extension.Hex do
   @doc """
   Collects hex deps from the registry as Mix.install-compatible tuples.
 
-  Returns a list like `[{:minga_snippets, "~> 0.3"}, {:other_ext, ">= 0.0.0"}]`.
+  Returns a list like `[{:snippets, "~> 0.3", hex: "minga_snippets"}]`.
   Extensions without a version constraint default to `">= 0.0.0"` (latest).
   """
   @spec collect_hex_deps(GenServer.server()) :: [mix_dep()]
@@ -83,7 +83,7 @@ defmodule Minga.Extension.Hex do
     registry
     |> ExtRegistry.all()
     |> Enum.filter(fn {_name, entry} -> entry.source_type == :hex end)
-    |> Enum.map(fn {_name, %Entry{hex: hex}} -> to_mix_dep(hex) end)
+    |> Enum.map(fn {name, %Entry{hex: hex}} -> to_mix_dep(name, hex) end)
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────
@@ -106,12 +106,21 @@ defmodule Minga.Extension.Hex do
       {:error, msg}
   end
 
-  @spec to_mix_dep(%{package: String.t(), version: String.t() | nil}) :: mix_dep()
-  defp to_mix_dep(%{package: package, version: nil}) do
-    {String.to_atom(package), ">= 0.0.0"}
+  @spec to_mix_dep(atom(), %{package: String.t(), version: String.t() | nil, app: atom() | nil}) ::
+          mix_dep()
+  defp to_mix_dep(name, %{app: nil, package: package, version: nil}) do
+    {name, ">= 0.0.0", hex: package}
   end
 
-  defp to_mix_dep(%{package: package, version: version}) do
-    {String.to_atom(package), version}
+  defp to_mix_dep(name, %{app: nil, package: package, version: version}) do
+    {name, version, hex: package}
+  end
+
+  defp to_mix_dep(_name, %{app: app, package: package, version: nil}) when is_atom(app) do
+    {app, ">= 0.0.0", hex: package}
+  end
+
+  defp to_mix_dep(_name, %{app: app, package: package, version: version}) when is_atom(app) do
+    {app, version, hex: package}
   end
 end

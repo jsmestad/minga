@@ -69,7 +69,7 @@ defmodule Minga.Extension.EntryTest do
 
       assert %Entry{} = entry
       assert entry.source_type == :hex
-      assert entry.hex == %{package: "minga_snippets", version: "~> 0.3"}
+      assert entry.hex == %{package: "minga_snippets", version: "~> 0.3", app: nil}
       assert entry.path == nil
       assert entry.git == nil
       assert entry.config == []
@@ -80,6 +80,7 @@ defmodule Minga.Extension.EntryTest do
 
       assert entry.hex.package == "minga_snippets"
       assert entry.hex.version == nil
+      assert entry.hex.app == nil
     end
 
     test "separates version from extension config" do

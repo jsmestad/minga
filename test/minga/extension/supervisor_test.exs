@@ -128,19 +128,100 @@ defmodule Minga.Extension.SupervisorTest do
       assert updated.status == :load_error
     end
 
-    test "records load_error when a hex application cannot start", ctx do
-      package = "missing_hex_app_#{System.unique_integer([:positive])}"
-      package_atom = String.to_atom(package)
+    test "records load_error for an unknown hex application without interning it", ctx do
+      package = "missing-hex-app-#{System.unique_integer([:positive])}"
+      normalized = String.replace(package, "-", "_")
+
+      assert_raise ArgumentError, fn -> String.to_existing_atom(normalized) end
 
       :ok = ExtRegistry.register_hex(ctx.registry, :hex_start_fail, package, [])
       {:ok, entry} = ExtRegistry.get(ctx.registry, :hex_start_fail)
 
-      assert {:error, {:hex_application_start_failed, ^package_atom, _reason}} =
+      assert {:error, {:hex_application_start_failed, :hex_start_fail, _reason}} =
                ExtSupervisor.start_extension(ctx.supervisor, ctx.registry, :hex_start_fail, entry)
 
       {:ok, updated} = ExtRegistry.get(ctx.registry, :hex_start_fail)
       assert updated.status == :load_error
       assert updated.pid == nil
+      assert updated.manifest == nil
+      assert_raise ArgumentError, fn -> String.to_existing_atom(normalized) end
+    end
+
+    test "starts a hex extension when package alias and explicit app atom differ", ctx do
+      app_atom = :minga_hex_runtime_explicit_app
+      app_module = Minga.Extension.SupervisorTest.HexRuntimeApp
+      extension_module = Minga.TestExtensions.HexRuntimeExplicitApp
+
+      Code.compile_quoted(
+        quote do
+          defmodule unquote(app_module) do
+            @moduledoc false
+            use Application
+
+            @impl true
+            def start(_type, _args), do: Supervisor.start_link([], strategy: :one_for_one)
+          end
+
+          defmodule unquote(extension_module) do
+            use Minga.Extension
+
+            @impl true
+            def name, do: :hex_runtime_alias
+
+            @impl true
+            def description, do: "Hex runtime explicit app"
+
+            @impl true
+            def version, do: "1.0.0"
+
+            @impl true
+            def init(_config), do: {:ok, %{}}
+          end
+        end,
+        __ENV__.file
+      )
+
+      on_exit(fn ->
+        :application.stop(app_atom)
+        :application.unload(app_atom)
+        :code.purge(extension_module)
+        :code.delete(extension_module)
+        :code.purge(app_module)
+        :code.delete(app_module)
+      end)
+
+      :ok =
+        :application.load(
+          {:application, app_atom,
+           [
+             description: ~c"Hex runtime explicit app",
+             vsn: ~c"1.0.0",
+             applications: [:kernel, :stdlib],
+             modules: [app_module, extension_module],
+             registered: [],
+             mod: {app_module, []}
+           ]}
+        )
+
+      :ok =
+        ExtRegistry.register_hex(ctx.registry, :hex_runtime_alias, "minga-hex-runtime-package",
+          app: app_atom
+        )
+
+      {:ok, entry} = ExtRegistry.get(ctx.registry, :hex_runtime_alias)
+
+      assert {:ok, pid} =
+               ExtSupervisor.start_extension(
+                 ctx.supervisor,
+                 ctx.registry,
+                 :hex_runtime_alias,
+                 entry
+               )
+
+      {:ok, updated} = ExtRegistry.get(ctx.registry, :hex_runtime_alias)
+      assert updated.status == :running
+      assert updated.pid == pid
+      assert updated.module == extension_module
     end
 
     test "passes config to init/1", ctx do

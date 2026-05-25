@@ -691,8 +691,9 @@ defmodule Minga.Config do
 
   ## Hex source (stable, published)
 
-      extension :snippets, hex: "minga_snippets", version: "~> 0.3"
-      extension :snippets, hex: "minga_snippets"
+      extension :minga_snippets, hex: "minga_snippets", version: "~> 0.3"
+      extension :minga_snippets, hex: "minga_snippets"
+      extension :snippets, hex: "minga_snippets", app: :minga_snippets
   """
   @spec extension(atom(), keyword()) :: :ok
   def extension(name, opts) when is_atom(name) and is_list(opts) do

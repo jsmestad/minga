@@ -1521,9 +1521,82 @@ defmodule Minga.Extension.LifecycleContractTest do
     assert crashed_entry.pid == nil
   end
 
-  test "start during pending crash restart reuses the supervisor replacement", ctx do
+  test "transient exits with normal or shutdown reasons stop without restart", ctx do
+    for {module, module_name, ext_name, exit_reason} <- [
+          {Minga.TestExtensions.TransientExitNormal, "TransientExitNormal",
+           :transient_exit_normal, :normal},
+          {Minga.TestExtensions.TransientExitShutdown, "TransientExitShutdown",
+           :transient_exit_shutdown, {:shutdown, :planned}}
+        ] do
+      {path, cleanup} =
+        make_extension(module_name, """
+        defmodule #{inspect(module)} do
+          use Minga.Extension
+
+          @impl true
+          def name, do: #{inspect(ext_name)}
+
+          @impl true
+          def description, do: "Transient exit #{module_name}"
+
+          @impl true
+          def version, do: "1.0.0"
+
+          @impl true
+          def init(_config), do: {:ok, %{}}
+
+          @impl true
+          def child_spec(_config) do
+            %{
+              id: __MODULE__,
+              start: {__MODULE__, :start_link, []},
+              restart: :transient,
+              type: :worker
+            }
+          end
+
+          @spec start_link() :: {:ok, pid()}
+          def start_link do
+            {:ok, spawn_link(fn -> loop() end)}
+          end
+
+          defp loop do
+            receive do
+              {:stop, reason} -> exit(reason)
+              _ -> loop()
+            end
+          end
+        end
+        """)
+
+      on_exit(fn ->
+        cleanup.()
+        :code.purge(module)
+        :code.delete(module)
+      end)
+
+      :ok = ExtRegistry.register(ctx.registry, ext_name, path, [])
+      {:ok, entry} = ExtRegistry.get(ctx.registry, ext_name)
+
+      assert {:ok, pid} =
+               ExtSupervisor.start_extension(ctx.supervisor, ctx.registry, ext_name, entry)
+
+      send(pid, {:stop, exit_reason})
+
+      refute_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
+                      %{count: 1}, %{extension: ^ext_name, phase: :crash_restart_count}},
+                     150
+
+      stopped_entry = wait_for_entry_status(ctx.registry, ext_name, :stopped, 40)
+      assert stopped_entry.pid == nil
+      assert stopped_entry.status == :stopped
+    end
+  end
+
+  test "delayed crash restart does not mark the lifecycle crashed before replacement starts",
+       ctx do
     telemetry_id = {__MODULE__, self(), :restart_start_race_telemetry}
-    test_pid = self()
+    parent_pid = self()
 
     :telemetry.attach_many(
       telemetry_id,
@@ -1535,16 +1608,6 @@ defmodule Minga.Extension.LifecycleContractTest do
     )
 
     on_exit(fn -> :telemetry.detach(telemetry_id) end)
-
-    restart_gate = fn ->
-      send(test_pid, {:restart_reconcile_blocked, self()})
-
-      receive do
-        :release_restart_reconcile -> :ok
-      after
-        5_000 -> raise "timed out waiting to release restart reconciliation"
-      end
-    end
 
     {path, cleanup} =
       make_extension("RestartStartRace", """
@@ -1565,6 +1628,27 @@ defmodule Minga.Extension.LifecycleContractTest do
         @impl true
         def init(_config), do: {:ok, %{}}
 
+        @impl true
+        def child_spec(config) do
+          %{
+            id: __MODULE__,
+            start: {__MODULE__, :start_link, [Keyword.fetch!(config, :parent_gate)]},
+            restart: :permanent,
+            type: :worker
+          }
+        end
+
+        @spec start_link(pid()) :: {:ok, pid()} | {:error, term()}
+        def start_link(parent_gate) do
+          send(parent_gate, {:restart_child_start_blocked, self()})
+
+          receive do
+            :release_restart_child_start -> Agent.start_link(fn -> :restart_start_race end)
+          after
+            5_000 -> {:error, :restart_child_start_timeout}
+          end
+        end
+
         @spec noop(map()) :: map()
         def noop(state), do: state
       end
@@ -1576,23 +1660,24 @@ defmodule Minga.Extension.LifecycleContractTest do
       :code.delete(Minga.TestExtensions.RestartStartRace)
     end)
 
-    opts = [
-      command_registry: ctx.command_registry,
-      keymap: ctx.keymap,
-      test_hooks: %{before_restart_reconcile: restart_gate}
-    ]
-
-    :ok = ExtRegistry.register(ctx.registry, :restart_start_race, path, [])
+    :ok = ExtRegistry.register(ctx.registry, :restart_start_race, path, parent_gate: parent_pid)
     {:ok, entry} = ExtRegistry.get(ctx.registry, :restart_start_race)
 
-    assert {:ok, pid_a} =
-             ExtSupervisor.start_extension(
-               ctx.supervisor,
-               ctx.registry,
-               :restart_start_race,
-               entry,
-               opts
-             )
+    start_task =
+      Task.async(fn ->
+        ExtSupervisor.start_extension(
+          ctx.supervisor,
+          ctx.registry,
+          :restart_start_race,
+          entry,
+          command_registry: ctx.command_registry,
+          keymap: ctx.keymap
+        )
+      end)
+
+    assert_receive {:restart_child_start_blocked, start_supervisor_pid}, 1_000
+    send(start_supervisor_pid, :release_restart_child_start)
+    assert {:ok, pid_a} = Task.await(start_task)
 
     assert_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
                     %{count: 0}, %{extension: :restart_start_race, phase: :crash_restart_count}}
@@ -1600,24 +1685,19 @@ defmodule Minga.Extension.LifecycleContractTest do
     pid_a_ref = Process.monitor(pid_a)
     Process.exit(pid_a, :kill)
     assert_receive {:DOWN, ^pid_a_ref, :process, ^pid_a, _reason}, 1_000
-    assert_receive {:restart_reconcile_blocked, monitor_pid}, 1_000
+    assert_receive {:restart_child_start_blocked, restart_supervisor_pid}, 1_000
 
-    pid_b = wait_for_child_pid(ctx.supervisor, Minga.TestExtensions.RestartStartRace, pid_a)
     {:ok, stale_running_entry} = ExtRegistry.get(ctx.registry, :restart_start_race)
+    assert stale_running_entry.status == :running
     assert stale_running_entry.pid == pid_a
 
-    assert {:ok, ^pid_b} =
-             ExtSupervisor.start_extension(
-               ctx.supervisor,
-               ctx.registry,
-               :restart_start_race,
-               stale_running_entry,
-               opts
-             )
+    refute_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
+                    %{count: 1}, %{extension: :restart_start_race, phase: :crash_restart_count}},
+                   150
 
-    assert {:ok, _command} = CommandRegistry.lookup(ctx.command_registry, :restart_start_race_cmd)
+    send(restart_supervisor_pid, :release_restart_child_start)
 
-    send(monitor_pid, :release_restart_reconcile)
+    pid_b = wait_for_child_pid(ctx.supervisor, Minga.TestExtensions.RestartStartRace, pid_a)
 
     assert_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
                     %{count: 1}, %{extension: :restart_start_race, phase: :crash_restart_count}}
@@ -1626,6 +1706,120 @@ defmodule Minga.Extension.LifecycleContractTest do
     assert final_entry.status == :running
     assert final_entry.pid == pid_b
     assert 1 == count_children(ctx.supervisor, Minga.TestExtensions.RestartStartRace)
+    assert {:ok, _command} = CommandRegistry.lookup(ctx.command_registry, :restart_start_race_cmd)
+  end
+
+  test "restart reconciliation handles a dead supervisor without leaving stale state", ctx do
+    telemetry_id = {__MODULE__, self(), :restart_missing_replacement_telemetry}
+    parent_pid = self()
+
+    :telemetry.attach_many(
+      telemetry_id,
+      [[:minga, :extension, :lifecycle, :crash_restart_count]],
+      fn event, measurements, metadata, test_pid ->
+        send(test_pid, {:telemetry, event, measurements, metadata})
+      end,
+      self()
+    )
+
+    on_exit(fn -> :telemetry.detach(telemetry_id) end)
+
+    {path, cleanup} =
+      make_extension("RestartMissingReplacement", """
+      defmodule Minga.TestExtensions.RestartMissingReplacement do
+        use Minga.Extension
+
+        @impl true
+        def name, do: :restart_missing_replacement
+
+        @impl true
+        def description, do: "Restart missing replacement"
+
+        @impl true
+        def version, do: "1.0.0"
+
+        @impl true
+        def init(_config), do: {:ok, %{}}
+
+        @impl true
+        def child_spec(config) do
+          %{
+            id: __MODULE__,
+            start: {__MODULE__, :start_link, [Keyword.fetch!(config, :parent_gate)]},
+            restart: :permanent,
+            type: :worker
+          }
+        end
+
+        @spec start_link(pid()) :: {:ok, pid()} | {:error, term()}
+        def start_link(parent_gate) do
+          send(parent_gate, {:restart_missing_replacement_blocked, self()})
+
+          receive do
+            :release_restart_missing_replacement ->
+              Agent.start_link(fn -> :restart_missing_replacement end)
+
+            :fail_restart_missing_replacement ->
+              {:error, :restart_missing_replacement_failed}
+          after
+            5_000 -> {:error, :restart_missing_replacement_timeout}
+          end
+        end
+      end
+      """)
+
+    on_exit(fn ->
+      cleanup.()
+      :code.purge(Minga.TestExtensions.RestartMissingReplacement)
+      :code.delete(Minga.TestExtensions.RestartMissingReplacement)
+    end)
+
+    :ok =
+      ExtRegistry.register(ctx.registry, :restart_missing_replacement, path,
+        parent_gate: parent_pid
+      )
+
+    {:ok, entry} = ExtRegistry.get(ctx.registry, :restart_missing_replacement)
+
+    start_task =
+      Task.async(fn ->
+        ExtSupervisor.start_extension(
+          ctx.supervisor,
+          ctx.registry,
+          :restart_missing_replacement,
+          entry,
+          command_registry: ctx.command_registry,
+          keymap: ctx.keymap
+        )
+      end)
+
+    assert_receive {:restart_missing_replacement_blocked, start_supervisor_pid}, 1_000
+    send(start_supervisor_pid, :release_restart_missing_replacement)
+    assert {:ok, pid} = Task.await(start_task)
+
+    pid_ref = Process.monitor(pid)
+    Process.exit(pid, :kill)
+    assert_receive {:DOWN, ^pid_ref, :process, ^pid, _reason}, 1_000
+    assert_receive {:restart_missing_replacement_blocked, _replacement_supervisor_pid}, 1_000
+    previous_trap_exit = Process.flag(:trap_exit, true)
+    Process.exit(Process.whereis(ctx.supervisor), :kill)
+    assert_receive {:EXIT, _supervisor_pid, :killed}, 1_000
+    Process.flag(:trap_exit, previous_trap_exit)
+
+    {:ok, running_entry} = ExtRegistry.get(ctx.registry, :restart_missing_replacement)
+    assert running_entry.status == :running
+    assert running_entry.pid == pid
+
+    refute_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
+                    %{count: 1},
+                    %{extension: :restart_missing_replacement, phase: :crash_restart_count}},
+                   150
+
+    crashed_entry =
+      wait_for_entry_status(ctx.registry, :restart_missing_replacement, :crashed, 20)
+
+    assert crashed_entry.pid == nil
+    assert crashed_entry.lifecycle_ref == nil
   end
 
   test "stale crash monitor does not overwrite a newer lifecycle", ctx do

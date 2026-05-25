@@ -462,7 +462,7 @@ defmodule Minga.Extension.Supervisor do
     case run_lifecycle_phase(name, :child_start, opts, fn ->
            start_extension_child(supervisor, module, config)
          end) do
-      {:ok, pid} ->
+      {:ok, {pid, restart}} ->
         ExtRegistry.update(
           registry,
           name,
@@ -483,6 +483,7 @@ defmodule Minga.Extension.Supervisor do
             lifecycle_ref: lifecycle_ref,
             cmd_registry: cmd_registry,
             keymap: keymap,
+            restart: restart,
             opts: opts
           },
           pid
@@ -685,7 +686,7 @@ defmodule Minga.Extension.Supervisor do
   defp canonical_registry_id(registry), do: registry
 
   @spec current_start_entry(GenServer.server(), GenServer.server(), atom()) ::
-          {:ok, ExtRegistry.entry() | {:running, pid()}} | {:error, :not_registered}
+          {:ok, ExtRegistry.entry() | {:running, pid()}} | {:error, term()}
   defp current_start_entry(supervisor, registry, name) do
     case ExtRegistry.get(registry, name) do
       {:ok, %{status: :running, pid: pid} = entry} when is_pid(pid) ->
@@ -705,7 +706,7 @@ defmodule Minga.Extension.Supervisor do
           atom(),
           pid(),
           ExtRegistry.entry()
-        ) :: {:ok, {:running, pid()} | ExtRegistry.entry()}
+        ) :: {:ok, {:running, pid()} | ExtRegistry.entry()} | {:error, term()}
   defp current_running_or_restartable_entry(supervisor, registry, name, pid, entry) do
     case Process.alive?(pid) do
       true ->
@@ -722,16 +723,25 @@ defmodule Minga.Extension.Supervisor do
           atom(),
           ExtRegistry.entry()
         ) ::
-          {:ok, {:running, pid()} | ExtRegistry.entry()}
+          {:ok, {:running, pid()} | ExtRegistry.entry()} | {:error, term()}
   defp reconcile_dead_running_entry(supervisor, registry, name, %{module: module} = entry)
        when is_atom(module) and not is_nil(module) do
     case extension_child_pid(supervisor, module) do
-      pid when is_pid(pid) ->
+      {:ok, pid} ->
         ExtRegistry.update(registry, name, pid: pid)
         {:ok, {:running, pid}}
 
-      nil ->
+      :not_found ->
         {:ok, entry}
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :config,
+          "Extension #{name} restart reconciliation failed: #{inspect(reason)}"
+        )
+
+        mark_start_load_error(registry, name)
+        {:error, {:restart_lookup_failed, reason}}
     end
   end
 
@@ -839,10 +849,15 @@ defmodule Minga.Extension.Supervisor do
   end
 
   @spec start_extension_child(GenServer.server(), module(), keyword()) ::
-          {:ok, pid()} | {:error, term()}
+          {:ok, {pid(), child_restart()}} | {:error, term()}
   defp start_extension_child(supervisor, module, config) do
     child_spec = normalize_child_spec(module, config)
-    DynamicSupervisor.start_child(supervisor, child_spec)
+    restart = Map.get(child_spec, :restart, :permanent)
+
+    case DynamicSupervisor.start_child(supervisor, child_spec) do
+      {:ok, pid} -> {:ok, {pid, restart}}
+      {:error, _reason} = error -> error
+    end
   rescue
     e -> {:error, {:child_spec_failed, Exception.message(e)}}
   catch
@@ -878,10 +893,13 @@ defmodule Minga.Extension.Supervisor do
 
   defp terminate_extension_process_by_module(supervisor, module) do
     case extension_child_pid(supervisor, module) do
-      pid when is_pid(pid) -> terminate_extension_child(supervisor, pid)
-      nil -> {:error, :not_found}
+      {:ok, pid} -> terminate_extension_child(supervisor, pid)
+      :not_found -> {:error, :not_found}
+      {:error, reason} -> {:error, {:restart_lookup_failed, reason}}
     end
   end
+
+  @typep child_restart :: :permanent | :transient | :temporary
 
   @typep restart_monitor :: %{
            supervisor: GenServer.server(),
@@ -891,6 +909,7 @@ defmodule Minga.Extension.Supervisor do
            lifecycle_ref: reference(),
            cmd_registry: GenServer.server(),
            keymap: GenServer.server(),
+           restart: child_restart(),
            opts: start_opts()
          }
 
@@ -906,13 +925,13 @@ defmodule Minga.Extension.Supervisor do
     ref = Process.monitor(pid)
 
     receive do
-      {:DOWN, ^ref, :process, ^pid, reason} -> handle_child_down(monitor, reason, count)
+      {:DOWN, ^ref, :process, ^pid, reason} -> handle_child_down(monitor, pid, reason, count)
     end
   end
 
-  @spec handle_child_down(restart_monitor(), term(), non_neg_integer()) :: :ok
-  defp handle_child_down(monitor, reason, count) do
-    wait_for_restarted_child(monitor, reason, count + 1, 0)
+  @spec handle_child_down(restart_monitor(), pid(), term(), non_neg_integer()) :: :ok
+  defp handle_child_down(monitor, pid, reason, count) do
+    wait_for_restarted_child(monitor, pid, reason, count + 1, 0)
   end
 
   @spec lifecycle_monitor_active?(GenServer.server(), atom(), reference()) :: boolean()
@@ -929,9 +948,77 @@ defmodule Minga.Extension.Supervisor do
   defp crash_reason?({:shutdown, _reason}), do: false
   defp crash_reason?(_reason), do: true
 
-  @spec wait_for_restarted_child(restart_monitor(), term(), non_neg_integer(), non_neg_integer()) ::
+  @spec wait_for_restarted_child(
+          restart_monitor(),
+          pid(),
+          term(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
           :ok
-  defp wait_for_restarted_child(monitor, reason, _count, 5) do
+  defp wait_for_restarted_child(monitor, excluded_pid, reason, count, attempts) do
+    case lifecycle_monitor_active?(monitor.registry, monitor.name, monitor.lifecycle_ref) do
+      true -> wait_for_active_monitor_child(monitor, excluded_pid, reason, count, attempts)
+      false -> :ok
+    end
+  end
+
+  @spec wait_for_active_monitor_child(
+          restart_monitor(),
+          pid(),
+          term(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: :ok
+  defp wait_for_active_monitor_child(monitor, excluded_pid, reason, count, attempts) do
+    case extension_child_pid(monitor.supervisor, monitor.module, excluded_pid) do
+      {:ok, pid} ->
+        handle_restarted_child(monitor, pid, count)
+
+      :not_found ->
+        wait_for_missing_restarted_child(monitor, excluded_pid, reason, count, attempts)
+
+      {:error, lookup_reason} ->
+        Minga.Log.warning(
+          :config,
+          "Extension #{monitor.name} restart reconciliation failed: #{inspect(lookup_reason)}"
+        )
+
+        finalize_terminal_child_exit(monitor, reason)
+    end
+  end
+
+  @spec wait_for_missing_restarted_child(
+          restart_monitor(),
+          pid(),
+          term(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: :ok
+  defp wait_for_missing_restarted_child(monitor, excluded_pid, reason, count, attempts) do
+    case restart_terminal_exit?(monitor.restart, reason) do
+      true ->
+        finalize_terminal_child_exit(monitor, reason)
+
+      false ->
+        if attempts >= restart_reconcile_attempt_limit() do
+          Minga.Log.warning(
+            :config,
+            "Extension #{monitor.name} restart reconciliation timed out after #{attempts} attempt(s)"
+          )
+
+          finalize_terminal_child_exit(monitor, reason)
+        else
+          receive do
+          after
+            10 -> wait_for_restarted_child(monitor, excluded_pid, reason, count, attempts + 1)
+          end
+        end
+    end
+  end
+
+  @spec finalize_terminal_child_exit(restart_monitor(), term()) :: :ok
+  defp finalize_terminal_child_exit(monitor, reason) do
     run_test_hook(monitor.opts, :before_terminal_child_exit)
 
     mark_terminal_child_exit(
@@ -945,25 +1032,14 @@ defmodule Minga.Extension.Supervisor do
     )
   end
 
-  defp wait_for_restarted_child(monitor, reason, count, attempts) do
-    case lifecycle_monitor_active?(monitor.registry, monitor.name, monitor.lifecycle_ref) do
-      true -> wait_for_active_monitor_child(monitor, reason, count, attempts)
-      false -> :ok
-    end
-  end
+  @spec restart_terminal_exit?(child_restart(), term()) :: boolean()
+  defp restart_terminal_exit?(:temporary, _reason), do: true
+  defp restart_terminal_exit?(:transient, reason), do: not crash_reason?(reason)
+  defp restart_terminal_exit?(:permanent, _reason), do: false
 
-  @spec wait_for_active_monitor_child(
-          restart_monitor(),
-          term(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: :ok
-  defp wait_for_active_monitor_child(monitor, reason, count, attempts) do
-    case extension_child_pid(monitor.supervisor, monitor.module) do
-      pid when is_pid(pid) -> handle_restarted_child(monitor, pid, count)
-      nil -> retry_restarted_child_wait(monitor, reason, count, attempts)
-    end
-  end
+  @restart_reconcile_attempt_limit 50
+  @spec restart_reconcile_attempt_limit() :: non_neg_integer()
+  defp restart_reconcile_attempt_limit, do: @restart_reconcile_attempt_limit
 
   @spec handle_restarted_child(restart_monitor(), pid(), non_neg_integer()) :: :ok
   defp handle_restarted_child(monitor, pid, count) do
@@ -989,20 +1065,6 @@ defmodule Minga.Extension.Supervisor do
           :stale
       end
     end)
-  end
-
-  @spec retry_restarted_child_wait(
-          restart_monitor(),
-          term(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) ::
-          :ok
-  defp retry_restarted_child_wait(monitor, reason, count, attempts) do
-    receive do
-    after
-      10 -> wait_for_restarted_child(monitor, reason, count, attempts + 1)
-    end
   end
 
   @spec mark_terminal_child_exit(
@@ -1114,16 +1176,21 @@ defmodule Minga.Extension.Supervisor do
     :ok
   end
 
-  @spec extension_child_pid(GenServer.server(), module()) :: pid() | nil
-  defp extension_child_pid(supervisor, module) do
+  @spec extension_child_pid(GenServer.server(), module()) ::
+          {:ok, pid()} | :not_found | {:error, term()}
+  defp extension_child_pid(supervisor, module), do: extension_child_pid(supervisor, module, nil)
+
+  @spec extension_child_pid(GenServer.server(), module(), pid() | nil) ::
+          {:ok, pid()} | :not_found | {:error, term()}
+  defp extension_child_pid(supervisor, module, excluded_pid) do
     supervisor
     |> DynamicSupervisor.which_children()
-    |> Enum.find_value(fn
-      {:undefined, pid, _type, [^module]} when is_pid(pid) -> pid
-      _child -> nil
+    |> Enum.find_value(:not_found, fn
+      {:undefined, pid, _type, [^module]} when is_pid(pid) and pid != excluded_pid -> {:ok, pid}
+      _child -> false
     end)
   catch
-    :exit, _reason -> nil
+    :exit, reason -> {:error, {:which_children_failed, reason}}
   end
 
   @spec resolve_git_extensions(GenServer.server()) :: [start_failure()]
@@ -1164,12 +1231,12 @@ defmodule Minga.Extension.Supervisor do
     keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
     mark_start_attempt(registry, name)
 
-    with {:ok, package_atom} <- hex_package_application(entry.hex.package),
+    with {:ok, app_atom} <- hex_application_name(name, entry.hex),
          :ok <-
            run_lifecycle_phase(name, :load, opts, fn ->
-             ensure_hex_application_started(package_atom)
+             ensure_hex_application_started(app_atom)
            end),
-         {:ok, module} <- find_extension_module(package_atom),
+         {:ok, module} <- find_extension_module(app_atom),
          :ok <- validate_behaviour(module, name),
          :ok <- record_extension_manifest(registry, name, module, entry.source_type),
          :ok <- register_and_validate_options(name, module, entry.config),
@@ -1435,15 +1502,10 @@ defmodule Minga.Extension.Supervisor do
     :ok
   end
 
-  @spec hex_package_application(String.t()) :: {:ok, atom()} | {:error, term()}
-  defp hex_package_application(package) when is_binary(package) do
-    package
-    |> String.replace("-", "_")
-    |> String.to_existing_atom()
-    |> then(&{:ok, &1})
-  rescue
-    ArgumentError -> {:error, {:unknown_hex_application, package}}
-  end
+  @spec hex_application_name(atom(), Minga.Extension.Entry.hex_opts()) ::
+          {:ok, atom()} | {:error, term()}
+  defp hex_application_name(_name, %{app: app}) when is_atom(app) and app != nil, do: {:ok, app}
+  defp hex_application_name(name, %{app: nil}), do: {:ok, name}
 
   @spec ensure_hex_application_started(atom()) :: :ok | {:error, term()}
   defp ensure_hex_application_started(package_atom) do

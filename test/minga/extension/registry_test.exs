@@ -85,7 +85,7 @@ defmodule Minga.Extension.RegistryTest do
 
       assert {:ok, %Entry{} = entry} = Registry.get(r, :my_ext)
       assert entry.source_type == :hex
-      assert entry.hex == %{package: "minga_snippets", version: "~> 0.3"}
+      assert entry.hex == %{package: "minga_snippets", version: "~> 0.3", app: nil}
       assert entry.path == nil
       assert entry.git == nil
       assert entry.config == []
