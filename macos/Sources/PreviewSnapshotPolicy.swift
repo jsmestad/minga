@@ -4,8 +4,8 @@ import Foundation
 /// Shared policy for preview screenshots and snapshot-fixture layout.
 enum PreviewSnapshotPolicy {
     private static let fullShellViews: Set<String> = ["EditorChromeView", "AgentChromeView", "DiagnosticsEditorView", "InsertModeEditorView", "HoverEditorView", "SignatureHelpEditorView"]
-    private static let renderedWindowViews: Set<String> = ["EditorChromeView", "AgentChromeView", "DiagnosticsEditorView", "InsertModeEditorView", "HoverEditorView", "SignatureHelpEditorView", "GitStatusView", "FileTreeView", "FileTreeEmpty", "FileTreeError", "FileTreeDeep", "GitStatusClean", "GitStatusConflict", "GitStatusDense"]
-    private static let eagerLayoutViews: Set<String> = ["GitStatusView", "FileTreeView", "FileTreeEmpty", "FileTreeError", "FileTreeDeep", "GitStatusClean", "GitStatusConflict", "GitStatusDense"]
+    private static let renderedWindowViews: Set<String> = ["EditorChromeView", "AgentChromeView", "DiagnosticsEditorView", "InsertModeEditorView", "HoverEditorView", "SignatureHelpEditorView", "GitStatusView", "FileTreeView", "FileTreeEmpty", "FileTreeError", "FileTreeDeep", "GitStatusClean", "GitStatusConflict", "GitStatusDense", "FileTreeRename"]
+    private static let eagerLayoutViews: Set<String> = ["GitStatusView", "FileTreeView", "FileTreeEmpty", "FileTreeError", "FileTreeDeep", "GitStatusClean", "GitStatusConflict", "GitStatusDense", "FileTreeRename"]
 
     static func size(named name: String) -> CGSize {
         switch name {
@@ -33,6 +33,9 @@ enum PreviewSnapshotPolicy {
         case "SignatureHelpOverlay": CGSize(width: 500, height: 200)
         case "DiagnosticsEditorView": CGSize(width: 1200, height: 704)
         case "TabBarOverflow": CGSize(width: 1200, height: 36)
+        case "BottomPanelDiagnostics": CGSize(width: 800, height: 250)
+        case "NotificationOverflow": CGSize(width: 800, height: 600)
+        case "FileTreeRename": CGSize(width: 280, height: 600)
         default: CGSize(width: 400, height: 200)
         }
     }
