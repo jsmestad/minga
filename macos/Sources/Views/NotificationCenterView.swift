@@ -52,7 +52,7 @@ private struct NotificationCard: View {
                                     .font(.system(size: 10, weight: .bold))
                             }
                             .buttonStyle(.plain)
-                            .foregroundStyle(theme.popupFg.opacity(0.55))
+                            .foregroundStyle(theme.popupMutedFg)
                             .help("Dismiss notification")
                         }
                     }
@@ -64,7 +64,7 @@ private struct NotificationCard: View {
             if !notification.body.isEmpty {
                 Text(notification.body)
                     .font(.system(size: 12))
-                    .foregroundStyle(theme.popupFg.opacity(0.78))
+                    .foregroundStyle(theme.popupSecondaryFg)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -78,7 +78,7 @@ private struct NotificationCard: View {
                         .font(.system(size: 11, weight: .medium))
                         .padding(.horizontal, 9)
                         .padding(.vertical, 5)
-                        .background(theme.popupFg.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
+                        .background(theme.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 5))
                         .foregroundStyle(theme.accent)
                     }
                 }
@@ -86,12 +86,12 @@ private struct NotificationCard: View {
         }
         .padding(12)
         .frame(width: 360, alignment: .leading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .background(theme.popupBg, in: RoundedRectangle(cornerRadius: 10))
         .overlay {
             RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(severityColor.opacity(0.55), lineWidth: 1)
+                .strokeBorder(notificationBorderColor, lineWidth: 1)
         }
-        .shadow(color: .black.opacity(0.28), radius: 16, x: 0, y: 8)
+        .shadow(color: .black.opacity(0.32), radius: 16, x: 0, y: 8)
     }
 
     private var severityIcon: some View {
@@ -117,13 +117,17 @@ private struct NotificationCard: View {
             if !notification.source.isEmpty {
                 Text(notification.source)
                     .font(.system(size: 10))
-                    .foregroundStyle(theme.popupFg.opacity(0.55))
+                    .foregroundStyle(theme.popupMutedFg)
             }
 
             Text(notification.updatedAt, style: .relative)
                 .font(.system(size: 10))
-                .foregroundStyle(theme.popupFg.opacity(0.45))
+                .foregroundStyle(theme.popupDisabledFg)
         }
+    }
+
+    private var notificationBorderColor: Color {
+        severityColor.opacity(0.58)
     }
 
     private var severityColor: Color {

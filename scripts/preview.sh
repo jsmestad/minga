@@ -4,7 +4,8 @@
 # Usage: scripts/preview.sh <ViewName>
 #
 # Available views: GitStatusView, FileTreeView, CompletionOverlay,
-#                  StatusBarView, TabBarView, NotificationCenterView
+#                  StatusBarView, TabBarView, NotificationCenterView,
+#                  ObservatoryView, AgentChatView
 #
 # The script builds the PreviewHost target (fast: no GPU rendering, no BEAM),
 # launches it with the view name, and the app self-captures its window

@@ -21,6 +21,10 @@ enum PreviewRegistry {
             tabBarPreview()
         case "NotificationCenterView":
             notificationPreview()
+        case "ObservatoryView":
+            observatoryPreview()
+        case "AgentChatView":
+            agentChatPreview()
         default:
             Text("Unknown view: \(name)")
                 .font(.title)
@@ -219,6 +223,69 @@ enum PreviewRegistry {
         return NotificationCenterView(state: state, theme: theme, encoder: nil, bottomInset: 40)
             .frame(width: 800, height: 600)
             .background(theme.editorBg)
+    }
+
+    // MARK: - ObservatoryView
+
+    private static func observatoryPreview() -> some View {
+        let state = ObservatoryState()
+        let theme = populatedTheme()
+        state.update(visible: true, rawNodes: [
+            Wire.ObservatoryNode(pid: "<0.100.0>", parentPid: "", name: "Elixir.Minga.Application", processClass: 0, depth: 0, memory: 184_320, messageQueueLen: 0, reductions: 91_204, sparkline: [0.12, 0.18, 0.13, 0.22, 0.19, 0.24]),
+            Wire.ObservatoryNode(pid: "<0.101.0>", parentPid: "<0.100.0>", name: "Elixir.Minga.Foundation.Supervisor", processClass: 0, depth: 1, memory: 96_448, messageQueueLen: 0, reductions: 40_112, sparkline: [0.10, 0.12, 0.09, 0.11, 0.10, 0.13]),
+            Wire.ObservatoryNode(pid: "<0.102.0>", parentPid: "<0.101.0>", name: "Elixir.Minga.Events", processClass: 4, depth: 2, memory: 58_912, messageQueueLen: 1, reductions: 18_901, sparkline: [0.08, 0.20, 0.12, 0.18, 0.16, 0.19]),
+            Wire.ObservatoryNode(pid: "<0.120.0>", parentPid: "<0.100.0>", name: "Elixir.Minga.Editor.Supervisor", processClass: 0, depth: 1, memory: 122_880, messageQueueLen: 0, reductions: 52_772, sparkline: [0.18, 0.16, 0.20, 0.21, 0.19, 0.24]),
+            Wire.ObservatoryNode(pid: "<0.121.0>", parentPid: "<0.120.0>", name: "Elixir.MingaEditor", processClass: 5, depth: 2, memory: 214_016, messageQueueLen: 7, reductions: 182_394, sparkline: [0.24, 0.42, 0.32, 0.54, 0.37, 0.49]),
+            Wire.ObservatoryNode(pid: "<0.122.0>", parentPid: "<0.120.0>", name: "Elixir.Minga.Buffer.Process", processClass: 1, depth: 2, memory: 73_728, messageQueueLen: 0, reductions: 22_140, sparkline: [0.10, 0.14, 0.11, 0.15, 0.12, 0.16]),
+            Wire.ObservatoryNode(pid: "<0.130.0>", parentPid: "<0.100.0>", name: "Elixir.MingaAgent.SessionManager", processClass: 2, depth: 1, memory: 308_224, messageQueueLen: 14, reductions: 241_006, sparkline: [0.38, 0.48, 0.62, 0.57, 0.72, 0.66]),
+            Wire.ObservatoryNode(pid: "<0.140.0>", parentPid: "<0.100.0>", name: "Elixir.Minga.LSP.Client", processClass: 3, depth: 1, memory: 155_648, messageQueueLen: 2, reductions: 88_440, sparkline: [0.16, 0.18, 0.26, 0.22, 0.28, 0.24]),
+        ])
+
+        return ObservatoryView(state: state, theme: theme, encoder: nil)
+            .frame(width: 320, height: 640)
+            .background(theme.treeBg)
+    }
+
+    // MARK: - AgentChatView
+
+    private static func agentChatPreview() -> some View {
+        let state = AgentChatState()
+        let theme = populatedTheme()
+        state.update(
+            visible: true,
+            status: 2,
+            model: "anthropic:claude-sonnet-4",
+            thinkingLevel: "medium",
+            prompt: "Make the notification card use the configured theme",
+            promptLineCount: 1,
+            promptCursorLine: 0,
+            promptCursorCol: 52,
+            promptVimMode: 1,
+            promptVisibleRows: 1,
+            promptCompletion: nil,
+            helpVisible: false,
+            helpGroups: [],
+            rawMessages: agentChatMessages()
+        )
+
+        return AgentChatView(state: state, theme: theme, isInsertMode: true, encoder: nil, cellHeight: 18)
+            .frame(width: 760, height: 600)
+            .background(theme.agentPanelBg)
+    }
+
+    private static func agentChatMessages() -> [Wire.ChatMessage] {
+        [
+            Wire.ChatMessage(beamId: 1, content: .user(text: "The notification card should use our configured theme.")),
+            Wire.ChatMessage(beamId: 2, content: .thinking(text: "Inspecting the SwiftUI chrome path and checking whether the notification background bypasses ThemeColors.", collapsed: false)),
+            Wire.ChatMessage(beamId: 3, content: .toolCall(name: "read", summary: "macos/Sources/Views/NotificationCenterView.swift", status: 1, isError: false, collapsed: false, autoApprovedScope: 0, durationMs: 148, result: "Found .ultraThinMaterial on the card background.")),
+            Wire.ChatMessage(beamId: 4, content: .assistant(text: "I’ll switch the card to theme.popupBg and keep severity as a themed border, so light and dark themes stay under BEAM control.")),
+            Wire.ChatMessage(beamId: 5, content: .styledToolCall(name: "edit", summary: "Apply notification theme polish", status: 1, isError: false, collapsed: false, autoApprovedScope: 0, durationMs: 93, resultLines: [[styledRun(".background(theme.popupBg", 0x98, 0xBE, 0x65, bold: true), styledRun(", in: RoundedRectangle(cornerRadius: 10))", 0xBB, 0xC2, 0xCF)]])),
+            Wire.ChatMessage(beamId: 6, content: .usage(input: 128_000, output: 3_840, cacheRead: 64_000, cacheWrite: 1_280, costMicros: 431_000)),
+        ]
+    }
+
+    private static func styledRun(_ text: String, _ r: UInt8, _ g: UInt8, _ b: UInt8, bold: Bool = false) -> Wire.StyledTextRun {
+        Wire.StyledTextRun(text: text, fgR: r, fgG: g, fgB: b, bgR: 0, bgG: 0, bgB: 0, bold: bold, italic: false, underline: false)
     }
 
     // MARK: - Helpers

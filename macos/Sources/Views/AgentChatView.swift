@@ -141,7 +141,7 @@ struct AgentChatView: View {
 
             Text("·")
                 .font(.system(size: 11))
-                .foregroundStyle(theme.agentTextFg.opacity(0.35))
+                .foregroundStyle(theme.agentDisabledFg)
 
             thinkingLevelMenu
 
@@ -155,7 +155,7 @@ struct AgentChatView: View {
 
             Text(state.statusLabel)
                 .font(.system(size: 11))
-                .foregroundStyle(theme.agentTextFg.opacity(0.4))
+                .foregroundStyle(theme.agentMutedFg)
 
             Button {
                 // Send '?' to toggle help overlay
@@ -163,7 +163,7 @@ struct AgentChatView: View {
             } label: {
                 Image(systemName: "questionmark.circle")
                     .font(.system(size: 13))
-                    .foregroundStyle(state.helpVisible ? theme.agentHeaderFg : theme.agentTextFg.opacity(0.4))
+                    .foregroundStyle(state.helpVisible ? theme.agentHeaderFg : theme.agentMutedFg)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 3)
                     .background(RoundedRectangle(cornerRadius: 4).fill(isHelpHovered ? theme.agentTextFg.opacity(0.06) : Color.clear))
@@ -197,7 +197,7 @@ struct AgentChatView: View {
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 9, weight: .semibold))
             }
-            .foregroundStyle(theme.agentHeaderFg.opacity(state.isThinking ? 0.45 : 1.0))
+            .foregroundStyle(state.isThinking ? theme.agentMutedFg : theme.agentHeaderFg)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .background(RoundedRectangle(cornerRadius: 4).fill(isModelHovered && !state.isThinking ? theme.agentTextFg.opacity(0.06) : Color.clear))
@@ -238,7 +238,7 @@ struct AgentChatView: View {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 8, weight: .semibold))
             }
-            .foregroundStyle(theme.agentHeaderFg.opacity(state.isThinking ? 0.45 : 0.9))
+            .foregroundStyle(state.isThinking ? theme.agentMutedFg : theme.agentHeaderFg.opacity(0.9))
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .background(RoundedRectangle(cornerRadius: 4).fill(isThinkingHovered && !state.isThinking ? theme.agentTextFg.opacity(0.06) : Color.clear))

@@ -61,7 +61,7 @@ struct CompletionOverlay: View {
             // Label
             Text(item.label)
                 .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(isSelected ? theme.popupFg : theme.popupFg.opacity(0.9))
+                .foregroundStyle(isSelected ? theme.popupSelFg : theme.popupFg)
                 .lineLimit(1)
 
             Spacer(minLength: 4)
@@ -70,7 +70,7 @@ struct CompletionOverlay: View {
             if !item.detail.isEmpty {
                 Text(item.detail)
                     .font(.system(size: 11))
-                    .foregroundStyle(theme.popupFg.opacity(0.4))
+                    .foregroundStyle(isSelected ? theme.popupSelFg.opacity(0.72) : theme.popupMutedFg)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }

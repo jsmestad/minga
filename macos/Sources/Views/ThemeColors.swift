@@ -143,6 +143,23 @@ final class ThemeColors {
     // ── Accent ──
     var accent: Color = color(0x51AFEF)
 
+    // ── Shared chrome contrast tokens ──
+    var chromeSecondaryFg: Color { editorFg.opacity(0.78) }
+    var chromeMutedFg: Color { editorFg.opacity(0.62) }
+    var chromeDisabledFg: Color { editorFg.opacity(0.42) }
+    var popupSecondaryFg: Color { popupFg.opacity(0.78) }
+    var popupMutedFg: Color { popupFg.opacity(0.62) }
+    var popupDisabledFg: Color { popupFg.opacity(0.42) }
+    var modelineSecondaryFg: Color { modelineBarFg.opacity(0.78) }
+    var modelineMutedFg: Color { modelineBarFg.opacity(0.62) }
+    var modelineDisabledFg: Color { modelineBarFg.opacity(0.42) }
+    var treeSecondaryFg: Color { treeFg.opacity(0.78) }
+    var treeMutedFg: Color { treeFg.opacity(0.62) }
+    var treeDisabledFg: Color { treeFg.opacity(0.42) }
+    var agentSecondaryFg: Color { agentTextFg.opacity(0.78) }
+    var agentMutedFg: Color { agentTextFg.opacity(0.62) }
+    var agentDisabledFg: Color { agentTextFg.opacity(0.42) }
+
     /// Apply a batch of color slot updates from the gui_theme protocol message.
     func applySlots(_ slots: [(UInt8, UInt8, UInt8, UInt8)]) {
         for (slotId, r, g, b) in slots {
