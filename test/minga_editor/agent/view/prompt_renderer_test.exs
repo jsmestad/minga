@@ -160,6 +160,22 @@ defmodule MingaEditor.Agent.View.PromptRendererTest do
                String.starts_with?(text, "╰─") and String.contains?(text, "Claude Sonnet 4")
              end)
     end
+
+    test "placeholder uses readable text color" do
+      state = base_state()
+      ctx = ViewContext.from_editor_state(state)
+      commands = PromptRenderer.render(ctx, {30, 0, 80, 5})
+      theme = Theme.agent_theme(state.theme)
+
+      {_row, _col, _text, face} =
+        Enum.find(commands, fn {_row, _col, text, face} ->
+          String.contains?(text, "Type a message") and face.fg != nil
+        end)
+
+      assert face.fg == theme.input_placeholder
+      assert face.bg == theme.input_bg
+      assert face.italic == true
+    end
   end
 
   describe "input layout helpers" do
@@ -170,7 +186,7 @@ defmodule MingaEditor.Agent.View.PromptRendererTest do
     test "input_inner_width subtracts border chrome" do
       box_w = PromptRenderer.input_box_width(80)
       inner = PromptRenderer.input_inner_width(box_w)
-      assert inner == box_w - 6
+      assert inner == box_w - 4
     end
 
     test "compute_input_height includes borders" do

@@ -69,38 +69,45 @@ defmodule MingaEditor.CompletionUI do
   @spec do_render([Completion.item()], non_neg_integer(), render_opts(), map()) ::
           [DisplayList.draw()]
   defp do_render(items, selected_offset, opts, theme) do
-    %{row: start_row, col: start_col, width: popup_width, height: item_count} =
-      menu_geometry(items, opts)
+    geometry = menu_geometry(items, opts)
+    %{row: start_row, col: start_col, width: popup_width, height: item_count} = geometry
 
     visible_items = Enum.take(items, item_count)
 
-    # Theme colors (reuse picker colors)
     pc = theme.picker
-    bg = pc.bg
-    sel_bg = pc.sel_bg
-    text_fg = pc.text_fg
-    highlight_fg = pc.highlight_fg
-    dim_fg = pc.dim_fg
+    popup = Map.get(theme, :popup, %{})
 
-    visible_items
-    |> Enum.with_index()
-    |> Enum.flat_map(fn {item, idx} ->
-      row = start_row + idx
+    colors = %{
+      bg: pc.bg,
+      border_fg: Map.get(popup, :border_fg, pc.border_fg),
+      text_fg: pc.text_fg,
+      highlight_fg: pc.highlight_fg,
+      dim_fg: pc.dim_fg
+    }
 
-      if row >= 0 and row < opts.viewport_rows do
-        is_selected = idx == selected_offset
+    border_draws = render_menu_border(geometry, colors)
 
-        render_completion_item(row, start_col, popup_width, item, is_selected, %{
-          bg: bg,
-          sel_bg: sel_bg,
-          text_fg: text_fg,
-          highlight_fg: highlight_fg,
-          dim_fg: dim_fg
-        })
-      else
-        []
-      end
-    end)
+    item_draws =
+      visible_items
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {item, idx} ->
+        row = start_row + idx
+
+        if row >= 0 and row < opts.viewport_rows do
+          render_completion_item(
+            row,
+            start_col,
+            popup_width,
+            item,
+            idx == selected_offset,
+            colors
+          )
+        else
+          []
+        end
+      end)
+
+    border_draws ++ item_draws
   end
 
   @spec menu_geometry([Completion.item()], render_opts()) ::
@@ -108,44 +115,151 @@ defmodule MingaEditor.CompletionUI do
             row: non_neg_integer(),
             col: non_neg_integer(),
             width: pos_integer(),
-            height: pos_integer()
+            height: pos_integer(),
+            box_row: non_neg_integer(),
+            box_col: non_neg_integer(),
+            box_width: pos_integer(),
+            box_height: pos_integer()
           }
           | nil
   defp menu_geometry([], _opts), do: nil
 
   defp menu_geometry(items, opts) do
-    item_count = min(length(items), @max_rows)
+    item_capacity = max(min(@max_rows, opts.viewport_rows - 2), 1)
+    item_count = min(length(items), item_capacity)
     visible_items = Enum.take(items, item_count)
     label_widths = Enum.map(visible_items, fn item -> String.length(item.label) + 4 end)
-    popup_width = label_widths |> Enum.max() |> max(@min_width) |> min(@max_width)
-    popup_width = min(popup_width, max(opts.viewport_cols - opts.cursor_col, 1))
-    start_row = menu_start_row(opts.cursor_row, opts.viewport_rows, item_count)
-    start_col = min(opts.cursor_col, max(0, opts.viewport_cols - popup_width))
-    %{row: start_row, col: start_col, width: popup_width, height: item_count}
+    desired_width = label_widths |> Enum.max() |> max(@min_width) |> min(@max_width)
+    box_width = min(max(desired_width + 2, 3), max(opts.viewport_cols, 1))
+    popup_width = max(box_width - 2, 1)
+    box_height = min(item_count + 2, max(opts.viewport_rows, 1))
+    box_row = menu_box_start_row(opts.cursor_row, opts.viewport_rows, box_height)
+    box_col = min(opts.cursor_col, max(0, opts.viewport_cols - box_width))
+
+    %{
+      row: box_row + 1,
+      col: box_col + 1,
+      width: popup_width,
+      height: item_count,
+      box_row: box_row,
+      box_col: box_col,
+      box_width: box_width,
+      box_height: box_height
+    }
   end
 
-  @spec menu_start_row(non_neg_integer(), non_neg_integer(), pos_integer()) :: non_neg_integer()
-  defp menu_start_row(cursor_row, viewport_rows, item_count) do
-    space_below = viewport_rows - cursor_row - 2
-    space_above = cursor_row
-    choose_menu_start_row(cursor_row, item_count, space_below, space_above)
-  end
-
-  @spec choose_menu_start_row(non_neg_integer(), pos_integer(), integer(), non_neg_integer()) ::
+  @spec menu_box_start_row(non_neg_integer(), non_neg_integer(), pos_integer()) ::
           non_neg_integer()
-  defp choose_menu_start_row(cursor_row, item_count, space_below, _space_above)
-       when space_below >= item_count do
+  defp menu_box_start_row(cursor_row, viewport_rows, box_height) do
+    space_below = viewport_rows - cursor_row - 1
+    space_above = cursor_row
+    choose_menu_box_start_row(cursor_row, box_height, space_below, space_above, viewport_rows)
+  end
+
+  @spec choose_menu_box_start_row(
+          non_neg_integer(),
+          pos_integer(),
+          integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: non_neg_integer()
+  defp choose_menu_box_start_row(
+         cursor_row,
+         box_height,
+         space_below,
+         _space_above,
+         _viewport_rows
+       )
+       when space_below >= box_height do
     cursor_row + 1
   end
 
-  defp choose_menu_start_row(cursor_row, item_count, _space_below, space_above)
-       when space_above >= item_count do
-    cursor_row - item_count
+  defp choose_menu_box_start_row(
+         cursor_row,
+         box_height,
+         _space_below,
+         space_above,
+         _viewport_rows
+       )
+       when space_above >= box_height do
+    cursor_row - box_height
   end
 
-  defp choose_menu_start_row(cursor_row, _item_count, _space_below, _space_above) do
-    cursor_row + 1
+  defp choose_menu_box_start_row(
+         cursor_row,
+         box_height,
+         _space_below,
+         _space_above,
+         viewport_rows
+       ) do
+    min(cursor_row + 1, max(viewport_rows - box_height, 0))
   end
+
+  @spec render_menu_border(map(), map()) :: [DisplayList.draw()]
+  defp render_menu_border(
+         %{box_row: row, box_col: col, box_width: width, box_height: height},
+         colors
+       ) do
+    bg_style = Face.new(bg: colors.bg)
+    fill = String.duplicate(" ", width)
+
+    bg_draws =
+      for draw_row <- row..(row + height - 1) do
+        DisplayList.draw(draw_row, col, fill, bg_style)
+      end
+
+    border_style = Face.new(fg: colors.border_fg, bg: colors.bg)
+    border_draws = render_menu_border_lines(row, col, width, height, border_style)
+
+    bg_draws ++ border_draws
+  end
+
+  @spec render_menu_border_lines(
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer(),
+          pos_integer(),
+          Face.t()
+        ) :: [DisplayList.draw()]
+  defp render_menu_border_lines(row, col, width, 1, style) do
+    [DisplayList.draw(row, col, menu_top_border(width), style)]
+  end
+
+  defp render_menu_border_lines(row, col, width, height, style) do
+    top = DisplayList.draw(row, col, menu_top_border(width), style)
+    bottom = DisplayList.draw(row + height - 1, col, menu_bottom_border(width), style)
+    sides = render_menu_side_borders(row, col, width, height, style)
+    [top, bottom | sides]
+  end
+
+  @spec render_menu_side_borders(
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer(),
+          pos_integer(),
+          Face.t()
+        ) :: [DisplayList.draw()]
+  defp render_menu_side_borders(_row, _col, _width, height, _style) when height <= 2, do: []
+
+  defp render_menu_side_borders(row, col, width, height, style) do
+    (row + 1)..(row + height - 2)
+    |> Enum.flat_map(fn draw_row ->
+      [
+        DisplayList.draw(draw_row, col, "│", style),
+        DisplayList.draw(draw_row, col + width - 1, "│", style)
+      ]
+    end)
+  end
+
+  @spec menu_top_border(pos_integer()) :: String.t()
+  defp menu_top_border(1), do: "╭"
+  defp menu_top_border(2), do: "╭╮"
+  defp menu_top_border(width), do: "╭" <> String.duplicate("─", width - 2) <> "╮"
+
+  @spec menu_bottom_border(pos_integer()) :: String.t()
+  defp menu_bottom_border(1), do: "╰"
+  defp menu_bottom_border(2), do: "╰╯"
+  defp menu_bottom_border(width), do: "╰" <> String.duplicate("─", width - 2) <> "╯"
 
   @spec render_completion_item(
           non_neg_integer(),
@@ -157,7 +271,7 @@ defmodule MingaEditor.CompletionUI do
         ) :: [DisplayList.draw()]
   defp render_completion_item(row, col, width, item, is_selected, colors) do
     fg = if is_selected, do: colors.highlight_fg, else: colors.text_fg
-    bg = if is_selected, do: colors.sel_bg, else: colors.bg
+    bg = colors.bg
 
     kind_char = Completion.kind_label(item.kind)
     label = item.label
@@ -189,6 +303,8 @@ defmodule MingaEditor.CompletionUI do
       )
     ]
 
+    rail_cmds = render_completion_selection_rail(row, col, is_selected, colors)
+
     # Render kind character with dim color
     kind_cmd =
       DisplayList.draw(row, col + 1, kind_char, Face.new(fg: colors.dim_fg, bg: bg))
@@ -202,7 +318,15 @@ defmodule MingaEditor.CompletionUI do
         []
       end
 
-    [kind_cmd | cmds] ++ detail_cmds
+    cmds ++ rail_cmds ++ [kind_cmd] ++ detail_cmds
+  end
+
+  @spec render_completion_selection_rail(non_neg_integer(), non_neg_integer(), boolean(), map()) ::
+          [DisplayList.draw()]
+  defp render_completion_selection_rail(_row, _col, false, _colors), do: []
+
+  defp render_completion_selection_rail(row, col, true, colors) do
+    [DisplayList.draw(row, col, "▌", Face.new(fg: colors.highlight_fg, bg: colors.bg))]
   end
 
   # ── Documentation preview pane ────────────────────────────────────────────
@@ -242,18 +366,12 @@ defmodule MingaEditor.CompletionUI do
     if parsed_lines == [] do
       []
     else
-      # Compute the completion popup's position and dimensions
-      item_count = min(length(items), @max_rows)
-
-      label_widths = Enum.map(items, fn i -> String.length(i.label) + 4 end)
-      popup_width = label_widths |> Enum.max() |> max(@min_width) |> min(@max_width)
-      popup_width = min(popup_width, opts.viewport_cols - opts.cursor_col)
-      popup_col = min(opts.cursor_col, max(0, opts.viewport_cols - popup_width))
-
-      space_below = opts.viewport_rows - opts.cursor_row - 2
-
-      popup_row =
-        if space_below >= item_count, do: opts.cursor_row + 1, else: opts.cursor_row - item_count
+      # Compute the completion popup's bordered position and dimensions.
+      geometry = menu_geometry(items, opts)
+      item_count = geometry.height
+      popup_width = geometry.box_width
+      popup_col = geometry.box_col
+      popup_row = geometry.box_row
 
       # Position the doc pane beside the completion popup
       doc_width = min(@doc_max_width, opts.viewport_cols - popup_col - popup_width - 1)

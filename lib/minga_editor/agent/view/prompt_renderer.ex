@@ -26,6 +26,8 @@ defmodule MingaEditor.Agent.View.PromptRenderer do
 
   @max_input_lines 8
   @input_h_margin 2
+  @input_pad_left 1
+  @input_pad_right 1
   @input_v_gap 1
 
   # ── Public API ──────────────────────────────────────────────────────────────
@@ -95,7 +97,7 @@ defmodule MingaEditor.Agent.View.PromptRenderer do
       visible_offset = visual_line - scroll
 
       input_text_row = input_row + 1 + min(visible_offset, visible_lines - 1)
-      input_col = box_col + 1 + 3 + visual_col
+      input_col = box_col + 1 + @input_pad_left + visual_col
       {input_text_row, input_col}
     else
       nil
@@ -107,10 +109,10 @@ defmodule MingaEditor.Agent.View.PromptRenderer do
   @doc """
   Computes the text width inside the input box, excluding borders and padding.
 
-  Layout: "│" (1) + padding_left (3) + text + padding_right (1) + "│" (1) = 6 chars chrome.
+  Layout: "│" (1) + padding_left + text + padding_right + "│" (1).
   """
   @spec input_inner_width(pos_integer()) :: pos_integer()
-  def input_inner_width(box_width), do: max(box_width - 6, 1)
+  def input_inner_width(box_width), do: max(box_width - input_chrome_width(), 1)
 
   @doc """
   Returns the prompt box width after applying horizontal margins.
@@ -125,6 +127,9 @@ defmodule MingaEditor.Agent.View.PromptRenderer do
   """
   @spec input_v_gap() :: non_neg_integer()
   def input_v_gap, do: @input_v_gap
+
+  @spec input_chrome_width() :: pos_integer()
+  defp input_chrome_width, do: 2 + @input_pad_left + @input_pad_right
 
   @doc """
   Computes the dynamic input area height for the bordered box:
@@ -157,9 +162,9 @@ defmodule MingaEditor.Agent.View.PromptRenderer do
     total_visual = InputWrap.visual_line_count(panel.input_lines, inner_width)
     visible_lines = max(min(total_visual, @max_input_lines), 1)
 
-    # Horizontal layout: "│" (1) + "   " (3) + text + pad + " " (1) + "│" (1) = 6 chars of chrome
-    pad_left = 3
-    pad_right = 1
+    # Horizontal layout: borders plus a small text inset on each side.
+    pad_left = @input_pad_left
+    pad_right = @input_pad_right
     left_pad = String.duplicate(" ", pad_left)
     right_pad = String.duplicate(" ", pad_right)
 
@@ -189,7 +194,7 @@ defmodule MingaEditor.Agent.View.PromptRenderer do
             content_start,
             col_off + 1 + pad_left,
             padded,
-            Face.new(fg: at.input_placeholder, bg: at.input_bg)
+            Face.new(fg: at.input_placeholder, bg: at.input_bg, italic: true)
           )
         ]
       else

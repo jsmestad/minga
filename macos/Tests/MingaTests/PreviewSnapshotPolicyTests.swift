@@ -12,12 +12,20 @@ struct PreviewSnapshotPolicyTests {
         #expect(PreviewSnapshotPolicy.expectedPixelSize(named: "StatusBarView", scale: 2.0) == CGSize(width: 1600, height: 56))
     }
 
-    @Test("rendered window capture is reserved for the shell and chrome previews")
+    @Test("rendered window capture is reserved for full-shell Metal previews")
     func renderedCapturePolicy() {
         #expect(PreviewSnapshotPolicy.shouldUseRenderedWindowCapture("EditorChromeView"))
         #expect(PreviewSnapshotPolicy.shouldUseRenderedWindowCapture("AgentChromeView"))
-        #expect(PreviewSnapshotPolicy.shouldUseRenderedWindowCapture("FileTreeView"))
-        #expect(PreviewSnapshotPolicy.shouldUseRenderedWindowCapture("GitStatusView"))
+        #expect(PreviewSnapshotPolicy.shouldUseRenderedWindowCapture("DiagnosticsEditorView"))
+        #expect(PreviewSnapshotPolicy.shouldUseRenderedWindowCapture("InsertModeEditorView"))
+        #expect(PreviewSnapshotPolicy.shouldUseRenderedWindowCapture("HoverEditorView"))
+        #expect(PreviewSnapshotPolicy.shouldUseRenderedWindowCapture("SignatureHelpEditorView"))
+        #expect(!PreviewSnapshotPolicy.shouldUseRenderedWindowCapture("FileTreeView"))
+        #expect(!PreviewSnapshotPolicy.shouldUseRenderedWindowCapture("FileTreeEmpty"))
+        #expect(!PreviewSnapshotPolicy.shouldUseRenderedWindowCapture("GitStatusView"))
+        #expect(!PreviewSnapshotPolicy.shouldUseRenderedWindowCapture("GitStatusClean"))
+        #expect(!PreviewSnapshotPolicy.shouldUseRenderedWindowCapture("GitStatusConflict"))
+        #expect(!PreviewSnapshotPolicy.shouldUseRenderedWindowCapture("GitStatusDense"))
         #expect(!PreviewSnapshotPolicy.shouldUseRenderedWindowCapture("StatusBarView"))
         #expect(PreviewSnapshotPolicy.requiresRenderedWindowCapture("EditorChromeView"))
         #expect(PreviewSnapshotPolicy.requiresRenderedWindowCapture("AgentChromeView"))
@@ -29,7 +37,9 @@ struct PreviewSnapshotPolicyTests {
     func eagerLayoutPolicy() {
         let enabledEnv = ["PREVIEW_EAGER_LAYOUT": "1"]
         #expect(PreviewSnapshotPolicy.shouldUseEagerLayout(for: "FileTreeView", environment: enabledEnv))
+        #expect(PreviewSnapshotPolicy.shouldUseEagerLayout(for: "FileTreeRename", environment: enabledEnv))
         #expect(PreviewSnapshotPolicy.shouldUseEagerLayout(for: "GitStatusView", environment: enabledEnv))
+        #expect(PreviewSnapshotPolicy.shouldUseEagerLayout(for: "GitStatusClean", environment: enabledEnv))
         #expect(!PreviewSnapshotPolicy.shouldUseEagerLayout(for: "EditorChromeView", environment: enabledEnv))
         #expect(!PreviewSnapshotPolicy.shouldUseEagerLayout(for: "AgentChromeView", environment: enabledEnv))
         #expect(!PreviewSnapshotPolicy.shouldUseEagerLayout(for: "FileTreeView", environment: [:]))
