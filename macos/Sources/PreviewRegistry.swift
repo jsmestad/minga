@@ -95,6 +95,12 @@ enum PreviewRegistry {
             hoverEditorPreview()
         case "SignatureHelpEditorView":
             signatureHelpEditorPreview()
+        case "BottomPanelDiagnostics":
+            bottomPanelDiagnosticsPreview()
+        case "NotificationOverflow":
+            notificationOverflowPreview()
+        case "FileTreeRename":
+            fileTreeRenamePreview()
         default:
             Text("Unknown view: \(name)")
                 .font(.title)
@@ -1685,6 +1691,194 @@ enum PreviewRegistry {
         ]
     }
 
+    // MARK: - BottomPanelDiagnostics
+
+    private static func bottomPanelDiagnosticsPreview() -> some View {
+        let theme = populatedTheme()
+        let state = BottomPanelState()
+
+        state.update(
+            visible: true,
+            activeTabIndex: 1,
+            heightPercent: 30,
+            filterPreset: 1,
+            tabs: [
+                BottomPanelTab(id: 0, tabType: 0x00, name: "Terminal"),
+                BottomPanelTab(id: 1, tabType: 0x01, name: "Diagnostics"),
+                BottomPanelTab(id: 2, tabType: 0x02, name: "Output"),
+            ]
+        )
+
+        state.messagesState.entries = [
+            MessageEntry(id: 1, level: 3, subsystem: 1, timestampSecs: 36_061, filePath: "lib/minga/editor.ex", text: "function head/2 is undefined or private"),
+            MessageEntry(id: 2, level: 3, subsystem: 1, timestampSecs: 36_062, filePath: "lib/minga/buffer/process.ex", text: "pattern can never match: the types <<_::binary>> and :error are incompatible"),
+            MessageEntry(id: 3, level: 2, subsystem: 1, timestampSecs: 36_063, filePath: "lib/minga/editor.ex", text: "unused variable `opts`"),
+            MessageEntry(id: 4, level: 3, subsystem: 2, timestampSecs: 36_064, filePath: "lib/minga/mode/normal.ex", text: "missing @spec for public function handle_key/2"),
+            MessageEntry(id: 5, level: 2, subsystem: 1, timestampSecs: 36_065, filePath: "lib/minga/buffer/document.ex", text: "this clause cannot match because a previous clause always matches"),
+            MessageEntry(id: 6, level: 2, subsystem: 2, timestampSecs: 36_066, filePath: "lib/minga/editor/render_pipeline.ex", text: "unused alias Buffer"),
+            MessageEntry(id: 7, level: 3, subsystem: 1, timestampSecs: 36_067, filePath: "test/minga/editor_test.exs", text: "undefined function assert_received/1 (expected MingaTest.EditorTest to define such a function)"),
+            MessageEntry(id: 8, level: 2, subsystem: 0, timestampSecs: 36_068, filePath: "lib/minga/editor.ex", text: "variable `state` is unused (if the variable is not meant to be used, prefix it with an underscore)"),
+        ]
+
+        state.messagesState.activeLevels = [2, 3]
+
+        return BottomPanelView(state: state, theme: theme, encoder: nil, availableHeight: 600)
+            .frame(width: 800, height: 250)
+            .background(theme.editorBg)
+    }
+
+    // MARK: - NotificationOverflow
+
+    private static func notificationOverflowPreview() -> some View {
+        let state = NotificationCenterState()
+        let theme = populatedTheme()
+        let now = UInt64(Date().timeIntervalSince1970)
+
+        state.update(rawNotifications: [
+            Wire.EditorNotification(
+                id: "notif-1",
+                level: .error,
+                flags: 0x01,
+                createdAt: now - 120,
+                updatedAt: now - 120,
+                autoDismissMs: nil,
+                title: "Build failed",
+                body: "Compilation error in lib/minga/editor.ex:42 - undefined function render/1",
+                source: "Compiler",
+                actions: [
+                    Wire.NotificationAction(id: "show", label: "Show Error"),
+                    Wire.NotificationAction(id: "rebuild", label: "Rebuild"),
+                ]
+            ),
+            Wire.EditorNotification(
+                id: "notif-2",
+                level: .warning,
+                flags: 0x01,
+                createdAt: now - 90,
+                updatedAt: now - 90,
+                autoDismissMs: nil,
+                title: "Deprecation warning",
+                body: "Minga.Buffer.read/1 is deprecated. Use Minga.Buffer.open/2 instead. This function will be removed in v2.0.",
+                source: "Compiler",
+                actions: []
+            ),
+            Wire.EditorNotification(
+                id: "notif-3",
+                level: .info,
+                flags: 0x01,
+                createdAt: now - 60,
+                updatedAt: now - 60,
+                autoDismissMs: nil,
+                title: "Extension loaded",
+                body: "org-mode v0.3.0 activated for .org files",
+                source: "Extensions",
+                actions: [
+                    Wire.NotificationAction(id: "configure", label: "Configure"),
+                ]
+            ),
+            Wire.EditorNotification(
+                id: "notif-4",
+                level: .success,
+                flags: 0x01,
+                createdAt: now - 45,
+                updatedAt: now - 45,
+                autoDismissMs: nil,
+                title: "Tests passed",
+                body: "42 tests, 0 failures",
+                source: "ExUnit",
+                actions: []
+            ),
+            Wire.EditorNotification(
+                id: "notif-5",
+                level: .progress,
+                flags: 0x00,
+                createdAt: now - 30,
+                updatedAt: now - 30,
+                autoDismissMs: nil,
+                title: "LSP indexing",
+                body: "Indexing project files (1,247 / 2,891)...",
+                source: "ElixirLS",
+                actions: []
+            ),
+            Wire.EditorNotification(
+                id: "notif-6",
+                level: .warning,
+                flags: 0x01,
+                createdAt: now - 15,
+                updatedAt: now - 15,
+                autoDismissMs: nil,
+                title: "Git conflict detected",
+                body: "lib/minga/buffer/process.ex has merge conflicts that must be resolved before committing",
+                source: "Git",
+                actions: [
+                    Wire.NotificationAction(id: "resolve", label: "Open File"),
+                ]
+            ),
+            Wire.EditorNotification(
+                id: "notif-7",
+                level: .error,
+                flags: 0x01,
+                createdAt: now - 5,
+                updatedAt: now - 5,
+                autoDismissMs: nil,
+                title: "Agent tool error",
+                body: "File write failed: permission denied for /etc/hosts. The agent cannot modify system files without elevated privileges.",
+                source: "Agent",
+                actions: [
+                    Wire.NotificationAction(id: "retry", label: "Retry"),
+                    Wire.NotificationAction(id: "dismiss", label: "Dismiss"),
+                ]
+            ),
+        ])
+
+        return NotificationCenterView(state: state, theme: theme, encoder: nil, bottomInset: 40)
+            .frame(width: 800, height: 600)
+            .background(theme.editorBg)
+    }
+
+    // MARK: - FileTreeRename
+
+    private static func fileTreeRenamePreview() -> some View {
+        let theme = populatedTheme()
+        let state = fileTreeRenameState()
+
+        return FileTreeView(fileTreeState: state, theme: theme, encoder: nil)
+            .frame(width: 280, height: 600)
+            .background(theme.treeBg)
+    }
+
+    private static func fileTreeRenameState() -> FileTreeState {
+        let state = FileTreeState()
+        var raw = fileTreeRawEntries()
+
+        // Replace the editor.ex entry (index 2) with an editing version
+        raw[2] = wireFileEntry(
+            id: "lib/minga/editor.ex",
+            name: "editor.ex",
+            path: "/Users/dev/code/minga/lib/minga/editor.ex",
+            relPath: "lib/minga/editor.ex",
+            isDir: false,
+            depth: 2,
+            icon: "",
+            isActive: true,
+            gitStatus: 1,
+            isEditing: true,
+            editingType: 2,
+            editingText: "new_name.ex"
+        )
+
+        state.update(
+            version: 1,
+            selectedId: "lib/minga/editor.ex",
+            focused: true,
+            treeWidth: 30,
+            rootPath: "/Users/dev/code/minga",
+            rawEntries: raw,
+            treeState: FileTreeVisibilityState.ready.rawValue
+        )
+        return state
+    }
+
     // MARK: - Helpers
 
     /// ThemeColors() already initializes with Doom One defaults, which look representative for preview screenshots without any BEAM theme push.
@@ -1704,7 +1898,10 @@ enum PreviewRegistry {
         isActive: Bool = false,
         isDirty: Bool = false,
         isLastChild: Bool = false,
-        gitStatus: UInt8 = 0
+        gitStatus: UInt8 = 0,
+        isEditing: Bool = false,
+        editingType: UInt8 = 255,
+        editingText: String = ""
     ) -> Wire.FileTreeEntry {
         Wire.FileTreeEntry(
             pathHash: UInt32(id.hashValue & 0x7FFFFFFF),
@@ -1716,7 +1913,7 @@ enum PreviewRegistry {
             isFocused: false,
             isActive: isActive,
             isDirty: isDirty,
-            isEditing: false,
+            isEditing: isEditing,
             isLastChild: isLastChild,
             depth: depth,
             gitStatus: gitStatus,
@@ -1728,8 +1925,8 @@ enum PreviewRegistry {
             icon: icon,
             name: name,
             relPath: relPath,
-            editingType: 255,
-            editingText: ""
+            editingType: editingType,
+            editingText: editingText
         )
     }
 }
