@@ -11,6 +11,14 @@ defmodule Minga.Extension.SourceCleanupTest do
   alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.Keymap.Bindings
   alias Minga.Keymap.KeyParser
+  alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.Shell.Board.Card
+  alias MingaEditor.Shell.Board.State, as: BoardState
+  alias MingaEditor.Shell.Traditional.State, as: ShellState
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Tab
+  alias MingaEditor.State.TabBar
+  alias MingaEditor.Viewport
 
   setup do
     reg_name = :"ext_cleanup_reg_#{System.unique_integer([:positive])}"
@@ -625,6 +633,8 @@ defmodule Minga.Extension.SourceCleanupTest do
     assert %{name: :source_cleanup_segment} =
              Minga.Config.ModelineSegments.lookup(:source_cleanup_segment)
 
+    editor_pid = start_fake_editor(source_cleanup_editor_state())
+
     {:ok, running_entry} = ExtRegistry.get(ctx.registry, :source_cleanup)
 
     assert :ok =
@@ -636,6 +646,30 @@ defmodule Minga.Extension.SourceCleanupTest do
                command_registry: ctx.command_registry,
                keymap: ctx.keymap
              )
+
+    cleaned_editor_state = fake_editor_state(editor_pid)
+    stop_fake_editor(editor_pid)
+
+    assert EditorState.get_feature_state(
+             cleaned_editor_state,
+             {:extension, :source_cleanup},
+             :sidebar
+           ) == nil
+
+    assert EditorState.get_feature_state(
+             cleaned_editor_state,
+             {:extension, :other_source},
+             :sidebar
+           ) == :live_other
+
+    cleaned_tab = TabBar.get(cleaned_editor_state.shell_state.tab_bar, 1)
+    assert_snapshot_feature_state(cleaned_tab.context, nil, :tab_other)
+
+    assert_snapshot_feature_state(
+      cleaned_editor_state.stashed_board_state.cards[2].workspace,
+      nil,
+      :board_other
+    )
 
     assert :error = CommandRegistry.lookup(ctx.command_registry, :source_cleanup_cmd)
     assert :not_found = leader_lookup(ctx.keymap, "m c")
@@ -650,6 +684,111 @@ defmodule Minga.Extension.SourceCleanupTest do
     assert :error = MingaEditor.UI.Theme.get(:source_cleanup_theme)
     assert Minga.Tool.Recipe.Registry.get(:source_cleanup_recipe) == nil
     assert Minga.Config.ModelineSegments.lookup(:source_cleanup_segment) == nil
+  end
+
+  @spec source_cleanup_editor_state() :: EditorState.t()
+  defp source_cleanup_editor_state do
+    source = {:extension, :source_cleanup}
+    other_source = {:extension, :other_source}
+
+    live_workspace =
+      workspace()
+      |> SessionState.put_feature_state(source, :sidebar, :live_owned)
+      |> SessionState.put_feature_state(other_source, :sidebar, :live_other)
+
+    tab_context =
+      workspace()
+      |> SessionState.put_feature_state(source, :sidebar, :tab_owned)
+      |> SessionState.put_feature_state(other_source, :sidebar, :tab_other)
+      |> SessionState.to_tab_context()
+
+    board_context =
+      workspace()
+      |> SessionState.put_feature_state(source, :sidebar, :board_owned)
+      |> SessionState.put_feature_state(other_source, :sidebar, :board_other)
+      |> SessionState.to_tab_context()
+
+    tab = Tab.new_file(1, "one") |> Tab.set_context(tab_context)
+
+    %EditorState{
+      port_manager: self(),
+      workspace: live_workspace,
+      shell_state: %ShellState{tab_bar: TabBar.new(tab)},
+      stashed_board_state: board_with_workspace(2, board_context)
+    }
+  end
+
+  @spec workspace() :: SessionState.t()
+  defp workspace, do: %SessionState{viewport: Viewport.new(24, 80)}
+
+  @spec board_with_workspace(Card.id(), Card.workspace_snapshot()) :: BoardState.t()
+  defp board_with_workspace(card_id, workspace_snapshot) do
+    card = Card.new(card_id, task: "card #{card_id}", workspace: workspace_snapshot)
+
+    %BoardState{
+      cards: %{card_id => card},
+      card_order: [card_id],
+      focused_card: card_id,
+      next_id: card_id + 1
+    }
+  end
+
+  @spec assert_snapshot_feature_state(Card.workspace_snapshot(), term(), term()) :: :ok
+  defp assert_snapshot_feature_state(context, expected_owned, expected_other) do
+    restored = SessionState.restore_tab_context(workspace(), context)
+
+    assert SessionState.get_feature_state(restored, {:extension, :source_cleanup}, :sidebar) ==
+             expected_owned
+
+    assert SessionState.get_feature_state(restored, {:extension, :other_source}, :sidebar) ==
+             expected_other
+  end
+
+  @spec start_fake_editor(EditorState.t()) :: pid()
+  defp start_fake_editor(state) do
+    caller = self()
+
+    pid =
+      spawn_link(fn ->
+        Process.register(self(), MingaEditor)
+        send(caller, :fake_editor_ready)
+        fake_editor_loop(state)
+      end)
+
+    assert_receive :fake_editor_ready
+    pid
+  end
+
+  @spec fake_editor_state(pid()) :: EditorState.t()
+  defp fake_editor_state(pid) do
+    send(pid, {:get_state, self()})
+    assert_receive {:fake_editor_state, %EditorState{} = state}
+    state
+  end
+
+  @spec stop_fake_editor(pid()) :: :ok
+  defp stop_fake_editor(pid) do
+    ref = Process.monitor(pid)
+    send(pid, :stop)
+    assert_receive {:DOWN, ^ref, :process, ^pid, _reason}
+    :ok
+  end
+
+  @spec fake_editor_loop(EditorState.t()) :: no_return()
+  defp fake_editor_loop(state) do
+    receive do
+      {:"$gen_call", from, {:cleanup_feature_state, source}} ->
+        GenServer.reply(from, :ok)
+        fake_editor_loop(EditorState.drop_feature_state_source(state, source))
+
+      {:get_state, caller} ->
+        send(caller, {:fake_editor_state, state})
+        fake_editor_loop(state)
+
+      :stop ->
+        Process.unregister(MingaEditor)
+        exit(:normal)
+    end
   end
 
   @spec leader_lookup(GenServer.server(), String.t()) :: term()

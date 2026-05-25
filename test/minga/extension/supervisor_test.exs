@@ -1,21 +1,25 @@
 defmodule Minga.Extension.SupervisorTest do
-  use ExUnit.Case, async: true
+  # Runtime code compilation and fixed Minga.TestExtensions module names are global.
+  use ExUnit.Case, async: false
 
   # Runtime code compilation makes these inherently slow (~250ms).
   # Excluded from test.llm; runs in test.heavy and full suite.
   @moduletag :heavy
 
+  alias Minga.Command.Registry, as: CommandRegistry
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Extension.Supervisor, as: ExtSupervisor
 
   setup do
     reg_name = :"ext_reg_#{System.unique_integer([:positive])}"
     sup_name = :"ext_sup_#{System.unique_integer([:positive])}"
+    cmd_reg_name = :"ext_cmd_reg_#{System.unique_integer([:positive])}"
 
     {:ok, _} = ExtRegistry.start_link(name: reg_name)
     {:ok, _} = ExtSupervisor.start_link(name: sup_name)
+    {:ok, _} = CommandRegistry.start_link(name: cmd_reg_name)
 
-    {:ok, registry: reg_name, supervisor: sup_name}
+    {:ok, registry: reg_name, supervisor: sup_name, command_registry: cmd_reg_name}
   end
 
   describe "start_extension/4" do
@@ -187,6 +191,83 @@ defmodule Minga.Extension.SupervisorTest do
   end
 
   describe "stop_extension/4" do
+    test "preserves supervisor lookup failures instead of reporting not found", ctx do
+      :ok = ExtRegistry.register(ctx.registry, :lookup_failure, System.tmp_dir!(), [])
+
+      :ok =
+        ExtRegistry.update(ctx.registry, :lookup_failure,
+          module: Minga.TestExtensions.LookupFailure,
+          status: :running,
+          pid: nil
+        )
+
+      {:ok, entry} = ExtRegistry.get(ctx.registry, :lookup_failure)
+
+      assert {:error, {:which_children_failed, _reason}} =
+               ExtSupervisor.stop_extension(
+                 :missing_extension_supervisor,
+                 ctx.registry,
+                 :lookup_failure,
+                 entry
+               )
+    end
+
+    test "stale stop request stops the current restarted replacement", ctx do
+      {path, cleanup} =
+        make_extension("StaleStop", """
+        defmodule Minga.TestExtensions.StaleStop do
+          use Minga.Extension
+
+          @impl true
+          def name, do: :stale_stop
+
+          @impl true
+          def description, do: "Stale stop test"
+
+          @impl true
+          def version, do: "0.1.0"
+
+          @impl true
+          def init(_config), do: {:ok, %{}}
+        end
+        """)
+
+      on_exit(fn ->
+        cleanup.()
+        :code.purge(Minga.TestExtensions.StaleStop)
+        :code.delete(Minga.TestExtensions.StaleStop)
+      end)
+
+      :ok = ExtRegistry.register(ctx.registry, :stale_stop, path, [])
+      {:ok, entry} = ExtRegistry.get(ctx.registry, :stale_stop)
+
+      {:ok, old_pid} =
+        ExtSupervisor.start_extension(ctx.supervisor, ctx.registry, :stale_stop, entry)
+
+      {:ok, stale_entry} = ExtRegistry.get(ctx.registry, :stale_stop)
+
+      Process.exit(old_pid, :kill)
+
+      restarted_entry =
+        wait_until(fn ->
+          {:ok, current} = ExtRegistry.get(ctx.registry, :stale_stop)
+          if is_pid(current.pid) and current.pid != old_pid, do: current, else: nil
+        end)
+
+      assert :ok =
+               ExtSupervisor.stop_extension(
+                 ctx.supervisor,
+                 ctx.registry,
+                 :stale_stop,
+                 stale_entry
+               )
+
+      {:ok, current_entry} = ExtRegistry.get(ctx.registry, :stale_stop)
+      assert current_entry.status == :stopped
+      assert current_entry.pid == nil
+      refute Process.alive?(restarted_entry.pid)
+    end
+
     test "stops a running extension and purges the module", ctx do
       {path, cleanup} =
         make_extension("StopMe", """
@@ -476,6 +557,75 @@ defmodule Minga.Extension.SupervisorTest do
   end
 
   describe "crash isolation" do
+    test "temporary extension normal exit is finalized as stopped", ctx do
+      {path, cleanup} =
+        make_extension("TemporaryNormalExit", """
+        defmodule Minga.TestExtensions.TemporaryNormalExit do
+          use Minga.Extension
+
+          @impl true
+          def name, do: :temporary_normal_exit
+
+          @impl true
+          def description, do: "Temporary normal exit"
+
+          @impl true
+          def version, do: "0.1.0"
+
+          @impl true
+          def init(config) do
+            command_registry = Keyword.fetch!(config, :command_registry)
+            source = {:extension, :temporary_normal_exit}
+            command = %Minga.Command{name: :temporary_normal_exit_cmd, description: "Temporary normal exit", execute: &__MODULE__.noop/1}
+            :ok = Minga.Command.Registry.register_command(command_registry, source, command)
+            {:ok, %{}}
+          end
+
+          @spec noop(map()) :: map()
+          def noop(state), do: state
+
+          @impl true
+          def child_spec(config) do
+            %{
+              id: __MODULE__,
+              start: {Agent, :start_link, [fn -> config end]},
+              restart: :temporary,
+              type: :worker
+            }
+          end
+        end
+        """)
+
+      on_exit(fn ->
+        cleanup.()
+        :code.purge(Minga.TestExtensions.TemporaryNormalExit)
+        :code.delete(Minga.TestExtensions.TemporaryNormalExit)
+      end)
+
+      config = [command_registry: ctx.command_registry]
+      :ok = ExtRegistry.register(ctx.registry, :temporary_normal_exit, path, config)
+      {:ok, entry} = ExtRegistry.get(ctx.registry, :temporary_normal_exit)
+
+      {:ok, pid} =
+        ExtSupervisor.start_extension(ctx.supervisor, ctx.registry, :temporary_normal_exit, entry,
+          command_registry: ctx.command_registry
+        )
+
+      assert {:ok, _command} =
+               CommandRegistry.lookup(ctx.command_registry, :temporary_normal_exit_cmd)
+
+      Agent.stop(pid, :normal)
+
+      stopped_entry =
+        wait_until(fn ->
+          {:ok, current} = ExtRegistry.get(ctx.registry, :temporary_normal_exit)
+          if current.status == :stopped and current.pid == nil, do: current, else: nil
+        end)
+
+      assert stopped_entry.module == nil
+      assert :error = CommandRegistry.lookup(ctx.command_registry, :temporary_normal_exit_cmd)
+    end
+
     test "a crashing extension does not take down the supervisor", ctx do
       {path, cleanup} =
         make_extension("Crasher", """
@@ -527,6 +677,24 @@ defmodule Minga.Extension.SupervisorTest do
   end
 
   # ── Helpers ─────────────────────────────────────────────────────────────────
+
+  @spec wait_until((-> term()), non_neg_integer()) :: term()
+  defp wait_until(fun, attempts \\ 100)
+
+  defp wait_until(fun, attempts) when attempts > 0 do
+    case fun.() do
+      nil ->
+        receive do
+        after
+          10 -> wait_until(fun, attempts - 1)
+        end
+
+      result ->
+        result
+    end
+  end
+
+  defp wait_until(fun, 0), do: flunk("condition was not met, last result: #{inspect(fun.())}")
 
   @spec make_extension(String.t(), String.t()) :: {String.t(), (-> :ok)}
   defp make_extension(dir_name, source) do

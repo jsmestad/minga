@@ -59,6 +59,15 @@ defmodule MingaEditor.FeatureStateTest do
     assert FeatureState.get(state, @source, nil) == nil
   end
 
+  test "tab context carries every session workspace field" do
+    workspace_fields =
+      SessionState.__struct__()
+      |> Map.delete(:__struct__)
+      |> Map.keys()
+
+    assert Enum.sort(TabContext.field_names()) == Enum.sort(workspace_fields)
+  end
+
   test "session helpers keep feature state scoped to tab snapshots" do
     tab_one =
       workspace()
@@ -157,7 +166,28 @@ defmodule MingaEditor.FeatureStateTest do
       |> SessionState.put_feature_state(@other_source, @feature, :old_other_extension)
       |> SessionState.put_feature_state(:builtin, @feature, :builtin)
 
-    state = %EditorState{port_manager: self(), workspace: live_workspace}
+    tab_context =
+      workspace()
+      |> SessionState.put_feature_state(:config, @feature, :tab_config)
+      |> SessionState.put_feature_state(@source, @feature, :tab_extension)
+      |> SessionState.put_feature_state(:builtin, @feature, :tab_builtin)
+      |> SessionState.to_tab_context()
+
+    board_context =
+      workspace()
+      |> SessionState.put_feature_state(:config, @feature, :board_config)
+      |> SessionState.put_feature_state(@source, @feature, :board_extension)
+      |> SessionState.put_feature_state(:builtin, @feature, :board_builtin)
+      |> SessionState.to_tab_context()
+
+    tab = Tab.new_file(1, "one") |> Tab.set_context(tab_context)
+
+    state = %EditorState{
+      port_manager: self(),
+      workspace: live_workspace,
+      shell_state: %ShellState{tab_bar: TabBar.new(tab)},
+      stashed_board_state: board_with_workspace(2, board_context)
+    }
 
     reloaded =
       BufferManagement.reload_config(state, fn cleaned_state ->
@@ -165,6 +195,20 @@ defmodule MingaEditor.FeatureStateTest do
         assert EditorState.get_feature_state(cleaned_state, @source, @feature) == nil
         assert EditorState.get_feature_state(cleaned_state, @other_source, @feature) == nil
         assert EditorState.get_feature_state(cleaned_state, :builtin, @feature) == :builtin
+
+        cleaned_tab = TabBar.get(cleaned_state.shell_state.tab_bar, 1)
+
+        assert_snapshot_feature_state(cleaned_tab.context,
+          config: nil,
+          extension: nil,
+          builtin: :tab_builtin
+        )
+
+        assert_snapshot_feature_state(cleaned_state.stashed_board_state.cards[2].workspace,
+          config: nil,
+          extension: nil,
+          builtin: :board_builtin
+        )
 
         cleaned_state =
           EditorState.put_feature_state(cleaned_state, :config, @feature, :new_config)
@@ -176,6 +220,62 @@ defmodule MingaEditor.FeatureStateTest do
     assert EditorState.get_feature_state(reloaded, @source, @feature) == :new_extension
     assert EditorState.get_feature_state(reloaded, @other_source, @feature) == nil
     assert EditorState.get_feature_state(reloaded, :builtin, @feature) == :builtin
+
+    reloaded_tab = TabBar.get(reloaded.shell_state.tab_bar, 1)
+
+    assert_snapshot_feature_state(reloaded_tab.context,
+      config: nil,
+      extension: nil,
+      builtin: :tab_builtin
+    )
+
+    assert_snapshot_feature_state(reloaded.stashed_board_state.cards[2].workspace,
+      config: nil,
+      extension: nil,
+      builtin: :board_builtin
+    )
+  end
+
+  test "config reload command cleans active board card snapshots" do
+    live_workspace =
+      workspace()
+      |> SessionState.put_feature_state(:config, @feature, :old_config)
+      |> SessionState.put_feature_state(@source, @feature, :old_extension)
+      |> SessionState.put_feature_state(:builtin, @feature, :builtin)
+
+    board_context =
+      workspace()
+      |> SessionState.put_feature_state(:config, @feature, :board_config)
+      |> SessionState.put_feature_state(@source, @feature, :board_extension)
+      |> SessionState.put_feature_state(:builtin, @feature, :board_builtin)
+      |> SessionState.to_tab_context()
+
+    state = %EditorState{
+      port_manager: self(),
+      workspace: live_workspace,
+      shell_state: board_with_workspace(1, board_context)
+    }
+
+    reloaded =
+      BufferManagement.reload_config(state, fn cleaned_state ->
+        assert_snapshot_feature_state(cleaned_state.shell_state.cards[1].workspace,
+          config: nil,
+          extension: nil,
+          builtin: :board_builtin
+        )
+
+        {:ok, cleaned_state}
+      end)
+
+    assert EditorState.get_feature_state(reloaded, :config, @feature) == nil
+    assert EditorState.get_feature_state(reloaded, @source, @feature) == nil
+    assert EditorState.get_feature_state(reloaded, :builtin, @feature) == :builtin
+
+    assert_snapshot_feature_state(reloaded.shell_state.cards[1].workspace,
+      config: nil,
+      extension: nil,
+      builtin: :board_builtin
+    )
   end
 
   test "brand-new tab defaults do not inherit outgoing feature state" do
@@ -244,7 +344,7 @@ defmodule MingaEditor.FeatureStateTest do
     %SessionState{viewport: Viewport.new(24, 80)}
   end
 
-  @spec board_with_workspace(Card.id(), map()) :: BoardState.t()
+  @spec board_with_workspace(Card.id(), Card.workspace_snapshot()) :: BoardState.t()
   defp board_with_workspace(card_id, workspace_snapshot) do
     card = Card.new(card_id, task: "card #{card_id}", workspace: workspace_snapshot)
 
@@ -254,6 +354,20 @@ defmodule MingaEditor.FeatureStateTest do
       focused_card: card_id,
       next_id: card_id + 1
     }
+  end
+
+  @spec assert_snapshot_feature_state(Card.workspace_snapshot(), keyword()) :: :ok
+  defp assert_snapshot_feature_state(context, expected) do
+    restored = SessionState.restore_tab_context(workspace(), context)
+
+    assert SessionState.get_feature_state(restored, :config, @feature) ==
+             Keyword.fetch!(expected, :config)
+
+    assert SessionState.get_feature_state(restored, @source, @feature) ==
+             Keyword.fetch!(expected, :extension)
+
+    assert SessionState.get_feature_state(restored, :builtin, @feature) ==
+             Keyword.fetch!(expected, :builtin)
   end
 
   @spec assert_received_messages([term()]) :: :ok

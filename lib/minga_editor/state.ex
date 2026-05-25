@@ -1758,6 +1758,7 @@ defmodule MingaEditor.State do
       },
       windows: windows,
       file_tree: %FileTreeState{project_root: state.workspace.file_tree.project_root},
+      dired: %DiredState{},
       viewport: state.terminal_viewport,
       mouse: %Mouse{},
       highlight: %Highlighting{},
@@ -1766,7 +1767,8 @@ defmodule MingaEditor.State do
       search: %Search{},
       editing: VimState.new(),
       feature_state: FeatureState.new(),
-      document_highlights: nil
+      document_highlights: nil,
+      agent_ui: UIState.new()
     })
   end
 
@@ -1788,6 +1790,7 @@ defmodule MingaEditor.State do
       },
       windows: windows,
       file_tree: %FileTreeState{project_root: state.workspace.file_tree.project_root},
+      dired: %DiredState{},
       viewport: state.terminal_viewport,
       mouse: %Mouse{},
       highlight: %Highlighting{},
@@ -1796,7 +1799,8 @@ defmodule MingaEditor.State do
       search: %Search{},
       editing: VimState.new(),
       feature_state: FeatureState.new(),
-      document_highlights: nil
+      document_highlights: nil,
+      agent_ui: UIState.new()
     })
   end
 

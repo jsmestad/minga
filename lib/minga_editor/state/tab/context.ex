@@ -6,10 +6,12 @@ defmodule MingaEditor.State.Tab.Context do
   """
 
   alias Minga.Keymap.Scope
+  alias MingaEditor.Agent.UIState
   alias MingaEditor.FeatureState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Dired, as: DiredState
   alias MingaEditor.State.FileTree, as: FileTreeState
+  alias MingaEditor.State.Highlighting
   alias MingaEditor.State.Mouse
   alias MingaEditor.State.Search
   alias MingaEditor.State.Windows
@@ -27,11 +29,14 @@ defmodule MingaEditor.State.Tab.Context do
     :dired,
     :viewport,
     :mouse,
+    :highlight,
     :lsp_pending,
+    :injection_ranges,
     :search,
     :editing,
     :feature_state,
-    :document_highlights
+    :document_highlights,
+    :agent_ui
   ]
 
   @typedoc "Workspace fields carried by a tab context."
@@ -43,11 +48,14 @@ defmodule MingaEditor.State.Tab.Context do
           | :dired
           | :viewport
           | :mouse
+          | :highlight
           | :lsp_pending
+          | :injection_ranges
           | :search
           | :editing
           | :feature_state
           | :document_highlights
+          | :agent_ui
 
   @typedoc "Legacy map persisted or built before tab contexts became typed structs."
   @type legacy :: map()
@@ -65,11 +73,14 @@ defmodule MingaEditor.State.Tab.Context do
           dired: DiredState.t() | nil,
           viewport: Viewport.t() | nil,
           mouse: Mouse.t() | nil,
+          highlight: Highlighting.t() | nil,
           lsp_pending: %{reference() => atom() | tuple()} | nil,
+          injection_ranges: %{pid() => [Minga.Language.Highlight.InjectionRange.t()]} | nil,
           search: Search.t() | nil,
           editing: VimState.t() | nil,
           feature_state: FeatureState.t() | nil,
-          document_highlights: [document_highlight()] | nil
+          document_highlights: [document_highlight()] | nil,
+          agent_ui: UIState.t() | nil
         }
 
   defstruct version: @version,
@@ -81,11 +92,14 @@ defmodule MingaEditor.State.Tab.Context do
             dired: nil,
             viewport: nil,
             mouse: nil,
+            highlight: nil,
             lsp_pending: nil,
+            injection_ranges: nil,
             search: nil,
             editing: nil,
             feature_state: nil,
-            document_highlights: nil
+            document_highlights: nil,
+            agent_ui: nil
 
   @doc "Returns the workspace field names represented by this context."
   @spec field_names() :: [field_name()]
@@ -120,11 +134,14 @@ defmodule MingaEditor.State.Tab.Context do
       dired: ws.dired,
       viewport: ws.viewport,
       mouse: ws.mouse,
+      highlight: ws.highlight,
       lsp_pending: ws.lsp_pending,
+      injection_ranges: ws.injection_ranges,
       search: ws.search,
       editing: editing,
       feature_state: ws.feature_state,
       document_highlights: ws.document_highlights,
+      agent_ui: ws.agent_ui,
       present_fields: @workspace_fields
     }
   end
@@ -226,12 +243,15 @@ defmodule MingaEditor.State.Tab.Context do
   defp valid_field?(:dired, %DiredState{}), do: true
   defp valid_field?(:viewport, %Viewport{}), do: true
   defp valid_field?(:mouse, %Mouse{}), do: true
+  defp valid_field?(:highlight, %Highlighting{}), do: true
   defp valid_field?(:lsp_pending, value) when is_map(value), do: true
+  defp valid_field?(:injection_ranges, value) when is_map(value), do: true
   defp valid_field?(:search, %Search{}), do: true
   defp valid_field?(:editing, %VimState{}), do: true
   defp valid_field?(:feature_state, %FeatureState{}), do: true
   defp valid_field?(:document_highlights, nil), do: true
   defp valid_field?(:document_highlights, value) when is_list(value), do: true
+  defp valid_field?(:agent_ui, %UIState{}), do: true
   defp valid_field?(_field, _value), do: false
 
   @spec fetch_version(map()) :: pos_integer()

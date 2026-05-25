@@ -336,7 +336,7 @@ defmodule Minga.Extension.Supervisor do
          keymap,
          opts
        ) do
-    case start_child(supervisor, registry, name, module, config, opts) do
+    case start_child(supervisor, registry, name, module, config, cmd_registry, keymap, opts) do
       {:ok, pid} ->
         register_dsl_for_started_child(supervisor, pid, module, name, cmd_registry, keymap)
 
@@ -426,17 +426,30 @@ defmodule Minga.Extension.Supervisor do
           atom(),
           module(),
           keyword(),
+          GenServer.server(),
+          GenServer.server(),
           start_opts()
         ) ::
           {:ok, pid()} | {:error, term()}
-  defp start_child(supervisor, registry, name, module, config, opts) do
+  defp start_child(supervisor, registry, name, module, config, cmd_registry, keymap, opts) do
     case run_lifecycle_phase(name, :child_start, opts, fn ->
            start_extension_child(supervisor, module, config)
          end) do
       {:ok, pid} ->
         ExtRegistry.update(registry, name, module: module, status: :running, pid: pid)
         emit_restart_count(name, 0)
-        start_child_restart_monitor(supervisor, registry, name, module, pid)
+
+        start_child_restart_monitor(
+          supervisor,
+          registry,
+          name,
+          module,
+          pid,
+          cmd_registry,
+          keymap,
+          opts
+        )
+
         Minga.Log.info(:config, "Extension #{name} started (#{module})")
         {:ok, pid}
 
@@ -463,6 +476,7 @@ defmodule Minga.Extension.Supervisor do
   def stop_extension(supervisor, registry, name, entry, opts \\ []) do
     cmd_registry = Keyword.get(opts, :command_registry, Minga.Command.Registry)
     keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
+    entry = current_stop_entry(registry, name, entry)
 
     termination_result =
       run_lifecycle_phase(name, :stop, opts, fn ->
@@ -601,6 +615,21 @@ defmodule Minga.Extension.Supervisor do
     |> Map.put(:modules, [module])
   end
 
+  @spec current_stop_entry(GenServer.server(), atom(), ExtRegistry.entry()) :: ExtRegistry.entry()
+  defp current_stop_entry(registry, name, %{pid: requested_pid} = entry)
+       when is_pid(requested_pid) do
+    case ExtRegistry.get(registry, name) do
+      {:ok, %{pid: current_pid} = current_entry}
+      when is_pid(current_pid) and current_pid != requested_pid ->
+        current_entry
+
+      _ ->
+        entry
+    end
+  end
+
+  defp current_stop_entry(_registry, _name, entry), do: entry
+
   @spec terminate_extension_process(GenServer.server(), ExtRegistry.entry()) ::
           :ok | {:error, term()}
   defp terminate_extension_process(supervisor, %{pid: pid} = entry) when is_pid(pid) do
@@ -623,8 +652,9 @@ defmodule Minga.Extension.Supervisor do
 
   defp terminate_extension_process_by_module(supervisor, module) do
     case extension_child_pid(supervisor, module) do
-      pid when is_pid(pid) -> terminate_extension_child(supervisor, pid)
-      nil -> {:error, :not_found}
+      {:ok, pid} when is_pid(pid) -> terminate_extension_child(supervisor, pid)
+      {:error, reason} -> {:error, reason}
+      :not_found -> {:error, :not_found}
     end
   end
 
@@ -633,10 +663,35 @@ defmodule Minga.Extension.Supervisor do
           GenServer.server(),
           atom(),
           module(),
-          pid()
+          pid(),
+          GenServer.server(),
+          GenServer.server(),
+          start_opts()
         ) :: :ok
-  defp start_child_restart_monitor(supervisor, registry, name, module, pid) do
-    spawn(fn -> monitor_child_restarts(supervisor, registry, name, module, pid, 0) end)
+  defp start_child_restart_monitor(
+         supervisor,
+         registry,
+         name,
+         module,
+         pid,
+         cmd_registry,
+         keymap,
+         opts
+       ) do
+    spawn(fn ->
+      monitor_child_restarts(
+        supervisor,
+        registry,
+        name,
+        module,
+        pid,
+        0,
+        cmd_registry,
+        keymap,
+        opts
+      )
+    end)
+
     :ok
   end
 
@@ -646,14 +701,38 @@ defmodule Minga.Extension.Supervisor do
           atom(),
           module(),
           pid(),
-          non_neg_integer()
+          non_neg_integer(),
+          GenServer.server(),
+          GenServer.server(),
+          start_opts()
         ) :: :ok
-  defp monitor_child_restarts(supervisor, registry, name, module, pid, count) do
+  defp monitor_child_restarts(
+         supervisor,
+         registry,
+         name,
+         module,
+         pid,
+         count,
+         cmd_registry,
+         keymap,
+         opts
+       ) do
     ref = Process.monitor(pid)
 
     receive do
       {:DOWN, ^ref, :process, ^pid, reason} ->
-        handle_child_down(supervisor, registry, name, module, reason, count)
+        handle_child_down(
+          supervisor,
+          registry,
+          name,
+          module,
+          pid,
+          reason,
+          count,
+          cmd_registry,
+          keymap,
+          opts
+        )
     end
   end
 
@@ -662,11 +741,38 @@ defmodule Minga.Extension.Supervisor do
           GenServer.server(),
           atom(),
           module(),
+          pid(),
           term(),
-          non_neg_integer()
+          non_neg_integer(),
+          GenServer.server(),
+          GenServer.server(),
+          start_opts()
         ) :: :ok
-  defp handle_child_down(supervisor, registry, name, module, reason, count) do
-    wait_for_restarted_child(supervisor, registry, name, module, reason, count + 1, 0)
+  defp handle_child_down(
+         supervisor,
+         registry,
+         name,
+         module,
+         pid,
+         reason,
+         count,
+         cmd_registry,
+         keymap,
+         opts
+       ) do
+    wait_for_restarted_child(
+      supervisor,
+      registry,
+      name,
+      module,
+      pid,
+      reason,
+      count + 1,
+      0,
+      cmd_registry,
+      keymap,
+      opts
+    )
   end
 
   @spec crash_reason?(term()) :: boolean()
@@ -680,22 +786,70 @@ defmodule Minga.Extension.Supervisor do
           GenServer.server(),
           atom(),
           module(),
+          pid(),
           term(),
           non_neg_integer(),
-          non_neg_integer()
+          non_neg_integer(),
+          GenServer.server(),
+          GenServer.server(),
+          start_opts()
         ) :: :ok
-  defp wait_for_restarted_child(_supervisor, registry, name, _module, reason, _count, 5) do
-    mark_crashed_without_replacement(registry, name, reason)
+  defp wait_for_restarted_child(
+         _supervisor,
+         registry,
+         name,
+         module,
+         observed_pid,
+         reason,
+         _count,
+         5,
+         cmd_registry,
+         keymap,
+         opts
+       ) do
+    reconcile_missing_restarted_child(
+      registry,
+      name,
+      module,
+      observed_pid,
+      reason,
+      cmd_registry,
+      keymap,
+      opts
+    )
   end
 
-  defp wait_for_restarted_child(supervisor, registry, name, module, reason, count, attempts) do
+  defp wait_for_restarted_child(
+         supervisor,
+         registry,
+         name,
+         module,
+         observed_pid,
+         reason,
+         count,
+         attempts,
+         cmd_registry,
+         keymap,
+         opts
+       ) do
     case extension_child_pid(supervisor, module) do
-      pid when is_pid(pid) ->
+      {:ok, pid} when is_pid(pid) ->
         ExtRegistry.update(registry, name, pid: pid)
         emit_restart_count(name, count)
-        monitor_child_restarts(supervisor, registry, name, module, pid, count)
 
-      nil ->
+        monitor_child_restarts(
+          supervisor,
+          registry,
+          name,
+          module,
+          pid,
+          count,
+          cmd_registry,
+          keymap,
+          opts
+        )
+
+      :not_found ->
         receive do
         after
           10 ->
@@ -704,32 +858,142 @@ defmodule Minga.Extension.Supervisor do
               registry,
               name,
               module,
+              observed_pid,
               reason,
               count,
-              attempts + 1
+              attempts + 1,
+              cmd_registry,
+              keymap,
+              opts
             )
         end
+
+      {:error, lookup_reason} ->
+        mark_observed_child_lookup_failed(registry, name, observed_pid, lookup_reason)
     end
   end
 
-  @spec mark_crashed_without_replacement(GenServer.server(), atom(), term()) :: :ok
-  defp mark_crashed_without_replacement(registry, name, reason) do
+  @spec reconcile_missing_restarted_child(
+          GenServer.server(),
+          atom(),
+          module(),
+          pid(),
+          term(),
+          GenServer.server(),
+          GenServer.server(),
+          start_opts()
+        ) :: :ok
+  defp reconcile_missing_restarted_child(
+         registry,
+         name,
+         module,
+         observed_pid,
+         reason,
+         cmd_registry,
+         keymap,
+         opts
+       ) do
     case crash_reason?(reason) do
-      true -> ExtRegistry.update(registry, name, status: :crashed, pid: nil)
-      false -> :ok
+      true ->
+        mark_observed_child_crashed(registry, name, observed_pid)
+
+      false ->
+        Minga.Log.info(
+          :config,
+          "Extension #{name} exited without restart: #{inspect(reason)}"
+        )
+
+        finalize_observed_terminal_exit(
+          registry,
+          name,
+          module,
+          observed_pid,
+          cmd_registry,
+          keymap,
+          opts
+        )
     end
   end
 
-  @spec extension_child_pid(GenServer.server(), module()) :: pid() | nil
+  @spec mark_observed_child_lookup_failed(GenServer.server(), atom(), pid(), term()) :: :ok
+  defp mark_observed_child_lookup_failed(registry, name, observed_pid, lookup_reason) do
+    if registry_observes_child?(registry, name, observed_pid) do
+      Minga.Log.warning(
+        :config,
+        "Extension #{name}: child lookup failed: #{inspect(lookup_reason)}"
+      )
+
+      ExtRegistry.update(registry, name, status: :crashed, pid: nil)
+    else
+      :ok
+    end
+  end
+
+  @spec mark_observed_child_crashed(GenServer.server(), atom(), pid()) :: :ok
+  defp mark_observed_child_crashed(registry, name, observed_pid) do
+    if registry_observes_child?(registry, name, observed_pid) do
+      ExtRegistry.update(registry, name, status: :crashed, pid: nil)
+    else
+      :ok
+    end
+  end
+
+  @spec registry_observes_child?(GenServer.server(), atom(), pid()) :: boolean()
+  defp registry_observes_child?(registry, name, observed_pid) do
+    case ExtRegistry.get(registry, name) do
+      {:ok, %{pid: ^observed_pid}} -> true
+      _ -> false
+    end
+  end
+
+  @spec finalize_observed_terminal_exit(
+          GenServer.server(),
+          atom(),
+          module(),
+          pid(),
+          GenServer.server(),
+          GenServer.server(),
+          start_opts()
+        ) :: :ok
+  defp finalize_observed_terminal_exit(
+         registry,
+         name,
+         module,
+         observed_pid,
+         cmd_registry,
+         keymap,
+         opts
+       ) do
+    case ExtRegistry.get(registry, name) do
+      {:ok, %{pid: ^observed_pid} = entry} ->
+        finalize_stopped_extension(registry, name, entry)
+        cleanup_extension_contributions(name, cmd_registry, keymap, opts)
+        :ok
+
+      :error ->
+        finalize_stopped_extension(registry, name, %{module: module})
+        cleanup_extension_contributions(name, cmd_registry, keymap, opts)
+        :ok
+
+      _replacement_or_stopped ->
+        :ok
+    end
+  end
+
+  @spec extension_child_pid(GenServer.server(), module()) ::
+          {:ok, pid()} | :not_found | {:error, term()}
   defp extension_child_pid(supervisor, module) do
-    supervisor
-    |> DynamicSupervisor.which_children()
-    |> Enum.find_value(fn
-      {:undefined, pid, _type, [^module]} when is_pid(pid) -> pid
-      _child -> nil
-    end)
+    child =
+      supervisor
+      |> DynamicSupervisor.which_children()
+      |> Enum.find_value(fn
+        {:undefined, pid, _type, [^module]} when is_pid(pid) -> {:ok, pid}
+        _child -> nil
+      end)
+
+    child || :not_found
   catch
-    :exit, _reason -> nil
+    :exit, reason -> {:error, {:which_children_failed, reason}}
   end
 
   @spec resolve_git_extensions(GenServer.server()) :: [start_failure()]

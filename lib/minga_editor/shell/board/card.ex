@@ -29,13 +29,15 @@ defmodule MingaEditor.Shell.Board.Card do
 
   @type connection_status :: :connected | :disconnected | :ended | :unavailable | nil
 
+  @type workspace_snapshot :: TabContext.t()
+
   @type t :: %__MODULE__{
           id: id(),
           session: pid() | nil,
           server_name: String.t() | nil,
           remote_session_id: String.t() | nil,
           connection_status: connection_status(),
-          workspace: map() | nil,
+          workspace: workspace_snapshot() | nil,
           task: String.t(),
           status: status(),
           model: String.t() | nil,
@@ -71,7 +73,7 @@ defmodule MingaEditor.Shell.Board.Card do
       remote_session_id: Keyword.get(attrs, :remote_session_id),
       connection_status: Keyword.get(attrs, :connection_status),
       model: Keyword.get(attrs, :model),
-      workspace: Keyword.get(attrs, :workspace),
+      workspace: normalize_workspace(Keyword.get(attrs, :workspace)),
       status: Keyword.get(attrs, :status, :idle),
       kind: Keyword.get(attrs, :kind, :agent),
       created_at: DateTime.utc_now(),
@@ -139,9 +141,9 @@ defmodule MingaEditor.Shell.Board.Card do
   end
 
   @doc "Stores a workspace snapshot on the card."
-  @spec store_workspace(t(), map()) :: t()
+  @spec store_workspace(t(), workspace_snapshot() | TabContext.legacy()) :: t()
   def store_workspace(%__MODULE__{} = card, workspace) when is_map(workspace) do
-    %{card | workspace: workspace}
+    %{card | workspace: TabContext.from_map(workspace)}
   end
 
   @doc "Clears the stored workspace snapshot."
@@ -188,6 +190,11 @@ defmodule MingaEditor.Shell.Board.Card do
   def from_agent_status(:error), do: :errored
   def from_agent_status(:idle), do: :done
   def from_agent_status(_), do: :idle
+
+  @spec normalize_workspace(workspace_snapshot() | TabContext.legacy() | nil) ::
+          workspace_snapshot() | nil
+  defp normalize_workspace(nil), do: nil
+  defp normalize_workspace(workspace) when is_map(workspace), do: TabContext.from_map(workspace)
 
   @spec update_workspace_feature_state(t(), (FeatureState.t() -> FeatureState.t())) :: t()
   defp update_workspace_feature_state(%__MODULE__{workspace: workspace} = card, fun)

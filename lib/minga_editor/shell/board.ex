@@ -569,7 +569,7 @@ defmodule MingaEditor.Shell.Board do
     end
   end
 
-  @spec restore_workspace(map() | nil, MingaEditor.Session.State.t()) ::
+  @spec restore_workspace(Card.workspace_snapshot() | nil, MingaEditor.Session.State.t()) ::
           MingaEditor.Session.State.t()
   defp restore_workspace(workspace_snapshot, fallback)
        when is_map(workspace_snapshot) and map_size(workspace_snapshot) > 0 do
