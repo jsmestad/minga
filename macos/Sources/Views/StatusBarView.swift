@@ -191,8 +191,8 @@ struct StatusBarView: View {
     var gitSyncing: Bool = false
 
     private let barHeight: CGFloat = 24
-    private let sideSpacing: CGFloat = 8
-    private let leftFixedControlsWidth: CGFloat = 101
+    private let sideSpacing: CGFloat = 10
+    private let leftFixedControlsWidth: CGFloat = 106
     private let rightFixedControlsWidth: CGFloat = 34
     private let maxCenterStatusWidth: CGFloat = 320
 
@@ -783,7 +783,7 @@ struct StatusBarView: View {
 
     @ViewBuilder
     private var leftFixedControls: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 6) {
             // File tree toggle
             StatusBarIconButton(
                 icon: "sidebar.leading",
@@ -824,7 +824,7 @@ struct StatusBarView: View {
             Rectangle()
                 .fill(theme.modelineBarFg.opacity(0.1))
                 .frame(width: 1, height: 14)
-                .padding(.horizontal, 4)
+                .padding(.horizontal, 6)
         }
     }
 
@@ -894,7 +894,7 @@ struct StatusBarView: View {
     }
 
     private func nativeModelineGroups(_ groups: [StatusBarSegmentGroup]) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             ForEach(groups) { group in
                 nativeModelineGroup(group)
             }
