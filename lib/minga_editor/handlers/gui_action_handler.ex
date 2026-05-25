@@ -383,12 +383,8 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     state
   end
 
-  defp dispatch_action(state, {:sidebar_action, _sidebar_id, kind, "toggle"}) do
-    dispatch_sidebar_toggle(state, kind)
-  end
-
-  defp dispatch_action(state, {:sidebar_action, _sidebar_id, _kind, _action}) do
-    state
+  defp dispatch_action(state, {:sidebar_action, sidebar_id, kind, action}) do
+    dispatch_sidebar_action(state, sidebar_id, kind, action)
   end
 
   defp dispatch_action(state, :new_tab) do
@@ -820,19 +816,114 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     state
   end
 
-  @spec dispatch_sidebar_toggle(EditorState.t(), String.t()) :: EditorState.t()
-  defp dispatch_sidebar_toggle(state, "file_tree"), do: Commands.FileTree.toggle(state)
+  @spec dispatch_sidebar_action(EditorState.t(), String.t(), String.t(), String.t()) ::
+          EditorState.t()
+  defp dispatch_sidebar_action(state, sidebar_id, kind, "toggle") do
+    state
+    |> dispatch_sidebar_toggle(sidebar_id, kind)
+    |> remember_visible_sidebar(sidebar_id)
+  end
 
-  defp dispatch_sidebar_toggle(state, "git_status"),
+  defp dispatch_sidebar_action(state, sidebar_id, kind, "activate") do
+    state
+    |> dispatch_sidebar_activate(sidebar_id, kind)
+    |> remember_visible_sidebar(sidebar_id)
+  end
+
+  defp dispatch_sidebar_action(state, sidebar_id, kind, action) do
+    ignored_sidebar_action(state, sidebar_id, kind, action)
+  end
+
+  @spec dispatch_sidebar_toggle(EditorState.t(), String.t(), String.t()) :: EditorState.t()
+  defp dispatch_sidebar_toggle(state, "file_tree", _kind),
+    do: Commands.FileTree.toggle(state)
+
+  defp dispatch_sidebar_toggle(state, "git_status", _kind),
     do: Commands.Git.execute(state, :git_status_toggle)
 
-  defp dispatch_sidebar_toggle(state, "observatory") do
+  defp dispatch_sidebar_toggle(state, "observatory", _kind) do
     state
     |> Commands.execute(:toggle_beam_observatory)
     |> normalize_command_result()
   end
 
-  defp dispatch_sidebar_toggle(state, _kind), do: state
+  defp dispatch_sidebar_toggle(state, sidebar_id, kind),
+    do: ignored_sidebar_action(state, sidebar_id, kind, "toggle")
+
+  @spec dispatch_sidebar_activate(EditorState.t(), String.t(), String.t()) :: EditorState.t()
+  defp dispatch_sidebar_activate(state, "file_tree", kind) do
+    if sidebar_visible?(state, "file_tree"),
+      do: focus_visible_sidebar(state, "file_tree"),
+      else: dispatch_sidebar_toggle(state, "file_tree", kind)
+  end
+
+  defp dispatch_sidebar_activate(state, "git_status", kind) do
+    if sidebar_visible?(state, "git_status"),
+      do: focus_visible_sidebar(state, "git_status"),
+      else: dispatch_sidebar_toggle(state, "git_status", kind)
+  end
+
+  defp dispatch_sidebar_activate(state, "observatory", kind) do
+    if sidebar_visible?(state, "observatory"),
+      do: focus_visible_sidebar(state, "observatory"),
+      else: dispatch_sidebar_toggle(state, "observatory", kind)
+  end
+
+  defp dispatch_sidebar_activate(state, sidebar_id, kind),
+    do: ignored_sidebar_action(state, sidebar_id, kind, "activate")
+
+  @spec focus_visible_sidebar(EditorState.t(), String.t()) :: EditorState.t()
+  defp focus_visible_sidebar(state, "file_tree") do
+    state
+    |> EditorState.update_file_tree(&FileTreeState.focus/1)
+    |> EditorState.set_keymap_scope(:file_tree)
+    |> Layout.invalidate()
+    |> EditorState.invalidate_all_windows()
+  end
+
+  defp focus_visible_sidebar(state, "git_status") do
+    state
+    |> EditorState.set_keymap_scope(:git_status)
+    |> Layout.invalidate()
+    |> EditorState.invalidate_all_windows()
+  end
+
+  defp focus_visible_sidebar(state, "observatory") do
+    state
+    |> EditorState.update_file_tree(&FileTreeState.unfocus/1)
+    |> EditorState.set_keymap_scope(:editor)
+    |> Layout.invalidate()
+    |> EditorState.invalidate_all_windows()
+  end
+
+  @spec remember_visible_sidebar(EditorState.t(), String.t()) :: EditorState.t()
+  defp remember_visible_sidebar(state, sidebar_id) do
+    if sidebar_visible?(state, sidebar_id) do
+      EditorState.set_sidebar_active_id(state, sidebar_id)
+    else
+      EditorState.set_sidebar_active_id(state, nil)
+    end
+  end
+
+  @spec sidebar_visible?(EditorState.t(), String.t()) :: boolean()
+  defp sidebar_visible?(%{workspace: %{file_tree: %FileTreeState{} = file_tree}}, "file_tree") do
+    file_tree |> FileTreeState.status() |> FileTreeState.visible_status?()
+  end
+
+  defp sidebar_visible?(state, "git_status"), do: EditorState.git_status_panel(state) != nil
+  defp sidebar_visible?(state, "observatory"), do: EditorState.observatory_visible?(state)
+  defp sidebar_visible?(_state, _sidebar_id), do: false
+
+  @spec ignored_sidebar_action(EditorState.t(), String.t(), String.t(), String.t()) ::
+          EditorState.t()
+  defp ignored_sidebar_action(state, sidebar_id, kind, action) do
+    Minga.Log.warning(
+      :editor,
+      "Ignored sidebar action id=#{inspect(sidebar_id)} kind=#{inspect(kind)} action=#{inspect(action)}"
+    )
+
+    EditorState.set_status(state, "Unsupported sidebar action: #{kind}/#{action}")
+  end
 
   # ── Git commit helpers ──────────────────────────────────────────────
 

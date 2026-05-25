@@ -20,7 +20,7 @@ struct NativeSidebarAdapter {
     let fallbackIcon: String
     let makeHeader: (NativeSidebarContext, SidebarItem) -> AnyView
     let makeBody: (NativeSidebarContext, SidebarItem) -> AnyView
-    let sendPrimaryAction: (InputEncoder?, SidebarItem) -> Void
+    let sendPrimaryAction: (InputEncoder?, SidebarItem, Bool) -> Void
     let badgeText: (NativeSidebarContext, SidebarItem) -> String?
 }
 
@@ -60,8 +60,8 @@ enum NativeSidebarRegistry {
                 encoder: context.encoder
             ))
         },
-        sendPrimaryAction: { encoder, item in
-            encoder?.sendSidebarAction(sidebarId: item.id, kind: item.semanticKind, action: "toggle")
+        sendPrimaryAction: { encoder, item, isActive in
+            encoder?.sendSidebarAction(sidebarId: item.id, kind: item.semanticKind, action: isActive ? "toggle" : "activate")
         },
         badgeText: { _, _ in nil }
     )
@@ -84,11 +84,11 @@ enum NativeSidebarRegistry {
                 encoder: context.encoder
             ))
         },
-        sendPrimaryAction: { encoder, item in
-            encoder?.sendSidebarAction(sidebarId: item.id, kind: item.semanticKind, action: "toggle")
+        sendPrimaryAction: { encoder, item, isActive in
+            encoder?.sendSidebarAction(sidebarId: item.id, kind: item.semanticKind, action: isActive ? "toggle" : "activate")
         },
         badgeText: { context, item in
-            let count = Int(item.badgeCount ?? UInt16(context.guiState.gitStatusState.totalCount))
+            let count = item.badgeCount.map(Int.init) ?? context.guiState.gitStatusState.totalCount
             guard count > 0 else { return nil }
             return count > 99 ? "99+" : String(count)
         }
@@ -107,8 +107,8 @@ enum NativeSidebarRegistry {
                 encoder: context.encoder
             ))
         },
-        sendPrimaryAction: { encoder, item in
-            encoder?.sendSidebarAction(sidebarId: item.id, kind: item.semanticKind, action: "toggle")
+        sendPrimaryAction: { encoder, item, isActive in
+            encoder?.sendSidebarAction(sidebarId: item.id, kind: item.semanticKind, action: isActive ? "toggle" : "activate")
         },
         badgeText: { _, _ in nil }
     )
@@ -122,8 +122,8 @@ enum NativeSidebarRegistry {
         makeBody: { context, item in
             AnyView(GenericSidebarFallbackView(item: item, theme: context.theme))
         },
-        sendPrimaryAction: { encoder, item in
-            encoder?.sendSidebarAction(sidebarId: item.id, kind: item.semanticKind, action: "toggle")
+        sendPrimaryAction: { encoder, item, isActive in
+            encoder?.sendSidebarAction(sidebarId: item.id, kind: item.semanticKind, action: isActive ? "toggle" : "activate")
         },
         badgeText: { _, _ in nil }
     )

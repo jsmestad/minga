@@ -35,7 +35,17 @@ struct NativeSidebarRegistryTests {
         let spy = SpyEncoder()
         let item = SidebarItem(Wire.SidebarMetadata(id: "git_status", displayName: "Git Status", semanticKind: "git_status", icon: "", order: 20, visible: true, focused: true, preferredWidth: 30, badgeCount: 2))
 
-        NativeSidebarRegistry.adapterOrFallback(for: item.semanticKind).sendPrimaryAction(spy, item)
+        NativeSidebarRegistry.adapterOrFallback(for: item.semanticKind).sendPrimaryAction(spy, item, false)
+
+        #expect(spy.guiActions == [.sidebarAction(sidebarId: "git_status", kind: "git_status", action: "activate")])
+    }
+
+    @Test("active adapter action toggles the selected sidebar")
+    func activeAdapterActionTogglesSemanticIntent() {
+        let spy = SpyEncoder()
+        let item = SidebarItem(Wire.SidebarMetadata(id: "git_status", displayName: "Git Status", semanticKind: "git_status", icon: "", order: 20, visible: true, focused: true, preferredWidth: 30, badgeCount: 2))
+
+        NativeSidebarRegistry.adapterOrFallback(for: item.semanticKind).sendPrimaryAction(spy, item, true)
 
         #expect(spy.guiActions == [.sidebarAction(sidebarId: "git_status", kind: "git_status", action: "toggle")])
     }

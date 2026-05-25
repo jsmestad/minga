@@ -44,6 +44,10 @@ final class SidebarHostState {
             return active
         }
 
+        if let focused = sidebars.filter({ $0.visible && $0.focused }).sorted(by: { lhs, rhs in lhs.order > rhs.order }).first {
+            return focused
+        }
+
         return sidebars
             .filter(\.visible)
             .sorted { lhs, rhs in lhs.order > rhs.order }

@@ -1716,8 +1716,19 @@ test "decode gui_observatory as noop in TUI" {
     try std.testing.expect((try decodeCommand(&data)) == .noop);
 }
 
+test "decode gui_sidebars as noop in TUI" {
+    const data = [_]u8{ OP_GUI_SIDEBARS, 0x00, 0x00, 0x00, 0x03, 0x01, 0x02, 0x03 };
+    try std.testing.expect((try decodeCommand(&data)) == .noop);
+}
+
 test "decode truncated gui_observatory returns malformed" {
     const data = [_]u8{ OP_GUI_OBSERVATORY, 0x00, 0x00, 0x00, 0x03, 0x01 };
+    const result = decodeCommand(&data);
+    try std.testing.expectError(error.Malformed, result);
+}
+
+test "decode truncated gui_sidebars returns malformed" {
+    const data = [_]u8{ OP_GUI_SIDEBARS, 0x00, 0x00, 0x00, 0x03, 0x01 };
     const result = decodeCommand(&data);
     try std.testing.expectError(error.Malformed, result);
 }
@@ -2201,8 +2212,18 @@ test "commandSize: gui_observatory uses forward-compatible envelope" {
     try std.testing.expectEqual(@as(usize, data.len), commandSize(&data));
 }
 
+test "commandSize: gui_sidebars uses forward-compatible envelope" {
+    const data = [_]u8{ OP_GUI_SIDEBARS, 0x00, 0x00, 0x00, 0x03, 0x01, 0x02, 0x03 };
+    try std.testing.expectEqual(@as(usize, data.len), commandSize(&data));
+}
+
 test "commandSize: truncated gui_observatory clamps to available payload" {
     const data = [_]u8{ OP_GUI_OBSERVATORY, 0x00 };
+    try std.testing.expectEqual(@as(usize, data.len), commandSize(&data));
+}
+
+test "commandSize: truncated gui_sidebars clamps to available payload" {
+    const data = [_]u8{ OP_GUI_SIDEBARS, 0x00 };
     try std.testing.expectEqual(@as(usize, data.len), commandSize(&data));
 }
 

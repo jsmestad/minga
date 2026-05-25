@@ -59,7 +59,7 @@ struct ActivityBar: View {
         let adapter = NativeSidebarRegistry.adapterOrFallback(for: item.semanticKind)
 
         return Button {
-            adapter.sendPrimaryAction(encoder, item)
+            adapter.sendPrimaryAction(encoder, item, isActive)
         } label: {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: item.icon.isEmpty ? adapter.fallbackIcon : item.icon)

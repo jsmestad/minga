@@ -719,6 +719,19 @@ defmodule MingaEditor.State do
   @spec close_git_status_panel(t()) :: t()
   def close_git_status_panel(s), do: update_shell_state(s, &ShellState.close_git_status_panel/1)
 
+  @spec sidebar_active_id(t()) :: String.t() | nil
+  def sidebar_active_id(%{shell_state: %{sidebar_active_id: id}}), do: id
+  def sidebar_active_id(_state), do: nil
+
+  @spec set_sidebar_active_id(t(), String.t() | nil) :: t()
+  def set_sidebar_active_id(s, id) when is_binary(id) or is_nil(id) do
+    update_shell_state(s, fn ss ->
+      if Map.has_key?(ss, :sidebar_active_id),
+        do: ShellState.set_sidebar_active_id(ss, id),
+        else: ss
+    end)
+  end
+
   @spec observatory_visible?(t()) :: boolean()
   def observatory_visible?(%{shell_state: ss}), do: ShellState.observatory_visible?(ss)
 

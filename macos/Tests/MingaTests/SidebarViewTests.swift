@@ -40,9 +40,23 @@ struct ActivityBarViewTests {
 
         #expect(spy.guiActions == [
             .sidebarAction(sidebarId: "file_tree", kind: "file_tree", action: "toggle"),
-            .sidebarAction(sidebarId: "git_status", kind: "git_status", action: "toggle"),
-            .sidebarAction(sidebarId: "observatory", kind: "observatory", action: "toggle")
+            .sidebarAction(sidebarId: "git_status", kind: "git_status", action: "activate"),
+            .sidebarAction(sidebarId: "observatory", kind: "observatory", action: "activate")
         ])
+    }
+
+    @Test("Git badge falls back to full total count without narrowing")
+    @MainActor func gitBadgeUsesLargeTotalCount() throws {
+        let guiState = GUIState()
+        guiState.gitStatusState.entries = (0..<70_000).map { index in
+            GitStatusEntry(pathHash: UInt32(index), section: .changed, status: .modified, path: "file_\(index).ex")
+        }
+        guiState.sidebarHostState.update(activeId: "git_status", sidebars: sidebarMetadata())
+        let sut = ActivityBar(guiState: guiState, sidebarHostState: guiState.sidebarHostState, theme: ThemeColors(), encoder: nil)
+        let body = try sut.inspect()
+        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(strings.contains("99+"))
     }
 
     @Test("Git badge shows changed file count and buttons keep accessibility labels")
@@ -66,6 +80,24 @@ struct ActivityBarViewTests {
             Wire.SidebarMetadata(id: "git_status", displayName: "Git Status", semanticKind: "git_status", icon: "point.3.filled.connected.trianglepath.dotted", order: 20, visible: false, focused: false, preferredWidth: 30, badgeCount: gitBadgeCount),
             Wire.SidebarMetadata(id: "observatory", displayName: "BEAM Observatory", semanticKind: "observatory", icon: "network", order: 30, visible: false, focused: false, preferredWidth: 30, badgeCount: nil)
         ]
+    }
+}
+
+// MARK: - SidebarContainer
+
+@Suite("SidebarContainer View Structure")
+struct SidebarContainerViewTests {
+    @Test("Unknown visible sidebar renders generic fallback")
+    @MainActor func unknownSidebarFallback() throws {
+        let guiState = GUIState()
+        let item = Wire.SidebarMetadata(id: "custom", displayName: "Custom Tools", semanticKind: "custom_sidebar", icon: "sparkles", order: 40, visible: true, focused: true, preferredWidth: 30, badgeCount: nil)
+        guiState.sidebarHostState.update(activeId: "custom", sidebars: [item])
+        let active = try #require(guiState.sidebarHostState.activeSidebar)
+        let sut = SidebarContainer(guiState: guiState, activeSidebar: active, theme: ThemeColors(), encoder: nil, projectName: "minga", gitBranch: "main", leadingPadding: 10, sidebarWidth: .constant(240))
+        let strings = try sut.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(strings.contains("Unsupported sidebar"))
+        #expect(strings.contains("The native frontend does not have an adapter for \"custom_sidebar\"."))
     }
 }
 

@@ -34,6 +34,7 @@ defmodule MingaEditor.Commands.FileTree do
     state
     |> EditorState.update_file_tree(&FileTreeState.close/1)
     |> EditorState.set_keymap_scope(scope)
+    |> EditorState.set_sidebar_active_id(nil)
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()
   end
@@ -45,6 +46,7 @@ defmodule MingaEditor.Commands.FileTree do
     state
     |> EditorState.update_file_tree(&FileTreeState.close/1)
     |> EditorState.set_keymap_scope(scope)
+    |> EditorState.set_sidebar_active_id(nil)
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()
   end
@@ -55,6 +57,7 @@ defmodule MingaEditor.Commands.FileTree do
     state
     |> EditorState.update_file_tree(&FileTreeState.close/1)
     |> EditorState.set_keymap_scope(scope)
+    |> EditorState.set_sidebar_active_id(nil)
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()
   end
@@ -514,7 +517,9 @@ defmodule MingaEditor.Commands.FileTree do
         state = sync_and_update(state, tree)
         state = update_file_tree(state, &FileTreeState.focus/1)
 
-        EditorState.set_keymap_scope(state, :file_tree)
+        state
+        |> EditorState.set_keymap_scope(:file_tree)
+        |> EditorState.set_sidebar_active_id("file_tree")
         |> Layout.invalidate()
         |> EditorState.invalidate_all_windows()
     end
@@ -537,6 +542,7 @@ defmodule MingaEditor.Commands.FileTree do
     state
     |> EditorState.update_file_tree(&FileTreeState.close/1)
     |> EditorState.set_keymap_scope(scope)
+    |> EditorState.set_sidebar_active_id(nil)
   end
 
   def close(state) do
@@ -545,6 +551,7 @@ defmodule MingaEditor.Commands.FileTree do
     state
     |> EditorState.update_file_tree(&FileTreeState.close/1)
     |> EditorState.set_keymap_scope(scope)
+    |> EditorState.set_sidebar_active_id(nil)
   end
 
   # ── Private helpers ───────────────────────────────────────────────────────
@@ -820,6 +827,7 @@ defmodule MingaEditor.Commands.FileTree do
     state
     |> EditorState.update_file_tree(&FileTreeState.open(&1, tree, buf))
     |> EditorState.set_keymap_scope(:file_tree)
+    |> EditorState.set_sidebar_active_id("file_tree")
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()
   end

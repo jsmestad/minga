@@ -340,8 +340,9 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   @spec build_gui_sidebars_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
   defp build_gui_sidebars_cmd(ctx, caches) do
-    sidebars = sidebar_metadata(ctx)
-    active_id = active_sidebar_id(sidebars)
+    raw_sidebars = sidebar_metadata(ctx)
+    active_id = active_sidebar_id(ctx, raw_sidebars)
+    sidebars = mark_active_sidebar(raw_sidebars, active_id)
     fp = :erlang.phash2({sidebars, active_id})
 
     if fp != caches.last_gui_sidebars_fp do
@@ -447,15 +448,50 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     }
   end
 
-  @spec active_sidebar_id([ProtocolGUI.sidebar_metadata()]) :: String.t()
-  defp active_sidebar_id(sidebars) do
-    sidebars
-    |> Enum.sort_by(& &1.order, :desc)
-    |> Enum.find(fn sidebar -> sidebar.visible? end)
-    |> case do
+  @spec active_sidebar_id(ctx(), [ProtocolGUI.sidebar_metadata()]) :: String.t()
+  defp active_sidebar_id(ctx, sidebars) do
+    preferred_id = ctx |> Map.get(:shell_state, %{}) |> Map.get(:sidebar_active_id)
+
+    case sidebar_visible?(sidebars, preferred_id) do
+      true -> preferred_id
+      false -> fallback_active_sidebar_id(sidebars)
+    end
+  end
+
+  @spec sidebar_visible?([ProtocolGUI.sidebar_metadata()], String.t() | nil) :: boolean()
+  defp sidebar_visible?(_sidebars, nil), do: false
+
+  defp sidebar_visible?(sidebars, id) do
+    Enum.any?(sidebars, fn sidebar -> sidebar.id == id and sidebar.visible? end)
+  end
+
+  @spec fallback_active_sidebar_id([ProtocolGUI.sidebar_metadata()]) :: String.t()
+  defp fallback_active_sidebar_id(sidebars) do
+    focused =
+      sidebars
+      |> Enum.filter(fn sidebar -> sidebar.visible? and sidebar.focused? end)
+      |> Enum.sort_by(& &1.order, :desc)
+      |> List.first()
+
+    visible =
+      sidebars
+      |> Enum.filter(& &1.visible?)
+      |> Enum.sort_by(& &1.order, :desc)
+      |> List.first()
+
+    case focused || visible do
       %{id: id} -> id
       nil -> ""
     end
+  end
+
+  @spec mark_active_sidebar([ProtocolGUI.sidebar_metadata()], String.t()) :: [
+          ProtocolGUI.sidebar_metadata()
+        ]
+  defp mark_active_sidebar(sidebars, active_id) do
+    Enum.map(sidebars, fn sidebar ->
+      %{sidebar | focused?: sidebar.visible? and sidebar.id == active_id}
+    end)
   end
 
   @spec build_gui_file_tree_state_cmd(FileTreeState.t(), FileTreeState.tree_status(), Caches.t()) ::
