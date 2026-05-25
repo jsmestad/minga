@@ -136,6 +136,28 @@ defmodule Minga.Buffer.Document do
   @spec cursor_offset(t()) :: non_neg_integer()
   def cursor_offset(%__MODULE__{before: before}), do: byte_size(before)
 
+  @doc "Returns the total byte size of the document without materializing full content."
+  @spec content_byte_size(t()) :: non_neg_integer()
+  def content_byte_size(%__MODULE__{before: before, after: after_}) do
+    Kernel.byte_size(before) + Kernel.byte_size(after_)
+  end
+
+  @doc "Returns one byte from the document without materializing full content."
+  @spec byte_at(t(), non_neg_integer()) :: byte()
+  def byte_at(%__MODULE__{before: before, after: after_} = doc, offset)
+      when offset >= 0 do
+    gap = Kernel.byte_size(before)
+    do_byte_at(before, after_, offset, gap, content_byte_size(doc))
+  end
+
+  @doc "Returns a byte range from the document without materializing full content."
+  @spec slice_byte_range(t(), non_neg_integer(), non_neg_integer()) :: binary()
+  def slice_byte_range(%__MODULE__{} = doc, start_byte, byte_count)
+      when start_byte >= 0 and byte_count >= 0 do
+    :ok = validate_byte_range(start_byte, byte_count, content_byte_size(doc))
+    do_slice_byte_range(doc, start_byte, byte_count)
+  end
+
   # ── Mutations ──
 
   @doc """
@@ -354,6 +376,39 @@ defmodule Minga.Buffer.Document do
   end
 
   # ── Private helpers ──
+
+  @spec do_byte_at(binary(), binary(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          byte()
+  defp do_byte_at(before, _after, offset, gap, _size) when offset < gap do
+    :binary.at(before, offset)
+  end
+
+  defp do_byte_at(_before, after_, offset, gap, size) when offset < size do
+    :binary.at(after_, offset - gap)
+  end
+
+  defp do_byte_at(_before, _after, offset, _gap, size) do
+    raise ArgumentError, "byte offset out of bounds: offset=#{offset}, byte_size=#{size}"
+  end
+
+  @spec do_slice_byte_range(t(), non_neg_integer(), non_neg_integer()) :: binary()
+  defp do_slice_byte_range(%__MODULE__{}, _start_byte, 0), do: ""
+
+  defp do_slice_byte_range(%__MODULE__{before: before}, start_byte, byte_count)
+       when start_byte + byte_count <= Kernel.byte_size(before) do
+    binary_part(before, start_byte, byte_count)
+  end
+
+  defp do_slice_byte_range(%__MODULE__{before: before, after: after_}, start_byte, byte_count)
+       when start_byte >= Kernel.byte_size(before) do
+    binary_part(after_, start_byte - Kernel.byte_size(before), byte_count)
+  end
+
+  defp do_slice_byte_range(%__MODULE__{before: before, after: after_}, start_byte, byte_count) do
+    before_count = Kernel.byte_size(before) - start_byte
+    after_count = byte_count - before_count
+    binary_part(before, start_byte, before_count) <> binary_part(after_, 0, after_count)
+  end
 
   @spec validate_byte_range(non_neg_integer(), non_neg_integer(), non_neg_integer()) :: :ok
   defp validate_byte_range(start_byte, bytes_to_remove, content_size)

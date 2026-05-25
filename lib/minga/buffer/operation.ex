@@ -5,8 +5,10 @@ defmodule Minga.Buffer.Operation do
   `Document` owns the gap-buffer data structure. This module owns domain edits that need both the updated document and the sync delta describing the change. `Buffer.Process` wraps these operations with process concerns like read-only checks, undo, dirty tracking, events, and persistence.
   """
 
+  alias Minga.Buffer.Cursor
   alias Minga.Buffer.Document
   alias Minga.Buffer.EditDelta
+  alias Minga.Buffer.Lines
   alias Minga.Buffer.Position
   alias Minga.Buffer.Selection
   alias Minga.Buffer.Span
@@ -95,6 +97,22 @@ defmodule Minga.Buffer.Operation do
     end
   end
 
+  @doc "Clears one line, returning the yanked text, new document, and delta."
+  @spec clear_line(Document.t(), non_neg_integer()) ::
+          :unchanged | {:edited, String.t(), Document.t(), EditDelta.t()}
+  def clear_line(%Document{} = doc, line) when line >= 0 do
+    case Lines.fetch(doc, line) do
+      nil ->
+        :unchanged
+
+      "" ->
+        clear_empty_line(doc, line)
+
+      text ->
+        clear_non_empty_line(doc, line, text)
+    end
+  end
+
   @doc "Deletes the character at the cursor."
   @spec delete_forward(Document.t()) :: result()
   def delete_forward(%Document{} = doc) do
@@ -144,77 +162,79 @@ defmodule Minga.Buffer.Operation do
   @spec delete_lines(Document.t(), non_neg_integer(), non_neg_integer()) :: result()
   def delete_lines(%Document{} = doc, start_line, end_line)
       when start_line >= 0 and end_line >= 0 do
-    new_doc = Document.delete_lines(doc, start_line, end_line)
+    selection = Selection.linewise(doc, start_line, end_line)
+    %Span{start: raw_start_byte, stop: old_end_byte} = selection.span
+    start_byte = effective_linewise_delete_start(doc, raw_start_byte, old_end_byte)
+    new_doc = Selection.delete(doc, selection)
 
     if new_doc == doc do
       :unchanged
     else
-      {:edited, new_doc, deletion_delta_from_documents(doc, new_doc)}
+      delta =
+        EditDelta.deletion(
+          start_byte,
+          old_end_byte,
+          Position.from_point(doc, start_byte),
+          Position.from_point(doc, old_end_byte)
+        )
+
+      {:edited, new_doc, delta}
     end
   end
 
-  @spec deletion_delta_from_documents(Document.t(), Document.t()) :: EditDelta.t()
-  defp deletion_delta_from_documents(%Document{} = old_doc, %Document{} = new_doc) do
-    old_content = Document.content(old_doc)
-    new_content = Document.content(new_doc)
-    start_byte = :binary.longest_common_prefix([old_content, new_content])
-    old_tail = byte_size(old_content) - start_byte
-    new_tail = byte_size(new_content) - start_byte
-    suffix_size = common_suffix_size(old_content, new_content, old_tail, new_tail)
-    old_end_byte = byte_size(old_content) - suffix_size
+  @spec clear_empty_line(Document.t(), non_neg_integer()) ::
+          {:edited, String.t(), Document.t(), EditDelta.t()} | :unchanged
+  defp clear_empty_line(%Document{} = doc, line) do
+    new_doc = Cursor.place(doc, {line, 0})
 
-    EditDelta.deletion(
-      start_byte,
-      old_end_byte,
-      Position.from_point(old_doc, start_byte),
-      Position.from_point(old_doc, old_end_byte)
-    )
+    if new_doc == doc do
+      :unchanged
+    else
+      start_byte = Position.point_for(doc, {line, 0})
+      delta = EditDelta.deletion(start_byte, start_byte, {line, 0}, {line, 0})
+      {:edited, "", new_doc, delta}
+    end
   end
 
-  @spec common_suffix_size(binary(), binary(), non_neg_integer(), non_neg_integer()) ::
+  @spec clear_non_empty_line(Document.t(), non_neg_integer(), String.t()) ::
+          {:edited, String.t(), Document.t(), EditDelta.t()}
+  defp clear_non_empty_line(%Document{} = doc, line, text) do
+    start_pos = {line, 0}
+    end_pos = {line, Position.last_character_on_line(text)}
+    selection = Selection.characterwise(doc, start_pos, end_pos)
+    %Span{start: start_byte, stop: old_end_byte} = selection.span
+    {yanked, new_doc} = Selection.clear_line(doc, line)
+
+    delta =
+      EditDelta.deletion(
+        start_byte,
+        old_end_byte,
+        Position.from_point(doc, start_byte),
+        Position.from_point(doc, old_end_byte)
+      )
+
+    {:edited, yanked, new_doc, delta}
+  end
+
+  @spec effective_linewise_delete_start(Document.t(), non_neg_integer(), non_neg_integer()) ::
           non_neg_integer()
-  defp common_suffix_size(left, right, left_tail, right_tail) do
-    left_suffix = binary_part(left, byte_size(left) - left_tail, left_tail)
-    right_suffix = binary_part(right, byte_size(right) - right_tail, right_tail)
-    do_common_suffix_size(left_suffix, right_suffix, left_tail, right_tail, 0)
+  defp effective_linewise_delete_start(%Document{} = doc, start_byte, old_end_byte)
+       when start_byte > 0 do
+    do_effective_linewise_delete_start(start_byte, old_end_byte, Document.content_byte_size(doc))
   end
 
-  @spec do_common_suffix_size(
-          binary(),
-          binary(),
+  defp effective_linewise_delete_start(%Document{}, start_byte, _old_end_byte), do: start_byte
+
+  @spec do_effective_linewise_delete_start(
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer()
         ) :: non_neg_integer()
-  defp do_common_suffix_size(_left, _right, 0, _right_tail, count), do: count
-  defp do_common_suffix_size(_left, _right, _left_tail, 0, count), do: count
-
-  defp do_common_suffix_size(left, right, left_tail, right_tail, count) do
-    left_byte = :binary.at(left, left_tail - 1)
-    right_byte = :binary.at(right, right_tail - 1)
-
-    continue_common_suffix_size(
-      left,
-      right,
-      left_tail,
-      right_tail,
-      count,
-      left_byte == right_byte
-    )
+  defp do_effective_linewise_delete_start(start_byte, document_size, document_size) do
+    start_byte - 1
   end
 
-  @spec continue_common_suffix_size(
-          binary(),
-          binary(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          boolean()
-        ) :: non_neg_integer()
-  defp continue_common_suffix_size(left, right, left_tail, right_tail, count, true) do
-    do_common_suffix_size(left, right, left_tail - 1, right_tail - 1, count + 1)
+  defp do_effective_linewise_delete_start(start_byte, _old_end_byte, _document_size) do
+    start_byte
   end
-
-  defp continue_common_suffix_size(_left, _right, _left_tail, _right_tail, count, false),
-    do: count
 end
