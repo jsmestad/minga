@@ -27,7 +27,7 @@ enum PreviewSnapshotPolicy {
         case "DispatchSheetView": CGSize(width: 600, height: 500)
         case "PickerOverlay": CGSize(width: 600, height: 400)
         case "MinibufferView": CGSize(width: 600, height: 140)
-        case "WhichKeyOverlay": CGSize(width: 520, height: 300)
+        case "WhichKeyOverlay", "WhichKeyPaged": CGSize(width: 520, height: 300)
         case "SearchToolbar": CGSize(width: 800, height: 40)
         case "HoverPopupOverlay": CGSize(width: 500, height: 300)
         case "SignatureHelpOverlay": CGSize(width: 500, height: 200)

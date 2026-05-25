@@ -101,6 +101,8 @@ enum PreviewRegistry {
             notificationOverflowPreview()
         case "FileTreeRename":
             fileTreeRenamePreview()
+        case "WhichKeyPaged":
+            whichKeyPagedPreview()
         default:
             Text("Unknown view: \(name)")
                 .font(.title)
@@ -1190,6 +1192,35 @@ enum PreviewRegistry {
                 Wire.WhichKeyBinding(kind: 1, key: "t", description: "+toggle", icon: ""),
                 Wire.WhichKeyBinding(kind: 1, key: "c", description: "+code", icon: ""),
                 Wire.WhichKeyBinding(kind: 0, key: "e", description: "file tree", icon: ""),
+            ]
+        )
+
+        return WhichKeyOverlay(state: state, theme: theme)
+            .frame(width: 520, height: 300)
+            .background(theme.editorBg)
+    }
+
+    // MARK: - WhichKeyPaged
+
+    private static func whichKeyPagedPreview() -> some View {
+        let theme = populatedTheme()
+        let state = WhichKeyState()
+        state.update(
+            visible: true,
+            prefix: "SPC g",
+            page: 1,
+            pageCount: 3,
+            rawBindings: [
+                Wire.WhichKeyBinding(kind: 0, key: "s", description: "stage file", icon: ""),
+                Wire.WhichKeyBinding(kind: 0, key: "u", description: "unstage file", icon: ""),
+                Wire.WhichKeyBinding(kind: 0, key: "c", description: "commit", icon: ""),
+                Wire.WhichKeyBinding(kind: 0, key: "p", description: "push", icon: ""),
+                Wire.WhichKeyBinding(kind: 0, key: "f", description: "fetch", icon: ""),
+                Wire.WhichKeyBinding(kind: 0, key: "d", description: "diff", icon: ""),
+                Wire.WhichKeyBinding(kind: 1, key: "b", description: "+branch", icon: ""),
+                Wire.WhichKeyBinding(kind: 1, key: "r", description: "+rebase", icon: ""),
+                Wire.WhichKeyBinding(kind: 0, key: "l", description: "log", icon: ""),
+                Wire.WhichKeyBinding(kind: 0, key: "z", description: "stash", icon: ""),
             ]
         )
 
