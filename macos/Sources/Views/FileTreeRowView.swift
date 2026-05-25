@@ -76,6 +76,7 @@ struct FileTreeRowView: View {
                 InlineEditField(
                     initialText: entry.editingText,
                     selectStem: entry.editingType == 2,
+                    style: inlineEditStyle,
                     onCommit: onEditCommit,
                     onCancel: onEditCancel
                 )
@@ -261,6 +262,9 @@ struct FileTreeRowView: View {
     }
 
     private var iconColor: Color {
+        if entry.isSelected {
+            return theme.treeSelectionFg
+        }
         if entry.showsActiveAccent {
             return theme.treeActiveFg
         }
@@ -271,13 +275,27 @@ struct FileTreeRowView: View {
     }
 
     private var nameColor: Color {
-        if entry.showsActiveAccent {
-            return theme.treeActiveFg
-        }
         if entry.isSelected {
             return theme.treeSelectionFg
         }
+        if entry.showsActiveAccent {
+            return theme.treeActiveFg
+        }
         return entry.isDir ? theme.treeDirFg : theme.treeFg
+    }
+
+    /// Derived locally for readable text on accent-filled controls.
+    private var readableAccentForeground: Color {
+        theme.treeBg
+    }
+
+    private var inlineEditStyle: InlineEditFieldStyle {
+        InlineEditFieldStyle(
+            textColor: theme.treeSelectionFg,
+            selectionBackgroundColor: theme.accent,
+            selectionForegroundColor: readableAccentForeground,
+            insertionPointColor: theme.accent
+        )
     }
 
     var accessibilityLabelText: String {

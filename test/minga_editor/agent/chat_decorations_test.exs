@@ -29,6 +29,23 @@ defmodule MingaEditor.Agent.ChatDecorationsTest do
       assert Decorations.has_block_decorations?(result)
     end
 
+    test "assistant body uses readable text foreground" do
+      decs = Decorations.new()
+      theme = test_theme()
+      messages = [{:assistant, "I can help with that."}]
+      offsets = [{0, 0, 1}]
+
+      result = ChatDecorations.build_decorations(decs, messages, offsets, theme)
+
+      readable_highlights =
+        result
+        |> Decorations.highlights_for_line(0)
+        |> Enum.filter(fn hl -> hl.priority == -30 and hl.style.fg == theme.text_fg end)
+
+      assert [%{style: %{fg: fg}, priority: -30}] = readable_highlights
+      assert fg == theme.text_fg
+    end
+
     test "collapsed thinking gets fold region" do
       decs = Decorations.new()
       messages = [{:thinking, "analyzing the code...", true}]

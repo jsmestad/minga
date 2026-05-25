@@ -181,6 +181,7 @@ defmodule MingaEditor.Agent.ChatDecorations do
       end
 
     decs = add_border_virtual_text(decs, line, line_count, theme.assistant_border)
+    decs = add_readable_body_highlight(decs, line, line_count, theme.text_fg)
 
     # Code block background highlights (lines between ``` fences)
     add_code_block_highlights(decs, text, line, theme.code_bg)
@@ -525,6 +526,25 @@ defmodule MingaEditor.Agent.ChatDecorations do
     fn _w ->
       [{header_text, Face.new(fg: status_fg, bold: true)}]
     end
+  end
+
+  # Ensures assistant prose stays readable even when markdown syntax colors would otherwise dim it.
+  @spec add_readable_body_highlight(
+          Decorations.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: Decorations.t()
+  defp add_readable_body_highlight(decs, _line, 0, _text_fg), do: decs
+
+  defp add_readable_body_highlight(decs, line, line_count, text_fg) do
+    {_id, decs} =
+      add_highlight(decs, {line, 0}, {line + line_count, 0},
+        style: Face.new(fg: text_fg),
+        priority: -30
+      )
+
+    decs
   end
 
   # Detects fenced code blocks (``` ... ```) in markdown text and adds

@@ -10,18 +10,28 @@ struct GitStatusView: View {
     let state: GitStatusState
     let theme: ThemeColors
     let encoder: InputEncoder?
+    let usesPreviewEagerLayout: Bool
+
+    init(
+        state: GitStatusState,
+        theme: ThemeColors,
+        encoder: InputEncoder?,
+        usesPreviewEagerLayout: Bool = false
+    ) {
+        self.state = state
+        self.theme = theme
+        self.encoder = encoder
+        self.usesPreviewEagerLayout = usesPreviewEagerLayout
+    }
 
     private let rowHeight: CGFloat = 24
     private let sectionHeaderHeight: CGFloat = 26
+    private let commitMessageEditorHeight: CGFloat = 64
+    private let directoryMaxWidth: CGFloat = 110
     @Namespace private var fileMoveNamespace
 
     private var animDuration: Double {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.15
-    }
-
-    /// PreviewHost can force eager layout for isolated component snapshots, but full-shell previews keep the production LazyVStack path.
-    private var usesPreviewEagerLayout: Bool {
-        PreviewSnapshotPolicy.shouldUseEagerLayout(for: "GitStatusView")
     }
 
     @State private var hoveredEntryId: UInt32? = nil
@@ -35,21 +45,27 @@ struct GitStatusView: View {
                 toastBanner(message: toast, level: state.toastLevel, action: state.toastAction)
             }
 
-            if state.repoState == .notARepo {
-                notARepoView
-            } else if state.repoState == .loading {
-                loadingView
-            } else if state.isClean {
-                cleanView
-            } else {
-                fileList
+            Group {
+                if state.repoState == .notARepo {
+                    notARepoView
+                } else if state.repoState == .loading {
+                    loadingView
+                } else if state.isClean {
+                    cleanView
+                } else {
+                    fileList
+                }
             }
-
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 0, maxHeight: .infinity)
+            .clipped()
+            .layoutPriority(0)
 
             // Git actions are available for any normal repo. A clean tree can still be ahead/behind, and amend does not require file changes.
             if state.repoState == .normal {
                 commitArea
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
             }
         }
         .background(theme.treeBg)
@@ -129,17 +145,19 @@ struct GitStatusView: View {
 
     @ViewBuilder
     private var fileList: some View {
-        ScrollView(.vertical) {
-            if usesPreviewEagerLayout {
-                VStack(spacing: 0) {
-                    sectionBlock(.conflicted)
-                    sectionBlock(.staged)
-                    sectionBlock(.changed)
-                    sectionBlock(.untracked)
-                }
-                .padding(.top, 2)
-                .animation(.easeInOut(duration: animDuration), value: state.entriesRevision)
-            } else {
+        if usesPreviewEagerLayout {
+            VStack(spacing: 0) {
+                sectionBlock(.conflicted)
+                sectionBlock(.staged)
+                sectionBlock(.changed)
+                sectionBlock(.untracked)
+            }
+            .padding(.top, 2)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .clipped()
+            .animation(.easeInOut(duration: animDuration), value: state.entriesRevision)
+        } else {
+            ScrollView(.vertical) {
                 LazyVStack(spacing: 0) {
                     sectionBlock(.conflicted)
                     sectionBlock(.staged)
@@ -269,17 +287,20 @@ struct GitStatusView: View {
             // Filename
             Text(entry.filename)
                 .font(.system(size: 12))
-                .foregroundStyle(statusColor(entry.status))
+                .foregroundStyle(theme.treeFg)
                 .lineLimit(1)
                 .truncationMode(.middle)
+                .layoutPriority(2)
 
             // Parent directory (dimmed)
             if !entry.directory.isEmpty {
                 Text(" " + entry.directory)
                     .font(.system(size: 11))
-                    .foregroundStyle(theme.treeFg.opacity(0.35))
+                    .foregroundStyle(theme.treeDisabledFg)
                     .lineLimit(1)
                     .truncationMode(.head)
+                    .frame(maxWidth: directoryMaxWidth, alignment: .leading)
+                    .layoutPriority(0)
             }
 
             Spacer(minLength: 4)
@@ -435,7 +456,7 @@ struct GitStatusView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(theme.treeFg)
                         .scrollContentBackground(.hidden)
-                        .frame(minHeight: 40, maxHeight: 80)
+                        .frame(height: commitMessageEditorHeight)
 
                     // Character counter (bottom-right)
                     charCounter
@@ -487,7 +508,7 @@ struct GitStatusView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .frame(height: 26)
-                    .foregroundStyle(commitButtonEnabled ? theme.treeBg : theme.treeDisabledFg)
+                    .foregroundStyle(commitButtonEnabled ? readableAccentForeground : theme.treeDisabledFg)
                     .background(
                         RoundedRectangle(cornerRadius: 4)
                             .fill(commitButtonEnabled ? theme.accent : theme.treeFg.opacity(0.10))
@@ -500,6 +521,7 @@ struct GitStatusView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 10)
         }
+        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder
@@ -559,6 +581,11 @@ struct GitStatusView: View {
             return "Enter a commit message"
         }
         return "Commit staged changes"
+    }
+
+    /// Derived locally for readable text on accent-filled controls.
+    private var readableAccentForeground: Color {
+        theme.treeBg
     }
 
     private func miniButton(systemName: String, label: String, action: @escaping () -> Void) -> some View {

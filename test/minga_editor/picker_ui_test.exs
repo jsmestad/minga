@@ -361,7 +361,7 @@ defmodule MingaEditor.PickerUITest do
 
       assert Enum.any?(draws, fn {row, col, text, face} ->
                row == 8 and col == 0 and String.starts_with?(text, "  lib/minga/file.ex") and
-                 face.fg == theme.dim_fg and face.bg == theme.sel_bg
+                 face.fg == theme.dim_fg and face.bg == theme.bg
              end)
     end
 
@@ -381,12 +381,12 @@ defmodule MingaEditor.PickerUITest do
       theme = theme_picker()
 
       assert Enum.any?(draws, fn
-               {7, 0, "▌", face} -> face.fg == theme.highlight_fg and face.bg == theme.sel_bg
+               {7, 0, "▌", face} -> face.fg == theme.highlight_fg and face.bg == theme.bg
                _ -> false
              end)
 
       assert Enum.any?(draws, fn
-               {8, 0, "▌", face} -> face.fg == theme.highlight_fg and face.bg == theme.sel_bg
+               {8, 0, "▌", face} -> face.fg == theme.highlight_fg and face.bg == theme.bg
                _ -> false
              end)
     end
@@ -407,6 +407,28 @@ defmodule MingaEditor.PickerUITest do
 
       assert Enum.any?(draws, fn {_row, _col, text, _face} ->
                String.contains?(text, "file.ex") and String.contains?(text, "lib/minga/file.ex")
+             end)
+    end
+
+    test "match highlights use display columns after wide graphemes" do
+      picker =
+        [%Item{id: "1", label: "界a", two_line: false}]
+        |> Picker.new()
+        |> Picker.filter("a")
+
+      input = %RenderInput{
+        picker_state: %PickerState{picker: picker, source: nil},
+        theme_picker: theme_picker(),
+        viewport: Viewport.new(10, 80)
+      }
+
+      {draws, _cursor} = PickerUI.render(input)
+      theme = theme_picker()
+      expected_col = 1 + Minga.Core.Unicode.display_width("界")
+
+      assert Enum.any?(draws, fn
+               {_row, ^expected_col, "a", face} -> face.fg == theme.match_fg and face.bold
+               _ -> false
              end)
     end
 

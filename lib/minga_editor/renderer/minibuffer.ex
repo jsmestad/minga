@@ -12,6 +12,7 @@ defmodule MingaEditor.Renderer.Minibuffer do
 
   alias Minga.Buffer
   alias Minga.Core.Face
+  alias Minga.Core.Unicode
   alias Minga.Diagnostics
   alias MingaEditor.DisplayList
   alias Minga.LSP.SyncServer
@@ -192,14 +193,7 @@ defmodule MingaEditor.Renderer.Minibuffer do
   end
 
   def render(%{shell_state: %{status_msg: msg}, theme: theme}, row, cols) when is_binary(msg) do
-    mb = theme.minibuffer
-
-    DisplayList.draw(
-      row,
-      0,
-      String.pad_trailing(msg, cols),
-      Face.new(fg: mb.warning_fg, bg: mb.bg)
-    )
+    render_status_banner(msg, row, cols, theme)
   end
 
   # Pre-fetched diagnostic hint (preferred: no GenServer calls during render)
@@ -242,6 +236,26 @@ defmodule MingaEditor.Renderer.Minibuffer do
 
   def render(%{theme: theme}, row, cols), do: render_blank(row, cols, theme.minibuffer)
   def render(_state, row, cols), do: render_blank_default(row, cols)
+
+  @spec render_status_banner(String.t(), non_neg_integer(), pos_integer(), map()) ::
+          DisplayList.draw()
+  defp render_status_banner(msg, row, cols, theme) do
+    mb = theme.minibuffer
+
+    DisplayList.draw(
+      row,
+      0,
+      msg |> status_banner_text() |> Unicode.pad_display_trailing(cols),
+      Face.new(fg: mb.fg, bg: status_banner_bg(theme), bold: true)
+    )
+  end
+
+  @spec status_banner_text(String.t()) :: String.t()
+  defp status_banner_text(msg), do: " ◆  " <> msg
+
+  @spec status_banner_bg(map()) :: non_neg_integer()
+  defp status_banner_bg(%{modeline: %{info_bg: bg}}) when is_integer(bg), do: bg
+  defp status_banner_bg(%{minibuffer: mb}), do: mb.bg
 
   @spec render_blank(non_neg_integer(), pos_integer(), map()) :: DisplayList.draw()
   defp render_blank(row, cols, mb) do

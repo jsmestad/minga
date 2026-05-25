@@ -179,7 +179,35 @@ defmodule MingaEditor.CompletionDocPreviewTest do
 
   # ── Doc preview rendering ──────────────────────────────────────────────
 
-  describe "CompletionUI doc preview rendering" do
+  describe "CompletionUI rendering" do
+    test "renders the completion menu with a border and selected rail" do
+      items = [Completion.parse_item(%{"label" => "alpha", "kind" => 3, "detail" => "Function"})]
+      completion = Completion.new(items, {0, 0})
+
+      opts = %{
+        cursor_row: 10,
+        cursor_col: 5,
+        viewport_rows: 24,
+        viewport_cols: 80
+      }
+
+      draws = CompletionUI.render(completion, opts, @theme)
+      assert {12, 6, _width, 1} = CompletionUI.menu_rect(completion, opts)
+
+      assert Enum.any?(draws, fn
+               {11, 5, "╭" <> _rest, face} -> face.fg == @theme.popup.border_fg
+               _ -> false
+             end)
+
+      assert Enum.any?(draws, fn
+               {12, 6, "▌", face} ->
+                 face.fg == @theme.picker.highlight_fg and face.bg == @theme.picker.bg
+
+               _ ->
+                 false
+             end)
+    end
+
     test "renders doc pane when selected item has documentation" do
       items = [
         Completion.parse_item(%{
@@ -205,6 +233,60 @@ defmodule MingaEditor.CompletionDocPreviewTest do
       cols = Enum.map(draws, fn {_r, c, _text, _s} -> c end) |> Enum.uniq()
       # Multiple column groups indicate popup + doc pane
       assert Enum.count(cols) > 2
+    end
+
+    test "renders the doc pane on the left when right-side space is tight" do
+      items = [
+        Completion.parse_item(%{
+          "label" => "func",
+          "kind" => 3,
+          "documentation" => "Returns detailed docs for the function."
+        })
+      ]
+
+      completion = Completion.new(items, {0, 0})
+
+      opts = %{
+        cursor_row: 10,
+        cursor_col: 30,
+        viewport_rows: 24,
+        viewport_cols: 70
+      }
+
+      draws = CompletionUI.render(completion, opts, @theme)
+      assert draws != []
+
+      assert Enum.any?(draws, fn
+               {_row, 0, "╭" <> _rest, _face} -> true
+               _ -> false
+             end)
+    end
+
+    test "suppresses the doc pane when the effective width is below 20" do
+      items = [
+        Completion.parse_item(%{
+          "label" => "func",
+          "kind" => 3,
+          "documentation" => "Returns detailed docs for the function."
+        })
+      ]
+
+      completion = Completion.new(items, {0, 0})
+
+      opts = %{
+        cursor_row: 10,
+        cursor_col: 16,
+        viewport_rows: 24,
+        viewport_cols: 40
+      }
+
+      draws = CompletionUI.render(completion, opts, @theme)
+      assert draws != []
+
+      refute Enum.any?(draws, fn
+               {_row, 0, "╭" <> _rest, _face} -> true
+               _ -> false
+             end)
     end
 
     test "does not render doc pane when documentation is empty" do
