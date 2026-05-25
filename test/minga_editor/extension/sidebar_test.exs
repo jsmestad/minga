@@ -131,6 +131,6 @@ defmodule MingaEditor.Extension.SidebarTest do
              })
 
     state = Sidebar.dispatch_action(table, %{}, "outline", "open", %{row: 1})
-    assert state.handled == {"open", %{row: 1}}
+    assert state.handled == {"open", %{row: 1, sidebar_id: "outline"}}
   end
 end

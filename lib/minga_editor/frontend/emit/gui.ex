@@ -341,8 +341,9 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   @spec build_gui_sidebars_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
   defp build_gui_sidebars_cmd(ctx, caches) do
-    raw_sidebars = sidebar_metadata(ctx)
-    active_id = active_sidebar_id(ctx, raw_sidebars)
+    registered_active = Sidebar.active_left()
+    raw_sidebars = sidebar_metadata(ctx, registered_active)
+    active_id = active_sidebar_id(ctx, raw_sidebars, registered_active)
     sidebars = mark_active_sidebar(raw_sidebars, active_id)
     fp = :erlang.phash2({sidebars, active_id})
 
@@ -353,10 +354,8 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     end
   end
 
-  @spec sidebar_metadata(ctx()) :: [ProtocolGUI.sidebar_metadata()]
-  defp sidebar_metadata(ctx) do
-    registered_active = Sidebar.active_left()
-
+  @spec sidebar_metadata(ctx(), Sidebar.entry() | nil) :: [ProtocolGUI.sidebar_metadata()]
+  defp sidebar_metadata(ctx, registered_active) do
     built_in =
       [
         file_tree_sidebar_metadata(ctx),
@@ -491,9 +490,10 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     }
   end
 
-  @spec active_sidebar_id(ctx(), [ProtocolGUI.sidebar_metadata()]) :: String.t()
-  defp active_sidebar_id(ctx, sidebars) do
-    registered_id = active_registered_sidebar_id(sidebars)
+  @spec active_sidebar_id(ctx(), [ProtocolGUI.sidebar_metadata()], Sidebar.entry() | nil) ::
+          String.t()
+  defp active_sidebar_id(ctx, sidebars, registered_active) do
+    registered_id = active_registered_sidebar_id(sidebars, registered_active)
     preferred_id = ctx |> Map.get(:shell_state, %{}) |> Map.get(:sidebar_active_id)
 
     case registered_id || sidebar_visible_id(sidebars, preferred_id) do
@@ -502,12 +502,12 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     end
   end
 
-  @spec active_registered_sidebar_id([ProtocolGUI.sidebar_metadata()]) :: String.t() | nil
-  defp active_registered_sidebar_id(sidebars) do
-    case Sidebar.active_left() do
-      %{id: id} -> sidebar_visible_id(sidebars, id)
-      nil -> nil
-    end
+  @spec active_registered_sidebar_id([ProtocolGUI.sidebar_metadata()], Sidebar.entry() | nil) ::
+          String.t() | nil
+  defp active_registered_sidebar_id(_sidebars, nil), do: nil
+
+  defp active_registered_sidebar_id(sidebars, %{id: id}) do
+    sidebar_visible_id(sidebars, id)
   end
 
   @spec sidebar_visible_id([ProtocolGUI.sidebar_metadata()], String.t() | nil) :: String.t() | nil

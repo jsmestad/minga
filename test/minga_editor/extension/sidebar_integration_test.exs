@@ -158,7 +158,8 @@ defmodule MingaEditor.Extension.SidebarIntegrationTest do
                ]
              })
 
-    draws = SidebarRenderer.render(state, {1, 0, 25, 10})
+    sidebar = SidebarRenderer.active_sidebar()
+    draws = SidebarRenderer.render(state, {1, 0, 25, 10}, sidebar)
     texts = Enum.map(draws, fn {_row, _col, text, _face} -> String.trim(text) end)
 
     assert "Outline" in texts

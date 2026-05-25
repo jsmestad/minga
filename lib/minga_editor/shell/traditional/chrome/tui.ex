@@ -136,10 +136,9 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
 
   @spec sidebar_draws(state(), Layout.t()) :: [DisplayList.draw()]
   defp sidebar_draws(state, layout) do
-    if SidebarRenderer.visible?() do
-      SidebarRenderer.render(state, layout.file_tree)
-    else
-      legacy_sidebar_draws(state, layout)
+    case SidebarRenderer.active_sidebar() do
+      nil -> legacy_sidebar_draws(state, layout)
+      sidebar -> SidebarRenderer.render(state, layout.file_tree, sidebar)
     end
   end
 

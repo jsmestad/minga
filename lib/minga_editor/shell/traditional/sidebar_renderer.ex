@@ -15,20 +15,14 @@ defmodule MingaEditor.Shell.Traditional.SidebarRenderer do
   @typedoc "Editor or render-pipeline state with theme data."
   @type state :: map()
 
-  @doc "Returns true when a registered left sidebar is visible."
-  @spec visible?() :: boolean()
-  def visible?, do: Sidebar.active_left() != nil
+  @doc "Returns the first visible registered left sidebar, if any."
+  @spec active_sidebar() :: Sidebar.entry() | nil
+  def active_sidebar, do: Sidebar.active_left()
 
-  @doc "Renders the first visible registered left sidebar."
-  @spec render(state(), Layout.rect() | nil) :: [DisplayList.draw()]
-  def render(_state, nil), do: []
-
-  def render(state, rect) do
-    case Sidebar.active_left() do
-      nil -> []
-      sidebar -> render_sidebar(state, rect, sidebar)
-    end
-  end
+  @doc "Renders a registered sidebar entry into the given rect."
+  @spec render(state(), Layout.rect() | nil, Sidebar.entry()) :: [DisplayList.draw()]
+  def render(_state, nil, _sidebar), do: []
+  def render(state, rect, sidebar), do: render_sidebar(state, rect, sidebar)
 
   @spec render_sidebar(state(), Layout.rect(), Sidebar.entry()) :: [DisplayList.draw()]
   defp render_sidebar(state, {row, col, width, height}, %{
@@ -92,10 +86,6 @@ defmodule MingaEditor.Shell.Traditional.SidebarRenderer do
   defp fit(text, width) when width <= 0, do: text
 
   defp fit(text, width) do
-    if Unicode.display_width(text) <= width do
-      String.pad_trailing(text, width)
-    else
-      text |> String.slice(0, max(width - 1, 0)) |> Kernel.<>("…")
-    end
+    text |> Unicode.truncate_display_width(width) |> Unicode.pad_display_trailing(width)
   end
 end

@@ -174,7 +174,7 @@ defmodule MingaEditor.Extension.Sidebar do
         run_action_handler(nil, state, action, Map.put(context, :sidebar_id, sidebar_id))
 
       %{action_handler: handler} ->
-        run_action_handler(handler, state, action, context)
+        run_action_handler(handler, state, action, Map.put(context, :sidebar_id, sidebar_id))
 
       nil ->
         state
@@ -188,7 +188,7 @@ defmodule MingaEditor.Extension.Sidebar do
     create_owned_table(table)
 
     ContributionCleanup.register(:editor_sidebars, fn source ->
-      unregister_source(source)
+      unregister_source(table, source)
     end)
 
     {:ok, table}
