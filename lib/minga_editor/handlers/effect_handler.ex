@@ -272,7 +272,37 @@ defmodule MingaEditor.Handlers.EffectHandler do
   end
 
   defp apply_effect(state, {:handle_git_remote_result, ref, result}),
-    do: Renderer.render_or_async(Commands.Git.handle_remote_result(state, ref, result))
+    do: Renderer.render_or_async(handle_git_remote_result(state, ref, result))
+
+  @spec handle_git_remote_result(EditorState.t(), reference(), term()) :: EditorState.t()
+  defp handle_git_remote_result(state, ref, result) do
+    module = :"Elixir.MingaGitPorcelain.Commands"
+
+    if git_porcelain_running?() and Code.ensure_loaded?(module) and
+         function_exported?(module, :handle_remote_result, 3) do
+      :erlang.apply(module, :handle_remote_result, [state, ref, result])
+    else
+      state
+    end
+  end
+
+  @spec git_porcelain_running?() :: boolean()
+  defp git_porcelain_running? do
+    case Process.whereis(Minga.Extension.Registry) do
+      nil -> false
+      _pid -> git_porcelain_running_in_registry?()
+    end
+  catch
+    :exit, _reason -> false
+  end
+
+  @spec git_porcelain_running_in_registry?() :: boolean()
+  defp git_porcelain_running_in_registry? do
+    case Minga.Extension.Registry.get(:minga_git_porcelain) do
+      {:ok, %{status: :running}} -> true
+      _ -> false
+    end
+  end
 
   # Dispatches a log effect to the appropriate Minga.Log function.
   @spec apply_log_effect(atom(), atom(), String.t()) :: :ok

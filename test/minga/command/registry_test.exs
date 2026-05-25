@@ -92,16 +92,6 @@ defmodule Minga.Command.RegistryTest do
           :goto_definition,
           :hover,
 
-          # Git
-          :next_git_hunk,
-          :prev_git_hunk,
-          :git_stage_hunk,
-          :git_revert_hunk,
-          :git_preview_hunk,
-          :git_blame_line,
-          :git_log,
-          :git_log_file,
-
           # Folding
           :fold_toggle,
           :fold_close,

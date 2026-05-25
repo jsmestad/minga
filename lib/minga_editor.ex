@@ -781,7 +781,7 @@ defmodule MingaEditor do
         EditorState.set_status(state, "Commit message ready (prompt already open)")
       else
         state
-        |> MingaEditor.PromptUI.open(MingaEditor.UI.Prompt.GitCommit, default: message)
+        |> open_git_commit_prompt(default: message)
         |> EditorState.set_status("Commit message generated")
       end
 
@@ -925,10 +925,52 @@ defmodule MingaEditor do
     if Map.has_key?(state.buffer_monitors, pid) do
       :buffer
     else
-      case Commands.Git.handle_remote_task_down(state, ref, reason) do
+      case handle_git_remote_task_down(state, ref, reason) do
         :not_matched -> :unknown
         updated_state -> {:git_remote_task, updated_state}
       end
+    end
+  end
+
+  @spec open_git_commit_prompt(EditorState.t(), keyword()) :: EditorState.t()
+  defp open_git_commit_prompt(state, opts) when is_list(opts) do
+    prompt = :"Elixir.MingaGitPorcelain.UI.Prompt.GitCommit"
+
+    if git_porcelain_running?() and Code.ensure_loaded?(prompt) do
+      MingaEditor.PromptUI.open(state, prompt, opts)
+    else
+      state
+    end
+  end
+
+  @spec handle_git_remote_task_down(EditorState.t(), reference(), term()) ::
+          :not_matched | EditorState.t()
+  defp handle_git_remote_task_down(state, ref, reason) do
+    module = :"Elixir.MingaGitPorcelain.Commands"
+
+    if git_porcelain_running?() and Code.ensure_loaded?(module) and
+         function_exported?(module, :handle_remote_task_down, 3) do
+      :erlang.apply(module, :handle_remote_task_down, [state, ref, reason])
+    else
+      :not_matched
+    end
+  end
+
+  @spec git_porcelain_running?() :: boolean()
+  defp git_porcelain_running? do
+    case Process.whereis(Minga.Extension.Registry) do
+      nil -> false
+      _pid -> git_porcelain_running_in_registry?()
+    end
+  catch
+    :exit, _reason -> false
+  end
+
+  @spec git_porcelain_running_in_registry?() :: boolean()
+  defp git_porcelain_running_in_registry? do
+    case Minga.Extension.Registry.get(:minga_git_porcelain) do
+      {:ok, %{status: :running}} -> true
+      _ -> false
     end
   end
 

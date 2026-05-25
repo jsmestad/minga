@@ -5,7 +5,6 @@ defmodule MingaEditor.StatusBar.DataTest do
   alias Minga.Git.Buffer, as: GitBuffer
   alias Minga.Git.Stub, as: GitStub
   alias Minga.Config.ModelineSegments
-  alias MingaEditor.Commands.Git, as: GitCommands
   alias Minga.Config.Options
   alias Minga.Mode.VisualState
   alias MingaAgent.Subagent.Handle
@@ -171,29 +170,6 @@ defmodule MingaEditor.StatusBar.DataTest do
     assert data.merge_conflict_count == 1
   end
 
-  test "tracked merge conflict count updates immediately after resolving one conflict" do
-    root = Path.join(System.tmp_dir!(), "status-bar-git-#{System.unique_integer([:positive])}")
-    GitStub.ensure_table()
-    GitStub.set_root(root, root)
-    on_exit(fn -> GitStub.clear(root) end)
-
-    content = two_conflict_content()
-    {state, buf} = state_with_buffer(content, nil, :text)
-
-    {:ok, git_pid} =
-      start_supervised(
-        {GitBuffer,
-         git_root: root, file_path: Path.join(root, "conflict.txt"), initial_content: content}
-      )
-
-    register_tracked_buffer(buf, git_pid)
-
-    state = GitCommands.execute(state, {:git_accept_conflict, :current, 0})
-    data = Data.from_state(state) |> Data.to_modeline_data()
-
-    assert data.merge_conflict_count == 1
-  end
-
   test "visual char selection reports grapheme count" do
     {state, _buf} = state_with_buffer("héllo", nil, :text)
 
@@ -283,14 +259,6 @@ defmodule MingaEditor.StatusBar.DataTest do
 
     :ets.insert(table, {buffer, git_pid})
     on_exit(fn -> :ets.delete(table, buffer) end)
-  end
-
-  defp two_conflict_content do
-    conflict("ours", "theirs") <> "\nbetween\n" <> conflict("left", "right")
-  end
-
-  defp conflict(current, incoming) do
-    "<<<<<<< HEAD\n#{current}\n=======\n#{incoming}\n>>>>>>> branch"
   end
 
   defp handle(session_id, task) do

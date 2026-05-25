@@ -5,7 +5,6 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.Session.State, as: SessionState
-  alias MingaEditor.Shell.Traditional.GitStatus.TuiState
   alias MingaEditor.Shell.Traditional.State, as: ShellState
 
   describe "chrome_fingerprint/1" do
@@ -102,8 +101,7 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
       input = Input.from_editor_state(state)
       fp1 = Input.chrome_fingerprint(input)
 
-      shell_state =
-        ShellState.set_git_status_tui_state(state.shell_state, %{TuiState.new() | cursor_index: 1})
+      shell_state = ShellState.set_git_status_tui_state(state.shell_state, %{cursor_index: 1})
 
       input2 = Input.from_editor_state(%{state | shell_state: shell_state})
       fp2 = Input.chrome_fingerprint(input2)

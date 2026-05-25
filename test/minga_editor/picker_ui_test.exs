@@ -867,14 +867,15 @@ defmodule MingaEditor.PickerUITest do
     test "typing fix in git log stays in the fuzzy query" do
       {state, _original_buf, _preview_buf} = preview_promotion_state()
 
+      source = :"Elixir.MingaEditor.PickerUITest.GitLogSource"
       picker = Picker.new([%Item{id: "abc123", label: "abc123"}], title: "Git Log")
-      picker_state = %PickerState{picker: picker, source: MingaEditor.UI.Picker.GitLogSource}
+      picker_state = %PickerState{picker: picker, source: source}
       state = put_in(state.shell_state.modal, {:picker, PickerPayload.new(picker_state)})
 
       state = Enum.reduce(~c"fix", state, fn cp, acc -> PickerUI.handle_key(acc, cp, 0) end)
       {:picker, %{picker_ui: pui}} = state.shell_state.modal
 
-      assert pui.source == MingaEditor.UI.Picker.GitLogSource
+      assert pui.source == source
       assert pui.picker.query == "fix"
     end
   end

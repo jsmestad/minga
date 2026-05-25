@@ -132,7 +132,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
     new_state =
       state
       |> FileTreeFreshness.refresh_git_status_from_disk()
-      |> MingaEditor.Commands.Git.refresh_diff_views_for_buffer(saved_buf)
+      |> refresh_git_diff_views_for_buffer(saved_buf)
       |> EditorState.rebind_buffer_file_identity(saved_buf)
 
     effects = [
@@ -149,6 +149,36 @@ defmodule MingaEditor.Handlers.FileEventHandler do
       end
 
     {new_state, effects}
+  end
+
+  @spec refresh_git_diff_views_for_buffer(EditorState.t(), pid()) :: EditorState.t()
+  defp refresh_git_diff_views_for_buffer(state, saved_buf) do
+    module = :"Elixir.MingaGitPorcelain.Commands"
+
+    if git_porcelain_running?() and Code.ensure_loaded?(module) and
+         function_exported?(module, :refresh_diff_views_for_buffer, 2) do
+      :erlang.apply(module, :refresh_diff_views_for_buffer, [state, saved_buf])
+    else
+      state
+    end
+  end
+
+  @spec git_porcelain_running?() :: boolean()
+  defp git_porcelain_running? do
+    case Process.whereis(Minga.Extension.Registry) do
+      nil -> false
+      _pid -> git_porcelain_running_in_registry?()
+    end
+  catch
+    :exit, _reason -> false
+  end
+
+  @spec git_porcelain_running_in_registry?() :: boolean()
+  defp git_porcelain_running_in_registry? do
+    case Minga.Extension.Registry.get(:minga_git_porcelain) do
+      {:ok, %{status: :running}} -> true
+      _ -> false
+    end
   end
 
   @spec handle_buffer_changed(EditorState.t(), pid()) :: {EditorState.t(), [file_effect()]}

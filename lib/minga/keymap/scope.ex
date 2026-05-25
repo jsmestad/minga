@@ -154,7 +154,6 @@ defmodule Minga.Keymap.Scope do
     Minga.Keymap.Scope.Editor,
     Minga.Keymap.Scope.Agent,
     Minga.Keymap.Scope.FileTree,
-    Minga.Keymap.Scope.GitStatus,
     Minga.Keymap.Scope.Dired
   ]
 
