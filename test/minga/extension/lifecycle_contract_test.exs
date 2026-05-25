@@ -139,6 +139,71 @@ defmodule Minga.Extension.LifecycleContractTest do
            ]
   end
 
+  test "failed start before manifest recording clears stale manifests", ctx do
+    {path, cleanup} =
+      make_extension("StaleManifestCleared", """
+      defmodule Minga.TestExtensions.StaleManifestCleared do
+        use Minga.Extension
+
+        @impl true
+        def name, do: :stale_manifest_cleared
+
+        @impl true
+        def description, do: "Stale manifest cleared"
+
+        @impl true
+        def version, do: "1.0.0"
+
+        @impl true
+        def init(_config), do: {:ok, %{}}
+      end
+      """)
+
+    on_exit(fn ->
+      cleanup.()
+      :code.purge(Minga.TestExtensions.StaleManifestCleared)
+      :code.delete(Minga.TestExtensions.StaleManifestCleared)
+    end)
+
+    :ok = ExtRegistry.register(ctx.registry, :stale_manifest_cleared, path, [])
+    {:ok, entry} = ExtRegistry.get(ctx.registry, :stale_manifest_cleared)
+
+    assert {:ok, _pid} =
+             ExtSupervisor.start_extension(
+               ctx.supervisor,
+               ctx.registry,
+               :stale_manifest_cleared,
+               entry
+             )
+
+    {:ok, running_entry} = ExtRegistry.get(ctx.registry, :stale_manifest_cleared)
+    assert running_entry.manifest.name == :stale_manifest_cleared
+
+    assert :ok =
+             ExtSupervisor.stop_extension(
+               ctx.supervisor,
+               ctx.registry,
+               :stale_manifest_cleared,
+               running_entry
+             )
+
+    File.rm!(Path.join(path, "extension.ex"))
+
+    {:ok, stopped_entry} = ExtRegistry.get(ctx.registry, :stale_manifest_cleared)
+
+    assert {:error, _reason} =
+             ExtSupervisor.start_extension(
+               ctx.supervisor,
+               ctx.registry,
+               :stale_manifest_cleared,
+               stopped_entry
+             )
+
+    {:ok, failed_entry} = ExtRegistry.get(ctx.registry, :stale_manifest_cleared)
+    assert failed_entry.status == :load_error
+    assert failed_entry.manifest == nil
+  end
+
   test "manifest introspection failures become load errors", ctx do
     cases = [
       {"ManifestNameRaise", :name, "raise(\"name boom\")", :manifest_name_raise},
@@ -291,6 +356,86 @@ defmodule Minga.Extension.LifecycleContractTest do
 
     assert catch_exit(Minga.Extension.manifest(Minga.TestExtensions.ManifestDirectExit, :path)) ==
              :direct_manifest_version_boom
+  end
+
+  test "direct manifest construction propagates thrown declaration failures", _ctx do
+    {path, cleanup} =
+      make_extension("ManifestDirectThrow", """
+      defmodule Minga.TestExtensions.ManifestDirectThrow do
+        use Minga.Extension
+
+        @impl true
+        def name, do: :manifest_direct_throw
+
+        @impl true
+        def description, do: throw(:direct_manifest_description_boom)
+
+        @impl true
+        def version, do: "1.0.0"
+
+        @impl true
+        def init(_config), do: {:ok, %{}}
+      end
+      """)
+
+    Code.compile_file(Path.join(path, "extension.ex"))
+
+    on_exit(fn ->
+      cleanup.()
+      :code.purge(Minga.TestExtensions.ManifestDirectThrow)
+      :code.delete(Minga.TestExtensions.ManifestDirectThrow)
+    end)
+
+    assert catch_throw(Minga.Extension.manifest(Minga.TestExtensions.ManifestDirectThrow, :path)) ==
+             :direct_manifest_description_boom
+  end
+
+  test "legacy behavior-only extensions receive default manifest schemas", ctx do
+    {path, cleanup} =
+      make_extension("LegacyManifestDefaults", """
+      defmodule Minga.TestExtensions.LegacyManifestDefaults do
+        @spec name() :: atom()
+        def name, do: :legacy_manifest_defaults
+
+        @spec description() :: String.t()
+        def description, do: "Legacy manifest defaults"
+
+        @spec version() :: String.t()
+        def version, do: "1.0.0"
+
+        @spec init(keyword()) :: {:ok, map()}
+        def init(_config), do: {:ok, %{}}
+
+        @spec child_spec(keyword()) :: Supervisor.child_spec()
+        def child_spec(config) do
+          %{id: __MODULE__, start: {Agent, :start_link, [fn -> config end]}, restart: :permanent, type: :worker}
+        end
+      end
+      """)
+
+    on_exit(fn ->
+      cleanup.()
+      :code.purge(Minga.TestExtensions.LegacyManifestDefaults)
+      :code.delete(Minga.TestExtensions.LegacyManifestDefaults)
+    end)
+
+    :ok = ExtRegistry.register(ctx.registry, :legacy_manifest_defaults, path, [])
+    {:ok, entry} = ExtRegistry.get(ctx.registry, :legacy_manifest_defaults)
+
+    assert {:ok, _pid} =
+             ExtSupervisor.start_extension(
+               ctx.supervisor,
+               ctx.registry,
+               :legacy_manifest_defaults,
+               entry
+             )
+
+    {:ok, started_entry} = ExtRegistry.get(ctx.registry, :legacy_manifest_defaults)
+    assert started_entry.manifest.name == :legacy_manifest_defaults
+    assert started_entry.manifest.commands == []
+    assert started_entry.manifest.keybindings == []
+    assert started_entry.manifest.modeline_segments == []
+    assert started_entry.manifest.capabilities == []
   end
 
   test "failed child start removes contributions registered during init", ctx do
@@ -1376,6 +1521,113 @@ defmodule Minga.Extension.LifecycleContractTest do
     assert crashed_entry.pid == nil
   end
 
+  test "start during pending crash restart reuses the supervisor replacement", ctx do
+    telemetry_id = {__MODULE__, self(), :restart_start_race_telemetry}
+    test_pid = self()
+
+    :telemetry.attach_many(
+      telemetry_id,
+      [[:minga, :extension, :lifecycle, :crash_restart_count]],
+      fn event, measurements, metadata, test_pid ->
+        send(test_pid, {:telemetry, event, measurements, metadata})
+      end,
+      self()
+    )
+
+    on_exit(fn -> :telemetry.detach(telemetry_id) end)
+
+    restart_gate = fn ->
+      send(test_pid, {:restart_reconcile_blocked, self()})
+
+      receive do
+        :release_restart_reconcile -> :ok
+      after
+        5_000 -> raise "timed out waiting to release restart reconciliation"
+      end
+    end
+
+    {path, cleanup} =
+      make_extension("RestartStartRace", """
+      defmodule Minga.TestExtensions.RestartStartRace do
+        use Minga.Extension
+
+        command :restart_start_race_cmd, "Restart start race command", execute: {__MODULE__, :noop}
+
+        @impl true
+        def name, do: :restart_start_race
+
+        @impl true
+        def description, do: "Restart/start race"
+
+        @impl true
+        def version, do: "1.0.0"
+
+        @impl true
+        def init(_config), do: {:ok, %{}}
+
+        @spec noop(map()) :: map()
+        def noop(state), do: state
+      end
+      """)
+
+    on_exit(fn ->
+      cleanup.()
+      :code.purge(Minga.TestExtensions.RestartStartRace)
+      :code.delete(Minga.TestExtensions.RestartStartRace)
+    end)
+
+    opts = [
+      command_registry: ctx.command_registry,
+      keymap: ctx.keymap,
+      test_hooks: %{before_restart_reconcile: restart_gate}
+    ]
+
+    :ok = ExtRegistry.register(ctx.registry, :restart_start_race, path, [])
+    {:ok, entry} = ExtRegistry.get(ctx.registry, :restart_start_race)
+
+    assert {:ok, pid_a} =
+             ExtSupervisor.start_extension(
+               ctx.supervisor,
+               ctx.registry,
+               :restart_start_race,
+               entry,
+               opts
+             )
+
+    assert_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
+                    %{count: 0}, %{extension: :restart_start_race, phase: :crash_restart_count}}
+
+    pid_a_ref = Process.monitor(pid_a)
+    Process.exit(pid_a, :kill)
+    assert_receive {:DOWN, ^pid_a_ref, :process, ^pid_a, _reason}, 1_000
+    assert_receive {:restart_reconcile_blocked, monitor_pid}, 1_000
+
+    pid_b = wait_for_child_pid(ctx.supervisor, Minga.TestExtensions.RestartStartRace, pid_a)
+    {:ok, stale_running_entry} = ExtRegistry.get(ctx.registry, :restart_start_race)
+    assert stale_running_entry.pid == pid_a
+
+    assert {:ok, ^pid_b} =
+             ExtSupervisor.start_extension(
+               ctx.supervisor,
+               ctx.registry,
+               :restart_start_race,
+               stale_running_entry,
+               opts
+             )
+
+    assert {:ok, _command} = CommandRegistry.lookup(ctx.command_registry, :restart_start_race_cmd)
+
+    send(monitor_pid, :release_restart_reconcile)
+
+    assert_receive {:telemetry, [:minga, :extension, :lifecycle, :crash_restart_count],
+                    %{count: 1}, %{extension: :restart_start_race, phase: :crash_restart_count}}
+
+    {:ok, final_entry} = ExtRegistry.get(ctx.registry, :restart_start_race)
+    assert final_entry.status == :running
+    assert final_entry.pid == pid_b
+    assert 1 == count_children(ctx.supervisor, Minga.TestExtensions.RestartStartRace)
+  end
+
   test "stale crash monitor does not overwrite a newer lifecycle", ctx do
     telemetry_id = {__MODULE__, self(), :stale_monitor_race_telemetry}
     test_pid = self()
@@ -1530,6 +1782,47 @@ defmodule Minga.Extension.LifecycleContractTest do
   @spec terminal_cleanup_key(:normal | :shutdown) :: String.t()
   defp terminal_cleanup_key(:normal), do: "C-t"
   defp terminal_cleanup_key(:shutdown), do: "C-y"
+
+  @spec wait_for_child_pid(GenServer.server(), module(), pid() | nil) :: pid()
+  defp wait_for_child_pid(supervisor, module, excluded_pid),
+    do: wait_for_child_pid(supervisor, module, excluded_pid, 50)
+
+  @spec wait_for_child_pid(GenServer.server(), module(), pid() | nil, non_neg_integer()) :: pid()
+  defp wait_for_child_pid(supervisor, module, excluded_pid, attempts_left) do
+    case child_pid(supervisor, module, excluded_pid) do
+      pid when is_pid(pid) ->
+        pid
+
+      nil when attempts_left > 0 ->
+        receive do
+        after
+          10 -> wait_for_child_pid(supervisor, module, excluded_pid, attempts_left - 1)
+        end
+
+      nil ->
+        flunk("expected #{inspect(module)} child to start")
+    end
+  end
+
+  @spec child_pid(GenServer.server(), module(), pid() | nil) :: pid() | nil
+  defp child_pid(supervisor, module, excluded_pid) do
+    supervisor
+    |> DynamicSupervisor.which_children()
+    |> Enum.find_value(fn
+      {_id, pid, _type, [^module]} when is_pid(pid) and pid != excluded_pid -> pid
+      _child -> nil
+    end)
+  end
+
+  @spec count_children(GenServer.server(), module()) :: non_neg_integer()
+  defp count_children(supervisor, module) do
+    supervisor
+    |> DynamicSupervisor.which_children()
+    |> Enum.count(fn
+      {_id, pid, _type, [^module]} when is_pid(pid) -> true
+      _child -> false
+    end)
+  end
 
   @spec wait_for_entry_status(GenServer.server(), atom(), Minga.Extension.extension_status()) ::
           ExtRegistry.entry()

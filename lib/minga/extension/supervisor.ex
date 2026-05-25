@@ -213,7 +213,7 @@ defmodule Minga.Extension.Supervisor do
           {:ok, pid()} | {:error, term()}
   def start_extension(supervisor, registry, name, _entry, opts \\ []) do
     with_lifecycle_lock(registry, name, fn ->
-      case current_start_entry(registry, name) do
+      case current_start_entry(supervisor, registry, name) do
         {:ok, {:running, pid}} ->
           {:ok, pid}
 
@@ -235,13 +235,14 @@ defmodule Minga.Extension.Supervisor do
         ) :: {:ok, pid()} | {:error, term()}
   defp start_current_entry_locked(
          _supervisor,
-         _registry,
-         _name,
+         registry,
+         name,
          %{source_type: :git, path: nil},
          _opts
        ) do
     # Git extensions are resolved to a local path in resolve_git_extensions/1.
     # If the current registry entry has no path, the clone failed.
+    mark_start_load_error(registry, name)
     {:error, :clone_failed}
   end
 
@@ -266,6 +267,7 @@ defmodule Minga.Extension.Supervisor do
   defp start_from_path_locked(supervisor, registry, name, entry, opts) do
     cmd_registry = Keyword.get(opts, :command_registry, Minga.Command.Registry)
     keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
+    mark_start_attempt(registry, name)
 
     with {:ok, module} <-
            run_lifecycle_phase(name, :load, opts, fn -> compile_extension(entry.path) end),
@@ -551,23 +553,8 @@ defmodule Minga.Extension.Supervisor do
         terminate_extension_process(supervisor, entry)
       end)
 
-    finalize_stopped_extension(registry, name, entry)
-
     cleanup_result = cleanup_extension_contributions(name, cmd_registry, keymap, opts)
-
-    case {termination_result, cleanup_result} do
-      {:ok, :ok} ->
-        :ok
-
-      {:ok, {:error, failures}} ->
-        {:error, {:cleanup_failed, failures}}
-
-      {{:error, reason}, :ok} ->
-        {:error, reason}
-
-      {{:error, reason}, {:error, failures}} ->
-        {:error, {:cleanup_failed, reason, failures}}
-    end
+    finalize_explicit_stop_result(termination_result, cleanup_result, registry, name, entry)
   end
 
   @doc """
@@ -612,6 +599,21 @@ defmodule Minga.Extension.Supervisor do
 
   # ── Private ────────────────────────────────────────────────────────────────
 
+  @spec mark_start_attempt(GenServer.server(), atom()) :: :ok
+  defp mark_start_attempt(registry, name) do
+    ExtRegistry.update(registry, name, manifest: nil)
+  end
+
+  @spec mark_start_load_error(GenServer.server(), atom()) :: :ok
+  defp mark_start_load_error(registry, name) do
+    ExtRegistry.update(registry, name,
+      status: :load_error,
+      pid: nil,
+      lifecycle_ref: nil,
+      manifest: nil
+    )
+  end
+
   @spec record_extension_manifest(GenServer.server(), atom(), module(), Manifest.source_type()) ::
           :ok | {:error, term()}
   defp record_extension_manifest(registry, name, module, source) do
@@ -639,18 +641,17 @@ defmodule Minga.Extension.Supervisor do
   @spec run_lifecycle_phase(atom(), atom(), start_opts(), (-> result)) :: result when result: var
   defp run_lifecycle_phase(name, phase, opts, fun)
        when is_atom(name) and is_atom(phase) and is_function(fun, 0) do
-    start_time = System.monotonic_time()
+    handler_id = attach_slow_lifecycle_handler(name, phase, opts)
 
-    result =
+    try do
       Minga.Telemetry.span(
         [:minga, :extension, :lifecycle],
         %{extension: name, phase: phase},
         fun
       )
-
-    duration = System.monotonic_time() - start_time
-    maybe_log_slow_lifecycle_phase(name, phase, duration, opts)
-    result
+    after
+      detach_slow_lifecycle_handler(handler_id)
+    end
   end
 
   @spec with_lifecycle_lock(GenServer.server(), atom(), (-> result)) :: result when result: var
@@ -683,12 +684,12 @@ defmodule Minga.Extension.Supervisor do
   defp canonical_registry_id({:via, module, name}), do: {:via, module, name}
   defp canonical_registry_id(registry), do: registry
 
-  @spec current_start_entry(GenServer.server(), atom()) ::
+  @spec current_start_entry(GenServer.server(), GenServer.server(), atom()) ::
           {:ok, ExtRegistry.entry() | {:running, pid()}} | {:error, :not_registered}
-  defp current_start_entry(registry, name) do
+  defp current_start_entry(supervisor, registry, name) do
     case ExtRegistry.get(registry, name) do
       {:ok, %{status: :running, pid: pid} = entry} when is_pid(pid) ->
-        current_running_or_restartable_entry(pid, entry)
+        current_running_or_restartable_entry(supervisor, registry, name, pid, entry)
 
       {:ok, entry} ->
         {:ok, entry}
@@ -698,14 +699,43 @@ defmodule Minga.Extension.Supervisor do
     end
   end
 
-  @spec current_running_or_restartable_entry(pid(), ExtRegistry.entry()) ::
-          {:ok, {:running, pid()} | ExtRegistry.entry()}
-  defp current_running_or_restartable_entry(pid, entry) do
+  @spec current_running_or_restartable_entry(
+          GenServer.server(),
+          GenServer.server(),
+          atom(),
+          pid(),
+          ExtRegistry.entry()
+        ) :: {:ok, {:running, pid()} | ExtRegistry.entry()}
+  defp current_running_or_restartable_entry(supervisor, registry, name, pid, entry) do
     case Process.alive?(pid) do
-      true -> {:ok, {:running, pid}}
-      false -> {:ok, entry}
+      true ->
+        {:ok, {:running, pid}}
+
+      false ->
+        reconcile_dead_running_entry(supervisor, registry, name, entry)
     end
   end
+
+  @spec reconcile_dead_running_entry(
+          GenServer.server(),
+          GenServer.server(),
+          atom(),
+          ExtRegistry.entry()
+        ) ::
+          {:ok, {:running, pid()} | ExtRegistry.entry()}
+  defp reconcile_dead_running_entry(supervisor, registry, name, %{module: module} = entry)
+       when is_atom(module) and not is_nil(module) do
+    case extension_child_pid(supervisor, module) do
+      pid when is_pid(pid) ->
+        ExtRegistry.update(registry, name, pid: pid)
+        {:ok, {:running, pid}}
+
+      nil ->
+        {:ok, entry}
+    end
+  end
+
+  defp reconcile_dead_running_entry(_supervisor, _registry, _name, entry), do: {:ok, entry}
 
   @spec current_stop_entry(GenServer.server(), atom(), ExtRegistry.entry()) ::
           {:ok, ExtRegistry.entry()} | :stale | :not_registered
@@ -741,9 +771,42 @@ defmodule Minga.Extension.Supervisor do
 
   defp current_stop_entry_for_request(_requested_entry, _current_entry), do: :stale
 
-  @spec maybe_log_slow_lifecycle_phase(atom(), atom(), integer(), start_opts()) :: :ok
-  defp maybe_log_slow_lifecycle_phase(name, phase, duration, opts) do
+  @spec attach_slow_lifecycle_handler(atom(), atom(), start_opts()) :: term()
+  defp attach_slow_lifecycle_handler(name, phase, opts) do
     threshold_ms = Keyword.get(opts, :slow_lifecycle_threshold_ms, 50)
+    handler_id = {__MODULE__, :slow_lifecycle, self(), make_ref()}
+
+    :telemetry.attach(
+      handler_id,
+      [:minga, :extension, :lifecycle, :stop],
+      &__MODULE__.handle_slow_lifecycle_event/4,
+      %{extension: name, phase: phase, threshold_ms: threshold_ms}
+    )
+
+    handler_id
+  end
+
+  @spec detach_slow_lifecycle_handler(term()) :: :ok
+  defp detach_slow_lifecycle_handler(handler_id) do
+    :telemetry.detach(handler_id)
+    :ok
+  end
+
+  @doc false
+  @spec handle_slow_lifecycle_event([atom()], map(), map(), map()) :: :ok
+  def handle_slow_lifecycle_event(
+        _event,
+        %{duration: duration},
+        %{extension: extension, phase: phase},
+        %{extension: extension, phase: phase, threshold_ms: threshold_ms}
+      ) do
+    maybe_log_slow_lifecycle_phase(extension, phase, duration, threshold_ms)
+  end
+
+  def handle_slow_lifecycle_event(_event, _measurements, _metadata, _config), do: :ok
+
+  @spec maybe_log_slow_lifecycle_phase(atom(), atom(), integer(), non_neg_integer()) :: :ok
+  defp maybe_log_slow_lifecycle_phase(name, phase, duration, threshold_ms) do
     duration_ms = System.convert_time_unit(duration, :native, :millisecond)
 
     case duration_ms >= threshold_ms do
@@ -904,15 +967,28 @@ defmodule Minga.Extension.Supervisor do
 
   @spec handle_restarted_child(restart_monitor(), pid(), non_neg_integer()) :: :ok
   defp handle_restarted_child(monitor, pid, count) do
-    case lifecycle_monitor_active?(monitor.registry, monitor.name, monitor.lifecycle_ref) do
-      true ->
-        ExtRegistry.update(monitor.registry, monitor.name, pid: pid)
-        emit_restart_count(monitor.name, count)
-        monitor_child_restarts(monitor, pid, count)
+    run_test_hook(monitor.opts, :before_restart_reconcile)
 
-      false ->
-        :ok
+    case reconcile_restarted_child(monitor, pid, count) do
+      :monitor -> monitor_child_restarts(monitor, pid, count)
+      :stale -> :ok
     end
+  end
+
+  @spec reconcile_restarted_child(restart_monitor(), pid(), non_neg_integer()) ::
+          :monitor | :stale
+  defp reconcile_restarted_child(monitor, pid, count) do
+    with_lifecycle_lock(monitor.registry, monitor.name, fn ->
+      case lifecycle_monitor_active?(monitor.registry, monitor.name, monitor.lifecycle_ref) do
+        true ->
+          ExtRegistry.update(monitor.registry, monitor.name, pid: pid)
+          emit_restart_count(monitor.name, count)
+          :monitor
+
+        false ->
+          :stale
+      end
+    end)
   end
 
   @spec retry_restarted_child_wait(
@@ -1069,7 +1145,7 @@ defmodule Minga.Extension.Supervisor do
 
       {:error, reason} ->
         Minga.Log.warning(:config, "Extension #{name}: #{reason}")
-        ExtRegistry.update(registry, name, status: :load_error, pid: nil, lifecycle_ref: nil)
+        mark_start_load_error(registry, name)
         [%{extension: name, reason: reason} | failures]
     end
   end
@@ -1086,9 +1162,10 @@ defmodule Minga.Extension.Supervisor do
   defp find_and_start_hex_extension_locked(supervisor, registry, name, entry, opts) do
     cmd_registry = Keyword.get(opts, :command_registry, Minga.Command.Registry)
     keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
-    package_atom = String.to_atom(entry.hex.package)
+    mark_start_attempt(registry, name)
 
-    with :ok <-
+    with {:ok, package_atom} <- hex_package_application(entry.hex.package),
+         :ok <-
            run_lifecycle_phase(name, :load, opts, fn ->
              ensure_hex_application_started(package_atom)
            end),
@@ -1306,6 +1383,32 @@ defmodule Minga.Extension.Supervisor do
     end
   end
 
+  @spec finalize_explicit_stop_result(
+          :ok | {:error, term()},
+          :ok | {:error, [map()]},
+          GenServer.server(),
+          atom(),
+          ExtRegistry.entry()
+        ) :: :ok | {:error, term()}
+  defp finalize_explicit_stop_result(:ok, :ok, registry, name, entry) do
+    finalize_stopped_extension(registry, name, entry)
+  end
+
+  defp finalize_explicit_stop_result(:ok, {:error, failures}, registry, name, _entry) do
+    ExtRegistry.update(registry, name, status: :load_error, pid: nil, lifecycle_ref: nil)
+    {:error, {:cleanup_failed, failures}}
+  end
+
+  defp finalize_explicit_stop_result({:error, reason}, :ok, registry, name, entry) do
+    finalize_stopped_extension(registry, name, entry)
+    {:error, reason}
+  end
+
+  defp finalize_explicit_stop_result({:error, reason}, {:error, failures}, registry, name, _entry) do
+    ExtRegistry.update(registry, name, status: :load_error, lifecycle_ref: nil)
+    {:error, {:cleanup_failed, reason, failures}}
+  end
+
   @spec finalize_stopped_extension(GenServer.server(), atom(), ExtRegistry.entry()) :: :ok
   defp finalize_stopped_extension(registry, name, entry) do
     if entry.module do
@@ -1326,10 +1429,20 @@ defmodule Minga.Extension.Supervisor do
   @spec mark_hex_entries_load_error(GenServer.server()) :: :ok
   defp mark_hex_entries_load_error(registry) do
     for {name, entry} <- ExtRegistry.all(registry), entry.source_type == :hex do
-      ExtRegistry.update(registry, name, status: :load_error, pid: nil, lifecycle_ref: nil)
+      mark_start_load_error(registry, name)
     end
 
     :ok
+  end
+
+  @spec hex_package_application(String.t()) :: {:ok, atom()} | {:error, term()}
+  defp hex_package_application(package) when is_binary(package) do
+    package
+    |> String.replace("-", "_")
+    |> String.to_existing_atom()
+    |> then(&{:ok, &1})
+  rescue
+    ArgumentError -> {:error, {:unknown_hex_application, package}}
   end
 
   @spec ensure_hex_application_started(atom()) :: :ok | {:error, term()}

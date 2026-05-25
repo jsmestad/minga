@@ -211,6 +211,8 @@ defmodule Minga.Extension.SourceCleanupTest do
 
     {:ok, running_entry} = ExtRegistry.get(ctx.registry, :stop_cleanup_failure)
 
+    pid_ref = Process.monitor(pid)
+
     assert {:error, {:cleanup_failed, failures}} =
              ExtSupervisor.stop_extension(
                ctx.supervisor,
@@ -226,12 +228,12 @@ defmodule Minga.Extension.SourceCleanupTest do
              _ -> false
            end)
 
-    refute Process.alive?(pid)
+    assert_receive {:DOWN, ^pid_ref, :process, ^pid, _reason}, 1_000
 
     {:ok, stopped_entry} = ExtRegistry.get(ctx.registry, :stop_cleanup_failure)
-    assert stopped_entry.status == :stopped
+    assert stopped_entry.status == :load_error
     assert stopped_entry.pid == nil
-    assert stopped_entry.module == nil
+    assert stopped_entry.module == Minga.TestExtensions.StopCleanupFailure
   end
 
   test "stop_extension cleans source-owned contributions even when the pid is stale", ctx do
@@ -525,6 +527,7 @@ defmodule Minga.Extension.SourceCleanupTest do
         status: :running
       )
 
+    healthy_ref = Process.monitor(healthy_pid)
     assert {:error, failures} = ExtSupervisor.stop_all(ctx.supervisor, ctx.registry)
 
     assert Enum.any?(failures, fn
@@ -535,7 +538,7 @@ defmodule Minga.Extension.SourceCleanupTest do
     {:ok, healthy_stopped} = ExtRegistry.get(ctx.registry, :stop_all_healthy)
     assert healthy_stopped.status == :stopped
     assert healthy_stopped.pid == nil
-    refute Process.alive?(healthy_pid)
+    assert_receive {:DOWN, ^healthy_ref, :process, ^healthy_pid, _reason}, 1_000
 
     {:ok, broken_entry} = ExtRegistry.get(ctx.registry, :stop_all_broken)
     assert broken_entry.status == :stopped
