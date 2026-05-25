@@ -54,6 +54,21 @@ enum NotificationLevel: Sendable, Equatable {
 /// Namespace for all binary protocol data types decoded from the BEAM.
 enum Wire {
 
+    // MARK: - Sidebars
+
+    /// Semantic sidebar metadata decoded from the BEAM sidebar host payload.
+    struct SidebarMetadata: Sendable, Equatable, Identifiable {
+        let id: String
+        let displayName: String
+        let semanticKind: String
+        let icon: String
+        let order: UInt16
+        let visible: Bool
+        let focused: Bool
+        let preferredWidth: UInt16
+        let badgeCount: UInt16?
+    }
+
     // MARK: - Notifications
 
     /// A BEAM-owned editor notification decoded from gui_notifications.

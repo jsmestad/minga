@@ -141,6 +141,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       &build_gui_theme_cmd/2,
       &build_gui_tab_bar_cmd/2,
       &build_gui_workspaces_cmd/2,
+      &build_gui_sidebars_cmd/2,
       &build_gui_file_tree_cmd/2,
       &build_gui_git_status_cmd/2,
       &build_gui_which_key_cmd/2,
@@ -333,6 +334,164 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   defp build_gui_file_tree_cmd(_ctx, caches) do
     build_hidden_gui_file_tree_cmd(nil, caches)
+  end
+
+  # ── Semantic sidebar metadata ──
+
+  @spec build_gui_sidebars_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
+  defp build_gui_sidebars_cmd(ctx, caches) do
+    raw_sidebars = sidebar_metadata(ctx)
+    active_id = active_sidebar_id(ctx, raw_sidebars)
+    sidebars = mark_active_sidebar(raw_sidebars, active_id)
+    fp = :erlang.phash2({sidebars, active_id})
+
+    if fp != caches.last_gui_sidebars_fp do
+      {ProtocolGUI.encode_gui_sidebars(sidebars, active_id), %{caches | last_gui_sidebars_fp: fp}}
+    else
+      {nil, caches}
+    end
+  end
+
+  @spec sidebar_metadata(ctx()) :: [ProtocolGUI.sidebar_metadata()]
+  defp sidebar_metadata(ctx) do
+    [
+      file_tree_sidebar_metadata(ctx),
+      git_status_sidebar_metadata(ctx),
+      observatory_sidebar_metadata(ctx)
+    ]
+  end
+
+  @spec file_tree_sidebar_metadata(ctx()) :: ProtocolGUI.sidebar_metadata()
+  defp file_tree_sidebar_metadata(%{file_tree: %FileTreeState{} = file_tree}) do
+    status = FileTreeState.status(file_tree)
+
+    %{
+      id: "file_tree",
+      display_name: "File Tree",
+      semantic_kind: "file_tree",
+      icon: "folder",
+      order: 10,
+      visible?: FileTreeState.visible_status?(status),
+      focused?: file_tree_focused?(file_tree),
+      preferred_width: FileTreeState.width(file_tree),
+      badge_count: nil
+    }
+  end
+
+  defp file_tree_sidebar_metadata(%{file_tree: %{project_root: _root}}) do
+    hidden_sidebar_metadata("file_tree", "File Tree", "file_tree", "folder", 10)
+  end
+
+  defp file_tree_sidebar_metadata(_ctx) do
+    hidden_sidebar_metadata("file_tree", "File Tree", "file_tree", "folder", 10)
+  end
+
+  @spec git_status_sidebar_metadata(ctx()) :: ProtocolGUI.sidebar_metadata()
+  defp git_status_sidebar_metadata(%{shell_state: %{git_status_panel: %{} = data}}) do
+    entries = Map.get(data, :entries, [])
+
+    %{
+      id: "git_status",
+      display_name: "Git Status",
+      semantic_kind: "git_status",
+      icon: "point.3.filled.connected.trianglepath.dotted",
+      order: 20,
+      visible?: true,
+      focused?: true,
+      preferred_width: 30,
+      badge_count: length(entries)
+    }
+  end
+
+  defp git_status_sidebar_metadata(_ctx) do
+    hidden_sidebar_metadata(
+      "git_status",
+      "Git Status",
+      "git_status",
+      "point.3.filled.connected.trianglepath.dotted",
+      20
+    )
+  end
+
+  @spec observatory_sidebar_metadata(ctx()) :: ProtocolGUI.sidebar_metadata()
+  defp observatory_sidebar_metadata(%{shell_state: %{observatory_visible: true}}) do
+    %{
+      id: "observatory",
+      display_name: "BEAM Observatory",
+      semantic_kind: "observatory",
+      icon: "network",
+      order: 30,
+      visible?: true,
+      focused?: true,
+      preferred_width: 30,
+      badge_count: nil
+    }
+  end
+
+  defp observatory_sidebar_metadata(_ctx) do
+    hidden_sidebar_metadata("observatory", "BEAM Observatory", "observatory", "network", 30)
+  end
+
+  @spec hidden_sidebar_metadata(String.t(), String.t(), String.t(), String.t(), non_neg_integer()) ::
+          ProtocolGUI.sidebar_metadata()
+  defp hidden_sidebar_metadata(id, display_name, kind, icon, order) do
+    %{
+      id: id,
+      display_name: display_name,
+      semantic_kind: kind,
+      icon: icon,
+      order: order,
+      visible?: false,
+      focused?: false,
+      preferred_width: 30,
+      badge_count: nil
+    }
+  end
+
+  @spec active_sidebar_id(ctx(), [ProtocolGUI.sidebar_metadata()]) :: String.t()
+  defp active_sidebar_id(ctx, sidebars) do
+    preferred_id = ctx |> Map.get(:shell_state, %{}) |> Map.get(:sidebar_active_id)
+
+    case sidebar_visible?(sidebars, preferred_id) do
+      true -> preferred_id
+      false -> fallback_active_sidebar_id(sidebars)
+    end
+  end
+
+  @spec sidebar_visible?([ProtocolGUI.sidebar_metadata()], String.t() | nil) :: boolean()
+  defp sidebar_visible?(_sidebars, nil), do: false
+
+  defp sidebar_visible?(sidebars, id) do
+    Enum.any?(sidebars, fn sidebar -> sidebar.id == id and sidebar.visible? end)
+  end
+
+  @spec fallback_active_sidebar_id([ProtocolGUI.sidebar_metadata()]) :: String.t()
+  defp fallback_active_sidebar_id(sidebars) do
+    focused =
+      sidebars
+      |> Enum.filter(fn sidebar -> sidebar.visible? and sidebar.focused? end)
+      |> Enum.sort_by(& &1.order, :desc)
+      |> List.first()
+
+    visible =
+      sidebars
+      |> Enum.filter(& &1.visible?)
+      |> Enum.sort_by(& &1.order, :desc)
+      |> List.first()
+
+    case focused || visible do
+      %{id: id} -> id
+      nil -> ""
+    end
+  end
+
+  @spec mark_active_sidebar([ProtocolGUI.sidebar_metadata()], String.t()) :: [
+          ProtocolGUI.sidebar_metadata()
+        ]
+  defp mark_active_sidebar(sidebars, active_id) do
+    Enum.map(sidebars, fn sidebar ->
+      %{sidebar | focused?: sidebar.visible? and sidebar.id == active_id}
+    end)
   end
 
   @spec build_gui_file_tree_state_cmd(FileTreeState.t(), FileTreeState.tree_status(), Caches.t()) ::

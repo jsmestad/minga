@@ -81,6 +81,7 @@ defmodule MingaEditor.Commands.Git do
       state
       |> EditorState.set_keymap_scope(:editor)
       |> EditorState.close_git_status_panel()
+      |> EditorState.set_sidebar_active_id(nil)
       |> Layout.invalidate()
       |> EditorState.invalidate_all_windows()
     else
@@ -1243,6 +1244,7 @@ defmodule MingaEditor.Commands.Git do
 
         state
         |> EditorState.set_git_status_panel(panel_data)
+        |> EditorState.set_sidebar_active_id("git_status")
         |> Layout.invalidate()
         |> EditorState.invalidate_all_windows()
     end
@@ -1268,6 +1270,7 @@ defmodule MingaEditor.Commands.Git do
 
     state
     |> EditorState.set_git_status_panel(panel_data)
+    |> EditorState.set_sidebar_active_id("git_status")
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()
   end

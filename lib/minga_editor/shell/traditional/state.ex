@@ -39,6 +39,7 @@ defmodule MingaEditor.Shell.Traditional.State do
           bottom_panel: BottomPanel.t(),
           git_status_panel: MingaEditor.Frontend.Protocol.GUI.git_status_panel_data() | nil,
           git_status_tui_state: GitStatusTuiState.t() | nil,
+          sidebar_active_id: String.t() | nil,
           observatory_visible: boolean(),
           observatory_data: Observatory.Data.t() | nil,
           observatory_timer: {reference(), reference()} | nil,
@@ -68,6 +69,7 @@ defmodule MingaEditor.Shell.Traditional.State do
             bottom_panel: %BottomPanel{},
             git_status_panel: nil,
             git_status_tui_state: nil,
+            sidebar_active_id: nil,
             observatory_visible: false,
             observatory_data: nil,
             observatory_timer: nil,
@@ -223,6 +225,16 @@ defmodule MingaEditor.Shell.Traditional.State do
   @spec close_git_status_panel(t()) :: t()
   def close_git_status_panel(%{} = ss) do
     %{ss | git_status_panel: nil, git_status_tui_state: nil}
+  end
+
+  @doc "Returns the active native sidebar id, or nil when the renderer should derive one."
+  @spec sidebar_active_id(t()) :: String.t() | nil
+  def sidebar_active_id(%{sidebar_active_id: id}), do: id
+
+  @doc "Sets the active native sidebar id."
+  @spec set_sidebar_active_id(t(), String.t() | nil) :: t()
+  def set_sidebar_active_id(%{} = ss, id) when is_binary(id) or is_nil(id) do
+    %{ss | sidebar_active_id: id}
   end
 
   # ── BEAM Observatory ──────────────────────────────────────────────────────

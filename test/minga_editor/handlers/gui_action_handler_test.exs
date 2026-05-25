@@ -5,10 +5,15 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
   use ExUnit.Case, async: true
 
+  import ExUnit.CaptureLog
+
   alias Minga.Events
+  alias MingaEditor.Commands
+  alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Handlers.GuiActionHandler
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.ResourcePressure
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -39,6 +44,81 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
     assert unpinned_tab_bar.active_id == 1
     refute TabBar.get(unpinned_tab_bar, 3).pinned?
+  end
+
+  test "activating visible sidebars updates focus and keyboard scope" do
+    file_tree_state = %FileTreeState{tree_status: :loading, focused: false}
+
+    state =
+      TestHelpers.base_state()
+      |> EditorState.update_file_tree(fn _file_tree -> file_tree_state end)
+
+    file_tree_active =
+      GuiActionHandler.dispatch(state, {:sidebar_action, "file_tree", "renamed_kind", "activate"})
+
+    assert file_tree_active.workspace.file_tree.focused
+    assert file_tree_active.workspace.keymap_scope == :file_tree
+    assert EditorState.sidebar_active_id(file_tree_active) == "file_tree"
+
+    git_state = EditorState.set_git_status_panel(state, %{entries: []})
+
+    git_active =
+      GuiActionHandler.dispatch(
+        git_state,
+        {:sidebar_action, "git_status", "renamed_kind", "activate"}
+      )
+
+    assert git_active.workspace.keymap_scope == :git_status
+    assert EditorState.sidebar_active_id(git_active) == "git_status"
+
+    observatory_state =
+      state
+      |> EditorState.open_observatory(nil)
+      |> EditorState.set_keymap_scope(:file_tree)
+
+    observatory_active =
+      GuiActionHandler.dispatch(
+        observatory_state,
+        {:sidebar_action, "observatory", "observatory", "activate"}
+      )
+
+    refute observatory_active.workspace.file_tree.focused
+    assert observatory_active.workspace.keymap_scope == :editor
+    assert EditorState.sidebar_active_id(observatory_active) == "observatory"
+  end
+
+  test "unknown sidebar action is reported instead of silently ignored" do
+    state = TestHelpers.base_state()
+
+    log =
+      capture_log(fn ->
+        new_state =
+          GuiActionHandler.dispatch(state, {:sidebar_action, "custom", "custom_kind", "toggle"})
+
+        assert EditorState.status_msg(new_state) ==
+                 "Unsupported sidebar action: custom_kind/toggle"
+      end)
+
+    assert log =~ "Ignored sidebar action"
+    assert log =~ "custom_kind"
+  end
+
+  test "command-opened observatory replaces stale active sidebar id" do
+    state =
+      TestHelpers.base_state()
+      |> Map.put(:capabilities, %Capabilities{frontend_type: :native_gui})
+      |> EditorState.update_file_tree(fn _file_tree ->
+        %FileTreeState{tree_status: :loading, focused: true}
+      end)
+      |> EditorState.set_keymap_scope(:file_tree)
+      |> EditorState.set_sidebar_active_id("git_status")
+
+    new_state = Commands.execute(state, :toggle_beam_observatory)
+
+    assert EditorState.sidebar_active_id(new_state) == "observatory"
+    assert EditorState.observatory_visible?(new_state)
+    refute new_state.workspace.file_tree.focused
+    assert new_state.workspace.keymap_scope == :editor
   end
 
   test "observatory inspect is a no-op in the Board shell" do

@@ -16,17 +16,21 @@ struct ActivityBarViewTests {
 
     @Test("Renders one icon per sidebar panel")
     @MainActor func rendersPanelIcons() throws {
-        let sut = ActivityBar(activePanel: .fileTree, gitStatusCount: 0, theme: ThemeColors(), encoder: nil)
+        let guiState = GUIState()
+        guiState.sidebarHostState.update(activeId: "file_tree", sidebars: sidebarMetadata())
+        let sut = ActivityBar(guiState: guiState, sidebarHostState: guiState.sidebarHostState, theme: ThemeColors(), encoder: nil)
         let body = try sut.inspect()
         let buttons = body.findAll(ViewType.Button.self)
 
-        #expect(buttons.count == ActivityBarPanel.allCases.count)
+        #expect(buttons.count == 3)
     }
 
-    @Test("Tap sends the matching panel toggle")
+    @Test("Tap sends semantic sidebar toggle actions")
     @MainActor func tapSendsPanelToggle() throws {
+        let guiState = GUIState()
+        guiState.sidebarHostState.update(activeId: "file_tree", sidebars: sidebarMetadata())
         let spy = SpyEncoder()
-        let sut = ActivityBar(activePanel: .fileTree, gitStatusCount: 0, theme: ThemeColors(), encoder: spy)
+        let sut = ActivityBar(guiState: guiState, sidebarHostState: guiState.sidebarHostState, theme: ThemeColors(), encoder: spy)
         let body = try sut.inspect()
         let buttons = body.findAll(ViewType.Button.self)
 
@@ -34,20 +38,66 @@ struct ActivityBarViewTests {
             try button.tap()
         }
 
-        #expect(spy.guiActions == [.togglePanel(panel: 0), .togglePanel(panel: 2), .togglePanel(panel: 4)])
+        #expect(spy.guiActions == [
+            .sidebarAction(sidebarId: "file_tree", kind: "file_tree", action: "toggle"),
+            .sidebarAction(sidebarId: "git_status", kind: "git_status", action: "activate"),
+            .sidebarAction(sidebarId: "observatory", kind: "observatory", action: "activate")
+        ])
+    }
+
+    @Test("Git badge falls back to full total count without narrowing")
+    @MainActor func gitBadgeUsesLargeTotalCount() throws {
+        let guiState = GUIState()
+        guiState.gitStatusState.entries = (0..<70_000).map { index in
+            GitStatusEntry(pathHash: UInt32(index), section: .changed, status: .modified, path: "file_\(index).ex")
+        }
+        guiState.sidebarHostState.update(activeId: "git_status", sidebars: sidebarMetadata())
+        let sut = ActivityBar(guiState: guiState, sidebarHostState: guiState.sidebarHostState, theme: ThemeColors(), encoder: nil)
+        let body = try sut.inspect()
+        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(strings.contains("99+"))
     }
 
     @Test("Git badge shows changed file count and buttons keep accessibility labels")
     @MainActor func gitBadgeAndLabels() throws {
-        let sut = ActivityBar(activePanel: .gitStatus, gitStatusCount: 7, theme: ThemeColors(), encoder: nil)
+        let guiState = GUIState()
+        guiState.sidebarHostState.update(activeId: "git_status", sidebars: sidebarMetadata(gitBadgeCount: 7))
+        let sut = ActivityBar(guiState: guiState, sidebarHostState: guiState.sidebarHostState, theme: ThemeColors(), encoder: nil)
         let body = try sut.inspect()
         let buttons = body.findAll(ViewType.Button.self)
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
-        #expect(buttons.count == ActivityBarPanel.allCases.count)
-        #expect(try buttons[1].accessibilityLabel().string() == "Git status")
-        #expect(try buttons[0].accessibilityLabel().string() == "File tree")
+        #expect(buttons.count == 3)
+        #expect(try buttons[1].accessibilityLabel().string() == "Git Status")
+        #expect(try buttons[0].accessibilityLabel().string() == "File Tree")
         #expect(strings.contains("7"))
+    }
+
+    private func sidebarMetadata(gitBadgeCount: UInt16? = nil) -> [Wire.SidebarMetadata] {
+        [
+            Wire.SidebarMetadata(id: "file_tree", displayName: "File Tree", semanticKind: "file_tree", icon: "folder", order: 10, visible: false, focused: false, preferredWidth: 30, badgeCount: nil),
+            Wire.SidebarMetadata(id: "git_status", displayName: "Git Status", semanticKind: "git_status", icon: "point.3.filled.connected.trianglepath.dotted", order: 20, visible: false, focused: false, preferredWidth: 30, badgeCount: gitBadgeCount),
+            Wire.SidebarMetadata(id: "observatory", displayName: "BEAM Observatory", semanticKind: "observatory", icon: "network", order: 30, visible: false, focused: false, preferredWidth: 30, badgeCount: nil)
+        ]
+    }
+}
+
+// MARK: - SidebarContainer
+
+@Suite("SidebarContainer View Structure")
+struct SidebarContainerViewTests {
+    @Test("Unknown visible sidebar renders generic fallback")
+    @MainActor func unknownSidebarFallback() throws {
+        let guiState = GUIState()
+        let item = Wire.SidebarMetadata(id: "custom", displayName: "Custom Tools", semanticKind: "custom_sidebar", icon: "sparkles", order: 40, visible: true, focused: true, preferredWidth: 30, badgeCount: nil)
+        guiState.sidebarHostState.update(activeId: "custom", sidebars: [item])
+        let active = try #require(guiState.sidebarHostState.activeSidebar)
+        let sut = SidebarContainer(guiState: guiState, activeSidebar: active, theme: ThemeColors(), encoder: nil, projectName: "minga", gitBranch: "main", leadingPadding: 10, sidebarWidth: .constant(240))
+        let strings = try sut.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(strings.contains("Unsupported sidebar"))
+        #expect(strings.contains("The native frontend does not have an adapter for \"custom_sidebar\"."))
     }
 }
 

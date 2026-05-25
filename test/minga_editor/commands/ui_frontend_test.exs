@@ -4,11 +4,16 @@ defmodule MingaEditor.Commands.UI.FrontendTest do
   alias MingaEditor.BottomPanel
   alias MingaEditor.Commands
   alias MingaEditor.Commands.UI.GUI, as: UIGUI
-  alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Commands.UI.TUI, as: UITUI
+  alias MingaEditor.Frontend.Capabilities
+  alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Viewport
 
   defp base_state do
-    %{
+    %EditorState{
+      port_manager: self(),
+      workspace: %SessionState{viewport: Viewport.new(24, 80)},
       capabilities: %Capabilities{frontend_type: :native_gui},
       shell_state: %MingaEditor.Shell.Traditional.State{bottom_panel: %BottomPanel{}}
     }

@@ -44,6 +44,7 @@ defmodule MingaEditor.Renderer.Caches do
     last_gui_tab_bar_fp: nil,
     last_gui_workspaces_fp: nil,
     last_gui_file_tree_fp: nil,
+    last_gui_sidebars_fp: nil,
     last_gui_git_status_fp: nil,
     last_gui_which_key_fp: nil,
     last_gui_completion_fp: nil,
@@ -88,6 +89,7 @@ defmodule MingaEditor.Renderer.Caches do
             | {:file_tree_state, String.t(), non_neg_integer(), term()}
             | {:no_tree, String.t()}
             | nil,
+          last_gui_sidebars_fp: integer() | nil,
           last_gui_git_status_fp:
             integer()
             | {:no_git, boolean(), MingaEditor.Frontend.Protocol.GUI.git_toast() | nil}

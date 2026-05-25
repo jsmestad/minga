@@ -11,6 +11,7 @@ defmodule MingaEditor.Commands.UI do
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias Minga.Parser.Manager, as: ParserManager
 
   command(:command_palette, "Execute command",
@@ -113,17 +114,31 @@ defmodule MingaEditor.Commands.UI do
       subscribe_observatory()
       token = make_ref()
       timer = Process.send_after(self(), {:observatory_tick, token}, 0)
-      EditorState.open_observatory(state, {timer, token})
+
+      state
+      |> focus_observatory_sidebar()
+      |> EditorState.open_observatory({timer, token})
+      |> EditorState.set_sidebar_active_id("observatory")
     else
       state
     end
+  end
+
+  @spec focus_observatory_sidebar(EditorState.t()) :: EditorState.t()
+  defp focus_observatory_sidebar(state) do
+    state
+    |> EditorState.update_file_tree(&FileTreeState.unfocus/1)
+    |> EditorState.set_keymap_scope(:editor)
   end
 
   @spec close_beam_observatory(EditorState.t()) :: EditorState.t()
   defp close_beam_observatory(state) do
     unsubscribe_observatory()
     cancel_timer(state.shell_state.observatory_timer)
-    EditorState.close_observatory(state)
+
+    state
+    |> EditorState.close_observatory()
+    |> EditorState.set_sidebar_active_id(nil)
   end
 
   @spec subscribe_observatory() :: :ok

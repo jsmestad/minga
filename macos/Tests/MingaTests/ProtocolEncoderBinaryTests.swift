@@ -331,6 +331,21 @@ struct EncoderGUIActionTests {
         #expect(payload[2] == 1)
     }
 
+    @Test("sidebar_action encodes id kind and action")
+    func sidebarActionLayout() {
+        let payload = captureFrame { $0.sendSidebarAction(sidebarId: "git_status", kind: "git_status", action: "toggle") }
+
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_SIDEBAR_ACTION)
+        let (id, kindOffset) = readString16(payload, 2)
+        let (kind, actionOffset) = readString16(payload, kindOffset)
+        let (action, endOffset) = readString16(payload, actionOffset)
+        #expect(id == "git_status")
+        #expect(kind == "git_status")
+        #expect(action == "toggle")
+        #expect(endOffset == payload.count)
+    }
+
     @Test("new_tab is just opcode + action_type")
     func newTabLayout() {
         let payload = captureFrame { $0.sendNewTab() }

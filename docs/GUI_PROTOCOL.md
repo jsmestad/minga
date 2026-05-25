@@ -61,6 +61,29 @@ The BEAM-side encoder must use a documented length-prefixed envelope for all new
 | 0x95 | gui_cursor_animation | Cursor movement animation preference for GUI renderers. |
 | 0x96 | gui_hover_action | Optional action metadata for the hover popup |
 | 0x9A | gui_observatory | BEAM Observatory process tree and metrics for native sidebars. Uses a 32-bit payload length because large supervision trees can exceed 64KB. |
+| 0x9F | gui_sidebars | Semantic sidebar host metadata. Uses a 32-bit payload length so future sidebar lists can grow without changing the envelope. |
+
+### 0x9F — gui_sidebars
+
+Native frontends receive sidebar identity and placement separately from rich sidebar payloads. The BEAM remains the source of truth for which sidebars exist, which one is visible or focused, and how user actions should route back. The frontend selects a compiled-in native adapter by `semantic_kind`; it must not load arbitrary extension frontend code at runtime.
+
+```
+opcode(1) + payload_len(4) + payload(payload_len)
+
+Payload v1:
+  version(1) + sidebar_count(2) + active_id_len(2) + active_id(active_id_len) + sidebars...
+
+Sidebar entry:
+  id_len(2) + id(id_len) + display_name_len(2) + display_name(display_name_len) + semantic_kind_len(2) + semantic_kind(semantic_kind_len) + icon_len(2) + icon(icon_len) + order(2) + flags(1) + preferred_width(2) + badge_count(2)
+```
+
+Flag bits:
+  bit 0: visible
+  bit 1: focused
+
+`badge_count == 0xFFFF` means no badge. Known semantic kinds in the macOS frontend are `file_tree`, `git_status`, and `observatory`. Unknown kinds must not crash the frontend. A frontend may ignore them or show a generic fallback and should log one concise warning.
+
+User actions from the native sidebar host should use `sidebar_action` with the sidebar id, semantic kind, and action name. Existing rich payloads such as `gui_file_tree`, `gui_git_status`, and `gui_observatory` remain separately versioned and centrally encoded.
 
 ### 0x9A — gui_observatory
 
@@ -941,6 +964,7 @@ opcode(1) + action_type(1) + payload...
 | 0x4B | tab_move_left | tab_id(4) | Move a tab one visible slot left without selecting it first |
 | 0x4C | tab_move_right | tab_id(4) | Move a tab one visible slot right without selecting it first |
 | 0x4D | observatory_inspect | pid_len(2) + pid | Inspect a BEAM Observatory process PID |
+| 0x57 | sidebar_action | sidebar_id_len(2) + sidebar_id + kind_len(2) + kind + action_len(2) + action | Invoke a semantic sidebar host action tied to BEAM-owned sidebar identity |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |

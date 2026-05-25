@@ -133,6 +133,15 @@ struct GUIActionEncoderTests {
         #expect(spy.guiActions == [.togglePanel(panel: 0), .togglePanel(panel: 1)])
     }
 
+    @Test("sendSidebarAction records semantic action")
+    func sidebarAction() {
+        let spy = SpyEncoder()
+        let encoder: InputEncoder = spy
+        encoder.sendSidebarAction(sidebarId: "git_status", kind: "git_status", action: "toggle")
+
+        #expect(spy.guiActions == [.sidebarAction(sidebarId: "git_status", kind: "git_status", action: "toggle")])
+    }
+
     @Test("panel actions record correctly")
     func panelActions() {
         let spy = SpyEncoder()
