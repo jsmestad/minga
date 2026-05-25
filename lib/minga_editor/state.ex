@@ -35,12 +35,14 @@ defmodule MingaEditor.State do
 
   alias MingaEditor.BottomPanel
   alias MingaEditor.KeystrokeHistory
+  alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Dired, as: DiredState
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.Session, as: EditorSessionState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Highlighting
   alias MingaEditor.State.Mouse
   alias MingaEditor.State.Remote
@@ -246,7 +248,15 @@ defmodule MingaEditor.State do
   @doc "Replaces the active workspace."
   @spec set_workspace(t(), SessionState.t()) :: t()
   def set_workspace(%__MODULE__{} = state, %SessionState{} = workspace) do
+    sync_file_tree_sidebar(workspace)
     %{state | workspace: workspace}
+  end
+
+  @spec sync_file_tree_sidebar(SessionState.t()) :: :ok
+  defp sync_file_tree_sidebar(%SessionState{} = workspace) do
+    workspace
+    |> SessionState.file_tree_state()
+    |> FileTreeFeature.sync_sidebar()
   end
 
   @doc "Returns source-owned feature state from the active workspace, or nil when inactive."
@@ -313,16 +323,8 @@ defmodule MingaEditor.State do
     update_workspace(state, &SessionState.set_keymap_scope(&1, scope))
   end
 
-  @empty_file_tree %{
-    tree: nil,
-    buffer: nil,
-    project_root: nil,
-    original_root: nil,
-    focused: false
-  }
-
   @doc "Returns the active workspace FileTree feature state."
-  @spec file_tree_state(t() | map()) :: map()
+  @spec file_tree_state(t() | map()) :: FileTreeState.t()
   def file_tree_state(%__MODULE__{workspace: workspace}) do
     SessionState.file_tree_state(workspace)
   end
@@ -335,16 +337,17 @@ defmodule MingaEditor.State do
     MingaEditor.RenderPipeline.Input.file_tree_state(input)
   end
 
-  def file_tree_state(_state), do: @empty_file_tree
+  def file_tree_state(_state), do: %FileTreeState{}
 
   @doc "Replaces the active workspace FileTree feature state."
-  @spec set_file_tree(t(), map()) :: t()
-  def set_file_tree(%__MODULE__{} = state, file_tree) when is_map(file_tree) do
+  @spec set_file_tree(t(), FileTreeState.t()) :: t()
+  def set_file_tree(%__MODULE__{} = state, %FileTreeState{} = file_tree) do
+    FileTreeFeature.sync_sidebar(file_tree)
     update_workspace(state, &SessionState.set_file_tree(&1, file_tree))
   end
 
   @doc "Updates the active workspace FileTree feature state."
-  @spec update_file_tree(t(), (map() -> map())) :: t()
+  @spec update_file_tree(t(), (FileTreeState.t() -> FileTreeState.t())) :: t()
   def update_file_tree(%__MODULE__{} = state, fun) when is_function(fun, 1) do
     set_file_tree(state, fun.(file_tree_state(state)))
   end
@@ -352,6 +355,7 @@ defmodule MingaEditor.State do
   @doc "Drops the active workspace FileTree feature state."
   @spec drop_file_tree(t()) :: t()
   def drop_file_tree(%__MODULE__{} = state) do
+    FileTreeFeature.sync_sidebar(%FileTreeState{})
     update_workspace(state, &SessionState.drop_file_tree/1)
   end
 

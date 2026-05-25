@@ -7,7 +7,7 @@ defmodule MingaEditor.Input.Dired do
   All other keys pass through to the Mode FSM, making the buffer fully
   editable with standard vim motions and operators.
 
-  Unlike extension-backed sidebar handlers, no buffer-swap trick is needed: the dired
+  Unlike FileTreeHandler, no buffer-swap trick is needed: the dired
   buffer IS the active buffer and is directly editable.
   """
 

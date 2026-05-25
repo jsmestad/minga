@@ -1054,7 +1054,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
           byte_size(source_a)::16, source_a::binary, byte_size(source_b)::16, source_b::binary>>
 
       assert {:ok, {:gui_action, {:file_tree_drop, intent}}} = Protocol.decode_event(payload)
-      assert is_map(intent)
+      assert %MingaEditor.FileTree.DropIntent{} = intent
       assert intent.target_index == 8
       assert intent.target_path_hash == 0xAABBCCDD
       assert intent.target_dir? == true
@@ -1159,7 +1159,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
 
     test "encodes semantic gui_file_tree with length prefix, root, selection, and row fields" do
       row =
-        Map.new(
+        MingaEditor.FileTree.Row.new(
           id: "/project/lib/hello.ex",
           path: "/project/lib/hello.ex",
           relative_path: "lib/hello.ex",
@@ -1171,7 +1171,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
           active?: true,
           dirty?: true,
           git_status: :modified,
-          diagnostics: {1, 2, 3, 4},
+          diagnostics: MingaEditor.FileTree.Diagnostics.new({1, 2, 3, 4}),
           depth: 1,
           guides: [true, false],
           last_child?: true,
@@ -1274,7 +1274,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
 
     test "clamps semantic gui_file_tree diagnostic counts to uint16 wire fields" do
       row =
-        Map.new(
+        MingaEditor.FileTree.Row.new(
           id: "/project/lib/noisy.ex",
           path: "/project/lib/noisy.ex",
           relative_path: "lib/noisy.ex",
@@ -1282,7 +1282,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
           directory?: false,
           expanded?: false,
           selected?: true,
-          diagnostics: {70_000, 65_536, 3, 4},
+          diagnostics: MingaEditor.FileTree.Diagnostics.new({70_000, 65_536, 3, 4}),
           depth: 0,
           guides: [],
           last_child?: true,
@@ -1300,7 +1300,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
 
     test "encodes semantic gui_file_tree string lengths as UTF-8 byte counts" do
       row =
-        Map.new(
+        MingaEditor.FileTree.Row.new(
           id: "/project/lib/ñ📄.ex",
           path: "/project/lib/ñ📄.ex",
           relative_path: "lib/ñ📄.ex",
@@ -1338,7 +1338,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
         for index <- 1..220 do
           suffix = String.duplicate("nested-segment-", 20) <> Integer.to_string(index)
 
-          Map.new(
+          MingaEditor.FileTree.Row.new(
             id: "/project/#{suffix}.ex",
             path: "/project/#{suffix}.ex",
             relative_path: "lib/#{suffix}.ex",
@@ -1410,7 +1410,7 @@ defmodule MingaEditor.Frontend.ProtocolTest do
 
     test "encodes semantic gui_file_tree editing payload" do
       row =
-        Map.new(
+        MingaEditor.FileTree.Row.new(
           id: "/project/target.txt",
           path: "/project/target.txt",
           relative_path: "target.txt",

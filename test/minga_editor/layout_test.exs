@@ -1,10 +1,9 @@
 defmodule MingaEditor.LayoutTest do
-  # Mutates the global sidebar registry while computing layout.
+  # Mutates the global built-in FileTree sidebar registration while computing layout.
   use ExUnit.Case, async: false
   use ExUnitProperties
 
   alias MingaEditor.Agent.UIState
-  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
@@ -13,16 +12,7 @@ defmodule MingaEditor.LayoutTest do
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Window
-
-  setup do
-    Sidebar.unregister_source({:extension, :layout_test})
-
-    on_exit(fn ->
-      Sidebar.unregister_source({:extension, :layout_test})
-    end)
-
-    :ok
-  end
+  alias Minga.Project.FileTree
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -56,20 +46,14 @@ defmodule MingaEditor.LayoutTest do
   end
 
   defp with_file_tree(state, width) do
-    :ok =
-      Sidebar.register({:extension, :layout_test}, %{
-        id: "layout_left_sidebar",
-        display_name: "Layout Sidebar",
-        placement: :left,
-        priority: 10,
-        preferred_width: width,
-        visible?: true,
-        focused?: true,
-        semantic_kind: "generic_tree",
-        icon: "list.bullet"
-      })
+    file_tree =
+      MingaEditor.State.FileTree.open(
+        %MingaEditor.State.FileTree{},
+        %FileTree{root: "/tmp", width: width},
+        nil
+      )
 
-    state
+    EditorState.set_file_tree(state, file_tree)
   end
 
   defp with_agent_workspace(state) do

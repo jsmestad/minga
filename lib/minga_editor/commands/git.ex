@@ -12,7 +12,6 @@ defmodule MingaEditor.Commands.Git do
   alias Minga.Core.Face
   alias MingaEditor.BufferLifecycle
   alias MingaEditor.Commands
-  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
@@ -489,7 +488,7 @@ defmodule MingaEditor.Commands.Git do
     if EditorState.file_tree_state(state).tree == nil do
       state
     else
-      Sidebar.dispatch_action(state, "file_tree", "close", %{})
+      Commands.FileTree.close(state)
     end
   end
 

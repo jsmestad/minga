@@ -20,6 +20,7 @@ defmodule MingaEditor.Commands.Movement do
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
   alias MingaEditor.Window
@@ -559,7 +560,7 @@ defmodule MingaEditor.Commands.Movement do
   # and restores the scope based on the active window's content type.
   defp navigate_window(state, :right) do
     if EditorState.file_tree_state(state).focused do
-      state = update_file_tree(state, &Map.put(&1, :focused, false))
+      state = update_file_tree(state, &FileTreeState.unfocus/1)
       scope = EditorState.scope_for_active_window(state)
       EditorState.set_keymap_scope(state, scope)
     else
@@ -593,7 +594,7 @@ defmodule MingaEditor.Commands.Movement do
   @spec maybe_focus_file_tree(state(), :left | :right | :up | :down) :: state()
   defp maybe_focus_file_tree(state, :left) do
     if match?(%Minga.Project.FileTree{}, EditorState.file_tree_state(state).tree) do
-      state = update_file_tree(state, &Map.put(&1, :focused, true))
+      state = update_file_tree(state, &FileTreeState.focus/1)
       EditorState.set_keymap_scope(state, :file_tree)
     else
       state
@@ -683,7 +684,7 @@ defmodule MingaEditor.Commands.Movement do
   defp structural_nav_action_code(:next_sibling), do: 2
   defp structural_nav_action_code(:prev_sibling), do: 3
 
-  @spec update_file_tree(state(), (map() -> map())) :: state()
+  @spec update_file_tree(state(), (FileTreeState.t() -> FileTreeState.t())) :: state()
   defp update_file_tree(state, fun) when is_function(fun, 1) do
     EditorState.update_file_tree(state, fun)
   end

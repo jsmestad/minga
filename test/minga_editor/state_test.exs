@@ -6,6 +6,7 @@ defmodule MingaEditor.StateTest do
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -241,12 +242,7 @@ defmodule MingaEditor.StateTest do
         port_manager: self(),
         workspace:
           %SessionState{viewport: Viewport.new(24, 80)}
-          |> SessionState.set_file_tree(%{
-            project_root: root,
-            tree: nil,
-            buffer: nil,
-            focused: false
-          }),
+          |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
         shell_state: %ShellState{tab_bar: tab_bar}
       }
 
@@ -335,12 +331,7 @@ defmodule MingaEditor.StateTest do
             viewport: Viewport.new(24, 80),
             buffers: %Buffers{active: active_buffer, list: [active_buffer], active_index: 0}
           }
-          |> SessionState.set_file_tree(%{
-            project_root: root,
-            tree: nil,
-            buffer: nil,
-            focused: false
-          }),
+          |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
         shell_state: %ShellState{tab_bar: tab_bar}
       }
 

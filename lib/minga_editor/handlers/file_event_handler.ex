@@ -8,6 +8,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   functions.
   """
 
+  alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.State, as: EditorState
 
   @typedoc "Effects that the file event handler may return."
@@ -67,6 +68,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   end
 
   def handle(state, :file_tree_refresh_timer) do
+    state = FileTreeFreshness.flush_refresh(state)
     {state, [{:render, 16}]}
   end
 
@@ -92,9 +94,11 @@ defmodule MingaEditor.Handlers.FileEventHandler do
            behind: behind
          } = event
        ) do
+    state = FileTreeFreshness.refresh_git_status(state, event)
+
     case EditorState.git_status_panel(state) do
       nil ->
-        {state, []}
+        if FileTreeFreshness.open?(state), do: {state, [{:render, 16}]}, else: {state, []}
 
       _panel ->
         git_status_data = %{
@@ -127,6 +131,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   defp handle_buffer_saved(state, saved_buf) do
     new_state =
       state
+      |> FileTreeFreshness.refresh_git_status_from_disk()
       |> MingaEditor.Commands.Git.refresh_diff_views_for_buffer(saved_buf)
       |> EditorState.rebind_buffer_file_identity(saved_buf)
 
@@ -147,8 +152,8 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   end
 
   @spec handle_buffer_changed(EditorState.t(), pid()) :: {EditorState.t(), [file_effect()]}
-  defp handle_buffer_changed(state, _buffer) do
-    if false do
+  defp handle_buffer_changed(state, buffer) do
+    if FileTreeFreshness.buffer_under_tree?(state, buffer) do
       {state, [{:render, 16}]}
     else
       {state, []}
@@ -157,8 +162,8 @@ defmodule MingaEditor.Handlers.FileEventHandler do
 
   @spec handle_diagnostics_updated(EditorState.t(), String.t()) ::
           {EditorState.t(), [file_effect()]}
-  defp handle_diagnostics_updated(state, _uri) do
-    if false do
+  defp handle_diagnostics_updated(state, uri) do
+    if FileTreeFreshness.diagnostic_uri_under_tree?(state, uri) do
       {state, [{:render, 16}]}
     else
       {state, []}
@@ -166,8 +171,8 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   end
 
   @spec handle_file_changed(EditorState.t(), String.t()) :: {EditorState.t(), [file_effect()]}
-  defp handle_file_changed(state, _path) do
-    if false do
+  defp handle_file_changed(state, path) do
+    if FileTreeFreshness.path_under_tree?(state, path) do
       {state, [{:schedule_file_tree_refresh, 50}]}
     else
       {state, []}
@@ -176,7 +181,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
 
   @spec handle_project_rebuilt(EditorState.t(), String.t()) :: {EditorState.t(), [file_effect()]}
   defp handle_project_rebuilt(state, root) do
-    _root = root
-    {state, []}
+    state = FileTreeFreshness.update_project_root(state, root)
+    {state, [{:render, 16}]}
   end
 end

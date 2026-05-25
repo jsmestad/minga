@@ -151,6 +151,7 @@ defmodule Minga.Keymap.Defaults do
 
     # ── Open ──────────────────────────────────────────────────────────────────
     {~k(o b), :toggle_beam_observatory, "BEAM observatory"},
+    {~k(o p), :toggle_file_tree, "Toggle file tree"},
     {~k(o r), :tree_reveal_active, "Reveal file in tree"},
 
     # ── AI agent ─────────────────────────────────────────────────────────────

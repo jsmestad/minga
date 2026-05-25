@@ -6,6 +6,7 @@ defmodule MingaEditor.Session.ChromeStateTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
@@ -35,10 +36,7 @@ defmodule MingaEditor.Session.ChromeStateTest do
     test "honors custom_name when supplied" do
       chrome =
         ChromeState.from_editor_state(%{
-          workspace: %{
-            custom_name: "Client App",
-            file_tree: %{tree: nil, buffer: nil, project_root: nil, focused: false}
-          },
+          workspace: %{custom_name: "Client App", file_tree: %FileTreeState{}},
           shell_state: %{tab_bar: nil}
         })
 
@@ -191,12 +189,7 @@ defmodule MingaEditor.Session.ChromeStateTest do
           keymap_scope: :editor,
           buffers: %Buffers{active: active_buffer, list: List.wrap(active_buffer)}
         }
-        |> SessionState.set_file_tree(%{
-          project_root: project_root,
-          tree: nil,
-          buffer: nil,
-          focused: false
-        }),
+        |> SessionState.set_file_tree(%FileTreeState{project_root: project_root}),
       shell_state: %{tab_bar: tb}
     }
   end

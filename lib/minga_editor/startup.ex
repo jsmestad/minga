@@ -15,6 +15,7 @@ defmodule MingaEditor.Startup do
   alias Minga.Buffer
   alias Minga.Config
   alias MingaEditor.Commands
+  alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.FileWatcherHelpers
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
@@ -105,6 +106,9 @@ defmodule MingaEditor.Startup do
 
     project_root = project_root_from_opts(opts)
 
+    file_tree = %MingaEditor.State.FileTree{project_root: project_root}
+    FileTreeFeature.register_contributions(file_tree)
+
     workspace =
       %MingaEditor.Session.State{
         buffers: %Buffers{
@@ -123,6 +127,7 @@ defmodule MingaEditor.Startup do
         },
         keymap_scope: keymap_scope
       }
+      |> MingaEditor.Session.State.set_file_tree(file_tree)
 
     editing_model =
       Keyword.get_lazy(opts, :editing_model, fn ->

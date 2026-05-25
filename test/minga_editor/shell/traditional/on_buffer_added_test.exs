@@ -15,6 +15,7 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
   alias MingaEditor.Shell.Traditional
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.ModalOverlay.Dashboard, as: DashboardPayload
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.Picker, as: PickerLegacy
@@ -60,12 +61,7 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
 
       workspace =
         %SessionState{viewport: Viewport.new(24, 80), buffers: %Buffers{active: buf, list: [buf]}}
-        |> SessionState.set_file_tree(%{
-          project_root: root,
-          tree: nil,
-          buffer: nil,
-          focused: false
-        })
+        |> SessionState.set_file_tree(%FileTreeState{project_root: root})
 
       shell_state = %ShellState{tab_bar: TabBar.new(Tab.new_file(1, "initial.ex"), root)}
 
@@ -85,12 +81,7 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
 
       workspace =
         %SessionState{viewport: Viewport.new(24, 80), buffers: %Buffers{active: buf, list: [buf]}}
-        |> SessionState.set_file_tree(%{
-          project_root: root,
-          tree: nil,
-          buffer: nil,
-          focused: false
-        })
+        |> SessionState.set_file_tree(%FileTreeState{project_root: root})
 
       shell_state = %ShellState{tab_bar: TabBar.new(Tab.new_file(1, "initial.ex"), root)}
 
@@ -115,12 +106,7 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
 
       workspace =
         %SessionState{viewport: Viewport.new(24, 80), buffers: %Buffers{active: buf, list: [buf]}}
-        |> SessionState.set_file_tree(%{
-          project_root: root,
-          tree: nil,
-          buffer: nil,
-          focused: false
-        })
+        |> SessionState.set_file_tree(%FileTreeState{project_root: root})
 
       shell_state = %ShellState{tab_bar: TabBar.new(Tab.new_file(1, "initial.ex"), root)}
 

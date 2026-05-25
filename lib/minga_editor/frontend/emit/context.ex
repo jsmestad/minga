@@ -11,6 +11,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
   alias Minga.Editing.Completion
   alias MingaEditor.Layout
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.FileTree
   alias MingaEditor.State.Highlighting
   alias MingaEditor.State.Search
   alias MingaEditor.State.TabBar
@@ -35,7 +36,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
           tab_bar: TabBar.t() | nil,
           buffers: Buffers.t(),
           viewport: Viewport.t(),
-          file_tree: map(),
+          file_tree: FileTree.t(),
           highlight: Highlighting.t(),
           agent_ui: UIState.t(),
           completion: Completion.t() | nil,

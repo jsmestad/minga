@@ -293,7 +293,6 @@ defmodule MingaEditor.Extension.Sidebar do
 
   @spec reject_reserved_builtin_id(source(), String.t()) :: :ok | {:error, term()}
   defp reject_reserved_builtin_id(:builtin, _id), do: :ok
-  defp reject_reserved_builtin_id({:extension, :minga_file_tree}, "file_tree"), do: :ok
 
   defp reject_reserved_builtin_id(_source, id) do
     if MapSet.member?(@reserved_builtin_ids, id) do

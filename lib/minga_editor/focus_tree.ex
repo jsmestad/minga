@@ -184,7 +184,7 @@ defmodule MingaEditor.FocusTree do
         TreeNode.new(:file_tree, rect,
           id: {:sidebar, "file_tree"},
           ref: "file_tree",
-          handler: handler || Input.Sidebar,
+          handler: handler || Input.FileTreeHandler,
           scrollable?: true,
           focusable?: true
         )
@@ -200,7 +200,7 @@ defmodule MingaEditor.FocusTree do
 
       nil ->
         TreeNode.new(:file_tree, rect,
-          handler: Input.Sidebar,
+          handler: Input.FileTreeHandler,
           scrollable?: true,
           focusable?: true
         )

@@ -28,6 +28,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
@@ -269,12 +270,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         shell: Traditional,
         workspace:
           %SessionState{viewport: Viewport.new(24, 80)}
-          |> SessionState.set_file_tree(%{
-            project_root: root,
-            tree: nil,
-            buffer: nil,
-            focused: false
-          }),
+          |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
         shell_state: %TraditionalState{agent: %AgentState{}, tab_bar: tb}
       }
 
@@ -322,12 +318,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         shell: Traditional,
         workspace:
           %SessionState{viewport: Viewport.new(24, 80)}
-          |> SessionState.set_file_tree(%{
-            project_root: root,
-            tree: nil,
-            buffer: nil,
-            focused: false
-          }),
+          |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
         shell_state: %TraditionalState{agent: %AgentState{}, tab_bar: tb}
       }
 
@@ -371,12 +362,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         shell: Traditional,
         workspace:
           %SessionState{viewport: Viewport.new(24, 80)}
-          |> SessionState.set_file_tree(%{
-            project_root: root,
-            tree: nil,
-            buffer: nil,
-            focused: false
-          }),
+          |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
         shell_state: %TraditionalState{agent: %AgentState{}, tab_bar: tb}
       }
 
@@ -406,12 +392,7 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         shell: Traditional,
         workspace:
           %SessionState{viewport: Viewport.new(24, 80)}
-          |> SessionState.set_file_tree(%{
-            project_root: root,
-            tree: nil,
-            buffer: nil,
-            focused: false
-          }),
+          |> SessionState.set_file_tree(%FileTreeState{project_root: root}),
         shell_state: %TraditionalState{agent: %AgentState{}, tab_bar: tb}
       }
 

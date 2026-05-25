@@ -15,6 +15,7 @@ defmodule MingaEditor.Agent.UIState.View do
   alias MingaEditor.Agent.UIState.ReturnTarget
   alias MingaEditor.Agent.View.Preview
   alias Minga.Config
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Windows
 
   @typedoc "Which panel has keyboard focus inside the agentic view."
@@ -51,7 +52,7 @@ defmodule MingaEditor.Agent.UIState.View do
           saved_windows: Windows.t() | nil,
           pending_prefix: prefix(),
           chat_width_pct: non_neg_integer(),
-          saved_file_tree: map() | nil,
+          saved_file_tree: FileTreeState.t() | nil,
           return_target: return_target() | nil,
           help_visible: boolean(),
           search: search_state() | nil,
@@ -93,7 +94,7 @@ defmodule MingaEditor.Agent.UIState.View do
           pos_integer() | nil,
           pid() | nil,
           Windows.t(),
-          map(),
+          FileTreeState.t(),
           Minga.Keymap.Scope.scope_name(),
           boolean()
         ) :: return_target()
@@ -116,13 +117,13 @@ defmodule MingaEditor.Agent.UIState.View do
   end
 
   @doc "Activates the view, saving the current window layout."
-  @spec activate(t(), Windows.t(), map()) :: t()
+  @spec activate(t(), Windows.t(), FileTreeState.t()) :: t()
   def activate(%__MODULE__{} = view, windows, file_tree) do
     activate(view, windows, file_tree, nil)
   end
 
   @doc "Activates the view with a recorded editor return target."
-  @spec activate(t(), Windows.t(), map(), return_target() | nil) :: t()
+  @spec activate(t(), Windows.t(), FileTreeState.t(), return_target() | nil) :: t()
   def activate(%__MODULE__{} = view, windows, file_tree, return_target) do
     %{
       view
@@ -146,7 +147,7 @@ defmodule MingaEditor.Agent.UIState.View do
   def clear_return_target(%__MODULE__{} = view), do: %{view | return_target: nil}
 
   @doc "Deactivates the view and returns the restored window layout."
-  @spec deactivate(t()) :: {t(), Windows.t() | nil, map() | nil}
+  @spec deactivate(t()) :: {t(), Windows.t() | nil, FileTreeState.t() | nil}
   def deactivate(
         %__MODULE__{saved_windows: saved_windows, saved_file_tree: saved_file_tree} = view
       ) do

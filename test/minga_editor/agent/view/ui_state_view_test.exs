@@ -2,6 +2,7 @@ defmodule MingaEditor.Agent.UIState.ViewFunctionsTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Windows
 
   describe "new/0" do
@@ -43,59 +44,31 @@ defmodule MingaEditor.Agent.UIState.ViewFunctionsTest do
 
   describe "activate/3" do
     test "sets active to true" do
-      ui =
-        UIState.new()
-        |> UIState.activate(%Windows{}, %{
-          tree: nil,
-          buffer: nil,
-          project_root: nil,
-          focused: false
-        })
-
+      ui = UIState.new() |> UIState.activate(%Windows{}, %FileTreeState{})
       assert ui.view.active
     end
 
     test "saves the windows layout" do
       windows = %Windows{tree: nil, map: %{}, active: 1, next_id: 3}
-
-      ui =
-        UIState.new()
-        |> UIState.activate(windows, %{tree: nil, buffer: nil, project_root: nil, focused: false})
-
+      ui = UIState.new() |> UIState.activate(windows, %FileTreeState{})
       assert ui.view.saved_windows == windows
     end
 
     test "saves the file tree state" do
-      ft = %{focused: true, tree: nil, buffer: nil}
+      ft = %FileTreeState{focused: true}
       ui = UIState.new() |> UIState.activate(%Windows{}, ft)
       assert ui.view.saved_file_tree == ft
     end
 
     test "resets focus to :chat" do
       ui = put_in(UIState.new().view.focus, :file_viewer)
-
-      ui =
-        UIState.activate(ui, %Windows{}, %{
-          tree: nil,
-          buffer: nil,
-          project_root: nil,
-          focused: false
-        })
-
+      ui = UIState.activate(ui, %Windows{}, %FileTreeState{})
       assert ui.view.focus == :chat
     end
 
     test "clears pending prefix" do
       ui = put_in(UIState.new().view.pending_prefix, :z)
-
-      ui =
-        UIState.activate(ui, %Windows{}, %{
-          tree: nil,
-          buffer: nil,
-          project_root: nil,
-          focused: false
-        })
-
+      ui = UIState.activate(ui, %Windows{}, %FileTreeState{})
       assert ui.view.pending_prefix == nil
     end
   end
@@ -103,7 +76,7 @@ defmodule MingaEditor.Agent.UIState.ViewFunctionsTest do
   describe "deactivate/1" do
     test "sets active to false and returns saved windows and file tree" do
       windows = %Windows{tree: nil, map: %{}, active: 1, next_id: 2}
-      ft = %{focused: true, tree: nil, buffer: nil}
+      ft = %FileTreeState{focused: true}
 
       ui =
         UIState.new()
@@ -118,12 +91,7 @@ defmodule MingaEditor.Agent.UIState.ViewFunctionsTest do
     test "clears saved_windows and saved_file_tree after deactivation" do
       ui =
         UIState.new()
-        |> UIState.activate(%Windows{}, %{
-          tree: nil,
-          buffer: nil,
-          project_root: nil,
-          focused: false
-        })
+        |> UIState.activate(%Windows{}, %FileTreeState{})
 
       {new_ui, _, _} = UIState.deactivate(ui)
       assert new_ui.view.saved_windows == nil

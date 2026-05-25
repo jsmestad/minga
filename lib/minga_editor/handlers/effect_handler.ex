@@ -201,11 +201,12 @@ defmodule MingaEditor.Handlers.EffectHandler do
   end
 
   defp apply_effect(state, {:schedule_file_tree_refresh, delay}) when is_integer(delay) do
-    if state.backend != :headless do
-      Process.send_after(self(), :file_tree_refresh_timer, delay)
+    if MingaEditor.FileTree.Freshness.refresh_scheduled?(state) do
+      state
+    else
+      ref = Process.send_after(self(), :file_tree_refresh_timer, delay)
+      MingaEditor.FileTree.Freshness.schedule_refresh(state, ref)
     end
-
-    state
   end
 
   defp apply_effect(state, {:conceal_spans, pid, spans}) when is_pid(pid) do

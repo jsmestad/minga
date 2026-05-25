@@ -45,6 +45,7 @@ defmodule Minga.Command.Registry do
     MingaEditor.Commands.InlineAsk,
     MingaEditor.Commands.InlineEdit,
     MingaEditor.Commands.RemoteFiles,
+    MingaEditor.Commands.FileTree,
     MingaEditor.Commands.Dired,
     MingaEditor.Commands.Testing,
     MingaEditor.Commands.Extensions,

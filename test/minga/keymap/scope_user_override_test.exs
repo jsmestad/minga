@@ -43,6 +43,27 @@ defmodule Minga.Keymap.Scope.UserOverrideTest do
                Scope.resolve_key(:agent, :normal, {?y, 0}, keymap_server: test_keymap_server())
     end
 
+    test "user override for file_tree scope works" do
+      # q is :tree_close by default
+      assert {:command, :tree_close} =
+               Scope.resolve_key(:file_tree, :normal, {?q, 0},
+                 keymap_server: test_keymap_server()
+               )
+
+      KeymapActive.bind(
+        test_keymap_server(),
+        {:file_tree, :normal},
+        "q",
+        :custom_close,
+        "Custom close"
+      )
+
+      assert {:command, :custom_close} =
+               Scope.resolve_key(:file_tree, :normal, {?q, 0},
+                 keymap_server: test_keymap_server()
+               )
+    end
+
     test "non-overridden keys still work from scope defaults" do
       KeymapActive.bind(test_keymap_server(), {:agent, :normal}, "y", :my_yank, "My yank")
 

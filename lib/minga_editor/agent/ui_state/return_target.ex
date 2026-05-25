@@ -6,13 +6,14 @@ defmodule MingaEditor.Agent.UIState.ReturnTarget do
   """
 
   alias Minga.Keymap.Scope
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Windows
 
   @type t :: %__MODULE__{
           active_tab_id: pos_integer() | nil,
           active_buffer: pid() | nil,
           windows: Windows.t(),
-          file_tree: map(),
+          file_tree: FileTreeState.t(),
           keymap_scope: Scope.scope_name(),
           prompt_focused: boolean()
         }
@@ -30,7 +31,7 @@ defmodule MingaEditor.Agent.UIState.ReturnTarget do
           pos_integer() | nil,
           pid() | nil,
           Windows.t(),
-          map(),
+          FileTreeState.t(),
           Scope.scope_name(),
           boolean()
         ) :: t()
