@@ -393,7 +393,7 @@ defmodule MingaEditor.State.SnapshotTest do
       assert new_map == old_map
     end
 
-    test "round-trips through to_workspace_map preserving all fields" do
+    test "round-trips through to_workspace_map preserving snapshot fields" do
       {:ok, buf} = BufferProcess.start_link(content: "round-trip")
       pending = %{make_ref() => {:semantic_tokens, buf}}
 
@@ -417,8 +417,8 @@ defmodule MingaEditor.State.SnapshotTest do
       assert restored_map.search == ws.search
       assert restored_map.lsp_pending == pending
 
-      assert restored_map.highlight == ws.highlight
-      assert restored_map.injection_ranges == ws.injection_ranges
+      refute Map.has_key?(restored_map, :highlight)
+      refute Map.has_key?(restored_map, :injection_ranges)
     end
 
     test "normalises transient vim state" do
