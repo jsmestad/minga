@@ -116,7 +116,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
         state = EditorState.set_git_status_panel(state, GitStatusPanel.new(git_status_data))
 
         {shell_state, workspace} =
-          state.shell.handle_event(
+          EditorState.active_shell_module(state).handle_event(
             state.shell_state,
             state.workspace,
             {:git_status_changed, entries}

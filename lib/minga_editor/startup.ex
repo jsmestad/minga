@@ -150,6 +150,8 @@ defmodule MingaEditor.Startup do
       )
     end
 
+    shell_entry = resolve_shell(opts)
+
     state = %EditorState{
       backend: backend,
       workspace: workspace,
@@ -159,8 +161,9 @@ defmodule MingaEditor.Startup do
       events_registry: events_registry,
       editing_model: editing_model,
       focus_stack: MingaEditor.Input.default_stack(),
-      shell: resolve_shell(opts),
-      shell_state: init_shell_state(resolve_shell(opts), dashboard, opts),
+      shell_id: shell_entry.id,
+      shell: shell_entry.module,
+      shell_state: init_shell_state(shell_entry.module, dashboard, opts),
       session: EditorSessionState.new(Keyword.take(opts, [:swap_dir, :session_dir]))
     }
 
@@ -504,24 +507,37 @@ defmodule MingaEditor.Startup do
 
   # ── Shell resolution ───────────────────────────────────────────────────
 
-  @spec resolve_shell(keyword()) :: module()
+  @spec resolve_shell(keyword()) :: MingaEditor.Shell.Entry.t()
   defp resolve_shell(opts) do
+    MingaEditor.Shell.Registry.seed_builtin()
+
     case Keyword.get(opts, :shell) do
-      :board -> MingaEditor.Shell.Board
-      :traditional -> MingaEditor.Shell.Traditional
       nil -> resolve_shell_from_config()
-      module when is_atom(module) -> module
+      id_or_module when is_atom(id_or_module) -> resolve_shell_id_or_module(id_or_module)
     end
   end
 
-  @spec resolve_shell_from_config() :: module()
+  @spec resolve_shell_from_config() :: MingaEditor.Shell.Entry.t()
   defp resolve_shell_from_config do
-    case Minga.Config.get(:default_shell) do
-      :board -> MingaEditor.Shell.Board
-      _ -> MingaEditor.Shell.Traditional
-    end
+    Minga.Config.get(:default_shell)
+    |> resolve_shell_id_or_module()
   catch
-    :exit, _ -> MingaEditor.Shell.Traditional
+    :exit, _ -> MingaEditor.Shell.Registry.default()
+  end
+
+  @spec resolve_shell_id_or_module(atom()) :: MingaEditor.Shell.Entry.t()
+  defp resolve_shell_id_or_module(id_or_module) do
+    MingaEditor.Shell.Registry.get(id_or_module) ||
+      resolve_shell_module(id_or_module) ||
+      MingaEditor.Shell.Registry.default()
+  end
+
+  @spec resolve_shell_module(module()) :: MingaEditor.Shell.Entry.t() | nil
+  defp resolve_shell_module(module) do
+    case MingaEditor.Shell.Registry.id_for_module(module) do
+      nil -> nil
+      id -> MingaEditor.Shell.Registry.get(id)
+    end
   end
 
   @spec init_shell_state(module(), term(), keyword()) :: term()

@@ -183,6 +183,10 @@ defmodule MingaEditor.Shell.Traditional do
   def async_render?(%{shell: __MODULE__}), do: false
 
   @impl true
+  @spec gui_payload(term()) :: nil
+  def gui_payload(_editor_state), do: nil
+
+  @impl true
   @spec render(term()) :: term()
   defdelegate render(editor_state), to: MingaEditor.Shell.Traditional.Renderer
 

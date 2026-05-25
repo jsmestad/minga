@@ -1064,7 +1064,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   def handle_agent_session_down(
-        %{shell: MingaEditor.Shell.Board} = state,
+        %{shell_id: :board} = state,
         session_pid,
         reason
       ) do
@@ -1392,7 +1392,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
   end
 
-  defp handle_remote_session_disconnected(%{shell: MingaEditor.Shell.Board} = state, session_pid) do
+  defp handle_remote_session_disconnected(%{shell_id: :board} = state, session_pid) do
     board = state.shell_state
 
     board =

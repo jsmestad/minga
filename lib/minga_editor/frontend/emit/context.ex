@@ -31,6 +31,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
           font_registry: FontRegistry.t(),
           windows: Windows.t(),
           layout: Layout.t(),
+          shell_id: atom(),
           shell: module(),
           shell_state: term(),
           tab_bar: TabBar.t() | nil,
@@ -58,6 +59,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
             font_registry: nil,
             windows: nil,
             layout: nil,
+            shell_id: :traditional,
             shell: nil,
             shell_state: nil,
             tab_bar: nil,
@@ -89,7 +91,8 @@ defmodule MingaEditor.Frontend.Emit.Context do
       font_registry: Map.get(state, :font_registry, FontRegistry.new()),
       windows: state.workspace.windows,
       layout: MingaEditor.Layout.get(state),
-      shell: state.shell,
+      shell_id: MingaEditor.State.active_shell_id(state),
+      shell: MingaEditor.State.active_shell_module(state),
       shell_state: state.shell_state,
       tab_bar: Map.get(state.shell_state, :tab_bar),
       buffers: state.workspace.buffers,
@@ -111,16 +114,14 @@ defmodule MingaEditor.Frontend.Emit.Context do
   end
 
   @spec compute_title(map()) :: String.t()
-  defp compute_title(
-         %{shell: MingaEditor.Shell.Board, shell_state: %{zoomed_into: card_id}} = state
-       )
+  defp compute_title(%{shell_id: :board, shell_state: %{zoomed_into: card_id}} = state)
        when card_id != nil do
     card = MingaEditor.Shell.Board.State.zoomed(state.shell_state)
     card_name = if card, do: card.task, else: "Board"
     "#{card_name} \u2014 Minga"
   end
 
-  defp compute_title(%{shell: MingaEditor.Shell.Board}) do
+  defp compute_title(%{shell_id: :board}) do
     "The Board \u2014 Minga"
   end
 

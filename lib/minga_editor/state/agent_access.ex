@@ -52,22 +52,20 @@ defmodule MingaEditor.State.AgentAccess do
   Traditional reads the active workspace. Board reads through the shell behaviour until Board moves onto the same workspace model.
   """
   @spec session(EditorState.t() | map()) :: pid() | nil
-  def session(%EditorState{shell: MingaEditor.Shell.Traditional} = state) do
-    active_workspace_session(state)
+  def session(%EditorState{} = state) do
+    if EditorState.active_shell_id(state) == :traditional do
+      active_workspace_session(state)
+    else
+      EditorState.active_shell_module(state).active_session(state.shell_state)
+    end
   end
 
-  def session(%{shell: MingaEditor.Shell.Traditional} = state) do
-    active_workspace_session(state)
-  end
-
-  def session(%EditorState{shell: shell, shell_state: shell_state})
-      when is_atom(shell) and not is_nil(shell) do
-    shell.active_session(shell_state)
-  end
-
-  def session(%{shell: shell, shell_state: shell_state})
-      when is_atom(shell) and not is_nil(shell) do
-    shell.active_session(shell_state)
+  def session(%{shell_state: shell_state} = state) do
+    if EditorState.active_shell_id(state) == :traditional do
+      active_workspace_session(state)
+    else
+      EditorState.active_shell_module(state).active_session(shell_state)
+    end
   end
 
   def session(_), do: nil

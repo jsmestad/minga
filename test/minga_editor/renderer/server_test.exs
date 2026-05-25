@@ -143,6 +143,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       port_manager: self(),
       theme: MingaEditor.UI.Theme.get!(:doom_one),
       capabilities: %MingaEditor.Frontend.Capabilities{},
+      shell_id: :traditional,
       shell: MingaEditor.Shell.Traditional,
       workspace: %{
         windows: %MingaEditor.State.Windows{},
@@ -158,7 +159,7 @@ defmodule MingaEditor.Renderer.ServerTest do
   defp build_board_grid_state(renderer_pid) do
     state = build_editor_state(:tui, renderer_pid)
     {board, _card} = BoardState.create_card(BoardState.new(), task: "Fix split renderer")
-    %{state | shell: Board, shell_state: board}
+    %{state | shell_id: :board, shell: Board, shell_state: board}
   end
 
   defp build_editor_state(backend, renderer_pid) do
@@ -189,6 +190,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       port_manager: port,
       workspace: workspace,
       renderer: renderer_pid,
+      shell_id: :traditional,
       shell: MingaEditor.Shell.Traditional,
       shell_state: %MingaEditor.Shell.Traditional.State{}
     }

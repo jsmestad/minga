@@ -210,7 +210,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   @spec build_gui_tab_bar_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
 
   # Board: no tab bar (Board manages its own navigation)
-  defp build_gui_tab_bar_cmd(%{shell: MingaEditor.Shell.Board}, caches), do: {nil, caches}
+  defp build_gui_tab_bar_cmd(%{shell_id: :board}, caches), do: {nil, caches}
 
   defp build_gui_tab_bar_cmd(%{shell_state: %{tab_bar: %TabBar{}}} = ctx, caches) do
     chrome_state = ChromeState.from_editor_state(ctx)
@@ -1897,7 +1897,16 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   # ── Board ──
 
   @spec build_gui_board_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
-  defp build_gui_board_cmd(%{shell: MingaEditor.Shell.Board, shell_state: board}, caches) do
+  defp build_gui_board_cmd(%{shell: shell} = ctx, caches) do
+    case shell.gui_payload(ctx) do
+      {:board, board} -> build_gui_board_payload_cmd(board, caches)
+      nil -> dismiss_gui_board_cmd(caches)
+    end
+  end
+
+  @spec build_gui_board_payload_cmd(MingaEditor.Shell.Board.State.t(), Caches.t()) ::
+          {binary() | nil, Caches.t()}
+  defp build_gui_board_payload_cmd(board, caches) do
     # Always send when Board is active so the GUI stays in sync.
     # The fingerprint covers card count, focused card, zoom state, and
     # card statuses so we skip encoding when nothing changed.
@@ -1913,7 +1922,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   # Board not active: send visible=false once to dismiss.
   # Must NOT use a default Board.State (grid_view? returns true → visible=1).
   # Instead, build a minimal board with zoomed_into set so visible encodes as 0.
-  defp build_gui_board_cmd(_ctx, caches) do
+  defp dismiss_gui_board_cmd(caches) do
     if caches.last_gui_board_fp != :dismissed do
       # zoomed_into: 1 forces grid_view? → false → visible=0
       dismissed = %MingaEditor.Shell.Board.State{zoomed_into: 1}
@@ -1946,13 +1955,13 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   @spec build_gui_agent_context_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
   defp build_gui_agent_context_cmd(
-         %{shell: MingaEditor.Shell.Board, shell_state: %{zoomed_into: nil}},
+         %{shell_id: :board, shell_state: %{zoomed_into: nil}},
          caches
        ) do
     send_hide_if_needed(:hidden, caches)
   end
 
-  defp build_gui_agent_context_cmd(%{shell: MingaEditor.Shell.Board, shell_state: board}, caches) do
+  defp build_gui_agent_context_cmd(%{shell_id: :board, shell_state: board}, caches) do
     card = MingaEditor.Shell.Board.State.zoomed(board)
     send_agent_context_if_applicable(board.zoomed_into, card, caches)
   end
@@ -2025,7 +2034,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   # Change summary visible when zoomed into an agent card (not You card)
   defp build_gui_change_summary_cmd(
-         %{shell: MingaEditor.Shell.Board, shell_state: %{zoomed_into: card_id}} = _ctx,
+         %{shell_id: :board, shell_state: %{zoomed_into: card_id}} = _ctx,
          caches
        )
        when card_id != nil do

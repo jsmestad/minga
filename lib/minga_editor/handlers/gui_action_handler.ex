@@ -196,9 +196,13 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     state
   end
 
-  defp dispatch_action(%{shell: MingaEditor.Shell.Board} = state, action) do
+  defp dispatch_action(%{shell_id: :board} = state, action) do
     {shell_state, workspace} =
-      MingaEditor.Shell.Board.handle_gui_action(state.shell_state, state.workspace, action)
+      EditorState.active_shell_module(state).handle_gui_action(
+        state.shell_state,
+        state.workspace,
+        action
+      )
 
     state =
       state
@@ -261,7 +265,11 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     # Delegate to the shell: Traditional switches to the target tab when
     # needed; Board and tab-bar-less Traditional return unchanged.
     {shell_state, workspace} =
-      state.shell.handle_gui_action(state.shell_state, state.workspace, {:close_tab, id})
+      EditorState.active_shell_module(state).handle_gui_action(
+        state.shell_state,
+        state.workspace,
+        {:close_tab, id}
+      )
 
     state =
       state
@@ -570,7 +578,11 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   defp dispatch_action(state, {:workspace_close, _ws_id} = action) do
     {shell_state, workspace} =
-      state.shell.handle_gui_action(state.shell_state, state.workspace, action)
+      EditorState.active_shell_module(state).handle_gui_action(
+        state.shell_state,
+        state.workspace,
+        action
+      )
 
     state
     |> EditorState.update_shell_state(fn _shell_state -> shell_state end)
@@ -580,7 +592,11 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   defp dispatch_action(state, {:workspace_rename, _ws_id, _name} = action) do
     {shell_state, workspace} =
-      state.shell.handle_gui_action(state.shell_state, state.workspace, action)
+      EditorState.active_shell_module(state).handle_gui_action(
+        state.shell_state,
+        state.workspace,
+        action
+      )
 
     state
     |> EditorState.update_shell_state(fn _shell_state -> shell_state end)
@@ -589,7 +605,11 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   defp dispatch_action(state, {:workspace_set_icon, _ws_id, _icon} = action) do
     {shell_state, workspace} =
-      state.shell.handle_gui_action(state.shell_state, state.workspace, action)
+      EditorState.active_shell_module(state).handle_gui_action(
+        state.shell_state,
+        state.workspace,
+        action
+      )
 
     state
     |> EditorState.update_shell_state(fn _shell_state -> shell_state end)

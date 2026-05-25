@@ -203,7 +203,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
     AgentSession.subscribe(handle.pid, self())
 
     {shell_state, workspace} =
-      state.shell.handle_event(
+      EditorState.active_shell_module(state).handle_event(
         state.shell_state,
         state.workspace,
         {:background_subagent_started, handle}
@@ -548,7 +548,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   end
 
   defp active_remote_server?(state, server_name) do
-    case state.shell.active_tab(state.shell_state) do
+    case EditorState.active_shell_module(state).active_tab(state.shell_state) do
       %Tab{server_name: ^server_name} -> true
       _ -> false
     end

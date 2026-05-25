@@ -70,6 +70,7 @@ defmodule Minga.Application do
     Grammar.init_registry()
     DevHandler.attach()
     Minga.Config.ThemeRegistry.seed_builtin()
+    MingaEditor.Shell.Registry.seed_builtin()
 
     # Prepend managed tools bin directory to PATH so System.find_executable
     # discovers managed tools. Done before supervisors start so LSP and

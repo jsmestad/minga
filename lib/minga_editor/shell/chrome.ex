@@ -25,6 +25,9 @@ defmodule MingaEditor.Shell.Chrome do
   @doc "Returns true when the shell's current state can safely render through the asynchronous RenderPipeline path."
   @callback async_render?(editor_state :: term()) :: boolean()
 
+  @doc "Returns structured GUI payload data for the active shell, or nil when the shell has no native GUI payload."
+  @callback gui_payload(editor_state :: term()) :: MingaEditor.Shell.gui_payload() | nil
+
   @doc """
   Runs the full render pipeline (content, chrome, compose, emit) and
   sends commands to the frontend. Returns updated state with cached
