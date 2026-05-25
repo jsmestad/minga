@@ -30,7 +30,7 @@ defmodule MingaEditor.RenderPipeline.Input do
   before it runs the pipeline.
 
   **From `state.workspace` (per-tab editing context, stored as `workspace` map):**
-  `windows`, `buffers`, `viewport`, `file_tree`, `highlight`,
+  `windows`, `buffers`, `viewport`, `file_tree` (FileTree feature state), `highlight`,
   `agent_ui`, `editing`, `document_highlights`,
   `search`, `keymap_scope`
 
@@ -42,7 +42,7 @@ defmodule MingaEditor.RenderPipeline.Input do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Layout
   alias MingaEditor.State.Buffers
-  alias MingaEditor.State.FileTree
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Highlighting
   alias MingaEditor.State.Mouse
   alias MingaEditor.State.Search
@@ -101,7 +101,7 @@ defmodule MingaEditor.RenderPipeline.Input do
           windows: Windows.t(),
           buffers: Buffers.t(),
           viewport: Viewport.t(),
-          file_tree: FileTree.t(),
+          file_tree: FileTreeState.t(),
           highlight: Highlighting.t(),
           agent_ui: UIState.t(),
           editing: VimState.t(),
@@ -180,11 +180,11 @@ defmodule MingaEditor.RenderPipeline.Input do
   end
 
   @doc "Returns the FileTree snapshot carried by this render input."
-  @spec file_tree_state(t()) :: FileTree.t()
-  def file_tree_state(%__MODULE__{workspace: %{file_tree: %FileTree{} = file_tree}}),
+  @spec file_tree_state(t()) :: FileTreeState.t()
+  def file_tree_state(%__MODULE__{workspace: %{file_tree: %FileTreeState{} = file_tree}}),
     do: file_tree
 
-  def file_tree_state(%__MODULE__{}), do: %FileTree{}
+  def file_tree_state(%__MODULE__{}), do: %FileTreeState{}
 
   @doc "Returns a copy of the render input with the renderer-owned font registry attached."
   @spec with_font_registry(t(), FontRegistry.t()) :: t()

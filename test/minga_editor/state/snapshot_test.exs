@@ -417,9 +417,8 @@ defmodule MingaEditor.State.SnapshotTest do
       assert restored_map.search == ws.search
       assert restored_map.lsp_pending == pending
 
-      # PID/process-keyed highlight and injection cache state stays out of the round-trip.
-      refute Map.has_key?(restored_map, :highlight)
-      refute Map.has_key?(restored_map, :injection_ranges)
+      assert restored_map.highlight == ws.highlight
+      assert restored_map.injection_ranges == ws.injection_ranges
     end
 
     test "normalises transient vim state" do

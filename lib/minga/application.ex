@@ -23,7 +23,6 @@ defmodule Minga.Application do
       ├── Minga.Buffer.Registry (Registry, :unique)
       ├── Minga.Buffer.Supervisor (DynamicSupervisor, one_for_one)
       ├── Minga.Log.MessagesBuffer           (singleton *Messages* buffer owner)
-      ├── MingaEditor.Extension.Sidebar      (source-owned sidebar registry)
       ├── Minga.Services.Supervisor (rest_for_one)
       │   ├── Minga.Services.Independent (one_for_one)
       │   │   ├── Minga.Git.Tracker
@@ -95,8 +94,7 @@ defmodule Minga.Application do
         Minga.Foundation.Supervisor,
         {Registry, keys: :unique, name: Minga.Buffer.Registry},
         {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},
-        Minga.Log.MessagesBuffer,
-        MingaEditor.Extension.Sidebar
+        Minga.Log.MessagesBuffer
       ] ++
         if minimal? do
           []

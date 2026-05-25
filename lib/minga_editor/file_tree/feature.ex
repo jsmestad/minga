@@ -11,7 +11,7 @@ defmodule MingaEditor.FileTree.Feature do
   alias MingaEditor.State.FileTree, as: FileTreeState
 
   @source :builtin
-  @input_source {:extension, :file_tree}
+  @input_source :builtin
   @feature_id :file_tree
   @sidebar_id "file_tree"
 
@@ -20,7 +20,7 @@ defmodule MingaEditor.FileTree.Feature do
   def source, do: @source
 
   @doc "Contribution source used for FileTree's dynamically registered input handler."
-  @spec input_source() :: {:extension, :file_tree}
+  @spec input_source() :: :builtin
   def input_source, do: @input_source
 
   @doc "Feature-state id used for FileTree UI state."
@@ -32,14 +32,14 @@ defmodule MingaEditor.FileTree.Feature do
   def sidebar_id, do: @sidebar_id
 
   @doc "Registers FileTree's dynamic input handler and sidebar contribution."
-  @spec register_contributions(FileTreeState.t()) :: :ok
+  @spec register_contributions(FileTreeState.t()) :: :ok | {:error, term()}
   def register_contributions(%FileTreeState{} = file_tree \\ %FileTreeState{}) do
     :ok = Input.register_handler(@input_source, FileTreeHandler, priority: 50)
     sync_sidebar(file_tree)
   end
 
   @doc "Synchronizes the global sidebar contribution from the current FileTree state."
-  @spec sync_sidebar(FileTreeState.t()) :: :ok
+  @spec sync_sidebar(FileTreeState.t()) :: :ok | {:error, term()}
   def sync_sidebar(%FileTreeState{} = file_tree) do
     status = FileTreeState.status(file_tree)
 

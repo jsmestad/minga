@@ -389,7 +389,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   defp dispatch_action(state, {:sidebar_action, sidebar_id, kind, action}) do
     case Sidebar.get(sidebar_id) do
-      nil -> dispatch_sidebar_action(state, sidebar_id, kind, action)
+      nil -> dispatch_missing_registered_sidebar_action(state, sidebar_id, kind, action)
       _sidebar -> Sidebar.dispatch_action(state, sidebar_id, action, %{kind: kind})
     end
   end
@@ -827,6 +827,30 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     state
   end
 
+  @spec dispatch_missing_registered_sidebar_action(
+          EditorState.t(),
+          String.t(),
+          String.t(),
+          String.t()
+        ) ::
+          EditorState.t()
+  defp dispatch_missing_registered_sidebar_action(state, sidebar_id, kind, action) do
+    if builtin_sidebar_id?(sidebar_id) do
+      Minga.Log.warning(
+        :editor,
+        "Sidebar registry missing #{sidebar_id}; using built-in #{action} fallback"
+      )
+
+      dispatch_sidebar_action(state, sidebar_id, kind, action)
+    else
+      ignored_sidebar_action(state, sidebar_id, kind, action)
+    end
+  end
+
+  @spec builtin_sidebar_id?(String.t()) :: boolean()
+  defp builtin_sidebar_id?(sidebar_id),
+    do: sidebar_id in ["file_tree", "git_status", "observatory"]
+
   @spec dispatch_sidebar_action(EditorState.t(), String.t(), String.t(), String.t()) ::
           EditorState.t()
   defp dispatch_sidebar_action(state, sidebar_id, kind, "toggle") do
@@ -917,8 +941,11 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   @spec sidebar_visible?(EditorState.t(), String.t()) :: boolean()
-  defp sidebar_visible?(%{workspace: %{file_tree: %FileTreeState{} = file_tree}}, "file_tree") do
-    file_tree |> FileTreeState.status() |> FileTreeState.visible_status?()
+  defp sidebar_visible?(state, "file_tree") do
+    state
+    |> EditorState.file_tree_state()
+    |> FileTreeState.status()
+    |> FileTreeState.visible_status?()
   end
 
   defp sidebar_visible?(state, "git_status"), do: EditorState.git_status_panel(state) != nil

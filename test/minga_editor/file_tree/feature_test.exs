@@ -13,6 +13,13 @@ defmodule MingaEditor.FileTree.FeatureTest do
   import MingaEditor.RenderPipeline.TestHelpers
 
   setup do
+    Sidebar.unregister_source(:builtin)
+
+    on_exit(fn ->
+      Sidebar.unregister_source(:builtin)
+      Input.reset_handlers()
+    end)
+
     :ok
   end
 
@@ -28,22 +35,21 @@ defmodule MingaEditor.FileTree.FeatureTest do
              file_tree
   end
 
-  test "FileTree dynamic handler uses an extension-owned source that can unregister safely" do
-    source = {:extension, :file_tree_feature_test}
+  test "FileTree dynamic handler uses a built-in source that extension cleanup cannot remove" do
+    Input.reset_handlers()
+    :ok = FileTreeFeature.register_contributions(%FileTreeState{})
 
-    before_handlers = Input.surface_handlers(%{editing_model: Minga.Editing.Model.Vim})
-    before_count = Enum.count(before_handlers, &(&1 == MingaEditor.Input.FileTreeHandler))
-
-    :ok = Input.register_handler(source, MingaEditor.Input.FileTreeHandler, priority: 50)
     handlers = Input.surface_handlers(%{editing_model: Minga.Editing.Model.Vim})
 
-    assert FileTreeFeature.input_source() == {:extension, :file_tree}
-    assert Enum.count(handlers, &(&1 == MingaEditor.Input.FileTreeHandler)) == before_count + 1
+    assert FileTreeFeature.input_source() == :builtin
+    assert Enum.count(handlers, &(&1 == MingaEditor.Input.FileTreeHandler)) == 1
 
-    :ok = Input.unregister_source(source)
+    :ok = Input.unregister_source({:extension, :file_tree})
     handlers = Input.surface_handlers(%{editing_model: Minga.Editing.Model.Vim})
 
-    assert Enum.count(handlers, &(&1 == MingaEditor.Input.FileTreeHandler)) == before_count
+    assert Enum.count(handlers, &(&1 == MingaEditor.Input.FileTreeHandler)) == 1
+  after
+    Input.reset_handlers()
   end
 
   test "layout uses FileTree sidebar registry visibility and width" do

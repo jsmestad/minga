@@ -8,6 +8,7 @@ defmodule MingaEditor.Session.ChromeState do
   alias Minga.Buffer
   alias Minga.Language
   alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.WorkspaceReview
   alias MingaEditor.State.Buffers
@@ -133,6 +134,17 @@ defmodule MingaEditor.Session.ChromeState do
   defp manual_workspace_label(%{workspace: %{custom_name: custom_name}}, _workspace)
        when is_binary(custom_name) and custom_name != "" do
     custom_name
+  end
+
+  defp manual_workspace_label(
+         %{workspace: %{file_tree: %FileTreeState{} = file_tree}},
+         _workspace
+       ) do
+    file_tree |> Map.get(:project_root) |> project_label()
+  end
+
+  defp manual_workspace_label(%{file_tree: %FileTreeState{} = file_tree}, _workspace) do
+    file_tree |> Map.get(:project_root) |> project_label()
   end
 
   defp manual_workspace_label(%{workspace: %SessionState{} = session}, _workspace) do

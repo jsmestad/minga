@@ -25,6 +25,14 @@ defmodule MingaEditor.Commands.FileTree do
   @doc "Handles semantic sidebar actions from native frontends or generic sidebar input."
   @spec handle_sidebar_action(state(), String.t(), map()) :: state()
   def handle_sidebar_action(state, "toggle", _context), do: toggle(state)
+
+  def handle_sidebar_action(state, "activate", _context) do
+    case file_tree_state(state) |> FileTreeState.status() |> FileTreeState.visible_status?() do
+      true -> focus_visible_tree(state)
+      false -> toggle(state)
+    end
+  end
+
   def handle_sidebar_action(state, _action, _context), do: state
 
   @spec toggle(state()) :: state()
@@ -42,6 +50,16 @@ defmodule MingaEditor.Commands.FileTree do
         FileTreeFreshness.unwatch_expanded_dirs(tree)
         close_tree(state)
     end
+  end
+
+  @spec focus_visible_tree(state()) :: state()
+  defp focus_visible_tree(state) do
+    state
+    |> EditorState.update_file_tree(&FileTreeState.focus/1)
+    |> EditorState.set_keymap_scope(:file_tree)
+    |> EditorState.set_sidebar_active_id("file_tree")
+    |> Layout.invalidate()
+    |> EditorState.invalidate_all_windows()
   end
 
   @spec close_tree(state()) :: state()

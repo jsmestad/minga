@@ -7,8 +7,10 @@ defmodule MingaEditor.StartupTest do
   alias Minga.Project.FileRef
   alias Minga.Test.RecordingFrontend
   alias MingaEditor.Commands.AgentSession
+  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Input
+  alias MingaEditor.Input.FileTreeHandler
   alias MingaEditor.LayoutPreset
   alias MingaEditor.Startup
   alias MingaEditor.State, as: EditorState
@@ -166,6 +168,30 @@ defmodule MingaEditor.StartupTest do
   end
 
   describe "build_initial_state/1" do
+    test "registers FileTree dynamic sidebar and input contributions" do
+      Input.reset_handlers()
+      Sidebar.unregister_source(:builtin)
+
+      state =
+        Startup.build_initial_state(
+          backend: :headless,
+          port_manager: nil,
+          parser_manager: nil,
+          options_server: nil,
+          width: 80,
+          height: 24
+        )
+
+      assert %{id: "file_tree", input_handler: FileTreeHandler, visible?: false} =
+               Sidebar.get("file_tree")
+
+      handlers = Input.surface_handlers(state)
+      assert Enum.count(handlers, &(&1 == FileTreeHandler)) == 1
+    after
+      Input.reset_handlers()
+      Sidebar.unregister_source(:builtin)
+    end
+
     test "normalizes nil and supplied options servers" do
       default_state =
         Startup.build_initial_state(

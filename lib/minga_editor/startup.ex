@@ -13,6 +13,7 @@ defmodule MingaEditor.Startup do
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer
+  alias Minga.Log
   alias Minga.Config
   alias MingaEditor.Commands
   alias MingaEditor.FileTree.Feature, as: FileTreeFeature
@@ -107,7 +108,14 @@ defmodule MingaEditor.Startup do
     project_root = project_root_from_opts(opts)
 
     file_tree = %MingaEditor.State.FileTree{project_root: project_root}
-    FileTreeFeature.register_contributions(file_tree)
+
+    case FileTreeFeature.register_contributions(file_tree) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Log.warning(:editor, "FileTree contribution registration failed: #{inspect(reason)}")
+    end
 
     workspace =
       %MingaEditor.Session.State{
