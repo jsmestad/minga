@@ -120,6 +120,9 @@ defmodule MingaEditor.State.Tab.Context do
     end
   end
 
+  @snapshot_excluded_fields [:highlight, :injection_ranges, :agent_ui]
+  @snapshot_fields @workspace_fields -- @snapshot_excluded_fields
+
   @doc "Creates a tab context directly from a workspace struct, without intermediate map conversion."
   @spec from_workspace(SessionState.t()) :: t()
   def from_workspace(%SessionState{} = ws) do
@@ -134,15 +137,12 @@ defmodule MingaEditor.State.Tab.Context do
       dired: ws.dired,
       viewport: ws.viewport,
       mouse: ws.mouse,
-      highlight: ws.highlight,
       lsp_pending: ws.lsp_pending,
-      injection_ranges: ws.injection_ranges,
       search: ws.search,
       editing: editing,
       feature_state: ws.feature_state,
       document_highlights: ws.document_highlights,
-      agent_ui: ws.agent_ui,
-      present_fields: @workspace_fields
+      present_fields: @snapshot_fields
     }
   end
 
@@ -157,7 +157,7 @@ defmodule MingaEditor.State.Tab.Context do
 
   def from_map(map) when is_map(map) do
     context = %__MODULE__{version: fetch_version(map)}
-    fields = fetch_present_fields(map) || @workspace_fields
+    fields = (fetch_present_fields(map) || @workspace_fields) -- @snapshot_excluded_fields
 
     Enum.reduce(fields, context, fn field, acc ->
       case fetch_field(map, field) do

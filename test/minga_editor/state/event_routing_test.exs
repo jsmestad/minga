@@ -207,7 +207,8 @@ defmodule MingaEditor.State.EventRoutingTest do
 
       refute Map.has_key?(ctx, :agent)
       refute Map.has_key?(ctx, :agentic)
-      refute Map.has_key?(ctx, :agent_ui)
+      assert ctx.agent_ui == nil
+      refute :agent_ui in ctx.present_fields
     end
   end
 

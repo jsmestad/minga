@@ -10,6 +10,7 @@ defmodule MingaEditor.Shell.Board.StateTest do
 
   alias MingaEditor.Shell.Board.Card
   alias MingaEditor.Shell.Board.State
+  alias MingaEditor.State.Tab.Context, as: TabContext
 
   # ── Card creation ──────────────────────────────────────────────────────
 
@@ -165,7 +166,7 @@ defmodule MingaEditor.Shell.Board.StateTest do
   describe "zoom_into/3" do
     test "sets zoomed_into and stores workspace snapshot" do
       {state, card} = State.create_card(State.new(), task: "zoom me")
-      ws = %{buffers: :fake_buffers, editing: :fake_vim}
+      ws = TabContext.from_map(%{buffers: :fake_buffers, editing: :fake_vim})
 
       state = State.zoom_into(state, card.id, ws)
       assert state.zoomed_into == card.id
@@ -190,7 +191,7 @@ defmodule MingaEditor.Shell.Board.StateTest do
   describe "zoom_out/1" do
     test "clears zoom and returns the stored workspace" do
       {state, card} = State.create_card(State.new(), task: "zoomed")
-      ws = %{buffers: :fake, editing: :fake}
+      ws = TabContext.from_map(%{buffers: :fake, editing: :fake})
 
       state = State.zoom_into(state, card.id, ws)
       {state, restored} = State.zoom_out(state)
@@ -213,7 +214,7 @@ defmodule MingaEditor.Shell.Board.StateTest do
   property "zoom_into then zoom_out restores the original workspace snapshot" do
     check all(task <- string(:printable, min_length: 1, max_length: 100)) do
       {state, card} = State.create_card(State.new(), task: task)
-      workspace = %{content: task, cursor: {0, 0}}
+      workspace = TabContext.from_map(%{search: task})
 
       state = State.zoom_into(state, card.id, workspace)
       {_state, restored} = State.zoom_out(state)

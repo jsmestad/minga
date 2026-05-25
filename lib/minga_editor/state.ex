@@ -1761,14 +1761,11 @@ defmodule MingaEditor.State do
       dired: %DiredState{},
       viewport: state.terminal_viewport,
       mouse: %Mouse{},
-      highlight: %Highlighting{},
       lsp_pending: %{},
-      injection_ranges: %{},
       search: %Search{},
       editing: VimState.new(),
       feature_state: FeatureState.new(),
-      document_highlights: nil,
-      agent_ui: UIState.new()
+      document_highlights: nil
     })
   end
 
@@ -1793,14 +1790,11 @@ defmodule MingaEditor.State do
       dired: %DiredState{},
       viewport: state.terminal_viewport,
       mouse: %Mouse{},
-      highlight: %Highlighting{},
       lsp_pending: %{},
-      injection_ranges: %{},
       search: %Search{},
       editing: VimState.new(),
       feature_state: FeatureState.new(),
-      document_highlights: nil,
-      agent_ui: UIState.new()
+      document_highlights: nil
     })
   end
 
