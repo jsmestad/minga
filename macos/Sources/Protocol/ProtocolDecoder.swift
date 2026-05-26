@@ -40,6 +40,7 @@ struct StatusBarUpdate: Sendable {
     let cursorCol: UInt32
     let lineCount: UInt32
     let flags: UInt8
+    let safeMode: Bool
     let lspStatus: UInt8
     let gitBranch: String
     let message: String
@@ -80,6 +81,7 @@ struct StatusBarUpdate: Sendable {
         cursorCol: UInt32,
         lineCount: UInt32,
         flags: UInt8,
+        safeMode: Bool = false,
         lspStatus: UInt8,
         gitBranch: String,
         message: String,
@@ -119,6 +121,7 @@ struct StatusBarUpdate: Sendable {
         self.cursorCol = cursorCol
         self.lineCount = lineCount
         self.flags = flags
+        self.safeMode = safeMode
         self.lspStatus = lspStatus
         self.gitBranch = gitBranch
         self.message = message
@@ -1043,7 +1046,8 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let update = StatusBarUpdate(
             contentKind: contentKind, mode: mode,
             cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount,
-            flags: flags, lspStatus: lspStatus, gitBranch: gitBranch,
+            flags: flags, safeMode: (flags & 0x08) != 0,
+            lspStatus: lspStatus, gitBranch: gitBranch,
             message: message, filetype: filetype,
             errorCount: errorCount, warningCount: warningCount,
             modelName: modelName, messageCount: messageCount, sessionStatus: sessionStatus,

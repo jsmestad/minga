@@ -2755,7 +2755,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     has_lsp = if d.lsp_status && d.lsp_status != :none, do: 1, else: 0
     has_git = if d.git_branch && d.git_branch != "", do: 1, else: 0
     is_dirty = if d.dirty, do: 1, else: 0
-    bor(has_lsp, bor(bsl(has_git, 1), bsl(is_dirty, 2)))
+    safe_mode = if Map.get(d, :safe_mode, false), do: 1, else: 0
+    bor(has_lsp, bor(bsl(has_git, 1), bor(bsl(is_dirty, 2), bsl(safe_mode, 3))))
   end
 
   @spec encode_agent_session_status(atom() | nil) :: non_neg_integer()

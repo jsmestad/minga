@@ -50,6 +50,7 @@ defmodule MingaEditor.StatusBar.Data do
           optional(:modeline_segments) => Modeline.gui_segments(),
           mode: Minga.Mode.mode(),
           mode_state: Minga.Mode.state() | nil,
+          safe_mode: boolean(),
           cursor_line: non_neg_integer(),
           cursor_col: non_neg_integer(),
           line_count: non_neg_integer(),
@@ -86,6 +87,7 @@ defmodule MingaEditor.StatusBar.Data do
           optional(:modeline_segments) => Modeline.gui_segments(),
           mode: Minga.Mode.mode(),
           mode_state: Minga.Mode.state() | nil,
+          safe_mode: boolean(),
           model_name: String.t(),
           session_status: AgentState.status(),
           message_count: non_neg_integer(),
@@ -185,6 +187,7 @@ defmodule MingaEditor.StatusBar.Data do
     %{
       mode: mode,
       mode_state: mode_state,
+      safe_mode: Minga.SafeMode.active?(),
       cursor_line: line,
       cursor_col: col,
       line_count: line_count,
@@ -341,6 +344,7 @@ defmodule MingaEditor.StatusBar.Data do
     %{
       mode: mode,
       mode_state: mode_state,
+      safe_mode: Minga.SafeMode.active?(),
       model_name: model_name,
       session_status: agent.runtime.status,
       message_count: message_count,
@@ -508,6 +512,7 @@ defmodule MingaEditor.StatusBar.Data do
     %{
       mode: d.mode,
       mode_state: d.mode_state,
+      safe_mode: Map.get(d, :safe_mode, false),
       file_name: d.file_name,
       filetype: d.filetype,
       dirty_marker: if(d.dirty, do: " ● ", else: ""),

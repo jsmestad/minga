@@ -381,11 +381,11 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.whichKeyState.visible == false)
     }
 
-    @Test("guiStatusBar updates statusBarState")
+    @Test("guiStatusBar updates statusBarState and clears safeMode")
     @MainActor func guiStatusBarRouting() {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.dispatch(.guiStatusBar(StatusBarUpdate(contentKind: 0, mode: 1, cursorLine: 42,
-                                           cursorCol: 9, lineCount: 500, flags: 0x03,
+                                           cursorCol: 9, lineCount: 500, flags: 0x0B, safeMode: true,
                                            lspStatus: 1, gitBranch: "main",
                                            message: "-- INSERT --", filetype: "elixir",
                                            errorCount: 3, warningCount: 7,
@@ -404,6 +404,7 @@ struct CommandDispatcherRoutingTests {
 
         #expect(gui.statusBarState.mode == 1)
         #expect(gui.statusBarState.cursorLine == 42)
+        #expect(gui.statusBarState.safeMode == true)
         #expect(gui.statusBarState.gitBranch == "main")
         #expect(gui.statusBarState.filetype == "elixir")
         #expect(gui.statusBarState.errorCount == 3)
@@ -414,6 +415,26 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.statusBarState.selection.mode == 2)
         #expect(gui.statusBarState.selection.size == 3)
         #expect(gui.statusBarState.activeToolName.isEmpty)
+
+        dispatcher.dispatch(.guiStatusBar(StatusBarUpdate(contentKind: 0, mode: 1, cursorLine: 42,
+                                           cursorCol: 9, lineCount: 500, flags: 0x03, safeMode: false,
+                                           lspStatus: 1, gitBranch: "main",
+                                           message: "-- INSERT --", filetype: "elixir",
+                                           errorCount: 3, warningCount: 7,
+                                           modelName: "", messageCount: 0, sessionStatus: 0,
+                                           infoCount: 1, hintCount: 2,
+                                           macroRecording: 0, parserStatus: 0, agentStatus: 0,
+                                           activeToolName: "",
+                                           gitAdded: 5, gitModified: 3, gitDeleted: 1,
+                                           icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0,
+                                           filename: "editor.ex", diagnosticHint: "",
+                                           backgroundSubagentCount: 0, backgroundSubagentLabel: "",
+                                           indent: .init(kind: 1, size: 4),
+                                           modelineLeftSegments: [Wire.StatusBarSegment(id: 0, text: " NORMAL ", fgColor: 0xFFFFFF, bgColor: 0x000000, attrs: 1, command: "")],
+                                           modelineRightSegments: [],
+                                           selection: .init(mode: 2, size: 3))))
+
+        #expect(gui.statusBarState.safeMode == false)
     }
 
     @Test("guiStatusBar agent variant populates background buffer fields")

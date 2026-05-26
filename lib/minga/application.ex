@@ -87,6 +87,7 @@ defmodule Minga.Application do
     # tree starts so headless and pre-editor logs reach Minga.Log.MessagesBuffer
     # via the same path as logs from a running editor.
     Minga.LoggerHandler.install_messages_handler()
+    store_startup_safe_mode()
 
     minimal? = minimal_mode?()
 
@@ -185,6 +186,17 @@ defmodule Minga.Application do
   @spec minimal_mode?() :: boolean()
   defp minimal_mode? do
     Application.get_env(:minga, :minimal_mode, false) or standalone_minimal?()
+  end
+
+  @spec store_startup_safe_mode() :: :ok
+  defp store_startup_safe_mode do
+    if Minga.SafeMode.active?() do
+      Minga.SafeMode.put(true)
+    end
+
+    :ok
+  rescue
+    _ -> :ok
   end
 
   @spec standalone_headless?() :: boolean()

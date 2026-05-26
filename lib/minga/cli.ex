@@ -34,6 +34,7 @@ defmodule Minga.CLI do
           debug_log: String.t() | nil,
           headless: boolean(),
           minimal: boolean(),
+          safe_mode: boolean(),
           node_name: String.t() | nil,
           short_name: boolean(),
           cookie: String.t() | nil,
@@ -49,6 +50,7 @@ defmodule Minga.CLI do
     debug_log: nil,
     headless: false,
     minimal: false,
+    safe_mode: false,
     node_name: nil,
     short_name: false,
     cookie: nil,
@@ -104,6 +106,12 @@ defmodule Minga.CLI do
   @spec minimal_args?([String.t()]) :: boolean()
   def minimal_args?(args) do
     Enum.member?(args, "--minimal")
+  end
+
+  @doc "Returns true when args request safe mode."
+  @spec safe_args?([String.t()]) :: boolean()
+  def safe_args?(args) do
+    Enum.member?(args, "--safe") or Enum.member?(args, "-Q")
   end
 
   @doc "Returns the startup flags stored by the CLI, or defaults if none were set."
@@ -324,6 +332,14 @@ defmodule Minga.CLI do
 
   defp parse_args(["--minimal" | rest], file, flags) do
     parse_args(rest, file, %{flags | minimal: true})
+  end
+
+  defp parse_args(["--safe" | rest], file, flags) do
+    parse_args(rest, file, %{flags | safe_mode: true})
+  end
+
+  defp parse_args(["-Q" | rest], file, flags) do
+    parse_args(rest, file, %{flags | safe_mode: true})
   end
 
   defp parse_args([<<"--", _::binary>> = flag | _], _file, _flags) do
@@ -672,6 +688,7 @@ defmodule Minga.CLI do
     Application.put_env(:minga, :cli_startup_flags, effective)
     store_startup_project_root(file)
     store_debug_log_path(effective.debug_log)
+    Minga.SafeMode.put(effective.safe_mode)
     if effective.minimal, do: Application.put_env(:minga, :minimal_mode, true)
     :ok
   end
@@ -798,6 +815,7 @@ defmodule Minga.CLI do
       -D, --debug-log <path> Append *Messages* and *Warnings* entries to a crash-safe log
       --editor               Start in file editing mode (skip agentic view)
       --minimal              Minimal mode: editor-only, no services/agent (for GIT_EDITOR use)
+      -Q, --safe             Safe mode: skip user config, user modules, after hooks, and extensions
       --no-context           Keep agentic view and don't load the file as agent context
       --headless             Start services and agent runtime without a GUI frontend
       --name <name@host>     Distributed Erlang long node name
@@ -814,6 +832,7 @@ defmodule Minga.CLI do
       minga --editor README.md           Open file in traditional editor
       MINGA_COOKIE=$(openssl rand -base64 32 | tr -d '/+=') minga --headless   Start detachable agent server
       minga --config ~/minimal.exs       Use a custom config profile
+      minga --safe                       Start with defaults and no user config
       minga -D /tmp/minga-debug.log      Persist messages and warnings for crash forensics
     """
   end

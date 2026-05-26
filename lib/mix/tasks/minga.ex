@@ -14,6 +14,7 @@ defmodule Mix.Tasks.Minga do
 
       +gui        Launch the native macOS GUI instead of the TUI
       --headless  Launch services, agent runtime, and Gateway without an editor frontend
+      --safe/-Q   Start in safe mode before config loading
 
   The `+gui` flag uses a `+` prefix to avoid conflicts with Mix's built-in option parser.
   """
@@ -26,6 +27,9 @@ defmodule Mix.Tasks.Minga do
     {gui?, remaining_args} = extract_gui_flag(args)
     headless? = Minga.CLI.headless_args?(remaining_args)
     minimal? = Minga.CLI.minimal_args?(remaining_args)
+    safe? = Minga.CLI.safe_args?(remaining_args)
+
+    Minga.SafeMode.put(safe?)
 
     if minimal? do
       Application.put_env(:minga, :minimal_mode, true)

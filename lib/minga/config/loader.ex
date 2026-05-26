@@ -88,7 +88,9 @@ defmodule Minga.Config.Loader do
       )
       |> Options.validate_server!()
 
-    Agent.start_link(fn -> load_all(keymap_server, options_server) end, name: name)
+    Agent.start_link(fn -> load_all(keymap_server, options_server, Minga.SafeMode.active?()) end,
+      name: name
+    )
   end
 
   @doc """
@@ -244,8 +246,9 @@ defmodule Minga.Config.Loader do
       PopupRegistry.clear()
       ModelineSegments.reset_warnings()
 
-      # Re-run the full load sequence (includes starting extensions)
-      new_state = load_all(keymap_server, options_server)
+      # Re-run the full load sequence (includes starting extensions).
+      # Reload deliberately ignores startup safe mode so fixed config can be loaded without restarting.
+      new_state = load_all(keymap_server, options_server, false)
       Agent.update(server, fn _ -> new_state end)
 
       # Return error if any stage had problems
@@ -275,8 +278,8 @@ defmodule Minga.Config.Loader do
   # callback) won't see this dict and will fall back to registered defaults.
   # Extensions are skipped in test mode, so this only affects long-lived runtime
   # callers.
-  @spec load_all(keymap_server(), options_server()) :: state()
-  defp load_all(keymap_server, options_server) do
+  @spec load_all(keymap_server(), options_server(), boolean()) :: state()
+  defp load_all(keymap_server, options_server, safe_mode?) when is_boolean(safe_mode?) do
     previous_keymap_server = Process.put(:minga_config_keymap, keymap_server)
     previous_options_server = Process.put(:minga_config_options, options_server)
     previous_lsp_settings = Process.put(:minga_config_lsp_settings, %{})
@@ -289,88 +292,110 @@ defmodule Minga.Config.Loader do
       # 0. Register default popup rules (before user config so overrides work)
       register_default_popup_rules()
 
-      # 1. Compile user modules
-      {loaded_modules, modules_errors} = compile_user_modules(config_dir)
+      if safe_mode? do
+        safe_mode_state(config_path, config_dir, keymap_server, options_server)
+      else
+        # 1. Compile user modules
+        {loaded_modules, modules_errors} = compile_user_modules(config_dir)
 
-      # 2. Load user themes (before config eval so `set :theme, :my_custom` works)
-      load_user_themes()
+        # 2. Load user themes (before config eval so `set :theme, :my_custom` works)
+        load_user_themes()
 
-      # 3. Eval global config
-      custom_config? = cli_config_file() != nil
+        # 3. Eval global config
+        custom_config? = cli_config_file() != nil
 
-      load_error =
-        case {custom_config?, File.exists?(config_path)} do
-          {true, false} ->
-            "Custom config not found: #{config_path} (using defaults)"
+        load_error =
+          case {custom_config?, File.exists?(config_path)} do
+            {true, false} ->
+              "Custom config not found: #{config_path} (using defaults)"
 
-          _ ->
-            eval_if_exists(config_path)
-        end
+            _ ->
+              eval_if_exists(config_path)
+          end
 
-      load_error =
-        if custom_config? and load_error == nil and not String.ends_with?(config_path, ".exs") do
-          "Custom config path does not end in .exs: #{config_path} (file was loaded, but may not be valid Elixir)"
-        else
-          load_error
-        end
+        load_error =
+          if custom_config? and load_error == nil and not String.ends_with?(config_path, ".exs") do
+            "Custom config path does not end in .exs: #{config_path} (file was loaded, but may not be valid Elixir)"
+          else
+            load_error
+          end
 
-      # 4. Eval project-local config
-      project_path = resolve_project_config_path()
-      project_config_error = eval_if_exists(project_path)
-      project_mcp_error = load_project_mcp_json()
+        # 4. Eval project-local config
+        project_path = resolve_project_config_path()
+        project_config_error = eval_if_exists(project_path)
+        project_mcp_error = load_project_mcp_json()
 
-      # 5. Eval generated GUI settings overlay
-      gui_settings_path = Path.join(config_dir, "gui_settings.exs")
+        # 5. Eval generated GUI settings overlay
+        gui_settings_path = Path.join(config_dir, "gui_settings.exs")
 
-      gui_settings_error =
-        with_config_source(:gui_settings, fn -> eval_if_exists(gui_settings_path) end)
+        gui_settings_error =
+          with_config_source(:gui_settings, fn -> eval_if_exists(gui_settings_path) end)
 
-      # 6. Eval after.exs
-      after_path = Path.join(config_dir, "after.exs")
-      after_error = eval_if_exists(after_path)
+        # 6. Eval after.exs
+        after_path = Path.join(config_dir, "after.exs")
+        after_error = eval_if_exists(after_path)
 
-      # 7. Apply log level from config
-      apply_log_level(options_server)
+        # 7. Apply log level from config
+        apply_log_level(options_server)
 
-      # 8. Register bundled extensions, then start extensions only after all config sources have had a chance
-      # to declare them.
-      register_bundled_extensions()
+        # 8. Register bundled extensions, then start extensions only after all config sources have had a chance
+        # to declare them.
+        register_bundled_extensions()
 
-      start_all_error =
-        if Process.whereis(Minga.Extension.Supervisor) != nil &&
-             Application.get_env(:minga, :load_extensions, true) do
-          start_all_extensions()
-        end
+        start_all_error =
+          if Process.whereis(Minga.Extension.Supervisor) != nil &&
+               Application.get_env(:minga, :load_extensions, true) do
+            start_all_extensions()
+          end
 
-      load_error =
-        merge_error_messages([
-          config_cleanup_error,
-          load_error,
-          project_mcp_error,
-          start_all_error
-        ])
+        load_error =
+          merge_error_messages([
+            config_cleanup_error,
+            load_error,
+            project_mcp_error,
+            start_all_error
+          ])
 
-      lsp_settings = Process.get(:minga_config_lsp_settings, %{})
+        lsp_settings = Process.get(:minga_config_lsp_settings, %{})
 
-      %{
-        config_path: config_path,
-        load_error: load_error,
-        loaded_modules: loaded_modules,
-        modules_errors: modules_errors,
-        project_config_path: project_path,
-        project_config_error: project_config_error,
-        gui_settings_path: gui_settings_path,
-        gui_settings_error: gui_settings_error,
-        after_error: after_error,
-        lsp_settings: lsp_settings,
-        keymap_server: keymap_server,
-        options_server: options_server
-      }
+        %{
+          config_path: config_path,
+          load_error: load_error,
+          loaded_modules: loaded_modules,
+          modules_errors: modules_errors,
+          project_config_path: project_path,
+          project_config_error: project_config_error,
+          gui_settings_path: gui_settings_path,
+          gui_settings_error: gui_settings_error,
+          after_error: after_error,
+          lsp_settings: lsp_settings,
+          keymap_server: keymap_server,
+          options_server: options_server
+        }
+      end
     after
       restore_pdict(:minga_config_keymap, previous_keymap_server)
       restore_pdict(:minga_config_options, previous_options_server)
       restore_pdict(:minga_config_lsp_settings, previous_lsp_settings)
     end
+  end
+
+  @spec safe_mode_state(String.t(), String.t(), keymap_server(), options_server()) :: state()
+  defp safe_mode_state(config_path, config_dir, keymap_server, options_server) do
+    %{
+      config_path: config_path,
+      load_error: nil,
+      loaded_modules: [],
+      modules_errors: [],
+      project_config_path: nil,
+      project_config_error: nil,
+      gui_settings_path: Path.join(config_dir, "gui_settings.exs"),
+      gui_settings_error: nil,
+      after_error: nil,
+      lsp_settings: %{},
+      keymap_server: keymap_server,
+      options_server: options_server
+    }
   end
 
   @spec register_bundled_extensions() :: :ok

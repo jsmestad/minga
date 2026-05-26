@@ -33,6 +33,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   @type modeline_data :: %{
           :mode => Mode.mode(),
           :mode_state => Mode.state() | nil,
+          optional(:safe_mode) => boolean(),
           :file_name => String.t(),
           :workspace_label => String.t(),
           :workspace_draft_count => non_neg_integer(),
@@ -712,8 +713,13 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   @spec render_mode(context()) :: [render_segment()]
   defp render_mode(ctx) do
     badge = ctx.data[:mode_override] || mode_badge(ctx.data.mode, ctx.data.mode_state)
+    badge = safe_mode_badge(badge, Map.get(ctx.data, :safe_mode, false))
     [{" #{badge} ", ctx.mode_fg, ctx.mode_bg, [bold: true], nil}]
   end
+
+  @spec safe_mode_badge(String.t(), boolean()) :: String.t()
+  defp safe_mode_badge(badge, true), do: "[SAFE] #{badge}"
+  defp safe_mode_badge(badge, false), do: badge
 
   @spec render_workspace(context()) :: [render_segment()]
   defp render_workspace(ctx) do

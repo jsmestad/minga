@@ -98,6 +98,7 @@ defmodule Minga.Command.Parser do
           | {:extension_update, []}
           | {:extension_update_all, []}
           | {:parser_restart, []}
+          | {:safe_mode_status, []}
           | {:describe_command, []}
           | {:describe_command_named, [String.t()]}
           | {:describe_option, []}
@@ -282,6 +283,8 @@ defmodule Minga.Command.Parser do
   defp do_parse("ExtUpdateAll"), do: {:extension_update_all, []}
   defp do_parse("parser-restart"), do: {:parser_restart, []}
   defp do_parse("ParserRestart"), do: {:parser_restart, []}
+  defp do_parse("safe-mode?"), do: {:safe_mode_status, []}
+  defp do_parse("safe-mode"), do: {:safe_mode_status, []}
   defp do_parse("agent-stop"), do: {:agent_abort, []}
   defp do_parse("agent-new"), do: {:agent_new_session, []}
   defp do_parse("agent-clear-history"), do: {:agent_clear_history, []}

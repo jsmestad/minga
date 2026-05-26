@@ -568,6 +568,10 @@ defmodule MingaEditor.Commands do
       EditorState.set_status(state, "Parser restart failed: manager not available")
   end
 
+  def execute(state, {:execute_ex_command, {:safe_mode_status, []}}) do
+    EditorState.set_status(state, safe_mode_status_message())
+  end
+
   def execute(state, {:execute_ex_command, {:extensions, []}}) do
     ExtCommands.list(state)
   end
@@ -691,6 +695,15 @@ defmodule MingaEditor.Commands do
   @spec normalize_options_server(term() | nil) :: Minga.Config.Options.server()
   defp normalize_options_server(nil), do: Minga.Config.Options.default_server()
   defp normalize_options_server(server), do: Minga.Config.Options.validate_server!(server)
+
+  @spec safe_mode_status_message() :: String.t()
+  defp safe_mode_status_message do
+    if Minga.SafeMode.active?() do
+      "Safe mode is active: user config was not loaded at startup"
+    else
+      "Safe mode is inactive"
+    end
+  end
 
   @spec reopen_git_branch_picker(state()) :: state()
   defp reopen_git_branch_picker(state) do

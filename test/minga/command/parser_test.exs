@@ -106,6 +106,8 @@ defmodule Minga.Command.ParserTest do
         {"agent-new", {:agent_new_session, []}},
         {"parser-restart", {:parser_restart, []}},
         {"ParserRestart", {:parser_restart, []}},
+        {"safe-mode?", {:safe_mode_status, []}},
+        {"safe-mode", {:safe_mode_status, []}},
         {"terminal", {:terminal, []}},
         {"reload-highlights", {:reload_highlights, []}},
         {"rh", {:reload_highlights, []}}

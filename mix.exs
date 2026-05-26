@@ -294,6 +294,7 @@ defmodule Minga.MixProject do
             other -> {false, other}
           end
           if gui, do: Application.put_env(:minga, :backend, :gui)
+          Minga.SafeMode.put(Minga.CLI.safe_args?(argv))
           Application.put_env(:minga, :start_editor, true)
           Application.ensure_all_started(:minga)
           Minga.CLI.main(argv)

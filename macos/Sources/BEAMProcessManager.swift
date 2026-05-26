@@ -73,6 +73,28 @@ final class BEAMProcessManager {
         beamExecutableURL() != nil
     }
 
+    /// Builds the BEAM argv from the macOS app argv, forwarding only supported Minga flags.
+    static func forwardedLaunchArguments(from appArguments: [String]) -> [String] {
+        var beamArgs = ["start"]
+        let mingaFlags: Set<String> = ["--editor", "--no-context", "--config", "--safe", "-Q"]
+        var skipNext = false
+
+        for arg in appArguments.dropFirst() {
+            if skipNext {
+                beamArgs.append(arg)
+                skipNext = false
+                continue
+            }
+
+            if mingaFlags.contains(arg) {
+                beamArgs.append(arg)
+                if arg == "--config" { skipNext = true }
+            }
+        }
+
+        return beamArgs
+    }
+
     /// Spawns the BEAM release as a child process with piped stdin/stdout.
     func start() {
         guard let execURL = Self.beamExecutableURL() else {
@@ -83,26 +105,8 @@ final class BEAMProcessManager {
         let proc = Process()
         proc.executableURL = execURL
 
-        // Forward CLI flags (--editor, --no-context, --config) to the BEAM.
-        // The CLI launcher script passes these via `open --args`, which puts
-        // them in ProcessInfo.processInfo.arguments. We forward all arguments
-        // that look like Minga CLI flags to the BEAM release's `start` command.
-        var beamArgs = ["start"]
-        let appArgs = ProcessInfo.processInfo.arguments.dropFirst() // skip argv[0]
-        let mingaFlags: Set<String> = ["--editor", "--no-context", "--config"]
-        var skipNext = false
-        for arg in appArgs {
-            if skipNext {
-                beamArgs.append(arg)
-                skipNext = false
-                continue
-            }
-            if mingaFlags.contains(arg) {
-                beamArgs.append(arg)
-                if arg == "--config" { skipNext = true }
-            }
-        }
-        proc.arguments = beamArgs
+        let launchArguments = Self.forwardedLaunchArguments(from: ProcessInfo.processInfo.arguments)
+        proc.arguments = launchArguments
 
         // Set up pipes for the port protocol.
         let stdinPipe = Pipe()
@@ -118,6 +122,10 @@ final class BEAMProcessManager {
         // Tell the BEAM to use connected mode (don't spawn a GUI).
         var env = ProcessInfo.processInfo.environment
         env["MINGA_PORT_MODE"] = "connected"
+
+        if launchArguments.contains("--safe") || launchArguments.contains("-Q") {
+            env["MINGA_SAFE_MODE"] = "1"
+        }
 
         // Set RELEASE_NODE to prevent the BEAM from trying to connect
         // to other BEAM nodes (which would fail in a sandboxed app).

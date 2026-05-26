@@ -64,6 +64,7 @@ Options:
   -v, --version          Show version
   --editor               Start in editor mode (skip agentic view)
   --no-context           Don't load the file as agent context
+  --safe, -Q             Start in safe mode before config loading
   --config <path>        Use a custom config file
 
 Examples:
@@ -137,7 +138,7 @@ for arg in "$@"; do
       flags+=("$arg")
       skip_next=true
       ;;
-    --editor|--no-context)
+    --editor|--no-context|--safe|-Q)
       flags+=("$arg")
       ;;
     -*)
