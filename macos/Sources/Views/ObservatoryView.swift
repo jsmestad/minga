@@ -66,20 +66,47 @@ struct ObservatoryView: View {
             }
             .padding(.vertical, 6)
         }
+        .focusable()
+        .onKeyPress(.escape) {
+            dismissInspection()
+            return .handled
+        }
     }
 
     private func row(_ node: ObservatoryNode) -> some View {
         HStack(spacing: 6) {
+            Button {
+                activateRow(node)
+            } label: {
+                rowMainContent(node)
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button {
+                selectedNodeId = node.id
+                encoder?.sendObservatoryInspect(pid: node.pid)
+            } label: {
+                Image(systemName: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(theme.treeFg.opacity(0.55))
+                    .frame(width: 16)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.leading, CGFloat(node.depth) * 14 + 8)
+        .padding(.trailing, 8)
+        .padding(.vertical, 4)
+        .background(selectedNodeId == node.id ? theme.treeSelectionBg.opacity(0.55) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func rowMainContent(_ node: ObservatoryNode) -> some View {
+        HStack(spacing: 6) {
             if node.isSupervisor {
-                Button {
-                    toggleExpanded(node.id)
-                } label: {
-                    Image(systemName: disclosureIcon(node))
-                        .font(.caption)
-                        .frame(width: 12)
-                        .foregroundStyle(theme.treeFg.opacity(0.55))
-                }
-                .buttonStyle(.plain)
+                Image(systemName: disclosureIcon(node))
+                    .font(.caption)
+                    .frame(width: 12)
+                    .foregroundStyle(theme.treeFg.opacity(0.55))
             } else {
                 Color.clear.frame(width: 12).allowsHitTesting(false)
             }
@@ -117,15 +144,7 @@ struct ObservatoryView: View {
             SparklineView(data: node.sparkline, color: statusColor(node))
                 .frame(width: 48, height: 16)
         }
-        .padding(.leading, CGFloat(node.depth) * 14 + 8)
-        .padding(.trailing, 8)
-        .padding(.vertical, 4)
-        .background(selectedNodeId == node.id ? theme.treeSelectionBg.opacity(0.55) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
         .contentShape(Rectangle())
-        .onTapGesture {
-            selectedNodeId = node.id
-            encoder?.sendObservatoryInspect(pid: node.pid)
-        }
     }
 
     private func disclosureIcon(_ node: ObservatoryNode) -> String {
@@ -166,6 +185,18 @@ struct ObservatoryView: View {
         if state.nodes.isEmpty {
             hasInitializedExpansion = false
         }
+    }
+
+    private func activateRow(_ node: ObservatoryNode) {
+        selectedNodeId = node.id
+        dismissInspection()
+        if node.isSupervisor {
+            toggleExpanded(node.id)
+        }
+    }
+
+    private func dismissInspection() {
+        encoder?.sendObservatoryInspect(pid: "")
     }
 
     private func toggleExpanded(_ id: String) {

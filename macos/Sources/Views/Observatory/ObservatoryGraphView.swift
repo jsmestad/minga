@@ -64,7 +64,7 @@ struct ObservatoryGraphView: View {
         .contentShape(Capsule())
         .onTapGesture {
             selectedNodeId = node.id
-            encoder?.sendObservatoryInspect(pid: node.pid)
+            encoder?.sendObservatoryInspect(pid: "")
         }
     }
 

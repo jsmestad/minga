@@ -29,6 +29,13 @@ defmodule MingaEditor.Input.ObservatoryTest do
                state.shell_state.observatory_inspection
     end
 
+    test "empty PID dismisses the inspection popup" do
+      state = Observatory.inspect_process(base_state(), "not-a-pid")
+      state = Observatory.inspect_process(state, "")
+
+      assert state.shell_state.observatory_inspection == nil
+    end
+
     test "falls back to process info when GenServer state is unavailable" do
       pid = spawn(fn -> :ok end)
       ref = Process.monitor(pid)
