@@ -167,7 +167,7 @@ defmodule Minga.Extension do
   if you want those failures converted into load errors instead of propagating.
   """
   @spec manifest(module(), Minga.Extension.Manifest.source_type()) :: Minga.Extension.Manifest.t()
-  def manifest(module, source) when is_atom(module) and source in [:path, :git, :hex] do
+  def manifest(module, source) when is_atom(module) and source in [:path, :git, :hex, :module] do
     Minga.Extension.Manifest.from_module(module, source)
   end
 

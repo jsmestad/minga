@@ -252,8 +252,64 @@ defmodule Minga.Extension.Supervisor do
     find_and_start_hex_extension_locked(supervisor, registry, name, entry, opts)
   end
 
+  defp start_current_entry_locked(
+         supervisor,
+         registry,
+         name,
+         %{source_type: :module} = entry,
+         opts
+       ) do
+    start_from_module_locked(supervisor, registry, name, entry, opts)
+  end
+
   defp start_current_entry_locked(supervisor, registry, name, entry, opts) do
     start_from_path_locked(supervisor, registry, name, entry, opts)
+  end
+
+  @spec start_from_module_locked(
+          GenServer.server(),
+          GenServer.server(),
+          atom(),
+          ExtRegistry.entry(),
+          start_opts()
+        ) ::
+          {:ok, pid()} | {:error, term()}
+  defp start_from_module_locked(supervisor, registry, name, entry, opts) do
+    cmd_registry = Keyword.get(opts, :command_registry, Minga.Command.Registry)
+    keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
+    module = entry.module
+    mark_start_attempt(registry, name)
+
+    with {:module, ^module} <- Code.ensure_loaded(module),
+         :ok <- validate_behaviour(module, name),
+         :ok <- record_extension_manifest(registry, name, module, entry.source_type),
+         :ok <- register_and_validate_options(name, module, entry.config),
+         {:ok, _state} <-
+           run_lifecycle_phase(name, :init, opts, fn -> call_init(module, entry.config) end) do
+      finalize_extension_start(
+        start_loaded_extension(
+          supervisor,
+          registry,
+          name,
+          module,
+          entry.config,
+          cmd_registry,
+          keymap,
+          opts
+        ),
+        registry,
+        name,
+        cmd_registry,
+        keymap,
+        opts
+      )
+    else
+      {:error, reason} ->
+        msg = "Extension #{name} load error: #{inspect(reason)}"
+        Minga.Log.warning(:config, msg)
+        ExtRegistry.update(registry, name, status: :load_error, pid: nil, lifecycle_ref: nil)
+        wrap_start_failure(name, reason, cmd_registry, keymap, opts)
+    end
   end
 
   @spec start_from_path_locked(
@@ -1508,17 +1564,21 @@ defmodule Minga.Extension.Supervisor do
 
   @spec finalize_stopped_extension(GenServer.server(), atom(), ExtRegistry.entry()) :: :ok
   defp finalize_stopped_extension(registry, name, entry) do
-    if entry.module do
+    if entry.source_type != :module and entry.module do
       :code.purge(entry.module)
       :code.delete(entry.module)
     end
 
-    ExtRegistry.update(registry, name,
-      status: :stopped,
-      pid: nil,
-      module: nil,
-      lifecycle_ref: nil
-    )
+    update_fields = [status: :stopped, pid: nil, lifecycle_ref: nil]
+
+    update_fields =
+      if entry.source_type == :module do
+        update_fields
+      else
+        [{:module, nil} | update_fields]
+      end
+
+    ExtRegistry.update(registry, name, update_fields)
 
     :ok
   end

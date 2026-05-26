@@ -40,6 +40,7 @@ defmodule MingaEditor.Agent.SlashCommand do
     },
     %Command{name: "model", description: "Set the model: /model <name>"},
     %Command{name: "trust", description: "Manage tool trust: /trust list|revoke <tool>|clear"},
+    %Command{name: "mcp", description: "Show configured MCP servers and lazy status"},
     %Command{name: "help", description: "Show available slash commands"},
     %Command{name: "plan", description: "Enter plan mode (destructive tools blocked)"},
     %Command{name: "exec", description: "Leave plan mode and allow execution"},
@@ -132,6 +133,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp dispatch(state, "thinking", args), do: {:ok, do_thinking(state, args)}
   defp dispatch(state, "model", args), do: do_model(state, args)
   defp dispatch(state, "trust", args), do: do_trust(state, args)
+  defp dispatch(state, "mcp", _args), do: {:ok, do_mcp(state)}
   defp dispatch(state, "help", _args), do: {:ok, do_help(state)}
   defp dispatch(state, "?", _args), do: {:ok, do_help(state)}
   defp dispatch(state, "plan", _args), do: do_plan(state)
@@ -209,6 +211,79 @@ defmodule MingaEditor.Agent.SlashCommand do
     state = AgentCommands.set_model(state, model)
     {:ok, state}
   end
+
+  @spec do_mcp(state()) :: state()
+  defp do_mcp(state) do
+    emit_system_message(state, mcp_status_message(state))
+  end
+
+  @spec mcp_status_message(state()) :: String.t()
+  defp mcp_status_message(state) do
+    enabled = Minga.Extensions.MCP.enabled?()
+
+    case MingaAgent.MCP.ServerConfig.normalize_list(Config.get(:agent_mcp_servers)) do
+      {:ok, []} ->
+        "MCP extension: #{mcp_enabled_label(enabled)}\nNo MCP servers configured."
+
+      {:ok, servers} ->
+        lines = Enum.map(mcp_live_or_configured_status(state, servers), &mcp_server_status_line/1)
+        "MCP extension: #{mcp_enabled_label(enabled)}\n" <> Enum.join(lines, "\n")
+
+      {:error, reason} ->
+        "MCP extension: #{mcp_enabled_label(enabled)}\nConfig error: #{reason}"
+    end
+  rescue
+    error ->
+      message = "MCP status unavailable: #{Exception.message(error)}"
+      Minga.Log.warning(:agent, message)
+      message
+  catch
+    :exit, reason ->
+      message = "MCP status unavailable: #{inspect(reason)}"
+      Minga.Log.warning(:agent, message)
+      message
+  end
+
+  @spec mcp_enabled_label(boolean()) :: String.t()
+  defp mcp_enabled_label(true), do: "enabled"
+  defp mcp_enabled_label(false), do: "disabled"
+
+  @spec mcp_live_or_configured_status(state(), [MingaAgent.MCP.ServerConfig.t()]) :: [map()]
+  defp mcp_live_or_configured_status(state, servers) do
+    case active_provider_mcp_status(state) do
+      {:ok, statuses} ->
+        statuses
+
+      :error ->
+        Enum.map(servers, &%{"name" => &1.name, "status" => "not_started", "error" => nil})
+    end
+  end
+
+  @spec active_provider_mcp_status(state()) :: {:ok, [map()]} | :error
+  defp active_provider_mcp_status(state) do
+    with {:ok, session} <- require_session(state),
+         provider when is_pid(provider) <- Session.get_provider(session),
+         {:ok, %{mcp_status: status}} <- MingaAgent.Providers.Native.get_state(provider) do
+      {:ok, status}
+    else
+      _other -> :error
+    end
+  catch
+    :exit, _ -> :error
+  end
+
+  @spec mcp_server_status_line(map()) :: String.t()
+  defp mcp_server_status_line(%{"name" => name, "status" => "errored", "error" => error}) do
+    "- #{name}: errored#{mcp_error_suffix(error)}"
+  end
+
+  defp mcp_server_status_line(%{"name" => name, "status" => status}) do
+    "- #{name}: #{status}"
+  end
+
+  @spec mcp_error_suffix(String.t() | nil) :: String.t()
+  defp mcp_error_suffix(nil), do: ""
+  defp mcp_error_suffix(error), do: " (#{error})"
 
   @spec do_trust(state(), String.t()) :: {:ok, state()} | {:error, String.t()}
   defp do_trust(state, args) do

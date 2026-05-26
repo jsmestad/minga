@@ -74,7 +74,7 @@ defmodule MingaAgent.MCP.Client do
   @doc "Calls an MCP tool by its original server-declared name."
   @spec call_tool(GenServer.server(), String.t(), map()) :: {:ok, term()} | {:error, term()}
   def call_tool(client, original_name, args) when is_binary(original_name) and is_map(args) do
-    safe_call(client, {:call_tool, original_name, args}, 30_000)
+    safe_call(client, {:call_tool, original_name, args}, :infinity)
   end
 
   @impl GenServer

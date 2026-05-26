@@ -15,6 +15,9 @@ defmodule MingaAgent.MCP.StdioTransport do
   defstruct [:port]
 
   @type t :: %__MODULE__{port: port()}
+  @typep env_value :: charlist() | false
+  @typep env_entry :: {charlist(), env_value()}
+  @allowlisted_env_keys ~w(PATH HOME LANG LANGUAGE LC_ALL SSL_CERT_FILE SSL_CERT_DIR TMPDIR TEMP TMP XDG_RUNTIME_DIR)
 
   @impl MingaAgent.MCP.Transport
   @spec start(ServerConfig.t(), pid(), keyword()) :: {:ok, t()} | {:error, term()}
@@ -26,7 +29,7 @@ defmodule MingaAgent.MCP.StdioTransport do
         :use_stdio,
         {:line, 65_536},
         {:args, config.args},
-        {:env, env_to_charlists(config.env)}
+        {:env, port_env(config)}
       ]
 
       {:ok, %__MODULE__{port: Port.open({:spawn_executable, executable}, port_opts)}}
@@ -79,10 +82,47 @@ defmodule MingaAgent.MCP.StdioTransport do
     end
   end
 
-  @spec env_to_charlists(%{String.t() => String.t()}) :: [{charlist(), charlist()}]
-  defp env_to_charlists(env) do
-    Enum.map(env, fn {key, value} -> {String.to_charlist(key), String.to_charlist(value)} end)
+  @doc false
+  @spec port_env(ServerConfig.t()) :: [env_entry()]
+  def port_env(%ServerConfig{} = config), do: port_env(config, System.get_env())
+
+  @doc false
+  @spec port_env(ServerConfig.t(), %{String.t() => String.t()}) :: [env_entry()]
+  def port_env(%ServerConfig{env: env}, inherited_env) when is_map(inherited_env) do
+    explicit_env = Map.new(env)
+
+    inherited_allowlist =
+      inherited_env
+      |> Enum.filter(fn {key, _value} -> allowlisted_env_key?(key) end)
+      |> Map.new()
+
+    merged_env = Map.merge(inherited_allowlist, explicit_env)
+    unallowed_inherited = disallowed_inherited_env(inherited_env, explicit_env)
+
+    merged_env
+    |> Enum.map(&to_env_entry/1)
+    |> Kernel.++(unallowed_inherited)
+    |> Enum.sort_by(&elem(&1, 0))
   end
+
+  @spec disallowed_inherited_env(%{String.t() => String.t()}, %{String.t() => String.t()}) :: [
+          env_entry()
+        ]
+  defp disallowed_inherited_env(inherited_env, explicit_env) do
+    inherited_env
+    |> Enum.reject(fn {key, _value} ->
+      allowlisted_env_key?(key) or Map.has_key?(explicit_env, key)
+    end)
+    |> Enum.map(fn {key, _value} -> {String.to_charlist(key), false} end)
+  end
+
+  @spec allowlisted_env_key?(String.t()) :: boolean()
+  defp allowlisted_env_key?(key) do
+    key in @allowlisted_env_keys or String.starts_with?(key, "LC_")
+  end
+
+  @spec to_env_entry({String.t(), String.t()}) :: env_entry()
+  defp to_env_entry({key, value}), do: {String.to_charlist(key), String.to_charlist(value)}
 
   @spec write_message(port(), map()) :: :ok | {:error, term()}
   defp write_message(port, message) do

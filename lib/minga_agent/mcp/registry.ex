@@ -38,6 +38,7 @@ defmodule MingaAgent.MCP.Registry do
           | {:request_timeout, timeout()}
           | {:notify_pid, pid()}
           | {:reserved_tool_names, [tool_name()]}
+          | {:supervisor, GenServer.server() | nil}
 
   @doc "Starts all enabled MCP servers and returns the registry, tools, and startup failure messages."
   @spec start_all([ServerConfig.t()], pid(), [start_opt()]) :: {t(), [Tool.t()], [String.t()]}
@@ -65,6 +66,45 @@ defmodule MingaAgent.MCP.Registry do
   @spec new() :: t()
   def new, do: %__MODULE__{clients: %{}}
 
+  @doc "Starts one MCP server if needed and returns the client pid."
+  @spec ensure_server(t(), ServerConfig.t(), pid(), [start_opt()]) ::
+          {:ok, t(), pid()} | {:error, String.t()}
+  def ensure_server(
+        %__MODULE__{} = registry,
+        %ServerConfig{name: server_name} = config,
+        subscriber,
+        opts \\ []
+      )
+      when is_pid(subscriber) do
+    case client_for_server(registry, server_name) do
+      {:ok, pid} ->
+        {:ok, registry, pid}
+
+      :error ->
+        case start_one(config, subscriber, opts) do
+          {:ok, client, client_tools} ->
+            {registry, _client_tools, _seen} =
+              add_client(registry, config.name, client, client_tools, MapSet.new())
+
+            {:ok, registry, client}
+
+          {:error, message} ->
+            {:error, message}
+        end
+    end
+  end
+
+  @doc "Returns the client pid for a started MCP server."
+  @spec client_for_server(t() | nil, String.t()) :: {:ok, pid()} | :error
+  def client_for_server(nil, _server_name), do: :error
+
+  def client_for_server(%__MODULE__{} = registry, server_name) when is_binary(server_name) do
+    case Map.fetch(registry.clients, server_name) do
+      {:ok, %{pid: pid}} -> {:ok, pid}
+      :error -> :error
+    end
+  end
+
   @doc "Returns the server name for a monitored client pid."
   @spec server_for_pid(t() | nil, pid()) :: String.t() | nil
   def server_for_pid(nil, _pid), do: nil
@@ -86,7 +126,7 @@ defmodule MingaAgent.MCP.Registry do
 
       {%{pid: pid, ref: ref, tool_names: tool_names}, clients} ->
         Process.demonitor(ref, [:flush])
-        stop_client(pid)
+        stop_client(pid, server_name)
         {%{registry | clients: clients}, tool_names}
     end
   end
@@ -96,9 +136,9 @@ defmodule MingaAgent.MCP.Registry do
   def stop_all(nil), do: :ok
 
   def stop_all(%__MODULE__{} = registry) do
-    Enum.each(registry.clients, fn {_server_name, %{pid: pid, ref: ref}} ->
+    Enum.each(registry.clients, fn {server_name, %{pid: pid, ref: ref}} ->
       Process.demonitor(ref, [:flush])
-      stop_client(pid)
+      stop_client(pid, server_name)
     end)
 
     :ok
@@ -163,12 +203,26 @@ defmodule MingaAgent.MCP.Registry do
       request_timeout: Keyword.get(opts, :request_timeout, 5_000)
     ]
 
-    case MCPClient.start(client_opts) do
+    case start_client(
+           client_opts,
+           Keyword.get(opts, :supervisor, Minga.Extensions.MCP.Supervisor)
+         ) do
       {:ok, client} ->
         tools_for_started_client(client, config, subscriber)
 
       {:error, reason} ->
         {:error, notify_start_failure(subscriber, config.name, reason)}
+    end
+  end
+
+  @spec start_client(keyword(), GenServer.server() | nil) :: GenServer.on_start()
+  defp start_client(client_opts, nil), do: MCPClient.start(client_opts)
+
+  defp start_client(client_opts, supervisor) do
+    if is_atom(supervisor) and Process.whereis(supervisor) == nil do
+      MCPClient.start(client_opts)
+    else
+      Minga.Extensions.MCP.Supervisor.start_client(client_opts, supervisor)
     end
   end
 
@@ -180,7 +234,7 @@ defmodule MingaAgent.MCP.Registry do
         {:ok, client, tools}
 
       {:error, reason} ->
-        stop_client(client)
+        stop_client(client, config.name)
         {:error, notify_start_failure(subscriber, config.name, reason)}
     end
   end
@@ -195,12 +249,18 @@ defmodule MingaAgent.MCP.Registry do
     message
   end
 
-  @spec stop_client(pid()) :: :ok
-  defp stop_client(pid) when is_pid(pid) do
+  @spec stop_client(pid(), String.t() | nil) :: :ok
+  defp stop_client(pid, server_name) when is_pid(pid) do
     GenServer.stop(pid, :normal, 1_000)
     :ok
   catch
-    :exit, _ -> :ok
+    :exit, reason ->
+      Minga.Log.warning(
+        :agent,
+        "MCP server #{server_name || inspect(pid)} stop failed: #{inspect(reason)}"
+      )
+
+      :ok
   end
 
   @spec format_error(term()) :: String.t()

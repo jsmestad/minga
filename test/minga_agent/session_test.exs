@@ -1568,16 +1568,30 @@ defmodule MingaAgent.SessionTest do
         :counters.add(call_count, 1, 1)
 
         chunks =
-          if count == 0 do
-            [
-              ReqLLM.StreamChunk.tool_call("builtin_echo", %{}, %{id: "tc_builtin", index: 0}),
-              ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
-            ]
-          else
-            [
-              ReqLLM.StreamChunk.text("still works"),
-              ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
-            ]
+          case count do
+            0 ->
+              [
+                ReqLLM.StreamChunk.tool_call("list_mcp_tools", %{}, %{id: "tc_list", index: 0}),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+              ]
+
+            1 ->
+              [
+                ReqLLM.StreamChunk.text("listed"),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+              ]
+
+            2 ->
+              [
+                ReqLLM.StreamChunk.tool_call("builtin_echo", %{}, %{id: "tc_builtin", index: 0}),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+              ]
+
+            _done ->
+              [
+                ReqLLM.StreamChunk.text("still works"),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+              ]
           end
 
         mcp_session_stream(chunks)
@@ -1594,6 +1608,7 @@ defmodule MingaAgent.SessionTest do
               mcp_servers: [%ServerConfig{name: "Local Tools", command: "ignored"}],
               tool_approval: :none
             },
+            mcp_enabled?: true,
             mcp_transport: FakeTransport,
             mcp_transport_opts: [
               tools: [%{"name" => "echo-text", "inputSchema" => %{"type" => "object"}}],
@@ -1605,7 +1620,11 @@ defmodule MingaAgent.SessionTest do
 
       Session.subscribe(session)
       _provider = Session.get_provider(session)
-      assert_receive {:mcp_transport_started, "Local Tools", transport}
+
+      assert :ok = Session.send_prompt(session, "discover mcp")
+      assert_receive {:mcp_transport_started, "Local Tools", transport}, @event_timeout
+      await_turn_complete()
+
       FakeTransport.crash(transport)
 
       assert_receive {:agent_event, ^session, {:error, message}}, @event_timeout
@@ -1616,6 +1635,8 @@ defmodule MingaAgent.SessionTest do
       await_turn_complete()
       assert_receive {:session_mcp_tools, tool_names}, @event_timeout
       assert "builtin_echo" in tool_names
+      assert "list_mcp_tools" in tool_names
+      assert "call_mcp_tool" in tool_names
       refute "mcp_local_tools__echo_text" in tool_names
 
       assert Enum.any?(Session.messages(session), fn

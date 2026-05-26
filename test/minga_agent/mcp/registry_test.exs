@@ -48,6 +48,27 @@ defmodule MingaAgent.MCP.RegistryTest do
     Registry.stop_all(registry)
   end
 
+  test "starts clients under the optional MCP supervisor when available" do
+    supervisor = start_supervised!({Minga.Extensions.MCP.Supervisor, name: nil})
+
+    {registry, tools, failures} =
+      Registry.start_all([config("Alpha")], self(),
+        transport: FakeTransport,
+        transport_opts: [tools: [tool("echo-text")], test_pid: self()],
+        notify_pid: self(),
+        supervisor: supervisor
+      )
+
+    assert failures == []
+    assert [_tool] = tools
+    assert {:ok, client} = Registry.client_for_server(registry, "Alpha")
+
+    children = DynamicSupervisor.which_children(supervisor)
+    assert Enum.any?(children, fn {_id, pid, _type, _modules} -> pid == client end)
+
+    Registry.stop_all(registry)
+  end
+
   test "renames cross-server tool collisions and keeps callbacks routed to the owning server" do
     {registry, tools, failures} =
       Registry.start_all([config("Alpha Tools"), config("Alpha_Tools")], self(),

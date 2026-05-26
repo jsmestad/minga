@@ -105,6 +105,30 @@ defmodule Minga.Config.LoaderTest do
       assert Options.get(test_options_server(), :tab_width) == 4
       assert Options.get(test_options_server(), :line_numbers) == :relative
     end
+
+    test "loads the built-in MCP extension and mcp_server DSL" do
+      {_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+
+        extension Minga.Extensions.MCP
+        mcp_server "github", command: "npx", args: ["-y", "@modelcontextprotocol/server-github"], env: %{"GITHUB_TOKEN" => "token"}
+        """)
+
+      on_exit(cleanup)
+
+      name = :"loader_mcp_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+
+      assert Loader.load_error(pid) == nil
+      assert {:ok, entry} = ExtRegistry.get(:minga_mcp)
+      assert entry.source_type == :module
+      assert entry.module == Minga.Extensions.MCP
+
+      assert [server] = Options.get(test_options_server(), :agent_mcp_servers)
+      assert (Map.get(server, :name) || Map.get(server, "name")) == "github"
+      assert (Map.get(server, :command) || Map.get(server, "command")) == "npx"
+    end
   end
 
   test "registers bundled Board extension from packaged priv path" do
@@ -509,6 +533,66 @@ defmodule Minga.Config.LoaderTest do
 
       assert Loader.project_config_error(pid) == nil
       assert Options.get(test_options_server(), :tab_width) == 8
+    end
+
+    test "loads project-local .minga/mcp.json" do
+      {_dir, cleanup} = make_config_dir("use Minga.Config\n")
+
+      project_dir =
+        Path.join(System.tmp_dir!(), "minga_mcp_json_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(Path.join(project_dir, ".minga"))
+
+      File.write!(
+        Path.join([project_dir, ".minga", "mcp.json"]),
+        ~s({"mcpServers":{"github":{"command":"npx","args":["-y","@modelcontextprotocol/server-github"],"env":{"GITHUB_TOKEN":"token"}}}})
+      )
+
+      original_cwd = File.cwd!()
+      File.cd!(project_dir)
+
+      on_exit(fn ->
+        File.cd!(original_cwd)
+        cleanup.()
+        File.rm_rf!(project_dir)
+      end)
+
+      name = :"loader_project_mcp_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+
+      assert Loader.load_error(pid) == nil
+      assert [server] = Options.get(test_options_server(), :agent_mcp_servers)
+      assert (Map.get(server, :name) || Map.get(server, "name")) == "github"
+      assert (Map.get(server, :command) || Map.get(server, "command")) == "npx"
+    end
+
+    test "reports a clear error when mcpServers contains a non-map value" do
+      {_dir, cleanup} = make_config_dir("use Minga.Config\n")
+
+      project_dir =
+        Path.join(System.tmp_dir!(), "minga_mcp_json_bad_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(Path.join(project_dir, ".minga"))
+
+      File.write!(
+        Path.join([project_dir, ".minga", "mcp.json"]),
+        ~s({"mcpServers":{"github":42}})
+      )
+
+      original_cwd = File.cwd!()
+      File.cd!(project_dir)
+
+      on_exit(fn ->
+        File.cd!(original_cwd)
+        cleanup.()
+        File.rm_rf!(project_dir)
+      end)
+
+      name = :"loader_project_mcp_bad_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+
+      assert Loader.load_error(pid) =~ ".minga/mcp.json mcpServers.github must be a map, got: 42"
+      assert Options.get(test_options_server(), :agent_mcp_servers) == []
     end
 
     test "no error when .minga.exs does not exist" do

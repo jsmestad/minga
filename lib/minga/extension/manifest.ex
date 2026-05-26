@@ -11,7 +11,7 @@ defmodule Minga.Extension.Manifest do
   @type capabilities :: [Extension.capability_spec()]
 
   @typedoc "How the extension source code is obtained."
-  @type source_type :: :path | :git | :hex
+  @type source_type :: :path | :git | :hex | :module
 
   @enforce_keys [:name, :version, :source]
   defstruct [
@@ -44,7 +44,8 @@ defmodule Minga.Extension.Manifest do
   and turns them into load errors during startup.
   """
   @spec from_module(module(), source_type()) :: t()
-  def from_module(module, source) when is_atom(module) and source in [:path, :git, :hex] do
+  def from_module(module, source)
+      when is_atom(module) and source in [:path, :git, :hex, :module] do
     %__MODULE__{
       name: module.name(),
       description: safe_description(module),

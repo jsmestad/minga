@@ -49,6 +49,7 @@ defmodule MingaAgent.Provider do
           optional(:thinking_level) => String.t() | nil,
           optional(:active_skill_names) => [String.t()],
           optional(:project_root) => String.t() | nil,
+          optional(:mcp_status) => [map()],
           model: model_info() | String.t() | nil,
           is_streaming: boolean(),
           token_usage: Event.token_usage() | nil
