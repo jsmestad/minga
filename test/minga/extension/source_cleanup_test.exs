@@ -14,6 +14,7 @@ defmodule Minga.Extension.SourceCleanupTest do
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Board.Card
   alias MingaEditor.Shell.Board.State, as: BoardState
+  alias MingaEditor.Shell.StateStash
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
@@ -669,7 +670,7 @@ defmodule Minga.Extension.SourceCleanupTest do
     assert_snapshot_feature_state(cleaned_tab.context, nil, :tab_other)
 
     assert_snapshot_feature_state(
-      cleaned_editor_state.stashed_board_state.cards[2].workspace,
+      cleaned_editor_state.shell_state_stash.board.state.cards[2].workspace,
       nil,
       :board_other
     )
@@ -717,12 +718,17 @@ defmodule Minga.Extension.SourceCleanupTest do
       port_manager: self(),
       workspace: live_workspace,
       shell_state: %ShellState{tab_bar: TabBar.new(tab)},
-      stashed_board_state: board_with_workspace(2, board_context)
+      shell_state_stash: %{board: board_stash(board_with_workspace(2, board_context))}
     }
   end
 
   @spec workspace() :: SessionState.t()
   defp workspace, do: %SessionState{viewport: Viewport.new(24, 80)}
+
+  @spec board_stash(BoardState.t()) :: StateStash.t()
+  defp board_stash(%BoardState{} = board) do
+    %StateStash{module: MingaEditor.Shell.Board, source: :builtin, generation: 0, state: board}
+  end
 
   @spec board_with_workspace(Card.id(), Card.workspace_snapshot()) :: BoardState.t()
   defp board_with_workspace(card_id, workspace_snapshot) do

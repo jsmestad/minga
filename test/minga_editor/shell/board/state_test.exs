@@ -10,7 +10,8 @@ defmodule MingaEditor.Shell.Board.StateTest do
 
   alias MingaEditor.Shell.Board.Card
   alias MingaEditor.Shell.Board.State
-  alias MingaEditor.State.Tab.Context, as: TabContext
+  alias MingaEditor.State.Tab.Context
+  alias MingaEditor.Viewport
 
   # ── Card creation ──────────────────────────────────────────────────────
 
@@ -164,13 +165,20 @@ defmodule MingaEditor.Shell.Board.StateTest do
   # ── Zoom lifecycle ─────────────────────────────────────────────────────
 
   describe "zoom_into/3" do
-    test "sets zoomed_into and stores workspace snapshot" do
+    test "sets zoomed_into and stores a normalized workspace snapshot" do
       {state, card} = State.create_card(State.new(), task: "zoom me")
-      ws = TabContext.from_map(%{buffers: :fake_buffers, editing: :fake_vim})
+      viewport = Viewport.new(24, 80)
+      raw = %{keymap_scope: :agent, viewport: viewport, content: "ignored", cursor: {0, 0}}
 
-      state = State.zoom_into(state, card.id, ws)
+      state = State.zoom_into(state, card.id, raw)
+      stored = state.cards[card.id].workspace
+
       assert state.zoomed_into == card.id
-      assert state.cards[card.id].workspace == ws
+      assert %Context{} = stored
+      assert stored.keymap_scope == :agent
+      assert stored.viewport == viewport
+      refute Map.has_key?(Context.to_workspace_map(stored), :content)
+      refute Map.has_key?(Context.to_workspace_map(stored), :cursor)
     end
 
     test "focuses the zoomed card" do
@@ -189,16 +197,16 @@ defmodule MingaEditor.Shell.Board.StateTest do
   end
 
   describe "zoom_out/1" do
-    test "clears zoom and returns the stored workspace" do
+    test "clears zoom and returns the stored workspace context" do
       {state, card} = State.create_card(State.new(), task: "zoomed")
-      ws = TabContext.from_map(%{buffers: :fake, editing: :fake})
+      viewport = Viewport.new(24, 80)
+      snapshot = Context.from_workspace_map(%{keymap_scope: :editor, viewport: viewport})
 
-      state = State.zoom_into(state, card.id, ws)
+      state = State.zoom_into(state, card.id, snapshot)
       {state, restored} = State.zoom_out(state)
 
       assert state.zoomed_into == nil
-      assert restored == ws
-      # Workspace is cleared from the card after zoom out
+      assert restored == snapshot
       assert state.cards[card.id].workspace == nil
     end
 
@@ -211,15 +219,20 @@ defmodule MingaEditor.Shell.Board.StateTest do
 
   # ── Zoom round-trip (property) ─────────────────────────────────────────
 
-  property "zoom_into then zoom_out restores the original workspace snapshot" do
-    check all(task <- string(:printable, min_length: 1, max_length: 100)) do
-      {state, card} = State.create_card(State.new(), task: task)
-      workspace = TabContext.from_map(%{search: task})
+  property "zoom_into then zoom_out returns the normalized canonical snapshot" do
+    check all(
+            scope <- member_of([:editor, :agent]),
+            rows <- integer(1..100),
+            cols <- integer(1..200)
+          ) do
+      {state, card} = State.create_card(State.new(), task: "canonical")
+      raw = %{keymap_scope: scope, viewport: Viewport.new(rows, cols), ignored: :value}
+      expected = Context.from_map(raw)
 
-      state = State.zoom_into(state, card.id, workspace)
+      state = State.zoom_into(state, card.id, raw)
       {_state, restored} = State.zoom_out(state)
 
-      assert restored == workspace
+      assert restored == expected
     end
   end
 

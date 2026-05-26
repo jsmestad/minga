@@ -22,7 +22,7 @@ defmodule Minga.Extension.Entry do
   @type hex_opts :: %{
           package: String.t(),
           version: String.t() | nil,
-          app: atom() | nil
+          app: atom()
         }
 
   @enforce_keys [:source_type]
@@ -72,17 +72,10 @@ defmodule Minga.Extension.Entry do
   end
 
   @doc "Creates a hex-sourced entry."
-  @spec from_hex(String.t(), keyword()) :: t()
-  def from_hex(package, opts) when is_binary(package) and is_list(opts) do
+  @spec from_hex(String.t(), atom(), keyword()) :: t()
+  def from_hex(package, app, opts) when is_binary(package) and is_atom(app) and is_list(opts) do
     {version, opts} = Keyword.pop(opts, :version)
-    {app, config} = Keyword.pop(opts, :app)
-
-    app =
-      case app do
-        nil -> nil
-        app when is_atom(app) -> app
-        _ -> raise ArgumentError, "hex app must be an atom when provided"
-      end
+    {_app, config} = Keyword.pop(opts, :app)
 
     %__MODULE__{
       source_type: :hex,

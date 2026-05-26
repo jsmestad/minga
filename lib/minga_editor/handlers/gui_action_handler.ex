@@ -196,14 +196,8 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     state
   end
 
-  defp dispatch_action(%{shell: MingaEditor.Shell.Board} = state, action) do
-    {shell_state, workspace} =
-      MingaEditor.Shell.Board.handle_gui_action(state.shell_state, state.workspace, action)
-
-    state =
-      state
-      |> EditorState.update_shell_state(fn _ -> shell_state end)
-      |> EditorState.set_workspace(workspace)
+  defp dispatch_action(%{shell_id: :board} = state, action) do
+    state = handle_shell_gui_action(state, action)
 
     # After Board zoom into an agent card, atomically activate the
     # agent view (session, scope, window content, prompt focus).
@@ -211,7 +205,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     # (shell_state, workspace), not the full EditorState.
     case action do
       {:board_select_card, card_id} ->
-        card = Map.get(shell_state.cards, card_id)
+        card = Map.get(state.shell_state.cards, card_id)
 
         {new_board, state} =
           MingaEditor.Shell.Board.SessionLifecycle.ensure_session(state.shell_state, card, state)
@@ -260,13 +254,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, {:close_tab, id}) do
     # Delegate to the shell: Traditional switches to the target tab when
     # needed; Board and tab-bar-less Traditional return unchanged.
-    {shell_state, workspace} =
-      state.shell.handle_gui_action(state.shell_state, state.workspace, {:close_tab, id})
-
-    state =
-      state
-      |> EditorState.update_shell_state(fn _ -> shell_state end)
-      |> EditorState.set_workspace(workspace)
+    state = handle_shell_gui_action(state, {:close_tab, id})
 
     # Only close the buffer when the shell has a tab bar.
     # EditorState.active_tab/1 returns nil when there are no tabs.
@@ -569,31 +557,17 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:workspace_close, _ws_id} = action) do
-    {shell_state, workspace} =
-      state.shell.handle_gui_action(state.shell_state, state.workspace, action)
-
     state
-    |> EditorState.update_shell_state(fn _shell_state -> shell_state end)
-    |> EditorState.set_workspace(workspace)
+    |> handle_shell_gui_action(action)
     |> EditorState.sync_agent_ui_from_active_workspace()
   end
 
   defp dispatch_action(state, {:workspace_rename, _ws_id, _name} = action) do
-    {shell_state, workspace} =
-      state.shell.handle_gui_action(state.shell_state, state.workspace, action)
-
-    state
-    |> EditorState.update_shell_state(fn _shell_state -> shell_state end)
-    |> EditorState.set_workspace(workspace)
+    handle_shell_gui_action(state, action)
   end
 
   defp dispatch_action(state, {:workspace_set_icon, _ws_id, _icon} = action) do
-    {shell_state, workspace} =
-      state.shell.handle_gui_action(state.shell_state, state.workspace, action)
-
-    state
-    |> EditorState.update_shell_state(fn _shell_state -> shell_state end)
-    |> EditorState.set_workspace(workspace)
+    handle_shell_gui_action(state, action)
   end
 
   defp dispatch_action(state, {:space_leader_chord, codepoint, modifiers}) do
@@ -1301,6 +1275,22 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     end
   end
 
+  @spec handle_shell_gui_action(EditorState.t(), term()) :: EditorState.t()
+  defp handle_shell_gui_action(state, action) do
+    state = EditorState.ensure_shell_available(state)
+
+    {shell_state, workspace} =
+      EditorState.active_shell_module(state).handle_gui_action(
+        state.shell_state,
+        state.workspace,
+        action
+      )
+
+    state
+    |> EditorState.update_shell_state(fn _shell_state -> shell_state end)
+    |> EditorState.set_workspace(workspace)
+  end
+
   # ── Tab helpers ───────────────────────────────────────────────────
 
   @spec reorder_tab(state(), Tab.id(), non_neg_integer()) :: state()
@@ -1310,6 +1300,8 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec update_tab_bar(state(), (TabBar.t() -> TabBar.t())) :: state()
   defp update_tab_bar(state, fun) when is_function(fun, 1) do
+    state = EditorState.ensure_shell_available(state)
+
     case EditorState.tab_bar(state) do
       %TabBar{} = tb -> EditorState.set_tab_bar(state, fun.(tb))
       nil -> state
@@ -1320,6 +1312,8 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec copy_tab_path(state(), Tab.id()) :: state()
   defp copy_tab_path(state, id) do
+    state = EditorState.ensure_shell_available(state)
+
     case tab_file_path(state, id) do
       nil ->
         EditorState.set_status(state, "Tab has no file path")
@@ -1340,6 +1334,8 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec tab_file_path(state(), Tab.id()) :: String.t() | nil
   defp tab_file_path(state, id) do
+    state = EditorState.ensure_shell_available(state)
+
     case EditorState.tab_bar(state) do
       %TabBar{} = tb -> tab_file_path_from_tab(state, tb, TabBar.get(tb, id))
       nil -> nil

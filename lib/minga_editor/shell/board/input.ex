@@ -154,18 +154,9 @@ defmodule MingaEditor.Shell.Board.Input do
     end
   end
 
-  # Escape / q (unmodified): toggle back to Shell.Traditional, stash Board state
+  # Escape / q (unmodified): toggle back to the registered Traditional shell and stash Board state.
   defp dispatch_grid_key(state, cp, 0) when cp in [@key_escape, @key_q] do
-    board_state = state.shell_state
-
-    new_state =
-      EditorState.switch_from_board_to_traditional(
-        state,
-        board_state,
-        board_state.suppress_tool_prompts
-      )
-
-    {:handled, new_state}
+    {:handled, EditorState.switch_shell(state, :traditional)}
   end
 
   # Ctrl/Cmd-modified keys pass through to GlobalBindings (Ctrl+Q quit,

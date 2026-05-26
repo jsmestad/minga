@@ -38,7 +38,7 @@ defmodule MingaEditor.Commands.AgentSession do
   for new sessions and rely on `:agent_session_stopped` events for cleanup.
   """
   @spec restart_session(state(), String.t()) :: state()
-  def restart_session(%{shell: MingaEditor.Shell.Traditional} = state, message) do
+  def restart_session(%{shell_id: :traditional} = state, message) do
     session = AgentAccess.session(state)
 
     if session do

@@ -349,6 +349,10 @@ defmodule MingaEditor.Shell.Board do
   end
 
   @impl true
+  @spec gui_payload(term()) :: {:board, BoardState.t()}
+  def gui_payload(%{shell_state: %BoardState{} = board}), do: {:board, board}
+
+  @impl true
   @spec render(term()) :: term()
   def render(editor_state) do
     if BoardState.grid_view?(editor_state.shell_state) do

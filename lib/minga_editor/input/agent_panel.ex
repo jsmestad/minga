@@ -56,7 +56,7 @@ defmodule MingaEditor.Input.AgentPanel do
   # Only matches when the shell is Board to avoid interfering with
   # the TUI's agent scope which has its own input handling.
   def handle_key(
-        %{shell: MingaEditor.Shell.Board, workspace: %{keymap_scope: :agent}} = state,
+        %{shell_id: :board, workspace: %{keymap_scope: :agent}} = state,
         cp,
         mods
       ) do

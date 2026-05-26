@@ -44,6 +44,9 @@ defmodule MingaEditor.Shell do
   @typedoc "Workspace state (the editing context shared by all shells)."
   @type workspace :: MingaEditor.Session.State.t()
 
+  @typedoc "Structured GUI payload returned by a shell and encoded centrally by frontend protocol modules."
+  @type gui_payload :: {atom(), term()}
+
   @typedoc """
   Why a buffer was added — re-exported here from `Shell.BufferLifecycle`
   so existing call sites that use `MingaEditor.Shell.buffer_add_context/0`

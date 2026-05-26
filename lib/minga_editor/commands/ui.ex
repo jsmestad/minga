@@ -125,7 +125,7 @@ defmodule MingaEditor.Commands.UI do
   end
 
   @spec focus_observatory_sidebar(EditorState.t()) :: EditorState.t()
-  defp focus_observatory_sidebar(state) do
+  defp focus_observatory_sidebar(%EditorState{} = state) do
     state
     |> EditorState.update_file_tree(&FileTreeState.unfocus/1)
     |> EditorState.set_keymap_scope(:editor)
@@ -180,19 +180,12 @@ defmodule MingaEditor.Commands.UI do
   end
 
   @spec toggle_board(EditorState.t()) :: EditorState.t()
-  defp toggle_board(%{shell: MingaEditor.Shell.Board} = state) do
-    board_state = state.shell_state
-
-    EditorState.switch_from_board_to_traditional(
-      state,
-      board_state,
-      board_state.suppress_tool_prompts
-    )
-  end
-
   defp toggle_board(state) do
-    board_state = Map.get(state, :stashed_board_state) || MingaEditor.Shell.Board.init()
-    EditorState.switch_to_board(state, board_state)
+    if EditorState.active_shell_id(state) == :board do
+      EditorState.switch_shell(state, :traditional)
+    else
+      EditorState.switch_shell(state, :board)
+    end
   end
 
   @spec execute_parser_restart(EditorState.t()) :: EditorState.t()

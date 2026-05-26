@@ -63,14 +63,35 @@ defmodule Minga.Extension.Registry do
 
   Called by the config DSL when `extension :name, hex: "..."` is evaluated.
   """
-  @spec register_hex(atom(), String.t(), keyword()) :: :ok
-  @spec register_hex(GenServer.server(), atom(), String.t(), keyword()) :: :ok
+  @spec register_hex(atom(), String.t(), keyword()) :: :ok | {:error, term()}
+  @spec register_hex(GenServer.server(), atom(), String.t(), keyword()) :: :ok | {:error, term()}
   def register_hex(name, package, opts) when is_atom(name) and is_binary(package),
     do: register_hex(__MODULE__, name, package, opts)
 
   def register_hex(server, name, package, opts)
       when is_atom(name) and is_binary(package) and is_list(opts) do
-    Agent.update(server, &Map.put(&1, name, Entry.from_hex(package, opts)))
+    case resolve_hex_app(name, package, opts) do
+      {:ok, app} -> Agent.update(server, &Map.put(&1, name, Entry.from_hex(package, app, opts)))
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec resolve_hex_app(atom(), String.t(), keyword()) :: {:ok, atom()} | {:error, term()}
+  defp resolve_hex_app(name, package, opts) do
+    case Keyword.fetch(opts, :app) do
+      {:ok, app} when is_atom(app) and not is_nil(app) -> {:ok, app}
+      {:ok, app} -> {:error, {:invalid_hex_app, app}}
+      :error -> default_hex_app(name, package)
+    end
+  end
+
+  @spec default_hex_app(atom(), String.t()) :: {:ok, atom()} | {:error, term()}
+  defp default_hex_app(name, package) do
+    if package == Atom.to_string(name) do
+      {:ok, name}
+    else
+      {:error, {:hex_app_required, name, package}}
+    end
   end
 
   @doc "Removes an extension from the registry."

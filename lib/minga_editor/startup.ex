@@ -18,6 +18,7 @@ defmodule MingaEditor.Startup do
   alias MingaEditor.Commands
   alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.FileWatcherHelpers
+  alias MingaEditor.Shell.Identity, as: ShellIdentity
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Session, as: EditorSessionState
@@ -150,6 +151,8 @@ defmodule MingaEditor.Startup do
       )
     end
 
+    shell_entry = resolve_shell(opts)
+
     state = %EditorState{
       backend: backend,
       workspace: workspace,
@@ -159,8 +162,10 @@ defmodule MingaEditor.Startup do
       events_registry: events_registry,
       editing_model: editing_model,
       focus_stack: MingaEditor.Input.default_stack(),
-      shell: resolve_shell(opts),
-      shell_state: init_shell_state(resolve_shell(opts), dashboard, opts),
+      shell_id: shell_entry.id,
+      shell: shell_entry.module,
+      shell_identity: ShellIdentity.new(shell_entry),
+      shell_state: init_shell_state(shell_entry.module, dashboard, opts),
       session: EditorSessionState.new(Keyword.take(opts, [:swap_dir, :session_dir]))
     }
 
@@ -504,24 +509,74 @@ defmodule MingaEditor.Startup do
 
   # ── Shell resolution ───────────────────────────────────────────────────
 
-  @spec resolve_shell(keyword()) :: module()
+  @spec resolve_shell(keyword()) :: MingaEditor.Shell.Entry.t()
   defp resolve_shell(opts) do
+    MingaEditor.Shell.Registry.seed_builtin()
+
     case Keyword.get(opts, :shell) do
-      :board -> MingaEditor.Shell.Board
-      :traditional -> MingaEditor.Shell.Traditional
       nil -> resolve_shell_from_config()
-      module when is_atom(module) -> module
+      id_or_module when is_atom(id_or_module) -> resolve_explicit_shell(id_or_module)
     end
   end
 
-  @spec resolve_shell_from_config() :: module()
+  @spec resolve_shell_from_config() :: MingaEditor.Shell.Entry.t()
   defp resolve_shell_from_config do
-    case Minga.Config.get(:default_shell) do
-      :board -> MingaEditor.Shell.Board
-      _ -> MingaEditor.Shell.Traditional
-    end
+    Minga.Config.get(:default_shell)
+    |> resolve_shell_id_or_module()
   catch
-    :exit, _ -> MingaEditor.Shell.Traditional
+    :exit, reason ->
+      default = MingaEditor.Shell.Registry.default()
+      Log.warning(:editor, "Default shell lookup failed: #{inspect(reason)}; using #{default.id}")
+      default
+  end
+
+  @spec resolve_explicit_shell(atom()) :: MingaEditor.Shell.Entry.t()
+  defp resolve_explicit_shell(id_or_module) do
+    case resolve_shell_entry(id_or_module) do
+      nil ->
+        default = MingaEditor.Shell.Registry.default()
+
+        Log.warning(
+          :editor,
+          "Requested shell #{inspect(id_or_module)} is not registered, using #{default.id}"
+        )
+
+        default
+
+      entry ->
+        entry
+    end
+  end
+
+  @spec resolve_shell_id_or_module(atom()) :: MingaEditor.Shell.Entry.t()
+  defp resolve_shell_id_or_module(id_or_module) do
+    case resolve_shell_entry(id_or_module) do
+      nil ->
+        default = MingaEditor.Shell.Registry.default()
+
+        Log.warning(
+          :editor,
+          "Configured default shell #{inspect(id_or_module)} is not registered, using #{default.id}"
+        )
+
+        default
+
+      entry ->
+        entry
+    end
+  end
+
+  @spec resolve_shell_entry(atom()) :: MingaEditor.Shell.Entry.t() | nil
+  defp resolve_shell_entry(id_or_module) do
+    MingaEditor.Shell.Registry.get(id_or_module) || resolve_shell_module(id_or_module)
+  end
+
+  @spec resolve_shell_module(module()) :: MingaEditor.Shell.Entry.t() | nil
+  defp resolve_shell_module(module) do
+    case MingaEditor.Shell.Registry.id_for_module(module) do
+      nil -> nil
+      id -> MingaEditor.Shell.Registry.get(id)
+    end
   end
 
   @spec init_shell_state(module(), term(), keyword()) :: term()

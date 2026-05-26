@@ -708,12 +708,21 @@ defmodule Minga.Extension.Supervisor do
           ExtRegistry.entry()
         ) :: {:ok, {:running, pid()} | ExtRegistry.entry()} | {:error, term()}
   defp current_running_or_restartable_entry(supervisor, registry, name, pid, entry) do
-    case Process.alive?(pid) do
-      true ->
+    case extension_child_pid_by_pid(supervisor, pid) do
+      {:ok, ^pid} ->
         {:ok, {:running, pid}}
 
-      false ->
+      :not_found ->
         reconcile_dead_running_entry(supervisor, registry, name, entry)
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :config,
+          "Extension #{name} running child validation failed: #{inspect(reason)}"
+        )
+
+        mark_start_load_error(registry, name)
+        {:error, {:restart_lookup_failed, reason}}
     end
   end
 
@@ -770,6 +779,14 @@ defmodule Minga.Extension.Supervisor do
          %{status: :running, pid: requested_pid, lifecycle_ref: nil} = current_entry
        )
        when is_pid(requested_pid),
+       do: {:ok, current_entry}
+
+  defp current_stop_entry_for_request(
+         %{status: :running, pid: nil, module: requested_module, lifecycle_ref: nil},
+         %{status: :running, pid: nil, module: requested_module, lifecycle_ref: nil} =
+           current_entry
+       )
+       when is_atom(requested_module) and not is_nil(requested_module),
        do: {:ok, current_entry}
 
   defp current_stop_entry_for_request(
@@ -895,7 +912,7 @@ defmodule Minga.Extension.Supervisor do
     case extension_child_pid(supervisor, module) do
       {:ok, pid} -> terminate_extension_child(supervisor, pid)
       :not_found -> {:error, :not_found}
-      {:error, reason} -> {:error, {:restart_lookup_failed, reason}}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -1174,6 +1191,19 @@ defmodule Minga.Extension.Supervisor do
     end
 
     :ok
+  end
+
+  @spec extension_child_pid_by_pid(GenServer.server(), pid()) ::
+          {:ok, pid()} | :not_found | {:error, term()}
+  defp extension_child_pid_by_pid(supervisor, target_pid) do
+    supervisor
+    |> DynamicSupervisor.which_children()
+    |> Enum.find_value(:not_found, fn
+      {_id, ^target_pid, _type, _modules} -> {:ok, target_pid}
+      _child -> false
+    end)
+  catch
+    :exit, reason -> {:error, {:which_children_failed, reason}}
   end
 
   @spec extension_child_pid(GenServer.server(), module()) ::

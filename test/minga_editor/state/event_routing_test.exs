@@ -200,15 +200,16 @@ defmodule MingaEditor.State.EventRoutingTest do
     end
   end
 
-  describe "tab context excludes agent/agentic state" do
-    test "snapshot_tab_context does not include agent or agentic" do
+  describe "tab context excludes transient agent UI state" do
+    test "snapshot_tab_context excludes shell runtime and workspace agent UI fields" do
       %{state: state} = make_state()
+      state = AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, true))
       ctx = EditorState.snapshot_tab_context(state)
 
       refute Map.has_key?(ctx, :agent)
       refute Map.has_key?(ctx, :agentic)
-      assert ctx.agent_ui == nil
       refute :agent_ui in ctx.present_fields
+      assert ctx.agent_ui == nil
     end
   end
 
