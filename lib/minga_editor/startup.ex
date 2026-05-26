@@ -323,9 +323,8 @@ defmodule MingaEditor.Startup do
   Returns `{keymap_scope, agentic_state}`. Called before window creation
   so the correct window type can be built in a single pass.
 
-  Explicit CLI view modes are final. Auto startup keeps the existing
-  behavior: TUI consults the startup config, while GUI frontends default
-  to the editor view.
+  Explicit CLI view modes are final. Auto startup consults the
+  `:startup_view` config option for all backends.
   """
   @spec startup_view_state(EditorState.backend()) :: {atom(), UIState.t()}
   def startup_view_state(backend) do
@@ -337,10 +336,8 @@ defmodule MingaEditor.Startup do
   defp startup_view_state(_backend, :editor), do: editor_view_state()
   defp startup_view_state(_backend, :agentic), do: agent_view_state()
 
-  defp startup_view_state(:tui, :auto),
+  defp startup_view_state(_backend, :auto),
     do: startup_view_state_from_config(Config.get(:startup_view))
-
-  defp startup_view_state(_backend, :auto), do: editor_view_state()
 
   @spec startup_view_state_from_config(atom()) :: {atom(), UIState.t()}
   defp startup_view_state_from_config(:agent), do: agent_view_state()

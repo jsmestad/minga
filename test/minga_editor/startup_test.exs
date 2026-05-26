@@ -28,12 +28,11 @@ defmodule MingaEditor.StartupTest do
   alias MingaEditor.WindowTree
 
   describe "startup_view_state/1" do
-    test "defaults to agent view for TUI startup" do
-      {scope, agentic} = Startup.startup_view_state(:tui)
+    test "defaults to editor view for TUI startup" do
+      {scope, ui_state} = Startup.startup_view_state(:tui)
 
-      assert scope == :agent
-      assert agentic.view.active == true
-      assert agentic.view.focus == :chat
+      assert scope == :editor
+      assert ui_state.view.active == false
     end
 
     test "CLI startup flags select editor, agentic, and native GUI auto modes" do

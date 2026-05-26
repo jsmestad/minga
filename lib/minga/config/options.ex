@@ -288,7 +288,7 @@ defmodule Minga.Config.Options do
      "Number of days to retain persisted agent sessions."},
     {:agent_panel_split, :pos_integer, 65,
      "Percentage of available width assigned to the agent panel."},
-    {:startup_view, {:enum, [:agent, :editor]}, :agent, "Initial view shown when Minga starts."},
+    {:startup_view, {:enum, [:agent, :editor]}, :editor, "Initial view shown when Minga starts."},
     {:agent_auto_context, :boolean, true,
      "Whether the active buffer is automatically included in agent context."},
     {:agent_max_tokens, :pos_integer, 16_384, "Maximum token budget sent to the agent provider."},
