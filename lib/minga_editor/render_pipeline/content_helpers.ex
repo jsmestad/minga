@@ -176,10 +176,20 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       indent_guide_active_face:
         Face.new(fg: state.theme.editor.indent_guide_active_fg || state.theme.gutter.current_fg),
       hl_todo_faces: MingaEditor.UI.Theme.hl_todo_faces(state.theme),
-      cursor_col: Map.get(params, :cursor_col, cursor_display_col(lines, cursor, first_line))
+      cursor_col: Map.get(params, :cursor_col, cursor_display_col(lines, cursor, first_line)),
+      hover_row: extract_hover_row(state),
+      fold_ranges: window.fold_ranges
     }
 
     {ctx, state}
+  end
+
+  @spec extract_hover_row(state()) :: non_neg_integer() | nil
+  defp extract_hover_row(state) do
+    case state.workspace.mouse.hover_pos do
+      {row, _col} when is_integer(row) -> row
+      _ -> nil
+    end
   end
 
   # ── Line rendering ────────────────────────────────────────────────────────
@@ -224,6 +234,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     max_rows = length(lines)
     dirty_rows = dirty_screen_rows(lines, first_line, window)
     fold_start_lines = fold_start_lines(window.fold_ranges)
+    fold_viz = %{cursor_line: cursor_line, hover_row: ctx.hover_row, fold_ranges: ctx.fold_ranges}
 
     highlight_segments_list =
       if ctx.highlight do
@@ -275,7 +286,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
                 fold_indicator_pos(screen_row, row_off, col_off, gutter_w, ctx),
                 ctx.gutter_colors,
                 fold_start_lines,
-                buf_line
+                buf_line,
+                fold_viz
               )
 
             g_cmds = g_cmds ++ fold_g
@@ -335,6 +347,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     sign_ctx = SignContext.from_render_context(ctx)
     max_rows = length(lines)
     fold_start_lines = fold_start_lines(window.fold_ranges)
+    fold_viz = %{cursor_line: cursor_line, hover_row: ctx.hover_row, fold_ranges: ctx.fold_ranges}
 
     # Pre-compute highlight segments for all visible lines in one O(N) pass.
     highlight_segments_list =
@@ -385,7 +398,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
                 fold_indicator_pos(screen_row, row_off, col_off, gutter_w, ctx),
                 ctx.gutter_colors,
                 fold_start_lines,
-                buf_line
+                buf_line,
+                fold_viz
               )
 
             g_cmds = fold_g ++ g_cmds
@@ -480,7 +494,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
             fold_render_pos = fold_indicator_pos(screen_row, row_off, col_off, gutter_w, ctx)
 
             fold_g =
-              fold_gutter_indicator(fold_info, fold_render_pos, ctx.gutter_colors, %{}, nil)
+              fold_gutter_indicator(fold_info, fold_render_pos, ctx.gutter_colors, %{}, nil, %{})
 
             segments = placeholder.(fold.start_line, fold.end_line, ctx.content_w)
             c_cmds = render_placeholder_segments(segments, content_render_pos)
@@ -564,35 +578,72 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
           RenderPosition.t(),
           MingaEditor.UI.Theme.Gutter.t(),
           %{non_neg_integer() => true},
-          non_neg_integer() | nil
+          non_neg_integer() | nil,
+          map()
         ) :: [DisplayList.draw()]
-  defp fold_gutter_indicator({:fold_start, _}, %RenderPosition{} = pos, colors, _starts, _line) do
+  defp fold_gutter_indicator(
+         {:fold_start, _},
+         %RenderPosition{} = pos,
+         colors,
+         _starts,
+         _line,
+         _viz
+       ) do
     fold_indicator_draw(pos, "▶", colors)
   end
 
-  defp fold_gutter_indicator(:normal, %RenderPosition{} = pos, colors, starts, buf_line)
+  defp fold_gutter_indicator(:normal, %RenderPosition{} = pos, colors, starts, buf_line, viz)
        when is_integer(buf_line) do
     if Map.has_key?(starts, buf_line) do
-      fold_indicator_draw(pos, "▼", colors)
+      if fold_indicator_visible?(buf_line, pos, viz) do
+        fold_indicator_draw(pos, "▼", colors)
+      else
+        []
+      end
     else
       []
     end
   end
 
-  defp fold_gutter_indicator(:normal, _pos, _colors, _starts, _line), do: []
+  defp fold_gutter_indicator(:normal, _pos, _colors, _starts, _line, _viz), do: []
 
   defp fold_gutter_indicator(
          {:decoration_fold, _},
          %RenderPosition{} = pos,
          colors,
          _starts,
-         _line
+         _line,
+         _viz
        ) do
     fold_indicator_draw(pos, "▶", colors)
   end
 
-  defp fold_gutter_indicator({:virtual_line, _}, _pos, _colors, _starts, _line), do: []
-  defp fold_gutter_indicator({:block, _, _}, _pos, _colors, _starts, _line), do: []
+  defp fold_gutter_indicator({:virtual_line, _}, _pos, _colors, _starts, _line, _viz), do: []
+  defp fold_gutter_indicator({:block, _, _}, _pos, _colors, _starts, _line, _viz), do: []
+
+  @spec fold_indicator_visible?(non_neg_integer(), RenderPosition.t(), map()) :: boolean()
+  defp fold_indicator_visible?(buf_line, pos, viz) do
+    cursor_line = Map.get(viz, :cursor_line)
+    hover_row = Map.get(viz, :hover_row)
+    fold_ranges = Map.get(viz, :fold_ranges, [])
+
+    cursor_in_fold_range?(cursor_line, buf_line, fold_ranges) or
+      hover_on_row?(hover_row, pos)
+  end
+
+  @spec cursor_in_fold_range?(non_neg_integer() | nil, non_neg_integer(), [FoldRange.t()]) ::
+          boolean()
+  defp cursor_in_fold_range?(nil, _buf_line, _ranges), do: false
+
+  defp cursor_in_fold_range?(cursor_line, buf_line, ranges) do
+    Enum.any?(ranges, fn %FoldRange{start_line: s, end_line: e} ->
+      s == buf_line and cursor_line >= s and cursor_line <= e
+    end)
+  end
+
+  @spec hover_on_row?(non_neg_integer() | nil, RenderPosition.t()) :: boolean()
+  defp hover_on_row?(nil, _pos), do: false
+  defp hover_on_row?(hover_row, pos), do: hover_row == pos.screen_row + pos.row_off
 
   @spec fold_indicator_draw(RenderPosition.t(), String.t(), MingaEditor.UI.Theme.Gutter.t()) ::
           [DisplayList.draw()]
@@ -669,13 +720,20 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
           render_opts.ctx
         )
 
+      fold_viz = %{
+        cursor_line: render_opts.cursor_line,
+        hover_row: render_opts.ctx.hover_row,
+        fold_ranges: render_opts.ctx.fold_ranges
+      }
+
       fold_g =
         fold_gutter_indicator(
           fold_info,
           fold_render_pos,
           render_opts.ctx.gutter_colors,
           render_opts.fold_start_lines,
-          buf_line
+          buf_line,
+          fold_viz
         )
 
       {g_cmds, c_cmds, _rows} =
@@ -738,6 +796,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     sign_w = Gutter.sign_column_width()
     sign_ctx = SignContext.from_render_context(ctx)
     fold_start_lines = fold_start_lines(opts.window.fold_ranges)
+    fold_viz = %{cursor_line: cursor_line, hover_row: ctx.hover_row, fold_ranges: ctx.fold_ranges}
 
     {gutters, contents, screen_row, _byte_off} =
       lines
@@ -775,7 +834,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
               fold_indicator_pos(sr, row_off, col_off, gutter_w, ctx),
               ctx.gutter_colors,
               fold_start_lines,
-              buf_line
+              buf_line,
+              fold_viz
             )
 
           g2 = fold_g ++ g2
