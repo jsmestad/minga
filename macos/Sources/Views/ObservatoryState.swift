@@ -24,14 +24,6 @@ final class ObservatoryState {
     }
 }
 
-/// View mode for the Observatory sidebar.
-enum ObservatoryDisplayMode: String, CaseIterable, Identifiable {
-    case tree = "Tree"
-    case graph = "Graph"
-
-    var id: String { rawValue }
-}
-
 /// SwiftUI view model for a single BEAM process node.
 struct ObservatoryNode: Identifiable, Equatable {
     let id: String
