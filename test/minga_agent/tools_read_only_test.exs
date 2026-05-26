@@ -9,6 +9,7 @@ defmodule MingaAgent.ToolsReadOnlyTest do
 
     assert "read_file" in names
     assert "grep" in names
+    assert "fetch_url" in names
     assert "git_diff" in names
     refute "write_file" in names
     refute "edit_file" in names
