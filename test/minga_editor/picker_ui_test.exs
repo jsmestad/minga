@@ -959,7 +959,7 @@ defmodule MingaEditor.PickerUITest do
       box_draws = content_draws(draws, box_row, box_h)
       rows = Enum.map(box_draws, fn {row, _col, _text, _style} -> row end)
 
-      assert length(box_draws) > 0
+      assert box_draws != []
       assert Enum.min(rows) == box_row
       assert Enum.max(rows) == box_row + box_h - 1
 
