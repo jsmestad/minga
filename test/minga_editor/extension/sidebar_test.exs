@@ -101,6 +101,32 @@ defmodule MingaEditor.Extension.SidebarTest do
     assert %{id: "bookmarks"} = Sidebar.active_left(table)
   end
 
+  test "focus_left makes one visible left sidebar active", %{table: table} do
+    assert :ok =
+             Sidebar.register(table, {:extension, :alpha}, %{
+               id: "outline",
+               display_name: "Outline",
+               priority: 10,
+               visible?: true,
+               focused?: true
+             })
+
+    assert :ok =
+             Sidebar.register(table, {:extension, :beta}, %{
+               id: "bookmarks",
+               display_name: "Bookmarks",
+               priority: 20,
+               visible?: true,
+               focused?: false
+             })
+
+    assert :ok = Sidebar.focus_left(table, "bookmarks")
+
+    refute Sidebar.get(table, "outline").focused?
+    assert Sidebar.get(table, "bookmarks").focused?
+    assert %{id: "bookmarks"} = Sidebar.active_left(table)
+  end
+
   test "source cleanup removes only matching source sidebars", %{table: table} do
     assert :ok =
              Sidebar.register(table, {:extension, :alpha}, %{

@@ -2,10 +2,17 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Traditional.State, as: ShellState
+
+  setup do
+    table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
+    start_supervised!({Sidebar, name: table, notify: false})
+    %{sidebar_registry: table}
+  end
 
   describe "chrome_fingerprint/1" do
     test "same input produces same fingerprint" do
@@ -94,6 +101,74 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
       fp2 = Input.chrome_fingerprint(input2)
 
       assert fp1 != fp2
+    end
+
+    test "sidebar registry snapshot and visibility changes change fingerprint", %{
+      sidebar_registry: table
+    } do
+      assert :ok =
+               Sidebar.register(table, {:extension, :outline}, %{
+                 id: "outline",
+                 display_name: "Outline",
+                 visible?: true,
+                 preferred_width: 25,
+                 semantic_kind: "outline",
+                 snapshot: [rows: [%{id: "a", text: "alpha"}]]
+               })
+
+      state = TestHelpers.base_state(sidebar_registry: table)
+      fp_visible = state |> Input.from_editor_state() |> Input.chrome_fingerprint()
+
+      assert :ok = Sidebar.set_visible(table, {:extension, :outline}, "outline", false)
+      fp_hidden = state |> Input.from_editor_state() |> Input.chrome_fingerprint()
+      assert fp_visible != fp_hidden
+
+      assert :ok =
+               Sidebar.publish_snapshot(table, {:extension, :outline}, "outline",
+                 rows: [%{id: "a", text: "beta"}]
+               )
+
+      fp_snapshot = state |> Input.from_editor_state() |> Input.chrome_fingerprint()
+      assert fp_hidden != fp_snapshot
+    end
+
+    test "second frame updates sidebar output after snapshot changes", %{sidebar_registry: table} do
+      assert :ok =
+               Sidebar.register(table, {:extension, :outline}, %{
+                 id: "outline",
+                 display_name: "Outline",
+                 visible?: true,
+                 preferred_width: 25,
+                 semantic_kind: "outline",
+                 snapshot: [rows: [%{id: "a", text: "alpha"}]]
+               })
+
+      state = TestHelpers.base_state(sidebar_registry: table)
+      state1 = TestHelpers.run_pipeline(state)
+      first_sidebar = state1.caches.chrome_prev_result.file_tree
+
+      assert Enum.any?(first_sidebar, fn {_row, _col, text, _face} ->
+               String.trim(text) == "alpha"
+             end)
+
+      assert :ok =
+               Sidebar.publish_snapshot(table, {:extension, :outline}, "outline",
+                 rows: [%{id: "a", text: "beta"}]
+               )
+
+      state2 = TestHelpers.run_pipeline(state1)
+      second_sidebar = state2.caches.chrome_prev_result.file_tree
+
+      assert state2.caches.chrome_prev_fingerprint != state1.caches.chrome_prev_fingerprint
+      assert first_sidebar != second_sidebar
+
+      assert Enum.any?(second_sidebar, fn {_row, _col, text, _face} ->
+               String.trim(text) == "beta"
+             end)
+
+      refute Enum.any?(second_sidebar, fn {_row, _col, text, _face} ->
+               String.trim(text) == "alpha"
+             end)
     end
 
     test "shell-owned chrome state changes fingerprint through shell hook" do

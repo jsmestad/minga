@@ -15,7 +15,7 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
   @moduletag :tmp_dir
 
   alias Minga.Buffer.Process, as: BufferProcess
-  alias MingaEditor.FileTree.Feature, as: FileTreeFeature
+  alias MingaEditor.Input.FileTreeHandler
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -26,8 +26,6 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
   setup :verify_on_exit!
 
   setup do
-    FileTreeFeature.register_contributions()
-
     test_pid = self()
 
     stub(Minga.Clipboard.Mock, :write, fn text ->
@@ -38,16 +36,6 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
     stub(Minga.Clipboard.Mock, :read, fn -> nil end)
 
     :ok
-  end
-
-  defp walk_surface_handlers(state, cp, mods) do
-    Enum.reduce_while(MingaEditor.Input.surface_handlers(), {:passthrough, state}, fn handler,
-                                                                                      {_, acc} ->
-      case handler.handle_key(acc, cp, mods) do
-        {:handled, new_state} -> {:halt, {:handled, new_state}}
-        {:passthrough, new_state} -> {:cont, {:passthrough, new_state}}
-      end
-    end)
   end
 
   defp ft(state), do: EditorState.file_tree_state(state)
@@ -80,7 +68,7 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
       entries = FileTree.visible_entries(ft(state).tree)
       max_idx = length(entries) - 1
 
-      {:handled, state} = walk_surface_handlers(state, ?G, 0)
+      {:handled, state} = FileTreeHandler.handle_key(state, ?G, 0)
       assert ft(state).tree.cursor == max_idx
     end
 
@@ -88,12 +76,12 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
       state = make_tree_state(tmp_dir)
 
       # First move to bottom
-      {:handled, state} = walk_surface_handlers(state, ?G, 0)
+      {:handled, state} = FileTreeHandler.handle_key(state, ?G, 0)
       assert ft(state).tree.cursor > 0
 
       # Then gg to top (g enters prefix trie, second g triggers)
-      {:handled, state} = walk_surface_handlers(state, ?g, 0)
-      {:handled, state} = walk_surface_handlers(state, ?g, 0)
+      {:handled, state} = FileTreeHandler.handle_key(state, ?g, 0)
+      {:handled, state} = FileTreeHandler.handle_key(state, ?g, 0)
       assert ft(state).tree.cursor == 0
     end
   end
@@ -104,8 +92,8 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
       assert ft(state).tree.cursor == 0
 
       # Type 3j
-      {:handled, state} = walk_surface_handlers(state, ?3, 0)
-      {:handled, state} = walk_surface_handlers(state, ?j, 0)
+      {:handled, state} = FileTreeHandler.handle_key(state, ?3, 0)
+      {:handled, state} = FileTreeHandler.handle_key(state, ?j, 0)
       assert ft(state).tree.cursor == 3
     end
   end
@@ -119,7 +107,7 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
       content_before = BufferProcess.content(buf)
       selected_path = FileTree.selected_entry(ft(state).tree).path
 
-      {:handled, _state} = walk_surface_handlers(state, ?y, 0)
+      {:handled, _state} = FileTreeHandler.handle_key(state, ?y, 0)
 
       assert BufferProcess.content(buf) == content_before
       assert_receive {:clipboard_written, ^selected_path}, 200
@@ -132,21 +120,21 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
 
       # i is not a tree-specific key, so it delegates to mode FSM
       # The mode FSM should block insert on read-only buffer
-      {:handled, state} = walk_surface_handlers(state, ?i, 0)
+      {:handled, state} = FileTreeHandler.handle_key(state, ?i, 0)
       assert state.workspace.editing.mode == :normal
     end
 
     test "a does not enter insert mode", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
 
-      {:handled, state} = walk_surface_handlers(state, ?a, 0)
+      {:handled, state} = FileTreeHandler.handle_key(state, ?a, 0)
       assert state.workspace.editing.mode == :normal
     end
 
     test "o does not enter insert mode", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
 
-      {:handled, state} = walk_surface_handlers(state, ?o, 0)
+      {:handled, state} = FileTreeHandler.handle_key(state, ?o, 0)
       assert state.workspace.editing.mode == :normal
     end
   end
@@ -168,7 +156,7 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
         state =
           if dir_idx > 0 do
             Enum.reduce(1..dir_idx, state, fn _i, acc ->
-              {:handled, new_acc} = walk_surface_handlers(acc, ?j, 0)
+              {:handled, new_acc} = FileTreeHandler.handle_key(acc, ?j, 0)
               new_acc
             end)
           else
@@ -177,7 +165,7 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
 
         # Press Tab to expand
         entries_before = length(FileTree.visible_entries(ft(state).tree))
-        {:handled, state} = walk_surface_handlers(state, 9, 0)
+        {:handled, state} = FileTreeHandler.handle_key(state, 9, 0)
         entries_after = length(FileTree.visible_entries(ft(state).tree))
 
         # Should have more entries after expanding
@@ -192,7 +180,7 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
       state = make_tree_state(tmp_dir, 0)
       entries_default = FileTree.visible_entries(ft(state).tree)
 
-      {:handled, state} = walk_surface_handlers(state, ?H, 0)
+      {:handled, state} = FileTreeHandler.handle_key(state, ?H, 0)
       entries_with_hidden = FileTree.visible_entries(ft(state).tree)
 
       # Toggling hidden should change the entry count
@@ -202,7 +190,7 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
     test "q closes the file tree", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
 
-      {:handled, state} = walk_surface_handlers(state, ?q, 0)
+      {:handled, state} = FileTreeHandler.handle_key(state, ?q, 0)
       assert ft(state).tree == nil
       assert ft(state).focused == false
     end
@@ -213,16 +201,16 @@ defmodule MingaEditor.Input.VimNavIntegrationTest do
       state = make_tree_state(tmp_dir)
 
       # Move down first so we can verify gg works
-      {:handled, state} = walk_surface_handlers(state, ?j, 0)
-      {:handled, state} = walk_surface_handlers(state, ?j, 0)
+      {:handled, state} = FileTreeHandler.handle_key(state, ?j, 0)
+      {:handled, state} = FileTreeHandler.handle_key(state, ?j, 0)
       assert ft(state).tree.cursor == 2
 
       # g should delegate to mode FSM (prefix trie)
-      {:handled, state} = walk_surface_handlers(state, ?g, 0)
+      {:handled, state} = FileTreeHandler.handle_key(state, ?g, 0)
       assert state.workspace.editing.mode_state.prefix_node != nil
 
       # second g should trigger gg (go to top)
-      {:handled, state} = walk_surface_handlers(state, ?g, 0)
+      {:handled, state} = FileTreeHandler.handle_key(state, ?g, 0)
       assert ft(state).tree.cursor == 0
     end
   end

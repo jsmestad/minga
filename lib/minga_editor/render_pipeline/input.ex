@@ -40,6 +40,7 @@ defmodule MingaEditor.RenderPipeline.Input do
   """
 
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -71,6 +72,7 @@ defmodule MingaEditor.RenderPipeline.Input do
     :shell_state,
     :message_store,
     :notifications,
+    :sidebar_registry,
     :face_override_registries,
     :editing_model,
     :backend,
@@ -122,6 +124,7 @@ defmodule MingaEditor.RenderPipeline.Input do
           font_registry: FontRegistry.t(),
           message_store: MessageStore.t(),
           notifications: NotificationCenter.t(),
+          sidebar_registry: MingaEditor.Extension.Sidebar.table(),
           face_override_registries: %{pid() => MingaEditor.UI.Face.Registry.t()},
           editing_model: :vim | :cua,
           backend: EditorState.backend(),
@@ -155,6 +158,7 @@ defmodule MingaEditor.RenderPipeline.Input do
       shell_state: state.shell_state,
       message_store: state.message_store,
       notifications: state.notifications,
+      sidebar_registry: state.sidebar_registry,
       face_override_registries: state.face_override_registries,
       editing_model: state.editing_model,
       backend: state.backend,
@@ -257,6 +261,8 @@ defmodule MingaEditor.RenderPipeline.Input do
       input.shell_state |> Map.get(:status_msg),
       # Nav flash overlay
       input.shell_state |> Map.get(:nav_flash),
+      # Sidebar registry state drives sidebar chrome/layout rebuilds.
+      Sidebar.all(input.sidebar_registry),
       # File tree
       input.workspace.file_tree,
       # Hover popup and signature help

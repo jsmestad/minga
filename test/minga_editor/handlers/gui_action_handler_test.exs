@@ -3,8 +3,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   Pure-function tests for `MingaEditor.Handlers.GuiActionHandler`.
   """
 
-  # Uses the default extension sidebar registry for GUI action routing tests.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   import ExUnit.CaptureLog
 
@@ -23,23 +22,19 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
   setup do
-    Sidebar.unregister_source({:extension, :gui_action_test})
-    Sidebar.unregister_source(:builtin)
-
-    on_exit(fn ->
-      Sidebar.unregister_source({:extension, :gui_action_test})
-      Sidebar.unregister_source(:builtin)
-    end)
-
-    :ok
+    table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
+    start_supervised!({Sidebar, name: table, notify: false})
+    %{sidebar_registry: table}
   end
 
-  test "tab context actions target the requested tab without selecting it" do
+  test "tab context actions target the requested tab without selecting it", %{
+    sidebar_registry: table
+  } do
     tab1 = Tab.new_file(1, "a.ex")
     tab2 = Tab.new_file(2, "b.ex")
     tab3 = Tab.new_file(3, "c.ex")
     tab_bar = %TabBar{tabs: [tab1, tab2, tab3], active_id: 1, next_id: 4}
-    state = TestHelpers.base_state() |> EditorState.set_tab_bar(tab_bar)
+    state = base_state(table) |> EditorState.set_tab_bar(tab_bar)
 
     pinned = GuiActionHandler.dispatch(state, {:tab_pin, 3})
     pinned_tab_bar = EditorState.tab_bar(pinned)
@@ -61,11 +56,11 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     refute TabBar.get(unpinned_tab_bar, 3).pinned?
   end
 
-  test "activating visible sidebars updates focus and keyboard scope" do
+  test "activating visible sidebars updates focus and keyboard scope", %{sidebar_registry: table} do
     file_tree_state = %FileTreeState{tree_status: :loading, focused: false}
 
     state =
-      TestHelpers.base_state()
+      base_state(table)
       |> EditorState.update_file_tree(fn _file_tree -> file_tree_state end)
 
     file_tree_active =
@@ -102,9 +97,11 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert EditorState.sidebar_active_id(observatory_active) == "observatory"
   end
 
-  test "native GUI file tree sidebar actions use the registered FileTree action handler" do
-    assert :ok = FileTreeFeature.register_contributions(%FileTreeState{})
-    state = TestHelpers.base_state()
+  test "native GUI file tree sidebar actions use the registered FileTree action handler", %{
+    sidebar_registry: table
+  } do
+    assert :ok = FileTreeFeature.register_contributions(%FileTreeState{}, table)
+    state = base_state(table)
 
     opened =
       GuiActionHandler.dispatch(state, {:sidebar_action, "file_tree", "file_tree", "toggle"})
@@ -130,8 +127,10 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert EditorState.sidebar_active_id(closed) == nil
   end
 
-  test "board GUI actions report unavailable when Board is not the active shell" do
-    state = TestHelpers.base_state()
+  test "board GUI actions report unavailable when Board is not the active shell", %{
+    sidebar_registry: table
+  } do
+    state = base_state(table)
 
     new_state = GuiActionHandler.dispatch(state, {:board_select_card, 123})
 
@@ -141,8 +140,10 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     refute Map.has_key?(new_state.shell_state, :zoomed_into)
   end
 
-  test "git porcelain GUI actions report disabled extension instead of no-op" do
-    state = TestHelpers.base_state()
+  test "git porcelain GUI actions report disabled extension instead of no-op", %{
+    sidebar_registry: table
+  } do
+    state = base_state(table)
 
     toggled = GuiActionHandler.dispatch(state, {:toggle_panel, 2})
 
@@ -162,8 +163,8 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert EditorState.sidebar_active_id(activated) == nil
   end
 
-  test "extension panel actions report unavailable extensions" do
-    state = TestHelpers.base_state()
+  test "extension panel actions report unavailable extensions", %{sidebar_registry: table} do
+    state = base_state(table)
 
     log =
       capture_log(fn ->
@@ -180,9 +181,9 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert log =~ "missing_extension_for_gui_action/refresh"
   end
 
-  test "native GUI sidebar actions route to extension-owned sidebars" do
+  test "native GUI sidebar actions route to extension-owned sidebars", %{sidebar_registry: table} do
     assert :ok =
-             Sidebar.register({:extension, :gui_action_test}, %{
+             Sidebar.register(table, {:extension, :gui_action_test}, %{
                id: "outline",
                display_name: "Outline",
                action_handler: fn state, action, context ->
@@ -190,7 +191,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
                end
              })
 
-    state = TestHelpers.base_state()
+    state = base_state(table)
 
     new_state =
       GuiActionHandler.dispatch(state, {:sidebar_action, "outline", "generic_tree", "activate"})
@@ -198,8 +199,10 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert EditorState.status_msg(new_state) == "activate:generic_tree"
   end
 
-  test "unknown sidebar action is reported instead of silently ignored" do
-    state = TestHelpers.base_state()
+  test "unknown sidebar action is reported instead of silently ignored", %{
+    sidebar_registry: table
+  } do
+    state = base_state(table)
 
     log =
       capture_log(fn ->
@@ -214,9 +217,9 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert log =~ "custom_kind"
   end
 
-  test "command-opened observatory replaces stale active sidebar id" do
+  test "command-opened observatory replaces stale active sidebar id", %{sidebar_registry: table} do
     state =
-      TestHelpers.base_state()
+      base_state(table)
       |> Map.put(:capabilities, %Capabilities{frontend_type: :native_gui})
       |> EditorState.update_file_tree(fn _file_tree ->
         %FileTreeState{tree_status: :loading, focused: true}
@@ -232,18 +235,22 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert new_state.workspace.keymap_scope == :editor
   end
 
-  test "observatory inspect is a no-op when the active shell has no observatory state" do
-    state = %{TestHelpers.base_state() | shell_state: %{}}
+  test "observatory inspect is a no-op when the active shell has no observatory state", %{
+    sidebar_registry: table
+  } do
+    state = %{base_state(table) | shell_state: %{}}
 
     assert GuiActionHandler.dispatch(state, {:observatory_inspect, "<0.1.0>"}) == state
   end
 
-  test "power thermal gui action updates resource pressure and broadcasts the event" do
+  test "power thermal gui action updates resource pressure and broadcasts the event", %{
+    sidebar_registry: table
+  } do
     registry = power_thermal_events_registry()
     start_supervised!({Events, name: registry})
     Events.subscribe(:power_thermal_state_changed, registry: registry)
 
-    state = %{TestHelpers.base_state() | events_registry: registry}
+    state = %{base_state(table) | events_registry: registry}
 
     assert {:ok, {:power_thermal_state, true, {:unknown, 255}}} =
              ProtocolGUI.decode_gui_action(0x47, <<1, 255>>)
@@ -258,6 +265,11 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
                       low_power?: true,
                       thermal_state: {:unknown, 255}
                     }}
+  end
+
+  defp base_state(sidebar_registry, opts \\ []) do
+    opts = Keyword.put(opts, :sidebar_registry, sidebar_registry)
+    TestHelpers.base_state(opts)
   end
 
   defp power_thermal_events_registry do

@@ -13,6 +13,7 @@ defmodule MingaEditor.MouseTest do
   alias MingaEditor.FocusTree.Node, as: FocusNode
   alias MingaEditor.FoldMap
   alias MingaEditor.Frontend.Capabilities
+  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
   alias MingaEditor.Mouse
   alias MingaEditor.Startup
@@ -568,6 +569,7 @@ defmodule MingaEditor.MouseTest do
     File.rm_rf!(project_root)
     File.mkdir_p!(project_root)
     start_supervised!({Minga.Events, name: events_registry}, id: {:events, id})
+    sidebar_registry = start_sidebar_registry(id)
 
     options_server =
       start_supervised!({Minga.Config.Options, name: nil, events_registry: events_registry},
@@ -592,11 +594,18 @@ defmodule MingaEditor.MouseTest do
         editing_model: :vim,
         options_server: options_server,
         events_registry: events_registry,
+        sidebar_registry: sidebar_registry,
         project_root: project_root,
         suppress_tool_prompts: true
       )
 
     {state, buffer}
+  end
+
+  defp start_sidebar_registry(id) do
+    name = Module.concat(__MODULE__, "Sidebar#{id}")
+    start_supervised!({Sidebar, name: name, notify: false}, id: {:sidebars, id})
+    name
   end
 
   defp start_two_tab_state do
