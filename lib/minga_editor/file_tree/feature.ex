@@ -2,7 +2,7 @@ defmodule MingaEditor.FileTree.Feature do
   @moduledoc """
   FileTree feature ownership adapter.
 
-  FileTree is still implemented in core, but its UI state, input handler, and sidebar contribution are registered through the same source-owned paths that a bundled extension will use after extraction.
+  FileTree is implemented in core, while its input handler and sidebar contribution are registered through the shared extension contribution registries.
   """
 
   alias MingaEditor.Extension.Sidebar
@@ -10,22 +10,12 @@ defmodule MingaEditor.FileTree.Feature do
   alias MingaEditor.Input.FileTreeHandler
   alias MingaEditor.State.FileTree, as: FileTreeState
 
-  @source :builtin
   @input_source :builtin
-  @feature_id :file_tree
   @sidebar_id "file_tree"
-
-  @doc "Contribution source used while FileTree remains a bundled core feature."
-  @spec source() :: :builtin
-  def source, do: @source
 
   @doc "Contribution source used for FileTree's dynamically registered input handler."
   @spec input_source() :: :builtin
   def input_source, do: @input_source
-
-  @doc "Feature-state id used for FileTree UI state."
-  @spec feature_id() :: :file_tree
-  def feature_id, do: @feature_id
 
   @doc "Stable sidebar id for FileTree."
   @spec sidebar_id() :: String.t()
@@ -43,7 +33,7 @@ defmodule MingaEditor.FileTree.Feature do
   def sync_sidebar(%FileTreeState{} = file_tree) do
     status = FileTreeState.status(file_tree)
 
-    Sidebar.register(@source, %{
+    Sidebar.register(@input_source, %{
       id: @sidebar_id,
       display_name: "File Tree",
       description: "Project files",

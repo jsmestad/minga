@@ -8,7 +8,6 @@ defmodule MingaEditor.State.Tab.Context do
   alias Minga.Keymap.Scope
   alias MingaEditor.Agent.UIState
   alias MingaEditor.FeatureState
-  alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Dired, as: DiredState
   alias MingaEditor.State.FileTree, as: FileTreeState
@@ -27,6 +26,7 @@ defmodule MingaEditor.State.Tab.Context do
     :buffers,
     :windows,
     :dired,
+    :file_tree,
     :viewport,
     :mouse,
     :lsp_pending,
@@ -46,6 +46,7 @@ defmodule MingaEditor.State.Tab.Context do
           | :buffers
           | :windows
           | :dired
+          | :file_tree
           | :viewport
           | :mouse
           | :highlight
@@ -70,6 +71,7 @@ defmodule MingaEditor.State.Tab.Context do
           buffers: Buffers.t() | nil,
           windows: Windows.t() | nil,
           dired: DiredState.t() | nil,
+          file_tree: FileTreeState.t() | nil,
           viewport: Viewport.t() | nil,
           mouse: Mouse.t() | nil,
           highlight: Highlighting.t() | nil,
@@ -88,6 +90,7 @@ defmodule MingaEditor.State.Tab.Context do
             buffers: nil,
             windows: nil,
             dired: nil,
+            file_tree: nil,
             viewport: nil,
             mouse: nil,
             highlight: nil,
@@ -129,6 +132,7 @@ defmodule MingaEditor.State.Tab.Context do
       buffers: ws.buffers,
       windows: ws.windows,
       dired: ws.dired,
+      file_tree: ws.file_tree,
       viewport: ws.viewport,
       mouse: ws.mouse,
       lsp_pending: ws.lsp_pending,
@@ -209,19 +213,47 @@ defmodule MingaEditor.State.Tab.Context do
 
   @spec migrate_legacy_file_tree(t(), map()) :: t()
   defp migrate_legacy_file_tree(%__MODULE__{} = context, map) do
+    context
+    |> migrate_legacy_direct_file_tree(map)
+    |> migrate_legacy_feature_state_file_tree()
+    |> drop_legacy_feature_state_file_tree()
+  end
+
+  @spec migrate_legacy_direct_file_tree(t(), map()) :: t()
+  defp migrate_legacy_direct_file_tree(%__MODULE__{} = context, map) do
     case fetch_legacy_file_tree(map) do
-      {:ok, %FileTreeState{} = file_tree} ->
-        feature_state =
-          context.feature_state
-          |> Kernel.||(%FeatureState{})
-          |> FeatureState.put(FileTreeFeature.source(), FileTreeFeature.feature_id(), file_tree)
-
-        put_valid_field(context, :feature_state, feature_state)
-
-      _ ->
-        context
+      {:ok, %FileTreeState{} = file_tree} -> put_valid_field(context, :file_tree, file_tree)
+      _ -> context
     end
   end
+
+  @spec migrate_legacy_feature_state_file_tree(t()) :: t()
+  defp migrate_legacy_feature_state_file_tree(%__MODULE__{file_tree: %FileTreeState{}} = context),
+    do: context
+
+  defp migrate_legacy_feature_state_file_tree(
+         %__MODULE__{feature_state: %FeatureState{} = feature_state} = context
+       ) do
+    case FeatureState.fetch(feature_state, :builtin, :file_tree) do
+      {:ok, %FileTreeState{} = file_tree} -> put_valid_field(context, :file_tree, file_tree)
+      _ -> context
+    end
+  end
+
+  defp migrate_legacy_feature_state_file_tree(%__MODULE__{} = context), do: context
+
+  @spec drop_legacy_feature_state_file_tree(t()) :: t()
+  defp drop_legacy_feature_state_file_tree(
+         %__MODULE__{feature_state: %FeatureState{} = feature_state} = context
+       ) do
+    put_valid_field(
+      context,
+      :feature_state,
+      FeatureState.drop(feature_state, :builtin, :file_tree)
+    )
+  end
+
+  defp drop_legacy_feature_state_file_tree(%__MODULE__{} = context), do: context
 
   @spec put_valid_field(t(), field_name(), term()) :: t()
   defp put_valid_field(%__MODULE__{} = context, field, value) do
@@ -252,6 +284,7 @@ defmodule MingaEditor.State.Tab.Context do
   defp valid_field?(:buffers, %Buffers{}), do: true
   defp valid_field?(:windows, %Windows{}), do: true
   defp valid_field?(:dired, %DiredState{}), do: true
+  defp valid_field?(:file_tree, %FileTreeState{}), do: true
   defp valid_field?(:viewport, %Viewport{}), do: true
   defp valid_field?(:mouse, %Mouse{}), do: true
   defp valid_field?(:highlight, %Highlighting{}), do: true

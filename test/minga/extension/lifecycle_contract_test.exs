@@ -949,7 +949,11 @@ defmodule Minga.Extension.LifecycleContractTest do
       :code.delete(Minga.TestExtensions.CurrentSourceTypeWins)
     end)
 
-    :ok = ExtRegistry.register_hex(ctx.registry, :current_source_type_wins, "not_installed", [])
+    :ok =
+      ExtRegistry.register_hex(ctx.registry, :current_source_type_wins, "not_installed",
+        app: :not_installed
+      )
+
     {:ok, stale_hex_entry} = ExtRegistry.get(ctx.registry, :current_source_type_wins)
     assert stale_hex_entry.source_type == :hex
 

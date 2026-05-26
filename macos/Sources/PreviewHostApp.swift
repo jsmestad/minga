@@ -57,14 +57,15 @@ final class PreviewHostDelegate: NSObject, NSApplicationDelegate {
             fail("no window or content view found")
         }
 
-        window.orderFrontRegardless()
-        contentView.layoutSubtreeIfNeeded()
-        contentView.display()
-
         let outputDir = ProcessInfo.processInfo.environment["PREVIEW_OUTPUT_DIR"]
             ?? "macos/Tests/Snapshots"
         let viewName = ProcessInfo.processInfo.environment["PREVIEW_VIEW"] ?? "StatusBarView"
         let outputPath = "\(outputDir)/\(viewName).png"
+
+        window.setContentSize(PreviewSnapshotPolicy.size(named: viewName))
+        window.orderFrontRegardless()
+        contentView.layoutSubtreeIfNeeded()
+        contentView.display()
 
         let dirURL = URL(fileURLWithPath: outputDir, isDirectory: true)
         do {

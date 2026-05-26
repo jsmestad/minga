@@ -2065,7 +2065,25 @@ defmodule MingaEditor.State do
 
   @spec snapshot_workspace_fields(SessionState.t()) :: Tab.context()
   defp snapshot_workspace_fields(%SessionState{} = ws) do
-    SessionState.to_tab_context(ws)
+    ws
+    |> SessionState.to_tab_context()
+    |> put_non_default_shared_tab_fields(ws)
+  end
+
+  @spec put_non_default_shared_tab_fields(Tab.context(), SessionState.t()) :: Tab.context()
+  defp put_non_default_shared_tab_fields(context, %SessionState{} = ws) do
+    context
+    |> put_shared_tab_field(:highlight, ws.highlight, %Highlighting{})
+    |> put_shared_tab_field(:injection_ranges, ws.injection_ranges, %{})
+    |> put_shared_tab_field(:agent_ui, ws.agent_ui, UIState.new())
+  end
+
+  @spec put_shared_tab_field(Tab.context(), TabContext.field_name(), term(), term()) ::
+          Tab.context()
+  defp put_shared_tab_field(context, _field, default_value, default_value), do: context
+
+  defp put_shared_tab_field(context, field, value, _default_value) do
+    TabContext.put_fields(context, %{field => value})
   end
 
   @doc """
@@ -2163,7 +2181,8 @@ defmodule MingaEditor.State do
       lsp_pending: %{},
       search: %Search{},
       editing: VimState.new(),
-      feature_state: feature_state_with_file_tree_root(state),
+      file_tree: file_tree_with_current_root(state),
+      feature_state: FeatureState.new(),
       document_highlights: nil
     })
   end
@@ -2191,7 +2210,8 @@ defmodule MingaEditor.State do
       lsp_pending: %{},
       search: %Search{},
       editing: VimState.new(),
-      feature_state: feature_state_with_file_tree_root(state),
+      file_tree: file_tree_with_current_root(state),
+      feature_state: FeatureState.new(),
       document_highlights: nil
     })
   end
@@ -2227,16 +2247,9 @@ defmodule MingaEditor.State do
 
   defp build_agent_chat_windows(_agent_buf, _rows, _cols), do: %Windows{}
 
-  @spec feature_state_with_file_tree_root(t()) :: FeatureState.t()
-  defp feature_state_with_file_tree_root(%__MODULE__{} = state) do
-    project_root = file_tree_state(state).project_root
-
-    FeatureState.put(
-      FeatureState.new(),
-      FileTreeFeature.source(),
-      FileTreeFeature.feature_id(),
-      %FileTreeState{project_root: project_root}
-    )
+  @spec file_tree_with_current_root(t()) :: FileTreeState.t()
+  defp file_tree_with_current_root(%__MODULE__{} = state) do
+    %FileTreeState{project_root: file_tree_state(state).project_root}
   end
 
   @spec log_switch_tab(TabBar.t(), Tab.id(), Tab.id()) :: :ok

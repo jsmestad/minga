@@ -12,8 +12,6 @@ defmodule Minga.Extension.SourceCleanupTest do
   alias Minga.Keymap.Bindings
   alias Minga.Keymap.KeyParser
   alias MingaEditor.Session.State, as: SessionState
-  alias MingaEditor.Shell.Registry, as: ShellRegistry
-  alias MingaEditor.Shell.StateStash
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
@@ -31,23 +29,7 @@ defmodule Minga.Extension.SourceCleanupTest do
     {:ok, _} = CommandRegistry.start_link(name: cmd_reg_name)
     {:ok, _} = KeymapActive.start_link(name: keymap_name)
 
-    ShellRegistry.reset_for_test()
-    ShellRegistry.seed_builtin()
-
-    :ok =
-      ShellRegistry.register({:extension, :fake_shell}, %{
-        id: :fake_shell,
-        module: MingaEditor.Test.FakeShell,
-        display_name: "Fake Shell",
-        description: "Test shell",
-        default?: false,
-        capabilities: []
-      })
-
     on_exit(fn ->
-      ShellRegistry.reset_for_test()
-      ShellRegistry.seed_builtin()
-
       for source <- [
             {:extension, :source_cleanup},
             {:extension, :source_cleanup_fails},
@@ -684,12 +666,6 @@ defmodule Minga.Extension.SourceCleanupTest do
     cleaned_tab = TabBar.get(cleaned_editor_state.shell_state.tab_bar, 1)
     assert_snapshot_feature_state(cleaned_tab.context, nil, :tab_other)
 
-    assert_snapshot_feature_state(
-      cleaned_editor_state.shell_state_stash.fake_shell.state.contexts |> List.first(),
-      nil,
-      :board_other
-    )
-
     assert :error = CommandRegistry.lookup(ctx.command_registry, :source_cleanup_cmd)
     assert :not_found = leader_lookup(ctx.keymap, "m c")
     assert Minga.Keymap.Scope.module_for(:source_cleanup_scope) == nil
@@ -721,36 +697,19 @@ defmodule Minga.Extension.SourceCleanupTest do
       |> SessionState.put_feature_state(other_source, :sidebar, :tab_other)
       |> SessionState.to_tab_context()
 
-    stashed_context =
-      workspace()
-      |> SessionState.put_feature_state(source, :sidebar, :board_owned)
-      |> SessionState.put_feature_state(other_source, :sidebar, :board_other)
-      |> SessionState.to_tab_context()
-
     tab = Tab.new_file(1, "one") |> Tab.set_context(tab_context)
 
     %EditorState{
       port_manager: self(),
       workspace: live_workspace,
-      shell_state: %ShellState{tab_bar: TabBar.new(tab)},
-      shell_state_stash: %{fake_shell: fake_shell_stash(%{contexts: [stashed_context]})}
+      shell_state: %ShellState{tab_bar: TabBar.new(tab)}
     }
   end
 
   @spec workspace() :: SessionState.t()
   defp workspace, do: %SessionState{viewport: Viewport.new(24, 80)}
 
-  @spec fake_shell_stash(map()) :: StateStash.t()
-  defp fake_shell_stash(shell_state) do
-    %StateStash{
-      module: MingaEditor.Test.FakeShell,
-      source: {:extension, :fake_shell},
-      generation: 1,
-      state: shell_state
-    }
-  end
-
-  @spec assert_snapshot_feature_state(MingaEditor.State.Tab.Context.t(), term(), term()) :: :ok
+  @spec assert_snapshot_feature_state(Card.workspace_snapshot(), term(), term()) :: :ok
   defp assert_snapshot_feature_state(context, expected_owned, expected_other) do
     restored = SessionState.restore_tab_context(workspace(), context)
 

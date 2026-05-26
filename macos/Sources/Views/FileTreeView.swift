@@ -12,6 +12,19 @@ struct FileTreeView: View {
     let fileTreeState: FileTreeState
     let theme: ThemeColors
     let encoder: InputEncoder?
+    let usesPreviewEagerLayout: Bool
+
+    init(
+        fileTreeState: FileTreeState,
+        theme: ThemeColors,
+        encoder: InputEncoder?,
+        usesPreviewEagerLayout: Bool = false
+    ) {
+        self.fileTreeState = fileTreeState
+        self.theme = theme
+        self.encoder = encoder
+        self.usesPreviewEagerLayout = usesPreviewEagerLayout
+    }
 
     private let rowHeight: CGFloat = 22
     private let indentWidth: CGFloat = 14
@@ -20,11 +33,6 @@ struct FileTreeView: View {
     /// Chevron/hover animation duration. Respects reduced motion.
     private var animDuration: Double {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.15
-    }
-
-    /// PreviewHost can force eager layout for isolated component snapshots, but full-shell previews keep the production LazyVStack path.
-    private var usesPreviewEagerLayout: Bool {
-        PreviewSnapshotPolicy.shouldUseEagerLayout(for: "FileTreeView")
     }
 
     @State private var scrollOffset: CGFloat = 0
@@ -47,14 +55,15 @@ struct FileTreeView: View {
         if fileTreeState.entries.isEmpty && fileTreeState.treeState != .ready {
             stateContent
         } else if usesPreviewEagerLayout {
-            ScrollView(.vertical) {
-                VStack(spacing: 0) {
-                    ForEach(fileTreeState.entries) { entry in
-                        entryRow(entry)
-                    }
+            VStack(spacing: 0) {
+                ForEach(fileTreeState.entries) { entry in
+                    entryRow(entry)
                 }
-                .padding(.top, 2)
             }
+            .padding(.top, 2)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(theme.treeBg)
+            .clipped()
         } else {
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
@@ -104,17 +113,17 @@ struct FileTreeView: View {
                 Button("New File…") {
                     encoder?.sendFileTreeNewFile(parentIndex: UInt16(fileTreeState.selectedIndex))
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(primaryStateButtonStyle)
                 Button("Refresh") {
                     encoder?.sendFileTreeRefresh()
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(secondaryStateButtonStyle)
             case .error:
                 stateText(title: "Couldn’t load file tree", subtitle: fileTreeState.errorReason.isEmpty ? "Check project permissions, then refresh." : fileTreeState.errorReason)
                 Button("Refresh") {
                     encoder?.sendFileTreeRefresh()
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(primaryStateButtonStyle)
             case .hidden, .ready:
                 EmptyView()
             }
@@ -122,6 +131,27 @@ struct FileTreeView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .padding(20)
         .background(theme.treeBg)
+    }
+
+    /// Derived locally for readable text on accent-filled controls.
+    private var readableAccentForeground: Color {
+        theme.treeBg
+    }
+
+    private var primaryStateButtonStyle: FileTreeStateButtonStyle {
+        FileTreeStateButtonStyle(
+            backgroundColor: theme.accent,
+            foregroundColor: readableAccentForeground,
+            borderColor: theme.accent.opacity(0.85)
+        )
+    }
+
+    private var secondaryStateButtonStyle: FileTreeStateButtonStyle {
+        FileTreeStateButtonStyle(
+            backgroundColor: theme.treeFg.opacity(0.06),
+            foregroundColor: theme.accent,
+            borderColor: theme.treeSeparatorFg.opacity(0.55)
+        )
     }
 
     private func stateText(title: String, subtitle: String) -> some View {
@@ -471,6 +501,30 @@ struct FileTreeView: View {
         return mods
     }
 
+}
+
+private struct FileTreeStateButtonStyle: ButtonStyle {
+    let backgroundColor: Color
+    let foregroundColor: Color
+    let borderColor: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(foregroundColor.opacity(configuration.isPressed ? 0.82 : 1.0))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .frame(minWidth: 92)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(backgroundColor.opacity(configuration.isPressed ? 0.82 : 1.0))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(borderColor, lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 6))
+    }
 }
 
 private struct FileTreeEntryAccessibilityActions: ViewModifier {

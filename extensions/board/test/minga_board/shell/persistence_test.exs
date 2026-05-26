@@ -1,6 +1,7 @@
 defmodule MingaBoard.Shell.PersistenceTest do
   @moduledoc "Tests for Board persistence failure handling."
 
+  # Mutates global HOME and XDG_DATA_HOME while testing platform-specific persistence paths.
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
@@ -137,9 +138,9 @@ defmodule MingaBoard.Shell.PersistenceTest do
   end
 
   test "save returns an error and logs write setup failures", %{tmp_dir: dir} do
-    bad_xdg = Path.join(dir, "not_a_directory")
-    File.write!(bad_xdg, "file")
-    System.put_env("XDG_DATA_HOME", bad_xdg)
+    bad_data_home = Path.join(dir, "not_a_directory")
+    File.write!(bad_data_home, "file")
+    put_data_home(bad_data_home)
 
     log =
       capture_log(fn ->
@@ -147,10 +148,25 @@ defmodule MingaBoard.Shell.PersistenceTest do
       end)
 
     assert log =~ "Board persistence save failed"
-    assert log =~ bad_xdg
+    assert log =~ bad_data_home
   end
 
-  defp board_path(dir), do: Path.join([dir, "minga", "board.json"])
+  defp board_path(dir) do
+    case :os.type() do
+      {:unix, :darwin} ->
+        Path.join([dir, "Library", "Application Support", "minga", "board.json"])
+
+      _ ->
+        Path.join([dir, "minga", "board.json"])
+    end
+  end
+
+  defp put_data_home(dir) do
+    case :os.type() do
+      {:unix, :darwin} -> System.put_env("HOME", dir)
+      _ -> System.put_env("XDG_DATA_HOME", dir)
+    end
+  end
 
   defp restore_env(key, nil), do: System.delete_env(key)
   defp restore_env(key, value), do: System.put_env(key, value)
