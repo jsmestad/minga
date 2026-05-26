@@ -236,6 +236,24 @@ defmodule MingaEditor.Frontend.Emit.TUITest do
       assert [<<0x12>> | _] = commands
     end
 
+    test "falls back to full redraw when file tree sidebar is visible" do
+      state = base_state(rows: 24, cols: 80, content: long_content(100))
+
+      state1 = seed_state(state, 0)
+      frame1 = build_frame_with_window(state1, viewport_top: 0)
+      {caches, _} = Emit.emit(frame1, Context.from_editor_state(state1), nil)
+      assert_receive {:"$gen_cast", {:send_commands, _}}
+
+      state2 = simulate_scroll(state, 1)
+      ctx2 = Context.from_editor_state(state2)
+      ctx2 = %{ctx2 | layout: %{ctx2.layout | file_tree: {1, 0, 30, 21}}}
+      frame2 = build_frame_with_window(state2, viewport_top: 1)
+      Emit.emit(frame2, ctx2, nil, caches)
+
+      assert_receive {:"$gen_cast", {:send_commands, commands}}
+      assert [<<0x12>> | _] = commands
+    end
+
     test "falls back to full redraw on mode transition (visual to normal)" do
       state = base_state(rows: 24, cols: 80, content: long_content(100))
 

@@ -341,8 +341,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
       {gutter_layer, _content_layer, _rows, _window} =
         ContentHelpers.render_lines_nowrap_layers(lines, opts)
 
-      assert {col, "▾", face} =
-               Enum.find(Map.get(gutter_layer, 0), fn {_col, text, _face} -> text == "▾" end)
+      assert {col, "▼", face} =
+               Enum.find(Map.get(gutter_layer, 0), fn {_col, text, _face} -> text == "▼" end)
 
       assert col == Gutter.fold_column_offset()
       assert face.fg == ctx.gutter_colors.fold_fg
@@ -409,8 +409,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
       assert {0, "E ", _diag_face} =
                Enum.find(row, fn {col, text, _face} -> col == 0 and text == "E " end)
 
-      assert {2, "▾", _fold_face} =
-               Enum.find(row, fn {col, text, _face} -> col == 2 and text == "▾" end)
+      assert {2, "▼", _fold_face} =
+               Enum.find(row, fn {col, text, _face} -> col == 2 and text == "▼" end)
     end
 
     test "folded lines render a right chevron in the gutter", %{ctx: ctx, window: window} do
@@ -434,8 +434,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
       {gutter_draws, _line_draws, _rendered_rows, _window} =
         ContentHelpers.render_lines_nowrap(lines, opts)
 
-      assert {_row, _col, "▸", face} =
-               Enum.find(gutter_draws, fn {_row, _col, text, _face} -> text == "▸" end)
+      assert {_row, _col, "▶", face} =
+               Enum.find(gutter_draws, fn {_row, _col, text, _face} -> text == "▶" end)
 
       assert face.fg == ctx.gutter_colors.fold_fg
     end
@@ -534,8 +534,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
       {gutter_draws, line_draws, _rendered_rows, _window} =
         ContentHelpers.render_lines_nowrap(lines, opts)
 
-      assert {_row, col, "▸", face} =
-               Enum.find(gutter_draws, fn {_row, _col, text, _face} -> text == "▸" end)
+      assert {_row, col, "▶", face} =
+               Enum.find(gutter_draws, fn {_row, _col, text, _face} -> text == "▶" end)
 
       assert {_row, content_col, "custom placeholder", _face} =
                Enum.find(line_draws, fn {_row, _col, text, _face} ->
