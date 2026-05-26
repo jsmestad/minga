@@ -33,6 +33,7 @@ defmodule MingaAgent.Providers.Native do
 
   use GenServer
 
+  alias Minga.Buffer
   alias MingaAgent.Compaction
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.ContextArtifact
@@ -51,6 +52,7 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.MCP.ServerConfig, as: MCPServerConfig
   alias MingaAgent.Memory
   alias MingaAgent.ProjectView
+  alias MingaAgent.ToolRouter
   alias MingaAgent.ModelCatalog
   alias MingaAgent.ModelLimits
   alias MingaAgent.ProjectView
@@ -101,6 +103,9 @@ defmodule MingaAgent.Providers.Native do
       :config,
       :tools,
       :project_root,
+      :project_view,
+      :fork_store,
+      :changeset,
       :thinking_level,
       :max_tokens,
       :max_retries,
@@ -119,6 +124,9 @@ defmodule MingaAgent.Providers.Native do
             config: MingaAgent.Config.t(),
             tools: [term()],
             project_root: String.t(),
+            project_view: ProjectView.t() | nil,
+            fork_store: pid() | nil,
+            changeset: pid() | nil,
             thinking_level: String.t(),
             max_tokens: pos_integer(),
             max_retries: non_neg_integer(),
@@ -480,6 +488,9 @@ defmodule MingaAgent.Providers.Native do
         config: state.config,
         tools: state.tools,
         project_root: state.project_root,
+        project_view: state.project_view,
+        fork_store: state.fork_store,
+        changeset: state.changeset,
         thinking_level: state.thinking_level,
         max_tokens: state.max_tokens,
         max_retries: state.max_retries,
@@ -541,6 +552,9 @@ defmodule MingaAgent.Providers.Native do
       config: state.config,
       tools: state.tools,
       project_root: state.project_root,
+      project_view: state.project_view,
+      fork_store: state.fork_store,
+      changeset: state.changeset,
       thinking_level: state.thinking_level,
       max_tokens: state.max_tokens,
       max_retries: state.max_retries,
@@ -1323,7 +1337,7 @@ defmodule MingaAgent.Providers.Native do
 
     {final_ctx, _mode} =
       Enum.reduce(tool_calls, {context, initial_mode}, fn tool_call, {ctx, approval_mode} ->
-        before_content = capture_file_before(tool_call, lctx.project_root)
+        before_content = capture_file_before(lctx, tool_call)
 
         {result_text, is_error, new_mode} =
           execute_with_approval(
@@ -1349,13 +1363,7 @@ defmodule MingaAgent.Providers.Native do
 
         dispatch_post_tool_use(tool_call, result_text, is_error, lctx.config)
 
-        maybe_emit_file_changed(
-          lctx.provider_pid,
-          tool_call,
-          before_content,
-          is_error,
-          lctx.project_root
-        )
+        maybe_emit_file_changed(lctx, tool_call, before_content, is_error)
 
         meta = if is_error, do: %{is_error: true}, else: %{}
 
@@ -1603,42 +1611,33 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  @file_tools ~w(edit_file multi_edit_file write_file delete_file)
+  @file_tools ~w(edit_file multi_edit_file apply_diff write_file delete_file)
 
-  @spec capture_file_before(map(), String.t()) :: String.t() | nil
-  defp capture_file_before(%{name: name, arguments: %{"path" => path}}, project_root)
+  @spec capture_file_before(loop_ctx(), map()) :: String.t() | nil
+  defp capture_file_before(%LoopCtx{} = lctx, %{name: name, arguments: %{"path" => path}})
        when name in @file_tools do
-    resolved_path = resolved_tool_path(project_root, path)
-
-    case File.read(resolved_path) do
+    case read_tool_file_content(lctx, path) do
       {:ok, content} -> content
       {:error, _} -> nil
     end
   end
 
-  defp capture_file_before(_tool_call, _project_root), do: nil
+  defp capture_file_before(_lctx, _tool_call), do: nil
 
-  @spec maybe_emit_file_changed(pid(), map(), String.t() | nil, boolean(), String.t()) :: :ok
+  @spec maybe_emit_file_changed(loop_ctx(), map(), String.t() | nil, boolean()) :: :ok
   defp maybe_emit_file_changed(
-         provider_pid,
+         %LoopCtx{} = lctx,
          %{name: "delete_file", arguments: %{"path" => path}} = tool_call,
          before_content,
-         false,
-         project_root
+         false
        )
        when is_binary(before_content) do
-    resolved_path = resolved_tool_path(project_root, path)
-
-    after_content =
-      case File.read(resolved_path) do
-        {:ok, content} -> content
-        {:error, :enoent} -> ""
-        {:error, _} -> nil
-      end
+    resolved_path = file_changed_path(lctx, path)
+    after_content = read_deleted_tool_content(lctx, path)
 
     if is_binary(after_content) and after_content != before_content do
       send(
-        provider_pid,
+        lctx.provider_pid,
         {:agent_event,
          %Event.ToolFileChanged{
            tool_call_id: tool_call.id,
@@ -1652,47 +1651,107 @@ defmodule MingaAgent.Providers.Native do
     :ok
   end
 
-  defp maybe_emit_file_changed(
-         provider_pid,
-         tool_call,
-         before_content,
-         false = _is_error,
-         project_root
-       )
+  defp maybe_emit_file_changed(%LoopCtx{} = lctx, tool_call, before_content, false)
        when is_binary(before_content) and tool_call.name in @file_tools do
     path = tool_call.arguments["path"]
-    resolved_path = resolved_tool_path(project_root, path)
+    resolved_path = file_changed_path(lctx, path)
 
-    after_content =
-      case File.read(resolved_path) do
-        {:ok, content} -> content
-        {:error, _} -> nil
-      end
+    case read_tool_file_content(lctx, path) do
+      {:ok, after_content} when after_content != before_content ->
+        send(
+          lctx.provider_pid,
+          {:agent_event,
+           %Event.ToolFileChanged{
+             tool_call_id: tool_call.id,
+             path: resolved_path,
+             before_content: before_content,
+             after_content: after_content
+           }}
+        )
 
-    if after_content && after_content != before_content do
-      send(
-        provider_pid,
-        {:agent_event,
-         %Event.ToolFileChanged{
-           tool_call_id: tool_call.id,
-           path: resolved_path,
-           before_content: before_content,
-           after_content: after_content
-         }}
-      )
+      _ ->
+        :ok
     end
-
-    :ok
   end
 
-  defp maybe_emit_file_changed(
-         _provider_pid,
-         _tool_call,
-         _before_content,
-         _is_error,
-         _project_root
-       ),
-       do: :ok
+  defp maybe_emit_file_changed(_lctx, _tool_call, _before_content, _is_error), do: :ok
+
+  @spec tool_routing_configured?(loop_ctx()) :: boolean()
+  defp tool_routing_configured?(%LoopCtx{} = lctx),
+    do: ToolRouter.routing_configured?(tool_router_context(lctx))
+
+  @spec tool_router_context(loop_ctx()) :: ToolRouter.context()
+  defp tool_router_context(%LoopCtx{
+         project_view: project_view,
+         fork_store: fork_store,
+         changeset: changeset
+       }) do
+    ToolRouter.context(project_view, fork_store, changeset)
+  end
+
+  @spec file_changed_path(loop_ctx(), String.t()) :: String.t()
+  defp file_changed_path(%LoopCtx{} = lctx, path) do
+    if lctx.project_view do
+      case ToolRouter.filesystem_path_result(tool_router_context(lctx), path) do
+        {:ok, filesystem_path} -> filesystem_path
+        {:error, _} -> resolved_tool_path(lctx.project_root, path)
+      end
+    else
+      resolved_tool_path(lctx.project_root, path)
+    end
+  end
+
+  @spec read_deleted_tool_content(loop_ctx(), String.t()) :: String.t() | nil
+  defp read_deleted_tool_content(%LoopCtx{} = lctx, path) do
+    if tool_routing_configured?(lctx) do
+      absolute_path = resolved_tool_path(lctx.project_root, path)
+
+      case ToolRouter.read_file(tool_router_context(lctx), absolute_path) do
+        {:ok, content} -> content
+        {:error, _} -> ""
+      end
+    else
+      read_deleted_tool_content(Path.expand(path, lctx.project_root))
+    end
+  end
+
+  @spec read_deleted_tool_content(String.t()) :: String.t() | nil
+  defp read_deleted_tool_content(path) do
+    case File.read(path) do
+      {:ok, content} -> content
+      {:error, :enoent} -> ""
+      {:error, _} -> nil
+    end
+  end
+
+  @spec read_tool_file_content(loop_ctx(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  defp read_tool_file_content(%LoopCtx{} = lctx, path) do
+    if tool_routing_configured?(lctx) do
+      absolute_path = resolved_tool_path(lctx.project_root, path)
+      ToolRouter.read_file(tool_router_context(lctx), absolute_path)
+    else
+      read_tool_file_content_direct(Path.expand(path, lctx.project_root))
+    end
+  end
+
+  @spec read_tool_file_content_direct(String.t()) :: {:ok, String.t()} | {:error, term()}
+  defp read_tool_file_content_direct(path) do
+    case Buffer.pid_for_path(path) do
+      {:ok, pid} -> {:ok, Buffer.content(pid)}
+      :not_found -> read_tool_file_content_from_disk(path)
+    end
+  catch
+    :exit, _ -> read_tool_file_content_from_disk(path)
+  end
+
+  @spec read_tool_file_content_from_disk(String.t()) :: {:ok, String.t()} | {:error, term()}
+  defp read_tool_file_content_from_disk(path) do
+    case File.read(path) do
+      {:ok, content} -> {:ok, content}
+      {:error, :enoent} -> {:error, :enoent}
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
   @spec resolved_tool_path(String.t(), String.t()) :: String.t()
   defp resolved_tool_path(project_root, path), do: Path.expand(path, project_root)
@@ -2212,6 +2271,7 @@ defmodule MingaAgent.Providers.Native do
   read_file: Read file contents. Supports offset/limit for partial reads.
   write_file: Create/overwrite files. Auto-creates parent dirs.
   edit_file: Find-and-replace exact text. Read file first for exact match.
+  apply_diff: Apply unified diffs to a file. Use for large or multi-hunk edits.
   list_directory: List entries at a path.
   find: Find files by name/glob. Prefer over shell+find.
   grep: Search file contents by pattern. Prefer over shell+grep.
@@ -2222,7 +2282,8 @@ defmodule MingaAgent.Providers.Native do
 
   <rules>
   - Always read a file before editing it. old_text must match exactly.
-  - Prefer multi_edit_file when making several changes to the same file.
+  - Prefer apply_diff for large changes that are easiest to express as unified diff hunks.
+  - Prefer multi_edit_file when making several exact replacements in the same file.
   - Use find for file discovery, grep for content search.
   - Verify changes by reading the result or running tests.
   - Be concise. Show file paths clearly.

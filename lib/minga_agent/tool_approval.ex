@@ -84,7 +84,7 @@ defmodule MingaAgent.ToolApproval do
   end
 
   defp do_build_preview(name, %{"path" => path} = args)
-       when name in ["edit_file", "multi_edit_file"] do
+       when name in ["edit_file", "multi_edit_file", "apply_diff"] do
     path = stringify_value(path)
 
     Preview.new(:target, path, preview_lines(["file: #{path}", edit_summary(name, args)]))
@@ -151,6 +151,12 @@ defmodule MingaAgent.ToolApproval do
     edits = Map.get(args, "edits", [])
     count = if is_list(edits), do: length(edits), else: 0
     "#{count} edit(s)"
+  end
+
+  defp edit_summary("apply_diff", args) do
+    diff = stringify_value(Map.get(args, "diff", ""))
+    hunk_count = diff |> String.split("\n") |> Enum.count(&String.starts_with?(&1, "@@"))
+    "#{hunk_count} diff hunk(s)"
   end
 
   @spec stringify_keys(map()) :: map()

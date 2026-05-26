@@ -75,6 +75,21 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     assert_receive {:project_view_call, {:read_file, "lib/file.txt"}}
     assert_receive {:project_view_call, {:write_file, "lib/file.txt", "multi text\n"}}
 
+    diff = """
+    @@ -1,1 +1,1 @@
+    -multi text
+    +diff text
+    """
+
+    assert {:ok, diff_result} =
+             call_tool(tools, "apply_diff", %{"path" => "lib/file.txt", "diff" => diff})
+
+    assert diff_result =~ "via ProjectView"
+    assert diff_result =~ "ProjectView workspace 42"
+    assert File.read!(Path.join(working_dir, "lib/file.txt")) == "diff text\n"
+    assert_receive {:project_view_call, {:read_file, "lib/file.txt"}}
+    assert_receive {:project_view_call, {:write_file, "lib/file.txt", "diff text\n"}}
+
     assert {:ok, delete_result} = call_tool(tools, "delete_file", %{"path" => "lib/new.txt"})
     assert delete_result =~ "ProjectView"
     refute File.exists?(Path.join(working_dir, "lib/new.txt"))
@@ -183,6 +198,11 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
              "path" => "lib/edit_target.txt",
              "edits" => [%{"old_text" => "editable", "new_text" => "changed"}]
            }, ":read_failed"},
+          {"apply_diff",
+           %{
+             "path" => "lib/edit_target.txt",
+             "diff" => "@@ -1,1 +1,1 @@\n-editable root text\n+changed\n"
+           }, ":read_failed"},
           {"list_directory", %{"path" => "lib"}, ":list_failed"}
         ] do
       assert {:error, message} = call_tool(tools, name, args)
@@ -223,6 +243,31 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
     assert {:ok, changed} = Changeset.read_file(changeset, "lib/edit_target.txt")
     assert changed == "ONE TWO one\n"
     assert File.read!(target_path) == "one two one\n"
+  end
+
+  test "apply_diff through changeset applies unified diffs and leaves real files unchanged",
+       %{tmp_dir: root} do
+    File.mkdir_p!(Path.join(root, "lib"))
+    target_path = Path.join(root, "lib/diff_target.txt")
+    File.write!(target_path, "one\ntwo\n")
+
+    {:ok, changeset} = start_supervised({Changeset.Server, project_root: root})
+    tools = Tools.all(project_root: root, changeset: changeset)
+
+    diff = """
+    @@ -1,2 +1,2 @@
+     one
+    -two
+    +TWO
+    """
+
+    assert {:ok, result} =
+             call_tool(tools, "apply_diff", %{"path" => "lib/diff_target.txt", "diff" => diff})
+
+    assert result =~ "via changeset"
+    assert {:ok, changed} = Changeset.read_file(changeset, "lib/diff_target.txt")
+    assert changed == "one\nTWO\n"
+    assert File.read!(target_path) == "one\ntwo\n"
   end
 
   test "dead changeset multi_edit_file returns an unavailable error without mutating the project",
