@@ -128,6 +128,26 @@ defmodule MingaAgent.Providers.NativeTest do
     end
   end
 
+  defp tool_message_text(message) do
+    Enum.map_join(message.content, "", & &1.text)
+  end
+
+  defp collect_spawned_processes(parent, count) do
+    collect_spawned_processes(parent, count, [])
+  end
+
+  defp collect_spawned_processes(_parent, 0, acc), do: Enum.reverse(acc)
+
+  defp collect_spawned_processes(parent, count, acc) do
+    receive do
+      {:trace, ^parent, :spawn, pid, _mfa} ->
+        collect_spawned_processes(parent, count - 1, [pid | acc])
+    after
+      1_000 ->
+        flunk("expected #{count} more spawned process(es) from #{inspect(parent)}")
+    end
+  end
+
   # ── Lifecycle tests ─────────────────────────────────────────────────────────
 
   describe "init, context, and thinking level" do
@@ -417,6 +437,553 @@ defmodule MingaAgent.Providers.NativeTest do
       # Should eventually get a text response and AgentEnd
       assert Enum.any?(events, &match?(%Event.TextDelta{}, &1))
       assert Enum.any?(events, &match?(%Event.AgentEnd{}, &1))
+    end
+
+    test "executes independent tool calls concurrently and appends results in call order", %{
+      tmp_dir: dir
+    } do
+      test_pid = self()
+      release_ref = make_ref()
+      messages_ref = make_ref()
+      call_count = :counters.new(1, [:atomics])
+
+      slow_tool =
+        ReqLLM.Tool.new!(
+          name: "slow_tool",
+          description: "Blocks until the test releases it",
+          parameter_schema: [],
+          callback: fn _args ->
+            send(test_pid, {:tool_started, "slow_tool", self()})
+
+            receive do
+              {^release_ref, :release} -> {:ok, "slow result"}
+            after
+              1_000 -> {:error, "slow tool timed out"}
+            end
+          end
+        )
+
+      failing_tool =
+        ReqLLM.Tool.new!(
+          name: "failing_tool",
+          description: "Fails immediately",
+          parameter_schema: [],
+          callback: fn _args ->
+            send(test_pid, {:tool_started, "failing_tool", self()})
+            {:error, "boom"}
+          end
+        )
+
+      client = fn _model, messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          case count do
+            0 ->
+              [
+                ReqLLM.StreamChunk.tool_call("slow_tool", %{}, %{id: "tc_slow", index: 0}),
+                ReqLLM.StreamChunk.tool_call("failing_tool", %{}, %{id: "tc_fail", index: 1}),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+              ]
+
+            _ ->
+              send(test_pid, {messages_ref, messages})
+              [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      {:ok, pid} =
+        start_provider(tmp_dir: dir, llm_client: client, tools: [slow_tool, failing_tool])
+
+      assert :ok = Native.send_prompt(pid, "Run both tools")
+      assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
+      assert_receive {:tool_started, "slow_tool", slow_pid}, 1_000
+      assert_receive {:tool_started, "failing_tool", _failing_pid}, 1_000
+
+      send(slow_pid, {release_ref, :release})
+      events = collect_events(1_000)
+
+      assert Enum.any?(events, &match?(%Event.ToolEnd{name: "slow_tool", is_error: false}, &1))
+      assert Enum.any?(events, &match?(%Event.ToolEnd{name: "failing_tool", is_error: true}, &1))
+
+      assert_received {^messages_ref, messages}
+      tool_messages = Enum.filter(messages, fn message -> message.role == :tool end)
+      assert Enum.map(tool_messages, & &1.tool_call_id) == ["tc_slow", "tc_fail"]
+      assert Enum.map(tool_messages, &tool_message_text/1) == ["slow result", "boom"]
+      assert Enum.map(tool_messages, & &1.metadata[:is_error]) == [nil, true]
+    end
+
+    test "abnormal concurrent tool exit becomes an error while a sibling completes", %{
+      tmp_dir: dir
+    } do
+      test_pid = self()
+      release_ref = make_ref()
+      messages_ref = make_ref()
+      call_count = :counters.new(1, [:atomics])
+
+      crashing_tool =
+        ReqLLM.Tool.new!(
+          name: "crashing_tool",
+          description: "Exits abnormally",
+          parameter_schema: [],
+          callback: fn _args ->
+            send(test_pid, {:tool_started, "crashing_tool"})
+            Process.exit(self(), :kill)
+          end
+        )
+
+      sibling_tool =
+        ReqLLM.Tool.new!(
+          name: "sibling_tool",
+          description: "Completes after the crashing sibling exits",
+          parameter_schema: [],
+          callback: fn _args ->
+            send(test_pid, {:tool_started, "sibling_tool", self()})
+
+            receive do
+              {^release_ref, :release} -> {:ok, "sibling result"}
+            after
+              1_000 -> {:error, "sibling tool timed out"}
+            end
+          end
+        )
+
+      client = fn _model, messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          case count do
+            0 ->
+              [
+                ReqLLM.StreamChunk.tool_call("crashing_tool", %{}, %{id: "tc_crash", index: 0}),
+                ReqLLM.StreamChunk.tool_call("sibling_tool", %{}, %{id: "tc_sibling", index: 1}),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+              ]
+
+            _ ->
+              send(test_pid, {messages_ref, messages})
+              [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      {:ok, pid} =
+        start_provider(tmp_dir: dir, llm_client: client, tools: [crashing_tool, sibling_tool])
+
+      assert :ok = Native.send_prompt(pid, "Run both tools")
+      assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
+      assert_receive {:tool_started, "crashing_tool"}, 1_000
+      assert_receive {:tool_started, "sibling_tool", sibling_pid}, 1_000
+
+      send(sibling_pid, {release_ref, :release})
+      events = collect_events(1_000)
+
+      crash_end = Enum.find(events, &match?(%Event.ToolEnd{name: "crashing_tool"}, &1))
+      assert crash_end != nil
+      assert crash_end.is_error == true
+      assert crash_end.result =~ "killed"
+      assert Enum.any?(events, &match?(%Event.ToolEnd{name: "sibling_tool", is_error: false}, &1))
+      assert Enum.any?(events, &match?(%Event.AgentEnd{}, &1))
+
+      assert_received {^messages_ref, messages}
+      tool_messages = Enum.filter(messages, fn message -> message.role == :tool end)
+      assert Enum.map(tool_messages, & &1.tool_call_id) == ["tc_crash", "tc_sibling"]
+
+      assert Enum.map(tool_messages, &tool_message_text/1) == [
+               "Tool task failed: :killed",
+               "sibling result"
+             ]
+
+      assert Enum.map(tool_messages, & &1.metadata[:is_error]) == [true, nil]
+    end
+
+    test "concurrent tool update events keep streaming while sibling tools run", %{tmp_dir: dir} do
+      test_pid = self()
+      release_ref = make_ref()
+      messages_ref = make_ref()
+      provider_holder = start_supervised!({Agent, fn -> nil end})
+      call_count = :counters.new(1, [:atomics])
+
+      # The real shell tool spawns an OS process, which is unsafe in this async provider test.
+      # This custom tool covers the same provider event path by emitting ToolUpdate from a
+      # concurrent tool process without starting a shell.
+      streaming_tool =
+        ReqLLM.Tool.new!(
+          name: "streaming_tool",
+          description: "Emits ToolUpdate events without spawning an OS shell",
+          parameter_schema: [],
+          callback: fn _args ->
+            provider_pid = Agent.get(provider_holder, & &1)
+
+            send(
+              provider_pid,
+              {:agent_event,
+               %Event.ToolUpdate{
+                 tool_call_id: "tc_stream",
+                 name: "shell",
+                 partial_result: "stream chunk\n"
+               }}
+            )
+
+            {:ok, "stream result"}
+          end
+        )
+
+      sibling_tool =
+        ReqLLM.Tool.new!(
+          name: "stream_sibling_tool",
+          description: "Completes after the update has streamed",
+          parameter_schema: [],
+          callback: fn _args ->
+            send(test_pid, {:tool_started, "stream_sibling_tool", self()})
+
+            receive do
+              {^release_ref, :release} -> {:ok, "sibling result"}
+            after
+              1_000 -> {:error, "sibling tool timed out"}
+            end
+          end
+        )
+
+      client = fn _model, messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          case count do
+            0 ->
+              [
+                ReqLLM.StreamChunk.tool_call("streaming_tool", %{}, %{id: "tc_stream", index: 0}),
+                ReqLLM.StreamChunk.tool_call("stream_sibling_tool", %{}, %{
+                  id: "tc_stream_sibling",
+                  index: 1
+                }),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+              ]
+
+            _ ->
+              send(test_pid, {messages_ref, messages})
+              [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      {:ok, pid} =
+        start_provider(tmp_dir: dir, llm_client: client, tools: [streaming_tool, sibling_tool])
+
+      Agent.update(provider_holder, fn _ -> pid end)
+
+      assert :ok = Native.send_prompt(pid, "Run both tools")
+      assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
+
+      assert_receive {:agent_provider_event,
+                      %Event.ToolUpdate{
+                        tool_call_id: "tc_stream",
+                        name: "shell",
+                        partial_result: "stream chunk\n"
+                      }},
+                     1_000
+
+      assert_receive {:tool_started, "stream_sibling_tool", sibling_pid}, 1_000
+      send(sibling_pid, {release_ref, :release})
+      events = collect_events(1_000)
+
+      assert Enum.any?(
+               events,
+               &match?(%Event.ToolEnd{name: "streaming_tool", is_error: false}, &1)
+             )
+
+      assert Enum.any?(
+               events,
+               &match?(%Event.ToolEnd{name: "stream_sibling_tool", is_error: false}, &1)
+             )
+
+      assert_received {^messages_ref, messages}
+      tool_messages = Enum.filter(messages, fn message -> message.role == :tool end)
+      assert Enum.map(tool_messages, & &1.tool_call_id) == ["tc_stream", "tc_stream_sibling"]
+    end
+
+    test "registration failure cleans up unstarted concurrent tool workers", %{tmp_dir: dir} do
+      previous_trap = Process.flag(:trap_exit, true)
+
+      try do
+        test_pid = self()
+        release_ref = make_ref()
+        marker_one = Path.join(dir, "registration-worker-one-ran.txt")
+        marker_two = Path.join(dir, "registration-worker-two-ran.txt")
+
+        tool_one =
+          ReqLLM.Tool.new!(
+            name: "registration_cleanup_one",
+            description: "Should never run after registration failure",
+            parameter_schema: [],
+            callback: fn _args ->
+              File.write!(marker_one, "ran")
+              send(test_pid, :registration_cleanup_one_ran)
+              {:ok, "ran one"}
+            end
+          )
+
+        tool_two =
+          ReqLLM.Tool.new!(
+            name: "registration_cleanup_two",
+            description: "Should never run after registration failure",
+            parameter_schema: [],
+            callback: fn _args ->
+              File.write!(marker_two, "ran")
+              send(test_pid, :registration_cleanup_two_ran)
+              {:ok, "ran two"}
+            end
+          )
+
+        response =
+          build_stream_response([
+            ReqLLM.StreamChunk.tool_call("registration_cleanup_one", %{}, %{
+              id: "tc_registration_one",
+              index: 0
+            }),
+            ReqLLM.StreamChunk.tool_call("registration_cleanup_two", %{}, %{
+              id: "tc_registration_two",
+              index: 1
+            }),
+            ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+          ])
+
+        client = fn _model, _messages, _opts ->
+          send(test_pid, {:registration_cleanup_client_waiting, release_ref})
+
+          receive do
+            {^release_ref, :release} -> response
+          end
+        end
+
+        {:ok, pid} =
+          start_provider(tmp_dir: dir, llm_client: client, tools: [tool_one, tool_two])
+
+        assert :ok = Native.send_prompt(pid, "Run both tools")
+        assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
+        assert_receive {:registration_cleanup_client_waiting, ^release_ref}, 1_000
+
+        %{task: %Task{pid: task_pid}} = :sys.get_state(pid)
+        :erlang.trace(task_pid, true, [:procs])
+        :sys.suspend(pid)
+
+        send(task_pid, {release_ref, :release})
+        worker_pids = collect_spawned_processes(task_pid, 2)
+        :erlang.trace(task_pid, false, [:procs])
+        worker_refs = Enum.map(worker_pids, &Process.monitor/1)
+
+        for {worker_ref, worker_pid} <- Enum.zip(worker_refs, worker_pids) do
+          assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, _reason}, 7_000
+        end
+
+        if Process.alive?(pid) do
+          :sys.resume(pid)
+
+          try do
+            Native.get_state(pid)
+          catch
+            :exit, _ -> :ok
+          end
+        end
+
+        refute_receive :registration_cleanup_one_ran, 50
+        refute_receive :registration_cleanup_two_ran, 50
+        refute File.exists?(marker_one)
+        refute File.exists?(marker_two)
+      after
+        Process.flag(:trap_exit, previous_trap)
+      end
+    end
+
+    test "approval-required tools wait while allowed tools continue", %{tmp_dir: dir} do
+      test_pid = self()
+      release_ref = make_ref()
+      messages_ref = make_ref()
+      call_count = :counters.new(1, [:atomics])
+
+      ask_tool =
+        ReqLLM.Tool.new!(
+          name: "ask_tool",
+          description: "Requires approval before running",
+          parameter_schema: [],
+          callback: fn _args -> {:ok, "approved result"} end
+        )
+
+      allowed_tool =
+        ReqLLM.Tool.new!(
+          name: "allowed_tool",
+          description: "Runs without approval",
+          parameter_schema: [],
+          callback: fn _args ->
+            send(test_pid, {:tool_started, "allowed_tool", self()})
+
+            receive do
+              {^release_ref, :release} -> {:ok, "allowed result"}
+            after
+              1_000 -> {:error, "allowed tool timed out"}
+            end
+          end
+        )
+
+      client = fn _model, messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          case count do
+            0 ->
+              [
+                ReqLLM.StreamChunk.tool_call("ask_tool", %{}, %{id: "tc_ask", index: 0}),
+                ReqLLM.StreamChunk.tool_call("allowed_tool", %{}, %{id: "tc_allowed", index: 1}),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+              ]
+
+            _ ->
+              send(test_pid, {messages_ref, messages})
+              [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: client,
+          tools: [ask_tool, allowed_tool],
+          config: agent_config(tool_permissions: %{"ask_tool" => :ask, "allowed_tool" => :allow})
+        )
+
+      assert :ok = Native.send_prompt(pid, "Run both tools")
+      assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
+
+      assert_receive {:agent_provider_event,
+                      %Event.ToolApproval{tool_call_id: "tc_ask", reply_to: reply_to}},
+                     1_000
+
+      assert_receive {:tool_started, "allowed_tool", allowed_pid}, 1_000
+      send(reply_to, {:tool_approval_response, "tc_ask", :approve})
+      send(allowed_pid, {release_ref, :release})
+      events = collect_events(1_000)
+
+      assert Enum.any?(events, &match?(%Event.ToolEnd{name: "ask_tool", is_error: false}, &1))
+      assert Enum.any?(events, &match?(%Event.ToolEnd{name: "allowed_tool", is_error: false}, &1))
+
+      assert_received {^messages_ref, messages}
+      tool_messages = Enum.filter(messages, fn message -> message.role == :tool end)
+      assert Enum.map(tool_messages, & &1.tool_call_id) == ["tc_ask", "tc_allowed"]
+    end
+
+    test "rejected approval-required tool does not prevent an allowed sibling from finishing", %{
+      tmp_dir: dir
+    } do
+      test_pid = self()
+      release_ref = make_ref()
+      messages_ref = make_ref()
+      call_count = :counters.new(1, [:atomics])
+
+      ask_tool =
+        ReqLLM.Tool.new!(
+          name: "reject_ask_tool",
+          description: "Requires approval before running",
+          parameter_schema: [],
+          callback: fn _args ->
+            send(test_pid, :rejected_approval_tool_ran)
+            {:ok, "should not run"}
+          end
+        )
+
+      allowed_tool =
+        ReqLLM.Tool.new!(
+          name: "reject_allowed_tool",
+          description: "Runs without approval",
+          parameter_schema: [],
+          callback: fn _args ->
+            send(test_pid, {:tool_started, "reject_allowed_tool", self()})
+
+            receive do
+              {^release_ref, :release} -> {:ok, "allowed result"}
+            after
+              1_000 -> {:error, "allowed tool timed out"}
+            end
+          end
+        )
+
+      client = fn _model, messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          case count do
+            0 ->
+              [
+                ReqLLM.StreamChunk.tool_call("reject_ask_tool", %{}, %{id: "tc_reject", index: 0}),
+                ReqLLM.StreamChunk.tool_call("reject_allowed_tool", %{}, %{
+                  id: "tc_allowed",
+                  index: 1
+                }),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+              ]
+
+            _ ->
+              send(test_pid, {messages_ref, messages})
+              [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: client,
+          tools: [ask_tool, allowed_tool],
+          config:
+            agent_config(
+              tool_permissions: %{"reject_ask_tool" => :ask, "reject_allowed_tool" => :allow}
+            )
+        )
+
+      assert :ok = Native.send_prompt(pid, "Run both tools")
+      assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
+
+      assert_receive {:agent_provider_event,
+                      %Event.ToolApproval{tool_call_id: "tc_reject", reply_to: reply_to}},
+                     1_000
+
+      assert_receive {:tool_started, "reject_allowed_tool", allowed_pid}, 1_000
+      send(reply_to, {:tool_approval_response, "tc_reject", :reject})
+      send(allowed_pid, {release_ref, :release})
+      events = collect_events(1_000)
+
+      rejected_end = Enum.find(events, &match?(%Event.ToolEnd{name: "reject_ask_tool"}, &1))
+      assert rejected_end != nil
+      assert rejected_end.is_error == true
+      assert rejected_end.result == "Tool rejected by user"
+
+      assert Enum.any?(
+               events,
+               &match?(%Event.ToolEnd{name: "reject_allowed_tool", is_error: false}, &1)
+             )
+
+      assert_received {^messages_ref, messages}
+      tool_messages = Enum.filter(messages, fn message -> message.role == :tool end)
+      assert Enum.map(tool_messages, & &1.tool_call_id) == ["tc_reject", "tc_allowed"]
+
+      assert Enum.map(tool_messages, &tool_message_text/1) == [
+               "Tool rejected by user",
+               "allowed result"
+             ]
+
+      assert Enum.map(tool_messages, & &1.metadata[:is_error]) == [true, nil]
+      refute_receive :rejected_approval_tool_ran, 50
     end
 
     test "tool approval mode :all preserves the batch prompt after per-tool ask overrides", %{
@@ -737,6 +1304,160 @@ defmodule MingaAgent.Providers.NativeTest do
 
       assert :ok = Native.abort(pid)
       assert {:ok, %{is_streaming: false}} = Native.get_state(pid)
+    end
+
+    test "stops concurrent tool workers when aborted", %{tmp_dir: dir} do
+      test_pid = self()
+      marker_path = Path.join(dir, "abort-worker-continued.txt")
+      release_ref = make_ref()
+      call_count = :counters.new(1, [:atomics])
+
+      blocking_tool =
+        ReqLLM.Tool.new!(
+          name: "abort_blocking_tool",
+          description: "Blocks until the test releases it",
+          parameter_schema: [],
+          callback: fn _args ->
+            send(test_pid, {:abort_blocking_tool_started, self()})
+
+            receive do
+              {^release_ref, :release} ->
+                File.write!(marker_path, "continued")
+                send(test_pid, :abort_blocking_tool_continued)
+                {:ok, "continued"}
+            after
+              5_000 ->
+                {:error, "blocking tool timed out"}
+            end
+          end
+        )
+
+      client = fn _model, _messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          case count do
+            0 ->
+              [
+                ReqLLM.StreamChunk.tool_call("abort_blocking_tool", %{}, %{
+                  id: "tc_abort_blocking",
+                  index: 0
+                }),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+              ]
+
+            _ ->
+              [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, tools: [blocking_tool])
+
+      assert :ok = Native.send_prompt(pid, "Run the blocking tool")
+      assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
+      assert_receive {:abort_blocking_tool_started, worker_pid}, 1_000
+      worker_ref = Process.monitor(worker_pid)
+
+      assert :ok = Native.abort(pid)
+      assert {:ok, %{is_streaming: false}} = Native.get_state(pid)
+      assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, _reason}, 1_000
+
+      send(worker_pid, {release_ref, :release})
+      refute_receive :abort_blocking_tool_continued, 50
+      refute File.exists?(marker_path)
+    end
+
+    test "aborting with no active task still stops registered tool workers", %{tmp_dir: dir} do
+      marker_path = Path.join(dir, "abort-nil-task-worker-continued.txt")
+      test_pid = self()
+      release_ref = make_ref()
+
+      worker_pid =
+        spawn(fn ->
+          receive do
+            {^release_ref, :release} ->
+              File.write!(marker_path, "continued")
+              send(test_pid, :abort_nil_task_worker_continued)
+          end
+        end)
+
+      worker_ref = Process.monitor(worker_pid)
+      {:ok, pid} = start_provider(tmp_dir: dir)
+      :ok = GenServer.call(pid, {:register_tool_workers, [{make_ref(), worker_pid}]})
+
+      assert :ok = Native.abort(pid)
+      assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, _reason}, 1_000
+
+      send(worker_pid, {release_ref, :release})
+      refute_receive :abort_nil_task_worker_continued, 50
+      refute File.exists?(marker_path)
+    end
+
+    test "new_session stops concurrent tool workers", %{tmp_dir: dir} do
+      test_pid = self()
+      marker_path = Path.join(dir, "new-session-worker-continued.txt")
+      release_ref = make_ref()
+      call_count = :counters.new(1, [:atomics])
+
+      blocking_tool =
+        ReqLLM.Tool.new!(
+          name: "new_session_blocking_tool",
+          description: "Blocks until the test releases it",
+          parameter_schema: [],
+          callback: fn _args ->
+            send(test_pid, {:new_session_blocking_tool_started, self()})
+
+            receive do
+              {^release_ref, :release} ->
+                File.write!(marker_path, "continued")
+                send(test_pid, :new_session_blocking_tool_continued)
+                {:ok, "continued"}
+            after
+              5_000 ->
+                {:error, "blocking tool timed out"}
+            end
+          end
+        )
+
+      client = fn _model, _messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          case count do
+            0 ->
+              [
+                ReqLLM.StreamChunk.tool_call("new_session_blocking_tool", %{}, %{
+                  id: "tc_new_session_blocking",
+                  index: 0
+                }),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+              ]
+
+            _ ->
+              [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, tools: [blocking_tool])
+
+      assert :ok = Native.send_prompt(pid, "Run the blocking tool")
+      assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
+      assert_receive {:new_session_blocking_tool_started, worker_pid}, 1_000
+      worker_ref = Process.monitor(worker_pid)
+
+      assert :ok = Native.new_session(pid)
+      assert {:ok, %{is_streaming: false}} = Native.get_state(pid)
+      assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, _reason}, 1_000
+
+      send(worker_pid, {release_ref, :release})
+      refute_receive :new_session_blocking_tool_continued, 50
+      refute File.exists?(marker_path)
     end
   end
 

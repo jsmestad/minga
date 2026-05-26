@@ -51,11 +51,10 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.MCP.Registry, as: MCPRegistry
   alias MingaAgent.MCP.ServerConfig, as: MCPServerConfig
   alias MingaAgent.Memory
-  alias MingaAgent.ProjectView
-  alias MingaAgent.ToolRouter
   alias MingaAgent.ModelCatalog
   alias MingaAgent.ModelLimits
   alias MingaAgent.ProjectView
+  alias MingaAgent.ToolRouter
   alias MingaAgent.Retry
   alias MingaAgent.Session
   alias MingaAgent.Skills
@@ -184,7 +183,8 @@ defmodule MingaAgent.Providers.Native do
           mcp_enabled_override: boolean() | nil,
           mcp_errors: %{String.t() => String.t()},
           mcp_registry: MCPRegistry.t() | nil,
-          read_only?: boolean()
+          read_only?: boolean(),
+          tool_workers: %{reference() => pid()}
         }
 
   # ── Provider callbacks ──────────────────────────────────────────────────────
@@ -429,7 +429,8 @@ defmodule MingaAgent.Providers.Native do
       mcp_enabled_override: mcp_enabled_override,
       mcp_errors: %{},
       mcp_registry: mcp_registry,
-      read_only?: read_only?
+      read_only?: read_only?,
+      tool_workers: %{}
     }
 
     Minga.Log.info(:agent, "[Agent.Native] started with model=#{model} root=#{project_root}")
@@ -518,7 +519,8 @@ defmodule MingaAgent.Providers.Native do
   end
 
   def handle_call(:abort, _from, %{task: nil} = state) do
-    {:reply, :ok, state}
+    stop_registered_tool_workers(state.tool_workers)
+    {:reply, :ok, %{state | tool_workers: %{}}}
   end
 
   def handle_call(:abort, _from, state) do
@@ -526,8 +528,9 @@ defmodule MingaAgent.Providers.Native do
     # (which traps exits) can terminate cleanly via its terminate/2
     # callback. :brutal_kill sends an untrappable :kill signal that
     # causes OTP to log the StreamServer's state as an [error].
+    stop_registered_tool_workers(state.tool_workers)
     Task.shutdown(state.task, 150)
-    state = %{state | task: nil, streaming: false}
+    state = %{state | task: nil, streaming: false, tool_workers: %{}}
     Minga.Log.info(:agent, "[Agent.Native] aborted current operation")
     {:reply, :ok, state}
   end
@@ -619,7 +622,9 @@ defmodule MingaAgent.Providers.Native do
   end
 
   def handle_call(:new_session, _from, state) do
-    # Gracefully stop any running task (see :abort handler comment)
+    # Gracefully stop any running task and registered workers (see :abort handler comment)
+    stop_registered_tool_workers(state.tool_workers)
+
     if state.task do
       Task.shutdown(state.task, 150)
     end
@@ -627,7 +632,15 @@ defmodule MingaAgent.Providers.Native do
     system_prompt = build_system_prompt(state.project_root, state.active_skills)
     context = Context.new([Context.system(system_prompt)])
 
-    state = %{state | context: context, task: nil, streaming: false, session_cost: 0.0}
+    state = %{
+      state
+      | context: context,
+        task: nil,
+        streaming: false,
+        session_cost: 0.0,
+        tool_workers: %{}
+    }
+
     Minga.Log.info(:agent, "[Agent.Native] new session started")
 
     {:reply, :ok, state}
@@ -814,6 +827,15 @@ defmodule MingaAgent.Providers.Native do
     {:reply, {:ok, budget}, state}
   end
 
+  def handle_call({:register_tool_workers, workers}, _from, state) when is_list(workers) do
+    tool_workers =
+      Enum.reduce(workers, state.tool_workers, fn {monitor_ref, pid}, acc ->
+        Map.put(acc, monitor_ref, pid)
+      end)
+
+    {:reply, :ok, %{state | tool_workers: tool_workers}}
+  end
+
   def handle_call({:set_max_cost, amount}, _from, state) when is_number(amount) and amount > 0 do
     Minga.Log.info(:agent, "[Agent.Native] cost budget set to $#{Float.round(amount + 0.0, 2)}")
     {:reply, :ok, %{state | max_cost: amount + 0.0}}
@@ -844,44 +866,53 @@ defmodule MingaAgent.Providers.Native do
     {:noreply, %{state | interrupted: true}}
   end
 
+  def handle_info({:unregister_tool_workers, monitor_refs}, state) when is_list(monitor_refs) do
+    {:noreply, %{state | tool_workers: Map.drop(state.tool_workers, monitor_refs)}}
+  end
+
   def handle_info({ref, :ok}, %{task: %Task{ref: ref}} = state) do
     # Task completed normally
     Process.demonitor(ref, [:flush])
-    {:noreply, %{state | task: nil, streaming: false}}
+    {:noreply, %{state | task: nil, streaming: false, tool_workers: %{}}}
   end
 
   def handle_info({ref, {:error, :stream_interrupted}}, %{task: %Task{ref: ref}} = state) do
     # Stream was interrupted but partial response was preserved
     Process.demonitor(ref, [:flush])
-    {:noreply, %{state | task: nil, streaming: false, interrupted: true}}
+    stop_registered_tool_workers(state.tool_workers)
+    {:noreply, %{state | task: nil, streaming: false, interrupted: true, tool_workers: %{}}}
   end
 
   def handle_info({ref, {:error, :turn_limit_reached}}, %{task: %Task{ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
-    {:noreply, %{state | task: nil, streaming: false, interrupted: true}}
+    stop_registered_tool_workers(state.tool_workers)
+    {:noreply, %{state | task: nil, streaming: false, interrupted: true, tool_workers: %{}}}
   end
 
   def handle_info({ref, {:error, :cost_limit_reached}}, %{task: %Task{ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
-    {:noreply, %{state | task: nil, streaming: false}}
+    stop_registered_tool_workers(state.tool_workers)
+    {:noreply, %{state | task: nil, streaming: false, tool_workers: %{}}}
   end
 
   def handle_info({ref, {:error, reason}}, %{task: %Task{ref: ref}} = state) do
     # Task completed with an error
     Process.demonitor(ref, [:flush])
+    stop_registered_tool_workers(state.tool_workers)
     formatted = format_error(reason)
     Minga.Log.error(:agent, "[Agent.Native] agent loop error: #{formatted}")
     notify(state.subscriber, %Event.Error{message: formatted})
     notify(state.subscriber, %Event.AgentEnd{usage: nil})
-    {:noreply, %{state | task: nil, streaming: false}}
+    {:noreply, %{state | task: nil, streaming: false, tool_workers: %{}}}
   end
 
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{task: %Task{ref: ref}} = state) do
     # Task crashed
+    stop_registered_tool_workers(state.tool_workers)
     Minga.Log.error(:agent, "[Agent.Native] agent task crashed: #{inspect(reason)}")
     notify(state.subscriber, %Event.Error{message: "Agent task crashed: #{inspect(reason)}"})
     notify(state.subscriber, %Event.AgentEnd{usage: nil})
-    {:noreply, %{state | task: nil, streaming: false}}
+    {:noreply, %{state | task: nil, streaming: false, tool_workers: %{}}}
   end
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, %{fork_store: pid} = state)
@@ -940,6 +971,7 @@ defmodule MingaAgent.Providers.Native do
 
   @impl true
   def terminate(reason, state) do
+    stop_registered_tool_workers(state.tool_workers)
     cleanup_fork_store(state.fork_store)
     cleanup_changeset(state.changeset, reason)
     cleanup_mcp(state.mcp_registry)
@@ -1568,48 +1600,278 @@ defmodule MingaAgent.Providers.Native do
   defp execute_tools(lctx, context, tool_calls, available_tools) do
     initial_mode = approval_mode(lctx.config)
 
-    {final_ctx, _mode} =
-      Enum.reduce(tool_calls, {context, initial_mode}, fn tool_call, {ctx, approval_mode} ->
-        before_content = capture_file_before(lctx, tool_call)
+    baselines = capture_tool_baselines(tool_calls, lctx)
 
-        {result_text, is_error, new_mode} =
-          execute_with_approval(
-            lctx.provider_pid,
-            lctx.session_pid,
-            tool_call,
-            available_tools,
-            approval_mode,
-            lctx.config,
-            lctx.hook_runner
-          )
-
-        send(
-          lctx.provider_pid,
-          {:agent_event,
-           %Event.ToolEnd{
-             tool_call_id: tool_call.id,
-             name: tool_call.name,
-             result: result_text,
-             is_error: is_error
-           }}
-        )
-
-        dispatch_post_tool_use(tool_call, result_text, is_error, lctx.config)
-
-        maybe_emit_file_changed(lctx, tool_call, before_content, is_error)
-
-        meta = if is_error, do: %{is_error: true}, else: %{}
-
-        tool_result_msg =
-          Context.tool_result_message(tool_call.name, tool_call.id, result_text, meta)
-
-        {Context.append(ctx, tool_result_msg), new_mode}
+    {approval_baselines, concurrent_baselines} =
+      Enum.split_with(baselines, fn {_index, tool_call, _before_content} ->
+        tool_requires_approval?(tool_call, lctx.config, initial_mode)
       end)
 
-    final_ctx
+    concurrent_tasks =
+      start_concurrent_tool_tasks(lctx, concurrent_baselines, available_tools, initial_mode)
+
+    try do
+      approval_results =
+        Enum.map(approval_baselines, fn {index, tool_call, before_content} ->
+          {index,
+           execute_tool_call(lctx, tool_call, before_content, available_tools, initial_mode)}
+        end)
+
+      concurrent_results = await_concurrent_tool_tasks(lctx.provider_pid, concurrent_tasks)
+
+      (approval_results ++ concurrent_results)
+      |> Enum.sort_by(fn {index, _result} -> index end)
+      |> Enum.reduce(context, fn {_index, result}, ctx ->
+        Context.append(ctx, tool_result_message(result))
+      end)
+    after
+      cleanup_concurrent_tool_tasks(lctx.provider_pid, concurrent_tasks)
+    end
   end
 
   @typep approval_mode :: :none | :ask | :ask_all
+  @typep tool_baseline :: {non_neg_integer(), map(), String.t() | nil}
+  @typep unstarted_tool_task ::
+           {non_neg_integer(), map(), pid(), reference(), reference(), reference()}
+  @typep tool_task :: {non_neg_integer(), map(), pid(), reference(), reference()}
+  @typep tool_execution_result :: %{
+           required(:tool_call) => map(),
+           required(:result_text) => String.t(),
+           required(:is_error) => boolean()
+         }
+
+  @spec capture_tool_baselines([map()], loop_ctx()) :: [tool_baseline()]
+  defp capture_tool_baselines(tool_calls, lctx) do
+    tool_calls
+    |> Enum.with_index()
+    |> Enum.map(fn {tool_call, index} ->
+      {index, tool_call, capture_file_before(lctx, tool_call)}
+    end)
+  end
+
+  @spec start_concurrent_tool_tasks(
+          loop_ctx(),
+          [tool_baseline()],
+          [ReqLLM.Tool.t()],
+          approval_mode()
+        ) :: [tool_task()]
+  defp start_concurrent_tool_tasks(lctx, baselines, available_tools, approval_mode) do
+    parent = self()
+
+    tasks =
+      Enum.map(baselines, fn {index, tool_call, before_content} ->
+        result_ref = make_ref()
+        start_ref = make_ref()
+
+        pid =
+          spawn_link(fn ->
+            receive do
+              {^start_ref, :run} ->
+                result =
+                  execute_tool_call(
+                    lctx,
+                    tool_call,
+                    before_content,
+                    available_tools,
+                    approval_mode
+                  )
+
+                send(parent, {result_ref, :tool_result, result})
+            end
+          end)
+
+        monitor_ref = Process.monitor(pid)
+
+        {index, tool_call, pid, monitor_ref, result_ref, start_ref}
+      end)
+
+    start_registered_tool_tasks(lctx.provider_pid, tasks)
+  end
+
+  @spec start_registered_tool_tasks(pid(), [unstarted_tool_task()]) :: [tool_task()]
+  defp start_registered_tool_tasks(provider_pid, tasks) do
+    case register_tool_workers(provider_pid, tasks) do
+      :ok ->
+        Enum.map(tasks, fn {index, tool_call, pid, monitor_ref, result_ref, start_ref} ->
+          Process.unlink(pid)
+          send(pid, {start_ref, :run})
+          {index, tool_call, pid, monitor_ref, result_ref}
+        end)
+
+      {:error, reason} ->
+        cleanup_unstarted_tool_tasks(provider_pid, tasks)
+        exit({:tool_worker_registration_failed, reason})
+    end
+  catch
+    kind, reason ->
+      cleanup_unstarted_tool_tasks(provider_pid, tasks)
+      :erlang.raise(kind, reason, __STACKTRACE__)
+  end
+
+  @spec await_concurrent_tool_tasks(pid(), [tool_task()]) :: [
+          {non_neg_integer(), tool_execution_result()}
+        ]
+  defp await_concurrent_tool_tasks(provider_pid, tasks) do
+    Enum.map(tasks, fn {index, tool_call, _pid, monitor_ref, result_ref} ->
+      {index, await_tool_process(provider_pid, tool_call, monitor_ref, result_ref)}
+    end)
+  end
+
+  @spec register_tool_workers(pid(), [unstarted_tool_task()]) :: :ok | {:error, term()}
+  defp register_tool_workers(provider_pid, tasks) do
+    workers =
+      Enum.map(tasks, fn {_index, _tool_call, pid, monitor_ref, _result_ref, _start_ref} ->
+        {monitor_ref, pid}
+      end)
+
+    GenServer.call(provider_pid, {:register_tool_workers, workers})
+  catch
+    :exit, reason -> {:error, {:exit, reason}}
+  end
+
+  @spec cleanup_unstarted_tool_tasks(pid(), [unstarted_tool_task()]) :: :ok
+  defp cleanup_unstarted_tool_tasks(provider_pid, tasks) do
+    monitor_refs =
+      Enum.map(tasks, fn {_index, _tool_call, pid, monitor_ref, _result_ref, _start_ref} ->
+        Process.unlink(pid)
+        Process.demonitor(monitor_ref, [:flush])
+        stop_tool_worker(pid)
+        monitor_ref
+      end)
+
+    unregister_tool_workers(provider_pid, monitor_refs)
+    :ok
+  end
+
+  @spec cleanup_concurrent_tool_tasks(pid(), [tool_task()]) :: :ok
+  defp cleanup_concurrent_tool_tasks(provider_pid, tasks) do
+    monitor_refs =
+      Enum.map(tasks, fn {_index, _tool_call, pid, monitor_ref, _result_ref} ->
+        Process.unlink(pid)
+        Process.demonitor(monitor_ref, [:flush])
+        stop_tool_worker(pid)
+        monitor_ref
+      end)
+
+    unregister_tool_workers(provider_pid, monitor_refs)
+    :ok
+  end
+
+  @spec unregister_tool_workers(pid(), [reference()]) :: :ok
+  defp unregister_tool_workers(_provider_pid, []), do: :ok
+
+  defp unregister_tool_workers(provider_pid, monitor_refs) do
+    send(provider_pid, {:unregister_tool_workers, monitor_refs})
+    :ok
+  end
+
+  @spec stop_registered_tool_workers(%{reference() => pid()}) :: :ok
+  defp stop_registered_tool_workers(tool_workers) when is_map(tool_workers) do
+    Enum.each(tool_workers, fn {_monitor_ref, pid} ->
+      stop_tool_worker(pid)
+    end)
+
+    :ok
+  end
+
+  @spec stop_tool_worker(pid()) :: :ok
+  defp stop_tool_worker(pid) when is_pid(pid) do
+    if Process.alive?(pid) do
+      Process.exit(pid, :kill)
+    end
+
+    :ok
+  end
+
+  @spec await_tool_process(pid(), map(), reference(), reference()) :: tool_execution_result()
+  defp await_tool_process(provider_pid, tool_call, monitor_ref, result_ref) do
+    receive do
+      {^result_ref, :tool_result, result} ->
+        Process.demonitor(monitor_ref, [:flush])
+        result
+
+      {:DOWN, ^monitor_ref, :process, _pid, reason} ->
+        receive_tool_result_after_down(provider_pid, tool_call, result_ref, reason)
+    end
+  end
+
+  @spec receive_tool_result_after_down(pid(), map(), reference(), term()) ::
+          tool_execution_result()
+  defp receive_tool_result_after_down(provider_pid, tool_call, result_ref, reason) do
+    receive do
+      {^result_ref, :tool_result, result} ->
+        result
+    after
+      0 ->
+        tool_task_failed(provider_pid, tool_call, reason)
+    end
+  end
+
+  @spec tool_task_failed(pid(), map(), term()) :: tool_execution_result()
+  defp tool_task_failed(provider_pid, tool_call, reason) do
+    result_text = "Tool task failed: #{inspect(reason)}"
+    emit_tool_end(provider_pid, tool_call, result_text, true)
+    %{tool_call: tool_call, result_text: result_text, is_error: true}
+  end
+
+  @spec execute_tool_call(
+          loop_ctx(),
+          map(),
+          String.t() | nil,
+          [ReqLLM.Tool.t()],
+          approval_mode()
+        ) :: tool_execution_result()
+  defp execute_tool_call(lctx, tool_call, before_content, available_tools, approval_mode) do
+    {result_text, is_error, _new_mode} =
+      execute_with_approval(
+        lctx.provider_pid,
+        lctx.session_pid,
+        tool_call,
+        available_tools,
+        approval_mode,
+        lctx.config,
+        lctx.hook_runner
+      )
+
+    emit_tool_end(lctx.provider_pid, tool_call, result_text, is_error)
+    dispatch_post_tool_use(tool_call, result_text, is_error, lctx.config)
+
+    maybe_emit_file_changed(lctx, tool_call, before_content, is_error)
+
+    %{tool_call: tool_call, result_text: result_text, is_error: is_error}
+  rescue
+    e ->
+      result_text = "Tool '#{tool_call.name}' crashed: #{Exception.message(e)}"
+      emit_tool_end(lctx.provider_pid, tool_call, result_text, true)
+      %{tool_call: tool_call, result_text: result_text, is_error: true}
+  catch
+    kind, reason ->
+      result_text = "Tool '#{tool_call.name}' failed: #{inspect({kind, reason})}"
+      emit_tool_end(lctx.provider_pid, tool_call, result_text, true)
+      %{tool_call: tool_call, result_text: result_text, is_error: true}
+  end
+
+  @spec emit_tool_end(pid(), map(), String.t(), boolean()) :: :ok
+  defp emit_tool_end(provider_pid, tool_call, result_text, is_error) do
+    send(
+      provider_pid,
+      {:agent_event,
+       %Event.ToolEnd{
+         tool_call_id: tool_call.id,
+         name: tool_call.name,
+         result: result_text,
+         is_error: is_error
+       }}
+    )
+
+    :ok
+  end
+
+  @spec tool_result_message(tool_execution_result()) :: ReqLLM.Message.t()
+  defp tool_result_message(%{tool_call: tool_call, result_text: result_text, is_error: is_error}) do
+    meta = if is_error, do: %{is_error: true}, else: %{}
+    Context.tool_result_message(tool_call.name, tool_call.id, result_text, meta)
+  end
 
   @spec execute_with_approval(
           pid(),
@@ -1758,6 +2020,24 @@ defmodule MingaAgent.Providers.Native do
 
       {result, is_error, :ask}
     end
+  end
+
+  @spec tool_requires_approval?(map(), AgentConfig.t(), approval_mode()) :: boolean()
+  defp tool_requires_approval?(tool_call, config, mode) do
+    case tool_permission(tool_call.name, config) do
+      :ask -> true
+      :allow -> false
+      :deny -> false
+      nil -> global_mode_requires_approval?(tool_call, mode)
+    end
+  end
+
+  @spec global_mode_requires_approval?(map(), approval_mode()) :: boolean()
+  defp global_mode_requires_approval?(_tool_call, :none), do: false
+  defp global_mode_requires_approval?(_tool_call, :ask_all), do: true
+
+  defp global_mode_requires_approval?(tool_call, :ask) do
+    Tools.destructive?(tool_call.name, tool_call.arguments || %{})
   end
 
   # Looks up per-tool permission from config. Returns :allow, :deny, :ask, or nil
