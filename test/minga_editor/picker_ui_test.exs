@@ -29,6 +29,14 @@ defmodule MingaEditor.PickerUITest do
     Theme.get!(:doom_one).picker
   end
 
+  defp content_draws(draws, box_row, box_h, viewport_cols \\ 80) do
+    Enum.filter(draws, fn {row, col, text, _style} ->
+      in_box_rows = row >= box_row and row < box_row + box_h
+      is_backdrop = col == 0 and String.length(text) == viewport_cols
+      in_box_rows and not is_backdrop
+    end)
+  end
+
   defp marked_buffer_picker do
     [
       %Item{id: 0, label: "alpha"},
@@ -948,10 +956,14 @@ defmodule MingaEditor.PickerUITest do
       box_row = div(24 - box_h, 2)
       box_col = div(80 - box_w, 2)
 
-      Enum.each(draws, fn {row, col, _text, _style} ->
-        assert row >= box_row and row < box_row + box_h,
-               "draw row #{row} outside box (#{box_row}..#{box_row + box_h - 1})"
+      box_draws = content_draws(draws, box_row, box_h)
+      rows = Enum.map(box_draws, fn {row, _col, _text, _style} -> row end)
 
+      assert length(box_draws) > 0
+      assert Enum.min(rows) == box_row
+      assert Enum.max(rows) == box_row + box_h - 1
+
+      Enum.each(box_draws, fn {_row, col, _text, _style} ->
         assert col >= box_col and col < box_col + box_w,
                "draw col #{col} outside box (#{box_col}..#{box_col + box_w - 1})"
       end)
@@ -972,10 +984,12 @@ defmodule MingaEditor.PickerUITest do
       }
 
       {draws, {cursor_row, _cursor_col}} = PickerUI.render(input)
-      rows = Enum.map(draws, fn {row, _col, _text, _style} -> row end)
 
       box_h = length(items) + 3
       box_row = div(24 - box_h, 2)
+
+      box_draws = content_draws(draws, box_row, box_h)
+      rows = Enum.map(box_draws, fn {row, _col, _text, _style} -> row end)
 
       assert Enum.min(rows) == box_row
       assert Enum.max(rows) == box_row + box_h - 1
@@ -1002,18 +1016,38 @@ defmodule MingaEditor.PickerUITest do
       }
 
       {draws, {cursor_row, _cursor_col}} = PickerUI.render(input)
-      rows = Enum.map(draws, fn {row, _col, _text, _style} -> row end)
-      texts = Enum.map(draws, fn {_row, _col, text, _style} -> text end)
 
       max_height = max(div(24 * 7, 10), 5)
       box_h = min(length(items) + 3, max_height)
       box_row = div(24 - box_h, 2)
+
+      box_draws = content_draws(draws, box_row, box_h)
+      rows = Enum.map(box_draws, fn {row, _col, _text, _style} -> row end)
+      texts = Enum.map(box_draws, fn {_row, _col, text, _style} -> text end)
 
       assert Enum.min(rows) == box_row
       assert Enum.max(rows) == box_row + box_h - 1
       assert cursor_row == box_row + box_h - 2
       assert Enum.any?(texts, &String.contains?(&1, "model-20"))
       refute Enum.any?(texts, &String.contains?(&1, "model-1 "))
+    end
+
+    test "backdrop draws cover the full viewport when picker_backdrop is enabled" do
+      items = [%Item{id: "1", label: "item"}]
+      picker = Picker.new(items, title: "Test", max_visible: 5)
+
+      input = %RenderInput{
+        picker_state: %PickerState{picker: picker, source: nil, layout: :centered},
+        theme_picker: theme_picker(),
+        viewport: Viewport.new(24, 80)
+      }
+
+      {draws, _cursor} = PickerUI.render(input)
+
+      assert Enum.any?(draws, fn {row, col, text, _style} ->
+               row == 0 and col == 0 and String.length(text) == 80
+             end),
+             "expected a full-width backdrop draw at row 0"
     end
 
     test "cursor is inside the floating window (not at viewport bottom)" do

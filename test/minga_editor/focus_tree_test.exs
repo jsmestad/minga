@@ -213,12 +213,20 @@ defmodule MingaEditor.FocusTreeTest do
           viewport: Viewport.new(24, 80)
         })
 
-      rendered_rows = Enum.map(draws, fn {row, _col, _text, _style} -> row end)
-      rendered_height = Enum.max(rendered_rows) - Enum.min(rendered_rows) + 1
-
       tree = FocusTree.from_state(state)
       picker_backdrop = Enum.find(tree.children, &(&1.content_type == :picker_backdrop))
       picker_node = hd(picker_backdrop.children)
+      {box_row, _box_col, _box_w, box_h} = picker_node.rect
+
+      box_draws =
+        Enum.filter(draws, fn {row, col, text, _style} ->
+          in_box = row >= box_row and row < box_row + box_h
+          is_backdrop = col == 0 and String.length(text) == 80
+          in_box and not is_backdrop
+        end)
+
+      rendered_rows = Enum.map(box_draws, fn {row, _col, _text, _style} -> row end)
+      rendered_height = Enum.max(rendered_rows) - Enum.min(rendered_rows) + 1
 
       assert elem(picker_node.rect, 3) == rendered_height
     end
