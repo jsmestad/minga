@@ -95,8 +95,10 @@ jobs:
           version: 0.16.0
 
       - name: Install Neovim
+        env:
+          NEOVIM_VERSION: v0.12.2
         run: |
-          curl -LO https://github.com/neovim/neovim/releases/download/v0.12.2/nvim-linux-x86_64.tar.gz
+          curl --fail --location --retry 5 --retry-delay 10 --retry-all-errors --output nvim-linux-x86_64.tar.gz "https://github.com/neovim/neovim/releases/download/${NEOVIM_VERSION}/nvim-linux-x86_64.tar.gz"
           tar xzf nvim-linux-x86_64.tar.gz
           echo "$PWD/nvim-linux-x86_64/bin" >> $GITHUB_PATH
 
