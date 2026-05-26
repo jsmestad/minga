@@ -567,13 +567,13 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
           non_neg_integer() | nil
         ) :: [DisplayList.draw()]
   defp fold_gutter_indicator({:fold_start, _}, %RenderPosition{} = pos, colors, _starts, _line) do
-    fold_indicator_draw(pos, "▸", colors)
+    fold_indicator_draw(pos, "▶", colors)
   end
 
   defp fold_gutter_indicator(:normal, %RenderPosition{} = pos, colors, starts, buf_line)
        when is_integer(buf_line) do
     if Map.has_key?(starts, buf_line) do
-      fold_indicator_draw(pos, "▾", colors)
+      fold_indicator_draw(pos, "▼", colors)
     else
       []
     end
@@ -588,7 +588,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
          _starts,
          _line
        ) do
-    fold_indicator_draw(pos, "▸", colors)
+    fold_indicator_draw(pos, "▶", colors)
   end
 
   defp fold_gutter_indicator({:virtual_line, _}, _pos, _colors, _starts, _line), do: []
