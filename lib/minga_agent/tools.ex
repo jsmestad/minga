@@ -15,6 +15,7 @@ defmodule MingaAgent.Tools do
   | `write_file`      | Write content to a file (creates or overwrites)      |
   | `edit_file`       | Replace exact text in a file                         |
   | `multi_edit_file` | Apply multiple edits to one file in a single call    |
+  | `apply_diff`      | Apply a unified diff to one file                     |
   | `delete_file`     | Delete a file                                        |
   | `list_directory`  | List files and directories at a path                 |
   | `find`            | Find files by name/glob pattern                      |
@@ -43,6 +44,7 @@ defmodule MingaAgent.Tools do
   alias MingaAgent.ProjectView
   alias MingaAgent.ToolRouter
   alias MingaAgent.Tools.DeleteFile
+  alias MingaAgent.Tools.ApplyDiff
   alias MingaAgent.Tools.DiagnosticFeedback
   alias MingaAgent.Tools.EditFile
   alias MingaAgent.Tools.Find
@@ -75,7 +77,7 @@ defmodule MingaAgent.Tools do
           parent_session: GenServer.server() | nil
         ]
 
-  @default_destructive_tools ~w(write_file edit_file multi_edit_file delete_file shell git_stage git_commit rename)
+  @default_destructive_tools ~w(write_file edit_file multi_edit_file apply_diff delete_file shell git_stage git_commit rename)
   @file_read_tools ~w(read_file list_directory find grep)
   @read_only_tools ~w(read_file list_directory find grep git_status git_diff git_log diagnostics definition references hover document_symbols workspace_symbols describe_runtime describe_tools produce_rewrite)
   @max_symlink_depth 40
@@ -138,6 +140,7 @@ defmodule MingaAgent.Tools do
       write_file(root, router_ctx),
       edit_file(root, router_ctx),
       multi_edit_file(root, router_ctx),
+      apply_diff(root, router_ctx),
       delete_file(root, router_ctx),
       list_directory(root, router_ctx),
       find(root, router_ctx),
@@ -396,6 +399,46 @@ defmodule MingaAgent.Tools do
           apply_multi_edit_via_router(router_ctx, path, edits)
         else
           case MultiEditFile.execute(path, edits) do
+            {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
+            error -> error
+          end
+        end
+      end
+    )
+  end
+
+  @spec apply_diff(String.t(), MingaAgent.ToolRouter.context()) :: Tool.t()
+  defp apply_diff(root, router_ctx) do
+    Tool.new!(
+      name: "apply_diff",
+      description: """
+      Apply a unified diff to a single file. The diff must use standard
+      unified diff hunks (`@@ -start,count +start,count @@`) with context
+      lines. Context is validated against the current file content, with a
+      small fuzz window for hunks whose line numbers drifted by a few lines.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "path" => %{
+            "type" => "string",
+            "description" => "Path to the file, relative to the project root"
+          },
+          "diff" => %{
+            "type" => "string",
+            "description" => "Unified diff content to apply to the file"
+          }
+        },
+        "required" => ["path", "diff"]
+      },
+      callback: fn args ->
+        path = resolve_and_validate_path!(root, args["path"])
+        diff = args["diff"] || ""
+
+        if ToolRouter.routing_configured?(router_ctx) do
+          apply_diff_via_router(router_ctx, path, diff)
+        else
+          case ApplyDiff.execute(path, diff) do
             {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
             error -> error
           end
@@ -1469,6 +1512,50 @@ defmodule MingaAgent.Tools do
 
   # Applies multiple edits to a file through the tool router by reading,
   # applying each edit sequentially, then writing the result back.
+  @spec apply_diff_via_router(MingaAgent.ToolRouter.context(), String.t(), String.t()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp apply_diff_via_router(router_ctx, path, diff) do
+    case ToolRouter.read_file(router_ctx, path) do
+      {:ok, content} ->
+        commit_apply_diff(router_ctx, path, ApplyDiff.apply_to_content(content, diff))
+
+      {:error, reason} ->
+        {:error, "failed to read #{path}: #{inspect(reason)}"}
+    end
+  end
+
+  @spec commit_apply_diff(
+          ToolRouter.context(),
+          String.t(),
+          {:ok, ApplyDiff.apply_result()} | {:error, String.t()}
+        ) :: {:ok, String.t()} | {:error, String.t()}
+  defp commit_apply_diff(router_ctx, path, {:ok, %{content: final_content, hunks: hunk_count}}) do
+    case ToolRouter.write_file(router_ctx, path, final_content) do
+      :ok ->
+        msg =
+          append_workspace_context(
+            router_ctx,
+            "applied #{hunk_count} diff hunk(s) to #{path} (via #{route_name(router_ctx)})"
+          )
+
+        {:ok, maybe_append_diagnostics(path, msg)}
+
+      :passthrough ->
+        case WriteFile.execute(path, final_content) do
+          {:ok, _msg} ->
+            {:ok, maybe_append_diagnostics(path, "applied #{hunk_count} diff hunk(s) to #{path}")}
+
+          {:error, _message} = error ->
+            error
+        end
+
+      {:error, reason} ->
+        {:error, "failed to write #{path}: #{inspect(reason)}"}
+    end
+  end
+
+  defp commit_apply_diff(_router_ctx, _path, {:error, _message} = error), do: error
+
   @spec apply_multi_edit_via_router(MingaAgent.ToolRouter.context(), String.t(), [map()]) ::
           {:ok, String.t()} | {:error, String.t()}
   defp apply_multi_edit_via_router(router_ctx, path, edits) do

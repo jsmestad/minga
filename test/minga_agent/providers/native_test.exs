@@ -611,6 +611,62 @@ defmodule MingaAgent.Providers.NativeTest do
       refute File.exists?(absolute_path)
     end
 
+    test "tracks apply_diff as a file change through fork routing for an open buffer", %{
+      tmp_dir: dir
+    } do
+      path = Path.join(dir, "patch-me.txt")
+      absolute_path = path
+      File.write!(absolute_path, "one\ntwo\n")
+      buffer = start_supervised!({BufferProcess, file_path: absolute_path})
+      diff = "@@ -1,2 +1,2 @@\n one\n-two\n+TWO\n"
+      call_count = :counters.new(1, [:atomics])
+
+      client = fn _model, _messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          if count == 0 do
+            [
+              ReqLLM.StreamChunk.tool_call("apply_diff", %{"path" => path, "diff" => diff}, %{
+                id: "tc_apply_diff",
+                index: 0
+              }),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+            ]
+          else
+            [
+              ReqLLM.StreamChunk.text("patched"),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+            ]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: client,
+          tools: nil,
+          config: agent_config(tool_approval: :none)
+        )
+
+      assert :ok = Native.send_prompt(pid, "Patch the file")
+      events = collect_events(1_000)
+
+      assert Enum.any?(events, &match?(%Event.ToolStart{name: "apply_diff"}, &1))
+      assert Enum.any?(events, &match?(%Event.ToolEnd{name: "apply_diff", is_error: false}, &1))
+
+      file_changed = Enum.find(events, &match?(%Event.ToolFileChanged{}, &1))
+      assert file_changed != nil
+      assert file_changed.path == absolute_path
+      assert file_changed.before_content == "one\ntwo\n"
+      assert file_changed.after_content == "one\nTWO\n"
+      assert BufferProcess.content(buffer) == "one\ntwo\n"
+      assert File.read!(absolute_path) == "one\ntwo\n"
+    end
+
     test "passes is_error metadata on tool result message when tool fails", %{tmp_dir: dir} do
       test_pid = self()
       call_count = :counters.new(1, [:atomics])

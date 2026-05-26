@@ -13,6 +13,7 @@ defmodule MingaAgent.ToolsReadOnlyTest do
     refute "write_file" in names
     refute "edit_file" in names
     refute "multi_edit_file" in names
+    refute "apply_diff" in names
     refute "delete_file" in names
     refute "shell" in names
     refute "subagent" in names

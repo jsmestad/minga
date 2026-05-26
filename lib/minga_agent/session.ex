@@ -423,7 +423,7 @@ defmodule MingaAgent.Session do
   - `action`: `:created`, `:modified`, or `:deleted`
   - `timestamp`: monotonic timestamp of the last touch
 
-  Derived from tool call history (file_write, file_edit, multi_edit_file).
+  Derived from tool call history (file_write, file_edit, multi_edit_file, apply_diff).
   """
   @spec touched_files(GenServer.server()) :: [file_touch()]
   def touched_files(session) do

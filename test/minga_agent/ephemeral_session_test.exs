@@ -68,6 +68,7 @@ defmodule MingaAgent.EphemeralSessionTest do
     refute "git_status" in names
     refute "write_file" in names
     refute "multi_edit_file" in names
+    refute "apply_diff" in names
     refute "shell" in names
     refute "delete_file" in names
   end

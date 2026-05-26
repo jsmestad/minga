@@ -39,7 +39,8 @@ defmodule MingaAgent.Config do
 
     # Tool approval and hooks
     tool_approval: :destructive,
-    destructive_tools: ~w(write_file edit_file multi_edit_file shell git_stage git_commit rename),
+    destructive_tools:
+      ~w(write_file edit_file multi_edit_file apply_diff delete_file shell git_stage git_commit rename),
     tool_permissions: nil,
     agent_hooks: [],
 
@@ -147,7 +148,7 @@ defmodule MingaAgent.Config do
       destructive_tools:
         get(
           :agent_destructive_tools,
-          ~w(write_file edit_file multi_edit_file shell git_stage git_commit rename)
+          ~w(write_file edit_file multi_edit_file apply_diff delete_file shell git_stage git_commit rename)
         ),
       tool_permissions: get(:agent_tool_permissions, nil),
       agent_hooks: normalize_hooks(get(:agent_hooks, [])),

@@ -34,7 +34,7 @@ defmodule MingaAgent.ConfigTest do
       assert config.tool_approval == :destructive
 
       assert config.destructive_tools ==
-               ~w(write_file edit_file multi_edit_file delete_file shell git_stage git_commit rename)
+               ~w(write_file edit_file multi_edit_file apply_diff delete_file shell git_stage git_commit rename)
 
       assert config.agent_hooks == []
       assert config.prompt_cache == true

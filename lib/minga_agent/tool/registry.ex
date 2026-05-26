@@ -176,6 +176,7 @@ defmodule MingaAgent.Tool.Registry do
   defp categorize("write_file"), do: :filesystem
   defp categorize("edit_file"), do: :filesystem
   defp categorize("multi_edit_file"), do: :filesystem
+  defp categorize("apply_diff"), do: :filesystem
   defp categorize("list_directory"), do: :filesystem
   defp categorize("find"), do: :filesystem
   defp categorize("grep"), do: :filesystem

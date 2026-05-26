@@ -78,6 +78,18 @@ defmodule MingaAgent.ToolApprovalTest do
       assert "2 edit(s)" in preview.lines
     end
 
+    test "builds hunk-count preview for apply_diff tools" do
+      preview =
+        ToolApproval.build_preview("apply_diff", %{
+          "path" => "lib/a.ex",
+          "diff" => "@@ -1,1 +1,1 @@\n-old\n+new\n"
+        })
+
+      assert preview.kind == :target
+      assert preview.summary == "lib/a.ex"
+      assert "1 diff hunk(s)" in preview.lines
+    end
+
     test "builds target preview for git_stage tools" do
       preview = ToolApproval.build_preview("git_stage", %{"paths" => ["lib/a.ex", "mix.exs"]})
 

@@ -244,6 +244,7 @@ defmodule Minga.Config.OptionsTest do
         "write_file",
         "edit_file",
         "multi_edit_file",
+        "apply_diff",
         "delete_file",
         "shell",
         "git_stage",
