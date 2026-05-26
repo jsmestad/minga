@@ -20,6 +20,7 @@ defmodule MingaAgent.Tools do
   | `list_directory`  | List files and directories at a path                 |
   | `find`            | Find files by name/glob pattern                      |
   | `grep`            | Search file contents for a pattern                   |
+  | `fetch_url`       | Fetch a URL and return readable text content         |
   | `shell`           | Run a shell command in the project root              |
   | `git_status`      | Show changed files with structured status (read-only)|
   | `git_diff`        | Show unified diff for files or all changes (read-only)|
@@ -47,6 +48,7 @@ defmodule MingaAgent.Tools do
   alias MingaAgent.Tools.ApplyDiff
   alias MingaAgent.Tools.DiagnosticFeedback
   alias MingaAgent.Tools.EditFile
+  alias MingaAgent.Tools.FetchUrl
   alias MingaAgent.Tools.Find
   alias MingaAgent.Tools.Git, as: GitTools
   alias MingaAgent.Tools.Grep
@@ -79,7 +81,7 @@ defmodule MingaAgent.Tools do
 
   @default_destructive_tools ~w(write_file edit_file multi_edit_file apply_diff delete_file shell git_stage git_commit rename)
   @file_read_tools ~w(read_file list_directory find grep)
-  @read_only_tools ~w(read_file list_directory find grep git_status git_diff git_log diagnostics definition references hover document_symbols workspace_symbols describe_runtime describe_tools produce_rewrite)
+  @read_only_tools ~w(read_file list_directory find grep fetch_url git_status git_diff git_log diagnostics definition references hover document_symbols workspace_symbols describe_runtime describe_tools produce_rewrite)
   @max_symlink_depth 40
 
   @doc """
@@ -147,6 +149,7 @@ defmodule MingaAgent.Tools do
       list_directory(root, router_ctx),
       find(root, router_ctx),
       grep(root, router_ctx),
+      fetch_url(),
       shell(root, router_ctx),
       subagent(root, parent_session),
       git_status(root),
@@ -245,6 +248,36 @@ defmodule MingaAgent.Tools do
     opts = if args["offset"], do: [{:offset, args["offset"]} | opts], else: opts
     opts = if args["limit"], do: [{:limit, args["limit"]} | opts], else: opts
     opts
+  end
+
+  @spec fetch_url() :: Tool.t()
+  defp fetch_url do
+    Tool.new!(
+      name: "fetch_url",
+      description: """
+      Fetch a URL and return readable text content. HTML pages are converted to structured text with headings, lists, paragraphs, and code blocks preserved. Non-HTML text responses such as JSON, plain text, and XML are returned as-is. This is read-only and does not require approval.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "url" => %{
+            "type" => "string",
+            "description" => "HTTP or HTTPS URL to fetch"
+          },
+          "timeout_ms" => %{
+            "type" => "integer",
+            "description" =>
+              "Request timeout in milliseconds. Defaults to 10000 and is capped at 30000."
+          },
+          "max_bytes" => %{
+            "type" => "integer",
+            "description" => "Maximum bytes of extracted text to return. Defaults to 100000."
+          }
+        },
+        "required" => ["url"]
+      },
+      callback: &FetchUrl.execute/1
+    )
   end
 
   @spec write_file(String.t(), MingaAgent.ToolRouter.context()) :: Tool.t()

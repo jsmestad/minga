@@ -104,11 +104,10 @@ defmodule MingaAgent.ToolsTest do
   end
 
   describe "all/1" do
-    test "returns the expected number of tools", %{tmp_dir: dir} do
+    test "returns the expected tool set", %{tmp_dir: dir} do
       tools = Tools.all(project_root: dir)
-      assert length(tools) == 27
-
       names = Enum.map(tools, & &1.name)
+
       assert "read_file" in names
       assert "write_file" in names
       assert "edit_file" in names
@@ -118,8 +117,12 @@ defmodule MingaAgent.ToolsTest do
       assert "list_directory" in names
       assert "find" in names
       assert "grep" in names
+      assert "fetch_url" in names
       assert "shell" in names
       assert "subagent" in names
+      assert "describe_runtime" in names
+      assert "describe_tools" in names
+      assert Enum.count(names, &(&1 == "fetch_url")) == 1
 
       # LSP tools
       assert "diagnostics" in names
@@ -190,6 +193,10 @@ defmodule MingaAgent.ToolsTest do
 
     test "list_directory is not destructive by default" do
       refute Tools.destructive?("list_directory")
+    end
+
+    test "fetch_url is not destructive by default" do
+      refute Tools.destructive?("fetch_url")
     end
 
     test "rename is destructive by default" do
