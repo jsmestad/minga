@@ -57,6 +57,24 @@ final class WorkspaceState {
         flags & 0x01 != 0 || workspaces.contains(where: { $0.hasAttention })
     }
 
+    var shouldShowHeader: Bool {
+        guard hasCanonicalPayload else { return false }
+        guard let activeWorkspace else { return false }
+
+        return workspaces.count > 1 ||
+            activeWorkspace.isAgent ||
+            activeWorkspace.isCloseable ||
+            activeWorkspace.hasAttention ||
+            activeWorkspace.draftCount > 0 ||
+            activeWorkspace.conflictCount > 0 ||
+            activeWorkspace.runningBackgroundCount > 0 ||
+            backgroundRunningCount > 0 ||
+            backgroundDraftCount > 0 ||
+            backgroundConflictCount > 0 ||
+            backgroundAttentionCount > 0 ||
+            backgroundErrorCount > 0
+    }
+
     var backgroundWorkspaces: [WorkspaceSummaryEntry] {
         workspaces.filter { $0.id != activeWorkspaceId }
     }

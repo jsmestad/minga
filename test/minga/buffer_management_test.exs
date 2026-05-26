@@ -134,6 +134,36 @@ defmodule Minga.BufferManagementTest do
       assert active_content(ctx) == "some text"
     end
 
+    test "SPC b d closes the active scratch buffer when multiple scratch buffers are open" do
+      ctx = start_editor("")
+      send_keys_sync(ctx, "<SPC>bN")
+      send_keys_sync(ctx, "iHey there<Esc>")
+
+      assert active_content(ctx) == "Hey there"
+
+      send_keys_sync(ctx, "<SPC>bd")
+
+      assert active_content(ctx) == ""
+      refute status_msg(ctx) == "Cannot close the last window"
+    end
+
+    @tag :tmp_dir
+    test "SPC b d closes the active scratch buffer while the file tree is visible", %{
+      tmp_dir: tmp_dir
+    } do
+      ctx = start_editor("", project_root: tmp_dir)
+      send_keys_sync(ctx, "<SPC>op")
+      send_keys_sync(ctx, "<SPC>bN")
+      send_keys_sync(ctx, "iHey there<Esc>")
+
+      assert active_content(ctx) == "Hey there"
+
+      send_keys_sync(ctx, "<SPC>bd")
+
+      assert active_content(ctx) == ""
+      refute status_msg(ctx) == "Cannot close the last window"
+    end
+
     test "SPC b N creates an empty buffer" do
       ctx = start_editor("hello")
       send_keys_sync(ctx, "<SPC>bN")

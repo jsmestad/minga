@@ -144,6 +144,10 @@ struct ContentView: View {
         appState.isFullScreen ? 10 : 84
     }
 
+    private var sidebarHeaderLeadingPadding: CGFloat {
+        appState.isFullScreen ? 12 : 36
+    }
+
     private var projectName: String {
         if !appState.gui.fileTreeState.projectRoot.isEmpty {
             return (appState.gui.fileTreeState.projectRoot as NSString).lastPathComponent
@@ -196,8 +200,12 @@ struct ContentView: View {
     private let contentHeight: CGFloat = 28
     private let workspaceHeaderHeight: CGFloat = 30
 
+    private var showsWorkspaceHeader: Bool {
+        appState.gui.workspaceState.shouldShowHeader
+    }
+
     private var toolbarContentHeight: CGFloat {
-        appState.gui.workspaceState.hasCanonicalPayload ? contentHeight + workspaceHeaderHeight : contentHeight
+        showsWorkspaceHeader ? contentHeight + workspaceHeaderHeight : contentHeight
     }
 
     private var toolbarTopPadding: CGFloat {
@@ -226,7 +234,7 @@ struct ContentView: View {
                 }
 
                 VStack(spacing: 0) {
-                    if appState.gui.workspaceState.hasCanonicalPayload {
+                    if showsWorkspaceHeader {
                         WorkspaceHeaderView(
                             workspaceState: appState.gui.workspaceState,
                             theme: theme,
@@ -280,7 +288,7 @@ struct ContentView: View {
             encoder: appState.encoder,
             projectName: projectName,
             gitBranch: gitBranch,
-            leadingPadding: titleBarLeadingPadding
+            leadingPadding: sidebarHeaderLeadingPadding
         )
     }
 

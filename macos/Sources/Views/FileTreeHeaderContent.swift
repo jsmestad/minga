@@ -70,44 +70,59 @@ struct FileTreeHeaderContent: View {
     @ViewBuilder
     private var secondaryContext: some View {
         if !branchName.isEmpty {
-            badge(icon: "\u{E725}", label: branchName)
+            secondaryLabel(icon: "\u{E725}", label: branchName)
         } else if let stateLabel = treeStateLabel {
-            badge(icon: treeStateIcon, label: stateLabel)
+            secondaryLabel(icon: treeStateIcon, label: stateLabel)
         }
     }
 
-    private func badge(icon: String, label: String) -> some View {
+    private func secondaryLabel(icon: String, label: String) -> some View {
         HStack(spacing: 4) {
             Text(icon)
                 .font(.custom("Symbols Nerd Font Mono", size: 11))
-                .foregroundStyle(theme.treeDirFg.opacity(0.55))
+                .foregroundStyle(theme.treeDirFg.opacity(0.48))
 
             Text(label)
                 .font(.system(size: 11, weight: .regular))
-                .foregroundStyle(theme.tabActiveFg.opacity(0.62))
+                .foregroundStyle(theme.tabActiveFg.opacity(0.56))
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(theme.treeHeaderFg.opacity(0.08), in: Capsule())
     }
 
     private var actionButtons: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 0) {
             headerButton(systemName: "doc.badge.plus", tooltip: "New File…") {
                 encoder?.sendFileTreeNewFile(parentIndex: UInt16(fileTreeState.selectedIndex))
             }
-            headerButton(systemName: "folder.badge.plus", tooltip: "New Folder…") {
+
+            overflowMenu
+        }
+    }
+
+    private var overflowMenu: some View {
+        Menu {
+            Button("New Folder…") {
                 encoder?.sendFileTreeNewFolder(parentIndex: UInt16(fileTreeState.selectedIndex))
             }
-            headerButton(systemName: "arrow.clockwise", tooltip: "Refresh") {
+            Button("Refresh") {
                 encoder?.sendFileTreeRefresh()
             }
-            headerButton(systemName: "arrow.down.right.and.arrow.up.left", tooltip: "Collapse All") {
+            Button("Collapse All") {
                 encoder?.sendFileTreeCollapseAll()
             }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(theme.tabInactiveFg.opacity(0.55))
+                .frame(width: 28, height: 34)
+                .contentShape(Rectangle())
         }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: 28)
+        .help("More file tree actions")
+        .accessibilityLabel("More file tree actions")
     }
 
     @ViewBuilder
