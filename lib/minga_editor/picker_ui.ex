@@ -979,10 +979,10 @@ defmodule MingaEditor.PickerUI do
           map()
         ) :: [DisplayList.draw()]
   defp render_centered_items(visible, items_h, selected_offset, query, interior_w, pc) do
-    has_active = Enum.any?(visible, & &1.active)
+    taken = Enum.take(visible, items_h)
+    has_active = Enum.any?(taken, & &1.active)
 
-    visible
-    |> Enum.take(items_h)
+    taken
     |> Enum.with_index()
     |> Enum.flat_map(fn {item, idx} ->
       active_val = if(has_active, do: item.active, else: nil)
