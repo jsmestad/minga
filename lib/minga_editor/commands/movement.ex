@@ -213,16 +213,12 @@ defmodule MingaEditor.Commands.Movement do
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_to_document_start) do
-    gb = Buffer.snapshot(buf)
-    new_pos = Minga.Editing.document_start(gb)
-    Buffer.move_to(buf, new_pos)
+    Buffer.apply_motion(buf, fn doc, _cursor -> Minga.Editing.document_start(doc) end)
     state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_to_document_end) do
-    gb = Buffer.snapshot(buf)
-    new_pos = Minga.Editing.document_end(gb)
-    Buffer.move_to(buf, new_pos)
+    Buffer.apply_motion(buf, fn doc, _cursor -> Minga.Editing.document_end(doc) end)
     maybe_repin_agent_chat(state)
   end
 
@@ -233,21 +229,21 @@ defmodule MingaEditor.Commands.Movement do
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :next_line_first_non_blank) do
-    gb = Buffer.snapshot(buf)
-    {line, _col} = Document.cursor(gb)
-    total = Document.line_count(gb)
-    next_line = min(line + 1, total - 1)
-    new_pos = Minga.Editing.first_non_blank(gb, {next_line, 0})
-    Buffer.move_to(buf, new_pos)
+    Buffer.apply_motion(buf, fn doc, {line, _col} ->
+      total = Document.line_count(doc)
+      next_line = min(line + 1, total - 1)
+      Minga.Editing.first_non_blank(doc, {next_line, 0})
+    end)
+
     state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :prev_line_first_non_blank) do
-    gb = Buffer.snapshot(buf)
-    {line, _col} = Document.cursor(gb)
-    prev_line = max(line - 1, 0)
-    new_pos = Minga.Editing.first_non_blank(gb, {prev_line, 0})
-    Buffer.move_to(buf, new_pos)
+    Buffer.apply_motion(buf, fn doc, {line, _col} ->
+      prev_line = max(line - 1, 0)
+      Minga.Editing.first_non_blank(doc, {prev_line, 0})
+    end)
+
     state
   end
 
@@ -285,10 +281,12 @@ defmodule MingaEditor.Commands.Movement do
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :match_bracket) do
     state = Helpers.setup_for_motion(state, :match_bracket)
     buffer_id = Helpers.buffer_id_for_motion(state, buf, :match_bracket)
+    {row, col} = Buffer.cursor(buf)
 
-    Helpers.apply_motion(buf, fn gb, cursor ->
-      Helpers.resolve_motion(gb, cursor, :match_bracket, buffer_id)
-    end)
+    case ParserManager.request_match_item(buffer_id, row, col) do
+      nil -> :ok
+      target -> Buffer.move_to(buf, target)
+    end
 
     state
   end
@@ -320,8 +318,7 @@ defmodule MingaEditor.Commands.Movement do
       ) do
     {first_line, _last_line} = Viewport.visible_range(vp)
     visible_rows = Viewport.content_rows(vp)
-    gb = Buffer.snapshot(buf)
-    total_lines = Document.line_count(gb)
+    total_lines = Buffer.line_count(buf)
 
     target_line =
       case position do
@@ -691,57 +688,50 @@ defmodule MingaEditor.Commands.Movement do
 
   @spec visual_line_move(GenServer.server(), state(), :up | :down) :: state()
   defp visual_line_move(buf, state, direction) do
-    doc = Buffer.snapshot(buf)
-    pos = Document.cursor(doc)
     content_w = content_width(state)
     opts = wrap_opts(buf, width_oracle(state))
 
-    new_pos =
+    Buffer.apply_motion(buf, fn doc, pos ->
       case direction do
         :down -> Minga.Editing.visual_line_down(doc, pos, content_w, opts)
         :up -> Minga.Editing.visual_line_up(doc, pos, content_w, opts)
       end
+    end)
 
-    Buffer.move_to(buf, new_pos)
     state
   end
 
   @spec visual_line_edge(GenServer.server(), state(), :start | :end) :: state()
   defp visual_line_edge(buf, state, edge) do
-    doc = Buffer.snapshot(buf)
-    pos = Document.cursor(doc)
     content_w = content_width(state)
     opts = wrap_opts(buf, width_oracle(state))
 
-    new_pos =
+    Buffer.apply_motion(buf, fn doc, pos ->
       case edge do
         :start -> Minga.Editing.visual_line_start(doc, pos, content_w, opts)
         :end -> Minga.Editing.visual_line_end(doc, pos, content_w, opts)
       end
+    end)
 
-    Buffer.move_to(buf, new_pos)
     state
   end
 
   @spec logical_line_start(GenServer.server()) :: :ok
   defp logical_line_start(buf) do
-    gb = Buffer.snapshot(buf)
-    {line, _col} = Document.cursor(gb)
-    Buffer.move_to(buf, {line, 0})
+    Buffer.apply_motion(buf, fn _doc, {line, _col} -> {line, 0} end)
   end
 
   @spec logical_line_end(GenServer.server()) :: :ok
   defp logical_line_end(buf) do
-    gb = Buffer.snapshot(buf)
-    {line, _col} = Document.cursor(gb)
+    Buffer.apply_motion(buf, fn doc, {line, _col} ->
+      end_col =
+        case Document.lines(doc, line, 1) do
+          [text] when byte_size(text) > 0 -> Unicode.last_grapheme_byte_offset(text)
+          _ -> 0
+        end
 
-    end_col =
-      case Document.lines(gb, line, 1) do
-        [text] when byte_size(text) > 0 -> Unicode.last_grapheme_byte_offset(text)
-        _ -> 0
-      end
-
-    Buffer.move_to(buf, {line, end_col})
+      {line, end_col}
+    end)
   end
 
   @spec content_width(state()) :: pos_integer()

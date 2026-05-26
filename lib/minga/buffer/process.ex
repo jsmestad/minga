@@ -61,6 +61,7 @@ defmodule Minga.Buffer.Process do
   @typedoc "Internal state of the buffer server."
   @type state :: BufState.t()
   @type edit_delta_update :: {:ok, [EditDelta.t()]} | :reset_required
+  @type motion_fun :: (Document.t(), Document.position() -> Document.position())
 
   # ── Child Spec ──
 
@@ -232,6 +233,12 @@ defmodule Minga.Buffer.Process do
   @spec move_to(GenServer.server(), Document.position()) :: :ok
   def move_to(server, {line, col} = pos) when line >= 0 and col >= 0 do
     GenServer.call(server, {:move_to, pos})
+  end
+
+  @doc "Applies a cursor motion inside the buffer process."
+  @spec apply_motion(GenServer.server(), motion_fun()) :: :ok
+  def apply_motion(server, motion_fn) when is_function(motion_fn, 2) do
+    GenServer.call(server, {:apply_motion, motion_fn})
   end
 
   @file_io_call_timeout 30_000
@@ -1048,6 +1055,13 @@ defmodule Minga.Buffer.Process do
 
   def handle_call({:move_to, pos}, _from, state) do
     new_buf = Cursor.place(state.document, pos)
+    {:reply, :ok, %{state | document: new_buf}}
+  end
+
+  def handle_call({:apply_motion, motion_fn}, _from, state) when is_function(motion_fn, 2) do
+    cursor = Document.cursor(state.document)
+    new_pos = motion_fn.(state.document, cursor)
+    new_buf = Cursor.place(state.document, new_pos)
     {:reply, :ok, %{state | document: new_buf}}
   end
 
