@@ -64,7 +64,8 @@ defmodule MingaEditor.FloatingWindow do
               position: :center,
               border: :rounded,
               theme: nil,
-              viewport: nil
+              viewport: nil,
+              backdrop: false
 
     @type size :: {:cols, pos_integer()} | {:rows, pos_integer()} | {:percent, 1..100}
 
@@ -91,7 +92,8 @@ defmodule MingaEditor.FloatingWindow do
             position: position(),
             border: MingaEditor.FloatingWindow.border_style(),
             theme: map(),
-            viewport: {rows :: pos_integer(), cols :: pos_integer()}
+            viewport: {rows :: pos_integer(), cols :: pos_integer()},
+            backdrop: boolean()
           }
   end
 
@@ -110,13 +112,14 @@ defmodule MingaEditor.FloatingWindow do
     {vp_rows, vp_cols} = spec.viewport
     box = compute_box(spec, vp_rows, vp_cols)
 
+    backdrop_draws = render_backdrop(spec)
     bg_draws = render_background(box, spec.theme)
     border_draws = render_border(box, spec.border, spec.theme)
     title_draws = render_title(box, spec.title, spec.border, spec.theme)
     footer_draws = render_footer(box, spec.footer, spec.border, spec.theme)
     content_draws = offset_content(box, spec.content, spec.border)
 
-    bg_draws ++ border_draws ++ title_draws ++ footer_draws ++ content_draws
+    backdrop_draws ++ bg_draws ++ border_draws ++ title_draws ++ footer_draws ++ content_draws
   end
 
   @doc """
@@ -211,6 +214,21 @@ defmodule MingaEditor.FloatingWindow do
 
   @spec clamp(integer(), integer(), integer()) :: integer()
   defp clamp(val, lo, hi), do: max(lo, min(val, hi))
+
+  # ── Backdrop (full-viewport dimmed overlay) ──────────────────────────────
+
+  @spec render_backdrop(Spec.t()) :: [DisplayList.draw()]
+  defp render_backdrop(%Spec{backdrop: false}), do: []
+
+  defp render_backdrop(%Spec{backdrop: true, viewport: {vp_rows, vp_cols}, theme: theme}) do
+    color = Map.get(theme, :backdrop_color, 0x111111)
+    style = Face.new(bg: color)
+    fill = String.duplicate(" ", vp_cols)
+
+    for r <- 0..(vp_rows - 1) do
+      DisplayList.draw(r, 0, fill, style)
+    end
+  end
 
   # ── Background fill ─────────────────────────────────────────────────────
 

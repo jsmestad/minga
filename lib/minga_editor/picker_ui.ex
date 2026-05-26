@@ -895,11 +895,14 @@ defmodule MingaEditor.PickerUI do
     float_height_rows = centered_float_height(visible, viewport, status_message != nil)
     float_height = {:rows, float_height_rows}
 
+    backdrop = Minga.Config.Options.get(:picker_backdrop)
+
     popup_theme = %{
       fg: pc.text_fg,
       bg: pc.bg,
       border_fg: pc.dim_fg,
-      title_fg: pc.highlight_fg
+      title_fg: pc.highlight_fg,
+      backdrop_color: 0x111111
     }
 
     spec = %FloatingWindow.Spec{
@@ -909,7 +912,8 @@ defmodule MingaEditor.PickerUI do
       height: float_height,
       border: :rounded,
       theme: popup_theme,
-      viewport: {viewport.rows, viewport.cols}
+      viewport: {viewport.rows, viewport.cols},
+      backdrop: backdrop
     }
 
     {interior_h, interior_w} = FloatingWindow.interior_size(spec)
@@ -975,66 +979,77 @@ defmodule MingaEditor.PickerUI do
           map()
         ) :: [DisplayList.draw()]
   defp render_centered_items(visible, items_h, selected_offset, query, interior_w, pc) do
+    has_active = Enum.any?(visible, & &1.active)
+
     visible
+    |> Enum.take(items_h)
     |> Enum.with_index()
     |> Enum.flat_map(fn {item, idx} ->
-      if idx >= items_h,
-        do: [],
-        else:
-          render_centered_item(
-            idx,
-            item.label,
-            item.description,
-            idx == selected_offset,
-            query,
-            interior_w,
-            pc,
-            item.icon_color
-          )
+      active_val = if(has_active, do: item.active, else: nil)
+
+      render_centered_item(
+        %{row: idx, item: item, selected: idx == selected_offset, active: active_val},
+        query,
+        interior_w,
+        pc
+      )
     end)
   end
 
-  @spec render_centered_item(
-          non_neg_integer(),
-          String.t(),
-          String.t() | nil,
-          boolean(),
-          String.t(),
-          pos_integer(),
-          map(),
-          non_neg_integer() | nil
-        ) :: [DisplayList.draw()]
-  defp render_centered_item(row, label, desc, selected, query, width, pc, icon_color) do
+  @spec render_centered_item(map(), String.t(), pos_integer(), map()) :: [DisplayList.draw()]
+  defp render_centered_item(
+         %{row: row, item: item, selected: selected, active: active},
+         query,
+         width,
+         pc
+       ) do
     bg = pc.bg
     fg = if selected, do: pc.highlight_fg, else: pc.text_fg
 
     desc_text =
-      case desc do
+      case item.description do
         nil -> ""
         "" -> ""
         d -> " " <> d
       end
 
+    # Active indicator occupies 2 chars (bullet + space) when any item is active.
+    {active_prefix, active_draws, label_col} = active_indicator(row, active, pc, bg)
+
     # Pad the entire row with a leading gutter so the selected rail does not cover text.
-    full_text = " " <> label <> desc_text
+    full_text = "  " <> active_prefix <> item.label <> desc_text
     padded = String.pad_trailing(full_text, width)
 
     # Base draw (full row background)
     base = [DisplayList.draw(row, 0, padded, Face.new(fg: pc.dim_fg, bg: bg))]
 
     # Label (brighter text)
-    label_draw = [DisplayList.draw(row, 1, label, Face.new(fg: fg, bg: bg))]
+    label_draw = [DisplayList.draw(row, label_col, item.label, Face.new(fg: fg, bg: bg))]
 
     # Icon color overlay
-    icon_draws = render_icon_color(row, icon_color, bg, label, 1)
+    icon_draws = render_icon_color(row, item.icon_color, bg, item.label, label_col)
 
     rail_draws = render_selected_rail(row, 0, selected, pc.highlight_fg, bg)
 
     # Highlight matching characters in the label
-    match_draws = render_match_highlights(row, label, query, pc.match_fg, bg)
+    match_draws = render_match_highlights_at(row, item.label, query, pc.match_fg, bg, label_col)
 
-    base ++ label_draw ++ icon_draws ++ rail_draws ++ match_draws
+    base ++ active_draws ++ label_draw ++ icon_draws ++ rail_draws ++ match_draws
   end
+
+  # Returns {prefix_text, indicator_draws, label_col_offset} for the active indicator.
+  # `nil` means no item in the list has active set, so no indicator column at all.
+  @spec active_indicator(non_neg_integer(), boolean() | nil, map(), non_neg_integer()) ::
+          {String.t(), [DisplayList.draw()], non_neg_integer()}
+  defp active_indicator(_row, nil, _pc, _bg), do: {"", [], 2}
+
+  defp active_indicator(row, true, pc, bg) do
+    active_fg = Map.get(pc, :active_fg, pc.highlight_fg)
+    draw = DisplayList.draw(row, 2, "● ", Face.new(fg: active_fg, bg: bg))
+    {"● ", [draw], 4}
+  end
+
+  defp active_indicator(_row, false, _pc, _bg), do: {"  ", [], 4}
 
   @spec render_selected_rail(
           non_neg_integer(),
@@ -1522,6 +1537,20 @@ defmodule MingaEditor.PickerUI do
           non_neg_integer()
         ) :: [DisplayList.draw()]
   defp render_match_highlights(row, label, query, match_fg, row_bg) do
+    render_match_highlights_at(row, label, query, match_fg, row_bg, 1)
+  end
+
+  # Like `render_match_highlights/5` but with a configurable column offset
+  # for the label start position.
+  @spec render_match_highlights_at(
+          non_neg_integer(),
+          String.t(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: [DisplayList.draw()]
+  defp render_match_highlights_at(row, label, query, match_fg, row_bg, col_offset) do
     match_positions = Picker.match_positions(label, query)
 
     label_graphemes = String.graphemes(label)
@@ -1531,7 +1560,7 @@ defmodule MingaEditor.PickerUI do
     |> Enum.filter(&(&1 < label_len))
     |> Enum.map(fn pos ->
       char = Enum.at(label_graphemes, pos)
-      col = 1 + display_width_before(label_graphemes, pos)
+      col = col_offset + display_width_before(label_graphemes, pos)
       DisplayList.draw(row, col, char, Face.new(fg: match_fg, bg: row_bg, bold: true))
     end)
   end
