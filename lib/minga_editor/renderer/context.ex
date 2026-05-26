@@ -62,7 +62,9 @@ defmodule MingaEditor.Renderer.Context do
             document_highlight_colors: nil,
             wrap_on: false,
             line_number_style: :absolute,
-            width_oracle: %Monospace{}
+            width_oracle: %Monospace{},
+            hover_row: nil,
+            fold_ranges: []
 
   @typedoc """
   Represents the bounds of a visual selection for rendering.
@@ -107,6 +109,8 @@ defmodule MingaEditor.Renderer.Context do
           document_highlight_colors: term(),
           wrap_on: boolean(),
           line_number_style: atom(),
-          width_oracle: WidthOracle.t()
+          width_oracle: WidthOracle.t(),
+          hover_row: non_neg_integer() | nil,
+          fold_ranges: [term()]
         }
 end

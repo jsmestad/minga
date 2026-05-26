@@ -318,12 +318,14 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
       %{buf: buf, ctx: ctx, window: window}
     end
 
-    test "expanded foldable lines render a down chevron in the gutter", %{
+    test "expanded foldable lines render a down chevron in the gutter when cursor is on fold start", %{
       ctx: ctx,
       window: window
     } do
       lines = ["defmodule Example do", "  def run, do: :ok", "end"]
-      window = Window.set_fold_ranges(window, [FoldRange.new!(0, 2)])
+      fold_range = FoldRange.new!(0, 2)
+      window = Window.set_fold_ranges(window, [fold_range])
+      ctx = %{ctx | fold_ranges: [fold_range]}
 
       opts = %{
         first_line: 0,
@@ -385,8 +387,9 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
 
     test "fold indicators do not overwrite diagnostic signs", %{ctx: ctx, window: window} do
       lines = ["defmodule Example do", "  def run, do: :ok", "end"]
-      window = Window.set_fold_ranges(window, [FoldRange.new!(0, 2)])
-      ctx = %{ctx | diagnostic_signs: %{0 => :error}}
+      fold_range = FoldRange.new!(0, 2)
+      window = Window.set_fold_ranges(window, [fold_range])
+      ctx = %{ctx | diagnostic_signs: %{0 => :error}, fold_ranges: [fold_range]}
 
       opts = %{
         first_line: 0,
@@ -411,6 +414,101 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
 
       assert {2, "▼", _fold_face} =
                Enum.find(row, fn {col, text, _face} -> col == 2 and text == "▼" end)
+    end
+
+    test "open fold indicator is hidden when cursor and hover are both elsewhere", %{
+      ctx: ctx,
+      window: window
+    } do
+      lines = ["defmodule Example do", "  def run, do: :ok", "end"]
+      fold_range = FoldRange.new!(0, 2)
+      window = Window.set_fold_ranges(window, [fold_range])
+      ctx = %{ctx | fold_ranges: [fold_range], hover_row: nil}
+
+      opts = %{
+        first_line: 0,
+        cursor_line: 10,
+        ctx: ctx,
+        ln_style: :absolute,
+        gutter_w: 6,
+        first_byte_off: 0,
+        row_off: 0,
+        col_off: 0,
+        window: window,
+        buffer: window.buffer
+      }
+
+      {gutter_layer, _content_layer, _rows, _window} =
+        ContentHelpers.render_lines_nowrap_layers(lines, opts)
+
+      row = Map.get(gutter_layer, 0, [])
+
+      refute Enum.any?(row, fn {_col, text, _face} -> text == "▼" end),
+             "open fold indicator should be hidden when cursor and hover are elsewhere"
+    end
+
+    test "open fold indicator appears when cursor is inside fold range", %{
+      ctx: ctx,
+      window: window
+    } do
+      lines = ["defmodule Example do", "  def run, do: :ok", "end"]
+      fold_range = FoldRange.new!(0, 2)
+      window = Window.set_fold_ranges(window, [fold_range])
+      ctx = %{ctx | fold_ranges: [fold_range], hover_row: nil}
+
+      opts = %{
+        first_line: 0,
+        cursor_line: 1,
+        ctx: ctx,
+        ln_style: :absolute,
+        gutter_w: 6,
+        first_byte_off: 0,
+        row_off: 0,
+        col_off: 0,
+        window: window,
+        buffer: window.buffer
+      }
+
+      {gutter_layer, _content_layer, _rows, _window} =
+        ContentHelpers.render_lines_nowrap_layers(lines, opts)
+
+      assert {col, "▼", face} =
+               Enum.find(Map.get(gutter_layer, 0), fn {_col, text, _face} -> text == "▼" end)
+
+      assert col == Gutter.fold_column_offset()
+      assert face.fg == ctx.gutter_colors.fold_fg
+    end
+
+    test "open fold indicator appears on mouse hover row", %{
+      ctx: ctx,
+      window: window
+    } do
+      lines = ["defmodule Example do", "  def run, do: :ok", "end"]
+      fold_range = FoldRange.new!(0, 2)
+      window = Window.set_fold_ranges(window, [fold_range])
+      ctx = %{ctx | fold_ranges: [fold_range], hover_row: 0}
+
+      opts = %{
+        first_line: 0,
+        cursor_line: 10,
+        ctx: ctx,
+        ln_style: :absolute,
+        gutter_w: 6,
+        first_byte_off: 0,
+        row_off: 0,
+        col_off: 0,
+        window: window,
+        buffer: window.buffer
+      }
+
+      {gutter_layer, _content_layer, _rows, _window} =
+        ContentHelpers.render_lines_nowrap_layers(lines, opts)
+
+      assert {col, "▼", face} =
+               Enum.find(Map.get(gutter_layer, 0), fn {_col, text, _face} -> text == "▼" end)
+
+      assert col == Gutter.fold_column_offset()
+      assert face.fg == ctx.gutter_colors.fold_fg
     end
 
     test "folded lines render a right chevron in the gutter", %{ctx: ctx, window: window} do
