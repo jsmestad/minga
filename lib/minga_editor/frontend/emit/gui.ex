@@ -358,8 +358,9 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   @spec build_gui_sidebars_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
   defp build_gui_sidebars_cmd(ctx, caches) do
-    registered_active = Sidebar.active_left()
-    raw_sidebars = sidebar_metadata(ctx, registered_active)
+    sidebar_registry = Sidebar.table_for(ctx)
+    registered_active = Sidebar.active_left(sidebar_registry)
+    raw_sidebars = registered_sidebar_metadata(sidebar_registry)
     active_id = active_sidebar_id(ctx, raw_sidebars, registered_active)
     sidebars = mark_active_sidebar(raw_sidebars, active_id)
     fp = :erlang.phash2({sidebars, active_id})
@@ -371,39 +372,9 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     end
   end
 
-  @spec sidebar_metadata(ctx(), Sidebar.entry() | nil) :: [ProtocolGUI.sidebar_metadata()]
-  defp sidebar_metadata(ctx, registered_active) do
-    registered = registered_sidebar_metadata()
-    registered_ids = MapSet.new(registered, & &1.id)
-
-    built_in =
-      [
-        file_tree_sidebar_metadata(ctx),
-        git_status_sidebar_metadata(ctx),
-        observatory_sidebar_metadata(ctx)
-      ]
-      |> Enum.reject(&MapSet.member?(registered_ids, &1.id))
-      |> maybe_suppress_builtin_sidebar_visibility(registered_active)
-
-    (built_in ++ registered)
-    |> Enum.sort_by(&{&1.order, &1.id})
-  end
-
-  @spec maybe_suppress_builtin_sidebar_visibility(
-          [ProtocolGUI.sidebar_metadata()],
-          Sidebar.entry() | nil
-        ) ::
-          [ProtocolGUI.sidebar_metadata()]
-  defp maybe_suppress_builtin_sidebar_visibility(sidebars, nil), do: sidebars
-
-  defp maybe_suppress_builtin_sidebar_visibility(sidebars, _registered_active) do
-    Enum.map(sidebars, &%{&1 | visible?: false, focused?: false})
-  end
-
-  @spec registered_sidebar_metadata() :: [ProtocolGUI.sidebar_metadata()]
-  defp registered_sidebar_metadata do
-    Sidebar.all()
-    |> Enum.reject(&(&1.id == "file_tree"))
+  @spec registered_sidebar_metadata(Sidebar.table()) :: [ProtocolGUI.sidebar_metadata()]
+  defp registered_sidebar_metadata(sidebar_registry) do
+    Sidebar.all(sidebar_registry)
     |> Enum.map(fn sidebar ->
       %{
         id: sidebar.id,
@@ -414,7 +385,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
         visible?: sidebar.visible?,
         focused?: sidebar.focused?,
         preferred_width: sidebar.preferred_width,
-        badge_count: sidebar_badge_count(sidebar.snapshot.rows)
+        badge_count: sidebar.badge_count || sidebar_badge_count(sidebar.snapshot.rows)
       }
     end)
   end
@@ -423,93 +394,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   defp sidebar_badge_count(rows) do
     count = Enum.count(rows, &Map.get(&1, :badge))
     if count == 0, do: nil, else: count
-  end
-
-  @spec file_tree_sidebar_metadata(ctx()) :: ProtocolGUI.sidebar_metadata()
-  defp file_tree_sidebar_metadata(%{file_tree: %FileTreeState{} = file_tree}) do
-    status = FileTreeState.status(file_tree)
-
-    %{
-      id: "file_tree",
-      display_name: "File Tree",
-      semantic_kind: "file_tree",
-      icon: "folder",
-      order: 10,
-      visible?: FileTreeState.visible_status?(status),
-      focused?: file_tree_focused?(file_tree),
-      preferred_width: FileTreeState.width(file_tree),
-      badge_count: nil
-    }
-  end
-
-  defp file_tree_sidebar_metadata(%{file_tree: %{project_root: _root}}) do
-    hidden_sidebar_metadata("file_tree", "File Tree", "file_tree", "folder", 10)
-  end
-
-  defp file_tree_sidebar_metadata(_ctx) do
-    hidden_sidebar_metadata("file_tree", "File Tree", "file_tree", "folder", 10)
-  end
-
-  @spec git_status_sidebar_metadata(ctx()) :: ProtocolGUI.sidebar_metadata()
-  defp git_status_sidebar_metadata(%{shell_state: %{git_status_panel: %{} = data}}) do
-    entries = data |> git_status_panel_map() |> Map.get(:entries, [])
-
-    %{
-      id: "git_status",
-      display_name: "Git Status",
-      semantic_kind: "git_status",
-      icon: "point.3.filled.connected.trianglepath.dotted",
-      order: 20,
-      visible?: true,
-      focused?: true,
-      preferred_width: 30,
-      badge_count: length(entries)
-    }
-  end
-
-  defp git_status_sidebar_metadata(_ctx) do
-    hidden_sidebar_metadata(
-      "git_status",
-      "Git Status",
-      "git_status",
-      "point.3.filled.connected.trianglepath.dotted",
-      20
-    )
-  end
-
-  @spec observatory_sidebar_metadata(ctx()) :: ProtocolGUI.sidebar_metadata()
-  defp observatory_sidebar_metadata(%{shell_state: %{observatory_visible: true}}) do
-    %{
-      id: "observatory",
-      display_name: "BEAM Observatory",
-      semantic_kind: "observatory",
-      icon: "network",
-      order: 30,
-      visible?: true,
-      focused?: true,
-      preferred_width: 30,
-      badge_count: nil
-    }
-  end
-
-  defp observatory_sidebar_metadata(_ctx) do
-    hidden_sidebar_metadata("observatory", "BEAM Observatory", "observatory", "network", 30)
-  end
-
-  @spec hidden_sidebar_metadata(String.t(), String.t(), String.t(), String.t(), non_neg_integer()) ::
-          ProtocolGUI.sidebar_metadata()
-  defp hidden_sidebar_metadata(id, display_name, kind, icon, order) do
-    %{
-      id: id,
-      display_name: display_name,
-      semantic_kind: kind,
-      icon: icon,
-      order: order,
-      visible?: false,
-      focused?: false,
-      preferred_width: 30,
-      badge_count: nil
-    }
   end
 
   @spec active_sidebar_id(ctx(), [ProtocolGUI.sidebar_metadata()], Sidebar.entry() | nil) ::

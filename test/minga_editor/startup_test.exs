@@ -173,7 +173,7 @@ defmodule MingaEditor.StartupTest do
   describe "build_initial_state/1" do
     test "registers FileTree dynamic sidebar and input contributions" do
       Input.reset_handlers()
-      Sidebar.unregister_source(:builtin)
+      sidebar_registry = private_sidebar_registry()
 
       state =
         Startup.build_initial_state(
@@ -182,17 +182,17 @@ defmodule MingaEditor.StartupTest do
           parser_manager: nil,
           options_server: nil,
           width: 80,
-          height: 24
+          height: 24,
+          sidebar_registry: sidebar_registry
         )
 
       assert %{id: "file_tree", input_handler: FileTreeHandler, visible?: false} =
-               Sidebar.get("file_tree")
+               Sidebar.get(sidebar_registry, "file_tree")
 
       handlers = Input.surface_handlers(state)
       assert Enum.count(handlers, &(&1 == FileTreeHandler)) == 1
     after
       Input.reset_handlers()
-      Sidebar.unregister_source(:builtin)
     end
 
     test "falls back to default shell when explicit startup shell is unavailable" do
@@ -626,4 +626,10 @@ defmodule MingaEditor.StartupTest do
 
   defp gui_font_option_opcode?(<<0x92, _::binary>>), do: true
   defp gui_font_option_opcode?(_), do: false
+
+  defp private_sidebar_registry do
+    table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
+    start_supervised!({Sidebar, name: table, notify: false})
+    table
+  end
 end

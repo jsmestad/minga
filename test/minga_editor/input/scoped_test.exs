@@ -9,7 +9,6 @@ defmodule MingaEditor.Input.ScopedTest do
   alias Minga.Buffer.Process, as: BufferProcess
 
   alias MingaEditor.Commands.Agent, as: AgentCommands
-  alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
@@ -27,12 +26,8 @@ defmodule MingaEditor.Input.ScopedTest do
   alias Minga.Project.FileTree
   alias Minga.Project.FileTree.BufferSync
 
-  setup do
-    FileTreeFeature.register_contributions()
-    :ok
-  end
-
   defp base_state(opts) do
+    opts = Keyword.put_new_lazy(opts, :sidebar_registry, fn -> private_sidebar_registry() end)
     {:ok, buf} = BufferProcess.start_link(content: "hello world")
     {:ok, prompt_buf} = BufferProcess.start_link(content: "")
 
@@ -67,6 +62,7 @@ defmodule MingaEditor.Input.ScopedTest do
 
     %EditorState{
       port_manager: self(),
+      sidebar_registry: Keyword.fetch!(opts, :sidebar_registry),
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: %VimState{mode: mode, mode_state: Mode.initial_state()},
@@ -458,7 +454,7 @@ defmodule MingaEditor.Input.ScopedTest do
   describe "file tree scope" do
     test "q closes tree", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
-      {:handled, new_state} = walk_surface_handlers(state, ?q, 0)
+      {:handled, new_state} = FileTreeHandler.handle_key(state, ?q, 0)
       assert new_state.workspace.keymap_scope == :editor
       assert ft(new_state).tree == nil
     end
@@ -466,7 +462,7 @@ defmodule MingaEditor.Input.ScopedTest do
     test "unbound key delegates to mode FSM for vim nav", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
       # j is not bound in file_tree scope (handled by mode FSM delegation)
-      {:handled, new_state} = walk_surface_handlers(state, ?j, 0)
+      {:handled, new_state} = FileTreeHandler.handle_key(state, ?j, 0)
       assert ft(new_state).tree.cursor == 1
     end
 
@@ -478,7 +474,7 @@ defmodule MingaEditor.Input.ScopedTest do
 
       leader_state = put_in(state.workspace.editing.mode_state.leader_node, leader_node)
 
-      {:handled, _new_state} = walk_surface_handlers(leader_state, ?f, 0)
+      {:handled, _new_state} = FileTreeHandler.handle_key(leader_state, ?f, 0)
     end
 
     test "tree scope bindings are handled", %{tmp_dir: tmp_dir} do
@@ -486,7 +482,7 @@ defmodule MingaEditor.Input.ScopedTest do
 
       for {key, file_count} <- [{?h, 0}, {?l, 0}, {?r, 3}] do
         state = make_tree_state(tmp_dir, file_count)
-        assert {:handled, _new_state} = walk_surface_handlers(state, key, 0)
+        assert {:handled, _new_state} = FileTreeHandler.handle_key(state, key, 0)
       end
     end
 
@@ -495,7 +491,7 @@ defmodule MingaEditor.Input.ScopedTest do
       state = make_tree_state(tmp_dir, 0)
 
       entries_before = length(FileTree.visible_entries(ft(state).tree))
-      {:handled, new_state} = walk_surface_handlers(state, ?H, 0)
+      {:handled, new_state} = FileTreeHandler.handle_key(state, ?H, 0)
       entries_after = length(FileTree.visible_entries(ft(new_state).tree))
 
       assert entries_after != entries_before
@@ -771,6 +767,12 @@ defmodule MingaEditor.Input.ScopedTest do
         {:passthrough, new_state} -> {:cont, {:passthrough, new_state}}
       end
     end)
+  end
+
+  defp private_sidebar_registry do
+    table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
+    start_supervised!({MingaEditor.Extension.Sidebar, name: table, notify: false})
+    table
   end
 
   defp make_tree_state(tmp_dir, file_count \\ 5) do

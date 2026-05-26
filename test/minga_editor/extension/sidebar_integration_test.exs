@@ -1,29 +1,30 @@
 defmodule MingaEditor.Extension.SidebarIntegrationTest do
-  # Uses the default named sidebar registry read by layout, focus-tree, and render paths.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.FocusTree
   alias MingaEditor.Input.Router
   alias MingaEditor.Shell.Traditional.Layout.TUI, as: LayoutTUI
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.Shell.Traditional.SidebarRenderer
+  alias MingaEditor.State, as: EditorState
 
   import MingaEditor.RenderPipeline.TestHelpers
 
   setup do
-    reset_default_sidebar_table()
-    on_exit(&reset_default_sidebar_table/0)
-    :ok
+    table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
+    start_supervised!({Sidebar, name: table, notify: false})
+    %{sidebar_registry: table}
   end
 
-  test "layout reserves and reclaims space for a visible registered sidebar" do
-    state = base_state(cols: 80, rows: 24)
+  test "layout reserves and reclaims space for a visible registered sidebar", %{
+    sidebar_registry: table
+  } do
+    state = base_state(cols: 80, rows: 24, sidebar_registry: table)
 
     assert LayoutTUI.compute(state).file_tree == nil
 
     assert :ok =
-             Sidebar.register({:extension, :outline}, %{
+             Sidebar.register(table, {:extension, :outline}, %{
                id: "outline",
                display_name: "Outline",
                preferred_width: 25,
@@ -34,15 +35,17 @@ defmodule MingaEditor.Extension.SidebarIntegrationTest do
     assert {1, 0, 25, 21} = layout.file_tree
     assert {1, 26, 54, 21} = layout.editor_area
 
-    assert :ok = Sidebar.set_visible({:extension, :outline}, "outline", false)
+    assert :ok = Sidebar.set_visible(table, {:extension, :outline}, "outline", false)
     assert LayoutTUI.compute(state).file_tree == nil
   end
 
-  test "tiny terminals collapse registered sidebars instead of invalid editor dimensions" do
-    state = base_state(cols: 12, rows: 8)
+  test "tiny terminals collapse registered sidebars instead of invalid editor dimensions", %{
+    sidebar_registry: table
+  } do
+    state = base_state(cols: 12, rows: 8, sidebar_registry: table)
 
     assert :ok =
-             Sidebar.register({:extension, :outline}, %{
+             Sidebar.register(table, {:extension, :outline}, %{
                id: "outline",
                display_name: "Outline",
                preferred_width: 30,
@@ -55,11 +58,13 @@ defmodule MingaEditor.Extension.SidebarIntegrationTest do
     assert elem(layout.editor_area, 3) >= 1
   end
 
-  test "focus tree routes registered sidebars to the generic sidebar handler" do
-    state = base_state(cols: 80, rows: 24)
+  test "focus tree routes registered sidebars to the generic sidebar handler", %{
+    sidebar_registry: table
+  } do
+    state = base_state(cols: 80, rows: 24, sidebar_registry: table)
 
     assert :ok =
-             Sidebar.register({:extension, :outline}, %{
+             Sidebar.register(table, {:extension, :outline}, %{
                id: "outline",
                display_name: "Outline",
                preferred_width: 25,
@@ -67,18 +72,21 @@ defmodule MingaEditor.Extension.SidebarIntegrationTest do
                focused?: true
              })
 
-    node = state |> LayoutTUI.compute() |> FocusTree.from_layout() |> FocusTree.hit_test(2, 2)
+    state = %{state | layout: LayoutTUI.compute(state)}
+    node = state |> FocusTree.from_state() |> FocusTree.hit_test(2, 2)
 
     assert node.content_type == {:custom, :sidebar}
     assert node.ref == "outline"
     assert node.handler == MingaEditor.Input.Sidebar
   end
 
-  test "mouse input routes local coordinates through the generic sidebar handler" do
-    state = base_state(cols: 80, rows: 24)
+  test "mouse input routes local coordinates through the generic sidebar handler", %{
+    sidebar_registry: table
+  } do
+    state = base_state(cols: 80, rows: 24, sidebar_registry: table)
 
     assert :ok =
-             Sidebar.register({:extension, :outline}, %{
+             Sidebar.register(table, {:extension, :outline}, %{
                id: "outline",
                display_name: "Outline",
                preferred_width: 25,
@@ -92,7 +100,8 @@ defmodule MingaEditor.Extension.SidebarIntegrationTest do
                end
              })
 
-    focus_tree = state |> LayoutTUI.compute() |> FocusTree.from_layout()
+    state = %{state | layout: LayoutTUI.compute(state)}
+    focus_tree = FocusTree.from_state(state)
 
     new_state =
       Router.dispatch_mouse(%{state | focus_tree: focus_tree}, 2, 3, :left, 4, :press, 2)
@@ -100,11 +109,13 @@ defmodule MingaEditor.Extension.SidebarIntegrationTest do
     assert EditorState.status_msg(new_state) == "mouse 1:3:left:4:press:2"
   end
 
-  test "keyboard input routes through the generic sidebar handler when focused" do
-    state = base_state(cols: 80, rows: 24)
+  test "keyboard input routes through the generic sidebar handler when focused", %{
+    sidebar_registry: table
+  } do
+    state = base_state(cols: 80, rows: 24, sidebar_registry: table)
 
     assert :ok =
-             Sidebar.register({:extension, :outline}, %{
+             Sidebar.register(table, {:extension, :outline}, %{
                id: "outline",
                display_name: "Outline",
                preferred_width: 25,
@@ -119,33 +130,32 @@ defmodule MingaEditor.Extension.SidebarIntegrationTest do
     assert EditorState.status_msg(new_state) == "sidebar key handled"
   end
 
-  test "snapshot updates notify the editor render loop" do
-    Process.register(self(), MingaEditor)
+  test "snapshot updates can notify an explicit render target" do
+    table = Module.concat(__MODULE__, "NotifySidebar#{System.unique_integer([:positive])}")
+    start_supervised!({Sidebar, name: table, notify: self()})
 
     assert :ok =
-             Sidebar.register({:extension, :outline}, %{
+             Sidebar.register(table, {:extension, :outline}, %{
                id: "outline",
                display_name: "Outline",
                visible?: true
              })
 
-    flush_render_messages()
+    flush_sidebar_messages(table)
 
     assert :ok =
-             Sidebar.publish_snapshot({:extension, :outline}, "outline",
+             Sidebar.publish_snapshot(table, {:extension, :outline}, "outline",
                rows: [%{id: "a", text: "alpha"}]
              )
 
-    assert_receive {:"$gen_cast", :render}
-  after
-    if Process.whereis(MingaEditor) == self(), do: Process.unregister(MingaEditor)
+    assert_receive {:sidebar_changed, ^table}
   end
 
-  test "TUI renderer uses cached snapshot rows" do
-    state = base_state(cols: 80, rows: 24)
+  test "TUI renderer uses cached snapshot rows", %{sidebar_registry: table} do
+    state = base_state(cols: 80, rows: 24, sidebar_registry: table)
 
     assert :ok =
-             Sidebar.register({:extension, :outline}, %{
+             Sidebar.register(table, {:extension, :outline}, %{
                id: "outline",
                display_name: "Outline",
                preferred_width: 25,
@@ -167,15 +177,11 @@ defmodule MingaEditor.Extension.SidebarIntegrationTest do
     assert "beta" in Enum.map(texts, &String.trim/1)
   end
 
-  defp flush_render_messages do
+  defp flush_sidebar_messages(table) do
     receive do
-      {:"$gen_cast", :render} -> flush_render_messages()
+      {:sidebar_changed, ^table} -> flush_sidebar_messages(table)
     after
       0 -> :ok
     end
-  end
-
-  defp reset_default_sidebar_table do
-    Sidebar.unregister_source({:extension, :outline})
   end
 end

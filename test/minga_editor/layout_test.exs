@@ -1,9 +1,9 @@
 defmodule MingaEditor.LayoutTest do
-  # Mutates the global built-in FileTree sidebar registration while computing layout.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
   use ExUnitProperties
 
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
@@ -14,6 +14,13 @@ defmodule MingaEditor.LayoutTest do
   alias MingaEditor.Window
   alias Minga.Project.FileTree
 
+  setup do
+    table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
+    start_supervised!({Sidebar, name: table, notify: false})
+    Process.put(:sidebar_registry, table)
+    :ok
+  end
+
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
   defp new_state(rows, cols) do
@@ -21,6 +28,7 @@ defmodule MingaEditor.LayoutTest do
 
     %EditorState{
       port_manager: nil,
+      sidebar_registry: Process.get(:sidebar_registry),
       terminal_viewport: vp,
       workspace: %MingaEditor.Session.State{
         viewport: vp,

@@ -179,10 +179,10 @@ defmodule MingaEditor.FocusTreeTest do
       assert hit.ref == 2
     end
 
-    test "click on file tree resolves to :file_tree (not the editor area below it)" do
+    test "click on sidebar resolves to the sidebar region (not the editor area below it)" do
       tree = FocusTree.from_layout(split_layout())
       hit = FocusTree.hit_test(tree, 5, 10)
-      assert hit.content_type == :file_tree
+      assert hit.content_type == :sidebar
     end
   end
 

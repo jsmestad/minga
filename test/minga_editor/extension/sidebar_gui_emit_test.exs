@@ -1,13 +1,14 @@
 defmodule MingaEditor.Extension.SidebarGUIEmitTest do
-  # Uses the default named sidebar registry read by GUI emit.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Minga.Project.FileTree
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Frontend.Emit.GUI, as: EmitGUI
+  alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
   alias MingaEditor.Renderer.Caches
+  alias MingaEditor.Sidebar.BuiltinSurfaces
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.StatusBar.Data, as: StatusBarData
@@ -15,22 +16,82 @@ defmodule MingaEditor.Extension.SidebarGUIEmitTest do
   import MingaEditor.RenderPipeline.TestHelpers
 
   setup do
-    reset_default_sidebar_table()
-    on_exit(&reset_default_sidebar_table/0)
-    :ok
+    table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
+    start_supervised!({Sidebar, name: table, notify: false})
+    %{sidebar_registry: table}
   end
 
-  test "registered active sidebars own the GUI active id over legacy file tree metadata" do
+  test "registered file tree remains visible in GUI sidebar metadata", %{sidebar_registry: table} do
     root = Path.join(System.tmp_dir!(), "sidebar-gui-emit-#{System.unique_integer([:positive])}")
     File.mkdir_p!(root)
     File.write!(Path.join(root, "a.ex"), "")
 
     file_tree = FileTreeState.open(%FileTreeState{}, FileTree.new(root, width: 32), nil)
-    state = gui_state() |> EditorState.set_file_tree(file_tree)
-    FileTreeFeature.sync_sidebar(%FileTreeState{})
+    state = gui_state(sidebar_registry: table) |> EditorState.set_file_tree(file_tree)
+
+    {_ctx, _caches, cmds} = sync_chrome(state)
+    {active_id, entries} = cmds |> gui_sidebars_payload!() |> parse_gui_sidebars()
+
+    assert active_id == "file_tree"
+
+    file_tree_entry = Enum.find(entries, &(&1.id == "file_tree"))
+    assert file_tree_entry.visible?
+    assert file_tree_entry.focused?
+  end
+
+  test "registered built-in sidebars are emitted by the sidebar registry", %{
+    sidebar_registry: table
+  } do
+    assert :ok = FileTreeFeature.register_contributions(%FileTreeState{}, table)
+    assert :ok = BuiltinSurfaces.register_contributions(table)
+
+    {_ctx, _caches, cmds} = sync_chrome(gui_state(sidebar_registry: table))
+    {_active_id, entries} = cmds |> gui_sidebars_payload!() |> parse_gui_sidebars()
+
+    assert Enum.map(entries, & &1.id) == ["file_tree", "git_status", "observatory"]
+    assert Enum.all?(entries, &(not &1.visible?))
+  end
+
+  test "registered git status sidebar metadata carries visibility and badge count", %{
+    sidebar_registry: table
+  } do
+    panel = %GitStatusPanel{
+      repo_state: :normal,
+      branch: "main",
+      ahead: 0,
+      behind: 0,
+      entries: [
+        %Minga.Git.StatusEntry{path: "a.ex", status: :modified, staged: false},
+        %Minga.Git.StatusEntry{path: "b.ex", status: :untracked, staged: false}
+      ]
+    }
+
+    assert :ok = BuiltinSurfaces.sync_git_status_panel(panel, table)
+
+    {_ctx, _caches, cmds} = sync_chrome(gui_state(sidebar_registry: table))
+    {active_id, entries} = cmds |> gui_sidebars_payload!() |> parse_gui_sidebars()
+
+    assert active_id == "git_status"
+
+    git_status = Enum.find(entries, &(&1.id == "git_status"))
+    assert git_status.visible?
+    assert git_status.focused?
+    assert git_status.badge_count == 2
+  end
+
+  test "registered extension sidebars own the GUI active id over inactive built-ins", %{
+    sidebar_registry: table
+  } do
+    root = Path.join(System.tmp_dir!(), "sidebar-gui-emit-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(root)
+    File.write!(Path.join(root, "a.ex"), "")
+
+    file_tree = FileTreeState.open(%FileTreeState{}, FileTree.new(root, width: 32), nil)
+    state = gui_state(sidebar_registry: table) |> EditorState.set_file_tree(file_tree)
+    FileTreeFeature.sync_sidebar(%FileTreeState{}, table)
 
     assert :ok =
-             Sidebar.register({:extension, :outline}, %{
+             Sidebar.register(table, {:extension, :outline}, %{
                id: "outline",
                display_name: "Outline",
                priority: 40,
@@ -42,24 +103,20 @@ defmodule MingaEditor.Extension.SidebarGUIEmitTest do
              })
 
     {_ctx, _caches, cmds} = sync_chrome(state)
-    payload = gui_sidebars_payload!(cmds)
-    assert {"outline", rest} = take_string16(binary_part(payload, 3, byte_size(payload) - 3))
+    {active_id, entries} = cmds |> gui_sidebars_payload!() |> parse_gui_sidebars()
 
-    {id, rest} = take_string16(rest)
-    {_display_name, rest} = take_string16(rest)
-    {_kind, rest} = take_string16(rest)
-    {_icon, rest} = take_string16(rest)
-    <<_order::16, flags::8, _preferred_width::16, _badge::16, _rest::binary>> = rest
+    assert active_id == "outline"
 
-    assert id == "file_tree"
-    refute Bitwise.band(flags, 0x01) != 0
+    file_tree_entry = Enum.find(entries, &(&1.id == "file_tree"))
+    refute file_tree_entry.visible?
   end
 
-  test "GUI emit includes registered sidebar metadata and skips selection-only snapshot changes" do
-    state = gui_state()
+  test "GUI emit includes registered sidebar metadata and skips selection-only snapshot changes",
+       %{sidebar_registry: table} do
+    state = gui_state(sidebar_registry: table)
 
     assert :ok =
-             Sidebar.register({:extension, :outline}, %{
+             Sidebar.register(table, {:extension, :outline}, %{
                id: "outline",
                display_name: "Outline",
                priority: 40,
@@ -77,7 +134,7 @@ defmodule MingaEditor.Extension.SidebarGUIEmitTest do
     assert Enum.any?(first_cmds, &match?(<<0x9F, _::binary>>, &1))
 
     assert :ok =
-             Sidebar.publish_snapshot({:extension, :outline}, "outline",
+             Sidebar.publish_snapshot(table, {:extension, :outline}, "outline",
                rows: [%{id: "a", text: "alpha"}, %{id: "b", text: "beta", selected?: true}]
              )
 
@@ -104,6 +161,35 @@ defmodule MingaEditor.Extension.SidebarGUIEmitTest do
     end)
   end
 
+  defp parse_gui_sidebars(<<1::8, count::16, rest::binary>>) do
+    {active_id, rest} = take_string16(rest)
+    {active_id, parse_sidebar_entries(rest, count, [])}
+  end
+
+  defp parse_sidebar_entries(_rest, 0, acc), do: Enum.reverse(acc)
+
+  defp parse_sidebar_entries(rest, count, acc) do
+    {id, rest} = take_string16(rest)
+    {display_name, rest} = take_string16(rest)
+    {semantic_kind, rest} = take_string16(rest)
+    {icon, rest} = take_string16(rest)
+    <<order::16, flags::8, preferred_width::16, badge_count::16, rest::binary>> = rest
+
+    entry = %{
+      id: id,
+      display_name: display_name,
+      semantic_kind: semantic_kind,
+      icon: icon,
+      order: order,
+      visible?: Bitwise.band(flags, 0x01) != 0,
+      focused?: Bitwise.band(flags, 0x02) != 0,
+      preferred_width: preferred_width,
+      badge_count: badge_count
+    }
+
+    parse_sidebar_entries(rest, count - 1, [entry | acc])
+  end
+
   defp take_string16(<<len::16, value::binary-size(len), rest::binary>>), do: {value, rest}
 
   defp collect_port_casts, do: collect_port_casts([])
@@ -114,10 +200,5 @@ defmodule MingaEditor.Extension.SidebarGUIEmitTest do
     after
       0 -> Enum.reverse(acc)
     end
-  end
-
-  defp reset_default_sidebar_table do
-    Sidebar.unregister_source({:extension, :outline})
-    Sidebar.unregister_source(:builtin)
   end
 end

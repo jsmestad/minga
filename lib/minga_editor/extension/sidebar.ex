@@ -14,6 +14,7 @@ defmodule MingaEditor.Extension.Sidebar do
 
   @table __MODULE__
   @reserved_builtin_ids MapSet.new(["file_tree", "git_status", "observatory"])
+  @default_notify MingaEditor
 
   @typedoc "Registry table name."
   @type table :: atom()
@@ -44,6 +45,7 @@ defmodule MingaEditor.Extension.Sidebar do
           optional(:icon) => String.t(),
           optional(:input_handler) => module() | nil,
           optional(:action_handler) => action_handler(),
+          optional(:badge_count) => non_neg_integer() | nil,
           optional(:snapshot) => Snapshot.t()
         }
 
@@ -56,8 +58,18 @@ defmodule MingaEditor.Extension.Sidebar do
   @doc false
   @spec child_spec(keyword()) :: Supervisor.child_spec()
   def child_spec(opts) do
-    %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}, type: :worker}
+    id = Keyword.get(opts, :name, __MODULE__)
+    %{id: id, start: {__MODULE__, :start_link, [opts]}, type: :worker}
   end
+
+  @doc "Returns the default production sidebar registry table."
+  @spec default_table() :: table()
+  def default_table, do: @table
+
+  @doc "Returns the sidebar registry table for a state-like value."
+  @spec table_for(map() | nil) :: table()
+  def table_for(%{sidebar_registry: table}) when is_atom(table), do: table
+  def table_for(_state), do: @table
 
   @doc "Registers or replaces a sidebar owned by `source`."
   @spec register(source(), register_attrs() | keyword()) :: :ok | {:error, term()}
@@ -116,6 +128,15 @@ defmodule MingaEditor.Extension.Sidebar do
 
   def set_focused(table, source, id, focused?) when is_boolean(focused?) do
     call_table(table, {:set_focused, source, id, focused?})
+  end
+
+  @doc "Makes one visible left sidebar focused and clears focus from the rest."
+  @spec focus_left(String.t() | nil) :: :ok | {:error, term()}
+  @spec focus_left(table(), String.t() | nil) :: :ok | {:error, term()}
+  def focus_left(id), do: focus_left(@table, id)
+
+  def focus_left(table, id) when is_binary(id) or is_nil(id) do
+    call_table(table, {:focus_left, id})
   end
 
   @doc "Returns a sidebar by id."
@@ -185,11 +206,15 @@ defmodule MingaEditor.Extension.Sidebar do
   @spec init(keyword()) :: {:ok, table()}
   def init(opts) do
     table = Keyword.get(opts, :name, @table)
+    notify = Keyword.get(opts, :notify, if(table == @table, do: @default_notify, else: false))
     create_owned_table(table)
+    :persistent_term.put({__MODULE__, table, :notify}, notify)
 
-    ContributionCleanup.register(:editor_sidebars, fn source ->
-      unregister_source(table, source)
-    end)
+    if table == @table do
+      ContributionCleanup.register(:editor_sidebars, fn source ->
+        unregister_source(table, source)
+      end)
+    end
 
     {:ok, table}
   end
@@ -225,13 +250,18 @@ defmodule MingaEditor.Extension.Sidebar do
     {:reply, update_owned(table, source, id, &Entry.set_focused(&1, focused?)), table}
   end
 
+  def handle_call({:focus_left, id}, _from, table) do
+    focus_left_entries(table, id)
+    {:reply, :ok, table}
+  end
+
   @spec do_register(table(), source(), register_attrs() | keyword()) :: :ok | {:error, term()}
   defp do_register(table, source, attrs) do
     with {:ok, entry} <- build_entry(source, attrs),
          :ok <- reject_reserved_builtin_id(source, entry.id),
          :ok <- reject_foreign_duplicate(table, source, entry.id) do
       :ets.insert(table, {entry.id, entry})
-      notify_changed()
+      notify_changed(table)
       :ok
     end
   end
@@ -244,7 +274,7 @@ defmodule MingaEditor.Extension.Sidebar do
 
       %{source: ^source} ->
         :ets.delete(table, id)
-        notify_changed()
+        notify_changed(table)
         :ok
 
       %{source: other} ->
@@ -254,7 +284,7 @@ defmodule MingaEditor.Extension.Sidebar do
 
   @spec do_unregister_source(table(), source()) :: :ok
   defp do_unregister_source(table, source) do
-    if remove_source_entries(table, source), do: notify_changed()
+    if remove_source_entries(table, source), do: notify_changed(table)
     :ok
   end
 
@@ -282,6 +312,7 @@ defmodule MingaEditor.Extension.Sidebar do
          icon: Map.get(attrs, :icon, "sidebar.left"),
          input_handler: Map.get(attrs, :input_handler),
          action_handler: Map.get(attrs, :action_handler),
+         badge_count: Map.get(attrs, :badge_count),
          snapshot: normalize_snapshot(Map.get(attrs, :snapshot, Snapshot.new()))
        }}
     end
@@ -323,6 +354,18 @@ defmodule MingaEditor.Extension.Sidebar do
   @spec normalize_snapshot(Snapshot.t() | keyword() | map()) :: Snapshot.t()
   defp normalize_snapshot(%Snapshot{} = snapshot), do: snapshot
   defp normalize_snapshot(snapshot), do: Snapshot.new(snapshot)
+
+  @spec focus_left_entries(table(), String.t() | nil) :: :ok
+  defp focus_left_entries(table, id) do
+    table
+    |> :ets.tab2list()
+    |> Enum.each(fn {entry_id, entry} ->
+      focused? = entry.placement == :left and entry.visible? and entry_id == id
+      :ets.insert(table, {entry_id, Entry.set_focused(entry, focused?)})
+    end)
+
+    notify_changed(table)
+  end
 
   @spec remove_source_entries(table(), source()) :: boolean()
   defp remove_source_entries(table, source) do
@@ -370,7 +413,7 @@ defmodule MingaEditor.Extension.Sidebar do
 
       %{source: ^source} = entry ->
         :ets.insert(table, {id, fun.(entry)})
-        notify_changed()
+        notify_changed(table)
         :ok
 
       %{source: other} ->
@@ -391,10 +434,32 @@ defmodule MingaEditor.Extension.Sidebar do
   @spec sort_entries([entry()]) :: [entry()]
   defp sort_entries(entries), do: Enum.sort_by(entries, &{&1.priority, &1.id})
 
-  @spec notify_changed() :: :ok
-  defp notify_changed do
-    if Process.whereis(MingaEditor), do: MingaEditor.render()
-    :ok
+  @spec notify_changed(table()) :: :ok
+  defp notify_changed(table) do
+    case table_notify_target(table) do
+      false ->
+        :ok
+
+      MingaEditor ->
+        if Process.whereis(MingaEditor), do: MingaEditor.render()
+        :ok
+
+      pid when is_pid(pid) ->
+        send(pid, {:sidebar_changed, table})
+        :ok
+
+      name when is_atom(name) ->
+        if Process.whereis(name), do: GenServer.cast(name, :render)
+        :ok
+    end
+  end
+
+  @spec table_notify_target(table()) :: false | pid() | atom()
+  defp table_notify_target(table) do
+    case :persistent_term.get({__MODULE__, table, :notify}, :missing) do
+      :missing -> @default_notify
+      notify -> notify
+    end
   end
 
   @spec run_action_handler(action_handler(), MingaEditor.State.t(), String.t(), map()) ::

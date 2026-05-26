@@ -17,6 +17,7 @@ defmodule Minga.Test.EditorCase do
   alias MingaEditor
   alias Minga.Test.HeadlessPort
   alias Minga.Test.Snapshot
+  alias MingaEditor.Extension.Sidebar
 
   using do
     quote do
@@ -58,6 +59,9 @@ defmodule Minga.Test.EditorCase do
     events_registry =
       Keyword.get_lazy(opts, :events_registry, fn -> start_events_registry(id) end)
 
+    sidebar_registry =
+      Keyword.get_lazy(opts, :sidebar_registry, fn -> start_sidebar_registry(id) end)
+
     {:ok, port} = HeadlessPort.start_link(width: width, height: height)
     buffer_opts = [content: content, events_registry: events_registry]
     buffer_opts = if file_path, do: [{:file_path, file_path} | buffer_opts], else: buffer_opts
@@ -89,6 +93,7 @@ defmodule Minga.Test.EditorCase do
       height: height,
       editing_model: editing_model,
       events_registry: events_registry,
+      sidebar_registry: sidebar_registry,
       suppress_tool_prompts: true
     ]
 
@@ -127,7 +132,8 @@ defmodule Minga.Test.EditorCase do
       port: port,
       width: width,
       height: height,
-      events_registry: events_registry
+      events_registry: events_registry,
+      sidebar_registry: sidebar_registry
     })
   end
 
@@ -141,6 +147,9 @@ defmodule Minga.Test.EditorCase do
 
     events_registry =
       Keyword.get_lazy(opts, :events_registry, fn -> start_events_registry(id) end)
+
+    sidebar_registry =
+      Keyword.get_lazy(opts, :sidebar_registry, fn -> start_sidebar_registry(id) end)
 
     {:ok, port} = HeadlessPort.start_link(width: width, height: height)
 
@@ -159,6 +168,7 @@ defmodule Minga.Test.EditorCase do
       height: height,
       editing_model: editing_model,
       events_registry: events_registry,
+      sidebar_registry: sidebar_registry,
       suppress_tool_prompts: true
     ]
 
@@ -189,7 +199,8 @@ defmodule Minga.Test.EditorCase do
       port: port,
       width: width,
       height: height,
-      events_registry: events_registry
+      events_registry: events_registry,
+      sidebar_registry: sidebar_registry
     }
   end
 
@@ -898,6 +909,13 @@ defmodule Minga.Test.EditorCase do
   defp start_events_registry(id) do
     name = :"minga_events_#{id}"
     start_supervised!({Minga.Events, name: name})
+    name
+  end
+
+  @spec start_sidebar_registry(pos_integer()) :: Sidebar.table()
+  defp start_sidebar_registry(id) do
+    name = :"minga_sidebars_#{id}"
+    start_supervised!({Sidebar, name: name, notify: false})
     name
   end
 
