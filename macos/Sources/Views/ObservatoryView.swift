@@ -8,7 +8,6 @@ struct ObservatoryView: View {
 
     @State private var expandedNodeIds: Set<String> = []
     @State private var selectedNodeId: String?
-    @State private var displayMode: ObservatoryDisplayMode = .tree
     @State private var hasInitializedExpansion = false
 
     var body: some View {
@@ -16,11 +15,7 @@ struct ObservatoryView: View {
             header
             Divider().overlay(theme.treeSeparatorFg.opacity(0.4))
 
-            if displayMode == .tree {
-                treeList
-            } else {
-                ObservatoryGraphView(state: state, theme: theme, encoder: encoder, selectedNodeId: $selectedNodeId)
-            }
+            treeList
         }
         .background(theme.treeBg)
         .onAppear(perform: reconcileLocalState)
@@ -39,20 +34,9 @@ struct ObservatoryView: View {
                     .foregroundStyle(theme.treeFg.opacity(0.55))
             }
 
-            HStack(spacing: 8) {
-                Label(formatBytes(state.totalMemory), systemImage: "memorychip")
-                    .font(.caption)
-                    .foregroundStyle(theme.treeFg.opacity(0.55))
-                Spacer()
-                Picker("View", selection: $displayMode) {
-                    ForEach(ObservatoryDisplayMode.allCases) { mode in
-                        Text(mode.rawValue).tag(mode)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-                .frame(width: 120)
-            }
+            Label(formatBytes(state.totalMemory), systemImage: "memorychip")
+                .font(.caption)
+                .foregroundStyle(theme.treeFg.opacity(0.55))
         }
         .padding(10)
     }
