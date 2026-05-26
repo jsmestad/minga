@@ -224,12 +224,18 @@ defmodule MingaEditor.RenderPipeline.InputTest do
         shell_state: %{state.shell_state | modeline_click_regions: [{:old, 1}]}
       }
 
-      state = EditorState.switch_shell(state, :board)
+      state = %{
+        state
+        | shell_id: :fake,
+          shell: MingaEditor.Test.FakeShell,
+          shell_state: %{modeline_click_regions: [], tab_bar_click_regions: []}
+      }
+
       result = EditorState.apply_renderer_writeback(state, writeback)
 
       assert result.layout == nil
       assert result.focus_tree == nil
-      assert result.shell_id == :board
+      assert result.shell_id == :fake
       assert result.shell_state.modeline_click_regions == []
     end
   end

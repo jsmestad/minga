@@ -6,7 +6,7 @@ defmodule MingaEditor.State.ModalOverlay.Dashboard do
   with the metadata every ModalOverlay variant carries. The dashboard is
   global UX, so `owner` defaults to `:global`.
 
-  Scoped to the Traditional shell. `Shell.Board.State` declares
+  Scoped to the Traditional shell. Non-Traditional shell states may declare
   `dashboard: nil` in its typespec because Board does not surface the
   dashboard; opening this variant while the active shell is Board would
   violate that type. Callers that want a dashboard-style affordance on

@@ -1,4 +1,4 @@
-defmodule MingaEditor.Shell.Board.ChromeTest do
+defmodule MingaBoard.Shell.ChromeTest do
   @moduledoc "Tests Board's build_chrome callback."
 
   use ExUnit.Case, async: true
@@ -12,8 +12,8 @@ defmodule MingaEditor.Shell.Board.ChromeTest do
   alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.Scroll
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.Shell.Board
-  alias MingaEditor.Shell.Board.State, as: BoardState
+  alias MingaBoard.Shell
+  alias MingaBoard.Shell.State, as: BoardState
   alias MingaEditor.Shell.Traditional
 
   import MingaEditor.RenderPipeline.TestHelpers
@@ -22,7 +22,25 @@ defmodule MingaEditor.Shell.Board.ChromeTest do
 
   defp grid_board_state do
     state = base_state()
-    %{state | shell: Board, shell_state: BoardState.new()}
+
+    %{
+      state
+      | shell: Shell,
+        shell_id: :board,
+        shell_identity: board_identity(),
+        shell_state: BoardState.new()
+    }
+  end
+
+  defp board_identity do
+    case MingaEditor.Shell.Registry.get(:board) do
+      nil ->
+        MingaBoard.Feature.register_contributions()
+        MingaEditor.Shell.Identity.new(MingaEditor.Shell.Registry.get(:board))
+
+      entry ->
+        MingaEditor.Shell.Identity.new(entry)
+    end
   end
 
   defp zoomed_board_state(card_attrs \\ []) do
@@ -32,7 +50,14 @@ defmodule MingaEditor.Shell.Board.ChromeTest do
     board = BoardState.zoom_into(board, card.id, %{})
 
     state = base_state()
-    %{state | shell: Board, shell_state: board}
+
+    %{
+      state
+      | shell: Shell,
+        shell_id: :board,
+        shell_identity: board_identity(),
+        shell_state: board
+    }
   end
 
   defp run_through_content(state) do
@@ -52,11 +77,11 @@ defmodule MingaEditor.Shell.Board.ChromeTest do
 
   describe "async_render?/1" do
     test "Board grid view opts out of async rendering" do
-      refute Board.async_render?(grid_board_state())
+      refute Shell.async_render?(grid_board_state())
     end
 
     test "Board zoomed view allows async rendering" do
-      assert Board.async_render?(zoomed_board_state())
+      assert Shell.async_render?(zoomed_board_state())
     end
 
     test "Traditional shell allows async rendering" do
@@ -71,7 +96,7 @@ defmodule MingaEditor.Shell.Board.ChromeTest do
       state = grid_board_state()
       {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
 
-      chrome = Board.build_chrome(state, layout, scrolls, cursor_info)
+      chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
 
       assert %Chrome{} = chrome
       assert chrome.tab_bar == []
@@ -92,7 +117,7 @@ defmodule MingaEditor.Shell.Board.ChromeTest do
       state = zoomed_board_state()
       {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
 
-      chrome = Board.build_chrome(state, layout, scrolls, cursor_info)
+      chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
 
       assert [_ | _] = chrome.tab_bar
       assert Enum.all?(chrome.tab_bar, &match?({_, _, _, %Face{}}, &1))
@@ -102,7 +127,7 @@ defmodule MingaEditor.Shell.Board.ChromeTest do
       state = zoomed_board_state(task: "Fix the login bug")
       {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
 
-      chrome = Board.build_chrome(state, layout, scrolls, cursor_info)
+      chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
 
       assert context_bar_text(chrome) =~ "Fix the login bug"
     end
@@ -111,7 +136,7 @@ defmodule MingaEditor.Shell.Board.ChromeTest do
       state = zoomed_board_state(model: "sonnet-4")
       {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
 
-      chrome = Board.build_chrome(state, layout, scrolls, cursor_info)
+      chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
 
       assert context_bar_text(chrome) =~ "sonnet-4"
     end
@@ -120,7 +145,7 @@ defmodule MingaEditor.Shell.Board.ChromeTest do
       state = zoomed_board_state()
       {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
 
-      chrome = Board.build_chrome(state, layout, scrolls, cursor_info)
+      chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
 
       assert context_bar_text(chrome) =~ "ESC back to Board"
     end
@@ -129,7 +154,7 @@ defmodule MingaEditor.Shell.Board.ChromeTest do
       state = zoomed_board_state(task: "")
       {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
 
-      chrome = Board.build_chrome(state, layout, scrolls, cursor_info)
+      chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
 
       assert context_bar_text(chrome) =~ "Untitled"
     end
@@ -138,7 +163,7 @@ defmodule MingaEditor.Shell.Board.ChromeTest do
       state = zoomed_board_state(model: nil)
       {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
 
-      chrome = Board.build_chrome(state, layout, scrolls, cursor_info)
+      chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
 
       refute context_bar_text(chrome) =~ " · "
     end
@@ -147,7 +172,7 @@ defmodule MingaEditor.Shell.Board.ChromeTest do
       state = zoomed_board_state()
       {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
 
-      chrome = Board.build_chrome(state, layout, scrolls, cursor_info)
+      chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
 
       assert is_list(chrome.regions)
       assert Enum.all?(chrome.regions, &is_binary/1)
@@ -157,7 +182,7 @@ defmodule MingaEditor.Shell.Board.ChromeTest do
       state = zoomed_board_state()
       {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
 
-      chrome = Board.build_chrome(state, layout, scrolls, cursor_info)
+      chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
 
       assert chrome.status_bar_draws == []
       assert chrome.minibuffer == []
@@ -173,7 +198,7 @@ defmodule MingaEditor.Shell.Board.ChromeTest do
         Enum.map(statuses, fn status ->
           state = zoomed_board_state(status: status)
           {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
-          chrome = Board.build_chrome(state, layout, scrolls, cursor_info)
+          chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
           context_bar_text(chrome)
         end)
 
@@ -188,7 +213,7 @@ defmodule MingaEditor.Shell.Board.ChromeTest do
     test "zoomed chrome composes into a valid Frame without crashing" do
       state = zoomed_board_state()
       {scrolls, frames, cursor_info, state, layout} = run_through_content(state)
-      chrome = Board.build_chrome(state, layout, scrolls, cursor_info)
+      chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
 
       frame = Compose.compose_windows(frames, chrome, cursor_info, state)
 
@@ -204,10 +229,17 @@ defmodule MingaEditor.Shell.Board.ChromeTest do
       for cols <- [40, 80, 120, 200] do
         board = BoardState.new()
         state = base_state(cols: cols)
-        state = %{state | shell: Board, shell_state: board}
+
+        state = %{
+          state
+          | shell: Shell,
+            shell_id: :board,
+            shell_identity: board_identity(),
+            shell_state: board
+        }
 
         {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
-        chrome = Board.build_chrome(state, layout, scrolls, cursor_info)
+        chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
 
         assert chrome.tab_bar == [], "tab_bar should be empty at cols=#{cols}"
         assert chrome.status_bar_draws == [], "status_bar should be empty at cols=#{cols}"
@@ -220,7 +252,7 @@ defmodule MingaEditor.Shell.Board.ChromeTest do
       state = zoomed_board_state(task: "My task")
       {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
 
-      chrome = Board.build_chrome(state, layout, scrolls, cursor_info)
+      chrome = Shell.build_chrome(state, layout, scrolls, cursor_info)
 
       # Context bar is in tab_bar slot (Board's convention)
       assert [_ | _] = chrome.tab_bar

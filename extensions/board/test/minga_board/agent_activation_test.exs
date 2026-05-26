@@ -1,13 +1,13 @@
-defmodule MingaEditor.AgentActivationTest do
+defmodule MingaBoard.AgentActivationTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Test.StubServer
 
   alias MingaEditor.Agent.UIState
-  alias MingaEditor.AgentActivation
+  alias MingaBoard.AgentActivation
   alias MingaEditor.Commands.Agent, as: AgentCommands
-  alias MingaEditor.Shell.Board.Card
+  alias MingaBoard.Shell.Card
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess

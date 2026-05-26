@@ -1,4 +1,4 @@
-defmodule MingaEditor.Shell.Board.Renderer do
+defmodule MingaBoard.Shell.Renderer do
   @moduledoc """
   TUI renderer for The Board grid view.
 
@@ -12,9 +12,9 @@ defmodule MingaEditor.Shell.Board.Renderer do
 
   alias Minga.Core.Face
   alias MingaEditor.DisplayList
-  alias MingaEditor.Shell.Board.Card
-  alias MingaEditor.Shell.Board.Layout
-  alias MingaEditor.Shell.Board.State
+  alias MingaBoard.Shell.Card
+  alias MingaBoard.Shell.Layout
+  alias MingaBoard.Shell.State
 
   # Box-drawing characters (simple ASCII for maximum terminal compatibility)
   @tl "┌"

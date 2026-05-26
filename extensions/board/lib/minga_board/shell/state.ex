@@ -1,4 +1,4 @@
-defmodule MingaEditor.Shell.Board.State do
+defmodule MingaBoard.Shell.State do
   @moduledoc """
   Presentation state for The Board shell.
 
@@ -19,7 +19,7 @@ defmodule MingaEditor.Shell.Board.State do
   then either clears the live workspace or restores a minimal Board workspace.
   """
 
-  alias MingaEditor.Shell.Board.Card
+  alias MingaBoard.Shell.Card
   alias MingaEditor.State.ModalOverlay
 
   @type t :: %__MODULE__{
@@ -45,6 +45,10 @@ defmodule MingaEditor.Shell.Board.State do
           modal: ModalOverlay.t(),
           bottom_panel: MingaEditor.BottomPanel.t(),
           git_status_panel: nil,
+          observatory_visible: boolean(),
+          observatory_data: term(),
+          observatory_timer: reference() | nil,
+          observatory_inspection: term(),
           modeline_click_regions: [],
           tab_bar_click_regions: [],
           warning_popup_timer: nil,
@@ -74,6 +78,10 @@ defmodule MingaEditor.Shell.Board.State do
             modal: :none,
             bottom_panel: %MingaEditor.BottomPanel{},
             git_status_panel: nil,
+            observatory_visible: false,
+            observatory_data: nil,
+            observatory_timer: nil,
+            observatory_inspection: nil,
             modeline_click_regions: [],
             tab_bar_click_regions: [],
             warning_popup_timer: nil,
@@ -186,6 +194,41 @@ defmodule MingaEditor.Shell.Board.State do
     case Map.get(state.cards, card_id) do
       nil -> state
       card -> %{state | cards: Map.put(state.cards, card_id, fun.(card))}
+    end
+  end
+
+  @doc "Updates a card's status when it exists."
+  @spec set_card_status(t(), Card.id(), Card.status()) :: t()
+  def set_card_status(%__MODULE__{} = state, card_id, status) do
+    update_card(state, card_id, &Card.set_status(&1, status))
+  end
+
+  @doc "Sets the shell status message used by EditorState status helpers."
+  @spec set_status(t(), String.t()) :: t()
+  def set_status(%__MODULE__{} = state, message) when is_binary(message) do
+    %{state | status_msg: message}
+  end
+
+  @doc "Clears the shell status message."
+  @spec clear_status(t()) :: t()
+  def clear_status(%__MODULE__{} = state), do: %{state | status_msg: nil}
+
+  @doc "Clears zoom state without changing card workspaces."
+  @spec exit_zoom(t()) :: t()
+  def exit_zoom(%__MODULE__{} = state), do: %{state | zoomed_into: nil}
+
+  @doc "Stores the live workspace on a zoomed card and returns the grid workspace snapshot."
+  @spec store_live_workspace_and_zoom_out(t(), Card.id(), Card.workspace_snapshot()) ::
+          {t(), Card.workspace_snapshot() | nil}
+  def store_live_workspace_and_zoom_out(%__MODULE__{} = state, card_id, live_workspace) do
+    case Map.get(state.cards, card_id) do
+      nil ->
+        {state, nil}
+
+      %Card{} = card ->
+        grid_workspace = card.workspace
+        state = update_card(state, card_id, &Card.store_workspace(&1, live_workspace))
+        {%{state | zoomed_into: nil}, grid_workspace}
     end
   end
 

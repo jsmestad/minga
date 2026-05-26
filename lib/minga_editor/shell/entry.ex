@@ -6,7 +6,7 @@ defmodule MingaEditor.Shell.Entry do
   """
 
   @type source :: Minga.Extension.ContributionCleanup.contribution_source()
-  @type capability :: atom()
+  @type capability :: :gui | :tui
 
   @enforce_keys [:id, :source, :module, :display_name, :description, :capabilities]
   defstruct [
@@ -178,10 +178,15 @@ defmodule MingaEditor.Shell.Entry do
 
   @spec normalize_capabilities([term()]) :: {:ok, [capability()]} | {:error, term()}
   defp normalize_capabilities(capabilities) do
-    if Enum.all?(capabilities, &is_atom/1) do
+    if Enum.all?(capabilities, &valid_capability?/1) do
       {:ok, capabilities |> Enum.uniq() |> Enum.sort()}
     else
       {:error, {:invalid_capabilities, capabilities}}
     end
   end
+
+  @spec valid_capability?(term()) :: boolean()
+  defp valid_capability?(:gui), do: true
+  defp valid_capability?(:tui), do: true
+  defp valid_capability?(_capability), do: false
 end

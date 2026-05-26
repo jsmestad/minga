@@ -39,6 +39,7 @@ defmodule MingaEditor do
   alias MingaEditor.SemanticTokenSync
   alias MingaEditor.Startup
   alias MingaEditor.State.ResourcePressure
+  alias MingaEditor.Shell.StateStash
   alias MingaEditor.Viewport
 
   alias MingaEditor.Handlers.BufferRegistry
@@ -1092,7 +1093,13 @@ defmodule MingaEditor do
 
   defp route_agent_event(state, session_pid, event, :background) do
     state = EditorState.ensure_shell_available(state)
+    state = route_active_shell_agent_event(state, session_pid, event)
+    state = route_stashed_shell_agent_event(state, session_pid, event)
+    {:noreply, schedule_render(state, 16)}
+  end
 
+  @spec route_active_shell_agent_event(EditorState.t(), pid(), term()) :: EditorState.t()
+  defp route_active_shell_agent_event(state, session_pid, event) do
     {shell_state, workspace, shell_effects} =
       EditorState.active_shell_module(state).on_agent_event(
         state.shell_state,
@@ -1101,9 +1108,88 @@ defmodule MingaEditor do
         event
       )
 
-    state = %{state | shell_state: shell_state, workspace: workspace}
-    state = EffectHandler.apply_effects(state, shell_effects)
-    {:noreply, schedule_render(state, 16)}
+    state
+    |> Map.replace!(:shell_state, shell_state)
+    |> Map.replace!(:workspace, workspace)
+    |> EffectHandler.apply_effects(shell_effects)
+  end
+
+  @spec route_stashed_shell_agent_event(EditorState.t(), pid(), term()) :: EditorState.t()
+  defp route_stashed_shell_agent_event(state, session_pid, event) do
+    {stash, state} =
+      Enum.reduce(state.shell_state_stash, {state.shell_state_stash, state}, fn
+        {shell_id, %StateStash{} = stashed}, {stash_acc, state_acc} ->
+          route_stashed_shell_agent_event(
+            stash_acc,
+            state_acc,
+            shell_id,
+            stashed,
+            session_pid,
+            event
+          )
+
+        _entry, acc ->
+          acc
+      end)
+
+    %{state | shell_state_stash: stash}
+  end
+
+  @spec route_stashed_shell_agent_event(
+          EditorState.shell_state_stash(),
+          EditorState.t(),
+          EditorState.shell_id(),
+          StateStash.t(),
+          pid(),
+          term()
+        ) :: {EditorState.shell_state_stash(), EditorState.t()}
+  defp route_stashed_shell_agent_event(
+         stash,
+         state,
+         shell_id,
+         %StateStash{} = stashed,
+         session_pid,
+         event
+       ) do
+    if function_exported?(stashed.module, :on_agent_event, 4) do
+      apply_stashed_shell_agent_event(stash, state, shell_id, stashed, session_pid, event)
+    else
+      {stash, state}
+    end
+  end
+
+  @spec apply_stashed_shell_agent_event(
+          EditorState.shell_state_stash(),
+          EditorState.t(),
+          EditorState.shell_id(),
+          StateStash.t(),
+          pid(),
+          term()
+        ) :: {EditorState.shell_state_stash(), EditorState.t()}
+  defp apply_stashed_shell_agent_event(
+         stash,
+         state,
+         shell_id,
+         %StateStash{} = stashed,
+         session_pid,
+         event
+       ) do
+    {shell_state, workspace, effects} =
+      stashed.module.on_agent_event(stashed.state, state.workspace, session_pid, event)
+
+    shell_state = maybe_persist_stashed_shell_state(stashed.module, stashed.state, shell_state)
+    stash = Map.put(stash, shell_id, %StateStash{stashed | state: shell_state})
+    state = EffectHandler.apply_effects(%{state | workspace: workspace}, effects)
+    {stash, state}
+  end
+
+  @spec maybe_persist_stashed_shell_state(module(), term(), term()) :: term()
+  defp maybe_persist_stashed_shell_state(module, old_state, new_state) do
+    if old_state != new_state and function_exported?(module, :persist_shell_state, 1) do
+      module.persist_shell_state(new_state)
+    else
+      new_state
+    end
   end
 
   @spec agent_event_owner(EditorState.t(), pid()) ::

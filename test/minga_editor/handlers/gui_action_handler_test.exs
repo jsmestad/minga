@@ -130,6 +130,17 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert EditorState.sidebar_active_id(closed) == nil
   end
 
+  test "board GUI actions report unavailable when Board is not the active shell" do
+    state = TestHelpers.base_state()
+
+    new_state = GuiActionHandler.dispatch(state, {:board_select_card, 123})
+
+    assert EditorState.status_msg(new_state) == "Board shell is unavailable"
+    assert new_state.shell_id == state.shell_id
+    assert new_state.shell == state.shell
+    refute Map.has_key?(new_state.shell_state, :zoomed_into)
+  end
+
   test "git porcelain GUI actions report disabled extension instead of no-op" do
     state = TestHelpers.base_state()
 
@@ -149,6 +160,24 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
     assert activated.workspace.keymap_scope == state.workspace.keymap_scope
     assert EditorState.sidebar_active_id(activated) == nil
+  end
+
+  test "extension panel actions report unavailable extensions" do
+    state = TestHelpers.base_state()
+
+    log =
+      capture_log(fn ->
+        new_state =
+          GuiActionHandler.dispatch(
+            state,
+            {:extension_panel_action, "missing_extension_for_gui_action", :refresh, %{}}
+          )
+
+        assert EditorState.status_msg(new_state) == "Extension panel action unavailable"
+      end)
+
+    assert log =~ "Extension panel action ignored"
+    assert log =~ "missing_extension_for_gui_action/refresh"
   end
 
   test "native GUI sidebar actions route to extension-owned sidebars" do
@@ -203,12 +232,8 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert new_state.workspace.keymap_scope == :editor
   end
 
-  test "observatory inspect is a no-op in the Board shell" do
-    state = %{
-      TestHelpers.base_state()
-      | shell: MingaEditor.Shell.Board,
-        shell_state: MingaEditor.Shell.Board.State.new()
-    }
+  test "observatory inspect is a no-op when the active shell has no observatory state" do
+    state = %{TestHelpers.base_state() | shell_state: %{}}
 
     assert GuiActionHandler.dispatch(state, {:observatory_inspect, "<0.1.0>"}) == state
   end

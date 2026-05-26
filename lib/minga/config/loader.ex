@@ -372,6 +372,10 @@ defmodule Minga.Config.Loader do
       ExtRegistry.register(:minga_git_porcelain, bundled_extension_path("git_porcelain"), [])
     end
 
+    if Application.get_env(:minga, :load_board_extension, true) do
+      ExtRegistry.register(:minga_board, bundled_extension_path("board"), [])
+    end
+
     :ok
   end
 
@@ -379,11 +383,31 @@ defmodule Minga.Config.Loader do
   defp bundled_extension_path(name) do
     priv_path = Application.app_dir(:minga, Path.join(["priv", "extensions", name, "lib"]))
 
-    if File.dir?(priv_path) do
-      priv_path
-    else
-      Path.expand("../../../extensions/#{name}/lib", __DIR__)
+    case File.dir?(priv_path) do
+      true -> priv_path
+      false -> bundled_extension_fallback_path(name, priv_path)
     end
+  end
+
+  @spec bundled_extension_fallback_path(String.t(), String.t()) :: String.t()
+  defp bundled_extension_fallback_path(name, priv_path) do
+    source_path = Path.expand("../../../extensions/#{name}/lib", __DIR__)
+
+    if source_extension_fallback_allowed?() and File.dir?(source_path) do
+      source_path
+    else
+      Minga.Log.warning(
+        :config,
+        "Bundled extension #{name} is missing at #{priv_path}; source-tree fallback is disabled"
+      )
+
+      priv_path
+    end
+  end
+
+  @spec source_extension_fallback_allowed?() :: boolean()
+  defp source_extension_fallback_allowed? do
+    Application.get_env(:minga, :allow_source_extension_fallback, false)
   end
 
   @spec with_config_source(atom(), (-> term())) :: term()

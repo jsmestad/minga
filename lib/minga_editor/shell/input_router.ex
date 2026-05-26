@@ -34,4 +34,9 @@ defmodule MingaEditor.Shell.InputRouter do
   """
   @callback handle_gui_action(shell_state(), workspace(), action :: term()) ::
               {shell_state(), workspace()}
+
+  @doc "Runs after `handle_gui_action/3` has been applied to full editor state."
+  @callback after_gui_action(editor_state :: term(), action :: term()) :: term()
+
+  @optional_callbacks after_gui_action: 2
 end

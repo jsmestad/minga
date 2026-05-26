@@ -114,18 +114,37 @@ defmodule MingaEditor.Frontend.Emit.Context do
   end
 
   @spec compute_title(map()) :: String.t()
-  defp compute_title(%{shell_id: :board, shell_state: %{zoomed_into: card_id}} = state)
-       when card_id != nil do
-    card = MingaEditor.Shell.Board.State.zoomed(state.shell_state)
+  defp compute_title(%{shell: shell} = state) do
+    case shell.gui_payload(state) do
+      {:board, %MingaEditor.Frontend.Protocol.GUI.BoardPayload{} = board} ->
+        compute_board_title(board)
+
+      nil ->
+        compute_standard_title(state)
+
+      other ->
+        Minga.Log.warning(
+          :render,
+          "Unsupported GUI shell payload #{inspect(other)}; using standard title"
+        )
+
+        compute_standard_title(state)
+    end
+  end
+
+  defp compute_title(state), do: compute_standard_title(state)
+
+  @spec compute_board_title(MingaEditor.Frontend.Protocol.GUI.BoardPayload.t()) :: String.t()
+  defp compute_board_title(%{zoomed_card_id: card_id} = board) when card_id != nil do
+    card = MingaEditor.Frontend.Protocol.GUI.BoardPayload.zoomed_card(board)
     card_name = if card, do: card.task, else: "Board"
     "#{card_name} \u2014 Minga"
   end
 
-  defp compute_title(%{shell_id: :board}) do
-    "The Board \u2014 Minga"
-  end
+  defp compute_board_title(_board), do: "The Board \u2014 Minga"
 
-  defp compute_title(state) do
+  @spec compute_standard_title(map()) :: String.t()
+  defp compute_standard_title(state) do
     if MingaEditor.Frontend.gui?(state.capabilities) do
       MingaEditor.Title.format_gui(state)
     else

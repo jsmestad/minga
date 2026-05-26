@@ -210,10 +210,26 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   @spec build_gui_tab_bar_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
 
-  # Board: no tab bar (Board manages its own navigation)
-  defp build_gui_tab_bar_cmd(%{shell_id: :board}, caches), do: {nil, caches}
+  defp build_gui_tab_bar_cmd(%{shell: shell} = ctx, caches) do
+    case shell.gui_payload(ctx) do
+      {:board, %MingaEditor.Frontend.Protocol.GUI.BoardPayload{}} ->
+        {nil, caches}
 
-  defp build_gui_tab_bar_cmd(%{shell_state: %{tab_bar: %TabBar{}}} = ctx, caches) do
+      nil ->
+        build_standard_gui_tab_bar_cmd(ctx, caches)
+
+      other ->
+        Log.warning(
+          :render,
+          "Unsupported GUI shell payload #{inspect(other)}; using standard tabs"
+        )
+
+        build_standard_gui_tab_bar_cmd(ctx, caches)
+    end
+  end
+
+  @spec build_standard_gui_tab_bar_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
+  defp build_standard_gui_tab_bar_cmd(%{shell_state: %{tab_bar: %TabBar{}}} = ctx, caches) do
     chrome_state = ChromeState.from_editor_state(ctx)
 
     fp =
@@ -230,7 +246,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     end
   end
 
-  defp build_gui_tab_bar_cmd(%{shell_state: %{tab_bar: nil}}, caches), do: {nil, caches}
+  defp build_standard_gui_tab_bar_cmd(%{shell_state: %{tab_bar: nil}}, caches), do: {nil, caches}
 
   @spec build_gui_workspaces_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
   defp build_gui_workspaces_cmd(%{shell_state: %{tab_bar: %TabBar{}}} = ctx, caches) do
@@ -1900,9 +1916,14 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   @spec build_gui_board_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
   defp build_gui_board_cmd(%{shell: shell} = ctx, caches) do
     case shell.gui_payload(ctx) do
-      {:board, board} -> build_gui_board_payload_cmd(board, caches)
-      nil -> dismiss_gui_board_cmd(caches)
-      other -> unsupported_gui_payload_cmd(other, caches)
+      {:board, %MingaEditor.Frontend.Protocol.GUI.BoardPayload{} = board} ->
+        build_gui_board_payload_cmd(board, caches)
+
+      nil ->
+        dismiss_gui_board_cmd(caches)
+
+      other ->
+        unsupported_gui_payload_cmd(other, caches)
     end
   end
 
@@ -1916,7 +1937,10 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     dismiss_gui_board_cmd(caches)
   end
 
-  @spec build_gui_board_payload_cmd(MingaEditor.Shell.Board.State.t(), Caches.t()) ::
+  @spec build_gui_board_payload_cmd(
+          MingaEditor.Frontend.Protocol.GUI.BoardPayload.t(),
+          Caches.t()
+        ) ::
           {binary() | nil, Caches.t()}
   defp build_gui_board_payload_cmd(board, caches) do
     # Always send when Board is active so the GUI stays in sync.
@@ -1932,32 +1956,29 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   end
 
   # Board not active: send visible=false once to dismiss.
-  # Must NOT use a default Board.State (grid_view? returns true → visible=1).
+  # Must NOT synthesize a shell payload when the active shell did not provide one.
   # Instead, build a minimal board with zoomed_into set so visible encodes as 0.
   defp dismiss_gui_board_cmd(caches) do
     if caches.last_gui_board_fp != :dismissed do
-      # zoomed_into: 1 forces grid_view? → false → visible=0
-      dismissed = %MingaEditor.Shell.Board.State{zoomed_into: 1}
-      {ProtocolGUI.encode_gui_board(dismissed), %{caches | last_gui_board_fp: :dismissed}}
+      {ProtocolGUI.encode_gui_board(MingaEditor.Frontend.Protocol.GUI.BoardPayload.hidden()),
+       %{caches | last_gui_board_fp: :dismissed}}
     else
       {nil, caches}
     end
   end
 
-  @spec board_fingerprint(MingaEditor.Shell.Board.State.t()) :: integer()
+  @spec board_fingerprint(MingaEditor.Frontend.Protocol.GUI.BoardPayload.t()) :: integer()
   defp board_fingerprint(board) do
     cards =
-      board
-      |> MingaEditor.Shell.Board.State.sorted_cards()
-      |> Enum.map(fn card ->
-        {card.id, card.status, card.kind, card.task, card.model, card.created_at,
-         card.recent_files, card.sparkline}
+      Enum.map(board.cards, fn card ->
+        {card.id, card.status, card.kind, card.task, card.display_task, card.model,
+         card.created_at, card.recent_files, card.sparkline}
       end)
 
     :erlang.phash2({
-      board.focused_card,
-      board.zoomed_into,
-      board.filter_mode,
+      board.focused_card_id,
+      board.zoomed_card_id,
+      board.filter_mode?,
       board.filter_text,
       cards
     })
@@ -1966,21 +1987,23 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   # ── Agent context bar ──
 
   @spec build_gui_agent_context_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
-  defp build_gui_agent_context_cmd(
-         %{shell_id: :board, shell_state: %{zoomed_into: nil}},
-         caches
-       ) do
-    send_hide_if_needed(:hidden, caches)
-  end
+  defp build_gui_agent_context_cmd(%{shell: shell} = ctx, caches) do
+    case shell.gui_payload(ctx) do
+      {:board, %MingaEditor.Frontend.Protocol.GUI.BoardPayload{} = board} ->
+        card = MingaEditor.Frontend.Protocol.GUI.BoardPayload.zoomed_card(board)
+        send_agent_context_if_applicable(board.zoomed_card_id, card, caches)
 
-  defp build_gui_agent_context_cmd(%{shell_id: :board, shell_state: board}, caches) do
-    card = MingaEditor.Shell.Board.State.zoomed(board)
-    send_agent_context_if_applicable(board.zoomed_into, card, caches)
-  end
+      nil ->
+        send_hide_if_needed(:not_board, caches)
 
-  # Not Board shell: hide context bar
-  defp build_gui_agent_context_cmd(_state, caches) do
-    send_hide_if_needed(:not_board, caches)
+      other ->
+        Log.warning(
+          :render,
+          "Unsupported GUI shell payload #{inspect(other)}; hiding agent context"
+        )
+
+        send_hide_if_needed(:unsupported_payload, caches)
+    end
   end
 
   @spec send_hide_if_needed(atom(), Caches.t()) :: {binary() | nil, Caches.t()}
@@ -1993,13 +2016,13 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   end
 
   @spec send_agent_context_if_applicable(
-          pos_integer(),
-          MingaEditor.Shell.Board.Card.t() | nil,
+          pos_integer() | nil,
+          MingaEditor.Frontend.Protocol.GUI.BoardCardPayload.t() | nil,
           Caches.t()
         ) :: {binary() | nil, Caches.t()}
   defp send_agent_context_if_applicable(card_id, card, caches)
        when is_map(card) and not is_nil(card) do
-    if MingaEditor.Shell.Board.Card.you_card?(card) do
+    if MingaEditor.Frontend.Protocol.GUI.BoardCardPayload.you_card?(card) do
       send_hide_if_needed(:you_card, caches)
     else
       send_agent_context_for_card(card_id, card, caches)
@@ -2012,7 +2035,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   @spec send_agent_context_for_card(
           pos_integer(),
-          MingaEditor.Shell.Board.Card.t(),
+          MingaEditor.Frontend.Protocol.GUI.BoardCardPayload.t(),
           Caches.t()
         ) :: {binary() | nil, Caches.t()}
   defp send_agent_context_for_card(card_id, card, caches) do
@@ -2045,11 +2068,19 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   @spec build_gui_change_summary_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
 
   # Change summary visible when zoomed into an agent card (not You card)
-  defp build_gui_change_summary_cmd(
-         %{shell_id: :board, shell_state: %{zoomed_into: card_id}} = _ctx,
-         caches
-       )
-       when card_id != nil do
+  defp build_gui_change_summary_cmd(%{shell: shell} = ctx, caches) do
+    case shell.gui_payload(ctx) do
+      {:board, %{zoomed_card_id: card_id}} when card_id != nil ->
+        build_gui_change_summary_for_board_card(card_id, caches)
+
+      _other ->
+        hide_gui_change_summary(caches)
+    end
+  end
+
+  @spec build_gui_change_summary_for_board_card(pos_integer(), Caches.t()) ::
+          {binary() | nil, Caches.t()}
+  defp build_gui_change_summary_for_board_card(card_id, caches) do
     # TODO: Compute diff stats from the card's touched files
     # For now, send empty list to test the UI
     entries = []
@@ -2066,7 +2097,8 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   end
 
   # Board grid or other shells: hide change summary
-  defp build_gui_change_summary_cmd(_ctx, caches) do
+  @spec hide_gui_change_summary(Caches.t()) :: {binary() | nil, Caches.t()}
+  defp hide_gui_change_summary(caches) do
     if caches.last_gui_change_summary_fp != :hidden do
       {ProtocolGUI.encode_gui_change_summary([], 0),
        %{caches | last_gui_change_summary_fp: :hidden}}

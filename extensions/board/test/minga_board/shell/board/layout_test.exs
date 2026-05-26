@@ -1,4 +1,4 @@
-defmodule MingaEditor.Shell.Board.LayoutTest do
+defmodule MingaBoard.Shell.LayoutTest do
   @moduledoc """
   Tests for Board grid layout computation.
 
@@ -8,8 +8,8 @@ defmodule MingaEditor.Shell.Board.LayoutTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias MingaEditor.Shell.Board.Layout
-  alias MingaEditor.Shell.Board.State
+  alias MingaBoard.Shell.Layout
+  alias MingaBoard.Shell.State
 
   # ── Helpers ────────────────────────────────────────────────────────────
 

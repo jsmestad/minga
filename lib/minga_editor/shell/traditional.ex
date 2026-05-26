@@ -161,6 +161,10 @@ defmodule MingaEditor.Shell.Traditional do
   end
 
   @impl true
+  @spec after_gui_action(term(), term()) :: term()
+  def after_gui_action(state, _action), do: state
+
+  @impl true
   @spec compute_layout(term()) :: MingaEditor.Layout.t()
   defdelegate compute_layout(editor_state), to: MingaEditor.Shell.Traditional.Layout, as: :compute
 

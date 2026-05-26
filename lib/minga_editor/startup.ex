@@ -580,10 +580,6 @@ defmodule MingaEditor.Startup do
   end
 
   @spec init_shell_state(module(), term(), keyword()) :: term()
-  defp init_shell_state(MingaEditor.Shell.Board, _dashboard, opts) do
-    MingaEditor.Shell.Board.init(opts)
-  end
-
   defp init_shell_state(MingaEditor.Shell.Traditional, _dashboard, opts) do
     %MingaEditor.Shell.Traditional.State{
       suppress_tool_prompts: Keyword.get(opts, :suppress_tool_prompts, false)

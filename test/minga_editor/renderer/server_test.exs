@@ -5,16 +5,37 @@ defmodule MingaEditor.Renderer.ServerTest do
   Pipeline details are covered in render-pipeline tests. This file checks the server-level contract: coalescing telemetry, crash tolerance, writeback, and async-vs-sync dispatch.
   """
 
-  use ExUnit.Case, async: true
+  # Registers a fake shell in the global shell registry for async-render opt-out coverage.
+  use ExUnit.Case, async: false
 
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Renderer.Server, as: RendererServer
-  alias MingaEditor.Shell.Board
-  alias MingaEditor.Shell.Board.State, as: BoardState
   alias MingaEditor.Viewport
 
   # Async renderer writeback can lag a bit under CI load, keep this local to the renderer assertions.
   @async_render_timeout 5_000
+
+  setup do
+    MingaEditor.Shell.Registry.reset_for_test()
+    MingaEditor.Shell.Registry.seed_builtin()
+
+    :ok =
+      MingaEditor.Shell.Registry.register({:extension, :fake_shell}, %{
+        id: :fake,
+        module: MingaEditor.Test.FakeShell,
+        display_name: "Fake Shell",
+        description: "Test shell",
+        default?: false,
+        capabilities: []
+      })
+
+    on_exit(fn ->
+      MingaEditor.Shell.Registry.reset_for_test()
+      MingaEditor.Shell.Registry.seed_builtin()
+    end)
+
+    :ok
+  end
 
   test "coalescing replaces older pending snapshots and emits telemetry" do
     renderer = start_renderer(self())
@@ -81,18 +102,13 @@ defmodule MingaEditor.Renderer.ServerTest do
       assert Minga.Test.HeadlessPort.frame_count(state.port_manager) > 0
     end
 
-    test "Board grid renders synchronously even when a renderer pid is present" do
+    test "shells that opt out of async rendering render synchronously even when a renderer pid is present" do
       renderer = start_renderer(self())
-      state = build_board_grid_state(renderer)
-      frame_ref = Minga.Test.HeadlessPort.prepare_await(state.port_manager)
+      state = build_sync_shell_state(renderer)
 
       result = MingaEditor.Renderer.render_or_async(state)
-      assert {:ok, screen} = Minga.Test.HeadlessPort.collect_frame(frame_ref)
 
-      rows = screen_rows(screen)
       assert result == state
-      assert Enum.any?(rows, &String.contains?(&1, "The Board"))
-      assert Enum.any?(rows, &String.contains?(&1, "Fix split renderer"))
       refute_receive {:render_done, _writeback}, 50
     end
   end
@@ -152,14 +168,16 @@ defmodule MingaEditor.Renderer.ServerTest do
     }
   end
 
-  defp screen_rows(%{grid: grid}) do
-    Enum.map(grid, fn row -> Enum.map_join(row, & &1.char) end)
-  end
-
-  defp build_board_grid_state(renderer_pid) do
+  defp build_sync_shell_state(renderer_pid) do
     state = build_editor_state(:tui, renderer_pid)
-    {board, _card} = BoardState.create_card(BoardState.new(), task: "Fix split renderer")
-    %{state | shell_id: :board, shell: Board, shell_state: board}
+
+    %{
+      state
+      | shell_id: :fake,
+        shell: MingaEditor.Test.FakeShell,
+        shell_identity: MingaEditor.Shell.Identity.new(MingaEditor.Shell.Registry.get(:fake)),
+        shell_state: MingaEditor.Test.FakeShell.init([])
+    }
   end
 
   defp build_editor_state(backend, renderer_pid) do

@@ -73,11 +73,6 @@ defmodule MingaEditor.Commands.UI do
     execute: &bottom_panel_prev_tab/1
   )
 
-  command(:toggle_board, "Toggle The Board view",
-    requires_buffer: false,
-    execute: &toggle_board/1
-  )
-
   command(:toggle_beam_observatory, "BEAM observatory",
     requires_buffer: false,
     execute: &toggle_beam_observatory/1
@@ -177,15 +172,6 @@ defmodule MingaEditor.Commands.UI do
       Map.has_key?(shell_state, :observatory_timer) and
       Map.has_key?(shell_state, :observatory_data) and
       Map.has_key?(shell_state, :observatory_inspection)
-  end
-
-  @spec toggle_board(EditorState.t()) :: EditorState.t()
-  defp toggle_board(state) do
-    if EditorState.active_shell_id(state) == :board do
-      EditorState.switch_shell(state, :traditional)
-    else
-      EditorState.switch_shell(state, :board)
-    end
   end
 
   @spec execute_parser_restart(EditorState.t()) :: EditorState.t()

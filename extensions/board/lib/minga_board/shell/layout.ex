@@ -1,4 +1,4 @@
-defmodule MingaEditor.Shell.Board.Layout do
+defmodule MingaBoard.Shell.Layout do
   @moduledoc """
   Card grid layout computation for The Board.
 
@@ -19,7 +19,7 @@ defmodule MingaEditor.Shell.Board.Layout do
   `MingaEditor.Layout.rect()`.
   """
 
-  alias MingaEditor.Shell.Board.State
+  alias MingaBoard.Shell.State
 
   # ── Golden ratio constants ─────────────────────────────────────────────
 
@@ -83,7 +83,7 @@ defmodule MingaEditor.Shell.Board.Layout do
   # ── Private ────────────────────────────────────────────────────────────
 
   @spec compute_grid(
-          [MingaEditor.Shell.Board.Card.t()],
+          [MingaBoard.Shell.Card.t()],
           pos_integer(),
           non_neg_integer(),
           pos_integer(),

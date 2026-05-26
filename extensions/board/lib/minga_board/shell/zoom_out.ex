@@ -1,4 +1,4 @@
-defmodule MingaEditor.Shell.Board.ZoomOut do
+defmodule MingaBoard.Shell.ZoomOut do
   @moduledoc """
   Input handler that intercepts Escape to zoom out of a card.
 
@@ -13,10 +13,9 @@ defmodule MingaEditor.Shell.Board.ZoomOut do
 
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Session.State, as: SessionState
-  alias MingaEditor.Shell.Board
-  alias MingaEditor.Shell.Board.AgentDeactivation
-  alias MingaEditor.Shell.Board.Card
-  alias MingaEditor.Shell.Board.State, as: BoardState
+  alias MingaBoard.Shell.AgentDeactivation
+  alias MingaBoard.Shell.Card
+  alias MingaBoard.Shell.State, as: BoardState
 
   @key_escape 27
 
@@ -29,7 +28,7 @@ defmodule MingaEditor.Shell.Board.ZoomOut do
   # always pass through before zoom-out gets a chance to run.
   # When the agent panel is focused, let the key pass through so the prompt
   # handler can apply its own normal/visual/operator semantics first.
-  def handle_key(%{shell: Board} = state, cp, mods) do
+  def handle_key(%{shell_id: :board} = state, cp, mods) do
     if Minga.Editing.in_leader?(state) do
       {:passthrough, state}
     else

@@ -1,4 +1,4 @@
-defmodule MingaEditor.Shell.Board.StateTest do
+defmodule MingaBoard.Shell.StateTest do
   @moduledoc """
   Tests for Board.State and Card structs: card CRUD, focus management,
   zoom lifecycle, and workspace snapshot round-trips.
@@ -8,8 +8,8 @@ defmodule MingaEditor.Shell.Board.StateTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias MingaEditor.Shell.Board.Card
-  alias MingaEditor.Shell.Board.State
+  alias MingaBoard.Shell.Card
+  alias MingaBoard.Shell.State
   alias MingaEditor.State.Tab.Context
   alias MingaEditor.Viewport
 

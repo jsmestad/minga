@@ -1,4 +1,4 @@
-defmodule MingaEditor.Shell.Board.Card do
+defmodule MingaBoard.Shell.Card do
   @moduledoc """
   A card on The Board representing an agent session or manual workspace.
 
@@ -47,7 +47,7 @@ defmodule MingaEditor.Shell.Board.Card do
           sparkline: [float()]
         }
 
-  @enforce_keys [:id, :task]
+  @enforce_keys [:id, :task, :created_at]
   defstruct id: nil,
             session: nil,
             server_name: nil,

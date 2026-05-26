@@ -1,14 +1,16 @@
-defmodule MingaEditor.Shell.Board.SessionLifecycleTest do
+defmodule MingaBoard.Shell.SessionLifecycleTest do
   # Serial because one test temporarily unregisters the global MingaAgent.SessionManager.
   use ExUnit.Case, async: false
+
+  import ExUnit.CaptureLog
 
   alias MingaAgent.SessionManager
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Viewport
-  alias MingaEditor.Shell.Board
-  alias MingaEditor.Shell.Board.Input, as: BoardInput
-  alias MingaEditor.Shell.Board.SessionLifecycle
-  alias MingaEditor.Shell.Board.State, as: BoardState
+  alias MingaBoard.Shell
+  alias MingaBoard.Shell.Input, as: BoardInput
+  alias MingaBoard.Shell.SessionLifecycle
+  alias MingaBoard.Shell.State, as: BoardState
 
   defp stop_session(pid) when is_pid(pid) do
     SessionManager.stop_session_by_pid(pid)
@@ -21,11 +23,24 @@ defmodule MingaEditor.Shell.Board.SessionLifecycleTest do
   defp make_state(board) do
     %EditorState{
       port_manager: self(),
-      shell: Board,
+      shell: Shell,
+      shell_id: :board,
+      shell_identity: board_identity(),
       shell_state: board,
       workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
       focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
     }
+  end
+
+  defp board_identity do
+    case MingaEditor.Shell.Registry.get(:board) do
+      nil ->
+        MingaBoard.Feature.register_contributions()
+        MingaEditor.Shell.Identity.new(MingaEditor.Shell.Registry.get(:board))
+
+      entry ->
+        MingaEditor.Shell.Identity.new(entry)
+    end
   end
 
   describe "ensure_session/3" do
@@ -51,6 +66,28 @@ defmodule MingaEditor.Shell.Board.SessionLifecycleTest do
       state = make_state(board)
 
       assert {^board, ^state} = SessionLifecycle.ensure_session(board, card, state)
+    end
+
+    test "starts a replacement session for a stale session pid" do
+      stale_pid = spawn(fn -> :ok end)
+      ref = Process.monitor(stale_pid)
+      assert_receive {:DOWN, ^ref, :process, ^stale_pid, _reason}
+
+      board = BoardState.new()
+
+      {board, card} =
+        BoardState.create_card(board, task: "Fix bug", model: "test-model", session: stale_pid)
+
+      state = make_state(board)
+
+      {new_board, _state} = SessionLifecycle.ensure_session(board, card, state)
+
+      updated_card = new_board.cards[card.id]
+      on_exit(fn -> stop_session(updated_card.session) end)
+
+      assert is_pid(updated_card.session)
+      assert updated_card.session != stale_pid
+      assert updated_card.status == :working
     end
 
     test "starts a new session for a sessionless agent card" do
@@ -80,6 +117,28 @@ defmodule MingaEditor.Shell.Board.SessionLifecycleTest do
       on_exit(fn -> stop_session(updated_card.session) end)
 
       assert is_pid(updated_card.session)
+    end
+
+    test "stop logs SessionManager exits instead of reporting success" do
+      original_pid = Process.whereis(MingaAgent.SessionManager)
+      Process.unregister(MingaAgent.SessionManager)
+
+      on_exit(fn ->
+        if original_pid && Process.alive?(original_pid) &&
+             Process.whereis(MingaAgent.SessionManager) == nil do
+          try do
+            Process.register(original_pid, MingaAgent.SessionManager)
+          rescue
+            ArgumentError -> :ok
+          end
+        end
+      end)
+
+      log =
+        capture_log(fn -> assert {:error, {:exit, _reason}} = SessionLifecycle.stop(self()) end)
+
+      assert log =~ "Board: failed to stop session"
+      Process.register(original_pid, MingaAgent.SessionManager)
     end
 
     @tag :tmp_dir

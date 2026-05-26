@@ -1,4 +1,4 @@
-defmodule MingaEditor.Shell.Board.InputTest do
+defmodule MingaBoard.Shell.InputTest do
   @moduledoc """
   Tests for Board input handlers: grid navigation, zoom in/out, dispatch.
 
@@ -9,16 +9,17 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
   alias MingaAgent.RuntimeState
   alias MingaAgent.SessionManager
+  alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Viewport
   alias MingaEditor.Window.Content
-  alias MingaEditor.Shell.Board
-  alias MingaEditor.Shell.Board.Input, as: BoardInput
-  alias MingaEditor.Shell.Board.State, as: BoardState
-  alias MingaEditor.Shell.Board.ZoomOut
+  alias MingaBoard.Shell
+  alias MingaBoard.Shell.Input, as: BoardInput
+  alias MingaBoard.Shell.State, as: BoardState
+  alias MingaBoard.Shell.ZoomOut
 
   # ── Key constants ──────────────────────────────────────────────────────
 
@@ -43,13 +44,26 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
     %EditorState{
       port_manager: self(),
-      shell: Board,
+      shell: Shell,
+      shell_id: :board,
+      shell_identity: board_identity(),
       shell_state: board,
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80)
       },
       focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
     }
+  end
+
+  defp board_identity do
+    case MingaEditor.Shell.Registry.get(:board) do
+      nil ->
+        MingaBoard.Feature.register_contributions()
+        MingaEditor.Shell.Identity.new(MingaEditor.Shell.Registry.get(:board))
+
+      entry ->
+        MingaEditor.Shell.Identity.new(entry)
+    end
   end
 
   defp editor_zoomed_into(card_count, card_id) do
@@ -72,7 +86,9 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
     state = %EditorState{
       port_manager: self(),
-      shell: Board,
+      shell: Shell,
+      shell_id: :board,
+      shell_identity: board_identity(),
       shell_state: board,
       workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
       focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
@@ -103,6 +119,26 @@ defmodule MingaEditor.Shell.Board.InputTest do
   end
 
   defp stop_session(_pid), do: :ok
+
+  defp unregister_session_manager do
+    original_pid = Process.whereis(MingaAgent.SessionManager)
+    if original_pid, do: Process.unregister(MingaAgent.SessionManager)
+    original_pid
+  end
+
+  defp restore_session_manager(nil), do: :ok
+
+  defp restore_session_manager(pid) do
+    if Process.alive?(pid) && Process.whereis(MingaAgent.SessionManager) == nil do
+      try do
+        Process.register(pid, MingaAgent.SessionManager)
+      rescue
+        ArgumentError -> :ok
+      end
+    else
+      :ok
+    end
+  end
 
   defp fake_session_pid do
     pid =
@@ -217,7 +253,9 @@ defmodule MingaEditor.Shell.Board.InputTest do
       # replaces them with a fresh agent-chat window.
       state = %EditorState{
         port_manager: self(),
-        shell: Board,
+        shell: Shell,
+        shell_id: :board,
+        shell_identity: board_identity(),
         shell_state: board,
         workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
         focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
@@ -253,7 +291,9 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
       state = %EditorState{
         port_manager: self(),
-        shell: Board,
+        shell: Shell,
+        shell_id: :board,
+        shell_identity: board_identity(),
         shell_state: board,
         workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
         focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
@@ -308,7 +348,9 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
       state = %EditorState{
         port_manager: self(),
-        shell: Board,
+        shell: Shell,
+        shell_id: :board,
+        shell_identity: board_identity(),
         shell_state: board,
         workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
         focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
@@ -324,6 +366,52 @@ defmodule MingaEditor.Shell.Board.InputTest do
       assert new_state.workspace.keymap_scope == :agent
     end
 
+    test "reports session startup failure without staying zoomed into an existing card" do
+      {:ok, agent_buf} = Minga.Buffer.start_link(content: "")
+      saved_card_workspace = %MingaEditor.Session.State{viewport: Viewport.new(12, 40)}
+
+      board =
+        BoardState.new()
+        |> then(fn b ->
+          {b, _card} =
+            BoardState.create_card(b,
+              task: "Fix tests",
+              model: "test-model",
+              workspace: SessionState.to_tab_context(saved_card_workspace)
+            )
+
+          b
+        end)
+        |> Map.put(:agent, %AgentState{buffer: agent_buf})
+
+      focused_id = board.focused_card
+
+      state = %EditorState{
+        port_manager: self(),
+        shell: Shell,
+        shell_id: :board,
+        shell_identity: board_identity(),
+        shell_state: board,
+        workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
+        focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
+      }
+
+      original_pid = unregister_session_manager()
+
+      try do
+        {:handled, new_state} = BoardInput.handle_key(state, @enter, 0)
+
+        assert new_state.shell_state.zoomed_into == nil
+        assert new_state.shell_state.cards[focused_id].session == nil
+        assert new_state.shell_state.cards[focused_id].workspace.viewport.rows == 12
+        assert new_state.workspace.viewport.rows == 24
+        assert AgentAccess.session(new_state) == nil
+        assert EditorState.status_msg(new_state) == "Could not start Board agent session"
+      after
+        restore_session_manager(original_pid)
+      end
+    end
+
     test "uses the card's persisted model for the new session" do
       {:ok, agent_buf} = Minga.Buffer.start_link(content: "")
 
@@ -337,7 +425,9 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
       state = %EditorState{
         port_manager: self(),
-        shell: Board,
+        shell: Shell,
+        shell_id: :board,
+        shell_identity: board_identity(),
         shell_state: board,
         workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
         focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
@@ -374,7 +464,9 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
       state = %EditorState{
         port_manager: self(),
-        shell: Board,
+        shell: Shell,
+        shell_id: :board,
+        shell_identity: board_identity(),
         shell_state: board,
         workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
         focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
@@ -490,7 +582,7 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
       board =
         BoardState.update_card(state.shell_state, 1, fn card ->
-          MingaEditor.Shell.Board.Card.attach_session(card, fake_pid)
+          MingaBoard.Shell.Card.attach_session(card, fake_pid)
         end)
 
       state = %{state | shell_state: board}
@@ -523,7 +615,9 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
       state = %EditorState{
         port_manager: self(),
-        shell: Board,
+        shell: Shell,
+        shell_id: :board,
+        shell_identity: board_identity(),
         shell_state: board,
         workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
         focus_stack: [ZoomOut, MingaEditor.Input.GlobalBindings]
@@ -558,7 +652,9 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
       state = %EditorState{
         port_manager: self(),
-        shell: Board,
+        shell: Shell,
+        shell_id: :board,
+        shell_identity: board_identity(),
         shell_state: board,
         workspace: %MingaEditor.Session.State{viewport: Viewport.new(24, 80)},
         focus_stack: [BoardInput, ZoomOut, MingaEditor.Input.GlobalBindings]
@@ -607,6 +703,23 @@ defmodule MingaEditor.Shell.Board.InputTest do
   # ── New card dispatch ──────────────────────────────────────────────────
 
   describe "n creates and zooms into new card" do
+    test "reports session startup failure without zooming into a sessionless card" do
+      state = editor_with_board(0)
+      original_pid = unregister_session_manager()
+
+      try do
+        {:handled, new_state} = BoardInput.handle_key(state, ?n, 0)
+
+        assert new_state.shell_state.zoomed_into == nil
+        assert EditorState.status_msg(new_state) == "Could not start Board agent session"
+        [card] = BoardState.sorted_cards(new_state.shell_state)
+        assert card.status == :errored
+        assert card.session == nil
+      after
+        restore_session_manager(original_pid)
+      end
+    end
+
     test "creates a new card, starts a managed agent session, and auto-zooms" do
       state = editor_with_board(2)
       initial_count = BoardState.card_count(state.shell_state)
@@ -640,6 +753,47 @@ defmodule MingaEditor.Shell.Board.InputTest do
       assert BoardState.card_count(new_state.shell_state) == initial_count - 1
     end
 
+    test "keeps required You card when delete keys are pressed" do
+      board =
+        BoardState.new()
+        |> then(fn b ->
+          {b, you_card} = BoardState.create_card(b, task: "You", kind: :you)
+          BoardState.focus_card(b, you_card.id)
+        end)
+
+      state = %{editor_with_board(0) | shell_state: board}
+
+      {:handled, after_d} = BoardInput.handle_key(state, ?d, 0)
+      {:handled, after_x} = BoardInput.handle_key(state, ?x, 0)
+
+      assert BoardState.card_count(after_d.shell_state) == 1
+      assert BoardState.card_count(after_x.shell_state) == 1
+      assert after_d.shell_state.focused_card == board.focused_card
+      assert after_x.shell_state.focused_card == board.focused_card
+    end
+
+    test "keeps the focused card when stopping its session fails" do
+      state = editor_with_board(1)
+
+      board =
+        BoardState.update_card(state.shell_state, 1, fn card ->
+          MingaBoard.Shell.Card.attach_session(card, self())
+        end)
+
+      state = %{state | shell_state: board}
+      original_pid = unregister_session_manager()
+
+      try do
+        {:handled, new_state} = BoardInput.handle_key(state, ?d, 0)
+
+        assert BoardState.card_count(new_state.shell_state) == 1
+        assert new_state.shell_state.cards[1].status == :errored
+        assert EditorState.status_msg(new_state) == "Could not stop Board session"
+      after
+        restore_session_manager(original_pid)
+      end
+    end
+
     test "stops the managed session attached to the deleted card" do
       {:ok, _session_id, session_pid} = SessionManager.start_session([])
       on_exit(fn -> stop_session(session_pid) end)
@@ -648,7 +802,7 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
       board =
         BoardState.update_card(state.shell_state, 1, fn card ->
-          MingaEditor.Shell.Board.Card.attach_session(card, session_pid)
+          MingaBoard.Shell.Card.attach_session(card, session_pid)
         end)
 
       state = %{state | shell_state: board}
@@ -727,7 +881,7 @@ defmodule MingaEditor.Shell.Board.InputTest do
 
   defp walk_board_surface_handlers(state, cp, mods) do
     Enum.reduce_while(
-      MingaEditor.Shell.Board.input_handlers(state).surface,
+      MingaBoard.Shell.input_handlers(state).surface,
       {:passthrough, state},
       fn handler, {_, acc} ->
         case handler.handle_key(acc, cp, mods) do

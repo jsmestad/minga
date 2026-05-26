@@ -1098,18 +1098,19 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   Status bytes: 0=idle, 1=working, 2=iterating, 3=needs_you, 4=done, 5=errored
   Flags: bit 0 = is_you_card, bit 1 = is_focused
   """
-  @spec encode_gui_board(MingaEditor.Shell.Board.State.t()) :: binary()
-  def encode_gui_board(%MingaEditor.Shell.Board.State{} = board) do
-    cards = MingaEditor.Shell.Board.State.sorted_cards(board)
-    visible = if MingaEditor.Shell.Board.State.grid_view?(board), do: 1, else: 0
-    focused_id = board.focused_card || 0
+  @spec encode_gui_board(MingaEditor.Frontend.Protocol.GUI.BoardPayload.t()) :: binary()
+  def encode_gui_board(%MingaEditor.Frontend.Protocol.GUI.BoardPayload{} = board) do
+    :ok = validate_board_payload!(board)
+    cards = board.cards
+    visible = if board.visible?, do: 1, else: 0
+    focused_id = board.focused_card_id || 0
 
     card_entries =
       Enum.map(cards, fn card ->
-        encode_board_card(card, board.focused_card)
+        encode_board_card(card, board.focused_card_id)
       end)
 
-    filter_mode = if board.filter_mode, do: 1, else: 0
+    filter_mode = if board.filter_mode?, do: 1, else: 0
     filter_bytes = :erlang.iolist_to_binary([board.filter_text])
 
     IO.iodata_to_binary([
@@ -1120,15 +1121,40 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     ])
   end
 
-  @spec encode_board_card(MingaEditor.Shell.Board.Card.t(), pos_integer() | nil) :: binary()
+  @spec validate_board_payload!(MingaEditor.Frontend.Protocol.GUI.BoardPayload.t()) :: :ok
+  defp validate_board_payload!(%MingaEditor.Frontend.Protocol.GUI.BoardPayload{cards: cards}) do
+    Enum.each(cards, &validate_board_card!/1)
+  end
+
+  @spec validate_board_card!(MingaEditor.Frontend.Protocol.GUI.BoardCardPayload.t()) :: :ok
+  defp validate_board_card!(%MingaEditor.Frontend.Protocol.GUI.BoardCardPayload{} = card) do
+    with true <- is_integer(card.id) and card.id > 0,
+         true <- card.status in [:idle, :working, :iterating, :needs_you, :done, :errored],
+         true <- card.kind in [:you, :agent],
+         true <- is_binary(card.task),
+         true <- is_binary(card.display_task),
+         true <- is_nil(card.model) or is_binary(card.model),
+         true <- match?(%DateTime{}, card.created_at),
+         true <- is_list(card.recent_files) and Enum.all?(card.recent_files, &is_binary/1),
+         true <- is_list(card.sparkline) and Enum.all?(card.sparkline, &is_number/1) do
+      :ok
+    else
+      false -> raise ArgumentError, "invalid Board card payload: #{inspect(card)}"
+    end
+  end
+
+  @spec encode_board_card(
+          MingaEditor.Frontend.Protocol.GUI.BoardCardPayload.t(),
+          pos_integer() | nil
+        ) :: binary()
   defp encode_board_card(card, focused_id) do
     status_byte = board_status_byte(card.status)
 
-    is_you = if MingaEditor.Shell.Board.Card.you_card?(card), do: 1, else: 0
+    is_you = if MingaEditor.Frontend.Protocol.GUI.BoardCardPayload.you_card?(card), do: 1, else: 0
     is_focused = if card.id == focused_id, do: 1, else: 0
     flags = Bitwise.bor(is_you, Bitwise.bsl(is_focused, 1))
 
-    task_bytes = :erlang.iolist_to_binary([MingaEditor.Shell.Board.Card.display_task(card)])
+    task_bytes = :erlang.iolist_to_binary([card.display_task])
     model_bytes = :erlang.iolist_to_binary([card.model || ""])
 
     # Send Unix timestamp so Swift can compute elapsed time locally
@@ -1169,14 +1195,14 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     <<scaled::16>>
   end
 
-  @spec board_status_byte(MingaEditor.Shell.Board.Card.status()) :: non_neg_integer()
+  @spec board_status_byte(MingaEditor.Frontend.Protocol.GUI.BoardCardPayload.status()) ::
+          non_neg_integer()
   defp board_status_byte(:idle), do: 0
   defp board_status_byte(:working), do: 1
   defp board_status_byte(:iterating), do: 2
   defp board_status_byte(:needs_you), do: 3
   defp board_status_byte(:done), do: 4
   defp board_status_byte(:errored), do: 5
-  defp board_status_byte(_), do: 0
 
   # ── Agent context bar (0x88) ──
 

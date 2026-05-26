@@ -4,9 +4,6 @@ defmodule MingaEditor.FeatureStateTest do
   alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.FeatureState
   alias MingaEditor.Session.State, as: SessionState
-  alias MingaEditor.Shell.Board.Card
-  alias MingaEditor.Shell.Board.State, as: BoardState
-  alias MingaEditor.Shell.StateStash
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab
@@ -121,46 +118,6 @@ defmodule MingaEditor.FeatureStateTest do
     assert SessionState.get_feature_state(restored, @other_source, @feature) == :tab_other
   end
 
-  test "editor cleanup removes source-owned feature state from board card workspaces" do
-    card_context =
-      workspace()
-      |> SessionState.put_feature_state(@source, @feature, :board_owned)
-      |> SessionState.put_feature_state(@other_source, @feature, :board_other)
-      |> SessionState.to_tab_context()
-
-    stashed_context =
-      workspace()
-      |> SessionState.put_feature_state(@source, @feature, :stashed_owned)
-      |> SessionState.put_feature_state(@other_source, @feature, :stashed_other)
-      |> SessionState.to_tab_context()
-
-    board = board_with_workspace(1, card_context)
-    stashed_board = board_with_workspace(2, stashed_context)
-
-    state = %EditorState{
-      port_manager: self(),
-      workspace: workspace(),
-      shell_id: :board,
-      shell: MingaEditor.Shell.Board,
-      shell_state: board,
-      shell_state_stash: %{board: board_stash(stashed_board)}
-    }
-
-    cleaned = EditorState.drop_feature_state_source(state, @source)
-
-    cleaned_context = cleaned.shell_state.cards[1].workspace
-    cleaned_stashed_context = cleaned.shell_state_stash.board.state.cards[2].workspace
-    restored = SessionState.restore_tab_context(workspace(), cleaned_context)
-    restored_stashed = SessionState.restore_tab_context(workspace(), cleaned_stashed_context)
-
-    assert SessionState.get_feature_state(restored, @source, @feature) == nil
-    assert SessionState.get_feature_state(restored, @other_source, @feature) == :board_other
-    assert SessionState.get_feature_state(restored_stashed, @source, @feature) == nil
-
-    assert SessionState.get_feature_state(restored_stashed, @other_source, @feature) ==
-             :stashed_other
-  end
-
   test "config reload command cleans old config and extension state before loading replacements" do
     live_workspace =
       workspace()
@@ -176,20 +133,12 @@ defmodule MingaEditor.FeatureStateTest do
       |> SessionState.put_feature_state(:builtin, @feature, :tab_builtin)
       |> SessionState.to_tab_context()
 
-    board_context =
-      workspace()
-      |> SessionState.put_feature_state(:config, @feature, :board_config)
-      |> SessionState.put_feature_state(@source, @feature, :board_extension)
-      |> SessionState.put_feature_state(:builtin, @feature, :board_builtin)
-      |> SessionState.to_tab_context()
-
     tab = Tab.new_file(1, "one") |> Tab.set_context(tab_context)
 
     state = %EditorState{
       port_manager: self(),
       workspace: live_workspace,
-      shell_state: %ShellState{tab_bar: TabBar.new(tab)},
-      shell_state_stash: %{board: board_stash(board_with_workspace(2, board_context))}
+      shell_state: %ShellState{tab_bar: TabBar.new(tab)}
     }
 
     reloaded =
@@ -205,13 +154,6 @@ defmodule MingaEditor.FeatureStateTest do
           config: nil,
           extension: nil,
           builtin: :tab_builtin
-        )
-
-        assert_snapshot_feature_state(
-          cleaned_state.shell_state_stash.board.state.cards[2].workspace,
-          config: nil,
-          extension: nil,
-          builtin: :board_builtin
         )
 
         cleaned_state =
@@ -231,54 +173,6 @@ defmodule MingaEditor.FeatureStateTest do
       config: nil,
       extension: nil,
       builtin: :tab_builtin
-    )
-
-    assert_snapshot_feature_state(reloaded.shell_state_stash.board.state.cards[2].workspace,
-      config: nil,
-      extension: nil,
-      builtin: :board_builtin
-    )
-  end
-
-  test "config reload command cleans active board card snapshots" do
-    live_workspace =
-      workspace()
-      |> SessionState.put_feature_state(:config, @feature, :old_config)
-      |> SessionState.put_feature_state(@source, @feature, :old_extension)
-      |> SessionState.put_feature_state(:builtin, @feature, :builtin)
-
-    board_context =
-      workspace()
-      |> SessionState.put_feature_state(:config, @feature, :board_config)
-      |> SessionState.put_feature_state(@source, @feature, :board_extension)
-      |> SessionState.put_feature_state(:builtin, @feature, :board_builtin)
-      |> SessionState.to_tab_context()
-
-    state = %EditorState{
-      port_manager: self(),
-      workspace: live_workspace,
-      shell_state: board_with_workspace(1, board_context)
-    }
-
-    reloaded =
-      BufferManagement.reload_config(state, fn cleaned_state ->
-        assert_snapshot_feature_state(cleaned_state.shell_state.cards[1].workspace,
-          config: nil,
-          extension: nil,
-          builtin: :board_builtin
-        )
-
-        {:ok, cleaned_state}
-      end)
-
-    assert EditorState.get_feature_state(reloaded, :config, @feature) == nil
-    assert EditorState.get_feature_state(reloaded, @source, @feature) == nil
-    assert EditorState.get_feature_state(reloaded, :builtin, @feature) == :builtin
-
-    assert_snapshot_feature_state(reloaded.shell_state.cards[1].workspace,
-      config: nil,
-      extension: nil,
-      builtin: :board_builtin
     )
   end
 
@@ -348,24 +242,7 @@ defmodule MingaEditor.FeatureStateTest do
     %SessionState{viewport: Viewport.new(24, 80)}
   end
 
-  @spec board_stash(BoardState.t()) :: StateStash.t()
-  defp board_stash(%BoardState{} = board) do
-    %StateStash{module: MingaEditor.Shell.Board, source: :builtin, generation: 0, state: board}
-  end
-
-  @spec board_with_workspace(Card.id(), Card.workspace_snapshot()) :: BoardState.t()
-  defp board_with_workspace(card_id, workspace_snapshot) do
-    card = Card.new(card_id, task: "card #{card_id}", workspace: workspace_snapshot)
-
-    %BoardState{
-      cards: %{card_id => card},
-      card_order: [card_id],
-      focused_card: card_id,
-      next_id: card_id + 1
-    }
-  end
-
-  @spec assert_snapshot_feature_state(Card.workspace_snapshot(), keyword()) :: :ok
+  @spec assert_snapshot_feature_state(TabContext.t(), keyword()) :: :ok
   defp assert_snapshot_feature_state(context, expected) do
     restored = SessionState.restore_tab_context(workspace(), context)
 
