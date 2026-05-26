@@ -179,6 +179,10 @@ defmodule MingaAgent.Providers.Native do
           mcp_tools: [term()],
           internal_tools: [term()],
           custom_tools?: boolean(),
+          mcp_configs: [MCPServerConfig.t()],
+          mcp_client_opts: keyword(),
+          mcp_enabled_override: boolean() | nil,
+          mcp_errors: %{String.t() => String.t()},
           mcp_registry: MCPRegistry.t() | nil,
           read_only?: boolean()
         }
@@ -371,14 +375,11 @@ defmodule MingaAgent.Providers.Native do
     custom_tools? = Keyword.has_key?(opts, :tools)
     active_skills = load_active_skills(project_root, Keyword.get(opts, :active_skill_names, []))
     internal_tools = if read_only?, do: [], else: build_internal_tools(provider_pid)
-    reserved_tool_names = Enum.map(base_tools ++ internal_tools, & &1.name)
-
-    {mcp_registry, mcp_tools} =
-      if read_only? do
-        {nil, []}
-      else
-        start_mcp_servers(opts, config, subscriber, reserved_tool_names)
-      end
+    mcp_configs = configured_mcp_servers(opts, config, subscriber, read_only?)
+    mcp_client_opts = mcp_client_opts(opts)
+    mcp_enabled_override = Keyword.get(opts, :mcp_enabled?, nil)
+    mcp_registry = mcp_registry_for(mcp_configs)
+    mcp_tools = mcp_meta_tools_for(mcp_configs, provider_pid)
 
     tools =
       (base_tools ++ mcp_tools ++ internal_tools)
@@ -423,6 +424,10 @@ defmodule MingaAgent.Providers.Native do
       mcp_tools: mcp_tools,
       internal_tools: internal_tools,
       custom_tools?: custom_tools?,
+      mcp_configs: mcp_configs,
+      mcp_client_opts: mcp_client_opts,
+      mcp_enabled_override: mcp_enabled_override,
+      mcp_errors: %{},
       mcp_registry: mcp_registry,
       read_only?: read_only?
     }
@@ -662,7 +667,8 @@ defmodule MingaAgent.Providers.Native do
       system_prompt: system_prompt,
       thinking_level: state.thinking_level,
       active_skill_names: Enum.map(state.active_skills, & &1.name),
-      project_root: state.project_root
+      project_root: state.project_root,
+      mcp_status: mcp_status(state)
     }
 
     {:reply, {:ok, session_state}, state}
@@ -769,6 +775,18 @@ defmodule MingaAgent.Providers.Native do
   def handle_call({:set_model, model}, _from, state) do
     Minga.Log.info(:agent, "[Agent.Native] model set to #{model}")
     {:reply, :ok, %{state | model: model}}
+  end
+
+  def handle_call(:list_mcp_tools, _from, state) do
+    {reply, state} = with_enabled_mcp(state, &list_mcp_tools_for_agent/1)
+    {:reply, reply, state}
+  end
+
+  def handle_call({:call_mcp_tool, server_name, tool_name, args}, _from, state) do
+    {reply, state} =
+      with_enabled_mcp(state, &call_mcp_tool_for_agent(&1, server_name, tool_name, args || %{}))
+
+    {:reply, reply, state}
   end
 
   def handle_call({:refresh_project_view, project_view}, _from, state) do
@@ -930,40 +948,255 @@ defmodule MingaAgent.Providers.Native do
     :exit, _ -> :ok
   end
 
-  @spec start_mcp_servers(keyword(), AgentConfig.t(), pid(), [String.t()]) ::
-          {MCPRegistry.t() | nil, [term()]}
-  defp start_mcp_servers(opts, config, subscriber, reserved_tool_names) do
-    server_configs = Keyword.get(opts, :mcp_servers, config.mcp_servers)
-
-    case MCPServerConfig.normalize_list(server_configs) do
-      {:ok, []} ->
-        {nil, []}
-
-      {:ok, normalized} ->
-        registry_opts = [
-          transport: Keyword.get(opts, :mcp_transport, MingaAgent.MCP.StdioTransport),
-          transport_opts: Keyword.get(opts, :mcp_transport_opts, []),
-          notify_pid: self(),
-          request_timeout: Keyword.get(opts, :mcp_request_timeout, 5_000),
-          reserved_tool_names: reserved_tool_names
+  @spec configured_mcp_servers(keyword(), AgentConfig.t(), pid(), boolean()) :: [
+          MCPServerConfig.t()
         ]
+  defp configured_mcp_servers(_opts, _config, _subscriber, true), do: []
 
-        {registry, tools, _failures} =
-          MCPRegistry.start_all(normalized, subscriber, registry_opts)
+  defp configured_mcp_servers(opts, config, subscriber, false) do
+    if mcp_extension_enabled?(opts) do
+      server_configs = Keyword.get(opts, :mcp_servers, config.mcp_servers)
 
-        {registry, tools}
+      case MCPServerConfig.normalize_list(server_configs) do
+        {:ok, normalized} ->
+          normalized
+
+        {:error, reason} ->
+          notify(subscriber, %Event.Error{message: "MCP config error: #{reason}"})
+          []
+      end
+    else
+      []
+    end
+  end
+
+  @spec mcp_extension_enabled?(keyword()) :: boolean()
+  defp mcp_extension_enabled?(opts) do
+    Keyword.get_lazy(opts, :mcp_enabled?, fn -> Minga.Extensions.MCP.enabled?() end)
+  end
+
+  @spec mcp_registry_for([MCPServerConfig.t()]) :: MCPRegistry.t() | nil
+  defp mcp_registry_for([]), do: nil
+  defp mcp_registry_for(_configs), do: MCPRegistry.new()
+
+  @spec mcp_meta_tools_for([MCPServerConfig.t()], pid()) :: [ReqLLM.Tool.t()]
+  defp mcp_meta_tools_for([], _provider_pid), do: []
+  defp mcp_meta_tools_for(_configs, provider_pid), do: build_mcp_meta_tools(provider_pid)
+
+  @spec mcp_status(map()) :: [map()]
+  defp mcp_status(state) do
+    Enum.map(state.mcp_configs, fn config ->
+      status = mcp_server_status(state, config.name)
+
+      %{
+        "name" => config.name,
+        "status" => Atom.to_string(status),
+        "error" => Map.get(state.mcp_errors, config.name)
+      }
+    end)
+  end
+
+  @spec mcp_server_status(map(), String.t()) :: :not_started | :running | :errored
+  defp mcp_server_status(state, server_name) do
+    case {Map.has_key?(state.mcp_errors, server_name),
+          MCPRegistry.client_for_server(state.mcp_registry, server_name)} do
+      {true, _client} -> :errored
+      {false, {:ok, _pid}} -> :running
+      {false, :error} -> :not_started
+    end
+  end
+
+  @spec mcp_client_opts(keyword()) :: keyword()
+  defp mcp_client_opts(opts) do
+    [
+      transport: Keyword.get(opts, :mcp_transport, MingaAgent.MCP.StdioTransport),
+      transport_opts: Keyword.get(opts, :mcp_transport_opts, []),
+      notify_pid: self(),
+      request_timeout: Keyword.get(opts, :mcp_request_timeout, 5_000)
+    ]
+  end
+
+  @spec build_mcp_meta_tools(pid()) :: [ReqLLM.Tool.t()]
+  defp build_mcp_meta_tools(provider_pid) when is_pid(provider_pid) do
+    [
+      ReqLLM.Tool.new!(
+        name: "list_mcp_tools",
+        description:
+          "List available tools from configured MCP servers on demand. Use this when built-in tools do not cover the capability you need. This starts MCP servers lazily and returns server names, tool names, and short descriptions without adding every MCP tool to the system prompt.",
+        parameter_schema: %{"type" => "object", "properties" => %{}},
+        callback: fn _args -> GenServer.call(provider_pid, :list_mcp_tools, :infinity) end
+      ),
+      ReqLLM.Tool.new!(
+        name: "call_mcp_tool",
+        description:
+          "Call a tool from a configured MCP server by server name and tool name. Use list_mcp_tools first if you do not know the available server and tool names. MCP tool calls use the same approval flow as other destructive tools and default to ask approval.",
+        parameter_schema: %{
+          "type" => "object",
+          "properties" => %{
+            "server" => %{"type" => "string", "description" => "Configured MCP server name"},
+            "tool" => %{
+              "type" => "string",
+              "description" => "Original MCP tool name from that server"
+            },
+            "arguments" => %{
+              "type" => "object",
+              "description" => "Arguments to pass to the MCP tool"
+            }
+          },
+          "required" => ["server", "tool"]
+        },
+        callback: fn args ->
+          GenServer.call(
+            provider_pid,
+            {:call_mcp_tool, args["server"], args["tool"], Map.get(args, "arguments", %{})},
+            :infinity
+          )
+        end
+      )
+    ]
+  end
+
+  @spec with_enabled_mcp(map(), (map() -> {{:ok, term()} | {:error, term()}, map()})) ::
+          {{:ok, term()} | {:error, term()}, map()}
+  defp with_enabled_mcp(state, fun) when is_function(fun, 1) do
+    if mcp_enabled_for_state?(state) do
+      fun.(state)
+    else
+      {{:error, "MCP extension is disabled"}, disable_mcp_in_state(state)}
+    end
+  end
+
+  @spec mcp_enabled_for_state?(map()) :: boolean()
+  defp mcp_enabled_for_state?(%{mcp_enabled_override: override}) when is_boolean(override),
+    do: override
+
+  defp mcp_enabled_for_state?(_state), do: Minga.Extensions.MCP.enabled?()
+
+  @spec disable_mcp_in_state(map()) :: map()
+  defp disable_mcp_in_state(state) do
+    cleanup_mcp(state.mcp_registry)
+
+    tools = Enum.reject(state.tools, &(&1.name in ["list_mcp_tools", "call_mcp_tool"]))
+
+    %{state | mcp_configs: [], mcp_registry: nil, mcp_tools: [], mcp_errors: %{}, tools: tools}
+  end
+
+  @spec list_mcp_tools_for_agent(map()) :: {{:ok, term()} | {:error, term()}, map()}
+  defp list_mcp_tools_for_agent(%{mcp_configs: []} = state), do: {{:ok, []}, state}
+
+  defp list_mcp_tools_for_agent(state) do
+    {servers, failures, state} = ensure_all_mcp_servers(state)
+
+    tool_entries =
+      Enum.flat_map(servers, fn {server_name, client} ->
+        list_mcp_client_tools(server_name, client)
+      end)
+
+    failure_entries =
+      Enum.map(failures, fn {server_name, reason} ->
+        %{"server" => server_name, "error" => reason}
+      end)
+
+    reply = list_mcp_tools_reply(tool_entries, failure_entries)
+
+    {reply, state}
+  end
+
+  @spec list_mcp_tools_reply([map()], [map()]) :: {:ok, term()} | {:error, String.t()}
+  defp list_mcp_tools_reply([], []), do: {:ok, "No MCP tools are available."}
+
+  defp list_mcp_tools_reply([], failures) do
+    message =
+      failures
+      |> Enum.map_join("; ", fn %{"server" => server_name, "error" => reason} ->
+        "#{server_name}: #{reason}"
+      end)
+
+    {:error, "MCP servers failed to start: #{message}"}
+  end
+
+  defp list_mcp_tools_reply(tools, failures), do: {:ok, failures ++ tools}
+
+  @spec list_mcp_client_tools(String.t(), pid()) :: [map()]
+  defp list_mcp_client_tools(server_name, client) do
+    case MingaAgent.MCP.Client.list_tools(client) do
+      {:ok, tools} ->
+        Enum.map(tools, fn tool ->
+          %{
+            "server" => server_name,
+            "name" => tool.name,
+            "description" => String.split(tool.description, "\n") |> List.first() || ""
+          }
+        end)
 
       {:error, reason} ->
-        notify(subscriber, %Event.Error{message: "MCP config error: #{reason}"})
-        {nil, []}
+        [%{"server" => server_name, "error" => format_error(reason)}]
+    end
+  end
+
+  @spec call_mcp_tool_for_agent(map(), term(), term(), term()) ::
+          {{:ok, term()} | {:error, term()}, map()}
+  defp call_mcp_tool_for_agent(state, server_name, tool_name, args)
+       when is_binary(server_name) and is_binary(tool_name) and is_map(args) do
+    case ensure_mcp_server(state, server_name) do
+      {{:ok, client}, state} ->
+        {MingaAgent.MCP.Client.call_tool(client, tool_name, args), state}
+
+      {{:error, reason}, state} ->
+        {{:error, reason}, state}
+    end
+  end
+
+  defp call_mcp_tool_for_agent(state, _server_name, _tool_name, _args) do
+    {{:error, "call_mcp_tool requires string server, string tool, and object arguments"}, state}
+  end
+
+  @spec ensure_all_mcp_servers(map()) ::
+          {[{String.t(), pid()}], [{String.t(), String.t()}], map()}
+  defp ensure_all_mcp_servers(state) do
+    Enum.reduce(state.mcp_configs, {[], [], state}, fn config, {servers, failures, state} ->
+      case ensure_mcp_server(state, config.name) do
+        {{:ok, client}, state} -> {[{config.name, client} | servers], failures, state}
+        {{:error, reason}, state} -> {servers, [{config.name, reason} | failures], state}
+      end
+    end)
+    |> then(fn {servers, failures, state} ->
+      {Enum.reverse(servers), Enum.reverse(failures), state}
+    end)
+  end
+
+  @spec ensure_mcp_server(map(), String.t()) :: {{:ok, pid()} | {:error, String.t()}, map()}
+  defp ensure_mcp_server(state, server_name) do
+    case Enum.find(state.mcp_configs, &(&1.name == server_name)) do
+      nil ->
+        {{:error, "Unknown MCP server #{server_name}"}, state}
+
+      config ->
+        case MCPRegistry.ensure_server(
+               state.mcp_registry || MCPRegistry.new(),
+               config,
+               state.subscriber,
+               state.mcp_client_opts
+             ) do
+          {:ok, registry, client} ->
+            errors = Map.delete(state.mcp_errors, config.name)
+            {{:ok, client}, %{state | mcp_registry: registry, mcp_errors: errors}}
+
+          {:error, reason} ->
+            {{:error, reason}, put_in(state, [:mcp_errors, config.name], reason)}
+        end
     end
   end
 
   @spec remove_mcp_server_tools(map(), String.t()) :: map()
   defp remove_mcp_server_tools(state, server_name) do
-    {registry, removed_tool_names} = MCPRegistry.remove_server(state.mcp_registry, server_name)
-    tools = Enum.reject(state.tools, &(&1.name in removed_tool_names))
-    %{state | tools: tools, mcp_registry: registry}
+    {registry, _removed_tool_names} = MCPRegistry.remove_server(state.mcp_registry, server_name)
+
+    %{
+      state
+      | mcp_registry: registry,
+        mcp_errors: Map.put(state.mcp_errors, server_name, "stopped")
+    }
   end
 
   @spec rebuild_tools(map()) :: map()

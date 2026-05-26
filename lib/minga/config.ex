@@ -672,9 +672,21 @@ defmodule Minga.Config do
   end
 
   @doc """
+  Declares a built-in extension module to load.
+
+  Built-in optional extensions are already on Minga's code path and do not need a path, git URL, or Hex package.
+
+  ## Examples
+
+      extension Minga.Extensions.MCP
+  """
+  @spec extension(module()) :: :ok
+  def extension(module) when is_atom(module), do: extension(module, [])
+
+  @doc """
   Declares an extension to load.
 
-  Exactly one source must be provided: `path:`, `git:`, or `hex:`.
+  Exactly one source must be provided: `path:`, `git:`, or `hex:`. Built-in extension modules may omit a source.
   Extra keyword options (beyond the source and its options) are passed
   to the extension's `init/1` callback as config.
 
@@ -703,17 +715,27 @@ defmodule Minga.Config do
 
     source_count = Enum.count([has_path, has_git, has_hex], & &1)
 
-    if source_count == 0 do
-      raise ArgumentError,
-            "extension #{name}: one of :path, :git, or :hex is required"
-    end
-
     if source_count > 1 do
       raise ArgumentError,
             "extension #{name}: only one of :path, :git, or :hex can be specified"
     end
 
-    register_extension_source(name, opts, {has_path, has_git, has_hex})
+    case source_count do
+      0 -> register_module_extension(name, opts)
+      1 -> register_extension_source(name, opts, {has_path, has_git, has_hex})
+    end
+  end
+
+  @spec register_module_extension(module(), keyword()) :: :ok
+  defp register_module_extension(module, opts) when is_atom(module) and is_list(opts) do
+    with {:module, ^module} <- Code.ensure_loaded(module),
+         true <- function_exported?(module, :name, 0) do
+      ExtRegistry.register_module(module.name(), module, opts)
+    else
+      _other ->
+        raise ArgumentError,
+              "extension #{inspect(module)}: one of :path, :git, or :hex is required unless the argument is a loaded Minga.Extension module"
+    end
   end
 
   @spec register_extension_source(atom(), keyword(), {boolean(), boolean(), boolean()}) :: :ok
@@ -756,6 +778,40 @@ defmodule Minga.Config do
       {:error, {:invalid_hex_app, app}} ->
         raise ArgumentError,
               "extension #{name}: :app must be a non-nil atom, got: #{inspect(app)}"
+    end
+  end
+
+  @doc """
+  Declares an MCP stdio server for the optional MCP extension.
+
+  The declaration is inert unless `extension Minga.Extensions.MCP` is also enabled. Servers are normalized later by the agent provider and start lazily only when the agent uses an MCP meta-tool.
+
+  ## Examples
+
+      mcp_server "github", command: "npx", args: ["-y", "@modelcontextprotocol/server-github"], env: %{"GITHUB_TOKEN" => "..."}
+  """
+  @spec mcp_server(String.t(), keyword()) :: :ok
+  def mcp_server(name, opts) when is_binary(name) and is_list(opts) do
+    server = options_server()
+    command = Keyword.get(opts, :command)
+
+    unless is_binary(command) and command != "" do
+      raise ArgumentError, "mcp_server #{inspect(name)}: :command must be a non-empty string"
+    end
+
+    config = %{
+      name: name,
+      command: command,
+      args: Keyword.get(opts, :args, []),
+      env: Keyword.get(opts, :env, %{}),
+      enabled: Keyword.get(opts, :enabled, true)
+    }
+
+    current = Options.get(server, :agent_mcp_servers)
+
+    case Options.set(server, :agent_mcp_servers, current ++ [config]) do
+      {:ok, _servers} -> :ok
+      {:error, message} -> raise ArgumentError, "mcp_server #{inspect(name)}: #{message}"
     end
   end
 

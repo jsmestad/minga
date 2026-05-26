@@ -228,6 +228,14 @@ defmodule MingaAgent.ToolsTest do
       assert Tools.destructive?("mcp_workspace__lookup", %{}, [])
     end
 
+    test "list_mcp_tools is destructive because it starts MCP servers lazily" do
+      assert Tools.destructive?("list_mcp_tools", %{}, [])
+    end
+
+    test "call_mcp_tool is destructive because it invokes remote side effects" do
+      assert Tools.destructive?("call_mcp_tool", %{}, [])
+    end
+
     test "accepts a custom destructive list" do
       assert Tools.destructive?("read_file", %{}, ["read_file", "shell"])
       refute Tools.destructive?("write_file", %{}, ["read_file", "shell"])

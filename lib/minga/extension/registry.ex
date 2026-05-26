@@ -44,6 +44,22 @@ defmodule Minga.Extension.Registry do
   end
 
   @doc """
+  Registers a module-based built-in extension declaration.
+
+  Called by the config DSL when `extension Minga.Extensions.SomeFeature` is evaluated.
+  The module is already on the Minga code path, so no source compilation is needed.
+  """
+  @spec register_module(atom(), module(), keyword()) :: :ok
+  @spec register_module(GenServer.server(), atom(), module(), keyword()) :: :ok
+  def register_module(name, module, config) when is_atom(name) and is_atom(module),
+    do: register_module(__MODULE__, name, module, config)
+
+  def register_module(server, name, module, config)
+      when is_atom(name) and is_atom(module) and is_list(config) do
+    Agent.update(server, &Map.put(&1, name, Entry.from_module(module, config)))
+  end
+
+  @doc """
   Registers a git-based extension declaration.
 
   Called by the config DSL when `extension :name, git: "..."` is evaluated.

@@ -9,7 +9,7 @@ defmodule Minga.Extension.Entry do
   alias Minga.Extension
 
   @typedoc "How the extension source code is obtained."
-  @type source_type :: :path | :git | :hex
+  @type source_type :: :path | :git | :hex | :module
 
   @typedoc "Git-specific source options."
   @type git_opts :: %{
@@ -56,6 +56,12 @@ defmodule Minga.Extension.Entry do
   @spec from_path(String.t(), keyword()) :: t()
   def from_path(path, config) when is_binary(path) and is_list(config) do
     %__MODULE__{source_type: :path, path: path, config: config}
+  end
+
+  @doc "Creates a module-sourced entry for a bundled extension already on the code path."
+  @spec from_module(module(), keyword()) :: t()
+  def from_module(module, config) when is_atom(module) and is_list(config) do
+    %__MODULE__{source_type: :module, module: module, config: config}
   end
 
   @doc "Creates a git-sourced entry."

@@ -317,6 +317,7 @@ defmodule Minga.Config.Loader do
       # 4. Eval project-local config
       project_path = resolve_project_config_path()
       project_config_error = eval_if_exists(project_path)
+      project_mcp_error = load_project_mcp_json()
 
       # 5. Eval generated GUI settings overlay
       gui_settings_path = Path.join(config_dir, "gui_settings.exs")
@@ -341,7 +342,13 @@ defmodule Minga.Config.Loader do
           start_all_extensions()
         end
 
-      load_error = merge_error_messages([config_cleanup_error, load_error, start_all_error])
+      load_error =
+        merge_error_messages([
+          config_cleanup_error,
+          load_error,
+          project_mcp_error,
+          start_all_error
+        ])
 
       lsp_settings = Process.get(:minga_config_lsp_settings, %{})
 
@@ -652,6 +659,80 @@ defmodule Minga.Config.Loader do
       end
 
     Path.join([base, "minga", "config.exs"])
+  end
+
+  @spec load_project_mcp_json() :: String.t() | nil
+  defp load_project_mcp_json do
+    path = Path.join([File.cwd!(), ".minga", "mcp.json"])
+
+    if File.exists?(path) do
+      path
+      |> File.read()
+      |> parse_project_mcp_json(path)
+    end
+  end
+
+  @spec parse_project_mcp_json({:ok, String.t()} | {:error, term()}, String.t()) ::
+          String.t() | nil
+  defp parse_project_mcp_json({:ok, content}, path) do
+    case JSON.decode(content) do
+      {:ok, decoded} -> register_project_mcp_servers(decoded)
+      {:error, reason} -> "#{path}: invalid JSON: #{inspect(reason)}"
+    end
+  end
+
+  defp parse_project_mcp_json({:error, reason}, path), do: "#{path}: #{inspect(reason)}"
+
+  @spec register_project_mcp_servers(term()) :: String.t() | nil
+  defp register_project_mcp_servers(%{"mcpServers" => servers}) when is_map(servers) do
+    case normalize_project_mcp_server_entries(servers) do
+      {:ok, entries} -> append_project_mcp_servers(entries)
+      {:error, reason} -> reason
+    end
+  end
+
+  defp register_project_mcp_servers(%{"servers" => servers}) when is_list(servers),
+    do: append_project_mcp_servers(servers)
+
+  defp register_project_mcp_servers(servers) when is_list(servers),
+    do: append_project_mcp_servers(servers)
+
+  defp register_project_mcp_servers(_decoded) do
+    ".minga/mcp.json must contain a mcpServers object, servers list, or server list"
+  end
+
+  @spec normalize_project_mcp_server_entries(map()) :: {:ok, [map()]} | {:error, String.t()}
+  defp normalize_project_mcp_server_entries(servers) when is_map(servers) do
+    Enum.reduce_while(servers, {:ok, []}, fn {name, config}, {:ok, acc} ->
+      if is_map(config) do
+        {:cont, {:ok, [Map.put(config, "name", name) | acc]}}
+      else
+        {:halt,
+         {:error, ".minga/mcp.json mcpServers.#{name} must be a map, got: #{inspect(config)}"}}
+      end
+    end)
+    |> case do
+      {:ok, entries} -> {:ok, Enum.reverse(entries)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec append_project_mcp_servers([map()]) :: String.t() | nil
+  defp append_project_mcp_servers(servers) do
+    case MingaAgent.MCP.ServerConfig.normalize_list(servers) do
+      {:ok, normalized} ->
+        server = Process.get(:minga_config_options, Options.default_server())
+        existing = Options.get(server, :agent_mcp_servers)
+        configs = Enum.map(normalized, &Map.from_struct/1)
+
+        case Options.set(server, :agent_mcp_servers, existing ++ configs) do
+          {:ok, _servers} -> nil
+          {:error, message} -> message
+        end
+
+      {:error, reason} ->
+        reason
+    end
   end
 
   @spec resolve_project_config_path() :: String.t() | nil

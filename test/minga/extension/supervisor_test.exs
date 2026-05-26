@@ -471,6 +471,34 @@ defmodule Minga.Extension.SupervisorTest do
       assert stopped.pid == nil
       assert stopped.module == nil
     end
+
+    test "stops a module-sourced extension without purging its module", ctx do
+      :ok = ExtRegistry.register_module(ctx.registry, :minga_mcp, Minga.Extensions.MCP, [])
+      {:ok, entry} = ExtRegistry.get(ctx.registry, :minga_mcp)
+
+      assert {:ok, pid} =
+               ExtSupervisor.start_extension(ctx.supervisor, ctx.registry, :minga_mcp, entry)
+
+      assert Process.alive?(pid)
+      assert :code.is_loaded(Minga.Extensions.MCP) != false
+
+      {:ok, running_entry} = ExtRegistry.get(ctx.registry, :minga_mcp)
+      :ok = ExtSupervisor.stop_extension(ctx.supervisor, ctx.registry, :minga_mcp, running_entry)
+
+      refute Process.alive?(pid)
+
+      {:ok, stopped} = ExtRegistry.get(ctx.registry, :minga_mcp)
+      assert stopped.status == :stopped
+      assert stopped.pid == nil
+      assert stopped.module == Minga.Extensions.MCP
+      assert :code.is_loaded(Minga.Extensions.MCP) != false
+
+      assert {:ok, restarted_pid} =
+               ExtSupervisor.start_extension(ctx.supervisor, ctx.registry, :minga_mcp, stopped)
+
+      assert restarted_pid != pid
+      refute restarted_pid == nil
+    end
   end
 
   describe "start_all/2 and stop_all/2" do

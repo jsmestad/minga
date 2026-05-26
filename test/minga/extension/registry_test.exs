@@ -38,6 +38,20 @@ defmodule Minga.Extension.RegistryTest do
     end
   end
 
+  describe "register_module/4" do
+    test "registers a built-in module extension", %{registry: r} do
+      :ok = Registry.register_module(r, :minga_mcp, Minga.Extensions.MCP, [])
+
+      assert {:ok, %Entry{} = entry} = Registry.get(r, :minga_mcp)
+      assert entry.source_type == :module
+      assert entry.module == Minga.Extensions.MCP
+      assert entry.config == []
+      assert entry.path == nil
+      assert entry.git == nil
+      assert entry.hex == nil
+    end
+  end
+
   describe "register_git/4" do
     test "registers a git extension with defaults", %{registry: r} do
       :ok = Registry.register_git(r, :my_ext, "https://github.com/user/repo", [])
