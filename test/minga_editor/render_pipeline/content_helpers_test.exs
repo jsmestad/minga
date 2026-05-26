@@ -318,10 +318,11 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
       %{buf: buf, ctx: ctx, window: window}
     end
 
-    test "expanded foldable lines render a down chevron in the gutter when cursor is on fold start", %{
-      ctx: ctx,
-      window: window
-    } do
+    test "expanded foldable lines render a down chevron in the gutter when cursor is on fold start",
+         %{
+           ctx: ctx,
+           window: window
+         } do
       lines = ["defmodule Example do", "  def run, do: :ok", "end"]
       fold_range = FoldRange.new!(0, 2)
       window = Window.set_fold_ranges(window, [fold_range])

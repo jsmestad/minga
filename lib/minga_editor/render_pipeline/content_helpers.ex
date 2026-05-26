@@ -581,7 +581,14 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
           non_neg_integer() | nil,
           map()
         ) :: [DisplayList.draw()]
-  defp fold_gutter_indicator({:fold_start, _}, %RenderPosition{} = pos, colors, _starts, _line, _viz) do
+  defp fold_gutter_indicator(
+         {:fold_start, _},
+         %RenderPosition{} = pos,
+         colors,
+         _starts,
+         _line,
+         _viz
+       ) do
     fold_indicator_draw(pos, "▶", colors)
   end
 
