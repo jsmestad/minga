@@ -318,6 +318,58 @@ defmodule MingaEditor.FloatingWindowTest do
     end
   end
 
+  describe "backdrop" do
+    test "backdrop: true prepends full-viewport fills before window content" do
+      s = spec(backdrop: true, width: {:cols, 10}, height: {:rows, 5})
+      draws = FloatingWindow.render(s)
+
+      # The first 24 draws should be backdrop rows covering every viewport row
+      backdrop_draws = Enum.take(draws, 24)
+      assert length(backdrop_draws) == 24
+
+      Enum.each(Enum.with_index(backdrop_draws), fn {{row, col, text, style}, idx} ->
+        assert row == idx
+        assert col == 0
+        assert text == String.duplicate(" ", 80)
+        assert style.bg == 0x111111
+      end)
+    end
+
+    test "backdrop: false (default) produces no backdrop draws" do
+      s = spec(width: {:cols, 10}, height: {:rows, 5})
+      draws = FloatingWindow.render(s)
+
+      # The first draw should not be a full-viewport fill at row 0 col 0
+      {first_row, _col, first_text, _style} = hd(draws)
+      # With a 10x5 window centered in 80x24, the first draw is the background
+      # fill which starts at the window row, not row 0
+      refute first_row == 0 and String.length(first_text) == 80
+    end
+
+    test "backdrop uses custom color from theme" do
+      custom_theme = Map.put(@theme, :backdrop_color, 0x222222)
+      s = spec(backdrop: true, width: {:cols, 10}, height: {:rows, 5})
+      s = %{s | theme: custom_theme}
+      draws = FloatingWindow.render(s)
+
+      {_row, _col, _text, style} = hd(draws)
+      assert style.bg == 0x222222
+    end
+
+    test "backdrop uses default 0x111111 when theme omits :backdrop_color" do
+      s = spec(backdrop: true, width: {:cols, 10}, height: {:rows, 5})
+      draws = FloatingWindow.render(s)
+
+      {_row, _col, _text, style} = hd(draws)
+      assert style.bg == 0x111111
+    end
+
+    test "Spec struct defaults backdrop to false" do
+      s = %Spec{theme: @theme, viewport: {10, 20}}
+      assert s.backdrop == false
+    end
+  end
+
   # ── Anchor positioning ─────────────────────────────────────────────────────
 
   describe "anchor positioning" do

@@ -23,6 +23,9 @@ defmodule MingaEditor.UI.Picker.Item do
     label, computed during fuzzy filtering for rendering highlights
   - `:two_line` — when true, renders description on a second line below the label
     instead of inline. Used by file/buffer pickers for path display.
+  - `:active` — when true, marks this item as the currently active selection
+    (e.g. the current thinking level). The centered picker renderer draws a
+    `●` indicator for active items and blank padding for inactive siblings.
   """
 
   @enforce_keys [:id, :label]
@@ -34,7 +37,8 @@ defmodule MingaEditor.UI.Picker.Item do
     annotation: nil,
     search_text: "",
     match_positions: [],
-    two_line: false
+    two_line: false,
+    active: false
   ]
 
   @type t :: %__MODULE__{
@@ -45,6 +49,7 @@ defmodule MingaEditor.UI.Picker.Item do
           annotation: String.t() | nil,
           search_text: String.t(),
           match_positions: [non_neg_integer()],
-          two_line: boolean()
+          two_line: boolean(),
+          active: boolean()
         }
 end

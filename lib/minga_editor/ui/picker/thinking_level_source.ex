@@ -55,13 +55,9 @@ defmodule MingaEditor.UI.Picker.ThinkingLevelSource do
       id: level,
       label: display_name(level),
       description: description,
-      annotation: current_marker(level, current_level)
+      active: level == current_level
     }
   end
-
-  @spec current_marker(String.t(), String.t() | nil) :: String.t() | nil
-  defp current_marker(level, level), do: "✓"
-  defp current_marker(_level, _current_level), do: nil
 
   @spec display_name(String.t()) :: String.t()
   defp display_name("off"), do: "Off"

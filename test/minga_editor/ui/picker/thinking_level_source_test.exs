@@ -20,14 +20,14 @@ defmodule MingaEditor.UI.Picker.ThinkingLevelSourceTest do
       assert Enum.all?(candidates, &match?(%Item{}, &1))
     end
 
-    test "marks the current thinking level" do
+    test "marks the current thinking level as active" do
       candidates = ThinkingLevelSource.candidates(context_with_level("high"))
 
       high = Enum.find(candidates, &(&1.id == "high"))
       low = Enum.find(candidates, &(&1.id == "low"))
 
-      assert high.annotation == "✓"
-      assert low.annotation == nil
+      assert high.active == true
+      assert low.active == false
     end
   end
 

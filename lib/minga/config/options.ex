@@ -125,6 +125,7 @@ defmodule Minga.Config.Options do
           | :event_retention_days
           | :default_shell
           | :file_find_excludes
+          | :picker_backdrop
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -393,7 +394,9 @@ defmodule Minga.Config.Options do
        "_build",
        "deps",
        ".DS_Store"
-     ], "Directory names excluded from the file finder (SPC f f). Stacks with .gitignore."}
+     ], "Directory names excluded from the file finder (SPC f f). Stacks with .gitignore."},
+    {:picker_backdrop, :boolean, true,
+     "Whether centered floating pickers render a dimmed backdrop overlay."}
   ]
   @valid_names Enum.map(@option_specs, &elem(&1, 0))
 

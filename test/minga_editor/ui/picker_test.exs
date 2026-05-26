@@ -409,6 +409,31 @@ defmodule MingaEditor.UI.PickerTest do
     end
   end
 
+  describe "active field" do
+    test "items with active: true filter and select correctly" do
+      items = [
+        %Item{id: :off, label: "Off", description: "No effort", active: false},
+        %Item{id: :low, label: "Low", description: "Low effort", active: true},
+        %Item{id: :high, label: "High", description: "High effort", active: false}
+      ]
+
+      picker = Picker.new(items, title: "Level")
+      assert Picker.count(picker) == 3
+
+      # Filter to the active item
+      filtered = Picker.filter(picker, "low")
+      assert Picker.count(filtered) == 1
+      selected = Picker.selected_item(filtered)
+      assert selected.id == :low
+      assert selected.active == true
+    end
+
+    test "items default active to false" do
+      item = %Item{id: :a, label: "Test"}
+      assert item.active == false
+    end
+  end
+
   describe "selection clamping on filter" do
     test "selection is clamped when filter reduces results" do
       picker = Picker.new(@items)

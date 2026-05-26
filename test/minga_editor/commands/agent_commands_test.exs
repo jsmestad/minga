@@ -292,6 +292,15 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert picker_ui.context == %{current_level: "low"}
     end
 
+    test "agent_pick_thinking shows status when no session exists" do
+      state = base_state(session: nil)
+      command = command!(:agent_pick_thinking)
+
+      new_state = command.execute.(state)
+
+      assert new_state.shell_state.status_msg =~ "No agent session"
+    end
+
     test "agent_thinking_* commands set fixed levels" do
       for {command_name, expected_level} <- [
             agent_thinking_off: "off",

@@ -839,11 +839,15 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Opens a picker for selecting the agent thinking level."
   @spec pick_thinking_level(state()) :: state()
   def pick_thinking_level(state) do
-    current_level = AgentAccess.panel(state).thinking_level
+    if AgentAccess.session(state) == nil do
+      EditorState.set_status(state, "No agent session")
+    else
+      current_level = AgentAccess.panel(state).thinking_level
 
-    PickerUI.open(state, MingaEditor.UI.Picker.ThinkingLevelSource, %{
-      current_level: current_level
-    })
+      PickerUI.open(state, MingaEditor.UI.Picker.ThinkingLevelSource, %{
+        current_level: current_level
+      })
+    end
   end
 
   @spec apply_thinking_level(state(), pid(), String.t()) :: state()
