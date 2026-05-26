@@ -403,7 +403,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   @spec registered_sidebar_metadata() :: [ProtocolGUI.sidebar_metadata()]
   defp registered_sidebar_metadata do
     Sidebar.all()
-    |> Enum.reject(&(&1.id == "file_tree"))
     |> Enum.map(fn sidebar ->
       %{
         id: sidebar.id,

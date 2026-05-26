@@ -20,6 +20,24 @@ defmodule MingaEditor.Extension.SidebarGUIEmitTest do
     :ok
   end
 
+  test "registered file tree remains visible in GUI sidebar metadata" do
+    root = Path.join(System.tmp_dir!(), "sidebar-gui-emit-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(root)
+    File.write!(Path.join(root, "a.ex"), "")
+
+    file_tree = FileTreeState.open(%FileTreeState{}, FileTree.new(root, width: 32), nil)
+    state = gui_state() |> EditorState.set_file_tree(file_tree)
+
+    {_ctx, _caches, cmds} = sync_chrome(state)
+    {active_id, entries} = cmds |> gui_sidebars_payload!() |> parse_gui_sidebars()
+
+    assert active_id == "file_tree"
+
+    file_tree_entry = Enum.find(entries, &(&1.id == "file_tree"))
+    assert file_tree_entry.visible?
+    assert file_tree_entry.focused?
+  end
+
   test "registered active sidebars own the GUI active id over legacy file tree metadata" do
     root = Path.join(System.tmp_dir!(), "sidebar-gui-emit-#{System.unique_integer([:positive])}")
     File.mkdir_p!(root)
@@ -102,6 +120,35 @@ defmodule MingaEditor.Extension.SidebarGUIEmitTest do
       <<0x9F, payload_len::32, payload::binary-size(payload_len)>> -> payload
       _ -> nil
     end)
+  end
+
+  defp parse_gui_sidebars(<<1::8, count::16, rest::binary>>) do
+    {active_id, rest} = take_string16(rest)
+    {active_id, parse_sidebar_entries(rest, count, [])}
+  end
+
+  defp parse_sidebar_entries(_rest, 0, acc), do: Enum.reverse(acc)
+
+  defp parse_sidebar_entries(rest, count, acc) do
+    {id, rest} = take_string16(rest)
+    {display_name, rest} = take_string16(rest)
+    {semantic_kind, rest} = take_string16(rest)
+    {icon, rest} = take_string16(rest)
+    <<order::16, flags::8, preferred_width::16, badge_count::16, rest::binary>> = rest
+
+    entry = %{
+      id: id,
+      display_name: display_name,
+      semantic_kind: semantic_kind,
+      icon: icon,
+      order: order,
+      visible?: Bitwise.band(flags, 0x01) != 0,
+      focused?: Bitwise.band(flags, 0x02) != 0,
+      preferred_width: preferred_width,
+      badge_count: badge_count
+    }
+
+    parse_sidebar_entries(rest, count - 1, [entry | acc])
   end
 
   defp take_string16(<<len::16, value::binary-size(len), rest::binary>>), do: {value, rest}
