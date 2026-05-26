@@ -12,6 +12,7 @@ defmodule MingaEditor.Commands.MovementTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor
+  alias MingaEditor.Extension.Sidebar
 
   @sync_timeout 15_000
   @ctrl 0x02
@@ -24,6 +25,7 @@ defmodule MingaEditor.Commands.MovementTest do
     events_registry = :"movement_events_#{id}"
     project_root = isolated_project_root(id)
     start_supervised!({Minga.Events, name: events_registry})
+    sidebar_registry = private_sidebar_registry(id)
 
     {:ok, buffer} = BufferProcess.start_link(content: content, events_registry: events_registry)
 
@@ -36,11 +38,18 @@ defmodule MingaEditor.Commands.MovementTest do
         height: height,
         editing_model: :vim,
         events_registry: events_registry,
+        sidebar_registry: sidebar_registry,
         project_root: project_root,
         suppress_tool_prompts: true
       )
 
     {editor, buffer}
+  end
+
+  defp private_sidebar_registry(id) do
+    name = :"movement_sidebars_#{id}"
+    start_supervised!({Sidebar, name: name, notify: false})
+    name
   end
 
   defp isolated_project_root(id) do

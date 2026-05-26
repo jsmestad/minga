@@ -38,6 +38,10 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
     cols = Keyword.get(opts, :cols, 80)
     content = Keyword.get(opts, :content, "line one\nline two\nline three")
     filetype = Keyword.get(opts, :filetype, :elixir)
+
+    sidebar_registry =
+      Keyword.get(opts, :sidebar_registry, MingaEditor.Extension.Sidebar.default_table())
+
     {:ok, buf} = BufferProcess.start_link(content: content, filetype: filetype)
 
     win_id = 1
@@ -50,6 +54,7 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
     %EditorState{
       port_manager: self(),
       terminal_viewport: vp,
+      sidebar_registry: sidebar_registry,
       workspace: %MingaEditor.Session.State{
         viewport: vp,
         editing: VimState.new(),

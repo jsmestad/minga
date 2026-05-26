@@ -8,6 +8,7 @@ defmodule MingaEditor.Mouse.HitTestTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Editing.Fold.Range, as: FoldRange
   alias MingaEditor.Commands.Movement
+  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
   alias MingaEditor.Mouse.HitTest
   alias MingaEditor.Mouse.Target.Buffer, as: BufferTarget
@@ -111,6 +112,7 @@ defmodule MingaEditor.Mouse.HitTestTest do
     project_root = Path.join(System.tmp_dir!(), "minga-hit-test-#{id}")
     File.mkdir_p!(project_root)
     start_supervised!({Minga.Events, name: events_registry}, id: {:events, id})
+    sidebar_registry = start_sidebar_registry(id)
 
     options_server =
       start_supervised!({Minga.Config.Options, name: nil, events_registry: events_registry},
@@ -133,11 +135,18 @@ defmodule MingaEditor.Mouse.HitTestTest do
         editing_model: :vim,
         options_server: options_server,
         events_registry: events_registry,
+        sidebar_registry: sidebar_registry,
         project_root: project_root,
         suppress_tool_prompts: true
       )
 
     {state, buffer}
+  end
+
+  defp start_sidebar_registry(id) do
+    name = Module.concat(__MODULE__, "Sidebar#{id}")
+    start_supervised!({Sidebar, name: name, notify: false}, id: {:sidebars, id})
+    name
   end
 
   defp active_window_layout(state), do: Layout.active_window_layout(Layout.get(state), state)

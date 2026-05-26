@@ -1,5 +1,5 @@
 defmodule MingaEditor.FileTree.FeatureTest do
-  # Mutates global input/sidebar registries.
+  # Mutates the global input handler registry in the handler-registration test.
   use ExUnit.Case, async: false
 
   alias Minga.Project.FileTree
@@ -13,14 +13,12 @@ defmodule MingaEditor.FileTree.FeatureTest do
   import MingaEditor.RenderPipeline.TestHelpers
 
   setup do
-    Sidebar.unregister_source(:builtin)
+    table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
+    start_supervised!({Sidebar, name: table, notify: false})
 
-    on_exit(fn ->
-      Sidebar.unregister_source(:builtin)
-      Input.reset_handlers()
-    end)
+    on_exit(fn -> Input.reset_handlers() end)
 
-    :ok
+    %{sidebar_registry: table}
   end
 
   test "FileTree state is stored as a direct workspace field" do
@@ -34,9 +32,11 @@ defmodule MingaEditor.FileTree.FeatureTest do
     assert MingaEditor.Session.State.get_feature_state(workspace, :builtin, :file_tree) == nil
   end
 
-  test "FileTree dynamic handler uses a built-in source that extension cleanup cannot remove" do
+  test "FileTree dynamic handler uses a built-in source that extension cleanup cannot remove", %{
+    sidebar_registry: table
+  } do
     Input.reset_handlers()
-    :ok = FileTreeFeature.register_contributions(%FileTreeState{})
+    :ok = FileTreeFeature.register_contributions(%FileTreeState{}, table)
 
     handlers = Input.surface_handlers(%{editing_model: Minga.Editing.Model.Vim})
 
@@ -51,8 +51,8 @@ defmodule MingaEditor.FileTree.FeatureTest do
     Input.reset_handlers()
   end
 
-  test "layout uses FileTree sidebar registry visibility and width" do
-    state = base_state(cols: 80, rows: 24)
+  test "layout uses FileTree sidebar registry visibility and width", %{sidebar_registry: table} do
+    state = base_state(cols: 80, rows: 24, sidebar_registry: table)
     tree = FileTree.new(File.cwd!(), width: 26)
     file_tree = %FileTreeState{} |> FileTreeState.open(tree, nil)
 
@@ -66,23 +66,27 @@ defmodule MingaEditor.FileTree.FeatureTest do
     assert LayoutTUI.compute(state).file_tree == nil
   end
 
-  test "workspace replacement re-syncs the active FileTree sidebar" do
-    state = base_state(cols: 80, rows: 24)
+  test "workspace replacement re-syncs the active FileTree sidebar", %{sidebar_registry: table} do
+    state = base_state(cols: 80, rows: 24, sidebar_registry: table)
     open_tree = %FileTreeState{} |> FileTreeState.open(FileTree.new(File.cwd!(), width: 24), nil)
     open_workspace = MingaEditor.Session.State.set_file_tree(state.workspace, open_tree)
 
     state = EditorState.set_workspace(state, open_workspace)
-    assert %{id: "file_tree", visible?: true, preferred_width: 24} = Sidebar.get("file_tree")
+
+    assert %{id: "file_tree", visible?: true, preferred_width: 24} =
+             Sidebar.get(table, "file_tree")
 
     closed_workspace =
       MingaEditor.Session.State.set_file_tree(state.workspace, FileTreeState.close(open_tree))
 
     _state = EditorState.set_workspace(state, closed_workspace)
-    assert %{id: "file_tree", visible?: false} = Sidebar.get("file_tree")
+    assert %{id: "file_tree", visible?: false} = Sidebar.get(table, "file_tree")
   end
 
-  test "dropping FileTree feature state is safe and toggle recreates it" do
-    state = base_state(cols: 80, rows: 24)
+  test "dropping FileTree feature state is safe and toggle recreates it", %{
+    sidebar_registry: table
+  } do
+    state = base_state(cols: 80, rows: 24, sidebar_registry: table)
     state = EditorState.set_file_tree(state, %FileTreeState{project_root: File.cwd!()})
     state = EditorState.drop_file_tree(state)
 

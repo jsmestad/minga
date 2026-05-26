@@ -12,6 +12,7 @@ defmodule MingaEditor.RenderPipelineTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Editing.Completion
+  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.FocusTree
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline
@@ -21,7 +22,19 @@ defmodule MingaEditor.RenderPipelineTest do
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.Viewport
 
-  import MingaEditor.RenderPipeline.TestHelpers
+  import MingaEditor.RenderPipeline.TestHelpers, except: [base_state: 0, base_state: 1]
+
+  setup do
+    table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
+    start_supervised!({Sidebar, name: table, notify: false})
+    Process.put(:sidebar_registry, table)
+    :ok
+  end
+
+  defp base_state(opts \\ []) do
+    opts = Keyword.put(opts, :sidebar_registry, Process.get(:sidebar_registry))
+    MingaEditor.RenderPipeline.TestHelpers.base_state(opts)
+  end
 
   @spec completion_item(String.t()) :: Completion.item()
   defp completion_item(label) do

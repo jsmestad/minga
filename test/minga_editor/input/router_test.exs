@@ -3,6 +3,7 @@ defmodule MingaEditor.Input.RouterTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Test.InputRouterMouseProbe
+  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.FocusTree
   alias MingaEditor.FocusTree.Node, as: FocusNode
   alias MingaEditor.State, as: EditorState
@@ -12,11 +13,19 @@ defmodule MingaEditor.Input.RouterTest do
   alias MingaEditor.Input
   alias MingaEditor.Input.Router
 
+  setup do
+    table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
+    start_supervised!({Sidebar, name: table, notify: false})
+    Process.put(:sidebar_registry, table)
+    :ok
+  end
+
   defp base_state do
     {:ok, buf} = BufferProcess.start_link(content: "hello\nworld\nthird")
 
     %EditorState{
       port_manager: self(),
+      sidebar_registry: Process.get(:sidebar_registry),
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),

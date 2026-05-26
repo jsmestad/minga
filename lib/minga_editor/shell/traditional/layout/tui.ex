@@ -22,8 +22,6 @@ defmodule MingaEditor.Shell.Traditional.Layout.TUI do
   @editor_min_cols 10
   @editor_min_rows 3
   @file_tree_min_cols 8
-  @git_status_min_cols 20
-  @git_status_max_cols 40
   @agent_panel_min_rows 5
 
   @doc """
@@ -188,40 +186,10 @@ defmodule MingaEditor.Shell.Traditional.Layout.TUI do
   @spec file_tree_layout(EditorState.t(), pos_integer(), non_neg_integer()) ::
           {Layout.rect() | nil, non_neg_integer(), pos_integer()}
   defp file_tree_layout(state, total_cols, content_start) do
-    case active_left_sidebar(state) do
+    case Sidebar.active_left(Sidebar.table_for(state)) do
       %{preferred_width: width} -> sidebar_layout(state, total_cols, width, content_start)
-      nil -> legacy_sidebar_layout(state, total_cols, content_start)
+      nil -> {nil, 0, total_cols}
     end
-  end
-
-  @spec active_left_sidebar(EditorState.t()) :: Sidebar.entry() | nil
-  defp active_left_sidebar(state) do
-    Sidebar.visible()
-    |> Enum.filter(&(&1.placement == :left))
-    |> Enum.reject(&stale_file_tree_sidebar?(state, &1))
-    |> Enum.sort_by(&{not &1.focused?, &1.priority, &1.id})
-    |> List.first()
-  end
-
-  @spec stale_file_tree_sidebar?(EditorState.t(), Sidebar.entry()) :: boolean()
-  defp stale_file_tree_sidebar?(state, %{id: "file_tree"}) do
-    EditorState.file_tree_state(state).tree == nil
-  end
-
-  defp stale_file_tree_sidebar?(_state, _sidebar), do: false
-
-  @spec legacy_sidebar_layout(EditorState.t(), pos_integer(), non_neg_integer()) ::
-          {Layout.rect() | nil, non_neg_integer(), pos_integer()}
-  defp legacy_sidebar_layout(
-         %{shell_state: %{git_status_panel: %{} = _panel}} = state,
-         total_cols,
-         content_start
-       ) do
-    sidebar_layout(state, total_cols, git_status_width(total_cols), content_start)
-  end
-
-  defp legacy_sidebar_layout(_state, total_cols, _content_start) do
-    {nil, 0, total_cols}
   end
 
   @spec sidebar_layout(EditorState.t(), pos_integer(), pos_integer(), non_neg_integer()) ::
@@ -237,14 +205,6 @@ defmodule MingaEditor.Shell.Traditional.Layout.TUI do
     editor_col = clamped_tw + 1
     editor_width = max(total_cols - editor_col, 1)
     {tree_rect, editor_col, editor_width}
-  end
-
-  @spec git_status_width(pos_integer()) :: pos_integer()
-  defp git_status_width(total_cols) do
-    total_cols
-    |> div(4)
-    |> max(@git_status_min_cols)
-    |> min(@git_status_max_cols)
   end
 
   # ── Agent panel ────────────────────────────────────────────────────────────

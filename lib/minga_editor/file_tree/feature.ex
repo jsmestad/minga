@@ -22,30 +22,40 @@ defmodule MingaEditor.FileTree.Feature do
   def sidebar_id, do: @sidebar_id
 
   @doc "Registers FileTree's dynamic input handler and sidebar contribution."
-  @spec register_contributions(FileTreeState.t()) :: :ok | {:error, term()}
-  def register_contributions(%FileTreeState{} = file_tree \\ %FileTreeState{}) do
+  @spec register_contributions(FileTreeState.t(), Sidebar.table()) :: :ok | {:error, term()}
+  def register_contributions(
+        %FileTreeState{} = file_tree \\ %FileTreeState{},
+        sidebar_registry \\ Sidebar.default_table()
+      ) do
     :ok = Input.register_handler(@input_source, FileTreeHandler, priority: 50)
-    sync_sidebar(file_tree)
+    sync_sidebar(file_tree, sidebar_registry)
   end
 
-  @doc "Synchronizes the global sidebar contribution from the current FileTree state."
-  @spec sync_sidebar(FileTreeState.t()) :: :ok | {:error, term()}
-  def sync_sidebar(%FileTreeState{} = file_tree) do
+  @doc "Synchronizes the sidebar contribution from the current FileTree state."
+  @spec sync_sidebar(FileTreeState.t(), Sidebar.table()) :: :ok | {:error, term()}
+  def sync_sidebar(%FileTreeState{} = file_tree, sidebar_registry \\ Sidebar.default_table()) do
     status = FileTreeState.status(file_tree)
+    visible? = FileTreeState.visible_status?(status)
+    focused? = FileTreeState.focused?(file_tree)
 
-    Sidebar.register(@input_source, %{
-      id: @sidebar_id,
-      display_name: "File Tree",
-      description: "Project files",
-      placement: :left,
-      priority: 10,
-      preferred_width: FileTreeState.width(file_tree),
-      visible?: FileTreeState.visible_status?(status),
-      focused?: FileTreeState.focused?(file_tree),
-      semantic_kind: "file_tree",
-      icon: "folder",
-      input_handler: FileTreeHandler,
-      action_handler: {MingaEditor.Commands.FileTree, :handle_sidebar_action}
-    })
+    result =
+      Sidebar.register(sidebar_registry, @input_source, %{
+        id: @sidebar_id,
+        display_name: "File Tree",
+        description: "Project files",
+        placement: :left,
+        priority: 10,
+        preferred_width: FileTreeState.width(file_tree),
+        visible?: visible?,
+        focused?: visible? and focused?,
+        semantic_kind: "file_tree",
+        icon: "folder",
+        input_handler: FileTreeHandler,
+        action_handler: {MingaEditor.Commands.FileTree, :handle_sidebar_action}
+      })
+
+    if result == :ok and visible? and focused?,
+      do: Sidebar.focus_left(sidebar_registry, @sidebar_id),
+      else: result
   end
 end

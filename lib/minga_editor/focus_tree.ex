@@ -15,7 +15,6 @@ defmodule MingaEditor.FocusTree do
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
   alias MingaEditor.Renderer.Gutter
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.UI.Picker, as: PickerData
   alias MingaEditor.Viewport
@@ -199,8 +198,8 @@ defmodule MingaEditor.FocusTree do
         )
 
       nil ->
-        TreeNode.new(:file_tree, rect,
-          handler: Input.FileTreeHandler,
+        TreeNode.new(:sidebar, rect,
+          handler: Input.Sidebar,
           scrollable?: true,
           focusable?: true
         )
@@ -208,28 +207,8 @@ defmodule MingaEditor.FocusTree do
   end
 
   @spec active_left_sidebar(map() | nil) :: Sidebar.entry() | nil
-  defp active_left_sidebar(nil) do
-    Sidebar.visible()
-    |> Enum.reject(&(&1.id == "file_tree"))
-    |> Enum.filter(&(&1.placement == :left))
-    |> Enum.sort_by(&{not &1.focused?, &1.priority, &1.id})
-    |> List.first()
-  end
-
-  defp active_left_sidebar(state) do
-    Sidebar.visible()
-    |> Enum.filter(&(&1.placement == :left))
-    |> Enum.reject(&stale_file_tree_sidebar?(state, &1))
-    |> Enum.sort_by(&{not &1.focused?, &1.priority, &1.id})
-    |> List.first()
-  end
-
-  @spec stale_file_tree_sidebar?(map(), Sidebar.entry()) :: boolean()
-  defp stale_file_tree_sidebar?(state, %{id: "file_tree"}) do
-    EditorState.file_tree_state(state).tree == nil
-  end
-
-  defp stale_file_tree_sidebar?(_state, _sidebar), do: false
+  defp active_left_sidebar(nil), do: nil
+  defp active_left_sidebar(state), do: Sidebar.active_left(Sidebar.table_for(state))
 
   @spec agent_panel_node(Layout.rect()) :: TreeNode.t()
   defp agent_panel_node(rect) do

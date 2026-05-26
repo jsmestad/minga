@@ -3,6 +3,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
 
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer.Process, as: BufferProcess
+  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
   alias MingaEditor.LayoutPreset
   alias MingaEditor.State, as: EditorState
@@ -20,6 +21,13 @@ defmodule MingaEditor.Input.AgentMouseTest do
   alias MingaEditor.Input.AgentMouse
   alias MingaEditor.Input.Router
   alias Minga.Mode
+
+  setup do
+    table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
+    start_supervised!({Sidebar, name: table, notify: false})
+    Process.put(:sidebar_registry, table)
+    :ok
+  end
 
   # ── Test helpers ───────────────────────────────────────────────────────────
 
@@ -42,6 +50,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
 
     %EditorState{
       port_manager: self(),
+      sidebar_registry: Process.get(:sidebar_registry),
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},

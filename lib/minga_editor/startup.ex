@@ -19,6 +19,7 @@ defmodule MingaEditor.Startup do
   alias MingaEditor.FileTree.Feature, as: FileTreeFeature
   alias MingaEditor.FileWatcherHelpers
   alias MingaEditor.Shell.Identity, as: ShellIdentity
+  alias MingaEditor.Sidebar.BuiltinSurfaces
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Session, as: EditorSessionState
@@ -50,6 +51,9 @@ defmodule MingaEditor.Startup do
     port_manager = Keyword.get(opts, :port_manager, MingaEditor.Frontend.Manager)
     keymap_server = Keyword.get(opts, :keymap_server, Minga.Keymap.default_server())
     events_registry = Keyword.get(opts, :events_registry, Minga.Events.default_registry())
+
+    sidebar_registry =
+      Keyword.get(opts, :sidebar_registry, MingaEditor.Extension.Sidebar.default_table())
 
     options_server =
       case Keyword.get(opts, :options_server, Minga.Config.Options.default_server()) do
@@ -112,13 +116,7 @@ defmodule MingaEditor.Startup do
 
     file_tree = %MingaEditor.State.FileTree{project_root: project_root}
 
-    case FileTreeFeature.register_contributions(file_tree) do
-      :ok ->
-        :ok
-
-      {:error, reason} ->
-        Log.warning(:editor, "FileTree contribution registration failed: #{inspect(reason)}")
-    end
+    register_sidebar_contributions(file_tree, sidebar_registry)
 
     workspace =
       %MingaEditor.Session.State{
@@ -162,6 +160,7 @@ defmodule MingaEditor.Startup do
       keymap_server: keymap_server,
       options_server: options_server,
       events_registry: events_registry,
+      sidebar_registry: sidebar_registry,
       editing_model: editing_model,
       focus_stack: MingaEditor.Input.default_stack(),
       shell_id: shell_entry.id,
@@ -288,6 +287,29 @@ defmodule MingaEditor.Startup do
   @spec restore_persisted_workspaces(TabBar.t(), String.t() | nil) :: TabBar.t()
   defp restore_persisted_workspaces(%TabBar{} = tab_bar, project_root) do
     TabBar.restore_workspaces(tab_bar, WorkspacePersistence.scan(project_root), project_root)
+  end
+
+  @spec register_sidebar_contributions(
+          MingaEditor.State.FileTree.t(),
+          MingaEditor.Extension.Sidebar.table()
+        ) :: :ok
+  defp register_sidebar_contributions(file_tree, sidebar_registry) do
+    log_contribution_registration(
+      FileTreeFeature.register_contributions(file_tree, sidebar_registry),
+      "FileTree contribution registration failed"
+    )
+
+    log_contribution_registration(
+      BuiltinSurfaces.register_contributions(sidebar_registry),
+      "Built-in sidebar contribution registration failed"
+    )
+  end
+
+  @spec log_contribution_registration(:ok | {:error, term()}, String.t()) :: :ok
+  defp log_contribution_registration(:ok, _message), do: :ok
+
+  defp log_contribution_registration({:error, reason}, message) do
+    Log.warning(:editor, "#{message}: #{inspect(reason)}")
   end
 
   @spec project_root_from_opts(keyword()) :: String.t() | nil

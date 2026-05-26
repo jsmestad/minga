@@ -7,6 +7,7 @@ defmodule MingaEditor.Commands.BufferManagementTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias MingaEditor.Extension.Sidebar
   alias Minga.Command
   alias Minga.Config.Options
   alias Minga.Test.StubServer
@@ -474,12 +475,14 @@ defmodule MingaEditor.Commands.BufferManagementTest do
       |> Keyword.merge(buffer_opts)
 
     {:ok, buffer} = BufferProcess.start_link(buffer_opts)
+    sidebar_registry = private_sidebar_registry()
 
     {:ok, editor} =
       MingaEditor.start_link(
         name: :"editor_#{:erlang.unique_integer([:positive])}",
         port_manager: nil,
         options_server: options_server,
+        sidebar_registry: sidebar_registry,
         buffer: buffer,
         width: 40,
         height: 10,
@@ -497,6 +500,7 @@ defmodule MingaEditor.Commands.BufferManagementTest do
       Startup.build_initial_state(
         port_manager: nil,
         options_server: options,
+        sidebar_registry: private_sidebar_registry(),
         buffer: buffer,
         width: 40,
         height: 10,
@@ -504,6 +508,12 @@ defmodule MingaEditor.Commands.BufferManagementTest do
       )
 
     {state, buffer}
+  end
+
+  defp private_sidebar_registry do
+    name = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
+    start_supervised!({Sidebar, name: name, notify: false})
+    name
   end
 
   defp send_keys(editor, text) do

@@ -371,9 +371,14 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   end
 
   defp dispatch_action(state, {:sidebar_action, sidebar_id, kind, action}) do
-    case Sidebar.get(sidebar_id) do
-      nil -> dispatch_missing_registered_sidebar_action(state, sidebar_id, kind, action)
-      _sidebar -> Sidebar.dispatch_action(state, sidebar_id, action, %{kind: kind})
+    sidebar_registry = EditorState.sidebar_registry(state)
+
+    case Sidebar.get(sidebar_registry, sidebar_id) do
+      nil ->
+        dispatch_missing_registered_sidebar_action(state, sidebar_id, kind, action)
+
+      _sidebar ->
+        Sidebar.dispatch_action(sidebar_registry, state, sidebar_id, action, %{kind: kind})
     end
   end
 

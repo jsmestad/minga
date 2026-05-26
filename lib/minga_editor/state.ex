@@ -33,6 +33,8 @@ defmodule MingaEditor.State do
   alias MingaEditor.BottomPanel
   alias MingaEditor.KeystrokeHistory
   alias MingaEditor.FileTree.Feature, as: FileTreeFeature
+  alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
+  alias MingaEditor.Sidebar.BuiltinSurfaces
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Dired, as: DiredState
@@ -99,6 +101,7 @@ defmodule MingaEditor.State do
             keymap_server: @default_keymap_server,
             options_server: @default_options_server,
             events_registry: @default_events_registry,
+            sidebar_registry: MingaEditor.Extension.Sidebar.default_table(),
             workspace: nil,
             terminal_viewport: Viewport.new(24, 80),
             editing_model: :vim,
@@ -147,6 +150,7 @@ defmodule MingaEditor.State do
           keymap_server: keymap_server(),
           options_server: options_server(),
           events_registry: events_registry(),
+          sidebar_registry: MingaEditor.Extension.Sidebar.table(),
           workspace: SessionState.t(),
           terminal_viewport: Viewport.t(),
           editing_model: :vim | :cua,
@@ -181,6 +185,10 @@ defmodule MingaEditor.State do
           git_commit_gen_ref: reference() | nil,
           font_size_override: pos_integer() | nil
         }
+
+  @doc "Returns the active sidebar registry table for this state."
+  @spec sidebar_registry(t() | map()) :: MingaEditor.Extension.Sidebar.table()
+  def sidebar_registry(state), do: MingaEditor.Extension.Sidebar.table_for(state)
 
   @spec set_renderer(t(), pid() | nil) :: t()
   def set_renderer(%__MODULE__{} = state, pid) when is_pid(pid) or is_nil(pid),
@@ -253,13 +261,13 @@ defmodule MingaEditor.State do
   @doc "Replaces the active workspace."
   @spec set_workspace(t(), SessionState.t()) :: t()
   def set_workspace(%__MODULE__{} = state, %SessionState{} = workspace) do
-    workspace |> SessionState.file_tree_state() |> sync_file_tree_sidebar()
+    workspace |> SessionState.file_tree_state() |> sync_file_tree_sidebar(sidebar_registry(state))
     %{state | workspace: workspace}
   end
 
-  @spec sync_file_tree_sidebar(FileTreeState.t()) :: :ok
-  defp sync_file_tree_sidebar(%FileTreeState{} = file_tree) do
-    case FileTreeFeature.sync_sidebar(file_tree) do
+  @spec sync_file_tree_sidebar(FileTreeState.t(), MingaEditor.Extension.Sidebar.table()) :: :ok
+  defp sync_file_tree_sidebar(%FileTreeState{} = file_tree, sidebar_registry) do
+    case FileTreeFeature.sync_sidebar(file_tree, sidebar_registry) do
       :ok -> :ok
       {:error, reason} -> Log.warning(:editor, "FileTree sidebar sync failed: #{inspect(reason)}")
     end
@@ -348,7 +356,7 @@ defmodule MingaEditor.State do
   @doc "Replaces the active workspace FileTree feature state."
   @spec set_file_tree(t(), FileTreeState.t()) :: t()
   def set_file_tree(%__MODULE__{} = state, %FileTreeState{} = file_tree) do
-    sync_file_tree_sidebar(file_tree)
+    sync_file_tree_sidebar(file_tree, sidebar_registry(state))
     update_workspace(state, &SessionState.set_file_tree(&1, file_tree))
   end
 
@@ -361,7 +369,7 @@ defmodule MingaEditor.State do
   @doc "Drops the active workspace FileTree feature state."
   @spec drop_file_tree(t()) :: t()
   def drop_file_tree(%__MODULE__{} = state) do
-    sync_file_tree_sidebar(%FileTreeState{})
+    sync_file_tree_sidebar(%FileTreeState{}, sidebar_registry(state))
     update_workspace(state, &SessionState.drop_file_tree/1)
   end
 
@@ -1051,11 +1059,33 @@ defmodule MingaEditor.State do
   @spec git_status_panel(t()) :: ShellState.git_status_panel() | nil
   def git_status_panel(%{shell_state: ss}), do: ShellState.git_status_panel(ss)
   @spec set_git_status_panel(t(), ShellState.git_status_panel() | nil) :: t()
-  def set_git_status_panel(s, data),
-    do: update_shell_state(s, &ShellState.set_git_status_panel(&1, data))
+  def set_git_status_panel(s, nil) do
+    sync_git_status_sidebar(s, nil)
+    update_shell_state(s, &ShellState.set_git_status_panel(&1, nil))
+  end
+
+  def set_git_status_panel(s, data) do
+    panel = GitStatusPanel.new(data)
+    sync_git_status_sidebar(s, panel)
+    update_shell_state(s, &ShellState.set_git_status_panel(&1, panel))
+  end
+
+  @spec sync_git_status_sidebar(t(), GitStatusPanel.t() | nil) :: :ok
+  defp sync_git_status_sidebar(state, panel) do
+    case BuiltinSurfaces.sync_git_status_panel(panel, sidebar_registry(state)) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Log.warning(:editor, "Git Status sidebar sync failed: #{inspect(reason)}")
+    end
+  end
 
   @spec close_git_status_panel(t()) :: t()
-  def close_git_status_panel(s), do: update_shell_state(s, &ShellState.close_git_status_panel/1)
+  def close_git_status_panel(s) do
+    sync_git_status_sidebar(s, nil)
+    update_shell_state(s, &ShellState.close_git_status_panel/1)
+  end
 
   @spec sidebar_active_id(t()) :: String.t() | nil
   def sidebar_active_id(%{shell_state: %{sidebar_active_id: id}}), do: id
@@ -1063,6 +1093,8 @@ defmodule MingaEditor.State do
 
   @spec set_sidebar_active_id(t(), String.t() | nil) :: t()
   def set_sidebar_active_id(s, id) when is_binary(id) or is_nil(id) do
+    sync_active_sidebar(s, id)
+
     update_shell_state(s, fn ss ->
       if Map.has_key?(ss, :sidebar_active_id),
         do: ShellState.set_sidebar_active_id(ss, id),
@@ -1070,15 +1102,39 @@ defmodule MingaEditor.State do
     end)
   end
 
+  @spec sync_active_sidebar(t(), String.t() | nil) :: :ok
+  defp sync_active_sidebar(state, id) do
+    case MingaEditor.Extension.Sidebar.focus_left(sidebar_registry(state), id) do
+      :ok -> :ok
+      {:error, reason} -> Log.warning(:editor, "Sidebar focus sync failed: #{inspect(reason)}")
+    end
+  end
+
   @spec observatory_visible?(t()) :: boolean()
   def observatory_visible?(%{shell_state: ss}), do: ShellState.observatory_visible?(ss)
 
   @spec open_observatory(t(), {reference(), reference()} | nil) :: t()
-  def open_observatory(s, timer),
-    do: update_shell_state(s, &ShellState.open_observatory(&1, timer))
+  def open_observatory(s, timer) do
+    sync_observatory_sidebar(s, true)
+    update_shell_state(s, &ShellState.open_observatory(&1, timer))
+  end
 
   @spec close_observatory(t()) :: t()
-  def close_observatory(s), do: update_shell_state(s, &ShellState.close_observatory/1)
+  def close_observatory(s) do
+    sync_observatory_sidebar(s, false)
+    update_shell_state(s, &ShellState.close_observatory/1)
+  end
+
+  @spec sync_observatory_sidebar(t(), boolean()) :: :ok
+  defp sync_observatory_sidebar(state, visible?) do
+    case BuiltinSurfaces.sync_observatory(visible?, sidebar_registry(state)) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Log.warning(:editor, "Observatory sidebar sync failed: #{inspect(reason)}")
+    end
+  end
 
   @spec set_observatory_data(t(), Observatory.Data.t() | nil) :: t()
   def set_observatory_data(s, data),

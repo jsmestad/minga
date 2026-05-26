@@ -35,6 +35,7 @@ defmodule MingaEditor.Extension.Sidebar.Entry do
           icon: String.t(),
           input_handler: module() | nil,
           action_handler: action_handler(),
+          badge_count: non_neg_integer() | nil,
           snapshot: Snapshot.t()
         }
 
@@ -52,6 +53,7 @@ defmodule MingaEditor.Extension.Sidebar.Entry do
             icon: "sidebar.left",
             input_handler: nil,
             action_handler: nil,
+            badge_count: nil,
             snapshot: Snapshot.new()
 
   @doc "Updates the cached snapshot."

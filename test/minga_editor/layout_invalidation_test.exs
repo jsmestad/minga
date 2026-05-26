@@ -10,9 +10,9 @@ defmodule MingaEditor.LayoutInvalidationTest do
   render after toggling the tree because the window's cached draws still
   had the old col_off=0 coordinates.
   """
-  # Mutates the global built-in FileTree sidebar registration while computing layout.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
+  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Windows
@@ -21,11 +21,19 @@ defmodule MingaEditor.LayoutInvalidationTest do
   alias MingaEditor.Window
   alias Minga.Project.FileTree
 
+  setup do
+    table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
+    start_supervised!({Sidebar, name: table, notify: false})
+    Process.put(:sidebar_registry, table)
+    :ok
+  end
+
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
   defp new_state(rows \\ 24, cols \\ 80) do
     %EditorState{
       port_manager: nil,
+      sidebar_registry: Process.get(:sidebar_registry),
       workspace: %MingaEditor.Session.State{
         viewport: Viewport.new(rows, cols),
         editing: VimState.new()
