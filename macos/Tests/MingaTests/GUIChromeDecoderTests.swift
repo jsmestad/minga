@@ -400,7 +400,7 @@ struct GUIStatusBarDecoderTests {
         var identity = Data()
         identity.append(0) // contentKind = buffer
         identity.append(1) // mode = insert
-        identity.append(0x03) // flags
+        identity.append(0x0B) // flags: has_lsp + has_git + is_dirty + safe_mode
 
         var cursor = Data()
         appendU32(&cursor, 42) // cursorLine
@@ -481,7 +481,8 @@ struct GUIStatusBarDecoderTests {
         #expect(update.cursorLine == 42)
         #expect(update.cursorCol == 9)
         #expect(update.lineCount == 500)
-        #expect(update.flags == 0x03)
+        #expect(update.flags == 0x0B)
+        #expect(update.safeMode == true)
         #expect(update.lspStatus == 1)
         #expect(update.gitBranch == "main")
         #expect(update.message == "-- INSERT --")

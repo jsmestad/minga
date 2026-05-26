@@ -107,6 +107,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         result["cursor_col"] = Int(update.cursorCol)
         result["line_count"] = Int(update.lineCount)
         result["flags"] = Int(update.flags)
+        result["safe_mode"] = update.safeMode
         result["lsp_status"] = Int(update.lspStatus)
         result["git_branch"] = update.gitBranch
         result["message"] = update.message

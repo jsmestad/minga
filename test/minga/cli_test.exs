@@ -128,6 +128,26 @@ defmodule Minga.CLITest do
       assert message =~ "--config"
     end
 
+    test "--safe enables safe mode" do
+      assert {:open, nil, %{safe_mode: true}} = CLI.parse_args(["--safe"])
+    end
+
+    test "-Q enables safe mode" do
+      assert {:open, nil, %{safe_mode: true}} = CLI.parse_args(["-Q"])
+    end
+
+    test "--safe flag appears in help output" do
+      assert {:error, message} = CLI.parse_args(["--help"])
+      assert message =~ "--safe"
+      assert message =~ "-Q"
+    end
+
+    test "safe_args?/1 detects long and short safe mode flags" do
+      assert CLI.safe_args?(["--safe"])
+      assert CLI.safe_args?(["-Q"])
+      refute CLI.safe_args?(["README.md"])
+    end
+
     test "--debug-log sets expanded debug log path" do
       assert {:open, nil, %{debug_log: path}} =
                CLI.parse_args(["--debug-log", "~/minga-debug.log"])

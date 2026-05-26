@@ -1682,6 +1682,104 @@ defmodule Minga.Config.LoaderTest do
     end
   end
 
+  describe "safe mode" do
+    test "skips user modules and all config eval stages" do
+      {minga_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+        set :tab_width, 42
+        """)
+
+      modules_dir = Path.join(minga_dir, "modules")
+      File.mkdir_p!(modules_dir)
+
+      File.write!(
+        Path.join(modules_dir, "broken_module.ex"),
+        "raise \"module should not compile\""
+      )
+
+      File.write!(
+        Path.join(minga_dir, "gui_settings.exs"),
+        "use Minga.Config\nset :tab_width, 43\n"
+      )
+
+      File.write!(Path.join(minga_dir, "after.exs"), "use Minga.Config\nset :tab_width, 44\n")
+
+      project_dir =
+        Path.join(System.tmp_dir!(), "minga_safe_project_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(project_dir)
+      File.write!(Path.join(project_dir, ".minga.exs"), "use Minga.Config\nset :tab_width, 45\n")
+
+      previous_cwd = File.cwd!()
+      File.cd!(project_dir)
+      Minga.SafeMode.put(true)
+
+      on_exit(fn ->
+        Minga.SafeMode.put(false)
+        File.cd!(previous_cwd)
+        cleanup.()
+        File.rm_rf!(project_dir)
+      end)
+
+      name = :"loader_safe_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+
+      assert Options.get(test_options_server(), :tab_width) == 2
+      assert Loader.loaded_modules(pid) == []
+      assert Loader.modules_errors(pid) == []
+      assert Loader.load_error(pid) == nil
+      assert Loader.project_config_error(pid) == nil
+      assert Loader.gui_settings_error(pid) == nil
+      assert Loader.after_error(pid) == nil
+    end
+
+    test "skips bundled extension registration and startup" do
+      {_minga_dir, cleanup} = make_config_dir("use Minga.Config\n")
+      previous_load_extensions = Application.get_env(:minga, :load_extensions)
+      previous_load_board = Application.get_env(:minga, :load_board_extension)
+
+      Application.put_env(:minga, :load_extensions, true)
+      Application.put_env(:minga, :load_board_extension, true)
+      Minga.SafeMode.put(true)
+      ensure_extension_runtime()
+
+      on_exit(fn ->
+        Minga.SafeMode.put(false)
+        restore_application_env(:load_extensions, previous_load_extensions)
+        restore_application_env(:load_board_extension, previous_load_board)
+        cleanup.()
+      end)
+
+      name = :"loader_safe_extensions_#{System.unique_integer([:positive])}"
+      {:ok, _pid} = Loader.start_link(name: name)
+
+      assert ExtRegistry.all() == []
+    end
+
+    test "reload loads user config even when startup safe mode remains active" do
+      {_minga_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+        set :tab_width, 46
+        """)
+
+      Minga.SafeMode.put(true)
+
+      on_exit(fn ->
+        Minga.SafeMode.put(false)
+        cleanup.()
+      end)
+
+      name = :"loader_safe_reload_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+      assert Options.get(test_options_server(), :tab_width) == 2
+
+      assert :ok = Loader.reload(pid)
+      assert Options.get(test_options_server(), :tab_width) == 46
+    end
+  end
+
   # ── Helpers ─────────────────────────────────────────────────────────────────
 
   defp assert_error_fragments(error, {:any, fragments}) do

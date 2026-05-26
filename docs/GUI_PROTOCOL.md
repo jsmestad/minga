@@ -304,7 +304,9 @@ opcode(1) + section_count(1) + [section_id(1) + section_len(2) + payload(section
 
 Mode values: 0=normal, 1=insert, 2=visual, 3=command, 4=operator_pending, 5=search, 6=replace
 
-Flags bits: bit 0=has_lsp, bit 1=has_git, bit 2=is_dirty
+Flags bits: bit 0=has_lsp, bit 1=has_git, bit 2=is_dirty, bit 3=safe_mode
+
+When bit 3 is set, the frontend should surface safe mode in the native status bar, for example with a small `[SAFE]` badge next to the mode indicator.
 
 LSP status: 0=none, 1=ready, 2=initializing, 3=starting, 4=error
 

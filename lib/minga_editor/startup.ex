@@ -67,6 +67,8 @@ defmodule MingaEditor.Startup do
 
     messages_buf = Minga.Log.messages_buffer()
 
+    log_safe_mode_startup()
+
     # Always ensure an active buffer exists. The editor's render pipeline,
     # command dispatch, and input routing all assume buffers.active is a
     # pid. The dashboard feature (which set active to nil) is disabled
@@ -189,6 +191,15 @@ defmodule MingaEditor.Startup do
     current_tb = EditorState.tab_bar(state)
     tb = TabBar.update_context(current_tb, current_tb.active_id, context)
     EditorState.set_tab_bar(state, tb)
+  end
+
+  @spec log_safe_mode_startup() :: :ok
+  defp log_safe_mode_startup do
+    if Minga.SafeMode.active?() do
+      Log.info(:editor, "Started in safe mode: user config not loaded")
+    end
+
+    :ok
   end
 
   @doc """

@@ -29,6 +29,24 @@ defmodule MingaEditor.Commands.ExDispatchTest do
     assert MingaEditor.State.AgentAccess.panel(new_state).model_name == "gpt-4o"
   end
 
+  test "safe mode ex command reports active state" do
+    Minga.SafeMode.put(true)
+    on_exit(fn -> Minga.SafeMode.put(false) end)
+
+    new_state = Commands.execute(state(), {:execute_ex_command, {:safe_mode_status, []}})
+
+    assert EditorState.status_msg(new_state) =~ "Safe mode is active"
+  end
+
+  test "safe mode ex command reports inactive state" do
+    Minga.SafeMode.put(false)
+    on_exit(fn -> Minga.SafeMode.put(false) end)
+
+    new_state = Commands.execute(state(), {:execute_ex_command, {:safe_mode_status, []}})
+
+    assert EditorState.status_msg(new_state) == "Safe mode is inactive"
+  end
+
   defp state do
     %EditorState{
       port_manager: nil,

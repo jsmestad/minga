@@ -674,6 +674,16 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       assert tool == "read_file"
     end
 
+    test "encodes safe mode in the identity section flags" do
+      data = Map.put(status_data(), :safe_mode, true)
+      binary = ProtocolGUI.encode_gui_status_bar({:buffer, data})
+      sections = status_sections(binary)
+
+      <<_content_kind::8, _mode::8, flags::8>> = Map.fetch!(sections, 0x01)
+
+      assert Bitwise.band(flags, 0x08) == 0x08
+    end
+
     test "encodes an empty active tool name when the field is nil" do
       data = Map.put(status_data(), :active_tool_name, nil)
       binary = ProtocolGUI.encode_gui_status_bar({:buffer, data})

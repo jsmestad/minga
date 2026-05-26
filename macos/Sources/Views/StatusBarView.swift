@@ -36,6 +36,7 @@ final class StatusBarState {
     var cursorCol: UInt32 = 1
     var lineCount: UInt32 = 1
     var flags: UInt8 = 0
+    var safeMode: Bool = false
     var lspStatus: UInt8 = 0
     var gitBranch: String = ""
     var message: String = ""
@@ -82,6 +83,7 @@ final class StatusBarState {
         if self.cursorCol != data.cursorCol { self.cursorCol = data.cursorCol }
         if self.lineCount != data.lineCount { self.lineCount = data.lineCount }
         if self.flags != data.flags { self.flags = data.flags }
+        if self.safeMode != data.safeMode { self.safeMode = data.safeMode }
         if self.lspStatus != data.lspStatus { self.lspStatus = data.lspStatus }
         if self.gitBranch != data.gitBranch { self.gitBranch = data.gitBranch }
         if self.message != data.message { self.message = data.message }
@@ -137,6 +139,7 @@ final class StatusBarState {
     var isRecordingMacro: Bool { macroRecording > 0 }
     var hasGitDiffStats: Bool { gitAdded > 0 || gitModified > 0 || gitDeleted > 0 }
     var hasRunningBackgroundSubagents: Bool { backgroundSubagentCount > 0 }
+    var isSafeMode: Bool { safeMode }
 
     /// The macro register character (a-z), or nil if not recording.
     var macroRegister: Character? {
@@ -233,11 +236,17 @@ struct StatusBarView: View {
     }
 
     private var rightModelineGroups: [StatusBarSegmentGroup] {
-        statusBarGroups(
+        var groups = statusBarGroups(
             from: state.modelineRightSegments,
             fallbackKinds: ["parser", "lsp", "indent", "filetype", "position", "mode"],
             side: "right"
         )
+
+        if state.isSafeMode && !groups.contains(where: { $0.kind == "mode" }) {
+            groups.insert(StatusBarSegmentGroup(id: "right-safe-mode", kind: "safe", segments: []), at: 0)
+        }
+
+        return groups
     }
 
     private func statusBarGroups(from segments: [Wire.StatusBarSegment], fallbackKinds: [String], side: String) -> [StatusBarSegmentGroup] {
@@ -343,6 +352,8 @@ struct StatusBarView: View {
         switch group.kind {
         case "mode":
             modeBadge
+        case "safe":
+            safeModeBadge
         case "filename":
             filenameSegment(group: group, command: command(in: group))
         case "git":
@@ -747,18 +758,39 @@ struct StatusBarView: View {
     }
 
     @ViewBuilder
-    private var modeBadge: some View {
-        let (bg, fg) = modeColors(state.mode)
-        Text(state.modeName)
+    private var safeModeBadge: some View {
+        Text("[SAFE]")
             .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(fg)
-            .padding(.horizontal, 8)
+            .foregroundStyle(theme.modelineInfoFg)
+            .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(bg)
+                    .fill(theme.modelineInfoBg)
             )
-            .help("\(state.modeName) mode")
+            .help("Safe mode enabled")
+            .accessibilityLabel("Safe mode enabled")
+    }
+
+    @ViewBuilder
+    private var modeBadge: some View {
+        let (bg, fg) = modeColors(state.mode)
+        HStack(spacing: 4) {
+            if state.isSafeMode {
+                safeModeBadge
+            }
+
+            Text(state.modeName)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(fg)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(bg)
+                )
+        }
+        .help(state.isSafeMode ? "Safe mode enabled, \(state.modeName) mode" : "\(state.modeName) mode")
     }
 
     private func modeColors(_ mode: UInt8) -> (Color, Color) {

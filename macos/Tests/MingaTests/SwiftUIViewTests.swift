@@ -169,12 +169,13 @@ struct StatusBarViewViewTests {
         leftSegments: [Wire.StatusBarSegment] = [],
         rightSegments: [Wire.StatusBarSegment] = [],
         agentStatus: UInt8 = 0,
-        activeToolName: String = ""
+        activeToolName: String = "",
+        safeMode: Bool = false
     ) -> StatusBarState {
         let state = StatusBarState()
         state.update(from: StatusBarUpdate(
             contentKind: 0, mode: 0, cursorLine: 42, cursorCol: 9,
-            lineCount: 500, flags: 0, lspStatus: 0, gitBranch: "",
+            lineCount: 500, flags: safeMode ? 0x08 : 0, safeMode: safeMode, lspStatus: 0, gitBranch: "",
             message: message, filetype: "elixir", errorCount: 0, warningCount: 0,
             modelName: "", messageCount: 0, sessionStatus: 0,
             infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: agentStatus,
@@ -225,6 +226,25 @@ struct StatusBarViewViewTests {
         #expect(strings.contains("Elixir"))
         #expect(strings.contains("Ln 42, Col 9"))
         #expect(strings.contains("Spaces:2"))
+    }
+
+    @Test("Safe mode badge remains visible without the mode group")
+    @MainActor func safeModeBadgeRemainsVisibleWithoutModeGroup() throws {
+        let state = statusBarState(
+            rightSegments: [
+                segment(1, " Elixir ", kind: "filetype"),
+                segment(2, " Ln 42, Col 9 ", kind: "position")
+            ],
+            safeMode: true
+        )
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
+        let body = try sut.inspect()
+        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        #expect(strings.contains("[SAFE]"))
+        #expect(!strings.contains("NORMAL"))
+        #expect(strings.contains("Elixir"))
+        #expect(strings.contains("Ln 42, Col 9"))
     }
 
     @Test("Filename group uses BEAM modeline text for native rendering")

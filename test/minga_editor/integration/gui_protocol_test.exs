@@ -104,6 +104,7 @@ defmodule Minga.Integration.GUIProtocolTest do
          %{
            mode: :normal,
            mode_state: nil,
+           safe_mode: true,
            cursor_line: 41,
            cursor_col: 9,
            line_count: 200,
@@ -141,6 +142,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       # content_kind 0 = buffer
       assert decoded["content_kind"] == 0
       assert decoded["mode"] == 0
+      assert decoded["safe_mode"] == true
       # 1-indexed in the wire format (cursor_line is 0-indexed internally, +1 encoded)
       assert decoded["cursor_line"] == 42
       assert decoded["cursor_col"] == 10
@@ -179,6 +181,7 @@ defmodule Minga.Integration.GUIProtocolTest do
          %{
            mode: :normal,
            mode_state: nil,
+           safe_mode: true,
            model_name: "claude-3-5-sonnet",
            session_status: :thinking,
            message_count: 7,
@@ -216,6 +219,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       # content_kind 1 = agent
       assert decoded["content_kind"] == 1
       assert decoded["mode"] == 0
+      assert decoded["safe_mode"] == true
       assert decoded["model_name"] == "claude-3-5-sonnet"
       assert decoded["message_count"] == 7
       # Background buffer fields are now populated

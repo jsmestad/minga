@@ -51,6 +51,14 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
              "Should not show OPERATOR badge in operator_pending mode"
     end
 
+    test "safe mode prepends a visible mode badge" do
+      data = Map.put(@base_data, :safe_mode, true)
+      {commands, _regions} = Modeline.render(0, 80, data)
+      text = Enum.map_join(commands, fn {_row, _col, segment, _opts} -> segment end)
+
+      assert String.contains?(text, "[SAFE] NORMAL")
+    end
+
     test "renders common file state variants" do
       for data <- [
             Map.put(@base_data, :dirty_marker, " ● "),
