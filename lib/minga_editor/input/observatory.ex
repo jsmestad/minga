@@ -14,6 +14,10 @@ defmodule MingaEditor.Input.Observatory do
 
   @doc "Inspects a process selected in the BEAM Observatory."
   @spec inspect_process(state(), String.t()) :: state()
+  def inspect_process(state, "") do
+    EditorState.set_observatory_inspection(state, nil)
+  end
+
   def inspect_process(state, pid_string) when is_binary(pid_string) do
     inspection =
       pid_string
