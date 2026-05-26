@@ -91,7 +91,8 @@ defmodule MingaEditor.Frontend.Emit.TUI do
 
   @spec detect_scroll_regions(ctx(), Caches.t()) :: [scroll_delta()] | nil
   defp detect_scroll_regions(ctx, caches) do
-    if scroll_optimization_enabled?() and scroll_compatible_mode?(ctx, caches) do
+    if scroll_optimization_enabled?() and scroll_compatible_mode?(ctx, caches) and
+         scroll_region_full_width?(ctx) do
       detect_scroll_regions_impl(ctx, caches)
     else
       nil
@@ -117,6 +118,19 @@ defmodule MingaEditor.Frontend.Emit.TUI do
     prev_mode = caches.emit_prev_editing_mode
 
     current_mode not in @volatile_modes and current_mode == prev_mode
+  end
+
+  # ANSI scroll regions (CSI top;bottom r) always scroll the full terminal
+  # width; there is no column restriction in the spec. When any chrome
+  # element occupies columns alongside the editor within the scroll
+  # region's row range, the scroll shifts that chrome too, desynchronizing
+  # libvaxis's screen buffers from the actual terminal state.
+  #
+  # If you add a new sidebar or column-sharing chrome element to the
+  # layout, extend this guard to include it.
+  @spec scroll_region_full_width?(ctx()) :: boolean()
+  defp scroll_region_full_width?(ctx) do
+    ctx.layout.file_tree == nil
   end
 
   @spec detect_scroll_regions_impl(ctx(), Caches.t()) :: [scroll_delta()] | nil
