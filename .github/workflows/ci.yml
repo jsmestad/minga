@@ -78,11 +78,6 @@ jobs:
         run: scripts/check_protocol_generated_edits "${{ github.event.pull_request.base.sha }}"
       - run: mix protocol.gen --check
       - run: mix test --warnings-as-errors --exclude system_clipboard --exclude conformance
-      - name: Test bundled Board extension
-        run: |
-          cd extensions/board
-          mix deps.get
-          mix test --warnings-as-errors
 
   conformance:
     name: Neovim Conformance

@@ -162,6 +162,20 @@ defmodule MingaBoard.Shell.GUIActionTest do
   end
 
   describe "stashed Board session lifecycle" do
+    setup do
+      ShellRegistry.reset_for_test()
+      ShellRegistry.seed_builtin()
+      :ok = MingaBoard.Feature.register_contributions()
+
+      on_exit(fn ->
+        ShellRegistry.reset_for_test()
+        ShellRegistry.seed_builtin()
+        MingaBoard.Feature.register_contributions()
+      end)
+
+      :ok
+    end
+
     test "agent session down updates stashed Board cards", %{workspace: workspace} do
       session = self()
       {board, card} = BoardState.create_card(BoardState.new(), task: "Agent", session: session)
