@@ -15,6 +15,7 @@ The following optimizations have been completed (see commit `8beec9d`):
 - **Motion: binary pattern matching for char classification** `classify_char/1` with guards replaces `word_char?` regex. Hot helpers inlined with `@compile {:inline, ...}`.
 - **Motion: multi-clause functions replacing `cond`** `advance_word_forward/4`, `advance_word_end/4`, bracket scan helpers extracted as multi-clause functions.
 - **Editor: `content_and_cursor/1`** 12 separate `content()` + `cursor()` GenServer call pairs replaced with single round-trip.
+- **Motion: `Buffer.Process.apply_motion/2`** cursor-only motion functions now run inside the buffer process, so word, line, paragraph, find-char, visual-line, and page motions avoid returning a `Document` snapshot to the Editor before moving the cursor.
 - **Git: in-memory diffing** `Git.Buffer` caches HEAD content and diffs against current buffer using `List.myers_difference/2` in pure Elixir. No `git diff` subprocess spawned on edits. Git commands only run at buffer open and explicit stage operations.
 - **BEAM VM tuning** (see below)
 
@@ -245,15 +246,15 @@ end
 
 ## 4. Motion Module: Avoid Temporary Document + Content Copies
 
+**Status: Implemented in #1887.**
+
 ### Problem
 
-Every motion function receives a `Document.t()` and calls `Document.content/1` (binary concat), then `String.graphemes/1` (tuple allocation), then `String.split/2` (another list). The Editor's `apply_motion/2` creates a temporary `Document.new(content)`, so the content is still materialized and copied into a throwaway struct.
-
-While `content_and_cursor/1` reduced GenServer round-trips from 3 to 2, the temporary Document allocation and content copy remain.
+Cursor-only motions used to run outside `Buffer.Process`: the Editor requested a document snapshot, computed a target cursor, then sent a second call to move there. Older versions did this with `content_and_cursor/1` plus `Document.new(content)`, and the later snapshot path still returned the live document struct to the Editor process before every motion.
 
 ### Fix
 
-**Move motion execution into the Buffer.Process process** via an `apply_motion/2` GenServer call. The motion function runs inside the server where the gap buffer already lives (zero copies):
+Motion execution now happens inside `Buffer.Process` via an `apply_motion/2` GenServer call. The motion function runs inside the server where the gap buffer already lives:
 
 ```elixir
 # In Buffer.Process
@@ -264,11 +265,11 @@ def handle_call({:apply_motion, motion_fn}, _from, state) do
 end
 ```
 
-This eliminates the content copy, the temporary Document, and reduces the remaining 2 GenServer calls to 1.
+This eliminates the temporary external document snapshot and reduces the remaining 2 GenServer calls to 1 for cursor-only motions. Reproduce the timing and allocation comparison with `mix run bench/motion_process_bench.exs`, which prints `legacy_motion_us`, `buffer_process_motion_us`, `motion_speedup_x`, and caller heap growth metrics for the 50,000-line word-motion case.
 
 ### Impact
 
-**High.** Eliminates all temporary allocations per motion. For a 50,000-line file, that's ~3 MB saved per keystroke.
+**High.** Eliminates most caller-side temporary allocation per cursor motion and keeps motion work next to the buffer data.
 
 ---
 
@@ -497,6 +498,7 @@ The keystroke-to-render critical path is instrumented with `:telemetry` spans. S
 
 ### Tools
 
+- **`mix run bench/motion_process_bench.exs`** reproducible before/after timing and allocation comparison for `Buffer.Process.apply_motion/2`
 - **`Benchee`** micro-benchmarks for individual functions
 - **`:timer.tc/1`** quick timing in IEx
 - **`:erlang.statistics(:reductions)`** BEAM work units (proxy for CPU)
@@ -522,6 +524,8 @@ The project already has `test/perf/document_perf_test.exs`. Extend this with ben
 - Render cycle with full viewport
 - Picker filtering with 5000 candidates
 - 1000 sequential inserts (typing simulation)
+
+The motion benchmark in `bench/motion_process_bench.exs` is the reproducible artifact for the `Buffer.Process.apply_motion/2` comparison in section 4.
 
 ### Priority Order
 

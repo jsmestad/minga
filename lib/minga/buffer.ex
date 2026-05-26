@@ -19,6 +19,7 @@ defmodule Minga.Buffer do
   @type position :: {line :: non_neg_integer(), col :: non_neg_integer()}
   @type direction :: :left | :right | :up | :down
   @type document :: Document.t()
+  @type motion_fun :: BufferProcess.motion_fun()
   @type text_edit :: BufferProcess.text_edit()
   @type boundary :: BufferProcess.boundary()
   @type replace_edit :: BufferProcess.replace_edit()
@@ -143,6 +144,10 @@ defmodule Minga.Buffer do
   @doc "Move the cursor to an exact position."
   @spec move_to(t(), position()) :: :ok
   defdelegate move_to(server, pos), to: BufferProcess
+
+  @doc "Apply a cursor motion inside the buffer process."
+  @spec apply_motion(t(), motion_fun()) :: :ok
+  defdelegate apply_motion(server, motion_fn), to: BufferProcess
 
   @doc "Move the cursor one step in a direction."
   @spec move(t(), direction()) :: :ok

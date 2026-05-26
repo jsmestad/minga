@@ -218,6 +218,21 @@ defmodule Minga.Buffer.ProcessTest do
       refute BufferProcess.dirty?(pid)
     end
 
+    test "apply_motion runs the motion function inside the buffer process" do
+      parent = self()
+      pid = start_supervised!({BufferProcess, content: "alpha\nbeta"})
+
+      assert :ok =
+               BufferProcess.apply_motion(pid, fn doc, cursor ->
+                 send(parent, {:motion_context, self(), cursor, Document.line_count(doc)})
+                 {1, 2}
+               end)
+
+      assert_receive {:motion_context, ^pid, {0, 0}, 2}
+      assert BufferProcess.cursor(pid) == {1, 2}
+      refute BufferProcess.dirty?(pid)
+    end
+
     test "move_if_possible reports successful moves and boundaries" do
       pid = start_supervised!({BufferProcess, content: "ab"})
 

@@ -367,14 +367,9 @@ defmodule MingaEditor.Commands.Helpers do
   # ── Motion application ──────────────────────────────────────────────────────
 
   @doc "Applies a `(buf, pos) -> new_pos` motion function to the buffer cursor."
-  @spec apply_motion(
-          pid(),
-          (Buffer.document(), Minga.Editing.Motion.position() -> Minga.Editing.Motion.position())
-        ) :: :ok
+  @spec apply_motion(pid(), Buffer.motion_fun()) :: :ok
   def apply_motion(buf, motion_fn) do
-    gb = Buffer.snapshot(buf)
-    new_pos = motion_fn.(gb, Document.cursor(gb))
-    Buffer.move_to(buf, new_pos)
+    Buffer.apply_motion(buf, motion_fn)
   end
 
   @doc "Sets up parser state only for motions that need tree-sitter."
@@ -489,9 +484,6 @@ defmodule MingaEditor.Commands.Helpers do
   @doc "Applies a find-char motion in the given direction."
   @spec apply_find_char(pid(), ModeState.find_direction(), String.t()) :: :ok
   def apply_find_char(buf, dir, char) do
-    gb = Buffer.snapshot(buf)
-    cursor = Document.cursor(gb)
-
     motion_fn =
       case dir do
         :f -> &Minga.Editing.find_char_forward/3
@@ -500,8 +492,7 @@ defmodule MingaEditor.Commands.Helpers do
         :T -> &Minga.Editing.till_char_backward/3
       end
 
-    new_pos = motion_fn.(gb, cursor, char)
-    Buffer.move_to(buf, new_pos)
+    Buffer.apply_motion(buf, fn doc, cursor -> motion_fn.(doc, cursor, char) end)
   end
 
   @doc "Reverses a find-char direction (`f`↔`F`, `t`↔`T`)."
@@ -708,21 +699,21 @@ defmodule MingaEditor.Commands.Helpers do
   @doc "Scrolls the buffer cursor by `delta` lines, clamping to bounds."
   @spec page_move(pid(), Viewport.t(), integer()) :: :ok
   def page_move(buf, _vp, delta) do
-    gb = Buffer.snapshot(buf)
-    {line, col} = Document.cursor(gb)
-    total_lines = Document.line_count(gb)
-    target_line = max(0, min(line + delta, total_lines - 1))
+    Buffer.apply_motion(buf, fn doc, {line, col} ->
+      total_lines = Document.line_count(doc)
+      target_line = max(0, min(line + delta, total_lines - 1))
 
-    target_col =
-      case Document.lines(gb, target_line, 1) do
-        [text] when byte_size(text) > 0 ->
-          min(col, Unicode.last_grapheme_byte_offset(text))
+      target_col =
+        case Document.lines(doc, target_line, 1) do
+          [text] when byte_size(text) > 0 ->
+            min(col, Unicode.last_grapheme_byte_offset(text))
 
-        _ ->
-          0
-      end
+          _ ->
+            0
+        end
 
-    Buffer.move_to(buf, {target_line, target_col})
+      {target_line, target_col}
+    end)
   end
 
   @doc "Toggles the case of a single grapheme."
