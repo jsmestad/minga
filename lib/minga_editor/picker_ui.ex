@@ -645,16 +645,7 @@ defmodule MingaEditor.PickerUI do
     # Separator line
     title = picker.title
     filter_info = picker_filter_info(picker)
-
-    sep_text =
-      " #{title} " <>
-        String.duplicate(
-          "─",
-          max(
-            0,
-            viewport.cols - Unicode.display_width(title) - Unicode.display_width(filter_info) - 4
-          )
-        ) <> " #{filter_info} "
+    sep_text = picker_top_rule(title, filter_info, viewport.cols)
 
     separator_cmd =
       if separator_row >= 0 do
@@ -662,8 +653,8 @@ defmodule MingaEditor.PickerUI do
           DisplayList.draw(
             separator_row,
             0,
-            String.pad_trailing(sep_text, viewport.cols),
-            Face.new(fg: dim_fg, bg: bg)
+            sep_text,
+            Face.new(fg: pc.border_fg, bg: bg, bold: true)
           )
         ]
       else
@@ -678,7 +669,8 @@ defmodule MingaEditor.PickerUI do
       dim_fg: dim_fg,
       bg: bg,
       sel_bg: sel_bg,
-      match_fg: match_fg
+      match_fg: match_fg,
+      border_fg: pc.border_fg
     }
 
     item_commands =
@@ -754,6 +746,25 @@ defmodule MingaEditor.PickerUI do
       0 -> base
       count -> "#{base} (#{count} marked)"
     end
+  end
+
+  @spec picker_top_rule(String.t(), String.t(), pos_integer()) :: String.t()
+  defp picker_top_rule(_title, _filter_info, 1), do: "╭"
+
+  defp picker_top_rule(title, filter_info, cols) do
+    left = "╭─ #{title} "
+    right = " #{filter_info} ╮"
+
+    rule =
+      left <>
+        String.duplicate(
+          "─",
+          max(0, cols - Unicode.display_width(left) - Unicode.display_width(right))
+        ) <> right
+
+    rule
+    |> Unicode.truncate_display_width(cols)
+    |> Unicode.pad_display_trailing(cols)
   end
 
   @doc """
@@ -994,8 +1005,8 @@ defmodule MingaEditor.PickerUI do
           non_neg_integer() | nil
         ) :: [DisplayList.draw()]
   defp render_centered_item(row, label, desc, selected, query, width, pc, icon_color) do
-    bg = if selected, do: pc.sel_bg, else: pc.bg
-    fg = if selected, do: pc.text_fg, else: pc.text_fg
+    bg = pc.bg
+    fg = if selected, do: pc.highlight_fg, else: pc.text_fg
 
     desc_text =
       case desc do
@@ -1004,23 +1015,38 @@ defmodule MingaEditor.PickerUI do
         d -> " " <> d
       end
 
-    # Pad the entire row
-    full_text = label <> desc_text
+    # Pad the entire row with a leading gutter so the selected rail does not cover text.
+    full_text = " " <> label <> desc_text
     padded = String.pad_trailing(full_text, width)
 
     # Base draw (full row background)
     base = [DisplayList.draw(row, 0, padded, Face.new(fg: pc.dim_fg, bg: bg))]
 
     # Label (brighter text)
-    label_draw = [DisplayList.draw(row, 0, label, Face.new(fg: fg, bg: bg))]
+    label_draw = [DisplayList.draw(row, 1, label, Face.new(fg: fg, bg: bg))]
 
     # Icon color overlay
-    icon_draws = render_icon_color(row, icon_color, bg, label, 0)
+    icon_draws = render_icon_color(row, icon_color, bg, label, 1)
+
+    rail_draws = render_selected_rail(row, 0, selected, pc.highlight_fg, bg)
 
     # Highlight matching characters in the label
-    match_draws = highlight_matches(row, label, query, pc.match_fg, bg)
+    match_draws = render_match_highlights(row, label, query, pc.match_fg, bg)
 
-    base ++ label_draw ++ icon_draws ++ match_draws
+    base ++ label_draw ++ icon_draws ++ rail_draws ++ match_draws
+  end
+
+  @spec render_selected_rail(
+          non_neg_integer(),
+          non_neg_integer(),
+          boolean(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: [DisplayList.draw()]
+  defp render_selected_rail(_row, _col, false, _fg, _bg), do: []
+
+  defp render_selected_rail(row, col, true, fg, bg) do
+    [DisplayList.draw(row, col, "▌", Face.new(fg: fg, bg: bg))]
   end
 
   # Renders the icon (first grapheme of the label) in its language color.
@@ -1045,40 +1071,6 @@ defmodule MingaEditor.PickerUI do
 
       nil ->
         []
-    end
-  end
-
-  @spec highlight_matches(non_neg_integer(), String.t(), String.t(), term(), term()) :: [
-          DisplayList.draw()
-        ]
-  defp highlight_matches(row, label, query, match_fg, bg) do
-    query_chars = String.downcase(query) |> String.graphemes()
-    label_chars = String.graphemes(label)
-    label_lower = String.downcase(label) |> String.graphemes()
-
-    do_highlight_matches(row, label_chars, label_lower, query_chars, 0, match_fg, bg, [])
-  end
-
-  @spec do_highlight_matches(
-          non_neg_integer(),
-          [String.t()],
-          [String.t()],
-          [String.t()],
-          non_neg_integer(),
-          term(),
-          term(),
-          [DisplayList.draw()]
-        ) :: [DisplayList.draw()]
-  defp do_highlight_matches(_row, _label, _lower, [], _col, _fg, _bg, acc), do: Enum.reverse(acc)
-  defp do_highlight_matches(_row, [], _lower, _query, _col, _fg, _bg, acc), do: Enum.reverse(acc)
-
-  defp do_highlight_matches(row, [lc | lt], [ll | llt], [qc | qt] = query, col, fg, bg, acc) do
-    if ll == qc do
-      draw = DisplayList.draw(row, col, lc, Face.new(fg: fg, bg: bg, bold: true))
-
-      do_highlight_matches(row, lt, llt, qt, col + Unicode.display_width(lc), fg, bg, [draw | acc])
-    else
-      do_highlight_matches(row, lt, llt, query, col + Unicode.display_width(lc), fg, bg, acc)
     end
   end
 
@@ -1396,7 +1388,7 @@ defmodule MingaEditor.PickerUI do
           map()
         ) :: [DisplayList.draw()]
   defp render_two_line_item(row, item, is_selected, query, viewport, colors) do
-    row_bg = if is_selected, do: colors.sel_bg, else: colors.bg
+    row_bg = colors.bg
 
     label_cmds =
       if row < 0 or row >= viewport.rows do
@@ -1475,7 +1467,7 @@ defmodule MingaEditor.PickerUI do
         ) :: [DisplayList.draw()]
   defp render_item(row, label, desc, is_selected, query, cols, colors, icon_color) do
     fg = if is_selected, do: colors.highlight_fg, else: colors.text_fg
-    row_bg = if is_selected, do: colors.sel_bg, else: colors.bg
+    row_bg = colors.bg
 
     label_text = " " <> label
     avail_for_desc = max(0, cols - Unicode.display_width(label_text) - 2)
@@ -1508,6 +1500,7 @@ defmodule MingaEditor.PickerUI do
     highlight_cmds = render_match_highlights(row, label, query, colors.match_fg, row_bg)
 
     icon_cmds = render_icon_color(row, icon_color, row_bg, label, 1)
+    rail_cmds = render_selected_rail(row, 0, is_selected, colors.highlight_fg, row_bg)
 
     desc_cmds =
       if desc_display != "" do
@@ -1517,7 +1510,7 @@ defmodule MingaEditor.PickerUI do
         []
       end
 
-    [bg_cmd | icon_cmds] ++ highlight_cmds ++ desc_cmds
+    [bg_cmd | icon_cmds] ++ rail_cmds ++ highlight_cmds ++ desc_cmds
   end
 
   # Renders highlighted characters for fuzzy match positions in a picker label.
@@ -1538,8 +1531,16 @@ defmodule MingaEditor.PickerUI do
     |> Enum.filter(&(&1 < label_len))
     |> Enum.map(fn pos ->
       char = Enum.at(label_graphemes, pos)
-      DisplayList.draw(row, pos + 1, char, Face.new(fg: match_fg, bg: row_bg, bold: true))
+      col = 1 + display_width_before(label_graphemes, pos)
+      DisplayList.draw(row, col, char, Face.new(fg: match_fg, bg: row_bg, bold: true))
     end)
+  end
+
+  @spec display_width_before([String.t()], non_neg_integer()) :: non_neg_integer()
+  defp display_width_before(graphemes, pos) do
+    graphemes
+    |> Enum.take(pos)
+    |> Enum.reduce(0, fn grapheme, width -> width + Unicode.display_width(grapheme) end)
   end
 
   # Renders the C-o action menu popup overlay.

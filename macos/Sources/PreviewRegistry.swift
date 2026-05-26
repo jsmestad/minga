@@ -468,9 +468,14 @@ enum PreviewRegistry {
         let state = gitStatusState()
         state.commitMessage = "feat(macos): polish preview snapshots"
 
-        return GitStatusView(state: state, theme: theme, encoder: nil)
-            .frame(width: 280, height: 600)
-            .background(theme.treeBg)
+        return GitStatusView(
+            state: state,
+            theme: theme,
+            encoder: nil,
+            usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "GitStatusView")
+        )
+        .frame(width: 280, height: 600)
+        .background(theme.treeBg)
     }
 
     private static func gitStatusState() -> GitStatusState {
@@ -524,9 +529,14 @@ enum PreviewRegistry {
             stashCount: 0
         )
 
-        return GitStatusView(state: state, theme: theme, encoder: nil)
-            .frame(width: 280, height: 600)
-            .background(theme.treeBg)
+        return GitStatusView(
+            state: state,
+            theme: theme,
+            encoder: nil,
+            usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "GitStatusClean")
+        )
+        .frame(width: 280, height: 600)
+        .background(theme.treeBg)
     }
 
     // MARK: - GitStatusConflict
@@ -548,9 +558,14 @@ enum PreviewRegistry {
         )
         state.commitMessage = ""
 
-        return GitStatusView(state: state, theme: theme, encoder: nil)
-            .frame(width: 280, height: 600)
-            .background(theme.treeBg)
+        return GitStatusView(
+            state: state,
+            theme: theme,
+            encoder: nil,
+            usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "GitStatusConflict")
+        )
+        .frame(width: 280, height: 600)
+        .background(theme.treeBg)
     }
 
     private static func gitStatusConflictEntries() -> [GitStatusEntry] {
@@ -584,9 +599,14 @@ enum PreviewRegistry {
         )
         state.commitMessage = "feat(editor): comprehensive render pipeline overhaul"
 
-        return GitStatusView(state: state, theme: theme, encoder: nil)
-            .frame(width: 280, height: 600)
-            .background(theme.treeBg)
+        return GitStatusView(
+            state: state,
+            theme: theme,
+            encoder: nil,
+            usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "GitStatusDense")
+        )
+        .frame(width: 280, height: 600)
+        .background(theme.treeBg)
     }
 
     private static func gitStatusDenseEntries() -> [GitStatusEntry] {
@@ -623,7 +643,12 @@ enum PreviewRegistry {
     }
 
     private static func fileTreeBodyPreview(theme: ThemeColors) -> some View {
-        FileTreeView(fileTreeState: fileTreeState(), theme: theme, encoder: nil)
+        FileTreeView(
+            fileTreeState: fileTreeState(),
+            theme: theme,
+            encoder: nil,
+            usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "FileTreeView")
+        )
     }
 
     private static func fileTreeState() -> FileTreeState {
@@ -656,9 +681,14 @@ enum PreviewRegistry {
             treeState: FileTreeVisibilityState.empty.rawValue
         )
 
-        return FileTreeView(fileTreeState: state, theme: theme, encoder: nil)
-            .frame(width: 280, height: 600)
-            .background(theme.treeBg)
+        return FileTreeView(
+            fileTreeState: state,
+            theme: theme,
+            encoder: nil,
+            usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "FileTreeEmpty")
+        )
+        .frame(width: 280, height: 600)
+        .background(theme.treeBg)
     }
 
     // MARK: - FileTreeError
@@ -677,9 +707,14 @@ enum PreviewRegistry {
             errorReason: "Permission denied: /Users/dev/code/minga/.git/objects"
         )
 
-        return FileTreeView(fileTreeState: state, theme: theme, encoder: nil)
-            .frame(width: 280, height: 600)
-            .background(theme.treeBg)
+        return FileTreeView(
+            fileTreeState: state,
+            theme: theme,
+            encoder: nil,
+            usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "FileTreeError")
+        )
+        .frame(width: 280, height: 600)
+        .background(theme.treeBg)
     }
 
     // MARK: - FileTreeDeep
@@ -697,9 +732,14 @@ enum PreviewRegistry {
             treeState: FileTreeVisibilityState.ready.rawValue
         )
 
-        return FileTreeView(fileTreeState: state, theme: theme, encoder: nil)
-            .frame(width: 280, height: 600)
-            .background(theme.treeBg)
+        return FileTreeView(
+            fileTreeState: state,
+            theme: theme,
+            encoder: nil,
+            usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "FileTreeDeep")
+        )
+        .frame(width: 280, height: 600)
+        .background(theme.treeBg)
     }
 
     private static func fileTreeDeepRawEntries() -> [Wire.FileTreeEntry] {
@@ -1873,9 +1913,14 @@ enum PreviewRegistry {
         let theme = populatedTheme()
         let state = fileTreeRenameState()
 
-        return FileTreeView(fileTreeState: state, theme: theme, encoder: nil)
-            .frame(width: 280, height: 600)
-            .background(theme.treeBg)
+        return FileTreeView(
+            fileTreeState: state,
+            theme: theme,
+            encoder: nil,
+            usesPreviewEagerLayout: PreviewSnapshotPolicy.shouldUseEagerLayout(for: "FileTreeRename")
+        )
+        .frame(width: 280, height: 600)
+        .background(theme.treeBg)
     }
 
     private static func fileTreeRenameState() -> FileTreeState {

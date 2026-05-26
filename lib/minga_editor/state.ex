@@ -330,7 +330,7 @@ defmodule MingaEditor.State do
     update_workspace(state, &SessionState.set_keymap_scope(&1, scope))
   end
 
-  @doc "Returns the active workspace FileTree feature state."
+  @doc "Returns the active workspace FileTree state."
   @spec file_tree_state(t() | map()) :: FileTreeState.t()
   def file_tree_state(%__MODULE__{workspace: workspace}) do
     SessionState.file_tree_state(workspace)
@@ -346,20 +346,20 @@ defmodule MingaEditor.State do
 
   def file_tree_state(_state), do: %FileTreeState{}
 
-  @doc "Replaces the active workspace FileTree feature state."
+  @doc "Replaces the active workspace FileTree state."
   @spec set_file_tree(t(), FileTreeState.t()) :: t()
   def set_file_tree(%__MODULE__{} = state, %FileTreeState{} = file_tree) do
     sync_file_tree_sidebar(file_tree)
     update_workspace(state, &SessionState.set_file_tree(&1, file_tree))
   end
 
-  @doc "Updates the active workspace FileTree feature state."
+  @doc "Updates the active workspace FileTree state."
   @spec update_file_tree(t(), (FileTreeState.t() -> FileTreeState.t())) :: t()
   def update_file_tree(%__MODULE__{} = state, fun) when is_function(fun, 1) do
     set_file_tree(state, fun.(file_tree_state(state)))
   end
 
-  @doc "Drops the active workspace FileTree feature state."
+  @doc "Resets the active workspace FileTree state."
   @spec drop_file_tree(t()) :: t()
   def drop_file_tree(%__MODULE__{} = state) do
     sync_file_tree_sidebar(%FileTreeState{})
@@ -2146,7 +2146,8 @@ defmodule MingaEditor.State do
       lsp_pending: %{},
       search: %Search{},
       editing: VimState.new(),
-      feature_state: feature_state_with_file_tree_root(state),
+      file_tree: file_tree_with_current_root(state),
+      feature_state: FeatureState.new(),
       document_highlights: nil
     })
   end
@@ -2174,7 +2175,8 @@ defmodule MingaEditor.State do
       lsp_pending: %{},
       search: %Search{},
       editing: VimState.new(),
-      feature_state: feature_state_with_file_tree_root(state),
+      file_tree: file_tree_with_current_root(state),
+      feature_state: FeatureState.new(),
       document_highlights: nil
     })
   end
@@ -2214,16 +2216,9 @@ defmodule MingaEditor.State do
 
   defp build_agent_card_windows(_agent_buf, _rows, _cols), do: %Windows{}
 
-  @spec feature_state_with_file_tree_root(t()) :: FeatureState.t()
-  defp feature_state_with_file_tree_root(%__MODULE__{} = state) do
-    project_root = file_tree_state(state).project_root
-
-    FeatureState.put(
-      FeatureState.new(),
-      FileTreeFeature.source(),
-      FileTreeFeature.feature_id(),
-      %FileTreeState{project_root: project_root}
-    )
+  @spec file_tree_with_current_root(t()) :: FileTreeState.t()
+  defp file_tree_with_current_root(%__MODULE__{} = state) do
+    %FileTreeState{project_root: file_tree_state(state).project_root}
   end
 
   @spec log_switch_tab(TabBar.t(), Tab.id(), Tab.id()) :: :ok
