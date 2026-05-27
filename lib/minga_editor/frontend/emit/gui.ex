@@ -147,7 +147,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       &build_gui_git_status_cmd/2,
       &build_gui_which_key_cmd/2,
       &build_gui_completion_cmd/2,
-      &build_gui_breadcrumb_cmd/2,
       fn ctx, caches -> build_gui_status_bar_cmd(ctx, sb_data, caches) end,
       &build_gui_picker_cmd/2,
       &build_gui_agent_chat_cmd/2,
@@ -644,27 +643,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   @spec visible_cursor_line(MingaEditor.Window.t(), non_neg_integer()) :: non_neg_integer()
   defp visible_cursor_line(%{fold_map: fold_map}, line) do
     if FoldMap.empty?(fold_map), do: line, else: FoldMap.buffer_to_visible(fold_map, line)
-  end
-
-  # ── Breadcrumb ──
-
-  @spec build_gui_breadcrumb_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
-  defp build_gui_breadcrumb_cmd(ctx, caches) do
-    file_path = active_buffer_path(ctx)
-
-    root =
-      case ctx.file_tree do
-        %{tree: %{root: r}} -> r
-        _ -> ""
-      end
-
-    fp = :erlang.phash2({file_path, root})
-
-    if fp != caches.last_gui_breadcrumb_fp do
-      {ProtocolGUI.encode_gui_breadcrumb(file_path, root), %{caches | last_gui_breadcrumb_fp: fp}}
-    else
-      {nil, caches}
-    end
   end
 
   @spec active_buffer_path(ctx()) :: String.t() | nil
