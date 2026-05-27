@@ -4,7 +4,7 @@ The rendering pipeline has too many parts, too many lines of code, and is unnece
 
 ## Status
 
-Discussion spec. Not an implementation plan yet.
+Phase 1 implementation plan: [#2005](https://github.com/jsmestad/minga/issues/2005). Detailed PR-level plan at `docs/RENDERING_SIMPLIFICATION_PLAN.md`.
 
 ## The problem
 

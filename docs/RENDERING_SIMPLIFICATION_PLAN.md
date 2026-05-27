@@ -1,5 +1,7 @@
 # Phase 1: UI Models and GUI Adapter for UI Components
 
+**Tracking:** [#2005](https://github.com/jsmestad/minga/issues/2005)
+
 ## Context
 
 The rendering pipeline has 25+1 SwiftUI chrome builders in `Emit.GUI` (~2,320 lines) that each compute what's visible, fingerprint it, check a cache, and encode it. Steps 1-3 are rendering work that belongs upstream in a shared model; only step 4 (encoding) belongs in the emit layer.
