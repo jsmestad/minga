@@ -154,7 +154,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       &build_gui_float_popup_cmd/2,
       &build_gui_observatory_cmd/2,
       &build_gui_board_cmd/2,
-      &build_gui_agent_context_cmd/2,
       &build_gui_change_summary_cmd/2,
       &build_gui_edit_timeline_cmd/2,
       &build_gui_extension_overlay_cmd/2,
@@ -1746,85 +1745,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       board.filter_text,
       cards
     })
-  end
-
-  # ── Agent context bar ──
-
-  @spec build_gui_agent_context_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
-  defp build_gui_agent_context_cmd(%{shell: shell} = ctx, caches) do
-    case shell.gui_payload(ctx) do
-      {:board, %MingaEditor.Frontend.Protocol.GUI.BoardPayload{} = board} ->
-        card = MingaEditor.Frontend.Protocol.GUI.BoardPayload.zoomed_card(board)
-        send_agent_context_if_applicable(board.zoomed_card_id, card, caches)
-
-      nil ->
-        send_hide_if_needed(:not_board, caches)
-
-      other ->
-        Log.warning(
-          :render,
-          "Unsupported GUI shell payload #{inspect(other)}; hiding agent context"
-        )
-
-        send_hide_if_needed(:unsupported_payload, caches)
-    end
-  end
-
-  @spec send_hide_if_needed(atom(), Caches.t()) :: {binary() | nil, Caches.t()}
-  defp send_hide_if_needed(fp_key, caches) do
-    if caches.last_gui_agent_context_fp != fp_key do
-      {encode_hidden_agent_context(), %{caches | last_gui_agent_context_fp: fp_key}}
-    else
-      {nil, caches}
-    end
-  end
-
-  @spec send_agent_context_if_applicable(
-          pos_integer() | nil,
-          MingaEditor.Frontend.Protocol.GUI.BoardCardPayload.t() | nil,
-          Caches.t()
-        ) :: {binary() | nil, Caches.t()}
-  defp send_agent_context_if_applicable(card_id, card, caches)
-       when is_map(card) and not is_nil(card) do
-    if MingaEditor.Frontend.Protocol.GUI.BoardCardPayload.you_card?(card) do
-      send_hide_if_needed(:you_card, caches)
-    else
-      send_agent_context_for_card(card_id, card, caches)
-    end
-  end
-
-  defp send_agent_context_if_applicable(_card_id, _card, caches) do
-    send_hide_if_needed(:you_card, caches)
-  end
-
-  @spec send_agent_context_for_card(
-          pos_integer(),
-          MingaEditor.Frontend.Protocol.GUI.BoardCardPayload.t(),
-          Caches.t()
-        ) :: {binary() | nil, Caches.t()}
-  defp send_agent_context_for_card(card_id, card, caches) do
-    can_approve = card.status in [:needs_you, :done]
-    fp = :erlang.phash2({card_id, card.task, card.created_at, card.status, can_approve})
-
-    if fp != caches.last_gui_agent_context_fp do
-      cmd =
-        ProtocolGUI.encode_gui_agent_context(
-          true,
-          card.task,
-          card.created_at,
-          card.status,
-          can_approve
-        )
-
-      {cmd, %{caches | last_gui_agent_context_fp: fp}}
-    else
-      {nil, caches}
-    end
-  end
-
-  @spec encode_hidden_agent_context() :: binary()
-  defp encode_hidden_agent_context do
-    ProtocolGUI.encode_gui_agent_context(false, "", DateTime.utc_now(), :idle, false)
   end
 
   # ── Change Summary ──

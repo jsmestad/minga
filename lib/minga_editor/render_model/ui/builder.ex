@@ -3,6 +3,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
 
   alias Minga.Buffer
   alias MingaEditor.Frontend.Emit.Context
+  alias MingaEditor.RenderModel.UI.AgentContextBuilder
   alias MingaEditor.RenderModel.UI.BreadcrumbBuilder
   alias MingaEditor.RenderModel.UI.GitStatusBuilder
   alias MingaEditor.RenderModel.UI.NotificationsBuilder
@@ -16,6 +17,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
     file_path = active_buffer_path(ctx)
     root = file_tree_root(ctx)
     active_buf = active_buffer_pid(ctx)
+    gui_payload = shell_gui_payload(ctx)
 
     %RenderModel.UI{
       theme: ThemeBuilder.build(ctx.theme),
@@ -23,7 +25,8 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       which_key: build_which_key(ctx),
       notifications: NotificationsBuilder.build(ctx.notifications),
       search_state: SearchStateBuilder.build(ctx.search, active_buf),
-      git_status: build_git_status(ctx)
+      git_status: build_git_status(ctx),
+      agent_context: AgentContextBuilder.build(gui_payload)
     }
   end
 
@@ -65,4 +68,15 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   @spec file_tree_root(Context.t()) :: String.t()
   defp file_tree_root(%{file_tree: %{tree: %{root: r}}}) when is_binary(r), do: r
   defp file_tree_root(_ctx), do: ""
+
+  @spec shell_gui_payload(Context.t()) :: term()
+  defp shell_gui_payload(%{shell: shell} = ctx) do
+    if function_exported?(shell, :gui_payload, 1) do
+      shell.gui_payload(ctx)
+    else
+      nil
+    end
+  rescue
+    _ -> nil
+  end
 end

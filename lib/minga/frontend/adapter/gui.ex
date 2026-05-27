@@ -1,6 +1,7 @@
 defmodule Minga.Frontend.Adapter.GUI do
   @moduledoc false
 
+  alias Minga.Frontend.Adapter.GUI.AgentContextEncoder
   alias Minga.Frontend.Adapter.GUI.BreadcrumbEncoder
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.GitStatusEncoder
@@ -36,6 +37,11 @@ defmodule Minga.Frontend.Adapter.GUI do
         do: GitStatusEncoder.encode(ui.git_status, caches),
         else: {nil, caches}
 
+    {agent_context_cmd, caches} =
+      if ui.agent_context,
+        do: AgentContextEncoder.encode(ui.agent_context, caches),
+        else: {nil, caches}
+
     cmds =
       Enum.reject(
         [
@@ -44,7 +50,8 @@ defmodule Minga.Frontend.Adapter.GUI do
           which_key_cmd,
           notifications_cmd,
           search_state_cmd,
-          git_status_cmd
+          git_status_cmd,
+          agent_context_cmd
         ],
         &is_nil/1
       )

@@ -320,16 +320,16 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
 
       {_ctx, caches, board_cmds} = sync_chrome(board_state)
       assert [<<0x87, 1::8, _::binary>>] = opcode_cmds(board_cmds, 0x87)
-      assert [<<0x88, 1::8, _::binary>>] = opcode_cmds(board_cmds, 0x88)
+      # 0x88 (agent context) is now handled by the RenderModel adapter path
 
       {_ctx, caches, dismiss_cmds} = sync_chrome(gui_state(), caches)
       assert [<<0x87, 0::8, _::binary>>] = opcode_cmds(dismiss_cmds, 0x87)
-      assert [<<0x88, 0::8, _::binary>>] = opcode_cmds(dismiss_cmds, 0x88)
+      # 0x88 (agent context) is now handled by the RenderModel adapter path
       assert [<<0x89, 0::8, _::binary>>] = opcode_cmds(dismiss_cmds, 0x89)
 
       {_ctx, _caches, repeated_cmds} = sync_chrome(gui_state(), caches)
       assert [] = opcode_cmds(repeated_cmds, 0x87)
-      assert [] = opcode_cmds(repeated_cmds, 0x88)
+      # 0x88 (agent context) is now handled by the RenderModel adapter path
       assert [] = opcode_cmds(repeated_cmds, 0x89)
     end
 

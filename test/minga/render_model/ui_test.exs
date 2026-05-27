@@ -13,6 +13,7 @@ defmodule Minga.RenderModel.UITest do
       assert ui.notifications == nil
       assert ui.search_state == nil
       assert ui.git_status == nil
+      assert ui.agent_context == nil
     end
   end
 end

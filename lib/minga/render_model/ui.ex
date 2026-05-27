@@ -7,7 +7,8 @@ defmodule Minga.RenderModel.UI do
           which_key: term(),
           notifications: term(),
           search_state: term(),
-          git_status: term()
+          git_status: term(),
+          agent_context: term()
         }
 
   defstruct [
@@ -16,6 +17,7 @@ defmodule Minga.RenderModel.UI do
     :which_key,
     :notifications,
     :search_state,
-    :git_status
+    :git_status,
+    :agent_context
   ]
 end
