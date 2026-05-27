@@ -11,6 +11,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.RenderModel.UI.ObservatoryBuilder
   alias MingaEditor.RenderModel.UI.SearchStateBuilder
   alias MingaEditor.RenderModel.UI.StatusBarBuilder
+  alias MingaEditor.RenderModel.UI.TabBarBuilder
   alias MingaEditor.RenderModel.UI.ThemeBuilder
   alias MingaEditor.RenderModel.UI.WhichKeyBuilder
   alias MingaEditor.StatusBar.Data, as: StatusBarData
@@ -34,7 +35,8 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       agent_context: AgentContextBuilder.build(gui_payload),
       status_bar: build_status_bar(sb_data, ctx),
       observatory: ObservatoryBuilder.build(ctx.shell_state),
-      board: BoardBuilder.build(gui_payload)
+      board: BoardBuilder.build(gui_payload),
+      tab_bar: TabBarBuilder.build(ctx)
     }
   end
 

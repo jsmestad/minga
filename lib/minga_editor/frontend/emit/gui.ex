@@ -24,7 +24,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   alias MingaEditor.Agent.View.PromptSemanticWindow
   alias Minga.Buffer
   alias Minga.Config
-  alias Minga.Log
   alias Minga.Diagnostics, as: DiagnosticStore
   alias Minga.LSP.SyncServer
 
@@ -136,7 +135,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     # Each build_gui_* function returns {cmd | nil, updated_caches}.
     # Note: status_bar is now handled by the RenderModel adapter path.
     builders = [
-      &build_gui_tab_bar_cmd/2,
       &build_gui_workspaces_cmd/2,
       &build_gui_sidebars_cmd/2,
       &build_gui_file_tree_cmd/2,
@@ -170,48 +168,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
     {ctx, caches}
   end
-
-  # ── Tab bar ──
-
-  @spec build_gui_tab_bar_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
-
-  defp build_gui_tab_bar_cmd(%{shell: shell} = ctx, caches) do
-    case shell.gui_payload(ctx) do
-      {:board, %MingaEditor.Frontend.Protocol.GUI.BoardPayload{}} ->
-        {nil, caches}
-
-      nil ->
-        build_standard_gui_tab_bar_cmd(ctx, caches)
-
-      other ->
-        Log.warning(
-          :render,
-          "Unsupported GUI shell payload #{inspect(other)}; using standard tabs"
-        )
-
-        build_standard_gui_tab_bar_cmd(ctx, caches)
-    end
-  end
-
-  @spec build_standard_gui_tab_bar_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
-  defp build_standard_gui_tab_bar_cmd(%{shell_state: %{tab_bar: %TabBar{}}} = ctx, caches) do
-    chrome_state = ChromeState.from_editor_state(ctx)
-
-    fp =
-      :erlang.phash2({
-        chrome_state.active_workspace_id,
-        chrome_state.active_tab_id,
-        chrome_state.visible_tabs
-      })
-
-    if fp != caches.last_gui_tab_bar_fp do
-      {ProtocolGUI.encode_gui_tab_bar(chrome_state), %{caches | last_gui_tab_bar_fp: fp}}
-    else
-      {nil, caches}
-    end
-  end
-
-  defp build_standard_gui_tab_bar_cmd(%{shell_state: %{tab_bar: nil}}, caches), do: {nil, caches}
 
   @spec build_gui_workspaces_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
   defp build_gui_workspaces_cmd(%{shell_state: %{tab_bar: %TabBar{}}} = ctx, caches) do

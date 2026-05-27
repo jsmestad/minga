@@ -10,6 +10,7 @@ defmodule Minga.Frontend.Adapter.GUI do
   alias Minga.Frontend.Adapter.GUI.ObservatoryEncoder
   alias Minga.Frontend.Adapter.GUI.SearchStateEncoder
   alias Minga.Frontend.Adapter.GUI.StatusBarEncoder
+  alias Minga.Frontend.Adapter.GUI.TabBarEncoder
   alias Minga.Frontend.Adapter.GUI.ThemeEncoder
   alias Minga.Frontend.Adapter.GUI.WhichKeyEncoder
   alias Minga.RenderModel
@@ -60,6 +61,11 @@ defmodule Minga.Frontend.Adapter.GUI do
         do: BoardEncoder.encode(ui.board, caches),
         else: {nil, caches}
 
+    {tab_bar_cmd, caches} =
+      if ui.tab_bar,
+        do: TabBarEncoder.encode(ui.tab_bar, caches),
+        else: {nil, caches}
+
     cmds =
       Enum.reject(
         [
@@ -72,7 +78,8 @@ defmodule Minga.Frontend.Adapter.GUI do
           agent_context_cmd,
           status_bar_cmd,
           observatory_cmd,
-          board_cmd
+          board_cmd,
+          tab_bar_cmd
         ],
         &is_nil/1
       )

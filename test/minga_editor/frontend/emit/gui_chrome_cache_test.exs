@@ -3,7 +3,6 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
 
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Diagnostics
   alias Minga.Diagnostics.Diagnostic
   alias Minga.LSP.SyncServer
@@ -134,16 +133,12 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
              "status bar command should not appear (handled by adapter)"
     end
 
-    test "tab bar cache changes when active buffer dirty state changes" do
+    test "tab bar is no longer emitted by sync_swiftui_chrome (handled by adapter)" do
       state = put_in(gui_state().shell_state.tab_bar, TabBar.new(Tab.new_file(1, "test.ex")))
-      {_ctx, caches, _cmds} = sync_chrome(state)
+      {_ctx, _caches, cmds} = sync_chrome(state)
 
-      BufferProcess.insert_text(state.workspace.buffers.active, "!")
-
-      {_ctx, _caches2, cmds} = sync_chrome(state, caches)
-
-      assert Enum.any?(cmds, &match?(<<0x71, _::binary>>, &1)),
-             "expected gui_tab_bar command after dirty state changes"
+      assert opcode_count(cmds, 0x71) == 0,
+             "tab bar command should not appear (handled by adapter)"
     end
 
     test "hidden file tree cache includes project root and resends when it changes" do

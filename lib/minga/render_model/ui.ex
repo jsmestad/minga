@@ -11,7 +11,8 @@ defmodule Minga.RenderModel.UI do
           agent_context: term(),
           status_bar: term(),
           observatory: term(),
-          board: term()
+          board: term(),
+          tab_bar: term()
         }
 
   defstruct [
@@ -24,6 +25,7 @@ defmodule Minga.RenderModel.UI do
     :agent_context,
     :status_bar,
     :observatory,
-    :board
+    :board,
+    :tab_bar
   ]
 end
