@@ -9,6 +9,7 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.DisplayList
   alias MingaEditor.DisplayList.{Cursor, Frame, WindowFrame}
+  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline.Input, as: PipelineInput
   alias MingaEditor.Shell.Identity, as: ShellIdentity
@@ -39,8 +40,7 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
     content = Keyword.get(opts, :content, "line one\nline two\nline three")
     filetype = Keyword.get(opts, :filetype, :elixir)
 
-    sidebar_registry =
-      Keyword.get(opts, :sidebar_registry, MingaEditor.Extension.Sidebar.default_table())
+    sidebar_registry = Keyword.get_lazy(opts, :sidebar_registry, &private_sidebar_registry/0)
 
     {:ok, buf} = BufferProcess.start_link(content: content, filetype: filetype)
 
@@ -71,6 +71,13 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
       shell_identity: ShellIdentity.new(shell_entry),
       theme: Theme.get!(:doom_one)
     }
+  end
+
+  @spec private_sidebar_registry() :: Sidebar.table()
+  defp private_sidebar_registry do
+    table = Module.concat(__MODULE__, "Sidebar#{System.unique_integer([:positive])}")
+    {:ok, _pid} = Sidebar.start_link(name: table, notify: false)
+    table
   end
 
   @doc """

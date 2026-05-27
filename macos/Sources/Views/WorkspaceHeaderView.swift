@@ -11,14 +11,16 @@ struct WorkspaceHeaderView: View {
     @State private var showIconPicker = false
     @FocusState private var renameFieldFocused: Bool
 
-    private let rowHeight: CGFloat = 30
+    private let rowHeight: CGFloat = 26
 
     var body: some View {
         HStack(spacing: 8) {
             if let activeWorkspace = workspaceState.activeWorkspace {
                 activeWorkspacePill(activeWorkspace)
 
-                workspaceSwitcher
+                if workspaceState.workspaces.count > 1 {
+                    workspaceSwitcher
+                }
 
                 if activeWorkspace.isAgent {
                     agentStatusButton(activeWorkspace)
@@ -44,25 +46,20 @@ struct WorkspaceHeaderView: View {
         .background(theme.tabBg)
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(theme.tabSeparatorFg.opacity(0.25))
+                .fill(theme.tabSeparatorFg.opacity(0.16))
                 .frame(height: 1)
         }
         .accessibilityIdentifier("workspace-header")
     }
 
     private func activeWorkspacePill(_ workspace: WorkspaceSummaryEntry) -> some View {
-        let pillBackground = Capsule().fill(workspace.color.opacity(0.18))
-        let pillBorder = Capsule().stroke(workspace.color.opacity(0.55), lineWidth: 1)
-
-        return HStack(spacing: 6) {
+        HStack(spacing: 6) {
             workspaceIcon(workspace)
             workspaceTitle(workspace)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
-        .background(pillBackground)
-        .overlay(pillBorder)
-        .accessibilityIdentifier("workspace-pill-\(workspace.id)")
+        .padding(.horizontal, 4)
+        .frame(height: rowHeight)
+        .accessibilityIdentifier("workspace-label-\(workspace.id)")
         .accessibilityLabel("Workspace \(workspace.label)")
         .accessibilityValue(workspaceValue(workspace))
         .contextMenu {

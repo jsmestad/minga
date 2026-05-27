@@ -155,6 +155,16 @@ defmodule MingaEditor.Input.FileTreeHandler do
   @spec handle_file_tree_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
   defp handle_file_tree_key(state, cp, mods) do
+    if Minga.Editing.in_leader?(state) do
+      {:handled, delegate_leader_to_mode_fsm(state, cp, mods)}
+    else
+      handle_non_leader_file_tree_key(state, cp, mods)
+    end
+  end
+
+  @spec handle_non_leader_file_tree_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
+          MingaEditor.Input.Handler.result()
+  defp handle_non_leader_file_tree_key(state, cp, mods) do
     if Input.key_sequence_pending?(state) do
       {:handled, delegate_to_mode_fsm_with_tree_buffer(state, cp, mods)}
     else
@@ -181,6 +191,21 @@ defmodule MingaEditor.Input.FileTreeHandler do
     end
   end
 
+  @spec delegate_leader_to_mode_fsm(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
+          EditorState.t()
+  defp delegate_leader_to_mode_fsm(state, cp, mods) do
+    real_active = state.workspace.buffers.active
+    state = MingaEditor.do_handle_key(state, cp, mods)
+
+    if state.workspace.buffers.active != real_active do
+      state
+      |> update_file_tree(&FileTreeState.unfocus/1)
+      |> EditorState.set_keymap_scope(:editor)
+    else
+      state
+    end
+  end
+
   @spec delegate_to_mode_fsm_with_tree_buffer(
           EditorState.t(),
           non_neg_integer(),
@@ -201,7 +226,12 @@ defmodule MingaEditor.Input.FileTreeHandler do
             state
           end
 
-        state = set_active_buffer_override(state, real_active)
+        state =
+          if state.workspace.buffers.active == buf do
+            set_active_buffer_override(state, real_active)
+          else
+            state
+          end
 
         case file_tree_state(state).tree do
           nil -> state
