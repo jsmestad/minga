@@ -19,7 +19,8 @@ defmodule Minga.RenderModel.UI do
           picker: term(),
           minibuffer: term(),
           completion: term(),
-          signature_help: term()
+          signature_help: term(),
+          agent_chat: term()
         }
 
   defstruct [
@@ -40,6 +41,7 @@ defmodule Minga.RenderModel.UI do
     :picker,
     :minibuffer,
     :completion,
-    :signature_help
+    :signature_help,
+    :agent_chat
   ]
 end

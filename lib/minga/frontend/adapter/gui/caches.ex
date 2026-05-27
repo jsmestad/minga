@@ -18,7 +18,8 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
           last_picker_fp: integer() | :closed | nil,
           last_minibuffer_fp: term(),
           last_completion_fp: integer() | nil,
-          last_signature_help_fp: integer() | nil
+          last_signature_help_fp: integer() | nil,
+          last_agent_chat_fp: integer() | :not_visible | nil
         }
 
   defstruct last_theme_fp: nil,
@@ -37,7 +38,8 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
             last_picker_fp: nil,
             last_minibuffer_fp: nil,
             last_completion_fp: nil,
-            last_signature_help_fp: nil
+            last_signature_help_fp: nil,
+            last_agent_chat_fp: nil
 
   @spec new() :: t()
   def new, do: %__MODULE__{}

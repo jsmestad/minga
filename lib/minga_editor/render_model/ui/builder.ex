@@ -3,6 +3,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
 
   alias Minga.Buffer
   alias MingaEditor.Frontend.Emit.Context
+  alias MingaEditor.RenderModel.UI.AgentChatBuilder
   alias MingaEditor.RenderModel.UI.AgentContextBuilder
   alias MingaEditor.RenderModel.UI.BoardBuilder
   alias MingaEditor.RenderModel.UI.BreadcrumbBuilder
@@ -50,7 +51,8 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       picker: PickerBuilder.build(ctx),
       minibuffer: MinibufferBuilder.build(minibuffer_data),
       completion: CompletionBuilder.build(ctx),
-      signature_help: SignatureHelpBuilder.build(ctx)
+      signature_help: SignatureHelpBuilder.build(ctx),
+      agent_chat: AgentChatBuilder.build(ctx)
     }
   end
 

@@ -1,6 +1,7 @@
 defmodule Minga.Frontend.Adapter.GUI do
   @moduledoc false
 
+  alias Minga.Frontend.Adapter.GUI.AgentChatEncoder
   alias Minga.Frontend.Adapter.GUI.AgentContextEncoder
   alias Minga.Frontend.Adapter.GUI.BoardEncoder
   alias Minga.Frontend.Adapter.GUI.BreadcrumbEncoder
@@ -108,6 +109,11 @@ defmodule Minga.Frontend.Adapter.GUI do
         do: SignatureHelpEncoder.encode(ui.signature_help, caches),
         else: {nil, caches}
 
+    {agent_chat_cmd, caches} =
+      if ui.agent_chat,
+        do: AgentChatEncoder.encode(ui.agent_chat, caches),
+        else: {nil, caches}
+
     cmds =
       Enum.reject(
         [
@@ -128,7 +134,8 @@ defmodule Minga.Frontend.Adapter.GUI do
           picker_cmd,
           minibuffer_cmd,
           completion_cmd,
-          signature_help_cmd
+          signature_help_cmd,
+          agent_chat_cmd
         ],
         &is_nil/1
       )
