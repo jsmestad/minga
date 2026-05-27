@@ -4,6 +4,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias Minga.Buffer
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.RenderModel.UI.BreadcrumbBuilder
+  alias MingaEditor.RenderModel.UI.NotificationsBuilder
   alias MingaEditor.RenderModel.UI.ThemeBuilder
   alias MingaEditor.RenderModel.UI.WhichKeyBuilder
   alias Minga.RenderModel
@@ -16,7 +17,8 @@ defmodule MingaEditor.RenderModel.UI.Builder do
     %RenderModel.UI{
       theme: ThemeBuilder.build(ctx.theme),
       breadcrumb: BreadcrumbBuilder.build(file_path, root),
-      which_key: build_which_key(ctx)
+      which_key: build_which_key(ctx),
+      notifications: NotificationsBuilder.build(ctx.notifications)
     }
   end
 

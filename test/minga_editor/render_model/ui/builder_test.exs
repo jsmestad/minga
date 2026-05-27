@@ -11,7 +11,7 @@ defmodule MingaEditor.RenderModel.UI.BuilderTest do
       assert function_exported?(Builder, :build_ui, 1)
     end
 
-    test "returns a UI struct with theme and breadcrumb populated" do
+    test "returns a UI struct with theme, breadcrumb, and notifications populated" do
       ctx = build_minimal_context()
       ui = Builder.build_ui(ctx)
 
@@ -22,8 +22,8 @@ defmodule MingaEditor.RenderModel.UI.BuilderTest do
       assert %Minga.RenderModel.UI.Breadcrumb{} = ui.breadcrumb
       assert ui.breadcrumb.file_path == nil
       assert ui.breadcrumb.root == ""
-      assert ui.which_key == nil
-      assert ui.notifications == nil
+      assert %Minga.RenderModel.UI.Notifications{} = ui.notifications
+      assert ui.notifications.items == []
       assert ui.search_state == nil
       assert ui.git_status == nil
     end

@@ -153,7 +153,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       &build_gui_hover_popup_cmd/2,
       &build_gui_signature_help_cmd/2,
       &build_gui_float_popup_cmd/2,
-      &build_gui_notifications_cmd/2,
       &build_gui_observatory_cmd/2,
       &build_gui_board_cmd/2,
       &build_gui_agent_context_cmd/2,
@@ -1699,20 +1698,6 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       {:rows, n} -> n
       n when is_integer(n) -> n
       _ -> max(div(viewport_size, 2), 1)
-    end
-  end
-
-  # ── Notifications ──
-
-  @spec build_gui_notifications_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
-  defp build_gui_notifications_cmd(ctx, caches) do
-    fp = :erlang.phash2(ctx.notifications)
-
-    if fp != caches.last_gui_notifications_fp do
-      {ProtocolGUI.encode_gui_notifications(ctx.notifications),
-       %{caches | last_gui_notifications_fp: fp}}
-    else
-      {nil, caches}
     end
   end
 

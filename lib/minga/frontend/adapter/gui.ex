@@ -3,6 +3,7 @@ defmodule Minga.Frontend.Adapter.GUI do
 
   alias Minga.Frontend.Adapter.GUI.BreadcrumbEncoder
   alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.NotificationsEncoder
   alias Minga.Frontend.Adapter.GUI.ThemeEncoder
   alias Minga.Frontend.Adapter.GUI.WhichKeyEncoder
   alias Minga.RenderModel
@@ -18,7 +19,14 @@ defmodule Minga.Frontend.Adapter.GUI do
     {which_key_cmd, caches} =
       if ui.which_key, do: WhichKeyEncoder.encode(ui.which_key, caches), else: {nil, caches}
 
-    cmds = Enum.reject([theme_cmd, breadcrumb_cmd, which_key_cmd], &is_nil/1)
+    {notifications_cmd, caches} =
+      if ui.notifications,
+        do: NotificationsEncoder.encode(ui.notifications, caches),
+        else: {nil, caches}
+
+    cmds =
+      Enum.reject([theme_cmd, breadcrumb_cmd, which_key_cmd, notifications_cmd], &is_nil/1)
+
     {cmds, caches}
   end
 end
