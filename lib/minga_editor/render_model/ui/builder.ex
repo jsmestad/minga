@@ -10,6 +10,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   alias MingaEditor.RenderModel.UI.BreadcrumbBuilder
   alias MingaEditor.RenderModel.UI.ChangeSummaryBuilder
   alias MingaEditor.RenderModel.UI.CompletionBuilder
+  alias MingaEditor.RenderModel.UI.EditTimelineBuilder
   alias MingaEditor.RenderModel.UI.FileTreeBuilder
   alias MingaEditor.RenderModel.UI.GitStatusBuilder
   alias MingaEditor.RenderModel.UI.MinibufferBuilder
@@ -67,7 +68,8 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       signature_help: SignatureHelpBuilder.build(ctx),
       agent_chat: AgentChatBuilder.build(ctx),
       bottom_panel: bottom_panel,
-      change_summary: ChangeSummaryBuilder.build(gui_payload)
+      change_summary: ChangeSummaryBuilder.build(gui_payload),
+      edit_timeline: EditTimelineBuilder.build(ctx)
     }
 
     {ui, ctx}

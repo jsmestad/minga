@@ -22,7 +22,8 @@ defmodule Minga.RenderModel.UI do
           signature_help: term(),
           agent_chat: term(),
           bottom_panel: term(),
-          change_summary: term()
+          change_summary: term(),
+          edit_timeline: term()
         }
 
   defstruct [
@@ -46,6 +47,7 @@ defmodule Minga.RenderModel.UI do
     :signature_help,
     :agent_chat,
     :bottom_panel,
-    :change_summary
+    :change_summary,
+    :edit_timeline
   ]
 end
